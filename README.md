@@ -29,7 +29,6 @@ pnpm install
 pnpm build
 pnpm check       # Biome: formatting and lint (pnpm format fixes them)
 pnpm typecheck   # tests and scripts (packages are checked by build)
-pnpm lint:deps   # package boundary rules
 pnpm test
 ```
 

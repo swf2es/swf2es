@@ -19,8 +19,8 @@ For the same input, both modes must produce byte-identical output. That
 requires:
 
 1. **Compilation is pure.** `format` and `codegen` use no DOM or node APIs, no
-   clock and no randomness. The dependency rules and the per-package `lib`
-   settings enforce this, and a unit test fails if `codegen.wasm` imports
+   clock and no randomness. Their tsconfigs load no DOM or node types, so the
+   build rejects such code, and a unit test fails if `codegen.wasm` imports
    anything besides `env.abort`.
 2. **The unit of translation is one method.** A method's output depends only on
    its ABC, never on which other methods were compiled before it.
@@ -47,8 +47,9 @@ hashes differ.
 
 `runtime` contains only the language, with no display list, so it runs in node
 next to avmshell. `codegen` knows the runtime's function names and signatures
-but never imports its implementation. `.dependency-cruiser.cjs` checks all of
-this in CI.
+but never imports its implementation. pnpm only links the packages each
+`package.json` lists, so the build rejects undeclared imports, and
+`tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
 
 ## Testing against oracles
 

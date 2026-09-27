@@ -9,7 +9,6 @@
   "scripts": {
     "build": "pnpm --filter @swf2es/codegen build:wasm && tsc -b packages/*",
     "clean": "tsc -b --clean packages/*",
-    "lint:deps": "depcruise packages --config .dependency-cruiser.json",
     "test": "pnpm -r --filter './tests/*' test",
     "oracle:avmshell": "node oracle/avmshell/fetch.ts",
     "typecheck": "tsc -p tsconfig.json",
@@ -19,8 +18,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
     "@types/node": "^24.19.0",
-    "dependency-cruiser": "^18.4.0",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   },
   "workspaces": [
     "packages/*",

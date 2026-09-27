@@ -7,6 +7,5 @@
   },
   "[typescript]": { "editor.defaultFormatter": "biomejs.biome" },
   "[json]": { "editor.defaultFormatter": "biomejs.biome" },
-  "[jsonc]": { "editor.defaultFormatter": "biomejs.biome" },
-  "js/ts.tsdk.path": "node_modules/typescript/lib"
+  "[jsonc]": { "editor.defaultFormatter": "biomejs.biome" }
 }
