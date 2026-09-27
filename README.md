@@ -42,6 +42,11 @@ directly. Deno works too once the packages are built, for example
 `deno test -A --no-check` in `tests/unit`; its type-checker uses its own lib
 settings, so type-checking stays with `pnpm typecheck`.
 
+## Contributing
+
+See [AGENTS.md](AGENTS.md) for the commands, rules and code style (written
+for coding agents, and just as true for people).
+
 ## License
 
 Apache-2.0
