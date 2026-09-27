@@ -21,6 +21,8 @@ const SKIPPED_DIRS: Record<string, string> = {
   // Player, not in Ruffle, and not in the oracle's avmshell (built without them).
   "as3/Types/Float": "float (ABC 47.16) is AIR-only",
   "as3/Types/Float4": "float (ABC 47.16) is AIR-only",
+  // Exhausts memory, so whether it finishes in time depends on the machine.
+  "mmgc/outofmemory": "depends on the machine's memory",
 };
 
 export interface TamarinTest {
