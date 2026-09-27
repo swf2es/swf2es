@@ -1,7 +1,9 @@
 # AGENTS.md
 
 Instructions for coding agents working on swf2es. Humans may find them
-useful too; the design itself is in [docs/architecture.md](docs/architecture.md).
+useful too; the design itself is in [docs/architecture.md](docs/architecture.md),
+and the specs and implementations to consult are in
+[docs/references.md](docs/references.md).
 
 ## What this is
 
