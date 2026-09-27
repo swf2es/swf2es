@@ -10,10 +10,11 @@
     "build": "pnpm --filter @swf2es/codegen build:wasm && tsc -b packages/*",
     "clean": "tsc -b --clean packages/*",
     "test": "pnpm -r --filter './tests/*' test",
-    "oracle:avmshell": "node oracle/avmshell/fetch.ts",
     "typecheck": "tsc -p tsconfig.json",
     "check": "biome check .",
-    "format": "biome check --write ."
+    "format": "biome check --write .",
+    "oracle": "node oracle/oracle.ts",
+    "oracle:pull": "node oracle/oracle.ts --pull"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

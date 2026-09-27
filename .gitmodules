@@ -1,0 +1,4 @@
+[submodule "oracle/avmplus"]
+	path = oracle/avmplus
+	url = https://github.com/swf2es/avmplus.git
+	shallow = true

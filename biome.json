@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!pnpm-lock.yaml", "!**/dist"]
+    "includes": ["**", "!pnpm-lock.yaml", "!**/dist", "!oracle/avmplus"]
   },
   "formatter": {
     "enabled": true,

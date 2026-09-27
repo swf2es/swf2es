@@ -1,7 +1,6 @@
 node_modules/
 dist/
 *.tsbuildinfo
-oracle/avmshell/bin/
-oracle/tamarin/
+oracle/out/
 tests/**/out/
 .DS_Store

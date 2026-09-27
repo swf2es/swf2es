@@ -25,11 +25,12 @@ docs/        design notes
 ## Development
 
 ```sh
+git submodule update --init   # the avmplus tests
 pnpm install
 pnpm build
 pnpm check       # Biome: formatting and lint (pnpm format fixes them)
 pnpm typecheck   # tests and scripts (packages are checked by build)
-pnpm test
+pnpm test        # needs podman or docker for the avmshell oracle
 ```
 
 Formatting and linting use [Biome](https://biomejs.dev), installed with the
