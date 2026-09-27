@@ -10,12 +10,14 @@ import { existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const avmshell = root + "oracle/avmshell/bin/avmshell";
-const cases = root + "tests/conformance/cases/";
+const avmshell = `${root}oracle/avmshell/bin/avmshell`;
+const cases = `${root}tests/conformance/cases/`;
 
 if (!existsSync(avmshell)) {
-  console.log("conformance: skipped (no avmshell at oracle/avmshell/bin/avmshell; run pnpm oracle:avmshell)");
+  console.log(
+    "conformance: skipped (no avmshell at oracle/avmshell/bin/avmshell; run pnpm oracle:avmshell)",
+  );
   process.exit(0);
 }
-const tests = existsSync(cases) ? readdirSync(cases).filter(f => f.endsWith(".abc")) : [];
-console.log("conformance: avmshell found, " + tests.length + " test(s); codegen not implemented yet");
+const tests = existsSync(cases) ? readdirSync(cases).filter((f) => f.endsWith(".abc")) : [];
+console.log(`conformance: avmshell found, ${tests.length} test(s); codegen not implemented yet`);

@@ -3,6 +3,7 @@
 // These are the parts the wrapper, the asc bindings and the tests use;
 // consumers get the real ones from their own environment.
 declare namespace WebAssembly {
+  // biome-ignore lint/suspicious/noEmptyInterface: an opaque handle, like the real Module type
   interface Module {}
   interface ModuleImportDescriptor {
     module: string;

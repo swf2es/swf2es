@@ -27,10 +27,15 @@ docs/        design notes
 ```sh
 pnpm install
 pnpm build
+pnpm check       # Biome: formatting and lint (pnpm format fixes them)
 pnpm typecheck   # tests and scripts (packages are checked by build)
 pnpm lint:deps   # package boundary rules
 pnpm test
 ```
+
+Formatting and linting use [Biome](https://biomejs.dev), installed with the
+other dev dependencies. VS Code suggests its extension on opening the repo
+and formats on save.
 
 Node 24 is the default: tests and scripts are `.ts` files that node runs
 directly. Deno works too once the packages are built, for example

@@ -1,5 +1,5 @@
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import { avm2 } from "@swf2es/runtime";
 
 test("int() and uint() coerce like AS3", () => {

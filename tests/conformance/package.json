@@ -2,5 +2,7 @@
   "name": "@swf2es/tests-conformance",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node run.ts" }
+  "scripts": {
+    "test": "node run.ts"
+  }
 }

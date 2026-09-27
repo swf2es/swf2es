@@ -12,12 +12,18 @@
     "lint:deps": "depcruise packages --config .dependency-cruiser.json",
     "test": "pnpm -r --filter './tests/*' test",
     "oracle:avmshell": "node oracle/avmshell/fetch.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "biome check .",
+    "format": "biome check --write ."
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.14",
     "@types/node": "^24.19.0",
     "dependency-cruiser": "^16.0.0",
     "typescript": "^5.9.0"
   },
-  "workspaces": ["packages/*", "tests/*"]
+  "workspaces": [
+    "packages/*",
+    "tests/*"
+  ]
 }

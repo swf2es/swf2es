@@ -5,6 +5,8 @@
 const RELEASE: { tag: string; asset: string } | null = null; // e.g. { tag: "avmshell-2026.1", asset: "avmshell-linux-x64" }
 
 if (!RELEASE) {
-  console.error("No pinned avmshell release yet: build it from adobe/avmplus and place it at oracle/avmshell/bin/avmshell.");
+  console.error(
+    "No pinned avmshell release yet: build it from adobe/avmplus and place it at oracle/avmshell/bin/avmshell.",
+  );
   process.exit(1);
 }

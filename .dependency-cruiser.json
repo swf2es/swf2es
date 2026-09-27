@@ -59,9 +59,7 @@
         "path": "^packages/(format|codegen|runtime)/"
       },
       "to": {
-        "dependencyTypes": [
-          "core"
-        ]
+        "dependencyTypes": ["core"]
       }
     }
   ],
@@ -77,14 +75,8 @@
     },
     "tsPreCompilationDeps": true,
     "enhancedResolveOptions": {
-      "exportsFields": [
-        "exports"
-      ],
-      "conditionNames": [
-        "types",
-        "import",
-        "default"
-      ]
+      "exportsFields": ["exports"],
+      "conditionNames": ["types", "import", "default"]
     }
   }
 }
