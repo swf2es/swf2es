@@ -37,10 +37,11 @@ export interface Codegen {
 export async function createCodegen(module: WebAssembly.Module): Promise<Codegen> {
   const wasm = await instantiate(module, { env: {} });
   const version = wasm.compilerVersion();
-  if (version !== COMPILER_VERSION)
+  if (version !== COMPILER_VERSION) {
     throw new Error(
       `codegen.wasm is version ${version} but the wrapper expects ${COMPILER_VERSION}`,
     );
+  }
   return {
     abcVersion(abc) {
       const packed = wasm.abcVersion(abc);

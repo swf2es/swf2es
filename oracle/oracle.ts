@@ -30,9 +30,16 @@ export interface OracleResult {
 /** podman or docker, or $SWF2ES_CONTAINER if set. */
 export function containerEngine(): string {
   const forced = process.env.SWF2ES_CONTAINER;
-  if (forced) return forced;
-  for (const engine of ["podman", "docker"])
-    if (spawnSync(engine, ["--version"], { stdio: "ignore" }).status === 0) return engine;
+  if (forced) {
+    return forced;
+  }
+
+  for (const engine of ["podman", "docker"]) {
+    if (spawnSync(engine, ["--version"], { stdio: "ignore" }).status === 0) {
+      return engine;
+    }
+  }
+
   throw new Error("The avmshell oracle needs podman or docker");
 }
 
@@ -42,6 +49,7 @@ function container(engine: string, args: string[]) {
     engine === "podman"
       ? ["--userns=keep-id"]
       : [`--user=${process.getuid?.()}:${process.getgid?.()}`];
+
   return spawnSync(
     engine,
     ["run", "--rm", ...user, "-e", "HOME=/tmp", "-v", `${root}:/work:Z`, "-w", "/work"].concat([
@@ -56,7 +64,9 @@ function container(engine: string, args: string[]) {
 
 export function pull(engine = containerEngine()): void {
   const r = spawnSync(engine, ["pull", IMAGE], { stdio: "inherit" });
-  if (r.status !== 0) throw new Error(`${engine} pull failed`);
+  if (r.status !== 0) {
+    throw new Error(`${engine} pull failed`);
+  }
 }
 
 /**
@@ -70,9 +80,13 @@ export function runOracle(
   { engine = containerEngine(), timeoutSeconds = 20 } = {},
 ): OracleResult[] {
   mkdirSync(outDir, { recursive: true });
+
   const rel = (p: string) => relative(root, resolve(p));
   const out = rel(outDir);
-  if (out.startsWith("..")) throw new Error(`outDir must be inside ${root}`);
+  if (out.startsWith("..")) {
+    throw new Error(`outDir must be inside ${root}`);
+  }
+
   const script = [
     "L=/opt/crossbridge/sdk/usr/lib",
     `while IFS= read -r f; do`,
@@ -85,16 +99,22 @@ export function runOracle(
     "  fi",
     `done < "${out}/files.txt"`,
   ].join("\n");
+
   const names = new Set<string>();
   for (const f of files) {
     const n = basename(f, ".as");
-    if (names.has(n)) throw new Error(`Two files are named ${n}.as; run them in separate batches`);
+    if (names.has(n)) {
+      throw new Error(`Two files are named ${n}.as; run them in separate batches`);
+    }
     names.add(n);
   }
+
   writeFileSync(join(outDir, "files.txt"), `${files.map(rel).join("\n")}\n`);
   writeFileSync(join(outDir, "run.sh"), `${script}\n`);
   const r = container(engine, [`${out}/run.sh`]);
-  if (r.status !== 0) throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+  if (r.status !== 0) {
+    throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+  }
 
   const read = (p: string) => {
     try {
@@ -103,11 +123,14 @@ export function runOracle(
       return null;
     }
   };
+
   // The JVM announces _JAVA_OPTIONS from the image on every run.
   const clean = (log: string) => log.replace(/^Picked up _JAVA_OPTIONS:.*\n/m, "");
+
   return files.map((f) => {
     const n = join(outDir, basename(f, ".as"));
     const code = read(`${n}.code`);
+
     return {
       file: rel(f),
       compiled: code !== null,
@@ -120,8 +143,10 @@ export function runOracle(
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  if (args[0] === "--pull") pull();
-  else if (!args.length) {
+
+  if (args[0] === "--pull") {
+    pull();
+  } else if (!args.length) {
     console.error("usage: node oracle/oracle.ts <file.as>... | --pull");
     process.exit(1);
   } else {

@@ -14,7 +14,9 @@ export function compilerVersion(): string {
  * or -1 when the block is shorter than the 4-byte header.
  */
 export function abcVersion(abc: Uint8Array): i32 {
-  if (abc.length < 4) return -1;
+  if (abc.length < 4) {
+    return -1;
+  }
   const minor = <i32>abc[0] | ((<i32>abc[1]) << 8);
   const major = <i32>abc[2] | ((<i32>abc[3]) << 8);
   return (major << 16) | minor;

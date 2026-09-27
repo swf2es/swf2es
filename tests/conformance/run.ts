@@ -26,9 +26,15 @@ const results = runOracle(cases, `${here}out`, { engine });
 let failed = 0;
 for (const r of results) {
   const ok = r.compiled && r.exitCode === 0;
-  if (!ok) failed++;
+  if (!ok) {
+    failed++;
+  }
   console.log(`${ok ? "ok  " : "FAIL"} ${r.file}`);
-  if (!ok) console.log(r.compiled ? r.output : r.compileLog);
+  if (!ok) {
+    console.log(r.compiled ? r.output : r.compileLog);
+  }
 }
 console.log(`conformance: ${results.length - failed}/${results.length} cases run in avmshell`);
-if (failed) process.exit(1);
+if (failed) {
+  process.exit(1);
+}
