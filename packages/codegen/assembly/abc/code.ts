@@ -3,28 +3,97 @@
 // reachable instruction can trigger. Unreachable bytes are never read, as in
 // Flash; obfuscated SWFs often hide junk there.
 //
-// Type and stack checks are the verifier's; this checks only what decoding
-// needs, with the verifier's VerifyError numbers.
+// On the way it checks the method's structure as the verifier does, with its
+// VerifyError numbers: frame limits, operand stack and scope stack depths at
+// every instruction and where paths join, local registers, and operands that
+// index the constant pool or the method's tables. Types and bindings, and
+// anything that needs the scope chain the method is created in, come later.
 //
 // A BodyDecoder is made once per ABC and reused for every body: its scratch
 // buffers and its output only grow, so decoding allocates nothing per body.
 import { Abc } from "./abc";
 import {
   CONSTANT_Multiname,
+  CONSTANT_MultinameA,
+  CONSTANT_MultinameL,
+  CONSTANT_MultinameLA,
   CONSTANT_Qname,
+  CONSTANT_QnameA,
+  CONSTANT_RTQname,
+  CONSTANT_RTQnameA,
+  CONSTANT_RTQnameL,
+  CONSTANT_RTQnameLA,
   CONSTANT_TypeName,
   kCannotFallOffMethodError,
+  kClassInfoExceedsCountError,
   kCorruptABCError,
+  kCpoolIndexRangeError,
+  kGetScopeObjectBoundsError,
   kIllegalExceptionHandlerError,
   kIllegalOpcodeError,
+  kIllegalOpMultinameError,
+  kIllegalSetDxns,
   kInvalidBranchTargetError,
+  kInvalidHasNextError,
+  kInvalidNewActivationError,
+  kInvalidRegisterError,
   kLastInstExceedsCodeSizeError,
+  kMethodInfoExceedsCountError,
+  kScopeDepthUnbalancedError,
+  kScopeStackOverflowError,
+  kScopeStackUnderflowError,
+  kStackDepthUnbalancedError,
+  kStackOverflowError,
+  kStackUnderflowError,
+  METHOD_NeedActivation,
+  METHOD_NeedArguments,
+  METHOD_NeedRest,
+  METHOD_SetsDxns,
 } from "./constants";
 import {
   FLAG_Terminal,
   FLAG_Throws,
+  OP_callproperty,
+  OP_callproplex,
+  OP_callpropvoid,
+  OP_callstatic,
+  OP_callsuper,
+  OP_callsupervoid,
+  OP_constructprop,
+  OP_debugfile,
+  OP_declocal,
+  OP_declocal_i,
+  OP_dxns,
+  OP_dxnslate,
+  OP_finddef,
+  OP_getlex,
+  OP_getlocal,
+  OP_getlocal0,
+  OP_getscopeobject,
+  OP_getsuper,
+  OP_hasnext2,
+  OP_inclocal,
+  OP_inclocal_i,
+  OP_kill,
   OP_label,
   OP_lookupswitch,
+  OP_newactivation,
+  OP_newarray,
+  OP_newcatch,
+  OP_newclass,
+  OP_newfunction,
+  OP_newobject,
+  OP_popscope,
+  OP_pushdouble,
+  OP_pushint,
+  OP_pushnamespace,
+  OP_pushscope,
+  OP_pushstring,
+  OP_pushuint,
+  OP_pushwith,
+  OP_setlocal,
+  OP_setlocal0,
+  OP_setsuper,
   OPERANDS_Branch,
   OPERANDS_Byte,
   OPERANDS_Debug,
@@ -35,6 +104,13 @@ import {
   OPERANDS_U30U30,
   opcodeFlags,
   opcodeOperands,
+  opcodePops,
+  opcodePushes,
+  opcodeStack,
+  STACK_ArgcA,
+  STACK_ArgcB,
+  STACK_CheckPushOne,
+  STACK_Multiname,
 } from "./opcodes";
 import { ConstantPool } from "./pool";
 import { Reader } from "./reader";
@@ -119,6 +195,12 @@ export class BodyDecoder {
   slotA: StaticArray<i32> = new StaticArray<i32>(0);
   slotB: StaticArray<u32> = new StaticArray<u32>(0);
   slotC: StaticArray<u32> = new StaticArray<u32>(0);
+  /** Operand and scope stack depth where each decoded instruction starts. */
+  stackAt: StaticArray<u32> = new StaticArray<u32>(0);
+  scopeAt: StaticArray<u32> = new StaticArray<u32>(0);
+  /** The frame state a known target is entered with; every path in must match. */
+  entryStack: StaticArray<u32> = new StaticArray<u32>(0);
+  entryScope: StaticArray<u32> = new StaticArray<u32>(0);
   /** Block starts still to decode; each offset is pushed at most once. */
   work: StaticArray<u32> = new StaticArray<u32>(0);
   workCount: u32 = 0;
@@ -132,6 +214,15 @@ export class BodyDecoder {
   tryTo: u32 = 0;
   /** A branch into the middle of an instruction, reported after other errors. */
   overlap: bool = false;
+
+  // The method being verified and the frame state of the block being decoded.
+  method: u32 = 0;
+  methodFlags: u8 = 0;
+  maxStack: u32 = 0;
+  localCount: u32 = 0;
+  maxScope: u32 = 0;
+  stack: u32 = 0;
+  scope: u32 = 0;
 
   constructor(
     public abc: Abc,
@@ -158,21 +249,29 @@ export class BodyDecoder {
     this.workCount = 0;
     this.overlap = false;
     this.r.failed = false;
+    this.method = unchecked(abc.bodyMethod[body]);
+    this.methodFlags = unchecked(abc.methodFlags[this.method]);
+    this.maxStack = unchecked(abc.bodyMaxStack[body]);
+    this.localCount = unchecked(abc.bodyLocalCount[body]);
     this.reset();
 
-    if (!this.checkHandlers()) {
+    // As Verifier::verify: frame limits, exception handlers, then parameters.
+    if (!this.checkFrame(body) || !this.checkHandlers() || !this.checkParams()) {
       return code;
     }
 
     // Code starting with a label is a block target, so loops may branch to it.
     if (load<u8>(this.start) === OP_label) {
-      this.target(-1, 0);
-    } else if (!this.block(0)) {
+      this.target(-1, 0, 0, 0);
+    } else if (!this.block(0, 0, 0)) {
       return code;
     }
 
     while (this.workCount) {
-      if (!this.block(unchecked(this.work[--this.workCount]))) {
+      const start = unchecked(this.work[--this.workCount]);
+      if (
+        !this.block(start, unchecked(this.entryStack[start]), unchecked(this.entryScope[start]))
+      ) {
         return code;
       }
     }
@@ -204,7 +303,53 @@ export class BodyDecoder {
     this.slotA = new StaticArray<i32>(capacity);
     this.slotB = new StaticArray<u32>(capacity);
     this.slotC = new StaticArray<u32>(capacity);
+    this.stackAt = new StaticArray<u32>(capacity);
+    this.scopeAt = new StaticArray<u32>(capacity);
+    this.entryStack = new StaticArray<u32>(capacity);
+    this.entryScope = new StaticArray<u32>(capacity);
     this.work = new StaticArray<u32>(capacity);
+  }
+
+  /** As Verifier::checkFrameDefinition: a scope size that is a u30, and a frame that fits. */
+  checkFrame(body: u32): bool {
+    const abc = this.abc;
+    const scope =
+      <i64>unchecked(abc.bodyMaxScopeDepth[body]) - unchecked(abc.bodyInitScopeDepth[body]);
+    const frame = <i64>this.localCount + scope + this.maxStack;
+    if (scope < 0 || frame > 0x7fffffff / 8) {
+      this.code.fail(kCorruptABCError);
+      return false;
+    }
+
+    this.maxScope = <u32>scope;
+    return true;
+  }
+
+  /** As Verifier::checkParams: registers for this, the parameters and any rest or arguments. */
+  checkParams(): bool {
+    const abc = this.abc;
+    const params =
+      unchecked(abc.methodParamStart[this.method + 1]) -
+      unchecked(abc.methodParamStart[this.method]);
+    if (this.localCount < params + 1) {
+      this.code.fail(kCorruptABCError);
+      return false;
+    }
+
+    if (this.methodFlags & (METHOD_NeedRest | METHOD_NeedArguments)) {
+      return this.checkLocal(params + 1);
+    }
+
+    return true;
+  }
+
+  checkLocal(register: u32): bool {
+    if (register >= this.localCount) {
+      this.code.fail(kInvalidRegisterError);
+      return false;
+    }
+
+    return true;
   }
 
   /** As Verifier::parseExceptionHandlers: sane ranges and binding catch names. */
@@ -243,8 +388,12 @@ export class BodyDecoder {
     return true;
   }
 
-  /** As Verifier::checkTarget: stay in the code; back edges need a label or known target. */
-  target(from: i64, to: i64): bool {
+  /**
+   * As Verifier::checkTarget and mergeState: stay in the code, back edges need
+   * a label or known target, and every path into a block has the same stack
+   * and scope depths.
+   */
+  target(from: i64, to: i64, stack: u32, scope: u32): bool {
     if (to < 0 || to >= <i64>this.length) {
       this.code.fail(kInvalidBranchTargetError);
       return false;
@@ -258,8 +407,22 @@ export class BodyDecoder {
     }
 
     if (isNew) {
+      // Code decoded as part of another block must have been reached with the same state.
+      if (
+        unchecked(this.cover[t]) === START &&
+        !this.sameDepths(unchecked(this.stackAt[t]), unchecked(this.scopeAt[t]), stack, scope)
+      ) {
+        return false;
+      }
+
       unchecked((this.known[t] = 1));
+      unchecked((this.entryStack[t] = stack));
+      unchecked((this.entryScope[t] = scope));
       unchecked((this.work[this.workCount++] = t));
+    } else if (
+      !this.sameDepths(unchecked(this.entryStack[t]), unchecked(this.entryScope[t]), stack, scope)
+    ) {
+      return false;
     }
 
     // A loop header's implicit interrupt check can throw, so it reaches the
@@ -272,7 +435,21 @@ export class BodyDecoder {
     return true;
   }
 
-  /** Edges from `pc` to every handler covering it. */
+  sameDepths(stack: u32, scope: u32, otherStack: u32, otherScope: u32): bool {
+    if (stack !== otherStack) {
+      this.code.fail(kStackDepthUnbalancedError);
+      return false;
+    }
+
+    if (scope !== otherScope) {
+      this.code.fail(kScopeDepthUnbalancedError);
+      return false;
+    }
+
+    return true;
+  }
+
+  /** Edges from `pc` to every handler covering it; a handler starts with just the exception on the stack. */
   throwsAt(pc: u32): bool {
     if (pc < this.tryFrom || pc >= this.tryTo) {
       return true;
@@ -282,7 +459,12 @@ export class BodyDecoder {
     for (let i: u32 = 0; i < this.handlerCount; i++) {
       const h = this.handlerFirst + i;
       if (pc >= unchecked(abc.exceptionFrom[h]) && pc < unchecked(abc.exceptionTo[h])) {
-        if (!this.target(<i64>pc, <i64>unchecked(abc.exceptionTarget[h]))) {
+        if (this.maxStack < 1) {
+          this.code.fail(kStackOverflowError);
+          return false;
+        }
+
+        if (!this.target(<i64>pc, <i64>unchecked(abc.exceptionTarget[h]), 1, 0)) {
           return false;
         }
       }
@@ -291,9 +473,11 @@ export class BodyDecoder {
     return true;
   }
 
-  /** Decode one block from `start` until it ends or runs into another block. */
-  block(start: u32): bool {
+  /** Decode and check one block from `start` until it ends or runs into another block. */
+  block(start: u32, stack: u32, scope: u32): bool {
     const code = this.code;
+    this.stack = stack;
+    this.scope = scope;
     let pc = start;
 
     while (true) {
@@ -310,7 +494,7 @@ export class BodyDecoder {
       }
 
       if (pc !== start && (opcode === OP_label || unchecked(this.known[pc]))) {
-        return this.target(<i64>pc - 1, <i64>pc);
+        return this.target(<i64>pc - 1, <i64>pc, this.stack, this.scope);
       }
 
       const flags = unchecked(opcodeFlags[opcode]);
@@ -325,24 +509,29 @@ export class BodyDecoder {
         return true;
       }
 
-      if (!this.decodeAt(pc, opcode, operands)) {
+      unchecked((this.stackAt[pc] = this.stack));
+      unchecked((this.scopeAt[pc] = this.scope));
+      if (!this.decodeAt(pc, opcode, operands) || !this.verifyAt(pc, opcode)) {
         return false;
       }
 
+      // Targets get the state after the instruction, as in the verifier.
       const next = unchecked(this.slotNext[pc]);
+      const stack = this.stack;
+      const scope = this.scope;
       if (operands === OPERANDS_Branch) {
-        if (!this.target(<i64>pc, <i64>next + unchecked(this.slotA[pc]))) {
+        if (!this.target(<i64>pc, <i64>next + unchecked(this.slotA[pc]), stack, scope)) {
           return false;
         }
       } else if (opcode === OP_lookupswitch) {
-        if (!this.target(<i64>pc, <i64>pc + unchecked(this.slotA[pc]))) {
+        if (!this.target(<i64>pc, <i64>pc + unchecked(this.slotA[pc]), stack, scope)) {
           return false;
         }
 
         const first = unchecked(this.slotC[pc]);
         const last = first + unchecked(this.slotB[pc]);
         for (let i = first; i <= last; i++) {
-          if (!this.target(<i64>pc, <i64>pc + unchecked(code.cases[i]))) {
+          if (!this.target(<i64>pc, <i64>pc + unchecked(code.cases[i]), stack, scope)) {
             return false;
           }
         }
@@ -438,6 +627,166 @@ export class BodyDecoder {
     return true;
   }
 
+  /**
+   * The checks of the instruction at `pc` in Verifier::verifyBlock that need
+   * no types, in the verifier's order, and its effect on the stack and scope
+   * depths; false after recording the error.
+   */
+  verifyAt(pc: u32, opcode: u8): bool {
+    const pool = this.abc.pool;
+    const a = <u32>unchecked(this.slotA[pc]);
+    const b = unchecked(this.slotB[pc]);
+    const stack = unchecked(opcodeStack[opcode]);
+    let pops = <u64>unchecked(opcodePops[opcode]);
+    const pushes = <u64>unchecked(opcodePushes[opcode]);
+    const checkPushes = stack & STACK_CheckPushOne ? 1 : pushes;
+
+    // Operands that index the pool or the method tables, checked before the stack.
+    if (stack & STACK_Multiname) {
+      if (a === 0 || a >= pool.multinameCount) {
+        return this.fail(kCpoolIndexRangeError);
+      }
+
+      pops += runtimeParts(pool, a);
+    }
+
+    if (stack & STACK_ArgcA) {
+      pops += a;
+    } else if (stack & STACK_ArgcB) {
+      pops += b;
+    }
+
+    if (opcode === OP_newobject) {
+      pops = <u64>a * 2;
+    } else if (opcode === OP_newarray) {
+      pops = a;
+    } else if (opcode === OP_callstatic) {
+      if (a >= this.abc.methodCount) {
+        return this.fail(kCorruptABCError);
+      }
+    } else if (opcode === OP_dxns) {
+      if (!(this.methodFlags & METHOD_SetsDxns)) {
+        return this.fail(kIllegalSetDxns);
+      }
+
+      return this.checkString(a);
+    } else if (opcode === OP_debugfile) {
+      return this.checkString(a);
+    } else if (opcode === OP_kill || opcode === OP_inclocal || opcode === OP_declocal) {
+      return this.checkLocal(a);
+    } else if (opcode === OP_inclocal_i || opcode === OP_declocal_i) {
+      return this.checkLocal(a);
+    } else if (opcode === OP_popscope) {
+      if (this.scope === 0) {
+        return this.fail(kScopeStackUnderflowError);
+      }
+
+      this.scope--;
+      return true;
+    }
+
+    if (<u64>this.stack < pops) {
+      return this.fail(kStackUnderflowError);
+    }
+
+    if (<u64>this.stack - pops + checkPushes > this.maxStack) {
+      return this.fail(kStackOverflowError);
+    }
+
+    if (!this.verifySpecial(pc, opcode, a, b)) {
+      return false;
+    }
+
+    this.stack = <u32>(<u64>this.stack - pops + pushes);
+    return true;
+  }
+
+  /** The checks after the stack check that only some opcodes have. */
+  verifySpecial(pc: u32, opcode: u8, a: u32, b: u32): bool {
+    const abc = this.abc;
+    const pool = abc.pool;
+    if (opcode >= OP_getlocal0 && opcode < OP_getlocal0 + 4) {
+      return this.checkLocal(opcode - OP_getlocal0);
+    }
+
+    if (opcode >= OP_setlocal0 && opcode < OP_setlocal0 + 4) {
+      return this.checkLocal(opcode - OP_setlocal0);
+    }
+
+    switch (opcode) {
+      case OP_getlocal:
+      case OP_setlocal:
+        return this.checkLocal(a);
+      case OP_hasnext2:
+        if (!this.checkLocal(a) || !this.checkLocal(b)) {
+          return false;
+        }
+
+        return a === b ? this.fail(kInvalidHasNextError) : true;
+      case OP_pushstring:
+        return this.checkString(a);
+      case OP_pushint:
+        return a === 0 || a >= <u32>pool.ints.length ? this.fail(kCpoolIndexRangeError) : true;
+      case OP_pushuint:
+        return a === 0 || a >= <u32>pool.uints.length ? this.fail(kCpoolIndexRangeError) : true;
+      case OP_pushdouble:
+        return a === 0 || a >= <u32>pool.doubles.length ? this.fail(kCpoolIndexRangeError) : true;
+      case OP_pushnamespace:
+        return a === 0 || a >= pool.nsCount ? this.fail(kCpoolIndexRangeError) : true;
+      case OP_dxnslate:
+        return this.methodFlags & METHOD_SetsDxns ? true : this.fail(kIllegalSetDxns);
+      case OP_getlex:
+        return runtimeParts(pool, a) ? this.fail(kIllegalOpMultinameError) : true;
+      case OP_finddef:
+        return isBinding(pool, a) ? true : this.fail(kIllegalOpMultinameError);
+      case OP_callproperty:
+      case OP_callproplex:
+      case OP_callpropvoid:
+      case OP_constructprop:
+      case OP_callsuper:
+      case OP_callsupervoid:
+      case OP_getsuper:
+      case OP_setsuper:
+        return isAttribute(pool, a) ? this.fail(kIllegalOpMultinameError) : true;
+      case OP_newfunction:
+        return a >= abc.methodCount ? this.fail(kMethodInfoExceedsCountError) : true;
+      case OP_newclass:
+        return a >= abc.classCount ? this.fail(kClassInfoExceedsCountError) : true;
+      case OP_newactivation:
+        return this.methodFlags & METHOD_NeedActivation
+          ? true
+          : this.fail(kInvalidNewActivationError);
+      case OP_newcatch:
+        return a >= this.handlerCount ? this.fail(kInvalidNewActivationError) : true;
+      case OP_pushscope:
+      case OP_pushwith:
+        if (this.scope + 1 > this.maxScope) {
+          return this.fail(kScopeStackOverflowError);
+        }
+
+        this.scope++;
+        return true;
+      case OP_getscopeobject:
+        // The verifier reads the index as the operand's first byte.
+        return <u32>load<u8>(this.start + pc + 1) >= this.scope
+          ? this.fail(kGetScopeObjectBoundsError)
+          : true;
+      default:
+        return true;
+    }
+  }
+
+  checkString(index: u32): bool {
+    return index === 0 || index >= this.abc.pool.stringCount
+      ? this.fail(kCpoolIndexRangeError)
+      : true;
+  }
+
+  fail(error: i32): bool {
+    this.code.fail(error);
+    return false;
+  }
+
   /** Copy the decoded instructions into `code` in offset order. */
   pack(): void {
     const code = this.code;
@@ -476,4 +825,30 @@ function isBinding(pool: ConstantPool, index: u32): bool {
   }
 
   return kind === CONSTANT_Multiname && unchecked(pool.mnB[mn]) !== 0;
+}
+
+/** Values a multiname takes from the stack: a runtime namespace, a runtime name, or both. */
+function runtimeParts(pool: ConstantPool, index: u32): u32 {
+  const kind = unchecked(pool.mnKind[index]);
+  if (
+    kind === CONSTANT_RTQname ||
+    kind === CONSTANT_RTQnameA ||
+    kind === CONSTANT_MultinameL ||
+    kind === CONSTANT_MultinameLA
+  ) {
+    return 1;
+  }
+
+  return kind === CONSTANT_RTQnameL || kind === CONSTANT_RTQnameLA ? 2 : 0;
+}
+
+function isAttribute(pool: ConstantPool, index: u32): bool {
+  const kind = unchecked(pool.mnKind[index]);
+  return (
+    kind === CONSTANT_QnameA ||
+    kind === CONSTANT_RTQnameA ||
+    kind === CONSTANT_RTQnameLA ||
+    kind === CONSTANT_MultinameA ||
+    kind === CONSTANT_MultinameLA
+  );
 }
