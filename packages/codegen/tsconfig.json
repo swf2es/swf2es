@@ -1,6 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist", "types": [], "lib": ["ES2022"] },
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // asc writes codegen.js/.d.ts into dist/ before tsc runs; rootDirs lets
+    // src/index.ts import them as "./codegen.js".
+    "rootDirs": ["src", "dist"],
+    "types": [],
+    "lib": ["ES2022"]
+  },
   "include": ["src"],
   "references": [{ "path": "../format" }]
 }

@@ -8,6 +8,11 @@ JavaScript. It has one compiler, which runs at two different times:
 - **AOT**: node (or a server) runs the same compiler ahead of time and caches
   the result.
 
+The compiler is written in AssemblyScript and ships as `codegen.wasm`, with
+a thin TypeScript wrapper. The one wasm binary runs in browser workers, in
+node, and in any server-side wasm runtime (for example wazero in a Go
+server), so there is only one implementation to keep correct.
+
 ## The JIT/AOT invariant
 
 For the same input, both modes must produce byte-identical output. That
@@ -15,7 +20,8 @@ requires:
 
 1. **Compilation is pure.** `format` and `codegen` use no DOM or node APIs, no
    clock and no randomness. The dependency rules and the per-package `lib`
-   settings enforce this.
+   settings enforce this, and a unit test fails if `codegen.wasm` imports
+   anything besides `env.abort`.
 2. **The unit of translation is one method.** A method's output depends only on
    its ABC, never on which other methods were compiled before it.
 3. **Both modes use the same facts.** Optimizations use only what the ABC being
@@ -34,7 +40,7 @@ hashes differ.
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
 | `format`  | SWF container and tags, ABC, AVM1 action records                | —                         |
-| `codegen` | bytecode → IR → ES modules (`ir/`, `avm2/`, `avm1/`)            | format                    |
+| `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3/AS2 language semantics called by generated code             | —                         |
 | `player`  | display list, timeline, playerglobal, AVM1 globals, renderers   | format, codegen, runtime  |
 | `cli`     | ahead-of-time compiler command                                  | format, codegen           |

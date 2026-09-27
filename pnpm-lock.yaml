@@ -32,6 +32,10 @@ importers:
       '@swf2es/format':
         specifier: workspace:*
         version: link:../format
+    devDependencies:
+      assemblyscript:
+        specifier: ^0.28.20
+        version: 0.28.20
 
   packages/format: {}
 
@@ -53,6 +57,9 @@ importers:
 
   tests/unit:
     dependencies:
+      '@swf2es/codegen':
+        specifier: workspace:*
+        version: link:../../packages/codegen
       '@swf2es/format':
         specifier: workspace:*
         version: link:../../packages/format
@@ -92,6 +99,15 @@ packages:
   ansi-styles@4.3.0:
     resolution: {integrity: sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg==}
     engines: {node: '>=8'}
+
+  assemblyscript@0.28.20:
+    resolution: {integrity: sha512-5PM7GZpvcLypHcLmi30aP8mqm5HjU+LL3BdV1xDyA3USGtL2w+iMiUnhtH+vW8+2kOuHlAyPu7M+QgyEw5he1g==}
+    engines: {node: '>=20', npm: '>=10'}
+    hasBin: true
+
+  binaryen@131.0.0-nightly.20260721:
+    resolution: {integrity: sha512-AAQIkhfbYXh4FBObwBrlO+5L+6Rp6OOMOjh6AdT0M+GLNLyrwKWgtW+EzmizNgx9CWDfTJPfDtKoZi62QESbtg==}
+    hasBin: true
 
   chalk@4.1.2:
     resolution: {integrity: sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA==}
@@ -180,6 +196,9 @@ packages:
   kleur@3.0.3:
     resolution: {integrity: sha512-eTIzlVOSUR+JxdDFepEYcBMtZ9Qqdef+rnzWdRZuMbOywu5tO2w2N7rqjoANZ5k9vywhL6Br1VRjUIgTQx4E8w==}
     engines: {node: '>=6'}
+
+  long@5.3.2:
+    resolution: {integrity: sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA==}
 
   memoize@10.2.0:
     resolution: {integrity: sha512-DeC6b7QBrZsRs3Y02A6A7lQyzFbsQbqgjI6UW0GigGWV+u1s25TycMr0XHZE4cJce7rY/vyw2ctMQqfDkIhUEA==}
@@ -307,6 +326,13 @@ snapshots:
     dependencies:
       color-convert: 2.0.1
 
+  assemblyscript@0.28.20:
+    dependencies:
+      binaryen: 131.0.0-nightly.20260721
+      long: 5.3.2
+
+  binaryen@131.0.0-nightly.20260721: {}
+
   chalk@4.1.2:
     dependencies:
       ansi-styles: 4.3.0
@@ -392,6 +418,8 @@ snapshots:
   json5@2.2.3: {}
 
   kleur@3.0.3: {}
+
+  long@5.3.2: {}
 
   memoize@10.2.0:
     dependencies:

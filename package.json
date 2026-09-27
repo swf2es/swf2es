@@ -3,9 +3,11 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.21.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "tsc -b packages/*",
+    "build": "pnpm --filter @swf2es/codegen build:wasm && tsc -b packages/*",
     "clean": "tsc -b --clean packages/*",
     "lint:deps": "depcruise packages --config .dependency-cruiser.cjs",
     "test": "pnpm -r --filter './tests/*' test",

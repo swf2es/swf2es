@@ -1,0 +1,12 @@
+{
+  "entries": ["assembly/index.ts"],
+  "options": {
+    "outFile": "dist/codegen.wasm",
+    "bindings": "raw",
+    "optimizeLevel": 3,
+    "shrinkLevel": 0,
+    "converge": false,
+    "noAssert": false,
+    "runtime": "incremental"
+  }
+}

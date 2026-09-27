@@ -13,7 +13,7 @@ output.
 ```
 packages/
   format/    SWF, ABC and AVM1 parsers
-  codegen/   bytecode → ES modules (same output for JIT and AOT)
+  codegen/   bytecode → ES modules, AssemblyScript → wasm (same output for JIT and AOT)
   runtime/   AS3/AS2 language runtime (avm2/, avm1/)
   player/    browser player: display list, playerglobal, renderers
   cli/       ahead-of-time compiler

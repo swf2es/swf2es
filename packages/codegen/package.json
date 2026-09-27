@@ -1,10 +1,26 @@
 {
   "name": "@swf2es/codegen",
   "version": "0.0.0",
-  "description": "ABC and AVM1 bytecode to ES module compiler; identical output in JIT and AOT modes",
+  "description": "ABC and AVM1 bytecode to ES module compiler (AssemblyScript → wasm); identical output in JIT and AOT modes",
   "license": "Apache-2.0",
   "type": "module",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-  "files": ["dist"],
-  "dependencies": { "@swf2es/format": "workspace:*" }
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./codegen.wasm": "./dist/codegen.wasm"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@swf2es/format": "workspace:*"
+  },
+  "devDependencies": {
+    "assemblyscript": "^0.28.20"
+  },
+  "scripts": {
+    "build:wasm": "asc --config asconfig.json"
+  }
 }
