@@ -64,6 +64,8 @@ calling a change done; CI runs the same steps.
 
 ### AssemblyScript (`packages/codegen/assembly`)
 
+- Group files by compiler stage (`abc/`, later `ir/`, `emit/`), not by kind:
+  no `utils/`. A helper lives next to its only user.
 - Keep any object read through a raw pointer (`changetype<usize>`, `load`)
   referenced from a live variable, field or global; otherwise the collector
   may free it mid-read.
@@ -72,7 +74,7 @@ calling a change done; CI runs the same steps.
   Biome's import-type fix is off for this folder for that reason.
 - Errors are sticky flags or VerifyError numbers, never `throw`: an abort
   kills the wasm instance, and the JIT must survive a malformed SWF.
-- Use avmplus' error numbers (`assembly/constants.ts`) so rejections match
+- Use avmplus' error numbers (`assembly/abc/constants.ts`) so rejections match
   avmshell.
 
 ## Git

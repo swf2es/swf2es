@@ -1,7 +1,7 @@
 // Test-only entry point: exposes the reader to node tests without adding
 // exports to codegen.wasm.
-import { readConstantPool } from "./pool";
-import { PADDING, Reader } from "./reader";
+import { readConstantPool } from "./abc/pool";
+import { PADDING, Reader } from "./abc/reader";
 
 export const U8: u8 = 0;
 export const U16: u8 = 1;
