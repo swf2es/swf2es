@@ -30,41 +30,48 @@ const CALLPROPERTY = 0x46;
 const GETLOCAL = 0x62;
 const GETLOCAL0 = 0xd0;
 const NOP = 0x02;
+const PUSHTRUE = 0x26;
 const DEBUG = 0xef;
 
 /** Decode one body; its lines without the "body" header. */
-function decode(code: number[], exceptions: Body["exceptions"] = []): string[] {
-  const bytes = abc(
-    pool,
-    tables({ methods: [{}], scripts: [{ init: 0 }], bodies: [{ method: 0, code, exceptions }] }),
-  );
+function decode(
+  code: number[],
+  exceptions: Body["exceptions"] = [],
+  frame: Partial<Body> = {},
+): string[] {
+  const body: Body = { method: 0, code, exceptions, maxStack: 4, ...frame };
+  const bytes = abc(pool, tables({ methods: [{}], scripts: [{ init: 0 }], bodies: [body] }));
   return (testing.codeDump(bytes) as string)
     .split("\n")
     .slice(1)
     .map((l) => l.trim());
 }
 
-const error = (code: number[], exceptions?: Body["exceptions"]) =>
-  decode(code, exceptions).find((l) => l.startsWith("error"));
+const error = (code: number[], exceptions?: Body["exceptions"], frame?: Partial<Body>) =>
+  decode(code, exceptions, frame).find((l) => l.startsWith("error"));
 
 test("decodes each operand layout", () => {
-  const lines = decode([
-    PUSHBYTE,
-    0xff,
-    PUSHSHORT,
-    ...u30(0xffff),
-    GETLOCAL,
-    ...u30(300),
-    CALLPROPERTY,
-    ...u30(1),
-    ...u30(2),
-    DEBUG,
-    1,
-    ...u30(1),
-    3,
-    ...u30(0),
-    RETURNVOID,
-  ]);
+  const lines = decode(
+    [
+      PUSHBYTE,
+      0xff,
+      PUSHSHORT,
+      ...u30(0xffff),
+      GETLOCAL,
+      ...u30(300),
+      CALLPROPERTY,
+      ...u30(1),
+      ...u30(2),
+      DEBUG,
+      1,
+      ...u30(1),
+      3,
+      ...u30(0),
+      RETURNVOID,
+    ],
+    [],
+    { localCount: 301 },
+  );
   assert.deepEqual(lines, [
     "0 pushbyte -1 0 0",
     "2 pushshort -1 0 0",
@@ -77,8 +84,10 @@ test("decodes each operand layout", () => {
 });
 
 test("lookupswitch reaches every case, relative to the instruction", () => {
-  // 0: lookupswitch default +14, 2 cases +15, +16 (11 bytes); 11..13 unreachable.
+  // 2: lookupswitch default +14, 2 cases +15, +16 (11 bytes); 13..15 unreachable.
   const lines = decode([
+    PUSHBYTE,
+    0,
     LOOKUPSWITCH,
     ...s24(14),
     ...u30(1),
@@ -92,10 +101,11 @@ test("lookupswitch reaches every case, relative to the instruction", () => {
     RETURNVOID,
   ]);
   assert.deepEqual(lines, [
-    "0 lookupswitch 14 1 0 [15,16]",
-    "14 returnvoid 0 0 0",
-    "15 returnvoid 0 0 0",
+    "0 pushbyte 0 0 0",
+    "2 lookupswitch 14 1 0 [15,16]",
     "16 returnvoid 0 0 0",
+    "17 returnvoid 0 0 0",
+    "18 returnvoid 0 0 0",
     "unreachable 3",
   ]);
 });
@@ -132,7 +142,11 @@ test("instructions may not run past the code", () => {
 test("control may not fall off the end", () => {
   assert.equal(error([NOP]), "error 1020");
   assert.equal(error([PUSHBYTE, 1]), "error 1020");
-  assert.equal(error([IFTRUE, ...s24(0)]), "error 1021", "a branch to the end is out of the code");
+  assert.equal(
+    error([PUSHTRUE, IFTRUE, ...s24(0)]),
+    "error 1021",
+    "a branch to the end is out of the code",
+  );
 });
 
 test("branch targets stay in the code and back edges need a label", () => {
@@ -140,7 +154,7 @@ test("branch targets stay in the code and back edges need a label", () => {
   assert.equal(error([NOP, JUMP, ...s24(-5)]), "error 1021", "back to a nop");
   assert.equal(error([LABEL, JUMP, ...s24(-5)]), undefined, "back to a label");
   assert.equal(
-    error([IFTRUE, ...s24(0), NOP, JUMP, ...s24(-5), RETURNVOID]),
+    error([PUSHTRUE, IFTRUE, ...s24(0), NOP, JUMP, ...s24(-5), RETURNVOID]),
     undefined,
     "back to an earlier forward target",
   );
@@ -148,7 +162,10 @@ test("branch targets stay in the code and back edges need a label", () => {
 
 test("a branch into the middle of an instruction is 1021", () => {
   // iftrue +1 lands on pushbyte's operand byte, which is also a returnvoid.
-  assert.equal(error([IFTRUE, ...s24(1), PUSHBYTE, RETURNVOID, RETURNVOID]), "error 1021");
+  assert.equal(
+    error([PUSHTRUE, IFTRUE, ...s24(1), PUSHBYTE, RETURNVOID, RETURNVOID]),
+    "error 1021",
+  );
 });
 
 test("handlers are reached only from instructions that can throw", () => {
