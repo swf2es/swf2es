@@ -17,3 +17,18 @@ Near-term work, in order. The goal of milestone 1 is in
    first real program for milestone 1.
 
 Tracked separately: SWF decompression in `format` (issue #3).
+
+## Later
+
+- **A built-in parse mode** that accepts native methods (1079 for user
+  code), so `playerglobal.swc` and `airglobal.swc` parse: large real ABCs
+  for testing, and the API definitions swf2es needs for playerglobal.
+
+## Not planned
+
+- **`float` (ABC 47.16 with float pools).** Only HARMAN's AIR runtime has it
+  (AIR 51.x, 32-bit `float` only, AIR-6279); Flash Player never did, and
+  neither does Ruffle. swf2es reads every 47.x version with the 46.16
+  layout, as Flash Player builds of avmplus do. Supporting AIR content
+  would mean the float pools, the float opcodes, and a float-enabled
+  avmshell built from avmplus as the oracle.

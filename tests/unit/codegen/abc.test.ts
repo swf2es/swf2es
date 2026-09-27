@@ -279,3 +279,26 @@ test("truncated tables are corrupt", () => {
     assert.equal(lines.at(-1), "error 1107", `length ${length}`);
   }
 });
+
+test("accepts ABC 46.16 and 47.12 to 47.18, as Flash Player builds of avmplus", () => {
+  const withVersion = (major: number, minor: number) => {
+    const bytes = abc(pool, tables({}));
+    bytes.set([minor & 0xff, minor >> 8, major & 0xff, major >> 8], 0);
+    return testing.abcDump(bytes) as string;
+  };
+
+  assert.equal(withVersion(46, 16), "");
+  for (let minor = 12; minor <= 18; minor++) {
+    assert.equal(withVersion(47, minor), "", `47.${minor}`);
+  }
+
+  for (const [major, minor] of [
+    [46, 15],
+    [46, 17],
+    [47, 11],
+    [47, 19],
+    [48, 0],
+  ]) {
+    assert.equal(withVersion(major, minor), "error 1042", `${major}.${minor}`);
+  }
+});
