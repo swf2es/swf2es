@@ -11,6 +11,7 @@
 
 export const PADDING: i32 = 16;
 
+@final
 export class Reader {
   failed: bool = false;
 

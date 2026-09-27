@@ -72,6 +72,8 @@ calling a change done; CI runs the same steps.
 - The dialect is stricter than TypeScript: no `import type`, and `@inline`
   only on class members (Binaryen inlines small functions at `-O3` anyway).
   Biome's import-type fix is off for this folder for that reason.
+- Mark classes `@final` unless they are meant to be extended, so calls on
+  them never need virtual dispatch.
 - Errors are sticky flags or VerifyError numbers, never `throw`: an abort
   kills the wasm instance, and the JIT must survive a malformed SWF.
 - Use avmplus' error numbers (`assembly/abc/constants.ts`) so rejections match

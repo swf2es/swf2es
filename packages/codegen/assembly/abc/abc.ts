@@ -3,6 +3,7 @@
 // table owns items [start[i], start[i + 1]).
 import { ConstantPool } from "./pool";
 
+@final
 export class Abc {
   /** 0, or the VerifyError number avmplus would throw; then the tables are incomplete. */
   error: i32 = 0;

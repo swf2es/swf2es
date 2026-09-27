@@ -31,6 +31,7 @@ import { Reader } from "./reader";
  * default. Strings stay byte ranges into the ABC, so only the names codegen
  * uses get decoded.
  */
+@final
 export class ConstantPool {
   /** 0, or the VerifyError number avmplus would throw. */
   error: i32 = 0;
