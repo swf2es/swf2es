@@ -5,6 +5,9 @@
 //
 // Type and stack checks are the verifier's; this checks only what decoding
 // needs, with the verifier's VerifyError numbers.
+//
+// A BodyDecoder is made once per ABC and reused for every body: its scratch
+// buffers and its output only grow, so decoding allocates nothing per body.
 import { Abc } from "./abc";
 import {
   CONSTANT_Multiname,
@@ -37,29 +40,27 @@ import { ConstantPool } from "./pool";
 import { Reader } from "./reader";
 
 /**
- * The reachable instructions of one body, ordered by offset. Operands:
- * a is the first u30, the signed branch offset, or pushbyte/pushshort's
- * value; b the second u30 (debug: string index; lookupswitch: case count - 1);
- * c debug's register, or where lookupswitch's case offsets start in `cases`.
+ * The reachable instructions of one body, ordered by offset; entries past
+ * `count` are stale. Operands: a is the first u30, the signed branch offset,
+ * or pushbyte/pushshort's value; b the second u30 (debug: string index;
+ * lookupswitch: case count - 1); c debug's register, or where lookupswitch's
+ * case offsets start in `cases`.
  */
 @final
 export class Code {
   /** 0, or the VerifyError number avmplus would throw; then the lists are incomplete. */
   error: i32 = 0;
-  offset: Array<u32> = [] as u32[];
+  count: u32 = 0;
+  offset: StaticArray<u32> = new StaticArray<u32>(0);
   /** Offset of the next instruction in the code. */
-  next: Array<u32> = [] as u32[];
-  opcode: Array<u8> = [] as u8[];
-  a: Array<i32> = [] as i32[];
-  b: Array<u32> = [] as u32[];
-  c: Array<u32> = [] as u32[];
-  /** lookupswitch case offsets, relative to the instruction. */
-  cases: Array<i32> = [] as i32[];
-
-  @inline
-  get count(): u32 {
-    return this.offset.length;
-  }
+  next: StaticArray<u32> = new StaticArray<u32>(0);
+  opcode: StaticArray<u8> = new StaticArray<u8>(0);
+  a: StaticArray<i32> = new StaticArray<i32>(0);
+  b: StaticArray<u32> = new StaticArray<u32>(0);
+  c: StaticArray<u32> = new StaticArray<u32>(0);
+  /** lookupswitch case offsets, relative to the instruction; `caseCount` are valid. */
+  cases: StaticArray<i32> = new StaticArray<i32>(0);
+  caseCount: u32 = 0;
 
   fail(error: i32): Code {
     if (!this.error) {
@@ -68,71 +69,153 @@ export class Code {
 
     return this;
   }
+
+  /** Room for `count` instructions; old contents are not kept. */
+  reserve(count: u32): void {
+    if (<u32>this.offset.length >= count) {
+      return;
+    }
+
+    const capacity = max(count, <u32>this.offset.length * 2);
+    this.offset = new StaticArray<u32>(capacity);
+    this.next = new StaticArray<u32>(capacity);
+    this.opcode = new StaticArray<u8>(capacity);
+    this.a = new StaticArray<i32>(capacity);
+    this.b = new StaticArray<u32>(capacity);
+    this.c = new StaticArray<u32>(capacity);
+  }
+
+  pushCase(offset: i32): void {
+    if (this.caseCount === <u32>this.cases.length) {
+      const grown = new StaticArray<i32>(max(16, this.cases.length * 2));
+      memory.copy(changetype<usize>(grown), changetype<usize>(this.cases), this.caseCount << 2);
+      this.cases = grown;
+    }
+
+    unchecked((this.cases[this.caseCount++] = offset));
+  }
 }
 
-// Byte states in Decoder.cover, which starts zeroed: unseen.
+// Byte states in BodyDecoder.cover, which starts zeroed: unseen.
 const START: u8 = 1;
 const INSIDE: u8 = 2;
 
 @final
-class Decoder {
+export class BodyDecoder {
+  /** The last decode's result, overwritten by the next one. */
   code: Code = new Code();
-  start: usize;
-  length: u32;
   r: Reader;
 
+  // Scratch for the body being decoded, sized to the longest body so far.
+  capacity: u32 = 0;
   /** Whether each byte starts an instruction, lies inside one, or is unseen (0). */
-  cover: StaticArray<u8>;
-  /** Decode order index of the instruction starting at each byte. */
-  at: StaticArray<i32>;
+  cover: StaticArray<u8> = new StaticArray<u8>(0);
   /** Offsets with a known frame state: branch and handler targets. */
-  known: StaticArray<u8>;
+  known: StaticArray<u8> = new StaticArray<u8>(0);
   /** Targets of backward branches. */
-  loopHeader: StaticArray<u8>;
-  work: Array<u32> = [] as u32[];
+  loopHeader: StaticArray<u8> = new StaticArray<u8>(0);
+  /** Each decoded instruction's operands and end, by its offset. */
+  slotNext: StaticArray<u32> = new StaticArray<u32>(0);
+  slotA: StaticArray<i32> = new StaticArray<i32>(0);
+  slotB: StaticArray<u32> = new StaticArray<u32>(0);
+  slotC: StaticArray<u32> = new StaticArray<u32>(0);
+  /** Block starts still to decode; each offset is pushed at most once. */
+  work: StaticArray<u32> = new StaticArray<u32>(0);
+  workCount: u32 = 0;
 
-  handlerFrom: StaticArray<u32>;
-  handlerTo: StaticArray<u32>;
-  handlerTarget: StaticArray<u32>;
+  start: usize = 0;
+  length: u32 = 0;
+  instructions: u32 = 0;
+  handlerFirst: u32 = 0;
+  handlerCount: u32 = 0;
   tryFrom: u32 = 0;
   tryTo: u32 = 0;
   /** A branch into the middle of an instruction, reported after other errors. */
   overlap: bool = false;
 
-  constructor(abc: Abc, body: u32, base: usize) {
-    const start = base + unchecked(abc.bodyCodeStart[body]);
-    const length = unchecked(abc.bodyCodeLength[body]);
-    const first = unchecked(abc.bodyExceptionStart[body]);
-    const count = unchecked(abc.bodyExceptionStart[body + 1]) - first;
-
-    this.start = start;
-    this.length = length;
+  constructor(
+    public abc: Abc,
+    public base: usize,
+  ) {
     // Operands may read past the code up to the end of the ABC, as avmplus'
     // do into its padding; the end of the code is checked per instruction.
-    this.r = new Reader(start, base + abc.length);
-    this.cover = new StaticArray<u8>(length);
-    this.at = new StaticArray<i32>(length);
-    this.known = new StaticArray<u8>(length);
-    this.loopHeader = new StaticArray<u8>(length);
-    this.handlerFrom = new StaticArray<u32>(count);
-    this.handlerTo = new StaticArray<u32>(count);
-    this.handlerTarget = new StaticArray<u32>(count);
+    this.r = new Reader(base, base + abc.length);
+  }
 
-    for (let i: u32 = 0; i < count; i++) {
-      unchecked((this.handlerFrom[i] = abc.exceptionFrom[first + i]));
-      unchecked((this.handlerTo[i] = abc.exceptionTo[first + i]));
-      unchecked((this.handlerTarget[i] = abc.exceptionTarget[first + i]));
+  /** Decode body `body`; the result is valid until the next call. */
+  decode(body: u32): Code {
+    const abc = this.abc;
+    const code = this.code;
+    code.error = 0;
+    code.count = 0;
+    code.caseCount = 0;
+
+    this.start = this.base + unchecked(abc.bodyCodeStart[body]);
+    this.length = unchecked(abc.bodyCodeLength[body]);
+    this.handlerFirst = unchecked(abc.bodyExceptionStart[body]);
+    this.handlerCount = unchecked(abc.bodyExceptionStart[body + 1]) - this.handlerFirst;
+    this.instructions = 0;
+    this.workCount = 0;
+    this.overlap = false;
+    this.r.failed = false;
+    this.reset();
+
+    if (!this.checkHandlers()) {
+      return code;
     }
+
+    // Code starting with a label is a block target, so loops may branch to it.
+    if (load<u8>(this.start) === OP_label) {
+      this.target(-1, 0);
+    } else if (!this.block(0)) {
+      return code;
+    }
+
+    while (this.workCount) {
+      if (!this.block(unchecked(this.work[--this.workCount]))) {
+        return code;
+      }
+    }
+
+    if (this.overlap) {
+      return code.fail(kInvalidBranchTargetError);
+    }
+
+    this.pack();
+    return code;
+  }
+
+  /** Zeroed scratch for this body, growing it if the body is the longest yet. */
+  reset(): void {
+    const length = this.length;
+    if (length <= this.capacity) {
+      memory.fill(changetype<usize>(this.cover), 0, length);
+      memory.fill(changetype<usize>(this.known), 0, length);
+      memory.fill(changetype<usize>(this.loopHeader), 0, length);
+      return;
+    }
+
+    const capacity = max(length, this.capacity * 2);
+    this.capacity = capacity;
+    this.cover = new StaticArray<u8>(capacity);
+    this.known = new StaticArray<u8>(capacity);
+    this.loopHeader = new StaticArray<u8>(capacity);
+    this.slotNext = new StaticArray<u32>(capacity);
+    this.slotA = new StaticArray<i32>(capacity);
+    this.slotB = new StaticArray<u32>(capacity);
+    this.slotC = new StaticArray<u32>(capacity);
+    this.work = new StaticArray<u32>(capacity);
   }
 
   /** As Verifier::parseExceptionHandlers: sane ranges and binding catch names. */
-  checkHandlers(abc: Abc, body: u32): bool {
-    const first = unchecked(abc.bodyExceptionStart[body]);
-    for (let i = 0; i < this.handlerFrom.length; i++) {
-      const from = unchecked(this.handlerFrom[i]);
-      const to = unchecked(this.handlerTo[i]);
-      const target = unchecked(this.handlerTarget[i]);
-      const name = unchecked(abc.exceptionName[first + i]);
+  checkHandlers(): bool {
+    const abc = this.abc;
+    for (let i: u32 = 0; i < this.handlerCount; i++) {
+      const h = this.handlerFirst + i;
+      const from = unchecked(abc.exceptionFrom[h]);
+      const to = unchecked(abc.exceptionTo[h]);
+      const target = unchecked(abc.exceptionTarget[h]);
+      const name = unchecked(abc.exceptionName[h]);
       if (name !== 0 && !isBinding(abc.pool, name)) {
         this.code.fail(kCorruptABCError);
         return false;
@@ -147,9 +230,14 @@ class Decoder {
         this.tryFrom = from;
       }
 
-      if (to > this.tryTo) {
+      if (i === 0 || to > this.tryTo) {
         this.tryTo = to;
       }
+    }
+
+    if (!this.handlerCount) {
+      this.tryFrom = 0;
+      this.tryTo = 0;
     }
 
     return true;
@@ -171,7 +259,7 @@ class Decoder {
 
     if (isNew) {
       unchecked((this.known[t] = 1));
-      this.work.push(t);
+      unchecked((this.work[this.workCount++] = t));
     }
 
     // A loop header's implicit interrupt check can throw, so it reaches the
@@ -190,9 +278,11 @@ class Decoder {
       return true;
     }
 
-    for (let i = 0; i < this.handlerFrom.length; i++) {
-      if (pc >= unchecked(this.handlerFrom[i]) && pc < unchecked(this.handlerTo[i])) {
-        if (!this.target(<i64>pc, <i64>unchecked(this.handlerTarget[i]))) {
+    const abc = this.abc;
+    for (let i: u32 = 0; i < this.handlerCount; i++) {
+      const h = this.handlerFirst + i;
+      if (pc >= unchecked(abc.exceptionFrom[h]) && pc < unchecked(abc.exceptionTo[h])) {
+        if (!this.target(<i64>pc, <i64>unchecked(abc.exceptionTarget[h]))) {
           return false;
         }
       }
@@ -235,23 +325,22 @@ class Decoder {
         return true;
       }
 
-      const index = this.decode(pc, opcode, operands);
-      if (index < 0) {
+      if (!this.decodeAt(pc, opcode, operands)) {
         return false;
       }
 
-      const next = unchecked(code.next[index]);
+      const next = unchecked(this.slotNext[pc]);
       if (operands === OPERANDS_Branch) {
-        if (!this.target(<i64>pc, <i64>next + unchecked(code.a[index]))) {
+        if (!this.target(<i64>pc, <i64>next + unchecked(this.slotA[pc]))) {
           return false;
         }
       } else if (opcode === OP_lookupswitch) {
-        if (!this.target(<i64>pc, <i64>pc + unchecked(code.a[index]))) {
+        if (!this.target(<i64>pc, <i64>pc + unchecked(this.slotA[pc]))) {
           return false;
         }
 
-        const first = unchecked(code.c[index]);
-        const last = first + unchecked(code.b[index]);
+        const first = unchecked(this.slotC[pc]);
+        const last = first + unchecked(this.slotB[pc]);
         for (let i = first; i <= last; i++) {
           if (!this.target(<i64>pc, <i64>pc + unchecked(code.cases[i]))) {
             return false;
@@ -267,8 +356,8 @@ class Decoder {
     }
   }
 
-  /** Decode the instruction at `pc`; returns its index, or -1 after recording the error. */
-  decode(pc: u32, opcode: u8, operands: u8): i32 {
+  /** Decode the instruction at `pc` into its slots; false after recording the error. */
+  decodeAt(pc: u32, opcode: u8, operands: u8): bool {
     const code = this.code;
     const r = this.r;
     r.pos = this.start + pc + 1;
@@ -305,25 +394,25 @@ class Decoder {
 
     if (wide & 0xc0000000) {
       code.fail(kCorruptABCError);
-      return -1;
+      return false;
     }
 
     const codeEnd = this.start + this.length;
     if (r.failed || r.pos > codeEnd) {
       code.fail(kLastInstExceedsCodeSizeError);
-      return -1;
+      return false;
     }
 
     if (opcode === OP_lookupswitch) {
-      c = code.cases.length;
+      c = code.caseCount;
       const caseCount = <u64>b + 1;
       if (<u64>r.pos + caseCount * 3 > codeEnd) {
         code.fail(kLastInstExceedsCodeSizeError);
-        return -1;
+        return false;
       }
 
       for (let i: u64 = 0; i < caseCount; i++) {
-        code.cases.push(r.s24());
+        code.pushCase(r.s24());
       }
     }
 
@@ -341,63 +430,34 @@ class Decoder {
     }
 
     unchecked((this.cover[pc] = START));
-    const index = code.offset.length;
-    unchecked((this.at[pc] = index));
-    code.offset.push(pc);
-    code.next.push(next);
-    code.opcode.push(opcode);
-    code.a.push(a);
-    code.b.push(b);
-    code.c.push(c);
-    return index;
+    unchecked((this.slotNext[pc] = next));
+    unchecked((this.slotA[pc] = a));
+    unchecked((this.slotB[pc] = b));
+    unchecked((this.slotC[pc] = c));
+    this.instructions++;
+    return true;
   }
 
-  /** The instructions again, ordered by offset. */
-  ordered(): Code {
-    const from = this.code;
-    const to = new Code();
-    to.cases = from.cases;
+  /** Copy the decoded instructions into `code` in offset order. */
+  pack(): void {
+    const code = this.code;
+    code.reserve(this.instructions);
+
+    let i: u32 = 0;
     for (let pc: u32 = 0; pc < this.length; pc++) {
       if (unchecked(this.cover[pc]) === START) {
-        const i = unchecked(this.at[pc]);
-        to.offset.push(unchecked(from.offset[i]));
-        to.next.push(unchecked(from.next[i]));
-        to.opcode.push(unchecked(from.opcode[i]));
-        to.a.push(unchecked(from.a[i]));
-        to.b.push(unchecked(from.b[i]));
-        to.c.push(unchecked(from.c[i]));
+        unchecked((code.offset[i] = pc));
+        unchecked((code.next[i] = this.slotNext[pc]));
+        unchecked((code.opcode[i] = load<u8>(this.start + pc)));
+        unchecked((code.a[i] = this.slotA[pc]));
+        unchecked((code.b[i] = this.slotB[pc]));
+        unchecked((code.c[i] = this.slotC[pc]));
+        i++;
       }
     }
 
-    return to;
+    code.count = i;
   }
-}
-
-/** Decode body `body` of `abc`, whose bytes start at `base`. */
-export function decodeBody(abc: Abc, body: u32, base: usize): Code {
-  const d = new Decoder(abc, body, base);
-  if (!d.checkHandlers(abc, body)) {
-    return d.code;
-  }
-
-  // Code starting with a label is a block target, so loops may branch to it.
-  if (load<u8>(d.start) === OP_label) {
-    d.target(-1, 0);
-  } else if (!d.block(0)) {
-    return d.code;
-  }
-
-  while (d.work.length) {
-    if (!d.block(d.work.pop())) {
-      return d.code;
-    }
-  }
-
-  if (d.overlap) {
-    return d.code.fail(kInvalidBranchTargetError);
-  }
-
-  return d.ordered();
 }
 
 /**

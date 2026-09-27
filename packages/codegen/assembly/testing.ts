@@ -1,7 +1,7 @@
 // Test-only entry point: exposes the reader to node tests without adding
 // exports to codegen.wasm.
 import { Abc } from "./abc/abc";
-import { decodeBody } from "./abc/code";
+import { BodyDecoder } from "./abc/code";
 import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./abc/opcodes";
 import { readAbc } from "./abc/parse";
 import { readConstantPool } from "./abc/pool";
@@ -235,9 +235,10 @@ export function codeDump(bytes: Uint8Array): string {
   }
 
   const out: string[] = [];
+  const decoder = new BodyDecoder(abc, base);
   for (let body: u32 = 0; body < abc.bodyCount; body++) {
     out.push(`body ${body} method ${abc.bodyMethod[body]}`);
-    const code = decodeBody(abc, body, base);
+    const code = decoder.decode(body);
     if (code.error) {
       out.push(`  error ${code.error}`);
       continue;
@@ -277,11 +278,12 @@ export function benchParse(bytes: Uint8Array, rounds: i32): i32 {
 export function benchDecode(bytes: Uint8Array, rounds: i32): i32 {
   const base = padded(bytes);
   const abc = readAbc(base, bytes.length);
+  const decoder = new BodyDecoder(abc, base);
   let instructions = 0;
   for (let round = 0; round < rounds; round++) {
     instructions = 0;
     for (let body: u32 = 0; body < abc.bodyCount; body++) {
-      instructions += decodeBody(abc, body, base).count;
+      instructions += decoder.decode(body).count;
     }
   }
   return instructions;

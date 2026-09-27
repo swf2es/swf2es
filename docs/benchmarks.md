@@ -25,15 +25,20 @@
 Node 24, x86-64, warm, averaged over 100 to 200 rounds. Numbers are for
 comparing changes on one machine, not across machines.
 
-**as3pb benchmark ABC** (96,280 bytes; built with AIR SDK 51.3.1, compiler
-3.2.3.0; ABC 46.16; 310 method bodies, 43,829 reachable instructions, 2
-unreachable bytes):
+`pnpm bench [file.abc...]` measures these; without files it uses abcdump.abc.
 
-| Step | Time per ABC | Throughput |
-|---|---|---|
-| Parse all tables (`readAbc`) | 0.127 ms | 724 MB/s |
-| Parse, then decode every body (`decodeBody`) | 6.94 ms | 13 MB/s |
+| ABC | Size | Instructions | Parse | Decode every body | Per instruction |
+|---|---|---|---|---|---|
+| abcdump.abc | 32 KB | 6,489 | 0.078 ms | 0.225 ms | 35 ns |
+| as3pb benchmark | 94 KB | 43,829 | 0.103 ms | 1.376 ms | 31 ns |
+| Tamarin `as3/Vector/initializerLargeVector` | 3.8 MB | 1,002,071 | 1.211 ms | 36.5 ms | 36 ns |
 
-Decoding costs about 160 ns per instruction, mostly allocation: a new
-decoder with code-sized scratch arrays per body, growing output arrays,
-and a final copy into offset order. See [roadmap.md](roadmap.md).
+The as3pb ABC was built with AIR SDK 51.3.1 (compiler 3.2.3.0), ABC 46.16,
+with 310 method bodies and 2 unreachable bytes.
+
+Before the BodyDecoder rewrite (a new decoder with code-sized scratch per
+body, growing output arrays and a final copy into offset order), decoding
+cost 181, 152 and 123 ns per instruction for the same three files. Reusing
+one decoder's buffers across bodies, writing instructions into offset slots
+and packing them in one pass made it 3.4 to 5.2 times faster, with output
+identical for all 2,579 compiled Tamarin ABCs.
