@@ -1,0 +1,10 @@
+[package]
+name = "swf2es-ruffle-bench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+swf = { version = "=0.3.0", default-features = false }
+
+[workspace]

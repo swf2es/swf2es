@@ -175,3 +175,177 @@ cost 181, 152 and 123 ns per instruction for the same three files. Reusing
 one decoder's buffers across bodies, writing instructions into offset slots
 and packing them in one pass made it 3.4 to 5.2 times faster, with output
 identical for all 2,579 compiled Tamarin ABCs.
+
+## Comparison
+
+Measured on 2026-09-28: Intel Core i9-13900H (x86-64), AlmaLinux 10.2,
+Linux 6.12.0-211.56.1.el10_2.x86_64, Node v24.13.1, rustc 1.92.0
+(ded5c06cf, Red Hat 1.92.0-2.el10_2.alma.1), Cargo 1.92.0.
+This is a laptop measurement with ordinary background activity, no CPU affinity
+or frequency lock, and another agent working in a separate checkout. Treat
+small differences as noise, not a ranking of entire players.
+
+Implementations:
+
+- **swf2es:** `dev` at `da17175`, plus the test-only `benchCompare` entry point;
+  AssemblyScript 0.28.20, release `-O3`, incremental GC, assertions enabled.
+- **AwayFL:** local `avm2/dist` from the checkout at
+  `ce9630d8b7c4f6022da33e37a1a5b1a33aad459b` (package 0.2.239), bundled
+  without changing its parser or analyzer. Installed peers: swf-loader
+  0.4.135, core 0.9.61, graphics 0.5.101, scene 0.13.324, stage 0.11.172.
+  Build tools came from the existing player installation: Rollup 2.80.0,
+  node-resolve 11.2.1, commonjs 18.1.0. No pnpm dependency was added.
+- **Ruffle:** the published [`swf` 0.3.0 crate](https://docs.rs/swf/0.3.0/swf/),
+  pinned with Cargo.lock, default features disabled, compiled with
+  `cargo build --release`. This measures the crate's ABC/op reader, not
+  Ruffle's complete VM verifier or runtime.
+
+Each tool reads the same input bytes, including all constant-pool and ABC tables,
+traits, exceptions, and body headers. Parse + decode creates a fresh ABC and
+decodes every body each round. All instruction operands are read; Ruffle retains
+a `Vec<Op>` until each body is complete and passes it through `black_box`.
+AwayFL calls its actual `analyze(methodInfo)`; touching `body.code` alone would
+only read a raw byte view and would not decode instructions.
+
+The timing rule matches `bench.ts`: three warm-up rounds, one calibration round,
+then the median of five samples, with `max(1, round(40 / calibration_ms))` ABCs
+per sample. One untimed parse and decode also checks counts before warm-up.
+Each tool/input runs in a fresh process, sequentially, with a single benchmark
+thread; Node/V8 can still use runtime helper threads. Input I/O, module loading,
+Wasm compilation, and process startup are outside timings. GC/deallocation during
+timed work is included; no forced GC is used. Raw samples, rounds, input SHA-256s,
+and artifact hashes are in
+[`comparison-results.json`](../tests/bench/comparison-results.json).
+
+**Read these caveats alongside every table:** swf2es checks avmplus verification
+rules and decodes only reachable instructions. It retains strings and code as
+input offsets, uses packed instruction arrays, and reuses decoder scratch across
+bodies. Its JS-to-Wasm input transfer and padded input copy happen once per
+sample batch, amortized over that batch's rounds. AwayFL constructs JS strings,
+namespaces and trait objects, retains global namespace interning across warm-up
+and samples, and performs stack/scope propagation, branch linking and catch-block
+analysis in addition to decoding. `OPTIMISE_ON_IR=false` prevents instruction
+fusion so counts remain comparable; other settings retain their shipped defaults.
+Ruffle copies strings into byte vectors and copies body code, then linearly reads
+all instructions without running the VM verifier. These are different amounts of
+work and different output representations.
+
+**Units:** parse and parse + decode are ms per ABC; MB/s uses decimal MB
+(1,000,000 bytes), unlike the older `pnpm bench` display, which uses MiB.
+The final column is an **estimated incremental decode cost**:
+`(median(parse + decode) - median(parse)) * 1e6 / decoded_instruction_count`.
+It is a difference of independent medians, not a directly timed decode-only run;
+allocation, GC and measurement noise also affect it. The existing `pnpm bench`
+parses only once per decode batch, so its decode column is not the total column
+below.
+
+### `abcdump.abc`
+
+33,121 bytes; 100 methods in all three.
+
+| Tool | Instructions | Parse ms | Parse MB/s | Parse + decode ms | Estimated decode ns/instr |
+|---|---:|---:|---:|---:|---:|
+| swf2es | 6,489 | 0.078 | 423.6 | 0.316 | 36.7 |
+| AwayFL | 6,489 | 0.241 | 137.6 | 1.644 | 216.2 |
+| Ruffle | 6,489 | 0.062 | 536.6 | 0.172 | 17.0 |
+
+### `as3/Vector/initializerLargeVector.abc`
+
+3,962,592 bytes; 58 methods in all three.
+
+| Tool | Instructions | Parse ms | Parse MB/s | Parse + decode ms | Estimated decode ns/instr |
+|---|---:|---:|---:|---:|---:|
+| swf2es | 1,002,071 | 0.734 | 5401.0 | 35.446 | 34.6 |
+| AwayFL | 1,002,088 | 0.601 | 6596.8 | 216.325 | 215.3 |
+| Ruffle | 1,002,088 | 0.449 | 8832.0 | 14.664 | 14.2 |
+
+AwayFL and Ruffle include 17 instructions skipped as unreachable by swf2es.
+
+### `spidermonkey/js1_5/Regress/regress-280769.abc`
+
+40,846 bytes; 58 methods in all three.
+
+| Tool | Instructions | Parse ms | Parse MB/s | Parse + decode ms | Estimated decode ns/instr |
+|---|---:|---:|---:|---:|---:|
+| swf2es | 2,144 | 0.033 | 1228.4 | 0.099 | 30.8 |
+| AwayFL | 2,161 | 0.057 | 721.3 | 0.364 | 142.0 |
+| Ruffle | 2,161 | 0.020 | 2083.8 | 0.054 | 15.8 |
+
+AwayFL and Ruffle include 17 instructions skipped as unreachable by swf2es.
+This regression ABC is mostly string data; its small instruction count makes
+parse throughput a poor proxy for decoder throughput.
+
+### `spidermonkey/js1_5/Regress/regress-274888.abc`
+
+73,484 bytes; 58 methods in all three.
+
+| Tool | Instructions | Parse ms | Parse MB/s | Parse + decode ms | Estimated decode ns/instr |
+|---|---:|---:|---:|---:|---:|
+| swf2es | 2,127 | 0.031 | 2338.0 | 0.097 | 30.7 |
+| AwayFL | 2,144 | 0.060 | 1229.4 | 0.352 | 136.3 |
+| Ruffle | 2,144 | 0.019 | 3926.2 | 0.052 | 15.6 |
+
+AwayFL and Ruffle include 17 instructions skipped as unreachable by swf2es.
+This regression ABC is mostly string data; its small instruction count makes
+parse throughput a poor proxy for decoder throughput.
+
+### `spidermonkey/js1_5/Regress/regress-311629.abc`
+
+127,807 bytes; 58 methods in all three.
+
+| Tool | Instructions | Parse ms | Parse MB/s | Parse + decode ms | Estimated decode ns/instr |
+|---|---:|---:|---:|---:|---:|
+| swf2es | 2,096 | 0.031 | 4068.0 | 0.093 | 29.5 |
+| AwayFL | 2,113 | 0.061 | 2085.8 | 0.344 | 134.0 |
+| Ruffle | 2,113 | 0.019 | 6686.2 | 0.054 | 16.5 |
+
+AwayFL and Ruffle include 17 instructions skipped as unreachable by swf2es.
+This regression ABC is mostly string data; its small instruction count makes
+parse throughput a poor proxy for decoder throughput.
+
+### `ecma3/Statements/eregress_74474_002.abc`
+
+97,665 bytes; 59 methods in all three.
+
+| Tool | Instructions | Parse ms | Parse MB/s | Parse + decode ms | Estimated decode ns/instr |
+|---|---:|---:|---:|---:|---:|
+| swf2es | 38,113 | 0.033 | 2971.0 | 1.344 | 34.4 |
+| AwayFL | 38,130 | 0.052 | 1861.6 | 382.599 | 10032.7 |
+| Ruffle | 38,130 | 0.019 | 5260.1 | 0.518 | 13.1 |
+
+AwayFL and Ruffle include 17 instructions skipped as unreachable by swf2es.
+
+AwayFL's 382.6 ms here includes its branch/stack/scope analysis passes. This
+outlier must not be interpreted as the cost of reading opcode operands alone.
+
+### Reproduce
+
+Run from the repository root. Rust is optional and is not invoked by any pnpm
+step. If Cargo is unavailable, stop rather than installing a toolchain.
+The AwayFL checkout needs its existing `dist/` output; the second argument points
+to a local installation containing its peers and Rollup plugins. The bundler
+writes only ignored `tests/bench/out/awayfl.js`; no third-party code is committed.
+Node aliases `self` and `window` to its global object for AwayJS feature detection
+and explicitly calls `initlazy()` before any measurements. It does not initialize
+a player or DOM. `AWAYFL_BUNDLE` can override the bundle path.
+
+```sh
+pnpm build
+node tests/bench/awayfl-build.ts /path/to/awayfl/avm2 /path/to/awayfl/awayfl-player/node_modules
+cargo build --release --locked -j 4 --manifest-path tests/bench/ruffle/Cargo.toml
+SWF2ES_ORACLE_JOBS=4 pnpm --workspace-concurrency=1 test
+SWF2ES_ORACLE_JOBS=4 pnpm tamarin as3/Vector/initializerLargeVector spidermonkey/js1_5/Regress/regress-280769 spidermonkey/js1_5/Regress/regress-274888 spidermonkey/js1_5/Regress/regress-311629 ecma3/Statements/eregress_74474_002
+node tests/bench/compare.ts \
+  tests/conformance/out/abcdump.abc \
+  tests/tamarin/out/as3/Vector/initializerLargeVector.abc \
+  tests/tamarin/out/spidermonkey/js1_5/Regress/regress-280769.abc \
+  tests/tamarin/out/spidermonkey/js1_5/Regress/regress-274888.abc \
+  tests/tamarin/out/spidermonkey/js1_5/Regress/regress-311629.abc \
+  tests/tamarin/out/ecma3/Statements/eregress_74474_002.abc > tests/bench/out/comparison.json
+```
+
+The measurements above used existing cached Tamarin ABCs, with the code-heavy
+`eregress_74474_002` measured in a subsequent invocation of the same harness.
+The harness rejects parser/decoder errors, differing method counts, differing
+AwayFL/Ruffle instruction counts, or swf2es counts larger than the linear readers.
+It retains the reachable-versus-linear count difference instead of hiding it.
