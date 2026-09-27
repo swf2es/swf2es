@@ -18,6 +18,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export interface OracleResult {
   /** Path of the .as file, relative to the repository root. */
   file: string;
+
+  /** Whether ASC 2.0 produced an .abc; avmshell runs only if it did. */
   compiled: boolean;
   /** ASC 2.0 output: errors and warnings. */
   compileLog: string;
@@ -111,6 +113,7 @@ export function runOracle(
 
   writeFileSync(join(outDir, "files.txt"), `${files.map(rel).join("\n")}\n`);
   writeFileSync(join(outDir, "run.sh"), `${script}\n`);
+
   const r = container(engine, [`${out}/run.sh`]);
   if (r.status !== 0) {
     throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
