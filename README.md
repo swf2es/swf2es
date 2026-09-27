@@ -19,7 +19,7 @@ packages/
   cli/       ahead-of-time compiler
 oracle/      avmshell and Flash Player references
 tests/       unit and conformance tests
-docs/        design notes
+docs/        design, references, benchmarks and roadmap
 ```
 
 ## Development

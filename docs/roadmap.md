@@ -1,0 +1,19 @@
+# Roadmap
+
+Near-term work, in order. The goal of milestone 1 is in
+[architecture.md](architecture.md#milestone-1).
+
+1. **Tamarin acceptance tests through the oracle.** Compile and run
+   `oracle/avmplus/test/acceptance` with ASC 2.0 (the compiler stays a
+   parameter, so ASC 1.0 from the Flex SDK can be a second run), record a
+   baseline of avmshell's results, and parse and decode every compiled ABC.
+   A fast subset runs on every push, the full set separately.
+2. **Faster decoding**, with a `pnpm bench` script: reuse one decoder's
+   scratch buffers across bodies, order instructions by index instead of
+   copying, and presize the output (a body has at most one instruction per
+   byte). See [benchmarks.md](benchmarks.md).
+3. **as3pb in avmshell**: a shell entry point for the as3pb benchmark that
+   reports through `trace()`, built with `-compiler.float=false`, as the
+   first real program for milestone 1.
+
+Tracked separately: SWF decompression in `format` (issue #3).
