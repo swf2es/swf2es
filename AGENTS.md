@@ -62,6 +62,19 @@ calling a change done; CI runs the same steps.
   that only restate a name, a type or the obvious.
 - Prefer no new dependencies; ask before adding one.
 
+### AssemblyScript (`packages/codegen/assembly`)
+
+- Keep any object read through a raw pointer (`changetype<usize>`, `load`)
+  referenced from a live variable, field or global; otherwise the collector
+  may free it mid-read.
+- The dialect is stricter than TypeScript: no `import type`, and `@inline`
+  only on class members (Binaryen inlines small functions at `-O3` anyway).
+  Biome's import-type fix is off for this folder for that reason.
+- Errors are sticky flags or VerifyError numbers, never `throw`: an abort
+  kills the wasm instance, and the JIT must survive a malformed SWF.
+- Use avmplus' error numbers (`assembly/constants.ts`) so rejections match
+  avmshell.
+
 ## Git
 
 - Work on `dev`; `main` receives merges from `dev`.

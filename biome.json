@@ -34,5 +34,20 @@
         "organizeImports": "on"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/codegen/assembly/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useImportType": "off"
+          },
+          "suspicious": {
+            "noAssignInExpressions": "off"
+          }
+        }
+      }
+    }
+  ]
 }

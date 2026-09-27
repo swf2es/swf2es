@@ -1,16 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { testing as wasm } from "./testing-module.ts";
 
-// The test build of codegen (assembly/testing.ts) exposes the ABC reader.
-const wasmPath = fileURLToPath(
-  new URL("../../../packages/codegen/dist-test/testing.wasm", import.meta.url),
-);
-const { instantiate } = await import(
-  new URL("../../../packages/codegen/dist-test/testing.js", import.meta.url).href
-);
-const wasm = await instantiate(await WebAssembly.compile(await readFile(wasmPath)), { env: {} });
 const kind = (name: string): number => wasm[name].value;
 
 interface Read {

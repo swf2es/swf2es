@@ -1,5 +1,6 @@
 // Test-only entry point: exposes the reader to node tests without adding
 // exports to codegen.wasm.
+import { readConstantPool } from "./pool";
 import { PADDING, Reader } from "./reader";
 
 export const U8: u8 = 0;
@@ -12,16 +13,13 @@ export const D64: u8 = 6;
 export const UTF8: u8 = 7;
 
 /**
- * Read `kinds` in order from `input` and return the values, then the final
+ * Read `kinds` in order from `bytes` and return the values, then the final
  * position and 1 if the reader failed. UTF8 yields the string's byte length
  * and skips its bytes.
  */
-export function readAll(input: Uint8Array, kinds: Uint8Array): Float64Array {
-  const padded = new StaticArray<u8>(input.length + PADDING);
-  const start = changetype<usize>(padded);
-  memory.copy(start, input.dataStart, input.length);
-
-  const r = new Reader(start, start + input.length);
+export function readAll(bytes: Uint8Array, kinds: Uint8Array): Float64Array {
+  const start = padded(bytes);
+  const r = new Reader(start, start + bytes.length);
   const values = new Float64Array(kinds.length + 2);
   for (let i = 0; i < kinds.length; i++) {
     const kind = kinds[i];
@@ -51,4 +49,66 @@ export function readAll(input: Uint8Array, kinds: Uint8Array): Float64Array {
   values[kinds.length] = <f64>(r.pos - start);
   values[kinds.length + 1] = r.failed ? 1 : 0;
   return values;
+}
+
+/**
+ * Parse the constant pool of a whole ABC block and describe it one entry
+ * per line: "int 1 -5", "string 2 foo", "ns 1 0x16 2", "nsset 1 1,2",
+ * "mn 3 0x07 1 2", then "error N" if avmplus would reject it.
+ */
+export function poolDump(bytes: Uint8Array): string {
+  const base = padded(bytes);
+  const r = new Reader(base, base + bytes.length);
+  r.u16();
+  r.u16();
+  const pool = readConstantPool(r, base);
+
+  let out = "";
+  for (let i = 1; i < pool.ints.length; i++) {
+    out += `int ${i} ${pool.ints[i]}\n`;
+  }
+  for (let i = 1; i < pool.uints.length; i++) {
+    out += `uint ${i} ${pool.uints[i]}\n`;
+  }
+  for (let i = 1; i < pool.doubles.length; i++) {
+    out += `double ${i} ${pool.doubles[i]}\n`;
+  }
+  for (let i = 1; i < pool.stringStart.length; i++) {
+    const text = String.UTF8.decodeUnsafe(base + pool.stringStart[i], pool.stringLength[i]);
+    out += `string ${i} ${text}\n`;
+  }
+  for (let i = 1; i < pool.nsKind.length; i++) {
+    out += `ns ${i} ${hex(pool.nsKind[i])} ${pool.nsName[i]}\n`;
+  }
+  for (let i: u32 = 1; i < pool.nsSetCount; i++) {
+    let members = "";
+    for (let j = pool.nsSetStart[i]; j < pool.nsSetStart[i + 1]; j++) {
+      members += (members.length ? "," : "") + pool.nsSetMembers[j].toString();
+    }
+    out += `nsset ${i} ${members}\n`;
+  }
+  for (let i = 1; i < pool.mnKind.length; i++) {
+    out += `mn ${i} ${hex(pool.mnKind[i])} ${pool.mnA[i]} ${pool.mnB[i]}\n`;
+  }
+  if (pool.error) {
+    out += `error ${pool.error}\n`;
+  }
+
+  return out;
+}
+
+// Held in a global so the collector keeps it alive while it is read
+// through raw pointers.
+let input: StaticArray<u8> = new StaticArray<u8>(0);
+
+/** Copy `bytes` into a buffer followed by PADDING bytes; returns its start. */
+function padded(bytes: Uint8Array): usize {
+  input = new StaticArray<u8>(bytes.length + PADDING);
+  const start = changetype<usize>(input);
+  memory.copy(start, bytes.dataStart, bytes.length);
+  return start;
+}
+
+function hex(kind: u8): string {
+  return `0x${kind < 0x10 ? "0" : ""}${kind.toString(16)}`;
 }
