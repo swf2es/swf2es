@@ -22,8 +22,8 @@
 
 ## Results
 
-Node 24, x86-64, warm, averaged over 100 to 200 rounds. Numbers are for
-comparing changes on one machine, not across machines.
+Node 24, x86-64, after a warm-up, the median of 5 samples of about 40 ms
+each. Numbers are for comparing changes on one machine, not across machines.
 
 `pnpm bench [file.abc...]` measures these; without files it uses abcdump.abc.
 
