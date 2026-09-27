@@ -1,7 +1,7 @@
 // Test-only entry point: exposes the reader to node tests without adding
 // exports to codegen.wasm.
 import { Abc } from "./abc/abc";
-import { decodeBody } from "./abc/code";
+import { BodyDecoder } from "./abc/code";
 import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./abc/opcodes";
 import { readAbc } from "./abc/parse";
 import { readConstantPool } from "./abc/pool";
@@ -235,9 +235,10 @@ export function codeDump(bytes: Uint8Array): string {
   }
 
   const out: string[] = [];
+  const decoder = new BodyDecoder(abc, base);
   for (let body: u32 = 0; body < abc.bodyCount; body++) {
     out.push(`body ${body} method ${abc.bodyMethod[body]}`);
-    const code = decodeBody(abc, body, base);
+    const code = decoder.decode(body);
     if (code.error) {
       out.push(`  error ${code.error}`);
       continue;
@@ -261,6 +262,31 @@ export function codeDump(bytes: Uint8Array): string {
   }
 
   return out.join("\n");
+}
+
+/** Parse `bytes` as an ABC `rounds` times; returns the method count, so the work is used. */
+export function benchParse(bytes: Uint8Array, rounds: i32): i32 {
+  const base = padded(bytes);
+  let methods = 0;
+  for (let round = 0; round < rounds; round++) {
+    methods += readAbc(base, bytes.length).methodCount;
+  }
+  return methods;
+}
+
+/** Parse once, then decode every body `rounds` times; returns instructions decoded per round. */
+export function benchDecode(bytes: Uint8Array, rounds: i32): i32 {
+  const base = padded(bytes);
+  const abc = readAbc(base, bytes.length);
+  const decoder = new BodyDecoder(abc, base);
+  let instructions = 0;
+  for (let round = 0; round < rounds; round++) {
+    instructions = 0;
+    for (let body: u32 = 0; body < abc.bodyCount; body++) {
+      instructions += decoder.decode(body).count;
+    }
+  }
+  return instructions;
 }
 
 /** The opcode table, one "opcode name layout flags" line per opcode. */

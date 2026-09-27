@@ -1,0 +1,8 @@
+{
+  "name": "@swf2es/tests-bench",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "node bench.ts"
+  }
+}

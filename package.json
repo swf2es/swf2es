@@ -12,6 +12,7 @@
     "clean": "tsc -b --clean packages/*",
     "test": "pnpm -r --filter './tests/*' test",
     "tamarin": "node tests/tamarin/run.ts",
+    "bench": "node tests/bench/bench.ts",
     "typecheck": "tsc -p tsconfig.json",
     "check": "biome check .",
     "format": "biome check --write .",
