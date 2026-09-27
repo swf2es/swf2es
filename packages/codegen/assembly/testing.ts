@@ -1,6 +1,7 @@
 // Test-only entry point: exposes the reader to node tests without adding
 // exports to codegen.wasm.
 import { Abc } from "./abc/abc";
+import { opcodeFlags, opcodeNames, opcodeOperands } from "./abc/opcodes";
 import { readAbc } from "./abc/parse";
 import { readConstantPool } from "./abc/pool";
 import { PADDING, Reader } from "./abc/reader";
@@ -218,6 +219,15 @@ function join(items: Array<u32>, start: u32, end: u32): string {
     parts.push(items[i].toString());
   }
   return parts.join(",");
+}
+
+/** The opcode table, one "opcode name layout flags" line per opcode. */
+export function opcodeTable(): string {
+  const lines: string[] = [];
+  for (let op = 0; op < 256; op++) {
+    lines.push(`${op} ${opcodeNames[op]} ${opcodeOperands[op]} ${opcodeFlags[op]}`);
+  }
+  return lines.join("\n");
 }
 
 // Held in a global so the collector keeps it alive while it is read
