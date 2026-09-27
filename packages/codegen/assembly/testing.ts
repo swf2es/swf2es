@@ -1,5 +1,7 @@
 // Test-only entry point: exposes the reader to node tests without adding
 // exports to codegen.wasm.
+import { Abc } from "./abc/abc";
+import { readAbc } from "./abc/parse";
 import { readConstantPool } from "./abc/pool";
 import { PADDING, Reader } from "./abc/reader";
 
@@ -95,6 +97,105 @@ export function poolDump(bytes: Uint8Array): string {
   }
 
   return out;
+}
+
+/**
+ * Parse a whole ABC block and describe the tables after the constant pool,
+ * one entry per line; just "error N" if avmplus would reject it, since the
+ * tables of a rejected ABC are incomplete.
+ */
+export function abcDump(bytes: Uint8Array): string {
+  const abc = readAbc(padded(bytes), bytes.length);
+  if (abc.error) {
+    return `error ${abc.error}`;
+  }
+
+  const out: string[] = [];
+
+  for (let i: u32 = 0; i < abc.methodCount; i++) {
+    let line = `method ${i} ret=${abc.methodReturnType[i]} params=`;
+    line += join(abc.paramTypes, abc.methodParamStart[i], abc.methodParamStart[i + 1]);
+    line += ` name=${abc.methodName[i]} flags=${hex(abc.methodFlags[i])}`;
+    const optional: string[] = [];
+    for (let j = abc.methodOptionalStart[i]; j < abc.methodOptionalStart[i + 1]; j++) {
+      optional.push(`${abc.optionalValue[j]}:${hex(abc.optionalKind[j])}`);
+    }
+    if (optional.length) {
+      line += ` optional=${optional.join(",")}`;
+    }
+    out.push(line);
+  }
+
+  for (let i: u32 = 0; i < abc.metadataCount; i++) {
+    const items: string[] = [];
+    for (let j = abc.metadataItemStart[i]; j < abc.metadataItemStart[i + 1]; j++) {
+      items.push(`${abc.metadataKey[j]}:${abc.metadataValue[j]}`);
+    }
+    out.push(`metadata ${i} name=${abc.metadataName[i]} items=${items.join(",")}`);
+  }
+
+  for (let i: u32 = 0; i < abc.classCount; i++) {
+    let line = `instance ${i} name=${abc.instanceName[i]} super=${abc.instanceSuper[i]}`;
+    line += ` flags=${hex(abc.instanceFlags[i])} protectedNs=${abc.instanceProtectedNs[i]}`;
+    line += ` interfaces=${join(abc.interfaces, abc.instanceInterfaceStart[i], abc.instanceInterfaceStart[i + 1])}`;
+    out.push(`${line} init=${abc.instanceInit[i]}`);
+    dumpTraits(abc, out, `instance ${i}`, abc.instanceTraitStart[i], abc.instanceTraitStart[i + 1]);
+  }
+
+  for (let i: u32 = 0; i < <u32>abc.classInit.length; i++) {
+    out.push(`class ${i} init=${abc.classInit[i]}`);
+    dumpTraits(abc, out, `class ${i}`, abc.classTraitStart[i], abc.classTraitStart[i + 1]);
+  }
+
+  for (let i: u32 = 0; i < abc.scriptCount; i++) {
+    out.push(`script ${i} init=${abc.scriptInit[i]}`);
+    dumpTraits(abc, out, `script ${i}`, abc.scriptTraitStart[i], abc.scriptTraitStart[i + 1]);
+  }
+
+  for (let i: u32 = 0; i < abc.methodCount; i++) {
+    const owner = abc.methodOwner[i];
+    if (owner >= 0) {
+      out.push(`bound method ${i} to ${ownerLabel(abc, owner)}`);
+    }
+  }
+
+  return out.join("\n");
+}
+
+function dumpTraits(abc: Abc, out: Array<string>, owner: string, start: u32, end: u32): void {
+  for (let t = start; t < end; t++) {
+    const tag = abc.traitTag[t];
+    let line = `  trait ${owner} name=${abc.traitName[t]} kind=${tag & 0x0f} attr=${hex(tag & 0xf0)}`;
+    line += ` id=${abc.traitId[t]} index=${abc.traitIndex[t]}`;
+    if (abc.traitValue[t]) {
+      line += ` value=${abc.traitValue[t]}:${hex(abc.traitValueKind[t])}`;
+    }
+    const metadataStart = abc.traitMetadataStart[t];
+    const metadataEnd = abc.traitMetadataStart[t + 1];
+    if (metadataEnd > metadataStart) {
+      line += ` metadata=${join(abc.traitMetadata, metadataStart, metadataEnd)}`;
+    }
+    out.push(line);
+  }
+}
+
+function ownerLabel(abc: Abc, owner: i32): string {
+  const classes = <i32>abc.classCount;
+  if (owner < classes) {
+    return `instance ${owner}`;
+  }
+  if (owner < 2 * classes) {
+    return `class ${owner - classes}`;
+  }
+  return `script ${owner - 2 * classes}`;
+}
+
+function join(items: Array<u32>, start: u32, end: u32): string {
+  const parts: string[] = [];
+  for (let i = start; i < end; i++) {
+    parts.push(items[i].toString());
+  }
+  return parts.join(",");
 }
 
 // Held in a global so the collector keeps it alive while it is read

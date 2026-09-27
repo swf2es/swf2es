@@ -18,9 +18,34 @@ export const CONSTANT_MultinameL: u8 = 0x1b;
 export const CONSTANT_MultinameLA: u8 = 0x1c;
 export const CONSTANT_TypeName: u8 = 0x1d;
 
+// Method flags (method_info.flags).
+export const METHOD_HasOptional: u8 = 0x08;
+export const METHOD_Native: u8 = 0x20;
+export const METHOD_HasParamNames: u8 = 0x80;
+
+// Instance flags (instance_info.flags).
+export const INSTANCE_Interface: u8 = 0x04;
+export const INSTANCE_ProtectedNs: u8 = 0x08;
+
+// Trait kinds (low 4 bits of traits_info.kind) and attributes (high 4 bits).
+export const TRAIT_Slot: u8 = 0;
+export const TRAIT_Method: u8 = 1;
+export const TRAIT_Getter: u8 = 2;
+export const TRAIT_Setter: u8 = 3;
+export const TRAIT_Class: u8 = 4;
+export const TRAIT_Const: u8 = 6;
+export const ATTR_Metadata: u8 = 0x40;
+
 // VerifyError numbers avmplus reports (core/ErrorConstants.h), so a rejected
 // ABC fails the same way it does in avmshell.
+export const kMethodInfoExceedsCountError: i32 = 1027;
 export const kCpoolIndexRangeError: i32 = 1032;
 export const kCpoolEntryWrongTypeError: i32 = 1033;
+export const kUnsupportedTraitsKindError: i32 = 1045;
+export const kClassInfoOrderError: i32 = 1059;
+export const kClassInfoExceedsCountError: i32 = 1060;
+export const kAlreadyBoundError: i32 = 1071;
+export const kIllegalNativeMethodError: i32 = 1079;
 export const kIllegalNamespaceError: i32 = 1080;
 export const kCorruptABCError: i32 = 1107;
+export const kCannotImplementError: i32 = 1111;
