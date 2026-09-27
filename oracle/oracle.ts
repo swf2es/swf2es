@@ -175,11 +175,12 @@ export function runOracle(
     `  rm -f "$out/$n.abc" "$out/$n.code" "$out/$n.out" "$out/$n.out2" "$out/$n.dump"`,
     `  ${asc} $args -outdir "$d" "$f" > "$out/$n.log" 2>&1`,
     `  if [ -f "$out/$n.abc" ]; then`,
-    `    ${avmshell} "$out/$n.abc" > "$out/$n.out" 2>&1`,
-    `    echo $? > "$out/$n.code"`,
-    ...(repeat ? [`    ${avmshell} "$out/$n.abc" > "$out/$n.out2" 2>&1`] : []),
+    // Run from the job's own directory: tests may write files, which then stay in outDir.
+    `    b=$(basename "$n")`,
+    `    (cd "$d" && ${avmshell} "$b.abc" > "$b.out" 2>&1; echo $? > "$b.code")`,
+    ...(repeat ? [`    (cd "$d" && ${avmshell} "$b.abc" > "$b.out2" 2>&1)`] : []),
     ...(abcdump
-      ? [`    ${avmshell} "$out/tools/abcdump.abc" -- "$out/$n.abc" > "$out/$n.dump" 2>&1`]
+      ? [`    (cd "$d" && ${avmshell} "/work/$out/tools/abcdump.abc" -- "$b.abc" > "$b.dump" 2>&1)`]
       : []),
     "  fi",
     "}",
