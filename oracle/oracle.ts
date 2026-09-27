@@ -92,9 +92,11 @@ function container(engine: string, args: string[]) {
   // Dates print in UTC wherever the oracle runs.
   const env = ["-e", "HOME=/tmp", "-e", "TZ=UTC", "-e", "_JAVA_OPTIONS=-Xms64m -Xmx768m"];
 
+  // A shared SELinux label (z, not Z): a private one would lock out any other
+  // oracle container using the repo at the same time.
   return spawnSync(
     engine,
-    ["run", "--rm", ...user, ...env, "-v", `${root}:/work:Z`, "-w", "/work"].concat([
+    ["run", "--rm", ...user, ...env, "-v", `${root}:/work:z`, "-w", "/work"].concat([
       "--entrypoint",
       "bash",
       IMAGE,
