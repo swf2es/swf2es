@@ -13,6 +13,16 @@ Near-term work, in order. The goal of milestone 1 is in
    (the `tests/programs/as3pb` submodule) through the oracle; its
    deterministic output is `tests/programs/expected/as3pb.txt`, the expected
    result for milestone 1, and swf2es parses and decodes its ABC like abcdump.
+4. **The verifier**, in three steps (see
+   [architecture.md](architecture.md#compiling-a-method)):
+   1. Structure: done. Stack, scope and register depths, merges, handler
+      entry states and the operand checks that need no types. Every
+      Tamarin method body verifies except the one avmshell also rejects,
+      and `pnpm tamarin` checks that swf2es reports the VerifyErrors
+      avmshell prints.
+   2. Value types and scope chains, and the checks that need them: 1013,
+      getouterscope, slots, callstatic's binding, operand types.
+   3. The IR, written by the same pass.
 
 Tracked separately: SWF decompression in `format` (issue #3).
 

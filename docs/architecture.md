@@ -79,6 +79,10 @@ Each method goes through the same steps, in `codegen`:
    their types), merged where control flow joins, with avmplus' VerifyError
    numbers. The same pass writes the IR, so what is compiled is exactly what
    was verified.
+   Where avmplus changed after the oracle's avmshell was built, swf2es
+   follows the newer Flash Player: since PSIRT 3037, a method that can
+   throw into a handler needs `max_stack` of at least 1, which the
+   oracle's avmshell does not check.
 3. **The IR** is register form with types, not SSA. Stack slot *d* becomes
    register `s_d` and locals stay `l_n`, so `getlocal1; getlocal2; add;
    setlocal3` is `l3 = add(l1, l2)`. Every register has the verifier's type
