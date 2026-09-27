@@ -1,7 +1,8 @@
 // Test-only entry point: exposes the reader to node tests without adding
 // exports to codegen.wasm.
 import { Abc } from "./abc/abc";
-import { opcodeFlags, opcodeNames, opcodeOperands } from "./abc/opcodes";
+import { decodeBody } from "./abc/code";
+import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./abc/opcodes";
 import { readAbc } from "./abc/parse";
 import { readConstantPool } from "./abc/pool";
 import { PADDING, Reader } from "./abc/reader";
@@ -219,6 +220,47 @@ function join(items: Array<u32>, start: u32, end: u32): string {
     parts.push(items[i].toString());
   }
   return parts.join(",");
+}
+
+/**
+ * Decode every method body: "body B method M", then one "offset name a b c"
+ * line per reachable instruction (lookupswitch adds its case offsets), then
+ * "unreachable N" bytes, or "error N" if avmplus' verifier would reject it.
+ */
+export function codeDump(bytes: Uint8Array): string {
+  const base = padded(bytes);
+  const abc = readAbc(base, bytes.length);
+  if (abc.error) {
+    return `error ${abc.error}`;
+  }
+
+  const out: string[] = [];
+  for (let body: u32 = 0; body < abc.bodyCount; body++) {
+    out.push(`body ${body} method ${abc.bodyMethod[body]}`);
+    const code = decodeBody(abc, body, base);
+    if (code.error) {
+      out.push(`  error ${code.error}`);
+      continue;
+    }
+
+    let decoded: u32 = 0;
+    for (let i: u32 = 0; i < code.count; i++) {
+      const opcode = code.opcode[i];
+      let line = `  ${code.offset[i]} ${opcodeNames[opcode]} ${code.a[i]} ${code.b[i]} ${code.c[i]}`;
+      if (opcode === OP_lookupswitch) {
+        const cases: string[] = [];
+        for (let j = code.c[i]; j <= code.c[i] + code.b[i]; j++) {
+          cases.push(code.cases[j].toString());
+        }
+        line += ` [${cases.join(",")}]`;
+      }
+      out.push(line);
+      decoded += code.next[i] - code.offset[i];
+    }
+    out.push(`  unreachable ${abc.bodyCodeLength[body] - decoded}`);
+  }
+
+  return out.join("\n");
 }
 
 /** The opcode table, one "opcode name layout flags" line per opcode. */

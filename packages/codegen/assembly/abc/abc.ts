@@ -7,6 +7,8 @@ import { ConstantPool } from "./pool";
 export class Abc {
   /** 0, or the VerifyError number avmplus would throw; then the tables are incomplete. */
   error: i32 = 0;
+  /** Byte length of the ABC block. */
+  length: u32 = 0;
   minorVersion: u32 = 0;
   majorVersion: u32 = 0;
   pool: ConstantPool = new ConstantPool();

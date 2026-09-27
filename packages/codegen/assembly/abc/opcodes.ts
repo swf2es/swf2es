@@ -27,6 +27,10 @@ export const FLAG_Throws: u8 = 1;
 /** Control never falls through to the next instruction. */
 export const FLAG_Terminal: u8 = 2;
 
+export const OP_label: u8 = 0x09;
+export const OP_jump: u8 = 0x10;
+export const OP_lookupswitch: u8 = 0x1b;
+
 export const opcodeOperands = new StaticArray<u8>(256);
 export const opcodeFlags = new StaticArray<u8>(256);
 export const opcodeNames = new StaticArray<string>(256);

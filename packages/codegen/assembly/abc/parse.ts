@@ -12,6 +12,7 @@ import { Reader } from "./reader";
  */
 export function readAbc(base: usize, length: u32): Abc {
   const abc = new Abc();
+  abc.length = length;
   const r = new Reader(base, base + length);
   abc.minorVersion = r.u16();
   abc.majorVersion = r.u16();
