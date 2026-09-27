@@ -263,6 +263,30 @@ export function codeDump(bytes: Uint8Array): string {
   return out.join("\n");
 }
 
+/** Parse `bytes` as an ABC `rounds` times; returns the method count, so the work is used. */
+export function benchParse(bytes: Uint8Array, rounds: i32): i32 {
+  const base = padded(bytes);
+  let methods = 0;
+  for (let round = 0; round < rounds; round++) {
+    methods += readAbc(base, bytes.length).methodCount;
+  }
+  return methods;
+}
+
+/** Parse once, then decode every body `rounds` times; returns instructions decoded per round. */
+export function benchDecode(bytes: Uint8Array, rounds: i32): i32 {
+  const base = padded(bytes);
+  const abc = readAbc(base, bytes.length);
+  let instructions = 0;
+  for (let round = 0; round < rounds; round++) {
+    instructions = 0;
+    for (let body: u32 = 0; body < abc.bodyCount; body++) {
+      instructions += decodeBody(abc, body, base).count;
+    }
+  }
+  return instructions;
+}
+
 /** The opcode table, one "opcode name layout flags" line per opcode. */
 export function opcodeTable(): string {
   const lines: string[] = [];
