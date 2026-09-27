@@ -55,7 +55,8 @@ calling a change done; CI runs the same steps.
 - Separate logical steps inside a function with a blank line (after guard
   clauses, around loops, before the final `return`). Biome cannot enforce
   this, so keep it by hand.
-- Comments explain why, not what. Keep them short.
+- Comments explain why, not what. Keep them short, and leave out comments
+  that only restate a name, a type or the obvious.
 - Prefer no new dependencies; ask before adding one.
 
 ## Git

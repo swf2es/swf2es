@@ -18,7 +18,6 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export interface OracleResult {
   /** Path of the .as file, relative to the repository root. */
   file: string;
-
   /** Whether ASC 2.0 produced an .abc; avmshell runs only if it did. */
   compiled: boolean;
   /** ASC 2.0 output: errors and warnings. */
