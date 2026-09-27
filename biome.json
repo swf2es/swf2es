@@ -6,7 +6,13 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!pnpm-lock.yaml", "!**/dist", "!oracle/avmplus"]
+    "includes": [
+      "**",
+      "!pnpm-lock.yaml",
+      "!**/dist",
+      "!oracle/avmplus",
+      "!tests/tamarin/baseline.json"
+    ]
   },
   "formatter": {
     "enabled": true,

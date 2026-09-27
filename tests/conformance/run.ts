@@ -8,8 +8,8 @@
 // facts as avmplus' abcdump.
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { abcdumpFacts, compareFacts, swf2esFacts } from "../../oracle/abc-facts.ts";
 import { containerEngine, type OracleResult, runOracle } from "../../oracle/oracle.ts";
-import { abcdumpFacts, compareFacts, swf2esFacts } from "./abc-facts.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));

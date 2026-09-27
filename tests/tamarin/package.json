@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "tamarin": "node run.ts"
+    "tamarin": "node run.ts",
+    "update-baseline": "node run.ts --update-baseline"
   }
 }
