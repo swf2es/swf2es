@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 
 // The test build of codegen (assembly/testing.ts) exposes the ABC reader.
 const wasmPath = fileURLToPath(
-  new URL("../../packages/codegen/dist-test/testing.wasm", import.meta.url),
+  new URL("../../../packages/codegen/dist-test/testing.wasm", import.meta.url),
 );
 const { instantiate } = await import(
-  new URL("../../packages/codegen/dist-test/testing.js", import.meta.url).href
+  new URL("../../../packages/codegen/dist-test/testing.js", import.meta.url).href
 );
 const wasm = await instantiate(await WebAssembly.compile(await readFile(wasmPath)), { env: {} });
 const kind = (name: string): number => wasm[name].value;
