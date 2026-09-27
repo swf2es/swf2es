@@ -1,0 +1,10 @@
+{
+  "name": "@swf2es/codegen",
+  "version": "0.0.0",
+  "description": "ABC and AVM1 bytecode to ES module compiler; identical output in JIT and AOT modes",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "dependencies": { "@swf2es/format": "workspace:*" }
+}

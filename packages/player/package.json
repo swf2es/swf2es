@@ -1,0 +1,10 @@
+{
+  "name": "@swf2es/player",
+  "version": "0.0.0",
+  "description": "Browser SWF player: display list, timeline, playerglobal and renderer adapters",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "dependencies": { "@swf2es/format": "workspace:*", "@swf2es/codegen": "workspace:*", "@swf2es/runtime": "workspace:*" }
+}

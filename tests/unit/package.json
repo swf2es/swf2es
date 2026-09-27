@@ -1,0 +1,10 @@
+{
+  "name": "@swf2es/tests-unit",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test" },
+  "dependencies": {
+    "@swf2es/format": "workspace:*",
+    "@swf2es/runtime": "workspace:*"
+  }
+}

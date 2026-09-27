@@ -1,0 +1,19 @@
+{
+  "name": "swf2es-monorepo",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.21.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc -b packages/*",
+    "clean": "tsc -b --clean packages/*",
+    "lint:deps": "depcruise packages --config .dependency-cruiser.cjs",
+    "test": "pnpm -r --filter './tests/*' test",
+    "oracle:avmshell": "node oracle/avmshell/fetch.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "dependency-cruiser": "^16.0.0",
+    "typescript": "^5.9.0"
+  }
+}

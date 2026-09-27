@@ -1,0 +1,10 @@
+{
+  "name": "@swf2es/format",
+  "version": "0.0.0",
+  "description": "SWF, ABC and AVM1 action parsers shared by the compiler and the player",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "dependencies": {}
+}

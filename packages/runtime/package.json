@@ -1,0 +1,25 @@
+{
+  "name": "@swf2es/runtime",
+  "version": "0.0.0",
+  "description": "AVM2 and AVM1 language runtime used by generated code",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./avm2": {
+      "types": "./dist/avm2/index.d.ts",
+      "default": "./dist/avm2/index.js"
+    },
+    "./avm1": {
+      "types": "./dist/avm1/index.d.ts",
+      "default": "./dist/avm1/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {}
+}

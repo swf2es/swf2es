@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.tsbuildinfo
+oracle/avmshell/bin/
+oracle/tamarin/
+tests/**/out/
+.DS_Store
