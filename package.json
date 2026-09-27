@@ -11,6 +11,7 @@
     "build:debug": "pnpm --filter @swf2es/codegen build:wasm:debug && tsc -b packages/*",
     "clean": "tsc -b --clean packages/*",
     "test": "pnpm -r --filter './tests/*' test",
+    "tamarin": "node tests/tamarin/run.ts",
     "typecheck": "tsc -p tsconfig.json",
     "check": "biome check .",
     "format": "biome check --write .",

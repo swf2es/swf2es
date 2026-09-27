@@ -3,7 +3,8 @@
 // opcodes.test.ts checks the table against avmplus' core/opcodes.tbl.
 //
 // Opcodes not defined here are illegal in ABC 46.16, including the float
-// instructions of ABC 47.16 and those avmplus only uses internally.
+// instructions of ABC 47.16 (AIR-only: Flash Player never had them) and
+// those avmplus only uses internally.
 
 export const OPERANDS_None: u8 = 0;
 /** One u30: a pool index, register, argument count or slot. */

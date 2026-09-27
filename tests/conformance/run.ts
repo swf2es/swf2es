@@ -42,8 +42,7 @@ const report = (ok: boolean, what: string, details: string[] = []) => {
   }
 };
 
-const abcOf = (r: OracleResult) =>
-  new Uint8Array(readFileSync(`${here}out/${r.file.split("/").pop()?.replace(/\.as$/, ".abc")}`));
+const abcOf = (r: OracleResult) => new Uint8Array(readFileSync(`${here}out/${r.name}.abc`));
 
 for (const r of results) {
   const isCase = !parseOnly.some((p) => p.endsWith(r.file));

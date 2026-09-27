@@ -1,0 +1,8 @@
+{
+  "name": "@swf2es/tests-tamarin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tamarin": "node run.ts"
+  }
+}

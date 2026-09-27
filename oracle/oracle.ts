@@ -8,6 +8,7 @@
 //   node oracle/oracle.ts --pull                  pull the image
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,9 +17,24 @@ export const IMAGE =
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+/** One .as file to compile and run. */
+export interface OracleJob {
+  source: string;
+  /**
+   * Where the outputs go, relative to outDir and without extension; it must
+   * end with the source's base name, which is how ASC names its output.
+   * Defaults to that base name.
+   */
+  name?: string;
+  /** Extra ASC 2.0 arguments, such as -AS3, -strict or -in helper.as. */
+  ascArgs?: string[];
+}
+
 export interface OracleResult {
   /** Path of the .as file, relative to the repository root. */
   file: string;
+  /** The job's name: its outputs are <outDir>/<name>.abc, .log, .out, .code and .dump. */
+  name: string;
   /** Whether ASC 2.0 produced an .abc; avmshell runs only if it did. */
   compiled: boolean;
   /** ASC 2.0 output: errors and warnings. */
@@ -33,6 +49,19 @@ export interface OracleResult {
 
 /** avmplus' ABC disassembler, run in avmshell; the oracle for our ABC parser. */
 const ABCDUMP_SOURCE = "oracle/avmplus/utils/abcdump.as";
+
+/**
+ * Jobs at a time: $SWF2ES_ORACLE_JOBS, or up to 10, since each is a JVM and
+ * more makes a laptop sluggish.
+ */
+function defaultParallelism(): number {
+  const forced = Number(process.env.SWF2ES_ORACLE_JOBS);
+  if (forced > 0) {
+    return forced;
+  }
+
+  return Math.min(10, availableParallelism());
+}
 
 /** podman or docker, or $SWF2ES_CONTAINER if set. */
 export function containerEngine(): string {
@@ -57,9 +86,12 @@ function container(engine: string, args: string[]) {
       ? ["--userns=keep-id"]
       : [`--user=${process.getuid?.()}:${process.getgid?.()}`];
 
+  // The image gives every JVM a 6 GB heap; ASC needs far less, and many run at once.
+  const env = ["-e", "HOME=/tmp", "-e", "_JAVA_OPTIONS=-Xms64m -Xmx768m"];
+
   return spawnSync(
     engine,
-    ["run", "--rm", ...user, "-e", "HOME=/tmp", "-v", `${root}:/work:Z`, "-w", "/work"].concat([
+    ["run", "--rm", ...user, ...env, "-v", `${root}:/work:Z`, "-w", "/work"].concat([
       "--entrypoint",
       "bash",
       IMAGE,
@@ -77,14 +109,19 @@ export function pull(engine = containerEngine()): void {
 }
 
 /**
- * Compile and run each .as file in one container, so the image starts once
- * per batch. Outputs land in `outDir` as <name>.abc, .log, .out and .code,
- * plus .dump with `abcdump`. Each avmshell run gets `timeoutSeconds`.
+ * Compile and run each job in one container, so the image starts once per
+ * batch, with `parallel` jobs at a time. With `abcdump`, each compiled ABC is
+ * also dumped. Each avmshell run gets `timeoutSeconds`.
  */
 export function runOracle(
-  files: string[],
+  jobs: (string | OracleJob)[],
   outDir: string,
-  { engine = containerEngine(), timeoutSeconds = 20, abcdump = false } = {},
+  {
+    engine = containerEngine(),
+    timeoutSeconds = 20,
+    abcdump = false,
+    parallel = defaultParallelism(),
+  } = {},
 ): OracleResult[] {
   mkdirSync(join(outDir, "tools"), { recursive: true });
 
@@ -98,40 +135,54 @@ export function runOracle(
     throw new Error(`${ABCDUMP_SOURCE} is missing; run git submodule update --init`);
   }
 
+  const all = jobs.map((j) => (typeof j === "string" ? { source: j } : j));
+  const names = new Set<string>();
+  const lines = all.map((job) => {
+    const name = job.name ?? basename(job.source, ".as");
+    if (basename(name) !== basename(job.source, ".as")) {
+      throw new Error(`Job ${name} must end with the base name of ${job.source}`);
+    }
+
+    if (names.has(name)) {
+      throw new Error(`Two jobs are named ${name}`);
+    }
+
+    names.add(name);
+    return [name, rel(job.source), (job.ascArgs ?? []).join(" ")].join("\t");
+  });
+
   const asc = "java -jar $L/asc2.jar -import $L/builtin.abc -import $L/shell_toplevel.abc";
   const avmshell = `timeout ${timeoutSeconds} /opt/crossbridge/sdk/usr/bin/avmshell`;
   const script = [
     "L=/opt/crossbridge/sdk/usr/lib",
+    `out="${out}"`,
     ...(abcdump
       ? [
-          `if [ ! -f "${out}/tools/abcdump.abc" ]; then`,
-          `  ${asc} -outdir "${out}/tools" ${ABCDUMP_SOURCE} > "${out}/tools/abcdump.log" 2>&1`,
+          `if [ ! -f "$out/tools/abcdump.abc" ]; then`,
+          `  ${asc} -outdir "$out/tools" ${ABCDUMP_SOURCE} > "$out/tools/abcdump.log" 2>&1`,
           "fi",
         ]
       : []),
-    `while IFS= read -r f; do`,
-    `  n=$(basename "$f" .as)`,
-    `  ${asc} -outdir "${out}" "$f" > "${out}/$n.log" 2>&1`,
-    `  if [ -f "${out}/$n.abc" ]; then`,
-    `    ${avmshell} "${out}/$n.abc" > "${out}/$n.out" 2>&1`,
-    `    echo $? > "${out}/$n.code"`,
+    "job() {",
+    `  IFS=$'\t' read -r n f args <<< "$1"`,
+    `  d=$(dirname "$out/$n")`,
+    `  mkdir -p "$d"`,
+    `  rm -f "$out/$n.abc" "$out/$n.code" "$out/$n.out" "$out/$n.dump"`,
+    `  ${asc} $args -outdir "$d" "$f" > "$out/$n.log" 2>&1`,
+    `  if [ -f "$out/$n.abc" ]; then`,
+    `    ${avmshell} "$out/$n.abc" > "$out/$n.out" 2>&1`,
+    `    echo $? > "$out/$n.code"`,
     ...(abcdump
-      ? [`    ${avmshell} "${out}/tools/abcdump.abc" -- "${out}/$n.abc" > "${out}/$n.dump" 2>&1`]
+      ? [`    ${avmshell} "$out/tools/abcdump.abc" -- "$out/$n.abc" > "$out/$n.dump" 2>&1`]
       : []),
     "  fi",
-    `done < "${out}/files.txt"`,
+    "}",
+    "export -f job",
+    "export L out",
+    `xargs -a "$out/jobs.tsv" -d '\n' -P ${parallel} -I{} bash -c 'job "$1"' _ {}`,
   ].join("\n");
 
-  const names = new Set<string>();
-  for (const f of files) {
-    const n = basename(f, ".as");
-    if (names.has(n)) {
-      throw new Error(`Two files are named ${n}.as; run them in separate batches`);
-    }
-    names.add(n);
-  }
-
-  writeFileSync(join(outDir, "files.txt"), `${files.map(rel).join("\n")}\n`);
+  writeFileSync(join(outDir, "jobs.tsv"), `${lines.join("\n")}\n`);
   writeFileSync(join(outDir, "run.sh"), `${script}\n`);
 
   const r = container(engine, [`${out}/run.sh`]);
@@ -147,15 +198,17 @@ export function runOracle(
     }
   };
 
-  // The JVM announces _JAVA_OPTIONS from the image on every run.
+  // The JVM announces _JAVA_OPTIONS on every run.
   const clean = (log: string) => log.replace(/^Picked up _JAVA_OPTIONS:.*\n/m, "");
 
-  return files.map((f) => {
-    const n = join(outDir, basename(f, ".as"));
+  return all.map((job, i) => {
+    const name = lines[i].split("\t")[0];
+    const n = join(outDir, name);
     const code = read(`${n}.code`);
 
     return {
-      file: rel(f),
+      file: rel(job.source),
+      name,
       compiled: code !== null,
       compileLog: clean(read(`${n}.log`) ?? ""),
       exitCode: code === null ? null : Number(code),
