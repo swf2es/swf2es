@@ -1,0 +1,8 @@
+{
+  "extends": "./asconfig.base.json",
+  "entries": ["assembly/testing.ts"],
+  "targets": {
+    "release": { "outFile": "dist-test/testing.wasm" },
+    "debug": { "outFile": "dist-test/testing.wasm" }
+  }
+}

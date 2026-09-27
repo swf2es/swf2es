@@ -21,6 +21,7 @@
     "assemblyscript": "^0.28.20"
   },
   "scripts": {
-    "build:wasm": "asc --config asconfig.json && asc assembly/testing.ts --outFile dist-test/testing.wasm --bindings raw --runtime incremental --optimizeLevel 3"
+    "build:wasm": "asc --config asconfig.json --target release && asc --config asconfig.testing.json --target release",
+    "build:wasm:debug": "asc --config asconfig.json --target debug && asc --config asconfig.testing.json --target debug"
   }
 }

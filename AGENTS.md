@@ -18,6 +18,7 @@ must give **identical output** in both modes.
 git submodule update --init   # oracle/avmplus (Tamarin tests)
 pnpm install
 pnpm build       # asc → codegen.wasm, then tsc -b for all packages
+pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
 pnpm test        # unit tests + conformance (needs podman or docker)

@@ -1,0 +1,18 @@
+{
+  "options": {
+    "bindings": "raw",
+    "runtime": "incremental"
+  },
+  "targets": {
+    "release": {
+      "optimizeLevel": 3,
+      "shrinkLevel": 0,
+      "converge": false,
+      "noAssert": false
+    },
+    "debug": {
+      "debug": true,
+      "sourceMap": true
+    }
+  }
+}
