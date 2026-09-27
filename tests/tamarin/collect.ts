@@ -114,6 +114,11 @@ function skipReason(path: string, file: string, configSkips: RegExp[]): string |
     return "needs prebuilt support ABCs (_support)";
   }
 
+  // runtests.py runs these only in the time zones listed; the oracle is UTC.
+  if (existsSync(`${file}.tz`) && !/UTC|GMT/.test(readFileSync(`${file}.tz`, "utf8"))) {
+    return "needs a US time zone (.tz)";
+  }
+
   if (configSkips.some((re) => re.test(path))) {
     return "skipped in testconfig.txt";
   }

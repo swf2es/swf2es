@@ -13,6 +13,7 @@ const started = performance.now();
 const results = runOracle(
   tests.map((t) => ({ source: t.source, name: t.path, ascArgs: t.ascArgs })),
   `${here}out`,
+  { repeat: true },
 );
 const seconds = ((performance.now() - started) / 1000).toFixed(0);
 
@@ -22,6 +23,7 @@ const summary = results.map((r) => ({
   exitCode: r.exitCode,
   passed: (r.output.match(/PASSED!/g) ?? []).length,
   failed: (r.output.match(/FAILED!/g) ?? []).length,
+  nondeterministic: r.nondeterministic,
 }));
 writeFileSync(
   `${here}out/results.json`,
@@ -40,3 +42,4 @@ console.log(
 );
 console.log(`  some checks failed: ${count((s) => s.failed > 0)}`);
 console.log(`  no checks printed: ${count((s) => s.compiled && s.passed + s.failed === 0)}`);
+console.log(`  output differs between runs: ${count((s) => s.nondeterministic)}`);

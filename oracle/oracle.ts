@@ -45,6 +45,8 @@ export interface OracleResult {
   output: string;
   /** abcdump's dump of the .abc, when requested and the file compiled. */
   dump: string | null;
+  /** With `repeat`: whether a second avmshell run printed something else. */
+  nondeterministic: boolean;
 }
 
 /** avmplus' ABC disassembler, run in avmshell; the oracle for our ABC parser. */
@@ -87,7 +89,8 @@ function container(engine: string, args: string[]) {
       : [`--user=${process.getuid?.()}:${process.getgid?.()}`];
 
   // The image gives every JVM a 6 GB heap; ASC needs far less, and many run at once.
-  const env = ["-e", "HOME=/tmp", "-e", "_JAVA_OPTIONS=-Xms64m -Xmx768m"];
+  // Dates print in UTC wherever the oracle runs.
+  const env = ["-e", "HOME=/tmp", "-e", "TZ=UTC", "-e", "_JAVA_OPTIONS=-Xms64m -Xmx768m"];
 
   return spawnSync(
     engine,
@@ -111,7 +114,8 @@ export function pull(engine = containerEngine()): void {
 /**
  * Compile and run each job in one container, so the image starts once per
  * batch, with `parallel` jobs at a time. With `abcdump`, each compiled ABC is
- * also dumped. Each avmshell run gets `timeoutSeconds`.
+ * also dumped; with `repeat`, it runs twice to find output that changes from
+ * run to run. Each avmshell run gets `timeoutSeconds`.
  */
 export function runOracle(
   jobs: (string | OracleJob)[],
@@ -120,6 +124,7 @@ export function runOracle(
     engine = containerEngine(),
     timeoutSeconds = 20,
     abcdump = false,
+    repeat = false,
     parallel = defaultParallelism(),
   } = {},
 ): OracleResult[] {
@@ -167,11 +172,12 @@ export function runOracle(
     `  IFS=$'\t' read -r n f args <<< "$1"`,
     `  d=$(dirname "$out/$n")`,
     `  mkdir -p "$d"`,
-    `  rm -f "$out/$n.abc" "$out/$n.code" "$out/$n.out" "$out/$n.dump"`,
+    `  rm -f "$out/$n.abc" "$out/$n.code" "$out/$n.out" "$out/$n.out2" "$out/$n.dump"`,
     `  ${asc} $args -outdir "$d" "$f" > "$out/$n.log" 2>&1`,
     `  if [ -f "$out/$n.abc" ]; then`,
     `    ${avmshell} "$out/$n.abc" > "$out/$n.out" 2>&1`,
     `    echo $? > "$out/$n.code"`,
+    ...(repeat ? [`    ${avmshell} "$out/$n.abc" > "$out/$n.out2" 2>&1`] : []),
     ...(abcdump
       ? [`    ${avmshell} "$out/tools/abcdump.abc" -- "$out/$n.abc" > "$out/$n.dump" 2>&1`]
       : []),
@@ -205,6 +211,7 @@ export function runOracle(
     const name = lines[i].split("\t")[0];
     const n = join(outDir, name);
     const code = read(`${n}.code`);
+    const output = read(`${n}.out`) ?? "";
 
     return {
       file: rel(job.source),
@@ -212,8 +219,9 @@ export function runOracle(
       compiled: code !== null,
       compileLog: clean(read(`${n}.log`) ?? ""),
       exitCode: code === null ? null : Number(code),
-      output: read(`${n}.out`) ?? "",
+      output,
       dump: abcdump && code !== null ? read(`${n}.dump`) : null,
+      nondeterministic: repeat && code !== null && read(`${n}.out2`) !== output,
     };
   });
 }
