@@ -68,6 +68,51 @@ three, with the same VerifyError numbers:
 An ABC with errors in more than one stage may report a different first
 error than avmshell. Well-formed ABCs are unaffected.
 
+## Compiling a method
+
+Each method goes through the same steps, in `codegen`:
+
+1. **Decode** (`abc/code.ts`): the reachable instructions, as the avmplus
+   verifier reads them.
+2. **Verify and build the IR** in one pass, as avmplus' `Verifier` does its
+   checks: a frame state per block (operand stack, scope stack, locals and
+   their types), merged where control flow joins, with avmplus' VerifyError
+   numbers. The same pass writes the IR, so what is compiled is exactly what
+   was verified.
+3. **The IR** is register form with types, not SSA. Stack slot *d* becomes
+   register `s_d` and locals stay `l_n`, so `getlocal1; getlocal2; add;
+   setlocal3` is `l3 = add(l1, l2)`. Every register has the verifier's type
+   (`int`, `uint`, `Number`, `Boolean`, `String`, a class, `null`, `*`),
+   which is what typed lowering needs: `add` then `convert_i` on two `int`s is
+   `(a + b) | 0`, a typed slot on a known class is a direct field access. V8
+   does SSA-level optimization on the JavaScript anyway. The IR is flat
+   tables, like the parser's: instruction rows (op, destination, sources,
+   immediate, type) and block rows (range, successors), reused across methods.
+4. **Control flow.** First a per-method dispatcher
+   (`for (;;) switch (block) { ... }`), which handles any control flow,
+   irreducible or obfuscated included. Then structured JavaScript (loops, `if`,
+   labelled `break`) from the dominator tree for the reducible code compilers
+   emit, falling back to the dispatcher. Conformance tests check that both
+   give the same results.
+5. **Emission** writes JavaScript as UTF-8 into a growable byte buffer: no
+   JavaScript strings, and names are copied straight from the ABC.
+
+### The runtime and the standard library
+
+Generated code calls `@swf2es/runtime` for the object model, multiname
+lookup, coercions and exceptions; it grows as far as each step needs.
+
+avmplus' standard library (`Object`, `Array`, `String`, `Math`, `Date`,
+`RegExp`, `JSON`, `Vector`, `ByteArray` and so on) is mostly AS3 compiled
+into `builtin.abc`; only its `native` methods are C++. swf2es compiles
+`builtin.abc` itself and implements the natives in TypeScript, matched by
+class and method name as avmplus matches its C++ ones. The standard library
+never changes for a compiler version, so it is compiled once at build time
+and shipped precompiled next to the runtime, keyed by its hash like any ABC.
+Its AS3 sources are MPL-2.0: the compiled library stays MPL, in its own
+package, with its source available. `playerglobal` (`flash.*`) is declarations
+only, so the player implements all of it.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
