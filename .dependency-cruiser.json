@@ -1,0 +1,90 @@
+{
+  "$schema": "https://raw.githubusercontent.com/sverweij/dependency-cruiser/main/src/schema/configuration.schema.json",
+  "forbidden": [
+    {
+      "name": "no-circular",
+      "severity": "error",
+      "from": {},
+      "to": {
+        "circular": true
+      },
+      "comment": "Package boundaries (docs/architecture.md): format <- codegen <- cli; format, codegen, runtime <- player. runtime depends on nothing, and codegen never imports the runtime implementation. See docs/architecture.md."
+    },
+    {
+      "name": "format-is-a-leaf",
+      "severity": "error",
+      "from": {
+        "path": "^packages/format/"
+      },
+      "to": {
+        "path": "^(packages/(codegen|runtime|player|cli)/|@swf2es/(codegen|runtime|player|cli)($|/))"
+      }
+    },
+    {
+      "name": "runtime-is-a-leaf",
+      "severity": "error",
+      "from": {
+        "path": "^packages/runtime/"
+      },
+      "to": {
+        "path": "^(packages/(format|codegen|player|cli)/|@swf2es/(format|codegen|player|cli)($|/))"
+      }
+    },
+    {
+      "name": "codegen-does-not-import-runtime",
+      "severity": "error",
+      "comment": "Generated code calls the runtime; the compiler itself must not.",
+      "from": {
+        "path": "^packages/codegen/"
+      },
+      "to": {
+        "path": "^(packages/(runtime|player|cli)/|@swf2es/(runtime|player|cli)($|/))"
+      }
+    },
+    {
+      "name": "player-does-not-import-cli",
+      "severity": "error",
+      "from": {
+        "path": "^packages/player/"
+      },
+      "to": {
+        "path": "^(packages/cli/|@swf2es/cli($|/))"
+      }
+    },
+    {
+      "name": "portable-packages-avoid-node",
+      "severity": "error",
+      "comment": "format, codegen and runtime run in browsers, workers and node alike.",
+      "from": {
+        "path": "^packages/(format|codegen|runtime)/"
+      },
+      "to": {
+        "dependencyTypes": [
+          "core"
+        ]
+      }
+    }
+  ],
+  "options": {
+    "doNotFollow": {
+      "path": "node_modules"
+    },
+    "exclude": {
+      "path": "(^|/)dist/"
+    },
+    "tsConfig": {
+      "fileName": "tsconfig.base.json"
+    },
+    "tsPreCompilationDeps": true,
+    "enhancedResolveOptions": {
+      "exportsFields": [
+        "exports"
+      ],
+      "conditionNames": [
+        "types",
+        "import",
+        "default"
+      ]
+    }
+  }
+}

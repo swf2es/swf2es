@@ -4,18 +4,20 @@
   "type": "module",
   "packageManager": "pnpm@10.21.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18"
   },
   "scripts": {
     "build": "pnpm --filter @swf2es/codegen build:wasm && tsc -b packages/*",
     "clean": "tsc -b --clean packages/*",
-    "lint:deps": "depcruise packages --config .dependency-cruiser.cjs",
+    "lint:deps": "depcruise packages --config .dependency-cruiser.json",
     "test": "pnpm -r --filter './tests/*' test",
-    "oracle:avmshell": "node oracle/avmshell/fetch.mjs"
+    "oracle:avmshell": "node oracle/avmshell/fetch.ts",
+    "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^24.19.0",
     "dependency-cruiser": "^16.0.0",
     "typescript": "^5.9.0"
-  }
+  },
+  "workspaces": ["packages/*", "tests/*"]
 }

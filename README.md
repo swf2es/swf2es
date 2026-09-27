@@ -27,9 +27,15 @@ docs/        design notes
 ```sh
 pnpm install
 pnpm build
+pnpm typecheck   # tests and scripts (packages are checked by build)
 pnpm lint:deps   # package boundary rules
 pnpm test
 ```
+
+Node 24 is the default: tests and scripts are `.ts` files that node runs
+directly. Deno works too once the packages are built, for example
+`deno test -A --no-check` in `tests/unit`; its type-checker uses its own lib
+settings, so type-checking stays with `pnpm typecheck`.
 
 ## License
 
