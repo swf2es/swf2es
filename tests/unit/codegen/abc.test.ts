@@ -45,6 +45,10 @@ test("parses the tables ASC 2.0 wrote for vector-sort.as", async () => {
     "method 1 ret=4 params=4,4 name=6 flags=0x00",
     "script 0 init=0",
     "  trait script 0 name=1 kind=0 attr=0x00 id=0 index=2",
+    // abcdump: local_count=3 max_scope=0 max_stack=2 code_len=4 code_offset=188
+    "body 0 method=1 stack=2 locals=3 scope=0..0 code=188+4",
+    // abcdump: local_count=1 max_scope=1 max_stack=7 code_len=67 code_offset=200
+    "body 1 method=0 stack=7 locals=1 scope=0..1 code=200+67",
     "bound method 0 to script 0",
   ]);
 });
@@ -181,6 +185,71 @@ test("a method belongs to at most one owner", () => {
   );
 });
 
+test("method bodies: sizes, code, exceptions and activation traits", () => {
+  const lines = dump({
+    methods: methods(3),
+    scripts: [{ init: 0 }],
+    bodies: [
+      {
+        method: 0,
+        maxStack: 2,
+        localCount: 3,
+        initScopeDepth: 1,
+        maxScopeDepth: 4,
+        code: [0xd0, 0x30, 0x47],
+        exceptions: [[0, 2, 2, 99, 0]],
+        traits: [{ name: 1, kind: METHOD, index: 1 }],
+      },
+    ],
+  });
+  const body = lines.findIndex((l) => l.startsWith("body 0"));
+  assert.match(
+    lines[body],
+    /^body 0 method=0 stack=2 locals=3 scope=1\.\.4 code=\d+\+3 exceptions=0-2>2:99:0$/,
+  );
+  assert.equal(lines[body + 1], "  trait activation 0 name=1 kind=1 attr=0x00 id=0 index=1");
+  assert.equal(lines.includes("bound method 1 to activation 0"), true);
+});
+
+test("method bodies are checked like avmplus", () => {
+  const withBodies = (bodies: Tables["bodies"], extra: Partial<Tables> = {}) =>
+    error({ methods: methods(3), scripts: [{ init: 0 }], bodies, ...extra });
+
+  assert.equal(withBodies([{ method: 0 }, { method: 1 }]), undefined);
+  assert.equal(withBodies([{ method: 3 }]), "error 1027");
+  assert.equal(withBodies([{ method: 0, code: [] }]), "error 1043");
+  assert.equal(withBodies([{ method: 0 }, { method: 0 }]), "error 1121", "duplicate");
+  assert.equal(withBodies([{ method: 0, exceptions: [[0, 1, 1, 0, 8]] }]), "error 1032");
+  assert.equal(
+    withBodies([{ method: 0, traits: [{ name: 1, kind: METHOD, index: 0 }] }]),
+    "error 1107",
+    "an activation binds a method that already has an owner",
+  );
+
+  const interfaceMethod: Partial<Tables> = {
+    classes: [
+      {
+        instance: { name: 3, flags: 0x04, init: 1, traits: [{ name: 1, kind: METHOD, index: 2 }] },
+        init: 0,
+      },
+    ],
+    methods: methods(4),
+    scripts: [{ init: 3 }],
+  };
+  assert.equal(withBodies([{ method: 2 }], interfaceMethod), "error 1122");
+  assert.equal(withBodies([{ method: 0 }], interfaceMethod), undefined, "the class init");
+});
+
+test("bytecode may not reach the end of the ABC", () => {
+  const upToBodies = abc(pool, tables({ methods: methods(1), scripts: [{ init: 0 }] })).slice(
+    0,
+    -1,
+  );
+  const body = (codeLength: number) => [0, 1, 1, 0, 1, ...u30(codeLength), 0x47];
+  assert.equal(testing.abcDump(new Uint8Array([...upToBodies, 1, ...body(1)])), "error 1107");
+  assert.equal(testing.abcDump(new Uint8Array([...upToBodies, 1, ...body(100000)])), "error 1107");
+});
+
 test("truncated tables are corrupt", () => {
   const bytes = abc(
     pool,
@@ -195,6 +264,7 @@ test("truncated tables are corrupt", () => {
         },
       ],
       scripts: [{ init: 2, traits: [{ name: 2, kind: CLASS, index: 0 }] }],
+      bodies: [{ method: 0, exceptions: [[0, 1, 1, 0, 1]], traits: [{ name: 1, kind: SLOT }] }],
     }),
   );
   const whole = (testing.abcDump(bytes) as string).split("\n");
@@ -204,7 +274,7 @@ test("truncated tables are corrupt", () => {
   );
 
   const poolEnd = abc(pool, []).length;
-  for (let length = poolEnd; length < bytes.length - 1; length++) {
+  for (let length = poolEnd; length < bytes.length; length++) {
     const lines = (testing.abcDump(bytes.slice(0, length)) as string).split("\n");
     assert.equal(lines.at(-1), "error 1107", `length ${length}`);
   }

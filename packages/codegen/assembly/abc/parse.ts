@@ -1,4 +1,5 @@
 import { Abc } from "./abc";
+import { readMethodBodies } from "./bodies";
 import { readClasses, readInstances, readScripts } from "./classes";
 import { kCorruptABCError } from "./constants";
 import { readMetadata, readMethods } from "./methods";
@@ -30,7 +31,8 @@ export function readAbc(base: usize, length: u32): Abc {
     !readMetadata(abc, r) ||
     !readInstances(abc, r) ||
     !readClasses(abc, r) ||
-    !readScripts(abc, r)
+    !readScripts(abc, r) ||
+    !readMethodBodies(abc, r, base)
   ) {
     return abc;
   }

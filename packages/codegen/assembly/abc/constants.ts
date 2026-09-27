@@ -19,6 +19,7 @@ export const CONSTANT_MultinameLA: u8 = 0x1c;
 export const CONSTANT_TypeName: u8 = 0x1d;
 
 // Method flags (method_info.flags).
+export const METHOD_NeedActivation: u8 = 0x02;
 export const METHOD_HasOptional: u8 = 0x08;
 export const METHOD_Native: u8 = 0x20;
 export const METHOD_HasParamNames: u8 = 0x80;
@@ -41,6 +42,7 @@ export const ATTR_Metadata: u8 = 0x40;
 export const kMethodInfoExceedsCountError: i32 = 1027;
 export const kCpoolIndexRangeError: i32 = 1032;
 export const kCpoolEntryWrongTypeError: i32 = 1033;
+export const kInvalidCodeLengthError: i32 = 1043;
 export const kUnsupportedTraitsKindError: i32 = 1045;
 export const kClassInfoOrderError: i32 = 1059;
 export const kClassInfoExceedsCountError: i32 = 1060;
@@ -49,3 +51,5 @@ export const kIllegalNativeMethodError: i32 = 1079;
 export const kIllegalNamespaceError: i32 = 1080;
 export const kCorruptABCError: i32 = 1107;
 export const kCannotImplementError: i32 = 1111;
+export const kDuplicateMethodBodyError: i32 = 1121;
+export const kIllegalInterfaceMethodBodyError: i32 = 1122;

@@ -152,6 +152,24 @@ export function abcDump(bytes: Uint8Array): string {
     dumpTraits(abc, out, `script ${i}`, abc.scriptTraitStart[i], abc.scriptTraitStart[i + 1]);
   }
 
+  for (let b: u32 = 0; b < abc.bodyCount; b++) {
+    const method = abc.bodyMethod[b];
+    let line = `body ${b} method=${method} stack=${abc.bodyMaxStack[b]} locals=${abc.bodyLocalCount[b]}`;
+    line += ` scope=${abc.bodyInitScopeDepth[b]}..${abc.bodyMaxScopeDepth[b]}`;
+    line += ` code=${abc.bodyCodeStart[b]}+${abc.bodyCodeLength[b]}`;
+    const exceptions: string[] = [];
+    for (let e = abc.bodyExceptionStart[b]; e < abc.bodyExceptionStart[b + 1]; e++) {
+      exceptions.push(
+        `${abc.exceptionFrom[e]}-${abc.exceptionTo[e]}>${abc.exceptionTarget[e]}:${abc.exceptionType[e]}:${abc.exceptionName[e]}`,
+      );
+    }
+    if (exceptions.length) {
+      line += ` exceptions=${exceptions.join(",")}`;
+    }
+    out.push(line);
+    dumpTraits(abc, out, `activation ${method}`, abc.bodyTraitStart[b], abc.bodyTraitStart[b + 1]);
+  }
+
   for (let i: u32 = 0; i < abc.methodCount; i++) {
     const owner = abc.methodOwner[i];
     if (owner >= 0) {
@@ -187,7 +205,11 @@ function ownerLabel(abc: Abc, owner: i32): string {
   if (owner < 2 * classes) {
     return `class ${owner - classes}`;
   }
-  return `script ${owner - 2 * classes}`;
+  const scripts = <i32>abc.scriptCount;
+  if (owner < 2 * classes + scripts) {
+    return `script ${owner - 2 * classes}`;
+  }
+  return `activation ${owner - 2 * classes - scripts}`;
 }
 
 function join(items: Array<u32>, start: u32, end: u32): string {

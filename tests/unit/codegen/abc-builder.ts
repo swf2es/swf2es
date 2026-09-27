@@ -94,12 +94,26 @@ export interface Instance {
   traits?: Trait[];
 }
 
+export interface Body {
+  method: number;
+  maxStack?: number;
+  localCount?: number;
+  initScopeDepth?: number;
+  maxScopeDepth?: number;
+  /** Bytecode; by default a single returnvoid. */
+  code?: number[];
+  /** [from, to, target, type, name] */
+  exceptions?: [number, number, number, number, number][];
+  traits?: Trait[];
+}
+
 export interface Tables {
   methods?: Method[];
   metadata?: { name: number; items?: [number, number][] }[];
   /** instance_info and class_info, which share one count. */
   classes?: { instance: Instance; init: number; traits?: Trait[] }[];
   scripts?: { init: number; traits?: Trait[] }[];
+  bodies?: Body[];
 }
 
 const list = <T>(items: T[], encode: (item: T) => number[]): number[] => [
@@ -150,7 +164,22 @@ function instance(i: Instance): number[] {
   ];
 }
 
-/** Everything after the constant pool, ending with an empty method body list. */
+function body(b: Body): number[] {
+  const code = b.code ?? [0x47];
+  return [
+    ...u30(b.method),
+    ...u30(b.maxStack ?? 1),
+    ...u30(b.localCount ?? 1),
+    ...u30(b.initScopeDepth ?? 0),
+    ...u30(b.maxScopeDepth ?? 1),
+    ...u30(code.length),
+    ...code,
+    ...list(b.exceptions ?? [], (e) => e.flatMap(u30)),
+    ...list(b.traits ?? [], trait),
+  ];
+}
+
+/** Everything after the constant pool. */
 export function tables(t: Tables): number[] {
   const classes = t.classes ?? [];
   return [
@@ -162,6 +191,6 @@ export function tables(t: Tables): number[] {
     ...list(classes, (c) => instance(c.instance)),
     ...classes.flatMap((c) => [...u30(c.init), ...list(c.traits ?? [], trait)]),
     ...list(t.scripts ?? [], (s) => [...u30(s.init), ...list(s.traits ?? [], trait)]),
-    ...u30(0),
+    ...list(t.bodies ?? [], body),
   ];
 }

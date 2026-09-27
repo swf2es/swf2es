@@ -22,7 +22,7 @@ export class Abc {
   methodOptionalStart: StaticArray<u32> = new StaticArray<u32>(1);
   optionalValue: Array<u32> = [] as u32[];
   optionalKind: Array<u8> = [] as u8[];
-  /** The owner (see instanceOwner, classOwner, scriptOwner) a method is bound to, or -1. */
+  /** The owner (see instanceOwner .. activationOwner) a method is bound to, or -1. */
   methodOwner: StaticArray<i32> = new StaticArray<i32>(0);
 
   // metadata_info
@@ -47,7 +47,29 @@ export class Abc {
   // script_info
   scriptInit: StaticArray<u32> = new StaticArray<u32>(0);
 
-  // traits_info of every instance, class and script, in that order.
+  // method_body_info, in ABC order.
+  /** Index of each method's body, or -1 if it has none. */
+  methodBody: StaticArray<i32> = new StaticArray<i32>(0);
+  bodyMethod: Array<u32> = [] as u32[];
+  bodyMaxStack: Array<u32> = [] as u32[];
+  bodyLocalCount: Array<u32> = [] as u32[];
+  bodyInitScopeDepth: Array<u32> = [] as u32[];
+  bodyMaxScopeDepth: Array<u32> = [] as u32[];
+  /** Offset of the bytecode from the start of the ABC. */
+  bodyCodeStart: Array<u32> = [] as u32[];
+  bodyCodeLength: Array<u32> = [] as u32[];
+  bodyExceptionStart: Array<u32> = [] as u32[];
+  exceptionFrom: Array<u32> = [] as u32[];
+  exceptionTo: Array<u32> = [] as u32[];
+  exceptionTarget: Array<u32> = [] as u32[];
+  /** Multiname of the caught type; 0 catches everything. */
+  exceptionType: Array<u32> = [] as u32[];
+  /** Multiname of the catch variable; 0 if it has none. */
+  exceptionName: Array<u32> = [] as u32[];
+  /** Body b's activation traits are traits [start[b] .. start[b + 1]]. */
+  bodyTraitStart: Array<u32> = [] as u32[];
+
+  // traits_info of every instance, class, script and method activation, in that order.
   traitName: Array<u32> = [] as u32[];
   /** Kind in the low 4 bits, attributes in the high 4. */
   traitTag: Array<u8> = [] as u8[];
@@ -97,6 +119,17 @@ export class Abc {
   @inline
   scriptOwner(i: u32): i32 {
     return <i32>(2 * this.classCount + i);
+  }
+
+  /** The owner of method m's activation traits. */
+  @inline
+  activationOwner(m: u32): i32 {
+    return <i32>(2 * this.classCount + this.scriptCount + m);
+  }
+
+  @inline
+  get bodyCount(): u32 {
+    return this.bodyMethod.length;
   }
 
   /** Record the first error, as avmplus stops at the first throw; returns false. */
