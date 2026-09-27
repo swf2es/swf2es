@@ -2,7 +2,7 @@
 // report, not by text: abcdump's own formatting has quirks we do not copy.
 import { readFile } from "node:fs/promises";
 
-const dir = new URL("../../packages/codegen/dist-test/", import.meta.url);
+const dir = new URL("../packages/codegen/dist-test/", import.meta.url);
 const { instantiate } = await import(new URL("testing.js", dir).href);
 const module = await WebAssembly.compile(await readFile(new URL("testing.wasm", dir)));
 const testing = await instantiate(module, { env: {} });

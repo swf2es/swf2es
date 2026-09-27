@@ -1,7 +1,7 @@
 import { Abc } from "./abc";
 import { readMethodBodies } from "./bodies";
 import { readClasses, readInstances, readScripts } from "./classes";
-import { kCorruptABCError } from "./constants";
+import { kCorruptABCError, kInvalidMagicError } from "./constants";
 import { readMetadata, readMethods } from "./methods";
 import { readConstantPool } from "./pool";
 import { Reader } from "./reader";
@@ -18,6 +18,11 @@ export function readAbc(base: usize, length: u32): Abc {
   abc.majorVersion = r.u16();
   if (r.failed) {
     abc.fail(kCorruptABCError);
+    return abc;
+  }
+
+  if (!isSupportedVersion(abc.majorVersion, abc.minorVersion)) {
+    abc.fail(kInvalidMagicError);
     return abc;
   }
 
@@ -46,4 +51,14 @@ export function readAbc(base: usize, length: u32): Abc {
 
   abc.traitMetadataStart.push(abc.traitMetadata.length);
   return abc;
+}
+
+/**
+ * The versions avmplus' AbcParser::canParse accepts in Flash Player builds,
+ * as the oracle's avmshell does: 46.16 and 47.12 to 47.18. All share the
+ * 46.16 layout. HARMAN's AIR reads 47.16 with float constant pools, but Flash
+ * Player never had float, so neither does swf2es.
+ */
+function isSupportedVersion(major: u32, minor: u32): bool {
+  return (major === 46 && minor === 16) || (major === 47 && minor >= 12 && minor <= 18);
 }

@@ -46,6 +46,7 @@ export const kInvalidBranchTargetError: i32 = 1021;
 export const kMethodInfoExceedsCountError: i32 = 1027;
 export const kCpoolIndexRangeError: i32 = 1032;
 export const kCpoolEntryWrongTypeError: i32 = 1033;
+export const kInvalidMagicError: i32 = 1042;
 export const kInvalidCodeLengthError: i32 = 1043;
 export const kUnsupportedTraitsKindError: i32 = 1045;
 export const kIllegalExceptionHandlerError: i32 = 1054;

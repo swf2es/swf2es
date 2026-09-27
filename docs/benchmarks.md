@@ -10,8 +10,9 @@
   opcodes: many of the less common instructions, in hot loops.
 
   Build it with **`-compiler.float=false`** (`AS3_FLOAT=false`). Without it,
-  the AIR SDK compiler may emit ABC 47.16 float instructions, which Flash
-  Player never shipped and swf2es treats as illegal.
+  the AIR SDK compiler may emit ABC 47.16 float instructions. Only HARMAN's
+  AIR runtime supports those (its `airglobal` defines `float`); Flash
+  Player and Ruffle do not, and swf2es treats them as illegal for now.
 
   The benchmark reports through a `TextField`, so for avmshell it needs a
   shell entry point that only calls `trace()` (milestone 1).

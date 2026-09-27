@@ -31,6 +31,7 @@ pnpm build
 pnpm check       # Biome: formatting and lint (pnpm format fixes them)
 pnpm typecheck   # tests and scripts (packages are checked by build)
 pnpm test        # needs podman or docker for the avmshell oracle
+pnpm tamarin     # the Tamarin acceptance tests in avmshell and swf2es
 ```
 
 Formatting and linting use [Biome](https://biomejs.dev), installed with the

@@ -1,11 +1,12 @@
-name: CI
+name: Tamarin
 on:
-  push:
-    branches: [main, dev]
-  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
 jobs:
-  build:
+  tamarin:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -16,15 +17,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
       - run: pnpm build
-      - run: pnpm typecheck
       - run: pnpm oracle:pull
-      - run: pnpm test
-      # A subset of the Tamarin acceptance tests; the full set runs in tamarin.yml.
+      # Compile keys decide what to recompile, so any earlier output helps.
       - uses: actions/cache@v4
         with:
           path: tests/tamarin/out
-          key: tamarin-subset-${{ github.sha }}
-          restore-keys: tamarin-subset-
-      - run: pnpm tamarin ecma3/Array as3/Types
+          key: tamarin-${{ github.sha }}
+          restore-keys: tamarin-
+      - run: pnpm tamarin

@@ -8,8 +8,8 @@
 // facts as avmplus' abcdump.
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { abcdumpFacts, compareFacts, swf2esFacts } from "../../oracle/abc-facts.ts";
 import { containerEngine, type OracleResult, runOracle } from "../../oracle/oracle.ts";
-import { abcdumpFacts, compareFacts, swf2esFacts } from "./abc-facts.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -42,8 +42,7 @@ const report = (ok: boolean, what: string, details: string[] = []) => {
   }
 };
 
-const abcOf = (r: OracleResult) =>
-  new Uint8Array(readFileSync(`${here}out/${r.file.split("/").pop()?.replace(/\.as$/, ".abc")}`));
+const abcOf = (r: OracleResult) => new Uint8Array(readFileSync(`${here}out/${r.name}.abc`));
 
 for (const r of results) {
   const isCase = !parseOnly.some((p) => p.endsWith(r.file));

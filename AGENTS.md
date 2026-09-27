@@ -23,6 +23,9 @@ pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
 pnpm test        # unit tests + conformance (needs podman or docker)
 pnpm oracle path/to/file.as   # print avmshell's output for a file
+pnpm tamarin [prefix...]      # Tamarin acceptance tests vs baseline.json (about 10 minutes
+                              # uncached; SWF2ES_ORACLE_JOBS sets parallelism, default 10)
+pnpm tamarin --update-baseline [prefix...]   # after an oracle or harness change
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
@@ -39,6 +42,10 @@ calling a change done; CI runs the same steps.
   `format`, `codegen` and `runtime` load no DOM or node types.
   `tests/unit/boundaries.test.ts` checks this; change the table there only
   together with docs/architecture.md.
+- **The Tamarin baseline is avmshell's behaviour**, failures included:
+  swf2es must reproduce what avmshell prints, not what a test expects.
+  Update `tests/tamarin/baseline.json` only when the oracle or the harness
+  changes, never to make swf2es pass.
 - **avmshell is the reference.** For AS3 semantics, the expected result is
   what avmshell prints, not what JavaScript or the spec suggests. Add a case
   under `tests/conformance/cases/` for any semantic you implement.
