@@ -39,11 +39,16 @@ export const ATTR_Metadata: u8 = 0x40;
 
 // VerifyError numbers avmplus reports (core/ErrorConstants.h), so a rejected
 // ABC fails the same way it does in avmshell.
+export const kIllegalOpcodeError: i32 = 1011;
+export const kLastInstExceedsCodeSizeError: i32 = 1012;
+export const kCannotFallOffMethodError: i32 = 1020;
+export const kInvalidBranchTargetError: i32 = 1021;
 export const kMethodInfoExceedsCountError: i32 = 1027;
 export const kCpoolIndexRangeError: i32 = 1032;
 export const kCpoolEntryWrongTypeError: i32 = 1033;
 export const kInvalidCodeLengthError: i32 = 1043;
 export const kUnsupportedTraitsKindError: i32 = 1045;
+export const kIllegalExceptionHandlerError: i32 = 1054;
 export const kClassInfoOrderError: i32 = 1059;
 export const kClassInfoExceedsCountError: i32 = 1060;
 export const kAlreadyBoundError: i32 = 1071;
