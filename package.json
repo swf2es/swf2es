@@ -19,8 +19,8 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
     "@types/node": "^24.19.0",
-    "dependency-cruiser": "^16.0.0",
-    "typescript": "^5.9.0"
+    "dependency-cruiser": "^18.4.0",
+    "typescript": "^6.0.3"
   },
   "workspaces": [
     "packages/*",
