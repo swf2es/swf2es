@@ -7,7 +7,8 @@
 //   node oracle/oracle.ts --abcdump <file.as>...  print abcdump's dump of each file
 //   node oracle/oracle.ts --pull                  pull the image
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -114,10 +115,37 @@ export function pull(engine = containerEngine()): void {
 }
 
 /**
+ * What a compile depends on: the image, the arguments, and the contents of
+ * the source and of every file passed with -in or -import.
+ */
+function compileKey(job: OracleJob): string {
+  const hash = createHash("sha256")
+    .update(IMAGE)
+    .update("\0")
+    .update((job.ascArgs ?? []).join(" "));
+  const args = job.ascArgs ?? [];
+  const inputs = [
+    job.source,
+    ...args.filter((_, i) => args[i - 1] === "-in" || args[i - 1] === "-import"),
+  ];
+  for (const file of inputs) {
+    const path = resolve(root, file);
+    hash
+      .update("\0")
+      .update(file)
+      .update("\0")
+      .update(existsSync(path) ? readFileSync(path) : "");
+  }
+
+  return hash.digest("hex");
+}
+
+/**
  * Compile and run each job in one container, so the image starts once per
- * batch, with `parallel` jobs at a time. With `abcdump`, each compiled ABC is
- * also dumped; with `repeat`, it runs twice to find output that changes from
- * run to run. Each avmshell run gets `timeoutSeconds`.
+ * batch, with `parallel` jobs at a time. An ABC whose compile key (see
+ * compileKey) is unchanged is reused instead of recompiled. With `abcdump`,
+ * each ABC is also dumped; with `repeat`, it runs twice to find output that
+ * changes from run to run. Each avmshell run gets `timeoutSeconds`.
  */
 export function runOracle(
   jobs: (string | OracleJob)[],
@@ -155,7 +183,11 @@ export function runOracle(
     }
 
     names.add(name);
-    return [name, rel(job.source), (job.ascArgs ?? []).join(" ")].join("\t");
+    const cached =
+      existsSync(join(outDir, `${name}.abc`)) &&
+      existsSync(join(outDir, `${name}.key`)) &&
+      readFileSync(join(outDir, `${name}.key`), "utf8") === compileKey(job);
+    return [name, rel(job.source), cached ? "0" : "1", (job.ascArgs ?? []).join(" ")].join("\t");
   });
 
   const asc = "java -jar $L/asc2.jar -import $L/builtin.abc -import $L/shell_toplevel.abc";
@@ -171,11 +203,14 @@ export function runOracle(
         ]
       : []),
     "job() {",
-    `  IFS=$'\t' read -r n f args <<< "$1"`,
+    `  IFS=$'\t' read -r n f compile args <<< "$1"`,
     `  d=$(dirname "$out/$n")`,
     `  mkdir -p "$d"`,
-    `  rm -f "$out/$n.abc" "$out/$n.code" "$out/$n.out" "$out/$n.out2" "$out/$n.dump"`,
-    `  ${asc} $args -outdir "$d" "$f" > "$out/$n.log" 2>&1`,
+    `  rm -f "$out/$n.code" "$out/$n.out" "$out/$n.out2" "$out/$n.dump"`,
+    `  if [ "$compile" = 1 ]; then`,
+    `    rm -f "$out/$n.abc" "$out/$n.key"`,
+    `    ${asc} $args -outdir "$d" "$f" > "$out/$n.log" 2>&1`,
+    "  fi",
     `  if [ -f "$out/$n.abc" ]; then`,
     // Run from the job's own directory: tests may write files, which then stay in outDir.
     `    b=$(basename "$n")`,
@@ -185,6 +220,8 @@ export function runOracle(
       ? [`    (cd "$d" && ${avmshell} "/work/$out/tools/abcdump.abc" -- "$b.abc" > "$b.dump" 2>&1)`]
       : []),
     "  fi",
+    // Results are read from the files; an avmshell error must not fail xargs.
+    "  return 0",
     "}",
     "export -f job",
     "export L out",
@@ -211,10 +248,18 @@ export function runOracle(
   const clean = (log: string) => log.replace(/^Picked up _JAVA_OPTIONS:.*\n/m, "");
 
   return all.map((job, i) => {
-    const name = lines[i].split("\t")[0];
+    const [name, , compile] = lines[i].split("\t");
     const n = join(outDir, name);
     const code = read(`${n}.code`);
     const output = read(`${n}.out`) ?? "";
+
+    if (compile === "1") {
+      if (existsSync(`${n}.abc`)) {
+        writeFileSync(`${n}.key`, compileKey(job));
+      } else {
+        rmSync(`${n}.key`, { force: true });
+      }
+    }
 
     return {
       file: rel(job.source),
