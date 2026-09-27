@@ -1,0 +1,27 @@
+=== AS3PB Runtime Benchmark ===
+Messages: 100
+Iterations: 300
+
+AS3PB decode reuses messages; AMF3/JSON allocate objects.
+Memory: attach/detach per message; binding and input copy excluded.
+AS3PB output buffers reused; AMF3/JSON allocate buffers.
+JSON retains this harness's partial field mapping.
+
+--- Data Size ---
+AS3PB bytes: 28300 bytes, 283 bytes/message
+AS3PB memory: 28300 bytes, 283 bytes/message
+AMF3: 63598 bytes, 636 bytes/message
+JSON: 75048 bytes, 750 bytes/message
+
+--- Serialize ---
+
+--- Deserialize ---
+
+--- Total ---
+
+--- Time / AS3PB memory (higher = slower) ---
+
+--- Wire checksum ---
+AS3PB bytes: 7054fa3
+
+Done.

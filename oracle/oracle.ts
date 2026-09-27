@@ -27,7 +27,10 @@ export interface OracleJob {
    * Defaults to that base name.
    */
   name?: string;
-  /** Extra ASC 2.0 arguments, such as -AS3, -strict or -in helper.as. */
+  /**
+   * Extra ASC 2.0 arguments, such as -AS3, -strict or -in helper.as. File paths
+   * must be relative to the repository root: that is what the container sees.
+   */
   ascArgs?: string[];
 }
 

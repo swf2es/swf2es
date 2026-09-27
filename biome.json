@@ -11,7 +11,8 @@
       "!pnpm-lock.yaml",
       "!**/dist",
       "!oracle/avmplus",
-      "!tests/tamarin/baseline.json"
+      "!tests/tamarin/baseline.json",
+      "!tests/programs/as3pb"
     ]
   },
   "formatter": {

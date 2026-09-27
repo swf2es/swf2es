@@ -9,9 +9,10 @@ Near-term work, in order. The goal of milestone 1 is in
    second run with ASC 1.0 from the Flex SDK is still open.
 2. **Faster decoding**: done. `pnpm bench` measures it; see
    [benchmarks.md](benchmarks.md).
-3. **as3pb in avmshell**: a shell entry point for the as3pb benchmark that
-   reports through `trace()`, built with `-compiler.float=false`, as the
-   first real program for milestone 1.
+3. **as3pb in avmshell**: done. `tests/programs` builds as3pb's benchmark
+   (the `tests/programs/as3pb` submodule) through the oracle; its
+   deterministic output is `tests/programs/expected/as3pb.txt`, the expected
+   result for milestone 1, and swf2es parses and decodes its ABC like abcdump.
 
 Tracked separately: SWF decompression in `format` (issue #3).
 
