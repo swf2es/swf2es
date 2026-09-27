@@ -57,6 +57,8 @@ importers:
 
   tests/conformance: {}
 
+  tests/programs: {}
+
   tests/tamarin: {}
 
   tests/unit:

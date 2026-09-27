@@ -1,0 +1,9 @@
+{
+  "name": "@swf2es/tests-programs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node run.ts",
+    "update": "node run.ts --update"
+  }
+}

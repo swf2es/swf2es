@@ -15,13 +15,13 @@ must give **identical output** in both modes.
 ## Commands
 
 ```sh
-git submodule update --init   # oracle/avmplus (Tamarin tests)
+git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb
 pnpm install
 pnpm build       # asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
-pnpm test        # unit tests + conformance (needs podman or docker)
+pnpm test        # unit, conformance and program tests (needs podman or docker)
 pnpm oracle path/to/file.as   # print avmshell's output for a file
 pnpm tamarin [prefix...]      # Tamarin acceptance tests vs baseline.json (about 10 minutes
                               # uncached; SWF2ES_ORACLE_JOBS sets parallelism, default 10)

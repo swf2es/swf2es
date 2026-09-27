@@ -25,7 +25,7 @@ docs/        design, references, benchmarks and roadmap
 ## Development
 
 ```sh
-git submodule update --init   # the avmplus tests
+git submodule update --init   # avmplus (Tamarin tests) and as3pb
 pnpm install
 pnpm build
 pnpm check       # Biome: formatting and lint (pnpm format fixes them)

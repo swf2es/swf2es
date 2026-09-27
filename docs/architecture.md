@@ -78,7 +78,7 @@ error than avmshell. Well-formed ABCs are unaffected.
 
 ## Milestone 1
 
-A headless build of the as3pb protobuf benchmark, compiled and run in node:
+The as3pb protobuf benchmark (`tests/programs`), compiled by swf2es and run in node:
 
 - its trace output matches avmshell byte for byte;
 - it is faster than the AwayFL JIT on the same benchmark (ByteArray 574 ms,
