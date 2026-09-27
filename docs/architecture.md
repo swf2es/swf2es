@@ -51,6 +51,23 @@ but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
 
+## Parsing, linking and verifying
+
+avmplus checks an ABC in three places, and swf2es checks it in the same
+three, with the same VerifyError numbers:
+
+1. **Parsing** (`codegen/assembly/abc`): everything avmplus rejects while
+   parsing that one ABC can decide on its own: counts, pool indices, trait
+   kinds and names, class order, a method bound to two owners.
+2. **Linking**, when classes are defined: anything that needs classes from
+   other ABCs or playerglobal, such as base classes, interfaces, overrides
+   and name clashes.
+3. **Verifying a method**, when it is first compiled: its signature's types
+   and its bytecode.
+
+An ABC with errors in more than one stage may report a different first
+error than avmshell. Well-formed ABCs are unaffected.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the

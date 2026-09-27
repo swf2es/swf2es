@@ -3,10 +3,11 @@
 // run with podman or docker. The image is pinned by digest so every machine
 // and CI run uses the same avmshell.
 //
-//   node oracle/oracle.ts <file.as>...   print each file's avmshell output
-//   node oracle/oracle.ts --pull         pull the image
+//   node oracle/oracle.ts <file.as>...            print each file's avmshell output
+//   node oracle/oracle.ts --abcdump <file.as>...  print abcdump's dump of each file
+//   node oracle/oracle.ts --pull                  pull the image
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,7 +27,12 @@ export interface OracleResult {
   exitCode: number | null;
   /** avmshell stdout and stderr: the trace output to compare against. */
   output: string;
+  /** abcdump's dump of the .abc, when requested and the file compiled. */
+  dump: string | null;
 }
+
+/** avmplus' ABC disassembler, run in avmshell; the oracle for our ABC parser. */
+const ABCDUMP_SOURCE = "oracle/avmplus/utils/abcdump.as";
 
 /** podman or docker, or $SWF2ES_CONTAINER if set. */
 export function containerEngine(): string {
@@ -72,15 +78,15 @@ export function pull(engine = containerEngine()): void {
 
 /**
  * Compile and run each .as file in one container, so the image starts once
- * per batch. Outputs land in `outDir` as <name>.abc, .log, .out and .code.
- * Each avmshell run gets `timeoutSeconds`.
+ * per batch. Outputs land in `outDir` as <name>.abc, .log, .out and .code,
+ * plus .dump with `abcdump`. Each avmshell run gets `timeoutSeconds`.
  */
 export function runOracle(
   files: string[],
   outDir: string,
-  { engine = containerEngine(), timeoutSeconds = 20 } = {},
+  { engine = containerEngine(), timeoutSeconds = 20, abcdump = false } = {},
 ): OracleResult[] {
-  mkdirSync(outDir, { recursive: true });
+  mkdirSync(join(outDir, "tools"), { recursive: true });
 
   const rel = (p: string) => relative(root, resolve(p));
   const out = rel(outDir);
@@ -88,15 +94,30 @@ export function runOracle(
     throw new Error(`outDir must be inside ${root}`);
   }
 
+  if (abcdump && !existsSync(join(root, ABCDUMP_SOURCE))) {
+    throw new Error(`${ABCDUMP_SOURCE} is missing; run git submodule update --init`);
+  }
+
+  const asc = "java -jar $L/asc2.jar -import $L/builtin.abc -import $L/shell_toplevel.abc";
+  const avmshell = `timeout ${timeoutSeconds} /opt/crossbridge/sdk/usr/bin/avmshell`;
   const script = [
     "L=/opt/crossbridge/sdk/usr/lib",
+    ...(abcdump
+      ? [
+          `if [ ! -f "${out}/tools/abcdump.abc" ]; then`,
+          `  ${asc} -outdir "${out}/tools" ${ABCDUMP_SOURCE} > "${out}/tools/abcdump.log" 2>&1`,
+          "fi",
+        ]
+      : []),
     `while IFS= read -r f; do`,
     `  n=$(basename "$f" .as)`,
-    `  java -jar $L/asc2.jar -import $L/builtin.abc -import $L/shell_toplevel.abc \\`,
-    `    -outdir "${out}" "$f" > "${out}/$n.log" 2>&1`,
+    `  ${asc} -outdir "${out}" "$f" > "${out}/$n.log" 2>&1`,
     `  if [ -f "${out}/$n.abc" ]; then`,
-    `    timeout ${timeoutSeconds} /opt/crossbridge/sdk/usr/bin/avmshell "${out}/$n.abc" > "${out}/$n.out" 2>&1`,
+    `    ${avmshell} "${out}/$n.abc" > "${out}/$n.out" 2>&1`,
     `    echo $? > "${out}/$n.code"`,
+    ...(abcdump
+      ? [`    ${avmshell} "${out}/tools/abcdump.abc" -- "${out}/$n.abc" > "${out}/$n.dump" 2>&1`]
+      : []),
     "  fi",
     `done < "${out}/files.txt"`,
   ].join("\n");
@@ -139,6 +160,7 @@ export function runOracle(
       compileLog: clean(read(`${n}.log`) ?? ""),
       exitCode: code === null ? null : Number(code),
       output: read(`${n}.out`) ?? "",
+      dump: abcdump && code !== null ? read(`${n}.dump`) : null,
     };
   });
 }
@@ -146,15 +168,18 @@ export function runOracle(
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
 
+  const abcdump = args[0] === "--abcdump";
+  const files = abcdump ? args.slice(1) : args;
+
   if (args[0] === "--pull") {
     pull();
-  } else if (!args.length) {
-    console.error("usage: node oracle/oracle.ts <file.as>... | --pull");
+  } else if (!files.length) {
+    console.error("usage: node oracle/oracle.ts [--abcdump] <file.as>... | --pull");
     process.exit(1);
   } else {
-    for (const r of runOracle(args, join(root, "oracle/out"))) {
+    for (const r of runOracle(files, join(root, "oracle/out"), { abcdump })) {
       console.log(`== ${r.file} (${r.compiled ? `exit ${r.exitCode}` : "did not compile"})`);
-      process.stdout.write(r.compiled ? r.output : r.compileLog);
+      process.stdout.write(r.compiled ? ((abcdump ? r.dump : r.output) ?? "") : r.compileLog);
     }
   }
 }

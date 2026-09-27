@@ -1,7 +1,9 @@
 # AGENTS.md
 
 Instructions for coding agents working on swf2es. Humans may find them
-useful too; the design itself is in [docs/architecture.md](docs/architecture.md).
+useful too; the design itself is in [docs/architecture.md](docs/architecture.md),
+and the specs and implementations to consult are in
+[docs/references.md](docs/references.md).
 
 ## What this is
 
@@ -16,6 +18,7 @@ must give **identical output** in both modes.
 git submodule update --init   # oracle/avmplus (Tamarin tests)
 pnpm install
 pnpm build       # asc → codegen.wasm, then tsc -b for all packages
+pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
 pnpm test        # unit tests + conformance (needs podman or docker)
@@ -58,6 +61,23 @@ calling a change done; CI runs the same steps.
 - Comments explain why, not what. Keep them short, and leave out comments
   that only restate a name, a type or the obvious.
 - Prefer no new dependencies; ask before adding one.
+
+### AssemblyScript (`packages/codegen/assembly`)
+
+- Group files by compiler stage (`abc/`, later `ir/`, `emit/`), not by kind:
+  no `utils/`. A helper lives next to its only user.
+- Keep any object read through a raw pointer (`changetype<usize>`, `load`)
+  referenced from a live variable, field or global; otherwise the collector
+  may free it mid-read.
+- The dialect is stricter than TypeScript: no `import type`, and `@inline`
+  only on class members (Binaryen inlines small functions at `-O3` anyway).
+  Biome's import-type fix is off for this folder for that reason.
+- Mark classes `@final` unless they are meant to be extended, so calls on
+  them never need virtual dispatch.
+- Errors are sticky flags or VerifyError numbers, never `throw`: an abort
+  kills the wasm instance, and the JIT must survive a malformed SWF.
+- Use avmplus' error numbers (`assembly/abc/constants.ts`) so rejections match
+  avmshell.
 
 ## Git
 

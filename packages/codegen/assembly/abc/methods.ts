@@ -1,0 +1,114 @@
+// method_info and metadata_info, checked like avmplus' parseMethodInfos and
+// parseMetadataInfos.
+import { Abc } from "./abc";
+import {
+  kCorruptABCError,
+  kCpoolIndexRangeError,
+  kIllegalNativeMethodError,
+  METHOD_HasOptional,
+  METHOD_HasParamNames,
+  METHOD_Native,
+} from "./constants";
+import { Reader } from "./reader";
+
+export function readMethods(abc: Abc, r: Reader): bool {
+  const count = r.u30();
+  if (<usize>max(count, 1) > r.end - r.pos) {
+    return abc.fail(kCorruptABCError);
+  }
+
+  abc.methodReturnType = new StaticArray<u32>(count);
+  abc.methodName = new StaticArray<u32>(count);
+  abc.methodFlags = new StaticArray<u8>(count);
+  abc.methodParamStart = new StaticArray<u32>(count + 1);
+  abc.methodOptionalStart = new StaticArray<u32>(count + 1);
+  abc.methodOwner = new StaticArray<i32>(count);
+
+  for (let i: u32 = 0; i < count; i++) {
+    unchecked((abc.methodOwner[i] = -1));
+
+    const paramCount = r.u30();
+    unchecked((abc.methodReturnType[i] = r.u30()));
+    unchecked((abc.methodParamStart[i] = abc.paramTypes.length));
+    for (let j: u32 = 0; j < paramCount && !r.failed; j++) {
+      abc.paramTypes.push(r.u30());
+    }
+
+    unchecked((abc.methodName[i] = r.u30()));
+    const flags = <u8>r.u8();
+    if (r.failed) {
+      return abc.fail(kCorruptABCError);
+    }
+
+    if (flags & METHOD_Native) {
+      return abc.fail(kIllegalNativeMethodError);
+    }
+
+    unchecked((abc.methodFlags[i] = flags));
+    unchecked((abc.methodOptionalStart[i] = abc.optionalValue.length));
+    if (flags & METHOD_HasOptional) {
+      const optionalCount = r.u30();
+      for (let j: u32 = 0; j < optionalCount && !r.failed; j++) {
+        abc.optionalValue.push(r.u30());
+        abc.optionalKind.push(<u8>r.u8());
+      }
+
+      if (optionalCount === 0 || optionalCount > paramCount) {
+        return abc.fail(kCorruptABCError);
+      }
+    }
+
+    // Parameter names are debug information; skip them.
+    if (flags & METHOD_HasParamNames) {
+      for (let j: u32 = 0; j < paramCount && !r.failed; j++) {
+        r.u30();
+      }
+    }
+
+    if (r.failed) {
+      return abc.fail(kCorruptABCError);
+    }
+  }
+
+  unchecked((abc.methodParamStart[count] = abc.paramTypes.length));
+  unchecked((abc.methodOptionalStart[count] = abc.optionalValue.length));
+  return true;
+}
+
+export function readMetadata(abc: Abc, r: Reader): bool {
+  const count = r.u30();
+  if (<usize>count > r.end - r.pos) {
+    return abc.fail(kCorruptABCError);
+  }
+
+  abc.metadataName = new StaticArray<u32>(count);
+  abc.metadataItemStart = new StaticArray<u32>(count + 1);
+
+  for (let i: u32 = 0; i < count; i++) {
+    const name = r.u30();
+    if (r.failed) {
+      return abc.fail(kCorruptABCError);
+    }
+
+    if (name === 0 || name >= abc.pool.stringCount) {
+      return abc.fail(kCpoolIndexRangeError);
+    }
+
+    unchecked((abc.metadataName[i] = name));
+    unchecked((abc.metadataItemStart[i] = abc.metadataKey.length));
+
+    // Keys and values are string indices that avmplus does not check.
+    const itemCount = r.u30();
+    for (let j: u32 = 0; j < itemCount && !r.failed; j++) {
+      abc.metadataKey.push(r.u30());
+      abc.metadataValue.push(r.u30());
+    }
+
+    if (r.failed) {
+      return abc.fail(kCorruptABCError);
+    }
+  }
+
+  unchecked((abc.metadataItemStart[count] = abc.metadataKey.length));
+  return true;
+}
