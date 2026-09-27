@@ -167,7 +167,8 @@ export function compareFacts(
 
   for (const method of Object.keys(actual.code)) {
     const listed = new Set(expected.code[Number(method)] ?? []);
-    const decoded = actual.code[Number(method)];
+    // Verifier errors are compared against avmshell's output; see verifyErrors.
+    const decoded = actual.code[Number(method)].filter((l) => !l.startsWith("error"));
     for (const instruction of decoded) {
       if (!listed.has(instruction)) {
         differences.push(
@@ -179,4 +180,22 @@ export function compareFacts(
   }
 
   return differences;
+}
+
+/**
+ * The VerifyError numbers swf2es reports for an ABC's method bodies, each
+ * once. avmshell verifies a method only when it first runs, so these are
+ * compared with the VerifyErrors avmshell printed.
+ */
+export function verifyErrors(facts: AbcFacts): number[] {
+  const errors = new Set<number>();
+  for (const lines of Object.values(facts.code)) {
+    for (const line of lines) {
+      if (line.startsWith("error")) {
+        errors.add(Number(line.split(" ")[1]));
+      }
+    }
+  }
+
+  return [...errors].sort((a, b) => a - b);
 }

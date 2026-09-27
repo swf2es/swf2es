@@ -11,7 +11,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { abcdumpFacts, compareFacts, swf2esFacts } from "../../oracle/abc-facts.ts";
+import { abcdumpFacts, compareFacts, swf2esFacts, verifyErrors } from "../../oracle/abc-facts.ts";
 import { runOracle } from "../../oracle/oracle.ts";
 import { collectTests } from "./collect.ts";
 
@@ -60,8 +60,17 @@ for (const r of results) {
   if (r.compiled) {
     const abc = new Uint8Array(readFileSync(`${here}out/${r.name}.abc`));
     const count = { count: 0 };
-    for (const difference of compareFacts(abcdumpFacts(r.dump ?? ""), swf2esFacts(abc), count)) {
+    const facts = swf2esFacts(abc);
+    for (const difference of compareFacts(abcdumpFacts(r.dump ?? ""), facts, count)) {
       problems.push(`${r.name}: ${difference}`);
+    }
+
+    const ours = verifyErrors(facts).join(" ");
+    const theirs = [...new Set(r.output.match(/(?<=VerifyError: Error #)\d+/g) ?? [])]
+      .sort()
+      .join(" ");
+    if (ours !== theirs) {
+      problems.push(`${r.name}: VerifyErrors: avmshell [${theirs}], swf2es [${ours}]`);
     }
     unreachable += count.count;
   }
