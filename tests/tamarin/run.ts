@@ -73,11 +73,12 @@ if (update) {
   // Merge, so updating a subset keeps the other tests' entries.
   const previous = prefixes.length ? readBaseline() : {};
   const merged = Object.fromEntries(
-    Object.entries({ ...previous, ...outcomes }).sort(([a], [b]) => a.localeCompare(b)),
+    // Code point order: the same on every machine, unlike localeCompare.
+    Object.entries({ ...previous, ...outcomes }).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
   );
   // One test per line, so a changed result is a one-line diff.
   const lines = Object.entries(merged).map(
-    ([path, o]) => `${JSON.stringify(path)}: ${JSON.stringify(o)}`,
+    ([path, o]) => `  ${JSON.stringify(path)}: ${JSON.stringify(o)}`,
   );
   writeFileSync(baselineFile, `{\n${lines.join(",\n")}\n}\n`);
   console.log(`  baseline: wrote ${Object.keys(merged).length} tests`);
