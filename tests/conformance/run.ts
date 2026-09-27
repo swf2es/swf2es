@@ -60,8 +60,10 @@ for (const r of results) {
     );
   }
 
-  const differences = compareFacts(abcdumpFacts(r.dump ?? ""), swf2esFacts(abcOf(r)));
-  report(!differences.length, `${r.file} parses like abcdump`, differences);
+  const unreachable = { count: 0 };
+  const differences = compareFacts(abcdumpFacts(r.dump ?? ""), swf2esFacts(abcOf(r)), unreachable);
+  const skipped = unreachable.count ? ` (${unreachable.count} unreachable instructions)` : "";
+  report(!differences.length, `${r.file} parses and decodes like abcdump${skipped}`, differences);
 }
 
 console.log(`conformance: ${results.length} ABCs, ${failed ? `${failed} failed` : "all passed"}`);

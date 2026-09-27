@@ -7,10 +7,14 @@ const { instantiate } = await import(new URL("testing.js", dir).href);
 const module = await WebAssembly.compile(await readFile(new URL("testing.wasm", dir)));
 const testing = await instantiate(module, { env: {} });
 
-/** Table counts, and each method body's sizes keyed by method index. */
+/**
+ * Table counts, each method body's sizes, and each body's instructions as
+ * "offset name", keyed by method index.
+ */
 export interface AbcFacts {
   counts: Record<string, number>;
   bodies: Record<number, string>;
+  code: Record<number, string[]>;
 }
 
 // abcdump names each table in its "// X count N" lines.
@@ -35,8 +39,10 @@ const body = (
   `local_count=${localCount} max_scope=${maxScope} max_stack=${maxStack} code_len=${length} code_offset=${offset}`;
 
 export function abcdumpFacts(dump: string): AbcFacts {
-  const facts: AbcFacts = { counts: {}, bodies: {} };
+  const facts: AbcFacts = { counts: {}, bodies: {}, code: {} };
   let method = -1;
+  // The method whose disassembly is being read, until its closing brace.
+  let inCode = -1;
 
   for (const line of dump.split("\n")) {
     const count = line.match(/^\/\/ (.+?) count (\d+)/);
@@ -44,6 +50,19 @@ export function abcdumpFacts(dump: string): AbcFacts {
       // An empty pool may be written with count 0 or 1; both mean no entries.
       const n = Number(count[2]);
       facts.counts[COUNTS[count[1]]] = count[1].startsWith("Cpool") ? Math.max(n, 1) : n;
+      continue;
+    }
+
+    if (inCode >= 0) {
+      if (/^\s*\}\s*$/.test(line)) {
+        inCode = -1;
+        continue;
+      }
+
+      const instruction = line.match(/^\s*(\d+)\s+(\w+)/);
+      if (instruction) {
+        facts.code[inCode].push(`${instruction[1]} ${instruction[2]}`);
+      }
       continue;
     }
 
@@ -59,6 +78,8 @@ export function abcdumpFacts(dump: string): AbcFacts {
     if (sizes && method >= 0) {
       const [, locals, scope, stack, length, offset] = sizes.map(Number);
       facts.bodies[method] = body(locals, scope, stack, length, offset);
+      facts.code[method] = [];
+      inCode = method;
     }
   }
 
@@ -66,7 +87,7 @@ export function abcdumpFacts(dump: string): AbcFacts {
 }
 
 export function swf2esFacts(abc: Uint8Array): AbcFacts {
-  const facts: AbcFacts = { counts: {}, bodies: {} };
+  const facts: AbcFacts = { counts: {}, bodies: {}, code: {} };
   const pool = (testing.poolDump(abc) as string).split("\n");
   const tables = (testing.abcDump(abc) as string).split("\n");
 
@@ -98,11 +119,37 @@ export function swf2esFacts(abc: Uint8Array): AbcFacts {
     }
   }
 
+  let method = -1;
+  for (const line of (testing.codeDump(abc) as string).split("\n")) {
+    const header = line.match(/^body \d+ method (\d+)/);
+    if (header) {
+      method = Number(header[1]);
+      facts.code[method] = [];
+      continue;
+    }
+
+    const instruction = line.match(/^\s+(\d+) (\w+)/);
+    if (instruction) {
+      facts.code[method].push(`${instruction[1]} ${instruction[2]}`);
+    } else if (line.trim().startsWith("error")) {
+      facts.code[method].push(line.trim());
+    }
+  }
+
   return facts;
 }
 
-/** Every difference between two sets of facts, as readable lines. */
-export function compareFacts(expected: AbcFacts, actual: AbcFacts): string[] {
+/**
+ * Every difference between two sets of facts, as readable lines. abcdump
+ * disassembles code in a straight line while swf2es decodes only reachable
+ * code, so each decoded instruction must be in abcdump's list, not the
+ * reverse; `unreachable` counts the ones abcdump lists beyond ours.
+ */
+export function compareFacts(
+  expected: AbcFacts,
+  actual: AbcFacts,
+  unreachable = { count: 0 },
+): string[] {
   const differences: string[] = [];
   for (const key of new Set([...Object.keys(expected.counts), ...Object.keys(actual.counts)])) {
     if (expected.counts[key] !== actual.counts[key]) {
@@ -116,6 +163,19 @@ export function compareFacts(expected: AbcFacts, actual: AbcFacts): string[] {
     if (e !== a) {
       differences.push(`method ${method} body: abcdump ${e}, swf2es ${a}`);
     }
+  }
+
+  for (const method of Object.keys(actual.code)) {
+    const listed = new Set(expected.code[Number(method)] ?? []);
+    const decoded = actual.code[Number(method)];
+    for (const instruction of decoded) {
+      if (!listed.has(instruction)) {
+        differences.push(
+          `method ${method}: swf2es decoded "${instruction}", which abcdump does not list`,
+        );
+      }
+    }
+    unreachable.count += listed.size - decoded.length;
   }
 
   return differences;
