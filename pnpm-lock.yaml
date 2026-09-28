@@ -37,7 +37,18 @@ importers:
         specifier: ^0.28.20
         version: 0.28.20
 
-  packages/format: {}
+  packages/format:
+    dependencies:
+      lzma1:
+        specifier: 0.3.0
+        version: 0.3.0
+      pako:
+        specifier: 2.1.0
+        version: 2.1.0
+    devDependencies:
+      '@types/pako':
+        specifier: 2.0.3
+        version: 2.0.3
 
   packages/player:
     dependencies:
@@ -51,7 +62,11 @@ importers:
         specifier: workspace:*
         version: link:../runtime
 
-  packages/runtime: {}
+  packages/runtime:
+    dependencies:
+      '@swf2es/format':
+        specifier: workspace:*
+        version: link:../format
 
   tests/bench: {}
 
@@ -132,6 +147,9 @@ packages:
 
   '@types/node@24.19.0':
     resolution: {integrity: sha512-zY+5tKxXdhGh1PYI0ac+7juvEu4OI6vWtVVoj5i2m42jxAY1U+zHGt6QCyOFwykdP62sM3MJ9stoYYUw5aCWew==}
+
+  '@types/pako@2.0.3':
+    resolution: {integrity: sha512-bq0hMV9opAcrmE0Byyo0fY3Ew4tgOevJmQ9grUhpXQhYfyLJ1Kqg3P33JT5fdbT2AjeAjR51zqqVjAL/HMkx7Q==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -265,6 +283,13 @@ packages:
   long@5.3.2:
     resolution: {integrity: sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA==}
 
+  lzma1@0.3.0:
+    resolution: {integrity: sha512-ETg5CT6Ojybzjx2YG48NuPcN7kGzhLO6FfKbkvUwt0bxIEOq+wXykCZBoNBrkGq66zwJT1ZdUI71F0wC6pP9TQ==}
+    engines: {bun: '>=1.0.0', node: '>=18.0.0'}
+
+  pako@2.1.0:
+    resolution: {integrity: sha512-w+eufiZ1WuJYgPXbV/PO3NCMEc3xqylkKHzp8bxp1uW4qaSNQUkwmLLEc3kKsfz8lpV1F8Ht3U1Cm+9Srog2ug==}
+
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
     engines: {node: '>=16.20.0'}
@@ -313,6 +338,8 @@ snapshots:
   '@types/node@24.19.0':
     dependencies:
       undici-types: 7.24.6
+
+  '@types/pako@2.0.3': {}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
@@ -382,6 +409,10 @@ snapshots:
   binaryen@131.0.0-nightly.20260721: {}
 
   long@5.3.2: {}
+
+  lzma1@0.3.0: {}
+
+  pako@2.1.0: {}
 
   typescript@7.0.2:
     optionalDependencies:

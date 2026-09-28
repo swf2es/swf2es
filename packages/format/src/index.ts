@@ -29,3 +29,14 @@ export function readSwfHeader(bytes: Uint8Array): SwfHeader {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return { compression, version: bytes[3], fileLength: view.getUint32(4, true) };
 }
+
+export {
+  CompressedDataError,
+  decompressSwf,
+  deflateCompress,
+  LZMA_HEADER,
+  lzmaByteArrayCompress,
+  lzmaByteArrayUncompress,
+  zlibCompress,
+  zlibUncompress,
+} from "./compression.js";
