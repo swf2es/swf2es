@@ -338,9 +338,19 @@ const ASCII_LENGTH = 16;
 
 export function fromUtf8(bytes: Uint8Array): string {
   const n = bytes.length;
-  // ASCII, as most text is: its bytes are its characters. Not below
-  // ASCII_LENGTH bytes, where looking costs more than it saves.
-  if (n >= ASCII_LENGTH) {
+  // ASCII, as most text is: its bytes are its characters. Below
+  // ASCII_LENGTH bytes, a character at a time, until one is not.
+  if (n < ASCII_LENGTH) {
+    let s = "";
+    let k = 0;
+    for (; k < n && bytes[k] < 0x80; k++) {
+      s += String.fromCharCode(bytes[k]);
+    }
+
+    if (k === n) {
+      return s;
+    }
+  } else {
     let ascii = 0;
     while (ascii < n && bytes[ascii] < 0x80) {
       ascii++;
