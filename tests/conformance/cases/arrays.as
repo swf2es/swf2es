@@ -28,3 +28,9 @@ people.sortOn("n");
 trace(people.map(function(p:*, i:int, arr:Array):* { return p.n; }));
 people.sortOn("a", Array.NUMERIC | Array.DESCENDING);
 trace(people.map(function(p:*, i:int, arr:Array):* { return p.n; }));
+// A hole reads through to Array.prototype, in the callbacks and in sort.
+var holes:Array = [];
+holes[1] = 2;
+Array.prototype[0] = 99;
+trace("holes", holes.map(function(x:*, i:int, arr:Array):* { return x; }), holes.every(function(x:*, i:int, arr:Array):Boolean { return x > 0; }));
+delete Array.prototype[0];

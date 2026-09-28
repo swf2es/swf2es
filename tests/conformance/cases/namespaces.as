@@ -19,3 +19,5 @@ use namespace veg;
 trace(b.item, b.name());
 var q:QName = new QName(fruit, "item");
 trace(q.localName, q.uri, b[q]);
+var any:QName = new QName("*");
+trace(any.localName, any.uri, new QName(null, "x").uri, new QName("x").uri, String(new QName(fruit, "y")));

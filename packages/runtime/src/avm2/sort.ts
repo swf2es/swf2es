@@ -42,7 +42,7 @@ function numericCompare(rt: Runtime): Compare {
     const a = rt.toNumber(x);
     const b = rt.toNumber(y);
     const diff = a - b;
-    if (diff === diff) {
+    if (!Number.isNaN(diff)) {
       return diff < 0 ? -1 : diff > 0 ? 1 : 0;
     }
 
@@ -228,7 +228,7 @@ function sortWith(
     const name = qname(publicNs, fields[0].name);
     for (let i = len - 1; i >= 0; i--) {
       index[i] = i;
-      const v = a[i];
+      const v = rt.getProperty(d, rt.publicName(i));
       fieldAtoms[i] = v;
       if (isObject(v)) {
         atoms[i] = rt.getProperty(v, name);
@@ -241,7 +241,8 @@ function sortWith(
   } else {
     for (let i = len - 1; i >= 0; i--) {
       index[i] = i;
-      atoms[i] = a[i];
+      // As getUintProperty: a hole finds the prototype's element.
+      atoms[i] = rt.getProperty(d, rt.publicName(i));
       if (numeric && typeof atoms[i] !== "number" && Number.isNaN(rt.toNumber(atoms[i]))) {
         throw rt.error("TypeError", 1034, rt.describe(atoms[i]), "Number");
       }

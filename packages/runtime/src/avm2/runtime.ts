@@ -1677,7 +1677,10 @@ export class Runtime {
   // Domain memory, as avmplus' MOPS: little-endian, an address outside the
   // memory a RangeError.
 
-  /** The domain memory's view for `size` bytes at `address`, which it must hold. */
+  /**
+   * `address` as an int, once checked that the domain memory holds `size`
+   * bytes there; before the memory is touched, since there may be none.
+   */
   private mops(address: Value, size: number): number {
     const a = this.toInt(address);
     const memory = this.memory;
@@ -1689,43 +1692,53 @@ export class Runtime {
   }
 
   li8(address: Value): number {
-    return (this.memory as DataView).getUint8(this.mops(address, 1));
+    const at = this.mops(address, 1);
+    return (this.memory as DataView).getUint8(at);
   }
 
   li16(address: Value): number {
-    return (this.memory as DataView).getUint16(this.mops(address, 2), true);
+    const at = this.mops(address, 2);
+    return (this.memory as DataView).getUint16(at, true);
   }
 
   li32(address: Value): number {
-    return (this.memory as DataView).getInt32(this.mops(address, 4), true);
+    const at = this.mops(address, 4);
+    return (this.memory as DataView).getInt32(at, true);
   }
 
   lf32(address: Value): number {
-    return (this.memory as DataView).getFloat32(this.mops(address, 4), true);
+    const at = this.mops(address, 4);
+    return (this.memory as DataView).getFloat32(at, true);
   }
 
   lf64(address: Value): number {
-    return (this.memory as DataView).getFloat64(this.mops(address, 8), true);
+    const at = this.mops(address, 8);
+    return (this.memory as DataView).getFloat64(at, true);
   }
 
   si8(value: Value, address: Value): void {
-    (this.memory as DataView).setUint8(this.mops(address, 1), this.toInt(value));
+    const at = this.mops(address, 1);
+    (this.memory as DataView).setUint8(at, this.toInt(value));
   }
 
   si16(value: Value, address: Value): void {
-    (this.memory as DataView).setUint16(this.mops(address, 2), this.toInt(value), true);
+    const at = this.mops(address, 2);
+    (this.memory as DataView).setUint16(at, this.toInt(value), true);
   }
 
   si32(value: Value, address: Value): void {
-    (this.memory as DataView).setInt32(this.mops(address, 4), this.toInt(value), true);
+    const at = this.mops(address, 4);
+    (this.memory as DataView).setInt32(at, this.toInt(value), true);
   }
 
   sf32(value: Value, address: Value): void {
-    (this.memory as DataView).setFloat32(this.mops(address, 4), this.toNumber(value), true);
+    const at = this.mops(address, 4);
+    (this.memory as DataView).setFloat32(at, this.toNumber(value), true);
   }
 
   sf64(value: Value, address: Value): void {
-    (this.memory as DataView).setFloat64(this.mops(address, 8), this.toNumber(value), true);
+    const at = this.mops(address, 8);
+    (this.memory as DataView).setFloat64(at, this.toNumber(value), true);
   }
 
   // E4X, not implemented yet.

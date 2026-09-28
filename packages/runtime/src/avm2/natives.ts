@@ -587,10 +587,10 @@ function eachElement(
     throw rt.error("TypeError", 1510);
   }
 
-  const a: Value[] = o.$a;
-  const length = a.length;
+  // Each element as a get of its index: a hole finds the prototype's.
+  const length: number = o.$a.length;
   for (let i = 0; i < length; i++) {
-    const element = a[i];
+    const element = rt.getProperty(o, rt.publicName(i));
     const done = each(rt.callValue(f, receiver, [element, i, o], null), element);
     if (done !== undefined) {
       return done;
@@ -622,6 +622,11 @@ function newQName(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
 
   const local =
     name === undefined ? "" : name?.$local !== undefined ? name.$local : rt.toString(name);
+  // With no namespace given, the any name is in any namespace too.
+  if (local === "*" && (args.length < 2 || args[0] === undefined)) {
+    ns = null;
+  }
+
   o.$ns = ns;
   o.$local = local === "*" ? null : local;
   return o;

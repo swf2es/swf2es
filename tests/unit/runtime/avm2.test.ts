@@ -58,3 +58,9 @@ test("domain memory loads and stores little-endian, and rejects addresses outsid
   assert.throws(() => rt.li32(13), /Error #1506/);
   assert.throws(() => rt.si8(0, -1), /Error #1506/);
 });
+
+test("domain memory with none set throws AS3's RangeError, not the host's TypeError", () => {
+  const rt = avm2.createRuntime();
+  assert.throws(() => rt.li8(0), /Error #1506/);
+  assert.throws(() => rt.sf64(1, 0), /Error #1506/);
+});

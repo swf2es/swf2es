@@ -13,7 +13,8 @@ export const DTOSTR_FIXED = 1;
 export const DTOSTR_PRECISION = 2;
 export const DTOSTR_EXPONENTIAL = 3;
 
-const kLog2_10 = 0.30102999566398119521373889472449;
+// avmplus' kLog2_10, 0.30102999566398119521373889472449, as the double it is.
+const kLog2_10 = 0.3010299956639812;
 const maxBase2Precision = 53;
 const two_pow_52 = 2 ** 52;
 

@@ -54,6 +54,18 @@ Near-term work, in order. The goal of milestone 1 is in
    was compiled against. Every instruction of Tamarin, the libraries and
    as3pb lowers. Next: ByteArray and domain memory, so as3pb runs, and more
    cases.
+7. **Faster generated code**, measured on as3pb against AwayFL and on small
+   loops, including loops with bounds known only at run time:
+   1. Typed comparisons and branches: plain `<`, `>` and `===` where the
+      IR's types are numbers, instead of the runtime's generic ones.
+   2. Structured control flow: loops, `if`s and labelled blocks built from
+      the dominator tree, as in Ramsey's "Beyond Relooper", with copies of
+      stack registers removed. A method whose control flow is irreducible,
+      or whose handler ranges do not nest, keeps the dispatcher. It changes
+      only how blocks connect, so int wrapping, evaluation order and where
+      an exception comes from stay as they are.
+   3. Source maps from the ABC's debugline and debugfile, to step through
+      the AS3 in DevTools.
 5. **Faster verification**: the minimal runtime halved decoding to about
    35 ns per instruction, against Ruffle's 15 for decoding alone
    ([benchmarks.md](benchmarks.md)); the typed verifier still walks every
