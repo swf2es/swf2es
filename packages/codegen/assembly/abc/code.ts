@@ -723,18 +723,23 @@ export class BodyDecoder {
    * recording 1068 for a with scope meeting another scope.
    */
   mergeEntry(t: u32): i32 {
-    const domain = this.domain;
     const at = this.entryAt[t];
-    const scopeTop = this.localCount + this.scope;
     const stackBase = this.stackBase;
-    const stackTop = stackBase + this.stack;
-    let changed = 0;
-    for (let i: u32 = 0; i < stackTop; i++) {
-      if (i >= scopeTop && i < stackBase) {
-        i = stackBase - 1;
-        continue;
-      }
+    // The locals and scopes, then the stack, not what lies between.
+    const low = this.mergeRange(at, 0, this.localCount + this.scope);
+    if (low < 0) {
+      return -1;
+    }
 
+    const high = this.mergeRange(at, stackBase, stackBase + this.stack);
+    return high < 0 ? -1 : low | high;
+  }
+
+  /** mergeEntry for values [from, to) of the entry state at `at`. */
+  @inline
+  mergeRange(at: u32, from: u32, to: u32): i32 {
+    let changed = 0;
+    for (let i = from; i < to; i++) {
       const flags = this.valueFlags[i];
       const entryFlags = this.entryFlags[at + i];
       if ((flags ^ entryFlags) & WITH) {
@@ -743,8 +748,14 @@ export class BodyDecoder {
       }
 
       const entryType = this.entryType[at + i];
-      const merged = commonBase(domain, entryType, this.valueType[i]);
+      const valueType = this.valueType[i];
       const mergedFlags = entryFlags & (flags | WITH);
+      // Most merges meet the same type, which stays.
+      if (valueType === entryType && mergedFlags === entryFlags) {
+        continue;
+      }
+
+      const merged = commonBase(this.domain, entryType, valueType);
       if (merged !== entryType || mergedFlags !== entryFlags) {
         this.entryType[at + i] = merged;
         this.entryFlags[at + i] = mergedFlags;
