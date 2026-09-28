@@ -17,6 +17,7 @@ import {
   type TypeRef,
   type Value,
 } from "./runtime.js";
+import { sort, sortOn } from "./sort.js";
 
 type Natives = Record<string, (rt: Runtime) => Method>;
 
@@ -172,10 +173,31 @@ const natives: Natives = {
     o.$a.indexOf(v, rt.toInt(from)),
   "Array.Array::_lastIndexOf": (rt) => (o: AsObject, v: Value, from: Value) =>
     o.$a.lastIndexOf(v, rt.toInt(from)),
-  "Array.Array::_sort": (rt) => (o: AsObject, args: Value) => {
-    const [compare] = elements(args);
-    sortValues(rt, o.$a, compare);
-    return o;
+  "Array.Array::_sort": (rt) => (o: AsObject, args: Value) => sort(rt, o, elements(args)),
+  "Array.Array::_sortOn": (rt) => (o: AsObject, names: Value, options: Value) =>
+    sortOn(rt, o, names, options),
+  "Array.Array::_every": (rt) => (o: AsObject, f: Value, receiver: Value) =>
+    eachElement(rt, o, f, receiver, (result) => (result === true ? undefined : false)) ?? true,
+  "Array.Array::_some": (rt) => (o: AsObject, f: Value, receiver: Value) =>
+    eachElement(rt, o, f, receiver, (result) => (result === true ? true : undefined)) ?? false,
+  "Array.Array::_forEach": (rt) => (o: AsObject, f: Value, receiver: Value) => {
+    eachElement(rt, o, f, receiver, () => undefined);
+  },
+  "Array.Array::_filter": (rt) => (o: AsObject, f: Value, receiver: Value) => {
+    const out: Value[] = [];
+    eachElement(rt, o, f, receiver, (result, element) => {
+      if (result === true) {
+        out.push(element);
+      }
+    });
+    return rt.array(out);
+  },
+  "Array.Array::_map": (rt) => (o: AsObject, f: Value, receiver: Value) => {
+    const out: Value[] = [];
+    eachElement(rt, o, f, receiver, (result) => {
+      out.push(result);
+    });
+    return rt.array(out);
   },
 
   // String: `this` is the string.
@@ -502,26 +524,41 @@ for (const [kind] of VECTORS) {
       );
       this.$a.splice(at, rt.toUint(deleteCount), ...items);
     };
-  natives[`${c}.${own}::_sort`] = (rt) => (o: AsObject, args: Value) => {
-    const [compare] = elements(args);
-    sortValues(rt, o.$a, compare);
-    return o;
-  };
+  natives[`${c}.${own}::_sort`] = (rt) => (o: AsObject, args: Value) => sort(rt, o, elements(args));
 }
 
-/** Sort as Array's and Vector's sort with a compare function, or else as strings. */
-function sortValues(rt: Runtime, a: Value[], compare: Value): void {
-  if (compare !== null && typeof compare === "object" && compare.$f) {
-    a.sort((x, y) => rt.toNumber(rt.callValue(compare, null, [x, y], null)));
-    return;
+/**
+ * As ArrayClass's every, filter, forEach, map and some: `f` called with
+ * each element, its index and the array, up to the length at the start;
+ * `each` sees each result and the element, and a value it returns ends the
+ * walk with that value. A method closure takes no other receiver.
+ */
+function eachElement(
+  rt: Runtime,
+  o: AsObject,
+  f: Value,
+  receiver: Value,
+  each: (result: Value, element: Value) => Value,
+): Value {
+  if (f === null || f === undefined) {
+    return undefined;
   }
 
-  // With no compare function, or sort options, by the elements' strings.
-  a.sort((x, y) => {
-    const sx = rt.toString(x);
-    const sy = rt.toString(y);
-    return sx < sy ? -1 : sx > sy ? 1 : 0;
-  });
+  if (f.$closure && receiver !== null && receiver !== undefined) {
+    throw rt.error("TypeError", 1510);
+  }
+
+  const a: Value[] = o.$a;
+  const length = a.length;
+  for (let i = 0; i < length; i++) {
+    const element = a[i];
+    const done = each(rt.callValue(f, receiver, [element, i, o], null), element);
+    if (done !== undefined) {
+      return done;
+    }
+  }
+
+  return undefined;
 }
 
 /** A match as AS3 gives it: an Array of the match and its groups, with its index and input. */

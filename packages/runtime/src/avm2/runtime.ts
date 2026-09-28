@@ -709,6 +709,7 @@ export class Runtime {
     if (!f) {
       const method: Method = traits.proto[`$m${id}`];
       f = this.newFunctionObject((...args: Value[]) => method.apply(o, args), null);
+      f.$closure = true;
       if (typeof o === "object") {
         byId.set(id, f);
       }
@@ -1522,9 +1523,12 @@ export class Runtime {
     return c !== undefined && c >= 0;
   }
 
-  // Iteration: an index counts through an object's own names, then its prototypes'.
+  // Iteration: an index counts through an object's own names, then its
+  // prototypes'. As avmplus' hashtable slots, it counts every name, hidden
+  // or not, so hiding one during a for-in (as _dontEnumPrototype does) does
+  // not move the others.
 
-  private enumerable(o: AsObject): string[] {
+  private names(o: AsObject): string[] {
     const names: string[] = [];
     if (o.$a !== undefined) {
       for (const i of Object.keys(o.$a)) {
@@ -1534,21 +1538,32 @@ export class Runtime {
 
     if (o.$d) {
       for (const k of o.$d.keys()) {
-        if (!o.$dontEnum?.has(k)) {
-          names.push(k);
-        }
+        names.push(k);
       }
     }
 
     return names;
   }
 
+  /** The index after `index` of an enumerable name of `o`, or 0. */
+  private nextIndex(o: AsObject, index: number): number {
+    const names = this.names(o);
+    for (let i = index; i < names.length; i++) {
+      if (!o.$dontEnum?.has(names[i])) {
+        return i + 1;
+      }
+    }
+
+    return 0;
+  }
+
   hasNext2(o: Value, index: number): [boolean, Value, number] {
     let obj = o;
     let i = index;
     while (obj !== null && obj !== undefined) {
-      if (typeof obj === "object" && i < this.enumerable(obj).length) {
-        return [true, obj, i + 1];
+      const next = typeof obj === "object" ? this.nextIndex(obj, i) : 0;
+      if (next) {
+        return [true, obj, next];
       }
 
       obj = this.protoOf(obj);
@@ -1559,16 +1574,16 @@ export class Runtime {
   }
 
   hasNext(o: Value, index: number): number {
-    return typeof o === "object" && o !== null && index < this.enumerable(o).length ? index + 1 : 0;
+    return typeof o === "object" && o !== null ? this.nextIndex(o, index) : 0;
   }
 
   nextName(o: Value, index: number): Value {
-    const name = this.enumerable(o)[index - 1];
+    const name = this.names(o)[index - 1];
     return o.$a !== undefined && arrayIndex(name) >= 0 ? Number(name) : name;
   }
 
   nextValue(o: Value, index: number): Value {
-    return this.getProperty(o, this.publicName(this.enumerable(o)[index - 1]));
+    return this.getProperty(o, this.publicName(this.names(o)[index - 1]));
   }
 
   // Errors.
