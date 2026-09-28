@@ -144,6 +144,25 @@ and emptied without a call into its runtime; and no rest arrays on calls
 made millions of times. What did not: small helpers V8 already inlines
 (domain memory's, `findDef`).
 
+### Step 13: unrolled loops
+
+Each candidate was measured on its own path, then on as3pb with
+`tests/programs/ab.ts`. as3pb, over 11 interleaved pairs, is unchanged
+by all three (ByteArray 194 → 195 ms, domain memory 201 → 201): it
+writes short strings and no AMF Vectors.
+
+| Change | Measured on | Before | After | Kept |
+|---|---|---|---|---|
+| `utf8()` ASCII detection and copy, 4 or 8 characters at a time | ns per character, strings of 6 to 2000 | 4.2–16.4 | 3.8–16.2 (within noise, 8 slower on short strings) | no |
+| `utf8()` through `TextEncoder` from 96 characters (the crossover is about 90) | ns per character, 96 / 512 / 2000 characters | 7.4 / 5.0 / 4.2 | 4.5 / 1.2 / 0.8 | yes |
+| The emitter's `Output.text()`, 4 characters per step | compiling the builtins and as3pb, median of 9, 5 interleaved pairs | 122.4 ms | 121.0 ms (−1.1%, lower in 10 of 10 runs) | yes |
+| AMF numeric Vectors, their bytes reserved at once | 60 × `writeObject` of a 100,000-element `Vector.<Number>` and `Vector.<int>` | 47 ms | 15 ms (avmshell: 115) | yes |
+
+`TextEncoder` writes a lone surrogate as U+FFFD, as the loop does. There
+avmshell's `writeUTFBytes` loses characters instead: a lone high
+surrogate takes the one after it, and one at the end disappears. swf2es
+keeps valid UTF-8.
+
 ### The AssemblyScript runtime
 
 codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator
