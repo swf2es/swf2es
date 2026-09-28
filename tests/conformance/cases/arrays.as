@@ -53,3 +53,18 @@ for (var ok:String in nestedObject) {
     for (var oj:String in nestedObject) {}
 }
 trace("nested object for-in", nestedCount);
+// However many for-ins inside it come and go, over names added and deleted.
+var churn:Array = [10, 20, 30];
+var churnSeen:Array = [];
+for (var ck:String in churn) {
+    churnSeen.push(ck);
+    if (ck == "0") {
+        delete churn[0];
+        for (var cn:int = 0; cn < 150; cn++) {
+            churn["k" + cn] = cn;
+            for (var cj:String in churn) {}
+            delete churn["k" + cn];
+        }
+    }
+}
+trace("churned for-in", churnSeen.join(","));
