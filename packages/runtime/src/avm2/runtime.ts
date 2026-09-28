@@ -55,7 +55,8 @@ export interface TraitsDesc {
   slots: number;
   defaults: [number, Value, TypeRef][];
   bindings: [Namespace, number, string, number][];
-  methods: [number, Factory][];
+  /** Each by dispatch id: its factory, and its method id in its ABC. */
+  methods: [number, Factory, number][];
   /** Its own slots with [Transient] metadata. */
   transient?: number[];
   /** Its own accessors with metadata, by dispatch id: 1 if any of it is [Transient], else 0. */
@@ -659,8 +660,8 @@ export class Runtime {
       traits.describe(script.desc.traits);
       const g = traits.instance();
       const scope = Object.assign([g], { w: 0 });
-      for (const [d, factory] of script.desc.traits.methods) {
-        traits.proto[methodKey(d)] = factory(scope, null);
+      for (const [d, factory, id] of script.desc.traits.methods) {
+        traits.proto[methodKey(d)] = this.withId(factory(scope, null), id);
       }
 
       script.global = g;
@@ -1153,8 +1154,9 @@ export class Runtime {
           : (...args: Value[]) => this.callBound(method, o, args),
         null,
       );
-      // Its length is the method's, its declared parameters, not the wrapper's.
+      // Its length is the method's, its declared parameters, not the wrapper's; and its id.
       f.$length = method.length;
+      f.$id = (method as Method & { $id?: number }).$id ?? 0;
       f.$closure = true;
       if (typeof o === "object") {
         byId.set(id, f);
@@ -1682,6 +1684,12 @@ export class Runtime {
     return o;
   }
 
+  /** `f`, a method, with its method id, which a closure of it keeps. */
+  private withId(f: Method, id: number): Method {
+    (f as Method & { $id?: number }).$id = id;
+    return f;
+  }
+
   /** A function's prototype, made when first asked for. */
   functionPrototype(f: AsObject): AsObject {
     if (!f.$prototype) {
@@ -1815,12 +1823,12 @@ export class Runtime {
     prototype.$dontEnum = new Set(["constructor"]);
 
     const iscope = this.scope(scope, [cls], 0);
-    for (const [d, factory] of desc.static.methods) {
-      straits.proto[methodKey(d)] = factory(scope, base);
+    for (const [d, factory, id] of desc.static.methods) {
+      straits.proto[methodKey(d)] = this.withId(factory(scope, base), id);
     }
 
-    for (const [d, factory] of desc.instance.methods) {
-      itraits.proto[methodKey(d)] = factory(iscope, base);
+    for (const [d, factory, id] of desc.instance.methods) {
+      itraits.proto[methodKey(d)] = this.withId(factory(iscope, base), id);
     }
 
     itraits.proto.$init = desc.init(iscope, base);

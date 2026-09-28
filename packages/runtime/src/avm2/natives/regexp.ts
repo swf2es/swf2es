@@ -74,10 +74,7 @@ function newRegExp(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
   const js = [..."gims"].filter((f) => flags.includes(f)).join("");
   o.$source = source;
   o.$extended = extended;
-  const text = extended
-    ? source.replace(/\\.|\s+|#[^\n]*/g, (t) => (t[0] === "\\" ? t : ""))
-    : source;
-  o.$re = compile(text, js);
+  o.$re = compile(source, js, extended);
   return o;
 }
 
@@ -85,9 +82,9 @@ function newRegExp(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
  * The JavaScript RegExp of an AS3 pattern (see fromPcre). One that does
  * not compile throws nothing, as in avmplus: it matches nothing.
  */
-export function compile(source: string, flags: string): RegExp {
+export function compile(source: string, flags: string, extended = false): RegExp {
   try {
-    const re = new RegExp(fromPcre(source), flags);
+    const re = new RegExp(fromPcre(source, extended), flags);
     // V8 compiles on the first match, where a pattern too large throws: here, once.
     re.test("");
     re.lastIndex = 0;
@@ -114,19 +111,27 @@ export function replacement(re: RegExp, text: string): string {
 }
 
 /**
- * PCRE's syntax that JavaScript has otherwise: a named group (?P<name>...)
- * as (?<name>...), its reference (?P=name) as \k<name>, and inline flags,
- * (?i) and (?-i), as a modifier group (?i:...) to the end of the group
- * they are in. Escapes and character classes are left as they are.
+ * PCRE's syntax that JavaScript has otherwise:
+ * - a named group (?P<name>...) as (?<name>...), and its reference
+ *   (?P=name) as \\k<name>;
+ * - inline flags, (?i) and (?-i), as a modifier group (?i:...) to the end
+ *   of the group they are in, and (?i:...) as it is;
+ * - extended mode, the x flag, and (?x) and (?x:...) within: whitespace
+ *   and # comments dropped where it is on;
+ * - a comment group (?#...) dropped.
+ * Escapes and character classes are left as they are.
  */
-function fromPcre(source: string): string {
-  if (!source.includes("(?")) {
+function fromPcre(source: string, extended: boolean): string {
+  if (!extended && !source.includes("(?")) {
     return source;
   }
 
   let out = "";
-  // For each open group, and the pattern itself, the modifier groups to close with it.
+  let x = extended;
+  // For each open group, and the pattern itself: the modifier groups to
+  // close with it, and whether x was on where it opened.
   const closers: number[] = [0];
+  const outerX: boolean[] = [x];
   let inClass = false;
   for (let i = 0; i < source.length; i++) {
     const c = source[i];
@@ -142,6 +147,18 @@ function fromPcre(source: string): string {
       continue;
     }
 
+    if (x && isSpace(c)) {
+      continue;
+    }
+
+    if (x && c === "#") {
+      while (i + 1 < source.length && source[i + 1] !== "\n") {
+        i++;
+      }
+
+      continue;
+    }
+
     if (c === "[") {
       inClass = true;
       out += c;
@@ -150,8 +167,10 @@ function fromPcre(source: string): string {
 
     if (c === ")") {
       out += ")".repeat(closers.pop() ?? 0);
+      x = outerX.pop() ?? extended;
       if (!closers.length) {
         closers.push(0);
+        outerX.push(x);
       }
 
       out += c;
@@ -163,10 +182,17 @@ function fromPcre(source: string): string {
       continue;
     }
 
+    if (source.startsWith("(?#", i)) {
+      const end = source.indexOf(")", i);
+      i = end < 0 ? source.length : end;
+      continue;
+    }
+
     if (source.startsWith("(?P<", i)) {
       out += "(?<";
       i += 3;
       closers.push(0);
+      outerX.push(x);
       continue;
     }
 
@@ -177,14 +203,26 @@ function fromPcre(source: string): string {
       continue;
     }
 
-    const flags = /^\(\?([imsx]*)(?:-([imsx]*))?\)/.exec(source.slice(i));
+    const flags = /^\(\?([imsx]*)(?:-([imsx]*))?([:)])/.exec(source.slice(i));
     if (flags && (flags[1] || flags[2])) {
-      // JavaScript's modifiers are i, m and s; x was applied to the whole pattern.
-      const on = flags[1].replace("x", "");
-      const off = (flags[2] ?? "").replace("x", "");
-      if (on || off) {
-        out += `(?${on}${off ? `-${off}` : ""}:`;
+      const on = flags[1];
+      const off = flags[2] ?? "";
+      // JavaScript's modifiers are i, m and s; x is applied here.
+      const js = modifiers(on.replace("x", ""), off.replace("x", ""));
+      const scoped = flags[3] === ":";
+      if (scoped) {
+        closers.push(0);
+        outerX.push(x);
+        out += js ? `(?${js}:` : "(?:";
+      } else if (js) {
+        out += `(?${js}:`;
         closers[closers.length - 1]++;
+      }
+
+      if (on.includes("x")) {
+        x = true;
+      } else if (off.includes("x")) {
+        x = false;
       }
 
       i += flags[0].length - 1;
@@ -193,10 +231,17 @@ function fromPcre(source: string): string {
 
     out += c;
     closers.push(0);
+    outerX.push(x);
   }
 
   return out + ")".repeat(closers[0]);
 }
+
+const modifiers = (on: string, off: string) => (on || off ? `${on}${off ? `-${off}` : ""}` : "");
+
+/** PCRE's whitespace, which extended mode drops. */
+const isSpace = (c: string) =>
+  c === " " || c === "\t" || c === "\n" || c === "\r" || c === "\f" || c === "\v";
 
 export const regexpHooks: Record<string, ClassHook> = {
   RegExp: {

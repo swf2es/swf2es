@@ -1,5 +1,6 @@
 // PCRE syntax JavaScript writes otherwise: named groups and their
-// references, inline flags to the end of their group; a pattern that does
+// references, inline flags to the end of their group, extended mode
+// however it is set, and comment groups; a pattern that does
 // not compile matches nothing and throws nothing, a string pattern too;
 // and a replacement's $0d, which avmplus reads as group d and the digit d.
 function probe(name:String, f:Function):void {
@@ -13,3 +14,9 @@ probe("inline flag off", function():* { return [/(?i)a(?-i)b/.test("Ab"), /(?i)a
 probe("no compile", function():* { var r:RegExp = new RegExp("(a"); return r.test("(a") + " " + r.exec("a") + " " + "x(a".search("(a") + " " + "x(a".match("(a"); });
 probe("nothing to repeat", function():* { return new RegExp("?").test("?"); });
 probe("replace $0d", function():* { return ["one two".replace(/(one) (two)/, "$02-$01"), "ab".replace(/(a)(b)/, "$00|$09|$$01|$1"), "ab".replace(/(a)/, "$01$1")].join(" "); });
+probe("extended option", function():* { return [new RegExp("a b # c", "x").test("ab"), new RegExp("a[ ]b", "x").test("a b"), new RegExp("a\\ b", "x").test("a b")].join(","); });
+probe("extended inline", function():* { return [new RegExp("(?x)a b").test("ab"), new RegExp("(?x)a b").test("a b"), new RegExp("a(?x) b c").test("abc")].join(","); });
+probe("extended scoped", function():* { return [new RegExp("(?x: a b )c d").test("abc d"), new RegExp("(?x: a b )c d").test("abcd")].join(","); });
+probe("extended off", function():* { return [new RegExp("a (?-x)b c", "x").test("ab c"), new RegExp("a (?-x)b c", "x").test("abc"), new RegExp("(a (?-x)b )c", "x").test("ab c")].join(","); });
+probe("extended comment", function():* { return new RegExp("(?x)a # the a\nb").test("ab"); });
+probe("comment group", function():* { return [/a(?#a comment)b/.test("ab"), new RegExp("a(?#)b").test("ab")].join(","); });
