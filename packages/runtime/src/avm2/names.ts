@@ -17,7 +17,18 @@ export class Namespace {
     readonly kind: number,
     /** null for a namespace without a URI (the any namespace). */
     readonly uri: string | null,
+    /**
+     * E4X's prefix, undefined for none, as a Namespace value can have one.
+     * A namespace with a prefix is not interned: names look it up as the
+     * interned one of its kind and URI (see interned).
+     */
+    readonly prefix: string | undefined = undefined,
   ) {}
+
+  /** The namespace names look this one up as: this one, or without its prefix, interned. */
+  get interned(): Namespace {
+    return this.prefix === undefined ? this : namespace(this.kind, this.uri);
+  }
 }
 
 const interned = new Map<string, Namespace>();
@@ -35,6 +46,23 @@ export function namespace(kind: number, uri: string | null): Namespace {
 }
 
 export const publicNs = namespace(NS_Public, "");
+
+/**
+ * A public Namespace value of `uri` with `prefix`, as E4X makes one: with
+ * no prefix, or the empty one for the empty URI, the interned namespace.
+ */
+export function prefixedNamespace(prefix: string | undefined, uri: string): Namespace {
+  if (prefix === undefined || (prefix === "" && uri === "")) {
+    return namespace(NS_Public, uri);
+  }
+
+  return new Namespace(NS_Public, uri, prefix);
+}
+
+/** A Namespace value's prefix, as avmplus has it: the empty URI's is "", else undefined unless given. */
+export function prefixOf(ns: Namespace): string | undefined {
+  return ns.prefix ?? (ns.uri === "" ? "" : undefined);
+}
 
 // Multiname kinds, as the ABC numbers them.
 export const CONSTANT_Qname = 0x07;
@@ -67,7 +95,8 @@ export class Multiname {
 
   constructor(
     readonly kind: number,
-    readonly namespaces: Namespace[],
+    /** Its namespaces; one of null, as a Qname's, is any namespace. */
+    readonly namespaces: (Namespace | null)[],
     readonly versions: number[],
     name: string | null,
     readonly attribute: boolean,
@@ -82,7 +111,7 @@ export class Multiname {
    */
   static keyed(
     kind: number,
-    namespaces: Namespace[],
+    namespaces: (Namespace | null)[],
     versions: number[],
     key: object,
     attribute: boolean,
@@ -141,7 +170,8 @@ export class Multiname {
     }
 
     for (const ns of this.namespaces) {
-      if (ns.kind === NS_Public && ns.uri === "") {
+      // null is any namespace, as in *::x.
+      if (ns !== null && ns.kind === NS_Public && ns.uri === "") {
         return this.name;
       }
     }
@@ -155,7 +185,8 @@ export class Multiname {
   get elementName(): boolean {
     if (this.publicCache === undefined) {
       this.publicCache =
-        !this.attribute && this.namespaces.some((ns) => ns.kind === NS_Public && ns.uri === "");
+        !this.attribute &&
+        this.namespaces.some((ns) => ns !== null && ns.kind === NS_Public && ns.uri === "");
     }
 
     return this.publicCache;

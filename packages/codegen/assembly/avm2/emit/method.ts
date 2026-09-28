@@ -134,6 +134,13 @@ export class MethodEmitter {
 
     out.text(") {\n");
     this.prologue(method, global, flags);
+    // A method that sets the default XML namespace gives its caller's
+    // back when it returns or throws.
+    const dxns = (flags & C.METHOD_SetsDxns) !== 0;
+    if (dxns) {
+      out.text("  const $dxns = rt.enterDxns();\n  try {\n");
+    }
+
     const handled = ir.handlerCount > 0;
     if (handled) {
       this.regions();
@@ -156,6 +163,7 @@ export class MethodEmitter {
       this.node(0);
       this.structured = false;
       if (!this.unenclosed) {
+        this.leaveDxns(dxns);
         out.text("}");
         return;
       }
@@ -182,7 +190,16 @@ export class MethodEmitter {
       out.text("  }");
     }
 
-    out.text("\n}");
+    out.text("\n");
+    this.leaveDxns(dxns);
+    out.text("}");
+  }
+
+  /** The end of a method that sets the default XML namespace: its caller's back. */
+  leaveDxns(dxns: bool): void {
+    if (dxns) {
+      this.out.text("  } finally {\n    rt.defaultXmlNamespace = $dxns;\n  }\n");
+    }
   }
 
   /** Each block's file and line where it starts, from the debugfile and debugline instructions before it. */

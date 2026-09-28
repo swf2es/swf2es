@@ -26,30 +26,31 @@ recurses until the host's stack runs out, and
 
 ## Results
 
-2026-09-29, after the quick wins (#38), in 39 s. Two runs agree, but for the
-two tests above.
+2026-09-29, after E4X (#39), in 43 s. Two runs agree, but for the two
+tests above.
 
 | | Tests | Match avmshell | Checks passed, of avmshell's |
 |---|---|---|---|
-| **All** | 2578 | **2130 (82.6%)** | 57,838 of 62,435 (92.6%) |
+| **All** | 2578 | **2338 (90.7%)** | 59,950 of 62,435 (96.0%) |
 | ecma3 | 928 | 847 (91%) | 44,253 of 44,561 (99.3%) |
-| spidermonkey | 521 | 486 (93%) | 2,636 of 2,701 (97.6%) |
-| as3 | 849 | 729 (86%) | 10,298 of 11,522 (89.4%) |
-| e4x | 173 | 0 | 0 of 1,919 |
-| regress | 61 | 34 (56%) | 418 of 1,344 |
-| misc, mmgc, mops, recursion, versioning | 46 | 34 | 233 of 388 |
+| spidermonkey | 521 | 488 (94%) | 2,639 of 2,701 (97.7%) |
+| as3 | 849 | 754 (89%) | 10,344 of 11,522 (89.8%) |
+| e4x | 173 | 171 (99%) | 1,916 of 1,919 (99.8%) |
+| regress | 61 | 42 (69%) | 556 of 1,344 |
+| misc, mmgc, mops, recursion, versioning | 46 | 36 | 242 of 388 |
 
-Without E4X, which swf2es does not have yet, 2130 of 2405 tests match (88.6%).
+The two E4X tests left call a native with too few arguments, which
+avmshell checks (ArgumentError 1063) and swf2es' natives do not yet.
 
 What stops a test, or makes it differ, most often:
 
 | Tests | Reason |
 |---|---|
-| 187 | E4X: an XML or XMLList native, `descendants`, or AMF3 for XML |
-| 116 | Fewer checks passed than in avmshell |
-| 67 | Ended otherwise: 65 with an AS3 exception nothing caught where avmshell ended normally, 2 the other way |
+| 101 | Fewer checks passed than in avmshell |
+| 66 | Ended otherwise: 64 with an AS3 exception nothing caught where avmshell ended normally, 2 the other way |
 | 14 | The same checks passed, but others failed |
-| 21 | avmshell's shell API (`System`, `File`, `Domain`, the sampler), which a SWF never calls |
+| 31 | avmshell's shell API (`System`, `File`, `Domain`, the sampler, `Mutex`), which a SWF never calls |
+| 4 | `describeTypeJSON`, and AMF3 for XML |
 
 ### Since the first run (2015, 78.2%)
 
@@ -59,15 +60,14 @@ What stops a test, or makes it differ, most often:
 | The URI functions, `escape` and `unescape`; a method closure's `length` is its method's | +34 |
 | The register below a `swap` given the top's type, so a setter called from a setter is bound by its own type | +14 |
 | A private type named by its module's own namespace, as a class outside the package block is | +20 |
+| E4X: XML and XMLList, their parser, names and namespaces, the default XML namespace | +208 |
 
 ## Natives
 
-285 of the 585 native methods builtin.abc and shell_toplevel.abc declare
+381 of the 585 native methods builtin.abc and shell_toplevel.abc declare
 are implemented. About 140 of the rest are avmshell's shell API
 (`ShellPosix`, `File`, `System`, the sampler, `Trace`, `Worker`, `Mutex`,
 `Condition`), which SWF content cannot reach. Of the others:
-- E4X: 88 natives (`XML`, `XMLList`, `isXMLName`);
 - `IExternalizable` in AMF: 35 (`ObjectInput`, `ObjectOutput`);
-- the URI functions: 6;
 - `describeTypeJSON`, `Proxy`'s `isAttribute`, `DynamicPropertyOutput`,
   `Domain#loadBytes`/`getClass`, the atomics: 8.
