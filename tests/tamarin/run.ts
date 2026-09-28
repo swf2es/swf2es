@@ -1,7 +1,8 @@
 // Runs the Tamarin acceptance tests in avmshell through the oracle, checks
 // the results against baseline.json, and checks that swf2es parses and
-// decodes every compiled ABC like avmplus' abcdump and links it against
-// the builtins avmshell loads.
+// decodes every compiled ABC like avmplus' abcdump, and links it against
+// the builtins avmshell loads and verifies it with types, expecting the
+// VerifyErrors avmshell prints.
 //
 //   node tests/tamarin/run.ts [--update-baseline | --relax] [path prefix...]
 //
@@ -15,8 +16,8 @@ import { fileURLToPath } from "node:url";
 import {
   abcdumpFacts,
   compareFacts,
-  linkError,
   swf2esFacts,
+  typedErrors,
   verifyErrors,
 } from "../../oracle/abc-facts.ts";
 import { libraries, runOracle } from "../../oracle/oracle.ts";
@@ -76,9 +77,10 @@ for (const r of results) {
     }
 
     // A linking error stops the ABC loading, before any method is verified;
-    // a class's types resolve when it is created, before its methods run.
-    const link = linkError(builtins, abc);
-    const ours = link ? `${link}` : verifyErrors(facts).join(" ");
+    // otherwise every method the scripts can run is verified with types, and
+    // any other body structurally.
+    const typed = typedErrors(builtins, abc);
+    const ours = [...new Set([...typed, ...verifyErrors(facts)])].sort((x, y) => x - y).join(" ");
     const theirs = [...new Set(r.output.match(/(?<=VerifyError: Error #)\d+/g) ?? [])]
       .sort()
       .join(" ");

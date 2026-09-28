@@ -88,11 +88,17 @@ Each method goes through the same steps, in `codegen`:
 
 1. **Decode** (`abc/code.ts`): the reachable instructions, as the avmplus
    verifier reads them.
-2. **Verify and build the IR** in one pass, as avmplus' `Verifier` does its
-   checks: a frame state per block (operand stack, scope stack, locals and
-   their types), merged where control flow joins, with avmplus' VerifyError
-   numbers. The same pass writes the IR, so what is compiled is exactly what
-   was verified.
+2. **Verify and build the IR**, as avmplus' `Verifier` does its checks,
+   with its VerifyError numbers. A first pass keeps a frame state per block
+   (the locals, scope stack and operand stack, each value with its type,
+   whether it is known not null, and whether it is a with scope), merges it
+   where control flow joins, and walks a block again when its entry state
+   changes, until none does. A second pass walks the blocks in code order
+   with their final states; there `newclass` and `newfunction` capture the
+   scope chains the methods they create run in, and the same pass will
+   write the IR, so what is compiled is exactly what was verified. An ABC's
+   methods are verified from its scripts outward, as each becomes
+   creatable; methods nothing can create are never verified, as in avmplus.
    Where avmplus changed after the oracle's avmshell was built, swf2es
    follows the newer Flash Player: since PSIRT 3037, a method that can
    throw into a handler needs `max_stack` of at least 1, which the

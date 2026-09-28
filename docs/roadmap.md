@@ -20,7 +20,7 @@ Near-term work, in order. The goal of milestone 1 is in
       Tamarin method body verifies except the one avmshell also rejects,
       and `pnpm tamarin` checks that swf2es reports the VerifyErrors
       avmshell prints.
-   2. Value types and scope chains, in three parts:
+   2. Value types and scope chains: done, in three parts:
       - 2a. A domain and linking: classes looked up by qualified name
         across ABCs and linked to their base classes and interfaces with
         avmplus' errors. Builtin ABCs parse in a mode that allows native
@@ -33,13 +33,17 @@ Near-term work, in order. The goal of milestone 1 is in
         overrides), and resolved as avmplus resolves a class when it is
         created (slot types and initial values, method signatures, final
         methods, override signatures, implemented interfaces).
-      - 2c. The typed verifier: frame states with each value's type, merged
-        until they settle; each method's declaring scope, captured where it
-        is created; and the checks that need them (1013, getouterscope,
-        slots, callstatic's binding, operand types). Declaring scopes need
-        the scope stack's types and those types need the declaring scopes,
-        so they come together, as in avmplus' Verifier.
-   3. The IR, written by the same pass.
+      - 2c. The typed verifier: done. Frame states with each value's
+        type, merged until they settle; each method's declaring scope,
+        captured where it is created in a second pass in code order; and
+        the checks that need them. Every method of the libraries and as3pb
+        verifies, and every Tamarin method that can be created, with the
+        VerifyErrors avmshell prints.
+   3. The IR, written by the verifier's second pass.
+5. **Faster verification**: the typed verifier walks every block twice and
+   the structural checks cost about 60 ns per instruction, against Ruffle's
+   15 for decoding alone ([benchmarks.md](benchmarks.md)); profile it with
+   the IR in place.
 
 Tracked separately: SWF decompression in `format` (issue #3).
 

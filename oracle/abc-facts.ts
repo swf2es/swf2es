@@ -217,3 +217,22 @@ export function linkError(builtins: Uint8Array[], abc: Uint8Array, builtin = fal
   const first = testing.domainTraitsCount() as number;
   return (testing.domainAdd(abc, builtin) as number) || (testing.domainResolve(first) as number);
 }
+
+/**
+ * The VerifyErrors swf2es reports for `abc` loaded after `builtins`: the
+ * linking error if it does not link, else each distinct error of the
+ * methods its scripts can run, verified with types. `builtin` loads `abc`
+ * as a builtin ABC.
+ */
+export function typedErrors(builtins: Uint8Array[], abc: Uint8Array, builtin = false): number[] {
+  const link = linkError(builtins, abc, builtin);
+  if (link) {
+    return [link];
+  }
+
+  const errors = (testing.domainVerifyAll() as string)
+    .split("\n")
+    .filter((l) => l.includes(" error "))
+    .map((l) => Number(l.split(" ")[5]));
+  return [...new Set(errors)].sort((a, b) => a - b);
+}

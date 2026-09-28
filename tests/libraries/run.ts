@@ -2,15 +2,15 @@
 // avmshell runs with), and Flash Player's playerglobal and AIR's airglobal.
 // swf2es must parse and decode each, as a builtin ABC, like abcdump, and
 // link each of the others on top of builtin, as the player loads them, and
-// resolve all their types.
+// verify all their methods with types.
 //
 //   node tests/libraries/run.ts
 import { fileURLToPath } from "node:url";
 import {
   abcdumpFacts,
   compareFacts,
-  linkError,
   swf2esFacts,
+  typedErrors,
   verifyErrors,
 } from "../../oracle/abc-facts.ts";
 import { containerEngine, libraries } from "../../oracle/oracle.ts";
@@ -39,9 +39,9 @@ for (const library of all) {
   }
 
   const bases = library.name === "builtin" ? [] : [all[0].abc];
-  const link = linkError(bases, library.abc, true);
-  if (link) {
-    differences.push(`linking on top of builtin and resolving: error ${link}`);
+  const typed = typedErrors(bases, library.abc, true);
+  if (typed.length) {
+    differences.push(`linking on top of builtin and typed verification: errors ${typed.join(" ")}`);
   }
 
   for (const d of differences.slice(0, 20)) {
