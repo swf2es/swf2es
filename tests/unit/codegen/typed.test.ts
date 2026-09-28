@@ -10,7 +10,7 @@ const builtin = skip
   ? new Uint8Array()
   : new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
 
-/** The first VerifyError the typed verifier reports for the ABC's script initializers, or undefined. */
+/** The first VerifyError the typed verifier reports for the methods the ABC's scripts can run, or undefined. */
 function verify(abc: Uint8Array): number | undefined {
   testing.domainReset(50);
   assert.equal(testing.domainAdd(builtin, true), 0);
@@ -19,10 +19,8 @@ function verify(abc: Uint8Array): number | undefined {
     return link;
   }
 
-  const error = (testing.domainVerifyScripts() as string)
-    .split("\n")
-    .find((l) => l.includes("error"));
-  return error ? Number(error.split(" ")[3]) : undefined;
+  const error = (testing.domainVerifyAll() as string).split("\n").find((l) => l.includes("error"));
+  return error ? Number(error.split(" ")[5]) : undefined;
 }
 
 for (const c of typedCases) {

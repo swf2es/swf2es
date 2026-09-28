@@ -1,7 +1,7 @@
 // Test-only entry point: exposes the reader to node tests without adding
 // exports to codegen.wasm.
 import { Abc } from "./abc/abc";
-import { BodyDecoder } from "./abc/code";
+import { BodyDecoder, verifyMethods } from "./abc/code";
 import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./abc/opcodes";
 import { readAbc } from "./abc/parse";
 import { readConstantPool } from "./abc/pool";
@@ -424,6 +424,31 @@ export function domainVerifyScripts(): string {
     out.push(`script ${s} ${error ? `error ${error}` : "ok"}`);
   }
 
+  return out.join("\n");
+}
+
+/**
+ * Verify every method of the domain's last ABC that its scripts can run,
+ * with types: a "body B method M error N" line for each that fails, then
+ * "verified V of B bodies".
+ */
+export function domainVerifyAll(): string {
+  const index = <u32>(domain.abcs.length - 1);
+  const abc = domain.abcs[index];
+  const results = verifyMethods(domain, index);
+  const out: string[] = [];
+  let verified = 0;
+  for (let b = 0; b < results.length; b++) {
+    if (results[b] >= 0) {
+      verified++;
+    }
+
+    if (results[b] > 0) {
+      out.push(`body ${b} method ${abc.bodyMethod[b]} error ${results[b]}`);
+    }
+  }
+
+  out.push(`verified ${verified} of ${results.length} bodies`);
   return out.join("\n");
 }
 

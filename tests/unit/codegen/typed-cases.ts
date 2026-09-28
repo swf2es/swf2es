@@ -4,10 +4,10 @@
 import { abc, type Body, type Trait, tables, u30 } from "./abc-builder.ts";
 import type { Case } from "./oracle-case.ts";
 
-// Strings 1 a, 2 "", 3 Missing, 4 void, 5 int. Namespace 1 public.
-// Multinames: 1 a, 2 RTQNameL, 3 Missing, 4 void, 5 int.
+// Strings 1 a, 2 "", 3 Missing, 4 void, 5 int, 6 Object, 7 A. Namespace 1 public.
+// Multinames: 1 a, 2 RTQNameL, 3 Missing, 4 void, 5 int, 6 Object, 7 A.
 const pool = {
-  strings: ["a", "", "Missing", "void", "int"],
+  strings: ["a", "", "Missing", "void", "int", "Object", "A"],
   namespaces: [[0x16, ...u30(2)]],
   multinames: [
     [0x07, ...u30(1), ...u30(1)],
@@ -15,12 +15,17 @@ const pool = {
     [0x07, ...u30(1), ...u30(3)],
     [0x07, ...u30(1), ...u30(4)],
     [0x07, ...u30(1), ...u30(5)],
+    [0x07, ...u30(1), ...u30(6)],
+    [0x07, ...u30(1), ...u30(7)],
   ],
 };
 
 const s24 = (n: number) => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff];
 
 const IFTRUE = 0x11;
+const NEWFUNCTION = 0x40;
+const CALL = 0x41;
+const NEWCLASS = 0x58;
 const JUMP = 0x10;
 const LOOKUPSWITCH = 0x1b;
 const PUSHWITH = 0x1c;
@@ -47,6 +52,43 @@ const ASTYPE = 0x86;
 const GETLOCAL0 = 0xd0;
 const GETLOCAL1 = 0xd1;
 const SETLOCAL1 = 0xd5;
+
+/**
+ * An ABC whose script initializer has `code`, and method 1 `function`, the
+ * body of a function the script may create.
+ */
+function withFunction(code: number[], fn: number[]): Uint8Array {
+  return abc(
+    pool,
+    tables({
+      methods: [{}, {}],
+      scripts: [{ init: 0 }],
+      bodies: [
+        { method: 0, code, maxStack: 4, localCount: 1, maxScopeDepth: 2 },
+        { method: 1, code: fn, maxStack: 4, localCount: 1, maxScopeDepth: 2 },
+      ],
+    }),
+  );
+}
+
+/** An ABC whose script creates class A, extending Object, with `code` before newclass. */
+function withClass(code: number[]): Uint8Array {
+  return abc(
+    pool,
+    tables({
+      methods: [{}, {}, {}],
+      classes: [{ instance: { name: 7, base: 6, init: 0 }, init: 1 }],
+      scripts: [{ init: 2, traits: [{ name: 7, kind: 4, id: 1, index: 0 }] }],
+      bodies: [
+        { method: 2, code: [...code, NEWCLASS, 0, POP, RETURNVOID], maxStack: 4, maxScopeDepth: 3 },
+        { method: 1, code: [RETURNVOID] },
+      ],
+    }),
+  );
+}
+
+// Create the function in the global scope and call it.
+const callIt = [GETLOCAL0, PUSHSCOPE, NEWFUNCTION, 1, PUSHNULL, CALL, 0, POP, RETURNVOID];
 
 /** An ABC whose script initializer has `code`, and the script `traits`. */
 function script(code: number[], frame: Partial<Body> = {}, traits: Trait[] = []): Uint8Array {
@@ -161,4 +203,52 @@ export const typedCases: Case[] = [
     error: 1014,
   },
   { name: "coerce to int", abc: script([PUSHNULL, COERCE, 5, POP, RETURNVOID]) },
+  { name: "newclass with no scope", abc: withClass([GETLEX, 6]), error: 1013 },
+  {
+    name: "newclass in the global scope",
+    abc: withClass([GETLOCAL0, PUSHSCOPE, GETLEX, 6]),
+    error: 1107,
+  },
+  {
+    name: "newclass in its base class's scope",
+    abc: withClass([GETLOCAL0, PUSHSCOPE, GETLEX, 6, PUSHSCOPE, GETLEX, 6]),
+  },
+  {
+    name: "a function created in two scope chains",
+    abc: withFunction(
+      [NEWFUNCTION, 1, POP, GETLOCAL0, PUSHSCOPE, NEWFUNCTION, 1, POP, POPSCOPE, RETURNVOID],
+      [RETURNVOID],
+    ),
+    error: 1107,
+  },
+  {
+    name: "a method bound to traits made a function",
+    abc: script([NEWFUNCTION, 0, POP, RETURNVOID]),
+    error: 1107,
+  },
+  {
+    name: "getouterscope in a function",
+    abc: withFunction(callIt, [GETOUTERSCOPE, 0, POP, RETURNVOID]),
+  },
+  {
+    name: "getouterscope past a function's scope chain",
+    abc: withFunction(callIt, [GETOUTERSCOPE, 1, POP, RETURNVOID]),
+    error: 1019,
+  },
+  {
+    name: "getlex in a function's scope chain",
+    abc: withFunction(callIt, [GETLEX, 5, POP, RETURNVOID]),
+  },
+  {
+    name: "getlex in a function created with no scope",
+    abc: withFunction(
+      [NEWFUNCTION, 1, PUSHNULL, CALL, 0, POP, RETURNVOID],
+      [GETLEX, 5, POP, RETURNVOID],
+    ),
+    error: 1013,
+  },
+  {
+    name: "getglobalscope and a global slot in a function",
+    abc: withFunction(callIt, [GETGLOBALSCOPE, POP, RETURNVOID]),
+  },
 ];

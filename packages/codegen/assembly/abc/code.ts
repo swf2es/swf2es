@@ -17,7 +17,7 @@
 // A BodyDecoder is made once per ABC and reused for every body: its scratch
 // buffers and its output only grow, so decoding allocates nothing per body.
 import { Domain } from "../link/domain";
-import { BIND_None, TYPE_Any } from "../link/traits";
+import { BIND_None, Scope, TYPE_Any } from "../link/traits";
 import {
   BIND_Ambiguous,
   bindingType,
@@ -289,20 +289,6 @@ export class Code {
   }
 }
 
-/**
- * The scope chain a method is created in (avmplus' ScopeTypeChain): the
- * types of its `size` entries, and whether each is a with scope. An `extra`
- * type other than TYPE_Any constrains the method's first own scope, as for
- * class methods, whose `this` must be of their class.
- */
-@final
-export class Scope {
-  size: u32 = 0;
-  types: i32[] = [];
-  withs: u8[] = [];
-  extra: i32 = TYPE_Any;
-}
-
 // Byte states in BodyDecoder.cover, which starts zeroed: unseen.
 const START: u8 = 1;
 const INSIDE: u8 = 2;
@@ -389,6 +375,14 @@ export class BodyDecoder {
   /** Each handler's exception type and catch scope type. */
   handlerType: i32[] = [];
   handlerScope: i32[] = [];
+  /**
+   * avmplus' second verifier phase: blocks walked once more in code order
+   * with their final states, capturing the scope chains of the classes and
+   * functions the method creates.
+   */
+  emitPass: bool = false;
+  /** Methods (domain-wide ids) whose scope chain the last decode captured. */
+  captured: u32[] = [];
 
   constructor(
     public abc: Abc,
@@ -476,8 +470,28 @@ export class BodyDecoder {
       return code.fail(kInvalidBranchTargetError);
     }
 
+    if (this.typed && !this.secondPass()) {
+      return code;
+    }
+
     this.pack();
     return code;
+  }
+
+  /** As the verifier's phase 2: walk the blocks in code order with their final entry states. */
+  secondPass(): bool {
+    this.emitPass = true;
+    this.captured.length = 0;
+    let ok = true;
+    for (let pc: u32 = 0; pc < this.length && ok; pc++) {
+      if (pc === 0 || unchecked(this.known[pc])) {
+        this.loadEntry(pc);
+        ok = this.block(pc, unchecked(this.entryStack[pc]), unchecked(this.entryScope[pc]));
+      }
+    }
+
+    this.emitPass = false;
+    return ok;
   }
 
   /** Zeroed scratch for this body, growing it if the body is the longest yet. */
@@ -780,6 +794,11 @@ export class BodyDecoder {
    * and scope depths, whose values merge.
    */
   target(from: i64, to: i64, stack: u32, scope: u32): bool {
+    // The second phase only visits what the first already checked.
+    if (this.emitPass) {
+      return true;
+    }
+
     if (to < 0 || to >= <i64>this.length) {
       this.code.fail(kInvalidBranchTargetError);
       return false;
@@ -914,7 +933,7 @@ export class BodyDecoder {
    * locals as they are, no scopes, and just the exception on the stack.
    */
   throwsAt(pc: u32): bool {
-    if (pc < this.tryFrom || pc >= this.tryTo) {
+    if (this.emitPass || pc < this.tryFrom || pc >= this.tryTo) {
       return true;
     }
 
@@ -1363,6 +1382,10 @@ export class BodyDecoder {
       case OP_getlocal:
         return this.push(this.typeOf(a), unchecked(this.valueFlags[a]) & NOT_NULL);
       case OP_newfunction:
+        if (this.emitPass && !this.captureFunction(a)) {
+          return false;
+        }
+
         return this.push(domain.functionType, NOT_NULL);
       case OP_getlex: {
         // The scope object found is the receiver of the get.
@@ -1379,6 +1402,10 @@ export class BodyDecoder {
       case OP_findproperty:
         return this.findProperty(a);
       case OP_newclass:
+        if (this.emitPass && !this.captureClass(a)) {
+          return false;
+        }
+
         this.coerce(top, domain.classInstanceType());
         this.setValue(top, domain.staticTraitsOf(this.index, a), NOT_NULL);
         return true;
@@ -2279,6 +2306,108 @@ export class BodyDecoder {
     return faster;
   }
 
+  /** The scope chain `outer` and the scopes pushed so far, with an optional last entry and extra. */
+  scopeHere(last: i32, extra: i32): Scope {
+    const outer = this.outer;
+    const scope = new Scope();
+    for (let i: u32 = 0; i < outer.size; i++) {
+      scope.types.push(unchecked(outer.types[i]));
+      scope.withs.push(unchecked(outer.withs[i]));
+    }
+
+    for (let i: u32 = 0; i < this.scope; i++) {
+      const v = this.localCount + i;
+      scope.types.push(this.typeOf(v));
+      scope.withs.push(unchecked(this.valueFlags[v]) & WITH ? 1 : 0);
+    }
+
+    if (last !== -2) {
+      scope.types.push(last);
+      scope.withs.push(0);
+    }
+
+    scope.size = scope.types.length;
+    scope.extra = extra;
+    return scope;
+  }
+
+  /**
+   * As the ScopeWriter's OP_newfunction: function m is created in the scope
+   * chain here, once; a method bound to traits cannot be a function, and one
+   * created again must be created alike, unless it creates itself.
+   */
+  captureFunction(m: u32): bool {
+    const domain = this.domain;
+    const traits = domain.traits;
+    const global = unchecked(domain.methodStart[this.index]) + m;
+    const scope = this.scopeHere(-2, TYPE_Any);
+    const current = unchecked(traits.functionScope[global]);
+    if (current !== null) {
+      return current.equals(scope) || global === this.global ? true : this.fail(kCorruptABCError);
+    }
+
+    if (unchecked(traits.methodTraits[global]) >= 0) {
+      return this.fail(kCorruptABCError);
+    }
+
+    unchecked((traits.methodFunction[global] = 1));
+    const error = traits.sign(domain, global);
+    if (error) {
+      return this.fail(error);
+    }
+
+    unchecked((traits.functionScope[global] = scope));
+    this.captured.push(global);
+    return true;
+  }
+
+  /**
+   * As the ScopeWriter's OP_newclass: the innermost scope must be the base
+   * class object; the class's static methods run in the scope chain here,
+   * its instance methods in that and the class object, once, and a class
+   * created again must be created alike. Both traits resolve.
+   */
+  captureClass(i: u32): bool {
+    const domain = this.domain;
+    const traits = domain.traits;
+    const ctraits = domain.staticTraitsOf(this.index, i);
+    const itraits = domain.instanceTraitsOf(ctraits);
+    if (this.scope === 0) {
+      return this.fail(kCorruptABCError);
+    }
+
+    const innermost = this.typeOf(this.localCount + this.scope - 1);
+    if (
+      innermost === TYPE_Any ||
+      domain.instanceTraitsOf(innermost) !== unchecked(traits.base[itraits])
+    ) {
+      return this.fail(kCorruptABCError);
+    }
+
+    const cscope = this.scopeHere(-2, ctraits);
+    const iscope = this.scopeHere(ctraits, itraits);
+    const error = traits.resolve(domain, <u32>ctraits) || traits.resolve(domain, <u32>itraits);
+    if (error) {
+      return this.fail(error);
+    }
+
+    const current = unchecked(traits.scope[ctraits]);
+    if (current !== null) {
+      const instance = unchecked(traits.scope[itraits]);
+      if (instance === null || !current.equals(cscope) || !instance.equals(iscope)) {
+        return this.fail(kCorruptABCError);
+      }
+
+      return true;
+    }
+
+    unchecked((traits.scope[ctraits] = cscope));
+    unchecked((traits.scope[itraits] = iscope));
+    domain.methodsOf(<u32>ctraits, this.captured);
+    domain.methodsOf(<u32>itraits, this.captured);
+    return true;
+  }
+
   /** As Verifier's OP_callstatic: a bound method, called with its signature. */
   callStatic(m: u32, argc: u32): bool {
     const domain = this.domain;
@@ -2482,4 +2611,44 @@ function nameParts(pool: ConstantPool, index: u32): u8 {
     default:
       return 0;
   }
+}
+
+/**
+ * Verify, with types, every method of ABC `index` that its scripts can
+ * run: each script's initializer and methods, then each class's and
+ * function's methods once creating them captured their scope chain, as
+ * avmplus verifies each before it first runs. The result is each body's
+ * VerifyError, 0 if it verified, or -1 if nothing could run it.
+ */
+export function verifyMethods(domain: Domain, index: u32): StaticArray<i32> {
+  const abc = unchecked(domain.abcs[index]);
+  const traits = domain.traits;
+  const results = new StaticArray<i32>(abc.bodyCount);
+  for (let b: u32 = 0; b < abc.bodyCount; b++) {
+    unchecked((results[b] = -1));
+  }
+
+  const queue: u32[] = [];
+  const scripts = unchecked(domain.scriptTraits[index]);
+  for (let s: u32 = 0; s < abc.scriptCount; s++) {
+    domain.methodsOf(unchecked(scripts[s]), queue);
+  }
+
+  const methods = unchecked(domain.methodStart[index]);
+  const decoder = new BodyDecoder(abc, unchecked(domain.abcBase[index]), domain, index);
+  for (let q = 0; q < queue.length; q++) {
+    const m = unchecked(queue[q]);
+    const body = unchecked(abc.methodBody[m - methods]);
+    const scope = traits.scopeOf(m);
+    if (body < 0 || scope === null || unchecked(results[body]) !== -1) {
+      continue;
+    }
+
+    unchecked((results[body] = decoder.decode(<u32>body, scope).error));
+    for (let c = 0; c < decoder.captured.length; c++) {
+      queue.push(unchecked(decoder.captured[c]));
+    }
+  }
+
+  return results;
 }

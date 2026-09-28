@@ -98,6 +98,38 @@ function compatibleKind(base: u32, over: u32): bool {
   return ((accessors >> base) & 1) === 1 && ((accessors >> over) & 1) === 1;
 }
 
+/**
+ * The scope chain a method is created in (avmplus' ScopeTypeChain): the
+ * types of its `size` entries, and whether each is a with scope. An `extra`
+ * type other than TYPE_Any constrains the method's first own scope, as for
+ * class methods, whose `this` must be of their class.
+ */
+@final
+export class Scope {
+  size: u32 = 0;
+  types: i32[] = [];
+  withs: u8[] = [];
+  extra: i32 = TYPE_Any;
+
+  /** As ScopeTypeChain::equals. */
+  equals(other: Scope): bool {
+    if (this.size !== other.size || this.extra !== other.extra) {
+      return false;
+    }
+
+    for (let i: u32 = 0; i < this.size; i++) {
+      if (
+        unchecked(this.types[i]) !== unchecked(other.types[i]) ||
+        unchecked(this.withs[i]) !== unchecked(other.withs[i])
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+}
+
 @final
 export class TraitsTable {
   kind: u8[] = [];
@@ -126,6 +158,8 @@ export class TraitsTable {
   param: i32[] = [];
   /** The initializer method (global id), or -1. */
   init: i32[] = [];
+  /** The scope chain the traits' methods are created in, once known. */
+  scope: Array<Scope | null> = [];
 
   memberTraits: u32[] = [];
   memberNs: u32[] = [];
@@ -150,6 +184,10 @@ export class TraitsTable {
   methodVirtual: u8[] = [];
   /** Made by newfunction rather than bound to traits: its receiver is Object. */
   methodFunction: u8[] = [];
+  /** A function that takes extra arguments without a rest array, as avmplus' _ignoreRest. */
+  ignoresRest: u8[] = [];
+  /** A function's scope chain, captured by newfunction. */
+  functionScope: Array<Scope | null> = [];
   signed: u8[] = [];
   returnType: i32[] = [];
   receiverType: i32[] = [];
@@ -184,6 +222,7 @@ export class TraitsTable {
     this.interfaceEnd.push(0);
     this.param.push(TYPE_Any);
     this.init.push(-1);
+    this.scope.push(null);
     this.resolved.push(0);
     this.slotStart.push(0);
     this.dispatchStart.push(0);
@@ -208,9 +247,20 @@ export class TraitsTable {
     this.interfaceEnd.length = count;
     this.param.length = count;
     this.init.length = count;
+    this.scope.length = count;
     this.resolved.length = count;
     this.slotStart.length = count;
     this.dispatchStart.length = count;
+  }
+
+  /** As MethodInfo::declaringScope: the scope chain method m runs in, or null if not yet known. */
+  scopeOf(m: u32): Scope | null {
+    if (unchecked(this.methodFunction[m])) {
+      return unchecked(this.functionScope[m]);
+    }
+
+    const t = unchecked(this.methodTraits[m]);
+    return t < 0 ? null : unchecked(this.scope[t]);
   }
 
   /** Room for `count` more methods, unbound and unsigned. */
@@ -220,6 +270,8 @@ export class TraitsTable {
       this.methodFinal.push(0);
       this.methodVirtual.push(0);
       this.methodFunction.push(0);
+      this.functionScope.push(null);
+      this.ignoresRest.push(0);
       this.signed.push(0);
       this.returnType.push(TYPE_Any);
       this.receiverType.push(TYPE_Any);
@@ -234,6 +286,8 @@ export class TraitsTable {
     this.methodFinal.length = count;
     this.methodVirtual.length = count;
     this.methodFunction.length = count;
+    this.functionScope.length = count;
+    this.ignoresRest.length = count;
     this.signed.length = count;
     this.returnType.length = count;
     this.receiverType.length = count;
@@ -885,12 +939,36 @@ export class TraitsTable {
       }
     }
 
+    // As avmplus' unchecked-function hack: a function with only untyped
+    // parameters and result takes them all as optional.
+    let optionalCount = optional;
+    if (
+      unchecked(this.methodFunction[m]) &&
+      optional === 0 &&
+      returnType === TYPE_Any &&
+      count > 0
+    ) {
+      let untyped = true;
+      for (let p: u32 = 0; p < count; p++) {
+        untyped = untyped && unchecked(this.paramType[start + p]) === TYPE_Any;
+      }
+
+      if (untyped) {
+        optionalCount = count;
+        unchecked((this.ignoresRest[m] = 1));
+      }
+    }
+
+    if (unchecked(this.methodFunction[m]) && count === 0) {
+      unchecked((this.ignoresRest[m] = 1));
+    }
+
     const owner = unchecked(this.methodTraits[m]);
     unchecked((this.returnType[m] = returnType));
     unchecked((this.receiverType[m] = owner >= 0 ? owner : domain.objectType()));
     unchecked((this.paramStart[m] = start));
     unchecked((this.paramCount[m] = count));
-    unchecked((this.optionalCount[m] = optional));
+    unchecked((this.optionalCount[m] = optionalCount));
     unchecked((this.signed[m] = 1));
     return 0;
   }

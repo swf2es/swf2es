@@ -75,6 +75,7 @@ import {
   BUILTIN_Void,
   isDefaultKind,
   legalDefault,
+  Scope,
   TRAITS_Activation,
   TRAITS_Catch,
   TRAITS_Class,
@@ -432,6 +433,7 @@ export class Domain {
         unchecked(abc.scriptTraitStart[s + 1]),
       );
       unchecked((scripts[s] = t));
+      unchecked((this.traits.scope[t] = new Scope()));
       const error = this.traits.layout(this, t);
       if (error) {
         return abc.fail(error);
@@ -572,12 +574,40 @@ export class Domain {
     return t < 0 ? TYPE_Any : t;
   }
 
-  /** Whether method m takes any number of extra arguments, into a rest or arguments array. */
+  /**
+   * Whether method m takes any number of extra arguments: into a rest or
+   * arguments array, or as a function avmplus lets ignore them (see
+   * TraitsTable.sign).
+   */
   allowsExtraArgs(m: u32): bool {
     const index = this.methodAbc(m);
     const abc = unchecked(this.abcs[index]);
-    const flags = unchecked(abc.methodFlags[m - this.methodStart[index]]);
-    return (flags & (METHOD_NeedRest | METHOD_NeedArguments)) !== 0;
+    const local = m - unchecked(this.methodStart[index]);
+    const flags = unchecked(abc.methodFlags[local]);
+    if (flags & (METHOD_NeedRest | METHOD_NeedArguments)) {
+      return true;
+    }
+
+    return unchecked(this.traits.ignoresRest[m]) !== 0;
+  }
+
+  /** Add to `out` the methods bound to traits t: its initializer, methods, getters and setters. */
+  methodsOf(t: u32, out: u32[]): void {
+    const traits = this.traits;
+    const index = unchecked(traits.abc[t]);
+    const abc = unchecked(this.abcs[index]);
+    const methods = unchecked(this.methodStart[index]);
+    const init = unchecked(traits.init[t]);
+    if (init >= 0) {
+      out.push(<u32>init);
+    }
+
+    for (let i = unchecked(traits.first[t]); i < unchecked(traits.end[t]); i++) {
+      const kind = unchecked(abc.traitTag[i]) & 0x0f;
+      if (kind === TRAIT_Method || kind === TRAIT_Getter || kind === TRAIT_Setter) {
+        out.push(methods + unchecked(abc.traitIndex[i]));
+      }
+    }
   }
 
   /** Whether method m is a method, getter or setter of some traits, which callstatic may call. */
