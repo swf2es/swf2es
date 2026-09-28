@@ -1083,6 +1083,8 @@ export class Runtime {
     if (!f) {
       const method: Method = traits.proto[`$m${id}`];
       f = this.newFunctionObject((...args: Value[]) => method.apply(o, args), null);
+      // Its length is the method's, its declared parameters, not the wrapper's.
+      f.$length = method.length;
       f.$closure = true;
       if (typeof o === "object") {
         byId.set(id, f);
