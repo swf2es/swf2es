@@ -185,6 +185,10 @@ export class Domain {
   booleanType: i32 = -1;
   stringType: i32 = -1;
   namespaceType: i32 = -1;
+  /** XML's and XMLList's traits, and the strings of E4X's classes' names, XML, XMLList and QName. */
+  xmlType: i32 = -1;
+  xmlListType: i32 = -1;
+  e4xNames: StaticArray<i32> = new StaticArray<i32>(3);
   vectorClass: i32 = -1;
   vectorObjectType: i32 = -1;
   vectorIntType: i32 = -1;
@@ -490,6 +494,11 @@ export class Domain {
     this.booleanType = this.builtinType("Boolean");
     this.stringType = this.builtinType("String");
     this.namespaceType = this.builtinType("Namespace");
+    this.xmlType = this.builtinType("XML");
+    this.xmlListType = this.builtinType("XMLList");
+    this.e4xNames[0] = this.findText("XML");
+    this.e4xNames[1] = this.findText("XMLList");
+    this.e4xNames[2] = this.findText("QName");
     this.vectorClass = this.findBuiltin("Vector");
     this.vectorObjectType = this.builtinType("Vector$object");
     this.vectorIntType = this.builtinType("Vector$int");
@@ -651,6 +660,28 @@ export class Domain {
     const name = this.nameOf(index, mn);
     const text = String.UTF8.decodeUnsafe(this.stringPtr[name], this.stringLength[name]);
     return this.findText(`_${text}`);
+  }
+
+  /** Whether multiname `mn` of ABC `index` is named XML, XMLList or QName, or at run time. */
+  isE4XName(index: u32, mn: u32): bool {
+    const pool = this.abcs[index].pool;
+    const kind = pool.mnKind[mn];
+    if (
+      kind === C.CONSTANT_RTQnameL ||
+      kind === C.CONSTANT_RTQnameLA ||
+      kind === C.CONSTANT_MultinameL ||
+      kind === C.CONSTANT_MultinameLA
+    ) {
+      return true;
+    }
+
+    if (kind === C.CONSTANT_TypeName) {
+      return false;
+    }
+
+    const name = <i32>this.abcString[index][pool.mnB[mn]];
+    const names = this.e4xNames;
+    return name === names[0] || name === names[1] || name === names[2];
   }
 
   /** Whether multiname `mn` of ABC `index` is named Math or Number. */

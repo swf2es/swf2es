@@ -529,9 +529,10 @@ export class Runtime {
       if (part?.$local !== undefined && !(part instanceof Namespace)) {
         // A QName names its own namespace, null for any, and local name,
         // null for any, and may be an attribute's.
+        // Bindings compare interned namespaces: an XML name's has a prefix.
         return new Multiname(
           CONSTANT_Qname,
-          [part.$ns],
+          [part.$ns ? part.$ns.interned : null],
           [255],
           part.$local,
           mn.attribute || part.$attr === true,
@@ -1360,12 +1361,7 @@ export class Runtime {
   callValue(f: Value, receiver: Value, args: Value[], mn: Multiname | null): Value {
     if (f !== null && typeof f === "object") {
       if (f.$f) {
-        const dxns: Namespace | undefined = f.$dxns;
-        if (dxns === undefined || dxns === this.defaultXmlNamespace) {
-          return f.$f.apply(receiver ?? f.$global ?? null, args);
-        }
-
-        return this.callInDxns(f, dxns, receiver, args);
+        return f.$f.apply(receiver ?? f.$global ?? null, args);
       }
 
       if (f.$it) {
@@ -1376,12 +1372,16 @@ export class Runtime {
     throw this.error("TypeError", 1006, mn ? mn.name : "value");
   }
 
-  /** A closure called with the default XML namespace of where it was made, the caller's back after. */
-  private callInDxns(f: AsObject, dxns: Namespace, receiver: Value, args: Value[]): Value {
+  /**
+   * A method called where the default XML namespace is not the one of the
+   * scope it was made in, `dxns`: called again with it, and the caller's
+   * back after.
+   */
+  callInDxns(dxns: Namespace, f: Method, receiver: Value, args: ArrayLike<Value>): Value {
     const caller = this.defaultXmlNamespace;
     this.defaultXmlNamespace = dxns;
     try {
-      return f.$f.apply(receiver ?? f.$global ?? null, args);
+      return f.apply(receiver, args as Value[]);
     } finally {
       this.defaultXmlNamespace = caller;
     }
@@ -1540,9 +1540,7 @@ export class Runtime {
   }
 
   newFunction(factory: Factory, scope: Scope): AsObject {
-    const o = this.newFunctionObject(factory(scope, null), scope.length ? scope[0] : null);
-    o.$dxns = this.defaultXmlNamespace;
-    return o;
+    return this.newFunctionObject(factory(scope, null), scope.length ? scope[0] : null);
   }
 
   /** A Function object calling `f`, with `global` as its receiver when it has none. */
@@ -1550,7 +1548,6 @@ export class Runtime {
     const o = this.functionTraits.instance();
     o.$f = f;
     o.$global = global;
-    o.$dxns = undefined;
     return o;
   }
 
@@ -2554,9 +2551,9 @@ export class Runtime {
   /**
    * The default XML namespace, as dxns and dxnslate set it. avmplus keeps
    * it for each frame: one a method set, else the one of the scope the
-   * method was made in. Here the runtime has the current one: a method
-   * that sets it gives its caller's back, and a function closure has the
-   * one there was when it was made while it runs (newFunction, callValue).
+   * method was made in. Here the runtime has the current one: each
+   * method's factory captures it, and the method runs with that one
+   * (callInDxns); one that sets it gives its caller's back.
    */
   defaultXmlNamespace: Namespace = publicNs;
 

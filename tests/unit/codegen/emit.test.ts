@@ -25,7 +25,8 @@ function emit(abc: Uint8Array): string {
 
 /** The script initializer of `abc`, compiled and run with `this` as its global; its result. */
 function run(abc: Uint8Array): unknown {
-  return new Function("rt", `return ${emit(abc)}`)(rt).call({});
+  // $dx: the default XML namespace a method's factory gives it.
+  return new Function("rt", "$dx", `return ${emit(abc)}`)(rt, rt.defaultXmlNamespace).call({});
 }
 
 const PUSHBYTE = 0x24;
@@ -434,7 +435,9 @@ function factoryAt(factories: string, index: number): string {
   let at = -1;
   for (let i = 1; i < lines.length; i++) {
     if (
-      /^ {4}(\(scope, sup\) =>|\(\(\.\.\.T\) => \(scope, sup\) =>|rt\.)/.test(lines[i]) &&
+      /^ {4}(\(scope, sup, \$dx[^)]*\) =>|\(\(\.\.\.T\) => \(scope, sup, \$dx[^)]*\) =>|rt\.)/.test(
+        lines[i],
+      ) &&
       /[[,]$/.test(lines[i - 1]) &&
       ++at === index
     ) {

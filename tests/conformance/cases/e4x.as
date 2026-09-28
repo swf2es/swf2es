@@ -1,9 +1,18 @@
 // E4X as the runtime sees it outside XML's own methods: the default XML
-// namespace a method that sets it starts with and gives back, Namespace
+// namespace of the scope a method or class was made in, not its caller's,
+// and the one a method sets given back after it, Namespace
 // and QName enumerated, compared and used as names, and delete by an
 // XMLList, a TypeError. Also some of XML's own: names found in the default
 // namespace, children hiding XML's methods of their names, writes to lists
-// back into their tree, and XML's text.
+// back into their tree, XML's text, and an XML name as a trait's name.
+package {
+  public class Scoped {
+    public function uri():String { return (<x/>).namespace().uri; }
+  }
+}
+namespace zz = "urn:test";
+class Named { zz var value:int = 42; }
+
 function probe(name:String, f:Function):void {
   try { trace(name, f()); } catch (e:Error) { trace(name, "error", e.errorID); }
 }
@@ -23,6 +32,10 @@ function setsNone():String {
 
 probe("dxns in a method that sets it", setsItsOwn);
 probe("dxns after it returns", setsNone);
+probe("dxns of a class method", function():* {
+  default xml namespace = "http://caller/";
+  return "[" + new Scoped().uri() + "]";
+});
 probe("dxns after a throw", function():* {
   try {
     (function():void { default xml namespace = "http://thrown/"; throw new Error("x"); })();
@@ -82,3 +95,7 @@ probe("equality", function():* {
   return [five == 5, one == two, one === two, text == "x", new XMLList() == undefined].join(",");
 });
 probe("plus", function():* { var a:XML = <a/>, b:XML = <b/>; return (a + b).length(); });
+probe("xml name as a trait's name", function():* {
+  var xml:XML = <p:value xmlns:p="urn:test"/>;
+  return new Named()[xml.name()];
+});
