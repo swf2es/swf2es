@@ -19,6 +19,7 @@ test("codegen.wasm imports nothing but abort", () => {
 test("wrapper and wasm agree on the compiler version", async () => {
   await createCodegen(module); // throws on a mismatch
   assert.equal(cacheKey("abc123"), `swf2es@${COMPILER_VERSION}:abc123`);
+  assert.equal(cacheKey("abc123", ["b1", "s2"]), `swf2es@${COMPILER_VERSION}:b1+s2+abc123`);
 });
 
 test("reads the ABC version header", async () => {

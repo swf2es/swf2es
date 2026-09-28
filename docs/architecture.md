@@ -25,14 +25,19 @@ requires:
    build rejects such code, and a unit test fails if `codegen.wasm` imports
    anything besides `env.abort`.
 2. **The unit of translation is one method.** A method's output depends only on
-   its ABC, never on which other methods were compiled before it.
+   its ABC and the ABCs it is linked against, never on which other methods
+   were compiled before it.
 3. **Both modes use the same facts.** Optimizations use only what the ABC being
    compiled proves (final classes, sealed traits, typed slots). Anything that
    can change at runtime, such as a child SWF redefining a class, gets a
    runtime guard in both modes.
-4. **Shared cache key.** Output is keyed by ABC hash plus `COMPILER_VERSION`
-   (`cacheKey()` in codegen), so the browser cache, AOT output served by a
-   server, and JIT output are interchangeable.
+4. **Shared cache key.** Output is keyed by `COMPILER_VERSION`, the ABC's
+   hash, and the hashes of the ABCs loaded before it, in order (`cacheKey()`
+   in codegen), so the browser cache, AOT output served by a server, and JIT
+   output are interchangeable. An ABC's layouts depend on those it links
+   against, since its slot and dispatch ids follow its base classes', so a
+   module also records their hashes and the runtime refuses it when the
+   ABCs loaded before it differ.
 
 CI compiles every conformance test in both modes and fails if the output
 hashes differ.
@@ -168,6 +173,42 @@ Values are JavaScript's own: `undefined`, `null`, numbers for `Number`,
 classes. A script's global object is an instance of its traits like any
 other. Errors thrown by the runtime are AS3 `Error` objects with avmplus'
 error numbers and messages, so traced errors read as in avmshell.
+
+### Modules and the bootstrap
+
+The compiler computes every traits' layout, so a module states it and the
+runtime never derives one. An ABC's module exports a function of the
+runtime, `rt`, that returns:
+
+- **names**: the ABC's namespaces and multinames as runtime objects,
+  interned by the compiler's rules (kind and URI, API version, a private
+  namespace per ABC entry);
+- **methods**: a factory per method, `(scope) => function (...) { ... }`,
+  so that each `newclass` or `newfunction` binds the scope chain it
+  captured;
+- **traits**: for each class, its base class and interfaces by name,
+  resolved when the class is created as avmplus resolves them, its own
+  bindings by namespace and name, its slots' defaults, and its methods,
+  getters and setters by dispatch id;
+- **scripts**: each script's traits and initializer, run the first time
+  something asks for a name it defines, as avmplus runs them.
+
+The runtime starts with builtin.abc, then the ABCs that follow it (for
+avmshell's programs, shell_toplevel.abc):
+
+1. load the builtin module, which defines no classes yet;
+2. run the builtin script that defines Object, Class and Function. Object's
+   class object is created before Class exists, so class objects created
+   in this step get Class's prototype once it does, as avmplus'
+   `Toplevel` does;
+3. run any other script lazily, the first time a name it defines is looked
+   up: `finddef`, `findpropstrict`, `getlex` of a global name, or a class
+   resolving its base by name.
+
+A native method is bound by its class's and its own qualified name, as
+avmplus binds its C++ ones: `rt.natives["Math.floor"]`, or
+`"String.prototype.indexOf"` for an instance method. A native the runtime
+lacks throws an error naming it when called, not when loaded.
 
 ### The runtime and the standard library
 

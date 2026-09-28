@@ -13,10 +13,12 @@ export const COMPILER_VERSION = "0.0.0";
 
 /**
  * Cache key for compiled output. Browser caches, the AOT server and the JIT
- * all use this key, so their results are interchangeable.
+ * all use this key, so their results are interchangeable. `linked` are the
+ * hashes of the ABCs loaded before this one, in order, whose layouts the
+ * output depends on.
  */
-export function cacheKey(abcHash: string): string {
-  return `swf2es@${COMPILER_VERSION}:${abcHash}`;
+export function cacheKey(abcHash: string, linked: string[] = []): string {
+  return `swf2es@${COMPILER_VERSION}:${[...linked, abcHash].join("+")}`;
 }
 
 export interface AbcVersion {
