@@ -1091,10 +1091,10 @@ export class Runtime {
     switch (b & 7) {
       case BIND_Var:
       case BIND_Const:
-        return o[`$${id}`];
+        return o[slotKey(id)];
       case BIND_Get:
       case BIND_GetSet:
-        return traits.proto[`$m${id}`].call(o);
+        return traits.proto[methodKey(id)].call(o);
       case BIND_Method:
         return this.methodClosure(o, traits, id);
       default:
@@ -1113,7 +1113,7 @@ export class Runtime {
 
     let f = typeof o === "object" ? byId.get(id) : undefined;
     if (!f) {
-      const method: Method = traits.proto[`$m${id}`];
+      const method: Method = traits.proto[methodKey(id)];
       f = this.newFunctionObject(
         (method as CountedMethod).$min === undefined
           ? (...args: Value[]) => method.apply(o, args)
@@ -1151,14 +1151,14 @@ export class Runtime {
           if (!init) {
             throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.name);
           }
-          o[`$${id}`] = this.coerce(v, traits.slotType(id));
+          o[slotKey(id)] = this.coerce(v, traits.slotType(id));
           return;
         case BIND_Var:
-          o[`$${id}`] = this.coerce(v, traits.slotType(id));
+          o[slotKey(id)] = this.coerce(v, traits.slotType(id));
           return;
         case BIND_Set:
         case BIND_GetSet:
-          traits.proto[`$m${id + 1}`].call(o, v);
+          traits.proto[methodKey(id + 1)].call(o, v);
           return;
         case BIND_Method:
           throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.name);
@@ -1327,7 +1327,7 @@ export class Runtime {
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
     if ((b & 7) === BIND_Method) {
-      return this.callBound(traits.proto[`$m${b >> 3}`], o, args);
+      return this.callBound(traits.proto[methodKey(b >> 3)], o, args);
     }
 
     return this.callValue(this.callee(o, traits, b, mn), o, args, mn);
@@ -1369,7 +1369,7 @@ export class Runtime {
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
     if ((b & 7) === BIND_Method) {
-      return this.callBound(traits.proto[`$m${b >> 3}`], o, args);
+      return this.callBound(traits.proto[methodKey(b >> 3)], o, args);
     }
 
     return this.callValue(this.callee(o, traits, b, mn), null, args, mn);
@@ -1429,7 +1429,7 @@ export class Runtime {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
     if ((b & 7) === BIND_Method) {
-      return this.callBound(traits.proto[`$m${b >> 3}`], o, args);
+      return this.callBound(traits.proto[methodKey(b >> 3)], o, args);
     }
 
     return this.callValue(this.getSuper(sup, o, mn), o, args, mn);
@@ -1449,7 +1449,7 @@ export class Runtime {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
     if ((b & 7) === BIND_Set || (b & 7) === BIND_GetSet) {
-      traits.proto[`$m${(b >> 3) + 1}`].call(o, v);
+      traits.proto[methodKey((b >> 3) + 1)].call(o, v);
       return;
     }
 
@@ -2774,6 +2774,13 @@ function defaultPrint(line: string): void {
 }
 
 const BUILTIN_REFS = new Set(["int", "uint", "Number", "String", "Boolean", "Object"]);
+
+// The names of slot and method properties by id, made once each, for the
+// runtime's dynamic paths; generated code names them itself.
+const slotKeys: string[] = [];
+const methodKeys: string[] = [];
+const slotKey = (id: number): string => (slotKeys[id] ??= `$${id}`);
+const methodKey = (id: number): string => (methodKeys[id] ??= `$m${id}`);
 
 /** Not a property: distinct from undefined, which a property can hold. */
 export const NOT_FOUND = Symbol("not found");
