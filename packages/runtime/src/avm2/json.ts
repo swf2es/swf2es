@@ -1,18 +1,106 @@
 // JSON's natives, as avmplus' JSONParser and JSONSerializer: the parser's
-// tokens and SyntaxError 1132, and stringify's toJSON (in the AS3
-// namespace first), replacers, gaps, numbers in avmplus' own format, and a
+// tokens and SyntaxError 1132, and stringify's toJSON (public only: see
+// toJSONOf), replacers, gaps, numbers as the host writes them, and a
 // class instance's public variables and readable accessors before its
 // dynamic properties, leaving out [Transient] ones.
 //
 // Translated from avmplus' core/JSONClass.cpp, this file is subject to the
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
-import { NS_Public, namespace, publicNs, qname } from "./names.js";
-import { convertDoubleToString } from "./numbers.js";
+import { NS_Public, publicNs, qname } from "./names.js";
 import type { AsObject, Runtime, Traits, Value } from "./runtime.js";
 
 type Natives = Record<string, (rt: Runtime) => (...args: Value[]) => Value>;
 
-const AS3 = namespace(NS_Public, "http://adobe.com/AS3/2006/builtin");
+const TO_JSON = qname(publicNs, "toJSON");
+
+/** Whether each traits binds a public toJSON, found once. */
+const boundToJSON = new WeakMap<Traits, boolean>();
+
+/**
+ * As JSONParser, through the host's JSON.parse, then its values made AS3's
+ * in place. The text the host rejects goes to parse(): avmplus reads some
+ * of it (numbers with leading zeros, as 01), and fails the rest as
+ * SyntaxError 1132.
+ */
+function parseText(rt: Runtime, text: string): Value {
+  let tree: unknown;
+  try {
+    tree = JSON.parse(text);
+  } catch {
+    return parse(rt, text);
+  }
+
+  return fromHost(rt, tree);
+}
+
+/** How deep fromHost recurses before it continues with a stack of its own. */
+const RECURSION_DEPTH = 500;
+
+/**
+ * A value of the host's JSON.parse as AS3's: an array as an Array holding
+ * it, its elements made AS3's in place, and an object as an Object with its
+ * keys, each where a public name of a plain Object is set (JSON's
+ * `__proto__` is a key of the object's own). Deeper than RECURSION_DEPTH,
+ * as deepFromHost does, as avmplus reads any depth.
+ */
+function fromHost(rt: Runtime, v: unknown, depth = 0): Value {
+  if (typeof v !== "object" || v === null) {
+    return v;
+  }
+
+  if (depth > RECURSION_DEPTH) {
+    return deepFromHost(rt, v);
+  }
+
+  if (Array.isArray(v)) {
+    for (let i = 0; i < v.length; i++) {
+      v[i] = fromHost(rt, v[i], depth + 1);
+    }
+
+    return rt.array(v);
+  }
+
+  const o = rt.newObject([]);
+  const d: Map<string, Value> = o.$d;
+  const from = v as Record<string, unknown>;
+  for (const key in from) {
+    d.set(key, fromHost(rt, from[key], depth + 1));
+  }
+
+  return o;
+}
+
+/** As fromHost, with a stack of its own, not the host's: slower, and at any depth. */
+function deepFromHost(rt: Runtime, root: object): Value {
+  const pending: [unknown, AsObject][] = [];
+  const wrap = (v: unknown): Value => {
+    if (typeof v !== "object" || v === null) {
+      return v;
+    }
+
+    const o = Array.isArray(v) ? rt.array(v) : rt.newObject([]);
+    pending.push([v, o]);
+    return o;
+  };
+
+  const result = wrap(root);
+  for (let next = pending.pop(); next; next = pending.pop()) {
+    const [host, o] = next;
+    if (Array.isArray(host)) {
+      for (let i = 0; i < host.length; i++) {
+        host[i] = wrap(host[i]);
+      }
+    } else {
+      const d: Map<string, Value> = o.$d;
+      const from = host as Record<string, unknown>;
+      for (const key in from) {
+        d.set(key, wrap(from[key]));
+      }
+    }
+  }
+
+  return result;
+}
 
 /** As JSONParser: the JSON text to a value, or SyntaxError 1132. */
 function parse(rt: Runtime, text: string): Value {
@@ -279,10 +367,15 @@ function describedNames(traits: Traits): [string[], string[]] {
   return [variables, accessors];
 }
 
-/** As JSONSerializer. */
+/**
+ * As JSONSerializer, in two steps, as Ruffle's does: the walk over the AS3
+ * values, calling toJSON and the replacer in avmplus' order and failing a
+ * cycle as it does, builds a tree of the host's values, which the host's
+ * JSON.stringify writes, gap and all. The text need not be avmplus' own:
+ * key order, escapes and numbers' digits differ, and it reads back as the
+ * same keys and values.
+ */
 class Serializer {
-  private out = "";
-  private indent = "";
   private readonly active = new Set<AsObject>();
 
   constructor(
@@ -295,77 +388,20 @@ class Serializer {
   stringify(v: Value): Value {
     const wrapper = this.rt.newObject([]);
     wrapper.$d.set("", v);
-    return this.str("", v, wrapper, "", false) ? this.out : undefined;
+    const tree = this.str("", v, wrapper);
+    return tree === undefined ? undefined : JSON.stringify(tree, null, this.gap);
   }
 
-  private quote(s: string): void {
-    let out = '"';
-    for (const ch of s) {
-      const c = ch.charCodeAt(0);
-      if (c >= 32 && c !== 34 && c !== 92) {
-        out += ch;
-        continue;
-      }
-
-      switch (ch) {
-        case '"':
-          out += '\\"';
-          break;
-        case "\\":
-          out += "\\\\";
-          break;
-        case "\b":
-          out += "\\b";
-          break;
-        case "\t":
-          out += "\\t";
-          break;
-        case "\n":
-          out += "\\n";
-          break;
-        case "\f":
-          out += "\\f";
-          break;
-        case "\r":
-          out += "\\r";
-          break;
-        default:
-          out += `\\u${(c + 0x10000).toString(16).slice(1)}`;
-      }
-    }
-
-    this.out += `${out}"`;
-  }
-
-  /** As committedToEmitFor: the pending separator, then the key if in an object. */
-  private commit(key: string, pending: string, colon: boolean): void {
-    this.out += pending;
-    if (colon) {
-      this.quote(key);
-      this.out += this.gap ? ": " : ":";
-    }
-  }
-
-  /** As StrFoundValue: whether it wrote anything. */
-  private str(
-    key: string,
-    valueIn: Value,
-    holder: AsObject,
-    pending: string,
-    colon: boolean,
-  ): boolean {
+  /**
+   * As StrFoundValue: the value to write for `valueIn`, the host's, or
+   * undefined for none. A number the host writes as null if it is not
+   * finite, as avmplus does.
+   */
+  private str(key: string, valueIn: Value, holder: AsObject): unknown {
     const rt = this.rt;
     let value = valueIn;
     if (value !== null && value !== undefined) {
-      let probe: Value = null;
-      const as3 = qname(AS3, "toJSON");
-      const pub = qname(publicNs, "toJSON");
-      if (rt.hasProperty(value, as3)) {
-        probe = rt.getProperty(value, as3);
-      } else if (rt.hasProperty(value, pub)) {
-        probe = rt.getProperty(value, pub);
-      }
-
+      const probe = this.toJSONOf(value);
       if (probe?.$f) {
         value = rt.callValue(probe, value, [key], null);
       }
@@ -375,36 +411,25 @@ class Serializer {
       value = rt.callValue(this.replacer, holder, [key, value], null);
     }
 
-    if (value === null) {
-      this.commit(key, pending, colon);
-      this.out += "null";
-      return true;
-    }
-
     switch (typeof value) {
       case "boolean":
-        this.commit(key, pending, colon);
-        this.out += value ? "true" : "false";
-        return true;
       case "string":
-        this.commit(key, pending, colon);
-        this.quote(value);
-        return true;
       case "number":
-        this.commit(key, pending, colon);
-        this.out += Number.isFinite(value) ? convertDoubleToString(value) : "null";
-        return true;
+        return value;
       case "object":
         break;
       default:
-        return false;
+        return undefined;
+    }
+
+    if (value === null) {
+      return null;
     }
 
     if (value.$f) {
-      return false;
+      return undefined;
     }
 
-    this.commit(key, pending, colon);
     const traits: Traits = rt.traitsOf(value);
     if (isA(traits, "Array") || isVector(traits)) {
       return this.array(value);
@@ -413,35 +438,72 @@ class Serializer {
     return this.object(value, traits);
   }
 
-  private enter(value: AsObject): [string, string, string, string] {
+  /**
+   * As the probe of StrFoundValue: `value`'s toJSON, or null. A public
+   * binding first; else, as hasProperty finds a public name that is not an
+   * index, the object's own dynamic one and then its prototype chain's.
+   *
+   * avmplus probes the AS3 namespace before the public one, with the
+   * builtin's own AS3 namespace, which sees AS3 bindings only at the
+   * builtin's API version: no class of avmshell's binds an AS3 toJSON
+   * (theirs are its prototypes'), and a script's AS3 toJSON is never
+   * found, even when it has no public one. So only the public one is.
+   */
+  private toJSONOf(value: Value): Value {
+    const rt = this.rt;
+    const traits = rt.traitsOf(value);
+    let bound = boundToJSON.get(traits);
+    if (bound === undefined) {
+      bound = traits.find(TO_JSON) !== 0;
+      boundToJSON.set(traits, bound);
+    }
+
+    if (bound) {
+      return rt.getProperty(value, TO_JSON);
+    }
+
+    const own: Map<string, Value> | null | undefined =
+      typeof value === "object" ? value.$d : undefined;
+    if (own?.has("toJSON")) {
+      return own.get("toJSON");
+    }
+
+    for (let p = rt.protoOf(value); p; p = p.$p) {
+      if (p.$d?.has("toJSON")) {
+        return p.$d.get("toJSON");
+      }
+    }
+
+    return null;
+  }
+
+  private enter(value: AsObject): void {
     if (this.active.has(value)) {
       throw this.rt.error("TypeError", 1129);
     }
 
     this.active.add(value);
-    const stepback = this.indent;
-    this.indent += this.gap;
-    return this.gap
-      ? [stepback, `\n${this.indent}`, `,\n${this.indent}`, `\n${stepback}`]
-      : [stepback, "", ",", ""];
-  }
-
-  private leave(value: AsObject, stepback: string): void {
-    this.active.delete(value);
-    this.indent = stepback;
   }
 
   /** As JO: the property list, or the described properties and then the dynamic ones. */
-  private object(value: AsObject, traits: Traits): boolean {
+  private object(value: AsObject, traits: Traits): Record<string, unknown> {
     const rt = this.rt;
-    const [stepback, first, connective, post] = this.enter(value);
-    let pending = first;
-    let emitted = false;
-    this.out += "{";
+    this.enter(value);
+    const out: Record<string, unknown> = {};
+    const own: Map<string, Value> | null = value.$d;
     const prop = (name: string) => {
-      if (this.str(name, rt.getProperty(value, qname(publicNs, name)), value, pending, true)) {
-        pending = connective;
-        emitted = true;
+      // A dynamic property of its own is where getProperty would find it.
+      const v = own?.has(name) ? own.get(name) : rt.getProperty(value, qname(publicNs, name));
+      const written = this.str(name, v, value);
+      if (written === undefined) {
+        return;
+      }
+
+      if (name === "__proto__") {
+        // Assigned, it would set the prototype, not the key.
+        Object.defineProperty(out, name, { value: written, enumerable: true, writable: true });
+      } else {
+        out[name] = written;
       }
     };
 
@@ -460,37 +522,29 @@ class Serializer {
       }
     }
 
-    if (emitted) {
-      this.out += post;
-    }
-
-    this.out += "}";
-    this.leave(value, stepback);
-    return true;
+    this.active.delete(value);
+    return out;
   }
 
   /** As JAfinish: each element, null for one that writes nothing. */
-  private array(value: AsObject): boolean {
-    const [stepback, first, connective, post] = this.enter(value);
-    let pending = first;
+  private array(value: AsObject): unknown[] {
+    this.enter(value);
     const length: number = value.$a.length;
-    this.out += "[";
+    const out = new Array<unknown>(length);
     for (let i = 0; i < length; i++) {
-      const element = this.rt.getProperty(value, this.rt.publicName(i));
-      if (!this.str(String(i), element, value, pending, false)) {
-        this.out += `${pending}null`;
-      }
-
-      pending = connective;
+      // The elements as they are now: toJSON or the replacer may have
+      // changed them, or the Vector its storage. A hole, or an element
+      // since removed, is got as getUintProperty gets it: from the
+      // prototype chain, or a Vector's RangeError.
+      const elements: Value[] = value.$a;
+      const element =
+        i in elements ? elements[i] : this.rt.getProperty(value, this.rt.publicName(i));
+      const written = this.str(String(i), element, value);
+      out[i] = written === undefined ? null : written;
     }
 
-    if (length > 0) {
-      this.out += post;
-    }
-
-    this.out += "]";
-    this.leave(value, stepback);
-    return true;
+    this.active.delete(value);
+    return out;
   }
 }
 
@@ -516,7 +570,7 @@ function isA(traits: Traits, name: string): boolean {
 
 export function jsonNatives(): Natives {
   return {
-    "JSON.JSON::parseCore": (rt) => (text: Value) => parse(rt, rt.toString(text)),
+    "JSON.JSON::parseCore": (rt) => (text: Value) => parseText(rt, rt.toString(text)),
     "JSON.JSON::stringifySpecializedToString":
       (rt) => (value: Value, propertyList: Value, replacer: Value, gap: Value) =>
         new Serializer(
