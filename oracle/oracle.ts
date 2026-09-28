@@ -327,6 +327,50 @@ export function libraries(
   }));
 }
 
+/** avmshell's run of one ABC. */
+export interface AbcRun {
+  exitCode: number;
+  output: string;
+}
+
+/**
+ * Run each ABC in avmshell, from `outDir` (inside the repository), in one
+ * container: no compiling, for ABCs built by hand.
+ */
+export function runAbcs(
+  abcs: Uint8Array[],
+  outDir: string,
+  { engine = containerEngine(), timeoutSeconds = 20 } = {},
+): AbcRun[] {
+  mkdirSync(outDir, { recursive: true });
+  const out = relative(root, resolve(outDir));
+  if (out.startsWith("..")) {
+    throw new Error(`outDir must be inside ${root}`);
+  }
+
+  for (const [i, bytes] of abcs.entries()) {
+    writeFileSync(join(outDir, `${i}.abc`), bytes);
+  }
+
+  const script = [
+    `cd "${out}"`,
+    `for i in $(seq 0 ${abcs.length - 1}); do`,
+    `  timeout ${timeoutSeconds} /opt/crossbridge/sdk/usr/bin/avmshell $i.abc > $i.out 2>&1; echo $? > $i.code`,
+    "done",
+  ].join("\n");
+  writeFileSync(join(outDir, "run.sh"), `${script}\n`);
+
+  const r = container(engine, [`${out}/run.sh`]);
+  if (r.status !== 0) {
+    throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+  }
+
+  return abcs.map((_, i) => ({
+    exitCode: Number(readFileSync(join(outDir, `${i}.code`), "utf8")),
+    output: readFileSync(join(outDir, `${i}.out`), "utf8"),
+  }));
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
 

@@ -23,6 +23,7 @@ pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
 pnpm test        # unit, conformance and program tests (needs podman or docker)
 pnpm oracle path/to/file.as   # print avmshell's output for a file
+pnpm oracle:cases             # the unit tests' hand-built ABCs vs avmshell
 pnpm tamarin [prefix...]      # Tamarin acceptance tests vs baseline.json (about 10 minutes
                               # uncached; SWF2ES_ORACLE_JOBS sets parallelism, default 10)
 pnpm tamarin --update-baseline [prefix...]   # after an oracle or harness change
