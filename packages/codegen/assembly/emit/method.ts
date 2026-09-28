@@ -110,6 +110,16 @@ export class MethodEmitter {
     out.text(") {\n");
     this.prologue(method, global, flags);
     const handled = ir.handlerCount > 0;
+
+    // Structured control flow where it applies: no handlers yet, and reducible.
+    if (!handled && this.analyze()) {
+      this.structured = true;
+      this.node(0);
+      this.structured = false;
+      out.text("}");
+      return;
+    }
+
     if (handled) {
       this.regions();
       out.text("  let b = 0, t = 0;\n  for (;;) try { switch (b) {\n");
@@ -325,10 +335,16 @@ export class MethodEmitter {
   /** Write block k: its case label, then its instructions, following register types. */
   block(k: u32): void {
     const out = this.out;
-    const ir = this.ir;
     out.text("  case ");
     out.uint(k);
     out.text(":\n");
+    this.blockBody(k);
+  }
+
+  /** Block k's instructions, following register types from its entry state. */
+  blockBody(k: u32): void {
+    const out = this.out;
+    const ir = this.ir;
     const entry = k * ir.frameSize;
     for (let r: u32 = 0; r < ir.frameSize; r++) {
       this.regType[r] = ir.entryType[entry + r];
@@ -395,9 +411,369 @@ export class MethodEmitter {
 
   /** `b = n; continue;` to block n. */
   goto(block: u32): void {
+    if (this.structured) {
+      this.branchTo(block);
+      return;
+    }
+
     this.out.text("b = ");
     this.out.uint(block);
     this.out.text("; continue;");
+  }
+
+  // Structured control flow, as Ramsey's "Beyond Relooper" translates a
+  // reducible control-flow graph: by the dominator tree, a loop header as
+  // `L: for (;;) { ... }`, a merge node (more than one forward edge in) as
+  // a labelled block `L: { ... }` followed by its code, and a branch as
+  // continue to a loop header, break to a merge node, or else its target's
+  // code in place, as its only way in.
+
+  /** Each block's successors, flat; succStart[k] .. succStart[k + 1]. */
+  succStart: StaticArray<u32> = new StaticArray<u32>(0);
+  succ: u32[] = [];
+  /** Reverse postorder number by block, -1 if unreachable, and blocks by it. */
+  rpo: StaticArray<i32> = new StaticArray<i32>(0);
+  order: StaticArray<u32> = new StaticArray<u32>(0);
+  idom: StaticArray<i32> = new StaticArray<i32>(0);
+  forwardIn: StaticArray<u32> = new StaticArray<u32>(0);
+  loopHeader: StaticArray<u8> = new StaticArray<u8>(0);
+  predStart: StaticArray<u32> = new StaticArray<u32>(0);
+  pred: u32[] = [];
+  /** The dominator tree's children; childStart[k] .. childStart[k + 1]. */
+  childStart: StaticArray<u32> = new StaticArray<u32>(0);
+  child: u32[] = [];
+  fill: StaticArray<u32> = new StaticArray<u32>(0);
+  dfsStack: u32[] = [];
+  dfsEdge: u32[] = [];
+  reachable: u32 = 0;
+  structured: bool = false;
+  currentBlock: u32 = 0;
+
+  /** The index after block k's last instruction, and its first. */
+  private blockEnd(k: u32): u32 {
+    const ir = this.ir;
+    return k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
+  }
+
+  /** Whether block k ends in a branch, return or throw, not falling through. */
+  private terminates(k: u32): bool {
+    const ir = this.ir;
+    const end = this.blockEnd(k);
+    if (end === ir.blockFirst[k]) {
+      return false;
+    }
+
+    const op = ir.op[end - 1];
+    return (
+      op === ops.OP_jump ||
+      op === ops.OP_lookupswitch ||
+      op === ops.OP_returnvoid ||
+      op === ops.OP_returnvalue ||
+      op === ops.OP_throw
+    );
+  }
+
+  /** Whether op branches on a condition. */
+  private conditional(op: u16): bool {
+    return (
+      (op >= ops.OP_ifnlt && op <= ops.OP_ifnge) || (op >= ops.OP_iftrue && op <= ops.OP_ifstrictne)
+    );
+  }
+
+  /**
+   * Block k's successors: every conditional branch in it (a block starts
+   * only where something branches to, so one may be in the middle), then
+   * what its last instruction does, or its fall-through.
+   */
+  private successors(k: u32): void {
+    const ir = this.ir;
+    const first = ir.blockFirst[k];
+    const end = this.blockEnd(k);
+    const next = k + 1 < ir.blockCount;
+    for (let i = first; i < end; i++) {
+      if (this.conditional(ir.op[i])) {
+        this.succ.push(ir.a[i]);
+      }
+    }
+
+    if (end === first) {
+      if (next) {
+        this.succ.push(k + 1);
+      }
+      return;
+    }
+
+    const i = end - 1;
+    const op = ir.op[i];
+    if (op === ops.OP_jump) {
+      this.succ.push(ir.a[i]);
+    } else if (op === ops.OP_lookupswitch) {
+      this.succ.push(ir.a[i]);
+      for (let c: u32 = 0; c <= <u32>ir.c[i]; c++) {
+        this.succ.push(ir.cases[ir.b[i] + c]);
+      }
+    } else if (op === ops.OP_returnvoid || op === ops.OP_returnvalue || op === ops.OP_throw) {
+      // No successor.
+    } else if (next) {
+      this.succ.push(k + 1);
+    }
+  }
+
+  /**
+   * The analysis the translation needs: successors and predecessors, a
+   * reverse postorder, dominators (Cooper, Harvey and Kennedy's), each
+   * block's children in the dominator tree, loop headers and forward edge
+   * counts. False if the graph is irreducible: a retreating edge whose
+   * target does not dominate its source.
+   */
+  analyze(): bool {
+    const ir = this.ir;
+    const n = ir.blockCount;
+    if (<u32>this.rpo.length < n) {
+      const size = max(n, 64);
+      this.succStart = new StaticArray<u32>(size + 1);
+      this.predStart = new StaticArray<u32>(size + 1);
+      this.childStart = new StaticArray<u32>(size + 1);
+      this.rpo = new StaticArray<i32>(size);
+      this.order = new StaticArray<u32>(size);
+      this.idom = new StaticArray<i32>(size);
+      this.forwardIn = new StaticArray<u32>(size);
+      this.loopHeader = new StaticArray<u8>(size);
+      this.fill = new StaticArray<u32>(size);
+    }
+
+    this.succ.length = 0;
+    for (let k: u32 = 0; k < n; k++) {
+      this.succStart[k] = <u32>this.succ.length;
+      this.successors(k);
+      this.rpo[k] = -1;
+      this.idom[k] = -1;
+      this.forwardIn[k] = 0;
+      this.loopHeader[k] = 0;
+    }
+
+    this.succStart[n] = <u32>this.succ.length;
+
+    // A depth-first walk from the entry: postorder, reversed. -2 marks a block on the way.
+    const stack = this.dfsStack;
+    const edge = this.dfsEdge;
+    stack.length = 0;
+    edge.length = 0;
+    stack.push(0);
+    edge.push(0);
+    this.rpo[0] = -2;
+    let post = n;
+    while (stack.length) {
+      const top = stack.length - 1;
+      const k = stack[top];
+      const e = edge[top];
+      if (this.succStart[k] + e < this.succStart[k + 1]) {
+        edge[top] = e + 1;
+        const s = this.succ[this.succStart[k] + e];
+        if (this.rpo[s] === -1) {
+          this.rpo[s] = -2;
+          stack.push(s);
+          edge.push(0);
+        }
+      } else {
+        stack.pop();
+        edge.pop();
+        this.rpo[k] = <i32>--post;
+      }
+    }
+
+    // Reachable blocks, numbered from 0 in reverse postorder.
+    const reachable = n - post;
+    this.reachable = reachable;
+    for (let k: u32 = 0; k < n; k++) {
+      if (this.rpo[k] >= 0) {
+        this.rpo[k] -= <i32>post;
+        this.order[this.rpo[k]] = k;
+      }
+    }
+
+    // Predecessors, by counting then filling.
+    for (let k: u32 = 0; k <= n; k++) {
+      this.predStart[k] = 0;
+    }
+
+    for (let e: u32 = 0; e < <u32>this.succ.length; e++) {
+      this.predStart[this.succ[e] + 1]++;
+    }
+
+    for (let k: u32 = 0; k < n; k++) {
+      this.predStart[k + 1] += this.predStart[k];
+      this.fill[k] = this.predStart[k];
+    }
+
+    this.pred.length = this.succ.length;
+    for (let p: u32 = 0; p < n; p++) {
+      for (let e = this.succStart[p]; e < this.succStart[p + 1]; e++) {
+        const s = this.succ[e];
+        this.pred[this.fill[s]++] = p;
+      }
+    }
+
+    // Dominators, iterated to a fixed point in reverse postorder.
+    this.idom[0] = 0;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let r: u32 = 1; r < reachable; r++) {
+        const b = this.order[r];
+        let dom: i32 = -1;
+        for (let e = this.predStart[b]; e < this.predStart[b + 1]; e++) {
+          const p = this.pred[e];
+          if (this.rpo[p] >= 0 && this.idom[p] >= 0) {
+            dom = dom < 0 ? <i32>p : this.intersect(<u32>dom, p);
+          }
+        }
+
+        if (dom !== this.idom[b]) {
+          this.idom[b] = dom;
+          changed = true;
+        }
+      }
+    }
+
+    // Edges: forward ones counted, retreating ones back edges to a dominator, or irreducible.
+    for (let r: u32 = 0; r < reachable; r++) {
+      const p = this.order[r];
+      for (let e = this.succStart[p]; e < this.succStart[p + 1]; e++) {
+        const s = this.succ[e];
+        if (this.rpo[s] > this.rpo[p]) {
+          this.forwardIn[s]++;
+        } else if (this.dominates(s, p)) {
+          this.loopHeader[s] = 1;
+        } else {
+          return false;
+        }
+      }
+    }
+
+    // The dominator tree's children, each block's in reverse postorder.
+    for (let k: u32 = 0; k <= n; k++) {
+      this.childStart[k] = 0;
+    }
+
+    for (let r: u32 = 1; r < reachable; r++) {
+      this.childStart[this.idom[this.order[r]] + 1]++;
+    }
+
+    for (let k: u32 = 0; k < n; k++) {
+      this.childStart[k + 1] += this.childStart[k];
+      this.fill[k] = this.childStart[k];
+    }
+
+    this.child.length = reachable > 0 ? reachable - 1 : 0;
+    for (let r: u32 = 1; r < reachable; r++) {
+      const y = this.order[r];
+      this.child[this.fill[this.idom[y]]++] = y;
+    }
+
+    return true;
+  }
+
+  private intersect(a: u32, b: u32): u32 {
+    let x = a;
+    let y = b;
+    while (x !== y) {
+      while (this.rpo[x] > this.rpo[y]) {
+        x = <u32>this.idom[x];
+      }
+
+      while (this.rpo[y] > this.rpo[x]) {
+        y = <u32>this.idom[y];
+      }
+    }
+
+    return x;
+  }
+
+  /** Whether block a dominates block b. */
+  private dominates(a: u32, b: u32): bool {
+    let x = b;
+    while (x !== a) {
+      if (x === 0) {
+        return false;
+      }
+
+      x = <u32>this.idom[x];
+    }
+
+    return true;
+  }
+
+  /** Block x and what it dominates: in a loop if it heads one. */
+  node(x: u32): void {
+    const out = this.out;
+    // Its children in the dominator tree that are merge nodes, the latest first.
+    const merges: u32[] = [];
+    for (let c = this.childStart[x + 1]; c > this.childStart[x]; c--) {
+      const y = this.child[c - 1];
+      if (this.forwardIn[y] >= 2) {
+        merges.push(y);
+      }
+    }
+
+    if (this.loopHeader[x]) {
+      out.text("  L");
+      out.uint(x);
+      out.text(": for (;;) {\n");
+      this.within(x, merges, 0);
+      out.text("  }\n");
+    } else {
+      this.within(x, merges, 0);
+    }
+  }
+
+  /** Block x's code inside a labelled block for each merge node from j, each followed by its code. */
+  private within(x: u32, merges: u32[], j: i32): void {
+    const out = this.out;
+    if (j === merges.length) {
+      this.structuredBlock(x);
+      return;
+    }
+
+    const y = merges[j];
+    out.text("  L");
+    out.uint(y);
+    out.text(": {\n");
+    this.within(x, merges, j + 1);
+    out.text("  }\n");
+    this.node(y);
+  }
+
+  /** Block k's instructions, and its fall-through as an explicit branch. */
+  private structuredBlock(k: u32): void {
+    this.currentBlock = k;
+    this.blockBody(k);
+    if (!this.terminates(k) && k + 1 < this.ir.blockCount) {
+      this.currentBlock = k;
+      this.out.text("    ");
+      this.branchTo(k + 1);
+      this.out.text("\n");
+    }
+  }
+
+  /** A branch from the current block to block t. */
+  private branchTo(t: u32): void {
+    const out = this.out;
+    const from = this.currentBlock;
+    if (this.loopHeader[t] && this.rpo[t] <= this.rpo[from]) {
+      out.text("continue L");
+      out.uint(t);
+      out.text(";");
+    } else if (this.forwardIn[t] >= 2) {
+      out.text("break L");
+      out.uint(t);
+      out.text(";");
+    } else {
+      // Its only way in: its code here.
+      out.text("\n");
+      this.node(t);
+      this.currentBlock = from;
+    }
   }
 
   instruction(i: u32): void {

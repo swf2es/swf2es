@@ -138,13 +138,29 @@ Each method goes through the same steps, in `codegen`:
 ### Generated code
 
 Each ABC compiles to one ES module. Every method becomes a JavaScript
-function whose registers are `let` variables, and at first a dispatcher
-runs its blocks: `for (;;) switch (b) { case 0: ...; b = 2; continue; }`.
-It handles any control flow, and the structured form of step 4 replaces it
-where the code is reducible. A method with exception handlers wraps the
+function whose registers are `let` variables, and whose blocks are
+structured JavaScript, as Norman Ramsey's "Beyond Relooper" translates a
+reducible control-flow graph by its dominator tree:
+
+- a loop header (the target of a back edge) is `L3: for (;;) { ... }`;
+- a merge node (more than one forward edge in) is a labelled block,
+  `L5: { ... }`, followed by its own code;
+- a branch to a loop header is `continue L3`, to a merge node `break L5`,
+  and to a block it is the only way into, that block's code in place;
+- every path ends in a branch, return or throw, so nothing falls out of a
+  loop or through a case.
+
+A block starts only where something branches to, so a conditional branch
+may be in the middle of one; it is then an `if` whose body branches, and
+the block goes on after it.
+
+Where that translation does not apply, a dispatcher runs the blocks:
+`for (;;) switch (b) { case 0: ...; b = 2; continue; }`. It handles any
+control flow: an irreducible graph (a loop entered in more than one
+place), and for now any method with exception handlers, which wraps the
 loop in `try`/`catch`; the catch picks the handler covering the throwing
-instruction, matches the exception's type, and continues at its block with
-the exception as the only stack value, or rethrows.
+instruction, matches the exception's type, and continues at its block
+with the exception as the only stack value, or rethrows.
 
 The IR's types decide the JavaScript from the start where that is simple:
 `int` arithmetic ends in `| 0`, `uint` in `>>> 0`, a slot bound early is a
