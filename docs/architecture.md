@@ -201,7 +201,10 @@ to try it.
 
 The IR's types decide the JavaScript from the start where that is simple:
 `int` arithmetic ends in `| 0`, `uint` in `>>> 0`, a slot bound early is a
-field access, a method bound early a direct call. Anything typed `*` goes
+field access, a method bound early a direct call, a coercion to a class
+`rt.coerceTo` (no builtin for the runtime to look for), and a typed
+Vector's element `rt.vectorGetInt` and the like, one for each kind of
+element, so that each sees one kind of array. Anything typed `*` goes
 through the runtime, which does what avmplus does at run time.
 
 ### The object model
