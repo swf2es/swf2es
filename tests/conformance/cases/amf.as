@@ -105,3 +105,17 @@ function cut(v:*, drop:int):String {
 }
 trace("truncated", cut(new <int>[1, 2, 3], 0), cut(new <int>[1, 2, 3], 1), cut(new <int>[1, 2, 3], 5), cut(new <uint>[7, 8], 3), cut(new <Number>[0.5, 1.5], 1), cut(new <Number>[0.5, 1.5], 9));
 trace("truncated strings", cut("short", 0), cut("short", 1), cut("short", 5), cut("abcdefghijklmnopqrstuvwxyz", 3), cut("é€", 1), cut(["ab", "ab"], 0), cut(["ab", "ab"], 1));
+// Empty Vectors at the very end of the data, each numeric kind and Object's.
+function emptyAtEnd(v:*):String {
+  var b:ByteArray = new ByteArray();
+  b.writeObject(v);
+  b.position = 0;
+  try {
+    var r:* = b.readObject();
+    return r.length + " at " + b.position + "/" + b.length;
+  } catch (e:Error) {
+    return e.errorID + " at " + b.position;
+  }
+  return "";
+}
+trace("empty at end", emptyAtEnd(new Vector.<int>()), emptyAtEnd(new Vector.<uint>()), emptyAtEnd(new Vector.<Number>()), emptyAtEnd(new Vector.<Object>()), emptyAtEnd(new Vector.<int>(0, true)));

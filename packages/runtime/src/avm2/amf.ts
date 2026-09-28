@@ -634,9 +634,10 @@ class Reader {
     this.objects.push(v);
     // A numeric Vector's elements, when all are there, at once: into its
     // storage, each as its type reads it. Else each on its own, to fail
-    // where avmplus does.
+    // where avmplus does; an empty one reads none, even at the end, where
+    // shortRead would fail even for no bytes.
     const size = type === kVectorDouble ? 8 : 4;
-    if (type !== kVectorObject && this.input.available >= length * size) {
+    if (type !== kVectorObject && length > 0 && this.input.available >= length * size) {
       const at = this.input.shortRead(length * size);
       const view = this.input.view;
       const elements: number[] = v.$a;
