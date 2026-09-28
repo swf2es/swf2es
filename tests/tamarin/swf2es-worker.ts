@@ -94,7 +94,8 @@ process.on("message", async (message: { path: string; abc: string }) => {
     process.send?.({ path: message.path, lines });
   } catch (e) {
     const error = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-    process.send?.({ path: message.path, error: error.split("\n")[0] });
+    // Its first line, and not all of it: some quote a whole regular expression.
+    process.send?.({ path: message.path, error: error.split("\n")[0].slice(0, 200) });
   }
 });
 

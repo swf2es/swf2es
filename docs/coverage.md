@@ -40,8 +40,8 @@ What stops a test, or makes it differ, most often:
 | 216 | Fewer checks passed than in avmshell |
 | 187 | E4X: an XML or XMLList native, `descendants`, or AMF3 for XML |
 | 47 | A runtime bug: `Cannot read properties of null (reading '$it')` |
-| 17 | The same checks passed, but others failed |
 | 20 | The URI functions: `escape`, `unescape`, `encodeURI`, `decodeURI` and their Component forms |
+| 17 | The same checks passed, but others failed |
 | 9 | Runtime bugs on strings: `this.substring` or `this.substr` is not a function |
 | 6 | Timeouts: script timeouts (`misc/catchableTimeout`, `doubleTimeout`) and huge arrays |
 | 5 | Runtime bugs: `Cannot read properties of undefined (reading 'call')` |
