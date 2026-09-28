@@ -44,6 +44,7 @@ const JUMP = 0x10;
 const IFTRUE = 0x11;
 const IFFALSE = 0x12;
 const PUSHTRUE = 0x26;
+const PUSHFALSE = 0x27;
 const GETLOCAL1 = 0xd1;
 const GETLOCAL2 = 0xd2;
 const GETLOCAL3 = 0xd3;
@@ -164,6 +165,34 @@ test("code after an if goes on with its own register types, not the if body's", 
     RETURNVALUE,
   ];
   assert.equal(run(script(code)), 0);
+});
+
+test("a value an if body moves to a local leaves the code after the if as it is", { skip }, () => {
+  // l1 = 1; if (false) l1 = 7; else { l1 = 3 } return l1: the if body, written in
+  // place, ends putting 7 straight in l1, and the else still pushes its 3.
+  // 0 pushbyte 1; 2 setlocal1; 3 pushfalse; 4 iftrue +7 to 15; 8 pushbyte 3;
+  // 10 setlocal1; 11 jump +3 to 18; 15 pushbyte 7; 17 setlocal1; 18 getlocal1; 19 returnvalue.
+  const code = [
+    PUSHBYTE,
+    1,
+    SETLOCAL1,
+    PUSHFALSE,
+    IFTRUE,
+    ...s24(7),
+    PUSHBYTE,
+    3,
+    SETLOCAL1,
+    JUMP,
+    ...s24(3),
+    PUSHBYTE,
+    7,
+    SETLOCAL1,
+    GETLOCAL1,
+    RETURNVALUE,
+  ];
+  const js = emit(script(code));
+  assert.match(js, /l1 = 3;/);
+  assert.equal(run(script(code)), 3);
 });
 
 test("an irreducible loop keeps the dispatcher, and runs the same", { skip }, () => {

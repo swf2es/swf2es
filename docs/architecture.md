@@ -169,6 +169,12 @@ the order avmplus looks for them. With handlers, the whole loop is in
 instruction, matches the exception's type, and continues at its block
 with the exception as the only stack value, or rethrows.
 
+Stack registers that only copy a local are not written: a `getlocal`
+leaves its stack register a copy, read as the local itself, until the local
+changes or a branch needs the stack as it is. A value the next instruction
+only moves to a local (a `setlocal`) goes to the local straight, and a
+conversion that changes nothing writes no code.
+
 The IR's types decide the JavaScript from the start where that is simple:
 `int` arithmetic ends in `| 0`, `uint` in `>>> 0`, a slot bound early is a
 field access, a method bound early a direct call. Anything typed `*` goes

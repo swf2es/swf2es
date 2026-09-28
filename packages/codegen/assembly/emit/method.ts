@@ -100,6 +100,14 @@ export class MethodEmitter {
       this.scopeWith = new StaticArray<u8>(ir.maxScope);
     }
 
+    if (<u32>this.copyOf.length < ir.frameSize) {
+      this.copyOf = new StaticArray<i32>(ir.frameSize);
+    }
+
+    for (let r: u32 = 0; r < ir.frameSize; r++) {
+      this.copyOf[r] = -1;
+    }
+
     const count = traits.paramCount[global];
     out.text("function (");
     for (let p: u32 = 1; p <= count; p++) {
@@ -266,7 +274,7 @@ export class MethodEmitter {
         }
 
         out.text("{ ");
-        this.reg(exception);
+        this.regName(exception);
         out.text(" = x; ");
         this.goto(ir.handlerBlock[h]);
         out.text(" }\n");
@@ -378,7 +386,44 @@ export class MethodEmitter {
     const handled = ir.handlerCount > 0;
     this.region = -1;
     const last = k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
+    const stack = <i32>(ir.localCount + ir.maxScope);
+    // Every way in wrote its copies.
+    this.uncopy(stack);
     for (let i = ir.blockFirst[k]; i < last; i++) {
+      const op = ir.op[i];
+      const dst = ir.dst[i];
+      // What the instruction writes, other than stack registers, is copied
+      // first by the stack registers copying it; and what a branch leaves
+      // on the stack, for the block it goes to.
+      if (dst >= 0 && dst < stack) {
+        this.copyAll(dst);
+      }
+
+      if (op === ops.OP_hasnext2) {
+        this.copyAll(<i32>ir.a[i]);
+        this.copyAll(<i32>ir.b[i]);
+      } else if (op === ops.OP_popscope) {
+        this.copyAll(ir.src[i]);
+      } else if (this.conditional(op) || op === ops.OP_lookupswitch) {
+        this.copyBelow(ir.src[i]);
+      } else if (op === ops.OP_jump) {
+        this.copyBelow(<i32>ir.frameSize);
+      }
+
+      // A value the next instruction only moves to a local goes there
+      // straight, if the instruction assigns it.
+      this.target = -1;
+      if (
+        dst >= stack &&
+        i + 1 < last &&
+        this.setsLocal(ir.op[i + 1]) &&
+        ir.src[i + 1] === dst &&
+        op !== ops.OP_hasnext2
+      ) {
+        this.target = ir.dst[i + 1];
+        this.copyAll(this.target);
+      }
+
       if (handled) {
         const region = this.regionOf(ir.pc[i]);
         if (region !== this.region) {
@@ -392,10 +437,107 @@ export class MethodEmitter {
         }
       }
 
+      // A branch's own target, written in place, sinks its own values: only
+      // an instruction given a local here can have assigned it.
+      const sinking = this.target >= 0;
+      this.kept = false;
+      this.sunk = false;
       this.instruction(i);
-      if (ir.dst[i] >= 0) {
-        this.regType[ir.dst[i]] = ir.type[i];
+      this.target = -1;
+      if (dst >= 0) {
+        this.regType[dst] = ir.type[i];
       }
+
+      if (sinking && this.sunk) {
+        // The setlocal is written: its stack register was never set.
+        i++;
+        this.regType[ir.dst[i]] = ir.type[i];
+        this.copyOf[dst] = -1;
+        continue;
+      }
+
+      if (this.conditional(op) || op === ops.OP_lookupswitch) {
+        // What the branch took is gone, and the rest is written.
+        this.uncopy(stack);
+      } else if (op === ops.OP_swap) {
+        this.copyOf[ir.src[i]] = -1;
+        this.copyOf[ir.src[i] + 1] = -1;
+      } else if (op === ops.OP_pop || this.setsLocal(op)) {
+        this.copyOf[ir.src[i]] = -1;
+      } else if (dst >= stack && !this.kept) {
+        this.copyOf[dst] = -1;
+      }
+    }
+
+    if (!this.terminates(k)) {
+      this.copyBelow(<i32>ir.frameSize);
+    }
+  }
+
+  /**
+   * Whether instruction i, a getlocal or dup to a stack register, only
+   * makes it a copy: of the local, or of what the register duplicated copies.
+   */
+  private copies(i: u32): bool {
+    const ir = this.ir;
+    const stack = <i32>(ir.localCount + ir.maxScope);
+    const dst = ir.dst[i];
+    const src = ir.src[i];
+    if (dst < stack) {
+      return false;
+    }
+
+    const from = src < stack ? src : this.copyOf[src];
+    if (from < 0) {
+      return false;
+    }
+
+    this.copyOf[dst] = from;
+    this.kept = true;
+    return true;
+  }
+
+  /** Whether op is a setlocal, which takes its stack register. */
+  private setsLocal(op: u16): bool {
+    return op === ops.OP_setlocal || (op >= ops.OP_setlocal0 && op < ops.OP_setlocal0 + 4);
+  }
+
+  /** Write the stack registers below `limit` that are copies. */
+  private copyBelow(limit: i32): void {
+    const ir = this.ir;
+    const end = min(limit, <i32>ir.frameSize);
+    for (let r = <i32>(ir.localCount + ir.maxScope); r < end; r++) {
+      if (this.copyOf[r] >= 0) {
+        this.writeCopy(r);
+      }
+    }
+  }
+
+  /** Write the stack registers that copy register w, before w changes. */
+  private copyAll(w: i32): void {
+    const ir = this.ir;
+    for (let r = <i32>(ir.localCount + ir.maxScope); r < <i32>ir.frameSize; r++) {
+      if (this.copyOf[r] === w) {
+        this.writeCopy(r);
+      }
+    }
+  }
+
+  private writeCopy(r: i32): void {
+    const out = this.out;
+    const from = this.copyOf[r];
+    this.copyOf[r] = -1;
+    out.text("    ");
+    this.reg(r);
+    out.text(" = ");
+    this.reg(from);
+    out.text(";\n");
+  }
+
+  /** Forget every copy from register `from` up: none is needed. */
+  private uncopy(from: i32): void {
+    for (let r = from; r < <i32>this.ir.frameSize; r++) {
+      this.copyOf[r] = -1;
     }
   }
 
@@ -404,7 +546,14 @@ export class MethodEmitter {
     return this.domain.builtin(this.regType[r]);
   }
 
+  /** Register r as read: what it copies, if it is a copy. */
   reg(r: i32): void {
+    const copy = this.copyOf[r];
+    this.regName(copy >= 0 ? copy : r);
+  }
+
+  /** Register r itself, as written. */
+  regName(r: i32): void {
     const ir = this.ir;
     const out = this.out;
     const local = <i32>ir.localCount;
@@ -423,7 +572,13 @@ export class MethodEmitter {
   /** `dst = ` for instruction i. */
   assign(i: u32): void {
     this.out.text("    ");
-    this.reg(this.ir.dst[i]);
+    if (this.target >= 0) {
+      this.regName(this.target);
+      this.sunk = true;
+    } else {
+      this.regName(this.ir.dst[i]);
+    }
+
     this.out.text(" = ");
   }
 
@@ -481,6 +636,17 @@ export class MethodEmitter {
   tryStack: u32[] = [];
   /** The state of the blocks around one being written in place, as save pushes it. */
   saved: i32[] = [];
+  /**
+   * The local or scope register each stack register copies, -1 if none:
+   * a copy is not written until something needs the stack register itself,
+   * so reading it reads what it copies.
+   */
+  copyOf: StaticArray<i32> = new StaticArray<i32>(0);
+  /** Whether the instruction just written left its destination a copy, or as it was. */
+  kept: bool = false;
+  /** The local the instruction being written assigns in place of its stack register, -1 if none; and whether it did. */
+  target: i32 = -1;
+  sunk: bool = false;
   unenclosed: bool = false;
   dfsStack: u32[] = [];
   dfsEdge: u32[] = [];
@@ -891,7 +1057,7 @@ export class MethodEmitter {
     }
 
     out.text(") { ");
-    this.reg(<i32>(ir.localCount + ir.maxScope));
+    this.regName(<i32>(ir.localCount + ir.maxScope));
     out.text(" = x; break L");
     out.uint(y);
     out.text("; }\n    throw e;\n");
@@ -1048,6 +1214,10 @@ export class MethodEmitter {
       case ops.OP_getlocal:
       case ops.OP_setlocal:
       case ops.OP_dup:
+        if (this.copies(i)) {
+          return;
+        }
+
         this.assign(i);
         this.reg(ir.src[i]);
         break;
@@ -1058,9 +1228,9 @@ export class MethodEmitter {
       case ops.OP_swap: {
         const x = ir.src[i];
         out.text("    [");
-        this.reg(x);
+        this.regName(x);
         out.text(", ");
-        this.reg(x + 1);
+        this.regName(x + 1);
         out.text("] = [");
         this.reg(x + 1);
         out.text(", ");
@@ -1075,6 +1245,7 @@ export class MethodEmitter {
         return;
       case IR_Coerce:
         if (ir.dst[i] === ir.src[i] && this.keeps(ir.c[i], this.regType[ir.src[i]])) {
+          this.kept = true;
           return;
         }
 
@@ -1228,6 +1399,7 @@ export class MethodEmitter {
           ir.dst[i] === ir.src[i] &&
           this.keeps(this.conversionType(<u8>op, i), this.regType[ir.src[i]])
         ) {
+          this.kept = true;
           return;
         }
 
@@ -1295,6 +1467,10 @@ export class MethodEmitter {
         }
 
         if (op >= ops.OP_getlocal0 && op < ops.OP_getlocal0 + 4) {
+          if (this.copies(i)) {
+            return;
+          }
+
           this.assign(i);
           this.reg(ir.src[i]);
           break;
@@ -1336,7 +1512,7 @@ export class MethodEmitter {
       case ops.OP_popscope:
         this.scopeDepth--;
         out.text("    ");
-        this.reg(src);
+        this.regName(src);
         out.text(" = undefined");
         return true;
       case ops.OP_getscopeobject:
@@ -1659,11 +1835,11 @@ export class MethodEmitter {
         // hasnext2 updates its two locals: the object and the index.
         const b = ir.b[i];
         out.text("    [");
-        this.reg(ir.dst[i]);
+        this.regName(ir.dst[i]);
         out.text(", ");
-        this.reg(<i32>a);
+        this.regName(<i32>a);
         out.text(", ");
-        this.reg(<i32>b);
+        this.regName(<i32>b);
         out.text("] = rt.hasNext2(");
         this.reg(<i32>a);
         out.text(", ");
