@@ -117,11 +117,25 @@ refused for their bytecode size (`kExceedsBytecodeLimit`), and
 |---|---|---|---|
 | Two registers swapped through a temporary, not `[a, b] = [b, a]` (an array and the iterator protocol) | +1.6% | −9.5% | yes |
 | **Against #27** | **+0.5%** | **224 → 199 (−11.2%)** | |
-| V8's inlining limits raised to 2000 bytes, 4000 cumulative (a flag, as a bound on what smaller code could win) | −7% | −7% | not a change |
 | A null check once per register until it is written | +1.6% | +1.0% | no |
 
-So smaller generated code is worth at most about 7% more; V8 already
-removes the checks and folds the constants the code repeats.
+Raising V8's inlining limits (`--max-inlined-bytecode-size=2000
+--max-inlined-bytecode-size-cumulative=4000`, a flag, not a change)
+improves this workload by about 7%. That measures those settings on the
+code as it is, not a bound: smaller code could also save work, compiling
+and registers, and other limits on inlining remain. Against the swap, as
+medians of 7 interleaved pairs each (`AB_NODE_ARGS` in `tests/programs/ab.ts`):
+
+| | ByteArray | Domain memory |
+|---|---|---|
+| Swap by destructuring, V8's limits | 193 | 222 |
+| Swap through a temporary, V8's limits | 194 | 199 |
+| Swap by destructuring, limits raised | 181 | 213 |
+| Swap through a temporary, limits raised | 182 | 185 |
+
+The two gains do not overlap: the swap is worth as much with the limits
+raised (−13%), and the limits as much after it. The null checks' dedup
+gained nothing measurable, which does not show that V8 removes every one.
 
 What paid: a runtime helper that many call sites share with many kinds of
 values, where the emitter knows the type and can call one made for it
