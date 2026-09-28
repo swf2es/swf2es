@@ -668,7 +668,7 @@ export class TraitsTable {
       }
     }
 
-    let legal = true;
+    let legal: bool = true;
     if (base >= 0) {
       const baseDispatch = unchecked(this.dispatchStart[base]);
       for (let d: u32 = 0; d < unchecked(this.methodCount[base]); d++) {
