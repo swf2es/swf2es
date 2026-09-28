@@ -1,6 +1,7 @@
 // Runs the Tamarin acceptance tests in avmshell through the oracle, checks
 // the results against baseline.json, and checks that swf2es parses and
-// decodes every compiled ABC like avmplus' abcdump.
+// decodes every compiled ABC like avmplus' abcdump and links it against
+// the builtins avmshell loads.
 //
 //   node tests/tamarin/run.ts [--update-baseline | --relax] [path prefix...]
 //
@@ -11,8 +12,14 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { abcdumpFacts, compareFacts, swf2esFacts, verifyErrors } from "../../oracle/abc-facts.ts";
-import { runOracle } from "../../oracle/oracle.ts";
+import {
+  abcdumpFacts,
+  compareFacts,
+  linkError,
+  swf2esFacts,
+  verifyErrors,
+} from "../../oracle/abc-facts.ts";
+import { libraries, runOracle } from "../../oracle/oracle.ts";
 import { collectTests } from "./collect.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -44,6 +51,9 @@ const results = runOracle(
   { repeat: true, abcdump: true },
 );
 
+// What avmshell loads before each test, as swf2es links it.
+const builtins = libraries(["builtin", "shell_toplevel"], `${here}out/lib`).map((l) => l.abc);
+
 const outcomes: Record<string, Outcome> = {};
 const problems: string[] = [];
 let unreachable = 0;
@@ -65,7 +75,9 @@ for (const r of results) {
       problems.push(`${r.name}: ${difference}`);
     }
 
-    const ours = verifyErrors(facts).join(" ");
+    // A linking error stops the ABC loading, before any method is verified.
+    const link = linkError(builtins, abc);
+    const ours = link ? `${link}` : verifyErrors(facts).join(" ");
     const theirs = [...new Set(r.output.match(/(?<=VerifyError: Error #)\d+/g) ?? [])]
       .sort()
       .join(" ");

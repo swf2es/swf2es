@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { abc, tables, u30 } from "./abc-builder.ts";
+import { linkCases } from "./link-cases.ts";
 import { testing } from "./testing-module.ts";
 
 const NS_PUBLIC = 0;
@@ -118,4 +119,15 @@ test("names are visible as avmshell's versioning tests expect", {
   );
   assert.notEqual(find("", "Object"), "none");
   assert.notEqual(find("__AS3__.vec", "Vector"), "none");
+});
+
+test("classes link to their bases and interfaces as avmplus links them", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  for (const c of linkCases) {
+    testing.domainReset(SWF_31);
+    assert.equal(testing.domainAdd(builtin, true), 0);
+    assert.equal(testing.domainAdd(c.abc, false), c.error ?? 0, c.name);
+  }
 });

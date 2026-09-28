@@ -1,6 +1,12 @@
-// A domain: the ABCs loaded together, and the names their scripts define.
-// Strings and namespaces are interned across ABCs, so a name is a pair of
-// ids however many ABCs spell it.
+// A domain: the ABCs loaded together, the names their scripts define, and
+// their classes, linked to their base classes and interfaces. Strings and
+// namespaces are interned across ABCs, so a name is a pair of ids however
+// many ABCs spell it.
+//
+// Classes link as in avmplus' AbcParser::parseInstanceInfos: while an ABC
+// loads, a type name resolves to a class some earlier ABC's script defines,
+// or else to an earlier class of the same ABC. Once the ABC has linked, the
+// classes its scripts define become visible to later ABCs.
 //
 // Namespaces follow avmplus' AbcParser: two are the same if their kind and
 // URI are; a private namespace is only ever equal to itself. A URI may end
@@ -19,8 +25,18 @@ import {
   CONSTANT_PackageInternalNs,
   CONSTANT_PrivateNs,
   CONSTANT_ProtectedNamespace,
+  CONSTANT_Qname,
   CONSTANT_StaticProtectedNs,
   CONSTANT_TypeName,
+  INSTANCE_Final,
+  INSTANCE_Interface,
+  kAmbiguousBindingError,
+  kCannotExtendError,
+  kCannotExtendFinalClass,
+  kCannotImplementError,
+  kClassNotFoundError,
+  kIllegalVoidError,
+  TRAIT_Class,
 } from "../abc/constants";
 import { readAbc } from "../abc/parse";
 
@@ -133,7 +149,10 @@ export class Domain {
   air: bool = false;
 
   abcs: Abc[] = [];
-  /** Each ABC's bytes, followed by PADDING; kept so pool strings stay readable. */
+  /**
+   * The bytes of every ABC ever added, followed by PADDING, including those
+   * rejected while linking: interned strings may point into any of them.
+   */
   buffers: StaticArray<u8>[] = [];
   /** Per ABC, the interned id of each pool string, and of each namespace and its version. */
   abcString: StaticArray<u32>[] = [];
@@ -160,6 +179,37 @@ export class Domain {
   bindingTrait: u32[] = [];
   bindings: IdTable = new IdTable();
 
+  // Classes by domain-wide id; ABC a's instance i is classStart[a] + i.
+  classStart: u32[] = [];
+  classAbc: u32[] = [];
+  classInstance: u32[] = [];
+  /** The base class's id, or -1. */
+  classBase: i32[] = [];
+  classFlags: u8[] = [];
+
+  /**
+   * Class names. Those a script defines are visible to every ABC (owner -1);
+   * while an ABC links, its own classes are visible to it by instance name
+   * (owner: its load number, which a rejected ABC never gives to another).
+   */
+  typeNs: u32[] = [];
+  typeName: u32[] = [];
+  typeVersion: u8[] = [];
+  typeClass: u32[] = [];
+  typeOwner: i32[] = [];
+  types: IdTable = new IdTable();
+  loads: i32 = 0;
+  /** Strings interned from text rather than an ABC, kept for their bytes. */
+  texts: ArrayBuffer[] = [];
+
+  // The builtin classes linking treats specially, found when the first
+  // builtin ABC links; -1 if it has none.
+  hasBuiltins: bool = false;
+  classClass: i32 = -1;
+  functionClass: i32 = -1;
+  /** avmplus registers void as a class, which nothing may extend. */
+  voidClass: i32 = -1;
+
   /**
    * Parse and add the ABC in `buffer`, whose first `length` bytes are the ABC
    * and the rest PADDING. Returns the ABC; check its `error`.
@@ -174,6 +224,7 @@ export class Domain {
     const index = <u32>this.abcs.length;
     this.abcs.push(abc);
     this.buffers.push(buffer);
+    this.loads++;
 
     const pool = abc.pool;
     const strings = new StaticArray<u32>(pool.stringCount);
@@ -184,8 +235,282 @@ export class Domain {
 
     this.abcString.push(strings);
     this.addNamespaces(abc, base, strings);
+    if (!this.link(index)) {
+      this.abcs.pop();
+      this.abcString.pop();
+      this.abcNs.pop();
+      this.abcNsVersion.pop();
+      this.classStart.pop();
+      return abc;
+    }
+
+    this.addClassNames(index);
     this.addBindings(index);
     return abc;
+  }
+
+  /** Link ABC `index`'s classes to their bases and interfaces; false after recording the error. */
+  link(index: u32): bool {
+    const abc = unchecked(this.abcs[index]);
+    const first = <u32>this.classAbc.length;
+    this.classStart.push(first);
+    for (let i: u32 = 0; i < abc.classCount; i++) {
+      this.classAbc.push(index);
+      this.classInstance.push(i);
+      this.classBase.push(-1);
+      this.classFlags.push(unchecked(abc.instanceFlags[i]));
+    }
+
+    for (let i: u32 = 0; i < abc.classCount; i++) {
+      const id = first + i;
+      const flags = unchecked(abc.instanceFlags[i]);
+      const baseName = unchecked(abc.instanceSuper[i]);
+      if (baseName) {
+        const base = this.resolveType(index, baseName);
+        if (base < 0) {
+          return abc.fail(-base);
+        }
+
+        if (
+          unchecked(this.classFlags[base]) & INSTANCE_Final ||
+          base === this.classClass ||
+          (base === this.functionClass && !abc.builtin)
+        ) {
+          return abc.fail(kCannotExtendFinalClass);
+        }
+
+        if (unchecked(this.classFlags[base]) & INSTANCE_Interface) {
+          return abc.fail(kCannotExtendError);
+        }
+
+        unchecked((this.classBase[id] = base));
+      }
+
+      const last = unchecked(abc.instanceInterfaceStart[i + 1]);
+      for (let j = unchecked(abc.instanceInterfaceStart[i]); j < last; j++) {
+        const t = this.resolveType(index, unchecked(abc.interfaces[j]));
+        if (t < 0) {
+          return abc.fail(-t);
+        }
+
+        if (!(unchecked(this.classFlags[t]) & INSTANCE_Interface)) {
+          return abc.fail(kCannotImplementError);
+        }
+      }
+
+      if (flags & INSTANCE_Interface && baseName) {
+        return abc.fail(kCannotExtendError);
+      }
+
+      this.nameInstance(index, i);
+    }
+
+    // As AvmCore's first builtin pool: its classes include the special ones.
+    if (abc.builtin && !this.hasBuiltins) {
+      this.hasBuiltins = true;
+      this.classClass = this.findPublicClass("Class");
+      this.functionClass = this.findPublicClass("Function");
+      this.voidClass = <i32>this.classAbc.length;
+      this.classAbc.push(index);
+      this.classInstance.push(0xffffffff);
+      this.classBase.push(-1);
+      this.classFlags.push(INSTANCE_Final);
+      const empty = this.internNamespace(NS_Public, this.internText(""));
+      this.nameType(empty, this.internText("void"), API_AllVersions, this.voidClass, -1);
+    }
+
+    return true;
+  }
+
+  /**
+   * As PoolObject::resolveTypeName for a base class or interface: the class
+   * id, or minus the error: 1014 if nothing matches, 1008 if two classes do,
+   * 1022 for void.
+   */
+  resolveType(index: u32, mn: u32): i32 {
+    const abc = unchecked(this.abcs[index]);
+    const pool = abc.pool;
+    const kind = unchecked(pool.mnKind[mn]);
+    if (kind === CONSTANT_TypeName) {
+      const base = this.resolveType(index, unchecked(pool.mnA[mn]));
+      const param = unchecked(pool.mnB[mn]);
+      if (base >= 0 && param) {
+        const t = this.resolveType(index, param);
+        if (t < 0) {
+          return t;
+        }
+      }
+
+      return base;
+    }
+
+    const strings = unchecked(this.abcString[index]);
+    const ids = unchecked(this.abcNs[index]);
+    const versions = unchecked(this.abcNsVersion[index]);
+    const nameIndex = unchecked(pool.mnB[mn]);
+    let found: i32 = -1;
+    if (kind === CONSTANT_Qname && unchecked(pool.mnA[mn]) !== 0 && nameIndex !== 0) {
+      const ns = unchecked(pool.mnA[mn]);
+      found = this.findType(ids[ns], strings[nameIndex], versions[ns]);
+    } else if (kind === CONSTANT_Multiname && nameIndex !== 0) {
+      const set = unchecked(pool.mnA[mn]);
+      const last = unchecked(pool.nsSetStart[set + 1]);
+      for (let m = unchecked(pool.nsSetStart[set]); m < last; m++) {
+        const ns = unchecked(pool.nsSetMembers[m]);
+        const t = this.findType(ids[ns], strings[nameIndex], versions[ns]);
+        if (t >= 0 && found >= 0 && t !== found) {
+          return -kAmbiguousBindingError;
+        }
+
+        if (t >= 0) {
+          found = t;
+        }
+      }
+    }
+
+    if (found < 0) {
+      return -kClassNotFoundError;
+    }
+
+    return found === this.voidClass ? -kIllegalVoidError : found;
+  }
+
+  /**
+   * As DomainMgr::findTraitsInPoolByNameAndNS for the ABC being linked: a
+   * class a script defines, else one of the ABC's own; -1 if none.
+   */
+  findType(ns: u32, name: u32, version: u8): i32 {
+    const found = this.findTypeOf(ns, name, version, -1);
+    return found >= 0 ? found : this.findTypeOf(ns, name, version, this.loads);
+  }
+
+  findTypeOf(ns: u32, name: u32, version: u8, owner: i32): i32 {
+    const hash = hashPair(ns, name);
+    const table = this.types;
+    let slot = table.start(hash);
+    while (true) {
+      const id = table.at(slot);
+      if (id < 0) {
+        return -1;
+      }
+
+      if (
+        unchecked(this.typeNs[id]) === ns &&
+        unchecked(this.typeName[id]) === name &&
+        unchecked(this.typeVersion[id]) <= version &&
+        unchecked(this.typeOwner[id]) === owner
+      ) {
+        return <i32>unchecked(this.typeClass[id]);
+      }
+
+      slot = table.next(slot);
+    }
+  }
+
+  nameType(ns: u32, name: u32, version: u8, id: i32, owner: i32): void {
+    const type = <u32>this.typeNs.length;
+    this.typeNs.push(ns);
+    this.typeName.push(name);
+    this.typeVersion.push(version);
+    this.typeClass.push(<u32>id);
+    this.typeOwner.push(owner);
+    this.types.insert(hashPair(ns, name), type);
+  }
+
+  /** As DomainMgr::addNamedInstanceTraits: instance i's name, unless something is already found by it. */
+  nameInstance(index: u32, i: u32): void {
+    const abc = unchecked(this.abcs[index]);
+    const pool = abc.pool;
+    let mn = unchecked(abc.instanceName[i]);
+    if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
+      mn = unchecked(pool.mnA[mn]);
+    }
+
+    let ns = unchecked(pool.mnA[mn]);
+    if (unchecked(pool.mnKind[mn]) === CONSTANT_Multiname) {
+      ns = unchecked(pool.nsSetMembers[pool.nsSetStart[ns]]);
+    }
+
+    const nsId = unchecked(this.abcNs[index][ns]);
+    const version = unchecked(this.abcNsVersion[index][ns]);
+    const name = unchecked(this.abcString[index][pool.mnB[mn]]);
+    if (this.findType(nsId, name, version) < 0) {
+      this.nameType(nsId, name, version, <i32>(this.classStart[index] + i), this.loads);
+    }
+  }
+
+  /**
+   * As AbcParser::addNamedTraits: every class a script of ABC `index`
+   * defines, visible to all later ABCs unless the domain has the name already.
+   */
+  addClassNames(index: u32): void {
+    const abc = unchecked(this.abcs[index]);
+    const pool = abc.pool;
+    const ids = unchecked(this.abcNs[index]);
+    const versions = unchecked(this.abcNsVersion[index]);
+    const strings = unchecked(this.abcString[index]);
+    const first = unchecked(abc.scriptTraitStart[0]);
+    const end = unchecked(abc.scriptTraitStart[abc.scriptCount]);
+    for (let t = first; t < end; t++) {
+      if ((unchecked(abc.traitTag[t]) & 0x0f) !== TRAIT_Class) {
+        continue;
+      }
+
+      let mn = unchecked(abc.traitName[t]);
+      if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
+        mn = unchecked(pool.mnA[mn]);
+      }
+
+      let ns = unchecked(pool.mnA[mn]);
+      let version = this.activeVersion(unchecked(versions[ns]));
+      if (unchecked(pool.mnKind[mn]) === CONSTANT_Multiname) {
+        const set = ns;
+        const last = unchecked(pool.nsSetStart[set + 1]);
+        ns = unchecked(pool.nsSetMembers[pool.nsSetStart[set]]);
+        version = API_Internal;
+        for (let m = unchecked(pool.nsSetStart[set]); m < last; m++) {
+          const v = this.activeVersion(unchecked(versions[pool.nsSetMembers[m]]));
+          if (v < version) {
+            version = v;
+          }
+        }
+      }
+
+      const nsId = unchecked(ids[ns]);
+      const name = unchecked(strings[pool.mnB[mn]]);
+      if (
+        unchecked(this.nsType[nsId]) !== NS_Private &&
+        this.findTypeOf(nsId, name, version, -1) < 0
+      ) {
+        const id = unchecked(this.classStart[index]) + unchecked(abc.traitIndex[t]);
+        this.nameType(nsId, name, version, <i32>id, -1);
+      }
+    }
+  }
+
+  /** The class the ABC being linked names public::`name`, or -1. */
+  findPublicClass(name: string): i32 {
+    const empty = this.findText("");
+    const text = this.findText(name);
+    const ns = empty < 0 ? -1 : this.findNamespace(NS_Public, <u32>empty);
+    return ns < 0 || text < 0 ? -1 : this.findTypeOf(ns, <u32>text, API_Internal, this.loads);
+  }
+
+  findText(text: string): i32 {
+    const bytes = String.UTF8.encode(text);
+    return this.findString(changetype<usize>(bytes), bytes.byteLength);
+  }
+
+  /** Intern a string that is not in an ABC. */
+  internText(text: string): u32 {
+    const bytes = String.UTF8.encode(text);
+    const found = this.findString(changetype<usize>(bytes), bytes.byteLength);
+    if (found >= 0) {
+      return <u32>found;
+    }
+
+    this.texts.push(bytes);
+    return this.internString(changetype<usize>(bytes), bytes.byteLength);
   }
 
   internString(ptr: usize, length: u32): u32 {

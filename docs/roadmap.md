@@ -22,14 +22,18 @@ Near-term work, in order. The goal of milestone 1 is in
       avmshell prints.
    2. Value types and scope chains, in three parts:
       - 2a. A domain and linking: classes looked up by qualified name
-        across ABCs, and linked with avmplus' errors. Builtin ABCs parse
-        in a mode that allows native methods and multi-namespace trait
-        names; `tests/libraries` checks the image's builtin,
-        shell_toplevel, playerglobal and airglobal against abcdump.
+        across ABCs and linked to their base classes and interfaces with
+        avmplus' errors. Builtin ABCs parse in a mode that allows native
+        methods and multi-namespace trait names; `tests/libraries` checks
+        the image's builtin, shell_toplevel, playerglobal and airglobal
+        against abcdump and links them, and every Tamarin ABC links as in
+        avmshell.
       - 2b. Declaring scopes: each method's outer scope chain, for 1013,
         getouterscope and the global slots.
-      - 2c. Value types in the frame state, and the checks that need them:
-        slots, callstatic's binding, operand types.
+      - 2c. Trait layout (overrides, name clashes, slot and disp ids, as
+        avmplus resolves a class when first used), then value types in the
+        frame state, and the checks that need them: slots, callstatic's
+        binding, operand types.
    3. The IR, written by the same pass.
 
 Tracked separately: SWF decompression in `format` (issue #3).

@@ -28,6 +28,7 @@ export const METHOD_Native: u8 = 0x20;
 export const METHOD_HasParamNames: u8 = 0x80;
 
 // Instance flags (instance_info.flags).
+export const INSTANCE_Final: u8 = 0x02;
 export const INSTANCE_Interface: u8 = 0x04;
 export const INSTANCE_ProtectedNs: u8 = 0x08;
 
@@ -41,15 +42,18 @@ export const TRAIT_Const: u8 = 6;
 export const ATTR_Metadata: u8 = 0x40;
 
 // VerifyError numbers avmplus reports (core/ErrorConstants.h), so a rejected
-// ABC fails the same way it does in avmshell.
+// ABC fails the same way it does in avmshell. 1008 is a ReferenceError.
+export const kAmbiguousBindingError: i32 = 1008;
 export const kIllegalOpcodeError: i32 = 1011;
 export const kLastInstExceedsCodeSizeError: i32 = 1012;
+export const kClassNotFoundError: i32 = 1014;
 export const kIllegalSetDxns: i32 = 1015;
 export const kScopeStackOverflowError: i32 = 1017;
 export const kScopeStackUnderflowError: i32 = 1018;
 export const kGetScopeObjectBoundsError: i32 = 1019;
 export const kCannotFallOffMethodError: i32 = 1020;
 export const kInvalidBranchTargetError: i32 = 1021;
+export const kIllegalVoidError: i32 = 1022;
 export const kStackOverflowError: i32 = 1023;
 export const kStackUnderflowError: i32 = 1024;
 export const kInvalidRegisterError: i32 = 1025;
@@ -68,7 +72,9 @@ export const kAlreadyBoundError: i32 = 1071;
 export const kIllegalOpMultinameError: i32 = 1078;
 export const kIllegalNativeMethodError: i32 = 1079;
 export const kIllegalNamespaceError: i32 = 1080;
+export const kCannotExtendFinalClass: i32 = 1103;
 export const kCorruptABCError: i32 = 1107;
+export const kCannotExtendError: i32 = 1110;
 export const kCannotImplementError: i32 = 1111;
 export const kInvalidNewActivationError: i32 = 1113;
 export const kDuplicateMethodBodyError: i32 = 1121;
