@@ -61,9 +61,9 @@ Near-term work, in order. The goal of milestone 1 is in
    2. Structured control flow: loops, `if`s and labelled blocks built from
       the dominator tree, as in Ramsey's "Beyond Relooper", with copies of
       stack registers removed. A method whose control flow is irreducible,
-      or whose handler ranges do not nest, keeps the dispatcher. It changes
-      only how blocks connect, so int wrapping, evaluation order and where
-      an exception comes from stay as they are.
+      or whose handler ranges do not nest, keeps the dispatcher. Both
+      preserve AS3's semantics exactly: int wrapping, evaluation order, and
+      which instruction an exception comes from, as its handlers see it.
    3. Source maps from the ABC's debugline and debugfile, to step through
       the AS3 in DevTools.
 5. **Faster verification**: the minimal runtime halved decoding to about
