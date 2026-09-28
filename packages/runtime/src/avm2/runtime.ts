@@ -319,7 +319,9 @@ export class Runtime {
    * as it, or, as avmplus' DomainEnv, 1024 bytes of scratch memory.
    */
   readonly scratchMemory = new DataView(new ArrayBuffer(1024));
-  memory: DataView = this.scratchMemory;
+  /** The domain memory, and its length kept with it for mops: fields, not an accessor and DataView's getter. */
+  private view: DataView = this.scratchMemory;
+  memoryLength: number = this.scratchMemory.byteLength;
   memoryProvider: AsObject | null = null;
   /** ByteArray.defaultObjectEncoding: AMF3 until set. */
   defaultObjectEncoding = 3;
@@ -2101,9 +2103,19 @@ export class Runtime {
   }
 
   /** `address` as an int, once checked that the domain memory holds `size` bytes there. */
+  /** The domain memory: where li8 and the other opcodes read and write, with its length. */
+  get memory(): DataView {
+    return this.view;
+  }
+
+  set memory(view: DataView) {
+    this.view = view;
+    this.memoryLength = view.byteLength;
+  }
+
   private mops(address: Value, size: number): number {
     const a = this.toInt(address);
-    if (a < 0 || a + size > this.memory.byteLength) {
+    if (a < 0 || a + size > this.memoryLength) {
       throw this.error("RangeError", 1506);
     }
 
@@ -2112,52 +2124,52 @@ export class Runtime {
 
   li8(address: Value): number {
     const at = this.mops(address, 1);
-    return this.memory.getUint8(at);
+    return this.view.getUint8(at);
   }
 
   li16(address: Value): number {
     const at = this.mops(address, 2);
-    return this.memory.getUint16(at, true);
+    return this.view.getUint16(at, true);
   }
 
   li32(address: Value): number {
     const at = this.mops(address, 4);
-    return this.memory.getInt32(at, true);
+    return this.view.getInt32(at, true);
   }
 
   lf32(address: Value): number {
     const at = this.mops(address, 4);
-    return this.memory.getFloat32(at, true);
+    return this.view.getFloat32(at, true);
   }
 
   lf64(address: Value): number {
     const at = this.mops(address, 8);
-    return this.memory.getFloat64(at, true);
+    return this.view.getFloat64(at, true);
   }
 
   si8(value: Value, address: Value): void {
     const at = this.mops(address, 1);
-    this.memory.setUint8(at, this.toInt(value));
+    this.view.setUint8(at, this.toInt(value));
   }
 
   si16(value: Value, address: Value): void {
     const at = this.mops(address, 2);
-    this.memory.setUint16(at, this.toInt(value), true);
+    this.view.setUint16(at, this.toInt(value), true);
   }
 
   si32(value: Value, address: Value): void {
     const at = this.mops(address, 4);
-    this.memory.setInt32(at, this.toInt(value), true);
+    this.view.setInt32(at, this.toInt(value), true);
   }
 
   sf32(value: Value, address: Value): void {
     const at = this.mops(address, 4);
-    this.memory.setFloat32(at, this.toNumber(value), true);
+    this.view.setFloat32(at, this.toNumber(value), true);
   }
 
   sf64(value: Value, address: Value): void {
     const at = this.mops(address, 8);
-    this.memory.setFloat64(at, this.toNumber(value), true);
+    this.view.setFloat64(at, this.toNumber(value), true);
   }
 
   // E4X, not implemented yet.

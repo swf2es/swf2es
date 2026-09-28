@@ -87,6 +87,25 @@ table above; medians of 7 to 9 runs each, in ms:
 | **Step 7.4 against #22** | **325 → 229 (−29.5%)** | **437 → 302 (−30.9%)** | |
 | AwayFL, same load, cold / warm | 559 / 409–462 | 709 / 622–701 | |
 
+Step 10, domain memory against PepperFlash's 83 ms, the same way:
+
+| Step 10 change | ByteArray | Domain memory | Kept |
+|---|---|---|---|
+| Domain memory's length in a field, not DataView's getter, for the range check | 0.0% | −9% | yes |
+| A new DataView for domain memory only when its bytes move or resize | −0.5% | −5.4% | yes |
+| **Both, against #25** | **0.0%** | **253 → 224 (−11.5%)** | |
+| `writeBytes` through a view, not a copy | 0.0% | −1.3% | no |
+| `coerceTo` keeping the last subtype it found | −0.5% | +0.9% | no |
+| findDef's global kept on the multiname (again, on an idle machine) | +1.0% | +0.9% | no |
+
+What is left is spread over the generated code: the three methods that
+take most (the codec's serializeMemory and deserializeMemory, and the
+benchmark's loop) each make a static call per field, `Pack.writeVarint(...)`,
+as `rt.findDef(M[k]).$slot` and a direct method call; findDef costs 3.7%
+itself, but V8 inlines it well enough that keeping its result gains
+nothing. More would need the compiler to bind such calls to a class it
+knows, with the script's initialization kept exact.
+
 What paid: a runtime helper that many call sites share with many kinds of
 values, where the emitter knows the type and can call one made for it
 (`coerceTo`, the Vector accessors); arrays kept as V8 wants them, packed

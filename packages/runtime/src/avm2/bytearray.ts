@@ -103,10 +103,14 @@ export class Bytes {
     this.notify();
   }
 
-  /** Tell the domain memory, if this is it, where the bytes are now. */
+  /** Tell the domain memory, if this is it, where the bytes are now: a new view only if they moved or their length changed. */
   notify(): void {
-    if (this.subscribed) {
-      this.rt.memory = new DataView(this.buffer.buffer, 0, this.length);
+    const rt = this.rt;
+    if (
+      this.subscribed &&
+      (rt.memory.buffer !== this.buffer.buffer || rt.memoryLength !== this.length)
+    ) {
+      rt.memory = new DataView(this.buffer.buffer, 0, this.length);
     }
   }
 
