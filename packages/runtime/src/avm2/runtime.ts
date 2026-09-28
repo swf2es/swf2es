@@ -306,6 +306,9 @@ export class Runtime {
   readonly functionTraits: Traits;
   /** Method closures, by receiver, so that o.f === o.f. */
   private readonly closures = new WeakMap<object, Map<number, AsObject>>();
+  private readonly builtinTraitsByName = new Map<string, Traits>();
+  /** The names a for-in is going through, per object, taken when it starts. */
+  private readonly enumerating = new WeakMap<object, string[]>();
   /** Special traits: an activation's or a catch scope's, by descriptor. */
   private readonly scopeTraits = new WeakMap<object, Traits>();
   readonly specialized = new Map<AsObject, AsObject>();
@@ -643,8 +646,15 @@ export class Runtime {
     }
   }
 
+  /** A builtin class's instance traits, by name, resolved once. */
   private builtinTraits(name: string): Traits {
-    return this.builtinClass(name).$it;
+    let traits = this.builtinTraitsByName.get(name);
+    if (!traits) {
+      traits = this.builtinClass(name).$it as Traits;
+      this.builtinTraitsByName.set(name, traits);
+    }
+
+    return traits;
   }
 
   /** A public class of the builtins, by name. */
@@ -1599,14 +1609,43 @@ export class Runtime {
 
   /** The index after `index` of an enumerable name of `o`, or 0. */
   private nextIndex(o: AsObject, index: number): number {
-    const names = this.names(o);
+    let names = index === 0 ? undefined : this.enumerating.get(o);
+    if (!names) {
+      names = this.names(o);
+      this.enumerating.set(o, names);
+    }
+
+    // A name deleted since the for-in started is skipped.
     for (let i = index; i < names.length; i++) {
-      if (!o.$dontEnum?.has(names[i])) {
+      const name = names[i];
+      if (!o.$dontEnum?.has(name) && this.stillThere(o, name)) {
         return i + 1;
       }
     }
 
     return 0;
+  }
+
+  private stillThere(o: AsObject, name: string): boolean {
+    if (o.$a !== undefined) {
+      const i = arrayIndex(name);
+      if (i >= 0) {
+        return i in o.$a;
+      }
+    }
+
+    return o.$d?.has(name) ?? false;
+  }
+
+  /** The for-in's names of `o`, as nextIndex took them. */
+  private enumerated(o: AsObject): string[] {
+    let names = this.enumerating.get(o);
+    if (!names) {
+      names = this.names(o);
+      this.enumerating.set(o, names);
+    }
+
+    return names;
   }
 
   hasNext2(o: Value, index: number): [boolean, Value, number] {
@@ -1630,12 +1669,12 @@ export class Runtime {
   }
 
   nextName(o: Value, index: number): Value {
-    const name = this.names(o)[index - 1];
+    const name = this.enumerated(o)[index - 1];
     return o.$a !== undefined && arrayIndex(name) >= 0 ? Number(name) : name;
   }
 
   nextValue(o: Value, index: number): Value {
-    return this.getProperty(o, this.publicName(this.names(o)[index - 1]));
+    return this.getProperty(o, this.publicName(this.enumerated(o)[index - 1]));
   }
 
   // Errors.
