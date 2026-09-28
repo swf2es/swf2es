@@ -216,6 +216,7 @@ export class ModuleEmitter {
       if (abc.methodFlags[m] & C.METHOD_Native) {
         out.text("rt.native(");
         this.nativeName(global);
+        this.nativeArity(global);
         out.text(")");
         continue;
       }
@@ -283,6 +284,36 @@ export class ModuleEmitter {
     }
 
     out.text(")");
+  }
+
+  /**
+   * A native method's argument counts, as MethodEnv's argcOk checks them,
+   * when it has any: `, required, max`, max -1 where it takes more than it
+   * declares (a rest, arguments, or a native that ignores the rest).
+   */
+  nativeArity(m: u32): void {
+    const traits = this.domain.traits;
+    // Its signature, as avmplus resolves it before the first call; one that
+    // fails to resolve fails when called, as the runtime has it.
+    if (traits.sign(this.domain, m) !== 0) {
+      return;
+    }
+
+    const required = traits.paramCount[m] - traits.optionalCount[m];
+    const extra = this.domain.allowsExtraArgs(m);
+    if (required === 0 && extra) {
+      return;
+    }
+
+    const out = this.out;
+    out.text(", ");
+    out.uint(required);
+    out.text(", ");
+    if (extra) {
+      out.text("-1");
+    } else {
+      out.uint(traits.paramCount[m]);
+    }
   }
 
   /**

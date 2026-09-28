@@ -419,11 +419,14 @@ test("a module lays out traits that verifying its methods did not resolve", { sk
   const entry = script[2].match(new RegExp(`\\[${disp}, F\\[(\\d+)\\]\\]`));
   assert.ok(entry, "its method by dispatch id");
   const factories = js.slice(js.indexOf("const F = ["), js.indexOf("const A = "));
-  const natives = [...factories.matchAll(/rt\.native\("([^"]*)"\)/g)].map((m) => m[1]);
+  // A native's name, and its argument counts when it has any.
+  const natives = [...factories.matchAll(/rt\.native\("([^"]*)"(?:, \d+, -?\d+)?\)/g)].map(
+    (m) => m[1],
+  );
   assert.ok(natives.includes("flash.net::registerClassAlias"));
   assert.match(
     factoryAt(factories, Number(entry[1])),
-    /rt\.native\("flash\.net::registerClassAlias"\)/,
+    /rt\.native\("flash\.net::registerClassAlias", 2, 2\)/,
   );
 });
 

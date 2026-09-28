@@ -37,6 +37,9 @@ export type AsObject = any;
 // biome-ignore lint/complexity/noBannedTypes: methods take their receiver as this
 export type Method = Function;
 
+/** A native with argument counts to check, when it has any (see Runtime.native). */
+type CountedMethod = Method & { $min?: number; $max?: number };
+
 /** A scope chain: its objects, outermost first, and a bit per with scope in w. */
 export type Scope = Value[] & { w: number };
 
@@ -180,7 +183,7 @@ export class Traits {
 
     for (const [slot, value, type] of desc.defaults) {
       this.slotTypes[slot] = type;
-      this.own.push([`$${slot}`, value]);
+      this.own.push([slotKey(slot), value]);
     }
 
     if (desc.transient) {
@@ -425,7 +428,8 @@ export class Runtime {
   readonly natives: Record<string, (rt: Runtime) => Method>;
   /** Names the scripts define, by local name: the first definition wins. */
   private readonly globals = new Map<string, GlobalName[]>();
-  private readonly classRefs = new Map<string, ClassRef>();
+  /** Class references by namespace, which is interned or private, then name. */
+  private readonly classRefs = new Map<Namespace, Map<string, ClassRef>>();
   private readonly vectorRefs = new Map<TypeRef, VectorRef>();
   /**
    * The domain memory the domain memory instructions use: the ByteArray set
@@ -570,11 +574,16 @@ export class Runtime {
   }
 
   cls(ns: Namespace, name: string): ClassRef {
-    const key = `${ns.kind}:${ns.uri}:${name}`;
-    let ref = this.classRefs.get(key);
+    let byName = this.classRefs.get(ns);
+    if (!byName) {
+      byName = new Map();
+      this.classRefs.set(ns, byName);
+    }
+
+    let ref = byName.get(name);
     if (!ref) {
       ref = new ClassRef(ns, name);
-      this.classRefs.set(key, ref);
+      byName.set(name, ref);
     }
 
     return ref;
@@ -651,7 +660,7 @@ export class Runtime {
       const g = traits.instance();
       const scope = Object.assign([g], { w: 0 });
       for (const [d, factory] of script.desc.traits.methods) {
-        traits.proto[`$m${d}`] = factory(scope, null);
+        traits.proto[methodKey(d)] = factory(scope, null);
       }
 
       script.global = g;
@@ -662,6 +671,17 @@ export class Runtime {
 
   /** Run a script's initializer, once. */
   initScript(script: Script): AsObject {
+    // As avmplus' Toplevel, which is made from the script defining Object
+    // before any other runs: builtin scripts refer to each other, as the
+    // one defining Object makes XML while XML's needs Object.
+    if (!this.toplevelReady) {
+      this.toplevelReady = true;
+      const toplevel = this.findScript(qname(publicNs, "Object"));
+      if (toplevel && toplevel !== script) {
+        this.initScript(toplevel);
+      }
+    }
+
     const g = this.globalOf(script);
     if (script.state === 0) {
       script.state = 1;
@@ -671,6 +691,8 @@ export class Runtime {
 
     return g;
   }
+
+  private toplevelReady = false;
 
   /**
    * The script that defines `mn`, kept on the multiname once found: the
@@ -1075,10 +1097,10 @@ export class Runtime {
     switch (b & 7) {
       case BIND_Var:
       case BIND_Const:
-        return o[`$${id}`];
+        return o[slotKey(id)];
       case BIND_Get:
       case BIND_GetSet:
-        return traits.proto[`$m${id}`].call(o);
+        return traits.proto[methodKey(id)].call(o);
       case BIND_Method:
         return this.methodClosure(o, traits, id);
       default:
@@ -1097,8 +1119,13 @@ export class Runtime {
 
     let f = typeof o === "object" ? byId.get(id) : undefined;
     if (!f) {
-      const method: Method = traits.proto[`$m${id}`];
-      f = this.newFunctionObject((...args: Value[]) => method.apply(o, args), null);
+      const method: Method = traits.proto[methodKey(id)];
+      f = this.newFunctionObject(
+        (method as CountedMethod).$min === undefined
+          ? (...args: Value[]) => method.apply(o, args)
+          : (...args: Value[]) => this.callBound(method, o, args),
+        null,
+      );
       // Its length is the method's, its declared parameters, not the wrapper's.
       f.$length = method.length;
       f.$closure = true;
@@ -1130,14 +1157,14 @@ export class Runtime {
           if (!init) {
             throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.name);
           }
-          o[`$${id}`] = this.coerce(v, traits.slotType(id));
+          o[slotKey(id)] = this.coerce(v, traits.slotType(id));
           return;
         case BIND_Var:
-          o[`$${id}`] = this.coerce(v, traits.slotType(id));
+          o[slotKey(id)] = this.coerce(v, traits.slotType(id));
           return;
         case BIND_Set:
         case BIND_GetSet:
-          traits.proto[`$m${id + 1}`].call(o, v);
+          traits.proto[methodKey(id + 1)].call(o, v);
           return;
         case BIND_Method:
           throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.name);
@@ -1306,7 +1333,7 @@ export class Runtime {
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
     if ((b & 7) === BIND_Method) {
-      return traits.proto[`$m${b >> 3}`].apply(o, args);
+      return this.callBound(traits.proto[methodKey(b >> 3)], o, args);
     }
 
     return this.callValue(this.callee(o, traits, b, mn), o, args, mn);
@@ -1348,7 +1375,7 @@ export class Runtime {
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
     if ((b & 7) === BIND_Method) {
-      return traits.proto[`$m${b >> 3}`].apply(o, args);
+      return this.callBound(traits.proto[methodKey(b >> 3)], o, args);
     }
 
     return this.callValue(this.callee(o, traits, b, mn), null, args, mn);
@@ -1408,7 +1435,7 @@ export class Runtime {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
     if ((b & 7) === BIND_Method) {
-      return traits.proto[`$m${b >> 3}`].apply(o, args);
+      return this.callBound(traits.proto[methodKey(b >> 3)], o, args);
     }
 
     return this.callValue(this.getSuper(sup, o, mn), o, args, mn);
@@ -1428,7 +1455,7 @@ export class Runtime {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
     if ((b & 7) === BIND_Set || (b & 7) === BIND_GetSet) {
-      traits.proto[`$m${(b >> 3) + 1}`].call(o, v);
+      traits.proto[methodKey((b >> 3) + 1)].call(o, v);
       return;
     }
 
@@ -1682,11 +1709,11 @@ export class Runtime {
 
     const iscope = this.scope(scope, [cls], 0);
     for (const [d, factory] of desc.static.methods) {
-      straits.proto[`$m${d}`] = factory(scope, base);
+      straits.proto[methodKey(d)] = factory(scope, base);
     }
 
     for (const [d, factory] of desc.instance.methods) {
-      itraits.proto[`$m${d}`] = factory(iscope, base);
+      itraits.proto[methodKey(d)] = factory(iscope, base);
     }
 
     itraits.proto.$init = desc.init(iscope, base);
@@ -2434,20 +2461,32 @@ export class Runtime {
     throw this.error("ReferenceError", 1014, name);
   }
 
+  // ByteArray, Dictionary and Vector, as AMF makes them for each value it reads: resolved once.
+  private byteArrayCls: AsObject | null = null;
+  private dictionaryCls: AsObject | null = null;
+  private vectorCls: AsObject | null = null;
+
   byteArrayClass(): AsObject {
-    return this.resolve(this.cls(namespace(NS_Public, "flash.utils"), "ByteArray"));
+    this.byteArrayCls ??= this.resolve(this.cls(namespace(NS_Public, "flash.utils"), "ByteArray"));
+    return this.byteArrayCls;
   }
 
   dictionaryClass(): AsObject {
-    return this.resolve(this.cls(namespace(NS_Public, "flash.utils"), "Dictionary"));
+    this.dictionaryCls ??= this.resolve(
+      this.cls(namespace(NS_Public, "flash.utils"), "Dictionary"),
+    );
+    return this.dictionaryCls;
   }
 
   /** Vector.<T>, for a class T or null for *. */
   vectorClass(param: AsObject | null): AsObject {
-    return (
-      this.vectorClasses.get(param) ??
-      this.applyType(this.resolve(this.cls(namespace(NS_Public, "__AS3__.vec"), "Vector")), [param])
-    );
+    const specialized = this.vectorClasses.get(param);
+    if (specialized) {
+      return specialized;
+    }
+
+    this.vectorCls ??= this.resolve(this.cls(namespace(NS_Public, "__AS3__.vec"), "Vector"));
+    return this.applyType(this.vectorCls, [param]);
   }
 
   /** Each Vector class made, by its element class (null for *), kept by Vector's apply. */
@@ -2603,7 +2642,7 @@ export class Runtime {
   // Methods whose bodies are not generated.
 
   /** A native method, bound by its name; one the runtime lacks throws when called. */
-  native(name: string): Factory {
+  native(name: string, required = 0, max = -1): Factory {
     const make = this.natives[name];
     if (!make) {
       return () => () => {
@@ -2613,9 +2652,33 @@ export class Runtime {
 
     let f: Method | null = null;
     return () => {
-      f ??= make(this);
+      if (!f) {
+        f = make(this);
+        // Checked where a call was not bound (callBound, methodClosure): the
+        // verifier binds only a call its argument count fits.
+        if (required > 0 || max >= 0) {
+          (f as CountedMethod).$min = required;
+          (f as CountedMethod).$max = max;
+        }
+      }
+
       return f;
     };
+  }
+
+  /**
+   * A bound method called with arguments the verifier did not see: a
+   * native's count checked, as MethodEnv's argcOk does. A compiled method
+   * checks its own.
+   */
+  callBound(f: CountedMethod, o: Value, args: Value[]): Value {
+    const min = f.$min;
+    const max = f.$max as number;
+    if (min !== undefined && (args.length < min || (max >= 0 && args.length > max))) {
+      throw this.argumentCountError(min, args.length);
+    }
+
+    return f.apply(o, args);
   }
 
   get noBody(): Factory {
@@ -2729,6 +2792,13 @@ function defaultPrint(line: string): void {
 }
 
 const BUILTIN_REFS = new Set(["int", "uint", "Number", "String", "Boolean", "Object"]);
+
+// The names of slot and method properties by id, made once each, for the
+// runtime's dynamic paths; generated code names them itself.
+const slotKeys: string[] = [];
+const methodKeys: string[] = [];
+const slotKey = (id: number): string => (slotKeys[id] ??= `$${id}`);
+const methodKey = (id: number): string => (methodKeys[id] ??= `$m${id}`);
 
 /** Not a property: distinct from undefined, which a property can hold. */
 export const NOT_FOUND = Symbol("not found");
