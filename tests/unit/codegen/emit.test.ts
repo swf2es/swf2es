@@ -345,6 +345,20 @@ test("the builtins compile to modules with every instruction lowered", { skip },
   }
 });
 
+test("a module's functions are named after their methods, for stacks and profiles", {
+  skip,
+}, () => {
+  testing.domainReset(50);
+  const js = module("builtin.abc", true);
+  // A script's function, by its qualified name, as a JavaScript identifier after $.
+  assert.match(js, /function \$avmplus__describeType\(/);
+  // A class's method, Class#uri::name, and a setter, Class#set:name.
+  assert.match(js, /function \$Array_http___adobe_com_AS3_2006_builtin__join\(/);
+  assert.match(js, /function \$Array_Array__set_length\(/);
+  // No name the generated code binds: every factory's function starts with $.
+  assert.doesNotMatch(js, /=> function [A-Za-z_][A-Za-z0-9_]*\(/);
+});
+
 test("an ABC compiled again gives the same module", { skip }, () => {
   testing.domainReset(50);
   const first = module("builtin.abc", true);

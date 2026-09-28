@@ -64,6 +64,8 @@ export class MethodEmitter {
   /** The classes and Vectors the method being written refers to, in the order its T holds them. */
   types: i32[] = [];
   typeIndex: Map<i32, u32> = new Map<i32, u32>();
+  /** The name the method being written is given, a JavaScript identifier; "" for none. */
+  functionName: string = "";
   /** The method being written: its ABC index and body. */
   current: u32 = 0;
   body: i32 = -1;
@@ -118,7 +120,8 @@ export class MethodEmitter {
     }
 
     const count = traits.paramCount[global];
-    out.text("function (");
+    // Named, for stacks and profiles: a name its code never binds.
+    out.text(this.functionName.length ? `function ${this.functionName}(` : "function (");
     for (let p: u32 = 1; p <= count; p++) {
       out.text(p > 1 ? ", p" : "p");
       out.uint(p);

@@ -262,7 +262,9 @@ export class ModuleEmitter {
     const at = out.length;
     const marks = methods.map.count;
     out.text("(scope, sup) => ");
+    methods.functionName = this.functionName(global);
     methods.method(m, global, decoder.ir);
+    methods.functionName = "";
     const types = methods.types;
     if (types.length === 0) {
       return;
@@ -289,7 +291,35 @@ export class ModuleEmitter {
    * their namespace's URI, "uri::name".
    */
   nativeName(m: u32): void {
-    const out = this.out;
+    const bytes = String.UTF8.encode(this.methodName(m));
+    this.out.string(changetype<usize>(bytes), bytes.byteLength);
+  }
+
+  /**
+   * Method m's name as a JavaScript identifier for its function: its name
+   * as nativeName gives it, each character outside [A-Za-z0-9_] as `_`, and
+   * `$` before, which no name the generated code binds starts with; a
+   * method no trait binds, such as a closure, as `$f` and its index.
+   */
+  functionName(m: u32): string {
+    const text = this.methodName(m);
+    if (text.length === 0) {
+      return `$f${m - this.domain.methodStart[this.index]}`;
+    }
+
+    let name = "$";
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i);
+      const word =
+        (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
+      name += word ? String.fromCharCode(c) : "_";
+    }
+
+    return name;
+  }
+
+  /** Method m's name: "Class.name", "Class#name", or a script's qualified name, "" if no trait binds it. */
+  methodName(m: u32): string {
     const domain = this.domain;
     const traits = domain.traits;
     const t = traits.methodTraits[m];
@@ -318,13 +348,12 @@ export class ModuleEmitter {
 
           traits.readName(domain, this.index, i);
           text += this.methods.qualified(traits.nameNs, traits.nameId);
-          break;
+          return text;
         }
       }
     }
 
-    const bytes = String.UTF8.encode(text);
-    out.string(changetype<usize>(bytes), bytes.byteLength);
+    return "";
   }
 
   /**
