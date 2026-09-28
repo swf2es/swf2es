@@ -39,6 +39,8 @@ export const TRAIT_Getter: u8 = 2;
 export const TRAIT_Setter: u8 = 3;
 export const TRAIT_Class: u8 = 4;
 export const TRAIT_Const: u8 = 6;
+export const ATTR_Final: u8 = 0x10;
+export const ATTR_Override: u8 = 0x20;
 export const ATTR_Metadata: u8 = 0x40;
 
 // VerifyError numbers avmplus reports (core/ErrorConstants.h), so a rejected
@@ -65,7 +67,9 @@ export const kCpoolEntryWrongTypeError: i32 = 1033;
 export const kInvalidMagicError: i32 = 1042;
 export const kInvalidCodeLengthError: i32 = 1043;
 export const kUnsupportedTraitsKindError: i32 = 1045;
+export const kIllegalOverrideError: i32 = 1053;
 export const kIllegalExceptionHandlerError: i32 = 1054;
+export const kIllegalSlotError: i32 = 1057;
 export const kClassInfoOrderError: i32 = 1059;
 export const kClassInfoExceedsCountError: i32 = 1060;
 export const kAlreadyBoundError: i32 = 1071;

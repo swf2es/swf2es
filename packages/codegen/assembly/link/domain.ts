@@ -30,15 +30,25 @@ import {
   CONSTANT_TypeName,
   INSTANCE_Final,
   INSTANCE_Interface,
+  INSTANCE_ProtectedNs,
   kAmbiguousBindingError,
   kCannotExtendError,
   kCannotExtendFinalClass,
   kCannotImplementError,
   kClassNotFoundError,
   kIllegalVoidError,
+  METHOD_NeedActivation,
   TRAIT_Class,
 } from "../abc/constants";
 import { readAbc } from "../abc/parse";
+import { hashBytes, hashPair, IdTable } from "./table";
+import {
+  TRAITS_Activation,
+  TRAITS_Class,
+  TRAITS_Instance,
+  TRAITS_Script,
+  TraitsTable,
+} from "./traits";
 
 export const NS_Public: u8 = 0;
 export const NS_PackageInternal: u8 = 1;
@@ -58,88 +68,6 @@ const API_MinMark: u32 = 0xe294;
 
 /** The URI of a namespace written with string index 0. */
 export const URI_None: u32 = 0xffffffff;
-
-/** Maps a 32-bit hash to ids by linear probing; callers compare the keys. */
-@final
-class IdTable {
-  /** id + 1 per slot; 0 is empty. */
-  ids: StaticArray<u32> = new StaticArray<u32>(64);
-  hashes: StaticArray<u32> = new StaticArray<u32>(64);
-  count: u32 = 0;
-
-  @inline
-  start(hash: u32): u32 {
-    return hash & (<u32>this.ids.length - 1);
-  }
-
-  @inline
-  next(slot: u32): u32 {
-    return (slot + 1) & (<u32>this.ids.length - 1);
-  }
-
-  /** The id in `slot`, or -1 at the end of the probe. */
-  @inline
-  at(slot: u32): i32 {
-    return <i32>unchecked(this.ids[slot]) - 1;
-  }
-
-  @inline
-  hashAt(slot: u32): u32 {
-    return unchecked(this.hashes[slot]);
-  }
-
-  insert(hash: u32, id: u32): void {
-    if ((this.count + 1) * 4 > <u32>this.ids.length * 3) {
-      this.grow();
-    }
-
-    let slot = this.start(hash);
-    while (unchecked(this.ids[slot])) {
-      slot = this.next(slot);
-    }
-
-    unchecked((this.ids[slot] = id + 1));
-    unchecked((this.hashes[slot] = hash));
-    this.count++;
-  }
-
-  grow(): void {
-    const ids = this.ids;
-    const hashes = this.hashes;
-    this.ids = new StaticArray<u32>(ids.length * 2);
-    this.hashes = new StaticArray<u32>(ids.length * 2);
-    this.count = 0;
-
-    // Re-inserting in slot order keeps equal hashes in insertion order.
-    const size = <u32>ids.length;
-    let first: u32 = 0;
-    while (first < size && unchecked(ids[first])) {
-      first++;
-    }
-
-    for (let i: u32 = 1; i <= size; i++) {
-      const slot = (first + i) & (size - 1);
-      if (unchecked(ids[slot])) {
-        this.insert(unchecked(hashes[slot]), unchecked(ids[slot]) - 1);
-      }
-    }
-  }
-}
-
-function hashBytes(ptr: usize, length: u32): u32 {
-  let h: u32 = 0x811c9dc5;
-  for (let i: u32 = 0; i < length; i++) {
-    h = (h ^ load<u8>(ptr + i)) * 0x01000193;
-  }
-
-  return h;
-}
-
-function hashPair(a: u32, b: u32): u32 {
-  let h = a * 0x9e3779b1;
-  h ^= b + 0x7f4a7c15 + (h << 6) + (h >> 2);
-  return h ^ (h >> 16);
-}
 
 @final
 export class Domain {
@@ -186,6 +114,14 @@ export class Domain {
   /** The base class's id, or -1. */
   classBase: i32[] = [];
   classFlags: u8[] = [];
+  /** The traits of the class's instances, and of the class object; -1 for void. */
+  classTraits: i32[] = [];
+  classStatic: i32[] = [];
+
+  traits: TraitsTable = new TraitsTable();
+  /** Per ABC, each script's traits, and each body's activation traits or -1. */
+  scriptTraits: StaticArray<u32>[] = [];
+  bodyTraits: StaticArray<i32>[] = [];
 
   /**
    * Class names. Those a script defines are visible to every ABC (owner -1);
@@ -205,6 +141,7 @@ export class Domain {
   // The builtin classes linking treats specially, found when the first
   // builtin ABC links; -1 if it has none.
   hasBuiltins: bool = false;
+  objectClass: i32 = -1;
   classClass: i32 = -1;
   functionClass: i32 = -1;
   /** avmplus registers void as a class, which nothing may extend. */
@@ -235,12 +172,16 @@ export class Domain {
 
     this.abcString.push(strings);
     this.addNamespaces(abc, base, strings);
+    const traitsCount = <u32>this.traits.kind.length;
     if (!this.link(index)) {
       this.abcs.pop();
       this.abcString.pop();
       this.abcNs.pop();
       this.abcNsVersion.pop();
       this.classStart.pop();
+      this.scriptTraits.length = index;
+      this.bodyTraits.length = index;
+      this.traits.truncate(traitsCount);
       return abc;
     }
 
@@ -259,7 +200,11 @@ export class Domain {
       this.classInstance.push(i);
       this.classBase.push(-1);
       this.classFlags.push(unchecked(abc.instanceFlags[i]));
+      this.classTraits.push(-1);
+      this.classStatic.push(-1);
     }
+
+    const ids = unchecked(this.abcNs[index]);
 
     for (let i: u32 = 0; i < abc.classCount; i++) {
       const id = first + i;
@@ -302,6 +247,30 @@ export class Domain {
         return abc.fail(kCannotExtendError);
       }
 
+      // As avmplus' AvmCore: the first builtin class without a base is Object.
+      if (!baseName && abc.builtin && !this.hasBuiltins && this.objectClass < 0) {
+        this.objectClass = <i32>id;
+      }
+
+      const base = unchecked(this.classBase[id]);
+      const protectedNs =
+        flags & INSTANCE_ProtectedNs ? <i32>unchecked(ids[abc.instanceProtectedNs[i]]) : -1;
+      const t = this.traits.create(
+        TRAITS_Instance,
+        index,
+        i,
+        base >= 0 ? unchecked(this.classTraits[base]) : -1,
+        protectedNs,
+        unchecked(abc.instanceTraitStart[i]),
+        unchecked(abc.instanceTraitStart[i + 1]),
+      );
+      unchecked((this.traits.isInterface[t] = flags & INSTANCE_Interface ? 1 : 0));
+      unchecked((this.classTraits[id] = t));
+      const error = this.traits.layout(this, t);
+      if (error) {
+        return abc.fail(error);
+      }
+
       this.nameInstance(index, i);
     }
 
@@ -315,10 +284,86 @@ export class Domain {
       this.classInstance.push(0xffffffff);
       this.classBase.push(-1);
       this.classFlags.push(INSTANCE_Final);
+      this.classTraits.push(-1);
+      this.classStatic.push(-1);
       const empty = this.internNamespace(NS_Public, this.internText(""));
       this.nameType(empty, this.internText("void"), API_AllVersions, this.voidClass, -1);
     }
 
+    return this.layoutStatics(index) && this.layoutScripts(index) && this.layoutActivations(index);
+  }
+
+  /** Lay out each class object's traits, whose base is Class. */
+  layoutStatics(index: u32): bool {
+    const abc = unchecked(this.abcs[index]);
+    const first = unchecked(this.classStart[index]);
+    const classTraits = this.classClass >= 0 ? unchecked(this.classTraits[this.classClass]) : -1;
+    for (let i: u32 = 0; i < abc.classCount; i++) {
+      const t = this.traits.create(
+        TRAITS_Class,
+        index,
+        i,
+        classTraits,
+        unchecked(this.traits.protectedNs[this.classTraits[first + i]]),
+        unchecked(abc.classTraitStart[i]),
+        unchecked(abc.classTraitStart[i + 1]),
+      );
+      unchecked((this.classStatic[first + i] = t));
+      const error = this.traits.layout(this, t);
+      if (error) {
+        return abc.fail(error);
+      }
+    }
+
+    return true;
+  }
+
+  /** Lay out each script's global object traits, whose base is Object. */
+  layoutScripts(index: u32): bool {
+    const abc = unchecked(this.abcs[index]);
+    const objectTraits = this.objectClass >= 0 ? unchecked(this.classTraits[this.objectClass]) : -1;
+    const scripts = new StaticArray<u32>(abc.scriptCount);
+    this.scriptTraits.push(scripts);
+    for (let s: u32 = 0; s < abc.scriptCount; s++) {
+      const t = this.traits.create(
+        TRAITS_Script,
+        index,
+        s,
+        objectTraits,
+        -1,
+        unchecked(abc.scriptTraitStart[s]),
+        unchecked(abc.scriptTraitStart[s + 1]),
+      );
+      unchecked((scripts[s] = t));
+      const error = this.traits.layout(this, t);
+      if (error) {
+        return abc.fail(error);
+      }
+    }
+
+    return true;
+  }
+
+  /** Lay out activation traits, for bodies that need an activation or declare traits. */
+  layoutActivations(index: u32): bool {
+    const abc = unchecked(this.abcs[index]);
+    const bodies = new StaticArray<i32>(abc.bodyCount);
+    for (let b: u32 = 0; b < abc.bodyCount; b++) {
+      const first = unchecked(abc.bodyTraitStart[b]);
+      const end = unchecked(abc.bodyTraitStart[b + 1]);
+      const flags = unchecked(abc.methodFlags[abc.bodyMethod[b]]);
+      unchecked((bodies[b] = -1));
+      if (flags & METHOD_NeedActivation || end > first) {
+        const t = this.traits.create(TRAITS_Activation, index, b, -1, -1, first, end);
+        unchecked((bodies[b] = t));
+        const error = this.traits.layout(this, t);
+        if (error) {
+          return abc.fail(error);
+        }
+      }
+    }
+
+    this.bodyTraits.push(bodies);
     return true;
   }
 

@@ -1,16 +1,31 @@
 // User ABCs whose classes link against builtin.abc, with the error avmplus
 // reports while loading each. domain.test.ts checks swf2es against these,
 // and `pnpm oracle:cases` checks them against avmshell.
-import { abc, type Instance, tables, u30 } from "./abc-builder.ts";
+import { abc, type Instance, type Trait, tables, u30 } from "./abc-builder.ts";
 import type { Case } from "./oracle-case.ts";
 
-const STRINGS = ["", "Object", "Class", "Function", "void", "Error", "A", "B", "I", "F", "Missing"];
+const STRINGS = [
+  "",
+  "Object",
+  "Class",
+  "Function",
+  "void",
+  "Error",
+  "A",
+  "B",
+  "I",
+  "F",
+  "Missing",
+  "m",
+  "x",
+  "prototype",
+];
 /** Multiname index of public::name, for each of STRINGS[1..]. */
-const mn = (name: string) => STRINGS.indexOf(name);
+export const mn = (name: string) => STRINGS.indexOf(name);
 
 // Namespaces: 1 public, 2 package "A" (a second namespace for ambiguity).
-// Multinames 1..10: public::Object .. public::Missing; 11: {public, A}::A;
-// 12: A::A. String k of STRINGS is pool string k + 1.
+// Multinames 1..13: public::Object .. public::prototype; 14: {public, A}::A;
+// 15: A::A. String k of STRINGS is pool string k + 1.
 const pool = {
   strings: STRINGS,
   namespaces: [
@@ -26,16 +41,31 @@ const pool = {
 };
 const AMBIGUOUS_A = STRINGS.length;
 
-type Class = Omit<Instance, "init">;
+/** A trait; methods, getters and setters get a method of their own. */
+type Member = Omit<Trait, "index"> & { index?: number };
+type Class = Omit<Instance, "init" | "traits"> & { traits?: Member[]; statics?: Member[] };
+
+export const METHOD = 1;
+export const GETTER = 2;
+export const SETTER = 3;
+export const OVERRIDE = 0x20;
 
 /** An ABC defining `classes` in order; its script init just returns. */
-function classes(list: Class[]): Uint8Array {
+export function classes(list: Class[]): Uint8Array {
   const script = 2 * list.length;
+  let methods = script + 1;
+  const withMethods = (traits: Member[] = []): Trait[] =>
+    traits.map((t) => (t.kind >= METHOD && t.kind <= SETTER ? { ...t, index: methods++ } : t));
+  const defined = list.map((c, i) => ({
+    instance: { ...c, init: 2 * i, traits: withMethods(c.traits) },
+    init: 2 * i + 1,
+    traits: withMethods(c.statics),
+  }));
   return abc(
     pool,
     tables({
-      methods: Array.from({ length: script + 1 }, () => ({})),
-      classes: list.map((c, i) => ({ instance: { ...c, init: 2 * i }, init: 2 * i + 1 })),
+      methods: Array.from({ length: methods }, () => ({})),
+      classes: defined,
       scripts: [
         {
           init: script,
@@ -47,6 +77,7 @@ function classes(list: Class[]): Uint8Array {
   );
 }
 
+export const SLOT = 0;
 const SEALED = 0x01;
 const FINAL = 0x02;
 const INTERFACE = 0x04;
@@ -126,5 +157,108 @@ export const linkCases: Case[] = [
       { name: mn("B"), base: AMBIGUOUS_A },
     ]),
     error: 1008,
+  },
+  {
+    name: "a method must override a base method",
+    abc: classes([
+      { name: mn("A"), base: mn("Object"), traits: [{ name: mn("m"), kind: METHOD }] },
+      { name: mn("B"), base: mn("A"), traits: [{ name: mn("m"), kind: METHOD }] },
+    ]),
+    error: 1053,
+  },
+  {
+    name: "a method overrides a base method",
+    abc: classes([
+      { name: mn("A"), base: mn("Object"), traits: [{ name: mn("m"), kind: METHOD }] },
+      { name: mn("B"), base: mn("A"), traits: [{ name: mn("m"), kind: METHOD, attr: OVERRIDE }] },
+    ]),
+  },
+  {
+    name: "an override of nothing",
+    abc: classes([
+      {
+        name: mn("A"),
+        base: mn("Object"),
+        traits: [{ name: mn("m"), kind: METHOD, attr: OVERRIDE }],
+      },
+    ]),
+    error: 1053,
+  },
+  {
+    name: "a getter cannot override a method",
+    abc: classes([
+      { name: mn("A"), base: mn("Object"), traits: [{ name: mn("m"), kind: METHOD }] },
+      { name: mn("B"), base: mn("A"), traits: [{ name: mn("m"), kind: GETTER, attr: OVERRIDE }] },
+    ]),
+    error: 1053,
+  },
+  {
+    name: "a getter and a setter pair",
+    abc: classes([
+      {
+        name: mn("A"),
+        base: mn("Object"),
+        traits: [
+          { name: mn("x"), kind: GETTER },
+          { name: mn("x"), kind: SETTER },
+        ],
+      },
+    ]),
+  },
+  {
+    name: "a getter beside a base setter overrides nothing",
+    abc: classes([
+      { name: mn("A"), base: mn("Object"), traits: [{ name: mn("x"), kind: SETTER }] },
+      { name: mn("B"), base: mn("A"), traits: [{ name: mn("x"), kind: GETTER }] },
+    ]),
+  },
+  {
+    name: "a getter beside a base setter may not say override",
+    abc: classes([
+      { name: mn("A"), base: mn("Object"), traits: [{ name: mn("x"), kind: SETTER }] },
+      { name: mn("B"), base: mn("A"), traits: [{ name: mn("x"), kind: GETTER, attr: OVERRIDE }] },
+    ]),
+    error: 1053,
+  },
+  {
+    name: "a slot id the base class has",
+    abc: classes([
+      { name: mn("A"), base: mn("Object"), traits: [{ name: mn("x"), kind: SLOT, id: 1 }] },
+      { name: mn("B"), base: mn("A"), traits: [{ name: mn("m"), kind: SLOT, id: 1 }] },
+    ]),
+    error: 1053,
+  },
+  {
+    name: "two slots with one name",
+    abc: classes([
+      {
+        name: mn("A"),
+        base: mn("Object"),
+        traits: [
+          { name: mn("x"), kind: SLOT },
+          { name: mn("x"), kind: SLOT },
+        ],
+      },
+    ]),
+    error: 1107,
+  },
+  {
+    name: "a slot id past the trait count",
+    abc: classes([
+      { name: mn("A"), base: mn("Object"), traits: [{ name: mn("x"), kind: SLOT, id: 5 }] },
+    ]),
+    error: 1107,
+  },
+  {
+    name: "an interface with a slot",
+    abc: classes([{ name: mn("I"), flags: INTERFACE, traits: [{ name: mn("x"), kind: SLOT }] }]),
+    error: 1057,
+  },
+  {
+    name: "a static getter must override Class's",
+    abc: classes([
+      { name: mn("A"), base: mn("Object"), statics: [{ name: mn("prototype"), kind: GETTER }] },
+    ]),
+    error: 1053,
   },
 ];
