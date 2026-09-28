@@ -37,6 +37,9 @@ export type AsObject = any;
 // biome-ignore lint/complexity/noBannedTypes: methods take their receiver as this
 export type Method = Function;
 
+/** A native with argument counts to check, when it has any (see Runtime.native). */
+type CountedMethod = Method & { $min?: number; $max?: number };
+
 /** A scope chain: its objects, outermost first, and a bit per with scope in w. */
 export type Scope = Value[] & { w: number };
 
@@ -1098,7 +1101,12 @@ export class Runtime {
     let f = typeof o === "object" ? byId.get(id) : undefined;
     if (!f) {
       const method: Method = traits.proto[`$m${id}`];
-      f = this.newFunctionObject((...args: Value[]) => method.apply(o, args), null);
+      f = this.newFunctionObject(
+        (method as CountedMethod).$min === undefined
+          ? (...args: Value[]) => method.apply(o, args)
+          : (...args: Value[]) => this.callBound(method, o, args),
+        null,
+      );
       // Its length is the method's, its declared parameters, not the wrapper's.
       f.$length = method.length;
       f.$closure = true;
@@ -1306,7 +1314,7 @@ export class Runtime {
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
     if ((b & 7) === BIND_Method) {
-      return traits.proto[`$m${b >> 3}`].apply(o, args);
+      return this.callBound(traits.proto[`$m${b >> 3}`], o, args);
     }
 
     return this.callValue(this.callee(o, traits, b, mn), o, args, mn);
@@ -1348,7 +1356,7 @@ export class Runtime {
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
     if ((b & 7) === BIND_Method) {
-      return traits.proto[`$m${b >> 3}`].apply(o, args);
+      return this.callBound(traits.proto[`$m${b >> 3}`], o, args);
     }
 
     return this.callValue(this.callee(o, traits, b, mn), null, args, mn);
@@ -1408,7 +1416,7 @@ export class Runtime {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
     if ((b & 7) === BIND_Method) {
-      return traits.proto[`$m${b >> 3}`].apply(o, args);
+      return this.callBound(traits.proto[`$m${b >> 3}`], o, args);
     }
 
     return this.callValue(this.getSuper(sup, o, mn), o, args, mn);
@@ -2603,7 +2611,7 @@ export class Runtime {
   // Methods whose bodies are not generated.
 
   /** A native method, bound by its name; one the runtime lacks throws when called. */
-  native(name: string): Factory {
+  native(name: string, required = 0, max = -1): Factory {
     const make = this.natives[name];
     if (!make) {
       return () => () => {
@@ -2613,9 +2621,33 @@ export class Runtime {
 
     let f: Method | null = null;
     return () => {
-      f ??= make(this);
+      if (!f) {
+        f = make(this);
+        // Checked where a call was not bound (callBound, methodClosure): the
+        // verifier binds only a call its argument count fits.
+        if (required > 0 || max >= 0) {
+          (f as CountedMethod).$min = required;
+          (f as CountedMethod).$max = max;
+        }
+      }
+
       return f;
     };
+  }
+
+  /**
+   * A bound method called with arguments the verifier did not see: a
+   * native's count checked, as MethodEnv's argcOk does. A compiled method
+   * checks its own.
+   */
+  callBound(f: CountedMethod, o: Value, args: Value[]): Value {
+    const min = f.$min;
+    const max = f.$max as number;
+    if (min !== undefined && (args.length < min || (max >= 0 && args.length > max))) {
+      throw this.argumentCountError(min, args.length);
+    }
+
+    return f.apply(o, args);
   }
 
   get noBody(): Factory {
