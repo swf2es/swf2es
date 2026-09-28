@@ -529,11 +529,14 @@ class Serializer {
   /** As JAfinish: each element, null for one that writes nothing. */
   private array(value: AsObject): unknown[] {
     this.enter(value);
-    const elements: Value[] = value.$a;
-    const length = elements.length;
+    const length: number = value.$a.length;
     const out = new Array<unknown>(length);
     for (let i = 0; i < length; i++) {
-      // A hole is looked for on the prototype chain, as getUintProperty does.
+      // The elements as they are now: toJSON or the replacer may have
+      // changed them, or the Vector its storage. A hole, or an element
+      // since removed, is got as getUintProperty gets it: from the
+      // prototype chain, or a Vector's RangeError.
+      const elements: Value[] = value.$a;
       const element =
         i in elements ? elements[i] : this.rt.getProperty(value, this.rt.publicName(i));
       const written = this.str(String(i), element, value);

@@ -52,3 +52,19 @@ probe("strings", function():* { var s:String = "q\"b\\s/\b\f\n\r\t" + String.fro
 probe("keys escaped", function():* { var k:Object = {}; k["a\"b"] = 1; k["\n"] = 2; k[""] = 3; return back(JSON.stringify(k)); });
 probe("date", function():* { return back(JSON.stringify({d: new Date(0)})).length > 10; });
 probe("boxed", function():* { return back(JSON.stringify([new Number(3), new String("s"), new Boolean(false)])); });
+// A replacer or toJSON that changes the Array or Vector being written: the
+// length is the one it had, and each element as it is when written.
+var v:Vector.<int> = new <int>[1, 2, 3];
+probe("vector refilled", function():* { return JSON.stringify(v, function(k:String, x:*):* { if (k == "0") { v.length = 0; v.push(7, 8, 9); } return x; }); });
+var v2:Vector.<int> = new <int>[1, 2, 3];
+probe("vector cleared", function():* { return JSON.stringify(v2, function(k:String, x:*):* { if (k == "0") v2.length = 0; return x; }); });
+var v3:Vector.<int> = new <int>[1, 2];
+probe("vector grown", function():* { return JSON.stringify(v3, function(k:String, x:*):* { if (k == "0") v3.push(3); return x; }); });
+var a:Array = [1, 2, 3];
+probe("array cleared", function():* { return JSON.stringify(a, function(k:String, x:*):* { if (k == "0") a.length = 0; return x; }); });
+var a2:Array = [1, 2, 3];
+probe("array changed", function():* { return JSON.stringify(a2, function(k:String, x:*):* { if (k == "0") { a2[1] = "two"; a2.splice(2, 1); } return x; }); });
+var a3:Array = [{toJSON: function(k:String):* { a3[1] = "from toJSON"; return 0; }}, 1];
+probe("array toJSON", function():* { return JSON.stringify(a3); });
+var o2:Object = {a: 1};
+probe("object changed", function():* { return back(JSON.stringify({x: o2}, function(k:String, x:*):* { if (k == "x") o2.a = 2; return x; })); });
