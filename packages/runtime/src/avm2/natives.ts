@@ -529,9 +529,19 @@ for (const [kind] of VECTORS) {
         throw rt.error("RangeError", 1126);
       }
 
-      const convert = this.$traits.cls.$convert;
-      for (const v of args) {
-        this.$a.push(convert(rt, this.$traits.cls, v));
+      // Each at the length there is before it, set as an element: after
+      // its conversion, which can run AS3 that changes the Vector.
+      const cls = this.$traits.cls;
+      const convert = cls.$convert;
+      for (let k = 0; k < args.length; k++) {
+        const i: number = this.$a.length;
+        const x = convert(rt, cls, args[k]);
+        const a: Value[] = this.$a;
+        if (i > a.length || (i === a.length && this.$fixed)) {
+          throw rt.error("RangeError", 1125, i, a.length);
+        }
+
+        a[i] = x;
       }
 
       return this.$a.length;
@@ -558,8 +568,12 @@ for (const [kind] of VECTORS) {
         throw rt.error("RangeError", 1126);
       }
 
-      const convert = this.$traits.cls.$convert;
-      this.$a.unshift(...args.map((v) => convert(rt, this.$traits.cls, v)));
+      // Room made first, then each converted and written in its place.
+      const cls = this.$traits.cls;
+      this.$a.unshift(...args.map(() => cls.$fill));
+      args.forEach((v, k) => {
+        writeElement(this, k, cls.$convert(rt, cls, v));
+      });
       return this.$a.length;
     };
   natives[`${c}#${own}::newThisType`] = (rt) =>
@@ -579,12 +593,17 @@ for (const [kind] of VECTORS) {
       args: Value,
       offset: Value,
     ) {
+      // As unshift: room made, then each item converted, as the Vector's
+      // type does, and written in its place.
+      const cls = this.$traits.cls;
       const at = rt.toUint(insert);
-      const items: Value[] = (args?.$a ?? []).slice(
-        rt.toUint(offset),
-        rt.toUint(offset) + rt.toUint(insertCount),
-      );
-      this.$a.splice(at, rt.toUint(deleteCount), ...items);
+      const count = rt.toUint(insertCount);
+      const from = rt.toUint(offset);
+      const items: Value[] = args?.$a ?? [];
+      this.$a.splice(at, rt.toUint(deleteCount), ...new Array(count).fill(cls.$fill));
+      for (let k = 0; k < count; k++) {
+        writeElement(this, at + k, cls.$convert(rt, cls, items[from + k]));
+      }
     };
   natives[`${c}.${own}::_sort`] = (rt) => (o: AsObject, args: Value) => sort(rt, o, elements(args));
   natives[`${c}.${own}::_every`] = (rt) => (o: AsObject, f: Value, receiver: Value) =>
@@ -849,14 +868,7 @@ for (const [kind, convert, fill] of VECTORS) {
 
       throw rt.error("RangeError", 1125, rt.toString(d), o.$a.length);
     },
-    setIndex: (o, i, v, rt) => {
-      const cls = o.$traits.cls;
-      if (i > o.$a.length || (i === o.$a.length && o.$fixed)) {
-        throw rt.error("RangeError", 1125, i, o.$a.length);
-      }
-
-      o.$a[i] = convert(rt, cls, v);
-    },
+    setIndex: (o, i, v, rt) => rt.setElement(o, i, convert(rt, o.$traits.cls, v)),
     construct: (rt, cls, args) => {
       prepareVector(rt, cls, convert, fill);
       const o = cls.$it.instance();
@@ -872,11 +884,33 @@ for (const [kind, convert, fill] of VECTORS) {
         throw rt.error("TypeError", 1034, rt.describe(source), cls.$it.name);
       }
 
+      // Each element as a get of the source's, as its conversion may change
+      // the source: past a Vector's end, a RangeError.
       const o = cls.$it.instance();
-      o.$a = source.$a.map((v: Value) => convert(rt, cls, v));
+      const length: number = source.$a.length;
+      const a: Value[] = [];
+      for (let i = 0; i < length; i++) {
+        a.push(convert(rt, cls, rt.getProperty(source, rt.publicName(i))));
+      }
+
+      o.$a = a;
       return o;
     },
   };
+}
+
+/**
+ * Element i of Vector o written as unshift and splice write what they
+ * insert, into the elements it has after the conversion, grown to it with
+ * the fill value if the conversion shrank them.
+ */
+function writeElement(o: AsObject, i: number, x: Value): void {
+  const a: Value[] = o.$a;
+  while (a.length <= i) {
+    a.push(o.$traits.cls.$fill);
+  }
+
+  a[i] = x;
 }
 
 /** A Vector class's element conversion and fill value, kept on the class for its natives. */

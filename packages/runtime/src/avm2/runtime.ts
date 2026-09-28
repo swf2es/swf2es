@@ -788,9 +788,25 @@ export class Runtime {
     this.setProperty(o, this.runtimeName(mn, i), v);
   }
 
+  /**
+   * Element i of Vector o set to x, already converted, as
+   * VectorBaseObject::setUintProperty checks it: against the length and
+   * fixedness as they are after the conversion, which can run AS3 that
+   * changes them, into the elements the Vector has then.
+   */
+  setElement(o: AsObject, i: number, x: Value): void {
+    const a: Value[] = o.$a;
+    if (i > a.length || (i === a.length && o.$fixed)) {
+      throw this.error("RangeError", 1125, i, a.length);
+    }
+
+    a[i] = x;
+  }
+
   // obj[i] for a Vector the code was compiled against, by the kind of its
   // elements: a function for each, so that each sees one kind of array. As
-  // the Vector's getIndex and setIndex hooks, with getIndexed's checks; for
+  // the Vector's getIndex and setIndex hooks, with getIndexed's checks, a
+  // set converting the value before it checks the index (setElement); for
   // anything else, such as a null Vector, getIndexed and setIndexed.
 
   vectorGetInt(o: Value, mn: Multiname, i: number): Value {
@@ -808,12 +824,7 @@ export class Runtime {
 
   vectorSetInt(o: Value, mn: Multiname, i: number, v: Value): void {
     if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
-      const a: Value[] = o.$a;
-      if (i > a.length || (i === a.length && o.$fixed)) {
-        throw this.error("RangeError", 1125, i, a.length);
-      }
-
-      a[i] = this.toInt(v);
+      this.setElement(o, i, this.toInt(v));
       return;
     }
 
@@ -835,12 +846,7 @@ export class Runtime {
 
   vectorSetUint(o: Value, mn: Multiname, i: number, v: Value): void {
     if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
-      const a: Value[] = o.$a;
-      if (i > a.length || (i === a.length && o.$fixed)) {
-        throw this.error("RangeError", 1125, i, a.length);
-      }
-
-      a[i] = this.toUint(v);
+      this.setElement(o, i, this.toUint(v));
       return;
     }
 
@@ -862,12 +868,7 @@ export class Runtime {
 
   vectorSetDouble(o: Value, mn: Multiname, i: number, v: Value): void {
     if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
-      const a: Value[] = o.$a;
-      if (i > a.length || (i === a.length && o.$fixed)) {
-        throw this.error("RangeError", 1125, i, a.length);
-      }
-
-      a[i] = this.toNumber(v);
+      this.setElement(o, i, this.toNumber(v));
       return;
     }
 
@@ -889,12 +890,7 @@ export class Runtime {
 
   vectorSetObject(o: Value, mn: Multiname, i: number, v: Value): void {
     if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
-      const a: Value[] = o.$a;
-      if (i > a.length || (i === a.length && o.$fixed)) {
-        throw this.error("RangeError", 1125, i, a.length);
-      }
-
-      a[i] = o.$traits.cls.$convert(this, o.$traits.cls, v);
+      this.setElement(o, i, o.$traits.cls.$convert(this, o.$traits.cls, v));
       return;
     }
 
