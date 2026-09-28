@@ -68,3 +68,12 @@ for (var ck:String in churn) {
     }
 }
 trace("churned for-in", churnSeen.join(","));
+// A name deleted, gone for a for-in, then back, is found once.
+var back:Array = [10];
+for (var bk:String in back) {}
+delete back[0];
+for (var bj:String in back) {}
+back[0] = 20;
+var backSeen:Array = [];
+for (var bn:String in back) backSeen.push(bn);
+trace("back for-in", backSeen.join(","));

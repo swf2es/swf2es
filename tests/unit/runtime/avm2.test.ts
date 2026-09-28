@@ -111,3 +111,23 @@ test("a for-in goes on through its own names however many for-ins inside it come
 
   assert.deepEqual(seen, ["0", "1", "2"]);
 });
+
+test("a name deleted and then back is in one slot, not its old one too", () => {
+  // a = [10]; for-in; delete a[0]; for-in; a[0] = 20: a for-in finds 0 once.
+  const rt = avm2.createRuntime();
+  const o = { $a: [10] as number[] };
+  const names = () => {
+    const seen: string[] = [];
+    for (let i = rt.hasNext(o, 0); i; i = rt.hasNext(o, i)) {
+      seen.push(String(rt.nextName(o, i)));
+    }
+
+    return seen;
+  };
+
+  names();
+  delete o.$a[0];
+  assert.deepEqual(names(), []);
+  o.$a[0] = 20;
+  assert.deepEqual(names(), ["0"]);
+});
