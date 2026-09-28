@@ -102,7 +102,7 @@ function module(name: string, builtin: boolean): string {
     testing.domainAdd(new Uint8Array(readFileSync(new URL(name, generated))), builtin),
     0,
   );
-  const js = testing.domainModule() as string;
+  const js = testing.domainModule("") as string;
   const body = js.replace(/^export default function \(rt\) \{/, "").replace(/\}\s*$/, "");
   assert.doesNotThrow(() => new Function("rt", body), `${name} parses`);
   return js;
@@ -120,5 +120,5 @@ test("the builtins compile to modules with every instruction lowered", { skip },
 test("an ABC compiled again gives the same module", { skip }, () => {
   testing.domainReset(50);
   const first = module("builtin.abc", true);
-  assert.equal(testing.domainModule(), first);
+  assert.equal(testing.domainModule(""), first);
 });

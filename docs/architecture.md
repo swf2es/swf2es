@@ -200,6 +200,9 @@ runtime, `rt`, that returns:
   getters and setters by dispatch id;
 - **scripts**: each script's traits and initializer, run the first time
   something asks for a name it defines, as avmplus runs them.
+- **hash** and **linked**: the hash of its ABC and of the ABCs loaded
+  before it, in order, as the cache key names them. Its layouts depend on
+  those ABCs, so the runtime refuses to load it after any others.
 
 The runtime starts with builtin.abc, then the ABCs that follow it (for
 avmshell's programs, shell_toplevel.abc):

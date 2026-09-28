@@ -71,7 +71,9 @@ export interface ScriptDesc {
 }
 
 export interface AbcDesc {
-  linked: number;
+  /** The hash of the module's ABC, and of the ABCs loaded before it, in order, that it was compiled against. */
+  hash: string;
+  linked: string[];
   names: (Multiname | TypeName | null)[];
   classes: ClassDesc[];
   scripts: ScriptDesc[];
@@ -271,6 +273,8 @@ export class Runtime {
   private readonly globals = new Map<string, GlobalName[]>();
   private readonly classRefs = new Map<string, ClassRef>();
   private readonly vectorRefs = new Map<TypeRef, VectorRef>();
+  /** The hashes of the modules loaded, in order. */
+  private readonly loaded: string[] = [];
   /** The builtin classes' traits, made before their classes so the bootstrap can refer to them. */
   readonly objectTraits: Traits;
   readonly classTraits: Traits;
@@ -398,6 +402,15 @@ export class Runtime {
 
   /** Load a module: its scripts' names become visible; the entry script of a non-builtin module runs. */
   abc(desc: AbcDesc): Abc {
+    // Its layouts are those of its ABC after exactly these ABCs.
+    const linked = desc.linked;
+    if (linked.length !== this.loaded.length || linked.some((h, i) => h !== this.loaded[i])) {
+      throw new Error(
+        `swf2es: a module compiled after [${linked.join(", ")}] cannot load after [${this.loaded.join(", ")}]`,
+      );
+    }
+
+    this.loaded.push(desc.hash);
     const abc = desc as Abc;
     for (const name of abc.names) {
       if (name instanceof TypeName) {

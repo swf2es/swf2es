@@ -1,6 +1,7 @@
 // Runs an ABC compiled by swf2es in node: the builtins avmshell loads, then
 // the ABC, each compiled to a module and loaded into one runtime, whose
 // trace output is the result.
+import { createHash } from "node:crypto";
 import { testing } from "../unit/codegen/testing-module.ts";
 
 const runtime = await import(
@@ -20,6 +21,13 @@ async function load(js: string): Promise<(rt: unknown) => unknown> {
 export async function runSwf2es(builtins: Uint8Array[], abc: Uint8Array): Promise<string[]> {
   const lines: string[] = [];
   const rt = runtime.createRuntime({ print: (line: string) => lines.push(line) });
+  // Each module names the ABCs before it, by the hashes the cache key uses.
+  const hashes: string[] = [];
+  const hash = (bytes: Uint8Array) => {
+    hashes.push(createHash("sha256").update(bytes).digest("hex"));
+    return hashes.join("\n");
+  };
+
   testing.domainReset(50);
   for (const bytes of builtins) {
     const error = testing.domainAdd(bytes, true);
@@ -27,7 +35,7 @@ export async function runSwf2es(builtins: Uint8Array[], abc: Uint8Array): Promis
       throw new Error(`a builtin failed to link: error ${error}`);
     }
 
-    (await load(testing.domainModule()))(rt);
+    (await load(testing.domainModule(hash(bytes))))(rt);
   }
 
   const error = testing.domainAdd(abc, false);
@@ -35,7 +43,7 @@ export async function runSwf2es(builtins: Uint8Array[], abc: Uint8Array): Promis
     return [`VerifyError: Error #${error}`];
   }
 
-  const A = (await load(testing.domainModule()))(rt);
+  const A = (await load(testing.domainModule(hash(abc))))(rt);
   rt.run(A);
   return lines;
 }

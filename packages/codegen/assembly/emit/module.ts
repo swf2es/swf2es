@@ -2,11 +2,13 @@
 // layouts of its traits as the compiler computed them, its classes and its
 // scripts. The runtime builds its objects from these and never derives a
 // layout itself (see docs/architecture.md, "Modules and the bootstrap").
+// Those layouts depend on the ABCs loaded before this one, so the module
+// names them by hash, and the runtime refuses it after any others.
 //
 //   export default function (rt) {
 //     const N = [...namespaces], S = [...namespace sets], M = [...multinames];
 //     const F = [...method factories, (scope, sup) => function (...) {...}];
-//     const A = rt.abc({ linked, names: M, classes, scripts, activations });
+//     const A = rt.abc({ hash, linked, names: M, classes, scripts, activations });
 //     return A;
 //   }
 //
@@ -55,16 +57,29 @@ export class ModuleEmitter {
     this.out = methods.out;
   }
 
-  /** Write the whole module; the result is in `out`. */
-  module(): void {
+  /**
+   * Write the whole module; the result is in `out`. `hashes` are the
+   * hashes of the domain's ABCs, in load order, up to and including this
+   * one, as the host computes them for the cache key.
+   */
+  module(hashes: string[]): void {
     const out = this.out;
     out.reset();
     out.text("export default function (rt) {\n");
     this.names();
     this.functions();
-    out.text("  const A = rt.abc({\n    linked: ");
-    out.uint(this.index);
-    out.text(",\n    names: M,\n    classes: [");
+    out.text("  const A = rt.abc({\n    hash: ");
+    this.text(this.index < <u32>hashes.length ? hashes[this.index] : "");
+    out.text(",\n    linked: [");
+    for (let i: u32 = 0; i < this.index; i++) {
+      if (i) {
+        out.text(", ");
+      }
+
+      this.text(i < <u32>hashes.length ? hashes[i] : "");
+    }
+
+    out.text("],\n    names: M,\n    classes: [");
     this.classes();
     out.text("],\n    scripts: [");
     this.scripts();
@@ -364,6 +379,12 @@ export class ModuleEmitter {
     }
 
     out.text("] }");
+  }
+
+  /** A string of the host's, such as a hash, as a JavaScript string literal. */
+  text(s: string): void {
+    const bytes = String.UTF8.encode(s);
+    this.out.string(changetype<usize>(bytes), bytes.byteLength);
   }
 
   /** The pool index of this ABC's namespace with interned id `id`. */

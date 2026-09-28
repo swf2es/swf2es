@@ -530,10 +530,13 @@ export function domainIr(body: u32): string {
   return out.join("\n");
 }
 
-/** The ES module the domain's last ABC compiles to. */
-export function domainModule(): string {
+/**
+ * The ES module the domain's last ABC compiles to; `hashes` are the ABCs'
+ * hashes in load order, one per line.
+ */
+export function domainModule(hashes: string = ""): string {
   const emitter = new ModuleEmitter(domain, <u32>(domain.abcs.length - 1));
-  emitter.module();
+  emitter.module(hashes.length ? hashes.split("\n") : []);
   const out = emitter.out;
   return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
 }
