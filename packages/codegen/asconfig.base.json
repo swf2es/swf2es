@@ -9,11 +9,19 @@
       "optimizeLevel": 3,
       "shrinkLevel": 0,
       "converge": false,
-      "noAssert": false
+      "noAssert": false,
+      "uncheckedBehavior": "always"
     },
     "debug": {
       "debug": true,
       "sourceMap": true
+    },
+    "checked": {
+      "optimizeLevel": 3,
+      "shrinkLevel": 0,
+      "converge": false,
+      "noAssert": false,
+      "uncheckedBehavior": "never"
     }
   }
 }

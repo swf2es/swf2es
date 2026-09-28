@@ -112,14 +112,14 @@ export function readTraits(abc: Abc, r: Reader, owner: i32, classesDefined: u32)
 
   // As avmplus' makeMethodOf: a method belongs to at most one owner.
   for (let t = first; t < abc.traitName.length; t++) {
-    const kind = unchecked(abc.traitTag[t]) & 0x0f;
+    const kind = abc.traitTag[t] & 0x0f;
     if (kind === TRAIT_Method || kind === TRAIT_Getter || kind === TRAIT_Setter) {
-      const method = unchecked(abc.traitIndex[t]);
-      if (unchecked(abc.methodOwner[method]) !== -1) {
+      const method = abc.traitIndex[t];
+      if (abc.methodOwner[method] !== -1) {
         return abc.fail(kCorruptABCError);
       }
 
-      unchecked((abc.methodOwner[method] = owner));
+      abc.methodOwner[method] = owner;
     }
   }
 
@@ -138,16 +138,16 @@ export function bindingNameError(pool: ConstantPool, index: u32, builtin: bool):
   }
 
   let mn = index;
-  if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
-    mn = unchecked(pool.mnA[mn]);
+  if (pool.mnKind[mn] === CONSTANT_TypeName) {
+    mn = pool.mnA[mn];
   }
 
-  const kind = unchecked(pool.mnKind[mn]);
-  if (builtin && kind === CONSTANT_Multiname && unchecked(pool.mnB[mn]) !== 0) {
+  const kind = pool.mnKind[mn];
+  if (builtin && kind === CONSTANT_Multiname && pool.mnB[mn] !== 0) {
     return 0;
   }
 
-  if (kind !== CONSTANT_Qname || unchecked(pool.mnA[mn]) === 0 || unchecked(pool.mnB[mn]) === 0) {
+  if (kind !== CONSTANT_Qname || pool.mnA[mn] === 0 || pool.mnB[mn] === 0) {
     return kCpoolEntryWrongTypeError;
   }
 

@@ -22,6 +22,7 @@
   },
   "scripts": {
     "build:wasm": "asc --config asconfig.json --target release && asc --config asconfig.testing.json --target release",
-    "build:wasm:debug": "asc --config asconfig.json --target debug && asc --config asconfig.testing.json --target debug"
+    "build:wasm:debug": "asc --config asconfig.json --target debug && asc --config asconfig.testing.json --target debug",
+    "build:wasm:checked": "asc --config asconfig.testing.json --target checked"
   }
 }

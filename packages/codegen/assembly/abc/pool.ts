@@ -86,20 +86,20 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
   const intCount = readCount(r);
   pool.ints = new StaticArray<i32>(max(intCount, 1));
   for (let i: u32 = 1; i < intCount; i++) {
-    unchecked((pool.ints[i] = r.s32()));
+    pool.ints[i] = r.s32();
   }
 
   const uintCount = readCount(r);
   pool.uints = new StaticArray<u32>(max(uintCount, 1));
   for (let i: u32 = 1; i < uintCount; i++) {
-    unchecked((pool.uints[i] = r.u32()));
+    pool.uints[i] = r.u32();
   }
 
   const doubleCount = readCount(r);
   pool.doubles = new StaticArray<f64>(max(doubleCount, 1));
-  unchecked((pool.doubles[0] = NaN));
+  pool.doubles[0] = NaN;
   for (let i: u32 = 1; i < doubleCount; i++) {
-    unchecked((pool.doubles[i] = r.d64()));
+    pool.doubles[i] = r.d64();
   }
 
   if (r.failed) {
@@ -117,8 +117,8 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
       return fail(pool, kCorruptABCError);
     }
 
-    unchecked((pool.stringStart[i] = <u32>(r.pos - base)));
-    unchecked((pool.stringLength[i] = length));
+    pool.stringStart[i] = <u32>(r.pos - base);
+    pool.stringLength[i] = length;
     r.pos += length;
   }
 
@@ -136,15 +136,15 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
       return fail(pool, kCpoolIndexRangeError);
     }
 
-    unchecked((pool.nsKind[i] = kind));
-    unchecked((pool.nsName[i] = name));
+    pool.nsKind[i] = kind;
+    pool.nsName[i] = name;
   }
 
   const nsSetCount = max(readCount(r), 1);
   pool.nsSetStart = new StaticArray<u32>(nsSetCount + 1);
   const members: u32[] = [];
   for (let i: u32 = 1; i < nsSetCount; i++) {
-    unchecked((pool.nsSetStart[i] = members.length));
+    pool.nsSetStart[i] = members.length;
     const count = readCount(r);
     for (let j: u32 = 0; j < count; j++) {
       const ns = r.u30();
@@ -159,7 +159,7 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
       members.push(ns);
     }
   }
-  unchecked((pool.nsSetStart[nsSetCount] = members.length));
+  pool.nsSetStart[nsSetCount] = members.length;
   pool.nsSetMembers = StaticArray.fromArray(members);
 
   const mnCount = max(readCount(r), 1);
@@ -218,9 +218,9 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
       return fail(pool, r.failed ? kCorruptABCError : kCpoolEntryWrongTypeError);
     }
 
-    unchecked((pool.mnKind[i] = kind));
-    unchecked((pool.mnA[i] = a));
-    unchecked((pool.mnB[i] = b));
+    pool.mnKind[i] = kind;
+    pool.mnA[i] = a;
+    pool.mnB[i] = b;
   }
 
   if (r.failed) {
@@ -267,23 +267,23 @@ function typeNamesAreAcyclic(pool: ConstantPool): bool {
   const count = pool.multinameCount;
   const stamp = new StaticArray<u32>(count);
   for (let i: u32 = 1; i < count; i++) {
-    if (unchecked(pool.mnKind[i]) !== CONSTANT_TypeName) {
+    if (pool.mnKind[i] !== CONSTANT_TypeName) {
       continue;
     }
 
-    if (unchecked(pool.mnKind[unchecked(pool.mnA[i])]) === CONSTANT_TypeName) {
+    if (pool.mnKind[pool.mnA[i]] === CONSTANT_TypeName) {
       return false;
     }
 
-    let param = unchecked(pool.mnB[i]);
+    let param = pool.mnB[i];
     while (param !== 0) {
-      unchecked((stamp[param] = i));
-      if (unchecked(pool.mnKind[param]) !== CONSTANT_TypeName) {
+      stamp[param] = i;
+      if (pool.mnKind[param] !== CONSTANT_TypeName) {
         break;
       }
 
-      param = unchecked(pool.mnB[param]);
-      if (unchecked(stamp[param]) === i) {
+      param = pool.mnB[param];
+      if (stamp[param] === i) {
         return false;
       }
     }

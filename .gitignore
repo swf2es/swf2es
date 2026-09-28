@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-test/
+dist-test-checked/
 *.tsbuildinfo
 oracle/out/
 tests/**/out/

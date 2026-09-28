@@ -245,8 +245,8 @@ export class Domain {
     const pool = abc.pool;
     const strings = new StaticArray<u32>(pool.stringCount);
     for (let i: u32 = 1; i < pool.stringCount; i++) {
-      const ptr = base + unchecked(pool.stringStart[i]);
-      unchecked((strings[i] = this.internString(ptr, unchecked(pool.stringLength[i]))));
+      const ptr = base + pool.stringStart[i];
+      strings[i] = this.internString(ptr, pool.stringLength[i]);
     }
 
     this.abcString.push(strings);
@@ -276,24 +276,24 @@ export class Domain {
 
   /** Link ABC `index`'s classes to their bases and interfaces; false after recording the error. */
   link(index: u32): bool {
-    const abc = unchecked(this.abcs[index]);
+    const abc = this.abcs[index];
     const first = <u32>this.classAbc.length;
     this.classStart.push(first);
     for (let i: u32 = 0; i < abc.classCount; i++) {
       this.classAbc.push(index);
       this.classInstance.push(i);
       this.classBase.push(-1);
-      this.classFlags.push(unchecked(abc.instanceFlags[i]));
+      this.classFlags.push(abc.instanceFlags[i]);
       this.classTraits.push(-1);
       this.classStatic.push(-1);
     }
 
-    const ids = unchecked(this.abcNs[index]);
+    const ids = this.abcNs[index];
 
     for (let i: u32 = 0; i < abc.classCount; i++) {
       const id = first + i;
-      const flags = unchecked(abc.instanceFlags[i]);
-      const baseName = unchecked(abc.instanceSuper[i]);
+      const flags = abc.instanceFlags[i];
+      const baseName = abc.instanceSuper[i];
       if (baseName) {
         const base = this.resolveType(index, baseName);
         if (base < 0) {
@@ -301,35 +301,35 @@ export class Domain {
         }
 
         if (
-          unchecked(this.classFlags[base]) & INSTANCE_Final ||
+          this.classFlags[base] & INSTANCE_Final ||
           base === this.classClass ||
           (base === this.functionClass && !abc.builtin)
         ) {
           return abc.fail(kCannotExtendFinalClass);
         }
 
-        if (unchecked(this.classFlags[base]) & INSTANCE_Interface) {
+        if (this.classFlags[base] & INSTANCE_Interface) {
           return abc.fail(kCannotExtendError);
         }
 
-        unchecked((this.classBase[id] = base));
+        this.classBase[id] = base;
       }
 
       const interfaces = <u32>this.traits.interfaceList.length;
-      const last = unchecked(abc.instanceInterfaceStart[i + 1]);
-      for (let j = unchecked(abc.instanceInterfaceStart[i]); j < last; j++) {
-        const t = this.resolveType(index, unchecked(abc.interfaces[j]));
+      const last = abc.instanceInterfaceStart[i + 1];
+      for (let j = abc.instanceInterfaceStart[i]; j < last; j++) {
+        const t = this.resolveType(index, abc.interfaces[j]);
         if (t < 0) {
           this.traits.interfaceList.length = interfaces;
           return abc.fail(-t);
         }
 
-        if (!(unchecked(this.classFlags[t]) & INSTANCE_Interface)) {
+        if (!(this.classFlags[t] & INSTANCE_Interface)) {
           this.traits.interfaceList.length = interfaces;
           return abc.fail(kCannotImplementError);
         }
 
-        this.traits.interfaceList.push(<u32>unchecked(this.classTraits[t]));
+        this.traits.interfaceList.push(<u32>this.classTraits[t]);
       }
 
       if (flags & INSTANCE_Interface && baseName) {
@@ -341,22 +341,21 @@ export class Domain {
         this.objectClass = <i32>id;
       }
 
-      const base = unchecked(this.classBase[id]);
-      const protectedNs =
-        flags & INSTANCE_ProtectedNs ? <i32>unchecked(ids[abc.instanceProtectedNs[i]]) : -1;
+      const base = this.classBase[id];
+      const protectedNs = flags & INSTANCE_ProtectedNs ? <i32>ids[abc.instanceProtectedNs[i]] : -1;
       const t = this.traits.create(
         TRAITS_Instance,
         index,
         i,
-        base >= 0 ? unchecked(this.classTraits[base]) : -1,
+        base >= 0 ? this.classTraits[base] : -1,
         protectedNs,
-        unchecked(abc.instanceTraitStart[i]),
-        unchecked(abc.instanceTraitStart[i + 1]),
+        abc.instanceTraitStart[i],
+        abc.instanceTraitStart[i + 1],
       );
-      unchecked((this.traits.isInterface[t] = flags & INSTANCE_Interface ? 1 : 0));
-      unchecked((this.traits.interfaceStart[t] = interfaces));
-      unchecked((this.traits.interfaceEnd[t] = this.traits.interfaceList.length));
-      unchecked((this.classTraits[id] = t));
+      this.traits.isInterface[t] = flags & INSTANCE_Interface ? 1 : 0;
+      this.traits.interfaceStart[t] = interfaces;
+      this.traits.interfaceEnd[t] = this.traits.interfaceList.length;
+      this.classTraits[id] = t;
       const error = this.traits.layout(this, t);
       if (error) {
         return abc.fail(error);
@@ -391,20 +390,20 @@ export class Domain {
 
   /** Lay out each class object's traits, whose base is Class. */
   layoutStatics(index: u32): bool {
-    const abc = unchecked(this.abcs[index]);
-    const first = unchecked(this.classStart[index]);
-    const classTraits = this.classClass >= 0 ? unchecked(this.classTraits[this.classClass]) : -1;
+    const abc = this.abcs[index];
+    const first = this.classStart[index];
+    const classTraits = this.classClass >= 0 ? this.classTraits[this.classClass] : -1;
     for (let i: u32 = 0; i < abc.classCount; i++) {
       const t = this.traits.create(
         TRAITS_Class,
         index,
         i,
         classTraits,
-        unchecked(this.traits.protectedNs[this.classTraits[first + i]]),
-        unchecked(abc.classTraitStart[i]),
-        unchecked(abc.classTraitStart[i + 1]),
+        this.traits.protectedNs[this.classTraits[first + i]],
+        abc.classTraitStart[i],
+        abc.classTraitStart[i + 1],
       );
-      unchecked((this.classStatic[first + i] = t));
+      this.classStatic[first + i] = t;
       const error = this.traits.layout(this, t);
       if (error) {
         return abc.fail(error);
@@ -418,8 +417,8 @@ export class Domain {
 
   /** Lay out each script's global object traits, whose base is Object. */
   layoutScripts(index: u32): bool {
-    const abc = unchecked(this.abcs[index]);
-    const objectTraits = this.objectClass >= 0 ? unchecked(this.classTraits[this.objectClass]) : -1;
+    const abc = this.abcs[index];
+    const objectTraits = this.objectClass >= 0 ? this.classTraits[this.objectClass] : -1;
     const scripts = new StaticArray<u32>(abc.scriptCount);
     this.scriptTraits.push(scripts);
     for (let s: u32 = 0; s < abc.scriptCount; s++) {
@@ -429,11 +428,11 @@ export class Domain {
         s,
         objectTraits,
         -1,
-        unchecked(abc.scriptTraitStart[s]),
-        unchecked(abc.scriptTraitStart[s + 1]),
+        abc.scriptTraitStart[s],
+        abc.scriptTraitStart[s + 1],
       );
-      unchecked((scripts[s] = t));
-      unchecked((this.traits.scope[t] = new Scope()));
+      scripts[s] = t;
+      this.traits.scope[t] = new Scope();
       const error = this.traits.layout(this, t);
       if (error) {
         return abc.fail(error);
@@ -447,16 +446,16 @@ export class Domain {
 
   /** Lay out activation traits, for bodies that need an activation or declare traits. */
   layoutActivations(index: u32): bool {
-    const abc = unchecked(this.abcs[index]);
+    const abc = this.abcs[index];
     const bodies = new StaticArray<i32>(abc.bodyCount);
     for (let b: u32 = 0; b < abc.bodyCount; b++) {
-      const first = unchecked(abc.bodyTraitStart[b]);
-      const end = unchecked(abc.bodyTraitStart[b + 1]);
-      const flags = unchecked(abc.methodFlags[abc.bodyMethod[b]]);
-      unchecked((bodies[b] = -1));
+      const first = abc.bodyTraitStart[b];
+      const end = abc.bodyTraitStart[b + 1];
+      const flags = abc.methodFlags[abc.bodyMethod[b]];
+      bodies[b] = -1;
       if (flags & METHOD_NeedActivation || end > first) {
         const t = this.traits.create(TRAITS_Activation, index, b, -1, -1, first, end);
-        unchecked((bodies[b] = t));
+        bodies[b] = t;
         const error = this.traits.layout(this, t);
         if (error) {
           return abc.fail(error);
@@ -477,23 +476,23 @@ export class Domain {
    */
   bindMethods(t: u32, init: i32, final: bool): void {
     const traits = this.traits;
-    const index = unchecked(traits.abc[t]);
-    const abc = unchecked(this.abcs[index]);
-    const methods = unchecked(this.methodStart[index]);
-    for (let i = unchecked(traits.first[t]); i < unchecked(traits.end[t]); i++) {
-      const tag = unchecked(abc.traitTag[i]);
+    const index = traits.abc[t];
+    const abc = this.abcs[index];
+    const methods = this.methodStart[index];
+    for (let i = traits.first[t]; i < traits.end[t]; i++) {
+      const tag = abc.traitTag[i];
       const kind = tag & 0x0f;
       if (kind === TRAIT_Method || kind === TRAIT_Getter || kind === TRAIT_Setter) {
-        const m = methods + unchecked(abc.traitIndex[i]);
-        unchecked((traits.methodTraits[m] = t));
-        unchecked((traits.methodVirtual[m] = 1));
-        unchecked((traits.methodFinal[m] = tag & ATTR_Final || final ? 1 : 0));
+        const m = methods + abc.traitIndex[i];
+        traits.methodTraits[m] = t;
+        traits.methodVirtual[m] = 1;
+        traits.methodFinal[m] = tag & ATTR_Final || final ? 1 : 0;
       }
     }
 
     if (init >= 0) {
-      unchecked((traits.methodTraits[methods + init] = t));
-      unchecked((traits.init[t] = methods + init));
+      traits.methodTraits[methods + init] = t;
+      traits.init[t] = methods + init;
     }
   }
 
@@ -513,7 +512,7 @@ export class Domain {
     this.arrayType = this.builtinType("Array");
     this.functionType = this.builtinType("Function");
     const math = this.findBuiltin("Math");
-    this.mathStatic = math < 0 ? -1 : unchecked(this.classStatic[math]);
+    this.mathStatic = math < 0 ? -1 : this.classStatic[math];
     this.builtinAbc = <i32>(this.abcs.length - 1);
   }
 
@@ -527,22 +526,22 @@ export class Domain {
 
   /** The traits of Class's instances, which class objects are. */
   classInstanceType(): i32 {
-    return this.classClass < 0 ? TYPE_Any : unchecked(this.classTraits[this.classClass]);
+    return this.classClass < 0 ? TYPE_Any : this.classTraits[this.classClass];
   }
 
   /** The class object traits of class `i` of ABC `index`. */
   staticTraitsOf(index: u32, i: u32): i32 {
-    return unchecked(this.classStatic[this.classStart[index] + i]);
+    return this.classStatic[this.classStart[index] + i];
   }
 
   /** As Traits::itraits: for a class object's traits, its instances'; else *. */
   instanceTraitsOf(type: i32): i32 {
     const traits = this.traits;
-    if (type < 0 || unchecked(traits.kind[type]) !== TRAITS_Class) {
+    if (type < 0 || traits.kind[type] !== TRAITS_Class) {
       return TYPE_Any;
     }
 
-    return unchecked(this.classTraits[this.classStart[traits.abc[type]] + traits.owner[type]]);
+    return this.classTraits[this.classStart[traits.abc[type]] + traits.owner[type]];
   }
 
   /**
@@ -551,20 +550,20 @@ export class Domain {
    * below TYPE_Any on failure, with typeError set.
    */
   checkTypeName(index: u32, mn: u32): i32 {
-    const pool = unchecked(this.abcs[index]).pool;
-    const isTypeName = unchecked(pool.mnKind[mn]) === CONSTANT_TypeName;
-    const c = this.resolveType(index, isTypeName ? unchecked(pool.mnA[mn]) : mn);
+    const pool = this.abcs[index].pool;
+    const isTypeName = pool.mnKind[mn] === CONSTANT_TypeName;
+    const c = this.resolveType(index, isTypeName ? pool.mnA[mn] : mn);
     if (c < 0 && c !== -kIllegalVoidError) {
       this.typeError = -c;
       return -2;
     }
 
-    const type = c < 0 ? this.voidType : unchecked(this.classTraits[c]);
+    const type = c < 0 ? this.voidType : this.classTraits[c];
     if (!isTypeName) {
       return type;
     }
 
-    const paramName = unchecked(pool.mnB[mn]);
+    const paramName = pool.mnB[mn];
     const param = paramName ? this.checkTypeName(index, paramName) : TYPE_Any;
     if (param < TYPE_Any) {
       return param;
@@ -581,38 +580,38 @@ export class Domain {
    */
   allowsExtraArgs(m: u32): bool {
     const index = this.methodAbc(m);
-    const abc = unchecked(this.abcs[index]);
-    const local = m - unchecked(this.methodStart[index]);
-    const flags = unchecked(abc.methodFlags[local]);
+    const abc = this.abcs[index];
+    const local = m - this.methodStart[index];
+    const flags = abc.methodFlags[local];
     if (flags & (METHOD_NeedRest | METHOD_NeedArguments)) {
       return true;
     }
 
-    return unchecked(this.traits.ignoresRest[m]) !== 0;
+    return this.traits.ignoresRest[m] !== 0;
   }
 
   /** Add to `out` the methods bound to traits t: its initializer, methods, getters and setters. */
   methodsOf(t: u32, out: u32[]): void {
     const traits = this.traits;
-    const index = unchecked(traits.abc[t]);
-    const abc = unchecked(this.abcs[index]);
-    const methods = unchecked(this.methodStart[index]);
-    const init = unchecked(traits.init[t]);
+    const index = traits.abc[t];
+    const abc = this.abcs[index];
+    const methods = this.methodStart[index];
+    const init = traits.init[t];
     if (init >= 0) {
       out.push(<u32>init);
     }
 
-    for (let i = unchecked(traits.first[t]); i < unchecked(traits.end[t]); i++) {
-      const kind = unchecked(abc.traitTag[i]) & 0x0f;
+    for (let i = traits.first[t]; i < traits.end[t]; i++) {
+      const kind = abc.traitTag[i] & 0x0f;
       if (kind === TRAIT_Method || kind === TRAIT_Getter || kind === TRAIT_Setter) {
-        out.push(methods + unchecked(abc.traitIndex[i]));
+        out.push(methods + abc.traitIndex[i]);
       }
     }
   }
 
   /** Whether method m is a method, getter or setter of some traits, which callstatic may call. */
   isVirtual(m: u32): bool {
-    return unchecked(this.traits.methodVirtual[m]) !== 0;
+    return this.traits.methodVirtual[m] !== 0;
   }
 
   /**
@@ -621,24 +620,24 @@ export class Domain {
    * none or several.
    */
   findScript(index: u32, mn: u32): i32 {
-    const pool = unchecked(this.abcs[index]).pool;
-    if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
-      mn = unchecked(pool.mnA[mn]);
+    const pool = this.abcs[index].pool;
+    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+      mn = pool.mnA[mn];
     }
 
-    const ids = unchecked(this.abcNs[index]);
-    const versions = unchecked(this.abcNsVersion[index]);
-    const name = unchecked(this.abcString[index][pool.mnB[mn]]);
-    if (unchecked(pool.mnKind[mn]) === CONSTANT_Qname) {
-      const ns = unchecked(pool.mnA[mn]);
-      return this.scriptOf(this.find(unchecked(ids[ns]), name, unchecked(versions[ns])));
+    const ids = this.abcNs[index];
+    const versions = this.abcNsVersion[index];
+    const name = this.abcString[index][pool.mnB[mn]];
+    if (pool.mnKind[mn] === CONSTANT_Qname) {
+      const ns = pool.mnA[mn];
+      return this.scriptOf(this.find(ids[ns], name, versions[ns]));
     }
 
-    const set = unchecked(pool.mnA[mn]);
+    const set = pool.mnA[mn];
     let found = -1;
-    for (let m = unchecked(pool.nsSetStart[set]); m < unchecked(pool.nsSetStart[set + 1]); m++) {
-      const ns = unchecked(pool.nsSetMembers[m]);
-      const script = this.scriptOf(this.find(unchecked(ids[ns]), name, unchecked(versions[ns])));
+    for (let m = pool.nsSetStart[set]; m < pool.nsSetStart[set + 1]; m++) {
+      const ns = pool.nsSetMembers[m];
+      const script = this.scriptOf(this.find(ids[ns], name, versions[ns]));
       if (script >= 0) {
         if (found >= 0 && found !== script) {
           return -1;
@@ -657,31 +656,28 @@ export class Domain {
       return -1;
     }
 
-    const index = unchecked(this.bindingAbc[b]);
-    return <i32>unchecked(this.scriptTraits[index][this.bindingScript[b]]);
+    const index = this.bindingAbc[b];
+    return <i32>this.scriptTraits[index][this.bindingScript[b]];
   }
 
   /** The interned id of multiname `mn`'s name with a leading underscore, or -1 if no ABC has it. */
   underscored(index: u32, mn: u32): i32 {
     const name = this.nameOf(index, mn);
-    const text = String.UTF8.decodeUnsafe(
-      unchecked(this.stringPtr[name]),
-      unchecked(this.stringLength[name]),
-    );
+    const text = String.UTF8.decodeUnsafe(this.stringPtr[name], this.stringLength[name]);
     return this.findText(`_${text}`);
   }
 
   /** Whether multiname `mn` of ABC `index` is named Math or Number. */
   isMathOrNumber(index: u32, mn: u32): bool {
-    const pool = unchecked(this.abcs[index]).pool;
-    const name = unchecked(this.abcString[index][pool.mnB[mn]]);
+    const pool = this.abcs[index].pool;
+    const name = this.abcString[index][pool.mnB[mn]];
     return name === <u32>this.findText("Math") || name === <u32>this.findText("Number");
   }
 
   /** As Multiname::containsAnyPublicNamespace, for a multiname with a namespace set. */
   hasPublicNamespace(index: u32, mn: u32): bool {
-    const pool = unchecked(this.abcs[index]).pool;
-    const kind = unchecked(pool.mnKind[mn]);
+    const pool = this.abcs[index].pool;
+    const kind = pool.mnKind[mn];
     if (
       kind !== CONSTANT_Multiname &&
       kind !== CONSTANT_MultinameL &&
@@ -690,10 +686,10 @@ export class Domain {
       return false;
     }
 
-    const set = unchecked(pool.mnA[mn]);
-    for (let m = unchecked(pool.nsSetStart[set]); m < unchecked(pool.nsSetStart[set + 1]); m++) {
-      const ns = unchecked(this.abcNs[index][pool.nsSetMembers[m]]);
-      if (unchecked(this.nsType[ns]) === NS_Public) {
+    const set = pool.mnA[mn];
+    for (let m = pool.nsSetStart[set]; m < pool.nsSetStart[set + 1]; m++) {
+      const ns = this.abcNs[index][pool.nsSetMembers[m]];
+      if (this.nsType[ns] === NS_Public) {
         return true;
       }
     }
@@ -708,7 +704,7 @@ export class Domain {
    */
   initOfDeclarer(type: i32, index: u32, mn: u32): i32 {
     const traits = this.traits;
-    for (let t = type; t >= 0; t = unchecked(traits.base[t])) {
+    for (let t = type; t >= 0; t = traits.base[t]) {
       const b = getOwnBinding(this, index, <u32>t, mn);
       if (b === BIND_None) {
         continue;
@@ -716,13 +712,13 @@ export class Domain {
 
       let declarer = t;
       let ns = this.foundNs;
-      while (ns === unchecked(traits.protectedNs[declarer])) {
-        const parent = unchecked(traits.base[declarer]);
-        if (parent < 0 || unchecked(traits.protectedNs[parent]) < 0) {
+      while (ns === traits.protectedNs[declarer]) {
+        const parent = traits.base[declarer];
+        if (parent < 0 || traits.protectedNs[parent] < 0) {
           break;
         }
 
-        const parentNs = <u32>unchecked(traits.protectedNs[parent]);
+        const parentNs = <u32>traits.protectedNs[parent];
         const name = this.nameOf(index, mn);
         if (traits.find(parent, parentNs, name, API_Internal) !== b) {
           break;
@@ -732,7 +728,7 @@ export class Domain {
         ns = <i32>parentNs;
       }
 
-      return unchecked(traits.init[declarer]);
+      return traits.init[declarer];
     }
 
     return -1;
@@ -740,12 +736,12 @@ export class Domain {
 
   /** The interned name of multiname `mn` of ABC `index`. */
   nameOf(index: u32, mn: u32): u32 {
-    const pool = unchecked(this.abcs[index]).pool;
-    if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
-      mn = unchecked(pool.mnA[mn]);
+    const pool = this.abcs[index].pool;
+    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+      mn = pool.mnA[mn];
     }
 
-    return unchecked(this.abcString[index][pool.mnB[mn]]);
+    return this.abcString[index][pool.mnB[mn]];
   }
 
   /** The namespace the last getOwnBinding found its binding in. */
@@ -780,9 +776,9 @@ export class Domain {
 
     const traits = this.traits;
     if (
-      unchecked(traits.kind[slotType]) === TRAITS_Class &&
-      unchecked(traits.base[slotType]) === this.classInstanceType() &&
-      !unchecked(this.abcs[traits.abc[slotType]]).builtin
+      traits.kind[slotType] === TRAITS_Class &&
+      traits.base[slotType] === this.classInstanceType() &&
+      !this.abcs[traits.abc[slotType]].builtin
     ) {
       return this.instanceTraitsOf(slotType);
     }
@@ -806,8 +802,8 @@ export class Domain {
   /** The class object traits of instance traits `type`. */
   staticOf(type: i32): i32 {
     const traits = this.traits;
-    const index = unchecked(traits.abc[type]);
-    return unchecked(this.classStatic[this.classStart[index] + traits.owner[type]]);
+    const index = traits.abc[type];
+    return this.classStatic[this.classStart[index] + traits.owner[type]];
   }
 
   /**
@@ -820,38 +816,38 @@ export class Domain {
       return this.catchScopes.get(key);
     }
 
-    const pool = unchecked(this.abcs[index]).pool;
+    const pool = this.abcs[index].pool;
     let mn = name;
-    if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
-      mn = unchecked(pool.mnA[mn]);
+    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+      mn = pool.mnA[mn];
     }
 
     const traits = this.traits;
     const t = traits.create(TRAITS_Catch, index, h, -1, -1, 0, 0);
     const start = <u32>traits.memberTraits.length;
-    unchecked((traits.memberStart[t] = start));
-    unchecked((traits.memberEnd[t] = start));
-    let ns = unchecked(pool.mnA[mn]);
-    if (unchecked(pool.mnKind[mn]) === CONSTANT_Multiname) {
-      ns = unchecked(pool.nsSetMembers[pool.nsSetStart[ns]]);
+    traits.memberStart[t] = start;
+    traits.memberEnd[t] = start;
+    let ns = pool.mnA[mn];
+    if (pool.mnKind[mn] === CONSTANT_Multiname) {
+      ns = pool.nsSetMembers[pool.nsSetStart[ns]];
     }
 
-    const nsId = unchecked(this.abcNs[index][ns]);
-    const version = this.activeVersion(unchecked(this.abcNsVersion[index][ns]));
+    const nsId = this.abcNs[index][ns];
+    const version = this.activeVersion(this.abcNsVersion[index][ns]);
     traits.add(t, nsId, this.nameOf(index, name), version, BKIND_Var);
-    unchecked((traits.slotCount[t] = 1));
-    unchecked((traits.slotStart[t] = traits.slotType.length));
+    traits.slotCount[t] = 1;
+    traits.slotStart[t] = traits.slotType.length;
     traits.slotType.push(type);
     traits.slotSet.push(1);
-    unchecked((traits.dispatchStart[t] = traits.dispatch.length));
-    unchecked((traits.resolved[t] = 1));
+    traits.dispatchStart[t] = traits.dispatch.length;
+    traits.resolved[t] = 1;
     this.catchScopes.set(key, <i32>t);
     return <i32>t;
   }
 
   builtinType(name: string): i32 {
     const c = this.findBuiltin(name);
-    return c < 0 ? -1 : unchecked(this.classTraits[c]);
+    return c < 0 ? -1 : this.classTraits[c];
   }
 
   /**
@@ -861,11 +857,8 @@ export class Domain {
   findBuiltin(name: string): i32 {
     const text = this.findText(name);
     for (let id = 0; text >= 0 && id < this.typeName.length; id++) {
-      if (
-        unchecked(this.typeName[id]) === <u32>text &&
-        unchecked(this.typeOwner[id]) === this.loads
-      ) {
-        return <i32>unchecked(this.typeClass[id]);
+      if (this.typeName[id] === <u32>text && this.typeOwner[id] === this.loads) {
+        return <i32>this.typeClass[id];
       }
     }
 
@@ -873,7 +866,7 @@ export class Domain {
   }
 
   objectType(): i32 {
-    return this.objectClass < 0 ? TYPE_Any : unchecked(this.classTraits[this.objectClass]);
+    return this.objectClass < 0 ? TYPE_Any : this.classTraits[this.objectClass];
   }
 
   /** As Traits::getBuiltinType. */
@@ -933,7 +926,7 @@ export class Domain {
   }
 
   methodAbc(m: u32): u32 {
-    return unchecked(this.methodAbcIndex[m]);
+    return this.methodAbcIndex[m];
   }
 
   /** The namespace id of the public namespace, or -1 if no ABC has one. */
@@ -944,7 +937,7 @@ export class Domain {
 
   /** The version of ABC `index`'s public namespace, as AvmCore::getPublicNamespace(pool). */
   publicVersion(index: u32): u8 {
-    return unchecked(this.abcs[index]).builtin ? API_Internal : this.apiVersion;
+    return this.abcs[index].builtin ? API_Internal : this.apiVersion;
   }
 
   /**
@@ -956,20 +949,20 @@ export class Domain {
       return TYPE_Any;
     }
 
-    const pool = unchecked(this.abcs[index]).pool;
+    const pool = this.abcs[index].pool;
     if (mn >= pool.multinameCount) {
       this.typeError = kCpoolIndexRangeError;
       return -2;
     }
 
-    if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
-      const base = this.resolveType(index, unchecked(pool.mnA[mn]));
+    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+      const base = this.resolveType(index, pool.mnA[mn]);
       if (base === -kAmbiguousBindingError) {
         this.typeError = kAmbiguousBindingError;
         return -2;
       }
 
-      const param = this.resolveTypeId(index, unchecked(pool.mnB[mn]), false);
+      const param = this.resolveTypeId(index, pool.mnB[mn], false);
       if (param < TYPE_Any) {
         return param;
       }
@@ -998,7 +991,7 @@ export class Domain {
       return -2;
     }
 
-    return unchecked(this.classTraits[c]);
+    return this.classTraits[c];
   }
 
   /**
@@ -1037,18 +1030,18 @@ export class Domain {
     const objects = <u32>this.vectorObjectType;
     const t = traits.create(
       TRAITS_Instance,
-      unchecked(traits.abc[objects]),
-      unchecked(traits.owner[objects]),
+      traits.abc[objects],
+      traits.owner[objects],
       <i32>objects,
       -1,
       0,
       0,
     );
-    unchecked((traits.param[t] = param));
-    unchecked((traits.slotCount[t] = traits.slotCount[objects]));
-    unchecked((traits.methodCount[t] = traits.methodCount[objects]));
-    unchecked((traits.memberStart[t] = traits.memberTraits.length));
-    unchecked((traits.memberEnd[t] = traits.memberTraits.length));
+    traits.param[t] = param;
+    traits.slotCount[t] = traits.slotCount[objects];
+    traits.methodCount[t] = traits.methodCount[objects];
+    traits.memberStart[t] = traits.memberTraits.length;
+    traits.memberEnd[t] = traits.memberTraits.length;
     this.vectorOf.set(param, <i32>t);
     return <i32>t;
   }
@@ -1068,18 +1061,18 @@ export class Domain {
       return type === TYPE_Any ? kCorruptABCError : kIllegalDefaultValue;
     }
 
-    const pool = unchecked(this.abcs[index]).pool;
+    const pool = this.abcs[index].pool;
     let number: f64 = 0;
     let count: u32 = 0xffffffff;
     if (kind === CONSTANT_Int) {
       count = pool.ints.length;
-      number = value < count ? unchecked(pool.ints[value]) : 0;
+      number = value < count ? pool.ints[value] : 0;
     } else if (kind === CONSTANT_UInt) {
       count = pool.uints.length;
-      number = value < count ? unchecked(pool.uints[value]) : 0;
+      number = value < count ? pool.uints[value] : 0;
     } else if (kind === CONSTANT_Double) {
       count = pool.doubles.length;
-      number = value < count ? unchecked(pool.doubles[value]) : 0;
+      number = value < count ? pool.doubles[value] : 0;
     } else if (kind === CONSTANT_Utf8) {
       count = pool.stringCount;
     } else if (kind !== CONSTANT_True && kind !== CONSTANT_False && kind !== CONSTANT_Null) {
@@ -1099,12 +1092,12 @@ export class Domain {
    * 1022 for void.
    */
   resolveType(index: u32, mn: u32): i32 {
-    const abc = unchecked(this.abcs[index]);
+    const abc = this.abcs[index];
     const pool = abc.pool;
-    const kind = unchecked(pool.mnKind[mn]);
+    const kind = pool.mnKind[mn];
     if (kind === CONSTANT_TypeName) {
-      const base = this.resolveType(index, unchecked(pool.mnA[mn]));
-      const param = unchecked(pool.mnB[mn]);
+      const base = this.resolveType(index, pool.mnA[mn]);
+      const param = pool.mnB[mn];
       if (base >= 0 && param) {
         const t = this.resolveType(index, param);
         if (t < 0) {
@@ -1115,19 +1108,19 @@ export class Domain {
       return base;
     }
 
-    const strings = unchecked(this.abcString[index]);
-    const ids = unchecked(this.abcNs[index]);
-    const versions = unchecked(this.abcNsVersion[index]);
-    const nameIndex = unchecked(pool.mnB[mn]);
+    const strings = this.abcString[index];
+    const ids = this.abcNs[index];
+    const versions = this.abcNsVersion[index];
+    const nameIndex = pool.mnB[mn];
     let found: i32 = -1;
-    if (kind === CONSTANT_Qname && unchecked(pool.mnA[mn]) !== 0 && nameIndex !== 0) {
-      const ns = unchecked(pool.mnA[mn]);
+    if (kind === CONSTANT_Qname && pool.mnA[mn] !== 0 && nameIndex !== 0) {
+      const ns = pool.mnA[mn];
       found = this.findType(index, ids[ns], strings[nameIndex], versions[ns]);
     } else if (kind === CONSTANT_Multiname && nameIndex !== 0) {
-      const set = unchecked(pool.mnA[mn]);
-      const last = unchecked(pool.nsSetStart[set + 1]);
-      for (let m = unchecked(pool.nsSetStart[set]); m < last; m++) {
-        const ns = unchecked(pool.nsSetMembers[m]);
+      const set = pool.mnA[mn];
+      const last = pool.nsSetStart[set + 1];
+      for (let m = pool.nsSetStart[set]; m < last; m++) {
+        const ns = pool.nsSetMembers[m];
         const t = this.findType(index, ids[ns], strings[nameIndex], versions[ns]);
         if (t >= 0 && found >= 0 && t !== found) {
           return -kAmbiguousBindingError;
@@ -1166,12 +1159,12 @@ export class Domain {
       }
 
       if (
-        unchecked(this.typeNs[id]) === ns &&
-        unchecked(this.typeName[id]) === name &&
-        unchecked(this.typeVersion[id]) <= version &&
-        unchecked(this.typeOwner[id]) === owner
+        this.typeNs[id] === ns &&
+        this.typeName[id] === name &&
+        this.typeVersion[id] <= version &&
+        this.typeOwner[id] === owner
       ) {
-        return <i32>unchecked(this.typeClass[id]);
+        return <i32>this.typeClass[id];
       }
 
       slot = table.next(slot);
@@ -1190,21 +1183,21 @@ export class Domain {
 
   /** As DomainMgr::addNamedInstanceTraits: instance i's name, unless something is already found by it. */
   nameInstance(index: u32, i: u32): void {
-    const abc = unchecked(this.abcs[index]);
+    const abc = this.abcs[index];
     const pool = abc.pool;
-    let mn = unchecked(abc.instanceName[i]);
-    if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
-      mn = unchecked(pool.mnA[mn]);
+    let mn = abc.instanceName[i];
+    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+      mn = pool.mnA[mn];
     }
 
-    let ns = unchecked(pool.mnA[mn]);
-    if (unchecked(pool.mnKind[mn]) === CONSTANT_Multiname) {
-      ns = unchecked(pool.nsSetMembers[pool.nsSetStart[ns]]);
+    let ns = pool.mnA[mn];
+    if (pool.mnKind[mn] === CONSTANT_Multiname) {
+      ns = pool.nsSetMembers[pool.nsSetStart[ns]];
     }
 
-    const nsId = unchecked(this.abcNs[index][ns]);
-    const version = unchecked(this.abcNsVersion[index][ns]);
-    const name = unchecked(this.abcString[index][pool.mnB[mn]]);
+    const nsId = this.abcNs[index][ns];
+    const version = this.abcNsVersion[index][ns];
+    const name = this.abcString[index][pool.mnB[mn]];
     if (this.findType(index, nsId, name, version) < 0) {
       this.nameType(nsId, name, version, <i32>(this.classStart[index] + i), this.abcOwner[index]);
     }
@@ -1215,45 +1208,42 @@ export class Domain {
    * defines, visible to all later ABCs unless the domain has the name already.
    */
   addClassNames(index: u32): void {
-    const abc = unchecked(this.abcs[index]);
+    const abc = this.abcs[index];
     const pool = abc.pool;
-    const ids = unchecked(this.abcNs[index]);
-    const versions = unchecked(this.abcNsVersion[index]);
-    const strings = unchecked(this.abcString[index]);
-    const first = unchecked(abc.scriptTraitStart[0]);
-    const end = unchecked(abc.scriptTraitStart[abc.scriptCount]);
+    const ids = this.abcNs[index];
+    const versions = this.abcNsVersion[index];
+    const strings = this.abcString[index];
+    const first = abc.scriptTraitStart[0];
+    const end = abc.scriptTraitStart[abc.scriptCount];
     for (let t = first; t < end; t++) {
-      if ((unchecked(abc.traitTag[t]) & 0x0f) !== TRAIT_Class) {
+      if ((abc.traitTag[t] & 0x0f) !== TRAIT_Class) {
         continue;
       }
 
-      let mn = unchecked(abc.traitName[t]);
-      if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
-        mn = unchecked(pool.mnA[mn]);
+      let mn = abc.traitName[t];
+      if (pool.mnKind[mn] === CONSTANT_TypeName) {
+        mn = pool.mnA[mn];
       }
 
-      let ns = unchecked(pool.mnA[mn]);
-      let version = this.activeVersion(unchecked(versions[ns]));
-      if (unchecked(pool.mnKind[mn]) === CONSTANT_Multiname) {
+      let ns = pool.mnA[mn];
+      let version = this.activeVersion(versions[ns]);
+      if (pool.mnKind[mn] === CONSTANT_Multiname) {
         const set = ns;
-        const last = unchecked(pool.nsSetStart[set + 1]);
-        ns = unchecked(pool.nsSetMembers[pool.nsSetStart[set]]);
+        const last = pool.nsSetStart[set + 1];
+        ns = pool.nsSetMembers[pool.nsSetStart[set]];
         version = API_Internal;
-        for (let m = unchecked(pool.nsSetStart[set]); m < last; m++) {
-          const v = this.activeVersion(unchecked(versions[pool.nsSetMembers[m]]));
+        for (let m = pool.nsSetStart[set]; m < last; m++) {
+          const v = this.activeVersion(versions[pool.nsSetMembers[m]]);
           if (v < version) {
             version = v;
           }
         }
       }
 
-      const nsId = unchecked(ids[ns]);
-      const name = unchecked(strings[pool.mnB[mn]]);
-      if (
-        unchecked(this.nsType[nsId]) !== NS_Private &&
-        this.findTypeOf(nsId, name, version, -1) < 0
-      ) {
-        const id = unchecked(this.classStart[index]) + unchecked(abc.traitIndex[t]);
+      const nsId = ids[ns];
+      const name = strings[pool.mnB[mn]];
+      if (this.nsType[nsId] !== NS_Private && this.findTypeOf(nsId, name, version, -1) < 0) {
+        const id = this.classStart[index] + abc.traitIndex[t];
         this.nameType(nsId, name, version, <i32>id, -1);
       }
     }
@@ -1303,8 +1293,8 @@ export class Domain {
 
       if (
         table.hashAt(slot) === hash &&
-        unchecked(this.stringLength[id]) === length &&
-        memory.compare(unchecked(this.stringPtr[id]), ptr, length) === 0
+        this.stringLength[id] === length &&
+        memory.compare(this.stringPtr[id], ptr, length) === 0
       ) {
         return id;
       }
@@ -1342,7 +1332,7 @@ export class Domain {
         return -1;
       }
 
-      if (unchecked(this.nsType[id]) === type && unchecked(this.nsUri[id]) === uri) {
+      if (this.nsType[id] === type && this.nsUri[id] === uri) {
         return id;
       }
 
@@ -1365,9 +1355,9 @@ export class Domain {
       }
 
       if (
-        unchecked(this.bindingNs[id]) === ns &&
-        unchecked(this.bindingName[id]) === name &&
-        unchecked(this.bindingVersion[id]) <= version
+        this.bindingNs[id] === ns &&
+        this.bindingName[id] === name &&
+        this.bindingVersion[id] <= version
       ) {
         return id;
       }
@@ -1387,22 +1377,22 @@ export class Domain {
     // A builtin ABC's marked URIs are versioned before any of its namespaces
     // get a version, as the player registers them before parsing.
     for (let i: u32 = 1; i < count; i++) {
-      const index = unchecked(pool.nsName[i]);
+      const index = pool.nsName[i];
       const mark = index
         ? versionMark(base, pool.stringStart[index], pool.stringLength[index])
         : -1;
-      unchecked((marks[i] = mark));
+      marks[i] = mark;
       if (abc.builtin && mark >= 0 && namespaceType(pool.nsKind[i]) === NS_Public) {
         const uri = this.internString(base + pool.stringStart[index], pool.stringLength[index] - 3);
-        unchecked((this.versioned[uri] = 1));
+        this.versioned[uri] = 1;
       }
     }
 
     for (let i: u32 = 1; i < count; i++) {
-      const type = namespaceType(unchecked(pool.nsKind[i]));
-      const index = unchecked(pool.nsName[i]);
-      const mark = unchecked(marks[i]);
-      let uri = index ? unchecked(strings[index]) : URI_None;
+      const type = namespaceType(pool.nsKind[i]);
+      const index = pool.nsName[i];
+      const mark = marks[i];
+      let uri = index ? strings[index] : URI_None;
       let version = API_AllVersions;
       if (mark >= 0) {
         uri = this.internString(base + pool.stringStart[index], pool.stringLength[index] - 3);
@@ -1412,15 +1402,15 @@ export class Domain {
       if (type === NS_Private) {
         version = API_AllVersions;
       } else if (index && abc.builtin) {
-        if (mark < 0 && type === NS_Public && unchecked(this.versioned[uri])) {
+        if (mark < 0 && type === NS_Public && this.versioned[uri]) {
           version = API_Internal;
         }
       } else if (index && type === NS_Public) {
         version = this.apiVersion;
       }
 
-      unchecked((ids[i] = this.internNamespace(type, uri)));
-      unchecked((versions[i] = version));
+      ids[i] = this.internNamespace(type, uri);
+      versions[i] = version;
     }
 
     this.abcNs.push(ids);
@@ -1432,36 +1422,36 @@ export class Domain {
    * under its name's first namespace, with the earliest of their versions.
    */
   addBindings(index: u32): void {
-    const abc = unchecked(this.abcs[index]);
+    const abc = this.abcs[index];
     const pool = abc.pool;
-    const strings = unchecked(this.abcString[index]);
-    const ids = unchecked(this.abcNs[index]);
-    const versions = unchecked(this.abcNsVersion[index]);
+    const strings = this.abcString[index];
+    const ids = this.abcNs[index];
+    const versions = this.abcNsVersion[index];
     for (let script: u32 = 0; script < abc.scriptCount; script++) {
-      const end = unchecked(abc.scriptTraitStart[script + 1]);
-      for (let t = unchecked(abc.scriptTraitStart[script]); t < end; t++) {
-        let mn = unchecked(abc.traitName[t]);
-        if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
-          mn = unchecked(pool.mnA[mn]);
+      const end = abc.scriptTraitStart[script + 1];
+      for (let t = abc.scriptTraitStart[script]; t < end; t++) {
+        let mn = abc.traitName[t];
+        if (pool.mnKind[mn] === CONSTANT_TypeName) {
+          mn = pool.mnA[mn];
         }
 
-        const name = unchecked(strings[pool.mnB[mn]]);
-        let first = unchecked(pool.mnA[mn]);
-        let version = this.activeVersion(unchecked(versions[first]));
-        if (unchecked(pool.mnKind[mn]) === CONSTANT_Multiname) {
-          const set = unchecked(pool.mnA[mn]);
-          const last = unchecked(pool.nsSetStart[set + 1]);
-          first = unchecked(pool.nsSetMembers[pool.nsSetStart[set]]);
+        const name = strings[pool.mnB[mn]];
+        let first = pool.mnA[mn];
+        let version = this.activeVersion(versions[first]);
+        if (pool.mnKind[mn] === CONSTANT_Multiname) {
+          const set = pool.mnA[mn];
+          const last = pool.nsSetStart[set + 1];
+          first = pool.nsSetMembers[pool.nsSetStart[set]];
           version = API_Internal;
-          for (let m = unchecked(pool.nsSetStart[set]); m < last; m++) {
-            const v = this.activeVersion(unchecked(versions[pool.nsSetMembers[m]]));
+          for (let m = pool.nsSetStart[set]; m < last; m++) {
+            const v = this.activeVersion(versions[pool.nsSetMembers[m]]);
             if (v < version) {
               version = v;
             }
           }
         }
 
-        this.bind(unchecked(ids[first]), name, version, index, script, t);
+        this.bind(ids[first], name, version, index, script, t);
       }
     }
   }

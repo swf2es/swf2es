@@ -21,6 +21,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm oracle:pull
       - run: pnpm test
+      - run: pnpm test:checked
       # A subset of the Tamarin acceptance tests; the full set runs in tamarin.yml.
       - uses: actions/cache@v4
         with:

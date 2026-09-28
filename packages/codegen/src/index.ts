@@ -45,13 +45,17 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
   // codegen.wasm uses AssemblyScript's minimal runtime, which collects
   // garbage only when asked. Nothing runs in wasm between calls, so that is
-  // when: after a call that grew memory by COLLECT_AFTER bytes.
-  let collectedAt = wasm.memory.buffer.byteLength;
+  // when: every COLLECT_EVERY calls, and after a call that grew memory.
+  // Memory never shrinks, so collecting only on growth would let each
+  // cycle's garbage grow it a little further.
+  let size = wasm.memory.buffer.byteLength;
+  let calls = 0;
   const collected = <T>(result: T): T => {
-    const size = wasm.memory.buffer.byteLength;
-    if (size > collectedAt + COLLECT_AFTER) {
+    const grown = wasm.memory.buffer.byteLength;
+    if (grown > size || ++calls >= COLLECT_EVERY) {
       wasm.__collect();
-      collectedAt = size;
+      size = grown;
+      calls = 0;
     }
 
     return result;
@@ -65,4 +69,4 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   };
 }
 
-const COLLECT_AFTER = 64 << 20;
+const COLLECT_EVERY = 64;

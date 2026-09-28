@@ -224,18 +224,18 @@ function define(
   pushes: u8,
   stack: u8,
 ): void {
-  unchecked((opcodeOperands[opcode] = operands));
-  unchecked((opcodeFlags[opcode] = flags));
-  unchecked((opcodeNames[opcode] = name));
-  unchecked((opcodePops[opcode] = pops));
-  unchecked((opcodePushes[opcode] = pushes));
-  unchecked((opcodeStack[opcode] = stack));
+  opcodeOperands[opcode] = operands;
+  opcodeFlags[opcode] = flags;
+  opcodeNames[opcode] = name;
+  opcodePops[opcode] = pops;
+  opcodePushes[opcode] = pushes;
+  opcodeStack[opcode] = stack;
 }
 
 function defineAll(): void {
   for (let opcode = 0; opcode < 256; opcode++) {
-    unchecked((opcodeOperands[opcode] = OPERANDS_Illegal));
-    unchecked((opcodeNames[opcode] = `0x${opcode < 0x10 ? "0" : ""}${opcode.toString(16)}`));
+    opcodeOperands[opcode] = OPERANDS_Illegal;
+    opcodeNames[opcode] = `0x${opcode < 0x10 ? "0" : ""}${opcode.toString(16)}`;
   }
 
   define(0x01, "bkpt", OPERANDS_None, 0, 0, 0, 0);
