@@ -104,10 +104,11 @@ export function poolDump(bytes: Uint8Array): string {
 /**
  * Parse a whole ABC block and describe the tables after the constant pool,
  * one entry per line; just "error N" if avmplus would reject it, since the
- * tables of a rejected ABC are incomplete.
+ * tables of a rejected ABC are incomplete. `builtin` parses it as an ABC the
+ * player ships.
  */
-export function abcDump(bytes: Uint8Array): string {
-  const abc = readAbc(padded(bytes), bytes.length);
+export function abcDump(bytes: Uint8Array, builtin: bool = false): string {
+  const abc = readAbc(padded(bytes), bytes.length, builtin);
   if (abc.error) {
     return `error ${abc.error}`;
   }
@@ -226,10 +227,11 @@ function join(items: Array<u32>, start: u32, end: u32): string {
  * Decode every method body: "body B method M", then one "offset name a b c"
  * line per reachable instruction (lookupswitch adds its case offsets), then
  * "unreachable N" bytes, or "error N" if avmplus' verifier would reject it.
+ * `builtin` parses it as an ABC the player ships.
  */
-export function codeDump(bytes: Uint8Array): string {
+export function codeDump(bytes: Uint8Array, builtin: bool = false): string {
   const base = padded(bytes);
-  const abc = readAbc(base, bytes.length);
+  const abc = readAbc(base, bytes.length, builtin);
   if (abc.error) {
     return `error ${abc.error}`;
   }

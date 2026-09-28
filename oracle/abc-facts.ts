@@ -17,14 +17,14 @@ export interface AbcFacts {
   code: Record<number, string[]>;
 }
 
-// abcdump names each table in its "// X count N" lines.
+// abcdump names each table in its "// X count N" lines. Its MetadataInfo
+// line prints the last entry's item count instead, so metadata is not compared.
 const COUNTS: Record<string, string> = {
   "Cpool strings": "strings",
   "Cpool namespaces": "namespaces",
   "Cpool nssets": "nssets",
   "Cpool names": "multinames",
   MethodInfo: "methods",
-  MetadataInfo: "metadata",
   InstanceInfo: "classes",
   MethodBodies: "bodies",
 };
@@ -86,10 +86,11 @@ export function abcdumpFacts(dump: string): AbcFacts {
   return facts;
 }
 
-export function swf2esFacts(abc: Uint8Array): AbcFacts {
+/** swf2es' facts about an ABC; `builtin` parses it as one the player ships. */
+export function swf2esFacts(abc: Uint8Array, builtin = false): AbcFacts {
   const facts: AbcFacts = { counts: {}, bodies: {}, code: {} };
   const pool = (testing.poolDump(abc) as string).split("\n");
-  const tables = (testing.abcDump(abc) as string).split("\n");
+  const tables = (testing.abcDump(abc, builtin) as string).split("\n");
 
   const error = [...pool, ...tables].find((l) => l.startsWith("error"));
   if (error) {
@@ -105,7 +106,6 @@ export function swf2esFacts(abc: Uint8Array): AbcFacts {
   facts.counts.nssets = entries(pool, "nsset") + 1;
   facts.counts.multinames = entries(pool, "mn") + 1;
   facts.counts.methods = entries(tables, "method");
-  facts.counts.metadata = entries(tables, "metadata");
   facts.counts.classes = entries(tables, "instance");
   facts.counts.bodies = entries(tables, "body");
 
@@ -120,7 +120,7 @@ export function swf2esFacts(abc: Uint8Array): AbcFacts {
   }
 
   let method = -1;
-  for (const line of (testing.codeDump(abc) as string).split("\n")) {
+  for (const line of (testing.codeDump(abc, builtin) as string).split("\n")) {
     const header = line.match(/^body \d+ method (\d+)/);
     if (header) {
       method = Number(header[1]);

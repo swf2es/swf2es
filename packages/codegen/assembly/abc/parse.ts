@@ -8,11 +8,13 @@ import { Reader } from "./reader";
 
 /**
  * Parse the ABC block at `base`, which must be followed by PADDING readable
- * bytes. Check `error` on the result: 0, or the VerifyError avmplus would throw.
+ * bytes; `builtin` for an ABC the player ships (see Abc.builtin). Check
+ * `error` on the result: 0, or the VerifyError avmplus would throw.
  */
-export function readAbc(base: usize, length: u32): Abc {
+export function readAbc(base: usize, length: u32, builtin: bool = false): Abc {
   const abc = new Abc();
   abc.length = length;
+  abc.builtin = builtin;
   const r = new Reader(base, base + length);
   abc.minorVersion = r.u16();
   abc.majorVersion = r.u16();
