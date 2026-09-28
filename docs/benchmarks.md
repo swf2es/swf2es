@@ -50,13 +50,20 @@ Totals, encode plus decode, in ms, as roadmap step 7 went:
 | Elements read and written by number | 341 | 458 |
 | Defining scripts kept, classes matched first | 313 | 414 |
 | Structured control flow (#22) | 289 | 410 |
-| AwayFL JIT, headless | 574 | 728 |
+| Runtime hot paths (#23) | 207 | 251 |
+| AwayFL JIT, headless, first run | 525 | 689 |
+| AwayFL JIT, headless, runs after | 406–462 | 611–654 |
 | PepperFlash | 188 | 83 |
 | avmshell (the oracle, its JIT in a container) | 107 | 74 |
 
-Each change was found with `node --cpu-prof` on the benchmark. AMF3 and
-JSON take about 1250 and 2780 ms; they are the runtime's own code
-(amf.ts, json.ts), not generated.
+Each change was found with `node --cpu-prof` on the benchmark. swf2es's
+times are medians of 5 runs, each in a node process of its own, so each a
+first run; #23's, with AwayFL's, measured on 2026-09-28 on an otherwise
+idle machine (swf2es 207–210 and 250–254 ms). AwayFL runs the same
+benchmark (as3pb's codecs unchanged since the SWF it plays was built),
+its page read from DevTools screenshots after its first run and after 4
+more. AMF3 and JSON take about 1120 and 2730 ms; they are the runtime's
+own code (amf.ts, json.ts), not generated.
 
 From step 7.4 on, a change is timed against the build before it with
 `tests/programs/ab.ts`: both builds run as3pb in turn, interleaved
