@@ -1,17 +1,20 @@
 // Loads the test build of codegen (packages/codegen/assembly/testing.ts).
 //
-// Its runtime collects garbage only when asked, between calls: after a call
-// that grew memory by COLLECT_AFTER bytes since the last collection.
+// Its runtime collects garbage only when asked, between calls: every
+// COLLECT_EVERY calls, and after a call that grew memory. Memory never
+// shrinks, so collecting only on growth would let each cycle's garbage grow
+// it a little further.
 import { readFile } from "node:fs/promises";
 
 const dir = new URL("../../../packages/codegen/dist-test/", import.meta.url);
 const { instantiate } = await import(new URL("testing.js", dir).href);
 const module = await WebAssembly.compile(await readFile(new URL("testing.wasm", dir)));
-const COLLECT_AFTER = 64 << 20;
+const COLLECT_EVERY = 64;
 
 // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
 const exports: any = await instantiate(module, { env: {} });
-let collectedAt = exports.memory.buffer.byteLength;
+let size = exports.memory.buffer.byteLength;
+let calls = 0;
 
 // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
 export const testing: any = new Proxy(exports, {
@@ -23,10 +26,11 @@ export const testing: any = new Proxy(exports, {
 
     return (...args: unknown[]) => {
       const result = value.apply(target, args);
-      const size = target.memory.buffer.byteLength;
-      if (size > collectedAt + COLLECT_AFTER) {
+      const grown = target.memory.buffer.byteLength;
+      if (grown > size || ++calls >= COLLECT_EVERY) {
         target.__collect();
-        collectedAt = size;
+        size = grown;
+        calls = 0;
       }
 
       return result;
