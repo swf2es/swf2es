@@ -28,3 +28,16 @@ test("a module loads only after the ABCs it was compiled against", () => {
   assert.throws(() => rt.abc(module("case", [])), /cannot load after \[builtin\]/);
   rt.abc(module("case", ["builtin"]));
 });
+
+test("error messages are the release player's, or the debugger player's with its text", () => {
+  // With no builtins loaded, the runtime's errors are JavaScript errors naming them.
+  assert.equal(avm2.createRuntime().error("TypeError", 1009).message, "TypeError: Error #1009");
+  assert.equal(
+    avm2.createRuntime({ debugger: true }).error("TypeError", 1009).message,
+    "TypeError: Error #1009: Cannot access a property or method of a null object reference.",
+  );
+  assert.equal(
+    avm2.createRuntime({ debugger: true }).errorMessage(1065, ["x"]),
+    "Error #1065: Variable x is not defined.",
+  );
+});

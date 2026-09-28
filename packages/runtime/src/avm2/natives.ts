@@ -249,10 +249,65 @@ const natives: Natives = {
   "String#String::_substr": plain(function (this: string, start = 0, length = 0x7fffffff) {
     return this.substr(start, length);
   }),
+  "String.String::_replace": (rt) => (s: string, pattern: Value, replacement: Value) => {
+    const p = pattern?.$re instanceof RegExp ? pattern.$re : rt.toString(pattern);
+    if (replacement !== null && typeof replacement === "object" && replacement.$f) {
+      // The function gets the match, its groups, its position and the string.
+      return s.replace(p, (...a: Value[]) => {
+        const args = typeof a[a.length - 1] === "object" ? a.slice(0, -1) : a;
+        return rt.toString(rt.callValue(replacement, null, args, null));
+      });
+    }
+
+    return s.replace(p, rt.toString(replacement));
+  },
+  "String.String::_search": (rt) => (s: string, pattern: Value) =>
+    s.search(pattern?.$re instanceof RegExp ? pattern.$re : rt.toString(pattern)),
+  "String.String::_match": (rt) => (s: string, pattern: Value) => {
+    const m = s.match(pattern?.$re instanceof RegExp ? pattern.$re : rt.toString(pattern));
+    return m ? matchArray(rt, m) : null;
+  },
   "String.String::_split": (rt) => (s: string, delimiter: Value, limit: number) => {
+    if (delimiter?.$re instanceof RegExp) {
+      return rt.array(s.split(delimiter.$re, limit >= 0 ? limit : undefined));
+    }
+
     const parts = s.split(rt.toString(delimiter));
     return rt.array(limit >= 0 && limit < parts.length ? parts.slice(0, limit) : parts);
   },
+
+  // RegExp: `this` holds its JavaScript RegExp in $re.
+  "RegExp#get:source": plain(function (this: AsObject) {
+    return this.$source;
+  }),
+  "RegExp#get:global": plain(function (this: AsObject) {
+    return this.$re.global;
+  }),
+  "RegExp#get:ignoreCase": plain(function (this: AsObject) {
+    return this.$re.ignoreCase;
+  }),
+  "RegExp#get:multiline": plain(function (this: AsObject) {
+    return this.$re.multiline;
+  }),
+  "RegExp#get:dotall": plain(function (this: AsObject) {
+    return this.$re.dotAll;
+  }),
+  "RegExp#get:extended": plain(function (this: AsObject) {
+    return this.$extended;
+  }),
+  "RegExp#get:lastIndex": plain(function (this: AsObject) {
+    return this.$re.lastIndex;
+  }),
+  "RegExp#set:lastIndex": (rt) =>
+    function (this: AsObject, i: Value) {
+      this.$re.lastIndex = rt.toInt(i);
+    },
+  [`RegExp#${AS3}::exec`]: (rt) =>
+    function (this: AsObject, s: Value = "") {
+      const re: RegExp = this.$re;
+      const m = re.exec(rt.toString(s));
+      return m ? matchArray(rt, m) : null;
+    },
 
   // Number
   "Number.Number::_numberToString": plain((n: number, radix: number) =>
@@ -284,7 +339,9 @@ const natives: Natives = {
   },
 
   // Error
-  "Error.getErrorMessage": plain((id: number) => messages[id] ?? `Error #${id}`),
+  // Error.throwError fills in the template's %n: in debugger mode it has some.
+  "Error.getErrorMessage": (rt) => (id: number) =>
+    rt.debugger ? `Error #${id}: ${messages[id] ?? ""}` : `Error #${id}`,
   "Error#getStackTrace": plain(() => null),
 
   // avmshell's System
@@ -304,7 +361,7 @@ const natives: Natives = {
   "avmplus::System.get:apiVersion": plain(() => 50),
   "avmplus::System.getTimer": plain(() => Date.now() - started),
   "avmplus::System.getRunmode": plain(() => "jit"),
-  "avmplus::System.isDebugger": plain(() => false),
+  "avmplus::System.isDebugger": (rt) => () => rt.debugger,
   "avmplus::System.exit": plain(() => undefined),
 };
 
@@ -468,6 +525,45 @@ function sortValues(rt: Runtime, a: Value[], compare: Value): void {
   });
 }
 
+/** A match as AS3 gives it: an Array of the match and its groups, with its index and input. */
+function matchArray(rt: Runtime, m: RegExpMatchArray): AsObject {
+  const a = rt.array(Array.from(m));
+  if (m.index !== undefined) {
+    a.$d.set("index", m.index);
+    a.$d.set("input", m.input);
+  }
+
+  return a;
+}
+
+/**
+ * A RegExp from its pattern and options, as RegExpClass::construct: AS3's
+ * flags g, i, m and s are JavaScript's, and x, extended, drops whitespace
+ * and comments from the pattern.
+ */
+function newRegExp(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
+  const [pattern, options] = args;
+  const o = cls.$it.instance();
+  if (pattern?.$re instanceof RegExp && options === undefined) {
+    o.$source = pattern.$source;
+    o.$extended = pattern.$extended;
+    o.$re = new RegExp(pattern.$re.source, pattern.$re.flags);
+    return o;
+  }
+
+  const source = pattern === undefined ? "" : rt.toString(pattern);
+  const flags = options === undefined ? "" : rt.toString(options);
+  const extended = flags.includes("x");
+  const js = [..."gims"].filter((f) => flags.includes(f)).join("");
+  o.$source = source;
+  o.$extended = extended;
+  o.$re = new RegExp(
+    extended ? source.replace(/\\.|\s+|#[^\n]*/g, (t) => (t[0] === "\\" ? t : "")) : source,
+    js,
+  );
+  return o;
+}
+
 function shortName(qualified: string): string {
   const i = qualified.lastIndexOf("::");
   return i < 0 ? qualified : qualified.slice(i + 2);
@@ -521,6 +617,11 @@ const hooks: Record<string, ClassHook> = {
   Array: {
     create: withStorage,
     call: (rt, cls, args) => rt.constructClass(cls, args),
+  },
+  RegExp: {
+    construct: newRegExp,
+    call: (rt, cls, args) =>
+      args[0]?.$re instanceof RegExp && args[1] === undefined ? args[0] : newRegExp(rt, cls, args),
   },
   Function: {
     construct: (rt) => rt.newFunctionObject(() => undefined, null),

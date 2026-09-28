@@ -261,6 +261,12 @@ interface GlobalName {
 export interface RuntimeOptions {
   /** Where trace and print write a line. */
   print?: (line: string) => void;
+  /**
+   * Behave as the debugger player: error messages carry avmplus' text
+   * ("Error #1009: Cannot access ..."), and System.isDebugger is true. By
+   * default they are the release player's and avmshell's, "Error #1009".
+   */
+  debugger?: boolean;
 }
 
 /** Thrown for an AS3 exception that is an Error the runtime made, before its class existed. */
@@ -268,6 +274,7 @@ export class AsError extends Error {}
 
 export class Runtime {
   readonly print: (line: string) => void;
+  readonly debugger: boolean;
   readonly natives: Record<string, (rt: Runtime) => Method>;
   /** Names the scripts define, by local name: the first definition wins. */
   private readonly globals = new Map<string, GlobalName[]>();
@@ -293,6 +300,7 @@ export class Runtime {
   ) {
     this.natives = natives;
     this.print = options.print ?? defaultPrint;
+    this.debugger = options.debugger ?? false;
     this.objectTraits = new Traits("Object", null);
     this.objectTraits.dynamic = true;
     this.classTraits = new Traits("Class", this.objectTraits);
@@ -1564,9 +1572,7 @@ export class Runtime {
 
   /** A new AS3 error of builtin class `name`, number `id`, with its message's arguments. */
   error(name: string, id: number, ...args: Value[]): Value {
-    const template = messages[id] ?? "";
-    const text = template.replace(/%(\d)/g, (_, n) => String(args[Number(n) - 1] ?? ""));
-    const message = `Error #${id}: ${text}`;
+    const message = this.errorMessage(id, args);
     let cls: AsObject;
     try {
       cls = this.builtinClass(name);
@@ -1575,6 +1581,20 @@ export class Runtime {
     }
 
     return this.constructClass(cls, [message, id]);
+  }
+
+  /**
+   * Error `id`'s message as AS3 sees it: its number, as the release player
+   * and avmshell give it, or with its text and arguments in debugger mode.
+   */
+  errorMessage(id: number, args: Value[] = []): string {
+    if (!this.debugger) {
+      return `Error #${id}`;
+    }
+
+    const template = messages[id] ?? "";
+    const text = template.replace(/%(\d)/g, (_, n) => String(args[Number(n) - 1] ?? ""));
+    return `Error #${id}: ${text}`;
   }
 
   nullError(v: Value): Value {

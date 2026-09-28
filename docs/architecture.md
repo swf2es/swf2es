@@ -179,7 +179,11 @@ Values are JavaScript's own: `undefined`, `null`, numbers for `Number`,
 interned namespace, whose class is Namespace. Arrays and Vectors keep their
 elements in a JavaScript array, `$a`. A script's global object is an instance of its traits like any
 other. Errors thrown by the runtime are AS3 `Error` objects with avmplus'
-error numbers and messages, so traced errors read as in avmshell.
+error numbers. Their messages are the release player's, as avmshell's
+are: `Error #1009`, and nothing more, since AS3 can read and print them.
+With the runtime's `debugger` option they are the debugger player's,
+`Error #1009: Cannot access a property or method of a null object
+reference.`, and `System.isDebugger` is true.
 
 ### Modules and the bootstrap
 
@@ -256,8 +260,9 @@ lookup, coercions and exceptions (`packages/runtime/src/avm2`); it grows as
 far as each step needs. The natives are in `natives.ts`, with what makes
 some builtin classes differ from others: Arrays' and Vectors' element
 storage, and what calling or constructing `int`, `String`, `Object`,
-`Array` or a Vector does. The error messages are avmplus' own, generated
-from its `ErrorConstants.cpp` into `messages.ts`, which stays MPL-2.0.
+`Array` or a Vector does. The debugger player's error messages are avmplus'
+own, generated from its `ErrorConstants.cpp` into `messages.ts`, which
+stays MPL-2.0.
 
 avmplus' standard library (`Object`, `Array`, `String`, `Math`, `Date`,
 `RegExp`, `JSON`, `Vector`, `ByteArray` and so on) is mostly AS3 compiled
