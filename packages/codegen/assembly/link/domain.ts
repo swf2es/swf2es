@@ -108,6 +108,25 @@ export class Domain {
   /** Index of the trait in its ABC's trait tables. */
   bindingTrait: u32[] = [];
   bindings: IdTable = new IdTable();
+  /**
+   * getBinding's answers, by type, ABC and multiname: a type's members do
+   * not change once its ABC links, and a link that fails, which reuses its
+   * traits' and its ABC's ids, clears them.
+   */
+  bindingMemo: IdTable = new IdTable();
+  memoType: i32[] = [];
+  memoAbc: u32[] = [];
+  memoName: u32[] = [];
+  memoBinding: u32[] = [];
+
+  /** Forget getBinding's answers. */
+  clearBindingMemo(): void {
+    this.bindingMemo = new IdTable();
+    this.memoType.length = 0;
+    this.memoAbc.length = 0;
+    this.memoName.length = 0;
+    this.memoBinding.length = 0;
+  }
 
   // Classes by domain-wide id; ABC a's instance i is classStart[a] + i.
   classStart: u32[] = [];
@@ -230,6 +249,7 @@ export class Domain {
       this.methodAbcIndex.length = methodCount;
       this.traits.truncate(traitsCount);
       this.traits.truncateMethods(methodCount);
+      this.clearBindingMemo();
       return abc;
     }
 

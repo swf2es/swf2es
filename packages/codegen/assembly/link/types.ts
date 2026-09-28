@@ -2,6 +2,7 @@
 // type that binding holds, and how two types merge or assign.
 import * as C from "../abc/constants";
 import { Domain } from "./domain";
+import { hashPair } from "./table";
 import {
   BIND_None,
   BKIND_Const,
@@ -43,7 +44,45 @@ export function isBindingName(domain: Domain, index: u32, mn: u32): bool {
  * its namespaces. The type's own members are searched before its base's.
  */
 export function getBinding(domain: Domain, index: u32, type: i32, mn: u32): u32 {
-  if (type < 0 || !isBindingName(domain, index, mn)) {
+  if (type < 0) {
+    return BIND_None;
+  }
+
+  // Answered before, as the verifier asks again and again (findProperty
+  // tries each scope in turn, in every method).
+  const hash = hashPair(hashPair(<u32>type, index), mn);
+  const memo = domain.bindingMemo;
+  let slot = memo.start(hash);
+  while (true) {
+    const id = memo.at(slot);
+    if (id < 0) {
+      break;
+    }
+
+    if (
+      memo.hashAt(slot) === hash &&
+      domain.memoType[id] === type &&
+      domain.memoAbc[id] === index &&
+      domain.memoName[id] === mn
+    ) {
+      return domain.memoBinding[id];
+    }
+
+    slot = memo.next(slot);
+  }
+
+  const b = lookupBinding(domain, index, type, mn);
+  memo.insert(hash, <u32>domain.memoType.length);
+  domain.memoType.push(type);
+  domain.memoAbc.push(index);
+  domain.memoName.push(mn);
+  domain.memoBinding.push(b);
+  return b;
+}
+
+/** getBinding, looked up. */
+function lookupBinding(domain: Domain, index: u32, type: i32, mn: u32): u32 {
+  if (!isBindingName(domain, index, mn)) {
     return BIND_None;
   }
 
