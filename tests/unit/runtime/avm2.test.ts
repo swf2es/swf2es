@@ -66,3 +66,60 @@ test("domain memory with none set is 1024 bytes of scratch memory, as avmplus' D
   assert.throws(() => rt.li32(1021), /Error #1506/);
   assert.throws(() => rt.sf64(1, 1017), /Error #1506/);
 });
+
+test("for-ins over an object whose names come and go keep only a few of those gone", () => {
+  const rt = avm2.createRuntime();
+  const o = { $d: new Map<string, unknown>() };
+  const names = () => {
+    const seen: string[] = [];
+    for (let i = rt.hasNext(o, 0); i; i = rt.hasNext(o, i)) {
+      seen.push(rt.nextName(o, i));
+    }
+
+    return seen;
+  };
+
+  for (let n = 0; n < 2000; n++) {
+    o.$d.set(`k${n}`, n);
+    assert.deepEqual(names(), [`k${n}`]);
+    o.$d.delete(`k${n}`);
+  }
+
+  // The lists the for-ins went through, the last 4 generations of them.
+  const lists: string[][] =
+    (rt as unknown as { enumerating: WeakMap<object, { lists: string[][] }> }).enumerating.get(o)
+      ?.lists ?? [];
+  assert.equal(lists.length, 4);
+  assert.ok(
+    lists.every((list) => list.length <= 20),
+    `lists of ${lists.map((l) => l.length)}`,
+  );
+});
+
+test("a for-in goes on through its own names when one inside it takes a new list", () => {
+  const rt = avm2.createRuntime();
+  const o = { $d: new Map<string, unknown>() };
+  for (let n = 0; n < 40; n++) {
+    o.$d.set(`k${n}`, n);
+  }
+
+  const seen: string[] = [];
+  for (let i = rt.hasNext(o, 0); i; i = rt.hasNext(o, i)) {
+    const name = rt.nextName(o, i);
+    seen.push(name);
+    if (name === "k0") {
+      // Most names gone, then a for-in inside: it starts a new generation.
+      for (let n = 10; n < 40; n++) {
+        o.$d.delete(`k${n}`);
+      }
+
+      o.$d.set("late", 1);
+      for (let j = rt.hasNext(o, 0); j; j = rt.hasNext(o, j)) {}
+    }
+  }
+
+  // The rest of its names, then the one added, which the inner for-in put after them.
+  assert.deepEqual(seen, ["k0", "k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9", "late"]);
+  const e = (rt as unknown as { enumerating: WeakMap<object, { generation: number }> }).enumerating;
+  assert.equal(e.get(o)?.generation, 1);
+});

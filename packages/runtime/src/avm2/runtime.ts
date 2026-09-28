@@ -252,6 +252,24 @@ export class VectorRef {
 }
 
 /** A script: its descriptor, its global object once made, and whether it has run. */
+/**
+ * The names for-ins go through over one object. Each name keeps the place
+ * it first had, as avmplus' hashtable slots do, so that a for-in started
+ * inside another does not move the outer one's names: a later for-in adds
+ * only names that are new, and one deleted keeps its place, skipped. Once
+ * more are gone than there, a for-in starting takes a new list, of those
+ * still there, while those going through the old one keep it: a for-in's
+ * index is its place in its list times 4 plus the list's generation, of
+ * the last 4. (One that goes on through 4 more generations reads a list
+ * since replaced.)
+ */
+interface Enumeration {
+  lists: string[][];
+  generation: number;
+  /** The names in the current generation's list. */
+  known: Set<string>;
+}
+
 interface Script {
   desc: ScriptDesc;
   abc: Abc;
@@ -309,12 +327,8 @@ export class Runtime {
   /** Method closures, by receiver, so that o.f === o.f. */
   private readonly closures = new WeakMap<object, Map<number, AsObject>>();
   private readonly builtinTraitsByName = new Map<string, Traits>();
-  /**
-   * The names for-ins go through, per object, and which they are: each at
-   * the place it first had, as in avmplus' hashtable, so that a for-in
-   * started inside another does not move the outer one's names.
-   */
-  private readonly enumerating = new WeakMap<object, { names: string[]; known: Set<string> }>();
+  /** The names for-ins go through, per object (see Enumeration). */
+  private readonly enumerating = new WeakMap<object, Enumeration>();
   /** Special traits: an activation's or a catch scope's, by descriptor. */
   private readonly scopeTraits = new WeakMap<object, Traits>();
   readonly specialized = new Map<AsObject, AsObject>();
@@ -1685,36 +1699,53 @@ export class Runtime {
   }
 
   /**
-   * The names of `o` for-ins go through: when one starts, those it has
-   * now, the ones it had before where they were and new ones after them.
+   * A for-in starting over `o`: the names it has now, those it had before
+   * where they were and new ones after them; and, once more of those are
+   * gone than there, a new list of those still there, the next generation.
+   * Its generation, which the for-in's index carries.
    */
-  private enumeration(o: AsObject, starting: boolean): string[] {
+  private startEnumeration(o: AsObject): number {
+    const names = this.names(o);
     let e = this.enumerating.get(o);
     if (!e) {
-      const names = this.names(o);
-      e = { names, known: new Set(names) };
+      e = { lists: [names, [], [], []], generation: 0, known: new Set(names) };
       this.enumerating.set(o, e);
-    } else if (starting) {
-      for (const name of this.names(o)) {
-        if (!e.known.has(name)) {
-          e.known.add(name);
-          e.names.push(name);
-        }
+      return 0;
+    }
+
+    let list = e.lists[e.generation];
+    for (const name of names) {
+      if (!e.known.has(name)) {
+        e.known.add(name);
+        list.push(name);
       }
     }
 
-    return e.names;
+    if (list.length > 2 * names.length + 16) {
+      list = list.filter((name) => this.stillThere(o, name));
+      e.generation = (e.generation + 1) & 3;
+      e.lists[e.generation] = list;
+      e.known = new Set(list);
+    }
+
+    return e.generation;
+  }
+
+  /** The name of `o` at a for-in's index. */
+  private enumerated(o: AsObject, index: number): string {
+    return this.enumerating.get(o)?.lists[index & 3][(index >> 2) - 1] ?? "";
   }
 
   /** The index after `index` of an enumerable name of `o`, or 0. */
   private nextIndex(o: AsObject, index: number): number {
-    const names = this.enumeration(o, index === 0);
+    const generation = index === 0 ? this.startEnumeration(o) : index & 3;
+    const names = this.enumerating.get(o)?.lists[generation] ?? [];
 
     // A name deleted since the for-in started is skipped.
-    for (let i = index; i < names.length; i++) {
+    for (let i = index >> 2; i < names.length; i++) {
       const name = names[i];
       if (!o.$dontEnum?.has(name) && this.stillThere(o, name)) {
-        return i + 1;
+        return ((i + 1) << 2) | generation;
       }
     }
 
@@ -1730,11 +1761,6 @@ export class Runtime {
     }
 
     return o.$d?.has(name) ?? false;
-  }
-
-  /** The for-in's names of `o`, as nextIndex took them. */
-  private enumerated(o: AsObject): string[] {
-    return this.enumeration(o, false);
   }
 
   hasNext2(o: Value, index: number): [boolean, Value, number] {
@@ -1758,12 +1784,12 @@ export class Runtime {
   }
 
   nextName(o: Value, index: number): Value {
-    const name = this.enumerated(o)[index - 1];
+    const name = this.enumerated(o, index);
     return o.$a !== undefined && arrayIndex(name) >= 0 ? Number(name) : name;
   }
 
   nextValue(o: Value, index: number): Value {
-    return this.getProperty(o, this.publicName(this.enumerated(o)[index - 1]));
+    return this.getProperty(o, this.publicName(this.enumerated(o, index)));
   }
 
   // Errors.

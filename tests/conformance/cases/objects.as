@@ -31,3 +31,22 @@ keys = [];
 for (k in o) keys.push(k);
 keys.sort();
 trace("hidden", keys, o.propertyIsEnumerable("a"), o.propertyIsEnumerable("c"));
+// A for-in inside another, after most names are gone, leaves the outer one going through the rest.
+var many:Object = {};
+for (var mi:int = 0; mi < 40; mi++) many["m" + mi] = mi;
+var manyVisited:int = 0;
+var manyLeft:int = 0;
+var manyFirst:Boolean = true;
+for (var mk:String in many) {
+    manyVisited++;
+    if (manyFirst) {
+        manyFirst = false;
+        var all:Array = [];
+        for (var ma:String in many) all.push(ma);
+        for (var md:int = 0; md < all.length && all.length - md > 10; md++) {
+            if (all[md] != mk) delete many[all[md]];
+        }
+        for (var mc:String in many) manyLeft++;
+    }
+}
+trace("many", manyVisited, manyLeft, manyVisited == manyLeft);
