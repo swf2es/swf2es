@@ -51,7 +51,7 @@ const ENTITIES: Record<string, string> = {
   apos: "'",
   lt: "<",
   gt: ">",
-  nbsp: " ",
+  nbsp: "\u00a0",
 };
 
 export class XMLParser {
