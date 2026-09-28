@@ -56,7 +56,12 @@ export function matchArray(rt: Runtime, m: RegExpMatchArray): AsObject {
 function newRegExp(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
   const [pattern, options] = args;
   const o = cls.$it.instance();
-  if (pattern?.$re instanceof RegExp && options === undefined) {
+  // A RegExp with flags is a TypeError, as ECMA-262 15.10.4.1 has it.
+  if (pattern?.$re instanceof RegExp && options !== undefined) {
+    throw rt.error("TypeError", 1100);
+  }
+
+  if (pattern?.$re instanceof RegExp) {
     o.$source = pattern.$source;
     o.$extended = pattern.$extended;
     o.$re = new RegExp(pattern.$re.source, pattern.$re.flags);

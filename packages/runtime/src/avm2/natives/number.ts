@@ -56,14 +56,27 @@ for (const prefix of ["Math", "Number"]) {
     Math.atan2(rt.toNumber(y), rt.toNumber(x));
   numberNatives[`${prefix}.pow`] = (rt) => (x: Value, y: Value) => rt.toNumber(x) ** rt.toNumber(y);
   numberNatives[`${prefix}.random`] = plain(() => Math.random());
-  numberNatives[`${prefix}.max`] =
-    (rt) =>
-    (...args: Value[]) =>
-      args.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...args.map((a) => rt.toNumber(a)));
-  numberNatives[`${prefix}.min`] =
-    (rt) =>
-    (...args: Value[]) =>
-      args.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...args.map((a) => rt.toNumber(a)));
+  // Of two declared parameters, and any more, so that their length is 2.
+  numberNatives[`${prefix}.max`] = (rt) =>
+    function (x: Value, y: Value) {
+      // biome-ignore lint/complexity/noArguments: all of them, however many
+      const args = arguments;
+      if (args.length === 2) {
+        return Math.max(rt.toNumber(x), rt.toNumber(y));
+      }
+
+      return Math.max(...Array.from(args, (a: Value) => rt.toNumber(a)));
+    };
+  numberNatives[`${prefix}.min`] = (rt) =>
+    function (x: Value, y: Value) {
+      // biome-ignore lint/complexity/noArguments: all of them, however many
+      const args = arguments;
+      if (args.length === 2) {
+        return Math.min(rt.toNumber(x), rt.toNumber(y));
+      }
+
+      return Math.min(...Array.from(args, (a: Value) => rt.toNumber(a)));
+    };
 }
 
 numberNatives["Math.Math::_max"] = plain((x: number, y: number) => Math.max(x, y));

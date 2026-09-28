@@ -30,8 +30,18 @@ export const stringNatives: Natives = {
     },
   [`String#${AS3}::localeCompare`]: (rt) =>
     function (this: string, other: Value) {
+      // As String::Compare: the first difference of their character codes,
+      // else which is longer.
       const o = rt.toString(other);
-      return this < o ? -1 : this > o ? 1 : 0;
+      const n = Math.min(this.length, o.length);
+      for (let i = 0; i < n; i++) {
+        const d = this.charCodeAt(i) - o.charCodeAt(i);
+        if (d) {
+          return d;
+        }
+      }
+
+      return Math.sign(this.length - o.length);
     },
   [`String#${AS3}::slice`]: (rt) =>
     function (this: string, start: Value = 0, end: Value = 0x7fffffff) {
@@ -89,6 +99,11 @@ export const stringNatives: Natives = {
     return m ? matchArray(rt, m) : null;
   },
   "String.String::_split": (rt) => (s: string, delimiter: Value, limit: number) => {
+    // The empty string splits to itself, whatever the delimiter, as avmplus has it.
+    if (s === "") {
+      return rt.array(limit === 0 ? [] : [""]);
+    }
+
     if (delimiter?.$re instanceof RegExp) {
       return rt.array(s.split(delimiter.$re, limit >= 0 ? limit : undefined));
     }

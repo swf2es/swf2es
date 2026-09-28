@@ -1097,8 +1097,15 @@ export class Runtime {
    * too for one with elements, as Array.prototype, an Array, has them.
    */
   private protoOwn(p: AsObject, name: string): Value {
-    if (p.$a !== undefined) {
-      return this.getOwn(p, name);
+    const a: Value[] | undefined = p.$a;
+    if (a !== undefined) {
+      const c = name.charCodeAt(0);
+      if (c >= 0x30 && c <= 0x39) {
+        const i = arrayIndex(name);
+        if (i >= 0) {
+          return i in a ? a[i] : NOT_FOUND;
+        }
+      }
     }
 
     const d: Map<string, Value> | null | undefined = p.$d;
@@ -1227,6 +1234,11 @@ export class Runtime {
       return true;
     }
 
+    // A primitive's property cannot be deleted, as MethodEnv's delproperty has it.
+    if (typeof o !== "object" || o instanceof Namespace) {
+      throw this.error("ReferenceError", 1120, mn.name ?? "*", this.traitsOf(o).name);
+    }
+
     // E4X 11.3.1: delete x[list] is a TypeError, as in delete x.a.(b == 1).
     if ((mn.key as Value)?.$nodes !== undefined) {
       throw this.error("TypeError", 1119, "XMLList");
@@ -1349,6 +1361,13 @@ export class Runtime {
       const i = arrayIndex(name);
       if (i >= 0) {
         return traits.hasIndex(o, i);
+      }
+
+      // Another number, negative or fractional, is no index it has, as
+      // VectorBaseObject::hasAtomProperty has it, where a get throws.
+      const c = name.charCodeAt(0);
+      if (((c >= 0x30 && c <= 0x39) || c === 0x2d) && !Number.isNaN(Number(name))) {
+        return false;
       }
     }
 
@@ -1491,6 +1510,9 @@ export class Runtime {
     throw this.unsupported(`callstatic ${m}`);
   }
 
+  // The super operations, as MethodEnv's: by the base class's traits
+  // alone, a name they do not bind a ReferenceError, not a dynamic property.
+
   callSuper(sup: AsObject, o: Value, mn: Multiname, ...args: Value[]): Value {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
@@ -1498,14 +1520,18 @@ export class Runtime {
       return this.callBound(traits.proto[methodKey(b >> 3)], o, args);
     }
 
-    return this.callValue(this.getSuper(sup, o, mn), o, args, mn);
+    if (b === 0) {
+      throw this.error("ReferenceError", 1070, mn.name ?? "*", traits.name);
+    }
+
+    return this.callValue(this.getBound(o, traits, b, mn), o, args, mn);
   }
 
   getSuper(sup: AsObject, o: Value, mn: Multiname): Value {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
     if (b === 0) {
-      return this.getProperty(o, mn);
+      throw this.error("ReferenceError", 1069, mn.name ?? "*", traits.name);
     }
 
     return this.getBound(o, traits, b, mn);
@@ -1514,12 +1540,22 @@ export class Runtime {
   setSuper(sup: AsObject, o: Value, mn: Multiname, v: Value): void {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
-    if ((b & 7) === BIND_Set || (b & 7) === BIND_GetSet) {
-      traits.proto[methodKey((b >> 3) + 1)].call(o, v);
-      return;
+    const id = b >> 3;
+    switch (b & 7) {
+      case BIND_Set:
+      case BIND_GetSet:
+        traits.proto[methodKey(id + 1)].call(o, v);
+        return;
+      case BIND_Var:
+        o[slotKey(id)] = this.coerce(v, traits.slotType(id));
+        return;
+      case BIND_Method:
+        throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.name);
+      case 0:
+        throw this.error("ReferenceError", 1056, mn.name ?? "*", traits.name);
+      default:
+        throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.name);
     }
-
-    this.setProperty(o, mn, v);
   }
 
   constructSuper(sup: AsObject, o: Value, ...args: Value[]): void {
@@ -1528,6 +1564,11 @@ export class Runtime {
 
   construct(f: Value, ...args: Value[]): Value {
     if (f !== null && typeof f === "object") {
+      // A method closure is not a constructor, as MethodClosure's construct has it.
+      if (f.$closure) {
+        throw this.error("TypeError", 1064, "function");
+      }
+
       if (f.$it) {
         return this.constructClass(f, args);
       }
@@ -1646,6 +1687,7 @@ export class Runtime {
     if (!f.$prototype) {
       const p = this.objectTraits.instance();
       p.$d.set("constructor", f);
+      p.$dontEnum = new Set(["constructor"]);
       f.$prototype = p;
     }
 
@@ -1770,6 +1812,7 @@ export class Runtime {
     cls.$prototype = prototype;
     itraits.proto.$p = prototype;
     prototype.$d.set("constructor", cls);
+    prototype.$dontEnum = new Set(["constructor"]);
 
     const iscope = this.scope(scope, [cls], 0);
     for (const [d, factory] of desc.static.methods) {
@@ -2942,7 +2985,17 @@ export function stringToNumber(s: string): number {
     return t[0] === "-" ? -n : n;
   }
 
-  return Number(t);
+  const n = Number(t);
+  // As avmplus, a NUL ends the number, and one before any is none: a NUL
+  // makes JavaScript's NaN, so it is looked for only then.
+  if (Number.isNaN(n)) {
+    const nul = s.indexOf("\0");
+    if (nul > 0 && s.slice(0, nul).trim() !== "") {
+      return stringToNumber(s.slice(0, nul));
+    }
+  }
+
+  return n;
 }
 
 /** A number as AS3 writes it: avmplus' own formatting, not JavaScript's. */
