@@ -9,8 +9,9 @@
 //   node tests/programs/ab.ts <dir A> <dir B> [runs, 7]
 //
 // A snapshot holds the runtime's dist and the compiler's release test
-// build (packages/runtime/dist, packages/codegen/dist-test), so that a
-// change to either can be timed: snapshot, change, build, snapshot again.
+// build (packages/runtime/dist, packages/codegen/dist-test), with format's
+// dist and its dependencies for the runtime to import, so that a change to
+// any of them can be timed: snapshot, change, build, snapshot again.
 // AB_NODE_ARGS="--flag ..." runs both with those node options, such as V8
 // flags to measure a change against.
 // Run tests/programs first, for out/as3pb/ShellMain.abc and the builtins.
@@ -38,6 +39,22 @@ if (process.argv[2] === "--snapshot") {
   rmSync(dir, { recursive: true, force: true });
   cpSync(`${root}packages/runtime/dist`, join(dir, "runtime"), { recursive: true });
   cpSync(`${root}packages/codegen/dist-test`, join(dir, "codegen"), { recursive: true });
+  // The runtime imports format, and format pako and lzma1: a copy of each
+  // where the runtime's imports find them, as node resolves a package.
+  const format = join(dir, "node_modules/@swf2es/format");
+  cpSync(`${root}packages/format/dist`, join(format, "dist"), { recursive: true });
+  cpSync(`${root}packages/format/package.json`, join(format, "package.json"));
+  for (const dependency of ["pako", "lzma1"]) {
+    cpSync(
+      `${root}packages/format/node_modules/${dependency}`,
+      join(dir, "node_modules", dependency),
+      {
+        recursive: true,
+        dereference: true,
+      },
+    );
+  }
+
   console.log(`snapshot of the builds in ${dir}`);
   process.exit(0);
 }
