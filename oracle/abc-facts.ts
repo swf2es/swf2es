@@ -241,3 +241,10 @@ export function irProblem(): string | null {
   const result = testing.domainCheckIr() as string;
   return result.startsWith("checked") ? null : result;
 }
+
+/** The instructions of the domain's last ABC the emitter does not lower yet, or null. */
+export function loweringProblem(): string | null {
+  const js = testing.domainModule("") as string;
+  const missing = new Set([...js.matchAll(/rt\.unsupported\("([^"]*)"\)/g)].map((m) => m[1]));
+  return missing.size ? `not lowered: ${[...missing].sort().join(", ")}` : null;
+}

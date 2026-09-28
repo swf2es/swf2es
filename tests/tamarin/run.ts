@@ -17,6 +17,7 @@ import {
   abcdumpFacts,
   compareFacts,
   irProblem,
+  loweringProblem,
   swf2esFacts,
   typedErrors,
   verifyErrors,
@@ -81,7 +82,7 @@ for (const r of results) {
     // otherwise every method the scripts can run is verified with types, and
     // any other body structurally.
     const typed = typedErrors(builtins, abc);
-    const ir = irProblem();
+    const ir = irProblem() ?? loweringProblem();
     if (ir) {
       problems.push(`${r.name}: IR: ${ir}`);
     }

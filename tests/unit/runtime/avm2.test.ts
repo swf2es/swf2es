@@ -41,3 +41,20 @@ test("error messages are the release player's, or the debugger player's with its
     "Error #1065: Variable x is not defined.",
   );
 });
+
+test("domain memory loads and stores little-endian, and rejects addresses outside it", () => {
+  const rt = avm2.createRuntime();
+  rt.memory = new DataView(new ArrayBuffer(16));
+  rt.si32(-2, 0);
+  rt.si8(0x1ff, 4);
+  rt.si16(0x12345, 6);
+  rt.sf64(1.5, 8);
+  assert.deepEqual(
+    [rt.li32(0), rt.li8(0), rt.li8(4), rt.li16(6), rt.lf64(8)],
+    [-2, 0xfe, 0xff, 0x2345, 1.5],
+  );
+  rt.sf32(0.1, 12);
+  assert.equal(rt.lf32(12), Math.fround(0.1));
+  assert.throws(() => rt.li32(13), /Error #1506/);
+  assert.throws(() => rt.si8(0, -1), /Error #1506/);
+});

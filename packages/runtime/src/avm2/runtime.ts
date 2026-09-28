@@ -281,6 +281,8 @@ export class Runtime {
   private readonly globals = new Map<string, GlobalName[]>();
   private readonly classRefs = new Map<string, ClassRef>();
   private readonly vectorRefs = new Map<TypeRef, VectorRef>();
+  /** The domain's memory, for the domain memory instructions, once a ByteArray is set as it. */
+  memory: DataView | null = null;
   /** The hashes of the modules loaded, in order. */
   private readonly loaded: string[] = [];
   /** The builtin classes' traits, made before their classes so the bootstrap can refer to them. */
@@ -355,7 +357,14 @@ export class Runtime {
     let name = mn.name;
     if (mn.runtimeName) {
       const part = parts[k];
-      name = typeof part === "string" ? part : this.toString(part);
+      if (part?.$local !== undefined) {
+        // A QName names its own namespace and local name.
+        namespaces = [part.$ns ?? publicNs];
+        versions = [255];
+        name = part.$local;
+      } else {
+        name = typeof part === "string" ? part : this.toString(part);
+      }
     }
 
     const kind =
@@ -824,7 +833,8 @@ export class Runtime {
 
   /** A value's AS3 prototype object: its class's prototype, or its own link for a prototype object. */
   protoOf(o: Value): AsObject | null {
-    if (typeof o === "object" && o !== null) {
+    // A namespace is the runtime's own object: its prototype is its class's.
+    if (typeof o === "object" && o !== null && !(o instanceof Namespace)) {
       return o.$p;
     }
 
@@ -1224,6 +1234,11 @@ export class Runtime {
 
   refOf(cls: AsObject): TypeRef {
     const name: string = cls.$it.name;
+    // The builtins a coercion converts to go by name, as a module names them.
+    if (BUILTIN_REFS.has(name)) {
+      return name;
+    }
+
     const i = name.lastIndexOf("::");
     const ns = i < 0 ? publicNs : namespace(NS_Public, name.slice(0, i));
     const ref = this.cls(ns, i < 0 ? name : name.slice(i + 2));
@@ -1615,6 +1630,11 @@ export class Runtime {
     return `Error #${id}: ${text}`;
   }
 
+  /** As MethodEnv::argcError: ArgumentError 1063, with the count required and the count given. */
+  argumentCountError(required: number, given: number): Value {
+    return this.error("ArgumentError", 1063, "function", required, given);
+  }
+
   nullError(v: Value): Value {
     return this.error("TypeError", v === undefined ? 1010 : 1009);
   }
@@ -1652,6 +1672,70 @@ export class Runtime {
 
   unsupported(what: string): Error {
     return new Error(`swf2es: ${what} is not supported yet`);
+  }
+
+  // Domain memory, as avmplus' MOPS: little-endian, an address outside the
+  // memory a RangeError.
+
+  /** The domain memory's view for `size` bytes at `address`, which it must hold. */
+  private mops(address: Value, size: number): number {
+    const a = this.toInt(address);
+    const memory = this.memory;
+    if (!memory || a < 0 || a + size > memory.byteLength) {
+      throw this.error("RangeError", 1506);
+    }
+
+    return a;
+  }
+
+  li8(address: Value): number {
+    return (this.memory as DataView).getUint8(this.mops(address, 1));
+  }
+
+  li16(address: Value): number {
+    return (this.memory as DataView).getUint16(this.mops(address, 2), true);
+  }
+
+  li32(address: Value): number {
+    return (this.memory as DataView).getInt32(this.mops(address, 4), true);
+  }
+
+  lf32(address: Value): number {
+    return (this.memory as DataView).getFloat32(this.mops(address, 4), true);
+  }
+
+  lf64(address: Value): number {
+    return (this.memory as DataView).getFloat64(this.mops(address, 8), true);
+  }
+
+  si8(value: Value, address: Value): void {
+    (this.memory as DataView).setUint8(this.mops(address, 1), this.toInt(value));
+  }
+
+  si16(value: Value, address: Value): void {
+    (this.memory as DataView).setUint16(this.mops(address, 2), this.toInt(value), true);
+  }
+
+  si32(value: Value, address: Value): void {
+    (this.memory as DataView).setInt32(this.mops(address, 4), this.toInt(value), true);
+  }
+
+  sf32(value: Value, address: Value): void {
+    (this.memory as DataView).setFloat32(this.mops(address, 4), this.toNumber(value), true);
+  }
+
+  sf64(value: Value, address: Value): void {
+    (this.memory as DataView).setFloat64(this.mops(address, 8), this.toNumber(value), true);
+  }
+
+  // E4X, not implemented yet.
+
+  getDescendants(_o: Value, _mn: Multiname): Value {
+    throw this.unsupported("XML's descendants");
+  }
+
+  setDefaultXmlNamespace(_ns: Value): void {
+    throw this.unsupported("default xml namespace");
   }
 
   checkFilter(v: Value): void {
@@ -1723,6 +1807,8 @@ export interface ClassHook {
 function defaultPrint(line: string): void {
   (globalThis as { console?: { log(line: string): void } }).console?.log(line);
 }
+
+const BUILTIN_REFS = new Set(["int", "uint", "Number", "String", "Boolean", "Object"]);
 
 /** Not a property: distinct from undefined, which a property can hold. */
 export const NOT_FOUND = Symbol("not found");
