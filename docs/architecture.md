@@ -138,13 +138,52 @@ Each method goes through the same steps, in `codegen`:
 ### Generated code
 
 Each ABC compiles to one ES module. Every method becomes a JavaScript
-function whose registers are `let` variables, and at first a dispatcher
-runs its blocks: `for (;;) switch (b) { case 0: ...; b = 2; continue; }`.
-It handles any control flow, and the structured form of step 4 replaces it
-where the code is reducible. A method with exception handlers wraps the
-loop in `try`/`catch`; the catch picks the handler covering the throwing
-instruction, matches the exception's type, and continues at its block with
-the exception as the only stack value, or rethrows.
+function whose registers are `let` variables, and whose blocks are
+structured JavaScript, as Norman Ramsey's "Beyond Relooper" translates a
+reducible control-flow graph by its dominator tree:
+
+- a loop header (the target of a back edge) is `L3: for (;;) { ... }`;
+- a merge node (more than one forward edge in) is a labelled block,
+  `L5: { ... }`, followed by its own code;
+- a branch to a loop header is `continue L3`, to a merge node `break L5`,
+  and to a block it is the only way into, that block's code in place;
+- every path ends in a branch, return or throw, so nothing falls out of a
+  loop or through a case.
+
+A block starts only where something branches to, so a conditional branch
+may be in the middle of one; it is then an `if` whose body branches, and
+the block goes on after it.
+
+An exception handler's block counts as entered from every block its
+range covers, so it is a child of the block that dominates them all, and
+is written as a merge node is, with a `try` inside the labelled block:
+`L7: { try { ... } catch (e) { ...; break L7; } }`, then the handler's
+code; how its `catch` finds the handler is below.
+
+Where that translation does not apply, a dispatcher runs the blocks:
+`for (;;) switch (b) { case 0: ...; b = 2; continue; }`. It handles any
+control flow: an irreducible graph (a loop entered in more than one
+place), or handlers whose `try`s cannot enclose the code they cover, in
+the order avmplus looks for them. With handlers, the whole loop is in
+`try`/`catch`; the catch picks the handler covering the throwing
+instruction, matches the exception's type, and continues at its block
+with the exception as the only stack value, or rethrows.
+
+Stack registers that only copy a local are not written: a `getlocal`
+leaves its stack register a copy, read as the local itself, until the local
+changes or a branch needs the stack as it is. A value the next instruction
+only moves to a local (a `setlocal`) goes to the local straight, and a
+conversion that changes nothing writes no code.
+
+Each module has a source map (version 3) from the ABC's `debugfile` and
+`debugline`, where an ABC compiled with them has them (asc's `-d`): the
+method emitter marks where the code for each AS3 line starts as it writes
+it, and the map finds the marks' lines and columns in the module. A block
+starts with the line the instructions before it in the ABC left, and code
+after a block written in place inside another goes back to the other's.
+With it, stacks name AS3 lines and a debugger steps through the AS3;
+`node tests/conformance/debug.ts <case> --lines` compiles a case with `-d`
+to try it.
 
 The IR's types decide the JavaScript from the start where that is simple:
 `int` arithmetic ends in `| 0`, `uint` in `>>> 0`, a slot bound early is a
@@ -245,13 +284,20 @@ registers and the chain it captured are passed to the runtime together
 when it looks a name up or creates a function or class, with a bit per
 scope for the with scopes.
 
-A method with exception handlers runs its dispatcher inside `try`. The
-handlers' ranges split the code into regions, and the variable `t` holds
-the region of the instruction running, set only where it changes. The
-`catch` tries the handlers covering that region in the order of the ABC's
-table, as avmplus does. The first one the exception's type matches gets
-the exception as its only stack value, and the dispatcher goes on at its
-block. With no match, the exception goes on to the caller.
+In a method with exception handlers, the handlers' ranges split the code
+into regions, and the variable `t` holds the region of the instruction
+running, set only where it changes. Each handler's `try` encloses the code
+its range covers, and maybe other code; its `catch` takes the exception
+only if `t` is one of its regions and the exception's type matches, and
+otherwise rethrows it to the next `try` out. The `try`s covering each
+region are open innermost first in the order of the ABC's table, so the
+handler that gets an exception is the first in the table that covers the
+instruction and matches, as avmplus finds it. It gets the exception as its
+only stack value; with no match, the exception goes on to the caller. The
+emitter checks that order as it writes each block, and writes the method
+with the dispatcher where it does not hold: one `try`/`catch` around the
+loop, whose `catch` tries the handlers covering `t`'s region in the
+table's order and goes on at the first match's block.
 
 ### The runtime and the standard library
 

@@ -47,6 +47,7 @@ export class ModuleEmitter {
   module(hashes: string[]): void {
     const out = this.out;
     out.reset();
+    this.methods.map.reset();
     out.text("export default function (rt) {\n");
     this.names();
     this.methods.types.length = 0;
@@ -71,6 +72,12 @@ export class ModuleEmitter {
     out.text("],\n    activations: [");
     this.activations();
     out.text("],\n  });\n  return A;\n}\n");
+  }
+
+  /** The source map of the module just written, as JSON, into `map`. */
+  sourceMap(map: Output): void {
+    const methods = this.methods;
+    methods.map.write(map, this.out, this.domain.abcs[this.index].pool, methods.base);
   }
 
   /** N: the pool's namespaces; S: its namespace sets; M: its multinames. */

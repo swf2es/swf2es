@@ -14,13 +14,17 @@ const rt = {
   unreachable: () => new Error("unreachable"),
 };
 
-/** The script initializer of `abc`, compiled and run with `this` as its global; its result. */
-function run(abc: Uint8Array): unknown {
+/** The script initializer of `abc` as JavaScript. */
+function emit(abc: Uint8Array): string {
   testing.domainReset(50);
   testing.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
   assert.equal(testing.domainAdd(abc, false), 0);
-  const js = testing.domainEmit(0) as string;
-  return new Function("rt", `return ${js}`)(rt).call({});
+  return testing.domainEmit(0) as string;
+}
+
+/** The script initializer of `abc`, compiled and run with `this` as its global; its result. */
+function run(abc: Uint8Array): unknown {
+  return new Function("rt", `return ${emit(abc)}`)(rt).call({});
 }
 
 const PUSHBYTE = 0x24;
@@ -33,6 +37,14 @@ const ADD_I = 0xc5;
 const DECLOCAL_I = 0xc3;
 const RETURNVALUE = 0x48;
 const THROW = 0x03;
+const POP = 0x29;
+const PUSHNAN = 0x28;
+const CONVERT_I = 0x73;
+const JUMP = 0x10;
+const IFTRUE = 0x11;
+const IFFALSE = 0x12;
+const PUSHTRUE = 0x26;
+const PUSHFALSE = 0x27;
 const GETLOCAL1 = 0xd1;
 const GETLOCAL2 = 0xd2;
 const GETLOCAL3 = 0xd3;
@@ -79,12 +91,228 @@ test("a loop runs through its blocks until its branch falls through", { skip }, 
   assert.equal(run(script(code)), 55);
 });
 
+test("a loop is a labelled for (;;), its back edge a continue, and no dispatcher", { skip }, () => {
+  // As the loop above: sum = 0; i = 10; do { sum += i; i-- } while (i > 0); return sum
+  const code = [
+    PUSHBYTE,
+    0,
+    SETLOCAL1,
+    PUSHBYTE,
+    10,
+    SETLOCAL2,
+    LABEL,
+    GETLOCAL1,
+    GETLOCAL2,
+    ADD_I,
+  ];
+  const js = emit(
+    script([
+      ...code,
+      SETLOCAL1,
+      DECLOCAL_I,
+      2,
+      GETLOCAL2,
+      PUSHBYTE,
+      0,
+      IFGT,
+      ...s24(-14),
+      GETLOCAL1,
+      RETURNVALUE,
+    ]),
+  );
+  assert.match(js, /L1: for \(;;\) \{/);
+  assert.match(js, /continue L1;/);
+  assert.doesNotMatch(js, /switch \(b\)/);
+  // The locals are read and written straight, with no stack registers between.
+  assert.match(js, /l1 = l1 \+ l2 \| 0;\n {4}l2 = l2 - 1 \| 0;/);
+});
+
+test("if and else meet again after a labelled block", { skip }, () => {
+  // 0 pushtrue; 1 iffalse +6 to 11; 5 pushbyte 1; 7 jump +2 to 13; 11 pushbyte 2; 13 returnvalue.
+  const code = [
+    PUSHTRUE,
+    IFFALSE,
+    ...s24(6),
+    PUSHBYTE,
+    1,
+    JUMP,
+    ...s24(2),
+    PUSHBYTE,
+    2,
+    RETURNVALUE,
+  ];
+  // The stack value merges, so each side sets it and both go on to its merge block.
+  const js = emit(script(code));
+  assert.match(js, /L\d+: \{/);
+  assert.doesNotMatch(js, /switch \(b\)/);
+  assert.equal(run(script(code)), 1);
+});
+
+test("code after an if goes on with its own register types, not the if body's", { skip }, () => {
+  // NaN stays on the stack past if (!true) { pop; return 1 }, then int(it): the
+  // if body, written in place, pushes an int where the NaN was, but after it the
+  // NaN is still there, a Number.
+  // 0 pushnan; 1 pushtrue; 2 iffalse +2 to 8; 6 convert_i; 7 returnvalue;
+  // 8 pop; 9 pushbyte 1; 11 returnvalue.
+  const code = [
+    PUSHNAN,
+    PUSHTRUE,
+    IFFALSE,
+    ...s24(2),
+    CONVERT_I,
+    RETURNVALUE,
+    POP,
+    PUSHBYTE,
+    1,
+    RETURNVALUE,
+  ];
+  assert.equal(run(script(code)), 0);
+});
+
+test("a value an if body moves to a local leaves the code after the if as it is", { skip }, () => {
+  // l1 = 1; if (false) l1 = 7; else { l1 = 3 } return l1: the if body, written in
+  // place, ends putting 7 straight in l1, and the else still pushes its 3.
+  // 0 pushbyte 1; 2 setlocal1; 3 pushfalse; 4 iftrue +7 to 15; 8 pushbyte 3;
+  // 10 setlocal1; 11 jump +3 to 18; 15 pushbyte 7; 17 setlocal1; 18 getlocal1; 19 returnvalue.
+  const code = [
+    PUSHBYTE,
+    1,
+    SETLOCAL1,
+    PUSHFALSE,
+    IFTRUE,
+    ...s24(7),
+    PUSHBYTE,
+    3,
+    SETLOCAL1,
+    JUMP,
+    ...s24(3),
+    PUSHBYTE,
+    7,
+    SETLOCAL1,
+    GETLOCAL1,
+    RETURNVALUE,
+  ];
+  const js = emit(script(code));
+  assert.match(js, /l1 = 3;/);
+  assert.equal(run(script(code)), 3);
+});
+
+test("an irreducible loop keeps the dispatcher, and runs the same", { skip }, () => {
+  // n = 3; if (true) goto B; A: n--; B: if (n > 0) goto A; return n. A and B are
+  // a loop with two ways in, from the entry to each, so neither dominates the other.
+  // 0 pushbyte 3; 2 setlocal1; 3 pushtrue; 4 iftrue +10 to 18;
+  // 8 label; 9 getlocal1; 10 pushbyte 1; 12 subtract_i; 13 setlocal1; 14 jump +0 to 18;
+  // 18 getlocal1; 19 pushbyte 0; 21 ifgt -17 to 8; 25 getlocal1; 26 returnvalue.
+  const code = [
+    PUSHBYTE,
+    3,
+    SETLOCAL1,
+    PUSHTRUE,
+    IFTRUE,
+    ...s24(10),
+    LABEL,
+    GETLOCAL1,
+    PUSHBYTE,
+    1,
+    SUBTRACT_I,
+    SETLOCAL1,
+    JUMP,
+    ...s24(0),
+    GETLOCAL1,
+    PUSHBYTE,
+    0,
+    IFGT,
+    ...s24(-17),
+    GETLOCAL1,
+    RETURNVALUE,
+  ];
+  assert.match(emit(script(code)), /switch \(b\)/);
+  assert.equal(run(script(code)), 0);
+});
+
 test("a throw in a handler's range runs the handler, with the exception on the stack", {
   skip,
 }, () => {
   // 0: pushbyte 7; 2: throw; 3: returnvalue, the handler of 0 up to 3, for any type.
   const code = [PUSHBYTE, 7, THROW, RETURNVALUE];
-  assert.equal(run(script(code, { exceptions: [[0, 3, 3, 0, 0]] })), 7);
+  const abc = script(code, { exceptions: [[0, 3, 3, 0, 0]] });
+  assert.equal(run(abc), 7);
+  // A structured try, the handler's code after its labelled block.
+  const js = emit(abc);
+  assert.match(js, /L\d+: \{\n {2}try \{/);
+  assert.doesNotMatch(js, /switch \(b\)/);
+});
+
+test("of two handlers covering a throw, the table's first takes it, as the inner try", {
+  skip,
+}, () => {
+  // 0 pushbyte 7; 2 throw; 3 pop; 4 pushbyte 1; 6 returnvalue; 7 pop; 8 pushbyte 2; 10 returnvalue.
+  const code = [PUSHBYTE, 7, THROW, POP, PUSHBYTE, 1, RETURNVALUE, POP, PUSHBYTE, 2, RETURNVALUE];
+  const first = script(code, {
+    exceptions: [
+      [0, 3, 3, 0, 0],
+      [0, 3, 7, 0, 0],
+    ],
+  });
+  const second = script(code, {
+    exceptions: [
+      [0, 3, 7, 0, 0],
+      [0, 3, 3, 0, 0],
+    ],
+  });
+  assert.equal(run(first), 1);
+  assert.equal(run(second), 2);
+  assert.doesNotMatch(emit(first), /switch \(b\)/);
+  assert.doesNotMatch(emit(second), /switch \(b\)/);
+});
+
+test("an exception in a handler's code goes to the handler covering that", { skip }, () => {
+  // 0 pushbyte 7; 2 throw; 3 pop; 4 pushbyte 8; 6 throw; 7 returnvalue. The
+  // handler at 3 covers 0 up to 3; the one at 7 covers 0 up to 7, the first's code too.
+  const code = [PUSHBYTE, 7, THROW, POP, PUSHBYTE, 8, THROW, RETURNVALUE];
+  const abc = script(code, {
+    exceptions: [
+      [0, 3, 3, 0, 0],
+      [0, 7, 7, 0, 0],
+    ],
+  });
+  assert.equal(run(abc), 8);
+  assert.doesNotMatch(emit(abc), /switch \(b\)/);
+});
+
+test("a handler that goes back into its range first keeps the dispatcher, and runs the same", {
+  skip,
+}, () => {
+  // n = 1; M: if (n > 0) { n = 0; throw 9 } return n; the handler at 19, of 0
+  // up to 19, pops and jumps back to M: M is reached through the handler first.
+  // 0 pushbyte 1; 2 setlocal1; 3 label; 4 getlocal1; 5 pushbyte 0; 7 ifgt +2 to 13;
+  // 11 getlocal1; 12 returnvalue; 13 pushbyte 0; 15 setlocal1; 16 pushbyte 9; 18 throw;
+  // 19 pop; 20 jump -21 to 3.
+  const code = [
+    PUSHBYTE,
+    1,
+    SETLOCAL1,
+    LABEL,
+    GETLOCAL1,
+    PUSHBYTE,
+    0,
+    IFGT,
+    ...s24(2),
+    GETLOCAL1,
+    RETURNVALUE,
+    PUSHBYTE,
+    0,
+    SETLOCAL1,
+    PUSHBYTE,
+    9,
+    THROW,
+    POP,
+    JUMP,
+    ...s24(-21),
+  ];
+  const abc = script(code, { exceptions: [[0, 19, 19, 0, 0]] });
+  assert.match(emit(abc), /switch \(b\)/);
+  assert.equal(run(abc), 0);
 });
 
 test("a throw past a handler's range goes on to the caller", { skip }, () => {
@@ -160,3 +388,76 @@ function factoryAt(factories: string, index: number): string {
 
   return "";
 }
+
+const DEBUGLINE = 0xf0;
+const DEBUGFILE = 0xf1;
+
+/** A source map's mappings, decoded: per generated line, its segments' source indices and lines, absolute. */
+function mappings(map: string): [number, number][][] {
+  const digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let source = 0;
+  let line = 0;
+  return map.split(";").map((segments) =>
+    segments
+      ? segments.split(",").map((segment) => {
+          const fields: number[] = [];
+          let value = 0;
+          let shift = 0;
+          for (const c of segment) {
+            const d = digits.indexOf(c);
+            value |= (d & 31) << shift;
+            shift += 5;
+            if (!(d & 32)) {
+              fields.push(value & 1 ? -(value >> 1) : value >> 1);
+              value = 0;
+              shift = 0;
+            }
+          }
+
+          source += fields[1];
+          line += fields[2];
+          return [source, line] as [number, number];
+        })
+      : [],
+  );
+}
+
+test("a module's source map has each statement's line, from debugfile and debugline", {
+  skip,
+}, () => {
+  // debugfile "x"; debugline 7; l1 = 5; debugline 9; return l1.
+  const code = [
+    DEBUGFILE,
+    1,
+    DEBUGLINE,
+    7,
+    PUSHBYTE,
+    5,
+    SETLOCAL1,
+    DEBUGLINE,
+    9,
+    GETLOCAL1,
+    RETURNVALUE,
+  ];
+  testing.domainReset(50);
+  testing.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
+  assert.equal(testing.domainAdd(script(code), false), 0);
+  const js = (testing.domainModule("") as string).split("\n");
+  const map = JSON.parse(testing.domainSourceMap() as string);
+  assert.deepEqual(map.sources, ["x"]);
+  const lines = mappings(map.mappings);
+  // The source line (zero-based) the generated line starts in: its last segment's, or the line before's.
+  const lineOf = (g: number): number => {
+    for (let at = g; at >= 0; at--) {
+      const segments = lines[at] ?? [];
+      if (segments.length) {
+        return segments[segments.length - 1][1];
+      }
+    }
+
+    return -1;
+  };
+
+  assert.equal(lineOf(js.findIndex((l) => l.trim() === "l1 = 5;")), 6);
+  assert.equal(lineOf(js.findIndex((l) => l.trim() === "return l1;")), 8);
+});

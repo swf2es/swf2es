@@ -8,6 +8,7 @@ import { readConstantPool } from "./abc/pool";
 import { PADDING, Reader } from "./abc/reader";
 import { MethodEmitter } from "./emit/method";
 import { ModuleEmitter } from "./emit/module";
+import { Output } from "./emit/output";
 import {
   IR_CallGetter,
   IR_CallInterface,
@@ -538,7 +539,17 @@ export function domainModule(hashes: string = ""): string {
   const emitter = new ModuleEmitter(domain, <u32>(domain.abcs.length - 1));
   emitter.module(hashes.length ? hashes.split("\n") : []);
   const out = emitter.out;
+  const map = new Output();
+  emitter.sourceMap(map);
+  lastSourceMap = String.UTF8.decodeUnsafe(changetype<usize>(map.bytes), map.length);
   return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
+}
+
+let lastSourceMap = "";
+
+/** The source map of the module domainModule wrote last, as JSON: its code's AS3 lines, from debugline. */
+export function domainSourceMap(): string {
+  return lastSourceMap;
 }
 
 /**
