@@ -34,3 +34,22 @@ holes[1] = 2;
 Array.prototype[0] = 99;
 trace("holes", holes.map(function(x:*, i:int, arr:Array):* { return x; }), holes.every(function(x:*, i:int, arr:Array):Boolean { return x > 0; }));
 delete Array.prototype[0];
+// A for-in started inside another over the same array leaves the outer one's names where they were.
+var nested:Array = [10, 20, 30];
+var nestedSeen:Array = [];
+for (var nk:String in nested) {
+    nestedSeen.push(nk);
+    if (nk == "0") {
+        delete nested[0];
+        for (var nj:String in nested) {}
+    }
+}
+trace("nested for-in", nestedSeen.join(","));
+// And over an object, whose names are counted, in no order the case depends on.
+var nestedObject:Object = {a: 1, b: 2, c: 3};
+var nestedCount:int = 0;
+for (var ok:String in nestedObject) {
+    nestedCount++;
+    for (var oj:String in nestedObject) {}
+}
+trace("nested object for-in", nestedCount);

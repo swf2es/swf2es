@@ -309,8 +309,12 @@ export class Runtime {
   /** Method closures, by receiver, so that o.f === o.f. */
   private readonly closures = new WeakMap<object, Map<number, AsObject>>();
   private readonly builtinTraitsByName = new Map<string, Traits>();
-  /** The names a for-in is going through, per object, taken when it starts. */
-  private readonly enumerating = new WeakMap<object, string[]>();
+  /**
+   * The names for-ins go through, per object, and which they are: each at
+   * the place it first had, as in avmplus' hashtable, so that a for-in
+   * started inside another does not move the outer one's names.
+   */
+  private readonly enumerating = new WeakMap<object, { names: string[]; known: Set<string> }>();
   /** Special traits: an activation's or a catch scope's, by descriptor. */
   private readonly scopeTraits = new WeakMap<object, Traits>();
   readonly specialized = new Map<AsObject, AsObject>();
@@ -1680,13 +1684,31 @@ export class Runtime {
     return names;
   }
 
+  /**
+   * The names of `o` for-ins go through: when one starts, those it has
+   * now, the ones it had before where they were and new ones after them.
+   */
+  private enumeration(o: AsObject, starting: boolean): string[] {
+    let e = this.enumerating.get(o);
+    if (!e) {
+      const names = this.names(o);
+      e = { names, known: new Set(names) };
+      this.enumerating.set(o, e);
+    } else if (starting) {
+      for (const name of this.names(o)) {
+        if (!e.known.has(name)) {
+          e.known.add(name);
+          e.names.push(name);
+        }
+      }
+    }
+
+    return e.names;
+  }
+
   /** The index after `index` of an enumerable name of `o`, or 0. */
   private nextIndex(o: AsObject, index: number): number {
-    let names = index === 0 ? undefined : this.enumerating.get(o);
-    if (!names) {
-      names = this.names(o);
-      this.enumerating.set(o, names);
-    }
+    const names = this.enumeration(o, index === 0);
 
     // A name deleted since the for-in started is skipped.
     for (let i = index; i < names.length; i++) {
@@ -1712,13 +1734,7 @@ export class Runtime {
 
   /** The for-in's names of `o`, as nextIndex took them. */
   private enumerated(o: AsObject): string[] {
-    let names = this.enumerating.get(o);
-    if (!names) {
-      names = this.names(o);
-      this.enumerating.set(o, names);
-    }
-
-    return names;
+    return this.enumeration(o, false);
   }
 
   hasNext2(o: Value, index: number): [boolean, Value, number] {
