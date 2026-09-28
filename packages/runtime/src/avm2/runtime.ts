@@ -256,13 +256,15 @@ export class VectorRef {
  * The names for-ins go through over one object, each in a slot, as in
  * avmplus' hashtable. A name keeps its slot while it is there, so a for-in
  * started inside another never moves the outer one's names. One deleted
- * leaves its slot, which the outer one skips and a new name takes when a
- * for-in next starts; only with none free does the list grow. So it is at
+ * stays in its slot, which the outer one skips, until a for-in next starts:
+ * then its slot is free, and it takes one again only if it is back, as a
+ * new name, which takes a free slot; only with none free does the list grow. So it is at
  * most as long as the most names the object had at once, as avmplus'
  * table, and nothing a for-in goes through is ever moved or dropped.
  */
 interface Enumeration {
-  names: string[];
+  /** The name in each slot, null in one free. */
+  names: (string | null)[];
   /** Each name's slot. */
   slot: Map<string, number>;
 }
@@ -1699,7 +1701,7 @@ export class Runtime {
    * The names of `o` for a for-in starting over it: those it had before in
    * their slots, and new ones in the slots of those gone, then after them.
    */
-  private startEnumeration(o: AsObject): string[] {
+  private startEnumeration(o: AsObject): (string | null)[] {
     const names = this.names(o);
     let e = this.enumerating.get(o);
     if (!e) {
@@ -1710,8 +1712,11 @@ export class Runtime {
 
     const free: number[] = [];
     e.names.forEach((name, i) => {
-      if (!this.stillThere(o, name)) {
+      if (name === null) {
+        free.push(i);
+      } else if (!this.stillThere(o, name)) {
         e.slot.delete(name);
+        e.names[i] = null;
         free.push(i);
       }
     });
@@ -1740,7 +1745,7 @@ export class Runtime {
     // A name deleted since the for-in started is skipped.
     for (let i = index; i < names.length; i++) {
       const name = names[i];
-      if (!o.$dontEnum?.has(name) && this.stillThere(o, name)) {
+      if (name !== null && !o.$dontEnum?.has(name) && this.stillThere(o, name)) {
         return i + 1;
       }
     }
