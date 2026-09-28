@@ -12,6 +12,10 @@ package {
 }
 namespace zz = "urn:test";
 class Named { zz var value:int = 42; }
+class Holder { public static var C:Class = QName; public static var X:Class = XML; }
+function indirect(c:*, value:String):* { return c(value); }
+function aliased():* { return new Holder.C("x"); }
+function aliasedXML():* { return new Holder.X("<a/>"); }
 
 function probe(name:String, f:Function):void {
   try { trace(name, f()); } catch (e:Error) { trace(name, "error", e.errorID); }
@@ -35,6 +39,11 @@ probe("dxns after it returns", setsNone);
 probe("dxns of a class method", function():* {
   default xml namespace = "http://caller/";
   return "[" + new Scoped().uri() + "]";
+});
+probe("dxns of an indirect call and an aliased class", function():* {
+  default xml namespace = "http://caller/";
+  return [indirect(QName, "x").uri, indirect(XML, "<a/>").namespace().uri, aliased().uri,
+    aliasedXML().namespace().uri, Holder.C("y").uri].join("|");
 });
 probe("dxns after a throw", function():* {
   try {

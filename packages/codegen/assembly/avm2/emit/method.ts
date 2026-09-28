@@ -240,16 +240,19 @@ export class MethodEmitter {
     );
   }
 
-  /** Note whether instruction i, `op` on register `src`, can see the default XML namespace. */
-  notesDxns(i: u32, op: u16, src: i32): void {
+  /**
+   * Note whether instruction i, `op` on register `src`, can see the default
+   * XML namespace. A call or construction the linker did not bind may reach
+   * XML's, XMLList's or QName's class through any name, as a class held in
+   * a variable, so each counts; a call of a value, when the value may be a
+   * class.
+   */
+  notesDxns(op: u16, src: i32): void {
     switch (op) {
       case ops.OP_getproperty:
       case ops.OP_setproperty:
       case ops.OP_initproperty:
       case ops.OP_deleteproperty:
-      case ops.OP_callproperty:
-      case ops.OP_callproplex:
-      case ops.OP_callpropvoid:
       case ops.OP_getdescendants:
         if (this.mayBeXml(src)) {
           this.seesDxns = true;
@@ -262,12 +265,16 @@ export class MethodEmitter {
         }
 
         break;
-      case ops.OP_constructprop:
-        if (this.mayBeXml(src) || this.domain.isE4XName(this.index, this.ir.a[i])) {
+      case ops.OP_call:
+        if (this.mayBeXml(src) || this.regType[src] === this.domain.classType) {
           this.seesDxns = true;
         }
 
         break;
+      case ops.OP_callproperty:
+      case ops.OP_callproplex:
+      case ops.OP_callpropvoid:
+      case ops.OP_constructprop:
       case ops.OP_construct:
       case ops.OP_newfunction:
       case ops.OP_newclass:
@@ -1696,7 +1703,7 @@ export class MethodEmitter {
     const a = ir.a[i];
     const src = ir.src[i];
     if (!this.seesDxns) {
-      this.notesDxns(i, op, src);
+      this.notesDxns(op, src);
     }
     switch (op) {
       case ops.OP_pushscope:
