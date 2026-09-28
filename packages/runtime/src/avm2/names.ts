@@ -60,14 +60,52 @@ export class Multiname {
    * multiname has the same shape.
    */
   key: unknown = undefined;
+  /** The local name, or undefined until a key's is first needed. */
+  private local: string | null | undefined;
+  /** How a key's name is made, as the object's string, when a lookup first needs it. */
+  private nameOf: ((key: unknown) => string) | null = null;
 
   constructor(
     readonly kind: number,
     readonly namespaces: Namespace[],
     readonly versions: number[],
-    readonly name: string | null,
+    name: string | null,
     readonly attribute: boolean,
-  ) {}
+  ) {
+    this.local = name;
+  }
+
+  /**
+   * A runtime name that was an object: a Dictionary keys by the object
+   * itself, and anything else by its string, which is made only then, as
+   * avmplus converts it only for an object that is not a Dictionary.
+   */
+  static keyed(
+    kind: number,
+    namespaces: Namespace[],
+    versions: number[],
+    key: object,
+    attribute: boolean,
+    nameOf: (key: unknown) => string,
+  ): Multiname {
+    const mn = new Multiname(kind, namespaces, versions, null, attribute);
+    mn.key = key;
+    mn.local = undefined;
+    mn.nameOf = nameOf;
+    return mn;
+  }
+
+  /** The local name, null for any name. */
+  get name(): string | null {
+    const local = this.local;
+    if (local !== undefined) {
+      return local;
+    }
+
+    const name = (this.nameOf as (key: unknown) => string)(this.key);
+    this.local = name;
+    return name;
+  }
 
   /** Whether the name still needs a namespace from the stack. */
   get runtimeNs(): boolean {

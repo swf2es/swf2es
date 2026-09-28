@@ -62,3 +62,31 @@ for (var gk:* in got) gotKeys.push(typeof gk + ":" + (typeof gk == "object" ? go
 trace("amf back", gotKeys.sort().join(" "), got is Dictionary);
 var pair:Array = amfBack([mixed, ka]);
 trace("amf key identity", pair[0][pair[1]]);
+// An object key is not made a string for a Dictionary, whatever its
+// toString does; only where avmplus does make it one: for `in` once the
+// Dictionary does not hold it, which then looks on its prototype chain,
+// for hasOwnProperty and propertyIsEnumerable, and for any other object.
+var converted:int = 0;
+var loud:Object = {toString: function():String { converted++; return "loud"; }};
+var angry:Object = {toString: function():String { throw "converted"; }};
+function probe(name:String, f:Function):void {
+  try { trace(name, f(), converted); } catch (e:*) { trace(name, "threw", e, converted); }
+}
+var quiet:Dictionary = new Dictionary();
+probe("set", function():* { quiet[loud] = 7; quiet[angry] = 8; return "ok"; });
+probe("get", function():* { return quiet[loud] + quiet[angry]; });
+probe("in", function():* { return (loud in quiet) + " " + (angry in quiet); });
+probe("call", function():* { quiet[angry] = function():int { return 3; }; return quiet[angry](); });
+probe("delete", function():* { return delete quiet[angry]; });
+probe("get missing", function():* { return quiet[angry]; });
+probe("in missing", function():* { return angry in quiet; });
+delete quiet[loud];
+probe("in missing, made a string", function():* { return loud in quiet; });
+Dictionary.prototype.loud = 1;
+probe("in the prototype", function():* { return loud in quiet; });
+delete Dictionary.prototype.loud;
+probe("hasOwnProperty", function():* { return quiet.hasOwnProperty(angry); });
+probe("propertyIsEnumerable", function():* { return quiet.propertyIsEnumerable(loud); });
+var plain:Object = {};
+probe("plain", function():* { plain[loud] = 9; return plain[loud] + " " + plain.loud + " " + (loud in plain); });
+probe("plain set", function():* { plain[angry] = 1; return "ok"; });

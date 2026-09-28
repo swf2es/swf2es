@@ -25,7 +25,7 @@ import {
   qname,
   TypeName,
 } from "./names.js";
-import { convertDoubleToString, setDouble, setFloat } from "./numbers.js";
+import { convertDoubleToString } from "./numbers.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: AS3 values are untyped
 export type Value = any;
@@ -461,23 +461,6 @@ export class Runtime {
       versions = [255];
     }
 
-    let name = mn.name;
-    let key: unknown;
-    if (mn.runtimeName) {
-      const part = parts[k];
-      if (part?.$local !== undefined) {
-        // A QName names its own namespace and local name.
-        namespaces = [part.$ns ?? publicNs];
-        versions = [255];
-        name = part.$local;
-      } else {
-        name = typeof part === "string" ? part : this.toString(part);
-        if (typeof part === "object" && part !== null) {
-          key = part;
-        }
-      }
-    }
-
     const kind =
       mn.kind === CONSTANT_RTQname ||
       mn.kind === CONSTANT_RTQnameA ||
@@ -485,10 +468,27 @@ export class Runtime {
       mn.kind === CONSTANT_RTQnameLA
         ? CONSTANT_Qname
         : mn.kind;
-    const result = new Multiname(kind, namespaces, versions, name, mn.attribute);
-    result.key = key;
-    return result;
+    let name = mn.name;
+    if (mn.runtimeName) {
+      const part = parts[k];
+      if (part?.$local !== undefined) {
+        // A QName names its own namespace and local name.
+        namespaces = [part.$ns ?? publicNs];
+        versions = [255];
+        name = part.$local;
+      } else if (typeof part === "object" && part !== null) {
+        // Its string only once a lookup needs it: a Dictionary does not.
+        return Multiname.keyed(kind, namespaces, versions, part, mn.attribute, this.keyName);
+      } else {
+        name = typeof part === "string" ? part : this.toString(part);
+      }
+    }
+
+    return new Multiname(kind, namespaces, versions, name, mn.attribute);
   }
+
+  /** An object's string, as the name of an object that is not a Dictionary. */
+  private readonly keyName = (key: unknown): string => this.toString(key as Value);
 
   /** The runtime namespace a Namespace value stands for. */
   namespaceOf(value: Value): Namespace {
@@ -1128,16 +1128,35 @@ export class Runtime {
       name.$local === undefined &&
       o?.$keys !== undefined
     ) {
-      return o.$keys.has(name);
+      return this.dictionaryHas(o, name);
     }
 
     return this.hasProperty(o, this.publicName(name));
   }
 
+  /**
+   * Whether Dictionary `o` has object key `key`, as in_operator finds it:
+   * the key itself, then, made a string, on its prototype chain.
+   */
+  private dictionaryHas(o: AsObject, key: object): boolean {
+    if (o.$keys.has(key)) {
+      return true;
+    }
+
+    const name = this.toString(key);
+    for (let p = this.protoOf(o); p; p = p.$p) {
+      if (p.$d?.has(name)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   /** Whether `o` has `mn`: bound, dynamic, or on its prototype chain. */
   hasProperty(o: Value, mn: Multiname): boolean {
     if (mn.key !== undefined && o?.$keys !== undefined) {
-      return o.$keys.has(mn.key);
+      return this.dictionaryHas(o, mn.key as object);
     }
 
     if (this.traitsOf(o).find(mn) !== 0) {
@@ -2285,12 +2304,12 @@ export class Runtime {
 
   sf32(value: Value, address: Value): void {
     const at = this.mops(address, 4);
-    setFloat(this.view, at, this.toNumber(value), true);
+    this.view.setFloat32(at, this.toNumber(value), true);
   }
 
   sf64(value: Value, address: Value): void {
     const at = this.mops(address, 8);
-    setDouble(this.view, at, this.toNumber(value), true);
+    this.view.setFloat64(at, this.toNumber(value), true);
   }
 
   // E4X, not implemented yet.
