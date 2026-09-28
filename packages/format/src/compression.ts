@@ -83,8 +83,29 @@ function adler32(data: Uint8Array): number {
   let a = 1;
   let b = 0;
   for (let i = 0; i < data.length; ) {
-    // 5552 bytes at most before the modulo keep the sums exact, as zlib's NMAX.
+    // 5552 bytes at most before the modulo keep the sums exact, as zlib's
+    // NMAX; eight at a time, then the rest.
     const end = Math.min(i + 5552, data.length);
+    const unrolledEnd = end - ((end - i) % 8);
+    for (; i < unrolledEnd; i += 8) {
+      a += data[i];
+      b += a;
+      a += data[i + 1];
+      b += a;
+      a += data[i + 2];
+      b += a;
+      a += data[i + 3];
+      b += a;
+      a += data[i + 4];
+      b += a;
+      a += data[i + 5];
+      b += a;
+      a += data[i + 6];
+      b += a;
+      a += data[i + 7];
+      b += a;
+    }
+
     for (; i < end; i++) {
       a += data[i];
       b += a;
