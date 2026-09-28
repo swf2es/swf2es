@@ -25,7 +25,7 @@ import {
   qname,
   TypeName,
 } from "./names.js";
-import { convertDoubleToString } from "./numbers.js";
+import { convertDoubleToString, setDouble, setFloat } from "./numbers.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: AS3 values are untyped
 export type Value = any;
@@ -2164,12 +2164,12 @@ export class Runtime {
 
   sf32(value: Value, address: Value): void {
     const at = this.mops(address, 4);
-    this.view.setFloat32(at, this.toNumber(value), true);
+    setFloat(this.view, at, this.toNumber(value), true);
   }
 
   sf64(value: Value, address: Value): void {
     const at = this.mops(address, 8);
-    this.view.setFloat64(at, this.toNumber(value), true);
+    setDouble(this.view, at, this.toNumber(value), true);
   }
 
   // E4X, not implemented yet.
