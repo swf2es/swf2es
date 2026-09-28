@@ -16,6 +16,92 @@ const TO_JSON = qname(publicNs, "toJSON");
 /** Whether each traits binds a public toJSON, found once. */
 const boundToJSON = new WeakMap<Traits, boolean>();
 
+/**
+ * As JSONParser, through the host's JSON.parse, then its values made AS3's
+ * in place. The text the host rejects goes to parse(): avmplus reads some
+ * of it (numbers with leading zeros, as 01), and fails the rest as
+ * SyntaxError 1132.
+ */
+function parseText(rt: Runtime, text: string): Value {
+  let tree: unknown;
+  try {
+    tree = JSON.parse(text);
+  } catch {
+    return parse(rt, text);
+  }
+
+  return fromHost(rt, tree);
+}
+
+/** How deep fromHost recurses before it continues with a stack of its own. */
+const RECURSION_DEPTH = 500;
+
+/**
+ * A value of the host's JSON.parse as AS3's: an array as an Array holding
+ * it, its elements made AS3's in place, and an object as an Object with its
+ * keys, each where a public name of a plain Object is set (JSON's
+ * `__proto__` is a key of the object's own). Deeper than RECURSION_DEPTH,
+ * as deepFromHost does, as avmplus reads any depth.
+ */
+function fromHost(rt: Runtime, v: unknown, depth = 0): Value {
+  if (typeof v !== "object" || v === null) {
+    return v;
+  }
+
+  if (depth > RECURSION_DEPTH) {
+    return deepFromHost(rt, v);
+  }
+
+  if (Array.isArray(v)) {
+    for (let i = 0; i < v.length; i++) {
+      v[i] = fromHost(rt, v[i], depth + 1);
+    }
+
+    return rt.array(v);
+  }
+
+  const o = rt.newObject([]);
+  const d: Map<string, Value> = o.$d;
+  const from = v as Record<string, unknown>;
+  for (const key in from) {
+    d.set(key, fromHost(rt, from[key], depth + 1));
+  }
+
+  return o;
+}
+
+/** As fromHost, with a stack of its own, not the host's: slower, and at any depth. */
+function deepFromHost(rt: Runtime, root: object): Value {
+  const pending: [unknown, AsObject][] = [];
+  const wrap = (v: unknown): Value => {
+    if (typeof v !== "object" || v === null) {
+      return v;
+    }
+
+    const o = Array.isArray(v) ? rt.array(v) : rt.newObject([]);
+    pending.push([v, o]);
+    return o;
+  };
+
+  const result = wrap(root);
+  for (let next = pending.pop(); next; next = pending.pop()) {
+    const [host, o] = next;
+    if (Array.isArray(host)) {
+      for (let i = 0; i < host.length; i++) {
+        host[i] = wrap(host[i]);
+      }
+    } else {
+      const d: Map<string, Value> = o.$d;
+      const from = host as Record<string, unknown>;
+      for (const key in from) {
+        d.set(key, wrap(from[key]));
+      }
+    }
+  }
+
+  return result;
+}
+
 /** As JSONParser: the JSON text to a value, or SyntaxError 1132. */
 function parse(rt: Runtime, text: string): Value {
   let i = 0;
@@ -481,7 +567,7 @@ function isA(traits: Traits, name: string): boolean {
 
 export function jsonNatives(): Natives {
   return {
-    "JSON.JSON::parseCore": (rt) => (text: Value) => parse(rt, rt.toString(text)),
+    "JSON.JSON::parseCore": (rt) => (text: Value) => parseText(rt, rt.toString(text)),
     "JSON.JSON::stringifySpecializedToString":
       (rt) => (value: Value, propertyList: Value, replacer: Value, gap: Value) =>
         new Serializer(
