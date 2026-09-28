@@ -51,12 +51,17 @@ const lines = runOracle(
   out,
   {},
 );
+// Every case compiles, with -d too: one that does not would leave its
+// source map unchecked.
 const chains: { name: string; abc: Uint8Array }[] = [];
 names.forEach((name, i) => {
-  chains.push({ name, abc: read(`${out}${name}.abc`) });
-  if (lines[i].compiled) {
-    chains.push({ name: `${name} -d`, abc: read(`${out}lines/${name}.abc`) });
+  if (!lines[i].compiled) {
+    console.log(`determinism: ${name} did not compile with -d\n${lines[i].compileLog}`);
+    process.exit(1);
   }
+
+  chains.push({ name, abc: read(`${out}${name}.abc`) });
+  chains.push({ name: `${name} -d`, abc: read(`${out}lines/${name}.abc`) });
 });
 
 if (existsSync(`${programs}as3pb/ShellMain.abc`)) {
@@ -72,10 +77,10 @@ function compile(testing: any, abc: Uint8Array): string[] {
   const hashes: string[] = [];
   testing.domainReset(50);
   for (const [i, bytes] of [...builtins, abc].entries()) {
+    // The corpus is valid: an ABC that does not link is a failure, not output to compare.
     const error = testing.domainAdd(bytes, i < builtins.length);
     if (error) {
-      results.push(`error ${error}`);
-      break;
+      throw new Error(`an ABC of the chain failed to link: error ${error}`);
     }
 
     hashes.push(sha(bytes));
