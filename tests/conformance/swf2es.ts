@@ -16,6 +16,9 @@ const runtime = await import(
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 
+// The oracle runs avmshell with TZ=UTC, so local time is UTC here too.
+process.env.TZ = "UTC";
+
 // With SWF2ES_MODULES=<dir>, each module is written there, 0.mjs, 1.mjs, ...
 // in load order, and loaded from its file, so that stacks name it.
 const moduleDir = process.env.SWF2ES_MODULES;

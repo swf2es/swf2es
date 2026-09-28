@@ -50,6 +50,10 @@ export interface TraitsDesc {
   defaults: [number, Value, TypeRef][];
   bindings: [Namespace, number, string, number][];
   methods: [number, Factory][];
+  /** Its own slots with [Transient] metadata. */
+  transient?: number[];
+  /** Its own accessors with metadata, by dispatch id: 1 if any of it is [Transient], else 0. */
+  metadata?: [number, number][];
 }
 
 export interface ClassDesc {
@@ -128,6 +132,10 @@ export class Traits {
   refusesNames = false;
   /** How to allocate an instance, for classes whose instances hold native state. */
   create: ((traits: Traits) => AsObject) | null;
+  /** Its own slots with [Transient] metadata, if any. */
+  transientSlots: Set<number> | null = null;
+  /** Its own accessors with metadata, if any, by dispatch id: whether any of it is [Transient]. */
+  accessorMetadata: Map<number, boolean> | null = null;
   getIndex?: IndexHook["getIndex"];
   setIndex?: IndexHook["setIndex"];
   hasIndex?: IndexHook["hasIndex"];
@@ -169,7 +177,51 @@ export class Traits {
       this.own.push([`$${slot}`, value]);
     }
 
+    if (desc.transient) {
+      this.transientSlots = new Set(desc.transient);
+    }
+
+    if (desc.metadata) {
+      this.accessorMetadata = new Map(desc.metadata.map(([id, t]) => [id, t === 1]));
+    }
+
     this.allDefaults = null;
+  }
+
+  /**
+   * Whether the member binding `b` names is [Transient], which AMF and
+   * JSON leave out: a slot, or either accessor of a pair, whose metadata,
+   * found as avmplus' TraitsMetadata finds it, has it.
+   */
+  isTransient(b: number): boolean {
+    const kind = b & 7;
+    const id = b >> 3;
+    if (kind === BIND_Var || kind === BIND_Const) {
+      for (let t: Traits | null = this; t; t = t.base) {
+        if (t.transientSlots?.has(id)) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    return (
+      ((kind === BIND_Get || kind === BIND_GetSet) && this.transientAccessor(id)) ||
+      ((kind === BIND_Set || kind === BIND_GetSet) && this.transientAccessor(id + 1))
+    );
+  }
+
+  /** Whether accessor `id`'s metadata, the nearest traits' that has any, is [Transient]. */
+  private transientAccessor(id: number): boolean {
+    for (let t: Traits | null = this; t; t = t.base) {
+      const transient = t.accessorMetadata?.get(id);
+      if (transient !== undefined) {
+        return transient;
+      }
+    }
+
+    return false;
   }
 
   /** The type of slot `id`, declared here or by a base. */
@@ -272,11 +324,17 @@ export class VectorRef {
  * table, and nothing a for-in goes through is ever moved or dropped.
  */
 interface Enumeration {
-  /** The name in each slot, null in one free. */
-  names: (string | null)[];
+  /** The name in each slot, null in one free: a string, or a Dictionary's object key. */
+  names: (EnumeratedName | null)[];
   /** Each name's slot. */
-  slot: Map<string, number>;
+  slot: Map<EnumeratedName, number>;
 }
+
+/** A name a for-in goes through: a string, or an object a Dictionary is keyed by. */
+type EnumeratedName = string | object;
+
+/** The names below this come back from a for-in as numbers: avmplus' int atoms, of 29 bits. */
+const INT_ATOM_LIMIT = 0x10000000;
 
 /** A script: its descriptor, its global object once made, and whether it has run. */
 interface Script {
@@ -403,6 +461,13 @@ export class Runtime {
       versions = [255];
     }
 
+    const kind =
+      mn.kind === CONSTANT_RTQname ||
+      mn.kind === CONSTANT_RTQnameA ||
+      mn.kind === CONSTANT_RTQnameL ||
+      mn.kind === CONSTANT_RTQnameLA
+        ? CONSTANT_Qname
+        : mn.kind;
     let name = mn.name;
     if (mn.runtimeName) {
       const part = parts[k];
@@ -411,20 +476,19 @@ export class Runtime {
         namespaces = [part.$ns ?? publicNs];
         versions = [255];
         name = part.$local;
+      } else if (typeof part === "object" && part !== null) {
+        // Its string only once a lookup needs it: a Dictionary does not.
+        return Multiname.keyed(kind, namespaces, versions, part, mn.attribute, this.keyName);
       } else {
         name = typeof part === "string" ? part : this.toString(part);
       }
     }
 
-    const kind =
-      mn.kind === CONSTANT_RTQname ||
-      mn.kind === CONSTANT_RTQnameA ||
-      mn.kind === CONSTANT_RTQnameL ||
-      mn.kind === CONSTANT_RTQnameLA
-        ? CONSTANT_Qname
-        : mn.kind;
     return new Multiname(kind, namespaces, versions, name, mn.attribute);
   }
+
+  /** An object's string, as the name of an object that is not a Dictionary. */
+  private readonly keyName = (key: unknown): string => this.toString(key as Value);
 
   /** The runtime namespace a Namespace value stands for. */
   namespaceOf(value: Value): Namespace {
@@ -716,6 +780,11 @@ export class Runtime {
   }
 
   getProperty(o: Value, mn: Multiname): Value {
+    // A Dictionary's object key, before its traits, as DictionaryObject's.
+    if (mn.key !== undefined && o?.$keys !== undefined) {
+      return o.$keys.get(mn.key);
+    }
+
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
     if (b !== 0) {
@@ -967,6 +1036,11 @@ export class Runtime {
   }
 
   setProperty(o: Value, mn: Multiname, v: Value, init = false): void {
+    if (mn.key !== undefined && o?.$keys !== undefined) {
+      o.$keys.set(mn.key, v);
+      return;
+    }
+
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
     if (b !== 0) {
@@ -1021,6 +1095,11 @@ export class Runtime {
   }
 
   deleteProperty(o: Value, mn: Multiname): boolean {
+    if (mn.key !== undefined && o?.$keys !== undefined) {
+      o.$keys.delete(mn.key);
+      return true;
+    }
+
     const traits = this.traitsOf(o);
     if (traits.find(mn) !== 0) {
       return false;
@@ -1043,11 +1122,43 @@ export class Runtime {
 
   /** The `in` operator: whether `o` has the public property `name`. */
   in(name: Value, o: Value): boolean {
+    if (
+      typeof name === "object" &&
+      name !== null &&
+      name.$local === undefined &&
+      o?.$keys !== undefined
+    ) {
+      return this.dictionaryHas(o, name);
+    }
+
     return this.hasProperty(o, this.publicName(name));
+  }
+
+  /**
+   * Whether Dictionary `o` has object key `key`, as in_operator finds it:
+   * the key itself, then, made a string, on its prototype chain.
+   */
+  private dictionaryHas(o: AsObject, key: object): boolean {
+    if (o.$keys.has(key)) {
+      return true;
+    }
+
+    const name = this.toString(key);
+    for (let p = this.protoOf(o); p; p = p.$p) {
+      if (p.$d?.has(name)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /** Whether `o` has `mn`: bound, dynamic, or on its prototype chain. */
   hasProperty(o: Value, mn: Multiname): boolean {
+    if (mn.key !== undefined && o?.$keys !== undefined) {
+      return this.dictionaryHas(o, mn.key as object);
+    }
+
     if (this.traitsOf(o).find(mn) !== 0) {
       return true;
     }
@@ -1852,8 +1963,8 @@ export class Runtime {
   // or not, so hiding one during a for-in (as _dontEnumPrototype does) does
   // not move the others.
 
-  private names(o: AsObject): string[] {
-    const names: string[] = [];
+  private names(o: AsObject): EnumeratedName[] {
+    const names: EnumeratedName[] = [];
     if (o.$a !== undefined) {
       for (const i of Object.keys(o.$a)) {
         names.push(i);
@@ -1866,6 +1977,12 @@ export class Runtime {
       }
     }
 
+    if (o.$keys !== undefined) {
+      for (const k of o.$keys.keys()) {
+        names.push(k);
+      }
+    }
+
     return names;
   }
 
@@ -1873,7 +1990,7 @@ export class Runtime {
    * The names of `o` for a for-in starting over it: those it had before in
    * their slots, and new ones in the slots of those gone, then after them.
    */
-  private startEnumeration(o: AsObject): (string | null)[] {
+  private startEnumeration(o: AsObject): (EnumeratedName | null)[] {
     const names = this.names(o);
     let e = this.enumerating.get(o);
     if (!e) {
@@ -1906,7 +2023,7 @@ export class Runtime {
   }
 
   /** The name of `o` at a for-in's index. */
-  private enumerated(o: AsObject, index: number): string {
+  private enumerated(o: AsObject, index: number): EnumeratedName {
     return this.enumerating.get(o)?.names[index - 1] ?? "";
   }
 
@@ -1917,7 +2034,11 @@ export class Runtime {
     // A name deleted since the for-in started is skipped.
     for (let i = index; i < names.length; i++) {
       const name = names[i];
-      if (name !== null && !o.$dontEnum?.has(name) && this.stillThere(o, name)) {
+      if (
+        name !== null &&
+        !(typeof name === "string" && o.$dontEnum?.has(name)) &&
+        this.stillThere(o, name)
+      ) {
         return i + 1;
       }
     }
@@ -1925,7 +2046,11 @@ export class Runtime {
     return 0;
   }
 
-  private stillThere(o: AsObject, name: string): boolean {
+  private stillThere(o: AsObject, name: EnumeratedName): boolean {
+    if (typeof name !== "string") {
+      return o.$keys?.has(name) ?? false;
+    }
+
     if (o.$a !== undefined) {
       const i = arrayIndex(name);
       if (i >= 0) {
@@ -1956,13 +2081,24 @@ export class Runtime {
     return typeof o === "object" && o !== null ? this.nextIndex(o, index) : 0;
   }
 
+  /** As avmplus gives a for-in's name: an index as a number while an int atom holds it, a Dictionary's object key as itself. */
   nextName(o: Value, index: number): Value {
     const name = this.enumerated(o, index);
-    return o.$a !== undefined && arrayIndex(name) >= 0 ? Number(name) : name;
+    if (typeof name !== "string") {
+      return name;
+    }
+
+    const i = arrayIndex(name);
+    return i >= 0 && i < INT_ATOM_LIMIT ? i : name;
   }
 
   nextValue(o: Value, index: number): Value {
-    return this.getProperty(o, this.publicName(this.enumerated(o, index)));
+    const name = this.enumerated(o, index);
+    if (typeof name !== "string") {
+      return o.$keys.get(name);
+    }
+
+    return this.getProperty(o, this.publicName(name));
   }
 
   // Errors.
@@ -2082,6 +2218,10 @@ export class Runtime {
     return this.resolve(this.cls(namespace(NS_Public, "flash.utils"), "ByteArray"));
   }
 
+  dictionaryClass(): AsObject {
+    return this.resolve(this.cls(namespace(NS_Public, "flash.utils"), "Dictionary"));
+  }
+
   /** Vector.<T>, for a class T or null for *. */
   vectorClass(param: AsObject | null): AsObject {
     return this.applyType(this.resolve(this.cls(namespace(NS_Public, "__AS3__.vec"), "Vector")), [
@@ -2089,9 +2229,9 @@ export class Runtime {
     ]);
   }
 
-  /** An object's own names a for-in visits, in its order. */
+  /** An object's own names a for-in visits, in its order: its string names, not a Dictionary's object keys. */
   enumerableNames(o: AsObject): string[] {
-    return this.names(o).filter((n) => !o.$dontEnum?.has(n));
+    return this.names(o).filter((n): n is string => typeof n === "string" && !o.$dontEnum?.has(n));
   }
 
   /** avmshell's avmplus.Domain.currentDomain: an instance of Domain, without running its constructor. */

@@ -2,8 +2,7 @@
 // tokens and SyntaxError 1132, and stringify's toJSON (in the AS3
 // namespace first), replacers, gaps, numbers in avmplus' own format, and a
 // class instance's public variables and readable accessors before its
-// dynamic properties. [Transient] members are not left out yet: the
-// runtime does not keep metadata.
+// dynamic properties, leaving out [Transient] ones.
 //
 // Translated from avmplus' core/JSONClass.cpp, this file is subject to the
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
@@ -256,14 +255,14 @@ function parse(rt: Runtime, text: string): Value {
   return result;
 }
 
-/** A class instance's public variables and readable accessors, the class's own first, as TypeDescriber lists them. */
+/** A class instance's public variables and readable accessors but [Transient] ones, the class's own first, as TypeDescriber lists them. */
 function describedNames(traits: Traits): [string[], string[]] {
   const variables: string[] = [];
   const accessors: string[] = [];
   for (let t: Traits | null = traits; t && t.name !== "Object"; t = t.base) {
     for (const [name, list] of t.bindings) {
       for (const b of list) {
-        if (b.ns.kind !== NS_Public || b.ns.uri !== "") {
+        if (b.ns.kind !== NS_Public || b.ns.uri !== "" || traits.isTransient(b.value)) {
           continue;
         }
 

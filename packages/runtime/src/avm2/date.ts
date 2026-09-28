@@ -1,8 +1,11 @@
 // Date, as avmplus' DateClass and Date: the time a Date holds, its fields
-// by the indices Date.as asks for, the setters, and its strings in
-// avmplus' formats, which are not JavaScript's. Local time is the host's,
-// through JavaScript's Date, as avmplus' is the OS's. Date.parse is
-// JavaScript's for now, not avmplus' own parser.
+// by the indices Date.as asks for, the setters, its strings in avmplus'
+// formats, which are not JavaScript's, and its own parser of them for
+// Date.parse and new Date(string). Local time is the host's, through
+// JavaScript's Date, as avmplus' is the OS's.
+//
+// parseDate is translated from avmplus' core/DateClass.cpp, and so subject
+// to the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 import type { AsObject, ClassHook, Runtime, Value } from "./runtime.js";
 
 type Natives = Record<string, (rt: Runtime) => (...args: Value[]) => Value>;
@@ -112,6 +115,183 @@ function field(t: number, index: number): number {
 
 const timeOf = (o: AsObject): number => o.$time ?? Number.NaN;
 
+const KEYWORDS = "JanFebMarAprMayJunJulAugSepOctNovDecSunMonTueWedThuFriSatGMTUTC";
+const UTC_KEYWORD = 12 + 7 + 1;
+
+/** What stringToDateDouble has parsed so far; -1 for a field not yet seen. */
+interface DateFields {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  min: number;
+  sec: number;
+  zone: number;
+}
+
+/** As parseDateKeyword: a month, UTC, AM or PM, or a day or GMT, which say nothing; false if none. */
+function dateKeyword(word: string, f: DateFields): boolean {
+  if (word.length > 3) {
+    return false;
+  }
+
+  for (let i = 0; i < word.length; i++) {
+    const c = word.charCodeAt(i);
+    if (c < 65 || c > 122 || (c > 90 && c < 97)) {
+      return false;
+    }
+  }
+
+  if (word.length === 3) {
+    for (let x = 0; x < 7 + 12 + 2; x++) {
+      if (KEYWORDS.substr(x * 3, 3) === word) {
+        if (x < 12) {
+          f.month = x;
+        } else if (x === UTC_KEYWORD) {
+          f.zone = 0;
+        }
+
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  if (word === "AM" || word === "PM") {
+    const valid = f.hour <= 12 && f.hour >= 0;
+    if (word === "AM" && f.hour === 12) {
+      f.hour = 0;
+    } else if (word === "PM" && f.hour !== 12) {
+      f.hour += 12;
+    }
+
+    return valid;
+  }
+
+  return false;
+}
+
+/**
+ * As DateClass::stringToDateDouble: the formats its toString writes and a
+ * few others ("1/1/1999 13:30 PM"), by numbers and the separators before
+ * and after them, and three-letter keywords; NaN for anything else.
+ */
+export function parseDate(s: string): number {
+  const f: DateFields = { year: -1, month: -1, day: -1, hour: -1, min: -1, sec: -1, zone: -1 };
+  const length = s.length;
+  const code = (k: number) => s.charCodeAt(k);
+  const digit = (c: number) => c >= 48 && c <= 57;
+  const alpha = (c: number) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+  let prevc = 0;
+  let i = 0;
+  while (i < length) {
+    let c = code(i);
+    i++;
+    if (c <= 32 || c === 44 || c === 45) {
+      // Whitespace and delimiters; a '-' before a number is a zone's sign.
+      if (i < length && c === 45 && digit(code(i))) {
+        prevc = c;
+      }
+    } else if (c === 47 || c === 58 || c === 43 || c === 45) {
+      prevc = c;
+    } else if (digit(c)) {
+      // As parseDateNumber: a zone offset, a year, a month or day, a time unit.
+      // c is left the character after the digits, or the last digit at the end.
+      let n = c - 48;
+      while (i < length) {
+        c = code(i);
+        if (!digit(c)) {
+          break;
+        }
+
+        n = n * 10 + c - 48;
+        i++;
+      }
+
+      let valid = true;
+      if (prevc === 43 || prevc === 45) {
+        n = n < 24 ? n * 60 : (n % 100) + Math.trunc(n / 100) * 60;
+        if (prevc === 43) {
+          n = -n;
+        }
+
+        if (f.zone === 0 || f.zone === -1) {
+          f.zone = n;
+        } else {
+          valid = false;
+        }
+      } else if (n >= 70 || (prevc === 47 && f.month >= 0 && f.day >= 0 && f.year < 0)) {
+        if (f.year >= 0) {
+          valid = false;
+        } else if (c <= 32 || c === 44 || c === 47 || i >= length) {
+          f.year = n < 100 ? n + 1900 : n;
+        } else {
+          valid = false;
+        }
+      } else if (c === 47) {
+        if (f.month < 0) {
+          f.month = n - 1;
+        } else if (f.day < 0) {
+          f.day = n;
+        } else {
+          valid = false;
+        }
+      } else if (c === 58) {
+        if (f.hour < 0) {
+          f.hour = n;
+        } else if (f.min < 0) {
+          f.min = n;
+        } else {
+          valid = false;
+        }
+      } else if (i < length && c !== 44 && c > 32 && c !== 45) {
+        valid = false;
+      } else if (f.hour >= 0 && f.min < 0) {
+        f.min = n;
+      } else if (f.min >= 0 && f.sec < 0) {
+        f.sec = n;
+      } else if (f.day < 0) {
+        f.day = n;
+      } else {
+        valid = false;
+      }
+
+      if (!valid) {
+        return Number.NaN;
+      }
+
+      prevc = 0;
+    } else {
+      // A keyword, of letters.
+      const start = i - 1;
+      while (i < length && alpha(code(i))) {
+        i++;
+      }
+
+      if (i <= start + 1 || !dateKeyword(s.slice(start, i), f)) {
+        return Number.NaN;
+      }
+
+      prevc = 0;
+    }
+  }
+
+  if (f.year < 0 || f.month < 0 || f.day < 0) {
+    return Number.NaN;
+  }
+
+  const sec = Math.max(f.sec, 0);
+  const min = Math.max(f.min, 0);
+  const hour = Math.max(f.hour, 0);
+  // No zone: local time. Else UTC, and the offset east of it in minutes.
+  if (f.zone === -1) {
+    return timeClip(new Date(f.year, f.month, f.day, hour, min, sec, 0).getTime());
+  }
+
+  return timeClip(Date.UTC(f.year, f.month, f.day, hour, min, sec, 0) + f.zone * 60000);
+}
+
 /** As DateClass::construct: now, a time, a string, a Date, or local fields; years 0 to 99 are 1900's. */
 function construct(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
   const o = cls.$it.instance();
@@ -122,8 +302,9 @@ function construct(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
     if (v?.$time !== undefined) {
       o.$time = v.$time;
     } else {
-      const p = v !== null && typeof v === "object" ? rt.toPrimitive(v, "number") : v;
-      o.$time = timeClip(typeof p === "string" ? Date.parse(p) : rt.toNumber(p));
+      // A string is parsed; anything else is a number, as AvmCore::number
+      // makes it, an object's string from valueOf too.
+      o.$time = typeof v === "string" ? parseDate(v) : timeClip(rt.toNumber(v));
     }
   } else {
     const n = args.map((a) => rt.toNumber(a));
@@ -144,7 +325,7 @@ export const dateHook: ClassHook = {
 
 export function dateNatives(): Natives {
   const natives: Natives = {
-    "Date.parse": (rt) => (s: Value) => timeClip(Date.parse(rt.toString(s))),
+    "Date.parse": (rt) => (s: Value) => parseDate(rt.toString(s)),
     "Date.UTC":
       (rt) =>
       (...args: Value[]) => {

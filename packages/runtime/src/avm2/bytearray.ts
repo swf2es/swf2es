@@ -8,6 +8,15 @@
 // Translated from avmplus' core/ByteArrayGlue.cpp, core/DataIO.cpp and
 // core/UnicodeUtils.cpp, this file is subject to the Mozilla Public
 // License, v. 2.0: http://mozilla.org/MPL/2.0/.
+import {
+  CompressedDataError,
+  deflateCompress,
+  LZMA_HEADER,
+  lzmaByteArrayCompress,
+  lzmaByteArrayUncompress,
+  zlibCompress,
+  zlibUncompress,
+} from "@swf2es/format";
 import type { AsObject, IndexHook, Runtime, Traits, Value } from "./runtime.js";
 
 const kGrowthIncr = 4096;
@@ -377,6 +386,29 @@ const BOM = (b: Uint8Array) => b.length >= 3 && b[0] === 0xef && b[1] === 0xbb &
 
 type Natives = Record<string, (rt: Runtime) => (...args: Value[]) => Value>;
 
+/** As ByteArrayObject::algorithmToEnum: zlib, deflate or lzma; null a TypeError, any other an IOError. */
+function algorithmOf(rt: Runtime, algorithm: Value): "zlib" | "deflate" | "lzma" {
+  if (algorithm === null || algorithm === undefined) {
+    throw rt.error("TypeError", 2007, "algorithm");
+  }
+
+  const name = rt.toString(algorithm);
+  if (name === "zlib" || name === "deflate" || name === "lzma") {
+    return name;
+  }
+
+  throw rt.error("flash.errors::IOError", 2058);
+}
+
+/** A ByteArray's bytes, all of them, replaced by a copy of `bytes`, its position `position`; the domain memory told, if it is. */
+function replaceBytes(b: Bytes, bytes: Uint8Array, position: number): void {
+  b.buffer = new Uint8Array(bytes);
+  b.view = new DataView(b.buffer.buffer);
+  b.length = bytes.length;
+  b.position = position;
+  b.notify();
+}
+
 /** ByteArray's natives, by the names the compiler gives them. */
 export function byteArrayNatives(): Natives {
   const c = "flash.utils::ByteArray";
@@ -612,6 +644,67 @@ export function byteArrayNatives(): Natives {
       b.write(from.buffer.slice(offset, offset + count));
     }
   });
+
+  // As ByteArrayObject::_compress and _uncompress, which compress(),
+  // uncompress(), deflate() and inflate() call: the algorithm checked
+  // first, and an empty ByteArray left as it is. The domain memory is
+  // compressed too, as avmshell's is: its Domain does not subscribe to it
+  // as the player refuses a subscribed one (3735). Compressing leaves the position at the end, uncompressing at 0;
+  // data that does not uncompress leaves the ByteArray as it was.
+  natives[`${c}#${own}::_compress`] = (rt) =>
+    function (this: AsObject, algorithm: Value) {
+      const kind = algorithmOf(rt, algorithm);
+      const b = bytesOf(rt, this);
+      if (b.length === 0) {
+        return;
+      }
+
+      const data = b.buffer.subarray(0, b.length);
+      const out =
+        kind === "zlib"
+          ? zlibCompress(data)
+          : kind === "deflate"
+            ? deflateCompress(data)
+            : lzmaByteArrayCompress(data);
+      replaceBytes(b, out, out.length);
+    };
+  natives[`${c}#${own}::_uncompress`] = (rt) =>
+    function (this: AsObject, algorithm: Value) {
+      const kind = algorithmOf(rt, algorithm);
+      const b = bytesOf(rt, this);
+      if (b.length === 0) {
+        return;
+      }
+
+      const data = b.buffer.subarray(0, b.length);
+      let out: Uint8Array;
+      if (kind === "lzma") {
+        // As UncompressViaLzma: too short for its header is left as it is, and
+        // a length past 32 bits a MemoryError before anything is read.
+        if (b.length < LZMA_HEADER) {
+          return;
+        }
+
+        if (data[9] | data[10] | data[11] | data[12]) {
+          throw rt.error("flash.errors::MemoryError", 1000);
+        }
+      }
+
+      try {
+        out =
+          kind === "lzma"
+            ? lzmaByteArrayUncompress(data)
+            : zlibUncompress(data, kind === "deflate");
+      } catch (e) {
+        if (e instanceof CompressedDataError) {
+          throw rt.error("flash.errors::IOError", 2058);
+        }
+
+        throw e;
+      }
+
+      replaceBytes(b, out, 0);
+    };
 
   // As ByteArrayObject::_toString: by its BOM, UTF-8 or UTF-16 of either
   // order, else UTF-8; all of its length, NULs too.

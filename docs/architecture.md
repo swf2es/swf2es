@@ -62,12 +62,14 @@ over the builtins, then each conformance case (also compiled with asc's
 |-----------|-----------------------------------------------------------------|---------------------------|
 | `format`  | SWF container and tags, ABC, AVM1 action records                | —                         |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
-| `runtime` | AS3/AS2 language semantics called by generated code             | —                         |
+| `runtime` | AS3/AS2 language semantics called by generated code             | format                    |
 | `player`  | display list, timeline, playerglobal, AVM1 globals, renderers   | format, codegen, runtime  |
 | `cli`     | ahead-of-time compiler command                                  | format, codegen           |
 
 `runtime` contains only the language, with no display list, so it runs in node
-next to avmshell. `codegen` knows the runtime's function names and signatures
+next to avmshell. It uses `format` for what both need, such as compression
+(zlib through pako, LZMA through lzma1): ByteArray's `compress` and a SWF's
+body are the same code. `codegen` knows the runtime's function names and signatures
 but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.

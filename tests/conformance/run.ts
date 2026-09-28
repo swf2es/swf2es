@@ -27,7 +27,13 @@ try {
   process.exit(0);
 }
 
-const results = runOracle([...cases, ...parseOnly], `${here}out`, { engine, abcdump: true });
+// With -md, ASC keeps metadata, such as the [Transient] that AMF and JSON
+// leave a member out for, as Tamarin's JSON tests are compiled.
+const results = runOracle(
+  [...cases.map((source) => ({ source, ascArgs: ["-md"] })), ...parseOnly],
+  `${here}out`,
+  { engine, abcdump: true },
+);
 const builtins = libraries(["builtin", "shell_toplevel"], `${here}out/lib`, { engine }).map(
   (l) => l.abc,
 );

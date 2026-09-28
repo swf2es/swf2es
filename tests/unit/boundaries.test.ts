@@ -8,7 +8,7 @@ import { test } from "node:test";
 const allowed: Record<string, string[]> = {
   format: [],
   codegen: ["format"],
-  runtime: [],
+  runtime: ["format"],
   player: ["codegen", "format", "runtime"],
   cli: ["codegen", "format"],
 };
