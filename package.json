@@ -14,6 +14,7 @@
     "test:checked": "pnpm --filter @swf2es/codegen build:wasm:checked && SWF2ES_CHECKED=1 pnpm test",
     "determinism": "node tests/conformance/determinism.ts",
     "tamarin": "node tests/tamarin/run.ts",
+    "tamarin:swf2es": "node tests/tamarin/swf2es.ts",
     "bench": "node tests/bench/bench.ts",
     "typecheck": "tsc -p tsconfig.json",
     "check": "biome check .",

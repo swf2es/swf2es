@@ -1,0 +1,101 @@
+// A worker of tests/tamarin/swf2es.ts: runs the Tamarin tests it is sent in
+// swf2es, one at a time, each in a runtime of its own after the builtins
+// avmshell loads. The builtins are compiled to modules once; each test
+// links them again in a new domain, then its ABC, and runs it.
+//
+// Messages in: { path, abc } for an ABC file. Out: { path, lines } with the
+// lines it traced, or { path, error } with what stopped it.
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { testing } from "../unit/codegen/testing-module.ts";
+
+const runtime = await import(
+  new URL("../../packages/runtime/dist/avm2/index.js", import.meta.url).href
+);
+
+// The oracle runs avmshell with TZ=UTC, so local time is UTC here too.
+process.env.TZ = "UTC";
+
+const here = fileURLToPath(new URL(".", import.meta.url));
+const builtins = ["builtin", "shell_toplevel"].map(
+  (name) => new Uint8Array(readFileSync(`${here}out/lib/${name}.abc`)),
+);
+
+type Module = (rt: unknown) => unknown;
+
+async function load(js: string): Promise<Module> {
+  const url = `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`;
+  return (await import(url)).default;
+}
+
+const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+/** A new domain holding the builtins, linked; each module names the ABCs before it by their hashes. */
+function linkBuiltins(): string[] {
+  testing.domainReset(50);
+  const hashes: string[] = [];
+  for (const bytes of builtins) {
+    const error = testing.domainAdd(bytes, true);
+    if (error) {
+      throw new Error(`a builtin failed to link: error ${error}`);
+    }
+
+    hashes.push(sha(bytes));
+  }
+
+  return hashes;
+}
+
+// The builtins' modules, compiled once: each test's runtime runs them.
+const builtinModules: Module[] = [];
+{
+  testing.domainReset(50);
+  const hashes: string[] = [];
+  for (const bytes of builtins) {
+    testing.domainAdd(bytes, true);
+    hashes.push(sha(bytes));
+    builtinModules.push(await load(testing.domainModule(hashes.join("\n"))));
+  }
+}
+
+async function run(abc: Uint8Array): Promise<string[]> {
+  const lines: string[] = [];
+  const rt = runtime.createRuntime({ print: (line: string) => lines.push(line) });
+  for (const module of builtinModules) {
+    module(rt);
+  }
+
+  const hashes = linkBuiltins();
+  const error = testing.domainAdd(abc, false);
+  if (error) {
+    return [`VerifyError: Error #${error}`];
+  }
+
+  hashes.push(sha(abc));
+  const A = (await load(testing.domainModule(hashes.join("\n"))))(rt);
+  try {
+    rt.run(A);
+  } catch (e) {
+    // An AS3 exception nothing caught: avmshell prints it, as its string.
+    if (e instanceof Error) {
+      throw e;
+    }
+
+    lines.push(rt.toString(e));
+  }
+
+  return lines;
+}
+
+process.on("message", async (message: { path: string; abc: string }) => {
+  try {
+    const lines = await run(new Uint8Array(readFileSync(message.abc)));
+    process.send?.({ path: message.path, lines });
+  } catch (e) {
+    const error = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    process.send?.({ path: message.path, error: error.split("\n")[0] });
+  }
+});
+
+process.send?.({ ready: true });
