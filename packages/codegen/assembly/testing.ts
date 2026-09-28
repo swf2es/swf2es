@@ -1,15 +1,15 @@
 // Test-only entry point: exposes the reader to node tests without adding
 // exports to codegen.wasm.
-import { Abc } from "./abc/abc";
-import { BodyDecoder, verifyMethods } from "./abc/code";
-import * as C from "./abc/constants";
-import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./abc/opcodes";
-import { readAbc } from "./abc/parse";
-import { readConstantPool } from "./abc/pool";
-import { PADDING, Reader } from "./abc/reader";
-import { MethodEmitter } from "./emit/method";
-import { ModuleEmitter } from "./emit/module";
-import { Output } from "./emit/output";
+import { Abc } from "./avm2/abc/abc";
+import { BodyDecoder, verifyMethods } from "./avm2/abc/code";
+import * as C from "./avm2/abc/constants";
+import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./avm2/abc/opcodes";
+import { readAbc } from "./avm2/abc/parse";
+import { readConstantPool } from "./avm2/abc/pool";
+import { PADDING, Reader } from "./avm2/abc/reader";
+import { MethodEmitter } from "./avm2/emit/method";
+import { ModuleEmitter } from "./avm2/emit/module";
+import { Output } from "./avm2/emit/output";
 import {
   IR_CallGetter,
   IR_CallInterface,
@@ -21,8 +21,8 @@ import {
   IR_GetGlobalScope,
   IR_Nip,
   Ir,
-} from "./ir/ir";
-import { Domain } from "./link/domain";
+} from "./avm2/ir/ir";
+import { Domain } from "./avm2/link/domain";
 import {
   TRAITS_Activation,
   TRAITS_Catch,
@@ -31,7 +31,7 @@ import {
   TRAITS_Null,
   TRAITS_Script,
   TRAITS_Void,
-} from "./link/traits";
+} from "./avm2/link/traits";
 
 export const U8: u8 = 0;
 export const U16: u8 = 1;

@@ -73,8 +73,9 @@ calling a change done; CI runs the same steps.
 
 ### AssemblyScript (`packages/codegen/assembly`)
 
-- Group files by compiler stage (`abc/`, later `ir/`, `emit/`), not by kind:
-  no `utils/`. A helper lives next to its only user.
+- Group files by bytecode, then by compiler stage (`avm2/abc/`, `avm2/link/`,
+  `avm2/ir/`, `avm2/emit/`), not by kind: no `utils/`. A helper lives next to
+  its only user; what AVM1 and AVM2 come to share lives beside `avm2/`.
 - Keep any object read through a raw pointer (`changetype<usize>`, `load`)
   referenced from a live variable, field or global; otherwise the collector
   may free it mid-read.
@@ -99,7 +100,7 @@ calling a change done; CI runs the same steps.
   test:checked` checks on every access.
 - Errors are sticky flags or VerifyError numbers, never `throw`: an abort
   kills the wasm instance, and the JIT must survive a malformed SWF.
-- Use avmplus' error numbers (`assembly/abc/constants.ts`) so rejections match
+- Use avmplus' error numbers (`assembly/avm2/abc/constants.ts`) so rejections match
   avmshell.
 
 ## Git
