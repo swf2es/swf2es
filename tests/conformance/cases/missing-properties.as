@@ -60,3 +60,9 @@ probe("vector for-in", function():* { var ks:Array = []; for (var k:String in v)
 probe("int proto method", function():* { return n.twice(); });
 delete Object.prototype.shared;
 delete Number.prototype.twice;
+// A Vector deletes a name it does not have, as any dynamic object; a primitive's call of a name no dynamic property has fails as a get.
+namespace custom = "custom";
+probe("delete vector", function():* { return (delete v.nope) + " " + (delete v[-1]) + " " + v.length; });
+probe("call int custom", function():* { return n.custom::foo(); });
+probe("call string custom", function():* { return s.custom::foo(); });
+probe("read int custom", function():* { return n.custom::foo; });

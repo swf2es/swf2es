@@ -837,7 +837,7 @@ for (const [kind, convert, fill] of VECTORS) {
   hooks[`${VEC}::${kind}`] = {
     create: withStorage,
     // As VectorBaseObject: any name but an index is refused, 1069 or 1056.
-    sealed: true,
+    refusesNames: true,
     getIndex: (o, i, rt) => {
       if (i >= o.$a.length) {
         throw rt.error("RangeError", 1125, i, o.$a.length);

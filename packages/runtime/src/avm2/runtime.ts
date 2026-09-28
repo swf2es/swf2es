@@ -120,6 +120,12 @@ export class Traits {
   cls: AsObject | null = null;
   interfaces = new Set<Traits>();
   dynamic = false;
+  /**
+   * Whether a dynamic class's instances refuse any name but their own and
+   * an index, getting it or setting it, as a Vector's do: they delete one,
+   * or have one in, as any dynamic object, which it never has.
+   */
+  refusesNames = false;
   /** How to allocate an instance, for classes whose instances hold native state. */
   create: ((traits: Traits) => AsObject) | null;
   getIndex?: IndexHook["getIndex"];
@@ -730,7 +736,7 @@ export class Runtime {
     }
 
     // A dynamic object has any dynamic name, but no other: obj.ns::x throws.
-    if (traits.dynamic && name !== null) {
+    if (traits.dynamic && !traits.refusesNames && name !== null) {
       return undefined;
     }
 
@@ -999,7 +1005,7 @@ export class Runtime {
         }
       }
 
-      if (o.$d) {
+      if (o.$d && !traits.refusesNames) {
         o.$d.set(name, v);
         return;
       }
@@ -1108,14 +1114,15 @@ export class Runtime {
       return this.getBound(o, traits, b, mn);
     }
 
-    if (typeof o === "object") {
+    // A name no dynamic property has, such as ns::x, fails as a get does.
+    const name = mn.dynamicName();
+    if (typeof o === "object" || name === null) {
       return this.getProperty(o, mn);
     }
 
-    const name = mn.dynamicName();
-    for (let p = name === null ? null : this.protoOf(o); p; p = p.$p) {
-      const v = p.$d?.get(name as string);
-      if (v !== undefined || p.$d?.has(name as string)) {
+    for (let p = this.protoOf(o); p; p = p.$p) {
+      const v = p.$d?.get(name);
+      if (v !== undefined || p.$d?.has(name)) {
         return v;
       }
     }
@@ -1264,6 +1271,7 @@ export class Runtime {
   specializeVector(base: AsObject, param: AsObject): AsObject {
     const itraits = new Traits(`__AS3__.vec::Vector.<${param.$it.name}>`, base.$it);
     itraits.dynamic = base.$it.dynamic;
+    itraits.refusesNames = base.$it.refusesNames;
     const cls = Object.create(Object.getPrototypeOf(base));
     cls.$d = null;
     cls.$it = itraits;
@@ -1385,7 +1393,8 @@ export class Runtime {
 
     itraits.describe(desc.instance);
     const hooks = this.classHooks[qualified];
-    itraits.dynamic = !desc.sealed && !hooks?.sealed;
+    itraits.dynamic = !desc.sealed;
+    itraits.refusesNames = !!hooks?.refusesNames;
 
     // A class's allocation, bound to the runtime; its subclasses inherit it.
     const create = hooks?.create;
@@ -2228,11 +2237,8 @@ export interface IndexHook {
 /** How a builtin class differs from others: allocation, index access, calls and construction. */
 export interface ClassHook {
   create?: (traits: Traits, rt: Runtime) => AsObject;
-  /**
-   * Whether its instances take no dynamic names although the class is
-   * dynamic, as a Vector's refuse any that is not an index.
-   */
-  sealed?: boolean;
+  /** Whether its instances refuse any name but their own and an index, as a Vector's (Traits.refusesNames). */
+  refusesNames?: boolean;
   getIndex?: IndexHook["getIndex"];
   setIndex?: IndexHook["setIndex"];
   hasIndex?: IndexHook["hasIndex"];
