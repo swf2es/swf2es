@@ -49,6 +49,7 @@ Totals, encode plus decode, in ms, as roadmap step 7 went:
 | Builtin traits kept, for-in names taken once, ASCII UTF-8 | 593 | 751 |
 | Elements read and written by number | 341 | 458 |
 | Defining scripts kept, classes matched first | 313 | 414 |
+| Structured control flow (#22) | 289 | 410 |
 | AwayFL JIT, headless | 574 | 728 |
 | PepperFlash | 188 | 83 |
 | avmshell (the oracle, its JIT in a container) | 107 | 74 |
@@ -56,6 +57,35 @@ Totals, encode plus decode, in ms, as roadmap step 7 went:
 Each change was found with `node --cpu-prof` on the benchmark. AMF3 and
 JSON take about 1250 and 2780 ms; they are the runtime's own code
 (amf.ts, json.ts), not generated.
+
+From step 7.4 on, a change is timed against the build before it with
+`tests/programs/ab.ts`: both builds run as3pb in turn, interleaved
+(A, B, B, A, ...), each run in a process of its own, so that both see the
+same load on the machine. Kept are the changes whose gain repeats; a build
+against a copy of itself differs by up to 2 or 3%. These were measured
+with another process busy on the machine, so they run slower than the
+table above; medians of 7 to 9 runs each, in ms:
+
+| Step 7.4 change | ByteArray | Domain memory | Kept |
+|---|---|---|---|
+| Vector length 0 as a new array, grown by pushing (packed) | −10.3% | −8.9% | yes |
+| Class coercions without the builtin switch, traits on the reference | −8.2% | −14.4% | yes |
+| Typed Vector elements by kind, not through the hooks | −7.1% | −12.9% | yes |
+| ByteArray methods' arguments passed, not a rest array spread | −6.2% | −1.3% | yes |
+| Vector push by `arguments`, not a rest array | −1.2% | −2.0% | no |
+| Vector grown by pushing, without the new array for 0 (runs one after another, not interleaved) | +2% | +4% | no |
+| findDef's global kept on the multiname | −0.6% | +0.9% | no |
+| Vector constructed by pushing (packed) | +1.7% | −1.3% | no |
+| Domain memory loads and stores inline, not the helpers | −0.9% | −2.3% | no |
+| **Step 7.4 against #22** | **325 → 229 (−29.5%)** | **437 → 302 (−30.9%)** | |
+| AwayFL, same load, cold / warm | 559 / 409–462 | 709 / 622–701 | |
+
+What paid: a runtime helper that many call sites share with many kinds of
+values, where the emitter knows the type and can call one made for it
+(`coerceTo`, the Vector accessors); arrays kept as V8 wants them, packed
+and emptied without a call into its runtime; and no rest arrays on calls
+made millions of times. What did not: small helpers V8 already inlines
+(domain memory's, `findDef`).
 
 ### The AssemblyScript runtime
 
