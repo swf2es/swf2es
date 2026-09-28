@@ -4,6 +4,10 @@
 // "set:" for accessors and "uri::name" outside the public namespace. And how
 // the builtin classes differ from others: how their instances hold native
 // state, and what calling or constructing them does.
+import { readObject, writeObject } from "./amf.js";
+import { byteArrayHook, byteArrayNatives, bytesOf, domainNatives } from "./bytearray.js";
+import { dateHook, dateNatives } from "./date.js";
+import { jsonNatives } from "./json.js";
 import { messages } from "./messages.js";
 import { Namespace, publicNs, qname } from "./names.js";
 import { convertDoubleToString, convertDoubleToStringRadix, DTOSTR_PRECISION } from "./numbers.js";
@@ -368,6 +372,44 @@ const natives: Natives = {
 
   // As Toplevel::bugzilla: the bug fixes the builtins' AS3 asks about, all
   // in effect at the latest SWF version, as avmshell runs.
+  // Class aliases and AMF.
+  "flash.net::registerClassAlias": (rt) => (aliasName: Value, cls: Value) => {
+    if (cls === null || cls === undefined) {
+      throw rt.error("TypeError", 2007, "classObject");
+    }
+
+    if (aliasName === null || aliasName === undefined) {
+      throw rt.error("TypeError", 2007, "aliasName");
+    }
+
+    const name = rt.toString(aliasName);
+    if (name === "") {
+      throw rt.error("ArgumentError", 2085, "aliasName");
+    }
+
+    rt.registerClassAlias(name, cls);
+  },
+  "flash.net::getClassByAlias": (rt) => (aliasName: Value) => {
+    if (aliasName === null || aliasName === undefined) {
+      throw rt.error("TypeError", 2007, "aliasName");
+    }
+
+    const name = rt.toString(aliasName);
+    if (name === "") {
+      throw rt.error("ArgumentError", 2085, "aliasName");
+    }
+
+    return rt.classByAlias(name);
+  },
+  "flash.net::ObjectEncoding.get:dynamicPropertyWriter": plain(() => null),
+  "flash.utils::ByteArray#writeObject": (rt) =>
+    function (this: AsObject, v: Value) {
+      writeObject(rt, bytesOf(rt, this), v);
+    },
+  "flash.utils::ByteArray#readObject": (rt) =>
+    function (this: AsObject) {
+      return readObject(rt, bytesOf(rt, this));
+    },
   bugzilla: plain((n: number) => n === 504525 || n === 574600 || n === 661330),
 
   // Error
@@ -377,15 +419,17 @@ const natives: Natives = {
   "Error#getStackTrace": plain(() => null),
 
   // avmshell's System
+  // avmshell's console skips NUL characters, which strings may hold.
   "avmplus::System.trace": (rt) => (args: Value) => {
     rt.print(
       elements(args)
         .map((v) => rt.toString(v))
-        .join(" "),
+        .join(" ")
+        .replaceAll("\0", ""),
     );
   },
   "avmplus::System.write": (rt) => (s: Value) => {
-    rt.print(rt.toString(s));
+    rt.print(rt.toString(s).replaceAll("\0", ""));
   },
   "avmplus::System.avmplus:System::getArgv": (rt) => () => rt.array([]),
   "avmplus::System.getAvmplusVersion": plain(() => "swf2es"),
@@ -747,6 +791,8 @@ const hooks: Record<string, ClassHook> = {
     construct: newQName,
     call: newQName,
   },
+  "flash.utils::ByteArray": byteArrayHook,
+  Date: dateHook,
   RegExp: {
     construct: newRegExp,
     call: (rt, cls, args) =>
@@ -764,16 +810,16 @@ const hooks: Record<string, ClassHook> = {
 for (const [kind, convert, fill] of VECTORS) {
   hooks[`${VEC}::${kind}`] = {
     create: withStorage,
-    getIndex: (o, i) => {
+    getIndex: (o, i, rt) => {
       if (i >= o.$a.length) {
-        throw o.$traits.cls.$rt.error("RangeError", 1125, i, o.$a.length);
+        throw rt.error("RangeError", 1125, i, o.$a.length);
       }
 
       return o.$a[i];
     },
-    setIndex: (o, i, v) => {
+    hasIndex: (o, i) => i < o.$a.length,
+    setIndex: (o, i, v, rt) => {
       const cls = o.$traits.cls;
-      const rt: Runtime = cls.$rt;
       if (i > o.$a.length || (i === o.$a.length && o.$fixed)) {
         throw rt.error("RangeError", 1125, i, o.$a.length);
       }
@@ -847,7 +893,13 @@ function vectorOf(rt: Runtime, param: AsObject | null): AsObject {
 }
 
 export function builtinNatives(): Natives {
-  return natives;
+  return {
+    ...natives,
+    ...byteArrayNatives(),
+    ...domainNatives(),
+    ...dateNatives(),
+    ...jsonNatives(),
+  };
 }
 
 export function builtinHooks(): Record<string, ClassHook> {

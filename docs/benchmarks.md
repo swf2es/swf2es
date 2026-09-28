@@ -35,6 +35,24 @@ Decoding includes the structural verifier's checks, without types.
 | as3pb, avmshell build (`tests/programs`) | 209 KB | 96,575 | 0.128 ms | 2.90 ms | 30 ns |
 | Tamarin `as3/Vector/initializerLargeVector` | 3.8 MB | 1,002,071 | 1.33 ms | 68.2 ms | 68 ns |
 
+### Generated code: as3pb
+
+as3pb's benchmark (100 messages, 300 iterations), compiled by swf2es and
+run in node by `tests/programs`, with its output matching avmshell's. The
+first working version: every method a dispatcher, and property access and
+comparison mostly through the runtime's generic operations (roadmap step
+7 is next). Totals, encode plus decode, in ms:
+
+| Path | swf2es, node 24 | AwayFL JIT, headless | avmshell (oracle) |
+|---|---|---|---|
+| AS3PB through ByteArray | 1104 | 574 | 107 |
+| AS3PB through domain memory | 1412 | 728 | 74 |
+| AMF3 | 1697 | | 601 |
+| JSON | 3293 | | 2563 |
+
+AMF3 and JSON are the runtime's own code (amf.ts, json.ts), not generated.
+avmshell's numbers are its JIT in the oracle's container, for scale only.
+
 ### The AssemblyScript runtime
 
 codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator

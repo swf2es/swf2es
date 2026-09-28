@@ -59,8 +59,10 @@ test("domain memory loads and stores little-endian, and rejects addresses outsid
   assert.throws(() => rt.si8(0, -1), /Error #1506/);
 });
 
-test("domain memory with none set throws AS3's RangeError, not the host's TypeError", () => {
+test("domain memory with none set is 1024 bytes of scratch memory, as avmplus' DomainEnv's", () => {
   const rt = avm2.createRuntime();
-  assert.throws(() => rt.li8(0), /Error #1506/);
-  assert.throws(() => rt.sf64(1, 0), /Error #1506/);
+  rt.si32(7, 1020);
+  assert.equal(rt.li32(1020), 7);
+  assert.throws(() => rt.li32(1021), /Error #1506/);
+  assert.throws(() => rt.sf64(1, 1017), /Error #1506/);
 });

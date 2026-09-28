@@ -264,6 +264,15 @@ storage, and what calling or constructing `int`, `String`, `Object`,
 own, generated from its `ErrorConstants.cpp` into `messages.ts`, which
 stays MPL-2.0.
 
+Where avmplus' behaviour is its own algorithm rather than a language rule,
+the runtime translates it, so that its output is avmplus' byte for byte:
+number formatting (`numbers.ts`), Array's sort (`sort.ts`), ByteArray with
+its capacity and UTF-8 (`bytearray.ts`), AMF3 (`amf.ts`) and JSON
+(`json.ts`). These are MPL-2.0 as their sources are. Domain memory is
+avmshell's `avmplus.Domain`'s: 1024 bytes of scratch memory until a
+ByteArray is set as it. Date is JavaScript's Date, with avmplus' string
+formats.
+
 avmplus' standard library (`Object`, `Array`, `String`, `Math`, `Date`,
 `RegExp`, `JSON`, `Vector`, `ByteArray` and so on) is mostly AS3 compiled
 into `builtin.abc`; only its `native` methods are C++. swf2es compiles
@@ -283,7 +292,9 @@ only, so the player implements all of it.
   The oracle's avmshell is a 32-bit x86 build, whose C++ double arithmetic
   may run in the x87's extended precision. Where that shows, swf2es follows
   IEEE doubles and the cases avoid it: `Number.toString(radix)` of a value
-  above 2^53 writes digits that are neither exact nor a double's.
+  above 2^53 writes digits that are neither exact nor a double's, and in
+  its JIT a multiplication past 2^53 comes out exact, as as3pb's wire
+  checksum shows (`tests/programs` compares all but that line).
   for-in and for each visit an object's dynamic properties in the order
   they were added; avmplus visits them in its hashtable's, which for names
   that are not indexes follows their interned strings' addresses, so the
