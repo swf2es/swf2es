@@ -65,3 +65,16 @@ var dates:Array = back([when, {at: when}, new Date(0)]);
 trace("dates back", dates[0].time, dates[0] is Date, dates[0] == dates[1].at, dates[2].time, dates[0].toUTCString());
 var invalid:* = back(new Date(NaN));
 trace("invalid back", invalid is Date, isNaN(invalid.time));
+// Numeric Vectors large enough to grow the ByteArray while they are written.
+var bigD:Vector.<Number> = new Vector.<Number>();
+var bigI:Vector.<int> = new Vector.<int>();
+var bigU:Vector.<uint> = new Vector.<uint>();
+for (var bv:int = 0; bv < 5000; bv++) { bigD.push(bv / 3); bigI.push(bv * -7); bigU.push(0xfffffff0 + bv % 16); }
+var grow:ByteArray = new ByteArray();
+grow.writeUTFBytes("prefix");
+grow.writeObject(bigD); grow.writeObject(bigI); grow.writeObject(bigU);
+var sumBytes:uint = 0;
+for (var gb:uint = 0; gb < grow.length; gb++) sumBytes = (sumBytes * 31 + grow[gb]) >>> 0;
+grow.position = 6;
+var gd:Vector.<Number> = grow.readObject(), gi:Vector.<int> = grow.readObject(), gu:Vector.<uint> = grow.readObject();
+trace("big vectors", grow.length, sumBytes, gd.length, gd[4999] == bigD[4999], gi[4999], gu[4999], gu[15]);

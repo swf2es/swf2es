@@ -135,11 +135,6 @@ class Writer {
     this.out.view.setFloat64(at, v, false);
   }
 
-  private u32(v: number): void {
-    const at = this.out.shortWrite(4);
-    this.out.view.setUint32(at, v >>> 0);
-  }
-
   /** As WriteString: the empty string as 1, else a reference to it or its UTF-8. */
   string(s: string): void {
     if (s.length === 0) {
@@ -321,13 +316,19 @@ class Writer {
     const elements: Value[] = v.$a;
     this.uint29((elements.length << 1) | 1);
     this.u8(v.$fixed ? 1 : 0);
+    // A numeric Vector's elements in bytes reserved at once, which may move
+    // the buffer: its view is read after.
     if (kind === kVectorDouble) {
-      for (const e of elements) {
-        this.double(e);
+      const at = this.out.shortWrite(elements.length * 8);
+      const view = this.out.view;
+      for (let i = 0; i < elements.length; i++) {
+        view.setFloat64(at + i * 8, elements[i], false);
       }
     } else if (kind === kVectorInt || kind === kVectorUint) {
-      for (const e of elements) {
-        this.u32(e);
+      const at = this.out.shortWrite(elements.length * 4);
+      const view = this.out.view;
+      for (let i = 0; i < elements.length; i++) {
+        view.setUint32(at + i * 4, elements[i] >>> 0);
       }
     } else {
       const param = v.$traits.cls.$param;
