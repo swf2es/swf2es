@@ -57,3 +57,10 @@ var zero:ByteArray = new ByteArray();
 ByteArray.defaultObjectEncoding = 3;
 trace("default", zero.objectEncoding, new ByteArray().objectEncoding, ByteArray.defaultObjectEncoding);
 try { zero.writeObject(1); } catch (e:Error) { trace("amf0", e.errorID); }
+// Dates: a reference into the objects' table, else 1 and the time as a double.
+var when:Date = new Date(Date.UTC(2004, 8, 12, 11, 11, 11, 500));
+trace("date", amf(when), amf(new Date(NaN)), amf([when, when]));
+var dates:Array = back([when, {at: when}, new Date(0)]);
+trace("dates back", dates[0].time, dates[0] is Date, dates[0] == dates[1].at, dates[2].time, dates[0].toUTCString());
+var invalid:* = back(new Date(NaN));
+trace("invalid back", invalid is Date, isNaN(invalid.time));

@@ -5,12 +5,14 @@
 // not -0, and within 29 bits (avmshell is a 32-bit build). Doubles and
 // Vector elements are big-endian whatever the ByteArray's byte order: avmplus
 // writes AMF through a wrapper of its own.
-// Dates, XML and Dictionaries are not supported yet.
+// Dates too, as a reference or their time; XML and Dictionaries are not
+// supported yet.
 //
 // Translated from avmplus' core/AvmSerializer.cpp, this file is subject to
 // the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 import { type Bytes, bytesOf, fromUtf8, utf8 } from "./bytearray.js";
 import { NS_Public, publicNs, qname } from "./names.js";
+import { setDouble } from "./numbers.js";
 import type { AsObject, Runtime, Traits, Value } from "./runtime.js";
 
 const kUndefined = 0;
@@ -20,6 +22,7 @@ const kTrue = 3;
 const kInteger = 4;
 const kDouble = 5;
 const kString = 6;
+const kDate = 8;
 const kArray = 9;
 const kObject = 10;
 const kByteArray = 12;
@@ -129,7 +132,7 @@ class Writer {
 
   private double(v: number): void {
     const at = this.out.shortWrite(8);
-    this.out.view.setFloat64(at, v);
+    setDouble(this.out.view, at, v, false);
   }
 
   private u32(v: number): void {
@@ -207,7 +210,14 @@ class Writer {
     }
 
     const traits: Traits = rt.traitsOf(v);
-    if (isA(traits, "Array")) {
+    if (isA(traits, "Date")) {
+      // As WriteDate: in the objects' table; new, an odd reference, 1, then its time.
+      this.u8(kDate);
+      if (!this.reference(v)) {
+        this.uint29(1);
+        this.double(v.$time ?? Number.NaN);
+      }
+    } else if (isA(traits, "Array")) {
       this.u8(kArray);
       this.array(v);
     } else if (isA(traits, "flash.utils::ByteArray")) {
@@ -219,11 +229,7 @@ class Writer {
       }
     } else if (vectorKind(traits)) {
       this.vector(v, vectorKind(traits));
-    } else if (
-      isA(traits, "Date") ||
-      isA(traits, "XML") ||
-      isA(traits, "flash.utils::Dictionary")
-    ) {
+    } else if (isA(traits, "XML") || isA(traits, "flash.utils::Dictionary")) {
       throw rt.unsupported(`AMF3 for ${traits.name}`);
     } else {
       this.u8(kObject);
@@ -453,6 +459,18 @@ class Reader {
         return this.double();
       case kString:
         return this.string();
+      case kDate: {
+        // As ReadDate: a reference, or a new Date of the time that follows.
+        const ref = this.uint29();
+        if ((ref & 1) === 0) {
+          return this.find(this.objects, ref >>> 1);
+        }
+
+        const date = rt.constructClass(rt.builtinClass("Date"), []);
+        date.$time = this.double();
+        this.objects.push(date);
+        return date;
+      }
       case kArray:
         return this.array();
       case kObject:
