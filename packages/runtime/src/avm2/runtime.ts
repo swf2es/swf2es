@@ -1589,10 +1589,11 @@ export class Runtime {
         }
       } else {
         // Its script is the one running, and has not made it yet.
-        (itraits.pendingInterfaces ??= []).push(() => {
-          delete (mn as Multiname & { $cls?: AsObject }).$cls;
-          return this.resolveName(mn)?.$it ?? null;
-        });
+        if (!itraits.pendingInterfaces) {
+          itraits.pendingInterfaces = [];
+        }
+
+        itraits.pendingInterfaces.push(() => this.resolveName(mn)?.$it ?? null);
       }
     }
 
