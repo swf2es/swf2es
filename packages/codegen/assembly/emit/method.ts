@@ -7,7 +7,12 @@
 // JavaScript (int arithmetic ends in `| 0`), anything else calls the
 // runtime, which does what avmplus does at run time.
 import { Abc } from "../abc/abc";
-import { METHOD_NeedArguments, METHOD_NeedRest } from "../abc/constants";
+import {
+  CONSTANT_Multiname,
+  CONSTANT_TypeName,
+  METHOD_NeedArguments,
+  METHOD_NeedRest,
+} from "../abc/constants";
 import {
   OP_add,
   OP_add_i,
@@ -100,7 +105,7 @@ import {
   opcodeNames,
 } from "../abc/opcodes";
 import { IR_CheckNull, IR_Coerce, Ir } from "../ir/ir";
-import { Domain } from "../link/domain";
+import { Domain, URI_None } from "../link/domain";
 import {
   BUILTIN_Any,
   BUILTIN_Boolean,
@@ -109,6 +114,8 @@ import {
   BUILTIN_Object,
   BUILTIN_String,
   BUILTIN_Uint,
+  TRAITS_Instance,
+  TraitsTable,
   TYPE_Any,
 } from "../link/traits";
 import { Output } from "./output";
@@ -796,11 +803,124 @@ export class MethodEmitter {
     }
   }
 
-  /** A reference to type t for the runtime. */
+  /**
+   * A reference to type t for the runtime, by name, as types are known
+   * across modules: null for *, a string for the builtin primitive types,
+   * rt.cls(namespace, "Name") for a class, rt.vector(type) for Vector.<T>.
+   */
   typeRef(t: i32): void {
-    this.out.text("rt.type(");
-    this.out.int(t);
-    this.out.text(")");
+    const out = this.out;
+    const domain = this.domain;
+    const traits = domain.traits;
+    if (t < 0) {
+      out.text("null");
+      return;
+    }
+
+    switch (domain.builtin(t)) {
+      case BUILTIN_Int:
+        out.text('"int"');
+        return;
+      case BUILTIN_Uint:
+        out.text('"uint"');
+        return;
+      case BUILTIN_Number:
+        out.text('"Number"');
+        return;
+      case BUILTIN_Boolean:
+        out.text('"Boolean"');
+        return;
+      case BUILTIN_String:
+        out.text('"String"');
+        return;
+      case BUILTIN_Object:
+        out.text('"Object"');
+        return;
+      default:
+        break;
+    }
+
+    if (t === domain.voidType) {
+      out.text('"void"');
+    } else if (traits.kind[t] !== TRAITS_Instance) {
+      out.text("null");
+    } else if (traits.param[t] !== TYPE_Any) {
+      out.text("rt.vector(");
+      this.typeRef(traits.param[t]);
+      out.text(")");
+    } else {
+      const index = traits.abc[t];
+      const abc = domain.abcs[index];
+      const pool = abc.pool;
+      let mn = abc.instanceName[traits.owner[t]];
+      if (pool.mnKind[mn] === CONSTANT_TypeName) {
+        mn = pool.mnA[mn];
+      }
+
+      let ns = pool.mnA[mn];
+      if (pool.mnKind[mn] === CONSTANT_Multiname) {
+        ns = pool.nsSetMembers[pool.nsSetStart[ns]];
+      }
+
+      const name = domain.abcString[index][pool.mnB[mn]];
+      out.text("rt.cls(");
+      this.namespace(domain.abcNs[index][ns]);
+      out.text(", ");
+      out.string(domain.stringPtr[name], domain.stringLength[name]);
+      out.text(")");
+    }
+  }
+
+  /** A non-private namespace by its interned id, as rt.ns(type, uri). */
+  namespace(id: u32): void {
+    const out = this.out;
+    out.text("rt.ns(");
+    out.uint(this.domain.nsType[id]);
+    out.text(", ");
+    this.uri(this.domain.nsUri[id]);
+    out.text(")");
+  }
+
+  uri(id: u32): void {
+    if (id === URI_None) {
+      this.out.text("null");
+      return;
+    }
+
+    const domain = this.domain;
+    this.out.string(domain.stringPtr[id], domain.stringLength[id]);
+  }
+
+  /** "uri::name", or just the name in a public namespace with an empty URI. */
+  qualified(ns: u32, name: u32): string {
+    const domain = this.domain;
+    const nameText = String.UTF8.decodeUnsafe(domain.stringPtr[name], domain.stringLength[name]);
+    const uri = domain.nsUri[ns];
+    if (uri === URI_None) {
+      return nameText;
+    }
+
+    const uriText = String.UTF8.decodeUnsafe(domain.stringPtr[uri], domain.stringLength[uri]);
+    return uriText.length ? `${uriText}::${nameText}` : nameText;
+  }
+
+  /** The qualified name of the class traits t belong to. */
+  className(traits: TraitsTable, t: u32): string {
+    const domain = this.domain;
+    const index = traits.abc[t];
+    const abc = domain.abcs[index];
+    const pool = abc.pool;
+    let mn = abc.instanceName[traits.owner[t]];
+    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+      mn = pool.mnA[mn];
+    }
+
+    let ns = pool.mnA[mn];
+    if (pool.mnKind[mn] === CONSTANT_Multiname) {
+      ns = pool.nsSetMembers[pool.nsSetStart[ns]];
+    }
+
+    return this.qualified(domain.abcNs[index][ns], domain.abcString[index][pool.mnB[mn]]);
   }
 
   /** Pool string `index` as a JavaScript string literal. */

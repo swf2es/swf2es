@@ -7,6 +7,7 @@ import { readAbc } from "./abc/parse";
 import { readConstantPool } from "./abc/pool";
 import { PADDING, Reader } from "./abc/reader";
 import { MethodEmitter } from "./emit/method";
+import { ModuleEmitter } from "./emit/module";
 import {
   IR_CallGetter,
   IR_CallInterface,
@@ -527,6 +528,14 @@ export function domainIr(body: u32): string {
   }
 
   return out.join("\n");
+}
+
+/** The ES module the domain's last ABC compiles to. */
+export function domainModule(): string {
+  const emitter = new ModuleEmitter(domain, <u32>(domain.abcs.length - 1));
+  emitter.module();
+  const out = emitter.out;
+  return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
 }
 
 /**
