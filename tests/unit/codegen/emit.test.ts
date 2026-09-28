@@ -372,13 +372,16 @@ test("a module lays out traits that verifying its methods did not resolve", { sk
   );
 });
 
-/** F[index]'s source in a module's `const F = [...]`: entries start on a line after one ending in [ or ,. */
+/**
+ * F[index]'s source in a module's `const F = [...]`: entries start on a
+ * line after one ending in [ or ,, with the method's type table or not.
+ */
 function factoryAt(factories: string, index: number): string {
   const lines = factories.split("\n");
   let at = -1;
   for (let i = 1; i < lines.length; i++) {
     if (
-      /^ {4}(\(scope, sup\) =>|rt\.)/.test(lines[i]) &&
+      /^ {4}(\(scope, sup\) =>|\(\(\.\.\.T\) => \(scope, sup\) =>|rt\.)/.test(lines[i]) &&
       /[[,]$/.test(lines[i - 1]) &&
       ++at === index
     ) {

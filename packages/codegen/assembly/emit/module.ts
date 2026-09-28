@@ -8,7 +8,6 @@
 //   export default function (rt) {
 //     const N = [...namespaces], S = [...namespace sets], M = [...multinames];
 //     const F = [...method factories, (scope, sup) => function (...) {...}];
-//     const T = [...the classes and Vectors the methods refer to];
 //     const A = rt.abc({ hash, linked, names: M, classes, scripts, activations });
 //     return A;
 //   }
@@ -16,7 +15,15 @@
 // A factory makes a method's function once its scope chain is known: `scope`
 // is the chain it captured, and `sup` the base class of the class it is a
 // method of, for the super instructions. Methods reach the module's own
-// descriptors, such as the class a newclass creates, through A.
+// descriptors, such as the class a newclass creates, through A. A method
+// that refers to classes or Vectors has them in a table of its own, T,
+// made as the module loads:
+//
+//     ((...T) => (scope, sup) => function (...) {... T[0] ...})(rt.cls(...))
+//
+// numbered as the method first refers to each, so that its code does not
+// depend on the module's other methods: compiled alone, as lazy JIT will
+// compile it, it comes out as it is in the module.
 import { BodyDecoder, verifyMethods } from "../abc/code";
 import * as C from "../abc/constants";
 import { Domain, NS_Private } from "../link/domain";
@@ -28,6 +35,10 @@ import { Output } from "./output";
 export class ModuleEmitter {
   methods: MethodEmitter;
   out: Output;
+  /** Each compiled method's entry in F: its body, and where it starts and ends in the module. */
+  entryBody: u32[] = [];
+  entryStart: u32[] = [];
+  entryEnd: u32[] = [];
   domain: Domain;
   index: u32;
 
@@ -50,10 +61,7 @@ export class ModuleEmitter {
     this.methods.map.reset();
     out.text("export default function (rt) {\n");
     this.names();
-    this.methods.types.length = 0;
-    this.methods.typeIndex.clear();
     this.functions();
-    this.typeTable();
     out.text("  const A = rt.abc({\n    hash: ");
     this.text(this.index < <u32>hashes.length ? hashes[this.index] : "");
     out.text(",\n    linked: [");
@@ -231,27 +239,46 @@ export class ModuleEmitter {
       }
 
       decoder.decode(<u32>body, domain.traits.scopeOf(global));
-      out.text("(scope, sup) => ");
-      this.methods.method(m, global, decoder.ir);
+      this.entryBody.push(<u32>body);
+      this.entryStart.push(out.length);
+      this.factory(m, global, decoder);
+      this.entryEnd.push(out.length);
     }
 
     out.text("];\n");
   }
 
   /**
-   * T: the classes and Vectors the methods refer to, made once as the
-   * module loads, after F, whose methods run only after it has.
+   * Method m's entry in F, from its IR in `decoder`: `(scope, sup) =>
+   * function`, and if it refers to classes or Vectors, inside a function
+   * of its table of them. The same whether the module is being written or
+   * the method compiled alone.
    */
-  typeTable(): void {
+  factory(m: u32, global: u32, decoder: BodyDecoder): void {
     const out = this.out;
-    const types = this.methods.types;
-    out.text("  const T = [");
-    for (let k = 0; k < types.length; k++) {
-      out.text(k ? ", " : "");
-      this.methods.typeExpr(types[k]);
+    const methods = this.methods;
+    methods.types.length = 0;
+    methods.typeIndex.clear();
+    const at = out.length;
+    const marks = methods.map.count;
+    out.text("(scope, sup) => ");
+    methods.method(m, global, decoder.ir);
+    const types = methods.types;
+    if (types.length === 0) {
+      return;
     }
 
-    out.text("];\n");
+    // The table's function goes before the method, which it now knows the types of.
+    const head = "((...T) => ";
+    out.insert(at, head);
+    methods.map.shift(marks, <u32>head.length);
+    out.text(")(");
+    for (let k = 0; k < types.length; k++) {
+      out.text(k ? ", " : "");
+      methods.typeExpr(types[k]);
+    }
+
+    out.text(")");
   }
 
   /**

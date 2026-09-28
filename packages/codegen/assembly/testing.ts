@@ -2,6 +2,7 @@
 // exports to codegen.wasm.
 import { Abc } from "./abc/abc";
 import { BodyDecoder, verifyMethods } from "./abc/code";
+import * as C from "./abc/constants";
 import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./abc/opcodes";
 import { readAbc } from "./abc/parse";
 import { readConstantPool } from "./abc/pool";
@@ -542,10 +543,29 @@ export function domainModule(hashes: string = ""): string {
   const map = new Output();
   emitter.sourceMap(map);
   lastSourceMap = String.UTF8.decodeUnsafe(changetype<usize>(map.bytes), map.length);
+  // The entries' bytes copied into one buffer, decoded once.
+  const entries = new Output();
+  for (let k = 0; k < emitter.entryBody.length; k++) {
+    const start = emitter.entryStart[k];
+    const length = emitter.entryEnd[k] - start;
+    entries.uint(emitter.entryBody[k]);
+    entries.byte(1);
+    entries.reserve(length);
+    memory.copy(
+      changetype<usize>(entries.bytes) + entries.length,
+      changetype<usize>(out.bytes) + start,
+      length,
+    );
+    entries.length += length;
+    entries.byte(2);
+  }
+
+  lastEntries = String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
   return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
 }
 
 let lastSourceMap = "";
+let lastEntries = "";
 
 /** The source map of the module domainModule wrote last, as JSON: its code's AS3 lines, from debugline. */
 export function domainSourceMap(): string {
@@ -576,6 +596,62 @@ export function domainEmit(body: u32): string {
   emitter.method(method, global, decoder.ir);
   const out = emitter.out;
   return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
+}
+
+/**
+ * Method bodies of the domain's last ABC compiled alone, as lazy JIT will
+ * compile them: each its entry in F, as the module writes it. `bodies` are
+ * their indices, comma-separated, in the order to compile them; `reuse`
+ * compiles them all with one emitter, else each with a new one. The ABC is
+ * verified once first, which a closure's scope needs. Written as
+ * domainModuleEntries writes them, leaving out a native or an unverified.
+ */
+export function domainEmitEach(bodies: string, reuse: bool): string {
+  const index = <u32>(domain.abcs.length - 1);
+  const abc = domain.abcs[index];
+  const results = verifyMethods(domain, index);
+  const decoder = new BodyDecoder(abc, domain.abcBase[index], domain, index);
+  const entries = new Output();
+  let emitter = new ModuleEmitter(domain, index);
+  const list = bodies.split(",");
+  for (let k = 0; k < list.length; k++) {
+    const body = <u32>I32.parseInt(list[k]);
+    const method = abc.bodyMethod[body];
+    if (results[body] !== 0 || abc.methodFlags[method] & C.METHOD_Native) {
+      continue;
+    }
+
+    if (!reuse) {
+      emitter = new ModuleEmitter(domain, index);
+    }
+
+    const global = domain.methodStart[index] + method;
+    decoder.decode(body, domain.traits.scopeOf(global));
+    const out = emitter.out;
+    out.reset();
+    emitter.methods.map.reset();
+    emitter.factory(method, global, decoder);
+    entries.uint(body);
+    entries.byte(1);
+    entries.reserve(out.length);
+    memory.copy(
+      changetype<usize>(entries.bytes) + entries.length,
+      changetype<usize>(out.bytes),
+      out.length,
+    );
+    entries.length += out.length;
+    entries.byte(2);
+  }
+
+  return String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
+}
+
+/**
+ * The compiled methods' entries in F of the module domainModule wrote last:
+ * for each, its body's index, U+0001, its entry, U+0002.
+ */
+export function domainModuleEntries(): string {
+  return lastEntries;
 }
 
 /**
