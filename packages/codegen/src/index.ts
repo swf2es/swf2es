@@ -42,10 +42,27 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       `codegen.wasm is version ${version} but the wrapper expects ${COMPILER_VERSION}`,
     );
   }
+
+  // codegen.wasm uses AssemblyScript's minimal runtime, which collects
+  // garbage only when asked. Nothing runs in wasm between calls, so that is
+  // when: after a call that grew memory by COLLECT_AFTER bytes.
+  let collectedAt = wasm.memory.buffer.byteLength;
+  const collected = <T>(result: T): T => {
+    const size = wasm.memory.buffer.byteLength;
+    if (size > collectedAt + COLLECT_AFTER) {
+      wasm.__collect();
+      collectedAt = size;
+    }
+
+    return result;
+  };
+
   return {
     abcVersion(abc) {
-      const packed = wasm.abcVersion(abc);
+      const packed = collected(wasm.abcVersion(abc));
       return packed < 0 ? null : { major: packed >>> 16, minor: packed & 0xffff };
     },
   };
 }
+
+const COLLECT_AFTER = 64 << 20;

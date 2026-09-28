@@ -11,7 +11,9 @@ JavaScript. It has one compiler, which runs at two different times:
 The compiler is written in AssemblyScript and ships as `codegen.wasm`, with
 a thin TypeScript wrapper. The one wasm binary runs in browser workers, in
 node, and in any server-side wasm runtime (for example wazero in a Go
-server), so there is only one implementation to keep correct.
+server), so there is only one implementation to keep correct. It uses
+AssemblyScript's minimal runtime, whose garbage the wrapper collects between
+calls (see [benchmarks.md](benchmarks.md#the-assemblyscript-runtime)).
 
 ## The JIT/AOT invariant
 

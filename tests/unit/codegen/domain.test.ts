@@ -210,3 +210,32 @@ test("the first builtin ABC supplies the builtin types", {
     assert.ok(Number(found[i + 1]) >= 0, `${found[i]} not found`);
   }
 });
+
+test("collecting garbage between calls keeps the domain and frees what was dropped", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  testing.domainReset(SWF_31);
+  testing.domainAdd(builtin, true);
+  testing.__collect();
+  assert.notEqual(find("", "Object"), "none");
+  assert.match(testing.domainVerifyAll() as string, /^verified 630 of 630 bodies$/);
+
+  // Domains dropped by domainReset are freed, so memory stops growing.
+  for (let i = 0; i < 50; i++) {
+    testing.domainReset(SWF_31);
+    testing.domainAdd(builtin, true);
+    testing.domainVerifyAll();
+    testing.__collect();
+  }
+
+  const size = testing.memory.buffer.byteLength;
+  for (let i = 0; i < 50; i++) {
+    testing.domainReset(SWF_31);
+    testing.domainAdd(builtin, true);
+    testing.domainVerifyAll();
+    testing.__collect();
+  }
+
+  assert.equal(testing.memory.buffer.byteLength, size);
+});

@@ -27,14 +27,35 @@ each. Numbers are for comparing changes on one machine, not across machines.
 
 `pnpm bench [file.abc...]` measures these; without files it uses abcdump.abc.
 
+Decoding includes the structural verifier's checks, without types.
+
 | ABC | Size | Instructions | Parse | Decode every body | Per instruction |
 |---|---|---|---|---|---|
-| abcdump.abc | 32 KB | 6,489 | 0.078 ms | 0.225 ms | 35 ns |
-| as3pb benchmark | 94 KB | 43,829 | 0.103 ms | 1.376 ms | 31 ns |
-| Tamarin `as3/Vector/initializerLargeVector` | 3.8 MB | 1,002,071 | 1.211 ms | 36.5 ms | 36 ns |
+| abcdump.abc | 32 KB | 6,489 | 0.056 ms | 0.240 ms | 37 ns |
+| as3pb, avmshell build (`tests/programs`) | 209 KB | 96,575 | 0.128 ms | 2.90 ms | 30 ns |
+| Tamarin `as3/Vector/initializerLargeVector` | 3.8 MB | 1,002,071 | 1.33 ms | 68.2 ms | 68 ns |
 
-The as3pb ABC was built with AIR SDK 51.3.1 (compiler 3.2.3.0), ABC 46.16,
-with 310 method bodies and 2 unreachable bytes.
+### The AssemblyScript runtime
+
+codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator
+and a collector that runs only when the host calls `__collect()`, which
+the wrapper does between calls once memory has grown by 64 MB. The
+`incremental` runtime collects during calls, and pays for it with a write
+barrier on every store of an object reference. Switching made the same
+builds, with the same output:
+
+| ABC | Parse, incremental | minimal | Decode per instruction, incremental | minimal |
+|---|---|---|---|---|
+| abcdump.abc | 0.075 ms | 0.056 ms | 67.5 ns | 37.0 ns |
+| as3pb (avmshell build) | 0.185 ms | 0.128 ms | 61.6 ns | 30.0 ns |
+| initializerLargeVector | 1.41 ms | 1.33 ms | 63.8 ns | 68.0 ns |
+
+The one huge body of initializerLargeVector spends its time in per-body
+scratch, not in managed stores. Loading, linking, resolving and verifying
+with types every Tamarin ABC, each in a new domain after builtin and
+shell_toplevel, went from 9.8 to 5.5 s. The `stub` runtime, which never
+frees, was no faster. The optimizer's `converge` and `noAssert` made no
+measurable difference at `optimizeLevel` 3.
 
 Before the BodyDecoder rewrite (a new decoder with code-sized scratch per
 body, growing output arrays and a final copy into offset order), decoding
