@@ -153,24 +153,31 @@ through the runtime, which does what avmplus does at run time.
 
 ### The object model
 
-An AS3 class is a JavaScript class, made at `newclass` from its traits:
+An AS3 object is a JavaScript object made from its traits' prototype,
+which `newclass` builds from the module's layout:
 
-- **Slots** are fields named by slot id (`$0`, `$1`, ...), initialized to
-  their defaults in the constructor, so an early bound slot is one property
-  access and cannot collide with any dynamic name.
+- **Slots** are fields named by slot id (`$0`, `$1`, ...), set to their
+  initial values when the object is made, so an early bound slot is one
+  property access and cannot collide with any dynamic name.
 - **Methods, getters and setters** are on the prototype, named by dispatch
   id, so `callmethod` is a direct call and overriding is JavaScript's own
   inheritance.
 - **Dynamic properties** of dynamic classes live in their own map, apart
   from slots and methods.
-- **Names**: each class carries its traits' bindings by namespace and name,
-  which the runtime's multiname lookup (getproperty, setproperty,
-  callproperty with a name that did not bind early) searches as avmplus
-  does: bindings, then dynamic properties, then the prototype chain.
+- **Names**: each traits has its own bindings by namespace and name, and
+  a lookup goes on to its base's, as avmplus' does. The runtime's multiname
+  lookup (getproperty, setproperty, callproperty with a name that did not
+  bind early) searches as avmplus does: bindings, then dynamic properties,
+  then the AS3 prototype chain, which each object reaches through `$p`.
+- **A class object** is an instance of its static traits, whose base is
+  Class's instance traits; it holds its instances' traits (`$it`) and its
+  AS3 `prototype`. Class is dynamic, so class objects are, as the builtins
+  need (`String.fromCharCode = function ...`).
 
 Values are JavaScript's own: `undefined`, `null`, numbers for `Number`,
-`int` and `uint`, booleans, strings; `Namespace` and `QName` are small
-classes. A script's global object is an instance of its traits like any
+`int` and `uint`, booleans, strings. A namespace value is the runtime's
+interned namespace, whose class is Namespace. Arrays and Vectors keep their
+elements in a JavaScript array, `$a`. A script's global object is an instance of its traits like any
 other. Errors thrown by the runtime are AS3 `Error` objects with avmplus'
 error numbers and messages, so traced errors read as in avmshell.
 
@@ -197,14 +204,22 @@ runtime, `rt`, that returns:
 The runtime starts with builtin.abc, then the ABCs that follow it (for
 avmshell's programs, shell_toplevel.abc):
 
-1. load the builtin module, which defines no classes yet;
-2. run the builtin script that defines Object, Class and Function. Object's
-   class object is created before Class exists, so class objects created
-   in this step get Class's prototype once it does, as avmplus'
-   `Toplevel` does;
-3. run any other script lazily, the first time a name it defines is looked
-   up: `finddef`, `findpropstrict`, `getlex` of a global name, or a class
-   resolving its base by name.
+1. make the traits of Object, Class and Function, empty, before any module
+   loads: global objects and class objects are made with them as their
+   bases before their classes exist;
+2. load the builtin modules: their scripts' names become visible, and
+   nothing runs;
+3. run a script the first time a name it defines is looked up (`finddef`,
+   `findpropstrict`, `getlex` of a global name, a coercion to a class) and
+   the entry point, the last script, of each module that is not a builtin,
+   as avmshell does.
+
+The first lookup of any builtin name runs the builtin script that defines
+Object, Class and Function. Its `newclass` of Object fills in Object's
+traits; class objects made before Class exists already inherit from
+Class's traits, so they see its bindings and prototype once it does. A
+coercion to Object, Class or Function checks against their traits, so it
+works while they are being made, as avmplus' does.
 
 A native method is bound by its class's and its own qualified name, as
 avmplus binds its C++ ones: `"Math.floor"` for a static method,
@@ -234,7 +249,12 @@ block. With no match, the exception goes on to the caller.
 ### The runtime and the standard library
 
 Generated code calls `@swf2es/runtime` for the object model, multiname
-lookup, coercions and exceptions; it grows as far as each step needs.
+lookup, coercions and exceptions (`packages/runtime/src/avm2`); it grows as
+far as each step needs. The natives are in `natives.ts`, with what makes
+some builtin classes differ from others: Arrays' and Vectors' element
+storage, and what calling or constructing `int`, `String`, `Object`,
+`Array` or a Vector does. The error messages are avmplus' own, generated
+from its `ErrorConstants.cpp` into `messages.ts`, which stays MPL-2.0.
 
 avmplus' standard library (`Object`, `Array`, `String`, `Math`, `Date`,
 `RegExp`, `JSON`, `Vector`, `ByteArray` and so on) is mostly AS3 compiled

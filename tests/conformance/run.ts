@@ -1,15 +1,14 @@
 // Conformance runner. For every case, avmshell's trace output is the expected
-// result; the swf2es-compiled case run in node will be the actual result, and
-// the two must match exactly. Each case will also be compiled in JIT mode and
-// AOT mode, which must give identical output (see docs/architecture.md).
-//
-// Codegen is not implemented yet, so for now this checks that every case runs
-// cleanly in avmshell, and that swf2es parses each case's ABC to the same
-// facts as avmplus' abcdump.
+// result, and the case compiled by swf2es and run in node, after the
+// builtins avmshell loads, also compiled by swf2es, must print the same
+// lines. Each case will also be compiled in JIT mode and AOT mode, which must
+// give identical output (see docs/architecture.md). swf2es must also parse
+// each case's ABC to the same facts as avmplus' abcdump.
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { abcdumpFacts, compareFacts, swf2esFacts } from "../../oracle/abc-facts.ts";
-import { containerEngine, type OracleResult, runOracle } from "../../oracle/oracle.ts";
+import { containerEngine, libraries, type OracleResult, runOracle } from "../../oracle/oracle.ts";
+import { runSwf2es } from "./swf2es.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -29,6 +28,9 @@ try {
 }
 
 const results = runOracle([...cases, ...parseOnly], `${here}out`, { engine, abcdump: true });
+const builtins = libraries(["builtin", "shell_toplevel"], `${here}out/lib`, { engine }).map(
+  (l) => l.abc,
+);
 let failed = 0;
 
 const report = (ok: boolean, what: string, details: string[] = []) => {
@@ -57,12 +59,41 @@ for (const r of results) {
       `${r.file} runs in avmshell`,
       r.exitCode === 0 ? [] : r.output.split("\n"),
     );
+
+    const expected = r.output.replace(/\n$/, "").split("\n");
+    let actual: string[];
+    try {
+      actual = await runSwf2es(builtins, abcOf(r));
+    } catch (e) {
+      actual = [`threw ${e instanceof Error ? e.stack : String(e)}`];
+    }
+
+    report(
+      actual.join("\n") === expected.join("\n"),
+      `${r.file} runs in swf2es as in avmshell`,
+      firstDifference(expected, actual),
+    );
   }
 
   const unreachable = { count: 0 };
   const differences = compareFacts(abcdumpFacts(r.dump ?? ""), swf2esFacts(abcOf(r)), unreachable);
   const skipped = unreachable.count ? ` (${unreachable.count} unreachable instructions)` : "";
   report(!differences.length, `${r.file} parses and decodes like abcdump${skipped}`, differences);
+}
+
+/** Where two outputs part, for the report. */
+function firstDifference(expected: string[], actual: string[]): string[] {
+  for (let i = 0; i < Math.max(expected.length, actual.length); i++) {
+    if (expected[i] !== actual[i]) {
+      return [
+        `line ${i + 1}:`,
+        `  avmshell: ${expected[i] ?? "(end)"}`,
+        `  swf2es:   ${actual[i] ?? "(end)"}`,
+      ];
+    }
+  }
+
+  return [];
 }
 
 console.log(`conformance: ${results.length} ABCs, ${failed ? `${failed} failed` : "all passed"}`);
