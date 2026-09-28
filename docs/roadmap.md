@@ -44,7 +44,13 @@ Near-term work, in order. The goal of milestone 1 is in
       IR, which the test runs check.
 6. **A dispatcher emitter and a minimal runtime**: JavaScript from the IR
    with one `switch` over blocks per method, and enough of the runtime to
-   run it, so conformance cases run in node and compare with avmshell.
+   run it, so conformance cases run in node and compare with avmshell. In
+   progress: every instruction of the libraries lowers, exception handlers
+   included, and `tests/conformance` runs each case compiled by swf2es,
+   after builtin.abc and shell_toplevel.abc also compiled by swf2es,
+   comparing its output with avmshell's. The three cases pass, and a
+   module loads only after the ABCs it was compiled against. Next: more
+   cases, opcode by opcode.
 5. **Faster verification**: the minimal runtime halved decoding to about
    35 ns per instruction, against Ruffle's 15 for decoding alone
    ([benchmarks.md](benchmarks.md)); the typed verifier still walks every

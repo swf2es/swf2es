@@ -61,9 +61,12 @@ export class Ir {
   blockStack: StaticArray<u32> = new StaticArray<u32>(0);
   blockScope: StaticArray<u32> = new StaticArray<u32>(0);
 
-  /** Each block's entry state: frameSize types and not-null flags from block * frameSize. */
+  /**
+   * Each block's entry state: frameSize types and flags from block *
+   * frameSize, flag 1 for known not null and 2 for a with scope.
+   */
   entryType: StaticArray<i32> = new StaticArray<i32>(0);
-  entryNotNull: StaticArray<u8> = new StaticArray<u8>(0);
+  entryFlags: StaticArray<u8> = new StaticArray<u8>(0);
 
   /** Exception handlers: the ABC range they cover, their block, exception type and catch scope type. */
   handlerCount: u32 = 0;
@@ -77,10 +80,11 @@ export class Ir {
   cases: StaticArray<u32> = new StaticArray<u32>(0);
   caseCount: u32 = 0;
 
-  // The method's frame, to name registers.
+  // The method's frame, to name registers, and its outer scope chain's size.
   localCount: u32 = 0;
   maxScope: u32 = 0;
   frameSize: u32 = 0;
+  outerSize: u32 = 0;
 
   reset(localCount: u32, maxScope: u32, frameSize: u32): void {
     this.count = 0;
@@ -129,7 +133,7 @@ export class Ir {
   /**
    * Start a block at ABC offset `pc` with the next instruction, entered with
    * stack and scope depths `stack` and `scope` and the frame values `types`
-   * and `flags` (bit 0: not null).
+   * and `flags` (1: not null, 2: with scope).
    */
   addBlock(pc: u32, stack: u32, scope: u32, types: StaticArray<i32>, flags: StaticArray<u8>): void {
     const k = this.blockCount;
@@ -146,12 +150,12 @@ export class Ir {
     if (used + size > <u32>this.entryType.length) {
       const capacity = max(used + size, <u32>this.entryType.length * 2);
       this.entryType = grown<i32>(this.entryType, capacity, used);
-      this.entryNotNull = grown<u8>(this.entryNotNull, capacity, used);
+      this.entryFlags = grown<u8>(this.entryFlags, capacity, used);
     }
 
     for (let i: u32 = 0; i < size; i++) {
       this.entryType[used + i] = types[i];
-      this.entryNotNull[used + i] = flags[i] & 1;
+      this.entryFlags[used + i] = flags[i] & 3;
     }
 
     this.blockFirst[k] = this.count;

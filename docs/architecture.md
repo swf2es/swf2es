@@ -25,14 +25,19 @@ requires:
    build rejects such code, and a unit test fails if `codegen.wasm` imports
    anything besides `env.abort`.
 2. **The unit of translation is one method.** A method's output depends only on
-   its ABC, never on which other methods were compiled before it.
+   its ABC and the ABCs it is linked against, never on which other methods
+   were compiled before it.
 3. **Both modes use the same facts.** Optimizations use only what the ABC being
    compiled proves (final classes, sealed traits, typed slots). Anything that
    can change at runtime, such as a child SWF redefining a class, gets a
    runtime guard in both modes.
-4. **Shared cache key.** Output is keyed by ABC hash plus `COMPILER_VERSION`
-   (`cacheKey()` in codegen), so the browser cache, AOT output served by a
-   server, and JIT output are interchangeable.
+4. **Shared cache key.** Output is keyed by `COMPILER_VERSION`, the ABC's
+   hash, and the hashes of the ABCs loaded before it, in order (`cacheKey()`
+   in codegen), so the browser cache, AOT output served by a server, and JIT
+   output are interchangeable. An ABC's layouts depend on those it links
+   against, since its slot and dispatch ids follow its base classes', so a
+   module also records their hashes and the runtime refuses it when the
+   ABCs loaded before it differ.
 
 CI compiles every conformance test in both modes and fails if the output
 hashes differ.
@@ -130,10 +135,134 @@ Each method goes through the same steps, in `codegen`:
 5. **Emission** writes JavaScript as UTF-8 into a growable byte buffer: no
    JavaScript strings, and names are copied straight from the ABC.
 
+### Generated code
+
+Each ABC compiles to one ES module. Every method becomes a JavaScript
+function whose registers are `let` variables, and at first a dispatcher
+runs its blocks: `for (;;) switch (b) { case 0: ...; b = 2; continue; }`.
+It handles any control flow, and the structured form of step 4 replaces it
+where the code is reducible. A method with exception handlers wraps the
+loop in `try`/`catch`; the catch picks the handler covering the throwing
+instruction, matches the exception's type, and continues at its block with
+the exception as the only stack value, or rethrows.
+
+The IR's types decide the JavaScript from the start where that is simple:
+`int` arithmetic ends in `| 0`, `uint` in `>>> 0`, a slot bound early is a
+field access, a method bound early a direct call. Anything typed `*` goes
+through the runtime, which does what avmplus does at run time.
+
+### The object model
+
+An AS3 object is a JavaScript object made from its traits' prototype,
+which `newclass` builds from the module's layout:
+
+- **Slots** are fields named by slot id (`$0`, `$1`, ...), set to their
+  initial values when the object is made, so an early bound slot is one
+  property access and cannot collide with any dynamic name.
+- **Methods, getters and setters** are on the prototype, named by dispatch
+  id, so `callmethod` is a direct call and overriding is JavaScript's own
+  inheritance.
+- **Dynamic properties** of dynamic classes live in their own map, apart
+  from slots and methods.
+- **Names**: each traits has its own bindings by namespace and name, and
+  a lookup goes on to its base's, as avmplus' does. The runtime's multiname
+  lookup (getproperty, setproperty, callproperty with a name that did not
+  bind early) searches as avmplus does: bindings, then dynamic properties,
+  then the AS3 prototype chain, which each object reaches through `$p`.
+- **A class object** is an instance of its static traits, whose base is
+  Class's instance traits; it holds its instances' traits (`$it`) and its
+  AS3 `prototype`. Class is dynamic, so class objects are, as the builtins
+  need (`String.fromCharCode = function ...`).
+
+Values are JavaScript's own: `undefined`, `null`, numbers for `Number`,
+`int` and `uint`, booleans, strings. A namespace value is the runtime's
+interned namespace, whose class is Namespace. Arrays and Vectors keep their
+elements in a JavaScript array, `$a`. A script's global object is an instance of its traits like any
+other. Errors thrown by the runtime are AS3 `Error` objects with avmplus'
+error numbers. Their messages are the release player's, as avmshell's
+are: `Error #1009`, and nothing more, since AS3 can read and print them.
+With the runtime's `debugger` option they are the debugger player's,
+`Error #1009: Cannot access a property or method of a null object
+reference.`, and `System.isDebugger` is true.
+
+### Modules and the bootstrap
+
+The compiler computes every traits' layout, so a module states it and the
+runtime never derives one. An ABC's module exports a function of the
+runtime, `rt`, that returns:
+
+- **names**: the ABC's namespaces and multinames as runtime objects,
+  interned by the compiler's rules (kind and URI, API version, a private
+  namespace per ABC entry);
+- **methods**: a factory per method, `(scope, sup) => function (...) { ... }`,
+  so that each `newclass` or `newfunction` binds the scope chain it
+  captured, and a class's methods the base class their super instructions
+  use;
+- **traits**: for each class, its base class and interfaces by name,
+  resolved when the class is created as avmplus resolves them, its own
+  bindings by namespace and name, its slots' defaults, and its methods,
+  getters and setters by dispatch id;
+- **scripts**: each script's traits and initializer, run the first time
+  something asks for a name it defines, as avmplus runs them.
+- **hash** and **linked**: the hash of its ABC and of the ABCs loaded
+  before it, in order, as the cache key names them. Its layouts depend on
+  those ABCs, so the runtime refuses to load it after any others.
+
+The runtime starts with builtin.abc, then the ABCs that follow it (for
+avmshell's programs, shell_toplevel.abc):
+
+1. make the traits of Object, Class and Function, empty, before any module
+   loads: global objects and class objects are made with them as their
+   bases before their classes exist;
+2. load the builtin modules: their scripts' names become visible, and
+   nothing runs;
+3. run a script the first time a name it defines is looked up (`finddef`,
+   `findpropstrict`, `getlex` of a global name, a coercion to a class) and
+   the entry point, the last script, of each module that is not a builtin,
+   as avmshell does.
+
+The first lookup of any builtin name runs the builtin script that defines
+Object, Class and Function. Its `newclass` of Object fills in Object's
+traits; class objects made before Class exists already inherit from
+Class's traits, so they see its bindings and prototype once it does. A
+coercion to Object, Class or Function checks against their traits, so it
+works while they are being made, as avmplus' does.
+
+A native method is bound by its class's and its own qualified name, as
+avmplus binds its C++ ones: `"Math.floor"` for a static method,
+`"String#indexOf"` for an instance method, and the name alone for a
+script's function; accessors as `"get:"` and `"set:"` names, and a name
+outside the public namespace with its namespace's URI, `"uri::name"`. A
+native the runtime lacks throws an error naming it when called, not when
+loaded.
+
+Generated methods follow one calling convention. A slot is the field `$n`,
+by its slot id from 0, and a method, getter or setter is `$mn` on the
+prototype, by its dispatch id; dynamic properties are kept apart from
+both. A method of a primitive receiver is called through its class's
+prototype, `rt.prototypeOf(int).$mn.call(x, ...)`. A method's own scope
+registers and the chain it captured are passed to the runtime together
+when it looks a name up or creates a function or class, with a bit per
+scope for the with scopes.
+
+A method with exception handlers runs its dispatcher inside `try`. The
+handlers' ranges split the code into regions, and the variable `t` holds
+the region of the instruction running, set only where it changes. The
+`catch` tries the handlers covering that region in the order of the ABC's
+table, as avmplus does. The first one the exception's type matches gets
+the exception as its only stack value, and the dispatcher goes on at its
+block. With no match, the exception goes on to the caller.
+
 ### The runtime and the standard library
 
 Generated code calls `@swf2es/runtime` for the object model, multiname
-lookup, coercions and exceptions; it grows as far as each step needs.
+lookup, coercions and exceptions (`packages/runtime/src/avm2`); it grows as
+far as each step needs. The natives are in `natives.ts`, with what makes
+some builtin classes differ from others: Arrays' and Vectors' element
+storage, and what calling or constructing `int`, `String`, `Object`,
+`Array` or a Vector does. The debugger player's error messages are avmplus'
+own, generated from its `ErrorConstants.cpp` into `messages.ts`, which
+stays MPL-2.0.
 
 avmplus' standard library (`Object`, `Array`, `String`, `Math`, `Date`,
 `RegExp`, `JSON`, `Vector`, `ByteArray` and so on) is mostly AS3 compiled

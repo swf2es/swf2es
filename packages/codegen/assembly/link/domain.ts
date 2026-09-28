@@ -688,8 +688,10 @@ export class Domain {
 
     const set = pool.mnA[mn];
     for (let m = pool.nsSetStart[set]; m < pool.nsSetStart[set + 1]; m++) {
+      // As Namespace::isPublic: of the public kind, and with an empty URI.
       const ns = this.abcNs[index][pool.nsSetMembers[m]];
-      if (this.nsType[ns] === NS_Public) {
+      const uri = this.nsUri[ns];
+      if (this.nsType[ns] === NS_Public && (uri === URI_None || this.stringLength[uri] === 0)) {
         return true;
       }
     }

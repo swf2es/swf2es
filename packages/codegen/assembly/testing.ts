@@ -6,6 +6,8 @@ import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./abc
 import { readAbc } from "./abc/parse";
 import { readConstantPool } from "./abc/pool";
 import { PADDING, Reader } from "./abc/reader";
+import { MethodEmitter } from "./emit/method";
+import { ModuleEmitter } from "./emit/module";
 import {
   IR_CallGetter,
   IR_CallInterface,
@@ -503,7 +505,7 @@ export function domainIr(body: u32): string {
     const stack: string[] = [];
     for (let d: u32 = 0; d < ir.blockStack[k]; d++) {
       stack.push(
-        typeText(ir.entryType[entry + stackBase + d], ir.entryNotNull[entry + stackBase + d]),
+        typeText(ir.entryType[entry + stackBase + d], ir.entryFlags[entry + stackBase + d] & 1),
       );
     }
 
@@ -526,6 +528,43 @@ export function domainIr(body: u32): string {
   }
 
   return out.join("\n");
+}
+
+/**
+ * The ES module the domain's last ABC compiles to; `hashes` are the ABCs'
+ * hashes in load order, one per line.
+ */
+export function domainModule(hashes: string = ""): string {
+  const emitter = new ModuleEmitter(domain, <u32>(domain.abcs.length - 1));
+  emitter.module(hashes.length ? hashes.split("\n") : []);
+  const out = emitter.out;
+  return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
+}
+
+/**
+ * The JavaScript function body `body` of the domain's last ABC compiles to,
+ * after verifying the ABC as domainVerifyAll does; "error N" if it failed.
+ */
+export function domainEmit(body: u32): string {
+  const index = <u32>(domain.abcs.length - 1);
+  const abc = domain.abcs[index];
+  const results = verifyMethods(domain, index);
+  if (results[body] !== 0) {
+    return results[body] < 0 ? "not verified" : `error ${results[body]}`;
+  }
+
+  const decoder = new BodyDecoder(abc, domain.abcBase[index], domain, index);
+  const method = abc.bodyMethod[body];
+  const global = domain.methodStart[index] + method;
+  const code = decoder.decode(body, domain.traits.scopeOf(global));
+  if (code.error) {
+    return `error ${code.error}`;
+  }
+
+  const emitter = new MethodEmitter(domain, index);
+  emitter.method(method, global, decoder.ir);
+  const out = emitter.out;
+  return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
 }
 
 /**

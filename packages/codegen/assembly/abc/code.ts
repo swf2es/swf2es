@@ -531,6 +531,7 @@ export class BodyDecoder {
     this.captured.length = 0;
     const ir = this.ir;
     ir.reset(this.localCount, this.maxScope, this.frameSize);
+    ir.outerSize = this.outer.size;
     let blocks: u32 = 0;
     for (let pc: u32 = 0; pc < this.length; pc++) {
       if (pc === 0 || this.known[pc]) {
@@ -2658,8 +2659,14 @@ export class BodyDecoder {
     const global = domain.methodStart[this.index] + m;
     const scope = this.scopeHere(-2, TYPE_Any);
     const current = traits.functionScope[global];
+    // Created again alike, it is still queued, so that verifying the ABC again finds it.
     if (current !== null) {
-      return current.equals(scope) || global === this.global ? true : this.fail(kCorruptABCError);
+      if (!current.equals(scope) && global !== this.global) {
+        return this.fail(kCorruptABCError);
+      }
+
+      this.captured.push(global);
+      return true;
     }
 
     if (traits.methodTraits[global] >= 0) {
@@ -2710,12 +2717,11 @@ export class BodyDecoder {
       if (instance === null || !current.equals(cscope) || !instance.equals(iscope)) {
         return this.fail(kCorruptABCError);
       }
-
-      return true;
+    } else {
+      traits.scope[ctraits] = cscope;
+      traits.scope[itraits] = iscope;
     }
 
-    traits.scope[ctraits] = cscope;
-    traits.scope[itraits] = iscope;
     domain.methodsOf(<u32>ctraits, this.captured);
     domain.methodsOf(<u32>itraits, this.captured);
     return true;
