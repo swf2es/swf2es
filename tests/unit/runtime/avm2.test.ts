@@ -67,7 +67,7 @@ test("domain memory with none set is 1024 bytes of scratch memory, as avmplus' D
   assert.throws(() => rt.sf64(1, 1017), /Error #1506/);
 });
 
-test("for-ins over an object whose names come and go keep only a few of those gone", () => {
+test("for-ins over an object whose names come and go keep a slot for each at once", () => {
   const rt = avm2.createRuntime();
   const o = { $d: new Map<string, unknown>() };
   const names = () => {
@@ -85,41 +85,29 @@ test("for-ins over an object whose names come and go keep only a few of those go
     o.$d.delete(`k${n}`);
   }
 
-  // The lists the for-ins went through, the last 4 generations of them.
-  const lists: string[][] =
-    (rt as unknown as { enumerating: WeakMap<object, { lists: string[][] }> }).enumerating.get(o)
-      ?.lists ?? [];
-  assert.equal(lists.length, 4);
-  assert.ok(
-    lists.every((list) => list.length <= 20),
-    `lists of ${lists.map((l) => l.length)}`,
-  );
+  // Each new name took the slot of the one before it.
+  const e = (rt as unknown as { enumerating: WeakMap<object, { names: string[] }> }).enumerating;
+  assert.equal(e.get(o)?.names.length, 1);
 });
 
-test("a for-in goes on through its own names when one inside it takes a new list", () => {
+test("a for-in goes on through its own names however many for-ins inside it come and go", () => {
+  // [10, 20, 30]: at 0, delete it, then 150 times add a name, go through
+  // them all and delete it again; the outer for-in still finds 1 and 2.
   const rt = avm2.createRuntime();
-  const o = { $d: new Map<string, unknown>() };
-  for (let n = 0; n < 40; n++) {
-    o.$d.set(`k${n}`, n);
-  }
-
+  const o = { $a: [10, 20, 30], $d: new Map<string, unknown>() };
   const seen: string[] = [];
   for (let i = rt.hasNext(o, 0); i; i = rt.hasNext(o, i)) {
-    const name = rt.nextName(o, i);
+    const name = String(rt.nextName(o, i));
     seen.push(name);
-    if (name === "k0") {
-      // Most names gone, then a for-in inside: it starts a new generation.
-      for (let n = 10; n < 40; n++) {
+    if (name === "0") {
+      delete o.$a[0];
+      for (let n = 0; n < 150; n++) {
+        o.$d.set(`k${n}`, n);
+        for (let j = rt.hasNext(o, 0); j; j = rt.hasNext(o, j)) {}
         o.$d.delete(`k${n}`);
       }
-
-      o.$d.set("late", 1);
-      for (let j = rt.hasNext(o, 0); j; j = rt.hasNext(o, j)) {}
     }
   }
 
-  // The rest of its names, then the one added, which the inner for-in put after them.
-  assert.deepEqual(seen, ["k0", "k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9", "late"]);
-  const e = (rt as unknown as { enumerating: WeakMap<object, { generation: number }> }).enumerating;
-  assert.equal(e.get(o)?.generation, 1);
+  assert.deepEqual(seen, ["0", "1", "2"]);
 });

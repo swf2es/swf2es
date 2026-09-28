@@ -253,21 +253,18 @@ export class VectorRef {
 
 /** A script: its descriptor, its global object once made, and whether it has run. */
 /**
- * The names for-ins go through over one object. Each name keeps the place
- * it first had, as avmplus' hashtable slots do, so that a for-in started
- * inside another does not move the outer one's names: a later for-in adds
- * only names that are new, and one deleted keeps its place, skipped. Once
- * more are gone than there, a for-in starting takes a new list, of those
- * still there, while those going through the old one keep it: a for-in's
- * index is its place in its list times 4 plus the list's generation, of
- * the last 4. (One that goes on through 4 more generations reads a list
- * since replaced.)
+ * The names for-ins go through over one object, each in a slot, as in
+ * avmplus' hashtable. A name keeps its slot while it is there, so a for-in
+ * started inside another never moves the outer one's names. One deleted
+ * leaves its slot, which the outer one skips and a new name takes when a
+ * for-in next starts; only with none free does the list grow. So it is at
+ * most as long as the most names the object had at once, as avmplus'
+ * table, and nothing a for-in goes through is ever moved or dropped.
  */
 interface Enumeration {
-  lists: string[][];
-  generation: number;
-  /** The names in the current generation's list. */
-  known: Set<string>;
+  names: string[];
+  /** Each name's slot. */
+  slot: Map<string, number>;
 }
 
 interface Script {
@@ -1699,53 +1696,52 @@ export class Runtime {
   }
 
   /**
-   * A for-in starting over `o`: the names it has now, those it had before
-   * where they were and new ones after them; and, once more of those are
-   * gone than there, a new list of those still there, the next generation.
-   * Its generation, which the for-in's index carries.
+   * The names of `o` for a for-in starting over it: those it had before in
+   * their slots, and new ones in the slots of those gone, then after them.
    */
-  private startEnumeration(o: AsObject): number {
+  private startEnumeration(o: AsObject): string[] {
     const names = this.names(o);
     let e = this.enumerating.get(o);
     if (!e) {
-      e = { lists: [names, [], [], []], generation: 0, known: new Set(names) };
+      e = { names, slot: new Map(names.map((name, i) => [name, i])) };
       this.enumerating.set(o, e);
-      return 0;
+      return names;
     }
 
-    let list = e.lists[e.generation];
+    const free: number[] = [];
+    e.names.forEach((name, i) => {
+      if (!this.stillThere(o, name)) {
+        e.slot.delete(name);
+        free.push(i);
+      }
+    });
+
+    let next = 0;
     for (const name of names) {
-      if (!e.known.has(name)) {
-        e.known.add(name);
-        list.push(name);
+      if (!e.slot.has(name)) {
+        const i = next < free.length ? free[next++] : e.names.length;
+        e.names[i] = name;
+        e.slot.set(name, i);
       }
     }
 
-    if (list.length > 2 * names.length + 16) {
-      list = list.filter((name) => this.stillThere(o, name));
-      e.generation = (e.generation + 1) & 3;
-      e.lists[e.generation] = list;
-      e.known = new Set(list);
-    }
-
-    return e.generation;
+    return e.names;
   }
 
   /** The name of `o` at a for-in's index. */
   private enumerated(o: AsObject, index: number): string {
-    return this.enumerating.get(o)?.lists[index & 3][(index >> 2) - 1] ?? "";
+    return this.enumerating.get(o)?.names[index - 1] ?? "";
   }
 
   /** The index after `index` of an enumerable name of `o`, or 0. */
   private nextIndex(o: AsObject, index: number): number {
-    const generation = index === 0 ? this.startEnumeration(o) : index & 3;
-    const names = this.enumerating.get(o)?.lists[generation] ?? [];
+    const names = index === 0 ? this.startEnumeration(o) : (this.enumerating.get(o)?.names ?? []);
 
     // A name deleted since the for-in started is skipped.
-    for (let i = index >> 2; i < names.length; i++) {
+    for (let i = index; i < names.length; i++) {
       const name = names[i];
       if (!o.$dontEnum?.has(name) && this.stillThere(o, name)) {
-        return ((i + 1) << 2) | generation;
+        return i + 1;
       }
     }
 
