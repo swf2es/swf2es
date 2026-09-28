@@ -1,13 +1,13 @@
 // Real programs, compiled and run in avmshell through the oracle. Their
 // deterministic output (lines not starting with "time: ") must match
 // expected/<name>.txt, and swf2es must parse and decode their ABCs like
-// abcdump, and link them and resolve their types.
+// abcdump, and link them and verify all their methods with types.
 //
 //   node tests/programs/run.ts [--update]
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { abcdumpFacts, compareFacts, linkError, swf2esFacts } from "../../oracle/abc-facts.ts";
+import { abcdumpFacts, compareFacts, swf2esFacts, typedErrors } from "../../oracle/abc-facts.ts";
 import { containerEngine, libraries, type OracleJob, runOracle } from "../../oracle/oracle.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -89,9 +89,9 @@ for (const [i, r] of results.entries()) {
 
   const abc = new Uint8Array(readFileSync(`${here}out/${r.name}.abc`));
   const differences = compareFacts(abcdumpFacts(r.dump ?? ""), swf2esFacts(abc));
-  const link = linkError(builtins, abc);
-  if (link) {
-    differences.push(`linking and resolving: error ${link}`);
+  const errors = typedErrors(builtins, abc);
+  if (errors.length) {
+    differences.push(`linking and typed verification: errors ${errors.join(" ")}`);
   }
 
   for (const d of differences.slice(0, 20)) {
