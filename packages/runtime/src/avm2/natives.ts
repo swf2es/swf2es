@@ -4,6 +4,7 @@
 // "set:" for accessors and "uri::name" outside the public namespace. And how
 // the builtin classes differ from others: how their instances hold native
 // state, and what calling or constructing them does.
+import { byteArrayHook, byteArrayNatives, domainNatives } from "./bytearray.js";
 import { messages } from "./messages.js";
 import { Namespace, publicNs, qname } from "./names.js";
 import { convertDoubleToString, convertDoubleToStringRadix, DTOSTR_PRECISION } from "./numbers.js";
@@ -377,15 +378,17 @@ const natives: Natives = {
   "Error#getStackTrace": plain(() => null),
 
   // avmshell's System
+  // avmshell's console skips NUL characters, which strings may hold.
   "avmplus::System.trace": (rt) => (args: Value) => {
     rt.print(
       elements(args)
         .map((v) => rt.toString(v))
-        .join(" "),
+        .join(" ")
+        .replaceAll("\0", ""),
     );
   },
   "avmplus::System.write": (rt) => (s: Value) => {
-    rt.print(rt.toString(s));
+    rt.print(rt.toString(s).replaceAll("\0", ""));
   },
   "avmplus::System.avmplus:System::getArgv": (rt) => () => rt.array([]),
   "avmplus::System.getAvmplusVersion": plain(() => "swf2es"),
@@ -747,6 +750,7 @@ const hooks: Record<string, ClassHook> = {
     construct: newQName,
     call: newQName,
   },
+  "flash.utils::ByteArray": byteArrayHook,
   RegExp: {
     construct: newRegExp,
     call: (rt, cls, args) =>
@@ -764,16 +768,16 @@ const hooks: Record<string, ClassHook> = {
 for (const [kind, convert, fill] of VECTORS) {
   hooks[`${VEC}::${kind}`] = {
     create: withStorage,
-    getIndex: (o, i) => {
+    getIndex: (o, i, rt) => {
       if (i >= o.$a.length) {
-        throw o.$traits.cls.$rt.error("RangeError", 1125, i, o.$a.length);
+        throw rt.error("RangeError", 1125, i, o.$a.length);
       }
 
       return o.$a[i];
     },
-    setIndex: (o, i, v) => {
+    hasIndex: (o, i) => i < o.$a.length,
+    setIndex: (o, i, v, rt) => {
       const cls = o.$traits.cls;
-      const rt: Runtime = cls.$rt;
       if (i > o.$a.length || (i === o.$a.length && o.$fixed)) {
         throw rt.error("RangeError", 1125, i, o.$a.length);
       }
@@ -847,7 +851,7 @@ function vectorOf(rt: Runtime, param: AsObject | null): AsObject {
 }
 
 export function builtinNatives(): Natives {
-  return natives;
+  return { ...natives, ...byteArrayNatives(), ...domainNatives() };
 }
 
 export function builtinHooks(): Record<string, ClassHook> {

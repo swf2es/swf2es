@@ -120,8 +120,9 @@ export class Traits {
   dynamic = false;
   /** How to allocate an instance, for classes whose instances hold native state. */
   create: ((traits: Traits) => AsObject) | null;
-  getIndex?: (o: AsObject, i: number) => Value;
-  setIndex?: (o: AsObject, i: number, v: Value) => void;
+  getIndex?: IndexHook["getIndex"];
+  setIndex?: IndexHook["setIndex"];
+  hasIndex?: IndexHook["hasIndex"];
 
   constructor(
     readonly name: string,
@@ -133,6 +134,7 @@ export class Traits {
     this.create = base ? base.create : null;
     this.getIndex = base?.getIndex;
     this.setIndex = base?.setIndex;
+    this.hasIndex = base?.hasIndex;
     if (base) {
       for (const i of base.interfaces) {
         this.interfaces.add(i);
@@ -281,8 +283,14 @@ export class Runtime {
   private readonly globals = new Map<string, GlobalName[]>();
   private readonly classRefs = new Map<string, ClassRef>();
   private readonly vectorRefs = new Map<TypeRef, VectorRef>();
-  /** The domain's memory, for the domain memory instructions, once a ByteArray is set as it. */
-  memory: DataView | null = null;
+  /**
+   * The domain memory the domain memory instructions use: the ByteArray set
+   * as it, or, as avmplus' DomainEnv, 1024 bytes of scratch memory.
+   */
+  readonly scratchMemory = new DataView(new ArrayBuffer(1024));
+  memory: DataView = this.scratchMemory;
+  memoryProvider: AsObject | null = null;
+  private domain: AsObject | null = null;
   /** The hashes of the modules loaded, in order. */
   private readonly loaded: string[] = [];
   /** The builtin classes' traits, made before their classes so the bootstrap can refer to them. */
@@ -673,11 +681,12 @@ export class Runtime {
       return NOT_FOUND;
     }
 
-    if (o.$a !== undefined) {
+    // Elements: a class's own indexing (a Vector's, a ByteArray's), else an Array's.
+    const traits: Traits | undefined = o.$traits;
+    if (traits?.getIndex || o.$a !== undefined) {
       const i = arrayIndex(name);
       if (i >= 0) {
-        const traits: Traits = o.$traits;
-        return traits.getIndex ? traits.getIndex(o, i) : i in o.$a ? o.$a[i] : NOT_FOUND;
+        return traits?.getIndex ? traits.getIndex(o, i, this) : i in o.$a ? o.$a[i] : NOT_FOUND;
       }
     }
 
@@ -755,11 +764,11 @@ export class Runtime {
 
     const name = mn.dynamicName();
     if (name !== null && typeof o === "object") {
-      if (o.$a !== undefined) {
+      if (traits.setIndex || o.$a !== undefined) {
         const i = arrayIndex(name);
         if (i >= 0) {
           if (traits.setIndex) {
-            traits.setIndex(o, i, v);
+            traits.setIndex(o, i, v, this);
           } else {
             o.$a[i] = v;
           }
@@ -816,6 +825,15 @@ export class Runtime {
     const name = mn.dynamicName();
     if (name === null) {
       return false;
+    }
+
+    // An index a class indexes itself is there only within its length.
+    const traits: Traits | undefined = typeof o === "object" && o !== null ? o.$traits : undefined;
+    if (traits?.hasIndex) {
+      const i = arrayIndex(name);
+      if (i >= 0) {
+        return traits.hasIndex(o, i);
+      }
     }
 
     if (this.getOwn(o, name) !== NOT_FOUND) {
@@ -1124,6 +1142,7 @@ export class Runtime {
     if (hooks?.getIndex) {
       itraits.getIndex = hooks.getIndex;
       itraits.setIndex = hooks.setIndex;
+      itraits.hasIndex = hooks.hasIndex;
     }
 
     for (const i of desc.interfaces) {
@@ -1608,7 +1627,12 @@ export class Runtime {
     const message = this.errorMessage(id, args);
     let cls: AsObject;
     try {
-      cls = this.builtinClass(name);
+      // A class outside the unnamed package goes by its qualified name.
+      const at = name.lastIndexOf("::");
+      cls =
+        at < 0
+          ? this.builtinClass(name)
+          : this.resolve(this.cls(namespace(NS_Public, name.slice(0, at)), name.slice(at + 2)));
     } catch {
       return new AsError(`${name}: ${message}`);
     }
@@ -1677,14 +1701,18 @@ export class Runtime {
   // Domain memory, as avmplus' MOPS: little-endian, an address outside the
   // memory a RangeError.
 
-  /**
-   * `address` as an int, once checked that the domain memory holds `size`
-   * bytes there; before the memory is touched, since there may be none.
-   */
+  /** avmshell's avmplus.Domain.currentDomain: an instance of Domain, without running its constructor. */
+  currentDomain(): AsObject {
+    this.domain ??= this.resolve(
+      this.cls(namespace(NS_Public, "avmplus"), "Domain"),
+    ).$it.instance();
+    return this.domain;
+  }
+
+  /** `address` as an int, once checked that the domain memory holds `size` bytes there. */
   private mops(address: Value, size: number): number {
     const a = this.toInt(address);
-    const memory = this.memory;
-    if (!memory || a < 0 || a + size > memory.byteLength) {
+    if (a < 0 || a + size > this.memory.byteLength) {
       throw this.error("RangeError", 1506);
     }
 
@@ -1693,52 +1721,52 @@ export class Runtime {
 
   li8(address: Value): number {
     const at = this.mops(address, 1);
-    return (this.memory as DataView).getUint8(at);
+    return this.memory.getUint8(at);
   }
 
   li16(address: Value): number {
     const at = this.mops(address, 2);
-    return (this.memory as DataView).getUint16(at, true);
+    return this.memory.getUint16(at, true);
   }
 
   li32(address: Value): number {
     const at = this.mops(address, 4);
-    return (this.memory as DataView).getInt32(at, true);
+    return this.memory.getInt32(at, true);
   }
 
   lf32(address: Value): number {
     const at = this.mops(address, 4);
-    return (this.memory as DataView).getFloat32(at, true);
+    return this.memory.getFloat32(at, true);
   }
 
   lf64(address: Value): number {
     const at = this.mops(address, 8);
-    return (this.memory as DataView).getFloat64(at, true);
+    return this.memory.getFloat64(at, true);
   }
 
   si8(value: Value, address: Value): void {
     const at = this.mops(address, 1);
-    (this.memory as DataView).setUint8(at, this.toInt(value));
+    this.memory.setUint8(at, this.toInt(value));
   }
 
   si16(value: Value, address: Value): void {
     const at = this.mops(address, 2);
-    (this.memory as DataView).setUint16(at, this.toInt(value), true);
+    this.memory.setUint16(at, this.toInt(value), true);
   }
 
   si32(value: Value, address: Value): void {
     const at = this.mops(address, 4);
-    (this.memory as DataView).setInt32(at, this.toInt(value), true);
+    this.memory.setInt32(at, this.toInt(value), true);
   }
 
   sf32(value: Value, address: Value): void {
     const at = this.mops(address, 4);
-    (this.memory as DataView).setFloat32(at, this.toNumber(value), true);
+    this.memory.setFloat32(at, this.toNumber(value), true);
   }
 
   sf64(value: Value, address: Value): void {
     const at = this.mops(address, 8);
-    (this.memory as DataView).setFloat64(at, this.toNumber(value), true);
+    this.memory.setFloat64(at, this.toNumber(value), true);
   }
 
   // E4X, not implemented yet.
@@ -1806,11 +1834,19 @@ export class Runtime {
   }
 }
 
+/** How a class that holds its own elements indexes them. */
+export interface IndexHook {
+  getIndex: (o: AsObject, i: number, rt: Runtime) => Value;
+  setIndex: (o: AsObject, i: number, v: Value, rt: Runtime) => void;
+  hasIndex: (o: AsObject, i: number) => boolean;
+}
+
 /** How a builtin class differs from others: allocation, index access, calls and construction. */
 export interface ClassHook {
   create?: (traits: Traits) => AsObject;
-  getIndex?: (o: AsObject, i: number) => Value;
-  setIndex?: (o: AsObject, i: number, v: Value) => void;
+  getIndex?: IndexHook["getIndex"];
+  setIndex?: IndexHook["setIndex"];
+  hasIndex?: IndexHook["hasIndex"];
   construct?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
   call?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
   apply?: (rt: Runtime, factory: AsObject, params: Value[]) => AsObject;
