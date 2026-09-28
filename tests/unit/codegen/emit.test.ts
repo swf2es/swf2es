@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
+import { abc, tables, u30 } from "./abc-builder.ts";
 import { s24, script } from "./ir-cases.ts";
-import { testing } from "./testing-module.ts";
+import { loadTesting, testing } from "./testing-module.ts";
 
 const generated = new URL("../../../oracle/avmplus/generated/", import.meta.url);
 const skip = !existsSync(generated) && "oracle/avmplus missing";
@@ -343,6 +344,58 @@ test("the builtins compile to modules with every instruction lowered", { skip },
     assert.deepEqual(js.match(/rt\.unsupported\("[^"]*"\)/g) ?? [], [], name);
     assert.equal(js.match(/rt\.unverified/g), null, `${name} has every method verified`);
   }
+});
+
+test("a module's functions are named after their methods, for stacks and profiles", {
+  skip,
+}, () => {
+  testing.domainReset(50);
+  const js = module("builtin.abc", true);
+  // A script's function, by its qualified name, as a JavaScript identifier after $.
+  assert.match(js, /function \$avmplus__describeType\(/);
+  // A class's method, Class#uri::name, and a setter, Class#set:name.
+  assert.match(js, /function \$Array_http___adobe_com_AS3_2006_builtin__join\(/);
+  assert.match(js, /function \$Array_Array__set_length\(/);
+  // No name the generated code binds: every factory's function starts with $.
+  assert.doesNotMatch(js, /=> function [A-Za-z_][A-Za-z0-9_]*\(/);
+});
+
+test("a method with a long name is named without the memory growing with it", {
+  skip,
+}, async () => {
+  // A script's method named by 8000 characters: its function's name is built
+  // in one buffer, where a string grown a character at a time took 63 MiB.
+  const long = "n".repeat(8000);
+  const pool = {
+    strings: ["x", "", long],
+    namespaces: [[0x16, ...u30(2)]],
+    multinames: [
+      [0x07, ...u30(1), ...u30(1)],
+      [0x07, ...u30(1), ...u30(3)],
+    ],
+  };
+  const returnVoid = [0x47];
+  const bytes = abc(
+    pool,
+    tables({
+      methods: [{}, {}],
+      scripts: [{ init: 0, traits: [{ name: 2, kind: 1, index: 1 }] }],
+      bodies: [
+        { method: 0, code: returnVoid, maxStack: 1, localCount: 1, maxScopeDepth: 1 },
+        { method: 1, code: returnVoid, maxStack: 1, localCount: 1, maxScopeDepth: 1 },
+      ],
+    }),
+  );
+  const fresh = await loadTesting("dist-test");
+  fresh.domainReset(50);
+  fresh.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
+  fresh.domainModule("");
+  assert.equal(fresh.domainAdd(bytes, false), 0);
+  const before = fresh.memory.buffer.byteLength;
+  const js = fresh.domainModule("") as string;
+  assert.ok(js.includes(`function $${long}(`), "the method named in full");
+  const grown = fresh.memory.buffer.byteLength - before;
+  assert.ok(grown < 4 << 20, `memory grew ${grown} bytes`);
 });
 
 test("an ABC compiled again gives the same module", { skip }, () => {

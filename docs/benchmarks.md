@@ -87,6 +87,56 @@ table above; medians of 7 to 9 runs each, in ms:
 | **Step 7.4 against #22** | **325 → 229 (−29.5%)** | **437 → 302 (−30.9%)** | |
 | AwayFL, same load, cold / warm | 559 / 409–462 | 709 / 622–701 | |
 
+Step 10, domain memory against PepperFlash's 83 ms, the same way:
+
+| Step 10 change | ByteArray | Domain memory | Kept |
+|---|---|---|---|
+| Domain memory's length in a field, not DataView's getter, for the range check | 0.0% | −9% | yes |
+| A new DataView for domain memory only when its bytes move or resize | −0.5% | −5.4% | yes |
+| **Both, against #25** | **0.0%** | **253 → 224 (−11.5%)** | |
+| `writeBytes` through a view, not a copy | 0.0% | −1.3% | no |
+| `coerceTo` keeping the last subtype it found | −0.5% | +0.9% | no |
+| findDef's global kept on the multiname (again, on an idle machine) | +1.0% | +0.9% | no |
+
+What is left is spread over the generated code: the three methods that
+take most (the codec's serializeMemory and deserializeMemory, and the
+benchmark's loop) each make a static call per field, `Pack.writeVarint(...)`,
+as `rt.findDef(M[k]).$slot` and a direct method call; findDef costs 3.7%
+itself, but V8 inlines it well enough that keeping its result gains
+nothing. More would need the compiler to bind such calls to a class it
+knows, with the script's initialization kept exact.
+
+Step 10's follow-up asked why V8 does not inline more of the codec. With
+the generated functions named after their methods (`function
+$as3pb_proto__Pack_writeVarint32(...)`, kept, as stacks and profiles read
+better), V8's `--trace-turbo-inlining` shows the codec's small methods
+refused for their bytecode size (`kExceedsBytecodeLimit`), and
+`--trace-deopt` no deoptimizations in its loops worth the name:
+
+| Step 10 follow-up | ByteArray | Domain memory | Kept |
+|---|---|---|---|
+| Two registers swapped through a temporary, not `[a, b] = [b, a]` (an array and the iterator protocol) | +1.6% | −9.5% | yes |
+| **Against #27** | **+0.5%** | **224 → 199 (−11.2%)** | |
+| A null check once per register until it is written | +1.6% | +1.0% | no |
+
+Raising V8's inlining limits (`--max-inlined-bytecode-size=2000
+--max-inlined-bytecode-size-cumulative=4000`, a flag, not a change)
+improves this workload by about 7%. That measures those settings on the
+code as it is, not a bound: smaller code could also save work, compiling
+and registers, and other limits on inlining remain. Against the swap, as
+medians of 7 interleaved pairs each (`AB_NODE_ARGS` in `tests/programs/ab.ts`):
+
+| | ByteArray | Domain memory |
+|---|---|---|
+| Swap by destructuring, V8's limits | 193 | 222 |
+| Swap through a temporary, V8's limits | 194 | 199 |
+| Swap by destructuring, limits raised | 181 | 213 |
+| Swap through a temporary, limits raised | 182 | 185 |
+
+Both gains persist when combined: the swap is worth as much with the
+limits raised (−13%), and raising the limits still helps after it. The null checks' dedup
+gained nothing measurable, which does not show that V8 removes every one.
+
 What paid: a runtime helper that many call sites share with many kinds of
 values, where the emitter knows the type and can call one made for it
 (`coerceTo`, the Vector accessors); arrays kept as V8 wants them, packed

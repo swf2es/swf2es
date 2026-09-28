@@ -64,6 +64,8 @@ export class MethodEmitter {
   /** The classes and Vectors the method being written refers to, in the order its T holds them. */
   types: i32[] = [];
   typeIndex: Map<i32, u32> = new Map<i32, u32>();
+  /** The name the method being written is given, a JavaScript identifier; "" for none. */
+  functionName: string = "";
   /** The method being written: its ABC index and body. */
   current: u32 = 0;
   body: i32 = -1;
@@ -118,7 +120,8 @@ export class MethodEmitter {
     }
 
     const count = traits.paramCount[global];
-    out.text("function (");
+    // Named, for stacks and profiles: a name its code never binds.
+    out.text(this.functionName.length ? `function ${this.functionName}(` : "function (");
     for (let p: u32 = 1; p <= count; p++) {
       out.text(p > 1 ? ", p" : "p");
       out.uint(p);
@@ -1301,16 +1304,18 @@ export class MethodEmitter {
         out.text("undefined");
         break;
       case ops.OP_swap: {
+        // Through a temporary, not [a, b] = [b, a]: destructuring is an
+        // array and the iterator protocol, which V8 counts against inlining.
         const x = ir.src[i];
-        out.text("    [");
-        this.regName(x);
-        out.text(", ");
-        this.regName(x + 1);
-        out.text("] = [");
+        out.text("    { const w = ");
         this.reg(x + 1);
-        out.text(", ");
+        out.text("; ");
+        this.regName(x + 1);
+        out.text(" = ");
         this.reg(x);
-        out.text("]");
+        out.text("; ");
+        this.regName(x);
+        out.text(" = w; }");
         break;
       }
       case ops.OP_debugfile:
