@@ -38,20 +38,24 @@ Decoding includes the structural verifier's checks, without types.
 ### Generated code: as3pb
 
 as3pb's benchmark (100 messages, 300 iterations), compiled by swf2es and
-run in node by `tests/programs`, with its output matching avmshell's. The
-first working version: every method a dispatcher, and property access and
-comparison mostly through the runtime's generic operations (roadmap step
-7 is next). Totals, encode plus decode, in ms:
+run in node by `tests/programs`, with its output matching avmshell's.
+Totals, encode plus decode, in ms, as roadmap step 7 went:
 
-| Path | swf2es, node 24 | AwayFL JIT, headless | avmshell (oracle) |
-|---|---|---|---|
-| AS3PB through ByteArray | 1104 | 574 | 107 |
-| AS3PB through domain memory | 1412 | 728 | 74 |
-| AMF3 | 1697 | | 601 |
-| JSON | 3293 | | 2563 |
+| Change | Through ByteArray | Through domain memory |
+|---|---|---|
+| First working version (#20) | 1104 | 1412 |
+| Typed comparisons and branches | 1018 | 1256 |
+| Type references made once per module | 732 | 821 |
+| Builtin traits kept, for-in names taken once, ASCII UTF-8 | 593 | 751 |
+| Elements read and written by number | 341 | 458 |
+| Defining scripts kept, classes matched first | 313 | 414 |
+| AwayFL JIT, headless | 574 | 728 |
+| PepperFlash | 188 | 83 |
+| avmshell (the oracle, its JIT in a container) | 107 | 74 |
 
-AMF3 and JSON are the runtime's own code (amf.ts, json.ts), not generated.
-avmshell's numbers are its JIT in the oracle's container, for scale only.
+Each change was found with `node --cpu-prof` on the benchmark. AMF3 and
+JSON take about 1250 and 2780 ms; they are the runtime's own code
+(amf.ts, json.ts), not generated.
 
 ### The AssemblyScript runtime
 

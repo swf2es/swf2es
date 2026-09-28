@@ -230,6 +230,21 @@ export function bytesOf(rt: Runtime, o: AsObject): Bytes {
 
 /** As UnicodeUtils::Utf16ToUtf8: a surrogate pair as four bytes, a lone surrogate as U+FFFD. */
 export function utf8(s: string): Uint8Array {
+  // ASCII, byte for byte.
+  let ascii = true;
+  for (let i = 0; i < s.length && ascii; i++) {
+    ascii = s.charCodeAt(i) < 0x80;
+  }
+
+  if (ascii) {
+    const out = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) {
+      out[i] = s.charCodeAt(i);
+    }
+
+    return out;
+  }
+
   const out = new Uint8Array(s.length * 3);
   let n = 0;
   for (let i = 0; i < s.length; i++) {

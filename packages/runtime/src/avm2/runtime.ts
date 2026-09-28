@@ -125,6 +125,7 @@ export class Traits {
   getIndex?: IndexHook["getIndex"];
   setIndex?: IndexHook["setIndex"];
   hasIndex?: IndexHook["hasIndex"];
+  index?: IndexHook["index"];
 
   constructor(
     readonly name: string,
@@ -137,6 +138,7 @@ export class Traits {
     this.getIndex = base?.getIndex;
     this.setIndex = base?.setIndex;
     this.hasIndex = base?.hasIndex;
+    this.index = base?.index;
     if (base) {
       for (const i of base.interfaces) {
         this.interfaces.add(i);
@@ -250,6 +252,23 @@ export class VectorRef {
 }
 
 /** A script: its descriptor, its global object once made, and whether it has run. */
+/**
+ * The names for-ins go through over one object, each in a slot, as in
+ * avmplus' hashtable. A name keeps its slot while it is there, so a for-in
+ * started inside another never moves the outer one's names. One deleted
+ * stays in its slot, which the outer one skips, until a for-in next starts:
+ * then its slot is free, and it takes one again only if it is back, as a
+ * new name, which takes a free slot; only with none free does the list grow. So it is at
+ * most as long as the most names the object had at once, as avmplus'
+ * table, and nothing a for-in goes through is ever moved or dropped.
+ */
+interface Enumeration {
+  /** The name in each slot, null in one free. */
+  names: (string | null)[];
+  /** Each name's slot. */
+  slot: Map<string, number>;
+}
+
 interface Script {
   desc: ScriptDesc;
   abc: Abc;
@@ -306,6 +325,9 @@ export class Runtime {
   readonly functionTraits: Traits;
   /** Method closures, by receiver, so that o.f === o.f. */
   private readonly closures = new WeakMap<object, Map<number, AsObject>>();
+  private readonly builtinTraitsByName = new Map<string, Traits>();
+  /** The names for-ins go through, per object (see Enumeration). */
+  private readonly enumerating = new WeakMap<object, Enumeration>();
   /** Special traits: an activation's or a catch scope's, by descriptor. */
   private readonly scopeTraits = new WeakMap<object, Traits>();
   readonly specialized = new Map<AsObject, AsObject>();
@@ -513,6 +535,24 @@ export class Runtime {
     return g;
   }
 
+  /**
+   * The script that defines `mn`, kept on the multiname once found: the
+   * first definition of a name wins, so later modules cannot change it.
+   */
+  private definingScript(mn: Multiname): Script | null {
+    const known = (mn as Multiname & { $script?: Script }).$script;
+    if (known) {
+      return known;
+    }
+
+    const script = this.findScript(mn);
+    if (script) {
+      (mn as Multiname & { $script?: Script }).$script = script;
+    }
+
+    return script;
+  }
+
   /** The script that defines `mn`, or null. */
   findScript(mn: Multiname): Script | null {
     if (mn.name === null) {
@@ -546,7 +586,7 @@ export class Runtime {
   }
 
   findDef(mn: Multiname): AsObject {
-    const script = this.findScript(mn);
+    const script = this.definingScript(mn);
     if (!script) {
       throw this.error("ReferenceError", 1065, mn.toString());
     }
@@ -594,7 +634,7 @@ export class Runtime {
   }
 
   private global(mn: Multiname, global: AsObject, strict: boolean): AsObject {
-    const script = this.findScript(mn);
+    const script = this.definingScript(mn);
     if (script) {
       return this.initScript(script);
     }
@@ -643,8 +683,15 @@ export class Runtime {
     }
   }
 
+  /** A builtin class's instance traits, by name, resolved once. */
   private builtinTraits(name: string): Traits {
-    return this.builtinClass(name).$it;
+    let traits = this.builtinTraitsByName.get(name);
+    if (!traits) {
+      traits = this.builtinClass(name).$it as Traits;
+      this.builtinTraitsByName.set(name, traits);
+    }
+
+    return traits;
   }
 
   /** A public class of the builtins, by name. */
@@ -686,6 +733,57 @@ export class Runtime {
     throw this.error("ReferenceError", 1069, mn.name ?? "*", traits.name);
   }
 
+  /**
+   * obj[i] for a number i, as avmplus' getUintProperty: a Vector's,
+   * ByteArray's or Array's element directly; anything else, or a hole, by
+   * the name the number makes.
+   */
+  getIndexed(o: Value, mn: Multiname, i: number): Value {
+    if (
+      typeof o === "object" &&
+      o !== null &&
+      i >>> 0 === i &&
+      i !== 0xffffffff &&
+      mn.elementName
+    ) {
+      const traits: Traits | undefined = o.$traits;
+      if (traits?.getIndex) {
+        return traits.getIndex(o, i, this);
+      }
+
+      const a: Value[] | undefined = o.$a;
+      if (a !== undefined && i in a) {
+        return a[i];
+      }
+    }
+
+    return this.getProperty(o, this.runtimeName(mn, i));
+  }
+
+  /** obj[i] = v for a number i, as avmplus' setUintProperty. */
+  setIndexed(o: Value, mn: Multiname, i: number, v: Value): void {
+    if (
+      typeof o === "object" &&
+      o !== null &&
+      i >>> 0 === i &&
+      i !== 0xffffffff &&
+      mn.elementName
+    ) {
+      const traits: Traits | undefined = o.$traits;
+      if (traits?.setIndex) {
+        traits.setIndex(o, i, v, this);
+        return;
+      }
+
+      if (o.$a !== undefined) {
+        o.$a[i] = v;
+        return;
+      }
+    }
+
+    this.setProperty(o, this.runtimeName(mn, i), v);
+  }
+
   /** An object's own dynamic or indexed property, or NOT_FOUND. */
   getOwn(o: Value, name: string): Value {
     if (typeof o !== "object" || o === null) {
@@ -695,7 +793,7 @@ export class Runtime {
     // Elements: a class's own indexing (a Vector's, a ByteArray's), else an Array's.
     const traits: Traits | undefined = o.$traits;
     if (traits?.getIndex || o.$a !== undefined) {
-      const i = arrayIndex(name);
+      const i = traits?.index ? traits.index(o, name, this) : arrayIndex(name);
       if (i >= 0) {
         return traits?.getIndex ? traits.getIndex(o, i, this) : i in o.$a ? o.$a[i] : NOT_FOUND;
       }
@@ -776,7 +874,7 @@ export class Runtime {
     const name = mn.dynamicName();
     if (name !== null && typeof o === "object") {
       if (traits.setIndex || o.$a !== undefined) {
-        const i = arrayIndex(name);
+        const i = traits.index ? traits.index(o, name, this) : arrayIndex(name);
         if (i >= 0) {
           if (traits.setIndex) {
             traits.setIndex(o, i, v, this);
@@ -1161,6 +1259,7 @@ export class Runtime {
       itraits.getIndex = hooks.getIndex;
       itraits.setIndex = hooks.setIndex;
       itraits.hasIndex = hooks.hasIndex;
+      itraits.index = hooks.index;
     }
 
     for (const i of desc.interfaces) {
@@ -1353,8 +1452,9 @@ export class Runtime {
           return null;
         }
 
+        // An instance of the class itself, most often, then any subtype.
         const traits = this.traitsOfType(type);
-        if (this.isInstanceOf(v, traits)) {
+        if (v.$traits === traits || this.isInstanceOf(v, traits)) {
           return v;
         }
 
@@ -1597,16 +1697,71 @@ export class Runtime {
     return names;
   }
 
+  /**
+   * The names of `o` for a for-in starting over it: those it had before in
+   * their slots, and new ones in the slots of those gone, then after them.
+   */
+  private startEnumeration(o: AsObject): (string | null)[] {
+    const names = this.names(o);
+    let e = this.enumerating.get(o);
+    if (!e) {
+      e = { names, slot: new Map(names.map((name, i) => [name, i])) };
+      this.enumerating.set(o, e);
+      return names;
+    }
+
+    const free: number[] = [];
+    e.names.forEach((name, i) => {
+      if (name === null) {
+        free.push(i);
+      } else if (!this.stillThere(o, name)) {
+        e.slot.delete(name);
+        e.names[i] = null;
+        free.push(i);
+      }
+    });
+
+    let next = 0;
+    for (const name of names) {
+      if (!e.slot.has(name)) {
+        const i = next < free.length ? free[next++] : e.names.length;
+        e.names[i] = name;
+        e.slot.set(name, i);
+      }
+    }
+
+    return e.names;
+  }
+
+  /** The name of `o` at a for-in's index. */
+  private enumerated(o: AsObject, index: number): string {
+    return this.enumerating.get(o)?.names[index - 1] ?? "";
+  }
+
   /** The index after `index` of an enumerable name of `o`, or 0. */
   private nextIndex(o: AsObject, index: number): number {
-    const names = this.names(o);
+    const names = index === 0 ? this.startEnumeration(o) : (this.enumerating.get(o)?.names ?? []);
+
+    // A name deleted since the for-in started is skipped.
     for (let i = index; i < names.length; i++) {
-      if (!o.$dontEnum?.has(names[i])) {
+      const name = names[i];
+      if (name !== null && !o.$dontEnum?.has(name) && this.stillThere(o, name)) {
         return i + 1;
       }
     }
 
     return 0;
+  }
+
+  private stillThere(o: AsObject, name: string): boolean {
+    if (o.$a !== undefined) {
+      const i = arrayIndex(name);
+      if (i >= 0) {
+        return i in o.$a;
+      }
+    }
+
+    return o.$d?.has(name) ?? false;
   }
 
   hasNext2(o: Value, index: number): [boolean, Value, number] {
@@ -1630,12 +1785,12 @@ export class Runtime {
   }
 
   nextName(o: Value, index: number): Value {
-    const name = this.names(o)[index - 1];
+    const name = this.enumerated(o, index);
     return o.$a !== undefined && arrayIndex(name) >= 0 ? Number(name) : name;
   }
 
   nextValue(o: Value, index: number): Value {
-    return this.getProperty(o, this.publicName(this.names(o)[index - 1]));
+    return this.getProperty(o, this.publicName(this.enumerated(o, index)));
   }
 
   // Errors.
@@ -1905,6 +2060,8 @@ export interface IndexHook {
   getIndex: (o: AsObject, i: number, rt: Runtime) => Value;
   setIndex: (o: AsObject, i: number, v: Value, rt: Runtime) => void;
   hasIndex: (o: AsObject, i: number) => boolean;
+  /** A name's element index, -1 if it names none; the class's own rule, else an array index's. */
+  index?: (o: AsObject, name: string, rt: Runtime) => number;
 }
 
 /** How a builtin class differs from others: allocation, index access, calls and construction. */
@@ -1913,6 +2070,7 @@ export interface ClassHook {
   getIndex?: IndexHook["getIndex"];
   setIndex?: IndexHook["setIndex"];
   hasIndex?: IndexHook["hasIndex"];
+  index?: IndexHook["index"];
   construct?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
   call?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
   apply?: (rt: Runtime, factory: AsObject, params: Value[]) => AsObject;

@@ -8,6 +8,7 @@
 //   export default function (rt) {
 //     const N = [...namespaces], S = [...namespace sets], M = [...multinames];
 //     const F = [...method factories, (scope, sup) => function (...) {...}];
+//     const T = [...the classes and Vectors the methods refer to];
 //     const A = rt.abc({ hash, linked, names: M, classes, scripts, activations });
 //     return A;
 //   }
@@ -48,7 +49,10 @@ export class ModuleEmitter {
     out.reset();
     out.text("export default function (rt) {\n");
     this.names();
+    this.methods.types.length = 0;
+    this.methods.typeIndex.clear();
     this.functions();
+    this.typeTable();
     out.text("  const A = rt.abc({\n    hash: ");
     this.text(this.index < <u32>hashes.length ? hashes[this.index] : "");
     out.text(",\n    linked: [");
@@ -228,6 +232,22 @@ export class ModuleEmitter {
   }
 
   /**
+   * T: the classes and Vectors the methods refer to, made once as the
+   * module loads, after F, whose methods run only after it has.
+   */
+  typeTable(): void {
+    const out = this.out;
+    const types = this.methods.types;
+    out.text("  const T = [");
+    for (let k = 0; k < types.length; k++) {
+      out.text(k ? ", " : "");
+      this.methods.typeExpr(types[k]);
+    }
+
+    out.text("];\n");
+  }
+
+  /**
    * A native method's name, as avmplus binds its C++ ones: "Class.name" for
    * a class's static method, "Class#name" for an instance method, and the
    * qualified name alone for a script's function; getters and setters as
@@ -322,7 +342,7 @@ export class ModuleEmitter {
       }
 
       out.text(", ");
-      this.methods.typeRef(type);
+      this.methods.typeExpr(type);
       out.text("]");
     }
 

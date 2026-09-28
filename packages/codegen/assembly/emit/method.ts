@@ -30,6 +30,7 @@ import {
   BUILTIN_Namespace,
   BUILTIN_Number,
   BUILTIN_Object,
+  BUILTIN_Other,
   BUILTIN_String,
   BUILTIN_Uint,
   TRAITS_Instance,
@@ -46,6 +47,9 @@ export class MethodEmitter {
   /** Which local scope registers hold with scopes, and how many are pushed. */
   scopeWith: StaticArray<u8> = new StaticArray<u8>(0);
   scopeDepth: u32 = 0;
+  /** The types the module's methods refer to, in the order T holds them. */
+  types: i32[] = [];
+  typeIndex: Map<i32, u32> = new Map<i32, u32>();
   /** The method being written: its ABC index and body. */
   current: u32 = 0;
   body: i32 = -1;
@@ -601,28 +605,13 @@ export class MethodEmitter {
         out.text(")");
         break;
       case ops.OP_equals:
-        this.assign(i);
-        this.call2("rt.equals(", i);
-        break;
       case ops.OP_strictequals:
-        this.assign(i);
-        this.call2("rt.strictEquals(", i);
-        break;
       case ops.OP_lessthan:
-        this.assign(i);
-        this.call2("rt.lessThan(", i);
-        break;
       case ops.OP_lessequals:
-        this.assign(i);
-        this.call2("rt.lessEquals(", i);
-        break;
       case ops.OP_greaterthan:
-        this.assign(i);
-        this.call2("rt.greaterThan(", i);
-        break;
       case ops.OP_greaterequals:
         this.assign(i);
-        this.call2("rt.greaterEquals(", i);
+        this.compare(i, op, false);
         break;
       case ops.OP_convert_i:
       case ops.OP_coerce_i:
@@ -854,6 +843,18 @@ export class MethodEmitter {
         return true;
       case ops.OP_getproperty:
         this.assign(i);
+        if (this.indexed(a, src + 1)) {
+          // As avmplus' getUintProperty: an element by its number.
+          out.text("rt.getIndexed(");
+          this.reg(src);
+          out.text(", M[");
+          out.uint(a);
+          out.text("], ");
+          this.reg(src + 1);
+          out.text(")");
+          return true;
+        }
+
         out.text("rt.getProperty(");
         this.reg(src);
         out.text(", ");
@@ -861,6 +862,27 @@ export class MethodEmitter {
         out.text(")");
         return true;
       case ops.OP_setproperty:
+        if (this.indexed(a, src + 1)) {
+          out.text("    rt.setIndexed(");
+          this.reg(src);
+          out.text(", M[");
+          out.uint(a);
+          out.text("], ");
+          this.reg(src + 1);
+          out.text(", ");
+          this.reg(src + 2);
+          out.text(")");
+          return true;
+        }
+
+        out.text("    rt.setProperty(");
+        this.reg(src);
+        out.text(", ");
+        this.name(a, src + 1);
+        out.text(", ");
+        this.reg(src + <i32>ir.srcCount[i] - 1);
+        out.text(")");
+        return true;
       case ops.OP_initproperty: {
         out.text(op === ops.OP_initproperty ? "    rt.initProperty(" : "    rt.setProperty(");
         this.reg(src);
@@ -1218,6 +1240,15 @@ export class MethodEmitter {
     out.text(")");
   }
 
+  /**
+   * Whether multiname `a` is a runtime name alone, not an attribute, whose
+   * name in register r is a number: an element's index, which the runtime
+   * reads and writes without making the name.
+   */
+  indexed(a: u32, r: i32): bool {
+    return this.abc.pool.mnKind[a] === C.CONSTANT_MultinameL && this.isNumber(r);
+  }
+
   /** `, r, r+1, ...` for `count` arguments from register `from`. */
   args(from: i32, count: u32): void {
     for (let k: u32 = 0; k < count; k++) {
@@ -1273,6 +1304,75 @@ export class MethodEmitter {
     out.text(")");
   }
 
+  /**
+   * The comparison `op` of instruction i's two operands, negated if `not`:
+   * JavaScript's own operator where the types make it AS3's, else the
+   * runtime's. For numbers and Booleans the relational operators and ==
+   * are the same in both, NaN included; === is for any two primitives; and
+   * == for two Strings, null included. A String compared otherwise would
+   * convert as JavaScript does, which differs from AS3 for "0b1".
+   */
+  compare(i: u32, op: u16, not: bool): void {
+    const out = this.out;
+    const a = this.src(i, 0);
+    const b = this.src(i, 1);
+    const numeric = this.isNumeric(a) && this.isNumeric(b);
+    const strings = this.builtinOf(a) === BUILTIN_String && this.builtinOf(b) === BUILTIN_String;
+    let js = "";
+    let runtime = "";
+    switch (op) {
+      case ops.OP_equals:
+        js = numeric || strings ? " == " : "";
+        runtime = "rt.equals(";
+        break;
+      case ops.OP_strictequals:
+        js = this.isPrimitive(a) && this.isPrimitive(b) ? " === " : "";
+        runtime = "rt.strictEquals(";
+        break;
+      case ops.OP_lessthan:
+        js = numeric ? " < " : "";
+        runtime = "rt.lessThan(";
+        break;
+      case ops.OP_lessequals:
+        js = numeric ? " <= " : "";
+        runtime = "rt.lessEquals(";
+        break;
+      case ops.OP_greaterthan:
+        js = numeric ? " > " : "";
+        runtime = "rt.greaterThan(";
+        break;
+      default:
+        js = numeric ? " >= " : "";
+        runtime = "rt.greaterEquals(";
+        break;
+    }
+
+    if (js.length === 0) {
+      if (not) {
+        out.text("!");
+      }
+
+      this.call2(runtime, i);
+      return;
+    }
+
+    out.text(not ? "!(" : "(");
+    this.reg(a);
+    out.text(js);
+    this.reg(b);
+    out.text(")");
+  }
+
+  /** Whether register r holds an int, uint, Number or Boolean now. */
+  isNumeric(r: i32): bool {
+    return this.isNumber(r) || this.builtinOf(r) === BUILTIN_Boolean;
+  }
+
+  /** Whether register r holds a value of one of the primitive types now. */
+  isPrimitive(r: i32): bool {
+    return this.isNumeric(r) || this.builtinOf(r) === BUILTIN_String;
+  }
+
   isNumber(r: i32): bool {
     const bt = this.builtinOf(r);
     return bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Number;
@@ -1303,40 +1403,40 @@ export class MethodEmitter {
     out.text("    if (");
     switch (op) {
       case ops.OP_ifeq:
-        this.call2("rt.equals(", i);
+        this.compare(i, ops.OP_equals, false);
         break;
       case ops.OP_ifne:
-        this.call2("!rt.equals(", i);
+        this.compare(i, ops.OP_equals, true);
         break;
       case ops.OP_ifstricteq:
-        this.call2("rt.strictEquals(", i);
+        this.compare(i, ops.OP_strictequals, false);
         break;
       case ops.OP_ifstrictne:
-        this.call2("!rt.strictEquals(", i);
+        this.compare(i, ops.OP_strictequals, true);
         break;
       case ops.OP_iflt:
-        this.call2("rt.lessThan(", i);
+        this.compare(i, ops.OP_lessthan, false);
         break;
       case ops.OP_ifle:
-        this.call2("rt.lessEquals(", i);
+        this.compare(i, ops.OP_lessequals, false);
         break;
       case ops.OP_ifgt:
-        this.call2("rt.greaterThan(", i);
+        this.compare(i, ops.OP_greaterthan, false);
         break;
       case ops.OP_ifge:
-        this.call2("rt.greaterEquals(", i);
+        this.compare(i, ops.OP_greaterequals, false);
         break;
       case ops.OP_ifnlt:
-        this.call2("!rt.lessThan(", i);
+        this.compare(i, ops.OP_lessthan, true);
         break;
       case ops.OP_ifnle:
-        this.call2("!rt.lessEquals(", i);
+        this.compare(i, ops.OP_lessequals, true);
         break;
       case ops.OP_ifngt:
-        this.call2("!rt.greaterThan(", i);
+        this.compare(i, ops.OP_greaterthan, true);
         break;
       default:
-        this.call2("!rt.greaterEquals(", i);
+        this.compare(i, ops.OP_greaterequals, true);
         break;
     }
 
@@ -1472,11 +1572,41 @@ export class MethodEmitter {
   }
 
   /**
+   * Type t in a method: an entry of the module's table T, made once when
+   * the module loads, for a class or Vector; the builtin types, and * as
+   * null, as they are.
+   */
+  typeRef(t: i32): void {
+    const out = this.out;
+    // What typeExpr writes as a literal stays one: *, the builtins it names
+    // by string, and a type that is not a class's instances.
+    const bt = t < 0 ? BUILTIN_Any : this.domain.builtin(t);
+    if (
+      t < 0 ||
+      (bt !== BUILTIN_Other && bt !== BUILTIN_Namespace) ||
+      t === this.domain.voidType ||
+      this.domain.traits.kind[t] !== TRAITS_Instance
+    ) {
+      this.typeExpr(t);
+      return;
+    }
+
+    if (!this.typeIndex.has(t)) {
+      this.typeIndex.set(t, <u32>this.types.length);
+      this.types.push(t);
+    }
+
+    out.text("T[");
+    out.uint(this.typeIndex.get(t));
+    out.text("]");
+  }
+
+  /**
    * A reference to type t for the runtime, by name, as types are known
    * across modules: null for *, a string for the builtin primitive types,
    * rt.cls(namespace, "Name") for a class, rt.vector(type) for Vector.<T>.
    */
-  typeRef(t: i32): void {
+  typeExpr(t: i32): void {
     const out = this.out;
     const domain = this.domain;
     const traits = domain.traits;
@@ -1514,7 +1644,7 @@ export class MethodEmitter {
       out.text("null");
     } else if (traits.param[t] !== TYPE_Any) {
       out.text("rt.vector(");
-      this.typeRef(traits.param[t]);
+      this.typeExpr(traits.param[t]);
       out.text(")");
     } else {
       const index = traits.abc[t];

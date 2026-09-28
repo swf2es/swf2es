@@ -13,6 +13,7 @@ import { Namespace, publicNs, qname } from "./names.js";
 import { convertDoubleToString, convertDoubleToStringRadix, DTOSTR_PRECISION } from "./numbers.js";
 import {
   type AsObject,
+  arrayIndex,
   type ClassHook,
   type Method,
   NOT_FOUND,
@@ -818,6 +819,30 @@ for (const [kind, convert, fill] of VECTORS) {
       return o.$a[i];
     },
     hasIndex: (o, i) => i < o.$a.length,
+    // As VectorBaseObject::getVectorIndex: a name starting with a digit or
+    // "-" that is a number is an index, and must be a whole one from 0 up.
+    index: (o, name, rt) => {
+      const i = arrayIndex(name);
+      if (i >= 0) {
+        return i;
+      }
+
+      const c = name.charCodeAt(0);
+      if (name.length === 0 || !((c >= 0x30 && c <= 0x39) || c === 0x2d)) {
+        return -1;
+      }
+
+      const d = rt.toNumber(name);
+      if (Number.isNaN(d)) {
+        return -1;
+      }
+
+      if ((d | 0) === d && d >= 0) {
+        return d;
+      }
+
+      throw rt.error("RangeError", 1125, rt.toString(d), o.$a.length);
+    },
     setIndex: (o, i, v, rt) => {
       const cls = o.$traits.cls;
       if (i > o.$a.length || (i === o.$a.length && o.$fixed)) {
