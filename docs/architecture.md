@@ -183,9 +183,10 @@ runtime, `rt`, that returns:
 - **names**: the ABC's namespaces and multinames as runtime objects,
   interned by the compiler's rules (kind and URI, API version, a private
   namespace per ABC entry);
-- **methods**: a factory per method, `(scope) => function (...) { ... }`,
+- **methods**: a factory per method, `(scope, sup) => function (...) { ... }`,
   so that each `newclass` or `newfunction` binds the scope chain it
-  captured;
+  captured, and a class's methods the base class their super instructions
+  use;
 - **traits**: for each class, its base class and interfaces by name,
   resolved when the class is created as avmplus resolves them, its own
   bindings by namespace and name, its slots' defaults, and its methods,
@@ -206,9 +207,21 @@ avmshell's programs, shell_toplevel.abc):
    resolving its base by name.
 
 A native method is bound by its class's and its own qualified name, as
-avmplus binds its C++ ones: `rt.natives["Math.floor"]`, or
-`"String.prototype.indexOf"` for an instance method. A native the runtime
-lacks throws an error naming it when called, not when loaded.
+avmplus binds its C++ ones: `"Math.floor"` for a static method,
+`"String#indexOf"` for an instance method, and the name alone for a
+script's function; accessors as `"get:"` and `"set:"` names, and a name
+outside the public namespace with its namespace's URI, `"uri::name"`. A
+native the runtime lacks throws an error naming it when called, not when
+loaded.
+
+Generated methods follow one calling convention. A slot is the field `$n`,
+by its slot id from 0, and a method, getter or setter is `$mn` on the
+prototype, by its dispatch id; dynamic properties are kept apart from
+both. A method of a primitive receiver is called through its class's
+prototype, `rt.prototypeOf(int).$mn.call(x, ...)`. A method's own scope
+registers and the chain it captured are passed to the runtime together
+when it looks a name up or creates a function or class, with a bit per
+scope for the with scopes.
 
 ### The runtime and the standard library
 

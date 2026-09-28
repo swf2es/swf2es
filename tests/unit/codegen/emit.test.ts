@@ -76,3 +76,30 @@ test("a loop runs through its blocks until its branch falls through", { skip }, 
   ];
   assert.equal(run(script(code)), 55);
 });
+
+/** The module of `name`, added to the domain, as a function of `rt` whose body parses. */
+function module(name: string, builtin: boolean): string {
+  assert.equal(
+    testing.domainAdd(new Uint8Array(readFileSync(new URL(name, generated))), builtin),
+    0,
+  );
+  const js = testing.domainModule() as string;
+  const body = js.replace(/^export default function \(rt\) \{/, "").replace(/\}\s*$/, "");
+  assert.doesNotThrow(() => new Function("rt", body), `${name} parses`);
+  return js;
+}
+
+test("the builtins compile to modules with every instruction lowered", { skip }, () => {
+  testing.domainReset(50);
+  for (const name of ["builtin.abc", "shell_toplevel.abc"]) {
+    const js = module(name, true);
+    assert.deepEqual(js.match(/rt\.unsupported\("[^"]*"\)/g) ?? [], [], name);
+    assert.equal(js.match(/rt\.unverified/g), null, `${name} has every method verified`);
+  }
+});
+
+test("an ABC compiled again gives the same module", { skip }, () => {
+  testing.domainReset(50);
+  const first = module("builtin.abc", true);
+  assert.equal(testing.domainModule(), first);
+});

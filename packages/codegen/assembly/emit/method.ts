@@ -9,6 +9,12 @@
 import { Abc } from "../abc/abc";
 import {
   CONSTANT_Multiname,
+  CONSTANT_MultinameL,
+  CONSTANT_MultinameLA,
+  CONSTANT_RTQname,
+  CONSTANT_RTQnameA,
+  CONSTANT_RTQnameL,
+  CONSTANT_RTQnameLA,
   CONSTANT_TypeName,
   METHOD_NeedArguments,
   METHOD_NeedRest,
@@ -16,10 +22,22 @@ import {
 import {
   OP_add,
   OP_add_i,
+  OP_applytype,
+  OP_astype,
+  OP_astypelate,
   OP_bitand,
   OP_bitnot,
   OP_bitor,
   OP_bitxor,
+  OP_call,
+  OP_callmethod,
+  OP_callproperty,
+  OP_callproplex,
+  OP_callpropvoid,
+  OP_callstatic,
+  OP_callsuper,
+  OP_callsupervoid,
+  OP_checkfilter,
   OP_coerce,
   OP_coerce_a,
   OP_coerce_b,
@@ -28,6 +46,9 @@ import {
   OP_coerce_o,
   OP_coerce_s,
   OP_coerce_u,
+  OP_construct,
+  OP_constructprop,
+  OP_constructsuper,
   OP_convert_b,
   OP_convert_d,
   OP_convert_i,
@@ -41,13 +62,28 @@ import {
   OP_declocal_i,
   OP_decrement,
   OP_decrement_i,
+  OP_deleteproperty,
   OP_divide,
   OP_dup,
   OP_equals,
+  OP_esc_xattr,
+  OP_esc_xelem,
+  OP_finddef,
+  OP_findproperty,
+  OP_findpropstrict,
+  OP_getglobalscope,
+  OP_getglobalslot,
   OP_getlocal,
   OP_getlocal0,
+  OP_getouterscope,
+  OP_getproperty,
+  OP_getscopeobject,
+  OP_getslot,
+  OP_getsuper,
   OP_greaterequals,
   OP_greaterthan,
+  OP_hasnext,
+  OP_hasnext2,
   OP_ifeq,
   OP_iffalse,
   OP_ifge,
@@ -62,10 +98,15 @@ import {
   OP_ifstricteq,
   OP_ifstrictne,
   OP_iftrue,
+  OP_in,
   OP_inclocal,
   OP_inclocal_i,
   OP_increment,
   OP_increment_i,
+  OP_initproperty,
+  OP_instanceof,
+  OP_istype,
+  OP_istypelate,
   OP_jump,
   OP_kill,
   OP_lessequals,
@@ -77,24 +118,39 @@ import {
   OP_multiply_i,
   OP_negate,
   OP_negate_i,
+  OP_newactivation,
+  OP_newarray,
+  OP_newcatch,
+  OP_newclass,
+  OP_newfunction,
+  OP_newobject,
+  OP_nextname,
+  OP_nextvalue,
   OP_not,
   OP_pop,
+  OP_popscope,
   OP_pushbyte,
   OP_pushdouble,
   OP_pushfalse,
   OP_pushint,
   OP_pushnan,
   OP_pushnull,
+  OP_pushscope,
   OP_pushshort,
   OP_pushstring,
   OP_pushtrue,
   OP_pushuint,
   OP_pushundefined,
+  OP_pushwith,
   OP_returnvalue,
   OP_returnvoid,
   OP_rshift,
+  OP_setglobalslot,
   OP_setlocal,
   OP_setlocal0,
+  OP_setproperty,
+  OP_setslot,
+  OP_setsuper,
   OP_strictequals,
   OP_subtract,
   OP_subtract_i,
@@ -104,7 +160,18 @@ import {
   OP_urshift,
   opcodeNames,
 } from "../abc/opcodes";
-import { IR_CheckNull, IR_Coerce, Ir } from "../ir/ir";
+import {
+  IR_CallGetter,
+  IR_CallInterface,
+  IR_CallSetter,
+  IR_CheckNull,
+  IR_Coerce,
+  IR_FindPropGlobal,
+  IR_FindPropGlobalStrict,
+  IR_GetGlobalScope,
+  IR_Nip,
+  Ir,
+} from "../ir/ir";
 import { Domain, URI_None } from "../link/domain";
 import {
   BUILTIN_Any,
@@ -125,6 +192,12 @@ export class MethodEmitter {
   out: Output = new Output();
   /** Each register's type as the instruction being written reads it. */
   regType: StaticArray<i32> = new StaticArray<i32>(0);
+  /** Which local scope registers hold with scopes, and how many are pushed. */
+  scopeWith: StaticArray<u8> = new StaticArray<u8>(0);
+  scopeDepth: u32 = 0;
+  /** The method being written: its ABC index and body. */
+  current: u32 = 0;
+  body: i32 = -1;
 
   domain: Domain;
   index: u32 = 0;
@@ -147,8 +220,14 @@ export class MethodEmitter {
     const out = this.out;
     const traits = this.domain.traits;
     this.ir = ir;
+    this.current = method;
+    this.body = this.abc.methodBody[method];
     if (<u32>this.regType.length < ir.frameSize) {
       this.regType = new StaticArray<i32>(ir.frameSize);
+    }
+
+    if (<u32>this.scopeWith.length < ir.maxScope) {
+      this.scopeWith = new StaticArray<u8>(ir.maxScope);
     }
 
     const count = traits.paramCount[global];
@@ -233,6 +312,11 @@ export class MethodEmitter {
     const entry = k * ir.frameSize;
     for (let r: u32 = 0; r < ir.frameSize; r++) {
       this.regType[r] = ir.entryType[entry + r];
+    }
+
+    this.scopeDepth = ir.blockScope[k];
+    for (let d: u32 = 0; d < this.scopeDepth; d++) {
+      this.scopeWith[d] = (ir.entryFlags[entry + ir.localCount + d] & 2) >> 1;
     }
 
     const last = k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
@@ -578,6 +662,10 @@ export class MethodEmitter {
         this.reg(ir.src[i]);
         break;
       default:
+        if (this.object(i, op)) {
+          break;
+        }
+
         if (op >= OP_getlocal0 && op < OP_getlocal0 + 4) {
           this.assign(i);
           this.reg(ir.src[i]);
@@ -603,6 +691,491 @@ export class MethodEmitter {
     }
 
     out.text(";\n");
+  }
+
+  /**
+   * The instructions of the object model: scopes, names, properties, calls,
+   * and creating objects, functions and classes; false for one it does not
+   * know, which then calls rt.unsupported.
+   */
+  object(i: u32, op: u16): bool {
+    const out = this.out;
+    const ir = this.ir;
+    const a = ir.a[i];
+    const src = ir.src[i];
+    switch (op) {
+      case OP_pushscope:
+      case OP_pushwith:
+        this.scopeWith[this.scopeDepth++] = op === OP_pushwith ? 1 : 0;
+        this.assign(i);
+        this.reg(src);
+        return true;
+      case OP_popscope:
+        this.scopeDepth--;
+        out.text("    ");
+        this.reg(src);
+        out.text(" = undefined");
+        return true;
+      case OP_getscopeobject:
+        this.assign(i);
+        this.reg(src);
+        return true;
+      case OP_getouterscope:
+        this.assign(i);
+        out.text("scope[");
+        out.uint(a);
+        out.text("]");
+        return true;
+      case OP_getglobalscope:
+      case IR_GetGlobalScope:
+        this.assign(i);
+        this.globalScope();
+        return true;
+      case OP_finddef:
+        this.assign(i);
+        out.text("rt.findDef(M[");
+        out.uint(a);
+        out.text("])");
+        return true;
+      case IR_FindPropGlobal:
+      case IR_FindPropGlobalStrict:
+        this.assign(i);
+        out.text(op === IR_FindPropGlobalStrict ? "rt.findGlobalStrict(M[" : "rt.findGlobal(M[");
+        out.uint(a);
+        out.text("])");
+        return true;
+      case OP_findproperty:
+      case OP_findpropstrict:
+        this.assign(i);
+        out.text(op === OP_findpropstrict ? "rt.findPropertyStrict(" : "rt.findProperty(");
+        this.name(a, src);
+        out.text(", scope, ");
+        this.localScopes();
+        out.text(")");
+        return true;
+      case OP_getslot:
+        this.assign(i);
+        this.reg(src);
+        out.text(".$");
+        out.uint(a);
+        return true;
+      case OP_setslot:
+        out.text("    ");
+        this.reg(src);
+        out.text(".$");
+        out.uint(a);
+        out.text(" = ");
+        this.reg(src + 1);
+        return true;
+      case OP_getglobalslot:
+        this.assign(i);
+        this.globalScope();
+        out.text(".$");
+        out.uint(a);
+        return true;
+      case OP_setglobalslot:
+        out.text("    ");
+        this.globalScope();
+        out.text(".$");
+        out.uint(a);
+        out.text(" = ");
+        this.reg(src);
+        return true;
+      case IR_CallGetter:
+        this.assign(i);
+        this.virtual(a, src, 0);
+        return true;
+      case IR_CallSetter:
+        out.text("    ");
+        this.virtual(a, src, 1);
+        return true;
+      case OP_callmethod:
+        if (ir.dst[i] >= 0) {
+          this.assign(i);
+        } else {
+          out.text("    ");
+        }
+
+        this.virtual(a, src, ir.b[i]);
+        return true;
+      case IR_CallInterface:
+        if (ir.dst[i] >= 0) {
+          this.assign(i);
+        } else {
+          out.text("    ");
+        }
+
+        // By the interface's dispatch id, which its layout maps to a name.
+        out.text("rt.callInterface(");
+        this.typeRef(this.regType[src]);
+        out.text(", ");
+        out.uint(a);
+        out.text(", ");
+        this.reg(src);
+        this.args(src + 1, ir.b[i]);
+        out.text(")");
+        return true;
+      case IR_Nip:
+        this.assign(i);
+        this.reg(src + <i32>ir.srcCount[i] - 1);
+        return true;
+      case OP_getproperty:
+        this.assign(i);
+        out.text("rt.getProperty(");
+        this.reg(src);
+        out.text(", ");
+        this.name(a, src + 1);
+        out.text(")");
+        return true;
+      case OP_setproperty:
+      case OP_initproperty: {
+        out.text(op === OP_initproperty ? "    rt.initProperty(" : "    rt.setProperty(");
+        this.reg(src);
+        out.text(", ");
+        this.name(a, src + 1);
+        out.text(", ");
+        this.reg(src + <i32>ir.srcCount[i] - 1);
+        out.text(")");
+        return true;
+      }
+      case OP_deleteproperty:
+        this.assign(i);
+        out.text("rt.deleteProperty(");
+        this.reg(src);
+        out.text(", ");
+        this.name(a, src + 1);
+        out.text(")");
+        return true;
+      case OP_in:
+        this.assign(i);
+        this.call2("rt.hasProperty(", i);
+        return true;
+      case OP_callproperty:
+      case OP_callproplex:
+      case OP_callpropvoid:
+      case OP_constructprop: {
+        const argc = ir.b[i];
+        const parts = ir.srcCount[i] - 1 - argc;
+        if (ir.dst[i] >= 0) {
+          this.assign(i);
+        } else {
+          out.text("    ");
+        }
+
+        out.text(
+          op === OP_constructprop
+            ? "rt.constructProperty("
+            : op === OP_callproplex
+              ? "rt.callPropLex("
+              : "rt.callProperty(",
+        );
+        this.reg(src);
+        out.text(", ");
+        this.name(a, src + 1);
+        this.args(src + 1 + <i32>parts, argc);
+        out.text(")");
+        return true;
+      }
+      case OP_callsuper:
+      case OP_callsupervoid:
+      case OP_getsuper:
+      case OP_setsuper: {
+        const argc = op === OP_getsuper ? 0 : op === OP_setsuper ? 1 : ir.b[i];
+        const parts = ir.srcCount[i] - 1 - argc;
+        if (ir.dst[i] >= 0) {
+          this.assign(i);
+        } else {
+          out.text("    ");
+        }
+
+        out.text(
+          op === OP_getsuper
+            ? "rt.getSuper(sup, "
+            : op === OP_setsuper
+              ? "rt.setSuper(sup, "
+              : "rt.callSuper(sup, ",
+        );
+        this.reg(src);
+        out.text(", ");
+        this.name(a, src + 1);
+        this.args(src + 1 + <i32>parts, argc);
+        out.text(")");
+        return true;
+      }
+      case OP_constructsuper:
+        out.text("    rt.constructSuper(sup, ");
+        this.reg(src);
+        this.args(src + 1, a);
+        out.text(")");
+        return true;
+      case OP_construct:
+        this.assign(i);
+        out.text("rt.construct(");
+        this.reg(src);
+        this.args(src + 1, a);
+        out.text(")");
+        return true;
+      case OP_call:
+        this.assign(i);
+        out.text("rt.call(");
+        this.reg(src);
+        out.text(", ");
+        this.reg(src + 1);
+        this.args(src + 2, a);
+        out.text(")");
+        return true;
+      case OP_callstatic:
+        if (ir.dst[i] >= 0) {
+          this.assign(i);
+        } else {
+          out.text("    ");
+        }
+
+        out.text("rt.callStatic(A, ");
+        out.uint(a);
+        out.text(", ");
+        this.reg(src);
+        this.args(src + 1, ir.b[i]);
+        out.text(")");
+        return true;
+      case OP_newfunction:
+        this.assign(i);
+        out.text("rt.newFunction(F[");
+        out.uint(a);
+        out.text("], ");
+        this.scopeHere();
+        out.text(")");
+        return true;
+      case OP_newclass:
+        this.assign(i);
+        out.text("rt.newClass(A.classes[");
+        out.uint(a);
+        out.text("], ");
+        this.reg(src);
+        out.text(", ");
+        this.scopeHere();
+        out.text(")");
+        return true;
+      case OP_newactivation:
+        this.assign(i);
+        out.text("rt.newActivation(A.activations[");
+        out.int(this.body);
+        out.text("])");
+        return true;
+      case OP_newcatch: {
+        const abc = this.abc;
+        const h = abc.bodyExceptionStart[this.body] + a;
+        this.assign(i);
+        out.text("rt.newCatch(M[");
+        out.uint(abc.exceptionName[h]);
+        out.text("])");
+        return true;
+      }
+      case OP_newobject:
+        this.assign(i);
+        out.text("rt.newObject([");
+        this.list(src, ir.srcCount[i]);
+        out.text("])");
+        return true;
+      case OP_newarray:
+        this.assign(i);
+        out.text("rt.newArray([");
+        this.list(src, ir.srcCount[i]);
+        out.text("])");
+        return true;
+      case OP_applytype:
+        this.assign(i);
+        out.text("rt.applyType(");
+        this.reg(src);
+        out.text(", [");
+        this.list(src + 1, a);
+        out.text("])");
+        return true;
+      case OP_hasnext:
+        this.assign(i);
+        this.call2("rt.hasNext(", i);
+        return true;
+      case OP_hasnext2: {
+        // hasnext2 updates its two locals: the object and the index.
+        const b = ir.b[i];
+        out.text("    [");
+        this.reg(ir.dst[i]);
+        out.text(", ");
+        this.reg(<i32>a);
+        out.text(", ");
+        this.reg(<i32>b);
+        out.text("] = rt.hasNext2(");
+        this.reg(<i32>a);
+        out.text(", ");
+        this.reg(<i32>b);
+        out.text(")");
+        return true;
+      }
+      case OP_nextname:
+        this.assign(i);
+        this.call2("rt.nextName(", i);
+        return true;
+      case OP_nextvalue:
+        this.assign(i);
+        this.call2("rt.nextValue(", i);
+        return true;
+      case OP_instanceof:
+        this.assign(i);
+        this.call2("rt.instanceOf(", i);
+        return true;
+      case OP_istypelate:
+        this.assign(i);
+        this.call2("rt.isTypeLate(", i);
+        return true;
+      case OP_astypelate:
+        this.assign(i);
+        this.call2("rt.asTypeLate(", i);
+        return true;
+      case OP_istype:
+      case OP_astype:
+        this.assign(i);
+        out.text(op === OP_istype ? "rt.isType(" : "rt.asType(");
+        this.reg(src);
+        out.text(", M[");
+        out.uint(a);
+        out.text("])");
+        return true;
+      case OP_checkfilter:
+        out.text("    rt.checkFilter(");
+        this.reg(src);
+        out.text(")");
+        return true;
+      case OP_esc_xelem:
+      case OP_esc_xattr:
+        this.assign(i);
+        out.text(op === OP_esc_xelem ? "rt.escapeElement(" : "rt.escapeAttribute(");
+        this.reg(src);
+        out.text(")");
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /** The method's global object: its scope chain's first, else its own first scope. */
+  globalScope(): void {
+    if (this.ir.outerSize > 0) {
+      this.out.text("scope[0]");
+    } else {
+      this.reg(<i32>this.ir.localCount);
+    }
+  }
+
+  /** The scopes pushed so far, innermost last: [sc0, ...], with their with flags. */
+  localScopes(): void {
+    const out = this.out;
+    out.text("[");
+    let withs: u32 = 0;
+    for (let d: u32 = 0; d < this.scopeDepth; d++) {
+      if (d) {
+        out.text(", ");
+      }
+
+      this.reg(<i32>(this.ir.localCount + d));
+      withs |= (<u32>this.scopeWith[d]) << d;
+    }
+
+    out.text("], ");
+    out.uint(withs);
+  }
+
+  /** The scope chain a function or class created here runs in. */
+  scopeHere(): void {
+    this.out.text("rt.scope(scope, ");
+    this.localScopes();
+    this.out.text(")");
+  }
+
+  /**
+   * Multiname `a`: M[a], or with its runtime namespace and
+   * name taken from the registers from `from`.
+   */
+  name(a: u32, from: i32): void {
+    const out = this.out;
+    const kind = this.abc.pool.mnKind[a];
+    const parts =
+      kind === CONSTANT_RTQnameL || kind === CONSTANT_RTQnameLA
+        ? 2
+        : kind === CONSTANT_RTQname ||
+            kind === CONSTANT_RTQnameA ||
+            kind === CONSTANT_MultinameL ||
+            kind === CONSTANT_MultinameLA
+          ? 1
+          : 0;
+    if (parts === 0) {
+      out.text("M[");
+      out.uint(a);
+      out.text("]");
+      return;
+    }
+
+    out.text("rt.runtimeName(M[");
+    out.uint(a);
+    out.text("]");
+    for (let k: i32 = 0; k < parts; k++) {
+      out.text(", ");
+      this.reg(from + k);
+    }
+
+    out.text(")");
+  }
+
+  /** `, r, r+1, ...` for `count` arguments from register `from`. */
+  args(from: i32, count: u32): void {
+    for (let k: u32 = 0; k < count; k++) {
+      this.out.text(", ");
+      this.reg(from + <i32>k);
+    }
+  }
+
+  list(from: i32, count: u32): void {
+    for (let k: u32 = 0; k < count; k++) {
+      if (k) {
+        this.out.text(", ");
+      }
+
+      this.reg(from + <i32>k);
+    }
+  }
+
+  /**
+   * A call by dispatch id `disp` on the receiver in `src`, with `argc`
+   * arguments after it: a method of the receiver's prototype, or for a
+   * primitive receiver, of its class's.
+   */
+  virtual(disp: u32, src: i32, argc: u32): void {
+    const out = this.out;
+    const type = this.regType[src];
+    const bt = this.builtinOf(src);
+    const primitive =
+      bt === BUILTIN_Int ||
+      bt === BUILTIN_Uint ||
+      bt === BUILTIN_Number ||
+      bt === BUILTIN_Boolean ||
+      bt === BUILTIN_String;
+    if (primitive) {
+      out.text("rt.prototypeOf(");
+      this.typeRef(type);
+      out.text(").$m");
+      out.uint(disp);
+      out.text(".call(");
+      this.reg(src);
+      this.args(src + 1, argc);
+      out.text(")");
+      return;
+    }
+
+    this.reg(src);
+    out.text(".$m");
+    out.uint(disp);
+    out.text("(");
+    this.list(src + 1, argc);
+    out.text(")");
   }
 
   isNumber(r: i32): bool {

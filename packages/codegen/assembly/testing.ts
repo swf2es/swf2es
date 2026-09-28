@@ -505,7 +505,7 @@ export function domainIr(body: u32): string {
     const stack: string[] = [];
     for (let d: u32 = 0; d < ir.blockStack[k]; d++) {
       stack.push(
-        typeText(ir.entryType[entry + stackBase + d], ir.entryNotNull[entry + stackBase + d]),
+        typeText(ir.entryType[entry + stackBase + d], ir.entryFlags[entry + stackBase + d] & 1),
       );
     }
 

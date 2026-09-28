@@ -5,9 +5,15 @@
 //
 //   export default function (rt) {
 //     const N = [...namespaces], S = [...namespace sets], M = [...multinames];
-//     const F = [...method factories, (scope) => function (...) {...}];
-//     return rt.abc({ linked, classes, scripts, activations, catches });
+//     const F = [...method factories, (scope, sup) => function (...) {...}];
+//     const A = rt.abc({ linked, classes, scripts, activations });
+//     return A;
 //   }
+//
+// A factory makes a method's function once its scope chain is known: `scope`
+// is the chain it captured, and `sup` the base class of the class it is a
+// method of, for the super instructions. Methods reach the module's own
+// descriptors, such as the class a newclass creates, through A.
 import { BodyDecoder, verifyMethods } from "../abc/code";
 import {
   CONSTANT_Multiname,
@@ -56,7 +62,7 @@ export class ModuleEmitter {
     out.text("export default function (rt) {\n");
     this.names();
     this.functions();
-    out.text("  return rt.abc({\n    linked: ");
+    out.text("  const A = rt.abc({\n    linked: ");
     out.uint(this.index);
     out.text(",\n    classes: [");
     this.classes();
@@ -64,7 +70,7 @@ export class ModuleEmitter {
     this.scripts();
     out.text("],\n    activations: [");
     this.activations();
-    out.text("],\n  });\n}\n");
+    out.text("],\n  });\n  return A;\n}\n");
   }
 
   /** N: the pool's namespaces; S: its namespace sets; M: its multinames. */
@@ -176,7 +182,7 @@ export class ModuleEmitter {
   }
 
   /**
-   * F: a factory per method, `(scope) => function`, from its verified IR;
+   * F: a factory per method, `(scope, sup) => function`, from its verified IR;
    * a native binds by name, and a method that failed verification throws
    * its VerifyError when called, as avmplus verifies on the first call.
    */
@@ -218,7 +224,7 @@ export class ModuleEmitter {
       }
 
       decoder.decode(<u32>body, domain.traits.scopeOf(global));
-      out.text("(scope) => ");
+      out.text("(scope, sup) => ");
       this.methods.method(m, global, decoder.ir);
     }
 
@@ -379,7 +385,6 @@ export class ModuleEmitter {
   classes(): void {
     const out = this.out;
     const domain = this.domain;
-    const _traits = domain.traits;
     const abc = domain.abcs[this.index];
     const classStart = domain.classStart[this.index];
     for (let i: u32 = 0; i < abc.classCount; i++) {
