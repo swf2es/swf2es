@@ -5,8 +5,8 @@
 // not -0, and within 29 bits (avmshell is a 32-bit build). Doubles and
 // Vector elements are big-endian whatever the ByteArray's byte order: avmplus
 // writes AMF through a wrapper of its own.
-// Dates too, as a reference or their time; XML and Dictionaries are not
-// supported yet.
+// Dates too, as a reference or their time, and Dictionaries, by name or
+// object key; XML is not supported yet.
 //
 // Translated from avmplus' core/AvmSerializer.cpp, this file is subject to
 // the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
@@ -30,6 +30,7 @@ const kVectorInt = 13;
 const kVectorUint = 14;
 const kVectorDouble = 15;
 const kVectorObject = 16;
+const kDictionary = 17;
 
 const VECTOR_KINDS: Record<string, number> = {
   "__AS3__.vec::Vector$int": kVectorInt,
@@ -229,11 +230,40 @@ class Writer {
       }
     } else if (vectorKind(traits)) {
       this.vector(v, vectorKind(traits));
-    } else if (isA(traits, "XML") || isA(traits, "flash.utils::Dictionary")) {
+    } else if (isA(traits, "flash.utils::Dictionary")) {
+      this.dictionary(v);
+    } else if (isA(traits, "XML")) {
       throw rt.unsupported(`AMF3 for ${traits.name}`);
     } else {
       this.u8(kObject);
       this.object(v, traits);
+    }
+  }
+
+  /**
+   * As WriteDictionary: a reference, or how many entries, whether its keys
+   * are weak, then each key and value. A name is a string, as avmplus writes
+   * the integer names its table holds, and an object key the object.
+   */
+  private dictionary(d: AsObject): void {
+    this.u8(kDictionary);
+    if (this.reference(d)) {
+      return;
+    }
+
+    const rt = this.rt;
+    const names = rt.enumerableNames(d);
+    const keys: Map<object, Value> = d.$keys ?? new Map();
+    this.uint29(((names.length + keys.size) << 1) | 1);
+    this.u8(d.$weakKeys ? 1 : 0);
+    for (const name of names) {
+      this.value(name);
+      this.value(rt.getProperty(d, qname(publicNs, name)));
+    }
+
+    for (const [key, value] of keys) {
+      this.value(key);
+      this.value(value);
     }
   }
 
@@ -441,6 +471,33 @@ class Reader {
   }
 
   /** As ReadAtom. */
+  /** As ReadDictionary: a reference, or its entries, each key a string or an object; anything else is 2004. */
+  private dictionary(): AsObject {
+    const rt = this.rt;
+    const ref = this.uint29();
+    if ((ref & 1) === 0) {
+      return this.find(this.objects, ref >>> 1);
+    }
+
+    const length = ref >>> 1;
+    const weakKeys = this.u8() !== 0;
+    const d = rt.constructClass(rt.dictionaryClass(), [weakKeys]);
+    this.objects.push(d);
+    for (let i = 0; i < length; i++) {
+      const key = this.value();
+      const value = this.value();
+      if (typeof key === "string") {
+        rt.setProperty(d, qname(publicNs, key), value);
+      } else if (typeof key === "object" && key !== null) {
+        d.$keys.set(key, value);
+      } else {
+        throw rt.error("ArgumentError", 2004);
+      }
+    }
+
+    return d;
+  }
+
   value(): Value {
     const rt = this.rt;
     const type = this.u8();
@@ -459,6 +516,8 @@ class Reader {
         return this.double();
       case kString:
         return this.string();
+      case kDictionary:
+        return this.dictionary();
       case kDate: {
         // As ReadDate: a reference, or a new Date of the time that follows.
         const ref = this.uint29();
