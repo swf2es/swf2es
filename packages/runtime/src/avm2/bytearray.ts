@@ -378,10 +378,16 @@ export function byteArrayNatives(): Natives {
   const c = "flash.utils::ByteArray";
   const own = "flash.utils:ByteArray";
   const natives: Natives = {};
-  const method = (name: string, f: (rt: Runtime, b: Bytes, ...args: Value[]) => Value) => {
+  // Three arguments, the most any method takes, passed as they are, not as
+  // a rest array spread again: a missing one is undefined, as before, and
+  // its default applies.
+  const method = (
+    name: string,
+    f: (rt: Runtime, b: Bytes, x?: Value, y?: Value, z?: Value) => Value,
+  ) => {
     natives[`${c}#${name}`] = (rt) =>
-      function (this: AsObject, ...args: Value[]) {
-        return f(rt, bytesOf(rt, this), ...args);
+      function (this: AsObject, x?: Value, y?: Value, z?: Value) {
+        return f(rt, bytesOf(rt, this), x, y, z);
       };
   };
 
