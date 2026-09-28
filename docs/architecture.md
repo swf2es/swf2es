@@ -154,11 +154,18 @@ A block starts only where something branches to, so a conditional branch
 may be in the middle of one; it is then an `if` whose body branches, and
 the block goes on after it.
 
+An exception handler's block counts as entered from every block its
+range covers, so it is a child of the block that dominates them all, and
+is written as a merge node is, with a `try` inside the labelled block:
+`L7: { try { ... } catch (e) { ...; break L7; } }`, then the handler's
+code; how its `catch` finds the handler is below.
+
 Where that translation does not apply, a dispatcher runs the blocks:
 `for (;;) switch (b) { case 0: ...; b = 2; continue; }`. It handles any
 control flow: an irreducible graph (a loop entered in more than one
-place), and for now any method with exception handlers, which wraps the
-loop in `try`/`catch`; the catch picks the handler covering the throwing
+place), or handlers whose `try`s cannot enclose the code they cover, in
+the order avmplus looks for them. With handlers, the whole loop is in
+`try`/`catch`; the catch picks the handler covering the throwing
 instruction, matches the exception's type, and continues at its block
 with the exception as the only stack value, or rethrows.
 
@@ -261,13 +268,20 @@ registers and the chain it captured are passed to the runtime together
 when it looks a name up or creates a function or class, with a bit per
 scope for the with scopes.
 
-A method with exception handlers runs its dispatcher inside `try`. The
-handlers' ranges split the code into regions, and the variable `t` holds
-the region of the instruction running, set only where it changes. The
-`catch` tries the handlers covering that region in the order of the ABC's
-table, as avmplus does. The first one the exception's type matches gets
-the exception as its only stack value, and the dispatcher goes on at its
-block. With no match, the exception goes on to the caller.
+In a method with exception handlers, the handlers' ranges split the code
+into regions, and the variable `t` holds the region of the instruction
+running, set only where it changes. Each handler's `try` encloses the code
+its range covers, and maybe other code; its `catch` takes the exception
+only if `t` is one of its regions and the exception's type matches, and
+otherwise rethrows it to the next `try` out. The `try`s covering each
+region are open innermost first in the order of the ABC's table, so the
+handler that gets an exception is the first in the table that covers the
+instruction and matches, as avmplus finds it. It gets the exception as its
+only stack value; with no match, the exception goes on to the caller. The
+emitter checks that order as it writes each block, and writes the method
+with the dispatcher where it does not hold: one `try`/`catch` around the
+loop, whose `catch` tries the handlers covering `t`'s region in the
+table's order and goes on at the first match's block.
 
 ### The runtime and the standard library
 

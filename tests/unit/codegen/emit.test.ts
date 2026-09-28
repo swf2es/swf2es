@@ -37,6 +37,7 @@ const ADD_I = 0xc5;
 const DECLOCAL_I = 0xc3;
 const RETURNVALUE = 0x48;
 const THROW = 0x03;
+const POP = 0x29;
 const JUMP = 0x10;
 const IFTRUE = 0x11;
 const IFFALSE = 0x12;
@@ -180,7 +181,84 @@ test("a throw in a handler's range runs the handler, with the exception on the s
 }, () => {
   // 0: pushbyte 7; 2: throw; 3: returnvalue, the handler of 0 up to 3, for any type.
   const code = [PUSHBYTE, 7, THROW, RETURNVALUE];
-  assert.equal(run(script(code, { exceptions: [[0, 3, 3, 0, 0]] })), 7);
+  const abc = script(code, { exceptions: [[0, 3, 3, 0, 0]] });
+  assert.equal(run(abc), 7);
+  // A structured try, the handler's code after its labelled block.
+  const js = emit(abc);
+  assert.match(js, /L\d+: \{\n {2}try \{/);
+  assert.doesNotMatch(js, /switch \(b\)/);
+});
+
+test("of two handlers covering a throw, the table's first takes it, as the inner try", {
+  skip,
+}, () => {
+  // 0 pushbyte 7; 2 throw; 3 pop; 4 pushbyte 1; 6 returnvalue; 7 pop; 8 pushbyte 2; 10 returnvalue.
+  const code = [PUSHBYTE, 7, THROW, POP, PUSHBYTE, 1, RETURNVALUE, POP, PUSHBYTE, 2, RETURNVALUE];
+  const first = script(code, {
+    exceptions: [
+      [0, 3, 3, 0, 0],
+      [0, 3, 7, 0, 0],
+    ],
+  });
+  const second = script(code, {
+    exceptions: [
+      [0, 3, 7, 0, 0],
+      [0, 3, 3, 0, 0],
+    ],
+  });
+  assert.equal(run(first), 1);
+  assert.equal(run(second), 2);
+  assert.doesNotMatch(emit(first), /switch \(b\)/);
+  assert.doesNotMatch(emit(second), /switch \(b\)/);
+});
+
+test("an exception in a handler's code goes to the handler covering that", { skip }, () => {
+  // 0 pushbyte 7; 2 throw; 3 pop; 4 pushbyte 8; 6 throw; 7 returnvalue. The
+  // handler at 3 covers 0 up to 3; the one at 7 covers 0 up to 7, the first's code too.
+  const code = [PUSHBYTE, 7, THROW, POP, PUSHBYTE, 8, THROW, RETURNVALUE];
+  const abc = script(code, {
+    exceptions: [
+      [0, 3, 3, 0, 0],
+      [0, 7, 7, 0, 0],
+    ],
+  });
+  assert.equal(run(abc), 8);
+  assert.doesNotMatch(emit(abc), /switch \(b\)/);
+});
+
+test("a handler that goes back into its range first keeps the dispatcher, and runs the same", {
+  skip,
+}, () => {
+  // n = 1; M: if (n > 0) { n = 0; throw 9 } return n; the handler at 19, of 0
+  // up to 19, pops and jumps back to M: M is reached through the handler first.
+  // 0 pushbyte 1; 2 setlocal1; 3 label; 4 getlocal1; 5 pushbyte 0; 7 ifgt +2 to 13;
+  // 11 getlocal1; 12 returnvalue; 13 pushbyte 0; 15 setlocal1; 16 pushbyte 9; 18 throw;
+  // 19 pop; 20 jump -21 to 3.
+  const code = [
+    PUSHBYTE,
+    1,
+    SETLOCAL1,
+    LABEL,
+    GETLOCAL1,
+    PUSHBYTE,
+    0,
+    IFGT,
+    ...s24(2),
+    GETLOCAL1,
+    RETURNVALUE,
+    PUSHBYTE,
+    0,
+    SETLOCAL1,
+    PUSHBYTE,
+    9,
+    THROW,
+    POP,
+    JUMP,
+    ...s24(-21),
+  ];
+  const abc = script(code, { exceptions: [[0, 19, 19, 0, 0]] });
+  assert.match(emit(abc), /switch \(b\)/);
+  assert.equal(run(abc), 0);
 });
 
 test("a throw past a handler's range goes on to the caller", { skip }, () => {

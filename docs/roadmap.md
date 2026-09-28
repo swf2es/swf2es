@@ -62,8 +62,10 @@ Near-term work, in order. The goal of milestone 1 is in
       IR's types are numbers, instead of the runtime's generic ones.
    2. Structured control flow: loops, `if`s and labelled blocks built from
       the dominator tree, as in Ramsey's "Beyond Relooper", with copies of
-      stack registers removed. A method whose control flow is irreducible,
-      or whose handler ranges do not nest, keeps the dispatcher. Both
+      stack registers removed, and each handler as a `try` around the code
+      it covers. A method whose control flow is irreducible, or whose
+      handlers' `try`s cannot enclose their ranges in the order avmplus
+      searches them, keeps the dispatcher. Both
       preserve AS3's semantics exactly: int wrapping, evaluation order, and
       which instruction an exception comes from, as its handlers see it.
    3. Source maps from the ABC's debugline and debugfile, to step through
