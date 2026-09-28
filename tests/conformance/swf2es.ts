@@ -2,14 +2,29 @@
 // the ABC, each compiled to a module and loaded into one runtime, whose
 // trace output is the result.
 import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { testing } from "../unit/codegen/testing-module.ts";
 
 const runtime = await import(
   new URL("../../packages/runtime/dist/avm2/index.js", import.meta.url).href
 );
 
+// With SWF2ES_MODULES=<dir>, each module is written there, 0.mjs, 1.mjs, ...
+// in load order, and loaded from its file, so that stacks name it.
+const moduleDir = process.env.SWF2ES_MODULES;
+let loaded = 0;
+
 /** The module swf2es compiles the domain's last ABC to, loaded. */
 async function load(js: string): Promise<(rt: unknown) => unknown> {
+  if (moduleDir) {
+    mkdirSync(moduleDir, { recursive: true });
+    const file = join(moduleDir, `${loaded++}.mjs`);
+    writeFileSync(file, js);
+    return (await import(`${pathToFileURL(file).href}?${Date.now()}`)).default;
+  }
+
   const module = await import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
   return module.default;
 }

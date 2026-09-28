@@ -44,6 +44,8 @@ export type Factory = (scope: Scope, sup: AsObject | null) => Method;
 export type TypeRef = null | string | ClassRef | VectorRef;
 
 export interface TraitsDesc {
+  /** The VerifyError resolving the traits gave, if they did not resolve. */
+  error?: number;
   slots: number;
   defaults: [number, Value, TypeRef][];
   bindings: [Namespace, number, string, number][];
@@ -475,6 +477,10 @@ export class Runtime {
   /** The global object of a script, made the first time it is needed. */
   globalOf(script: Script): AsObject {
     if (!script.global) {
+      if (script.desc.traits.error) {
+        throw this.error("VerifyError", script.desc.traits.error);
+      }
+
       const traits = new Traits("global", this.objectTraits);
       traits.dynamic = true;
       traits.describe(script.desc.traits);
@@ -1116,6 +1122,11 @@ export class Runtime {
    * use the traits the runtime made for them before they existed.
    */
   newClass(desc: ClassDesc, base: AsObject | null, scope: Scope): AsObject {
+    const error = desc.instance.error ?? desc.static.error;
+    if (error) {
+      throw this.error("VerifyError", error);
+    }
+
     const abc = desc.abc as Abc;
     const name = abc.names[desc.name] as Multiname;
     const qualified = qualifiedName(name);

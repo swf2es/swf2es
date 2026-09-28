@@ -122,3 +122,41 @@ test("an ABC compiled again gives the same module", { skip }, () => {
   const first = module("builtin.abc", true);
   assert.equal(testing.domainModule(""), first);
 });
+
+test("a module lays out traits that verifying its methods did not resolve", { skip }, () => {
+  // Nothing in builtin.abc calls flash.net's registerClassAlias, so only
+  // emitting the module resolves its script's traits.
+  testing.domainReset(50);
+  const js = module("builtin.abc", true);
+  const script = js.match(
+    /\{ traits: \{[^\n]*"registerClassAlias", (\d+)\][^\n]*methods: \[([^\n]*?)\] \}, init/,
+  );
+  assert.ok(script, "the script binding registerClassAlias");
+  const disp = Number(script[1]) >> 3;
+  const entry = script[2].match(new RegExp(`\\[${disp}, F\\[(\\d+)\\]\\]`));
+  assert.ok(entry, "its method by dispatch id");
+  const factories = js.slice(js.indexOf("const F = ["), js.indexOf("const A = "));
+  const natives = [...factories.matchAll(/rt\.native\("([^"]*)"\)/g)].map((m) => m[1]);
+  assert.ok(natives.includes("flash.net::registerClassAlias"));
+  assert.match(
+    factoryAt(factories, Number(entry[1])),
+    /rt\.native\("flash\.net::registerClassAlias"\)/,
+  );
+});
+
+/** F[index]'s source in a module's `const F = [...]`: entries start on a line after one ending in [ or ,. */
+function factoryAt(factories: string, index: number): string {
+  const lines = factories.split("\n");
+  let at = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (
+      /^ {4}(\(scope, sup\) =>|rt\.)/.test(lines[i]) &&
+      /[[,]$/.test(lines[i - 1]) &&
+      ++at === index
+    ) {
+      return lines[i];
+    }
+  }
+
+  return "";
+}

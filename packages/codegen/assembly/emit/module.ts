@@ -277,13 +277,24 @@ export class ModuleEmitter {
    * Traits t as { slots, defaults, types, bindings, methods }: the slot
    * count with the base's, its own slots' initial values and types, its own
    * bindings as [namespace, version, name, binding], and its own methods by
-   * dispatch id.
+   * dispatch id. Traits lay out when they resolve, which verifying the
+   * methods may not have needed, so they resolve here; if they cannot, the
+   * descriptor holds the VerifyError, which the runtime throws when the
+   * class is created or the script run, as avmplus does.
    */
   traits(t: u32): void {
     const out = this.out;
     const domain = this.domain;
     const traits = domain.traits;
     const abc = domain.abcs[this.index];
+    const error = traits.resolve(domain, t);
+    if (error) {
+      out.text("{ error: ");
+      out.uint(<u32>error);
+      out.text(", slots: 0, defaults: [], bindings: [], methods: [] }");
+      return;
+    }
+
     out.text("{ slots: ");
     out.uint(traits.slotCount[t]);
     out.text(", defaults: [");
