@@ -1094,8 +1094,33 @@ export class Runtime {
       return traits.proto[`$m${b >> 3}`].apply(o, args);
     }
 
-    const f = b !== 0 ? this.getBound(o, traits, b, mn) : this.getProperty(o, mn);
-    return this.callValue(f, o, args, mn);
+    return this.callValue(this.callee(o, traits, b, mn), o, args, mn);
+  }
+
+  /**
+   * What callproperty calls, for a binding other than a method: its value,
+   * else the property. As avmplus' callproperty, on a primitive a name its
+   * class does not have is its prototype's, undefined if none has it, so
+   * that calling it is a TypeError, where getting it is a ReferenceError.
+   */
+  private callee(o: Value, traits: Traits, b: number, mn: Multiname): Value {
+    if (b !== 0) {
+      return this.getBound(o, traits, b, mn);
+    }
+
+    if (typeof o === "object") {
+      return this.getProperty(o, mn);
+    }
+
+    const name = mn.dynamicName();
+    for (let p = name === null ? null : this.protoOf(o); p; p = p.$p) {
+      const v = p.$d?.get(name as string);
+      if (v !== undefined || p.$d?.has(name as string)) {
+        return v;
+      }
+    }
+
+    return undefined;
   }
 
   /** callproplex: as callproperty, with no receiver. */
@@ -1106,7 +1131,7 @@ export class Runtime {
       return traits.proto[`$m${b >> 3}`].apply(o, args);
     }
 
-    return this.callValue(this.getProperty(o, mn), null, args, mn);
+    return this.callValue(this.callee(o, traits, b, mn), null, args, mn);
   }
 
   call(f: Value, receiver: Value, ...args: Value[]): Value {
@@ -1359,9 +1384,9 @@ export class Runtime {
     }
 
     itraits.describe(desc.instance);
-    itraits.dynamic = !desc.sealed;
-
     const hooks = this.classHooks[qualified];
+    itraits.dynamic = !desc.sealed && !hooks?.sealed;
+
     // A class's allocation, bound to the runtime; its subclasses inherit it.
     const create = hooks?.create;
     if (create) {
@@ -2203,6 +2228,11 @@ export interface IndexHook {
 /** How a builtin class differs from others: allocation, index access, calls and construction. */
 export interface ClassHook {
   create?: (traits: Traits, rt: Runtime) => AsObject;
+  /**
+   * Whether its instances take no dynamic names although the class is
+   * dynamic, as a Vector's refuse any that is not an index.
+   */
+  sealed?: boolean;
   getIndex?: IndexHook["getIndex"];
   setIndex?: IndexHook["setIndex"];
   hasIndex?: IndexHook["hasIndex"];
