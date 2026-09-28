@@ -449,7 +449,26 @@ class Reader {
       return "";
     }
 
-    const s = fromUtf8(this.input.readView(length));
+    // A short ASCII string straight from the input, a character at a time;
+    // any other through fromUtf8.
+    const input = this.input;
+    const at = input.position;
+    if (length < 16 && input.available >= length) {
+      const b = input.buffer;
+      let ascii = "";
+      let k = 0;
+      for (; k < length && b[at + k] < 0x80; k++) {
+        ascii += String.fromCharCode(b[at + k]);
+      }
+
+      if (k === length) {
+        input.position = at + length;
+        this.strings.push(ascii);
+        return ascii;
+      }
+    }
+
+    const s = fromUtf8(input.readView(length));
     this.strings.push(s);
     return s;
   }
@@ -613,6 +632,27 @@ class Reader {
 
     const v = rt.constructClass(cls, [length]);
     this.objects.push(v);
+    // A numeric Vector's elements, when all are there, at once: into its
+    // storage, each as its type reads it. Else each on its own, to fail
+    // where avmplus does.
+    const size = type === kVectorDouble ? 8 : 4;
+    if (type !== kVectorObject && this.input.available >= length * size) {
+      const at = this.input.shortRead(length * size);
+      const view = this.input.view;
+      const elements: number[] = v.$a;
+      for (let i = 0; i < length; i++) {
+        elements[i] =
+          type === kVectorDouble
+            ? view.getFloat64(at + i * 8)
+            : type === kVectorInt
+              ? view.getInt32(at + i * 4)
+              : view.getUint32(at + i * 4);
+      }
+
+      v.$fixed = fixed;
+      return v;
+    }
+
     // Each element through the Vector's own setter, which converts it to
     // its type, as setProperty would reach it for an index.
     const setIndex = v.$traits.setIndex as NonNullable<Traits["setIndex"]>;

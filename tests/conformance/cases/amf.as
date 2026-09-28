@@ -87,3 +87,21 @@ trace("vector point", vpBack.length, vpBack[0].x, vpBack[0].y, vpBack[1], vpBack
 var vs:Vector.<String> = new <String>["a", null, "c"];
 var vsBack:* = back(vs);
 trace("vector string", vsBack is Vector.<String>, vsBack is Vector.<Object>, vsBack.join("|"), back(new <Array>[[1]]) is Vector.<Object>, back(new <uint>[0xffffffff, 1])[0], back(new <int>[-1, 0x7fffffff])[0]);
+// Truncated data: the error, and the position it leaves, for numeric
+// Vectors and short strings cut short, and whole ones read at the end.
+function cut(v:*, drop:int):String {
+  var b:ByteArray = new ByteArray();
+  b.writeObject(v);
+  var c:ByteArray = new ByteArray();
+  c.writeBytes(b, 0, b.length - drop);
+  c.position = 0;
+  try {
+    var r:* = c.readObject();
+    return "ok " + r + " at " + c.position;
+  } catch (e:Error) {
+    return e.errorID + " at " + c.position;
+  }
+  return "";
+}
+trace("truncated", cut(new <int>[1, 2, 3], 0), cut(new <int>[1, 2, 3], 1), cut(new <int>[1, 2, 3], 5), cut(new <uint>[7, 8], 3), cut(new <Number>[0.5, 1.5], 1), cut(new <Number>[0.5, 1.5], 9));
+trace("truncated strings", cut("short", 0), cut("short", 1), cut("short", 5), cut("abcdefghijklmnopqrstuvwxyz", 3), cut("é€", 1), cut(["ab", "ab"], 0), cut(["ab", "ab"], 1));
