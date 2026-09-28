@@ -1446,6 +1446,12 @@ export class Runtime {
       if (f.$it) {
         return this.callClass(f, args);
       }
+
+      // A RegExp called is its exec of the argument's string, as RegExpObject::call has it.
+      if (f.$re !== undefined) {
+        this.execName ??= qname(namespace(NS_Public, "http://adobe.com/AS3/2006/builtin"), "exec");
+        return this.callProperty(f, this.execName, args.length ? this.toString(args[0]) : "");
+      }
     }
 
     throw this.error("TypeError", 1006, mn ? mn.name : "value");
@@ -1465,6 +1471,8 @@ export class Runtime {
       this.defaultXmlNamespace = caller;
     }
   }
+
+  private execName: Multiname | null = null;
 
   callInterface(iface: TypeRef, disp: number, o: Value, ...args: Value[]): Value {
     const cls = this.classOf(iface);
@@ -1618,8 +1626,10 @@ export class Runtime {
     return this.array(Array.prototype.slice.call(args));
   }
 
-  newFunction(factory: Factory, scope: Scope): AsObject {
-    return this.newFunctionObject(factory(scope, null), scope.length ? scope[0] : null);
+  newFunction(factory: Factory, scope: Scope, id = 0): AsObject {
+    const f = this.newFunctionObject(factory(scope, null), scope.length ? scope[0] : null);
+    f.$id = id;
+    return f;
   }
 
   /** A Function object calling `f`, with `global` as its receiver when it has none. */
@@ -1627,6 +1637,7 @@ export class Runtime {
     const o = this.functionTraits.instance();
     o.$f = f;
     o.$global = global;
+    o.$id = 0;
     return o;
   }
 

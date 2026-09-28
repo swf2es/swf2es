@@ -55,6 +55,11 @@ export const objectNatives: Natives = {
       return `[class ${shortName(o.$it.name)}]`;
     }
 
+    // As FunctionObject::implToString: its method's id.
+    if (o !== null && typeof o === "object" && o.$f) {
+      return `[object Function-${o.$id}]`;
+    }
+
     return `[object ${shortName(rt.traitsOf(o).name)}]`;
   },
 
@@ -176,5 +181,7 @@ export const objectHooks: Record<string, ClassHook> = {
   Function: {
     construct: (rt) => rt.newFunctionObject(() => undefined, null),
     call: (rt) => rt.newFunctionObject(() => undefined, null),
+    // Function.prototype is a function, that does nothing.
+    prototype: (rt) => rt.newFunctionObject(() => undefined, null),
   },
 };
