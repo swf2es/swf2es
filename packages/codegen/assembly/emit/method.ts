@@ -477,6 +477,8 @@ export class MethodEmitter {
   normalStart: StaticArray<u32> = new StaticArray<u32>(0);
   /** The handlers whose trys are open, the innermost last; and whether some covered code was outside its try. */
   tryStack: u32[] = [];
+  /** The state of the blocks around one being written in place, as save pushes it. */
+  saved: i32[] = [];
   unenclosed: bool = false;
   dfsStack: u32[] = [];
   dfsEdge: u32[] = [];
@@ -947,10 +949,44 @@ export class MethodEmitter {
       out.uint(t);
       out.text(";");
     } else {
-      // Its only way in: its code here.
+      // Its only way in: its code here, and then the block branching goes
+      // on, a conditional branch's, with its own types, scopes and region.
       out.text("\n");
+      this.save();
       this.node(t);
+      this.restore();
       this.currentBlock = from;
+    }
+  }
+
+  /** Push what writing a block follows: its registers' types, scopes and region. */
+  private save(): void {
+    const ir = this.ir;
+    const saved = this.saved;
+    for (let r: u32 = 0; r < ir.frameSize; r++) {
+      saved.push(this.regType[r]);
+    }
+
+    for (let d: u32 = 0; d < ir.maxScope; d++) {
+      saved.push(this.scopeWith[d]);
+    }
+
+    saved.push(<i32>this.scopeDepth);
+    saved.push(this.region);
+  }
+
+  /** Pop what save pushed. */
+  private restore(): void {
+    const ir = this.ir;
+    const saved = this.saved;
+    this.region = saved.pop();
+    this.scopeDepth = <u32>saved.pop();
+    for (let d = <i32>ir.maxScope - 1; d >= 0; d--) {
+      this.scopeWith[d] = <u8>saved.pop();
+    }
+
+    for (let r = <i32>ir.frameSize - 1; r >= 0; r--) {
+      this.regType[r] = saved.pop();
     }
   }
 

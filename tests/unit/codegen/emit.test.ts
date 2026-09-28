@@ -38,6 +38,8 @@ const DECLOCAL_I = 0xc3;
 const RETURNVALUE = 0x48;
 const THROW = 0x03;
 const POP = 0x29;
+const PUSHNAN = 0x28;
+const CONVERT_I = 0x73;
 const JUMP = 0x10;
 const IFTRUE = 0x11;
 const IFFALSE = 0x12;
@@ -141,6 +143,27 @@ test("if and else meet again after a labelled block", { skip }, () => {
   assert.match(js, /L\d+: \{/);
   assert.doesNotMatch(js, /switch \(b\)/);
   assert.equal(run(script(code)), 1);
+});
+
+test("code after an if goes on with its own register types, not the if body's", { skip }, () => {
+  // NaN stays on the stack past if (!true) { pop; return 1 }, then int(it): the
+  // if body, written in place, pushes an int where the NaN was, but after it the
+  // NaN is still there, a Number.
+  // 0 pushnan; 1 pushtrue; 2 iffalse +2 to 8; 6 convert_i; 7 returnvalue;
+  // 8 pop; 9 pushbyte 1; 11 returnvalue.
+  const code = [
+    PUSHNAN,
+    PUSHTRUE,
+    IFFALSE,
+    ...s24(2),
+    CONVERT_I,
+    RETURNVALUE,
+    POP,
+    PUSHBYTE,
+    1,
+    RETURNVALUE,
+  ];
+  assert.equal(run(script(code)), 0);
 });
 
 test("an irreducible loop keeps the dispatcher, and runs the same", { skip }, () => {
