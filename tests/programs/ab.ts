@@ -3,7 +3,8 @@
 // turn, A, B, B, A, A, B, ..., each run in a process of its own as the
 // programs runner runs it. Interleaved, both builds see the same load on
 // the machine, and neither always runs after the other. The totals of
-// as3pb's two AS3PB paths, median and range, per build.
+// as3pb's two AS3PB paths, or the lines AB_PATHS names, median and range,
+// per build.
 //
 //   node tests/programs/ab.ts --snapshot <dir>    the builds now, into <dir>
 //   node tests/programs/ab.ts <dir A> <dir B> [runs, 7]
@@ -30,7 +31,7 @@ if (process.argv[2] === "--child") {
     [read("lib/builtin.abc"), read("lib/shell_toplevel.abc")],
     read("as3pb/ShellMain.abc"),
   );
-  console.log(lines.filter((l) => l.startsWith("time: AS3PB")).join("\n"));
+  console.log(lines.filter((l) => l.startsWith("time: ")).join("\n"));
   process.exit(0);
 }
 
@@ -66,7 +67,17 @@ if (!a || !b) {
 }
 
 const runs = Number(runsArg ?? 7);
-const paths = ["bytes", "memory"];
+// Each path as the name of as3pb's timing line and which of its lines to
+// take, 1 for serialize, 2 for deserialize, 3 for the total: by default the
+// totals of AS3PB's two, else AB_PATHS, as "AMF3:2,JSON:1".
+const paths = (process.env.AB_PATHS ?? "AS3PB bytes:3,AS3PB memory:3").split(",").map((p) => {
+  const at = p.lastIndexOf(":");
+  return { name: p.slice(0, at), line: Number(p.slice(at + 1)) };
+});
+const label = (p: (typeof paths)[number]) =>
+  p.name.startsWith("AS3PB ") && p.line === 3
+    ? p.name.slice(6)
+    : `${p.name} ${["", "encode", "decode", "total"][p.line]}`;
 const times: Record<string, Record<string, number[]>> = { A: {}, B: {} };
 for (let run = 0; run < runs; run++) {
   // A then B, then B then A: neither always runs after the other.
@@ -89,9 +100,9 @@ for (let run = 0; run < runs; run++) {
       },
     );
     for (const path of paths) {
-      // Serialize, deserialize, then the total: the last line for the path.
-      const all = [...out.matchAll(new RegExp(`AS3PB ${path}: (\\d+)ms`, "g"))];
-      times[name][path] = [...(times[name][path] ?? []), Number(all[all.length - 1][1])];
+      const all = [...out.matchAll(new RegExp(`time: ${path.name}: (\\d+)ms`, "g"))];
+      const key = label(path);
+      times[name][key] = [...(times[name][key] ?? []), Number(all[path.line - 1][1])];
     }
   }
 }
@@ -100,11 +111,11 @@ const median = (v: number[]) => {
   const s = [...v].sort((x, y) => x - y);
   return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
 };
-for (const path of paths) {
-  const [ma, mb] = [median(times.A[path]), median(times.B[path])];
+for (const key of paths.map(label)) {
+  const [ma, mb] = [median(times.A[key]), median(times.B[key])];
   const range = (v: number[]) => `${Math.min(...v)}–${Math.max(...v)}`;
   const change = (((mb - ma) / ma) * 100).toFixed(1);
   console.log(
-    `${path.padEnd(6)} A ${ma} ms (${range(times.A[path])})  B ${mb} ms (${range(times.B[path])})  B/A ${change}%`,
+    `${key.padEnd(6)} A ${ma} ms (${range(times.A[key])})  B ${mb} ms (${range(times.B[key])})  B/A ${change}%`,
   );
 }
