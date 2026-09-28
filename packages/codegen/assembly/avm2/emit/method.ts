@@ -497,6 +497,13 @@ export class MethodEmitter {
       this.sunk = false;
       this.instruction(i);
       this.target = -1;
+      if (op === ops.OP_swap) {
+        // Its one destination is the new top, whose type the IR gives; the
+        // register below it now holds what the top did, and its type.
+        const x = ir.src[i];
+        this.regType[x] = this.regType[x + 1];
+      }
+
       if (dst >= 0) {
         this.regType[dst] = ir.type[i];
       }
