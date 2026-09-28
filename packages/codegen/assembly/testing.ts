@@ -68,38 +68,39 @@ export function poolDump(bytes: Uint8Array): string {
   r.u16();
   const pool = readConstantPool(r, base);
 
-  let out = "";
+  // Lines joined once: the minimal runtime frees nothing during a call.
+  const out: string[] = [];
   for (let i = 1; i < pool.ints.length; i++) {
-    out += `int ${i} ${pool.ints[i]}\n`;
+    out.push(`int ${i} ${pool.ints[i]}`);
   }
   for (let i = 1; i < pool.uints.length; i++) {
-    out += `uint ${i} ${pool.uints[i]}\n`;
+    out.push(`uint ${i} ${pool.uints[i]}`);
   }
   for (let i = 1; i < pool.doubles.length; i++) {
-    out += `double ${i} ${pool.doubles[i]}\n`;
+    out.push(`double ${i} ${pool.doubles[i]}`);
   }
   for (let i = 1; i < pool.stringStart.length; i++) {
     const text = String.UTF8.decodeUnsafe(base + pool.stringStart[i], pool.stringLength[i]);
-    out += `string ${i} ${text}\n`;
+    out.push(`string ${i} ${text}`);
   }
   for (let i = 1; i < pool.nsKind.length; i++) {
-    out += `ns ${i} ${hex(pool.nsKind[i])} ${pool.nsName[i]}\n`;
+    out.push(`ns ${i} ${hex(pool.nsKind[i])} ${pool.nsName[i]}`);
   }
   for (let i: u32 = 1; i < pool.nsSetCount; i++) {
-    let members = "";
+    const members: string[] = [];
     for (let j = pool.nsSetStart[i]; j < pool.nsSetStart[i + 1]; j++) {
-      members += (members.length ? "," : "") + pool.nsSetMembers[j].toString();
+      members.push(pool.nsSetMembers[j].toString());
     }
-    out += `nsset ${i} ${members}\n`;
+    out.push(`nsset ${i} ${members.join(",")}`);
   }
   for (let i = 1; i < pool.mnKind.length; i++) {
-    out += `mn ${i} ${hex(pool.mnKind[i])} ${pool.mnA[i]} ${pool.mnB[i]}\n`;
+    out.push(`mn ${i} ${hex(pool.mnKind[i])} ${pool.mnA[i]} ${pool.mnB[i]}`);
   }
   if (pool.error) {
-    out += `error ${pool.error}\n`;
+    out.push(`error ${pool.error}`);
   }
 
-  return out;
+  return out.length ? `${out.join("\n")}\n` : "";
 }
 
 /**
