@@ -6,7 +6,9 @@
 // it a little further.
 import { readFile } from "node:fs/promises";
 
-const dir = new URL("../../../packages/codegen/dist-test/", import.meta.url);
+// SWF2ES_CHECKED selects the build that checks every array access (pnpm test:checked).
+const build = process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test";
+const dir = new URL(`../../../packages/codegen/${build}/`, import.meta.url);
 const { instantiate } = await import(new URL("testing.js", dir).href);
 const module = await WebAssembly.compile(await readFile(new URL("testing.wasm", dir)));
 const COLLECT_EVERY = 64;

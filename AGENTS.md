@@ -22,6 +22,7 @@ pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
 pnpm test        # unit, conformance and program tests (needs podman or docker)
+pnpm test:checked # the same with every array access bounds-checked
 pnpm oracle path/to/file.as   # print avmshell's output for a file
 pnpm oracle:cases             # the unit tests' hand-built ABCs vs avmshell
 pnpm tamarin [prefix...]      # Tamarin acceptance tests vs baseline.json (about 10 minutes
@@ -86,6 +87,11 @@ calling a change done; CI runs the same steps.
   JS, never during one. Nothing allocated in a call is freed before it
   returns, so build large results from a list joined once, not with `+=`
   in a loop, and reuse scratch buffers across iterations.
+- Release builds leave every array access unchecked (`uncheckedBehavior:
+  "always"`), so do not write `unchecked()`. An index that comes from the
+  input needs an explicit comparison that rejects it with avmplus' error;
+  any other index must be in range by construction, which `pnpm
+  test:checked` checks on every access.
 - Errors are sticky flags or VerifyError numbers, never `throw`: an abort
   kills the wasm instance, and the JIT must survive a malformed SWF.
 - Use avmplus' error numbers (`assembly/abc/constants.ts`) so rejections match

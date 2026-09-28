@@ -55,7 +55,10 @@ scratch, not in managed stores. Loading, linking, resolving and verifying
 with types every Tamarin ABC, each in a new domain after builtin and
 shell_toplevel, went from 9.8 to 5.5 s. The `stub` runtime, which never
 frees, was no faster. The optimizer's `converge` and `noAssert` made no
-measurable difference at `optimizeLevel` 3.
+measurable difference at `optimizeLevel` 3. Neither did `uncheckedBehavior: "always"`,
+as the hot loops were already unchecked; releases use it anyway, so the
+code needs no `unchecked()`, and `pnpm test:checked` runs the tests with
+every access checked instead (see AGENTS.md).
 
 Before the BodyDecoder rewrite (a new decoder with code-sized scratch per
 body, growing output arrays and a final copy into offset order), decoding
