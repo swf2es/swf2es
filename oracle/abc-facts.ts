@@ -236,3 +236,12 @@ export function typedErrors(builtins: Uint8Array[], abc: Uint8Array, builtin = f
     .map((l) => Number(l.split(" ")[5]));
   return [...new Set(errors)].sort((a, b) => a - b);
 }
+
+/**
+ * A problem in the IR of the methods of the ABC typedErrors last verified
+ * (see domainCheckIr in codegen's testing.ts), or null if it is well formed.
+ */
+export function irProblem(): string | null {
+  const result = testing.domainCheckIr() as string;
+  return result.startsWith("checked") ? null : result;
+}

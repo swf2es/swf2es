@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import {
   abcdumpFacts,
   compareFacts,
+  irProblem,
   swf2esFacts,
   typedErrors,
   verifyErrors,
@@ -80,6 +81,10 @@ for (const r of results) {
     // otherwise every method the scripts can run is verified with types, and
     // any other body structurally.
     const typed = typedErrors(builtins, abc);
+    const ir = irProblem();
+    if (ir) {
+      problems.push(`${r.name}: IR: ${ir}`);
+    }
     const ours = [...new Set([...typed, ...verifyErrors(facts)])].sort((x, y) => x - y).join(" ");
     const theirs = [...new Set(r.output.match(/(?<=VerifyError: Error #)\d+/g) ?? [])]
       .sort()
