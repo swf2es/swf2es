@@ -2460,7 +2460,8 @@ export class MethodEmitter {
         out.text(")");
         return;
       default:
-        out.text("rt.coerce(");
+        // A class's instances, by T: no builtin for the runtime to look for.
+        out.text(this.isClassRef(type) ? "rt.coerceTo(" : "rt.coerce(");
         this.operand(prefix, r);
         out.text(", ");
         this.typeRef(type);
@@ -2482,17 +2483,22 @@ export class MethodEmitter {
    * the module loads, for a class or Vector; the builtin types, and * as
    * null, as they are.
    */
-  typeRef(t: i32): void {
-    const out = this.out;
+  /** Whether typeRef writes type t as T[k], a class's instances; else a literal. */
+  isClassRef(t: i32): bool {
     // What typeExpr writes as a literal stays one: *, the builtins it names
     // by string, and a type that is not a class's instances.
     const bt = t < 0 ? BUILTIN_Any : this.domain.builtin(t);
-    if (
-      t < 0 ||
-      (bt !== BUILTIN_Other && bt !== BUILTIN_Namespace) ||
-      t === this.domain.voidType ||
-      this.domain.traits.kind[t] !== TRAITS_Instance
-    ) {
+    return (
+      t >= 0 &&
+      (bt === BUILTIN_Other || bt === BUILTIN_Namespace) &&
+      t !== this.domain.voidType &&
+      this.domain.traits.kind[t] === TRAITS_Instance
+    );
+  }
+
+  typeRef(t: i32): void {
+    const out = this.out;
+    if (!this.isClassRef(t)) {
       this.typeExpr(t);
       return;
     }

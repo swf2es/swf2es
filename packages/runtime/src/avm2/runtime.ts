@@ -237,6 +237,8 @@ export class Traits {
 /** A class named in a module, resolved the first time it is needed. */
 export class ClassRef {
   cls: AsObject | null = null;
+  /** Its instances' traits, once coerceTo has found them. */
+  traits: Traits | null = null;
 
   constructor(
     readonly ns: Namespace,
@@ -247,11 +249,12 @@ export class ClassRef {
 /** Vector.<T>, resolved the first time it is needed. */
 export class VectorRef {
   cls: AsObject | null = null;
+  /** Its instances' traits, once coerceTo has found them. */
+  traits: Traits | null = null;
 
   constructor(readonly param: TypeRef) {}
 }
 
-/** A script: its descriptor, its global object once made, and whether it has run. */
 /**
  * The names for-ins go through over one object, each in a slot, as in
  * avmplus' hashtable. A name keeps its slot while it is there, so a for-in
@@ -269,6 +272,7 @@ interface Enumeration {
   slot: Map<string, number>;
 }
 
+/** A script: its descriptor, its global object once made, and whether it has run. */
 interface Script {
   desc: ScriptDesc;
   abc: Abc;
@@ -1461,6 +1465,29 @@ export class Runtime {
         throw this.error("TypeError", 1034, this.describe(v), traits.name);
       }
     }
+  }
+
+  /**
+   * coerce, to a class's instances: what code compiled against the type
+   * calls, with no builtin to look for, and the class's traits kept on the
+   * reference once resolved, as it always resolves to the same class.
+   */
+  coerceTo(v: Value, type: ClassRef | VectorRef): Value {
+    if (v === null || v === undefined) {
+      return null;
+    }
+
+    let traits = type.traits;
+    if (traits === null) {
+      traits = this.traitsOfType(type);
+      type.traits = traits;
+    }
+
+    if (v.$traits === traits || this.isInstanceOf(v, traits)) {
+      return v;
+    }
+
+    throw this.error("TypeError", 1034, this.describe(v), traits.name);
   }
 
   coerceString(v: Value): string | null {
