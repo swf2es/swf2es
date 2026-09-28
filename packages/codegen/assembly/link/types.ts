@@ -23,18 +23,18 @@ export const BIND_Ambiguous: u32 = 0xffffffff;
  * something that can be bound early, a name in known namespaces.
  */
 export function isBindingName(domain: Domain, index: u32, mn: u32): bool {
-  const pool = unchecked(domain.abcs[index]).pool;
-  let kind = unchecked(pool.mnKind[mn]);
+  const pool = domain.abcs[index].pool;
+  let kind = pool.mnKind[mn];
   if (kind === CONSTANT_TypeName) {
-    mn = unchecked(pool.mnA[mn]);
-    kind = unchecked(pool.mnKind[mn]);
+    mn = pool.mnA[mn];
+    kind = pool.mnKind[mn];
   }
 
   if (kind === CONSTANT_Qname) {
-    return unchecked(pool.mnA[mn]) !== 0 && unchecked(pool.mnB[mn]) !== 0;
+    return pool.mnA[mn] !== 0 && pool.mnB[mn] !== 0;
   }
 
-  return kind === CONSTANT_Multiname && unchecked(pool.mnB[mn]) !== 0;
+  return kind === CONSTANT_Multiname && pool.mnB[mn] !== 0;
 }
 
 /**
@@ -47,28 +47,28 @@ export function getBinding(domain: Domain, index: u32, type: i32, mn: u32): u32 
     return BIND_None;
   }
 
-  const pool = unchecked(domain.abcs[index]).pool;
-  if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
-    mn = unchecked(pool.mnA[mn]);
+  const pool = domain.abcs[index].pool;
+  if (pool.mnKind[mn] === CONSTANT_TypeName) {
+    mn = pool.mnA[mn];
   }
 
   const traits = domain.traits;
-  const ids = unchecked(domain.abcNs[index]);
-  const versions = unchecked(domain.abcNsVersion[index]);
-  const name = unchecked(domain.abcString[index][pool.mnB[mn]]);
-  if (unchecked(pool.mnKind[mn]) === CONSTANT_Qname) {
-    const ns = unchecked(pool.mnA[mn]);
-    return traits.find(type, unchecked(ids[ns]), name, unchecked(versions[ns]));
+  const ids = domain.abcNs[index];
+  const versions = domain.abcNsVersion[index];
+  const name = domain.abcString[index][pool.mnB[mn]];
+  if (pool.mnKind[mn] === CONSTANT_Qname) {
+    const ns = pool.mnA[mn];
+    return traits.find(type, ids[ns], name, versions[ns]);
   }
 
-  const set = unchecked(pool.mnA[mn]);
-  const first = unchecked(pool.nsSetStart[set]);
-  const last = unchecked(pool.nsSetStart[set + 1]);
-  for (let t = type; t >= 0; t = unchecked(traits.base[t])) {
+  const set = pool.mnA[mn];
+  const first = pool.nsSetStart[set];
+  const last = pool.nsSetStart[set + 1];
+  for (let t = type; t >= 0; t = traits.base[t]) {
     let found = BIND_None;
     for (let m = first; m < last; m++) {
-      const ns = unchecked(pool.nsSetMembers[m]);
-      const b = traits.own(<u32>t, unchecked(ids[ns]), name, unchecked(versions[ns]));
+      const ns = pool.nsSetMembers[m];
+      const b = traits.own(<u32>t, ids[ns], name, versions[ns]);
       if (b === BIND_None) {
         continue;
       }
@@ -93,27 +93,27 @@ export function getBinding(domain: Domain, index: u32, type: i32, mn: u32): u32 
  * BIND_None; Domain.foundNs is then the namespace it was found in.
  */
 export function getOwnBinding(domain: Domain, index: u32, t: u32, mn: u32): u32 {
-  const pool = unchecked(domain.abcs[index]).pool;
-  if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
-    mn = unchecked(pool.mnA[mn]);
+  const pool = domain.abcs[index].pool;
+  if (pool.mnKind[mn] === CONSTANT_TypeName) {
+    mn = pool.mnA[mn];
   }
 
   const traits = domain.traits;
-  const ids = unchecked(domain.abcNs[index]);
-  const versions = unchecked(domain.abcNsVersion[index]);
-  const name = unchecked(domain.abcString[index][pool.mnB[mn]]);
-  if (unchecked(pool.mnKind[mn]) === CONSTANT_Qname) {
-    const ns = unchecked(pool.mnA[mn]);
-    domain.foundNs = <i32>unchecked(ids[ns]);
-    return traits.own(t, unchecked(ids[ns]), name, unchecked(versions[ns]));
+  const ids = domain.abcNs[index];
+  const versions = domain.abcNsVersion[index];
+  const name = domain.abcString[index][pool.mnB[mn]];
+  if (pool.mnKind[mn] === CONSTANT_Qname) {
+    const ns = pool.mnA[mn];
+    domain.foundNs = <i32>ids[ns];
+    return traits.own(t, ids[ns], name, versions[ns]);
   }
 
-  const set = unchecked(pool.mnA[mn]);
-  for (let m = unchecked(pool.nsSetStart[set]); m < unchecked(pool.nsSetStart[set + 1]); m++) {
-    const ns = unchecked(pool.nsSetMembers[m]);
-    const b = traits.own(t, unchecked(ids[ns]), name, unchecked(versions[ns]));
+  const set = pool.mnA[mn];
+  for (let m = pool.nsSetStart[set]; m < pool.nsSetStart[set + 1]; m++) {
+    const ns = pool.nsSetMembers[m];
+    const b = traits.own(t, ids[ns], name, versions[ns]);
     if (b !== BIND_None) {
-      domain.foundNs = <i32>unchecked(ids[ns]);
+      domain.foundNs = <i32>ids[ns];
       return b;
     }
   }
@@ -129,12 +129,12 @@ export function bindingType(domain: Domain, type: i32, b: u32): i32 {
   const kind = b & 7;
   const traits = domain.traits;
   if (kind === BKIND_Var || kind === BKIND_Const) {
-    return unchecked(traits.slotType[traits.slotStart[type] + (b >> 3)]);
+    return traits.slotType[traits.slotStart[type] + (b >> 3)];
   }
 
   if (kind === BKIND_Get || kind === BKIND_GetSet) {
-    const m = unchecked(traits.dispatch[traits.dispatchStart[type] + (b >> 3)]);
-    return m < 0 ? TYPE_Any : unchecked(traits.returnType[m]);
+    const m = traits.dispatch[traits.dispatchStart[type] + (b >> 3)];
+    return m < 0 ? TYPE_Any : traits.returnType[m];
   }
 
   return TYPE_Any;
@@ -151,16 +151,16 @@ export function commonBase(domain: Domain, a: i32, b: i32): i32 {
   }
 
   const traits = domain.traits;
-  if (unchecked(traits.kind[a]) === TRAITS_Null && !domain.isMachineType(b)) {
+  if (traits.kind[a] === TRAITS_Null && !domain.isMachineType(b)) {
     return b;
   }
 
-  if (unchecked(traits.kind[b]) === TRAITS_Null && !domain.isMachineType(a)) {
+  if (traits.kind[b] === TRAITS_Null && !domain.isMachineType(a)) {
     return a;
   }
 
-  for (let t = b; t >= 0; t = unchecked(traits.base[t])) {
-    for (let s = a; s >= 0; s = unchecked(traits.base[s])) {
+  for (let t = b; t >= 0; t = traits.base[t]) {
+    for (let s = a; s >= 0; s = traits.base[s]) {
       if (s === t) {
         return t;
       }
@@ -180,7 +180,7 @@ export function canAssign(domain: Domain, lhs: i32, rhs: i32): bool {
     return true;
   }
 
-  for (let t = rhs; t >= 0; t = unchecked(domain.traits.base[t])) {
+  for (let t = rhs; t >= 0; t = domain.traits.base[t]) {
     if (t === lhs) {
       return true;
     }

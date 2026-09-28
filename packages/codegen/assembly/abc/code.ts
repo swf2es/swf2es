@@ -322,7 +322,7 @@ export class Code {
       this.cases = grown;
     }
 
-    unchecked((this.cases[this.caseCount++] = offset));
+    this.cases[this.caseCount++] = offset;
   }
 }
 
@@ -455,19 +455,19 @@ export class BodyDecoder {
     code.count = 0;
     code.caseCount = 0;
 
-    this.start = this.base + unchecked(abc.bodyCodeStart[body]);
-    this.length = unchecked(abc.bodyCodeLength[body]);
-    this.handlerFirst = unchecked(abc.bodyExceptionStart[body]);
-    this.handlerCount = unchecked(abc.bodyExceptionStart[body + 1]) - this.handlerFirst;
+    this.start = this.base + abc.bodyCodeStart[body];
+    this.length = abc.bodyCodeLength[body];
+    this.handlerFirst = abc.bodyExceptionStart[body];
+    this.handlerCount = abc.bodyExceptionStart[body + 1] - this.handlerFirst;
     this.instructions = 0;
     this.workCount = 0;
     this.entryUsed = 0;
     this.overlap = false;
     this.r.failed = false;
-    this.method = unchecked(abc.bodyMethod[body]);
-    this.methodFlags = unchecked(abc.methodFlags[this.method]);
-    this.maxStack = unchecked(abc.bodyMaxStack[body]);
-    this.localCount = unchecked(abc.bodyLocalCount[body]);
+    this.method = abc.bodyMethod[body];
+    this.methodFlags = abc.methodFlags[this.method];
+    this.maxStack = abc.bodyMaxStack[body];
+    this.localCount = abc.bodyLocalCount[body];
     this.outer = outer !== null ? outer : new Scope();
     this.reset();
 
@@ -491,8 +491,8 @@ export class BodyDecoder {
       }
     } else {
       if (this.typed) {
-        unchecked((this.entryStack[0] = 0));
-        unchecked((this.entryScope[0] = 0));
+        this.entryStack[0] = 0;
+        this.entryScope[0] = 0;
         this.saveEntry(0);
       }
 
@@ -502,12 +502,10 @@ export class BodyDecoder {
     }
 
     while (this.workCount) {
-      const start = unchecked(this.work[--this.workCount]);
-      unchecked((this.pending[start] = 0));
+      const start = this.work[--this.workCount];
+      this.pending[start] = 0;
       this.loadEntry(start);
-      if (
-        !this.block(start, unchecked(this.entryStack[start]), unchecked(this.entryScope[start]))
-      ) {
+      if (!this.block(start, this.entryStack[start], this.entryScope[start])) {
         return code;
       }
     }
@@ -535,8 +533,8 @@ export class BodyDecoder {
     ir.reset(this.localCount, this.maxScope, this.frameSize);
     let blocks: u32 = 0;
     for (let pc: u32 = 0; pc < this.length; pc++) {
-      if (pc === 0 || unchecked(this.known[pc])) {
-        unchecked((this.blockOf[pc] = blocks++));
+      if (pc === 0 || this.known[pc]) {
+        this.blockOf[pc] = blocks++;
       }
     }
 
@@ -544,31 +542,25 @@ export class BodyDecoder {
     const abc = this.abc;
     for (let i: u32 = 0; i < this.handlerCount; i++) {
       const h = this.handlerFirst + i;
-      if (!unchecked(this.known[abc.exceptionTarget[h]])) {
+      if (!this.known[abc.exceptionTarget[h]]) {
         continue;
       }
 
       ir.addHandler(
-        unchecked(abc.exceptionFrom[h]),
-        unchecked(abc.exceptionTo[h]),
-        unchecked(this.blockOf[abc.exceptionTarget[h]]),
-        unchecked(this.handlerType[i]),
-        unchecked(this.handlerScope[i]),
+        abc.exceptionFrom[h],
+        abc.exceptionTo[h],
+        this.blockOf[abc.exceptionTarget[h]],
+        this.handlerType[i],
+        this.handlerScope[i],
       );
     }
 
     let ok = true;
     for (let pc: u32 = 0; pc < this.length && ok; pc++) {
-      if (pc === 0 || unchecked(this.known[pc])) {
+      if (pc === 0 || this.known[pc]) {
         this.loadEntry(pc);
-        ir.addBlock(
-          pc,
-          unchecked(this.entryStack[pc]),
-          unchecked(this.entryScope[pc]),
-          this.valueType,
-          this.valueFlags,
-        );
-        ok = this.block(pc, unchecked(this.entryStack[pc]), unchecked(this.entryScope[pc]));
+        ir.addBlock(pc, this.entryStack[pc], this.entryScope[pc], this.valueType, this.valueFlags);
+        ok = this.block(pc, this.entryStack[pc], this.entryScope[pc]);
       }
     }
 
@@ -581,8 +573,8 @@ export class BodyDecoder {
     const ir = this.ir;
     const i = ir.add(op, dst, src, count, a, b, c, pc);
     if (dst >= 0) {
-      unchecked((ir.type[i] = this.valueType[dst]));
-      unchecked((ir.notNull[i] = this.valueFlags[dst] & NOT_NULL));
+      ir.type[i] = this.valueType[dst];
+      ir.notNull[i] = this.valueFlags[dst] & NOT_NULL;
     }
   }
 
@@ -654,26 +646,17 @@ export class BodyDecoder {
       case OP_ifnle:
       case OP_ifngt:
       case OP_ifnge:
-        ra = unchecked(this.blockOf[this.slotNext[pc] + <u32>this.slotA[pc]]);
+        ra = this.blockOf[this.slotNext[pc] + <u32>this.slotA[pc]];
         break;
       case OP_lookupswitch: {
         const ir = this.ir;
-        const first = unchecked(this.slotC[pc]);
+        const first = this.slotC[pc];
         const cases = ir.caseCount;
         for (let i = first; i <= first + b; i++) {
-          ir.addCase(unchecked(this.blockOf[pc + this.code.cases[i]]));
+          ir.addCase(this.blockOf[pc + this.code.cases[i]]);
         }
 
-        this.emit(
-          opcode,
-          -1,
-          src,
-          count,
-          unchecked(this.blockOf[pc + this.slotA[pc]]),
-          cases,
-          <i32>b,
-          pc,
-        );
+        this.emit(opcode, -1, src, count, this.blockOf[pc + this.slotA[pc]], cases, <i32>b, pc);
         return;
       }
       default:
@@ -724,8 +707,7 @@ export class BodyDecoder {
   /** As Verifier::checkFrameDefinition: a scope size that is a u30, and a frame that fits. */
   checkFrame(body: u32): bool {
     const abc = this.abc;
-    const scope =
-      <i64>unchecked(abc.bodyMaxScopeDepth[body]) - unchecked(abc.bodyInitScopeDepth[body]);
+    const scope = <i64>abc.bodyMaxScopeDepth[body] - abc.bodyInitScopeDepth[body];
     const frame = <i64>this.localCount + scope + this.maxStack;
     if (scope < 0 || frame > 0x7fffffff / 8) {
       this.code.fail(kCorruptABCError);
@@ -740,9 +722,7 @@ export class BodyDecoder {
   /** As Verifier::checkParams: registers for this, the parameters and any rest or arguments. */
   checkParams(): bool {
     const abc = this.abc;
-    const params =
-      unchecked(abc.methodParamStart[this.method + 1]) -
-      unchecked(abc.methodParamStart[this.method]);
+    const params = abc.methodParamStart[this.method + 1] - abc.methodParamStart[this.method];
     if (this.localCount < params + 1) {
       this.code.fail(kCorruptABCError);
       return false;
@@ -776,13 +756,13 @@ export class BodyDecoder {
     this.handlerScope.length = 0;
     for (let i: u32 = 0; i < this.handlerCount; i++) {
       const h = this.handlerFirst + i;
-      const from = unchecked(abc.exceptionFrom[h]);
-      const to = unchecked(abc.exceptionTo[h]);
-      const target = unchecked(abc.exceptionTarget[h]);
-      const name = unchecked(abc.exceptionName[h]);
+      const from = abc.exceptionFrom[h];
+      const to = abc.exceptionTo[h];
+      const target = abc.exceptionTarget[h];
+      const name = abc.exceptionName[h];
       let type = TYPE_Any;
-      if (typed && unchecked(abc.exceptionType[h]) !== 0) {
-        type = this.typeName(unchecked(abc.exceptionType[h]));
+      if (typed && abc.exceptionType[h] !== 0) {
+        type = this.typeName(abc.exceptionType[h]);
         if (type < TYPE_Any) {
           return false;
         }
@@ -830,8 +810,8 @@ export class BodyDecoder {
   initTypes(): bool {
     const domain = this.domain;
     const traits = domain.traits;
-    this.global = unchecked(domain.methodStart[this.index]) + this.method;
-    this.declarer = unchecked(traits.methodTraits[this.global]);
+    this.global = domain.methodStart[this.index] + this.method;
+    this.declarer = traits.methodTraits[this.global];
     const error = traits.sign(domain, this.global);
     if (error) {
       return this.fail(error);
@@ -843,10 +823,10 @@ export class BodyDecoder {
     }
 
     const m = this.global;
-    const count = unchecked(traits.paramCount[m]);
-    this.setValue(0, unchecked(traits.receiverType[m]), NOT_NULL);
+    const count = traits.paramCount[m];
+    this.setValue(0, traits.receiverType[m], NOT_NULL);
     for (let p: u32 = 0; p < count; p++) {
-      this.setValue(p + 1, unchecked(traits.paramType[traits.paramStart[m] + p]), 0);
+      this.setValue(p + 1, traits.paramType[traits.paramStart[m] + p], 0);
     }
 
     let firstLocal = count + 1;
@@ -866,8 +846,8 @@ export class BodyDecoder {
 
   @inline
   setValue(i: u32, type: i32, flags: u8): void {
-    unchecked((this.valueType[i] = type));
-    unchecked((this.valueFlags[i] = flags));
+    this.valueType[i] = type;
+    this.valueFlags[i] = flags;
   }
 
   @inline
@@ -883,12 +863,12 @@ export class BodyDecoder {
 
   @inline
   typeOf(i: u32): i32 {
-    return unchecked(this.valueType[i]);
+    return this.valueType[i];
   }
 
   @inline
   isNotNull(i: u32): bool {
-    return (unchecked(this.valueFlags[i]) & NOT_NULL) !== 0;
+    return (this.valueFlags[i] & NOT_NULL) !== 0;
   }
 
   /** Save the current state as known target t's entry state. */
@@ -905,7 +885,7 @@ export class BodyDecoder {
     }
 
     const at = this.entryUsed;
-    unchecked((this.entryAt[t] = at));
+    this.entryAt[t] = at;
     this.entryUsed += size;
     memory.copy(
       changetype<usize>(this.entryType) + ((<usize>at) << 2),
@@ -925,7 +905,7 @@ export class BodyDecoder {
       return;
     }
 
-    const at = unchecked(this.entryAt[t]);
+    const at = this.entryAt[t];
     memory.copy(
       changetype<usize>(this.valueType),
       changetype<usize>(this.entryType) + ((<usize>at) << 2),
@@ -946,7 +926,7 @@ export class BodyDecoder {
    */
   mergeEntry(t: u32): i32 {
     const domain = this.domain;
-    const at = unchecked(this.entryAt[t]);
+    const at = this.entryAt[t];
     const scopeTop = this.localCount + this.scope;
     const stackBase = this.stackBase;
     const stackTop = stackBase + this.stack;
@@ -957,19 +937,19 @@ export class BodyDecoder {
         continue;
       }
 
-      const flags = unchecked(this.valueFlags[i]);
-      const entryFlags = unchecked(this.entryFlags[at + i]);
+      const flags = this.valueFlags[i];
+      const entryFlags = this.entryFlags[at + i];
       if ((flags ^ entryFlags) & WITH) {
         this.fail(kCannotMergeTypesError);
         return -1;
       }
 
-      const entryType = unchecked(this.entryType[at + i]);
-      const merged = commonBase(domain, entryType, unchecked(this.valueType[i]));
+      const entryType = this.entryType[at + i];
+      const merged = commonBase(domain, entryType, this.valueType[i]);
       const mergedFlags = entryFlags & (flags | WITH);
       if (merged !== entryType || mergedFlags !== entryFlags) {
-        unchecked((this.entryType[at + i] = merged));
-        unchecked((this.entryFlags[at + i] = mergedFlags));
+        this.entryType[at + i] = merged;
+        this.entryFlags[at + i] = mergedFlags;
         changed = 1;
       }
     }
@@ -979,9 +959,9 @@ export class BodyDecoder {
 
   /** Put known target t on the work list unless it is there already. */
   requeue(t: u32): void {
-    if (!unchecked(this.pending[t])) {
-      unchecked((this.pending[t] = 1));
-      unchecked((this.work[this.workCount++] = t));
+    if (!this.pending[t]) {
+      this.pending[t] = 1;
+      this.work[this.workCount++] = t;
     }
   }
 
@@ -1002,7 +982,7 @@ export class BodyDecoder {
     }
 
     const t = <u32>to;
-    const isNew = !unchecked(this.known[t]);
+    const isNew = !this.known[t];
     if (to <= from && isNew && load<u8>(this.start + t) !== OP_label) {
       this.code.fail(kInvalidBranchTargetError);
       return false;
@@ -1010,17 +990,14 @@ export class BodyDecoder {
 
     if (isNew) {
       // Code decoded as part of another block must have been reached with the same state.
-      const walked = unchecked(this.cover[t]) === START;
-      if (
-        walked &&
-        !this.sameDepths(unchecked(this.stackAt[t]), unchecked(this.scopeAt[t]), stack, scope)
-      ) {
+      const walked = this.cover[t] === START;
+      if (walked && !this.sameDepths(this.stackAt[t], this.scopeAt[t], stack, scope)) {
         return false;
       }
 
-      unchecked((this.known[t] = 1));
-      unchecked((this.entryStack[t] = stack));
-      unchecked((this.entryScope[t] = scope));
+      this.known[t] = 1;
+      this.entryStack[t] = stack;
+      this.entryScope[t] = scope;
       if (this.typed) {
         this.saveEntry(t);
       }
@@ -1028,13 +1005,11 @@ export class BodyDecoder {
       this.requeue(t);
 
       // The block that walked through t must now end there and merge into it.
-      if (walked && this.typed && unchecked(this.walkOf[t]) !== t) {
-        this.requeue(unchecked(this.walkOf[t]));
+      if (walked && this.typed && this.walkOf[t] !== t) {
+        this.requeue(this.walkOf[t]);
       }
     } else {
-      if (
-        !this.sameDepths(unchecked(this.entryStack[t]), unchecked(this.entryScope[t]), stack, scope)
-      ) {
+      if (!this.sameDepths(this.entryStack[t], this.entryScope[t], stack, scope)) {
         return false;
       }
 
@@ -1052,8 +1027,8 @@ export class BodyDecoder {
 
     // A loop header's implicit interrupt check can throw, so it reaches the
     // handlers covering it, even when the back edge is found after its block.
-    if (to <= from && !unchecked(this.loopHeader[t])) {
-      unchecked((this.loopHeader[t] = 1));
+    if (to <= from && !this.loopHeader[t]) {
+      this.loopHeader[t] = 1;
       if (this.typed) {
         // Its handlers are reached with the state it is entered with.
         this.saveCurrent();
@@ -1137,14 +1112,14 @@ export class BodyDecoder {
     const abc = this.abc;
     for (let i: u32 = 0; i < this.handlerCount; i++) {
       const h = this.handlerFirst + i;
-      if (pc >= unchecked(abc.exceptionFrom[h]) && pc < unchecked(abc.exceptionTo[h])) {
+      if (pc >= abc.exceptionFrom[h] && pc < abc.exceptionTo[h]) {
         if (this.maxStack < 1) {
           this.code.fail(kStackOverflowError);
           return false;
         }
 
         if (!this.typed) {
-          if (!this.target(<i64>pc, <i64>unchecked(abc.exceptionTarget[h]), 1, 0)) {
+          if (!this.target(<i64>pc, <i64>abc.exceptionTarget[h], 1, 0)) {
             return false;
           }
 
@@ -1154,13 +1129,13 @@ export class BodyDecoder {
         const stack = this.stack;
         const scope = this.scope;
         const base = this.stackBase;
-        const firstType = unchecked(this.valueType[base]);
-        const firstFlags = unchecked(this.valueFlags[base]);
-        const type = unchecked(this.handlerType[i]);
+        const firstType = this.valueType[base];
+        const firstFlags = this.valueFlags[base];
+        const type = this.handlerType[i];
         this.setValue(base, type, this.domain.typeNotNull(type) ? NOT_NULL : 0);
         this.stack = 1;
         this.scope = 0;
-        const reached = this.target(<i64>pc, <i64>unchecked(abc.exceptionTarget[h]), 1, 0);
+        const reached = this.target(<i64>pc, <i64>abc.exceptionTarget[h], 1, 0);
         this.stack = stack;
         this.scope = scope;
         this.setValue(base, firstType, firstFlags);
@@ -1187,20 +1162,20 @@ export class BodyDecoder {
       }
 
       const opcode = load<u8>(this.start + pc);
-      const operands = unchecked(opcodeOperands[opcode]);
+      const operands = opcodeOperands[opcode];
       if (operands === OPERANDS_Illegal) {
         code.fail(kIllegalOpcodeError);
         return false;
       }
 
-      if (pc !== start && (opcode === OP_label || unchecked(this.known[pc]))) {
+      if (pc !== start && (opcode === OP_label || this.known[pc])) {
         return this.target(<i64>pc - 1, <i64>pc, this.stack, this.scope);
       }
 
       // A loop header's implicit interrupt check can throw too, with the
       // state the block is entered with.
-      const flags = unchecked(opcodeFlags[opcode]);
-      if (flags & FLAG_Throws || (pc === start && this.typed && unchecked(this.loopHeader[pc]))) {
+      const flags = opcodeFlags[opcode];
+      if (flags & FLAG_Throws || (pc === start && this.typed && this.loopHeader[pc])) {
         if (!this.throwsAt(pc)) {
           return false;
         }
@@ -1208,7 +1183,7 @@ export class BodyDecoder {
 
       // Decoded already, walking through from an earlier block: without types
       // it was checked with the same depths, so only a typed walk goes on.
-      if (unchecked(this.cover[pc]) === START) {
+      if (this.cover[pc] === START) {
         if (!this.typed) {
           return true;
         }
@@ -1216,30 +1191,30 @@ export class BodyDecoder {
         return false;
       }
 
-      unchecked((this.walkOf[pc] = start));
-      unchecked((this.stackAt[pc] = this.stack));
-      unchecked((this.scopeAt[pc] = this.scope));
+      this.walkOf[pc] = start;
+      this.stackAt[pc] = this.stack;
+      this.scopeAt[pc] = this.scope;
       if (!this.verifyAt(pc, opcode)) {
         return false;
       }
 
       // Targets get the state after the instruction, as in the verifier.
-      const next = unchecked(this.slotNext[pc]);
+      const next = this.slotNext[pc];
       const stack = this.stack;
       const scope = this.scope;
       if (operands === OPERANDS_Branch) {
-        if (!this.target(<i64>pc, <i64>next + unchecked(this.slotA[pc]), stack, scope)) {
+        if (!this.target(<i64>pc, <i64>next + this.slotA[pc], stack, scope)) {
           return false;
         }
       } else if (opcode === OP_lookupswitch) {
-        if (!this.target(<i64>pc, <i64>pc + unchecked(this.slotA[pc]), stack, scope)) {
+        if (!this.target(<i64>pc, <i64>pc + this.slotA[pc], stack, scope)) {
           return false;
         }
 
-        const first = unchecked(this.slotC[pc]);
-        const last = first + unchecked(this.slotB[pc]);
+        const first = this.slotC[pc];
+        const last = first + this.slotB[pc];
         for (let i = first; i <= last; i++) {
-          if (!this.target(<i64>pc, <i64>pc + unchecked(code.cases[i]), stack, scope)) {
+          if (!this.target(<i64>pc, <i64>pc + code.cases[i], stack, scope)) {
             return false;
           }
         }
@@ -1315,22 +1290,22 @@ export class BodyDecoder {
 
     const next = <u32>(r.pos - this.start);
     for (let p = pc + 1; p < next; p++) {
-      if (unchecked(this.cover[p]) === START) {
+      if (this.cover[p] === START) {
         this.overlap = true;
       }
 
-      unchecked((this.cover[p] = INSIDE));
+      this.cover[p] = INSIDE;
     }
 
-    if (unchecked(this.cover[pc]) === INSIDE) {
+    if (this.cover[pc] === INSIDE) {
       this.overlap = true;
     }
 
-    unchecked((this.cover[pc] = START));
-    unchecked((this.slotNext[pc] = next));
-    unchecked((this.slotA[pc] = a));
-    unchecked((this.slotB[pc] = b));
-    unchecked((this.slotC[pc] = c));
+    this.cover[pc] = START;
+    this.slotNext[pc] = next;
+    this.slotA[pc] = a;
+    this.slotB[pc] = b;
+    this.slotC[pc] = c;
     this.instructions++;
     return true;
   }
@@ -1342,11 +1317,11 @@ export class BodyDecoder {
    */
   verifyAt(pc: u32, opcode: u8): bool {
     const pool = this.abc.pool;
-    const a = <u32>unchecked(this.slotA[pc]);
-    const b = unchecked(this.slotB[pc]);
-    const stack = unchecked(opcodeStack[opcode]);
-    let pops = <u64>unchecked(opcodePops[opcode]);
-    const pushes = <u64>unchecked(opcodePushes[opcode]);
+    const a = <u32>this.slotA[pc];
+    const b = this.slotB[pc];
+    const stack = opcodeStack[opcode];
+    let pops = <u64>opcodePops[opcode];
+    const pushes = <u64>opcodePushes[opcode];
     const checkPushes = stack & STACK_CheckPushOne ? 1 : pushes;
 
     // A name looked up in the scope chain needs a scope to look in.
@@ -1563,7 +1538,7 @@ export class BodyDecoder {
       return true;
     }
 
-    return domain.isVirtual(unchecked(domain.methodStart[this.index]) + m);
+    return domain.isVirtual(domain.methodStart[this.index] + m);
   }
 
   /**
@@ -1598,16 +1573,16 @@ export class BodyDecoder {
       case OP_pushnamespace:
         return this.push(domain.namespaceType, NOT_NULL);
       case OP_setlocal:
-        this.setValue(a, this.typeOf(top), unchecked(this.valueFlags[top]) & NOT_NULL);
+        this.setValue(a, this.typeOf(top), this.valueFlags[top] & NOT_NULL);
         return true;
       case OP_getlocal:
-        return this.push(this.typeOf(a), unchecked(this.valueFlags[a]) & NOT_NULL);
+        return this.push(this.typeOf(a), this.valueFlags[a] & NOT_NULL);
       case OP_newfunction:
         if (this.emitPass && !this.captureFunction(a)) {
           return false;
         }
 
-        this.rowC = <i32>(unchecked(domain.methodStart[this.index]) + a);
+        this.rowC = <i32>(domain.methodStart[this.index] + a);
         return this.push(domain.functionType, NOT_NULL);
       case OP_getlex: {
         // The scope object found is the receiver of the get.
@@ -1725,7 +1700,7 @@ export class BodyDecoder {
         this.coerce(top, domain.booleanType);
         return true;
       case OP_returnvalue:
-        this.coerce(top, unchecked(domain.traits.returnType[this.global]));
+        this.coerce(top, domain.traits.returnType[this.global]);
         return true;
       case OP_istype:
         if (this.typeName(a) < TYPE_Any) {
@@ -1813,7 +1788,7 @@ export class BodyDecoder {
           return false;
         }
 
-        const init = unchecked(domain.traits.init[base]);
+        const init = domain.traits.init[base];
         if (init >= 0 && !this.coerceArgs(<u32>init, a)) {
           return false;
         }
@@ -1849,7 +1824,7 @@ export class BodyDecoder {
         return true;
       }
       case OP_newactivation: {
-        const t = unchecked(domain.bodyTraits[this.index][this.abc.methodBody[this.method]]);
+        const t = domain.bodyTraits[this.index][this.abc.methodBody[this.method]];
         const error = t >= 0 ? domain.traits.resolve(domain, <u32>t) : 0;
         if (error) {
           return this.fail(error);
@@ -1858,10 +1833,10 @@ export class BodyDecoder {
         return this.push(t, NOT_NULL);
       }
       case OP_newcatch:
-        return this.push(unchecked(this.handlerScope[a]), NOT_NULL);
+        return this.push(this.handlerScope[a], NOT_NULL);
       case OP_getscopeobject: {
         const i = this.localCount + load<u8>(this.start + pc + 1);
-        return this.push(this.typeOf(i), unchecked(this.valueFlags[i]) & NOT_NULL);
+        return this.push(this.typeOf(i), this.valueFlags[i] & NOT_NULL);
       }
       case OP_getouterscope: {
         const outer = this.outer;
@@ -1869,7 +1844,7 @@ export class BodyDecoder {
           return this.fail(kGetScopeObjectBoundsError);
         }
 
-        return this.push(unchecked(outer.types[a]), NOT_NULL);
+        return this.push(outer.types[a], NOT_NULL);
       }
       case OP_getglobalscope:
         return this.globalScope() >= TYPE_Any;
@@ -1887,7 +1862,7 @@ export class BodyDecoder {
       }
       case OP_setglobalslot: {
         const outer = this.outer;
-        const global = outer.size > 0 ? unchecked(outer.types[0]) : this.typeOf(this.localCount);
+        const global = outer.size > 0 ? outer.types[0] : this.typeOf(this.localCount);
         const slotType = this.slot(global, a - 1);
         if (slotType < TYPE_Any) {
           return false;
@@ -1916,12 +1891,12 @@ export class BodyDecoder {
         return true;
       }
       case OP_dup:
-        return this.push(this.typeOf(top), unchecked(this.valueFlags[top]) & NOT_NULL);
+        return this.push(this.typeOf(top), this.valueFlags[top] & NOT_NULL);
       case OP_swap: {
         const below = this.peek(2);
         const type = this.typeOf(top);
-        const flags = unchecked(this.valueFlags[top]) & NOT_NULL;
-        this.setValue(top, this.typeOf(below), unchecked(this.valueFlags[below]) & NOT_NULL);
+        const flags = this.valueFlags[top] & NOT_NULL;
+        this.setValue(top, this.typeOf(below), this.valueFlags[below] & NOT_NULL);
         this.setValue(below, type, flags);
         return true;
       }
@@ -2042,14 +2017,10 @@ export class BodyDecoder {
     }
 
     if (opcode >= OP_setlocal0 && opcode < OP_setlocal0 + 4) {
-      this.setValue(
-        opcode - OP_setlocal0,
-        this.typeOf(top),
-        unchecked(this.valueFlags[top]) & NOT_NULL,
-      );
+      this.setValue(opcode - OP_setlocal0, this.typeOf(top), this.valueFlags[top] & NOT_NULL);
     } else if (opcode >= OP_getlocal0 && opcode < OP_getlocal0 + 4) {
       const i = <u32>(opcode - OP_getlocal0);
-      return this.push(this.typeOf(i), unchecked(this.valueFlags[i]) & NOT_NULL);
+      return this.push(this.typeOf(i), this.valueFlags[i] & NOT_NULL);
     }
 
     return true;
@@ -2071,8 +2042,8 @@ export class BodyDecoder {
 
   /** As Verifier::emitCoerce: value i becomes `type`, still null or not. */
   coerce(i: u32, type: i32): void {
-    const changes = unchecked(this.valueType[i]) !== type;
-    this.setValue(i, type, unchecked(this.valueFlags[i]) & NOT_NULL);
+    const changes = this.valueType[i] !== type;
+    this.setValue(i, type, this.valueFlags[i] & NOT_NULL);
     if (this.emitPass && changes && type !== TYPE_Any) {
       this.emit(IR_Coerce, <i32>i, <i32>i, 1, 0, 0, type, this.pc);
     }
@@ -2080,16 +2051,16 @@ export class BodyDecoder {
 
   /** As FrameState::setType from a conversion instruction: value i becomes `type`, without IR of its own. */
   retype(i: u32, type: i32): void {
-    this.setValue(i, type, unchecked(this.valueFlags[i]) & NOT_NULL);
+    this.setValue(i, type, this.valueFlags[i] & NOT_NULL);
   }
 
   /** As Verifier::emitCheckNull: value i is known not null from here on. */
   checkNull(i: u32): void {
-    if (this.emitPass && !(unchecked(this.valueFlags[i]) & NOT_NULL)) {
+    if (this.emitPass && !(this.valueFlags[i] & NOT_NULL)) {
       this.emit(IR_CheckNull, -1, <i32>i, 1, 0, 0, 0, this.pc);
     }
 
-    unchecked((this.valueFlags[i] = this.valueFlags[i] | NOT_NULL));
+    this.valueFlags[i] = this.valueFlags[i] | NOT_NULL;
   }
 
   /** As Verifier::peekType: the value `n` from the top must be exactly `type`. */
@@ -2180,25 +2151,25 @@ export class BodyDecoder {
       return this.fail(error);
     }
 
-    const count = unchecked(traits.paramCount[m]);
-    const required = count - unchecked(traits.optionalCount[m]);
+    const count = traits.paramCount[m];
+    const required = count - traits.optionalCount[m];
     if (argc < required || (argc > count && !domain.allowsExtraArgs(m))) {
       return this.fail(kWrongArgumentCountError);
     }
 
-    const start = unchecked(traits.paramStart[m]);
+    const start = traits.paramStart[m];
     for (let k: u32 = 1; k <= argc; k++) {
-      const target = k <= count ? unchecked(traits.paramType[start + k - 1]) : TYPE_Any;
+      const target = k <= count ? traits.paramType[start + k - 1] : TYPE_Any;
       this.coerce(this.peek(argc - k + 1), target);
     }
 
-    this.coerce(this.peek(argc + 1), unchecked(traits.receiverType[m]));
+    this.coerce(this.peek(argc + 1), traits.receiverType[m]);
     return true;
   }
 
   /** As Verifier::emitCoerceSuper: the receiver at i becomes the declaring class's base. */
   coerceSuper(i: u32): i32 {
-    const base = this.declarer >= 0 ? unchecked(this.domain.traits.base[this.declarer]) : -1;
+    const base = this.declarer >= 0 ? this.domain.traits.base[this.declarer] : -1;
     if (base < 0) {
       this.fail(kIllegalSuperCallError);
       return -2;
@@ -2217,11 +2188,7 @@ export class BodyDecoder {
   slot(type: i32, slot: u32): i32 {
     const domain = this.domain;
     const traits = domain.traits;
-    if (
-      type < 0 ||
-      unchecked(traits.abc[type]) !== this.index ||
-      !traits.allowEarlyBinding(<u32>type)
-    ) {
+    if (type < 0 || traits.abc[type] !== this.index || !traits.allowEarlyBinding(<u32>type)) {
       this.fail(kIllegalEarlyBindingError);
       return -2;
     }
@@ -2232,19 +2199,19 @@ export class BodyDecoder {
       return -2;
     }
 
-    if (slot >= unchecked(traits.slotCount[type])) {
+    if (slot >= traits.slotCount[type]) {
       this.fail(kSlotExceedsCountError);
       return -2;
     }
 
-    return unchecked(traits.slotType[traits.slotStart[type] + slot]);
+    return traits.slotType[traits.slotStart[type] + slot];
   }
 
   /** As Verifier::checkGetGlobalScope: push the global object; its type, below TYPE_Any on error. */
   globalScope(): i32 {
     const outer = this.outer;
     if (outer.size > 0) {
-      const t = unchecked(outer.types[0]);
+      const t = outer.types[0];
       this.push(t, NOT_NULL);
       return t;
     }
@@ -2255,7 +2222,7 @@ export class BodyDecoder {
     }
 
     const i = this.localCount;
-    this.push(this.typeOf(i), unchecked(this.valueFlags[i]) & NOT_NULL);
+    this.push(this.typeOf(i), this.valueFlags[i] & NOT_NULL);
     return this.typeOf(i);
   }
 
@@ -2280,11 +2247,11 @@ export class BodyDecoder {
         }
 
         if (b !== 0) {
-          this.push(this.typeOf(<u32>i), unchecked(this.valueFlags[i]) & NOT_NULL);
+          this.push(this.typeOf(<u32>i), this.valueFlags[i] & NOT_NULL);
           return this.emitFound(OP_getscopeobject, top, i, <u32>i - this.localCount, 0);
         }
 
-        if (unchecked(this.valueFlags[i]) & WITH) {
+        if (this.valueFlags[i] & WITH) {
           break;
         }
       }
@@ -2292,7 +2259,7 @@ export class BodyDecoder {
       if (i < <i32>base) {
         let j = <i32>outer.size - 1;
         for (; j > 0; j--) {
-          const t = unchecked(outer.types[j]);
+          const t = outer.types[j];
           const b = this.binding(t, mn);
           if (b === BIND_Ambiguous) {
             return false;
@@ -2303,7 +2270,7 @@ export class BodyDecoder {
             return this.emitFound(OP_getouterscope, top, -1, <u32>j, 0);
           }
 
-          if (unchecked(outer.withs[j])) {
+          if (outer.withs[j]) {
             break;
           }
         }
@@ -2314,7 +2281,7 @@ export class BodyDecoder {
             this.push(script, NOT_NULL);
 
             // Defined by this very script: its global object.
-            if (unchecked(domain.traits.init[script]) === <i32>this.global) {
+            if (domain.traits.init[script] === <i32>this.global) {
               return outer.size > 0
                 ? this.emitFound(OP_getouterscope, top, -1, 0, 0)
                 : this.emitFound(IR_GetGlobalScope, top, -1, 0, 0);
@@ -2388,16 +2355,13 @@ export class BodyDecoder {
     if (kind === 2 || kind === 3) {
       // The builtin global's Math and Number are never null.
       const notNull =
-        unchecked(domain.traits.abc[type]) === domain.builtinAbc &&
-        domain.isMathOrNumber(this.index, mn);
+        domain.traits.abc[type] === domain.builtinAbc && domain.isMathOrNumber(this.index, mn);
       this.popPush(n, propType, notNull ? NOT_NULL : 0);
       return this.emitOn(OP_getslot, <i32>obj, <i32>obj, 1, b >> 3, 0, 0);
     }
 
     if (kind === 5 || kind === 7) {
-      const getter = unchecked(
-        domain.traits.dispatch[domain.traits.dispatchStart[type] + (b >> 3)],
-      );
+      const getter = domain.traits.dispatch[domain.traits.dispatchStart[type] + (b >> 3)];
       if (getter >= 0 && !this.coerceArgs(<u32>getter, 0)) {
         return false;
       }
@@ -2418,7 +2382,7 @@ export class BodyDecoder {
         domain.vectorObjectType >= 0 &&
         domain.traits.subtypeOf(<u32>type, <u32>domain.vectorObjectType)
       ) {
-        propType = unchecked(domain.traits.param[type]);
+        propType = domain.traits.param[type];
       }
     }
 
@@ -2487,9 +2451,7 @@ export class BodyDecoder {
     }
 
     if (kind === 6 || kind === 7) {
-      const setter = unchecked(
-        domain.traits.dispatch[domain.traits.dispatchStart[type] + (b >> 3) + 1],
-      );
+      const setter = domain.traits.dispatch[domain.traits.dispatchStart[type] + (b >> 3) + 1];
       if (setter >= 0 && !this.coerceArgs(<u32>setter, 1)) {
         return false;
       }
@@ -2537,25 +2499,25 @@ export class BodyDecoder {
     const voidCall = opcode === OP_callpropvoid;
     if ((b & 7) === 1) {
       b = this.fasterCall(type, mn, b, argc);
-      const m = unchecked(traits.dispatch[traits.dispatchStart[type] + (b >> 3)]);
+      const m = traits.dispatch[traits.dispatchStart[type] + (b >> 3)];
       if (m >= 0) {
         const signError = traits.sign(domain, <u32>m);
         if (signError) {
           return this.fail(signError);
         }
 
-        const count = unchecked(traits.paramCount[m]);
-        const required = count - unchecked(traits.optionalCount[m]);
+        const count = traits.paramCount[m];
+        const required = count - traits.optionalCount[m];
         if (argc >= required && (argc <= count || domain.allowsExtraArgs(<u32>m))) {
           if (!this.coerceArgs(<u32>m, argc)) {
             return false;
           }
 
-          const result = unchecked(traits.returnType[m]);
+          const result = traits.returnType[m];
           this.popPush(n, result, domain.typeNotNull(result) ? NOT_NULL : 0);
 
           // An interface's method has no dispatch id of its own on the receiver.
-          const call = unchecked(traits.isInterface[type]) ? IR_CallInterface : OP_callmethod;
+          const call = traits.isInterface[type] ? IR_CallInterface : OP_callmethod;
           return this.emitOn(call, voidCall ? -1 : <i32>obj, <i32>obj, n, b >> 3, argc, m);
         }
       }
@@ -2577,7 +2539,7 @@ export class BodyDecoder {
           return true;
         }
 
-        const flags = unchecked(this.valueFlags[top]);
+        const flags = this.valueFlags[top];
         const value = this.typeOf(top);
         this.popPush(n, value, flags & NOT_NULL);
         return this.emitOn(IR_Nip, <i32>obj, <i32>obj, n, 0, 0, 0);
@@ -2625,13 +2587,13 @@ export class BodyDecoder {
       return b;
     }
 
-    const m = unchecked(traits.dispatch[traits.dispatchStart[type] + (faster >> 3)]);
+    const m = traits.dispatch[traits.dispatchStart[type] + (faster >> 3)];
     if (m < 0 || traits.sign(domain, <u32>m)) {
       return b;
     }
 
-    const count = unchecked(traits.paramCount[m]);
-    const start = unchecked(traits.paramStart[m]);
+    const count = traits.paramCount[m];
+    const start = traits.paramStart[m];
     if (type === domain.mathStatic) {
       if (argc !== count) {
         return b;
@@ -2647,12 +2609,12 @@ export class BodyDecoder {
       return faster;
     }
 
-    if (argc < count - unchecked(traits.optionalCount[m]) || argc > count) {
+    if (argc < count - traits.optionalCount[m] || argc > count) {
       return b;
     }
 
     for (let k: u32 = 1; k <= argc; k++) {
-      if (this.typeOf(this.peek(argc - k + 1)) !== unchecked(traits.paramType[start + k - 1])) {
+      if (this.typeOf(this.peek(argc - k + 1)) !== traits.paramType[start + k - 1]) {
         return b;
       }
     }
@@ -2665,14 +2627,14 @@ export class BodyDecoder {
     const outer = this.outer;
     const scope = new Scope();
     for (let i: u32 = 0; i < outer.size; i++) {
-      scope.types.push(unchecked(outer.types[i]));
-      scope.withs.push(unchecked(outer.withs[i]));
+      scope.types.push(outer.types[i]);
+      scope.withs.push(outer.withs[i]);
     }
 
     for (let i: u32 = 0; i < this.scope; i++) {
       const v = this.localCount + i;
       scope.types.push(this.typeOf(v));
-      scope.withs.push(unchecked(this.valueFlags[v]) & WITH ? 1 : 0);
+      scope.withs.push(this.valueFlags[v] & WITH ? 1 : 0);
     }
 
     if (last !== -2) {
@@ -2693,24 +2655,24 @@ export class BodyDecoder {
   captureFunction(m: u32): bool {
     const domain = this.domain;
     const traits = domain.traits;
-    const global = unchecked(domain.methodStart[this.index]) + m;
+    const global = domain.methodStart[this.index] + m;
     const scope = this.scopeHere(-2, TYPE_Any);
-    const current = unchecked(traits.functionScope[global]);
+    const current = traits.functionScope[global];
     if (current !== null) {
       return current.equals(scope) || global === this.global ? true : this.fail(kCorruptABCError);
     }
 
-    if (unchecked(traits.methodTraits[global]) >= 0) {
+    if (traits.methodTraits[global] >= 0) {
       return this.fail(kCorruptABCError);
     }
 
-    unchecked((traits.methodFunction[global] = 1));
+    traits.methodFunction[global] = 1;
     const error = traits.sign(domain, global);
     if (error) {
       return this.fail(error);
     }
 
-    unchecked((traits.functionScope[global] = scope));
+    traits.functionScope[global] = scope;
     this.captured.push(global);
     return true;
   }
@@ -2731,10 +2693,7 @@ export class BodyDecoder {
     }
 
     const innermost = this.typeOf(this.localCount + this.scope - 1);
-    if (
-      innermost === TYPE_Any ||
-      domain.instanceTraitsOf(innermost) !== unchecked(traits.base[itraits])
-    ) {
+    if (innermost === TYPE_Any || domain.instanceTraitsOf(innermost) !== traits.base[itraits]) {
       return this.fail(kCorruptABCError);
     }
 
@@ -2745,9 +2704,9 @@ export class BodyDecoder {
       return this.fail(error);
     }
 
-    const current = unchecked(traits.scope[ctraits]);
+    const current = traits.scope[ctraits];
     if (current !== null) {
-      const instance = unchecked(traits.scope[itraits]);
+      const instance = traits.scope[itraits];
       if (instance === null || !current.equals(cscope) || !instance.equals(iscope)) {
         return this.fail(kCorruptABCError);
       }
@@ -2755,8 +2714,8 @@ export class BodyDecoder {
       return true;
     }
 
-    unchecked((traits.scope[ctraits] = cscope));
-    unchecked((traits.scope[itraits] = iscope));
+    traits.scope[ctraits] = cscope;
+    traits.scope[itraits] = iscope;
     domain.methodsOf(<u32>ctraits, this.captured);
     domain.methodsOf(<u32>itraits, this.captured);
     return true;
@@ -2766,13 +2725,13 @@ export class BodyDecoder {
   callStatic(m: u32, argc: u32): bool {
     const domain = this.domain;
     const traits = domain.traits;
-    const global = unchecked(domain.methodStart[this.index]) + m;
+    const global = domain.methodStart[this.index] + m;
     const error = traits.sign(domain, global);
     if (error) {
       return this.fail(error);
     }
 
-    if (unchecked(traits.receiverType[global]) === TYPE_Any) {
+    if (traits.receiverType[global] === TYPE_Any) {
       return this.fail(kDanglingFunctionError);
     }
 
@@ -2781,7 +2740,7 @@ export class BodyDecoder {
       return false;
     }
 
-    const result = unchecked(traits.returnType[global]);
+    const result = traits.returnType[global];
     this.rowC = <i32>global;
     return this.popPush(argc + 1, result, domain.typeNotNull(result) ? NOT_NULL : 0);
   }
@@ -2813,7 +2772,7 @@ export class BodyDecoder {
         return this.fail(error);
       }
 
-      const m = unchecked(traits.dispatch[traits.dispatchStart[base] + (b >> 3)]);
+      const m = traits.dispatch[traits.dispatchStart[base] + (b >> 3)];
       if (m < 0) {
         return this.fail(kCorruptABCError);
       }
@@ -2823,7 +2782,7 @@ export class BodyDecoder {
         return this.fail(signError);
       }
 
-      result = unchecked(traits.returnType[m]);
+      result = traits.returnType[m];
     }
 
     this.checkNull(obj);
@@ -2878,13 +2837,13 @@ export class BodyDecoder {
 
     let i: u32 = 0;
     for (let pc: u32 = 0; pc < this.length; pc++) {
-      if (unchecked(this.cover[pc]) === START) {
-        unchecked((code.offset[i] = pc));
-        unchecked((code.next[i] = this.slotNext[pc]));
-        unchecked((code.opcode[i] = load<u8>(this.start + pc)));
-        unchecked((code.a[i] = this.slotA[pc]));
-        unchecked((code.b[i] = this.slotB[pc]));
-        unchecked((code.c[i] = this.slotC[pc]));
+      if (this.cover[pc] === START) {
+        code.offset[i] = pc;
+        code.next[i] = this.slotNext[pc];
+        code.opcode[i] = load<u8>(this.start + pc);
+        code.a[i] = this.slotA[pc];
+        code.b[i] = this.slotB[pc];
+        code.c[i] = this.slotC[pc];
         i++;
       }
     }
@@ -2899,21 +2858,21 @@ export class BodyDecoder {
  */
 function isBinding(pool: ConstantPool, index: u32): bool {
   let mn = index;
-  if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
-    mn = unchecked(pool.mnA[mn]);
+  if (pool.mnKind[mn] === CONSTANT_TypeName) {
+    mn = pool.mnA[mn];
   }
 
-  const kind = unchecked(pool.mnKind[mn]);
+  const kind = pool.mnKind[mn];
   if (kind === CONSTANT_Qname) {
-    return unchecked(pool.mnA[mn]) !== 0 && unchecked(pool.mnB[mn]) !== 0;
+    return pool.mnA[mn] !== 0 && pool.mnB[mn] !== 0;
   }
 
-  return kind === CONSTANT_Multiname && unchecked(pool.mnB[mn]) !== 0;
+  return kind === CONSTANT_Multiname && pool.mnB[mn] !== 0;
 }
 
 /** Values a multiname takes from the stack: a runtime namespace, a runtime name, or both. */
 function runtimeParts(pool: ConstantPool, index: u32): u32 {
-  const kind = unchecked(pool.mnKind[index]);
+  const kind = pool.mnKind[index];
   if (
     kind === CONSTANT_RTQname ||
     kind === CONSTANT_RTQnameA ||
@@ -2927,7 +2886,7 @@ function runtimeParts(pool: ConstantPool, index: u32): u32 {
 }
 
 function isAttribute(pool: ConstantPool, index: u32): bool {
-  const kind = unchecked(pool.mnKind[index]);
+  const kind = pool.mnKind[index];
   return (
     kind === CONSTANT_QnameA ||
     kind === CONSTANT_RTQnameA ||
@@ -2939,9 +2898,9 @@ function isAttribute(pool: ConstantPool, index: u32): bool {
 
 /** A multiname's MN_* parts, as avmplus' Multiname flags. */
 function nameParts(pool: ConstantPool, index: u32): u8 {
-  let kind = unchecked(pool.mnKind[index]);
+  let kind = pool.mnKind[index];
   if (kind === CONSTANT_TypeName) {
-    kind = unchecked(pool.mnKind[pool.mnA[index]]);
+    kind = pool.mnKind[pool.mnA[index]];
   }
 
   switch (kind) {
@@ -2976,32 +2935,32 @@ function nameParts(pool: ConstantPool, index: u32): u8 {
  * VerifyError, 0 if it verified, or -1 if nothing could run it.
  */
 export function verifyMethods(domain: Domain, index: u32): StaticArray<i32> {
-  const abc = unchecked(domain.abcs[index]);
+  const abc = domain.abcs[index];
   const traits = domain.traits;
   const results = new StaticArray<i32>(abc.bodyCount);
   for (let b: u32 = 0; b < abc.bodyCount; b++) {
-    unchecked((results[b] = -1));
+    results[b] = -1;
   }
 
   const queue: u32[] = [];
-  const scripts = unchecked(domain.scriptTraits[index]);
+  const scripts = domain.scriptTraits[index];
   for (let s: u32 = 0; s < abc.scriptCount; s++) {
-    domain.methodsOf(unchecked(scripts[s]), queue);
+    domain.methodsOf(scripts[s], queue);
   }
 
-  const methods = unchecked(domain.methodStart[index]);
-  const decoder = new BodyDecoder(abc, unchecked(domain.abcBase[index]), domain, index);
+  const methods = domain.methodStart[index];
+  const decoder = new BodyDecoder(abc, domain.abcBase[index], domain, index);
   for (let q = 0; q < queue.length; q++) {
-    const m = unchecked(queue[q]);
-    const body = unchecked(abc.methodBody[m - methods]);
+    const m = queue[q];
+    const body = abc.methodBody[m - methods];
     const scope = traits.scopeOf(m);
-    if (body < 0 || scope === null || unchecked(results[body]) !== -1) {
+    if (body < 0 || scope === null || results[body] !== -1) {
       continue;
     }
 
-    unchecked((results[body] = decoder.decode(<u32>body, scope).error));
+    results[body] = decoder.decode(<u32>body, scope).error;
     for (let c = 0; c < decoder.captured.length; c++) {
-      queue.push(unchecked(decoder.captured[c]));
+      queue.push(decoder.captured[c]);
     }
   }
 

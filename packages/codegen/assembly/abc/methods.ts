@@ -25,16 +25,16 @@ export function readMethods(abc: Abc, r: Reader): bool {
   abc.methodOwner = new StaticArray<i32>(count);
 
   for (let i: u32 = 0; i < count; i++) {
-    unchecked((abc.methodOwner[i] = -1));
+    abc.methodOwner[i] = -1;
 
     const paramCount = r.u30();
-    unchecked((abc.methodReturnType[i] = r.u30()));
-    unchecked((abc.methodParamStart[i] = abc.paramTypes.length));
+    abc.methodReturnType[i] = r.u30();
+    abc.methodParamStart[i] = abc.paramTypes.length;
     for (let j: u32 = 0; j < paramCount && !r.failed; j++) {
       abc.paramTypes.push(r.u30());
     }
 
-    unchecked((abc.methodName[i] = r.u30()));
+    abc.methodName[i] = r.u30();
     const flags = <u8>r.u8();
     if (r.failed) {
       return abc.fail(kCorruptABCError);
@@ -44,8 +44,8 @@ export function readMethods(abc: Abc, r: Reader): bool {
       return abc.fail(kIllegalNativeMethodError);
     }
 
-    unchecked((abc.methodFlags[i] = flags));
-    unchecked((abc.methodOptionalStart[i] = abc.optionalValue.length));
+    abc.methodFlags[i] = flags;
+    abc.methodOptionalStart[i] = abc.optionalValue.length;
     if (flags & METHOD_HasOptional) {
       const optionalCount = r.u30();
       for (let j: u32 = 0; j < optionalCount && !r.failed; j++) {
@@ -70,8 +70,8 @@ export function readMethods(abc: Abc, r: Reader): bool {
     }
   }
 
-  unchecked((abc.methodParamStart[count] = abc.paramTypes.length));
-  unchecked((abc.methodOptionalStart[count] = abc.optionalValue.length));
+  abc.methodParamStart[count] = abc.paramTypes.length;
+  abc.methodOptionalStart[count] = abc.optionalValue.length;
   return true;
 }
 
@@ -94,8 +94,8 @@ export function readMetadata(abc: Abc, r: Reader): bool {
       return abc.fail(kCpoolIndexRangeError);
     }
 
-    unchecked((abc.metadataName[i] = name));
-    unchecked((abc.metadataItemStart[i] = abc.metadataKey.length));
+    abc.metadataName[i] = name;
+    abc.metadataItemStart[i] = abc.metadataKey.length;
 
     // Keys and values are string indices that avmplus does not check.
     const itemCount = r.u30();
@@ -109,6 +109,6 @@ export function readMetadata(abc: Abc, r: Reader): bool {
     }
   }
 
-  unchecked((abc.metadataItemStart[count] = abc.metadataKey.length));
+  abc.metadataItemStart[count] = abc.metadataKey.length;
   return true;
 }

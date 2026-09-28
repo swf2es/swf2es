@@ -17,7 +17,7 @@ import { readTraits } from "./traits";
 export function readMethodBodies(abc: Abc, r: Reader, base: usize): bool {
   abc.methodBody = new StaticArray<i32>(abc.methodCount);
   for (let m: u32 = 0; m < abc.methodCount; m++) {
-    unchecked((abc.methodBody[m] = -1));
+    abc.methodBody[m] = -1;
   }
 
   // avmplus does not bound the count, so the tables grow body by body.
@@ -71,20 +71,20 @@ export function readMethodBodies(abc: Abc, r: Reader, base: usize): bool {
       abc.exceptionName.push(name);
     }
 
-    const owner = unchecked(abc.methodOwner[method]);
+    const owner = abc.methodOwner[method];
     if (
       owner >= 0 &&
       <u32>owner < abc.classCount &&
-      unchecked(abc.instanceFlags[owner]) & INSTANCE_Interface
+      abc.instanceFlags[owner] & INSTANCE_Interface
     ) {
       return abc.fail(kIllegalInterfaceMethodBodyError);
     }
 
-    if (unchecked(abc.methodBody[method]) !== -1) {
+    if (abc.methodBody[method] !== -1) {
       return abc.fail(kDuplicateMethodBodyError);
     }
 
-    unchecked((abc.methodBody[method] = <i32>abc.bodyMethod.length));
+    abc.methodBody[method] = <i32>abc.bodyMethod.length;
     abc.bodyMethod.push(method);
     abc.bodyMaxStack.push(maxStack);
     abc.bodyLocalCount.push(localCount);

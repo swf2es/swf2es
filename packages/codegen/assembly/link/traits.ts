@@ -118,10 +118,7 @@ export class Scope {
     }
 
     for (let i: u32 = 0; i < this.size; i++) {
-      if (
-        unchecked(this.types[i]) !== unchecked(other.types[i]) ||
-        unchecked(this.withs[i]) !== unchecked(other.withs[i])
-      ) {
+      if (this.types[i] !== other.types[i] || this.withs[i] !== other.withs[i]) {
         return false;
       }
     }
@@ -255,12 +252,12 @@ export class TraitsTable {
 
   /** As MethodInfo::declaringScope: the scope chain method m runs in, or null if not yet known. */
   scopeOf(m: u32): Scope | null {
-    if (unchecked(this.methodFunction[m])) {
-      return unchecked(this.functionScope[m]);
+    if (this.methodFunction[m]) {
+      return this.functionScope[m];
     }
 
-    const t = unchecked(this.methodTraits[m]);
-    return t < 0 ? null : unchecked(this.scope[t]);
+    const t = this.methodTraits[m];
+    return t < 0 ? null : this.scope[t];
   }
 
   /** Room for `count` more methods, unbound and unsigned. */
@@ -308,15 +305,15 @@ export class TraitsTable {
       }
 
       if (
-        unchecked(this.memberTraits[id]) === t &&
-        unchecked(this.memberNs[id]) === ns &&
-        unchecked(this.memberName[id]) === name &&
-        unchecked(this.memberVersion[id]) <= version &&
+        this.memberTraits[id] === t &&
+        this.memberNs[id] === ns &&
+        this.memberName[id] === name &&
+        this.memberVersion[id] <= version &&
         // Members of traits that failed to link may remain in the table.
-        <u32>id >= unchecked(this.memberStart[t]) &&
-        <u32>id < unchecked(this.memberEnd[t])
+        <u32>id >= this.memberStart[t] &&
+        <u32>id < this.memberEnd[t]
       ) {
-        return unchecked(this.memberBinding[id]);
+        return this.memberBinding[id];
       }
 
       slot = table.next(slot);
@@ -325,7 +322,7 @@ export class TraitsTable {
 
   /** As TraitsBindings::findBinding: t's own members, then its base's. */
   find(t: i32, ns: u32, name: u32, version: u8): u32 {
-    for (; t >= 0; t = unchecked(this.base[t])) {
+    for (; t >= 0; t = this.base[t]) {
       const b = this.own(<u32>t, ns, name, version);
       if (b !== BIND_None) {
         return b;
@@ -340,11 +337,11 @@ export class TraitsTable {
    * `name` in any namespace of t or its bases.
    */
   findName(t: i32, name: u32): u32 {
-    for (; t >= 0; t = unchecked(this.base[t])) {
-      const last = unchecked(this.memberEnd[t]);
-      for (let m = unchecked(this.memberStart[t]); m < last; m++) {
-        if (unchecked(this.memberName[m]) === name) {
-          return unchecked(this.memberBinding[m]);
+    for (; t >= 0; t = this.base[t]) {
+      const last = this.memberEnd[t];
+      for (let m = this.memberStart[t]; m < last; m++) {
+        if (this.memberName[m] === name) {
+          return this.memberBinding[m];
         }
       }
     }
@@ -356,17 +353,17 @@ export class TraitsTable {
   add(t: u32, ns: u32, name: u32, version: u8, binding: u32): void {
     const hash = hashPair(hashPair(t, ns), name);
     const table = this.members;
-    const start = unchecked(this.memberStart[t]);
+    const start = this.memberStart[t];
     for (let slot = table.start(hash); table.at(slot) >= 0; slot = table.next(slot)) {
       const m = <u32>table.at(slot);
       if (
         m >= start &&
-        unchecked(this.memberTraits[m]) === t &&
-        unchecked(this.memberNs[m]) === ns &&
-        unchecked(this.memberName[m]) === name &&
-        unchecked(this.memberVersion[m]) === version
+        this.memberTraits[m] === t &&
+        this.memberNs[m] === ns &&
+        this.memberName[m] === name &&
+        this.memberVersion[m] === version
       ) {
-        unchecked((this.memberBinding[m] = binding));
+        this.memberBinding[m] = binding;
         return;
       }
     }
@@ -378,7 +375,7 @@ export class TraitsTable {
     this.memberVersion.push(version);
     this.memberBinding.push(binding);
     table.insert(hash, id);
-    unchecked((this.memberEnd[t] = id + 1));
+    this.memberEnd[t] = id + 1;
   }
 
   /**
@@ -387,33 +384,33 @@ export class TraitsTable {
    * the earliest version of its namespaces in the domain's series.
    */
   readName(domain: Domain, index: u32, i: u32): void {
-    const abc = unchecked(domain.abcs[index]);
+    const abc = domain.abcs[index];
     const pool = abc.pool;
-    const versions = unchecked(domain.abcNsVersion[index]);
-    let mn = unchecked(abc.traitName[i]);
-    if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
-      mn = unchecked(pool.mnA[mn]);
+    const versions = domain.abcNsVersion[index];
+    let mn = abc.traitName[i];
+    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+      mn = pool.mnA[mn];
     }
 
-    let ns = unchecked(pool.mnA[mn]);
-    let version = domain.activeVersion(unchecked(versions[ns]));
-    if (unchecked(pool.mnKind[mn]) === CONSTANT_Multiname) {
+    let ns = pool.mnA[mn];
+    let version = domain.activeVersion(versions[ns]);
+    if (pool.mnKind[mn] === CONSTANT_Multiname) {
       const set = ns;
-      const last = unchecked(pool.nsSetStart[set + 1]);
-      ns = unchecked(pool.nsSetMembers[pool.nsSetStart[set]]);
+      const last = pool.nsSetStart[set + 1];
+      ns = pool.nsSetMembers[pool.nsSetStart[set]];
       version = API_Internal;
-      for (let m = unchecked(pool.nsSetStart[set]); m < last; m++) {
-        const v = domain.activeVersion(unchecked(versions[pool.nsSetMembers[m]]));
+      for (let m = pool.nsSetStart[set]; m < last; m++) {
+        const v = domain.activeVersion(versions[pool.nsSetMembers[m]]);
         if (v < version) {
           version = v;
         }
       }
     }
 
-    this.nameNs = unchecked(domain.abcNs[index][ns]);
-    this.nameNsVersion = unchecked(versions[ns]);
+    this.nameNs = domain.abcNs[index][ns];
+    this.nameNsVersion = versions[ns];
     this.nameVersion = version;
-    this.nameId = unchecked(domain.abcString[index][pool.mnB[mn]]);
+    this.nameId = domain.abcString[index][pool.mnB[mn]];
   }
 
   /**
@@ -421,35 +418,35 @@ export class TraitsTable {
    * already laid out; 0, or the VerifyError.
    */
   layout(domain: Domain, t: u32): i32 {
-    const index = unchecked(this.abc[t]);
-    const abc = unchecked(domain.abcs[index]);
-    const base = unchecked(this.base[t]);
-    const baseSlots = base >= 0 ? unchecked(this.slotCount[base]) : 0;
-    let methodCount = base >= 0 ? unchecked(this.methodCount[base]) : 0;
+    const index = this.abc[t];
+    const abc = domain.abcs[index];
+    const base = this.base[t];
+    const baseSlots = base >= 0 ? this.slotCount[base] : 0;
+    let methodCount = base >= 0 ? this.methodCount[base] : 0;
     const start = <u32>this.memberTraits.length;
-    unchecked((this.memberStart[t] = start));
-    unchecked((this.memberEnd[t] = start));
+    this.memberStart[t] = start;
+    this.memberEnd[t] = start;
 
     // A subclass sees its base's protected members in its own protected namespace.
-    const protectedNs = unchecked(this.protectedNs[t]);
-    if (base >= 0 && protectedNs >= 0 && unchecked(this.protectedNs[base]) >= 0) {
-      const baseNs = <u32>unchecked(this.protectedNs[base]);
-      const last = unchecked(this.memberEnd[base]);
-      for (let m = unchecked(this.memberStart[base]); m < last; m++) {
-        if (unchecked(this.memberNs[m]) === baseNs) {
+    const protectedNs = this.protectedNs[t];
+    if (base >= 0 && protectedNs >= 0 && this.protectedNs[base] >= 0) {
+      const baseNs = <u32>this.protectedNs[base];
+      const last = this.memberEnd[base];
+      for (let m = this.memberStart[base]; m < last; m++) {
+        if (this.memberNs[m] === baseNs) {
           this.add(
             t,
             <u32>protectedNs,
-            unchecked(this.memberName[m]),
-            unchecked(this.memberVersion[m]),
-            unchecked(this.memberBinding[m]),
+            this.memberName[m],
+            this.memberVersion[m],
+            this.memberBinding[m],
           );
         }
       }
     }
 
-    const first = unchecked(this.first[t]);
-    const end = unchecked(this.end[t]);
+    const first = this.first[t];
+    const end = this.end[t];
     const nameCount = end - first;
     const early = this.allowEarlyBinding(t);
     let slotCount = baseSlots;
@@ -459,11 +456,11 @@ export class TraitsTable {
       const nsVersion = this.nameNsVersion;
       const version = this.nameVersion;
       const name = this.nameId;
-      const tag = unchecked(abc.traitTag[i]);
+      const tag = abc.traitTag[i];
       const kind = tag & 0x0f;
       if (kind === TRAIT_Slot || kind === TRAIT_Const || kind === TRAIT_Class) {
         // As SlotIdCalcer: explicit ids only where slots may bind early.
-        const id = unchecked(abc.traitId[i]);
+        const id = abc.traitId[i];
         let slot: u32;
         if (id === 0 || !early) {
           slot = ++slotCount;
@@ -487,7 +484,7 @@ export class TraitsTable {
           return kCorruptABCError;
         }
 
-        if (unchecked(this.isInterface[t])) {
+        if (this.isInterface[t]) {
           return kIllegalSlotError;
         }
 
@@ -538,9 +535,9 @@ export class TraitsTable {
       }
     }
 
-    unchecked((this.slotCount[t] = slotCount));
-    unchecked((this.methodCount[t] = methodCount));
-    if (unchecked(this.kind[t]) === TRAITS_Instance && !unchecked(this.isInterface[t])) {
+    this.slotCount[t] = slotCount;
+    this.methodCount[t] = methodCount;
+    if (this.kind[t] === TRAITS_Instance && !this.isInterface[t]) {
       this.bindInterfaces(domain, t);
     }
 
@@ -554,23 +551,23 @@ export class TraitsTable {
    * namespace too.
    */
   bindInterfaces(domain: Domain, t: u32): void {
-    const base = unchecked(this.base[t]);
+    const base = this.base[t];
     const all = this.allInterfaces(t);
-    const index = unchecked(this.abc[t]);
+    const index = this.abc[t];
     const publicNs = domain.publicNamespace();
     const publicVersion = domain.publicVersion(index);
     for (let k = 0; k < all.length; k++) {
-      const ifc = unchecked(all[k]);
+      const ifc = all[k];
       if (base >= 0 && this.subtypeOf(base, ifc)) {
         continue;
       }
 
-      const last = unchecked(this.memberEnd[ifc]);
-      for (let m = unchecked(this.memberStart[ifc]); m < last; m++) {
-        const ns = unchecked(this.memberNs[m]);
-        const name = unchecked(this.memberName[m]);
-        const version = unchecked(this.memberVersion[m]);
-        const iKind = unchecked(this.memberBinding[m]) & 7;
+      const last = this.memberEnd[ifc];
+      for (let m = this.memberStart[ifc]; m < last; m++) {
+        const ns = this.memberNs[m];
+        const name = this.memberName[m];
+        const version = this.memberVersion[m];
+        const iKind = this.memberBinding[m] & 7;
         if (compatibleKind(iKind, this.find(t, ns, name, version) & 7)) {
           continue;
         }
@@ -590,11 +587,11 @@ export class TraitsTable {
    * set where nothing is overridden, or not set where something is.
    */
   overridden(t: u32, ns: u32, version: u8, name: u32, tag: u8): i64 {
-    const base = unchecked(this.base[t]);
+    const base = this.base[t];
     let binding = BIND_None;
     if (base >= 0) {
-      const protectedNs = unchecked(this.protectedNs[t]);
-      const baseProtected = unchecked(this.protectedNs[base]);
+      const protectedNs = this.protectedNs[t];
+      const baseProtected = this.protectedNs[base];
       const lookup = protectedNs === <i32>ns && baseProtected >= 0 ? <u32>baseProtected : ns;
       binding = this.find(base, lookup, name, version);
     }
@@ -625,13 +622,13 @@ export class TraitsTable {
    * reach another ABC's private members.
    */
   allowEarlyBinding(t: u32): bool {
-    const abc = unchecked(this.abc[t]);
-    for (let b = unchecked(this.base[t]); b >= 0; b = unchecked(this.base[b])) {
-      if (unchecked(this.slotCount[b]) === 0) {
+    const abc = this.abc[t];
+    for (let b = this.base[t]; b >= 0; b = this.base[b]) {
+      if (this.slotCount[b] === 0) {
         break;
       }
 
-      if (unchecked(this.abc[b]) !== abc) {
+      if (this.abc[b] !== abc) {
         return false;
       }
     }
@@ -642,7 +639,7 @@ export class TraitsTable {
   /** Every interface t implements, its bases' and the interfaces' own included, once each. */
   allInterfaces(t: u32): u32[] {
     const all: u32[] = [];
-    for (let c = <i32>t; c >= 0; c = unchecked(this.base[c])) {
+    for (let c = <i32>t; c >= 0; c = this.base[c]) {
       this.addInterfaces(<u32>c, all);
     }
 
@@ -650,9 +647,9 @@ export class TraitsTable {
   }
 
   addInterfaces(t: u32, all: u32[]): void {
-    const last = unchecked(this.interfaceEnd[t]);
-    for (let j = unchecked(this.interfaceStart[t]); j < last; j++) {
-      const ifc = unchecked(this.interfaceList[j]);
+    const last = this.interfaceEnd[t];
+    for (let j = this.interfaceStart[t]; j < last; j++) {
+      const ifc = this.interfaceList[j];
       if (!all.includes(ifc)) {
         all.push(ifc);
         this.addInterfaces(ifc, all);
@@ -662,7 +659,7 @@ export class TraitsTable {
 
   /** As Traits::subtypeof: t is s, extends it, or implements it. */
   subtypeOf(t: u32, s: u32): bool {
-    for (let c = <i32>t; c >= 0; c = unchecked(this.base[c])) {
+    for (let c = <i32>t; c >= 0; c = this.base[c]) {
       if (<u32>c === s) {
         return true;
       }
@@ -677,11 +674,11 @@ export class TraitsTable {
    * overrides and interfaces; 0, or the VerifyError.
    */
   resolve(domain: Domain, t: u32): i32 {
-    if (unchecked(this.resolved[t])) {
+    if (this.resolved[t]) {
       return 0;
     }
 
-    const base = unchecked(this.base[t]);
+    const base = this.base[t];
     if (base >= 0) {
       const error = this.resolve(domain, <u32>base);
       if (error) {
@@ -691,7 +688,7 @@ export class TraitsTable {
 
     const interfaces = this.allInterfaces(t);
     for (let k = 0; k < interfaces.length; k++) {
-      const error = this.resolve(domain, unchecked(interfaces[k]));
+      const error = this.resolve(domain, interfaces[k]);
       if (error) {
         return error;
       }
@@ -708,9 +705,9 @@ export class TraitsTable {
     }
 
     // Every method's signature, then the initializer's.
-    const dispatch = unchecked(this.dispatchStart[t]);
-    for (let d: u32 = 0; d < unchecked(this.methodCount[t]); d++) {
-      const m = unchecked(this.dispatch[dispatch + d]);
+    const dispatch = this.dispatchStart[t];
+    for (let d: u32 = 0; d < this.methodCount[t]; d++) {
+      const m = this.dispatch[dispatch + d];
       if (m >= 0) {
         const signError = this.sign(domain, <u32>m);
         if (signError) {
@@ -719,7 +716,7 @@ export class TraitsTable {
       }
     }
 
-    const init = unchecked(this.init[t]);
+    const init = this.init[t];
     if (init >= 0) {
       const signError = this.sign(domain, <u32>init);
       if (signError) {
@@ -729,17 +726,17 @@ export class TraitsTable {
 
     let legal: bool = true;
     if (base >= 0) {
-      const baseDispatch = unchecked(this.dispatchStart[base]);
-      for (let d: u32 = 0; d < unchecked(this.methodCount[base]); d++) {
-        const virt = unchecked(this.dispatch[baseDispatch + d]);
-        const over = unchecked(this.dispatch[dispatch + d]);
+      const baseDispatch = this.dispatchStart[base];
+      for (let d: u32 = 0; d < this.methodCount[base]; d++) {
+        const virt = this.dispatch[baseDispatch + d];
+        const over = this.dispatch[dispatch + d];
         if (virt >= 0 && virt !== over) {
           legal = legal && this.checkOverride(domain, t, <u32>virt, over);
         }
       }
     }
 
-    if (legal && !unchecked(this.isInterface[t])) {
+    if (legal && !this.isInterface[t]) {
       legal = this.checkInterfaces(domain, t, interfaces);
     }
 
@@ -747,7 +744,7 @@ export class TraitsTable {
       return kIllegalOverrideError;
     }
 
-    unchecked((this.resolved[t] = 1));
+    this.resolved[t] = 1;
     return 0;
   }
 
@@ -756,48 +753,48 @@ export class TraitsTable {
    * dispatch id; an overridden method must not be final.
    */
   resolveSlotsAndMethods(domain: Domain, t: u32): i32 {
-    const index = unchecked(this.abc[t]);
-    const abc = unchecked(domain.abcs[index]);
-    const base = unchecked(this.base[t]);
-    const slotCount = unchecked(this.slotCount[t]);
+    const index = this.abc[t];
+    const abc = domain.abcs[index];
+    const base = this.base[t];
+    const slotCount = this.slotCount[t];
     const slots = <u32>this.slotType.length;
-    unchecked((this.slotStart[t] = slots));
+    this.slotStart[t] = slots;
     for (let s: u32 = 0; s < slotCount; s++) {
       this.slotType.push(TYPE_Any);
       this.slotSet.push(0);
     }
 
-    const methodCount = unchecked(this.methodCount[t]);
+    const methodCount = this.methodCount[t];
     const dispatch = <u32>this.dispatch.length;
-    unchecked((this.dispatchStart[t] = dispatch));
+    this.dispatchStart[t] = dispatch;
     for (let d: u32 = 0; d < methodCount; d++) {
       this.dispatch.push(-1);
     }
 
     let baseSlots: u32 = 0;
     if (base >= 0) {
-      baseSlots = unchecked(this.slotCount[base]);
-      const from = unchecked(this.slotStart[base]);
+      baseSlots = this.slotCount[base];
+      const from = this.slotStart[base];
       for (let s: u32 = 0; s < baseSlots; s++) {
-        unchecked((this.slotType[slots + s] = this.slotType[from + s]));
-        unchecked((this.slotSet[slots + s] = 1));
+        this.slotType[slots + s] = this.slotType[from + s];
+        this.slotSet[slots + s] = 1;
       }
 
-      const baseMethods = unchecked(this.methodCount[base]);
-      const fromDispatch = unchecked(this.dispatchStart[base]);
+      const baseMethods = this.methodCount[base];
+      const fromDispatch = this.dispatchStart[base];
       for (let d: u32 = 0; d < baseMethods; d++) {
-        unchecked((this.dispatch[dispatch + d] = this.dispatch[fromDispatch + d]));
+        this.dispatch[dispatch + d] = this.dispatch[fromDispatch + d];
       }
     }
 
-    const methods = unchecked(domain.methodStart[index]);
+    const methods = domain.methodStart[index];
     const early = this.allowEarlyBinding(t);
     let next = baseSlots;
-    for (let i = unchecked(this.first[t]); i < unchecked(this.end[t]); i++) {
-      const tag = unchecked(abc.traitTag[i]);
+    for (let i = this.first[t]; i < this.end[t]; i++) {
+      const tag = abc.traitTag[i];
       const kind = tag & 0x0f;
       if (kind === TRAIT_Slot || kind === TRAIT_Const || kind === TRAIT_Class) {
-        const id = unchecked(abc.traitId[i]);
+        const id = abc.traitId[i];
         let slot: u32;
         if (id === 0 || !early) {
           slot = ++next;
@@ -810,22 +807,22 @@ export class TraitsTable {
 
         // A slot defined twice would give one memory location two types.
         slot -= 1;
-        if (slot >= slotCount || unchecked(this.slotSet[slots + slot])) {
+        if (slot >= slotCount || this.slotSet[slots + slot]) {
           return kCorruptABCError;
         }
 
         let type: i32;
         if (kind === TRAIT_Class) {
-          type = unchecked(domain.classStatic[domain.classStart[index] + abc.traitIndex[i]]);
+          type = domain.classStatic[domain.classStart[index] + abc.traitIndex[i]];
         } else {
-          type = domain.resolveTypeId(index, unchecked(abc.traitIndex[i]), false);
+          type = domain.resolveTypeId(index, abc.traitIndex[i], false);
           if (type < TYPE_Any) {
             return domain.typeError;
           }
         }
 
-        unchecked((this.slotType[slots + slot] = type));
-        unchecked((this.slotSet[slots + slot] = 1));
+        this.slotType[slots + slot] = type;
+        this.slotSet[slots + slot] = 1;
       } else if (kind === TRAIT_Method || kind === TRAIT_Getter || kind === TRAIT_Setter) {
         this.readName(domain, index, i);
         const b = this.own(t, this.nameNs, this.nameId, this.nameNsVersion);
@@ -842,14 +839,14 @@ export class TraitsTable {
             (hasGetter(bb) && kind === TRAIT_Getter) ||
             (hasSetter(bb) && kind === TRAIT_Setter)
           ) {
-            const virt = unchecked(this.dispatch[this.dispatchStart[base] + d]);
-            if (virt >= 0 && unchecked(this.methodFinal[virt])) {
+            const virt = this.dispatch[this.dispatchStart[base] + d];
+            if (virt >= 0 && this.methodFinal[virt]) {
               return kIllegalOverrideError;
             }
           }
         }
 
-        unchecked((this.dispatch[dispatch + d] = methods + abc.traitIndex[i]));
+        this.dispatch[dispatch + d] = methods + abc.traitIndex[i];
       }
     }
 
@@ -858,19 +855,19 @@ export class TraitsTable {
 
   /** As Traits::genInitBody: every slot's initial value must suit its type. */
   checkInitialValues(domain: Domain, t: u32): i32 {
-    const index = unchecked(this.abc[t]);
-    const abc = unchecked(domain.abcs[index]);
+    const index = this.abc[t];
+    const abc = domain.abcs[index];
     const early = this.allowEarlyBinding(t);
-    const base = unchecked(this.base[t]);
-    const slots = unchecked(this.slotStart[t]);
-    let next = base >= 0 ? unchecked(this.slotCount[base]) : 0;
-    for (let i = unchecked(this.first[t]); i < unchecked(this.end[t]); i++) {
-      const kind = unchecked(abc.traitTag[i]) & 0x0f;
+    const base = this.base[t];
+    const slots = this.slotStart[t];
+    let next = base >= 0 ? this.slotCount[base] : 0;
+    for (let i = this.first[t]; i < this.end[t]; i++) {
+      const kind = abc.traitTag[i] & 0x0f;
       if (kind !== TRAIT_Slot && kind !== TRAIT_Const && kind !== TRAIT_Class) {
         continue;
       }
 
-      const id = unchecked(abc.traitId[i]);
+      const id = abc.traitId[i];
       let slot: u32;
       if (id === 0 || !early) {
         slot = ++next;
@@ -881,9 +878,9 @@ export class TraitsTable {
         }
       }
 
-      const type = unchecked(this.slotType[slots + slot - 1]);
-      const value = kind === TRAIT_Class ? 0 : unchecked(abc.traitValue[i]);
-      const error = domain.checkDefault(index, value, unchecked(abc.traitValueKind[i]), type);
+      const type = this.slotType[slots + slot - 1];
+      const value = kind === TRAIT_Class ? 0 : abc.traitValue[i];
+      const error = domain.checkDefault(index, value, abc.traitValueKind[i], type);
       if (error) {
         return error;
       }
@@ -898,23 +895,23 @@ export class TraitsTable {
    * parameters' default values.
    */
   sign(domain: Domain, m: u32): i32 {
-    if (unchecked(this.signed[m])) {
+    if (this.signed[m]) {
       return 0;
     }
 
     const index = domain.methodAbc(m);
-    const abc = unchecked(domain.abcs[index]);
-    const local = m - unchecked(domain.methodStart[index]);
-    const returnType = domain.resolveTypeId(index, unchecked(abc.methodReturnType[local]), true);
+    const abc = domain.abcs[index];
+    const local = m - domain.methodStart[index];
+    const returnType = domain.resolveTypeId(index, abc.methodReturnType[local], true);
     if (returnType < TYPE_Any) {
       return domain.typeError;
     }
 
-    const first = unchecked(abc.methodParamStart[local]);
-    const count = unchecked(abc.methodParamStart[local + 1]) - first;
+    const first = abc.methodParamStart[local];
+    const count = abc.methodParamStart[local + 1] - first;
     const start = <u32>this.paramType.length;
     for (let p: u32 = 0; p < count; p++) {
-      const type = domain.resolveTypeId(index, unchecked(abc.paramTypes[first + p]), false);
+      const type = domain.resolveTypeId(index, abc.paramTypes[first + p], false);
       if (type < TYPE_Any) {
         this.paramType.length = start;
         return domain.typeError;
@@ -923,14 +920,14 @@ export class TraitsTable {
       this.paramType.push(type);
     }
 
-    const optionalFirst = unchecked(abc.methodOptionalStart[local]);
-    const optional = unchecked(abc.methodOptionalStart[local + 1]) - optionalFirst;
+    const optionalFirst = abc.methodOptionalStart[local];
+    const optional = abc.methodOptionalStart[local + 1] - optionalFirst;
     for (let j: u32 = 0; j < optional; j++) {
-      const type = unchecked(this.paramType[start + count - optional + j]);
+      const type = this.paramType[start + count - optional + j];
       const error = domain.checkDefault(
         index,
-        unchecked(abc.optionalValue[optionalFirst + j]),
-        unchecked(abc.optionalKind[optionalFirst + j]),
+        abc.optionalValue[optionalFirst + j],
+        abc.optionalKind[optionalFirst + j],
         type,
       );
       if (error) {
@@ -942,34 +939,29 @@ export class TraitsTable {
     // As avmplus' unchecked-function hack: a function with only untyped
     // parameters and result takes them all as optional.
     let optionalCount = optional;
-    if (
-      unchecked(this.methodFunction[m]) &&
-      optional === 0 &&
-      returnType === TYPE_Any &&
-      count > 0
-    ) {
+    if (this.methodFunction[m] && optional === 0 && returnType === TYPE_Any && count > 0) {
       let untyped = true;
       for (let p: u32 = 0; p < count; p++) {
-        untyped = untyped && unchecked(this.paramType[start + p]) === TYPE_Any;
+        untyped = untyped && this.paramType[start + p] === TYPE_Any;
       }
 
       if (untyped) {
         optionalCount = count;
-        unchecked((this.ignoresRest[m] = 1));
+        this.ignoresRest[m] = 1;
       }
     }
 
-    if (unchecked(this.methodFunction[m]) && count === 0) {
-      unchecked((this.ignoresRest[m] = 1));
+    if (this.methodFunction[m] && count === 0) {
+      this.ignoresRest[m] = 1;
     }
 
-    const owner = unchecked(this.methodTraits[m]);
-    unchecked((this.returnType[m] = returnType));
-    unchecked((this.receiverType[m] = owner >= 0 ? owner : domain.objectType()));
-    unchecked((this.paramStart[m] = start));
-    unchecked((this.paramCount[m] = count));
-    unchecked((this.optionalCount[m] = optionalCount));
-    unchecked((this.signed[m] = 1));
+    const owner = this.methodTraits[m];
+    this.returnType[m] = returnType;
+    this.receiverType[m] = owner >= 0 ? owner : domain.objectType();
+    this.paramStart[m] = start;
+    this.paramCount[m] = count;
+    this.optionalCount[m] = optionalCount;
+    this.signed[m] = 1;
     return 0;
   }
 
@@ -989,14 +981,14 @@ export class TraitsTable {
     }
 
     if (
-      unchecked(this.returnType[o]) !== unchecked(this.returnType[virt]) ||
-      unchecked(this.paramCount[o]) !== unchecked(this.paramCount[virt]) ||
-      unchecked(this.optionalCount[o]) !== unchecked(this.optionalCount[virt])
+      this.returnType[o] !== this.returnType[virt] ||
+      this.paramCount[o] !== this.paramCount[virt] ||
+      this.optionalCount[o] !== this.optionalCount[virt]
     ) {
       return false;
     }
 
-    const receiver = unchecked(this.receiverType[virt]);
+    const receiver = this.receiverType[virt];
     if (
       receiver === TYPE_Any ||
       !this.subtypeOf(t, <u32>receiver) ||
@@ -1007,10 +999,10 @@ export class TraitsTable {
       }
     }
 
-    const oStart = unchecked(this.paramStart[o]);
-    const vStart = unchecked(this.paramStart[virt]);
-    for (let p: u32 = 0; p < unchecked(this.paramCount[o]); p++) {
-      if (unchecked(this.paramType[oStart + p]) !== unchecked(this.paramType[vStart + p])) {
+    const oStart = this.paramStart[o];
+    const vStart = this.paramStart[virt];
+    for (let p: u32 = 0; p < this.paramCount[o]; p++) {
+      if (this.paramType[oStart + p] !== this.paramType[vStart + p]) {
         return false;
       }
     }
@@ -1023,19 +1015,14 @@ export class TraitsTable {
    * every interface it has, with the interface's signatures.
    */
   checkInterfaces(domain: Domain, t: u32, interfaces: u32[]): bool {
-    const dispatch = unchecked(this.dispatchStart[t]);
+    const dispatch = this.dispatchStart[t];
     for (let k = 0; k < interfaces.length; k++) {
-      const ifc = unchecked(interfaces[k]);
-      const ifcDispatch = unchecked(this.dispatchStart[ifc]);
-      const last = unchecked(this.memberEnd[ifc]);
-      for (let m = unchecked(this.memberStart[ifc]); m < last; m++) {
-        const iBinding = unchecked(this.memberBinding[m]);
-        const cBinding = this.find(
-          t,
-          unchecked(this.memberNs[m]),
-          unchecked(this.memberName[m]),
-          unchecked(this.memberVersion[m]),
-        );
+      const ifc = interfaces[k];
+      const ifcDispatch = this.dispatchStart[ifc];
+      const last = this.memberEnd[ifc];
+      for (let m = this.memberStart[ifc]; m < last; m++) {
+        const iBinding = this.memberBinding[m];
+        const cBinding = this.find(t, this.memberNs[m], this.memberName[m], this.memberVersion[m]);
         const iKind = iBinding & 7;
         if (!compatibleKind(iKind, cBinding & 7)) {
           return false;
@@ -1044,8 +1031,8 @@ export class TraitsTable {
         const iId = iBinding >> 3;
         const cId = cBinding >> 3;
         if (iKind === BKIND_Method) {
-          const virt = unchecked(this.dispatch[ifcDispatch + iId]);
-          const over = unchecked(this.dispatch[dispatch + cId]);
+          const virt = this.dispatch[ifcDispatch + iId];
+          const over = this.dispatch[dispatch + cId];
           if (virt >= 0 && !this.checkOverride(domain, t, <u32>virt, over)) {
             return false;
           }
@@ -1054,8 +1041,8 @@ export class TraitsTable {
         }
 
         if (hasGetter(iBinding)) {
-          const virt = unchecked(this.dispatch[ifcDispatch + iId]);
-          const over = unchecked(this.dispatch[dispatch + cId]);
+          const virt = this.dispatch[ifcDispatch + iId];
+          const over = this.dispatch[dispatch + cId];
           if (
             !hasGetter(cBinding) ||
             (virt >= 0 && !this.checkOverride(domain, t, <u32>virt, over))
@@ -1065,8 +1052,8 @@ export class TraitsTable {
         }
 
         if (hasSetter(iBinding)) {
-          const virt = unchecked(this.dispatch[ifcDispatch + iId + 1]);
-          const over = unchecked(this.dispatch[dispatch + cId + 1]);
+          const virt = this.dispatch[ifcDispatch + iId + 1];
+          const over = this.dispatch[dispatch + cId + 1];
           if (
             !hasSetter(cBinding) ||
             (virt >= 0 && !this.checkOverride(domain, t, <u32>virt, over))

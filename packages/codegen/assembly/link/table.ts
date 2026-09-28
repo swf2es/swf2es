@@ -21,12 +21,12 @@ export class IdTable {
   /** The id in `slot`, or -1 at the end of the probe. */
   @inline
   at(slot: u32): i32 {
-    return <i32>unchecked(this.ids[slot]) - 1;
+    return <i32>this.ids[slot] - 1;
   }
 
   @inline
   hashAt(slot: u32): u32 {
-    return unchecked(this.hashes[slot]);
+    return this.hashes[slot];
   }
 
   insert(hash: u32, id: u32): void {
@@ -35,12 +35,12 @@ export class IdTable {
     }
 
     let slot = this.start(hash);
-    while (unchecked(this.ids[slot])) {
+    while (this.ids[slot]) {
       slot = this.next(slot);
     }
 
-    unchecked((this.ids[slot] = id + 1));
-    unchecked((this.hashes[slot] = hash));
+    this.ids[slot] = id + 1;
+    this.hashes[slot] = hash;
     this.count++;
   }
 
@@ -54,14 +54,14 @@ export class IdTable {
     // Re-inserting in slot order keeps equal hashes in insertion order.
     const size = <u32>ids.length;
     let first: u32 = 0;
-    while (first < size && unchecked(ids[first])) {
+    while (first < size && ids[first]) {
       first++;
     }
 
     for (let i: u32 = 1; i <= size; i++) {
       const slot = (first + i) & (size - 1);
-      if (unchecked(ids[slot])) {
-        this.insert(unchecked(hashes[slot]), unchecked(ids[slot]) - 1);
+      if (ids[slot]) {
+        this.insert(hashes[slot], ids[slot] - 1);
       }
     }
   }

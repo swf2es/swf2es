@@ -99,16 +99,16 @@ export class Ir {
     }
 
     const i = this.count++;
-    unchecked((this.op[i] = op));
-    unchecked((this.dst[i] = dst));
-    unchecked((this.src[i] = src));
-    unchecked((this.srcCount[i] = count));
-    unchecked((this.a[i] = a));
-    unchecked((this.b[i] = b));
-    unchecked((this.c[i] = c));
-    unchecked((this.type[i] = -1));
-    unchecked((this.notNull[i] = 0));
-    unchecked((this.pc[i] = pc));
+    this.op[i] = op;
+    this.dst[i] = dst;
+    this.src[i] = src;
+    this.srcCount[i] = count;
+    this.a[i] = a;
+    this.b[i] = b;
+    this.c[i] = c;
+    this.type[i] = -1;
+    this.notNull[i] = 0;
+    this.pc[i] = pc;
     return i;
   }
 
@@ -150,14 +150,14 @@ export class Ir {
     }
 
     for (let i: u32 = 0; i < size; i++) {
-      unchecked((this.entryType[used + i] = types[i]));
-      unchecked((this.entryNotNull[used + i] = flags[i] & 1));
+      this.entryType[used + i] = types[i];
+      this.entryNotNull[used + i] = flags[i] & 1;
     }
 
-    unchecked((this.blockFirst[k] = this.count));
-    unchecked((this.blockPc[k] = pc));
-    unchecked((this.blockStack[k] = stack));
-    unchecked((this.blockScope[k] = scope));
+    this.blockFirst[k] = this.count;
+    this.blockPc[k] = pc;
+    this.blockStack[k] = stack;
+    this.blockScope[k] = scope;
     this.blockCount++;
   }
 
@@ -172,11 +172,11 @@ export class Ir {
       this.handlerScope = grown<i32>(this.handlerScope, capacity, h);
     }
 
-    unchecked((this.handlerFrom[h] = from));
-    unchecked((this.handlerTo[h] = to));
-    unchecked((this.handlerBlock[h] = block));
-    unchecked((this.handlerType[h] = type));
-    unchecked((this.handlerScope[h] = scope));
+    this.handlerFrom[h] = from;
+    this.handlerTo[h] = to;
+    this.handlerBlock[h] = block;
+    this.handlerType[h] = type;
+    this.handlerScope[h] = scope;
     this.handlerCount++;
   }
 
@@ -185,12 +185,12 @@ export class Ir {
       this.cases = grown<u32>(this.cases, max(16, this.cases.length * 2), this.caseCount);
     }
 
-    unchecked((this.cases[this.caseCount++] = block));
+    this.cases[this.caseCount++] = block;
   }
 
   /** Whether instruction i is a lookupswitch, whose targets are in `cases`. */
   isSwitch(i: u32): bool {
-    return unchecked(this.op[i]) === OP_lookupswitch;
+    return this.op[i] === OP_lookupswitch;
   }
 }
 

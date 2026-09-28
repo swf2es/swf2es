@@ -57,7 +57,7 @@ export function readInstances(abc: Abc, r: Reader): bool {
       return abc.fail(kCorruptABCError);
     }
 
-    unchecked((abc.instanceInterfaceStart[i] = abc.interfaces.length));
+    abc.instanceInterfaceStart[i] = abc.interfaces.length;
     for (let j: u32 = 0; j < interfaceCount; j++) {
       const type = r.u30();
       if (r.failed) {
@@ -84,12 +84,12 @@ export function readInstances(abc: Abc, r: Reader): bool {
       return abc.fail(kMethodInfoExceedsCountError);
     }
 
-    unchecked((abc.instanceName[i] = name));
-    unchecked((abc.instanceSuper[i] = base));
-    unchecked((abc.instanceFlags[i] = flags));
-    unchecked((abc.instanceProtectedNs[i] = protectedNs));
-    unchecked((abc.instanceInit[i] = init));
-    unchecked((abc.instanceTraitStart[i] = abc.traitName.length));
+    abc.instanceName[i] = name;
+    abc.instanceSuper[i] = base;
+    abc.instanceFlags[i] = flags;
+    abc.instanceProtectedNs[i] = protectedNs;
+    abc.instanceInit[i] = init;
+    abc.instanceTraitStart[i] = abc.traitName.length;
 
     // No class is defined yet while instances are parsed.
     if (!readTraits(abc, r, abc.instanceOwner(i), 0) || !bind(abc, init, abc.instanceOwner(i))) {
@@ -97,8 +97,8 @@ export function readInstances(abc: Abc, r: Reader): bool {
     }
   }
 
-  unchecked((abc.instanceInterfaceStart[count] = abc.interfaces.length));
-  unchecked((abc.instanceTraitStart[count] = abc.traitName.length));
+  abc.instanceInterfaceStart[count] = abc.interfaces.length;
+  abc.instanceTraitStart[count] = abc.traitName.length;
   return true;
 }
 
@@ -113,8 +113,8 @@ export function readClasses(abc: Abc, r: Reader): bool {
       return false;
     }
 
-    unchecked((abc.classInit[i] = <u32>init));
-    unchecked((abc.classTraitStart[i] = abc.traitName.length));
+    abc.classInit[i] = <u32>init;
+    abc.classTraitStart[i] = abc.traitName.length;
 
     // Class i's traits may name the classes before it.
     if (!readTraits(abc, r, abc.classOwner(i), i) || !bind(abc, <u32>init, abc.classOwner(i))) {
@@ -122,7 +122,7 @@ export function readClasses(abc: Abc, r: Reader): bool {
     }
   }
 
-  unchecked((abc.classTraitStart[count] = abc.traitName.length));
+  abc.classTraitStart[count] = abc.traitName.length;
   return true;
 }
 
@@ -142,23 +142,23 @@ export function readScripts(abc: Abc, r: Reader): bool {
     }
 
     // Unlike instances and classes, a script checks its init before its traits.
-    if (unchecked(abc.methodOwner[init]) !== -1) {
+    if (abc.methodOwner[init] !== -1) {
       return abc.fail(kAlreadyBoundError);
     }
 
-    unchecked((abc.scriptInit[i] = <u32>init));
-    unchecked((abc.scriptTraitStart[i] = abc.traitName.length));
+    abc.scriptInit[i] = <u32>init;
+    abc.scriptTraitStart[i] = abc.traitName.length;
     if (!readTraits(abc, r, abc.scriptOwner(i), abc.classCount)) {
       return false;
     }
 
     // A trait may already have bound the init; avmplus ignores that.
-    if (unchecked(abc.methodOwner[init]) === -1) {
-      unchecked((abc.methodOwner[init] = abc.scriptOwner(i)));
+    if (abc.methodOwner[init] === -1) {
+      abc.methodOwner[init] = abc.scriptOwner(i);
     }
   }
 
-  unchecked((abc.scriptTraitStart[count] = abc.traitName.length));
+  abc.scriptTraitStart[count] = abc.traitName.length;
   return true;
 }
 
@@ -180,10 +180,10 @@ function readMethodIndex(abc: Abc, r: Reader): i32 {
 
 /** Bind an instance or class initializer to its owner. */
 function bind(abc: Abc, method: u32, owner: i32): bool {
-  if (unchecked(abc.methodOwner[method]) !== -1) {
+  if (abc.methodOwner[method] !== -1) {
     return abc.fail(kAlreadyBoundError);
   }
 
-  unchecked((abc.methodOwner[method] = owner));
+  abc.methodOwner[method] = owner;
   return true;
 }
