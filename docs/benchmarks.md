@@ -133,8 +133,8 @@ medians of 7 interleaved pairs each (`AB_NODE_ARGS` in `tests/programs/ab.ts`):
 | Swap by destructuring, limits raised | 181 | 213 |
 | Swap through a temporary, limits raised | 182 | 185 |
 
-The two gains do not overlap: the swap is worth as much with the limits
-raised (−13%), and the limits as much after it. The null checks' dedup
+Both gains persist when combined: the swap is worth as much with the
+limits raised (−13%), and raising the limits still helps after it. The null checks' dedup
 gained nothing measurable, which does not show that V8 removes every one.
 
 What paid: a runtime helper that many call sites share with many kinds of
