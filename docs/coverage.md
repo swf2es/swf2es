@@ -26,29 +26,26 @@ recurses until the host's stack runs out, and
 
 ## Results
 
-2026-09-29, after E4X (#39), in 43 s. Two runs agree, but for the two
-tests above.
+2026-09-29, after the natives' argument counts (#40), in 43 s. Two runs
+agree, but for the two tests above.
 
 | | Tests | Match avmshell | Checks passed, of avmshell's |
 |---|---|---|---|
-| **All** | 2578 | **2338 (90.7%)** | 59,950 of 62,435 (96.0%) |
-| ecma3 | 928 | 847 (91%) | 44,253 of 44,561 (99.3%) |
+| **All** | 2578 | **2356 (91.4%)** | 60,594 of 62,435 (97.1%) |
+| ecma3 | 928 | 849 (91%) | 44,255 of 44,561 (99.3%) |
 | spidermonkey | 521 | 488 (94%) | 2,639 of 2,701 (97.7%) |
-| as3 | 849 | 754 (89%) | 10,344 of 11,522 (89.8%) |
-| e4x | 173 | 171 (99%) | 1,916 of 1,919 (99.8%) |
+| as3 | 849 | 768 (90%) | 10,983 of 11,522 (95.3%) |
+| e4x | 173 | 173 (100%) | 1,919 of 1,919 (100%) |
 | regress | 61 | 42 (69%) | 556 of 1,344 |
 | misc, mmgc, mops, recursion, versioning | 46 | 36 | 242 of 388 |
-
-The two E4X tests left call a native with too few arguments, which
-avmshell checks (ArgumentError 1063) and swf2es' natives do not yet.
 
 What stops a test, or makes it differ, most often:
 
 | Tests | Reason |
 |---|---|
-| 101 | Fewer checks passed than in avmshell |
-| 66 | Ended otherwise: 64 with an AS3 exception nothing caught where avmshell ended normally, 2 the other way |
-| 14 | The same checks passed, but others failed |
+| 97 | Fewer checks passed than in avmshell |
+| 50 | Ended otherwise: 48 with an AS3 exception nothing caught where avmshell ended normally, 2 the other way |
+| 16 | The same checks passed, but others failed |
 | 31 | avmshell's shell API (`System`, `File`, `Domain`, the sampler, `Mutex`), which a SWF never calls |
 | 4 | `describeTypeJSON`, and AMF3 for XML |
 
@@ -61,6 +58,7 @@ What stops a test, or makes it differ, most often:
 | The register below a `swap` given the top's type, so a setter called from a setter is bound by its own type | +14 |
 | A private type named by its module's own namespace, as a class outside the package block is | +20 |
 | E4X: XML and XMLList, their parser, names and namespaces, the default XML namespace | +208 |
+| A native's argument count checked where its call was not bound; the script defining Object run first | +18 |
 
 ## Natives
 
