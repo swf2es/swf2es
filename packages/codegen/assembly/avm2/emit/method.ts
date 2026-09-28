@@ -66,6 +66,16 @@ export class MethodEmitter {
   typeIndex: Map<i32, u32> = new Map<i32, u32>();
   /** The name the method being written is given, a JavaScript identifier; "" for none. */
   functionName: string = "";
+  /**
+   * Whether the method being written can see the default XML namespace: a
+   * lookup, call or construction that may reach XML, a closure or class it
+   * makes, a with scope, or dxns. Only such a method checks, on entry, that
+   * it runs with its scope's (see checkDxns).
+   */
+  seesDxns: bool = false;
+  dxnsAt: u32 = 0;
+  dxnsMarks: i32 = 0;
+  dxnsCheck: string = "";
   /** The method being written: its ABC index and body. */
   current: u32 = 0;
   body: i32 = -1;
@@ -121,7 +131,8 @@ export class MethodEmitter {
 
     const count = traits.paramCount[global];
     // Named, for stacks and profiles: a name its code never binds.
-    out.text(this.functionName.length ? `function ${this.functionName}(` : "function (");
+    const name = this.functionName.length ? this.functionName : "$method";
+    out.text(`function ${name}(`);
     for (let p: u32 = 1; p <= count; p++) {
       out.text(p > 1 ? ", p" : "p");
       out.uint(p);
@@ -133,7 +144,18 @@ export class MethodEmitter {
     }
 
     out.text(") {\n");
+    this.dxnsAt = out.length;
+    this.dxnsMarks = this.map.count;
+    this.dxnsCheck = `  if (rt.defaultXmlNamespace !== $dx) return rt.callInDxns($dx, ${name}, this, arguments);\n`;
+    this.seesDxns = false;
     this.prologue(method, global, flags);
+    // A method that sets the default XML namespace gives its caller's
+    // back when it returns or throws.
+    const dxns = (flags & C.METHOD_SetsDxns) !== 0;
+    if (dxns) {
+      out.text("  const $dxns = rt.enterDxns();\n  try {\n");
+    }
+
     const handled = ir.handlerCount > 0;
     if (handled) {
       this.regions();
@@ -156,7 +178,9 @@ export class MethodEmitter {
       this.node(0);
       this.structured = false;
       if (!this.unenclosed) {
+        this.leaveDxns(dxns);
         out.text("}");
+        this.checkDxns();
         return;
       }
 
@@ -182,7 +206,91 @@ export class MethodEmitter {
       out.text("  }");
     }
 
-    out.text("\n}");
+    out.text("\n");
+    this.leaveDxns(dxns);
+    out.text("}");
+    this.checkDxns();
+  }
+
+  /**
+   * A method that can see the default XML namespace runs with the one of
+   * the scope it was made in ($dx, see ModuleEmitter.factory), not its
+   * caller's: else it runs again with it, and the caller's is back after.
+   * Written first in the method once its code shows it is needed.
+   */
+  checkDxns(): void {
+    if (!this.seesDxns) {
+      return;
+    }
+
+    const check = this.dxnsCheck;
+    this.out.insert(this.dxnsAt, check);
+    this.map.shift(this.dxnsMarks, <u32>check.length);
+  }
+
+  /** Whether register r may hold XML or an XMLList: untyped, Object, or either. */
+  mayBeXml(r: i32): bool {
+    const type = this.regType[r];
+    const bt = this.domain.builtin(type);
+    return (
+      bt === BUILTIN_Any ||
+      bt === BUILTIN_Object ||
+      type === this.domain.xmlType ||
+      type === this.domain.xmlListType
+    );
+  }
+
+  /**
+   * Note whether instruction i, `op` on register `src`, can see the default
+   * XML namespace. A call or construction the linker did not bind may reach
+   * XML's, XMLList's or QName's class through any name, as a class held in
+   * a variable, so each counts; a call of a value, when the value may be a
+   * class.
+   */
+  notesDxns(op: u16, src: i32): void {
+    switch (op) {
+      case ops.OP_getproperty:
+      case ops.OP_setproperty:
+      case ops.OP_initproperty:
+      case ops.OP_deleteproperty:
+      case ops.OP_getdescendants:
+        if (this.mayBeXml(src)) {
+          this.seesDxns = true;
+        }
+
+        break;
+      case ops.OP_in:
+        if (this.mayBeXml(src + 1)) {
+          this.seesDxns = true;
+        }
+
+        break;
+      case ops.OP_call:
+        if (this.mayBeXml(src) || this.regType[src] === this.domain.classType) {
+          this.seesDxns = true;
+        }
+
+        break;
+      case ops.OP_callproperty:
+      case ops.OP_callproplex:
+      case ops.OP_callpropvoid:
+      case ops.OP_constructprop:
+      case ops.OP_construct:
+      case ops.OP_newfunction:
+      case ops.OP_newclass:
+      case ops.OP_pushwith:
+      case ops.OP_dxns:
+      case ops.OP_dxnslate:
+        this.seesDxns = true;
+        break;
+    }
+  }
+
+  /** The end of a method that sets the default XML namespace: its caller's back. */
+  leaveDxns(dxns: bool): void {
+    if (dxns) {
+      this.out.text("  } finally {\n    rt.defaultXmlNamespace = $dxns;\n  }\n");
+    }
   }
 
   /** Each block's file and line where it starts, from the debugfile and debugline instructions before it. */
@@ -1594,6 +1702,9 @@ export class MethodEmitter {
     const ir = this.ir;
     const a = ir.a[i];
     const src = ir.src[i];
+    if (!this.seesDxns) {
+      this.notesDxns(op, src);
+    }
     switch (op) {
       case ops.OP_pushscope:
       case ops.OP_pushwith:
@@ -2186,6 +2297,11 @@ export class MethodEmitter {
   virtual(disp: u32, src: i32, argc: u32): void {
     const out = this.out;
     const type = this.regType[src];
+    // XML's methods look names up in the default XML namespace.
+    if (type === this.domain.xmlType || type === this.domain.xmlListType) {
+      this.seesDxns = true;
+    }
+
     const bt = this.builtinOf(src);
     const primitive =
       bt === BUILTIN_Int ||

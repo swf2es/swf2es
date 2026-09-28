@@ -19,8 +19,11 @@ import {
   CONSTANT_RTQnameLA,
   Multiname,
   Namespace,
+  NS_Private,
   NS_Public,
   namespace,
+  prefixedNamespace,
+  prefixOf,
   publicNs,
   qname,
   TypeName,
@@ -132,6 +135,8 @@ export class Traits {
   refusesNames = false;
   /** How to allocate an instance, for classes whose instances hold native state. */
   create: ((traits: Traits) => AsObject) | null;
+  /** How its instances resolve the names it does not bind, if not as dynamic properties. */
+  properties: PropertyHook | null = null;
   /** Its own slots with [Transient] metadata, if any. */
   transientSlots: Set<number> | null = null;
   /** Its own accessors with metadata, if any, by dispatch id: whether any of it is [Transient]. */
@@ -149,6 +154,7 @@ export class Traits {
     this.proto = proto ?? Object.create(base ? base.proto : null);
     this.proto.$traits = this;
     this.create = base ? base.create : null;
+    this.properties = base ? base.properties : null;
     this.getIndex = base?.getIndex;
     this.setIndex = base?.setIndex;
     this.hasIndex = base?.hasIndex;
@@ -501,7 +507,7 @@ export class Runtime {
 
   /** A multiname with its runtime namespace and name, from the stack. */
   runtimeName(mn: Multiname, ...parts: Value[]): Multiname {
-    let namespaces = mn.namespaces;
+    let namespaces: (Namespace | null)[] = mn.namespaces;
     let versions = mn.versions;
     let k = 0;
     if (mn.runtimeNs) {
@@ -520,11 +526,17 @@ export class Runtime {
     let name = mn.name;
     if (mn.runtimeName) {
       const part = parts[k];
-      if (part?.$local !== undefined) {
-        // A QName names its own namespace and local name.
-        namespaces = [part.$ns ?? publicNs];
-        versions = [255];
-        name = part.$local;
+      if (part?.$local !== undefined && !(part instanceof Namespace)) {
+        // A QName names its own namespace, null for any, and local name,
+        // null for any, and may be an attribute's.
+        // Bindings compare interned namespaces: an XML name's has a prefix.
+        return new Multiname(
+          CONSTANT_Qname,
+          [part.$ns ? part.$ns.interned : null],
+          [255],
+          part.$local,
+          mn.attribute || part.$attr === true,
+        );
       } else if (typeof part === "object" && part !== null) {
         // Its string only once a lookup needs it: a Dictionary does not.
         return Multiname.keyed(kind, namespaces, versions, part, mn.attribute, this.keyName);
@@ -542,11 +554,11 @@ export class Runtime {
   /** The runtime namespace a Namespace value stands for. */
   namespaceOf(value: Value): Namespace {
     if (value instanceof Namespace) {
-      return value;
+      return value.interned;
     }
 
     if (value && value.$ns instanceof Namespace) {
-      return value.$ns;
+      return value.$ns.interned;
     }
 
     throw this.error("TypeError", 1034, this.describe(value), "Namespace");
@@ -844,6 +856,10 @@ export class Runtime {
 
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
+    if (traits.properties !== null && hookedBinding(b, mn)) {
+      return traits.properties.get(this, o, mn);
+    }
+
     if (b !== 0) {
       return this.getBound(o, traits, b, mn);
     }
@@ -1102,6 +1118,11 @@ export class Runtime {
 
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
+    if (traits.properties !== null && hookedBinding(b, mn)) {
+      traits.properties.set(this, o, mn, v);
+      return;
+    }
+
     if (b !== 0) {
       const id = b >> 3;
       switch (b & 7) {
@@ -1159,8 +1180,18 @@ export class Runtime {
       return true;
     }
 
+    // E4X 11.3.1: delete x[list] is a TypeError, as in delete x.a.(b == 1).
+    if ((mn.key as Value)?.$nodes !== undefined) {
+      throw this.error("TypeError", 1119, "XMLList");
+    }
+
     const traits = this.traitsOf(o);
-    if (traits.find(mn) !== 0) {
+    const b = traits.find(mn);
+    if (traits.properties !== null && hookedBinding(b, mn)) {
+      return traits.properties.delete(this, o, mn);
+    }
+
+    if (b !== 0) {
       return false;
     }
 
@@ -1218,7 +1249,13 @@ export class Runtime {
       return this.dictionaryHas(o, mn.key as object);
     }
 
-    if (this.traitsOf(o).find(mn) !== 0) {
+    const own = this.traitsOf(o);
+    const b = own.find(mn);
+    if (own.properties !== null && hookedBinding(b, mn)) {
+      return own.properties.has(this, o, mn);
+    }
+
+    if (b !== 0) {
       return true;
     }
 
@@ -1286,6 +1323,10 @@ export class Runtime {
       return this.getBound(o, traits, b, mn);
     }
 
+    if (traits.properties !== null) {
+      return traits.properties.callee(this, o, mn);
+    }
+
     // A name no dynamic property has, such as ns::x, fails as a get does.
     const name = mn.dynamicName();
     if (typeof o === "object" || name === null) {
@@ -1329,6 +1370,21 @@ export class Runtime {
     }
 
     throw this.error("TypeError", 1006, mn ? mn.name : "value");
+  }
+
+  /**
+   * A method called where the default XML namespace is not the one of the
+   * scope it was made in, `dxns`: called again with it, and the caller's
+   * back after.
+   */
+  callInDxns(dxns: Namespace, f: Method, receiver: Value, args: ArrayLike<Value>): Value {
+    const caller = this.defaultXmlNamespace;
+    this.defaultXmlNamespace = dxns;
+    try {
+      return f.apply(receiver, args as Value[]);
+    } finally {
+      this.defaultXmlNamespace = caller;
+    }
   }
 
   callInterface(iface: TypeRef, disp: number, o: Value, ...args: Value[]): Value {
@@ -1526,7 +1582,7 @@ export class Runtime {
         traits.describe({
           slots: 1,
           defaults: [[0, undefined, null]],
-          bindings: [[mn.namespaces[0], 0, mn.name, BIND_Var]],
+          bindings: [[mn.namespaces[0] as Namespace, 0, mn.name, BIND_Var]],
           methods: [],
         });
       }
@@ -1572,6 +1628,10 @@ export class Runtime {
     const create = hooks?.create;
     if (create) {
       itraits.create = (traits) => create(traits, this);
+    }
+
+    if (hooks?.properties) {
+      itraits.properties = hooks.properties;
     }
 
     if (hooks?.getIndex) {
@@ -1931,6 +1991,12 @@ export class Runtime {
 
   /** As [[DefaultValue]]: valueOf and toString, in the hint's order. */
   toPrimitive(o: AsObject, hint: "number" | "string"): Value {
+    // XML's is its string, as XMLObject::toString gives it.
+    const properties: PropertyHook | null | undefined = o.$traits?.properties;
+    if (properties) {
+      return properties.toString(this, o);
+    }
+
     const order = hint === "string" ? ["toString", "valueOf"] : ["valueOf", "toString"];
     for (const name of order) {
       const f = this.getProperty(o, qname(publicNs, name));
@@ -1950,6 +2016,13 @@ export class Runtime {
       return a + b;
     }
 
+    if (typeof a === "object" && typeof b === "object" && a?.$traits?.properties) {
+      const sum = a.$traits.properties.add(this, a, b);
+      if (sum !== undefined) {
+        return sum;
+      }
+    }
+
     const pa = a !== null && typeof a === "object" ? this.toPrimitive(a, this.hintOf(a)) : a;
     const pb = b !== null && typeof b === "object" ? this.toPrimitive(b, this.hintOf(b)) : b;
     if (typeof pa === "string" || typeof pb === "string") {
@@ -1960,10 +2033,17 @@ export class Runtime {
   }
 
   private hintOf(o: AsObject): "number" | "string" {
-    return o.$traits.name === "Date" ? "string" : "number";
+    return this.traitsOf(o).name === "Date" ? "string" : "number";
   }
 
   equals(a: Value, b: Value): boolean {
+    if (typeof a === "object" || typeof b === "object") {
+      const e = this.objectEquals(a, b);
+      if (e !== undefined) {
+        return e;
+      }
+    }
+
     if (typeof a === typeof b) {
       return a === b;
     }
@@ -1985,6 +2065,32 @@ export class Runtime {
     }
 
     return this.toNumber(a) === this.toNumber(b);
+  }
+
+  /**
+   * == where either side is an object, as E4X has it (11.5.1): XML and
+   * XMLList by their hook, QNames by URI and local name, Namespaces by URI.
+   */
+  private objectEquals(a: Value, b: Value): boolean | undefined {
+    if (a === b) {
+      return true;
+    }
+
+    const properties: PropertyHook | null | undefined =
+      a?.$traits?.properties ?? b?.$traits?.properties;
+    if (properties) {
+      return properties.equals(this, a, b);
+    }
+
+    if (a instanceof Namespace && b instanceof Namespace) {
+      return a.kind !== NS_Private && a.kind === b.kind && a.uri === b.uri;
+    }
+
+    if (a?.$local !== undefined && b?.$local !== undefined) {
+      return (a.$ns?.uri ?? null) === (b.$ns?.uri ?? null) && a.$local === b.$local;
+    }
+
+    return undefined;
   }
 
   strictEquals(a: Value, b: Value): boolean {
@@ -2134,7 +2240,16 @@ export class Runtime {
     let obj = o;
     let i = index;
     while (obj !== null && obj !== undefined) {
-      const next = typeof obj === "object" ? this.nextIndex(obj, i) : 0;
+      const properties: PropertyHook | null | undefined =
+        typeof obj === "object" ? obj.$traits?.properties : null;
+      const next =
+        typeof obj !== "object"
+          ? 0
+          : properties
+            ? properties.nextIndex(this, obj, i)
+            : pairOf(obj)
+              ? pairIndex(i)
+              : this.nextIndex(obj, i);
       if (next) {
         return [true, obj, next];
       }
@@ -2147,11 +2262,30 @@ export class Runtime {
   }
 
   hasNext(o: Value, index: number): number {
-    return typeof o === "object" && o !== null ? this.nextIndex(o, index) : 0;
+    if (typeof o !== "object" || o === null) {
+      return 0;
+    }
+
+    const properties: PropertyHook | null | undefined = o.$traits?.properties;
+    if (properties) {
+      return properties.nextIndex(this, o, index);
+    }
+
+    return pairOf(o) ? pairIndex(index) : this.nextIndex(o, index);
   }
 
   /** As avmplus gives a for-in's name: an index as a number while an int atom holds it, a Dictionary's object key as itself. */
   nextName(o: Value, index: number): Value {
+    const properties: PropertyHook | null | undefined = o?.$traits?.properties;
+    if (properties) {
+      return properties.nextName(this, o, index);
+    }
+
+    const pair = pairOf(o);
+    if (pair) {
+      return index === 1 ? "uri" : index === 2 ? pair : null;
+    }
+
     const name = this.enumerated(o, index);
     if (typeof name !== "string") {
       return name;
@@ -2162,6 +2296,23 @@ export class Runtime {
   }
 
   nextValue(o: Value, index: number): Value {
+    const properties: PropertyHook | null | undefined = o?.$traits?.properties;
+    if (properties) {
+      return properties.nextValue(this, o, index);
+    }
+
+    // As avmplus: a QName's values come localName first, though its names come uri first.
+    const pair = pairOf(o);
+    if (pair === "prefix") {
+      return index === 1 ? o.uri : index === 2 ? prefixOf(o) : undefined;
+    }
+
+    if (pair === "localName") {
+      const uri = o.$ns ? o.$ns.uri : null;
+      const local = o.$local ?? "*";
+      return index === 1 ? local : index === 2 ? uri : null;
+    }
+
     const name = this.enumerated(o, index);
     if (typeof name !== "string") {
       return o.$keys.get(name);
@@ -2387,26 +2538,66 @@ export class Runtime {
 
   // E4X, not implemented yet.
 
-  getDescendants(_o: Value, _mn: Multiname): Value {
-    throw this.unsupported("XML's descendants");
+  /** getdescendants: x..name, on XML or XMLList; anything else, as avmplus, TypeError 1016. */
+  getDescendants(o: Value, mn: Multiname): Value {
+    const properties: PropertyHook | null | undefined = o?.$traits?.properties;
+    if (!properties) {
+      throw this.error("TypeError", 1016, this.describe(o));
+    }
+
+    return properties.descendants(this, o, mn);
   }
 
-  setDefaultXmlNamespace(_ns: Value): void {
-    throw this.unsupported("default xml namespace");
+  /**
+   * The default XML namespace, as dxns and dxnslate set it. avmplus keeps
+   * it for each frame: one a method set, else the one of the scope the
+   * method was made in. Here the runtime has the current one: each
+   * method's factory captures it, and the method runs with that one
+   * (callInDxns); one that sets it gives its caller's back.
+   */
+  defaultXmlNamespace: Namespace = publicNs;
+
+  /** On entering a method that sets the default XML namespace: the one to give back on leaving it. */
+  enterDxns(): Namespace {
+    return this.defaultXmlNamespace;
   }
 
+  setDefaultXmlNamespace(ns: Value): void {
+    if (ns instanceof Namespace) {
+      this.defaultXmlNamespace = ns;
+    } else {
+      const uri = this.toString(ns);
+      this.defaultXmlNamespace = prefixedNamespace(uri === "" ? "" : undefined, uri);
+    }
+  }
+
+  /** checkfilter: x.(...) filters XML and XMLList only, else TypeError 1123. */
   checkFilter(v: Value): void {
-    throw this.error("TypeError", 1123, this.describe(v));
+    if (!v?.$traits?.properties) {
+      throw this.error("TypeError", 1123, this.describe(v));
+    }
   }
 
+  /** esc_xelem, as AvmCore::ToXMLString: XML's own XML, else a string escaped and trimmed. */
   escapeElement(v: Value): string {
-    return this.toString(v).replace(/[&<>]/g, (c) =>
-      c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;",
-    );
+    if (typeof v === "string") {
+      return escapeElementValue(v, true);
+    }
+
+    if (typeof v !== "object" || v === null) {
+      return this.toString(v);
+    }
+
+    const properties: PropertyHook | null | undefined = v.$traits?.properties;
+    if (properties) {
+      return properties.toXMLString(this, v);
+    }
+
+    return escapeElementValue(this.toString(v), true);
   }
 
   escapeAttribute(v: Value): string {
-    return this.toString(v).replace(/[&<"\n\r\t]/g, (c) => XML_ATTRIBUTE[c]);
+    return escapeAttributeValue(this.toString(v));
   }
 
   // Methods whose bodies are not generated.
@@ -2459,8 +2650,67 @@ export interface IndexHook {
   index?: (o: AsObject, name: string, rt: Runtime) => number;
 }
 
+/**
+ * How a class's instances resolve the names their traits do not bind, in
+ * place of dynamic properties, as XML and XMLList do (E4X's [[Get]] and so
+ * on): each operation, their enumeration, and their equality and +.
+ */
+export interface PropertyHook {
+  get(rt: Runtime, o: AsObject, mn: Multiname): Value;
+  set(rt: Runtime, o: AsObject, mn: Multiname, v: Value): void;
+  delete(rt: Runtime, o: AsObject, mn: Multiname): boolean;
+  has(rt: Runtime, o: AsObject, mn: Multiname): boolean;
+  /** callproperty: what a name calls, looked for as the class does. */
+  callee(rt: Runtime, o: AsObject, mn: Multiname): Value;
+  descendants(rt: Runtime, o: AsObject, mn: Multiname): Value;
+  /** The index after `index` for a for-in, or 0; and the name and value at one. */
+  nextIndex(rt: Runtime, o: AsObject, index: number): number;
+  nextName(rt: Runtime, o: AsObject, index: number): Value;
+  nextValue(rt: Runtime, o: AsObject, index: number): Value;
+  /** ==, when either side is an instance, or undefined to leave it to the rest. */
+  equals(rt: Runtime, a: Value, b: Value): boolean | undefined;
+  /** +, when both sides are an instance or another hooked class's, or undefined. */
+  add(rt: Runtime, a: Value, b: Value): Value;
+  /** An instance's string, as its primitive value. */
+  toString(rt: Runtime, o: AsObject): string;
+  /** An instance as XML text, as esc_xelem writes it. */
+  toXMLString(rt: Runtime, o: AsObject): string;
+}
+
+/**
+ * Whether a hooked class's hook resolves `mn`, bound to `b`: a name its
+ * traits do not bind, an attribute's, or a public name of a method, as a
+ * child or attribute of XML hides the methods of its names (as avmplus'
+ * getproperty does for XML and XMLList).
+ */
+/**
+ * A Namespace or QName, which enumerate "uri" and the name this gives
+ * ("prefix" or "localName"), as avmplus' nextName does; else null.
+ */
+function pairOf(o: Value): string | null {
+  if (o instanceof Namespace) {
+    return "prefix";
+  }
+
+  return typeof o === "object" && o !== null && o.$local !== undefined ? "localName" : null;
+}
+
+const pairIndex = (index: number) => (index < 2 ? index + 1 : 0);
+
+function hookedBinding(b: number, mn: Multiname): boolean {
+  if (b === 0 || mn.attribute) {
+    return true;
+  }
+
+  return (
+    (b & 7) === BIND_Method && mn.namespaces.some((ns) => ns?.kind === NS_Public && ns.uri === "")
+  );
+}
+
 /** How a builtin class differs from others: allocation, index access, calls and construction. */
 export interface ClassHook {
+  /** How its instances resolve names, as XML's (Traits.properties). */
+  properties?: PropertyHook;
   create?: (traits: Traits, rt: Runtime) => AsObject;
   /** Whether its instances refuse any name but their own and an index, as a Vector's (Traits.refusesNames). */
   refusesNames?: boolean;
@@ -2483,6 +2733,13 @@ const BUILTIN_REFS = new Set(["int", "uint", "Number", "String", "Boolean", "Obj
 /** Not a property: distinct from undefined, which a property can hold. */
 export const NOT_FOUND = Symbol("not found");
 
+const XML_ELEMENT: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  "\0": "&#x0;",
+};
+
 const XML_ATTRIBUTE: Record<string, string> = {
   "&": "&amp;",
   "<": "&lt;",
@@ -2490,7 +2747,35 @@ const XML_ATTRIBUTE: Record<string, string> = {
   "\n": "&#xA;",
   "\r": "&#xD;",
   "\t": "&#x9;",
+  "\0": "&#x0;",
 };
+
+/** As AvmCore::EscapeElementValue: & < > escaped, and without whitespace around it if `trim`. */
+export function escapeElementValue(s: string, trim: boolean): string {
+  let t = s;
+  if (trim) {
+    let start = 0;
+    let end = s.length;
+    while (end > 0 && isXMLSpace(s.charCodeAt(end - 1))) {
+      end--;
+    }
+
+    while (start < end && isXMLSpace(s.charCodeAt(start))) {
+      start++;
+    }
+
+    t = s.slice(start, end);
+  }
+
+  return t.replace(/[&<>\0]/g, (c) => XML_ELEMENT[c]);
+}
+
+/** As AvmCore::EscapeAttributeValue. */
+export function escapeAttributeValue(s: string): string {
+  return s.replace(/[&<"\n\r\t\0]/g, (c) => XML_ATTRIBUTE[c]);
+}
+
+const isXMLSpace = (c: number) => c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d;
 
 /** A name's index as an array element, or -1: a canonical uint below 2^32 - 1. */
 export function arrayIndex(name: string): number {

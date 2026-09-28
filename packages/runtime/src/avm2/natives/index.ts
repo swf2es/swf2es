@@ -20,6 +20,7 @@ import { shellNatives } from "./shell.js";
 import { stringHooks, stringNatives } from "./string.js";
 import { toplevelNatives } from "./toplevel.js";
 import { vectorHooks, vectorNatives } from "./vector.js";
+import { xmlHooks, xmlNatives } from "./xml/xml.js";
 
 export function builtinNatives(): Natives {
   return {
@@ -37,6 +38,7 @@ export function builtinNatives(): Natives {
     ...domainNatives(),
     ...dateNatives(),
     ...jsonNatives(),
+    ...xmlNatives,
   };
 }
 
@@ -50,5 +52,6 @@ export function builtinHooks(): Record<string, ClassHook> {
     "flash.utils::ByteArray": byteArrayHook,
     Date: dateHook,
     ...vectorHooks,
+    ...xmlHooks,
   };
 }

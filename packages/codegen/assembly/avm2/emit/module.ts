@@ -7,7 +7,7 @@
 //
 //   export default function (rt) {
 //     const N = [...namespaces], S = [...namespace sets], M = [...multinames];
-//     const F = [...method factories, (scope, sup) => function (...) {...}];
+//     const F = [...method factories, (scope, sup, $dx) => function (...) {...}];
 //     const A = rt.abc({ hash, linked, names: M, classes, scripts, activations });
 //     return A;
 //   }
@@ -261,7 +261,9 @@ export class ModuleEmitter {
     methods.typeIndex.clear();
     const at = out.length;
     const marks = methods.map.count;
-    out.text("(scope, sup) => ");
+    // $dx: the default XML namespace when the factory runs, as avmplus'
+    // scope chain captures it when the method's closure or class is made.
+    out.text("(scope, sup, $dx = rt.defaultXmlNamespace) => ");
     methods.functionName = this.functionName(global);
     methods.method(m, global, decoder.ir);
     methods.functionName = "";

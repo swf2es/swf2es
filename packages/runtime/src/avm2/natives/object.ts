@@ -1,8 +1,9 @@
 // Object, Class, Function, Namespace and QName: their natives, and what
 // calling or constructing Object, Namespace, QName or Function does.
-import { Namespace, publicNs, qname } from "../names.js";
+import { Namespace, prefixOf, publicNs, qname } from "../names.js";
 import { type AsObject, type ClassHook, NOT_FOUND, type Runtime, type Value } from "../runtime.js";
-import { AS3, conversion, elements, type Natives, plain } from "./define.js";
+import { AS3, elements, type Natives, plain } from "./define.js";
+import { constructNamespace, newNamespace } from "./xml/xml.js";
 
 export const objectNatives: Natives = {
   // Object
@@ -16,6 +17,11 @@ export const objectNatives: Natives = {
   },
   "Object.Object::_propertyIsEnumerable": (rt) => (o: Value, v: Value) => {
     const name = rt.toString(v);
+    // E4X 13.2.5: a Namespace's prefix and uri are enumerable.
+    if (o instanceof Namespace) {
+      return name === "uri" || name === "prefix";
+    }
+
     return rt.getOwn(o, name) !== NOT_FOUND && !o.$dontEnum?.has(name);
   },
   "Object.Object::_setPropertyIsEnumerable": (rt) => (o: Value, v: Value, enumerable: boolean) => {
@@ -86,7 +92,9 @@ export const objectNatives: Natives = {
   "QName#get:uri": plain(function (this: AsObject) {
     return this.$ns ? this.$ns.uri : null;
   }),
-  "Namespace#get:prefix": plain(() => undefined),
+  "Namespace#get:prefix": plain(function (this: Namespace) {
+    return prefixOf(this);
+  }),
 };
 
 /** As QNameClass::construct: QName(name) or QName(namespace, name). */
@@ -97,14 +105,15 @@ function newQName(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
 
   const name = args.length >= 2 ? args[1] : args[0];
   const o = cls.$it.instance();
-  let ns: Namespace | null = publicNs;
+  // With no namespace, a name is in the default XML namespace.
+  let ns: Namespace | null = rt.defaultXmlNamespace.interned;
   if (args.length >= 2 && args[0] !== undefined) {
     ns =
       args[0] === null
         ? null
         : args[0] instanceof Namespace
-          ? args[0]
-          : rt.namespaceOf(rt.construct(rt.builtinClass("Namespace"), args[0]));
+          ? args[0].interned
+          : newNamespace(rt, args[0]);
   } else if (name?.$local !== undefined) {
     ns = name.$ns;
   }
@@ -118,6 +127,7 @@ function newQName(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
 
   o.$ns = ns;
   o.$local = local === "*" ? null : local;
+  o.$attr = false;
   return o;
 }
 
@@ -152,23 +162,12 @@ export const objectHooks: Record<string, ClassHook> = {
     construct: (rt, _cls, args) =>
       args[0] === null || args[0] === undefined ? rt.newObject([]) : args[0],
   },
-  // As NamespaceClass::construct: a namespace, a QName's, or one of a URI.
-  Namespace: conversion((rt, args) => {
-    const v = args[args.length - 1];
-    if (args.length === 0 || v === undefined) {
-      return publicNs;
-    }
-
-    if (v instanceof Namespace) {
-      return v;
-    }
-
-    if (v?.$local !== undefined) {
-      return v.$ns ?? publicNs;
-    }
-
-    return rt.ns(0, rt.toString(v));
-  }),
+  // As NamespaceClass: Namespace(), Namespace(uri) or Namespace(prefix, uri).
+  Namespace: {
+    construct: (rt, _cls, args) => constructNamespace(rt, args),
+    call: (rt, _cls, args) =>
+      args.length === 1 && args[0] instanceof Namespace ? args[0] : constructNamespace(rt, args),
+  },
   // As QNameClass::construct.
   QName: {
     construct: newQName,

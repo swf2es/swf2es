@@ -185,6 +185,11 @@ export class Domain {
   booleanType: i32 = -1;
   stringType: i32 = -1;
   namespaceType: i32 = -1;
+  /** XML's and XMLList's traits. */
+  xmlType: i32 = -1;
+  xmlListType: i32 = -1;
+  /** Class's traits, the type of a value that is a class. */
+  classType: i32 = -1;
   vectorClass: i32 = -1;
   vectorObjectType: i32 = -1;
   vectorIntType: i32 = -1;
@@ -490,6 +495,9 @@ export class Domain {
     this.booleanType = this.builtinType("Boolean");
     this.stringType = this.builtinType("String");
     this.namespaceType = this.builtinType("Namespace");
+    this.xmlType = this.builtinType("XML");
+    this.xmlListType = this.builtinType("XMLList");
+    this.classType = this.builtinType("Class");
     this.vectorClass = this.findBuiltin("Vector");
     this.vectorObjectType = this.builtinType("Vector$object");
     this.vectorIntType = this.builtinType("Vector$int");
