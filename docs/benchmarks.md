@@ -199,7 +199,10 @@ in ms. avmshell: 317.
 | A table of each class's variables, set straight to their slots | ~497 (−2%) | | no |
 | ASCII read at once from 16 bytes | 497 | 266 (−11%) | yes |
 | A short ASCII string a character at a time | 486 (−2.6%) | | yes |
-| **Against dev** | **486 (−40.8%)** | **266 (−11.3%)** | |
+| After review: a numeric Vector's elements at once into its storage, when all are there | 473 (−2.5%) | | yes |
+| After review: uint29 through a local cursor when four bytes are there | 478 (+0.2%) | | no |
+| After review: a short ASCII string straight from the input, no view | 461 (−3.2%) | | yes |
+| **Against dev** | **457 (−43.5%)** | **266 (−10.4%)** | |
 
 What is left is mostly constructing the objects read (38%), about two
 thirds of it as3pb's own constructors, which avmshell runs too.
