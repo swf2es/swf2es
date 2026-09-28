@@ -185,6 +185,28 @@ the host rejects, such as `01`, goes to the old parser. Conversion
 recurses to a depth of 500, then uses a stack of its own, as avmplus
 reads 100,000-deep text.
 
+### Step 15: AMF3 decoding
+
+as3pb's AMF3 deserialize line (`readObject` of 100 typed messages, 300
+rounds), medians of interleaved runs (`AB_PATHS` in `tests/programs/ab.ts`),
+in ms. avmshell: 317.
+
+| Change | AMF3 decode | JSON decode | Kept |
+|---|---|---|---|
+| Before (dev) | 821 | 300 | |
+| Vector classes kept once made, in `vectorClass` and in `Vector.<T>`'s apply, and builtin classes by name; a Vector's elements through its own setter | 565 | | yes |
+| Strings and ByteArray contents read from views of the input, not copies | 497 | | yes |
+| A table of each class's variables, set straight to their slots | ~497 (−2%) | | no |
+| ASCII read at once from 16 bytes | 497 | 266 (−11%) | yes |
+| A short ASCII string a character at a time | 486 (−2.6%) | | yes |
+| After review: a numeric Vector's elements at once into its storage, when all are there | 473 (−2.5%) | | yes |
+| After review: uint29 through a local cursor when four bytes are there | 478 (+0.2%) | | no |
+| After review: a short ASCII string straight from the input, no view | 461 (−3.2%) | | yes |
+| **Against dev** | **457 (−43.5%)** | **266 (−10.4%)** | |
+
+What is left is mostly constructing the objects read (38%), about two
+thirds of it as3pb's own constructors, which avmshell runs too.
+
 ### The AssemblyScript runtime
 
 codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator

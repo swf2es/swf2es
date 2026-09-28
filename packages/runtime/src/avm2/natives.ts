@@ -941,8 +941,19 @@ function prepareVector(
   }
 }
 
-/** Vector.<T>: the specialized classes for int, uint and Number, else Vector$object's for T. */
+/** Vector.<T>: the specialized classes for int, uint and Number, else Vector$object's for T; made once each. */
 function vectorOf(rt: Runtime, param: AsObject | null): AsObject {
+  const made = rt.vectorClasses.get(param);
+  if (made) {
+    return made;
+  }
+
+  const cls = makeVector(rt, param);
+  rt.vectorClasses.set(param, cls);
+  return cls;
+}
+
+function makeVector(rt: Runtime, param: AsObject | null): AsObject {
   const kind =
     param === null
       ? "Vector$object"

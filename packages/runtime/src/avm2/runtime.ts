@@ -770,10 +770,18 @@ export class Runtime {
     return traits;
   }
 
-  /** A public class of the builtins, by name. */
+  /** A public class of the builtins, by name, kept once resolved. */
   builtinClass(name: string): AsObject {
-    return this.resolve(this.cls(publicNs, name));
+    let cls = this.builtinClasses.get(name);
+    if (!cls) {
+      cls = this.resolve(this.cls(publicNs, name));
+      this.builtinClasses.set(name, cls);
+    }
+
+    return cls;
   }
+
+  private readonly builtinClasses = new Map<string, AsObject>();
 
   prototypeOf(ref: TypeRef): AsObject {
     return this.classOf(ref).$it.proto;
@@ -2224,10 +2232,14 @@ export class Runtime {
 
   /** Vector.<T>, for a class T or null for *. */
   vectorClass(param: AsObject | null): AsObject {
-    return this.applyType(this.resolve(this.cls(namespace(NS_Public, "__AS3__.vec"), "Vector")), [
-      param,
-    ]);
+    return (
+      this.vectorClasses.get(param) ??
+      this.applyType(this.resolve(this.cls(namespace(NS_Public, "__AS3__.vec"), "Vector")), [param])
+    );
   }
+
+  /** Each Vector class made, by its element class (null for *), kept by Vector's apply. */
+  readonly vectorClasses = new Map<AsObject | null, AsObject>();
 
   /** An object's own names a for-in visits, in its order: its string names, not a Dictionary's object keys. */
   enumerableNames(o: AsObject): string[] {

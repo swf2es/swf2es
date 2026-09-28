@@ -78,3 +78,44 @@ for (var gb:uint = 0; gb < grow.length; gb++) sumBytes = (sumBytes * 31 + grow[g
 grow.position = 6;
 var gd:Vector.<Number> = grow.readObject(), gi:Vector.<int> = grow.readObject(), gu:Vector.<uint> = grow.readObject();
 trace("big vectors", grow.length, sumBytes, gd.length, gd[4999] == bigD[4999], gi[4999], gu[4999], gu[15]);
+// One class for each Vector type, however it is reached; typed Vectors
+// read back, one of a class with no alias as Vector.<Object>.
+var vp:Vector.<Point3> = new <Point3>[new Point3(1, 2), null];
+var vpBack:* = back(vp);
+trace("vector classes", vpBack is Vector.<Point3>, Object(vpBack).constructor == Vector.<Point3>, Vector.<Point3> == Vector.<Point3>, Object(back(new <int>[1])).constructor == Vector.<int>, Object(back(new Vector.<*>())).constructor == Vector.<*>);
+trace("vector point", vpBack.length, vpBack[0].x, vpBack[0].y, vpBack[1], vpBack.fixed, back(new Vector.<int>(2, true)).fixed);
+var vs:Vector.<String> = new <String>["a", null, "c"];
+var vsBack:* = back(vs);
+trace("vector string", vsBack is Vector.<String>, vsBack is Vector.<Object>, vsBack.join("|"), back(new <Array>[[1]]) is Vector.<Object>, back(new <uint>[0xffffffff, 1])[0], back(new <int>[-1, 0x7fffffff])[0]);
+// Truncated data: the error, and the position it leaves, for numeric
+// Vectors and short strings cut short, and whole ones read at the end.
+function cut(v:*, drop:int):String {
+  var b:ByteArray = new ByteArray();
+  b.writeObject(v);
+  var c:ByteArray = new ByteArray();
+  c.writeBytes(b, 0, b.length - drop);
+  c.position = 0;
+  try {
+    var r:* = c.readObject();
+    return "ok " + r + " at " + c.position;
+  } catch (e:Error) {
+    return e.errorID + " at " + c.position;
+  }
+  return "";
+}
+trace("truncated", cut(new <int>[1, 2, 3], 0), cut(new <int>[1, 2, 3], 1), cut(new <int>[1, 2, 3], 5), cut(new <uint>[7, 8], 3), cut(new <Number>[0.5, 1.5], 1), cut(new <Number>[0.5, 1.5], 9));
+trace("truncated strings", cut("short", 0), cut("short", 1), cut("short", 5), cut("abcdefghijklmnopqrstuvwxyz", 3), cut("é€", 1), cut(["ab", "ab"], 0), cut(["ab", "ab"], 1));
+// Empty Vectors at the very end of the data, each numeric kind and Object's.
+function emptyAtEnd(v:*):String {
+  var b:ByteArray = new ByteArray();
+  b.writeObject(v);
+  b.position = 0;
+  try {
+    var r:* = b.readObject();
+    return r.length + " at " + b.position + "/" + b.length;
+  } catch (e:Error) {
+    return e.errorID + " at " + b.position;
+  }
+  return "";
+}
+trace("empty at end", emptyAtEnd(new Vector.<int>()), emptyAtEnd(new Vector.<uint>()), emptyAtEnd(new Vector.<Number>()), emptyAtEnd(new Vector.<Object>()), emptyAtEnd(new Vector.<int>(0, true)));
