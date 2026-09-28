@@ -403,7 +403,9 @@ export class MethodEmitter {
     const traits = this.domain.traits;
     const abc = this.abc;
     const count = traits.paramCount[global];
-    const optional = traits.optionalCount[global];
+    // The parameters with default values: an untyped function's others are
+    // optional too, as avmplus' are, but a missing one is just undefined.
+    const optional = abc.methodOptionalStart[method + 1] - abc.methodOptionalStart[method];
     out.text("  let l0 = this");
     for (let p: u32 = 1; p <= count; p++) {
       out.text(", l");
@@ -432,9 +434,7 @@ export class MethodEmitter {
     } else if (flags & METHOD_NeedArguments) {
       out.text(", l");
       out.uint(local++);
-      out.text(" = rt.arguments(arguments, ");
-      out.uint(count);
-      out.text(")");
+      out.text(" = rt.arguments(arguments)");
     }
 
     for (let r = local; r < ir.frameSize; r++) {
@@ -1007,7 +1007,8 @@ export class MethodEmitter {
         return true;
       case OP_in:
         this.assign(i);
-        this.call2("rt.hasProperty(", i);
+        // `name in object`.
+        this.call2("rt.in(", i);
         return true;
       case OP_callproperty:
       case OP_callproplex:

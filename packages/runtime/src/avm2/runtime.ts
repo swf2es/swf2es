@@ -624,21 +624,23 @@ export class Runtime {
       return this.getBound(o, traits, b, mn);
     }
 
-    if (mn.hasPublic && mn.name !== null) {
-      const own = this.getOwn(o, mn.name);
+    const name = mn.dynamicName();
+    if (name !== null) {
+      const own = this.getOwn(o, name);
       if (own !== NOT_FOUND) {
         return own;
       }
 
       for (let p = this.protoOf(o); p; p = p.$p) {
-        const v = p.$d?.get(mn.name);
-        if (v !== undefined || p.$d?.has(mn.name)) {
+        const v = p.$d?.get(name);
+        if (v !== undefined || p.$d?.has(name)) {
           return v;
         }
       }
     }
 
-    if (traits.dynamic) {
+    // A dynamic object has any dynamic name, but no other: obj.ns::x throws.
+    if (traits.dynamic && name !== null) {
       return undefined;
     }
 
@@ -730,9 +732,10 @@ export class Runtime {
       }
     }
 
-    if (mn.hasPublic && mn.name !== null && typeof o === "object") {
+    const name = mn.dynamicName();
+    if (name !== null && typeof o === "object") {
       if (o.$a !== undefined) {
-        const i = arrayIndex(mn.name);
+        const i = arrayIndex(name);
         if (i >= 0) {
           if (traits.setIndex) {
             traits.setIndex(o, i, v);
@@ -745,7 +748,7 @@ export class Runtime {
       }
 
       if (o.$d) {
-        o.$d.set(mn.name, v);
+        o.$d.set(name, v);
         return;
       }
     }
@@ -763,41 +766,43 @@ export class Runtime {
       return false;
     }
 
-    if (mn.hasPublic && mn.name !== null && typeof o === "object") {
+    const name = mn.dynamicName();
+    if (name !== null && typeof o === "object") {
       if (o.$a !== undefined) {
-        const i = arrayIndex(mn.name);
+        const i = arrayIndex(name);
         if (i >= 0) {
           return delete o.$a[i];
         }
       }
 
-      return o.$d ? o.$d.delete(mn.name) || true : false;
+      return o.$d ? o.$d.delete(name) || true : false;
     }
 
     return false;
   }
 
-  /** Whether `o` has `mn`: bound, dynamic, or on its prototype chain. */
-  hasProperty(o: Value, mn: Multiname | Value, obj?: Value): boolean {
-    // `in`: the name is a value, the object second.
-    if (!(mn instanceof Multiname)) {
-      return this.hasProperty(obj, this.publicName(mn));
-    }
+  /** The `in` operator: whether `o` has the public property `name`. */
+  in(name: Value, o: Value): boolean {
+    return this.hasProperty(o, this.publicName(name));
+  }
 
+  /** Whether `o` has `mn`: bound, dynamic, or on its prototype chain. */
+  hasProperty(o: Value, mn: Multiname): boolean {
     if (this.traitsOf(o).find(mn) !== 0) {
       return true;
     }
 
-    if (!mn.hasPublic || mn.name === null) {
+    const name = mn.dynamicName();
+    if (name === null) {
       return false;
     }
 
-    if (this.getOwn(o, mn.name) !== NOT_FOUND) {
+    if (this.getOwn(o, name) !== NOT_FOUND) {
       return true;
     }
 
     for (let p = this.protoOf(o); p; p = p.$p) {
-      if (p.$d?.has(mn.name)) {
+      if (p.$d?.has(name)) {
         return true;
       }
     }
@@ -1006,8 +1011,9 @@ export class Runtime {
     return o;
   }
 
-  arguments(args: IArguments, count: number): AsObject {
-    return this.array(Array.prototype.slice.call(args, count));
+  /** A method's `arguments`: every argument it was called with, declared or not. */
+  arguments(args: IArguments): AsObject {
+    return this.array(Array.prototype.slice.call(args));
   }
 
   newFunction(factory: Factory, scope: Scope): AsObject {

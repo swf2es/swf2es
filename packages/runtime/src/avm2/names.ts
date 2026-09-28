@@ -84,15 +84,24 @@ export class Multiname {
     );
   }
 
-  /** Whether one of its namespaces is public, so it can name a dynamic property. */
-  get hasPublic(): boolean {
+  /**
+   * The dynamic property the name names, or null, as
+   * Multiname::isValidDynamicName: not an attribute and with a public
+   * namespace, one of the public kind and an empty URI, as
+   * Namespace::isPublic.
+   */
+  dynamicName(): string | null {
+    if (this.attribute || this.name === null) {
+      return null;
+    }
+
     for (const ns of this.namespaces) {
-      if (ns.kind === NS_Public) {
-        return true;
+      if (ns.kind === NS_Public && ns.uri === "") {
+        return this.name;
       }
     }
 
-    return false;
+    return null;
   }
 
   toString(): string {
