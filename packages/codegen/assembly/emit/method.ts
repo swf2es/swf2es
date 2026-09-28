@@ -198,6 +198,16 @@ export class MethodEmitter {
   /** The method being written: its ABC index and body. */
   current: u32 = 0;
   body: i32 = -1;
+  /**
+   * The ABC offsets where the set of handlers covering an instruction can
+   * change, sorted; region r is from bounds[r - 1] up to bounds[r]. `t` in
+   * the generated code is the region of the instruction running.
+   */
+  bounds: StaticArray<u32> = new StaticArray<u32>(0);
+  /** Whether a handler covers region r + 1; a region none covers is region 0. */
+  covered: StaticArray<u8> = new StaticArray<u8>(0);
+  boundCount: u32 = 0;
+  region: i32 = -1;
 
   domain: Domain;
   index: u32 = 0;
@@ -244,13 +254,146 @@ export class MethodEmitter {
 
     out.text(") {\n");
     this.prologue(method, global, flags);
-    out.text("  let b = 0;\n  for (;;) switch (b) {\n");
+    const handled = ir.handlerCount > 0;
+    if (handled) {
+      this.regions();
+      out.text("  let b = 0, t = 0;\n  for (;;) try { switch (b) {\n");
+    } else {
+      out.text("  let b = 0;\n  for (;;) switch (b) {\n");
+    }
+
     for (let k: u32 = 0; k < ir.blockCount; k++) {
       this.block(k);
     }
 
     // The verifier proved every block ends; a dispatcher still needs an end.
-    out.text("  default: throw rt.unreachable();\n  }\n}");
+    out.text("  default: throw rt.unreachable();\n  }");
+    if (handled) {
+      out.text(" } catch (e) {\n");
+      this.handlers();
+      out.text("  }");
+    }
+
+    out.text("\n}");
+  }
+
+  /** The bounds of the method's handler regions: every handler's from and to, sorted, once each. */
+  regions(): void {
+    const ir = this.ir;
+    const count = ir.handlerCount * 2;
+    if (<u32>this.bounds.length < count) {
+      this.bounds = new StaticArray<u32>(count);
+    }
+
+    const bounds = this.bounds;
+    let n: u32 = 0;
+    for (let h: u32 = 0; h < count; h++) {
+      const pc = h & 1 ? ir.handlerTo[h >> 1] : ir.handlerFrom[h >> 1];
+      // Insert in order, skipping one already there.
+      let at = n;
+      while (at > 0 && bounds[at - 1] > pc) {
+        at--;
+      }
+
+      if (at > 0 && bounds[at - 1] === pc) {
+        continue;
+      }
+
+      for (let k = n; k > at; k--) {
+        bounds[k] = bounds[k - 1];
+      }
+
+      bounds[at] = pc;
+      n++;
+    }
+
+    this.boundCount = n;
+    if (<u32>this.covered.length < n) {
+      this.covered = new StaticArray<u8>(n);
+    }
+
+    for (let r: u32 = 1; r < n; r++) {
+      const start = bounds[r - 1];
+      let covered: u8 = 0;
+      for (let h: u32 = 0; h < ir.handlerCount; h++) {
+        if (start >= ir.handlerFrom[h] && start < ir.handlerTo[h]) {
+          covered = 1;
+          break;
+        }
+      }
+
+      this.covered[r - 1] = covered;
+    }
+  }
+
+  /** The handler region of ABC offset `pc`: how many bounds are at or before it, or 0 if none covers it. */
+  regionOf(pc: u32): i32 {
+    let lo: u32 = 0;
+    let hi = this.boundCount;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.bounds[mid] <= pc) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+
+    return lo > 0 && lo < this.boundCount && this.covered[lo - 1] ? <i32>lo : 0;
+  }
+
+  /**
+   * The catch of the dispatcher: the handlers covering the region that
+   * threw, in the order of the ABC's table, as avmplus finds them; the first
+   * whose type the exception has gets it as its only stack value. With none,
+   * the exception goes on to the caller.
+   */
+  handlers(): void {
+    const out = this.out;
+    const ir = this.ir;
+    const bounds = this.bounds;
+    const exception = <i32>(ir.localCount + ir.maxScope);
+    out.text("    const x = rt.caught(e);\n    switch (t) {\n");
+    for (let r: u32 = 1; r < this.boundCount; r++) {
+      if (!this.covered[r - 1]) {
+        continue;
+      }
+
+      const start = bounds[r - 1];
+      let first = true;
+      for (let h: u32 = 0; h < ir.handlerCount; h++) {
+        if (start < ir.handlerFrom[h] || start >= ir.handlerTo[h]) {
+          continue;
+        }
+
+        if (first) {
+          out.text("    case ");
+          out.uint(r);
+          out.text(":\n");
+          first = false;
+        }
+
+        const type = ir.handlerType[h];
+        out.text("      ");
+        if (type >= 0) {
+          out.text("if (rt.catches(x, ");
+          this.typeRef(type);
+          out.text(")) ");
+        }
+
+        out.text("{ ");
+        this.reg(exception);
+        out.text(" = x; ");
+        this.goto(ir.handlerBlock[h]);
+        out.text(" }\n");
+      }
+
+      if (!first) {
+        out.text("      break;\n");
+      }
+    }
+
+    out.text("    }\n    throw e;\n");
   }
 
   /** Declare the registers: `this`, the parameters, coerced, with defaults, then the rest. */
@@ -319,8 +462,21 @@ export class MethodEmitter {
       this.scopeWith[d] = (ir.entryFlags[entry + ir.localCount + d] & 2) >> 1;
     }
 
+    // A block may be entered from any region, so it sets its own first.
+    const handled = ir.handlerCount > 0;
+    this.region = -1;
     const last = k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
     for (let i = ir.blockFirst[k]; i < last; i++) {
+      if (handled) {
+        const region = this.regionOf(ir.pc[i]);
+        if (region !== this.region) {
+          out.text("    t = ");
+          out.int(region);
+          out.text(";\n");
+          this.region = region;
+        }
+      }
+
       this.instruction(i);
       if (ir.dst[i] >= 0) {
         this.regType[ir.dst[i]] = ir.type[i];

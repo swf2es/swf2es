@@ -223,6 +223,14 @@ registers and the chain it captured are passed to the runtime together
 when it looks a name up or creates a function or class, with a bit per
 scope for the with scopes.
 
+A method with exception handlers runs its dispatcher inside `try`. The
+handlers' ranges split the code into regions, and the variable `t` holds
+the region of the instruction running, set only where it changes. The
+`catch` tries the handlers covering that region in the order of the ABC's
+table, as avmplus does. The first one the exception's type matches gets
+the exception as its only stack value, and the dispatcher goes on at its
+block. With no match, the exception goes on to the caller.
+
 ### The runtime and the standard library
 
 Generated code calls `@swf2es/runtime` for the object model, multiname

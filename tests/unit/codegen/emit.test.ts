@@ -10,6 +10,7 @@ const skip = !existsSync(generated) && "oracle/avmplus missing";
 /** Just what these methods call. */
 const rt = {
   greaterThan: (a: number, b: number) => a > b,
+  caught: (e: unknown) => e,
   unreachable: () => new Error("unreachable"),
 };
 
@@ -31,6 +32,7 @@ const ADD = 0xa0;
 const ADD_I = 0xc5;
 const DECLOCAL_I = 0xc3;
 const RETURNVALUE = 0x48;
+const THROW = 0x03;
 const GETLOCAL1 = 0xd1;
 const GETLOCAL2 = 0xd2;
 const GETLOCAL3 = 0xd3;
@@ -75,6 +77,23 @@ test("a loop runs through its blocks until its branch falls through", { skip }, 
     RETURNVALUE,
   ];
   assert.equal(run(script(code)), 55);
+});
+
+test("a throw in a handler's range runs the handler, with the exception on the stack", {
+  skip,
+}, () => {
+  // 0: pushbyte 7; 2: throw; 3: returnvalue, the handler of 0 up to 3, for any type.
+  const code = [PUSHBYTE, 7, THROW, RETURNVALUE];
+  assert.equal(run(script(code, { exceptions: [[0, 3, 3, 0, 0]] })), 7);
+});
+
+test("a throw past a handler's range goes on to the caller", { skip }, () => {
+  // The handler covers 0 up to 2, so not the throw at 2.
+  const code = [PUSHBYTE, 7, THROW, RETURNVALUE];
+  assert.throws(
+    () => run(script(code, { exceptions: [[0, 2, 3, 0, 0]] })),
+    (e) => e === 7,
+  );
 });
 
 /** The module of `name`, added to the domain, as a function of `rt` whose body parses. */
