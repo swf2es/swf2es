@@ -12,7 +12,6 @@
 // the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 import { type Bytes, bytesOf, fromUtf8, utf8 } from "./bytearray.js";
 import { NS_Public, publicNs, qname } from "./names.js";
-import { setDouble } from "./numbers.js";
 import type { AsObject, Runtime, Traits, Value } from "./runtime.js";
 
 const kUndefined = 0;
@@ -133,7 +132,7 @@ class Writer {
 
   private double(v: number): void {
     const at = this.out.shortWrite(8);
-    setDouble(this.out.view, at, v, false);
+    this.out.view.setFloat64(at, v, false);
   }
 
   private u32(v: number): void {

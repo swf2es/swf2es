@@ -17,7 +17,6 @@ import {
   zlibCompress,
   zlibUncompress,
 } from "@swf2es/format";
-import { setDouble, setFloat } from "./numbers.js";
 import type { AsObject, IndexHook, Runtime, Traits, Value } from "./runtime.js";
 
 const kGrowthIncr = 4096;
@@ -592,11 +591,11 @@ export function byteArrayNatives(): Natives {
   });
   method("writeFloat", (rt, b, v) => {
     const at = b.shortWrite(4);
-    setFloat(b.view, at, rt.toNumber(v), b.littleEndian);
+    b.view.setFloat32(at, rt.toNumber(v), b.littleEndian);
   });
   method("writeDouble", (rt, b, v) => {
     const at = b.shortWrite(8);
-    setDouble(b.view, at, rt.toNumber(v), b.littleEndian);
+    b.view.setFloat64(at, rt.toNumber(v), b.littleEndian);
   });
   method("writeUTFBytes", (rt, b, v) => {
     nonNull(rt, v, "value");

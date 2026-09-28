@@ -603,33 +603,3 @@ export function convertDoubleToStringRadix(input: number, radix: number): string
 
   return negative ? `-${out}` : out;
 }
-
-// avmplus' constant NaN, MathUtils::kNaN, as it writes one into bytes. V8's
-// constant NaN writes the canonical 0x7ff8... instead; a NaN an operation
-// makes (0/0, which the hardware writes as 0xfff8...) is the same in both.
-const NAN_HIGH = 0x7fffffff;
-const NAN_LOW = 0xe0000000;
-
-/** A double into `view` as avmplus writes it: its bits, but V8's constant NaN as avmplus' own. */
-export function setDouble(view: DataView, at: number, v: number, littleEndian: boolean): void {
-  view.setFloat64(at, v, littleEndian);
-  if (Number.isNaN(v)) {
-    const high = littleEndian ? at + 4 : at;
-    const low = littleEndian ? at : at + 4;
-    if (
-      view.getUint32(high, littleEndian) === 0x7ff80000 &&
-      view.getUint32(low, littleEndian) === 0
-    ) {
-      view.setUint32(high, NAN_HIGH, littleEndian);
-      view.setUint32(low, NAN_LOW, littleEndian);
-    }
-  }
-}
-
-/** A float into `view` as avmplus writes it: V8's constant NaN as avmplus', 0x7fffffff. */
-export function setFloat(view: DataView, at: number, v: number, littleEndian: boolean): void {
-  view.setFloat32(at, v, littleEndian);
-  if (Number.isNaN(v) && view.getUint32(at, littleEndian) === 0x7fc00000) {
-    view.setUint32(at, NAN_HIGH, littleEndian);
-  }
-}
