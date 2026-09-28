@@ -292,6 +292,8 @@ export class Runtime {
   readonly scratchMemory = new DataView(new ArrayBuffer(1024));
   memory: DataView = this.scratchMemory;
   memoryProvider: AsObject | null = null;
+  /** ByteArray.defaultObjectEncoding: AMF3 until set. */
+  defaultObjectEncoding = 3;
   private domain: AsObject | null = null;
   /** Class aliases, as registerClassAlias sets them, both ways. */
   private readonly aliases = new Map<string, AsObject>();
@@ -1149,8 +1151,10 @@ export class Runtime {
     itraits.dynamic = !desc.sealed;
 
     const hooks = this.classHooks[qualified];
-    if (hooks?.create) {
-      itraits.create = hooks.create;
+    // A class's allocation, bound to the runtime; its subclasses inherit it.
+    const create = hooks?.create;
+    if (create) {
+      itraits.create = (traits) => create(traits, this);
     }
 
     if (hooks?.getIndex) {
@@ -1905,7 +1909,7 @@ export interface IndexHook {
 
 /** How a builtin class differs from others: allocation, index access, calls and construction. */
 export interface ClassHook {
-  create?: (traits: Traits) => AsObject;
+  create?: (traits: Traits, rt: Runtime) => AsObject;
   getIndex?: IndexHook["getIndex"];
   setIndex?: IndexHook["setIndex"];
   hasIndex?: IndexHook["hasIndex"];

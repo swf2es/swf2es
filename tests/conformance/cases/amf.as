@@ -41,3 +41,19 @@ var shared:Object = {n: 1};
 var two:Array = back([shared, shared]);
 trace(two[0] == two[1], back(new <int>[5, 6]), back(ba).length, back("é€"), back(1e100));
 try { getClassByAlias("nope"); } catch (e:Error) { trace("missing alias", e.errorID); }
+// AMF is big-endian whatever the ByteArray's byte order.
+var le:ByteArray = new ByteArray();
+le.endian = "littleEndian";
+le.writeObject(1.5);
+le.writeObject(new <int>[1]);
+le.writeObject(new <Number>[2.5]);
+var leHex:String = "";
+for (var li:uint = 0; li < le.length; li++) leHex += (le[li] < 16 ? "0" : "") + le[li].toString(16);
+le.position = 0;
+trace("little", leHex, le.readObject(), le.readObject(), le.readObject());
+// A new ByteArray takes defaultObjectEncoding as it is then.
+ByteArray.defaultObjectEncoding = 0;
+var zero:ByteArray = new ByteArray();
+ByteArray.defaultObjectEncoding = 3;
+trace("default", zero.objectEncoding, new ByteArray().objectEncoding, ByteArray.defaultObjectEncoding);
+try { zero.writeObject(1); } catch (e:Error) { trace("amf0", e.errorID); }

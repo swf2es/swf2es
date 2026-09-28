@@ -59,3 +59,9 @@ var p:ByteArray = new ByteArray();
 p.position = 5;
 p.writeByte(9);
 trace(hex(p), p.length, p.position);
+// A large UTF-16 buffer converts whole.
+var big:ByteArray = new ByteArray();
+big.writeByte(0xfe); big.writeByte(0xff);
+for (var bi:int = 0; bi < 200000; bi++) { big.writeByte(0); big.writeByte(0x41 + bi % 26); }
+var bs:String = big.toString();
+trace("utf-16", bs.length, bs.substr(0, 5), bs.charAt(199999));

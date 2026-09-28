@@ -8,7 +8,7 @@
 // Translated from avmplus' core/ByteArrayGlue.cpp, core/DataIO.cpp and
 // core/UnicodeUtils.cpp, this file is subject to the Mozilla Public
 // License, v. 2.0: http://mozilla.org/MPL/2.0/.
-import type { AsObject, IndexHook, Runtime, Value } from "./runtime.js";
+import type { AsObject, IndexHook, Runtime, Traits, Value } from "./runtime.js";
 
 const kGrowthIncr = 4096;
 const kHugeGrowthThreshold = 24 * 1024 * 1024;
@@ -29,14 +29,17 @@ export class Bytes {
   length = 0;
   position = 0;
   littleEndian = false;
-  objectEncoding = kAMF3;
+  /** As ByteArray's constructor: ByteArray.defaultObjectEncoding when it is made. */
+  objectEncoding: number;
   /** Whether it is the domain memory, which it then tells when its buffer or length changes. */
   subscribed = false;
 
   constructor(
     readonly rt: Runtime,
     readonly owner: AsObject,
-  ) {}
+  ) {
+    this.objectEncoding = rt.defaultObjectEncoding;
+  }
 
   get available(): number {
     return this.length > this.position ? this.length - this.position : 0;
@@ -196,7 +199,13 @@ export class Bytes {
 }
 
 /** How a ByteArray's elements are indexed: its bytes; past its length undefined, and a write grows it. */
-export const byteArrayHook: IndexHook = {
+export const byteArrayHook: IndexHook & { create: (traits: Traits, rt: Runtime) => AsObject } = {
+  // Its state from the start: it takes defaultObjectEncoding as it is then.
+  create: (traits, rt) => {
+    const o = Object.create(traits.proto);
+    o.$bytes = new Bytes(rt, o);
+    return o;
+  },
   getIndex: (o, i) => {
     const b: Bytes | undefined = o.$bytes;
     return b && i < b.length ? b.buffer[i] : undefined;
@@ -326,9 +335,14 @@ export function fromUtf8(bytes: Uint8Array): string {
     i++;
   }
 
+  return fromCodes(out);
+}
+
+/** A string of UTF-16 code units, in chunks, as String.fromCharCode takes only so many arguments. */
+function fromCodes(units: number[]): string {
   let s = "";
-  for (let k = 0; k < out.length; k += 8192) {
-    s += String.fromCharCode(...out.slice(k, k + 8192));
+  for (let k = 0; k < units.length; k += 8192) {
+    s += String.fromCharCode(...units.slice(k, k + 8192));
   }
 
   return s;
@@ -362,15 +376,14 @@ export function byteArrayNatives(): Natives {
     }
   };
 
-  let defaultObjectEncoding = kAMF3;
-  natives[`${c}.get:defaultObjectEncoding`] = () => () => defaultObjectEncoding;
+  natives[`${c}.get:defaultObjectEncoding`] = (rt) => () => rt.defaultObjectEncoding;
   natives[`${c}.set:defaultObjectEncoding`] = (rt) => (v: Value) => {
     const e = rt.toUint(v);
     if (e !== kAMF0 && e !== kAMF3) {
       throw rt.error("ArgumentError", 2008, "objectEncoding");
     }
 
-    defaultObjectEncoding = e;
+    rt.defaultObjectEncoding = e;
   };
 
   method("get:length", (_rt, b) => b.length);
@@ -594,7 +607,7 @@ export function byteArrayNatives(): Natives {
             units.push(view.getUint16(i, little));
           }
 
-          return String.fromCharCode(...units);
+          return fromCodes(units);
         }
       }
 

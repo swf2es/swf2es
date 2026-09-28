@@ -3,7 +3,8 @@
 // references, and the string, object and traits tables, fresh for each
 // call. A number is an integer if it is one of avmplus' int atoms: whole,
 // not -0, and within 29 bits (avmshell is a 32-bit build). Doubles and
-// Vector elements follow the ByteArray's byte order, as all its writes do.
+// Vector elements are big-endian whatever the ByteArray's byte order: avmplus
+// writes AMF through a wrapper of its own.
 // Dates, XML and Dictionaries are not supported yet.
 //
 // Translated from avmplus' core/AvmSerializer.cpp, this file is subject to
@@ -128,12 +129,12 @@ class Writer {
 
   private double(v: number): void {
     const at = this.out.shortWrite(8);
-    this.out.view.setFloat64(at, v, this.out.littleEndian);
+    this.out.view.setFloat64(at, v);
   }
 
   private u32(v: number): void {
     const at = this.out.shortWrite(4);
-    this.out.view.setUint32(at, v >>> 0, this.out.littleEndian);
+    this.out.view.setUint32(at, v >>> 0);
   }
 
   /** As WriteString: the empty string as 1, else a reference to it or its UTF-8. */
@@ -384,12 +385,12 @@ class Reader {
 
   private double(): number {
     const at = this.input.shortRead(8);
-    return this.input.view.getFloat64(at, this.input.littleEndian);
+    return this.input.view.getFloat64(at);
   }
 
   private u32(): number {
     const at = this.input.shortRead(4);
-    return this.input.view.getUint32(at, this.input.littleEndian);
+    return this.input.view.getUint32(at);
   }
 
   private find<T>(list: T[], i: number): T {
