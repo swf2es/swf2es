@@ -105,15 +105,22 @@ Each method goes through the same steps, in `codegen`:
    follows the newer Flash Player: since PSIRT 3037, a method that can
    throw into a handler needs `max_stack` of at least 1, which the
    oracle's avmshell does not check.
-3. **The IR** is register form with types, not SSA. Stack slot *d* becomes
-   register `s_d` and locals stay `l_n`, so `getlocal1; getlocal2; add;
-   setlocal3` is `l3 = add(l1, l2)`. Every register has the verifier's type
-   (`int`, `uint`, `Number`, `Boolean`, `String`, a class, `null`, `*`),
-   which is what typed lowering needs: `add` then `convert_i` on two `int`s is
-   `(a + b) | 0`, a typed slot on a known class is a direct field access. V8
-   does SSA-level optimization on the JavaScript anyway. The IR is flat
-   tables, like the parser's: instruction rows (op, destination, sources,
-   immediate, type) and block rows (range, successors), reused across methods.
+3. **The IR** (`ir/ir.ts`) is register form with types, not SSA. A
+   register is an index into the verifier's frame: locals `l_n`, then scope
+   entries `sc_n`, then stack slots `s_d`, so `getlocal1; getlocal2; add;
+   setlocal3` is `s0 = getlocal1 l1; s1 = getlocal2 l2; s0 = add s0 s1;
+   l3 = setlocal3 s0`. An instruction reads consecutive registers and
+   writes one, with the verifier's type there (`int`, `uint`, `Number`,
+   `Boolean`, `String`, a class, `null`, `*`) and whether it is known not
+   null. Each block keeps its entry state, so a lowering can follow every
+   register's type: `add` then `convert_i` on two `int`s is `(a + b) | 0`.
+   The instructions are what avmplus' verifier tells its code generator:
+   the ABC instruction, or the verifier's decision made explicit, as a
+   slot bound early (`getslot`), a method called by dispatch id
+   (`callmethod`), where a name was found (`getscopeobject`,
+   `getouterscope`, `finddef`, the global scope), and every coercion and
+   null check. V8 does SSA-level optimization on the JavaScript anyway.
+   The tables are flat, like the parser's, and reused across methods.
 4. **Control flow.** First a per-method dispatcher
    (`for (;;) switch (block) { ... }`), which handles any control flow,
    irreducible or obfuscated included. Then structured JavaScript (loops, `if`,

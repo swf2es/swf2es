@@ -7,7 +7,13 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { abcdumpFacts, compareFacts, swf2esFacts, typedErrors } from "../../oracle/abc-facts.ts";
+import {
+  abcdumpFacts,
+  compareFacts,
+  irProblem,
+  swf2esFacts,
+  typedErrors,
+} from "../../oracle/abc-facts.ts";
 import { containerEngine, libraries, type OracleJob, runOracle } from "../../oracle/oracle.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -92,6 +98,11 @@ for (const [i, r] of results.entries()) {
   const errors = typedErrors(builtins, abc);
   if (errors.length) {
     differences.push(`linking and typed verification: errors ${errors.join(" ")}`);
+  }
+
+  const ir = irProblem();
+  if (ir) {
+    differences.push(`IR: ${ir}`);
   }
 
   for (const d of differences.slice(0, 20)) {

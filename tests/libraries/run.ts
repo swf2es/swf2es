@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   abcdumpFacts,
   compareFacts,
+  irProblem,
   swf2esFacts,
   typedErrors,
   verifyErrors,
@@ -40,6 +41,11 @@ for (const library of all) {
 
   const bases = library.name === "builtin" ? [] : [all[0].abc];
   const typed = typedErrors(bases, library.abc, true);
+  const ir = irProblem();
+  if (ir) {
+    differences.push(`IR: ${ir}`);
+  }
+
   if (typed.length) {
     differences.push(`linking on top of builtin and typed verification: errors ${typed.join(" ")}`);
   }

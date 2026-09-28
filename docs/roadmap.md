@@ -39,7 +39,12 @@ Near-term work, in order. The goal of milestone 1 is in
         the checks that need them. Every method of the libraries and as3pb
         verifies, and every Tamarin method that can be created, with the
         VerifyErrors avmshell prints.
-   3. The IR, written by the verifier's second pass.
+   3. The IR: done, written by the verifier's second pass. Every method
+      of the libraries, as3pb and Tamarin that verifies gets well formed
+      IR, which the test runs check.
+6. **A dispatcher emitter and a minimal runtime**: JavaScript from the IR
+   with one `switch` over blocks per method, and enough of the runtime to
+   run it, so conformance cases run in node and compare with avmshell.
 5. **Faster verification**: the minimal runtime halved decoding to about
    35 ns per instruction, against Ruffle's 15 for decoding alone
    ([benchmarks.md](benchmarks.md)); the typed verifier still walks every

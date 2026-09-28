@@ -16,6 +16,18 @@
 //
 // A BodyDecoder is made once per ABC and reused for every body: its scratch
 // buffers and its output only grow, so decoding allocates nothing per body.
+import {
+  IR_CallGetter,
+  IR_CallInterface,
+  IR_CallSetter,
+  IR_CheckNull,
+  IR_Coerce,
+  IR_FindPropGlobal,
+  IR_FindPropGlobalStrict,
+  IR_GetGlobalScope,
+  IR_Nip,
+  Ir,
+} from "../ir/ir";
 import { Domain } from "../link/domain";
 import { BIND_None, Scope, TYPE_Any } from "../link/traits";
 import {
@@ -89,6 +101,8 @@ import {
   OP_bitnot,
   OP_bitor,
   OP_bitxor,
+  OP_bkpt,
+  OP_bkptline,
   OP_call,
   OP_callmethod,
   OP_callproperty,
@@ -146,6 +160,20 @@ import {
   OP_greaterthan,
   OP_hasnext,
   OP_hasnext2,
+  OP_ifeq,
+  OP_iffalse,
+  OP_ifge,
+  OP_ifgt,
+  OP_ifle,
+  OP_iflt,
+  OP_ifne,
+  OP_ifnge,
+  OP_ifngt,
+  OP_ifnle,
+  OP_ifnlt,
+  OP_ifstricteq,
+  OP_ifstrictne,
+  OP_iftrue,
   OP_in,
   OP_inclocal,
   OP_inclocal_i,
@@ -155,6 +183,7 @@ import {
   OP_instanceof,
   OP_istype,
   OP_istypelate,
+  OP_jump,
   OP_kill,
   OP_label,
   OP_lessequals,
@@ -179,6 +208,7 @@ import {
   OP_newobject,
   OP_nextname,
   OP_nextvalue,
+  OP_nop,
   OP_not,
   OP_popscope,
   OP_pushbyte,
@@ -195,6 +225,7 @@ import {
   OP_pushuint,
   OP_pushundefined,
   OP_pushwith,
+  OP_returnvalue,
   OP_rshift,
   OP_setglobalslot,
   OP_setlocal,
@@ -202,6 +233,11 @@ import {
   OP_setproperty,
   OP_setslot,
   OP_setsuper,
+  OP_sf32,
+  OP_sf64,
+  OP_si8,
+  OP_si16,
+  OP_si32,
   OP_strictequals,
   OP_subtract,
   OP_subtract_i,
@@ -209,6 +245,7 @@ import {
   OP_sxi1,
   OP_sxi8,
   OP_sxi16,
+  OP_timestamp,
   OP_typeof,
   OP_urshift,
   OPERANDS_Branch,
@@ -383,6 +420,15 @@ export class BodyDecoder {
   emitPass: bool = false;
   /** Methods (domain-wide ids) whose scope chain the last decode captured. */
   captured: u32[] = [];
+  /** The IR the second pass writes, valid until the next decode. */
+  ir: Ir = new Ir();
+  /** The block number of each block start. */
+  blockOf: StaticArray<u32> = new StaticArray<u32>(0);
+  /** Whether the instruction being verified wrote its own IR, and the extra operand of a generic one. */
+  emitted: bool = false;
+  rowC: i32 = 0;
+  /** The instruction being verified. */
+  pc: u32 = 0;
 
   constructor(
     public abc: Abc,
@@ -478,20 +524,170 @@ export class BodyDecoder {
     return code;
   }
 
-  /** As the verifier's phase 2: walk the blocks in code order with their final entry states. */
+  /**
+   * As the verifier's phase 2: walk the blocks in code order with their
+   * final entry states, writing the IR.
+   */
   secondPass(): bool {
     this.emitPass = true;
     this.captured.length = 0;
+    const ir = this.ir;
+    ir.reset(this.localCount, this.maxScope, this.frameSize);
+    let blocks: u32 = 0;
+    for (let pc: u32 = 0; pc < this.length; pc++) {
+      if (pc === 0 || unchecked(this.known[pc])) {
+        unchecked((this.blockOf[pc] = blocks++));
+      }
+    }
+
+    // A handler nothing in its range can throw into has no block, and no use.
+    const abc = this.abc;
+    for (let i: u32 = 0; i < this.handlerCount; i++) {
+      const h = this.handlerFirst + i;
+      if (!unchecked(this.known[abc.exceptionTarget[h]])) {
+        continue;
+      }
+
+      ir.addHandler(
+        unchecked(abc.exceptionFrom[h]),
+        unchecked(abc.exceptionTo[h]),
+        unchecked(this.blockOf[abc.exceptionTarget[h]]),
+        unchecked(this.handlerType[i]),
+        unchecked(this.handlerScope[i]),
+      );
+    }
+
     let ok = true;
     for (let pc: u32 = 0; pc < this.length && ok; pc++) {
       if (pc === 0 || unchecked(this.known[pc])) {
         this.loadEntry(pc);
+        ir.addBlock(
+          pc,
+          unchecked(this.entryStack[pc]),
+          unchecked(this.entryScope[pc]),
+          this.valueType,
+          this.valueFlags,
+        );
         ok = this.block(pc, unchecked(this.entryStack[pc]), unchecked(this.entryScope[pc]));
       }
     }
 
     this.emitPass = false;
     return ok;
+  }
+
+  /** Write an IR instruction, typed as its destination is now. */
+  emit(op: u16, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32, pc: u32): void {
+    const ir = this.ir;
+    const i = ir.add(op, dst, src, count, a, b, c, pc);
+    if (dst >= 0) {
+      unchecked((ir.type[i] = this.valueType[dst]));
+      unchecked((ir.notNull[i] = this.valueFlags[dst] & NOT_NULL));
+    }
+  }
+
+  /**
+   * The IR of an instruction that wrote none of its own: its opcode reading
+   * the values it popped, or the register it names, and writing what it
+   * pushed; branches name their target blocks.
+   */
+  emitGeneric(
+    pc: u32,
+    opcode: u8,
+    a: u32,
+    b: u32,
+    stackBefore: u32,
+    scopeBefore: u32,
+    pops: u32,
+  ): void {
+    const base = this.stackBase;
+    let src = <i32>(base + stackBefore - pops);
+    let count = pops;
+    let dst = this.stack > stackBefore - pops ? <i32>(base + this.stack - 1) : -1;
+    let ra = a;
+    switch (opcode) {
+      case OP_label:
+      case OP_nop:
+      case OP_bkpt:
+      case OP_bkptline:
+      case OP_timestamp:
+        return;
+      case OP_getlocal:
+        src = <i32>a;
+        count = 1;
+        break;
+      case OP_setlocal:
+        dst = <i32>a;
+        break;
+      case OP_pushscope:
+      case OP_pushwith:
+        dst = <i32>(this.localCount + scopeBefore);
+        break;
+      case OP_popscope:
+        src = <i32>(this.localCount + scopeBefore - 1);
+        count = 1;
+        break;
+      case OP_getscopeobject:
+        ra = <u32>load<u8>(this.start + pc + 1);
+        src = <i32>(this.localCount + ra);
+        count = 1;
+        break;
+      // Slots count from 0 in the IR, as early bound ones do.
+      case OP_getslot:
+      case OP_setslot:
+      case OP_getglobalslot:
+      case OP_setglobalslot:
+        ra = a - 1;
+        break;
+      case OP_jump:
+      case OP_iftrue:
+      case OP_iffalse:
+      case OP_ifeq:
+      case OP_ifne:
+      case OP_iflt:
+      case OP_ifle:
+      case OP_ifgt:
+      case OP_ifge:
+      case OP_ifstricteq:
+      case OP_ifstrictne:
+      case OP_ifnlt:
+      case OP_ifnle:
+      case OP_ifngt:
+      case OP_ifnge:
+        ra = unchecked(this.blockOf[this.slotNext[pc] + <u32>this.slotA[pc]]);
+        break;
+      case OP_lookupswitch: {
+        const ir = this.ir;
+        const first = unchecked(this.slotC[pc]);
+        const cases = ir.caseCount;
+        for (let i = first; i <= first + b; i++) {
+          ir.addCase(unchecked(this.blockOf[pc + this.code.cases[i]]));
+        }
+
+        this.emit(
+          opcode,
+          -1,
+          src,
+          count,
+          unchecked(this.blockOf[pc + this.slotA[pc]]),
+          cases,
+          <i32>b,
+          pc,
+        );
+        return;
+      }
+      default:
+        break;
+    }
+
+    if (opcode >= OP_getlocal0 && opcode < OP_getlocal0 + 4) {
+      src = <i32>(opcode - OP_getlocal0);
+      count = 1;
+    } else if (opcode >= OP_setlocal0 && opcode < OP_setlocal0 + 4) {
+      dst = <i32>(opcode - OP_setlocal0);
+    }
+
+    this.emit(opcode, dst, src, count, ra, b, this.rowC, pc);
   }
 
   /** Zeroed scratch for this body, growing it if the body is the longest yet. */
@@ -521,6 +717,7 @@ export class BodyDecoder {
     this.entryScope = new StaticArray<u32>(capacity);
     this.entryAt = new StaticArray<u32>(capacity);
     this.walkOf = new StaticArray<u32>(capacity);
+    this.blockOf = new StaticArray<u32>(capacity);
     this.work = new StaticArray<u32>(capacity);
   }
 
@@ -1189,8 +1386,16 @@ export class BodyDecoder {
         return this.fail(kIllegalSetDxns);
       }
 
+      if (this.emitPass) {
+        this.emit(opcode, -1, -1, 0, a, 0, 0, pc);
+      }
+
       return this.checkString(a);
     } else if (opcode === OP_debugfile) {
+      if (this.emitPass) {
+        this.emit(opcode, -1, -1, 0, a, 0, 0, pc);
+      }
+
       return this.checkString(a);
     } else if (opcode === OP_kill) {
       if (!this.checkLocal(a)) {
@@ -1201,24 +1406,28 @@ export class BodyDecoder {
         this.setValue(a, TYPE_Any, 0);
       }
 
+      if (this.emitPass) {
+        this.emit(opcode, <i32>a, -1, 0, a, 0, 0, pc);
+      }
+
       return true;
-    } else if (opcode === OP_inclocal || opcode === OP_declocal) {
+    } else if (
+      opcode === OP_inclocal ||
+      opcode === OP_declocal ||
+      opcode === OP_inclocal_i ||
+      opcode === OP_declocal_i
+    ) {
       if (!this.checkLocal(a)) {
         return false;
       }
 
       if (this.typed) {
-        this.coerce(a, this.domain.numberType);
+        const integer = opcode === OP_inclocal_i || opcode === OP_declocal_i;
+        this.coerce(a, integer ? this.domain.intType : this.domain.numberType);
       }
 
-      return true;
-    } else if (opcode === OP_inclocal_i || opcode === OP_declocal_i) {
-      if (!this.checkLocal(a)) {
-        return false;
-      }
-
-      if (this.typed) {
-        this.coerce(a, this.domain.intType);
+      if (this.emitPass) {
+        this.emit(opcode, <i32>a, <i32>a, 1, a, 0, 0, pc);
       }
 
       return true;
@@ -1228,6 +1437,10 @@ export class BodyDecoder {
       }
 
       this.scope--;
+      if (this.emitPass) {
+        this.emit(opcode, -1, <i32>(this.localCount + this.scope), 1, 0, 0, 0, pc);
+      }
+
       return true;
     } else if (opcode === OP_setglobalslot && this.typed) {
       if (this.scope === 0 && this.outer.size === 0) {
@@ -1248,11 +1461,19 @@ export class BodyDecoder {
       return false;
     }
 
+    this.emitted = false;
+    this.rowC = 0;
+    this.pc = pc;
     if (this.typed && !this.typeAt(pc, opcode, a, b, scopeBefore)) {
       return false;
     }
 
+    const stackBefore = this.stack;
     this.stack = <u32>(<u64>this.stack - pops + pushes);
+    if (this.emitPass && !this.emitted) {
+      this.emitGeneric(pc, opcode, a, b, stackBefore, scopeBefore, <u32>pops);
+    }
+
     return true;
   }
 
@@ -1386,10 +1607,11 @@ export class BodyDecoder {
           return false;
         }
 
+        this.rowC = <i32>(unchecked(domain.methodStart[this.index]) + a);
         return this.push(domain.functionType, NOT_NULL);
       case OP_getlex: {
         // The scope object found is the receiver of the get.
-        if (!this.findProperty(a)) {
+        if (!this.findProperty(OP_findpropstrict, a)) {
           return false;
         }
 
@@ -1400,7 +1622,7 @@ export class BodyDecoder {
       }
       case OP_findpropstrict:
       case OP_findproperty:
-        return this.findProperty(a);
+        return this.findProperty(opcode, a);
       case OP_newclass:
         if (this.emitPass && !this.captureClass(a)) {
           return false;
@@ -1408,6 +1630,7 @@ export class BodyDecoder {
 
         this.coerce(top, domain.classInstanceType());
         this.setValue(top, domain.staticTraitsOf(this.index, a), NOT_NULL);
+        this.rowC = domain.staticTraitsOf(this.index, a);
         return true;
       case OP_finddef:
         return this.findDef(a);
@@ -1461,39 +1684,48 @@ export class BodyDecoder {
 
         return this.popPush(2, t, domain.typeNotNull(t) ? NOT_NULL : 0);
       }
+      // The conversion is the instruction itself, which only retypes the value.
       case OP_coerce: {
         const t = this.typeName(a);
         if (t < TYPE_Any) {
           return false;
         }
 
-        this.coerce(top, t);
+        this.rowC = t;
+        this.retype(top, t);
         return true;
       }
       case OP_convert_b:
       case OP_coerce_b:
-        this.coerce(top, domain.booleanType);
+        this.retype(top, domain.booleanType);
         return true;
       case OP_coerce_o:
-        this.coerce(top, domain.objectType());
+        this.retype(top, domain.objectType());
         return true;
       case OP_coerce_a:
-        this.coerce(top, TYPE_Any);
+        this.retype(top, TYPE_Any);
         return true;
       case OP_convert_i:
       case OP_coerce_i:
-        this.coerce(top, domain.intType);
+        this.retype(top, domain.intType);
         return true;
       case OP_convert_u:
       case OP_coerce_u:
-        this.coerce(top, domain.uintType);
+        this.retype(top, domain.uintType);
         return true;
       case OP_convert_d:
       case OP_coerce_d:
-        this.coerce(top, domain.numberType);
+        this.retype(top, domain.numberType);
         return true;
       case OP_coerce_s:
-        this.coerce(top, domain.stringType);
+        this.retype(top, domain.stringType);
+        return true;
+      case OP_iftrue:
+      case OP_iffalse:
+        this.coerce(top, domain.booleanType);
+        return true;
+      case OP_returnvalue:
+        this.coerce(top, unchecked(domain.traits.returnType[this.global]));
         return true;
       case OP_istype:
         if (this.typeName(a) < TYPE_Any) {
@@ -1549,6 +1781,7 @@ export class BodyDecoder {
         }
 
         this.checkNull(obj);
+        this.rowC = ctraits;
         const itraits = domain.instanceTraitsOf(ctraits);
         return this.popPush(n, itraits, itraits === TYPE_Any ? 0 : NOT_NULL);
       }
@@ -1718,6 +1951,7 @@ export class BodyDecoder {
       case OP_instanceof:
         return this.popPush(2, domain.booleanType, NOT_NULL);
       case OP_not:
+        this.coerce(top, domain.booleanType);
         return this.popPush(1, domain.booleanType, NOT_NULL);
       case OP_add: {
         const lhs = this.peek(2);
@@ -1739,6 +1973,8 @@ export class BodyDecoder {
       case OP_subtract:
       case OP_divide:
       case OP_multiply:
+        this.coerce(this.peek(2), domain.numberType);
+        this.coerce(top, domain.numberType);
         return this.popPush(2, domain.numberType, NOT_NULL);
       case OP_negate:
       case OP_increment:
@@ -1759,8 +1995,12 @@ export class BodyDecoder {
       case OP_bitxor:
       case OP_lshift:
       case OP_rshift:
+        this.coerce(this.peek(2), domain.intType);
+        this.coerce(top, domain.intType);
         return this.popPush(2, domain.intType, NOT_NULL);
       case OP_urshift:
+        this.coerce(this.peek(2), domain.intType);
+        this.coerce(top, domain.intType);
         return this.popPush(2, domain.uintType, NOT_NULL);
       case OP_nextvalue:
       case OP_nextname:
@@ -1780,10 +2020,23 @@ export class BodyDecoder {
       case OP_li8:
       case OP_li16:
       case OP_li32:
+        this.coerce(top, domain.intType);
         return this.popPush(1, domain.intType, NOT_NULL);
       case OP_lf32:
       case OP_lf64:
+        this.coerce(top, domain.intType);
         return this.popPush(1, domain.numberType, NOT_NULL);
+      case OP_si8:
+      case OP_si16:
+      case OP_si32:
+        this.coerce(this.peek(2), domain.intType);
+        this.coerce(top, domain.intType);
+        return true;
+      case OP_sf32:
+      case OP_sf64:
+        this.coerce(this.peek(2), domain.numberType);
+        this.coerce(top, domain.intType);
+        return true;
       default:
         break;
     }
@@ -1818,11 +2071,24 @@ export class BodyDecoder {
 
   /** As Verifier::emitCoerce: value i becomes `type`, still null or not. */
   coerce(i: u32, type: i32): void {
+    const changes = unchecked(this.valueType[i]) !== type;
+    this.setValue(i, type, unchecked(this.valueFlags[i]) & NOT_NULL);
+    if (this.emitPass && changes && type !== TYPE_Any) {
+      this.emit(IR_Coerce, <i32>i, <i32>i, 1, 0, 0, type, this.pc);
+    }
+  }
+
+  /** As FrameState::setType from a conversion instruction: value i becomes `type`, without IR of its own. */
+  retype(i: u32, type: i32): void {
     this.setValue(i, type, unchecked(this.valueFlags[i]) & NOT_NULL);
   }
 
   /** As Verifier::emitCheckNull: value i is known not null from here on. */
   checkNull(i: u32): void {
+    if (this.emitPass && !(unchecked(this.valueFlags[i]) & NOT_NULL)) {
+      this.emit(IR_CheckNull, -1, <i32>i, 1, 0, 0, 0, this.pc);
+    }
+
     unchecked((this.valueFlags[i] = this.valueFlags[i] | NOT_NULL));
   }
 
@@ -1939,6 +2205,7 @@ export class BodyDecoder {
     }
 
     this.coerce(i, base);
+    this.rowC = base;
     return base;
   }
 
@@ -1997,9 +2264,11 @@ export class BodyDecoder {
    * the innermost scope out, stopping at a with scope, then the scripts that
    * define it; else an Object, after the runtime name parts are popped.
    */
-  findProperty(mn: u32): bool {
+  findProperty(opcode: u8, mn: u32): bool {
     const domain = this.domain;
     const outer = this.outer;
+    const top = <i32>(this.stackBase + this.stack);
+    let global = false;
     if (isBindingName(domain, this.index, mn)) {
       // With no outer scopes, the global object is a local scope, which is not bound early.
       const base = this.localCount + (outer.size === 0 ? 1 : 0);
@@ -2011,7 +2280,8 @@ export class BodyDecoder {
         }
 
         if (b !== 0) {
-          return this.push(this.typeOf(<u32>i), unchecked(this.valueFlags[i]) & NOT_NULL);
+          this.push(this.typeOf(<u32>i), unchecked(this.valueFlags[i]) & NOT_NULL);
+          return this.emitFound(OP_getscopeobject, top, i, <u32>i - this.localCount, 0);
         }
 
         if (unchecked(this.valueFlags[i]) & WITH) {
@@ -2029,7 +2299,8 @@ export class BodyDecoder {
           }
 
           if (b !== 0) {
-            return this.push(t, NOT_NULL);
+            this.push(t, NOT_NULL);
+            return this.emitFound(OP_getouterscope, top, -1, <u32>j, 0);
           }
 
           if (unchecked(outer.withs[j])) {
@@ -2040,8 +2311,19 @@ export class BodyDecoder {
         if (j <= 0) {
           const script = domain.findScript(this.index, mn);
           if (script >= 0) {
-            return this.push(script, NOT_NULL);
+            this.push(script, NOT_NULL);
+
+            // Defined by this very script: its global object.
+            if (unchecked(domain.traits.init[script]) === <i32>this.global) {
+              return outer.size > 0
+                ? this.emitFound(OP_getouterscope, top, -1, 0, 0)
+                : this.emitFound(IR_GetGlobalScope, top, -1, 0, 0);
+            }
+
+            return this.emitFound(OP_finddef, top, -1, mn, script);
           }
+
+          global = true;
         }
       }
     }
@@ -2051,7 +2333,29 @@ export class BodyDecoder {
       return false;
     }
 
-    return this.popPush(n - 1, domain.objectType(), NOT_NULL);
+    this.popPush(n - 1, domain.objectType(), NOT_NULL);
+    if (global) {
+      const op = opcode === OP_findproperty ? IR_FindPropGlobal : IR_FindPropGlobalStrict;
+      return this.emitFound(op, top, -1, mn, 0);
+    }
+
+    const at = <i32>(this.stackBase + this.stack) - <i32>(n - 1);
+    if (this.emitPass) {
+      this.emit(opcode, at, at, n - 1, mn, 0, 0, this.pc);
+      this.emitted = true;
+    }
+
+    return true;
+  }
+
+  /** The IR of where a name was found, pushed into register `dst`. */
+  emitFound(op: u16, dst: i32, src: i32, a: u32, c: i32): bool {
+    if (this.emitPass) {
+      this.emit(op, dst, src, src >= 0 ? 1 : 0, a, 0, c, this.pc);
+      this.emitted = true;
+    }
+
+    return true;
   }
 
   /** As Verifier's OP_finddef: the global object of the script that defines `mn`, else Object. */
@@ -2086,11 +2390,20 @@ export class BodyDecoder {
       const notNull =
         unchecked(domain.traits.abc[type]) === domain.builtinAbc &&
         domain.isMathOrNumber(this.index, mn);
-      return this.popPush(n, propType, notNull ? NOT_NULL : 0);
+      this.popPush(n, propType, notNull ? NOT_NULL : 0);
+      return this.emitOn(OP_getslot, <i32>obj, <i32>obj, 1, b >> 3, 0, 0);
     }
 
     if (kind === 5 || kind === 7) {
-      return this.popPush(n, propType, domain.typeNotNull(propType) ? NOT_NULL : 0);
+      const getter = unchecked(
+        domain.traits.dispatch[domain.traits.dispatchStart[type] + (b >> 3)],
+      );
+      if (getter >= 0 && !this.coerceArgs(<u32>getter, 0)) {
+        return false;
+      }
+
+      this.popPush(n, propType, domain.typeNotNull(propType) ? NOT_NULL : 0);
+      return this.emitOn(IR_CallGetter, <i32>obj, <i32>obj, 1, b >> 3, 0, getter);
     }
 
     if (propType === TYPE_Any && this.numericIndex(mn)) {
@@ -2109,7 +2422,18 @@ export class BodyDecoder {
       }
     }
 
-    return this.popPush(n, propType, domain.typeNotNull(propType) ? NOT_NULL : 0);
+    this.popPush(n, propType, domain.typeNotNull(propType) ? NOT_NULL : 0);
+    return this.emitOn(OP_getproperty, <i32>obj, <i32>obj, n, mn, 0, 0);
+  }
+
+  /** Write the instruction's own IR row, instead of the generic one. */
+  emitOn(op: u16, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32): bool {
+    if (this.emitPass) {
+      this.emit(op, dst, src, count, a, b, c, this.pc);
+      this.emitted = true;
+    }
+
+    return true;
   }
 
   /**
@@ -2159,7 +2483,7 @@ export class BodyDecoder {
         domain.initOfDeclarer(type, this.index, mn) === <i32>this.global)
     ) {
       this.coerce(top, propType);
-      return true;
+      return this.emitOn(OP_setslot, -1, <i32>obj, 2, b >> 3, 0, 0);
     }
 
     if (kind === 6 || kind === 7) {
@@ -2170,7 +2494,7 @@ export class BodyDecoder {
         return false;
       }
 
-      return true;
+      return this.emitOn(IR_CallSetter, -1, <i32>obj, 2, (b >> 3) + 1, 0, setter);
     }
 
     if (this.numericIndex(mn)) {
@@ -2183,7 +2507,7 @@ export class BodyDecoder {
       }
     }
 
-    return true;
+    return this.emitOn(opcode, -1, <i32>obj, n, mn, 0, 0);
   }
 
   /** As Verifier::emitCallproperty and emitCallpropertyMethod. */
@@ -2228,7 +2552,11 @@ export class BodyDecoder {
           }
 
           const result = unchecked(traits.returnType[m]);
-          return this.popPush(n, result, domain.typeNotNull(result) ? NOT_NULL : 0);
+          this.popPush(n, result, domain.typeNotNull(result) ? NOT_NULL : 0);
+
+          // An interface's method has no dispatch id of its own on the receiver.
+          const call = unchecked(traits.isInterface[type]) ? IR_CallInterface : OP_callmethod;
+          return this.emitOn(call, voidCall ? -1 : <i32>obj, <i32>obj, n, b >> 3, argc, m);
         }
       }
     } else if (((b & 7) === 2 || (b & 7) === 3) && argc === 1) {
@@ -2239,17 +2567,43 @@ export class BodyDecoder {
       if (converted !== -2) {
         if (converted >= 0 && domain.isConversion(slotType)) {
           this.setValue(top, converted, NOT_NULL);
+          this.emitOn(this.conversionOp(converted), <i32>top, <i32>top, 1, 0, 0, 0);
         } else {
           this.coerce(top, converted);
         }
 
+        this.emitted = this.emitPass;
+        if (voidCall) {
+          return true;
+        }
+
         const flags = unchecked(this.valueFlags[top]);
         const value = this.typeOf(top);
-        return voidCall ? true : this.popPush(n, value, flags & NOT_NULL);
+        this.popPush(n, value, flags & NOT_NULL);
+        return this.emitOn(IR_Nip, <i32>obj, <i32>obj, n, 0, 0, 0);
       }
     }
 
-    return this.popPush(n, TYPE_Any, 0);
+    this.popPush(n, TYPE_Any, 0);
+    return this.emitOn(opcode, voidCall ? -1 : <i32>obj, <i32>obj, n, mn, argc, 0);
+  }
+
+  /** The convert opcode that gives `type`, one of the builtin conversions. */
+  conversionOp(type: i32): u16 {
+    const domain = this.domain;
+    if (type === domain.intType) {
+      return OP_convert_i;
+    }
+
+    if (type === domain.uintType) {
+      return OP_convert_u;
+    }
+
+    if (type === domain.numberType) {
+      return OP_convert_d;
+    }
+
+    return type === domain.booleanType ? OP_convert_b : OP_convert_s;
   }
 
   /**
@@ -2428,6 +2782,7 @@ export class BodyDecoder {
     }
 
     const result = unchecked(traits.returnType[global]);
+    this.rowC = <i32>global;
     return this.popPush(argc + 1, result, domain.typeNotNull(result) ? NOT_NULL : 0);
   }
 
