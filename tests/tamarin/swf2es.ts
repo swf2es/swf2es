@@ -4,10 +4,13 @@
 // run.ts, which compiles the tests and records avmshell's results in
 // baseline.json.
 //
-//   node tests/tamarin/swf2es.ts [--update-baseline] [path prefix...]
+//   node tests/tamarin/swf2es.ts [--update-baseline | --relax] [path prefix...]
 //
 // swf2es-baseline.json holds swf2es' results, so that a change that breaks
-// a test that matched fails, and one that fixes a test shows. Each test runs
+// a test that matched fails, and one that fixes a test shows. A test whose
+// entry is null is not compared: one whose result varies from run to run,
+// as with the host's stack depth or a clock. --relax makes each test that
+// differs so, as run.ts's --relax does. Each test runs
 // in one of at most 10 worker processes, which is replaced when a test runs
 // longer than TIMEOUT.
 import { type ChildProcess, fork } from "node:child_process";
@@ -20,6 +23,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const baselineFile = `${here}swf2es-baseline.json`;
 const args = process.argv.slice(2);
 const update = args.includes("--update-baseline");
+const relax = args.includes("--relax");
 const prefixes = args.filter((a) => !a.startsWith("--"));
 const TIMEOUT = 30_000;
 
@@ -27,7 +31,12 @@ const TIMEOUT = 30_000;
 interface Outcome {
   passed: number;
   failed: number;
-  /** What stopped it, if anything: an error of the host's, or "timeout". */
+  /**
+   * How it ended, as avmshell's exit code: 0, 1 for a VerifyError or an AS3
+   * exception nothing caught, 124 for a timeout; null if the host stopped it.
+   */
+  exitCode: number | null;
+  /** What of the host's stopped it, if anything: an error, or its worker dying. */
   error: string | null;
 }
 
@@ -41,9 +50,22 @@ interface Avmshell {
 
 const avmshell: Record<string, Avmshell> = JSON.parse(readFileSync(`${here}baseline.json`, "utf8"));
 const { tests } = collectTests(prefixes);
-const queue = tests
+// A test avmshell compiled must have its ABC: a missing one would drop out
+// of the comparison, and out of the baseline on an update.
+const compiled = tests
   .map((t) => ({ path: t.path, abc: `${here}out/${t.path}.abc` }))
-  .filter((t) => avmshell[t.path]?.compiled && existsSync(t.abc));
+  .filter((t) => avmshell[t.path]?.compiled);
+const missing = compiled.filter((t) => !existsSync(t.abc));
+if (missing.length) {
+  for (const t of missing.slice(0, 20)) {
+    console.log(`FAIL ${t.path}: no ${t.abc}; pnpm tamarin compiles it`);
+  }
+
+  console.log(`tamarin in swf2es: ${missing.length} compiled tests have no ABC`);
+  process.exit(1);
+}
+
+const queue = compiled;
 
 const outcomes: Record<string, Outcome> = {};
 const started = performance.now();
@@ -66,7 +88,7 @@ async function runAll(count: number): Promise<void> {
         const test = queue[next++];
         current = test.path;
         timer = setTimeout(() => {
-          outcomes[test.path] = { passed: 0, failed: 0, error: "timeout" };
+          outcomes[test.path] = { passed: 0, failed: 0, exitCode: 124, error: null };
           current = null;
           child.kill("SIGKILL");
           spawn();
@@ -83,7 +105,13 @@ async function runAll(count: number): Promise<void> {
         child = c;
         c.on(
           "message",
-          (m: { ready?: boolean; path?: string; lines?: string[]; error?: string }) => {
+          (m: {
+            ready?: boolean;
+            path?: string;
+            lines?: string[];
+            exitCode?: number;
+            error?: string;
+          }) => {
             // A worker killed at a timeout has been replaced: it no longer speaks for its test.
             if (child !== c) {
               return;
@@ -99,6 +127,7 @@ async function runAll(count: number): Promise<void> {
             outcomes[m.path as string] = {
               passed: (output.match(/PASSED!/g) ?? []).length,
               failed: (output.match(/FAILED!/g) ?? []).length,
+              exitCode: m.error === undefined ? (m.exitCode ?? null) : null,
               error: m.error ?? null,
             };
             current = null;
@@ -109,7 +138,12 @@ async function runAll(count: number): Promise<void> {
           // A worker that died on its own, as out of memory, fails its test.
           if (child === c && current !== null) {
             clearTimeout(timer);
-            outcomes[current] = { passed: 0, failed: 0, error: `worker exited (${code})` };
+            outcomes[current] = {
+              passed: 0,
+              failed: 0,
+              exitCode: null,
+              error: `worker exited (${code})`,
+            };
             current = null;
             spawn();
           }
@@ -124,9 +158,10 @@ async function runAll(count: number): Promise<void> {
 
 await runAll(Math.min(10, availableParallelism(), queue.length));
 
-/** Whether swf2es passed and failed the checks avmshell did, and nothing stopped it. */
+/** Whether swf2es passed and failed the checks avmshell did, and ended as it did, nothing of the host's stopping it. */
 const matches = (path: string, o: Outcome) =>
   o.error === null &&
+  o.exitCode === avmshell[path].exitCode &&
   o.passed === (avmshell[path].passed ?? 0) &&
   o.failed === (avmshell[path].failed ?? 0);
 
@@ -147,7 +182,11 @@ for (const [path, o] of Object.entries(outcomes)) {
     // Why, with the specifics that vary (numbers, quoted names) kept: they say what is missing.
     const why =
       o.error ??
-      (o.passed < (avmshell[path].passed ?? 0) ? "fewer checks passed" : "other checks failed");
+      (o.exitCode !== avmshell[path].exitCode
+        ? `ended with ${o.exitCode === 124 ? "a timeout" : `exit code ${o.exitCode}`}, avmshell with ${avmshell[path].exitCode}`
+        : o.passed < (avmshell[path].passed ?? 0)
+          ? "fewer checks passed"
+          : "other checks failed");
     reasons.set(why, (reasons.get(why) ?? 0) + 1);
   }
 
@@ -177,23 +216,38 @@ for (const [why, n] of [...reasons].sort((a, b) => b[1] - a[1]).slice(0, 30)) {
 }
 
 // Against the baseline: a test that matched and no longer does is a regression.
-const baseline: Record<string, Outcome> = existsSync(baselineFile)
+const baseline: Record<string, Outcome | null> = existsSync(baselineFile)
   ? JSON.parse(readFileSync(baselineFile, "utf8"))
   : {};
-if (update) {
-  const merged = prefixes.length ? { ...baseline, ...outcomes } : outcomes;
-  const sorted = Object.entries(merged).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+
+function writeBaseline(entries: Record<string, Outcome | null>): void {
+  const sorted = Object.entries(entries).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   writeFileSync(
     baselineFile,
     `{\n${sorted.map(([p, o]) => `  ${JSON.stringify(p)}: ${JSON.stringify(o)}`).join(",\n")}\n}\n`,
   );
   console.log(`\n  baseline: wrote ${sorted.length} tests`);
+}
+
+if (update) {
+  // A test not compared stays so.
+  const merged: Record<string, Outcome | null> = prefixes.length ? { ...baseline } : {};
+  for (const [path, o] of all) {
+    merged[path] = baseline[path] === null ? null : o;
+  }
+
+  writeBaseline(merged);
 } else {
   const regressions: string[] = [];
   const fixed: string[] = [];
   for (const [path, o] of all) {
     const before = baseline[path];
-    if (!before) {
+    if (before === undefined) {
+      regressions.push(`${path}: not in swf2es-baseline.json (run with --update-baseline)`);
+      continue;
+    }
+
+    if (before === null) {
       continue;
     }
 
@@ -212,6 +266,16 @@ if (update) {
     console.log(
       `\n  now as avmshell (${fixed.length}; --update-baseline to keep): ${fixed.slice(0, 20).join(", ")}`,
     );
+  }
+
+  if (relax) {
+    for (const r of regressions) {
+      baseline[r.split(":")[0]] = null;
+    }
+
+    writeBaseline(baseline);
+    console.log(`  baseline: relaxed ${regressions.length} tests`);
+    process.exit(0);
   }
 
   for (const r of regressions.slice(0, 50)) {

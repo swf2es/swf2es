@@ -3,8 +3,10 @@
 // avmshell loads. The builtins are compiled to modules once; each test
 // links them again in a new domain, then its ABC, and runs it.
 //
-// Messages in: { path, abc } for an ABC file. Out: { path, lines } with the
-// lines it traced, or { path, error } with what stopped it.
+// Messages in: { path, abc } for an ABC file. Out: { path, lines, exitCode }
+// with the lines it traced and how it ended, as avmshell's exit code: 0, or
+// 1 for a VerifyError or an AS3 exception nothing caught; or { path, lines,
+// error } with what of the host's stopped it, and the lines before.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -59,8 +61,8 @@ const builtinModules: Module[] = [];
   }
 }
 
-async function run(abc: Uint8Array): Promise<string[]> {
-  const lines: string[] = [];
+/** Run `abc`, tracing into `lines`: avmshell's exit code for how it ended. */
+async function run(abc: Uint8Array, lines: string[]): Promise<number> {
   const rt = runtime.createRuntime({ print: (line: string) => lines.push(line) });
   for (const module of builtinModules) {
     module(rt);
@@ -69,7 +71,8 @@ async function run(abc: Uint8Array): Promise<string[]> {
   const hashes = linkBuiltins();
   const error = testing.domainAdd(abc, false);
   if (error) {
-    return [`VerifyError: Error #${error}`];
+    lines.push(`VerifyError: Error #${error}`);
+    return 1;
   }
 
   hashes.push(sha(abc));
@@ -77,25 +80,27 @@ async function run(abc: Uint8Array): Promise<string[]> {
   try {
     rt.run(A);
   } catch (e) {
-    // An AS3 exception nothing caught: avmshell prints it, as its string.
+    // An AS3 exception nothing caught: avmshell prints it, as its string, and exits with 1.
     if (e instanceof Error) {
       throw e;
     }
 
     lines.push(rt.toString(e));
+    return 1;
   }
 
-  return lines;
+  return 0;
 }
 
 process.on("message", async (message: { path: string; abc: string }) => {
+  const lines: string[] = [];
   try {
-    const lines = await run(new Uint8Array(readFileSync(message.abc)));
-    process.send?.({ path: message.path, lines });
+    const exitCode = await run(new Uint8Array(readFileSync(message.abc)), lines);
+    process.send?.({ path: message.path, lines, exitCode });
   } catch (e) {
     const error = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
     // Its first line, and not all of it: some quote a whole regular expression.
-    process.send?.({ path: message.path, error: error.split("\n")[0].slice(0, 200) });
+    process.send?.({ path: message.path, lines, error: error.split("\n")[0].slice(0, 200) });
   }
 });
 
