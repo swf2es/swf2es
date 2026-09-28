@@ -6,6 +6,7 @@
 // state, and what calling or constructing them does.
 import { messages } from "./messages.js";
 import { publicNs, qname } from "./names.js";
+import { convertDoubleToString, convertDoubleToStringRadix, DTOSTR_PRECISION } from "./numbers.js";
 import {
   type AsObject,
   type ClassHook,
@@ -28,15 +29,6 @@ const plain =
   (f: Method) =>
   (_rt: Runtime): Method =>
     f;
-
-/** A number's JavaScript string in `radix`, as avmplus writes it. */
-function radixString(n: number, radix: number): string {
-  if (radix < 2 || radix > 36) {
-    return "";
-  }
-
-  return n.toString(radix);
-}
 
 /** The elements of an Array value, for natives that take one. */
 function elements(v: Value): Value[] {
@@ -310,20 +302,27 @@ const natives: Natives = {
     },
 
   // Number
-  "Number.Number::_numberToString": plain((n: number, radix: number) =>
-    radix === 10 ? String(n) : radixString(n, radix),
-  ),
-  "Number.Number::_convert": plain((n: number, precision: number, mode: number) => {
-    // avmplus' DTOSTR_FIXED 1, DTOSTR_PRECISION 2, DTOSTR_EXPONENTIAL 3.
-    switch (mode) {
-      case 1:
-        return n.toFixed(precision);
-      case 2:
-        return n.toPrecision(precision);
-      default:
-        return n.toExponential(precision);
+  // As NumberClass::_numberToString: another radix writes the integer part only.
+  "Number.Number::_numberToString": (rt) => (n: number, radix: number) => {
+    if (radix === 10 || !Number.isFinite(n)) {
+      return convertDoubleToString(n);
     }
-  }),
+
+    if (radix < 2 || radix > 36) {
+      throw rt.error("RangeError", 1003, radix);
+    }
+
+    return convertDoubleToStringRadix(n, radix);
+  },
+  // As NumberClass::_convert: toFixed, toPrecision and toExponential.
+  "Number.Number::_convert": (rt) => (n: number, precision: number, mode: number) => {
+    const [min, max] = mode === DTOSTR_PRECISION ? [1, 21] : [0, 20];
+    if (precision < min || precision > max) {
+      throw rt.error("RangeError", 1002, precision, min, max);
+    }
+
+    return convertDoubleToString(n, mode, precision);
+  },
   "Number.Number::_minValue": plain(() => Number.MIN_VALUE),
 
   // Global functions

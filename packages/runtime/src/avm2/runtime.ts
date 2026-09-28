@@ -25,6 +25,7 @@ import {
   qname,
   TypeName,
 } from "./names.js";
+import { convertDoubleToString } from "./numbers.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: AS3 values are untyped
 export type Value = any;
@@ -601,8 +602,10 @@ export class Runtime {
         }
 
         return v instanceof Namespace ? this.builtinTraits("Namespace") : v.$traits;
+      // As avmplus' toVTable: every number is a Number at run time, int or
+      // not; int's and uint's traits only bind early, from static types.
       case "number":
-        return this.builtinTraits((v | 0) === v ? "int" : "Number");
+        return this.builtinTraits("Number");
       case "string":
         return this.builtinTraits("String");
       case "boolean":
@@ -1750,6 +1753,7 @@ export function stringToNumber(s: string): number {
   return Number(t);
 }
 
+/** A number as AS3 writes it: avmplus' own formatting, not JavaScript's. */
 export function numberToString(n: number): string {
-  return String(n);
+  return convertDoubleToString(n);
 }
