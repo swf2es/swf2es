@@ -108,6 +108,10 @@ Near-term work, in order. The goal of milestone 1 is in
     parser only for text native parsing rejects; `JSON.stringify` by a
     tree of AS3's members, written by the native one. Output needs the
     same keys and values, not the same bytes.
+15. **Faster AMF3 decoding**: 809 ms on as3pb against avmshell's 317.
+    The Vector reader resolves its class by name for each Vector, and
+    sets each element through `setProperty`; profile the rest. Taken
+    before step 12.
 
 
 ## Later
