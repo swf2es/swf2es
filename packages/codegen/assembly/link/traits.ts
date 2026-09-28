@@ -120,8 +120,8 @@ export class TraitsTable {
   interfaceStart: u32[] = [];
   interfaceEnd: u32[] = [];
   interfaceList: u32[] = [];
-  /** For a parameterized Vector type, the traits whose members it has, else -1. */
-  alias: i32[] = [];
+  /** For Vector.<T> with T other than int, uint, Number and *, T; else TYPE_Any. */
+  param: i32[] = [];
   /** The initializer method (global id), or -1. */
   init: i32[] = [];
 
@@ -178,7 +178,7 @@ export class TraitsTable {
     this.memberEnd.push(0);
     this.interfaceStart.push(0);
     this.interfaceEnd.push(0);
-    this.alias.push(-1);
+    this.param.push(TYPE_Any);
     this.init.push(-1);
     this.resolved.push(0);
     this.slotStart.push(0);
@@ -202,7 +202,7 @@ export class TraitsTable {
     this.memberEnd.length = count;
     this.interfaceStart.length = count;
     this.interfaceEnd.length = count;
-    this.alias.length = count;
+    this.param.length = count;
     this.init.length = count;
     this.resolved.length = count;
     this.slotStart.length = count;
@@ -238,11 +238,6 @@ export class TraitsTable {
 
   /** The binding of `name` in `ns` among t's own members, visible at `version`. */
   own(t: u32, ns: u32, name: u32, version: u8): u32 {
-    const alias = unchecked(this.alias[t]);
-    if (alias >= 0) {
-      t = <u32>alias;
-    }
-
     const hash = hashPair(hashPair(t, ns), name);
     const table = this.members;
     let slot = table.start(hash);
@@ -606,19 +601,6 @@ export class TraitsTable {
    */
   resolve(domain: Domain, t: u32): i32 {
     if (unchecked(this.resolved[t])) {
-      return 0;
-    }
-
-    const alias = unchecked(this.alias[t]);
-    if (alias >= 0) {
-      const error = this.resolve(domain, <u32>alias);
-      if (error) {
-        return error;
-      }
-
-      unchecked((this.slotStart[t] = this.slotStart[alias]));
-      unchecked((this.dispatchStart[t] = this.dispatchStart[alias]));
-      unchecked((this.resolved[t] = 1));
       return 0;
     }
 

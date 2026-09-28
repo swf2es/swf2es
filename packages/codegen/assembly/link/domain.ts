@@ -644,7 +644,7 @@ export class Domain {
   /**
    * As PoolObject::resolveParameterizedType: Vector.<T>, which avmplus has
    * as its own classes for int, uint, Number and *, and otherwise makes as
-   * a copy of Vector.<*>; -1 if `base` is not Vector.
+   * a subclass of Vector.<*>; -1 if `base` is not Vector.
    */
   parameterized(base: i32, param: i32): i32 {
     if (base !== this.vectorClass || base < 0) {
@@ -672,20 +672,23 @@ export class Domain {
       return this.vectorOf.get(param);
     }
 
+    // As Traits::newParameterizedITraits: a subclass of Vector.<*> with no members of its own.
     const traits = this.traits;
     const objects = <u32>this.vectorObjectType;
     const t = traits.create(
       TRAITS_Instance,
       unchecked(traits.abc[objects]),
       unchecked(traits.owner[objects]),
-      unchecked(traits.base[objects]),
+      <i32>objects,
       -1,
-      unchecked(traits.first[objects]),
-      unchecked(traits.end[objects]),
+      0,
+      0,
     );
-    unchecked((traits.alias[t] = objects));
+    unchecked((traits.param[t] = param));
     unchecked((traits.slotCount[t] = traits.slotCount[objects]));
     unchecked((traits.methodCount[t] = traits.methodCount[objects]));
+    unchecked((traits.memberStart[t] = traits.memberTraits.length));
+    unchecked((traits.memberEnd[t] = traits.memberTraits.length));
     this.vectorOf.set(param, <i32>t);
     return <i32>t;
   }
