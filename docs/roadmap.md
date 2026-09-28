@@ -90,7 +90,8 @@ Near-term work, in order. The goal of milestone 1 is in
     generated code of the codecs' loops, not the runtime, and take out of
     them what does not change, where the IR proves it cannot.
 11. **Compatibility left from steps 6 and 7**: `Date.parse` as avmplus
-    parses; `compress` and `uncompress`; AMF0, and Date, XML and
+    parses; `compress` and `uncompress`, and SWF decompression in `format`
+    (issue #3), both through pako and lzma1; AMF0, and Date, XML and
     Dictionary in AMF; `[Transient]`, once the runtime keeps metadata; and
     PR #9, rebased.
 12. **Faster verification**: the minimal runtime halved decoding to about
@@ -98,7 +99,6 @@ Near-term work, in order. The goal of milestone 1 is in
    ([benchmarks.md](benchmarks.md)); the typed verifier still walks every
    block twice. Profile it with the IR in place.
 
-Tracked separately: SWF decompression in `format` (issue #3).
 
 ## Later
 
