@@ -503,12 +503,18 @@ for (const [kind] of VECTORS) {
       }
 
       const length = rt.toUint(n);
-      const fill = this.$traits.cls.$fill;
       const a: Value[] = this.$a;
-      const old = a.length;
-      a.length = length;
-      if (length > old) {
-        a.fill(fill, old);
+      if (length === 0) {
+        // A new array: V8 empties one by a call into its runtime.
+        this.$a = [];
+      } else if (length < a.length) {
+        a.length = length;
+      } else if (length > a.length) {
+        // Pushed, not a length set then filled, so that V8 keeps it packed.
+        const fill = this.$traits.cls.$fill;
+        while (a.length < length) {
+          a.push(fill);
+        }
       }
     };
   natives[`${c}#get:fixed`] = plain(function (this: AsObject) {

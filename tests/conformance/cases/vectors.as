@@ -23,3 +23,29 @@ vv.push(new <int>[1, 2]);
 trace(vv.length, vv[0][1], String(vv));
 for each (var x:int in new <int>[4, 5]) trace("each", x);
 for (var i:* in new <int>[4, 5]) trace("in", i);
+// Length set: emptied and used again, grown with the type's default, shrunk.
+var lv:Vector.<int> = new Vector.<int>();
+lv.push(1, 2, 3);
+lv.length = 0;
+lv.push(4);
+lv.length = 3;
+trace("length reset", lv, lv.length);
+lv.length = 1;
+trace("length shrunk", lv, lv.length);
+var ls:Vector.<String> = new Vector.<String>();
+ls.length = 2;
+trace("length grown", ls[0], ls[1], ls.length);
+var ld:Vector.<Number> = new Vector.<Number>(2);
+ld.length = 0;
+ld.length = 2;
+trace("length regrown", ld);
+var lf:Vector.<int> = new Vector.<int>(2, true);
+try { lf.length = 0; } catch (e:RangeError) { trace("fixed length", e.errorID, lf.length); }
+// Emptied while forEach goes through it.
+var le:Vector.<int> = new Vector.<int>();
+le.push(1, 2, 3);
+var leSeen:Array = [];
+try {
+    le.forEach(function (x:int, i:int, v:Vector.<int>):void { leSeen.push(x); if (i == 0) v.length = 0; });
+} catch (e:RangeError) { leSeen.push("RangeError " + e.errorID); }
+trace("emptied in forEach", leSeen, le.length);
