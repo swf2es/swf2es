@@ -116,7 +116,39 @@ Near-term work, in order. The goal of milestone 1 is in
 
 ## Later
 
-Nothing yet.
+Compilation speed is a solid baseline after steps 12 to 15. Application
+coverage comes first, unless loading measurements show the compiler
+stalling. These are measured candidates, not planned steps:
+
+- **Verification's IR from the first walk.** The second pass, which walks
+  every block again to emit its IR, is 34% of as3pb's verification and 52%
+  of initializerLargeVector's (`docs/benchmarks.md`, step 12). That is its
+  time, not a saving: its emitting still has to happen somewhere. In a
+  worklist that reaches a fixed point, each block's last visit follows the
+  last change to its entry state, so each block's IR could be kept from
+  its last visit and put together once the types converge. Blocks are
+  still revisited when their entry types change, and IR from earlier
+  visits is thrown away. Before switching:
+  - tests for what step 12 relies on: `getBinding`'s memo after a failed
+    link, and handler merges after a local or its nullability changes
+    (the IR dump shows no locals yet, so it would first need to);
+  - the current emitting pass kept as a reference while it changes, with
+    the IR, generated JavaScript, source maps and VerifyErrors compared;
+  - total compile time and peak memory measured, as discarded IR could
+    offset the gain.
+
+  Worth doing sooner if removing the second walk also simplifies the
+  verifier substantially.
+- **Copy forwarding over the registers holding copies.** The emitter's
+  `copyBelow`, `copyAll` and `uncopy` scan register ranges even when few
+  registers hold pending copies; a sparse set of those registers could
+  scan only them. The set must keep emission order deterministic and be
+  saved, restored and rolled back with branch state. Measure on methods
+  with large stacks but few pending copies, with the compile benchmark of
+  step 13.
+- **The rest of AMF3 decoding:** 457 ms on as3pb against avmshell's 317.
+  Most of it is constructing the objects read, two thirds of it as3pb's own
+  constructors, which avmshell runs too.
 
 ## Not planned
 
