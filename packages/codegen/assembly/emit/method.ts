@@ -39,6 +39,9 @@ import {
 } from "../link/traits";
 import { Output } from "./output";
 
+/** The deepest structured code a method is given; one deeper keeps the dispatcher. */
+const MAX_NESTING: u32 = 500;
+
 @final
 export class MethodEmitter {
   out: Output = new Output();
@@ -669,6 +672,27 @@ export class MethodEmitter {
     for (let r: u32 = 1; r < reachable; r++) {
       const y = this.order[r];
       this.child[this.fill[this.idom[y]]++] = y;
+    }
+
+    // The translation recurses, and its code nests, along the dominator
+    // tree: a block's code at most as deep as its dominator's, and a
+    // labelled block for each of that one's merge children, a loop and an
+    // if's braces around it. Deeper than engines parse keeps the dispatcher.
+    this.fill[0] = this.loopHeader[0];
+    for (let r: u32 = 1; r < reachable; r++) {
+      const b = this.order[r];
+      const d = <u32>this.idom[b];
+      let merges: u32 = 0;
+      for (let c = this.childStart[d]; c < this.childStart[d + 1]; c++) {
+        merges += this.forwardIn[this.child[c]] >= 2 ? 1 : 0;
+      }
+
+      const nesting = this.fill[d] + merges + this.loopHeader[b] + 1;
+      if (nesting > MAX_NESTING) {
+        return false;
+      }
+
+      this.fill[b] = nesting;
     }
 
     return true;

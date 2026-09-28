@@ -242,9 +242,23 @@ export function irProblem(): string | null {
   return result.startsWith("checked") ? null : result;
 }
 
-/** The instructions of the domain's last ABC the emitter does not lower yet, or null. */
+/**
+ * What is wrong with the module the domain's last ABC compiles to, or
+ * null: instructions not lowered yet, or JavaScript that does not parse,
+ * such as a break or continue to a label not around it.
+ */
 export function loweringProblem(): string | null {
   const js = testing.domainModule("") as string;
   const missing = new Set([...js.matchAll(/rt\.unsupported\("([^"]*)"\)/g)].map((m) => m[1]));
-  return missing.size ? `not lowered: ${[...missing].sort().join(", ")}` : null;
+  if (missing.size) {
+    return `not lowered: ${[...missing].sort().join(", ")}`;
+  }
+
+  try {
+    new Function("rt", js.replace(/^export default function \(rt\) \{/, "").replace(/\}\s*$/, ""));
+  } catch (e) {
+    return `module does not parse: ${(e as Error).message}`;
+  }
+
+  return null;
 }
