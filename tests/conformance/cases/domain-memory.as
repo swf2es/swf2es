@@ -26,6 +26,26 @@ trace(li8(100), sxi1(1), sxi8(0xff), sxi16(0x8000));
 mem.length = 4096;
 si8(5, 4000);
 trace(li8(4000), mem[4000]);
+// Each width at the end, one past it, and before 0; addresses and values
+// that are not ints and numbers, converted in order.
+probe("end 32", function():* { return li32(4092); });
+probe("past 32", function():* { return li32(4093); });
+probe("past 16", function():* { si16(1, 4095); });
+probe("past 64", function():* { return lf64(4089); });
+var neg:int = -1;
+probe("negative", function():* { return li8(neg); });
+probe("negative store", function():* { si8(1, neg); });
+var fraction:Number = 1.5;
+var text:String = "10";
+si8(257.9, 30); si32(0xFFFFFFFF as uint, 32); sf32(true, 36);
+trace("converted", li8(30), li32(32), lf32(36), li8(fraction), li8(text));
+si8("3" as Object, 40);
+trace("string value", li8(40));
+var order:Array = [];
+var at:Object = { valueOf: function():* { order.push("address"); return 44; } };
+var what:Object = { valueOf: function():* { order.push("value"); return 9; } };
+si8(what, at);
+trace("order", order, li8(44));
 probe("shrink", function():* { mem.length = 10; });
 probe("past end", function():* { return li8(4096); });
 probe("clear", function():* { mem.clear(); });
