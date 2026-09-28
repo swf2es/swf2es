@@ -479,6 +479,18 @@ for (const prefix of ["Math", "Number"]) {
       args.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...args.map((a) => rt.toNumber(a)));
 }
 
+// As DictionaryObject: keyed by an object itself, in a Map of its own that
+// property access looks in first, and by any other key as a name. Weak keys
+// cannot be told apart where the host collects garbage, so are kept only
+// for AMF to write.
+natives["flash.utils::Dictionary#flash.utils:Dictionary::init"] = plain(function (
+  this: AsObject,
+  weakKeys: Value,
+) {
+  this.$keys = new Map<object, Value>();
+  this.$weakKeys = !!weakKeys;
+});
+
 natives["Math.Math::_max"] = plain((x: number, y: number) => Math.max(x, y));
 natives["Math.Math::_min"] = plain((x: number, y: number) => Math.min(x, y));
 

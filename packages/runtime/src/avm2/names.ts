@@ -54,6 +54,13 @@ export const CONSTANT_TypeName = 0x1d;
  * version it sees bindings at, and its local name, null for any name.
  */
 export class Multiname {
+  /**
+   * The object a runtime name was, which a Dictionary keys by itself; its
+   * name is the object's string for any other. Declared, so that every
+   * multiname has the same shape.
+   */
+  key: unknown = undefined;
+
   constructor(
     readonly kind: number,
     readonly namespaces: Namespace[],
