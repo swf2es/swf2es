@@ -1,7 +1,14 @@
 // Real programs, compiled and run in avmshell through the oracle. Their
 // deterministic output (lines not starting with "time: ") must match
 // expected/<name>.txt, and swf2es must parse and decode their ABCs like
-// abcdump, and link them and verify all their methods with types.
+// abcdump, and link them and verify all their methods with types. Each
+// program also runs compiled by swf2es in node, whose deterministic output
+// must match too, and whose timings are reported.
+//
+// One line is not compared: as3pb's wire checksum multiplies past 2^53,
+// which the oracle's 32-bit avmshell computes in the x87's extended
+// precision and swf2es in IEEE doubles (docs/architecture.md, "Testing
+// against oracles").
 //
 //   node tests/programs/run.ts [--update]
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -16,6 +23,7 @@ import {
   typedErrors,
 } from "../../oracle/abc-facts.ts";
 import { containerEngine, libraries, type OracleJob, runOracle } from "../../oracle/oracle.ts";
+import { runSwf2es } from "../conformance/swf2es.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -106,10 +114,41 @@ for (const [i, r] of results.entries()) {
     differences.push(`IR: ${ir}`);
   }
 
+  // The same program compiled by swf2es, in node.
+  const started = performance.now();
+  let lines2: string[];
+  try {
+    lines2 = await runSwf2es(builtins, abc);
+  } catch (e) {
+    lines2 = [`threw ${e instanceof Error ? e.stack : String(e)}`];
+  }
+
+  const seconds = ((performance.now() - started) / 1000).toFixed(1);
+  const compared = (all: string[]) => {
+    const kept = all.filter((l) => !l.startsWith("time: "));
+    const at = kept.indexOf("--- Wire checksum ---");
+    return at < 0 ? kept : [...kept.slice(0, at + 1), ...kept.slice(at + 2)];
+  };
+
+  const theirs = compared(output.trimEnd().split("\n"));
+  const ours = compared(lines2);
+  for (let i = 0; i < Math.max(theirs.length, ours.length); i++) {
+    if (theirs[i] !== ours[i]) {
+      differences.push(
+        `swf2es output, line ${i + 1}: avmshell ${theirs[i] ?? "(end)"}, swf2es ${ours[i] ?? "(end)"}`,
+      );
+      break;
+    }
+  }
+
   for (const d of differences.slice(0, 20)) {
     console.log(`FAIL ${name}: ${d}`);
   }
   failed += differences.length ? 1 : 0;
+  console.log(`     ${name} in swf2es, ${seconds} s:`);
+  for (const l of lines2.filter((l) => l.startsWith("time: "))) {
+    console.log(`       ${l.slice(6)}`);
+  }
 
   console.log(
     `${failed ? "FAIL" : "ok  "} ${name}: exit ${r.exitCode}, ${output.split("\n").length - 1} expected lines, ${timings} timing lines`,

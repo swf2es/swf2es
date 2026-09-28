@@ -52,8 +52,10 @@ Near-term work, in order. The goal of milestone 1 is in
    control flow and closures to classes, namespaces, Vectors, sorting and
    avmplus' number formatting, and a module loads only after the ABCs it
    was compiled against. Every instruction of Tamarin, the libraries and
-   as3pb lowers. Next: ByteArray and domain memory, so as3pb runs, and more
-   cases.
+   as3pb lowers. With ByteArray, domain memory, AMF3, JSON and Date, as3pb
+   runs compiled by swf2es in node, its output matching avmshell's but for
+   its wire checksum, which the oracle computes with x87 precision. Done;
+   first timings in [benchmarks.md](benchmarks.md).
 7. **Faster generated code**, measured on as3pb against AwayFL and on small
    loops, including loops with bounds known only at run time:
    1. Typed comparisons and branches: plain `<`, `>` and `===` where the
