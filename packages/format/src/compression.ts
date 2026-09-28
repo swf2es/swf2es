@@ -88,22 +88,18 @@ function adler32(data: Uint8Array): number {
     const end = Math.min(i + 5552, data.length);
     const unrolledEnd = end - ((end - i) % 8);
     for (; i < unrolledEnd; i += 8) {
-      a += data[i];
-      b += a;
-      a += data[i + 1];
-      b += a;
-      a += data[i + 2];
-      b += a;
-      a += data[i + 3];
-      b += a;
-      a += data[i + 4];
-      b += a;
-      a += data[i + 5];
-      b += a;
-      a += data[i + 6];
-      b += a;
-      a += data[i + 7];
-      b += a;
+      // The eight steps of b += a at once: each byte counted once for each
+      // step after it.
+      const x0 = data[i];
+      const x1 = data[i + 1];
+      const x2 = data[i + 2];
+      const x3 = data[i + 3];
+      const x4 = data[i + 4];
+      const x5 = data[i + 5];
+      const x6 = data[i + 6];
+      const x7 = data[i + 7];
+      b += 8 * a + 8 * x0 + 7 * x1 + 6 * x2 + 5 * x3 + 4 * x4 + 3 * x5 + 2 * x6 + x7;
+      a += x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7;
     }
 
     for (; i < end; i++) {
