@@ -665,6 +665,17 @@ export class Runtime {
 
   /** Run a script's initializer, once. */
   initScript(script: Script): AsObject {
+    // As avmplus' Toplevel, which is made from the script defining Object
+    // before any other runs: builtin scripts refer to each other, as the
+    // one defining Object makes XML while XML's needs Object.
+    if (!this.toplevelReady) {
+      this.toplevelReady = true;
+      const toplevel = this.findScript(qname(publicNs, "Object"));
+      if (toplevel && toplevel !== script) {
+        this.initScript(toplevel);
+      }
+    }
+
     const g = this.globalOf(script);
     if (script.state === 0) {
       script.state = 1;
@@ -674,6 +685,8 @@ export class Runtime {
 
     return g;
   }
+
+  private toplevelReady = false;
 
   /**
    * The script that defines `mn`, kept on the multiname once found: the
