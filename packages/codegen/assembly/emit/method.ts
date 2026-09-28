@@ -393,17 +393,20 @@ export class MethodEmitter {
       const op = ir.op[i];
       const dst = ir.dst[i];
       // What the instruction writes, other than stack registers, is copied
-      // first by the stack registers copying it; and what a branch leaves
-      // on the stack, for the block it goes to.
+      // first by the stack registers copying it, but for those it takes:
+      // it reads them before it writes. And what a branch leaves on the
+      // stack is written, for the block it goes to.
+      const frame = <i32>ir.frameSize;
+      const pops = this.stackDiscipline(op) && ir.srcCount[i] > 0 && ir.src[i] >= stack;
       if (dst >= 0 && dst < stack) {
-        this.copyAll(dst);
+        this.copyAll(dst, pops ? ir.src[i] : frame);
       }
 
       if (op === ops.OP_hasnext2) {
-        this.copyAll(<i32>ir.a[i]);
-        this.copyAll(<i32>ir.b[i]);
+        this.copyAll(<i32>ir.a[i], frame);
+        this.copyAll(<i32>ir.b[i], frame);
       } else if (op === ops.OP_popscope) {
-        this.copyAll(ir.src[i]);
+        this.copyAll(ir.src[i], frame);
       } else if (this.conditional(op) || op === ops.OP_lookupswitch) {
         this.copyBelow(ir.src[i]);
       } else if (op === ops.OP_jump) {
@@ -420,8 +423,10 @@ export class MethodEmitter {
         ir.src[i + 1] === dst &&
         op !== ops.OP_hasnext2
       ) {
+        // After the two, the stack is as far as dst: what is there on, the
+        // instruction takes.
         this.target = ir.dst[i + 1];
-        this.copyAll(this.target);
+        this.copyAll(this.target, dst);
       }
 
       if (handled) {
@@ -449,10 +454,11 @@ export class MethodEmitter {
       }
 
       if (sinking && this.sunk) {
-        // The setlocal is written: its stack register was never set.
+        // The setlocal is written: its stack register was never set, and
+        // the stack is as far as it.
         i++;
         this.regType[ir.dst[i]] = ir.type[i];
-        this.copyOf[dst] = -1;
+        this.uncopy(dst);
         continue;
       }
 
@@ -462,10 +468,19 @@ export class MethodEmitter {
       } else if (op === ops.OP_swap) {
         this.copyOf[ir.src[i]] = -1;
         this.copyOf[ir.src[i] + 1] = -1;
-      } else if (op === ops.OP_pop || this.setsLocal(op)) {
-        this.copyOf[ir.src[i]] = -1;
-      } else if (dst >= stack && !this.kept) {
-        this.copyOf[dst] = -1;
+      } else {
+        if (dst >= stack && !this.kept) {
+          this.copyOf[dst] = -1;
+        }
+
+        // What is above the stack now is gone.
+        if (this.stackDiscipline(op)) {
+          if (dst >= stack) {
+            this.uncopy(dst + 1);
+          } else if (pops) {
+            this.uncopy(ir.src[i]);
+          }
+        }
       }
     }
 
@@ -497,6 +512,15 @@ export class MethodEmitter {
     return true;
   }
 
+  /**
+   * Whether op takes its stack operands from the top and pushes what it
+   * gives there, as an instruction of a stack machine: all but a coercion
+   * or null check in place, and swap.
+   */
+  private stackDiscipline(op: u16): bool {
+    return op !== IR_Coerce && op !== IR_CheckNull && op !== ops.OP_swap;
+  }
+
   /** Whether op is a setlocal, which takes its stack register. */
   private setsLocal(op: u16): bool {
     return op === ops.OP_setlocal || (op >= ops.OP_setlocal0 && op < ops.OP_setlocal0 + 4);
@@ -513,10 +537,11 @@ export class MethodEmitter {
     }
   }
 
-  /** Write the stack registers that copy register w, before w changes. */
-  private copyAll(w: i32): void {
+  /** Write the stack registers below `limit` that copy register w, before w changes. */
+  private copyAll(w: i32, limit: i32): void {
     const ir = this.ir;
-    for (let r = <i32>(ir.localCount + ir.maxScope); r < <i32>ir.frameSize; r++) {
+    const end = min(limit, <i32>ir.frameSize);
+    for (let r = <i32>(ir.localCount + ir.maxScope); r < end; r++) {
       if (this.copyOf[r] === w) {
         this.writeCopy(r);
       }

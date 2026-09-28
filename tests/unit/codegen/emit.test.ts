@@ -123,6 +123,8 @@ test("a loop is a labelled for (;;), its back edge a continue, and no dispatcher
   assert.match(js, /L1: for \(;;\) \{/);
   assert.match(js, /continue L1;/);
   assert.doesNotMatch(js, /switch \(b\)/);
+  // The locals are read and written straight, with no stack registers between.
+  assert.match(js, /l1 = l1 \+ l2 \| 0;\n {4}l2 = l2 - 1 \| 0;/);
 });
 
 test("if and else meet again after a labelled block", { skip }, () => {
