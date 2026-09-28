@@ -281,6 +281,43 @@ export class Traits {
     return this.allDefaults ?? (this.base ? [...this.base.defaultsOf(), ...this.own] : this.own);
   }
 
+  /**
+   * Interfaces named by a class made before them, as a script may define a
+   * class before an interface it implements: each gives the interface's
+   * traits once its class exists, or null before. avmplus takes interfaces
+   * from traits, which exist from loading; these are settled when a type
+   * test first needs them.
+   */
+  pendingInterfaces: (() => Traits | null)[] | null = null;
+
+  /** Add the interfaces now made that were pending, here and in the bases. */
+  private settleInterfaces(): void {
+    for (let c: Traits | null = this; c; c = c.base) {
+      const pending = c.pendingInterfaces;
+      if (!pending) {
+        continue;
+      }
+
+      c.pendingInterfaces = pending.filter((get) => {
+        const iface = get();
+        if (!iface) {
+          return true;
+        }
+
+        iface.settleInterfaces();
+        c.interfaces.add(iface);
+        for (const i of iface.interfaces) {
+          c.interfaces.add(i);
+        }
+
+        return false;
+      });
+      if (!c.pendingInterfaces.length) {
+        c.pendingInterfaces = null;
+      }
+    }
+  }
+
   isSubtypeOf(t: Traits): boolean {
     for (let c: Traits | null = this; c; c = c.base) {
       if (c === t) {
@@ -288,7 +325,19 @@ export class Traits {
       }
     }
 
-    return this.interfaces.has(t);
+    if (this.interfaces.has(t)) {
+      return true;
+    }
+
+    // An interface a base settled after this class copied its interfaces.
+    this.settleInterfaces();
+    for (let c: Traits | null = this; c; c = c.base) {
+      if (c.interfaces.has(t)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 }
 
@@ -1531,10 +1580,19 @@ export class Runtime {
     }
 
     for (const i of desc.interfaces) {
-      const iface = this.resolveName(abc.names[i] as Multiname);
-      itraits.interfaces.add(iface.$it);
-      for (const t of iface.$it.interfaces) {
-        itraits.interfaces.add(t);
+      const mn = abc.names[i] as Multiname;
+      const iface = this.resolveName(mn);
+      if (iface) {
+        itraits.interfaces.add(iface.$it);
+        for (const t of iface.$it.interfaces) {
+          itraits.interfaces.add(t);
+        }
+      } else {
+        // Its script is the one running, and has not made it yet.
+        (itraits.pendingInterfaces ??= []).push(() => {
+          delete (mn as Multiname & { $cls?: AsObject }).$cls;
+          return this.resolveName(mn)?.$it ?? null;
+        });
       }
     }
 
