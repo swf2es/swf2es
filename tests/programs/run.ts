@@ -1,14 +1,14 @@
 // Real programs, compiled and run in avmshell through the oracle. Their
 // deterministic output (lines not starting with "time: ") must match
 // expected/<name>.txt, and swf2es must parse and decode their ABCs like
-// abcdump.
+// abcdump, and link them and resolve their types.
 //
 //   node tests/programs/run.ts [--update]
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { abcdumpFacts, compareFacts, swf2esFacts } from "../../oracle/abc-facts.ts";
-import { containerEngine, type OracleJob, runOracle } from "../../oracle/oracle.ts";
+import { abcdumpFacts, compareFacts, linkError, swf2esFacts } from "../../oracle/abc-facts.ts";
+import { containerEngine, libraries, type OracleJob, runOracle } from "../../oracle/oracle.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -54,6 +54,11 @@ const results = runOracle(
   { engine, abcdump: true, timeoutSeconds: 120 },
 );
 
+// What avmshell loads before each program.
+const builtins = libraries(["builtin", "shell_toplevel"], `${here}out/lib`, { engine }).map(
+  (l) => l.abc,
+);
+
 let failed = 0;
 for (const [i, r] of results.entries()) {
   const name = programs[i].name;
@@ -82,10 +87,13 @@ for (const [i, r] of results.entries()) {
     console.log(output);
   }
 
-  const differences = compareFacts(
-    abcdumpFacts(r.dump ?? ""),
-    swf2esFacts(new Uint8Array(readFileSync(`${here}out/${r.name}.abc`))),
-  );
+  const abc = new Uint8Array(readFileSync(`${here}out/${r.name}.abc`));
+  const differences = compareFacts(abcdumpFacts(r.dump ?? ""), swf2esFacts(abc));
+  const link = linkError(builtins, abc);
+  if (link) {
+    differences.push(`linking and resolving: error ${link}`);
+  }
+
   for (const d of differences.slice(0, 20)) {
     console.log(`FAIL ${name}: ${d}`);
   }

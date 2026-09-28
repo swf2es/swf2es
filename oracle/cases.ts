@@ -4,11 +4,11 @@
 //
 //   node oracle/cases.ts
 import { fileURLToPath } from "node:url";
-import { linkCases } from "../tests/unit/codegen/link-cases.ts";
+import { linkCases, resolveCases } from "../tests/unit/codegen/link-cases.ts";
 import { verifyCases } from "../tests/unit/codegen/verify-cases.ts";
 import { runAbcs } from "./oracle.ts";
 
-const cases = [...verifyCases, ...linkCases];
+const cases = [...verifyCases, ...linkCases, ...resolveCases];
 const runs = runAbcs(
   cases.map((c) => c.abc),
   fileURLToPath(new URL("out/cases/", import.meta.url)),

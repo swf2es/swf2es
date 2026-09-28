@@ -28,12 +28,17 @@ Near-term work, in order. The goal of milestone 1 is in
         the image's builtin, shell_toplevel, playerglobal and airglobal
         against abcdump and links them, and every Tamarin ABC links as in
         avmshell.
-      - 2b. Declaring scopes: each method's outer scope chain, for 1013,
-        getouterscope and the global slots.
-      - 2c. Trait layout (overrides, name clashes, slot and disp ids, as
-        avmplus resolves a class when first used), then value types in the
-        frame state, and the checks that need them: slots, callstatic's
-        binding, operand types.
+      - 2b. Traits and types: each class's, script's and activation's
+        members laid out as the ABC loads (slot and dispatch ids,
+        overrides), and resolved as avmplus resolves a class when it is
+        created (slot types and initial values, method signatures, final
+        methods, override signatures, implemented interfaces).
+      - 2c. The typed verifier: frame states with each value's type, merged
+        until they settle; each method's declaring scope, captured where it
+        is created; and the checks that need them (1013, getouterscope,
+        slots, callstatic's binding, operand types). Declaring scopes need
+        the scope stack's types and those types need the declaring scopes,
+        so they come together, as in avmplus' Verifier.
    3. The IR, written by the same pass.
 
 Tracked separately: SWF decompression in `format` (issue #3).

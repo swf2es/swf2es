@@ -70,6 +70,12 @@ three, with the same VerifyError numbers:
    and VM-internal names stay hidden. While an ABC loads, its classes link
    to base classes and interfaces defined by earlier ABCs' scripts or by
    its own earlier classes, as avmplus' `AbcParser` links them.
+   Each class's, script's and activation's traits then lay out their
+   members, binding names to slot and dispatch ids after their base's
+   (`link/traits.ts`). Types resolve later, when a class is first used:
+   slot types, method signatures, and the override and interface checks
+   that compare them. A type is the id of a traits, including void and
+   null, or `*`.
 3. **Verifying a method**, when it is first compiled: its signature's types
    and its bytecode.
 

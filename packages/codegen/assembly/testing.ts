@@ -387,6 +387,27 @@ export function domainTraits(first: i32): string {
   return out.join("\n");
 }
 
+/**
+ * Resolve every traits of the domain from `first` on, as avmplus does when
+ * each is first used: 0, or the first VerifyError.
+ */
+export function domainResolve(first: i32): i32 {
+  const count = domain.traits.kind.length;
+  for (let t = first; t < count; t++) {
+    const error = domain.traits.resolve(domain, t);
+    if (error) {
+      return error;
+    }
+  }
+
+  return 0;
+}
+
+/** The builtin types the domain found, as traits ids. */
+export function domainBuiltins(): string {
+  return `object ${domain.objectType()} class ${domain.classClass} void ${domain.voidType} null ${domain.nullType} number ${domain.numberType} int ${domain.intType} uint ${domain.uintType} boolean ${domain.booleanType} string ${domain.stringType} namespace ${domain.namespaceType} vector ${domain.vectorClass} vectorObject ${domain.vectorObjectType} vectorInt ${domain.vectorIntType} vectorUint ${domain.vectorUintType} vectorDouble ${domain.vectorDoubleType}`;
+}
+
 /** How many traits the domain has. */
 export function domainTraitsCount(): i32 {
   return domain.traits.kind.length;

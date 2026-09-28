@@ -20,14 +20,22 @@
 // they cannot see VM-internal names.
 import { Abc } from "../abc/abc";
 import {
+  ATTR_Final,
+  CONSTANT_Double,
   CONSTANT_ExplicitNamespace,
+  CONSTANT_False,
+  CONSTANT_Int,
   CONSTANT_Multiname,
+  CONSTANT_Null,
   CONSTANT_PackageInternalNs,
   CONSTANT_PrivateNs,
   CONSTANT_ProtectedNamespace,
   CONSTANT_Qname,
   CONSTANT_StaticProtectedNs,
+  CONSTANT_True,
   CONSTANT_TypeName,
+  CONSTANT_UInt,
+  CONSTANT_Utf8,
   INSTANCE_Final,
   INSTANCE_Interface,
   INSTANCE_ProtectedNs,
@@ -36,18 +44,39 @@ import {
   kCannotExtendFinalClass,
   kCannotImplementError,
   kClassNotFoundError,
+  kCorruptABCError,
+  kCpoolIndexRangeError,
+  kIllegalDefaultValue,
   kIllegalVoidError,
   METHOD_NeedActivation,
   TRAIT_Class,
+  TRAIT_Getter,
+  TRAIT_Method,
+  TRAIT_Setter,
 } from "../abc/constants";
 import { readAbc } from "../abc/parse";
 import { hashBytes, hashPair, IdTable } from "./table";
 import {
+  BUILTIN_Any,
+  BUILTIN_Boolean,
+  BUILTIN_Int,
+  BUILTIN_Namespace,
+  BUILTIN_Number,
+  BUILTIN_Object,
+  BUILTIN_Other,
+  BUILTIN_String,
+  BUILTIN_Uint,
+  BUILTIN_Void,
+  isDefaultKind,
+  legalDefault,
   TRAITS_Activation,
   TRAITS_Class,
   TRAITS_Instance,
+  TRAITS_Null,
   TRAITS_Script,
+  TRAITS_Void,
   TraitsTable,
+  TYPE_Any,
 } from "./traits";
 
 export const NS_Public: u8 = 0;
@@ -119,6 +148,11 @@ export class Domain {
   classStatic: i32[] = [];
 
   traits: TraitsTable = new TraitsTable();
+  /** Each ABC's first method id; the ABC of each method id. */
+  methodStart: u32[] = [];
+  methodAbcIndex: u32[] = [];
+  /** The error of the last resolveTypeId that failed. */
+  typeError: i32 = 0;
   /** Per ABC, each script's traits, and each body's activation traits or -1. */
   scriptTraits: StaticArray<u32>[] = [];
   bodyTraits: StaticArray<i32>[] = [];
@@ -135,6 +169,8 @@ export class Domain {
   typeOwner: i32[] = [];
   types: IdTable = new IdTable();
   loads: i32 = 0;
+  /** Each ABC's load number, the owner of its own class names. */
+  abcOwner: i32[] = [];
   /** Strings interned from text rather than an ABC, kept for their bytes. */
   texts: ArrayBuffer[] = [];
 
@@ -146,6 +182,22 @@ export class Domain {
   functionClass: i32 = -1;
   /** avmplus registers void as a class, which nothing may extend. */
   voidClass: i32 = -1;
+  // Builtin types by traits id, for the rules that treat them specially.
+  voidType: i32 = -1;
+  nullType: i32 = -1;
+  numberType: i32 = -1;
+  intType: i32 = -1;
+  uintType: i32 = -1;
+  booleanType: i32 = -1;
+  stringType: i32 = -1;
+  namespaceType: i32 = -1;
+  vectorClass: i32 = -1;
+  vectorObjectType: i32 = -1;
+  vectorIntType: i32 = -1;
+  vectorUintType: i32 = -1;
+  vectorDoubleType: i32 = -1;
+  /** Vector.<T> for other element types T, by T. */
+  vectorOf: Map<i32, i32> = new Map<i32, i32>();
 
   /**
    * Parse and add the ABC in `buffer`, whose first `length` bytes are the ABC
@@ -162,6 +214,13 @@ export class Domain {
     this.abcs.push(abc);
     this.buffers.push(buffer);
     this.loads++;
+    this.abcOwner.push(this.loads);
+    const methodCount = <u32>this.traits.methodTraits.length;
+    this.methodStart.push(methodCount);
+    this.traits.addMethods(abc.methodCount);
+    for (let m: u32 = 0; m < abc.methodCount; m++) {
+      this.methodAbcIndex.push(index);
+    }
 
     const pool = abc.pool;
     const strings = new StaticArray<u32>(pool.stringCount);
@@ -181,7 +240,11 @@ export class Domain {
       this.classStart.pop();
       this.scriptTraits.length = index;
       this.bodyTraits.length = index;
+      this.abcOwner.length = index;
+      this.methodStart.length = index;
+      this.methodAbcIndex.length = methodCount;
       this.traits.truncate(traitsCount);
+      this.traits.truncateMethods(methodCount);
       return abc;
     }
 
@@ -231,16 +294,21 @@ export class Domain {
         unchecked((this.classBase[id] = base));
       }
 
+      const interfaces = <u32>this.traits.interfaceList.length;
       const last = unchecked(abc.instanceInterfaceStart[i + 1]);
       for (let j = unchecked(abc.instanceInterfaceStart[i]); j < last; j++) {
         const t = this.resolveType(index, unchecked(abc.interfaces[j]));
         if (t < 0) {
+          this.traits.interfaceList.length = interfaces;
           return abc.fail(-t);
         }
 
         if (!(unchecked(this.classFlags[t]) & INSTANCE_Interface)) {
+          this.traits.interfaceList.length = interfaces;
           return abc.fail(kCannotImplementError);
         }
+
+        this.traits.interfaceList.push(<u32>unchecked(this.classTraits[t]));
       }
 
       if (flags & INSTANCE_Interface && baseName) {
@@ -265,11 +333,15 @@ export class Domain {
         unchecked(abc.instanceTraitStart[i + 1]),
       );
       unchecked((this.traits.isInterface[t] = flags & INSTANCE_Interface ? 1 : 0));
+      unchecked((this.traits.interfaceStart[t] = interfaces));
+      unchecked((this.traits.interfaceEnd[t] = this.traits.interfaceList.length));
       unchecked((this.classTraits[id] = t));
       const error = this.traits.layout(this, t);
       if (error) {
         return abc.fail(error);
       }
+
+      this.bindMethods(t, abc.instanceInit[i], (flags & INSTANCE_Final) !== 0);
 
       this.nameInstance(index, i);
     }
@@ -277,15 +349,18 @@ export class Domain {
     // As AvmCore's first builtin pool: its classes include the special ones.
     if (abc.builtin && !this.hasBuiltins) {
       this.hasBuiltins = true;
-      this.classClass = this.findPublicClass("Class");
-      this.functionClass = this.findPublicClass("Function");
+      this.classClass = this.findBuiltin("Class");
+      this.functionClass = this.findBuiltin("Function");
       this.voidClass = <i32>this.classAbc.length;
       this.classAbc.push(index);
       this.classInstance.push(0xffffffff);
       this.classBase.push(-1);
       this.classFlags.push(INSTANCE_Final);
-      this.classTraits.push(-1);
+      this.voidType = <i32>this.traits.create(TRAITS_Void, index, 0, -1, -1, 0, 0);
+      this.nullType = <i32>this.traits.create(TRAITS_Null, index, 0, -1, -1, 0, 0);
+      this.classTraits.push(this.voidType);
       this.classStatic.push(-1);
+      this.findBuiltinTypes();
       const empty = this.internNamespace(NS_Public, this.internText(""));
       this.nameType(empty, this.internText("void"), API_AllVersions, this.voidClass, -1);
     }
@@ -313,6 +388,8 @@ export class Domain {
       if (error) {
         return abc.fail(error);
       }
+
+      this.bindMethods(t, abc.classInit[i], false);
     }
 
     return true;
@@ -339,6 +416,8 @@ export class Domain {
       if (error) {
         return abc.fail(error);
       }
+
+      this.bindMethods(t, abc.scriptInit[s], false);
     }
 
     return true;
@@ -360,11 +439,295 @@ export class Domain {
         if (error) {
           return abc.fail(error);
         }
+
+        this.bindMethods(t, -1, false);
       }
     }
 
     this.bodyTraits.push(bodies);
     return true;
+  }
+
+  /**
+   * As MethodInfo::makeMethodOf, after t's members bind: its methods,
+   * getters, setters and `init` (-1 for none) become t's; `final` for a
+   * final class, whose methods are all final.
+   */
+  bindMethods(t: u32, init: i32, final: bool): void {
+    const traits = this.traits;
+    const index = unchecked(traits.abc[t]);
+    const abc = unchecked(this.abcs[index]);
+    const methods = unchecked(this.methodStart[index]);
+    for (let i = unchecked(traits.first[t]); i < unchecked(traits.end[t]); i++) {
+      const tag = unchecked(abc.traitTag[i]);
+      const kind = tag & 0x0f;
+      if (kind === TRAIT_Method || kind === TRAIT_Getter || kind === TRAIT_Setter) {
+        const m = methods + unchecked(abc.traitIndex[i]);
+        unchecked((traits.methodTraits[m] = t));
+        unchecked((traits.methodFinal[m] = tag & ATTR_Final || final ? 1 : 0));
+      }
+    }
+
+    if (init >= 0) {
+      unchecked((traits.methodTraits[methods + init] = t));
+      unchecked((traits.init[t] = methods + init));
+    }
+  }
+
+  /** The types AvmCore's builtin traits hold, from the first builtin ABC. */
+  findBuiltinTypes(): void {
+    this.numberType = this.builtinType("Number");
+    this.intType = this.builtinType("int");
+    this.uintType = this.builtinType("uint");
+    this.booleanType = this.builtinType("Boolean");
+    this.stringType = this.builtinType("String");
+    this.namespaceType = this.builtinType("Namespace");
+    this.vectorClass = this.findBuiltin("Vector");
+    this.vectorObjectType = this.builtinType("Vector$object");
+    this.vectorIntType = this.builtinType("Vector$int");
+    this.vectorUintType = this.builtinType("Vector$uint");
+    this.vectorDoubleType = this.builtinType("Vector$double");
+  }
+
+  builtinType(name: string): i32 {
+    const c = this.findBuiltin(name);
+    return c < 0 ? -1 : unchecked(this.classTraits[c]);
+  }
+
+  /**
+   * As DomainMgr::findBuiltinTraitsByName: the first class of the ABC being
+   * linked named `name` in any namespace, or -1.
+   */
+  findBuiltin(name: string): i32 {
+    const text = this.findText(name);
+    for (let id = 0; text >= 0 && id < this.typeName.length; id++) {
+      if (
+        unchecked(this.typeName[id]) === <u32>text &&
+        unchecked(this.typeOwner[id]) === this.loads
+      ) {
+        return <i32>unchecked(this.typeClass[id]);
+      }
+    }
+
+    return -1;
+  }
+
+  objectType(): i32 {
+    return this.objectClass < 0 ? TYPE_Any : unchecked(this.classTraits[this.objectClass]);
+  }
+
+  /** As Traits::getBuiltinType. */
+  builtin(type: i32): u8 {
+    if (type === TYPE_Any) {
+      return BUILTIN_Any;
+    }
+
+    if (type === this.objectType()) {
+      return BUILTIN_Object;
+    }
+
+    if (type === this.voidType) {
+      return BUILTIN_Void;
+    }
+
+    if (type === this.booleanType) {
+      return BUILTIN_Boolean;
+    }
+
+    if (type === this.intType) {
+      return BUILTIN_Int;
+    }
+
+    if (type === this.uintType) {
+      return BUILTIN_Uint;
+    }
+
+    if (type === this.numberType) {
+      return BUILTIN_Number;
+    }
+
+    if (type === this.stringType) {
+      return BUILTIN_String;
+    }
+
+    return type === this.namespaceType ? BUILTIN_Namespace : BUILTIN_Other;
+  }
+
+  /** As Traits::isMachineType: Object, void, Boolean, int, uint and Number. */
+  isMachineType(type: i32): bool {
+    const bt = this.builtin(type);
+    return bt >= BUILTIN_Object && bt <= BUILTIN_Number;
+  }
+
+  /** As Traits::isMachineCompatible: whether a and b have the same representation. */
+  machineCompatible(a: i32, b: i32): bool {
+    if (a === b) {
+      return true;
+    }
+
+    if (isAtom(this.builtin(a)) && isAtom(this.builtin(b))) {
+      return true;
+    }
+
+    return a !== TYPE_Any && b !== TYPE_Any && !this.isMachineType(a) && !this.isMachineType(b);
+  }
+
+  methodAbc(m: u32): u32 {
+    return unchecked(this.methodAbcIndex[m]);
+  }
+
+  /** The namespace id of the public namespace, or -1 if no ABC has one. */
+  publicNamespace(): i32 {
+    const empty = this.findText("");
+    return empty < 0 ? -1 : this.findNamespace(NS_Public, <u32>empty);
+  }
+
+  /** The version of ABC `index`'s public namespace, as AvmCore::getPublicNamespace(pool). */
+  publicVersion(index: u32): u8 {
+    return unchecked(this.abcs[index]).builtin ? API_Internal : this.apiVersion;
+  }
+
+  /**
+   * As PoolObject::resolveTypeName for a slot or parameter type: TYPE_Any
+   * for index 0, or the type; below TYPE_Any on failure, with typeError set.
+   */
+  resolveTypeId(index: u32, mn: u32, allowVoid: bool): i32 {
+    if (mn === 0) {
+      return TYPE_Any;
+    }
+
+    const pool = unchecked(this.abcs[index]).pool;
+    if (mn >= pool.multinameCount) {
+      this.typeError = kCpoolIndexRangeError;
+      return -2;
+    }
+
+    if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
+      const base = this.resolveType(index, unchecked(pool.mnA[mn]));
+      if (base === -kAmbiguousBindingError) {
+        this.typeError = kAmbiguousBindingError;
+        return -2;
+      }
+
+      const param = this.resolveTypeId(index, unchecked(pool.mnB[mn]), false);
+      if (param < TYPE_Any) {
+        return param;
+      }
+
+      const t = base >= 0 ? this.parameterized(base, param) : -1;
+      if (t < 0) {
+        this.typeError = kClassNotFoundError;
+        return -2;
+      }
+
+      return t;
+    }
+
+    const c = this.resolveType(index, mn);
+    if (c === -kIllegalVoidError) {
+      if (allowVoid) {
+        return this.voidType;
+      }
+
+      this.typeError = kIllegalVoidError;
+      return -2;
+    }
+
+    if (c < 0) {
+      this.typeError = -c;
+      return -2;
+    }
+
+    return unchecked(this.classTraits[c]);
+  }
+
+  /**
+   * As PoolObject::resolveParameterizedType: Vector.<T>, which avmplus has
+   * as its own classes for int, uint, Number and *, and otherwise makes as
+   * a copy of Vector.<*>; -1 if `base` is not Vector.
+   */
+  parameterized(base: i32, param: i32): i32 {
+    if (base !== this.vectorClass || base < 0) {
+      return -1;
+    }
+
+    const bt = this.builtin(param);
+    if (bt === BUILTIN_Any) {
+      return this.vectorObjectType;
+    }
+
+    if (bt === BUILTIN_Int) {
+      return this.vectorIntType;
+    }
+
+    if (bt === BUILTIN_Uint) {
+      return this.vectorUintType;
+    }
+
+    if (bt === BUILTIN_Number) {
+      return this.vectorDoubleType;
+    }
+
+    if (this.vectorOf.has(param)) {
+      return this.vectorOf.get(param);
+    }
+
+    const traits = this.traits;
+    const objects = <u32>this.vectorObjectType;
+    const t = traits.create(
+      TRAITS_Instance,
+      unchecked(traits.abc[objects]),
+      unchecked(traits.owner[objects]),
+      unchecked(traits.base[objects]),
+      -1,
+      unchecked(traits.first[objects]),
+      unchecked(traits.end[objects]),
+    );
+    unchecked((traits.alias[t] = objects));
+    unchecked((traits.slotCount[t] = traits.slotCount[objects]));
+    unchecked((traits.methodCount[t] = traits.methodCount[objects]));
+    this.vectorOf.set(param, <i32>t);
+    return <i32>t;
+  }
+
+  /**
+   * As PoolObject::getLegalDefaultValue: whether constant `value` of `kind`
+   * of ABC `index` may be the default of a slot or parameter of `type`; 0,
+   * or the VerifyError.
+   */
+  checkDefault(index: u32, value: u32, kind: u8, type: i32): i32 {
+    // Without a value, the type's own default is always legal.
+    if (value === 0) {
+      return 0;
+    }
+
+    if (!isDefaultKind(kind)) {
+      return type === TYPE_Any ? kCorruptABCError : kIllegalDefaultValue;
+    }
+
+    const pool = unchecked(this.abcs[index]).pool;
+    let number: f64 = 0;
+    let count: u32 = 0xffffffff;
+    if (kind === CONSTANT_Int) {
+      count = pool.ints.length;
+      number = value < count ? unchecked(pool.ints[value]) : 0;
+    } else if (kind === CONSTANT_UInt) {
+      count = pool.uints.length;
+      number = value < count ? unchecked(pool.uints[value]) : 0;
+    } else if (kind === CONSTANT_Double) {
+      count = pool.doubles.length;
+      number = value < count ? unchecked(pool.doubles[value]) : 0;
+    } else if (kind === CONSTANT_Utf8) {
+      count = pool.stringCount;
+    } else if (kind !== CONSTANT_True && kind !== CONSTANT_False && kind !== CONSTANT_Null) {
+      count = pool.nsCount;
+    }
+
+    if (value >= count) {
+      return kCpoolIndexRangeError;
+    }
+
+    return legalDefault(this.builtin(type), kind, number) ? 0 : kIllegalDefaultValue;
   }
 
   /**
@@ -396,13 +759,13 @@ export class Domain {
     let found: i32 = -1;
     if (kind === CONSTANT_Qname && unchecked(pool.mnA[mn]) !== 0 && nameIndex !== 0) {
       const ns = unchecked(pool.mnA[mn]);
-      found = this.findType(ids[ns], strings[nameIndex], versions[ns]);
+      found = this.findType(index, ids[ns], strings[nameIndex], versions[ns]);
     } else if (kind === CONSTANT_Multiname && nameIndex !== 0) {
       const set = unchecked(pool.mnA[mn]);
       const last = unchecked(pool.nsSetStart[set + 1]);
       for (let m = unchecked(pool.nsSetStart[set]); m < last; m++) {
         const ns = unchecked(pool.nsSetMembers[m]);
-        const t = this.findType(ids[ns], strings[nameIndex], versions[ns]);
+        const t = this.findType(index, ids[ns], strings[nameIndex], versions[ns]);
         if (t >= 0 && found >= 0 && t !== found) {
           return -kAmbiguousBindingError;
         }
@@ -421,12 +784,12 @@ export class Domain {
   }
 
   /**
-   * As DomainMgr::findTraitsInPoolByNameAndNS for the ABC being linked: a
-   * class a script defines, else one of the ABC's own; -1 if none.
+   * As DomainMgr::findTraitsInPoolByNameAndNS for ABC `index`: a class a
+   * script defines, else one of the ABC's own; -1 if none.
    */
-  findType(ns: u32, name: u32, version: u8): i32 {
+  findType(index: u32, ns: u32, name: u32, version: u8): i32 {
     const found = this.findTypeOf(ns, name, version, -1);
-    return found >= 0 ? found : this.findTypeOf(ns, name, version, this.loads);
+    return found >= 0 ? found : this.findTypeOf(ns, name, version, this.abcOwner[index]);
   }
 
   findTypeOf(ns: u32, name: u32, version: u8, owner: i32): i32 {
@@ -479,8 +842,8 @@ export class Domain {
     const nsId = unchecked(this.abcNs[index][ns]);
     const version = unchecked(this.abcNsVersion[index][ns]);
     const name = unchecked(this.abcString[index][pool.mnB[mn]]);
-    if (this.findType(nsId, name, version) < 0) {
-      this.nameType(nsId, name, version, <i32>(this.classStart[index] + i), this.loads);
+    if (this.findType(index, nsId, name, version) < 0) {
+      this.nameType(nsId, name, version, <i32>(this.classStart[index] + i), this.abcOwner[index]);
     }
   }
 
@@ -531,14 +894,6 @@ export class Domain {
         this.nameType(nsId, name, version, <i32>id, -1);
       }
     }
-  }
-
-  /** The class the ABC being linked names public::`name`, or -1. */
-  findPublicClass(name: string): i32 {
-    const empty = this.findText("");
-    const text = this.findText(name);
-    const ns = empty < 0 ? -1 : this.findNamespace(NS_Public, <u32>empty);
-    return ns < 0 || text < 0 ? -1 : this.findTypeOf(ns, <u32>text, API_Internal, this.loads);
   }
 
   findText(text: string): i32 {
@@ -792,6 +1147,11 @@ function isAir(version: u8): bool {
   }
 
   return version !== API_FP_10_0 && version !== 5 && version !== 7;
+}
+
+/** *, Object and void are all represented as atoms. */
+function isAtom(bt: u8): bool {
+  return bt === BUILTIN_Any || bt === BUILTIN_Object || bt === BUILTIN_Void;
 }
 
 function namespaceType(kind: u8): u8 {

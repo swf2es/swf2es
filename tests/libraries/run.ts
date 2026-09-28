@@ -1,7 +1,8 @@
 // The ABCs the oracle image ships: builtin and shell_toplevel (the classes
 // avmshell runs with), and Flash Player's playerglobal and AIR's airglobal.
 // swf2es must parse and decode each, as a builtin ABC, like abcdump, and
-// link each of the others on top of builtin, as the player loads them.
+// link each of the others on top of builtin, as the player loads them, and
+// resolve all their types.
 //
 //   node tests/libraries/run.ts
 import { fileURLToPath } from "node:url";
@@ -37,9 +38,10 @@ for (const library of all) {
     differences.push(`VerifyErrors ${errors.join(" ")}`);
   }
 
-  const link = library.name === "builtin" ? 0 : linkError([all[0].abc], library.abc, true);
+  const bases = library.name === "builtin" ? [] : [all[0].abc];
+  const link = linkError(bases, library.abc, true);
   if (link) {
-    differences.push(`linking on top of builtin: error ${link}`);
+    differences.push(`linking on top of builtin and resolving: error ${link}`);
   }
 
   for (const d of differences.slice(0, 20)) {

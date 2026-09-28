@@ -1,8 +1,16 @@
-// Constant kinds (avmplus core/ActionBlockConstants.h).
+// Constant kinds (avmplus core/ActionBlockConstants.h): of default values,
+// namespaces and multinames.
+export const CONSTANT_Utf8: u8 = 0x01;
+export const CONSTANT_Int: u8 = 0x03;
+export const CONSTANT_UInt: u8 = 0x04;
 export const CONSTANT_PrivateNs: u8 = 0x05;
+export const CONSTANT_Double: u8 = 0x06;
 export const CONSTANT_Qname: u8 = 0x07;
 export const CONSTANT_Namespace: u8 = 0x08;
 export const CONSTANT_Multiname: u8 = 0x09;
+export const CONSTANT_False: u8 = 0x0a;
+export const CONSTANT_True: u8 = 0x0b;
+export const CONSTANT_Null: u8 = 0x0c;
 export const CONSTANT_QnameA: u8 = 0x0d;
 export const CONSTANT_MultinameA: u8 = 0x0e;
 export const CONSTANT_RTQname: u8 = 0x0f;
@@ -70,6 +78,7 @@ export const kUnsupportedTraitsKindError: i32 = 1045;
 export const kIllegalOverrideError: i32 = 1053;
 export const kIllegalExceptionHandlerError: i32 = 1054;
 export const kIllegalSlotError: i32 = 1057;
+export const kIllegalDefaultValue: i32 = 1102;
 export const kClassInfoOrderError: i32 = 1059;
 export const kClassInfoExceedsCountError: i32 = 1060;
 export const kAlreadyBoundError: i32 = 1071;

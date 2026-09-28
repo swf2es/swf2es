@@ -202,17 +202,18 @@ export function verifyErrors(facts: AbcFacts): number[] {
 
 /**
  * The error swf2es reports while linking `abc` into a domain after
- * `builtins` (such as builtin and shell_toplevel), or 0; `builtin` links
- * `abc` as a builtin ABC too.
+ * `builtins` (such as builtin and shell_toplevel) and resolving the types
+ * of all its traits, or 0; `builtin` links `abc` as a builtin ABC too.
  */
 export function linkError(builtins: Uint8Array[], abc: Uint8Array, builtin = false): number {
   testing.domainReset(50);
-  for (const builtin of builtins) {
-    const error = testing.domainAdd(builtin, true) as number;
+  for (const b of builtins) {
+    const error = testing.domainAdd(b, true) as number;
     if (error) {
       throw new Error(`builtin ABC rejected with ${error}`);
     }
   }
 
-  return testing.domainAdd(abc, builtin) as number;
+  const first = testing.domainTraitsCount() as number;
+  return (testing.domainAdd(abc, builtin) as number) || (testing.domainResolve(first) as number);
 }

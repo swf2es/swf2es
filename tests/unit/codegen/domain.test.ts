@@ -2,7 +2,17 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { abc, tables, u30 } from "./abc-builder.ts";
-import { classes, GETTER, linkCases, METHOD, mn, OVERRIDE, SETTER, SLOT } from "./link-cases.ts";
+import {
+  classes,
+  GETTER,
+  linkCases,
+  METHOD,
+  mn,
+  OVERRIDE,
+  resolveCases,
+  SETTER,
+  SLOT,
+} from "./link-cases.ts";
 import { testing } from "./testing-module.ts";
 
 const NS_PUBLIC = 0;
@@ -174,4 +184,29 @@ test("members bind to slot and dispatch ids after their base's", {
     "  ::I 2 1",
     `traits ${first + 2} kind 2 base 1 slots 0 methods 5`,
   ]);
+});
+
+test("classes resolve their types as avmplus resolves them when created", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  for (const c of resolveCases) {
+    testing.domainReset(SWF_31);
+    assert.equal(testing.domainAdd(builtin, true), 0);
+    const first = testing.domainTraitsCount() as number;
+    const error =
+      (testing.domainAdd(c.abc, false) as number) || (testing.domainResolve(first) as number);
+    assert.equal(error, c.error ?? 0, c.name);
+  }
+});
+
+test("the first builtin ABC supplies the builtin types", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  testing.domainReset(SWF_31);
+  testing.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
+  const found = (testing.domainBuiltins() as string).split(" ");
+  for (let i = 0; i < found.length; i += 2) {
+    assert.ok(Number(found[i + 1]) >= 0, `${found[i]} not found`);
+  }
 });
