@@ -55,6 +55,30 @@ async function worker(tool: string, file: string) {
 
       return count;
     };
+  } else if (tool === "Ruffle Wasm") {
+    const wasm = await WebAssembly.compile(
+      readFileSync(`${here}ruffle/target/wasm32-unknown-unknown/release/swf2es_ruffle_bench.wasm`),
+    );
+    if (WebAssembly.Module.imports(wasm).length) {
+      throw new Error("Expected a standalone Ruffle Wasm module");
+    }
+    const instance = await WebAssembly.instantiate(wasm);
+    const api = instance.exports as unknown as {
+      memory: WebAssembly.Memory;
+      bench_alloc(len: number): number;
+      bench_free(ptr: number, len: number): void;
+      bench_run(ptr: number, len: number, rounds: number, decode: number): number;
+    };
+    run = (rounds, decode) => {
+      // Like swf2es, transfer input once per batch, inside the timing boundary.
+      const ptr = api.bench_alloc(bytes.length);
+      try {
+        new Uint8Array(api.memory.buffer, ptr, bytes.length).set(bytes);
+        return api.bench_run(ptr, bytes.length, rounds, Number(decode));
+      } finally {
+        api.bench_free(ptr, bytes.length);
+      }
+    };
   } else {
     // AwayJS checks browser global names while loading; parsing uses no DOM.
     Object.assign(globalThis, { self: globalThis, window: globalThis });
@@ -118,7 +142,8 @@ async function worker(tool: string, file: string) {
   );
 }
 
-const args = process.argv.slice(2);
+const includeWasm = process.argv.includes("--ruffle-wasm");
+const args = process.argv.slice(2).filter((arg) => arg !== "--ruffle-wasm");
 if (args[0] === "--worker") {
   await worker(args[1], args[2]);
 } else {
@@ -130,7 +155,7 @@ if (args[0] === "--worker") {
     const file = resolve(input);
     const bytes = readFileSync(file);
     const rows: Result[] = [];
-    for (const tool of ["swf2es", "AwayFL", "Ruffle"]) {
+    for (const tool of ["swf2es", "AwayFL", "Ruffle", ...(includeWasm ? ["Ruffle Wasm"] : [])]) {
       const stdout =
         tool === "Ruffle"
           ? execFileSync(`${here}ruffle/target/release/swf2es-ruffle-bench`, [file], {
@@ -151,7 +176,8 @@ if (args[0] === "--worker") {
     }
     if (
       rows[1].instructions !== rows[2].instructions ||
-      rows[0].instructions > rows[2].instructions
+      rows[0].instructions > rows[2].instructions ||
+      (includeWasm && rows[3].instructions !== rows[2].instructions)
     ) {
       throw new Error(`Unexpected instruction count mismatch: ${file}`);
     }
@@ -166,6 +192,17 @@ if (args[0] === "--worker") {
     JSON.stringify(
       {
         artifacts: {
+          ...(includeWasm
+            ? {
+                ruffleWasmSha256: createHash("sha256")
+                  .update(
+                    readFileSync(
+                      `${here}ruffle/target/wasm32-unknown-unknown/release/swf2es_ruffle_bench.wasm`,
+                    ),
+                  )
+                  .digest("hex"),
+              }
+            : {}),
           wasmSha256: createHash("sha256")
             .update(
               readFileSync(

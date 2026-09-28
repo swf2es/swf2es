@@ -1,24 +1,5 @@
 use std::{env, fs, hint::black_box, time::Instant};
-use swf::{avm2::read::Reader, extensions::ReadSwfExt};
-
-fn run(bytes: &[u8], decode: bool) -> usize {
-    let abc = Reader::new(black_box(bytes)).read().expect("invalid ABC");
-    let mut count = abc.methods.len();
-    if decode {
-        count = 0;
-        for body in &abc.method_bodies {
-            let mut reader = Reader::new(&body.code);
-            let mut ops = Vec::new();
-            while !reader.as_slice().is_empty() {
-                ops.push(reader.read_op().expect("invalid opcode"));
-            }
-            count += ops.len();
-            black_box(&ops);
-        }
-    }
-    black_box(&abc);
-    black_box(count)
-}
+use swf2es_ruffle_bench::run;
 
 fn time(mut f: impl FnMut() -> usize) -> (f64, usize, Vec<f64>) {
     for _ in 0..3 {
