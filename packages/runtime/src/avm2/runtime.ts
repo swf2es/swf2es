@@ -894,8 +894,8 @@ export class Runtime {
       }
 
       for (let p = this.protoOf(o); p; p = p.$p) {
-        const v = p.$d?.get(name);
-        if (v !== undefined || p.$d?.has(name)) {
+        const v = this.protoOwn(p, name);
+        if (v !== NOT_FOUND) {
           return v;
         }
       }
@@ -1092,6 +1092,26 @@ export class Runtime {
     return NOT_FOUND;
   }
 
+  /**
+   * A prototype's own dynamic property `name`, or NOT_FOUND: an element
+   * too for one with elements, as Array.prototype, an Array, has them.
+   */
+  private protoOwn(p: AsObject, name: string): Value {
+    if (p.$a !== undefined) {
+      return this.getOwn(p, name);
+    }
+
+    const d: Map<string, Value> | null | undefined = p.$d;
+    if (d) {
+      const v = d.get(name);
+      if (v !== undefined || d.has(name)) {
+        return v;
+      }
+    }
+
+    return NOT_FOUND;
+  }
+
   private getBound(o: Value, traits: Traits, b: number, mn: Multiname): Value {
     const id = b >> 3;
     switch (b & 7) {
@@ -1248,7 +1268,39 @@ export class Runtime {
       return this.dictionaryHas(o, name);
     }
 
+    // As in_operator: a uint names an element the object itself has, or
+    // for a primitive its prototype, as hasUintProperty finds it, not one
+    // up the prototype chain.
+    if (typeof name === "number" && name >>> 0 === name && name !== 0xffffffff) {
+      return this.hasOwnIndex(
+        typeof o === "object" && o !== null ? o : (this.protoOf(o) as AsObject),
+        name,
+      );
+    }
+
     return this.hasProperty(o, this.publicName(name));
+  }
+
+  /** Whether `o` itself has element `i`: its class's indexing, an Array's, or a dynamic property. */
+  private hasOwnIndex(o: AsObject, i: number): boolean {
+    if (o instanceof Namespace) {
+      return false;
+    }
+
+    const traits: Traits | undefined = o.$traits;
+    if (traits?.properties) {
+      return traits.properties.has(this, o, this.publicName(i));
+    }
+
+    if (traits?.hasIndex) {
+      return traits.hasIndex(o, i);
+    }
+
+    if (o.$a !== undefined) {
+      return i in o.$a;
+    }
+
+    return o.$d?.has(String(i)) ?? false;
   }
 
   /**
@@ -1262,7 +1314,7 @@ export class Runtime {
 
     const name = this.toString(key);
     for (let p = this.protoOf(o); p; p = p.$p) {
-      if (p.$d?.has(name)) {
+      if (this.protoOwn(p, name) !== NOT_FOUND) {
         return true;
       }
     }
@@ -1305,7 +1357,7 @@ export class Runtime {
     }
 
     for (let p = this.protoOf(o); p; p = p.$p) {
-      if (p.$d?.has(name)) {
+      if (this.protoOwn(p, name) !== NOT_FOUND) {
         return true;
       }
     }
@@ -1361,8 +1413,8 @@ export class Runtime {
     }
 
     for (let p = this.protoOf(o); p; p = p.$p) {
-      const v = p.$d?.get(name);
-      if (v !== undefined || p.$d?.has(name)) {
+      const v = this.protoOwn(p, name);
+      if (v !== NOT_FOUND) {
         return v;
       }
     }
@@ -1701,7 +1753,8 @@ export class Runtime {
     // Its prototype object: an Object whose prototype is the base class's.
     // A class object's own $p comes from Class's instance prototype, which
     // it inherits: class objects made before Class see it once Class exists.
-    const prototype = this.objectTraits.instance();
+    // Date's, RegExp's and Array's are instances of their own class, as avmplus has them.
+    const prototype = hooks?.prototype ? hooks.prototype(this, cls) : this.objectTraits.instance();
     prototype.$p = base ? base.$prototype : null;
     cls.$prototype = prototype;
     itraits.proto.$p = prototype;
@@ -2775,6 +2828,8 @@ export interface ClassHook {
   /** How its instances resolve names, as XML's (Traits.properties). */
   properties?: PropertyHook;
   create?: (traits: Traits, rt: Runtime) => AsObject;
+  /** Its prototype object, when not an Object: an instance of the class, as Date's (its $it is ready). */
+  prototype?: (rt: Runtime, cls: AsObject) => AsObject;
   /** Whether its instances refuse any name but their own and an index, as a Vector's (Traits.refusesNames). */
   refusesNames?: boolean;
   getIndex?: IndexHook["getIndex"];

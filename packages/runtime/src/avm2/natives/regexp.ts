@@ -79,6 +79,8 @@ function newRegExp(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
 export const regexpHooks: Record<string, ClassHook> = {
   RegExp: {
     construct: newRegExp,
+    // RegExp.prototype is a RegExp, of the empty pattern, which avmplus writes (?:).
+    prototype: (rt, cls) => newRegExp(rt, cls, ["(?:)"]),
     call: (rt, cls, args) =>
       args[0]?.$re instanceof RegExp && args[1] === undefined ? args[0] : newRegExp(rt, cls, args),
   },
