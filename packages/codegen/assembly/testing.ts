@@ -479,6 +479,57 @@ export function domainVerifyAll(): string {
 }
 
 /**
+ * Verify the domain's last ABC with types `rounds` times, as verifyMethods
+ * does, a body that fails too; returns the instructions of the bodies that
+ * verified, per round.
+ */
+export function benchVerify(rounds: i32): i32 {
+  const index = <u32>(domain.abcs.length - 1);
+  const abc = domain.abcs[index];
+  const traits = domain.traits;
+  const methods = domain.methodStart[index];
+  const scripts = domain.scriptTraits[index];
+  const done = new StaticArray<bool>(abc.bodyCount);
+  const queue: u32[] = [];
+  const decoder = new BodyDecoder(abc, domain.abcBase[index], domain, index);
+  let instructions = 0;
+  for (let round = 0; round < rounds; round++) {
+    // Each round as the first: the ABC verified once, as it is compiled.
+    domain.clearBindingMemo();
+    instructions = 0;
+    for (let b: u32 = 0; b < abc.bodyCount; b++) {
+      done[b] = false;
+    }
+
+    queue.length = 0;
+    for (let s: u32 = 0; s < abc.scriptCount; s++) {
+      domain.methodsOf(scripts[s], queue);
+    }
+
+    for (let q = 0; q < queue.length; q++) {
+      const m = queue[q];
+      const body = abc.methodBody[m - methods];
+      const scope = traits.scopeOf(m);
+      if (body < 0 || scope === null || done[body]) {
+        continue;
+      }
+
+      done[body] = true;
+      const code = decoder.decode(<u32>body, scope);
+      if (!code.error) {
+        instructions += code.count;
+      }
+
+      for (let c = 0; c < decoder.captured.length; c++) {
+        queue.push(decoder.captured[c]);
+      }
+    }
+  }
+
+  return instructions;
+}
+
+/**
  * The IR of body `body` of the domain's last ABC, after verifying the ABC
  * as domainVerifyAll does: "B<n> @<pc> stack [types] scope [types]" per
  * block, then a line per instruction, "<pc>: [dst =] op srcs [a b c] : type",
