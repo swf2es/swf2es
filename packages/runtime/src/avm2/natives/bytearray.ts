@@ -17,7 +17,7 @@ import {
   zlibCompress,
   zlibUncompress,
 } from "@swf2es/format";
-import type { AsObject, IndexHook, Runtime, Traits, Value } from "./runtime.js";
+import type { AsObject, IndexHook, Runtime, Traits, Value } from "../runtime.js";
 
 const kGrowthIncr = 4096;
 const kHugeGrowthThreshold = 24 * 1024 * 1024;

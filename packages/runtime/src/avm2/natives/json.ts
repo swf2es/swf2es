@@ -6,8 +6,8 @@
 //
 // Translated from avmplus' core/JSONClass.cpp, this file is subject to the
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
-import { NS_Public, publicNs, qname } from "./names.js";
-import type { AsObject, Runtime, Traits, Value } from "./runtime.js";
+import { NS_Public, publicNs, qname } from "../names.js";
+import type { AsObject, Runtime, Traits, Value } from "../runtime.js";
 
 type Natives = Record<string, (rt: Runtime) => (...args: Value[]) => Value>;
 

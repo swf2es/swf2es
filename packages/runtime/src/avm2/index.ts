@@ -1,5 +1,5 @@
 // The AVM2 runtime: what generated modules call as `rt`.
-import { builtinHooks, builtinNatives } from "./natives.js";
+import { builtinHooks, builtinNatives } from "./natives/index.js";
 import { Runtime, type RuntimeOptions } from "./runtime.js";
 
 export { Runtime, type RuntimeOptions } from "./runtime.js";

@@ -322,10 +322,17 @@ table's order and goes on at the first match's block.
 
 Generated code calls `@swf2es/runtime` for the object model, multiname
 lookup, coercions and exceptions (`packages/runtime/src/avm2`); it grows as
-far as each step needs. The natives are in `natives.ts`, with what makes
-some builtin classes differ from others: Arrays' and Vectors' element
-storage, and what calling or constructing `int`, `String`, `Object`,
-`Array` or a Vector does. The debugger player's error messages are avmplus'
+far as each step needs. The engine is at the top: `runtime.ts`, `names.ts`,
+`numbers.ts`, `messages.ts`, and `amf.ts`, which ByteArray and later the
+player's networking use. The builtins' natives are in `natives/`, a file per
+family of classes (`object`, `array`, `string`, `regexp`, `number`,
+`vector`, `bytearray`, `date`, `json`, `dictionary`...), registered in
+`natives/index.ts`, with what makes some builtin classes differ from others:
+Arrays' and Vectors' element storage, and what calling or constructing
+`int`, `String`, `Object`, `Array` or a Vector does. avmshell's own classes,
+which a player has not, are in `natives/shell.ts`. playerglobal is the
+player's (`packages/player/src/playerglobal/flash/display/...`, a path per
+package, so a class's file follows from its qualified name). The debugger player's error messages are avmplus'
 own, generated from its `ErrorConstants.cpp` into `messages.ts`, which
 stays MPL-2.0.
 
