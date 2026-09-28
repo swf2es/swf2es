@@ -64,7 +64,7 @@ export const objectNatives: Natives = {
     this.$prototype = p;
   }),
   "Function#get:length": plain(function (this: AsObject) {
-    return this.$f.length;
+    return this.$length ?? this.$f.length;
   }),
   [`Function#${AS3}::call`]: (rt) =>
     function (this: AsObject, receiver: Value, ...args: Value[]) {

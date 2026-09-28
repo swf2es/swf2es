@@ -22,7 +22,7 @@ import {
   IR_Nip,
   Ir,
 } from "../ir/ir";
-import { Domain, URI_None } from "../link/domain";
+import { Domain, NS_Private, URI_None } from "../link/domain";
 import {
   BUILTIN_Any,
   BUILTIN_Boolean,
@@ -497,6 +497,13 @@ export class MethodEmitter {
       this.sunk = false;
       this.instruction(i);
       this.target = -1;
+      if (op === ops.OP_swap) {
+        // Its one destination is the new top, whose type the IR gives; the
+        // register below it now holds what the top did, and its type.
+        const x = ir.src[i];
+        this.regType[x] = this.regType[x + 1];
+      }
+
       if (dst >= 0) {
         this.regType[dst] = ir.type[i];
       }
@@ -2617,7 +2624,17 @@ export class MethodEmitter {
 
       const name = domain.abcString[index][pool.mnB[mn]];
       out.text("rt.cls(");
-      this.namespace(domain.abcNs[index][ns]);
+      const id = domain.abcNs[index][ns];
+      if (domain.nsType[id] === NS_Private && index === this.index) {
+        // A private namespace is its module's own object, N[k], which its
+        // definitions are bound in, not one made again from its URI.
+        out.text("N[");
+        out.uint(ns);
+        out.text("]");
+      } else {
+        this.namespace(id);
+      }
+
       out.text(", ");
       out.string(domain.stringPtr[name], domain.stringLength[name]);
       out.text(")");

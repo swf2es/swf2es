@@ -26,38 +26,39 @@ recurses until the host's stack runs out, and
 
 ## Results
 
-2026-09-28, after step 15 (0e4578a), in 38 s. Two runs agree, but for the
+2026-09-29, after the quick wins (#38), in 39 s. Two runs agree, but for the
 two tests above.
 
 | | Tests | Match avmshell | Checks passed, of avmshell's |
 |---|---|---|---|
-| **All** | 2578 | **2015 (78.2%)** | 54,084 of 62,435 (86.6%) |
-| ecma3 | 928 | 821 (88%) | 41,998 of 44,561 (94.2%) |
-| spidermonkey | 521 | 483 (93%) | 2,619 of 2,701 (97.0%) |
-| as3 | 849 | 648 (76%) | 8,889 of 11,522 (77.1%) |
+| **All** | 2578 | **2130 (82.6%)** | 57,838 of 62,435 (92.6%) |
+| ecma3 | 928 | 847 (91%) | 44,253 of 44,561 (99.3%) |
+| spidermonkey | 521 | 486 (93%) | 2,636 of 2,701 (97.6%) |
+| as3 | 849 | 729 (86%) | 10,298 of 11,522 (89.4%) |
 | e4x | 173 | 0 | 0 of 1,919 |
-| regress | 61 | 32 (52%) | 351 of 1,344 |
-| misc, mmgc, mops, recursion, versioning | 46 | 31 | 227 of 388 |
+| regress | 61 | 34 (56%) | 418 of 1,344 |
+| misc, mmgc, mops, recursion, versioning | 46 | 34 | 233 of 388 |
 
-Without E4X, which swf2es does not have yet, 2015 of 2405 tests match (83.8%).
+Without E4X, which swf2es does not have yet, 2130 of 2405 tests match (88.6%).
 
 What stops a test, or makes it differ, most often:
 
 | Tests | Reason |
 |---|---|
 | 187 | E4X: an XML or XMLList native, `descendants`, or AMF3 for XML |
-| 128 | Fewer checks passed than in avmshell |
-| 90 | Ended otherwise: 88 with an AS3 exception nothing caught where avmshell ended normally, 2 the other way |
-| 47 | A runtime bug: `Cannot read properties of null (reading '$it')` |
-| 20 | The URI functions: `escape`, `unescape`, `encodeURI`, `decodeURI` and their Component forms |
-| 13 | The same checks passed, but others failed |
-| 9 | Runtime bugs on strings: `this.substring` or `this.substr` is not a function |
-| 6 | Timeouts: script timeouts (`misc/catchableTimeout`, `doubleTimeout`) and huge arrays |
-| 5 | Runtime bugs: `Cannot read properties of undefined (reading 'call')` |
+| 116 | Fewer checks passed than in avmshell |
+| 67 | Ended otherwise: 65 with an AS3 exception nothing caught where avmshell ended normally, 2 the other way |
+| 14 | The same checks passed, but others failed |
 | 21 | avmshell's shell API (`System`, `File`, `Domain`, the sampler), which a SWF never calls |
-| 1 | `describeTypeJSON` |
 
-Full per-directory results: `pnpm tamarin:swf2es`.
+### Since the first run (2015, 78.2%)
+
+| Fix | Tests |
+|---|---|
+| A class's interfaces settled when a type test needs them, as a script may make the class before them | +47 |
+| The URI functions, `escape` and `unescape`; a method closure's `length` is its method's | +34 |
+| The register below a `swap` given the top's type, so a setter called from a setter is bound by its own type | +14 |
+| A private type named by its module's own namespace, as a class outside the package block is | +20 |
 
 ## Natives
 
