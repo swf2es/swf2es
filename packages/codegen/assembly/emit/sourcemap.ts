@@ -34,6 +34,13 @@ export class SourceMap {
     this.line.length = count;
   }
 
+  /** The marks from `from` on moved `by` bytes later, for text put in before them. */
+  shift(from: i32, by: u32): void {
+    for (let m = from; m < this.offset.length; m++) {
+      this.offset[m] += by;
+    }
+  }
+
   /** The code from module offset `at` on is from line `line` of `file`; nothing if either is unknown. */
   mark(at: u32, file: i32, line: u32): void {
     if (file < 0 || line === 0) {

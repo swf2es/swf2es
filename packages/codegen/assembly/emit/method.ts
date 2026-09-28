@@ -61,7 +61,7 @@ export class MethodEmitter {
   /** Which local scope registers hold with scopes, and how many are pushed. */
   scopeWith: StaticArray<u8> = new StaticArray<u8>(0);
   scopeDepth: u32 = 0;
-  /** The types the module's methods refer to, in the order T holds them. */
+  /** The classes and Vectors the method being written refers to, in the order its T holds them. */
   types: i32[] = [];
   typeIndex: Map<i32, u32> = new Map<i32, u32>();
   /** The method being written: its ABC index and body. */
