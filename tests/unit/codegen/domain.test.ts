@@ -1,0 +1,133 @@
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { test } from "node:test";
+import { abc, tables, u30 } from "./abc-builder.ts";
+import { linkCases } from "./link-cases.ts";
+import { testing } from "./testing-module.ts";
+
+const NS_PUBLIC = 0;
+const SWF_31 = 50;
+const VM_INTERNAL = 52;
+const mark = (version: number) => String.fromCharCode(0xe294 + version);
+
+/** An ABC whose script defines a slot for each of `names`, as [URI, name]. */
+function definitions(names: [string, string][], kind = 0x16): Uint8Array {
+  const strings = names.flat();
+  const pool = {
+    strings,
+    namespaces: names.map((_, i) => [kind, ...u30(2 * i + 1)]),
+    multinames: names.map((_, i) => [0x07, ...u30(i + 1), ...u30(2 * i + 2)]),
+  };
+  const traits = names.map((_, i) => ({ name: i + 1, kind: 0 }));
+  return abc(pool, tables({ methods: [{}], scripts: [{ init: 0, traits }] }));
+}
+
+const find = (uri: string, name: string, version = SWF_31) =>
+  testing.domainFind(NS_PUBLIC, uri, name, version) as string;
+
+test("names are interned across ABCs, and the first definition wins", () => {
+  testing.domainReset(SWF_31);
+  assert.equal(testing.domainAdd(definitions([["p", "a"]]), false), 0);
+  assert.equal(
+    testing.domainAdd(
+      definitions([
+        ["q", "b"],
+        ["p", "a"],
+      ]),
+      false,
+    ),
+    0,
+  );
+  assert.equal(find("p", "a"), "abc 0 script 0 trait 0");
+  assert.equal(find("q", "b"), "abc 1 script 0 trait 0");
+  assert.equal(find("q", "a"), "none");
+  assert.match(testing.domainSummary() as string, /^strings 4 namespaces 2 bindings 3 /);
+});
+
+test("an ABC that does not parse is not added", () => {
+  testing.domainReset(SWF_31);
+  assert.equal(testing.domainAdd(abc({}, tables({ methods: [{ flags: 0x20 }] })), false), 1079);
+  assert.match(testing.domainSummary() as string, /^strings 0 namespaces 0 bindings 0 /);
+});
+
+test("a builtin ABC's version marks are stripped and set the binding's version", () => {
+  testing.domainReset(SWF_31);
+  const builtin = definitions([
+    [`p${mark(12)}`, "since12"],
+    ["p", "internal"],
+    ["other", "all"],
+  ]);
+  assert.equal(testing.domainAdd(builtin, true), 0);
+  assert.equal(find("p", "since12", 12), "abc 0 script 0 trait 0");
+  assert.equal(find("p", "since12", 10), "none");
+  // A public name in a URI that has marks elsewhere, but not here, is VM-internal.
+  assert.equal(find("p", "internal"), "none");
+  assert.equal(find("p", "internal", VM_INTERNAL), "abc 0 script 0 trait 1");
+  assert.equal(find("other", "all", 0), "abc 0 script 0 trait 2");
+  assert.match(testing.domainSummary() as string, / versioned p$/);
+});
+
+test("user ABCs' marks are stripped, but their public names get the domain's version", () => {
+  testing.domainReset(SWF_31);
+  assert.equal(testing.domainAdd(definitions([[`p${mark(12)}`, "a"]]), false), 0);
+  assert.equal(find("p", "a"), "abc 0 script 0 trait 0");
+  assert.equal(find("p", "a", SWF_31 - 2), "none");
+});
+
+// avmshell's own API versioning fixtures, from the avmplus submodule. The
+// expected visibility is what Tamarin's versioning/globals.as expects at
+// FP_10_0 and FP_10_0_32, and what avmshell prints at its default, SWF_31.
+const generated = new URL("../../../oracle/avmplus/generated/", import.meta.url);
+test("names are visible as avmshell's versioning tests expect", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  testing.domainReset(SWF_31);
+  for (const name of ["builtin", "shell_toplevel"]) {
+    const bytes = new Uint8Array(readFileSync(new URL(`${name}.abc`, generated)));
+    assert.equal(testing.domainAdd(bytes, true), 0, name);
+  }
+
+  const visible = (name: string) =>
+    [2, 5, SWF_31].map((v) => (find("avmshell", name, v) === "none" ? "-" : "+")).join("");
+  assert.deepEqual(
+    Object.fromEntries(
+      [
+        "public_var",
+        "public_var_AIR_1_0",
+        "public_var_FP_10_0",
+        "public_var_AIR_1_5",
+        "public_var_AIR_1_5_1",
+        "public_var_FP_10_0_32",
+        "public_var_AIR_1_5_2",
+        "public_var_AIR_1_0_FP_10_0",
+        "public_var_AIR_1_5_1_FP_10_0_AIR_1_5_2",
+        "public_var_FP_10_0_32_AIR_1_0_FP_10_0",
+      ].map((n) => [n, visible(n)]),
+    ),
+    {
+      public_var: "+++",
+      public_var_AIR_1_0: "---",
+      public_var_FP_10_0: "+++",
+      public_var_AIR_1_5: "---",
+      public_var_AIR_1_5_1: "---",
+      public_var_FP_10_0_32: "-++",
+      public_var_AIR_1_5_2: "---",
+      public_var_AIR_1_0_FP_10_0: "+++",
+      public_var_AIR_1_5_1_FP_10_0_AIR_1_5_2: "+++",
+      public_var_FP_10_0_32_AIR_1_0_FP_10_0: "+++",
+    },
+  );
+  assert.notEqual(find("", "Object"), "none");
+  assert.notEqual(find("__AS3__.vec", "Vector"), "none");
+});
+
+test("classes link to their bases and interfaces as avmplus links them", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  for (const c of linkCases) {
+    testing.domainReset(SWF_31);
+    assert.equal(testing.domainAdd(builtin, true), 0);
+    assert.equal(testing.domainAdd(c.abc, false), c.error ?? 0, c.name);
+  }
+});

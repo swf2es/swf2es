@@ -56,6 +56,18 @@ export interface OracleResult {
 /** avmplus' ABC disassembler, run in avmshell; the oracle for our ABC parser. */
 const ABCDUMP_SOURCE = "oracle/avmplus/utils/abcdump.as";
 
+/** Where the image keeps the ABCs ASC imports: builtin, shell_toplevel, playerglobal... */
+const LIBRARY = "/opt/crossbridge/sdk/usr/lib";
+
+const ASC = `java -jar ${LIBRARY}/asc2.jar -import ${LIBRARY}/builtin.abc -import ${LIBRARY}/shell_toplevel.abc`;
+
+/** Shell lines that compile abcdump into $out/tools, once. */
+const buildAbcdump = [
+  `if [ ! -f "$out/tools/abcdump.abc" ]; then`,
+  `  ${ASC} -outdir "$out/tools" ${ABCDUMP_SOURCE} > "$out/tools/abcdump.log" 2>&1`,
+  "fi",
+];
+
 /**
  * Jobs at a time: $SWF2ES_ORACLE_JOBS, or up to 10, since each is a JVM and
  * more makes a laptop sluggish.
@@ -193,18 +205,10 @@ export function runOracle(
     return [name, rel(job.source), cached ? "0" : "1", (job.ascArgs ?? []).join(" ")].join("\t");
   });
 
-  const asc = "java -jar $L/asc2.jar -import $L/builtin.abc -import $L/shell_toplevel.abc";
   const avmshell = `timeout ${timeoutSeconds} /opt/crossbridge/sdk/usr/bin/avmshell`;
   const script = [
-    "L=/opt/crossbridge/sdk/usr/lib",
     `out="${out}"`,
-    ...(abcdump
-      ? [
-          `if [ ! -f "$out/tools/abcdump.abc" ]; then`,
-          `  ${asc} -outdir "$out/tools" ${ABCDUMP_SOURCE} > "$out/tools/abcdump.log" 2>&1`,
-          "fi",
-        ]
-      : []),
+    ...(abcdump ? buildAbcdump : []),
     "job() {",
     `  IFS=$'\t' read -r n f compile args <<< "$1"`,
     `  d=$(dirname "$out/$n")`,
@@ -212,7 +216,7 @@ export function runOracle(
     `  rm -f "$out/$n.code" "$out/$n.out" "$out/$n.out2" "$out/$n.dump"`,
     `  if [ "$compile" = 1 ]; then`,
     `    rm -f "$out/$n.abc" "$out/$n.key"`,
-    `    ${asc} $args -outdir "$d" "$f" > "$out/$n.log" 2>&1`,
+    `    ${ASC} $args -outdir "$d" "$f" > "$out/$n.log" 2>&1`,
     "  fi",
     `  if [ -f "$out/$n.abc" ]; then`,
     // Run from the job's own directory: tests may write files, which then stay in outDir.
@@ -227,7 +231,7 @@ export function runOracle(
     "  return 0",
     "}",
     "export -f job",
-    "export L out",
+    "export out",
     `xargs -a "$out/jobs.tsv" -d '\n' -P ${parallel} -I{} bash -c 'job "$1"' _ {}`,
   ].join("\n");
 
@@ -275,6 +279,96 @@ export function runOracle(
       nondeterministic: repeat && code !== null && read(`${n}.out2`) !== output,
     };
   });
+}
+
+/** One of the image's library ABCs, copied out, and abcdump's dump of it. */
+export interface Library {
+  name: string;
+  abc: Uint8Array;
+  dump: string;
+}
+
+/**
+ * Copy library ABCs (such as "builtin" or "playerglobal") out of the image
+ * into outDir and dump each with abcdump. They are what ASC compiles
+ * against; playerglobal and airglobal are Adobe's, so they stay out of the
+ * repository.
+ */
+export function libraries(
+  names: string[],
+  outDir: string,
+  { engine = containerEngine() } = {},
+): Library[] {
+  mkdirSync(join(outDir, "tools"), { recursive: true });
+  const out = relative(root, resolve(outDir));
+  if (out.startsWith("..")) {
+    throw new Error(`outDir must be inside ${root}`);
+  }
+
+  const script = [
+    `out="${out}"`,
+    ...buildAbcdump,
+    ...names.flatMap((n) => [
+      `cp ${LIBRARY}/${n}.abc "$out/${n}.abc"`,
+      `(cd "$out" && /opt/crossbridge/sdk/usr/bin/avmshell tools/abcdump.abc -- ${n}.abc > ${n}.dump 2>&1)`,
+    ]),
+  ].join("\n");
+  writeFileSync(join(outDir, "libraries.sh"), `${script}\n`);
+
+  const r = container(engine, [`${out}/libraries.sh`]);
+  if (r.status !== 0) {
+    throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+  }
+
+  return names.map((name) => ({
+    name,
+    abc: new Uint8Array(readFileSync(join(outDir, `${name}.abc`))),
+    dump: readFileSync(join(outDir, `${name}.dump`), "utf8"),
+  }));
+}
+
+/** avmshell's run of one ABC. */
+export interface AbcRun {
+  exitCode: number;
+  output: string;
+}
+
+/**
+ * Run each ABC in avmshell, from `outDir` (inside the repository), in one
+ * container: no compiling, for ABCs built by hand.
+ */
+export function runAbcs(
+  abcs: Uint8Array[],
+  outDir: string,
+  { engine = containerEngine(), timeoutSeconds = 20 } = {},
+): AbcRun[] {
+  mkdirSync(outDir, { recursive: true });
+  const out = relative(root, resolve(outDir));
+  if (out.startsWith("..")) {
+    throw new Error(`outDir must be inside ${root}`);
+  }
+
+  for (const [i, bytes] of abcs.entries()) {
+    writeFileSync(join(outDir, `${i}.abc`), bytes);
+  }
+
+  const script = [
+    `cd "${out}"`,
+    `for i in $(seq 0 ${abcs.length - 1}); do`,
+    `  timeout ${timeoutSeconds} /opt/crossbridge/sdk/usr/bin/avmshell $i.abc > $i.out 2>&1; echo $? > $i.code`,
+    "done",
+  ].join("\n");
+  writeFileSync(join(outDir, "run.sh"), `${script}\n`);
+
+  const r = container(engine, [`${out}/run.sh`]);
+  if (r.status !== 0) {
+    throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+  }
+
+  return abcs.map((_, i) => ({
+    exitCode: Number(readFileSync(join(outDir, `${i}.code`), "utf8")),
+    output: readFileSync(join(outDir, `${i}.out`), "utf8"),
+  }));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -4,6 +4,7 @@
 import { Abc } from "./abc";
 import {
   ATTR_Metadata,
+  CONSTANT_Multiname,
   CONSTANT_Qname,
   CONSTANT_TypeName,
   kClassInfoExceedsCountError,
@@ -40,7 +41,7 @@ export function readTraits(abc: Abc, r: Reader, owner: i32, classesDefined: u32)
       return abc.fail(kCorruptABCError);
     }
 
-    const nameError = bindingNameError(abc.pool, name);
+    const nameError = bindingNameError(abc.pool, name, abc.builtin);
     if (nameError) {
       return abc.fail(nameError);
     }
@@ -127,9 +128,11 @@ export function readTraits(abc: Abc, r: Reader, owner: i32, classesDefined: u32)
 
 /**
  * 0 if multiname `index` can name a trait or class: a QName with a namespace
- * and a name. A TypeName stands for its base, as avmplus parses it.
+ * and a name, or in a builtin ABC also a Multiname with a name, whose
+ * namespaces are the API versions that introduce it. A TypeName stands for
+ * its base, as avmplus parses it.
  */
-export function bindingNameError(pool: ConstantPool, index: u32): i32 {
+export function bindingNameError(pool: ConstantPool, index: u32, builtin: bool): i32 {
   if (index === 0 || index >= pool.multinameCount) {
     return kCpoolIndexRangeError;
   }
@@ -139,11 +142,12 @@ export function bindingNameError(pool: ConstantPool, index: u32): i32 {
     mn = unchecked(pool.mnA[mn]);
   }
 
-  if (
-    unchecked(pool.mnKind[mn]) !== CONSTANT_Qname ||
-    unchecked(pool.mnA[mn]) === 0 ||
-    unchecked(pool.mnB[mn]) === 0
-  ) {
+  const kind = unchecked(pool.mnKind[mn]);
+  if (builtin && kind === CONSTANT_Multiname && unchecked(pool.mnB[mn]) !== 0) {
+    return 0;
+  }
+
+  if (kind !== CONSTANT_Qname || unchecked(pool.mnA[mn]) === 0 || unchecked(pool.mnB[mn]) === 0) {
     return kCpoolEntryWrongTypeError;
   }
 

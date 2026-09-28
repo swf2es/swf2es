@@ -11,6 +11,12 @@ export class Abc {
   length: u32 = 0;
   minorVersion: u32 = 0;
   majorVersion: u32 = 0;
+  /**
+   * Whether this is a builtin ABC, one the player ships (builtin.abc,
+   * playerglobal): it may declare native methods and name traits with
+   * several namespaces, as avmplus allows for a builtin pool.
+   */
+  builtin: bool = false;
   pool: ConstantPool = new ConstantPool();
 
   // method_info. Type indices are checked when a method is compiled, as

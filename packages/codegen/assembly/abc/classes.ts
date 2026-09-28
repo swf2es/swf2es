@@ -33,7 +33,7 @@ export function readInstances(abc: Abc, r: Reader): bool {
       return abc.fail(kCorruptABCError);
     }
 
-    const nameError = bindingNameError(pool, name);
+    const nameError = bindingNameError(pool, name, abc.builtin);
     if (nameError) {
       return abc.fail(nameError);
     }

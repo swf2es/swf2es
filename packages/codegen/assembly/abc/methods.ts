@@ -40,7 +40,7 @@ export function readMethods(abc: Abc, r: Reader): bool {
       return abc.fail(kCorruptABCError);
     }
 
-    if (flags & METHOD_Native) {
+    if (flags & METHOD_Native && !abc.builtin) {
       return abc.fail(kIllegalNativeMethodError);
     }
 

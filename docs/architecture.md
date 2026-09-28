@@ -62,6 +62,14 @@ three, with the same VerifyError numbers:
 2. **Linking**, when classes are defined: anything that needs classes from
    other ABCs or playerglobal, such as base classes, interfaces, overrides
    and name clashes.
+   The ABCs loaded together form a domain (`codegen/assembly/link`), which
+   interns strings and namespaces across them and finds script definitions
+   by qualified name. Builtin ABCs mark their namespace URIs with the API
+   version that introduced a name; as in avmplus, user code sees the names
+   of its own version and series (Flash Player's by default), so AIR-only
+   and VM-internal names stay hidden. While an ABC loads, its classes link
+   to base classes and interfaces defined by earlier ABCs' scripts or by
+   its own earlier classes, as avmplus' `AbcParser` links them.
 3. **Verifying a method**, when it is first compiled: its signature's types
    and its bytecode.
 

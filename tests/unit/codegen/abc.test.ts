@@ -82,6 +82,18 @@ test("trait names must be QNames with a namespace and a name", () => {
   assert.equal(named(6), "error 1033", "any namespace");
 });
 
+test("a builtin ABC may declare native methods and name traits with namespace sets", () => {
+  const builtinError = (t: Tables) =>
+    (testing.abcDump(abc(pool, tables(t)), true) as string)
+      .split("\n")
+      .find((l) => l.startsWith("error"));
+  assert.equal(builtinError({ methods: [{ flags: 0x20 }] }), undefined, "native");
+  const named = (name: number) => builtinError(scriptWith([{ name, kind: SLOT }]));
+  assert.equal(named(4), undefined, "Multiname");
+  assert.equal(named(5), "error 1033", "attribute");
+  assert.equal(named(6), "error 1033", "any namespace");
+});
+
 test("trait kinds, values and metadata", () => {
   const lines = dump({
     metadata: [{ name: 1 }],

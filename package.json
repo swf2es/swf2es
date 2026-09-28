@@ -18,7 +18,8 @@
     "format": "biome check --write .",
     "oracle": "node oracle/oracle.ts",
     "oracle:pull": "node oracle/oracle.ts --pull",
-    "oracle:abcdump": "node oracle/oracle.ts --abcdump"
+    "oracle:abcdump": "node oracle/oracle.ts --abcdump",
+    "oracle:cases": "node oracle/cases.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

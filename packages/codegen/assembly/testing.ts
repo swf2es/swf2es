@@ -6,6 +6,7 @@ import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./abc
 import { readAbc } from "./abc/parse";
 import { readConstantPool } from "./abc/pool";
 import { PADDING, Reader } from "./abc/reader";
+import { Domain } from "./link/domain";
 
 export const U8: u8 = 0;
 export const U16: u8 = 1;
@@ -104,10 +105,11 @@ export function poolDump(bytes: Uint8Array): string {
 /**
  * Parse a whole ABC block and describe the tables after the constant pool,
  * one entry per line; just "error N" if avmplus would reject it, since the
- * tables of a rejected ABC are incomplete.
+ * tables of a rejected ABC are incomplete. `builtin` parses it as an ABC the
+ * player ships.
  */
-export function abcDump(bytes: Uint8Array): string {
-  const abc = readAbc(padded(bytes), bytes.length);
+export function abcDump(bytes: Uint8Array, builtin: bool = false): string {
+  const abc = readAbc(padded(bytes), bytes.length, builtin);
   if (abc.error) {
     return `error ${abc.error}`;
   }
@@ -226,10 +228,11 @@ function join(items: Array<u32>, start: u32, end: u32): string {
  * Decode every method body: "body B method M", then one "offset name a b c"
  * line per reachable instruction (lookupswitch adds its case offsets), then
  * "unreachable N" bytes, or "error N" if avmplus' verifier would reject it.
+ * `builtin` parses it as an ABC the player ships.
  */
-export function codeDump(bytes: Uint8Array): string {
+export function codeDump(bytes: Uint8Array, builtin: bool = false): string {
   const base = padded(bytes);
-  const abc = readAbc(base, bytes.length);
+  const abc = readAbc(base, bytes.length, builtin);
   if (abc.error) {
     return `error ${abc.error}`;
   }
@@ -287,6 +290,75 @@ export function benchDecode(bytes: Uint8Array, rounds: i32): i32 {
     }
   }
   return instructions;
+}
+
+let domain = new Domain();
+
+/** Start a new domain whose user ABCs have API version `apiVersion`. */
+export function domainReset(apiVersion: i32): void {
+  domain = new Domain();
+  domain.apiVersion = <u8>apiVersion;
+}
+
+/** Add an ABC to the domain; 0, or the VerifyError it was rejected with. */
+export function domainAdd(bytes: Uint8Array, builtin: bool): i32 {
+  const buffer = new StaticArray<u8>(bytes.length + PADDING);
+  memory.copy(changetype<usize>(buffer), bytes.dataStart, bytes.length);
+  return domain.add(buffer, bytes.length, builtin).error;
+}
+
+/**
+ * The domain's binding of `name` in the namespace of type `type` (NS_*) and
+ * URI `uri`, visible at `version`: "abc A script S trait T", or "none".
+ */
+export function domainFind(type: u8, uri: string, name: string, version: i32): string {
+  const uriBytes = String.UTF8.encode(uri);
+  const nameBytes = String.UTF8.encode(name);
+  const uriId = domain.findString(changetype<usize>(uriBytes), uriBytes.byteLength);
+  const nameId = domain.findString(changetype<usize>(nameBytes), nameBytes.byteLength);
+  if (uriId < 0 || nameId < 0) {
+    return "none";
+  }
+
+  const ns = domain.findNamespace(type, uriId);
+  const b = ns < 0 ? -1 : domain.find(ns, nameId, <u8>version);
+  if (b < 0) {
+    return "none";
+  }
+
+  return `abc ${domain.bindingAbc[b]} script ${domain.bindingScript[b]} trait ${domain.bindingTrait[b]}`;
+}
+
+/** Counts of the domain's tables, then the URIs builtin ABCs version, sorted. */
+export function domainSummary(): string {
+  const uris: string[] = [];
+  for (let i = 0; i < domain.versioned.length; i++) {
+    if (domain.versioned[i]) {
+      uris.push(String.UTF8.decodeUnsafe(domain.stringPtr[i], domain.stringLength[i]));
+    }
+  }
+
+  uris.sort();
+  return `strings ${domain.stringPtr.length} namespaces ${domain.nsType.length} bindings ${domain.bindingNs.length} versioned ${uris.join(",")}`;
+}
+
+/** The domain's bindings in load order: "uri::name version V abc A trait T". */
+export function domainBindings(): string {
+  const out: string[] = [];
+  for (let b = 0; b < domain.bindingNs.length; b++) {
+    const uri = domain.nsUri[domain.bindingNs[b]];
+    const name = domain.bindingName[b];
+    const uriText =
+      uri === 0xffffffff
+        ? "*"
+        : String.UTF8.decodeUnsafe(domain.stringPtr[uri], domain.stringLength[uri]);
+    const nameText = String.UTF8.decodeUnsafe(domain.stringPtr[name], domain.stringLength[name]);
+    out.push(
+      `${uriText}::${nameText} version ${domain.bindingVersion[b]} abc ${domain.bindingAbc[b]} trait ${domain.bindingTrait[b]}`,
+    );
+  }
+
+  return out.join("\n");
 }
 
 /** The opcode table, one "opcode name layout flags" line per opcode. */

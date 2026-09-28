@@ -20,17 +20,27 @@ Near-term work, in order. The goal of milestone 1 is in
       Tamarin method body verifies except the one avmshell also rejects,
       and `pnpm tamarin` checks that swf2es reports the VerifyErrors
       avmshell prints.
-   2. Value types and scope chains, and the checks that need them: 1013,
-      getouterscope, slots, callstatic's binding, operand types.
+   2. Value types and scope chains, in three parts:
+      - 2a. A domain and linking: classes looked up by qualified name
+        across ABCs and linked to their base classes and interfaces with
+        avmplus' errors. Builtin ABCs parse in a mode that allows native
+        methods and multi-namespace trait names; `tests/libraries` checks
+        the image's builtin, shell_toplevel, playerglobal and airglobal
+        against abcdump and links them, and every Tamarin ABC links as in
+        avmshell.
+      - 2b. Declaring scopes: each method's outer scope chain, for 1013,
+        getouterscope and the global slots.
+      - 2c. Trait layout (overrides, name clashes, slot and disp ids, as
+        avmplus resolves a class when first used), then value types in the
+        frame state, and the checks that need them: slots, callstatic's
+        binding, operand types.
    3. The IR, written by the same pass.
 
 Tracked separately: SWF decompression in `format` (issue #3).
 
 ## Later
 
-- **A built-in parse mode** that accepts native methods (1079 for user
-  code), so `playerglobal.swc` and `airglobal.swc` parse: large real ABCs
-  for testing, and the API definitions swf2es needs for playerglobal.
+Nothing yet.
 
 ## Not planned
 
