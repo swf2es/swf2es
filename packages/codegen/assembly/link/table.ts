@@ -30,7 +30,9 @@ export class IdTable {
   }
 
   insert(hash: u32, id: u32): void {
-    if ((this.count + 1) * 4 > <u32>this.ids.length * 3) {
+    // At most half full: a lookup that misses, as most of a binding's
+    // lookups do, probes until an empty slot.
+    if ((this.count + 1) * 2 > <u32>this.ids.length) {
       this.grow();
     }
 
