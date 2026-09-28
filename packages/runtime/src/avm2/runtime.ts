@@ -788,6 +788,119 @@ export class Runtime {
     this.setProperty(o, this.runtimeName(mn, i), v);
   }
 
+  // obj[i] for a Vector the code was compiled against, by the kind of its
+  // elements: a function for each, so that each sees one kind of array. As
+  // the Vector's getIndex and setIndex hooks, with getIndexed's checks; for
+  // anything else, such as a null Vector, getIndexed and setIndexed.
+
+  vectorGetInt(o: Value, mn: Multiname, i: number): Value {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: Value[] = o.$a;
+      if (i >= a.length) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      return a[i];
+    }
+
+    return this.getIndexed(o, mn, i);
+  }
+
+  vectorSetInt(o: Value, mn: Multiname, i: number, v: Value): void {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: Value[] = o.$a;
+      if (i > a.length || (i === a.length && o.$fixed)) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      a[i] = this.toInt(v);
+      return;
+    }
+
+    this.setIndexed(o, mn, i, v);
+  }
+
+  vectorGetUint(o: Value, mn: Multiname, i: number): Value {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: Value[] = o.$a;
+      if (i >= a.length) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      return a[i];
+    }
+
+    return this.getIndexed(o, mn, i);
+  }
+
+  vectorSetUint(o: Value, mn: Multiname, i: number, v: Value): void {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: Value[] = o.$a;
+      if (i > a.length || (i === a.length && o.$fixed)) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      a[i] = this.toUint(v);
+      return;
+    }
+
+    this.setIndexed(o, mn, i, v);
+  }
+
+  vectorGetDouble(o: Value, mn: Multiname, i: number): Value {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: Value[] = o.$a;
+      if (i >= a.length) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      return a[i];
+    }
+
+    return this.getIndexed(o, mn, i);
+  }
+
+  vectorSetDouble(o: Value, mn: Multiname, i: number, v: Value): void {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: Value[] = o.$a;
+      if (i > a.length || (i === a.length && o.$fixed)) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      a[i] = this.toNumber(v);
+      return;
+    }
+
+    this.setIndexed(o, mn, i, v);
+  }
+
+  vectorGetObject(o: Value, mn: Multiname, i: number): Value {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: Value[] = o.$a;
+      if (i >= a.length) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      return a[i];
+    }
+
+    return this.getIndexed(o, mn, i);
+  }
+
+  vectorSetObject(o: Value, mn: Multiname, i: number, v: Value): void {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: Value[] = o.$a;
+      if (i > a.length || (i === a.length && o.$fixed)) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      a[i] = o.$traits.cls.$convert(this, o.$traits.cls, v);
+      return;
+    }
+
+    this.setIndexed(o, mn, i, v);
+  }
+
   /** An object's own dynamic or indexed property, or NOT_FOUND. */
   getOwn(o: Value, name: string): Value {
     if (typeof o !== "object" || o === null) {

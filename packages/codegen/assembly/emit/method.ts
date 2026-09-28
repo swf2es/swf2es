@@ -1704,8 +1704,15 @@ export class MethodEmitter {
       case ops.OP_getproperty:
         this.assign(i);
         if (this.indexed(a, src + 1)) {
-          // As avmplus' getUintProperty: an element by its number.
-          out.text("rt.getIndexed(");
+          // As avmplus' getUintProperty: an element by its number, of a
+          // Vector by the kind of its elements where the IR knows it.
+          const kind = this.vectorKind(this.regType[src]);
+          out.text(kind.length ? "rt.vectorGet" : "rt.getIndexed(");
+          if (kind.length) {
+            out.text(kind);
+            out.text("(");
+          }
+
           this.reg(src);
           out.text(", M[");
           out.uint(a);
@@ -1723,7 +1730,13 @@ export class MethodEmitter {
         return true;
       case ops.OP_setproperty:
         if (this.indexed(a, src + 1)) {
-          out.text("    rt.setIndexed(");
+          const kind = this.vectorKind(this.regType[src]);
+          out.text(kind.length ? "    rt.vectorSet" : "    rt.setIndexed(");
+          if (kind.length) {
+            out.text(kind);
+            out.text("(");
+          }
+
           this.reg(src);
           out.text(", M[");
           out.uint(a);
@@ -2105,6 +2118,31 @@ export class MethodEmitter {
    * name in register r is a number: an element's index, which the runtime
    * reads and writes without making the name.
    */
+  /** The kind of a Vector's elements, as the runtime's vectorGet and vectorSet name it, for type t; "" if not a Vector's. */
+  vectorKind(t: i32): string {
+    const domain = this.domain;
+    if (t < 0) {
+      return "";
+    }
+
+    if (t === domain.vectorIntType) {
+      return "Int";
+    }
+
+    if (t === domain.vectorUintType) {
+      return "Uint";
+    }
+
+    if (t === domain.vectorDoubleType) {
+      return "Double";
+    }
+
+    return domain.vectorObjectType >= 0 &&
+      domain.traits.subtypeOf(<u32>t, <u32>domain.vectorObjectType)
+      ? "Object"
+      : "";
+  }
+
   indexed(a: u32, r: i32): bool {
     return this.abc.pool.mnKind[a] === C.CONSTANT_MultinameL && this.isNumber(r);
   }
