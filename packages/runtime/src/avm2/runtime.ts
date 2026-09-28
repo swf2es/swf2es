@@ -1622,7 +1622,15 @@ export class Runtime {
 
   /** A builtin class's hook; hooks are not inherited, but a specialized Vector has its base's. */
   private hookOf(cls: AsObject, kind: "construct" | "call"): ClassHook["construct"] | null {
-    return this.classHooks[cls.$hook ?? cls.$it.name]?.[kind] ?? null;
+    // Looked up by name once, then kept on the class.
+    const key = kind === "construct" ? "$constructHook" : "$callHook";
+    let hook = cls[key];
+    if (hook === undefined) {
+      hook = this.classHooks[cls.$hook ?? cls.$it.name]?.[kind] ?? null;
+      cls[key] = hook;
+    }
+
+    return hook;
   }
 
   /** Vector.<T> for a T other than int, uint and Number: Vector$object's class, typed. */
