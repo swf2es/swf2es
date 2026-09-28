@@ -5,6 +5,7 @@
 // shrinks, so collecting only on growth would let each cycle's garbage grow
 // it a little further.
 import { readFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 
 /** The release build, or the one that checks every array access (pnpm test:checked). */
 export type Build = "dist-test" | "dist-test-checked";
@@ -14,7 +15,11 @@ const COLLECT_EVERY = 64;
 /** A new instance of `build`, with a memory of its own. */
 // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
 export async function loadTesting(build: Build): Promise<any> {
-  const dir = new URL(`../../../packages/codegen/${build}/`, import.meta.url);
+  // SWF2ES_CODEGEN=<dir> loads another copy of the release build, to compare two (tests/programs/ab.ts).
+  const other = build === "dist-test" ? process.env.SWF2ES_CODEGEN : undefined;
+  const dir = other
+    ? pathToFileURL(`${other.replace(/\/$/, "")}/`)
+    : new URL(`../../../packages/codegen/${build}/`, import.meta.url);
   const { instantiate } = await import(new URL("testing.js", dir).href);
   const module = await WebAssembly.compile(await readFile(new URL("testing.wasm", dir)));
   // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS

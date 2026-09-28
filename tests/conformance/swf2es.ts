@@ -7,8 +7,11 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { testing } from "../unit/codegen/testing-module.ts";
 
+// SWF2ES_RUNTIME=<dir> loads another build of the runtime's dist, to compare two (tests/programs/ab.ts).
 const runtime = await import(
-  new URL("../../packages/runtime/dist/avm2/index.js", import.meta.url).href
+  process.env.SWF2ES_RUNTIME
+    ? pathToFileURL(join(process.env.SWF2ES_RUNTIME, "avm2/index.js")).href
+    : new URL("../../packages/runtime/dist/avm2/index.js", import.meta.url).href
 );
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
