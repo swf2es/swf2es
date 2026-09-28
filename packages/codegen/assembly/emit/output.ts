@@ -19,6 +19,19 @@ export class Output {
     this.bytes = grown;
   }
 
+  /** Text of the emitter's own, all ASCII, put in at offset `at`, what follows moved after it. */
+  insert(at: u32, s: string): void {
+    const n = <u32>s.length;
+    this.reserve(n);
+    const base = changetype<usize>(this.bytes);
+    memory.copy(base + at + n, base + at, this.length - at);
+    for (let i: u32 = 0; i < n; i++) {
+      this.bytes[at + i] = <u8>s.charCodeAt(i);
+    }
+
+    this.length += n;
+  }
+
   byte(b: u8): void {
     this.reserve(1);
     this.bytes[this.length++] = b;

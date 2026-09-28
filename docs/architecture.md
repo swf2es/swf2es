@@ -39,22 +39,22 @@ requires:
    module also records their hashes and the runtime refuses it when the
    ABCs loaded before it differ.
 
-What CI checks today is that the compiler is deterministic
-(`pnpm determinism`, `tests/conformance/determinism.ts`): the builtins,
-then each conformance case (also compiled with asc's `-d`, for source
-maps) and as3pb, compile to the same modules and source maps, byte for
-byte, in a compiler instance of their own, in one instance after the
-others, in the reverse order twice in a row, and in the build that checks
-every array access. So nothing the compiler keeps between calls, such as
-its reused buffers, leaks into its output.
+CI checks both (`pnpm determinism`, `tests/conformance/determinism.ts`),
+over the builtins, then each conformance case (also compiled with asc's
+`-d`, for source maps) and as3pb:
 
-The JIT/AOT invariant itself is still a requirement, not yet a test: there
-is no JIT mode yet, which compiles a method at a time. Before there is, a
-method's type references (`T[k]` in its module) must come from its ABC and
-the ABCs it links against, not from the order the module's methods are
-compiled in, so that a method compiled alone comes out as in its module.
-Comparing the two with type references normalized would show less than
-byte-identical output, and does not count as the invariant.
+- **Determinism:** each compiles to the same modules and source maps, byte
+  for byte, in a compiler instance of its own, in one instance after the
+  others, in the reverse order twice in a row, and in the build that checks
+  every array access, so that nothing the compiler keeps between calls,
+  such as its reused buffers, leaks into its output.
+- **The JIT/AOT invariant:** each method compiled alone, as lazy JIT will
+  compile it, is byte for byte its entry in its module: in order with a
+  new emitter each, and in the reverse order with one emitter for all.
+  Everything a method's code refers to is indexed by its ABC (multinames,
+  namespaces, functions, descriptors), but for the classes and Vectors it
+  refers to, which it has in a table of its own, numbered as it first
+  refers to each (`((...T) => (scope, sup) => function ...)(rt.cls(...))`).
 
 ## Packages
 
