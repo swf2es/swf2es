@@ -449,7 +449,7 @@ class Reader {
       return "";
     }
 
-    const s = fromUtf8(this.input.read(length));
+    const s = fromUtf8(this.input.readView(length));
     this.strings.push(s);
     return s;
   }
@@ -545,7 +545,7 @@ class Reader {
         const length = ref >>> 1;
         const b = bytesOf(rt, o);
         b.setLength(length);
-        b.buffer.set(this.input.read(length));
+        b.buffer.set(this.input.readView(length));
         return o;
       }
       case kVectorInt:
@@ -602,7 +602,8 @@ class Reader {
     let cls: AsObject;
     if (type === kVectorObject) {
       const name = this.string();
-      const param = name === "*" ? null : rt.classByAlias(name);
+      // As getClassClosureFromAlias: a class with no alias, as String, reads as Object.
+      const param = name === "*" ? null : rt.classByAlias(name, true);
       cls = rt.vectorClass(param);
     } else {
       cls = rt.vectorClass(
@@ -612,10 +613,13 @@ class Reader {
 
     const v = rt.constructClass(cls, [length]);
     this.objects.push(v);
+    // Each element through the Vector's own setter, which converts it to
+    // its type, as setProperty would reach it for an index.
+    const setIndex = v.$traits.setIndex as NonNullable<Traits["setIndex"]>;
     for (let i = 0; i < length; i++) {
       const value =
         type === kVectorDouble ? this.double() : type === kVectorObject ? this.value() : this.u32();
-      rt.setProperty(v, rt.publicName(i), value);
+      setIndex(v, i, value, rt);
     }
 
     v.$fixed = fixed;

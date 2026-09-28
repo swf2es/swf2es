@@ -78,3 +78,12 @@ for (var gb:uint = 0; gb < grow.length; gb++) sumBytes = (sumBytes * 31 + grow[g
 grow.position = 6;
 var gd:Vector.<Number> = grow.readObject(), gi:Vector.<int> = grow.readObject(), gu:Vector.<uint> = grow.readObject();
 trace("big vectors", grow.length, sumBytes, gd.length, gd[4999] == bigD[4999], gi[4999], gu[4999], gu[15]);
+// One class for each Vector type, however it is reached; typed Vectors
+// read back, one of a class with no alias as Vector.<Object>.
+var vp:Vector.<Point3> = new <Point3>[new Point3(1, 2), null];
+var vpBack:* = back(vp);
+trace("vector classes", vpBack is Vector.<Point3>, Object(vpBack).constructor == Vector.<Point3>, Vector.<Point3> == Vector.<Point3>, Object(back(new <int>[1])).constructor == Vector.<int>, Object(back(new Vector.<*>())).constructor == Vector.<*>);
+trace("vector point", vpBack.length, vpBack[0].x, vpBack[0].y, vpBack[1], vpBack.fixed, back(new Vector.<int>(2, true)).fixed);
+var vs:Vector.<String> = new <String>["a", null, "c"];
+var vsBack:* = back(vs);
+trace("vector string", vsBack is Vector.<String>, vsBack is Vector.<Object>, vsBack.join("|"), back(new <Array>[[1]]) is Vector.<Object>, back(new <uint>[0xffffffff, 1])[0], back(new <int>[-1, 0x7fffffff])[0]);

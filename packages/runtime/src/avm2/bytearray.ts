@@ -176,6 +176,14 @@ export class Bytes {
     return bytes;
   }
 
+  /** As read, but the bytes themselves, not a copy: for a caller that only reads them, at once. */
+  readView(count: number): Uint8Array {
+    this.checkEOF(count);
+    const bytes = this.buffer.subarray(this.position, this.position + count);
+    this.position += count;
+    return bytes;
+  }
+
   /** As ByteArray::Write: `bytes` at the position; the length grows to the position after. */
   write(bytes: Uint8Array): void {
     const count = bytes.length;
@@ -325,9 +333,30 @@ export function utf8(s: string): Uint8Array {
  * valid sequence is the character of its value, and a four-byte sequence
  * may start with 0xF8 to 0xFF, as Flash Player 9 and 10 read them.
  */
+/** The length from which fromUtf8 first looks for ASCII. */
+const ASCII_LENGTH = 16;
+
 export function fromUtf8(bytes: Uint8Array): string {
-  const out: number[] = [];
   const n = bytes.length;
+  // ASCII, as most text is: its bytes are its characters. Not below
+  // ASCII_LENGTH bytes, where looking costs more than it saves.
+  if (n >= ASCII_LENGTH) {
+    let ascii = 0;
+    while (ascii < n && bytes[ascii] < 0x80) {
+      ascii++;
+    }
+
+    if (ascii === n) {
+      let s = "";
+      for (let k = 0; k < n; k += 8192) {
+        s += String.fromCharCode.apply(null, bytes.subarray(k, k + 8192) as unknown as number[]);
+      }
+
+      return s;
+    }
+  }
+
+  const out: number[] = [];
   let i = 0;
   while (i < n) {
     const c = bytes[i];

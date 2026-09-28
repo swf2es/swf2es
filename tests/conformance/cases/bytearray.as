@@ -88,3 +88,28 @@ for each (var size:int in [95, 96, 97, 300]) {
   sizes.push(utf8Sum(ascii), utf8Sum(ascii.substr(0, size - 2) + "é€"), utf8Sum(ascii.substr(0, size - 3) + "😀x"));
 }
 trace("utf8 sizes", sizes.join(" "));
+// Reading UTF-8 back, either side of 16 bytes, where swf2es first looks for
+// ASCII, and of 8192, where it makes the string in pieces; through
+// readUTFBytes, readUTF and AMF.
+function readBack(s:String):String {
+  var b:ByteArray = new ByteArray();
+  b.writeUTFBytes(s);
+  b.position = 0;
+  var r:String = b.readUTFBytes(b.length);
+  var u:ByteArray = new ByteArray();
+  u.writeUTF(s);
+  u.position = 0;
+  var a:ByteArray = new ByteArray();
+  a.writeObject([s, s]);
+  a.position = 0;
+  var back:Array = a.readObject();
+  return r.length + ":" + (r == s) + (u.readUTF() == s) + (back[0] == s) + (back[1] == s);
+}
+var reads:Array = [];
+for each (var rn:int in [0, 1, 15, 16, 17, 100, 8191, 8192, 8193, 20000]) {
+  var rs:String = "";
+  while (rs.length < rn) rs += "x" + rs.length;
+  rs = rs.substr(0, rn);
+  reads.push(readBack(rs), readBack(rs.substr(0, rn > 0 ? rn - 1 : 0) + "é"));
+}
+trace("utf8 reads", reads.join(" "));
