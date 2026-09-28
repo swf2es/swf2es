@@ -19,147 +19,8 @@ import {
   METHOD_NeedArguments,
   METHOD_NeedRest,
 } from "../abc/constants";
-import {
-  OP_add,
-  OP_add_i,
-  OP_applytype,
-  OP_astype,
-  OP_astypelate,
-  OP_bitand,
-  OP_bitnot,
-  OP_bitor,
-  OP_bitxor,
-  OP_call,
-  OP_callmethod,
-  OP_callproperty,
-  OP_callproplex,
-  OP_callpropvoid,
-  OP_callstatic,
-  OP_callsuper,
-  OP_callsupervoid,
-  OP_checkfilter,
-  OP_coerce,
-  OP_coerce_a,
-  OP_coerce_b,
-  OP_coerce_d,
-  OP_coerce_i,
-  OP_coerce_o,
-  OP_coerce_s,
-  OP_coerce_u,
-  OP_construct,
-  OP_constructprop,
-  OP_constructsuper,
-  OP_convert_b,
-  OP_convert_d,
-  OP_convert_i,
-  OP_convert_o,
-  OP_convert_s,
-  OP_convert_u,
-  OP_debug,
-  OP_debugfile,
-  OP_debugline,
-  OP_declocal,
-  OP_declocal_i,
-  OP_decrement,
-  OP_decrement_i,
-  OP_deleteproperty,
-  OP_divide,
-  OP_dup,
-  OP_equals,
-  OP_esc_xattr,
-  OP_esc_xelem,
-  OP_finddef,
-  OP_findproperty,
-  OP_findpropstrict,
-  OP_getglobalscope,
-  OP_getglobalslot,
-  OP_getlocal,
-  OP_getlocal0,
-  OP_getouterscope,
-  OP_getproperty,
-  OP_getscopeobject,
-  OP_getslot,
-  OP_getsuper,
-  OP_greaterequals,
-  OP_greaterthan,
-  OP_hasnext,
-  OP_hasnext2,
-  OP_ifeq,
-  OP_iffalse,
-  OP_ifge,
-  OP_ifgt,
-  OP_ifle,
-  OP_iflt,
-  OP_ifne,
-  OP_ifnge,
-  OP_ifngt,
-  OP_ifnle,
-  OP_ifnlt,
-  OP_ifstricteq,
-  OP_ifstrictne,
-  OP_iftrue,
-  OP_in,
-  OP_inclocal,
-  OP_inclocal_i,
-  OP_increment,
-  OP_increment_i,
-  OP_initproperty,
-  OP_instanceof,
-  OP_istype,
-  OP_istypelate,
-  OP_jump,
-  OP_kill,
-  OP_lessequals,
-  OP_lessthan,
-  OP_lookupswitch,
-  OP_lshift,
-  OP_modulo,
-  OP_multiply,
-  OP_multiply_i,
-  OP_negate,
-  OP_negate_i,
-  OP_newactivation,
-  OP_newarray,
-  OP_newcatch,
-  OP_newclass,
-  OP_newfunction,
-  OP_newobject,
-  OP_nextname,
-  OP_nextvalue,
-  OP_not,
-  OP_pop,
-  OP_popscope,
-  OP_pushbyte,
-  OP_pushdouble,
-  OP_pushfalse,
-  OP_pushint,
-  OP_pushnan,
-  OP_pushnull,
-  OP_pushscope,
-  OP_pushshort,
-  OP_pushstring,
-  OP_pushtrue,
-  OP_pushuint,
-  OP_pushundefined,
-  OP_pushwith,
-  OP_returnvalue,
-  OP_returnvoid,
-  OP_rshift,
-  OP_setglobalslot,
-  OP_setlocal,
-  OP_setlocal0,
-  OP_setproperty,
-  OP_setslot,
-  OP_setsuper,
-  OP_strictequals,
-  OP_subtract,
-  OP_subtract_i,
-  OP_swap,
-  OP_throw,
-  OP_typeof,
-  OP_urshift,
-  opcodeNames,
-} from "../abc/opcodes";
+import * as ops from "../abc/opcodes";
+import { opcodeNames } from "../abc/opcodes";
 import {
   IR_CallGetter,
   IR_CallInterface,
@@ -529,58 +390,58 @@ export class MethodEmitter {
     const op = ir.op[i];
     const a = ir.a[i];
     switch (op) {
-      case OP_pushbyte:
-      case OP_pushshort:
+      case ops.OP_pushbyte:
+      case ops.OP_pushshort:
         this.assign(i);
         out.int(<i32>a);
         break;
-      case OP_pushint:
+      case ops.OP_pushint:
         this.assign(i);
         out.int(this.abc.pool.ints[a]);
         break;
-      case OP_pushuint:
+      case ops.OP_pushuint:
         this.assign(i);
         out.uint(this.abc.pool.uints[a]);
         break;
-      case OP_pushdouble:
+      case ops.OP_pushdouble:
         this.assign(i);
         out.double(this.abc.pool.doubles[a]);
         break;
-      case OP_pushnan:
+      case ops.OP_pushnan:
         this.assign(i);
         out.text("NaN");
         break;
-      case OP_pushstring:
+      case ops.OP_pushstring:
         this.assign(i);
         this.string(a);
         break;
-      case OP_pushtrue:
+      case ops.OP_pushtrue:
         this.assign(i);
         out.text("true");
         break;
-      case OP_pushfalse:
+      case ops.OP_pushfalse:
         this.assign(i);
         out.text("false");
         break;
-      case OP_pushnull:
+      case ops.OP_pushnull:
         this.assign(i);
         out.text("null");
         break;
-      case OP_pushundefined:
+      case ops.OP_pushundefined:
         this.assign(i);
         out.text("undefined");
         break;
-      case OP_getlocal:
-      case OP_setlocal:
-      case OP_dup:
+      case ops.OP_getlocal:
+      case ops.OP_setlocal:
+      case ops.OP_dup:
         this.assign(i);
         this.reg(ir.src[i]);
         break;
-      case OP_kill:
+      case ops.OP_kill:
         this.assign(i);
         out.text("undefined");
         break;
-      case OP_swap: {
+      case ops.OP_swap: {
         const x = ir.src[i];
         out.text("    [");
         this.reg(x);
@@ -593,10 +454,10 @@ export class MethodEmitter {
         out.text("]");
         break;
       }
-      case OP_pop:
-      case OP_debug:
-      case OP_debugline:
-      case OP_debugfile:
+      case ops.OP_pop:
+      case ops.OP_debug:
+      case ops.OP_debugline:
+      case ops.OP_debugfile:
         return;
       case IR_Coerce:
         this.assign(i);
@@ -609,7 +470,7 @@ export class MethodEmitter {
         this.reg(ir.src[i]);
         out.text(")");
         break;
-      case OP_add:
+      case ops.OP_add:
         this.assign(i);
         if (this.isNumber(this.src(i, 0)) && this.isNumber(this.src(i, 1))) {
           this.binary(i, " + ");
@@ -617,178 +478,178 @@ export class MethodEmitter {
           this.call2("rt.add(", i);
         }
         break;
-      case OP_subtract:
+      case ops.OP_subtract:
         this.assign(i);
         this.binary(i, " - ");
         break;
-      case OP_multiply:
+      case ops.OP_multiply:
         this.assign(i);
         this.binary(i, " * ");
         break;
-      case OP_divide:
+      case ops.OP_divide:
         this.assign(i);
         this.binary(i, " / ");
         break;
-      case OP_modulo:
+      case ops.OP_modulo:
         this.assign(i);
         this.binary(i, " % ");
         break;
-      case OP_add_i:
+      case ops.OP_add_i:
         this.assign(i);
         this.binaryInt(i, " + ");
         break;
-      case OP_subtract_i:
+      case ops.OP_subtract_i:
         this.assign(i);
         this.binaryInt(i, " - ");
         break;
-      case OP_multiply_i:
+      case ops.OP_multiply_i:
         // int multiplication wraps as Math.imul does, not as a double product.
         this.assign(i);
         this.call2("Math.imul(", i);
         break;
-      case OP_bitand:
+      case ops.OP_bitand:
         this.assign(i);
         this.binary(i, " & ");
         break;
-      case OP_bitor:
+      case ops.OP_bitor:
         this.assign(i);
         this.binary(i, " | ");
         break;
-      case OP_bitxor:
+      case ops.OP_bitxor:
         this.assign(i);
         this.binary(i, " ^ ");
         break;
-      case OP_lshift:
+      case ops.OP_lshift:
         this.assign(i);
         this.binary(i, " << ");
         break;
-      case OP_rshift:
+      case ops.OP_rshift:
         this.assign(i);
         this.binary(i, " >> ");
         break;
-      case OP_urshift:
+      case ops.OP_urshift:
         this.assign(i);
         this.binary(i, " >>> ");
         break;
-      case OP_bitnot:
+      case ops.OP_bitnot:
         this.assign(i);
         out.text("~");
         this.reg(ir.src[i]);
         break;
-      case OP_negate:
+      case ops.OP_negate:
         this.assign(i);
         out.text("-");
         this.reg(ir.src[i]);
         break;
-      case OP_negate_i:
+      case ops.OP_negate_i:
         this.assign(i);
         out.text("-");
         this.reg(ir.src[i]);
         out.text(" | 0");
         break;
-      case OP_increment:
-      case OP_decrement:
+      case ops.OP_increment:
+      case ops.OP_decrement:
         this.assign(i);
         this.reg(ir.src[i]);
-        out.text(op === OP_increment ? " + 1" : " - 1");
+        out.text(op === ops.OP_increment ? " + 1" : " - 1");
         break;
-      case OP_increment_i:
-      case OP_decrement_i:
+      case ops.OP_increment_i:
+      case ops.OP_decrement_i:
         this.assign(i);
         this.reg(ir.src[i]);
-        out.text(op === OP_increment_i ? " + 1 | 0" : " - 1 | 0");
+        out.text(op === ops.OP_increment_i ? " + 1 | 0" : " - 1 | 0");
         break;
-      case OP_inclocal:
-      case OP_declocal:
+      case ops.OP_inclocal:
+      case ops.OP_declocal:
         this.assign(i);
         this.reg(ir.src[i]);
-        out.text(op === OP_inclocal ? " + 1" : " - 1");
+        out.text(op === ops.OP_inclocal ? " + 1" : " - 1");
         break;
-      case OP_inclocal_i:
-      case OP_declocal_i:
+      case ops.OP_inclocal_i:
+      case ops.OP_declocal_i:
         this.assign(i);
         this.reg(ir.src[i]);
-        out.text(op === OP_inclocal_i ? " + 1 | 0" : " - 1 | 0");
+        out.text(op === ops.OP_inclocal_i ? " + 1 | 0" : " - 1 | 0");
         break;
-      case OP_not:
+      case ops.OP_not:
         this.assign(i);
         out.text("!");
         this.reg(ir.src[i]);
         break;
-      case OP_typeof:
+      case ops.OP_typeof:
         this.assign(i);
         out.text("rt.typeOf(");
         this.reg(ir.src[i]);
         out.text(")");
         break;
-      case OP_equals:
+      case ops.OP_equals:
         this.assign(i);
         this.call2("rt.equals(", i);
         break;
-      case OP_strictequals:
+      case ops.OP_strictequals:
         this.assign(i);
         this.call2("rt.strictEquals(", i);
         break;
-      case OP_lessthan:
+      case ops.OP_lessthan:
         this.assign(i);
         this.call2("rt.lessThan(", i);
         break;
-      case OP_lessequals:
+      case ops.OP_lessequals:
         this.assign(i);
         this.call2("rt.lessEquals(", i);
         break;
-      case OP_greaterthan:
+      case ops.OP_greaterthan:
         this.assign(i);
         this.call2("rt.greaterThan(", i);
         break;
-      case OP_greaterequals:
+      case ops.OP_greaterequals:
         this.assign(i);
         this.call2("rt.greaterEquals(", i);
         break;
-      case OP_convert_i:
-      case OP_coerce_i:
-      case OP_convert_u:
-      case OP_coerce_u:
-      case OP_convert_d:
-      case OP_coerce_d:
-      case OP_convert_b:
-      case OP_coerce_b:
-      case OP_convert_s:
-      case OP_coerce_s:
-      case OP_coerce_a:
-      case OP_coerce_o:
-      case OP_coerce:
-      case OP_convert_o:
+      case ops.OP_convert_i:
+      case ops.OP_coerce_i:
+      case ops.OP_convert_u:
+      case ops.OP_coerce_u:
+      case ops.OP_convert_d:
+      case ops.OP_coerce_d:
+      case ops.OP_convert_b:
+      case ops.OP_coerce_b:
+      case ops.OP_convert_s:
+      case ops.OP_coerce_s:
+      case ops.OP_coerce_a:
+      case ops.OP_coerce_o:
+      case ops.OP_coerce:
+      case ops.OP_convert_o:
         this.assign(i);
         this.conversion(i, <u8>op);
         break;
-      case OP_jump:
+      case ops.OP_jump:
         out.text("    ");
         this.goto(a);
         break;
-      case OP_iftrue:
-      case OP_iffalse:
-        out.text(op === OP_iftrue ? "    if (" : "    if (!");
+      case ops.OP_iftrue:
+      case ops.OP_iffalse:
+        out.text(op === ops.OP_iftrue ? "    if (" : "    if (!");
         this.reg(ir.src[i]);
         out.text(") { ");
         this.goto(a);
         out.text(" }");
         break;
-      case OP_ifeq:
-      case OP_ifne:
-      case OP_ifstricteq:
-      case OP_ifstrictne:
-      case OP_iflt:
-      case OP_ifle:
-      case OP_ifgt:
-      case OP_ifge:
-      case OP_ifnlt:
-      case OP_ifnle:
-      case OP_ifngt:
-      case OP_ifnge:
+      case ops.OP_ifeq:
+      case ops.OP_ifne:
+      case ops.OP_ifstricteq:
+      case ops.OP_ifstrictne:
+      case ops.OP_iflt:
+      case ops.OP_ifle:
+      case ops.OP_ifgt:
+      case ops.OP_ifge:
+      case ops.OP_ifnlt:
+      case ops.OP_ifnle:
+      case ops.OP_ifngt:
+      case ops.OP_ifnge:
         this.branch(i, <u8>op);
         break;
-      case OP_lookupswitch: {
+      case ops.OP_lookupswitch: {
         // An index out of range, or not an int, takes the default.
         out.text("    switch (");
         this.reg(ir.src[i]);
@@ -806,14 +667,14 @@ export class MethodEmitter {
         out.text(" }");
         break;
       }
-      case OP_returnvoid:
+      case ops.OP_returnvoid:
         out.text("    return undefined");
         break;
-      case OP_returnvalue:
+      case ops.OP_returnvalue:
         out.text("    return ");
         this.reg(ir.src[i]);
         break;
-      case OP_throw:
+      case ops.OP_throw:
         out.text("    throw ");
         this.reg(ir.src[i]);
         break;
@@ -822,13 +683,13 @@ export class MethodEmitter {
           break;
         }
 
-        if (op >= OP_getlocal0 && op < OP_getlocal0 + 4) {
+        if (op >= ops.OP_getlocal0 && op < ops.OP_getlocal0 + 4) {
           this.assign(i);
           this.reg(ir.src[i]);
           break;
         }
 
-        if (op >= OP_setlocal0 && op < OP_setlocal0 + 4) {
+        if (op >= ops.OP_setlocal0 && op < ops.OP_setlocal0 + 4) {
           this.assign(i);
           this.reg(ir.src[i]);
           break;
@@ -860,34 +721,34 @@ export class MethodEmitter {
     const a = ir.a[i];
     const src = ir.src[i];
     switch (op) {
-      case OP_pushscope:
-      case OP_pushwith:
-        this.scopeWith[this.scopeDepth++] = op === OP_pushwith ? 1 : 0;
+      case ops.OP_pushscope:
+      case ops.OP_pushwith:
+        this.scopeWith[this.scopeDepth++] = op === ops.OP_pushwith ? 1 : 0;
         this.assign(i);
         this.reg(src);
         return true;
-      case OP_popscope:
+      case ops.OP_popscope:
         this.scopeDepth--;
         out.text("    ");
         this.reg(src);
         out.text(" = undefined");
         return true;
-      case OP_getscopeobject:
+      case ops.OP_getscopeobject:
         this.assign(i);
         this.reg(src);
         return true;
-      case OP_getouterscope:
+      case ops.OP_getouterscope:
         this.assign(i);
         out.text("scope[");
         out.uint(a);
         out.text("]");
         return true;
-      case OP_getglobalscope:
+      case ops.OP_getglobalscope:
       case IR_GetGlobalScope:
         this.assign(i);
         this.globalScope();
         return true;
-      case OP_finddef:
+      case ops.OP_finddef:
         this.assign(i);
         out.text("rt.findDef(M[");
         out.uint(a);
@@ -903,22 +764,22 @@ export class MethodEmitter {
         this.globalScope();
         out.text(")");
         return true;
-      case OP_findproperty:
-      case OP_findpropstrict:
+      case ops.OP_findproperty:
+      case ops.OP_findpropstrict:
         this.assign(i);
-        out.text(op === OP_findpropstrict ? "rt.findPropertyStrict(" : "rt.findProperty(");
+        out.text(op === ops.OP_findpropstrict ? "rt.findPropertyStrict(" : "rt.findProperty(");
         this.name(a, src);
         out.text(", scope, ");
         this.localScopes();
         out.text(")");
         return true;
-      case OP_getslot:
+      case ops.OP_getslot:
         this.assign(i);
         this.reg(src);
         out.text(".$");
         out.uint(a);
         return true;
-      case OP_setslot:
+      case ops.OP_setslot:
         out.text("    ");
         this.reg(src);
         out.text(".$");
@@ -926,13 +787,13 @@ export class MethodEmitter {
         out.text(" = ");
         this.reg(src + 1);
         return true;
-      case OP_getglobalslot:
+      case ops.OP_getglobalslot:
         this.assign(i);
         this.globalScope();
         out.text(".$");
         out.uint(a);
         return true;
-      case OP_setglobalslot:
+      case ops.OP_setglobalslot:
         out.text("    ");
         this.globalScope();
         out.text(".$");
@@ -948,7 +809,7 @@ export class MethodEmitter {
         out.text("    ");
         this.virtual(a, src, 1);
         return true;
-      case OP_callmethod:
+      case ops.OP_callmethod:
         if (ir.dst[i] >= 0) {
           this.assign(i);
         } else {
@@ -978,7 +839,7 @@ export class MethodEmitter {
         this.assign(i);
         this.reg(src + <i32>ir.srcCount[i] - 1);
         return true;
-      case OP_getproperty:
+      case ops.OP_getproperty:
         this.assign(i);
         out.text("rt.getProperty(");
         this.reg(src);
@@ -986,9 +847,9 @@ export class MethodEmitter {
         this.name(a, src + 1);
         out.text(")");
         return true;
-      case OP_setproperty:
-      case OP_initproperty: {
-        out.text(op === OP_initproperty ? "    rt.initProperty(" : "    rt.setProperty(");
+      case ops.OP_setproperty:
+      case ops.OP_initproperty: {
+        out.text(op === ops.OP_initproperty ? "    rt.initProperty(" : "    rt.setProperty(");
         this.reg(src);
         out.text(", ");
         this.name(a, src + 1);
@@ -997,7 +858,7 @@ export class MethodEmitter {
         out.text(")");
         return true;
       }
-      case OP_deleteproperty:
+      case ops.OP_deleteproperty:
         this.assign(i);
         out.text("rt.deleteProperty(");
         this.reg(src);
@@ -1005,15 +866,15 @@ export class MethodEmitter {
         this.name(a, src + 1);
         out.text(")");
         return true;
-      case OP_in:
+      case ops.OP_in:
         this.assign(i);
         // `name in object`.
         this.call2("rt.in(", i);
         return true;
-      case OP_callproperty:
-      case OP_callproplex:
-      case OP_callpropvoid:
-      case OP_constructprop: {
+      case ops.OP_callproperty:
+      case ops.OP_callproplex:
+      case ops.OP_callpropvoid:
+      case ops.OP_constructprop: {
         const argc = ir.b[i];
         const parts = ir.srcCount[i] - 1 - argc;
         if (ir.dst[i] >= 0) {
@@ -1023,9 +884,9 @@ export class MethodEmitter {
         }
 
         out.text(
-          op === OP_constructprop
+          op === ops.OP_constructprop
             ? "rt.constructProperty("
-            : op === OP_callproplex
+            : op === ops.OP_callproplex
               ? "rt.callPropLex("
               : "rt.callProperty(",
         );
@@ -1036,11 +897,11 @@ export class MethodEmitter {
         out.text(")");
         return true;
       }
-      case OP_callsuper:
-      case OP_callsupervoid:
-      case OP_getsuper:
-      case OP_setsuper: {
-        const argc = op === OP_getsuper ? 0 : op === OP_setsuper ? 1 : ir.b[i];
+      case ops.OP_callsuper:
+      case ops.OP_callsupervoid:
+      case ops.OP_getsuper:
+      case ops.OP_setsuper: {
+        const argc = op === ops.OP_getsuper ? 0 : op === ops.OP_setsuper ? 1 : ir.b[i];
         const parts = ir.srcCount[i] - 1 - argc;
         if (ir.dst[i] >= 0) {
           this.assign(i);
@@ -1049,9 +910,9 @@ export class MethodEmitter {
         }
 
         out.text(
-          op === OP_getsuper
+          op === ops.OP_getsuper
             ? "rt.getSuper(sup, "
-            : op === OP_setsuper
+            : op === ops.OP_setsuper
               ? "rt.setSuper(sup, "
               : "rt.callSuper(sup, ",
         );
@@ -1062,20 +923,20 @@ export class MethodEmitter {
         out.text(")");
         return true;
       }
-      case OP_constructsuper:
+      case ops.OP_constructsuper:
         out.text("    rt.constructSuper(sup, ");
         this.reg(src);
         this.args(src + 1, a);
         out.text(")");
         return true;
-      case OP_construct:
+      case ops.OP_construct:
         this.assign(i);
         out.text("rt.construct(");
         this.reg(src);
         this.args(src + 1, a);
         out.text(")");
         return true;
-      case OP_call:
+      case ops.OP_call:
         this.assign(i);
         out.text("rt.call(");
         this.reg(src);
@@ -1084,7 +945,7 @@ export class MethodEmitter {
         this.args(src + 2, a);
         out.text(")");
         return true;
-      case OP_callstatic:
+      case ops.OP_callstatic:
         if (ir.dst[i] >= 0) {
           this.assign(i);
         } else {
@@ -1098,7 +959,7 @@ export class MethodEmitter {
         this.args(src + 1, ir.b[i]);
         out.text(")");
         return true;
-      case OP_newfunction:
+      case ops.OP_newfunction:
         this.assign(i);
         out.text("rt.newFunction(F[");
         out.uint(a);
@@ -1106,7 +967,7 @@ export class MethodEmitter {
         this.scopeHere();
         out.text(")");
         return true;
-      case OP_newclass:
+      case ops.OP_newclass:
         this.assign(i);
         out.text("rt.newClass(A.classes[");
         out.uint(a);
@@ -1116,13 +977,13 @@ export class MethodEmitter {
         this.scopeHere();
         out.text(")");
         return true;
-      case OP_newactivation:
+      case ops.OP_newactivation:
         this.assign(i);
         out.text("rt.newActivation(A.activations[");
         out.int(this.body);
         out.text("])");
         return true;
-      case OP_newcatch: {
+      case ops.OP_newcatch: {
         const abc = this.abc;
         const h = abc.bodyExceptionStart[this.body] + a;
         this.assign(i);
@@ -1131,19 +992,19 @@ export class MethodEmitter {
         out.text("])");
         return true;
       }
-      case OP_newobject:
+      case ops.OP_newobject:
         this.assign(i);
         out.text("rt.newObject([");
         this.list(src, ir.srcCount[i]);
         out.text("])");
         return true;
-      case OP_newarray:
+      case ops.OP_newarray:
         this.assign(i);
         out.text("rt.newArray([");
         this.list(src, ir.srcCount[i]);
         out.text("])");
         return true;
-      case OP_applytype:
+      case ops.OP_applytype:
         this.assign(i);
         out.text("rt.applyType(");
         this.reg(src);
@@ -1151,11 +1012,11 @@ export class MethodEmitter {
         this.list(src + 1, a);
         out.text("])");
         return true;
-      case OP_hasnext:
+      case ops.OP_hasnext:
         this.assign(i);
         this.call2("rt.hasNext(", i);
         return true;
-      case OP_hasnext2: {
+      case ops.OP_hasnext2: {
         // hasnext2 updates its two locals: the object and the index.
         const b = ir.b[i];
         out.text("    [");
@@ -1171,44 +1032,44 @@ export class MethodEmitter {
         out.text(")");
         return true;
       }
-      case OP_nextname:
+      case ops.OP_nextname:
         this.assign(i);
         this.call2("rt.nextName(", i);
         return true;
-      case OP_nextvalue:
+      case ops.OP_nextvalue:
         this.assign(i);
         this.call2("rt.nextValue(", i);
         return true;
-      case OP_instanceof:
+      case ops.OP_instanceof:
         this.assign(i);
         this.call2("rt.instanceOf(", i);
         return true;
-      case OP_istypelate:
+      case ops.OP_istypelate:
         this.assign(i);
         this.call2("rt.isTypeLate(", i);
         return true;
-      case OP_astypelate:
+      case ops.OP_astypelate:
         this.assign(i);
         this.call2("rt.asTypeLate(", i);
         return true;
-      case OP_istype:
-      case OP_astype:
+      case ops.OP_istype:
+      case ops.OP_astype:
         this.assign(i);
-        out.text(op === OP_istype ? "rt.isType(" : "rt.asType(");
+        out.text(op === ops.OP_istype ? "rt.isType(" : "rt.asType(");
         this.reg(src);
         out.text(", M[");
         out.uint(a);
         out.text("])");
         return true;
-      case OP_checkfilter:
+      case ops.OP_checkfilter:
         out.text("    rt.checkFilter(");
         this.reg(src);
         out.text(")");
         return true;
-      case OP_esc_xelem:
-      case OP_esc_xattr:
+      case ops.OP_esc_xelem:
+      case ops.OP_esc_xattr:
         this.assign(i);
-        out.text(op === OP_esc_xelem ? "rt.escapeElement(" : "rt.escapeAttribute(");
+        out.text(op === ops.OP_esc_xelem ? "rt.escapeElement(" : "rt.escapeAttribute(");
         this.reg(src);
         out.text(")");
         return true;
@@ -1367,37 +1228,37 @@ export class MethodEmitter {
     const out = this.out;
     out.text("    if (");
     switch (op) {
-      case OP_ifeq:
+      case ops.OP_ifeq:
         this.call2("rt.equals(", i);
         break;
-      case OP_ifne:
+      case ops.OP_ifne:
         this.call2("!rt.equals(", i);
         break;
-      case OP_ifstricteq:
+      case ops.OP_ifstricteq:
         this.call2("rt.strictEquals(", i);
         break;
-      case OP_ifstrictne:
+      case ops.OP_ifstrictne:
         this.call2("!rt.strictEquals(", i);
         break;
-      case OP_iflt:
+      case ops.OP_iflt:
         this.call2("rt.lessThan(", i);
         break;
-      case OP_ifle:
+      case ops.OP_ifle:
         this.call2("rt.lessEquals(", i);
         break;
-      case OP_ifgt:
+      case ops.OP_ifgt:
         this.call2("rt.greaterThan(", i);
         break;
-      case OP_ifge:
+      case ops.OP_ifge:
         this.call2("rt.greaterEquals(", i);
         break;
-      case OP_ifnlt:
+      case ops.OP_ifnlt:
         this.call2("!rt.lessThan(", i);
         break;
-      case OP_ifnle:
+      case ops.OP_ifnle:
         this.call2("!rt.lessEquals(", i);
         break;
-      case OP_ifngt:
+      case ops.OP_ifngt:
         this.call2("!rt.greaterThan(", i);
         break;
       default:
@@ -1416,40 +1277,40 @@ export class MethodEmitter {
     const src = this.ir.src[i];
     const from = this.regType[src];
     switch (op) {
-      case OP_convert_i:
-      case OP_coerce_i:
+      case ops.OP_convert_i:
+      case ops.OP_coerce_i:
         this.convert("", src, domain.intType, from);
         break;
-      case OP_convert_u:
-      case OP_coerce_u:
+      case ops.OP_convert_u:
+      case ops.OP_coerce_u:
         this.convert("", src, domain.uintType, from);
         break;
-      case OP_convert_d:
-      case OP_coerce_d:
+      case ops.OP_convert_d:
+      case ops.OP_coerce_d:
         this.convert("", src, domain.numberType, from);
         break;
-      case OP_convert_b:
-      case OP_coerce_b:
+      case ops.OP_convert_b:
+      case ops.OP_coerce_b:
         this.convert("", src, domain.booleanType, from);
         break;
-      case OP_convert_s:
+      case ops.OP_convert_s:
         // Unlike coerce_s, null and undefined become "null" and "undefined".
         this.out.text("rt.toString(");
         this.reg(src);
         this.out.text(")");
         break;
-      case OP_coerce_s:
+      case ops.OP_coerce_s:
         this.convert("", src, domain.stringType, from);
         break;
-      case OP_convert_o:
+      case ops.OP_convert_o:
         this.out.text("rt.toObject(");
         this.reg(src);
         this.out.text(")");
         break;
-      case OP_coerce_o:
+      case ops.OP_coerce_o:
         this.convert("", src, domain.objectType(), from);
         break;
-      case OP_coerce:
+      case ops.OP_coerce:
         this.convert("", src, this.ir.c[i], from);
         break;
       default:
