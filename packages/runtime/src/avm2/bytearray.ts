@@ -241,6 +241,10 @@ export function bytesOf(rt: Runtime, o: AsObject): Bytes {
   return o.$bytes;
 }
 
+// TextEncoder is the web's and node's alike, though not ECMAScript's,
+// whose library alone the runtime is typed against.
+declare const TextEncoder: new () => { encode(s: string): Uint8Array };
+
 /** The host's UTF-8 encoder, which writes a lone surrogate as U+FFFD, as utf8() does. */
 const encoder = new TextEncoder();
 
