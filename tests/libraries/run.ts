@@ -10,6 +10,7 @@ import {
   abcdumpFacts,
   compareFacts,
   irProblem,
+  loweringProblem,
   swf2esFacts,
   typedErrors,
   verifyErrors,
@@ -41,7 +42,7 @@ for (const library of all) {
 
   const bases = library.name === "builtin" ? [] : [all[0].abc];
   const typed = typedErrors(bases, library.abc, true);
-  const ir = irProblem();
+  const ir = irProblem() ?? loweringProblem();
   if (ir) {
     differences.push(`IR: ${ir}`);
   }

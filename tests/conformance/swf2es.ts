@@ -44,6 +44,16 @@ export async function runSwf2es(builtins: Uint8Array[], abc: Uint8Array): Promis
   }
 
   const A = (await load(testing.domainModule(hash(abc))))(rt);
-  rt.run(A);
+  try {
+    rt.run(A);
+  } catch (e) {
+    // An AS3 exception nothing caught: avmshell prints it, as its string.
+    if (e instanceof Error) {
+      throw e;
+    }
+
+    lines.push(rt.toString(e));
+  }
+
   return lines;
 }

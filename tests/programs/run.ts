@@ -11,6 +11,7 @@ import {
   abcdumpFacts,
   compareFacts,
   irProblem,
+  loweringProblem,
   swf2esFacts,
   typedErrors,
 } from "../../oracle/abc-facts.ts";
@@ -100,7 +101,7 @@ for (const [i, r] of results.entries()) {
     differences.push(`linking and typed verification: errors ${errors.join(" ")}`);
   }
 
-  const ir = irProblem();
+  const ir = irProblem() ?? loweringProblem();
   if (ir) {
     differences.push(`IR: ${ir}`);
   }

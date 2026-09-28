@@ -48,9 +48,24 @@ Near-term work, in order. The goal of milestone 1 is in
    progress: every instruction of the libraries lowers, exception handlers
    included, and `tests/conformance` runs each case compiled by swf2es,
    after builtin.abc and shell_toplevel.abc also compiled by swf2es,
-   comparing its output with avmshell's. The three cases pass, and a
-   module loads only after the ABCs it was compiled against. Next: more
-   cases, opcode by opcode.
+   comparing its output with avmshell's. 18 cases pass, from arithmetic,
+   control flow and closures to classes, namespaces, Vectors, sorting and
+   avmplus' number formatting, and a module loads only after the ABCs it
+   was compiled against. Every instruction of Tamarin, the libraries and
+   as3pb lowers. Next: ByteArray and domain memory, so as3pb runs, and more
+   cases.
+7. **Faster generated code**, measured on as3pb against AwayFL and on small
+   loops, including loops with bounds known only at run time:
+   1. Typed comparisons and branches: plain `<`, `>` and `===` where the
+      IR's types are numbers, instead of the runtime's generic ones.
+   2. Structured control flow: loops, `if`s and labelled blocks built from
+      the dominator tree, as in Ramsey's "Beyond Relooper", with copies of
+      stack registers removed. A method whose control flow is irreducible,
+      or whose handler ranges do not nest, keeps the dispatcher. Both
+      preserve AS3's semantics exactly: int wrapping, evaluation order, and
+      which instruction an exception comes from, as its handlers see it.
+   3. Source maps from the ABC's debugline and debugfile, to step through
+      the AS3 in DevTools.
 5. **Faster verification**: the minimal runtime halved decoding to about
    35 ns per instruction, against Ruffle's 15 for decoding alone
    ([benchmarks.md](benchmarks.md)); the typed verifier still walks every

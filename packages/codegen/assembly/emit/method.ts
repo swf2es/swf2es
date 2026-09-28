@@ -27,6 +27,7 @@ import {
   BUILTIN_Any,
   BUILTIN_Boolean,
   BUILTIN_Int,
+  BUILTIN_Namespace,
   BUILTIN_Number,
   BUILTIN_Object,
   BUILTIN_String,
@@ -256,6 +257,28 @@ export class MethodEmitter {
     // The parameters with default values: an untyped function's others are
     // optional too, as avmplus' are, but a missing one is just undefined.
     const optional = abc.methodOptionalStart[method + 1] - abc.methodOptionalStart[method];
+
+    // As MethodEnv's argcOk, before any coercion: fewer arguments than it
+    // requires, or more than it declares unless it takes the rest.
+    const required = count - traits.optionalCount[global];
+    const extra = this.domain.allowsExtraArgs(global);
+    if (required > 0 || !extra) {
+      out.text("  if (");
+      if (required > 0) {
+        out.text("arguments.length < ");
+        out.uint(required);
+      }
+
+      if (!extra) {
+        out.text(required > 0 ? " || arguments.length > " : "arguments.length > ");
+        out.uint(count);
+      }
+
+      out.text(") throw rt.argumentCountError(");
+      out.uint(required);
+      out.text(", arguments.length);\n");
+    }
+
     out.text("  let l0 = this");
     for (let p: u32 = 1; p <= count; p++) {
       out.text(", l");
@@ -415,6 +438,12 @@ export class MethodEmitter {
       case ops.OP_pushnull:
         this.assign(i);
         out.text("null");
+        break;
+      case ops.OP_pushnamespace:
+        this.assign(i);
+        out.text("rt.namespace(N[");
+        out.uint(a);
+        out.text("])");
         break;
       case ops.OP_pushundefined:
         this.assign(i);
@@ -684,13 +713,8 @@ export class MethodEmitter {
           break;
         }
 
-        out.text("    ");
-        if (ir.dst[i] >= 0) {
-          this.reg(ir.dst[i]);
-          out.text(" = ");
-        }
-
-        out.text('rt.unsupported("');
+        // An instruction not lowered yet fails where it runs.
+        out.text('    throw rt.unsupported("');
         out.text(op < 256 ? opcodeNames[op] : "ir");
         out.text('")');
         break;
@@ -1050,6 +1074,65 @@ export class MethodEmitter {
         out.uint(a);
         out.text("])");
         return true;
+      // Domain memory: loads and stores through the runtime, which checks
+      // their range; sign extensions in plain JavaScript.
+      case ops.OP_li8:
+      case ops.OP_li16:
+      case ops.OP_li32:
+      case ops.OP_lf32:
+      case ops.OP_lf64:
+        this.assign(i);
+        out.text("rt.");
+        out.text(opcodeNames[op]);
+        out.text("(");
+        this.reg(src);
+        out.text(")");
+        return true;
+      case ops.OP_si8:
+      case ops.OP_si16:
+      case ops.OP_si32:
+      case ops.OP_sf32:
+      case ops.OP_sf64:
+        out.text("    rt.");
+        out.text(opcodeNames[op]);
+        out.text("(");
+        this.reg(src);
+        out.text(", ");
+        this.reg(src + 1);
+        out.text(")");
+        return true;
+      case ops.OP_sxi1:
+      case ops.OP_sxi8:
+      case ops.OP_sxi16:
+        this.assign(i);
+        out.text("(");
+        this.reg(src);
+        out.text(
+          op === ops.OP_sxi1
+            ? " << 31) >> 31"
+            : op === ops.OP_sxi8
+              ? " << 24) >> 24"
+              : " << 16) >> 16",
+        );
+        return true;
+      case ops.OP_getdescendants:
+        this.assign(i);
+        out.text("rt.getDescendants(");
+        this.reg(src);
+        out.text(", ");
+        this.name(a, src + 1);
+        out.text(")");
+        return true;
+      case ops.OP_dxns:
+        out.text("    rt.setDefaultXmlNamespace(");
+        this.string(a);
+        out.text(")");
+        return true;
+      case ops.OP_dxnslate:
+        out.text("    rt.setDefaultXmlNamespace(");
+        this.reg(src);
+        out.text(")");
+        return true;
       case ops.OP_checkfilter:
         out.text("    rt.checkFilter(");
         this.reg(src);
@@ -1156,7 +1239,8 @@ export class MethodEmitter {
   /**
    * A call by dispatch id `disp` on the receiver in `src`, with `argc`
    * arguments after it: a method of the receiver's prototype, or for a
-   * primitive receiver, of its class's.
+   * primitive receiver, or a namespace, which the runtime represents
+   * itself, of its class's.
    */
   virtual(disp: u32, src: i32, argc: u32): void {
     const out = this.out;
@@ -1167,7 +1251,8 @@ export class MethodEmitter {
       bt === BUILTIN_Uint ||
       bt === BUILTIN_Number ||
       bt === BUILTIN_Boolean ||
-      bt === BUILTIN_String;
+      bt === BUILTIN_String ||
+      bt === BUILTIN_Namespace;
     if (primitive) {
       out.text("rt.prototypeOf(");
       this.typeRef(type);

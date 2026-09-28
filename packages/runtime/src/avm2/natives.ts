@@ -5,7 +5,8 @@
 // the builtin classes differ from others: how their instances hold native
 // state, and what calling or constructing them does.
 import { messages } from "./messages.js";
-import { publicNs, qname } from "./names.js";
+import { Namespace, publicNs, qname } from "./names.js";
+import { convertDoubleToString, convertDoubleToStringRadix, DTOSTR_PRECISION } from "./numbers.js";
 import {
   type AsObject,
   type ClassHook,
@@ -16,6 +17,7 @@ import {
   type TypeRef,
   type Value,
 } from "./runtime.js";
+import { sort, sortOn } from "./sort.js";
 
 type Natives = Record<string, (rt: Runtime) => Method>;
 
@@ -28,15 +30,6 @@ const plain =
   (f: Method) =>
   (_rt: Runtime): Method =>
     f;
-
-/** A number's JavaScript string in `radix`, as avmplus writes it. */
-function radixString(n: number, radix: number): string {
-  if (radix < 2 || radix > 36) {
-    return "";
-  }
-
-  return n.toString(radix);
-}
 
 /** The elements of an Array value, for natives that take one. */
 function elements(v: Value): Value[] {
@@ -114,9 +107,16 @@ const natives: Natives = {
       return rt.callValue(this, receiver, elements(args).slice(), null);
     },
 
-  // Namespace
+  // Namespace and QName: a QName holds its namespace, null for any, and its
+  // local name, null for any.
   "Namespace#get:uri": plain(function (this: Value) {
     return this.uri ?? "";
+  }),
+  "QName#get:localName": plain(function (this: AsObject) {
+    return this.$local ?? "*";
+  }),
+  "QName#get:uri": plain(function (this: AsObject) {
+    return this.$ns ? this.$ns.uri : null;
   }),
   "Namespace#get:prefix": plain(() => undefined),
 
@@ -180,10 +180,31 @@ const natives: Natives = {
     o.$a.indexOf(v, rt.toInt(from)),
   "Array.Array::_lastIndexOf": (rt) => (o: AsObject, v: Value, from: Value) =>
     o.$a.lastIndexOf(v, rt.toInt(from)),
-  "Array.Array::_sort": (rt) => (o: AsObject, args: Value) => {
-    const [compare] = elements(args);
-    sortValues(rt, o.$a, compare);
-    return o;
+  "Array.Array::_sort": (rt) => (o: AsObject, args: Value) => sort(rt, o, elements(args)),
+  "Array.Array::_sortOn": (rt) => (o: AsObject, names: Value, options: Value) =>
+    sortOn(rt, o, names, options),
+  "Array.Array::_every": (rt) => (o: AsObject, f: Value, receiver: Value) =>
+    eachElement(rt, o, f, receiver, (result) => (result === true ? undefined : false)) ?? true,
+  "Array.Array::_some": (rt) => (o: AsObject, f: Value, receiver: Value) =>
+    eachElement(rt, o, f, receiver, (result) => (result === true ? true : undefined)) ?? false,
+  "Array.Array::_forEach": (rt) => (o: AsObject, f: Value, receiver: Value) => {
+    eachElement(rt, o, f, receiver, () => undefined);
+  },
+  "Array.Array::_filter": (rt) => (o: AsObject, f: Value, receiver: Value) => {
+    const out: Value[] = [];
+    eachElement(rt, o, f, receiver, (result, element) => {
+      if (result === true) {
+        out.push(element);
+      }
+    });
+    return rt.array(out);
+  },
+  "Array.Array::_map": (rt) => (o: AsObject, f: Value, receiver: Value) => {
+    const out: Value[] = [];
+    eachElement(rt, o, f, receiver, (result) => {
+      out.push(result);
+    });
+    return rt.array(out);
   },
 
   // String: `this` is the string.
@@ -310,20 +331,27 @@ const natives: Natives = {
     },
 
   // Number
-  "Number.Number::_numberToString": plain((n: number, radix: number) =>
-    radix === 10 ? String(n) : radixString(n, radix),
-  ),
-  "Number.Number::_convert": plain((n: number, precision: number, mode: number) => {
-    // avmplus' DTOSTR_FIXED 1, DTOSTR_PRECISION 2, DTOSTR_EXPONENTIAL 3.
-    switch (mode) {
-      case 1:
-        return n.toFixed(precision);
-      case 2:
-        return n.toPrecision(precision);
-      default:
-        return n.toExponential(precision);
+  // As NumberClass::_numberToString: another radix writes the integer part only.
+  "Number.Number::_numberToString": (rt) => (n: number, radix: number) => {
+    if (radix === 10 || !Number.isFinite(n)) {
+      return convertDoubleToString(n);
     }
-  }),
+
+    if (radix < 2 || radix > 36) {
+      throw rt.error("RangeError", 1003, radix);
+    }
+
+    return convertDoubleToStringRadix(n, radix);
+  },
+  // As NumberClass::_convert: toFixed, toPrecision and toExponential.
+  "Number.Number::_convert": (rt) => (n: number, precision: number, mode: number) => {
+    const [min, max] = mode === DTOSTR_PRECISION ? [1, 21] : [0, 20];
+    if (precision < min || precision > max) {
+      throw rt.error("RangeError", 1002, precision, min, max);
+    }
+
+    return convertDoubleToString(n, mode, precision);
+  },
   "Number.Number::_minValue": plain(() => Number.MIN_VALUE),
 
   // Global functions
@@ -337,6 +365,10 @@ const natives: Natives = {
     const base = cls?.$base;
     return base ? base.$it.name : null;
   },
+
+  // As Toplevel::bugzilla: the bug fixes the builtins' AS3 asks about, all
+  // in effect at the latest SWF version, as avmshell runs.
+  bugzilla: plain((n: number) => n === 504525 || n === 574600 || n === 661330),
 
   // Error
   // Error.throwError fills in the template's %n: in debugger mode it has some.
@@ -503,26 +535,101 @@ for (const [kind] of VECTORS) {
       );
       this.$a.splice(at, rt.toUint(deleteCount), ...items);
     };
-  natives[`${c}.${own}::_sort`] = (rt) => (o: AsObject, args: Value) => {
-    const [compare] = elements(args);
-    sortValues(rt, o.$a, compare);
-    return o;
+  natives[`${c}.${own}::_sort`] = (rt) => (o: AsObject, args: Value) => sort(rt, o, elements(args));
+  natives[`${c}.${own}::_every`] = (rt) => (o: AsObject, f: Value, receiver: Value) =>
+    eachElement(rt, o, f, receiver, (result) => (result === true ? undefined : false)) ?? true;
+  natives[`${c}.${own}::_some`] = (rt) => (o: AsObject, f: Value, receiver: Value) =>
+    eachElement(rt, o, f, receiver, (result) => (result === true ? true : undefined)) ?? false;
+  natives[`${c}.${own}::_forEach`] = (rt) => (o: AsObject, f: Value, receiver: Value) => {
+    eachElement(rt, o, f, receiver, () => undefined);
   };
+  // As TypedVectorObject's _map and _filter: a new Vector of the same type.
+  natives[`${c}#${own}::_map`] = (rt) =>
+    function (this: AsObject, f: Value, receiver: Value) {
+      const cls = this.$traits.cls;
+      const r = rt.constructClass(cls, [this.$a.length]);
+      let i = 0;
+      eachElement(rt, this, f, receiver, (result) => {
+        r.$a[i++] = cls.$convert(rt, cls, result);
+      });
+      return r;
+    };
+  natives[`${c}#${own}::_filter`] = (rt) =>
+    function (this: AsObject, f: Value, receiver: Value) {
+      const r = rt.constructClass(this.$traits.cls, []);
+      eachElement(rt, this, f, receiver, (result, element) => {
+        if (result === true) {
+          r.$a.push(element);
+        }
+      });
+      return r;
+    };
 }
 
-/** Sort as Array's and Vector's sort with a compare function, or else as strings. */
-function sortValues(rt: Runtime, a: Value[], compare: Value): void {
-  if (compare !== null && typeof compare === "object" && compare.$f) {
-    a.sort((x, y) => rt.toNumber(rt.callValue(compare, null, [x, y], null)));
-    return;
+/**
+ * As ArrayClass's every, filter, forEach, map and some: `f` called with
+ * each element, its index and the array, up to the length at the start;
+ * `each` sees each result and the element, and a value it returns ends the
+ * walk with that value. A method closure takes no other receiver.
+ */
+function eachElement(
+  rt: Runtime,
+  o: AsObject,
+  f: Value,
+  receiver: Value,
+  each: (result: Value, element: Value) => Value,
+): Value {
+  if (f === null || f === undefined) {
+    return undefined;
   }
 
-  // With no compare function, or sort options, by the elements' strings.
-  a.sort((x, y) => {
-    const sx = rt.toString(x);
-    const sy = rt.toString(y);
-    return sx < sy ? -1 : sx > sy ? 1 : 0;
-  });
+  if (f.$closure && receiver !== null && receiver !== undefined) {
+    throw rt.error("TypeError", 1510);
+  }
+
+  // Each element as a get of its index: a hole finds the prototype's.
+  const length: number = o.$a.length;
+  for (let i = 0; i < length; i++) {
+    const element = rt.getProperty(o, rt.publicName(i));
+    const done = each(rt.callValue(f, receiver, [element, i, o], null), element);
+    if (done !== undefined) {
+      return done;
+    }
+  }
+
+  return undefined;
+}
+
+/** As QNameClass::construct: QName(name) or QName(namespace, name). */
+function newQName(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
+  if (args.length === 1 && args[0]?.$local !== undefined) {
+    return args[0];
+  }
+
+  const name = args.length >= 2 ? args[1] : args[0];
+  const o = cls.$it.instance();
+  let ns: Namespace | null = publicNs;
+  if (args.length >= 2 && args[0] !== undefined) {
+    ns =
+      args[0] === null
+        ? null
+        : args[0] instanceof Namespace
+          ? args[0]
+          : rt.namespaceOf(rt.construct(rt.builtinClass("Namespace"), args[0]));
+  } else if (name?.$local !== undefined) {
+    ns = name.$ns;
+  }
+
+  const local =
+    name === undefined ? "" : name?.$local !== undefined ? name.$local : rt.toString(name);
+  // With no namespace given, the any name is in any namespace too.
+  if (local === "*" && (args.length < 2 || args[0] === undefined)) {
+    ns = null;
+  }
+
+  o.$ns = ns;
+  o.$local = local === "*" ? null : local;
+  return o;
 }
 
 /** A match as AS3 gives it: an Array of the match and its groups, with its index and input. */
@@ -617,6 +724,28 @@ const hooks: Record<string, ClassHook> = {
   Array: {
     create: withStorage,
     call: (rt, cls, args) => rt.constructClass(cls, args),
+  },
+  // As NamespaceClass::construct: a namespace, a QName's, or one of a URI.
+  Namespace: conversion((rt, args) => {
+    const v = args[args.length - 1];
+    if (args.length === 0 || v === undefined) {
+      return publicNs;
+    }
+
+    if (v instanceof Namespace) {
+      return v;
+    }
+
+    if (v?.$local !== undefined) {
+      return v.$ns ?? publicNs;
+    }
+
+    return rt.ns(0, rt.toString(v));
+  }),
+  // As QNameClass::construct.
+  QName: {
+    construct: newQName,
+    call: newQName,
   },
   RegExp: {
     construct: newRegExp,

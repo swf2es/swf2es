@@ -280,6 +280,14 @@ only, so the player implements all of it.
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
   compiled test must match avmshell's `trace()` output exactly. The Tamarin
   acceptance suite supplies thousands of cases.
+  The oracle's avmshell is a 32-bit x86 build, whose C++ double arithmetic
+  may run in the x87's extended precision. Where that shows, swf2es follows
+  IEEE doubles and the cases avoid it: `Number.toString(radix)` of a value
+  above 2^53 writes digits that are neither exact nor a double's.
+  for-in and for each visit an object's dynamic properties in the order
+  they were added; avmplus visits them in its hashtable's, which for names
+  that are not indexes follows their interned strings' addresses, so the
+  cases do not depend on it.
 - **Flash Player debug projector** for playerglobal behaviour, captured into
   a separate corpus repo. Only redistributable SWFs go there.
 

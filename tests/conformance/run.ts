@@ -65,7 +65,13 @@ for (const r of results) {
     try {
       actual = await runSwf2es(builtins, abcOf(r));
     } catch (e) {
-      actual = [`threw ${e instanceof Error ? e.stack : String(e)}`];
+      // The first frames, with each module's data URL shortened.
+      const stack = (e instanceof Error ? (e.stack ?? e.message) : String(e))
+        .replace(/data:text\/javascript;base64,[A-Za-z0-9+/=]+/g, "module")
+        .split("\n")
+        .slice(0, 5)
+        .join("\n");
+      actual = [`threw ${stack}`];
     }
 
     report(
