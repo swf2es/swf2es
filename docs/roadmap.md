@@ -70,6 +70,11 @@ Near-term work, in order. The goal of milestone 1 is in
       which instruction an exception comes from, as its handlers see it.
    3. Source maps from the ABC's debugline and debugfile, to step through
       the AS3 in DevTools.
+   4. Runtime hot paths, each kept only for a repeatable gain on as3pb:
+      first a check that the JIT and AOT builds of the compiler write the
+      same modules and source maps; then Vector's `push` and `length`,
+      what `findDef` still costs, and domain memory's loads and stores,
+      with AS3's coercions, errors and access widths as they are.
 5. **Faster verification**: the minimal runtime halved decoding to about
    35 ns per instruction, against Ruffle's 15 for decoding alone
    ([benchmarks.md](benchmarks.md)); the typed verifier still walks every

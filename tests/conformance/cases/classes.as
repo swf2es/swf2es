@@ -42,3 +42,15 @@ try { Object(r).nothing = 1; } catch (e:Error) { trace("sealed", e.errorID); }
 try { Object(r).nothing(); } catch (e:Error) { trace("missing method", e.errorID); }
 try { var n:Rect = Object(s) as Rect; trace("cast", n.area()); } catch (e:Error) { trace(e.errorID); }
 try { Square(r); } catch (e:Error) { trace("coerce", e.errorID); }
+// Coercions to a class's instances: a subclass's, null and undefined as null, any other a TypeError.
+function takesRect(x:Rect):String { return x == null ? "null" : x.describe(); }
+function takesShape(x:IShape):String { return x == null ? "null" : String(x.area()); }
+function takesInts(x:Vector.<int>):String { return x == null ? "null" : String(x.length); }
+trace("coerce", takesRect(s), takesRect(null), takesRect(undefined), takesShape(r), takesInts(new <int>[1, 2]));
+var anyValue:* = new Bag();
+try { takesRect(anyValue); } catch (e:TypeError) { trace("coerce wrong", e.errorID); }
+anyValue = new <uint>[1];
+try { takesInts(anyValue); } catch (e:TypeError) { trace("coerce vector", e.errorID); }
+anyValue = r;
+var local:Square;
+try { local = anyValue; } catch (e:TypeError) { trace("coerce local", e.errorID, local); }

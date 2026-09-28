@@ -39,8 +39,22 @@ requires:
    module also records their hashes and the runtime refuses it when the
    ABCs loaded before it differ.
 
-CI compiles every conformance test in both modes and fails if the output
-hashes differ.
+What CI checks today is that the compiler is deterministic
+(`pnpm determinism`, `tests/conformance/determinism.ts`): the builtins,
+then each conformance case (also compiled with asc's `-d`, for source
+maps) and as3pb, compile to the same modules and source maps, byte for
+byte, in a compiler instance of their own, in one instance after the
+others, in the reverse order twice in a row, and in the build that checks
+every array access. So nothing the compiler keeps between calls, such as
+its reused buffers, leaks into its output.
+
+The JIT/AOT invariant itself is still a requirement, not yet a test: there
+is no JIT mode yet, which compiles a method at a time. Before there is, a
+method's type references (`T[k]` in its module) must come from its ABC and
+the ABCs it links against, not from the order the module's methods are
+compiled in, so that a method compiled alone comes out as in its module.
+Comparing the two with type references normalized would show less than
+byte-identical output, and does not count as the invariant.
 
 ## Packages
 
@@ -187,7 +201,10 @@ to try it.
 
 The IR's types decide the JavaScript from the start where that is simple:
 `int` arithmetic ends in `| 0`, `uint` in `>>> 0`, a slot bound early is a
-field access, a method bound early a direct call. Anything typed `*` goes
+field access, a method bound early a direct call, a coercion to a class
+`rt.coerceTo` (no builtin for the runtime to look for), and a typed
+Vector's element `rt.vectorGetInt` and the like, one for each kind of
+element, so that each sees one kind of array. Anything typed `*` goes
 through the runtime, which does what avmplus does at run time.
 
 ### The object model

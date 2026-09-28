@@ -237,6 +237,8 @@ export class Traits {
 /** A class named in a module, resolved the first time it is needed. */
 export class ClassRef {
   cls: AsObject | null = null;
+  /** Its instances' traits, once coerceTo has found them. */
+  traits: Traits | null = null;
 
   constructor(
     readonly ns: Namespace,
@@ -247,11 +249,12 @@ export class ClassRef {
 /** Vector.<T>, resolved the first time it is needed. */
 export class VectorRef {
   cls: AsObject | null = null;
+  /** Its instances' traits, once coerceTo has found them. */
+  traits: Traits | null = null;
 
   constructor(readonly param: TypeRef) {}
 }
 
-/** A script: its descriptor, its global object once made, and whether it has run. */
 /**
  * The names for-ins go through over one object, each in a slot, as in
  * avmplus' hashtable. A name keeps its slot while it is there, so a for-in
@@ -269,6 +272,7 @@ interface Enumeration {
   slot: Map<string, number>;
 }
 
+/** A script: its descriptor, its global object once made, and whether it has run. */
 interface Script {
   desc: ScriptDesc;
   abc: Abc;
@@ -782,6 +786,115 @@ export class Runtime {
     }
 
     this.setProperty(o, this.runtimeName(mn, i), v);
+  }
+
+  /**
+   * Element i of Vector o set to x, already converted, as
+   * VectorBaseObject::setUintProperty checks it: against the length and
+   * fixedness as they are after the conversion, which can run AS3 that
+   * changes them, into the elements the Vector has then.
+   */
+  setElement(o: AsObject, i: number, x: Value): void {
+    const a: Value[] = o.$a;
+    if (i > a.length || (i === a.length && o.$fixed)) {
+      throw this.error("RangeError", 1125, i, a.length);
+    }
+
+    a[i] = x;
+  }
+
+  // obj[i] for a Vector the code was compiled against, by the kind of its
+  // elements: a function for each, so that each sees one kind of array. As
+  // the Vector's getIndex and setIndex hooks, with getIndexed's checks, a
+  // set converting the value before it checks the index (setElement); for
+  // anything else, such as a null Vector, getIndexed and setIndexed.
+
+  vectorGetInt(o: Value, mn: Multiname, i: number): Value {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: Value[] = o.$a;
+      if (i >= a.length) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      return a[i];
+    }
+
+    return this.getIndexed(o, mn, i);
+  }
+
+  vectorSetInt(o: Value, mn: Multiname, i: number, v: Value): void {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      this.setElement(o, i, this.toInt(v));
+      return;
+    }
+
+    this.setIndexed(o, mn, i, v);
+  }
+
+  vectorGetUint(o: Value, mn: Multiname, i: number): Value {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: Value[] = o.$a;
+      if (i >= a.length) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      return a[i];
+    }
+
+    return this.getIndexed(o, mn, i);
+  }
+
+  vectorSetUint(o: Value, mn: Multiname, i: number, v: Value): void {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      this.setElement(o, i, this.toUint(v));
+      return;
+    }
+
+    this.setIndexed(o, mn, i, v);
+  }
+
+  vectorGetDouble(o: Value, mn: Multiname, i: number): Value {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: Value[] = o.$a;
+      if (i >= a.length) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      return a[i];
+    }
+
+    return this.getIndexed(o, mn, i);
+  }
+
+  vectorSetDouble(o: Value, mn: Multiname, i: number, v: Value): void {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      this.setElement(o, i, this.toNumber(v));
+      return;
+    }
+
+    this.setIndexed(o, mn, i, v);
+  }
+
+  vectorGetObject(o: Value, mn: Multiname, i: number): Value {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: Value[] = o.$a;
+      if (i >= a.length) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      return a[i];
+    }
+
+    return this.getIndexed(o, mn, i);
+  }
+
+  vectorSetObject(o: Value, mn: Multiname, i: number, v: Value): void {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      this.setElement(o, i, o.$traits.cls.$convert(this, o.$traits.cls, v));
+      return;
+    }
+
+    this.setIndexed(o, mn, i, v);
   }
 
   /** An object's own dynamic or indexed property, or NOT_FOUND. */
@@ -1461,6 +1574,29 @@ export class Runtime {
         throw this.error("TypeError", 1034, this.describe(v), traits.name);
       }
     }
+  }
+
+  /**
+   * coerce, to a class's instances: what code compiled against the type
+   * calls, with no builtin to look for, and the class's traits kept on the
+   * reference once resolved, as it always resolves to the same class.
+   */
+  coerceTo(v: Value, type: ClassRef | VectorRef): Value {
+    if (v === null || v === undefined) {
+      return null;
+    }
+
+    let traits = type.traits;
+    if (traits === null) {
+      traits = this.traitsOfType(type);
+      type.traits = traits;
+    }
+
+    if (v.$traits === traits || this.isInstanceOf(v, traits)) {
+      return v;
+    }
+
+    throw this.error("TypeError", 1034, this.describe(v), traits.name);
   }
 
   coerceString(v: Value): string | null {

@@ -1704,8 +1704,15 @@ export class MethodEmitter {
       case ops.OP_getproperty:
         this.assign(i);
         if (this.indexed(a, src + 1)) {
-          // As avmplus' getUintProperty: an element by its number.
-          out.text("rt.getIndexed(");
+          // As avmplus' getUintProperty: an element by its number, of a
+          // Vector by the kind of its elements where the IR knows it.
+          const kind = this.vectorKind(this.regType[src]);
+          out.text(kind.length ? "rt.vectorGet" : "rt.getIndexed(");
+          if (kind.length) {
+            out.text(kind);
+            out.text("(");
+          }
+
           this.reg(src);
           out.text(", M[");
           out.uint(a);
@@ -1723,7 +1730,13 @@ export class MethodEmitter {
         return true;
       case ops.OP_setproperty:
         if (this.indexed(a, src + 1)) {
-          out.text("    rt.setIndexed(");
+          const kind = this.vectorKind(this.regType[src]);
+          out.text(kind.length ? "    rt.vectorSet" : "    rt.setIndexed(");
+          if (kind.length) {
+            out.text(kind);
+            out.text("(");
+          }
+
           this.reg(src);
           out.text(", M[");
           out.uint(a);
@@ -2105,6 +2118,31 @@ export class MethodEmitter {
    * name in register r is a number: an element's index, which the runtime
    * reads and writes without making the name.
    */
+  /** The kind of a Vector's elements, as the runtime's vectorGet and vectorSet name it, for type t; "" if not a Vector's. */
+  vectorKind(t: i32): string {
+    const domain = this.domain;
+    if (t < 0) {
+      return "";
+    }
+
+    if (t === domain.vectorIntType) {
+      return "Int";
+    }
+
+    if (t === domain.vectorUintType) {
+      return "Uint";
+    }
+
+    if (t === domain.vectorDoubleType) {
+      return "Double";
+    }
+
+    return domain.vectorObjectType >= 0 &&
+      domain.traits.subtypeOf(<u32>t, <u32>domain.vectorObjectType)
+      ? "Object"
+      : "";
+  }
+
   indexed(a: u32, r: i32): bool {
     return this.abc.pool.mnKind[a] === C.CONSTANT_MultinameL && this.isNumber(r);
   }
@@ -2460,7 +2498,8 @@ export class MethodEmitter {
         out.text(")");
         return;
       default:
-        out.text("rt.coerce(");
+        // A class's instances, by T: no builtin for the runtime to look for.
+        out.text(this.isClassRef(type) ? "rt.coerceTo(" : "rt.coerce(");
         this.operand(prefix, r);
         out.text(", ");
         this.typeRef(type);
@@ -2482,17 +2521,22 @@ export class MethodEmitter {
    * the module loads, for a class or Vector; the builtin types, and * as
    * null, as they are.
    */
-  typeRef(t: i32): void {
-    const out = this.out;
+  /** Whether typeRef writes type t as T[k], a class's instances; else a literal. */
+  isClassRef(t: i32): bool {
     // What typeExpr writes as a literal stays one: *, the builtins it names
     // by string, and a type that is not a class's instances.
     const bt = t < 0 ? BUILTIN_Any : this.domain.builtin(t);
-    if (
-      t < 0 ||
-      (bt !== BUILTIN_Other && bt !== BUILTIN_Namespace) ||
-      t === this.domain.voidType ||
-      this.domain.traits.kind[t] !== TRAITS_Instance
-    ) {
+    return (
+      t >= 0 &&
+      (bt === BUILTIN_Other || bt === BUILTIN_Namespace) &&
+      t !== this.domain.voidType &&
+      this.domain.traits.kind[t] === TRAITS_Instance
+    );
+  }
+
+  typeRef(t: i32): void {
+    const out = this.out;
+    if (!this.isClassRef(t)) {
       this.typeExpr(t);
       return;
     }

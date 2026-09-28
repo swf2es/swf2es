@@ -276,14 +276,17 @@ function sortWith(
     return rt.array(index.slice());
   }
 
+  // Into the elements as they are now: a comparison may have set a
+  // Vector's length, which gives it a new array.
   const source = fieldAtoms ?? atoms;
   const sorted = index.slice(0, newlen).map((i) => source[i]);
+  const target: Value[] = d.$a;
   for (let i = 0; i < newlen; i++) {
-    a[i] = sorted[i];
+    target[i] = sorted[i];
   }
 
   for (let i = newlen; i < len; i++) {
-    delete a[i];
+    delete target[i];
   }
 
   return d;
