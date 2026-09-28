@@ -208,6 +208,13 @@ export class BodyDecoder {
   entryUsed: u32 = 0;
   /** Each handler's exception type and catch scope type. */
   handlerType: i32[] = [];
+  /**
+   * Bumped whenever a local may have changed: a local set, or the frame
+   * loaded whole. A handler edge whose locals are the same as at the last
+   * merge into it, at the version of handlerMerged, changes nothing there.
+   */
+  localsVersion: u64 = 1;
+  handlerMerged: StaticArray<u64> = new StaticArray<u64>(0);
   handlerScope: i32[] = [];
   /**
    * avmplus' second verifier phase: blocks walked once more in code order
@@ -256,6 +263,13 @@ export class BodyDecoder {
     this.length = abc.bodyCodeLength[body];
     this.handlerFirst = abc.bodyExceptionStart[body];
     this.handlerCount = abc.bodyExceptionStart[body + 1] - this.handlerFirst;
+    if (<u32>this.handlerMerged.length < this.handlerCount) {
+      this.handlerMerged = new StaticArray<u64>(this.handlerCount);
+    }
+
+    // No merge yet into this body's handlers: every version before now.
+    memory.fill(changetype<usize>(this.handlerMerged), 0, (<usize>this.handlerCount) << 3);
+    this.localsVersion++;
     this.instructions = 0;
     this.workCount = 0;
     this.entryUsed = 0;
@@ -646,6 +660,9 @@ export class BodyDecoder {
   setValue(i: u32, type: i32, flags: u8): void {
     this.valueType[i] = type;
     this.valueFlags[i] = flags;
+    if (i < this.localCount) {
+      this.localsVersion++;
+    }
   }
 
   @inline
@@ -703,6 +720,7 @@ export class BodyDecoder {
       return;
     }
 
+    this.localsVersion++;
     const at = this.entryAt[t];
     memory.copy(
       changetype<usize>(this.valueType),
@@ -883,6 +901,7 @@ export class BodyDecoder {
   }
 
   restoreCurrent(): void {
+    this.localsVersion++;
     memory.copy(
       changetype<usize>(this.valueType),
       changetype<usize>(this.savedType),
@@ -935,6 +954,13 @@ export class BodyDecoder {
           continue;
         }
 
+        // The same locals as when last merged into this handler change
+        // nothing there, once a backward edge has made it a loop header.
+        const to = abc.exceptionTarget[h];
+        if (this.handlerMerged[i] === this.localsVersion && (to > pc || this.loopHeader[to])) {
+          continue;
+        }
+
         const stack = this.stack;
         const scope = this.scope;
         const base = this.stackBase;
@@ -951,6 +977,8 @@ export class BodyDecoder {
         if (!reached) {
           return false;
         }
+
+        this.handlerMerged[i] = this.localsVersion;
       }
     }
 
@@ -1874,6 +1902,9 @@ export class BodyDecoder {
     }
 
     this.valueFlags[i] = this.valueFlags[i] | NOT_NULL;
+    if (i < this.localCount) {
+      this.localsVersion++;
+    }
   }
 
   /** As Verifier::peekType: the value `n` from the top must be exactly `type`. */
