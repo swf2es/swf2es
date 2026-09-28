@@ -38,6 +38,7 @@ import {
   TYPE_Any,
 } from "../link/traits";
 import { Output } from "./output";
+import { SourceMap } from "./sourcemap";
 
 /** The deepest structured code a method is given; one deeper keeps the dispatcher. */
 const MAX_NESTING: u32 = 500;
@@ -47,6 +48,14 @@ const CONVERTS: i32 = -2;
 @final
 export class MethodEmitter {
   out: Output = new Output();
+  /** Where the code for each AS3 line starts, by debugfile and debugline. */
+  map: SourceMap = new SourceMap();
+  /** The file (a string of the pool, -1 if none) and line (0 if none) of what is being written. */
+  file: i32 = -1;
+  line: u32 = 0;
+  /** Each block's file and line where it starts, as the instructions before it in the ABC leave them. */
+  blockFile: StaticArray<i32> = new StaticArray<i32>(0);
+  blockLine: StaticArray<u32> = new StaticArray<u32>(0);
   /** Each register's type as the instruction being written reads it. */
   regType: StaticArray<i32> = new StaticArray<i32>(0);
   /** Which local scope registers hold with scopes, and how many are pushed. */
@@ -127,6 +136,9 @@ export class MethodEmitter {
       this.regions();
     }
 
+    this.debugLines();
+    const marks = this.map.count;
+
     // Structured control flow where the graph is reducible and each
     // handler's try encloses the code it covers; else the dispatcher.
     if (this.analyze()) {
@@ -146,6 +158,7 @@ export class MethodEmitter {
       }
 
       out.length = start;
+      this.map.truncate(marks);
     }
 
     if (handled) {
@@ -167,6 +180,35 @@ export class MethodEmitter {
     }
 
     out.text("\n}");
+  }
+
+  /** Each block's file and line where it starts, from the debugfile and debugline instructions before it. */
+  debugLines(): void {
+    const ir = this.ir;
+    if (<u32>this.blockFile.length < ir.blockCount) {
+      this.blockFile = new StaticArray<i32>(max(ir.blockCount, 64));
+      this.blockLine = new StaticArray<u32>(max(ir.blockCount, 64));
+    }
+
+    let file: i32 = -1;
+    let line: u32 = 0;
+    for (let k: u32 = 0; k < ir.blockCount; k++) {
+      this.blockFile[k] = file;
+      this.blockLine[k] = line;
+      const end = k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
+      for (let i = ir.blockFirst[k]; i < end; i++) {
+        if (ir.op[i] === ops.OP_debugfile) {
+          file = <i32>ir.a[i];
+        } else if (ir.op[i] === ops.OP_debugline) {
+          line = ir.a[i];
+        }
+      }
+    }
+  }
+
+  /** The code written from here on is from the current file and line. */
+  mark(): void {
+    this.map.mark(this.out.length, this.file, this.line);
   }
 
   /** The bounds of the method's handler regions: every handler's from and to, sorted, once each. */
@@ -389,6 +431,9 @@ export class MethodEmitter {
     const stack = <i32>(ir.localCount + ir.maxScope);
     // Every way in wrote its copies.
     this.uncopy(stack);
+    this.file = this.blockFile[k];
+    this.line = this.blockLine[k];
+    this.mark();
     for (let i = ir.blockFirst[k]; i < last; i++) {
       const op = ir.op[i];
       const dst = ir.dst[i];
@@ -1148,6 +1193,7 @@ export class MethodEmitter {
       this.save();
       this.node(t);
       this.restore();
+      this.mark();
       this.currentBlock = from;
     }
   }
@@ -1166,12 +1212,16 @@ export class MethodEmitter {
 
     saved.push(<i32>this.scopeDepth);
     saved.push(this.region);
+    saved.push(this.file);
+    saved.push(<i32>this.line);
   }
 
   /** Pop what save pushed. */
   private restore(): void {
     const ir = this.ir;
     const saved = this.saved;
+    this.line = <u32>saved.pop();
+    this.file = saved.pop();
     this.region = saved.pop();
     this.scopeDepth = <u32>saved.pop();
     for (let d = <i32>ir.maxScope - 1; d >= 0; d--) {
@@ -1263,10 +1313,15 @@ export class MethodEmitter {
         out.text("]");
         break;
       }
+      case ops.OP_debugfile:
+        this.file = <i32>a;
+        return;
+      case ops.OP_debugline:
+        this.line = a;
+        this.mark();
+        return;
       case ops.OP_pop:
       case ops.OP_debug:
-      case ops.OP_debugline:
-      case ops.OP_debugfile:
         return;
       case IR_Coerce:
         if (ir.dst[i] === ir.src[i] && this.keeps(ir.c[i], this.regType[ir.src[i]])) {

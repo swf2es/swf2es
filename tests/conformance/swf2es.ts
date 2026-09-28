@@ -4,28 +4,41 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { testing } from "../unit/codegen/testing-module.ts";
 
 const runtime = await import(
   new URL("../../packages/runtime/dist/avm2/index.js", import.meta.url).href
 );
 
+const root = fileURLToPath(new URL("../../", import.meta.url));
+
 // With SWF2ES_MODULES=<dir>, each module is written there, 0.mjs, 1.mjs, ...
 // in load order, and loaded from its file, so that stacks name it.
 const moduleDir = process.env.SWF2ES_MODULES;
 let loaded = 0;
 
-/** The module swf2es compiles the domain's last ABC to, loaded. */
+/**
+ * The module swf2es compiles the domain's last ABC to, loaded, with its
+ * source map: next to it, or in it, so that a debugger steps through the AS3.
+ */
 async function load(js: string): Promise<(rt: unknown) => unknown> {
+  // asc runs in the oracle's container, where the repository is /work.
+  const parsed = JSON.parse(testing.domainSourceMap());
+  parsed.sources = parsed.sources.map((s: string) => s.replace(/^\/work\//, root));
+  const map = JSON.stringify(parsed);
   if (moduleDir) {
     mkdirSync(moduleDir, { recursive: true });
-    const file = join(moduleDir, `${loaded++}.mjs`);
-    writeFileSync(file, js);
+    const name = `${loaded++}.mjs`;
+    const file = join(moduleDir, name);
+    writeFileSync(`${file}.map`, map);
+    writeFileSync(file, `${js}//# sourceMappingURL=${name}.map\n`);
     return (await import(`${pathToFileURL(file).href}?${Date.now()}`)).default;
   }
 
-  const module = await import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
+  const base64 = (s: string) => Buffer.from(s).toString("base64");
+  const source = `${js}//# sourceMappingURL=data:application/json;base64,${base64(map)}\n`;
+  const module = await import(`data:text/javascript;base64,${base64(source)}`);
   return module.default;
 }
 

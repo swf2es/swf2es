@@ -388,3 +388,76 @@ function factoryAt(factories: string, index: number): string {
 
   return "";
 }
+
+const DEBUGLINE = 0xf0;
+const DEBUGFILE = 0xf1;
+
+/** A source map's mappings, decoded: per generated line, its segments' source indices and lines, absolute. */
+function mappings(map: string): [number, number][][] {
+  const digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let source = 0;
+  let line = 0;
+  return map.split(";").map((segments) =>
+    segments
+      ? segments.split(",").map((segment) => {
+          const fields: number[] = [];
+          let value = 0;
+          let shift = 0;
+          for (const c of segment) {
+            const d = digits.indexOf(c);
+            value |= (d & 31) << shift;
+            shift += 5;
+            if (!(d & 32)) {
+              fields.push(value & 1 ? -(value >> 1) : value >> 1);
+              value = 0;
+              shift = 0;
+            }
+          }
+
+          source += fields[1];
+          line += fields[2];
+          return [source, line] as [number, number];
+        })
+      : [],
+  );
+}
+
+test("a module's source map has each statement's line, from debugfile and debugline", {
+  skip,
+}, () => {
+  // debugfile "x"; debugline 7; l1 = 5; debugline 9; return l1.
+  const code = [
+    DEBUGFILE,
+    1,
+    DEBUGLINE,
+    7,
+    PUSHBYTE,
+    5,
+    SETLOCAL1,
+    DEBUGLINE,
+    9,
+    GETLOCAL1,
+    RETURNVALUE,
+  ];
+  testing.domainReset(50);
+  testing.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
+  assert.equal(testing.domainAdd(script(code), false), 0);
+  const js = (testing.domainModule("") as string).split("\n");
+  const map = JSON.parse(testing.domainSourceMap() as string);
+  assert.deepEqual(map.sources, ["x"]);
+  const lines = mappings(map.mappings);
+  // The source line (zero-based) the generated line starts in: its last segment's, or the line before's.
+  const lineOf = (g: number): number => {
+    for (let at = g; at >= 0; at--) {
+      const segments = lines[at] ?? [];
+      if (segments.length) {
+        return segments[segments.length - 1][1];
+      }
+    }
+
+    return -1;
+  };
+
+  assert.equal(lineOf(js.findIndex((l) => l.trim() === "l1 = 5;")), 6);
+  assert.equal(lineOf(js.findIndex((l) => l.trim() === "return l1;")), 8);
+});

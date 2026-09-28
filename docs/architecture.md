@@ -175,6 +175,16 @@ changes or a branch needs the stack as it is. A value the next instruction
 only moves to a local (a `setlocal`) goes to the local straight, and a
 conversion that changes nothing writes no code.
 
+Each module has a source map (version 3) from the ABC's `debugfile` and
+`debugline`, where an ABC compiled with them has them (asc's `-d`): the
+method emitter marks where the code for each AS3 line starts as it writes
+it, and the map finds the marks' lines and columns in the module. A block
+starts with the line the instructions before it in the ABC left, and code
+after a block written in place inside another goes back to the other's.
+With it, stacks name AS3 lines and a debugger steps through the AS3;
+`node tests/conformance/debug.ts <case> --lines` compiles a case with `-d`
+to try it.
+
 The IR's types decide the JavaScript from the start where that is simple:
 `int` arithmetic ends in `| 0`, `uint` in `>>> 0`, a slot bound early is a
 field access, a method bound early a direct call. Anything typed `*` goes
