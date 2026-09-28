@@ -117,7 +117,7 @@ refused for their bytecode size (`kExceedsBytecodeLimit`), and
 |---|---|---|---|
 | Two registers swapped through a temporary, not `[a, b] = [b, a]` (an array and the iterator protocol) | +1.6% | −9.5% | yes |
 | **Against #27** | **+0.5%** | **224 → 199 (−11.2%)** | |
-| V8's inlining limits raised to 2000 bytes, 4000 cumulative (a flag, as a bound on what smaller code could win) | −7% | −7% | measure |
+| V8's inlining limits raised to 2000 bytes, 4000 cumulative (a flag, as a bound on what smaller code could win) | −7% | −7% | not a change |
 | A null check once per register until it is written | +1.6% | +1.0% | no |
 
 So smaller generated code is worth at most about 7% more; V8 already
