@@ -207,6 +207,33 @@ in ms. avmshell: 317.
 What is left is mostly constructing the objects read (38%), about two
 thirds of it as3pb's own constructors, which avmshell runs too.
 
+### Step 12: typed verification
+
+`pnpm bench` now times typed verification too: every body the ABC's
+scripts can run, in a domain after builtin and shell_toplevel, as the
+compiler verifies, with `getBinding`'s memo cleared each round. In ms, then
+ns per instruction verified:
+
+| Change | abcdump | as3pb | initializerLargeVector |
+|---|---|---|---|
+| Before | 2.38 (367) | 19.7 (204) | 135.8 (135) |
+| A binding's probe compares the slot's hash before its key | 2.13 | 18.9 | 135.2 |
+| The domain's hash tables at most half full, not three quarters | 2.12 | 16.1 | 135.5 |
+| `mergeEntry` in two ranges, skipping a value whose type and flags stay | 2.10 | 15.5 | 135.6 |
+| `getBinding`'s answers kept, by type, ABC and multiname | 1.39 | 14.9 | 136.3 |
+| A handler edge skipped when its locals are as at its last merge | 1.42 (219) | 13.3 (138) | 135.4 (135) |
+| A table of each traits' names, before each namespace's probe | no gain once the memo was in | | |
+
+Compiling builtin, shell_toplevel and as3pb to modules: 121.9 to 110.9 ms
+(−9%), in 5 interleaved pairs.
+
+What is left is the verifier's second pass, which walks every block again
+to emit its IR: 34% of as3pb's verification and 52% of
+initializerLargeVector's, a body of a million instructions with no handlers.
+In a worklist that reaches a fixed point, each block's last visit follows
+the last change to its entry state, so the IR could be kept from that visit
+instead, once whatever only the second pass does is done in the first.
+
 ### The AssemblyScript runtime
 
 codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator

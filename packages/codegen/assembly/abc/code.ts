@@ -208,6 +208,13 @@ export class BodyDecoder {
   entryUsed: u32 = 0;
   /** Each handler's exception type and catch scope type. */
   handlerType: i32[] = [];
+  /**
+   * Bumped whenever a local may have changed: a local set, or the frame
+   * loaded whole. A handler edge whose locals are the same as at the last
+   * merge into it, at the version of handlerMerged, changes nothing there.
+   */
+  localsVersion: u64 = 1;
+  handlerMerged: StaticArray<u64> = new StaticArray<u64>(0);
   handlerScope: i32[] = [];
   /**
    * avmplus' second verifier phase: blocks walked once more in code order
@@ -256,6 +263,13 @@ export class BodyDecoder {
     this.length = abc.bodyCodeLength[body];
     this.handlerFirst = abc.bodyExceptionStart[body];
     this.handlerCount = abc.bodyExceptionStart[body + 1] - this.handlerFirst;
+    if (<u32>this.handlerMerged.length < this.handlerCount) {
+      this.handlerMerged = new StaticArray<u64>(this.handlerCount);
+    }
+
+    // No merge yet into this body's handlers: every version before now.
+    memory.fill(changetype<usize>(this.handlerMerged), 0, (<usize>this.handlerCount) << 3);
+    this.localsVersion++;
     this.instructions = 0;
     this.workCount = 0;
     this.entryUsed = 0;
@@ -646,6 +660,9 @@ export class BodyDecoder {
   setValue(i: u32, type: i32, flags: u8): void {
     this.valueType[i] = type;
     this.valueFlags[i] = flags;
+    if (i < this.localCount) {
+      this.localsVersion++;
+    }
   }
 
   @inline
@@ -703,6 +720,7 @@ export class BodyDecoder {
       return;
     }
 
+    this.localsVersion++;
     const at = this.entryAt[t];
     memory.copy(
       changetype<usize>(this.valueType),
@@ -723,18 +741,23 @@ export class BodyDecoder {
    * recording 1068 for a with scope meeting another scope.
    */
   mergeEntry(t: u32): i32 {
-    const domain = this.domain;
     const at = this.entryAt[t];
-    const scopeTop = this.localCount + this.scope;
     const stackBase = this.stackBase;
-    const stackTop = stackBase + this.stack;
-    let changed = 0;
-    for (let i: u32 = 0; i < stackTop; i++) {
-      if (i >= scopeTop && i < stackBase) {
-        i = stackBase - 1;
-        continue;
-      }
+    // The locals and scopes, then the stack, not what lies between.
+    const low = this.mergeRange(at, 0, this.localCount + this.scope);
+    if (low < 0) {
+      return -1;
+    }
 
+    const high = this.mergeRange(at, stackBase, stackBase + this.stack);
+    return high < 0 ? -1 : low | high;
+  }
+
+  /** mergeEntry for values [from, to) of the entry state at `at`. */
+  @inline
+  mergeRange(at: u32, from: u32, to: u32): i32 {
+    let changed = 0;
+    for (let i = from; i < to; i++) {
       const flags = this.valueFlags[i];
       const entryFlags = this.entryFlags[at + i];
       if ((flags ^ entryFlags) & WITH) {
@@ -743,8 +766,14 @@ export class BodyDecoder {
       }
 
       const entryType = this.entryType[at + i];
-      const merged = commonBase(domain, entryType, this.valueType[i]);
+      const valueType = this.valueType[i];
       const mergedFlags = entryFlags & (flags | WITH);
+      // Most merges meet the same type, which stays.
+      if (valueType === entryType && mergedFlags === entryFlags) {
+        continue;
+      }
+
+      const merged = commonBase(this.domain, entryType, valueType);
       if (merged !== entryType || mergedFlags !== entryFlags) {
         this.entryType[at + i] = merged;
         this.entryFlags[at + i] = mergedFlags;
@@ -872,6 +901,7 @@ export class BodyDecoder {
   }
 
   restoreCurrent(): void {
+    this.localsVersion++;
     memory.copy(
       changetype<usize>(this.valueType),
       changetype<usize>(this.savedType),
@@ -924,6 +954,13 @@ export class BodyDecoder {
           continue;
         }
 
+        // The same locals as when last merged into this handler change
+        // nothing there, once a backward edge has made it a loop header.
+        const to = abc.exceptionTarget[h];
+        if (this.handlerMerged[i] === this.localsVersion && (to > pc || this.loopHeader[to])) {
+          continue;
+        }
+
         const stack = this.stack;
         const scope = this.scope;
         const base = this.stackBase;
@@ -940,6 +977,8 @@ export class BodyDecoder {
         if (!reached) {
           return false;
         }
+
+        this.handlerMerged[i] = this.localsVersion;
       }
     }
 
@@ -1863,6 +1902,9 @@ export class BodyDecoder {
     }
 
     this.valueFlags[i] = this.valueFlags[i] | NOT_NULL;
+    if (i < this.localCount) {
+      this.localsVersion++;
+    }
   }
 
   /** As Verifier::peekType: the value `n` from the top must be exactly `type`. */

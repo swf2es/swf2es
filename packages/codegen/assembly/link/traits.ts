@@ -277,7 +277,9 @@ export class TraitsTable {
         return BIND_None;
       }
 
+      // The slot's hash first: most slots a probe passes hold another key.
       if (
+        table.hashAt(slot) === hash &&
         this.memberTraits[id] === t &&
         this.memberNs[id] === ns &&
         this.memberName[id] === name &&

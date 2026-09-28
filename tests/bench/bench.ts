@@ -47,8 +47,20 @@ function time(
   return samples.sort((a, b) => a - b)[2];
 }
 
+// Typed verification runs in a domain after the builtins avmshell loads,
+// as the compiler verifies: those of the last conformance run.
+const lib = `${root}tests/conformance/out/lib/`;
+const builtins = ["builtin.abc", "shell_toplevel.abc"].map((f) => {
+  if (!existsSync(`${lib}${f}`)) {
+    console.error(`${lib}${f} is missing; pnpm test builds it`);
+    process.exit(1);
+  }
+
+  return new Uint8Array(readFileSync(`${lib}${f}`));
+});
+
 console.log(
-  "file                       KB   methods  instructions   parse ms    MB/s   decode ms  ns/instr",
+  "file                       KB   methods  instructions   parse ms    MB/s   decode ms  ns/instr   verify ms  ns/instr",
 );
 for (const file of files) {
   const bytes = new Uint8Array(readFileSync(file));
@@ -56,6 +68,14 @@ for (const file of files) {
   const instructions = testing.benchDecode(bytes, 1);
   const parse = time(testing.benchParse, bytes);
   const decode = time(testing.benchDecode, bytes);
+  testing.domainReset(50);
+  for (const b of builtins) {
+    testing.domainAdd(b, true);
+  }
+  const linked = testing.domainAdd(bytes, false) === 0;
+  const verified = linked ? testing.benchVerify(1) : 0;
+  const verify = linked ? time((_bytes, rounds) => testing.benchVerify(rounds), bytes) : Number.NaN;
+  testing.__collect();
   const mb = bytes.length / 1024 / 1024;
   console.log(
     [
@@ -67,6 +87,8 @@ for (const file of files) {
       (mb / (parse / 1000)).toFixed(0).padStart(7),
       decode.toFixed(3).padStart(11),
       ((decode * 1e6) / instructions).toFixed(1).padStart(9),
+      verify.toFixed(3).padStart(12),
+      ((verify * 1e6) / verified).toFixed(1).padStart(9),
     ].join(""),
   );
 }
