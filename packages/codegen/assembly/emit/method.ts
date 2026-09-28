@@ -1304,16 +1304,18 @@ export class MethodEmitter {
         out.text("undefined");
         break;
       case ops.OP_swap: {
+        // Through a temporary, not [a, b] = [b, a]: destructuring is an
+        // array and the iterator protocol, which V8 counts against inlining.
         const x = ir.src[i];
-        out.text("    [");
-        this.regName(x);
-        out.text(", ");
-        this.regName(x + 1);
-        out.text("] = [");
+        out.text("    { const w = ");
         this.reg(x + 1);
-        out.text(", ");
+        out.text("; ");
+        this.regName(x + 1);
+        out.text(" = ");
         this.reg(x);
-        out.text("]");
+        out.text("; ");
+        this.regName(x);
+        out.text(" = w; }");
         break;
       }
       case ops.OP_debugfile:
