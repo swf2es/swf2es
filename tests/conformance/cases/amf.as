@@ -1,0 +1,43 @@
+// AMF3 through ByteArray's writeObject and readObject: the bytes avmplus
+// writes for each kind of value, and what reading them back gives.
+package {
+  public class Point3 {
+    public var x:Number = 0;
+    public var y:int = 0;
+    public function Point3(x:Number = 0, y:int = 0) { this.x = x; this.y = y; }
+  }
+}
+import flash.utils.ByteArray;
+import flash.net.registerClassAlias;
+import flash.net.getClassByAlias;
+function amf(v:*):String {
+  var b:ByteArray = new ByteArray();
+  b.writeObject(v);
+  var hex:String = "";
+  for (var i:uint = 0; i < b.length; i++) hex += (b[i] < 16 ? "0" : "") + b[i].toString(16);
+  return hex;
+}
+function back(v:*):* {
+  var b:ByteArray = new ByteArray();
+  b.writeObject(v);
+  b.position = 0;
+  return b.readObject();
+}
+trace(amf(undefined), amf(null), amf(true), amf(false), amf(0), amf(-1), amf(268435455), amf(268435456), amf(1.5), amf(-0));
+trace(amf("hi"), amf(""), amf(["a", "a"]), amf([1, 2]), amf(new <int>[1, -1]), amf(new <uint>[3]), amf(new <Number>[0.5]));
+var ba:ByteArray = new ByteArray();
+ba.writeByte(7);
+trace(amf(ba), amf({}), amf({k: "v"}), amf(new <String>["s"]));
+registerClassAlias("test.Point3", Point3);
+trace(amf(new Point3(1.5, 2)).length, getClassByAlias("test.Point3") == Point3);
+var pt:* = back(new Point3(2.5, 3));
+trace(pt is Point3, pt.x, pt.y);
+var arr:Array = back([1, "two", null, [3], {four: 4}]);
+trace(arr.length, arr[0], arr[1], arr[2], arr[3][0], arr[4].four);
+var sparse:Array = [];
+sparse[2] = "c";
+trace(amf(sparse), back(sparse).length, back(sparse)[2]);
+var shared:Object = {n: 1};
+var two:Array = back([shared, shared]);
+trace(two[0] == two[1], back(new <int>[5, 6]), back(ba).length, back("é€"), back(1e100));
+try { getClassByAlias("nope"); } catch (e:Error) { trace("missing alias", e.errorID); }

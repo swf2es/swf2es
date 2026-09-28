@@ -4,7 +4,10 @@
 // "set:" for accessors and "uri::name" outside the public namespace. And how
 // the builtin classes differ from others: how their instances hold native
 // state, and what calling or constructing them does.
-import { byteArrayHook, byteArrayNatives, domainNatives } from "./bytearray.js";
+import { readObject, writeObject } from "./amf.js";
+import { byteArrayHook, byteArrayNatives, bytesOf, domainNatives } from "./bytearray.js";
+import { dateHook, dateNatives } from "./date.js";
+import { jsonNatives } from "./json.js";
 import { messages } from "./messages.js";
 import { Namespace, publicNs, qname } from "./names.js";
 import { convertDoubleToString, convertDoubleToStringRadix, DTOSTR_PRECISION } from "./numbers.js";
@@ -369,6 +372,44 @@ const natives: Natives = {
 
   // As Toplevel::bugzilla: the bug fixes the builtins' AS3 asks about, all
   // in effect at the latest SWF version, as avmshell runs.
+  // Class aliases and AMF.
+  "flash.net::registerClassAlias": (rt) => (aliasName: Value, cls: Value) => {
+    if (cls === null || cls === undefined) {
+      throw rt.error("TypeError", 2007, "classObject");
+    }
+
+    if (aliasName === null || aliasName === undefined) {
+      throw rt.error("TypeError", 2007, "aliasName");
+    }
+
+    const name = rt.toString(aliasName);
+    if (name === "") {
+      throw rt.error("ArgumentError", 2085, "aliasName");
+    }
+
+    rt.registerClassAlias(name, cls);
+  },
+  "flash.net::getClassByAlias": (rt) => (aliasName: Value) => {
+    if (aliasName === null || aliasName === undefined) {
+      throw rt.error("TypeError", 2007, "aliasName");
+    }
+
+    const name = rt.toString(aliasName);
+    if (name === "") {
+      throw rt.error("ArgumentError", 2085, "aliasName");
+    }
+
+    return rt.classByAlias(name);
+  },
+  "flash.net::ObjectEncoding.get:dynamicPropertyWriter": plain(() => null),
+  "flash.utils::ByteArray#writeObject": (rt) =>
+    function (this: AsObject, v: Value) {
+      writeObject(rt, bytesOf(rt, this), v);
+    },
+  "flash.utils::ByteArray#readObject": (rt) =>
+    function (this: AsObject) {
+      return readObject(rt, bytesOf(rt, this));
+    },
   bugzilla: plain((n: number) => n === 504525 || n === 574600 || n === 661330),
 
   // Error
@@ -751,6 +792,7 @@ const hooks: Record<string, ClassHook> = {
     call: newQName,
   },
   "flash.utils::ByteArray": byteArrayHook,
+  Date: dateHook,
   RegExp: {
     construct: newRegExp,
     call: (rt, cls, args) =>
@@ -851,7 +893,13 @@ function vectorOf(rt: Runtime, param: AsObject | null): AsObject {
 }
 
 export function builtinNatives(): Natives {
-  return { ...natives, ...byteArrayNatives(), ...domainNatives() };
+  return {
+    ...natives,
+    ...byteArrayNatives(),
+    ...domainNatives(),
+    ...dateNatives(),
+    ...jsonNatives(),
+  };
 }
 
 export function builtinHooks(): Record<string, ClassHook> {

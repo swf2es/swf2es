@@ -293,6 +293,9 @@ export class Runtime {
   memory: DataView = this.scratchMemory;
   memoryProvider: AsObject | null = null;
   private domain: AsObject | null = null;
+  /** Class aliases, as registerClassAlias sets them, both ways. */
+  private readonly aliases = new Map<string, AsObject>();
+  private readonly aliasByTraits = new Map<Traits, string>();
   /** The hashes of the modules loaded, in order. */
   private readonly loaded: string[] = [];
   /** The builtin classes' traits, made before their classes so the bootstrap can refer to them. */
@@ -1711,6 +1714,54 @@ export class Runtime {
 
   // Domain memory, as avmplus' MOPS: little-endian, an address outside the
   // memory a RangeError.
+
+  // Class aliases, for AMF.
+
+  /** As Toplevel::registerClassAlias: a class by a name, replacing what the name had. */
+  registerClassAlias(name: string, cls: AsObject): void {
+    const previous = this.aliases.get(name);
+    if (previous) {
+      this.aliasByTraits.delete(previous.$it);
+    }
+
+    this.aliases.set(name, cls);
+    this.aliasByTraits.set(cls.$it, name);
+  }
+
+  /** The alias of a class's instances' traits, or "". */
+  aliasOf(traits: Traits): string {
+    return this.aliasByTraits.get(traits) ?? "";
+  }
+
+  /** The class of an alias: as getClassByAlias, ReferenceError 1014 if none, or Object if `orObject`. */
+  classByAlias(name: string, orObject = false): AsObject {
+    const cls = this.aliases.get(name);
+    if (cls) {
+      return cls;
+    }
+
+    if (orObject) {
+      return this.builtinClass("Object");
+    }
+
+    throw this.error("ReferenceError", 1014, name);
+  }
+
+  byteArrayClass(): AsObject {
+    return this.resolve(this.cls(namespace(NS_Public, "flash.utils"), "ByteArray"));
+  }
+
+  /** Vector.<T>, for a class T or null for *. */
+  vectorClass(param: AsObject | null): AsObject {
+    return this.applyType(this.resolve(this.cls(namespace(NS_Public, "__AS3__.vec"), "Vector")), [
+      param,
+    ]);
+  }
+
+  /** An object's own names a for-in visits, in its order. */
+  enumerableNames(o: AsObject): string[] {
+    return this.names(o).filter((n) => !o.$dontEnum?.has(n));
+  }
 
   /** avmshell's avmplus.Domain.currentDomain: an instance of Domain, without running its constructor. */
   currentDomain(): AsObject {
