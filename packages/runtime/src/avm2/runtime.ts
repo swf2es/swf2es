@@ -125,6 +125,7 @@ export class Traits {
   getIndex?: IndexHook["getIndex"];
   setIndex?: IndexHook["setIndex"];
   hasIndex?: IndexHook["hasIndex"];
+  index?: IndexHook["index"];
 
   constructor(
     readonly name: string,
@@ -137,6 +138,7 @@ export class Traits {
     this.getIndex = base?.getIndex;
     this.setIndex = base?.setIndex;
     this.hasIndex = base?.hasIndex;
+    this.index = base?.index;
     if (base) {
       for (const i of base.interfaces) {
         this.interfaces.add(i);
@@ -696,6 +698,57 @@ export class Runtime {
     throw this.error("ReferenceError", 1069, mn.name ?? "*", traits.name);
   }
 
+  /**
+   * obj[i] for a number i, as avmplus' getUintProperty: a Vector's,
+   * ByteArray's or Array's element directly; anything else, or a hole, by
+   * the name the number makes.
+   */
+  getIndexed(o: Value, mn: Multiname, i: number): Value {
+    if (
+      typeof o === "object" &&
+      o !== null &&
+      i >>> 0 === i &&
+      i !== 0xffffffff &&
+      mn.elementName
+    ) {
+      const traits: Traits | undefined = o.$traits;
+      if (traits?.getIndex) {
+        return traits.getIndex(o, i, this);
+      }
+
+      const a: Value[] | undefined = o.$a;
+      if (a !== undefined && i in a) {
+        return a[i];
+      }
+    }
+
+    return this.getProperty(o, this.runtimeName(mn, i));
+  }
+
+  /** obj[i] = v for a number i, as avmplus' setUintProperty. */
+  setIndexed(o: Value, mn: Multiname, i: number, v: Value): void {
+    if (
+      typeof o === "object" &&
+      o !== null &&
+      i >>> 0 === i &&
+      i !== 0xffffffff &&
+      mn.elementName
+    ) {
+      const traits: Traits | undefined = o.$traits;
+      if (traits?.setIndex) {
+        traits.setIndex(o, i, v, this);
+        return;
+      }
+
+      if (o.$a !== undefined) {
+        o.$a[i] = v;
+        return;
+      }
+    }
+
+    this.setProperty(o, this.runtimeName(mn, i), v);
+  }
+
   /** An object's own dynamic or indexed property, or NOT_FOUND. */
   getOwn(o: Value, name: string): Value {
     if (typeof o !== "object" || o === null) {
@@ -705,7 +758,7 @@ export class Runtime {
     // Elements: a class's own indexing (a Vector's, a ByteArray's), else an Array's.
     const traits: Traits | undefined = o.$traits;
     if (traits?.getIndex || o.$a !== undefined) {
-      const i = arrayIndex(name);
+      const i = traits?.index ? traits.index(o, name, this) : arrayIndex(name);
       if (i >= 0) {
         return traits?.getIndex ? traits.getIndex(o, i, this) : i in o.$a ? o.$a[i] : NOT_FOUND;
       }
@@ -786,7 +839,7 @@ export class Runtime {
     const name = mn.dynamicName();
     if (name !== null && typeof o === "object") {
       if (traits.setIndex || o.$a !== undefined) {
-        const i = arrayIndex(name);
+        const i = traits.index ? traits.index(o, name, this) : arrayIndex(name);
         if (i >= 0) {
           if (traits.setIndex) {
             traits.setIndex(o, i, v, this);
@@ -1171,6 +1224,7 @@ export class Runtime {
       itraits.getIndex = hooks.getIndex;
       itraits.setIndex = hooks.setIndex;
       itraits.hasIndex = hooks.hasIndex;
+      itraits.index = hooks.index;
     }
 
     for (const i of desc.interfaces) {
@@ -1944,6 +1998,8 @@ export interface IndexHook {
   getIndex: (o: AsObject, i: number, rt: Runtime) => Value;
   setIndex: (o: AsObject, i: number, v: Value, rt: Runtime) => void;
   hasIndex: (o: AsObject, i: number) => boolean;
+  /** A name's element index, -1 if it names none; the class's own rule, else an array index's. */
+  index?: (o: AsObject, name: string, rt: Runtime) => number;
 }
 
 /** How a builtin class differs from others: allocation, index access, calls and construction. */
@@ -1952,6 +2008,7 @@ export interface ClassHook {
   getIndex?: IndexHook["getIndex"];
   setIndex?: IndexHook["setIndex"];
   hasIndex?: IndexHook["hasIndex"];
+  index?: IndexHook["index"];
   construct?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
   call?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
   apply?: (rt: Runtime, factory: AsObject, params: Value[]) => AsObject;

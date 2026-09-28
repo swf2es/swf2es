@@ -843,6 +843,18 @@ export class MethodEmitter {
         return true;
       case ops.OP_getproperty:
         this.assign(i);
+        if (this.indexed(a, src + 1)) {
+          // As avmplus' getUintProperty: an element by its number.
+          out.text("rt.getIndexed(");
+          this.reg(src);
+          out.text(", M[");
+          out.uint(a);
+          out.text("], ");
+          this.reg(src + 1);
+          out.text(")");
+          return true;
+        }
+
         out.text("rt.getProperty(");
         this.reg(src);
         out.text(", ");
@@ -850,6 +862,27 @@ export class MethodEmitter {
         out.text(")");
         return true;
       case ops.OP_setproperty:
+        if (this.indexed(a, src + 1)) {
+          out.text("    rt.setIndexed(");
+          this.reg(src);
+          out.text(", M[");
+          out.uint(a);
+          out.text("], ");
+          this.reg(src + 1);
+          out.text(", ");
+          this.reg(src + 2);
+          out.text(")");
+          return true;
+        }
+
+        out.text("    rt.setProperty(");
+        this.reg(src);
+        out.text(", ");
+        this.name(a, src + 1);
+        out.text(", ");
+        this.reg(src + <i32>ir.srcCount[i] - 1);
+        out.text(")");
+        return true;
       case ops.OP_initproperty: {
         out.text(op === ops.OP_initproperty ? "    rt.initProperty(" : "    rt.setProperty(");
         this.reg(src);
@@ -1205,6 +1238,15 @@ export class MethodEmitter {
     }
 
     out.text(")");
+  }
+
+  /**
+   * Whether multiname `a` is a runtime name alone, not an attribute, whose
+   * name in register r is a number: an element's index, which the runtime
+   * reads and writes without making the name.
+   */
+  indexed(a: u32, r: i32): bool {
+    return this.abc.pool.mnKind[a] === C.CONSTANT_MultinameL && this.isNumber(r);
   }
 
   /** `, r, r+1, ...` for `count` arguments from register `from`. */

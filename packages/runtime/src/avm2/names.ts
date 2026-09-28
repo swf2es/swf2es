@@ -104,6 +104,18 @@ export class Multiname {
     return null;
   }
 
+  private publicCache: boolean | undefined;
+
+  /** Whether it has the public namespace and is not an attribute: whether an element is its to name. */
+  get elementName(): boolean {
+    if (this.publicCache === undefined) {
+      this.publicCache =
+        !this.attribute && this.namespaces.some((ns) => ns.kind === NS_Public && ns.uri === "");
+    }
+
+    return this.publicCache;
+  }
+
   toString(): string {
     const ns = this.namespaces.length === 1 ? this.namespaces[0] : null;
     const name = this.name ?? "*";
