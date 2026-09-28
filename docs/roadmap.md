@@ -40,10 +40,10 @@ Near-term work, in order. The goal of milestone 1 is in
         verifies, and every Tamarin method that can be created, with the
         VerifyErrors avmshell prints.
    3. The IR, written by the verifier's second pass.
-5. **Faster verification**: the typed verifier walks every block twice and
-   the structural checks cost about 60 ns per instruction, against Ruffle's
-   15 for decoding alone ([benchmarks.md](benchmarks.md)); profile it with
-   the IR in place.
+5. **Faster verification**: the minimal runtime halved decoding to about
+   35 ns per instruction, against Ruffle's 15 for decoding alone
+   ([benchmarks.md](benchmarks.md)); the typed verifier still walks every
+   block twice. Profile it with the IR in place.
 
 Tracked separately: SWF decompression in `format` (issue #3).
 

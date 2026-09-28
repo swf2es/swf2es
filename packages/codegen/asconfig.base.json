@@ -1,7 +1,8 @@
 {
   "options": {
     "bindings": "raw",
-    "runtime": "incremental"
+    "runtime": "minimal",
+    "exportRuntime": true
   },
   "targets": {
     "release": {
