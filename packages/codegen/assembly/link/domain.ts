@@ -155,6 +155,8 @@ export class Domain {
   functionClass: i32 = -1;
   /** avmplus registers void as a class, which nothing may extend. */
   voidClass: i32 = -1;
+  /** The interned id of "Transient", the metadata AMF and JSON leave a member out for. */
+  transientName: u32 = 0;
   // Builtin types by traits id, for the rules that treat them specially.
   voidType: i32 = -1;
   nullType: i32 = -1;
@@ -346,6 +348,7 @@ export class Domain {
       this.findBuiltinTypes();
       const empty = this.internNamespace(NS_Public, this.internText(""));
       this.nameType(empty, this.internText("void"), API_AllVersions, this.voidClass, -1);
+      this.transientName = this.internText("Transient");
     }
 
     return this.layoutStatics(index) && this.layoutScripts(index) && this.layoutActivations(index);

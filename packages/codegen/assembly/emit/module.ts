@@ -456,7 +456,76 @@ export class ModuleEmitter {
       out.text("]]");
     }
 
-    out.text("] }");
+    out.text("]");
+    this.metadata(t);
+    out.text(" }");
+  }
+
+  /**
+   * What AMF and JSON need of traits t's metadata, when it has any: as
+   * `transient`, its slots with [Transient]; as `metadata`, each accessor
+   * with metadata, as [dispatch id, 1 if any of it is [Transient], else 0],
+   * since an accessor's metadata hides its base's, as avmplus'
+   * getMethodMetadataPos finds it.
+   */
+  metadata(t: u32): void {
+    const out = this.out;
+    const traits = this.domain.traits;
+    const abc = this.domain.abcs[this.index];
+    let count = 0;
+    for (let i = traits.first[t]; i < traits.end[t]; i++) {
+      const kind = abc.traitTag[i] & 0x0f;
+      if (
+        (kind === C.TRAIT_Slot || kind === C.TRAIT_Const || kind === C.TRAIT_Class) &&
+        this.transientOf(i) > 0
+      ) {
+        traits.readName(this.domain, this.index, i);
+        out.text(count++ ? ", " : ", transient: [");
+        out.uint(traits.own(t, traits.nameNs, traits.nameId, traits.nameNsVersion) >> 3);
+      }
+    }
+
+    if (count) {
+      out.text("]");
+    }
+
+    count = 0;
+    for (let i = traits.first[t]; i < traits.end[t]; i++) {
+      const kind = abc.traitTag[i] & 0x0f;
+      const transient = this.transientOf(i);
+      if ((kind !== C.TRAIT_Getter && kind !== C.TRAIT_Setter) || transient < 0) {
+        continue;
+      }
+
+      traits.readName(this.domain, this.index, i);
+      const b = traits.own(t, traits.nameNs, traits.nameId, traits.nameNsVersion);
+      out.text(count++ ? ", [" : ", metadata: [[");
+      out.uint((b >> 3) + (kind === C.TRAIT_Setter ? 1 : 0));
+      out.text(transient ? ", 1]" : ", 0]");
+    }
+
+    if (count) {
+      out.text("]");
+    }
+  }
+
+  /** Whether trait i of this ABC has [Transient]: 1, or 0 if it has other metadata only, or -1 if none. */
+  transientOf(i: u32): i32 {
+    const abc = this.domain.abcs[this.index];
+    const strings = this.domain.abcString[this.index];
+    const start = abc.traitMetadataStart[i];
+    const end = abc.traitMetadataStart[i + 1];
+    if (start === end) {
+      return -1;
+    }
+
+    for (let j = start; j < end; j++) {
+      if (strings[abc.metadataName[abc.traitMetadata[j]]] === this.domain.transientName) {
+        return 1;
+      }
+    }
+
+    return 0;
   }
 
   /** A string of the host's, such as a hash, as a JavaScript string literal. */

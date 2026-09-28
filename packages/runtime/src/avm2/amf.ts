@@ -73,9 +73,9 @@ function vectorKind(traits: Traits): number {
 }
 
 /**
- * As ClassInfo's constructor for output: the public variables, and the
- * public accessors with both a getter and a setter, of the traits and then
- * their bases'.
+ * As ClassInfo's constructor for output: the public variables (not
+ * constants) and the public accessors with both a getter and a setter, of
+ * the traits and then their bases', but [Transient] ones.
  */
 function classInfoOf(rt: Runtime, traits: Traits): ClassInfo {
   const sealed: string[] = [];
@@ -84,7 +84,7 @@ function classInfoOf(rt: Runtime, traits: Traits): ClassInfo {
       for (const b of list) {
         const kind = b.value & 7;
         const isPublic = b.ns.kind === NS_Public && b.ns.uri === "";
-        if (isPublic && (kind === 2 || kind === 3 || kind === 7)) {
+        if (isPublic && (kind === 2 || kind === 7) && !traits.isTransient(b.value)) {
           sealed.push(name);
         }
       }

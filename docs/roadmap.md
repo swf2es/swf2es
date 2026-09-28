@@ -92,7 +92,7 @@ Near-term work, in order. The goal of milestone 1 is in
 11. **Compatibility left from steps 6 and 7**: `Date.parse` as avmplus
     parses; `compress` and `uncompress`, and SWF decompression in `format`
     (issue #3), both through pako and lzma1; AMF0, and Date, XML and
-    Dictionary in AMF; `[Transient]`, once the runtime keeps metadata; and
+    Dictionary in AMF; `[Transient]`, carried from the ABC's metadata; and
     PR #9, rebased.
 12. **Faster verification**: the minimal runtime halved decoding to about
    35 ns per instruction, against Ruffle's 15 for decoding alone

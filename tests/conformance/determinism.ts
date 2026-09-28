@@ -38,7 +38,7 @@ try {
 const read = (path: string) => new Uint8Array(readFileSync(path));
 const builtins = [read(`${out}lib/builtin.abc`), read(`${out}lib/shell_toplevel.abc`)];
 
-// The cases, as the conformance runner compiled them and again with -d.
+// The cases, as the conformance runner compiled them (with -md) and again with -d.
 const names = readdirSync(`${here}cases`)
   .filter((f) => f.endsWith(".as"))
   .map((f) => f.slice(0, -3));
@@ -46,7 +46,7 @@ const lines = runOracle(
   names.map((name) => ({
     source: `${here}cases/${name}.as`,
     name: `lines/${name}`,
-    ascArgs: ["-d"],
+    ascArgs: ["-md", "-d"],
   })),
   out,
   {},

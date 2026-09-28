@@ -50,6 +50,10 @@ export interface TraitsDesc {
   defaults: [number, Value, TypeRef][];
   bindings: [Namespace, number, string, number][];
   methods: [number, Factory][];
+  /** Its own slots with [Transient] metadata. */
+  transient?: number[];
+  /** Its own accessors with metadata, by dispatch id: 1 if any of it is [Transient], else 0. */
+  metadata?: [number, number][];
 }
 
 export interface ClassDesc {
@@ -128,6 +132,10 @@ export class Traits {
   refusesNames = false;
   /** How to allocate an instance, for classes whose instances hold native state. */
   create: ((traits: Traits) => AsObject) | null;
+  /** Its own slots with [Transient] metadata, if any. */
+  transientSlots: Set<number> | null = null;
+  /** Its own accessors with metadata, if any, by dispatch id: whether any of it is [Transient]. */
+  accessorMetadata: Map<number, boolean> | null = null;
   getIndex?: IndexHook["getIndex"];
   setIndex?: IndexHook["setIndex"];
   hasIndex?: IndexHook["hasIndex"];
@@ -169,7 +177,51 @@ export class Traits {
       this.own.push([`$${slot}`, value]);
     }
 
+    if (desc.transient) {
+      this.transientSlots = new Set(desc.transient);
+    }
+
+    if (desc.metadata) {
+      this.accessorMetadata = new Map(desc.metadata.map(([id, t]) => [id, t === 1]));
+    }
+
     this.allDefaults = null;
+  }
+
+  /**
+   * Whether the member binding `b` names is [Transient], which AMF and
+   * JSON leave out: a slot, or either accessor of a pair, whose metadata,
+   * found as avmplus' TraitsMetadata finds it, has it.
+   */
+  isTransient(b: number): boolean {
+    const kind = b & 7;
+    const id = b >> 3;
+    if (kind === BIND_Var || kind === BIND_Const) {
+      for (let t: Traits | null = this; t; t = t.base) {
+        if (t.transientSlots?.has(id)) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    return (
+      ((kind === BIND_Get || kind === BIND_GetSet) && this.transientAccessor(id)) ||
+      ((kind === BIND_Set || kind === BIND_GetSet) && this.transientAccessor(id + 1))
+    );
+  }
+
+  /** Whether accessor `id`'s metadata, the nearest traits' that has any, is [Transient]. */
+  private transientAccessor(id: number): boolean {
+    for (let t: Traits | null = this; t; t = t.base) {
+      const transient = t.accessorMetadata?.get(id);
+      if (transient !== undefined) {
+        return transient;
+      }
+    }
+
+    return false;
   }
 
   /** The type of slot `id`, declared here or by a base. */
