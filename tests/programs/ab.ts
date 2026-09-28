@@ -11,6 +11,8 @@
 // A snapshot holds the runtime's dist and the compiler's release test
 // build (packages/runtime/dist, packages/codegen/dist-test), so that a
 // change to either can be timed: snapshot, change, build, snapshot again.
+// AB_NODE_ARGS="--flag ..." runs both with those node options, such as V8
+// flags to measure a change against.
 // Run tests/programs first, for out/as3pb/ShellMain.abc and the builtins.
 import { execFileSync } from "node:child_process";
 import { cpSync, readFileSync, rmSync } from "node:fs";
@@ -56,14 +58,19 @@ for (let run = 0; run < runs; run++) {
     ["B", b],
   ];
   for (const [name, dir] of run % 2 ? pair.reverse() : pair) {
-    const out = execFileSync(process.execPath, [fileURLToPath(import.meta.url), "--child"], {
-      env: {
-        ...process.env,
-        SWF2ES_RUNTIME: resolve(dir, "runtime"),
-        SWF2ES_CODEGEN: resolve(dir, "codegen"),
+    const flags = (process.env.AB_NODE_ARGS ?? "").split(" ").filter((f) => f);
+    const out = execFileSync(
+      process.execPath,
+      [...flags, fileURLToPath(import.meta.url), "--child"],
+      {
+        env: {
+          ...process.env,
+          SWF2ES_RUNTIME: resolve(dir, "runtime"),
+          SWF2ES_CODEGEN: resolve(dir, "codegen"),
+        },
+        encoding: "utf8",
       },
-      encoding: "utf8",
-    });
+    );
     for (const path of paths) {
       // Serialize, deserialize, then the total: the last line for the path.
       const all = [...out.matchAll(new RegExp(`AS3PB ${path}: (\\d+)ms`, "g"))];
