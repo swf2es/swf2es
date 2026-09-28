@@ -40,214 +40,11 @@ import {
   isNumeric,
 } from "../link/types";
 import { Abc } from "./abc";
-import {
-  CONSTANT_Multiname,
-  CONSTANT_MultinameA,
-  CONSTANT_MultinameL,
-  CONSTANT_MultinameLA,
-  CONSTANT_Qname,
-  CONSTANT_QnameA,
-  CONSTANT_RTQname,
-  CONSTANT_RTQnameA,
-  CONSTANT_RTQnameL,
-  CONSTANT_RTQnameLA,
-  CONSTANT_TypeName,
-  kAmbiguousBindingError,
-  kCannotFallOffMethodError,
-  kCannotMergeTypesError,
-  kClassInfoExceedsCountError,
-  kCorruptABCError,
-  kCpoolIndexRangeError,
-  kDanglingFunctionError,
-  kFindVarWithNoScopeError,
-  kGetScopeObjectBoundsError,
-  kIllegalEarlyBindingError,
-  kIllegalExceptionHandlerError,
-  kIllegalOpcodeError,
-  kIllegalOperandTypeError,
-  kIllegalOpMultinameError,
-  kIllegalSetDxns,
-  kIllegalSuperCallError,
-  kInvalidBranchTargetError,
-  kInvalidHasNextError,
-  kInvalidNewActivationError,
-  kInvalidRegisterError,
-  kLastInstExceedsCodeSizeError,
-  kMethodInfoExceedsCountError,
-  kNoGlobalScopeError,
-  kScopeDepthUnbalancedError,
-  kScopeStackOverflowError,
-  kScopeStackUnderflowError,
-  kSlotExceedsCountError,
-  kStackDepthUnbalancedError,
-  kStackOverflowError,
-  kStackUnderflowError,
-  kWrongArgumentCountError,
-  kZeroDispIdError,
-  METHOD_NeedActivation,
-  METHOD_NeedArguments,
-  METHOD_NeedRest,
-  METHOD_SetsDxns,
-} from "./constants";
+import * as C from "./constants";
+import * as ops from "./opcodes";
 import {
   FLAG_Terminal,
   FLAG_Throws,
-  OP_add,
-  OP_add_i,
-  OP_applytype,
-  OP_astype,
-  OP_astypelate,
-  OP_bitand,
-  OP_bitnot,
-  OP_bitor,
-  OP_bitxor,
-  OP_bkpt,
-  OP_bkptline,
-  OP_call,
-  OP_callmethod,
-  OP_callproperty,
-  OP_callproplex,
-  OP_callpropvoid,
-  OP_callstatic,
-  OP_callsuper,
-  OP_callsupervoid,
-  OP_checkfilter,
-  OP_coerce,
-  OP_coerce_a,
-  OP_coerce_b,
-  OP_coerce_d,
-  OP_coerce_i,
-  OP_coerce_o,
-  OP_coerce_s,
-  OP_coerce_u,
-  OP_construct,
-  OP_constructprop,
-  OP_constructsuper,
-  OP_convert_b,
-  OP_convert_d,
-  OP_convert_i,
-  OP_convert_o,
-  OP_convert_s,
-  OP_convert_u,
-  OP_debugfile,
-  OP_declocal,
-  OP_declocal_i,
-  OP_decrement,
-  OP_decrement_i,
-  OP_deleteproperty,
-  OP_divide,
-  OP_dup,
-  OP_dxns,
-  OP_dxnslate,
-  OP_equals,
-  OP_esc_xattr,
-  OP_esc_xelem,
-  OP_finddef,
-  OP_findproperty,
-  OP_findpropstrict,
-  OP_getdescendants,
-  OP_getglobalscope,
-  OP_getglobalslot,
-  OP_getlex,
-  OP_getlocal,
-  OP_getlocal0,
-  OP_getouterscope,
-  OP_getproperty,
-  OP_getscopeobject,
-  OP_getslot,
-  OP_getsuper,
-  OP_greaterequals,
-  OP_greaterthan,
-  OP_hasnext,
-  OP_hasnext2,
-  OP_ifeq,
-  OP_iffalse,
-  OP_ifge,
-  OP_ifgt,
-  OP_ifle,
-  OP_iflt,
-  OP_ifne,
-  OP_ifnge,
-  OP_ifngt,
-  OP_ifnle,
-  OP_ifnlt,
-  OP_ifstricteq,
-  OP_ifstrictne,
-  OP_iftrue,
-  OP_in,
-  OP_inclocal,
-  OP_inclocal_i,
-  OP_increment,
-  OP_increment_i,
-  OP_initproperty,
-  OP_instanceof,
-  OP_istype,
-  OP_istypelate,
-  OP_jump,
-  OP_kill,
-  OP_label,
-  OP_lessequals,
-  OP_lessthan,
-  OP_lf32,
-  OP_lf64,
-  OP_li8,
-  OP_li16,
-  OP_li32,
-  OP_lookupswitch,
-  OP_lshift,
-  OP_modulo,
-  OP_multiply,
-  OP_multiply_i,
-  OP_negate,
-  OP_negate_i,
-  OP_newactivation,
-  OP_newarray,
-  OP_newcatch,
-  OP_newclass,
-  OP_newfunction,
-  OP_newobject,
-  OP_nextname,
-  OP_nextvalue,
-  OP_nop,
-  OP_not,
-  OP_popscope,
-  OP_pushbyte,
-  OP_pushdouble,
-  OP_pushfalse,
-  OP_pushint,
-  OP_pushnamespace,
-  OP_pushnan,
-  OP_pushnull,
-  OP_pushscope,
-  OP_pushshort,
-  OP_pushstring,
-  OP_pushtrue,
-  OP_pushuint,
-  OP_pushundefined,
-  OP_pushwith,
-  OP_returnvalue,
-  OP_rshift,
-  OP_setglobalslot,
-  OP_setlocal,
-  OP_setlocal0,
-  OP_setproperty,
-  OP_setslot,
-  OP_setsuper,
-  OP_sf32,
-  OP_sf64,
-  OP_si8,
-  OP_si16,
-  OP_si32,
-  OP_strictequals,
-  OP_subtract,
-  OP_subtract_i,
-  OP_swap,
-  OP_sxi1,
-  OP_sxi8,
-  OP_sxi16,
-  OP_timestamp,
-  OP_typeof,
-  OP_urshift,
   OPERANDS_Branch,
   OPERANDS_Byte,
   OPERANDS_Debug,
@@ -485,7 +282,7 @@ export class BodyDecoder {
     // walk it again, so its state is kept all the same.
     this.stack = 0;
     this.scope = 0;
-    if (load<u8>(this.start) === OP_label) {
+    if (load<u8>(this.start) === ops.OP_label) {
       if (!this.target(-1, 0, 0, 0)) {
         return code;
       }
@@ -511,7 +308,7 @@ export class BodyDecoder {
     }
 
     if (this.overlap) {
-      return code.fail(kInvalidBranchTargetError);
+      return code.fail(C.kInvalidBranchTargetError);
     }
 
     if (this.typed && !this.secondPass()) {
@@ -599,57 +396,57 @@ export class BodyDecoder {
     let dst = this.stack > stackBefore - pops ? <i32>(base + this.stack - 1) : -1;
     let ra = a;
     switch (opcode) {
-      case OP_label:
-      case OP_nop:
-      case OP_bkpt:
-      case OP_bkptline:
-      case OP_timestamp:
+      case ops.OP_label:
+      case ops.OP_nop:
+      case ops.OP_bkpt:
+      case ops.OP_bkptline:
+      case ops.OP_timestamp:
         return;
-      case OP_getlocal:
+      case ops.OP_getlocal:
         src = <i32>a;
         count = 1;
         break;
-      case OP_setlocal:
+      case ops.OP_setlocal:
         dst = <i32>a;
         break;
-      case OP_pushscope:
-      case OP_pushwith:
+      case ops.OP_pushscope:
+      case ops.OP_pushwith:
         dst = <i32>(this.localCount + scopeBefore);
         break;
-      case OP_popscope:
+      case ops.OP_popscope:
         src = <i32>(this.localCount + scopeBefore - 1);
         count = 1;
         break;
-      case OP_getscopeobject:
+      case ops.OP_getscopeobject:
         ra = <u32>load<u8>(this.start + pc + 1);
         src = <i32>(this.localCount + ra);
         count = 1;
         break;
       // Slots count from 0 in the IR, as early bound ones do.
-      case OP_getslot:
-      case OP_setslot:
-      case OP_getglobalslot:
-      case OP_setglobalslot:
+      case ops.OP_getslot:
+      case ops.OP_setslot:
+      case ops.OP_getglobalslot:
+      case ops.OP_setglobalslot:
         ra = a - 1;
         break;
-      case OP_jump:
-      case OP_iftrue:
-      case OP_iffalse:
-      case OP_ifeq:
-      case OP_ifne:
-      case OP_iflt:
-      case OP_ifle:
-      case OP_ifgt:
-      case OP_ifge:
-      case OP_ifstricteq:
-      case OP_ifstrictne:
-      case OP_ifnlt:
-      case OP_ifnle:
-      case OP_ifngt:
-      case OP_ifnge:
+      case ops.OP_jump:
+      case ops.OP_iftrue:
+      case ops.OP_iffalse:
+      case ops.OP_ifeq:
+      case ops.OP_ifne:
+      case ops.OP_iflt:
+      case ops.OP_ifle:
+      case ops.OP_ifgt:
+      case ops.OP_ifge:
+      case ops.OP_ifstricteq:
+      case ops.OP_ifstrictne:
+      case ops.OP_ifnlt:
+      case ops.OP_ifnle:
+      case ops.OP_ifngt:
+      case ops.OP_ifnge:
         ra = this.blockOf[this.slotNext[pc] + <u32>this.slotA[pc]];
         break;
-      case OP_lookupswitch: {
+      case ops.OP_lookupswitch: {
         const ir = this.ir;
         const first = this.slotC[pc];
         const cases = ir.caseCount;
@@ -664,11 +461,11 @@ export class BodyDecoder {
         break;
     }
 
-    if (opcode >= OP_getlocal0 && opcode < OP_getlocal0 + 4) {
-      src = <i32>(opcode - OP_getlocal0);
+    if (opcode >= ops.OP_getlocal0 && opcode < ops.OP_getlocal0 + 4) {
+      src = <i32>(opcode - ops.OP_getlocal0);
       count = 1;
-    } else if (opcode >= OP_setlocal0 && opcode < OP_setlocal0 + 4) {
-      dst = <i32>(opcode - OP_setlocal0);
+    } else if (opcode >= ops.OP_setlocal0 && opcode < ops.OP_setlocal0 + 4) {
+      dst = <i32>(opcode - ops.OP_setlocal0);
     }
 
     this.emit(opcode, dst, src, count, ra, b, this.rowC, pc);
@@ -711,7 +508,7 @@ export class BodyDecoder {
     const scope = <i64>abc.bodyMaxScopeDepth[body] - abc.bodyInitScopeDepth[body];
     const frame = <i64>this.localCount + scope + this.maxStack;
     if (scope < 0 || frame > 0x7fffffff / 8) {
-      this.code.fail(kCorruptABCError);
+      this.code.fail(C.kCorruptABCError);
       return false;
     }
 
@@ -725,11 +522,11 @@ export class BodyDecoder {
     const abc = this.abc;
     const params = abc.methodParamStart[this.method + 1] - abc.methodParamStart[this.method];
     if (this.localCount < params + 1) {
-      this.code.fail(kCorruptABCError);
+      this.code.fail(C.kCorruptABCError);
       return false;
     }
 
-    if (this.methodFlags & (METHOD_NeedRest | METHOD_NeedArguments)) {
+    if (this.methodFlags & (C.METHOD_NeedRest | C.METHOD_NeedArguments)) {
       return this.checkLocal(params + 1);
     }
 
@@ -738,7 +535,7 @@ export class BodyDecoder {
 
   checkLocal(register: u32): bool {
     if (register >= this.localCount) {
-      this.code.fail(kInvalidRegisterError);
+      this.code.fail(C.kInvalidRegisterError);
       return false;
     }
 
@@ -770,12 +567,12 @@ export class BodyDecoder {
       }
 
       if (name !== 0 && !isBinding(abc.pool, name)) {
-        this.code.fail(kCorruptABCError);
+        this.code.fail(C.kCorruptABCError);
         return false;
       }
 
       if (to < from || target < to || target >= this.length) {
-        this.code.fail(kIllegalExceptionHandlerError);
+        this.code.fail(C.kIllegalExceptionHandlerError);
         return false;
       }
 
@@ -831,7 +628,7 @@ export class BodyDecoder {
     }
 
     let firstLocal = count + 1;
-    if (this.methodFlags & (METHOD_NeedRest | METHOD_NeedArguments)) {
+    if (this.methodFlags & (C.METHOD_NeedRest | C.METHOD_NeedArguments)) {
       this.setValue(firstLocal++, domain.arrayType, NOT_NULL);
     }
 
@@ -941,7 +738,7 @@ export class BodyDecoder {
       const flags = this.valueFlags[i];
       const entryFlags = this.entryFlags[at + i];
       if ((flags ^ entryFlags) & WITH) {
-        this.fail(kCannotMergeTypesError);
+        this.fail(C.kCannotMergeTypesError);
         return -1;
       }
 
@@ -978,14 +775,14 @@ export class BodyDecoder {
     }
 
     if (to < 0 || to >= <i64>this.length) {
-      this.code.fail(kInvalidBranchTargetError);
+      this.code.fail(C.kInvalidBranchTargetError);
       return false;
     }
 
     const t = <u32>to;
     const isNew = !this.known[t];
-    if (to <= from && isNew && load<u8>(this.start + t) !== OP_label) {
-      this.code.fail(kInvalidBranchTargetError);
+    if (to <= from && isNew && load<u8>(this.start + t) !== ops.OP_label) {
+      this.code.fail(C.kInvalidBranchTargetError);
       return false;
     }
 
@@ -1089,12 +886,12 @@ export class BodyDecoder {
 
   sameDepths(stack: u32, scope: u32, otherStack: u32, otherScope: u32): bool {
     if (stack !== otherStack) {
-      this.code.fail(kStackDepthUnbalancedError);
+      this.code.fail(C.kStackDepthUnbalancedError);
       return false;
     }
 
     if (scope !== otherScope) {
-      this.code.fail(kScopeDepthUnbalancedError);
+      this.code.fail(C.kScopeDepthUnbalancedError);
       return false;
     }
 
@@ -1115,7 +912,7 @@ export class BodyDecoder {
       const h = this.handlerFirst + i;
       if (pc >= abc.exceptionFrom[h] && pc < abc.exceptionTo[h]) {
         if (this.maxStack < 1) {
-          this.code.fail(kStackOverflowError);
+          this.code.fail(C.kStackOverflowError);
           return false;
         }
 
@@ -1158,18 +955,18 @@ export class BodyDecoder {
 
     while (true) {
       if (pc >= this.length) {
-        code.fail(kCannotFallOffMethodError);
+        code.fail(C.kCannotFallOffMethodError);
         return false;
       }
 
       const opcode = load<u8>(this.start + pc);
       const operands = opcodeOperands[opcode];
       if (operands === OPERANDS_Illegal) {
-        code.fail(kIllegalOpcodeError);
+        code.fail(C.kIllegalOpcodeError);
         return false;
       }
 
-      if (pc !== start && (opcode === OP_label || this.known[pc])) {
+      if (pc !== start && (opcode === ops.OP_label || this.known[pc])) {
         return this.target(<i64>pc - 1, <i64>pc, this.stack, this.scope);
       }
 
@@ -1207,7 +1004,7 @@ export class BodyDecoder {
         if (!this.target(<i64>pc, <i64>next + this.slotA[pc], stack, scope)) {
           return false;
         }
-      } else if (opcode === OP_lookupswitch) {
+      } else if (opcode === ops.OP_lookupswitch) {
         if (!this.target(<i64>pc, <i64>pc + this.slotA[pc], stack, scope)) {
           return false;
         }
@@ -1266,21 +1063,21 @@ export class BodyDecoder {
     }
 
     if (wide & 0xc0000000) {
-      code.fail(kCorruptABCError);
+      code.fail(C.kCorruptABCError);
       return false;
     }
 
     const codeEnd = this.start + this.length;
     if (r.failed || r.pos > codeEnd) {
-      code.fail(kLastInstExceedsCodeSizeError);
+      code.fail(C.kLastInstExceedsCodeSizeError);
       return false;
     }
 
-    if (opcode === OP_lookupswitch) {
+    if (opcode === ops.OP_lookupswitch) {
       c = code.caseCount;
       const caseCount = <u64>b + 1;
       if (<u64>r.pos + caseCount * 3 > codeEnd) {
-        code.fail(kLastInstExceedsCodeSizeError);
+        code.fail(C.kLastInstExceedsCodeSizeError);
         return false;
       }
 
@@ -1328,16 +1125,18 @@ export class BodyDecoder {
     // A name looked up in the scope chain needs a scope to look in.
     if (
       this.typed &&
-      (opcode === OP_getlex || opcode === OP_findpropstrict || opcode === OP_findproperty) &&
+      (opcode === ops.OP_getlex ||
+        opcode === ops.OP_findpropstrict ||
+        opcode === ops.OP_findproperty) &&
       this.scope + this.outer.size === 0
     ) {
-      return this.fail(kFindVarWithNoScopeError);
+      return this.fail(C.kFindVarWithNoScopeError);
     }
 
     // Operands that index the pool or the method tables, checked before the stack.
     if (stack & STACK_Multiname) {
       if (a === 0 || a >= pool.multinameCount) {
-        return this.fail(kCpoolIndexRangeError);
+        return this.fail(C.kCpoolIndexRangeError);
       }
 
       pops += runtimeParts(pool, a);
@@ -1349,17 +1148,17 @@ export class BodyDecoder {
       pops += b;
     }
 
-    if (opcode === OP_newobject) {
+    if (opcode === ops.OP_newobject) {
       pops = <u64>a * 2;
-    } else if (opcode === OP_newarray) {
+    } else if (opcode === ops.OP_newarray) {
       pops = a;
-    } else if (opcode === OP_callstatic) {
+    } else if (opcode === ops.OP_callstatic) {
       if (a >= this.abc.methodCount || !this.callable(a)) {
-        return this.fail(kCorruptABCError);
+        return this.fail(C.kCorruptABCError);
       }
-    } else if (opcode === OP_dxns) {
-      if (!(this.methodFlags & METHOD_SetsDxns)) {
-        return this.fail(kIllegalSetDxns);
+    } else if (opcode === ops.OP_dxns) {
+      if (!(this.methodFlags & C.METHOD_SetsDxns)) {
+        return this.fail(C.kIllegalSetDxns);
       }
 
       if (this.emitPass) {
@@ -1367,13 +1166,13 @@ export class BodyDecoder {
       }
 
       return this.checkString(a);
-    } else if (opcode === OP_debugfile) {
+    } else if (opcode === ops.OP_debugfile) {
       if (this.emitPass) {
         this.emit(opcode, -1, -1, 0, a, 0, 0, pc);
       }
 
       return this.checkString(a);
-    } else if (opcode === OP_kill) {
+    } else if (opcode === ops.OP_kill) {
       if (!this.checkLocal(a)) {
         return false;
       }
@@ -1388,17 +1187,17 @@ export class BodyDecoder {
 
       return true;
     } else if (
-      opcode === OP_inclocal ||
-      opcode === OP_declocal ||
-      opcode === OP_inclocal_i ||
-      opcode === OP_declocal_i
+      opcode === ops.OP_inclocal ||
+      opcode === ops.OP_declocal ||
+      opcode === ops.OP_inclocal_i ||
+      opcode === ops.OP_declocal_i
     ) {
       if (!this.checkLocal(a)) {
         return false;
       }
 
       if (this.typed) {
-        const integer = opcode === OP_inclocal_i || opcode === OP_declocal_i;
+        const integer = opcode === ops.OP_inclocal_i || opcode === ops.OP_declocal_i;
         this.coerce(a, integer ? this.domain.intType : this.domain.numberType);
       }
 
@@ -1407,9 +1206,9 @@ export class BodyDecoder {
       }
 
       return true;
-    } else if (opcode === OP_popscope) {
+    } else if (opcode === ops.OP_popscope) {
       if (this.scope === 0) {
-        return this.fail(kScopeStackUnderflowError);
+        return this.fail(C.kScopeStackUnderflowError);
       }
 
       this.scope--;
@@ -1418,18 +1217,18 @@ export class BodyDecoder {
       }
 
       return true;
-    } else if (opcode === OP_setglobalslot && this.typed) {
+    } else if (opcode === ops.OP_setglobalslot && this.typed) {
       if (this.scope === 0 && this.outer.size === 0) {
-        return this.fail(kNoGlobalScopeError);
+        return this.fail(C.kNoGlobalScopeError);
       }
     }
 
     if (<u64>this.stack < pops) {
-      return this.fail(kStackUnderflowError);
+      return this.fail(C.kStackUnderflowError);
     }
 
     if (<u64>this.stack - pops + checkPushes > this.maxStack) {
-      return this.fail(kStackOverflowError);
+      return this.fail(C.kStackOverflowError);
     }
 
     const scopeBefore = this.scope;
@@ -1457,71 +1256,71 @@ export class BodyDecoder {
   verifySpecial(pc: u32, opcode: u8, a: u32, b: u32): bool {
     const abc = this.abc;
     const pool = abc.pool;
-    if (opcode >= OP_getlocal0 && opcode < OP_getlocal0 + 4) {
-      return this.checkLocal(opcode - OP_getlocal0);
+    if (opcode >= ops.OP_getlocal0 && opcode < ops.OP_getlocal0 + 4) {
+      return this.checkLocal(opcode - ops.OP_getlocal0);
     }
 
-    if (opcode >= OP_setlocal0 && opcode < OP_setlocal0 + 4) {
-      return this.checkLocal(opcode - OP_setlocal0);
+    if (opcode >= ops.OP_setlocal0 && opcode < ops.OP_setlocal0 + 4) {
+      return this.checkLocal(opcode - ops.OP_setlocal0);
     }
 
     switch (opcode) {
-      case OP_getlocal:
-      case OP_setlocal:
+      case ops.OP_getlocal:
+      case ops.OP_setlocal:
         return this.checkLocal(a);
-      case OP_hasnext2:
+      case ops.OP_hasnext2:
         if (!this.checkLocal(a) || !this.checkLocal(b)) {
           return false;
         }
 
-        return a === b ? this.fail(kInvalidHasNextError) : true;
-      case OP_pushstring:
+        return a === b ? this.fail(C.kInvalidHasNextError) : true;
+      case ops.OP_pushstring:
         return this.checkString(a);
-      case OP_pushint:
-        return a === 0 || a >= <u32>pool.ints.length ? this.fail(kCpoolIndexRangeError) : true;
-      case OP_pushuint:
-        return a === 0 || a >= <u32>pool.uints.length ? this.fail(kCpoolIndexRangeError) : true;
-      case OP_pushdouble:
-        return a === 0 || a >= <u32>pool.doubles.length ? this.fail(kCpoolIndexRangeError) : true;
-      case OP_pushnamespace:
-        return a === 0 || a >= pool.nsCount ? this.fail(kCpoolIndexRangeError) : true;
-      case OP_dxnslate:
-        return this.methodFlags & METHOD_SetsDxns ? true : this.fail(kIllegalSetDxns);
-      case OP_getlex:
-        return runtimeParts(pool, a) ? this.fail(kIllegalOpMultinameError) : true;
-      case OP_finddef:
-        return isBinding(pool, a) ? true : this.fail(kIllegalOpMultinameError);
-      case OP_callproperty:
-      case OP_callproplex:
-      case OP_callpropvoid:
-      case OP_constructprop:
-      case OP_callsuper:
-      case OP_callsupervoid:
-      case OP_getsuper:
-      case OP_setsuper:
-        return isAttribute(pool, a) ? this.fail(kIllegalOpMultinameError) : true;
-      case OP_newfunction:
-        return a >= abc.methodCount ? this.fail(kMethodInfoExceedsCountError) : true;
-      case OP_newclass:
-        return a >= abc.classCount ? this.fail(kClassInfoExceedsCountError) : true;
-      case OP_newactivation:
-        return this.methodFlags & METHOD_NeedActivation
+      case ops.OP_pushint:
+        return a === 0 || a >= <u32>pool.ints.length ? this.fail(C.kCpoolIndexRangeError) : true;
+      case ops.OP_pushuint:
+        return a === 0 || a >= <u32>pool.uints.length ? this.fail(C.kCpoolIndexRangeError) : true;
+      case ops.OP_pushdouble:
+        return a === 0 || a >= <u32>pool.doubles.length ? this.fail(C.kCpoolIndexRangeError) : true;
+      case ops.OP_pushnamespace:
+        return a === 0 || a >= pool.nsCount ? this.fail(C.kCpoolIndexRangeError) : true;
+      case ops.OP_dxnslate:
+        return this.methodFlags & C.METHOD_SetsDxns ? true : this.fail(C.kIllegalSetDxns);
+      case ops.OP_getlex:
+        return runtimeParts(pool, a) ? this.fail(C.kIllegalOpMultinameError) : true;
+      case ops.OP_finddef:
+        return isBinding(pool, a) ? true : this.fail(C.kIllegalOpMultinameError);
+      case ops.OP_callproperty:
+      case ops.OP_callproplex:
+      case ops.OP_callpropvoid:
+      case ops.OP_constructprop:
+      case ops.OP_callsuper:
+      case ops.OP_callsupervoid:
+      case ops.OP_getsuper:
+      case ops.OP_setsuper:
+        return isAttribute(pool, a) ? this.fail(C.kIllegalOpMultinameError) : true;
+      case ops.OP_newfunction:
+        return a >= abc.methodCount ? this.fail(C.kMethodInfoExceedsCountError) : true;
+      case ops.OP_newclass:
+        return a >= abc.classCount ? this.fail(C.kClassInfoExceedsCountError) : true;
+      case ops.OP_newactivation:
+        return this.methodFlags & C.METHOD_NeedActivation
           ? true
-          : this.fail(kInvalidNewActivationError);
-      case OP_newcatch:
-        return a >= this.handlerCount ? this.fail(kInvalidNewActivationError) : true;
-      case OP_pushscope:
-      case OP_pushwith:
+          : this.fail(C.kInvalidNewActivationError);
+      case ops.OP_newcatch:
+        return a >= this.handlerCount ? this.fail(C.kInvalidNewActivationError) : true;
+      case ops.OP_pushscope:
+      case ops.OP_pushwith:
         if (this.scope + 1 > this.maxScope) {
-          return this.fail(kScopeStackOverflowError);
+          return this.fail(C.kScopeStackOverflowError);
         }
 
         this.scope++;
         return true;
-      case OP_getscopeobject:
+      case ops.OP_getscopeobject:
         // The verifier reads the index as the operand's first byte.
         return <u32>load<u8>(this.start + pc + 1) >= this.scope
-          ? this.fail(kGetScopeObjectBoundsError)
+          ? this.fail(C.kGetScopeObjectBoundsError)
           : true;
       default:
         return true;
@@ -1551,43 +1350,43 @@ export class BodyDecoder {
     const domain = this.domain;
     const top = this.peek(1);
     switch (opcode) {
-      case OP_lookupswitch:
+      case ops.OP_lookupswitch:
         return this.peekType(1, domain.intType);
-      case OP_pushnull:
+      case ops.OP_pushnull:
         return this.push(domain.nullType, 0);
-      case OP_pushundefined:
+      case ops.OP_pushundefined:
         return this.push(domain.voidType, 0);
-      case OP_pushtrue:
-      case OP_pushfalse:
+      case ops.OP_pushtrue:
+      case ops.OP_pushfalse:
         return this.push(domain.booleanType, NOT_NULL);
-      case OP_pushnan:
-      case OP_pushdouble:
+      case ops.OP_pushnan:
+      case ops.OP_pushdouble:
         return this.push(domain.numberType, NOT_NULL);
-      case OP_pushbyte:
-      case OP_pushshort:
-      case OP_pushint:
+      case ops.OP_pushbyte:
+      case ops.OP_pushshort:
+      case ops.OP_pushint:
         return this.push(domain.intType, NOT_NULL);
-      case OP_pushuint:
+      case ops.OP_pushuint:
         return this.push(domain.uintType, NOT_NULL);
-      case OP_pushstring:
+      case ops.OP_pushstring:
         return this.push(domain.stringType, NOT_NULL);
-      case OP_pushnamespace:
+      case ops.OP_pushnamespace:
         return this.push(domain.namespaceType, NOT_NULL);
-      case OP_setlocal:
+      case ops.OP_setlocal:
         this.setValue(a, this.typeOf(top), this.valueFlags[top] & NOT_NULL);
         return true;
-      case OP_getlocal:
+      case ops.OP_getlocal:
         return this.push(this.typeOf(a), this.valueFlags[a] & NOT_NULL);
-      case OP_newfunction:
+      case ops.OP_newfunction:
         if (this.emitPass && !this.captureFunction(a)) {
           return false;
         }
 
         this.rowC = <i32>(domain.methodStart[this.index] + a);
         return this.push(domain.functionType, NOT_NULL);
-      case OP_getlex: {
+      case ops.OP_getlex: {
         // The scope object found is the receiver of the get.
-        if (!this.findProperty(OP_findpropstrict, a)) {
+        if (!this.findProperty(ops.OP_findpropstrict, a)) {
           return false;
         }
 
@@ -1596,10 +1395,10 @@ export class BodyDecoder {
         this.stack--;
         return got;
       }
-      case OP_findpropstrict:
-      case OP_findproperty:
+      case ops.OP_findpropstrict:
+      case ops.OP_findproperty:
         return this.findProperty(opcode, a);
-      case OP_newclass:
+      case ops.OP_newclass:
         if (this.emitPass && !this.captureClass(a)) {
           return false;
         }
@@ -1608,16 +1407,16 @@ export class BodyDecoder {
         this.setValue(top, domain.staticTraitsOf(this.index, a), NOT_NULL);
         this.rowC = domain.staticTraitsOf(this.index, a);
         return true;
-      case OP_finddef:
+      case ops.OP_finddef:
         return this.findDef(a);
-      case OP_setproperty:
-      case OP_initproperty:
+      case ops.OP_setproperty:
+      case ops.OP_initproperty:
         return this.setProperty(opcode, a);
-      case OP_getproperty: {
+      case ops.OP_getproperty: {
         const n = this.propertyDepth(a, 1);
         return n > 0 && this.getProperty(a, n);
       }
-      case OP_getdescendants: {
+      case ops.OP_getdescendants: {
         const n = this.propertyDepth(a, 1);
         if (n === 0) {
           return false;
@@ -1626,11 +1425,11 @@ export class BodyDecoder {
         this.checkNull(this.peek(n));
         return this.popPush(n, TYPE_Any, 0);
       }
-      case OP_checkfilter:
-      case OP_convert_o:
+      case ops.OP_checkfilter:
+      case ops.OP_convert_o:
         this.checkNull(top);
         return true;
-      case OP_deleteproperty: {
+      case ops.OP_deleteproperty: {
         const n = this.propertyDepth(a, 1);
         if (n === 0) {
           return false;
@@ -1639,7 +1438,7 @@ export class BodyDecoder {
         this.checkNull(this.peek(n));
         return this.popPush(n, domain.booleanType, NOT_NULL);
       }
-      case OP_astype: {
+      case ops.OP_astype: {
         const t = this.typeName(a);
         if (t < TYPE_Any) {
           return false;
@@ -1652,7 +1451,7 @@ export class BodyDecoder {
 
         return true;
       }
-      case OP_astypelate: {
+      case ops.OP_astypelate: {
         let t = domain.instanceTraitsOf(this.typeOf(this.peek(1)));
         if (t !== TYPE_Any && domain.isMachineType(t)) {
           t = domain.objectType();
@@ -1661,7 +1460,7 @@ export class BodyDecoder {
         return this.popPush(2, t, domain.typeNotNull(t) ? NOT_NULL : 0);
       }
       // The conversion is the instruction itself, which only retypes the value.
-      case OP_coerce: {
+      case ops.OP_coerce: {
         const t = this.typeName(a);
         if (t < TYPE_Any) {
           return false;
@@ -1671,74 +1470,76 @@ export class BodyDecoder {
         this.retype(top, t);
         return true;
       }
-      case OP_convert_b:
-      case OP_coerce_b:
+      case ops.OP_convert_b:
+      case ops.OP_coerce_b:
         this.retype(top, domain.booleanType);
         return true;
-      case OP_coerce_o:
+      case ops.OP_coerce_o:
         this.retype(top, domain.objectType());
         return true;
-      case OP_coerce_a:
+      case ops.OP_coerce_a:
         this.retype(top, TYPE_Any);
         return true;
-      case OP_convert_i:
-      case OP_coerce_i:
+      case ops.OP_convert_i:
+      case ops.OP_coerce_i:
         this.retype(top, domain.intType);
         return true;
-      case OP_convert_u:
-      case OP_coerce_u:
+      case ops.OP_convert_u:
+      case ops.OP_coerce_u:
         this.retype(top, domain.uintType);
         return true;
-      case OP_convert_d:
-      case OP_coerce_d:
+      case ops.OP_convert_d:
+      case ops.OP_coerce_d:
         this.retype(top, domain.numberType);
         return true;
-      case OP_coerce_s:
+      case ops.OP_coerce_s:
         this.retype(top, domain.stringType);
         return true;
-      case OP_iftrue:
-      case OP_iffalse:
+      case ops.OP_iftrue:
+      case ops.OP_iffalse:
         this.coerce(top, domain.booleanType);
         return true;
-      case OP_returnvalue:
+      case ops.OP_returnvalue:
         this.coerce(top, domain.traits.returnType[this.global]);
         return true;
-      case OP_istype:
+      case ops.OP_istype:
         if (this.typeName(a) < TYPE_Any) {
           return false;
         }
 
         return this.popPush(1, domain.booleanType, NOT_NULL);
-      case OP_istypelate:
+      case ops.OP_istypelate:
         return this.popPush(2, domain.booleanType, NOT_NULL);
-      case OP_convert_s:
-      case OP_esc_xelem:
-      case OP_esc_xattr:
-      case OP_typeof:
+      case ops.OP_convert_s:
+      case ops.OP_esc_xelem:
+      case ops.OP_esc_xattr:
+      case ops.OP_typeof:
         return this.popPush(1, domain.stringType, NOT_NULL);
-      case OP_callstatic:
+      case ops.OP_callstatic:
         return this.callStatic(a, b);
-      case OP_call:
+      case ops.OP_call:
         return this.popPush(a + 2, TYPE_Any, 0);
-      case OP_construct: {
+      case ops.OP_construct: {
         const t = domain.instanceTraitsOf(this.typeOf(this.peek(a + 1)));
         return this.popPush(a + 1, t, NOT_NULL);
       }
-      case OP_callmethod: {
+      case ops.OP_callmethod: {
         // Always rejected, as avmplus has done since Flash Player 9.
         if (a === 0) {
-          return this.fail(kZeroDispIdError);
+          return this.fail(C.kZeroDispIdError);
         }
 
         return this.fail(
-          this.typeOf(this.peek(b + 1)) === TYPE_Any ? kCorruptABCError : kIllegalEarlyBindingError,
+          this.typeOf(this.peek(b + 1)) === TYPE_Any
+            ? C.kCorruptABCError
+            : C.kIllegalEarlyBindingError,
         );
       }
-      case OP_callproperty:
-      case OP_callproplex:
-      case OP_callpropvoid:
+      case ops.OP_callproperty:
+      case ops.OP_callproplex:
+      case ops.OP_callpropvoid:
         return this.callProperty(opcode, a, b);
-      case OP_constructprop: {
+      case ops.OP_constructprop: {
         const n = this.propertyDepth(a, b + 1);
         if (n === 0) {
           return false;
@@ -1761,14 +1562,14 @@ export class BodyDecoder {
         const itraits = domain.instanceTraitsOf(ctraits);
         return this.popPush(n, itraits, itraits === TYPE_Any ? 0 : NOT_NULL);
       }
-      case OP_applytype:
+      case ops.OP_applytype:
         return this.popPush(a + 1, TYPE_Any, NOT_NULL);
-      case OP_callsuper:
-      case OP_callsupervoid:
+      case ops.OP_callsuper:
+      case ops.OP_callsupervoid:
         return this.callSuper(opcode, a, b);
-      case OP_getsuper:
+      case ops.OP_getsuper:
         return this.getSuper(a);
-      case OP_setsuper: {
+      case ops.OP_setsuper: {
         const n = this.propertyDepth(a, 2);
         if (n === 0) {
           return false;
@@ -1782,7 +1583,7 @@ export class BodyDecoder {
         this.checkNull(obj);
         return true;
       }
-      case OP_constructsuper: {
+      case ops.OP_constructsuper: {
         const obj = this.peek(a + 1);
         const base = this.coerceSuper(obj);
         if (base < TYPE_Any) {
@@ -1797,7 +1598,7 @@ export class BodyDecoder {
         this.checkNull(obj);
         return true;
       }
-      case OP_newobject:
+      case ops.OP_newobject:
         for (let n: u32 = 2; n <= 2 * a; n += 2) {
           if (!this.peekType(n, domain.stringType)) {
             return false;
@@ -1805,26 +1606,26 @@ export class BodyDecoder {
         }
 
         return this.popPush(2 * a, domain.objectType(), NOT_NULL);
-      case OP_newarray:
+      case ops.OP_newarray:
         return this.popPush(a, domain.arrayType, NOT_NULL);
-      case OP_pushscope:
-      case OP_pushwith: {
+      case ops.OP_pushscope:
+      case ops.OP_pushwith: {
         const type = this.typeOf(top);
         const outer = this.outer;
-        if (opcode === OP_pushscope && scope === 0 && outer.extra !== TYPE_Any) {
+        if (opcode === ops.OP_pushscope && scope === 0 && outer.extra !== TYPE_Any) {
           if (type === TYPE_Any || !domain.traits.subtypeOf(<u32>type, <u32>outer.extra)) {
-            return this.fail(kIllegalOperandTypeError);
+            return this.fail(C.kIllegalOperandTypeError);
           }
         }
 
         this.setValue(
           this.localCount + scope,
           type,
-          opcode === OP_pushwith ? NOT_NULL | WITH : NOT_NULL,
+          opcode === ops.OP_pushwith ? NOT_NULL | WITH : NOT_NULL,
         );
         return true;
       }
-      case OP_newactivation: {
+      case ops.OP_newactivation: {
         const t = domain.bodyTraits[this.index][this.abc.methodBody[this.method]];
         const error = t >= 0 ? domain.traits.resolve(domain, <u32>t) : 0;
         if (error) {
@@ -1833,23 +1634,23 @@ export class BodyDecoder {
 
         return this.push(t, NOT_NULL);
       }
-      case OP_newcatch:
+      case ops.OP_newcatch:
         return this.push(this.handlerScope[a], NOT_NULL);
-      case OP_getscopeobject: {
+      case ops.OP_getscopeobject: {
         const i = this.localCount + load<u8>(this.start + pc + 1);
         return this.push(this.typeOf(i), this.valueFlags[i] & NOT_NULL);
       }
-      case OP_getouterscope: {
+      case ops.OP_getouterscope: {
         const outer = this.outer;
         if (a >= outer.size) {
-          return this.fail(kGetScopeObjectBoundsError);
+          return this.fail(C.kGetScopeObjectBoundsError);
         }
 
         return this.push(outer.types[a], NOT_NULL);
       }
-      case OP_getglobalscope:
+      case ops.OP_getglobalscope:
         return this.globalScope() >= TYPE_Any;
-      case OP_getglobalslot: {
+      case ops.OP_getglobalslot: {
         const global = this.globalScope();
         if (global < TYPE_Any) {
           return false;
@@ -1861,7 +1662,7 @@ export class BodyDecoder {
           slotType >= TYPE_Any && this.push(slotType, domain.typeNotNull(slotType) ? NOT_NULL : 0)
         );
       }
-      case OP_setglobalslot: {
+      case ops.OP_setglobalslot: {
         const outer = this.outer;
         const global = outer.size > 0 ? outer.types[0] : this.typeOf(this.localCount);
         const slotType = this.slot(global, a - 1);
@@ -1872,7 +1673,7 @@ export class BodyDecoder {
         this.coerce(top, slotType);
         return true;
       }
-      case OP_getslot: {
+      case ops.OP_getslot: {
         const slotType = this.slot(this.typeOf(top), a - 1);
         if (slotType < TYPE_Any) {
           return false;
@@ -1881,7 +1682,7 @@ export class BodyDecoder {
         this.checkNull(top);
         return this.popPush(1, slotType, domain.typeNotNull(slotType) ? NOT_NULL : 0);
       }
-      case OP_setslot: {
+      case ops.OP_setslot: {
         const slotType = this.slot(this.typeOf(this.peek(2)), a - 1);
         if (slotType < TYPE_Any) {
           return false;
@@ -1891,9 +1692,9 @@ export class BodyDecoder {
         this.checkNull(this.peek(2));
         return true;
       }
-      case OP_dup:
+      case ops.OP_dup:
         return this.push(this.typeOf(top), this.valueFlags[top] & NOT_NULL);
-      case OP_swap: {
+      case ops.OP_swap: {
         const below = this.peek(2);
         const type = this.typeOf(top);
         const flags = this.valueFlags[top] & NOT_NULL;
@@ -1901,10 +1702,10 @@ export class BodyDecoder {
         this.setValue(below, type, flags);
         return true;
       }
-      case OP_lessthan:
-      case OP_greaterthan:
-      case OP_lessequals:
-      case OP_greaterequals: {
+      case ops.OP_lessthan:
+      case ops.OP_greaterthan:
+      case ops.OP_lessequals:
+      case ops.OP_greaterequals: {
         // A comparison with a number compares numbers.
         const lhs = this.peek(2);
         const lt = this.typeOf(lhs);
@@ -1919,17 +1720,17 @@ export class BodyDecoder {
 
         return this.popPush(2, domain.booleanType, NOT_NULL);
       }
-      case OP_in:
+      case ops.OP_in:
         this.checkNull(top);
         return this.popPush(2, domain.booleanType, NOT_NULL);
-      case OP_equals:
-      case OP_strictequals:
-      case OP_instanceof:
+      case ops.OP_equals:
+      case ops.OP_strictequals:
+      case ops.OP_instanceof:
         return this.popPush(2, domain.booleanType, NOT_NULL);
-      case OP_not:
+      case ops.OP_not:
         this.coerce(top, domain.booleanType);
         return this.popPush(1, domain.booleanType, NOT_NULL);
-      case OP_add: {
+      case ops.OP_add: {
         const lhs = this.peek(2);
         const lt = this.typeOf(lhs);
         const rt = this.typeOf(top);
@@ -1945,71 +1746,71 @@ export class BodyDecoder {
         // A number or a string, but not null either way.
         return this.popPush(2, domain.objectType(), NOT_NULL);
       }
-      case OP_modulo:
-      case OP_subtract:
-      case OP_divide:
-      case OP_multiply:
+      case ops.OP_modulo:
+      case ops.OP_subtract:
+      case ops.OP_divide:
+      case ops.OP_multiply:
         this.coerce(this.peek(2), domain.numberType);
         this.coerce(top, domain.numberType);
         return this.popPush(2, domain.numberType, NOT_NULL);
-      case OP_negate:
-      case OP_increment:
-      case OP_decrement:
+      case ops.OP_negate:
+      case ops.OP_increment:
+      case ops.OP_decrement:
         this.coerce(top, domain.numberType);
         return true;
-      case OP_increment_i:
-      case OP_decrement_i:
-      case OP_negate_i:
-      case OP_bitnot:
+      case ops.OP_increment_i:
+      case ops.OP_decrement_i:
+      case ops.OP_negate_i:
+      case ops.OP_bitnot:
         this.coerce(top, domain.intType);
         return true;
-      case OP_add_i:
-      case OP_subtract_i:
-      case OP_multiply_i:
-      case OP_bitand:
-      case OP_bitor:
-      case OP_bitxor:
-      case OP_lshift:
-      case OP_rshift:
+      case ops.OP_add_i:
+      case ops.OP_subtract_i:
+      case ops.OP_multiply_i:
+      case ops.OP_bitand:
+      case ops.OP_bitor:
+      case ops.OP_bitxor:
+      case ops.OP_lshift:
+      case ops.OP_rshift:
         this.coerce(this.peek(2), domain.intType);
         this.coerce(top, domain.intType);
         return this.popPush(2, domain.intType, NOT_NULL);
-      case OP_urshift:
+      case ops.OP_urshift:
         this.coerce(this.peek(2), domain.intType);
         this.coerce(top, domain.intType);
         return this.popPush(2, domain.uintType, NOT_NULL);
-      case OP_nextvalue:
-      case OP_nextname:
+      case ops.OP_nextvalue:
+      case ops.OP_nextname:
         return this.peekType(1, domain.intType) && this.popPush(2, TYPE_Any, 0);
-      case OP_hasnext:
+      case ops.OP_hasnext:
         return this.peekType(1, domain.intType) && this.popPush(2, domain.intType, NOT_NULL);
-      case OP_hasnext2:
+      case ops.OP_hasnext2:
         if (this.typeOf(b) !== domain.intType) {
-          return this.fail(kIllegalOperandTypeError);
+          return this.fail(C.kIllegalOperandTypeError);
         }
 
         this.setValue(a, TYPE_Any, 0);
         return this.push(domain.booleanType, NOT_NULL);
-      case OP_sxi1:
-      case OP_sxi8:
-      case OP_sxi16:
-      case OP_li8:
-      case OP_li16:
-      case OP_li32:
+      case ops.OP_sxi1:
+      case ops.OP_sxi8:
+      case ops.OP_sxi16:
+      case ops.OP_li8:
+      case ops.OP_li16:
+      case ops.OP_li32:
         this.coerce(top, domain.intType);
         return this.popPush(1, domain.intType, NOT_NULL);
-      case OP_lf32:
-      case OP_lf64:
+      case ops.OP_lf32:
+      case ops.OP_lf64:
         this.coerce(top, domain.intType);
         return this.popPush(1, domain.numberType, NOT_NULL);
-      case OP_si8:
-      case OP_si16:
-      case OP_si32:
+      case ops.OP_si8:
+      case ops.OP_si16:
+      case ops.OP_si32:
         this.coerce(this.peek(2), domain.intType);
         this.coerce(top, domain.intType);
         return true;
-      case OP_sf32:
-      case OP_sf64:
+      case ops.OP_sf32:
+      case ops.OP_sf64:
         this.coerce(this.peek(2), domain.numberType);
         this.coerce(top, domain.intType);
         return true;
@@ -2017,10 +1818,10 @@ export class BodyDecoder {
         break;
     }
 
-    if (opcode >= OP_setlocal0 && opcode < OP_setlocal0 + 4) {
-      this.setValue(opcode - OP_setlocal0, this.typeOf(top), this.valueFlags[top] & NOT_NULL);
-    } else if (opcode >= OP_getlocal0 && opcode < OP_getlocal0 + 4) {
-      const i = <u32>(opcode - OP_getlocal0);
+    if (opcode >= ops.OP_setlocal0 && opcode < ops.OP_setlocal0 + 4) {
+      this.setValue(opcode - ops.OP_setlocal0, this.typeOf(top), this.valueFlags[top] & NOT_NULL);
+    } else if (opcode >= ops.OP_getlocal0 && opcode < ops.OP_getlocal0 + 4) {
+      const i = <u32>(opcode - ops.OP_getlocal0);
       return this.push(this.typeOf(i), this.valueFlags[i] & NOT_NULL);
     }
 
@@ -2066,7 +1867,7 @@ export class BodyDecoder {
 
   /** As Verifier::peekType: the value `n` from the top must be exactly `type`. */
   peekType(n: u32, type: i32): bool {
-    return this.typeOf(this.peek(n)) === type ? true : this.fail(kIllegalOperandTypeError);
+    return this.typeOf(this.peek(n)) === type ? true : this.fail(C.kIllegalOperandTypeError);
   }
 
   /**
@@ -2101,7 +1902,7 @@ export class BodyDecoder {
   binding(type: i32, mn: u32): u32 {
     const b = getBinding(this.domain, this.index, type, mn);
     if (b === BIND_Ambiguous) {
-      this.fail(kAmbiguousBindingError);
+      this.fail(C.kAmbiguousBindingError);
     }
 
     return b;
@@ -2127,7 +1928,7 @@ export class BodyDecoder {
   typeName(mn: u32): i32 {
     const pool = this.abc.pool;
     if (mn === 0 || mn >= pool.multinameCount) {
-      this.fail(kCpoolIndexRangeError);
+      this.fail(C.kCpoolIndexRangeError);
       return -2;
     }
 
@@ -2155,7 +1956,7 @@ export class BodyDecoder {
     const count = traits.paramCount[m];
     const required = count - traits.optionalCount[m];
     if (argc < required || (argc > count && !domain.allowsExtraArgs(m))) {
-      return this.fail(kWrongArgumentCountError);
+      return this.fail(C.kWrongArgumentCountError);
     }
 
     const start = traits.paramStart[m];
@@ -2172,7 +1973,7 @@ export class BodyDecoder {
   coerceSuper(i: u32): i32 {
     const base = this.declarer >= 0 ? this.domain.traits.base[this.declarer] : -1;
     if (base < 0) {
-      this.fail(kIllegalSuperCallError);
+      this.fail(C.kIllegalSuperCallError);
       return -2;
     }
 
@@ -2190,7 +1991,7 @@ export class BodyDecoder {
     const domain = this.domain;
     const traits = domain.traits;
     if (type < 0 || traits.abc[type] !== this.index || !traits.allowEarlyBinding(<u32>type)) {
-      this.fail(kIllegalEarlyBindingError);
+      this.fail(C.kIllegalEarlyBindingError);
       return -2;
     }
 
@@ -2201,7 +2002,7 @@ export class BodyDecoder {
     }
 
     if (slot >= traits.slotCount[type]) {
-      this.fail(kSlotExceedsCountError);
+      this.fail(C.kSlotExceedsCountError);
       return -2;
     }
 
@@ -2218,7 +2019,7 @@ export class BodyDecoder {
     }
 
     if (this.scope === 0) {
-      this.fail(kGetScopeObjectBoundsError);
+      this.fail(C.kGetScopeObjectBoundsError);
       return -2;
     }
 
@@ -2249,7 +2050,7 @@ export class BodyDecoder {
 
         if (b !== 0) {
           this.push(this.typeOf(<u32>i), this.valueFlags[i] & NOT_NULL);
-          return this.emitFound(OP_getscopeobject, top, i, <u32>i - this.localCount, 0);
+          return this.emitFound(ops.OP_getscopeobject, top, i, <u32>i - this.localCount, 0);
         }
 
         if (this.valueFlags[i] & WITH) {
@@ -2268,7 +2069,7 @@ export class BodyDecoder {
 
           if (b !== 0) {
             this.push(t, NOT_NULL);
-            return this.emitFound(OP_getouterscope, top, -1, <u32>j, 0);
+            return this.emitFound(ops.OP_getouterscope, top, -1, <u32>j, 0);
           }
 
           if (outer.withs[j]) {
@@ -2284,11 +2085,11 @@ export class BodyDecoder {
             // Defined by this very script: its global object.
             if (domain.traits.init[script] === <i32>this.global) {
               return outer.size > 0
-                ? this.emitFound(OP_getouterscope, top, -1, 0, 0)
+                ? this.emitFound(ops.OP_getouterscope, top, -1, 0, 0)
                 : this.emitFound(IR_GetGlobalScope, top, -1, 0, 0);
             }
 
-            return this.emitFound(OP_finddef, top, -1, mn, script);
+            return this.emitFound(ops.OP_finddef, top, -1, mn, script);
           }
 
           global = true;
@@ -2303,7 +2104,7 @@ export class BodyDecoder {
 
     this.popPush(n - 1, domain.objectType(), NOT_NULL);
     if (global) {
-      const op = opcode === OP_findproperty ? IR_FindPropGlobal : IR_FindPropGlobalStrict;
+      const op = opcode === ops.OP_findproperty ? IR_FindPropGlobal : IR_FindPropGlobalStrict;
       return this.emitFound(op, top, -1, mn, 0);
     }
 
@@ -2358,7 +2159,7 @@ export class BodyDecoder {
       const notNull =
         domain.traits.abc[type] === domain.builtinAbc && domain.isMathOrNumber(this.index, mn);
       this.popPush(n, propType, notNull ? NOT_NULL : 0);
-      return this.emitOn(OP_getslot, <i32>obj, <i32>obj, 1, b >> 3, 0, 0);
+      return this.emitOn(ops.OP_getslot, <i32>obj, <i32>obj, 1, b >> 3, 0, 0);
     }
 
     if (kind === 5 || kind === 7) {
@@ -2388,7 +2189,7 @@ export class BodyDecoder {
     }
 
     this.popPush(n, propType, domain.typeNotNull(propType) ? NOT_NULL : 0);
-    return this.emitOn(OP_getproperty, <i32>obj, <i32>obj, n, mn, 0, 0);
+    return this.emitOn(ops.OP_getproperty, <i32>obj, <i32>obj, n, mn, 0, 0);
   }
 
   /** Write the instruction's own IR row, instead of the generic one. */
@@ -2444,11 +2245,11 @@ export class BodyDecoder {
     if (
       kind === 2 ||
       (kind === 3 &&
-        opcode === OP_initproperty &&
+        opcode === ops.OP_initproperty &&
         domain.initOfDeclarer(type, this.index, mn) === <i32>this.global)
     ) {
       this.coerce(top, propType);
-      return this.emitOn(OP_setslot, -1, <i32>obj, 2, b >> 3, 0, 0);
+      return this.emitOn(ops.OP_setslot, -1, <i32>obj, 2, b >> 3, 0, 0);
     }
 
     if (kind === 6 || kind === 7) {
@@ -2497,7 +2298,7 @@ export class BodyDecoder {
     }
 
     this.checkNull(obj);
-    const voidCall = opcode === OP_callpropvoid;
+    const voidCall = opcode === ops.OP_callpropvoid;
     if ((b & 7) === 1) {
       b = this.fasterCall(type, mn, b, argc);
       const m = traits.dispatch[traits.dispatchStart[type] + (b >> 3)];
@@ -2518,7 +2319,7 @@ export class BodyDecoder {
           this.popPush(n, result, domain.typeNotNull(result) ? NOT_NULL : 0);
 
           // An interface's method has no dispatch id of its own on the receiver.
-          const call = traits.isInterface[type] ? IR_CallInterface : OP_callmethod;
+          const call = traits.isInterface[type] ? IR_CallInterface : ops.OP_callmethod;
           return this.emitOn(call, voidCall ? -1 : <i32>obj, <i32>obj, n, b >> 3, argc, m);
         }
       }
@@ -2555,18 +2356,18 @@ export class BodyDecoder {
   conversionOp(type: i32): u16 {
     const domain = this.domain;
     if (type === domain.intType) {
-      return OP_convert_i;
+      return ops.OP_convert_i;
     }
 
     if (type === domain.uintType) {
-      return OP_convert_u;
+      return ops.OP_convert_u;
     }
 
     if (type === domain.numberType) {
-      return OP_convert_d;
+      return ops.OP_convert_d;
     }
 
-    return type === domain.booleanType ? OP_convert_b : OP_convert_s;
+    return type === domain.booleanType ? ops.OP_convert_b : ops.OP_convert_s;
   }
 
   /**
@@ -2662,7 +2463,7 @@ export class BodyDecoder {
     // Created again alike, it is still queued, so that verifying the ABC again finds it.
     if (current !== null) {
       if (!current.equals(scope) && global !== this.global) {
-        return this.fail(kCorruptABCError);
+        return this.fail(C.kCorruptABCError);
       }
 
       this.captured.push(global);
@@ -2670,7 +2471,7 @@ export class BodyDecoder {
     }
 
     if (traits.methodTraits[global] >= 0) {
-      return this.fail(kCorruptABCError);
+      return this.fail(C.kCorruptABCError);
     }
 
     traits.methodFunction[global] = 1;
@@ -2696,12 +2497,12 @@ export class BodyDecoder {
     const ctraits = domain.staticTraitsOf(this.index, i);
     const itraits = domain.instanceTraitsOf(ctraits);
     if (this.scope === 0) {
-      return this.fail(kCorruptABCError);
+      return this.fail(C.kCorruptABCError);
     }
 
     const innermost = this.typeOf(this.localCount + this.scope - 1);
     if (innermost === TYPE_Any || domain.instanceTraitsOf(innermost) !== traits.base[itraits]) {
-      return this.fail(kCorruptABCError);
+      return this.fail(C.kCorruptABCError);
     }
 
     const cscope = this.scopeHere(-2, ctraits);
@@ -2715,7 +2516,7 @@ export class BodyDecoder {
     if (current !== null) {
       const instance = traits.scope[itraits];
       if (instance === null || !current.equals(cscope) || !instance.equals(iscope)) {
-        return this.fail(kCorruptABCError);
+        return this.fail(C.kCorruptABCError);
       }
     } else {
       traits.scope[ctraits] = cscope;
@@ -2738,7 +2539,7 @@ export class BodyDecoder {
     }
 
     if (traits.receiverType[global] === TYPE_Any) {
-      return this.fail(kDanglingFunctionError);
+      return this.fail(C.kDanglingFunctionError);
     }
 
     this.checkNull(this.peek(argc + 1));
@@ -2780,7 +2581,7 @@ export class BodyDecoder {
 
       const m = traits.dispatch[traits.dispatchStart[base] + (b >> 3)];
       if (m < 0) {
-        return this.fail(kCorruptABCError);
+        return this.fail(C.kCorruptABCError);
       }
 
       const signError = traits.sign(domain, <u32>m);
@@ -2792,7 +2593,7 @@ export class BodyDecoder {
     }
 
     this.checkNull(obj);
-    return opcode === OP_callsupervoid
+    return opcode === ops.OP_callsupervoid
       ? true
       : this.popPush(n, result, domain.typeNotNull(result) ? NOT_NULL : 0);
   }
@@ -2827,7 +2628,7 @@ export class BodyDecoder {
 
   checkString(index: u32): bool {
     return index === 0 || index >= this.abc.pool.stringCount
-      ? this.fail(kCpoolIndexRangeError)
+      ? this.fail(C.kCpoolIndexRangeError)
       : true;
   }
 
@@ -2864,69 +2665,69 @@ export class BodyDecoder {
  */
 function isBinding(pool: ConstantPool, index: u32): bool {
   let mn = index;
-  if (pool.mnKind[mn] === CONSTANT_TypeName) {
+  if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
     mn = pool.mnA[mn];
   }
 
   const kind = pool.mnKind[mn];
-  if (kind === CONSTANT_Qname) {
+  if (kind === C.CONSTANT_Qname) {
     return pool.mnA[mn] !== 0 && pool.mnB[mn] !== 0;
   }
 
-  return kind === CONSTANT_Multiname && pool.mnB[mn] !== 0;
+  return kind === C.CONSTANT_Multiname && pool.mnB[mn] !== 0;
 }
 
 /** Values a multiname takes from the stack: a runtime namespace, a runtime name, or both. */
 function runtimeParts(pool: ConstantPool, index: u32): u32 {
   const kind = pool.mnKind[index];
   if (
-    kind === CONSTANT_RTQname ||
-    kind === CONSTANT_RTQnameA ||
-    kind === CONSTANT_MultinameL ||
-    kind === CONSTANT_MultinameLA
+    kind === C.CONSTANT_RTQname ||
+    kind === C.CONSTANT_RTQnameA ||
+    kind === C.CONSTANT_MultinameL ||
+    kind === C.CONSTANT_MultinameLA
   ) {
     return 1;
   }
 
-  return kind === CONSTANT_RTQnameL || kind === CONSTANT_RTQnameLA ? 2 : 0;
+  return kind === C.CONSTANT_RTQnameL || kind === C.CONSTANT_RTQnameLA ? 2 : 0;
 }
 
 function isAttribute(pool: ConstantPool, index: u32): bool {
   const kind = pool.mnKind[index];
   return (
-    kind === CONSTANT_QnameA ||
-    kind === CONSTANT_RTQnameA ||
-    kind === CONSTANT_RTQnameLA ||
-    kind === CONSTANT_MultinameA ||
-    kind === CONSTANT_MultinameLA
+    kind === C.CONSTANT_QnameA ||
+    kind === C.CONSTANT_RTQnameA ||
+    kind === C.CONSTANT_RTQnameLA ||
+    kind === C.CONSTANT_MultinameA ||
+    kind === C.CONSTANT_MultinameLA
   );
 }
 
 /** A multiname's MN_* parts, as avmplus' Multiname flags. */
 function nameParts(pool: ConstantPool, index: u32): u8 {
   let kind = pool.mnKind[index];
-  if (kind === CONSTANT_TypeName) {
+  if (kind === C.CONSTANT_TypeName) {
     kind = pool.mnKind[pool.mnA[index]];
   }
 
   switch (kind) {
-    case CONSTANT_Qname:
+    case C.CONSTANT_Qname:
       return MN_QName;
-    case CONSTANT_QnameA:
+    case C.CONSTANT_QnameA:
       return MN_QName | MN_Attr;
-    case CONSTANT_RTQname:
+    case C.CONSTANT_RTQname:
       return MN_QName | MN_Rtns;
-    case CONSTANT_RTQnameA:
+    case C.CONSTANT_RTQnameA:
       return MN_QName | MN_Rtns | MN_Attr;
-    case CONSTANT_RTQnameL:
+    case C.CONSTANT_RTQnameL:
       return MN_QName | MN_Rtns | MN_Rtname;
-    case CONSTANT_RTQnameLA:
+    case C.CONSTANT_RTQnameLA:
       return MN_QName | MN_Rtns | MN_Rtname | MN_Attr;
-    case CONSTANT_MultinameL:
+    case C.CONSTANT_MultinameL:
       return MN_Rtname;
-    case CONSTANT_MultinameLA:
+    case C.CONSTANT_MultinameLA:
       return MN_Rtname | MN_Attr;
-    case CONSTANT_MultinameA:
+    case C.CONSTANT_MultinameA:
       return MN_Attr;
     default:
       return 0;

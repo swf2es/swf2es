@@ -1,7 +1,7 @@
 import { Abc } from "./abc";
 import { readMethodBodies } from "./bodies";
 import { readClasses, readInstances, readScripts } from "./classes";
-import { kCorruptABCError, kInvalidMagicError } from "./constants";
+import * as C from "./constants";
 import { readMetadata, readMethods } from "./methods";
 import { readConstantPool } from "./pool";
 import { Reader } from "./reader";
@@ -19,12 +19,12 @@ export function readAbc(base: usize, length: u32, builtin: bool = false): Abc {
   abc.minorVersion = r.u16();
   abc.majorVersion = r.u16();
   if (r.failed) {
-    abc.fail(kCorruptABCError);
+    abc.fail(C.kCorruptABCError);
     return abc;
   }
 
   if (!isSupportedVersion(abc.majorVersion, abc.minorVersion)) {
-    abc.fail(kInvalidMagicError);
+    abc.fail(C.kInvalidMagicError);
     return abc;
   }
 
@@ -47,7 +47,7 @@ export function readAbc(base: usize, length: u32, builtin: bool = false): Abc {
 
   // A read past the end returns 0, which can look like an empty table.
   if (r.failed) {
-    abc.fail(kCorruptABCError);
+    abc.fail(C.kCorruptABCError);
     return abc;
   }
 

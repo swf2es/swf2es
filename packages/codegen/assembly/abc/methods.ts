@@ -1,20 +1,13 @@
 // method_info and metadata_info, checked like avmplus' parseMethodInfos and
 // parseMetadataInfos.
 import { Abc } from "./abc";
-import {
-  kCorruptABCError,
-  kCpoolIndexRangeError,
-  kIllegalNativeMethodError,
-  METHOD_HasOptional,
-  METHOD_HasParamNames,
-  METHOD_Native,
-} from "./constants";
+import * as C from "./constants";
 import { Reader } from "./reader";
 
 export function readMethods(abc: Abc, r: Reader): bool {
   const count = r.u30();
   if (<usize>max(count, 1) > r.end - r.pos) {
-    return abc.fail(kCorruptABCError);
+    return abc.fail(C.kCorruptABCError);
   }
 
   abc.methodReturnType = new StaticArray<u32>(count);
@@ -37,16 +30,16 @@ export function readMethods(abc: Abc, r: Reader): bool {
     abc.methodName[i] = r.u30();
     const flags = <u8>r.u8();
     if (r.failed) {
-      return abc.fail(kCorruptABCError);
+      return abc.fail(C.kCorruptABCError);
     }
 
-    if (flags & METHOD_Native && !abc.builtin) {
-      return abc.fail(kIllegalNativeMethodError);
+    if (flags & C.METHOD_Native && !abc.builtin) {
+      return abc.fail(C.kIllegalNativeMethodError);
     }
 
     abc.methodFlags[i] = flags;
     abc.methodOptionalStart[i] = abc.optionalValue.length;
-    if (flags & METHOD_HasOptional) {
+    if (flags & C.METHOD_HasOptional) {
       const optionalCount = r.u30();
       for (let j: u32 = 0; j < optionalCount && !r.failed; j++) {
         abc.optionalValue.push(r.u30());
@@ -54,19 +47,19 @@ export function readMethods(abc: Abc, r: Reader): bool {
       }
 
       if (optionalCount === 0 || optionalCount > paramCount) {
-        return abc.fail(kCorruptABCError);
+        return abc.fail(C.kCorruptABCError);
       }
     }
 
     // Parameter names are debug information; skip them.
-    if (flags & METHOD_HasParamNames) {
+    if (flags & C.METHOD_HasParamNames) {
       for (let j: u32 = 0; j < paramCount && !r.failed; j++) {
         r.u30();
       }
     }
 
     if (r.failed) {
-      return abc.fail(kCorruptABCError);
+      return abc.fail(C.kCorruptABCError);
     }
   }
 
@@ -78,7 +71,7 @@ export function readMethods(abc: Abc, r: Reader): bool {
 export function readMetadata(abc: Abc, r: Reader): bool {
   const count = r.u30();
   if (<usize>count > r.end - r.pos) {
-    return abc.fail(kCorruptABCError);
+    return abc.fail(C.kCorruptABCError);
   }
 
   abc.metadataName = new StaticArray<u32>(count);
@@ -87,11 +80,11 @@ export function readMetadata(abc: Abc, r: Reader): bool {
   for (let i: u32 = 0; i < count; i++) {
     const name = r.u30();
     if (r.failed) {
-      return abc.fail(kCorruptABCError);
+      return abc.fail(C.kCorruptABCError);
     }
 
     if (name === 0 || name >= abc.pool.stringCount) {
-      return abc.fail(kCpoolIndexRangeError);
+      return abc.fail(C.kCpoolIndexRangeError);
     }
 
     abc.metadataName[i] = name;
@@ -105,7 +98,7 @@ export function readMetadata(abc: Abc, r: Reader): bool {
     }
 
     if (r.failed) {
-      return abc.fail(kCorruptABCError);
+      return abc.fail(C.kCorruptABCError);
     }
   }
 

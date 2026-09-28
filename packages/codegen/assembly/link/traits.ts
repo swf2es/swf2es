@@ -9,34 +9,7 @@
 // signatures, final methods, override signatures and implemented interfaces.
 //
 // A type is a traits id, or TYPE_Any for *.
-import {
-  ATTR_Override,
-  CONSTANT_Double,
-  CONSTANT_ExplicitNamespace,
-  CONSTANT_False,
-  CONSTANT_Int,
-  CONSTANT_Multiname,
-  CONSTANT_Namespace,
-  CONSTANT_Null,
-  CONSTANT_PackageInternalNs,
-  CONSTANT_PackageNamespace,
-  CONSTANT_PrivateNs,
-  CONSTANT_ProtectedNamespace,
-  CONSTANT_StaticProtectedNs,
-  CONSTANT_True,
-  CONSTANT_TypeName,
-  CONSTANT_UInt,
-  CONSTANT_Utf8,
-  kCorruptABCError,
-  kIllegalOverrideError,
-  kIllegalSlotError,
-  TRAIT_Class,
-  TRAIT_Const,
-  TRAIT_Getter,
-  TRAIT_Method,
-  TRAIT_Setter,
-  TRAIT_Slot,
-} from "../abc/constants";
+import * as C from "../abc/constants";
 import { API_Internal, Domain } from "./domain";
 import { hashPair, IdTable } from "./table";
 
@@ -388,13 +361,13 @@ export class TraitsTable {
     const pool = abc.pool;
     const versions = domain.abcNsVersion[index];
     let mn = abc.traitName[i];
-    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+    if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
       mn = pool.mnA[mn];
     }
 
     let ns = pool.mnA[mn];
     let version = domain.activeVersion(versions[ns]);
-    if (pool.mnKind[mn] === CONSTANT_Multiname) {
+    if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
       const set = ns;
       const last = pool.nsSetStart[set + 1];
       ns = pool.nsSetMembers[pool.nsSetStart[set]];
@@ -458,7 +431,7 @@ export class TraitsTable {
       const name = this.nameId;
       const tag = abc.traitTag[i];
       const kind = tag & 0x0f;
-      if (kind === TRAIT_Slot || kind === TRAIT_Const || kind === TRAIT_Class) {
+      if (kind === C.TRAIT_Slot || kind === C.TRAIT_Const || kind === C.TRAIT_Class) {
         // As SlotIdCalcer: explicit ids only where slots may bind early.
         const id = abc.traitId[i];
         let slot: u32;
@@ -472,28 +445,28 @@ export class TraitsTable {
         }
 
         if (id > nameCount && early) {
-          return kCorruptABCError;
+          return C.kCorruptABCError;
         }
 
         // Slots are final, and cannot override anything else.
         if (slot - 1 < baseSlots) {
-          return kIllegalOverrideError;
+          return C.kIllegalOverrideError;
         }
 
         if (this.own(t, nsId, name, nsVersion) !== BIND_None) {
-          return kCorruptABCError;
+          return C.kCorruptABCError;
         }
 
         if (this.isInterface[t]) {
-          return kIllegalSlotError;
+          return C.kIllegalSlotError;
         }
 
-        const bkind = kind === TRAIT_Slot ? BKIND_Var : BKIND_Const;
+        const bkind = kind === C.TRAIT_Slot ? BKIND_Var : BKIND_Const;
         this.add(t, nsId, name, version, ((slot - 1) << 3) | bkind);
-      } else if (kind === TRAIT_Method) {
+      } else if (kind === C.TRAIT_Method) {
         const baseBinding = this.overridden(t, nsId, nsVersion, name, tag);
         if (baseBinding < 0) {
-          return kIllegalOverrideError;
+          return C.kIllegalOverrideError;
         }
 
         if (baseBinding === BIND_None) {
@@ -502,20 +475,20 @@ export class TraitsTable {
         } else if ((<u32>baseBinding & 7) === BKIND_Method) {
           this.add(t, nsId, name, version, <u32>baseBinding);
         } else {
-          return kCorruptABCError;
+          return C.kCorruptABCError;
         }
-      } else if (kind === TRAIT_Getter || kind === TRAIT_Setter) {
+      } else if (kind === C.TRAIT_Getter || kind === C.TRAIT_Setter) {
         // The other accessor of the pair may be defined here already.
         let baseBinding = <i64>this.own(t, nsId, name, nsVersion);
         if (baseBinding === BIND_None) {
           baseBinding = this.overridden(t, nsId, nsVersion, name, tag);
           if (baseBinding < 0) {
-            return kIllegalOverrideError;
+            return C.kIllegalOverrideError;
           }
         }
 
-        const us = kind === TRAIT_Getter ? BKIND_Get : BKIND_Set;
-        const them = kind === TRAIT_Getter ? BKIND_Set : BKIND_Get;
+        const us = kind === C.TRAIT_Getter ? BKIND_Get : BKIND_Set;
+        const them = kind === C.TRAIT_Getter ? BKIND_Set : BKIND_Get;
         const baseKind = <u32>baseBinding & 7;
         if (baseBinding === BIND_None) {
           this.add(t, nsId, name, version, (methodCount << 3) | us);
@@ -530,7 +503,7 @@ export class TraitsTable {
             baseKind === them ? id | BKIND_GetSet : <u32>baseBinding,
           );
         } else {
-          return kCorruptABCError;
+          return C.kCorruptABCError;
         }
       }
     }
@@ -599,8 +572,8 @@ export class TraitsTable {
     const baseKind = binding & 7;
     const kind = tag & 0x0f;
     const desired =
-      kind === TRAIT_Method ? BKIND_Method : kind === TRAIT_Getter ? BKIND_Get : BKIND_Set;
-    const legal = kind === TRAIT_Method ? LEGAL_Method : LEGAL_Accessor;
+      kind === C.TRAIT_Method ? BKIND_Method : kind === C.TRAIT_Getter ? BKIND_Get : BKIND_Set;
+    const legal = kind === C.TRAIT_Method ? LEGAL_Method : LEGAL_Accessor;
     if (!((legal >> baseKind) & 1)) {
       return -1;
     }
@@ -609,7 +582,7 @@ export class TraitsTable {
     const required =
       baseKind === desired ||
       (baseKind === BKIND_GetSet && (desired === BKIND_Get || desired === BKIND_Set));
-    if (required !== ((tag & ATTR_Override) !== 0)) {
+    if (required !== ((tag & C.ATTR_Override) !== 0)) {
       return -1;
     }
 
@@ -741,7 +714,7 @@ export class TraitsTable {
     }
 
     if (!legal) {
-      return kIllegalOverrideError;
+      return C.kIllegalOverrideError;
     }
 
     this.resolved[t] = 1;
@@ -793,7 +766,7 @@ export class TraitsTable {
     for (let i = this.first[t]; i < this.end[t]; i++) {
       const tag = abc.traitTag[i];
       const kind = tag & 0x0f;
-      if (kind === TRAIT_Slot || kind === TRAIT_Const || kind === TRAIT_Class) {
+      if (kind === C.TRAIT_Slot || kind === C.TRAIT_Const || kind === C.TRAIT_Class) {
         const id = abc.traitId[i];
         let slot: u32;
         if (id === 0 || !early) {
@@ -808,11 +781,11 @@ export class TraitsTable {
         // A slot defined twice would give one memory location two types.
         slot -= 1;
         if (slot >= slotCount || this.slotSet[slots + slot]) {
-          return kCorruptABCError;
+          return C.kCorruptABCError;
         }
 
         let type: i32;
-        if (kind === TRAIT_Class) {
+        if (kind === C.TRAIT_Class) {
           type = domain.classStatic[domain.classStart[index] + abc.traitIndex[i]];
         } else {
           type = domain.resolveTypeId(index, abc.traitIndex[i], false);
@@ -823,25 +796,25 @@ export class TraitsTable {
 
         this.slotType[slots + slot] = type;
         this.slotSet[slots + slot] = 1;
-      } else if (kind === TRAIT_Method || kind === TRAIT_Getter || kind === TRAIT_Setter) {
+      } else if (kind === C.TRAIT_Method || kind === C.TRAIT_Getter || kind === C.TRAIT_Setter) {
         this.readName(domain, index, i);
         const b = this.own(t, this.nameNs, this.nameId, this.nameNsVersion);
         if (b === BIND_None) {
           continue;
         }
 
-        const d = (b >> 3) + (kind === TRAIT_Setter ? 1 : 0);
+        const d = (b >> 3) + (kind === C.TRAIT_Setter ? 1 : 0);
         const baseBinding = this.overridden(t, this.nameNs, this.nameNsVersion, this.nameId, tag);
         if (baseBinding > 0) {
           const bb = <u32>baseBinding;
           if (
             (bb & 7) === BKIND_Method ||
-            (hasGetter(bb) && kind === TRAIT_Getter) ||
-            (hasSetter(bb) && kind === TRAIT_Setter)
+            (hasGetter(bb) && kind === C.TRAIT_Getter) ||
+            (hasSetter(bb) && kind === C.TRAIT_Setter)
           ) {
             const virt = this.dispatch[this.dispatchStart[base] + d];
             if (virt >= 0 && this.methodFinal[virt]) {
-              return kIllegalOverrideError;
+              return C.kIllegalOverrideError;
             }
           }
         }
@@ -863,7 +836,7 @@ export class TraitsTable {
     let next = base >= 0 ? this.slotCount[base] : 0;
     for (let i = this.first[t]; i < this.end[t]; i++) {
       const kind = abc.traitTag[i] & 0x0f;
-      if (kind !== TRAIT_Slot && kind !== TRAIT_Const && kind !== TRAIT_Class) {
+      if (kind !== C.TRAIT_Slot && kind !== C.TRAIT_Const && kind !== C.TRAIT_Class) {
         continue;
       }
 
@@ -879,7 +852,7 @@ export class TraitsTable {
       }
 
       const type = this.slotType[slots + slot - 1];
-      const value = kind === TRAIT_Class ? 0 : abc.traitValue[i];
+      const value = kind === C.TRAIT_Class ? 0 : abc.traitValue[i];
       const error = domain.checkDefault(index, value, abc.traitValueKind[i], type);
       if (error) {
         return error;
@@ -1078,22 +1051,23 @@ export function legalDefault(bt: u8, kind: u8, number: f64): bool {
     return true;
   }
 
-  const isNumber = kind === CONSTANT_Int || kind === CONSTANT_UInt || kind === CONSTANT_Double;
+  const isNumber =
+    kind === C.CONSTANT_Int || kind === C.CONSTANT_UInt || kind === C.CONSTANT_Double;
   const isNamespace =
-    kind === CONSTANT_Namespace ||
-    kind === CONSTANT_PackageNamespace ||
-    kind === CONSTANT_PackageInternalNs ||
-    kind === CONSTANT_ProtectedNamespace ||
-    kind === CONSTANT_ExplicitNamespace ||
-    kind === CONSTANT_StaticProtectedNs ||
-    kind === CONSTANT_PrivateNs;
+    kind === C.CONSTANT_Namespace ||
+    kind === C.CONSTANT_PackageNamespace ||
+    kind === C.CONSTANT_PackageInternalNs ||
+    kind === C.CONSTANT_ProtectedNamespace ||
+    kind === C.CONSTANT_ExplicitNamespace ||
+    kind === C.CONSTANT_StaticProtectedNs ||
+    kind === C.CONSTANT_PrivateNs;
   switch (bt) {
     case BUILTIN_Object:
       return true;
     case BUILTIN_Number:
       return isNumber;
     case BUILTIN_Boolean:
-      return kind === CONSTANT_True || kind === CONSTANT_False;
+      return kind === C.CONSTANT_True || kind === C.CONSTANT_False;
     case BUILTIN_Int:
       return (
         isNumber && number === <f64>(<i32>number) && number >= -2147483648 && number <= 2147483647
@@ -1101,30 +1075,30 @@ export function legalDefault(bt: u8, kind: u8, number: f64): bool {
     case BUILTIN_Uint:
       return isNumber && number === <f64>(<u32>number) && number >= 0 && number <= 4294967295;
     case BUILTIN_String:
-      return kind === CONSTANT_Null || kind === CONSTANT_Utf8;
+      return kind === C.CONSTANT_Null || kind === C.CONSTANT_Utf8;
     case BUILTIN_Namespace:
-      return kind === CONSTANT_Null || isNamespace;
+      return kind === C.CONSTANT_Null || isNamespace;
     default:
-      return kind === CONSTANT_Null;
+      return kind === C.CONSTANT_Null;
   }
 }
 
 /** Whether `kind` names a constant a default value may be. */
 export function isDefaultKind(kind: u8): bool {
   return (
-    kind === CONSTANT_Int ||
-    kind === CONSTANT_UInt ||
-    kind === CONSTANT_Double ||
-    kind === CONSTANT_Utf8 ||
-    kind === CONSTANT_True ||
-    kind === CONSTANT_False ||
-    kind === CONSTANT_Null ||
-    kind === CONSTANT_Namespace ||
-    kind === CONSTANT_PackageNamespace ||
-    kind === CONSTANT_PackageInternalNs ||
-    kind === CONSTANT_ProtectedNamespace ||
-    kind === CONSTANT_ExplicitNamespace ||
-    kind === CONSTANT_StaticProtectedNs ||
-    kind === CONSTANT_PrivateNs
+    kind === C.CONSTANT_Int ||
+    kind === C.CONSTANT_UInt ||
+    kind === C.CONSTANT_Double ||
+    kind === C.CONSTANT_Utf8 ||
+    kind === C.CONSTANT_True ||
+    kind === C.CONSTANT_False ||
+    kind === C.CONSTANT_Null ||
+    kind === C.CONSTANT_Namespace ||
+    kind === C.CONSTANT_PackageNamespace ||
+    kind === C.CONSTANT_PackageInternalNs ||
+    kind === C.CONSTANT_ProtectedNamespace ||
+    kind === C.CONSTANT_ExplicitNamespace ||
+    kind === C.CONSTANT_StaticProtectedNs ||
+    kind === C.CONSTANT_PrivateNs
   );
 }

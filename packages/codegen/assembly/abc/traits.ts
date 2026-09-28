@@ -2,25 +2,7 @@
 // slot layout (Traits::verifyBindings) need the base class, which may live in
 // another ABC, so they are checked when classes are linked.
 import { Abc } from "./abc";
-import {
-  ATTR_Metadata,
-  CONSTANT_Multiname,
-  CONSTANT_Qname,
-  CONSTANT_TypeName,
-  kClassInfoExceedsCountError,
-  kClassInfoOrderError,
-  kCorruptABCError,
-  kCpoolEntryWrongTypeError,
-  kCpoolIndexRangeError,
-  kMethodInfoExceedsCountError,
-  kUnsupportedTraitsKindError,
-  TRAIT_Class,
-  TRAIT_Const,
-  TRAIT_Getter,
-  TRAIT_Method,
-  TRAIT_Setter,
-  TRAIT_Slot,
-} from "./constants";
+import * as C from "./constants";
 import { ConstantPool } from "./pool";
 import { Reader } from "./reader";
 
@@ -31,14 +13,14 @@ import { Reader } from "./reader";
 export function readTraits(abc: Abc, r: Reader, owner: i32, classesDefined: u32): bool {
   const count = r.u30();
   if (<usize>count > r.end - r.pos) {
-    return abc.fail(kCorruptABCError);
+    return abc.fail(C.kCorruptABCError);
   }
 
   const first = abc.traitName.length;
   for (let i: u32 = 0; i < count; i++) {
     const name = r.u30();
     if (r.failed) {
-      return abc.fail(kCorruptABCError);
+      return abc.fail(C.kCorruptABCError);
     }
 
     const nameError = bindingNameError(abc.pool, name, abc.builtin);
@@ -52,7 +34,7 @@ export function readTraits(abc: Abc, r: Reader, owner: i32, classesDefined: u32)
     let index: u32 = 0;
     let value: u32 = 0;
     let valueKind: u8 = 0;
-    if (kind === TRAIT_Slot || kind === TRAIT_Const) {
+    if (kind === C.TRAIT_Slot || kind === C.TRAIT_Const) {
       id = r.u30();
       index = r.u30();
       value = r.u30();
@@ -60,24 +42,24 @@ export function readTraits(abc: Abc, r: Reader, owner: i32, classesDefined: u32)
         valueKind = <u8>r.u8();
       }
     } else if (
-      kind === TRAIT_Class ||
-      kind === TRAIT_Method ||
-      kind === TRAIT_Getter ||
-      kind === TRAIT_Setter
+      kind === C.TRAIT_Class ||
+      kind === C.TRAIT_Method ||
+      kind === C.TRAIT_Getter ||
+      kind === C.TRAIT_Setter
     ) {
       id = r.u30();
       index = r.u30();
     } else {
-      return abc.fail(r.failed ? kCorruptABCError : kUnsupportedTraitsKindError);
+      return abc.fail(r.failed ? C.kCorruptABCError : C.kUnsupportedTraitsKindError);
     }
 
     abc.traitMetadataStart.push(abc.traitMetadata.length);
-    if (tag & ATTR_Metadata) {
+    if (tag & C.ATTR_Metadata) {
       const metadataCount = r.u30();
       for (let j: u32 = 0; j < metadataCount; j++) {
         const metadata = r.u30();
         if (r.failed || metadata >= abc.metadataCount) {
-          return abc.fail(kCorruptABCError);
+          return abc.fail(C.kCorruptABCError);
         }
 
         abc.traitMetadata.push(metadata);
@@ -85,20 +67,20 @@ export function readTraits(abc: Abc, r: Reader, owner: i32, classesDefined: u32)
     }
 
     if (r.failed) {
-      return abc.fail(kCorruptABCError);
+      return abc.fail(C.kCorruptABCError);
     }
 
-    if (kind === TRAIT_Class) {
+    if (kind === C.TRAIT_Class) {
       if (index >= abc.classCount) {
-        return abc.fail(kClassInfoExceedsCountError);
+        return abc.fail(C.kClassInfoExceedsCountError);
       }
 
       if (index >= classesDefined) {
-        return abc.fail(kClassInfoOrderError);
+        return abc.fail(C.kClassInfoOrderError);
       }
-    } else if (kind === TRAIT_Method || kind === TRAIT_Getter || kind === TRAIT_Setter) {
+    } else if (kind === C.TRAIT_Method || kind === C.TRAIT_Getter || kind === C.TRAIT_Setter) {
       if (index >= abc.methodCount) {
-        return abc.fail(kMethodInfoExceedsCountError);
+        return abc.fail(C.kMethodInfoExceedsCountError);
       }
     }
 
@@ -113,10 +95,10 @@ export function readTraits(abc: Abc, r: Reader, owner: i32, classesDefined: u32)
   // As avmplus' makeMethodOf: a method belongs to at most one owner.
   for (let t = first; t < abc.traitName.length; t++) {
     const kind = abc.traitTag[t] & 0x0f;
-    if (kind === TRAIT_Method || kind === TRAIT_Getter || kind === TRAIT_Setter) {
+    if (kind === C.TRAIT_Method || kind === C.TRAIT_Getter || kind === C.TRAIT_Setter) {
       const method = abc.traitIndex[t];
       if (abc.methodOwner[method] !== -1) {
-        return abc.fail(kCorruptABCError);
+        return abc.fail(C.kCorruptABCError);
       }
 
       abc.methodOwner[method] = owner;
@@ -134,21 +116,21 @@ export function readTraits(abc: Abc, r: Reader, owner: i32, classesDefined: u32)
  */
 export function bindingNameError(pool: ConstantPool, index: u32, builtin: bool): i32 {
   if (index === 0 || index >= pool.multinameCount) {
-    return kCpoolIndexRangeError;
+    return C.kCpoolIndexRangeError;
   }
 
   let mn = index;
-  if (pool.mnKind[mn] === CONSTANT_TypeName) {
+  if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
     mn = pool.mnA[mn];
   }
 
   const kind = pool.mnKind[mn];
-  if (builtin && kind === CONSTANT_Multiname && pool.mnB[mn] !== 0) {
+  if (builtin && kind === C.CONSTANT_Multiname && pool.mnB[mn] !== 0) {
     return 0;
   }
 
-  if (kind !== CONSTANT_Qname || pool.mnA[mn] === 0 || pool.mnB[mn] === 0) {
-    return kCpoolEntryWrongTypeError;
+  if (kind !== C.CONSTANT_Qname || pool.mnA[mn] === 0 || pool.mnB[mn] === 0) {
+    return C.kCpoolEntryWrongTypeError;
   }
 
   return 0;
