@@ -57,7 +57,9 @@ Near-term work, in order. The goal of milestone 1 is in
    its wire checksum, which the oracle computes with x87 precision. Done;
    first timings in [benchmarks.md](benchmarks.md).
 7. **Faster generated code**, measured on as3pb against AwayFL and on small
-   loops, including loops with bounds known only at run time:
+   loops, including loops with bounds known only at run time. Done:
+   as3pb 1104 / 1412 ms (ByteArray / domain memory) to 207 / 251, against
+   AwayFL's 525 / 689 ([benchmarks.md](benchmarks.md#generated-code-as3pb)).
    1. Typed comparisons and branches: plain `<`, `>` and `===` where the
       IR's types are numbers, instead of the runtime's generic ones.
    2. Structured control flow: loops, `if`s and labelled blocks built from
@@ -75,7 +77,23 @@ Near-term work, in order. The goal of milestone 1 is in
       same modules and source maps; then Vector's `push` and `length`,
       what `findDef` still costs, and domain memory's loads and stores,
       with AS3's coercions, errors and access widths as they are.
-5. **Faster verification**: the minimal runtime halved decoding to about
+8. **Type references independent of compile order**: a method's `T[k]`
+   comes from its ABC and the ABCs it links against, not from which of the
+   module's methods is compiled first, so that a method compiled alone,
+   as lazy JIT will compile it, is byte for byte its code in the module.
+   Then the JIT/AOT invariant can be checked as it is stated: each method
+   alone against its module.
+9. **Calling a property an object does not have**: on a sealed object,
+   avmplus' `ReferenceError` 1069 from the lookup, where swf2es calls
+   undefined and throws `TypeError` 1006.
+10. **Domain memory against PepperFlash**: 251 against 83 ms. Profile the
+    generated code of the codecs' loops, not the runtime, and take out of
+    them what does not change, where the IR proves it cannot.
+11. **Compatibility left from steps 6 and 7**: `Date.parse` as avmplus
+    parses; `compress` and `uncompress`; AMF0, and Date, XML and
+    Dictionary in AMF; `[Transient]`, once the runtime keeps metadata; and
+    PR #9, rebased.
+12. **Faster verification**: the minimal runtime halved decoding to about
    35 ns per instruction, against Ruffle's 15 for decoding alone
    ([benchmarks.md](benchmarks.md)); the typed verifier still walks every
    block twice. Profile it with the IR in place.
