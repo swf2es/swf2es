@@ -41,6 +41,8 @@ import { Output } from "./output";
 
 /** The deepest structured code a method is given; one deeper keeps the dispatcher. */
 const MAX_NESTING: u32 = 500;
+/** No type: a conversion, convert_s or convert_o, that always calls the runtime. */
+const CONVERTS: i32 = -2;
 
 @final
 export class MethodEmitter {
@@ -1072,6 +1074,10 @@ export class MethodEmitter {
       case ops.OP_debugfile:
         return;
       case IR_Coerce:
+        if (ir.dst[i] === ir.src[i] && this.keeps(ir.c[i], this.regType[ir.src[i]])) {
+          return;
+        }
+
         this.assign(i);
         this.convert("", ir.src[i], ir.c[i], this.regType[ir.src[i]]);
         break;
@@ -1217,6 +1223,14 @@ export class MethodEmitter {
       case ops.OP_coerce_o:
       case ops.OP_coerce:
       case ops.OP_convert_o:
+        // A conversion that changes nothing, in place, is no code.
+        if (
+          ir.dst[i] === ir.src[i] &&
+          this.keeps(this.conversionType(<u8>op, i), this.regType[ir.src[i]])
+        ) {
+          return;
+        }
+
         this.assign(i);
         this.conversion(i, <u8>op);
         break;
@@ -2033,6 +2047,52 @@ export class MethodEmitter {
     out.text(") { ");
     this.goto(this.ir.a[i]);
     out.text(" }");
+  }
+
+  /** The type a conversion instruction gives, or CONVERTS for one that always calls the runtime. */
+  conversionType(op: u8, i: u32): i32 {
+    const domain = this.domain;
+    switch (op) {
+      case ops.OP_convert_i:
+      case ops.OP_coerce_i:
+        return domain.intType;
+      case ops.OP_convert_u:
+      case ops.OP_coerce_u:
+        return domain.uintType;
+      case ops.OP_convert_d:
+      case ops.OP_coerce_d:
+        return domain.numberType;
+      case ops.OP_convert_b:
+      case ops.OP_coerce_b:
+        return domain.booleanType;
+      case ops.OP_coerce_s:
+        return domain.stringType;
+      case ops.OP_coerce_o:
+        return domain.objectType();
+      case ops.OP_coerce:
+        return this.ir.c[i];
+      case ops.OP_coerce_a:
+        return TYPE_Any;
+      default:
+        return CONVERTS;
+    }
+  }
+
+  /** Whether converting a value of type `from` to `type` gives the value itself, as convert writes no code for. */
+  keeps(type: i32, from: i32): bool {
+    if (type === CONVERTS) {
+      return false;
+    }
+
+    const domain = this.domain;
+    const bt = domain.builtin(type);
+    const fromBt = domain.builtin(from);
+    return (
+      type === from ||
+      bt === BUILTIN_Any ||
+      (bt === BUILTIN_Number &&
+        (fromBt === BUILTIN_Int || fromBt === BUILTIN_Uint || fromBt === BUILTIN_Number))
+    );
   }
 
   /** The conversion instructions: the value of src as the type they give. */
