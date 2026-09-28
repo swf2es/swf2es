@@ -130,6 +130,45 @@ Each method goes through the same steps, in `codegen`:
 5. **Emission** writes JavaScript as UTF-8 into a growable byte buffer: no
    JavaScript strings, and names are copied straight from the ABC.
 
+### Generated code
+
+Each ABC compiles to one ES module. Every method becomes a JavaScript
+function whose registers are `let` variables, and at first a dispatcher
+runs its blocks: `for (;;) switch (b) { case 0: ...; b = 2; continue; }`.
+It handles any control flow, and the structured form of step 4 replaces it
+where the code is reducible. A method with exception handlers wraps the
+loop in `try`/`catch`; the catch picks the handler covering the throwing
+instruction, matches the exception's type, and continues at its block with
+the exception as the only stack value, or rethrows.
+
+The IR's types decide the JavaScript from the start where that is simple:
+`int` arithmetic ends in `| 0`, `uint` in `>>> 0`, a slot bound early is a
+field access, a method bound early a direct call. Anything typed `*` goes
+through the runtime, which does what avmplus does at run time.
+
+### The object model
+
+An AS3 class is a JavaScript class, made at `newclass` from its traits:
+
+- **Slots** are fields named by slot id (`$0`, `$1`, ...), initialized to
+  their defaults in the constructor, so an early bound slot is one property
+  access and cannot collide with any dynamic name.
+- **Methods, getters and setters** are on the prototype, named by dispatch
+  id, so `callmethod` is a direct call and overriding is JavaScript's own
+  inheritance.
+- **Dynamic properties** of dynamic classes live in their own map, apart
+  from slots and methods.
+- **Names**: each class carries its traits' bindings by namespace and name,
+  which the runtime's multiname lookup (getproperty, setproperty,
+  callproperty with a name that did not bind early) searches as avmplus
+  does: bindings, then dynamic properties, then the prototype chain.
+
+Values are JavaScript's own: `undefined`, `null`, numbers for `Number`,
+`int` and `uint`, booleans, strings; `Namespace` and `QName` are small
+classes. A script's global object is an instance of its traits like any
+other. Errors thrown by the runtime are AS3 `Error` objects with avmplus'
+error numbers and messages, so traced errors read as in avmshell.
+
 ### The runtime and the standard library
 
 Generated code calls `@swf2es/runtime` for the object model, multiname
