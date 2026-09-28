@@ -241,8 +241,30 @@ export function bytesOf(rt: Runtime, o: AsObject): Bytes {
   return o.$bytes;
 }
 
-/** As UnicodeUtils::Utf16ToUtf8: a surrogate pair as four bytes, a lone surrogate as U+FFFD. */
+// TextEncoder is the web's and node's alike, though not ECMAScript's,
+// whose library alone the runtime is typed against.
+declare const TextEncoder: new () => { encode(s: string): Uint8Array };
+
+/** The host's UTF-8 encoder, which writes a lone surrogate as U+FFFD, as utf8() does. */
+const encoder = new TextEncoder();
+
+/**
+ * Below this length, a string encodes faster here than through
+ * TextEncoder, whose call costs more than the loop saves (about 90
+ * characters in V8).
+ */
+const ENCODER_LENGTH = 96;
+
+/**
+ * As UnicodeUtils::Utf16ToUtf8: a surrogate pair as four bytes, a lone
+ * surrogate as U+FFFD. avmshell's writeUTFBytes loses characters around a
+ * lone one instead; this keeps them, and the UTF-8 valid.
+ */
 export function utf8(s: string): Uint8Array {
+  if (s.length >= ENCODER_LENGTH) {
+    return encoder.encode(s);
+  }
+
   // ASCII, byte for byte.
   let ascii = true;
   for (let i = 0; i < s.length && ascii; i++) {

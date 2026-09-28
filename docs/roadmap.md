@@ -98,6 +98,16 @@ Near-term work, in order. The goal of milestone 1 is in
    35 ns per instruction, against Ruffle's 15 for decoding alone
    ([benchmarks.md](benchmarks.md)); the typed verifier still walks every
    block twice. Profile it with the IR in place.
+13. **Unrolled hot loops**, each kept only for a repeatable gain in
+    `tests/programs/ab.ts` or a benchmark of its own: ASCII detection and
+    copying in `utf8()`, four or eight characters at a time; the emitter's
+    `Output.text()`, four characters at a time; AMF's numeric Vectors,
+    reserving their bytes once.
+14. **JSON through the host's own**: `JSON.parse` by native parsing, then
+    conversion into AS3 values, with the reviver as AS3's and the current
+    parser only for text native parsing rejects; `JSON.stringify` by a
+    tree of AS3's members, written by the native one. Output needs the
+    same keys and values, not the same bytes.
 
 
 ## Later

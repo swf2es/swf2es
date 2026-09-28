@@ -41,9 +41,23 @@ export class Output {
   text(s: string): void {
     const n = <u32>s.length;
     this.reserve(n);
-    for (let i: u32 = 0; i < n; i++) {
-      this.bytes[this.length++] = <u8>s.charCodeAt(i);
+    const from = changetype<usize>(s);
+    const to = changetype<usize>(this.bytes) + this.length;
+    let i: u32 = 0;
+    // Four characters at a time, each one's low byte: its ASCII.
+    for (; i + 4 <= n; i += 4) {
+      const w = load<u64>(from + ((<usize>i) << 1));
+      store<u32>(
+        to + i,
+        <u32>((w & 0xff) | ((w >> 8) & 0xff00) | ((w >> 16) & 0xff0000) | ((w >> 24) & 0xff000000)),
+      );
     }
+
+    for (; i < n; i++) {
+      store<u8>(to + i, load<u16>(from + ((<usize>i) << 1)));
+    }
+
+    this.length += n;
   }
 
   int(n: i64): void {
