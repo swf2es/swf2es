@@ -19,45 +19,7 @@
 // later version. User ABCs' public namespaces get the domain's version, so
 // they cannot see VM-internal names.
 import { Abc } from "../abc/abc";
-import {
-  ATTR_Final,
-  CONSTANT_Double,
-  CONSTANT_ExplicitNamespace,
-  CONSTANT_False,
-  CONSTANT_Int,
-  CONSTANT_Multiname,
-  CONSTANT_MultinameL,
-  CONSTANT_MultinameLA,
-  CONSTANT_Null,
-  CONSTANT_PackageInternalNs,
-  CONSTANT_PrivateNs,
-  CONSTANT_ProtectedNamespace,
-  CONSTANT_Qname,
-  CONSTANT_StaticProtectedNs,
-  CONSTANT_True,
-  CONSTANT_TypeName,
-  CONSTANT_UInt,
-  CONSTANT_Utf8,
-  INSTANCE_Final,
-  INSTANCE_Interface,
-  INSTANCE_ProtectedNs,
-  kAmbiguousBindingError,
-  kCannotExtendError,
-  kCannotExtendFinalClass,
-  kCannotImplementError,
-  kClassNotFoundError,
-  kCorruptABCError,
-  kCpoolIndexRangeError,
-  kIllegalDefaultValue,
-  kIllegalVoidError,
-  METHOD_NeedActivation,
-  METHOD_NeedArguments,
-  METHOD_NeedRest,
-  TRAIT_Class,
-  TRAIT_Getter,
-  TRAIT_Method,
-  TRAIT_Setter,
-} from "../abc/constants";
+import * as C from "../abc/constants";
 import { readAbc } from "../abc/parse";
 import { hashBytes, hashPair, IdTable } from "./table";
 import {
@@ -301,15 +263,15 @@ export class Domain {
         }
 
         if (
-          this.classFlags[base] & INSTANCE_Final ||
+          this.classFlags[base] & C.INSTANCE_Final ||
           base === this.classClass ||
           (base === this.functionClass && !abc.builtin)
         ) {
-          return abc.fail(kCannotExtendFinalClass);
+          return abc.fail(C.kCannotExtendFinalClass);
         }
 
-        if (this.classFlags[base] & INSTANCE_Interface) {
-          return abc.fail(kCannotExtendError);
+        if (this.classFlags[base] & C.INSTANCE_Interface) {
+          return abc.fail(C.kCannotExtendError);
         }
 
         this.classBase[id] = base;
@@ -324,16 +286,16 @@ export class Domain {
           return abc.fail(-t);
         }
 
-        if (!(this.classFlags[t] & INSTANCE_Interface)) {
+        if (!(this.classFlags[t] & C.INSTANCE_Interface)) {
           this.traits.interfaceList.length = interfaces;
-          return abc.fail(kCannotImplementError);
+          return abc.fail(C.kCannotImplementError);
         }
 
         this.traits.interfaceList.push(<u32>this.classTraits[t]);
       }
 
-      if (flags & INSTANCE_Interface && baseName) {
-        return abc.fail(kCannotExtendError);
+      if (flags & C.INSTANCE_Interface && baseName) {
+        return abc.fail(C.kCannotExtendError);
       }
 
       // As avmplus' AvmCore: the first builtin class without a base is Object.
@@ -342,7 +304,8 @@ export class Domain {
       }
 
       const base = this.classBase[id];
-      const protectedNs = flags & INSTANCE_ProtectedNs ? <i32>ids[abc.instanceProtectedNs[i]] : -1;
+      const protectedNs =
+        flags & C.INSTANCE_ProtectedNs ? <i32>ids[abc.instanceProtectedNs[i]] : -1;
       const t = this.traits.create(
         TRAITS_Instance,
         index,
@@ -352,7 +315,7 @@ export class Domain {
         abc.instanceTraitStart[i],
         abc.instanceTraitStart[i + 1],
       );
-      this.traits.isInterface[t] = flags & INSTANCE_Interface ? 1 : 0;
+      this.traits.isInterface[t] = flags & C.INSTANCE_Interface ? 1 : 0;
       this.traits.interfaceStart[t] = interfaces;
       this.traits.interfaceEnd[t] = this.traits.interfaceList.length;
       this.classTraits[id] = t;
@@ -361,7 +324,7 @@ export class Domain {
         return abc.fail(error);
       }
 
-      this.bindMethods(t, abc.instanceInit[i], (flags & INSTANCE_Final) !== 0);
+      this.bindMethods(t, abc.instanceInit[i], (flags & C.INSTANCE_Final) !== 0);
 
       this.nameInstance(index, i);
     }
@@ -375,7 +338,7 @@ export class Domain {
       this.classAbc.push(index);
       this.classInstance.push(0xffffffff);
       this.classBase.push(-1);
-      this.classFlags.push(INSTANCE_Final);
+      this.classFlags.push(C.INSTANCE_Final);
       this.voidType = <i32>this.traits.create(TRAITS_Void, index, 0, -1, -1, 0, 0);
       this.nullType = <i32>this.traits.create(TRAITS_Null, index, 0, -1, -1, 0, 0);
       this.classTraits.push(this.voidType);
@@ -453,7 +416,7 @@ export class Domain {
       const end = abc.bodyTraitStart[b + 1];
       const flags = abc.methodFlags[abc.bodyMethod[b]];
       bodies[b] = -1;
-      if (flags & METHOD_NeedActivation || end > first) {
+      if (flags & C.METHOD_NeedActivation || end > first) {
         const t = this.traits.create(TRAITS_Activation, index, b, -1, -1, first, end);
         bodies[b] = t;
         const error = this.traits.layout(this, t);
@@ -482,11 +445,11 @@ export class Domain {
     for (let i = traits.first[t]; i < traits.end[t]; i++) {
       const tag = abc.traitTag[i];
       const kind = tag & 0x0f;
-      if (kind === TRAIT_Method || kind === TRAIT_Getter || kind === TRAIT_Setter) {
+      if (kind === C.TRAIT_Method || kind === C.TRAIT_Getter || kind === C.TRAIT_Setter) {
         const m = methods + abc.traitIndex[i];
         traits.methodTraits[m] = t;
         traits.methodVirtual[m] = 1;
-        traits.methodFinal[m] = tag & ATTR_Final || final ? 1 : 0;
+        traits.methodFinal[m] = tag & C.ATTR_Final || final ? 1 : 0;
       }
     }
 
@@ -551,9 +514,9 @@ export class Domain {
    */
   checkTypeName(index: u32, mn: u32): i32 {
     const pool = this.abcs[index].pool;
-    const isTypeName = pool.mnKind[mn] === CONSTANT_TypeName;
+    const isTypeName = pool.mnKind[mn] === C.CONSTANT_TypeName;
     const c = this.resolveType(index, isTypeName ? pool.mnA[mn] : mn);
-    if (c < 0 && c !== -kIllegalVoidError) {
+    if (c < 0 && c !== -C.kIllegalVoidError) {
       this.typeError = -c;
       return -2;
     }
@@ -583,7 +546,7 @@ export class Domain {
     const abc = this.abcs[index];
     const local = m - this.methodStart[index];
     const flags = abc.methodFlags[local];
-    if (flags & (METHOD_NeedRest | METHOD_NeedArguments)) {
+    if (flags & (C.METHOD_NeedRest | C.METHOD_NeedArguments)) {
       return true;
     }
 
@@ -603,7 +566,7 @@ export class Domain {
 
     for (let i = traits.first[t]; i < traits.end[t]; i++) {
       const kind = abc.traitTag[i] & 0x0f;
-      if (kind === TRAIT_Method || kind === TRAIT_Getter || kind === TRAIT_Setter) {
+      if (kind === C.TRAIT_Method || kind === C.TRAIT_Getter || kind === C.TRAIT_Setter) {
         out.push(methods + abc.traitIndex[i]);
       }
     }
@@ -621,14 +584,14 @@ export class Domain {
    */
   findScript(index: u32, mn: u32): i32 {
     const pool = this.abcs[index].pool;
-    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+    if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
       mn = pool.mnA[mn];
     }
 
     const ids = this.abcNs[index];
     const versions = this.abcNsVersion[index];
     const name = this.abcString[index][pool.mnB[mn]];
-    if (pool.mnKind[mn] === CONSTANT_Qname) {
+    if (pool.mnKind[mn] === C.CONSTANT_Qname) {
       const ns = pool.mnA[mn];
       return this.scriptOf(this.find(ids[ns], name, versions[ns]));
     }
@@ -679,9 +642,9 @@ export class Domain {
     const pool = this.abcs[index].pool;
     const kind = pool.mnKind[mn];
     if (
-      kind !== CONSTANT_Multiname &&
-      kind !== CONSTANT_MultinameL &&
-      kind !== CONSTANT_MultinameLA
+      kind !== C.CONSTANT_Multiname &&
+      kind !== C.CONSTANT_MultinameL &&
+      kind !== C.CONSTANT_MultinameLA
     ) {
       return false;
     }
@@ -739,7 +702,7 @@ export class Domain {
   /** The interned name of multiname `mn` of ABC `index`. */
   nameOf(index: u32, mn: u32): u32 {
     const pool = this.abcs[index].pool;
-    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+    if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
       mn = pool.mnA[mn];
     }
 
@@ -820,7 +783,7 @@ export class Domain {
 
     const pool = this.abcs[index].pool;
     let mn = name;
-    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+    if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
       mn = pool.mnA[mn];
     }
 
@@ -830,7 +793,7 @@ export class Domain {
     traits.memberStart[t] = start;
     traits.memberEnd[t] = start;
     let ns = pool.mnA[mn];
-    if (pool.mnKind[mn] === CONSTANT_Multiname) {
+    if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
       ns = pool.nsSetMembers[pool.nsSetStart[ns]];
     }
 
@@ -953,14 +916,14 @@ export class Domain {
 
     const pool = this.abcs[index].pool;
     if (mn >= pool.multinameCount) {
-      this.typeError = kCpoolIndexRangeError;
+      this.typeError = C.kCpoolIndexRangeError;
       return -2;
     }
 
-    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+    if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
       const base = this.resolveType(index, pool.mnA[mn]);
-      if (base === -kAmbiguousBindingError) {
-        this.typeError = kAmbiguousBindingError;
+      if (base === -C.kAmbiguousBindingError) {
+        this.typeError = C.kAmbiguousBindingError;
         return -2;
       }
 
@@ -971,7 +934,7 @@ export class Domain {
 
       const t = base >= 0 ? this.parameterized(base, param) : -1;
       if (t < 0) {
-        this.typeError = kClassNotFoundError;
+        this.typeError = C.kClassNotFoundError;
         return -2;
       }
 
@@ -979,12 +942,12 @@ export class Domain {
     }
 
     const c = this.resolveType(index, mn);
-    if (c === -kIllegalVoidError) {
+    if (c === -C.kIllegalVoidError) {
       if (allowVoid) {
         return this.voidType;
       }
 
-      this.typeError = kIllegalVoidError;
+      this.typeError = C.kIllegalVoidError;
       return -2;
     }
 
@@ -1060,32 +1023,32 @@ export class Domain {
     }
 
     if (!isDefaultKind(kind)) {
-      return type === TYPE_Any ? kCorruptABCError : kIllegalDefaultValue;
+      return type === TYPE_Any ? C.kCorruptABCError : C.kIllegalDefaultValue;
     }
 
     const pool = this.abcs[index].pool;
     let number: f64 = 0;
     let count: u32 = 0xffffffff;
-    if (kind === CONSTANT_Int) {
+    if (kind === C.CONSTANT_Int) {
       count = pool.ints.length;
       number = value < count ? pool.ints[value] : 0;
-    } else if (kind === CONSTANT_UInt) {
+    } else if (kind === C.CONSTANT_UInt) {
       count = pool.uints.length;
       number = value < count ? pool.uints[value] : 0;
-    } else if (kind === CONSTANT_Double) {
+    } else if (kind === C.CONSTANT_Double) {
       count = pool.doubles.length;
       number = value < count ? pool.doubles[value] : 0;
-    } else if (kind === CONSTANT_Utf8) {
+    } else if (kind === C.CONSTANT_Utf8) {
       count = pool.stringCount;
-    } else if (kind !== CONSTANT_True && kind !== CONSTANT_False && kind !== CONSTANT_Null) {
+    } else if (kind !== C.CONSTANT_True && kind !== C.CONSTANT_False && kind !== C.CONSTANT_Null) {
       count = pool.nsCount;
     }
 
     if (value >= count) {
-      return kCpoolIndexRangeError;
+      return C.kCpoolIndexRangeError;
     }
 
-    return legalDefault(this.builtin(type), kind, number) ? 0 : kIllegalDefaultValue;
+    return legalDefault(this.builtin(type), kind, number) ? 0 : C.kIllegalDefaultValue;
   }
 
   /**
@@ -1097,7 +1060,7 @@ export class Domain {
     const abc = this.abcs[index];
     const pool = abc.pool;
     const kind = pool.mnKind[mn];
-    if (kind === CONSTANT_TypeName) {
+    if (kind === C.CONSTANT_TypeName) {
       const base = this.resolveType(index, pool.mnA[mn]);
       const param = pool.mnB[mn];
       if (base >= 0 && param) {
@@ -1115,17 +1078,17 @@ export class Domain {
     const versions = this.abcNsVersion[index];
     const nameIndex = pool.mnB[mn];
     let found: i32 = -1;
-    if (kind === CONSTANT_Qname && pool.mnA[mn] !== 0 && nameIndex !== 0) {
+    if (kind === C.CONSTANT_Qname && pool.mnA[mn] !== 0 && nameIndex !== 0) {
       const ns = pool.mnA[mn];
       found = this.findType(index, ids[ns], strings[nameIndex], versions[ns]);
-    } else if (kind === CONSTANT_Multiname && nameIndex !== 0) {
+    } else if (kind === C.CONSTANT_Multiname && nameIndex !== 0) {
       const set = pool.mnA[mn];
       const last = pool.nsSetStart[set + 1];
       for (let m = pool.nsSetStart[set]; m < last; m++) {
         const ns = pool.nsSetMembers[m];
         const t = this.findType(index, ids[ns], strings[nameIndex], versions[ns]);
         if (t >= 0 && found >= 0 && t !== found) {
-          return -kAmbiguousBindingError;
+          return -C.kAmbiguousBindingError;
         }
 
         if (t >= 0) {
@@ -1135,10 +1098,10 @@ export class Domain {
     }
 
     if (found < 0) {
-      return -kClassNotFoundError;
+      return -C.kClassNotFoundError;
     }
 
-    return found === this.voidClass ? -kIllegalVoidError : found;
+    return found === this.voidClass ? -C.kIllegalVoidError : found;
   }
 
   /**
@@ -1188,12 +1151,12 @@ export class Domain {
     const abc = this.abcs[index];
     const pool = abc.pool;
     let mn = abc.instanceName[i];
-    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+    if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
       mn = pool.mnA[mn];
     }
 
     let ns = pool.mnA[mn];
-    if (pool.mnKind[mn] === CONSTANT_Multiname) {
+    if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
       ns = pool.nsSetMembers[pool.nsSetStart[ns]];
     }
 
@@ -1218,18 +1181,18 @@ export class Domain {
     const first = abc.scriptTraitStart[0];
     const end = abc.scriptTraitStart[abc.scriptCount];
     for (let t = first; t < end; t++) {
-      if ((abc.traitTag[t] & 0x0f) !== TRAIT_Class) {
+      if ((abc.traitTag[t] & 0x0f) !== C.TRAIT_Class) {
         continue;
       }
 
       let mn = abc.traitName[t];
-      if (pool.mnKind[mn] === CONSTANT_TypeName) {
+      if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
         mn = pool.mnA[mn];
       }
 
       let ns = pool.mnA[mn];
       let version = this.activeVersion(versions[ns]);
-      if (pool.mnKind[mn] === CONSTANT_Multiname) {
+      if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
         const set = ns;
         const last = pool.nsSetStart[set + 1];
         ns = pool.nsSetMembers[pool.nsSetStart[set]];
@@ -1433,14 +1396,14 @@ export class Domain {
       const end = abc.scriptTraitStart[script + 1];
       for (let t = abc.scriptTraitStart[script]; t < end; t++) {
         let mn = abc.traitName[t];
-        if (pool.mnKind[mn] === CONSTANT_TypeName) {
+        if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
           mn = pool.mnA[mn];
         }
 
         const name = strings[pool.mnB[mn]];
         let first = pool.mnA[mn];
         let version = this.activeVersion(versions[first]);
-        if (pool.mnKind[mn] === CONSTANT_Multiname) {
+        if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
           const set = pool.mnA[mn];
           const last = pool.nsSetStart[set + 1];
           first = pool.nsSetMembers[pool.nsSetStart[set]];
@@ -1511,15 +1474,15 @@ function isAtom(bt: u8): bool {
 
 function namespaceType(kind: u8): u8 {
   switch (kind) {
-    case CONSTANT_PackageInternalNs:
+    case C.CONSTANT_PackageInternalNs:
       return NS_PackageInternal;
-    case CONSTANT_ProtectedNamespace:
+    case C.CONSTANT_ProtectedNamespace:
       return NS_Protected;
-    case CONSTANT_ExplicitNamespace:
+    case C.CONSTANT_ExplicitNamespace:
       return NS_Explicit;
-    case CONSTANT_StaticProtectedNs:
+    case C.CONSTANT_StaticProtectedNs:
       return NS_StaticProtected;
-    case CONSTANT_PrivateNs:
+    case C.CONSTANT_PrivateNs:
       return NS_Private;
     default:
       return NS_Public;

@@ -1,6 +1,6 @@
 // What the verifier asks of types: which binding a name has on a type, what
 // type that binding holds, and how two types merge or assign.
-import { CONSTANT_Multiname, CONSTANT_Qname, CONSTANT_TypeName } from "../abc/constants";
+import * as C from "../abc/constants";
 import { Domain } from "./domain";
 import {
   BIND_None,
@@ -25,16 +25,16 @@ export const BIND_Ambiguous: u32 = 0xffffffff;
 export function isBindingName(domain: Domain, index: u32, mn: u32): bool {
   const pool = domain.abcs[index].pool;
   let kind = pool.mnKind[mn];
-  if (kind === CONSTANT_TypeName) {
+  if (kind === C.CONSTANT_TypeName) {
     mn = pool.mnA[mn];
     kind = pool.mnKind[mn];
   }
 
-  if (kind === CONSTANT_Qname) {
+  if (kind === C.CONSTANT_Qname) {
     return pool.mnA[mn] !== 0 && pool.mnB[mn] !== 0;
   }
 
-  return kind === CONSTANT_Multiname && pool.mnB[mn] !== 0;
+  return kind === C.CONSTANT_Multiname && pool.mnB[mn] !== 0;
 }
 
 /**
@@ -48,7 +48,7 @@ export function getBinding(domain: Domain, index: u32, type: i32, mn: u32): u32 
   }
 
   const pool = domain.abcs[index].pool;
-  if (pool.mnKind[mn] === CONSTANT_TypeName) {
+  if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
     mn = pool.mnA[mn];
   }
 
@@ -56,7 +56,7 @@ export function getBinding(domain: Domain, index: u32, type: i32, mn: u32): u32 
   const ids = domain.abcNs[index];
   const versions = domain.abcNsVersion[index];
   const name = domain.abcString[index][pool.mnB[mn]];
-  if (pool.mnKind[mn] === CONSTANT_Qname) {
+  if (pool.mnKind[mn] === C.CONSTANT_Qname) {
     const ns = pool.mnA[mn];
     return traits.find(type, ids[ns], name, versions[ns]);
   }
@@ -94,7 +94,7 @@ export function getBinding(domain: Domain, index: u32, type: i32, mn: u32): u32 
  */
 export function getOwnBinding(domain: Domain, index: u32, t: u32, mn: u32): u32 {
   const pool = domain.abcs[index].pool;
-  if (pool.mnKind[mn] === CONSTANT_TypeName) {
+  if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
     mn = pool.mnA[mn];
   }
 
@@ -102,7 +102,7 @@ export function getOwnBinding(domain: Domain, index: u32, t: u32, mn: u32): u32 
   const ids = domain.abcNs[index];
   const versions = domain.abcNsVersion[index];
   const name = domain.abcString[index][pool.mnB[mn]];
-  if (pool.mnKind[mn] === CONSTANT_Qname) {
+  if (pool.mnKind[mn] === C.CONSTANT_Qname) {
     const ns = pool.mnA[mn];
     domain.foundNs = <i32>ids[ns];
     return traits.own(t, ids[ns], name, versions[ns]);

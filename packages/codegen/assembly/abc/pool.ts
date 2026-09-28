@@ -1,29 +1,6 @@
 // The constant pool (AVM2 overview 4.3), checked like avmplus'
 // AbcParser::parseCpool so the same ABC is accepted or rejected.
-import {
-  CONSTANT_ExplicitNamespace,
-  CONSTANT_Multiname,
-  CONSTANT_MultinameA,
-  CONSTANT_MultinameL,
-  CONSTANT_MultinameLA,
-  CONSTANT_Namespace,
-  CONSTANT_PackageInternalNs,
-  CONSTANT_PackageNamespace,
-  CONSTANT_PrivateNs,
-  CONSTANT_ProtectedNamespace,
-  CONSTANT_Qname,
-  CONSTANT_QnameA,
-  CONSTANT_RTQname,
-  CONSTANT_RTQnameA,
-  CONSTANT_RTQnameL,
-  CONSTANT_RTQnameLA,
-  CONSTANT_StaticProtectedNs,
-  CONSTANT_TypeName,
-  kCorruptABCError,
-  kCpoolEntryWrongTypeError,
-  kCpoolIndexRangeError,
-  kIllegalNamespaceError,
-} from "./constants";
+import * as C from "./constants";
 import { Reader } from "./reader";
 
 /**
@@ -103,7 +80,7 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
   }
 
   if (r.failed) {
-    return fail(pool, kCorruptABCError);
+    return fail(pool, C.kCorruptABCError);
   }
 
   const stringCount = max(readCount(r), 1);
@@ -114,7 +91,7 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
     // UTF-8 is not validated.
     const length = r.u32();
     if (length & 0xc0000000 || <u64>r.pos + length >= r.end) {
-      return fail(pool, kCorruptABCError);
+      return fail(pool, C.kCorruptABCError);
     }
 
     pool.stringStart[i] = <u32>(r.pos - base);
@@ -128,12 +105,12 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
   for (let i: u32 = 1; i < nsCount; i++) {
     const kind = <u8>r.u8();
     if (!isNamespaceKind(kind)) {
-      return fail(pool, r.failed ? kCorruptABCError : kCpoolEntryWrongTypeError);
+      return fail(pool, r.failed ? C.kCorruptABCError : C.kCpoolEntryWrongTypeError);
     }
 
     const name = r.u30();
     if (name >= stringCount) {
-      return fail(pool, kCpoolIndexRangeError);
+      return fail(pool, C.kCpoolIndexRangeError);
     }
 
     pool.nsKind[i] = kind;
@@ -149,11 +126,11 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
     for (let j: u32 = 0; j < count; j++) {
       const ns = r.u30();
       if (ns === 0) {
-        return fail(pool, r.failed ? kCorruptABCError : kIllegalNamespaceError);
+        return fail(pool, r.failed ? C.kCorruptABCError : C.kIllegalNamespaceError);
       }
 
       if (ns >= nsCount) {
-        return fail(pool, kCpoolIndexRangeError);
+        return fail(pool, C.kCpoolIndexRangeError);
       }
 
       members.push(ns);
@@ -170,52 +147,52 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
     const kind = <u8>r.u8();
     let a: u32 = 0;
     let b: u32 = 0;
-    if (kind === CONSTANT_Qname || kind === CONSTANT_QnameA) {
+    if (kind === C.CONSTANT_Qname || kind === C.CONSTANT_QnameA) {
       a = r.u30();
       b = r.u30();
       if (a >= nsCount || b >= stringCount) {
-        return fail(pool, kCpoolIndexRangeError);
+        return fail(pool, C.kCpoolIndexRangeError);
       }
-    } else if (kind === CONSTANT_RTQname || kind === CONSTANT_RTQnameA) {
+    } else if (kind === C.CONSTANT_RTQname || kind === C.CONSTANT_RTQnameA) {
       b = r.u30();
       if (b >= stringCount) {
-        return fail(pool, kCpoolIndexRangeError);
+        return fail(pool, C.kCpoolIndexRangeError);
       }
-    } else if (kind === CONSTANT_RTQnameL || kind === CONSTANT_RTQnameLA) {
+    } else if (kind === C.CONSTANT_RTQnameL || kind === C.CONSTANT_RTQnameLA) {
       // No operands: both come from the stack.
-    } else if (kind === CONSTANT_Multiname || kind === CONSTANT_MultinameA) {
+    } else if (kind === C.CONSTANT_Multiname || kind === C.CONSTANT_MultinameA) {
       b = r.u30();
       if (b >= stringCount) {
-        return fail(pool, kCpoolIndexRangeError);
+        return fail(pool, C.kCpoolIndexRangeError);
       }
 
       a = r.u30();
       if (a === 0 || a >= nsSetCount) {
-        return fail(pool, kCpoolIndexRangeError);
+        return fail(pool, C.kCpoolIndexRangeError);
       }
-    } else if (kind === CONSTANT_MultinameL || kind === CONSTANT_MultinameLA) {
+    } else if (kind === C.CONSTANT_MultinameL || kind === C.CONSTANT_MultinameLA) {
       a = r.u30();
       if (a === 0 || a >= nsSetCount) {
-        return fail(pool, kCpoolIndexRangeError);
+        return fail(pool, C.kCpoolIndexRangeError);
       }
-    } else if (kind === CONSTANT_TypeName) {
+    } else if (kind === C.CONSTANT_TypeName) {
       // Forward references are legal; the base kind is checked below.
       a = r.u30();
       if (a === 0 || a >= mnCount) {
-        return fail(pool, kCpoolIndexRangeError);
+        return fail(pool, C.kCpoolIndexRangeError);
       }
 
       if (r.u30() !== 1) {
-        return fail(pool, kCorruptABCError);
+        return fail(pool, C.kCorruptABCError);
       }
 
       // Parameter 0 is Vector.<*>.
       b = r.u30();
       if (b >= mnCount) {
-        return fail(pool, kCpoolIndexRangeError);
+        return fail(pool, C.kCpoolIndexRangeError);
       }
     } else {
-      return fail(pool, r.failed ? kCorruptABCError : kCpoolEntryWrongTypeError);
+      return fail(pool, r.failed ? C.kCorruptABCError : C.kCpoolEntryWrongTypeError);
     }
 
     pool.mnKind[i] = kind;
@@ -224,11 +201,11 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
   }
 
   if (r.failed) {
-    return fail(pool, kCorruptABCError);
+    return fail(pool, C.kCorruptABCError);
   }
 
   if (!typeNamesAreAcyclic(pool)) {
-    return fail(pool, kCorruptABCError);
+    return fail(pool, C.kCorruptABCError);
   }
 
   return pool;
@@ -248,13 +225,13 @@ function readCount(r: Reader): u32 {
 
 function isNamespaceKind(kind: u8): bool {
   return (
-    kind === CONSTANT_Namespace ||
-    kind === CONSTANT_PackageNamespace ||
-    kind === CONSTANT_PackageInternalNs ||
-    kind === CONSTANT_ProtectedNamespace ||
-    kind === CONSTANT_ExplicitNamespace ||
-    kind === CONSTANT_StaticProtectedNs ||
-    kind === CONSTANT_PrivateNs
+    kind === C.CONSTANT_Namespace ||
+    kind === C.CONSTANT_PackageNamespace ||
+    kind === C.CONSTANT_PackageInternalNs ||
+    kind === C.CONSTANT_ProtectedNamespace ||
+    kind === C.CONSTANT_ExplicitNamespace ||
+    kind === C.CONSTANT_StaticProtectedNs ||
+    kind === C.CONSTANT_PrivateNs
   );
 }
 
@@ -267,18 +244,18 @@ function typeNamesAreAcyclic(pool: ConstantPool): bool {
   const count = pool.multinameCount;
   const stamp = new StaticArray<u32>(count);
   for (let i: u32 = 1; i < count; i++) {
-    if (pool.mnKind[i] !== CONSTANT_TypeName) {
+    if (pool.mnKind[i] !== C.CONSTANT_TypeName) {
       continue;
     }
 
-    if (pool.mnKind[pool.mnA[i]] === CONSTANT_TypeName) {
+    if (pool.mnKind[pool.mnA[i]] === C.CONSTANT_TypeName) {
       return false;
     }
 
     let param = pool.mnB[i];
     while (param !== 0) {
       stamp[param] = i;
-      if (pool.mnKind[param] !== CONSTANT_TypeName) {
+      if (pool.mnKind[param] !== C.CONSTANT_TypeName) {
         break;
       }
 

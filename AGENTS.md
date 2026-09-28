@@ -81,9 +81,11 @@ calling a change done; CI runs the same steps.
 - The dialect is stricter than TypeScript: no `import type`, and `@inline`
   only on class members (Binaryen inlines small functions at `-O3` anyway).
   Biome's import-type fix is off for this folder for that reason.
-- Import the opcodes as a namespace, `import * as ops from "./opcodes"`, and
-  write `ops.OP_add`: the constants still inline, and the files that use
-  them need no import list. Other names are imported by name.
+- Import the opcodes and the ABC constants as namespaces, `import * as ops
+  from "./opcodes"` and `import * as C from "./constants"`, and write
+  `ops.OP_add` and `C.kCorruptABCError`: the constants still inline, and
+  the files that use them need no import list. Other names, such as the
+  traits module's classes, are imported by name.
 - Mark classes `@final` unless they are meant to be extended, so calls on
   them never need virtual dispatch.
 - The runtime is `minimal`: garbage is collected only between calls from

@@ -2,15 +2,7 @@
 // scope sizes, exception ranges and catch types are checked when the method
 // is verified.
 import { Abc } from "./abc";
-import {
-  INSTANCE_Interface,
-  kCorruptABCError,
-  kCpoolIndexRangeError,
-  kDuplicateMethodBodyError,
-  kIllegalInterfaceMethodBodyError,
-  kInvalidCodeLengthError,
-  kMethodInfoExceedsCountError,
-} from "./constants";
+import * as C from "./constants";
 import { Reader } from "./reader";
 import { readTraits } from "./traits";
 
@@ -25,11 +17,11 @@ export function readMethodBodies(abc: Abc, r: Reader, base: usize): bool {
   for (let i: u32 = 0; i < count; i++) {
     const method = r.u30();
     if (r.failed) {
-      return abc.fail(kCorruptABCError);
+      return abc.fail(C.kCorruptABCError);
     }
 
     if (method >= abc.methodCount) {
-      return abc.fail(kMethodInfoExceedsCountError);
+      return abc.fail(C.kMethodInfoExceedsCountError);
     }
 
     const maxStack = r.u30();
@@ -38,15 +30,15 @@ export function readMethodBodies(abc: Abc, r: Reader, base: usize): bool {
     const maxScopeDepth = r.u30();
     const codeLength = r.u30();
     if (r.failed) {
-      return abc.fail(kCorruptABCError);
+      return abc.fail(C.kCorruptABCError);
     }
 
     if (codeLength === 0) {
-      return abc.fail(kInvalidCodeLengthError);
+      return abc.fail(C.kInvalidCodeLengthError);
     }
 
     if (<u64>r.pos + codeLength >= r.end) {
-      return abc.fail(kCorruptABCError);
+      return abc.fail(C.kCorruptABCError);
     }
 
     const codeStart = <u32>(r.pos - base);
@@ -61,11 +53,11 @@ export function readMethodBodies(abc: Abc, r: Reader, base: usize): bool {
       abc.exceptionType.push(r.u30());
       const name = r.u30();
       if (r.failed) {
-        return abc.fail(kCorruptABCError);
+        return abc.fail(C.kCorruptABCError);
       }
 
       if (name >= abc.pool.multinameCount) {
-        return abc.fail(kCpoolIndexRangeError);
+        return abc.fail(C.kCpoolIndexRangeError);
       }
 
       abc.exceptionName.push(name);
@@ -75,13 +67,13 @@ export function readMethodBodies(abc: Abc, r: Reader, base: usize): bool {
     if (
       owner >= 0 &&
       <u32>owner < abc.classCount &&
-      abc.instanceFlags[owner] & INSTANCE_Interface
+      abc.instanceFlags[owner] & C.INSTANCE_Interface
     ) {
-      return abc.fail(kIllegalInterfaceMethodBodyError);
+      return abc.fail(C.kIllegalInterfaceMethodBodyError);
     }
 
     if (abc.methodBody[method] !== -1) {
-      return abc.fail(kDuplicateMethodBodyError);
+      return abc.fail(C.kDuplicateMethodBodyError);
     }
 
     abc.methodBody[method] = <i32>abc.bodyMethod.length;

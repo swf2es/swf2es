@@ -17,26 +17,7 @@
 // method of, for the super instructions. Methods reach the module's own
 // descriptors, such as the class a newclass creates, through A.
 import { BodyDecoder, verifyMethods } from "../abc/code";
-import {
-  CONSTANT_Multiname,
-  CONSTANT_MultinameA,
-  CONSTANT_MultinameL,
-  CONSTANT_MultinameLA,
-  CONSTANT_Qname,
-  CONSTANT_QnameA,
-  CONSTANT_RTQname,
-  CONSTANT_RTQnameA,
-  CONSTANT_TypeName,
-  INSTANCE_Final,
-  INSTANCE_Interface,
-  METHOD_Native,
-  TRAIT_Class,
-  TRAIT_Const,
-  TRAIT_Getter,
-  TRAIT_Method,
-  TRAIT_Setter,
-  TRAIT_Slot,
-} from "../abc/constants";
+import * as C from "../abc/constants";
 import { Domain, NS_Private } from "../link/domain";
 import { TRAITS_Class, TRAITS_Instance } from "../link/traits";
 import { MethodEmitter } from "./method";
@@ -146,7 +127,7 @@ export class ModuleEmitter {
     const out = this.out;
     const pool = this.domain.abcs[this.index].pool;
     const kind = pool.mnKind[i];
-    if (kind === CONSTANT_TypeName) {
+    if (kind === C.CONSTANT_TypeName) {
       out.text("rt.typeName(N, V, S, ");
       out.uint(pool.mnA[i]);
       out.text(", ");
@@ -159,16 +140,16 @@ export class ModuleEmitter {
     out.uint(kind);
     out.text(", ");
     switch (kind) {
-      case CONSTANT_Qname:
-      case CONSTANT_QnameA:
+      case C.CONSTANT_Qname:
+      case C.CONSTANT_QnameA:
         out.text("[");
         out.uint(pool.mnA[i]);
         out.text("]");
         break;
-      case CONSTANT_Multiname:
-      case CONSTANT_MultinameA:
-      case CONSTANT_MultinameL:
-      case CONSTANT_MultinameLA:
+      case C.CONSTANT_Multiname:
+      case C.CONSTANT_MultinameA:
+      case C.CONSTANT_MultinameL:
+      case C.CONSTANT_MultinameLA:
         out.text("S[");
         out.uint(pool.mnA[i]);
         out.text("]");
@@ -180,12 +161,12 @@ export class ModuleEmitter {
 
     out.text(", ");
     const hasName =
-      kind === CONSTANT_Qname ||
-      kind === CONSTANT_QnameA ||
-      kind === CONSTANT_RTQname ||
-      kind === CONSTANT_RTQnameA ||
-      kind === CONSTANT_Multiname ||
-      kind === CONSTANT_MultinameA;
+      kind === C.CONSTANT_Qname ||
+      kind === C.CONSTANT_QnameA ||
+      kind === C.CONSTANT_RTQname ||
+      kind === C.CONSTANT_RTQnameA ||
+      kind === C.CONSTANT_Multiname ||
+      kind === C.CONSTANT_MultinameA;
     const name = hasName ? pool.mnB[i] : 0;
     if (name) {
       this.methods.string(name);
@@ -213,7 +194,7 @@ export class ModuleEmitter {
       out.text(m ? ",\n    " : "\n    ");
       const global = start + m;
       const body = abc.methodBody[m];
-      if (abc.methodFlags[m] & METHOD_Native) {
+      if (abc.methodFlags[m] & C.METHOD_Native) {
         out.text("rt.native(");
         this.nativeName(global);
         out.text(")");
@@ -272,12 +253,12 @@ export class ModuleEmitter {
       for (let i = traits.first[t]; i < traits.end[t]; i++) {
         const tk = abc.traitTag[i] & 0x0f;
         if (
-          (tk === TRAIT_Method || tk === TRAIT_Getter || tk === TRAIT_Setter) &&
+          (tk === C.TRAIT_Method || tk === C.TRAIT_Getter || tk === C.TRAIT_Setter) &&
           abc.traitIndex[i] === local
         ) {
-          if (tk === TRAIT_Getter) {
+          if (tk === C.TRAIT_Getter) {
             text += "get:";
-          } else if (tk === TRAIT_Setter) {
+          } else if (tk === C.TRAIT_Setter) {
             text += "set:";
           }
 
@@ -311,7 +292,7 @@ export class ModuleEmitter {
     const base = traits.base[t];
     for (let i = traits.first[t]; i < traits.end[t]; i++) {
       const kind = abc.traitTag[i] & 0x0f;
-      if (kind !== TRAIT_Slot && kind !== TRAIT_Const && kind !== TRAIT_Class) {
+      if (kind !== C.TRAIT_Slot && kind !== C.TRAIT_Const && kind !== C.TRAIT_Class) {
         continue;
       }
 
@@ -323,7 +304,7 @@ export class ModuleEmitter {
       out.uint(slot);
       out.text(", ");
       const type = traits.slotType[slotStart + slot];
-      if (kind === TRAIT_Class) {
+      if (kind === C.TRAIT_Class) {
         out.text("null");
       } else {
         this.methods.constant(abc.traitValue[i], abc.traitValueKind[i], type);
@@ -424,9 +405,9 @@ export class ModuleEmitter {
 
       const flags = abc.instanceFlags[i];
       out.text("], final: ");
-      out.text(flags & INSTANCE_Final ? "true" : "false");
+      out.text(flags & C.INSTANCE_Final ? "true" : "false");
       out.text(", interface: ");
-      out.text(flags & INSTANCE_Interface ? "true" : "false");
+      out.text(flags & C.INSTANCE_Interface ? "true" : "false");
       out.text(", sealed: ");
       out.text(flags & 1 ? "true" : "false");
       out.text(", protectedNs: ");

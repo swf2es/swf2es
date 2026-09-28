@@ -7,18 +7,7 @@
 // JavaScript (int arithmetic ends in `| 0`), anything else calls the
 // runtime, which does what avmplus does at run time.
 import { Abc } from "../abc/abc";
-import {
-  CONSTANT_Multiname,
-  CONSTANT_MultinameL,
-  CONSTANT_MultinameLA,
-  CONSTANT_RTQname,
-  CONSTANT_RTQnameA,
-  CONSTANT_RTQnameL,
-  CONSTANT_RTQnameLA,
-  CONSTANT_TypeName,
-  METHOD_NeedArguments,
-  METHOD_NeedRest,
-} from "../abc/constants";
+import * as C from "../abc/constants";
 import * as ops from "../abc/opcodes";
 import { opcodeNames } from "../abc/opcodes";
 import {
@@ -109,7 +98,7 @@ export class MethodEmitter {
     }
 
     const flags = this.abc.methodFlags[method];
-    if (flags & METHOD_NeedRest) {
+    if (flags & C.METHOD_NeedRest) {
       out.text(count ? ", ...rest" : "...rest");
     }
 
@@ -288,11 +277,11 @@ export class MethodEmitter {
     }
 
     let local = count + 1;
-    if (flags & METHOD_NeedRest) {
+    if (flags & C.METHOD_NeedRest) {
       out.text(", l");
       out.uint(local++);
       out.text(" = rt.array(rest)");
-    } else if (flags & METHOD_NeedArguments) {
+    } else if (flags & C.METHOD_NeedArguments) {
       out.text(", l");
       out.uint(local++);
       out.text(" = rt.arguments(arguments)");
@@ -1120,12 +1109,12 @@ export class MethodEmitter {
     const out = this.out;
     const kind = this.abc.pool.mnKind[a];
     const parts =
-      kind === CONSTANT_RTQnameL || kind === CONSTANT_RTQnameLA
+      kind === C.CONSTANT_RTQnameL || kind === C.CONSTANT_RTQnameLA
         ? 2
-        : kind === CONSTANT_RTQname ||
-            kind === CONSTANT_RTQnameA ||
-            kind === CONSTANT_MultinameL ||
-            kind === CONSTANT_MultinameLA
+        : kind === C.CONSTANT_RTQname ||
+            kind === C.CONSTANT_RTQnameA ||
+            kind === C.CONSTANT_MultinameL ||
+            kind === C.CONSTANT_MultinameLA
           ? 1
           : 0;
     if (parts === 0) {
@@ -1447,12 +1436,12 @@ export class MethodEmitter {
       const abc = domain.abcs[index];
       const pool = abc.pool;
       let mn = abc.instanceName[traits.owner[t]];
-      if (pool.mnKind[mn] === CONSTANT_TypeName) {
+      if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
         mn = pool.mnA[mn];
       }
 
       let ns = pool.mnA[mn];
-      if (pool.mnKind[mn] === CONSTANT_Multiname) {
+      if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
         ns = pool.nsSetMembers[pool.nsSetStart[ns]];
       }
 
@@ -1505,12 +1494,12 @@ export class MethodEmitter {
     const abc = domain.abcs[index];
     const pool = abc.pool;
     let mn = abc.instanceName[traits.owner[t]];
-    if (pool.mnKind[mn] === CONSTANT_TypeName) {
+    if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
       mn = pool.mnA[mn];
     }
 
     let ns = pool.mnA[mn];
-    if (pool.mnKind[mn] === CONSTANT_Multiname) {
+    if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
       ns = pool.nsSetMembers[pool.nsSetStart[ns]];
     }
 

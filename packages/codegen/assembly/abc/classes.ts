@@ -1,21 +1,14 @@
 // instance_info, class_info and script_info, checked like avmplus'
 // parseInstanceInfos, parseClassInfos and parseScriptInfos.
 import { Abc } from "./abc";
-import {
-  INSTANCE_ProtectedNs,
-  kAlreadyBoundError,
-  kCannotImplementError,
-  kCorruptABCError,
-  kCpoolIndexRangeError,
-  kMethodInfoExceedsCountError,
-} from "./constants";
+import * as C from "./constants";
 import { Reader } from "./reader";
 import { bindingNameError, readTraits } from "./traits";
 
 export function readInstances(abc: Abc, r: Reader): bool {
   const count = r.u30();
   if (<usize>count > r.end - r.pos) {
-    return abc.fail(kCorruptABCError);
+    return abc.fail(C.kCorruptABCError);
   }
 
   abc.instanceName = new StaticArray<u32>(count);
@@ -30,7 +23,7 @@ export function readInstances(abc: Abc, r: Reader): bool {
   for (let i: u32 = 0; i < count; i++) {
     const name = r.u30();
     if (r.failed) {
-      return abc.fail(kCorruptABCError);
+      return abc.fail(C.kCorruptABCError);
     }
 
     const nameError = bindingNameError(pool, name, abc.builtin);
@@ -40,36 +33,36 @@ export function readInstances(abc: Abc, r: Reader): bool {
 
     const base = r.u30();
     if (base >= pool.multinameCount) {
-      return abc.fail(r.failed ? kCorruptABCError : kCpoolIndexRangeError);
+      return abc.fail(r.failed ? C.kCorruptABCError : C.kCpoolIndexRangeError);
     }
 
     const flags = <u8>r.u8();
     let protectedNs: u32 = 0;
-    if (flags & INSTANCE_ProtectedNs) {
+    if (flags & C.INSTANCE_ProtectedNs) {
       protectedNs = r.u30();
       if (protectedNs >= pool.nsCount) {
-        return abc.fail(r.failed ? kCorruptABCError : kCpoolIndexRangeError);
+        return abc.fail(r.failed ? C.kCorruptABCError : C.kCpoolIndexRangeError);
       }
     }
 
     const interfaceCount = r.u30();
     if (interfaceCount >= 0x10000000) {
-      return abc.fail(kCorruptABCError);
+      return abc.fail(C.kCorruptABCError);
     }
 
     abc.instanceInterfaceStart[i] = abc.interfaces.length;
     for (let j: u32 = 0; j < interfaceCount; j++) {
       const type = r.u30();
       if (r.failed) {
-        return abc.fail(kCorruptABCError);
+        return abc.fail(C.kCorruptABCError);
       }
 
       if (type === 0) {
-        return abc.fail(kCannotImplementError);
+        return abc.fail(C.kCannotImplementError);
       }
 
       if (type >= pool.multinameCount) {
-        return abc.fail(kCpoolIndexRangeError);
+        return abc.fail(C.kCpoolIndexRangeError);
       }
 
       abc.interfaces.push(type);
@@ -77,11 +70,11 @@ export function readInstances(abc: Abc, r: Reader): bool {
 
     const init = r.u30();
     if (r.failed) {
-      return abc.fail(kCorruptABCError);
+      return abc.fail(C.kCorruptABCError);
     }
 
     if (init >= abc.methodCount) {
-      return abc.fail(kMethodInfoExceedsCountError);
+      return abc.fail(C.kMethodInfoExceedsCountError);
     }
 
     abc.instanceName[i] = name;
@@ -129,7 +122,7 @@ export function readClasses(abc: Abc, r: Reader): bool {
 export function readScripts(abc: Abc, r: Reader): bool {
   const count = r.u30();
   if (<usize>count > r.end - r.pos) {
-    return abc.fail(kCorruptABCError);
+    return abc.fail(C.kCorruptABCError);
   }
 
   abc.scriptInit = new StaticArray<u32>(count);
@@ -143,7 +136,7 @@ export function readScripts(abc: Abc, r: Reader): bool {
 
     // Unlike instances and classes, a script checks its init before its traits.
     if (abc.methodOwner[init] !== -1) {
-      return abc.fail(kAlreadyBoundError);
+      return abc.fail(C.kAlreadyBoundError);
     }
 
     abc.scriptInit[i] = <u32>init;
@@ -166,12 +159,12 @@ export function readScripts(abc: Abc, r: Reader): bool {
 function readMethodIndex(abc: Abc, r: Reader): i32 {
   const method = r.u30();
   if (r.failed) {
-    abc.fail(kCorruptABCError);
+    abc.fail(C.kCorruptABCError);
     return -1;
   }
 
   if (method >= abc.methodCount) {
-    abc.fail(kMethodInfoExceedsCountError);
+    abc.fail(C.kMethodInfoExceedsCountError);
     return -1;
   }
 
@@ -181,7 +174,7 @@ function readMethodIndex(abc: Abc, r: Reader): i32 {
 /** Bind an instance or class initializer to its owner. */
 function bind(abc: Abc, method: u32, owner: i32): bool {
   if (abc.methodOwner[method] !== -1) {
-    return abc.fail(kAlreadyBoundError);
+    return abc.fail(C.kAlreadyBoundError);
   }
 
   abc.methodOwner[method] = owner;

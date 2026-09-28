@@ -40,55 +40,7 @@ import {
   isNumeric,
 } from "../link/types";
 import { Abc } from "./abc";
-import {
-  CONSTANT_Multiname,
-  CONSTANT_MultinameA,
-  CONSTANT_MultinameL,
-  CONSTANT_MultinameLA,
-  CONSTANT_Qname,
-  CONSTANT_QnameA,
-  CONSTANT_RTQname,
-  CONSTANT_RTQnameA,
-  CONSTANT_RTQnameL,
-  CONSTANT_RTQnameLA,
-  CONSTANT_TypeName,
-  kAmbiguousBindingError,
-  kCannotFallOffMethodError,
-  kCannotMergeTypesError,
-  kClassInfoExceedsCountError,
-  kCorruptABCError,
-  kCpoolIndexRangeError,
-  kDanglingFunctionError,
-  kFindVarWithNoScopeError,
-  kGetScopeObjectBoundsError,
-  kIllegalEarlyBindingError,
-  kIllegalExceptionHandlerError,
-  kIllegalOpcodeError,
-  kIllegalOperandTypeError,
-  kIllegalOpMultinameError,
-  kIllegalSetDxns,
-  kIllegalSuperCallError,
-  kInvalidBranchTargetError,
-  kInvalidHasNextError,
-  kInvalidNewActivationError,
-  kInvalidRegisterError,
-  kLastInstExceedsCodeSizeError,
-  kMethodInfoExceedsCountError,
-  kNoGlobalScopeError,
-  kScopeDepthUnbalancedError,
-  kScopeStackOverflowError,
-  kScopeStackUnderflowError,
-  kSlotExceedsCountError,
-  kStackDepthUnbalancedError,
-  kStackOverflowError,
-  kStackUnderflowError,
-  kWrongArgumentCountError,
-  kZeroDispIdError,
-  METHOD_NeedActivation,
-  METHOD_NeedArguments,
-  METHOD_NeedRest,
-  METHOD_SetsDxns,
-} from "./constants";
+import * as C from "./constants";
 import * as ops from "./opcodes";
 import {
   FLAG_Terminal,
@@ -356,7 +308,7 @@ export class BodyDecoder {
     }
 
     if (this.overlap) {
-      return code.fail(kInvalidBranchTargetError);
+      return code.fail(C.kInvalidBranchTargetError);
     }
 
     if (this.typed && !this.secondPass()) {
@@ -556,7 +508,7 @@ export class BodyDecoder {
     const scope = <i64>abc.bodyMaxScopeDepth[body] - abc.bodyInitScopeDepth[body];
     const frame = <i64>this.localCount + scope + this.maxStack;
     if (scope < 0 || frame > 0x7fffffff / 8) {
-      this.code.fail(kCorruptABCError);
+      this.code.fail(C.kCorruptABCError);
       return false;
     }
 
@@ -570,11 +522,11 @@ export class BodyDecoder {
     const abc = this.abc;
     const params = abc.methodParamStart[this.method + 1] - abc.methodParamStart[this.method];
     if (this.localCount < params + 1) {
-      this.code.fail(kCorruptABCError);
+      this.code.fail(C.kCorruptABCError);
       return false;
     }
 
-    if (this.methodFlags & (METHOD_NeedRest | METHOD_NeedArguments)) {
+    if (this.methodFlags & (C.METHOD_NeedRest | C.METHOD_NeedArguments)) {
       return this.checkLocal(params + 1);
     }
 
@@ -583,7 +535,7 @@ export class BodyDecoder {
 
   checkLocal(register: u32): bool {
     if (register >= this.localCount) {
-      this.code.fail(kInvalidRegisterError);
+      this.code.fail(C.kInvalidRegisterError);
       return false;
     }
 
@@ -615,12 +567,12 @@ export class BodyDecoder {
       }
 
       if (name !== 0 && !isBinding(abc.pool, name)) {
-        this.code.fail(kCorruptABCError);
+        this.code.fail(C.kCorruptABCError);
         return false;
       }
 
       if (to < from || target < to || target >= this.length) {
-        this.code.fail(kIllegalExceptionHandlerError);
+        this.code.fail(C.kIllegalExceptionHandlerError);
         return false;
       }
 
@@ -676,7 +628,7 @@ export class BodyDecoder {
     }
 
     let firstLocal = count + 1;
-    if (this.methodFlags & (METHOD_NeedRest | METHOD_NeedArguments)) {
+    if (this.methodFlags & (C.METHOD_NeedRest | C.METHOD_NeedArguments)) {
       this.setValue(firstLocal++, domain.arrayType, NOT_NULL);
     }
 
@@ -786,7 +738,7 @@ export class BodyDecoder {
       const flags = this.valueFlags[i];
       const entryFlags = this.entryFlags[at + i];
       if ((flags ^ entryFlags) & WITH) {
-        this.fail(kCannotMergeTypesError);
+        this.fail(C.kCannotMergeTypesError);
         return -1;
       }
 
@@ -823,14 +775,14 @@ export class BodyDecoder {
     }
 
     if (to < 0 || to >= <i64>this.length) {
-      this.code.fail(kInvalidBranchTargetError);
+      this.code.fail(C.kInvalidBranchTargetError);
       return false;
     }
 
     const t = <u32>to;
     const isNew = !this.known[t];
     if (to <= from && isNew && load<u8>(this.start + t) !== ops.OP_label) {
-      this.code.fail(kInvalidBranchTargetError);
+      this.code.fail(C.kInvalidBranchTargetError);
       return false;
     }
 
@@ -934,12 +886,12 @@ export class BodyDecoder {
 
   sameDepths(stack: u32, scope: u32, otherStack: u32, otherScope: u32): bool {
     if (stack !== otherStack) {
-      this.code.fail(kStackDepthUnbalancedError);
+      this.code.fail(C.kStackDepthUnbalancedError);
       return false;
     }
 
     if (scope !== otherScope) {
-      this.code.fail(kScopeDepthUnbalancedError);
+      this.code.fail(C.kScopeDepthUnbalancedError);
       return false;
     }
 
@@ -960,7 +912,7 @@ export class BodyDecoder {
       const h = this.handlerFirst + i;
       if (pc >= abc.exceptionFrom[h] && pc < abc.exceptionTo[h]) {
         if (this.maxStack < 1) {
-          this.code.fail(kStackOverflowError);
+          this.code.fail(C.kStackOverflowError);
           return false;
         }
 
@@ -1003,14 +955,14 @@ export class BodyDecoder {
 
     while (true) {
       if (pc >= this.length) {
-        code.fail(kCannotFallOffMethodError);
+        code.fail(C.kCannotFallOffMethodError);
         return false;
       }
 
       const opcode = load<u8>(this.start + pc);
       const operands = opcodeOperands[opcode];
       if (operands === OPERANDS_Illegal) {
-        code.fail(kIllegalOpcodeError);
+        code.fail(C.kIllegalOpcodeError);
         return false;
       }
 
@@ -1111,13 +1063,13 @@ export class BodyDecoder {
     }
 
     if (wide & 0xc0000000) {
-      code.fail(kCorruptABCError);
+      code.fail(C.kCorruptABCError);
       return false;
     }
 
     const codeEnd = this.start + this.length;
     if (r.failed || r.pos > codeEnd) {
-      code.fail(kLastInstExceedsCodeSizeError);
+      code.fail(C.kLastInstExceedsCodeSizeError);
       return false;
     }
 
@@ -1125,7 +1077,7 @@ export class BodyDecoder {
       c = code.caseCount;
       const caseCount = <u64>b + 1;
       if (<u64>r.pos + caseCount * 3 > codeEnd) {
-        code.fail(kLastInstExceedsCodeSizeError);
+        code.fail(C.kLastInstExceedsCodeSizeError);
         return false;
       }
 
@@ -1178,13 +1130,13 @@ export class BodyDecoder {
         opcode === ops.OP_findproperty) &&
       this.scope + this.outer.size === 0
     ) {
-      return this.fail(kFindVarWithNoScopeError);
+      return this.fail(C.kFindVarWithNoScopeError);
     }
 
     // Operands that index the pool or the method tables, checked before the stack.
     if (stack & STACK_Multiname) {
       if (a === 0 || a >= pool.multinameCount) {
-        return this.fail(kCpoolIndexRangeError);
+        return this.fail(C.kCpoolIndexRangeError);
       }
 
       pops += runtimeParts(pool, a);
@@ -1202,11 +1154,11 @@ export class BodyDecoder {
       pops = a;
     } else if (opcode === ops.OP_callstatic) {
       if (a >= this.abc.methodCount || !this.callable(a)) {
-        return this.fail(kCorruptABCError);
+        return this.fail(C.kCorruptABCError);
       }
     } else if (opcode === ops.OP_dxns) {
-      if (!(this.methodFlags & METHOD_SetsDxns)) {
-        return this.fail(kIllegalSetDxns);
+      if (!(this.methodFlags & C.METHOD_SetsDxns)) {
+        return this.fail(C.kIllegalSetDxns);
       }
 
       if (this.emitPass) {
@@ -1256,7 +1208,7 @@ export class BodyDecoder {
       return true;
     } else if (opcode === ops.OP_popscope) {
       if (this.scope === 0) {
-        return this.fail(kScopeStackUnderflowError);
+        return this.fail(C.kScopeStackUnderflowError);
       }
 
       this.scope--;
@@ -1267,16 +1219,16 @@ export class BodyDecoder {
       return true;
     } else if (opcode === ops.OP_setglobalslot && this.typed) {
       if (this.scope === 0 && this.outer.size === 0) {
-        return this.fail(kNoGlobalScopeError);
+        return this.fail(C.kNoGlobalScopeError);
       }
     }
 
     if (<u64>this.stack < pops) {
-      return this.fail(kStackUnderflowError);
+      return this.fail(C.kStackUnderflowError);
     }
 
     if (<u64>this.stack - pops + checkPushes > this.maxStack) {
-      return this.fail(kStackOverflowError);
+      return this.fail(C.kStackOverflowError);
     }
 
     const scopeBefore = this.scope;
@@ -1321,23 +1273,23 @@ export class BodyDecoder {
           return false;
         }
 
-        return a === b ? this.fail(kInvalidHasNextError) : true;
+        return a === b ? this.fail(C.kInvalidHasNextError) : true;
       case ops.OP_pushstring:
         return this.checkString(a);
       case ops.OP_pushint:
-        return a === 0 || a >= <u32>pool.ints.length ? this.fail(kCpoolIndexRangeError) : true;
+        return a === 0 || a >= <u32>pool.ints.length ? this.fail(C.kCpoolIndexRangeError) : true;
       case ops.OP_pushuint:
-        return a === 0 || a >= <u32>pool.uints.length ? this.fail(kCpoolIndexRangeError) : true;
+        return a === 0 || a >= <u32>pool.uints.length ? this.fail(C.kCpoolIndexRangeError) : true;
       case ops.OP_pushdouble:
-        return a === 0 || a >= <u32>pool.doubles.length ? this.fail(kCpoolIndexRangeError) : true;
+        return a === 0 || a >= <u32>pool.doubles.length ? this.fail(C.kCpoolIndexRangeError) : true;
       case ops.OP_pushnamespace:
-        return a === 0 || a >= pool.nsCount ? this.fail(kCpoolIndexRangeError) : true;
+        return a === 0 || a >= pool.nsCount ? this.fail(C.kCpoolIndexRangeError) : true;
       case ops.OP_dxnslate:
-        return this.methodFlags & METHOD_SetsDxns ? true : this.fail(kIllegalSetDxns);
+        return this.methodFlags & C.METHOD_SetsDxns ? true : this.fail(C.kIllegalSetDxns);
       case ops.OP_getlex:
-        return runtimeParts(pool, a) ? this.fail(kIllegalOpMultinameError) : true;
+        return runtimeParts(pool, a) ? this.fail(C.kIllegalOpMultinameError) : true;
       case ops.OP_finddef:
-        return isBinding(pool, a) ? true : this.fail(kIllegalOpMultinameError);
+        return isBinding(pool, a) ? true : this.fail(C.kIllegalOpMultinameError);
       case ops.OP_callproperty:
       case ops.OP_callproplex:
       case ops.OP_callpropvoid:
@@ -1346,21 +1298,21 @@ export class BodyDecoder {
       case ops.OP_callsupervoid:
       case ops.OP_getsuper:
       case ops.OP_setsuper:
-        return isAttribute(pool, a) ? this.fail(kIllegalOpMultinameError) : true;
+        return isAttribute(pool, a) ? this.fail(C.kIllegalOpMultinameError) : true;
       case ops.OP_newfunction:
-        return a >= abc.methodCount ? this.fail(kMethodInfoExceedsCountError) : true;
+        return a >= abc.methodCount ? this.fail(C.kMethodInfoExceedsCountError) : true;
       case ops.OP_newclass:
-        return a >= abc.classCount ? this.fail(kClassInfoExceedsCountError) : true;
+        return a >= abc.classCount ? this.fail(C.kClassInfoExceedsCountError) : true;
       case ops.OP_newactivation:
-        return this.methodFlags & METHOD_NeedActivation
+        return this.methodFlags & C.METHOD_NeedActivation
           ? true
-          : this.fail(kInvalidNewActivationError);
+          : this.fail(C.kInvalidNewActivationError);
       case ops.OP_newcatch:
-        return a >= this.handlerCount ? this.fail(kInvalidNewActivationError) : true;
+        return a >= this.handlerCount ? this.fail(C.kInvalidNewActivationError) : true;
       case ops.OP_pushscope:
       case ops.OP_pushwith:
         if (this.scope + 1 > this.maxScope) {
-          return this.fail(kScopeStackOverflowError);
+          return this.fail(C.kScopeStackOverflowError);
         }
 
         this.scope++;
@@ -1368,7 +1320,7 @@ export class BodyDecoder {
       case ops.OP_getscopeobject:
         // The verifier reads the index as the operand's first byte.
         return <u32>load<u8>(this.start + pc + 1) >= this.scope
-          ? this.fail(kGetScopeObjectBoundsError)
+          ? this.fail(C.kGetScopeObjectBoundsError)
           : true;
       default:
         return true;
@@ -1574,11 +1526,13 @@ export class BodyDecoder {
       case ops.OP_callmethod: {
         // Always rejected, as avmplus has done since Flash Player 9.
         if (a === 0) {
-          return this.fail(kZeroDispIdError);
+          return this.fail(C.kZeroDispIdError);
         }
 
         return this.fail(
-          this.typeOf(this.peek(b + 1)) === TYPE_Any ? kCorruptABCError : kIllegalEarlyBindingError,
+          this.typeOf(this.peek(b + 1)) === TYPE_Any
+            ? C.kCorruptABCError
+            : C.kIllegalEarlyBindingError,
         );
       }
       case ops.OP_callproperty:
@@ -1660,7 +1614,7 @@ export class BodyDecoder {
         const outer = this.outer;
         if (opcode === ops.OP_pushscope && scope === 0 && outer.extra !== TYPE_Any) {
           if (type === TYPE_Any || !domain.traits.subtypeOf(<u32>type, <u32>outer.extra)) {
-            return this.fail(kIllegalOperandTypeError);
+            return this.fail(C.kIllegalOperandTypeError);
           }
         }
 
@@ -1689,7 +1643,7 @@ export class BodyDecoder {
       case ops.OP_getouterscope: {
         const outer = this.outer;
         if (a >= outer.size) {
-          return this.fail(kGetScopeObjectBoundsError);
+          return this.fail(C.kGetScopeObjectBoundsError);
         }
 
         return this.push(outer.types[a], NOT_NULL);
@@ -1832,7 +1786,7 @@ export class BodyDecoder {
         return this.peekType(1, domain.intType) && this.popPush(2, domain.intType, NOT_NULL);
       case ops.OP_hasnext2:
         if (this.typeOf(b) !== domain.intType) {
-          return this.fail(kIllegalOperandTypeError);
+          return this.fail(C.kIllegalOperandTypeError);
         }
 
         this.setValue(a, TYPE_Any, 0);
@@ -1913,7 +1867,7 @@ export class BodyDecoder {
 
   /** As Verifier::peekType: the value `n` from the top must be exactly `type`. */
   peekType(n: u32, type: i32): bool {
-    return this.typeOf(this.peek(n)) === type ? true : this.fail(kIllegalOperandTypeError);
+    return this.typeOf(this.peek(n)) === type ? true : this.fail(C.kIllegalOperandTypeError);
   }
 
   /**
@@ -1948,7 +1902,7 @@ export class BodyDecoder {
   binding(type: i32, mn: u32): u32 {
     const b = getBinding(this.domain, this.index, type, mn);
     if (b === BIND_Ambiguous) {
-      this.fail(kAmbiguousBindingError);
+      this.fail(C.kAmbiguousBindingError);
     }
 
     return b;
@@ -1974,7 +1928,7 @@ export class BodyDecoder {
   typeName(mn: u32): i32 {
     const pool = this.abc.pool;
     if (mn === 0 || mn >= pool.multinameCount) {
-      this.fail(kCpoolIndexRangeError);
+      this.fail(C.kCpoolIndexRangeError);
       return -2;
     }
 
@@ -2002,7 +1956,7 @@ export class BodyDecoder {
     const count = traits.paramCount[m];
     const required = count - traits.optionalCount[m];
     if (argc < required || (argc > count && !domain.allowsExtraArgs(m))) {
-      return this.fail(kWrongArgumentCountError);
+      return this.fail(C.kWrongArgumentCountError);
     }
 
     const start = traits.paramStart[m];
@@ -2019,7 +1973,7 @@ export class BodyDecoder {
   coerceSuper(i: u32): i32 {
     const base = this.declarer >= 0 ? this.domain.traits.base[this.declarer] : -1;
     if (base < 0) {
-      this.fail(kIllegalSuperCallError);
+      this.fail(C.kIllegalSuperCallError);
       return -2;
     }
 
@@ -2037,7 +1991,7 @@ export class BodyDecoder {
     const domain = this.domain;
     const traits = domain.traits;
     if (type < 0 || traits.abc[type] !== this.index || !traits.allowEarlyBinding(<u32>type)) {
-      this.fail(kIllegalEarlyBindingError);
+      this.fail(C.kIllegalEarlyBindingError);
       return -2;
     }
 
@@ -2048,7 +2002,7 @@ export class BodyDecoder {
     }
 
     if (slot >= traits.slotCount[type]) {
-      this.fail(kSlotExceedsCountError);
+      this.fail(C.kSlotExceedsCountError);
       return -2;
     }
 
@@ -2065,7 +2019,7 @@ export class BodyDecoder {
     }
 
     if (this.scope === 0) {
-      this.fail(kGetScopeObjectBoundsError);
+      this.fail(C.kGetScopeObjectBoundsError);
       return -2;
     }
 
@@ -2509,7 +2463,7 @@ export class BodyDecoder {
     // Created again alike, it is still queued, so that verifying the ABC again finds it.
     if (current !== null) {
       if (!current.equals(scope) && global !== this.global) {
-        return this.fail(kCorruptABCError);
+        return this.fail(C.kCorruptABCError);
       }
 
       this.captured.push(global);
@@ -2517,7 +2471,7 @@ export class BodyDecoder {
     }
 
     if (traits.methodTraits[global] >= 0) {
-      return this.fail(kCorruptABCError);
+      return this.fail(C.kCorruptABCError);
     }
 
     traits.methodFunction[global] = 1;
@@ -2543,12 +2497,12 @@ export class BodyDecoder {
     const ctraits = domain.staticTraitsOf(this.index, i);
     const itraits = domain.instanceTraitsOf(ctraits);
     if (this.scope === 0) {
-      return this.fail(kCorruptABCError);
+      return this.fail(C.kCorruptABCError);
     }
 
     const innermost = this.typeOf(this.localCount + this.scope - 1);
     if (innermost === TYPE_Any || domain.instanceTraitsOf(innermost) !== traits.base[itraits]) {
-      return this.fail(kCorruptABCError);
+      return this.fail(C.kCorruptABCError);
     }
 
     const cscope = this.scopeHere(-2, ctraits);
@@ -2562,7 +2516,7 @@ export class BodyDecoder {
     if (current !== null) {
       const instance = traits.scope[itraits];
       if (instance === null || !current.equals(cscope) || !instance.equals(iscope)) {
-        return this.fail(kCorruptABCError);
+        return this.fail(C.kCorruptABCError);
       }
     } else {
       traits.scope[ctraits] = cscope;
@@ -2585,7 +2539,7 @@ export class BodyDecoder {
     }
 
     if (traits.receiverType[global] === TYPE_Any) {
-      return this.fail(kDanglingFunctionError);
+      return this.fail(C.kDanglingFunctionError);
     }
 
     this.checkNull(this.peek(argc + 1));
@@ -2627,7 +2581,7 @@ export class BodyDecoder {
 
       const m = traits.dispatch[traits.dispatchStart[base] + (b >> 3)];
       if (m < 0) {
-        return this.fail(kCorruptABCError);
+        return this.fail(C.kCorruptABCError);
       }
 
       const signError = traits.sign(domain, <u32>m);
@@ -2674,7 +2628,7 @@ export class BodyDecoder {
 
   checkString(index: u32): bool {
     return index === 0 || index >= this.abc.pool.stringCount
-      ? this.fail(kCpoolIndexRangeError)
+      ? this.fail(C.kCpoolIndexRangeError)
       : true;
   }
 
@@ -2711,69 +2665,69 @@ export class BodyDecoder {
  */
 function isBinding(pool: ConstantPool, index: u32): bool {
   let mn = index;
-  if (pool.mnKind[mn] === CONSTANT_TypeName) {
+  if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
     mn = pool.mnA[mn];
   }
 
   const kind = pool.mnKind[mn];
-  if (kind === CONSTANT_Qname) {
+  if (kind === C.CONSTANT_Qname) {
     return pool.mnA[mn] !== 0 && pool.mnB[mn] !== 0;
   }
 
-  return kind === CONSTANT_Multiname && pool.mnB[mn] !== 0;
+  return kind === C.CONSTANT_Multiname && pool.mnB[mn] !== 0;
 }
 
 /** Values a multiname takes from the stack: a runtime namespace, a runtime name, or both. */
 function runtimeParts(pool: ConstantPool, index: u32): u32 {
   const kind = pool.mnKind[index];
   if (
-    kind === CONSTANT_RTQname ||
-    kind === CONSTANT_RTQnameA ||
-    kind === CONSTANT_MultinameL ||
-    kind === CONSTANT_MultinameLA
+    kind === C.CONSTANT_RTQname ||
+    kind === C.CONSTANT_RTQnameA ||
+    kind === C.CONSTANT_MultinameL ||
+    kind === C.CONSTANT_MultinameLA
   ) {
     return 1;
   }
 
-  return kind === CONSTANT_RTQnameL || kind === CONSTANT_RTQnameLA ? 2 : 0;
+  return kind === C.CONSTANT_RTQnameL || kind === C.CONSTANT_RTQnameLA ? 2 : 0;
 }
 
 function isAttribute(pool: ConstantPool, index: u32): bool {
   const kind = pool.mnKind[index];
   return (
-    kind === CONSTANT_QnameA ||
-    kind === CONSTANT_RTQnameA ||
-    kind === CONSTANT_RTQnameLA ||
-    kind === CONSTANT_MultinameA ||
-    kind === CONSTANT_MultinameLA
+    kind === C.CONSTANT_QnameA ||
+    kind === C.CONSTANT_RTQnameA ||
+    kind === C.CONSTANT_RTQnameLA ||
+    kind === C.CONSTANT_MultinameA ||
+    kind === C.CONSTANT_MultinameLA
   );
 }
 
 /** A multiname's MN_* parts, as avmplus' Multiname flags. */
 function nameParts(pool: ConstantPool, index: u32): u8 {
   let kind = pool.mnKind[index];
-  if (kind === CONSTANT_TypeName) {
+  if (kind === C.CONSTANT_TypeName) {
     kind = pool.mnKind[pool.mnA[index]];
   }
 
   switch (kind) {
-    case CONSTANT_Qname:
+    case C.CONSTANT_Qname:
       return MN_QName;
-    case CONSTANT_QnameA:
+    case C.CONSTANT_QnameA:
       return MN_QName | MN_Attr;
-    case CONSTANT_RTQname:
+    case C.CONSTANT_RTQname:
       return MN_QName | MN_Rtns;
-    case CONSTANT_RTQnameA:
+    case C.CONSTANT_RTQnameA:
       return MN_QName | MN_Rtns | MN_Attr;
-    case CONSTANT_RTQnameL:
+    case C.CONSTANT_RTQnameL:
       return MN_QName | MN_Rtns | MN_Rtname;
-    case CONSTANT_RTQnameLA:
+    case C.CONSTANT_RTQnameLA:
       return MN_QName | MN_Rtns | MN_Rtname | MN_Attr;
-    case CONSTANT_MultinameL:
+    case C.CONSTANT_MultinameL:
       return MN_Rtname;
-    case CONSTANT_MultinameLA:
+    case C.CONSTANT_MultinameLA:
       return MN_Rtname | MN_Attr;
-    case CONSTANT_MultinameA:
+    case C.CONSTANT_MultinameA:
       return MN_Attr;
     default:
       return 0;
