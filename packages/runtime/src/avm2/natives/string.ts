@@ -1,7 +1,7 @@
 // String: `this` is the string.
 import type { ClassHook, Value } from "../runtime.js";
 import { AS3, conversion, type Natives, plain } from "./define.js";
-import { matchArray } from "./regexp.js";
+import { compile, matchArray, replacement as replacementOf } from "./regexp.js";
 
 export const stringNatives: Natives = {
   "String#get:length": plain(function (this: string) {
@@ -76,12 +76,16 @@ export const stringNatives: Natives = {
       });
     }
 
-    return s.replace(p, rt.toString(replacement));
+    const text = rt.toString(replacement);
+    return s.replace(p, p instanceof RegExp ? replacementOf(p, text) : text);
   },
+  // A string pattern is a RegExp's, as avmplus makes one of it.
   "String.String::_search": (rt) => (s: string, pattern: Value) =>
-    s.search(pattern?.$re instanceof RegExp ? pattern.$re : rt.toString(pattern)),
+    s.search(pattern?.$re instanceof RegExp ? pattern.$re : compile(rt.toString(pattern), "")),
   "String.String::_match": (rt) => (s: string, pattern: Value) => {
-    const m = s.match(pattern?.$re instanceof RegExp ? pattern.$re : rt.toString(pattern));
+    const m = s.match(
+      pattern?.$re instanceof RegExp ? pattern.$re : compile(rt.toString(pattern), ""),
+    );
     return m ? matchArray(rt, m) : null;
   },
   "String.String::_split": (rt) => (s: string, delimiter: Value, limit: number) => {
