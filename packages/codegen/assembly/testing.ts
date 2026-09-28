@@ -6,7 +6,28 @@ import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./abc
 import { readAbc } from "./abc/parse";
 import { readConstantPool } from "./abc/pool";
 import { PADDING, Reader } from "./abc/reader";
+import {
+  IR_CallGetter,
+  IR_CallInterface,
+  IR_CallSetter,
+  IR_CheckNull,
+  IR_Coerce,
+  IR_FindPropGlobal,
+  IR_FindPropGlobalStrict,
+  IR_GetGlobalScope,
+  IR_Nip,
+  Ir,
+} from "./ir/ir";
 import { Domain } from "./link/domain";
+import {
+  TRAITS_Activation,
+  TRAITS_Catch,
+  TRAITS_Class,
+  TRAITS_Instance,
+  TRAITS_Null,
+  TRAITS_Script,
+  TRAITS_Void,
+} from "./link/traits";
 
 export const U8: u8 = 0;
 export const U16: u8 = 1;
@@ -451,6 +472,254 @@ export function domainVerifyAll(): string {
 
   out.push(`verified ${verified} of ${results.length} bodies`);
   return out.join("\n");
+}
+
+/**
+ * The IR of body `body` of the domain's last ABC, after verifying the ABC
+ * as domainVerifyAll does: "B<n> @<pc> stack [types] scope [types]" per
+ * block, then a line per instruction, "<pc>: [dst =] op srcs [a b c] : type",
+ * a trailing ! marking a type known not null; "error N" if it failed.
+ */
+export function domainIr(body: u32): string {
+  const index = <u32>(domain.abcs.length - 1);
+  const abc = domain.abcs[index];
+  const results = verifyMethods(domain, index);
+  if (results[body] !== 0) {
+    return results[body] < 0 ? "not verified" : `error ${results[body]}`;
+  }
+
+  const decoder = new BodyDecoder(abc, domain.abcBase[index], domain, index);
+  const m = domain.methodStart[index] + abc.bodyMethod[body];
+  const code = decoder.decode(body, domain.traits.scopeOf(m));
+  if (code.error) {
+    return `error ${code.error}`;
+  }
+
+  const ir = decoder.ir;
+  const out: string[] = [];
+  const stackBase = ir.localCount + ir.maxScope;
+  for (let k: u32 = 0; k < ir.blockCount; k++) {
+    const entry = k * ir.frameSize;
+    const stack: string[] = [];
+    for (let d: u32 = 0; d < ir.blockStack[k]; d++) {
+      stack.push(
+        typeText(ir.entryType[entry + stackBase + d], ir.entryNotNull[entry + stackBase + d]),
+      );
+    }
+
+    const scope: string[] = [];
+    for (let d: u32 = 0; d < ir.blockScope[k]; d++) {
+      scope.push(typeText(ir.entryType[entry + ir.localCount + d], 1));
+    }
+
+    out.push(`B${k} @${ir.blockPc[k]} stack [${stack.join(", ")}] scope [${scope.join(", ")}]`);
+    const last = k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
+    for (let i = ir.blockFirst[k]; i < last; i++) {
+      out.push(`  ${irLine(ir, i)}`);
+    }
+  }
+
+  for (let h: u32 = 0; h < ir.handlerCount; h++) {
+    out.push(
+      `handler ${ir.handlerFrom[h]}..${ir.handlerTo[h]} B${ir.handlerBlock[h]} ${typeText(ir.handlerType[h], 0)}`,
+    );
+  }
+
+  return out.join("\n");
+}
+
+/**
+ * Check the IR of every method of the domain's last ABC that verifies:
+ * registers inside the frame, branch, case and handler targets that are
+ * blocks, blocks that end in a terminal instruction or fall into the next,
+ * and each instruction's pc inside its block. "checked N bodies, R
+ * instructions" or the first problem.
+ */
+export function domainCheckIr(): string {
+  const index = <u32>(domain.abcs.length - 1);
+  const abc = domain.abcs[index];
+  const results = verifyMethods(domain, index);
+  const decoder = new BodyDecoder(abc, domain.abcBase[index], domain, index);
+  let bodies = 0;
+  let rows = 0;
+  for (let body: u32 = 0; body < abc.bodyCount; body++) {
+    if (results[body] !== 0) {
+      continue;
+    }
+
+    const m = domain.methodStart[index] + abc.bodyMethod[body];
+    decoder.decode(body, domain.traits.scopeOf(m));
+    const ir = decoder.ir;
+    bodies++;
+    rows += ir.count;
+    const size = <i32>ir.frameSize;
+    for (let k: u32 = 0; k < ir.blockCount; k++) {
+      const first = ir.blockFirst[k];
+      const last = k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
+      const end = k + 1 < ir.blockCount ? ir.blockPc[k + 1] : abc.bodyCodeLength[body];
+      if (last === first && k + 1 === ir.blockCount) {
+        return `body ${body} B${k}: empty last block`;
+      }
+
+      for (let i = first; i < last; i++) {
+        const op = ir.op[i];
+        const where = `body ${body} B${k} row ${i} (${irName(op)})`;
+        if (ir.dst[i] >= size || ir.dst[i] < -1) {
+          return `${where}: dst ${ir.dst[i]} outside the frame of ${size}`;
+        }
+
+        if (ir.srcCount[i] && (ir.src[i] < 0 || ir.src[i] + <i32>ir.srcCount[i] > size)) {
+          return `${where}: src ${ir.src[i]}+${ir.srcCount[i]} outside the frame of ${size}`;
+        }
+
+        if (ir.pc[i] < ir.blockPc[k] || ir.pc[i] >= end) {
+          return `${where}: pc ${ir.pc[i]} outside ${ir.blockPc[k]}..${end}`;
+        }
+
+        const branches = (op >= 0x0c && op <= 0x1a) || op === 0x10;
+        if (branches && ir.a[i] >= ir.blockCount) {
+          return `${where}: target B${ir.a[i]} of ${ir.blockCount}`;
+        }
+
+        if (ir.isSwitch(i)) {
+          if (ir.a[i] >= ir.blockCount) {
+            return `${where}: default B${ir.a[i]}`;
+          }
+
+          for (let c = ir.b[i]; c <= ir.b[i] + <u32>ir.c[i]; c++) {
+            if (ir.cases[c] >= ir.blockCount) {
+              return `${where}: case B${ir.cases[c]}`;
+            }
+          }
+        }
+      }
+
+      // A block ends in a jump, switch, return or throw, or falls into the next.
+      const lastOp = last > first ? ir.op[last - 1] : 0;
+      const terminal =
+        lastOp === 0x10 || lastOp === 0x1b || lastOp === 0x03 || lastOp === 0x47 || lastOp === 0x48;
+      if (!terminal && k + 1 === ir.blockCount) {
+        return `body ${body} B${k}: falls off the end after ${irName(lastOp)}`;
+      }
+    }
+
+    for (let h: u32 = 0; h < ir.handlerCount; h++) {
+      if (ir.handlerBlock[h] >= ir.blockCount) {
+        return `body ${body} handler ${h}: block B${ir.handlerBlock[h]}`;
+      }
+    }
+  }
+
+  return `checked ${bodies} bodies, ${rows} instructions`;
+}
+
+function irLine(ir: Ir, i: u32): string {
+  const srcs: string[] = [];
+  for (let k: u32 = 0; k < ir.srcCount[i]; k++) {
+    srcs.push(register(ir, ir.src[i] + <i32>k));
+  }
+
+  const op = ir.op[i];
+  const dst = ir.dst[i];
+  let line = `${ir.pc[i]}: ${dst >= 0 ? `${register(ir, dst)} = ` : ""}${irName(op)}`;
+  if (srcs.length) {
+    line += ` ${srcs.join(" ")}`;
+  }
+
+  if (ir.isSwitch(i)) {
+    const cases: string[] = [];
+    for (let c = ir.b[i]; c <= ir.b[i] + <u32>ir.c[i]; c++) {
+      cases.push(`B${ir.cases[c]}`);
+    }
+
+    line += ` default B${ir.a[i]} [${cases.join(" ")}]`;
+  } else if (op === 0x10 || (op >= 0x0c && op <= 0x1a)) {
+    line += ` B${ir.a[i]}`;
+  } else if (op === IR_Coerce) {
+    line += ` ${typeText(ir.c[i], 0)}`;
+  } else if (ir.a[i] || ir.b[i] || ir.c[i]) {
+    line += ` [${ir.a[i]} ${ir.b[i]} ${ir.c[i]}]`;
+  }
+
+  return dst >= 0 ? `${line} : ${typeText(ir.type[i], ir.notNull[i])}` : line;
+}
+
+function register(ir: Ir, r: i32): string {
+  const local = <i32>ir.localCount;
+  if (r < local) {
+    return `l${r}`;
+  }
+
+  return r < local + <i32>ir.maxScope ? `sc${r - local}` : `s${r - local - <i32>ir.maxScope}`;
+}
+
+function irName(op: u16): string {
+  if (op < 256) {
+    return opcodeNames[op];
+  }
+
+  switch (op) {
+    case IR_Coerce:
+      return "coerce";
+    case IR_CheckNull:
+      return "checknull";
+    case IR_CallGetter:
+      return "callgetter";
+    case IR_CallSetter:
+      return "callsetter";
+    case IR_CallInterface:
+      return "callinterface";
+    case IR_FindPropGlobal:
+      return "findpropglobal";
+    case IR_FindPropGlobalStrict:
+      return "findpropglobalstrict";
+    case IR_GetGlobalScope:
+      return "getglobalscope";
+    case IR_Nip:
+      return "nip";
+    default:
+      return `ir${op}`;
+  }
+}
+
+/** A type's name: "*", void, null, a class's name, "Name$" for its class object, and so on. */
+function typeText(t: i32, notNull: u8): string {
+  const bang = notNull ? "!" : "";
+  if (t < 0) {
+    return `*${bang}`;
+  }
+
+  const traits = domain.traits;
+  const kind = traits.kind[t];
+  let name = "";
+  if (kind === TRAITS_Void) {
+    name = "void";
+  } else if (kind === TRAITS_Null) {
+    name = "null";
+  } else if (kind === TRAITS_Script) {
+    name = "global";
+  } else if (kind === TRAITS_Activation) {
+    name = "activation";
+  } else if (kind === TRAITS_Catch) {
+    name = "catch";
+  } else if (
+    traits.param[t] !== -1 ||
+    (kind === TRAITS_Instance &&
+      traits.first[t] === traits.end[t] &&
+      traits.base[t] === domain.vectorObjectType &&
+      t !== domain.vectorObjectType)
+  ) {
+    name = `Vector.<${typeText(traits.param[t], 0)}>`;
+  } else {
+    const abc = domain.abcs[traits.abc[t]];
+    const id = domain.nameOf(traits.abc[t], abc.instanceName[traits.owner[t]]);
+    name = String.UTF8.decodeUnsafe(domain.stringPtr[id], domain.stringLength[id]);
+    if (kind === TRAITS_Class) {
+      name += "$";
+    }
+  }
+
+  return name + bang;
 }
 
 /** How many traits the domain has. */
