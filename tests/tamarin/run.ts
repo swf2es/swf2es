@@ -75,7 +75,8 @@ for (const r of results) {
       problems.push(`${r.name}: ${difference}`);
     }
 
-    // A linking error stops the ABC loading, before any method is verified.
+    // A linking error stops the ABC loading, before any method is verified;
+    // a class's types resolve when it is created, before its methods run.
     const link = linkError(builtins, abc);
     const ours = link ? `${link}` : verifyErrors(facts).join(" ");
     const theirs = [...new Set(r.output.match(/(?<=VerifyError: Error #)\d+/g) ?? [])]

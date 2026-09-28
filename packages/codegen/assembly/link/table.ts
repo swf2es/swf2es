@@ -1,0 +1,83 @@
+// Hash tables of ids for the domain's interned names and bindings.
+
+/** Maps a 32-bit hash to ids by linear probing; callers compare the keys. */
+@final
+export class IdTable {
+  /** id + 1 per slot; 0 is empty. */
+  ids: StaticArray<u32> = new StaticArray<u32>(64);
+  hashes: StaticArray<u32> = new StaticArray<u32>(64);
+  count: u32 = 0;
+
+  @inline
+  start(hash: u32): u32 {
+    return hash & (<u32>this.ids.length - 1);
+  }
+
+  @inline
+  next(slot: u32): u32 {
+    return (slot + 1) & (<u32>this.ids.length - 1);
+  }
+
+  /** The id in `slot`, or -1 at the end of the probe. */
+  @inline
+  at(slot: u32): i32 {
+    return <i32>unchecked(this.ids[slot]) - 1;
+  }
+
+  @inline
+  hashAt(slot: u32): u32 {
+    return unchecked(this.hashes[slot]);
+  }
+
+  insert(hash: u32, id: u32): void {
+    if ((this.count + 1) * 4 > <u32>this.ids.length * 3) {
+      this.grow();
+    }
+
+    let slot = this.start(hash);
+    while (unchecked(this.ids[slot])) {
+      slot = this.next(slot);
+    }
+
+    unchecked((this.ids[slot] = id + 1));
+    unchecked((this.hashes[slot] = hash));
+    this.count++;
+  }
+
+  grow(): void {
+    const ids = this.ids;
+    const hashes = this.hashes;
+    this.ids = new StaticArray<u32>(ids.length * 2);
+    this.hashes = new StaticArray<u32>(ids.length * 2);
+    this.count = 0;
+
+    // Re-inserting in slot order keeps equal hashes in insertion order.
+    const size = <u32>ids.length;
+    let first: u32 = 0;
+    while (first < size && unchecked(ids[first])) {
+      first++;
+    }
+
+    for (let i: u32 = 1; i <= size; i++) {
+      const slot = (first + i) & (size - 1);
+      if (unchecked(ids[slot])) {
+        this.insert(unchecked(hashes[slot]), unchecked(ids[slot]) - 1);
+      }
+    }
+  }
+}
+
+export function hashBytes(ptr: usize, length: u32): u32 {
+  let h: u32 = 0x811c9dc5;
+  for (let i: u32 = 0; i < length; i++) {
+    h = (h ^ load<u8>(ptr + i)) * 0x01000193;
+  }
+
+  return h;
+}
+
+export function hashPair(a: u32, b: u32): u32 {
+  let h = a * 0x9e3779b1;
+  h ^= b + 0x7f4a7c15 + (h << 6) + (h >> 2);
+  return h ^ (h >> 16);
+}

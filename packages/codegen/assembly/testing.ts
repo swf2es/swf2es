@@ -361,6 +361,58 @@ export function domainBindings(): string {
   return out.join("\n");
 }
 
+/**
+ * The domain's traits from `first` on: "traits T kind K base B slots S
+ * methods M", then a "  uri::name kind id" line per own member.
+ */
+export function domainTraits(first: i32): string {
+  const traits = domain.traits;
+  const text = (id: u32): string =>
+    id === 0xffffffff
+      ? "*"
+      : String.UTF8.decodeUnsafe(domain.stringPtr[id], domain.stringLength[id]);
+  const out: string[] = [];
+  for (let t = first; t < traits.kind.length; t++) {
+    out.push(
+      `traits ${t} kind ${traits.kind[t]} base ${traits.base[t]} slots ${traits.slotCount[t]} methods ${traits.methodCount[t]}`,
+    );
+    for (let m = traits.memberStart[t]; m < traits.memberEnd[t]; m++) {
+      const binding = traits.memberBinding[m];
+      out.push(
+        `  ${text(domain.nsUri[traits.memberNs[m]])}::${text(traits.memberName[m])} ${binding & 7} ${binding >> 3}`,
+      );
+    }
+  }
+
+  return out.join("\n");
+}
+
+/**
+ * Resolve every traits of the domain from `first` on, as avmplus does when
+ * each is first used: 0, or the first VerifyError.
+ */
+export function domainResolve(first: i32): i32 {
+  const count = domain.traits.kind.length;
+  for (let t = first; t < count; t++) {
+    const error = domain.traits.resolve(domain, t);
+    if (error) {
+      return error;
+    }
+  }
+
+  return 0;
+}
+
+/** The builtin types the domain found, as traits ids. */
+export function domainBuiltins(): string {
+  return `object ${domain.objectType()} class ${domain.classClass} void ${domain.voidType} null ${domain.nullType} number ${domain.numberType} int ${domain.intType} uint ${domain.uintType} boolean ${domain.booleanType} string ${domain.stringType} namespace ${domain.namespaceType} vector ${domain.vectorClass} vectorObject ${domain.vectorObjectType} vectorInt ${domain.vectorIntType} vectorUint ${domain.vectorUintType} vectorDouble ${domain.vectorDoubleType}`;
+}
+
+/** How many traits the domain has. */
+export function domainTraitsCount(): i32 {
+  return domain.traits.kind.length;
+}
+
 /** The opcode table, one "opcode name layout flags" line per opcode. */
 export function opcodeTable(): string {
   const lines: string[] = [];
