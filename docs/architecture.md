@@ -370,8 +370,10 @@ only, so the player implements all of it.
 The as3pb protobuf benchmark (`tests/programs`), compiled by swf2es and run in node:
 
 - its trace output matches avmshell byte for byte;
-- it is faster than the AwayFL JIT on the same benchmark (ByteArray 574 ms,
-  domain memory 728 ms headless; PepperFlash 188 ms / 83 ms);
+- it is faster than the AwayFL JIT on the same benchmark (headless, its
+  first run: ByteArray 525 ms, domain memory 689 ms; PepperFlash 188 ms /
+  83 ms). Met since #23, at 207 ms / 251 ms
+  ([benchmarks.md](benchmarks.md#generated-code-as3pb));
 - the Tamarin `ecma3/` and `as3/Types/` suites run through the conformance
   runner, with their pass rate tracked.
 
