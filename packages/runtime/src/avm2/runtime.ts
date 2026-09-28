@@ -518,6 +518,24 @@ export class Runtime {
     return g;
   }
 
+  /**
+   * The script that defines `mn`, kept on the multiname once found: the
+   * first definition of a name wins, so later modules cannot change it.
+   */
+  private definingScript(mn: Multiname): Script | null {
+    const known = (mn as Multiname & { $script?: Script }).$script;
+    if (known) {
+      return known;
+    }
+
+    const script = this.findScript(mn);
+    if (script) {
+      (mn as Multiname & { $script?: Script }).$script = script;
+    }
+
+    return script;
+  }
+
   /** The script that defines `mn`, or null. */
   findScript(mn: Multiname): Script | null {
     if (mn.name === null) {
@@ -551,7 +569,7 @@ export class Runtime {
   }
 
   findDef(mn: Multiname): AsObject {
-    const script = this.findScript(mn);
+    const script = this.definingScript(mn);
     if (!script) {
       throw this.error("ReferenceError", 1065, mn.toString());
     }
@@ -599,7 +617,7 @@ export class Runtime {
   }
 
   private global(mn: Multiname, global: AsObject, strict: boolean): AsObject {
-    const script = this.findScript(mn);
+    const script = this.definingScript(mn);
     if (script) {
       return this.initScript(script);
     }
@@ -1417,8 +1435,9 @@ export class Runtime {
           return null;
         }
 
+        // An instance of the class itself, most often, then any subtype.
         const traits = this.traitsOfType(type);
-        if (this.isInstanceOf(v, traits)) {
+        if (v.$traits === traits || this.isInstanceOf(v, traits)) {
           return v;
         }
 
