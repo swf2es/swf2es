@@ -1,11 +1,7 @@
 // Compares swf2es' ABC parser with avmplus' abcdump by the facts both
 // report, not by text: abcdump's own formatting has quirks we do not copy.
-import { readFile } from "node:fs/promises";
-
-const dir = new URL("../packages/codegen/dist-test/", import.meta.url);
-const { instantiate } = await import(new URL("testing.js", dir).href);
-const module = await WebAssembly.compile(await readFile(new URL("testing.wasm", dir)));
-const testing = await instantiate(module, { env: {} });
+// The test build, which collects garbage between calls as the tests' does.
+import { testing } from "../tests/unit/codegen/testing-module.ts";
 
 /**
  * Table counts, each method body's sizes, and each body's instructions as
