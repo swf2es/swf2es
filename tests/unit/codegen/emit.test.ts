@@ -13,6 +13,7 @@ const rt = {
   greaterThan: (a: number, b: number) => a > b,
   caught: (e: unknown) => e,
   unreachable: () => new Error("unreachable"),
+  defaultXmlNamespace: null,
 };
 
 /** The script initializer of `abc` as JavaScript. */
