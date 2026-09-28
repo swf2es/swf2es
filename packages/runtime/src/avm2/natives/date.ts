@@ -6,7 +6,7 @@
 //
 // parseDate is translated from avmplus' core/DateClass.cpp, and so subject
 // to the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
-import type { AsObject, ClassHook, Runtime, Value } from "./runtime.js";
+import type { AsObject, ClassHook, Runtime, Value } from "../runtime.js";
 
 type Natives = Record<string, (rt: Runtime) => (...args: Value[]) => Value>;
 

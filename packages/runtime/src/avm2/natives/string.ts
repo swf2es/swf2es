@@ -1,0 +1,99 @@
+// String: `this` is the string.
+import type { ClassHook, Value } from "../runtime.js";
+import { AS3, conversion, type Natives, plain } from "./define.js";
+import { matchArray } from "./regexp.js";
+
+export const stringNatives: Natives = {
+  "String#get:length": plain(function (this: string) {
+    return this.length;
+  }),
+  [`String.${AS3}::fromCharCode`]:
+    (rt) =>
+    (...codes: Value[]) => {
+      return String.fromCharCode(...codes.map((c) => rt.toUint(c) & 0xffff));
+    },
+  [`String#${AS3}::charAt`]: (rt) =>
+    function (this: string, i: Value = 0) {
+      return this.charAt(rt.toNumber(i));
+    },
+  [`String#${AS3}::charCodeAt`]: (rt) =>
+    function (this: string, i: Value = 0) {
+      return this.charCodeAt(rt.toNumber(i));
+    },
+  [`String#${AS3}::indexOf`]: (rt) =>
+    function (this: string, s: Value = "undefined", i: Value = 0) {
+      return this.indexOf(rt.toString(s), rt.toNumber(i));
+    },
+  [`String#${AS3}::lastIndexOf`]: (rt) =>
+    function (this: string, s: Value = "undefined", i: Value = 0x7fffffff) {
+      return this.lastIndexOf(rt.toString(s), rt.toNumber(i));
+    },
+  [`String#${AS3}::localeCompare`]: (rt) =>
+    function (this: string, other: Value) {
+      const o = rt.toString(other);
+      return this < o ? -1 : this > o ? 1 : 0;
+    },
+  [`String#${AS3}::slice`]: (rt) =>
+    function (this: string, start: Value = 0, end: Value = 0x7fffffff) {
+      return this.slice(rt.toNumber(start), rt.toNumber(end));
+    },
+  [`String#${AS3}::substring`]: (rt) =>
+    function (this: string, start: Value = 0, end: Value = 0x7fffffff) {
+      return this.substring(rt.toNumber(start), rt.toNumber(end));
+    },
+  [`String#${AS3}::substr`]: (rt) =>
+    function (this: string, start: Value = 0, length: Value = 0x7fffffff) {
+      return this.substr(rt.toNumber(start), rt.toNumber(length));
+    },
+  [`String#${AS3}::toLowerCase`]: plain(function (this: string) {
+    return this.toLowerCase();
+  }),
+  [`String#${AS3}::toUpperCase`]: plain(function (this: string) {
+    return this.toUpperCase();
+  }),
+  "String#String::_indexOf": plain(function (this: string, s: string, i = 0) {
+    return this.indexOf(s, i);
+  }),
+  "String#String::_lastIndexOf": plain(function (this: string, s: string, i = 0x7fffffff) {
+    return this.lastIndexOf(s, i);
+  }),
+  "String#String::_slice": plain(function (this: string, start = 0, end = 0x7fffffff) {
+    return this.slice(start, end);
+  }),
+  "String#String::_substring": plain(function (this: string, start = 0, end = 0x7fffffff) {
+    return this.substring(start, end);
+  }),
+  "String#String::_substr": plain(function (this: string, start = 0, length = 0x7fffffff) {
+    return this.substr(start, length);
+  }),
+  "String.String::_replace": (rt) => (s: string, pattern: Value, replacement: Value) => {
+    const p = pattern?.$re instanceof RegExp ? pattern.$re : rt.toString(pattern);
+    if (replacement !== null && typeof replacement === "object" && replacement.$f) {
+      // The function gets the match, its groups, its position and the string.
+      return s.replace(p, (...a: Value[]) => {
+        const args = typeof a[a.length - 1] === "object" ? a.slice(0, -1) : a;
+        return rt.toString(rt.callValue(replacement, null, args, null));
+      });
+    }
+
+    return s.replace(p, rt.toString(replacement));
+  },
+  "String.String::_search": (rt) => (s: string, pattern: Value) =>
+    s.search(pattern?.$re instanceof RegExp ? pattern.$re : rt.toString(pattern)),
+  "String.String::_match": (rt) => (s: string, pattern: Value) => {
+    const m = s.match(pattern?.$re instanceof RegExp ? pattern.$re : rt.toString(pattern));
+    return m ? matchArray(rt, m) : null;
+  },
+  "String.String::_split": (rt) => (s: string, delimiter: Value, limit: number) => {
+    if (delimiter?.$re instanceof RegExp) {
+      return rt.array(s.split(delimiter.$re, limit >= 0 ? limit : undefined));
+    }
+
+    const parts = s.split(rt.toString(delimiter));
+    return rt.array(limit >= 0 && limit < parts.length ? parts.slice(0, limit) : parts);
+  },
+};
+
+export const stringHooks: Record<string, ClassHook> = {
+  String: conversion((rt, args) => (args.length ? rt.toString(args[0]) : "")),
+};

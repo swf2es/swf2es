@@ -6,8 +6,8 @@
 //
 // Translated from avmplus' core/ArrayClass.cpp, this file is subject to the
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
-import { publicNs, qname } from "./names.js";
-import type { AsObject, Runtime, Value } from "./runtime.js";
+import { publicNs, qname } from "../names.js";
+import type { AsObject, Runtime, Value } from "../runtime.js";
 
 export const kCaseInsensitive = 1;
 export const kDescending = 2;
