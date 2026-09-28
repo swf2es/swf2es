@@ -65,3 +65,26 @@ big.writeByte(0xfe); big.writeByte(0xff);
 for (var bi:int = 0; bi < 200000; bi++) { big.writeByte(0); big.writeByte(0x41 + bi % 26); }
 var bs:String = big.toString();
 trace("utf-16", bs.length, bs.substr(0, 5), bs.charAt(199999));
+// UTF-8 of strings short and long, either side of where swf2es hands them
+// to the host's encoder, with a surrogate pair as four bytes. Lone
+// surrogates are left out: avmshell loses characters around them (a lone
+// high one takes the character after it, and one at the end disappears),
+// where swf2es writes each as U+FFFD, valid UTF-8 that keeps the rest.
+function utf8Sum(s:String):String {
+  var b:ByteArray = new ByteArray();
+  b.writeUTFBytes(s);
+  var sum:uint = 0;
+  for (var i:uint = 0; i < b.length; i++) sum = (sum * 31 + b[i]) >>> 0;
+  var u:ByteArray = new ByteArray();
+  u.writeUTF(s);
+  u.position = 0;
+  return b.length + ":" + sum + ":" + (u.readUTF() == s);
+}
+var sizes:Array = [];
+for each (var size:int in [95, 96, 97, 300]) {
+  var ascii:String = "";
+  while (ascii.length < size) ascii += "abc " + ascii.length;
+  ascii = ascii.substr(0, size);
+  sizes.push(utf8Sum(ascii), utf8Sum(ascii.substr(0, size - 2) + "é€"), utf8Sum(ascii.substr(0, size - 3) + "😀x"));
+}
+trace("utf8 sizes", sizes.join(" "));
