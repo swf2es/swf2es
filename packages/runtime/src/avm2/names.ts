@@ -31,15 +31,21 @@ export class Namespace {
   }
 }
 
-const interned = new Map<string, Namespace>();
+/** The interned namespaces, by kind, then URI: null, the any namespace, is not "null". */
+const interned: Map<string | null, Namespace>[] = [];
 
 /** The namespace of `kind` and `uri`, the same object each time. */
 export function namespace(kind: number, uri: string | null): Namespace {
-  const key = `${kind}:${uri}`;
-  let ns = interned.get(key);
+  let byUri = interned[kind];
+  if (!byUri) {
+    byUri = new Map();
+    interned[kind] = byUri;
+  }
+
+  let ns = byUri.get(uri);
   if (!ns) {
     ns = new Namespace(kind, uri);
-    interned.set(key, ns);
+    byUri.set(uri, ns);
   }
 
   return ns;

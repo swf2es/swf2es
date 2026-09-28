@@ -183,7 +183,7 @@ export class Traits {
 
     for (const [slot, value, type] of desc.defaults) {
       this.slotTypes[slot] = type;
-      this.own.push([`$${slot}`, value]);
+      this.own.push([slotKey(slot), value]);
     }
 
     if (desc.transient) {
@@ -428,7 +428,8 @@ export class Runtime {
   readonly natives: Record<string, (rt: Runtime) => Method>;
   /** Names the scripts define, by local name: the first definition wins. */
   private readonly globals = new Map<string, GlobalName[]>();
-  private readonly classRefs = new Map<string, ClassRef>();
+  /** Class references by namespace, which is interned or private, then name. */
+  private readonly classRefs = new Map<Namespace, Map<string, ClassRef>>();
   private readonly vectorRefs = new Map<TypeRef, VectorRef>();
   /**
    * The domain memory the domain memory instructions use: the ByteArray set
@@ -573,11 +574,16 @@ export class Runtime {
   }
 
   cls(ns: Namespace, name: string): ClassRef {
-    const key = `${ns.kind}:${ns.uri}:${name}`;
-    let ref = this.classRefs.get(key);
+    let byName = this.classRefs.get(ns);
+    if (!byName) {
+      byName = new Map();
+      this.classRefs.set(ns, byName);
+    }
+
+    let ref = byName.get(name);
     if (!ref) {
       ref = new ClassRef(ns, name);
-      this.classRefs.set(key, ref);
+      byName.set(name, ref);
     }
 
     return ref;
@@ -654,7 +660,7 @@ export class Runtime {
       const g = traits.instance();
       const scope = Object.assign([g], { w: 0 });
       for (const [d, factory] of script.desc.traits.methods) {
-        traits.proto[`$m${d}`] = factory(scope, null);
+        traits.proto[methodKey(d)] = factory(scope, null);
       }
 
       script.global = g;
@@ -1703,11 +1709,11 @@ export class Runtime {
 
     const iscope = this.scope(scope, [cls], 0);
     for (const [d, factory] of desc.static.methods) {
-      straits.proto[`$m${d}`] = factory(scope, base);
+      straits.proto[methodKey(d)] = factory(scope, base);
     }
 
     for (const [d, factory] of desc.instance.methods) {
-      itraits.proto[`$m${d}`] = factory(iscope, base);
+      itraits.proto[methodKey(d)] = factory(iscope, base);
     }
 
     itraits.proto.$init = desc.init(iscope, base);
@@ -2455,20 +2461,32 @@ export class Runtime {
     throw this.error("ReferenceError", 1014, name);
   }
 
+  // ByteArray, Dictionary and Vector, as AMF makes them for each value it reads: resolved once.
+  private byteArrayCls: AsObject | null = null;
+  private dictionaryCls: AsObject | null = null;
+  private vectorCls: AsObject | null = null;
+
   byteArrayClass(): AsObject {
-    return this.resolve(this.cls(namespace(NS_Public, "flash.utils"), "ByteArray"));
+    this.byteArrayCls ??= this.resolve(this.cls(namespace(NS_Public, "flash.utils"), "ByteArray"));
+    return this.byteArrayCls;
   }
 
   dictionaryClass(): AsObject {
-    return this.resolve(this.cls(namespace(NS_Public, "flash.utils"), "Dictionary"));
+    this.dictionaryCls ??= this.resolve(
+      this.cls(namespace(NS_Public, "flash.utils"), "Dictionary"),
+    );
+    return this.dictionaryCls;
   }
 
   /** Vector.<T>, for a class T or null for *. */
   vectorClass(param: AsObject | null): AsObject {
-    return (
-      this.vectorClasses.get(param) ??
-      this.applyType(this.resolve(this.cls(namespace(NS_Public, "__AS3__.vec"), "Vector")), [param])
-    );
+    const specialized = this.vectorClasses.get(param);
+    if (specialized) {
+      return specialized;
+    }
+
+    this.vectorCls ??= this.resolve(this.cls(namespace(NS_Public, "__AS3__.vec"), "Vector"));
+    return this.applyType(this.vectorCls, [param]);
   }
 
   /** Each Vector class made, by its element class (null for *), kept by Vector's apply. */
