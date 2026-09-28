@@ -163,6 +163,28 @@ avmshell's `writeUTFBytes` loses characters instead: a lone high
 surrogate takes the one after it, and one at the end disappears. swf2es
 keeps valid UTF-8.
 
+### Step 14: JSON through the host's own
+
+as3pb's JSON lines (100 messages of 750 bytes, 300 rounds), then a nested
+document of 2000 items (277 KB of text, 20 rounds), in ms:
+
+| | as3pb stringify | as3pb parse | nested stringify | nested parse |
+|---|---|---|---|---|
+| avmshell | 2240 | 386 | 400 | 104 |
+| swf2es before | 2279 | 434 | 363 | 99 |
+| Numbers in the host's digits, not avmplus' (its D2A, with big numbers, was half the time) | 1080 | | | |
+| toJSON found through a cached binding and the dynamic properties, elements and own properties read directly | 670 | | | |
+| Strings quoted by the host's `JSON.stringify` | 650 | | | |
+| A tree of the host's values, written by its `JSON.stringify` | 522 | | 96 | |
+| Parsed by the host's `JSON.parse`, then made AS3's in place | | 300 | | 56 |
+
+Output reads back as the same keys and values, not the same text (key
+order, escapes and digits differ). avmplus' probe for an AS3 toJSON
+never finds a script's, so swf2es looks only for a public one. The text
+the host rejects, such as `01`, goes to the old parser. Conversion
+recurses to a depth of 500, then uses a stack of its own, as avmplus
+reads 100,000-deep text.
+
 ### The AssemblyScript runtime
 
 codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator
