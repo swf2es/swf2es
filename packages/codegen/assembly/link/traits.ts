@@ -47,6 +47,8 @@ export const TRAITS_Activation: u8 = 4;
 /** The types of void and null, which avmplus also represents as traits. */
 export const TRAITS_Void: u8 = 5;
 export const TRAITS_Null: u8 = 6;
+/** A catch block's scope, with the exception in its one slot. */
+export const TRAITS_Catch: u8 = 7;
 
 export const TYPE_Any: i32 = -1;
 
@@ -144,6 +146,8 @@ export class TraitsTable {
   // Methods by domain-wide id; ABC a's method m is Domain.methodStart[a] + m.
   methodTraits: i32[] = [];
   methodFinal: u8[] = [];
+  /** Bound by a method, getter or setter trait, not as an initializer. */
+  methodVirtual: u8[] = [];
   /** Made by newfunction rather than bound to traits: its receiver is Object. */
   methodFunction: u8[] = [];
   signed: u8[] = [];
@@ -214,6 +218,7 @@ export class TraitsTable {
     for (let i: u32 = 0; i < count; i++) {
       this.methodTraits.push(-1);
       this.methodFinal.push(0);
+      this.methodVirtual.push(0);
       this.methodFunction.push(0);
       this.signed.push(0);
       this.returnType.push(TYPE_Any);
@@ -227,6 +232,7 @@ export class TraitsTable {
   truncateMethods(count: u32): void {
     this.methodTraits.length = count;
     this.methodFinal.length = count;
+    this.methodVirtual.length = count;
     this.methodFunction.length = count;
     this.signed.length = count;
     this.returnType.length = count;
@@ -269,6 +275,23 @@ export class TraitsTable {
       const b = this.own(<u32>t, ns, name, version);
       if (b !== BIND_None) {
         return b;
+      }
+    }
+
+    return BIND_None;
+  }
+
+  /**
+   * As TraitsBindings::findBinding by name alone: the first member named
+   * `name` in any namespace of t or its bases.
+   */
+  findName(t: i32, name: u32): u32 {
+    for (; t >= 0; t = unchecked(this.base[t])) {
+      const last = unchecked(this.memberEnd[t]);
+      for (let m = unchecked(this.memberStart[t]); m < last; m++) {
+        if (unchecked(this.memberName[m]) === name) {
+          return unchecked(this.memberBinding[m]);
+        }
       }
     }
 

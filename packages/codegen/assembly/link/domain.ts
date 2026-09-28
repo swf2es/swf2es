@@ -26,6 +26,8 @@ import {
   CONSTANT_False,
   CONSTANT_Int,
   CONSTANT_Multiname,
+  CONSTANT_MultinameL,
+  CONSTANT_MultinameLA,
   CONSTANT_Null,
   CONSTANT_PackageInternalNs,
   CONSTANT_PrivateNs,
@@ -49,6 +51,8 @@ import {
   kIllegalDefaultValue,
   kIllegalVoidError,
   METHOD_NeedActivation,
+  METHOD_NeedArguments,
+  METHOD_NeedRest,
   TRAIT_Class,
   TRAIT_Getter,
   TRAIT_Method,
@@ -57,6 +61,8 @@ import {
 import { readAbc } from "../abc/parse";
 import { hashBytes, hashPair, IdTable } from "./table";
 import {
+  BIND_None,
+  BKIND_Var,
   BUILTIN_Any,
   BUILTIN_Boolean,
   BUILTIN_Int,
@@ -70,6 +76,7 @@ import {
   isDefaultKind,
   legalDefault,
   TRAITS_Activation,
+  TRAITS_Catch,
   TRAITS_Class,
   TRAITS_Instance,
   TRAITS_Null,
@@ -78,6 +85,7 @@ import {
   TraitsTable,
   TYPE_Any,
 } from "./traits";
+import { getOwnBinding } from "./types";
 
 export const NS_Public: u8 = 0;
 export const NS_PackageInternal: u8 = 1;
@@ -106,6 +114,8 @@ export class Domain {
   air: bool = false;
 
   abcs: Abc[] = [];
+  /** Where each ABC's bytes start. */
+  abcBase: usize[] = [];
   /**
    * The bytes of every ABC ever added, followed by PADDING, including those
    * rejected while linking: interned strings may point into any of them.
@@ -196,6 +206,14 @@ export class Domain {
   vectorIntType: i32 = -1;
   vectorUintType: i32 = -1;
   vectorDoubleType: i32 = -1;
+  arrayType: i32 = -1;
+  functionType: i32 = -1;
+  /** The traits of the Math class object, whose methods have faster variants. */
+  mathStatic: i32 = -1;
+  /** The builtin ABC whose global's Math and Number slots are never null. */
+  builtinAbc: i32 = -1;
+  /** Catch scope traits, by the ABC's handler index. */
+  catchScopes: Map<u64, i32> = new Map<u64, i32>();
   /** Vector.<T> for other element types T, by T. */
   vectorOf: Map<i32, i32> = new Map<i32, i32>();
 
@@ -212,6 +230,7 @@ export class Domain {
 
     const index = <u32>this.abcs.length;
     this.abcs.push(abc);
+    this.abcBase.push(base);
     this.buffers.push(buffer);
     this.loads++;
     this.abcOwner.push(this.loads);
@@ -234,6 +253,7 @@ export class Domain {
     const traitsCount = <u32>this.traits.kind.length;
     if (!this.link(index)) {
       this.abcs.pop();
+      this.abcBase.pop();
       this.abcString.pop();
       this.abcNs.pop();
       this.abcNsVersion.pop();
@@ -464,6 +484,7 @@ export class Domain {
       if (kind === TRAIT_Method || kind === TRAIT_Getter || kind === TRAIT_Setter) {
         const m = methods + unchecked(abc.traitIndex[i]);
         unchecked((traits.methodTraits[m] = t));
+        unchecked((traits.methodVirtual[m] = 1));
         unchecked((traits.methodFinal[m] = tag & ATTR_Final || final ? 1 : 0));
       }
     }
@@ -487,6 +508,315 @@ export class Domain {
     this.vectorIntType = this.builtinType("Vector$int");
     this.vectorUintType = this.builtinType("Vector$uint");
     this.vectorDoubleType = this.builtinType("Vector$double");
+    this.arrayType = this.builtinType("Array");
+    this.functionType = this.builtinType("Function");
+    const math = this.findBuiltin("Math");
+    this.mathStatic = math < 0 ? -1 : unchecked(this.classStatic[math]);
+    this.builtinAbc = <i32>(this.abcs.length - 1);
+  }
+
+  /** Whether the machine type always holds a value: int, uint, Number and Boolean. */
+  typeNotNull(type: i32): bool {
+    const bt = this.builtin(type);
+    return (
+      bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Number || bt === BUILTIN_Boolean
+    );
+  }
+
+  /** The traits of Class's instances, which class objects are. */
+  classInstanceType(): i32 {
+    return this.classClass < 0 ? TYPE_Any : unchecked(this.classTraits[this.classClass]);
+  }
+
+  /** The class object traits of class `i` of ABC `index`. */
+  staticTraitsOf(index: u32, i: u32): i32 {
+    return unchecked(this.classStatic[this.classStart[index] + i]);
+  }
+
+  /** As Traits::itraits: for a class object's traits, its instances'; else *. */
+  instanceTraitsOf(type: i32): i32 {
+    const traits = this.traits;
+    if (type < 0 || unchecked(traits.kind[type]) !== TRAITS_Class) {
+      return TYPE_Any;
+    }
+
+    return unchecked(this.classTraits[this.classStart[traits.abc[type]] + traits.owner[type]]);
+  }
+
+  /**
+   * As Verifier::checkTypeName: the type multiname `mn` of ABC `index` names,
+   * void included, and Vector.<T>, or * for another parameterized type;
+   * below TYPE_Any on failure, with typeError set.
+   */
+  checkTypeName(index: u32, mn: u32): i32 {
+    const pool = unchecked(this.abcs[index]).pool;
+    const isTypeName = unchecked(pool.mnKind[mn]) === CONSTANT_TypeName;
+    const c = this.resolveType(index, isTypeName ? unchecked(pool.mnA[mn]) : mn);
+    if (c < 0 && c !== -kIllegalVoidError) {
+      this.typeError = -c;
+      return -2;
+    }
+
+    const type = c < 0 ? this.voidType : unchecked(this.classTraits[c]);
+    if (!isTypeName) {
+      return type;
+    }
+
+    const paramName = unchecked(pool.mnB[mn]);
+    const param = paramName ? this.checkTypeName(index, paramName) : TYPE_Any;
+    if (param < TYPE_Any) {
+      return param;
+    }
+
+    const t = c >= 0 ? this.parameterized(c, param) : -1;
+    return t < 0 ? TYPE_Any : t;
+  }
+
+  /** Whether method m takes any number of extra arguments, into a rest or arguments array. */
+  allowsExtraArgs(m: u32): bool {
+    const index = this.methodAbc(m);
+    const abc = unchecked(this.abcs[index]);
+    const flags = unchecked(abc.methodFlags[m - this.methodStart[index]]);
+    return (flags & (METHOD_NeedRest | METHOD_NeedArguments)) !== 0;
+  }
+
+  /** Whether method m is a method, getter or setter of some traits, which callstatic may call. */
+  isVirtual(m: u32): bool {
+    return unchecked(this.traits.methodVirtual[m]) !== 0;
+  }
+
+  /**
+   * As DomainMgr::findScriptInPoolByMultiname: the global object traits of
+   * the one script that defines multiname `mn` of ABC `index`, or -1 for
+   * none or several.
+   */
+  findScript(index: u32, mn: u32): i32 {
+    const pool = unchecked(this.abcs[index]).pool;
+    if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
+      mn = unchecked(pool.mnA[mn]);
+    }
+
+    const ids = unchecked(this.abcNs[index]);
+    const versions = unchecked(this.abcNsVersion[index]);
+    const name = unchecked(this.abcString[index][pool.mnB[mn]]);
+    if (unchecked(pool.mnKind[mn]) === CONSTANT_Qname) {
+      const ns = unchecked(pool.mnA[mn]);
+      return this.scriptOf(this.find(unchecked(ids[ns]), name, unchecked(versions[ns])));
+    }
+
+    const set = unchecked(pool.mnA[mn]);
+    let found = -1;
+    for (let m = unchecked(pool.nsSetStart[set]); m < unchecked(pool.nsSetStart[set + 1]); m++) {
+      const ns = unchecked(pool.nsSetMembers[m]);
+      const script = this.scriptOf(this.find(unchecked(ids[ns]), name, unchecked(versions[ns])));
+      if (script >= 0) {
+        if (found >= 0 && found !== script) {
+          return -1;
+        }
+
+        found = script;
+      }
+    }
+
+    return found;
+  }
+
+  /** The global object traits of the script binding b is in, or -1. */
+  scriptOf(b: i32): i32 {
+    if (b < 0) {
+      return -1;
+    }
+
+    const index = unchecked(this.bindingAbc[b]);
+    return <i32>unchecked(this.scriptTraits[index][this.bindingScript[b]]);
+  }
+
+  /** The interned id of multiname `mn`'s name with a leading underscore, or -1 if no ABC has it. */
+  underscored(index: u32, mn: u32): i32 {
+    const name = this.nameOf(index, mn);
+    const text = String.UTF8.decodeUnsafe(
+      unchecked(this.stringPtr[name]),
+      unchecked(this.stringLength[name]),
+    );
+    return this.findText(`_${text}`);
+  }
+
+  /** Whether multiname `mn` of ABC `index` is named Math or Number. */
+  isMathOrNumber(index: u32, mn: u32): bool {
+    const pool = unchecked(this.abcs[index]).pool;
+    const name = unchecked(this.abcString[index][pool.mnB[mn]]);
+    return name === <u32>this.findText("Math") || name === <u32>this.findText("Number");
+  }
+
+  /** As Multiname::containsAnyPublicNamespace, for a multiname with a namespace set. */
+  hasPublicNamespace(index: u32, mn: u32): bool {
+    const pool = unchecked(this.abcs[index]).pool;
+    const kind = unchecked(pool.mnKind[mn]);
+    if (
+      kind !== CONSTANT_Multiname &&
+      kind !== CONSTANT_MultinameL &&
+      kind !== CONSTANT_MultinameLA
+    ) {
+      return false;
+    }
+
+    const set = unchecked(pool.mnA[mn]);
+    for (let m = unchecked(pool.nsSetStart[set]); m < unchecked(pool.nsSetStart[set + 1]); m++) {
+      const ns = unchecked(this.abcNs[index][pool.nsSetMembers[m]]);
+      if (unchecked(this.nsType[ns]) === NS_Public) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * As TraitsBindings::findBindingAndDeclarer: the initializer of the traits
+   * that declares what multiname `mn` of ABC `index` binds to on `type`, a
+   * protected member belonging to the first base that has it; -1 if none.
+   */
+  initOfDeclarer(type: i32, index: u32, mn: u32): i32 {
+    const traits = this.traits;
+    for (let t = type; t >= 0; t = unchecked(traits.base[t])) {
+      const b = getOwnBinding(this, index, <u32>t, mn);
+      if (b === BIND_None) {
+        continue;
+      }
+
+      let declarer = t;
+      let ns = this.foundNs;
+      while (ns === unchecked(traits.protectedNs[declarer])) {
+        const parent = unchecked(traits.base[declarer]);
+        if (parent < 0 || unchecked(traits.protectedNs[parent]) < 0) {
+          break;
+        }
+
+        const parentNs = <u32>unchecked(traits.protectedNs[parent]);
+        const name = this.nameOf(index, mn);
+        if (traits.find(parent, parentNs, name, API_Internal) !== b) {
+          break;
+        }
+
+        declarer = parent;
+        ns = <i32>parentNs;
+      }
+
+      return unchecked(traits.init[declarer]);
+    }
+
+    return -1;
+  }
+
+  /** The interned name of multiname `mn` of ABC `index`. */
+  nameOf(index: u32, mn: u32): u32 {
+    const pool = unchecked(this.abcs[index]).pool;
+    if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
+      mn = unchecked(pool.mnA[mn]);
+    }
+
+    return unchecked(this.abcString[index][pool.mnB[mn]]);
+  }
+
+  /** The namespace the last getOwnBinding found its binding in. */
+  foundNs: i32 = -1;
+
+  /**
+   * As Verifier::emitCallpropertySlot: what calling a class slot of type
+   * `slotType` with one argument does to it: the builtin conversions give
+   * int, uint, Number, Boolean or String, a user class coerces to it, and
+   * anything else is a call (-2).
+   */
+  conversionOf(slotType: i32): i32 {
+    if (slotType < 0) {
+      return -2;
+    }
+
+    for (let k = 0; k < 5; k++) {
+      const type =
+        k === 0
+          ? this.intType
+          : k === 1
+            ? this.uintType
+            : k === 2
+              ? this.numberType
+              : k === 3
+                ? this.booleanType
+                : this.stringType;
+      if (type >= 0 && slotType === this.staticOf(type)) {
+        return type;
+      }
+    }
+
+    const traits = this.traits;
+    if (
+      unchecked(traits.kind[slotType]) === TRAITS_Class &&
+      unchecked(traits.base[slotType]) === this.classInstanceType() &&
+      !unchecked(this.abcs[traits.abc[slotType]]).builtin
+    ) {
+      return this.instanceTraitsOf(slotType);
+    }
+
+    return -2;
+  }
+
+  /** Whether calling class slot `slotType` converts to a builtin primitive, never null. */
+  isConversion(slotType: i32): bool {
+    const converted = this.conversionOf(slotType);
+    return (
+      converted >= 0 &&
+      (converted === this.intType ||
+        converted === this.uintType ||
+        converted === this.numberType ||
+        converted === this.booleanType ||
+        converted === this.stringType)
+    );
+  }
+
+  /** The class object traits of instance traits `type`. */
+  staticOf(type: i32): i32 {
+    const traits = this.traits;
+    const index = unchecked(traits.abc[type]);
+    return unchecked(this.classStatic[this.classStart[index] + traits.owner[type]]);
+  }
+
+  /**
+   * The catch scope of handler `h` of ABC `index`, as Traits::newCatchTraits:
+   * one slot, named `name`, of the handler's exception type.
+   */
+  catchTraits(index: u32, h: u32, name: u32, type: i32): i32 {
+    const key = ((<u64>index) << 32) | h;
+    if (this.catchScopes.has(key)) {
+      return this.catchScopes.get(key);
+    }
+
+    const pool = unchecked(this.abcs[index]).pool;
+    let mn = name;
+    if (unchecked(pool.mnKind[mn]) === CONSTANT_TypeName) {
+      mn = unchecked(pool.mnA[mn]);
+    }
+
+    const traits = this.traits;
+    const t = traits.create(TRAITS_Catch, index, h, -1, -1, 0, 0);
+    const start = <u32>traits.memberTraits.length;
+    unchecked((traits.memberStart[t] = start));
+    unchecked((traits.memberEnd[t] = start));
+    let ns = unchecked(pool.mnA[mn]);
+    if (unchecked(pool.mnKind[mn]) === CONSTANT_Multiname) {
+      ns = unchecked(pool.nsSetMembers[pool.nsSetStart[ns]]);
+    }
+
+    const nsId = unchecked(this.abcNs[index][ns]);
+    const version = this.activeVersion(unchecked(this.abcNsVersion[index][ns]));
+    traits.add(t, nsId, this.nameOf(index, name), version, BKIND_Var);
+    unchecked((traits.slotCount[t] = 1));
+    unchecked((traits.slotStart[t] = traits.slotType.length));
+    traits.slotType.push(type);
+    traits.slotSet.push(1);
+    unchecked((traits.dispatchStart[t] = traits.dispatch.length));
+    unchecked((traits.resolved[t] = 1));
+    this.catchScopes.set(key, <i32>t);
+    return <i32>t;
   }
 
   builtinType(name: string): i32 {
