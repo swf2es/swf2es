@@ -6,7 +6,7 @@
 //   export default function (rt) {
 //     const N = [...namespaces], S = [...namespace sets], M = [...multinames];
 //     const F = [...method factories, (scope, sup) => function (...) {...}];
-//     const A = rt.abc({ linked, classes, scripts, activations });
+//     const A = rt.abc({ linked, names: M, classes, scripts, activations });
 //     return A;
 //   }
 //
@@ -64,7 +64,7 @@ export class ModuleEmitter {
     this.functions();
     out.text("  const A = rt.abc({\n    linked: ");
     out.uint(this.index);
-    out.text(",\n    classes: [");
+    out.text(",\n    names: M,\n    classes: [");
     this.classes();
     out.text("],\n    scripts: [");
     this.scripts();

@@ -896,9 +896,12 @@ export class MethodEmitter {
       case IR_FindPropGlobal:
       case IR_FindPropGlobalStrict:
         this.assign(i);
+        // Not found statically: a script's name, or else the global object's.
         out.text(op === IR_FindPropGlobalStrict ? "rt.findGlobalStrict(M[" : "rt.findGlobal(M[");
         out.uint(a);
-        out.text("])");
+        out.text("], ");
+        this.globalScope();
+        out.text(")");
         return true;
       case OP_findproperty:
       case OP_findpropstrict:
@@ -1693,9 +1696,10 @@ export class MethodEmitter {
         out.text("null");
         return;
       default:
-        out.text("rt.namespace(");
+        // A namespace, as the Namespace object it is to AS3.
+        out.text("rt.namespace(N[");
         out.uint(value);
-        out.text(")");
+        out.text("])");
         return;
     }
   }
