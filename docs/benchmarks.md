@@ -106,6 +106,23 @@ itself, but V8 inlines it well enough that keeping its result gains
 nothing. More would need the compiler to bind such calls to a class it
 knows, with the script's initialization kept exact.
 
+Step 10's follow-up asked why V8 does not inline more of the codec. With
+the generated functions named after their methods (`function
+$as3pb_proto__Pack_writeVarint32(...)`, kept, as stacks and profiles read
+better), V8's `--trace-turbo-inlining` shows the codec's small methods
+refused for their bytecode size (`kExceedsBytecodeLimit`), and
+`--trace-deopt` no deoptimizations in its loops worth the name:
+
+| Step 10 follow-up | ByteArray | Domain memory | Kept |
+|---|---|---|---|
+| Two registers swapped through a temporary, not `[a, b] = [b, a]` (an array and the iterator protocol) | +1.6% | −9.5% | yes |
+| **Against #27** | **+0.5%** | **224 → 199 (−11.2%)** | |
+| V8's inlining limits raised to 2000 bytes, 4000 cumulative (a flag, as a bound on what smaller code could win) | −7% | −7% | measure |
+| A null check once per register until it is written | +1.6% | +1.0% | no |
+
+So smaller generated code is worth at most about 7% more; V8 already
+removes the checks and folds the constants the code repeats.
+
 What paid: a runtime helper that many call sites share with many kinds of
 values, where the emitter knows the type and can call one made for it
 (`coerceTo`, the Vector accessors); arrays kept as V8 wants them, packed
