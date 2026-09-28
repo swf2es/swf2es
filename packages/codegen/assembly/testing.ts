@@ -6,6 +6,7 @@ import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./abc
 import { readAbc } from "./abc/parse";
 import { readConstantPool } from "./abc/pool";
 import { PADDING, Reader } from "./abc/reader";
+import { MethodEmitter } from "./emit/method";
 import {
   IR_CallGetter,
   IR_CallInterface,
@@ -526,6 +527,32 @@ export function domainIr(body: u32): string {
   }
 
   return out.join("\n");
+}
+
+/**
+ * The JavaScript function body `body` of the domain's last ABC compiles to,
+ * after verifying the ABC as domainVerifyAll does; "error N" if it failed.
+ */
+export function domainEmit(body: u32): string {
+  const index = <u32>(domain.abcs.length - 1);
+  const abc = domain.abcs[index];
+  const results = verifyMethods(domain, index);
+  if (results[body] !== 0) {
+    return results[body] < 0 ? "not verified" : `error ${results[body]}`;
+  }
+
+  const decoder = new BodyDecoder(abc, domain.abcBase[index], domain, index);
+  const method = abc.bodyMethod[body];
+  const global = domain.methodStart[index] + method;
+  const code = decoder.decode(body, domain.traits.scopeOf(global));
+  if (code.error) {
+    return `error ${code.error}`;
+  }
+
+  const emitter = new MethodEmitter(domain, index);
+  emitter.method(method, global, decoder.ir);
+  const out = emitter.out;
+  return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
 }
 
 /**
