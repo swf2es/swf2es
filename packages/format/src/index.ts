@@ -4,32 +4,6 @@
  * DOM and node APIs.
  */
 
-export type SwfCompression = "none" | "zlib" | "lzma";
-
-export interface SwfHeader {
-  compression: SwfCompression;
-  /** SWF version byte (e.g. 10 for Flash Player 10). */
-  version: number;
-  /** Uncompressed length of the whole file, header included. */
-  fileLength: number;
-}
-
-const SIGNATURES: Record<string, SwfCompression> = { FWS: "none", CWS: "zlib", ZWS: "lzma" };
-
-/** Read the 8-byte header every SWF starts with. */
-export function readSwfHeader(bytes: Uint8Array): SwfHeader {
-  if (bytes.length < 8) {
-    throw new RangeError(`SWF header needs 8 bytes, got ${bytes.length}`);
-  }
-  const signature = String.fromCharCode(bytes[0], bytes[1], bytes[2]);
-  const compression = SIGNATURES[signature];
-  if (!compression) {
-    throw new TypeError(`Not a SWF file (signature ${JSON.stringify(signature)})`);
-  }
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return { compression, version: bytes[3], fileLength: view.getUint32(4, true) };
-}
-
 export {
   CompressedDataError,
   decompressSwf,
@@ -40,3 +14,39 @@ export {
   zlibCompress,
   zlibUncompress,
 } from "./compression.js";
+export {
+  type Place,
+  readDoAbc,
+  readFrameLabel,
+  readPlace,
+  readRemove,
+  readSprite,
+  readSymbolClass,
+} from "./display.js";
+export {
+  type ColorTransform,
+  type Fill,
+  type Gradient,
+  type GradientStop,
+  IDENTITY,
+  type Line,
+  type Matrix,
+  readColorTransform,
+  readMatrix,
+  readShape,
+  type Shape,
+  type ShapeRecord,
+} from "./shape.js";
+export {
+  backgroundColor,
+  type Rect,
+  readSwf,
+  readSwfHeader,
+  readTags,
+  type Swf,
+  type SwfCompression,
+  type SwfHeader,
+  SwfReader,
+  type Tag,
+} from "./swf.js";
+export * as tags from "./tags.js";
