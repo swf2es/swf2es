@@ -21,13 +21,18 @@ pnpm build       # asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
-pnpm test        # unit, conformance and program tests (needs podman or docker)
+pnpm test        # unit, conformance, program and player tests (needs podman or
+                 # docker, and Chrome; CHROME names another browser)
 pnpm test:checked # the same with every array access bounds-checked
 pnpm oracle path/to/file.as   # print avmshell's output for a file
 pnpm oracle:cases             # the unit tests' hand-built ABCs vs avmshell
 pnpm tamarin [prefix...]      # Tamarin acceptance tests vs baseline.json (about 10 minutes
                               # uncached; SWF2ES_ORACLE_JOBS sets parallelism, default 10)
 pnpm tamarin --update-baseline [prefix...]   # after an oracle or harness change
+node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
+                              # what Flash traces and draws, with AIR's adl (not in CI)
+node tests/player/run.ts --update [case...]  # draw the player's references in Flash
+node tests/player/fetch-ruffle.ts            # Ruffle's test corpus, for check-references.ts
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
