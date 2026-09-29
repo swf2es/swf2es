@@ -1,7 +1,7 @@
 // String: `this` is the string.
 import type { ClassHook, Value } from "../runtime.js";
 import { AS3, conversion, type Natives, plain } from "./define.js";
-import { matchArray } from "./regexp.js";
+import { compile, matchArray, replacement as replacementOf } from "./regexp.js";
 
 export const stringNatives: Natives = {
   "String#get:length": plain(function (this: string) {
@@ -30,8 +30,18 @@ export const stringNatives: Natives = {
     },
   [`String#${AS3}::localeCompare`]: (rt) =>
     function (this: string, other: Value) {
+      // As String::Compare: the first difference of their character codes,
+      // else which is longer.
       const o = rt.toString(other);
-      return this < o ? -1 : this > o ? 1 : 0;
+      const n = Math.min(this.length, o.length);
+      for (let i = 0; i < n; i++) {
+        const d = this.charCodeAt(i) - o.charCodeAt(i);
+        if (d) {
+          return d;
+        }
+      }
+
+      return Math.sign(this.length - o.length);
     },
   [`String#${AS3}::slice`]: (rt) =>
     function (this: string, start: Value = 0, end: Value = 0x7fffffff) {
@@ -76,15 +86,24 @@ export const stringNatives: Natives = {
       });
     }
 
-    return s.replace(p, rt.toString(replacement));
+    const text = rt.toString(replacement);
+    return s.replace(p, p instanceof RegExp ? replacementOf(p, text) : text);
   },
+  // A string pattern is a RegExp's, as avmplus makes one of it.
   "String.String::_search": (rt) => (s: string, pattern: Value) =>
-    s.search(pattern?.$re instanceof RegExp ? pattern.$re : rt.toString(pattern)),
+    s.search(pattern?.$re instanceof RegExp ? pattern.$re : compile(rt.toString(pattern), "")),
   "String.String::_match": (rt) => (s: string, pattern: Value) => {
-    const m = s.match(pattern?.$re instanceof RegExp ? pattern.$re : rt.toString(pattern));
+    const m = s.match(
+      pattern?.$re instanceof RegExp ? pattern.$re : compile(rt.toString(pattern), ""),
+    );
     return m ? matchArray(rt, m) : null;
   },
   "String.String::_split": (rt) => (s: string, delimiter: Value, limit: number) => {
+    // The empty string splits to itself, whatever the delimiter, as avmplus has it.
+    if (s === "") {
+      return rt.array(limit === 0 ? [] : [""]);
+    }
+
     if (delimiter?.$re instanceof RegExp) {
       return rt.array(s.split(delimiter.$re, limit >= 0 ? limit : undefined));
     }

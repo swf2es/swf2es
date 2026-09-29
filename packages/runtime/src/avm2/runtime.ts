@@ -55,7 +55,8 @@ export interface TraitsDesc {
   slots: number;
   defaults: [number, Value, TypeRef][];
   bindings: [Namespace, number, string, number][];
-  methods: [number, Factory][];
+  /** Each by dispatch id: its factory, and its method id in its ABC. */
+  methods: [number, Factory, number][];
   /** Its own slots with [Transient] metadata. */
   transient?: number[];
   /** Its own accessors with metadata, by dispatch id: 1 if any of it is [Transient], else 0. */
@@ -659,8 +660,8 @@ export class Runtime {
       traits.describe(script.desc.traits);
       const g = traits.instance();
       const scope = Object.assign([g], { w: 0 });
-      for (const [d, factory] of script.desc.traits.methods) {
-        traits.proto[methodKey(d)] = factory(scope, null);
+      for (const [d, factory, id] of script.desc.traits.methods) {
+        traits.proto[methodKey(d)] = this.withId(factory(scope, null), id);
       }
 
       script.global = g;
@@ -894,8 +895,8 @@ export class Runtime {
       }
 
       for (let p = this.protoOf(o); p; p = p.$p) {
-        const v = p.$d?.get(name);
-        if (v !== undefined || p.$d?.has(name)) {
+        const v = this.protoOwn(p, name);
+        if (v !== NOT_FOUND) {
           return v;
         }
       }
@@ -1092,6 +1093,33 @@ export class Runtime {
     return NOT_FOUND;
   }
 
+  /**
+   * A prototype's own dynamic property `name`, or NOT_FOUND: an element
+   * too for one with elements, as Array.prototype, an Array, has them.
+   */
+  private protoOwn(p: AsObject, name: string): Value {
+    const a: Value[] | undefined = p.$a;
+    if (a !== undefined) {
+      const c = name.charCodeAt(0);
+      if (c >= 0x30 && c <= 0x39) {
+        const i = arrayIndex(name);
+        if (i >= 0) {
+          return i in a ? a[i] : NOT_FOUND;
+        }
+      }
+    }
+
+    const d: Map<string, Value> | null | undefined = p.$d;
+    if (d) {
+      const v = d.get(name);
+      if (v !== undefined || d.has(name)) {
+        return v;
+      }
+    }
+
+    return NOT_FOUND;
+  }
+
   private getBound(o: Value, traits: Traits, b: number, mn: Multiname): Value {
     const id = b >> 3;
     switch (b & 7) {
@@ -1126,8 +1154,9 @@ export class Runtime {
           : (...args: Value[]) => this.callBound(method, o, args),
         null,
       );
-      // Its length is the method's, its declared parameters, not the wrapper's.
+      // Its length is the method's, its declared parameters, not the wrapper's; and its id.
       f.$length = method.length;
+      f.$id = (method as Method & { $id?: number }).$id ?? 0;
       f.$closure = true;
       if (typeof o === "object") {
         byId.set(id, f);
@@ -1207,6 +1236,11 @@ export class Runtime {
       return true;
     }
 
+    // A primitive's property cannot be deleted, as MethodEnv's delproperty has it.
+    if (typeof o !== "object" || o instanceof Namespace) {
+      throw this.error("ReferenceError", 1120, mn.name ?? "*", this.traitsOf(o).name);
+    }
+
     // E4X 11.3.1: delete x[list] is a TypeError, as in delete x.a.(b == 1).
     if ((mn.key as Value)?.$nodes !== undefined) {
       throw this.error("TypeError", 1119, "XMLList");
@@ -1248,7 +1282,39 @@ export class Runtime {
       return this.dictionaryHas(o, name);
     }
 
+    // As in_operator: a uint names an element the object itself has, or
+    // for a primitive its prototype, as hasUintProperty finds it, not one
+    // up the prototype chain.
+    if (typeof name === "number" && name >>> 0 === name && name !== 0xffffffff) {
+      return this.hasOwnIndex(
+        typeof o === "object" && o !== null ? o : (this.protoOf(o) as AsObject),
+        name,
+      );
+    }
+
     return this.hasProperty(o, this.publicName(name));
+  }
+
+  /** Whether `o` itself has element `i`: its class's indexing, an Array's, or a dynamic property. */
+  private hasOwnIndex(o: AsObject, i: number): boolean {
+    if (o instanceof Namespace) {
+      return false;
+    }
+
+    const traits: Traits | undefined = o.$traits;
+    if (traits?.properties) {
+      return traits.properties.has(this, o, this.publicName(i));
+    }
+
+    if (traits?.hasIndex) {
+      return traits.hasIndex(o, i);
+    }
+
+    if (o.$a !== undefined) {
+      return i in o.$a;
+    }
+
+    return o.$d?.has(String(i)) ?? false;
   }
 
   /**
@@ -1262,7 +1328,7 @@ export class Runtime {
 
     const name = this.toString(key);
     for (let p = this.protoOf(o); p; p = p.$p) {
-      if (p.$d?.has(name)) {
+      if (this.protoOwn(p, name) !== NOT_FOUND) {
         return true;
       }
     }
@@ -1298,6 +1364,13 @@ export class Runtime {
       if (i >= 0) {
         return traits.hasIndex(o, i);
       }
+
+      // Another number, negative or fractional, is no index it has, as
+      // VectorBaseObject::hasAtomProperty has it, where a get throws.
+      const c = name.charCodeAt(0);
+      if (((c >= 0x30 && c <= 0x39) || c === 0x2d) && !Number.isNaN(Number(name))) {
+        return false;
+      }
     }
 
     if (this.getOwn(o, name) !== NOT_FOUND) {
@@ -1305,7 +1378,7 @@ export class Runtime {
     }
 
     for (let p = this.protoOf(o); p; p = p.$p) {
-      if (p.$d?.has(name)) {
+      if (this.protoOwn(p, name) !== NOT_FOUND) {
         return true;
       }
     }
@@ -1361,8 +1434,8 @@ export class Runtime {
     }
 
     for (let p = this.protoOf(o); p; p = p.$p) {
-      const v = p.$d?.get(name);
-      if (v !== undefined || p.$d?.has(name)) {
+      const v = this.protoOwn(p, name);
+      if (v !== NOT_FOUND) {
         return v;
       }
     }
@@ -1394,6 +1467,12 @@ export class Runtime {
       if (f.$it) {
         return this.callClass(f, args);
       }
+
+      // A RegExp called is its exec of the argument's string, as RegExpObject::call has it.
+      if (f.$re !== undefined) {
+        this.execName ??= qname(namespace(NS_Public, "http://adobe.com/AS3/2006/builtin"), "exec");
+        return this.callProperty(f, this.execName, args.length ? this.toString(args[0]) : "");
+      }
     }
 
     throw this.error("TypeError", 1006, mn ? mn.name : "value");
@@ -1414,6 +1493,8 @@ export class Runtime {
     }
   }
 
+  private execName: Multiname | null = null;
+
   callInterface(iface: TypeRef, disp: number, o: Value, ...args: Value[]): Value {
     const cls = this.classOf(iface);
     // The interface's layout names the method; the receiver binds that name.
@@ -1431,6 +1512,9 @@ export class Runtime {
     throw this.unsupported(`callstatic ${m}`);
   }
 
+  // The super operations, as MethodEnv's: by the base class's traits
+  // alone, a name they do not bind a ReferenceError, not a dynamic property.
+
   callSuper(sup: AsObject, o: Value, mn: Multiname, ...args: Value[]): Value {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
@@ -1438,14 +1522,18 @@ export class Runtime {
       return this.callBound(traits.proto[methodKey(b >> 3)], o, args);
     }
 
-    return this.callValue(this.getSuper(sup, o, mn), o, args, mn);
+    if (b === 0) {
+      throw this.error("ReferenceError", 1070, mn.name ?? "*", traits.name);
+    }
+
+    return this.callValue(this.getBound(o, traits, b, mn), o, args, mn);
   }
 
   getSuper(sup: AsObject, o: Value, mn: Multiname): Value {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
     if (b === 0) {
-      return this.getProperty(o, mn);
+      throw this.error("ReferenceError", 1069, mn.name ?? "*", traits.name);
     }
 
     return this.getBound(o, traits, b, mn);
@@ -1454,12 +1542,22 @@ export class Runtime {
   setSuper(sup: AsObject, o: Value, mn: Multiname, v: Value): void {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
-    if ((b & 7) === BIND_Set || (b & 7) === BIND_GetSet) {
-      traits.proto[methodKey((b >> 3) + 1)].call(o, v);
-      return;
+    const id = b >> 3;
+    switch (b & 7) {
+      case BIND_Set:
+      case BIND_GetSet:
+        traits.proto[methodKey(id + 1)].call(o, v);
+        return;
+      case BIND_Var:
+        o[slotKey(id)] = this.coerce(v, traits.slotType(id));
+        return;
+      case BIND_Method:
+        throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.name);
+      case 0:
+        throw this.error("ReferenceError", 1056, mn.name ?? "*", traits.name);
+      default:
+        throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.name);
     }
-
-    this.setProperty(o, mn, v);
   }
 
   constructSuper(sup: AsObject, o: Value, ...args: Value[]): void {
@@ -1468,6 +1566,11 @@ export class Runtime {
 
   construct(f: Value, ...args: Value[]): Value {
     if (f !== null && typeof f === "object") {
+      // A method closure is not a constructor, as MethodClosure's construct has it.
+      if (f.$closure) {
+        throw this.error("TypeError", 1064, "function");
+      }
+
       if (f.$it) {
         return this.constructClass(f, args);
       }
@@ -1519,7 +1622,15 @@ export class Runtime {
 
   /** A builtin class's hook; hooks are not inherited, but a specialized Vector has its base's. */
   private hookOf(cls: AsObject, kind: "construct" | "call"): ClassHook["construct"] | null {
-    return this.classHooks[cls.$hook ?? cls.$it.name]?.[kind] ?? null;
+    // Looked up by name once, then kept on the class.
+    const key = kind === "construct" ? "$constructHook" : "$callHook";
+    let hook = cls[key];
+    if (hook === undefined) {
+      hook = this.classHooks[cls.$hook ?? cls.$it.name]?.[kind] ?? null;
+      cls[key] = hook;
+    }
+
+    return hook;
   }
 
   /** Vector.<T> for a T other than int, uint and Number: Vector$object's class, typed. */
@@ -1566,8 +1677,10 @@ export class Runtime {
     return this.array(Array.prototype.slice.call(args));
   }
 
-  newFunction(factory: Factory, scope: Scope): AsObject {
-    return this.newFunctionObject(factory(scope, null), scope.length ? scope[0] : null);
+  newFunction(factory: Factory, scope: Scope, id = 0): AsObject {
+    const f = this.newFunctionObject(factory(scope, null), scope.length ? scope[0] : null);
+    f.$id = id;
+    return f;
   }
 
   /** A Function object calling `f`, with `global` as its receiver when it has none. */
@@ -1575,7 +1688,14 @@ export class Runtime {
     const o = this.functionTraits.instance();
     o.$f = f;
     o.$global = global;
+    o.$id = 0;
     return o;
+  }
+
+  /** `f`, a method, with its method id, which a closure of it keeps. */
+  private withId(f: Method, id: number): Method {
+    (f as Method & { $id?: number }).$id = id;
+    return f;
   }
 
   /** A function's prototype, made when first asked for. */
@@ -1583,6 +1703,7 @@ export class Runtime {
     if (!f.$prototype) {
       const p = this.objectTraits.instance();
       p.$d.set("constructor", f);
+      p.$dontEnum = new Set(["constructor"]);
       f.$prototype = p;
     }
 
@@ -1701,19 +1822,21 @@ export class Runtime {
     // Its prototype object: an Object whose prototype is the base class's.
     // A class object's own $p comes from Class's instance prototype, which
     // it inherits: class objects made before Class see it once Class exists.
-    const prototype = this.objectTraits.instance();
+    // Date's, RegExp's and Array's are instances of their own class, as avmplus has them.
+    const prototype = hooks?.prototype ? hooks.prototype(this, cls) : this.objectTraits.instance();
     prototype.$p = base ? base.$prototype : null;
     cls.$prototype = prototype;
     itraits.proto.$p = prototype;
     prototype.$d.set("constructor", cls);
+    prototype.$dontEnum = new Set(["constructor"]);
 
     const iscope = this.scope(scope, [cls], 0);
-    for (const [d, factory] of desc.static.methods) {
-      straits.proto[methodKey(d)] = factory(scope, base);
+    for (const [d, factory, id] of desc.static.methods) {
+      straits.proto[methodKey(d)] = this.withId(factory(scope, base), id);
     }
 
-    for (const [d, factory] of desc.instance.methods) {
-      itraits.proto[methodKey(d)] = factory(iscope, base);
+    for (const [d, factory, id] of desc.instance.methods) {
+      itraits.proto[methodKey(d)] = this.withId(factory(iscope, base), id);
     }
 
     itraits.proto.$init = desc.init(iscope, base);
@@ -2775,6 +2898,8 @@ export interface ClassHook {
   /** How its instances resolve names, as XML's (Traits.properties). */
   properties?: PropertyHook;
   create?: (traits: Traits, rt: Runtime) => AsObject;
+  /** Its prototype object, when not an Object: an instance of the class, as Date's (its $it is ready). */
+  prototype?: (rt: Runtime, cls: AsObject) => AsObject;
   /** Whether its instances refuse any name but their own and an index, as a Vector's (Traits.refusesNames). */
   refusesNames?: boolean;
   getIndex?: IndexHook["getIndex"];
@@ -2876,7 +3001,17 @@ export function stringToNumber(s: string): number {
     return t[0] === "-" ? -n : n;
   }
 
-  return Number(t);
+  const n = Number(t);
+  // As avmplus, a NUL ends the number, and one before any is none: a NUL
+  // makes JavaScript's NaN, so it is looked for only then.
+  if (Number.isNaN(n)) {
+    const nul = s.indexOf("\0");
+    if (nul > 0 && s.slice(0, nul).trim() !== "") {
+      return stringToNumber(s.slice(0, nul));
+    }
+  }
+
+  return n;
 }
 
 /** A number as AS3 writes it: avmplus' own formatting, not JavaScript's. */

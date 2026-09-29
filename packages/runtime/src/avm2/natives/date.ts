@@ -319,6 +319,12 @@ function construct(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
 
 export const dateHook: ClassHook = {
   construct,
+  // Date.prototype is a Date, of no time.
+  prototype: (_rt, cls) => {
+    const o = cls.$it.instance();
+    o.$time = Number.NaN;
+    return o;
+  },
   // Date() called is the time now, as a string.
   call: () => format(Date.now(), 0),
 };

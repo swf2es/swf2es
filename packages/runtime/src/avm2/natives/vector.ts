@@ -82,7 +82,7 @@ for (const [kind] of VECTORS) {
         throw rt.error("RangeError", 1126);
       }
 
-      return this.$a.length ? this.$a.pop() : this.$traits.cls.$fill;
+      return this.$a.length ? this.$a.pop() : empty(this);
     };
   vectorNatives[`${c}#${AS3}::shift`] = (rt) =>
     function (this: AsObject) {
@@ -90,7 +90,7 @@ for (const [kind] of VECTORS) {
         throw rt.error("RangeError", 1126);
       }
 
-      return this.$a.length ? this.$a.shift() : this.$traits.cls.$fill;
+      return this.$a.length ? this.$a.shift() : empty(this);
     };
   vectorNatives[`${c}#${AS3}::unshift`] = (rt) =>
     function (this: AsObject, ...args: Value[]) {
@@ -248,6 +248,13 @@ function writeElement(o: AsObject, i: number, x: Value): void {
 
   a[i] = x;
 }
+
+/**
+ * What pop and shift give of an empty Vector, as TypedVectorConstants'
+ * undefinedValue: undefined for objects, else the fill value, 0.
+ */
+const empty = (v: AsObject): Value =>
+  v.$traits.cls.$fill === null ? undefined : v.$traits.cls.$fill;
 
 /** A Vector class's element conversion and fill value, kept on the class for its natives. */
 function prepareVector(

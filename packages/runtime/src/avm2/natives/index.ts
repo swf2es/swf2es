@@ -18,7 +18,7 @@ import { objectHooks, objectNatives } from "./object.js";
 import { regexpHooks, regexpNatives } from "./regexp.js";
 import { shellNatives } from "./shell.js";
 import { stringHooks, stringNatives } from "./string.js";
-import { toplevelNatives } from "./toplevel.js";
+import { errorHooks, toplevelNatives } from "./toplevel.js";
 import { vectorHooks, vectorNatives } from "./vector.js";
 import { xmlHooks, xmlNatives } from "./xml/xml.js";
 
@@ -53,5 +53,6 @@ export function builtinHooks(): Record<string, ClassHook> {
     Date: dateHook,
     ...vectorHooks,
     ...xmlHooks,
+    ...errorHooks,
   };
 }

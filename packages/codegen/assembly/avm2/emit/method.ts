@@ -1996,6 +1996,9 @@ export class MethodEmitter {
         out.uint(a);
         out.text("], ");
         this.scopeHere();
+        // Its method's id, as avmplus writes a function as [object Function-id].
+        out.text(", ");
+        out.uint(a);
         out.text(")");
         return true;
       case ops.OP_newclass:

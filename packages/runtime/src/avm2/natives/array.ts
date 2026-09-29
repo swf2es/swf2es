@@ -95,6 +95,8 @@ export const arrayNatives: Natives = {
 export const arrayHooks: Record<string, ClassHook> = {
   Array: {
     create: withStorage,
+    // Array.prototype is an Array, empty.
+    prototype: (_rt, cls) => cls.$it.instance(),
     call: (rt, cls, args) => rt.constructClass(cls, args),
   },
 };

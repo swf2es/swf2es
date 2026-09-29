@@ -483,10 +483,13 @@ export class ModuleEmitter {
 
       out.text(first ? "[" : ", [");
       first = false;
+      // Its dispatch id, factory, and method id, as avmplus writes a function [object Function-id].
       out.uint(d);
       out.text(", F[");
       out.uint(<u32>m - start);
-      out.text("]]");
+      out.text("], ");
+      out.uint(<u32>m - start);
+      out.text("]");
     }
 
     out.text("]");

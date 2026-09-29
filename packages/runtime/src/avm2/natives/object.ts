@@ -37,8 +37,9 @@ export const objectNatives: Natives = {
       o.$dontEnum.add(name);
     }
   },
+  // A primitive's prototype chain is its class's, as toPrototype gives it.
   "Object.Object::_isPrototypeOf": (rt) => (o: Value, v: Value) => {
-    if (v === null || v === undefined || typeof v !== "object") {
+    if (v === null || v === undefined) {
       return false;
     }
 
@@ -53,6 +54,11 @@ export const objectNatives: Natives = {
   "Object.Object::_toString": (rt) => (o: Value) => {
     if (o !== null && typeof o === "object" && o.$it) {
       return `[class ${shortName(o.$it.name)}]`;
+    }
+
+    // As FunctionObject::implToString: its method's id.
+    if (o !== null && typeof o === "object" && o.$f) {
+      return `[object Function-${o.$id}]`;
     }
 
     return `[object ${shortName(rt.traitsOf(o).name)}]`;
@@ -78,6 +84,11 @@ export const objectNatives: Natives = {
     },
   [`Function#${AS3}::apply`]: (rt) =>
     function (this: AsObject, receiver: Value, args: Value) {
+      // Its arguments an Array, or none, as FunctionObject::AS3_apply has them.
+      if (args !== null && args !== undefined && args.$a === undefined) {
+        throw rt.error("TypeError", 1116);
+      }
+
       return rt.callValue(this, receiver, elements(args).slice(), null);
     },
 
@@ -155,7 +166,35 @@ export function qualifiedClassName(rt: Runtime, v: Value): string {
   }
 }
 
+function emptyFunction(rt: Runtime, args: Value[]): AsObject {
+  if (args.length) {
+    throw rt.error("EvalError", 1066);
+  }
+
+  return rt.newFunctionObject(() => undefined, null);
+}
+
+/** A class of static natives only, which cannot be instantiated: construct="none" in its declaration. */
+const notInstantiated = (name: string): ClassHook => ({
+  construct: (rt) => {
+    throw rt.error("ArgumentError", 2012, name);
+  },
+});
+
 export const objectHooks: Record<string, ClassHook> = {
+  JSON: notInstantiated("JSON"),
+  "flash.net::ObjectEncoding": notInstantiated("ObjectEncoding"),
+  "avmplus::System": notInstantiated("System"),
+  "avmplus::File": notInstantiated("File"),
+  // Math is neither a function nor a constructor.
+  Math: {
+    call: (rt) => {
+      throw rt.error("TypeError", 1075);
+    },
+    construct: (rt) => {
+      throw rt.error("TypeError", 1076);
+    },
+  },
   Object: {
     call: (rt, _cls, args) =>
       args[0] === null || args[0] === undefined ? rt.newObject([]) : args[0],
@@ -173,8 +212,12 @@ export const objectHooks: Record<string, ClassHook> = {
     construct: newQName,
     call: newQName,
   },
+  // Function() and new Function(): an empty function; with a body, which
+  // would be compiled at run time, EvalError 1066, as FunctionClass has it.
   Function: {
-    construct: (rt) => rt.newFunctionObject(() => undefined, null),
-    call: (rt) => rt.newFunctionObject(() => undefined, null),
+    construct: (rt, _cls, args) => emptyFunction(rt, args),
+    call: (rt, _cls, args) => emptyFunction(rt, args),
+    // Function.prototype is a function, that does nothing.
+    prototype: (rt) => rt.newFunctionObject(() => undefined, null),
   },
 };

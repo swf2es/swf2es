@@ -1,6 +1,6 @@
 // The global functions, bugzilla, and Error.
 import { messages } from "../messages.js";
-import type { Runtime, Value } from "../runtime.js";
+import type { ClassHook, Runtime, Value } from "../runtime.js";
 import { type Natives, plain } from "./define.js";
 import { qualifiedClassName } from "./object.js";
 
@@ -70,3 +70,27 @@ export const toplevelNatives: Natives = {
     rt.debugger ? `Error #${id}: ${messages[id] ?? ""}` : `Error #${id}`,
   "Error#getStackTrace": plain(() => null),
 };
+
+/**
+ * The native error classes, which construct an error when called, as
+ * ErrorClass::call does: Error("x") is new Error("x"), not a coercion.
+ * flash.errors' are AS3 classes, and coerce.
+ */
+const constructs: ClassHook = { call: (rt, cls, args) => rt.constructClass(cls, args) };
+
+export const errorHooks: Record<string, ClassHook> = Object.fromEntries(
+  [
+    "Error",
+    "DefinitionError",
+    "EvalError",
+    "RangeError",
+    "ReferenceError",
+    "SecurityError",
+    "SyntaxError",
+    "TypeError",
+    "URIError",
+    "VerifyError",
+    "UninitializedError",
+    "ArgumentError",
+  ].map((name) => [name, constructs]),
+);
