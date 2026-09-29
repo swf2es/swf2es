@@ -14,8 +14,9 @@
     "dist"
   ],
   "dependencies": {
-    "@swf2es/format": "workspace:*",
     "@swf2es/codegen": "workspace:*",
-    "@swf2es/runtime": "workspace:*"
+    "@swf2es/format": "workspace:*",
+    "@swf2es/runtime": "workspace:*",
+    "pixi.js": "8.21.0"
   }
 }
