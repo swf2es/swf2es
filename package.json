@@ -16,7 +16,7 @@
     "tamarin": "node tests/tamarin/run.ts",
     "tamarin:swf2es": "node tests/tamarin/swf2es.ts",
     "bench": "node tests/bench/bench.ts",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tests/player/tsconfig.json",
     "check": "biome check .",
     "format": "biome check --write .",
     "oracle": "node oracle/oracle.ts",

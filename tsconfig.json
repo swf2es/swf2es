@@ -15,5 +15,5 @@
     "skipLibCheck": true
   },
   "include": ["tests/**/*.ts", "oracle/*.ts", "packages/codegen/src/webassembly.d.ts"],
-  "exclude": ["tests/programs/as3pb"]
+  "exclude": ["tests/programs/as3pb", "tests/player/page.ts"]
 }
