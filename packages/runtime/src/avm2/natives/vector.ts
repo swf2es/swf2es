@@ -213,17 +213,28 @@ for (const [kind, convert, fill] of VECTORS) {
       o.$fixed = !!args[1];
       return o;
     },
+    // As VectorClass::call: a Vector of this class is itself; any other
+    // object is read as an array-like, its length and then each index, a
+    // ByteArray's bytes included; a primitive or null cannot convert.
     call: (rt, cls, args) => {
       prepareVector(rt, cls, convert, fill);
+      if (args.length !== 1) {
+        throw rt.error("ArgumentError", 1112, args.length);
+      }
+
       const source = args[0];
-      if (source?.$a === undefined) {
+      if (source === null || source === undefined || typeof source !== "object") {
         throw rt.error("TypeError", 1034, rt.describe(source), cls.$it.name);
+      }
+
+      if (source.$traits === cls.$it) {
+        return source;
       }
 
       // Each element as a get of the source's, as its conversion may change
       // the source: past a Vector's end, a RangeError.
       const o = cls.$it.instance();
-      const length: number = source.$a.length;
+      const length = rt.toUint(rt.getProperty(source, rt.publicName("length")));
       const a: Value[] = [];
       for (let i = 0; i < length; i++) {
         a.push(convert(rt, cls, rt.getProperty(source, rt.publicName(i))));

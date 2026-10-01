@@ -1723,8 +1723,9 @@ export class Runtime {
       return hook(this, cls, args);
     }
 
+    // An interface's constructor is a method nothing implements, as avmplus words it.
     if (cls.$desc?.interface) {
-      throw this.error("TypeError", 1007);
+      throw this.error("VerifyError", 1001, `${cls.$it.name}()`);
     }
 
     const o = cls.$it.instance();
@@ -1971,9 +1972,20 @@ export class Runtime {
     }
 
     itraits.proto.$init = desc.init(iscope, base);
-    desc.cinit(scope, base).call(cls);
+    // Its static initializer may name the class as a type, as avmplus
+    // resolves from traits, before initproperty has stored it anywhere.
+    this.defining.set(qualified, cls);
+    try {
+      desc.cinit(scope, base).call(cls);
+    } finally {
+      this.defining.delete(qualified);
+    }
+
     return cls;
   }
+
+  /** The classes whose static initializers are running, by qualified name. */
+  private readonly defining = new Map<string, AsObject>();
 
   applyType(factory: AsObject, params: Value[]): AsObject {
     const hook = this.classHooks[factory.$it.name]?.apply;
@@ -2011,9 +2023,15 @@ export class Runtime {
     }
 
     const mn = qname(ref.ns, ref.name);
-    const cls = this.getProperty(this.findDef(mn), mn);
+    let cls = this.getProperty(this.findDef(mn), mn);
     if (cls === null || cls === undefined || !cls.$it) {
-      throw this.error("ReferenceError", 1065, ref.name);
+      cls = this.defining.get(ref.ns.uri ? `${ref.ns.uri}::${ref.name}` : ref.name);
+      if (!cls) {
+        throw this.error("ReferenceError", 1065, ref.name);
+      }
+
+      // Not kept: the class is not yet where its name will find it.
+      return cls;
     }
 
     ref.cls = cls;
