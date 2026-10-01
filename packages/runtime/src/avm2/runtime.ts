@@ -1698,9 +1698,13 @@ export class Runtime {
       }
 
       if (f.$f) {
-        // A function as a constructor: a new Object whose prototype is the function's.
+        // A function as a constructor: a new Object whose prototype is the
+        // function's, or a plain Object where the prototype was cleared.
         const o = this.objectTraits.instance();
-        o.$p = this.functionPrototype(f);
+        const p = this.functionPrototype(f);
+        if (p !== undefined) {
+          o.$p = p;
+        }
         const result = f.$f.apply(o, args);
         return result !== null && typeof result === "object" ? result : o;
       }
@@ -1820,9 +1824,9 @@ export class Runtime {
     return f;
   }
 
-  /** A function's prototype, made when first asked for. */
-  functionPrototype(f: AsObject): AsObject {
-    if (!f.$prototype) {
+  /** A function's prototype, made when first asked for; undefined once a script has cleared it. */
+  functionPrototype(f: AsObject): AsObject | undefined {
+    if (!f.$prototype && !f.$noPrototype) {
       const p = this.objectTraits.instance();
       p.$d.set("constructor", f);
       p.$dontEnum = new Set(["constructor"]);

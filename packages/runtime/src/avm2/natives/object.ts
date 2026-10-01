@@ -73,9 +73,22 @@ export const objectNatives: Natives = {
     function (this: AsObject) {
       return rt.functionPrototype(this);
     },
-  "Function#set:prototype": plain(function (this: AsObject, p: Value) {
-    this.$prototype = p;
-  }),
+  // As FunctionObject's setter: null and undefined clear it, a primitive is refused.
+  "Function#set:prototype": (rt) =>
+    function (this: AsObject, p: Value) {
+      if (p === null || p === undefined) {
+        this.$prototype = undefined;
+        this.$noPrototype = true;
+        return;
+      }
+
+      if (typeof p !== "object" && typeof p !== "function") {
+        throw rt.error("TypeError", 1049);
+      }
+
+      this.$prototype = p;
+      this.$noPrototype = false;
+    },
   "Function#get:length": plain(function (this: AsObject) {
     return this.$length ?? this.$f.length;
   }),
