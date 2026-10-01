@@ -15,6 +15,7 @@
     "determinism": "node tests/conformance/determinism.ts",
     "tamarin": "node tests/tamarin/run.ts",
     "tamarin:swf2es": "node tests/tamarin/swf2es.ts",
+    "corpus": "node tests/player/corpus/run.ts",
     "bench": "node tests/bench/bench.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tests/player/tsconfig.json",
     "check": "biome check .",
