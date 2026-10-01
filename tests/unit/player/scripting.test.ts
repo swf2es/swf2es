@@ -263,3 +263,47 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "5 complete - http://example.test/nested.swf true",
   ]);
 });
+
+test("timers fire in the order of their times, each at its own time", { skip }, async () => {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  // A 10 fps root: the clock is at 100 as the constructor starts the timers, at 400 after three ticks.
+  const player = new Player(bare(compiler(out)("Timers"), 4), scripting);
+  player.frameRate = 10;
+  await player.start();
+  player.tick();
+  player.tick();
+  player.tick();
+  // Both due at 400: B was scheduled for it first, at 250, and goes first.
+  assert.deepEqual(lines, ["A 200", "B 250", "A 300", "B 400", "A 400"]);
+});
+
+test("timers due at once fire in the order started, after others around them were stopped", {
+  skip,
+}, async () => {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  // Five timers started A to E, three stopped at once: B and C, both due at 300, keep their order.
+  const player = new Player(bare(compiler(out)("TimerTies"), 3), scripting);
+  player.frameRate = 10;
+  await player.start();
+  player.tick();
+  player.tick();
+  assert.deepEqual(lines, ["B 300", "C 300"]);
+});
+
+test("a timer whose closure throws keeps running and fires again", { skip }, async () => {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compiler(out)("TimerThrows"), 3), scripting);
+  player.frameRate = 10;
+  await player.start();
+  // The first firing's error reaches the host; the timer is back in its place for the next.
+  assert.throws(() => player.tick());
+  assert.equal(scripting.now, scripting.clock);
+  player.tick();
+  assert.deepEqual(lines, ["firing 1 200 true", "firing 2 300 true"]);
+});

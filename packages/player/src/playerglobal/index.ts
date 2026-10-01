@@ -22,6 +22,7 @@ import { urlRequestNatives } from "./flash/net/URLRequest.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { securityNatives } from "./flash/system/Security.js";
 import { systemNatives } from "./flash/system/System.js";
+import { timerNatives } from "./flash/utils/Timer.js";
 import { toplevelNatives } from "./toplevel.js";
 
 export function playerNatives(s: Scripting): avm2.Natives {
@@ -45,6 +46,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...transformNatives(s),
     ...graphicsNatives(s),
     ...shapeNatives(s),
+    ...timerNatives(s),
   };
 }
 

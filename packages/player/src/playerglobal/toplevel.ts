@@ -27,8 +27,8 @@ export function toplevelNatives(s: Scripting): avm2.Natives {
       },
     "flash.utils::getDefinitionByName": (rt) => (name: Value) =>
       rt.classNamed(qualify(rt.toString(name))),
-    // Milliseconds since the start, by the frames played: a clock the frame step keeps, not the wall's.
-    "flash.utils::getTimer": () => () => Math.round((s.frames * 1000) / s.frameRate),
+    // Milliseconds since the start, by the clock the frame step keeps, not the wall's.
+    "flash.utils::getTimer": () => () => Math.round(s.now),
     "flash.utils::escapeMultiByte": (rt) => (text: Value) => escapeMultiByte(rt.toString(text)),
     "flash.utils::unescapeMultiByte": (rt) => (text: Value) => unescapeMultiByte(rt.toString(text)),
   };

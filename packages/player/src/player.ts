@@ -8,6 +8,9 @@ import { Container, type DisplayObject, MovieClip } from "./display.js";
 import type { Scripting } from "./scripting.js";
 import { type Library, readLibrary } from "./timeline.js";
 
+/** Frames one advance() may run to catch up with time passed. */
+const MAX_CATCH_UP = 5;
+
 export class Player {
   readonly swf: Swf;
   readonly root: MovieClip;
@@ -59,6 +62,8 @@ export class Player {
     s.stageHeight = this.height;
     s.frameRate = this.frameRate;
     s.constructAs(this.stage, s.rt.classNamed("flash.display::Stage"));
+    // The first frame has its time too: the clock is a frame's duration on as it runs, as in Flash.
+    s.beginFrame(1000 / this.frameRate);
     // The main SWF's LoaderInfo: on the root, which every display object under it reports.
     const info = s.loaderInfo(null);
     s.describe(info, this.bytes, this.swf);
@@ -75,6 +80,31 @@ export class Player {
     this.frameRate = s.frameRate;
   }
 
+  /** Time a host has let pass, in ms, still to be played as frames. */
+  private owed = 0;
+
+  /**
+   * Play what `dt` milliseconds are worth, a frame per frame's duration at
+   * the frame rate, the rest kept for the next call; at most MAX_CATCH_UP
+   * frames at once, so that a long pause does not become a spiral of
+   * catching up, as Ruffle paces. A host playing in real time calls this
+   * each animation frame; the tests step frames with tick().
+   */
+  advance(dt: number): void {
+    this.owed += Math.max(0, dt);
+    let n = 0;
+    while (n < MAX_CATCH_UP && this.owed >= 1000 / this.frameRate) {
+      this.owed -= 1000 / this.frameRate;
+      this.tick();
+      n++;
+    }
+
+    // What could not be caught up with is let go, not owed for ever; less than a frame is kept.
+    if (this.owed >= 1000 / this.frameRate) {
+      this.owed = 0;
+    }
+  }
+
   /**
    * The next frame: every clip advances, those on the display list, parents
    * before children, loaded SWFs' too, and the orphans a script took off it,
@@ -82,6 +112,7 @@ export class Player {
    * takes off still has its frame, as in Flash. Then the frame's scripts.
    */
   tick(): void {
+    this.scripting?.beginFrame(1000 / this.frameRate);
     const clips: MovieClip[] = [];
     const collect = (o: DisplayObject) => {
       if (o instanceof MovieClip) {

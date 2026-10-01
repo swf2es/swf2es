@@ -671,6 +671,38 @@ asks whether two objects' bounds in the stage's space overlap. The
 corpus's `displayobject_getrect`, `_hittestpoint`, `_hittestpoint_root`
 and `_hittestobject` are the reference, with the `draws` case.
 
+### Time
+
+The player keeps a clock of its own, in milliseconds, apart from the
+frame count: `getTimer` reads it, and `Timer` fires by it. A frame
+stepped by `Player.tick()` moves the clock by one frame's duration at
+the stage's frame rate, the first frame's included, so a test that steps
+frames gets the same clock every time; a host playing in real time calls
+`Player.advance(dt)` with the time passed, which accumulates it and runs
+as many frames as it is worth, five at most after a long pause and the
+rest let go, as Ruffle paces, so a stall does not become a spiral of
+catch-up. Frame pacing and the clock are related but not one counter:
+the clock may run on within a frame later, where the frame count cannot.
+
+`flash.utils.Timer` is playerglobal's own in all but three natives: the
+counting, `delay`'s range (RangeError #2066), `reset` and the events are
+AS3; the player keeps the timers started, each with its delay and the
+closure to call, fires the ones due as a frame begins, before its
+timeline advances, each firing the earliest due so that two timers
+interleave as their times do, two due at once in the order scheduled,
+and tells `running`. The timers are a heap by due time, as asyncio keeps
+its callbacks: a scan of all of them per firing costs 2.5 ms a frame at a
+thousand timers where the heap costs 0.3, and nothing either way below a
+hundred.
+Flash fires timers between frames at their own times, so while a
+timer's closure runs the time is the one it fell due at, which a timer
+started from it counts from and `getTimer` tells: three timers set one
+from another at 100 ms each land at 400, 500 and 600 ms, as in Flash,
+not a frame later each (the corpus's `timer_finished`).
+`setTimeout` and `setInterval` are AS3 over `Timer`. The corpus's
+`timer*` tests, Flash's traces of timers against frames, are the
+reference, with a node test of the clock and `advance`.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
