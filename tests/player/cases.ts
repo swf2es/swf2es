@@ -467,6 +467,25 @@ function replaces(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A root of one frame whose document class makes BitmapDatas and shows three
+// Bitmaps (scripts/Bitmaps.as): what Flash traces of the pixel store, and draws.
+function bitmaps(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 70,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "Bitmaps"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A Box placed by the timeline on frame 1 and removed on frame 2, and one a
 // script adds and removes, each listening for the display list's events
 // (scripts/Added.as).
@@ -613,6 +632,16 @@ export const cases: PlayerCase[] = [
     frames: 3,
     capture: [1, 3],
     tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "bitmaps",
+    swf: bitmaps,
+    script: "Bitmaps",
+    frames: 1,
+    capture: [1],
+    // The smoothed Bitmap: Flash's bilinear filter and the GPU's part by up to 2 in a channel.
+    tolerance: 2,
     maxOutliers: 0,
   },
   {

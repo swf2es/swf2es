@@ -1,0 +1,53 @@
+tiny error 2015
+wide [object BitmapData]
+edge 8191x1
+area [object BitmapData]
+area ok 4095
+8193 [object BitmapData]
+16384 [object BitmapData]
+tall [object BitmapData]
+4097x4096 [object BitmapData]
+negative error 2015
+size 4 3 true (x=0, y=0, w=4, h=3)
+default fill 80ff7f40 ff7f40
+out of range 0 0 0
+roundtrip 1ffffff 1ffffff ffffff
+roundtrip 180c040 1ffff00 ffff00
+roundtrip 2ffffff 2ffffff ffffff
+roundtrip 7f3366cc 7f3266cd 3266cd
+roundtrip 80ff8040 80ff7f40 ff7f40
+roundtrip fe123456 fe123456 123456
+roundtrip ff123456 ff123456 123456
+roundtrip 123456 0 0
+roundtrip 10203040 10203040 203040
+roundtrip c8c8c8c8 c8c8c8c8 c8c8c8
+setPixel keeps alpha 8000ff00
+opaque fill ff345678 345678
+opaque set32 ff102030
+fillRect clipped 40ff0000 40ff0000 8000ff00 80ff7f40
+copy 80ff0000 4000ff00 ff0000ff
+merge ff80007f ff0040bf
+merge over translucent a0cc0033 7000916d
+copy into opaque ff80007f ff0040bf
+merge into opaque ffc0003f ff00708f
+copy clipped 80ff0000 4000ff00
+getPixels 16 16
+bytes 80ff0000 80ff0000 80ff0000 4000ff00
+getVector 4 80ff0000 4000ff00
+setVector 80ff0000 4000ff00
+setVector short error 2006
+setPixels 4000ff00 16
+setPixels short error 2030
+clone ffffffff 80ff0000 2 true
+disposed width error 2015
+disposed height error 2015
+disposed transparent error 2015
+dispose again ok
+disposed rect error 2015
+disposed getPixel error 2015
+disposed fillRect error 2015
+rect null error 2007
+empty bitmap null 0 0 auto false
+bitmap size 40 40 40 4 4 false true auto
+snapping error 2008
+drawn ff000000
