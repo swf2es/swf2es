@@ -55,6 +55,7 @@ export function zlibUncompress(data: Uint8Array, raw = false): Uint8Array {
 
   const inflator = new pako.Inflate({ raw: true });
   inflator.push(data.subarray(start), true);
+
   // Ended at the stream's end; its types leave `ended` and `strm` out.
   const state = inflator as unknown as { ended: boolean; strm: { next_in: number } };
   if (inflator.err || !state.ended) {
@@ -82,6 +83,7 @@ export function zlibUncompress(data: Uint8Array, raw = false): Uint8Array {
 function adler32(data: Uint8Array): number {
   let a = 1;
   let b = 0;
+
   for (let i = 0; i < data.length; ) {
     // 5552 bytes at most before the modulo keep the sums exact, as zlib's
     // NMAX; eight at a time, then the rest.
@@ -130,6 +132,7 @@ export function lzmaByteArrayCompress(data: Uint8Array): Uint8Array {
 export function lzmaByteArrayUncompress(data: Uint8Array): Uint8Array {
   const length = (data[5] | (data[6] << 8) | (data[7] << 16) | (data[8] << 24)) >>> 0;
   let bytes: Uint8Array;
+
   try {
     bytes = lzmaDecompress(data);
   } catch (e) {

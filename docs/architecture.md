@@ -356,6 +356,26 @@ Its AS3 sources are MPL-2.0: the compiled library stays MPL, in its own
 package, with its source available. `playerglobal` (`flash.*`) is declarations
 only, so the player implements all of it.
 
+## The player
+
+The player keeps Flash's display list and timeline (`packages/player/src`:
+`timeline.ts` reads a SWF's definitions and frames, `display.ts` is the
+display list), and PixiJS only mirrors it (`pixi.ts`): a container per
+display object, kept from frame to frame and updated where the display
+object marks itself changed. A shape's fills are immutable
+`GraphicsContext`s shared by its instances, built from Flash's edges
+(`shapes.ts`: each edge goes to its right fill forward and its left fill
+reversed, joined into contours) and filled even-odd through a containment
+tree of the contours, holes cut. Its lines are drawn for each instance, in
+the stage's axes, because Flash strokes a transformed line with one width
+all along, not the local width stretched by the transform.
+
+Flash anti-aliases by supersampling on a grid: none at low quality, 2×2 at
+medium, 4×4 at high and best. The test page draws the same way, at that
+many times the resolution without multisampling, averaged down, and its
+frames then match Flash's to the pixel for straight edges, and within a
+quarter pixel's anti-aliasing for curved lines and lines under a skew.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
@@ -371,8 +391,25 @@ only, so the player implements all of it.
   they were added; avmplus visits them in its hashtable's, which for names
   that are not indexes follows their interned strings' addresses, so the
   cases do not depend on it.
-- **Flash Player debug projector** for playerglobal behaviour, captured into
-  a separate corpus repo. Only redistributable SWFs go there.
+- **Flash, as AIR's `adl` runs it**, for what the player draws and traces
+  (`oracle/flash.ts`, `oracle/flash/Harness.as`). The harness is an AIR
+  application that loads each SWF with a `Loader`, in a hidden window of
+  the SWF's size, and sends back the frames asked for, drawn with
+  `BitmapData.drawWithQuality` at the SWF's stage quality, and its traces.
+  Frame 1 is the one its `INIT` follows and frame k the one after k - 1
+  `EXIT_FRAME`s, a frame later for AVM1, whose movie in a `Loader` shows
+  its frame 2 a frame late. adl is not in CI (here it runs the Windows AIR
+  runtime under Wine), so what the player's tests compare against is drawn
+  once and committed (`tests/player/references`, `node tests/player/run.ts
+  --update`); CI needs only Chrome.
+  [Ruffle's test corpus](https://github.com/ruffle-rs/ruffle/tree/master/tests/tests/swfs)
+  supplies thousands of SWFs with Flash Player's traces, and some with its
+  frames (`tests/player/corpus/fetch-ruffle.ts` fetches it, uncommitted). Flash
+  under adl traces what their `output.txt` holds (`timeline/`: all 15 that
+  finish; `visual/`: 104 of 107). The expected frames are not all Flash's,
+  some are Ruffle's own, and Flash under adl draws 42 of the 101 in
+  `visual/` within their tolerance or a pixel's anti-aliasing of it, so
+  the oracle decides, not the corpus's PNGs (`tests/player/corpus/check-references.ts`).
 
 ## Milestone 1
 

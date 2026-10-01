@@ -1,0 +1,20 @@
+// SWF tag codes, as the specification numbers them. The player reads these
+// first; any other tag is kept by its code.
+export const End = 0;
+export const ShowFrame = 1;
+export const DefineShape = 2;
+export const PlaceObject = 4;
+export const RemoveObject = 5;
+export const SetBackgroundColor = 9;
+export const DefineShape2 = 22;
+export const PlaceObject2 = 26;
+export const RemoveObject2 = 28;
+export const DefineShape3 = 32;
+export const DefineSprite = 39;
+export const FrameLabel = 43;
+export const FileAttributes = 69;
+export const PlaceObject3 = 70;
+export const DoABC = 72;
+export const SymbolClass = 76;
+export const DoABC2 = 82;
+export const DefineShape4 = 83;

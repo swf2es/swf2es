@@ -30,7 +30,7 @@ pnpm install
 pnpm build
 pnpm check       # Biome: formatting and lint (pnpm format fixes them)
 pnpm typecheck   # tests and scripts (packages are checked by build)
-pnpm test        # needs podman or docker for the avmshell oracle
+pnpm test        # needs podman or docker for the avmshell oracle, and Chrome for the player
 pnpm tamarin     # the Tamarin acceptance tests in avmshell and swf2es
 ```
 

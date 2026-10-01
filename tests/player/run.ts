@@ -1,0 +1,90 @@
+// Plays the cases in cases.ts in the player, in headless Chrome, and checks
+// their frames against Flash's in references/. Where a frame differs, its
+// image, Flash's and their difference go to out/<case>/.
+//
+//   node tests/player/run.ts [case...]            check
+//   node tests/player/run.ts --update [case...]   draw the references again in Flash
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { cases } from "./cases.ts";
+import { runPlayer } from "./chrome.ts";
+import { compareImages, decodePng, differenceImage, encodePng } from "./image.ts";
+
+const here = fileURLToPath(new URL(".", import.meta.url));
+const args = process.argv.slice(2);
+const update = args.includes("--update");
+const names = args.filter((a) => a !== "--update");
+const chosen = cases.filter((c) => !names.length || names.includes(c.name));
+const reference = (name: string, frame: number) => `${here}references/${name}/frame-${frame}.png`;
+
+if (update) {
+  // The oracle needs adl, which only this mode does.
+  const { runFlash } = await import("../../oracle/flash.ts");
+  const results = await runFlash(chosen);
+  for (const [i, c] of chosen.entries()) {
+    const r = results[i];
+    if (r.incomplete) {
+      console.log(`${c.name}: Flash did not finish`);
+      process.exitCode = 1;
+      continue;
+    }
+
+    rmSync(`${here}references/${c.name}`, { recursive: true, force: true });
+    mkdirSync(`${here}references/${c.name}`, { recursive: true });
+    for (const [frame, png] of r.images) {
+      writeFileSync(reference(c.name, frame), png);
+    }
+
+    console.log(`${c.name}: ${r.images.size} frames`);
+  }
+} else {
+  const results = await runPlayer(chosen);
+  let failed = 0;
+  for (const [i, c] of chosen.entries()) {
+    const r = results[i];
+    const problems: string[] = [];
+    if (r.error) {
+      problems.push(r.error);
+    }
+
+    rmSync(`${here}out/${c.name}`, { recursive: true, force: true });
+    for (const frame of c.capture) {
+      const actual = r.images.get(frame);
+      if (!actual) {
+        problems.push(`frame ${frame}: not drawn`);
+        continue;
+      }
+
+      const expected = readFileSync(reference(c.name, frame));
+      const a = decodePng(actual);
+      const e = decodePng(expected);
+      const d = compareImages(a, e, c.tolerance);
+      if (d.outliers <= c.maxOutliers) {
+        continue;
+      }
+
+      problems.push(
+        d.sizeDiffers
+          ? `frame ${frame}: ${a.width}×${a.height}, not ${e.width}×${e.height}`
+          : `frame ${frame}: ${d.outliers} outliers (allowed ${c.maxOutliers}), max difference ${d.maxDifference}`,
+      );
+      const out = `${here}out/${c.name}`;
+      mkdirSync(out, { recursive: true });
+      writeFileSync(`${out}/frame-${frame}.png`, actual);
+      writeFileSync(`${out}/frame-${frame}.flash.png`, expected);
+      if (!d.sizeDiffers) {
+        writeFileSync(`${out}/frame-${frame}.difference.png`, encodePng(differenceImage(a, e)));
+      }
+    }
+
+    if (problems.length) {
+      failed++;
+      console.log(`FAIL ${c.name}\n  ${problems.join("\n  ")}`);
+    }
+  }
+
+  console.log(`${chosen.length - failed} of ${chosen.length} cases as Flash drew them`);
+  if (failed) {
+    process.exitCode = 1;
+  }
+}
