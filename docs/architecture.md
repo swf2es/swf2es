@@ -870,7 +870,11 @@ doubles there too, so those two tests cannot be matched to the end.
   `tests/player/corpus/run.ts`): the player plays each `avm2/` and
   `timeline/` test that has Flash's `output.txt` for the frames its
   `test.toml` names, in Chrome as the player's tests run, and its trace is
-  compared to Flash's line by line. `baseline.json` records each test's
+  compared to Flash's line by line. The page runs the runtime as the
+  debugger player, since Ruffle recorded its traces with one and adl is
+  one: an uncaught error's line carries its text, "Error #1010: A term is
+  undefined and has no properties.", where the release player's and
+  avmshell's has the number alone. `baseline.json` records each test's
   standing, as `tests/tamarin/swf2es-baseline.json` records swf2es's on
   Tamarin: the lines matched before the first difference, of how many,
   and what stopped the player, if anything. A change may not lower a

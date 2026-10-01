@@ -33,6 +33,8 @@ async function scriptingFor(
   const scripting = new Scripting(await createCodegen(wasm), {
     // A trace of several lines is several lines of Flash's output.
     print: (line) => trace.push(...line.split("\n")),
+    // The debugger player, as adl is and as Ruffle's traces were recorded: errors carry their text.
+    debugger: true,
     url: url ? new URL(url, location.href).href : undefined,
     fetch: async (target, signal) => {
       const response = await fetch(target, { signal });

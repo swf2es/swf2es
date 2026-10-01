@@ -72,8 +72,9 @@ export const toplevelNatives: Natives = {
 
   // Error
   // Error.throwError fills in the template's %n: in debugger mode it has some.
+  // The debugger player writes the template as it is, %1 and all; an id it has no text for is the number alone.
   "Error.getErrorMessage": (rt) => (id: number) =>
-    rt.debugger ? `Error #${id}: ${messages[id] ?? ""}` : `Error #${id}`,
+    rt.debugger && messages[id] ? `Error #${id}: ${messages[id]}` : `Error #${id}`,
   "Error#getStackTrace": plain(() => null),
 };
 
