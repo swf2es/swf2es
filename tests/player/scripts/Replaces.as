@@ -1,8 +1,10 @@
-// A script sets a timeline child's scale and rotation; on the next frame
-// the timeline replaces the character at that depth with no matrix of its
-// own. Flash says what the new child reports: the sign and the angle the
-// old one was given, or only what its matrix says.
+// Scripts set one property each of timeline children, and on the next frame
+// the timeline places another character at every depth, with no matrix of
+// its own. Flash says whether a child is a new object, what it reports of
+// its transform, and (in the frame drawn) which untouched Shapes take the
+// new shape's graphic; depth 14 is a second untouched control.
 package {
+  import flash.accessibility.AccessibilityProperties;
   import flash.display.DisplayObject;
   import flash.display.MovieClip;
 
@@ -40,6 +42,26 @@ package {
       }
       getChildAt(11).filters = [];
       getChildAt(12).blendMode = "normal";
+      try {
+        getChildAt(14).metaData = {};
+      } catch (e:Error) {
+        trace("metaData:", e.errorID);
+      }
+      try {
+        getChildAt(15).accessibilityProperties = new AccessibilityProperties();
+      } catch (e:Error) {
+        trace("accessibilityProperties:", e.errorID);
+      }
+      getChildAt(16).mask = null;
+      getChildAt(17).scrollRect = null;
+      getChildAt(18).cacheAsBitmap = false;
+      getChildAt(19).opaqueBackground = null;
+      getChildAt(20).scale9Grid = null;
+      getChildAt(21).alpha = 1;
+      getChildAt(22).visible = true;
+      getChildAt(23).transform.matrix = getChildAt(23).transform.matrix;
+      getChildAt(24).cacheAsBitmap = true;
+      getChildAt(25).transform.colorTransform = getChildAt(25).transform.colorTransform;
       report("frame 1");
     }
 

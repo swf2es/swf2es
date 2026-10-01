@@ -165,9 +165,13 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       return this.$display.visible;
     }
 
+    // Set to what it was, visible, mask and cacheAsBitmap are no touch in Flash (the `replaces` case).
     set visible(v: Value) {
+      if (this.$display.visible !== !!v) {
+        this.$display.scripted = true;
+      }
+
       this.$display.visible = !!v;
-      this.$display.scripted = true;
       this.$display.invalidate(TRANSFORM);
     }
 
@@ -369,7 +373,10 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set cacheAsBitmap(v: Value) {
-      this.$display.scripted = true;
+      if ((this.$cacheAsBitmap ?? false) !== !!v) {
+        this.$display.scripted = true;
+      }
+
       this.$cacheAsBitmap = !!v;
     }
 
@@ -396,7 +403,10 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set mask(v: Value) {
-      this.$display.scripted = true;
+      if ((this.$mask ?? null) !== (v ?? null)) {
+        this.$display.scripted = true;
+      }
+
       this.$mask = v;
     }
 
