@@ -15,6 +15,16 @@ server), so there is only one implementation to keep correct. It uses
 AssemblyScript's minimal runtime, whose garbage the wrapper collects between
 calls (see [benchmarks.md](benchmarks.md#the-assemblyscript-runtime)).
 
+The wrapper's `Codegen` (`createCodegen` in `packages/codegen/src`) is the
+compiler's whole API: `reset` starts a domain, `add` links an ABC into it
+after those before, and the last one added compiles with `compile`, whole,
+to its module, source map and the entry of each method, or with
+`compileMethods`, a method at a time as the JIT compiles each on its first
+call. Both go through `assembly/compile.ts`, which the test build
+(`assembly/testing.ts`, with the reader, verifier and emitter exposed for
+the node tests) exports too, so the tests exercise the code that ships, and
+the determinism check compiles every chain through both builds.
+
 ## The JIT/AOT invariant
 
 For the same input, both modes must produce byte-identical output. That

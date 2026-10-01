@@ -21,3 +21,13 @@ export function abcVersion(abc: Uint8Array): i32 {
   const major = <i32>abc[2] | ((<i32>abc[3]) << 8);
   return (major << 16) | minor;
 }
+
+// The compiler: see compile.ts.
+export {
+  domainAdd,
+  domainEmitEach,
+  domainModule,
+  domainModuleEntries,
+  domainReset,
+  domainSourceMap,
+} from "./compile";
