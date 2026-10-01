@@ -1387,6 +1387,8 @@ export class Runtime {
         }
       }
 
+      // A name deleted is enumerable again when set anew, as avmplus has it.
+      o.$dontEnum?.delete(name);
       return o.$d ? o.$d.delete(name) || true : false;
     }
 
@@ -3014,13 +3016,15 @@ const pairIndex = (index: number) => (index < 2 ? index + 1 : 0);
  * child or attribute of XML hides the methods of its names (as avmplus'
  * getproperty does for XML and XMLList).
  */
-function hookedBinding(b: number, mn: Multiname): boolean {
+function hookedBinding(b: number, mn: Multiname, hook: PropertyHook): boolean {
   if (b === 0 || mn.attribute) {
     return true;
   }
 
   return (
-    (b & 7) === BIND_Method && mn.namespaces.some((ns) => ns?.kind === NS_Public && ns.uri === "")
+    hook.hidesMethods &&
+    (b & 7) === BIND_Method &&
+    mn.namespaces.some((ns) => ns?.kind === NS_Public && ns.uri === "")
   );
 }
 

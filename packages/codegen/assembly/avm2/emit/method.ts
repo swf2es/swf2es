@@ -499,9 +499,12 @@ export class MethodEmitter {
       out.uint(local++);
       out.text(" = rt.array(rest)");
     } else if (flags & C.METHOD_NeedArguments) {
+      // With the function itself, for arguments.callee.
       out.text(", l");
       out.uint(local++);
-      out.text(" = rt.arguments(arguments)");
+      out.text(" = rt.arguments(arguments, ");
+      out.text(this.functionName.length ? this.functionName : "$method");
+      out.text(")");
     }
 
     for (let r = local; r < ir.frameSize; r++) {
