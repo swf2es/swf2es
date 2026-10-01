@@ -202,34 +202,43 @@ export class Scripting {
 
   /**
    * Run the frame scripts of the clips under `root` that entered a frame
-   * with one since they last ran, in tree order, and again for what those
-   * scripts made jump, until none is left (bounded, as a script that jumps
-   * on every run would never settle).
+   * with one since they last ran, in tree order: a clip's own, again for
+   * the frame a goto of its own lands it on, then its children's, as Flash
+   * runs a parent's landing script before a child the jump made. Rounds
+   * until none is left, bounded, as a script that jumps on every run would
+   * never settle.
    */
   runFrameScripts(root: DisplayObject): void {
     for (let round = 0; round < 64; round++) {
       let ran = false;
-      const visit = (o: DisplayObject) => {
-        if (o instanceof MovieClip && o.object && o.scriptedFrame !== o.currentFrame) {
+      const own = (o: MovieClip) => {
+        for (let jumps = 0; jumps < 64 && o.scriptedFrame !== o.currentFrame; jumps++) {
           o.scriptedFrame = o.currentFrame;
           const script = o.frameScripts.get(o.currentFrame);
-          if (script) {
-            ran = true;
-            this.inFrameScript = o;
-            try {
-              this.rt.call(script, o.object);
-            } finally {
-              this.inFrameScript = null;
-            }
-
-            // The goto the script asked for, now that it has returned; the
-            // frame it lands on has its script run in this same phase.
-            if (o.queuedGoto !== null) {
-              const frame = o.queuedGoto;
-              o.queuedGoto = null;
-              o.gotoFrame(frame);
-            }
+          if (!script) {
+            return;
           }
+
+          ran = true;
+          this.inFrameScript = o;
+          try {
+            this.rt.call(script, o.object);
+          } finally {
+            this.inFrameScript = null;
+          }
+
+          // The goto the script asked for, now that it has returned; the
+          // frame it lands on has its script run next, in this same phase.
+          if (o.queuedGoto !== null) {
+            const frame = o.queuedGoto;
+            o.queuedGoto = null;
+            o.gotoFrame(frame);
+          }
+        }
+      };
+      const visit = (o: DisplayObject) => {
+        if (o instanceof MovieClip && o.object) {
+          own(o);
         }
 
         if (o instanceof Container) {

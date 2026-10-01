@@ -321,6 +321,33 @@ function nested(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A three-frame root whose frame 3 places a clip with a frame script; the
+// root's frame 1 script jumps there (scripts/GotoChild.as).
+function gotoChild(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "GotoChild"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Inner"],
+      ]),
+      w.showFrame(),
+      w.showFrame(),
+      w.place({ depth: 1, character: 2, matrix: { tx: 400, ty: 400 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // What differs from Flash in "moves" is anti-aliasing a quarter pixel off:
 // Flash's curved lines reach further into their shape, and under the skew
 // of frame 2 its lines are a little wider or narrower than Ruffle's rule
@@ -389,6 +416,15 @@ export const cases: PlayerCase[] = [
     script: "Nested",
     frames: 3,
     capture: [1, 2, 3],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "gotoChild",
+    swf: gotoChild,
+    script: "GotoChild",
+    frames: 2,
+    capture: [1, 2],
     tolerance: 0,
     maxOutliers: 0,
   },

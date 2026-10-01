@@ -305,6 +305,8 @@ export class MovieClip extends Container {
       }
     }
 
+    // On the frame before its children are made: one constructed now sees it there, as in Flash.
+    this.currentFrame = target;
     for (const [depth, jump] of jumps) {
       const existing = this.depths.get(depth);
       if (existing && jump.before) {
@@ -344,8 +346,6 @@ export class MovieClip extends Container {
       this.placeAtDepth(child, depth);
       construct(child, character, this.library);
     }
-
-    this.currentFrame = target;
   }
 
   /** The first frame, as a clip runs it when it is made; once. */
