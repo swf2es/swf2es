@@ -220,6 +220,7 @@ function readFilterBytes(r: SwfReader): Uint8Array {
 /** A RemoveObject's or RemoveObject2's depth. */
 export function readRemove(bytes: Uint8Array, tag: Tag): number {
   const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+
   if (tag.code === RemoveObject) {
     r.u16();
   } else if (tag.code !== RemoveObject2) {

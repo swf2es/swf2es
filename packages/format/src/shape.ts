@@ -103,6 +103,7 @@ export interface Shape {
 export function readMatrix(r: SwfReader): Matrix {
   r.align();
   const m = { ...IDENTITY };
+
   if (r.ub(1)) {
     const n = r.ub(5);
     m.a = r.sb(n) / 65536;
@@ -128,6 +129,7 @@ export function readColorTransform(r: SwfReader, alpha: boolean): ColorTransform
   const hasMul = r.ub(1);
   const n = r.ub(4);
   const ct = { rMul: 1, gMul: 1, bMul: 1, aMul: 1, rAdd: 0, gAdd: 0, bAdd: 0, aAdd: 0 };
+
   if (hasMul) {
     ct.rMul = r.sb(n) / 256;
     ct.gMul = r.sb(n) / 256;
@@ -162,6 +164,7 @@ function readColor(r: SwfReader, alpha: boolean): number {
 function readGradient(r: SwfReader, alpha: boolean, focal: boolean): Gradient {
   const matrix = readMatrix(r);
   r.align();
+
   const spread = r.ub(2);
   const interpolation = r.ub(2);
   const count = r.ub(4);
@@ -239,7 +242,9 @@ function readLines(r: SwfReader, version: number): Line[] {
     const noHScale = r.ub(1) === 1;
     const noVScale = r.ub(1) === 1;
     const pixelHinting = r.ub(1) === 1;
-    r.ub(5);
+
+    r.ub(5); // reserved: the flags fill two bytes, must be zero
+
     const noClose = r.ub(1) === 1;
     const endCap = r.ub(2);
     const miterLimit = join === 2 ? r.u16() / 256 : 3;
@@ -251,6 +256,7 @@ function readLines(r: SwfReader, version: number): Line[] {
           ? 0xff000000
           : (fill.gradient.stops[0]?.color ?? 0xff000000)
       : readColor(r, true);
+
     lines.push({
       width,
       color,
@@ -278,6 +284,7 @@ function readRecords(
   let fillBits = r.ub(4);
   let lineBits = r.ub(4);
   const records: ShapeRecord[] = [];
+
   for (;;) {
     if (r.overrun) {
       return { records, truncated: true };
@@ -315,6 +322,7 @@ function readRecords(
     const fill1 = flags & 4 ? r.ub(fillBits) : null;
     const line = flags & 8 ? r.ub(lineBits) : null;
     let styles: { fills: Fill[]; lines: Line[] } | null = null;
+
     if (flags & 16 && version >= 2) {
       styles = { fills: readFills(r, version), lines: readLines(r, version) };
       r.align();
@@ -342,6 +350,7 @@ export function readShape(bytes: Uint8Array, code: number, offset: number, lengt
   const r = new SwfReader(bytes, offset, offset + length);
   const id = r.u16();
   const bounds = r.rect();
+
   let edgeBounds: Rect | null = null;
   if (version === 4) {
     edgeBounds = r.rect();
