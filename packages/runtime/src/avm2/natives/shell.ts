@@ -8,7 +8,6 @@ const started = Date.now();
 export function shellNatives(rt: Runtime): Natives {
   const natives: Natives = {};
 
-  // biome-ignore lint/complexity/noStaticOnlyClass: the class is how System's natives are written, and all of System's are static
   class SystemNatives {
     // avmshell's console skips NUL characters, which strings may hold.
     static trace(args: Value): void {
