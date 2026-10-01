@@ -16,6 +16,8 @@ export function qualify(name: string): string {
   return i < 0 ? name : `${name.slice(0, i)}::${name.slice(i + 1)}`;
 }
 
+const UTF8 = new TextEncoder();
+
 export function toplevelNatives(s: Scripting): avm2.Natives {
   return {
     trace:
@@ -35,7 +37,7 @@ export function toplevelNatives(s: Scripting): avm2.Natives {
 /** Every byte of the UTF-8 but the alphanumerics as %XX, up to a NUL; a lone surrogate is U+FFFD, as the encoder has it. */
 function escapeMultiByte(text: string): string {
   const nul = text.indexOf("\0");
-  const bytes = new TextEncoder().encode(nul < 0 ? text : text.slice(0, nul));
+  const bytes = UTF8.encode(nul < 0 ? text : text.slice(0, nul));
   let out = "";
   for (let i = 0; i < bytes.length; i++) {
     const b = bytes[i];
@@ -67,7 +69,7 @@ function unescapeMultiByte(text: string): string {
     }
 
     if (c !== "%") {
-      for (const b of new TextEncoder().encode(c)) {
+      for (const b of UTF8.encode(c)) {
         bytes.push(b);
       }
 
