@@ -15,11 +15,13 @@ import { fileURLToPath } from "node:url";
 import { type PlayerResult, runPlayer } from "../chrome.ts";
 import { collectRuffle, corpus, type RuffleTest } from "./ruffle.ts";
 
-/** How the player stood on one test. */
+/** How the player stood on one test: a pass is every line matched, no more traced, and no error. */
 interface Standing {
   /** Lines matched before the first difference, of `lines` Flash traced. */
   matched: number;
   lines: number;
+  /** Lines the player traced, more than `lines` when it went on past Flash's. */
+  traced: number;
   /** What stopped the player: an exception's text, "timeout", or null. */
   error: string | null;
 }
@@ -81,15 +83,12 @@ function standing(t: RuffleTest, r: PlayerResult): Standing {
     matched++;
   }
 
-  // Everything matched and nothing more traced: a pass, the error aside.
-  if (matched === lines && r.trace.length > lines) {
-    matched = Math.max(0, lines - 1);
-  }
-
-  return { matched, lines, error: r.error };
+  return { matched, lines, traced: r.trace.length, error: r.error };
 }
 
-const passes = Object.values(standings).filter((s) => s.matched === s.lines && !s.error).length;
+const passed = (s: Standing) => s.matched === s.lines && s.traced === s.lines && !s.error;
+
+const passes = Object.values(standings).filter(passed).length;
 console.log(
   `${passes} of ${tests.length} match Flash's trace, ${Math.round((performance.now() - started) / 1000)} s`,
 );
@@ -130,8 +129,6 @@ if (update) {
     if (before === null) {
       continue;
     }
-
-    const passed = (x: Standing) => x.matched === x.lines && !x.error;
     if (
       (passed(before) && !passed(s)) ||
       s.matched < before.matched ||

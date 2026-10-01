@@ -190,13 +190,26 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
     async (evaluate) => {
       const results: PlayerResult[] = [];
       for (const [index, job] of jobs.entries()) {
-        const { value, exception } = await evaluate<{
-          images: Record<string, string>;
-          trace: string[];
-          error: string | null;
-        }>(
-          `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)})`,
-        );
+        let value:
+          | { images: Record<string, string>; trace: string[]; error: string | null }
+          | undefined;
+        let exception: string | null = null;
+        const begun = performance.now();
+        try {
+          ({ value, exception } = await evaluate<NonNullable<typeof value>>(
+            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)})`,
+          ));
+        } catch (e) {
+          // A job stopped at the timeout makes the protocol answer with an
+          // error ("Internal error"), not a result; one that fails sooner is
+          // the browser's or the protocol's, and stops the run.
+          if (!options.timeout || performance.now() - begun < options.timeout) {
+            throw e;
+          }
+
+          exception = "timed out";
+        }
+
         const images = new Map<number, Uint8Array>();
         for (const [frame, dataUrl] of Object.entries(value?.images ?? {})) {
           images.set(Number(frame), new Uint8Array(Buffer.from(dataUrl.split(",")[1], "base64")));

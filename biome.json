@@ -13,6 +13,7 @@
       "!oracle/avmplus",
       "!tests/tamarin/baseline.json",
       "!tests/tamarin/swf2es-baseline.json",
+      "!tests/player/corpus/baseline.json",
       "!tests/programs/as3pb"
     ]
   },
