@@ -329,14 +329,13 @@ export class PixiView {
         return;
       }
 
-      strokes.context.destroy();
-      if (det === 0) {
-        strokes.context = new GraphicsContext();
-        return;
+      // The new context goes in before the old one goes: the Graphics listens on the one it holds.
+      const previous = strokes.context;
+      strokes.context = det === 0 ? new GraphicsContext() : strokeContext(layer, m);
+      previous.destroy();
+      if (det !== 0) {
+        strokes.setFromMatrix(new Matrix(m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, 0, 0));
       }
-
-      strokes.context = strokeContext(layer, m);
-      strokes.setFromMatrix(new Matrix(m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, 0, 0));
     });
   }
 
