@@ -1,15 +1,12 @@
-// Test-only entry point: exposes the reader to node tests without adding
-// exports to codegen.wasm.
+// Test-only entry point: what codegen.wasm exports, and the reader, the
+// verifier and the emitter besides, for the node tests to look inside.
 import { Abc } from "./avm2/abc/abc";
 import { BodyDecoder, verifyMethods } from "./avm2/abc/code";
-import * as C from "./avm2/abc/constants";
 import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./avm2/abc/opcodes";
 import { readAbc } from "./avm2/abc/parse";
 import { readConstantPool } from "./avm2/abc/pool";
 import { PADDING, Reader } from "./avm2/abc/reader";
 import { MethodEmitter } from "./avm2/emit/method";
-import { ModuleEmitter } from "./avm2/emit/module";
-import { Output } from "./avm2/emit/output";
 import {
   IR_CallGetter,
   IR_CallInterface,
@@ -22,7 +19,6 @@ import {
   IR_Nip,
   Ir,
 } from "./avm2/ir/ir";
-import { Domain } from "./avm2/link/domain";
 import {
   TRAITS_Activation,
   TRAITS_Catch,
@@ -32,6 +28,7 @@ import {
   TRAITS_Script,
   TRAITS_Void,
 } from "./avm2/link/traits";
+import { domain } from "./compile";
 
 export const U8: u8 = 0;
 export const U16: u8 = 1;
@@ -318,21 +315,6 @@ export function benchDecode(bytes: Uint8Array, rounds: i32): i32 {
   return instructions;
 }
 
-let domain = new Domain();
-
-/** Start a new domain whose user ABCs have API version `apiVersion`. */
-export function domainReset(apiVersion: i32): void {
-  domain = new Domain();
-  domain.apiVersion = <u8>apiVersion;
-}
-
-/** Add an ABC to the domain; 0, or the VerifyError it was rejected with. */
-export function domainAdd(bytes: Uint8Array, builtin: bool): i32 {
-  const buffer = new StaticArray<u8>(bytes.length + PADDING);
-  memory.copy(changetype<usize>(buffer), bytes.dataStart, bytes.length);
-  return domain.add(buffer, bytes.length, builtin).error;
-}
-
 /**
  * The domain's binding of `name` in the namespace of type `type` (NS_*) and
  * URI `uri`, visible at `version`: "abc A script S trait T", or "none".
@@ -584,46 +566,6 @@ export function domainIr(body: u32): string {
 }
 
 /**
- * The ES module the domain's last ABC compiles to; `hashes` are the ABCs'
- * hashes in load order, one per line.
- */
-export function domainModule(hashes: string = ""): string {
-  const emitter = new ModuleEmitter(domain, <u32>(domain.abcs.length - 1));
-  emitter.module(hashes.length ? hashes.split("\n") : []);
-  const out = emitter.out;
-  const map = new Output();
-  emitter.sourceMap(map);
-  lastSourceMap = String.UTF8.decodeUnsafe(changetype<usize>(map.bytes), map.length);
-  // The entries' bytes copied into one buffer, decoded once.
-  const entries = new Output();
-  for (let k = 0; k < emitter.entryBody.length; k++) {
-    const start = emitter.entryStart[k];
-    const length = emitter.entryEnd[k] - start;
-    entries.uint(emitter.entryBody[k]);
-    entries.byte(1);
-    entries.reserve(length);
-    memory.copy(
-      changetype<usize>(entries.bytes) + entries.length,
-      changetype<usize>(out.bytes) + start,
-      length,
-    );
-    entries.length += length;
-    entries.byte(2);
-  }
-
-  lastEntries = String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
-  return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
-}
-
-let lastSourceMap = "";
-let lastEntries = "";
-
-/** The source map of the module domainModule wrote last, as JSON: its code's AS3 lines, from debugline. */
-export function domainSourceMap(): string {
-  return lastSourceMap;
-}
-
-/**
  * The JavaScript function body `body` of the domain's last ABC compiles to,
  * after verifying the ABC as domainVerifyAll does; "error N" if it failed.
  */
@@ -647,62 +589,6 @@ export function domainEmit(body: u32): string {
   emitter.method(method, global, decoder.ir);
   const out = emitter.out;
   return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
-}
-
-/**
- * Method bodies of the domain's last ABC compiled alone, as lazy JIT will
- * compile them: each its entry in F, as the module writes it. `bodies` are
- * their indices, comma-separated, in the order to compile them; `reuse`
- * compiles them all with one emitter, else each with a new one. The ABC is
- * verified once first, which a closure's scope needs. Written as
- * domainModuleEntries writes them, leaving out a native or an unverified.
- */
-export function domainEmitEach(bodies: string, reuse: bool): string {
-  const index = <u32>(domain.abcs.length - 1);
-  const abc = domain.abcs[index];
-  const results = verifyMethods(domain, index);
-  const decoder = new BodyDecoder(abc, domain.abcBase[index], domain, index);
-  const entries = new Output();
-  let emitter = new ModuleEmitter(domain, index);
-  const list = bodies.split(",");
-  for (let k = 0; k < list.length; k++) {
-    const body = <u32>I32.parseInt(list[k]);
-    const method = abc.bodyMethod[body];
-    if (results[body] !== 0 || abc.methodFlags[method] & C.METHOD_Native) {
-      continue;
-    }
-
-    if (!reuse) {
-      emitter = new ModuleEmitter(domain, index);
-    }
-
-    const global = domain.methodStart[index] + method;
-    decoder.decode(body, domain.traits.scopeOf(global));
-    const out = emitter.out;
-    out.reset();
-    emitter.methods.map.reset();
-    emitter.factory(method, global, decoder);
-    entries.uint(body);
-    entries.byte(1);
-    entries.reserve(out.length);
-    memory.copy(
-      changetype<usize>(entries.bytes) + entries.length,
-      changetype<usize>(out.bytes),
-      out.length,
-    );
-    entries.length += out.length;
-    entries.byte(2);
-  }
-
-  return String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
-}
-
-/**
- * The compiled methods' entries in F of the module domainModule wrote last:
- * for each, its body's index, U+0001, its entry, U+0002.
- */
-export function domainModuleEntries(): string {
-  return lastEntries;
 }
 
 /**
@@ -928,3 +814,12 @@ function padded(bytes: Uint8Array): usize {
 function hex(kind: u8): string {
   return `0x${kind < 0x10 ? "0" : ""}${kind.toString(16)}`;
 }
+
+export {
+  domainAdd,
+  domainEmitEach,
+  domainModule,
+  domainModuleEntries,
+  domainReset,
+  domainSourceMap,
+} from "./compile";

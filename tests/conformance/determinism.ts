@@ -5,7 +5,9 @@
 //   - in an instance of its own (the reference);
 //   - in one instance, after all the chains before it;
 //   - in one instance, in the reverse order, each chain twice in a row;
-//   - in the build that checks every array access.
+//   - in the build that checks every array access;
+//   - in the release build, codegen.wasm, through the package's API, as the
+//     player and the AOT compiler use it.
 //
 // So nothing the compiler keeps between calls, such as its reused buffers,
 // leaks into what it writes. Then the JIT/AOT invariant of
@@ -22,6 +24,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { containerEngine, runOracle } from "../../oracle/oracle.ts";
+// The built package, as the player loads it: node runs its .js, not its sources.
+import { createCodegen } from "../../packages/codegen/dist/index.js";
 import { type Build, loadTesting } from "../unit/codegen/testing-module.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -155,6 +159,29 @@ await oneInstance("after the chains before it", "dist-test", chains, 1);
 await oneInstance("in reverse, twice in a row", "dist-test", [...chains].reverse(), 2);
 await oneInstance("in the checked build", "dist-test-checked", chains, 1);
 
+// The release build has the same source for this behind its own entry; the
+// package's API must give the same bytes.
+{
+  const wasm = new URL("../../packages/codegen/dist/codegen.wasm", import.meta.url);
+  const codegen = await createCodegen(await WebAssembly.compile(readFileSync(wasm)));
+  for (const chain of chains) {
+    const results: string[] = [];
+    const hashes: string[] = [];
+    codegen.reset();
+    for (const [i, bytes] of [...builtins, chain.abc].entries()) {
+      if (codegen.add(bytes, i < builtins.length)) {
+        throw new Error("an ABC of the chain failed to link in the release build");
+      }
+
+      hashes.push(sha(bytes));
+      const compiled = codegen.compile(hashes);
+      results.push(compiled.module, compiled.sourceMap);
+    }
+
+    compare("in the release build", chain.name, results, reference.get(chain.name) ?? []);
+  }
+}
+
 // The JIT/AOT invariant: each method compiled alone, as lazy JIT will
 // compile it, byte for byte its entry in the module. In order, a new
 // emitter for each; then in the reverse order, one emitter for all. The
@@ -201,5 +228,5 @@ if (differences) {
 }
 
 console.log(
-  `determinism: ${chains.length} chains, each the same 4 ways, and ${methods} methods each alone as in its module, 2 ways (${seconds} s)`,
+  `determinism: ${chains.length} chains, each the same 5 ways, and ${methods} methods each alone as in its module, 2 ways (${seconds} s)`,
 );
