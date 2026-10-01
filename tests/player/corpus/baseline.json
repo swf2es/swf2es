@@ -407,7 +407,7 @@
   "avm2/encode_uri_surrogate_pair_swf11": {"matched":15,"lines":15,"traced":15,"error":null},
   "avm2/equals": {"matched":512,"lines":512,"traced":512,"error":null},
   "avm2/error_1034_debug_string": {"matched":0,"lines":30,"traced":18,"error":"TypeError: Cannot read properties of undefined (reading 'name')"},
-  "avm2/error_geterrormessage": {"matched":169,"lines":779,"traced":779,"error":null},
+  "avm2/error_geterrormessage": {"matched":779,"lines":779,"traced":779,"error":null},
   "avm2/error_prototype": {"matched":0,"lines":15,"traced":0,"error":null},
   "avm2/error_stack_trace": {"matched":0,"lines":45,"traced":14,"error":null},
   "avm2/error_stack_trace_debug_swf17": {"matched":0,"lines":0,"traced":0,"error":null},
