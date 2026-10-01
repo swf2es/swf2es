@@ -24,7 +24,6 @@ import {
 } from "./display.js";
 import {
   CUBIC,
-  CURVE,
   flatten,
   inside,
   LINE,
