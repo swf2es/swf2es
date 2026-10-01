@@ -31,7 +31,8 @@ async function scriptingFor(
 
   const wasm = await WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm"));
   const scripting = new Scripting(await createCodegen(wasm), {
-    print: (line) => trace.push(line),
+    // A trace of several lines is several lines of Flash's output.
+    print: (line) => trace.push(...line.split("\n")),
     url: url ? new URL(url, location.href).href : undefined,
     fetch: async (target, signal) => {
       const response = await fetch(target, { signal });
