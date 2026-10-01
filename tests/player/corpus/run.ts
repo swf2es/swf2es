@@ -5,7 +5,10 @@
 // --update-baseline. A test whose standing varies from run to run is set
 // to null and not compared, as --relax does for each test that differs.
 //
-//   node tests/player/corpus/run.ts [--update-baseline | --relax] [path prefix...]
+//   node tests/player/corpus/run.ts [--update-baseline | --relax] [--diff] [path prefix...]
+//
+// --diff prints, for each test that does not pass, the lines where the
+// player's trace and Flash's part, and what stopped the player.
 //
 // The avm2/ and timeline/ tests with an output.txt, less those the
 // collector ignores (input, audio, video, fonts). Only traces compare: the
@@ -14,6 +17,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { type PlayerResult, runPlayer } from "../chrome.ts";
 import { collectRuffle, corpus, type RuffleTest } from "./ruffle.ts";
+
+/** A pass: every line matched, no more traced, and no error. */
+function passed(s: Standing): boolean {
+  return s.matched === s.lines && s.traced === s.lines && !s.error;
+}
 
 /** How the player stood on one test: a pass is every line matched, no more traced, and no error. */
 interface Standing {
@@ -31,6 +39,7 @@ const baselineFile = `${here}baseline.json`;
 const args = process.argv.slice(2);
 const update = args.includes("--update-baseline");
 const relax = args.includes("--relax");
+const diff = args.includes("--diff");
 const prefixes = args.filter((a) => !a.startsWith("--"));
 /** A test's scripts may run this long; frames beyond it are a timeout. */
 const TIMEOUT = 20_000;
@@ -73,11 +82,38 @@ const results = await runPlayer(
 const standings: Record<string, Standing> = {};
 for (const [i, t] of tests.entries()) {
   standings[t.path] = standing(t, results[i]);
+  if (diff && !passed(standings[t.path])) {
+    showDiff(t, results[i], standings[t.path]);
+  }
+}
+
+/** Where the traces part, three lines of each side from there, and the error. */
+function showDiff(t: RuffleTest, r: PlayerResult, s: Standing): void {
+  const expected = expectedLines(t);
+  console.log(`\n${t.path}: ${s.matched} of ${s.lines} lines${s.error ? `, ${s.error}` : ""}`);
+  for (
+    let i = s.matched;
+    i < Math.min(s.matched + 3, Math.max(expected.length, r.trace.length));
+    i++
+  ) {
+    if (i < expected.length) {
+      console.log(`  flash  | ${expected[i]}`);
+    }
+
+    if (i < r.trace.length) {
+      console.log(`  player | ${r.trace[i]}`);
+    }
+  }
+}
+
+function expectedLines(t: RuffleTest): string[] {
+  const text = (t.output as string).replace(/\r\n/g, "\n").replace(/\n$/, "");
+  return text === "" ? [] : text.split("\n");
 }
 
 function standing(t: RuffleTest, r: PlayerResult): Standing {
-  const expected = (t.output as string).replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
-  const lines = t.output === "" ? 0 : expected.length;
+  const expected = expectedLines(t);
+  const lines = expected.length;
   let matched = 0;
   while (matched < lines && matched < r.trace.length && r.trace[matched] === expected[matched]) {
     matched++;
@@ -85,8 +121,6 @@ function standing(t: RuffleTest, r: PlayerResult): Standing {
 
   return { matched, lines, traced: r.trace.length, error: r.error };
 }
-
-const passed = (s: Standing) => s.matched === s.lines && s.traced === s.lines && !s.error;
 
 const passes = Object.values(standings).filter(passed).length;
 console.log(
