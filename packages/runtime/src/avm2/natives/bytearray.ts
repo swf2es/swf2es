@@ -18,7 +18,7 @@ import {
   zlibUncompress,
 } from "@swf2es/format";
 import type { AsObject, IndexHook, Runtime, Traits, Value } from "../runtime.js";
-import type { Natives } from "./define.js";
+import { type Natives, registerNativeClass } from "./define.js";
 
 const kGrowthIncr = 4096;
 const kHugeGrowthThreshold = 24 * 1024 * 1024;
@@ -470,108 +470,16 @@ function replaceBytes(b: Bytes, bytes: Uint8Array, position: number): void {
 }
 
 /** ByteArray's natives, by the names the compiler gives them. */
-export function byteArrayNatives(): Natives {
-  const c = "flash.utils::ByteArray";
+/** ByteArray's natives, for `rt`: written as a class, each running with the ByteArray object as `this`. */
+export function byteArrayNatives(rt: Runtime): Natives {
   const own = "flash.utils:ByteArray";
   const natives: Natives = {};
-  // Three arguments, the most any method takes, passed as they are, not as
-  // a rest array spread again: a missing one is undefined, as before, and
-  // its default applies.
-  const method = (
-    name: string,
-    f: (rt: Runtime, b: Bytes, x?: Value, y?: Value, z?: Value) => Value,
-  ) => {
-    natives[`${c}#${name}`] = (rt) =>
-      function (this: AsObject, x?: Value, y?: Value, z?: Value) {
-        return f(rt, bytesOf(rt, this), x, y, z);
-      };
-  };
 
   const nonNull = (rt: Runtime, v: Value, name: string) => {
     if (v === null || v === undefined) {
       throw rt.error("TypeError", 2007, name);
     }
   };
-
-  natives[`${c}.get:defaultObjectEncoding`] = (rt) => () => rt.defaultObjectEncoding;
-  natives[`${c}.set:defaultObjectEncoding`] = (rt) => (v: Value) => {
-    const e = rt.toUint(v);
-    if (e !== kAMF0 && e !== kAMF3) {
-      throw rt.error("ArgumentError", 2008, "objectEncoding");
-    }
-
-    rt.defaultObjectEncoding = e;
-  };
-
-  method("get:length", (_rt, b) => b.length);
-  method("set:length", (rt, b, v) => b.setLength(rt.toUint(v), true));
-  method("get:position", (_rt, b) => b.position);
-  method("set:position", (rt, b, v) => {
-    b.position = rt.toUint(v);
-  });
-  method("get:bytesAvailable", (_rt, b) => b.available);
-  method("get:endian", (_rt, b) => (b.littleEndian ? "littleEndian" : "bigEndian"));
-  method("set:endian", (rt, b, v) => {
-    nonNull(rt, v, "endian");
-    const type = rt.toString(v);
-    if (type === "bigEndian" || type === "littleEndian") {
-      b.littleEndian = type === "littleEndian";
-    } else {
-      throw rt.error("ArgumentError", 2008, "type");
-    }
-  });
-  method("get:objectEncoding", (_rt, b) => b.objectEncoding);
-  method("set:objectEncoding", (rt, b, v) => {
-    const e = rt.toUint(v);
-    if (e !== kAMF0 && e !== kAMF3) {
-      throw rt.error("ArgumentError", 2008, "objectEncoding");
-    }
-
-    b.objectEncoding = e;
-  });
-  method("get:shareable", () => false);
-  method("set:shareable", () => undefined);
-  method("clear", (_rt, b) => {
-    b.clear();
-  });
-
-  // Reads.
-  method("readBoolean", (_rt, b) => {
-    const at = b.shortRead(1);
-    return b.buffer[at] !== 0;
-  });
-  method("readByte", (_rt, b) => {
-    const at = b.shortRead(1);
-    return b.view.getInt8(at);
-  });
-  method("readUnsignedByte", (_rt, b) => {
-    const at = b.shortRead(1);
-    return b.buffer[at];
-  });
-  method("readShort", (_rt, b) => {
-    const at = b.shortRead(2);
-    return b.view.getInt16(at, b.littleEndian);
-  });
-  method("readUnsignedShort", (_rt, b) => {
-    const at = b.shortRead(2);
-    return b.view.getUint16(at, b.littleEndian);
-  });
-  method("readInt", (_rt, b) => {
-    const at = b.shortRead(4);
-    return b.view.getInt32(at, b.littleEndian);
-  });
-  method("readUnsignedInt", (_rt, b) => {
-    const at = b.shortRead(4);
-    return b.view.getUint32(at, b.littleEndian);
-  });
-  method("readFloat", (_rt, b) => {
-    const at = b.shortRead(4);
-    return b.view.getFloat32(at, b.littleEndian);
-  });
-  method("readDouble", (_rt, b) => {
-    const at = b.shortRead(8);
-    return b.view.getFloat64(at, b.littleEndian);
-  });
 
   // As ByteArrayObject::readUTFBytes: a BOM skipped, and a NUL ends the string.
   const readUTFBytes = (rt: Runtime, b: Bytes, n: number) => {
@@ -588,131 +496,297 @@ export function byteArrayNatives(): Natives {
     b.position += n;
     return s;
   };
-  method("readUTFBytes", (rt, b, n) => readUTFBytes(rt, b, rt.toUint(n)));
-  method("readUTF", (rt, b) => {
-    const at = b.shortRead(2);
-    return readUTFBytes(rt, b, b.view.getUint16(at, b.littleEndian));
-  });
 
-  // avmshell converts no other charset: the bytes are checked, and nothing read.
-  method("readMultiByte", (rt, b, n, charSet) => {
-    nonNull(rt, charSet, "charSet");
-    b.checkEOF(rt.toUint(n));
-    return "";
-  });
+  class ByteArrayNatives {
+    declare $bytes: Bytes;
 
-  // As DataInput::ReadByteArray: into `bytes` at `offset`, growing it to hold them.
-  method("readBytes", (rt, b, bytes, offsetIn = 0, lengthIn = 0) => {
-    nonNull(rt, bytes, "bytes");
-    const offset = rt.toUint(offsetIn);
-    let count = rt.toUint(lengthIn);
-    const available = b.available;
-    if (count === 0) {
-      count = available;
+    static get defaultObjectEncoding() {
+      return rt.defaultObjectEncoding;
     }
 
-    if (count > available) {
-      throw rt.error("flash.errors::EOFError", 2030);
+    static set defaultObjectEncoding(v: Value) {
+      const e = rt.toUint(v);
+      if (e !== kAMF0 && e !== kAMF3) {
+        throw rt.error("ArgumentError", 2008, "objectEncoding");
+      }
+
+      rt.defaultObjectEncoding = e;
     }
 
-    if (offset + count > 0xffffffff) {
-      throw rt.error("RangeError", 2006);
+    get length() {
+      const b = bytesOf(rt, this);
+      return b.length;
     }
 
-    const to = bytesOf(rt, bytes);
-    const read = b.read(count);
-    if (offset + count >= to.length) {
-      to.setLength(offset + count);
+    set length(v: Value) {
+      const b = bytesOf(rt, this);
+      b.setLength(rt.toUint(v), true);
     }
 
-    to.buffer.set(read, offset);
-  });
-
-  // Writes.
-  method("writeBoolean", (_rt, b, v) => {
-    const at = b.shortWrite(1);
-    b.buffer[at] = v ? 1 : 0;
-  });
-  method("writeByte", (rt, b, v) => {
-    const at = b.shortWrite(1);
-    b.buffer[at] = rt.toInt(v) & 0xff;
-  });
-  method("writeShort", (rt, b, v) => {
-    const at = b.shortWrite(2);
-    b.view.setInt16(at, rt.toInt(v), b.littleEndian);
-  });
-  method("writeInt", (rt, b, v) => {
-    const at = b.shortWrite(4);
-    b.view.setInt32(at, rt.toInt(v), b.littleEndian);
-  });
-  method("writeUnsignedInt", (rt, b, v) => {
-    const at = b.shortWrite(4);
-    b.view.setUint32(at, rt.toUint(v), b.littleEndian);
-  });
-  method("writeFloat", (rt, b, v) => {
-    const at = b.shortWrite(4);
-    b.view.setFloat32(at, rt.toNumber(v), b.littleEndian);
-  });
-  method("writeDouble", (rt, b, v) => {
-    const at = b.shortWrite(8);
-    b.view.setFloat64(at, rt.toNumber(v), b.littleEndian);
-  });
-  method("writeUTFBytes", (rt, b, v) => {
-    nonNull(rt, v, "value");
-    b.write(utf8(rt.toString(v)));
-  });
-  method("writeUTF", (rt, b, v) => {
-    nonNull(rt, v, "value");
-    const bytes = utf8(rt.toString(v));
-    if (bytes.length > 65535) {
-      throw rt.error("RangeError", 2006);
+    get position() {
+      const b = bytesOf(rt, this);
+      return b.position;
     }
 
-    const at = b.shortWrite(2);
-    b.view.setUint16(at, bytes.length, b.littleEndian);
-    b.write(bytes);
-  });
-  method("writeMultiByte", (rt, _b, value, charSet) => {
-    nonNull(rt, value, "value");
-    nonNull(rt, charSet, "charSet");
-  });
-
-  // As ByteArrayObject::writeBytes and DataOutput::WriteByteArray.
-  method("writeBytes", (rt, b, bytes, offsetIn = 0, lengthIn = 0) => {
-    nonNull(rt, bytes, "bytes");
-    const from = bytesOf(rt, bytes);
-    let offset = rt.toUint(offsetIn);
-    let count = rt.toUint(lengthIn);
-    if (count === 0) {
-      count = (from.length - offset) >>> 0;
+    set position(v: Value) {
+      const b = bytesOf(rt, this);
+      b.position = rt.toUint(v);
     }
 
-    const length = from.length;
-    if (offset > length) {
-      offset = length;
+    get bytesAvailable() {
+      const b = bytesOf(rt, this);
+      return b.available;
     }
 
-    if (count === 0) {
-      count = length - offset;
+    get endian() {
+      const b = bytesOf(rt, this);
+      return b.littleEndian ? "littleEndian" : "bigEndian";
     }
 
-    if (count > length - offset) {
-      throw rt.error("RangeError", 2006);
+    set endian(v: Value) {
+      const b = bytesOf(rt, this);
+      nonNull(rt, v, "endian");
+      const type = rt.toString(v);
+      if (type === "bigEndian" || type === "littleEndian") {
+        b.littleEndian = type === "littleEndian";
+      } else {
+        throw rt.error("ArgumentError", 2008, "type");
+      }
     }
 
-    if (count > 0) {
-      b.write(from.buffer.slice(offset, offset + count));
+    get objectEncoding() {
+      const b = bytesOf(rt, this);
+      return b.objectEncoding;
     }
-  });
 
-  // As ByteArrayObject::_compress and _uncompress, which compress(),
-  // uncompress(), deflate() and inflate() call: the algorithm checked
-  // first, and an empty ByteArray left as it is. The domain memory is
-  // compressed too, as avmshell's is: its Domain does not subscribe to it
-  // as the player refuses a subscribed one (3735). Compressing leaves the position at the end, uncompressing at 0;
-  // data that does not uncompress leaves the ByteArray as it was.
-  natives[`${c}#${own}::_compress`] = (rt) =>
-    function (this: AsObject, algorithm: Value) {
+    set objectEncoding(v: Value) {
+      const b = bytesOf(rt, this);
+      const e = rt.toUint(v);
+      if (e !== kAMF0 && e !== kAMF3) {
+        throw rt.error("ArgumentError", 2008, "objectEncoding");
+      }
+
+      b.objectEncoding = e;
+    }
+
+    get shareable() {
+      return false;
+    }
+
+    set shareable(_v: Value) {
+      // Shareable byte arrays are not shared here.
+    }
+
+    clear() {
+      const b = bytesOf(rt, this);
+      b.clear();
+    }
+
+    // Reads.
+    readBoolean() {
+      const b = bytesOf(rt, this);
+      const at = b.shortRead(1);
+      return b.buffer[at] !== 0;
+    }
+
+    readByte() {
+      const b = bytesOf(rt, this);
+      const at = b.shortRead(1);
+      return b.view.getInt8(at);
+    }
+
+    readUnsignedByte() {
+      const b = bytesOf(rt, this);
+      const at = b.shortRead(1);
+      return b.buffer[at];
+    }
+
+    readShort() {
+      const b = bytesOf(rt, this);
+      const at = b.shortRead(2);
+      return b.view.getInt16(at, b.littleEndian);
+    }
+
+    readUnsignedShort() {
+      const b = bytesOf(rt, this);
+      const at = b.shortRead(2);
+      return b.view.getUint16(at, b.littleEndian);
+    }
+
+    readInt() {
+      const b = bytesOf(rt, this);
+      const at = b.shortRead(4);
+      return b.view.getInt32(at, b.littleEndian);
+    }
+
+    readUnsignedInt() {
+      const b = bytesOf(rt, this);
+      const at = b.shortRead(4);
+      return b.view.getUint32(at, b.littleEndian);
+    }
+
+    readFloat() {
+      const b = bytesOf(rt, this);
+      const at = b.shortRead(4);
+      return b.view.getFloat32(at, b.littleEndian);
+    }
+
+    readDouble() {
+      const b = bytesOf(rt, this);
+      const at = b.shortRead(8);
+      return b.view.getFloat64(at, b.littleEndian);
+    }
+
+    readUTFBytes(n: Value) {
+      const b = bytesOf(rt, this);
+      return readUTFBytes(rt, b, rt.toUint(n));
+    }
+
+    readUTF() {
+      const b = bytesOf(rt, this);
+      const at = b.shortRead(2);
+      return readUTFBytes(rt, b, b.view.getUint16(at, b.littleEndian));
+    }
+
+    // avmshell converts no other charset: the bytes are checked, and nothing read.
+    readMultiByte(n: Value, charSet: Value) {
+      const b = bytesOf(rt, this);
+      nonNull(rt, charSet, "charSet");
+      b.checkEOF(rt.toUint(n));
+      return "";
+    }
+
+    // As DataInput::ReadByteArray: into `bytes` at `offset`, growing it to hold them.
+    readBytes(bytes: Value, offsetIn: Value = 0, lengthIn: Value = 0) {
+      const b = bytesOf(rt, this);
+      nonNull(rt, bytes, "bytes");
+      const offset = rt.toUint(offsetIn);
+      let count = rt.toUint(lengthIn);
+      const available = b.available;
+      if (count === 0) {
+        count = available;
+      }
+
+      if (count > available) {
+        throw rt.error("flash.errors::EOFError", 2030);
+      }
+
+      if (offset + count > 0xffffffff) {
+        throw rt.error("RangeError", 2006);
+      }
+
+      const to = bytesOf(rt, bytes);
+      const read = b.read(count);
+      if (offset + count >= to.length) {
+        to.setLength(offset + count);
+      }
+
+      to.buffer.set(read, offset);
+    }
+
+    // Writes.
+    writeBoolean(v: Value) {
+      const b = bytesOf(rt, this);
+      const at = b.shortWrite(1);
+      b.buffer[at] = v ? 1 : 0;
+    }
+
+    writeByte(v: Value) {
+      const b = bytesOf(rt, this);
+      const at = b.shortWrite(1);
+      b.buffer[at] = rt.toInt(v) & 0xff;
+    }
+
+    writeShort(v: Value) {
+      const b = bytesOf(rt, this);
+      const at = b.shortWrite(2);
+      b.view.setInt16(at, rt.toInt(v), b.littleEndian);
+    }
+
+    writeInt(v: Value) {
+      const b = bytesOf(rt, this);
+      const at = b.shortWrite(4);
+      b.view.setInt32(at, rt.toInt(v), b.littleEndian);
+    }
+
+    writeUnsignedInt(v: Value) {
+      const b = bytesOf(rt, this);
+      const at = b.shortWrite(4);
+      b.view.setUint32(at, rt.toUint(v), b.littleEndian);
+    }
+
+    writeFloat(v: Value) {
+      const b = bytesOf(rt, this);
+      const at = b.shortWrite(4);
+      b.view.setFloat32(at, rt.toNumber(v), b.littleEndian);
+    }
+
+    writeDouble(v: Value) {
+      const b = bytesOf(rt, this);
+      const at = b.shortWrite(8);
+      b.view.setFloat64(at, rt.toNumber(v), b.littleEndian);
+    }
+
+    writeUTFBytes(v: Value) {
+      const b = bytesOf(rt, this);
+      nonNull(rt, v, "value");
+      b.write(utf8(rt.toString(v)));
+    }
+
+    writeUTF(v: Value) {
+      const b = bytesOf(rt, this);
+      nonNull(rt, v, "value");
+      const bytes = utf8(rt.toString(v));
+      if (bytes.length > 65535) {
+        throw rt.error("RangeError", 2006);
+      }
+
+      const at = b.shortWrite(2);
+      b.view.setUint16(at, bytes.length, b.littleEndian);
+      b.write(bytes);
+    }
+
+    writeMultiByte(value: Value, charSet: Value) {
+      nonNull(rt, value, "value");
+      nonNull(rt, charSet, "charSet");
+    }
+
+    // As ByteArrayObject::writeBytes and DataOutput::WriteByteArray.
+    writeBytes(bytes: Value, offsetIn: Value = 0, lengthIn: Value = 0) {
+      const b = bytesOf(rt, this);
+      nonNull(rt, bytes, "bytes");
+      const from = bytesOf(rt, bytes);
+      let offset = rt.toUint(offsetIn);
+      let count = rt.toUint(lengthIn);
+      if (count === 0) {
+        count = (from.length - offset) >>> 0;
+      }
+
+      const length = from.length;
+      if (offset > length) {
+        offset = length;
+      }
+
+      if (count === 0) {
+        count = length - offset;
+      }
+
+      if (count > length - offset) {
+        throw rt.error("RangeError", 2006);
+      }
+
+      if (count > 0) {
+        b.write(from.buffer.slice(offset, offset + count));
+      }
+    }
+
+    // As ByteArrayObject::_compress and _uncompress, which compress(),
+    // uncompress(), deflate() and inflate() call: the algorithm checked
+    // first, and an empty ByteArray left as it is. The domain memory is
+    // compressed too, as avmshell's is: its Domain does not subscribe to it
+    // as the player refuses a subscribed one (3735). Compressing leaves the position at the end, uncompressing at 0;
+    // data that does not uncompress leaves the ByteArray as it was.
+    [`${own}::_compress`](algorithm: Value) {
       const kind = algorithmOf(rt, algorithm);
       const b = bytesOf(rt, this);
       if (b.length === 0) {
@@ -727,9 +801,9 @@ export function byteArrayNatives(): Natives {
             ? deflateCompress(data)
             : lzmaByteArrayCompress(data);
       replaceBytes(b, out, out.length);
-    };
-  natives[`${c}#${own}::_uncompress`] = (rt) =>
-    function (this: AsObject, algorithm: Value) {
+    }
+
+    [`${own}::_uncompress`](algorithm: Value) {
       const kind = algorithmOf(rt, algorithm);
       const b = bytesOf(rt, this);
       if (b.length === 0) {
@@ -764,12 +838,11 @@ export function byteArrayNatives(): Natives {
       }
 
       replaceBytes(b, out, 0);
-    };
+    }
 
-  // As ByteArrayObject::_toString: by its BOM, UTF-8 or UTF-16 of either
-  // order, else UTF-8; all of its length, NULs too.
-  natives[`${c}#${own}::_toString`] = (rt) =>
-    function (this: AsObject) {
+    // As ByteArrayObject::_toString: by its BOM, UTF-8 or UTF-16 of either
+    // order, else UTF-8; all of its length, NULs too.
+    [`${own}::_toString`]() {
       const b = bytesOf(rt, this);
       const bytes = b.buffer.subarray(0, b.length);
       if (bytes.length >= 3) {
@@ -790,20 +863,32 @@ export function byteArrayNatives(): Natives {
       }
 
       return fromUtf8(bytes);
-    };
+    }
+  }
 
+  registerNativeClass(natives, "flash.utils::ByteArray", ByteArrayNatives);
   return natives;
 }
 
 /** avmshell's Domain: its domain memory is the runtime's, a ByteArray or the scratch memory. */
-export function domainNatives(): Natives {
-  const c = "avmplus::Domain";
-  return {
-    [`${c}.get:currentDomain`]: (rt) => () => rt.currentDomain(),
-    [`${c}.get:MIN_DOMAIN_MEMORY_LENGTH`]: () => () => GLOBAL_MEMORY_MIN_SIZE,
-    [`${c}#get:domainMemory`]: (rt) => () => rt.memoryProvider,
+export function domainNatives(rt: Runtime): Natives {
+  const natives: Natives = {};
+
+  class DomainNatives {
+    static get currentDomain(): Value {
+      return rt.currentDomain();
+    }
+
+    static get MIN_DOMAIN_MEMORY_LENGTH(): number {
+      return GLOBAL_MEMORY_MIN_SIZE;
+    }
+
+    get domainMemory(): Value {
+      return rt.memoryProvider;
+    }
+
     // As DomainEnv::set_globalMemory: null for the scratch memory; a ByteArray shorter than the least length fails.
-    [`${c}#set:domainMemory`]: (rt) => (v: Value) => {
+    set domainMemory(v: Value) {
       const previous: AsObject | null = rt.memoryProvider;
       if (v === null || v === undefined) {
         if (previous) {
@@ -827,6 +912,9 @@ export function domainNatives(): Natives {
       }
 
       rt.memoryProvider = v;
-    },
-  };
+    }
+  }
+
+  registerNativeClass(natives, "avmplus::Domain", DomainNatives);
+  return natives;
 }

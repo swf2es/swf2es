@@ -1,41 +1,58 @@
 // RegExp: `this` holds its JavaScript RegExp in $re; and the match
 // arrays String's methods give too.
 import type { AsObject, ClassHook, Runtime, Value } from "../runtime.js";
-import { AS3, type Natives, plain } from "./define.js";
+import { AS3, type Natives, registerNativeClass } from "./define.js";
 
-export const regexpNatives: Natives = {
-  "RegExp#get:source": plain(function (this: AsObject) {
-    return this.$source;
-  }),
-  "RegExp#get:global": plain(function (this: AsObject) {
-    return this.$re.global;
-  }),
-  "RegExp#get:ignoreCase": plain(function (this: AsObject) {
-    return this.$re.ignoreCase;
-  }),
-  "RegExp#get:multiline": plain(function (this: AsObject) {
-    return this.$re.multiline;
-  }),
-  "RegExp#get:dotall": plain(function (this: AsObject) {
-    return this.$re.dotAll;
-  }),
-  "RegExp#get:extended": plain(function (this: AsObject) {
-    return this.$extended;
-  }),
-  "RegExp#get:lastIndex": plain(function (this: AsObject) {
-    return this.$re.lastIndex;
-  }),
-  "RegExp#set:lastIndex": (rt) =>
-    function (this: AsObject, i: Value) {
+/** RegExp's natives, for `rt`: written as a class, each running with the RegExp object as `this`. */
+export function regexpNatives(rt: Runtime): Natives {
+  const natives: Natives = {};
+
+  class RegExpNatives {
+    declare $re: RegExp;
+    declare $source: string;
+    declare $extended: boolean;
+
+    get source(): string {
+      return this.$source;
+    }
+
+    get global(): boolean {
+      return this.$re.global;
+    }
+
+    get ignoreCase(): boolean {
+      return this.$re.ignoreCase;
+    }
+
+    get multiline(): boolean {
+      return this.$re.multiline;
+    }
+
+    get dotall(): boolean {
+      return this.$re.dotAll;
+    }
+
+    get extended(): boolean {
+      return this.$extended;
+    }
+
+    get lastIndex(): number {
+      return this.$re.lastIndex;
+    }
+
+    set lastIndex(i: Value) {
       this.$re.lastIndex = rt.toInt(i);
-    },
-  [`RegExp#${AS3}::exec`]: (rt) =>
-    function (this: AsObject, s: Value = "") {
-      const re: RegExp = this.$re;
-      const m = re.exec(rt.toString(s));
+    }
+
+    [`${AS3}::exec`](s: Value = ""): Value {
+      const m = this.$re.exec(rt.toString(s));
       return m ? matchArray(rt, m) : null;
-    },
-};
+    }
+  }
+
+  registerNativeClass(natives, "RegExp", RegExpNatives);
+  return natives;
+}
 
 /** A match as AS3 gives it: an Array of the match and its groups, with its index and input. */
 export function matchArray(rt: Runtime, m: RegExpMatchArray): AsObject {

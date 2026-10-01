@@ -1,29 +1,59 @@
 // avmshell's own classes, which a player has not: its System.
-import type { Value } from "../runtime.js";
-import { elements, type Natives, plain } from "./define.js";
+import type { Runtime, Value } from "../runtime.js";
+import { elements, type Natives, registerNativeClass } from "./define.js";
 
 const started = Date.now();
 
-export const shellNatives: Natives = {
-  // avmshell's System
-  // avmshell's console skips NUL characters, which strings may hold.
-  "avmplus::System.trace": (rt) => (args: Value) => {
-    rt.print(
-      elements(args)
-        .map((v) => rt.toString(v))
-        .join(" ")
-        .replaceAll("\0", ""),
-    );
-  },
-  "avmplus::System.write": (rt) => (s: Value) => {
-    rt.print(rt.toString(s).replaceAll("\0", ""));
-  },
-  "avmplus::System.avmplus:System::getArgv": (rt) => () => rt.array([]),
-  "avmplus::System.getAvmplusVersion": plain(() => "swf2es"),
-  "avmplus::System.get:swfVersion": plain(() => 31),
-  "avmplus::System.get:apiVersion": plain(() => 50),
-  "avmplus::System.getTimer": plain(() => Date.now() - started),
-  "avmplus::System.getRunmode": plain(() => "jit"),
-  "avmplus::System.isDebugger": (rt) => () => rt.debugger,
-  "avmplus::System.exit": plain(() => undefined),
-};
+/** System's natives, for `rt`: all static, as avmshell has them. */
+export function shellNatives(rt: Runtime): Natives {
+  const natives: Natives = {};
+
+  class SystemNatives {
+    // avmshell's console skips NUL characters, which strings may hold.
+    static trace(args: Value): void {
+      rt.print(
+        elements(args)
+          .map((v) => rt.toString(v))
+          .join(" ")
+          .replaceAll("\0", ""),
+      );
+    }
+
+    static write(s: Value): void {
+      rt.print(rt.toString(s).replaceAll("\0", ""));
+    }
+
+    static "avmplus:System::getArgv"(): Value {
+      return rt.array([]);
+    }
+
+    static getAvmplusVersion(): string {
+      return "swf2es";
+    }
+
+    static get swfVersion(): number {
+      return 31;
+    }
+
+    static get apiVersion(): number {
+      return 50;
+    }
+
+    static getTimer(): number {
+      return Date.now() - started;
+    }
+
+    static getRunmode(): string {
+      return "jit";
+    }
+
+    static isDebugger(): boolean {
+      return rt.debugger;
+    }
+
+    static exit(): void {}
+  }
+
+  registerNativeClass(natives, "avmplus::System", SystemNatives);
+  return natives;
+}

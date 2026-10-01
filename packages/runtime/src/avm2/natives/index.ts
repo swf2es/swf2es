@@ -5,7 +5,7 @@
 // the builtin classes differ from others: how their instances hold native
 // state, and what calling or constructing them does.
 
-import type { ClassHook } from "../runtime.js";
+import type { ClassHook, Runtime } from "../runtime.js";
 import { aliasesNatives } from "./aliases.js";
 import { arrayHooks, arrayNatives } from "./array.js";
 import { byteArrayHook, byteArrayNatives, domainNatives } from "./bytearray.js";
@@ -22,20 +22,21 @@ import { errorHooks, toplevelNatives } from "./toplevel.js";
 import { vectorHooks, vectorNatives } from "./vector.js";
 import { xmlHooks, xmlNatives } from "./xml/xml.js";
 
-export function builtinNatives(): Natives {
+/** The builtins' natives for `rt`: most are the same for every runtime; a class of natives closes over it. */
+export function builtinNatives(rt: Runtime): Natives {
   return {
     ...objectNatives,
     ...arrayNatives,
     ...stringNatives,
-    ...regexpNatives,
+    ...regexpNatives(rt),
     ...numberNatives,
     ...toplevelNatives,
     ...aliasesNatives,
-    ...shellNatives,
+    ...shellNatives(rt),
     ...dictionaryNatives,
     ...vectorNatives,
-    ...byteArrayNatives(),
-    ...domainNatives(),
+    ...byteArrayNatives(rt),
+    ...domainNatives(rt),
     ...dateNatives(),
     ...jsonNatives(),
     ...xmlNatives,

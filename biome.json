@@ -45,6 +45,16 @@
   },
   "overrides": [
     {
+      "includes": ["packages/runtime/src/avm2/natives/**", "packages/player/src/playerglobal/**"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noStaticOnlyClass": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["packages/codegen/assembly/**"],
       "linter": {
         "rules": {
