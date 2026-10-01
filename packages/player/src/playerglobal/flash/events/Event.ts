@@ -2,62 +2,80 @@
 // and flags; dispatch sets the target, current target and phase.
 import { avm2 } from "@swf2es/runtime";
 
-const { plain } = avm2;
-type AsObject = avm2.AsObject;
+type Value = avm2.Value;
 
 export const CAPTURING_PHASE = 1;
 export const AT_TARGET = 2;
 export const BUBBLING_PHASE = 3;
 
 export function eventNatives(): avm2.Natives {
-  return {
-    "flash.events::Event#flash.events:Event::ctor": plain(function (
-      this: AsObject,
-      type: avm2.Value,
-      bubbles: avm2.Value,
-      cancelable: avm2.Value,
-    ) {
+  const natives: avm2.Natives = {};
+
+  class EventNatives {
+    declare $type: string;
+    declare $bubbles: boolean;
+    declare $cancelable: boolean;
+    declare $target: Value;
+    declare $currentTarget: Value;
+    declare $phase: number;
+    /** 0 running, 1 propagation stopped, 2 stopped at once. */
+    declare $stopped: number;
+    declare $prevented: boolean;
+
+    "flash.events:Event::ctor"(type: Value, bubbles: Value, cancelable: Value): void {
       this.$type = String(type);
       this.$bubbles = !!bubbles;
       this.$cancelable = !!cancelable;
       this.$target = null;
       this.$currentTarget = null;
       this.$phase = AT_TARGET;
-      // 0 running, 1 propagation stopped, 2 stopped at once.
       this.$stopped = 0;
       this.$prevented = false;
-    }),
-    "flash.events::Event#get:type": plain(function (this: AsObject) {
+    }
+
+    get type(): string {
       return this.$type;
-    }),
-    "flash.events::Event#get:bubbles": plain(function (this: AsObject) {
+    }
+
+    get bubbles(): boolean {
       return this.$bubbles;
-    }),
-    "flash.events::Event#get:cancelable": plain(function (this: AsObject) {
+    }
+
+    get cancelable(): boolean {
       return this.$cancelable;
-    }),
-    "flash.events::Event#get:target": plain(function (this: AsObject) {
+    }
+
+    get target(): Value {
       return this.$target;
-    }),
-    "flash.events::Event#get:currentTarget": plain(function (this: AsObject) {
+    }
+
+    get currentTarget(): Value {
       return this.$currentTarget;
-    }),
-    "flash.events::Event#get:eventPhase": plain(function (this: AsObject) {
+    }
+
+    get eventPhase(): number {
       return this.$phase;
-    }),
-    "flash.events::Event#stopPropagation": plain(function (this: AsObject) {
+    }
+
+    stopPropagation(): void {
       this.$stopped = Math.max(this.$stopped, 1);
-    }),
-    "flash.events::Event#stopImmediatePropagation": plain(function (this: AsObject) {
+    }
+
+    stopImmediatePropagation(): void {
       this.$stopped = 2;
-    }),
-    "flash.events::Event#preventDefault": plain(function (this: AsObject) {
+    }
+
+    preventDefault(): void {
       if (this.$cancelable) {
         this.$prevented = true;
       }
-    }),
-    "flash.events::Event#isDefaultPrevented": plain(function (this: AsObject) {
+    }
+
+    isDefaultPrevented(): boolean {
       return this.$prevented;
-    }),
-  };
+    }
+  }
+
+  avm2.registerNativeClass(natives, "flash.events::Event", EventNatives);
+  return natives;
 }

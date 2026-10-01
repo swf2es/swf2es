@@ -5,7 +5,6 @@ import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 import { AT_TARGET, BUBBLING_PHASE, CAPTURING_PHASE } from "./Event.js";
 
-const { plain } = avm2;
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
@@ -89,21 +88,19 @@ export function dispatchEvent(s: Scripting, target: AsObject, event: AsObject): 
 }
 
 export function eventDispatcherNatives(s: Scripting): avm2.Natives {
-  return {
-    "flash.events::EventDispatcher#flash.events:EventDispatcher::ctor": plain(function (
-      this: AsObject,
-      target: Value,
-    ) {
-      // The IEventDispatcher a composed dispatcher stands in for, as events' target.
+  const natives: avm2.Natives = {};
+
+  class EventDispatcherNatives {
+    /** The IEventDispatcher a composed dispatcher stands in for, as events' target. */
+    declare $target: Value;
+    declare $listeners: Map<string, Listener[]> | undefined;
+    declare $display: AsObject | undefined;
+
+    "flash.events:EventDispatcher::ctor"(target: Value): void {
       this.$target = target ?? null;
-    }),
-    "flash.events::EventDispatcher#addEventListener": plain(function (
-      this: AsObject,
-      type: Value,
-      fn: Value,
-      useCapture: Value,
-      priority: Value,
-    ) {
+    }
+
+    addEventListener(type: Value, fn: Value, useCapture: Value, priority: Value): void {
       if (typeof fn !== "object" && typeof fn !== "function") {
         return;
       }
@@ -128,15 +125,11 @@ export function eventDispatcherNatives(s: Scripting): avm2.Natives {
       if (BROADCAST.has(key) && this.$display) {
         s.broadcastTargets(key).add(this);
       }
-    }),
-    "flash.events::EventDispatcher#removeEventListener": plain(function (
-      this: AsObject,
-      type: Value,
-      fn: Value,
-      useCapture: Value,
-    ) {
+    }
+
+    removeEventListener(type: Value, fn: Value, useCapture: Value): void {
       const key = String(type);
-      const list = this.$listeners?.get(key) as Listener[] | undefined;
+      const list = this.$listeners?.get(key);
       const at = list?.findIndex((l) => l.fn === fn && l.capture === !!useCapture) ?? -1;
       if (list && at >= 0) {
         list.splice(at, 1);
@@ -144,11 +137,13 @@ export function eventDispatcherNatives(s: Scripting): avm2.Natives {
           s.broadcastTargets(key).delete(this);
         }
       }
-    }),
-    "flash.events::EventDispatcher#hasEventListener": plain(function (this: AsObject, type: Value) {
+    }
+
+    hasEventListener(type: Value): boolean {
       return (this.$listeners?.get(String(type))?.length ?? 0) > 0;
-    }),
-    "flash.events::EventDispatcher#willTrigger": plain(function (this: AsObject, type: Value) {
+    }
+
+    willTrigger(type: Value): boolean {
       const key = String(type);
       for (let o: AsObject | null = this; o; o = displayOf(o)?.parent?.object ?? null) {
         if ((o.$listeners?.get(key)?.length ?? 0) > 0) {
@@ -157,10 +152,13 @@ export function eventDispatcherNatives(s: Scripting): avm2.Natives {
       }
 
       return false;
-    }),
-    "flash.events::EventDispatcher#flash.events:EventDispatcher::dispatchEventFunction": (_rt) =>
-      function (this: AsObject, event: Value) {
-        return dispatchEvent(s, this, event);
-      },
-  };
+    }
+
+    "flash.events:EventDispatcher::dispatchEventFunction"(event: Value): boolean {
+      return dispatchEvent(s, this, event);
+    }
+  }
+
+  avm2.registerNativeClass(natives, "flash.events::EventDispatcher", EventDispatcherNatives);
+  return natives;
 }
