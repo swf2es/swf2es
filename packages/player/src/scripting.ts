@@ -83,8 +83,19 @@ export class Scripting {
   stageWidth = 0;
   stageHeight = 0;
   frameRate = 24;
-  /** Frames played since the start, the clock getTimer reads. */
+  /** Frames played since the start. */
   frames = 0;
+  /** The clock, in milliseconds since the start, moved by the frame step and nothing else; Timer fires by it. */
+  clock = 0;
+  /**
+   * The time getTimer tells and a timer started now counts from: the clock,
+   * except while a timer's closure runs, when it is the time the timer fell
+   * due, as Flash fires timers between frames at their own times, so that
+   * one timer set from another keeps the first's pace, not the frame's.
+   */
+  now = 0;
+  /** The timers started and not stopped, each with when it next falls due. */
+  private timers: { object: AsObject; delay: number; closure: Value; due: number }[] = [];
   quality = "HIGH";
   private readonly hashes: string[] = [];
 
@@ -713,6 +724,40 @@ export class Scripting {
         dispatchEvent(this, info, this.event("complete"));
       }
     };
+  }
+
+  /**
+   * A frame begins: the clock moves on by `ms`, and the timers that fall
+   * due by then fire, in due order, each as many times as its delay fits,
+   * before the timeline advances. A timer started while they fire waits
+   * for the next frame.
+   */
+  beginFrame(ms: number): void {
+    this.clock += ms;
+    const due = this.timers.filter((t) => t.due <= this.clock).sort((a, b) => a.due - b.due);
+    for (const timer of due) {
+      while (timer.due <= this.clock && this.timers.includes(timer)) {
+        this.now = timer.due;
+        timer.due += timer.delay;
+        this.rt.call(timer.closure, timer.object);
+      }
+    }
+
+    this.now = this.clock;
+  }
+
+  /** Timer._start: `closure` is called every `delay` ms from now, until stopped; a timer running already is started anew. */
+  startTimer(object: AsObject, delay: number, closure: Value): void {
+    this.stopTimer(object);
+    this.timers.push({ object, delay: Math.max(delay, 1), closure, due: this.now + delay });
+  }
+
+  stopTimer(object: AsObject): void {
+    this.timers = this.timers.filter((t) => t.object !== object);
+  }
+
+  timerRunning(object: AsObject): boolean {
+    return this.timers.some((t) => t.object === object);
   }
 
   /** A flash.events.Event of `type`. */
