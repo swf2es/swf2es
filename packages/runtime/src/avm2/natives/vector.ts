@@ -84,6 +84,36 @@ for (const [kind] of VECTORS) {
 
       return this.$a.length ? this.$a.pop() : empty(this);
     };
+  // As TypedVectorObject::AS3_insertAt and AS3_removeAt: a negative index
+  // counts from the end, no further back than 0; an insert past the end
+  // appends; a removal past the end is a RangeError, as an element get is.
+  vectorNatives[`${c}#${AS3}::insertAt`] = (rt) =>
+    function (this: AsObject, index: Value, element: Value) {
+      if (this.$fixed) {
+        throw rt.error("RangeError", 1126);
+      }
+
+      const cls = this.$traits.cls;
+      const x = cls.$convert(rt, cls, element);
+      const a: Value[] = this.$a;
+      const i = rt.toInt(index);
+      a.splice(i < 0 ? Math.max(0, a.length + i) : Math.min(i, a.length), 0, x);
+    };
+  vectorNatives[`${c}#${AS3}::removeAt`] = (rt) =>
+    function (this: AsObject, index: Value) {
+      if (this.$fixed) {
+        throw rt.error("RangeError", 1126);
+      }
+
+      const a: Value[] = this.$a;
+      const i = rt.toInt(index);
+      const at = i < 0 ? Math.max(0, a.length + i) : i;
+      if (at >= a.length) {
+        throw rt.error("RangeError", 1125, at, a.length);
+      }
+
+      return a.splice(at, 1)[0];
+    };
   vectorNatives[`${c}#${AS3}::shift`] = (rt) =>
     function (this: AsObject) {
       if (this.$fixed) {

@@ -58,6 +58,8 @@ const ABCDUMP_SOURCE = "oracle/avmplus/utils/abcdump.as";
 
 /** Where the image keeps the ABCs ASC imports: builtin, shell_toplevel, playerglobal... */
 const LIBRARY = "/opt/crossbridge/sdk/usr/lib";
+/** The libraries taken from the avmplus submodule's generated/ instead, newer than the image's (docs/architecture.md). */
+const SUBMODULE_LIBRARIES = ["builtin", "shell_toplevel"];
 
 /** ASC 2.0 with the image's library ABCs `imports` on its path, builtin first. */
 function ascCommand(imports: string[]): string {
@@ -324,7 +326,8 @@ export function libraries(
     `out="${out}"`,
     ...buildAbcdump,
     ...names.flatMap((n) => [
-      `cp ${LIBRARY}/${n}.abc "$out/${n}.abc"`,
+      // The standard library is the submodule's own; the player's and AIR's declarations are the image's.
+      `cp ${SUBMODULE_LIBRARIES.includes(n) ? `oracle/avmplus/generated/${n}` : `${LIBRARY}/${n}`}.abc "$out/${n}.abc"`,
       `(cd "$out" && /opt/crossbridge/sdk/usr/bin/avmshell tools/abcdump.abc -- ${n}.abc > ${n}.dump 2>&1)`,
     ]),
   ].join("\n");
