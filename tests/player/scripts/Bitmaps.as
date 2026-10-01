@@ -91,6 +91,13 @@ package {
       shown.fillRect(new Rectangle(2, 0, 2, 2), 0xFF00FF00);
       shown.fillRect(new Rectangle(0, 2, 2, 2), 0xFF0000FF);
       shown.fillRect(new Rectangle(2, 2, 2, 2), 0x80FFFFFF);
+      var loose:Bitmap = new Bitmap(shown);
+      trace("unadded size", loose.width, loose.height, loose.getBounds(loose), loose.getRect(loose));
+      var r:BitmapData = new BitmapData(5, 5, true, 0);
+      r.fillRect(new Rectangle(1.6, 1.6, 1.8, 2), 0xFFFFFFFF);
+      r.fillRect(new Rectangle(0.1, 0, 1.8, 2.5), 0xFFAABBCC);
+      r.fillRect(new Rectangle(3.5, 3.5, 1, 1), 0xFF112233);
+      trace("rounded rects", r.getVector(r.rect));
       var a:Bitmap = new Bitmap(shown);
       a.x = 10; a.y = 10; a.scaleX = a.scaleY = 10;
       addChild(a);

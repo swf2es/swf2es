@@ -47,6 +47,8 @@ disposed rect error 2015
 disposed getPixel error 2015
 disposed fillRect error 2015
 rect null error 2007
+unadded size 4 4 (x=0, y=0, w=4, h=4) (x=0, y=0, w=4, h=4)
+rounded rects 4289379276,4289379276,0,0,0,4289379276,4289379276,0,0,0,0,0,4294967295,0,0,0,0,4294967295,0,0,0,0,0,0,0
 empty bitmap null 0 0 auto false
 bitmap size 40 40 40 4 4 false true auto
 snapping error 2008

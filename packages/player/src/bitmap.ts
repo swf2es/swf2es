@@ -161,11 +161,13 @@ export class BitmapStore {
 
     const sx = s.x + (d.x - dx);
     const sy = s.y + (d.y - dy);
+    // From a snapshot where the source is this store: Flash reads every pixel before it writes one.
+    const pixels = source === this ? Uint32Array.from(source.pixels) : source.pixels;
     for (let row = 0; row < d.height; row++) {
       const from = (sy + row) * source.width + sx;
       const to = (d.y + row) * this.width + d.x;
       for (let i = 0; i < d.width; i++) {
-        const p = source.pixels[from + i];
+        const p = pixels[from + i];
         if (!this.transparent) {
           // An opaque destination composites whatever it is given, as Flash does without mergeAlpha too.
           this.pixels[to + i] = (over(p, this.pixels[to + i]) | 0xff000000) >>> 0;

@@ -18,16 +18,33 @@ export function storeOf(s: Scripting, o: AsObject): BitmapStore {
   return store;
 }
 
-/** A flash.geom.Rectangle's values, rounded to pixels as Flash takes them; null for a null rectangle (TypeError 2007). */
+/** The nearest integer, a half to the even one, as C's rint rounds and Flash's pixel coordinates do. */
+function nearest(v: number): number {
+  const f = Math.floor(v);
+  const d = v - f;
+  if (d !== 0.5) {
+    return d > 0.5 ? f + 1 : f;
+  }
+
+  return f % 2 === 0 ? f : f + 1;
+}
+
+/** A flash.geom.Rectangle as pixels; TypeError 2007 for null. */
 function rectOf(s: Scripting, v: Value): PixelRect {
   if (v === null || v === undefined) {
     throw s.rt.error("TypeError", 2007, "rect");
   }
 
+  // Each edge rounded to the nearest pixel, a half to the even one, as
+  // Flash does: a rect from 1.6 of 1.8 fills the pixel at 2 alone, one
+  // from 3.5 of 1 fills nothing (Ruffle's bitmapdata_rectangle_rounding).
   const r = v as AsObject;
-  const read = (k: string) =>
-    Math.trunc(s.rt.toNumber(s.rt.getProperty(r, s.rt.publicName(k))) || 0);
-  return { x: read("x"), y: read("y"), width: read("width"), height: read("height") };
+  const read = (k: string) => s.rt.toNumber(s.rt.getProperty(r, s.rt.publicName(k))) || 0;
+  const x0 = nearest(read("x"));
+  const y0 = nearest(read("y"));
+  const x1 = nearest(read("x") + read("width"));
+  const y1 = nearest(read("y") + read("height"));
+  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
 
 /** A flash.geom.Point's values, rounded to pixels; TypeError 2007 for null. */
@@ -37,8 +54,7 @@ function pointOf(s: Scripting, v: Value, name: string): [number, number] {
   }
 
   const p = v as AsObject;
-  const read = (k: string) =>
-    Math.trunc(s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k))) || 0);
+  const read = (k: string) => nearest(s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k))) || 0);
   return [read("x"), read("y")];
 }
 
@@ -181,11 +197,12 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
     setPixels(rect: Value, input: Value): void {
       const store = storeOf(s, this);
+      // The parameters checked in order: the rect's null before the input's.
+      const r = rectOf(s, rect);
       if (input === null || input === undefined) {
         throw s.rt.error("TypeError", 2007, "inputByteArray");
       }
 
-      const r = rectOf(s, rect);
       const c = store.clip(r);
       if (!c) {
         return;
@@ -212,11 +229,11 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
     setVector(rect: Value, input: Value): void {
       const store = storeOf(s, this);
+      const r = rectOf(s, rect);
       if (input === null || input === undefined) {
         throw s.rt.error("TypeError", 2007, "inputVector");
       }
 
-      const r = rectOf(s, rect);
       const c = store.clip(r);
       if (!c) {
         return;
