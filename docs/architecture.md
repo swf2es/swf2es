@@ -398,7 +398,14 @@ on that class (hooks' allocation is inherited through `Traits.create`),
 which attaches a player `DisplayObject` as `$display`, and the player's
 object points back with `object`. The natives of the display classes
 (`packages/player/src/playerglobal/flash/display/...`) read and write
-`$display`; an AVM1 movie's children, and a timeline child without a
+`$display`. They are written as a class of getters, setters and methods,
+whose members `registerNativeClass` (`playerglobal/natives.ts`) registers
+under the names the compiler binds, `Class#get:x`, `Class#set:x`,
+`Class#method` and `Class.method` for a static, each through `plain()`,
+so it runs with the AS3 object as `this`; the class is only how they are
+written, and a private native is registered by name beside it. The class
+lives in the factory that makes the natives, so it closes over its
+`Scripting`; an AVM1 movie's children, and a timeline child without a
 class, have `object === null`, and nothing in `display.ts` or `pixi.ts`
 depends on which VM drives them.
 
