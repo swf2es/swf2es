@@ -149,3 +149,42 @@ test("a place without the move flag makes a new child; with it, changes the one 
   assert.equal(moved.root.depths.get(1), kept);
   assert.equal(kept?.matrix.tx, 10);
 });
+
+test("a rewind puts back what the first frame's place left unsaid", () => {
+  // Frame 1 places the square with no matrix, frame 2 moves it; the loop
+  // must bring it back to where a character first placed is, not leave it.
+  const player = movie(
+    [w.place({ depth: 1, character: 1 })],
+    [w.place({ depth: 1, move: true, matrix: { tx: 1000 } })],
+  );
+  const square = player.root.depths.get(1);
+  player.tick();
+  assert.equal(square?.matrix.tx, 50);
+
+  player.tick();
+  assert.equal(player.root.currentFrame, 1);
+  assert.equal(player.root.depths.get(1), square);
+  assert.equal(square?.matrix.tx, 0);
+});
+
+test("a goto forward makes a new child where the frame places the character anew", () => {
+  // As frame by frame would (see the place without the move flag above);
+  // only a rewind, or a place in the child's stead, keeps it.
+  const jumped = movie(
+    [w.place({ depth: 1, character: 1 })],
+    [w.place({ depth: 1, character: 1 })],
+  );
+  const before = jumped.root.depths.get(1);
+  jumped.root.gotoFrame(2);
+  assert.notEqual(jumped.root.depths.get(1), before);
+  assert.equal(jumped.root.children.length, 1);
+
+  const replaced = movie(
+    [w.place({ depth: 1, character: 1 })],
+    [w.place({ depth: 1, character: 1, move: true, matrix: { tx: 200 } })],
+  );
+  const kept = replaced.root.depths.get(1);
+  replaced.root.gotoFrame(2);
+  assert.equal(replaced.root.depths.get(1), kept);
+  assert.equal(kept?.matrix.tx, 10);
+});

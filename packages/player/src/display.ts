@@ -177,7 +177,9 @@ export class MovieClip extends Container {
    * it (from the first, for a rewind) are replayed into one command per
    * depth, and each command changes the child still at its depth if it is
    * the same character, else makes one. A child placed before the frame and
-   * untouched since keeps playing, and its identity.
+   * untouched since keeps playing, and its identity; on a rewind a place
+   * puts back what it leaves unsaid too, so it looks as it did when first
+   * placed.
    */
   gotoFrame(frame: number): void {
     const target = Math.max(1, Math.min(frame, this.totalFrames));
@@ -205,7 +207,10 @@ export class MovieClip extends Container {
           continue;
         }
 
-        const place = command.place;
+        const place =
+          rewind && command.place.character !== null && !command.place.move
+            ? asFirstPlaced(command.place)
+            : command.place;
         const previous = commands.get(place.depth);
         commands.set(place.depth, previous ? mergePlace(previous, place) : place);
         if (place.character !== null) {
@@ -218,7 +223,13 @@ export class MovieClip extends Container {
       const existing = this.depths.get(depth);
       const character =
         place.character === null ? null : this.library.characters.get(place.character);
-      if (existing && (character === null || existing.character === character)) {
+      // The child stays for a change, and for the same character placed
+      // again on a rewind or in place of itself; placed anew going forward,
+      // it is a new child, as it would be frame by frame.
+      if (
+        existing &&
+        (character === null || (existing.character === character && (rewind || place.move)))
+      ) {
         existing.applyPlace(place);
         continue;
       }
@@ -267,10 +278,39 @@ export class MovieClip extends Container {
   }
 }
 
-/** `next` over `previous`: what the later place sets, and the rest as it was. */
+/**
+ * A rewind's place with what it leaves unsaid said: the transform, colour,
+ * ratio and the rest as a character first placed has them, as Ruffle's
+ * goto fills them in. The name and visibility are not among them: they
+ * stay as they were.
+ */
+function asFirstPlaced(place: Place): Place {
+  return {
+    ...place,
+    matrix: place.matrix ?? IDENTITY,
+    colorTransform: place.colorTransform ?? IDENTITY_COLOR,
+    ratio: place.ratio ?? 0,
+    blendMode: place.blendMode ?? 0,
+    cacheAsBitmap: place.cacheAsBitmap ?? false,
+  };
+}
+
+const IDENTITY_COLOR: ColorTransform = {
+  rMul: 1,
+  gMul: 1,
+  bMul: 1,
+  aMul: 1,
+  rAdd: 0,
+  gAdd: 0,
+  bAdd: 0,
+  aAdd: 0,
+};
+
+/** `next` over `previous`: what the later place sets, and the rest as it was; a later character brings its flag. */
 function mergePlace(previous: Place, next: Place): Place {
   return {
     ...previous,
+    move: next.character !== null ? next.move : previous.move,
     character: next.character ?? previous.character,
     matrix: next.matrix ?? previous.matrix,
     colorTransform: next.colorTransform ?? previous.colorTransform,
