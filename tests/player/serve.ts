@@ -14,7 +14,11 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 /** URL prefixes and the directories they serve. */
 const mounts: [string, string][] = [
   ["/format/", join(root, "packages/format/dist/")],
+  ["/codegen/", join(root, "packages/codegen/dist/")],
+  ["/runtime/", join(root, "packages/runtime/dist/")],
   ["/player/", join(root, "packages/player/dist/")],
+  // The ABCs a SWF's code links against, copied out of the oracle's image by the tests.
+  ["/libraries/", join(root, "tests/libraries/out/")],
   ["/pixi/", join(root, "packages/player/node_modules/pixi.js/dist/")],
   ["/pako/", join(root, "packages/format/node_modules/pako/dist/")],
   ["/lzma1/", join(root, "packages/format/node_modules/lzma1/lib/")],
@@ -24,6 +28,8 @@ const mounts: [string, string][] = [
 export const importMap = {
   imports: {
     "@swf2es/format": "/format/index.js",
+    "@swf2es/codegen": "/codegen/index.js",
+    "@swf2es/runtime": "/runtime/index.js",
     "@swf2es/player": "/player/index.js",
     "pixi.js": "/pixi/pixi.mjs",
     pako: "/pako/pako.esm.mjs",
@@ -37,6 +43,7 @@ const types: Record<string, string> = {
   ".ts": "text/javascript",
   ".html": "text/html",
   ".map": "application/json",
+  ".wasm": "application/wasm",
 };
 
 function page(): string {

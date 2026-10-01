@@ -19,6 +19,8 @@ const QUALITIES = ["low", "medium", "high", "best"];
 
 export interface PlayerResult {
   images: Map<number, Uint8Array>;
+  /** What the SWF's scripts traced, a line each. */
+  trace: string[];
   /** What stopped the player, if anything. */
   error: string | null;
 }
@@ -173,6 +175,7 @@ export function runPlayer(jobs: PlayerJob[]): Promise<PlayerResult[]> {
     for (const job of jobs) {
       const { value, exception } = await evaluate<{
         images: Record<string, string>;
+        trace: string[];
         error: string | null;
       }>(
         `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")})`,
@@ -182,7 +185,7 @@ export function runPlayer(jobs: PlayerJob[]): Promise<PlayerResult[]> {
         images.set(Number(frame), new Uint8Array(Buffer.from(dataUrl.split(",")[1], "base64")));
       }
 
-      results.push({ images, error: value?.error ?? exception ?? null });
+      results.push({ images, trace: value?.trace ?? [], error: value?.error ?? exception ?? null });
     }
 
     return results;

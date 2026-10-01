@@ -292,14 +292,16 @@ export class PixiView {
     let node = this.nodes.get(o);
     if (!node) {
       node = { container: new PixiContainer(), world: [0, 0, 0, 0], strokes: [] };
-      if (o instanceof ShapeObject) {
-        let fills = this.fills.get(o.shape);
+      // A Shape a script made has nothing to draw yet.
+      if (o instanceof ShapeObject && o.shape) {
+        const shape = o.shape;
+        let fills = this.fills.get(shape);
         if (!fills) {
-          fills = o.shape.layers.map(fillContext);
-          this.fills.set(o.shape, fills);
+          fills = shape.layers.map(fillContext);
+          this.fills.set(shape, fills);
         }
 
-        o.shape.layers.forEach((layer, i) => {
+        shape.layers.forEach((layer, i) => {
           node?.container.addChild(new Graphics(fills[i]));
           const strokes = layer.strokes.length ? new Graphics() : null;
           if (strokes) {
@@ -323,7 +325,7 @@ export class PixiView {
   private restroke(o: ShapeObject, node: Node): void {
     const m = node.world;
     const det = m[0] * m[3] - m[1] * m[2];
-    o.shape.layers.forEach((layer, i) => {
+    o.shape?.layers.forEach((layer, i) => {
       const strokes = node.strokes[i];
       if (!strokes) {
         return;

@@ -14,6 +14,7 @@ import {
   type Tag,
   tags,
 } from "@swf2es/format";
+import type { DisplayObject } from "./display.js";
 import { type ShapeLayer, shapeLayers } from "./shapes.js";
 
 export type FrameCommand = { type: "place"; place: Place } | { type: "remove"; depth: number };
@@ -43,6 +44,12 @@ export type Character = ShapeCharacter | SpriteCharacter;
 export interface Library {
   characters: Map<number, Character>;
   root: Timeline;
+  /**
+   * Gives a display object the player just made its AS3 object, where the
+   * SWF has scripts (Scripting.construct); null in an AVM1 movie. A clip's
+   * first frame is entered on the way, by Sprite's constructChildren.
+   */
+  construct: ((display: DisplayObject, character: Character) => void) | null;
 }
 
 function timelineOf(
@@ -104,5 +111,5 @@ function timelineOf(
 export function readLibrary(swf: Swf): Library {
   const characters = new Map<number, Character>();
   const root = timelineOf(swf.bytes, swf.tags, swf.frameCount, characters);
-  return { characters, root };
+  return { characters, root, construct: null };
 }

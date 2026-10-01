@@ -5,6 +5,7 @@
 // placed, by depth, which is how SWF tags address them; a child the
 // timeline places goes before the first child of a greater depth.
 import { type ColorTransform, IDENTITY, type Matrix, type Place } from "@swf2es/format";
+import type { avm2 } from "@swf2es/runtime";
 import type { Character, Library, ShapeCharacter, Timeline } from "./timeline.js";
 
 /** Nothing changed since the renderer last looked, or what did. */
@@ -26,6 +27,8 @@ export class DisplayObject {
   visible = true;
   /** The character it was made from, or null. */
   character: Character | null = null;
+  /** Its other face, the AS3 object a script sees; null in an AVM1 movie. */
+  object: avm2.AsObject | null = null;
   /** What changed since the renderer last synced it: TRANSFORM, CHILDREN, CONTENT. */
   dirty = TRANSFORM | CONTENT;
 
@@ -62,7 +65,8 @@ export class DisplayObject {
 }
 
 export class ShapeObject extends DisplayObject {
-  constructor(readonly shape: ShapeCharacter) {
+  /** The shape it draws; null for a Shape a script made, which draws nothing yet. */
+  constructor(readonly shape: ShapeCharacter | null) {
     super();
     this.character = shape;
   }
@@ -101,11 +105,41 @@ export class Container extends DisplayObject {
       return null;
     }
 
-    this.depths.delete(depth);
+    this.removeChild(child);
+    return child;
+  }
+
+  /** Take `child` out, wherever it is in the list, and off the timeline's depths. */
+  removeChild(child: DisplayObject): void {
+    if (child.depth !== null) {
+      this.depths.delete(child.depth);
+      child.depth = null;
+    }
+
     this.children.splice(this.children.indexOf(child), 1);
     child.parent = null;
     this.invalidate(CHILDREN);
-    return child;
+  }
+
+  /**
+   * Put `child` at `index` in render order, as a script's addChildAt does:
+   * out of its parent first, and off the timeline's depths, which no
+   * longer place it.
+   */
+  addChildAt(child: DisplayObject, index: number): void {
+    const same = child.parent === this;
+    child.parent?.removeChild(child);
+    child.parent = this;
+    this.children.splice(same ? Math.min(index, this.children.length) : index, 0, child);
+    this.invalidate(CHILDREN);
+  }
+
+  swapChildren(a: DisplayObject, b: DisplayObject): void {
+    const i = this.children.indexOf(a);
+    const j = this.children.indexOf(b);
+    this.children[i] = b;
+    this.children[j] = a;
+    this.invalidate(CHILDREN);
   }
 }
 
@@ -122,9 +156,13 @@ interface Jump {
 }
 
 export class MovieClip extends Container {
-  /** The frame it shows, 1 the first. */
+  /** The frame it shows, 1 the first; 0 before its first frame is entered. */
   currentFrame = 0;
   playing = true;
+  /** The scripts addFrameScript registered, by frame, 1 the first. */
+  readonly frameScripts = new Map<number, avm2.Value>();
+  /** The frame whose script last ran, so that entering a frame runs its script once. */
+  scriptedFrame = 0;
 
   constructor(
     readonly timeline: Timeline,
@@ -169,7 +207,7 @@ export class MovieClip extends Container {
         continue;
       }
 
-      const child = instantiate(character, this.library);
+      const child = displayFor(character, this.library);
       // A replaced character keeps what the place does not set.
       if (place.move && existing) {
         child.matrix = existing.matrix;
@@ -180,6 +218,7 @@ export class MovieClip extends Container {
       child.applyPlace(place);
       child.placeFrame = frame;
       this.placeAtDepth(child, place.depth);
+      construct(child, character, this.library);
     }
   }
 
@@ -290,7 +329,7 @@ export class MovieClip extends Container {
         continue;
       }
 
-      const child = instantiate(character, this.library);
+      const child = displayFor(character, this.library);
       // In the child's stead, the new one keeps what the place does not set, as frame by frame.
       if (existing && !anew) {
         child.matrix = existing.matrix;
@@ -301,13 +340,18 @@ export class MovieClip extends Container {
       child.applyPlace(jump.place);
       child.placeFrame = jump.frame;
       this.placeAtDepth(child, depth);
+      construct(child, character, this.library);
     }
 
     this.currentFrame = target;
   }
 
-  /** The first frame, as a clip runs it when it is made. */
+  /** The first frame, as a clip runs it when it is made; once. */
   enterFirstFrame(): void {
+    if (this.currentFrame !== 0) {
+      return;
+    }
+
     this.currentFrame = 1;
     this.runFrame(1);
   }
@@ -379,14 +423,37 @@ function mergePlace(previous: Place, next: Place): Place {
   };
 }
 
-/** A display object for a character: a shape, or a clip on its first frame. */
-export function instantiate(character: Character, library: Library): DisplayObject {
+/** A display object for a character, before its first frame: a shape, or a clip. */
+export function displayFor(character: Character, library: Library): DisplayObject {
   if (character.type === "shape") {
     return new ShapeObject(character);
   }
 
   const clip = new MovieClip(character.timeline, library);
   clip.character = character;
-  clip.enterFirstFrame();
   return clip;
 }
+
+/**
+ * Bring a display object the timeline placed to life: its AS3 object
+ * constructed where the SWF has scripts, which enters a clip's first frame
+ * and names it on its parent, else a clip's first frame entered. After the
+ * placement, as Flash has it, so that the parent and the name are there.
+ */
+function construct(display: DisplayObject, character: Character, library: Library): void {
+  if (library.construct) {
+    library.construct(display, character);
+  } else if (display instanceof MovieClip) {
+    display.enterFirstFrame();
+  }
+}
+
+/** A display object for a character as the timeline would place it, alive, but in no container. */
+export function instantiate(character: Character, library: Library): DisplayObject {
+  const display = displayFor(character, library);
+  construct(display, character, library);
+  return display;
+}
+
+/** A timeline of one empty frame: a clip a script makes. */
+export const EMPTY_TIMELINE: Timeline = { frames: [[]], labels: new Map() };

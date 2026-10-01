@@ -5,7 +5,10 @@ import * as w from "../swf-writer.ts";
 
 export interface PlayerCase {
   name: string;
-  swf: Uint8Array;
+  /** The SWF, or how to build it around the compiled script. */
+  swf: Uint8Array | ((abc: Uint8Array) => Uint8Array);
+  /** The AS3 half: scripts/<script>.as, compiled in the oracle's container; its trace must match Flash's. */
+  script?: string;
   frames: number;
   capture: number[];
   quality?: "low" | "medium" | "high" | "best";
@@ -167,6 +170,31 @@ function rewinds(as3: boolean): Uint8Array {
   });
 }
 
+// A document class (scripts/Main.as) on a two-frame root with a sprite named
+// "box" placed on frame 1 and moved on frame 2: what it traces when it is
+// constructed and on each frame's script must be what Flash traces.
+export function scripted(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "Main"),
+      w.symbolClass([[0, "Main"]]),
+      w.place({ depth: 1, character: 2, name: "box", matrix: { tx: 200, ty: 400 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, matrix: { tx: 1000, ty: 400 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // What differs from Flash in "moves" is anti-aliasing a quarter pixel off:
 // Flash's curved lines reach further into their shape, and under the skew
 // of frame 2 its lines are a little wider or narrower than Ruffle's rule
@@ -184,4 +212,13 @@ export const cases: PlayerCase[] = [
   { name: "loops-avm1", swf: loops(false), ...looped },
   { name: "rewinds", swf: rewinds(true), ...rewound },
   { name: "rewinds-avm1", swf: rewinds(false), ...rewound },
+  {
+    name: "scripted",
+    swf: scripted,
+    script: "Main",
+    frames: 2,
+    capture: [1, 2],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
 ];

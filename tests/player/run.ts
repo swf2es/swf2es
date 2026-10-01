@@ -6,9 +6,10 @@
 //   node tests/player/run.ts --update [case...]   draw the references again in Flash
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { cases } from "./cases.ts";
+import { cases, type PlayerCase } from "./cases.ts";
 import { runPlayer } from "./chrome.ts";
 import { compareImages, decodePng, differenceImage, encodePng } from "./image.ts";
+import { compileScripts } from "./scripts.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const args = process.argv.slice(2);
@@ -16,11 +17,18 @@ const update = args.includes("--update");
 const names = args.filter((a) => a !== "--update");
 const chosen = cases.filter((c) => !names.length || names.includes(c.name));
 const reference = (name: string, frame: number) => `${here}references/${name}/frame-${frame}.png`;
+const traceReference = (name: string) => `${here}references/${name}/trace.txt`;
+
+// The scripted cases' ABCs, compiled in the oracle's container, and each case's SWF.
+const scripts = compileScripts([...new Set(chosen.flatMap((c) => (c.script ? [c.script] : [])))]);
+const swfOf = (c: PlayerCase): Uint8Array =>
+  typeof c.swf === "function" ? c.swf(scripts.get(c.script ?? "") as Uint8Array) : c.swf;
+const jobs = chosen.map((c) => ({ ...c, swf: swfOf(c) }));
 
 if (update) {
   // The oracle needs adl, which only this mode does.
   const { runFlash } = await import("../../oracle/flash.ts");
-  const results = await runFlash(chosen);
+  const results = await runFlash(jobs);
   for (const [i, c] of chosen.entries()) {
     const r = results[i];
     if (r.incomplete) {
@@ -35,10 +43,16 @@ if (update) {
       writeFileSync(reference(c.name, frame), png);
     }
 
-    console.log(`${c.name}: ${r.images.size} frames`);
+    if (c.script) {
+      writeFileSync(traceReference(c.name), `${r.output.join("\n")}\n`);
+    }
+
+    console.log(
+      `${c.name}: ${r.images.size} frames${c.script ? `, ${r.output.length} lines traced` : ""}`,
+    );
   }
 } else {
-  const results = await runPlayer(chosen);
+  const results = await runPlayer(jobs);
   let failed = 0;
   for (const [i, c] of chosen.entries()) {
     const r = results[i];
@@ -48,6 +62,18 @@ if (update) {
     }
 
     rmSync(`${here}out/${c.name}`, { recursive: true, force: true });
+    if (c.script) {
+      const expected = readFileSync(traceReference(c.name), "utf8").replace(/\n$/, "").split("\n");
+      const got = r.trace;
+      const at = got.findIndex((line, i) => line !== expected[i]);
+      if (at >= 0 || got.length !== expected.length) {
+        const i = at < 0 ? Math.min(got.length, expected.length) : at;
+        problems.push(
+          `trace line ${i + 1}: ${JSON.stringify(got[i] ?? "(end)")}, Flash ${JSON.stringify(expected[i] ?? "(end)")}`,
+        );
+      }
+    }
+
     for (const frame of c.capture) {
       const actual = r.images.get(frame);
       if (!actual) {

@@ -466,7 +466,11 @@ avmshell's.
   `BitmapData.drawWithQuality` at the SWF's stage quality, and its traces.
   Frame 1 is the one its `INIT` follows and frame k the one after k - 1
   `EXIT_FRAME`s, a frame later for AVM1, whose movie in a `Loader` shows
-  its frame 2 a frame late. adl is not in CI (here it runs the Windows AIR
+  its frame 2 a frame late. A SWF the harness runs is loaded content, and
+  Flash constructs that before it is the `Loader`'s child: its document
+  class finds `stage` null in its constructor, where a main movie's finds
+  the stage, as the player's does. A case whose trace depends on that
+  waits for the player's own `Loader`, to run as loaded content too. adl is not in CI (here it runs the Windows AIR
   runtime under Wine), so what the player's tests compare against is drawn
   once and committed (`tests/player/references`, `node tests/player/run.ts
   --update`); CI needs only Chrome.
