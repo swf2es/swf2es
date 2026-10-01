@@ -263,3 +263,17 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "5 complete - http://example.test/nested.swf true",
   ]);
 });
+
+test("timers fire in the order of their times, each at its own time", { skip }, async () => {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  // A 10 fps root: the clock is at 100 as the constructor starts the timers, at 400 after three ticks.
+  const player = new Player(bare(compiler(out)("Timers"), 4), scripting);
+  player.frameRate = 10;
+  await player.start();
+  player.tick();
+  player.tick();
+  player.tick();
+  assert.deepEqual(lines, ["A 200", "B 250", "A 300", "A 400", "B 400"]);
+});

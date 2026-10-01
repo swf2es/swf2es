@@ -99,8 +99,8 @@ export class Player {
       n++;
     }
 
-    // What could not be caught up with is let go, not owed for ever.
-    if (n === MAX_CATCH_UP) {
+    // What could not be caught up with is let go, not owed for ever; less than a frame is kept.
+    if (this.owed >= 1000 / this.frameRate) {
       this.owed = 0;
     }
   }

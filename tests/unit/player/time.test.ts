@@ -33,4 +33,10 @@ test("advance plays a frame per 100 ms at 10 fps, keeps the remainder, and catch
   assert.equal(player.root.currentFrame, 9);
   player.advance(1);
   assert.equal(player.root.currentFrame, 10);
+
+  // Five frames and a half: the half is kept, as no whole frame is still owed.
+  player.advance(550);
+  assert.equal(player.root.currentFrame, 15);
+  player.advance(50);
+  assert.equal(player.root.currentFrame, 16);
 });

@@ -728,19 +728,27 @@ export class Scripting {
 
   /**
    * A frame begins: the clock moves on by `ms`, and the timers that fall
-   * due by then fire, in due order, each as many times as its delay fits,
-   * before the timeline advances. A timer started while they fire waits
-   * for the next frame.
+   * due by then fire, before the timeline advances, each firing the
+   * earliest due, so that two timers interleave as their times do and
+   * one started from another with time to spare fires in the same pass.
    */
   beginFrame(ms: number): void {
     this.clock += ms;
-    const due = this.timers.filter((t) => t.due <= this.clock).sort((a, b) => a.due - b.due);
-    for (const timer of due) {
-      while (timer.due <= this.clock && this.timers.includes(timer)) {
-        this.now = timer.due;
-        timer.due += timer.delay;
-        this.rt.call(timer.closure, timer.object);
+    for (;;) {
+      let next: (typeof this.timers)[number] | null = null;
+      for (const timer of this.timers) {
+        if (timer.due <= this.clock && (!next || timer.due < next.due)) {
+          next = timer;
+        }
       }
+
+      if (!next) {
+        break;
+      }
+
+      this.now = next.due;
+      next.due += next.delay;
+      this.rt.call(next.closure, next.object);
     }
 
     this.now = this.clock;
