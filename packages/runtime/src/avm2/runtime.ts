@@ -137,6 +137,12 @@ export interface IndexHook {
  * on): each operation, their enumeration, and their equality and +.
  */
 export interface PropertyHook {
+  /**
+   * Whether a public method's name resolves through the hook too, as a
+   * child or attribute of XML hides the methods of its names, or is the
+   * method the traits bind, as a Proxy's is.
+   */
+  hidesMethods: boolean;
   get(rt: Runtime, o: AsObject, mn: Multiname): Value;
   set(rt: Runtime, o: AsObject, mn: Multiname, v: Value): void;
   delete(rt: Runtime, o: AsObject, mn: Multiname): boolean;
@@ -1000,7 +1006,7 @@ export class Runtime {
 
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
-    if (traits.properties !== null && hookedBinding(b, mn)) {
+    if (traits.properties !== null && hookedBinding(b, mn, traits.properties)) {
       return traits.properties.get(this, o, mn);
     }
 
@@ -1296,7 +1302,7 @@ export class Runtime {
 
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
-    if (traits.properties !== null && hookedBinding(b, mn)) {
+    if (traits.properties !== null && hookedBinding(b, mn, traits.properties)) {
       traits.properties.set(this, o, mn, v);
       return;
     }
@@ -1370,7 +1376,7 @@ export class Runtime {
 
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
-    if (traits.properties !== null && hookedBinding(b, mn)) {
+    if (traits.properties !== null && hookedBinding(b, mn, traits.properties)) {
       return traits.properties.delete(this, o, mn);
     }
 
@@ -1468,7 +1474,7 @@ export class Runtime {
 
     const own = this.traitsOf(o);
     const b = own.find(mn);
-    if (own.properties !== null && hookedBinding(b, mn)) {
+    if (own.properties !== null && hookedBinding(b, mn, own.properties)) {
       return own.properties.has(this, o, mn);
     }
 
@@ -1801,14 +1807,33 @@ export class Runtime {
     return o;
   }
 
-  /** A method's `arguments`: every argument it was called with, declared or not. */
-  arguments(args: IArguments): AsObject {
-    return this.array(Array.prototype.slice.call(args));
+  /**
+   * A method's `arguments`: every argument it was called with, declared or
+   * not, and as `callee`, not enumerable, the method's Function object,
+   * the one a newfunction made for it, so that `arguments.callee === f`,
+   * else one made for it once, as avmplus' MethodClosure is.
+   */
+  arguments(args: IArguments, callee: Method): AsObject {
+    const o = this.array(Array.prototype.slice.call(args));
+    let f = this.functionObjects.get(callee);
+    if (!f) {
+      f = this.newFunctionObject(callee, null);
+      this.functionObjects.set(callee, f);
+    }
+
+    o.$d.set("callee", f);
+    o.$dontEnum = new Set(["callee"]);
+    return o;
   }
 
+  /** Each method's Function object, by the method, for arguments.callee. */
+  private readonly functionObjects = new WeakMap<Method, AsObject>();
+
   newFunction(factory: Factory, scope: Scope, id = 0): AsObject {
-    const f = this.newFunctionObject(factory(scope, null), scope.length ? scope[0] : null);
+    const method = factory(scope, null);
+    const f = this.newFunctionObject(method, scope.length ? scope[0] : null);
     f.$id = id;
+    this.functionObjects.set(method, f);
     return f;
   }
 
