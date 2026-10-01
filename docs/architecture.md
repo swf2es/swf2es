@@ -417,14 +417,19 @@ dispatch is part of the first slice: listeners by type and phase on the
 player object, `dispatchEvent` through the player's parent chain, and the
 frame events the player broadcasts.
 
-A frame runs in the order Flash runs one, which Ruffle documents and the
-Flash oracle checks: input; the timelines advanced, which places and
-removes children and queues the constructors of the new ones, run in tree
-order after the timeline; `ENTER_FRAME`; `FRAME_CONSTRUCTED`; the frame
-scripts `addFrameScript` registered, for each clip's current frame;
-`EXIT_FRAME`; `RENDER` when the stage was invalidated; then the frame is
-drawn. The `loops` and `rewinds` cases fixed what a goto keeps; the
-scripts' order is fixed the same way, by cases whose traces adl records.
+A frame runs in the order Flash runs one, which the Flash oracle fixed
+case by case: the timelines advanced, which places children and
+constructs their classes as it goes; `ENTER_FRAME`; `FRAME_CONSTRUCTED`;
+the frame scripts `addFrameScript` registered, once for each frame a clip
+enters and again for what a script's goto changes; `EXIT_FRAME`; `RENDER`
+when a script invalidated the stage; then the frame is drawn. The first
+frame, after the document class is constructed, has no `ENTER_FRAME`
+(`events`). The frame events are broadcasts: each display object that
+listens hears its own, on the display list or not, in the order the
+objects first listened, with no capture or bubble phase. And `SymbolClass`
+binds its classes after an eager `DoABC` has run its initializer, so an
+instance that initializer makes of a bound class has no timeline children,
+and one the constructor makes has (`init`).
 
 The player loads a SWF's code through `@swf2es/codegen`'s `Codegen`: each
 `DoABC`, in tag order, is added to one domain after the builtins and

@@ -15,12 +15,8 @@ interface Listener {
   priority: number;
 }
 
-// How many listen for each type, anywhere: a broadcast with none to reach skips the walk.
-const counts = new Map<string, number>();
-
-export function listenerCount(type: string): number {
-  return counts.get(type) ?? 0;
-}
+/** The events Flash broadcasts to every display object that listens, on the display list or not, target only. */
+export const BROADCAST = new Set(["enterFrame", "frameConstructed", "exitFrame", "render"]);
 
 function listeners(o: AsObject): Map<string, Listener[]> {
   if (!o.$listeners) {
@@ -52,6 +48,12 @@ function invoke(s: Scripting, o: AsObject, event: AsObject, phase: number): void
       return;
     }
   }
+}
+
+/** Dispatch `event` to `target`'s own listeners only, as a broadcast reaches each object: no capture, no bubble. */
+export function dispatchTo(s: Scripting, target: AsObject, event: AsObject): void {
+  event.$target = target.$target ?? target;
+  invoke(s, target, event, AT_TARGET);
 }
 
 /** Dispatch `event` from `target`, as EventDispatcher.dispatchEvent does; whether no listener prevented its default. */
@@ -122,7 +124,10 @@ export function eventDispatcherNatives(s: Scripting): avm2.Natives {
 
       list.splice(at, 0, listener);
       listeners(this).set(key, list);
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      // A display object listening for a frame event is broadcast to, wherever it is.
+      if (BROADCAST.has(key) && this.$display) {
+        s.broadcastTargets(key).add(this);
+      }
     }),
     "flash.events::EventDispatcher#removeEventListener": plain(function (
       this: AsObject,
@@ -135,7 +140,9 @@ export function eventDispatcherNatives(s: Scripting): avm2.Natives {
       const at = list?.findIndex((l) => l.fn === fn && l.capture === !!useCapture) ?? -1;
       if (list && at >= 0) {
         list.splice(at, 1);
-        counts.set(key, (counts.get(key) ?? 1) - 1);
+        if (list.length === 0 && BROADCAST.has(key)) {
+          s.broadcastTargets(key).delete(this);
+        }
       }
     }),
     "flash.events::EventDispatcher#hasEventListener": plain(function (this: AsObject, type: Value) {

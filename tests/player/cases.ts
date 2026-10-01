@@ -195,6 +195,50 @@ export function scripted(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A two-frame root with `abc` as its code and nothing placed: for what the
+// scripts alone do (scripts/Events.as).
+function bare(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "Main"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A sprite with one child, bound to a class the script constructs during
+// its initializer and again later (scripts/Init.as).
+function bound(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "Init"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Box"],
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // What differs from Flash in "moves" is anti-aliasing a quarter pixel off:
 // Flash's curved lines reach further into their shape, and under the skew
 // of frame 2 its lines are a little wider or narrower than Ruffle's rule
@@ -218,6 +262,24 @@ export const cases: PlayerCase[] = [
     script: "Main",
     frames: 2,
     capture: [1, 2],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "events",
+    swf: bare,
+    script: "Events",
+    frames: 2,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "init",
+    swf: bound,
+    script: "Init",
+    frames: 1,
+    capture: [1],
     tolerance: 0,
     maxOutliers: 0,
   },

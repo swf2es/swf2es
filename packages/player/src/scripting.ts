@@ -16,7 +16,7 @@ import {
   MovieClip,
   ShapeObject,
 } from "./display.js";
-import { dispatchEvent, listenerCount } from "./playerglobal/flash/events/EventDispatcher.js";
+import { dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
 import type { Character, Library } from "./timeline.js";
 
@@ -39,6 +39,8 @@ export class Scripting {
   library: Library | null = null;
   /** Whether a script asked the stage to render (Stage.invalidate). */
   invalidated = false;
+  /** The display objects listening for each frame event, in the order they first listened; a broadcast reaches these. */
+  private readonly broadcasts = new Map<string, Set<AsObject>>();
   /** What flash.display.Stage reports and sets; the player copies the frame rate back each frame. */
   stageWidth = 0;
   stageHeight = 0;
@@ -168,24 +170,32 @@ export class Scripting {
     return this.rt.construct(this.rt.classNamed("flash.events::Event"), type, bubbles, false);
   }
 
-  /** Dispatch an event of `type` to every object on the display list under `root`, in tree order, if anything listens. */
-  broadcast(type: string, root: DisplayObject): void {
-    if (listenerCount(type) === 0) {
+  /** The display objects a broadcast of `type` reaches, for EventDispatcher to keep. */
+  broadcastTargets(type: string): Set<AsObject> {
+    let targets = this.broadcasts.get(type);
+    if (!targets) {
+      targets = new Set();
+      this.broadcasts.set(type, targets);
+    }
+
+    return targets;
+  }
+
+  /**
+   * Dispatch an event of `type` to every display object that listens for
+   * it, on the display list or not, in the order they first listened, each
+   * its own event and its own target only: Flash's frame events have no
+   * capture or bubble phase.
+   */
+  broadcast(type: string): void {
+    const targets = this.broadcasts.get(type);
+    if (!targets) {
       return;
     }
 
-    const visit = (o: DisplayObject) => {
-      if (o.object) {
-        dispatchEvent(this, o.object, this.event(type));
-      }
-
-      if (o instanceof Container) {
-        for (const child of [...o.children]) {
-          visit(child);
-        }
-      }
-    };
-    visit(root);
+    for (const target of [...targets]) {
+      dispatchTo(this, target, this.event(type));
+    }
   }
 
   /**
@@ -220,15 +230,22 @@ export class Scripting {
     }
   }
 
-  /** What follows the timelines' advance in a frame: the frame events and scripts, in Flash's order. */
-  frame(root: DisplayObject): void {
-    this.broadcast("enterFrame", root);
-    this.broadcast("frameConstructed", root);
+  /**
+   * What follows the timelines' advance in a frame: the frame events and
+   * scripts, in Flash's order. The first frame, after construction, has no
+   * ENTER_FRAME: Flash goes to FRAME_CONSTRUCTED, the scripts and EXIT_FRAME.
+   */
+  frame(root: DisplayObject, entered = true): void {
+    if (entered) {
+      this.broadcast("enterFrame");
+    }
+
+    this.broadcast("frameConstructed");
     this.runFrameScripts(root);
-    this.broadcast("exitFrame", root);
+    this.broadcast("exitFrame");
     if (this.invalidated) {
       this.invalidated = false;
-      this.broadcast("render", root);
+      this.broadcast("render");
     }
   }
 }
