@@ -19,6 +19,7 @@ import {
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
+import { sha256 } from "./sha256.js";
 import { type Character, type Library, readLibrary } from "./timeline.js";
 
 type AsObject = avm2.AsObject;
@@ -166,7 +167,7 @@ export class Scripting {
       throw new Error(`an ABC was rejected: VerifyError #${error}`);
     }
 
-    this.hashes.push(await hashOf(abc));
+    this.hashes.push(await sha256(abc));
     const { module } = this.codegen.compile(this.hashes);
     const factory = (await import(`data:text/javascript,${encodeURIComponent(module)}`)).default;
     return factory(this.rt);
@@ -871,24 +872,4 @@ function resolve(base: string, url: string): string {
 function qualify(name: string): string {
   const i = name.lastIndexOf(".");
   return i < 0 ? name : `${name.slice(0, i)}::${name.slice(i + 1)}`;
-}
-
-/**
- * The fingerprint of an ABC's bytes for the modules' record of what they
- * were linked against: SHA-256 as hex, which is what the AOT side and the
- * cache key use, so that a module compiled here names its ABCs as one
- * compiled there does. crypto.subtle is a secure context's: https, or
- * localhost.
- */
-async function hashOf(bytes: Uint8Array): Promise<string> {
-  // The bytes are a view of the SWF's buffer, never a shared one, as digest requires.
-  const digest = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>),
-  );
-  let hex = "";
-  for (let i = 0; i < digest.length; i++) {
-    hex += digest[i].toString(16).padStart(2, "0");
-  }
-
-  return hex;
 }
