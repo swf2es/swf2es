@@ -293,3 +293,17 @@ test("timers due at once fire in the order started, after others around them wer
   player.tick();
   assert.deepEqual(lines, ["B 300", "C 300"]);
 });
+
+test("a timer whose closure throws keeps running and fires again", { skip }, async () => {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compiler(out)("TimerThrows"), 3), scripting);
+  player.frameRate = 10;
+  await player.start();
+  // The first firing's error reaches the host; the timer is back in its place for the next.
+  assert.throws(() => player.tick());
+  assert.equal(scripting.now, scripting.clock);
+  player.tick();
+  assert.deepEqual(lines, ["firing 1 200 true", "firing 2 300 true"]);
+});

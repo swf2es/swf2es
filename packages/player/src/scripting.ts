@@ -735,22 +735,28 @@ export class Scripting {
    */
   beginFrame(ms: number): void {
     this.clock += ms;
-    for (;;) {
-      const next = this.timers.pop(this.clock);
-      if (!next) {
-        break;
-      }
+    try {
+      for (;;) {
+        const next = this.timers.pop(this.clock);
+        if (!next) {
+          break;
+        }
 
-      this.now = next.due;
-      next.due += next.delay;
-      this.rt.call(next.closure, next.object);
-      // Pushed back after the call, which may have stopped it or started it anew.
-      if (!next.stopped) {
-        this.timers.push(next);
+        this.now = next.due;
+        next.due += next.delay;
+        try {
+          this.rt.call(next.closure, next.object);
+        } finally {
+          // Pushed back whatever the call did, unless it stopped the timer or
+          // started it anew: one whose closure throws still has its next time.
+          if (!next.stopped) {
+            this.timers.push(next);
+          }
+        }
       }
+    } finally {
+      this.now = this.clock;
     }
-
-    this.now = this.clock;
   }
 
   /** Timer._start: `closure` is called every `delay` ms from now, until stopped; a timer running already is started anew. */
