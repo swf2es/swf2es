@@ -578,6 +578,38 @@ every SWF in, so what the harness could not judge for a main movie, the
 document class's `stage` in its constructor among it, compares exactly
 once the case loads its SWF.
 
+### Drawing with Graphics
+
+A `Shape` or `Sprite` draws with its `Graphics`, which records into a
+drawing the display object keeps: the same layers of fills and strokes,
+with their paths in pixels, that `shapes.ts` makes of a SWF shape, so
+the renderer draws both alike. A fill begins at `beginFill` (or a
+gradient or bitmap fill) and ends at `endFill`, at the next begin, or at
+`lineStyle`'s change; what is drawn between is the fill's contours, each
+`moveTo` starting one and each closed back to its start, filled even-odd
+across them, as Flash fills. A stroke begins at `lineStyle` with a
+thickness and ends at one without, keeping the line's width, color,
+caps, joints, miter and scale mode. `drawRect`, `drawRoundRect` and
+`drawRoundRectComplex` are moves and lines with quadratic quarter
+circles, as Flash's; `drawCircle` and `drawEllipse` are playerglobal's
+own, over `curveTo`. `cubicCurveTo` adds a cubic command to the path
+model; `drawPath` takes commands and data with a winding. `clear` takes
+everything and the styles away. The drawn order is the calls' order,
+fills under strokes within a layer as in a SWF shape, and a sprite's
+drawing under its children.
+
+The renderer keeps a drawing's fills and strokes as it keeps a shape's,
+per display object rather than per character, since a drawing changes,
+rebuilt when the object's content changes; strokes go through the same
+re-stroking as a shape's for their width under a transform. The drawing's
+points, and its lines' half widths, give the object its bounds, for
+`width`, `height`, `getBounds` and the hit tests to come. Gradient and
+bitmap fills are recorded as a shape's are, and drawn as far as a shape's
+are (the first stop); shader fills, `drawTriangles`, `readGraphicsData`
+and `drawGraphicsData` wait. An adl case draws in a `Shape` and in a
+`Sprite` with a child, compared by pixels; the corpus's `graphics_*`
+tests, which trace nothing, check that nothing throws.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
