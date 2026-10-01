@@ -47,10 +47,15 @@ export interface Codegen {
   reset(apiVersion?: number): void;
   /** Add an ABC, linking it against those before it; 0, or the VerifyError it was rejected with (then it is not added). */
   add(abc: Uint8Array, builtin?: boolean): number;
-  /** The last ABC added compiled whole; `hashes` are the ABCs' hashes in load order, as the cache key names them. */
-  compile(hashes?: string[]): Compiled;
-  /** Method bodies of the last ABC compiled alone, as the JIT compiles each on its first call; a native, unverified or unknown one is left out. */
-  compileMethods(bodies: number[]): Map<number, string>;
+  /**
+   * ABC `index` compiled whole, the last added by default, against every ABC
+   * added so far, later ones included, so a SWF's DoABCs may all be added
+   * before any compiles; `hashes` are the ABCs' hashes in load order, as
+   * the cache key names them.
+   */
+  compile(hashes?: string[], index?: number): Compiled;
+  /** Method bodies of ABC `index` (the last added by default) compiled alone, as the JIT compiles each on its first call; a native, unverified or unknown one is left out. */
+  compileMethods(bodies: number[], index?: number): Map<number, string>;
 }
 
 /**
@@ -81,6 +86,14 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       throw new Error(`${what}: no ABC has been added to the domain`);
     }
   };
+  // An ABC by its position among those added, -1 for the last.
+  const indexOf = (index: number) => {
+    if (index >= 0 && (!Number.isInteger(index) || index >= added)) {
+      throw new Error(`ABC ${index}: only ${added} have been added to the domain`);
+    }
+
+    return index < 0 ? -1 : index;
+  };
   const collected = <T>(result: T): T => {
     const grown = wasm.memory.buffer.byteLength;
     if (grown > size || ++calls >= COLLECT_EVERY) {
@@ -109,22 +122,22 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
       return error;
     },
-    compile(hashes = []) {
+    compile(hashes = [], index = -1) {
       last("compile");
-      const module = wasm.domainModule(hashes.join("\n"));
+      const module = wasm.domainModule(hashes.join("\n"), indexOf(index));
       const sourceMap = wasm.domainSourceMap();
       const entries = parseEntries(wasm.domainModuleEntries());
       collected(undefined);
       return { module, sourceMap, entries };
     },
-    compileMethods(bodies) {
+    compileMethods(bodies, index = -1) {
       last("compileMethods");
       const indices = bodies.filter((b) => Number.isInteger(b) && b >= 0);
       if (indices.length === 0) {
         return new Map();
       }
 
-      return parseEntries(collected(wasm.domainEmitEach(indices.join(","), true)));
+      return parseEntries(collected(wasm.domainEmitEach(indices.join(","), true, indexOf(index))));
     },
   };
 }

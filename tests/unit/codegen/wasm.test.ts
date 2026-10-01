@@ -65,6 +65,13 @@ test("the release build compiles what the test build compiles, byte for byte", {
   assert.deepEqual(codegen.compileMethods([9999, -1, 1.5]), new Map());
   // Verified once: asking again gives the same, from the cache.
   assert.deepEqual(codegen.compileMethods([0]), new Map([[0, compiled.entries.get(0) ?? ""]]));
+
+  // By index: the last is the default, an earlier one compiles against the
+  // later too, and one not added is an error, not a trap.
+  assert.equal(codegen.compile(["b", "a"], 1).module, compiled.module);
+  assert.equal(codegen.compile(["b", "a"], 0).module, testing.domainModule("b\na", 0));
+  assert.deepEqual(codegen.compileMethods([...compiled.entries.keys()], 1), compiled.entries);
+  assert.throws(() => codegen.compile(["b", "a"], 2), /only 2 have been added/);
 });
 
 test("compiling before an ABC is added is an error, not a trap", async () => {
