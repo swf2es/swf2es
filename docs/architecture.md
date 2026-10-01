@@ -386,6 +386,64 @@ many times the resolution without multisampling, averaged down, and its
 frames then match Flash's to the pixel for straight edges, and within a
 quarter pixel's anti-aliasing for curved lines and lines under a skew.
 
+### Scripts and the display list
+
+An AS3 SWF's display objects are AS3 objects: a timeline child whose
+symbol has a class (`SymbolClass`) is an instance of that class, the root
+is one of the document class, and `new Sprite()` in a script is on the
+display list once added. The player keeps one object with two faces, as
+Ruffle and AwayFL do: the runtime allocates every instance of
+`flash.display::DisplayObject` and its subclasses through a `create` hook
+on that class (hooks' allocation is inherited through `Traits.create`),
+which attaches a player `DisplayObject` as `$display`, and the player's
+object points back with `object`. The natives of the display classes
+(`packages/player/src/playerglobal/flash/display/...`) read and write
+`$display`; an AVM1 movie's children, and a timeline child without a
+class, have `object === null`, and nothing in `display.ts` or `pixi.ts`
+depends on which VM drives them.
+
+Construction follows Flash's order, which playerglobal's own constructors
+fix: `Sprite()` calls its private native `constructChildren()` after
+`constructsuper`, so a symbol's first frame is placed, and its children's
+classes constructed, before the subclass's constructor body runs and can
+reach them by name. The player constructs a timeline child whose symbol
+has a class by making its player object, setting it as the one pending,
+and calling `rt.construct(cls)`: the `create` hook takes the pending
+object instead of making one, and `constructChildren` runs the clip's
+first frame. A `new Sprite()` from a script finds nothing pending and gets
+a fresh player object. `EventDispatcher()` calls its private native
+`ctor`, and `InteractiveObject()` calls `addEventListener`, so event
+dispatch is part of the first slice: listeners by type and phase on the
+player object, `dispatchEvent` through the player's parent chain, and the
+frame events the player broadcasts.
+
+A frame runs in the order Flash runs one, which Ruffle documents and the
+Flash oracle checks: input; the timelines advanced, which places and
+removes children and queues the constructors of the new ones, run in tree
+order after the timeline; `ENTER_FRAME`; `FRAME_CONSTRUCTED`; the frame
+scripts `addFrameScript` registered, for each clip's current frame;
+`EXIT_FRAME`; `RENDER` when the stage was invalidated; then the frame is
+drawn. The `loops` and `rewinds` cases fixed what a goto keeps; the
+scripts' order is fixed the same way, by cases whose traces adl records.
+
+The player loads a SWF's code through `@swf2es/codegen`'s `Codegen`: each
+`DoABC`, in tag order, is added to one domain after the builtins and
+playerglobal's declarations, compiled whole for now (the JIT's per-method
+path is `compileMethods`), loaded as a module, and run unless the tag's
+lazy flag defers it to its first use, as Flash defers it. `SymbolClass`
+then binds character ids to classes by qualified name through the
+runtime's name resolution; id 0 is the document class, constructed on the
+root clip before the first frame.
+
+The AS3 half of a player test is an `.as` file beside its case, compiled
+in the oracle's container by ASC against `builtin.abc` and
+`playerglobal.abc` (which stays in the image, not the repository: see
+[Testing against oracles](#testing-against-oracles)), and placed in the
+SWF the test builds as a `DoABC` with a `SymbolClass`. Flash's trace of
+the SWF is recorded by `--update` beside its frames, and the player's
+must match it line for line, as the conformance cases must match
+avmshell's.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
