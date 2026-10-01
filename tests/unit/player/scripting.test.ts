@@ -187,8 +187,10 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "7 open - null false",
     "replaced from open true 0",
     ...content,
+    // Loader 0's first content, let go of by the reload, plays on as an orphan: its scripts first.
+    "inner frame 1 false true true false",
     "frame 4 1,0,1,1,0,1,0,0 1",
-    // An unload asked for again from REMOVED finds no content: one REMOVED.
+    // An unload asked for again from REMOVED finds no content: one REMOVED; this one stops the content.
     "unloaded from removed 1 0 true",
     "8 requested replacer.swf",
     "inner frame 1 true true true true",
@@ -213,6 +215,8 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     `8 progress 0/${replacer.length} null false`,
     `8 progress ${replacer.length}/${replacer.length} null false`,
     "replaced from constructor true 0",
+    // Loader 0's orphan plays on; loader 2's, stopped, is silent.
+    "inner frame 2",
     "frame 5 1,0,0,1,0,1,0,1,0 LoadsNested",
     // From bytes, closing from the first PROGRESS: no second, no content.
     `9 progress 0/${inner.length}`,
@@ -243,6 +247,9 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     `5 progress ${nested.length}/${nested.length} null false`,
     ...content,
     ...content,
+    // The orphans, newest first: loader 5's replaced content, then loader 0's.
+    "inner frame 2",
+    "inner frame 1 false true true false",
     "frame 6 1,0,0,1,0,1,0,1,1,0 Inner LoadsNested",
     "inner frame 1 true true true true",
     "inner frame 1 true true true true",

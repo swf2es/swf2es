@@ -1,0 +1,17 @@
+root frame 1 1 false 1 1
+a frame 1 false false
+b frame 1 true true
+c frame 1 false false
+root enterFrame 2
+c frame 2 false false
+b frame 2 false false
+a frame 2 false false
+root frame 2 0 2 true true 2 true
+root enterFrame 3
+c frame 3 false false
+a frame 3 false false
+root frame 3 1 3 2
+root enterFrame 4
+c frame 1 false false
+root frame 4 1 1 2
+a frame 1 true true

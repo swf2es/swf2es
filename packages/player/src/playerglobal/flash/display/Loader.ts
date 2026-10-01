@@ -51,8 +51,8 @@ export function loaderNatives(s: Scripting): avm2.Natives {
       s.requestLoadUrl(this, String(request?.$url ?? ""));
     }
 
-    "flash.display:Loader::_unload"(_stopAllMovieClips: Value, _gc: Value): void {
-      s.unload(this);
+    "flash.display:Loader::_unload"(stopAllMovieClips: Value, _gc: Value): void {
+      s.unload(this, !!stopAllMovieClips);
     }
 
     "flash.display:Loader::_getJPEGLoaderContextdeblockingfilter"(_context: Value): number {

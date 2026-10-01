@@ -14,7 +14,11 @@ export const TRANSFORM = 1;
 export const CHILDREN = 2;
 export const CONTENT = 4;
 
+/** Display objects are numbered as they are made: Flash runs orphans' scripts newest first. */
+let made = 0;
+
 export class DisplayObject {
+  readonly serial = made++;
   parent: Container | null = null;
   /** The timeline depth it was placed at, or null for one a script added. */
   depth: number | null = null;
@@ -110,7 +114,7 @@ export class Container extends DisplayObject {
     }
 
     // The timeline's removal: a script's goes through the natives, which tell of it themselves.
-    this.library?.removing?.(child);
+    this.library?.removing?.(child, true);
     this.removeChild(child);
     return child;
   }
