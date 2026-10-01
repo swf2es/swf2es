@@ -590,17 +590,24 @@ export class ModuleEmitter {
       out.text(", [");
       for (let k = abc.metadataItemStart[md]; k < abc.metadataItemStart[md + 1]; k++) {
         out.text(k > abc.metadataItemStart[md] ? ", " : "");
-        const key = strings[abc.metadataKey[k]];
-        out.string(domain.stringPtr[key], domain.stringLength[key]);
+        this.poolString(abc.metadataKey[k]);
         out.text(", ");
-        const value = strings[abc.metadataValue[k]];
-        out.string(domain.stringPtr[value], domain.stringLength[value]);
+        this.poolString(abc.metadataValue[k]);
       }
 
       out.text("]]");
     }
 
     out.text("]");
+  }
+
+  /** Pool string `index` of this ABC as a literal, or "" past the pool's end, as avmplus' poolstr reads an unchecked index. */
+  poolString(index: u32): void {
+    const domain = this.domain;
+    const abc = domain.abcs[this.index];
+    const id =
+      index < abc.pool.stringCount ? domain.abcString[this.index][index] : domain.internText("");
+    this.out.string(domain.stringPtr[id], domain.stringLength[id]);
   }
 
   /** A string of the host's, such as a hash, as a JavaScript string literal. */

@@ -362,6 +362,33 @@ test("a module's functions are named after their methods, for stacks and profile
   assert.doesNotMatch(js, /=> function [A-Za-z_][A-Za-z0-9_]*\(/);
 });
 
+test("a metadata item's key or value past the string pool is empty, as avmplus reads it", {
+  skip,
+}, () => {
+  // [x(99="98")] on a slot, where the pool has one string: avmplus' poolstr
+  // gives "" for an index past the end, and the module must not read on.
+  const pool = {
+    strings: ["x"],
+    namespaces: [[0x16, ...u30(0)]],
+    multinames: [[0x07, ...u30(1), ...u30(1)]],
+  };
+  const bytes = abc(
+    pool,
+    tables({
+      methods: [{}],
+      metadata: [{ name: 1, items: [[99, 98]] }],
+      scripts: [{ init: 0, traits: [{ name: 1, kind: 0, index: 0, metadata: [0] }] }],
+      bodies: [{ method: 0, code: [0x47], maxStack: 1, localCount: 1, maxScopeDepth: 1 }],
+    }),
+  );
+  testing.domainReset(50);
+  testing.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
+  testing.domainModule("");
+  assert.equal(testing.domainAdd(bytes, false), 0);
+  const js = testing.domainModule("") as string;
+  assert.match(js, /meta: \[\[0, \d+, \[\["x", \["", ""\]\]\]\]\]/);
+});
+
 test("a method with a long name is named without the memory growing with it", {
   skip,
 }, async () => {
