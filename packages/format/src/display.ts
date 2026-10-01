@@ -51,6 +51,7 @@ function readString(r: SwfReader): string {
 function utf8(bytes: Uint8Array): string {
   let s = "";
   const length = bytes.length;
+
   for (let i = 0; i < length; ) {
     const b = bytes[i++];
     // ASCII, and a continuation byte on its own, stand for themselves.
@@ -108,6 +109,7 @@ export function readPlace(bytes: Uint8Array, tag: Tag): Place {
     filters: null,
     clipActions: null,
   };
+
   if (tag.code === PlaceObject) {
     place.character = r.u16();
     place.depth = r.u16();
@@ -123,6 +125,7 @@ export function readPlace(bytes: Uint8Array, tag: Tag): Place {
   const flags2 = tag.code === PlaceObject3 ? r.u8() : 0;
   place.depth = r.u16();
   place.move = (flags & 0x01) !== 0;
+
   // SWF19 has a class name follow HasImage with a character; Flash reads
   // one with HasImage only without a character, as Ruffle's reader notes.
   const hasImage = (flags2 & 0x10) !== 0;
@@ -188,6 +191,7 @@ export function readPlace(bytes: Uint8Array, tag: Tag): Place {
 function readFilterBytes(r: SwfReader): Uint8Array {
   const start = r.pos;
   const count = r.u8();
+
   for (let i = 0; i < count && !r.overrun; i++) {
     const id = r.u8();
     if (id === 0) {
@@ -245,6 +249,7 @@ export function readSymbolClass(bytes: Uint8Array, tag: Tag): Map<number, string
   const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
   const count = r.u16();
   const symbols = new Map<number, string>();
+
   for (let i = 0; i < count && !r.overrun; i++) {
     const id = r.u16();
     symbols.set(id, readString(r));
