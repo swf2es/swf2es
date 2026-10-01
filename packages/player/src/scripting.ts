@@ -945,6 +945,11 @@ class TimerHeap {
 
   push(record: TimerRecord): void {
     record.seq = this.seq++;
+    this.insert(record);
+  }
+
+  /** `record` in its place by due time and the sequence it has. */
+  private insert(record: TimerRecord): void {
     const h = this.heap;
     h.push(record);
     let i = h.length - 1;
@@ -980,11 +985,12 @@ class TimerHeap {
   stopped(): void {
     this.stoppedCount++;
     if (this.stoppedCount > this.heap.length / 2) {
+      // Rebuilt with each record's own sequence: the order of two due at once must not change.
       const live = this.heap.filter((r) => !r.stopped);
       this.heap = [];
       this.stoppedCount = 0;
       for (const record of live) {
-        this.push(record);
+        this.insert(record);
       }
     }
   }
