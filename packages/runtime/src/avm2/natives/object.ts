@@ -10,8 +10,14 @@ export const objectNatives: Natives = {
   // Object
   "Object.Object::_hasOwnProperty": (rt) => (o: Value, v: Value) => {
     const name = rt.toString(v);
-    if (rt.traitsOf(o).find(qname(publicNs, name)) !== 0) {
+    const traits = rt.traitsOf(o);
+    if (traits.find(qname(publicNs, name)) !== 0) {
       return true;
+    }
+
+    // An index of a class with its own elements, a Vector's: in range or not, no RangeError.
+    if (traits.hasIndex && /^(?:0|[1-9]\d*)$/.test(name) && Number(name) < 0xffffffff) {
+      return traits.hasIndex(o, Number(name));
     }
 
     return rt.getOwn(o, name) !== NOT_FOUND;
@@ -21,6 +27,11 @@ export const objectNatives: Natives = {
     // E4X 13.2.5: a Namespace's prefix and uri are enumerable.
     if (o instanceof Namespace) {
       return name === "uri" || name === "prefix";
+    }
+
+    // A Vector's elements are not enumerable to it, in or out of range, as avmplus has it.
+    if (o?.$traits?.refusesNames) {
+      return false;
     }
 
     return rt.getOwn(o, name) !== NOT_FOUND && !o.$dontEnum?.has(name);

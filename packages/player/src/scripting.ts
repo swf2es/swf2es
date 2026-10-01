@@ -137,14 +137,22 @@ export class Scripting {
    * asynchronous, running is not, so a load can run its code in a frame.
    */
   private async link(swf: Swf): Promise<() => void> {
-    const runs: (() => void)[] = [];
+    // Every DoABC added before any compiles: avmplus has a frame's ABCs all
+    // loaded before it verifies a method, so a class in the first tag may
+    // extend or name one in the last (the corpus's property_priority).
+    const added: { index: number; lazy: boolean }[] = [];
     for (const t of swf.tags) {
       if (t.code === tags.DoABC || t.code === tags.DoABC2) {
         const { lazy, abc } = readDoAbc(swf.bytes, t);
-        const linked = await this.load(abc, false);
-        if (!lazy) {
-          runs.push(() => this.rt.run(linked));
-        }
+        added.push({ index: await this.add(abc, false), lazy });
+      }
+    }
+
+    const runs: (() => void)[] = [];
+    for (const { index, lazy } of added) {
+      const linked = await this.compileAt(index);
+      if (!lazy) {
+        runs.push(() => this.rt.run(linked));
       }
     }
 
@@ -176,13 +184,23 @@ export class Scripting {
 
   /** An ABC compiled and linked into the runtime, its scripts not yet run: what `rt.run` takes. */
   private async load(abc: Uint8Array, builtin: boolean): Promise<Value> {
+    return this.compileAt(await this.add(abc, builtin));
+  }
+
+  /** An ABC added to the domain, linked against those before it: its index among them. */
+  private async add(abc: Uint8Array, builtin: boolean): Promise<number> {
     const error = this.codegen.add(abc, builtin);
     if (error) {
       throw new Error(`an ABC was rejected: VerifyError #${error}`);
     }
 
     this.hashes.push(await sha256(abc));
-    const { module } = this.codegen.compile(this.hashes);
+    return this.hashes.length - 1;
+  }
+
+  /** ABC `index`'s module, compiled against every ABC added so far, loaded into the runtime. */
+  private async compileAt(index: number): Promise<Value> {
+    const { module } = this.codegen.compile(this.hashes, index);
     const factory = (await import(`data:text/javascript,${encodeURIComponent(module)}`)).default;
     return factory(this.rt);
   }

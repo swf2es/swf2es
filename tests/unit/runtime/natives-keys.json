@@ -375,6 +375,7 @@
   "flash.utils::ByteArray.get:defaultObjectEncoding",
   "flash.utils::ByteArray.set:defaultObjectEncoding",
   "flash.utils::Dictionary#flash.utils:Dictionary::init",
+  "flash.utils::Proxy#http://www.adobe.com/2006/actionscript/flash/proxy::isAttribute",
   "isFinite",
   "isNaN",
   "isXMLName",

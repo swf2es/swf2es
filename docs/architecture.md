@@ -42,9 +42,11 @@ requires:
    can change at runtime, such as a child SWF redefining a class, gets a
    runtime guard in both modes.
 4. **Shared cache key.** Output is keyed by `COMPILER_VERSION`, the ABC's
-   hash, and the hashes of the ABCs loaded before it, in order (`cacheKey()`
-   in codegen), so the browser cache, AOT output served by a server, and JIT
-   output are interchangeable. An ABC's layouts depend on those it links
+   hash, and the hashes of the ABCs in its domain when it compiled, in load
+   order, those loaded with it included, since a SWF's `DoABC`s are all
+   added before any compiles (`cacheKey()` in codegen), so the browser
+   cache, AOT output served by a server, and JIT output are
+   interchangeable. An ABC's layouts depend on those it links
    against, since its slot and dispatch ids follow its base classes', so a
    module also records their hashes and the runtime refuses it when the
    ABCs loaded before it differ.
@@ -397,6 +399,32 @@ sorts them, as Ruffle's tests do. `getQualifiedClassName` names a number
 classes `Vector.<int>`, `Vector.<uint>`, `Vector.<Number>` and
 `Vector.<*>`, as avmplus renames them.
 
+A few of avmplus' corners the corpus met, each fixed by avmshell's word
+(`class-calls`, `enumerability`, `function-prototype`, `proxy`): an
+interface cannot be constructed, a VerifyError 1001 naming its
+constructor as a method nothing implements; `Object()` makes an object
+for nothing, null or undefined and returns its first argument otherwise,
+however many; `Vector.<T>(x)` is `x` for a Vector of that class, reads any
+other object as an array-like by `length` and index, a ByteArray's bytes
+included, and refuses a primitive or null (1034); a Vector's elements are
+not enumerable to `propertyIsEnumerable` though `hasOwnProperty` has them
+in range; a name set not enumerable stays so when set again but is
+enumerable anew once deleted and set; a class's static initializer may
+name its own class as a type, which avmplus resolves from traits, so the
+runtime keeps the classes being defined by name until their script slot
+holds them. `arguments.callee` is the method's own Function object, the
+one `newfunction` made where there is one, so `arguments.callee === f`,
+else one made for the method once, as avmplus' MethodClosure: the
+compiler hands `rt.arguments` the function itself. `flash.utils.Proxy`
+is a property hook on its traits (`natives/proxy.ts`), as XML's is, with
+the difference that a method the traits bind stays the method where XML
+hides the methods of its names behind its children (`hidesMethods`):
+every unbound name goes to the `flash_proxy` methods as ProxyObject
+sends it, a written name as a QName in its namespace, the empty URI for
+a set of several, an index as its string, `in` with the string, and an
+unbound call, `hasOwnProperty` or `toString` included, to
+`callProperty`; for-in walks `nextNameIndex`, `nextName` and `nextValue`.
+
 avmplus' standard library (`Object`, `Array`, `String`, `Math`, `Date`,
 `RegExp`, `JSON`, `Vector`, `ByteArray` and so on) is mostly AS3 compiled
 into `builtin.abc`; only its `native` methods are C++. swf2es compiles
@@ -540,8 +568,12 @@ where a script's `removeChild` leaves it. `unloadAndStop` stops a
 
 The player loads a SWF's code through `@swf2es/codegen`'s `Codegen`: each
 `DoABC`, in tag order, is added to one domain after the builtins and
-playerglobal's declarations, compiled whole for now (the JIT's per-method
-path is `compileMethods`), loaded as a module, and run unless the tag's
+playerglobal's declarations, all of a SWF's before any of them compiles,
+since avmplus has a frame's ABCs loaded before it verifies a method, so a
+class in the first tag may extend or name one in the last (the corpus's
+`property_priority`, five tags by mxmlc); each is then compiled whole for
+now (the JIT's per-method path is `compileMethods`, both by the ABC's
+index in the domain), loaded as a module, and run unless the tag's
 lazy flag defers it to its first use, as Flash defers it. `SymbolClass`
 then binds character ids to classes by qualified name through the
 runtime's name resolution; id 0 is the document class, constructed on the

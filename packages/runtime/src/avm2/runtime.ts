@@ -137,6 +137,12 @@ export interface IndexHook {
  * on): each operation, their enumeration, and their equality and +.
  */
 export interface PropertyHook {
+  /**
+   * Whether a public method's name resolves through the hook too, as a
+   * child or attribute of XML hides the methods of its names, or is the
+   * method the traits bind, as a Proxy's is.
+   */
+  hidesMethods: boolean;
   get(rt: Runtime, o: AsObject, mn: Multiname): Value;
   set(rt: Runtime, o: AsObject, mn: Multiname, v: Value): void;
   delete(rt: Runtime, o: AsObject, mn: Multiname): boolean;
@@ -1000,7 +1006,7 @@ export class Runtime {
 
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
-    if (traits.properties !== null && hookedBinding(b, mn)) {
+    if (traits.properties !== null && hookedBinding(b, mn, traits.properties)) {
       return traits.properties.get(this, o, mn);
     }
 
@@ -1296,7 +1302,7 @@ export class Runtime {
 
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
-    if (traits.properties !== null && hookedBinding(b, mn)) {
+    if (traits.properties !== null && hookedBinding(b, mn, traits.properties)) {
       traits.properties.set(this, o, mn, v);
       return;
     }
@@ -1370,7 +1376,7 @@ export class Runtime {
 
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
-    if (traits.properties !== null && hookedBinding(b, mn)) {
+    if (traits.properties !== null && hookedBinding(b, mn, traits.properties)) {
       return traits.properties.delete(this, o, mn);
     }
 
@@ -1387,6 +1393,8 @@ export class Runtime {
         }
       }
 
+      // A name deleted is enumerable again when set anew, as avmplus has it.
+      o.$dontEnum?.delete(name);
       return o.$d ? o.$d.delete(name) || true : false;
     }
 
@@ -1466,7 +1474,7 @@ export class Runtime {
 
     const own = this.traitsOf(o);
     const b = own.find(mn);
-    if (own.properties !== null && hookedBinding(b, mn)) {
+    if (own.properties !== null && hookedBinding(b, mn, own.properties)) {
       return own.properties.has(this, o, mn);
     }
 
@@ -1723,8 +1731,9 @@ export class Runtime {
       return hook(this, cls, args);
     }
 
+    // An interface's constructor is a method nothing implements, as avmplus words it.
     if (cls.$desc?.interface) {
-      throw this.error("TypeError", 1007);
+      throw this.error("VerifyError", 1001, `${cls.$it.name}()`);
     }
 
     const o = cls.$it.instance();
@@ -1798,14 +1807,33 @@ export class Runtime {
     return o;
   }
 
-  /** A method's `arguments`: every argument it was called with, declared or not. */
-  arguments(args: IArguments): AsObject {
-    return this.array(Array.prototype.slice.call(args));
+  /**
+   * A method's `arguments`: every argument it was called with, declared or
+   * not, and as `callee`, not enumerable, the method's Function object,
+   * the one a newfunction made for it, so that `arguments.callee === f`,
+   * else one made for it once, as avmplus' MethodClosure is.
+   */
+  arguments(args: IArguments, callee: Method): AsObject {
+    const o = this.array(Array.prototype.slice.call(args));
+    let f = this.functionObjects.get(callee);
+    if (!f) {
+      f = this.newFunctionObject(callee, null);
+      this.functionObjects.set(callee, f);
+    }
+
+    o.$d.set("callee", f);
+    o.$dontEnum = new Set(["callee"]);
+    return o;
   }
 
+  /** Each method's Function object, by the method, for arguments.callee. */
+  private readonly functionObjects = new WeakMap<Method, AsObject>();
+
   newFunction(factory: Factory, scope: Scope, id = 0): AsObject {
-    const f = this.newFunctionObject(factory(scope, null), scope.length ? scope[0] : null);
+    const method = factory(scope, null);
+    const f = this.newFunctionObject(method, scope.length ? scope[0] : null);
     f.$id = id;
+    this.functionObjects.set(method, f);
     return f;
   }
 
@@ -1971,9 +1999,20 @@ export class Runtime {
     }
 
     itraits.proto.$init = desc.init(iscope, base);
-    desc.cinit(scope, base).call(cls);
+    // Its static initializer may name the class as a type, as avmplus
+    // resolves from traits, before initproperty has stored it anywhere.
+    this.defining.set(qualified, cls);
+    try {
+      desc.cinit(scope, base).call(cls);
+    } finally {
+      this.defining.delete(qualified);
+    }
+
     return cls;
   }
+
+  /** The classes whose static initializers are running, by qualified name. */
+  private readonly defining = new Map<string, AsObject>();
 
   applyType(factory: AsObject, params: Value[]): AsObject {
     const hook = this.classHooks[factory.$it.name]?.apply;
@@ -2011,9 +2050,15 @@ export class Runtime {
     }
 
     const mn = qname(ref.ns, ref.name);
-    const cls = this.getProperty(this.findDef(mn), mn);
+    let cls = this.getProperty(this.findDef(mn), mn);
     if (cls === null || cls === undefined || !cls.$it) {
-      throw this.error("ReferenceError", 1065, ref.name);
+      cls = this.defining.get(ref.ns.uri ? `${ref.ns.uri}::${ref.name}` : ref.name);
+      if (!cls) {
+        throw this.error("ReferenceError", 1065, ref.name);
+      }
+
+      // Not kept: the class is not yet where its name will find it.
+      return cls;
     }
 
     ref.cls = cls;
@@ -2996,13 +3041,15 @@ const pairIndex = (index: number) => (index < 2 ? index + 1 : 0);
  * child or attribute of XML hides the methods of its names (as avmplus'
  * getproperty does for XML and XMLList).
  */
-function hookedBinding(b: number, mn: Multiname): boolean {
+function hookedBinding(b: number, mn: Multiname, hook: PropertyHook): boolean {
   if (b === 0 || mn.attribute) {
     return true;
   }
 
   return (
-    (b & 7) === BIND_Method && mn.namespaces.some((ns) => ns?.kind === NS_Public && ns.uri === "")
+    hook.hidesMethods &&
+    (b & 7) === BIND_Method &&
+    mn.namespaces.some((ns) => ns?.kind === NS_Public && ns.uri === "")
   );
 }
 

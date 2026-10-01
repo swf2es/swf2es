@@ -48,7 +48,11 @@ export class BitWriter {
 
   raw(bytes: Uint8Array | number[]): this {
     this.align();
-    this.bytes.push(...bytes);
+    // One at a time: spread as arguments, a large ABC overflows the stack.
+    for (let i = 0; i < bytes.length; i++) {
+      this.bytes.push(bytes[i]);
+    }
+
     return this;
   }
 

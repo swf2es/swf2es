@@ -31,30 +31,46 @@ export function domainAdd(bytes: Uint8Array, builtin: bool): i32 {
   return domain.add(buffer, bytes.length, builtin).error;
 }
 
-/** Each body of the last ABC's VerifyError, 0 if it verified, -1 if nothing runs it; verified once. */
+/** Each body of ABC `index`'s VerifyError, 0 if it verified, -1 if nothing runs it; verified once per ABC asked for. */
 function verifiedBodies(index: u32): StaticArray<i32> {
   let results = verified;
-  if (results === null) {
+  if (results === null || verifiedIndex !== index) {
     results = verifyMethods(domain, index);
     verified = results;
+    verifiedIndex = index;
   }
 
   return results;
 }
 
+let verifiedIndex: u32 = 0;
+
+/** ABC `index` of the domain, or the last added for -1; -1 again where there is none. */
+function abcIndex(index: i32): i32 {
+  if (domain.abcs.length === 0 || index >= domain.abcs.length) {
+    return -1;
+  }
+
+  return index < 0 ? domain.abcs.length - 1 : index;
+}
+
 /**
- * The ES module the domain's last ABC compiles to; `hashes` are the ABCs'
- * hashes in load order, one per line.
+ * The ES module ABC `index` compiles to, the last added for -1, against
+ * every ABC the domain holds, those added after it included: a SWF's
+ * DoABCs are all added before any compiles, as avmplus has every ABC of a
+ * frame loaded before it verifies a method. `hashes` are the ABCs' hashes
+ * in load order, one per line, as the cache key names them.
  */
-export function domainModule(hashes: string = ""): string {
+export function domainModule(hashes: string = "", index: i32 = -1): string {
   // No ABC, no module: the caller asked before adding one.
-  if (domain.abcs.length === 0) {
+  const at = abcIndex(index);
+  if (at < 0) {
     lastSourceMap = "";
     lastEntries = "";
     return "";
   }
 
-  const emitter = new ModuleEmitter(domain, <u32>(domain.abcs.length - 1));
+  const emitter = new ModuleEmitter(domain, <u32>at);
   emitter.module(hashes.length ? hashes.split("\n") : []);
   const out = emitter.out;
   const map = new Output();
@@ -90,19 +106,20 @@ export function domainSourceMap(): string {
 }
 
 /**
- * Method bodies of the domain's last ABC compiled alone, as lazy JIT will
+ * Method bodies of ABC `which` (the last added for -1) compiled alone, as lazy JIT will
  * compile them: each its entry in F, as the module writes it. `bodies` are
  * their indices, comma-separated, in the order to compile them; `reuse`
  * compiles them all with one emitter, else each with a new one. The ABC is
  * verified once first, which a closure's scope needs. Written as
  * domainModuleEntries writes them, leaving out a native or an unverified.
  */
-export function domainEmitEach(bodies: string, reuse: bool): string {
-  if (domain.abcs.length === 0) {
+export function domainEmitEach(bodies: string, reuse: bool, which: i32 = -1): string {
+  const at = abcIndex(which);
+  if (at < 0) {
     return "";
   }
 
-  const index = <u32>(domain.abcs.length - 1);
+  const index = <u32>at;
   const abc = domain.abcs[index];
   const results = verifiedBodies(index);
   const decoder = new BodyDecoder(abc, domain.abcBase[index], domain, index);

@@ -1803,6 +1803,7 @@ const forward = (rt: Runtime, receiver: Value, mn: Multiname) =>
 // The hooks.
 
 const xmlProperties: PropertyHook = {
+  hidesMethods: true,
   get: (rt, o, mn) => getXML(rt, o, fromMultiname(mn)),
   set: (rt, o, mn, v) => setXML(rt, o, fromMultiname(mn), v),
   delete: (rt, o, mn) => deleteXML(rt, o, fromMultiname(mn)),
@@ -1832,6 +1833,7 @@ const xmlProperties: PropertyHook = {
 };
 
 const listProperties: PropertyHook = {
+  hidesMethods: true,
   get: (rt, o, mn) => getList(rt, o, coerce(rt, fromMultiname(mn))),
   set: (rt, o, mn, v) => setList(rt, o, coerce(rt, fromMultiname(mn)), v),
   delete: (rt, o, mn) => deleteList(rt, o, coerce(rt, fromMultiname(mn))),
