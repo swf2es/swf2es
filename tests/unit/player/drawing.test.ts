@@ -17,15 +17,19 @@ test("a fill's contours close, a drawPath's winding is the fill's, and copying f
 
   d.beginFill(red);
   d.drawPath([1, 2, 2, 2], [0, 0, 20, 0, 20, 20, 0, 20], "nonZero");
+  // Another rule in the same fill: an entry of its own, the first's rule kept.
+  d.drawPath([1, 2, 2, 2], [30, 0, 40, 0, 40, 10, 30, 10], "evenOdd");
   d.endFill();
+  assert.equal(d.layers[1].fills.length, 2);
   assert.equal(d.layers[1].fills[0].winding, "nonZero");
+  assert.equal(d.layers[1].fills[1].winding, "evenOdd");
 
   // Copied from another: the layers come over, winding included.
   const copy = new Drawing();
   copy.copyFrom(d);
   assert.equal(copy.layers.length, 2);
   assert.equal(copy.layers[1].fills[0].winding, "nonZero");
-  assert.deepEqual(copy.bounds(), { xMin: 0, yMin: 0, xMax: 20, yMax: 20 });
+  assert.deepEqual(copy.bounds(), { xMin: 0, yMin: 0, xMax: 40, yMax: 20 });
 
   // Copied from itself: cleared first, so nothing is left to copy, as Flash has it.
   d.copyFrom(d);

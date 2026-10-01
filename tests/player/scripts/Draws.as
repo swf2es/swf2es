@@ -63,6 +63,23 @@ package {
       wound.y = 100;
       addChild(wound);
 
+      // One fill, two paths with different rules: each path keeps its own,
+      // so the first inner square is a hole and the second is filled.
+      var mixed:Shape = new Shape();
+      mixed.graphics.beginFill(0x336699);
+      mixed.graphics.drawPath(
+        Vector.<int>([1, 2, 2, 2, 1, 2, 2, 2]),
+        Vector.<Number>([0, 0, 30, 0, 30, 30, 0, 30, 10, 10, 20, 10, 20, 20, 10, 20]),
+        GraphicsPathWinding.EVEN_ODD);
+      mixed.graphics.drawPath(
+        Vector.<int>([1, 2, 2, 2, 1, 2, 2, 2]),
+        Vector.<Number>([40, 0, 70, 0, 70, 30, 40, 30, 50, 10, 60, 10, 60, 20, 50, 20]),
+        GraphicsPathWinding.NON_ZERO);
+      mixed.graphics.endFill();
+      mixed.x = 140;
+      mixed.y = 100;
+      addChild(mixed);
+
       // Copied from itself: Flash clears first and copies nothing, so it is not drawn.
       var copied:Shape = new Shape();
       copied.graphics.beginFill(0x996600);

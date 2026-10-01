@@ -14,6 +14,8 @@ const COS_45 = Math.SQRT1_2;
 export class Drawing {
   readonly layers: ShapeLayer[] = [];
   private fill: { fill: Fill; contours: Path[]; winding: Winding } | null = null;
+  /** The layer the open fill is in, for the entries a change of winding adds beside it. */
+  private fillLayer: ShapeLayer | null = null;
   private stroke: { line: Line; paths: Path[] } | null = null;
   private x = 0;
   private y = 0;
@@ -21,12 +23,14 @@ export class Drawing {
   beginFill(fill: Fill): void {
     this.endFill();
     this.fill = { fill, contours: [], winding: "evenOdd" };
-    this.layers.push({ fills: [this.fill], strokes: [] });
+    this.fillLayer = { fills: [this.fill], strokes: [] };
+    this.layers.push(this.fillLayer);
     this.begin(this.fill.contours);
   }
 
   endFill(): void {
     this.fill = null;
+    this.fillLayer = null;
   }
 
   /** A stroke from here on with `line`, or none for null; the one before it ends either way. */
@@ -127,10 +131,22 @@ export class Drawing {
     );
   }
 
-  /** Flash's drawPath: 1 moveTo, 2 lineTo, 3 curveTo, 4 wideMoveTo, 5 wideLineTo, 6 cubicCurveTo, each taking its data; the winding is the open fill's from here on. */
+  /**
+   * Flash's drawPath: 1 moveTo, 2 lineTo, 3 curveTo, 4 wideMoveTo, 5
+   * wideLineTo, 6 cubicCurveTo, each taking its data. The winding is this
+   * path's: a fill drawn with one rule and then another keeps each path's,
+   * as Flash does, so the contours from here on go in an entry of their
+   * own beside the fill's, with the same fill.
+   */
   drawPath(commands: number[], data: number[], winding: Winding): void {
-    if (this.fill) {
-      this.fill.winding = winding;
+    if (this.fill && this.fillLayer && this.fill.winding !== winding) {
+      if (this.fill.contours.some((c) => c.length > 3)) {
+        this.fill = { fill: this.fill.fill, contours: [], winding };
+        this.fillLayer.fills.push(this.fill);
+        this.begin(this.fill.contours);
+      } else {
+        this.fill.winding = winding;
+      }
     }
 
     let i = 0;
@@ -176,6 +192,7 @@ export class Drawing {
   clear(): void {
     this.layers.length = 0;
     this.fill = null;
+    this.fillLayer = null;
     this.stroke = null;
     this.x = 0;
     this.y = 0;
