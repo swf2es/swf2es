@@ -450,6 +450,21 @@ runs, parents' scripts before their children's (`nested`); the clips
 whose scripts are to run are fixed as the phase begins, so one a script
 removes still runs its own (`loads`, `orphans`).
 
+A `PlaceObject` with the move flag that names another character at an
+occupied depth makes no new object in Flash: the child stays, the same
+AS3 object with its matrix, sign and angle, and only a `Shape` no script
+has set a property of takes the new shape's graphic. A clip, a `Shape` a
+script has touched (an `x = x` counts), and a `Shape` a sprite is placed
+over all stay as they were (`replaces`: ten depths, one swapped). The
+player keeps a `scripted` flag on the display object for that. A goto
+forward does the same, whatever the frames between named at the depth;
+a rewind keeps the child only if the character the frames finally name
+is its own, and makes a new one for another (Ruffle's
+`place_object_replace_2`: the same object through two forward jumps, a
+new one on the rewind that ends on the other shape). Flash's matrix is
+exact at the quarter turns, 0 and not the doubles' cosine of 90°, so the
+player's is.
+
 A clip a script takes off the display list plays on in Flash, an
 orphan, and so does one a script makes with `new` and never adds: its
 timeline advances and its frame scripts run each frame, with `parent`

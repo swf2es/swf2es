@@ -826,7 +826,7 @@
   "avm2/place_and_lookup/swf9": {"matched":1,"lines":33,"traced":14,"error":"Error: swf2es: native flash.display::Bitmap#flash.display:Bitmap::ctor is not supported yet"},
   "avm2/place_multiple": {"matched":2,"lines":18,"traced":4,"error":"RangeError: Error #2006"},
   "avm2/place_object_replace": {"matched":1,"lines":10,"traced":10,"error":null},
-  "avm2/place_object_replace_2": {"matched":7,"lines":25,"traced":25,"error":null},
+  "avm2/place_object_replace_2": {"matched":25,"lines":25,"traced":25,"error":null},
   "avm2/place_object_same_depth_frame": {"matched":1,"lines":1,"traced":2,"error":null},
   "avm2/point": {"matched":133,"lines":133,"traced":133,"error":null},
   "avm2/primitive_edge_cases": {"matched":1,"lines":1,"traced":1,"error":null},

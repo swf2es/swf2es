@@ -154,6 +154,40 @@ test("a place without the move flag makes a new child; with it, changes the one 
   assert.equal(kept?.matrix.tx, 10);
 });
 
+test("another character placed with the move flag keeps the child, and swaps only an untouched shape's graphic, as Flash does", () => {
+  const swapped = movie(
+    [w.place({ depth: 1, character: 1 }), w.place({ depth: 2, character: 1 })],
+    [
+      w.place({ depth: 1, move: true, character: 2 }),
+      w.place({ depth: 2, move: true, character: 2 }),
+    ],
+  );
+  const [plain, touched] = [1, 2].map((d) => swapped.root.depths.get(d) as ShapeObject);
+  touched.scripted = true;
+  swapped.tick();
+  assert.equal(swapped.root.depths.get(1), plain);
+  assert.equal(swapped.root.depths.get(2), touched);
+  assert.equal(plain.shape?.id, 2);
+  assert.equal(touched.shape?.id, 1);
+
+  // A goto forward does the same; a rewind that ends on another character
+  // makes a new child instead, as Flash's does (the corpus's
+  // place_object_replace_2).
+  const jumped = movie(
+    [w.place({ depth: 1, character: 1 })],
+    [w.place({ depth: 1, move: true, character: 2 })],
+    [w.place({ depth: 1, move: true, character: 1 })],
+  );
+  const kept = jumped.root.depths.get(1) as ShapeObject;
+  jumped.root.gotoFrame(3);
+  assert.equal(jumped.root.depths.get(1), kept);
+  assert.equal(kept.shape?.id, 1);
+  jumped.root.gotoFrame(2);
+  assert.notEqual(jumped.root.depths.get(1), kept);
+  assert.equal((jumped.root.depths.get(1) as ShapeObject).shape?.id, 2);
+  assert.equal(jumped.root.children.length, 1);
+});
+
 test("a rewind puts back what the first frame's place left unsaid", () => {
   // Frame 1 places the square with no matrix, frame 2 moves it; the loop
   // must bring it back to where a character first placed is, not leave it.

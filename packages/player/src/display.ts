@@ -30,6 +30,18 @@ function scaled(to: number, from: number, x: number, y: number): [number, number
   return Number.isFinite(f) ? [x * f, y * f] : null;
 }
 
+/** The sine and cosine of `degrees`, exact at the quarter turns, where Flash's matrix has 0s and 1s and not the doubles' rounding (`replaces`). */
+function sinCos(degrees: number): [number, number] {
+  const quarters = degrees / 90;
+  if (Number.isInteger(quarters)) {
+    const k = ((quarters % 4) + 4) % 4;
+    return [[0, 1, 0, -1][k], [1, 0, -1, 0][k]];
+  }
+
+  const r = degrees / DEGREES;
+  return [Math.sin(r), Math.cos(r)];
+}
+
 /** Degrees into Flash's range, -180 to 180 with both ends kept as given; a NaN stays NaN. */
 export function normalizeDegrees(degrees: number): number {
   let d = degrees % 360;
@@ -66,6 +78,8 @@ export class DisplayObject {
   visible = true;
   /** The character it was made from, or null. */
   character: Character | null = null;
+  /** Whether a script set a property of it; from then on the timeline swaps no shape under it, as Flash's does not. */
+  scripted = false;
   /** Its other face, the AS3 object a script sees; null in an AVM1 movie. */
   object: avm2.AsObject | null = null;
   /** The LoaderInfo of the SWF this is the root of: set on the main root and on each loaded SWF's; null below. */
@@ -137,13 +151,13 @@ export class DisplayObject {
   }
 
   private remake(): void {
-    const r = (this.rotation || 0) / DEGREES;
-    const q = ((this.rotation || 0) + this.skew) / DEGREES;
+    const [sinR, cosR] = sinCos(this.rotation || 0);
+    const [sinQ, cosQ] = sinCos((this.rotation || 0) + this.skew);
     this.matrix = {
-      a: (this.scaleX || 0) * Math.cos(r),
-      b: (this.scaleX || 0) * Math.sin(r),
-      c: -(this.scaleY || 0) * Math.sin(q),
-      d: (this.scaleY || 0) * Math.cos(q),
+      a: (this.scaleX || 0) * cosR,
+      b: (this.scaleX || 0) * sinR,
+      c: -(this.scaleY || 0) * sinQ,
+      d: (this.scaleY || 0) * cosQ,
       tx: this.matrix.tx,
       ty: this.matrix.ty,
     };
@@ -175,9 +189,31 @@ export class DisplayObject {
 
 export class ShapeObject extends DisplayObject {
   /** The shape it draws; null for a Shape a script made, which draws nothing yet. */
-  constructor(readonly shape: ShapeCharacter | null) {
+  shape: ShapeCharacter | null;
+
+  constructor(shape: ShapeCharacter | null) {
     super();
+    this.shape = shape;
     this.character = shape;
+  }
+}
+
+/**
+ * Another character placed in a child's stead, with the move flag: Flash
+ * makes no new object, and only a Shape no script has touched takes the
+ * new shape's graphic; a clip, a Shape a script set a property of, and a
+ * Shape a sprite is placed over all stay as they are (`replaces`).
+ */
+function swap(existing: DisplayObject, character: Character): void {
+  if (
+    existing instanceof ShapeObject &&
+    character.type === "shape" &&
+    !existing.scripted &&
+    existing.shape !== character
+  ) {
+    existing.shape = character;
+    existing.character = character;
+    existing.invalidate(CONTENT);
   }
 }
 
@@ -262,8 +298,6 @@ interface Jump {
   before: Place | null;
   /** The place that put a character, with what followed folded in; move false for one placed anew. */
   place: Place | null;
-  /** Whether a place after the first put another character: the child is new even if the last is the first's again. */
-  changed: boolean;
   /** The frame of the place that makes the child, if one is made. */
   frame: number;
 }
@@ -322,19 +356,14 @@ export class MovieClip extends Container {
         continue;
       }
 
-      if (place.move && existing?.character === character) {
+      // With the move flag the child stays, another character or not.
+      if (place.move && existing) {
+        swap(existing, character);
         existing.applyPlace(place);
         continue;
       }
 
       const child = displayFor(character, this.library);
-      // A replaced character keeps what the place does not set.
-      if (place.move && existing) {
-        child.setMatrix(existing.matrix);
-        child.colorTransform = existing.colorTransform;
-        child.name = existing.name;
-      }
-
       child.applyPlace(place);
       child.placeFrame = frame;
       this.placeAtDepth(child, place.depth);
@@ -346,8 +375,9 @@ export class MovieClip extends Container {
    * Jump to frame `frame`, as Flash does rather than by running the frames
    * between: the children the timeline placed after it go, the frames up to
    * it (from the first, for a rewind) are replayed into one jump per depth,
-   * and each jump changes the child still at its depth if it is the same
-   * character, else makes one. The result is what playing the frames would
+   * and each jump changes the child still at its depth, or makes one where
+   * the frames placed one anew, or where a rewind ends on another
+   * character. The result is what playing the frames would
    * leave, except that a child placed before the frame and untouched since
    * keeps playing, and its identity; on a rewind a place puts back what it
    * leaves unsaid too, so it looks as it did when first placed.
@@ -377,12 +407,7 @@ export class MovieClip extends Container {
         }
 
         const place = command.place;
-        const jump = jumps.get(place.depth) ?? {
-          before: null,
-          place: null,
-          changed: false,
-          frame: f,
-        };
+        const jump = jumps.get(place.depth) ?? { before: null, place: null, frame: f };
         // A rewind replays from an empty display list, so what the frames do
         // at a depth nothing has placed yet is known: a change does nothing,
         // and a place in a child's stead places anew.
@@ -396,14 +421,8 @@ export class MovieClip extends Container {
           // Anew: the child starts from nothing, and from here.
           jump.before = null;
           jump.place = rewind ? asFirstPlaced({ ...place, move: false }) : place;
-          jump.changed = false;
           jump.frame = f;
         } else if (jump.place) {
-          if (jump.place.character !== place.character) {
-            jump.changed = true;
-            jump.frame = f;
-          }
-
           jump.place = mergePlace(jump.place, place);
         } else {
           jump.place = place;
@@ -442,23 +461,19 @@ export class MovieClip extends Container {
         continue;
       }
 
-      // The child stays for the same character placed in its own stead, or
-      // placed again on a rewind; placed anew, or through another
-      // character, it is a new child, as it would be frame by frame.
-      const anew = !jump.place.move;
-      if (existing && existing.character === character && (rewind || (!anew && !jump.changed))) {
+      // Forward, the child stays for a place with the move flag, whatever
+      // character it names, as frame by frame; on a rewind it stays only
+      // for its own character, and another, however the frames between went,
+      // makes a new child (the corpus's `place_object_replace_2`). Placed
+      // anew it is a new child.
+      const same = existing?.character === character;
+      if (existing && (rewind ? same : jump.place.move)) {
+        swap(existing, character);
         existing.applyPlace(jump.place);
         continue;
       }
 
       const child = displayFor(character, this.library);
-      // In the child's stead, the new one keeps what the place does not set, as frame by frame.
-      if (existing && !anew) {
-        child.setMatrix(existing.matrix);
-        child.colorTransform = existing.colorTransform;
-        child.name = existing.name;
-      }
-
       child.applyPlace(jump.place);
       child.placeFrame = jump.frame;
       this.placeAtDepth(child, depth);

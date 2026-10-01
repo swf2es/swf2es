@@ -101,6 +101,7 @@ function transform(d: DisplayObject, change: (m: Matrix) => void): void {
   const m = { ...d.matrix };
   change(m);
   d.matrix = m;
+  d.scripted = true;
   d.invalidate(TRANSFORM);
 }
 
@@ -161,6 +162,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     set visible(v: Value) {
       this.$display.visible = !!v;
+      this.$display.scripted = true;
       this.$display.invalidate(TRANSFORM);
     }
 
@@ -191,6 +193,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set scaleX(v: Value) {
+      this.$display.scripted = true;
       this.$display.setScaleX(Number(v));
     }
 
@@ -199,6 +202,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set scaleY(v: Value) {
+      this.$display.scripted = true;
       this.$display.setScaleY(Number(v));
     }
 
@@ -207,6 +211,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set rotation(v: Value) {
+      this.$display.scripted = true;
       this.$display.setRotation(Number(v));
     }
 
@@ -216,6 +221,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     set alpha(v: Value) {
       const d = this.$display;
+      d.scripted = true;
       d.colorTransform = { ...(d.colorTransform ?? IDENTITY_COLOR), aMul: Number(v) };
       d.invalidate(TRANSFORM);
     }
@@ -267,6 +273,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       }
 
       const d = this.$display;
+      d.scripted = true;
       const r = bounds(d, true);
       const base = r ? twips(r.xMax - r.xMin) : 0;
       if (d.rotation === 0 && d.skew === 0) {
@@ -292,6 +299,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       }
 
       const d = this.$display;
+      d.scripted = true;
       const r = bounds(d, true);
       const base = r ? twips(r.yMax - r.yMin) : 0;
       if (d.rotation === 0 && d.skew === 0) {
@@ -457,6 +465,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         const t = v as AsObject;
         this.$display.setMatrix(matrixOf(s, s.rt.getProperty(t, MATRIX_NAME) as AsObject));
         this.$display.colorTransform = colorOf(s, s.rt.getProperty(t, COLOR_NAME) as AsObject);
+        this.$display.scripted = true;
         this.$display.invalidate(TRANSFORM);
       }
     }
