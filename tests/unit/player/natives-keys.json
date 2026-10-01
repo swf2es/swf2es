@@ -252,7 +252,5 @@
     "flash.utils::unescapeMultiByte",
     "trace"
   ],
-  "hooks": [
-    "flash.display::DisplayObject"
-  ]
+  "hooks": ["flash.display::DisplayObject"]
 }
