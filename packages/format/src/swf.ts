@@ -122,6 +122,10 @@ export class SwfReader {
     return (this.u16() | (this.u16() << 16)) >>> 0;
   }
 
+  s16(): number {
+    return (this.u16() << 16) >> 16;
+  }
+
   rect(): Rect {
     this.align();
     const n = this.ub(5);

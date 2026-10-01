@@ -173,7 +173,7 @@ function readGradient(r: SwfReader, alpha: boolean, focal: boolean): Gradient {
     stops.push({ ratio: r.u8(), color: readColor(r, alpha) });
   }
 
-  const f = focal ? (r.u16() << 16) >> 16 : 0;
+  const f = focal ? r.s16() : 0;
   return { matrix, spread, interpolation, stops, focal: f / 256 };
 }
 
