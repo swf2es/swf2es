@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { cases, type PlayerCase } from "./cases.ts";
 import { runPlayer } from "./chrome.ts";
 import { compareImages, decodePng, differenceImage, encodePng } from "./image.ts";
+import { libraryAbcs } from "./libraries.ts";
 import { compileScripts } from "./scripts.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -19,8 +20,12 @@ const chosen = cases.filter((c) => !names.length || names.includes(c.name));
 const reference = (name: string, frame: number) => `${here}references/${name}/frame-${frame}.png`;
 const traceReference = (name: string) => `${here}references/${name}/trace.txt`;
 
-// The scripted cases' ABCs, compiled in the oracle's container, and each case's SWF.
+// The scripted cases' ABCs, compiled in the oracle's container, and each case's SWF;
+// the libraries the page serves them with, fetched if missing.
 const scripts = compileScripts([...new Set(chosen.flatMap((c) => (c.script ? [c.script] : [])))]);
+if (scripts.size) {
+  libraryAbcs();
+}
 const swfOf = (c: PlayerCase): Uint8Array =>
   typeof c.swf === "function" ? c.swf(scripts.get(c.script ?? "") as Uint8Array) : c.swf;
 const jobs = chosen.map((c) => ({ ...c, swf: swfOf(c) }));

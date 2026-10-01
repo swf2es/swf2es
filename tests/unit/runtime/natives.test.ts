@@ -3,8 +3,9 @@
 // apart.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { avm2 } from "@swf2es/runtime";
-import { registerNativeClass } from "../../../packages/player/dist/playerglobal/natives.js";
+import { avm2 } from "@swf2es/runtime";
+
+const { registerNativeClass } = avm2;
 
 /** A natives record's handler for `key`, bound as the runtime binds one. */
 function handler(natives: avm2.Natives, key: string): avm2.Method {

@@ -1,10 +1,9 @@
 // flash.display.DisplayObject: allocated with a player display object as its
 // other face, and its properties read and written through it.
 import type { Matrix } from "@swf2es/format";
-import type { avm2 } from "@swf2es/runtime";
+import { avm2 } from "@swf2es/runtime";
 import { type DisplayObject, TRANSFORM } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
-import { registerNativeClass } from "../../natives.js";
 
 type Value = avm2.Value;
 
@@ -57,7 +56,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
   // How the natives are written: each runs with the AS3 object as `this`,
-  // whose $display is the player's display object (see natives.ts).
+  // whose $display is the player's display object (registerNativeClass).
   class DisplayObjectNatives {
     declare $display: DisplayObject;
 
@@ -183,6 +182,6 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
   }
 
-  registerNativeClass(natives, "flash.display::DisplayObject", DisplayObjectNatives);
+  avm2.registerNativeClass(natives, "flash.display::DisplayObject", DisplayObjectNatives);
   return natives;
 }

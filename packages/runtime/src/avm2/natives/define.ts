@@ -13,6 +13,69 @@ export const plain =
   (_rt: Runtime): Method =>
     f;
 
+/** A class written to hold natives: its members are them (see registerNativeClass). */
+export type NativeClass = { prototype: object };
+
+// What every prototype, and every function, has of its own: not natives.
+// A prototype's `name` is a getter a class may well define, as DisplayObject's.
+const PROTOTYPE_OWN = new Set(["constructor"]);
+const FUNCTION_OWN = new Set(["length", "name", "prototype"]);
+
+/**
+ * Register the members of `Class` as the natives of the AS3 class
+ * `qualified`, by the names the compiler binds them with: its prototype's
+ * own getters, setters and methods as "Class#get:x", "Class#set:x" and
+ * "Class#method", its own static ones as "Class.get:x" and "Class.method".
+ * A computed member name carries a name the convention cannot spell, such
+ * as `[\`${AS3}::push\`]`. The class is only how the natives are written:
+ * nothing makes an instance of it, the AS3 objects' prototypes are not
+ * touched, and each function is registered as plain() registers one, so it
+ * runs with the AS3 object as `this`. Its descriptors are read, never a
+ * getter run. A name registered twice is an error, not a replacement.
+ */
+export function registerNativeClass(natives: Natives, qualified: string, Class: NativeClass): void {
+  const sides: [string, Members, Set<string>][] = [
+    [`${qualified}#`, Class.prototype as Members, PROTOTYPE_OWN],
+    [`${qualified}.`, Class as unknown as Members, FUNCTION_OWN],
+  ];
+  for (const [prefix, members, skip] of sides) {
+    // Descriptors, not values: a getter must not run here.
+    for (const name of Object.getOwnPropertyNames(members)) {
+      if (skip.has(name)) {
+        continue;
+      }
+
+      const d = Object.getOwnPropertyDescriptor(members, name);
+      if (!d) {
+        continue;
+      }
+
+      if (d.get) {
+        add(natives, `${prefix}get:${name}`, d.get as Method);
+      }
+
+      if (d.set) {
+        add(natives, `${prefix}set:${name}`, d.set as Method);
+      }
+
+      if (typeof d.value === "function") {
+        add(natives, `${prefix}${name}`, d.value as Method);
+      }
+    }
+  }
+}
+
+type Members = Record<string, unknown>;
+
+/** A native under `key`; a second one for the same key is a mistake, not a replacement. */
+function add(natives: Natives, key: string, fn: Method): void {
+  if (key in natives) {
+    throw new Error(`native ${key} is registered twice`);
+  }
+
+  natives[key] = plain(fn);
+}
+
 /** The elements of an Array value, for natives that take one. */
 export function elements(v: Value): Value[] {
   return v?.$a ?? [];
