@@ -2,7 +2,8 @@
 // first again, into the one domain there is, one that loads another in
 // turn, one closed before it comes, one replaced by a second load, the
 // first loaded again once complete, one unloaded before it comes, one
-// replaced from its OPEN listener, and one unloaded again from REMOVED.
+// replaced from its OPEN listener, one unloaded again from REMOVED, and
+// one whose content replaces it from its own constructor.
 // Driven by a node test with a stub for the host's fetch; Flash does not
 // run it.
 package {
@@ -18,7 +19,7 @@ package {
     private var loaders:Array = [];
 
     public function Main() {
-      addFrameScript(0, frame1, 1, frame2, 2, frame3, 3, frame4, 4, frame5);
+      addFrameScript(0, frame1, 1, frame2, 2, frame3, 3, frame4, 4, frame5, 5, frame6);
     }
 
     private function frame1():void {
@@ -62,10 +63,15 @@ package {
       });
       loaders[2].unload();
       trace("unloaded from removed", removed, loaders[2].numChildren, loaders[2].content == null);
+      load("replacer.swf");
     }
 
     private function frame5():void {
       trace("frame 5", counts(), getQualifiedClassName(loaders[7].content));
+    }
+
+    private function frame6():void {
+      trace("frame 6", counts(), getQualifiedClassName(loaders[8].content));
     }
 
     private function counts():Array {

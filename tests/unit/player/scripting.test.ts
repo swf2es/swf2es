@@ -67,6 +67,7 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
   const compile = compiler(out);
   const inner = innerSwf(compile("Inner"));
   const nested = bare(compile("LoadsNested"), 2, "LoadsNested");
+  const replacer = bare(compile("Replacer"), 1, "Replacer");
   const fetches: string[] = [];
   const aborted: string[] = [];
   const scripting = new Scripting(codegen, {
@@ -83,11 +84,15 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
         return nested;
       }
 
+      if (url.endsWith("replacer.swf")) {
+        return replacer;
+      }
+
       throw new Error("404");
     },
   });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const player = new Player(bare(compile("LoadsUrl"), 5), scripting);
+  const player = new Player(bare(compile("LoadsUrl"), 6), scripting);
   await player.start();
   // The frame that asks sees nothing of the loads; the host is asked for the URLs resolved against the SWF's.
   assert.deepEqual(lines.splice(0), ["0 requested inner.swf", "1 requested missing.swf"]);
@@ -185,6 +190,7 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "frame 4 1,0,1,1,0,1,0,0 1",
     // An unload asked for again from REMOVED finds no content: one REMOVED.
     "unloaded from removed 1 0 true",
+    "8 requested replacer.swf",
     "inner frame 1 true true true true",
     "inner frame 2",
     "inner frame 1 true true true true",
@@ -202,7 +208,12 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "7 open - null false",
     `7 progress 0/${nested.length} null false`,
     `7 progress ${nested.length}/${nested.length} null false`,
-    "frame 5 1,0,0,1,0,1,0,1 LoadsNested",
+    // Content that replaces its own load from its constructor never attaches, and its scripts never run.
+    "8 open - null false",
+    `8 progress 0/${replacer.length} null false`,
+    `8 progress ${replacer.length}/${replacer.length} null false`,
+    "replaced from constructor true 0",
+    "frame 5 1,0,0,1,0,1,0,1,0 LoadsNested",
     "inner frame 2",
     "nested requested deep.swf",
     "inner frame 2",
@@ -210,5 +221,27 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "nested requested deep.swf",
     "7 init - http://example.test/nested.swf true",
     "7 complete - http://example.test/nested.swf true",
+  ]);
+
+  // The load the constructor asked for instead comes as any, and with it
+  // the loads the two nested SWFs asked for in frame 5, in the order asked.
+  await scripting.settled();
+  player.tick();
+  assert.deepEqual(lines.splice(0), [
+    "8 open - null false",
+    `8 progress 0/${inner.length} null false`,
+    `8 progress ${inner.length}/${inner.length} null false`,
+    ...content,
+    ...content,
+    ...content,
+    "frame 6 1,0,0,1,0,1,0,1,1 Inner",
+    "inner frame 1 true true true true",
+    "inner frame 1 true true true true",
+    "inner frame 1 true true true true",
+    "inner frame 2",
+    "inner frame 1 true true true true",
+    "inner frame 1 true true true true",
+    "8 init - http://example.test/inner.swf true",
+    "8 complete - http://example.test/inner.swf true",
   ]);
 });

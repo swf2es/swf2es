@@ -539,6 +539,12 @@ export class Scripting {
       this.rt.classNamed(library.classes.get(0) ?? "flash.display::MovieClip"),
     );
     dispatchEvent(this, object, this.event("added", true));
+    // The SWF's own code has run by now, its document class's constructor
+    // among it, which reaches the Loader through loaderInfo.loader.
+    if (!live()) {
+      return () => {};
+    }
+
     info.$url = load.url ?? info.$dynamic ?? info.$loaderURL;
     info.$content = object;
     load.loader.$content = object;
