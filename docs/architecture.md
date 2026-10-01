@@ -854,8 +854,16 @@ into an opaque bitmap composites source over destination whether or not
 `setPixels` (ByteArrays of big-endian ARGB), `getVector` and `setVector`,
 `clone` and `rect` work on that store, clipped to it, a Rectangle's or
 Point's coordinates rounded to the nearest pixel and a half to the even
-one, as Flash rounds them (`bitmapdata_rectangle_rounding`); `copyPixels`
-within one store reads everything before writing; `lock` and `unlock`
+one, as Flash rounds them (`bitmapdata_rectangle_rounding`). `copyPixels`
+copies in place in Flash's order, which within one store reads what it
+already wrote in one direction (rows bottom-up only when the copy moves
+down without moving left, columns right to left when it moves right;
+`bitmapdata_copypixels_self`); an alpha bitmap scales each premultiplied
+channel by its alpha, 256 for 255, shifted down 8, and leaves the
+destination as it was where it does not reach; compositing is
+s + ((d * (256 - sa)) >> 8) a channel (`bitmapdata_copypixels_alpha_*`).
+A Bitmap watches its store, so a pixel set marks it for the renderer,
+which uploads the same texture again; `lock` and `unlock`
 do nothing, as a store drawn from each frame needs no batching. A
 `Bitmap` is a display object of its own kind (`BitmapObject`): its bounds
 are its data's size, and the renderer draws it as a sprite whose texture

@@ -165,8 +165,8 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       source: Value,
       rect: Value,
       dest: Value,
-      _alphaBitmap: Value,
-      _alphaPoint: Value,
+      alphaBitmap: Value,
+      alphaPoint: Value,
       mergeAlpha: Value,
     ): void {
       const store = storeOf(s, this);
@@ -175,8 +175,17 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       }
 
       const from = storeOf(s, source as AsObject);
+      const r = rectOf(s, rect);
       const [dx, dy] = pointOf(s, dest, "destPoint");
-      store.copyPixels(from, rectOf(s, rect), dx, dy, !!mergeAlpha);
+      const alpha =
+        alphaBitmap === null || alphaBitmap === undefined
+          ? null
+          : storeOf(s, alphaBitmap as AsObject);
+      const [ax, ay] =
+        alphaPoint === null || alphaPoint === undefined
+          ? [0, 0]
+          : pointOf(s, alphaPoint, "alphaPoint");
+      store.copyPixels(from, r, dx, dy, !!mergeAlpha, alpha, ax, ay);
     }
 
     getPixels(rect: Value): Value {
