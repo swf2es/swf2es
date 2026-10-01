@@ -1,7 +1,8 @@
 // A SWF loading others by URL: one that is there, one that is not, the
 // first again, into the one domain there is, one that loads another in
 // turn, one closed before it comes, one replaced by a second load, the
-// first loaded again once complete, and one unloaded before it comes.
+// first loaded again once complete, one unloaded before it comes, one
+// replaced from its OPEN listener, and one unloaded again from REMOVED.
 // Driven by a node test with a stub for the host's fetch; Flash does not
 // run it.
 package {
@@ -11,12 +12,13 @@ package {
   import flash.events.IOErrorEvent;
   import flash.events.ProgressEvent;
   import flash.net.URLRequest;
+  import flash.utils.getQualifiedClassName;
 
   public class Main extends MovieClip {
     private var loaders:Array = [];
 
     public function Main() {
-      addFrameScript(0, frame1, 1, frame2, 2, frame3, 3, frame4);
+      addFrameScript(0, frame1, 1, frame2, 2, frame3, 3, frame4, 4, frame5);
     }
 
     private function frame1():void {
@@ -38,10 +40,32 @@ package {
       loaders[0].load(new URLRequest("inner.swf"));
       trace("after reload", loaders[0].content == null, loaders[0].numChildren, info.bytesTotal, info.url == null, inaccessible(info));
       load("inner.swf").unload();
+      var replacing:Loader = load("inner.swf");
+      var replaced:Boolean = false;
+      replacing.contentLoaderInfo.addEventListener(Event.OPEN, function(e:Event):void {
+        if (replaced) {
+          return;
+        }
+
+        replaced = true;
+        replacing.load(new URLRequest("nested.swf"));
+        trace("replaced from open", replacing.content == null, replacing.contentLoaderInfo.bytesTotal);
+      });
     }
 
     private function frame4():void {
       trace("frame 4", counts(), Loader(MovieClip(loaders[3].content).getChildAt(0)).numChildren);
+      var removed:int = 0;
+      loaders[2].content.addEventListener(Event.REMOVED, function(e:Event):void {
+        removed++;
+        loaders[2].unload();
+      });
+      loaders[2].unload();
+      trace("unloaded from removed", removed, loaders[2].numChildren, loaders[2].content == null);
+    }
+
+    private function frame5():void {
+      trace("frame 5", counts(), getQualifiedClassName(loaders[7].content));
     }
 
     private function counts():Array {

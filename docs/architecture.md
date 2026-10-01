@@ -513,7 +513,9 @@ end in `IO_ERROR` on the `LoaderInfo` in the frame. `close` drops a
 pending load and aborts its fetch; `unload`, and a new load on the same
 `Loader`, do that and take the content out at the call, the `LoaderInfo`
 knowing nothing again (Ruffle's `loader_reuse` trace), so a `Loader`
-never holds two. What a `LoaderInfo` knows of its SWF's header
+never holds two; a load closed or replaced from one of its own events,
+`OPEN` or `PROGRESS` among them, ends there, and an `unload` asked for
+from `REMOVED` finds the content already let go of. What a `LoaderInfo` knows of its SWF's header
 (`swfVersion`, `frameRate`, `width`, `applicationDomain`...) is refused
 before the SWF is loaded, Error #2099, as Flash refuses it. The SWF a `Loader` belongs to, which its content's
 `loaderURL` reports and its relative URLs resolve against, is in Flash

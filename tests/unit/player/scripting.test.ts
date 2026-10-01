@@ -87,7 +87,7 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     },
   });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const player = new Player(bare(compile("LoadsUrl"), 4), scripting);
+  const player = new Player(bare(compile("LoadsUrl"), 5), scripting);
   await player.start();
   // The frame that asks sees nothing of the loads; the host is asked for the URLs resolved against the SWF's.
   assert.deepEqual(lines.splice(0), ["0 requested inner.swf", "1 requested missing.swf"]);
@@ -148,6 +148,7 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     `before reload true ${inner.length} 10`,
     "after reload true 0 0 true true",
     "6 requested inner.swf",
+    "7 requested inner.swf",
     "inner frame 2",
     "inner frame 1 true true true true",
     "nested requested deep.swf",
@@ -177,8 +178,13 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     `0 progress 0/${inner.length} null false`,
     `0 progress ${inner.length}/${inner.length} null false`,
     ...content,
+    // A load replaced from its OPEN listener ends there: no progress, no content.
+    "7 open - null false",
+    "replaced from open true 0",
     ...content,
-    "frame 4 1,0,1,1,0,1,0 1",
+    "frame 4 1,0,1,1,0,1,0,0 1",
+    // An unload asked for again from REMOVED finds no content: one REMOVED.
+    "unloaded from removed 1 0 true",
     "inner frame 1 true true true true",
     "inner frame 2",
     "inner frame 1 true true true true",
@@ -187,4 +193,22 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "0 complete - http://example.test/inner.swf true",
   ]);
   assert.deepEqual(aborted.slice(2), ["http://example.test/inner.swf"]);
+
+  // The replacement asked for from OPEN loads as any, and the replaced never
+  // attached; the nested SWF's two frames loop, so it asks for its load again.
+  await scripting.settled();
+  player.tick();
+  assert.deepEqual(lines.splice(0), [
+    "7 open - null false",
+    `7 progress 0/${nested.length} null false`,
+    `7 progress ${nested.length}/${nested.length} null false`,
+    "frame 5 1,0,0,1,0,1,0,1 LoadsNested",
+    "inner frame 2",
+    "nested requested deep.swf",
+    "inner frame 2",
+    "inner frame 1 true true true true",
+    "nested requested deep.swf",
+    "7 init - http://example.test/nested.swf true",
+    "7 complete - http://example.test/nested.swf true",
+  ]);
 });

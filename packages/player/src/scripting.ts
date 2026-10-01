@@ -436,13 +436,8 @@ export class Scripting {
   /** A Loader's unload: a pending load dropped, its content out of the display list, its LoaderInfo empty, the Loader kept. */
   unload(loader: AsObject): void {
     this.closeLoad(loader);
+    // The content is let go of before REMOVED, so an unload a listener asks for finds none.
     const content: AsObject | null = loader.$content ?? null;
-    const display: Container = loader.$display;
-    if (content?.$display?.parent === display) {
-      this.removing(content.$display);
-      display.removeChild(content.$display);
-    }
-
     loader.$content = null;
     const info: AsObject | undefined = loader.$loaderInfo;
     if (info) {
@@ -452,6 +447,12 @@ export class Scripting {
       info.$url = null;
       info.$loaded = 0;
       info.$total = 0;
+    }
+
+    const display: Container = loader.$display;
+    if (content?.$display?.parent === display) {
+      this.removing(content.$display);
+      display.removeChild(content.$display);
     }
   }
 
@@ -504,14 +505,27 @@ export class Scripting {
   private complete(load: Load, swf: Swf, library: Library, run: () => void): () => void {
     const info = this.loaderInfoOf(load.loader);
     load.loader.$abort = null;
+    // A listener of any of these may close the Loader or load anew, and this load then ends here.
+    const live = () => load.generation === load.loader.$generation;
     if (load.url !== null) {
       // A load from bytes told these in the call; one of a URL tells them as
       // the bytes come: OPEN knowing nothing, the total, then the bytes.
       dispatchEvent(this, info, this.event("open"));
+      if (!live()) {
+        return () => {};
+      }
+
       info.$total = load.bytes.length;
       this.progress(info, 0);
+      if (!live()) {
+        return () => {};
+      }
+
       this.describe(info, load.bytes, swf);
       this.progress(info, load.bytes.length);
+      if (!live()) {
+        return () => {};
+      }
     } else {
       this.describe(info, load.bytes, swf);
     }
@@ -532,6 +546,10 @@ export class Scripting {
     display.addChildAt(root, display.children.length);
     this.added(root);
     return () => {
+      if (!live()) {
+        return;
+      }
+
       dispatchEvent(this, info, this.event("init"));
       dispatchEvent(this, info, this.event("complete"));
     };
