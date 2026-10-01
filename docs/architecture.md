@@ -302,7 +302,10 @@ avmplus binds its C++ ones: `"Math.floor"` for a static method,
 script's function; accessors as `"get:"` and `"set:"` names, and a name
 outside the public namespace with its namespace's URI, `"uri::name"`. A
 native the runtime lacks throws an error naming it when called, not when
-loaded.
+loaded. The natives reach a runtime as a record by name, or as a provider
+`(rt) => natives` that the runtime calls on itself once it is made, so
+that a module of natives can close over the runtime it serves, as a class
+of natives written with `registerNativeClass` does.
 
 Generated methods follow one calling convention. A slot is the field `$n`,
 by its slot id from 0, and a method, getter or setter is `$mn` on the
