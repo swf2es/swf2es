@@ -2,8 +2,10 @@
 // first again, into the one domain there is, one that loads another in
 // turn, one closed before it comes, one replaced by a second load, the
 // first loaded again once complete, one unloaded before it comes, one
-// replaced from its OPEN listener, one unloaded again from REMOVED, and
-// one whose content replaces it from its own constructor.
+// replaced from its OPEN listener, one unloaded again from REMOVED, one
+// whose content replaces it from its own constructor, one from bytes
+// closed from its first PROGRESS, and one whose old content loads anew
+// from REMOVED as it is replaced.
 // Driven by a node test with a stub for the host's fetch; Flash does not
 // run it.
 package {
@@ -68,10 +70,25 @@ package {
 
     private function frame5():void {
       trace("frame 5", counts(), getQualifiedClassName(loaders[7].content));
+      // From bytes, the progress comes in the call; closing from the first ends it there.
+      var closing:Loader = new Loader();
+      loaders.push(closing);
+      closing.contentLoaderInfo.addEventListener(ProgressEvent.PROGRESS, function(e:ProgressEvent):void {
+        trace("9 progress", e.bytesLoaded + "/" + e.bytesTotal);
+        closing.close();
+      });
+      addChild(closing);
+      closing.loadBytes(loaders[0].contentLoaderInfo.bytes);
+      // The content being replaced loads another from REMOVED: that load is the one that counts.
+      loaders[5].content.addEventListener(Event.REMOVED, function(e:Event):void {
+        loaders[5].load(new URLRequest("nested.swf"));
+        trace("loaded from removed");
+      });
+      loaders[5].load(new URLRequest("inner.swf"));
     }
 
     private function frame6():void {
-      trace("frame 6", counts(), getQualifiedClassName(loaders[8].content));
+      trace("frame 6", counts(), getQualifiedClassName(loaders[8].content), getQualifiedClassName(loaders[5].content));
     }
 
     private function counts():Array {

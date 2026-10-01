@@ -1,0 +1,70 @@
+// A SWF that unloads its Loader from INIT: whether COMPLETE still follows,
+// and what the frame after shows, is Flash's to say. The inner SWF's
+// bytes are put in as base64 by tests/player/cases.ts.
+package {
+  import flash.display.Loader;
+  import flash.display.MovieClip;
+  import flash.events.Event;
+  import flash.system.ApplicationDomain;
+  import flash.system.LoaderContext;
+  import flash.utils.ByteArray;
+
+  public class Main extends MovieClip {
+    private static const INNER:String = "@@INNER@@";
+    private var loader:Loader;
+
+    public function Main() {
+      addFrameScript(0, frame1, 1, frame2, 2, frame3);
+    }
+
+    private function frame1():void {
+      loader = new Loader();
+      loader.contentLoaderInfo.addEventListener(Event.INIT, report);
+      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, report);
+      loader.contentLoaderInfo.addEventListener(Event.UNLOAD, report);
+      addChild(loader);
+      var context:LoaderContext = new LoaderContext(false, ApplicationDomain.currentDomain);
+      context.allowCodeImport = true;
+      loader.loadBytes(decode(INNER), context);
+    }
+
+    private function report(e:Event):void {
+      trace("event " + e.type, loader.numChildren, loader.content != null, loader.contentLoaderInfo.content != null, loader.contentLoaderInfo.bytesTotal);
+      if (e.type == Event.INIT) {
+        loader.unload();
+        trace("unloaded at init", loader.numChildren, loader.content == null);
+      }
+    }
+
+    private function frame2():void {
+      trace("outer frame 2", loader.numChildren);
+    }
+
+    private function frame3():void {
+      trace("outer frame 3", loader.numChildren);
+    }
+
+    private static function decode(text:String):ByteArray {
+      const ALPHABET:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      var out:ByteArray = new ByteArray();
+      var bits:int = 0;
+      var have:int = 0;
+      for (var i:int = 0; i < text.length; i++) {
+        var c:String = text.charAt(i);
+        if (c == "=") {
+          break;
+        }
+
+        bits = ((bits << 6) | ALPHABET.indexOf(c)) & 0xffff;
+        have += 6;
+        if (have >= 8) {
+          have -= 8;
+          out.writeByte((bits >> have) & 0xff);
+        }
+      }
+
+      out.position = 0;
+      return out;
+    }
+  }
+}

@@ -214,10 +214,15 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     `8 progress ${replacer.length}/${replacer.length} null false`,
     "replaced from constructor true 0",
     "frame 5 1,0,0,1,0,1,0,1,0 LoadsNested",
+    // From bytes, closing from the first PROGRESS: no second, no content.
+    `9 progress 0/${inner.length}`,
+    // The content replaced loads another from REMOVED; the replacement that asked is dropped for it.
+    "loaded from removed",
     "inner frame 2",
     "nested requested deep.swf",
     "inner frame 2",
-    "inner frame 1 true true true true",
+    // The replaced content, off the display list, still runs the script it had queued.
+    "inner frame 1 false true true false",
     "nested requested deep.swf",
     "7 init - http://example.test/nested.swf true",
     "7 complete - http://example.test/nested.swf true",
@@ -232,16 +237,22 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     `8 progress 0/${inner.length} null false`,
     `8 progress ${inner.length}/${inner.length} null false`,
     ...content,
+    // The load asked for from REMOVED, the nested SWF, is loader 5's; the one that replaced it is not.
+    "5 open - null false",
+    `5 progress 0/${nested.length} null false`,
+    `5 progress ${nested.length}/${nested.length} null false`,
     ...content,
     ...content,
-    "frame 6 1,0,0,1,0,1,0,1,1 Inner",
+    "frame 6 1,0,0,1,0,1,0,1,1,0 Inner LoadsNested",
     "inner frame 1 true true true true",
     "inner frame 1 true true true true",
     "inner frame 1 true true true true",
-    "inner frame 2",
+    "nested requested deep.swf",
     "inner frame 1 true true true true",
     "inner frame 1 true true true true",
     "8 init - http://example.test/inner.swf true",
     "8 complete - http://example.test/inner.swf true",
+    "5 init - http://example.test/nested.swf true",
+    "5 complete - http://example.test/nested.swf true",
   ]);
 });

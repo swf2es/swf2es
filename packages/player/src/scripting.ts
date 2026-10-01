@@ -327,25 +327,47 @@ export class Scripting {
    * a URL of the bytes' own.
    */
   requestLoad(loader: AsObject, bytes: Uint8Array): void {
-    const info = this.begin(loader);
+    const begun = this.begin(loader);
+    if (!begun) {
+      return;
+    }
+
+    const { info, generation } = begun;
     info.$dynamic = `${info.$loaderURL}/[[DYNAMIC]]/${++this.dynamic}`;
     info.$bytes = bytes;
     info.$total = bytes.length;
+    // A listener of either event may close the Loader or load anew, which ends this load.
     this.progress(info, 0);
+    if (loader.$generation !== generation) {
+      return;
+    }
+
     this.progress(info, bytes.length);
-    this.enqueue(loader, null, Promise.resolve(bytes));
+    if (loader.$generation !== generation) {
+      return;
+    }
+
+    this.enqueue(loader, generation, null, Promise.resolve(bytes));
   }
 
   /**
    * A load begins: the one before it is dropped, pending or complete, and
    * its LoaderInfo knows nothing again, as Flash's load() does at the call
-   * (Ruffle's `loader_reuse` trace).
+   * (Ruffle's `loader_reuse` trace). The old content's REMOVED listeners
+   * may load anew themselves, and that load is then the one that counts:
+   * null tells the caller so.
    */
-  private begin(loader: AsObject): AsObject {
-    this.unload(loader);
+  private begin(loader: AsObject): { info: AsObject; generation: number } | null {
+    this.closeLoad(loader);
+    const generation: number = loader.$generation;
+    this.dropContent(loader);
+    if (loader.$generation !== generation) {
+      return null;
+    }
+
     const info = this.loaderInfoOf(loader);
     info.$loaderURL = this.ownerUrl(loader);
-    return info;
+    return { info, generation };
   }
 
   /** A Loader's close, and what a new load does first: a pending load does nothing when its turn comes, and its fetch is aborted. */
@@ -373,12 +395,22 @@ export class Scripting {
 
   /** A Loader's load of a URL: the host fetches it, resolved, and the load completes in a frame after the bytes arrive. */
   requestLoadUrl(loader: AsObject, url: string): void {
-    const info = this.begin(loader);
+    const begun = this.begin(loader);
+    if (!begun) {
+      return;
+    }
+
+    const { info, generation } = begun;
     const resolved = resolve(info.$loaderURL, url);
     const abort = new AbortController();
     loader.$abort = abort;
     const fetch = this.fetch;
-    this.enqueue(loader, resolved, fetch ? fetch(resolved, abort.signal) : Promise.reject());
+    this.enqueue(
+      loader,
+      generation,
+      resolved,
+      fetch ? fetch(resolved, abort.signal) : Promise.reject(),
+    );
   }
 
   /**
@@ -390,10 +422,15 @@ export class Scripting {
     return this.preparing;
   }
 
-  private enqueue(loader: AsObject, url: string | null, bytes: Promise<Uint8Array>): void {
+  private enqueue(
+    loader: AsObject,
+    generation: number,
+    url: string | null,
+    bytes: Promise<Uint8Array>,
+  ): void {
     const load: Load = {
       loader,
-      generation: loader.$generation,
+      generation,
       url,
       bytes: new Uint8Array(0),
       ready: null,
@@ -436,7 +473,16 @@ export class Scripting {
   /** A Loader's unload: a pending load dropped, its content out of the display list, its LoaderInfo empty, the Loader kept. */
   unload(loader: AsObject): void {
     this.closeLoad(loader);
-    // The content is let go of before REMOVED, so an unload a listener asks for finds none.
+    this.dropContent(loader);
+  }
+
+  /**
+   * The content let go of, as unload() and a new load do: the Loader's and
+   * the LoaderInfo's first, so an unload a listener asks for finds none,
+   * then UNLOAD on the LoaderInfo with the child still attached, as Flash's
+   * trace has it (the `loads-init` case), then the child out.
+   */
+  private dropContent(loader: AsObject): void {
     const content: AsObject | null = loader.$content ?? null;
     loader.$content = null;
     const info: AsObject | undefined = loader.$loaderInfo;
@@ -447,6 +493,10 @@ export class Scripting {
       info.$url = null;
       info.$loaded = 0;
       info.$total = 0;
+    }
+
+    if (content && info) {
+      dispatchEvent(this, info, this.event("unload"));
     }
 
     const display: Container = loader.$display;
@@ -557,7 +607,10 @@ export class Scripting {
       }
 
       dispatchEvent(this, info, this.event("init"));
-      dispatchEvent(this, info, this.event("complete"));
+      // An INIT listener that unloads has no COMPLETE, as Flash (the loads-init case).
+      if (live()) {
+        dispatchEvent(this, info, this.event("complete"));
+      }
     };
   }
 

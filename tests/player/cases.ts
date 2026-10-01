@@ -386,12 +386,12 @@ function addedEvents(abc: Uint8Array): Uint8Array {
 // A SWF loading another with loadBytes. The inner one, with scripts/Inner.as as
 // its document class, is built first and carried in the outer's script,
 // scripts/Loads.as.template, as base64.
-export function innerSwf(abc: Uint8Array): Uint8Array {
+export function innerSwf(abc: Uint8Array, frames = 2): Uint8Array {
   return w.swf({
     width: 100,
     height: 50,
     frameRate: 12,
-    frameCount: 2,
+    frameCount: frames,
     tags: [
       w.fileAttributes(true),
       w.backgroundColor(0xffffff),
@@ -399,18 +399,28 @@ export function innerSwf(abc: Uint8Array): Uint8Array {
       w.doAbc(abc, "Inner"),
       w.symbolClass([[0, "Inner"]]),
       w.place({ depth: 1, character: 1, matrix: { tx: 200, ty: 200 } }),
-      w.showFrame(),
-      w.showFrame(),
+      ...Array.from({ length: frames }, () => w.showFrame()),
       w.end(),
     ],
   });
 }
 
 function loads(compile: Compile): Uint8Array {
-  const inner = innerSwf(compile("Inner"));
-  const template = readFileSync(new URL("scripts/Loads.as.template", import.meta.url), "utf8");
+  return loading(compile, "Loads", 2);
+}
+
+// The same, unloading from INIT (scripts/LoadsInit.as.template). The inner
+// SWF has one frame: a clip taken off the display list plays on in Flash,
+// which is not this case's.
+function loadsInit(compile: Compile): Uint8Array {
+  return loading(compile, "LoadsInit", 1);
+}
+
+function loading(compile: Compile, script: string, innerFrames: number): Uint8Array {
+  const inner = innerSwf(compile("Inner"), innerFrames);
+  const template = readFileSync(new URL(`scripts/${script}.as.template`, import.meta.url), "utf8");
   const abc = compile(
-    "Loads",
+    script,
     template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
   );
   return w.swf({
@@ -421,7 +431,7 @@ function loads(compile: Compile): Uint8Array {
     tags: [
       w.fileAttributes(true),
       w.backgroundColor(0xffffff),
-      w.doAbc(abc, "Loads"),
+      w.doAbc(abc, script),
       w.symbolClass([[0, "Main"]]),
       w.showFrame(),
       w.showFrame(),
@@ -516,5 +526,9 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  // The unload at INIT follows frame 2's capture (see the harness): frame 3 shows it.
+  { name: "loads-init", build: loadsInit, frames: 3, capture: [3], tolerance: 0, maxOutliers: 0 },
+  // Last: the content it unloads plays on in Flash until collected, and its
+  // traces would reach the case recorded after it.
   { name: "loads", build: loads, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
 ];

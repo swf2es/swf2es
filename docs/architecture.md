@@ -513,9 +513,14 @@ end in `IO_ERROR` on the `LoaderInfo` in the frame. `close` drops a
 pending load and aborts its fetch; `unload`, and a new load on the same
 `Loader`, do that and take the content out at the call, the `LoaderInfo`
 knowing nothing again (Ruffle's `loader_reuse` trace), so a `Loader`
-never holds two; a load closed or replaced from one of its own events,
-`OPEN` or `PROGRESS` among them, ends there, and an `unload` asked for
-from `REMOVED` finds the content already let go of. What a `LoaderInfo` knows of its SWF's header
+never holds two; the content let go of has `UNLOAD` dispatched on the
+`LoaderInfo`, its `content` and byte counts already cleared and the child
+still attached, before `REMOVED` (the `loads-init` case). A load closed
+or replaced from one of its own events, `OPEN`, `PROGRESS`, the content's
+constructor or `INIT` among them, ends there: an unload from `INIT` has
+no `COMPLETE`, as Flash has none. An `unload` asked for from `REMOVED`
+finds the content already let go of, and a load asked for there is the
+one that counts. What a `LoaderInfo` knows of its SWF's header
 (`swfVersion`, `frameRate`, `width`, `applicationDomain`...) is refused
 before the SWF is loaded, Error #2099, as Flash refuses it. The SWF a `Loader` belongs to, which its content's
 `loaderURL` reports and its relative URLs resolve against, is in Flash
@@ -568,7 +573,12 @@ once the case loads its SWF.
   `BitmapData.drawWithQuality` at the SWF's stage quality, and its traces.
   Frame 1 is the one its `INIT` follows and frame k the one after k - 1
   `EXIT_FRAME`s, a frame later for AVM1, whose movie in a `Loader` shows
-  its frame 2 a frame late. A SWF the harness runs is loaded content, and
+  its frame 2 a frame late. A frame's load completions (`INIT`,
+  `COMPLETE`) follow its `EXIT_FRAME`, so what their listeners change
+  shows in the next frame's capture (the `loads-init` case captures frame
+  3 for its unload at frame 2's `INIT`). A SWF's clips taken off the
+  display list play on in Flash until collected, so a case that leaves
+  one is recorded last, or its traces would reach the next case's. A SWF the harness runs is loaded content, and
   Flash constructs that before it is the `Loader`'s child: its document
   class finds `stage` null in its constructor, where a main movie's finds
   the stage, as the player's does. A case whose trace depends on that
