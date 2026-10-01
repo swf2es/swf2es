@@ -349,7 +349,11 @@ which a player has not, are in `natives/shell.ts`. playerglobal is the
 player's (`packages/player/src/playerglobal/flash/display/...`, a path per
 package, so a class's file follows from its qualified name). The debugger player's error messages are avmplus'
 own, generated from its `ErrorConstants.cpp` into `messages.ts`, which
-stays MPL-2.0.
+stays MPL-2.0, and Flash Player's own over them, 2000 and up, generated
+into `player-messages.ts` from the table Flash itself prints as
+`Error.getErrorMessage` of every number (Ruffle's corpus,
+`error_geterrormessage`); the release player and avmshell print the
+number alone.
 
 Where avmplus' behaviour is its own algorithm rather than a language rule,
 the runtime translates it, so that its output is avmplus' byte for byte:

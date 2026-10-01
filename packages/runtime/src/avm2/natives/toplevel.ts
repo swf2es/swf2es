@@ -1,5 +1,5 @@
 // The global functions, bugzilla, and Error.
-import { messages } from "../messages.js";
+import { errorMessages } from "../player-messages.js";
 import type { ClassHook, Runtime, Value } from "../runtime.js";
 import { type Natives, plain } from "./define.js";
 import { formatClassName } from "./describe.js";
@@ -74,7 +74,7 @@ export const toplevelNatives: Natives = {
   // Error.throwError fills in the template's %n: in debugger mode it has some.
   // The debugger player writes the template as it is, %1 and all; an id it has no text for is the number alone.
   "Error.getErrorMessage": (rt) => (id: number) =>
-    rt.debugger && messages[id] ? `Error #${id}: ${messages[id]}` : `Error #${id}`,
+    rt.debugger && errorMessages[id] ? `Error #${id}: ${errorMessages[id]}` : `Error #${id}`,
   "Error#getStackTrace": plain(() => null),
 };
 
