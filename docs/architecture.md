@@ -837,6 +837,29 @@ double to the sum, which the 32-bit player's x87 extended precision
 explains, as it does the avmshell's (above); swf2es follows IEEE
 doubles there too, so those two tests cannot be matched to the end.
 
+### Bitmaps
+
+`BitmapData` is a pixel store: a `Uint32Array` of ARGB pixels,
+premultiplied by alpha as Flash keeps them, so `setPixel32` premultiplies
+and `getPixel32` divides back, with the rounding Flash's does (Ruffle's
+`bitmapdata_accuracy` tabulates every alpha and value; adl is the judge of
+the rule); a bitmap made opaque keeps every alpha at 255, and `getPixel`
+answers without the alpha. The constructor refuses a side under 1 or over
+8191, and an area over 16,777,215 pixels, with ArgumentError 2015, and
+`dispose` empties the store, after which the size reads -1 and every
+operation throws 2015. `fillRect`, `copyPixels`, `getPixels` and
+`setPixels` (ByteArrays of big-endian ARGB), `getVector` and `setVector`,
+`clone` and `rect` work on that store, clipped to it; `lock` and `unlock`
+do nothing, as a store drawn from each frame needs no batching. A
+`Bitmap` is a display object of its own kind (`BitmapObject`): its bounds
+are its data's size, and the renderer draws it as a sprite whose texture
+is uploaded from the pixels and again when they change, which the store
+counts in a version the node compares. Slice one is the store and the
+`Bitmap` on the display list; the SWF's bitmap tags (`DefineBitsLossless`,
+`DefineBitsJPEG2` and 3) as characters, `draw` of a display object into a
+bitmap, the filters and the rest of the pixel operations follow, each by
+what Flash traces and draws under adl.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
