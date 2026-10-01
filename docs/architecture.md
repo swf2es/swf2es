@@ -870,10 +870,17 @@ do nothing, as a store drawn from each frame needs no batching. A
 are its data's size, and the renderer draws it as a sprite whose texture
 is uploaded from the pixels and again when they change, which the store
 counts in a version the node compares. Slice one is the store and the
-`Bitmap` on the display list; the SWF's bitmap tags (`DefineBitsLossless`,
-`DefineBitsJPEG2` and 3) as characters, `draw` of a display object into a
-bitmap, the filters and the rest of the pixel operations follow, each by
-what Flash traces and draws under adl.
+`Bitmap` on the display list. Slice two is the pixel operations that read
+and write the store alone, in `bitmap.ts` beside the rest: `noise` and
+`pixelDissolve`, whose pseudo-random sequences are Flash's own and fitted
+to the values Ruffle's corpus recorded of it; `copyChannel`,
+`colorTransform`, `merge`, `scroll`; `threshold`, `hitTest`,
+`getColorBoundsRect`, `floodFill` and `histogram`. Each works on the
+pixels as Flash does, premultiplied or not as its results show, and each
+is checked by the corpus's traces and a case's trace under adl. `draw`
+of a display object into a bitmap, the filters, and the SWF's bitmap
+tags (`DefineBitsLossless`, `DefineBitsJPEG2` and 3) as characters
+follow, each by what Flash traces and draws under adl.
 
 ## Testing against oracles
 
