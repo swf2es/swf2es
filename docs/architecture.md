@@ -837,6 +837,44 @@ double to the sum, which the 32-bit player's x87 extended precision
 explains, as it does the avmshell's (above); swf2es follows IEEE
 doubles there too, so those two tests cannot be matched to the end.
 
+### Bitmaps
+
+`BitmapData` is a pixel store: a `Uint32Array` of ARGB pixels,
+premultiplied by alpha as Flash keeps them, so `setPixel32` premultiplies
+and `getPixel32` divides back, with the rounding Flash's does (Ruffle's
+`bitmapdata_accuracy` tabulates every alpha and value; adl is the judge of
+the rule); a bitmap made opaque keeps every alpha at 255, and `getPixel`
+answers without the alpha. The constructor refuses a side under 1 with
+ArgumentError 2015 and no more: Flash's old limits, 8191 a side and
+16,777,215 pixels, are gone (16384 by 1 and 4097 by 4096 both pass in
+adl); `dispose` empties the store, after which every read, the size
+included, throws 2015, and a second `dispose` is nothing. `copyPixels`
+into an opaque bitmap composites source over destination whether or not
+`mergeAlpha` asks, as Flash does. `fillRect`, `copyPixels`, `getPixels` and
+`setPixels` (ByteArrays of big-endian ARGB), `getVector` and `setVector`,
+`clone` and `rect` work on that store, clipped to it, a Rectangle's or
+Point's coordinates rounded to the nearest pixel and a half to the even
+one, as Flash rounds them (`bitmapdata_rectangle_rounding`). `copyPixels`
+copies in place in Flash's order, which within one store reads what it
+already wrote in one direction (rows bottom-up only when the copy moves
+down without moving left, columns right to left when it moves right;
+`bitmapdata_copypixels_self`); an alpha bitmap scales each premultiplied
+channel by its alpha, 256 for 255, shifted down 8, and leaves the
+destination as it was where it does not reach; compositing is
+s + ((d * (256 - sa)) >> 8) a channel (`bitmapdata_copypixels_alpha_*`).
+A Bitmap watches its store, held weakly by it, so a pixel set marks it for the renderer
+without keeping a Bitmap taken off the display list alive,
+which uploads the same texture again; `lock` and `unlock`
+do nothing, as a store drawn from each frame needs no batching. A
+`Bitmap` is a display object of its own kind (`BitmapObject`): its bounds
+are its data's size, and the renderer draws it as a sprite whose texture
+is uploaded from the pixels and again when they change, which the store
+counts in a version the node compares. Slice one is the store and the
+`Bitmap` on the display list; the SWF's bitmap tags (`DefineBitsLossless`,
+`DefineBitsJPEG2` and 3) as characters, `draw` of a display object into a
+bitmap, the filters and the rest of the pixel operations follow, each by
+what Flash traces and draws under adl.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the

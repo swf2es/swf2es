@@ -1,5 +1,32 @@
 {
   "natives": [
+    "flash.display::Bitmap#flash.display:Bitmap::ctor",
+    "flash.display::Bitmap#get:bitmapData",
+    "flash.display::Bitmap#get:pixelSnapping",
+    "flash.display::Bitmap#get:smoothing",
+    "flash.display::Bitmap#set:bitmapData",
+    "flash.display::Bitmap#set:pixelSnapping",
+    "flash.display::Bitmap#set:smoothing",
+    "flash.display::BitmapData#clone",
+    "flash.display::BitmapData#copyPixels",
+    "flash.display::BitmapData#copyPixelsToByteArray",
+    "flash.display::BitmapData#dispose",
+    "flash.display::BitmapData#fillRect",
+    "flash.display::BitmapData#flash.display:BitmapData::ctor",
+    "flash.display::BitmapData#get:height",
+    "flash.display::BitmapData#get:rect",
+    "flash.display::BitmapData#get:transparent",
+    "flash.display::BitmapData#get:width",
+    "flash.display::BitmapData#getPixel",
+    "flash.display::BitmapData#getPixel32",
+    "flash.display::BitmapData#getPixels",
+    "flash.display::BitmapData#getVector",
+    "flash.display::BitmapData#lock",
+    "flash.display::BitmapData#setPixel",
+    "flash.display::BitmapData#setPixel32",
+    "flash.display::BitmapData#setPixels",
+    "flash.display::BitmapData#setVector",
+    "flash.display::BitmapData#unlock",
     "flash.display::DisplayObject#flash.display:DisplayObject::_hitTest",
     "flash.display::DisplayObject#get:accessibilityProperties",
     "flash.display::DisplayObject#get:alpha",
@@ -283,5 +310,5 @@
     "flash.utils::unescapeMultiByte",
     "trace"
   ],
-  "hooks": ["flash.display::DisplayObject"]
+  "hooks": ["flash.display::BitmapData", "flash.display::DisplayObject"]
 }

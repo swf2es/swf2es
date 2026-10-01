@@ -9,6 +9,7 @@ import type { Codegen } from "@swf2es/codegen";
 import { isAs3, readDoAbc, readSwf, readSymbolClass, type Swf, tags } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import {
+  BitmapObject,
   Container,
   type DisplayObject,
   displayFor,
@@ -392,6 +393,10 @@ export class Scripting {
 
       if (t.name === "flash.display::Shape") {
         return new ShapeObject(null);
+      }
+
+      if (t.name === "flash.display::Bitmap") {
+        return new BitmapObject(null);
       }
     }
 
