@@ -16,6 +16,7 @@ import {
   MovieClip,
   ShapeObject,
 } from "./display.js";
+import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
 import { type Character, type Library, readLibrary } from "./timeline.js";
@@ -33,6 +34,8 @@ const DEFAULT_CLASS = { shape: "flash.display::Shape", sprite: "flash.display::M
  */
 interface Load {
   loader: AsObject;
+  /** The Loader's count of requests when this was asked: an older one was closed or replaced, and does nothing. */
+  generation: number;
   /** The URL asked for, resolved; null for a load from bytes, which told its progress in the call. */
   url: string | null;
   bytes: Uint8Array;
@@ -51,8 +54,8 @@ export class Scripting {
   private preparing: Promise<void> = Promise.resolve();
   /** How many loads from bytes there have been: each gets a URL of its own under the main SWF's. */
   private dynamic = 0;
-  /** The host's fetch of a URL's bytes, for Loader.load; null where there is none. */
-  fetch: ((url: string) => Promise<Uint8Array>) | null = null;
+  /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
+  fetch: ((url: string, signal: AbortSignal) => Promise<Uint8Array>) | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
@@ -77,7 +80,7 @@ export class Scripting {
   constructor(
     readonly codegen: Codegen,
     options: avm2.RuntimeOptions & {
-      fetch?: (url: string) => Promise<Uint8Array>;
+      fetch?: (url: string, signal: AbortSignal) => Promise<Uint8Array>;
       url?: string;
     } = {},
   ) {
@@ -284,7 +287,7 @@ export class Scripting {
     info.$bytes = null;
     info.$swf = null;
     info.$url = null;
-    info.$loaderURL = this.url;
+    info.$loaderURL = loader ? null : this.url;
     info.$loaded = 0;
     info.$total = 0;
     return info;
@@ -309,19 +312,44 @@ export class Scripting {
   }
 
   /**
+   * The URL of the SWF a Loader belongs to, which its content's loaderURL
+   * reports and its relative URLs resolve against: Flash's is the SWF whose
+   * code made the Loader, which the runtime does not track, so it is the
+   * SWF the Loader is on the display list of when it loads, else the main.
+   */
+  private ownerUrl(loader: AsObject): string {
+    return rootOf(loader.$display)?.loaderInfo?.$url ?? this.url;
+  }
+
+  /**
    * A Loader's loadBytes. Flash tells the whole of the progress at once, in
    * the call, the URL still null; the content comes in a later frame, under
    * a URL of the bytes' own.
    */
   requestLoad(loader: AsObject, bytes: Uint8Array): void {
-    const info = this.loaderInfoOf(loader);
-    info.$url = null;
-    info.$dynamic = `${this.url}/[[DYNAMIC]]/${++this.dynamic}`;
+    const info = this.begin(loader);
+    info.$dynamic = `${info.$loaderURL}/[[DYNAMIC]]/${++this.dynamic}`;
     info.$bytes = bytes;
     info.$total = bytes.length;
     this.progress(info, 0);
     this.progress(info, bytes.length);
     this.enqueue(loader, null, Promise.resolve(bytes));
+  }
+
+  /** A load begins: the one before it, if still pending, is dropped, as Flash's load() terminates it. */
+  private begin(loader: AsObject): AsObject {
+    this.closeLoad(loader);
+    const info = this.loaderInfoOf(loader);
+    info.$url = null;
+    info.$loaderURL = this.ownerUrl(loader);
+    return info;
+  }
+
+  /** A Loader's close, and what a new load does first: a pending load does nothing when its turn comes, and its fetch is aborted. */
+  closeLoad(loader: AsObject): void {
+    loader.$generation = (loader.$generation ?? 0) + 1;
+    loader.$abort?.abort();
+    loader.$abort = null;
   }
 
   private progress(info: AsObject, loaded: number): void {
@@ -340,11 +368,14 @@ export class Scripting {
     );
   }
 
-  /** A Loader's load of a URL: the host fetches it, and the load completes in a frame after the bytes arrive. */
+  /** A Loader's load of a URL: the host fetches it, resolved, and the load completes in a frame after the bytes arrive. */
   requestLoadUrl(loader: AsObject, url: string): void {
-    this.loaderInfoOf(loader).$url = null;
+    const info = this.begin(loader);
+    const resolved = resolve(info.$loaderURL, url);
+    const abort = new AbortController();
+    loader.$abort = abort;
     const fetch = this.fetch;
-    this.enqueue(loader, resolve(this.url, url), fetch ? fetch(url) : Promise.reject());
+    this.enqueue(loader, resolved, fetch ? fetch(resolved, abort.signal) : Promise.reject());
   }
 
   /**
@@ -357,7 +388,14 @@ export class Scripting {
   }
 
   private enqueue(loader: AsObject, url: string | null, bytes: Promise<Uint8Array>): void {
-    const load: Load = { loader, url, bytes: new Uint8Array(0), ready: null, failed: null };
+    const load: Load = {
+      loader,
+      generation: loader.$generation,
+      url,
+      bytes: new Uint8Array(0),
+      ready: null,
+      failed: null,
+    };
     this.loads.push(load);
     this.preparing = this.preparing.then(async () => {
       try {
@@ -417,6 +455,10 @@ export class Scripting {
     const ends: (() => void)[] = [];
     while (this.loads.length && (this.loads[0].ready || this.loads[0].failed)) {
       const load = this.loads.shift() as Load;
+      if (load.generation !== load.loader.$generation) {
+        continue;
+      }
+
       if (load.ready) {
         ends.push(load.ready());
       } else {
@@ -436,6 +478,7 @@ export class Scripting {
   }
 
   private loaderInfoOf(loader: AsObject): AsObject {
+    loader.$generation ??= 0;
     loader.$loaderInfo ??= this.loaderInfo(loader);
     return loader.$loaderInfo;
   }
@@ -451,6 +494,7 @@ export class Scripting {
    */
   private complete(load: Load, swf: Swf, library: Library, run: () => void): () => void {
     const info = this.loaderInfoOf(load.loader);
+    load.loader.$abort = null;
     if (load.url !== null) {
       // A load from bytes told these in the call; one of a URL tells them as
       // the bytes come: OPEN knowing nothing, the total, then the bytes.
@@ -472,7 +516,7 @@ export class Scripting {
       this.rt.classNamed(library.classes.get(0) ?? "flash.display::MovieClip"),
     );
     dispatchEvent(this, object, this.event("added", true));
-    info.$url = load.url ?? info.$dynamic ?? this.url;
+    info.$url = load.url ?? info.$dynamic ?? info.$loaderURL;
     info.$content = object;
     load.loader.$content = object;
     const display: Container = load.loader.$display;

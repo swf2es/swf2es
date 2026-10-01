@@ -201,7 +201,7 @@ export function scripted(abc: Uint8Array): Uint8Array {
 
 // A root of `frames` frames with `abc` as its code and nothing placed: for
 // what the scripts alone do (scripts/Events.as, and the node tests' loads).
-export function bare(abc: Uint8Array, frames = 2): Uint8Array {
+export function bare(abc: Uint8Array, frames = 2, documentClass = "Main"): Uint8Array {
   return w.swf({
     width: 100,
     height: 50,
@@ -210,8 +210,8 @@ export function bare(abc: Uint8Array, frames = 2): Uint8Array {
     tags: [
       w.fileAttributes(true),
       w.backgroundColor(0xffffff),
-      w.doAbc(abc, "Main"),
-      w.symbolClass([[0, "Main"]]),
+      w.doAbc(abc, documentClass),
+      w.symbolClass([[0, documentClass]]),
       ...Array.from({ length: frames }, () => w.showFrame()),
       w.end(),
     ],

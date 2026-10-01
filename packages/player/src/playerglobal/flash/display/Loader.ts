@@ -24,6 +24,8 @@ export function loaderNatives(s: Scripting): avm2.Natives {
     declare $content: AsObject | null | undefined;
     declare $loaderInfo: AsObject | undefined;
     declare $uncaught: AsObject | undefined;
+    declare $generation: number | undefined;
+    declare $abort: AbortController | null | undefined;
 
     get content(): Value {
       return this.$content ?? null;
@@ -58,7 +60,7 @@ export function loaderNatives(s: Scripting): avm2.Natives {
     }
 
     "flash.display:Loader::_close"(): void {
-      // Nothing is in flight that could be stopped.
+      s.closeLoad(this);
     }
 
     "flash.display:Loader::_getUncaughtErrorEvents"(): Value {

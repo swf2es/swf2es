@@ -18,7 +18,7 @@ package {
     }
 
     private function onAddedToStage(e:Event):void {
-      trace("Inner addedToStage", e.target == this, loaderInfo.url != null, loaderInfo.content == this, root == this, parent == loaderInfo.loader);
+      trace("Inner addedToStage", e.target == this, loaderInfo.url != null, loaderInfo.content == this, root == this, parent == loaderInfo.loader, loaderInfo.loaderURL == parent.loaderInfo.url);
     }
 
     private function frame1():void {

@@ -34,7 +34,8 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
     declare $url: string | null;
     /** The URL the content gets when it is placed, for a load from bytes. */
     declare $dynamic: string | undefined;
-    declare $loaderURL: string;
+    /** The URL of the SWF the Loader belongs to, from its first load on; the main SWF's own. */
+    declare $loaderURL: string | null;
     declare $loaded: number;
     declare $total: number;
     declare $shared: AsObject | undefined;
@@ -52,7 +53,7 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
       return this.$url;
     }
 
-    get loaderURL(): string {
+    get loaderURL(): Value {
       return this.$loaderURL;
     }
 

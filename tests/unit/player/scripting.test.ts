@@ -66,25 +66,32 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
   const codegen = await createCodegen(wasm);
   const compile = compiler(out);
   const inner = innerSwf(compile("Inner"));
+  const nested = bare(compile("LoadsNested"), 2, "LoadsNested");
   const fetches: string[] = [];
+  const aborted: string[] = [];
   const scripting = new Scripting(codegen, {
     print: (line) => lines.push(line),
     url: "http://example.test/outer.swf",
-    fetch: async (url) => {
+    fetch: async (url, signal) => {
       fetches.push(url);
-      if (url.endsWith("inner.swf")) {
+      signal.addEventListener("abort", () => aborted.push(url));
+      if (url.endsWith("inner.swf") || url.endsWith("deep.swf")) {
         return inner;
+      }
+
+      if (url.endsWith("nested.swf")) {
+        return nested;
       }
 
       throw new Error("404");
     },
   });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const player = new Player(bare(compile("LoadsUrl"), 3), scripting);
+  const player = new Player(bare(compile("LoadsUrl"), 4), scripting);
   await player.start();
-  // The frame that asks sees nothing of the loads; the host is asked for the URLs as given.
-  assert.deepEqual(lines, ["0 requested inner.swf", "1 requested missing.swf"]);
-  assert.deepEqual(fetches, ["inner.swf", "missing.swf"]);
+  // The frame that asks sees nothing of the loads; the host is asked for the URLs resolved against the SWF's.
+  assert.deepEqual(lines.splice(0), ["0 requested inner.swf", "1 requested missing.swf"]);
+  assert.deepEqual(fetches, ["http://example.test/inner.swf", "http://example.test/missing.swf"]);
 
   // The next frame: the bytes that came are told as a URL load tells them,
   // OPEN and the progress, then the content comes as from loadBytes (the
@@ -98,37 +105,72 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "Inner made false false true true 1 true",
     "Inner added true false false false false true",
     "Inner added true false false true true true",
-    "Inner addedToStage true true true true true",
+    "Inner addedToStage true true true true true true",
   ];
-  assert.deepEqual(lines.slice(2), [
+  assert.deepEqual(lines.splice(0), [
     "0 open - null false",
-    "0 progress 0/1228 null false",
-    "0 progress 1228/1228 null false",
+    `0 progress 0/${inner.length} null false`,
+    `0 progress ${inner.length}/${inner.length} null false`,
     ...content,
     "1 ioError Error #2035: URL Not Found. URL: http://example.test/missing.swf null false",
     "2 requested inner.swf",
+    "3 requested nested.swf",
+    "4 requested inner.swf",
+    "5 requested missing.swf",
     "inner frame 1 true true true true",
     "0 init - http://example.test/inner.swf true",
     "0 complete - http://example.test/inner.swf true",
   ]);
+  // Closing a load and replacing one abort their fetches at once.
+  assert.deepEqual(aborted, ["http://example.test/inner.swf", "http://example.test/missing.swf"]);
 
   // The same SWF again, into the one domain: its classes are the first
   // load's, as Flash keeps a domain's definitions, and it plays on its own.
+  // The closed load and the replaced one come to nothing; the replacement
+  // loads. A loaded SWF's own load resolves against it.
   await scripting.settled();
   player.tick();
-  assert.deepEqual(lines.slice(14), [
+  assert.deepEqual(lines.splice(0), [
     "2 open - null false",
-    "2 progress 0/1228 null false",
-    "2 progress 1228/1228 null false",
+    `2 progress 0/${inner.length} null false`,
+    `2 progress ${inner.length}/${inner.length} null false`,
     ...content,
-    "frame 3 1 0 1",
+    `3 open - null false`,
+    `3 progress 0/${nested.length} null false`,
+    `3 progress ${nested.length}/${nested.length} null false`,
+    "5 open - null false",
+    `5 progress 0/${inner.length} null false`,
+    `5 progress ${inner.length}/${inner.length} null false`,
+    ...content,
+    "frame 3 1,0,1,1,0,1",
     "inner frame 2",
+    "inner frame 1 true true true true",
+    "nested requested deep.swf",
     "inner frame 1 true true true true",
     "2 init - http://example.test/inner.swf true",
     "2 complete - http://example.test/inner.swf true",
+    "3 init - http://example.test/nested.swf true",
+    "3 complete - http://example.test/nested.swf true",
+    "5 init - http://example.test/inner.swf true",
+    "5 complete - http://example.test/inner.swf true",
   ]);
+  assert.equal(fetches[fetches.length - 1], "http://example.test/deep.swf");
   const [first, , second] = player.root.children.map((loader) => (loader as Container).children[0]);
   assert.ok(first.object && second.object);
   assert.notEqual(first.object, second.object);
   assert.equal(Object.getPrototypeOf(second.object), Object.getPrototypeOf(first.object));
+
+  // The nested SWF's content reports the nested SWF as its loaderURL (the
+  // last field of addedToStage); the four loaded clips' scripts run in tree
+  // order, the two older ones back on their first frame.
+  await scripting.settled();
+  player.tick();
+  assert.deepEqual(lines.splice(0), [
+    ...content,
+    "frame 4 1 1",
+    "inner frame 1 true true true true",
+    "inner frame 2",
+    "inner frame 1 true true true true",
+    "inner frame 2",
+  ]);
 });

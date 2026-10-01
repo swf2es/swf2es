@@ -507,8 +507,16 @@ that steps frames by hand awaits `Scripting.settled()` between them, as
 the tests do, to see Flash's frame. `SymbolClass` bindings are the
 library's, since character ids collide across SWFs. The player package
 has no I/O: `load` of a URL asks the host for the bytes through a
-function the `Scripting` is given, and a fetch that fails, or bytes that
-are not an AS3 SWF, end in `IO_ERROR` on the `LoaderInfo` in the frame.
+function the `Scripting` is given, with the URL resolved and an
+`AbortSignal`, and a fetch that fails, or bytes that are not an AS3 SWF,
+end in `IO_ERROR` on the `LoaderInfo` in the frame. `close`, and a new
+load on the same `Loader`, drop a pending load and abort its fetch, as
+Flash's terminate it. The SWF a `Loader` belongs to, which its content's
+`loaderURL` reports and its relative URLs resolve against, is in Flash
+the one whose code made it; the runtime does not track callers, so it is
+the SWF the `Loader` is on the display list of when it loads, else the
+main one (Ruffle's `loader_loaderurl` adds the loader first, as SWFs
+usually do).
 The Flash cases use `loadBytes`, the inner SWF carried in the outer's
 script as base64; the oracle runs under AIR, which refuses code from
 bytes unless the `LoaderContext` has `allowCodeImport`, which Flash
