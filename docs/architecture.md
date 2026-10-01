@@ -466,6 +466,52 @@ the SWF is recorded by `--update` beside its frames, and the player's
 must match it line for line, as the conformance cases must match
 avmshell's.
 
+### Loading SWFs
+
+A `Loader` is a container whose one child is the root of the SWF it
+loaded, and a `LoaderInfo` is made for each `Loader` and one for the main
+SWF: `loaderInfo` on a display object is the `LoaderInfo` of the root it
+is under, and null off the display list, as Flash has it
+(Ruffle's `loaderinfo_root` trace). Its values are the loaded SWF's:
+`bytesLoaded` and `bytesTotal`, `content`, `url` and `loaderURL`,
+`contentType`, the header's version, frame rate, width and height,
+`loader`, `applicationDomain`, `bytes`.
+
+`loadBytes` and `load` do nothing in the frame that calls them. The load
+completes in a later frame, in the frame's loader step, in the order
+Flash's trace of `loadBytes` fixes (`loader_loadbytes_events`):
+`PROGRESS` with nothing loaded and again with all of it (a `load` of a URL
+has `OPEN` first; `loadBytes` has none), then the content's document
+class constructed with `stage`, its `loaderInfo.url` and
+`LoaderInfo.content` still null, then the content made the `Loader`'s
+child (`ADDED_TO_STAGE` if the loader is on the stage, and `url` set),
+its first frame's scripts, `INIT`, `COMPLETE`; all of it before the
+loading timeline's next frame scripts. Which step of the frame the loads
+complete in is fixed by a case adl traces. The loaded SWF's code goes
+through `Codegen` and the runtime as the main SWF's does, and its
+timeline advances with the stage's frame rate. `unload` takes the content
+out and keeps the `Loader`. The player package has no I/O: `load` of a
+URL asks the host for the bytes through a function the `Scripting` is
+given, and the tests use `loadBytes`, the inner SWF carried in the
+script.
+
+Flash loads into a child `ApplicationDomain` by default: the parent
+cannot see the loaded SWF's classes by name, a class the loaded SWF
+defines again shadows the parent's for its own code, and
+`LoaderInfo.applicationDomain.getDefinition` finds it
+(`loader_duplicate_class`). That needs two things: the compiler's domain
+forked, a new domain sharing the ABCs loaded so far, and the runtime
+resolving names by the domain of the module asking. The first slice has
+neither: it loads into the current domain, as a `LoaderContext` with
+`ApplicationDomain.currentDomain` asks, and refuses a load that defines a
+class the domain has, since the duplicate would otherwise shadow it for
+everyone. Child domains are the slice after.
+
+A SWF the player loads is in the position the oracle's harness puts
+every SWF in, so what the harness could not judge for a main movie, the
+document class's `stage` in its constructor among it, compares exactly
+once the case loads its SWF.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
