@@ -78,6 +78,28 @@ test("reading the descriptors runs no getter", () => {
   assert.ok(natives["Loud#get:boom"]);
 });
 
+test("a key registered twice is an error, not a replacement", () => {
+  const natives: avm2.Natives = {};
+  class First {
+    get x(): number {
+      return 1;
+    }
+  }
+  class Second {
+    get x(): number {
+      return 2;
+    }
+  }
+
+  registerNativeClass(natives, "Twice", First);
+  assert.throws(
+    () => registerNativeClass(natives, "Twice", Second),
+    /Twice#get:x is registered twice/,
+  );
+  // The first stays.
+  assert.equal(handler(natives, "Twice#get:x").call({}), 1);
+});
+
 test("two factories' classes close over their own context", () => {
   const make = (tag: string) => {
     const natives: avm2.Natives = {};

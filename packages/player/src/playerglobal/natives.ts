@@ -50,15 +50,24 @@ function register(
     }
 
     if (d.get) {
-      natives[`${prefix}get:${name}`] = plain(d.get as avm2.Method);
+      add(natives, `${prefix}get:${name}`, d.get as avm2.Method);
     }
 
     if (d.set) {
-      natives[`${prefix}set:${name}`] = plain(d.set as avm2.Method);
+      add(natives, `${prefix}set:${name}`, d.set as avm2.Method);
     }
 
     if (typeof d.value === "function") {
-      natives[`${prefix}${name}`] = plain(d.value as avm2.Method);
+      add(natives, `${prefix}${name}`, d.value as avm2.Method);
     }
   }
+}
+
+/** A native under `key`; a second one for the same key is a mistake, not a replacement. */
+function add(natives: avm2.Natives, key: string, fn: avm2.Method): void {
+  if (key in natives) {
+    throw new Error(`native ${key} is registered twice`);
+  }
+
+  natives[key] = plain(fn);
 }
