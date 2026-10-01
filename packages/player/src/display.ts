@@ -17,6 +17,8 @@ export class DisplayObject {
   parent: Container | null = null;
   /** The timeline depth it was placed at, or null for one a script added. */
   depth: number | null = null;
+  /** The frame of its parent's timeline that placed it, 1 the first; 0 for one a script added. */
+  placeFrame = 0;
   name = "";
   /** Its transform in its parent, translation in pixels. */
   matrix: Matrix = { ...IDENTITY };
@@ -123,7 +125,11 @@ export class MovieClip extends Container {
     return this.timeline.frames.length;
   }
 
-  /** Run frame `frame`'s commands: place, move and remove the timeline's children. */
+  /**
+   * Run frame `frame`'s commands as the playhead reaches it: place, move and
+   * remove the timeline's children. A place without the move flag makes a
+   * new child even where the same character is at the depth; a goto does not.
+   */
   private runFrame(frame: number): void {
     for (const command of this.timeline.frames[frame - 1] ?? []) {
       if (command.type === "remove") {
@@ -160,8 +166,80 @@ export class MovieClip extends Container {
       }
 
       child.applyPlace(place);
+      child.placeFrame = frame;
       this.placeAtDepth(child, place.depth);
     }
+  }
+
+  /**
+   * Jump to frame `frame`, as Flash does rather than by running the frames
+   * between: the children the timeline placed after it go, the frames up to
+   * it (from the first, for a rewind) are replayed into one command per
+   * depth, and each command changes the child still at its depth if it is
+   * the same character, else makes one. A child placed before the frame and
+   * untouched since keeps playing, and its identity.
+   */
+  gotoFrame(frame: number): void {
+    const target = Math.max(1, Math.min(frame, this.totalFrames));
+    const rewind = target < this.currentFrame;
+    if (rewind) {
+      for (const child of [...this.depths.values()]) {
+        if (child.placeFrame > target && child.depth !== null) {
+          this.removeAtDepth(child.depth);
+        }
+      }
+    }
+
+    const commands = new Map<number, Place>();
+    const placedOn = new Map<number, number>();
+    for (let f = (rewind ? 0 : this.currentFrame) + 1; f <= target; f++) {
+      for (const command of this.timeline.frames[f - 1] ?? []) {
+        if (command.type === "remove") {
+          commands.delete(command.depth);
+          placedOn.delete(command.depth);
+          // Going forward, a removal between the frames takes effect.
+          if (!rewind) {
+            this.removeAtDepth(command.depth);
+          }
+
+          continue;
+        }
+
+        const place = command.place;
+        const previous = commands.get(place.depth);
+        commands.set(place.depth, previous ? mergePlace(previous, place) : place);
+        if (place.character !== null) {
+          placedOn.set(place.depth, f);
+        }
+      }
+    }
+
+    for (const [depth, place] of commands) {
+      const existing = this.depths.get(depth);
+      const character =
+        place.character === null ? null : this.library.characters.get(place.character);
+      if (existing && (character === null || existing.character === character)) {
+        existing.applyPlace(place);
+        continue;
+      }
+
+      if (!character) {
+        continue;
+      }
+
+      const child = instantiate(character, this.library);
+      if (existing) {
+        child.matrix = existing.matrix;
+        child.colorTransform = existing.colorTransform;
+        child.name = existing.name;
+      }
+
+      child.applyPlace(place);
+      child.placeFrame = placedOn.get(depth) ?? target;
+      this.placeAtDepth(child, depth);
+    }
+
+    this.currentFrame = target;
   }
 
   /** The first frame, as a clip runs it when it is made. */
@@ -171,9 +249,8 @@ export class MovieClip extends Container {
   }
 
   /**
-   * On to the next frame, if it plays and has one. From the last back to the
-   * first, the timeline's children are made again from the first frame's
-   * commands, as a rewind in Flash puts back the first frame's state.
+   * On to the next frame, if it plays and has one. From the last frame it
+   * loops to the first as a goto, so what the first frame placed stays.
    */
   advance(): void {
     if (!this.playing || this.totalFrames <= 1) {
@@ -181,18 +258,33 @@ export class MovieClip extends Container {
     }
 
     if (this.currentFrame >= this.totalFrames) {
-      for (const depth of [...this.depths.keys()]) {
-        this.removeAtDepth(depth);
-      }
-
-      this.currentFrame = 1;
-      this.runFrame(1);
+      this.gotoFrame(1);
       return;
     }
 
     this.currentFrame++;
     this.runFrame(this.currentFrame);
   }
+}
+
+/** `next` over `previous`: what the later place sets, and the rest as it was. */
+function mergePlace(previous: Place, next: Place): Place {
+  return {
+    ...previous,
+    character: next.character ?? previous.character,
+    matrix: next.matrix ?? previous.matrix,
+    colorTransform: next.colorTransform ?? previous.colorTransform,
+    ratio: next.ratio ?? previous.ratio,
+    name: next.name ?? previous.name,
+    clipDepth: next.clipDepth ?? previous.clipDepth,
+    className: next.className ?? previous.className,
+    blendMode: next.blendMode ?? previous.blendMode,
+    cacheAsBitmap: next.cacheAsBitmap ?? previous.cacheAsBitmap,
+    visible: next.visible ?? previous.visible,
+    opaqueBackground: next.opaqueBackground ?? previous.opaqueBackground,
+    filters: next.filters ?? previous.filters,
+    clipActions: next.clipActions ?? previous.clipActions,
+  };
 }
 
 /** A display object for a character: a shape, or a clip on its first frame. */

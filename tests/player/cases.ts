@@ -115,14 +115,48 @@ const depths = w.swf({
   ],
 });
 
+// A three-frame sprite on frame 1 of a two-frame root. When the root loops
+// the sprite keeps playing rather than starting over, so its square is at
+// its third position on root frame 3 and back at its first on frame 4.
+function loops(as3: boolean): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(as3),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 3, [
+        w.place({ depth: 1, character: 1, matrix: { tx: 0, ty: 0 } }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, matrix: { tx: 1000, ty: 0 } }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, matrix: { tx: 2000, ty: 0 } }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.place({ depth: 1, character: 2, matrix: { tx: 0, ty: 0 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // What differs from Flash in "moves" is anti-aliasing a quarter pixel off:
 // Flash's curved lines reach further into their shape, and under the skew
 // of frame 2 its lines are a little wider or narrower than Ruffle's rule
 // for line widths gives.
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
+const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
+
 export const cases: PlayerCase[] = [
   { name: "moves", swf: moves(true), ...moved },
   { name: "moves-avm1", swf: moves(false), ...moved },
   { name: "depths", swf: depths, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
+  { name: "loops", swf: loops(true), ...looped },
+  { name: "loops-avm1", swf: loops(false), ...looped },
 ];
