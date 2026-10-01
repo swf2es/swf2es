@@ -448,7 +448,22 @@ parent already on the landing frame (`gotoChild`); a goto from anywhere
 else happens at once. All the timelines advance before any frame script
 runs, parents' scripts before their children's (`nested`); the clips
 whose scripts are to run are fixed as the phase begins, so one a script
-removes still runs its own (`loads`).
+removes still runs its own (`loads`, `orphans`).
+
+A clip a script takes off the display list plays on in Flash, an
+orphan: its timeline advances and its frame scripts run each frame, with
+`parent` and `stage` null, until it is put back, where it carries on from
+the frame it reached, or until it is collected (the `orphans` case; Ruffle
+keeps them by weak reference, and so does the player, with `WeakRef`, so
+an orphan nothing refers to stops as Flash's does, and a test that wants
+one to play on holds it). The orphans' scripts run before the display
+list's, the most recently created clip first, each subtree in tree order.
+The timeline's removal is different: the clip advances and runs the
+script of the frame that removed it, among the orphans, and then stops
+for good; and the property the parent had under the clip's instance name
+is set to null, where a script's `removeChild` leaves it. `unloadAndStop`
+stops a `Loader`'s content before letting it go, so it does not become an
+orphan; `unload` lets it play on, as Flash does.
 
 The player loads a SWF's code through `@swf2es/codegen`'s `Codegen`: each
 `DoABC`, in tag order, is added to one domain after the builtins and
