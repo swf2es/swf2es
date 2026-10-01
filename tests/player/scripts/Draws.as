@@ -104,9 +104,16 @@ package {
       sprite.y = 45;
       sprite.rotation = 15;
       addChild(sprite);
+      // A shape never added, scaled: its size is scaled all the same.
+      var lone:Shape = new Shape();
+      lone.graphics.beginFill(0x333333);
+      lone.graphics.drawRect(0, 0, 10, 10);
+      lone.graphics.endFill();
+      lone.scaleX = 2;
+      lone.scaleY = 3;
       // The rectangle without the lines' widths, and the turned sprite's size: Flash's
       // bounds of lines are half a pixel wider than their geometry, by a rule not known.
-      trace("drawn", shape.getRect(shape), sprite.width, sprite.height);
+      trace("drawn", shape.getRect(shape), sprite.width, sprite.height, lone.width, lone.height);
     }
   }
 }

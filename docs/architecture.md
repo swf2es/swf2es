@@ -632,8 +632,10 @@ drawing, the extent of its paths, curves at their true extremes, with
 the lines' half widths and square caps for the bounds with lines; for a
 container, the union of its children's bounds, each through the child's
 matrix, with its own drawing's. `width` and `height` are the bounds
-through the object's own matrix, in its parent's space, so a turned
-square is wider than its side (the `draws` case); setting one scales the
+through the object's own matrix, in its parent's space, or what that
+would be for one with no parent, so a turned square is wider than its
+side and a scaled shape never added is as wide as its scale makes it
+(the `draws` case); setting one scales the
 object so that the bounds come to the value, and leaves it when the
 bounds have no extent to scale, as Flash. `getBounds(target)` and
 `getRect(target)` take the bounds through the matrices up to the stage

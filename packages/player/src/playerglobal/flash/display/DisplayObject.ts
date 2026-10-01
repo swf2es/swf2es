@@ -2,9 +2,9 @@
 // other face, and its properties read and written through it.
 import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { boundsIn, hitsObject, hitsPoint, toStage } from "../../../bounds.js";
+import { bounds, boundsIn, hitsObject, hitsPoint, toStage } from "../../../bounds.js";
 import { type DisplayObject, TRANSFORM } from "../../../display.js";
-import type { Rect } from "../../../geometry.js";
+import { type Rect, transformRect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
 import { colorOf, matrixOf } from "../geom/Transform.js";
 
@@ -53,9 +53,9 @@ function point(s: Scripting, x: number, y: number): Value {
 /** Flash keeps positions in twips, so what it reports of bounds is a multiple of a twentieth. */
 const twips = (v: number) => Math.round(v * 20) / 20;
 
-/** The object's width and height in its parent's space: its bounds through its matrix. */
-function size(s: Scripting, d: DisplayObject): [number, number] {
-  const r = boundsIn(d, d.parent, s.stage, true);
+/** The object's width and height in its parent's space, or what that would be for one with no parent: its bounds through its own matrix. */
+function size(d: DisplayObject): [number, number] {
+  const r = transformRect(bounds(d, true) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 }, d.matrix);
   return [twips(r.xMax - r.xMin), twips(r.yMax - r.yMin)];
 }
 
@@ -264,12 +264,12 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     /** The bounds through the object's own matrix, in its parent's space. */
     get width(): number {
-      return size(s, this.$display)[0];
+      return size(this.$display)[0];
     }
 
     /** Scaled so that the bounds come to the value; left as it is when they have no extent. */
     set width(v: Value) {
-      const current = size(s, this.$display)[0];
+      const current = size(this.$display)[0];
       if (current > 0) {
         const value = Number(v);
         transform(this.$display, (m) => {
@@ -280,11 +280,11 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     get height(): number {
-      return size(s, this.$display)[1];
+      return size(this.$display)[1];
     }
 
     set height(v: Value) {
-      const current = size(s, this.$display)[1];
+      const current = size(this.$display)[1];
       if (current > 0) {
         const value = Number(v);
         transform(this.$display, (m) => {
