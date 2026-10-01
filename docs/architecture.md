@@ -384,8 +384,11 @@ own; the bindings a class gets in its interfaces' namespaces are not
 members and do not show; a binding above the caller's API version is
 left out, the caller taken to be the latest player's, as avmshell runs
 (a SWF's own version is not yet consulted), which hides the builtins'
-`[API(CONFIG::VM_INTERNAL)]` members, marked 52 as `core/api-versions.h`
-has it. For that the compiler emits what the
+`[API(CONFIG::VM_INTERNAL)]` members: VM_INTERNAL is the last mark of
+the table an ABC was built with, 42 in the AIR 15 SDK's, which the
+oracle's playerglobal has, 52 in `core/api-versions.h`, which the
+submodule's builtin has, so the compiler reads a builtin ABC's highest
+mark, from 42 up, as its internal one. For that the compiler emits what the
 runtime needed nothing of before: each method's signature beside its
 factory (return type, parameter types, how many are required), the
 constructor's in the class descriptor, and a class's and its traits'

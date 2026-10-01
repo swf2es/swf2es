@@ -63,6 +63,13 @@ export const API_FP_10_0: u8 = 2;
 /** kApiVersionLatest for Flash Player (SWF_31), avmshell's default. */
 export const API_LatestFP: u8 = 50;
 export const API_Internal: u8 = 52;
+/**
+ * VM_INTERNAL is the last mark of the table an ABC was built with: 42 in
+ * the AIR 15 SDK's, which the oracle's playerglobal has, 52 in
+ * core/api-versions.h, which the submodule's builtin has. A builtin ABC's
+ * highest mark, from 42 up, is its internal one.
+ */
+const API_FirstInternalMark: i32 = 42;
 const API_Count: u32 = 53;
 const API_MinMark: u32 = 0xe294;
 
@@ -1379,12 +1386,17 @@ export class Domain {
 
     // A builtin ABC's marked URIs are versioned before any of its namespaces
     // get a version, as the player registers them before parsing.
+    let highestMark: i32 = -1;
     for (let i: u32 = 1; i < count; i++) {
       const index = pool.nsName[i];
       const mark = index
         ? versionMark(base, pool.stringStart[index], pool.stringLength[index])
         : -1;
       marks[i] = mark;
+      if (mark > highestMark) {
+        highestMark = mark;
+      }
+
       if (abc.builtin && mark >= 0 && namespaceType(pool.nsKind[i]) === NS_Public) {
         const uri = this.internString(base + pool.stringStart[index], pool.stringLength[index] - 3);
         this.versioned[uri] = 1;
@@ -1405,7 +1417,10 @@ export class Domain {
       if (type === NS_Private) {
         version = API_AllVersions;
       } else if (index && abc.builtin) {
-        if (mark < 0 && type === NS_Public && this.versioned[uri]) {
+        if (
+          (mark < 0 && type === NS_Public && this.versioned[uri]) ||
+          (mark >= API_FirstInternalMark && mark === highestMark)
+        ) {
           version = API_Internal;
         }
       } else if (index && type === NS_Public) {
