@@ -7,13 +7,18 @@
 // tree, holes cut, as Pixi's own grouping of holes misses nested islands.
 import type { Fill, Line } from "@swf2es/format";
 import {
+  BufferImageSource,
   Graphics,
   GraphicsContext,
   Matrix,
   Container as PixiContainer,
   type Renderer,
+  Sprite,
+  Texture,
 } from "pixi.js";
+import { unmultiply } from "./bitmap.js";
 import {
+  BitmapObject,
   CHILDREN,
   CLEAN,
   CONTENT,
@@ -298,6 +303,8 @@ interface Node {
   layers: ShapeLayer[];
   /** The lines, a Graphics for each layer that has any; null where one has none. */
   strokes: (Graphics | null)[];
+  /** A Bitmap's sprite and the version of its store it was uploaded from; null for any other object. */
+  bitmap: { sprite: Sprite; source: BufferImageSource; version: number } | null;
 }
 
 export class PixiView {
@@ -311,7 +318,14 @@ export class PixiView {
     let node = this.nodes.get(o);
     if (!node) {
       const art = new PixiContainer();
-      node = { container: new PixiContainer(), world: [0, 0, 0, 0], art, layers: [], strokes: [] };
+      node = {
+        container: new PixiContainer(),
+        world: [0, 0, 0, 0],
+        art,
+        layers: [],
+        strokes: [],
+        bitmap: null,
+      };
       node.container.addChild(art);
       this.nodes.set(o, node);
     }
@@ -330,6 +344,12 @@ export class PixiView {
     }
 
     node.strokes = [];
+    node.bitmap = null;
+    if (o instanceof BitmapObject) {
+      this.drawBitmap(o, node);
+      return;
+    }
+
     const shape = o instanceof ShapeObject ? o.shape : null;
     node.layers = o.drawing?.layers ?? shape?.layers ?? [];
     let fills: GraphicsContext[];
@@ -350,6 +370,30 @@ export class PixiView {
       node.strokes.push(strokes);
     });
     this.restroke(node);
+  }
+
+  /**
+   * A Bitmap as a sprite over a texture uploaded from its store's pixels,
+   * nearest-neighbour unless it smooths; nothing for no store or one
+   * disposed. The store counts its changes, and `sync` uploads again when
+   * the count moves.
+   */
+  private drawBitmap(o: BitmapObject, node: Node): void {
+    const store = o.store;
+    if (!store || store.disposed) {
+      return;
+    }
+
+    const source = new BufferImageSource({
+      resource: rgba(store.pixels),
+      width: store.width,
+      height: store.height,
+      alphaMode: "premultiply-alpha-on-upload",
+      scaleMode: o.smoothing ? "linear" : "nearest",
+    });
+    const sprite = new Sprite(new Texture({ source }));
+    node.art.addChild(sprite);
+    node.bitmap = { sprite, source, version: store.version };
   }
 
   /**
@@ -413,6 +457,15 @@ export class PixiView {
       this.redraw(o, node);
     } else if (moved && node.strokes.some((g) => g)) {
       this.restroke(node);
+    } else if (node.bitmap && o instanceof BitmapObject && o.store) {
+      // Pixels set since the upload, or the store gone: drawn again.
+      if (o.store.disposed) {
+        this.redraw(o, node);
+      } else if (o.store.version !== node.bitmap.version) {
+        node.bitmap.source.resource = rgba(o.store.pixels);
+        node.bitmap.source.update();
+        node.bitmap.version = o.store.version;
+      }
     }
 
     if (o instanceof Container) {
@@ -455,4 +508,18 @@ export class PixiView {
     this.prepare(root);
     this.renderer.render(this.stage);
   }
+}
+
+/** A store's premultiplied ARGB pixels as the straight RGBA bytes a texture upload takes. */
+function rgba(pixels: Uint32Array): Uint8Array {
+  const out = new Uint8Array(pixels.length * 4);
+  for (let i = 0; i < pixels.length; i++) {
+    const p = unmultiply(pixels[i]);
+    out[i * 4] = (p >>> 16) & 0xff;
+    out[i * 4 + 1] = (p >>> 8) & 0xff;
+    out[i * 4 + 2] = p & 0xff;
+    out[i * 4 + 3] = p >>> 24;
+  }
+
+  return out;
 }

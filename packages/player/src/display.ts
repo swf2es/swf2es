@@ -6,6 +6,7 @@
 // timeline places goes before the first child of a greater depth.
 import { type ColorTransform, IDENTITY, type Matrix, type Place } from "@swf2es/format";
 import type { avm2 } from "@swf2es/runtime";
+import type { BitmapStore } from "./bitmap.js";
 import type { Drawing } from "./drawing.js";
 import type { Character, Library, ShapeCharacter, Timeline } from "./timeline.js";
 
@@ -214,6 +215,18 @@ function swap(existing: DisplayObject, character: Character): void {
     existing.shape = character;
     existing.character = character;
     existing.invalidate(CONTENT);
+  }
+}
+
+/** A Bitmap: a display object that shows a BitmapData's pixels, its bounds the data's size. */
+export class BitmapObject extends DisplayObject {
+  store: BitmapStore | null;
+  smoothing = false;
+  pixelSnapping = "auto";
+
+  constructor(store: BitmapStore | null) {
+    super();
+    this.store = store;
   }
 }
 

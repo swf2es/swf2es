@@ -2,7 +2,7 @@
 // and hit tests"): a SWF shape's recorded rectangles, a drawing's true
 // extent, a container's children's through their matrices.
 import type { Matrix } from "@swf2es/format";
-import { Container, type DisplayObject, ShapeObject } from "./display.js";
+import { BitmapObject, Container, type DisplayObject, ShapeObject } from "./display.js";
 import {
   apply,
   concat,
@@ -32,6 +32,13 @@ export function toStage(d: DisplayObject, stage: DisplayObject | null): Matrix {
 function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
   if (d.drawing) {
     return d.drawing.bounds(lines);
+  }
+
+  if (d instanceof BitmapObject) {
+    const store = d.store;
+    return store && !store.disposed
+      ? { xMin: 0, yMin: 0, xMax: store.width, yMax: store.height }
+      : null;
   }
 
   if (d instanceof ShapeObject && d.shape) {

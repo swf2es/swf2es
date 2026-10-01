@@ -844,10 +844,13 @@ premultiplied by alpha as Flash keeps them, so `setPixel32` premultiplies
 and `getPixel32` divides back, with the rounding Flash's does (Ruffle's
 `bitmapdata_accuracy` tabulates every alpha and value; adl is the judge of
 the rule); a bitmap made opaque keeps every alpha at 255, and `getPixel`
-answers without the alpha. The constructor refuses a side under 1 or over
-8191, and an area over 16,777,215 pixels, with ArgumentError 2015, and
-`dispose` empties the store, after which the size reads -1 and every
-operation throws 2015. `fillRect`, `copyPixels`, `getPixels` and
+answers without the alpha. The constructor refuses a side under 1 with
+ArgumentError 2015 and no more: Flash's old limits, 8191 a side and
+16,777,215 pixels, are gone (16384 by 1 and 4097 by 4096 both pass in
+adl); `dispose` empties the store, after which every read, the size
+included, throws 2015, and a second `dispose` is nothing. `copyPixels`
+into an opaque bitmap composites source over destination whether or not
+`mergeAlpha` asks, as Flash does. `fillRect`, `copyPixels`, `getPixels` and
 `setPixels` (ByteArrays of big-endian ARGB), `getVector` and `setVector`,
 `clone` and `rect` work on that store, clipped to it; `lock` and `unlock`
 do nothing, as a store drawn from each frame needs no batching. A
