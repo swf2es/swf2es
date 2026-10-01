@@ -4,26 +4,12 @@
 import { avm2 } from "@swf2es/runtime";
 import type { MovieClip } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
-import { displayOf } from "./DisplayObject.js";
 
-const { plain } = avm2;
-type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
-function clipOf(o: AsObject): MovieClip {
-  return displayOf(o) as MovieClip;
-}
-
 export function movieClipNatives(s: Scripting): avm2.Natives {
+  const natives: avm2.Natives = {};
   // s.rt at call time: the natives are made before the runtime that holds them is.
-  /** Jump to `frame`: at once, or when the frame script asking returns, as Flash defers a goto from one. */
-  const goto = (clip: MovieClip, frame: number) => {
-    if (s.inFrameScript === clip) {
-      clip.queuedGoto = frame;
-    } else {
-      clip.gotoFrame(frame);
-    }
-  };
   /** A frame by number, 1 the first, or by label; the clip's frame if the label is unknown. */
   const frameOf = (clip: MovieClip, frame: Value): number => {
     if (typeof frame === "string" && !/^\d+$/.test(frame)) {
@@ -32,10 +18,21 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
 
     return s.rt.toInt(frame);
   };
+  /** Jump to `frame`: at once, or when the frame script asking returns, as Flash defers a goto from one. */
+  const goto = (clip: MovieClip, frame: number) => {
+    if (s.inFrameScript === clip) {
+      clip.queuedGoto = frame;
+    } else {
+      clip.gotoFrame(frame);
+    }
+  };
 
-  return {
-    "flash.display::MovieClip#addFrameScript": plain(function (this: AsObject, ...args: Value[]) {
-      const clip = clipOf(this);
+  class MovieClipNatives {
+    declare $display: MovieClip;
+    declare $enabled: boolean | undefined;
+
+    addFrameScript(...args: Value[]): void {
+      const clip = this.$display;
       for (let i = 0; i + 1 < args.length; i += 2) {
         const frame = s.rt.toInt(args[i]) + 1;
         if (args[i + 1] === null || args[i + 1] === undefined) {
@@ -44,19 +41,23 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
           clip.frameScripts.set(frame, args[i + 1]);
         }
       }
-    }),
-    "flash.display::MovieClip#get:currentFrame": plain(function (this: AsObject) {
-      return Math.max(1, clipOf(this).currentFrame);
-    }),
-    "flash.display::MovieClip#get:totalFrames": plain(function (this: AsObject) {
-      return clipOf(this).totalFrames;
-    }),
-    "flash.display::MovieClip#get:framesLoaded": plain(function (this: AsObject) {
-      return clipOf(this).totalFrames;
-    }),
-    "flash.display::MovieClip#get:currentLabel": plain(function (this: AsObject) {
-      const clip = clipOf(this);
-      // The nearest label at or before the frame.
+    }
+
+    get currentFrame(): number {
+      return Math.max(1, this.$display.currentFrame);
+    }
+
+    get totalFrames(): number {
+      return this.$display.totalFrames;
+    }
+
+    get framesLoaded(): number {
+      return this.$display.totalFrames;
+    }
+
+    /** The nearest label at or before the frame. */
+    get currentLabel(): Value {
+      const clip = this.$display;
       let label: string | null = null;
       let at = 0;
       for (const [name, frame] of clip.timeline.labels) {
@@ -67,9 +68,10 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
       }
 
       return label;
-    }),
-    "flash.display::MovieClip#get:currentFrameLabel": plain(function (this: AsObject) {
-      const clip = clipOf(this);
+    }
+
+    get currentFrameLabel(): Value {
+      const clip = this.$display;
       for (const [name, frame] of clip.timeline.labels) {
         if (frame === clip.currentFrame) {
           return name;
@@ -77,43 +79,61 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
       }
 
       return null;
-    }),
-    "flash.display::MovieClip#get:isPlaying": plain(function (this: AsObject) {
-      return clipOf(this).playing;
-    }),
-    "flash.display::MovieClip#play": plain(function (this: AsObject) {
-      clipOf(this).playing = true;
-    }),
-    "flash.display::MovieClip#stop": plain(function (this: AsObject) {
-      clipOf(this).playing = false;
-    }),
-    "flash.display::MovieClip#nextFrame": plain(function (this: AsObject) {
-      const clip = clipOf(this);
+    }
+
+    get isPlaying(): boolean {
+      return this.$display.playing;
+    }
+
+    play(): void {
+      this.$display.playing = true;
+    }
+
+    stop(): void {
+      this.$display.playing = false;
+    }
+
+    nextFrame(): void {
+      const clip = this.$display;
       goto(clip, clip.currentFrame + 1);
       clip.playing = false;
-    }),
-    "flash.display::MovieClip#prevFrame": plain(function (this: AsObject) {
-      const clip = clipOf(this);
+    }
+
+    prevFrame(): void {
+      const clip = this.$display;
       goto(clip, clip.currentFrame - 1);
       clip.playing = false;
-    }),
-    "flash.display::MovieClip#gotoAndPlay": plain(function (this: AsObject, frame: Value) {
-      const clip = clipOf(this);
+    }
+
+    gotoAndPlay(frame: Value): void {
+      const clip = this.$display;
       goto(clip, frameOf(clip, frame));
       clip.playing = true;
-    }),
-    "flash.display::MovieClip#gotoAndStop": plain(function (this: AsObject, frame: Value) {
-      const clip = clipOf(this);
+    }
+
+    gotoAndStop(frame: Value): void {
+      const clip = this.$display;
       goto(clip, frameOf(clip, frame));
       clip.playing = false;
-    }),
-    "flash.display::MovieClip#get:enabled": plain(function (this: AsObject) {
+    }
+
+    get enabled(): boolean {
       return this.$enabled ?? true;
-    }),
-    "flash.display::MovieClip#set:enabled": plain(function (this: AsObject, v: Value) {
+    }
+
+    set enabled(v: Value) {
       this.$enabled = !!v;
-    }),
-    "flash.display::MovieClip#get:trackAsMenu": plain(() => false),
-    "flash.display::MovieClip#set:trackAsMenu": plain(() => undefined),
-  };
+    }
+
+    get trackAsMenu(): boolean {
+      return false;
+    }
+
+    set trackAsMenu(_v: Value) {
+      // No menus.
+    }
+  }
+
+  avm2.registerNativeClass(natives, "flash.display::MovieClip", MovieClipNatives);
+  return natives;
 }
