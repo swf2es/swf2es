@@ -620,6 +620,33 @@ and `drawGraphicsData` wait. An adl case draws in a `Shape` and in a
 `Sprite` with a child, compared by pixels; the corpus's `graphics_*`
 tests, which trace nothing, check that nothing throws.
 
+### Bounds and hit tests
+
+A display object's bounds are what it draws and what its children draw,
+in its own space: for a shape from the SWF the rectangle DefineShape
+recorded, with the lines' widths for `getBounds`, `width` and `height`
+and without them (`edgeBounds`, where the shape has one) for `getRect`,
+as Flash reports the recorded rectangles even where the shape's edges
+disagree with them (the corpus's `displayobject_getrect`); for a
+drawing, the extent of its paths, curves at their true extremes, with
+the lines' half widths and square caps for the bounds with lines; for a
+container, the union of its children's bounds, each through the child's
+matrix, with its own drawing's. `width` and `height` are the bounds
+through the object's own matrix, in its parent's space, so a turned
+square is wider than its side (the `draws` case); setting one scales the
+object so that the bounds come to the value, and leaves it when the
+bounds have no extent to scale, as Flash. `getBounds(target)` and
+`getRect(target)` take the bounds through the matrices up to the stage
+and back down into the target's, or stay in the object's own for null.
+
+`hitTestPoint(x, y)` takes a point of the stage's space: against the
+bounds, or, asked for the shape, against what is drawn, a fill where the
+point lies inside an odd number of its contours and a line where it is
+within half the width of a path, children included; `hitTestObject`
+asks whether two objects' bounds in the stage's space overlap. The
+corpus's `displayobject_width`, `_height`, `_getrect`, `_hittestpoint`
+and `_hittestobject` are the reference, with the `draws` case's sizes.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
