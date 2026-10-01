@@ -3,19 +3,10 @@
 // compiler's domain forked and the runtime resolving names by domain.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
+import { qualify } from "../../toplevel.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
-
-/** "pkg.Name" or "pkg::Name", as getDefinition takes either, as "pkg::Name". */
-function qualify(name: string): string {
-  if (name.includes("::")) {
-    return name;
-  }
-
-  const i = name.lastIndexOf(".");
-  return i < 0 ? name : `${name.slice(0, i)}::${name.slice(i + 1)}`;
-}
 
 export function applicationDomainNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};

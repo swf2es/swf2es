@@ -83,6 +83,8 @@ export class Scripting {
   stageWidth = 0;
   stageHeight = 0;
   frameRate = 24;
+  /** Frames played since the start, the clock getTimer reads. */
+  frames = 0;
   quality = "HIGH";
   private readonly hashes: string[] = [];
 
@@ -821,6 +823,7 @@ export class Scripting {
    */
   frame(root: DisplayObject, entered = true): void {
     if (entered) {
+      this.frames++;
       this.broadcast("enterFrame");
     }
 
