@@ -38,3 +38,59 @@ test("a store tells the Bitmaps showing it of a change, and lets go of one dropp
   kept.store = null;
   assert.equal(store.views.size, 0);
 });
+
+test("pixelDissolve visits pixels in Flash's order and returns its seeds", async () => {
+  const { pixelDissolve } = await import("../../../packages/player/dist/bitmap-ops.js");
+  // What Flash writes and returns call by call under adl, numPixels 1 from seed 0.
+  const runs: [number, number, string][] = [
+    [
+      4,
+      4,
+      "[0,12]>6 [6]>3 [3]>13 [13]>10 [10]>5 [5]>14 [14]>7 [7]>15 [15]>11 [11]>9 [9]>8 [8]>4 [4]>2 [2]>1 [1]>12 []>6",
+    ],
+    [
+      10,
+      10,
+      "[0,17]>179 [64]>50 [32]>25 [19]>180 [57]>147 [93]>241 [60]>48 [30]>24 [18]>12 [6]>3 [3]>185 [72]>57",
+    ],
+    [
+      3,
+      5,
+      "[0,8]>5 [4]>22 [13]>28 [11]>7 [9]>6 [5]>3 [10]>18 [14]>9 [7]>16 [12]>8 [6]>4 [3]>2 [2]>1 [1]>20 []>5",
+    ],
+    [7, 1, "[]>0 []>0"],
+  ];
+  for (const [w, h, expected] of runs) {
+    const store = new BitmapStore(w, h, false, 0);
+    let seed = 0;
+    const got: string[] = [];
+    for (const _ of expected.split(" ")) {
+      const before = store.pixels.slice();
+      seed = pixelDissolve(
+        store,
+        store,
+        { x: 0, y: 0, width: w, height: h },
+        0,
+        0,
+        seed,
+        1,
+        0xffff0000,
+      );
+      const hit = [...before.keys()].filter((i) => store.pixels[i] !== before[i]);
+      got.push(`[${hit.join(",")}]>${seed}`);
+    }
+
+    assert.equal(got.join(" "), expected, `${w}x${h}`);
+  }
+});
+
+test("threshold takes its six operations and no name Object's prototype has", async () => {
+  const { isThresholdOperation } = await import("../../../packages/player/dist/bitmap-ops.js");
+  for (const op of ["<", "<=", ">", ">=", "==", "!="]) {
+    assert.ok(isThresholdOperation(op), op);
+  }
+
+  for (const op of ["constructor", "toString", "hasOwnProperty", "__proto__", "=", "equals"]) {
+    assert.ok(!isThresholdOperation(op), op);
+  }
+});

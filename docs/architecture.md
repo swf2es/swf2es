@@ -889,8 +889,11 @@ as c · (a + 1) >> 8, leaving a pixel of alpha 0 alone; `merge` is
 nothing clamped; `copyChannel` from more than one channel copies 0;
 `getColorBoundsRect` gives an empty rect where the one pixel found is the
 origin; a point or rect `hitTest` never hits alpha 0; `pixelDissolve`
-writes numPixels + 1 pixels from where the last call stopped (its order
-of positions is Flash's own, unrecorded, so the player walks the rect).
+visits the rect, clipped to both bitmaps, in Flash's own order, a Galois
+LFSR over ⌈log2 w⌉ + ⌈log2 h⌉ bits whose taps for every width from 2 to
+26 bits were read off adl, a state standing for (s & (2^bw − 1), s >> bw)
+and skipped outside the rect; each call writes numPixels and returns the
+next state, a seed of 0 writing the origin first.
 `draw`
 of a display object into a bitmap, the filters, and the SWF's bitmap
 tags (`DefineBitsLossless`, `DefineBitsJPEG2` and 3) as characters

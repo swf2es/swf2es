@@ -233,11 +233,11 @@ function forEachCopied(
 
   const sx = s.x + (d.x - dx);
   const sy = s.y + (d.y - dy);
-  const pixels = source === store ? store.pixels.slice() : source.pixels;
+  const [pixels, pw, ox, oy] = readFrom(source, store, sx, sy, d.width, d.height);
   for (let row = 0; row < d.height; row++) {
     for (let i = 0; i < d.width; i++) {
       const to = (d.y + row) * store.width + d.x + i;
-      const p = unmultiply(pixels[(sy + row) * source.width + sx + i]);
+      const p = unmultiply(pixels[(sy - oy + row) * pw + sx - ox + i]);
       store.pixels[to] = store.premultiplied(f(p, unmultiply(store.pixels[to])));
     }
   }
@@ -277,7 +277,8 @@ const OPERATIONS: Record<string, (a: number, b: number) => boolean> = {
 
 /** Whether `op` is one threshold takes. */
 export function isThresholdOperation(op: string): boolean {
-  return op in OPERATIONS;
+  // Its own keys only: "constructor" and the rest of Object's are not operations.
+  return Object.hasOwn(OPERATIONS, op);
 }
 
 /**
@@ -315,12 +316,12 @@ export function threshold(
 
   const sx = s.x + (d.x - dx);
   const sy = s.y + (d.y - dy);
-  const pixels = source === store ? store.pixels.slice() : source.pixels;
+  const [pixels, pw, ox, oy] = readFrom(source, store, sx, sy, d.width, d.height);
   const fill = store.premultiplied(color >>> 0);
   for (let row = 0; row < d.height; row++) {
     for (let i = 0; i < d.width; i++) {
       const to = (d.y + row) * store.width + d.x + i;
-      const raw = pixels[(sy + row) * source.width + sx + i];
+      const raw = pixels[(sy - oy + row) * pw + sx - ox + i];
       if (test((unmultiply(raw) & mask) >>> 0, target)) {
         store.pixels[to] = fill;
         count++;
@@ -442,14 +443,30 @@ export function alphaAt(store: BitmapStore, x: number, y: number): number {
 }
 
 /**
- * pixelDissolve: numPixels + 1 pixels of the source rect, clipped to both
- * bitmaps, written to the destination, the fill colour where the source
- * is the destination, starting at the seed's position and going on; the
- * position reached is the next seed, so a call starts where the last
- * stopped and rewrites that pixel, as Flash's counts in Ruffle's
- * bitmapdata_pixeldissolve show (numPixels * calls + 1). Flash's order of
- * positions is its own pseudo-random one, which no trace records; this
- * walks the rect row by row.
+ * Flash's pixelDissolve taps, by the state's width in bits: a Galois LFSR,
+ * s >> 1, xor the tap where s was odd, read off adl for every width a
+ * BitmapData can have (2 to 26 bits).
+ */
+const DISSOLVE_TAPS = [
+  0, 0, 3, 6, 12, 20, 48, 96, 184, 272, 576, 1280, 3232, 6912, 13568, 24576, 46080, 73728, 132096,
+  466944, 589824, 1310720, 3145728, 4325376, 14155776, 18874368, 59244544,
+];
+
+/** Bits to number 0..n - 1: ceil(log2(n)). */
+function bitsFor(n: number): number {
+  return n <= 1 ? 0 : 32 - Math.clz32(n - 1);
+}
+
+/**
+ * pixelDissolve as Flash does it, fitted under adl: a state of
+ * ceil(log2 w) + ceil(log2 h) bits stands for the pixel (s & (2^bw - 1),
+ * s >> bw) of the rect, a state outside it skipped; each call writes
+ * numPixels pixels, from the seed on, and returns the state after the
+ * last, raw, so the next call goes on from there. A seed of 0 writes the
+ * pixel at the origin first and goes on from the tap, which is why n
+ * calls of 1 from 0 write n + 1 (Ruffle's bitmapdata_pixeldissolve). A
+ * pixel takes the fill colour where the source is the destination, else
+ * the source's; a rect a pixel high or wide dissolves nothing.
  */
 export function pixelDissolve(
   store: BitmapStore,
@@ -461,35 +478,104 @@ export function pixelDissolve(
   count: number,
   fill: number,
 ): number {
-  const s = source.clip(rect);
-  if (!s) {
+  // Over the rect clipped to the source and then to the destination, as the copies are.
+  const sc = source.clip(rect);
+  if (!sc) {
     return 0;
   }
 
-  dx += s.x - rect.x;
-  dy += s.y - rect.y;
-  const d = store.clip({ x: dx, y: dy, width: s.width, height: s.height });
-  if (!d) {
+  const ox = dx + (sc.x - rect.x);
+  const oy = dy + (sc.y - rect.y);
+  const dc = store.clip({ x: ox, y: oy, width: sc.width, height: sc.height });
+  if (!dc) {
     return 0;
   }
 
-  const sx = s.x + (d.x - dx);
-  const sy = s.y + (d.y - dy);
-  const total = d.width * d.height;
+  const rx = sc.x + (dc.x - ox);
+  const ry = sc.y + (dc.y - oy);
+  dx = dc.x;
+  dy = dc.y;
+  const { width: w, height: h } = dc;
+  if (w <= 1 || h <= 1) {
+    return 0;
+  }
+
+  const bw = bitsFor(w);
+  const bits = bw + bitsFor(h);
+  const tap = DISSOLVE_TAPS[bits] ?? 0;
+  const mask = 2 ** bits - 1;
+  const xMask = (1 << bw) - 1;
   const color = store.premultiplied(fill >>> 0);
-  let at = Math.abs(Math.trunc(seed)) % total;
-  for (let k = 0; k <= Math.min(count, total); k++) {
-    if (k > 0) {
-      at = (at + 1) % total;
+  const next = (s: number) => (s & 1 ? Math.floor(s / 2) ^ tap : Math.floor(s / 2));
+
+  // A position of the rect, written where it lies in both bitmaps.
+  const write = (state: number) => {
+    const px = state & xMask;
+    const py = Math.floor(state / 2 ** bw);
+    const sx = rx + px;
+    const sy = ry + py;
+    const tx = dx + px;
+    const ty = dy + py;
+    if (
+      sx < 0 ||
+      sy < 0 ||
+      sx >= source.width ||
+      sy >= source.height ||
+      tx < 0 ||
+      ty < 0 ||
+      tx >= store.width ||
+      ty >= store.height
+    ) {
+      return;
     }
 
-    const col = at % d.width;
-    const row = (at - col) / d.width;
-    const to = (d.y + row) * store.width + d.x + col;
-    store.pixels[to] =
-      source === store ? color : source.pixels[(sy + row) * source.width + sx + col];
+    store.pixels[ty * store.width + tx] =
+      source === store ? color : source.pixels[sy * source.width + sx];
+  };
+  const inside = (state: number) => (state & xMask) < w && Math.floor(state / 2 ** bw) < h;
+
+  let s = Math.abs(Math.trunc(seed)) & mask;
+  if (s === 0) {
+    write(0);
+    s = tap;
+  }
+
+  for (let k = 0; k < count; k++) {
+    // Every state but 0 comes round within 2^bits steps, so this ends.
+    while (!inside(s)) {
+      s = next(s);
+    }
+
+    write(s);
+    s = next(s);
   }
 
   store.changed();
-  return at;
+  return s;
+}
+
+/**
+ * The pixels a copy reads, with their row width and origin: the source's
+ * own, or where the source is the destination, a copy of the rect alone,
+ * so a one-pixel operation does not copy the whole store.
+ */
+function readFrom(
+  source: BitmapStore,
+  store: BitmapStore,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): [Uint32Array, number, number, number] {
+  if (source !== store) {
+    return [source.pixels, source.width, 0, 0];
+  }
+
+  const copy = new Uint32Array(w * h);
+  for (let row = 0; row < h; row++) {
+    const from = (y + row) * source.width + x;
+    copy.set(source.pixels.subarray(from, from + w), row * w);
+  }
+
+  return [copy, w, x, y];
 }
