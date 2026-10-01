@@ -384,10 +384,8 @@ own; the bindings a class gets in its interfaces' namespaces are not
 members and do not show; a binding above the caller's API version is
 left out, the caller taken to be the latest player's, as avmshell runs
 (a SWF's own version is not yet consulted), which hides the builtins'
-`[API(CONFIG::VM_INTERNAL)]` members: the oracle's SDK compiled them
-with the table of AIR 15's time, whose VM_INTERNAL mark is 42 where
-`core/api-versions.h` here has 52, so the compiler reads a builtin's
-mark from 42 up as internal. For that the compiler emits what the
+`[API(CONFIG::VM_INTERNAL)]` members, marked 52 as `core/api-versions.h`
+has it. For that the compiler emits what the
 runtime needed nothing of before: each method's signature beside its
 factory (return type, parameter types, how many are required), the
 constructor's in the class descriptor, and a class's and its traits'
@@ -433,7 +431,16 @@ avmplus' standard library (`Object`, `Array`, `String`, `Math`, `Date`,
 `RegExp`, `JSON`, `Vector`, `ByteArray` and so on) is mostly AS3 compiled
 into `builtin.abc`; only its `native` methods are C++. swf2es compiles
 `builtin.abc` itself and implements the natives in TypeScript, matched by
-class and method name as avmplus matches its C++ ones. The standard library
+class and method name as avmplus matches its C++ ones. The `builtin.abc`
+and `shell_toplevel.abc` the runtime, the player and the tests load are
+the avmplus submodule's own, `oracle/avmplus/generated/`, built by its
+`core/builtin.py` from its sources; the oracle's SDK ships older ones,
+of AIR 15's time, without `Array.removeAt` and `insertAt` and their
+Vector counterparts (SWF 30's), and its avmshell keeps its own copy
+inside the binary, so what avmshell runs is the older library whatever
+file is beside it. The two differ in those ten natives alone, and where
+the submodule's library is newer than the oracle's avmshell, the oracle
+cannot judge; Flash's traces in Ruffle's corpus do. The standard library
 never changes for a compiler version, so it is compiled once at build time
 and shipped precompiled next to the runtime, keyed by its hash like any ABC.
 Its AS3 sources are MPL-2.0: the compiled library stays MPL, in its own
