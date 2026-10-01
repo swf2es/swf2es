@@ -450,6 +450,28 @@ runs, parents' scripts before their children's (`nested`); the clips
 whose scripts are to run are fixed as the phase begins, so one a script
 removes still runs its own (`loads`, `orphans`).
 
+A `PlaceObject` with the move flag that names another character at an
+occupied depth makes no new object in Flash: the child stays, the same
+AS3 object with its matrix, sign and angle, and only a `Shape` no script
+has touched takes the new shape's graphic. A clip, a touched `Shape`,
+and a `Shape` a sprite is placed over all stay as they were. What
+touches, by the `replaces` case's 26 depths: the transform properties
+(`x = x` counts), `alpha`, `filters`, `blendMode`, `scrollRect`,
+`opaqueBackground` and `scale9Grid`, each set to what it was, the
+`transform` setters, and `cacheAsBitmap` set true; what does not:
+`visible`, `mask` and `cacheAsBitmap` set to what they were (the player
+takes a change of those as a touch), `metaData`,
+`accessibilityProperties`, and `name`, which Flash refuses for a
+timeline-placed object with error #2078. The player keeps a `scripted`
+flag on the display object for that. A goto
+forward does the same, whatever the frames between named at the depth;
+a rewind keeps the child only if the character the frames finally name
+is its own, and makes a new one for another (Ruffle's
+`place_object_replace_2`: the same object through two forward jumps, a
+new one on the rewind that ends on the other shape). Flash's matrix is
+exact at the quarter turns, 0 and not the doubles' cosine of 90°, so the
+player's is.
+
 A clip a script takes off the display list plays on in Flash, an
 orphan, and so does one a script makes with `new` and never adds: its
 timeline advances and its frame scripts run each frame, with `parent`
@@ -702,6 +724,33 @@ not a frame later each (the corpus's `timer_finished`).
 `setTimeout` and `setInterval` are AS3 over `Timer`. The corpus's
 `timer*` tests, Flash's traces of timers against frames, are the
 reference, with a node test of the clock and `advance`.
+
+### Scale and rotation
+
+Flash keeps a display object's `scaleX`, `scaleY` and `rotation` apart
+from its matrix, and the player does the same: the four are the object's
+own, the matrix is made from them, and a matrix set whole, by a
+`PlaceObject` or `transform.matrix`, is taken apart into them, the
+scales by the lengths of its columns and the rotation by the angle of
+the first, a skew by the second's. So `scaleX = -0.5` reads back as
+-0.5 and halves the width, where a matrix taken apart would read 0.5 at
+a half turn; and `width` sets `scaleX` to the value over the object's
+untransformed width, positive, from a scale of 0 as well as from any
+other, and a negative width changes nothing, as Flash has it (the
+corpus's `displayobject_width` and `_height`, 4852 and 6052 lines of
+ramps, in twips: a drawing thinner than one is no width, so `nan_scale`'s
+`Number.MIN_VALUE` square is as good as none). A scale set stretches its
+column of the matrix in proportion, so the other column stays exactly as
+it was, and a scale set to NaN reads back NaN and zeroes its column; a
+NaN rotation reads back NaN and leaves the matrix; a NaN position is 0
+(`displayobject_invalid_floats`). Rotation is reported in Flash's
+range, -180 to 180, both ends as given. The ramps
+add to what the getters return, so each step's value rests on the one
+before, and they part from the player where Flash's arithmetic does from
+IEEE's: Flash Player's `-0.9981818181818182 + 1/550` is not the nearest
+double to the sum, which the 32-bit player's x87 extended precision
+explains, as it does the avmshell's (above); swf2es follows IEEE
+doubles there too, so those two tests cannot be matched to the end.
 
 ## Testing against oracles
 

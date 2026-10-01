@@ -91,8 +91,8 @@ export function transformNatives(s: Scripting): avm2.Natives {
     set matrix(v: Value) {
       // null puts Flash's object into 3D, which waits.
       if (v) {
-        this.$display.matrix = matrixOf(s, v as AsObject);
-        this.$display.invalidate(TRANSFORM);
+        this.$display.setMatrix(matrixOf(s, v as AsObject));
+        this.$display.scripted = true;
       }
     }
 
@@ -103,6 +103,7 @@ export function transformNatives(s: Scripting): avm2.Natives {
     set colorTransform(v: Value) {
       if (v) {
         this.$display.colorTransform = colorOf(s, v as AsObject);
+        this.$display.scripted = true;
         this.$display.invalidate(TRANSFORM);
       }
     }

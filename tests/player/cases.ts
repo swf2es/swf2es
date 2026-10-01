@@ -410,6 +410,63 @@ function gotoChild(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Two squares placed on frame 1, given a negative scale and a turn by
+// scripts/Replaces.as, and replaced by another character on frame 3 with no
+// matrix in the place: what the new children report of their transforms.
+function replaces(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 300,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000, 400),
+      square(2, 0x0000ff, 400),
+      w.sprite(3, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.sprite(4, 1, [w.place({ depth: 1, character: 2 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "Replaces"),
+      w.symbolClass([[0, "Main"]]),
+      w.place({ depth: 1, character: 1, matrix: { tx: 1200, ty: 400 } }),
+      w.place({ depth: 2, character: 1, matrix: { tx: 2400, ty: 400 } }),
+      w.place({ depth: 3, character: 1, matrix: { tx: 3600, ty: 400 } }),
+      w.place({ depth: 4, character: 3, matrix: { tx: 1200, ty: 1200 } }),
+      w.place({ depth: 5, character: 1, matrix: { tx: 2400, ty: 1200 } }),
+      w.place({ depth: 6, character: 3, matrix: { tx: 3600, ty: 1200 } }),
+      w.place({ depth: 7, character: 1, matrix: { tx: 600, ty: 2000 } }),
+      w.place({ depth: 8, character: 1, matrix: { tx: 1600, ty: 2000 } }),
+      w.place({ depth: 9, character: 1, matrix: { tx: 2600, ty: 2000 } }),
+      w.place({ depth: 10, character: 1, matrix: { tx: 3600, ty: 2000 } }),
+      w.place({ depth: 11, character: 1, matrix: { tx: 600, ty: 2800 } }),
+      w.place({ depth: 12, character: 1, matrix: { tx: 1600, ty: 2800 } }),
+      w.place({ depth: 13, character: 1, matrix: { tx: 2600, ty: 2800 } }),
+      w.place({ depth: 14, character: 1, matrix: { tx: 600, ty: 3600 } }),
+      w.place({ depth: 15, character: 1, matrix: { tx: 1600, ty: 3600 } }),
+      w.place({ depth: 16, character: 1, matrix: { tx: 2600, ty: 3600 } }),
+      w.place({ depth: 17, character: 1, matrix: { tx: 200, ty: 4400 } }),
+      w.place({ depth: 18, character: 1, matrix: { tx: 1000, ty: 4400 } }),
+      w.place({ depth: 19, character: 1, matrix: { tx: 1800, ty: 4400 } }),
+      w.place({ depth: 20, character: 1, matrix: { tx: 2600, ty: 4400 } }),
+      w.place({ depth: 21, character: 1, matrix: { tx: 3400, ty: 4400 } }),
+      w.place({ depth: 22, character: 1, matrix: { tx: 200, ty: 5200 } }),
+      w.place({ depth: 23, character: 1, matrix: { tx: 1000, ty: 5200 } }),
+      w.place({ depth: 24, character: 1, matrix: { tx: 1800, ty: 5200 } }),
+      w.place({ depth: 25, character: 1, matrix: { tx: 2600, ty: 5200 } }),
+      w.place({ depth: 26, character: 1, matrix: { tx: 3400, ty: 5200 } }),
+      w.showFrame(),
+      w.showFrame(),
+      ...[
+        1, 2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+      ].map((depth) => w.place({ depth, move: true, character: 2 })),
+      w.place({ depth: 4, move: true, character: 4 }),
+      w.place({ depth: 5, move: true, character: 4 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A Box placed by the timeline on frame 1 and removed on frame 2, and one a
 // script adds and removes, each listening for the display list's events
 // (scripts/Added.as).
@@ -546,6 +603,15 @@ export const cases: PlayerCase[] = [
     script: "Goto",
     frames: 3,
     capture: [1, 2, 3],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "replaces",
+    swf: replaces,
+    script: "Replaces",
+    frames: 3,
+    capture: [1, 3],
     tolerance: 0,
     maxOutliers: 0,
   },
