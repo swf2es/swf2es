@@ -1,1 +1,2 @@
 drawn (x=10, y=10, w=185, h=80) 61.25 61.25 20 30
+hit true true false

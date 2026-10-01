@@ -11,7 +11,10 @@ package {
   import flash.display.Sprite;
 
   public class Main extends MovieClip {
+    private var wound:Shape;
+
     public function Main() {
+      addFrameScript(1, frame2);
       var shape:Shape = new Shape();
       var g = shape.graphics;
       // A fill with a stroke begun inside it: the stroke draws over the fill.
@@ -46,7 +49,7 @@ package {
 
       // A square inside another, both the same way round: the winding rule
       // says whether the inner is filled (non-zero) or a hole (even-odd).
-      var wound:Shape = new Shape();
+      wound = new Shape();
       wound.graphics.beginFill(0x009999);
       wound.graphics.drawPath(
         Vector.<int>([1, 2, 2, 2, 1, 2, 2, 2]),
@@ -114,6 +117,11 @@ package {
       // The rectangle without the lines' widths, and the turned sprite's size: Flash's
       // bounds of lines are half a pixel wider than their geometry, by a rule not known.
       trace("drawn", shape.getRect(shape), sprite.width, sprite.height, lone.width, lone.height);
+    }
+
+    private function frame2():void {
+      // Hit-tested by shape once drawn: the ring of the non-zero square, its inner square, and the even-odd one's inner square.
+      trace("hit", wound.hitTestPoint(10 + 5, 100 + 5, true), wound.hitTestPoint(10 + 15, 100 + 15, true), wound.hitTestPoint(10 + 55, 100 + 15, true));
     }
   }
 }

@@ -655,8 +655,13 @@ the matrix and loses the sign, which is where the corpus's
 Flash does (the corpus's `displayobject_hittestpoint_root`: moving the
 root moves nothing under the point, moving a loaded SWF's root does):
 against the bounds, or, asked for the shape, against what is drawn, a
-fill where the point lies inside an odd number of its contours and a
-line where it is within half the width of a path, children included.
+fill where the point is inside by the fill's winding rule, the parity
+of its contours around the point or the sum of their orientations, as
+the renderer fills it (the `draws` case hits the inner square of the
+non-zero pair and not the even-odd one's), and a line where it is within
+half the width of a path, children included. Flash finds nothing on an
+object not yet drawn and off the stage, as the oracle's harness has a
+document class in its constructor; the player does not model that.
 The shape test samples half a pixel to the left of the point, on its
 row, which is how Flash's answers on a shape's edges come out: a point
 on its right edge hits, one on its left, top or bottom edge does not

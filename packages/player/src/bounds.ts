@@ -13,7 +13,7 @@ import {
   transformRect,
   union,
 } from "./geometry.js";
-import { flatten, inside, type ShapeLayer } from "./shapes.js";
+import { flatten, inside, orientation, type ShapeLayer } from "./shapes.js";
 
 const TWIPS = 20;
 const IDENTITY: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
@@ -131,16 +131,20 @@ function drawnAt(d: DisplayObject, x: number, y: number): boolean {
   const layers: ShapeLayer[] =
     d.drawing?.layers ?? (d instanceof ShapeObject ? (d.shape?.layers ?? []) : []);
   for (const layer of layers) {
-    for (const { contours } of layer.fills) {
-      // Inside an odd number of the fill's contours: the even-odd rule across them.
+    for (const { contours, winding } of layer.fills) {
+      // Inside by the fill's rule: an odd number of its contours around the
+      // point for even-odd, a non-zero sum of their orientations for non-zero.
       let crossings = 0;
+      let sum = 0;
       for (const contour of contours) {
-        if (inside(flatten(contour), x, y)) {
+        const points = flatten(contour);
+        if (inside(points, x, y)) {
           crossings++;
+          sum += orientation(points);
         }
       }
 
-      if (crossings % 2) {
+      if (winding === "nonZero" ? sum !== 0 : crossings % 2) {
         return true;
       }
     }
