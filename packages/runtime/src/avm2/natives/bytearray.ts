@@ -18,6 +18,7 @@ import {
   zlibUncompress,
 } from "@swf2es/format";
 import type { AsObject, IndexHook, Runtime, Traits, Value } from "../runtime.js";
+import type { Natives } from "./define.js";
 
 const kGrowthIncr = 4096;
 const kHugeGrowthThreshold = 24 * 1024 * 1024;
@@ -444,8 +445,6 @@ function toNul(bytes: Uint8Array): Uint8Array {
 }
 
 const BOM = (b: Uint8Array) => b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf;
-
-type Natives = Record<string, (rt: Runtime) => (...args: Value[]) => Value>;
 
 /** As ByteArrayObject::algorithmToEnum: zlib, deflate or lzma; null a TypeError, any other an IOError. */
 function algorithmOf(rt: Runtime, algorithm: Value): "zlib" | "deflate" | "lzma" {

@@ -99,6 +99,71 @@ export interface Abc extends AbcDesc {
   scriptStates: Script[];
 }
 
+export interface RuntimeOptions {
+  /** Where trace and print write a line. */
+  print?: (line: string) => void;
+  /**
+   * Behave as the debugger player: error messages carry avmplus' text
+   * ("Error #1009: Cannot access ..."), and System.isDebugger is true. By
+   * default they are the release player's and avmshell's, "Error #1009".
+   */
+  debugger?: boolean;
+}
+
+/** How a class that holds its own elements indexes them. */
+export interface IndexHook {
+  getIndex: (o: AsObject, i: number, rt: Runtime) => Value;
+  setIndex: (o: AsObject, i: number, v: Value, rt: Runtime) => void;
+  hasIndex: (o: AsObject, i: number) => boolean;
+  /** A name's element index, -1 if it names none; the class's own rule, else an array index's. */
+  index?: (o: AsObject, name: string, rt: Runtime) => number;
+}
+
+/**
+ * How a class's instances resolve the names their traits do not bind, in
+ * place of dynamic properties, as XML and XMLList do (E4X's [[Get]] and so
+ * on): each operation, their enumeration, and their equality and +.
+ */
+export interface PropertyHook {
+  get(rt: Runtime, o: AsObject, mn: Multiname): Value;
+  set(rt: Runtime, o: AsObject, mn: Multiname, v: Value): void;
+  delete(rt: Runtime, o: AsObject, mn: Multiname): boolean;
+  has(rt: Runtime, o: AsObject, mn: Multiname): boolean;
+  /** callproperty: what a name calls, looked for as the class does. */
+  callee(rt: Runtime, o: AsObject, mn: Multiname): Value;
+  descendants(rt: Runtime, o: AsObject, mn: Multiname): Value;
+  /** The index after `index` for a for-in, or 0; and the name and value at one. */
+  nextIndex(rt: Runtime, o: AsObject, index: number): number;
+  nextName(rt: Runtime, o: AsObject, index: number): Value;
+  nextValue(rt: Runtime, o: AsObject, index: number): Value;
+  /** ==, when either side is an instance, or undefined to leave it to the rest. */
+  equals(rt: Runtime, a: Value, b: Value): boolean | undefined;
+  /** +, when both sides are an instance or another hooked class's, or undefined. */
+  add(rt: Runtime, a: Value, b: Value): Value;
+  /** An instance's string, as its primitive value. */
+  toString(rt: Runtime, o: AsObject): string;
+  /** An instance as XML text, as esc_xelem writes it. */
+  toXMLString(rt: Runtime, o: AsObject): string;
+}
+
+/** How a builtin class differs from others: allocation, index access, calls and construction. */
+export interface ClassHook {
+  /** How its instances resolve names, as XML's (Traits.properties). */
+  properties?: PropertyHook;
+  create?: (traits: Traits, rt: Runtime) => AsObject;
+  /** Its prototype object, when not an Object: an instance of the class, as Date's (its $it is ready). */
+  prototype?: (rt: Runtime, cls: AsObject) => AsObject;
+  /** Whether its instances refuse any name but their own and an index, as a Vector's (Traits.refusesNames). */
+  refusesNames?: boolean;
+  getIndex?: IndexHook["getIndex"];
+  setIndex?: IndexHook["setIndex"];
+  hasIndex?: IndexHook["hasIndex"];
+  index?: IndexHook["index"];
+  construct?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
+  call?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
+  apply?: (rt: Runtime, factory: AsObject, params: Value[]) => AsObject;
+}
+
 // Binding kinds, as the compiler encodes them: kind | id << 3.
 const BIND_Method = 1;
 const BIND_Var = 2;
@@ -407,17 +472,6 @@ interface GlobalName {
   ns: Namespace;
   version: number;
   script: Script;
-}
-
-export interface RuntimeOptions {
-  /** Where trace and print write a line. */
-  print?: (line: string) => void;
-  /**
-   * Behave as the debugger player: error messages carry avmplus' text
-   * ("Error #1009: Cannot access ..."), and System.isDebugger is true. By
-   * default they are the release player's and avmshell's, "Error #1009".
-   */
-  debugger?: boolean;
 }
 
 /** Thrown for an AS3 exception that is an Error the runtime made, before its class existed. */
@@ -2827,48 +2881,6 @@ export class Runtime {
   }
 }
 
-/** How a class that holds its own elements indexes them. */
-export interface IndexHook {
-  getIndex: (o: AsObject, i: number, rt: Runtime) => Value;
-  setIndex: (o: AsObject, i: number, v: Value, rt: Runtime) => void;
-  hasIndex: (o: AsObject, i: number) => boolean;
-  /** A name's element index, -1 if it names none; the class's own rule, else an array index's. */
-  index?: (o: AsObject, name: string, rt: Runtime) => number;
-}
-
-/**
- * How a class's instances resolve the names their traits do not bind, in
- * place of dynamic properties, as XML and XMLList do (E4X's [[Get]] and so
- * on): each operation, their enumeration, and their equality and +.
- */
-export interface PropertyHook {
-  get(rt: Runtime, o: AsObject, mn: Multiname): Value;
-  set(rt: Runtime, o: AsObject, mn: Multiname, v: Value): void;
-  delete(rt: Runtime, o: AsObject, mn: Multiname): boolean;
-  has(rt: Runtime, o: AsObject, mn: Multiname): boolean;
-  /** callproperty: what a name calls, looked for as the class does. */
-  callee(rt: Runtime, o: AsObject, mn: Multiname): Value;
-  descendants(rt: Runtime, o: AsObject, mn: Multiname): Value;
-  /** The index after `index` for a for-in, or 0; and the name and value at one. */
-  nextIndex(rt: Runtime, o: AsObject, index: number): number;
-  nextName(rt: Runtime, o: AsObject, index: number): Value;
-  nextValue(rt: Runtime, o: AsObject, index: number): Value;
-  /** ==, when either side is an instance, or undefined to leave it to the rest. */
-  equals(rt: Runtime, a: Value, b: Value): boolean | undefined;
-  /** +, when both sides are an instance or another hooked class's, or undefined. */
-  add(rt: Runtime, a: Value, b: Value): Value;
-  /** An instance's string, as its primitive value. */
-  toString(rt: Runtime, o: AsObject): string;
-  /** An instance as XML text, as esc_xelem writes it. */
-  toXMLString(rt: Runtime, o: AsObject): string;
-}
-
-/**
- * Whether a hooked class's hook resolves `mn`, bound to `b`: a name its
- * traits do not bind, an attribute's, or a public name of a method, as a
- * child or attribute of XML hides the methods of its names (as avmplus'
- * getproperty does for XML and XMLList).
- */
 /**
  * A Namespace or QName, which enumerate "uri" and the name this gives
  * ("prefix" or "localName"), as avmplus' nextName does; else null.
@@ -2883,6 +2895,12 @@ function pairOf(o: Value): string | null {
 
 const pairIndex = (index: number) => (index < 2 ? index + 1 : 0);
 
+/**
+ * Whether a hooked class's hook resolves `mn`, bound to `b`: a name its
+ * traits do not bind, an attribute's, or a public name of a method, as a
+ * child or attribute of XML hides the methods of its names (as avmplus'
+ * getproperty does for XML and XMLList).
+ */
 function hookedBinding(b: number, mn: Multiname): boolean {
   if (b === 0 || mn.attribute) {
     return true;
@@ -2891,24 +2909,6 @@ function hookedBinding(b: number, mn: Multiname): boolean {
   return (
     (b & 7) === BIND_Method && mn.namespaces.some((ns) => ns?.kind === NS_Public && ns.uri === "")
   );
-}
-
-/** How a builtin class differs from others: allocation, index access, calls and construction. */
-export interface ClassHook {
-  /** How its instances resolve names, as XML's (Traits.properties). */
-  properties?: PropertyHook;
-  create?: (traits: Traits, rt: Runtime) => AsObject;
-  /** Its prototype object, when not an Object: an instance of the class, as Date's (its $it is ready). */
-  prototype?: (rt: Runtime, cls: AsObject) => AsObject;
-  /** Whether its instances refuse any name but their own and an index, as a Vector's (Traits.refusesNames). */
-  refusesNames?: boolean;
-  getIndex?: IndexHook["getIndex"];
-  setIndex?: IndexHook["setIndex"];
-  hasIndex?: IndexHook["hasIndex"];
-  index?: IndexHook["index"];
-  construct?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
-  call?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
-  apply?: (rt: Runtime, factory: AsObject, params: Value[]) => AsObject;
 }
 
 /** Where output goes by default: the host's console. */
