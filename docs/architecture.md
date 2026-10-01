@@ -703,6 +703,21 @@ not a frame later each (the corpus's `timer_finished`).
 `timer*` tests, Flash's traces of timers against frames, are the
 reference, with a node test of the clock and `advance`.
 
+### Scale and rotation
+
+Flash keeps a display object's `scaleX`, `scaleY` and `rotation` apart
+from its matrix, and the player does the same: the four are the object's
+own, the matrix is made from them, and a matrix set whole, by a
+`PlaceObject` or `transform.matrix`, is taken apart into them, the
+scales by the lengths of its columns and the rotation by the angle of
+the first, a skew by the second's. So `scaleX = -0.5` reads back as
+-0.5 and halves the width, where a matrix taken apart would read 0.5 at
+a half turn; and `width` sets `scaleX` to the value over the object's
+untransformed width, positive, from a scale of 0 as well as from any
+other, and a negative width changes nothing, as Flash has it (the
+corpus's `displayobject_width` and `_height`, 4852 and 6052 lines of
+ramps). Rotation is reported in Flash's range, -180 to 180.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
