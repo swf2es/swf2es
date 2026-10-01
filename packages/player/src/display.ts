@@ -73,6 +73,8 @@ export class ShapeObject extends DisplayObject {
 }
 
 export class Container extends DisplayObject {
+  /** The library whose timeline this is, for what it tells of children going; a script's container has none. */
+  library: Library | null = null;
   /** Its children in render order: index 0 is drawn first, below the rest. */
   readonly children: DisplayObject[] = [];
   /** The children the timeline placed, by depth. */
@@ -105,6 +107,8 @@ export class Container extends DisplayObject {
       return null;
     }
 
+    // The timeline's removal: a script's goes through the natives, which tell of it themselves.
+    this.library?.removing?.(child);
     this.removeChild(child);
     return child;
   }
@@ -156,6 +160,8 @@ interface Jump {
 }
 
 export class MovieClip extends Container {
+  /** A clip always has its library: the one its timeline came from. */
+  declare library: Library;
   /** The frame it shows, 1 the first; 0 before its first frame is entered. */
   currentFrame = 0;
   playing = true;
@@ -168,9 +174,10 @@ export class MovieClip extends Container {
 
   constructor(
     readonly timeline: Timeline,
-    readonly library: Library,
+    library: Library,
   ) {
     super();
+    this.library = library;
   }
 
   get totalFrames(): number {

@@ -60,6 +60,7 @@ export class Player {
     s.frameRate = this.frameRate;
     s.constructAs(this.stage, s.rt.classNamed("flash.display::Stage"));
     this.library.construct = (display, character) => s.construct(display, character);
+    this.library.removing = (display) => s.removing(display);
     s.constructAs(this.root, s.rt.classNamed(s.classes.get(0) ?? "flash.display::MovieClip"));
     this.root.enterFirstFrame();
     s.frame(this.stage, false);

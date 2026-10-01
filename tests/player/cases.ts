@@ -348,6 +348,34 @@ function gotoChild(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A Box placed by the timeline on frame 1 and removed on frame 2, and one a
+// script adds and removes, each listening for the display list's events
+// (scripts/Added.as).
+function addedEvents(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "Added"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Box"],
+      ]),
+      w.place({ depth: 1, character: 2 }),
+      w.showFrame(),
+      w.remove(1),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // What differs from Flash in "moves" is anti-aliasing a quarter pixel off:
 // Flash's curved lines reach further into their shape, and under the skew
 // of frame 2 its lines are a little wider or narrower than Ruffle's rule
@@ -425,6 +453,15 @@ export const cases: PlayerCase[] = [
     script: "GotoChild",
     frames: 2,
     capture: [1, 2],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "added",
+    swf: addedEvents,
+    script: "Added",
+    frames: 2,
+    capture: [1],
     tolerance: 0,
     maxOutliers: 0,
   },

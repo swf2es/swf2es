@@ -194,10 +194,12 @@ package {
 
     private function done():void {
       removeEventListener(Event.EXIT_FRAME, exitFrame);
+      // The run ends before the content goes: what its listeners trace as
+      // it is unloaded is the harness's doing, not the SWF's.
+      trace("\x01swf2es:end " + id);
       loader.unloadAndStop();
       removeChild(loader);
       loader = null;
-      trace("\x01swf2es:end " + id);
       socket.writeByte(2);
       socket.writeUnsignedInt(id);
       socket.flush();

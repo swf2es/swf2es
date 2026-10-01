@@ -50,6 +50,8 @@ export interface Library {
    * first frame is entered on the way, by Sprite's constructChildren.
    */
   construct: ((display: DisplayObject, character: Character) => void) | null;
+  /** Told before a timeline child goes, for the events a script sees; null in an AVM1 movie. */
+  removing: ((display: DisplayObject) => void) | null;
 }
 
 function timelineOf(
@@ -111,5 +113,5 @@ function timelineOf(
 export function readLibrary(swf: Swf): Library {
   const characters = new Map<number, Character>();
   const root = timelineOf(swf.bytes, swf.tags, swf.frameCount, characters);
-  return { characters, root, construct: null };
+  return { characters, root, construct: null, removing: null };
 }

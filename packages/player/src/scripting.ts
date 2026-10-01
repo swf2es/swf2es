@@ -16,7 +16,7 @@ import {
   MovieClip,
   ShapeObject,
 } from "./display.js";
-import { dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
+import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
 import type { Character, Library } from "./timeline.js";
 
@@ -123,6 +123,57 @@ export class Scripting {
     if (parent && display.name) {
       this.rt.setProperty(parent, avm2.qname(avm2.publicNs, display.name), object);
     }
+
+    this.added(display);
+  }
+
+  /** Whether `d` is on the display list: under the stage. */
+  onStage(d: DisplayObject): boolean {
+    for (let o: DisplayObject | null = d; o; o = o.parent) {
+      if (o === this.stage) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * `display` has a parent now: ADDED to it, bubbling, and, if it is on
+   * the display list, ADDED_TO_STAGE to it and each descendant, in tree
+   * order, as Flash dispatches them.
+   */
+  added(display: DisplayObject): void {
+    if (display.object) {
+      dispatchEvent(this, display.object, this.event("added", true));
+    }
+
+    if (this.onStage(display)) {
+      this.eachObject(display, (o) => dispatchEvent(this, o, this.event("addedToStage")));
+    }
+  }
+
+  /** `display` is about to lose its parent: REMOVED, bubbling, and REMOVED_FROM_STAGE through the subtree if it was on the display list. */
+  removing(display: DisplayObject): void {
+    if (display.object) {
+      dispatchEvent(this, display.object, this.event("removed", true));
+    }
+
+    if (this.onStage(display)) {
+      this.eachObject(display, (o) => dispatchEvent(this, o, this.event("removedFromStage")));
+    }
+  }
+
+  private eachObject(display: DisplayObject, f: (o: AsObject) => void): void {
+    if (display.object) {
+      f(display.object);
+    }
+
+    if (display instanceof Container) {
+      for (const child of [...display.children]) {
+        this.eachObject(child, f);
+      }
+    }
   }
 
   /** Construct `cls` for `display`: the allocation hook takes it as the instance's other face. */
@@ -144,10 +195,11 @@ export class Scripting {
     name: string;
     base: { name: string; base: unknown } | null;
   }): DisplayObject {
-    const library = this.library ?? {
+    const library: Library = this.library ?? {
       characters: new Map(),
       root: EMPTY_TIMELINE,
       construct: null,
+      removing: null,
     };
     for (let t: typeof traits | null = traits; t; t = t.base as typeof traits | null) {
       const symbol = this.symbols.get(t.name);

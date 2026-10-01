@@ -42,8 +42,22 @@ export function containerNatives(s: Scripting): avm2.Natives {
       }
     }
 
+    // Out of another parent first, with its events; within the same one, a move only.
+    const moved = d.parent === c;
+    if (d.parent && !moved) {
+      s.removing(d);
+    }
+
     c.addChildAt(d, index);
+    if (!moved) {
+      s.added(d);
+    }
+
     return v;
+  };
+  const remove = (c: Container, d: DisplayObject): void => {
+    s.removing(d);
+    c.removeChild(d);
   };
 
   class DisplayObjectContainerNatives {
@@ -68,14 +82,14 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     removeChild(child: Value): Value {
       const c = this.$display;
-      c.removeChild(ownChild(c, child));
+      remove(c, ownChild(c, child));
       return child;
     }
 
     removeChildAt(index: Value): Value {
       const c = this.$display;
       const d = c.children[indexIn(c, index)];
-      c.removeChild(d);
+      remove(c, d);
       return d.object;
     }
 
@@ -89,7 +103,7 @@ export function containerNatives(s: Scripting): avm2.Natives {
       }
 
       for (const d of c.children.slice(from, to)) {
-        c.removeChild(d);
+        remove(c, d);
       }
     }
 
