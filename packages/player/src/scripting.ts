@@ -64,6 +64,8 @@ export class Scripting {
    * does once collected. One the timeline took is kept for its frame only.
    */
   private orphans: { ref: WeakRef<DisplayObject>; serial: number; keep: boolean }[] = [];
+  /** Display objects scripts made with `new` this frame: their first frame's script runs after everything else's, and they are orphans after. */
+  private fresh: DisplayObject[] = [];
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
   pending: DisplayObject | null = null;
   /** The stage, once the player has made it, and the root it holds. */
@@ -231,16 +233,37 @@ export class Scripting {
       this.eachObject(display, (o) => dispatchEvent(this, o, this.event("removedFromStage")));
     }
 
-    if (display.object) {
-      this.orphans.push({ ref: new WeakRef(display), serial: display.serial, keep: !byTimeline });
-    }
-
+    this.orphan(display, !byTimeline);
     const parent = display.parent?.object;
     if (byTimeline && parent && display.name) {
       const name = avm2.qname(avm2.publicNs, display.name);
       if (this.rt.getProperty(parent, name) === display.object) {
         this.rt.setProperty(parent, name, null);
       }
+    }
+  }
+
+  /**
+   * `display` is off the display list with an AS3 object that may play
+   * it, taken off by a script, or by the timeline, which keeps it for its
+   * frame only, not `keep`.
+   */
+  orphan(display: DisplayObject, keep = true): void {
+    if (display.object && !this.orphans.some((o) => o.ref.deref() === display)) {
+      this.orphans.push({ ref: new WeakRef(display), serial: display.serial, keep });
+    }
+  }
+
+  /**
+   * A script made `display` with `new`. Flash runs its first frame's
+   * script at the end of this frame's, in the order made, has it sit out
+   * the next frame's advance, and plays it on from there, on the display
+   * list or as an orphan.
+   */
+  made(display: DisplayObject): void {
+    this.fresh.push(display);
+    if (display instanceof MovieClip) {
+      display.fresh = true;
     }
   }
 
@@ -771,6 +794,10 @@ export class Scripting {
       }
 
       visit(root);
+      for (const display of this.fresh) {
+        visit(display);
+      }
+
       for (const o of queue) {
         own(o);
       }
@@ -796,6 +823,12 @@ export class Scripting {
     this.runFrameScripts(root);
     // What the timeline took off this frame has had its frame; it stops here.
     this.orphans = this.orphans.filter((o) => o.keep);
+    // What scripts made this frame and left off the display list plays on as an orphan.
+    for (const display of this.fresh.splice(0)) {
+      if (!display.parent) {
+        this.orphan(display);
+      }
+    }
     this.broadcast("exitFrame");
     for (const end of ends) {
       end();

@@ -325,8 +325,8 @@ function nested(abc: Uint8Array): Uint8Array {
 }
 
 // Three three-frame clips, a, b and c, on a four-frame root: a script takes
-// a and c off in frame 1 and puts a back in frame 3, the timeline takes b
-// off at frame 2 (scripts/Orphans.as).
+// a and c off in frame 1 and puts c back in frame 3, the timeline takes b
+// off at frame 2; scripts make three more (scripts/Orphans.as).
 function orphans(abc: Uint8Array): Uint8Array {
   return w.swf({
     width: 200,

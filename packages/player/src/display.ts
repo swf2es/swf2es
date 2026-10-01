@@ -171,6 +171,8 @@ export class MovieClip extends Container {
   /** The frame it shows, 1 the first; 0 before its first frame is entered. */
   currentFrame = 0;
   playing = true;
+  /** Made by a script with `new`: Flash has such a clip sit out the next frame's advance. */
+  fresh = false;
   /** The scripts addFrameScript registered, by frame, 1 the first. */
   readonly frameScripts = new Map<number, avm2.Value>();
   /** The frame whose script last ran, so that entering a frame runs its script once. */
@@ -376,6 +378,11 @@ export class MovieClip extends Container {
    * loops to the first as a goto, so what the first frame placed stays.
    */
   advance(): void {
+    if (this.fresh) {
+      this.fresh = false;
+      return;
+    }
+
     if (!this.playing || this.totalFrames <= 1) {
       return;
     }
