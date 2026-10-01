@@ -1,6 +1,6 @@
-// Writes small SWFs for the player's tests: the tags the player reads
-// first, laid out as the SWF specification lays them out, so that a test
-// can say what it places and draws without a Flash authoring tool.
+// Writes small SWFs for the tests: the tags the player reads first, laid
+// out as the SWF specification lays them out, so that a test can say what
+// it places and draws without a Flash authoring tool.
 export class BitWriter {
   private bytes: number[] = [];
   private bits = 0;

@@ -1,7 +1,7 @@
-// Checks out Ruffle's test corpus at RUFFLE_COMMIT into tests/player/ruffle:
+// Checks out Ruffle's test corpus at RUFFLE_COMMIT into tests/player/corpus/ruffle:
 // only tests/tests/swfs, shallow and sparse, about 230 MB.
 //
-//   node tests/player/fetch-ruffle.ts
+//   node tests/player/corpus/fetch-ruffle.ts
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";

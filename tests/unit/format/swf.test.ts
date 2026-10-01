@@ -11,7 +11,7 @@ import {
   readSymbolClass,
   tags,
 } from "@swf2es/format";
-import * as w from "../../player/swf-writer.ts";
+import * as w from "../../swf-writer.ts";
 
 const square = w.shape({
   id: 1,

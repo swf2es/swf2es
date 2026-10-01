@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { MovieClip, ShapeObject } from "../../../packages/player/dist/display.js";
 import { Player } from "../../../packages/player/dist/player.js";
-import * as w from "../../player/swf-writer.ts";
+import * as w from "../../swf-writer.ts";
 
 const square = (id: number) =>
   w.shape({

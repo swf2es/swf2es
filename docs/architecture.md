@@ -404,12 +404,12 @@ quarter pixel's anti-aliasing for curved lines and lines under a skew.
   --update`); CI needs only Chrome.
   [Ruffle's test corpus](https://github.com/ruffle-rs/ruffle/tree/master/tests/tests/swfs)
   supplies thousands of SWFs with Flash Player's traces, and some with its
-  frames (`tests/player/fetch-ruffle.ts` fetches it, uncommitted). Flash
+  frames (`tests/player/corpus/fetch-ruffle.ts` fetches it, uncommitted). Flash
   under adl traces what their `output.txt` holds (`timeline/`: all 15 that
   finish; `visual/`: 104 of 107). The expected frames are not all Flash's,
   some are Ruffle's own, and Flash under adl draws 42 of the 101 in
   `visual/` within their tolerance or a pixel's anti-aliasing of it, so
-  the oracle decides, not the corpus's PNGs (`tests/player/check-references.ts`).
+  the oracle decides, not the corpus's PNGs (`tests/player/corpus/check-references.ts`).
 
 ## Milestone 1
 

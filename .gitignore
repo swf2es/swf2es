@@ -6,4 +6,4 @@ dist-test-checked/
 oracle/out/
 tests/**/out/
 .DS_Store
-tests/player/ruffle/
+tests/player/corpus/ruffle/

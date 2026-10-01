@@ -3,10 +3,10 @@
 // expected PNGs hold, within the tests' tolerances. Where they differ, the
 // oracle is Flash and the corpus is not.
 //
-//   node tests/player/check-references.ts [path prefix...]
+//   node tests/player/corpus/check-references.ts [path prefix...]
 import { readFileSync } from "node:fs";
-import { runFlash } from "../../oracle/flash.ts";
-import { compareImages, compareImagesNear, decodePng } from "./image.ts";
+import { runFlash } from "../../../oracle/flash.ts";
+import { compareImages, compareImagesNear, decodePng } from "../image.ts";
 import { collectRuffle } from "./ruffle.ts";
 
 const prefixes = process.argv.slice(2);

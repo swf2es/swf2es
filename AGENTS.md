@@ -32,7 +32,7 @@ pnpm tamarin --update-baseline [prefix...]   # after an oracle or harness change
 node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
-node tests/player/fetch-ruffle.ts            # Ruffle's test corpus, for check-references.ts
+node tests/player/corpus/fetch-ruffle.ts     # Ruffle's test corpus, for corpus/check-references.ts
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before

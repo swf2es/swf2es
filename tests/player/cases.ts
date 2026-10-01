@@ -1,7 +1,7 @@
 // The player's test cases: SWFs built here, played for a few frames, whose
 // frames must look as Flash drew them. Flash's frames are in references/,
 // made by run.ts --update with the Flash oracle.
-import * as w from "./swf-writer.ts";
+import * as w from "../swf-writer.ts";
 
 export interface PlayerCase {
   name: string;
