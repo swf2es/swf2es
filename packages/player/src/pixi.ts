@@ -401,14 +401,18 @@ export class PixiView {
     return container;
   }
 
-  /** Draw `root`'s display list, synced first. */
-  render(root: DisplayObject): void {
+  /** Bring the stage up to date with `root`'s display list, without drawing. */
+  prepare(root: DisplayObject): void {
     const node = this.sync(root, UNIT, false);
     if (node.parent !== this.stage) {
       this.stage.removeChildren();
       this.stage.addChild(node);
     }
+  }
 
+  /** Draw `root`'s display list, synced first. */
+  render(root: DisplayObject): void {
+    this.prepare(root);
     this.renderer.render(this.stage);
   }
 }
