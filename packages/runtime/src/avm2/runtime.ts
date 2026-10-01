@@ -37,8 +37,8 @@ export type AsObject = any;
 // biome-ignore lint/complexity/noBannedTypes: methods take their receiver as this
 export type Method = Function;
 
-/** A native with argument counts to check, when it has any (see Runtime.native). */
-type CountedMethod = Method & { $min?: number; $max?: number };
+/** A native with argument counts to check, when it has any, and its declared parameter count (see Runtime.native). */
+type CountedMethod = Method & { $min?: number; $max?: number; $length?: number };
 
 /** A scope chain: its objects, outermost first, and a bit per with scope in w. */
 export type Scope = Value[] & { w: number };
@@ -1219,8 +1219,9 @@ export class Runtime {
           : (...args: Value[]) => this.callBound(method, o, args),
         null,
       );
-      // Its length is the method's, its declared parameters, not the wrapper's; and its id.
-      f.$length = method.length;
+      // Its length is the method's declared parameters, not the wrapper's: a
+      // native's from its ABC, a compiled method's from the parameters it declares.
+      f.$length = (method as CountedMethod).$length ?? method.length;
       f.$id = (method as Method & { $id?: number }).$id ?? 0;
       f.$closure = true;
       if (typeof o === "object") {
@@ -2858,6 +2859,13 @@ export class Runtime {
         if (required > 0 || max >= 0) {
           (f as CountedMethod).$min = required;
           (f as CountedMethod).$max = max;
+        }
+
+        // Its Function.length is the ABC's parameter count, as avmplus'
+        // (FunctionClass.cpp), not what the JavaScript declares: a native
+        // with optional parameters gives them defaults, which length skips.
+        if (max >= 0) {
+          (f as CountedMethod).$length = max;
         }
       }
 
