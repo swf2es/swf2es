@@ -1708,12 +1708,18 @@ export class Runtime {
 
       if (f.$f) {
         // A function as a constructor: a new Object whose prototype is the
-        // function's, or a plain Object where the prototype was cleared.
+        // function's. One whose prototype a script cleared gets Object's own
+        // prototype object back at its first new, as avmplus reinitializes
+        // it, so from then on every object is an instance of the function.
         const o = this.objectTraits.instance();
-        const p = this.functionPrototype(f);
-        if (p !== undefined) {
-          o.$p = p;
+        let p = this.functionPrototype(f);
+        if (p === undefined) {
+          p = this.builtinClass("Object").$prototype;
+          f.$prototype = p;
+          f.$noPrototype = false;
         }
+
+        o.$p = p;
         const result = f.$f.apply(o, args);
         return result !== null && typeof result === "object" ? result : o;
       }
