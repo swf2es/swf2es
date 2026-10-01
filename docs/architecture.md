@@ -877,7 +877,21 @@ to the values Ruffle's corpus recorded of it; `copyChannel`,
 `colorTransform`, `merge`, `scroll`; `threshold`, `hitTest`,
 `getColorBoundsRect`, `floodFill` and `histogram`. Each works on the
 pixels as Flash does, premultiplied or not as its results show, and each
-is checked by the corpus's traces and a case's trace under adl. `draw`
+is checked by the corpus's traces and a case's trace under adl (the
+`bitmap-ops` case). The rules fitted: `noise` is Park-Miller's minimal
+standard generator (x · 16807 mod 2^31 − 1, a seed of 0 taken as 1 and
+one below as −seed + 1), one draw per channel, R, G, B and then alpha on
+a transparent bitmap alone, a value `low + r % (high − low + 1)`;
+`colorTransform` reads a channel back as p · 255 / a floored, applies
+(c · ⌊m · 256⌋ >> 8) + ⌊offset⌋, alpha alike, and writes it premultiplied
+as c · (a + 1) >> 8, leaving a pixel of alpha 0 alone; `merge` is
+((s · m + d · (256 − m)) >> 8) & 0xFF with the multiplier a uint and
+nothing clamped; `copyChannel` from more than one channel copies 0;
+`getColorBoundsRect` gives an empty rect where the one pixel found is the
+origin; a point or rect `hitTest` never hits alpha 0; `pixelDissolve`
+writes numPixels + 1 pixels from where the last call stopped (its order
+of positions is Flash's own, unrecorded, so the player walks the rect).
+`draw`
 of a display object into a bitmap, the filters, and the SWF's bitmap
 tags (`DefineBitsLossless`, `DefineBitsJPEG2` and 3) as characters
 follow, each by what Flash traces and draws under adl.
