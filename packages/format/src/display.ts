@@ -50,30 +50,38 @@ function readString(r: SwfReader): string {
  */
 function utf8(bytes: Uint8Array): string {
   let s = "";
-  for (let i = 0; i < bytes.length; ) {
-    const b = bytes[i];
-    const n = b < 0x80 ? 0 : b >= 0xf0 ? 3 : b >= 0xe0 ? 2 : b >= 0xc0 ? 1 : -1;
-    let c = n === 0 ? b : n === 1 ? b & 0x1f : n === 2 ? b & 0x0f : b & 0x07;
-    let ok = n >= 0 && i + n < bytes.length + (n === 0 ? 1 : 0);
-    for (let k = 1; ok && k <= n; k++) {
+  const length = bytes.length;
+  for (let i = 0; i < length; ) {
+    const b = bytes[i++];
+    // ASCII, and a continuation byte on its own, stand for themselves.
+    if (b < 0xc0) {
+      s += String.fromCharCode(b);
+      continue;
+    }
+
+    const n = b < 0xe0 ? 1 : b < 0xf0 ? 2 : 3;
+    const minimum = n === 1 ? 0x80 : n === 2 ? 0x800 : 0x10000;
+    let c = b & (n === 1 ? 0x1f : n === 2 ? 0x0f : 0x07);
+    let ok = i + n <= length;
+    for (let k = 0; ok && k < n; k++) {
       const next = bytes[i + k];
       ok = (next & 0xc0) === 0x80;
       c = (c << 6) | (next & 0x3f);
     }
 
-    ok = ok && c >= [0, 0x80, 0x800, 0x10000][n];
-    if (!ok) {
+    if (!ok || c < minimum) {
       s += String.fromCharCode(b);
-      i++;
-    } else if (n === 3) {
+      continue;
+    }
+
+    i += n;
+    if (n === 3) {
       // A surrogate pair however large the value, as avmplus makes one;
       // fromCodePoint would refuse one past U+10FFFF.
       const u = c - 0x10000;
       s += String.fromCharCode(0xd800 + ((u >> 10) & 0x3ff), 0xdc00 + (u & 0x3ff));
-      i += 4;
     } else {
       s += String.fromCharCode(c);
-      i += n + 1;
     }
   }
 
