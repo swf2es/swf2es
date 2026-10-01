@@ -10,7 +10,7 @@
 //
 // Layouts come from the module, computed by the compiler: the runtime never
 // derives one (docs/architecture.md, "Modules and the bootstrap").
-import { messages } from "./messages.js";
+
 import {
   CONSTANT_Qname,
   CONSTANT_RTQname,
@@ -29,6 +29,7 @@ import {
   TypeName,
 } from "./names.js";
 import { convertDoubleToString } from "./numbers.js";
+import { errorMessages } from "./player-messages.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: AS3 values are untyped
 export type Value = any;
@@ -2687,7 +2688,7 @@ export class Runtime {
       return `Error #${id}`;
     }
 
-    const template = messages[id] ?? "";
+    const template = errorMessages[id] ?? "";
     const text = template.replace(/%(\d)/g, (_, n) => String(args[Number(n) - 1] ?? ""));
     return `Error #${id}: ${text}`;
   }
