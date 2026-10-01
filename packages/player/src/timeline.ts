@@ -44,6 +44,8 @@ export type Character = ShapeCharacter | SpriteCharacter;
 export interface Library {
   characters: Map<number, Character>;
   root: Timeline;
+  /** SymbolClass: the class each character is bound to, by qualified name "pkg::Name"; id 0 the document class. */
+  classes: Map<number, string>;
   /**
    * Gives a display object the player just made its AS3 object, where the
    * SWF has scripts (Scripting.construct); null in an AVM1 movie. A clip's
@@ -113,5 +115,5 @@ function timelineOf(
 export function readLibrary(swf: Swf): Library {
   const characters = new Map<number, Character>();
   const root = timelineOf(swf.bytes, swf.tags, swf.frameCount, characters);
-  return { characters, root, construct: null, removing: null };
+  return { characters, root, classes: new Map(), construct: null, removing: null };
 }

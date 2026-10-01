@@ -24,7 +24,7 @@ export class Player {
    * loads the SWF's code and constructs the root, which is asynchronous.
    */
   constructor(
-    bytes: Uint8Array,
+    readonly bytes: Uint8Array,
     readonly scripting: Scripting | null = null,
   ) {
     this.swf = readSwf(bytes);
@@ -59,15 +59,23 @@ export class Player {
     s.stageHeight = this.height;
     s.frameRate = this.frameRate;
     s.constructAs(this.stage, s.rt.classNamed("flash.display::Stage"));
-    this.library.construct = (display, character) => s.construct(display, character);
-    this.library.removing = (display) => s.removing(display);
-    s.constructAs(this.root, s.rt.classNamed(s.classes.get(0) ?? "flash.display::MovieClip"));
+    // The main SWF's LoaderInfo: on the root, which every display object under it reports.
+    const info = s.loaderInfo(null);
+    s.describe(info, this.bytes, this.swf);
+    info.$loaded = this.bytes.length;
+    info.$url = s.url;
+    this.root.loaderInfo = info;
+    const object = s.constructAs(
+      this.root,
+      s.rt.classNamed(this.library.classes.get(0) ?? "flash.display::MovieClip"),
+    );
+    info.$content = object;
     this.root.enterFirstFrame();
     s.frame(this.stage, false);
     this.frameRate = s.frameRate;
   }
 
-  /** The next frame: every clip on the display list advances, parents before children; then the frame's scripts. */
+  /** The next frame: every clip on the display list advances, parents before children, loaded SWFs' too; then the frame's scripts. */
   tick(): void {
     const clips: MovieClip[] = [];
     const collect = (o: DisplayObject) => {
@@ -81,10 +89,10 @@ export class Player {
         }
       }
     };
-    collect(this.root);
+    collect(this.stage);
     for (const clip of clips) {
       // One a clip before it removed is no longer on the display list.
-      if (clip === this.root || attached(clip, this.root)) {
+      if (attached(clip, this.stage)) {
         clip.advance();
       }
     }

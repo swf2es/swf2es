@@ -29,6 +29,8 @@ export class DisplayObject {
   character: Character | null = null;
   /** Its other face, the AS3 object a script sees; null in an AVM1 movie. */
   object: avm2.AsObject | null = null;
+  /** The LoaderInfo of the SWF this is the root of: set on the main root and on each loaded SWF's; null below. */
+  loaderInfo: avm2.AsObject | null = null;
   /** What changed since the renderer last synced it: TRANSFORM, CHILDREN, CONTENT. */
   dirty = TRANSFORM | CONTENT;
 

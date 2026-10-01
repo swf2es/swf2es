@@ -446,7 +446,9 @@ frame it lands on has its script run in the same phase (`gotos`), before
 the script of any child the jump placed, which is constructed with its
 parent already on the landing frame (`gotoChild`); a goto from anywhere
 else happens at once. All the timelines advance before any frame script
-runs, parents' scripts before their children's (`nested`).
+runs, parents' scripts before their children's (`nested`); the clips
+whose scripts are to run are fixed as the phase begins, so one a script
+removes still runs its own (`loads`).
 
 The player loads a SWF's code through `@swf2es/codegen`'s `Codegen`: each
 `DoABC`, in tag order, is added to one domain after the builtins and
@@ -470,30 +472,47 @@ avmshell's.
 
 A `Loader` is a container whose one child is the root of the SWF it
 loaded, and a `LoaderInfo` is made for each `Loader` and one for the main
-SWF: `loaderInfo` on a display object is the `LoaderInfo` of the root it
-is under, and null off the display list, as Flash has it
-(Ruffle's `loaderinfo_root` trace). Its values are the loaded SWF's:
-`bytesLoaded` and `bytesTotal`, `content`, `url` and `loaderURL`,
-`contentType`, the header's version, frame rate, width and height,
-`loader`, `applicationDomain`, `bytes`.
+SWF: a root display object carries its SWF's, and `loaderInfo` and `root`
+on a display object are the nearest root's up from it, null off the
+display list, as Flash has it (Ruffle's `loaderinfo_root` trace; a
+loaded SWF's root is its own root from its constructor on). Its values
+are the loaded SWF's: `bytesLoaded` and `bytesTotal`, `content`, `url`
+and `loaderURL`, `contentType`, the header's version, frame rate, width
+and height, `loader`, `applicationDomain`, `bytes`.
 
-`loadBytes` and `load` do nothing in the frame that calls them. The load
-completes in a later frame, in the frame's loader step, in the order
-Flash's trace of `loadBytes` fixes (`loader_loadbytes_events`):
-`PROGRESS` with nothing loaded and again with all of it (a `load` of a URL
-has `OPEN` first; `loadBytes` has none), then the content's document
-class constructed with `stage`, its `loaderInfo.url` and
-`LoaderInfo.content` still null, then the content made the `Loader`'s
-child (`ADDED_TO_STAGE` if the loader is on the stage, and `url` set),
-its first frame's scripts, `INIT`, `COMPLETE`; all of it before the
-loading timeline's next frame scripts. Which step of the frame the loads
-complete in is fixed by a case adl traces. The loaded SWF's code goes
-through `Codegen` and the runtime as the main SWF's does, and its
-timeline advances with the stage's frame rate. `unload` takes the content
-out and keeps the `Loader`. The player package has no I/O: `load` of a
-URL asks the host for the bytes through a function the `Scripting` is
-given, and the tests use `loadBytes`, the inner SWF carried in the
-script.
+The order is Flash's, traced by adl (the `loads` case; the Flash Player
+traces in Ruffle's corpus agree where they overlap). `loadBytes` tells
+the whole of the progress in the call, `PROGRESS` with nothing loaded and
+again with all of it, `bytes` set and `url` still null, and has no
+`OPEN`; a `load` of a URL has `OPEN` once the bytes come. The content
+comes in a later frame, after `ENTER_FRAME` and before `FRAME_CONSTRUCTED`:
+its SWF's code runs, its document class is constructed with `parent` and
+`stage` null and its timeline's first frame in place, it gets `ADDED`
+while it still has no parent, then `url` and `content` are set and it is
+made the `Loader`'s child, `ADDED` again and `ADDED_TO_STAGE` if the
+loader is on the stage. Its first frame's script runs in the frame's
+script phase, after its parents', and `INIT` and `COMPLETE` follow
+`EXIT_FRAME`, before `RENDER`. The content's timeline advances from the
+next frame on, with the stage's frame rate. `unload` takes the content
+out at once and keeps the `Loader`; a frame script the content had queued
+still runs. The URL of content loaded from bytes is the loading SWF's
+with `/[[DYNAMIC]]/n` appended, and `ApplicationDomain.currentDomain` is
+a new object at each ask, as in Flash, so two are never `==`.
+
+The loaded SWF's code goes through `Codegen` and the runtime as the main
+SWF's does. Linking is asynchronous (the module is imported), so a load
+asked for is compiled and linked between frames, in the order asked, and
+each takes its place in the first frame after its code is linked; a host
+that steps frames by hand awaits `Scripting.settled()` between them, as
+the tests do, to see Flash's frame. `SymbolClass` bindings are the
+library's, since character ids collide across SWFs. The player package
+has no I/O: `load` of a URL asks the host for the bytes through a
+function the `Scripting` is given, and a fetch that fails, or bytes that
+are not an AS3 SWF, end in `IO_ERROR` on the `LoaderInfo` in the frame.
+The Flash cases use `loadBytes`, the inner SWF carried in the outer's
+script as base64; the oracle runs under AIR, which refuses code from
+bytes unless the `LoaderContext` has `allowCodeImport`, which Flash
+Player does not need.
 
 Flash loads into a child `ApplicationDomain` by default: the parent
 cannot see the loaded SWF's classes by name, a class the loaded SWF
@@ -503,9 +522,10 @@ defines again shadows the parent's for its own code, and
 forked, a new domain sharing the ABCs loaded so far, and the runtime
 resolving names by the domain of the module asking. The first slice has
 neither: it loads into the current domain, as a `LoaderContext` with
-`ApplicationDomain.currentDomain` asks, and refuses a load that defines a
-class the domain has, since the duplicate would otherwise shadow it for
-everyone. Child domains are the slice after.
+`ApplicationDomain.currentDomain` asks. There, as in Flash, a class the
+loaded SWF defines again is ignored for the one the domain has, so a SWF
+loaded twice makes instances of its first load's classes (the node
+test). Child domains are the slice after.
 
 A SWF the player loads is in the position the oracle's harness puts
 every SWF in, so what the harness could not judge for a main movie, the

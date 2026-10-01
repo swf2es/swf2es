@@ -1,12 +1,16 @@
 // The player's test cases: SWFs built here, played for a few frames, whose
 // frames must look as Flash drew them. Flash's frames are in references/,
 // made by run.ts --update with the Flash oracle.
+import { readFileSync } from "node:fs";
 import * as w from "../swf-writer.ts";
+import type { Compile } from "./scripts.ts";
 
 export interface PlayerCase {
   name: string;
   /** The SWF, or how to build it around the compiled script. */
-  swf: Uint8Array | ((abc: Uint8Array) => Uint8Array);
+  swf?: Uint8Array | ((abc: Uint8Array) => Uint8Array);
+  /** Or how to build it with the compiler in hand, for a SWF holding another; traced like a scripted case. */
+  build?: (compile: Compile) => Uint8Array;
   /** The AS3 half: scripts/<script>.as, compiled in the oracle's container; its trace must match Flash's. */
   script?: string;
   frames: number;
@@ -195,21 +199,20 @@ export function scripted(abc: Uint8Array): Uint8Array {
   });
 }
 
-// A two-frame root with `abc` as its code and nothing placed: for what the
-// scripts alone do (scripts/Events.as).
-function bare(abc: Uint8Array): Uint8Array {
+// A root of `frames` frames with `abc` as its code and nothing placed: for
+// what the scripts alone do (scripts/Events.as, and the node tests' loads).
+export function bare(abc: Uint8Array, frames = 2): Uint8Array {
   return w.swf({
     width: 100,
     height: 50,
     frameRate: 24,
-    frameCount: 2,
+    frameCount: frames,
     tags: [
       w.fileAttributes(true),
       w.backgroundColor(0xffffff),
       w.doAbc(abc, "Main"),
       w.symbolClass([[0, "Main"]]),
-      w.showFrame(),
-      w.showFrame(),
+      ...Array.from({ length: frames }, () => w.showFrame()),
       w.end(),
     ],
   });
@@ -380,6 +383,54 @@ function addedEvents(abc: Uint8Array): Uint8Array {
 // Flash's curved lines reach further into their shape, and under the skew
 // of frame 2 its lines are a little wider or narrower than Ruffle's rule
 // for line widths gives.
+// A SWF loading another with loadBytes. The inner one, with scripts/Inner.as as
+// its document class, is built first and carried in the outer's script,
+// scripts/Loads.as.template, as base64.
+export function innerSwf(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 12,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0x0000ff),
+      w.doAbc(abc, "Inner"),
+      w.symbolClass([[0, "Inner"]]),
+      w.place({ depth: 1, character: 1, matrix: { tx: 200, ty: 200 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+function loads(compile: Compile): Uint8Array {
+  const inner = innerSwf(compile("Inner"));
+  const template = readFileSync(new URL("scripts/Loads.as.template", import.meta.url), "utf8");
+  const abc = compile(
+    "Loads",
+    template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
+  );
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "Loads"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
@@ -465,4 +516,5 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  { name: "loads", build: loads, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
 ];

@@ -41,6 +41,17 @@ function transform(d: DisplayObject, change: (m: Matrix) => void): void {
 
 const IDENTITY_COLOR = { rMul: 1, gMul: 1, bMul: 1, aMul: 1, rAdd: 0, gAdd: 0, bAdd: 0, aAdd: 0 };
 
+/** The root `d` is under, or is: the nearest display object up from it that carries a LoaderInfo; null under none, as for one a script made and did not add. */
+export function rootOf(d: DisplayObject): DisplayObject | null {
+  for (let o: DisplayObject | null = d; o; o = o.parent) {
+    if (o.loaderInfo) {
+      return o;
+    }
+  }
+
+  return null;
+}
+
 /** Whether `d` is on the display list: under the stage. */
 export function onStage(s: Scripting, d: DisplayObject): boolean {
   for (let o: DisplayObject | null = d; o; o = o.parent) {
@@ -155,18 +166,14 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       return onStage(s, this.$display) ? (s.stage?.object ?? null) : null;
     }
 
-    /** The topmost display object below the stage, or null off the display list. */
+    /** The root of the SWF this is in, main or loaded; null off the display list, as Flash has it. */
     get root(): Value {
-      if (!onStage(s, this.$display)) {
-        return null;
-      }
+      return rootOf(this.$display)?.object ?? null;
+    }
 
-      let o: DisplayObject = this.$display;
-      while (o.parent && o.parent !== s.stage) {
-        o = o.parent;
-      }
-
-      return o.object;
+    /** The LoaderInfo of the SWF this is in; null off the display list. */
+    get loaderInfo(): Value {
+      return rootOf(this.$display)?.loaderInfo ?? null;
     }
 
     get mouseX(): number {
