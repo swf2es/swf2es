@@ -11,6 +11,7 @@ import { arrayHooks, arrayNatives } from "./array.js";
 import { byteArrayHook, byteArrayNatives, domainNatives } from "./bytearray.js";
 import { dateHook, dateNatives } from "./date.js";
 import type { Natives } from "./define.js";
+import { describeNatives } from "./describe.js";
 import { dictionaryNatives } from "./dictionary.js";
 import { jsonNatives } from "./json.js";
 import { numberHooks, numberNatives } from "./number.js";
@@ -31,6 +32,7 @@ export function builtinNatives(rt: Runtime): Natives {
     ...regexpNatives(rt),
     ...numberNatives,
     ...toplevelNatives,
+    ...describeNatives,
     ...aliasesNatives,
     ...shellNatives(rt),
     ...dictionaryNatives,

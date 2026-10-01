@@ -319,6 +319,7 @@
   "avmplus::System.isDebugger",
   "avmplus::System.trace",
   "avmplus::System.write",
+  "avmplus::describeTypeJSON",
   "avmplus::getQualifiedClassName",
   "avmplus::getQualifiedSuperclassName",
   "bugzilla",

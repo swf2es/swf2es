@@ -49,18 +49,26 @@ export type Factory = (scope: Scope, sup: AsObject | null) => Method;
 /** A reference to a type: null for *, a builtin's name, or a class by name. */
 export type TypeRef = null | string | ClassRef | VectorRef;
 
+/** A metadata entry as the ABC has it: its name, and its keys and values alternating, a key "" where it has none. */
+export type Metadata = [string, string[]];
+
+/** A method's signature: its return type, its parameter types, and how many of them are required. */
+export type Signature = [TypeRef, TypeRef[], number];
+
 export interface TraitsDesc {
   /** The VerifyError resolving the traits gave, if they did not resolve. */
   error?: number;
   slots: number;
   defaults: [number, Value, TypeRef][];
   bindings: [Namespace, number, string, number][];
-  /** Each by dispatch id: its factory, and its method id in its ABC. */
-  methods: [number, Factory, number][];
-  /** Its own slots with [Transient] metadata. */
-  transient?: number[];
-  /** Its own accessors with metadata, by dispatch id: 1 if any of it is [Transient], else 0. */
-  metadata?: [number, number][];
+  /** Each by dispatch id: its factory, its method id in its ABC, and its signature. */
+  methods: [number, Factory, number, TypeRef, TypeRef[], number][];
+  /**
+   * Its own traits' metadata: the trait's kind as the ABC has it, its slot
+   * id for a slot, its dispatch id for a method or an accessor pair (the
+   * setter's one past the getter's), and the entries.
+   */
+  meta?: [number, number, Metadata[]][];
 }
 
 export interface ClassDesc {
@@ -75,6 +83,10 @@ export interface ClassDesc {
   static: TraitsDesc;
   init: Factory;
   cinit: Factory;
+  /** The constructor's parameter types and how many are required, when it has any. */
+  ctor?: [TypeRef[], number];
+  /** The class's own metadata, from the trait that defines it. */
+  meta?: Metadata[];
   /** The module, set when it loads. */
   abc?: Abc;
 }
@@ -170,12 +182,19 @@ export interface ClassHook {
 }
 
 // Binding kinds, as the compiler encodes them: kind | id << 3.
-const BIND_Method = 1;
-const BIND_Var = 2;
-const BIND_Const = 3;
-const BIND_Get = 5;
-const BIND_Set = 6;
-const BIND_GetSet = 7;
+export const BIND_Method = 1;
+export const BIND_Var = 2;
+export const BIND_Const = 3;
+export const BIND_Get = 5;
+export const BIND_Set = 6;
+export const BIND_GetSet = 7;
+
+/** Trait kinds as the ABC has them, which the descriptors' metadata is keyed by. */
+const TRAIT_Slot = 0;
+const TRAIT_Getter = 2;
+const TRAIT_Setter = 3;
+const TRAIT_Class = 4;
+const TRAIT_Const = 6;
 
 interface Binding {
   ns: Namespace;
@@ -215,6 +234,16 @@ export class Traits {
   transientSlots: Set<number> | null = null;
   /** Its own accessors with metadata, if any, by dispatch id: whether any of it is [Transient]. */
   accessorMetadata: Map<number, boolean> | null = null;
+  /** Its own methods' signatures, by dispatch id, for describeType. */
+  signatures = new Map<number, Signature>();
+  /** Its own slots' and methods' metadata, by slot id and by dispatch id, for describeType. */
+  slotMetadata: Map<number, Metadata[]> | null = null;
+  methodMetadata: Map<number, Metadata[]> | null = null;
+  /** The class's: whether it is final or an interface, its constructor's parameters, its own metadata. */
+  final = false;
+  isInterface = false;
+  ctor: [TypeRef[], number] | null = null;
+  metadata: Metadata[] | null = null;
   getIndex?: IndexHook["getIndex"];
   setIndex?: IndexHook["setIndex"];
   hasIndex?: IndexHook["hasIndex"];
@@ -257,15 +286,42 @@ export class Traits {
       this.own.push([slotKey(slot), value]);
     }
 
-    if (desc.transient) {
-      this.transientSlots = new Set(desc.transient);
+    for (const [d, , , returnType, params, required] of desc.methods) {
+      this.signatures.set(d, [returnType, params, required]);
     }
 
-    if (desc.metadata) {
-      this.accessorMetadata = new Map(desc.metadata.map(([id, t]) => [id, t === 1]));
+    if (desc.meta) {
+      this.annotate(desc.meta);
     }
 
     this.allDefaults = null;
+  }
+
+  /**
+   * Keep the traits' metadata, and what AMF and JSON ask of it: the slots
+   * with [Transient], and for each accessor with metadata whether any of
+   * it is [Transient], since an accessor's metadata hides its base's, as
+   * avmplus' getMethodMetadataPos finds it.
+   */
+  private annotate(meta: [number, number, Metadata[]][]): void {
+    const transient = (entries: Metadata[]) => entries.some(([name]) => name === "Transient");
+    for (const [kind, id, entries] of meta) {
+      if (kind === TRAIT_Slot || kind === TRAIT_Const || kind === TRAIT_Class) {
+        this.slotMetadata ??= new Map();
+        this.slotMetadata.set(id, entries);
+        if (transient(entries)) {
+          this.transientSlots ??= new Set();
+          this.transientSlots.add(id);
+        }
+      } else {
+        this.methodMetadata ??= new Map();
+        this.methodMetadata.set(id, entries);
+        if (kind === TRAIT_Getter || kind === TRAIT_Setter) {
+          this.accessorMetadata ??= new Map();
+          this.accessorMetadata.set(id, transient(entries));
+        }
+      }
+    }
   }
 
   /**
@@ -371,7 +427,7 @@ export class Traits {
   pendingInterfaces: (() => Traits | null)[] | null = null;
 
   /** Add the interfaces now made that were pending, here and in the bases. */
-  private settleInterfaces(): void {
+  settleInterfaces(): void {
     for (let c: Traits | null = this; c; c = c.base) {
       const pending = c.pendingInterfaces;
       if (!pending) {
@@ -1642,9 +1698,13 @@ export class Runtime {
       }
 
       if (f.$f) {
-        // A function as a constructor: a new Object whose prototype is the function's.
+        // A function as a constructor: a new Object whose prototype is the
+        // function's, or a plain Object where the prototype was cleared.
         const o = this.objectTraits.instance();
-        o.$p = this.functionPrototype(f);
+        const p = this.functionPrototype(f);
+        if (p !== undefined) {
+          o.$p = p;
+        }
         const result = f.$f.apply(o, args);
         return result !== null && typeof result === "object" ? result : o;
       }
@@ -1764,9 +1824,9 @@ export class Runtime {
     return f;
   }
 
-  /** A function's prototype, made when first asked for. */
-  functionPrototype(f: AsObject): AsObject {
-    if (!f.$prototype) {
+  /** A function's prototype, made when first asked for; undefined once a script has cleared it. */
+  functionPrototype(f: AsObject): AsObject | undefined {
+    if (!f.$prototype && !f.$noPrototype) {
       const p = this.objectTraits.instance();
       p.$d.set("constructor", f);
       p.$dontEnum = new Set(["constructor"]);
@@ -1836,6 +1896,10 @@ export class Runtime {
     itraits.describe(desc.instance);
     const hooks = this.classHooks[qualified];
     itraits.dynamic = !desc.sealed;
+    itraits.final = desc.final;
+    itraits.isInterface = desc.interface;
+    itraits.ctor = desc.ctor ?? null;
+    itraits.metadata = desc.meta ?? null;
     itraits.refusesNames = !!hooks?.refusesNames;
 
     // A class's allocation, bound to the runtime; its subclasses inherit it.
@@ -1877,6 +1941,7 @@ export class Runtime {
     // Class is dynamic, so its instances are: String.fromCharCode = ... is legal.
     const straits = new Traits(`${qualified}$`, this.classTraits);
     straits.dynamic = true;
+    straits.final = true;
     straits.describe(desc.static);
     const cls = straits.instance();
     cls.$it = itraits;

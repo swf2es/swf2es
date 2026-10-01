@@ -33,8 +33,9 @@ node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
 node tests/player/corpus/fetch-ruffle.ts     # Ruffle's test corpus, for the two below
-pnpm corpus [--update-baseline] [prefix...]  # the player on the corpus's avm2 and timeline tests vs
-                                             # corpus/baseline.json (Chrome; about 5 minutes)
+pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on the corpus's avm2 and
+                              # timeline tests vs corpus/baseline.json (Chrome; about 5 minutes); --diff
+                              # shows where a failing test parts from Flash, --dump its whole trace
 node tests/player/corpus/check-references.ts [prefix...]   # the corpus's expected outputs vs Flash
 node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
                               # timeline in Chrome; keep a change only for a gain that repeats

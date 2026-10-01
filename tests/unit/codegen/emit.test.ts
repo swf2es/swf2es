@@ -362,6 +362,33 @@ test("a module's functions are named after their methods, for stacks and profile
   assert.doesNotMatch(js, /=> function [A-Za-z_][A-Za-z0-9_]*\(/);
 });
 
+test("a metadata item's key or value past the string pool is empty, as avmplus reads it", {
+  skip,
+}, () => {
+  // [x(99="98")] on a slot, where the pool has one string: avmplus' poolstr
+  // gives "" for an index past the end, and the module must not read on.
+  const pool = {
+    strings: ["x"],
+    namespaces: [[0x16, ...u30(0)]],
+    multinames: [[0x07, ...u30(1), ...u30(1)]],
+  };
+  const bytes = abc(
+    pool,
+    tables({
+      methods: [{}],
+      metadata: [{ name: 1, items: [[99, 98]] }],
+      scripts: [{ init: 0, traits: [{ name: 1, kind: 0, index: 0, metadata: [0] }] }],
+      bodies: [{ method: 0, code: [0x47], maxStack: 1, localCount: 1, maxScopeDepth: 1 }],
+    }),
+  );
+  testing.domainReset(50);
+  testing.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
+  testing.domainModule("");
+  assert.equal(testing.domainAdd(bytes, false), 0);
+  const js = testing.domainModule("") as string;
+  assert.match(js, /meta: \[\[0, \d+, \[\["x", \["", ""\]\]\]\]\]/);
+});
+
 test("a method with a long name is named without the memory growing with it", {
   skip,
 }, async () => {
@@ -416,7 +443,8 @@ test("a module lays out traits that verifying its methods did not resolve", { sk
   );
   assert.ok(script, "the script binding registerClassAlias");
   const disp = Number(script[1]) >> 3;
-  const entry = script[2].match(new RegExp(`\\[${disp}, F\\[(\\d+)\\], \\d+\\]`));
+  // Its dispatch id, factory, method id, then its signature for describeType.
+  const entry = script[2].match(new RegExp(`\\[${disp}, F\\[(\\d+)\\], \\d+, `));
   assert.ok(entry, "its method by dispatch id");
   const factories = js.slice(js.indexOf("const F = ["), js.indexOf("const A = "));
   // A native's name, and its argument counts when it has any.

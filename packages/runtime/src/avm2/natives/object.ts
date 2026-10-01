@@ -3,6 +3,7 @@
 import { Namespace, prefixOf, publicNs, qname } from "../names.js";
 import { type AsObject, type ClassHook, NOT_FOUND, type Runtime, type Value } from "../runtime.js";
 import { AS3, elements, type Natives, plain } from "./define.js";
+import { formatClassName } from "./describe.js";
 import { constructNamespace, newNamespace } from "./xml/xml.js";
 
 export const objectNatives: Natives = {
@@ -72,9 +73,22 @@ export const objectNatives: Natives = {
     function (this: AsObject) {
       return rt.functionPrototype(this);
     },
-  "Function#set:prototype": plain(function (this: AsObject, p: Value) {
-    this.$prototype = p;
-  }),
+  // As FunctionObject's setter: null and undefined clear it, a primitive is refused.
+  "Function#set:prototype": (rt) =>
+    function (this: AsObject, p: Value) {
+      if (p === null || p === undefined) {
+        this.$prototype = undefined;
+        this.$noPrototype = true;
+        return;
+      }
+
+      if (typeof p !== "object" && typeof p !== "function") {
+        throw rt.error("TypeError", 1049);
+      }
+
+      this.$prototype = p;
+      this.$noPrototype = false;
+    },
   "Function#get:length": plain(function (this: AsObject) {
     return this.$length ?? this.$f.length;
   }),
@@ -149,8 +163,9 @@ function shortName(qualified: string): string {
 
 export function qualifiedClassName(rt: Runtime, v: Value): string {
   switch (typeof v) {
+    // As TypeDescriber::chooseTraits: an int is one that fits avmplus' 29-bit int atom.
     case "number":
-      return (v | 0) === v ? "int" : "Number";
+      return (v | 0) === v && v >= -(1 << 28) && v < 1 << 28 ? "int" : "Number";
     case "string":
       return "String";
     case "boolean":
@@ -162,7 +177,7 @@ export function qualifiedClassName(rt: Runtime, v: Value): string {
         return "null";
       }
 
-      return v.$it ? v.$it.name : rt.traitsOf(v).name;
+      return formatClassName(v.$it ? v.$it.name : rt.traitsOf(v).name);
   }
 }
 

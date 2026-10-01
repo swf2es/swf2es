@@ -27,6 +27,15 @@ export function toplevelNatives(s: Scripting): avm2.Natives {
       },
     "flash.utils::getDefinitionByName": (rt) => (name: Value) =>
       rt.classNamed(qualify(rt.toString(name))),
+    // The alias registerClassAlias gave the value's class, which describeType writes; null for none.
+    "flash.utils::getAliasName": (rt) => (v: Value) => {
+      if (v === null || v === undefined) {
+        return null;
+      }
+
+      const alias = rt.aliasOf(v.$it ? v.$it : rt.traitsOf(v));
+      return alias === "" ? null : alias;
+    },
     // Milliseconds since the start, by the clock the frame step keeps, not the wall's.
     "flash.utils::getTimer": () => () => Math.round(s.now),
     "flash.utils::escapeMultiByte": (rt) => (text: Value) => escapeMultiByte(rt.toString(text)),

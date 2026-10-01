@@ -5,7 +5,7 @@
 // --update-baseline. A test whose standing varies from run to run is set
 // to null and not compared, as --relax does for each test that differs.
 //
-//   node tests/player/corpus/run.ts [--update-baseline | --relax] [--diff] [path prefix...]
+//   node tests/player/corpus/run.ts [--update-baseline | --relax] [--diff [--dump]] [path prefix...]
 //
 // --diff prints, for each test that does not pass, the lines where the
 // player's trace and Flash's part, and what stopped the player.
@@ -40,6 +40,7 @@ const args = process.argv.slice(2);
 const update = args.includes("--update-baseline");
 const relax = args.includes("--relax");
 const diff = args.includes("--diff");
+const dump = args.includes("--dump");
 const prefixes = args.filter((a) => !a.startsWith("--"));
 /** A test's scripts may run this long; frames beyond it are a timeout. */
 const TIMEOUT = 20_000;
@@ -87,15 +88,12 @@ for (const [i, t] of tests.entries()) {
   }
 }
 
-/** Where the traces part, three lines of each side from there, and the error. */
+/** Where the traces part, three lines of each side from there (every line from the start with --dump), and the error. */
 function showDiff(t: RuffleTest, r: PlayerResult, s: Standing): void {
   const expected = expectedLines(t);
   console.log(`\n${t.path}: ${s.matched} of ${s.lines} lines${s.error ? `, ${s.error}` : ""}`);
-  for (
-    let i = s.matched;
-    i < Math.min(s.matched + 3, Math.max(expected.length, r.trace.length));
-    i++
-  ) {
+  const last = Math.max(expected.length, r.trace.length);
+  for (let i = dump ? 0 : s.matched; i < (dump ? last : Math.min(s.matched + 3, last)); i++) {
     if (i < expected.length) {
       console.log(`  flash  | ${expected[i]}`);
     }

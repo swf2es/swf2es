@@ -63,6 +63,13 @@ export const API_FP_10_0: u8 = 2;
 /** kApiVersionLatest for Flash Player (SWF_31), avmshell's default. */
 export const API_LatestFP: u8 = 50;
 export const API_Internal: u8 = 52;
+/**
+ * VM_INTERNAL in the table the builtins were compiled with: the oracle's
+ * SDK is of AIR 15's time, whose table ends at AIR_15_0 (41), where
+ * core/api-versions.h here goes on to SWF_31. A builtin's mark at or past
+ * it is internal, as it was to the avmplus that made it.
+ */
+const API_BuiltinInternal: i32 = 42;
 const API_Count: u32 = 53;
 const API_MinMark: u32 = 0xe294;
 
@@ -176,6 +183,10 @@ export class Domain {
   voidClass: i32 = -1;
   /** The interned id of "Transient", the metadata AMF and JSON leave a member out for. */
   transientName: u32 = 0;
+  /** The metadata names of the builtins' own that describeType leaves out, as avmplus does. */
+  versionName: u32 = 0;
+  nativeName: u32 = 0;
+  apiName: u32 = 0;
   // Builtin types by traits id, for the rules that treat them specially.
   voidType: i32 = -1;
   nullType: i32 = -1;
@@ -374,6 +385,9 @@ export class Domain {
       const empty = this.internNamespace(NS_Public, this.internText(""));
       this.nameType(empty, this.internText("void"), API_AllVersions, this.voidClass, -1);
       this.transientName = this.internText("Transient");
+      this.versionName = this.internText("Version");
+      this.nativeName = this.internText("native");
+      this.apiName = this.internText("API");
     }
 
     return this.layoutStatics(index) && this.layoutScripts(index) && this.layoutActivations(index);
@@ -1398,7 +1412,10 @@ export class Domain {
       if (type === NS_Private) {
         version = API_AllVersions;
       } else if (index && abc.builtin) {
-        if (mark < 0 && type === NS_Public && this.versioned[uri]) {
+        if (
+          (mark < 0 && type === NS_Public && this.versioned[uri]) ||
+          mark >= API_BuiltinInternal
+        ) {
           version = API_Internal;
         }
       } else if (index && type === NS_Public) {

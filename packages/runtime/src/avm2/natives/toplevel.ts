@@ -2,6 +2,7 @@
 import { messages } from "../messages.js";
 import type { ClassHook, Runtime, Value } from "../runtime.js";
 import { type Natives, plain } from "./define.js";
+import { formatClassName } from "./describe.js";
 import { qualifiedClassName } from "./object.js";
 
 /** A String argument as avmplus has it: null, as undefined coerced to String is, as "null". */
@@ -55,9 +56,14 @@ export const toplevelNatives: Natives = {
   unescape: ofText((_rt, s) => unescape(s)),
   "avmplus::getQualifiedClassName": (rt) => (v: Value) => qualifiedClassName(rt, v),
   "avmplus::getQualifiedSuperclassName": (rt) => (v: Value) => {
+    // null's and void's traits have no base.
+    if (v === null || v === undefined) {
+      return null;
+    }
+
     const cls = v !== null && typeof v === "object" && v.$it ? v : rt.traitsOf(v).cls;
     const base = cls?.$base;
-    return base ? base.$it.name : null;
+    return base ? formatClassName(base.$it.name) : null;
   },
 
   // As Toplevel::bugzilla: the bug fixes the builtins' AS3 asks about, all
