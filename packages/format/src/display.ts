@@ -43,7 +43,11 @@ function readString(r: SwfReader): string {
   return s;
 }
 
-/** UTF-8 as SWF 6 and later write strings; a malformed byte stands for itself. */
+/**
+ * UTF-8 as SWF 6 and later write strings, read as avmplus' Utf8ToUtf16 does
+ * (fromUtf8 in the runtime): a malformed or overlong sequence is no
+ * sequence, and its first byte stands for itself.
+ */
 function utf8(bytes: Uint8Array): string {
   let s = "";
   for (let i = 0; i < bytes.length; ) {
@@ -57,11 +61,18 @@ function utf8(bytes: Uint8Array): string {
       c = (c << 6) | (next & 0x3f);
     }
 
+    ok = ok && c >= [0, 0x80, 0x800, 0x10000][n];
     if (!ok) {
       s += String.fromCharCode(b);
       i++;
+    } else if (n === 3) {
+      // A surrogate pair however large the value, as avmplus makes one;
+      // fromCodePoint would refuse one past U+10FFFF.
+      const u = c - 0x10000;
+      s += String.fromCharCode(0xd800 + ((u >> 10) & 0x3ff), 0xdc00 + (u & 0x3ff));
+      i += 4;
     } else {
-      s += String.fromCodePoint(c);
+      s += String.fromCharCode(c);
       i += n + 1;
     }
   }
@@ -104,8 +115,10 @@ export function readPlace(bytes: Uint8Array, tag: Tag): Place {
   const flags2 = tag.code === PlaceObject3 ? r.u8() : 0;
   place.depth = r.u16();
   place.move = (flags & 0x01) !== 0;
+  // SWF19 has a class name follow HasImage with a character; Flash reads
+  // one with HasImage only without a character, as Ruffle's reader notes.
   const hasImage = (flags2 & 0x10) !== 0;
-  if (flags2 & 0x08 || (hasImage && flags & 0x02)) {
+  if (flags2 & 0x08 || (hasImage && !(flags & 0x02))) {
     place.className = readString(r);
   }
 
@@ -147,6 +160,10 @@ export function readPlace(bytes: Uint8Array, tag: Tag): Place {
 
   if (flags2 & 0x20) {
     place.visible = r.u8() !== 0;
+  }
+
+  // The background follows its own flag, not HasVisible as SWF19 lays it out.
+  if (flags2 & 0x40) {
     const a = r.u8();
     const rgb = (r.u8() << 16) | (r.u8() << 8) | r.u8();
     place.opaqueBackground = ((a << 24) | rgb) >>> 0;

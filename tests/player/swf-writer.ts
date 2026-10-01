@@ -240,12 +240,19 @@ export interface PlaceSpec {
   move?: boolean;
   matrix?: { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
   name?: string;
+  /** PlaceObject3's fields; any of them makes the tag one. */
+  className?: string;
+  hasImage?: boolean;
+  visible?: boolean;
+  /** 0xAARRGGBB. */
+  opaqueBackground?: number;
 }
 
-/** A PlaceObject2 tag. */
+/** A PlaceObject2 tag, or a PlaceObject3 when the spec has fields only it holds. */
 export function place(spec: PlaceSpec): Uint8Array {
   const w = new BitWriter();
   let flags = 0;
+  let flags2 = 0;
   if (spec.move) {
     flags |= 0x01;
   }
@@ -262,7 +269,36 @@ export function place(spec: PlaceSpec): Uint8Array {
     flags |= 0x20;
   }
 
-  w.u8(flags).u16(spec.depth);
+  // With HasImage and no character Flash reads a class name anyway, so the
+  // flag stays off then, which is what exercises that path in the reader.
+  const impliedClass = spec.hasImage && spec.character === undefined;
+  if (spec.className !== undefined && !impliedClass) {
+    flags2 |= 0x08;
+  }
+
+  if (spec.hasImage) {
+    flags2 |= 0x10;
+  }
+
+  if (spec.visible !== undefined) {
+    flags2 |= 0x20;
+  }
+
+  if (spec.opaqueBackground !== undefined) {
+    flags2 |= 0x40;
+  }
+
+  const v3 = flags2 !== 0;
+  w.u8(flags);
+  if (v3) {
+    w.u8(flags2);
+  }
+
+  w.u16(spec.depth);
+  if (spec.className !== undefined) {
+    w.string(spec.className);
+  }
+
   if (spec.character !== undefined) {
     w.u16(spec.character);
   }
@@ -275,7 +311,19 @@ export function place(spec: PlaceSpec): Uint8Array {
     w.string(spec.name);
   }
 
-  return tag(26, w.done());
+  if (spec.visible !== undefined) {
+    w.u8(spec.visible ? 1 : 0);
+  }
+
+  if (spec.opaqueBackground !== undefined) {
+    const c = spec.opaqueBackground;
+    w.u8(c >>> 24)
+      .u8(c >> 16)
+      .u8(c >> 8)
+      .u8(c);
+  }
+
+  return tag(v3 ? 70 : 26, w.done());
 }
 
 export function remove(depth: number): Uint8Array {

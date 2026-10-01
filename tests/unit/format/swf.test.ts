@@ -153,6 +153,38 @@ const frame = (...tags: Uint8Array[]) =>
     tags: [...tags, w.showFrame(), w.end()],
   });
 
+test("PlaceObject3's class name, visibility and background read as Flash does", () => {
+  const swf = readSwf(
+    frame(
+      w.place({ depth: 1, hasImage: true, className: "pkg.Image", matrix: { tx: 20 } }),
+      w.place({ depth: 2, character: 1, visible: false, name: "hidden" }),
+      w.place({ depth: 3, character: 1, opaqueBackground: 0x80112233 }),
+    ),
+  );
+  // No character: the class name is implied by HasImage, before the matrix.
+  const image = readPlace(swf.bytes, swf.tags[0]);
+  assert.equal(image.className, "pkg.Image");
+  assert.equal(image.character, null);
+  assert.deepEqual(image.matrix, { a: 1, b: 0, c: 0, d: 1, tx: 20, ty: 0 });
+
+  const hidden = readPlace(swf.bytes, swf.tags[1]);
+  assert.equal(hidden.name, "hidden");
+  assert.equal(hidden.visible, false);
+  assert.equal(hidden.opaqueBackground, null);
+
+  const backed = readPlace(swf.bytes, swf.tags[2]);
+  assert.equal(backed.visible, null);
+  assert.equal(backed.opaqueBackground, 0x80112233);
+});
+
+test("a string's malformed bytes stand for themselves, as avmplus reads them", () => {
+  // A PlaceObject2 with only a name: "é" as UTF-8, as the Latin-1 byte, an
+  // overlong NUL, and a four-byte value past U+10FFFF, which must not throw.
+  const name = [0xc3, 0xa9, 0xe9, 0xc0, 0x80, 0xf7, 0xbf, 0xbf, 0xbf, 0];
+  const swf = readSwf(frame(w.tag(26, new Uint8Array([0x20, 1, 0, ...name]))));
+  assert.equal(readPlace(swf.bytes, swf.tags[0]).name, "\u00e9\u00e9\u00c0\u0080\udbbf\udfff");
+});
+
 test("FileAttributes tells ActionScript 3 from an AVM1 movie", () => {
   assert.equal(isAs3(readSwf(movie)), false);
   assert.equal(isAs3(readSwf(frame(w.fileAttributes(true)))), true);
