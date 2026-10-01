@@ -429,7 +429,12 @@ listens hears its own, on the display list or not, in the order the
 objects first listened, with no capture or bubble phase. And `SymbolClass`
 binds its classes after an eager `DoABC` has run its initializer, so an
 instance that initializer makes of a bound class has no timeline children,
-and one the constructor makes has (`init`).
+and one the constructor makes has (`init`). A goto a frame script asks for
+waits until the script returns: `currentFrame` and the children read as
+before it through the rest of the script, then the jump happens and the
+frame it lands on has its script run in the same phase (`gotos`); a goto
+from anywhere else happens at once. All the timelines advance before any
+frame script runs, parents' scripts before their children's (`nested`).
 
 The player loads a SWF's code through `@swf2es/codegen`'s `Codegen`: each
 `DoABC`, in tag order, is added to one domain after the builtins and

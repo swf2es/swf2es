@@ -39,6 +39,8 @@ export class Scripting {
   library: Library | null = null;
   /** Whether a script asked the stage to render (Stage.invalidate). */
   invalidated = false;
+  /** The clip whose frame script is running, while one is: a goto it asks for waits for it to return. */
+  inFrameScript: MovieClip | null = null;
   /** The display objects listening for each frame event, in the order they first listened; a broadcast reaches these. */
   private readonly broadcasts = new Map<string, Set<AsObject>>();
   /** What flash.display.Stage reports and sets; the player copies the frame rate back each frame. */
@@ -213,7 +215,20 @@ export class Scripting {
           const script = o.frameScripts.get(o.currentFrame);
           if (script) {
             ran = true;
-            this.rt.call(script, o.object);
+            this.inFrameScript = o;
+            try {
+              this.rt.call(script, o.object);
+            } finally {
+              this.inFrameScript = null;
+            }
+
+            // The goto the script asked for, now that it has returned; the
+            // frame it lands on has its script run in this same phase.
+            if (o.queuedGoto !== null) {
+              const frame = o.queuedGoto;
+              o.queuedGoto = null;
+              o.gotoFrame(frame);
+            }
           }
         }
 

@@ -239,6 +239,88 @@ function bound(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A four-frame root whose square moves each frame, with scripts/Goto.as:
+// frame 2's script jumps to frame 4.
+function gotos(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.doAbc(abc, "Goto"),
+      w.symbolClass([[0, "Main"]]),
+      w.place({ depth: 1, character: 1, matrix: { tx: 0, ty: 400 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, matrix: { tx: 800, ty: 400 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, matrix: { tx: 1600, ty: 400 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, matrix: { tx: 2400, ty: 400 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A root with nothing placed and a bound Box symbol, with scripts/AddChild.as adding Boxes.
+function added(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "AddChild"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Box"],
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A two-frame clip (its square moving on frame 2) on a two-frame root, both
+// classes with frame scripts (scripts/Nested.as).
+function nested(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 2, [
+        w.place({ depth: 1, character: 1 }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, matrix: { tx: 1000, ty: 0 } }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc, "Nested"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Inner"],
+      ]),
+      w.place({ depth: 1, character: 2, matrix: { tx: 200, ty: 400 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // What differs from Flash in "moves" is anti-aliasing a quarter pixel off:
 // Flash's curved lines reach further into their shape, and under the skew
 // of frame 2 its lines are a little wider or narrower than Ruffle's rule
@@ -280,6 +362,33 @@ export const cases: PlayerCase[] = [
     script: "Init",
     frames: 1,
     capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "gotos",
+    swf: gotos,
+    script: "Goto",
+    frames: 3,
+    capture: [1, 2, 3],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "addChild",
+    swf: added,
+    script: "AddChild",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "nested",
+    swf: nested,
+    script: "Nested",
+    frames: 3,
+    capture: [1, 2, 3],
     tolerance: 0,
     maxOutliers: 0,
   },

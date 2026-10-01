@@ -163,6 +163,8 @@ export class MovieClip extends Container {
   readonly frameScripts = new Map<number, avm2.Value>();
   /** The frame whose script last ran, so that entering a frame runs its script once. */
   scriptedFrame = 0;
+  /** A goto a frame script asked for, taken when the script returns, as Flash defers it; null for none. */
+  queuedGoto: number | null = null;
 
   constructor(
     readonly timeline: Timeline,

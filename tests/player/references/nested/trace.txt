@@ -1,0 +1,8 @@
+Inner made 1
+Main made 1 1
+root frame 1 1 1
+inner frame 1 1 1
+root frame 2 2 2
+inner frame 2 2 2
+root frame 1 1 1
+inner frame 1 1 1

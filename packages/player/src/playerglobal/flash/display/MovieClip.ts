@@ -16,6 +16,14 @@ function clipOf(o: AsObject): MovieClip {
 
 export function movieClipNatives(s: Scripting): avm2.Natives {
   // s.rt at call time: the natives are made before the runtime that holds them is.
+  /** Jump to `frame`: at once, or when the frame script asking returns, as Flash defers a goto from one. */
+  const goto = (clip: MovieClip, frame: number) => {
+    if (s.inFrameScript === clip) {
+      clip.queuedGoto = frame;
+    } else {
+      clip.gotoFrame(frame);
+    }
+  };
   /** A frame by number, 1 the first, or by label; the clip's frame if the label is unknown. */
   const frameOf = (clip: MovieClip, frame: Value): number => {
     if (typeof frame === "string" && !/^\d+$/.test(frame)) {
@@ -81,22 +89,22 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
     }),
     "flash.display::MovieClip#nextFrame": plain(function (this: AsObject) {
       const clip = clipOf(this);
-      clip.gotoFrame(clip.currentFrame + 1);
+      goto(clip, clip.currentFrame + 1);
       clip.playing = false;
     }),
     "flash.display::MovieClip#prevFrame": plain(function (this: AsObject) {
       const clip = clipOf(this);
-      clip.gotoFrame(clip.currentFrame - 1);
+      goto(clip, clip.currentFrame - 1);
       clip.playing = false;
     }),
     "flash.display::MovieClip#gotoAndPlay": plain(function (this: AsObject, frame: Value) {
       const clip = clipOf(this);
-      clip.gotoFrame(frameOf(clip, frame));
+      goto(clip, frameOf(clip, frame));
       clip.playing = true;
     }),
     "flash.display::MovieClip#gotoAndStop": plain(function (this: AsObject, frame: Value) {
       const clip = clipOf(this);
-      clip.gotoFrame(frameOf(clip, frame));
+      goto(clip, frameOf(clip, frame));
       clip.playing = false;
     }),
     "flash.display::MovieClip#get:enabled": plain(function (this: AsObject) {
