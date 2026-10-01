@@ -45,11 +45,11 @@ export interface Codegen {
   abcVersion(abc: Uint8Array): AbcVersion | null;
   /** Start a domain whose user ABCs have API version `apiVersion`: Flash Player's, 50, by default. */
   reset(apiVersion?: number): void;
-  /** Add an ABC, linking it against those before it; 0, or the VerifyError it was rejected with. */
+  /** Add an ABC, linking it against those before it; 0, or the VerifyError it was rejected with (then it is not added). */
   add(abc: Uint8Array, builtin?: boolean): number;
   /** The last ABC added compiled whole; `hashes` are the ABCs' hashes in load order, as the cache key names them. */
   compile(hashes?: string[]): Compiled;
-  /** Method bodies of the last ABC compiled alone, as the JIT compiles each on its first call; a native or unverified one is left out. */
+  /** Method bodies of the last ABC compiled alone, as the JIT compiles each on its first call; a native, unverified or unknown one is left out. */
   compileMethods(bodies: number[]): Map<number, string>;
 }
 
@@ -74,6 +74,13 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // cycle's garbage grow it a little further.
   let size = wasm.memory.buffer.byteLength;
   let calls = 0;
+  // Whether the domain has an ABC to compile: asking before is a mistake worth a message, not a trap.
+  let added = 0;
+  const last = (what: string) => {
+    if (added === 0) {
+      throw new Error(`${what}: no ABC has been added to the domain`);
+    }
+  };
   const collected = <T>(result: T): T => {
     const grown = wasm.memory.buffer.byteLength;
     if (grown > size || ++calls >= COLLECT_EVERY) {
@@ -91,12 +98,19 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       return packed < 0 ? null : { major: packed >>> 16, minor: packed & 0xffff };
     },
     reset(apiVersion = 50) {
+      added = 0;
       collected(wasm.domainReset(apiVersion));
     },
     add(abc, builtin = false) {
-      return collected(wasm.domainAdd(abc, builtin));
+      const error = collected(wasm.domainAdd(abc, builtin));
+      if (error === 0) {
+        added++;
+      }
+
+      return error;
     },
     compile(hashes = []) {
+      last("compile");
       const module = wasm.domainModule(hashes.join("\n"));
       const sourceMap = wasm.domainSourceMap();
       const entries = parseEntries(wasm.domainModuleEntries());
@@ -104,7 +118,13 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       return { module, sourceMap, entries };
     },
     compileMethods(bodies) {
-      return parseEntries(collected(wasm.domainEmitEach(bodies.join(","), true)));
+      last("compileMethods");
+      const indices = bodies.filter((b) => Number.isInteger(b) && b >= 0);
+      if (indices.length === 0) {
+        return new Map();
+      }
+
+      return parseEntries(collected(wasm.domainEmitEach(indices.join(","), true)));
     },
   };
 }

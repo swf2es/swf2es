@@ -59,4 +59,20 @@ test("the release build compiles what the test build compiles, byte for byte", {
   assert.ok(compiled.entries.size > 0);
   assert.deepEqual(codegen.compileMethods([...compiled.entries.keys()]), compiled.entries);
   assert.match(compiled.module, /7/);
+
+  // Nothing asked for, or bodies the ABC has not: nothing, not body 0 or a trap.
+  assert.deepEqual(codegen.compileMethods([]), new Map());
+  assert.deepEqual(codegen.compileMethods([9999, -1, 1.5]), new Map());
+  // Verified once: asking again gives the same, from the cache.
+  assert.deepEqual(codegen.compileMethods([0]), new Map([[0, compiled.entries.get(0) ?? ""]]));
+});
+
+test("compiling before an ABC is added is an error, not a trap", async () => {
+  const codegen = await createCodegen(module);
+  codegen.reset();
+  assert.throws(() => codegen.compile(), /no ABC has been added/);
+  assert.throws(() => codegen.compileMethods([0]), /no ABC has been added/);
+  // An ABC the domain rejects does not count as added.
+  assert.notEqual(codegen.add(new Uint8Array([16, 0, 46, 0, 1, 2, 3])), 0);
+  assert.throws(() => codegen.compile(), /no ABC has been added/);
 });

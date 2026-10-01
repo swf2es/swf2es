@@ -2,14 +2,11 @@
 // verifier and the emitter besides, for the node tests to look inside.
 import { Abc } from "./avm2/abc/abc";
 import { BodyDecoder, verifyMethods } from "./avm2/abc/code";
-import * as C from "./avm2/abc/constants";
 import { OP_lookupswitch, opcodeFlags, opcodeNames, opcodeOperands } from "./avm2/abc/opcodes";
 import { readAbc } from "./avm2/abc/parse";
 import { readConstantPool } from "./avm2/abc/pool";
 import { PADDING, Reader } from "./avm2/abc/reader";
 import { MethodEmitter } from "./avm2/emit/method";
-import { ModuleEmitter } from "./avm2/emit/module";
-import { Output } from "./avm2/emit/output";
 import {
   IR_CallGetter,
   IR_CallInterface,
