@@ -277,6 +277,7 @@
     "flash.utils::Timer#get:running",
     "flash.utils::Timer#stop",
     "flash.utils::escapeMultiByte",
+    "flash.utils::getAliasName",
     "flash.utils::getDefinitionByName",
     "flash.utils::getTimer",
     "flash.utils::unescapeMultiByte",
