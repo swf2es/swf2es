@@ -6,16 +6,39 @@
 // edges they are set on, joined where one edge starts where the last ended.
 import type { Fill, Line, Shape } from "@swf2es/format";
 
-/** Path commands, flat: 1 x y (move), 2 x y (line), 3 cx cy x y (quadratic curve), in pixels. */
+/**
+ * Path commands, flat: 1 x y (move), 2 x y (line), 3 cx cy x y (quadratic
+ * curve), 4 c1x c1y c2x c2y x y (cubic curve, which only a Graphics
+ * draws), in pixels.
+ */
 export type Path = number[];
 
 export const MOVE = 1;
 export const LINE = 2;
 export const CURVE = 3;
+export const CUBIC = 4;
+
+/** How many points a command takes. */
+export function pointsOf(command: number): number {
+  return command === CUBIC ? 3 : command === CURVE ? 2 : 1;
+}
+
+/** How a fill's contours decide what is inside: by parity, or by the winding number, as drawPath may ask. */
+export type Winding = "evenOdd" | "nonZero";
 
 export interface ShapeLayer {
-  fills: { fill: Fill; contours: Path[] }[];
+  fills: { fill: Fill; contours: Path[]; winding: Winding }[];
   strokes: { line: Line; paths: Path[] }[];
+}
+
+/** The polygon's orientation: 1 clockwise on a y-down screen, -1 the other way, 0 for no area. */
+export function orientation(points: number[]): number {
+  let area = 0;
+  for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
+    area += points[j] * points[i + 1] - points[i] * points[j + 1];
+  }
+
+  return Math.sign(area);
 }
 
 interface Edge {
@@ -106,7 +129,7 @@ export function shapeLayers(shape: Shape): ShapeLayer[] {
     const layer: ShapeLayer = { fills: [], strokes: [] };
     for (const [i, fill] of fills.entries()) {
       if (fillEdges[i].length) {
-        layer.fills.push({ fill, contours: contours(fillEdges[i]) });
+        layer.fills.push({ fill, contours: contours(fillEdges[i]), winding: "evenOdd" });
       }
     }
 

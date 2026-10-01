@@ -6,10 +6,12 @@ import type { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
 import { displayObjectHooks, displayObjectNatives } from "./flash/display/DisplayObject.js";
 import { containerNatives } from "./flash/display/DisplayObjectContainer.js";
+import { graphicsNatives } from "./flash/display/Graphics.js";
 import { interactiveObjectNatives } from "./flash/display/InteractiveObject.js";
 import { loaderNatives } from "./flash/display/Loader.js";
 import { loaderInfoNatives } from "./flash/display/LoaderInfo.js";
 import { movieClipNatives } from "./flash/display/MovieClip.js";
+import { shapeNatives } from "./flash/display/Shape.js";
 import { spriteNatives } from "./flash/display/Sprite.js";
 import { stageNatives } from "./flash/display/Stage.js";
 import { eventNatives } from "./flash/events/Event.js";
@@ -29,7 +31,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...eventDispatcherNatives(s),
     ...displayObjectNatives(s),
     ...containerNatives(s),
-    ...spriteNatives(),
+    ...spriteNatives(s),
     ...movieClipNatives(s),
     ...stageNatives(s),
     ...loaderNatives(s),
@@ -41,6 +43,8 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...interactiveObjectNatives(s),
     ...fileFilterNatives(s),
     ...transformNatives(s),
+    ...graphicsNatives(s),
+    ...shapeNatives(s),
   };
 }
 

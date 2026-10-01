@@ -3,14 +3,20 @@
 // the children by name; a Sprite a script makes has none.
 import { avm2 } from "@swf2es/runtime";
 import { type DisplayObject, MovieClip } from "../../../display.js";
+import type { Scripting } from "../../../scripting.js";
+import { graphicsOf } from "./Graphics.js";
 
 type Value = avm2.Value;
 
-export function spriteNatives(): avm2.Natives {
+export function spriteNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
   class SpriteNatives {
     declare $display: DisplayObject;
+
+    get graphics(): Value {
+      return graphicsOf(s, this as unknown as avm2.AsObject);
+    }
 
     "flash.display:Sprite::constructChildren"(): void {
       const d = this.$display;
