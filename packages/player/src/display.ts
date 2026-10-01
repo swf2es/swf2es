@@ -239,7 +239,8 @@ export class MovieClip extends Container {
       }
 
       const child = instantiate(character, this.library);
-      if (existing) {
+      // In the child's stead, the new one keeps what the place does not set, as frame by frame.
+      if (place.move && existing) {
         child.matrix = existing.matrix;
         child.colorTransform = existing.colorTransform;
         child.name = existing.name;
@@ -306,8 +307,17 @@ const IDENTITY_COLOR: ColorTransform = {
   aAdd: 0,
 };
 
-/** `next` over `previous`: what the later place sets, and the rest as it was; a later character brings its flag. */
+/**
+ * `next` over `previous`: what the later place sets, and the rest as it
+ * was. A character placed anew, without the move flag, starts over, as the
+ * child it makes starts from nothing; one placed in the child's stead
+ * keeps what came before, as that child does.
+ */
 function mergePlace(previous: Place, next: Place): Place {
+  if (next.character !== null && !next.move) {
+    return next;
+  }
+
   return {
     ...previous,
     move: next.character !== null ? next.move : previous.move,

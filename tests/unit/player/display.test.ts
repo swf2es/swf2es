@@ -188,3 +188,41 @@ test("a goto forward makes a new child where the frame places the character anew
   assert.equal(replaced.root.depths.get(1), kept);
   assert.equal(kept?.matrix.tx, 10);
 });
+
+test("a goto forward leaves the display list as playing the frames would", () => {
+  // Frame 1 places the square, frame 2 moves it, frame 3 places it anew with
+  // no matrix: a jump must not hand the new square the moved one's place.
+  const anew = () =>
+    movie(
+      [w.place({ depth: 1, character: 1 })],
+      [w.place({ depth: 1, move: true, matrix: { tx: 1000 } })],
+      [w.place({ depth: 1, character: 1 })],
+    );
+  const played = anew();
+  played.tick();
+  played.tick();
+  const jumped = anew();
+  const before = jumped.root.depths.get(1);
+  jumped.root.gotoFrame(3);
+  assert.equal(played.root.depths.get(1)?.matrix.tx, 0);
+  assert.equal(jumped.root.depths.get(1)?.matrix.tx, 0);
+  assert.notEqual(jumped.root.depths.get(1), before);
+
+  // In the square's stead, the other character keeps its place both ways.
+  const instead = () =>
+    movie(
+      [w.place({ depth: 1, character: 1 })],
+      [w.place({ depth: 1, move: true, matrix: { tx: 1000 } })],
+      [w.place({ depth: 1, character: 2, move: true })],
+    );
+  const playedInstead = instead();
+  playedInstead.tick();
+  playedInstead.tick();
+  const jumpedInstead = instead();
+  jumpedInstead.root.gotoFrame(3);
+  for (const player of [playedInstead, jumpedInstead]) {
+    const child = player.root.depths.get(1);
+    assert.equal(child?.character?.id, 2);
+    assert.equal(child?.matrix.tx, 50);
+  }
+});
