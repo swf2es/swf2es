@@ -166,7 +166,7 @@ export class Scripting {
       throw new Error(`an ABC was rejected: VerifyError #${error}`);
     }
 
-    this.hashes.push(hashOf(abc));
+    this.hashes.push(await hashOf(abc));
     const { module } = this.codegen.compile(this.hashes);
     const factory = (await import(`data:text/javascript,${encodeURIComponent(module)}`)).default;
     return factory(this.rt);
@@ -526,14 +526,19 @@ export class Scripting {
       failed: null,
     };
     this.loads.push(load);
+    // Settled at once, not when its turn in the chain comes: a rejection must find its handler.
+    const fetched = bytes.then(
+      (result) => result,
+      () => null,
+    );
     this.preparing = this.preparing.then(async () => {
-      try {
-        load.bytes = await bytes;
-      } catch {
+      const result = await fetched;
+      if (!result) {
         load.failed = `${this.errorText(2035)} URL: ${url}`;
         return;
       }
 
+      load.bytes = result;
       try {
         load.ready = await this.prepare(load);
       } catch (e) {
@@ -869,17 +874,21 @@ function qualify(name: string): string {
 }
 
 /**
- * A hash of an ABC's bytes for the modules' record of what they were
- * linked against: FNV-1a, twice, which tells ABCs apart within one SWF.
- * A cache shared between machines keys on the SHA-256 the AOT side has.
+ * The fingerprint of an ABC's bytes for the modules' record of what they
+ * were linked against: SHA-256 as hex, which is what the AOT side and the
+ * cache key use, so that a module compiled here names its ABCs as one
+ * compiled there does. crypto.subtle is a secure context's: https, or
+ * localhost.
  */
-function hashOf(bytes: Uint8Array): string {
-  let a = 0x811c9dc5;
-  let b = 0x050c5d1f;
-  for (const byte of bytes) {
-    a = Math.imul(a ^ byte, 0x01000193);
-    b = Math.imul(b ^ byte, 0x01000193);
+async function hashOf(bytes: Uint8Array): Promise<string> {
+  // The bytes are a view of the SWF's buffer, never a shared one, as digest requires.
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>),
+  );
+  let hex = "";
+  for (let i = 0; i < digest.length; i++) {
+    hex += digest[i].toString(16).padStart(2, "0");
   }
 
-  return (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+  return hex;
 }
