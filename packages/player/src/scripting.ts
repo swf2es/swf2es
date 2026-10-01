@@ -19,6 +19,7 @@ import {
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
+import { sha256 } from "./sha256.js";
 import { type Character, type Library, readLibrary } from "./timeline.js";
 
 type AsObject = avm2.AsObject;
@@ -166,7 +167,7 @@ export class Scripting {
       throw new Error(`an ABC was rejected: VerifyError #${error}`);
     }
 
-    this.hashes.push(hashOf(abc));
+    this.hashes.push(await sha256(abc));
     const { module } = this.codegen.compile(this.hashes);
     const factory = (await import(`data:text/javascript,${encodeURIComponent(module)}`)).default;
     return factory(this.rt);
@@ -526,14 +527,19 @@ export class Scripting {
       failed: null,
     };
     this.loads.push(load);
+    // Settled at once, not when its turn in the chain comes: a rejection must find its handler.
+    const fetched = bytes.then(
+      (result) => result,
+      () => null,
+    );
     this.preparing = this.preparing.then(async () => {
-      try {
-        load.bytes = await bytes;
-      } catch {
+      const result = await fetched;
+      if (!result) {
         load.failed = `${this.errorText(2035)} URL: ${url}`;
         return;
       }
 
+      load.bytes = result;
       try {
         load.ready = await this.prepare(load);
       } catch (e) {
@@ -866,20 +872,4 @@ function resolve(base: string, url: string): string {
 function qualify(name: string): string {
   const i = name.lastIndexOf(".");
   return i < 0 ? name : `${name.slice(0, i)}::${name.slice(i + 1)}`;
-}
-
-/**
- * A hash of an ABC's bytes for the modules' record of what they were
- * linked against: FNV-1a, twice, which tells ABCs apart within one SWF.
- * A cache shared between machines keys on the SHA-256 the AOT side has.
- */
-function hashOf(bytes: Uint8Array): string {
-  let a = 0x811c9dc5;
-  let b = 0x050c5d1f;
-  for (const byte of bytes) {
-    a = Math.imul(a ^ byte, 0x01000193);
-    b = Math.imul(b ^ byte, 0x01000193);
-  }
-
-  return (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
 }
