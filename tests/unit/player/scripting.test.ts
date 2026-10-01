@@ -15,6 +15,9 @@ import { scripted } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compileScripts } from "../../player/scripts.ts";
 
+// This package's own out directory: the player's tests run at the same time and use theirs.
+const out = fileURLToPath(new URL("../out/player/", import.meta.url));
+
 let skip: string | false = false;
 try {
   containerEngine();
@@ -31,8 +34,8 @@ test("a document class is constructed on the root and its frame scripts run in o
 }, async () => {
   const lines: string[] = [];
   const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
-  await scripting.loadLibraries(libraryAbcs());
-  const abc = compileScripts(["Main"]).get("Main") as Uint8Array;
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const abc = compileScripts(["Main"], out).get("Main") as Uint8Array;
   const player = new Player(scripted(abc), scripting);
   await player.start();
 

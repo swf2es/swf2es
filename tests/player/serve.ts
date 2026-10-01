@@ -17,8 +17,8 @@ const mounts: [string, string][] = [
   ["/codegen/", join(root, "packages/codegen/dist/")],
   ["/runtime/", join(root, "packages/runtime/dist/")],
   ["/player/", join(root, "packages/player/dist/")],
-  // The ABCs a SWF's code links against, copied out of the oracle's image by the tests.
-  ["/libraries/", join(root, "tests/libraries/out/")],
+  // The ABCs a SWF's code links against, the player tests' own copies (libraries.ts).
+  ["/libraries/", join(here, "out/libraries/")],
   ["/pixi/", join(root, "packages/player/node_modules/pixi.js/dist/")],
   ["/pako/", join(root, "packages/format/node_modules/pako/dist/")],
   ["/lzma1/", join(root, "packages/format/node_modules/lzma1/lib/")],
