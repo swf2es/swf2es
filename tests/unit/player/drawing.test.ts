@@ -13,7 +13,7 @@ test("a fill's contours close, a drawPath's winding is the fill's, and copying f
   d.endFill();
   assert.equal(d.layers.length, 1);
   assert.equal(d.layers[0].fills[0].winding, "evenOdd");
-  assert.deepEqual(d.bounds(), { xMin: 0, yMin: 0, xMax: 10, yMax: 10 });
+  assert.deepEqual(d.bounds(true), { xMin: 0, yMin: 0, xMax: 10, yMax: 10 });
 
   d.beginFill(red);
   d.drawPath([1, 2, 2, 2], [0, 0, 20, 0, 20, 20, 0, 20], "nonZero");
@@ -29,9 +29,30 @@ test("a fill's contours close, a drawPath's winding is the fill's, and copying f
   copy.copyFrom(d);
   assert.equal(copy.layers.length, 2);
   assert.equal(copy.layers[1].fills[0].winding, "nonZero");
-  assert.deepEqual(copy.bounds(), { xMin: 0, yMin: 0, xMax: 40, yMax: 20 });
+  assert.deepEqual(copy.bounds(false), { xMin: 0, yMin: 0, xMax: 40, yMax: 20 });
 
   // Copied from itself: cleared first, so nothing is left to copy, as Flash has it.
   d.copyFrom(d);
   assert.equal(d.layers.length, 0);
+
+  // A move alone has no extent; a line from it does, its width counted when asked.
+  const e = new Drawing();
+  e.lineStyle({
+    width: 40,
+    color: 0xff000000,
+    startCap: 0,
+    endCap: 0,
+    join: 0,
+    miterLimit: 3,
+    noHScale: false,
+    noVScale: false,
+    pixelHinting: false,
+    noClose: false,
+    fill: null,
+  });
+  e.moveTo(50, 50);
+  assert.equal(e.bounds(true), null);
+  e.lineTo(60, 50);
+  assert.deepEqual(e.bounds(false), { xMin: 50, yMin: 50, xMax: 60, yMax: 50 });
+  assert.deepEqual(e.bounds(true), { xMin: 49, yMin: 49, xMax: 61, yMax: 51 });
 });

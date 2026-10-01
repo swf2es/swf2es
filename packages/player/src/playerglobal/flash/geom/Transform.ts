@@ -3,6 +3,7 @@
 // them, and set from either. The 3D side waits with the rest of 3D.
 import type { Matrix as Linear } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import { toStage } from "../../../bounds.js";
 import { type DisplayObject, TRANSFORM } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
 
@@ -73,28 +74,6 @@ export function colorOf(s: Scripting, o: AsObject): Color {
   return c;
 }
 
-/** The matrix from `d`'s space to the stage's, through every parent. */
-export function concatenated(s: Scripting, d: DisplayObject): Linear {
-  let m = d.matrix;
-  for (let p = d.parent; p && p !== s.stage; p = p.parent) {
-    m = concat(m, p.matrix);
-  }
-
-  return m;
-}
-
-/** `m` after `p`: the matrix that applies `m` and then `p`, as a child's in its parent's. */
-function concat(m: Linear, p: Linear): Linear {
-  return {
-    a: m.a * p.a + m.b * p.c,
-    b: m.a * p.b + m.b * p.d,
-    c: m.c * p.a + m.d * p.c,
-    d: m.c * p.b + m.d * p.d,
-    tx: m.tx * p.a + m.ty * p.c + p.tx,
-    ty: m.tx * p.b + m.ty * p.d + p.ty,
-  };
-}
-
 export function transformNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
@@ -129,7 +108,7 @@ export function transformNatives(s: Scripting): avm2.Natives {
     }
 
     get concatenatedMatrix(): Value {
-      return matrixObject(s, concatenated(s, this.$display));
+      return matrixObject(s, toStage(this.$display, s.stage));
     }
 
     /** The color transform to the stage: multipliers multiplied, offsets carried through the parents' multipliers. */

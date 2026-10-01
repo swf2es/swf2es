@@ -620,6 +620,57 @@ and `drawGraphicsData` wait. An adl case draws in a `Shape` and in a
 `Sprite` with a child, compared by pixels; the corpus's `graphics_*`
 tests, which trace nothing, check that nothing throws.
 
+### Bounds and hit tests
+
+A display object's bounds are what it draws and what its children draw,
+in its own space: for a shape from the SWF the rectangle DefineShape
+recorded, with the lines' widths for `getBounds`, `width` and `height`
+and without them (`edgeBounds`, where the shape has one) for `getRect`,
+as Flash reports the recorded rectangles even where the shape's edges
+disagree with them (the corpus's `displayobject_getrect`); for a
+drawing, the extent of its paths, curves at their true extremes, with
+the lines' half widths and square caps for the bounds with lines; for a
+container, the union of its children's bounds, each through the child's
+matrix, with its own drawing's. `width` and `height` are the bounds
+through the object's own matrix, in its parent's space, or what that
+would be for one with no parent, so a turned square is wider than its
+side and a scaled shape never added is as wide as its scale makes it
+(the `draws` case); setting one scales the
+object so that the bounds come to the value, and leaves it when the
+bounds have no extent to scale, as Flash. `getBounds(target)` and
+`getRect(target)` take the bounds through the matrices up to the stage
+and back down into the target's, or stay in the object's own for null.
+
+What is reported is in twips, as Flash keeps positions: a turned square
+of side 50 is 61.25 wide, not 61.237 (the `draws` case). Flash's bounds
+of a line come out about half a pixel wider than its geometry with its
+half width, by a rule not known yet, so the case reports its drawing's
+`getRect`, which has the lines' paths without their widths. Flash keeps
+`scaleX`, `scaleY` and `rotation` apart from the matrix, so that a
+negative width gives a negative `scaleX`; the player derives them from
+the matrix and loses the sign, which is where the corpus's
+`displayobject_width` and `_height` part from it.
+
+`hitTestPoint(x, y)` takes its point in the space of the main root, as
+Flash does (the corpus's `displayobject_hittestpoint_root`: moving the
+root moves nothing under the point, moving a loaded SWF's root does):
+against the bounds, or, asked for the shape, against what is drawn, a
+fill where the point is inside by the fill's winding rule, the parity
+of its contours around the point or the sum of their orientations, as
+the renderer fills it (the `draws` case hits the inner square of the
+non-zero pair and not the even-odd one's), and a line where it is within
+half the width of a path, children included. Flash finds nothing on an
+object not yet drawn and off the stage, as the oracle's harness has a
+document class in its constructor; the player does not model that.
+The shape test samples half a pixel to the left of the point, on its
+row, which is how Flash's answers on a shape's edges come out: a point
+on its right edge hits, one on its left, top or bottom edge does not
+(`displayobject_hittestpoint_boundary`, both ways round). The shape test
+asks for a SWF's root above the object, the bounds test does not. `hitTestObject`
+asks whether two objects' bounds in the stage's space overlap. The
+corpus's `displayobject_getrect`, `_hittestpoint`, `_hittestpoint_root`
+and `_hittestobject` are the reference, with the `draws` case.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
