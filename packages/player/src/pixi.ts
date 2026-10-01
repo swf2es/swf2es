@@ -24,6 +24,7 @@ import {
   CONTENT,
   Container,
   type DisplayObject,
+  PIXELS,
   ShapeObject,
   TRANSFORM,
 } from "./display.js";
@@ -339,8 +340,12 @@ export class PixiView {
    * its own and change.
    */
   private redraw(o: DisplayObject, node: Node): void {
+    // A Bitmap's texture and its source are its own: they go with the sprite.
+    node.bitmap?.sprite.destroy({ texture: true, textureSource: true });
     for (const child of node.art.removeChildren()) {
-      child.destroy();
+      if (!child.destroyed) {
+        child.destroy();
+      }
     }
 
     node.strokes = [];
@@ -457,11 +462,9 @@ export class PixiView {
       this.redraw(o, node);
     } else if (moved && node.strokes.some((g) => g)) {
       this.restroke(node);
-    } else if (node.bitmap && o instanceof BitmapObject && o.store) {
-      // Pixels set since the upload, or the store gone: drawn again.
-      if (o.store.disposed) {
-        this.redraw(o, node);
-      } else if (o.store.version !== node.bitmap.version) {
+    } else if (o.dirty & PIXELS && node.bitmap && o instanceof BitmapObject && o.store) {
+      // Pixels set since the upload: the same texture, uploaded again.
+      if (o.store.version !== node.bitmap.version) {
         node.bitmap.source.resource = rgba(o.store.pixels);
         node.bitmap.source.update();
         node.bitmap.version = o.store.version;

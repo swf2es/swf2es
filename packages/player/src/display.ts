@@ -15,6 +15,8 @@ export const CLEAN = 0;
 export const TRANSFORM = 1;
 export const CHILDREN = 2;
 export const CONTENT = 4;
+/** A Bitmap's pixels changed in place: the texture uploads again, nothing is rebuilt. */
+export const PIXELS = 8;
 
 /** Display objects are numbered as they are made: Flash runs orphans' scripts newest first. */
 let made = 0;
@@ -220,13 +222,30 @@ function swap(existing: DisplayObject, character: Character): void {
 
 /** A Bitmap: a display object that shows a BitmapData's pixels, its bounds the data's size. */
 export class BitmapObject extends DisplayObject {
-  store: BitmapStore | null;
+  private shown: BitmapStore | null = null;
   smoothing = false;
   pixelSnapping = "auto";
 
   constructor(store: BitmapStore | null) {
     super();
     this.store = store;
+  }
+
+  /** The store shown; the object watches it, so a pixel set marks the object for the renderer. */
+  get store(): BitmapStore | null {
+    return this.shown;
+  }
+
+  set store(store: BitmapStore | null) {
+    this.shown?.views.delete(this);
+    this.shown = store;
+    store?.views.add(this);
+    this.invalidate(CONTENT);
+  }
+
+  /** The store's pixels changed, or it was disposed. */
+  pixelsChanged(disposed: boolean): void {
+    this.invalidate(disposed ? CONTENT : PIXELS);
   }
 }
 
