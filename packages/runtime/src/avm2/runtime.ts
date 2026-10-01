@@ -1943,6 +1943,17 @@ export class Runtime {
     return cls;
   }
 
+  /**
+   * The class `qualified` names, "pkg::Name" or "Name", its defining script
+   * run; a ReferenceError if no script defines it. What a SWF's SymbolClass
+   * and a player's lookups by name go through.
+   */
+  classNamed(qualified: string): AsObject {
+    const i = qualified.lastIndexOf("::");
+    const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));
+    return this.resolveName(qname(ns, i < 0 ? qualified : qualified.slice(i + 2)));
+  }
+
   /** The class a multiname or TypeName names. */
   resolveName(mn: Multiname | TypeName): AsObject {
     if (mn instanceof TypeName) {

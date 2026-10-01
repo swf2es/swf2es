@@ -79,12 +79,18 @@ importers:
 
   tests/player:
     dependencies:
+      '@swf2es/codegen':
+        specifier: workspace:*
+        version: link:../../packages/codegen
       '@swf2es/format':
         specifier: workspace:*
         version: link:../../packages/format
       '@swf2es/player':
         specifier: workspace:*
         version: link:../../packages/player
+      '@swf2es/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       pixi.js:
         specifier: 8.21.0
         version: 8.21.0

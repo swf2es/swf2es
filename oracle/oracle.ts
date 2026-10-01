@@ -59,7 +59,15 @@ const ABCDUMP_SOURCE = "oracle/avmplus/utils/abcdump.as";
 /** Where the image keeps the ABCs ASC imports: builtin, shell_toplevel, playerglobal... */
 const LIBRARY = "/opt/crossbridge/sdk/usr/lib";
 
-const ASC = `java -jar ${LIBRARY}/asc2.jar -import ${LIBRARY}/builtin.abc -import ${LIBRARY}/shell_toplevel.abc`;
+/** ASC 2.0 with the image's library ABCs `imports` on its path, builtin first. */
+function ascCommand(imports: string[]): string {
+  return `java -jar ${LIBRARY}/asc2.jar ${imports.map((n) => `-import ${LIBRARY}/${n}.abc`).join(" ")}`;
+}
+
+/** The libraries avmshell's programs compile against; a player's compile against playerglobal instead. */
+const SHELL_IMPORTS = ["builtin", "shell_toplevel"];
+
+const ASC = ascCommand(SHELL_IMPORTS);
 
 /** Shell lines that compile abcdump into $out/tools, once. */
 const buildAbcdump = [
@@ -133,11 +141,12 @@ export function pull(engine = containerEngine()): void {
  * What a compile depends on: the image, the arguments, and the contents of
  * the source and of every file passed with -in or -import.
  */
-function compileKey(job: OracleJob): string {
+function compileKey(job: OracleJob, imports: string[]): string {
   const hash = createHash("sha256")
     .update(IMAGE)
     .update("\0")
-    .update((job.ascArgs ?? []).join(" "));
+    .update((job.ascArgs ?? []).join(" "))
+    .update(imports.join(" "));
   const args = job.ascArgs ?? [];
   const inputs = [
     job.source,
@@ -161,6 +170,9 @@ function compileKey(job: OracleJob): string {
  * compileKey) is unchanged is reused instead of recompiled. With `abcdump`,
  * each ABC is also dumped; with `repeat`, it runs twice to find output that
  * changes from run to run. Each avmshell run gets `timeoutSeconds`.
+ * `imports` names the image's library ABCs to compile against, and with
+ * `run` false nothing runs: for a SWF's script, compiled against
+ * playerglobal, which avmshell has no natives for.
  */
 export function runOracle(
   jobs: (string | OracleJob)[],
@@ -171,8 +183,11 @@ export function runOracle(
     abcdump = false,
     repeat = false,
     parallel = defaultParallelism(),
+    imports = SHELL_IMPORTS,
+    run = true,
   } = {},
 ): OracleResult[] {
+  const asc = ascCommand(imports);
   mkdirSync(join(outDir, "tools"), { recursive: true });
 
   const rel = (p: string) => relative(root, resolve(p));
@@ -201,7 +216,7 @@ export function runOracle(
     const cached =
       existsSync(join(outDir, `${name}.abc`)) &&
       existsSync(join(outDir, `${name}.key`)) &&
-      readFileSync(join(outDir, `${name}.key`), "utf8") === compileKey(job);
+      readFileSync(join(outDir, `${name}.key`), "utf8") === compileKey(job, imports);
     return [name, rel(job.source), cached ? "0" : "1", (job.ascArgs ?? []).join(" ")].join("\t");
   });
 
@@ -216,13 +231,13 @@ export function runOracle(
     `  rm -f "$out/$n.code" "$out/$n.out" "$out/$n.out2" "$out/$n.dump"`,
     `  if [ "$compile" = 1 ]; then`,
     `    rm -f "$out/$n.abc" "$out/$n.key"`,
-    `    ${ASC} $args -outdir "$d" "$f" > "$out/$n.log" 2>&1`,
+    `    ${asc} $args -outdir "$d" "$f" > "$out/$n.log" 2>&1`,
     "  fi",
     `  if [ -f "$out/$n.abc" ]; then`,
     // Run from the job's own directory: tests may write files, which then stay in outDir.
     `    b=$(basename "$n")`,
-    `    (cd "$d" && ${avmshell} "$b.abc" > "$b.out" 2>&1; echo $? > "$b.code")`,
-    ...(repeat ? [`    (cd "$d" && ${avmshell} "$b.abc" > "$b.out2" 2>&1)`] : []),
+    ...(run ? [`    (cd "$d" && ${avmshell} "$b.abc" > "$b.out" 2>&1; echo $? > "$b.code")`] : []),
+    ...(repeat && run ? [`    (cd "$d" && ${avmshell} "$b.abc" > "$b.out2" 2>&1)`] : []),
     ...(abcdump
       ? [`    (cd "$d" && ${avmshell} "/work/$out/tools/abcdump.abc" -- "$b.abc" > "$b.dump" 2>&1)`]
       : []),
@@ -262,7 +277,7 @@ export function runOracle(
 
     if (compile === "1") {
       if (existsSync(`${n}.abc`)) {
-        writeFileSync(`${n}.key`, compileKey(job));
+        writeFileSync(`${n}.key`, compileKey(job, imports));
       } else {
         rmSync(`${n}.key`, { force: true });
       }
@@ -271,11 +286,11 @@ export function runOracle(
     return {
       file: rel(job.source),
       name,
-      compiled: code !== null,
+      compiled: run ? code !== null : existsSync(`${n}.abc`),
       compileLog: clean(read(`${n}.log`) ?? ""),
       exitCode: code === null ? null : Number(code),
       output,
-      dump: abcdump && code !== null ? read(`${n}.dump`) : null,
+      dump: abcdump && existsSync(`${n}.abc`) ? read(`${n}.dump`) : null,
       nondeterministic: repeat && code !== null && read(`${n}.out2`) !== output,
     };
   });

@@ -5,7 +5,10 @@ import * as w from "../swf-writer.ts";
 
 export interface PlayerCase {
   name: string;
-  swf: Uint8Array;
+  /** The SWF, or how to build it around the compiled script. */
+  swf: Uint8Array | ((abc: Uint8Array) => Uint8Array);
+  /** The AS3 half: scripts/<script>.as, compiled in the oracle's container; its trace must match Flash's. */
+  script?: string;
   frames: number;
   capture: number[];
   quality?: "low" | "medium" | "high" | "best";
@@ -167,6 +170,184 @@ function rewinds(as3: boolean): Uint8Array {
   });
 }
 
+// A document class (scripts/Main.as) on a two-frame root with a sprite named
+// "box" placed on frame 1 and moved on frame 2: what it traces when it is
+// constructed and on each frame's script must be what Flash traces.
+export function scripted(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "Main"),
+      w.symbolClass([[0, "Main"]]),
+      w.place({ depth: 1, character: 2, name: "box", matrix: { tx: 200, ty: 400 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, matrix: { tx: 1000, ty: 400 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A two-frame root with `abc` as its code and nothing placed: for what the
+// scripts alone do (scripts/Events.as).
+function bare(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "Main"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A sprite with one child, bound to a class the script constructs during
+// its initializer and again later (scripts/Init.as).
+function bound(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "Init"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Box"],
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A four-frame root whose square moves each frame, with scripts/Goto.as:
+// frame 2's script jumps to frame 4.
+function gotos(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.doAbc(abc, "Goto"),
+      w.symbolClass([[0, "Main"]]),
+      w.place({ depth: 1, character: 1, matrix: { tx: 0, ty: 400 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, matrix: { tx: 800, ty: 400 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, matrix: { tx: 1600, ty: 400 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, matrix: { tx: 2400, ty: 400 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A root with nothing placed and a bound Box symbol, with scripts/AddChild.as adding Boxes.
+function added(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "AddChild"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Box"],
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A two-frame clip (its square moving on frame 2) on a two-frame root, both
+// classes with frame scripts (scripts/Nested.as).
+function nested(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 2, [
+        w.place({ depth: 1, character: 1 }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, matrix: { tx: 1000, ty: 0 } }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc, "Nested"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Inner"],
+      ]),
+      w.place({ depth: 1, character: 2, matrix: { tx: 200, ty: 400 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A three-frame root whose frame 3 places a clip with a frame script; the
+// root's frame 1 script jumps there (scripts/GotoChild.as).
+function gotoChild(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "GotoChild"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Inner"],
+      ]),
+      w.showFrame(),
+      w.showFrame(),
+      w.place({ depth: 1, character: 2, matrix: { tx: 400, ty: 400 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // What differs from Flash in "moves" is anti-aliasing a quarter pixel off:
 // Flash's curved lines reach further into their shape, and under the skew
 // of frame 2 its lines are a little wider or narrower than Ruffle's rule
@@ -184,4 +365,67 @@ export const cases: PlayerCase[] = [
   { name: "loops-avm1", swf: loops(false), ...looped },
   { name: "rewinds", swf: rewinds(true), ...rewound },
   { name: "rewinds-avm1", swf: rewinds(false), ...rewound },
+  {
+    name: "scripted",
+    swf: scripted,
+    script: "Main",
+    frames: 2,
+    capture: [1, 2],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "events",
+    swf: bare,
+    script: "Events",
+    frames: 2,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "init",
+    swf: bound,
+    script: "Init",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "gotos",
+    swf: gotos,
+    script: "Goto",
+    frames: 3,
+    capture: [1, 2, 3],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "addChild",
+    swf: added,
+    script: "AddChild",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "nested",
+    swf: nested,
+    script: "Nested",
+    frames: 3,
+    capture: [1, 2, 3],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "gotoChild",
+    swf: gotoChild,
+    script: "GotoChild",
+    frames: 2,
+    capture: [1, 2],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
 ];

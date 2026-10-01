@@ -6,12 +6,36 @@
 // at medium and 4×4 at high and best, so the page draws at that many times
 // the resolution, without multisampling, and averages each block of
 // samples into a pixel.
-import { PixiView, Player } from "@swf2es/player";
+import { createCodegen } from "@swf2es/codegen";
+import { isAs3, readSwf, tags } from "@swf2es/format";
+import { PixiView, Player, Scripting } from "@swf2es/player";
 import { autoDetectRenderer } from "pixi.js";
 
 interface Run {
   images: Record<number, string>;
+  /** What the SWF's scripts traced, a line each. */
+  trace: string[];
   error: string | null;
+}
+
+/** A player for `bytes`, started: with its scripts loaded if it has any, through the served codegen and libraries. */
+async function load(bytes: Uint8Array, trace: string[]): Promise<Player> {
+  const swf = readSwf(bytes);
+  if (!isAs3(swf) || !swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2)) {
+    return new Player(bytes);
+  }
+
+  const wasm = await WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm"));
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => trace.push(line) });
+  const libraries = await Promise.all(
+    ["builtin", "playerglobal"].map(
+      async (n) => new Uint8Array(await (await fetch(`/libraries/${n}.abc`)).arrayBuffer()),
+    ),
+  );
+  await scripting.loadLibraries(libraries);
+  const player = new Player(bytes, scripting);
+  await player.start();
+  return player;
 }
 
 const GRID = [1, 2, 4, 4];
@@ -52,8 +76,9 @@ async function runSwf(
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
+  const trace: string[] = [];
   try {
-    const player = new Player(bytes);
+    const player = await load(bytes, trace);
     const n = GRID[quality] ?? 4;
     const renderer = await autoDetectRenderer({
       preference: "webgl",
@@ -86,9 +111,9 @@ async function runSwf(
     }
 
     renderer.destroy();
-    return { images, error: null };
+    return { images, trace, error: null };
   } catch (e) {
-    return { images, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
+    return { images, trace, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
   }
 }
 

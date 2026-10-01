@@ -1,0 +1,4 @@
+frame 1 1 0
+frame 2 before 2 40
+frame 2 after 2 40
+frame 4 4 120 false

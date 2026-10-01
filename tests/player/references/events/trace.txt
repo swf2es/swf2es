@@ -1,0 +1,9 @@
+Main
+root frameConstructed 1
+frame 1
+root exitFrame 1
+off enterFrame 2 2 true true false
+root enterFrame 2 2 false
+root frameConstructed 2
+frame 2
+root exitFrame 2
