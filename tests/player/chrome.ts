@@ -52,8 +52,20 @@ class DevTools {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Run each job in the player, in one browser. */
-export async function runPlayer(jobs: PlayerJob[]): Promise<PlayerResult[]> {
+/** What `Runtime.evaluate` gives: the value, or what threw. */
+interface Evaluated<T> {
+  value?: T;
+  exception: string | null;
+}
+
+/**
+ * One headless Chrome on the served page, for `run` to evaluate expressions
+ * in once `ready` names a function the page has defined.
+ */
+async function withPage<T>(
+  ready: string,
+  run: (evaluate: <R>(expression: string) => Promise<Evaluated<R>>) => Promise<T>,
+): Promise<T> {
   const { server, url } = await serve();
   const profile = mkdtempSync(join(tmpdir(), "swf2es-chrome-"));
   let chrome: ChildProcess | null = null;
@@ -94,14 +106,14 @@ export async function runPlayer(jobs: PlayerJob[]): Promise<PlayerResult[]> {
     }
 
     const socket = new WebSocket(target.webSocketDebuggerUrl);
-    await new Promise((ready) => socket.addEventListener("open", ready));
+    await new Promise((open) => socket.addEventListener("open", open));
     const devtools = new DevTools(socket);
     await devtools.send("Page.enable");
     await devtools.send("Runtime.enable");
     await devtools.send("Page.navigate", { url });
     for (let i = 0; i < 100; i++) {
       const { result } = await devtools.send<{ result: { value: boolean } }>("Runtime.evaluate", {
-        expression: "typeof runSwf === 'function'",
+        expression: `typeof ${ready} === 'function'`,
         returnByValue: true,
       });
       if (result.value) {
@@ -111,27 +123,61 @@ export async function runPlayer(jobs: PlayerJob[]): Promise<PlayerResult[]> {
       await sleep(100);
     }
 
-    const results: PlayerResult[] = [];
-    for (const job of jobs) {
-      const expression = `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")})`;
-      const { result, exceptionDetails } = await devtools.send<{
-        result: { value?: { images: Record<string, string>; error: string | null } };
-        exceptionDetails?: { text: string };
-      }>("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-      const value = result.value;
-      const images = new Map<number, Uint8Array>();
-      for (const [frame, dataUrl] of Object.entries(value?.images ?? {})) {
-        images.set(Number(frame), new Uint8Array(Buffer.from(dataUrl.split(",")[1], "base64")));
-      }
-
-      results.push({ images, error: value?.error ?? exceptionDetails?.text ?? null });
+    try {
+      return await run(async <R>(expression: string) => {
+        const { result, exceptionDetails } = await devtools.send<{
+          result: { value?: R };
+          exceptionDetails?: { text: string };
+        }>("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+        return { value: result.value, exception: exceptionDetails?.text ?? null };
+      });
+    } finally {
+      socket.close();
     }
-
-    socket.close();
-    return results;
   } finally {
     chrome?.kill("SIGKILL");
     server.close();
     rmSync(profile, { recursive: true, force: true });
   }
+}
+
+/** Run each job in the player, in one browser. */
+export function runPlayer(jobs: PlayerJob[]): Promise<PlayerResult[]> {
+  return withPage("runSwf", async (evaluate) => {
+    const results: PlayerResult[] = [];
+    for (const job of jobs) {
+      const { value, exception } = await evaluate<{
+        images: Record<string, string>;
+        error: string | null;
+      }>(
+        `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")})`,
+      );
+      const images = new Map<number, Uint8Array>();
+      for (const [frame, dataUrl] of Object.entries(value?.images ?? {})) {
+        images.set(Number(frame), new Uint8Array(Buffer.from(dataUrl.split(",")[1], "base64")));
+      }
+
+      results.push({ images, error: value?.error ?? exception ?? null });
+    }
+
+    return results;
+  });
+}
+
+/** What timing a SWF in the player gave: each frame's tick and render, in ms, and the first frame's load and draw. */
+export interface BenchResult {
+  tick: number[];
+  render: number[];
+  first: number;
+  error: string | null;
+}
+
+/** Play `swf` for `frames` frames in the player, timing each; see page.ts's benchSwf. */
+export function benchPlayer(swf: Uint8Array, frames: number): Promise<BenchResult> {
+  return withPage("benchSwf", async (evaluate) => {
+    const { value, exception } = await evaluate<BenchResult>(
+      `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames})`,
+    );
+    return value ?? { tick: [], render: [], first: 0, error: exception ?? "no result" };
+  });
 }

@@ -1,5 +1,6 @@
 // The test page: plays a SWF in the player, frame by frame, and gives back
-// the frames asked for as PNG data URLs. chrome.ts calls window.runSwf.
+// the frames asked for as PNG data URLs (runSwf), or how long each frame
+// took (benchSwf). chrome.ts calls both.
 //
 // Flash anti-aliases by supersampling on a grid, none at low quality, 2×2
 // at medium and 4×4 at high and best, so the page draws at that many times
@@ -91,4 +92,61 @@ async function runSwf(
   }
 }
 
-(globalThis as unknown as { runSwf: typeof runSwf }).runSwf = runSwf;
+interface Bench {
+  tick: number[];
+  render: number[];
+  first: number;
+  error: string | null;
+}
+
+/**
+ * Play a SWF for `frames` frames at the stage's own resolution, timing each
+ * frame's tick and its render apart. The GPU is waited for, so that what
+ * it does counts; Chrome's software GL here does it on the CPU anyway.
+ */
+async function benchSwf(base64: string, frames: number): Promise<Bench> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const tick: number[] = [];
+  const render: number[] = [];
+  try {
+    const start = performance.now();
+    const player = new Player(bytes);
+    const renderer = await autoDetectRenderer({
+      preference: "webgl",
+      width: player.width,
+      height: player.height,
+      background: player.background,
+      antialias: false,
+      resolution: 1,
+    });
+    document.body.replaceChildren(renderer.canvas);
+    const view = new PixiView(renderer);
+    const gl = (renderer as unknown as { gl?: WebGLRenderingContext }).gl;
+    view.render(player.root);
+    gl?.finish();
+    const first = performance.now() - start;
+    for (let frame = 2; frame <= frames; frame++) {
+      const before = performance.now();
+      player.tick();
+      const ticked = performance.now();
+      view.render(player.root);
+      gl?.finish();
+      tick.push(ticked - before);
+      render.push(performance.now() - ticked);
+    }
+
+    renderer.destroy();
+    return { tick, render, first, error: null };
+  } catch (e) {
+    return {
+      tick,
+      render,
+      first: 0,
+      error: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+    };
+  }
+}
+
+const page = globalThis as unknown as { runSwf: typeof runSwf; benchSwf: typeof benchSwf };
+page.runSwf = runSwf;
+page.benchSwf = benchSwf;
