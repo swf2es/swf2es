@@ -88,18 +88,37 @@ async function withPage<T>(
         "--no-first-run",
         "about:blank",
       ],
-      { stdio: "ignore" },
+      { stdio: ["ignore", "ignore", "pipe"] },
     );
+    // What Chrome says and whether it is still there, for when it gives no port.
+    let stderr = "";
+    chrome.stderr?.on("data", (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString()).slice(-4000);
+    });
+    let exited: string | null = null;
+    chrome.on("exit", (code, signal) => {
+      exited = `exit ${code ?? signal}`;
+    });
+    chrome.on("error", (e) => {
+      exited = e.message;
+    });
 
-    // Chrome writes the port it chose into the profile.
+    // Chrome writes the port it chose into the profile; a CI runner's cold
+    // start has taken more than 10 s, so wait up to a minute, or until it dies.
     let port = "";
-    for (let i = 0; i < 100 && !port; i++) {
+    for (let i = 0; i < 600 && !port && !exited; i++) {
       await sleep(100);
       try {
         port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
       } catch {
         // Not yet.
       }
+    }
+
+    if (!port) {
+      throw new Error(
+        `Chrome gave no DevTools port (${exited ?? "still running after 60 s"})${stderr ? `:\n${stderr.trim()}` : ""}`,
+      );
     }
 
     const targets = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as {
