@@ -400,8 +400,7 @@ object points back with `object`. The natives of the display classes
 (`packages/player/src/playerglobal/flash/display/...`) read and write
 `$display`. They are written as a class of getters, setters and methods,
 whose members `registerNativeClass` (the runtime's `natives/define.ts`,
-beside `plain`; `registerNativeClassWith` for natives that need their
-runtime) registers under the names the compiler binds, `Class#get:x`, `Class#set:x`,
+beside `plain`) registers under the names the compiler binds, `Class#get:x`, `Class#set:x`,
 `Class#method` and `Class.method` for a static, each through `plain()`,
 so it runs with the AS3 object as `this`; the class is only how they are
 written, and a private native is registered by name beside it. The class

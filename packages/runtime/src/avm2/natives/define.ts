@@ -34,82 +34,46 @@ const FUNCTION_OWN = new Set(["length", "name", "prototype"]);
  * getter run. A name registered twice is an error, not a replacement.
  */
 export function registerNativeClass(natives: Natives, qualified: string, Class: NativeClass): void {
-  registerMembers(natives, qualified, Class, () => Class);
-}
-
-/**
- * As registerNativeClass, for natives that need their runtime: `make`
- * returns the class for a runtime, and is called once for each, when the
- * first of its natives is bound; `rt` is read inside the members. Its
- * names are read from the class made with no runtime, so `make` must only
- * return the class.
- */
-export function registerNativeClassWith(
-  natives: Natives,
-  qualified: string,
-  make: (rt: Runtime) => NativeClass,
-): void {
-  const made = new WeakMap<Runtime, NativeClass>();
-  const of = (rt: Runtime): NativeClass => {
-    let Class = made.get(rt);
-    if (!Class) {
-      Class = make(rt);
-      made.set(rt, Class);
-    }
-
-    return Class;
-  };
-  registerMembers(natives, qualified, make(undefined as unknown as Runtime), of);
-}
-
-type Members = Record<string, unknown>;
-
-function registerMembers(
-  natives: Natives,
-  qualified: string,
-  probe: NativeClass,
-  of: (rt: Runtime) => NativeClass,
-): void {
-  const sides: [string, (c: NativeClass) => Members, Set<string>][] = [
-    [`${qualified}#`, (c) => c.prototype as Members, PROTOTYPE_OWN],
-    [`${qualified}.`, (c) => c as unknown as Members, FUNCTION_OWN],
+  const sides: [string, Members, Set<string>][] = [
+    [`${qualified}#`, Class.prototype as Members, PROTOTYPE_OWN],
+    [`${qualified}.`, Class as unknown as Members, FUNCTION_OWN],
   ];
-  for (const [prefix, side, skip] of sides) {
-    for (const name of Object.getOwnPropertyNames(side(probe))) {
+  for (const [prefix, members, skip] of sides) {
+    // Descriptors, not values: a getter must not run here.
+    for (const name of Object.getOwnPropertyNames(members)) {
       if (skip.has(name)) {
         continue;
       }
 
-      const d = Object.getOwnPropertyDescriptor(side(probe), name);
+      const d = Object.getOwnPropertyDescriptor(members, name);
       if (!d) {
         continue;
       }
 
-      // Per runtime, the same member of the class made for it.
-      const member = (kind: "get" | "set" | "value") => (rt: Runtime) =>
-        Object.getOwnPropertyDescriptor(side(of(rt)), name)?.[kind] as Method;
       if (d.get) {
-        add(natives, `${prefix}get:${name}`, member("get"));
+        add(natives, `${prefix}get:${name}`, d.get as Method);
       }
 
       if (d.set) {
-        add(natives, `${prefix}set:${name}`, member("set"));
+        add(natives, `${prefix}set:${name}`, d.set as Method);
       }
 
       if (typeof d.value === "function") {
-        add(natives, `${prefix}${name}`, member("value"));
+        add(natives, `${prefix}${name}`, d.value as Method);
       }
     }
   }
 }
 
+type Members = Record<string, unknown>;
+
 /** A native under `key`; a second one for the same key is a mistake, not a replacement. */
-function add(natives: Natives, key: string, native: (rt: Runtime) => Method): void {
+function add(natives: Natives, key: string, fn: Method): void {
   if (key in natives) {
     throw new Error(`native ${key} is registered twice`);
   }
 
-  natives[key] = native;
+  natives[key] = plain(fn);
 }
 
 /** The elements of an Array value, for natives that take one. */

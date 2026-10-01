@@ -1,11 +1,11 @@
 // registerNativeClass: the keys a class's members register under, that each
-// runs with the AS3 object as `this`, that a class made for each runtime is
-// made once per runtime, and that two factories' classes stay apart.
+// runs with the AS3 object as `this`, and that two factories' classes stay
+// apart.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { avm2 } from "@swf2es/runtime";
 
-const { registerNativeClass, registerNativeClassWith } = avm2;
+const { registerNativeClass } = avm2;
 
 /** A natives record's handler for `key`, bound as the runtime binds one. */
 function handler(natives: avm2.Natives, key: string): avm2.Method {
@@ -99,37 +99,6 @@ test("a key registered twice is an error, not a replacement", () => {
   );
   // The first stays.
   assert.equal(handler(natives, "Twice#get:x").call({}), 1);
-});
-
-test("a class made for each runtime is made once per runtime, and its members see it", () => {
-  const natives: avm2.Natives = {};
-  let made = 0;
-  registerNativeClassWith(natives, "Dated", (rt) => {
-    made++;
-    return class {
-      get tag(): string {
-        return (rt as unknown as { tag: string }).tag;
-      }
-
-      stamp(v: unknown): string {
-        return `${(rt as unknown as { tag: string }).tag}:${String(v)}`;
-      }
-    };
-  });
-  // Once to read the names, with no runtime.
-  assert.equal(made, 1);
-  assert.deepEqual(Object.keys(natives).sort(), ["Dated#get:tag", "Dated#stamp"]);
-
-  const a = { tag: "a" } as unknown as avm2.Runtime;
-  const b = { tag: "b" } as unknown as avm2.Runtime;
-  const get = natives["Dated#get:tag"];
-  const stamp = natives["Dated#stamp"];
-  assert.equal(get(a).call({}), "a");
-  assert.equal(stamp(a).call({}, 1), "a:1");
-  assert.equal(get(b).call({}), "b");
-  // One class for each runtime, however many of its natives are bound.
-  assert.equal(made, 3);
-  assert.equal(get(a), get(a));
 });
 
 test("two factories' classes close over their own context", () => {

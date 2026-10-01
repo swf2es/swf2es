@@ -4,12 +4,7 @@ import { Runtime, type RuntimeOptions } from "./runtime.js";
 
 export { publicNs, qname } from "./names.js";
 export type { Natives } from "./natives/define.js";
-export {
-  type NativeClass,
-  plain,
-  registerNativeClass,
-  registerNativeClassWith,
-} from "./natives/define.js";
+export { type NativeClass, plain, registerNativeClass } from "./natives/define.js";
 // The builtins' natives and hooks, for a player that adds playerglobal's to them.
 export { builtinHooks, builtinNatives } from "./natives/index.js";
 export {
