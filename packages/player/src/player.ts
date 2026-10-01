@@ -13,8 +13,6 @@ export class Player {
   readonly height: number;
   readonly frameRate: number;
   readonly background: number;
-  /** The frame the root has run, 1 its first. */
-  frame = 1;
 
   constructor(bytes: Uint8Array) {
     const swf = readSwf(bytes);
@@ -48,8 +46,6 @@ export class Player {
         clip.advance();
       }
     }
-
-    this.frame++;
   }
 }
 
