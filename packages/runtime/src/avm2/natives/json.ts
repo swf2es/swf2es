@@ -34,6 +34,7 @@ function parseText(rt: Runtime, text: string): Value {
 
 /** How deep fromHost recurses before it continues with a stack of its own. */
 const RECURSION_DEPTH = 500;
+const LITERALS = ["null", "true", "false"];
 
 /**
  * A value of the host's JSON.parse as AS3's: an array as an Array holding
@@ -242,7 +243,7 @@ function parse(rt: Runtime, text: string): Value {
           return;
         }
         default:
-          for (const word of ["null", "true", "false"]) {
+          for (const word of LITERALS) {
             if (text.startsWith(word, i)) {
               i += word.length;
               token = word[0];
