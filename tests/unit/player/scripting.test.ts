@@ -275,5 +275,6 @@ test("timers fire in the order of their times, each at its own time", { skip }, 
   player.tick();
   player.tick();
   player.tick();
-  assert.deepEqual(lines, ["A 200", "B 250", "A 300", "A 400", "B 400"]);
+  // Both due at 400: B was scheduled for it first, at 250, and goes first.
+  assert.deepEqual(lines, ["A 200", "B 250", "A 300", "B 400", "A 400"]);
 });

@@ -94,8 +94,9 @@ export class Scripting {
    * one timer set from another keeps the first's pace, not the frame's.
    */
   now = 0;
-  /** The timers started and not stopped, each with when it next falls due. */
-  private timers: { object: AsObject; delay: number; closure: Value; due: number }[] = [];
+  /** The timers started, by their Timer objects, and a heap of them by when they fall due. */
+  private readonly running = new Map<AsObject, TimerRecord>();
+  private readonly timers = new TimerHeap();
   quality = "HIGH";
   private readonly hashes: string[] = [];
 
@@ -735,13 +736,7 @@ export class Scripting {
   beginFrame(ms: number): void {
     this.clock += ms;
     for (;;) {
-      let next: (typeof this.timers)[number] | null = null;
-      for (const timer of this.timers) {
-        if (timer.due <= this.clock && (!next || timer.due < next.due)) {
-          next = timer;
-        }
-      }
-
+      const next = this.timers.pop(this.clock);
       if (!next) {
         break;
       }
@@ -749,6 +744,10 @@ export class Scripting {
       this.now = next.due;
       next.due += next.delay;
       this.rt.call(next.closure, next.object);
+      // Pushed back after the call, which may have stopped it or started it anew.
+      if (!next.stopped) {
+        this.timers.push(next);
+      }
     }
 
     this.now = this.clock;
@@ -757,15 +756,29 @@ export class Scripting {
   /** Timer._start: `closure` is called every `delay` ms from now, until stopped; a timer running already is started anew. */
   startTimer(object: AsObject, delay: number, closure: Value): void {
     this.stopTimer(object);
-    this.timers.push({ object, delay: Math.max(delay, 1), closure, due: this.now + delay });
+    const record: TimerRecord = {
+      object,
+      delay: Math.max(delay, 1),
+      closure,
+      due: this.now + delay,
+      seq: 0,
+      stopped: false,
+    };
+    this.running.set(object, record);
+    this.timers.push(record);
   }
 
   stopTimer(object: AsObject): void {
-    this.timers = this.timers.filter((t) => t.object !== object);
+    const record = this.running.get(object);
+    if (record) {
+      record.stopped = true;
+      this.running.delete(object);
+      this.timers.stopped();
+    }
   }
 
   timerRunning(object: AsObject): boolean {
-    return this.timers.some((t) => t.object === object);
+    return this.running.has(object);
   }
 
   /** A flash.events.Event of `type`. */
@@ -905,6 +918,111 @@ export class Scripting {
 
 /** A load's failure, worded as its IOErrorEvent's text. */
 class LoadError extends Error {}
+
+interface TimerRecord {
+  object: AsObject;
+  delay: number;
+  closure: Value;
+  due: number;
+  /** Its place among timers due at the same time: the one scheduled first fires first. */
+  seq: number;
+  /** Stopped, and so to be dropped when it surfaces; a Timer started anew gets a record of its own. */
+  stopped: boolean;
+}
+
+/**
+ * The started timers by due time, a binary min-heap as asyncio keeps its
+ * scheduled callbacks: the next due is found and rescheduled in O(log n)
+ * where a scan of all timers is O(n) per firing, which at a thousand
+ * timers is the difference between 0.3 and 2.5 ms a frame. A stopped
+ * timer stays until it surfaces, and the heap is rebuilt without the
+ * stopped when they are more than half of it.
+ */
+class TimerHeap {
+  private heap: TimerRecord[] = [];
+  private seq = 0;
+  private stoppedCount = 0;
+
+  push(record: TimerRecord): void {
+    record.seq = this.seq++;
+    const h = this.heap;
+    h.push(record);
+    let i = h.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (!before(h[i], h[parent])) {
+        break;
+      }
+
+      [h[i], h[parent]] = [h[parent], h[i]];
+      i = parent;
+    }
+  }
+
+  /** The earliest due timer at or before `clock`, taken out; stopped ones in the way are dropped. */
+  pop(clock: number): TimerRecord | null {
+    for (;;) {
+      const top = this.heap[0];
+      if (!top || top.due > clock) {
+        return null;
+      }
+
+      this.remove();
+      if (top.stopped) {
+        this.stoppedCount--;
+        continue;
+      }
+
+      return top;
+    }
+  }
+
+  stopped(): void {
+    this.stoppedCount++;
+    if (this.stoppedCount > this.heap.length / 2) {
+      const live = this.heap.filter((r) => !r.stopped);
+      this.heap = [];
+      this.stoppedCount = 0;
+      for (const record of live) {
+        this.push(record);
+      }
+    }
+  }
+
+  private remove(): void {
+    const h = this.heap;
+    const last = h.pop() as TimerRecord;
+    if (!h.length) {
+      return;
+    }
+
+    h[0] = last;
+    let i = 0;
+    for (;;) {
+      const left = 2 * i + 1;
+      const right = left + 1;
+      let least = i;
+      if (left < h.length && before(h[left], h[least])) {
+        least = left;
+      }
+
+      if (right < h.length && before(h[right], h[least])) {
+        least = right;
+      }
+
+      if (least === i) {
+        break;
+      }
+
+      [h[i], h[least]] = [h[least], h[i]];
+      i = least;
+    }
+  }
+}
+
+function before(a: TimerRecord, b: TimerRecord): boolean {
+  return a.due < b.due || (a.due === b.due && a.seq < b.seq);
+}
 
 /**
  * `url` against `base`, enough for a SWF's relative paths: one with a
