@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   backgroundColor,
+  isAs3,
   readPlace,
   readRemove,
   readShape,
@@ -141,4 +142,18 @@ test("a tag past the file's end is cut there, and marked", () => {
   assert.equal(swf.truncated, true);
   const last = swf.tags[swf.tags.length - 1];
   assert.ok(last.offset + last.length <= cut.length);
+});
+
+const frame = (...tags: Uint8Array[]) =>
+  w.swf({
+    width: 10,
+    height: 10,
+    frameRate: 1,
+    frameCount: 1,
+    tags: [...tags, w.showFrame(), w.end()],
+  });
+
+test("FileAttributes tells ActionScript 3 from an AVM1 movie", () => {
+  assert.equal(isAs3(readSwf(movie)), false);
+  assert.equal(isAs3(readSwf(frame(w.fileAttributes(true)))), true);
 });

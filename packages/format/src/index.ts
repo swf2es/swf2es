@@ -39,6 +39,7 @@ export {
 } from "./shape.js";
 export {
   backgroundColor,
+  isAs3,
   type Rect,
   readSwf,
   readSwfHeader,

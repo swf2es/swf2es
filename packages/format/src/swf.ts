@@ -3,7 +3,7 @@
 // decompression, the frame size as a RECT, the frame rate as 8.8 fixed
 // point, the frame count, then tags to an End tag or the body's end.
 import { decompressSwf } from "./compression.js";
-import { End, SetBackgroundColor } from "./tags.js";
+import { End, FileAttributes, SetBackgroundColor } from "./tags.js";
 
 export type SwfCompression = "none" | "zlib" | "lzma";
 
@@ -181,4 +181,10 @@ export function backgroundColor(swf: Swf): number {
 
   const b = swf.bytes;
   return (b[tag.offset] << 16) | (b[tag.offset + 1] << 8) | b[tag.offset + 2];
+}
+
+/** Whether FileAttributes marks the SWF as ActionScript 3; without the bit it is an AVM1 movie. */
+export function isAs3(swf: Swf): boolean {
+  const tag = swf.tags.find((t) => t.code === FileAttributes);
+  return !!tag && tag.length >= 1 && (swf.bytes[tag.offset] & 0x08) !== 0;
 }

@@ -15,6 +15,6 @@ export const FrameLabel = 43;
 export const FileAttributes = 69;
 export const PlaceObject3 = 70;
 export const DoABC = 72;
-export const DefineShape4 = 83;
 export const SymbolClass = 76;
 export const DoABC2 = 82;
+export const DefineShape4 = 83;
