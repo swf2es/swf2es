@@ -19,10 +19,15 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
       // class; else one for the class, for a `new` from a script.
       create: (traits) => {
         const o = Object.create(traits.proto);
+        const made = s.pending === null;
         const display = s.pending ?? s.displayFor(traits);
         s.pending = null;
         o.$display = display;
         display.object = o;
+        if (made) {
+          s.made(display);
+        }
+
         return o;
       },
     },

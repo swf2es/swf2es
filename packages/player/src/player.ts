@@ -75,7 +75,12 @@ export class Player {
     this.frameRate = s.frameRate;
   }
 
-  /** The next frame: every clip on the display list advances, parents before children, loaded SWFs' too; then the frame's scripts. */
+  /**
+   * The next frame: every clip advances, those on the display list, parents
+   * before children, loaded SWFs' too, and the orphans a script took off it,
+   * which play on; all of them, found first, so that one a parent's frame
+   * takes off still has its frame, as in Flash. Then the frame's scripts.
+   */
   tick(): void {
     const clips: MovieClip[] = [];
     const collect = (o: DisplayObject) => {
@@ -90,11 +95,12 @@ export class Player {
       }
     };
     collect(this.stage);
+    for (const orphan of this.scripting?.orphanRoots() ?? []) {
+      collect(orphan);
+    }
+
     for (const clip of clips) {
-      // One a clip before it removed is no longer on the display list.
-      if (attached(clip, this.stage)) {
-        clip.advance();
-      }
+      clip.advance();
     }
 
     if (this.scripting) {
@@ -102,14 +108,4 @@ export class Player {
       this.frameRate = this.scripting.frameRate;
     }
   }
-}
-
-function attached(o: DisplayObject, root: DisplayObject): boolean {
-  for (let p = o.parent; p; p = p.parent) {
-    if (p === root) {
-      return true;
-    }
-  }
-
-  return false;
 }

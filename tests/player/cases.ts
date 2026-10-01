@@ -324,6 +324,46 @@ function nested(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Three three-frame clips, a, b and c, on a four-frame root: a script takes
+// a and c off in frame 1 and puts c back in frame 3, the timeline takes b
+// off at frame 2; scripts make three more (scripts/Orphans.as).
+function orphans(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000, 400),
+      w.sprite(2, 3, [
+        w.place({ depth: 1, character: 1 }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, matrix: { tx: 600, ty: 0 } }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, matrix: { tx: 1200, ty: 0 } }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc, "Orphans"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Clip"],
+      ]),
+      w.place({ depth: 1, character: 2, name: "a", matrix: { tx: 200, ty: 200 } }),
+      w.place({ depth: 2, character: 2, name: "b", matrix: { tx: 200, ty: 1200 } }),
+      w.place({ depth: 3, character: 2, name: "c", matrix: { tx: 2400, ty: 200 } }),
+      w.showFrame(),
+      w.remove(2),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A three-frame root whose frame 3 places a clip with a frame script; the
 // root's frame 1 script jumps there (scripts/GotoChild.as).
 function gotoChild(abc: Uint8Array): Uint8Array {
@@ -523,6 +563,15 @@ export const cases: PlayerCase[] = [
     script: "Added",
     frames: 2,
     capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "orphans",
+    swf: orphans,
+    script: "Orphans",
+    frames: 4,
+    capture: [1, 2, 3, 4],
     tolerance: 0,
     maxOutliers: 0,
   },

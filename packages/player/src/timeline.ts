@@ -53,7 +53,8 @@ export interface Library {
    */
   construct: ((display: DisplayObject, character: Character) => void) | null;
   /** Told before a timeline child goes, for the events a script sees; null in an AVM1 movie. */
-  removing: ((display: DisplayObject) => void) | null;
+  /** Tells of a display object about to lose its parent, and whether the timeline takes it (a script's removal otherwise). */
+  removing: ((display: DisplayObject, byTimeline: boolean) => void) | null;
 }
 
 function timelineOf(

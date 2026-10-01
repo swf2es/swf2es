@@ -63,7 +63,8 @@ package {
         removed++;
         loaders[2].unload();
       });
-      loaders[2].unload();
+      // Stopped for good, where unload() would let the content play on as an orphan, as loader 0's does.
+      loaders[2].unloadAndStop();
       trace("unloaded from removed", removed, loaders[2].numChildren, loaders[2].content == null);
       load("replacer.swf");
     }

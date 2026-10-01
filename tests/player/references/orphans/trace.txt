@@ -1,0 +1,10 @@
+made 1 true true
+root exit 1 2 a:1-:1- b:1+:1+ c:1-:1- made:1-:1- shown:1+:1+ late:1-:1-
+root enterFrame 2
+b is null true a is null false
+root exit 2 1 a:2-:1-2- b:2-:1+2- c:2-:1-2- made:1-:1- shown:1+:1+ late:1-:1-
+root enterFrame 3
+root exit 3 2 a:3-:1-2-3- b:2-:1+2- c:3+:1-2-3- made:2-:1-2- shown:2+:1+2+ late:2-:1-2-
+root enterFrame 4
+root frame 4
+root exit 4 2 a:1-:1-2-3-1- b:2-:1+2- c:1+:1-2-3-1+ made:3-:1-2-3- shown:3+:1+2+3+ late:3-:1-2-3-

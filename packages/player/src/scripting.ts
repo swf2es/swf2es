@@ -58,6 +58,14 @@ export class Scripting {
   fetch: ((url: string, signal: AbortSignal) => Promise<Uint8Array>) | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
+  /**
+   * Clips taken off the display list, which play on as Flash's do: held
+   * weakly, as Ruffle holds them, so one nothing refers to stops as Flash's
+   * does once collected. One the timeline took is kept for its frame only.
+   */
+  private orphans: { ref: WeakRef<DisplayObject>; serial: number; keep: boolean }[] = [];
+  /** Display objects scripts made with `new` this frame: their first frame's script runs after everything else's, and they are orphans after. */
+  private fresh: DisplayObject[] = [];
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
   pending: DisplayObject | null = null;
   /** The stage, once the player has made it, and the root it holds. */
@@ -148,7 +156,7 @@ export class Scripting {
     }
 
     library.construct = (display, character) => this.construct(display, character, library);
-    library.removing = (display) => this.removing(display);
+    library.removing = (display, byTimeline) => this.removing(display, byTimeline);
   }
 
   /** An ABC compiled and linked into the runtime, its scripts not yet run: what `rt.run` takes. */
@@ -200,6 +208,7 @@ export class Scripting {
    * order, as Flash dispatches them.
    */
   added(display: DisplayObject): void {
+    this.orphans = this.orphans.filter((o) => o.ref.deref() !== display);
     if (display.object) {
       dispatchEvent(this, display.object, this.event("added", true));
     }
@@ -209,8 +218,13 @@ export class Scripting {
     }
   }
 
-  /** `display` is about to lose its parent: REMOVED, bubbling, and REMOVED_FROM_STAGE through the subtree if it was on the display list. */
-  removing(display: DisplayObject): void {
+  /**
+   * `display` is about to lose its parent: REMOVED, bubbling, and
+   * REMOVED_FROM_STAGE through the subtree if it was on the display list.
+   * It then plays on as an orphan; the timeline's removal has it play its
+   * removal frame only, and takes the parent's property of its name away.
+   */
+  removing(display: DisplayObject, byTimeline = false): void {
     if (display.object) {
       dispatchEvent(this, display.object, this.event("removed", true));
     }
@@ -218,6 +232,81 @@ export class Scripting {
     if (this.onStage(display)) {
       this.eachObject(display, (o) => dispatchEvent(this, o, this.event("removedFromStage")));
     }
+
+    this.orphan(display, !byTimeline);
+    const parent = display.parent?.object;
+    if (byTimeline && parent && display.name) {
+      const name = avm2.qname(avm2.publicNs, display.name);
+      if (this.rt.getProperty(parent, name) === display.object) {
+        this.rt.setProperty(parent, name, null);
+      }
+    }
+  }
+
+  /**
+   * `display` is off the display list with an AS3 object that may play
+   * it, taken off by a script, or by the timeline, which keeps it for its
+   * frame only, not `keep`.
+   */
+  orphan(display: DisplayObject, keep = true): void {
+    if (display.object && !this.orphans.some((o) => o.ref.deref() === display)) {
+      this.orphans.push({ ref: new WeakRef(display), serial: display.serial, keep });
+    }
+  }
+
+  /**
+   * A script made `display` with `new`. Flash runs its first frame's
+   * script at the end of this frame's, in the order made, has it sit out
+   * the next frame's advance, and plays it on from there, on the display
+   * list or as an orphan.
+   */
+  made(display: DisplayObject): void {
+    this.fresh.push(display);
+    if (display instanceof MovieClip) {
+      display.fresh = true;
+    }
+  }
+
+  /** The orphans still there, newest first, as Flash runs their frames. */
+  orphanRoots(): DisplayObject[] {
+    const roots: DisplayObject[] = [];
+    this.orphans = this.orphans.filter((o) => {
+      const display = o.ref.deref();
+      if (!display) {
+        return false;
+      }
+
+      roots.push(display);
+      return true;
+    });
+
+    return roots.sort((a, b) => b.serial - a.serial);
+  }
+
+  /**
+   * Stop `display` and everything under it for good, as unloadAndStop
+   * does: timelines stopped, frame broadcasts no longer heard, no orphan.
+   */
+  stopAll(display: DisplayObject): void {
+    this.orphans = this.orphans.filter((o) => o.ref.deref() !== display);
+    const stop = (o: DisplayObject) => {
+      if (o instanceof MovieClip) {
+        o.playing = false;
+      }
+
+      if (o.object) {
+        for (const targets of this.broadcasts.values()) {
+          targets.delete(o.object);
+        }
+      }
+
+      if (o instanceof Container) {
+        for (const child of o.children) {
+          stop(child);
+        }
+      }
+    };
+    stop(display);
   }
 
   private eachObject(display: DisplayObject, f: (o: AsObject) => void): void {
@@ -470,10 +559,14 @@ export class Scripting {
     return () => this.complete(load, swf, library, run);
   }
 
-  /** A Loader's unload: a pending load dropped, its content out of the display list, its LoaderInfo empty, the Loader kept. */
-  unload(loader: AsObject): void {
+  /** A Loader's unload: a pending load dropped, its content out of the display list, its LoaderInfo empty, the Loader kept; stopped for good if `stop`, as unloadAndStop has it, else playing on as an orphan. */
+  unload(loader: AsObject, stop = false): void {
     this.closeLoad(loader);
+    const content: AsObject | null = loader.$content ?? null;
     this.dropContent(loader);
+    if (stop && content) {
+      this.stopAll(content.$display);
+    }
   }
 
   /**
@@ -648,13 +741,13 @@ export class Scripting {
   }
 
   /**
-   * Run the frame scripts of the clips under `root` that entered a frame
-   * with one since they last ran, in tree order: a clip's own, again for
-   * the frame a goto of its own lands it on, then its children's, as Flash
-   * runs a parent's landing script before a child the jump made. A clip a
-   * script removes still runs its own, as Flash queues them first. Rounds
-   * until none is left, bounded, as a script that jumps on every run would
-   * never settle.
+   * Run the frame scripts of the clips that entered a frame with one since
+   * they last ran: the orphans' first, newest first, then those under
+   * `root`, each in tree order: a clip's own, again for the frame a goto of
+   * its own lands it on, then its children's, as Flash runs a parent's
+   * landing script before a child the jump made. A clip a script removes
+   * still runs its own, as Flash queues them first. Rounds until none is
+   * left, bounded, as a script that jumps on every run would never settle.
    */
   runFrameScripts(root: DisplayObject): void {
     for (let round = 0; round < 64; round++) {
@@ -696,7 +789,15 @@ export class Scripting {
           }
         }
       };
+      for (const orphan of this.orphanRoots()) {
+        visit(orphan);
+      }
+
       visit(root);
+      for (const display of this.fresh) {
+        visit(display);
+      }
+
       for (const o of queue) {
         own(o);
       }
@@ -720,6 +821,14 @@ export class Scripting {
     const ends = this.completeLoads();
     this.broadcast("frameConstructed");
     this.runFrameScripts(root);
+    // What the timeline took off this frame has had its frame; it stops here.
+    this.orphans = this.orphans.filter((o) => o.keep);
+    // What scripts made this frame and left off the display list plays on as an orphan.
+    for (const display of this.fresh.splice(0)) {
+      if (!display.parent) {
+        this.orphan(display);
+      }
+    }
     this.broadcast("exitFrame");
     for (const end of ends) {
       end();
