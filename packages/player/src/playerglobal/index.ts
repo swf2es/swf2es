@@ -6,6 +6,7 @@ import type { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
 import { displayObjectHooks, displayObjectNatives } from "./flash/display/DisplayObject.js";
 import { containerNatives } from "./flash/display/DisplayObjectContainer.js";
+import { interactiveObjectNatives } from "./flash/display/InteractiveObject.js";
 import { loaderNatives } from "./flash/display/Loader.js";
 import { loaderInfoNatives } from "./flash/display/LoaderInfo.js";
 import { movieClipNatives } from "./flash/display/MovieClip.js";
@@ -13,9 +14,12 @@ import { spriteNatives } from "./flash/display/Sprite.js";
 import { stageNatives } from "./flash/display/Stage.js";
 import { eventNatives } from "./flash/events/Event.js";
 import { eventDispatcherNatives } from "./flash/events/EventDispatcher.js";
+import { transformNatives } from "./flash/geom/Transform.js";
+import { fileFilterNatives } from "./flash/net/FileFilter.js";
 import { urlRequestNatives } from "./flash/net/URLRequest.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { securityNatives } from "./flash/system/Security.js";
+import { systemNatives } from "./flash/system/System.js";
 import { toplevelNatives } from "./toplevel.js";
 
 export function playerNatives(s: Scripting): avm2.Natives {
@@ -33,6 +37,10 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...urlRequestNatives(s),
     ...applicationDomainNatives(s),
     ...securityNatives(s),
+    ...systemNatives(s),
+    ...interactiveObjectNatives(s),
+    ...fileFilterNatives(s),
+    ...transformNatives(s),
   };
 }
 

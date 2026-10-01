@@ -4,8 +4,49 @@ import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { type DisplayObject, TRANSFORM } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
+import { colorOf, concatenated, matrixOf } from "../geom/Transform.js";
 
+type AsObject = avm2.AsObject;
 type Value = avm2.Value;
+
+const MATRIX_NAME = avm2.qname(avm2.publicNs, "matrix");
+const COLOR_NAME = avm2.qname(avm2.publicNs, "colorTransform");
+const name = (n: string) => avm2.qname(avm2.publicNs, n);
+
+/** The blend modes Flash accepts; another is ArgumentError #2008. */
+const BLEND_MODES = new Set([
+  "normal",
+  "layer",
+  "multiply",
+  "screen",
+  "lighten",
+  "darken",
+  "difference",
+  "add",
+  "subtract",
+  "invert",
+  "alpha",
+  "erase",
+  "overlay",
+  "hardlight",
+  "shader",
+]);
+
+/** A new flash.geom.Rectangle with `r`'s values, as Flash hands out copies, or null for none. */
+function rectangleCopy(s: Scripting, r: AsObject | null): Value {
+  if (!r) {
+    return null;
+  }
+
+  return s.rt.construct(
+    s.rt.classNamed("flash.geom::Rectangle"),
+    ...["x", "y", "width", "height"].map((k) => s.rt.getProperty(r, name(k))),
+  );
+}
+
+function point(s: Scripting, x: number, y: number): Value {
+  return s.rt.construct(s.rt.classNamed("flash.geom::Point"), x, y);
+}
 
 /** The display object `o` is the face of. */
 export function displayOf(o: avm2.AsObject): DisplayObject {
@@ -75,6 +116,17 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
   // whose $display is the player's display object (registerNativeClass).
   class DisplayObjectNatives {
     declare $display: DisplayObject;
+    declare $transform: AsObject | undefined;
+    declare $blendMode: string | undefined;
+    declare $cacheAsBitmap: boolean | undefined;
+    declare $cacheAsBitmapMatrix: Value;
+    declare $filters: Value[] | undefined;
+    declare $mask: Value;
+    declare $metaData: Value;
+    declare $opaqueBackground: Value;
+    declare $scale9Grid: AsObject | null | undefined;
+    declare $scrollRect: AsObject | null | undefined;
+    declare $accessibilityProperties: Value;
 
     get name(): string {
       return this.$display.name;
@@ -189,8 +241,129 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       return 0;
     }
 
+    get blendMode(): string {
+      return this.$blendMode ?? "normal";
+    }
+
+    set blendMode(v: Value) {
+      const mode = s.rt.toString(v);
+      if (!BLEND_MODES.has(mode)) {
+        throw s.rt.error("ArgumentError", 2008, "blendMode");
+      }
+
+      this.$blendMode = mode;
+    }
+
+    get cacheAsBitmap(): boolean {
+      return this.$cacheAsBitmap ?? false;
+    }
+
+    set cacheAsBitmap(v: Value) {
+      this.$cacheAsBitmap = !!v;
+    }
+
+    get cacheAsBitmapMatrix(): Value {
+      return this.$cacheAsBitmapMatrix ?? null;
+    }
+
+    set cacheAsBitmapMatrix(v: Value) {
+      this.$cacheAsBitmapMatrix = v;
+    }
+
+    /** A copy each time, as Flash: `filters === filters` is false. Nothing draws them yet. */
+    get filters(): Value {
+      return s.rt.array([...(this.$filters ?? [])]);
+    }
+
+    set filters(v: Value) {
+      this.$filters = v ? [...(((v as AsObject).$a as Value[] | undefined) ?? [])] : [];
+    }
+
+    get mask(): Value {
+      return this.$mask ?? null;
+    }
+
+    set mask(v: Value) {
+      this.$mask = v;
+    }
+
+    get metaData(): Value {
+      return this.$metaData ?? null;
+    }
+
+    set metaData(v: Value) {
+      this.$metaData = v;
+    }
+
+    get opaqueBackground(): Value {
+      return this.$opaqueBackground ?? null;
+    }
+
+    set opaqueBackground(v: Value) {
+      this.$opaqueBackground = v === null || v === undefined ? null : s.rt.toUint(v);
+    }
+
+    get scale9Grid(): Value {
+      return rectangleCopy(s, this.$scale9Grid ?? null);
+    }
+
+    set scale9Grid(v: Value) {
+      this.$scale9Grid = v ? (rectangleCopy(s, v as AsObject) as AsObject) : null;
+    }
+
+    get scrollRect(): Value {
+      return rectangleCopy(s, this.$scrollRect ?? null);
+    }
+
+    set scrollRect(v: Value) {
+      this.$scrollRect = v ? (rectangleCopy(s, v as AsObject) as AsObject) : null;
+    }
+
+    get accessibilityProperties(): Value {
+      return this.$accessibilityProperties ?? null;
+    }
+
+    set accessibilityProperties(v: Value) {
+      this.$accessibilityProperties = v;
+    }
+
+    /** A point of this object's space in the stage's: through the matrices up to the stage. */
+    localToGlobal(p: Value): Value {
+      const m = concatenated(s, this.$display);
+      const x = Number(s.rt.getProperty(p as AsObject, name("x")));
+      const y = Number(s.rt.getProperty(p as AsObject, name("y")));
+      return point(s, m.a * x + m.c * y + m.tx, m.b * x + m.d * y + m.ty);
+    }
+
+    /** A point of the stage's space in this object's: the inverse of the way up. */
+    globalToLocal(p: Value): Value {
+      const m = concatenated(s, this.$display);
+      const x = Number(s.rt.getProperty(p as AsObject, name("x"))) - m.tx;
+      const y = Number(s.rt.getProperty(p as AsObject, name("y"))) - m.ty;
+      const det = m.a * m.d - m.b * m.c;
+      return point(s, (m.d * x - m.c * y) / det, (m.a * y - m.b * x) / det);
+    }
+
+    /** One Transform per display object, made when first asked for. */
     get transform(): Value {
-      return null;
+      if (!this.$transform) {
+        this.$transform = s.rt.construct(
+          s.rt.classNamed("flash.geom::Transform"),
+          this,
+        ) as AsObject;
+      }
+
+      return this.$transform;
+    }
+
+    /** Takes the given Transform's matrix and color transform, not the object. */
+    set transform(v: Value) {
+      if (v) {
+        const t = v as AsObject;
+        this.$display.matrix = matrixOf(s, s.rt.getProperty(t, MATRIX_NAME) as AsObject);
+        this.$display.colorTransform = colorOf(s, s.rt.getProperty(t, COLOR_NAME) as AsObject);
+        this.$display.invalidate(TRANSFORM);
+      }
     }
   }
 

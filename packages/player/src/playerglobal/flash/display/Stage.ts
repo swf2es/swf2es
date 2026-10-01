@@ -9,6 +9,10 @@ export function stageNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
   class StageNatives {
+    "flash.display:Stage::requireOwnerPermissions"(): void {
+      // One owner: the SWF the player runs.
+    }
+
     get frameRate(): number {
       return s.frameRate;
     }

@@ -19,6 +19,10 @@ package {
 
   public class Main extends MovieClip {
     private var loaders:Array = [];
+    // The contents let go of by a reload or a replacement: held, so that
+    // they play on as orphans for sure (an orphan nothing holds may be
+    // collected, and stop, as in Flash).
+    private var orphans:Array = [];
 
     public function Main() {
       addFrameScript(0, frame1, 1, frame2, 2, frame3, 3, frame4, 4, frame5, 5, frame6);
@@ -40,6 +44,7 @@ package {
       trace("frame 3", counts());
       var info:* = loaders[0].contentLoaderInfo;
       trace("before reload", loaders[0].content != null, info.bytesTotal, info.swfVersion);
+      orphans.push(loaders[0].content);
       loaders[0].load(new URLRequest("inner.swf"));
       trace("after reload", loaders[0].content == null, loaders[0].numChildren, info.bytesTotal, info.url == null, inaccessible(info));
       load("inner.swf").unload();
@@ -81,6 +86,7 @@ package {
       addChild(closing);
       closing.loadBytes(loaders[0].contentLoaderInfo.bytes);
       // The content being replaced loads another from REMOVED: that load is the one that counts.
+      orphans.push(loaders[5].content);
       loaders[5].content.addEventListener(Event.REMOVED, function(e:Event):void {
         loaders[5].load(new URLRequest("nested.swf"));
         trace("loaded from removed");
