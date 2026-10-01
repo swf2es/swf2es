@@ -1,0 +1,22 @@
+Box made true
+box added true true true
+box addedToStage true true
+frame 1 1 true
+Box made false
+box added true true true
+in holder false
+root hears added false 3
+box addedToStage true true
+holder added true
+root hears removed false 3
+box removedFromStage true
+holder removed false
+box removed true
+box added true true true
+root hears added true 3
+box addedToStage true true
+box added to root
+box removed true
+root hears removed true 3
+box removedFromStage true
+frame 2 1

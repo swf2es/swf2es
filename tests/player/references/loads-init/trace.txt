@@ -1,0 +1,10 @@
+Inner made false false true true 1 true
+Inner added true false false false false true
+Inner added true false false true true true
+Inner addedToStage true true true true true true
+outer frame 2 1
+inner frame 1 true true true true
+event init 1 true true 1250
+event unload 1 false false 0
+unloaded at init 0 true
+outer frame 3 0

@@ -18,11 +18,11 @@ interface Run {
   error: string | null;
 }
 
-/** A player for `bytes`, started: with its scripts loaded if it has any, through the served codegen and libraries. */
-async function load(bytes: Uint8Array, trace: string[]): Promise<Player> {
+/** The scripting for `bytes`, through the served codegen and libraries; null for a SWF with no scripts. */
+async function scriptingFor(bytes: Uint8Array, trace: string[]): Promise<Scripting | null> {
   const swf = readSwf(bytes);
   if (!isAs3(swf) || !swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2)) {
-    return new Player(bytes);
+    return null;
   }
 
   const wasm = await WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm"));
@@ -33,9 +33,7 @@ async function load(bytes: Uint8Array, trace: string[]): Promise<Player> {
     ),
   );
   await scripting.loadLibraries(libraries);
-  const player = new Player(bytes, scripting);
-  await player.start();
-  return player;
+  return scripting;
 }
 
 const GRID = [1, 2, 4, 4];
@@ -77,8 +75,11 @@ async function runSwf(
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
   const trace: string[] = [];
+  let scripting: Scripting | null = null;
   try {
-    const player = await load(bytes, trace);
+    scripting = await scriptingFor(bytes, trace);
+    const player = new Player(bytes, scripting);
+    await player.start();
     const n = GRID[quality] ?? 4;
     const renderer = await autoDetectRenderer({
       preference: "webgl",
@@ -99,6 +100,8 @@ async function runSwf(
     const view = new PixiView(renderer);
     for (let frame = 1; frame <= frames; frame++) {
       if (frame > 1) {
+        // What a frame asked to load is linked between frames, as in a browser's.
+        await scripting?.settled();
         player.tick();
       }
 
@@ -113,7 +116,20 @@ async function runSwf(
     renderer.destroy();
     return { images, trace, error: null };
   } catch (e) {
-    return { images, trace, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
+    return { images, trace, error: describe(e, scripting) };
+  }
+}
+
+/** An error's text: a JavaScript one's name and message, an AS3 one's as its runtime prints it. */
+function describe(e: unknown, scripting: Scripting | null): string {
+  if (e instanceof Error) {
+    return `${e.name}: ${e.message}`;
+  }
+
+  try {
+    return scripting ? scripting.rt.toString(e as never) : String(e);
+  } catch {
+    return "an error that could not be described";
   }
 }
 
@@ -196,8 +212,7 @@ async function benchSwf(base64: string, frames: number): Promise<Bench> {
     renderer.destroy();
     return { tick, sync, draw, gl: finished, first, renderer: name, error: null };
   } catch (e) {
-    const error = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-    return { tick, sync, draw, gl: finished, first: 0, renderer: name, error };
+    return { tick, sync, draw, gl: finished, first: 0, renderer: name, error: describe(e, null) };
   }
 }
 

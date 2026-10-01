@@ -10,7 +10,7 @@ import { cases, type PlayerCase } from "./cases.ts";
 import { runPlayer } from "./chrome.ts";
 import { compareImages, decodePng, differenceImage, encodePng } from "./image.ts";
 import { libraryAbcs } from "./libraries.ts";
-import { compileScripts } from "./scripts.ts";
+import { compiler, compileScripts } from "./scripts.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const args = process.argv.slice(2);
@@ -23,11 +23,20 @@ const traceReference = (name: string) => `${here}references/${name}/trace.txt`;
 // The scripted cases' ABCs, compiled in the oracle's container, and each case's SWF;
 // the libraries the page serves them with, fetched if missing.
 const scripts = compileScripts([...new Set(chosen.flatMap((c) => (c.script ? [c.script] : [])))]);
-if (scripts.size) {
+if (scripts.size || chosen.some((c) => c.build)) {
   libraryAbcs();
 }
-const swfOf = (c: PlayerCase): Uint8Array =>
-  typeof c.swf === "function" ? c.swf(scripts.get(c.script ?? "") as Uint8Array) : c.swf;
+const compile = compiler();
+const swfOf = (c: PlayerCase): Uint8Array => {
+  if (c.build) {
+    return c.build(compile);
+  }
+
+  return typeof c.swf === "function"
+    ? c.swf(scripts.get(c.script ?? "") as Uint8Array)
+    : (c.swf as Uint8Array);
+};
+const traced = (c: PlayerCase) => Boolean(c.script || c.build);
 const jobs = chosen.map((c) => ({ ...c, swf: swfOf(c) }));
 
 if (update) {
@@ -48,12 +57,12 @@ if (update) {
       writeFileSync(reference(c.name, frame), png);
     }
 
-    if (c.script) {
+    if (traced(c)) {
       writeFileSync(traceReference(c.name), `${r.output.join("\n")}\n`);
     }
 
     console.log(
-      `${c.name}: ${r.images.size} frames${c.script ? `, ${r.output.length} lines traced` : ""}`,
+      `${c.name}: ${r.images.size} frames${traced(c) ? `, ${r.output.length} lines traced` : ""}`,
     );
   }
 } else {
@@ -67,7 +76,7 @@ if (update) {
     }
 
     rmSync(`${here}out/${c.name}`, { recursive: true, force: true });
-    if (c.script) {
+    if (traced(c)) {
       const expected = readFileSync(traceReference(c.name), "utf8").replace(/\n$/, "").split("\n");
       const got = r.trace;
       const at = got.findIndex((line, i) => line !== expected[i]);

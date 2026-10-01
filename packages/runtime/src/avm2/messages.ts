@@ -157,7 +157,9 @@ export const messages: Record<number, string> = {
   2008: "Parameter %1 must be one of the accepted values.",
   2012: "%1 class cannot be instantiated.",
   2030: "End of file was encountered.",
+  2035: "URL Not Found.",
   2058: "There was an error decompressing the data.",
+  2099: "The loading object is not sufficiently loaded to provide this information.",
   2085: "Parameter %1 must be non-empty string.",
   2088: "The Proxy class does not implement getProperty. It must be overridden by a subclass.",
   2089: "The Proxy class does not implement setProperty. It must be overridden by a subclass.",
@@ -169,6 +171,7 @@ export const messages: Record<number, string> = {
   2106: "The Proxy class does not implement nextName. It must be overridden by a subclass.",
   2107: "The Proxy class does not implement nextValue. It must be overridden by a subclass.",
   2108: "The value %1 is not a valid Array length.",
+  2124: "Loaded file is an unknown type.",
   2173: "Unable to read object in stream.  The class %1 does not implement flash.utils.IExternalizable but is aliased to an externalizable class.",
   3735: "This API cannot accept shared ByteArrays.",
 };

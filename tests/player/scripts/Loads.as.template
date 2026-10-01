@@ -1,0 +1,88 @@
+// A SWF loading another with loadBytes: the Loader's and its LoaderInfo's
+// state before, the events in order with the state at each, and the outer
+// frames around them, so that the frame a load completes in shows. The
+// inner SWF's bytes are put in as base64 by tests/player/cases.ts.
+package {
+  import flash.display.Loader;
+  import flash.display.MovieClip;
+  import flash.events.Event;
+  import flash.events.IOErrorEvent;
+  import flash.events.ProgressEvent;
+  import flash.system.ApplicationDomain;
+  import flash.system.LoaderContext;
+  import flash.utils.ByteArray;
+
+  public class Main extends MovieClip {
+    private static const INNER:String = "@@INNER@@";
+    private var loader:Loader;
+
+    public function Main() {
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void { trace("outer enterFrame", currentFrame); });
+      addEventListener(Event.EXIT_FRAME, function(e:Event):void { trace("outer exitFrame", currentFrame); });
+      addEventListener(Event.FRAME_CONSTRUCTED, function(e:Event):void { trace("outer frameConstructed", currentFrame); });
+      addEventListener(Event.RENDER, function(e:Event):void { trace("outer render", currentFrame); });
+      addFrameScript(0, frame1, 1, frame2, 2, frame3);
+      trace("Main", loaderInfo != null, loaderInfo.content == this, root == this);
+    }
+
+    private function frame1():void {
+      loader = new Loader();
+      var info:* = loader.contentLoaderInfo;
+      trace("before", loader.content == null, info.content == null, info.bytesLoaded, info.bytesTotal, info.bytes == null, info.url == null, loader.numChildren, loader.loaderInfo == null);
+      info.addEventListener(Event.OPEN, report);
+      info.addEventListener(IOErrorEvent.IO_ERROR, report);
+      info.addEventListener(ProgressEvent.PROGRESS, report);
+      info.addEventListener(Event.INIT, report);
+      info.addEventListener(Event.COMPLETE, report);
+      addChild(loader);
+      // AIR, where Flash is run, refuses to load code from bytes unless asked to.
+      var context:LoaderContext = new LoaderContext(false, ApplicationDomain.currentDomain);
+      context.allowCodeImport = true;
+      loader.loadBytes(decode(INNER), context);
+      trace("after loadBytes", loader.content == null, info.bytesLoaded, info.bytesTotal, loader.numChildren, loader.loaderInfo == loaderInfo, info.url == null, loaderInfo.url == null, String(info.url).indexOf("[[DYNAMIC]]/1") > 0);
+      stage.invalidate();
+    }
+
+    private function report(e:Event):void {
+      var info:* = loader.contentLoaderInfo;
+      var p:ProgressEvent = e as ProgressEvent;
+      trace("event " + e.type, p ? p.bytesLoaded + "/" + p.bytesTotal : "-", loader.numChildren, loader.content != null, info.content == loader.content, info.bytesLoaded == info.bytesTotal, info.url != null, info.bytes != null, info.loader == loader);
+    }
+
+    private function frame2():void {
+      trace("outer frame 2", loader.numChildren, loader.content != null, loader.content ? MovieClip(loader.content).currentFrame : -1);
+      stage.invalidate();
+    }
+
+    private function frame3():void {
+      var info:* = loader.contentLoaderInfo;
+      trace("outer frame 3", MovieClip(loader.content).currentFrame, info.swfVersion, info.frameRate, info.width, info.height, info.contentType, info.actionScriptVersion, info.applicationDomain == ApplicationDomain.currentDomain, ApplicationDomain.currentDomain == ApplicationDomain.currentDomain, info.applicationDomain.hasDefinition("Inner"), ApplicationDomain.currentDomain.hasDefinition("Inner"), String(info.url).indexOf("/[[DYNAMIC]]/1") > 0, info.loaderURL == loaderInfo.url);
+      loader.unload();
+      trace("unloaded", loader.content == null, info.content == null, loader.numChildren);
+    }
+
+    /** Base64, as the bytes are carried in this script. */
+    private static function decode(text:String):ByteArray {
+      const ALPHABET:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      var out:ByteArray = new ByteArray();
+      var bits:int = 0;
+      var have:int = 0;
+      for (var i:int = 0; i < text.length; i++) {
+        var c:String = text.charAt(i);
+        if (c == "=") {
+          break;
+        }
+
+        bits = ((bits << 6) | ALPHABET.indexOf(c)) & 0xffff;
+        have += 6;
+        if (have >= 8) {
+          have -= 8;
+          out.writeByte((bits >> have) & 0xff);
+        }
+      }
+
+      out.position = 0;
+      return out;
+    }
+  }
+}

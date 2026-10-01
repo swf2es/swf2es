@@ -446,7 +446,9 @@ frame it lands on has its script run in the same phase (`gotos`), before
 the script of any child the jump placed, which is constructed with its
 parent already on the landing frame (`gotoChild`); a goto from anywhere
 else happens at once. All the timelines advance before any frame script
-runs, parents' scripts before their children's (`nested`).
+runs, parents' scripts before their children's (`nested`); the clips
+whose scripts are to run are fixed as the phase begins, so one a script
+removes still runs its own (`loads`).
 
 The player loads a SWF's code through `@swf2es/codegen`'s `Codegen`: each
 `DoABC`, in tag order, is added to one domain after the builtins and
@@ -465,6 +467,89 @@ SWF the test builds as a `DoABC` with a `SymbolClass`. Flash's trace of
 the SWF is recorded by `--update` beside its frames, and the player's
 must match it line for line, as the conformance cases must match
 avmshell's.
+
+### Loading SWFs
+
+A `Loader` is a container whose one child is the root of the SWF it
+loaded, and a `LoaderInfo` is made for each `Loader` and one for the main
+SWF: a root display object carries its SWF's, and `loaderInfo` and `root`
+on a display object are the nearest root's up from it, null off the
+display list, as Flash has it (Ruffle's `loaderinfo_root` trace; a
+loaded SWF's root is its own root from its constructor on). Its values
+are the loaded SWF's: `bytesLoaded` and `bytesTotal`, `content`, `url`
+and `loaderURL`, `contentType`, the header's version, frame rate, width
+and height, `loader`, `applicationDomain`, `bytes`.
+
+The order is Flash's, traced by adl (the `loads` case; the Flash Player
+traces in Ruffle's corpus agree where they overlap). `loadBytes` tells
+the whole of the progress in the call, `PROGRESS` with nothing loaded and
+again with all of it, `bytes` set and `url` still null, and has no
+`OPEN`; a `load` of a URL has `OPEN` once the bytes come. The content
+comes in a later frame, after `ENTER_FRAME` and before `FRAME_CONSTRUCTED`:
+its SWF's code runs, its document class is constructed with `parent` and
+`stage` null and its timeline's first frame in place, it gets `ADDED`
+while it still has no parent, then `url` and `content` are set and it is
+made the `Loader`'s child, `ADDED` again and `ADDED_TO_STAGE` if the
+loader is on the stage. Its first frame's script runs in the frame's
+script phase, after its parents', and `INIT` and `COMPLETE` follow
+`EXIT_FRAME`, before `RENDER`. The content's timeline advances from the
+next frame on, with the stage's frame rate. `unload` takes the content
+out at once and keeps the `Loader`; a frame script the content had queued
+still runs. The URL of content loaded from bytes is the loading SWF's
+with `/[[DYNAMIC]]/n` appended, and `ApplicationDomain.currentDomain` is
+a new object at each ask, as in Flash, so two are never `==`.
+
+The loaded SWF's code goes through `Codegen` and the runtime as the main
+SWF's does. Linking is asynchronous (the module is imported), so a load
+asked for is compiled and linked between frames, in the order asked, and
+each takes its place in the first frame after its code is linked; a host
+that steps frames by hand awaits `Scripting.settled()` between them, as
+the tests do, to see Flash's frame. `SymbolClass` bindings are the
+library's, since character ids collide across SWFs. The player package
+has no I/O: `load` of a URL asks the host for the bytes through a
+function the `Scripting` is given, with the URL resolved and an
+`AbortSignal`, and a fetch that fails, or bytes that are not an AS3 SWF,
+end in `IO_ERROR` on the `LoaderInfo` in the frame. `close` drops a
+pending load and aborts its fetch; `unload`, and a new load on the same
+`Loader`, do that and take the content out at the call, the `LoaderInfo`
+knowing nothing again (Ruffle's `loader_reuse` trace), so a `Loader`
+never holds two; the content let go of has `UNLOAD` dispatched on the
+`LoaderInfo`, its `content` and byte counts already cleared and the child
+still attached, before `REMOVED` (the `loads-init` case). A load closed
+or replaced from one of its own events, `OPEN`, `PROGRESS`, the content's
+constructor or `INIT` among them, ends there: an unload from `INIT` has
+no `COMPLETE`, as Flash has none. An `unload` asked for from `REMOVED`
+finds the content already let go of, and a load asked for there is the
+one that counts. What a `LoaderInfo` knows of its SWF's header
+(`swfVersion`, `frameRate`, `width`, `applicationDomain`...) is refused
+before the SWF is loaded, Error #2099, as Flash refuses it. The SWF a `Loader` belongs to, which its content's
+`loaderURL` reports and its relative URLs resolve against, is in Flash
+the one whose code made it; the runtime does not track callers, so it is
+the SWF the `Loader` is on the display list of when it loads, else the
+main one (Ruffle's `loader_loaderurl` adds the loader first, as SWFs
+usually do).
+The Flash cases use `loadBytes`, the inner SWF carried in the outer's
+script as base64; the oracle runs under AIR, which refuses code from
+bytes unless the `LoaderContext` has `allowCodeImport`, which Flash
+Player does not need.
+
+Flash loads into a child `ApplicationDomain` by default: the parent
+cannot see the loaded SWF's classes by name, a class the loaded SWF
+defines again shadows the parent's for its own code, and
+`LoaderInfo.applicationDomain.getDefinition` finds it
+(`loader_duplicate_class`). That needs two things: the compiler's domain
+forked, a new domain sharing the ABCs loaded so far, and the runtime
+resolving names by the domain of the module asking. The first slice has
+neither: it loads into the current domain, as a `LoaderContext` with
+`ApplicationDomain.currentDomain` asks. There, as in Flash, a class the
+loaded SWF defines again is ignored for the one the domain has, so a SWF
+loaded twice makes instances of its first load's classes (the node
+test). Child domains are the slice after.
+
+A SWF the player loads is in the position the oracle's harness puts
+every SWF in, so what the harness could not judge for a main movie, the
+document class's `stage` in its constructor among it, compares exactly
+once the case loads its SWF.
 
 ## Testing against oracles
 
@@ -488,7 +573,12 @@ avmshell's.
   `BitmapData.drawWithQuality` at the SWF's stage quality, and its traces.
   Frame 1 is the one its `INIT` follows and frame k the one after k - 1
   `EXIT_FRAME`s, a frame later for AVM1, whose movie in a `Loader` shows
-  its frame 2 a frame late. A SWF the harness runs is loaded content, and
+  its frame 2 a frame late. A frame's load completions (`INIT`,
+  `COMPLETE`) follow its `EXIT_FRAME`, so what their listeners change
+  shows in the next frame's capture (the `loads-init` case captures frame
+  3 for its unload at frame 2's `INIT`). A SWF's clips taken off the
+  display list play on in Flash until collected, so a case that leaves
+  one is recorded last, or its traces would reach the next case's. A SWF the harness runs is loaded content, and
   Flash constructs that before it is the `Loader`'s child: its document
   class finds `stage` null in its constructor, where a main movie's finds
   the stage, as the player's does. A case whose trace depends on that

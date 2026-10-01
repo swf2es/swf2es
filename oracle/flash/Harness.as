@@ -16,9 +16,14 @@
 //
 // Frame 1 is the frame the SWF's INIT follows: its first frame, constructed
 // and with its scripts run. Frame k is captured at the (k-1)th EXIT_FRAME
-// after that, when frame k's scripts have run. An AVM1 movie in a Loader
-// shows its frame 2 an EXIT_FRAME later than an AS3 one does, so for AVM1
-// the first EXIT_FRAME is skipped.
+// after that, when frame k's scripts have run. A frame's load completions
+// (INIT, COMPLETE) follow its EXIT_FRAME, so what their listeners change
+// shows in the next frame's capture, not this one's; a timer set here, or
+// RENDER, would capture later, but Flash services a timer after the next
+// frame's advance at times, and dispatches no RENDER in a frame whose
+// script did a goto. An AVM1 movie in a Loader shows its frame 2 an
+// EXIT_FRAME later than an AS3 one does, so for AVM1 the first EXIT_FRAME
+// is skipped.
 package {
   import flash.desktop.NativeApplication;
   import flash.display.BitmapData;
@@ -194,10 +199,12 @@ package {
 
     private function done():void {
       removeEventListener(Event.EXIT_FRAME, exitFrame);
+      // The run ends before the content goes: what its listeners trace as
+      // it is unloaded is the harness's doing, not the SWF's.
+      trace("\x01swf2es:end " + id);
       loader.unloadAndStop();
       removeChild(loader);
       loader = null;
-      trace("\x01swf2es:end " + id);
       socket.writeByte(2);
       socket.writeUnsignedInt(id);
       socket.flush();
