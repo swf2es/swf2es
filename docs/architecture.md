@@ -370,19 +370,32 @@ variable's type and access, the accessor's type, access and declaring
 class, the method's return type, parameters and declaring class, with
 the namespace's URI when it has one and the metadata when asked.
 `HIDE_NSURI_METHODS` drops the names in a namespace with a URI that a
-base class uses, as the AS3 namespace is; `HIDE_OBJECT` drops Object's
+base class uses, by the namespace's identity, which in avmplus carries
+its API version: so Object's AS3 methods hide under a class, a script's
+own AS3 methods show until a class derives from it, and the player keys
+the hidden set by URI and version alike. `HIDE_OBJECT` drops Object's
 own; the bindings a class gets in its interfaces' namespaces are not
-members and do not show. For that the compiler emits what the runtime
-needed nothing of before: each method's signature beside its factory
-(return type, parameter types, how many are required), the constructor's
-in the class descriptor, and a class's and its traits' metadata whole,
-name and key-value pairs, from which the runtime derives the
-`[Transient]` flags AMF and JSON use; a builtin's `Version`, `native`
-and `API` metadata stay out, as avmplus leaves them. avmplus iterates
-its bindings in a hashtable keyed by interned string addresses, so the
-order of the arrays is not one the player can reproduce, and the
-conformance case sorts them, as Ruffle's tests do; a binding's API
-version, which avmplus checks against the caller's, is not yet checked.
+members and do not show; a binding above the caller's API version is
+left out, the caller taken to be the latest player's, as avmshell runs
+(a SWF's own version is not yet consulted), which hides the builtins'
+`[API(CONFIG::VM_INTERNAL)]` members: the oracle's SDK compiled them
+with the table of AIR 15's time, whose VM_INTERNAL mark is 42 where
+`core/api-versions.h` here has 52, so the compiler reads a builtin's
+mark from 42 up as internal. For that the compiler emits what the
+runtime needed nothing of before: each method's signature beside its
+factory (return type, parameter types, how many are required), the
+constructor's in the class descriptor, and a class's and its traits'
+metadata whole, name and key-value pairs (the ABC lists all the keys,
+then all the values, as avmplus reads them, not the pairs the
+specification shows), from which the runtime derives the `[Transient]`
+flags AMF and JSON use; a builtin's `Version`, `native` and `API`
+metadata stay out, as avmplus leaves them. avmplus iterates its bindings
+in a hashtable keyed by interned string addresses, so the order of the
+arrays is not one the player can reproduce, and the conformance case
+sorts them, as Ruffle's tests do. `getQualifiedClassName` names a number
+`int` only within avmplus' 29-bit int atom, and the builtin Vector
+classes `Vector.<int>`, `Vector.<uint>`, `Vector.<Number>` and
+`Vector.<*>`, as avmplus renames them.
 
 avmplus' standard library (`Object`, `Array`, `String`, `Math`, `Date`,
 `RegExp`, `JSON`, `Vector`, `ByteArray` and so on) is mostly AS3 compiled

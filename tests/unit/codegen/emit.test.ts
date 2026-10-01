@@ -416,7 +416,8 @@ test("a module lays out traits that verifying its methods did not resolve", { sk
   );
   assert.ok(script, "the script binding registerClassAlias");
   const disp = Number(script[1]) >> 3;
-  const entry = script[2].match(new RegExp(`\\[${disp}, F\\[(\\d+)\\], \\d+\\]`));
+  // Its dispatch id, factory, method id, then its signature for describeType.
+  const entry = script[2].match(new RegExp(`\\[${disp}, F\\[(\\d+)\\], \\d+, `));
   assert.ok(entry, "its method by dispatch id");
   const factories = js.slice(js.indexOf("const F = ["), js.indexOf("const A = "));
   // A native's name, and its argument counts when it has any.

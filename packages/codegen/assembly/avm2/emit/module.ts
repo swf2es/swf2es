@@ -489,55 +489,73 @@ export class ModuleEmitter {
       out.uint(<u32>m - start);
       out.text("], ");
       out.uint(<u32>m - start);
+      out.text(", ");
+      this.signature(<u32>m, true);
       out.text("]");
     }
 
     out.text("]");
-    this.metadata(t);
+    this.meta(t);
     out.text(" }");
   }
 
   /**
-   * What AMF and JSON need of traits t's metadata, when it has any: as
-   * `transient`, its slots with [Transient]; as `metadata`, each accessor
-   * with metadata, as [dispatch id, 1 if any of it is [Transient], else 0],
-   * since an accessor's metadata hides its base's, as avmplus'
-   * getMethodMetadataPos finds it.
+   * Method m's signature for describeType: its return type (left out for a
+   * constructor), its parameter types, and how many are required; resolved
+   * here as avmplus resolves it before a call, and `null, [], 0` for one
+   * that does not resolve, which fails when called.
    */
-  metadata(t: u32): void {
+  signature(m: u32, returns: bool): void {
+    const out = this.out;
+    const traits = this.domain.traits;
+    if (traits.sign(this.domain, m) !== 0) {
+      out.text(returns ? "null, [], 0" : "[], 0");
+      return;
+    }
+
+    if (returns) {
+      this.methods.typeExpr(traits.returnType[m]);
+      out.text(", ");
+    }
+
+    out.text("[");
+    const start = traits.paramStart[m];
+    for (let p: u32 = 0; p < traits.paramCount[m]; p++) {
+      out.text(p ? ", " : "");
+      this.methods.typeExpr(traits.paramType[start + p]);
+    }
+
+    out.text("], ");
+    out.uint(traits.paramCount[m] - traits.optionalCount[m]);
+  }
+
+  /**
+   * Traits t's own metadata, when it has any, as `meta`: each trait with
+   * metadata as [kind, id, entries], the kind as the ABC has it, the id a
+   * slot's for a slot and the dispatch id for a method or an accessor pair
+   * (the setter's one past the getter's), from which the runtime takes the
+   * [Transient] flags AMF and JSON ask of it, and describeType the rest.
+   */
+  meta(t: u32): void {
     const out = this.out;
     const traits = this.domain.traits;
     const abc = this.domain.abcs[this.index];
     let count = 0;
     for (let i = traits.first[t]; i < traits.end[t]; i++) {
-      const kind = abc.traitTag[i] & 0x0f;
-      if (
-        (kind === C.TRAIT_Slot || kind === C.TRAIT_Const || kind === C.TRAIT_Class) &&
-        this.transientOf(i) > 0
-      ) {
-        traits.readName(this.domain, this.index, i);
-        out.text(count++ ? ", " : ", transient: [");
-        out.uint(traits.own(t, traits.nameNs, traits.nameId, traits.nameNsVersion) >> 3);
-      }
-    }
-
-    if (count) {
-      out.text("]");
-    }
-
-    count = 0;
-    for (let i = traits.first[t]; i < traits.end[t]; i++) {
-      const kind = abc.traitTag[i] & 0x0f;
-      const transient = this.transientOf(i);
-      if ((kind !== C.TRAIT_Getter && kind !== C.TRAIT_Setter) || transient < 0) {
+      if (abc.traitMetadataStart[i] === abc.traitMetadataStart[i + 1]) {
         continue;
       }
 
+      const kind = abc.traitTag[i] & 0x0f;
       traits.readName(this.domain, this.index, i);
       const b = traits.own(t, traits.nameNs, traits.nameId, traits.nameNsVersion);
-      out.text(count++ ? ", [" : ", metadata: [[");
+      out.text(count++ ? ", [" : ", meta: [[");
+      out.uint(kind);
+      out.text(", ");
       out.uint((b >> 3) + (kind === C.TRAIT_Setter ? 1 : 0));
-      out.text(transient ? ", 1]" : ", 0]");
+      out.text(", ");
+      this.metadataOf(i);
+      out.text("]");
     }
 
     if (count) {
@@ -545,23 +563,44 @@ export class ModuleEmitter {
     }
   }
 
-  /** Whether trait i of this ABC has [Transient]: 1, or 0 if it has other metadata only, or -1 if none. */
-  transientOf(i: u32): i32 {
-    const abc = this.domain.abcs[this.index];
-    const strings = this.domain.abcString[this.index];
-    const start = abc.traitMetadataStart[i];
-    const end = abc.traitMetadataStart[i + 1];
-    if (start === end) {
-      return -1;
-    }
-
-    for (let j = start; j < end; j++) {
-      if (strings[abc.metadataName[abc.traitMetadata[j]]] === this.domain.transientName) {
-        return 1;
+  /**
+   * Trait i's metadata entries as [[name, [key, value, ...]], ...]; a
+   * builtin's Version, native and API entries left out, as avmplus'
+   * describeMetadataInfo leaves them.
+   */
+  metadataOf(i: u32): void {
+    const out = this.out;
+    const domain = this.domain;
+    const abc = domain.abcs[this.index];
+    const strings = domain.abcString[this.index];
+    out.text("[");
+    let count = 0;
+    for (let j = abc.traitMetadataStart[i]; j < abc.traitMetadataStart[i + 1]; j++) {
+      const md = abc.traitMetadata[j];
+      const name = strings[abc.metadataName[md]];
+      if (
+        abc.builtin &&
+        (name === domain.versionName || name === domain.nativeName || name === domain.apiName)
+      ) {
+        continue;
       }
+
+      out.text(count++ ? ", [" : "[");
+      out.string(domain.stringPtr[name], domain.stringLength[name]);
+      out.text(", [");
+      for (let k = abc.metadataItemStart[md]; k < abc.metadataItemStart[md + 1]; k++) {
+        out.text(k > abc.metadataItemStart[md] ? ", " : "");
+        const key = strings[abc.metadataKey[k]];
+        out.string(domain.stringPtr[key], domain.stringLength[key]);
+        out.text(", ");
+        const value = strings[abc.metadataValue[k]];
+        out.string(domain.stringPtr[value], domain.stringLength[value]);
+      }
+
+      out.text("]]");
     }
 
-    return 0;
+    out.text("]");
   }
 
   /** A string of the host's, such as a hash, as a JavaScript string literal. */
@@ -622,8 +661,40 @@ export class ModuleEmitter {
       out.uint(abc.instanceInit[i]);
       out.text("], cinit: F[");
       out.uint(abc.classInit[i]);
-      out.text("] }");
+      out.text("]");
+      const init = domain.methodStart[this.index] + abc.instanceInit[i];
+      if (domain.traits.sign(domain, init) === 0 && domain.traits.paramCount[init] > 0) {
+        out.text(", ctor: [");
+        this.signature(init, false);
+        out.text("]");
+      }
+
+      const trait = this.classTrait(i);
+      if (trait >= 0 && abc.traitMetadataStart[trait] !== abc.traitMetadataStart[trait + 1]) {
+        out.text(", meta: ");
+        this.metadataOf(<u32>trait);
+      }
+
+      out.text(" }");
     }
+  }
+
+  /** The trait of a script of this ABC that defines class i, whose metadata is the class's, as avmplus has it; -1 for none. */
+  classTrait(i: u32): i32 {
+    const domain = this.domain;
+    const abc = domain.abcs[this.index];
+    const traits = domain.traits;
+    const scripts = domain.scriptTraits[this.index];
+    for (let s: u32 = 0; s < abc.scriptCount; s++) {
+      const t = scripts[s];
+      for (let k = traits.first[t]; k < traits.end[t]; k++) {
+        if ((abc.traitTag[k] & 0x0f) === C.TRAIT_Class && abc.traitIndex[k] === i) {
+          return <i32>k;
+        }
+      }
+    }
+
+    return -1;
   }
 
   /** Each script as { traits, init }. */
