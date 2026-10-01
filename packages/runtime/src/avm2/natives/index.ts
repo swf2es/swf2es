@@ -32,7 +32,7 @@ export function builtinNatives(rt: Runtime): Natives {
     ...numberNatives,
     ...toplevelNatives,
     ...aliasesNatives,
-    ...shellNatives,
+    ...shellNatives(rt),
     ...dictionaryNatives,
     ...vectorNatives,
     ...byteArrayNatives(rt),
