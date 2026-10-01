@@ -26,6 +26,168 @@ export function pointsOf(command: number): number {
 /** How a fill's contours decide what is inside: by parity, or by the winding number, as drawPath may ask. */
 export type Winding = "evenOdd" | "nonZero";
 
+/** The path as a polygon's points, x y x y..., its curves as eight chords each. */
+export function flatten(path: Path): number[] {
+  const points: number[] = [];
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i < path.length; ) {
+    const command = path[i];
+    if (command === CUBIC) {
+      const [c1x, c1y, c2x, c2y, ax, ay] = path.slice(i + 1, i + 7);
+      for (let k = 1; k <= 8; k++) {
+        const t = k / 8;
+        const u = 1 - t;
+        points.push(
+          u * u * u * x + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * ax,
+          u * u * u * y + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * ay,
+        );
+      }
+
+      x = ax;
+      y = ay;
+      i += 7;
+    } else if (command === CURVE) {
+      const [cx, cy, ax, ay] = path.slice(i + 1, i + 5);
+      for (let k = 1; k <= 8; k++) {
+        const t = k / 8;
+        const u = 1 - t;
+        points.push(
+          u * u * x + 2 * u * t * cx + t * t * ax,
+          u * u * y + 2 * u * t * cy + t * t * ay,
+        );
+      }
+
+      x = ax;
+      y = ay;
+      i += 5;
+    } else {
+      x = path[i + 1];
+      y = path[i + 2];
+      points.push(x, y);
+      i += 3;
+    }
+  }
+
+  return points;
+}
+
+/** Whether (px, py) is inside the polygon, by the even-odd rule. */
+export function inside(points: number[], px: number, py: number): boolean {
+  let hit = false;
+  for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
+    const xi = points[i];
+    const yi = points[i + 1];
+    const xj = points[j];
+    const yj = points[j + 1];
+    if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
+      hit = !hit;
+    }
+  }
+
+  return hit;
+}
+
+/**
+ * The path's extent, each curve at its true extremes, as [xMin, yMin,
+ * xMax, yMax]; null for a path with no points.
+ */
+export function extent(path: Path): [number, number, number, number] | null {
+  let xMin = Number.POSITIVE_INFINITY;
+  let yMin = Number.POSITIVE_INFINITY;
+  let xMax = Number.NEGATIVE_INFINITY;
+  let yMax = Number.NEGATIVE_INFINITY;
+  const take = (x: number, y: number) => {
+    xMin = Math.min(xMin, x);
+    yMin = Math.min(yMin, y);
+    xMax = Math.max(xMax, x);
+    yMax = Math.max(yMax, y);
+  };
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i < path.length; ) {
+    const command = path[i];
+    if (command === MOVE) {
+      // A move alone has no extent: the pen's place counts once a segment leaves it.
+      x = path[i + 1];
+      y = path[i + 2];
+      i += 3;
+      continue;
+    }
+
+    take(x, y);
+    if (command === CURVE) {
+      const [cx, cy, ax, ay] = path.slice(i + 1, i + 5);
+      take(ax, ay);
+      // Where the derivative is zero on either axis, if within the curve.
+      const at = (t: number) => {
+        const u = 1 - t;
+        take(u * u * x + 2 * u * t * cx + t * t * ax, u * u * y + 2 * u * t * cy + t * t * ay);
+      };
+      for (const [p0, c, p2] of [
+        [x, cx, ax],
+        [y, cy, ay],
+      ]) {
+        const denominator = p0 - 2 * c + p2;
+        const t = denominator === 0 ? -1 : (p0 - c) / denominator;
+        if (t > 0 && t < 1) {
+          at(t);
+        }
+      }
+
+      x = ax;
+      y = ay;
+      i += 5;
+    } else if (command === CUBIC) {
+      const [c1x, c1y, c2x, c2y, ax, ay] = path.slice(i + 1, i + 7);
+      take(ax, ay);
+      const at = (t: number) => {
+        const u = 1 - t;
+        take(
+          u * u * u * x + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * ax,
+          u * u * u * y + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * ay,
+        );
+      };
+      for (const [p0, c1, c2, p3] of [
+        [x, c1x, c2x, ax],
+        [y, c1y, c2y, ay],
+      ]) {
+        // The derivative's roots: a t² + b t + c = 0.
+        const a = -p0 + 3 * c1 - 3 * c2 + p3;
+        const b = 2 * (p0 - 2 * c1 + c2);
+        const c = c1 - p0;
+        const roots = a === 0 ? (b === 0 ? [] : [-c / b]) : quadraticRoots(a, b, c);
+        for (const t of roots) {
+          if (t > 0 && t < 1) {
+            at(t);
+          }
+        }
+      }
+
+      x = ax;
+      y = ay;
+      i += 7;
+    } else {
+      x = path[i + 1];
+      y = path[i + 2];
+      take(x, y);
+      i += 3;
+    }
+  }
+
+  return xMin <= xMax ? [xMin, yMin, xMax, yMax] : null;
+}
+
+function quadraticRoots(a: number, b: number, c: number): number[] {
+  const d = b * b - 4 * a * c;
+  if (d < 0) {
+    return [];
+  }
+
+  const s = Math.sqrt(d);
+  return [(-b + s) / (2 * a), (-b - s) / (2 * a)];
+}
+
 export interface ShapeLayer {
   fills: { fill: Fill; contours: Path[]; winding: Winding }[];
   strokes: { line: Line; paths: Path[] }[];

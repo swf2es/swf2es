@@ -4,7 +4,17 @@
 // draws them: commands go to the fill and the stroke open at the time, each
 // moveTo starting a contour of the fill and a path of the stroke.
 import type { Fill, Line } from "@swf2es/format";
-import { CUBIC, CURVE, LINE, MOVE, type Path, type ShapeLayer, type Winding } from "./shapes.js";
+import { type Rect, union } from "./geometry.js";
+import {
+  CUBIC,
+  CURVE,
+  extent,
+  LINE,
+  MOVE,
+  type Path,
+  type ShapeLayer,
+  type Winding,
+} from "./shapes.js";
 
 const TWIPS = 20;
 /** The quadratic approximation of a quarter ellipse Flash's drawRoundRect uses: two curves, meeting at 45°. */
@@ -213,25 +223,13 @@ export class Drawing {
     }
   }
 
-  /** The drawing's extent, in pixels, with the lines' half widths: null for one with no points. */
-  bounds(): { xMin: number; yMin: number; xMax: number; yMax: number } | null {
-    let xMin = Number.POSITIVE_INFINITY;
-    let yMin = Number.POSITIVE_INFINITY;
-    let xMax = Number.NEGATIVE_INFINITY;
-    let yMax = Number.NEGATIVE_INFINITY;
+  /** The drawing's extent, in pixels, curves at their true extremes; the lines' paths count, and with `lines` their half widths too. */
+  bounds(lines: boolean): Rect | null {
+    let r: Rect | null = null;
     const take = (path: Path, pad: number) => {
-      for (let i = 0; i < path.length; ) {
-        const points = path[i] === CUBIC ? 3 : path[i] === CURVE ? 2 : 1;
-        for (let k = 0; k < points; k++) {
-          const x = path[i + 1 + 2 * k];
-          const y = path[i + 2 + 2 * k];
-          xMin = Math.min(xMin, x - pad);
-          yMin = Math.min(yMin, y - pad);
-          xMax = Math.max(xMax, x + pad);
-          yMax = Math.max(yMax, y + pad);
-        }
-
-        i += 1 + 2 * points;
+      const e = extent(path);
+      if (e) {
+        r = union(r, { xMin: e[0] - pad, yMin: e[1] - pad, xMax: e[2] + pad, yMax: e[3] + pad });
       }
     };
     for (const layer of this.layers) {
@@ -243,12 +241,12 @@ export class Drawing {
 
       for (const s of layer.strokes) {
         for (const p of s.paths) {
-          take(p, Math.max(s.line.width / TWIPS, 1) / 2);
+          take(p, lines ? Math.max(s.line.width / TWIPS, 1) / 2 : 0);
         }
       }
     }
 
-    return xMin <= xMax ? { xMin, yMin, xMax, yMax } : null;
+    return r;
   }
 
   /** A contour or stroke path begins at the pen. */

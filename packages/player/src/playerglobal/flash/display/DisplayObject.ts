@@ -2,9 +2,11 @@
 // other face, and its properties read and written through it.
 import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import { boundsIn, hitsObject, hitsPoint, toStage } from "../../../bounds.js";
 import { type DisplayObject, TRANSFORM } from "../../../display.js";
+import type { Rect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
-import { colorOf, concatenated, matrixOf } from "../geom/Transform.js";
+import { colorOf, matrixOf } from "../geom/Transform.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -46,6 +48,25 @@ function rectangleCopy(s: Scripting, r: AsObject | null): Value {
 
 function point(s: Scripting, x: number, y: number): Value {
   return s.rt.construct(s.rt.classNamed("flash.geom::Point"), x, y);
+}
+
+/** Flash keeps positions in twips, so what it reports of bounds is a multiple of a twentieth. */
+const twips = (v: number) => Math.round(v * 20) / 20;
+
+/** The object's width and height in its parent's space: its bounds through its matrix. */
+function size(s: Scripting, d: DisplayObject): [number, number] {
+  const r = boundsIn(d, d.parent, s.stage, true);
+  return [twips(r.xMax - r.xMin), twips(r.yMax - r.yMin)];
+}
+
+function rectangle(s: Scripting, r: Rect): Value {
+  return s.rt.construct(
+    s.rt.classNamed("flash.geom::Rectangle"),
+    twips(r.xMin),
+    twips(r.yMin),
+    twips(r.xMax - r.xMin),
+    twips(r.yMax - r.yMin),
+  );
 }
 
 /** The display object `o` is the face of. */
@@ -241,6 +262,68 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       return 0;
     }
 
+    /** The bounds through the object's own matrix, in its parent's space. */
+    get width(): number {
+      return size(s, this.$display)[0];
+    }
+
+    /** Scaled so that the bounds come to the value; left as it is when they have no extent. */
+    set width(v: Value) {
+      const current = size(s, this.$display)[0];
+      if (current > 0) {
+        const value = Number(v);
+        transform(this.$display, (m) => {
+          m.a *= value / current;
+          m.b *= value / current;
+        });
+      }
+    }
+
+    get height(): number {
+      return size(s, this.$display)[1];
+    }
+
+    set height(v: Value) {
+      const current = size(s, this.$display)[1];
+      if (current > 0) {
+        const value = Number(v);
+        transform(this.$display, (m) => {
+          m.c *= value / current;
+          m.d *= value / current;
+        });
+      }
+    }
+
+    getBounds(target: Value): Value {
+      return rectangle(
+        s,
+        boundsIn(this.$display, (target as AsObject | null)?.$display ?? null, s.stage, true),
+      );
+    }
+
+    getRect(target: Value): Value {
+      return rectangle(
+        s,
+        boundsIn(this.$display, (target as AsObject | null)?.$display ?? null, s.stage, false),
+      );
+    }
+
+    /** hitTestPoint(x, y, shapeFlag) asks with `point`; hitTestObject(other) without. */
+    "flash.display:DisplayObject::_hitTest"(
+      point: Value,
+      x: Value,
+      y: Value,
+      shape: Value,
+      other: Value,
+    ): boolean {
+      if (point) {
+        return hitsPoint(this.$display, Number(x), Number(y), !!shape, s.root);
+      }
+
+      const o = (other as AsObject | null)?.$display;
+      return o ? hitsObject(this.$display, o, s.stage) : false;
+    }
+
     get blendMode(): string {
       return this.$blendMode ?? "normal";
     }
@@ -329,7 +412,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     /** A point of this object's space in the stage's: through the matrices up to the stage. */
     localToGlobal(p: Value): Value {
-      const m = concatenated(s, this.$display);
+      const m = toStage(this.$display, s.stage);
       const x = Number(s.rt.getProperty(p as AsObject, name("x")));
       const y = Number(s.rt.getProperty(p as AsObject, name("y")));
       return point(s, m.a * x + m.c * y + m.tx, m.b * x + m.d * y + m.ty);
@@ -337,7 +420,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     /** A point of the stage's space in this object's: the inverse of the way up. */
     globalToLocal(p: Value): Value {
-      const m = concatenated(s, this.$display);
+      const m = toStage(this.$display, s.stage);
       const x = Number(s.rt.getProperty(p as AsObject, name("x"))) - m.tx;
       const y = Number(s.rt.getProperty(p as AsObject, name("y"))) - m.ty;
       const det = m.a * m.d - m.b * m.c;

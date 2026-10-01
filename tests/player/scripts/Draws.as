@@ -104,8 +104,9 @@ package {
       sprite.y = 45;
       sprite.rotation = 15;
       addChild(sprite);
-      // The sizes (188.9 83.9 61.25 61.25 in Flash) wait for bounds.
-      trace("drawn");
+      // The rectangle without the lines' widths, and the turned sprite's size: Flash's
+      // bounds of lines are half a pixel wider than their geometry, by a rule not known.
+      trace("drawn", shape.getRect(shape), sprite.width, sprite.height);
     }
   }
 }

@@ -25,6 +25,8 @@ import {
 import {
   CUBIC,
   CURVE,
+  flatten,
+  inside,
   LINE,
   MOVE,
   orientation,
@@ -35,66 +37,6 @@ import {
 import type { ShapeCharacter } from "./timeline.js";
 
 /** A contour flattened to a polygon, for telling which contours hold which. */
-function polygon(path: Path): number[] {
-  const points: number[] = [];
-  let x = 0;
-  let y = 0;
-  for (let i = 0; i < path.length; ) {
-    const command = path[i];
-    if (command === CUBIC) {
-      const [c1x, c1y, c2x, c2y, ax, ay] = path.slice(i + 1, i + 7);
-      for (let k = 1; k <= 8; k++) {
-        const t = k / 8;
-        const u = 1 - t;
-        points.push(
-          u * u * u * x + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * ax,
-          u * u * u * y + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * ay,
-        );
-      }
-
-      x = ax;
-      y = ay;
-      i += 7;
-    } else if (command === CURVE) {
-      const [cx, cy, ax, ay] = path.slice(i + 1, i + 5);
-      for (let k = 1; k <= 8; k++) {
-        const t = k / 8;
-        const u = 1 - t;
-        points.push(
-          u * u * x + 2 * u * t * cx + t * t * ax,
-          u * u * y + 2 * u * t * cy + t * t * ay,
-        );
-      }
-
-      x = ax;
-      y = ay;
-      i += 5;
-    } else {
-      x = path[i + 1];
-      y = path[i + 2];
-      points.push(x, y);
-      i += 3;
-    }
-  }
-
-  return points;
-}
-
-function inside(points: number[], px: number, py: number): boolean {
-  let hit = false;
-  for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
-    const xi = points[i];
-    const yi = points[i + 1];
-    const xj = points[j];
-    const yj = points[j + 1];
-    if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
-      hit = !hit;
-    }
-  }
-
-  return hit;
-}
-
 interface Region {
   path: Path;
   points: number[];
@@ -106,7 +48,7 @@ interface Region {
 /** The contours as a tree, each under the smallest one that holds it. */
 function containment(paths: Path[]): Region[] {
   const regions: Region[] = paths.map((path) => {
-    const points = polygon(path);
+    const points = flatten(path);
     let area = 0;
     for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
       area += points[j] * points[i + 1] - points[i] * points[j + 1];

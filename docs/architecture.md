@@ -639,13 +639,30 @@ bounds have no extent to scale, as Flash. `getBounds(target)` and
 `getRect(target)` take the bounds through the matrices up to the stage
 and back down into the target's, or stay in the object's own for null.
 
-`hitTestPoint(x, y)` takes a point of the stage's space: against the
-bounds, or, asked for the shape, against what is drawn, a fill where the
-point lies inside an odd number of its contours and a line where it is
-within half the width of a path, children included; `hitTestObject`
+What is reported is in twips, as Flash keeps positions: a turned square
+of side 50 is 61.25 wide, not 61.237 (the `draws` case). Flash's bounds
+of a line come out about half a pixel wider than its geometry with its
+half width, by a rule not known yet, so the case reports its drawing's
+`getRect`, which has the lines' paths without their widths. Flash keeps
+`scaleX`, `scaleY` and `rotation` apart from the matrix, so that a
+negative width gives a negative `scaleX`; the player derives them from
+the matrix and loses the sign, which is where the corpus's
+`displayobject_width` and `_height` part from it.
+
+`hitTestPoint(x, y)` takes its point in the space of the main root, as
+Flash does (the corpus's `displayobject_hittestpoint_root`: moving the
+root moves nothing under the point, moving a loaded SWF's root does):
+against the bounds, or, asked for the shape, against what is drawn, a
+fill where the point lies inside an odd number of its contours and a
+line where it is within half the width of a path, children included.
+The shape test samples half a pixel to the left of the point, on its
+row, which is how Flash's answers on a shape's edges come out: a point
+on its right edge hits, one on its left, top or bottom edge does not
+(`displayobject_hittestpoint_boundary`, both ways round). The shape test
+asks for a SWF's root above the object, the bounds test does not. `hitTestObject`
 asks whether two objects' bounds in the stage's space overlap. The
-corpus's `displayobject_width`, `_height`, `_getrect`, `_hittestpoint`
-and `_hittestobject` are the reference, with the `draws` case's sizes.
+corpus's `displayobject_getrect`, `_hittestpoint`, `_hittestpoint_root`
+and `_hittestobject` are the reference, with the `draws` case.
 
 ## Testing against oracles
 
