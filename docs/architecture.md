@@ -862,7 +862,8 @@ down without moving left, columns right to left when it moves right;
 channel by its alpha, 256 for 255, shifted down 8, and leaves the
 destination as it was where it does not reach; compositing is
 s + ((d * (256 - sa)) >> 8) a channel (`bitmapdata_copypixels_alpha_*`).
-A Bitmap watches its store, so a pixel set marks it for the renderer,
+A Bitmap watches its store, held weakly by it, so a pixel set marks it for the renderer
+without keeping a Bitmap taken off the display list alive,
 which uploads the same texture again; `lock` and `unlock`
 do nothing, as a store drawn from each frame needs no batching. A
 `Bitmap` is a display object of its own kind (`BitmapObject`): its bounds

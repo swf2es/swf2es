@@ -223,6 +223,8 @@ function swap(existing: DisplayObject, character: Character): void {
 /** A Bitmap: a display object that shows a BitmapData's pixels, its bounds the data's size. */
 export class BitmapObject extends DisplayObject {
   private shown: BitmapStore | null = null;
+  /** This object, weakly, as its store holds it. */
+  private readonly ref = new WeakRef(this);
   smoothing = false;
   pixelSnapping = "auto";
 
@@ -237,9 +239,9 @@ export class BitmapObject extends DisplayObject {
   }
 
   set store(store: BitmapStore | null) {
-    this.shown?.views.delete(this);
+    this.shown?.views.delete(this.ref);
     this.shown = store;
-    store?.views.add(this);
+    store?.views.add(this.ref);
     this.invalidate(CONTENT);
   }
 

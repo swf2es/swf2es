@@ -59,8 +59,12 @@ export class BitmapStore {
   /** Counts each change, so a sprite drawn from the store knows to upload again. */
   version = 0;
   disposed = false;
-  /** The Bitmaps showing the store, told of each change so the renderer looks at them. */
-  readonly views = new Set<{ pixelsChanged(disposed: boolean): void }>();
+  /**
+   * The Bitmaps showing the store, told of each change so the renderer
+   * looks at them; held weakly, so a Bitmap taken off the display list
+   * and dropped is collected though the BitmapData lives on.
+   */
+  readonly views = new Set<WeakRef<{ pixelsChanged(disposed: boolean): void }>>();
 
   constructor(
     readonly width: number,
@@ -262,8 +266,13 @@ export class BitmapStore {
   /** A change: counted, and told to each Bitmap showing the store. */
   changed(): void {
     this.version++;
-    for (const view of this.views) {
-      view.pixelsChanged(this.disposed);
+    for (const ref of this.views) {
+      const view = ref.deref();
+      if (view) {
+        view.pixelsChanged(this.disposed);
+      } else {
+        this.views.delete(ref);
+      }
     }
   }
 }
