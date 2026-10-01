@@ -94,20 +94,30 @@ async function runSwf(
 
 interface Bench {
   tick: number[];
-  render: number[];
+  sync: number[];
+  /** Pixi's part of the draw: its instructions and batches, and the GL calls issued. */
+  draw: number[];
+  /** GL's part: the wait for what was issued to finish. */
+  gl: number[];
   first: number;
+  /** The GL renderer that drew: SwiftShader, or a GPU's name. */
+  renderer: string;
   error: string | null;
 }
 
 /**
  * Play a SWF for `frames` frames at the stage's own resolution, timing each
- * frame's tick and its render apart. The GPU is waited for, so that what
- * it does counts; Chrome's software GL here does it on the CPU anyway.
+ * frame's tick, the display list's sync to Pixi and Pixi's draw apart. The
+ * GPU is waited for, so that what it does counts; Chrome's software GL
+ * does it on the CPU anyway, and the result says which drew.
  */
 async function benchSwf(base64: string, frames: number): Promise<Bench> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
-  const render: number[] = [];
+  const sync: number[] = [];
+  const draw: number[] = [];
+  const finished: number[] = [];
+  let name = "";
   try {
     const start = performance.now();
     const player = new Player(bytes);
@@ -121,29 +131,48 @@ async function benchSwf(base64: string, frames: number): Promise<Bench> {
     });
     document.body.replaceChildren(renderer.canvas);
     const view = new PixiView(renderer);
-    const gl = (renderer as unknown as { gl?: WebGLRenderingContext }).gl;
+    // Which renderer Pixi chose and what it draws with; WebGPU when WebGL
+    // could not be had, which the output must say.
+    const { gl, gpu } = renderer as unknown as {
+      gl?: WebGLRenderingContext;
+      gpu?: { adapter: { info?: { description?: string; vendor?: string } }; device: GPUDevice };
+    };
+    const info = gl?.getExtension("WEBGL_debug_renderer_info");
+    name = gl
+      ? `WebGL, ${String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER))}`
+      : gpu
+        ? `WebGPU, ${gpu.adapter.info?.description || gpu.adapter.info?.vendor || "unknown adapter"}`
+        : "unknown renderer";
+    const finish = async () => {
+      if (gl) {
+        gl.finish();
+      } else if (gpu) {
+        await gpu.device.queue.onSubmittedWorkDone();
+      }
+    };
     view.render(player.root);
-    gl?.finish();
+    await finish();
     const first = performance.now() - start;
     for (let frame = 2; frame <= frames; frame++) {
       const before = performance.now();
       player.tick();
       const ticked = performance.now();
-      view.render(player.root);
-      gl?.finish();
+      view.prepare(player.root);
+      const synced = performance.now();
+      renderer.render(view.stage);
+      const drawn = performance.now();
+      await finish();
       tick.push(ticked - before);
-      render.push(performance.now() - ticked);
+      sync.push(synced - ticked);
+      draw.push(drawn - synced);
+      finished.push(performance.now() - drawn);
     }
 
     renderer.destroy();
-    return { tick, render, first, error: null };
+    return { tick, sync, draw, gl: finished, first, renderer: name, error: null };
   } catch (e) {
-    return {
-      tick,
-      render,
-      first: 0,
-      error: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
-    };
+    const error = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    return { tick, sync, draw, gl: finished, first: 0, renderer: name, error };
   }
 }
 

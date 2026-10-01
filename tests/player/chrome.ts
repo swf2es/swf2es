@@ -65,6 +65,7 @@ interface Evaluated<T> {
 async function withPage<T>(
   ready: string,
   run: (evaluate: <R>(expression: string) => Promise<Evaluated<R>>) => Promise<T>,
+  gpu = false,
 ): Promise<T> {
   const { server, url } = await serve();
   const profile = mkdtempSync(join(tmpdir(), "swf2es-chrome-"));
@@ -77,8 +78,13 @@ async function withPage<T>(
         "--no-sandbox",
         "--remote-debugging-port=0",
         `--user-data-dir=${profile}`,
-        "--use-angle=swiftshader",
-        "--enable-unsafe-swiftshader",
+        // Software GL draws the same on any machine; a GPU draws as a user's
+        // would. Headless Chrome reaches one here through ANGLE's Vulkan back
+        // end (its GL back end gave no WebGL at all); SWF2ES_GPU_FLAGS can
+        // name another. The bench prints which renderer drew either way.
+        ...(gpu
+          ? (process.env.SWF2ES_GPU_FLAGS ?? "--ignore-gpu-blocklist --use-angle=vulkan").split(" ")
+          : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]),
         "--no-first-run",
         "about:blank",
       ],
@@ -164,20 +170,41 @@ export function runPlayer(jobs: PlayerJob[]): Promise<PlayerResult[]> {
   });
 }
 
-/** What timing a SWF in the player gave: each frame's tick and render, in ms, and the first frame's load and draw. */
+/**
+ * What timing a SWF in the player gave: each frame's tick, sync to Pixi,
+ * Pixi's draw and GL's finish, in ms, the first frame's load and draw, and
+ * which GL renderer drew.
+ */
 export interface BenchResult {
   tick: number[];
-  render: number[];
+  sync: number[];
+  draw: number[];
+  gl: number[];
   first: number;
+  renderer: string;
   error: string | null;
 }
 
-/** Play `swf` for `frames` frames in the player, timing each; see page.ts's benchSwf. */
-export function benchPlayer(swf: Uint8Array, frames: number): Promise<BenchResult> {
-  return withPage("benchSwf", async (evaluate) => {
-    const { value, exception } = await evaluate<BenchResult>(
-      `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames})`,
-    );
-    return value ?? { tick: [], render: [], first: 0, error: exception ?? "no result" };
-  });
+/** Play `swf` for `frames` frames in the player, timing each; see page.ts's benchSwf. `gpu` lets Chrome use one. */
+export function benchPlayer(swf: Uint8Array, frames: number, gpu = false): Promise<BenchResult> {
+  return withPage(
+    "benchSwf",
+    async (evaluate) => {
+      const { value, exception } = await evaluate<BenchResult>(
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames})`,
+      );
+      return (
+        value ?? {
+          tick: [],
+          sync: [],
+          draw: [],
+          gl: [],
+          first: 0,
+          renderer: "",
+          error: exception ?? "no result",
+        }
+      );
+    },
+    gpu,
+  );
 }

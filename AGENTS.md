@@ -33,7 +33,7 @@ node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
 node tests/player/corpus/fetch-ruffle.ts     # Ruffle's test corpus, for corpus/check-references.ts
-node tests/player/bench.ts [--shapes N] [--frames N]   # time the player on a busy synthetic
+node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
                               # timeline in Chrome; keep a change only for a gain that repeats
 ```
 

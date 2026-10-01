@@ -1,12 +1,14 @@
 // Times the player on a synthetic SWF in headless Chrome: a few shape
 // characters placed many times over, some moving each frame, some turning
 // (which draws their lines again), a few replaced; what a busy timeline
-// does. Prints the median and p90 of a frame's tick (the timeline) and
-// render (the display list synced to Pixi and drawn) after the first frames
-// warm up. Chrome's software GL draws, so render times are CPU times and
-// compare run to run on one machine, not to a GPU.
+// does. Prints the median and p90 of a frame's tick (the timeline), sync
+// (the display list brought to Pixi), draw (Pixi's instructions, batches
+// and GL calls) and gl (the wait for GL to finish them) after the first
+// frames warm up. Chrome's software GL draws by default, so the draw is CPU
+// time that compares run to run on one machine; --gpu lets Chrome use the
+// machine's GPU, for what a user would see, and the output names which drew.
 //
-//   node tests/player/bench.ts [--shapes N] [--frames N] [--json]
+//   node tests/player/bench.ts [--shapes N] [--frames N] [--gpu] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 
@@ -153,23 +155,28 @@ const quantile = (values: number[], q: number) => {
 };
 
 const swf = synthetic();
-const result = await benchPlayer(swf, frames);
+const result = await benchPlayer(swf, frames, args.includes("--gpu"));
 if (result.error) {
   console.error(result.error);
   process.exit(1);
 }
 
 const tick = result.tick.slice(WARMUP);
-const render = result.render.slice(WARMUP);
-const total = tick.map((t, i) => t + render[i]);
+const sync = result.sync.slice(WARMUP);
+const draw = result.draw.slice(WARMUP);
+const gl = result.gl.slice(WARMUP);
+const total = tick.map((t, i) => t + sync[i] + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
   shapes,
   frames,
   swfBytes: swf.length,
+  renderer: result.renderer,
   firstFrameMs: result.first,
   tick: stats(tick),
-  render: stats(render),
+  sync: stats(sync),
+  draw: stats(draw),
+  gl: stats(gl),
   frame: stats(total),
 };
 if (args.includes("--json")) {
@@ -177,9 +184,11 @@ if (args.includes("--json")) {
 } else {
   const ms = (v: number) => `${v.toFixed(2)} ms`;
   console.log(
-    `${shapes} shapes, ${frames} frames, SWF of ${swf.length} bytes; first frame ${ms(result.first)}`,
+    `${shapes} shapes, ${frames} frames, SWF of ${swf.length} bytes; first frame ${ms(result.first)}; drawn by ${result.renderer}`,
   );
   console.log(`  tick    median ${ms(summary.tick.median)}  p90 ${ms(summary.tick.p90)}`);
-  console.log(`  render  median ${ms(summary.render.median)}  p90 ${ms(summary.render.p90)}`);
+  console.log(`  sync    median ${ms(summary.sync.median)}  p90 ${ms(summary.sync.p90)}`);
+  console.log(`  draw    median ${ms(summary.draw.median)}  p90 ${ms(summary.draw.p90)}`);
+  console.log(`  gl      median ${ms(summary.gl.median)}  p90 ${ms(summary.gl.p90)}`);
   console.log(`  frame   median ${ms(summary.frame.median)}  p90 ${ms(summary.frame.p90)}`);
 }
