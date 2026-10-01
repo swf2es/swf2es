@@ -416,7 +416,7 @@ function gotoChild(abc: Uint8Array): Uint8Array {
 function replaces(abc: Uint8Array): Uint8Array {
   return w.swf({
     width: 200,
-    height: 150,
+    height: 200,
     frameRate: 24,
     frameCount: 3,
     tags: [
@@ -438,9 +438,14 @@ function replaces(abc: Uint8Array): Uint8Array {
       w.place({ depth: 8, character: 1, matrix: { tx: 1600, ty: 2000 } }),
       w.place({ depth: 9, character: 1, matrix: { tx: 2600, ty: 2000 } }),
       w.place({ depth: 10, character: 1, matrix: { tx: 3600, ty: 2000 } }),
+      w.place({ depth: 11, character: 1, matrix: { tx: 600, ty: 2800 } }),
+      w.place({ depth: 12, character: 1, matrix: { tx: 1600, ty: 2800 } }),
+      w.place({ depth: 13, character: 1, matrix: { tx: 2600, ty: 2800 } }),
       w.showFrame(),
       w.showFrame(),
-      ...[1, 2, 3, 6, 7, 8, 9, 10].map((depth) => w.place({ depth, move: true, character: 2 })),
+      ...[1, 2, 3, 6, 7, 8, 9, 10, 11, 12, 13].map((depth) =>
+        w.place({ depth, move: true, character: 2 }),
+      ),
       w.place({ depth: 4, move: true, character: 4 }),
       w.place({ depth: 5, move: true, character: 4 }),
       w.showFrame(),

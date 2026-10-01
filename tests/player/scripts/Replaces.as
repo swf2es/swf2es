@@ -33,6 +33,13 @@ package {
       getChildAt(8).x = getChildAt(8).x;
       getChildAt(9).scaleX = -2;
       getChildAt(9).rotation = 90;
+      try {
+        getChildAt(10).name = "named";
+      } catch (e:Error) {
+        trace("name:", e.errorID);
+      }
+      getChildAt(11).filters = [];
+      getChildAt(12).blendMode = "normal";
       report("frame 1");
     }
 

@@ -288,7 +288,7 @@
   "avm2/displayobject_mask_self_referential": {"matched":0,"lines":0,"traced":0,"error":null},
   "avm2/displayobject_metaData": {"matched":3,"lines":3,"traced":3,"error":null},
   "avm2/displayobject_name": {"matched":1,"lines":22,"traced":22,"error":null},
-  "avm2/displayobject_name_from_timeline": {"matched":7,"lines":25,"traced":22,"error":null},
+  "avm2/displayobject_name_from_timeline": {"matched":7,"lines":25,"traced":25,"error":null},
   "avm2/displayobject_opaque_background": {"matched":6,"lines":6,"traced":6,"error":null},
   "avm2/displayobject_parent": {"matched":12,"lines":12,"traced":12,"error":null},
   "avm2/displayobject_root": {"matched":24,"lines":24,"traced":24,"error":null},

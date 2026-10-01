@@ -152,7 +152,12 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       return this.$display.name;
     }
 
+    /** Flash refuses a timeline-placed object's name, so a script's touch there never marks it (the `replaces` case). */
     set name(v: Value) {
+      if (this.$display.placeFrame > 0) {
+        throw s.rt.error("flash.errors::IllegalOperationError", 2078);
+      }
+
       this.$display.name = String(v);
     }
 
@@ -354,6 +359,8 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("ArgumentError", 2008, "blendMode");
       }
 
+      this.$display.scripted = true;
+
       this.$blendMode = mode;
     }
 
@@ -362,6 +369,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set cacheAsBitmap(v: Value) {
+      this.$display.scripted = true;
       this.$cacheAsBitmap = !!v;
     }
 
@@ -379,6 +387,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set filters(v: Value) {
+      this.$display.scripted = true;
       this.$filters = v ? [...(((v as AsObject).$a as Value[] | undefined) ?? [])] : [];
     }
 
@@ -387,6 +396,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set mask(v: Value) {
+      this.$display.scripted = true;
       this.$mask = v;
     }
 
@@ -403,6 +413,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set opaqueBackground(v: Value) {
+      this.$display.scripted = true;
       this.$opaqueBackground = v === null || v === undefined ? null : s.rt.toUint(v);
     }
 
@@ -411,6 +422,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set scale9Grid(v: Value) {
+      this.$display.scripted = true;
       this.$scale9Grid = v ? (rectangleCopy(s, v as AsObject) as AsObject) : null;
     }
 
@@ -419,6 +431,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set scrollRect(v: Value) {
+      this.$display.scripted = true;
       this.$scrollRect = v ? (rectangleCopy(s, v as AsObject) as AsObject) : null;
     }
 

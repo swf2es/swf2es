@@ -454,8 +454,11 @@ A `PlaceObject` with the move flag that names another character at an
 occupied depth makes no new object in Flash: the child stays, the same
 AS3 object with its matrix, sign and angle, and only a `Shape` no script
 has set a property of takes the new shape's graphic. A clip, a `Shape` a
-script has touched (an `x = x` counts), and a `Shape` a sprite is placed
-over all stay as they were (`replaces`: ten depths, one swapped). The
+script has touched (an `x = x` counts, and so do `filters = []` and a
+`blendMode` set to what it was), and a `Shape` a sprite is placed over
+all stay as they were (`replaces`: thirteen depths, two swapped, the
+untouched one and the one whose `name` a script tried to set, which
+Flash refuses for a timeline-placed object with error #2078). The
 player keeps a `scripted` flag on the display object for that. A goto
 forward does the same, whatever the frames between named at the depth;
 a rewind keeps the child only if the character the frames finally name

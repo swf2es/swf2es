@@ -159,6 +159,7 @@ export const messages: Record<number, string> = {
   2030: "End of file was encountered.",
   2035: "URL Not Found.",
   2058: "There was an error decompressing the data.",
+  2078: "The name property of a Timeline-placed object cannot be modified.",
   2099: "The loading object is not sufficiently loaded to provide this information.",
   2085: "Parameter %1 must be non-empty string.",
   2088: "The Proxy class does not implement getProperty. It must be overridden by a subclass.",
