@@ -893,7 +893,11 @@ visits the rect, clipped to both bitmaps, in Flash's own order, a Galois
 LFSR over ⌈log2 w⌉ + ⌈log2 h⌉ bits whose taps for every width from 2 to
 26 bits were read off adl, a state standing for (s & (2^bw − 1), s >> bw)
 and skipped outside the rect; each call writes numPixels and returns the
-next state, a seed of 0 writing the origin first.
+next state; every call writes the origin too, a seed past the states is
+taken modulo 2^bits − 1 and 0 starts at the tap, and a count past the
+w · h − 1 states a round visits is one round and the remainder, which
+gives Flash's seed without its loop (Flash itself takes seconds over
+2^31 − 1).
 `draw`
 of a display object into a bitmap, the filters, and the SWF's bitmap
 tags (`DefineBitsLossless`, `DefineBitsJPEG2` and 3) as characters

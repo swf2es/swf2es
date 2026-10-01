@@ -462,9 +462,10 @@ function bitsFor(n: number): number {
  * ceil(log2 w) + ceil(log2 h) bits stands for the pixel (s & (2^bw - 1),
  * s >> bw) of the rect, a state outside it skipped; each call writes
  * numPixels pixels, from the seed on, and returns the state after the
- * last, raw, so the next call goes on from there. A seed of 0 writes the
- * pixel at the origin first and goes on from the tap, which is why n
- * calls of 1 from 0 write n + 1 (Ruffle's bitmapdata_pixeldissolve). A
+ * last, raw, so the next call goes on from there. Every call writes the
+ * pixel at the origin too, which no state stands for, and so n calls of
+ * 1 write n + 1 (Ruffle's bitmapdata_pixeldissolve); a seed past the
+ * generator's states is taken modulo 2^bits - 1, and 0 starts at the tap. A
  * pixel takes the fill colour where the source is the destination, else
  * the source's; a rect a pixel high or wide dissolves nothing.
  */
@@ -534,13 +535,22 @@ export function pixelDissolve(
   };
   const inside = (state: number) => (state & xMask) < w && Math.floor(state / 2 ** bw) < h;
 
-  let s = Math.abs(Math.trunc(seed)) & mask;
+  // The origin is written on every call; the seed is reduced to the
+  // generator's period, and 0, which it never reaches, starts at the tap.
+  write(0);
+  const start = Math.abs(Math.trunc(seed));
+  let s = start > mask ? start % mask : start;
   if (s === 0) {
-    write(0);
     s = tap;
   }
 
-  for (let k = 0; k < count; k++) {
+  // The states inside the rect come round every w * h - 1 writes (state 0
+  // is the origin's, reached from seed 0 alone), so a count past that is
+  // one full round, which writes every pixel, and the remainder: the same
+  // pixels and the seed Flash returns, without its seconds-long loop.
+  const round = w * h - 1;
+  const steps = count > round ? round + (count % round) : count;
+  for (let k = 0; k < steps; k++) {
     // Every state but 0 comes round within 2^bits steps, so this ends.
     while (!inside(s)) {
       s = next(s);

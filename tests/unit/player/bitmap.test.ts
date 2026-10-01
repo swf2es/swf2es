@@ -60,6 +60,25 @@ test("pixelDissolve visits pixels in Flash's order and returns its seeds", async
     ],
     [7, 1, "[]>0 []>0"],
   ];
+  // From seed 12345 on 10x10: reduced modulo 255 to 105, the pixel at (9, 6), the origin with it.
+  const seeded = new BitmapStore(10, 10, false, 0);
+  assert.equal(
+    pixelDissolve(
+      seeded,
+      seeded,
+      { x: 0, y: 0, width: 10, height: 10 },
+      0,
+      0,
+      12345,
+      1,
+      0xffff0000,
+    ),
+    140,
+  );
+  assert.deepEqual(
+    [...seeded.pixels.keys()].filter((i) => seeded.pixels[i] === 0xffff0000),
+    [0, 69],
+  );
   for (const [w, h, expected] of runs) {
     const store = new BitmapStore(w, h, false, 0);
     let seed = 0;
@@ -92,5 +111,40 @@ test("threshold takes its six operations and no name Object's prototype has", as
 
   for (const op of ["constructor", "toString", "hasOwnProperty", "__proto__", "=", "equals"]) {
     assert.ok(!isThresholdOperation(op), op);
+  }
+});
+
+test("pixelDissolve takes a count past every pixel as Flash does, in a bounded number of steps", async () => {
+  const { pixelDissolve } = await import("../../../packages/player/dist/bitmap-ops.js");
+  // The seed Flash returns and the pixels it fills under adl, by count, from seeds 0 and 5.
+  const runs: [number, number, number, number, number, number][] = [
+    [4, 4, 0, 14, 1, 15],
+    [4, 4, 0, 16, 6, 16],
+    [4, 4, 0, 100, 9, 16],
+    [4, 4, 0, 2147483647, 7, 16],
+    [4, 4, 5, 15, 5, 16],
+    [4, 4, 5, 100, 12, 16],
+    [4, 4, 5, 2147483647, 4, 16],
+    [3, 5, 0, 16, 22, 15],
+    [3, 5, 0, 2147483647, 5, 15],
+    [3, 5, 5, 17, 7, 15],
+    [3, 5, 5, 2147483647, 22, 15],
+  ];
+  for (const [w, h, seed, count, next, filled] of runs) {
+    const store = new BitmapStore(w, h, false, 0);
+    const started = performance.now();
+    const got = pixelDissolve(
+      store,
+      store,
+      { x: 0, y: 0, width: w, height: h },
+      0,
+      0,
+      seed,
+      count,
+      0xffff0000,
+    );
+    assert.ok(performance.now() - started < 100, "bounded");
+    assert.equal(got, next, `${w}x${h} seed ${seed} count ${count}`);
+    assert.equal(store.pixels.filter((p) => p === 0xffff0000).length, filled);
   }
 });
