@@ -1,6 +1,7 @@
 // A SWF loading others by URL: one that is there, one that is not, the
 // first again, into the one domain there is, one that loads another in
-// turn, one closed before it comes, and one replaced by a second load.
+// turn, one closed before it comes, one replaced by a second load, the
+// first loaded again once complete, and one unloaded before it comes.
 // Driven by a node test with a stub for the host's fetch; Flash does not
 // run it.
 package {
@@ -31,16 +32,35 @@ package {
     }
 
     private function frame3():void {
+      trace("frame 3", counts());
+      var info:* = loaders[0].contentLoaderInfo;
+      trace("before reload", loaders[0].content != null, info.bytesTotal, info.swfVersion);
+      loaders[0].load(new URLRequest("inner.swf"));
+      trace("after reload", loaders[0].content == null, loaders[0].numChildren, info.bytesTotal, info.url == null, inaccessible(info));
+      load("inner.swf").unload();
+    }
+
+    private function frame4():void {
+      trace("frame 4", counts(), Loader(MovieClip(loaders[3].content).getChildAt(0)).numChildren);
+    }
+
+    private function counts():Array {
       var counts:Array = [];
       for each (var loader:Loader in loaders) {
         counts.push(loader.numChildren);
       }
 
-      trace("frame 3", counts);
+      return counts;
     }
 
-    private function frame4():void {
-      trace("frame 4", loaders[3].numChildren, Loader(MovieClip(loaders[3].content).getChildAt(0)).numChildren);
+    /** Whether the SWF's facts are refused, as Flash refuses them before the SWF is loaded. */
+    private function inaccessible(info:*):Boolean {
+      try {
+        info.actionScriptVersion;
+        return false;
+      } catch (e:Error) {
+        return e.errorID == 2099;
+      }
     }
 
     private function load(url:String):Loader {

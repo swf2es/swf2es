@@ -123,6 +123,8 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
   ]);
   // Closing a load and replacing one abort their fetches at once.
   assert.deepEqual(aborted, ["http://example.test/inner.swf", "http://example.test/missing.swf"]);
+  const contentOf = (loader: number) => (player.root.children[loader] as Container).children[0];
+  const first = contentOf(0);
 
   // The same SWF again, into the one domain: its classes are the first
   // load's, as Flash keeps a domain's definitions, and it plays on its own.
@@ -143,6 +145,9 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     `5 progress ${inner.length}/${inner.length} null false`,
     ...content,
     "frame 3 1,0,1,1,0,1",
+    `before reload true ${inner.length} 10`,
+    "after reload true 0 0 true true",
+    "6 requested inner.swf",
     "inner frame 2",
     "inner frame 1 true true true true",
     "nested requested deep.swf",
@@ -155,22 +160,31 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "5 complete - http://example.test/inner.swf true",
   ]);
   assert.equal(fetches[fetches.length - 1], "http://example.test/deep.swf");
-  const [first, , second] = player.root.children.map((loader) => (loader as Container).children[0]);
+  const second = contentOf(2);
   assert.ok(first.object && second.object);
   assert.notEqual(first.object, second.object);
   assert.equal(Object.getPrototypeOf(second.object), Object.getPrototypeOf(first.object));
 
-  // The nested SWF's content reports the nested SWF as its loaderURL (the
-  // last field of addedToStage); the four loaded clips' scripts run in tree
-  // order, the two older ones back on their first frame.
+  // The reload: the first Loader's content went at the call, and the new
+  // content comes as a first load's does; the one unloaded before its bytes
+  // came stays empty. The nested SWF's content reports the nested SWF as its
+  // loaderURL (the last field of addedToStage). The loaded clips' scripts
+  // run in tree order, the reloaded one's first again.
   await scripting.settled();
   player.tick();
   assert.deepEqual(lines.splice(0), [
+    "0 open - null false",
+    `0 progress 0/${inner.length} null false`,
+    `0 progress ${inner.length}/${inner.length} null false`,
     ...content,
-    "frame 4 1 1",
+    ...content,
+    "frame 4 1,0,1,1,0,1,0 1",
     "inner frame 1 true true true true",
     "inner frame 2",
     "inner frame 1 true true true true",
     "inner frame 2",
+    "0 init - http://example.test/inner.swf true",
+    "0 complete - http://example.test/inner.swf true",
   ]);
+  assert.deepEqual(aborted.slice(2), ["http://example.test/inner.swf"]);
 });

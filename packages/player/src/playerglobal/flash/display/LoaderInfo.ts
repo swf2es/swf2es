@@ -14,6 +14,15 @@ interface SwfFacts {
   as3: boolean;
 }
 
+/** A LoaderInfo's facts about its SWF, which Flash refuses to tell before the SWF is loaded: Error #2099. */
+function factsOf(s: Scripting, info: { $swf: SwfFacts | null }): SwfFacts {
+  if (!info.$swf) {
+    throw s.rt.error("Error", 2099);
+  }
+
+  return info.$swf;
+}
+
 /** The UncaughtErrorEvents of `owner`, a Loader or the main SWF's LoaderInfo, made when first asked for. */
 export function uncaughtErrorEvents(s: Scripting, owner: AsObject): AsObject {
   if (!owner.$uncaught) {
@@ -70,27 +79,28 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
     }
 
     get applicationDomain(): Value {
+      factsOf(s, this);
       return s.applicationDomain();
     }
 
     get swfVersion(): number {
-      return this.$swf?.version ?? 0;
+      return factsOf(s, this).version;
     }
 
     get actionScriptVersion(): number {
-      return this.$swf ? (this.$swf.as3 ? 3 : 2) : 0;
+      return factsOf(s, this).as3 ? 3 : 2;
     }
 
     get frameRate(): number {
-      return this.$swf?.frameRate ?? 0;
+      return factsOf(s, this).frameRate;
     }
 
     get width(): number {
-      return this.$swf?.width ?? 0;
+      return factsOf(s, this).width;
     }
 
     get height(): number {
-      return this.$swf?.height ?? 0;
+      return factsOf(s, this).height;
     }
 
     get contentType(): Value {

@@ -336,11 +336,14 @@ export class Scripting {
     this.enqueue(loader, null, Promise.resolve(bytes));
   }
 
-  /** A load begins: the one before it, if still pending, is dropped, as Flash's load() terminates it. */
+  /**
+   * A load begins: the one before it is dropped, pending or complete, and
+   * its LoaderInfo knows nothing again, as Flash's load() does at the call
+   * (Ruffle's `loader_reuse` trace).
+   */
   private begin(loader: AsObject): AsObject {
-    this.closeLoad(loader);
+    this.unload(loader);
     const info = this.loaderInfoOf(loader);
-    info.$url = null;
     info.$loaderURL = this.ownerUrl(loader);
     return info;
   }
@@ -430,8 +433,9 @@ export class Scripting {
     return () => this.complete(load, swf, library, run);
   }
 
-  /** A Loader's unload: its content out of the display list, the Loader kept. */
+  /** A Loader's unload: a pending load dropped, its content out of the display list, its LoaderInfo empty, the Loader kept. */
   unload(loader: AsObject): void {
+    this.closeLoad(loader);
     const content: AsObject | null = loader.$content ?? null;
     const display: Container = loader.$display;
     if (content?.$display?.parent === display) {
@@ -443,6 +447,11 @@ export class Scripting {
     const info: AsObject | undefined = loader.$loaderInfo;
     if (info) {
       info.$content = null;
+      info.$bytes = null;
+      info.$swf = null;
+      info.$url = null;
+      info.$loaded = 0;
+      info.$total = 0;
     }
   }
 
