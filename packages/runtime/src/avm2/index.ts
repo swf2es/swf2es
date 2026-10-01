@@ -2,7 +2,18 @@
 import { builtinHooks, builtinNatives } from "./natives/index.js";
 import { Runtime, type RuntimeOptions } from "./runtime.js";
 
-export { Runtime, type RuntimeOptions } from "./runtime.js";
+export type { Natives } from "./natives/define.js";
+export { plain } from "./natives/define.js";
+// The builtins' natives and hooks, for a player that adds playerglobal's to them.
+export { builtinHooks, builtinNatives } from "./natives/index.js";
+export {
+  type AsObject,
+  type ClassHook,
+  type Method,
+  Runtime,
+  type RuntimeOptions,
+  type Value,
+} from "./runtime.js";
 
 /** A runtime with the builtins' natives, for modules compiled from builtin.abc and after. */
 export function createRuntime(options: RuntimeOptions = {}): Runtime {
