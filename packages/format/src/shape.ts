@@ -18,6 +18,18 @@ export interface Matrix {
 
 export const IDENTITY: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
 
+/** A colour transform, as CXFORM or, with alpha, CXFORMWITHALPHA: multipliers /256, offsets. */
+export interface ColorTransform {
+  rMul: number;
+  gMul: number;
+  bMul: number;
+  aMul: number;
+  rAdd: number;
+  gAdd: number;
+  bAdd: number;
+  aAdd: number;
+}
+
 export interface GradientStop {
   ratio: number;
   /** 0xAARRGGBB. */
@@ -110,18 +122,6 @@ export function readMatrix(r: SwfReader): Matrix {
   return m;
 }
 
-/** A colour transform, as CXFORM or, with alpha, CXFORMWITHALPHA: multipliers /256, offsets. */
-export interface ColorTransform {
-  rMul: number;
-  gMul: number;
-  bMul: number;
-  aMul: number;
-  rAdd: number;
-  gAdd: number;
-  bAdd: number;
-  aAdd: number;
-}
-
 export function readColorTransform(r: SwfReader, alpha: boolean): ColorTransform {
   r.align();
   const hasAdd = r.ub(1);
@@ -186,7 +186,8 @@ function readFill(r: SwfReader, version: number): Fill {
     return { type: kind, gradient: readGradient(r, alpha, type === 0x13) };
   }
 
-  // Bitmap fills 0x40 to 0x43: repeating or clipped, smoothed or not.
+  // Bitmap fills 0x40 to 0x43: repeating or clipped, smoothed or not. Any
+  // other type byte reads as one too, rather than failing the shape.
   const bitmap = r.u16();
   const matrix = readMatrix(r);
   return { type: "bitmap", bitmap, matrix, repeat: (type & 1) === 0, smooth: (type & 2) === 0 };
