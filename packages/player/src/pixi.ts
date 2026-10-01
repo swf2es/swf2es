@@ -16,12 +16,13 @@ import {
 import {
   CHILDREN,
   CLEAN,
+  CONTENT,
   Container,
   type DisplayObject,
   ShapeObject,
   TRANSFORM,
 } from "./display.js";
-import { CURVE, LINE, MOVE, type Path, type ShapeLayer } from "./shapes.js";
+import { CUBIC, CURVE, LINE, MOVE, type Path, pointsOf, type ShapeLayer } from "./shapes.js";
 import type { ShapeCharacter } from "./timeline.js";
 
 /** A contour flattened to a polygon, for telling which contours hold which. */
@@ -31,7 +32,21 @@ function polygon(path: Path): number[] {
   let y = 0;
   for (let i = 0; i < path.length; ) {
     const command = path[i];
-    if (command === CURVE) {
+    if (command === CUBIC) {
+      const [c1x, c1y, c2x, c2y, ax, ay] = path.slice(i + 1, i + 7);
+      for (let k = 1; k <= 8; k++) {
+        const t = k / 8;
+        const u = 1 - t;
+        points.push(
+          u * u * u * x + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * ax,
+          u * u * u * y + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * ay,
+        );
+      }
+
+      x = ax;
+      y = ay;
+      i += 7;
+    } else if (command === CURVE) {
       const [cx, cy, ax, ay] = path.slice(i + 1, i + 5);
       for (let k = 1; k <= 8; k++) {
         const t = k / 8;
@@ -135,6 +150,30 @@ function trace(context: GraphicsContext, path: Path): void {
       continue;
     }
 
+    if (command === CUBIC) {
+      // A cubic's chords stray at most 3|Δ²| / 4n² for the larger of its two second differences.
+      const [c1x, c1y, c2x, c2y, ax, ay] = path.slice(i + 1, i + 7);
+      const bend = Math.max(
+        Math.hypot(x - 2 * c1x + c2x, y - 2 * c1y + c2y),
+        Math.hypot(c1x - 2 * c2x + ax, c1y - 2 * c2y + ay),
+      );
+      const n = Math.min(256, Math.max(1, Math.ceil(Math.sqrt((3 * bend) / (4 * FLATNESS)))));
+      for (let k = 1; k < n; k++) {
+        const t = k / n;
+        const u = 1 - t;
+        context.lineTo(
+          u * u * u * x + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * ax,
+          u * u * u * y + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * ay,
+        );
+      }
+
+      context.lineTo(ax, ay);
+      x = ax;
+      y = ay;
+      i += 7;
+      continue;
+    }
+
     // A quadratic's chords of parameter step 1/n stray at most |p0 - 2c + p2| / 4n².
     const cx = path[i + 1];
     const cy = path[i + 2];
@@ -214,7 +253,7 @@ function stroke(line: Line, m: Linear): Parameters<GraphicsContext["stroke"]>[0]
 function transformPath(path: Path, m: Linear): Path {
   const out = path.slice();
   for (let i = 0; i < out.length; ) {
-    const points = out[i] === CURVE ? 2 : 1;
+    const points = pointsOf(out[i]);
     for (let k = 0; k < points; k++) {
       const x = out[i + 1 + 2 * k];
       const y = out[i + 2 + 2 * k];
@@ -277,7 +316,11 @@ interface Node {
   container: PixiContainer;
   /** The linear part of the object's transform on the stage. */
   world: Linear;
-  /** A shape's lines, a Graphics for each layer that has any; null where one has none. */
+  /** What the object itself draws, a shape's or a drawing's layers, under any children. */
+  art: PixiContainer;
+  /** The layers drawn, a shape's or a drawing's, as of the last redraw. */
+  layers: ShapeLayer[];
+  /** The lines, a Graphics for each layer that has any; null where one has none. */
   strokes: (Graphics | null)[];
 }
 
@@ -291,27 +334,9 @@ export class PixiView {
   private node(o: DisplayObject): Node {
     let node = this.nodes.get(o);
     if (!node) {
-      node = { container: new PixiContainer(), world: [0, 0, 0, 0], strokes: [] };
-      // A Shape a script made has nothing to draw yet.
-      if (o instanceof ShapeObject && o.shape) {
-        const shape = o.shape;
-        let fills = this.fills.get(shape);
-        if (!fills) {
-          fills = shape.layers.map(fillContext);
-          this.fills.set(shape, fills);
-        }
-
-        shape.layers.forEach((layer, i) => {
-          node?.container.addChild(new Graphics(fills[i]));
-          const strokes = layer.strokes.length ? new Graphics() : null;
-          if (strokes) {
-            node?.container.addChild(strokes);
-          }
-
-          node?.strokes.push(strokes);
-        });
-      }
-
+      const art = new PixiContainer();
+      node = { container: new PixiContainer(), world: [0, 0, 0, 0], art, layers: [], strokes: [] };
+      node.container.addChild(art);
       this.nodes.set(o, node);
     }
 
@@ -319,13 +344,46 @@ export class PixiView {
   }
 
   /**
-   * Draw a shape's lines again for its transform on the stage: in the
+   * What `o` itself draws, built anew: a shape's layers, whose fills are
+   * shared by every instance of the character, or its drawing's, which are
+   * its own and change.
+   */
+  private redraw(o: DisplayObject, node: Node): void {
+    for (const child of node.art.removeChildren()) {
+      child.destroy();
+    }
+
+    node.strokes = [];
+    const shape = o instanceof ShapeObject ? o.shape : null;
+    node.layers = o.drawing?.layers ?? shape?.layers ?? [];
+    let fills: GraphicsContext[];
+    if (shape && !o.drawing) {
+      fills = this.fills.get(shape) ?? node.layers.map(fillContext);
+      this.fills.set(shape, fills);
+    } else {
+      fills = node.layers.map(fillContext);
+    }
+
+    node.layers.forEach((layer, i) => {
+      node.art.addChild(new Graphics(fills[i]));
+      const strokes = layer.strokes.length ? new Graphics() : null;
+      if (strokes) {
+        node.art.addChild(strokes);
+      }
+
+      node.strokes.push(strokes);
+    });
+    this.restroke(node);
+  }
+
+  /**
+   * Draw the lines again for the object's transform on the stage: in the
    * stage's axes, under the inverse of that transform's linear part.
    */
-  private restroke(o: ShapeObject, node: Node): void {
+  private restroke(node: Node): void {
     const m = node.world;
     const det = m[0] * m[3] - m[1] * m[2];
-    o.shape?.layers.forEach((layer, i) => {
+    node.layers.forEach((layer, i) => {
       const strokes = node.strokes[i];
       if (!strokes) {
         return;
@@ -373,14 +431,18 @@ export class PixiView {
       ];
       moved = !sameLinear(world, node.world);
       node.world = world;
-      if (moved && o instanceof ShapeObject) {
-        this.restroke(o, node);
-      }
+    }
+
+    if (o.dirty & CONTENT) {
+      this.redraw(o, node);
+    } else if (moved && node.strokes.some((g) => g)) {
+      this.restroke(node);
     }
 
     if (o instanceof Container) {
       if (o.dirty & CHILDREN) {
         container.removeChildren();
+        container.addChild(node.art);
         for (const child of o.children) {
           container.addChild(this.sync(child, node.world, moved));
         }

@@ -6,6 +6,7 @@
 // timeline places goes before the first child of a greater depth.
 import { type ColorTransform, IDENTITY, type Matrix, type Place } from "@swf2es/format";
 import type { avm2 } from "@swf2es/runtime";
+import type { Drawing } from "./drawing.js";
 import type { Character, Library, ShapeCharacter, Timeline } from "./timeline.js";
 
 /** Nothing changed since the renderer last looked, or what did. */
@@ -35,6 +36,8 @@ export class DisplayObject {
   object: avm2.AsObject | null = null;
   /** The LoaderInfo of the SWF this is the root of: set on the main root and on each loaded SWF's; null below. */
   loaderInfo: avm2.AsObject | null = null;
+  /** What its Graphics drew, for a Shape or Sprite a script draws in; null until one does. */
+  drawing: Drawing | null = null;
   /** What changed since the renderer last synced it: TRANSFORM, CHILDREN, CONTENT. */
   dirty = TRANSFORM | CONTENT;
 

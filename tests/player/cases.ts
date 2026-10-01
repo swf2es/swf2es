@@ -364,6 +364,24 @@ function orphans(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A one-frame root of 220 by 100 with `abc` as its code and nothing placed: room to draw in (scripts/Draws.as).
+function drawn(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 220,
+    height: 100,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "Main"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A three-frame root whose frame 3 places a clip with a frame script; the
 // root's frame 1 script jumps there (scripts/GotoChild.as).
 function gotoChild(abc: Uint8Array): Uint8Array {
@@ -565,6 +583,16 @@ export const cases: PlayerCase[] = [
     capture: [1],
     tolerance: 0,
     maxOutliers: 0,
+  },
+  // Curves and a turned sprite: anti-aliased a little differently, as "moves" is.
+  {
+    name: "draws",
+    swf: drawn,
+    script: "Draws",
+    frames: 1,
+    capture: [1],
+    tolerance: 32,
+    maxOutliers: 500,
   },
   {
     name: "orphans",

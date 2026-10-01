@@ -6,12 +6,22 @@
 // edges they are set on, joined where one edge starts where the last ended.
 import type { Fill, Line, Shape } from "@swf2es/format";
 
-/** Path commands, flat: 1 x y (move), 2 x y (line), 3 cx cy x y (quadratic curve), in pixels. */
+/**
+ * Path commands, flat: 1 x y (move), 2 x y (line), 3 cx cy x y (quadratic
+ * curve), 4 c1x c1y c2x c2y x y (cubic curve, which only a Graphics
+ * draws), in pixels.
+ */
 export type Path = number[];
 
 export const MOVE = 1;
 export const LINE = 2;
 export const CURVE = 3;
+export const CUBIC = 4;
+
+/** How many points a command takes. */
+export function pointsOf(command: number): number {
+  return command === CUBIC ? 3 : command === CURVE ? 2 : 1;
+}
 
 export interface ShapeLayer {
   fills: { fill: Fill; contours: Path[] }[];
