@@ -852,7 +852,10 @@ included, throws 2015, and a second `dispose` is nothing. `copyPixels`
 into an opaque bitmap composites source over destination whether or not
 `mergeAlpha` asks, as Flash does. `fillRect`, `copyPixels`, `getPixels` and
 `setPixels` (ByteArrays of big-endian ARGB), `getVector` and `setVector`,
-`clone` and `rect` work on that store, clipped to it; `lock` and `unlock`
+`clone` and `rect` work on that store, clipped to it, a Rectangle's or
+Point's coordinates rounded to the nearest pixel and a half to the even
+one, as Flash rounds them (`bitmapdata_rectangle_rounding`); `copyPixels`
+within one store reads everything before writing; `lock` and `unlock`
 do nothing, as a store drawn from each frame needs no batching. A
 `Bitmap` is a display object of its own kind (`BitmapObject`): its bounds
 are its data's size, and the renderer draws it as a sprite whose texture
