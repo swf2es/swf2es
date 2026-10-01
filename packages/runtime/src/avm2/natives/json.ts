@@ -8,8 +8,7 @@
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 import { NS_Public, publicNs, qname } from "../names.js";
 import type { AsObject, Runtime, Traits, Value } from "../runtime.js";
-
-type Natives = Record<string, (rt: Runtime) => (...args: Value[]) => Value>;
+import type { Natives } from "./define.js";
 
 const TO_JSON = qname(publicNs, "toJSON");
 

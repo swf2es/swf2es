@@ -7,8 +7,7 @@
 // parseDate is translated from avmplus' core/DateClass.cpp, and so subject
 // to the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 import type { AsObject, ClassHook, Runtime, Value } from "../runtime.js";
-
-type Natives = Record<string, (rt: Runtime) => (...args: Value[]) => Value>;
+import type { Natives } from "./define.js";
 
 const AS3 = "http://adobe.com/AS3/2006/builtin";
 const MONTHS = "JanFebMarAprMayJunJulAugSepOctNovDec";
