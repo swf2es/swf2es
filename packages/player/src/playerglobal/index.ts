@@ -14,6 +14,7 @@ import { spriteNatives } from "./flash/display/Sprite.js";
 import { stageNatives } from "./flash/display/Stage.js";
 import { eventNatives } from "./flash/events/Event.js";
 import { eventDispatcherNatives } from "./flash/events/EventDispatcher.js";
+import { transformNatives } from "./flash/geom/Transform.js";
 import { fileFilterNatives } from "./flash/net/FileFilter.js";
 import { urlRequestNatives } from "./flash/net/URLRequest.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
@@ -39,6 +40,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...systemNatives(s),
     ...interactiveObjectNatives(s),
     ...fileFilterNatives(s),
+    ...transformNatives(s),
   };
 }
 
