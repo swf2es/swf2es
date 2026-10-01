@@ -90,10 +90,15 @@ export function readMetadata(abc: Abc, r: Reader): bool {
     abc.metadataName[i] = name;
     abc.metadataItemStart[i] = abc.metadataKey.length;
 
-    // Keys and values are string indices that avmplus does not check.
+    // Keys and values are string indices that avmplus does not check: all
+    // the keys, then all the values, as avmplus' describeMetadataInfo reads
+    // them, not the pairs the specification shows.
     const itemCount = r.u30();
     for (let j: u32 = 0; j < itemCount && !r.failed; j++) {
       abc.metadataKey.push(r.u30());
+    }
+
+    for (let j: u32 = 0; j < itemCount && !r.failed; j++) {
       abc.metadataValue.push(r.u30());
     }
 
