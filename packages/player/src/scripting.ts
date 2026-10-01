@@ -55,7 +55,7 @@ export class Scripting {
     options: avm2.RuntimeOptions = {},
   ) {
     this.rt = new avm2.Runtime(
-      { ...avm2.builtinNatives(), ...playerNatives(this) },
+      (rt) => ({ ...avm2.builtinNatives(rt), ...playerNatives(this) }),
       { ...avm2.builtinHooks(), ...playerHooks(this) },
       options,
     );

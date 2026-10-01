@@ -19,7 +19,7 @@ export {
 
 /** A runtime with the builtins' natives, for modules compiled from builtin.abc and after. */
 export function createRuntime(options: RuntimeOptions = {}): Runtime {
-  return new Runtime(builtinNatives(), builtinHooks(), options);
+  return new Runtime(builtinNatives, builtinHooks(), options);
 }
 
 /** AS3 `int(value)`: ToInt32(ToNumber(value)). */
