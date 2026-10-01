@@ -15,22 +15,6 @@ export interface SwfHeader {
   fileLength: number;
 }
 
-const SIGNATURES: Record<string, SwfCompression> = { FWS: "none", CWS: "zlib", ZWS: "lzma" };
-
-/** Read the 8-byte header every SWF starts with. */
-export function readSwfHeader(bytes: Uint8Array): SwfHeader {
-  if (bytes.length < 8) {
-    throw new RangeError(`SWF header needs 8 bytes, got ${bytes.length}`);
-  }
-  const signature = String.fromCharCode(bytes[0], bytes[1], bytes[2]);
-  const compression = SIGNATURES[signature];
-  if (!compression) {
-    throw new TypeError(`Not a SWF file (signature ${JSON.stringify(signature)})`);
-  }
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return { compression, version: bytes[3], fileLength: view.getUint32(4, true) };
-}
-
 /** A rectangle in twips (1/20 pixel), as a RECT holds one. */
 export interface Rect {
   xMin: number;
@@ -58,6 +42,24 @@ export interface Swf {
   tags: Tag[];
   /** Whether the tags ran past the end of the file, and were cut there. */
   truncated: boolean;
+}
+
+const SIGNATURES: Record<string, SwfCompression> = { FWS: "none", CWS: "zlib", ZWS: "lzma" };
+
+/** Read the 8-byte header every SWF starts with. */
+export function readSwfHeader(bytes: Uint8Array): SwfHeader {
+  if (bytes.length < 8) {
+    throw new RangeError(`SWF header needs 8 bytes, got ${bytes.length}`);
+  }
+
+  const signature = String.fromCharCode(bytes[0], bytes[1], bytes[2]);
+  const compression = SIGNATURES[signature];
+  if (!compression) {
+    throw new TypeError(`Not a SWF file (signature ${JSON.stringify(signature)})`);
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { compression, version: bytes[3], fileLength: view.getUint32(4, true) };
 }
 
 /** Reads bits and bytes of a SWF body, bits most significant first, as the format packs them. */
