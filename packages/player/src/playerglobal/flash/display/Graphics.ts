@@ -175,7 +175,7 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("ArgumentError", 2004);
       }
 
-      drawing(this).drawPath(c, d);
+      drawing(this).drawPath(c, d, winding);
     }
 
     copyFrom(other: Value): void {

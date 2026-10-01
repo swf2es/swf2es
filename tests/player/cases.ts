@@ -364,11 +364,11 @@ function orphans(abc: Uint8Array): Uint8Array {
   });
 }
 
-// A one-frame root of 220 by 100 with `abc` as its code and nothing placed: room to draw in (scripts/Draws.as).
+// A one-frame root of 220 by 140 with `abc` as its code and nothing placed: room to draw in (scripts/Draws.as).
 function drawn(abc: Uint8Array): Uint8Array {
   return w.swf({
     width: 220,
-    height: 100,
+    height: 140,
     frameRate: 24,
     frameCount: 1,
     tags: [

@@ -23,9 +23,22 @@ export function pointsOf(command: number): number {
   return command === CUBIC ? 3 : command === CURVE ? 2 : 1;
 }
 
+/** How a fill's contours decide what is inside: by parity, or by the winding number, as drawPath may ask. */
+export type Winding = "evenOdd" | "nonZero";
+
 export interface ShapeLayer {
-  fills: { fill: Fill; contours: Path[] }[];
+  fills: { fill: Fill; contours: Path[]; winding: Winding }[];
   strokes: { line: Line; paths: Path[] }[];
+}
+
+/** The polygon's orientation: 1 clockwise on a y-down screen, -1 the other way, 0 for no area. */
+export function orientation(points: number[]): number {
+  let area = 0;
+  for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
+    area += points[j] * points[i + 1] - points[i] * points[j + 1];
+  }
+
+  return Math.sign(area);
 }
 
 interface Edge {
@@ -116,7 +129,7 @@ export function shapeLayers(shape: Shape): ShapeLayer[] {
     const layer: ShapeLayer = { fills: [], strokes: [] };
     for (const [i, fill] of fills.entries()) {
       if (fillEdges[i].length) {
-        layer.fills.push({ fill, contours: contours(fillEdges[i]) });
+        layer.fills.push({ fill, contours: contours(fillEdges[i]), winding: "evenOdd" });
       }
     }
 

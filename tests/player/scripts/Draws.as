@@ -4,6 +4,7 @@
 // rounded corners.
 package {
   import flash.display.CapsStyle;
+  import flash.display.GraphicsPathWinding;
   import flash.display.JointStyle;
   import flash.display.MovieClip;
   import flash.display.Shape;
@@ -42,6 +43,35 @@ package {
       g.lineTo(195, 90);
       g.lineStyle();
       addChild(shape);
+
+      // A square inside another, both the same way round: the winding rule
+      // says whether the inner is filled (non-zero) or a hole (even-odd).
+      var wound:Shape = new Shape();
+      wound.graphics.beginFill(0x009999);
+      wound.graphics.drawPath(
+        Vector.<int>([1, 2, 2, 2, 1, 2, 2, 2]),
+        Vector.<Number>([0, 0, 30, 0, 30, 30, 0, 30, 10, 10, 20, 10, 20, 20, 10, 20]),
+        GraphicsPathWinding.NON_ZERO);
+      wound.graphics.endFill();
+      wound.graphics.beginFill(0x990099);
+      wound.graphics.drawPath(
+        Vector.<int>([1, 2, 2, 2, 1, 2, 2, 2]),
+        Vector.<Number>([40, 0, 70, 0, 70, 30, 40, 30, 50, 10, 60, 10, 60, 20, 50, 20]),
+        GraphicsPathWinding.EVEN_ODD);
+      wound.graphics.endFill();
+      wound.x = 10;
+      wound.y = 100;
+      addChild(wound);
+
+      // Copied from itself: Flash clears first and copies nothing, so it is not drawn.
+      var copied:Shape = new Shape();
+      copied.graphics.beginFill(0x996600);
+      copied.graphics.drawRect(0, 0, 30, 30);
+      copied.graphics.endFill();
+      copied.graphics.copyFrom(copied.graphics);
+      copied.x = 100;
+      copied.y = 100;
+      addChild(copied);
 
       // A sprite's drawing goes under its child.
       var sprite:Sprite = new Sprite();

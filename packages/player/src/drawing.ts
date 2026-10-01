@@ -4,7 +4,7 @@
 // draws them: commands go to the fill and the stroke open at the time, each
 // moveTo starting a contour of the fill and a path of the stroke.
 import type { Fill, Line } from "@swf2es/format";
-import { CUBIC, CURVE, LINE, MOVE, type Path, type ShapeLayer } from "./shapes.js";
+import { CUBIC, CURVE, LINE, MOVE, type Path, type ShapeLayer, type Winding } from "./shapes.js";
 
 const TWIPS = 20;
 /** The quadratic approximation of a quarter ellipse Flash's drawRoundRect uses: two curves, meeting at 45°. */
@@ -13,14 +13,14 @@ const COS_45 = Math.SQRT1_2;
 
 export class Drawing {
   readonly layers: ShapeLayer[] = [];
-  private fill: { fill: Fill; contours: Path[] } | null = null;
+  private fill: { fill: Fill; contours: Path[]; winding: Winding } | null = null;
   private stroke: { line: Line; paths: Path[] } | null = null;
   private x = 0;
   private y = 0;
 
   beginFill(fill: Fill): void {
     this.endFill();
-    this.fill = { fill, contours: [] };
+    this.fill = { fill, contours: [], winding: "evenOdd" };
     this.layers.push({ fills: [this.fill], strokes: [] });
     this.begin(this.fill.contours);
   }
@@ -127,8 +127,12 @@ export class Drawing {
     );
   }
 
-  /** Flash's drawPath: 1 moveTo, 2 lineTo, 3 curveTo, 4 wideMoveTo, 5 wideLineTo, 6 cubicCurveTo, each taking its data. */
-  drawPath(commands: number[], data: number[]): void {
+  /** Flash's drawPath: 1 moveTo, 2 lineTo, 3 curveTo, 4 wideMoveTo, 5 wideLineTo, 6 cubicCurveTo, each taking its data; the winding is the open fill's from here on. */
+  drawPath(commands: number[], data: number[], winding: Winding): void {
+    if (this.fill) {
+      this.fill.winding = winding;
+    }
+
     let i = 0;
     for (const command of commands) {
       switch (command) {
@@ -177,15 +181,16 @@ export class Drawing {
     this.y = 0;
   }
 
-  /** The other drawing's layers, copied; the styles open there do not come. */
+  /**
+   * The other drawing's layers, copied, after this one is cleared: a
+   * drawing copied from itself ends empty, as Flash's does (the `draws`
+   * case). The styles open there do not come.
+   */
   copyFrom(other: Drawing): void {
     this.clear();
     for (const layer of other.layers) {
       this.layers.push({
-        fills: layer.fills.map((f) => ({
-          fill: f.fill,
-          contours: f.contours.map((c) => c.slice()),
-        })),
+        fills: layer.fills.map((f) => ({ ...f, contours: f.contours.map((c) => c.slice()) })),
         strokes: layer.strokes.map((s) => ({ line: s.line, paths: s.paths.map((c) => c.slice()) })),
       });
     }

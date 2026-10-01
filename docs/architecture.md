@@ -593,8 +593,17 @@ caps, joints, miter and scale mode. `drawRect`, `drawRoundRect` and
 `drawRoundRectComplex` are moves and lines with quadratic quarter
 circles, as Flash's; `drawCircle` and `drawEllipse` are playerglobal's
 own, over `curveTo`. `cubicCurveTo` adds a cubic command to the path
-model; `drawPath` takes commands and data with a winding. `clear` takes
-everything and the styles away. The drawn order is the calls' order,
+model; `drawPath` takes commands and data with a winding, which becomes
+the open fill's: even-odd fills by the parity of the contours around a
+point, non-zero by the sum of their orientations, so a square drawn
+inside another the same way round is filled under non-zero and a hole
+under even-odd (the `draws` case). The renderer decides a region by its
+nesting in the contours' containment, so two contours of one fill that
+overlap without nesting fill as their union, where Flash's even-odd
+would leave their overlap out: a limit of the triangulation, noted.
+`clear` takes everything and the styles away; `copyFrom` clears first
+and then copies, so a drawing copied from itself ends empty, as Flash's
+does (the `draws` case). The drawn order is the calls' order,
 fills under strokes within a layer as in a SWF shape, and a sprite's
 drawing under its children.
 

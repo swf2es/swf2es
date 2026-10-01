@@ -22,7 +22,16 @@ import {
   ShapeObject,
   TRANSFORM,
 } from "./display.js";
-import { CUBIC, CURVE, LINE, MOVE, type Path, pointsOf, type ShapeLayer } from "./shapes.js";
+import {
+  CUBIC,
+  CURVE,
+  LINE,
+  MOVE,
+  orientation,
+  type Path,
+  pointsOf,
+  type ShapeLayer,
+} from "./shapes.js";
 import type { ShapeCharacter } from "./timeline.js";
 
 /** A contour flattened to a polygon, for telling which contours hold which. */
@@ -267,29 +276,55 @@ function transformPath(path: Path, m: Linear): Path {
   return out;
 }
 
-/** A layer's fills, which are the same for every instance of the shape. */
+/**
+ * A layer's fills, which are the same for every instance of the shape.
+ * Each contour's region is inside or not by the fill's rule, by its depth
+ * in the containment for even-odd, by the sum of orientations around it
+ * for non-zero: a region inside where its parent is not is filled, with
+ * the first regions below it that are not cut out as holes, and so on in.
+ */
 function fillContext(layer: ShapeLayer): GraphicsContext {
   const context = new GraphicsContext();
-  for (const { fill, contours } of layer.fills) {
+  for (const { fill, contours, winding } of layer.fills) {
     const style = paint(fill);
-    const draw = (region: Region) => {
+    const inside = (depth: number, sum: number) =>
+      winding === "nonZero" ? sum !== 0 : depth % 2 === 0;
+    const fillRegion = (region: Region, depth: number, sum: number) => {
       context.beginPath();
       trace(context, region.path);
       context.closePath().fill(style);
-      for (const hole of region.children) {
-        context.beginPath();
-        trace(context, hole.path);
-        context.closePath().cut();
+      holes(region, depth, sum);
+    };
+    const holes = (region: Region, depth: number, sum: number) => {
+      for (const child of region.children) {
+        const s = sum + orientation(child.points);
+        if (inside(depth + 1, s)) {
+          holes(child, depth + 1, s);
+        } else {
+          context.beginPath();
+          trace(context, child.path);
+          context.closePath().cut();
+          islands(child, depth + 1, s);
+        }
       }
-
-      for (const hole of region.children) {
-        for (const island of hole.children) {
-          draw(island);
+    };
+    const islands = (region: Region, depth: number, sum: number) => {
+      for (const child of region.children) {
+        const s = sum + orientation(child.points);
+        if (inside(depth + 1, s)) {
+          fillRegion(child, depth + 1, s);
+        } else {
+          islands(child, depth + 1, s);
         }
       }
     };
     for (const root of containment(contours)) {
-      draw(root);
+      const s = orientation(root.points);
+      if (inside(0, s)) {
+        fillRegion(root, 0, s);
+      } else {
+        islands(root, 0, s);
+      }
     }
   }
 
