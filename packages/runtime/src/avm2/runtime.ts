@@ -146,6 +146,11 @@ export interface PropertyHook {
   toXMLString(rt: Runtime, o: AsObject): string;
 }
 
+/** Natives by name, or a function that makes them for the runtime they will serve. */
+export type NativesProvider =
+  | Record<string, (rt: Runtime) => Method>
+  | ((rt: Runtime) => Record<string, (rt: Runtime) => Method>);
+
 /** How a builtin class differs from others: allocation, index access, calls and construction. */
 export interface ClassHook {
   /** How its instances resolve names, as XML's (Traits.properties). */
@@ -517,12 +522,17 @@ export class Runtime {
   readonly specialized = new Map<AsObject, AsObject>();
   readonly empty: Scope = Object.assign([], { w: 0 });
 
+  /**
+   * `natives` are the natives by name, or a provider that makes them for
+   * this runtime, so that a natives module can close over its runtime (as a
+   * class of natives does, see natives/define.ts). The provider runs once,
+   * when the runtime is made; what it returns is read when modules bind.
+   */
   constructor(
-    natives: Record<string, (rt: Runtime) => Method>,
+    natives: NativesProvider,
     readonly classHooks: Record<string, ClassHook>,
     options: RuntimeOptions = {},
   ) {
-    this.natives = natives;
     this.print = options.print ?? defaultPrint;
     this.debugger = options.debugger ?? false;
     this.objectTraits = new Traits("Object", null);
@@ -530,6 +540,7 @@ export class Runtime {
     this.classTraits = new Traits("Class", this.objectTraits);
     this.functionTraits = new Traits("Function", this.objectTraits);
     this.functionTraits.dynamic = true;
+    this.natives = typeof natives === "function" ? natives(this) : natives;
   }
 
   // Names.

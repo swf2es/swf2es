@@ -11,6 +11,7 @@ export {
   type AsObject,
   type ClassHook,
   type Method,
+  type NativesProvider,
   Runtime,
   type RuntimeOptions,
   type Value,
