@@ -3,17 +3,11 @@
 import { avm2 } from "@swf2es/runtime";
 import type { Container, DisplayObject } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
-import { displayOf } from "./DisplayObject.js";
 
-const { plain } = avm2;
-type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
-function containerOf(o: AsObject): Container {
-  return displayOf(o) as Container;
-}
-
 export function containerNatives(s: Scripting): avm2.Natives {
+  const natives: avm2.Natives = {};
   // s.rt at call time: the natives are made before the runtime that holds them is.
   const childOf = (v: Value): DisplayObject => {
     const d = v?.$display as DisplayObject | undefined;
@@ -52,51 +46,41 @@ export function containerNatives(s: Scripting): avm2.Natives {
     return v;
   };
 
-  return {
-    "flash.display::DisplayObjectContainer#get:numChildren": plain(function (this: AsObject) {
-      return containerOf(this).children.length;
-    }),
-    "flash.display::DisplayObjectContainer#addChild": plain(function (
-      this: AsObject,
-      child: Value,
-    ) {
-      const c = containerOf(this);
+  class DisplayObjectContainerNatives {
+    declare $display: Container;
+
+    get numChildren(): number {
+      return this.$display.children.length;
+    }
+
+    addChild(child: Value): Value {
+      const c = this.$display;
       const d = childOf(child);
       // Already a child: moved to the top.
       return add(c, child, d.parent === c ? c.children.length - 1 : c.children.length);
-    }),
-    "flash.display::DisplayObjectContainer#addChildAt": plain(function (
-      this: AsObject,
-      child: Value,
-      index: Value,
-    ) {
-      const c = containerOf(this);
+    }
+
+    addChildAt(child: Value, index: Value): Value {
+      const c = this.$display;
       const d = childOf(child);
       return add(c, child, indexIn(c, index, c.children.length - (d.parent === c ? 1 : 0)));
-    }),
-    "flash.display::DisplayObjectContainer#removeChild": plain(function (
-      this: AsObject,
-      child: Value,
-    ) {
-      const c = containerOf(this);
+    }
+
+    removeChild(child: Value): Value {
+      const c = this.$display;
       c.removeChild(ownChild(c, child));
       return child;
-    }),
-    "flash.display::DisplayObjectContainer#removeChildAt": plain(function (
-      this: AsObject,
-      index: Value,
-    ) {
-      const c = containerOf(this);
+    }
+
+    removeChildAt(index: Value): Value {
+      const c = this.$display;
       const d = c.children[indexIn(c, index)];
       c.removeChild(d);
       return d.object;
-    }),
-    "flash.display::DisplayObjectContainer#removeChildren": plain(function (
-      this: AsObject,
-      begin: Value,
-      end: Value,
-    ) {
-      const c = containerOf(this);
+    }
+
+    removeChildren(begin: Value, end: Value): void {
+      const c = this.$display;
       const from = begin === undefined ? 0 : s.rt.toInt(begin);
       const to =
         end === undefined || s.rt.toInt(end) === 0x7fffffff ? c.children.length : s.rt.toInt(end);
@@ -107,42 +91,31 @@ export function containerNatives(s: Scripting): avm2.Natives {
       for (const d of c.children.slice(from, to)) {
         c.removeChild(d);
       }
-    }),
-    "flash.display::DisplayObjectContainer#getChildAt": plain(function (
-      this: AsObject,
-      index: Value,
-    ) {
-      const c = containerOf(this);
+    }
+
+    getChildAt(index: Value): Value {
+      const c = this.$display;
       return c.children[indexIn(c, index)].object;
-    }),
-    "flash.display::DisplayObjectContainer#getChildIndex": plain(function (
-      this: AsObject,
-      child: Value,
-    ) {
-      const c = containerOf(this);
+    }
+
+    getChildIndex(child: Value): number {
+      const c = this.$display;
       return c.children.indexOf(ownChild(c, child));
-    }),
-    "flash.display::DisplayObjectContainer#setChildIndex": plain(function (
-      this: AsObject,
-      child: Value,
-      index: Value,
-    ) {
-      const c = containerOf(this);
+    }
+
+    setChildIndex(child: Value, index: Value): void {
+      const c = this.$display;
       const d = ownChild(c, child);
       c.addChildAt(d, indexIn(c, index));
-    }),
-    "flash.display::DisplayObjectContainer#getChildByName": plain(function (
-      this: AsObject,
-      name: Value,
-    ) {
+    }
+
+    getChildByName(name: Value): Value {
       const key = String(name);
-      return containerOf(this).children.find((d) => d.name === key)?.object ?? null;
-    }),
-    "flash.display::DisplayObjectContainer#contains": plain(function (
-      this: AsObject,
-      child: Value,
-    ) {
-      const c = containerOf(this);
+      return this.$display.children.find((d) => d.name === key)?.object ?? null;
+    }
+
+    contains(child: Value): boolean {
+      const c = this.$display;
       for (let o: DisplayObject | null = child?.$display ?? null; o; o = o.parent) {
         if (o === c) {
           return true;
@@ -150,26 +123,39 @@ export function containerNatives(s: Scripting): avm2.Natives {
       }
 
       return false;
-    }),
-    "flash.display::DisplayObjectContainer#swapChildren": plain(function (
-      this: AsObject,
-      a: Value,
-      b: Value,
-    ) {
-      const c = containerOf(this);
+    }
+
+    swapChildren(a: Value, b: Value): void {
+      const c = this.$display;
       c.swapChildren(ownChild(c, a), ownChild(c, b));
-    }),
-    "flash.display::DisplayObjectContainer#swapChildrenAt": plain(function (
-      this: AsObject,
-      a: Value,
-      b: Value,
-    ) {
-      const c = containerOf(this);
+    }
+
+    swapChildrenAt(a: Value, b: Value): void {
+      const c = this.$display;
       c.swapChildren(c.children[indexIn(c, a)], c.children[indexIn(c, b)]);
-    }),
-    "flash.display::DisplayObjectContainer#get:mouseChildren": plain(() => true),
-    "flash.display::DisplayObjectContainer#set:mouseChildren": plain(() => undefined),
-    "flash.display::DisplayObjectContainer#get:tabChildren": plain(() => true),
-    "flash.display::DisplayObjectContainer#set:tabChildren": plain(() => undefined),
-  };
+    }
+
+    get mouseChildren(): boolean {
+      return true;
+    }
+
+    set mouseChildren(_v: Value) {
+      // Not yet: there is no mouse.
+    }
+
+    get tabChildren(): boolean {
+      return true;
+    }
+
+    set tabChildren(_v: Value) {
+      // Not yet: there is no keyboard.
+    }
+  }
+
+  avm2.registerNativeClass(
+    natives,
+    "flash.display::DisplayObjectContainer",
+    DisplayObjectContainerNatives,
+  );
+  return natives;
 }

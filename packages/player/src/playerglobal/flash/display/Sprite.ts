@@ -2,25 +2,40 @@
 // places a symbol's first frame, so that the subclass's constructor finds
 // the children by name; a Sprite a script makes has none.
 import { avm2 } from "@swf2es/runtime";
-import { MovieClip } from "../../../display.js";
-import { displayOf } from "./DisplayObject.js";
+import { type DisplayObject, MovieClip } from "../../../display.js";
 
-const { plain } = avm2;
-type AsObject = avm2.AsObject;
+type Value = avm2.Value;
 
 export function spriteNatives(): avm2.Natives {
-  return {
-    "flash.display::Sprite#flash.display:Sprite::constructChildren": plain(function (
-      this: AsObject,
-    ) {
-      const d = displayOf(this);
+  const natives: avm2.Natives = {};
+
+  class SpriteNatives {
+    declare $display: DisplayObject;
+
+    "flash.display:Sprite::constructChildren"(): void {
+      const d = this.$display;
       if (d instanceof MovieClip && d.currentFrame === 0) {
         d.enterFirstFrame();
       }
-    }),
-    "flash.display::Sprite#get:buttonMode": plain(() => false),
-    "flash.display::Sprite#set:buttonMode": plain(() => undefined),
-    "flash.display::Sprite#get:useHandCursor": plain(() => true),
-    "flash.display::Sprite#set:useHandCursor": plain(() => undefined),
-  };
+    }
+
+    get buttonMode(): boolean {
+      return false;
+    }
+
+    set buttonMode(_v: Value) {
+      // Not yet: there is no mouse.
+    }
+
+    get useHandCursor(): boolean {
+      return true;
+    }
+
+    set useHandCursor(_v: Value) {
+      // Not yet: there is no mouse.
+    }
+  }
+
+  avm2.registerNativeClass(natives, "flash.display::Sprite", SpriteNatives);
+  return natives;
 }
