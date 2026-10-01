@@ -3,7 +3,11 @@
 // display.js and player.js leave pixi.js out.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { MovieClip, ShapeObject } from "../../../packages/player/dist/display.js";
+import type {
+  DisplayObject,
+  MovieClip,
+  ShapeObject,
+} from "../../../packages/player/dist/display.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import * as w from "../../swf-writer.ts";
 
@@ -224,5 +228,115 @@ test("a goto forward leaves the display list as playing the frames would", () =>
     const child = player.root.depths.get(1);
     assert.equal(child?.character?.id, 2);
     assert.equal(child?.matrix.tx, 50);
+  }
+});
+
+test("a jump remembers a character placed anew through what follows", () => {
+  // Frame 2 places the square anew, frame 3 places it in its own stead: the
+  // child is frame 2's, not frame 1's, whether played or jumped to.
+  const anew = () =>
+    movie(
+      [w.place({ depth: 1, character: 1 })],
+      [w.place({ depth: 1, character: 1 })],
+      [w.place({ depth: 1, character: 1, move: true, matrix: { tx: 1000 } })],
+    );
+  const played = anew();
+  const playedFirst = played.root.depths.get(1);
+  played.tick();
+  played.tick();
+  const jumped = anew();
+  const jumpedFirst = jumped.root.depths.get(1);
+  jumped.root.gotoFrame(3);
+  for (const [player, first] of [
+    [played, playedFirst],
+    [jumped, jumpedFirst],
+  ] as const) {
+    const child = player.root.depths.get(1);
+    assert.notEqual(child, first);
+    assert.equal(child?.matrix.tx, 50);
+    assert.equal(child?.placeFrame, 2);
+  }
+});
+
+/** What a container's timeline children are, comparably between two players. */
+function snapshot(root: MovieClip, original: Map<number, DisplayObject | undefined>) {
+  return [...root.depths.keys()].sort().map((depth) => {
+    const child = root.depths.get(depth);
+    return {
+      depth,
+      character: child?.character?.id,
+      tx: child?.matrix.tx,
+      placeFrame: child?.placeFrame,
+      sameAsFirst: child === original.get(depth),
+    };
+  });
+}
+
+test("jumping forward to any frame of a random timeline ends as playing to it", () => {
+  // Place anew (with a matrix or not), place in another's stead, move,
+  // remove: a few per frame over three depths, two characters. Flash's
+  // forward goto is the frames played through, so the two must agree.
+  // A 32-bit LCG; Math.imul keeps it in 32 bits, where a double would lose the low bits.
+  let seed = 2026;
+  const random = (n: number) => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return (seed >>> 8) % n;
+  };
+  const command = (): Uint8Array => {
+    const depth = 1 + random(3);
+    const character = 1 + random(2);
+    const matrix = random(2) ? { tx: 200 * (1 + random(9)) } : undefined;
+    switch (random(4)) {
+      case 0:
+        return w.place({ depth, character, matrix });
+      case 1:
+        return w.place({ depth, character, move: true, matrix });
+      case 2:
+        return w.place({ depth, move: true, matrix: matrix ?? { tx: 0 } });
+      default:
+        return w.remove(depth);
+    }
+  };
+
+  for (let t = 0; t < 1000; t++) {
+    const frames = Array.from({ length: 2 + random(4) }, () =>
+      Array.from({ length: random(4) }, command),
+    );
+    for (let target = 2; target <= frames.length; target++) {
+      const played = movie(...frames);
+      const playedFirst = new Map([...played.root.depths].map(([d, c]) => [d, c]));
+      for (let f = 1; f < target; f++) {
+        played.tick();
+      }
+
+      const jumped = movie(...frames);
+      const jumpedFirst = new Map([...jumped.root.depths].map(([d, c]) => [d, c]));
+      jumped.root.gotoFrame(target);
+      assert.deepEqual(
+        snapshot(jumped.root, jumpedFirst),
+        snapshot(played.root, playedFirst),
+        `timeline ${t}, frame ${target}`,
+      );
+    }
+
+    // A rewind from the last frame to each earlier one shows what playing
+    // to it shows, though it keeps the children it can rather than make
+    // them again, so which object is which is not compared.
+    const state = (root: MovieClip) =>
+      snapshot(root, new Map()).map(({ sameAsFirst: _, ...rest }) => rest);
+    for (let target = 1; target < frames.length; target++) {
+      const played = movie(...frames);
+      for (let f = 1; f < target; f++) {
+        played.tick();
+      }
+
+      const rewound = movie(...frames);
+      for (let f = 1; f < frames.length; f++) {
+        rewound.tick();
+      }
+
+      rewound.root.gotoFrame(target);
+      assert.deepEqual(state(rewound.root), state(played.root), `timeline ${t}, back to ${target}`);
+    }
   }
 });
