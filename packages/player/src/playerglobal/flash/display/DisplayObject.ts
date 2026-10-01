@@ -96,9 +96,7 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
   };
 }
 
-const DEG = 180 / Math.PI;
-
-/** Change a display object's transform, by a copy, and have it drawn again. */
+/** Move a display object, by a copy of its matrix, and have it drawn again. */
 function transform(d: DisplayObject, change: (m: Matrix) => void): void {
   const m = { ...d.matrix };
   change(m);
@@ -170,9 +168,10 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       return this.$display.matrix.tx;
     }
 
+    // A NaN position is 0, as Flash has it (the corpus's `displayobject_invalid_floats`).
     set x(v: Value) {
       transform(this.$display, (m) => {
-        m.tx = Number(v);
+        m.tx = Number(v) || 0;
       });
     }
 
@@ -182,48 +181,33 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     set y(v: Value) {
       transform(this.$display, (m) => {
-        m.ty = Number(v);
+        m.ty = Number(v) || 0;
       });
     }
 
+    // The scales and the rotation are the display object's own, kept apart from the matrix as Flash keeps them.
     get scaleX(): number {
-      return Math.hypot(this.$display.matrix.a, this.$display.matrix.b);
+      return this.$display.scaleX;
     }
 
     set scaleX(v: Value) {
-      transform(this.$display, (m) => {
-        const r = Math.atan2(m.b, m.a);
-        m.a = Number(v) * Math.cos(r);
-        m.b = Number(v) * Math.sin(r);
-      });
+      this.$display.setScaleX(Number(v));
     }
 
     get scaleY(): number {
-      return Math.hypot(this.$display.matrix.c, this.$display.matrix.d);
+      return this.$display.scaleY;
     }
 
     set scaleY(v: Value) {
-      transform(this.$display, (m) => {
-        const r = Math.atan2(-m.c, m.d);
-        m.c = -Number(v) * Math.sin(r);
-        m.d = Number(v) * Math.cos(r);
-      });
+      this.$display.setScaleY(Number(v));
     }
 
     get rotation(): number {
-      return Math.atan2(this.$display.matrix.b, this.$display.matrix.a) * DEG;
+      return this.$display.rotation;
     }
 
     set rotation(v: Value) {
-      transform(this.$display, (m) => {
-        const r = (Number(v) / DEG) % (2 * Math.PI);
-        const sx = Math.hypot(m.a, m.b);
-        const sy = Math.hypot(m.c, m.d);
-        m.a = sx * Math.cos(r);
-        m.b = sx * Math.sin(r);
-        m.c = -sy * Math.sin(r);
-        m.d = sy * Math.cos(r);
-      });
+      this.$display.setRotation(Number(v));
     }
 
     get alpha(): number {
@@ -267,15 +251,33 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       return size(this.$display)[0];
     }
 
-    /** Scaled so that the bounds come to the value; left as it is when they have no extent. */
+    /**
+     * scaleX becomes the value over the object's untransformed width, as
+     * Flash sets it: positive whatever the sign was, from a scale of 0 as
+     * from any other, and not at all for a negative value or no width.
+     * Under a turn or skew, where Flash's rule is more involved, the
+     * current scale is adjusted in proportion instead. The width is
+     * Flash's, in twips: a drawing thinner than one is no width (the
+     * corpus's `nan_scale`).
+     */
     set width(v: Value) {
-      const current = size(this.$display)[0];
-      if (current > 0) {
-        const value = Number(v);
-        transform(this.$display, (m) => {
-          m.a *= value / current;
-          m.b *= value / current;
-        });
+      const value = Number(v);
+      if (!(value >= 0)) {
+        return;
+      }
+
+      const d = this.$display;
+      const r = bounds(d, true);
+      const base = r ? twips(r.xMax - r.xMin) : 0;
+      if (d.rotation === 0 && d.skew === 0) {
+        if (base > 0) {
+          d.setScaleX(value / base);
+        }
+      } else {
+        const current = size(d)[0];
+        if (current > 0) {
+          d.setScaleX((d.scaleX * value) / current);
+        }
       }
     }
 
@@ -284,13 +286,23 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set height(v: Value) {
-      const current = size(this.$display)[1];
-      if (current > 0) {
-        const value = Number(v);
-        transform(this.$display, (m) => {
-          m.c *= value / current;
-          m.d *= value / current;
-        });
+      const value = Number(v);
+      if (!(value >= 0)) {
+        return;
+      }
+
+      const d = this.$display;
+      const r = bounds(d, true);
+      const base = r ? twips(r.yMax - r.yMin) : 0;
+      if (d.rotation === 0 && d.skew === 0) {
+        if (base > 0) {
+          d.setScaleY(value / base);
+        }
+      } else {
+        const current = size(d)[1];
+        if (current > 0) {
+          d.setScaleY((d.scaleY * value) / current);
+        }
       }
     }
 
@@ -443,7 +455,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     set transform(v: Value) {
       if (v) {
         const t = v as AsObject;
-        this.$display.matrix = matrixOf(s, s.rt.getProperty(t, MATRIX_NAME) as AsObject);
+        this.$display.setMatrix(matrixOf(s, s.rt.getProperty(t, MATRIX_NAME) as AsObject));
         this.$display.colorTransform = colorOf(s, s.rt.getProperty(t, COLOR_NAME) as AsObject);
         this.$display.invalidate(TRANSFORM);
       }

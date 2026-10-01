@@ -716,7 +716,19 @@ a half turn; and `width` sets `scaleX` to the value over the object's
 untransformed width, positive, from a scale of 0 as well as from any
 other, and a negative width changes nothing, as Flash has it (the
 corpus's `displayobject_width` and `_height`, 4852 and 6052 lines of
-ramps). Rotation is reported in Flash's range, -180 to 180.
+ramps, in twips: a drawing thinner than one is no width, so `nan_scale`'s
+`Number.MIN_VALUE` square is as good as none). A scale set stretches its
+column of the matrix in proportion, so the other column stays exactly as
+it was, and a scale set to NaN reads back NaN and zeroes its column; a
+NaN rotation reads back NaN and leaves the matrix; a NaN position is 0
+(`displayobject_invalid_floats`). Rotation is reported in Flash's
+range, -180 to 180, both ends as given. The ramps
+add to what the getters return, so each step's value rests on the one
+before, and they part from the player where Flash's arithmetic does from
+IEEE's: Flash Player's `-0.9981818181818182 + 1/550` is not the nearest
+double to the sum, which the 32-bit player's x87 extended precision
+explains, as it does the avmshell's (above); swf2es follows IEEE
+doubles there too, so those two tests cannot be matched to the end.
 
 ## Testing against oracles
 

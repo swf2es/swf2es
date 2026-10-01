@@ -18,6 +18,30 @@ export const CONTENT = 4;
 /** Display objects are numbered as they are made: Flash runs orphans' scripts newest first. */
 let made = 0;
 
+const DEGREES = 180 / Math.PI;
+
+/** A matrix column of scale `from` stretched to scale `to`; zeroed for a NaN, and null where there is no proportion to keep. */
+function scaled(to: number, from: number, x: number, y: number): [number, number] | null {
+  if (Number.isNaN(to)) {
+    return [0, 0];
+  }
+
+  const f = to / from;
+  return Number.isFinite(f) ? [x * f, y * f] : null;
+}
+
+/** Degrees into Flash's range, -180 to 180 with both ends kept as given; a NaN stays NaN. */
+export function normalizeDegrees(degrees: number): number {
+  let d = degrees % 360;
+  if (d > 180) {
+    d -= 360;
+  } else if (d < -180) {
+    d += 360;
+  }
+
+  return d;
+}
+
 export class DisplayObject {
   readonly serial = made++;
   parent: Container | null = null;
@@ -26,8 +50,18 @@ export class DisplayObject {
   /** The frame of its parent's timeline that placed it, 1 the first; 0 for one a script added. */
   placeFrame = 0;
   name = "";
-  /** Its transform in its parent, translation in pixels. */
+  /**
+   * Its transform in its parent, translation in pixels: made from the
+   * scales, rotation and skew below, which are the object's own, as Flash
+   * keeps them apart from the matrix; set whole, it is taken apart into them.
+   */
   matrix: Matrix = { ...IDENTITY };
+  scaleX = 1;
+  scaleY = 1;
+  /** In degrees, -180 to 180, as Flash reports it. */
+  rotation = 0;
+  /** The second column's turn beyond the first's, in degrees: 0 but for a matrix that skews. */
+  skew = 0;
   colorTransform: ColorTransform | null = null;
   visible = true;
   /** The character it was made from, or null. */
@@ -49,12 +83,78 @@ export class DisplayObject {
     }
   }
 
+  /**
+   * The matrix set whole, and taken apart: the scales are its columns'
+   * lengths, the rotation the first column's angle, the skew the second's
+   * beyond that. A negative scale set as such is not recovered: a half
+   * turn is what the matrix says.
+   */
+  setMatrix(m: Matrix): void {
+    this.matrix = { ...m };
+    this.scaleX = Math.hypot(m.a, m.b);
+    this.scaleY = Math.hypot(m.c, m.d);
+    this.rotation = Math.atan2(m.b, m.a) * DEGREES;
+    this.skew = normalizeDegrees(Math.atan2(-m.c, m.d) * DEGREES - this.rotation);
+    this.invalidate(TRANSFORM);
+  }
+
+  /**
+   * A scale set stretches its column of the matrix in proportion, so the
+   * other column stays exactly as it was, as Flash's does (the corpus's
+   * `displayobject_invalid_floats`); from a scale of 0 or NaN, where there
+   * is no proportion, the column is made anew from the angles. A NaN is
+   * reported back as set, as Flash reports it: a NaN scale zeroes its
+   * column, a NaN rotation leaves the matrix as it was and counts as none
+   * from then on.
+   */
+  setScaleX(v: number): void {
+    const column = scaled(v, this.scaleX, this.matrix.a, this.matrix.b);
+    this.scaleX = v;
+    if (column) {
+      this.matrix = { ...this.matrix, a: column[0], b: column[1] };
+      this.invalidate(TRANSFORM);
+    } else {
+      this.remake();
+    }
+  }
+
+  setScaleY(v: number): void {
+    const column = scaled(v, this.scaleY, this.matrix.c, this.matrix.d);
+    this.scaleY = v;
+    if (column) {
+      this.matrix = { ...this.matrix, c: column[0], d: column[1] };
+      this.invalidate(TRANSFORM);
+    } else {
+      this.remake();
+    }
+  }
+
+  setRotation(degrees: number): void {
+    this.rotation = normalizeDegrees(degrees);
+    if (!Number.isNaN(degrees)) {
+      this.remake();
+    }
+  }
+
+  private remake(): void {
+    const r = (this.rotation || 0) / DEGREES;
+    const q = ((this.rotation || 0) + this.skew) / DEGREES;
+    this.matrix = {
+      a: (this.scaleX || 0) * Math.cos(r),
+      b: (this.scaleX || 0) * Math.sin(r),
+      c: -(this.scaleY || 0) * Math.sin(q),
+      d: (this.scaleY || 0) * Math.cos(q),
+      tx: this.matrix.tx,
+      ty: this.matrix.ty,
+    };
+    this.invalidate(TRANSFORM);
+  }
+
   /** Apply a place's transform, colour, name and visibility. */
   applyPlace(place: Place): void {
     if (place.matrix) {
       const m = place.matrix;
-      this.matrix = { a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 };
-      this.invalidate(TRANSFORM);
+      this.setMatrix({ a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 });
     }
 
     if (place.colorTransform) {
@@ -230,7 +330,7 @@ export class MovieClip extends Container {
       const child = displayFor(character, this.library);
       // A replaced character keeps what the place does not set.
       if (place.move && existing) {
-        child.matrix = existing.matrix;
+        child.setMatrix(existing.matrix);
         child.colorTransform = existing.colorTransform;
         child.name = existing.name;
       }
@@ -354,7 +454,7 @@ export class MovieClip extends Container {
       const child = displayFor(character, this.library);
       // In the child's stead, the new one keeps what the place does not set, as frame by frame.
       if (existing && !anew) {
-        child.matrix = existing.matrix;
+        child.setMatrix(existing.matrix);
         child.colorTransform = existing.colorTransform;
         child.name = existing.name;
       }
