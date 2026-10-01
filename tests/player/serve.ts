@@ -57,8 +57,11 @@ function page(): string {
 </html>`;
 }
 
-/** Start serving on a free port of the loopback interface. */
-export async function serve(): Promise<{ server: Server; url: string }> {
+/** Start serving on a free port of the loopback interface; `extra` mounts more directories, as the corpus runner's SWFs. */
+export async function serve(
+  extra: [string, string][] = [],
+): Promise<{ server: Server; url: string }> {
+  const served = [...extra, ...mounts];
   const server = createServer((request, response) => {
     const path = decodeURIComponent(new URL(request.url ?? "/", "http://localhost").pathname);
     if (path === "/") {
@@ -67,7 +70,7 @@ export async function serve(): Promise<{ server: Server; url: string }> {
       return;
     }
 
-    for (const [prefix, dir] of mounts) {
+    for (const [prefix, dir] of served) {
       if (!path.startsWith(prefix)) {
         continue;
       }

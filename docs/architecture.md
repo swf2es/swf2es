@@ -621,6 +621,23 @@ once the case loads its SWF.
   some are Ruffle's own, and Flash under adl draws 42 of the 101 in
   `visual/` within their tolerance or a pixel's anti-aliasing of it, so
   the oracle decides, not the corpus's PNGs (`tests/player/corpus/check-references.ts`).
+- **Ruffle's corpus, as a baseline for the player** (`pnpm corpus`,
+  `tests/player/corpus/run.ts`): the player plays each `avm2/` and
+  `timeline/` test that has Flash's `output.txt` for the frames its
+  `test.toml` names, in Chrome as the player's tests run, and its trace is
+  compared to Flash's line by line. `baseline.json` records each test's
+  standing, as `tests/tamarin/swf2es-baseline.json` records swf2es's on
+  Tamarin: the lines matched before the first difference, of how many,
+  and what stopped the player, if anything. A change may not lower a
+  standing, and one that raises it updates the baseline with
+  `--update-baseline`; a test whose standing varies from run to run is
+  set to null and not compared. Only the traces are compared: the frames
+  Flash drew are the oracle's matter (above), and a test needing input,
+  audio, video or a default font is ignored, as the collector marks it.
+  A test that does not finish in its time is a timeout, a standing of its
+  own. The corpus is fetched, not committed, so the baseline runs where
+  the corpus is, like adl, not in CI; it is what says, in order of what
+  real SWFs hit first, what the player lacks.
 
 ## Milestone 1
 

@@ -18,15 +18,30 @@ interface Run {
   error: string | null;
 }
 
-/** The scripting for `bytes`, through the served codegen and libraries; null for a SWF with no scripts. */
-async function scriptingFor(bytes: Uint8Array, trace: string[]): Promise<Scripting | null> {
+/** The scripting for `bytes`, through the served codegen and libraries; null for a SWF with no scripts. `url` is the SWF's, for what it loads. */
+async function scriptingFor(
+  bytes: Uint8Array,
+  trace: string[],
+  url: string | null,
+): Promise<Scripting | null> {
   const swf = readSwf(bytes);
   if (!isAs3(swf) || !swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2)) {
     return null;
   }
 
   const wasm = await WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm"));
-  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => trace.push(line) });
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => trace.push(line),
+    url: url ? new URL(url, location.href).href : undefined,
+    fetch: async (target, signal) => {
+      const response = await fetch(target, { signal });
+      if (!response.ok) {
+        throw new Error(`${response.status} for ${target}`);
+      }
+
+      return new Uint8Array(await response.arrayBuffer());
+    },
+  });
   const libraries = await Promise.all(
     ["builtin", "playerglobal"].map(
       async (n) => new Uint8Array(await (await fetch(`/libraries/${n}.abc`)).arrayBuffer()),
@@ -71,13 +86,14 @@ async function runSwf(
   frames: number,
   capture: number[],
   quality: number,
+  url: string | null = null,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
   const trace: string[] = [];
   let scripting: Scripting | null = null;
   try {
-    scripting = await scriptingFor(bytes, trace);
+    scripting = await scriptingFor(bytes, trace, url);
     const player = new Player(bytes, scripting);
     await player.start();
     const n = GRID[quality] ?? 4;

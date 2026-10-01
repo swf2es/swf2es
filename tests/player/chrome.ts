@@ -13,6 +13,15 @@ export interface PlayerJob {
   frames: number;
   capture: number[];
   quality?: "low" | "medium" | "high" | "best";
+  /** The SWF's URL on the served page, for what it loads by relative URL; the player's default otherwise. */
+  url?: string;
+}
+
+/** How to run jobs: a time each job's scripts may take, a listener for each result, and more directories to serve. */
+export interface RunOptions {
+  timeout?: number;
+  onResult?: (index: number, result: PlayerResult) => void;
+  mounts?: [string, string][];
 }
 
 const QUALITIES = ["low", "medium", "high", "best"];
@@ -68,8 +77,10 @@ async function withPage<T>(
   ready: string,
   run: (evaluate: <R>(expression: string) => Promise<Evaluated<R>>) => Promise<T>,
   gpu = false,
+  options: RunOptions = {},
 ): Promise<T> {
-  const { server, url } = await serve();
+  const { timeout, mounts } = options;
+  const { server, url } = await serve(mounts);
   const profile = mkdtempSync(join(tmpdir(), "swf2es-chrome-"));
   let chrome: ChildProcess | null = null;
   try {
@@ -155,7 +166,7 @@ async function withPage<T>(
         const { result, exceptionDetails } = await devtools.send<{
           result: { value?: R };
           exceptionDetails?: { text: string };
-        }>("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+        }>("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, timeout });
         return { value: result.value, exception: exceptionDetails?.text ?? null };
       });
     } finally {
@@ -168,28 +179,54 @@ async function withPage<T>(
   }
 }
 
-/** Run each job in the player, in one browser. */
-export function runPlayer(jobs: PlayerJob[]): Promise<PlayerResult[]> {
-  return withPage("runSwf", async (evaluate) => {
-    const results: PlayerResult[] = [];
-    for (const job of jobs) {
-      const { value, exception } = await evaluate<{
-        images: Record<string, string>;
-        trace: string[];
-        error: string | null;
-      }>(
-        `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")})`,
-      );
-      const images = new Map<number, Uint8Array>();
-      for (const [frame, dataUrl] of Object.entries(value?.images ?? {})) {
-        images.set(Number(frame), new Uint8Array(Buffer.from(dataUrl.split(",")[1], "base64")));
+/**
+ * Run each job in the player, in one browser. With a timeout, in ms, a
+ * job's script that runs longer is stopped, its error "timeout", and the
+ * jobs after it run on; `onResult` hears each as it comes.
+ */
+export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<PlayerResult[]> {
+  return withPage(
+    "runSwf",
+    async (evaluate) => {
+      const results: PlayerResult[] = [];
+      for (const [index, job] of jobs.entries()) {
+        let value:
+          | { images: Record<string, string>; trace: string[]; error: string | null }
+          | undefined;
+        let exception: string | null = null;
+        const begun = performance.now();
+        try {
+          ({ value, exception } = await evaluate<NonNullable<typeof value>>(
+            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)})`,
+          ));
+        } catch (e) {
+          // A job stopped at the timeout makes the protocol answer with an
+          // error ("Internal error"), not a result; one that fails sooner is
+          // the browser's or the protocol's, and stops the run.
+          if (!options.timeout || performance.now() - begun < options.timeout) {
+            throw e;
+          }
+
+          exception = "timed out";
+        }
+
+        const images = new Map<number, Uint8Array>();
+        for (const [frame, dataUrl] of Object.entries(value?.images ?? {})) {
+          images.set(Number(frame), new Uint8Array(Buffer.from(dataUrl.split(",")[1], "base64")));
+        }
+
+        const error =
+          value?.error ?? (exception?.includes("timed out") ? "timeout" : exception) ?? null;
+        const result = { images, trace: value?.trace ?? [], error };
+        results.push(result);
+        options.onResult?.(index, result);
       }
 
-      results.push({ images, trace: value?.trace ?? [], error: value?.error ?? exception ?? null });
-    }
-
-    return results;
-  });
+      return results;
+    },
+    false,
+    options,
+  );
 }
 
 /**

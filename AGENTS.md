@@ -32,7 +32,10 @@ pnpm tamarin --update-baseline [prefix...]   # after an oracle or harness change
 node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
-node tests/player/corpus/fetch-ruffle.ts     # Ruffle's test corpus, for corpus/check-references.ts
+node tests/player/corpus/fetch-ruffle.ts     # Ruffle's test corpus, for the two below
+pnpm corpus [--update-baseline] [prefix...]  # the player on the corpus's avm2 and timeline tests vs
+                                             # corpus/baseline.json (Chrome; about 5 minutes)
+node tests/player/corpus/check-references.ts [prefix...]   # the corpus's expected outputs vs Flash
 node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
                               # timeline in Chrome; keep a change only for a gain that repeats
 ```
@@ -54,7 +57,10 @@ calling a change done; CI runs the same steps.
 - **The Tamarin baseline is avmshell's behaviour**, failures included:
   swf2es must reproduce what avmshell prints, not what a test expects.
   Update `tests/tamarin/baseline.json` only when the oracle or the harness
-  changes, never to make swf2es pass.
+  changes, never to make swf2es pass. `tests/player/corpus/baseline.json`
+  is the player's own standing on Ruffle's corpus, failures included:
+  a change may not lower a test's standing, and one that raises it
+  updates the baseline with `--update-baseline`.
 - **avmshell is the reference.** For AS3 semantics, the expected result is
   what avmshell prints, not what JavaScript or the spec suggests. Add a case
   under `tests/conformance/cases/` for any semantic you implement.
