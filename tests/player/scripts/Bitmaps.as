@@ -113,6 +113,30 @@ package {
       probe("snapping", function():* { d.pixelSnapping = "sometimes"; return "ok"; });
       shown.setPixel32(0, 0, 0xFF000000);
       trace("drawn", shown.getPixel32(0, 0).toString(16));
+
+      // copyPixels through an alpha bitmap, offset by its point, and through the destination itself.
+      var mask:BitmapData = new BitmapData(3, 1, true, 0);
+      mask.setPixel32(0, 0, 0xFF000000);
+      mask.setPixel32(1, 0, 0x80000000);
+      mask.setPixel32(2, 0, 0x02000000);
+      var masked:BitmapData = new BitmapData(4, 1, true, 0x40332211);
+      var green:BitmapData = new BitmapData(4, 1, true, 0xC000FF00);
+      masked.copyPixels(green, new Rectangle(0, 0, 4, 1), new Point(0, 0), mask, new Point(0, 0), false);
+      trace("alpha bitmap", masked.getVector(masked.rect));
+      masked.fillRect(masked.rect, 0x40332211);
+      masked.copyPixels(green, new Rectangle(0, 0, 4, 1), new Point(0, 0), mask, new Point(1, 0), true);
+      trace("alpha bitmap offset merged", masked.getVector(masked.rect));
+      var ground:BitmapData = new BitmapData(3, 1, true, 0xFF663311);
+      ground.setPixel32(2, 0, 0);
+      ground.copyPixels(new BitmapData(3, 1, true, 0xFF00FF00), new Rectangle(0, 0, 3, 1), new Point(0, 0), ground, new Point(0, 0), true);
+      trace("alpha from itself", ground.getVector(ground.rect));
+
+      // Pixels changed on the next frame, after the first was drawn: the frame shows them.
+      addEventListener("enterFrame", function(e:*):void {
+        removeEventListener("enterFrame", arguments.callee);
+        shown.fillRect(new Rectangle(0, 0, 2, 4), 0xFFFFFF00);
+        trace("frame 2 pixels", shown.getPixel32(0, 0).toString(16));
+      });
     }
 
     private function probe(label:String, f:Function):void {

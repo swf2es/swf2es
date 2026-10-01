@@ -53,3 +53,7 @@ empty bitmap null 0 0 auto false
 bitmap size 40 40 40 4 4 false true auto
 snapping error 2008
 drawn ff000000
+alpha bitmap 3221290752,1610678016,16842496,1077158928
+alpha bitmap offset merged 2282732804,1076896780,1077158928,1077158928
+alpha from itself 4278255360,4278255360,0
+frame 2 pixels ffffff00
