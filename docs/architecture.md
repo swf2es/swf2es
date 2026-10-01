@@ -353,10 +353,36 @@ Where avmplus' behaviour is its own algorithm rather than a language rule,
 the runtime translates it, so that its output is avmplus' byte for byte:
 number formatting (`numbers.ts`), Array's sort (`sort.ts`), ByteArray with
 its capacity and UTF-8 (`bytearray.ts`), AMF3 (`amf.ts`) and JSON
-(`json.ts`). These are MPL-2.0 as their sources are. Domain memory is
+(`json.ts`) and describeType (`describe.ts`). These are MPL-2.0 as their sources are. Domain memory is
 avmshell's `avmplus.Domain`'s: 1024 bytes of scratch memory until a
 ByteArray is set as it. Date is JavaScript's Date, with avmplus' string
 formats.
+
+`avmplus.describeTypeJSON`, which `describeType` and playerglobal's
+`flash.utils.describeType` build their XML from, is avmplus' TypeDescriber
+translated (`natives/describe.ts`): the value's traits, or its class's
+instance traits with `USE_ITRAITS`, named as `getQualifiedClassName`
+names them (`*` for none, `void` and `null` for those values), its
+bases up the chain, every interface it implements, its constructor's
+parameters when it has any, and for each name bound in a public
+namespace, the base's first and a derived class's binding over it, the
+variable's type and access, the accessor's type, access and declaring
+class, the method's return type, parameters and declaring class, with
+the namespace's URI when it has one and the metadata when asked.
+`HIDE_NSURI_METHODS` drops the names in a namespace with a URI that a
+base class uses, as the AS3 namespace is; `HIDE_OBJECT` drops Object's
+own; the bindings a class gets in its interfaces' namespaces are not
+members and do not show. For that the compiler emits what the runtime
+needed nothing of before: each method's signature beside its factory
+(return type, parameter types, how many are required), the constructor's
+in the class descriptor, and a class's and its traits' metadata whole,
+name and key-value pairs, from which the runtime derives the
+`[Transient]` flags AMF and JSON use; a builtin's `Version`, `native`
+and `API` metadata stay out, as avmplus leaves them. avmplus iterates
+its bindings in a hashtable keyed by interned string addresses, so the
+order of the arrays is not one the player can reproduce, and the
+conformance case sorts them, as Ruffle's tests do; a binding's API
+version, which avmplus checks against the caller's, is not yet checked.
 
 avmplus' standard library (`Object`, `Array`, `String`, `Math`, `Date`,
 `RegExp`, `JSON`, `Vector`, `ByteArray` and so on) is mostly AS3 compiled
