@@ -175,7 +175,8 @@ async function withPage<T>(
   } finally {
     chrome?.kill("SIGKILL");
     server.close();
-    rmSync(profile, { recursive: true, force: true });
+    // Chrome may still be writing its profile as it dies: a few tries.
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
