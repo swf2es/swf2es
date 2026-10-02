@@ -203,6 +203,9 @@ export class Scripting {
   /** What flash.display.Stage reports and sets; the player copies the frame rate back each frame. */
   stageWidth = 0;
   stageHeight = 0;
+  /** The latest pointer position in stage coordinates. */
+  mouseStageX = 0;
+  mouseStageY = 0;
   frameRate = 24;
   /** Frames played since the start. */
   frames = 0;

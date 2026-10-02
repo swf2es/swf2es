@@ -8,11 +8,13 @@
 import type { ColorTransform, Fill, Line } from "@swf2es/format";
 import {
   BufferImageSource,
+  type FederatedPointerEvent,
   type FillInput,
   Graphics,
   GraphicsContext,
   Matrix,
   Container as PixiContainer,
+  Rectangle,
   type Renderer,
   RenderTexture,
   Sprite,
@@ -37,7 +39,9 @@ import {
 } from "./display.js";
 import { shifted } from "./geometry.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients.js";
+import type { PointerState } from "./input.js";
 import { setFlashColor } from "./pixi-color.js";
+import type { Player } from "./player.js";
 import {
   CUBIC,
   flatten,
@@ -460,6 +464,47 @@ export class PixiView {
     /** The stage's view, whose geometry and textures a fresh view borrows where they are current. */
     private readonly source: PixiView | null = null,
   ) {}
+
+  /** Let Pixi normalize browser coordinates; Flash's display list chooses the target. */
+  bindPointer(player: Player): () => void {
+    this.stage.eventMode = "static";
+    this.stage.hitArea = new Rectangle(
+      0,
+      0,
+      this.renderer.screen.width,
+      this.renderer.screen.height,
+    );
+    const send = (type: "move" | "down" | "up" | "leave") => (e: FederatedPointerEvent) => {
+      const p: PointerState = {
+        x: (e.global.x * player.width) / this.renderer.screen.width,
+        y: (e.global.y * player.height) / this.renderer.screen.height,
+        button: e.button,
+        buttons: e.buttons,
+        altKey: e.altKey,
+        ctrlKey: e.ctrlKey,
+        shiftKey: e.shiftKey,
+      };
+      player.pointer?.handle(type, p);
+    };
+    const move = send("move");
+    const down = send("down");
+    const up = send("up");
+    const leave = send("leave");
+    this.stage.on("pointermove", move);
+    this.stage.on("pointerdown", down);
+    this.stage.on("pointerup", up);
+    this.stage.on("pointerupoutside", up);
+    this.stage.on("pointerleave", leave);
+    return () => {
+      this.stage.off("pointermove", move);
+      this.stage.off("pointerdown", down);
+      this.stage.off("pointerup", up);
+      this.stage.off("pointerupoutside", up);
+      this.stage.off("pointerleave", leave);
+      this.stage.eventMode = "passive";
+      this.stage.hitArea = null;
+    };
+  }
 
   /**
    * The source view's node for `o`, if what it drew is still `o`'s: built

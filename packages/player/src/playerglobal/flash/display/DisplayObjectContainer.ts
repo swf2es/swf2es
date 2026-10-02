@@ -62,6 +62,7 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
   class DisplayObjectContainerNatives {
     declare $display: Container;
+    declare $mouseChildren: boolean | undefined;
 
     get numChildren(): number {
       return this.$display.children.length;
@@ -150,11 +151,11 @@ export function containerNatives(s: Scripting): avm2.Natives {
     }
 
     get mouseChildren(): boolean {
-      return true;
+      return this.$mouseChildren ?? true;
     }
 
-    set mouseChildren(_v: Value) {
-      // Not yet: there is no mouse.
+    set mouseChildren(v: Value) {
+      this.$mouseChildren = !!v;
     }
 
     get tabChildren(): boolean {
