@@ -1339,7 +1339,10 @@ object covers it; `alpha` and `erase` scale the layer below by the
 object's alpha, or by what it leaves, only where the object has any.
 The `blend-modes` case draws each over two grounds against adl. Pixi
 reads the back buffer only from a renderer made with `useBackBuffer:
-true`, which a host passes; without it the modes draw as normal.
+true`, which a host passes (the README's embedding example does);
+without it the modes draw as normal, and the view warns once. The back
+buffer is a full-screen copy a frame: on the bench (`--back-buffer`, an
+RTX 4060) it adds some 0.05 ms to the draw.
 
 ### Masks and scroll rectangles
 

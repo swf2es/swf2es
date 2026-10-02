@@ -8,7 +8,10 @@
 // time that compares run to run on one machine; --gpu lets Chrome use the
 // machine's GPU, for what a user would see, and the output names which drew.
 //
-//   node tests/player/bench.ts [--shapes N] [--frames N] [--gpu] [--json]
+// --back-buffer makes the renderer as a host that draws blend modes must,
+// with Pixi's back buffer.
+//
+//   node tests/player/bench.ts [--shapes N] [--frames N] [--gpu] [--back-buffer] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 
@@ -155,7 +158,12 @@ const quantile = (values: number[], q: number) => {
 };
 
 const swf = synthetic();
-const result = await benchPlayer(swf, frames, args.includes("--gpu"));
+const result = await benchPlayer(
+  swf,
+  frames,
+  args.includes("--gpu"),
+  args.includes("--back-buffer"),
+);
 if (result.error) {
   console.error(result.error);
   process.exit(1);

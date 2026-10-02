@@ -454,6 +454,28 @@ export class PixiView {
     const m = fill.matrix;
     return { texture, matrix: new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty), textureSpace: "global" };
   };
+  /** Whether the renderer was found to lack the back buffer that blend modes read, and the host told. */
+  private backBufferChecked = false;
+
+  /**
+   * A blend mode reads what is below from Pixi's back buffer, which a WebGL
+   * renderer has only when made with `useBackBuffer: true`; without it the
+   * modes draw as normal, so the host is told, once.
+   */
+  private checkBackBuffer(): void {
+    if (this.backBufferChecked) {
+      return;
+    }
+
+    this.backBufferChecked = true;
+    const gl = this.renderer as unknown as { backBuffer?: { useBackBuffer: boolean } };
+    if (gl.backBuffer && !gl.backBuffer.useBackBuffer) {
+      console.warn(
+        "swf2es: a blend mode draws as normal: make the Pixi renderer with useBackBuffer: true",
+      );
+    }
+  }
+
   /** What a fresh view built itself, which it destroys; what it borrowed from `source` stays. */
   private readonly built: GraphicsContext[] = [];
   /** The objects `mask` was found set on, for the masks to be placed that are not under the root. */
@@ -731,6 +753,9 @@ export class PixiView {
       if (blend !== node.blend) {
         node.blend = blend;
         container.filters = blendFilters(blend);
+        if (blend !== "normal" && blend !== "layer") {
+          this.checkBackBuffer();
+        }
       }
       // Most objects have neither: they pay one test.
       if (o.mask || o.scroll || node.clipped) {
