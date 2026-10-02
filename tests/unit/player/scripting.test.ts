@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
+import type { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../oracle/oracle.ts";
 import type { Container, MovieClip } from "../../../packages/player/dist/display.js";
 import { Player } from "../../../packages/player/dist/player.js";
@@ -262,6 +263,47 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "5 init - http://example.test/nested.swf true",
     "5 complete - http://example.test/nested.swf true",
   ]);
+});
+
+test("a stalled URLStream does not hold up a later Loader load", { skip }, async () => {
+  const compile = compiler(out);
+  const inner = innerSwf(compile("Inner"));
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: () => {},
+    url: "http://example.test/outer.swf",
+    fetch: (url) =>
+      url.endsWith("never.bin") ? new Promise<Uint8Array>(() => {}) : Promise.resolve(inner),
+  });
+  assert.equal(
+    scripting.streamError("missing.bin"),
+    "Error #2032: Stream Error. URL: http://example.test/missing.bin",
+  );
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const root = compile(
+    "StreamLoaderRoot",
+    "package { import flash.display.Sprite; public class StreamLoaderRoot extends Sprite {} }",
+  );
+  const player = new Player(bare(root, 1, "StreamLoaderRoot"), scripting);
+  await player.start();
+
+  scripting.requestBytes("never.bin", new AbortController().signal, () => {});
+  const loader = scripting.rt.construct(
+    scripting.rt.classNamed("flash.display::Loader"),
+  ) as avm2.AsObject;
+  scripting.requestLoadUrl(loader, "inner.swf");
+  // settled() waits for both requests, but Loader's preparation must finish
+  // independently of the stream that never resolves.
+  const preparing = (scripting as unknown as { preparing: Promise<void> }).preparing;
+  const finished = await Promise.race([
+    preparing.then(() => true),
+    new Promise<boolean>((resolve) => {
+      setTimeout(() => resolve(false), 3000).unref();
+    }),
+  ]);
+  assert.equal(finished, true);
+
+  player.tick();
+  assert.ok(loader.$content);
 });
 
 test("timers fire in the order of their times, each at its own time", { skip }, async () => {

@@ -776,4 +776,13 @@ export const cases: PlayerCase[] = [
   // Last: the content it unloads plays on in Flash until collected, and its
   // traces would reach the case recorded after it.
   { name: "loads", build: loads, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "url-stream-close",
+    swf: (abc) => bare(abc, 1, "UrlStreamClose"),
+    script: "UrlStreamClose",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
 ];
