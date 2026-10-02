@@ -14,11 +14,14 @@ export class CompressedDataError extends Error {}
  * compression, 8 for memory. A new object each time: pako's deflateRaw sets
  * `raw` on the one it is given.
  */
-const zlibOptions = () => ({ level: 9 as const, memLevel: 8 });
+const zlibOptions = (level: ZlibLevel = 9) => ({ level, memLevel: 8 as const });
 
-/** `data` as a zlib stream, as zlib's deflate writes it at level 9. */
-export function zlibCompress(data: Uint8Array): Uint8Array {
-  return pako.deflate(data, zlibOptions());
+/** A deflate level: 0 stores, 1 is fastest, 9 smallest. */
+export type ZlibLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+/** `data` as a zlib stream, as zlib's deflate writes it at `level`, 9 by default. */
+export function zlibCompress(data: Uint8Array, level: ZlibLevel = 9): Uint8Array {
+  return pako.deflate(data, zlibOptions(level));
 }
 
 /** `data` as a raw deflate stream, with no zlib header or checksum. */

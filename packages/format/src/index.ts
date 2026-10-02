@@ -12,6 +12,7 @@ export {
   LZMA_HEADER,
   lzmaByteArrayCompress,
   lzmaByteArrayUncompress,
+  type ZlibLevel,
   zlibCompress,
   zlibUncompress,
 } from "./compression.js";

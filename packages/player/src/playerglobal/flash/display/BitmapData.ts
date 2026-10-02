@@ -21,6 +21,7 @@ import {
 } from "../../../bitmap-ops.js";
 import { bounds } from "../../../bounds.js";
 import { transformRect } from "../../../geometry.js";
+import { encodePng } from "../../../png.js";
 import type { Scripting } from "../../../scripting.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../timeline.js";
 import { colorOf } from "../geom/Transform.js";
@@ -87,17 +88,6 @@ function pointOf(s: Scripting, v: Value, name: string): [number, number] {
   const p = v as AsObject;
   const read = (k: string) => nearest(s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k))) || 0);
   return [read("x"), read("y")];
-}
-
-/** Pixels as the big-endian ARGB bytes getPixels writes. */
-function argbBytes(values: number[]): Uint8Array {
-  const bytes = new Uint8Array(values.length * 4);
-  const view = new DataView(bytes.buffer);
-  for (let i = 0; i < values.length; i++) {
-    view.setUint32(i * 4, values[i]);
-  }
-
-  return bytes;
 }
 
 /** A source BitmapData's store; TypeError 2007 for null. */
@@ -344,7 +334,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     getPixels(rect: Value): Value {
       const store = storeOf(s, this);
       const o = s.rt.construct(s.rt.classNamed("flash.utils::ByteArray"));
-      o.$bytes.write(argbBytes(store.getVector(rectOf(s, rect))));
+      o.$bytes.write(store.argbBytes(rectOf(s, rect)));
       return o;
     }
 
@@ -354,7 +344,46 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "data");
       }
 
-      (target as AsObject).$bytes.write(argbBytes(store.getVector(rectOf(s, rect))));
+      (target as AsObject).$bytes.write(store.argbBytes(rectOf(s, rect)));
+    }
+
+    /**
+     * The rect as an image file, written into `byteArray` from its position
+     * or into a new one, which is returned: PNG; JPEG and JPEG XR, which
+     * Flash also writes, are not supported yet.
+     */
+    encode(rect: Value, compressor: Value, byteArray: Value): Value {
+      const store = storeOf(s, this);
+      if (rect === null || rect === undefined) {
+        throw s.rt.error("TypeError", 2007, "rectangle");
+      }
+
+      if (compressor === null || compressor === undefined) {
+        throw s.rt.error("TypeError", 2007, "compressor");
+      }
+
+      const options = compressor as AsObject;
+      const is = (name: string) => s.rt.isInstance(options, s.rt.classNamed(name));
+      if (!is("flash.display::PNGEncoderOptions")) {
+        if (is("flash.display::JPEGEncoderOptions") || is("flash.display::JPEGXREncoderOptions")) {
+          throw s.rt.unsupported("BitmapData#encode as JPEG");
+        }
+
+        throw s.rt.error("ArgumentError", 2004);
+      }
+
+      const area = store.clip(rectOf(s, rect));
+      if (!area) {
+        throw s.rt.error("ArgumentError", 2006);
+      }
+
+      const fast = !!s.rt.getProperty(options, s.rt.publicName("fastCompression"));
+      const out =
+        byteArray === null || byteArray === undefined
+          ? (s.rt.construct(s.rt.classNamed("flash.utils::ByteArray")) as AsObject)
+          : (byteArray as AsObject);
+      out.$bytes.write(encodePng(store, area, fast));
+      return out;
     }
 
     setPixels(rect: Value, input: Value): void {
