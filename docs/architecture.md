@@ -125,7 +125,8 @@ Each method goes through the same steps, in `codegen`:
 1. **Decode** (`abc/code.ts`): the reachable instructions, as the avmplus
    verifier reads them.
 2. **Verify and build the IR**, as avmplus' `Verifier` does its checks,
-   with its VerifyError numbers. A first pass keeps a frame state per block
+   with its VerifyError numbers (`abc/code.ts`, and for finding, getting,
+   setting and calling properties `abc/properties.ts`). A first pass keeps a frame state per block
    (the locals, scope stack and operand stack, each value with its type,
    whether it is known not null, and whether it is a with scope), merges it
    where control flow joins, and walks a block again when its entry state
@@ -155,14 +156,18 @@ Each method goes through the same steps, in `codegen`:
    `getouterscope`, `finddef`, the global scope), and every coercion and
    null check. V8 does SSA-level optimization on the JavaScript anyway.
    The tables are flat, like the parser's, and reused across methods.
-4. **Control flow.** First a per-method dispatcher
+4. **Control flow** (`emit/structure.ts`). First a per-method dispatcher
    (`for (;;) switch (block) { ... }`), which handles any control flow,
    irreducible or obfuscated included. Then structured JavaScript (loops, `if`,
    labelled `break`) from the dominator tree for the reducible code compilers
    emit, falling back to the dispatcher. Conformance tests check that both
    give the same results.
 5. **Emission** writes JavaScript as UTF-8 into a growable byte buffer: no
-   JavaScript strings, and names are copied straight from the ABC.
+   JavaScript strings, and names are copied straight from the ABC. A
+   method's instructions are `emit/method.ts`'s; arithmetic, comparisons
+   and conversions `emit/values.ts`'s, domain memory `emit/memory.ts`'s,
+   how types, namespaces and constants are named `emit/refs.ts`'s, and the
+   module around the methods `emit/module.ts`'s.
 
 ### Generated code
 
