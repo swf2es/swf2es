@@ -8,11 +8,11 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { zlibCompress } from "@swf2es/format";
-import type { avm2 } from "@swf2es/runtime";
+import { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../oracle/oracle.ts";
 import type { Container, MovieClip } from "../../../packages/player/dist/display.js";
 import { Player } from "../../../packages/player/dist/player.js";
-import { Scripting } from "../../../packages/player/dist/scripting.js";
+import { type FetchRequest, Scripting } from "../../../packages/player/dist/scripting.js";
 import { bare, innerSwf, scripted } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compiler, compileScripts } from "../../player/scripts.ts";
@@ -90,7 +90,7 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
   const scripting = new Scripting(codegen, {
     print: (line) => lines.push(line),
     url: "http://example.test/outer.swf",
-    fetch: async (url, signal) => {
+    fetch: async ({ url }, signal) => {
       fetches.push(url);
       signal.addEventListener("abort", () => aborted.push(url));
       if (url.endsWith("inner.swf") || url.endsWith("deep.swf")) {
@@ -287,7 +287,7 @@ test("a stalled URLStream does not hold up a later Loader load", { skip }, async
   const scripting = new Scripting(await createCodegen(wasm), {
     print: () => {},
     url: "http://example.test/outer.swf",
-    fetch: (url) =>
+    fetch: ({ url }) =>
       url.endsWith("never.bin")
         ? new Promise(() => {})
         : Promise.resolve({ bytes: inner, status: 200, headers: [] }),
@@ -324,6 +324,75 @@ test("a stalled URLStream does not hold up a later Loader load", { skip }, async
   assert.ok(loader.$content);
 });
 
+test("URLRequest data reaches the host as a query or a copied body", { skip }, async () => {
+  const requests: FetchRequest[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: () => {},
+    url: "http://example.test/outer.swf",
+    fetch: async (request) => {
+      requests.push(request);
+      return { bytes: new Uint8Array(0), status: 200, headers: [] };
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const rt = scripting.rt;
+  const name = (property: string) => rt.publicName(property);
+  const load = (request: avm2.AsObject) =>
+    scripting.requestBytes(request, new AbortController().signal, () => {});
+  const cls = rt.classNamed("flash.net::URLRequest");
+
+  const get = rt.construct(cls, "/api?old=1#part") as avm2.AsObject;
+  rt.setProperty(get, name("data"), "new=2");
+  load(get);
+  assert.deepEqual(requests[0], {
+    url: "http://example.test/api?old=1&new=2#part",
+    method: "GET",
+    headers: [],
+    body: null,
+  });
+
+  const variables = rt.construct(rt.classNamed("flash.net::URLVariables"), "sku=Test");
+  rt.setProperty(get, name("data"), variables);
+  load(get);
+  assert.equal(requests[1].url, "http://example.test/api?old=1&sku=Test#part");
+
+  const post = rt.construct(cls, "/api") as avm2.AsObject;
+  rt.setProperty(post, name("method"), "POST");
+  rt.setProperty(post, name("contentType"), "text/plain");
+  rt.setProperty(post, name("data"), "hello");
+  const header = rt.construct(rt.classNamed("flash.net::URLRequestHeader"), "X-Test", "one");
+  rt.setProperty(post, name("requestHeaders"), rt.array([header]));
+  load(post);
+  assert.deepEqual(requests[2], {
+    url: "http://example.test/api",
+    method: "POST",
+    headers: [
+      ["X-Test", "one"],
+      ["Content-Type", "text/plain"],
+    ],
+    body: new TextEncoder().encode("hello"),
+  });
+
+  const binary = rt.construct(rt.classNamed("flash.utils::ByteArray")) as avm2.AsObject;
+  const bytes = avm2.bytesOf(rt, binary);
+  bytes.write(new Uint8Array([0, 255, 4]));
+  rt.setProperty(post, name("data"), binary);
+  load(post);
+  bytes.buffer[0] = 9;
+  assert.deepEqual(requests[3].body, new Uint8Array([0, 255, 4]));
+
+  const loader = rt.construct(rt.classNamed("flash.display::Loader"));
+  rt.callProperty(loader, name("load"), post);
+  assert.equal(requests[4].method, "POST");
+  assert.deepEqual(requests[4].body, new Uint8Array([9, 255, 4]));
+
+  rt.setProperty(get, name("requestHeaders"), rt.array([header]));
+  load(get);
+  assert.deepEqual(requests[5].headers, []);
+
+  await scripting.settled();
+});
+
 test("LoaderInfo reports HTTP status between init and complete, and before an I/O error", {
   skip,
 }, async () => {
@@ -332,7 +401,7 @@ test("LoaderInfo reports HTTP status between init and complete, and before an I/
   const scripting = new Scripting(await createCodegen(wasm), {
     print: () => {},
     url: "http://example.test/outer.swf",
-    fetch: async (url) =>
+    fetch: async ({ url }) =>
       url.endsWith("inner.swf")
         ? { bytes: inner, status: 200, headers: [] }
         : { bytes: null, status: 404, headers: [] },

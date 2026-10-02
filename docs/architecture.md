@@ -653,8 +653,8 @@ that steps frames by hand awaits `Scripting.settled()` between them, as
 the tests do, to see Flash's frame. `SymbolClass` bindings are the
 library's, since character ids collide across SWFs. The player package
 has no I/O: `load` of a URL asks the host for the bytes through a
-function the `Scripting` is given, with the URL resolved and an
-`AbortSignal`, and a fetch that fails, or bytes that are not an AS3 SWF,
+function the `Scripting` is given, with a resolved URL, method, headers,
+copied body and `AbortSignal`. A fetch that fails, or bytes that are not an AS3 SWF,
 end in `IO_ERROR` on the `LoaderInfo` in the frame. `close` drops a
 pending load and aborts its fetch; `unload`, and a new load on the same
 `Loader`, do that and take the content out at the call, the `LoaderInfo`
@@ -676,7 +676,12 @@ it loads, else the main one (Ruffle's `loader_loaderurl` adds the loader first, 
 usually do).
 
 `URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
-status and headers. Its result arrives on the player thread in a later frame.
+status and headers. A `URLRequest`'s GET string or URLVariables data is appended to the query;
+GET ByteArray data is currently left out and has not been checked against Flash;
+other methods send its string, URLVariables or ByteArray data as the body.
+Only POST forwards custom headers in the browser player, as Flash Player does;
+the host's fetch decides which requests its environment permits. The result
+arrives on the player thread in a later frame.
 A successful stream reports `OPEN`, `PROGRESS`, `HTTP_STATUS`, `COMPLETE`;
 a failed one reports `HTTP_STATUS` before `IO_ERROR`. A URL load through
 `Loader` reports status on its `LoaderInfo` between `INIT` and `COMPLETE`,
