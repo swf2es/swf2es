@@ -19,6 +19,7 @@ import { stageNatives } from "./flash/display/Stage.js";
 import { eventNatives } from "./flash/events/Event.js";
 import { eventDispatcherNatives } from "./flash/events/EventDispatcher.js";
 import { httpStatusHooks } from "./flash/events/HTTPStatusEvent.js";
+import { mouseEventNatives } from "./flash/events/MouseEvent.js";
 import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js";
 import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
 import { transformNatives } from "./flash/geom/Transform.js";
@@ -42,6 +43,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
   return {
     ...toplevelNatives(s),
     ...eventNatives(),
+    ...mouseEventNatives(s),
     ...eventDispatcherNatives(s),
     ...displayObjectNatives(s),
     ...bitmapNatives(s),
