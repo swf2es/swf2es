@@ -42,6 +42,31 @@ test("the topmost artwork targets its interactive parent, with mouseChildren and
   assert.equal(pointerTarget(stage, 50, 10, 100, 100), field);
 });
 
+test("a disabled overlay lets pointer input reach an interactive object below it", () => {
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
+  const button = new Container();
+  button.object = { $display: button } as never;
+  button.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+  stage.addChildAt(button, 0);
+
+  const overlay = new Container();
+  overlay.object = {
+    $display: overlay,
+    $mouseEnabled: false,
+    $mouseChildren: false,
+  } as never;
+  overlay.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+  stage.addChildAt(overlay, 1);
+
+  assert.equal(pointerTarget(stage, 10, 10, 100, 100), button);
+
+  // A visible shape without an interactive object still blocks what is underneath.
+  overlay.object.$mouseEnabled = true;
+  assert.equal(pointerTarget(stage, 10, 10, 100, 100), overlay);
+});
+
 test("a pointer down dispatches capture, target and bubble with target-local coordinates", () => {
   const stage = new Container();
   stage.object = { $display: stage } as never;

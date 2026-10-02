@@ -33,6 +33,16 @@ export function pointerTarget(
       return { hit: false, target: null };
     }
 
+    // A disabled container with disabled children is transparent to mouse input.
+    // Shapes and bitmaps still count as hits and pass the event to their parent.
+    if (
+      d instanceof Container &&
+      d.object?.$mouseEnabled === false &&
+      d.object.$mouseChildren === false
+    ) {
+      return { hit: false, target: null };
+    }
+
     if (d instanceof Container) {
       for (let i = d.children.length - 1; i >= 0; i--) {
         const child = pick(d.children[i]);
