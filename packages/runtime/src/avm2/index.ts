@@ -17,6 +17,7 @@ export {
   type NativesProvider,
   Runtime,
   type RuntimeOptions,
+  setStaticVar,
   type Value,
 } from "./runtime.js";
 

@@ -188,6 +188,8 @@ export interface ClassHook {
   construct?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
   call?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
   apply?: (rt: Runtime, factory: AsObject, params: Value[]) => AsObject;
+  /** What the VM sets up on the class once its static initializer has run, as avmshell's Worker.current. */
+  created?: (rt: Runtime, cls: AsObject) => void;
 }
 
 // Binding kinds, as the compiler encodes them: kind | id << 3.
@@ -197,6 +199,19 @@ export const BIND_Const = 3;
 export const BIND_Get = 5;
 export const BIND_Set = 6;
 export const BIND_GetSet = 7;
+
+/**
+ * Set class `cls`'s own static variable `name`, in whatever namespace, to
+ * `value`: for a class hook setting what the VM keeps there, as a private
+ * static the class reads.
+ */
+export function setStaticVar(cls: AsObject, name: string, value: Value): void {
+  for (const [, , n, b] of (cls.$desc as ClassDesc).static.bindings) {
+    if (n === name && (b & 7) === BIND_Var) {
+      cls[`$${b >> 3}`] = value;
+    }
+  }
+}
 
 /** Trait kinds as the ABC has them, which the descriptors' metadata is keyed by. */
 const TRAIT_Slot = 0;
@@ -2058,6 +2073,7 @@ export class Runtime {
       this.defining.delete(qualified);
     }
 
+    hooks?.created?.(this, cls);
     return cls;
   }
 

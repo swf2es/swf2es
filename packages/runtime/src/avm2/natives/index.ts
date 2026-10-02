@@ -19,7 +19,7 @@ import { numberHooks, numberNatives } from "./number.js";
 import { objectHooks, objectNatives } from "./object.js";
 import { proxyHooks, proxyNatives } from "./proxy.js";
 import { regexpHooks, regexpNatives } from "./regexp.js";
-import { shellNatives } from "./shell.js";
+import { shellHooks, shellNatives } from "./shell.js";
 import { stringHooks, stringNatives } from "./string.js";
 import { errorHooks, toplevelNatives } from "./toplevel.js";
 import { vectorHooks, vectorNatives } from "./vector.js";
@@ -62,5 +62,6 @@ export function builtinHooks(): Record<string, ClassHook> {
     ...xmlHooks,
     ...proxyHooks,
     ...errorHooks,
+    ...shellHooks,
   };
 }

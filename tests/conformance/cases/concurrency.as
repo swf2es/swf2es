@@ -36,3 +36,10 @@ trace("wait", c.wait(1), c.wait(0), c.wait(0.5));
 trace("still held", m.tryLock());
 m.unlock();
 m.unlock();
+
+var w:Worker = Worker.current;
+trace(w == Worker.current, w.isPrimordial, w.state);
+trace(w.getSharedProperty("missing"));
+w.setSharedProperty("n", 42);
+w.setSharedProperty("o", m);
+trace(w.getSharedProperty("n"), w.getSharedProperty("o") == m);
