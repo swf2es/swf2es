@@ -28,6 +28,7 @@ import { urlRequestNatives } from "./flash/net/URLRequest.js";
 import { urlStreamNatives } from "./flash/net/URLStream.js";
 import { telemetryNatives } from "./flash/profiler/Telemetry.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
+import { capabilitiesNatives } from "./flash/system/Capabilities.js";
 import { securityNatives } from "./flash/system/Security.js";
 import { systemNatives } from "./flash/system/System.js";
 import { workerHooks, workerNatives } from "./flash/system/Worker.js";
@@ -54,6 +55,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...urlRequestNatives(s),
     ...urlStreamNatives(s),
     ...applicationDomainNatives(s),
+    ...capabilitiesNatives(s),
     ...securityNatives(s),
     ...systemNatives(s),
     ...workerNatives(s),

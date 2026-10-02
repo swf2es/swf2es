@@ -191,7 +191,7 @@
   "avm2/bytearray_writeobject": {"matched":13,"lines":24,"traced":13,"error":"ArgumentError: Error #1508: The value specified for argument objectEncoding is invalid."},
   "avm2/callee_in_initializer": {"matched":6,"lines":6,"traced":6,"error":null},
   "avm2/callproplex_class": {"matched":1,"lines":1,"traced":1,"error":null},
-  "avm2/capabilities_resolution": {"matched":1,"lines":8,"traced":1,"error":"Error: swf2es: native flash.system::Capabilities.get:screenResolutionX is not supported yet"},
+  "avm2/capabilities_resolution": {"matched":8,"lines":8,"traced":8,"error":null},
   "avm2/catch_class": {"matched":6,"lines":6,"traced":6,"error":null},
   "avm2/catch_scope_slot": {"matched":4,"lines":7,"traced":7,"error":null},
   "avm2/checkfilter": {"matched":0,"lines":4,"traced":4,"error":null},

@@ -17,6 +17,7 @@ export {
   type Drawer,
   type FetchRequest,
   type FetchResult,
+  type ScreenCapabilities,
   Scripting,
   type SocketEvents,
   type SocketHost,

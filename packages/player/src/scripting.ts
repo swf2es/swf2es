@@ -47,6 +47,14 @@ export interface ExternalInterfaceHost {
   objectID?: string | null;
 }
 
+/** Screen values reported by flash.system.Capabilities, captured when the player starts. */
+export interface ScreenCapabilities {
+  screenResolutionX: number;
+  screenResolutionY: number;
+  pixelAspectRatio: number;
+  screenDPI: number;
+}
+
 type Affine = { a: number; b: number; c: number; d: number; tx: number; ty: number };
 
 /** A renderer's part in BitmapData.draw of a display object. */
@@ -139,6 +147,7 @@ interface Load {
 
 export class Scripting {
   readonly rt: avm2.Runtime;
+  readonly screenCapabilities: Readonly<ScreenCapabilities>;
   readonly externalInterface: ExternalInterfaceHost | null;
   readonly socket: SocketHost | null;
   /** The character, and its SWF's library, each class SymbolClass bound makes, for a `new` of the class from a script. */
@@ -229,6 +238,7 @@ export class Scripting {
       externalInterface?: ExternalInterfaceHost;
       socket?: SocketHost;
       decodeImage?: ImageDecode | null;
+      screenCapabilities?: Partial<ScreenCapabilities>;
       /**
        * The clock getTimer reads, a monotonic one in milliseconds: by default
        * `performance.now`, as Flash's runs on in real time, while a script
@@ -238,6 +248,16 @@ export class Scripting {
       realTime?: (() => number) | null;
     } = {},
   ) {
+    this.screenCapabilities = {
+      screenResolutionX:
+        options.screenCapabilities?.screenResolutionX ??
+        (typeof screen === "undefined" ? 0 : screen.width),
+      screenResolutionY:
+        options.screenCapabilities?.screenResolutionY ??
+        (typeof screen === "undefined" ? 0 : screen.height),
+      pixelAspectRatio: options.screenCapabilities?.pixelAspectRatio ?? 1,
+      screenDPI: options.screenCapabilities?.screenDPI ?? 72,
+    };
     this.realTime = options.realTime === undefined ? defaultClock() : options.realTime;
     // getTimer's zero: when the player is made, as Flash's is when it starts.
     this.realStart = this.realTime ? this.realTime() : 0;

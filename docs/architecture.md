@@ -633,6 +633,16 @@ script text. Without a host, `available` is false, `objectID` is null,
 and calls and callback registration throw Error #2067 as Flash does in a
 container without a bridge.
 
+### Screen capabilities
+
+`flash.system.Capabilities` reads screen resolution, pixel aspect ratio and
+DPI from the `Scripting` instance. A host may supply any of the four values
+through `screenCapabilities`; omitted values fall back separately. Values are
+copied when the player is made, so another player can report a different
+screen. By default, resolution comes from the browser's `screen` (zero in a
+non-browser host), pixel aspect ratio is 1 and DPI is 72. The corpus harness
+supplies the screen on which its Flash traces were recorded.
+
 ### Loading SWFs
 
 A `Loader` is a container whose one child is the root of the SWF it
