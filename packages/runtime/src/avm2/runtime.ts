@@ -244,6 +244,8 @@ export class Traits {
   cls: AsObject | null = null;
   interfaces = new Set<Traits>();
   dynamic = false;
+  /** Whether it is a script's global object's, as System.isGlobal asks. */
+  isGlobal = false;
   /**
    * Whether a dynamic class's instances refuse any name but their own and
    * an index, getting it or setting it, as a Vector's do: they delete one,
@@ -807,6 +809,7 @@ export class Runtime {
 
       const traits = new Traits("global", this.objectTraits);
       traits.dynamic = true;
+      traits.isGlobal = true;
       traits.describe(script.desc.traits);
       const g = traits.instance();
       const scope = Object.assign([g], { w: 0 });

@@ -23,6 +23,12 @@ import { type Natives, registerNativeClass } from "./define.js";
 const kGrowthIncr = 4096;
 const kHugeGrowthThreshold = 24 * 1024 * 1024;
 const kHugeGrowthIncr = 24 * 1024 * 1024;
+/**
+ * The most a ByteArray holds: what a 32-bit avmshell, as the oracle's, can
+ * allocate, beyond which it fails with MemoryError 1000, and less than a
+ * browser's ArrayBuffer may be refused at.
+ */
+const kMaxCapacity = 0x80000000;
 /** DomainEnv::GLOBAL_MEMORY_MIN_SIZE: domain memory's least length. */
 export const GLOBAL_MEMORY_MIN_SIZE = 1024;
 const kAMF0 = 0;
@@ -66,11 +72,23 @@ export class Bytes {
       capacity = kGrowthIncr;
     }
 
+    if (minimum > kMaxCapacity) {
+      throw this.rt.error("flash.errors::MemoryError", 1000);
+    }
+
+    capacity = Math.min(capacity, kMaxCapacity);
     if (capacity === this.buffer.length) {
       return;
     }
 
-    const next = new Uint8Array(capacity);
+    let next: Uint8Array<ArrayBuffer>;
+    try {
+      next = new Uint8Array(capacity);
+    } catch {
+      // The host would not give it the memory, as the system would not give avmplus.
+      throw this.rt.error("flash.errors::MemoryError", 1000);
+    }
+
     next.set(this.buffer.subarray(0, Math.min(capacity, this.length)));
     this.buffer = next;
     this.view = new DataView(next.buffer);
