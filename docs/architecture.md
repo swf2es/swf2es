@@ -77,6 +77,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `runtime` | AS3/AS2 language semantics called by generated code             | format                    |
 | `player`  | display list, timeline, playerglobal, AVM1 globals, renderers   | format, codegen, runtime  |
 | `cli`     | ahead-of-time compiler command                                  | format, codegen           |
+| `player-hosts` | optional host transports for the player: Node TCP, a WebSocket relay | player          |
 
 `runtime` contains only the language, with no display list, so it runs in node
 next to avmshell. It uses `format` for what both need, such as compression
@@ -726,6 +727,11 @@ does not dispatch `CLOSE`, while a remote close does. Without a socket host,
 connect fails on a later frame; reads, writes and close on an invalid socket
 throw IOError #2002. The browser player has no default raw TCP transport:
 an embedding page must provide one through its own permitted bridge.
+`@swf2es/player-hosts/node` supplies a direct Node TCP transport;
+`@swf2es/player-hosts/websocket` sends binary frames through a WebSocket
+relay whose URL the embedder chooses. They live outside `player` so its
+browser entrypoint has no Node I/O dependency. WebSocket message boundaries
+are only transport chunks; ActionScript reads the resulting byte stream.
 
 The Flash cases use `loadBytes`, the inner SWF carried in the outer's
 script as base64; the oracle runs under AIR, which refuses code from

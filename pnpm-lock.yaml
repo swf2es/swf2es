@@ -65,6 +65,12 @@ importers:
         specifier: 8.21.0
         version: 8.21.0
 
+  packages/player-hosts:
+    dependencies:
+      '@swf2es/player':
+        specifier: workspace:*
+        version: link:../player
+
   packages/runtime:
     dependencies:
       '@swf2es/format':
@@ -107,6 +113,9 @@ importers:
       '@swf2es/format':
         specifier: workspace:*
         version: link:../../packages/format
+      '@swf2es/player-hosts':
+        specifier: workspace:*
+        version: link:../../packages/player-hosts
       '@swf2es/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime

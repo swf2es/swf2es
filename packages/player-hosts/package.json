@@ -1,0 +1,23 @@
+{
+  "name": "@swf2es/player-hosts",
+  "version": "0.0.0",
+  "description": "Optional Node and WebSocket transports for the swf2es player",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    },
+    "./websocket": {
+      "types": "./dist/websocket.d.ts",
+      "default": "./dist/websocket.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@swf2es/player": "workspace:*"
+  }
+}
