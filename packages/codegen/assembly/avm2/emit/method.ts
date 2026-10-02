@@ -37,9 +37,10 @@ import {
 import { Output } from "./output";
 import { constant, isClassRef, poolString, typeRef } from "./refs";
 import { SourceMap } from "./sourcemap";
+import { analyze, branchTo, conditional, enclosed, node, terminates } from "./structure";
 
 /** The deepest structured code a method is given; one deeper keeps the dispatcher. */
-const MAX_NESTING: u32 = 500;
+export const MAX_NESTING: u32 = 500;
 /** No type: a conversion, convert_s or convert_o, that always calls the runtime. */
 const CONVERTS: i32 = -2;
 /** copyOf of a stack register that holds a constant: CONSTANT - the instruction that pushed it. */
@@ -183,7 +184,7 @@ export class MethodEmitter {
 
     // Structured control flow where the graph is reducible and each
     // handler's try encloses the code it covers; else the dispatcher.
-    if (this.analyze()) {
+    if (analyze(this)) {
       const start = out.length;
       if (handled) {
         out.text("  let t = 0;\n");
@@ -192,7 +193,7 @@ export class MethodEmitter {
       this.structured = true;
       this.unenclosed = false;
       this.tryStack.length = 0;
-      this.node(0);
+      node(this, 0);
       this.structured = false;
       if (!this.unenclosed) {
         this.leaveDxns(dxns);
@@ -615,7 +616,7 @@ export class MethodEmitter {
         this.copyAll(<i32>ir.b[i], frame);
       } else if (op === ops.OP_popscope) {
         this.copyAll(ir.src[i], frame);
-      } else if (this.conditional(op) || op === ops.OP_lookupswitch) {
+      } else if (conditional(this, op) || op === ops.OP_lookupswitch) {
         this.copyBelow(ir.src[i]);
       } else if (op === ops.OP_jump) {
         this.copyBelow(<i32>ir.frameSize);
@@ -644,7 +645,7 @@ export class MethodEmitter {
           out.int(region);
           out.text(";\n");
           this.region = region;
-          if (this.structured && !this.enclosed(region)) {
+          if (this.structured && !enclosed(this, region)) {
             this.unenclosed = true;
           }
         }
@@ -691,7 +692,7 @@ export class MethodEmitter {
         continue;
       }
 
-      if (this.conditional(op) || op === ops.OP_lookupswitch) {
+      if (conditional(this, op) || op === ops.OP_lookupswitch) {
         // What the branch took is gone, and the rest is written.
         this.uncopy(stack);
       } else if (op === ops.OP_swap) {
@@ -713,7 +714,7 @@ export class MethodEmitter {
       }
     }
 
-    if (!this.terminates(k)) {
+    if (!terminates(this, k)) {
       this.copyBelow(<i32>ir.frameSize);
     }
   }
@@ -953,7 +954,7 @@ export class MethodEmitter {
   /** `b = n; continue;` to block n. */
   goto(block: u32): void {
     if (this.structured) {
-      this.branchTo(block);
+      branchTo(this, block);
       return;
     }
 
@@ -1021,527 +1022,6 @@ export class MethodEmitter {
   reachable: u32 = 0;
   structured: bool = false;
   currentBlock: u32 = 0;
-
-  /** The index after block k's last instruction, and its first. */
-  private blockEnd(k: u32): u32 {
-    const ir = this.ir;
-    return k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
-  }
-
-  /** Whether block k ends in a branch, return or throw, not falling through. */
-  private terminates(k: u32): bool {
-    const ir = this.ir;
-    const end = this.blockEnd(k);
-    if (end === ir.blockFirst[k]) {
-      return false;
-    }
-
-    const op = ir.op[end - 1];
-    return (
-      op === ops.OP_jump ||
-      op === ops.OP_lookupswitch ||
-      op === ops.OP_returnvoid ||
-      op === ops.OP_returnvalue ||
-      op === ops.OP_throw
-    );
-  }
-
-  /** Whether op branches on a condition. */
-  private conditional(op: u16): bool {
-    return (
-      (op >= ops.OP_ifnlt && op <= ops.OP_ifnge) || (op >= ops.OP_iftrue && op <= ops.OP_ifstrictne)
-    );
-  }
-
-  /**
-   * Block k's successors: the handlers covering any of it, the table's last
-   * first; then every conditional branch in it (a block starts only where
-   * something branches to, so one may be in the middle), then what its
-   * last instruction does, or its fall-through.
-   */
-  private successors(k: u32): void {
-    const ir = this.ir;
-    const first = ir.blockFirst[k];
-    const end = this.blockEnd(k);
-    const next = k + 1 < ir.blockCount;
-    if (end > first) {
-      const from = ir.pc[first];
-      const to = ir.pc[end - 1];
-      for (let h = <i32>ir.handlerCount - 1; h >= 0; h--) {
-        if (ir.handlerFrom[h] <= to && ir.handlerTo[h] > from) {
-          this.succ.push(ir.handlerBlock[h]);
-        }
-      }
-    }
-
-    this.normalStart[k] = <u32>this.succ.length;
-    for (let i = first; i < end; i++) {
-      if (this.conditional(ir.op[i])) {
-        this.succ.push(ir.a[i]);
-      }
-    }
-
-    if (end === first) {
-      if (next) {
-        this.succ.push(k + 1);
-      }
-      return;
-    }
-
-    const i = end - 1;
-    const op = ir.op[i];
-    if (op === ops.OP_jump) {
-      this.succ.push(ir.a[i]);
-    } else if (op === ops.OP_lookupswitch) {
-      this.succ.push(ir.a[i]);
-      for (let c: u32 = 0; c <= <u32>ir.c[i]; c++) {
-        this.succ.push(ir.cases[ir.b[i] + c]);
-      }
-    } else if (op === ops.OP_returnvoid || op === ops.OP_returnvalue || op === ops.OP_throw) {
-      // No successor.
-    } else if (next) {
-      this.succ.push(k + 1);
-    }
-  }
-
-  /**
-   * The analysis the translation needs: successors and predecessors, a
-   * reverse postorder, dominators (Cooper, Harvey and Kennedy's), each
-   * block's children in the dominator tree, loop headers and forward edge
-   * counts. False if the graph is irreducible: a retreating edge whose
-   * target does not dominate its source.
-   */
-  analyze(): bool {
-    const ir = this.ir;
-    const n = ir.blockCount;
-    if (<u32>this.rpo.length < n) {
-      const size = max(n, 64);
-      this.succStart = new StaticArray<u32>(size + 1);
-      this.predStart = new StaticArray<u32>(size + 1);
-      this.childStart = new StaticArray<u32>(size + 1);
-      this.rpo = new StaticArray<i32>(size);
-      this.order = new StaticArray<u32>(size);
-      this.idom = new StaticArray<i32>(size);
-      this.forwardIn = new StaticArray<u32>(size);
-      this.loopHeader = new StaticArray<u8>(size);
-      this.fill = new StaticArray<u32>(size);
-      this.handlerOf = new StaticArray<i32>(size);
-      this.normalStart = new StaticArray<u32>(size);
-    }
-
-    this.succ.length = 0;
-    for (let k: u32 = 0; k < n; k++) {
-      this.succStart[k] = <u32>this.succ.length;
-      this.successors(k);
-      this.rpo[k] = -1;
-      this.idom[k] = -1;
-      this.forwardIn[k] = 0;
-      this.loopHeader[k] = 0;
-      this.handlerOf[k] = -1;
-    }
-
-    // Each handler's own block, one block to a handler.
-    for (let h: u32 = 0; h < ir.handlerCount; h++) {
-      const block = ir.handlerBlock[h];
-      if (this.handlerOf[block] >= 0) {
-        return false;
-      }
-
-      this.handlerOf[block] = <i32>h;
-    }
-
-    this.succStart[n] = <u32>this.succ.length;
-
-    // A depth-first walk from the entry: postorder, reversed. -2 marks a block on the way.
-    const stack = this.dfsStack;
-    const edge = this.dfsEdge;
-    stack.length = 0;
-    edge.length = 0;
-    stack.push(0);
-    edge.push(0);
-    this.rpo[0] = -2;
-    let post = n;
-    while (stack.length) {
-      const top = stack.length - 1;
-      const k = stack[top];
-      const e = edge[top];
-      if (this.succStart[k] + e < this.succStart[k + 1]) {
-        edge[top] = e + 1;
-        const s = this.succ[this.succStart[k] + e];
-        if (this.rpo[s] === -1) {
-          this.rpo[s] = -2;
-          stack.push(s);
-          edge.push(0);
-        }
-      } else {
-        stack.pop();
-        edge.pop();
-        this.rpo[k] = <i32>--post;
-      }
-    }
-
-    // Reachable blocks, numbered from 0 in reverse postorder.
-    const reachable = n - post;
-    this.reachable = reachable;
-    for (let k: u32 = 0; k < n; k++) {
-      if (this.rpo[k] >= 0) {
-        this.rpo[k] -= <i32>post;
-        this.order[this.rpo[k]] = k;
-      }
-    }
-
-    // Predecessors, by counting then filling.
-    for (let k: u32 = 0; k <= n; k++) {
-      this.predStart[k] = 0;
-    }
-
-    for (let e: u32 = 0; e < <u32>this.succ.length; e++) {
-      this.predStart[this.succ[e] + 1]++;
-    }
-
-    for (let k: u32 = 0; k < n; k++) {
-      this.predStart[k + 1] += this.predStart[k];
-      this.fill[k] = this.predStart[k];
-    }
-
-    this.pred.length = this.succ.length;
-    for (let p: u32 = 0; p < n; p++) {
-      for (let e = this.succStart[p]; e < this.succStart[p + 1]; e++) {
-        const s = this.succ[e];
-        this.pred[this.fill[s]++] = p;
-      }
-    }
-
-    // Dominators, iterated to a fixed point in reverse postorder.
-    this.idom[0] = 0;
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (let r: u32 = 1; r < reachable; r++) {
-        const b = this.order[r];
-        let dom: i32 = -1;
-        for (let e = this.predStart[b]; e < this.predStart[b + 1]; e++) {
-          const p = this.pred[e];
-          if (this.rpo[p] >= 0 && this.idom[p] >= 0) {
-            dom = dom < 0 ? <i32>p : this.intersect(<u32>dom, p);
-          }
-        }
-
-        if (dom !== this.idom[b]) {
-          this.idom[b] = dom;
-          changed = true;
-        }
-      }
-    }
-
-    // Edges: forward ones counted, retreating ones back edges to a
-    // dominator, or irreducible. A handler's are forward, and its only ones.
-    for (let r: u32 = 0; r < reachable; r++) {
-      const p = this.order[r];
-      for (let e = this.succStart[p]; e < this.succStart[p + 1]; e++) {
-        const s = this.succ[e];
-        if (e < this.normalStart[p]) {
-          if (this.rpo[s] <= this.rpo[p]) {
-            return false;
-          }
-
-          continue;
-        }
-
-        if (this.handlerOf[s] >= 0) {
-          return false;
-        }
-
-        if (this.rpo[s] > this.rpo[p]) {
-          this.forwardIn[s]++;
-        } else if (this.dominates(s, p)) {
-          this.loopHeader[s] = 1;
-        } else {
-          return false;
-        }
-      }
-    }
-
-    // The dominator tree's children, each block's in reverse postorder.
-    for (let k: u32 = 0; k <= n; k++) {
-      this.childStart[k] = 0;
-    }
-
-    for (let r: u32 = 1; r < reachable; r++) {
-      this.childStart[this.idom[this.order[r]] + 1]++;
-    }
-
-    for (let k: u32 = 0; k < n; k++) {
-      this.childStart[k + 1] += this.childStart[k];
-      this.fill[k] = this.childStart[k];
-    }
-
-    this.child.length = reachable > 0 ? reachable - 1 : 0;
-    for (let r: u32 = 1; r < reachable; r++) {
-      const y = this.order[r];
-      this.child[this.fill[this.idom[y]]++] = y;
-    }
-
-    // The translation recurses, and its code nests, along the dominator
-    // tree: a block's code at most as deep as its dominator's, and a
-    // labelled block for each of that one's merge children, a loop and an
-    // if's braces around it. Deeper than engines parse keeps the dispatcher.
-    this.fill[0] = this.loopHeader[0];
-    for (let r: u32 = 1; r < reachable; r++) {
-      const b = this.order[r];
-      const d = <u32>this.idom[b];
-      let merges: u32 = 0;
-      for (let c = this.childStart[d]; c < this.childStart[d + 1]; c++) {
-        const y = this.child[c];
-        merges += this.handlerOf[y] >= 0 ? 2 : this.forwardIn[y] >= 2 ? 1 : 0;
-      }
-
-      const nesting = this.fill[d] + merges + this.loopHeader[b] + 1;
-      if (nesting > MAX_NESTING) {
-        return false;
-      }
-
-      this.fill[b] = nesting;
-    }
-
-    return true;
-  }
-
-  private intersect(a: u32, b: u32): u32 {
-    let x = a;
-    let y = b;
-    while (x !== y) {
-      while (this.rpo[x] > this.rpo[y]) {
-        x = <u32>this.idom[x];
-      }
-
-      while (this.rpo[y] > this.rpo[x]) {
-        y = <u32>this.idom[y];
-      }
-    }
-
-    return x;
-  }
-
-  /** Whether block a dominates block b. */
-  private dominates(a: u32, b: u32): bool {
-    let x = b;
-    while (x !== a) {
-      if (x === 0) {
-        return false;
-      }
-
-      x = <u32>this.idom[x];
-    }
-
-    return true;
-  }
-
-  /** Block x and what it dominates: in a loop if it heads one. */
-  node(x: u32): void {
-    const out = this.out;
-    // Its children in the dominator tree that are merge nodes or handlers, the latest first.
-    const merges: u32[] = [];
-    for (let c = this.childStart[x + 1]; c > this.childStart[x]; c--) {
-      const y = this.child[c - 1];
-      if (this.forwardIn[y] >= 2 || this.handlerOf[y] >= 0) {
-        merges.push(y);
-      }
-    }
-
-    if (this.loopHeader[x]) {
-      out.text("  L");
-      out.uint(x);
-      out.text(": for (;;) {\n");
-      this.within(x, merges, 0);
-      out.text("  }\n");
-    } else {
-      this.within(x, merges, 0);
-    }
-  }
-
-  /** Block x's code inside a labelled block for each merge node from j, each followed by its code. */
-  private within(x: u32, merges: u32[], j: i32): void {
-    const out = this.out;
-    if (j === merges.length) {
-      this.structuredBlock(x);
-      return;
-    }
-
-    const y = merges[j];
-    out.text("  L");
-    out.uint(y);
-    out.text(": {\n");
-    const h = this.handlerOf[y];
-    if (h >= 0) {
-      out.text("  try {\n");
-      this.tryStack.push(<u32>h);
-      this.within(x, merges, j + 1);
-      this.tryStack.pop();
-      out.text("  } catch (e) {\n");
-      this.catchClause(<u32>h, y);
-      out.text("  }\n");
-    } else {
-      this.within(x, merges, j + 1);
-    }
-
-    out.text("  }\n");
-    this.node(y);
-  }
-
-  /**
-   * Handler h's catch, around the code before its block y: the exception
-   * if it came from one of h's regions and has its type, else on.
-   */
-  private catchClause(h: u32, y: u32): void {
-    const out = this.out;
-    const ir = this.ir;
-    let low: u32 = 0;
-    let high: u32 = 0;
-    for (let r: u32 = 1; r < this.boundCount; r++) {
-      const start = this.bounds[r - 1];
-      if (this.covered[r - 1] && start >= ir.handlerFrom[h] && start < ir.handlerTo[h]) {
-        low = low ? low : r;
-        high = r;
-      }
-    }
-
-    out.text("    const x = rt.caught(e);\n    if (");
-    if (low === high) {
-      out.text("t === ");
-      out.uint(low);
-    } else {
-      out.text("t >= ");
-      out.uint(low);
-      out.text(" && t <= ");
-      out.uint(high);
-    }
-
-    const type = ir.handlerType[h];
-    if (type >= 0) {
-      out.text(" && rt.catches(x, ");
-      typeRef(this, type);
-      out.text(")");
-    }
-
-    out.text(") { ");
-    this.regName(<i32>(ir.localCount + ir.maxScope));
-    out.text(" = x; break L");
-    out.uint(y);
-    out.text("; }\n    throw e;\n");
-  }
-
-  /** Whether the handlers covering region r have their trys open, innermost first in the table's order. */
-  private enclosed(r: i32): bool {
-    if (r === 0) {
-      return true;
-    }
-
-    const ir = this.ir;
-    const start = this.bounds[r - 1];
-    let below = this.tryStack.length;
-    for (let h: u32 = 0; h < ir.handlerCount; h++) {
-      if (start < ir.handlerFrom[h] || start >= ir.handlerTo[h]) {
-        continue;
-      }
-
-      let at = below - 1;
-      while (at >= 0 && this.tryStack[at] !== h) {
-        at--;
-      }
-
-      if (at < 0) {
-        return false;
-      }
-
-      below = at;
-    }
-
-    return true;
-  }
-
-  /** Block k's instructions, and its fall-through as an explicit branch. */
-  private structuredBlock(k: u32): void {
-    this.currentBlock = k;
-    this.blockBody(k);
-    if (!this.terminates(k) && k + 1 < this.ir.blockCount) {
-      this.currentBlock = k;
-      this.out.text("    ");
-      this.branchTo(k + 1);
-      this.out.text("\n");
-    }
-  }
-
-  /** A branch from the current block to block t. */
-  private branchTo(t: u32): void {
-    const out = this.out;
-    const from = this.currentBlock;
-    if (this.loopHeader[t] && this.rpo[t] <= this.rpo[from]) {
-      out.text("continue L");
-      out.uint(t);
-      out.text(";");
-    } else if (this.forwardIn[t] >= 2) {
-      out.text("break L");
-      out.uint(t);
-      out.text(";");
-    } else {
-      // Its only way in: its code here, and then the block branching goes
-      // on, a conditional branch's, with its own types, scopes and region.
-      out.text("\n");
-      this.save();
-      // A loop's header is also entered from its end, with other checks.
-      this.inPlace = !this.loopHeader[t];
-      this.node(t);
-      this.restore();
-      this.mark();
-      this.currentBlock = from;
-    }
-  }
-
-  /** Push what writing a block follows: its registers' types, scopes and region. */
-  private save(): void {
-    const ir = this.ir;
-    const saved = this.saved;
-    for (let r: u32 = 0; r < ir.frameSize; r++) {
-      saved.push(this.regType[r]);
-    }
-
-    for (let d: u32 = 0; d < ir.maxScope; d++) {
-      saved.push(this.scopeWith[d]);
-    }
-
-    for (let r: u32 = 0; r < ir.frameSize; r++) {
-      saved.push(this.checked[r]);
-      saved.push(this.promoted[r]);
-    }
-
-    saved.push(<i32>this.scopeDepth);
-    saved.push(this.region);
-    saved.push(this.file);
-    saved.push(<i32>this.line);
-  }
-
-  /** Pop what save pushed. */
-  private restore(): void {
-    const ir = this.ir;
-    const saved = this.saved;
-    this.line = <u32>saved.pop();
-    this.file = saved.pop();
-    this.region = saved.pop();
-    this.scopeDepth = <u32>saved.pop();
-    for (let r = <i32>ir.frameSize - 1; r >= 0; r--) {
-      this.promoted[r] = <u8>saved.pop();
-      this.checked[r] = <u8>saved.pop();
-    }
-
-    for (let d = <i32>ir.maxScope - 1; d >= 0; d--) {
-      this.scopeWith[d] = <u8>saved.pop();
-    }
-
-    for (let r = <i32>ir.frameSize - 1; r >= 0; r--) {
-      this.regType[r] = saved.pop();
-    }
-  }
 
   instruction(i: u32): void {
     const out = this.out;
