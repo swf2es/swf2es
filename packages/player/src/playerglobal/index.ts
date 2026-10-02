@@ -23,6 +23,7 @@ import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js"
 import { transformNatives } from "./flash/geom/Transform.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
 import { fileFilterNatives } from "./flash/net/FileFilter.js";
+import { socketNatives } from "./flash/net/Socket.js";
 import { urlRequestNatives } from "./flash/net/URLRequest.js";
 import { urlStreamNatives } from "./flash/net/URLStream.js";
 import { telemetryNatives } from "./flash/profiler/Telemetry.js";
@@ -58,6 +59,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...telemetryNatives(),
     ...interactiveObjectNatives(s),
     ...fileFilterNatives(s),
+    ...socketNatives(s),
     ...transformNatives(s),
     ...soundTransformNatives(s),
     ...graphicsNatives(s),

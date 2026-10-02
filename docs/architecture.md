@@ -716,6 +716,17 @@ request, and `close` without one throws IOError #2029 as Flash does; reads use t
 runtime's ByteArray DataInput implementation. Relative
 URLs resolve against the main SWF until the runtime tracks the creator of
 each stream.
+
+`Socket` uses an optional host transport supplied to `Scripting`. The host
+opens the TCP connection and reports open, bytes, close and failure; the
+player delivers those reports on its next frame. ActionScript's reads and
+buffered writes use ByteArray's DataInput/DataOutput implementation; `flush`
+sends the pending bytes. A local close invalidates late host reports and
+does not dispatch `CLOSE`, while a remote close does. Without a socket host,
+connect fails on a later frame; reads, writes and close on an invalid socket
+throw IOError #2002. The browser player has no default raw TCP transport:
+an embedding page must provide one through its own permitted bridge.
+
 The Flash cases use `loadBytes`, the inner SWF carried in the outer's
 script as base64; the oracle runs under AIR, which refuses code from
 bytes unless the `LoaderContext` has `allowCodeImport`, which Flash

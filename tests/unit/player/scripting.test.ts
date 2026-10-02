@@ -62,6 +62,103 @@ test("a document class is constructed on the root and its frame scripts run in o
   assert.equal(root.depths.get(1), box);
 });
 
+test("Socket uses a host connection and delivers data on player frames", { skip }, async () => {
+  const compile = compiler(out);
+  const root = compile(
+    "SocketHostRoot",
+    "package { import flash.display.Sprite; public class SocketHostRoot extends Sprite {} }",
+  );
+  const sent: Uint8Array[] = [];
+  const closeCalls: number[] = [];
+  let opened: (() => void) | undefined;
+  let received: ((bytes: Uint8Array) => void) | undefined;
+  let remoteClose: (() => void) | undefined;
+  let failed: ((message: string) => void) | undefined;
+  const scripting = new Scripting(await createCodegen(wasm), {
+    socket: {
+      connect(host, port, events) {
+        assert.equal(host, "example.test");
+        assert.equal(port, 1234);
+        opened = events.open;
+        received = events.data;
+        remoteClose = events.close;
+        failed = events.error;
+        return {
+          send: (bytes) => sent.push(bytes),
+          close: () => closeCalls.push(1),
+        };
+      },
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(root, 1, "SocketHostRoot"), scripting);
+  await player.start();
+  const rt = scripting.rt;
+  const socket = rt.construct(rt.classNamed("flash.net::Socket")) as avm2.AsObject;
+  const events: string[] = [];
+  socket.$listeners = new Map(
+    ["connect", "socketData", "close", "ioError"].map((type) => [
+      type,
+      [{ fn: { $f: () => events.push(type) }, capture: false, priority: 0 }],
+    ]),
+  );
+  const call = (name: string, ...args: avm2.Value[]) =>
+    rt.callProperty(socket, rt.publicName(name), ...args);
+  const get = (name: string) => rt.getProperty(socket, rt.publicName(name));
+
+  assert.equal(get("connected"), false);
+  call("connect", "example.test", 1234);
+  assert.equal(get("connected"), false);
+  opened?.();
+  assert.deepEqual(events, []);
+  player.tick();
+  assert.deepEqual(events, ["connect"]);
+  assert.equal(get("connected"), true);
+
+  call("writeByte", 0x12);
+  call("writeShort", 0x3456);
+  assert.equal(get("bytesPending"), 3);
+  call("flush");
+  assert.deepEqual(
+    sent.map((bytes) => [...bytes]),
+    [[0x12, 0x34, 0x56]],
+  );
+  assert.equal(get("bytesPending"), 0);
+
+  received?.(Uint8Array.from([0x41, 0x42]));
+  assert.equal(get("bytesAvailable"), 0);
+  player.tick();
+  assert.deepEqual(events, ["connect", "socketData"]);
+  assert.equal(get("bytesAvailable"), 2);
+  assert.equal(call("readUnsignedByte"), 0x41);
+  assert.equal(call("readUnsignedByte"), 0x42);
+
+  call("close");
+  assert.equal(get("connected"), false);
+  assert.equal(closeCalls.length, 1);
+  remoteClose?.();
+  player.tick();
+  assert.deepEqual(events, ["connect", "socketData"]);
+
+  call("connect", "example.test", 1234);
+  opened?.();
+  player.tick();
+  remoteClose?.();
+  player.tick();
+  assert.deepEqual(events, ["connect", "socketData", "connect", "close"]);
+  assert.equal(get("connected"), false);
+  assert.equal(closeCalls.length, 1);
+
+  call("connect", "example.test", 1234);
+  failed?.("Error #2031: Socket Error.");
+  player.tick();
+  assert.deepEqual(events, ["connect", "socketData", "connect", "close", "ioError"]);
+  assert.equal(closeCalls.length, 2);
+  remoteClose?.();
+  player.tick();
+  assert.equal(events.length, 5);
+});
+
 test("an unloaded LoaderInfo reports its owner's URL before any load", { skip }, async () => {
   const scripting = new Scripting(await createCodegen(wasm), {
     print: () => {},
