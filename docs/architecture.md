@@ -1275,11 +1275,18 @@ search of its code table. A line is as tall as its tallest run's ascent
 and descent, each truncated to twips, plus the format's `leading` (not
 the font's); its width counts its trailing spaces. Lines break at a
 newline, and with `wordWrap` before a word that does not fit without
-its trailing space, or between characters for a word longer than the
-line. A line starts 2 pixels in, the gutter, then the margin and
-indent; centred, it is placed in the room left, and right-aligned one
-twip further left. `textHeight` is the lines' heights without the last
-one's leading, and a last line left empty by a newline does not count.
+its trailing space (one ending at the room's edge fits), or between
+characters for a word longer than the line. A line starts 2 pixels in,
+the gutter, then the margin, block indent and, on a paragraph's first
+line, its indent, and a bullet's 36 pixels; centred, it is placed in
+the room left, right-aligned one twip further left, and justified, a
+wrapped line but the paragraph's last has its inner spaces share the
+room. `textHeight` is the lines' heights, leading and all, less the
+last one's leading where there are two lines or more; a last line left
+empty by a newline does not count. adl's `numLines` can lag a
+relayout until the next one, which swf2es's does not; tab stops, and
+the boundaries adl leaves out for lines beyond the field's height, are
+still to come.
 `autoSize` makes the field the text's size and 4 pixels, keeping its
 left, centre or right edge. A device font's metrics are the browser's
 font's, measured by the host, which Flash's own system fonts differ
