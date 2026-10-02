@@ -644,6 +644,7 @@ export function drawBitmap(
   mode: string,
   clip: PixelRect | null,
   smooth: boolean,
+  rows = false,
 ): void {
   if (!BLENDS.has(mode)) {
     return;
@@ -699,7 +700,17 @@ export function drawBitmap(
     return sx >= 0 && sy >= 0 && sx < source.width && sy < source.height;
   };
 
+  // Drawn into itself, a BitmapData goes a row at a time, top down, every
+  // pixel of the row read before one is written, as Flash does: a move
+  // right keeps the pixels, a move down smears rows. Through a Bitmap of
+  // itself it is plain scan order, which smears both ways (adl).
+  const row = rows && source === store ? new Uint32Array(area.width) : null;
+  const written = row ? new Uint8Array(area.width) : null;
   for (let y = area.y; y < area.y + area.height; y++) {
+    if (row && written) {
+      written.fill(0);
+    }
+
     for (let x = area.x; x < area.x + area.width; x++) {
       let hits = 0;
       for (let k = 0; k < 16; k++) {
@@ -725,13 +736,31 @@ export function drawBitmap(
         p = scaleBy(p, hits / 16);
       }
 
-      const i = y * store.width + x;
-      const out = blend(mode, p, store.pixels[i]);
-      store.pixels[i] = store.transparent ? out : (out | 0xff000000) >>> 0;
+      if (row && written) {
+        row[x - area.x] = p;
+        written[x - area.x] = 1;
+        continue;
+      }
+
+      put(store, y * store.width + x, mode, p);
+    }
+
+    if (row && written) {
+      for (let k = 0; k < area.width; k++) {
+        if (written[k]) {
+          put(store, y * store.width + area.x + k, mode, row[k]);
+        }
+      }
     }
   }
 
   store.changed();
+}
+
+/** A drawn pixel composited into the store by the blend mode, opaque where the store is. */
+function put(store: BitmapStore, i: number, mode: string, p: number): void {
+  const out = blend(mode, p, store.pixels[i]);
+  store.pixels[i] = store.transparent ? out : (out | 0xff000000) >>> 0;
 }
 
 function nearest(source: BitmapStore, x: number, y: number): number {

@@ -60,7 +60,7 @@ export class Scripting {
   fetch: ((url: string, signal: AbortSignal) => Promise<Uint8Array>) | null = null;
   /**
    * How BitmapData.draw renders a display object: `o` through `m` into a
-   * w x h texture, read back as premultiplied ARGB; set by the host once it
+   * w x h texture at `samples` a side, read back as premultiplied ARGB; set by the host once it
    * has a renderer (PixiView.snapshot), null where there is none.
    */
   drawer:
@@ -69,6 +69,7 @@ export class Scripting {
         m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
         width: number,
         height: number,
+        samples: number,
       ) => Uint32Array)
     | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */

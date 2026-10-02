@@ -45,6 +45,18 @@ package {
       trace("Bitmap transform ignored", dump(viaMoved));
       try { new BitmapData(1, 1).draw(null); } catch (e:Error) { trace("null", e.errorID); }
 
+      // Drawn into itself: a row at a time for a BitmapData, scan order through a Bitmap.
+      for each (var move:Array in [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [2, 0]]) {
+        var self:BitmapData = new BitmapData(4, 3, true, 0);
+        for (var k:int = 0; k < 12; k++) self.setPixel32(k % 4, int(k / 4), 0xFF000000 | (k + 1) * 0x10);
+        self.draw(self, new Matrix(1, 0, 0, 1, move[0], move[1]));
+        trace("self " + move.join(","), dump(self));
+      }
+      var viaSelf:BitmapData = new BitmapData(4, 1, true, 0);
+      for (var j:int = 0; j < 4; j++) viaSelf.setPixel32(j, 0, 0xFF000000 | (j + 1) * 0x10);
+      viaSelf.draw(new Bitmap(viaSelf), new Matrix(1, 0, 0, 1, 1, 0));
+      trace("self via Bitmap", dump(viaSelf));
+
       show(new Matrix(1, 0, 0, 1, 0.5, 0), null, null, false, 0);
       show(new Matrix(1, 0, 0, 1, 0.5, 0), null, null, true, 0);
       show(new Matrix(2, 0, 0, 2, 0, 0), null, null, true, 0);

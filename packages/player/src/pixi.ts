@@ -309,9 +309,6 @@ interface Node {
   bitmap: { sprite: Sprite; source: BufferImageSource; version: number } | null;
 }
 
-/** Samples a side of each pixel a snapshot renders, averaged down. */
-const SNAPSHOT_SAMPLES = 4;
-
 export class PixiView {
   readonly stage = new PixiContainer();
   private readonly nodes = new WeakMap<DisplayObject, Node>();
@@ -534,9 +531,10 @@ export class PixiView {
     m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
     width: number,
     height: number,
+    samples = 4,
   ): Uint32Array {
-    // Rendered at 4 x 4 samples a pixel and averaged, as Flash covers edges at its high quality.
-    const n = SNAPSHOT_SAMPLES;
+    // Rendered at samples x samples a pixel and averaged, as Flash covers edges: 4 at its high quality.
+    const n = samples;
     const view = new PixiView(this.renderer, true);
     const node = view.sync(o, [m.a * n, m.b * n, m.c * n, m.d * n], true);
     node.setFromMatrix(new Matrix(m.a * n, m.b * n, m.c * n, m.d * n, m.tx * n, m.ty * n));

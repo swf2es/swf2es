@@ -710,10 +710,11 @@ export const cases: PlayerCase[] = [
     script: "DrawObjects",
     frames: 1,
     capture: [1],
-    // Edges are each rasteriser's own anti-aliasing, Flash's and the GPU's: a dozen drawn
-    // pixels magnified 4 times, within 64 a channel.
+    // Edges are each rasteriser's own: anti-aliased at high quality, a dozen drawn pixels
+    // within 64 a channel; at low quality, aliased, where a curve passes near a pixel's
+    // centre the two decide differently, some 30 more. Each drawn pixel is 16 here.
     tolerance: 32,
-    maxOutliers: 256,
+    maxOutliers: 768,
   },
   {
     name: "addChild",

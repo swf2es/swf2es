@@ -55,7 +55,14 @@ package {
       f.draw(group, new Matrix(0, 1, -1, 0, 16, 0));
       trace("group turned", px(f, 8, 12), px(f, 14, 2));
 
-      for each (var bd:BitmapData in [a, b, c, d, e, f]) {
+      var g:BitmapData = new BitmapData(16, 16, true, 0);
+      g.drawWithQuality(group, new Matrix(0, 1, -1, 0, 16, 0), null, null, null, false, "low");
+      trace("group low quality", px(g, 8, 12), px(g, 14, 2));
+      var h:BitmapData = new BitmapData(256, 256, true, 0);
+      h.draw(square, new Matrix(1, 0, 0, 1, 200, 200));
+      trace("small object in a large bitmap", px(h, 204, 204), px(h, 212, 212), px(h, 10, 10));
+
+      for each (var bd:BitmapData in [a, b, c, d, e, f, g]) {
         var bm:Bitmap = new Bitmap(bd);
         bm.scaleX = bm.scaleY = 4;
         bm.x = 2 + (shown % 4) * 100;
