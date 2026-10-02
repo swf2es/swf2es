@@ -1,0 +1,6 @@
+shape ffff0000 7f0000ff ff80007f 0 0
+shape scaled ffff0000 7f0000ff 0
+shape ct over bffefe55 9f9affff 80ffffff
+shape clip opaque ffff0000 ff336699 ff336699
+group ff00ff00 3f000000 ff00c000 0
+group turned ff00ff00 3f000000

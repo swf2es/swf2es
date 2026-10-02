@@ -911,8 +911,20 @@ the document class is constructed, which renders the object's subtree
 through the matrix into a texture of the bitmap's size and reads it back
 synchronously, as WebGL's readPixels allows, to composite as a bitmap
 source is; without a renderer, as in node, drawing a display object is
-not supported. Each rule is Flash's as a case traces and draws it under
-adl. `draw` of a display object into a bitmap is that slice; the filters
+not supported. The snapshot renders at 4 × 4 samples a pixel and
+averages them, as Flash covers edges at its high quality, in a fresh view
+that leaves the objects' dirty flags to the stage's. Each rule is Flash's
+as the `draw-bitmaps` and `draw-objects` cases trace and draw it under
+adl: a destination pixel takes the source pixel under its centre,
+clamped to the source's edges; the translation is snapped down to
+quarter pixels before rasterising, which the 4 × 4 coverage reads exactly
+(a move of 0.49 covers three quarters of the left edge pixels); `normal`
+is the store's source-over; a Bitmap draws as its data, its own transform
+ignored, as any source's is; `alpha` and `erase` do nothing to a bitmap
+drawn, which has no layer; `invert` ignores the source's colour; a fill's
+alpha is a byte floored, 0.5 being 127, on the stage as in a draw. The
+other blend modes follow the W3C's compositing and are judged by the
+frame, within 2 a channel. `draw` of a display object into a bitmap is that slice; the filters
 and the SWF's bitmap tags (`DefineBitsLossless`, `DefineBitsJPEG2` and 3) as characters
 follow, each by what Flash traces and draws under adl.
 
