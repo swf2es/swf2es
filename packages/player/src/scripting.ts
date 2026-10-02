@@ -58,6 +58,20 @@ export class Scripting {
   private dynamic = 0;
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
   fetch: ((url: string, signal: AbortSignal) => Promise<Uint8Array>) | null = null;
+  /**
+   * How BitmapData.draw renders a display object: `o` through `m` into a
+   * w x h texture at `samples` a side, read back as premultiplied ARGB; set by the host once it
+   * has a renderer (PixiView.snapshot), null where there is none.
+   */
+  drawer:
+    | ((
+        o: DisplayObject,
+        m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
+        width: number,
+        height: number,
+        samples: number,
+      ) => Uint32Array)
+    | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
   /**

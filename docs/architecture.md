@@ -898,9 +898,41 @@ taken modulo 2^bits − 1 and 0 starts at the tap, and a count past the
 w · h − 1 states a round visits is one round and the remainder, which
 gives Flash's seed without its loop (Flash itself takes seconds over
 2^31 − 1).
-`draw`
-of a display object into a bitmap, the filters, and the SWF's bitmap
-tags (`DefineBitsLossless`, `DefineBitsJPEG2` and 3) as characters
+Slice three is `draw` and `drawWithQuality`, in two paths. A
+BitmapData or a Bitmap drawn is composited on the CPU, in `bitmap.ts`'s
+arithmetic: through the matrix by the inverse of each destination
+pixel's centre, nearest or bilinear as `smoothing` asks, the colour
+transform as `colorTransform` applies it, then the blend mode (normal,
+`alpha`, `erase`, `multiply`, `screen`, `lighten`, `darken`,
+`difference`, `add`, `subtract`, `invert`), all clipped to `clipRect` and
+the bitmap. Any other display object is drawn by the renderer: the
+Scripting has a `drawer` the host sets once its renderer exists, before
+the document class is constructed, which renders the object's subtree
+through the matrix into a texture of the bitmap's size and reads it back
+synchronously, as WebGL's readPixels allows, to composite as a bitmap
+source is; without a renderer, as in node, drawing a display object is
+not supported. The snapshot renders only the object's bounds through
+the matrix, a pixel wider, within the clip and the bitmap, so its cost is
+the object's size, not the bitmap's; at 4 × 4 samples a pixel averaged
+down, as Flash covers edges at its high quality (`drawWithQuality` takes
+1, 2 or 4 for low, medium and high), in a fresh view
+that leaves the objects' dirty flags to the stage's. Each rule is Flash's
+as the `draw-bitmaps` and `draw-objects` cases trace and draw it under
+adl: a destination pixel takes the source pixel under its centre,
+clamped to the source's edges; the translation is snapped down to
+quarter pixels before rasterising, which the 4 × 4 coverage reads exactly
+(a move of 0.49 covers three quarters of the left edge pixels); `normal`
+is the store's source-over; a Bitmap draws as its data, its own transform
+ignored, as any source's is; a BitmapData drawn into itself goes a row
+at a time, top down, every pixel of the row read before one is written,
+so a move right keeps the pixels and a move down smears rows, while
+through a Bitmap of itself it goes in plain scan order and smears both
+ways; `alpha` and `erase` do nothing to a bitmap
+drawn, which has no layer; `invert` ignores the source's colour; a fill's
+alpha is a byte floored, 0.5 being 127, on the stage as in a draw. The
+other blend modes follow the W3C's compositing and are judged by the
+frame, within 2 a channel. `draw` of a display object into a bitmap is that slice; the filters
+and the SWF's bitmap tags (`DefineBitsLossless`, `DefineBitsJPEG2` and 3) as characters
 follow, each by what Flash traces and draws under adl.
 
 ## Testing against oracles

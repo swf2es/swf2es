@@ -470,6 +470,45 @@ function replaces(abc: Uint8Array): Uint8Array {
 // A root of two frames whose document class makes BitmapDatas and shows three
 // Bitmaps (scripts/Bitmaps.as), then changes their pixels on frame 2: what
 // Flash traces of the pixel store, and draws before and after.
+// A root of one frame, 210 by 64, whose document class draws bitmaps into
+// bitmaps and shows the ones whose pixels the rasteriser decides
+// (scripts/DrawBitmaps.as).
+function drawBitmaps(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 210,
+    height: 64,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "DrawBitmaps"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A root of one frame, 400 by 140, whose document class draws display
+// objects into bitmaps and shows them (scripts/DrawObjects.as).
+function drawObjects(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 400,
+    height: 140,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "DrawObjects"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 function bitmaps(abc: Uint8Array): Uint8Array {
   return w.swf({
     width: 200,
@@ -654,6 +693,28 @@ export const cases: PlayerCase[] = [
     capture: [1],
     tolerance: 0,
     maxOutliers: 0,
+  },
+  {
+    name: "draw-bitmaps",
+    swf: drawBitmaps,
+    script: "DrawBitmaps",
+    frames: 1,
+    capture: [1],
+    // The smoothed tiles: Flash's bilinear filter and the GPU's part by up to 2 a channel.
+    tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
+    name: "draw-objects",
+    swf: drawObjects,
+    script: "DrawObjects",
+    frames: 1,
+    capture: [1],
+    // Edges are each rasteriser's own: anti-aliased at high quality, a dozen drawn pixels
+    // within 64 a channel; at low quality, aliased, where a curve passes near a pixel's
+    // centre the two decide differently, some 30 more. Each drawn pixel is 16 here.
+    tolerance: 32,
+    maxOutliers: 768,
   },
   {
     name: "addChild",

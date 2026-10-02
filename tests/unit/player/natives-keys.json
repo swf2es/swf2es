@@ -13,6 +13,8 @@
     "flash.display::BitmapData#copyPixels",
     "flash.display::BitmapData#copyPixelsToByteArray",
     "flash.display::BitmapData#dispose",
+    "flash.display::BitmapData#draw",
+    "flash.display::BitmapData#drawWithQuality",
     "flash.display::BitmapData#fillRect",
     "flash.display::BitmapData#flash.display:BitmapData::ctor",
     "flash.display::BitmapData#floodFill",

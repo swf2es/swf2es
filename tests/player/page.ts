@@ -98,7 +98,6 @@ async function runSwf(
   try {
     scripting = await scriptingFor(bytes, trace, url);
     const player = new Player(bytes, scripting);
-    await player.start();
     const n = GRID[quality] ?? 4;
     const renderer = await autoDetectRenderer({
       preference: "webgl",
@@ -117,6 +116,13 @@ async function runSwf(
     output.height = player.height;
     document.body.replaceChildren(output);
     const view = new PixiView(renderer);
+    // BitmapData.draw of a display object renders with it, from the document class on.
+    if (scripting) {
+      scripting.drawer = (o, m, width, height, samples) =>
+        view.snapshot(o, m, width, height, samples);
+    }
+
+    await player.start();
     for (let frame = 1; frame <= frames; frame++) {
       if (frame > 1) {
         // What a frame asked to load is linked between frames, as in a browser's.

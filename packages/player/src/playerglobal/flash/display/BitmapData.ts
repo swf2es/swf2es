@@ -4,10 +4,12 @@
 import { avm2 } from "@swf2es/runtime";
 import { BitmapStore, type PixelRect } from "../../../bitmap.js";
 import {
+  type Affine,
   alphaAt,
   colorBounds,
   colorTransform,
   copyChannel,
+  drawBitmap,
   floodFill,
   histogram,
   isThresholdOperation,
@@ -17,6 +19,8 @@ import {
   scroll,
   threshold,
 } from "../../../bitmap-ops.js";
+import { bounds } from "../../../bounds.js";
+import { transformRect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
 import { colorOf } from "../geom/Transform.js";
 
@@ -91,6 +95,107 @@ function sourceOf(s: Scripting, v: Value): BitmapStore {
   }
 
   return storeOf(s, v as AsObject);
+}
+
+/**
+ * draw: a BitmapData, or a Bitmap as its data, its own transform ignored,
+ * composited on the CPU (bitmap-ops.ts drawBitmap); any other display
+ * object rendered by the Scripting's drawer at `samples` a side, over its
+ * own bounds alone, then composited the same way. A null source is
+ * ArgumentError 2005, as Flash words it.
+ */
+function drawInto(
+  s: Scripting,
+  store: BitmapStore,
+  source: Value,
+  matrix: Value,
+  ct: Value,
+  mode: Value,
+  clip: Value,
+  smoothing: Value,
+  samples = 4,
+): void {
+  if (source === null || source === undefined) {
+    throw s.rt.error("ArgumentError", 2005, 0);
+  }
+
+  const o = source as AsObject;
+  const data: AsObject | null =
+    o.$store !== undefined ? o : o.$display?.store !== undefined ? (o.$bitmapData ?? null) : null;
+  if (data === null && o.$display === undefined) {
+    throw s.rt.error("ArgumentError", 2005, 0);
+  }
+
+  const m =
+    matrix === null || matrix === undefined
+      ? { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }
+      : matrixOf(s, matrix as AsObject);
+  const c = ct === null || ct === undefined ? null : colorOf(s, ct as AsObject);
+  const blend = mode === null || mode === undefined ? "normal" : s.rt.toString(mode);
+  const r = clip === null || clip === undefined ? null : rectOf(s, clip);
+  if (data === null) {
+    // Any other display object, through the renderer, then composited as a bitmap is.
+    if (!s.drawer) {
+      throw s.rt.unsupported("BitmapData#draw of a display object without a renderer");
+    }
+
+    // Only the part the object can reach: its bounds through the matrix, a
+    // pixel wider for anti-aliasing, within the clip and the bitmap; the
+    // snapshot's cost is then the object's size, not the bitmap's.
+    const local = bounds(o.$display, true);
+    if (!local) {
+      return;
+    }
+
+    const reach = transformRect(local, m);
+    const x0 = Math.max(0, Math.floor(reach.xMin) - 1, r ? r.x : 0);
+    const y0 = Math.max(0, Math.floor(reach.yMin) - 1, r ? r.y : 0);
+    const x1 = Math.min(store.width, Math.ceil(reach.xMax) + 1, r ? r.x + r.width : store.width);
+    const y1 = Math.min(store.height, Math.ceil(reach.yMax) + 1, r ? r.y + r.height : store.height);
+    if (x1 <= x0 || y1 <= y0) {
+      return;
+    }
+
+    const drawn = new BitmapStore(x1 - x0, y1 - y0, true, 0);
+    drawn.pixels = s.drawer(
+      o.$display,
+      { ...m, tx: m.tx - x0, ty: m.ty - y0 },
+      x1 - x0,
+      y1 - y0,
+      samples,
+    );
+    drawBitmap(store, drawn, { a: 1, b: 0, c: 0, d: 1, tx: x0, ty: y0 }, c, blend, r, false);
+    return;
+  }
+
+  if (data.$bitmapData === null && data.$store === undefined) {
+    return;
+  }
+
+  // A BitmapData drawn into itself goes a row at a time; through a Bitmap, in scan order.
+  drawBitmap(store, storeOf(s, data), m, c, blend, r, !!smoothing, o.$store !== undefined);
+}
+
+/** Samples a side of each pixel a display object is rendered at, by drawWithQuality's quality: Flash's 1, 2 and 4. */
+function samplesOf(s: Scripting, quality: Value): number {
+  if (quality === null || quality === undefined) {
+    return 4;
+  }
+
+  switch (s.rt.toString(quality).toLowerCase()) {
+    case "low":
+      return 1;
+    case "medium":
+      return 2;
+    default:
+      return 4;
+  }
+}
+
+/** A flash.geom.Matrix's six values. */
+function matrixOf(s: Scripting, o: AsObject): Affine {
+  const read = (k: string) => s.rt.toNumber(s.rt.getProperty(o, s.rt.publicName(k)));
+  return { a: read("a"), b: read("b"), c: read("c"), d: read("d"), tx: read("tx"), ty: read("ty") };
 }
 
 export function bitmapDataNatives(s: Scripting): avm2.Natives {
@@ -509,6 +614,39 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         seed === undefined ? 0 : s.rt.toNumber(seed),
         n,
         fill === undefined ? 0 : s.rt.toUint(fill),
+      );
+    }
+
+    draw(
+      source: Value,
+      matrix: Value,
+      ct: Value,
+      mode: Value,
+      clip: Value,
+      smoothing: Value,
+    ): void {
+      drawInto(s, storeOf(s, this), source, matrix, ct, mode, clip, smoothing);
+    }
+
+    drawWithQuality(
+      source: Value,
+      matrix: Value,
+      ct: Value,
+      mode: Value,
+      clip: Value,
+      smoothing: Value,
+      quality: Value,
+    ): void {
+      drawInto(
+        s,
+        storeOf(s, this),
+        source,
+        matrix,
+        ct,
+        mode,
+        clip,
+        smoothing,
+        samplesOf(s, quality),
       );
     }
 
