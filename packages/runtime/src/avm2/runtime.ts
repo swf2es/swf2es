@@ -232,6 +232,8 @@ export interface ClassHook {
   apply?: (rt: Runtime, factory: AsObject, params: Value[]) => AsObject;
   /** What the VM sets up on the class once its static initializer has run, as avmshell's Worker.current. */
   created?: (rt: Runtime, cls: AsObject) => void;
+  /** As construct="restricted": a subclass from another ABC cannot be constructed, nor what extends it. */
+  restricted?: boolean;
 }
 
 // Binding kinds, as the compiler encodes them: kind | id << 3.
@@ -310,6 +312,10 @@ export class Traits {
   /** The class's: whether it is final or an interface, its constructor's parameters, its own metadata. */
   final = false;
   isInterface = false;
+  /** The ABC that defines the class, whether it is restricted, and whether that makes it one nothing constructs. */
+  abc: object | null = null;
+  restricted = false;
+  uninstantiable = false;
   ctor: [TypeRef[], number] | null = null;
   metadata: Metadata[] | null = null;
   getIndex?: IndexHook["getIndex"];
@@ -1843,6 +1849,10 @@ export class Runtime {
       throw this.error("VerifyError", 1001, `${cls.$it.name}()`);
     }
 
+    if (cls.$it.uninstantiable) {
+      throw this.error("ArgumentError", 2012, cls.$it.name);
+    }
+
     const o = cls.$it.instance();
     cls.$it.proto.$init.apply(o, args);
     return o;
@@ -2036,6 +2046,12 @@ export class Runtime {
     itraits.ctor = desc.ctor ?? null;
     itraits.metadata = desc.meta ?? null;
     itraits.refusesNames = !!hooks?.refusesNames;
+    // As ClassClosure::checkForRestrictedInheritance.
+    itraits.restricted = !!hooks?.restricted;
+    itraits.uninstantiable =
+      !!baseTraits &&
+      (baseTraits.uninstantiable || (baseTraits.restricted && baseTraits.abc !== abc));
+    itraits.abc = abc;
 
     // A class's allocation, bound to the runtime; its subclasses inherit it.
     const create = hooks?.create;

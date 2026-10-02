@@ -319,8 +319,30 @@ export function shellNatives(rt: Runtime): Natives {
   return natives;
 }
 
-/** As ShellWorkerClass: Worker.current is the primordial worker, made with the class. */
+/** As construct="abstract" and "native": AS3 does not construct the class itself, a subclass it may. */
+const abstract = (name: string): ClassHook => ({
+  construct: (rt) => {
+    throw rt.error("ArgumentError", 2012, name);
+  },
+});
+
+/**
+ * As ShellWorkerClass: Worker.current is the primordial worker, made with
+ * the class. And avmshell's classes that test how a native class may limit
+ * its construction.
+ */
 export const shellHooks: Record<string, ClassHook> = {
+  "avmshell::AbstractBase": abstract("AbstractBase"),
+  "avmshell::RestrictedBase": { restricted: true },
+  "avmshell::AbstractRestrictedBase": { ...abstract("AbstractRestrictedBase"), restricted: true },
+  "avmshell::NativeBase": abstract("NativeBase"),
+  "avmshell::NativeBaseAS3": abstract("NativeBaseAS3"),
+  // As CheckBaseClass::preCreateInstanceCheck, which throws an error of its own.
+  "avmshell::CheckBase": {
+    construct: (rt) => {
+      throw rt.error("ArgumentError", 1001, "avmshell::CheckBase");
+    },
+  },
   "flash.system::Worker": {
     created(rt: Runtime, cls: AsObject): void {
       setStaticVar(cls, "m_current", rt.constructClass(cls, []));
