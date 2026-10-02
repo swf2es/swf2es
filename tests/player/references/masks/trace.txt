@@ -9,9 +9,11 @@ frame 1 scroll width 50 40 bounds (x=175, y=75, w=50, h=40) (x=0, y=0, w=50, h=4
 frame 1 local (0,0) global (x=175, y=75) a.width 100 mask visible true
 frame 1 hits in a true false true in the off-list mask's false
 frame 1 hits in s true false true
+frame 1 bitmap-masked: opaque true transparent true outside false edge true false the masks themselves false false
 frame 1 scrolled and masked: hit true true true false
 frame 2 scroll width 50 40 bounds (x=175, y=75, w=50, h=40) (x=0, y=0, w=50, h=40) x 200 (a=1, b=0, c=0, d=1, tx=200, ty=100)
 frame 2 local (0,0) global (x=175, y=75) a.width 100 mask visible true
 frame 2 hits in a true false true in the off-list mask's false
 frame 2 hits in s true false true
+frame 2 bitmap-masked: opaque true transparent true outside false edge true false the masks themselves false false
 frame 2 scrolled and masked: hit true true true false

@@ -5,7 +5,7 @@ package {
 
   public class Masks extends Sprite {
     private var frames:int = 0;
-    private var a:Sprite, s:Sprite, p:Sprite, m:Shape, a2:Sprite, a3:Sprite, m2:Shape, hc:Sprite;
+    private var a:Sprite, s:Sprite, p:Sprite, m:Shape, a2:Sprite, a3:Sprite, m2:Shape, hc:Sprite, g:Sprite, gm:Bitmap;
 
     private function rect(color:uint, x:Number, y:Number, w:Number, h:Number):Sprite {
       var r:Sprite = new Sprite();
@@ -105,10 +105,10 @@ package {
       trace("reassigned: a2.mask", a2.mask, "a3.mask is m2", a3.mask == m2);
 
       // (0,2): a bitmap mask, its data transparent but for a corner.
-      var g:Sprite = rect(0xff0000, 0, 200, 100, 100);
+      g = rect(0xff0000, 0, 200, 100, 100);
       var bd:BitmapData = new BitmapData(60, 60, true, 0);
       bd.fillRect(new Rectangle(0, 0, 30, 30), 0xff000000);
-      var gm:Bitmap = new Bitmap(bd);
+      gm = new Bitmap(bd);
       gm.x = 20;
       gm.y = 220;
       addChild(g);
@@ -162,6 +162,7 @@ package {
       trace("frame", frames, "local (0,0) global", s.localToGlobal(new Point(0, 0)), "a.width", a.width, "mask visible", m.visible);
       trace("frame", frames, "hits in a", a.hitTestPoint(5, 5, false), a.hitTestPoint(5, 5, true), a.hitTestPoint(50, 50, true), "in the off-list mask's", p.getChildAt(0).hitTestPoint(150, 50, true));
       trace("frame", frames, "hits in s", s.hitTestPoint(210, 110, false), s.hitTestPoint(290, 190, false), s.hitTestPoint(210, 110, true));
+      trace("frame", frames, "bitmap-masked: opaque", g.hitTestPoint(30, 230, true), "transparent", g.hitTestPoint(70, 270, true), "outside", g.hitTestPoint(90, 290, true), "edge", g.hitTestPoint(80, 250, true), g.hitTestPoint(81, 250, true), "the masks themselves", gm.hitTestPoint(30, 230, true), m.hitTestPoint(50, 50, true));
       trace("frame", frames, "scrolled and masked: hit", hc.hitTestPoint(103, 250, true), hc.hitTestPoint(112, 250, true), hc.hitTestPoint(150, 250, true), hc.hitTestPoint(185, 250, true));
     }
   }

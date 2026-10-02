@@ -1250,7 +1250,8 @@ clips through its own place there. Off the list it clips through its own
 matrix, taken in the stage's space. One mask clips one object, so
 setting it on a second takes it off the first, whose `mask` is then
 null. Neither kind changes bounds or `width`, and a shape hit test
-follows `mask` but not a timeline's masks. The renderer gives each
+follows `mask` but not a timeline's masks; a mask itself is never hit,
+and a Bitmap, masking or not, is hit over its whole rectangle. The renderer gives each
 mask to Pixi as a stencil: a timeline's range goes in a container whose
 mask is the clip-depth child, and a mask's lines are hidden while it
 masks. When both objects are cached as bitmaps Flash clips by the

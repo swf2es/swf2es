@@ -124,7 +124,8 @@ export function hitsPoint(
     return r !== null && contains(r, lx, ly);
   }
 
-  if (!underRoot(d)) {
+  // A mask is not drawn, and adl hits nothing of it.
+  if (!underRoot(d) || d.maskOf) {
     return false;
   }
 
@@ -199,6 +200,12 @@ function drawnAt(d: DisplayObject, x: number, y: number, probe: Probe, mask: boo
 
   if (!mask && d.mask && !d.maskOf && !d.mask.encloses(d) && !inMask(d.mask, probe)) {
     return false;
+  }
+
+  // A Bitmap is hit, and masks, over its whole rectangle, transparent pixels and all.
+  if (d instanceof BitmapObject) {
+    const store = d.store;
+    return !!store && !store.disposed && x >= 0 && x < store.width && y >= 0 && y < store.height;
   }
 
   const layers: ShapeLayer[] =
