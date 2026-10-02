@@ -1360,7 +1360,25 @@ bevel's highlight before its shadow, as adl reads it), and gives copies
 back, so `filters === filters` is false and a filter changed after it was
 set changes nothing. BitmapFilter is abstract, and restricted: a script's
 class extending it is refused, while one extending a filter of
-playerglobal's is made. Drawing the filters is still to come.
+playerglobal's is made.
+
+BitmapData's `applyFilter` filters on the CPU, as adl computes
+(`bitmap-filters.ts`): the source's premultiplied channels over the
+filter's rect, what lies outside the source rect transparent, written
+whole into the destination, moved to its point and clipped; an opaque
+destination keeps its alpha. `generateFilterRect` grows a rect by
+ceil(blur × quality / 2) each way, and a shadow's by its offset too. A
+blur is a box of fractional width, its end pixels weighted by their
+part, run along x and then y `quality` times, each value truncated to
+8 bits. A glow's alpha is that blur of the source's alpha (of 255 less
+it, for an inner one), truncated, times strength to 255 and alpha, over
+or under the source as the display's are; a shadow samples it from its
+offset between pixels, linearly with weights in 256ths. A colour matrix
+maps straight colour, rounded, the pixels about what the source has
+premultiplied truncated and the rest of the rect the map of a
+transparent pixel. The `apply-filter` case matches adl's numbers to the
+bit. Bevels, convolution, displacement maps and gradient filters throw
+as not supported yet. Drawing the filters is still to come.
 
 ### Masks and scroll rectangles
 

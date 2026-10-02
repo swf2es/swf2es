@@ -3,6 +3,7 @@
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
 import { BitmapStore, type PixelRect } from "../../../bitmap.js";
+import { applyFilter, filterRect, filtersDrawn } from "../../../bitmap-filters.js";
 import {
   type Affine,
   alphaAt,
@@ -20,10 +21,12 @@ import {
   threshold,
 } from "../../../bitmap-ops.js";
 import { bounds } from "../../../bounds.js";
+import type { Filter } from "../../../filters.js";
 import { transformRect } from "../../../geometry.js";
 import { encodePng } from "../../../png.js";
 import type { Scripting } from "../../../scripting.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../timeline.js";
+import { filterKindOf, recordOf } from "../filters/filters.js";
 import { colorOf } from "../geom/Transform.js";
 
 type Value = avm2.Value;
@@ -206,6 +209,15 @@ function matrixOf(s: Scripting, o: AsObject): Affine {
 
 export function bitmapDataNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
+  /** A filter object's record; TypeError 2007 for null, as for anything that is no filter. */
+  const filterOf = (v: Value): Filter => {
+    const kind = v && typeof v === "object" ? filterKindOf(s.rt, v as AsObject) : null;
+    if (!kind) {
+      throw s.rt.error("TypeError", 2007, "filter");
+    }
+
+    return recordOf(v as AsObject, kind);
+  };
 
   class BitmapDataNatives {
     declare $store: BitmapStore | null;
@@ -329,6 +341,29 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
           ? [0, 0]
           : pointOf(s, alphaPoint, "alphaPoint");
       store.copyPixels(from, r, dx, dy, !!mergeAlpha, alpha, ax, ay);
+    }
+
+    /** `sourceRect` of the source filtered into this at `destPoint`, its filter's rect written whole (bitmap-filters.ts). */
+    applyFilter(source: Value, sourceRect: Value, destPoint: Value, filter: Value): void {
+      const store = storeOf(s, this);
+      const from = sourceOf(s, source);
+      const r = rectOf(s, sourceRect);
+      const [dx, dy] = pointOf(s, destPoint, "destPoint");
+      const f = filterOf(filter);
+      if (!applyFilter(store, from, r, dx, dy, f)) {
+        throw s.rt.unsupported(`BitmapData.applyFilter with a ${f.kind} filter`);
+      }
+    }
+
+    generateFilterRect(sourceRect: Value, filter: Value): Value {
+      storeOf(s, this);
+      const f = filterOf(filter);
+      if (!filtersDrawn.has(f.kind)) {
+        throw s.rt.unsupported(`BitmapData.generateFilterRect with a ${f.kind} filter`);
+      }
+
+      const r = filterRect(rectOf(s, sourceRect), f);
+      return s.rt.construct(s.rt.classNamed("flash.geom::Rectangle"), r.x, r.y, r.width, r.height);
     }
 
     getPixels(rect: Value): Value {
