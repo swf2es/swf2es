@@ -2211,6 +2211,12 @@ export class BodyDecoder {
       }
 
       this.popPush(n, propType, domain.typeNotNull(propType) ? NOT_NULL : 0);
+      // An interface's accessor has no dispatch id of its own on the
+      // receiver: its name finds the receiver's.
+      if (domain.traits.isInterface[type]) {
+        return this.emitOn(ops.OP_getproperty, <i32>obj, <i32>obj, n, mn, 0, 0);
+      }
+
       return this.emitOn(IR_CallGetter, <i32>obj, <i32>obj, 1, b >> 3, 0, getter);
     }
 
@@ -2298,6 +2304,10 @@ export class BodyDecoder {
       const setter = domain.traits.dispatch[domain.traits.dispatchStart[type] + (b >> 3) + 1];
       if (setter >= 0 && !this.coerceArgs(<u32>setter, 1)) {
         return false;
+      }
+
+      if (domain.traits.isInterface[type]) {
+        return this.emitOn(opcode, -1, <i32>obj, n, mn, 0, 0);
       }
 
       return this.emitOn(IR_CallSetter, -1, <i32>obj, 2, (b >> 3) + 1, 0, setter);
