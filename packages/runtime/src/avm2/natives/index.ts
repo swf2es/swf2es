@@ -9,6 +9,7 @@ import type { ClassHook, Runtime } from "../runtime.js";
 import { aliasesNatives } from "./aliases.js";
 import { arrayHooks, arrayNatives } from "./array.js";
 import { byteArrayHook, byteArrayNatives, domainNatives } from "./bytearray.js";
+import { concurrentNatives } from "./concurrent.js";
 import { dateHook, dateNatives } from "./date.js";
 import type { Natives } from "./define.js";
 import { describeNatives } from "./describe.js";
@@ -41,6 +42,7 @@ export function builtinNatives(rt: Runtime): Natives {
     ...vectorNatives,
     ...byteArrayNatives(rt),
     ...domainNatives(rt),
+    ...concurrentNatives(rt),
     ...dateNatives(),
     ...jsonNatives(),
     ...xmlNatives,
