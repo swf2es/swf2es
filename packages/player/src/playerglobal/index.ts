@@ -30,6 +30,7 @@ import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { securityNatives } from "./flash/system/Security.js";
 import { systemNatives } from "./flash/system/System.js";
 import { workerHooks, workerNatives } from "./flash/system/Worker.js";
+import { byteArrayHooks } from "./flash/utils/ByteArray.js";
 import { timerNatives } from "./flash/utils/Timer.js";
 import { toplevelNatives } from "./toplevel.js";
 
@@ -69,6 +70,7 @@ export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
   return {
     ...displayObjectHooks(s),
     ...bitmapDataHooks(s),
+    ...byteArrayHooks(s),
     ...httpStatusHooks,
     ...workerHooks(),
   };

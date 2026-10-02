@@ -368,6 +368,11 @@ export function symbolClass(symbols: [number, string][]): Uint8Array {
   return tag(76, w.done());
 }
 
+/** DefineBinaryData: bytes for a ByteArray subclass that symbolClass binds to `id`. */
+export function binaryData(id: number, data: Uint8Array): Uint8Array {
+  return tag(87, concat([new BitWriter().u16(id).u32(0).done(), data]), true);
+}
+
 /** A DefineSprite with its own tags; they should end with showFrame()s and end(). */
 export function sprite(id: number, frameCount: number, tags: Uint8Array[]): Uint8Array {
   return tag(39, concat([new BitWriter().u16(id).u16(frameCount).done(), ...tags]));

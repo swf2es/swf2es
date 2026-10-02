@@ -6,6 +6,7 @@ import {
   type Bitmap,
   isBitmapTag,
   type Place,
+  readBinaryData,
   readBitmap,
   readFrameLabel,
   readPlace,
@@ -58,7 +59,19 @@ export interface BitmapCharacter {
   pixels: BitmapPixels | null;
 }
 
-export type Character = ShapeCharacter | SpriteCharacter | BitmapCharacter;
+/** DefineBinaryData's bytes, which a ByteArray subclass bound to them starts with. */
+export interface BinaryCharacter {
+  type: "binary";
+  id: number;
+  data: Uint8Array;
+  /** The bytes every instance shares, as Flash's do until one is resized: made when the first is. */
+  shared?: Uint8Array<ArrayBuffer>;
+}
+
+export type Character = ShapeCharacter | SpriteCharacter | BitmapCharacter | BinaryCharacter;
+
+/** What a timeline can place: every character but data. */
+export type DisplayCharacter = Exclude<Character, BinaryCharacter>;
 
 /** What Flash makes of a bitmap it cannot read. */
 export const INVALID_PIXELS: BitmapPixels = {
@@ -78,7 +91,7 @@ export interface Library {
    * SWF has scripts (Scripting.construct); null in an AVM1 movie. A clip's
    * first frame is entered on the way, by Sprite's constructChildren.
    */
-  construct: ((display: DisplayObject, character: Character) => void) | null;
+  construct: ((display: DisplayObject, character: DisplayCharacter) => void) | null;
   /** Told before a timeline child goes, for the events a script sees; null in an AVM1 movie. */
   /** Tells of a display object about to lose its parent, and whether the timeline takes it (a script's removal otherwise). */
   removing: ((display: DisplayObject, byTimeline: boolean) => void) | null;
@@ -126,6 +139,11 @@ function timelineOf(
           id: sprite.id,
           timeline: timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg),
         });
+        break;
+      }
+      case tags.DefineBinaryData: {
+        const { id, data } = readBinaryData(bytes, t);
+        library.set(id, { type: "binary", id, data });
         break;
       }
       case tags.JPEGTables:

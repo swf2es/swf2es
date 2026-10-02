@@ -6,6 +6,7 @@ export { messages } from "./messages.js";
 export { publicNs, qname } from "./names.js";
 export {
   Bytes,
+  byteArrayHook,
   bytesOf,
   GLOBAL_MEMORY_MIN_SIZE,
   setDomainMemory,

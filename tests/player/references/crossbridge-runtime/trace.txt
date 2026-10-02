@@ -1,0 +1,21 @@
+blob 8 0 hello 254 6
+blob again 8 88 88 true
+domain memory 1024 null
+short 1504
+domain true -559038737 1024 2048
+shrink 1506
+read back 7 2048
+cleared null
+worker true true running
+shared undefined
+shared 3
+mutex true
+unlock 1514
+notify 1516
+telemetry false true
+constructed
+exitFrame 0
+init true
+complete true
+enterFrame 1
+exitFrame 1

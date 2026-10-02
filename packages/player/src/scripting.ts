@@ -26,6 +26,7 @@ import { sha256 } from "./sha256.js";
 import {
   type BitmapCharacter,
   type Character,
+  type DisplayCharacter,
   INVALID_PIXELS,
   type Library,
   readLibrary,
@@ -282,7 +283,7 @@ export class Scripting {
    * Shape, constructed with `display` as its other face. A clip's first
    * frame is entered by Sprite's constructChildren on the way.
    */
-  construct(display: DisplayObject, character: Character, library: Library): void {
+  construct(display: DisplayObject, character: DisplayCharacter, library: Library): void {
     const name = library.classes.get(character.id) ?? DEFAULT_CLASS[character.type];
     const object =
       character.type === "bitmap" && display instanceof BitmapObject
@@ -325,6 +326,28 @@ export class Scripting {
       const symbol = this.symbols.get(t.name);
       if (symbol) {
         return symbol.character.type === "bitmap" ? symbol.character : null;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * The bytes of the DefineBinaryData a class SymbolClass bound, if
+   * `traits` or a base is one's: one buffer for all its instances, which
+   * see each other's writes, as Flash's.
+   */
+  binarySymbol(traits: { name: string; base: unknown }): Uint8Array<ArrayBuffer> | null {
+    for (let t: typeof traits | null = traits; t; t = t.base as typeof traits | null) {
+      const symbol = this.symbols.get(t.name);
+      if (symbol) {
+        const character = symbol.character;
+        if (character.type !== "binary") {
+          return null;
+        }
+
+        character.shared ??= new Uint8Array(character.data);
+        return character.shared;
       }
     }
 
@@ -499,8 +522,9 @@ export class Scripting {
       removing: null,
     };
     for (let t: typeof traits | null = traits; t; t = t.base as typeof traits | null) {
+      // A display object's class bound to data has no display of it.
       const symbol = this.symbols.get(t.name);
-      if (symbol) {
+      if (symbol && symbol.character.type !== "binary") {
         return displayFor(symbol.character, symbol.library);
       }
 

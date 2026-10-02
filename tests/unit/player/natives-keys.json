@@ -395,6 +395,7 @@
     "flash.display::BitmapData",
     "flash.display::DisplayObject",
     "flash.events::HTTPStatusEvent",
-    "flash.system::Worker"
+    "flash.system::Worker",
+    "flash.utils::ByteArray"
   ]
 }

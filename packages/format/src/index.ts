@@ -18,6 +18,7 @@ export {
 
 export {
   type Place,
+  readBinaryData,
   readDoAbc,
   readFrameLabel,
   readPlace,

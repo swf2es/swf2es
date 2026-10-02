@@ -1052,6 +1052,15 @@ PlaceObject3's `HasImage`, as Flash Pro places one, a bitmap is a
 data an instance of the bound class constructed with (1, 1), else a plain
 `BitmapData`; without `HasImage` Flash takes the bound class for a
 display object's and throws TypeError 2022, which swf2es does too.
+A class SymbolClass binds to a `DefineBinaryData` and that extends
+`ByteArray` starts with its bytes, at position 0; its instances share
+them, each seeing what another writes until one is resized, as under adl
+(the `crossbridge-runtime` case). Crossbridge keeps a C program's data
+so. That case also has what Crossbridge's start asks of the player: the
+domain memory on `ApplicationDomain`, the runtime's one, as avmshell's
+`Domain` has it; `Worker.current`, the primordial (`isSupported` is
+false, where AIR's is true, as no other worker can start); `Telemetry`,
+never connected; and `System.disposeXML`, left to the collector.
 Bitmap fills, in a shape's records and through `beginBitmapFill`, and
 the filters follow, each by what Flash traces and draws under adl.
 
