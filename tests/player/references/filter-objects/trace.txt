@@ -1,0 +1,171 @@
+flash.filters::BlurFilter defaults
+   blurX:Number:readwrite = 4
+   blurY:Number:readwrite = 4
+   quality:int:readwrite = 1
+  set blurX -1.5->0 0.5->0.5 3.4->3.4 300->255 1000000000->255 NaN->NaN -1000000000->0 4886718345->255
+  set blurY -1.5->0 0.5->0.5 3.4->3.4 300->255 1000000000->255 NaN->NaN -1000000000->0 4886718345->255
+  set quality -1.5->0 0.5->0 3.4->3 300->15 1000000000->15 NaN->0 -1000000000->0 4886718345->15
+flash.filters::GlowFilter defaults
+   alpha:Number:readwrite = 1
+   blurX:Number:readwrite = 6
+   blurY:Number:readwrite = 6
+   color:uint:readwrite = 16711680
+   inner:Boolean:readwrite = false
+   knockout:Boolean:readwrite = false
+   quality:int:readwrite = 1
+   strength:Number:readwrite = 2
+  set alpha -1.5->0 0.5->0.4980392156862745 3.4->1 300->1 1000000000->1 NaN->0 -1000000000->0 4886718345->1
+  set blurX -1.5->0 0.5->0.5 3.4->3.4 300->255 1000000000->255 NaN->NaN -1000000000->0 4886718345->255
+  set blurY -1.5->0 0.5->0.5 3.4->3.4 300->255 1000000000->255 NaN->NaN -1000000000->0 4886718345->255
+  set color -1.5->16777215 0.5->0 3.4->3 300->300 1000000000->10144256 NaN->0 -1000000000->6632960 4886718345->4548489
+  set inner 1->true 0->false x->true null->false
+  set knockout 1->true 0->false x->true null->false
+  set quality -1.5->0 0.5->0 3.4->3 300->15 1000000000->15 NaN->0 -1000000000->0 4886718345->15
+  set strength -1.5->0 0.5->0.5 3.4->3.3984375 300->255 1000000000->0 NaN->0 -1000000000->0 4886718345->0
+flash.filters::DropShadowFilter defaults
+   alpha:Number:readwrite = 1
+   angle:Number:readwrite = 45
+   blurX:Number:readwrite = 4
+   blurY:Number:readwrite = 4
+   color:uint:readwrite = 0
+   distance:Number:readwrite = 4
+   hideObject:Boolean:readwrite = false
+   inner:Boolean:readwrite = false
+   knockout:Boolean:readwrite = false
+   quality:int:readwrite = 1
+   strength:Number:readwrite = 1
+  set alpha -1.5->0 0.5->0.4980392156862745 3.4->1 300->1 1000000000->1 NaN->0 -1000000000->0 4886718345->1
+  set angle -1.5->-1.5 0.5->0.5 3.4->3.4 300->300.00000000000006 1000000000->280 NaN->NaN -1000000000->-280 4886718345->225
+  set blurX -1.5->0 0.5->0.5 3.4->3.4 300->255 1000000000->255 NaN->NaN -1000000000->0 4886718345->255
+  set blurY -1.5->0 0.5->0.5 3.4->3.4 300->255 1000000000->255 NaN->NaN -1000000000->0 4886718345->255
+  set color -1.5->16777215 0.5->0 3.4->3 300->300 1000000000->10144256 NaN->0 -1000000000->6632960 4886718345->4548489
+  set distance -1.5->-1.5 0.5->0.5 3.4->3.4 300->300 1000000000->1000000000 NaN->NaN -1000000000->-1000000000 4886718345->4886718345
+  set hideObject 1->true 0->false x->true null->false
+  set inner 1->true 0->false x->true null->false
+  set knockout 1->true 0->false x->true null->false
+  set quality -1.5->0 0.5->0 3.4->3 300->15 1000000000->15 NaN->0 -1000000000->0 4886718345->15
+  set strength -1.5->0 0.5->0.5 3.4->3.3984375 300->255 1000000000->0 NaN->0 -1000000000->0 4886718345->0
+flash.filters::BevelFilter defaults
+   angle:Number:readwrite = 45
+   blurX:Number:readwrite = 4
+   blurY:Number:readwrite = 4
+   distance:Number:readwrite = 4
+   highlightAlpha:Number:readwrite = 1
+   highlightColor:uint:readwrite = 16777215
+   knockout:Boolean:readwrite = false
+   quality:int:readwrite = 1
+   shadowAlpha:Number:readwrite = 1
+   shadowColor:uint:readwrite = 0
+   strength:Number:readwrite = 1
+   type:String:readwrite = inner
+  set angle -1.5->-1.5 0.5->0.5 3.4->3.4 300->300.00000000000006 1000000000->280 NaN->NaN -1000000000->-280 4886718345->225
+  set blurX -1.5->0 0.5->0.5 3.4->3.4 300->255 1000000000->255 NaN->NaN -1000000000->0 4886718345->255
+  set blurY -1.5->0 0.5->0.5 3.4->3.4 300->255 1000000000->255 NaN->NaN -1000000000->0 4886718345->255
+  set distance -1.5->-1.5 0.5->0.5 3.4->3.4 300->300 1000000000->1000000000 NaN->NaN -1000000000->-1000000000 4886718345->4886718345
+  set highlightAlpha -1.5->0 0.5->0.4980392156862745 3.4->1 300->1 1000000000->1 NaN->0 -1000000000->0 4886718345->1
+  set highlightColor -1.5->16777215 0.5->0 3.4->3 300->300 1000000000->10144256 NaN->0 -1000000000->6632960 4886718345->4548489
+  set knockout 1->true 0->false x->true null->false
+  set quality -1.5->0 0.5->0 3.4->3 300->15 1000000000->15 NaN->0 -1000000000->0 4886718345->15
+  set shadowAlpha -1.5->0 0.5->0.4980392156862745 3.4->1 300->1 1000000000->1 NaN->0 -1000000000->0 4886718345->1
+  set shadowColor -1.5->16777215 0.5->0 3.4->3 300->300 1000000000->10144256 NaN->0 -1000000000->6632960 4886718345->4548489
+  set strength -1.5->0 0.5->0.5 3.4->3.3984375 300->255 1000000000->0 NaN->0 -1000000000->0 4886718345->0
+  set type inner->inner outer->outer full->full bogus->full null->2007
+flash.filters::ColorMatrixFilter defaults
+   matrix:Array:readwrite = [1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1,0]
+flash.filters::ConvolutionFilter defaults
+   alpha:Number:readwrite = 0
+   bias:Number:readwrite = 0
+   clamp:Boolean:readwrite = true
+   color:uint:readwrite = 0
+   divisor:Number:readwrite = 1
+   matrix:Array:readwrite = []
+   matrixX:Number:readwrite = 0
+   matrixY:Number:readwrite = 0
+   preserveAlpha:Boolean:readwrite = true
+  set alpha -1.5->0 0.5->0.4980392156862745 3.4->1 300->1 1000000000->1 NaN->0 -1000000000->0 4886718345->1
+  set bias -1.5->-1.5 0.5->0.5 3.4->3.4000000953674316 300->300 1000000000->1000000000 NaN->NaN -1000000000->-1000000000 4886718345->4886718464
+  set clamp 1->true 0->false x->true null->false
+  set color -1.5->16777215 0.5->0 3.4->3 300->300 1000000000->10144256 NaN->0 -1000000000->6632960 4886718345->4548489
+  set divisor -1.5->-1.5 0.5->0.5 3.4->3.4000000953674316 300->300 1000000000->1000000000 NaN->NaN -1000000000->-1000000000 4886718345->4886718464
+  set matrixX -1.5->0 0.5->0 3.4->3 300->15 1000000000->15 NaN->0 -1000000000->0 4886718345->0
+  set matrixY -1.5->0 0.5->0 3.4->3 300->15 1000000000->15 NaN->0 -1000000000->0 4886718345->0
+  set preserveAlpha 1->true 0->false x->true null->false
+flash.filters::DisplacementMapFilter defaults
+   alpha:Number:readwrite = 0
+   color:uint:readwrite = 0
+   componentX:uint:readwrite = 0
+   componentY:uint:readwrite = 0
+   mapBitmap:flash.display::BitmapData:readwrite = null
+   mapPoint:flash.geom::Point:readwrite = (x=0, y=0)
+   mode:String:readwrite = wrap
+   scaleX:Number:readwrite = 0
+   scaleY:Number:readwrite = 0
+  set alpha -1.5->0 0.5->0.4980392156862745 3.4->1 300->1 1000000000->1 NaN->0 -1000000000->0 4886718345->1
+  set color -1.5->16777215 0.5->0 3.4->3 300->300 1000000000->10144256 NaN->0 -1000000000->6632960 4886718345->4548489
+  set componentX -1.5->4294967295 0.5->0 3.4->3 300->300 1000000000->1000000000 NaN->0 -1000000000->3294967296 4886718345->591751049
+  set componentY -1.5->4294967295 0.5->0 3.4->3 300->300 1000000000->1000000000 NaN->0 -1000000000->3294967296 4886718345->591751049
+  set mode inner->2008 outer->2008 full->2008 bogus->2008 null->2007
+  set scaleX -1.5->-1.5 0.5->0.5 3.4->3.4000000953674316 300->300 1000000000->65535 NaN->NaN -1000000000->-65535 4886718345->65535
+  set scaleY -1.5->-1.5 0.5->0.5 3.4->3.4000000953674316 300->300 1000000000->65535 NaN->NaN -1000000000->-65535 4886718345->65535
+flash.filters::GradientGlowFilter defaults
+   alphas:Array:readwrite = []
+   angle:Number:readwrite = 45
+   blurX:Number:readwrite = 4
+   blurY:Number:readwrite = 4
+   colors:Array:readwrite = []
+   distance:Number:readwrite = 4
+   knockout:Boolean:readwrite = false
+   quality:int:readwrite = 1
+   ratios:Array:readwrite = []
+   strength:Number:readwrite = 1
+   type:String:readwrite = inner
+  set angle -1.5->-1.5 0.5->0.5 3.4->3.4 300->300.00000000000006 1000000000->280 NaN->NaN -1000000000->-280 4886718345->225
+  set blurX -1.5->0 0.5->0.5 3.4->3.4 300->255 1000000000->255 NaN->NaN -1000000000->0 4886718345->255
+  set blurY -1.5->0 0.5->0.5 3.4->3.4 300->255 1000000000->255 NaN->NaN -1000000000->0 4886718345->255
+  set distance -1.5->-1.5 0.5->0.5 3.4->3.4 300->300 1000000000->1000000000 NaN->NaN -1000000000->-1000000000 4886718345->4886718345
+  set knockout 1->true 0->false x->true null->false
+  set quality -1.5->0 0.5->0 3.4->3 300->15 1000000000->15 NaN->0 -1000000000->0 4886718345->15
+  set strength -1.5->0 0.5->0.5 3.4->3.3984375 300->255 1000000000->0 NaN->0 -1000000000->0 4886718345->0
+  set type inner->inner outer->outer full->full bogus->full null->2007
+flash.filters::GradientBevelFilter defaults
+   alphas:Array:readwrite = []
+   angle:Number:readwrite = 45
+   blurX:Number:readwrite = 4
+   blurY:Number:readwrite = 4
+   colors:Array:readwrite = []
+   distance:Number:readwrite = 4
+   knockout:Boolean:readwrite = false
+   quality:int:readwrite = 1
+   ratios:Array:readwrite = []
+   strength:Number:readwrite = 1
+   type:String:readwrite = inner
+  set angle -1.5->-1.5 0.5->0.5 3.4->3.4 300->300.00000000000006 1000000000->280 NaN->NaN -1000000000->-280 4886718345->225
+  set blurX -1.5->0 0.5->0.5 3.4->3.4 300->255 1000000000->255 NaN->NaN -1000000000->0 4886718345->255
+  set blurY -1.5->0 0.5->0.5 3.4->3.4 300->255 1000000000->255 NaN->NaN -1000000000->0 4886718345->255
+  set distance -1.5->-1.5 0.5->0.5 3.4->3.4 300->300 1000000000->1000000000 NaN->NaN -1000000000->-1000000000 4886718345->4886718345
+  set knockout 1->true 0->false x->true null->false
+  set quality -1.5->0 0.5->0 3.4->3 300->15 1000000000->15 NaN->0 -1000000000->0 4886718345->15
+  set strength -1.5->0 0.5->0.5 3.4->3.3984375 300->255 1000000000->0 NaN->0 -1000000000->0 4886718345->0
+  set type inner->inner outer->outer full->full bogus->full null->2007
+cm short 20 1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+cm long 20 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19
+cm values 20 2,NaN,0,NaN,NaN,1.5,1,4886718464,-3.299999952316284,Infinity,0,0,0,0,0,0,0,0,0,0
+cm null threw 2007
+cm copy 1 0 false
+cm float 0.10000000149011612,0.3333333432674408,0,123456792
+conv 3 2 6 [1,2,3,4,5,6]
+conv long 4 [1,2,3,4]
+conv resize 6 [1,2,3,4,0,0]
+conv null threw 2007
+conv float 0.10000000149011612
+gg 16711680,65280,4548489 | 1,0.4980392156862745,1 | 0,128,255
+gg alphas long 1,2 | 1,0.4980392156862745 | 0,255
+gg ratios short 1 | 1 | 0
+gg set colors 7,8,9 | 1,0.4980392156862745,0 | 0,255,0
+gg alpha values 1,2,3,4 | 0,0.4980392156862745,1,0 | 0,1,254,0
+gg null threw 2007
+gg 20 16 16 16
+dm (x=1, y=2) clamp 3.299999952316284
+dm bitmap false (x=0, y=0)
+clone 3 4 2 false
+toString [object BlurFilter] [object ColorMatrixFilter]

@@ -4,8 +4,10 @@ import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { bounds, boundsIn, hitsObject, hitsPoint, toStage } from "../../../bounds.js";
 import { CONTENT, type DisplayObject, TextObject, TRANSFORM } from "../../../display.js";
+import { copyFilter } from "../../../filters.js";
 import { apply, invert, type Rect, transformRect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
+import { filterClassName, filterKindOf, recordOf } from "../filters/filters.js";
 import { colorOf, matrixOf } from "../geom/Transform.js";
 
 type AsObject = avm2.AsObject;
@@ -145,7 +147,6 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     declare $transform: AsObject | undefined;
     declare $cacheAsBitmap: boolean | undefined;
     declare $cacheAsBitmapMatrix: Value;
-    declare $filters: Value[] | undefined;
     declare $metaData: Value;
     declare $opaqueBackground: Value;
     declare $scale9Grid: AsObject | null | undefined;
@@ -408,14 +409,30 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       this.$cacheAsBitmapMatrix = v;
     }
 
-    /** A copy each time, as Flash: `filters === filters` is false. Nothing draws them yet. */
+    /** Copies each time, as Flash gives them: `filters === filters` is false, and a filter changed is not the object's. */
     get filters(): Value {
-      return s.rt.array([...(this.$filters ?? [])]);
+      return s.rt.array(
+        this.$display.filters.map((f) => {
+          const o = s.rt.construct(s.rt.classNamed(filterClassName(f.kind))) as AsObject;
+          o.$filter = copyFilter(f);
+          return o;
+        }),
+      );
     }
 
     set filters(v: Value) {
       this.$display.scripted = true;
-      this.$filters = v ? [...(((v as AsObject).$a as Value[] | undefined) ?? [])] : [];
+      const list = v ? (((v as AsObject).$a as Value[] | undefined) ?? []) : [];
+      const filters = list.map((item) => {
+        const kind = item && typeof item === "object" ? filterKindOf(s.rt, item as AsObject) : null;
+        if (!kind) {
+          throw s.rt.error("ArgumentError", 2005, 0, "Filter");
+        }
+
+        return copyFilter(recordOf(item as AsObject, kind));
+      });
+      this.$display.filters = filters;
+      this.$display.invalidate(TRANSFORM);
     }
 
     get mask(): Value {

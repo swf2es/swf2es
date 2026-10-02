@@ -4,10 +4,17 @@
 // which is their index in AS3, and apart from it the children the timeline
 // placed, by depth, which is how SWF tags address them; a child the
 // timeline places goes before the first child of a greater depth.
-import { type ColorTransform, IDENTITY, type Matrix, type Place } from "@swf2es/format";
+import {
+  type ColorTransform,
+  IDENTITY,
+  type Matrix,
+  type Place,
+  readFilters,
+} from "@swf2es/format";
 import type { avm2 } from "@swf2es/runtime";
 import { BitmapStore } from "./bitmap.js";
 import type { Drawing } from "./drawing.js";
+import { type Filter, filterOfSwf } from "./filters.js";
 import type { FontSet } from "./fonts.js";
 import { type Rect, shifted } from "./geometry.js";
 import { TextModel } from "./text.js";
@@ -30,6 +37,9 @@ export const CHILDREN = 2;
 export const CONTENT = 4;
 /** A Bitmap's pixels changed in place: the texture uploads again, nothing is rebuilt. */
 export const PIXELS = 8;
+
+const NO_FILTERS: readonly Filter[] = Object.freeze([]);
+const NO_FILTER_BYTES = new Uint8Array([0]);
 
 /** The blend modes by the number PlaceObject3 gives them: 0 and 1 are normal. */
 export const BLEND_MODES = [
@@ -143,6 +153,8 @@ export class DisplayObject {
   scroll: Rect | null = null;
   /** Its blend mode, as BlendMode names it. */
   blendMode = "normal";
+  /** Its filters' values, which its `filters` reads copies of. */
+  filters: readonly Filter[] = NO_FILTERS;
 
   /** A store it shows or fills with changed its pixels, or was disposed. */
   pixelsChanged(disposed: boolean): void {
@@ -290,13 +302,18 @@ export class DisplayObject {
     }
 
     // Apart, and once tested: applyPlace runs for each move of each frame, and grown it is no longer inlined.
-    if (place.clipDepth !== null || place.blendMode !== null) {
+    if (place.clipDepth !== null || place.blendMode !== null || place.filters !== null) {
       this.applyRare(place);
     }
   }
 
-  /** What a place sets that few do: a clip depth, a blend mode. */
+  /** What a place sets that few do: a clip depth, a blend mode, filters. */
   private applyRare(place: Place): void {
+    if (place.filters !== null) {
+      this.filters = readFilters(place.filters).map(filterOfSwf);
+      this.invalidate(TRANSFORM);
+    }
+
     if (place.clipDepth !== null && place.clipDepth !== this.clipDepth) {
       this.clipDepth = place.clipDepth;
       this.invalidate(TRANSFORM);
@@ -872,6 +889,8 @@ function asFirstPlaced(place: Place): Place {
     colorTransform: place.colorTransform ?? IDENTITY_COLOR,
     ratio: place.ratio ?? 0,
     blendMode: place.blendMode ?? 0,
+    // An empty FILTERLIST: a rewind clears what the frames after set.
+    filters: place.filters ?? NO_FILTER_BYTES,
     cacheAsBitmap: place.cacheAsBitmap ?? false,
   };
 }

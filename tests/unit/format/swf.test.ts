@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   backgroundColor,
   isAs3,
+  readFilters,
   readPlace,
   readRemove,
   readShape,
@@ -188,4 +189,50 @@ test("a string's malformed bytes stand for themselves, as avmplus reads them", (
 test("FileAttributes tells ActionScript 3 from an AVM1 movie", () => {
   assert.equal(isAs3(readSwf(movie)), false);
   assert.equal(isAs3(readSwf(frame(w.fileAttributes(true)))), true);
+});
+
+test("a FILTERLIST reads its blur, glow and bevel, the bevel's highlight first as adl has it", () => {
+  const b = new w.BitWriter().u8(3);
+  // Blur: 16.16 blurs, then passes in the top five bits.
+  b.u8(1)
+    .u32(5 << 16)
+    .u32(0x00028000)
+    .u8(2 << 3);
+  // Glow: RGBA, blurs, 8.8 strength, inner | knockout | composite | passes.
+  b.u8(2)
+    .u8(0x11)
+    .u8(0x22)
+    .u8(0x33)
+    .u8(0x80)
+    .u32(6 << 16)
+    .u32(6 << 16)
+    .u16(0x0280)
+    .u8(0x80 | 0x20 | 3);
+  // Bevel: highlight, shadow, blurs, angle, distance, strength, flags with on top.
+  b.u8(3).u8(0xff).u8(0xff).u8(0xff).u8(0xff).u8(0).u8(0).u8(0).u8(0x40);
+  b.u32(4 << 16)
+    .u32(4 << 16)
+    .u32(0)
+    .u32(4 << 16)
+    .u16(0x0100)
+    .u8(0x10 | 1);
+  const filters = readFilters(b.done());
+  assert.deepEqual(filters[0], { type: "blur", blurX: 5, blurY: 2.5, passes: 2 });
+  assert.deepEqual(filters[1], {
+    type: "glow",
+    color: { rgb: 0x112233, alpha: 0x80 },
+    blurX: 6,
+    blurY: 6,
+    strength: 2.5,
+    inner: true,
+    knockout: false,
+    composite: true,
+    passes: 3,
+  });
+  const bevel = filters[2] as { colors: unknown[]; onTop: boolean; passes: number };
+  assert.deepEqual(bevel.colors, [
+    { rgb: 0, alpha: 0x40 },
+    { rgb: 0xffffff, alpha: 0xff },
+  ]);
+  assert.deepEqual([bevel.onTop, bevel.passes], [true, 1]);
 });
