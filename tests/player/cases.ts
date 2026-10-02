@@ -2,8 +2,9 @@
 // frames must look as Flash drew them. Flash's frames are in references/,
 // made by run.ts --update with the Flash oracle.
 import { readFileSync } from "node:fs";
+import { zlibCompress } from "../../packages/format/dist/index.js";
 import * as w from "../swf-writer.ts";
-import type { Compile } from "./scripts.ts";
+import { type Compile, compileScripts } from "./scripts.ts";
 
 export interface PlayerCase {
   name: string;
@@ -617,6 +618,209 @@ function loading(compile: Compile, script: string, innerFrames: number): Uint8Ar
   });
 }
 
+// The SWF's bitmap characters (scripts/BitmapSymbols.as): every kind of
+// bitmap tag, each bound to a class extending BitmapData, and three placed
+// on the timeline with PlaceObject3's HasImage, as Flash Pro places one.
+// The images are the repository's own (images/README.md).
+function bitmapSymbols(compile: Compile): Uint8Array {
+  const image = (name: string) =>
+    new Uint8Array(readFileSync(new URL(`images/${name}`, import.meta.url)));
+  const join = (...parts: (Uint8Array | number[])[]) => {
+    const all = parts.map((p) => Uint8Array.from(p));
+    const out = new Uint8Array(all.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const p of all) {
+      out.set(p, at);
+      at += p.length;
+    }
+
+    return out;
+  };
+  const u16 = (v: number) => [v & 0xff, v >> 8];
+  const u32 = (v: number) => [v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, v >>> 24];
+  // Flash refuses a bitmap tag with the short header: every one here has the long one but Short.
+  const bitmap = (code: number, body: Uint8Array, long = true) => w.tag(code, body, long);
+  const lossless = (
+    id: number,
+    format: number,
+    width: number,
+    height: number,
+    data: number[],
+    colors?: number,
+  ) =>
+    join(
+      u16(id),
+      [format],
+      u16(width),
+      u16(height),
+      colors === undefined ? [] : [colors - 1],
+      zlibCompress(Uint8Array.from(data)),
+    );
+  const argb = (pixels: number[]) =>
+    pixels.flatMap((p) => [p >>> 24, (p >> 16) & 0xff, (p >> 8) & 0xff, p & 0xff]);
+  const premultiplied = argb([
+    0xff102030, 0x80402010, 0x00000000, 0x40200010, 0x01010101, 0x7f7f7f7f, 0xc0123456, 0xffffffff,
+    0x00000000, 0x80808080, 0x20102010, 0x0a0a0a0a,
+  ]);
+  const pixel15 = (r: number, g: number, b: number) => {
+    const v = (r << 10) | (g << 5) | b;
+    return [v >> 8, v & 0xff];
+  };
+  const jpeg = image("j.jpg");
+  // DefineBits' JPEG without its tables, which go in JPEGTables.
+  const tables: number[] = [0xff, 0xd8];
+  const rest: number[] = [0xff, 0xd8];
+  for (let at = 2; at < jpeg.length; ) {
+    const marker = jpeg[at + 1];
+    if (marker === 0xda) {
+      rest.push(...jpeg.subarray(at));
+      break;
+    }
+
+    const end = at + 2 + ((jpeg[at + 2] << 8) | jpeg[at + 3]);
+    (marker === 0xdb || marker === 0xc4 ? tables : rest).push(...jpeg.subarray(at, end));
+    at = end;
+  }
+  tables.push(0xff, 0xd9);
+  const alpha = zlibCompress(Uint8Array.from({ length: 16 * 12 }, (_, i) => (i * 7) % 256));
+  const png = image("p.png");
+  const classes: [number, string][] = [
+    [1, "L2"],
+    [2, "L3"],
+    [3, "L5"],
+    [4, "L4"],
+    [5, "L2P"],
+    [6, "J2"],
+    [7, "JP"],
+    [8, "JT"],
+    [9, "J3"],
+    [10, "PNG"],
+    [11, "GIF"],
+    [12, "PNG3"],
+    [13, "J4"],
+    [14, "J444"],
+    [15, "JPR"],
+    [16, "Bad"],
+    [17, "Short"],
+    [20, "TL"],
+  ];
+  const helpers = compileScripts([
+    ...classes.map(([, name]) => ({
+      name,
+      source: `package { import flash.display.BitmapData; public class ${name} extends BitmapData { public function ${name}(w:int, h:int) { super(w, h); } } }`,
+    })),
+    {
+      name: "BB",
+      source:
+        "package { import flash.display.Bitmap; public class BB extends Bitmap { public function BB() { super(); } } }",
+    },
+  ]);
+  const main = compile("BitmapSymbols");
+  const scaled = (depth: number, character: number, scale: number, tx: number, ty: number) =>
+    w.place({ depth, character, matrix: { a: scale, d: scale, tx, ty }, hasImage: true });
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      bitmap(36, lossless(1, 5, 4, 3, premultiplied)),
+      bitmap(
+        20,
+        lossless(2, 3, 3, 2, [10, 20, 30, 200, 100, 50, 0, 0, 0, 0, 1, 2, 0, 2, 1, 0, 0], 3),
+      ),
+      bitmap(
+        20,
+        lossless(
+          3,
+          5,
+          3,
+          2,
+          [
+            0x12, 1, 2, 3, 0, 250, 128, 7, 0x80, 9, 99, 199, 0xff, 4, 5, 6, 0x34, 255, 0, 0, 0, 0,
+            0, 255,
+          ],
+        ),
+      ),
+      bitmap(
+        20,
+        lossless(4, 4, 3, 2, [
+          ...pixel15(31, 0, 0),
+          ...pixel15(0, 31, 0),
+          ...pixel15(1, 2, 3),
+          0,
+          0,
+          ...pixel15(16, 16, 16),
+          ...pixel15(31, 31, 31),
+          ...pixel15(0, 0, 31),
+          0,
+          0,
+        ]),
+      ),
+      bitmap(
+        36,
+        lossless(
+          5,
+          3,
+          3,
+          2,
+          [255, 0, 0, 255, 0, 128, 0, 128, 0, 0, 0, 0, 0, 1, 2, 0, 2, 1, 0, 0],
+          3,
+        ),
+      ),
+      bitmap(21, join(u16(6), jpeg)),
+      // The stray EOI and SOI that old tools wrote before the JPEG.
+      bitmap(21, join(u16(7), [0xff, 0xd9, 0xff, 0xd8], jpeg)),
+      w.tag(8, Uint8Array.from(tables)),
+      bitmap(6, join(u16(8), rest)),
+      bitmap(35, join(u16(9), u32(jpeg.length), jpeg, alpha)),
+      bitmap(21, join(u16(10), png)),
+      bitmap(21, join(u16(11), image("g.gif"))),
+      // A PNG in DefineBitsJPEG3: its own alpha, the tag's ignored.
+      bitmap(
+        35,
+        join(
+          u16(12),
+          u32(png.length),
+          png,
+          zlibCompress(Uint8Array.from({ length: 20 }, () => 77)),
+        ),
+      ),
+      // No deblocking, which Flash applies and the browser decoder does not.
+      bitmap(90, join(u16(13), u32(jpeg.length), u16(0), jpeg, alpha)),
+      bitmap(21, join(u16(14), image("j444.jpg"))),
+      bitmap(21, join(u16(15), image("jprog.jpg"))),
+      bitmap(
+        21,
+        join(
+          u16(16),
+          [0xff, 0xd8],
+          Array.from({ length: 64 }, (_, i) => i),
+        ),
+      ),
+      bitmap(
+        36,
+        lossless(17, 5, 2, 2, argb([0xff102030, 0xff102030, 0xff102030, 0xff102030])),
+        false,
+      ),
+      bitmap(36, lossless(20, 5, 4, 3, premultiplied)),
+      bitmap(36, lossless(21, 5, 4, 3, premultiplied)),
+      ...classes.map(([, name]) => w.doAbc(helpers.get(name) as Uint8Array, name)),
+      w.doAbc(helpers.get("BB") as Uint8Array, "BB"),
+      w.doAbc(main, "BitmapSymbols"),
+      w.symbolClass([...classes, [21, "BB"], [0, "BitmapSymbols"]]),
+      scaled(1, 20, 8, 200, 100),
+      scaled(2, 10, 8, 900, 100),
+      scaled(3, 11, 8, 1700, 100),
+      scaled(4, 14, 4, 200, 900),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
@@ -692,6 +896,14 @@ export const cases: PlayerCase[] = [
     frames: 1,
     capture: [1],
     tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "bitmap-symbols",
+    build: bitmapSymbols,
+    frames: 1,
+    capture: [1],
+    tolerance: 2,
     maxOutliers: 0,
   },
   {

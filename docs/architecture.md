@@ -972,16 +972,28 @@ to v · 8 + 7 and 0 kept at 0; format 5 xRGB, or with the 2 tag ARGB
 already premultiplied, which the store takes as it is. The JPEG tags are
 an image: the JPEG, PNG or GIF bytes, with a JPEG's stray `FF D9 FF D8`
 before its start dropped and a `DefineBits` tag's tables spliced in from
-`JPEGTables`; `DefineBitsJPEG3` adds zlib'd alpha, one byte a pixel, by
-which the JPEG's colours are premultiplied, while a PNG or GIF in it keeps
-its own alpha and the tag's is ignored, as Flash ignores
-`DefineBitsJPEG4`'s and its deblocking (the image comes out opaque). The
-player decodes the images when the SWF is linked, before its scripts
-run, through a decoder its host may give and otherwise the browser's
-`createImageBitmap`; no JPEG library comes along. Chrome's JPEG decoder
-interpolates subsampled chroma where Flash's repeats it, so a 4:2:0 JPEG
-differs from Flash's at sharp colour edges, up to some 40 a channel,
-while a 4:4:4 one is within 2. What Flash cannot decode is a bitmap of
+`JPEGTables`. `DefineBitsJPEG3` adds zlib'd alpha, one byte a pixel,
+which goes beside the JPEG's colours as though they were premultiplied
+already, so a colour above its alpha reads back as 255 (swf2es clamps it
+to the alpha, which reads the same and keeps the store valid); a PNG or
+GIF in it keeps its own alpha and the tag's is ignored, as Flash ignores
+`DefineBitsJPEG4`'s and shows it opaque, though reported transparent. A
+PNG's or GIF's alpha is premultiplied with the product floored, and the
+bitmap is transparent. The player decodes the images when the SWF is
+linked, beside its code, before its scripts run, through a decoder its
+host may give and otherwise the browser's: WebCodecs' `ImageDecoder` for
+a PNG or GIF, whose frame is copied as it is, straight alpha (its RGBA
+conversion goes through premultiplied values and loses low alphas'
+colours), and `createImageBitmap` through a canvas for a JPEG, which is
+opaque; no JPEG library comes along. Flash's JPEG decoding matches
+Chrome's to within 2 a channel at 4:4:4, but at 4:2:0 Flash's chroma is
+neither repeated nor interpolated as libjpeg-turbo's is: it is smoother
+than both, as IJG libjpeg 7's scaled inverse DCT upsamples it, which a
+decoder that gives only pixels or planes cannot reproduce; such a JPEG
+differs by some 6 a channel on average and up to 40 at sharp colour
+edges, and `DefineBitsJPEG4`'s deblocking is not applied. A decoder of
+swf2es's own would close both.
+What Flash cannot decode is a bitmap of
 0 × 0, not transparent, whose size and `rect` read and which `dispose`
 takes, while every other method throws ArgumentError 2015: a corrupt
 image, a `DefineBits` without `JPEGTables`, and a lossless tag written

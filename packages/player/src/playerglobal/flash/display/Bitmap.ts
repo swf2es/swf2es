@@ -38,7 +38,10 @@ export function bitmapNatives(s: Scripting): avm2.Natives {
     declare $bitmapData: AsObject | null;
 
     "flash.display:Bitmap::ctor"(bitmapData: Value, pixelSnapping: Value, smoothing: Value): void {
-      setData(this, bitmapData);
+      // One of a bitmap's class, or placed by a timeline, shows a new BitmapData of its pixels.
+      const character = this.$display.character;
+      const none = bitmapData === null || bitmapData === undefined;
+      setData(this, none && character ? s.bitmapDataOf(character) : bitmapData);
       setSnapping(this, pixelSnapping);
       setSmoothing(this, smoothing);
     }

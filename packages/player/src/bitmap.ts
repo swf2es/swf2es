@@ -76,6 +76,18 @@ export class BitmapStore {
     this.pixels.fill(this.premultiplied(fill));
   }
 
+  /** A store of its own holding `pixels`, premultiplied already. */
+  static of(pixels: {
+    width: number;
+    height: number;
+    transparent: boolean;
+    pixels: Uint32Array;
+  }): BitmapStore {
+    const store = new BitmapStore(pixels.width, pixels.height, pixels.transparent, 0);
+    store.pixels.set(pixels.pixels);
+    return store;
+  }
+
   /** `argb` as this store keeps it: premultiplied, and opaque where the store is. */
   premultiplied(argb: number): number {
     return premultiply(this.transparent ? argb : argb | 0xff000000);
