@@ -602,6 +602,18 @@ the SWF is recorded by `--update` beside its frames, and the player's
 must match it line for line, as the conformance cases must match
 avmshell's.
 
+### ExternalInterface
+
+`ExternalInterface` is available only when the embedding page gives
+`Scripting` an `externalInterface` host. Its public methods stay in
+`playerglobal.abc`; the player supplies their private native bridge:
+initialization, enumerable property names, callbacks, and the synchronous
+JavaScript and XML call paths. The host receives the JavaScript source or
+XML invocation and decides what to execute; the player does not evaluate
+script text. Without a host, `available` is false, `objectID` is null,
+and calls and callback registration throw Error #2067 as Flash does in a
+container without a bridge.
+
 ### Loading SWFs
 
 A `Loader` is a container whose one child is the root of the SWF it
