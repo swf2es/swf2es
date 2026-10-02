@@ -152,6 +152,19 @@ package {
         into.applyFilter(half, new Rectangle(1, 1, 4, 3), new Point(2, 2), e);
         dump("empty " + e.matrixX + "x" + e.matrixY + ", rect " + into.generateFilterRect(new Rectangle(1, 1, 4, 3), e), into);
       }
+      // In place, the copy overlapping what it reads: right, left, and up a row.
+      var moves:Array = [[new Rectangle(0, 0, 2, 1), new Point(1, 0), new ConvolutionFilter()],
+        [new Rectangle(1, 0, 2, 1), new Point(0, 0), new ConvolutionFilter()],
+        [new Rectangle(0, 0, 3, 2), new Point(0, 1), new ConvolutionFilter(0, 3, [1, 1, 1])]];
+      for each (var m:Array in moves) {
+        var rgb:BitmapData = new BitmapData(3, 3, true, 0);
+        rgb.setPixel32(0, 0, 0xffff0000);
+        rgb.setPixel32(1, 0, 0xff00ff00);
+        rgb.setPixel32(2, 0, 0xff0000ff);
+        rgb.setPixel32(0, 1, 0x80ffff00);
+        rgb.applyFilter(rgb, m[0], m[1], m[2]);
+        dump("in place " + m[0] + " to " + m[1], rgb);
+      }
       var opaqueInto:BitmapData = new BitmapData(7, 6, false, 0x0000ff);
       opaqueInto.applyFilter(half, half.rect, new Point(0, 0), new ConvolutionFilter());
       dump("empty into opaque", opaqueInto);

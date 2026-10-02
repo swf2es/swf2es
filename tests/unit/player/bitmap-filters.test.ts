@@ -151,3 +151,18 @@ test("a convolution with no taps copies the source, from the corner of the rect 
   });
   assert.deepEqual([...into.pixels], [0xff0000ff, 0xff000002, 0xff000003, 0xff0000ff]);
 });
+
+test("a convolution with no taps copies in place from the pixels as they were", () => {
+  const rgb = () => {
+    const s = new BitmapStore(3, 1, true, 0);
+    s.pixels.set([0xffff0000, 0xff00ff00, 0xff0000ff]);
+    return s;
+  };
+  const empty = filterDefaults("convolution");
+  const right = rgb();
+  applyFilter(right, right, { x: 0, y: 0, width: 2, height: 1 }, 1, 0, empty);
+  assert.deepEqual([...right.pixels], [0xffff0000, 0xffff0000, 0xff00ff00]);
+  const left = rgb();
+  applyFilter(left, left, { x: 1, y: 0, width: 2, height: 1 }, 0, 0, empty);
+  assert.deepEqual([...left.pixels], [0xff00ff00, 0xff0000ff, 0xff0000ff]);
+});

@@ -306,8 +306,9 @@ function colorMatrix(
  * source as the filter's rect is big (the other size of the matrix still
  * grows it) from the source rect's corner, to that rect's corner; over
  * what an opaque destination has, into a transparent one as it is; what
- * lies past the source left as it was. `shown` is what the destination
- * shows of `out`, and (mx, my) moves both there.
+ * lies past the source left as it was, and in place the source as it was
+ * before. `shown` is what the destination shows of `out`, and (mx, my)
+ * moves both there.
  */
 function copyEmpty(
   dest: BitmapStore,
@@ -319,6 +320,7 @@ function copyEmpty(
   my: number,
 ): void {
   const target = dest.pixels;
+  const pixels = source === dest ? source.pixels.slice() : source.pixels;
   for (let y = shown.y; y < shown.y + shown.height; y++) {
     const sy = rect.y + y - out.y;
     if (sy < 0 || sy >= source.height) {
@@ -328,7 +330,7 @@ function copyEmpty(
     for (let x = shown.x; x < shown.x + shown.width; x++) {
       const sx = rect.x + x - out.x;
       if (sx >= 0 && sx < source.width) {
-        const p = source.pixels[sy * source.width + sx];
+        const p = pixels[sy * source.width + sx];
         const at = (y + my) * dest.width + x + mx;
         target[at] = dest.transparent ? p : over(p, target[at]);
       }

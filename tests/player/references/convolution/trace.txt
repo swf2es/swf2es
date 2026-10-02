@@ -542,6 +542,18 @@ empty 3x0, rect (x=0, y=1, w=6, h=3)
  ff0000ff 80ff7f40 4020607f 80ff7f40 80ff7f40 0 ff0000ff
  ff0000ff 80ff7f40 80ff7f40 80ff7f40 80ff7f40 0 ff0000ff
  ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+in place (x=0, y=0, w=2, h=1) to (x=1, y=0)
+ ffff0000 ffff0000 .
+ 80ffff00 0 0
+ 0 0 0
+in place (x=1, y=0, w=2, h=1) to (x=0, y=0)
+ . ff0000ff ff0000ff
+ 80ffff00 0 0
+ 0 0 0
+in place (x=0, y=0, w=3, h=2) to (x=0, y=1)
+ ffff0000 . ff0000ff
+ 80ffff00 0 0
+ 0 0 0
 empty into opaque
  ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
  ff0000ff ff80409f ff80409f ff80409f ff80409f ff0000ff ff0000ff
