@@ -1001,7 +1001,7 @@
   "avm2/subclass_superclass_linked_symbol": {"matched":4,"lines":4,"traced":4,"error":null},
   "avm2/subtract": {"matched":1058,"lines":1058,"traced":1058,"error":null},
   "avm2/super_get_call": {"matched":12,"lines":12,"traced":12,"error":null},
-  "avm2/supercall_two_classobjects": {"matched":0,"lines":2,"traced":0,"error":"TypeError: Error #1034: Type Coercion failed: cannot convert 1@0 to Superclass1."},
+  "avm2/supercall_two_classobjects": {"matched":2,"lines":2,"traced":2,"error":null},
   "avm2/supercalls_coerce": {"matched":8,"lines":8,"traced":8,"error":null},
   "avm2/supercalls_weird": {"matched":0,"lines":2,"traced":0,"error":"TypeError: Cannot read properties of null (reading '$it')"},
   "avm2/superinterface_call": {"matched":20,"lines":20,"traced":20,"error":null},
