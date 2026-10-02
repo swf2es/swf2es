@@ -670,9 +670,9 @@ one that counts. What a `LoaderInfo` knows of its SWF's header
 (`swfVersion`, `frameRate`, `width`, `applicationDomain`...) is refused
 before the SWF is loaded, Error #2099, as Flash refuses it. The SWF a `Loader` belongs to, which its content's
 `loaderURL` reports and its relative URLs resolve against, is in Flash
-the one whose code made it; the runtime does not track callers, so it is
-the SWF the `Loader` is on the display list of when it loads, else the
-main one (Ruffle's `loader_loaderurl` adds the loader first, as SWFs
+the one whose code made it, even before the first load; the runtime does not
+track callers, so it is the SWF the `Loader` is on the display list of when
+it loads, else the main one (Ruffle's `loader_loaderurl` adds the loader first, as SWFs
 usually do).
 
 `URLStream` uses the same host fetch. Its bytes arrive on the player thread

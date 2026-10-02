@@ -512,7 +512,7 @@ export class Scripting {
     info.$bytes = null;
     info.$swf = null;
     info.$url = null;
-    info.$loaderURL = loader ? null : this.url;
+    info.$loaderURL = loader ? this.ownerUrl(loader) : this.url;
     info.$loaded = 0;
     info.$total = 0;
     return info;

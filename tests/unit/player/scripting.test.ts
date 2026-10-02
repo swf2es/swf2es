@@ -62,6 +62,20 @@ test("a document class is constructed on the root and its frame scripts run in o
   assert.equal(root.depths.get(1), box);
 });
 
+test("an unloaded LoaderInfo reports its owner's URL before any load", { skip }, async () => {
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: () => {},
+    url: "http://example.test/outer.swf",
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const rt = scripting.rt;
+  const loader = rt.construct(rt.classNamed("flash.display::Loader"));
+  const info = rt.getProperty(loader, rt.publicName("contentLoaderInfo"));
+
+  assert.equal(rt.getProperty(info, rt.publicName("url")), null);
+  assert.equal(rt.getProperty(info, rt.publicName("loaderURL")), "http://example.test/outer.swf");
+});
+
 test("a Loader's load of a URL fetches through the host, and fails as one, in frames", {
   skip,
 }, async () => {
