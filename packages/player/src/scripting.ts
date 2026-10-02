@@ -66,6 +66,8 @@ export class Scripting {
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
   private preparing: Promise<void> = Promise.resolve();
+  /** Completed host byte requests delivered at the next frame, with scripts on the player thread. */
+  private readonly readyBytes: (() => void)[] = [];
   /** How many loads from bytes there have been: each gets a URL of its own under the main SWF's. */
   private dynamic = 0;
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
@@ -568,6 +570,25 @@ export class Scripting {
     );
   }
 
+  /** A URLStream's host request, delivered in a frame after the bytes arrive. */
+  requestBytes(
+    url: string,
+    signal: AbortSignal,
+    deliver: (bytes: Uint8Array | null) => void,
+  ): void {
+    const resolved = resolve(this.url, url);
+    const fetch = this.fetch;
+    // Attach both handlers at once; an early rejection must not be unhandled.
+    const fetched = (fetch ? fetch(resolved, signal) : Promise.reject()).then(
+      (bytes) => bytes,
+      () => null,
+    );
+    const completed = fetched.then((bytes) => {
+      this.readyBytes.push(() => deliver(bytes));
+    });
+    this.preparing = Promise.all([this.preparing, completed]).then(() => {});
+  }
+
   /**
    * Resolves once every load asked for so far has its code linked or has
    * failed, so that a host stepping frames by hand sees each complete in
@@ -677,6 +698,12 @@ export class Scripting {
    */
   private completeLoads(): (() => void)[] {
     const ends: (() => void)[] = [];
+    if (this.readyBytes.length !== 0) {
+      for (const deliver of this.readyBytes.splice(0)) {
+        deliver();
+      }
+    }
+
     while (this.loads.length && (this.loads[0].ready || this.loads[0].failed)) {
       const load = this.loads.shift() as Load;
       if (load.generation !== load.loader.$generation) {

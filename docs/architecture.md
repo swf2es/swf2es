@@ -674,6 +674,14 @@ the one whose code made it; the runtime does not track callers, so it is
 the SWF the `Loader` is on the display list of when it loads, else the
 main one (Ruffle's `loader_loaderurl` adds the loader first, as SWFs
 usually do).
+
+`URLStream` uses the same host fetch. Its bytes arrive on the player thread
+in a later frame, with `OPEN`, `PROGRESS` and `COMPLETE`, or `IO_ERROR` on
+failure. A new load or `close` aborts the old request; reads use the
+runtime's ByteArray DataInput implementation. The host currently returns
+only bytes, so no HTTP status or response headers are reported. Relative
+URLs resolve against the main SWF until the runtime tracks the creator of
+each stream.
 The Flash cases use `loadBytes`, the inner SWF carried in the outer's
 script as base64; the oracle runs under AIR, which refuses code from
 bytes unless the `LoaderContext` has `allowCodeImport`, which Flash
