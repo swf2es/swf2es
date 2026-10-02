@@ -13,3 +13,12 @@ var m:Object;
 while ((m = re.exec(str)) != null) trace(m[0], m[1], m[2], m.index, re.lastIndex);
 trace(re.source, re.global, re.ignoreCase, String(re), /a/i.test("A"));
 trace("abc".replace(/b/, function(match:String, pos:int, all:String):String { return "[" + match + pos + "]"; }));
+// A global match: each match from where the last ended, until one fails or
+// is empty; lastIndex is left where the last try ended, or one on.
+function matches(s:String, re:RegExp):String {
+  re.lastIndex = 3;
+  var m:Array = s.match(re);
+  return (m === null ? "null" : m.length + "[" + m.join("|") + "]") + " " + re.lastIndex;
+}
+trace(matches("ABC abc", /z/ig), matches("ABC abc", /z/i), matches("aXbXc", /X/g));
+trace(matches("abc", /x*/g), matches("aab", /a*/g), matches("aaxb", /a|x*/g), matches("éaéa", /a/g));
