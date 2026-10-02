@@ -726,6 +726,11 @@ does not dispatch `CLOSE`, while a remote close does. Without a socket host,
 connect fails on a later frame; reads, writes and close on an invalid socket
 throw IOError #2002. The browser player has no default raw TCP transport:
 an embedding page must provide one through its own permitted bridge.
+`@swf2es/player-hosts/node` supplies a direct Node TCP transport;
+`@swf2es/player-hosts/websocket` sends binary frames through a WebSocket
+relay whose URL the embedder chooses. They live outside `player` so its
+browser entrypoint has no Node I/O dependency. WebSocket message boundaries
+are only transport chunks; ActionScript reads the resulting byte stream.
 
 The Flash cases use `loadBytes`, the inner SWF carried in the outer's
 script as base64; the oracle runs under AIR, which refuses code from
