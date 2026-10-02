@@ -287,6 +287,7 @@ export class Scripting {
   /** Load the SWF's DoABCs in tag order, each run unless its lazy flag defers it to first use, then its SymbolClass. */
   async loadSwf(swf: Swf, library: Library): Promise<void> {
     this.library = library;
+    this.rt.swfVersion = swf.header.version;
     const decoded = decodeImages(library, this.decodeImage);
     const run = await this.link(swf);
     await decoded;

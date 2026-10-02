@@ -94,10 +94,33 @@ export const stringNatives: Natives = {
   "String.String::_search": (rt) => (s: string, pattern: Value) =>
     s.search(pattern?.$re instanceof RegExp ? pattern.$re : compile(rt.toString(pattern), "")),
   "String.String::_match": (rt) => (s: string, pattern: Value) => {
-    const m = s.match(
-      pattern?.$re instanceof RegExp ? pattern.$re : compile(rt.toString(pattern), ""),
-    );
-    return m ? matchArray(rt, m) : null;
+    const re: RegExp =
+      pattern?.$re instanceof RegExp ? pattern.$re : compile(rt.toString(pattern), "");
+    if (!re.global) {
+      const m = s.match(re);
+      return m ? matchArray(rt, m) : null;
+    }
+
+    // As RegExpObject::match: each match from where the last ended, until
+    // one fails or is empty, so none is an empty Array; lastIndex is then
+    // where the last try ended, 0 for a failed one, one on if it was there.
+    const old = re.lastIndex;
+    const found: string[] = [];
+    let at = 0;
+    for (;;) {
+      re.lastIndex = at;
+      const m = re.exec(s);
+      const last = at;
+      at = m ? m.index + m[0].length : 0;
+      if (!m || at === last) {
+        break;
+      }
+
+      found.push(m[0]);
+    }
+
+    re.lastIndex = at === old ? at + 1 : at;
+    return rt.array(found);
   },
   "String.String::_split": (rt) => (s: string, delimiter: Value, limit: number) => {
     // The empty string splits to itself, whatever the delimiter, as avmplus has it.
