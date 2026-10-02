@@ -54,6 +54,14 @@ export interface FetchResult {
   local?: boolean;
 }
 
+/** The request the player asks its host to send. */
+export interface FetchRequest {
+  url: string;
+  method: string;
+  headers: readonly (readonly [name: string, value: string])[];
+  body: Uint8Array | null;
+}
+
 /** AS3 classes placed children are instances of when SymbolClass binds none. */
 const DEFAULT_CLASS = {
   shape: "flash.display::Shape",
@@ -95,7 +103,7 @@ export class Scripting {
   /** How many loads from bytes there have been: each gets a URL of its own under the main SWF's. */
   private dynamic = 0;
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
-  fetch: ((url: string, signal: AbortSignal) => Promise<FetchResult>) | null = null;
+  fetch: ((request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>) | null = null;
   /** Decodes the images of a SWF's JPEG tags as it is linked; the browser's by default, null for none. */
   readonly decodeImage: ImageDecode | null;
   /**
@@ -159,7 +167,7 @@ export class Scripting {
   constructor(
     readonly codegen: Codegen,
     options: avm2.RuntimeOptions & {
-      fetch?: (url: string, signal: AbortSignal) => Promise<FetchResult>;
+      fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
       externalInterface?: ExternalInterfaceHost;
       decodeImage?: ImageDecode | null;
@@ -630,31 +638,35 @@ export class Scripting {
   }
 
   /** A Loader's load of a URL: the host fetches it, resolved, and the load completes in a frame after the bytes arrive. */
-  requestLoadUrl(loader: AsObject, url: string): void {
+  requestLoadUrl(loader: AsObject, request: AsObject | string): void {
     const begun = this.begin(loader);
     if (!begun) {
       return;
     }
 
     const { info, generation } = begun;
-    const resolved = resolve(info.$loaderURL, url);
+    const outgoing = this.fetchRequest(request, info.$loaderURL);
     const abort = new AbortController();
     loader.$abort = abort;
     const fetch = this.fetch;
     this.enqueue(
       loader,
       generation,
-      resolved,
-      fetch ? fetch(resolved, abort.signal) : Promise.reject(),
+      outgoing.url,
+      fetch ? fetch(outgoing, abort.signal) : Promise.reject(),
     );
   }
 
   /** A URLStream's host request, delivered in a frame after the bytes arrive. */
-  requestBytes(url: string, signal: AbortSignal, deliver: (result: FetchResult) => void): void {
-    const resolved = resolve(this.url, url);
+  requestBytes(
+    request: AsObject | string,
+    signal: AbortSignal,
+    deliver: (result: FetchResult) => void,
+  ): void {
+    const outgoing = this.fetchRequest(request, this.url);
     const fetch = this.fetch;
     // Attach both handlers at once; an early rejection must not be unhandled.
-    const fetched = (fetch ? fetch(resolved, signal) : Promise.reject()).then(
+    const fetched = (fetch ? fetch(outgoing, signal) : Promise.reject()).then(
       (result) => result,
       () => ({ bytes: null, status: 0, headers: [] }),
     );
@@ -666,6 +678,54 @@ export class Scripting {
       () => this.pendingStreams.delete(completed),
       () => this.pendingStreams.delete(completed),
     );
+  }
+
+  /** Snapshot a URLRequest at load time, before scripts can change its data or headers. */
+  private fetchRequest(request: AsObject | string, base: string): FetchRequest {
+    if (typeof request === "string") {
+      return { url: resolve(base, request), method: "GET", headers: [], body: null };
+    }
+
+    let url = String(request?.$url ?? "");
+    const method = String(request?.$method ?? "GET");
+    const get = method.toUpperCase() === "GET";
+    const post = method.toUpperCase() === "POST";
+    const data = request?.$data as Value;
+    let body: Uint8Array | null = null;
+    if (data !== null && data !== undefined) {
+      if (typeof data === "object" && this.rt.traitsOf(data).name === "flash.utils::ByteArray") {
+        if (!get) {
+          const bytes = avm2.bytesOf(this.rt, data);
+          body = bytes.buffer.slice(0, bytes.length);
+        }
+      } else {
+        const text = this.rt.toString(data);
+        if (get) {
+          url = appendQuery(url, text);
+        } else {
+          body = new TextEncoder().encode(text);
+        }
+      }
+    }
+
+    const headers: [string, string][] = [];
+    if (post) {
+      for (const header of request?.$headers?.$a ?? []) {
+        headers.push([
+          this.rt.toString(this.rt.getProperty(header, this.rt.publicName("name"))),
+          this.rt.toString(this.rt.getProperty(header, this.rt.publicName("value"))),
+        ]);
+      }
+    }
+
+    if (body && !headers.some(([name]) => name.toLowerCase() === "content-type")) {
+      headers.push([
+        "Content-Type",
+        String(request?.$contentType ?? "application/x-www-form-urlencoded"),
+      ]);
+    }
+
+    return { url: resolve(base, url), method, headers, body };
   }
 
   /** The text a failed stream reports, using Flash Player's message and the resolved URL. */
@@ -1227,6 +1287,18 @@ class TimerHeap {
 
 function before(a: TimerRecord, b: TimerRecord): boolean {
   return a.due < b.due || (a.due === b.due && a.seq < b.seq);
+}
+
+function appendQuery(url: string, query: string): string {
+  if (!query) {
+    return url;
+  }
+
+  const at = url.indexOf("#");
+  const path = at < 0 ? url : url.slice(0, at);
+  const fragment = at < 0 ? "" : url.slice(at);
+  const separator = path.includes("?") ? (/[?&]$/.test(path) ? "" : "&") : "?";
+  return path + separator + query + fragment;
 }
 
 /**

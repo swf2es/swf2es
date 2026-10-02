@@ -36,15 +36,20 @@ async function scriptingFor(
     // The debugger player, as adl is and as Ruffle's traces were recorded: errors carry their text.
     debugger: true,
     url: url ? new URL(url, location.href).href : undefined,
-    fetch: async (target, signal) => {
-      const response = await fetch(target, { signal });
+    fetch: async (request, signal) => {
+      const response = await fetch(request.url, {
+        signal,
+        method: request.method,
+        headers: request.headers.map(([name, value]) => [name, value]),
+        body: request.body ? new Uint8Array(request.body).buffer : null,
+      });
       const headers: [string, string][] = [];
       response.headers.forEach((value, name) => {
         headers.push([name, value]);
       });
 
       // The corpus's files are served over HTTP here, but Flash loaded them from disk.
-      const local = new URL(target).pathname.startsWith("/corpus/");
+      const local = new URL(request.url).pathname.startsWith("/corpus/");
       return {
         bytes: response.ok ? new Uint8Array(await response.arrayBuffer()) : null,
         status: local ? 0 : response.status,

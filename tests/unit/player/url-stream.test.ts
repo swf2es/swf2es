@@ -33,8 +33,11 @@ test("URLStream delivers fetched bytes on a frame and discards a closed request"
     rt,
     event: (type: string) => ({ $type: type, $stopped: 0 }),
     httpStatus: (status: number) => ({ $type: "httpStatus", $status: status, $stopped: 0 }),
-    requestBytes: (url: string, signal: AbortSignal, deliver: (result: FetchResult) => void) =>
-      requests.push({ url, signal, deliver }),
+    requestBytes: (
+      request: { url: string },
+      signal: AbortSignal,
+      deliver: (result: FetchResult) => void,
+    ) => requests.push({ url: request.url, signal, deliver }),
     streamError: (url: string, local = false) =>
       local
         ? "Error #2032: Stream Error"

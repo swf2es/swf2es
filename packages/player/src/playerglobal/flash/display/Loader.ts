@@ -48,7 +48,7 @@ export function loaderNatives(s: Scripting): avm2.Natives {
     }
 
     "flash.display:Loader::_load"(request: Value): void {
-      s.requestLoadUrl(this, String(request?.$url ?? ""));
+      s.requestLoadUrl(this, request as AsObject);
     }
 
     "flash.display:Loader::_unload"(stopAllMovieClips: Value, _gc: Value): void {
