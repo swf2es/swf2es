@@ -1539,6 +1539,19 @@ test misses outside it.
   the corpus is, like adl, not in CI; it is what says, in order of what
   real SWFs hit first, what the player lacks.
 
+### Fuzzing the compiler
+
+The JIT compiles whatever bytes a SWF holds, so codegen must reject any
+malformed ABC with a VerifyError, never trap. `tests/fuzz/abc.ts` mutates
+seed ABCs (the unit tests' hand-built ones and the conformance cases) a
+few bytes at a time, mostly toward the end, where the method bodies are,
+and checks that the compiler does not trap, that a module it accepts
+imports as an ES module, and that each of its methods compiled alone is its
+entry in the module. A seeded generator makes a run repeat; a failing case
+is written to `tests/fuzz/out/failures/`. `pnpm test` runs a short round,
+`pnpm test:checked` the same in the build that checks every array access,
+which catches a read past a table's end the release build lets through.
+
 ## Milestone 1
 
 The as3pb protobuf benchmark (`tests/programs`), compiled by swf2es and run in node:

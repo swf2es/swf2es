@@ -37,6 +37,8 @@ pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on 
                               # timeline tests vs corpus/baseline.json (Chrome; about 5 minutes); --diff
                               # shows where a failing test parts from Flash, --dump its whole trace
 node tests/player/corpus/check-references.ts [prefix...]   # the corpus's expected outputs vs Flash
+node tests/fuzz/abc.ts [cases, 2000] [seed, 1]   # malformed ABCs: codegen never traps, its modules
+                              # parse, JIT equals AOT (SWF2ES_CHECKED=1 for the checked build)
 node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
                               # timeline in Chrome; keep a change only for a gain that repeats
 ```
