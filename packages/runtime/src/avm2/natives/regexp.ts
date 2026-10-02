@@ -109,7 +109,7 @@ function newRegExp(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
  */
 export function compile(source: string, flags: string, extended = false): RegExp {
   try {
-    const re = new RegExp(fromPcre(source, extended), flags);
+    const re = new RegExp(fromPcre(source, extended, flags.includes("m")), flags);
     // V8 compiles on the first match, where a pattern too large throws: here, once.
     re.test("");
     re.lastIndex = 0;
@@ -143,11 +143,12 @@ export function replacement(re: RegExp, text: string): string {
  *   of the group they are in, and (?i:...) as it is;
  * - extended mode, the x flag, and (?x) and (?x:...) within: whitespace
  *   and # comments dropped where it is on;
- * - a comment group (?#...) dropped.
+ * - a comment group (?#...) dropped;
+ * - in multiline mode, ^ and $ at PCRE's newlines (LINE_START, LINE_END).
  * Escapes and character classes are left as they are.
  */
-function fromPcre(source: string, extended: boolean): string {
-  if (!extended && !source.includes("(?")) {
+function fromPcre(source: string, extended: boolean, multiline: boolean): string {
+  if (!extended && !source.includes("(?") && !(multiline && /[$^]/.test(source))) {
     return source;
   }
 
@@ -199,6 +200,11 @@ function fromPcre(source: string, extended: boolean): string {
       }
 
       out += c;
+      continue;
+    }
+
+    if (multiline && (c === "^" || c === "$")) {
+      out += c === "^" ? LINE_START : LINE_END;
       continue;
     }
 
@@ -261,6 +267,15 @@ function fromPcre(source: string, extended: boolean): string {
 
   return out + ")".repeat(closers[0]);
 }
+
+// PCRE's newlines, as avmplus builds it: any of these, \r\n as one.
+const NEWLINE = "[\\n\\r\\v\\f\\x85\\u2028\\u2029]";
+
+/** Multiline ^: the start, or after a newline, but not at the end, nor within \r\n. */
+const LINE_START = `(?:(?<![\\s\\S])|(?<=${NEWLINE})(?!(?<=\\r)\\n)(?=[\\s\\S]))`;
+
+/** Multiline $: the end, or before any newline. */
+const LINE_END = `(?=${NEWLINE}|(?![\\s\\S]))`;
 
 const modifiers = (on: string, off: string) => (on || off ? `${on}${off ? `-${off}` : ""}` : "");
 
