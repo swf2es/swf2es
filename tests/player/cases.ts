@@ -1247,6 +1247,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 300,
   },
   {
+    name: "color-transforms",
+    swf: (abc) => bare(abc, 3, "ColorTransforms", 600, 100),
+    script: "ColorTransforms",
+    frames: 3,
+    capture: [1, 2, 3],
+    // Within 2 a channel, Flash's 8.8 multipliers against floats, but for the
+    // line's round caps, anti-aliased each rasteriser's way: 48 channels a frame.
+    tolerance: 2,
+    maxOutliers: 60,
+  },
+  {
     name: "text-fields",
     swf: (abc) => bare(abc, 1, "TextFields"),
     script: "TextFields",
