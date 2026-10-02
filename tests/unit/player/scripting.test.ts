@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
+import { zlibCompress } from "@swf2es/format";
 import type { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../oracle/oracle.ts";
 import type { Container, MovieClip } from "../../../packages/player/dist/display.js";
@@ -15,6 +16,7 @@ import { Scripting } from "../../../packages/player/dist/scripting.js";
 import { bare, innerSwf, scripted } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compiler, compileScripts } from "../../player/scripts.ts";
+import * as w from "../../swf-writer.ts";
 
 // This package's own out directory: the player's tests run at the same time and use theirs.
 const out = fileURLToPath(new URL("../out/player/", import.meta.url));
@@ -348,4 +350,74 @@ test("a timer whose closure throws keeps running and fires again", { skip }, asy
   assert.equal(scripting.now, scripting.clock);
   player.tick();
   assert.deepEqual(lines, ["firing 1 200 true", "firing 2 300 true"]);
+});
+
+test("a bitmap a timeline places is a Bitmap, its bound class its data's with HasImage alone", {
+  skip,
+}, async () => {
+  const compile = compiler(out);
+  const data = compile(
+    "PlacedData",
+    'package { import flash.display.BitmapData; public class PlacedData extends BitmapData { public function PlacedData(w:int = -1, h:int = -1) { super(w, h); trace("data", w, h, arguments.length); } } }',
+  );
+  const root = compile(
+    "PlacedRoot",
+    "package { import flash.display.*; import flash.utils.*; public class PlacedRoot extends Sprite { public function PlacedRoot() { var b:Bitmap = getChildAt(0) as Bitmap; trace(getQualifiedClassName(b.bitmapData), b.bitmapData.width, b.bitmapData.getPixel32(1, 0).toString(16)); } } }",
+  );
+  // The same, its first frame empty: a jump to frame 2 places the bitmap.
+  const seeking = compile(
+    "SeekRoot",
+    "package { import flash.display.*; import flash.utils.*; public class SeekRoot extends MovieClip { public function SeekRoot() { gotoAndStop(2); var b:Bitmap = getChildAt(0) as Bitmap; trace(getQualifiedClassName(b.bitmapData), b.bitmapData.width); } } }",
+  );
+  const pixels = Uint8Array.from([0xff, 1, 2, 3, 0x80, 0x40, 0x20, 0x10]);
+  const bitmapSwf = (hasImage: boolean, seek = false) =>
+    w.swf({
+      width: 100,
+      height: 50,
+      frameCount: seek ? 2 : 1,
+      tags: [
+        w.fileAttributes(true),
+        w.tag(36, Uint8Array.from([1, 0, 5, 2, 0, 1, 0, ...zlibCompress(pixels)]), true),
+        w.doAbc(data, "PlacedData"),
+        w.doAbc(seek ? seeking : root, seek ? "SeekRoot" : "PlacedRoot"),
+        w.symbolClass([
+          [1, "PlacedData"],
+          [0, seek ? "SeekRoot" : "PlacedRoot"],
+        ]),
+        ...(seek ? [w.showFrame()] : []),
+        w.place({ depth: 1, character: 1, hasImage: hasImage || undefined }),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+
+  const run = async (hasImage: boolean, seek = false) => {
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), {
+      print: (line) => lines.push(line),
+      debugger: true,
+    });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const player = new Player(bitmapSwf(hasImage, seek), scripting);
+    const error = await player.start().then(
+      () => null,
+      (e: unknown) => scripting.rt.toString(e as avm2.Value),
+    );
+    return { lines, error };
+  };
+
+  // As Flash Pro places one: the class constructed with (1, 1), the pixels its own.
+  assert.deepEqual(await run(true), {
+    lines: ["data 1 1 2", "PlacedData 2 807f4020"],
+    error: null,
+  });
+  // A jump to the frame that places it constructs it alike.
+  assert.deepEqual(await run(true, true), { lines: ["data 1 1 2", "PlacedData 2"], error: null });
+  // Without HasImage Flash takes the class for a display object's: constructed bare, then refused.
+  const bare = await run(false);
+  assert.deepEqual(bare.lines, ["data -1 -1 0"]);
+  assert.equal(
+    bare.error,
+    "TypeError: Error #2022: Class PlacedData$ must inherit from DisplayObject to link to a symbol.",
+  );
 });

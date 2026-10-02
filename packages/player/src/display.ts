@@ -6,9 +6,16 @@
 // timeline places goes before the first child of a greater depth.
 import { type ColorTransform, IDENTITY, type Matrix, type Place } from "@swf2es/format";
 import type { avm2 } from "@swf2es/runtime";
-import type { BitmapStore } from "./bitmap.js";
+import { BitmapStore } from "./bitmap.js";
 import type { Drawing } from "./drawing.js";
-import type { Character, Library, ShapeCharacter, Timeline } from "./timeline.js";
+import {
+  type BitmapCharacter,
+  type Character,
+  INVALID_PIXELS,
+  type Library,
+  type ShapeCharacter,
+  type Timeline,
+} from "./timeline.js";
 
 /** Nothing changed since the renderer last looked, or what did. */
 export const CLEAN = 0;
@@ -227,6 +234,10 @@ export class BitmapObject extends DisplayObject {
   private readonly ref = new WeakRef(this);
   smoothing = false;
   pixelSnapping = "auto";
+  /** The SWF's bitmap it shows a copy of, placed by a timeline or made by its class; null for one a script made. */
+  character: BitmapCharacter | null = null;
+  /** PlaceObject3's HasImage where a timeline placed it: Flash then takes a bound class for its data's. */
+  hasImage = false;
 
   constructor(store: BitmapStore | null) {
     super();
@@ -397,7 +408,7 @@ export class MovieClip extends Container {
         continue;
       }
 
-      const child = displayFor(character, this.library);
+      const child = displayFor(character, this.library, place.hasImage);
       child.applyPlace(place);
       child.placeFrame = frame;
       this.placeAtDepth(child, place.depth);
@@ -507,7 +518,7 @@ export class MovieClip extends Container {
         continue;
       }
 
-      const child = displayFor(character, this.library);
+      const child = displayFor(character, this.library, jump.place.hasImage);
       child.applyPlace(jump.place);
       child.placeFrame = jump.frame;
       this.placeAtDepth(child, depth);
@@ -598,9 +609,24 @@ function mergePlace(previous: Place, next: Place): Place {
 }
 
 /** A display object for a character, before its first frame: a shape, or a clip. */
-export function displayFor(character: Character, library: Library): DisplayObject {
+/** `hasImage` is PlaceObject3's flag where a timeline places it, which a bitmap's construction reads. */
+export function displayFor(
+  character: Character,
+  library: Library,
+  hasImage = false,
+): DisplayObject {
   if (character.type === "shape") {
     return new ShapeObject(character);
+  }
+
+  if (character.type === "bitmap") {
+    // With scripts, its Bitmap's constructor gives it its data; without, a copy of the pixels.
+    const bitmap = new BitmapObject(
+      library.construct ? null : BitmapStore.of(character.pixels ?? INVALID_PIXELS),
+    );
+    bitmap.character = character;
+    bitmap.hasImage = hasImage;
+    return bitmap;
   }
 
   const clip = new MovieClip(character.timeline, library);

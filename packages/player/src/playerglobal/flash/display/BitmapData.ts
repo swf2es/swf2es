@@ -22,6 +22,7 @@ import {
 import { bounds } from "../../../bounds.js";
 import { transformRect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
+import { type BitmapCharacter, INVALID_PIXELS } from "../../../timeline.js";
 import { colorOf } from "../geom/Transform.js";
 
 type Value = avm2.Value;
@@ -29,6 +30,17 @@ type AsObject = avm2.AsObject;
 
 /** The store of a BitmapData object, or ArgumentError 2015 where it was disposed or never made. */
 export function storeOf(s: Scripting, o: AsObject): BitmapStore {
+  const store = sizeOf(s, o);
+  // A bitmap of 0 by 0 is one Flash could not read from the SWF: it has a size and nothing else.
+  if (store.width === 0) {
+    throw s.rt.error("ArgumentError", 2015);
+  }
+
+  return store;
+}
+
+/** The store for reading its size: one Flash could not read has it, a disposed one not. */
+function sizeOf(s: Scripting, o: AsObject): BitmapStore {
   const store: BitmapStore | null | undefined = o.$store;
   if (!store || store.disposed) {
     throw s.rt.error("ArgumentError", 2015);
@@ -203,6 +215,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
   class BitmapDataNatives {
     declare $store: BitmapStore | null;
+    declare $symbol: BitmapCharacter | null;
 
     "flash.display:BitmapData::ctor"(
       width: Value,
@@ -210,6 +223,13 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       transparent: Value,
       fill: Value,
     ): void {
+      // A class SymbolClass binds to a bitmap has its pixels, whatever size it asks for.
+      const symbol: BitmapCharacter | null = this.$symbol;
+      if (symbol) {
+        this.$store = BitmapStore.of(symbol.pixels ?? INVALID_PIXELS);
+        return;
+      }
+
       // A side under 1 is refused; Flash sets no upper bound any more (16384 wide and 4097 by 4096 both pass).
       const w = s.rt.toInt(width);
       const h = s.rt.toInt(height);
@@ -227,19 +247,19 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
     // Disposed, every read throws, the size included, as Flash has it.
     get width(): number {
-      return storeOf(s, this).width;
+      return sizeOf(s, this).width;
     }
 
     get height(): number {
-      return storeOf(s, this).height;
+      return sizeOf(s, this).height;
     }
 
     get transparent(): boolean {
-      return storeOf(s, this).transparent;
+      return sizeOf(s, this).transparent;
     }
 
     get rect(): Value {
-      const store = storeOf(s, this);
+      const store = sizeOf(s, this);
       return s.rt.construct(
         s.rt.classNamed("flash.geom::Rectangle"),
         0,
@@ -663,12 +683,15 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
   return natives;
 }
 
-export const bitmapDataHooks: Record<string, avm2.ClassHook> = {
-  "flash.display::BitmapData": {
-    create: (traits) => {
-      const o = Object.create(traits.proto);
-      o.$store = null;
-      return o;
+export function bitmapDataHooks(s: Scripting): Record<string, avm2.ClassHook> {
+  return {
+    "flash.display::BitmapData": {
+      create: (traits) => {
+        const o = Object.create(traits.proto);
+        o.$store = null;
+        o.$symbol = s.bitmapSymbol(traits);
+        return o;
+      },
     },
-  },
-};
+  };
+}

@@ -3,7 +3,10 @@
 // the frames' labels. Definitions are read once, at load, as the whole
 // file is there.
 import {
+  type Bitmap,
+  isBitmapTag,
   type Place,
+  readBitmap,
   readFrameLabel,
   readPlace,
   readRemove,
@@ -39,7 +42,31 @@ export interface SpriteCharacter {
   timeline: Timeline;
 }
 
-export type Character = ShapeCharacter | SpriteCharacter;
+/** A bitmap's pixels as every copy of it starts: premultiplied ARGB; 0 by 0 for what Flash cannot read. */
+export interface BitmapPixels {
+  width: number;
+  height: number;
+  transparent: boolean;
+  pixels: Uint32Array;
+}
+
+export interface BitmapCharacter {
+  type: "bitmap";
+  id: number;
+  definition: Bitmap;
+  /** Set when the SWF is read for the lossless formats, and once decoded for an image; null until then. */
+  pixels: BitmapPixels | null;
+}
+
+export type Character = ShapeCharacter | SpriteCharacter | BitmapCharacter;
+
+/** What Flash makes of a bitmap it cannot read. */
+export const INVALID_PIXELS: BitmapPixels = {
+  width: 0,
+  height: 0,
+  transparent: false,
+  pixels: new Uint32Array(0),
+};
 
 export interface Library {
   characters: Map<number, Character>;
@@ -62,6 +89,7 @@ function timelineOf(
   list: Tag[],
   frameCount: number,
   library: Map<number, Character>,
+  jpeg: { tables: Uint8Array | null },
 ): Timeline {
   const frames: FrameCommand[][] = [[]];
   const labels = new Map<string, number>();
@@ -96,10 +124,28 @@ function timelineOf(
         library.set(sprite.id, {
           type: "sprite",
           id: sprite.id,
-          timeline: timelineOf(bytes, sprite.tags, sprite.frameCount, library),
+          timeline: timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg),
         });
         break;
       }
+      case tags.JPEGTables:
+        jpeg.tables = bytes.slice(t.offset, t.offset + t.length);
+        break;
+      default:
+        if (isBitmapTag(t.code)) {
+          const definition = readBitmap(bytes, t, jpeg.tables);
+          library.set(definition.id, {
+            type: "bitmap",
+            id: definition.id,
+            definition,
+            pixels:
+              definition.type === "pixels"
+                ? definition
+                : definition.type === "invalid"
+                  ? INVALID_PIXELS
+                  : null,
+          });
+        }
     }
   }
 
@@ -115,6 +161,6 @@ function timelineOf(
 /** The characters a SWF defines, and its root timeline. */
 export function readLibrary(swf: Swf): Library {
   const characters = new Map<number, Character>();
-  const root = timelineOf(swf.bytes, swf.tags, swf.frameCount, characters);
+  const root = timelineOf(swf.bytes, swf.tags, swf.frameCount, characters, { tables: null });
   return { characters, root, classes: new Map(), construct: null, removing: null };
 }

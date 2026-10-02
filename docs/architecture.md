@@ -961,9 +961,55 @@ ways; `alpha` and `erase` do nothing to a bitmap
 drawn, which has no layer; `invert` ignores the source's colour; a fill's
 alpha is a byte floored, 0.5 being 127, on the stage as in a draw. The
 other blend modes follow the W3C's compositing and are judged by the
-frame, within 2 a channel. `draw` of a display object into a bitmap is that slice; the filters
-and the SWF's bitmap tags (`DefineBitsLossless`, `DefineBitsJPEG2` and 3) as characters
-follow, each by what Flash traces and draws under adl.
+frame, within 2 a channel.
+Slice four is the SWF's bitmap characters: `DefineBits` with
+`JPEGTables`, `DefineBitsJPEG2`, 3 and 4, and `DefineBitsLossless` and 2.
+`format` reads a tag into either pixels or an image to decode. The
+lossless formats are pixels, inflated with the zlib `format` already has:
+format 3 a palette of RGB, or RGBA with the 2 tag, and rows of indices
+padded to 4 bytes; format 4 15-bit RGB, each 5-bit channel v widened
+to v · 8 + 7 and 0 kept at 0; format 5 xRGB, or with the 2 tag ARGB
+already premultiplied, which the store takes as it is. The JPEG tags are
+an image: the JPEG, PNG or GIF bytes, with a JPEG's stray `FF D9 FF D8`
+before its start dropped and a `DefineBits` tag's tables spliced in from
+`JPEGTables`. `DefineBitsJPEG3` adds zlib'd alpha, one byte a pixel,
+which goes beside the JPEG's colours as though they were premultiplied
+already, so a colour above its alpha reads back as 255 (swf2es clamps it
+to the alpha, which reads the same and keeps the store valid); a PNG or
+GIF in it keeps its own alpha and the tag's is ignored, as Flash ignores
+`DefineBitsJPEG4`'s and shows it opaque, though reported transparent. A
+PNG's or GIF's alpha is premultiplied with the product floored, and the
+bitmap is transparent. The player decodes the images when the SWF is
+linked, beside its code, before its scripts run, through a decoder its
+host may give and otherwise the browser's: WebCodecs' `ImageDecoder` for
+a PNG or GIF, whose frame is copied as it is, straight alpha (its RGBA
+conversion goes through premultiplied values and loses low alphas'
+colours), and `createImageBitmap` through a canvas for a JPEG, which is
+opaque; no JPEG library comes along. Flash's JPEG decoding matches
+Chrome's to within 2 a channel at 4:4:4, but at 4:2:0 Flash's chroma is
+neither repeated nor interpolated as libjpeg-turbo's is: it is smoother
+than both, as IJG libjpeg 7's scaled inverse DCT upsamples it, which a
+decoder that gives only pixels or planes cannot reproduce; such a JPEG
+differs by some 6 a channel on average and up to 40 at sharp colour
+edges, and `DefineBitsJPEG4`'s deblocking is not applied. A decoder of
+swf2es's own would close both.
+What Flash cannot decode is a bitmap of
+0 × 0, not transparent, whose size and `rect` read and which `dispose`
+takes, while every other method throws ArgumentError 2015: a corrupt
+image, a `DefineBits` without `JPEGTables`, and a lossless tag written
+with the short tag header, which Flash refuses whatever its data (the
+long header, as Flash Pro writes, takes the same bytes). A class
+SymbolClass binds to a bitmap and that extends `BitmapData` is
+constructed with a copy of the pixels, the size its constructor passes
+ignored (0 by 0 and −5 by 100000 alike); one that extends `Bitmap` gets
+a new plain `BitmapData` of them each time. Placed on a timeline with
+PlaceObject3's `HasImage`, as Flash Pro places one, a bitmap is a
+`Bitmap` of its own copy, smoothing off and pixel snapping `auto`, its
+data an instance of the bound class constructed with (1, 1), else a plain
+`BitmapData`; without `HasImage` Flash takes the bound class for a
+display object's and throws TypeError 2022, which swf2es does too.
+Bitmap fills, in a shape's records and through `beginBitmapFill`, and
+the filters follow, each by what Flash traces and draws under adl.
 
 ## Testing against oracles
 

@@ -388,13 +388,13 @@ export class PixiView {
 
   /**
    * A Bitmap as a sprite over a texture uploaded from its store's pixels,
-   * nearest-neighbour unless it smooths; nothing for no store or one
-   * disposed. The store counts its changes, and `sync` uploads again when
-   * the count moves.
+   * nearest-neighbour unless it smooths; nothing for no store, one
+   * disposed, or one of 0 by 0 that Flash could not read. The store counts
+   * its changes, and `sync` uploads again when the count moves.
    */
   private drawBitmap(o: BitmapObject, node: Node): void {
     const store = o.store;
-    if (!store || store.disposed) {
+    if (!store || store.disposed || store.width === 0) {
       return;
     }
 

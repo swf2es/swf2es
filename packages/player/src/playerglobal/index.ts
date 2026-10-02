@@ -61,5 +61,5 @@ export function playerNatives(s: Scripting): avm2.Natives {
 }
 
 export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
-  return { ...displayObjectHooks(s), ...bitmapDataHooks };
+  return { ...displayObjectHooks(s), ...bitmapDataHooks(s) };
 }

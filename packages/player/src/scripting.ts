@@ -8,6 +8,7 @@
 import type { Codegen } from "@swf2es/codegen";
 import { isAs3, readDoAbc, readSwf, readSymbolClass, type Swf, tags } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import { BitmapStore } from "./bitmap.js";
 import {
   BitmapObject,
   Container,
@@ -17,11 +18,18 @@ import {
   MovieClip,
   ShapeObject,
 } from "./display.js";
+import { decodeImages, decodeInBrowser, type ImageDecode } from "./images.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
 import { sha256 } from "./sha256.js";
-import { type Character, type Library, readLibrary } from "./timeline.js";
+import {
+  type BitmapCharacter,
+  type Character,
+  INVALID_PIXELS,
+  type Library,
+  readLibrary,
+} from "./timeline.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -38,7 +46,11 @@ export interface ExternalInterfaceHost {
 }
 
 /** AS3 classes placed children are instances of when SymbolClass binds none. */
-const DEFAULT_CLASS = { shape: "flash.display::Shape", sprite: "flash.display::MovieClip" };
+const DEFAULT_CLASS = {
+  shape: "flash.display::Shape",
+  sprite: "flash.display::MovieClip",
+  bitmap: "flash.display::Bitmap",
+};
 
 /**
  * A load a Loader asked for. Its SWF's code is compiled and linked as
@@ -74,6 +86,8 @@ export class Scripting {
   private dynamic = 0;
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
   fetch: ((url: string, signal: AbortSignal) => Promise<Uint8Array>) | null = null;
+  /** Decodes the images of a SWF's JPEG tags as it is linked; the browser's by default, null for none. */
+  readonly decodeImage: ImageDecode | null;
   /**
    * How BitmapData.draw renders a display object: `o` through `m` into a
    * w x h texture at `samples` a side, read back as premultiplied ARGB; set by the host once it
@@ -137,8 +151,10 @@ export class Scripting {
       fetch?: (url: string, signal: AbortSignal) => Promise<Uint8Array>;
       url?: string;
       externalInterface?: ExternalInterfaceHost;
+      decodeImage?: ImageDecode | null;
     } = {},
   ) {
+    this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
     this.externalInterface = options.externalInterface ?? null;
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
@@ -160,7 +176,10 @@ export class Scripting {
   /** Load the SWF's DoABCs in tag order, each run unless its lazy flag defers it to first use, then its SymbolClass. */
   async loadSwf(swf: Swf, library: Library): Promise<void> {
     this.library = library;
-    (await this.link(swf))();
+    const decoded = decodeImages(library, this.decodeImage);
+    const run = await this.link(swf);
+    await decoded;
+    run();
     this.bind(swf, library);
   }
 
@@ -246,7 +265,10 @@ export class Scripting {
    */
   construct(display: DisplayObject, character: Character, library: Library): void {
     const name = library.classes.get(character.id) ?? DEFAULT_CLASS[character.type];
-    const object = this.constructAs(display, this.rt.classNamed(name));
+    const object =
+      character.type === "bitmap" && display instanceof BitmapObject
+        ? this.constructBitmap(display, name)
+        : this.constructAs(display, this.rt.classNamed(name));
     // Flash gives the parent a property of the child's instance name, which
     // a sealed class without it refuses: ReferenceError #1056, as Flash.
     const parent = display.parent?.object;
@@ -255,6 +277,50 @@ export class Scripting {
     }
 
     this.added(display);
+  }
+
+  /**
+   * A bitmap a timeline placed: a Bitmap, or the Bitmap subclass bound to
+   * it. A class extending BitmapData bound to it is its data's, made with
+   * (1, 1) where PlaceObject3 has HasImage; without it Flash constructs
+   * the class as a display object's and refuses it, TypeError 2022.
+   */
+  private constructBitmap(display: BitmapObject, name: string): AsObject {
+    const cls = this.rt.classNamed(name);
+    if (!extendsClass(cls, "flash.display::BitmapData")) {
+      return this.constructAs(display, cls);
+    }
+
+    if (!display.hasImage) {
+      this.rt.construct(cls);
+      throw this.rt.error("TypeError", 2022, `${name.replace(/^.*::/, "")}$`);
+    }
+
+    const data = this.rt.construct(cls, 1, 1);
+    return this.constructAs(display, this.rt.classNamed("flash.display::Bitmap"), data);
+  }
+
+  /** The bitmap a class SymbolClass bound is of, if `traits` or a base is one's. */
+  bitmapSymbol(traits: { name: string; base: unknown }): BitmapCharacter | null {
+    for (let t: typeof traits | null = traits; t; t = t.base as typeof traits | null) {
+      const symbol = this.symbols.get(t.name);
+      if (symbol) {
+        return symbol.character.type === "bitmap" ? symbol.character : null;
+      }
+    }
+
+    return null;
+  }
+
+  /** A new plain BitmapData of a bitmap's pixels, as a Bitmap of the bitmap gets. */
+  bitmapDataOf(character: BitmapCharacter): AsObject {
+    const data = this.rt.construct(
+      this.rt.classNamed("flash.display::BitmapData"),
+      1,
+      1,
+    ) as AsObject;
+    data.$store = BitmapStore.of(character.pixels ?? INVALID_PIXELS);
+    return data;
   }
 
   /** Whether `d` is on the display list: under the stage. */
@@ -388,10 +454,10 @@ export class Scripting {
   }
 
   /** Construct `cls` for `display`: the allocation hook takes it as the instance's other face. */
-  constructAs(display: DisplayObject, cls: AsObject): AsObject {
+  constructAs(display: DisplayObject, cls: AsObject, ...args: Value[]): AsObject {
     this.pending = display;
     try {
-      return this.rt.construct(cls);
+      return this.rt.construct(cls, ...args);
     } finally {
       this.pending = null;
     }
@@ -658,7 +724,9 @@ export class Scripting {
     }
 
     const library = readLibrary(swf);
+    const decoded = decodeImages(library, this.decodeImage);
     const run = await this.link(swf);
+    await decoded;
     return () => this.complete(load, swf, library, run);
   }
 
@@ -1147,4 +1215,15 @@ function resolve(base: string, url: string): string {
 function qualify(name: string): string {
   const i = name.lastIndexOf(".");
   return i < 0 ? name : `${name.slice(0, i)}::${name.slice(i + 1)}`;
+}
+
+/** Whether `cls` is the class named `name` or extends it. */
+function extendsClass(cls: AsObject, name: string): boolean {
+  for (let t: { name: string; base: unknown } | null = cls.$it; t; t = t.base as typeof t) {
+    if (t.name === name) {
+      return true;
+    }
+  }
+
+  return false;
 }
