@@ -1260,6 +1260,28 @@ name. Embedded fonts' glyphs, runs of several formats on screen, text
 metrics (`textWidth`, `autoSize`'s resizing, lines that wrap), input and
 selection are still to come.
 
+### Colour transforms
+
+A colour transform acts on what each shape, bitmap and text field draws
+under it, not on a sprite's children composited first, as adl draws it:
+each fill's colour, straight rather than premultiplied, is multiplied and
+offset channel by channel, alpha too, and clamped to 0–255. An alpha
+offset so shows a fill of alpha 0, while a bitmap's fully transparent
+pixels stay transparent. A gradient's stops are transformed and its ramp
+made from them. Nested transforms apply the child's first, then the
+parent's: (c · m₁ + a₁) · m₂ + a₂. The renderer keeps Pixi's tint and
+alpha for a transform that only multiplies, by 0 to 1, as most do. Any
+other, with an offset or a multiplier beyond 0–1, sends what is drawn
+under it to a batcher of swf2es's own, whose shader takes each vertex's
+whole transform, concatenated from the stage down, and applies it to the
+straight colour; such objects still batch together. A gradient there is
+transformed pixel by pixel, which clamps after the ramp where Flash clamps
+its stops, so the two part only where a transformed stop is clamped.
+
+Blend modes are still to come. adl composites an object with a blend mode
+as a layer first, its children together, and blends that with what is
+below. Pixi blends each child on its own.
+
 ### Masks and scroll rectangles
 
 A mask clips what it masks to where its fills are, as adl draws it: the

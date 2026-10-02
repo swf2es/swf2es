@@ -5,7 +5,7 @@
 // each instance, as their width depends on its transform. Flash fills
 // even-odd; a fill of several contours is drawn from their containment
 // tree, holes cut, as Pixi's own grouping of holes misses nested islands.
-import type { Fill, Line } from "@swf2es/format";
+import type { ColorTransform, Fill, Line } from "@swf2es/format";
 import {
   BufferImageSource,
   type FillInput,
@@ -21,6 +21,7 @@ import {
 } from "pixi.js";
 import { BitmapStore, type GpuCopy } from "./bitmap.js";
 import { toStage } from "./bounds.js";
+import { concatColor, multipliesOnly, sameColor } from "./color.js";
 import {
   BitmapObject,
   CHILDREN,
@@ -36,6 +37,7 @@ import {
 } from "./display.js";
 import { shifted } from "./geometry.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients.js";
+import { setFlashColor } from "./pixi-color.js";
 import {
   CUBIC,
   flatten,
@@ -401,6 +403,9 @@ interface Node {
   scroll: { clip: Graphics; content: PixiContainer } | null;
   /** Whether it has a mask or a scroll's clip, to be taken off when the object's go. */
   clipped: boolean;
+  /** Its colour transform from the stage down, null for none, and its parent's that it was made from. */
+  color: ColorTransform | null;
+  inherited: ColorTransform | null;
 }
 
 export class PixiView {
@@ -492,6 +497,8 @@ export class PixiView {
         groups: [],
         scroll: null,
         clipped: false,
+        color: null,
+        inherited: null,
       };
       node.container.addChild(art);
       this.nodes.set(o, node);
@@ -647,6 +654,7 @@ export class PixiView {
     moved: boolean,
     own: DisplayObject["matrix"] = o.placed,
     inMask = false,
+    tint: ColorTransform | null = null,
   ): PixiContainer {
     const node = this.node(o);
     const { container } = node;
@@ -669,10 +677,26 @@ export class PixiView {
           dirty |= CHILDREN;
         }
       }
+    }
 
+    // The colour transform from the stage down. One that only multiplies is
+    // Pixi's tint and alpha, which Pixi composes down the tree itself; any
+    // other is what is drawn's own (pixi-color.ts), and the tint stays white.
+    let recolor = false;
+    if (dirty & TRANSFORM || tint !== node.inherited) {
+      node.inherited = tint;
       const ct = o.colorTransform;
-      // Multipliers as tint and alpha; offsets need a filter, not yet.
-      container.alpha = ct && !masking ? Math.max(0, Math.min(1, ct.aMul)) : 1;
+      const color = masking ? null : ct ? (tint ? concatColor(tint, ct) : ct) : tint;
+      if (!sameColor(color, node.color)) {
+        node.color = color;
+        recolor = true;
+      }
+    }
+
+    const flash = node.color && !multipliesOnly(node.color) ? node.color : null;
+    if (dirty & TRANSFORM || recolor) {
+      const ct = flash || masking ? null : o.colorTransform;
+      container.alpha = ct ? Math.max(0, Math.min(1, ct.aMul)) : 1;
       container.tint = ct
         ? (Math.round(Math.max(0, Math.min(1, ct.rMul)) * 255) << 16) |
           (Math.round(Math.max(0, Math.min(1, ct.gMul)) * 255) << 8) |
@@ -704,6 +728,12 @@ export class PixiView {
       }
     }
 
+    if (dirty & CONTENT || recolor) {
+      for (const leaf of node.art.children) {
+        setFlashColor(leaf, flash);
+      }
+    }
+
     if (dirty & PIXELS && !(dirty & CONTENT)) {
       // Pixels set since: the textures brought up to date, uploaded where the CPU changed them.
       const bitmaps = gpuBitmaps(this.renderer);
@@ -723,15 +753,16 @@ export class PixiView {
     if (o instanceof Container) {
       if (dirty & CHILDREN) {
         this.arrange(o, node, moved, masking);
-      } else if (moved || remask || o.descendantsDirty) {
+      } else if (moved || remask || recolor || o.descendantsDirty) {
         for (const child of o.children) {
           if (
             moved ||
             remask ||
+            recolor ||
             child.dirty !== CLEAN ||
             (child instanceof Container && child.descendantsDirty)
           ) {
-            this.sync(child, node.world, moved, child.placed, masking);
+            this.sync(child, node.world, moved, child.placed, masking, node.color);
           }
         }
       }
@@ -769,7 +800,7 @@ export class PixiView {
     for (const child of o.children) {
       open.length = clips.enter(child);
       const into = open.length > 0 ? open[open.length - 1] : content;
-      const container = this.sync(child, node.world, moved, child.placed, masking);
+      const container = this.sync(child, node.world, moved, child.placed, masking, node.color);
       into.addChild(container);
       if (child.clipDepth > 0) {
         const group = new PixiContainer();

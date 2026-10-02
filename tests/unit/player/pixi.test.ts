@@ -2,7 +2,9 @@
 // WebGL's: each keeps its own copy of a store, and one shows what another
 // drew by reading it back through the renderer that drew it.
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { BitmapStore } from "../../../packages/player/dist/bitmap.js";
 import { BitmapObject, Container } from "../../../packages/player/dist/display.js";
 import { PixiView } from "../../../packages/player/dist/pixi.js";
@@ -108,4 +110,23 @@ test("a timeline mask's range goes in a container it masks, a scroll clips the r
   view.prepare(root);
   assert.equal(holder.children.length, 0);
   assert.ok(!cNode.mask);
+});
+
+test("a batchable keeps the batcher name it is given, and one under a colour transform goes to swf2es's", async () => {
+  // Pixi as the player loads it, its ES module, which pixi-color.ts patched.
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const { BatchableSprite } = (await import(entry)) as {
+    BatchableSprite: new () => { batcherName: string; renderable: unknown };
+  };
+  const sprite = new BatchableSprite();
+  assert.equal(sprite.batcherName, "default");
+  sprite.batcherName = "host-custom";
+  assert.equal(sprite.batcherName, "host-custom");
+
+  const ct = { rMul: 1, gMul: 1, bMul: 1, aMul: 1, rAdd: 10, gAdd: 0, bAdd: 0, aAdd: 0 };
+  sprite.renderable = { flashColor: ct };
+  assert.equal(sprite.batcherName, "flash-color");
+  sprite.renderable = { flashColor: null };
+  assert.equal(sprite.batcherName, "host-custom");
 });
