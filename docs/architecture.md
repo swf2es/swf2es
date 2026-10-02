@@ -1013,7 +1013,10 @@ level 9. The rect is rounded and clipped as other methods' are, and an
 empty one is ArgumentError 2006; a null rect or compressor is TypeError
 2007, a compressor not an encoder's options ArgumentError 2004; the file
 goes into the ByteArray given, from its position, or a new one. JPEG and
-JPEG XR, which Flash also writes, are not supported yet. `getPixels` and
+JPEG XR, which Flash also writes, are not supported yet. The
+`bitmap-encode` case traces the file and each refusal under adl; fast
+compression's file is Flash's byte for byte, as pako and zlib deflate
+alike. `getPixels` and
 `copyPixelsToByteArray` write their bytes in one pass, about 13 ms for
 1080p as in Flash. Each rule is Flash's
 as the `draw-bitmaps` and `draw-objects` cases trace and draw it under
