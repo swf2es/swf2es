@@ -4,7 +4,7 @@ import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { bounds, boundsIn, hitsObject, hitsPoint, toStage } from "../../../bounds.js";
 import { CONTENT, type DisplayObject, TextObject, TRANSFORM } from "../../../display.js";
-import { type Rect, transformRect } from "../../../geometry.js";
+import { apply, invert, type Rect, transformRect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
 import { colorOf, matrixOf } from "../geom/Transform.js";
 
@@ -258,11 +258,13 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     get mouseX(): number {
-      return 0;
+      const m = invert(toStage(this.$display, s.stage));
+      return m ? apply(m, s.mouseStageX, s.mouseStageY)[0] : 0;
     }
 
     get mouseY(): number {
-      return 0;
+      const m = invert(toStage(this.$display, s.stage));
+      return m ? apply(m, s.mouseStageX, s.mouseStageY)[1] : 0;
     }
 
     /** The bounds through the object's own matrix, in its parent's space. */

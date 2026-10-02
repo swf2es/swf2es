@@ -6,6 +6,7 @@
 import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
 import { Container, type DisplayObject, MovieClip } from "./display.js";
 import { decodeImages, decodeInBrowser } from "./images.js";
+import { PointerInput } from "./input.js";
 import type { Scripting } from "./scripting.js";
 import { type Library, readLibrary } from "./timeline.js";
 
@@ -22,6 +23,8 @@ export class Player {
   readonly height: number;
   frameRate: number;
   readonly background: number;
+  /** Renderer-independent mouse routing, once scripts have been loaded. */
+  readonly pointer: PointerInput | null;
 
   /**
    * Without scripts the player is ready at once, but for the images of
@@ -38,6 +41,7 @@ export class Player {
     this.height = Math.round((this.swf.frameSize.yMax - this.swf.frameSize.yMin) / 20);
     this.frameRate = this.swf.frameRate || 24;
     this.background = backgroundColor(this.swf);
+    this.pointer = scripting ? new PointerInput(this.stage, scripting) : null;
     this.root = new MovieClip(this.library.root, this.library);
     this.stage.addChildAt(this.root, 0);
     if (!scripting) {

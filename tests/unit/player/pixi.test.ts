@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { BitmapStore } from "../../../packages/player/dist/bitmap.js";
 import { BitmapObject, Container } from "../../../packages/player/dist/display.js";
 import { PixiView } from "../../../packages/player/dist/pixi.js";
+import type { Player } from "../../../packages/player/dist/player.js";
 
 /** A renderer that draws nothing and reads back `pixels`, counting its reads. */
 function standIn(pixels: number[]) {
@@ -129,4 +130,36 @@ test("a batchable keeps the batcher name it is given, and one under a colour tra
   assert.equal(sprite.batcherName, "flash-color");
   sprite.renderable = { flashColor: null };
   assert.equal(sprite.batcherName, "host-custom");
+});
+
+test("Pixi pointer delivery scales to SWF coordinates and stops on unbind", () => {
+  const renderer = { screen: { width: 200, height: 100 } } as unknown as ConstructorParameters<
+    typeof PixiView
+  >[0];
+  const view = new PixiView(renderer);
+  const calls: unknown[][] = [];
+  const player = {
+    width: 100,
+    height: 50,
+    pointer: { handle: (...args: unknown[]) => calls.push(args) },
+  } as unknown as Player;
+  const unbind = view.bindPointer(player);
+  const event = {
+    global: { x: 30, y: 20 },
+    button: 0,
+    buttons: 1,
+    altKey: true,
+    ctrlKey: false,
+    shiftKey: false,
+  };
+  view.stage.emit("pointerdown", event as never);
+  assert.deepEqual(calls, [
+    [
+      "down",
+      { x: 15, y: 10, button: 0, buttons: 1, altKey: true, ctrlKey: false, shiftKey: false },
+    ],
+  ]);
+  unbind();
+  view.stage.emit("pointerdown", event as never);
+  assert.equal(calls.length, 1);
 });

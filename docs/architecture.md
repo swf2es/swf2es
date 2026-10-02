@@ -540,8 +540,18 @@ an unset one stays NaN (`mouseevent_constr` and `mouseevent_stagexy` in the
 corpus). AIR's `playerglobal.abc` adds `commandKey`, `controlKey` and
 `clickCount` to `MouseEvent.toString`; the Flash Player trace in
 `mouseevent_valueof_tostring` has none of them, so that one output still
-differs though its native values match. This slice does not yet dispatch
-mouse input from the host.
+differs though its native values match.
+
+`PixiView.bindPointer(player)` takes Pixi's normalized pointer positions,
+scaled to the SWF's stage, and passes them to the player's own hit test.
+The display list decides the target, so masks, scroll rectangles, depth,
+visibility, `mouseEnabled` and `mouseChildren` use the same objects that
+scripts see; Pixi's render tree does not choose a Flash target. The first
+input slice sends `mouseOver`, `mouseOut`, `mouseMove`, `mouseDown`,
+`mouseUp` and `click` through EventDispatcher's capture and bubble phases.
+`DisplayObject.mouseX` and `mouseY` follow the last pointer position.
+Roll events, wheel, right and middle buttons, and Flash's drag and focus
+rules still need their own cases.
 
 A frame runs in the order Flash runs one, which the Flash oracle fixed
 case by case: the timelines advanced, which places children and

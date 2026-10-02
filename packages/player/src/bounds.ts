@@ -137,6 +137,37 @@ export function hitsPoint(
   return drawnAt(d, lx, ly, probe, false) && !clippedAbove(d, probe);
 }
 
+/** What this object itself draws under a pointer, without asking its children. */
+export function hitsOwnPoint(d: DisplayObject, x: number, y: number, root: DisplayObject): boolean {
+  if (!underRoot(d) || d.maskOf) {
+    return false;
+  }
+
+  const toLocal = invert(toStage(d, root));
+  if (!toLocal) {
+    return false;
+  }
+
+  const probe = { x: x - 0.5, y, root };
+  if (clippedAbove(d, probe)) {
+    return false;
+  }
+
+  const [lx, ly] = apply(toLocal, probe.x, probe.y);
+  if (d instanceof TextObject) {
+    const r = ownBounds(d, true);
+    const scroll = d.scroll;
+    return (
+      !!r &&
+      contains(r, lx, ly) &&
+      (!scroll || contains(scroll, lx, ly)) &&
+      (!d.mask || inMask(d.mask, probe))
+    );
+  }
+
+  return drawnAt(d, lx, ly, probe, false, false);
+}
+
 /** Whether a mask or a scroll above `d` leaves the probe out. */
 function clippedAbove(d: DisplayObject, probe: Probe): boolean {
   for (let p = d.parent; p; p = p.parent) {
@@ -192,7 +223,14 @@ function underRoot(d: DisplayObject): boolean {
  * its lines count for nothing and its own mask is not asked, so that two
  * masks of each other end.
  */
-function drawnAt(d: DisplayObject, x: number, y: number, probe: Probe, mask: boolean): boolean {
+function drawnAt(
+  d: DisplayObject,
+  x: number,
+  y: number,
+  probe: Probe,
+  mask: boolean,
+  children = true,
+): boolean {
   const scroll = d.scroll;
   if (scroll && !(x >= scroll.xMin && x < scroll.xMax && y >= scroll.yMin && y < scroll.yMax)) {
     return false;
@@ -243,7 +281,7 @@ function drawnAt(d: DisplayObject, x: number, y: number, probe: Probe, mask: boo
     }
   }
 
-  if (d instanceof Container) {
+  if (children && d instanceof Container) {
     // Masks are not drawn; a timeline's clip no hit test, as Flash's do not.
     for (const child of d.children) {
       const toChild = invert(child.placed);
