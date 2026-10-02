@@ -81,6 +81,8 @@ importers:
 
   tests/conformance: {}
 
+  tests/fuzz: {}
+
   tests/libraries: {}
 
   tests/player:

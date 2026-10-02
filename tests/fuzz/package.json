@@ -1,0 +1,8 @@
+{
+  "name": "@swf2es/tests-fuzz",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node abc.ts"
+  }
+}
