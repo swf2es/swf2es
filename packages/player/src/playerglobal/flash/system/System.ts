@@ -65,6 +65,10 @@ export function systemNatives(_s: Scripting): avm2.Natives {
     static pauseForGCIfCollectionImminent(_imminence: Value): void {
       // JavaScript's collector decides.
     }
+
+    static disposeXML(_node: Value): void {
+      // It frees an XML tree early, which JavaScript's collector does once nothing refers to it.
+    }
   }
 
   avm2.registerNativeClass(natives, "flash.system::System", SystemNatives);

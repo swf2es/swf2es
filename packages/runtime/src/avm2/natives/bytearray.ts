@@ -910,6 +910,37 @@ export function byteArrayNatives(rt: Runtime): Natives {
   return natives;
 }
 
+/**
+ * As DomainEnv::set_globalMemory: the domain memory set to ByteArray `v`, or
+ * to the scratch memory for null; a ByteArray shorter than the least length
+ * fails. avmshell's Domain and the player's ApplicationDomain both set it.
+ */
+export function setDomainMemory(rt: Runtime, v: Value): void {
+  const previous: AsObject | null = rt.memoryProvider;
+  if (v === null || v === undefined) {
+    if (previous) {
+      bytesOf(rt, previous).subscribed = false;
+    }
+
+    rt.memoryProvider = null;
+    rt.memory = rt.scratchMemory;
+    return;
+  }
+
+  const b = bytesOf(rt, v);
+  if (b.length < GLOBAL_MEMORY_MIN_SIZE) {
+    throw rt.error("Error", 1504);
+  }
+
+  b.subscribed = true;
+  b.notify();
+  if (previous && previous !== v) {
+    bytesOf(rt, previous).subscribed = false;
+  }
+
+  rt.memoryProvider = v;
+}
+
 /** avmshell's Domain: its domain memory is the runtime's, a ByteArray or the scratch memory. */
 export function domainNatives(rt: Runtime): Natives {
   const natives: Natives = {};
@@ -927,31 +958,8 @@ export function domainNatives(rt: Runtime): Natives {
       return rt.memoryProvider;
     }
 
-    // As DomainEnv::set_globalMemory: null for the scratch memory; a ByteArray shorter than the least length fails.
     set domainMemory(v: Value) {
-      const previous: AsObject | null = rt.memoryProvider;
-      if (v === null || v === undefined) {
-        if (previous) {
-          bytesOf(rt, previous).subscribed = false;
-        }
-
-        rt.memoryProvider = null;
-        rt.memory = rt.scratchMemory;
-        return;
-      }
-
-      const b = bytesOf(rt, v);
-      if (b.length < GLOBAL_MEMORY_MIN_SIZE) {
-        throw rt.error("Error", 1504);
-      }
-
-      b.subscribed = true;
-      b.notify();
-      if (previous && previous !== v) {
-        bytesOf(rt, previous).subscribed = false;
-      }
-
-      rt.memoryProvider = v;
+      setDomainMemory(rt, v);
     }
   }
 

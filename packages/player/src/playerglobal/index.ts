@@ -25,9 +25,11 @@ import { soundTransformNatives } from "./flash/media/SoundTransform.js";
 import { fileFilterNatives } from "./flash/net/FileFilter.js";
 import { urlRequestNatives } from "./flash/net/URLRequest.js";
 import { urlStreamNatives } from "./flash/net/URLStream.js";
+import { telemetryNatives } from "./flash/profiler/Telemetry.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { securityNatives } from "./flash/system/Security.js";
 import { systemNatives } from "./flash/system/System.js";
+import { workerHooks, workerNatives } from "./flash/system/Worker.js";
 import { timerNatives } from "./flash/utils/Timer.js";
 import { toplevelNatives } from "./toplevel.js";
 
@@ -51,6 +53,8 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...applicationDomainNatives(s),
     ...securityNatives(s),
     ...systemNatives(s),
+    ...workerNatives(s),
+    ...telemetryNatives(),
     ...interactiveObjectNatives(s),
     ...fileFilterNatives(s),
     ...transformNatives(s),
@@ -62,5 +66,10 @@ export function playerNatives(s: Scripting): avm2.Natives {
 }
 
 export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
-  return { ...displayObjectHooks(s), ...bitmapDataHooks(s), ...httpStatusHooks };
+  return {
+    ...displayObjectHooks(s),
+    ...bitmapDataHooks(s),
+    ...httpStatusHooks,
+    ...workerHooks(),
+  };
 }
