@@ -50,52 +50,82 @@ export function filterRect(rect: PixelRect, f: Filter): PixelRect {
   return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
 
-/** A box `width` pixels wide: each tap's weight, from -reach to reach, its end taps weighted by their part. */
-function box(width: number): number[] {
-  const half = width / 2;
-  const reach = Math.ceil(half);
-  const taps: number[] = [];
-  for (let k = -reach; k <= reach; k++) {
-    taps.push(Math.max(0, Math.min(k + 0.5, half) - Math.max(k - 0.5, -half)) / width);
-  }
-
-  return taps;
-}
-
-/** One run of a box over `channels` (planes of w × h), along x or y, each value truncated to 8 bits. */
-function run(planes: Float64Array[], w: number, h: number, width: number, alongX: boolean): void {
+/**
+ * One run of a box `width` pixels wide over `planes` (each w × h), along x
+ * or y, each value truncated to 8 bits. Its taps from the pixel out are
+ * whole while they lie within half the width, and the next one weighs the
+ * part of it the box covers: the whole ones a running sum of integers,
+ * exact, the two partial ones added to it. Along y the sums run down
+ * whole rows at once, which the planes keep together.
+ */
+function run(planes: Int32Array[], w: number, h: number, width: number, alongX: boolean): void {
   if (width <= 1) {
     return;
   }
 
-  const taps = box(width);
-  const reach = (taps.length - 1) / 2;
-  const line = new Float64Array(alongX ? w : h);
-  for (const plane of planes) {
-    for (let j = 0; j < (alongX ? h : w); j++) {
-      const n = line.length;
-      for (let i = 0; i < n; i++) {
-        line[i] = plane[alongX ? j * w + i : i * w + j];
-      }
-
-      for (let i = 0; i < n; i++) {
+  const half = width / 2;
+  // The whole taps reach `full` each way; the partial one past them weighs `part`.
+  const full = Math.floor(half - 0.5);
+  const part = Math.min(1, Math.max(0, half - full - 0.5));
+  const scale = 1 / width;
+  if (alongX) {
+    // The line between zeros, as far as the taps reach past its ends.
+    const pad = full + 1;
+    const line = new Int32Array(w + 2 * pad + 1);
+    for (const plane of planes) {
+      for (let row = 0; row < h * w; row += w) {
+        line.set(plane.subarray(row, row + w), pad);
         let sum = 0;
-        for (let k = -reach; k <= reach; k++) {
-          const at = i + k;
-          if (at >= 0 && at < n) {
-            sum += line[at] * taps[k + reach];
-          }
+        for (let i = pad - full; i <= pad + full; i++) {
+          sum += line[i];
         }
 
-        // A hair over, so that a value the sum hits exactly stays.
-        plane[alongX ? j * w + i : i * w + j] = Math.floor(sum + 1e-7);
+        for (let i = 0; i < w; i++) {
+          const at = i + pad;
+          // A hair over, so that a value the sum hits exactly stays.
+          plane[row + i] =
+            ((sum + part * (line[at - full - 1] + line[at + full + 1])) * scale + 1e-7) | 0;
+          sum += line[at + full + 1] - line[at - full];
+        }
       }
     }
+
+    return;
+  }
+
+  // Along y, rows past the plane's ends are zeros.
+  const zeros = new Int32Array(w);
+  const rowOf = (plane: Int32Array, y: number) =>
+    y >= 0 && y < h ? plane.subarray(y * w, y * w + w) : zeros;
+  const sums = new Int32Array(w);
+  const out = new Int32Array(w * h);
+  for (const plane of planes) {
+    sums.fill(0);
+    for (let j = -full; j <= full; j++) {
+      const r = rowOf(plane, j);
+      for (let x = 0; x < w; x++) {
+        sums[x] += r[x];
+      }
+    }
+
+    for (let y = 0; y < h; y++) {
+      const lo = rowOf(plane, y - full - 1);
+      const hi = rowOf(plane, y + full + 1);
+      const leaving = rowOf(plane, y - full);
+      const o = y * w;
+      for (let x = 0; x < w; x++) {
+        out[o + x] = ((sums[x] + part * (lo[x] + hi[x])) * scale + 1e-7) | 0;
+        // The rows entering and leaving the whole taps, for the next.
+        sums[x] += hi[x] - leaving[x];
+      }
+    }
+
+    plane.set(out);
   }
 }
 
 /** The blur's runs: each quality's run along x, then along y. */
-function blur(planes: Float64Array[], w: number, h: number, f: Filter): void {
+function blur(planes: Int32Array[], w: number, h: number, f: Filter): void {
   for (let q = 0; q < f.quality; q++) {
     run(planes, w, h, f.blurX || 0, true);
     run(planes, w, h, f.blurY || 0, false);
@@ -152,28 +182,23 @@ export function applyFilter(
 
   // The source's premultiplied channels over the work, transparent past `rect`.
   const pixels = source.pixels;
-  const a = new Float64Array(w * h);
-  const r = new Float64Array(w * h);
-  const g = new Float64Array(w * h);
-  const b = new Float64Array(w * h);
-  for (let y = 0; y < h; y++) {
-    const sy = work.y + y;
-    if (sy < rect.y || sy >= rect.y + rect.height || sy < 0 || sy >= source.height) {
-      continue;
-    }
-
-    for (let x = 0; x < w; x++) {
-      const sx = work.x + x;
-      if (sx < rect.x || sx >= rect.x + rect.width || sx < 0 || sx >= source.width) {
-        continue;
+  const sw = source.width;
+  const a = new Int32Array(w * h);
+  const r = new Int32Array(w * h);
+  const g = new Int32Array(w * h);
+  const b = new Int32Array(w * h);
+  const inside = intersect(rect, work);
+  const from = inside && intersect(inside, { x: 0, y: 0, width: sw, height: source.height });
+  if (from) {
+    for (let sy = from.y; sy < from.y + from.height; sy++) {
+      let i = (sy - work.y) * w + from.x - work.x;
+      for (let sx = from.x; sx < from.x + from.width; sx++, i++) {
+        const p = pixels[sy * sw + sx];
+        a[i] = p >>> 24;
+        r[i] = (p >>> 16) & 0xff;
+        g[i] = (p >>> 8) & 0xff;
+        b[i] = p & 0xff;
       }
-
-      const p = pixels[sy * source.width + sx];
-      const i = y * w + x;
-      a[i] = p >>> 24;
-      r[i] = (p >>> 16) & 0xff;
-      g[i] = (p >>> 8) & 0xff;
-      b[i] = p & 0xff;
     }
   }
 
@@ -258,22 +283,27 @@ function contentOf(source: BitmapStore, rect: PixelRect): PixelRect | null {
 function colorMatrix(
   dest: BitmapStore,
   result: Uint32Array,
-  [a, r, g, b]: Float64Array[],
+  [a, r, g, b]: Int32Array[],
   work: PixelRect,
   content: PixelRect | null,
   m: number[],
 ): void {
-  const map = (c: number[]) =>
-    [0, 1, 2, 3].map((row) => {
+  // The map of straight (r, g, b, a) into `mapped`, each clamped and rounded.
+  const mapped = [0, 0, 0, 0];
+  const map = (cr: number, cg: number, cb: number, ca: number) => {
+    for (let row = 0; row < 4; row++) {
       const v =
-        m[row * 5] * c[0] +
-        m[row * 5 + 1] * c[1] +
-        m[row * 5 + 2] * c[2] +
-        m[row * 5 + 3] * c[3] +
+        m[row * 5] * cr +
+        m[row * 5 + 1] * cg +
+        m[row * 5 + 2] * cb +
+        m[row * 5 + 3] * ca +
         m[row * 5 + 4];
-      return Math.max(0, Math.min(255, Math.round(Number.isNaN(v) ? 0 : v)));
-    });
-  const empty = map([0, 0, 0, 0]);
+      mapped[row] = Math.max(0, Math.min(255, Math.round(Number.isNaN(v) ? 0 : v)));
+    }
+
+    return mapped;
+  };
+  const empty = [...map(0, 0, 0, 0)];
   result.fill(
     dest.premultiplied(((empty[3] << 24) | (empty[0] << 16) | (empty[1] << 8) | empty[2]) >>> 0),
   );
@@ -294,9 +324,13 @@ function colorMatrix(
     for (let x = near.x; x < near.x + near.width; x++) {
       const i = (y - work.y) * work.width + (x - work.x);
       const s = a[i] > 0 ? 255 / a[i] : 0;
-      const [nr, ng, nb, na] = map([r[i] * s, g[i] * s, b[i] * s, a[i]]);
-      const p = (c: number) => Math.floor((c * na) / 255);
-      result[i] = ((na << 24) | (p(nr) << 16) | (p(ng) << 8) | p(nb)) >>> 0;
+      const [nr, ng, nb, na] = map(r[i] * s, g[i] * s, b[i] * s, a[i]);
+      result[i] =
+        ((na << 24) |
+          (Math.floor((nr * na) / 255) << 16) |
+          (Math.floor((ng * na) / 255) << 8) |
+          Math.floor((nb * na) / 255)) >>>
+        0;
     }
   }
 }
@@ -364,101 +398,143 @@ function convolve(
   const integer = integerKernel(matrix, divisor);
   const sw = source.width;
   const sh = source.height;
+  const preserveAlpha = f.preserveAlpha;
 
   // The straight colour of the pixels the taps reach, clamped to the bitmap,
-  // and after them the filter's colour.
+  // a plane a channel, and after each the filter's colour.
   const clampX = (x: number) => Math.max(0, Math.min(sw - 1, x));
   const clampY = (y: number) => Math.max(0, Math.min(sh - 1, y));
   const x0 = clampX(area.x - hx);
   const y0 = clampY(area.y - hy);
   const nw = clampX(area.x + area.width + cols - hx - 2) - x0 + 1;
   const nh = clampY(area.y + area.height + rows - hy - 2) - y0 + 1;
-  const near = new Float64Array(nw * nh * 4 + 4);
+  const colour = nw * nh;
+  const planes = [0, 1, 2, 3].map(() => new Int32Array(colour + 1));
+  const [pr, pg, pb, pa] = planes;
+  const pixels = source.pixels;
   for (let y = 0; y < nh; y++) {
     for (let x = 0; x < nw; x++) {
-      const p = unmultiply(source.pixels[(y0 + y) * sw + x0 + x]);
-      const i = (y * nw + x) * 4;
-      near[i] = (p >>> 16) & 0xff;
-      near[i + 1] = (p >>> 8) & 0xff;
-      near[i + 2] = p & 0xff;
-      near[i + 3] = source.transparent ? p >>> 24 : 255;
+      const stored = pixels[(y0 + y) * sw + x0 + x];
+      // Opaque pixels, most of a picture's, are straight already.
+      const p = stored >>> 24 === 255 ? stored : unmultiply(stored);
+      const i = y * nw + x;
+      pr[i] = (p >>> 16) & 0xff;
+      pg[i] = (p >>> 8) & 0xff;
+      pb[i] = p & 0xff;
+      pa[i] = source.transparent ? p >>> 24 : 255;
     }
   }
 
-  const colour = nw * nh * 4;
-  near.set(
-    [(f.color >> 16) & 0xff, (f.color >> 8) & 0xff, f.color & 0xff, Math.floor(f.alpha * 255)],
-    colour,
-  );
+  pr[colour] = (f.color >> 16) & 0xff;
+  pg[colour] = (f.color >> 8) & 0xff;
+  pb[colour] = f.color & 0xff;
+  pa[colour] = Math.floor(f.alpha * 255);
   const at = (x: number, y: number) =>
     !f.clamp && (x < 0 || x >= sw || y < 0 || y >= sh)
       ? colour
-      : ((clampY(y) - y0) * nw + clampX(x) - x0) * 4;
+      : (clampY(y) - y0) * nw + clampX(x) - x0;
   // The taps that weigh anything: where each reads from the pixel, and its
-  // place in `near` from the pixel's where it lies in the bitmap.
+  // place in the planes from the pixel's where it lies in the bitmap.
   const tapsOf = (ws: number[], centreLast: boolean) => {
-    const taps = { dx: [] as number[], dy: [] as number[], w: [] as number[], at: [] as number[] };
+    const dx: number[] = [];
+    const dy: number[] = [];
+    const w: number[] = [];
     for (let k = 0; k < ws.length; k++) {
       if (ws[k] !== 0) {
         const last = centreLast && k === ws.length - 1;
-        const dx = last ? 0 : (k % cols) - hx;
-        const dy = last ? 0 : Math.floor(k / cols) - hy;
-        taps.dx.push(dx);
-        taps.dy.push(dy);
-        taps.w.push(ws[k]);
-        taps.at.push((dy * nw + dx) * 4);
+        dx.push(last ? 0 : (k % cols) - hx);
+        dy.push(last ? 0 : Math.floor(k / cols) - hy);
+        w.push(ws[k]);
       }
     }
 
-    return taps;
+    return { dx, dy, w, at: dx.map((x, k) => dy[k] * nw + x) };
   };
   const general = tapsOf(weights, false);
   const fixedTaps = tapsOf(matrix, true);
-  const value = (v: number) => Math.max(0, Math.min(255, v + f.bias)) || 0;
-  // A channel's sum premultiplied by `by`: truncating the fixed-point way, the other as the store does.
-  const channel = (v: number, by: number, fixed: boolean) => {
-    // A hair over, so that a value the sum hits exactly stays.
-    const straight = Math.floor(value(v) + 1e-7);
-    return fixed ? Math.floor((straight * by) / 255) : ((straight * by + 127) / 255) | 0;
+  const bias = f.bias;
+  // A channel's sum biased, clamped and truncated: a hair over, so that a
+  // value the sum hits exactly stays; NaN, from a NaN bias, 0.
+  const straight = (v: number) => {
+    const c = v + bias;
+    return c >= 255 ? 255 : c > 0 ? Math.floor(c + 1e-7) : 0;
   };
+  const scale = integer === null ? 0 : integer / 65536;
 
+  const sums = [0, 1, 2, 3].map(() => new Float64Array(area.width));
+  const [sr, sg, sb, sa] = sums;
   const result = new Uint32Array(area.width * area.height);
   for (let y = 0; y < area.height; y++) {
     const sy = area.y + y;
+    for (const sum of sums) {
+      sum.fill(0);
+    }
+
+    // The pixels whose taps all lie in the bitmap, x from `x1` to before `x2`,
+    // sum a tap at a time along the row; the rest a pixel at a time.
+    const rowInside = sy >= hy && sy <= sh - rows + hy;
+    const x1 = rowInside ? Math.min(area.width, Math.max(0, hx - area.x)) : 0;
+    const x2 = rowInside ? Math.max(x1, Math.min(area.width, sw - cols + hx + 1 - area.x)) : 0;
+    const fixedRow = integer !== null && sy >= 1 && sy < sh - 1;
+    if (x2 > x1) {
+      // The fixed-point way, where it is taken, is inside these too (its taps are 3 × 3).
+      const taps = fixedRow ? fixedTaps : general;
+      const base = (sy - y0) * nw + area.x + x1 - x0;
+      for (let k = 0; k < taps.w.length; k++) {
+        const w = taps.w[k];
+        let i = base + taps.at[k];
+        for (let x = x1; x < x2; x++, i++) {
+          sr[x] += pr[i] * w;
+          sg[x] += pg[i] * w;
+          sb[x] += pb[i] * w;
+          sa[x] += pa[i] * w;
+        }
+      }
+    }
+
     for (let x = 0; x < area.width; x++) {
       const sx = area.x + x;
-      const fixed = integer !== null && sx >= 1 && sx < sw - 1 && sy >= 1 && sy < sh - 1;
-      const taps = fixed ? fixedTaps : general;
-      const inside = sx >= hx && sx <= sw - cols + hx && sy >= hy && sy <= sh - rows + hy;
-      const base = ((sy - y0) * nw + sx - x0) * 4;
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      let a = 0;
-      for (let k = 0; k < taps.w.length; k++) {
-        const i = inside ? base + taps.at[k] : at(sx + taps.dx[k], sy + taps.dy[k]);
-        const w = taps.w[k];
-        r += near[i] * w;
-        g += near[i + 1] * w;
-        b += near[i + 2] * w;
-        a += near[i + 3] * w;
+      const fixed = fixedRow && sx >= 1 && sx < sw - 1;
+      if (x < x1 || x >= x2) {
+        const taps = fixed ? fixedTaps : general;
+        for (let k = 0; k < taps.w.length; k++) {
+          const i = at(sx + taps.dx[k], sy + taps.dy[k]);
+          const w = taps.w[k];
+          sr[x] += pr[i] * w;
+          sg[x] += pg[i] * w;
+          sb[x] += pb[i] * w;
+          sa[x] += pa[i] * w;
+        }
       }
 
+      let r = sr[x];
+      let g = sg[x];
+      let b = sb[x];
+      let a = sa[x];
       if (fixed) {
-        r = Math.floor((r * (integer as number)) / 65536);
-        g = Math.floor((g * (integer as number)) / 65536);
-        b = Math.floor((b * (integer as number)) / 65536);
-        a = Math.floor((a * (integer as number)) / 65536);
+        r = Math.floor(r * scale);
+        g = Math.floor(g * scale);
+        b = Math.floor(b * scale);
+        a = Math.floor(a * scale);
       }
 
-      const alpha = Math.floor((f.preserveAlpha ? near[at(sx, sy) + 3] : value(a)) + 1e-7);
+      const alpha = preserveAlpha ? pa[at(sx, sy)] : straight(a);
       const by = transparent ? alpha : 255;
-      result[y * area.width + x] =
-        ((alpha << 24) |
-          (channel(r, by, fixed) << 16) |
-          (channel(g, by, fixed) << 8) |
-          channel(b, by, fixed)) >>>
-        0;
+      r = straight(r) * by;
+      g = straight(g) * by;
+      b = straight(b) * by;
+      // The fixed-point way premultiplies truncating, the other as the store does.
+      result[y * area.width + x] = fixed
+        ? ((alpha << 24) |
+            (Math.floor(r / 255) << 16) |
+            (Math.floor(g / 255) << 8) |
+            Math.floor(b / 255)) >>>
+          0
+        : ((alpha << 24) |
+            (((r + 127) / 255) << 16) |
+            (((g + 127) / 255) << 8) |
+            ((b + 127) / 255)) >>>
+          0;
     }
   }
 
@@ -495,13 +571,13 @@ export function integerKernel(matrix: number[], divisor: number): number | null 
  */
 function glow(
   result: Uint32Array,
-  [a, r, g, b]: Float64Array[],
+  [a, r, g, b]: Int32Array[],
   w: number,
   h: number,
   f: Filter,
 ): void {
   // An inner one blurs what the source leaves, 255 less its alpha, as adl does.
-  const blurred = f.inner ? a.map((v) => 255 - v) : new Float64Array(a);
+  const blurred = f.inner ? a.map((v) => 255 - v) : new Int32Array(a);
   blur([blurred], w, h, f);
   const radians = ((f.angle || 0) * Math.PI) / 180;
   const shadow = f.kind === "dropShadow";
@@ -529,46 +605,56 @@ function glow(
   const cg = (f.color >> 8) & 0xff;
   const cb = f.color & 0xff;
   const hide = shadow && f.hideObject;
+  const round = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
       const blurA = sample(x - ox, y - oy);
       const sa = a[i];
-      let ga: number;
+      let ga = Math.floor(Math.min(255, Math.floor(blurA * f.strength)) * f.alpha);
       if (f.inner) {
-        ga = Math.floor(Math.min(255, Math.floor(blurA * f.strength)) * f.alpha);
         ga = Math.floor((ga * sa) / 255);
-      } else {
-        ga = Math.floor(Math.min(255, Math.floor(blurA * f.strength)) * f.alpha);
       }
 
-      const glowC = [cr, cg, cb].map((c) => (c * ga) / 255);
-      let out: number[];
-      if (f.knockout) {
-        out = f.inner ? [ga, ...glowC] : [ga, ...glowC].map((v) => (v * (255 - sa)) / 255);
-      } else if (f.inner) {
+      const gr = (cr * ga) / 255;
+      const gg = (cg * ga) / 255;
+      const gb = (cb * ga) / 255;
+      let oa: number;
+      let or: number;
+      let og: number;
+      let ob: number;
+      if (f.knockout && !f.inner) {
+        oa = (ga * (255 - sa)) / 255;
+        or = (gr * (255 - sa)) / 255;
+        og = (gg * (255 - sa)) / 255;
+        ob = (gb * (255 - sa)) / 255;
+      } else if (f.inner && !f.knockout) {
         const keep = (255 - ga) / 255;
-        out = [
-          ga + sa * keep,
-          glowC[0] + r[i] * keep,
-          glowC[1] + g[i] * keep,
-          glowC[2] + b[i] * keep,
-        ];
-      } else if (hide) {
-        out = [ga, ...glowC];
+        oa = ga + sa * keep;
+        or = gr + r[i] * keep;
+        og = gg + g[i] * keep;
+        ob = gb + b[i] * keep;
+      } else if (f.knockout || hide) {
+        // Knocked out inside, or a shadow drawn alone: the glow by itself.
+        oa = ga;
+        or = gr;
+        og = gg;
+        ob = gb;
       } else {
         const behind = (255 - sa) / 255;
-        out = [
-          sa + ga * behind,
-          r[i] + glowC[0] * behind,
-          g[i] + glowC[1] * behind,
-          b[i] + glowC[2] * behind,
-        ];
+        oa = sa + ga * behind;
+        or = r[i] + gr * behind;
+        og = g[i] + gg * behind;
+        ob = b[i] + gb * behind;
       }
 
-      const [oa, or, og, ob] = out.map((v) => Math.max(0, Math.min(255, Math.round(v))));
+      const ka = round(oa);
       result[i] =
-        ((oa << 24) | (Math.min(or, oa) << 16) | (Math.min(og, oa) << 8) | Math.min(ob, oa)) >>> 0;
+        ((ka << 24) |
+          (Math.min(round(or), ka) << 16) |
+          (Math.min(round(og), ka) << 8) |
+          Math.min(round(ob), ka)) >>>
+        0;
     }
   }
 }
@@ -582,20 +668,18 @@ function write(
   my: number,
 ): void {
   const target = dest.pixels;
-  for (let y = 0; y < rect.height; y++) {
-    const ty = rect.y + y + my;
-    if (ty < 0 || ty >= dest.height) {
-      continue;
-    }
-
-    for (let x = 0; x < rect.width; x++) {
-      const tx = rect.x + x + mx;
-      if (tx < 0 || tx >= dest.width) {
-        continue;
+  const to = intersect(
+    { x: rect.x + mx, y: rect.y + my, width: rect.width, height: rect.height },
+    { x: 0, y: 0, width: dest.width, height: dest.height },
+  );
+  if (to) {
+    const opaque = dest.transparent ? 0 : 0xff000000;
+    for (let ty = to.y; ty < to.y + to.height; ty++) {
+      let i = (ty - my - rect.y) * rect.width + to.x - mx - rect.x;
+      let t = ty * dest.width + to.x;
+      for (let n = 0; n < to.width; n++) {
+        target[t++] = (pixels[i++] | opaque) >>> 0;
       }
-
-      const p = pixels[y * rect.width + x];
-      target[ty * dest.width + tx] = dest.transparent ? p : (p | 0xff000000) >>> 0;
     }
   }
 
