@@ -1092,20 +1092,16 @@ export class Runtime {
 
   /** obj[i] = v for a number i, as avmplus' setUintProperty. */
   setIndexed(o: Value, mn: Multiname, i: number, v: Value): void {
-    if (
-      typeof o === "object" &&
-      o !== null &&
-      i >>> 0 === i &&
-      i !== 0xffffffff &&
-      mn.elementName
-    ) {
+    if (typeof o === "object" && o !== null && i >>> 0 === i && mn.elementName) {
+      // The JIT hands a typed index to setUintProperty even at 2^32-1, which is no
+      // property name: a ByteArray fails to grow to it, a Vector is out of range.
       const traits: Traits | undefined = o.$traits;
       if (traits?.setIndex) {
         traits.setIndex(o, i, v, this);
         return;
       }
 
-      if (o.$a !== undefined) {
+      if (o.$a !== undefined && i !== 0xffffffff) {
         o.$a[i] = v;
         return;
       }

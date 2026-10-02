@@ -51,3 +51,11 @@ probe("too big", function():* { return v[big]; });
 var vn:Vector.<int> = null;
 probe("null get", function():* { return vn[i]; });
 probe("null set", function():* { vn[i] = 1; });
+// A typed index of 2^32-1 still reaches a ByteArray or Vector as an index,
+// which neither can hold.
+var top:uint = 0xFFFFFFFF, topN:Number = top;
+probe("bytearray top", function():* { b[top] = 1; return b.length; });
+probe("bytearray top number", function():* { b[topN] = 1; return b.length; });
+probe("vector top", function():* { v[top] = 1; return v.length; });
+probe("array top", function():* { var t:Array = []; t[top] = 1; return t.length + " " + t[top]; });
+trace(b.length, v.length);
