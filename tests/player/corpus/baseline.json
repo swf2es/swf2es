@@ -43,7 +43,7 @@
   "avm2/amf_nondynamic_function_prop": {"matched":6,"lines":6,"traced":6,"error":null},
   "avm2/amf_setter_error": {"matched":0,"lines":8,"traced":0,"error":null},
   "avm2/amf_vector": {"matched":21,"lines":40,"traced":40,"error":null},
-  "avm2/amf_xml": {"matched":0,"lines":6,"traced":0,"error":"Error: swf2es: AMF3 for XML is not supported yet"},
+  "avm2/amf_xml": {"matched":6,"lines":6,"traced":6,"error":null},
   "avm2/appdomain_lookup_edge_cases": {"matched":6,"lines":32,"traced":8,"error":"ReferenceError: Error #1065: Variable Vector::<integerValue> is not defined."},
   "avm2/application_domain": {"matched":0,"lines":4,"traced":4,"error":null},
   "avm2/applicationdomain_getqualifieddefinitionnames": {"matched":0,"lines":9,"traced":0,"error":"Error: swf2es: native flash.system::ApplicationDomain#getQualifiedDefinitionNames is not supported yet"},
