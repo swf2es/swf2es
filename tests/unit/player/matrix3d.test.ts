@@ -60,6 +60,16 @@ test("Matrix3D stores float32 values, returns copies and transfers data in eithe
   );
   assert.deepEqual(fixed.$a, [-1]);
 
+  // A negative index is a uint of 2^32 - 1: refused, as adl refuses any from 2^28, not padded out to.
+  for (const index of [-1, 0x10000000]) {
+    const growable = vector([-1]);
+    assert.throws(
+      () => call(matrix, "copyRawDataTo", growable, index),
+      (e) => rt.toString(e as avm2.Value).includes("#2004"),
+    );
+    assert.deepEqual(growable.$a, [-1]);
+  }
+
   const vector3D = rt.construct(rt.classNamed("flash.geom::Vector3D")) as avm2.AsObject;
   call(matrix, "copyRowTo", 2, vector3D);
   assert.deepEqual(

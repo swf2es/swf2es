@@ -5,6 +5,9 @@ import type { Scripting } from "../../../scripting.js";
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
+/** The first index copyRawDataTo refuses: 2^28. */
+const MAX_INDEX = 0x10000000;
+
 function identity(): Float32Array {
   return Float32Array.of(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
 }
@@ -111,6 +114,11 @@ export function matrix3DNatives(s: Scripting): avm2.Natives {
       const vector = dest as AsObject;
       const values: Value[] = vector.$a;
       const start = s.rt.toUint(index);
+      // Below this adl pads the vector out to the index, however far; from it, a negative index too, it refuses.
+      if (start >= MAX_INDEX) {
+        throw s.rt.error("ArgumentError", 2004);
+      }
+
       if (vector.$fixed && start + 16 > values.length) {
         throw s.rt.error("RangeError", 1126);
       }

@@ -940,7 +940,9 @@ doubles there too, so those two tests cannot be matched to the end.
 `rawData`'s column-major order. Its constructor accepts a vector of exactly
 16 values; otherwise it starts as the identity. The getter returns a new
 `Vector.<Number>` each time, and the setter and copy methods round writes to
-float32. This data model and the copy operations stand apart from the display
+float32. `copyRawDataTo` pads a growable vector with zeros out to its index,
+as adl does however far, but refuses an index from 2^28 on, a negative one
+too, with ArgumentError 2004 before writing anything. This data model and the copy operations stand apart from the display
 list's 2D matrices; assigning `Transform.matrix3D` and drawing in 3D still
 need their own implementation.
 
