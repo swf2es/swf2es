@@ -1,0 +1,26 @@
+merge: 8f876730 707f5f00
+merge clamped: 8f876730 9efc5f00
+colorTransform: 95484aff 358700ff 0
+colorTransform opaque: 0 0
+alpha to red: ff800000 ffff0000 ff200000
+red to alpha: ff808080 0 107f7f7f
+to alpha opaque: ff808080 ff808080 ff808080
+two channels: ff808000 ff808000 ff808000
+scroll: ff000000 ff000003 ff000004 ff000003 ff000006 ff000007 ff000006 ff000007 ff000008
+threshold < 1: 80ff0000 ff00ff00 ffffffff ff000000
+threshold <= 2: ffffffff ff00ff00 ffffffff ff000000
+threshold > 2: 80ff0000 ffffffff 0 ffffffff
+threshold >= 3: ffffffff ffffffff 0 ffffffff
+threshold == 1: ffffffff ff00ff00 0 ff000000
+threshold != 3: 80ff0000 ffffffff ffffffff ffffffff
+bounds lone corner (x=3, y=3, w=1, h=1)
+bounds two (x=0, y=0, w=4, h=4)
+bounds origin (x=0, y=0, w=0, h=0)
+bounds origin and one (x=0, y=0, w=2, h=1)
+floodFill: ffff0000 ff000000 ffffffff ffffffff ffff0000 ff000000 ffffffff ffffffff ffff0000 ffff0000 ff000000 ffffffff
+floodFill translucent: ffff0000 ff000000 80ff0000 80ff0000 ffff0000 ff000000 80ff0000 80ff0000 ffff0000 ffff0000 ff000000 80ff0000
+histogram 4 256 1 1 1 1 1
+noise 0,0,255,7,false: ffa7f1d9 ff2a82c8
+noise 7,50,60,15,false: 38373b37 393a3a36
+noise -1,0,255,8,true: e24e4e4e 54b3b3b3
+noise 99,0,255,1,true: ff959595 ff404040

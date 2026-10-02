@@ -870,10 +870,38 @@ do nothing, as a store drawn from each frame needs no batching. A
 are its data's size, and the renderer draws it as a sprite whose texture
 is uploaded from the pixels and again when they change, which the store
 counts in a version the node compares. Slice one is the store and the
-`Bitmap` on the display list; the SWF's bitmap tags (`DefineBitsLossless`,
-`DefineBitsJPEG2` and 3) as characters, `draw` of a display object into a
-bitmap, the filters and the rest of the pixel operations follow, each by
-what Flash traces and draws under adl.
+`Bitmap` on the display list. Slice two is the pixel operations that read
+and write the store alone, in `bitmap.ts` beside the rest: `noise` and
+`pixelDissolve`, whose pseudo-random sequences are Flash's own and fitted
+to the values Ruffle's corpus recorded of it; `copyChannel`,
+`colorTransform`, `merge`, `scroll`; `threshold`, `hitTest`,
+`getColorBoundsRect`, `floodFill` and `histogram`. Each works on the
+pixels as Flash does, premultiplied or not as its results show, and each
+is checked by the corpus's traces and a case's trace under adl (the
+`bitmap-ops` case). The rules fitted: `noise` is Park-Miller's minimal
+standard generator (x · 16807 mod 2^31 − 1, a seed of 0 taken as 1 and
+one below as −seed + 1), one draw per channel, R, G, B and then alpha on
+a transparent bitmap alone, a value `low + r % (high − low + 1)`;
+`colorTransform` reads a channel back as p · 255 / a floored, applies
+(c · ⌊m · 256⌋ >> 8) + ⌊offset⌋, alpha alike, and writes it premultiplied
+as c · (a + 1) >> 8, leaving a pixel of alpha 0 alone; `merge` is
+((s · m + d · (256 − m)) >> 8) & 0xFF with the multiplier a uint and
+nothing clamped; `copyChannel` from more than one channel copies 0;
+`getColorBoundsRect` gives an empty rect where the one pixel found is the
+origin; a point or rect `hitTest` never hits alpha 0; `pixelDissolve`
+visits the rect, clipped to both bitmaps, in Flash's own order, a Galois
+LFSR over ⌈log2 w⌉ + ⌈log2 h⌉ bits whose taps for every width from 2 to
+26 bits were read off adl, a state standing for (s & (2^bw − 1), s >> bw)
+and skipped outside the rect; each call writes numPixels and returns the
+next state; every call writes the origin too, a seed past the states is
+taken modulo 2^bits − 1 and 0 starts at the tap, and a count past the
+w · h − 1 states a round visits is one round and the remainder, which
+gives Flash's seed without its loop (Flash itself takes seconds over
+2^31 − 1).
+`draw`
+of a display object into a bitmap, the filters, and the SWF's bitmap
+tags (`DefineBitsLossless`, `DefineBitsJPEG2` and 3) as characters
+follow, each by what Flash traces and draws under adl.
 
 ## Testing against oracles
 

@@ -3,7 +3,22 @@
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
 import { BitmapStore, type PixelRect } from "../../../bitmap.js";
+import {
+  alphaAt,
+  colorBounds,
+  colorTransform,
+  copyChannel,
+  floodFill,
+  histogram,
+  isThresholdOperation,
+  merge,
+  noise,
+  pixelDissolve,
+  scroll,
+  threshold,
+} from "../../../bitmap-ops.js";
 import type { Scripting } from "../../../scripting.js";
+import { colorOf } from "../geom/Transform.js";
 
 type Value = avm2.Value;
 type AsObject = avm2.AsObject;
@@ -67,6 +82,15 @@ function argbBytes(values: number[]): Uint8Array {
   }
 
   return bytes;
+}
+
+/** A source BitmapData's store; TypeError 2007 for null. */
+function sourceOf(s: Scripting, v: Value): BitmapStore {
+  if (v === null || v === undefined) {
+    throw s.rt.error("TypeError", 2007, "sourceBitmapData");
+  }
+
+  return storeOf(s, v as AsObject);
 }
 
 export function bitmapDataNatives(s: Scripting): avm2.Natives {
@@ -217,15 +241,17 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      // Read as the rect is clipped, so a short ByteArray fails as Flash's does (EOFError).
-      const bytes: Uint8Array = (input as AsObject).$bytes.read(c.width * c.height * 4);
-      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      // A pixel at a time, as Flash reads them: those read before the end are set, then EOFError 2030.
+      const bytes = (input as AsObject).$bytes;
       const values: number[] = [];
-      for (let i = 0; i < c.width * c.height; i++) {
-        values.push(view.getUint32(i * 4));
+      try {
+        for (let i = 0; i < c.width * c.height; i++) {
+          const b: Uint8Array = bytes.read(4);
+          values.push(((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0);
+        }
+      } finally {
+        store.setVector(c, values);
       }
-
-      store.setVector(c, values);
     }
 
     getVector(rect: Value): Value {
@@ -240,7 +266,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const store = storeOf(s, this);
       const r = rectOf(s, rect);
       if (input === null || input === undefined) {
-        throw s.rt.error("TypeError", 2007, "inputVector");
+        throw s.rt.error("TypeError", 2007, "imputVector");
       }
 
       const c = store.clip(r);
@@ -254,6 +280,236 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       }
 
       store.setVector(c, values);
+    }
+
+    noise(seed: Value, low: Value, high: Value, channels: Value, gray: Value): void {
+      noise(
+        storeOf(s, this),
+        s.rt.toInt(seed),
+        low === undefined ? 0 : s.rt.toUint(low),
+        high === undefined ? 255 : s.rt.toUint(high),
+        channels === undefined ? 7 : s.rt.toUint(channels),
+        !!gray,
+      );
+    }
+
+    copyChannel(source: Value, rect: Value, dest: Value, from: Value, to: Value): void {
+      const store = storeOf(s, this);
+      const src = sourceOf(s, source);
+      const r = rectOf(s, rect);
+      const [dx, dy] = pointOf(s, dest, "destPoint");
+      copyChannel(store, src, r, dx, dy, s.rt.toUint(from), s.rt.toUint(to));
+    }
+
+    colorTransform(rect: Value, ct: Value): void {
+      const store = storeOf(s, this);
+      const r = rectOf(s, rect);
+      if (ct === null || ct === undefined) {
+        throw s.rt.error("TypeError", 2007, "colorTransform");
+      }
+
+      colorTransform(store, r, colorOf(s, ct as AsObject));
+    }
+
+    merge(
+      source: Value,
+      rect: Value,
+      dest: Value,
+      rMul: Value,
+      gMul: Value,
+      bMul: Value,
+      aMul: Value,
+    ): void {
+      const store = storeOf(s, this);
+      const src = sourceOf(s, source);
+      const r = rectOf(s, rect);
+      const [dx, dy] = pointOf(s, dest, "destPoint");
+      merge(
+        store,
+        src,
+        r,
+        dx,
+        dy,
+        [rMul, gMul, bMul, aMul].map((m) => s.rt.toUint(m)) as [number, number, number, number],
+      );
+    }
+
+    scroll(x: Value, y: Value): void {
+      scroll(storeOf(s, this), s.rt.toInt(x), s.rt.toInt(y));
+    }
+
+    threshold(
+      source: Value,
+      rect: Value,
+      dest: Value,
+      op: Value,
+      value: Value,
+      color: Value,
+      mask: Value,
+      copySource: Value,
+    ): number {
+      const store = storeOf(s, this);
+      const src = sourceOf(s, source);
+      const r = rectOf(s, rect);
+      const [dx, dy] = pointOf(s, dest, "destPoint");
+      // A String parameter: undefined is null, refused with 2007 before the value is looked at.
+      if (op === null || op === undefined) {
+        throw s.rt.error("TypeError", 2007, "operation");
+      }
+
+      const operation = s.rt.toString(op);
+      if (!isThresholdOperation(operation)) {
+        throw s.rt.error("ArgumentError", 2005, 3);
+      }
+
+      return threshold(
+        store,
+        src,
+        r,
+        dx,
+        dy,
+        operation,
+        s.rt.toUint(value),
+        s.rt.toUint(color),
+        mask === undefined ? 0xffffffff : s.rt.toUint(mask),
+        !!copySource,
+      );
+    }
+
+    getColorBoundsRect(mask: Value, color: Value, find: Value): Value {
+      const r = colorBounds(
+        storeOf(s, this),
+        s.rt.toUint(mask),
+        s.rt.toUint(color),
+        find === undefined ? true : !!find,
+      );
+      return s.rt.construct(s.rt.classNamed("flash.geom::Rectangle"), r.x, r.y, r.width, r.height);
+    }
+
+    floodFill(x: Value, y: Value, color: Value): void {
+      floodFill(storeOf(s, this), s.rt.toInt(x), s.rt.toInt(y), s.rt.toUint(color));
+    }
+
+    histogram(rect: Value): Value {
+      const store = storeOf(s, this);
+      const counts = histogram(
+        store,
+        rect === null || rect === undefined
+          ? { x: 0, y: 0, width: store.width, height: store.height }
+          : rectOf(s, rect),
+      );
+      const inner = s.rt.resolve(s.rt.vector("Number"));
+      const outer = s.rt.applyType(s.rt.classNamed("__AS3__.vec::Vector"), [inner]);
+      const o = outer.$it.instance();
+      o.$a = counts.map((c) => {
+        const v = inner.$it.instance();
+        v.$a = c;
+        return v;
+      });
+      return o;
+    }
+
+    hitTest(
+      firstPoint: Value,
+      firstAlpha: Value,
+      second: Value,
+      secondPoint: Value,
+      secondAlpha: Value,
+    ): boolean {
+      const store = storeOf(s, this);
+      const [fx, fy] = pointOf(s, firstPoint, "firstPoint");
+      const a1 = s.rt.toUint(firstAlpha);
+      const other = second as AsObject;
+      if (other === null || other === undefined) {
+        throw s.rt.error("ArgumentError", 2005, 2);
+      }
+
+      const name = s.rt.traitsOf(other).name;
+      // A Bitmap tests as its BitmapData.
+      const data: AsObject | null =
+        other.$store !== undefined
+          ? other
+          : other.$display?.store !== undefined
+            ? (other.$bitmapData ?? null)
+            : null;
+      const isPoint = name === "flash.geom::Point";
+      const isRect = name === "flash.geom::Rectangle";
+      if (isPoint || isRect) {
+        const read = (k: string) => s.rt.toNumber(s.rt.getProperty(other, s.rt.publicName(k))) || 0;
+        const x0 = Math.trunc(read("x")) - fx;
+        const y0 = Math.trunc(read("y")) - fy;
+        const w = isRect ? Math.trunc(read("width")) : 1;
+        const h = isRect ? Math.trunc(read("height")) : 1;
+        for (let y = Math.max(0, y0); y < Math.min(store.height, y0 + h); y++) {
+          for (let x = Math.max(0, x0); x < Math.min(store.width, x0 + w); x++) {
+            // A point or rect hits no pixel of alpha 0, at threshold 0 too (bitmapdata_hittest_threshold).
+            const a = alphaAt(store, x, y);
+            if (a > 0 && a >= a1) {
+              return true;
+            }
+          }
+        }
+
+        return false;
+      }
+
+      if (data) {
+        const second = storeOf(s, data);
+        // Against a bitmap, its point is required.
+        const [sx, sy] = pointOf(s, secondPoint, "secondBitmapDataPoint");
+        const a2 = secondAlpha === undefined ? 1 : s.rt.toUint(secondAlpha);
+        const ox = sx - fx;
+        const oy = sy - fy;
+        for (let y = Math.max(0, oy); y < Math.min(store.height, oy + second.height); y++) {
+          for (let x = Math.max(0, ox); x < Math.min(store.width, ox + second.width); x++) {
+            if (alphaAt(store, x, y) >= a1 && alphaAt(second, x - ox, y - oy) >= a2) {
+              return true;
+            }
+          }
+        }
+
+        return false;
+      }
+
+      throw s.rt.error("ArgumentError", 2005, 2);
+    }
+
+    pixelDissolve(
+      source: Value,
+      rect: Value,
+      dest: Value,
+      seed: Value,
+      count: Value,
+      fill: Value,
+    ): number {
+      const store = storeOf(s, this);
+      // Anything but a BitmapData is refused as null, as Flash words it.
+      if (source === null || source === undefined || (source as AsObject).$store === undefined) {
+        throw s.rt.error("TypeError", 2007, "sourceBitmapData");
+      }
+
+      const src = storeOf(s, source as AsObject);
+      if (rect === null || rect === undefined) {
+        throw s.rt.error("TypeError", 2007, "sourceRect");
+      }
+
+      const r = rectOf(s, rect);
+      const [dx, dy] = pointOf(s, dest, "destPoint");
+      const n = count === undefined ? 0 : s.rt.toInt(count);
+      if (n < 0) {
+        throw s.rt.error("RangeError", 2027, "numPixels", n);
+      }
+
+      return pixelDissolve(
+        store,
+        src,
+        r,
+        dx,
+        dy,
+        seed === undefined ? 0 : s.rt.toNumber(seed),
+        n,
+        fill === undefined ? 0 : s.rt.toUint(fill),
+      );
     }
 
     lock(): void {

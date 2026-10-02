@@ -647,6 +647,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "bitmap-ops",
+    swf: bare,
+    script: "BitmapOps",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "addChild",
     swf: added,
     script: "AddChild",

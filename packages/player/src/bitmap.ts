@@ -233,16 +233,17 @@ export class BitmapStore {
     return out;
   }
 
-  /** The rect's pixels set from `values`, unmultiplied ARGB, row by row; how many it took. */
+  /** The rect's pixels set from `values`, unmultiplied ARGB, row by row, as far as they go; how many it took. */
   setVector(r: PixelRect, values: ArrayLike<number>): number {
     const c = this.clip(r);
     if (!c) {
       return 0;
     }
 
+    // As many as there are values, row by row; the rest stay.
     let k = 0;
-    for (let y = c.y; y < c.y + c.height; y++) {
-      for (let x = c.x; x < c.x + c.width; x++) {
+    for (let y = c.y; y < c.y + c.height && k < values.length; y++) {
+      for (let x = c.x; x < c.x + c.width && k < values.length; x++) {
         this.pixels[y * this.width + x] = this.premultiplied(values[k++] >>> 0);
       }
     }
