@@ -115,7 +115,10 @@ export class TextModel {
     const inserted = normalize(text);
     const format = this.formats[begin - 1] ?? this.formats[begin] ?? this.defaultFormat;
     this.text = this.text.slice(0, begin) + inserted + this.text.slice(end);
-    this.formats.splice(begin, end - begin, ...new Array(inserted.length).fill(format));
+    // Not splice with the formats spread: a long text would be more arguments than a call takes.
+    this.formats = this.formats
+      .slice(0, begin)
+      .concat(new Array(inserted.length).fill(format), this.formats.slice(end));
   }
 
   /** What [begin, end) has in common: each value null where its characters differ; the default's for none. */
