@@ -7,6 +7,56 @@ package {
     public function Point3(x:Number = 0, y:int = 0) { this.x = x; this.y = y; }
   }
 }
+package {
+  import flash.utils.IDataInput;
+  import flash.utils.IDataOutput;
+  import flash.utils.IExternalizable;
+  // Writes itself: a short in the stream's byte order, a string, an object.
+  public class Packed implements IExternalizable {
+    public var n:int = 0;
+    public var tag:String = "";
+    public var more:Object = null;
+    public function writeExternal(output:IDataOutput):void {
+      output.writeShort(n);
+      output.endian = "littleEndian";
+      output.writeShort(n);
+      output.writeUTF(tag);
+      output.writeObject(more);
+      trace("written", output.objectEncoding, output.endian);
+    }
+    public function readExternal(input:IDataInput):void {
+      n = input.readShort();
+      input.endian = "littleEndian";
+      trace("read", input.readShort() == n, input.bytesAvailable);
+      tag = input.readUTF();
+      more = input.readObject();
+    }
+  }
+}
+package {
+  import flash.utils.IDataInput;
+  import flash.utils.IDataOutput;
+  import flash.utils.IExternalizable;
+  public class Unaliased implements IExternalizable {
+    public function writeExternal(output:IDataOutput):void {}
+    public function readExternal(input:IDataInput):void {}
+  }
+}
+package {
+  import flash.net.IDynamicPropertyOutput;
+  import flash.net.IDynamicPropertyWriter;
+  // Writes only the names that start with "k", and one of its own.
+  public class KeysOnly implements IDynamicPropertyWriter {
+    public function writeDynamicProperties(obj:Object, output:IDynamicPropertyOutput):void {
+      for (var name:String in obj) {
+        if (name.charAt(0) == "k") {
+          output.writeDynamicProperty(name, obj[name]);
+        }
+      }
+      output.writeDynamicProperty("added", 1);
+    }
+  }
+}
 import flash.utils.ByteArray;
 import flash.net.registerClassAlias;
 import flash.net.getClassByAlias;
@@ -119,3 +169,32 @@ function emptyAtEnd(v:*):String {
   return "";
 }
 trace("empty at end", emptyAtEnd(new Vector.<int>()), emptyAtEnd(new Vector.<uint>()), emptyAtEnd(new Vector.<Number>()), emptyAtEnd(new Vector.<Object>()), emptyAtEnd(new Vector.<int>(0, true)));
+// XML as its toXMLString, a second time as a reference; an XMLList as an object.
+var x:XML = <a b="1"><c>t</c></a>;
+trace(amf(x), amf([x, x]), amf(<f>hi</f>));
+var xs:Array = back([x, x]);
+trace(xs[0].toXMLString().split("\n").join("|"), xs[0] === xs[1], xs[0] is XML);
+// An IExternalizable writes and reads itself, sharing the stream's tables.
+registerClassAlias("Packed", Packed);
+var p:Packed = new Packed();
+p.n = 258;
+p.tag = "t";
+p.more = {k: "t"};
+trace(amf(p));
+var q:Packed = back(p);
+trace(q.n, q.tag, q.more.k);
+try { amf(new Unaliased()); } catch (e:Error) { trace(e); }
+registerClassAlias("Point3", Point3);
+var notExternal:ByteArray = new ByteArray();
+notExternal.writeByte(10);
+notExternal.writeByte(7);
+notExternal.writeByte(13);
+notExternal.writeUTFBytes("Point3");
+notExternal.position = 0;
+try { notExternal.readObject(); } catch (e:Error) { trace(e); }
+// A dynamicPropertyWriter decides what of a dynamic object's own is written.
+import flash.net.ObjectEncoding;
+ObjectEncoding.dynamicPropertyWriter = new KeysOnly();
+trace(ObjectEncoding.dynamicPropertyWriter is KeysOnly, amf({k1: 1, other: 2}));
+ObjectEncoding.dynamicPropertyWriter = null;
+trace(ObjectEncoding.dynamicPropertyWriter, amf({k1: 1}));

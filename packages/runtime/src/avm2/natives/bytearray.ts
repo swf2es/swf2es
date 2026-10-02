@@ -17,7 +17,8 @@ import {
   zlibCompress,
   zlibUncompress,
 } from "@swf2es/format";
-import type { AsObject, IndexHook, Runtime, Traits, Value } from "../runtime.js";
+import type { ExternalStream, Reader, Writer } from "../amf.js";
+import type { AsObject, IndexHook, Method, Runtime, Traits, Value } from "../runtime.js";
 import { type Natives, registerNativeClass } from "./define.js";
 
 const kGrowthIncr = 4096;
@@ -925,6 +926,114 @@ export function byteArrayNatives(rt: Runtime): Natives {
   }
 
   registerNativeClass(natives, "flash.utils::ByteArray", ByteArrayNatives);
+
+  // flash.utils' ObjectOutput and ObjectInput, what writeExternal and
+  // readExternal are given: the ByteArray's own writes and reads, in the
+  // stream's byte order, and its objects through the stream's tables.
+  const delegated = (target: object, names: string[]) => {
+    const from = ByteArrayNatives.prototype as unknown as Record<string, Method>;
+    for (const name of names) {
+      const f = from[name];
+      Object.defineProperty(target, name, {
+        value(this: AsObject, ...args: Value[]) {
+          const stream: ExternalStream = this.$amf;
+          const b = stream.bytes;
+          const order = b.littleEndian;
+          b.littleEndian = stream.littleEndian;
+          try {
+            return f.apply(b.owner, args);
+          } finally {
+            b.littleEndian = order;
+          }
+        },
+      });
+    }
+  };
+  const streamState = {
+    get endian(): string {
+      return (this as unknown as AsObject).$amf.littleEndian ? "littleEndian" : "bigEndian";
+    },
+    set endian(v: Value) {
+      nonNull(rt, v, "endian");
+      if (v !== "bigEndian" && v !== "littleEndian") {
+        throw rt.error("ArgumentError", 2008, "type");
+      }
+
+      (this as unknown as AsObject).$amf.littleEndian = v === "littleEndian";
+    },
+    get objectEncoding(): number {
+      return (this as unknown as AsObject).$amf.objectEncoding;
+    },
+    set objectEncoding(v: Value) {
+      const encoding = rt.toUint(v);
+      if (encoding !== 0 && encoding !== 3) {
+        throw rt.error("ArgumentError", 2008, "objectEncoding");
+      }
+
+      (this as unknown as AsObject).$amf.objectEncoding = encoding;
+    },
+  };
+
+  class ObjectOutputNatives {
+    writeObject(this: AsObject, v: Value): void {
+      const stream: Writer = this.$amf;
+      if (stream.objectEncoding !== 3) {
+        throw rt.unsupported("AMF0");
+      }
+
+      stream.value(v);
+    }
+  }
+
+  class ObjectInputNatives {
+    readObject(this: AsObject): Value {
+      const stream: Reader = this.$amf;
+      if (stream.objectEncoding !== 3) {
+        throw rt.unsupported("AMF0");
+      }
+
+      return stream.value();
+    }
+
+    get bytesAvailable(): number {
+      return (this as unknown as AsObject).$amf.bytes.available;
+    }
+  }
+
+  for (const Class of [ObjectOutputNatives, ObjectInputNatives]) {
+    Object.defineProperties(Class.prototype, Object.getOwnPropertyDescriptors(streamState));
+  }
+
+  delegated(ObjectOutputNatives.prototype, [
+    "writeBytes",
+    "writeBoolean",
+    "writeByte",
+    "writeShort",
+    "writeInt",
+    "writeUnsignedInt",
+    "writeFloat",
+    "writeDouble",
+    "writeMultiByte",
+    "writeUTF",
+    "writeUTFBytes",
+  ]);
+  delegated(ObjectInputNatives.prototype, [
+    "readBytes",
+    "readBoolean",
+    "readByte",
+    "readUnsignedByte",
+    "readShort",
+    "readUnsignedShort",
+    "readInt",
+    "readUnsignedInt",
+    "readFloat",
+    "readDouble",
+    "readMultiByte",
+    "readUTF",
+    "readUTFBytes",
+  ]);
+  registerNativeClass(natives, "flash.utils::ObjectOutput", ObjectOutputNatives);
+  registerNativeClass(natives, "flash.utils::ObjectInput", ObjectInputNatives);
   return natives;
 }
 

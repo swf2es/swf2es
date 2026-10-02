@@ -2,7 +2,7 @@
 import { readObject, writeObject } from "../amf.js";
 import type { AsObject, Value } from "../runtime.js";
 import { bytesOf } from "./bytearray.js";
-import { type Natives, plain } from "./define.js";
+import type { Natives } from "./define.js";
 
 export const aliasesNatives: Natives = {
   // Class aliases and AMF.
@@ -34,7 +34,20 @@ export const aliasesNatives: Natives = {
 
     return rt.classByAlias(name);
   },
-  "flash.net::ObjectEncoding.get:dynamicPropertyWriter": plain(() => null),
+  "flash.net::ObjectEncoding.get:dynamicPropertyWriter": (rt) => () => rt.dynamicPropertyWriter,
+  "flash.net::ObjectEncoding.set:dynamicPropertyWriter": (rt) => (writer: Value) => {
+    rt.dynamicPropertyWriter = writer ?? null;
+  },
+  // What writeDynamicProperties writes through: the object being written's
+  // dynamic part, each name and value.
+  "flash.net::DynamicPropertyOutput#writeDynamicProperty": (rt) =>
+    function (this: AsObject, name: Value, value: Value) {
+      if (name === null || name === undefined) {
+        throw rt.error("TypeError", 2007, "name");
+      }
+
+      this.$amf.dynamicProperty(rt.toString(name), value);
+    },
   "flash.utils::ByteArray#writeObject": (rt) =>
     function (this: AsObject, v: Value) {
       writeObject(rt, bytesOf(rt, this), v);

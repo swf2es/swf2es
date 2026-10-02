@@ -1,5 +1,5 @@
 {
-  "as3/AMF/AMFSerializer": {"passed":10,"failed":0,"exitCode":null,"error":"Error: swf2es: AMF3 for XML is not supported yet"},
+  "as3/AMF/AMFSerializer": {"passed":225,"failed":0,"exitCode":0,"error":null},
   "as3/AbcDecoder/accessSpecifiers": {"passed":6,"failed":0,"exitCode":0,"error":null},
   "as3/AbcDecoder/extClass": {"passed":2,"failed":0,"exitCode":0,"error":null},
   "as3/AbcDecoder/impClass": {"passed":3,"failed":0,"exitCode":0,"error":null},
