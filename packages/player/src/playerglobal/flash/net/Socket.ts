@@ -37,12 +37,9 @@ export function socketNatives(s: Scripting): avm2.Natives {
 
     return c;
   };
+  // The runtime's message, which is the debugger player's text or the release player's number alone.
   const invalid = (): never => {
-    throw s.rt.construct(
-      s.rt.classNamed("flash.errors::IOError"),
-      "Error #2002: Operation attempted on invalid socket.",
-      2002,
-    );
+    throw s.rt.error("flash.errors::IOError", 2002);
   };
   const active = (o: AsObject): Connection => {
     const c = connection(o);
