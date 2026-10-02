@@ -1063,6 +1063,12 @@ the filters follow, each by what Flash traces and draws under adl.
   above 2^53 writes digits that are neither exact nor a double's, and in
   its JIT a multiplication past 2^53 comes out exact, as as3pb's wire
   checksum shows (`tests/programs` compares all but that line).
+  `tests/programs` also builds C, LZ4's from the com-lz4-as3 submodule
+  with a driver of its own (`tests/programs/lz4`), with the image's
+  Crossbridge, and runs it as avmshell's projector and its ABC in
+  swf2es. That avmshell has Crossbridge's ShellPosix, which swf2es's
+  shell has not, so its start, which then goes as in a player, is left
+  out of the comparison.
   for-in and for each visit an object's dynamic properties in the order
   they were added; avmplus visits them in its hashtable's, which for names
   that are not indexes follows their interned strings' addresses, so the
