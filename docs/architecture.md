@@ -898,9 +898,22 @@ taken modulo 2^bits − 1 and 0 starts at the tap, and a count past the
 w · h − 1 states a round visits is one round and the remainder, which
 gives Flash's seed without its loop (Flash itself takes seconds over
 2^31 − 1).
-`draw`
-of a display object into a bitmap, the filters, and the SWF's bitmap
-tags (`DefineBitsLossless`, `DefineBitsJPEG2` and 3) as characters
+Slice three is `draw` and `drawWithQuality`, in two paths. A
+BitmapData or a Bitmap drawn is composited on the CPU, in `bitmap.ts`'s
+arithmetic: through the matrix by the inverse of each destination
+pixel's centre, nearest or bilinear as `smoothing` asks, the colour
+transform as `colorTransform` applies it, then the blend mode (normal,
+`alpha`, `erase`, `multiply`, `screen`, `lighten`, `darken`,
+`difference`, `add`, `subtract`, `invert`), all clipped to `clipRect` and
+the bitmap. Any other display object is drawn by the renderer: the
+Scripting has a `drawer` the host sets once its renderer exists, before
+the document class is constructed, which renders the object's subtree
+through the matrix into a texture of the bitmap's size and reads it back
+synchronously, as WebGL's readPixels allows, to composite as a bitmap
+source is; without a renderer, as in node, drawing a display object is
+not supported. Each rule is Flash's as a case traces and draws it under
+adl. `draw` of a display object into a bitmap is that slice; the filters
+and the SWF's bitmap tags (`DefineBitsLossless`, `DefineBitsJPEG2` and 3) as characters
 follow, each by what Flash traces and draws under adl.
 
 ## Testing against oracles
