@@ -37,6 +37,10 @@ async function scriptingFor(
     debugger: true,
     // The frame clock: traces that tell getTimer are the same on every run.
     realTime: null,
+    // These corpus traces were recorded on a 1536×864 Flash host.
+    screenCapabilities: url?.startsWith("/corpus/")
+      ? { screenResolutionX: 1536, screenResolutionY: 864, pixelAspectRatio: 1, screenDPI: 72 }
+      : undefined,
     url: url ? new URL(url, location.href).href : undefined,
     fetch: async (request, signal) => {
       const response = await fetch(request.url, {
