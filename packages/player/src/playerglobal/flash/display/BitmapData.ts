@@ -4,10 +4,12 @@
 import { avm2 } from "@swf2es/runtime";
 import { BitmapStore, type PixelRect } from "../../../bitmap.js";
 import {
+  type Affine,
   alphaAt,
   colorBounds,
   colorTransform,
   copyChannel,
+  drawBitmap,
   floodFill,
   histogram,
   isThresholdOperation,
@@ -91,6 +93,65 @@ function sourceOf(s: Scripting, v: Value): BitmapStore {
   }
 
   return storeOf(s, v as AsObject);
+}
+
+/**
+ * draw: a BitmapData, or a Bitmap as its data, its own transform ignored,
+ * composited on the CPU (bitmap-ops.ts drawBitmap); any other display
+ * object waits for the renderer path. A null source is ArgumentError
+ * 2005, as Flash words it.
+ */
+function drawInto(
+  s: Scripting,
+  store: BitmapStore,
+  source: Value,
+  matrix: Value,
+  ct: Value,
+  mode: Value,
+  clip: Value,
+  smoothing: Value,
+): void {
+  if (source === null || source === undefined) {
+    throw s.rt.error("ArgumentError", 2005, 0);
+  }
+
+  const o = source as AsObject;
+  const data: AsObject | null =
+    o.$store !== undefined ? o : o.$display?.store !== undefined ? (o.$bitmapData ?? null) : null;
+  if (data === null && o.$display === undefined) {
+    throw s.rt.error("ArgumentError", 2005, 0);
+  }
+
+  const m =
+    matrix === null || matrix === undefined
+      ? { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }
+      : matrixOf(s, matrix as AsObject);
+  const c = ct === null || ct === undefined ? null : colorOf(s, ct as AsObject);
+  const blend = mode === null || mode === undefined ? "normal" : s.rt.toString(mode);
+  const r = clip === null || clip === undefined ? null : rectOf(s, clip);
+  if (data === null) {
+    // Any other display object, through the renderer, then composited as a bitmap is.
+    if (!s.drawer) {
+      throw s.rt.unsupported("BitmapData#draw of a display object without a renderer");
+    }
+
+    const drawn = new BitmapStore(store.width, store.height, true, 0);
+    drawn.pixels = s.drawer(o.$display, m, store.width, store.height);
+    drawBitmap(store, drawn, { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }, c, blend, r, false);
+    return;
+  }
+
+  if (data.$bitmapData === null && data.$store === undefined) {
+    return;
+  }
+
+  drawBitmap(store, storeOf(s, data), m, c, blend, r, !!smoothing);
+}
+
+/** A flash.geom.Matrix's six values. */
+function matrixOf(s: Scripting, o: AsObject): Affine {
+  const read = (k: string) => s.rt.toNumber(s.rt.getProperty(o, s.rt.publicName(k)));
+  return { a: read("a"), b: read("b"), c: read("c"), d: read("d"), tx: read("tx"), ty: read("ty") };
 }
 
 export function bitmapDataNatives(s: Scripting): avm2.Natives {
@@ -510,6 +571,28 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         n,
         fill === undefined ? 0 : s.rt.toUint(fill),
       );
+    }
+
+    draw(
+      source: Value,
+      matrix: Value,
+      ct: Value,
+      mode: Value,
+      clip: Value,
+      smoothing: Value,
+    ): void {
+      drawInto(s, storeOf(s, this), source, matrix, ct, mode, clip, smoothing);
+    }
+
+    drawWithQuality(
+      source: Value,
+      matrix: Value,
+      ct: Value,
+      mode: Value,
+      clip: Value,
+      smoothing: Value,
+    ): void {
+      drawInto(s, storeOf(s, this), source, matrix, ct, mode, clip, smoothing);
     }
 
     lock(): void {

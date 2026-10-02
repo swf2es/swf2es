@@ -13,6 +13,7 @@ import {
   Matrix,
   Container as PixiContainer,
   type Renderer,
+  RenderTexture,
   Sprite,
   Texture,
 } from "pixi.js";
@@ -308,12 +309,23 @@ interface Node {
   bitmap: { sprite: Sprite; source: BufferImageSource; version: number } | null;
 }
 
+/** Samples a side of each pixel a snapshot renders, averaged down. */
+const SNAPSHOT_SAMPLES = 4;
+
 export class PixiView {
   readonly stage = new PixiContainer();
   private readonly nodes = new WeakMap<DisplayObject, Node>();
   private readonly fills = new Map<ShapeCharacter, GraphicsContext[]>();
 
-  constructor(readonly renderer: Renderer) {}
+  /**
+   * `fresh` makes a view that draws every object as new and leaves the
+   * objects' dirty flags as they were, for a one-off render such as
+   * BitmapData.draw's, so the stage's own view still sees each change.
+   */
+  constructor(
+    readonly renderer: Renderer,
+    private readonly fresh = false,
+  ) {}
 
   private node(o: DisplayObject): Node {
     let node = this.nodes.get(o);
@@ -432,7 +444,8 @@ export class PixiView {
   private sync(o: DisplayObject, parent: Linear, moved: boolean): PixiContainer {
     const node = this.node(o);
     const { container } = node;
-    if (o.dirty & TRANSFORM) {
+    const dirty = this.fresh ? TRANSFORM | CHILDREN | CONTENT : o.dirty;
+    if (dirty & TRANSFORM) {
       const m = o.matrix;
       container.setFromMatrix(new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty));
       container.visible = o.visible;
@@ -446,7 +459,7 @@ export class PixiView {
         : 0xffffff;
     }
 
-    if (moved || o.dirty & TRANSFORM) {
+    if (moved || dirty & TRANSFORM) {
       const m = o.matrix;
       const world: Linear = [
         parent[0] * m.a + parent[2] * m.b,
@@ -458,11 +471,11 @@ export class PixiView {
       node.world = world;
     }
 
-    if (o.dirty & CONTENT) {
+    if (dirty & CONTENT) {
       this.redraw(o, node);
     } else if (moved && node.strokes.some((g) => g)) {
       this.restroke(node);
-    } else if (o.dirty & PIXELS && node.bitmap && o instanceof BitmapObject && o.store) {
+    } else if (dirty & PIXELS && node.bitmap && o instanceof BitmapObject && o.store) {
       // Pixels set since the upload: the same texture, uploaded again.
       if (o.store.version !== node.bitmap.version) {
         node.bitmap.source.resource = rgba(o.store.pixels);
@@ -472,7 +485,7 @@ export class PixiView {
     }
 
     if (o instanceof Container) {
-      if (o.dirty & CHILDREN) {
+      if (dirty & CHILDREN) {
         container.removeChildren();
         container.addChild(node.art);
         for (const child of o.children) {
@@ -490,10 +503,15 @@ export class PixiView {
         }
       }
 
-      o.descendantsDirty = false;
+      if (!this.fresh) {
+        o.descendantsDirty = false;
+      }
     }
 
-    o.dirty = CLEAN;
+    if (!this.fresh) {
+      o.dirty = CLEAN;
+    }
+
     return container;
   }
 
@@ -504,6 +522,58 @@ export class PixiView {
       this.stage.removeChildren();
       this.stage.addChild(node);
     }
+  }
+
+  /**
+   * `o` drawn alone, as BitmapData.draw takes a display object: through `m`
+   * in place of its own transform, into a w x h texture, read back as
+   * premultiplied ARGB. A fresh view does it, so the stage's is untouched.
+   */
+  snapshot(
+    o: DisplayObject,
+    m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
+    width: number,
+    height: number,
+  ): Uint32Array {
+    // Rendered at 4 x 4 samples a pixel and averaged, as Flash covers edges at its high quality.
+    const n = SNAPSHOT_SAMPLES;
+    const view = new PixiView(this.renderer, true);
+    const node = view.sync(o, [m.a * n, m.b * n, m.c * n, m.d * n], true);
+    node.setFromMatrix(new Matrix(m.a * n, m.b * n, m.c * n, m.d * n, m.tx * n, m.ty * n));
+    const target = RenderTexture.create({ width: width * n, height: height * n });
+    this.renderer.render({ container: node, target, clear: true });
+    const { pixels } = this.renderer.extract.pixels(target);
+    node.destroy({ children: true, texture: true, textureSource: true });
+    target.destroy(true);
+    const out = new Uint32Array(width * height);
+    const row = width * n;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let a = 0;
+        let r = 0;
+        let g = 0;
+        let b = 0;
+        for (let sy = 0; sy < n; sy++) {
+          for (let sx = 0; sx < n; sx++) {
+            const i = ((y * n + sy) * row + x * n + sx) * 4;
+            r += pixels[i];
+            g += pixels[i + 1];
+            b += pixels[i + 2];
+            a += pixels[i + 3];
+          }
+        }
+
+        const k = n * n;
+        out[y * width + x] =
+          ((Math.round(a / k) << 24) |
+            (Math.round(r / k) << 16) |
+            (Math.round(g / k) << 8) |
+            Math.round(b / k)) >>>
+          0;
+      }
+    }
+
+    return out;
   }
 
   /** Draw `root`'s display list, synced first. */
