@@ -32,3 +32,14 @@ try {
   trace("call on null", e.errorID);
 }
 
+// Constants: negative ones under negation and subtraction, -0, NaN, and
+// the same constant used on both sides of a branch.
+var i:int = 5;
+var n:Number = 2.5;
+trace(i - -3, -(-7), i * -1, n - -0.5, 1 / -0, 1 / (0 * -1), -NaN);
+trace(i > 3 ? -1 : 1, i < 3 ? 100 : -100, i >>> 1, -1 >>> 28, 0xffffffff, -2147483648);
+var u:uint = 4294967295;
+trace(u + 1, u >> 1, u >>> 1, u & -1);
+var picked:String = i > 0 ? "pos" : "neg";
+trace(picked, i == 5, i === 5, n != 2.5, null == undefined);
+

@@ -44,6 +44,8 @@ import { SourceMap } from "./sourcemap";
 const MAX_NESTING: u32 = 500;
 /** No type: a conversion, convert_s or convert_o, that always calls the runtime. */
 const CONVERTS: i32 = -2;
+/** copyOf of a stack register that holds a constant: CONSTANT - the instruction that pushed it. */
+const CONSTANT: i32 = -2;
 
 @final
 export class MethodEmitter {
@@ -669,7 +671,7 @@ export class MethodEmitter {
     }
 
     const from = src < stack ? src : this.copyOf[src];
-    if (from < 0) {
+    if (from === -1) {
       return false;
     }
 
@@ -697,7 +699,7 @@ export class MethodEmitter {
     const ir = this.ir;
     const end = min(limit, <i32>ir.frameSize);
     for (let r = <i32>(ir.localCount + ir.maxScope); r < end; r++) {
-      if (this.copyOf[r] >= 0) {
+      if (this.copyOf[r] !== -1) {
         this.writeCopy(r);
       }
     }
@@ -721,8 +723,92 @@ export class MethodEmitter {
     out.text("    ");
     this.reg(r);
     out.text(" = ");
-    this.reg(from);
+    this.copied(from);
     out.text(";\n");
+  }
+
+  /** Whether op pushes a constant, which a stack register can be a copy of. */
+  private pushesConstant(op: u16): bool {
+    switch (op) {
+      case ops.OP_pushbyte:
+      case ops.OP_pushshort:
+      case ops.OP_pushint:
+      case ops.OP_pushuint:
+      case ops.OP_pushdouble:
+      case ops.OP_pushnan:
+      case ops.OP_pushstring:
+      case ops.OP_pushtrue:
+      case ops.OP_pushfalse:
+      case ops.OP_pushnull:
+      case ops.OP_pushundefined:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /** What a copy reads: a register, or the constant instruction `CONSTANT - copy` pushed. */
+  private copied(copy: i32): void {
+    if (copy >= 0) {
+      this.regName(copy);
+      return;
+    }
+
+    const out = this.out;
+    const pool = this.abc.pool;
+    const i = <u32>(CONSTANT - copy);
+    const a = this.ir.a[i];
+    switch (this.ir.op[i]) {
+      case ops.OP_pushbyte:
+      case ops.OP_pushshort:
+        this.literal(<f64>(<i32>a), false);
+        break;
+      case ops.OP_pushint:
+        this.literal(<f64>pool.ints[a], false);
+        break;
+      case ops.OP_pushuint:
+        out.uint(pool.uints[a]);
+        break;
+      case ops.OP_pushdouble:
+        this.literal(pool.doubles[a], true);
+        break;
+      case ops.OP_pushnan:
+        out.text("NaN");
+        break;
+      case ops.OP_pushstring:
+        this.string(a);
+        break;
+      case ops.OP_pushtrue:
+        out.text("true");
+        break;
+      case ops.OP_pushfalse:
+        out.text("false");
+        break;
+      case ops.OP_pushnull:
+        out.text("null");
+        break;
+      default:
+        out.text("undefined");
+    }
+  }
+
+  /** A number read as an operand, a negative one in parentheses, so that `-` before it is no decrement. */
+  private literal(d: f64, double: bool): void {
+    const out = this.out;
+    const negative = d < 0 || (d === 0 && 1 / d < 0);
+    if (negative) {
+      out.byte(0x28); // (
+    }
+
+    if (double) {
+      out.double(d);
+    } else {
+      out.int(<i64>d);
+    }
+
+    if (negative) {
+      out.byte(0x29); // )
+    }
   }
 
   /** Forget every copy from register `from` up: none is needed. */
@@ -740,7 +826,11 @@ export class MethodEmitter {
   /** Register r as read: what it copies, if it is a copy. */
   reg(r: i32): void {
     const copy = this.copyOf[r];
-    this.regName(copy >= 0 ? copy : r);
+    if (copy === -1) {
+      this.regName(r);
+    } else {
+      this.copied(copy);
+    }
   }
 
   /** Register r itself, as written. */
@@ -1359,6 +1449,14 @@ export class MethodEmitter {
     const ir = this.ir;
     const op = ir.op[i];
     const a = ir.a[i];
+    if (this.pushesConstant(op) && ir.dst[i] >= <i32>(ir.localCount + ir.maxScope)) {
+      // Read as the literal until the register changes or a branch needs
+      // it: V8 then gives the operation the constant in its own bytecode.
+      this.copyOf[ir.dst[i]] = CONSTANT - <i32>i;
+      this.kept = true;
+      return;
+    }
+
     switch (op) {
       case ops.OP_pushbyte:
       case ops.OP_pushshort:
