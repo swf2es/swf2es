@@ -39,16 +39,17 @@ test("a field's tag text is read as HTML where the tag says so, in the tag's fon
   assert.equal(field.model.formats[4].color, 0xff0000);
 });
 
-test("a centred field's text is centred in it, past its 2 pixel gutter from the top", () => {
+test("a centred field's text is drawn where its layout centres it, past the 2 pixel gutter", () => {
   const field = placed(w.editText(3, "Loading", 4000, 400, 2));
   const view = new PixiView({} as ConstructorParameters<typeof PixiView>[0]);
   view.prepare(field);
-  const text = view.stage.children[0].children[0].children[0] as unknown as {
+  const line = field.layout.lines[0];
+  const text = view.stage.children[0].children[0].children[0].children[0] as unknown as {
     x: number;
-    y: number;
-    anchor: { x: number };
   };
-  assert.deepEqual([text.x, text.y, text.anchor.x], [100, 2, 0.5]);
+  assert.equal(text.x, line.x / 20);
+  // Centred in the 196 pixels past the gutters: as far from the right edge as the left.
+  assert.equal(line.x / 20 - 2, 200 - 2 - (line.x + line.width) / 20);
 });
 
 test("text a margin moves past its field's edge is clipped, though it is narrower than the field", async () => {
@@ -90,4 +91,57 @@ test("a long unbroken word wraps between its characters in time that grows with 
   assert.ok(layout.lines.every((line, i) => line.start === i * 9));
   // Some 40 ms; measured again for each line it took seconds.
   assert.ok(performance.now() - started < 2000);
+});
+
+test("a password field is laid out, and so drawn, as asterisks, in an embedded font too", async () => {
+  const { TextObject } = await import("../../../packages/player/dist/display.js");
+  const { FontSet } = await import("../../../packages/player/dist/fonts.js");
+  const { readFont, tags } = await import("../../../packages/format/dist/index.js");
+  const bytes = w.font3({
+    id: 1,
+    name: "Probe",
+    ascent: 800,
+    descent: 200,
+    glyphs: [
+      { char: "a", advance: 500, boxes: [[0, -500, 400, 0]] },
+      { char: "*", advance: 300, boxes: [[0, -500, 200, -300]] },
+    ],
+  });
+  const fonts = new FontSet();
+  fonts.add(
+    readFont(bytes, { code: tags.DefineFont3, offset: 6, length: bytes.length - 6, long: true }),
+  );
+  const field = new TextObject(null);
+  field.fonts = fonts;
+  field.embedFonts = true;
+  field.model.defaultFormat = { ...field.model.defaultFormat, font: "Probe", size: 20 };
+  field.model.setText("aa");
+  assert.equal(field.layout.width, 2 * 195);
+
+  field.displayAsPassword = true;
+  const chars = field.layout.lines[0].chars;
+  assert.deepEqual(
+    chars.map((c) => c.glyph?.code),
+    [42, 42],
+  );
+  // 300 of 1024 at 20 pixels, 117 twips each, truncated.
+  assert.equal(field.layout.width, 2 * 117);
+});
+
+test("text a horizontal scroll moves past the gutter is clipped", async () => {
+  const { TextObject } = await import("../../../packages/player/dist/display.js");
+  const field = new TextObject(null);
+  field.model.setText("abc");
+  const view = new PixiView({} as ConstructorParameters<typeof PixiView>[0]);
+  view.prepare(field);
+  const drawn = () =>
+    view.stage.children[0].children[0].children.find((c) => c.children.length > 0) as unknown as {
+      mask: unknown;
+    };
+  assert.ok(!drawn().mask);
+
+  field.scrollH = 30;
+  field.invalidate(4);
+  view.prepare(field);
+  assert.ok(drawn().mask);
 });

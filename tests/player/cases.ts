@@ -1147,6 +1147,25 @@ function textLayout(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Text drawn in Probe (scripts/TextDraw.as).
+function textDraw(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 400,
+    height: 150,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      probeFont(1),
+      w.doAbc(abc, "TextDraw"),
+      w.symbolClass([[0, "TextDraw"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
@@ -1313,6 +1332,19 @@ export const cases: PlayerCase[] = [
     capture: [],
     tolerance: 0,
     maxOutliers: 0,
+  },
+  {
+    name: "text-draw",
+    swf: textDraw,
+    script: "TextDraw",
+    frames: 1,
+    capture: [1],
+    // Within 64 a channel: Flash's 4 by 4 samples sit an eighth of a pixel
+    // past the page's, so a glyph's edge between them takes one row of
+    // samples more or less (64). Beyond it, each border's bottom right
+    // corner, part grey in Flash: 27 channels.
+    tolerance: 64,
+    maxOutliers: 40,
   },
   {
     name: "text-fields",

@@ -5,11 +5,13 @@
 // each instance, as their width depends on its transform. Flash fills
 // even-odd; a fill of several contours is drawn from their containment
 // tree, holes cut, as Pixi's own grouping of holes misses nested islands.
-import type { ColorTransform, Fill, Line } from "@swf2es/format";
+import type { ColorTransform, Fill, Glyph, Line } from "@swf2es/format";
 import {
   BufferImageSource,
+  CanvasTextMetrics,
   type FederatedPointerEvent,
   type FillInput,
+  fontStringFromTextStyle,
   Graphics,
   GraphicsContext,
   Matrix,
@@ -37,6 +39,7 @@ import {
   TextObject,
   TRANSFORM,
 } from "./display.js";
+import { deviceMetrics, fontFamily } from "./fonts.js";
 import { shifted } from "./geometry.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients.js";
 import type { PointerState } from "./input.js";
@@ -54,7 +57,9 @@ import {
   type Path,
   pointsOf,
   type ShapeLayer,
+  shapeLayers,
 } from "./shapes.js";
+import { GUTTER, type LaidChar, shownLines } from "./text-layout.js";
 import type { BitmapCharacter, ShapeCharacter } from "./timeline.js";
 
 /** A contour flattened to a polygon, for telling which contours hold which. */
@@ -565,9 +570,10 @@ export class PixiView {
       ...(node.ownFills && !this.fresh ? node.fills : []),
       ...(this.fresh ? [] : node.strokes.map((g) => g?.context)),
     ];
+    // A text's characters are in a container of their own; their shared glyph fills stay, not being theirs.
     for (const child of node.art.removeChildren()) {
       if (!child.destroyed) {
-        child.destroy();
+        child.destroy({ children: true });
       }
     }
 
@@ -1044,20 +1050,6 @@ export class PixiView {
   }
 }
 
-/** A Flash font's name as a CSS family: the device fonts as theirs, any other by name, then serif, as Flash's default is. */
-function fontFamily(font: string): string[] {
-  switch (font) {
-    case "_sans":
-      return ["Arial", "Helvetica", "sans-serif"];
-    case "_serif":
-      return ["Times New Roman", "Times", "serif"];
-    case "_typewriter":
-      return ["Courier New", "Courier", "monospace"];
-    default:
-      return [font, "serif"];
-  }
-}
-
 /**
  * Whether text laid out at (x, y), `width` by `height`, reaches outside its
  * field, which then clips it: where it lies, as a margin or an indent puts
@@ -1078,73 +1070,147 @@ export function overruns(
   );
 }
 
+/** Glyphs' fills, made once and shared by every character drawn in them; null for an empty glyph. */
+const glyphFills = new WeakMap<Glyph, GraphicsContext | null>();
+
+/** A glyph's outline as a shape's fill, white for a tint to colour, in the font's units over 20, as shapeLayers takes twips. */
+function glyphFill(glyph: Glyph): GraphicsContext | null {
+  let context = glyphFills.get(glyph);
+  if (context === undefined) {
+    const shape = {
+      id: 0,
+      bounds: { xMin: 0, xMax: 0, yMin: 0, yMax: 0 },
+      edgeBounds: null,
+      fills: [{ type: "solid" as const, color: 0xffffffff }],
+      lines: [],
+      records: glyph.records,
+      truncated: false,
+    };
+    const layers = shapeLayers(shape);
+    context = layers.length > 0 ? fillContext(layers[0], (fill) => paint(fill as Fill)) : null;
+    glyphFills.set(glyph, context);
+  }
+
+  return context;
+}
+
 /**
- * A TextField drawn: its background and border, then its text in the
- * format of its first character, 2 pixels in from the field's edges as
- * Flash's gutter is, aligned as its first paragraph, wrapped at the field's
- * width if it wraps, and clipped to the field where it runs over.
+ * A TextField drawn from its layout (text-layout.ts): its background and
+ * border, then each line from the first scrolled to, a character of an
+ * embedded font as its glyph's shape, a run of a device font as one Pixi
+ * Text on the line's baseline, each in its own colour, clipped to the
+ * field where the text runs over it.
  */
 function drawText(o: TextObject, art: PixiContainer): void {
   if (o.background || o.border) {
-    const box = new Graphics().rect(o.left, o.top, o.width, o.height);
+    const box = new Graphics();
     if (o.background) {
-      box.fill({ color: o.backgroundColor & 0xffffff });
+      box.rect(o.left, o.top, o.width, o.height).fill({ color: o.backgroundColor & 0xffffff });
     }
 
+    // A border covers the pixels at both edges, x and x + width, as adl draws it.
     if (o.border) {
-      box.stroke({ color: o.borderColor & 0xffffff, width: 1, alignment: 1 });
+      box
+        .rect(o.left + 0.5, o.top + 0.5, o.width, o.height)
+        .stroke({ color: o.borderColor & 0xffffff, width: 1 });
     }
 
     art.addChild(box);
   }
 
-  const model = o.model;
-  if (!model.text) {
+  if (!o.model.text) {
     return;
   }
 
-  const f = model.formats[0] ?? model.defaultFormat;
-  const shown = o.displayAsPassword
-    ? "*".repeat(model.text.length)
-    : model.text.replace(/\r/g, "\n");
-  const text = new Text({
-    text: shown,
-    style: {
-      fontFamily: fontFamily(f.font),
-      fontSize: f.size,
-      fill: f.color & 0xffffff,
-      fontWeight: f.bold ? "bold" : "normal",
-      fontStyle: f.italic ? "italic" : "normal",
-      align: f.align === "justify" ? "justify" : (f.align as "left" | "center" | "right"),
-      wordWrap: o.wordWrap,
-      wordWrapWidth: Math.max(1, o.width - 4 - f.leftMargin - f.rightMargin),
-      leading: f.leading,
-      letterSpacing: f.letterSpacing,
-    },
-  });
-  const inner = o.left + 2 + f.leftMargin;
-  text.y = o.top + 2;
-  if (f.align === "center") {
-    text.anchor.x = 0.5;
-    text.x = o.left + o.width / 2;
-  } else if (f.align === "right") {
-    text.anchor.x = 1;
-    text.x = o.left + o.width - 2 - f.rightMargin;
-  } else {
-    text.x = inner + f.indent;
+  const layout = o.layout;
+  const first = Math.min(Math.max(0, o.scrollV - 1), layout.lines.length - 1);
+  // The lines that fit the field from there, one at least: adl draws no line part of the way.
+  const last = first + shownLines(o, first) - 1;
+  const dx = o.left * 20 - o.scrollH * 20;
+  const dy = o.top * 20 - (layout.lines[first].y - GUTTER);
+  const text = new PixiContainer();
+  let bottom = 0;
+  let right = 0;
+  let left = Number.POSITIVE_INFINITY;
+  for (let l = first; l <= last; l++) {
+    const line = layout.lines[l];
+    const baseline = (dy + line.y + line.ascent) / 20;
+    let run: LaidChar[] = [];
+    const flush = () => {
+      if (run.length > 0) {
+        text.addChild(deviceRun(o, run, dx, baseline));
+        run = [];
+      }
+    };
+    for (const c of line.chars) {
+      if (!c.shown) {
+        continue;
+      }
+
+      if (c.font) {
+        flush();
+        const fill = c.glyph && glyphFill(c.glyph);
+        if (fill) {
+          const g = new Graphics(fill);
+          const scale = (Math.max(0, c.format.size) * 20) / c.font.em;
+          g.scale.set(scale);
+          g.position.set((dx + c.x + c.kern) / 20, baseline);
+          g.tint = c.format.color & 0xffffff;
+          text.addChild(g);
+        }
+      } else if (run.length > 0 && run[0].format !== c.format) {
+        flush();
+        run.push(c);
+      } else {
+        run.push(c);
+      }
+    }
+
+    flush();
+    bottom = Math.max(bottom, dy + line.y + line.ascent + line.descent);
+    right = Math.max(right, dx + line.x + line.width);
+    left = Math.min(left, dx + line.x);
   }
 
   art.addChild(text);
-  // Measuring needs a canvas, which there is none of without a DOM, as in node's tests.
-  const measurable = typeof document !== "undefined";
-  if (
-    measurable &&
-    overruns(o, text.x - text.anchor.x * text.width, text.y, text.width, text.height)
-  ) {
-    const clip = new Graphics().rect(o.left, o.top, o.width, o.height).fill({ color: 0xffffff });
+  // Clipped inside the gutter, as adl clips it: 2 pixels in from each edge.
+  const inner = {
+    left: o.left + GUTTER / 20,
+    top: o.top + GUTTER / 20,
+    width: o.width - (2 * GUTTER) / 20,
+    height: o.height - (2 * GUTTER) / 20,
+  };
+  // Where the text lies, scrolled: a scroll left of the gutter clips as one past the right does.
+  const top = (dy + layout.lines[first].y) / 20;
+  if (overruns(inner, left / 20, top, (right - left) / 20, bottom / 20 - top)) {
+    const clip = new Graphics()
+      .rect(inner.left, inner.top, Math.max(0, inner.width), Math.max(0, inner.height))
+      .fill({ color: 0xffffff });
     art.addChild(clip);
     text.mask = clip;
   }
+}
+
+/** A run of a device font's characters in one format, as Pixi Text from where the layout put its first, on the baseline. */
+function deviceRun(o: TextObject, run: LaidChar[], dx: number, baseline: number): Text {
+  const f = run[0].format;
+  const chars = run.map((c) => (o.displayAsPassword ? "*" : o.model.text[c.index])).join("");
+  const style = {
+    fontFamily: fontFamily(f.font),
+    fontSize: f.size,
+    fill: f.color & 0xffffff,
+    fontWeight: f.bold ? ("bold" as const) : ("normal" as const),
+    fontStyle: f.italic ? ("italic" as const) : ("normal" as const),
+    letterSpacing: f.letterSpacing,
+  };
+  const t = new Text({ text: chars, style });
+  // Pixi's Text puts its top at its font's ascent above the baseline; without a DOM (node) there is no font to measure.
+  const ascent =
+    typeof document === "undefined"
+      ? deviceMetrics(f.font, f.size, f.bold, f.italic).ascent
+      : CanvasTextMetrics.measureFont(fontStringFromTextStyle(t.style)).ascent;
+  t.position.set((dx + run[0].x) / 20, baseline - ascent);
+  return t;
 }
 
 /** Premultiplied ARGB as the RGBA bytes a texture holds, still premultiplied. */
