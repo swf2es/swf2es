@@ -33,3 +33,17 @@ probe("vector index", function():void { var v:Vector.<int> = new Vector.<int>(2)
 probe("fixed vector", function():void { var v:Vector.<int> = new Vector.<int>(2, true); v.push(1); });
 probe("radix", function():void { (5).toString(1); });
 probe("precision", function():void { (5).toFixed(30); });
+// new o.f() on a primitive looks f up on its prototype: a missing one is
+// undefined, which is no constructor; one set there constructs.
+function construct(name:String, f:Function):void {
+  try { trace(name, f()); } catch (e:Error) { trace(name, e); }
+}
+var cns:Namespace = new Namespace("u");
+construct("new on int", function():* { var n:* = 1; return new n.missing(); });
+construct("new on String", function():* { var s:* = "s"; return new s.missing(); });
+construct("new on Namespace", function():* { var n:* = cns; return new n.missing(); });
+construct("new on null", function():* { var n:* = null; return new n.missing(); });
+construct("new on undefined", function():* { var n:* = undefined; return new n.missing(); });
+String.prototype.made = String;
+construct("new from prototype", function():* { var s:* = "s"; return "[" + new s.made() + "]"; });
+delete String.prototype.made;

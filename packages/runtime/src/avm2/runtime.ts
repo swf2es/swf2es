@@ -1835,7 +1835,11 @@ export class Runtime {
   }
 
   constructProperty(o: Value, mn: Multiname, ...args: Value[]): Value {
-    return this.construct(this.getProperty(o, mn), ...args);
+    // As avmplus' constructprop: a primitive's, a Namespace's among them,
+    // from its prototype, where a missing name is undefined.
+    const primitive =
+      (o !== null && o !== undefined && typeof o !== "object") || o instanceof Namespace;
+    return this.construct(this.getProperty(primitive ? this.protoOf(o) : o, mn), ...args);
   }
 
   constructClass(cls: AsObject, args: Value[]): Value {
