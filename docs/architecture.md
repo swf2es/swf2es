@@ -1323,9 +1323,23 @@ straight colour; such objects still batch together. A gradient there is
 transformed pixel by pixel, which clamps after the ramp where Flash clamps
 its stops, so the two part only where a transformed stop is clamped.
 
-Blend modes are still to come. adl composites an object with a blend mode
-as a layer first, its children together, and blends that with what is
-below. Pixi blends each child on its own.
+### Blend modes
+
+adl composites an object with a blend mode as a layer, its children
+together in the normal way, and blends that with what is below, the
+stage's colour included, where Pixi would blend each child on its own.
+The renderer gives such an object a filter (`pixi-blend.ts`): `layer`
+one that only makes it a layer, any other one that reads the back buffer
+and computes the mode in premultiplied colour, its result replacing what
+is there. Multiply, screen, lighten, darken, difference, overlay and
+hardlight are the separable blends of the straight colours, composited
+source over; `add` adds and `subtract` takes the object from what is
+below, each clamped; `invert` inverts what is below as far as the
+object covers it; `alpha` and `erase` scale the layer below by the
+object's alpha, or by what it leaves, only where the object has any.
+The `blend-modes` case draws each over two grounds against adl. Pixi
+reads the back buffer only from a renderer made with `useBackBuffer:
+true`, which a host passes; without it the modes draw as normal.
 
 ### Masks and scroll rectangles
 
