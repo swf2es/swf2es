@@ -1378,6 +1378,26 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "convolution",
+    swf: (abc) => bare(abc, 1, "Convolution"),
+    script: "Convolution",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "convolution-draw",
+    swf: (abc) => bare(abc, 1, "ConvolutionDraw", 396, 132),
+    script: "ConvolutionDraw",
+    frames: 1,
+    capture: [1],
+    // The page's four samples a pixel premultiply a half-transparent
+    // object's colour a level or so off adl's: within 3 a channel.
+    tolerance: 3,
+    maxOutliers: 0,
+  },
+  {
     name: "filters",
     swf: (abc) => bare(abc, 1, "FiltersDraw", 396, 132),
     script: "FiltersDraw",

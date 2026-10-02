@@ -4,7 +4,9 @@
 // each run truncated to 8 bits; a glow and a shadow are the object's alpha
 // so blurred, times strength and alpha, in their colour, behind or inside
 // it; a colour matrix maps each pixel's straight colour, transparent ones
-// too. WebGL alone: each pass is a filter of its own.
+// too; a convolution sums its taps' straight colour over the object's
+// pixels and one more right and down, as BitmapData.applyFilter does. WebGL
+// alone: each pass is a filter of its own.
 import {
   Filter,
   type FilterSystem,
@@ -14,6 +16,7 @@ import {
   type Texture,
   TexturePool,
 } from "pixi.js";
+import { integerKernel } from "./bitmap-filters.js";
 import type { Filter as FilterRecord } from "./filters.js";
 
 const VERTEX = `in vec2 aPosition;
@@ -306,6 +309,119 @@ class ColorMatrixFilter extends FlashFilter {
   }
 }
 
+/**
+ * A convolution, in 255ths: the taps' straight colour over uBox, the
+ * object's pixels as adl filters them, in the input's pixels from its
+ * frame's corner; past it the nearest edge's or uEdge; summed, divided,
+ * biased, clamped and premultiplied as bitmap-filters' convolve does, the
+ * fixed-point way too (uReciprocal not 0) where every tap lies in the box.
+ */
+const CONVOLUTION = `in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+uniform highp vec4 uInputSize;
+uniform vec4 uMatrix[57];
+uniform vec2 uSize;
+uniform vec4 uBox;
+uniform vec4 uEdge;
+uniform float uDivisor;
+uniform float uReciprocal;
+uniform float uBias;
+uniform float uClamp;
+uniform float uPreserve;
+vec4 straight(vec2 p) {
+  if (any(lessThan(p, uBox.xy)) || any(greaterThanEqual(p, uBox.zw))) {
+    if (uClamp < 0.5) { return uEdge; }
+    p = clamp(p, floor(uBox.xy) + 0.5, floor(uBox.zw) - 0.5);
+  }
+  vec4 c = texture(uTexture, p * uInputSize.zw);
+  return c.a > 0.0 ? floor(vec4(c.rgb / c.a, c.a) * 255.0 + 0.5) : vec4(0.0);
+}
+void main(void) {
+  // The pixel's centre, which all its texels read alike, as adl's one pixel.
+  vec2 p = floor(vTextureCoord * uInputSize.xy) + 0.5;
+  vec2 reach = floor(uSize * 0.5);
+  if (any(lessThan(p, uBox.xy - reach)) || any(greaterThanEqual(p, uBox.zw + reach))) {
+    finalColor = vec4(0.0);
+    return;
+  }
+  bool fixed_ = uReciprocal != 0.0 && all(greaterThanEqual(p - 1.0, uBox.xy)) &&
+    all(lessThan(p + 1.0, uBox.zw));
+  int cols = int(uSize.x);
+  int count = cols * int(uSize.y);
+  vec4 sum = vec4(0.0);
+  // One loop, its index alone indexing the weights, as GLSL ES 1 allows.
+  for (int k = 0; k < 225; k++) {
+    if (k >= count) { break; }
+    float w = dot(uMatrix[k / 4], vec4(equal(vec4(float(k - k / 4 * 4)), vec4(0.0, 1.0, 2.0, 3.0))));
+    if (w != 0.0) {
+      int j = k / cols;
+      vec2 at = vec2(float(k - j * cols), float(j)) - reach;
+      sum += straight(fixed_ && k == 8 ? p : p + at) * w;
+    }
+  }
+  sum = fixed_ ? floor(sum * uReciprocal) : sum / uDivisor;
+  vec4 v = floor(clamp(sum + uBias, 0.0, 255.0) + 0.0001);
+  float a = uPreserve > 0.5 ? straight(p).a : v.a;
+  vec3 c = fixed_ ? floor(v.rgb * a / 255.0) : floor((v.rgb * a + 127.0) / 255.0);
+  finalColor = vec4(c, a) / 255.0;
+}`;
+
+class ConvolutionFilter extends FlashFilter {
+  /** How far in from the input's frame the object's pixels start: this and the later filters' padding. */
+  inset = 0;
+
+  constructor(f: FilterRecord) {
+    const matrix = new Float32Array(57 * 4);
+    const count = f.matrixX * f.matrixY;
+    for (let k = 0; k < count; k++) {
+      matrix[k] = f.matrix[k] || 0;
+    }
+
+    const divisor = f.divisor || 1;
+    const reciprocal = integerKernel(Array.from(matrix.subarray(0, count)), divisor);
+    super({
+      glProgram: GlProgram.from({
+        vertex: VERTEX,
+        fragment: CONVOLUTION,
+        name: "flash-convolution",
+      }),
+      resources: {
+        convolutionUniforms: {
+          uMatrix: { value: matrix, type: "vec4<f32>", size: 57 },
+          uSize: { value: new Float32Array([f.matrixX, f.matrixY]), type: "vec2<f32>" },
+          uBox: { value: new Float32Array(4), type: "vec4<f32>" },
+          uEdge: {
+            value: new Float32Array([
+              (f.color >> 16) & 0xff,
+              (f.color >> 8) & 0xff,
+              f.color & 0xff,
+              Math.floor(f.alpha * 255),
+            ]),
+            type: "vec4<f32>",
+          },
+          uDivisor: { value: divisor, type: "f32" },
+          uReciprocal: { value: reciprocal === null ? 0 : reciprocal / 65536, type: "f32" },
+          uBias: { value: f.bias || 0, type: "f32" },
+          uClamp: { value: f.clamp ? 1 : 0, type: "f32" },
+          uPreserve: { value: f.preserveAlpha ? 1 : 0, type: "f32" },
+        },
+      },
+    });
+    // Its reach, and the pixel right and down adl's bitmap of the object has.
+    this.padding = Math.max(f.matrixX >> 1, f.matrixY >> 1) + 1;
+  }
+
+  apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
+    const box = this.resources.convolutionUniforms.uniforms.uBox as Float32Array;
+    box[0] = this.inset;
+    box[1] = this.inset;
+    box[2] = input.frame.width - this.inset + 1;
+    box[3] = input.frame.height - this.inset + 1;
+    system.applyFilter(this, input, output, clear);
+  }
+}
+
 /** The Pixi filters a display object's filter records draw as: those swf2es draws yet, in their order. */
 export function displayFilters(records: readonly FilterRecord[]): Filter[] {
   const out: Filter[] = [];
@@ -317,11 +433,22 @@ export function displayFilters(records: readonly FilterRecord[]): Filter[] {
       filter = new GlowFilter(f);
     } else if (f.kind === "colorMatrix") {
       filter = new ColorMatrixFilter(f);
+    } else if (f.kind === "convolution") {
+      filter = new ConvolutionFilter(f);
     }
 
     if (filter) {
       filter.resolution = "inherit";
       out.push(filter);
+    }
+  }
+
+  let inset = 0;
+  for (let i = out.length - 1; i >= 0; i--) {
+    inset += out[i].padding;
+    const filter = out[i];
+    if (filter instanceof ConvolutionFilter) {
+      filter.inset = inset;
     }
   }
 

@@ -1,0 +1,526 @@
+tap 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 0 ff4080c0 0
+ 0 0 0 0 0
+tap 0 alpha kept
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 - 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 1
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 ff4080c0 0 0
+ 0 0 0 0 0
+tap 1 alpha kept
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 - 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 2
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 ff4080c0 0 0 0
+ 0 0 0 0 0
+tap 2 alpha kept
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 - 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 3
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 0 ff4080c0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 3 alpha kept
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 - 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 4
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 ff4080c0 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 4 alpha kept
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 ff4080c0 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 5
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 ff4080c0 0 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 5 alpha kept
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 - 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 6
+ 0 0 0 0 0
+ 0 0 0 ff4080c0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 6 alpha kept
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 - 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 7
+ 0 0 0 0 0
+ 0 0 ff4080c0 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 7 alpha kept
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 - 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 8
+ 0 0 0 0 0
+ 0 ff4080c0 0 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+tap 8 alpha kept
+ 0 0 0 0 0
+ 0 0 0 0 0
+ 0 0 - 0 0
+ 0 0 0 0 0
+ 0 0 0 0 0
+2x1 first
+ - - - - -
+ - - - ff4080c0 -
+ - - - - -
+2x1 last
+ - - - - -
+ - - ff4080c0 - -
+ - - - - -
+4x2 first
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - ff4080c0 -
+ - - - - - - -
+4x2 last
+ - - - - - - -
+ - - - - - - -
+ - - ff4080c0 - - - -
+ - - - - - - -
+ - - - - - - -
+short matrix
+ - - - - -
+ - - - - -
+ - - ff4080c0 - -
+ - - - - -
+ - - - - -
+half centre
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 80ff0000 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+half box
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 e120000 e120000 0 0
+ 0 0 e120000 1c370000 e120000 0 0
+ 0 0 e120000 e120000 e120000 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+half box alpha kept
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 80380000 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+half x2
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 ffff0000 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+half x0.5
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 407f0000 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+third 0.3
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 190a1f29 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+x0.3
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - ff132639 - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+x0.7
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - ff2c5986 - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+bias 64
+ 40404040 40404040 40404040 40404040 40404040 40404040 40404040
+ 40404040 40404040 40404040 40404040 40404040 40404040 40404040
+ 40404040 40404040 40404040 40404040 40404040 40404040 40404040
+ 40404040 40404040 40404040 ff80c0ff 40404040 40404040 40404040
+ 40404040 40404040 40404040 40404040 40404040 40404040 40404040
+ 40404040 40404040 40404040 40404040 40404040 40404040 40404040
+ 40404040 40404040 40404040 40404040 40404040 40404040 40404040
+bias 64 alpha kept
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 ff80c0ff 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+bias -1.5
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - ff3e7ebe - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+bias 0.6
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - ff4080c0 - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+negative bias 255
+ ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff
+ ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff
+ ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff
+ ffffffff ffffffff ffffffff ffbf7f3f ffffffff ffffffff ffffffff
+ ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff
+ ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff
+ ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff
+divisor 0
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - ff204060 - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+divisor -1
+ ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff
+ ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff
+ ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff
+ ffffffff ffffffff ffffffff ffbf7f3f ffffffff ffffffff ffffffff
+ ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff
+ ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff
+ ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff
+box /1 saturates
+ - - - - - - -
+ - - - - - - -
+ - - ff4080c0 ff4080c0 ff4080c0 - -
+ - - ff4080c0 ff4080c0 ff4080c0 - -
+ - - ff4080c0 ff4080c0 ff4080c0 - -
+ - - - - - - -
+ - - - - - - -
+box ninths /1
+ - - - - - - -
+ - - - - - - -
+ - - ff070e15 ff070e15 ff070e15 - -
+ - - ff070e15 ff070e15 ff070e15 - -
+ - - ff070e15 ff070e15 ff070e15 - -
+ - - - - - - -
+ - - - - - - -
+box /9
+ - - - - - - -
+ - - - - - - -
+ - - - ff070e15 ff070e15 - -
+ - - ff070e15 ff0e1c2a ff070e15 - -
+ - - ff070e15 ff070e15 ff070e15 - -
+ - - - - - - -
+ - - - - - - -
+box /9 corner
+ ff070e15 ff070e15 ff070e15 - - - -
+ ff070e15 ff0e1c2a ff070e15 - - - -
+ ff070e15 ff070e15 ff070e15 - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ramp /45
+ - - - - - - -
+ - - - - - - -
+ - - - ff0b1622 ff09131d - -
+ - - ff081119 ff13273b ff050b11 - -
+ - - ff04080c ff020508 ff010204 - -
+ - - - - - - -
+ - - - - - - -
+box /3
+ - - - - - - -
+ - - - - - - -
+ - - - ff102030 ff102030 - -
+ - - ff102030 ff204060 ff102030 - -
+ - - ff102030 ff102030 ff102030 - -
+ - - - - - - -
+ - - - - - - -
+box /2
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+box /2 bias
+ ff101010 ff101010 ff101010 ff101010 ff101010 ff101010 ff101010
+ ff101010 ff101010 ff101010 ff101010 ff101010 ff101010 ff101010
+ ff101010 ff101010 ff101010 - - ff101010 ff101010
+ ff101010 ff101010 - - - ff101010 ff101010
+ ff101010 ff101010 - - - ff101010 ff101010
+ ff101010 ff101010 ff101010 ff101010 ff101010 ff101010 ff101010
+ ff101010 ff101010 ff101010 ff101010 ff101010 ff101010 ff101010
+box /1.5
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+box /2.0001
+ - - - - - - -
+ - - - - - - -
+ - - - ff172f47 ff172f47 - -
+ - - ff172f47 ff2f5f8f ff172f47 - -
+ - - ff172f47 ff172f47 ff172f47 - -
+ - - - - - - -
+ - - - - - - -
+box /0.5
+ - - - - - - -
+ - - - - - - -
+ - - ff204060 ff204060 ff204060 - -
+ - - ff204060 ff204060 ff204060 - -
+ - - ff204060 ff204060 ff204060 - -
+ - - - - - - -
+ - - - - - - -
+box /-1
+ ff808080 ff808080 ff808080 ff808080 ff808080 ff808080 ff808080
+ ff808080 ff808080 ff808080 ff808080 ff808080 ff808080 ff808080
+ ff808080 ff808080 ff706050 ff706050 ff706050 ff808080 ff808080
+ ff808080 ff808080 ff706050 ff706050 ff706050 ff808080 ff808080
+ ff808080 ff808080 ff706050 ff706050 ff706050 ff808080 ff808080
+ ff808080 ff808080 ff808080 ff808080 ff808080 ff808080 ff808080
+ ff808080 ff808080 ff808080 ff808080 ff808080 ff808080 ff808080
+centre 2 /2
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+ - - - - - - -
+last -1 /9
+ ff404040 ff404040 ff404040 ff404040 ff404040 ff404040 ff404040
+ ff404040 ff404040 ff404040 ff404040 ff404040 ff404040 ff404040
+ ff404040 ff404040 ff404040 ff504a45 ff504a45 ff404040 ff404040
+ ff404040 ff404040 ff504a45 ff404040 ff504a45 ff404040 ff404040
+ ff404040 ff404040 ff504a45 ff504a45 ff504a45 ff404040 ff404040
+ ff404040 ff404040 ff404040 ff404040 ff404040 ff404040 ff404040
+ ff404040 ff404040 ff404040 ff404040 ff404040 ff404040 ff404040
+box /9 alpha
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 15180c00 15180c00 0 0
+ 0 0 15180c00 2a37180c 15180c00 0 0
+ 0 0 15180c00 15180c00 15180c00 0 0
+ 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0
+5x5 /25
+ - - - - - - - - -
+ - - - - - - - - -
+ - - ff0a0705 ff0a0705 ff0a0705 ff0a0705 ff0a0705 - -
+ - - ff0a0705 ff0a0705 ff0a0705 ff0a0705 ff0a0705 - -
+ - - ff0a0705 ff0a0705 ff0a0705 ff0a0705 ff0a0705 - -
+ - - ff0a0705 ff0a0705 ff0a0705 ff0a0705 ff0a0705 - -
+ - - ff0a0705 ff0a0705 ff0a0705 ff0a0705 ff0a0705 - -
+ - - - - - - - - -
+ - - - - - - - - -
+5x5 /2
+ - - - - - - - - -
+ - - - - - - - - -
+ - - ff201008 ff201008 ff201008 ff201008 ff201008 - -
+ - - ff201008 ff201008 ff201008 ff201008 ff201008 - -
+ - - ff201008 ff201008 ff201008 ff201008 ff201008 - -
+ - - ff201008 ff201008 ff201008 ff201008 ff201008 - -
+ - - ff201008 ff201008 ff201008 ff201008 ff201008 - -
+ - - - - - - - - -
+ - - - - - - - - -
+sharpen
+ - ff200000 ff400000 ff600000 ff800000 ffa00000 ffc00000 ffff0000
+ ff002800 ff202805 ff40280a ff60280f ff802814 ffa02819 ffc0281e ffff2828
+ ff005000 ff20500a ff405014 ff60501e ff805028 ffa05032 ffc0503c ffff5050
+ ff007800 ff20780f ff40781e ff60782d ff80783c ffa0784b ffc0785a ffff7878
+ ff00a000 ff20a014 ff40a028 ff60a03c ff80a050 ffa0a064 ffc0a078 ffffa0a0
+ ff00f000 ff20f01e ff40f03c ff60f05a ff80f078 ffa0f096 ffc0f0b4 fffff0eb
+sharpen /2
+ - ff200000 ff400000 ff600000 ff800000 ffa00000 ffc00000 fff00000
+ ff002800 ff202805 ff40280a ff60280f ff802814 ffa02819 ffc0281e fff02825
+ ff005000 ff20500a ff405014 ff60501e ff805028 ffa05032 ffc0503c fff0504b
+ ff007800 ff20780f ff40781e ff60782d ff80783c ffa0784b ffc0785a fff07870
+ ff00a000 ff20a014 ff40a028 ff60a03c ff80a050 ffa0a064 ffc0a078 fff0a096
+ ff00dc00 ff20dc1b ff40dc37 ff60dc52 ff80dc6e ffa0dc89 ffc0dca5 fff0dccd
+emboss
+ ff60780a ffe07819 ffff7828 ffff7837 ffff7846 ffff7855 ffff7864 ffff7869
+ ff60ff19 ffe0ff41 ffffff64 ffffff87 ffffffaa ffffffcd fffffff0 fffffffa
+ ff60ff28 ffe0ff64 ffffff8c ffffffb4 ffffffdc ffffffff ffffffff ffffffff
+ ff60ff37 ffe0ff87 ffffffb4 ffffffe1 ffffffff ffffffff ffffffff ffffffff
+ ff60ff46 ffe0ffaa ffffffdc ffffffff ffffffff ffffffff ffffffff ffffffff
+ ff60ff4b ffe0ffb4 ffffffdc ffffffff ffffffff ffffffff ffffffff ffffffff
+blur /16
+ ff080a00 ff200a01 ff400a02 ff600a03 ff800a05 ffa00a06 ffc00a07 ffd80a08
+ ff082801 ff1e2504 ff3e2508 ff5e250d ff7e2512 ff9e2516 ffbe251b ffd82821
+ ff085002 ff1e4d08 ff3e4d12 ff5e4d1c ff7e4d25 ff9e4d2f ffbe4d39 ffd85043
+ ff087803 ff1e750d ff3e751c ff5e752a ff7e7539 ff9e7548 ffbe7556 ffd87865
+ ff08a005 ff1e9d12 ff3e9d25 ff5e9d39 ff7e9d4d ff9e9d60 ffbe9d74 ffd8a087
+ ff08be05 ff20be17 ff40be2f ff60be47 ff80be5f ffa0be76 ffc0be8e ffd8bea0
+blur /16 transparent
+ 46070b00 58200900 70400902 88600904 a07f0a05 b89f0a06 d0bf0a07 e2d70a08
+ 46072800 561e2403 6e3c2307 865b240b 9e7c2312 b69d2415 cebc241a e2d72721
+ 46075004 561e4a06 6e3c4c10 865b4c1b 9e7c4c25 b69d4c2e cebc4d38 e2d74f42
+ 46077804 561e740c 6e3c741c 865b742a 9e7c7438 b69d7447 cebc7455 e2d77664
+ 4607a004 561e9a12 6e3c9b25 865b9c37 9e7c9b4c b69d9b5f cebc9c73 e2d79f86
+ 4607bd07 5820bc17 7040bd30 8860bd47 a07fbe5e b89fbc76 d0bfbc8d e2d7bd9f
+edges /4 bias
+ 40878b7f 587f8b82 707f8b82 887f8983 a07f8b84 b87f8a86 d07f8a86 e8788a88
+ 40877f7f 587f7c7c 707f7d7f 887e7f7f a07f7e7e b87f7f7f d07e7e80 e8787f7e
+ 40877f83 587f7c7f 707f7f7d 887e7e7f a07f7f7f b87f7e7f d07e807e e8787f7d
+ 40877f83 587f7f7f 707f7d7f 887e7f7f a07f7e7e b87f7e7f d07e7e80 e8787f7b
+ 40877f83 587f7f7f 707f7f7d 887e7f7f a07f7f7f b87f7f7e d07e7e7e e8787f7b
+ 40877887 587f747c 707f767d 887f747c a07f767b b87f767a d07f7579 e8787470
+clamped
+ ff202805 ff40280a ff80280f ffc02814 ffff2819 ffff281e ffff2823 ffff2823
+ ff20500a ff405014 ff80501e ffc05028 ffff5032 ffff503c ffff5046 ffff5046
+ ff20a00f ff40a01e ff80a032 ffc0a046 ffffa05a ffffa06e ffffa082 ffffa087
+ ff20f014 ff40f028 ff80f046 ffc0f064 fffff082 fffff0a0 fffff0be fffff0c8
+ ff20ff19 ff40ff32 ff80ff5a ffc0ff82 ffffffaa ffffffd2 fffffffa ffffffff
+ ff20ff19 ff40ff32 ff80ff5f ffc0ff8c ffffffb9 ffffffe6 ffffffff ffffffff
+coloured
+ ffffa805 ffffa80a ffffa80f ffffa814 ffffa819 ffffa81e ffffa823 ffffff00
+ ffffd00a ff405014 ff80501e ffc05028 ffff5032 ffff503c ffff5046 ffff8000
+ fffff80f ff40a01e ff80a032 ffc0a046 ffffa05a ffffa06e ffffa082 ffffa81e
+ ffffff14 ff40f028 ff80f046 ffc0f064 fffff082 fffff0a0 fffff0be ffffd03c
+ ffffff19 ff40ff32 ff80ff5a ffc0ff82 ffffffaa ffffffd2 fffffffa fffff85a
+ ffffff00 ffffff00 ffffff14 ffffff28 ffffff3c ffffff50 ffffff64 ffffff78
+coloured half
+ 684e5147 653f382b 7555392e 85693830 957f3732 a5943833 b5aa3834 a8a2504d
+ 5d34442c 551b2403 6d3a2105 855a220b 9d7a220f b59b2214 cdbc2319 bdb5453f
+ 5d34602c 551b4b06 6d3a4b10 855a4b19 9d7a4b24 b59b4b2c cdbc4b35 bdb55e55
+ 5d34782f 551b7209 6d3a721a 855a7128 9d7a7135 b59b7245 cdbc7253 bdb5796a
+ 5d349431 551b990f 6d3a9a23 855a9936 9d7a9a4b b59b9b5d cdbc9a70 bdb59481
+ 684e954c 653fa13a 7555a148 8569a156 957fa367 a594a275 b5aaa284 a8a29687
+coloured alpha kept
+ 40930800 586b0c00 707f0e02 88940d06 a0a90d06 b8bf0c08 d0d40d09 e8ea0807
+ 40601c00 581a2303 703b2207 885c220b a07b2110 b8992315 d0bb2218 e8df1a15
+ 40603404 581a4806 703b4910 885c4b18 a07b4b23 b8994b2c d0bb4b36 e8df352b
+ 40605004 581a7109 703b7219 885c7227 a07b7336 b8997145 d0bb7253 e8df4f40
+ 40606c08 581a990e 703b9b22 885c9a36 a07b9b4b b899995d d0bb9a70 e8df6956
+ 40935004 586b770e 707f761e 8894762d a0a9783b b8bf7749 d0d47759 e8ea4f40
+5x1 clamped
+ ff200000 ff300000 ff400000 ff600000 ff800000 ffa00000 ffb00000 ffc00000
+ ff202805 ff302807 ff40280a ff60280f ff802814 ffa02819 ffb0281b ffc0281e
+ ff20500a ff30500f ff405014 ff60501e ff805028 ffa05032 ffb05037 ffc0503c
+ ff20780f ff307816 ff40781e ff60782d ff80783c ffa0784b ffb07852 ffc0785a
+ ff20a014 ff30a01e ff40a028 ff60a03c ff80a050 ffa0a064 ffb0a06e ffc0a078
+ ff20c819 ff30c825 ff40c832 ff60c84b ff80c864 ffa0c87d ffb0c889 ffc0c896
+subrect
+ . . . . . . . . . .
+ . . . . . . . . . .
+ ff323c80 ff643c80 ff963c80 ffc83c80 fffa3c80 ffff3c80 ffff3c80 . . .
+ ff327880 ff647880 ff967880 ffc87880 fffa7880 ffff7880 ffff7880 . . .
+ ff32b480 ff64b480 ff96b480 ffc8b480 fffab480 ffffb480 ffffb480 . . .
+ ff32f080 ff64f080 ff96f080 ffc8f080 fffaf080 fffff080 fffff080 . . .
+ ff32ff80 ff64ff80 ff96ff80 ffc8ff80 fffaff80 ffffff80 ffffff80 . . .
+ ff32ff80 ff64ff80 ff96ff80 ffc8ff80 fffaff80 ffffff80 ffffff80 . . .
+subrect past the source
+ ff000080 ff000080 ff190080 ff320080 ff640080 ff960080 ffc80080 . . .
+ ff001e80 ff001e80 ff191e80 ff321e80 ff641e80 ff961e80 ffc81e80 . . .
+ ff003c80 ff003c80 ff193c80 ff323c80 ff643c80 ff963c80 ffc83c80 . . .
+ ff007880 ff007880 ff197880 ff327880 ff647880 ff967880 ffc87880 . . .
+ ff00b480 ff00b480 ff19b480 ff32b480 ff64b480 ff96b480 ffc8b480 . . .
+ ff00f080 ff00f080 ff19f080 ff32f080 ff64f080 ff96f080 ffc8f080 . . .
+ . . . . . . . . . .
+ . . . . . . . . . .
+subrect coloured
+ . . . . . . . . . .
+ . . . . . . . . . .
+ . . . . . . . . . .
+ . . . . . . . . . .
+ . . . . . fffaf080 fffff080 fffff080 fffff080 ffc85aff
+ . . . . . fffaff80 ffffff80 ffffff80 ffffff80 ffc878ff
+ . . . . . fffaff80 ffffff80 ffffff80 ffffff80 ffc896ff
+ . . . . . ff64b4ff ff7db4ff ff96b4ff ffafb4ff ffc8b4ff
+into opaque
+ ff1c0e07 ff381c0e ff552a15 ff552a15 ff381c0e ff1c0e07
+ ff381c0e ff71381c ff915131 ff915131 ff8d4623 ff381c0e
+ ff552a15 ff915131 ffcd784e ffe67b47 ffc66231 ff552a15
+ ff381c0e ff74432a ffad5f38 ffad5f38 ff8d4623 ff381c0e
+ ff1c0e07 ff381c0e ff552a15 ff552a15 ff381c0e ff1c0e07
+into opaque, alpha convolved
+ ff1c0e07 ff381c0e ff552a15 ff552a15 ff381c0e ff1c0e07
+ ff381c0e ff71381c ff915131 ff915131 ff8d4623 ff381c0e
+ ff552a15 ff915131 ffcd784e ffe67b47 ffc66231 ff552a15
+ ff381c0e ff74432a ffad5f38 ffad5f38 ff8d4623 ff381c0e
+ ff1c0e07 ff381c0e ff552a15 ff552a15 ff381c0e ff1c0e07
+into opaque, copied
+ - - - - - -
+ - ffff7f40 ffff7f40 ffff7f40 ffff7f40 -
+ - ffff7f40 ff20607f ffff7f40 ffff7f40 -
+ - ffff7f40 ffff7f40 ffff7f40 ffff7f40 -
+ - - - - - -
+in place
+ ff080a40 ff190a40 ff320a40 ff4b0a40 ff640a40 ff7d0a40 ff960a40 ffaf0a40 ffc80a40 ffd80a40
+ ff081e40 ff161a40 ff2f1a40 ff481a40 ff611a40 ff7a1a40 ff931a40 ffac1a40 ffc51a40 ffd81e40
+ ff083c40 ff163840 ff2f3840 ff483840 ff613840 ff7a3840 ff933840 ffac3840 ffc53840 ffd83c40
+ ff085a40 ff165640 ff2f5640 ff485640 ff615640 ff7a5640 ff935640 ffac5640 ffc55640 ffd85a40
+ ff087840 ff167440 ff2f7440 ff487440 ff617440 ff7a7440 ff937440 ffac7440 ffc57440 ffd87840
+ ff089640 ff169240 ff2f9240 ff489240 ff619240 ff7a9240 ff939240 ffac9240 ffc59240 ffd89640
+ ff08b440 ff16b040 ff2fb040 ff48b040 ff61b040 ff7ab040 ff93b040 ffacb040 ffc5b040 ffd8b440
+ ff08c840 ff19c840 ff32c840 ff4bc840 ff64c840 ff7dc840 ff96c840 ffafc840 ffc8c840 ffd8c840
+rect (x=1, y=0, w=5, h=4) (x=2, y=1, w=3, h=2) (x=1, y=0, w=5, h=4) (x=0, y=1, w=7, h=2) (x=0, y=0, w=7, h=4) (x=2, y=1, w=3, h=2)

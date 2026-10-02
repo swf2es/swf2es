@@ -213,3 +213,26 @@ test("Flash's filters are left out under WebGPU, and a fresh view destroys those
 
   assert.ok(destroyed >= 2);
 });
+
+test("a convolution pads its reach and the pixel adl adds, and knows the padding after it", async () => {
+  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const { displayFilters } = await import("../../../packages/player/dist/pixi-filters.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    DOMAdapter: { get(): object; set(adapter: object): void };
+  };
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  try {
+    const [convolution, blur] = displayFilters([
+      { ...filterDefaults("convolution"), matrixX: 5, matrixY: 3, matrix: new Array(15).fill(1) },
+      { ...filterDefaults("blur"), blurX: 4, blurY: 4 },
+    ]) as unknown as { padding: number; inset?: number }[];
+    assert.equal(convolution.padding, 3);
+    assert.equal(blur.padding, 2);
+    assert.equal(convolution.inset, 5);
+  } finally {
+    pixi.DOMAdapter.set(adapter);
+  }
+});
