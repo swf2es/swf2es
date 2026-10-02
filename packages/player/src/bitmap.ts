@@ -292,6 +292,29 @@ export class BitmapStore {
     return out;
   }
 
+  /** The rect's pixels as getPixels gives them: unmultiplied ARGB, big-endian, row by row; the rect clipped to the store. */
+  argbBytes(rect: PixelRect): Uint8Array {
+    const c = this.clip(rect);
+    if (!c) {
+      return new Uint8Array(0);
+    }
+
+    const pixels = this.pixels;
+    const out = new Uint8Array(c.width * c.height * 4);
+    let j = 0;
+    for (let y = c.y; y < c.y + c.height; y++) {
+      for (let i = y * this.width + c.x, end = i + c.width; i < end; i++, j += 4) {
+        const p = unmultiply(pixels[i]);
+        out[j] = p >>> 24;
+        out[j + 1] = (p >>> 16) & 0xff;
+        out[j + 2] = (p >>> 8) & 0xff;
+        out[j + 3] = p & 0xff;
+      }
+    }
+
+    return out;
+  }
+
   /** The rect's pixels set from `values`, unmultiplied ARGB, row by row, as far as they go; how many it took. */
   setVector(r: PixelRect, values: ArrayLike<number>): number {
     const c = this.clip(r);

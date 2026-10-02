@@ -114,7 +114,7 @@
   "avm2/bitmapdata_applyfilter_destpoint_edges": {"matched":0,"lines":0,"traced":0,"error":"Error: swf2es: native flash.filters::BlurFilter#set:blurX is not supported yet"},
   "avm2/bitmapdata_applyfilter_identity": {"matched":0,"lines":4,"traced":0,"error":"Error: swf2es: native flash.filters::ConvolutionFilter#set:matrixX is not supported yet"},
   "avm2/bitmapdata_clone": {"matched":13,"lines":13,"traced":13,"error":null},
-  "avm2/bitmapdata_colortransform": {"matched":0,"lines":0,"traced":0,"error":"Error: swf2es: native flash.display::BitmapData#encode is not supported yet"},
+  "avm2/bitmapdata_colortransform": {"matched":0,"lines":0,"traced":0,"error":"Error: swf2es: native flash.net::FileReference.flash.net:FileReference::_ensureIsRootPlayer is not supported yet"},
   "avm2/bitmapdata_colortransform_oob": {"matched":2,"lines":2,"traced":2,"error":null},
   "avm2/bitmapdata_constr": {"matched":22,"lines":22,"traced":22,"error":null},
   "avm2/bitmapdata_constructor_from_timeline": {"matched":1,"lines":1,"traced":1,"error":null},

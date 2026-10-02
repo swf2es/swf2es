@@ -907,6 +907,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "bitmap-encode",
+    swf: (abc) => bare(abc, 1, "BitmapEncode"),
+    script: "BitmapEncode",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "draw-bitmaps",
     swf: drawBitmaps,
     script: "DrawBitmaps",

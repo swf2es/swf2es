@@ -999,7 +999,26 @@ one colour, as a new bitmap's are, is cleared to it on the GPU rather
 than uploaded; the scan that tells stops at the first pixel that
 differs. The stage of 1,500 outlined shapes above draws into a new
 1920 × 1080 bitmap in about 38 ms against Flash's 44, and with a
-`getPixel` after it in about 65. Each rule is Flash's
+`getPixel` after it in about 65.
+`encode` writes a PNG as Flash does: IHDR, one IDAT and IEND, RGBA for a
+transparent bitmap and RGB for an opaque one, each colour divided out of
+alpha as floor(c · 256 / a) up to 255, Flash's encoder's own rule, which
+adl showed for every alpha and value and which is not `getPixel32`'s.
+Only what the file decodes to is Flash's: `fastCompression` filters no
+row and deflates at level 1, as Flash does; otherwise each row takes the
+filter whose output sums smallest, libpng's heuristic, deflated at level
+6 where Flash uses 9. A 1080p frame encodes in about 135 ms fast (Flash
+about 120) and 520 ms otherwise (Flash 2.7 s), at 1% more bytes than
+level 9. The rect is rounded and clipped as other methods' are, and an
+empty one is ArgumentError 2006; a null rect or compressor is TypeError
+2007, a compressor not an encoder's options ArgumentError 2004; the file
+goes into the ByteArray given, from its position, or a new one. JPEG and
+JPEG XR, which Flash also writes, are not supported yet. The
+`bitmap-encode` case traces the file and each refusal under adl; fast
+compression's file is Flash's byte for byte, as pako and zlib deflate
+alike. `getPixels` and
+`copyPixelsToByteArray` write their bytes in one pass, about 13 ms for
+1080p as in Flash. Each rule is Flash's
 as the `draw-bitmaps` and `draw-objects` cases trace and draw it under
 adl: a destination pixel takes the source pixel under its centre,
 clamped to the source's edges; the translation is snapped down to
