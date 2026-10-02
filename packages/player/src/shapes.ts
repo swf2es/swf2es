@@ -4,7 +4,7 @@
 // its fill1 as it goes and to its fill0 reversed, so that each fill's edges
 // join end to start into closed contours, filled even-odd. Lines stroke the
 // edges they are set on, joined where one edge starts where the last ended.
-import type { Fill, Line, Matrix, Shape } from "@swf2es/format";
+import type { Fill, GradientStop, Line, Matrix, Shape } from "@swf2es/format";
 import type { BitmapStore } from "./bitmap.js";
 import type { BitmapCharacter } from "./timeline.js";
 
@@ -202,8 +202,25 @@ export interface ImageFill {
   smooth: boolean;
 }
 
-/** A fill as the player paints it: the SWF's, a bitmap fill of a bitmap it lacks among them, or a resolved one. */
-export type Paint = Fill | ImageFill;
+/**
+ * A gradient fill, of a SWF's shape or beginGradientFill: radial or not,
+ * its stops, at most 16, and its matrix in pixels, which maps the gradient
+ * square, -819.2 to 819.2 a side, to the shape.
+ */
+export interface GradientFill {
+  type: "gradient";
+  radial: boolean;
+  /** Where the focal point lies across the circle, -1 to 1; 0 for one centred. */
+  focal: number;
+  stops: GradientStop[];
+  /** 0 pad, 1 reflect, 2 repeat. */
+  spread: number;
+  linearRgb: boolean;
+  matrix: Matrix;
+}
+
+/** A fill as the player paints it: a solid colour, a bitmap fill of a bitmap the SWF lacks, or a resolved bitmap or gradient. */
+export type Paint = Fill | ImageFill | GradientFill;
 
 export interface ShapeLayer {
   fills: { fill: Paint; contours: Path[]; winding: Winding }[];
@@ -295,6 +312,21 @@ export function shapeLayers(
   const layers: ShapeLayer[] = [];
   // A bitmap fill's bitmap, its matrix from twips to pixels; one the SWF lacks stays the SWF's fill.
   const paint = (fill: Fill): Paint => {
+    if (fill.type === "linear" || fill.type === "radial" || fill.type === "focal") {
+      const g = fill.gradient;
+      const m = g.matrix;
+      return {
+        type: "gradient",
+        radial: fill.type !== "linear",
+        focal: fill.type === "focal" ? g.focal : 0,
+        stops: g.stops.slice(0, 16),
+        spread: g.spread <= 2 ? g.spread : 0,
+        linearRgb: g.interpolation === 1,
+        // The square is in twips as the shape is, so only the translation goes to pixels.
+        matrix: { a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 },
+      };
+    }
+
     const image = fill.type === "bitmap" ? bitmap(fill.bitmap) : null;
     if (fill.type !== "bitmap" || !image) {
       return fill;

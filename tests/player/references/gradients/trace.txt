@@ -1,0 +1,2 @@
+conic ArgumentError 2008
+linear TypeError 2007

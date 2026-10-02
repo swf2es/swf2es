@@ -57,10 +57,65 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
     }
 
     /** Recorded as a shape's gradient is drawn: its first stop's color, until gradients draw. */
-    beginGradientFill(_type: Value, colors: Value, alphas: Value): void {
-      const c = ((colors as AsObject)?.$a as Value[] | undefined) ?? [];
-      const a = ((alphas as AsObject)?.$a as Value[] | undefined) ?? [];
-      drawing(this).beginFill({ type: "solid", color: argb(c[0] ?? 0, a[0] ?? 1) });
+    /**
+     * As adl draws one: arrays of different lengths, or a ratio outside 0
+     * to 255, draw nothing; no stops draw black; past 16 stops are left
+     * out; an unknown spread or interpolation is pad or RGB; null alphas
+     * and ratios are opaque and even, null colours TypeError 2007.
+     */
+    beginGradientFill(
+      type: Value,
+      colors: Value,
+      alphas: Value,
+      ratios: Value,
+      matrix: Value = null,
+      spreadMethod: Value = "pad",
+      interpolationMethod: Value = "rgb",
+      focalPointRatio: Value = 0,
+    ): void {
+      const kind = s.rt.toString(type);
+      if (kind !== "linear" && kind !== "radial") {
+        throw s.rt.error("ArgumentError", 2008, "type");
+      }
+
+      if (colors === null || colors === undefined) {
+        throw s.rt.error("TypeError", 2007, "colors");
+      }
+
+      // Null alphas are opaque, and null ratios spread evenly, floor(255 k / (n - 1)), as adl draws them.
+      const array = (v: Value) => ((v as AsObject).$a as Value[] | undefined) ?? [];
+      const c = array(colors);
+      const a = alphas === null || alphas === undefined ? c.map(() => 1) : array(alphas);
+      const r =
+        ratios === null || ratios === undefined
+          ? c.map((_, k) => (c.length > 1 ? Math.floor((255 * k) / (c.length - 1)) : 0))
+          : array(ratios).map((v) => Math.trunc(s.rt.toNumber(v)));
+      if (a.length !== c.length || r.length !== c.length || r.some((v) => !(v >= 0 && v <= 255))) {
+        drawing(this).beginFill({ type: "solid", color: 0 });
+        return;
+      }
+
+      const read = (k: string, fallback: number) =>
+        matrix === null || matrix === undefined
+          ? fallback
+          : s.rt.toNumber(s.rt.getProperty(matrix as AsObject, s.rt.publicName(k)));
+      const spread = s.rt.toString(spreadMethod);
+      drawing(this).beginFill({
+        type: "gradient",
+        radial: kind === "radial",
+        focal: kind === "radial" ? num(focalPointRatio) : 0,
+        stops: c.slice(0, 16).map((color, i) => ({ ratio: r[i], color: argb(color, a[i]) })),
+        spread: spread === "reflect" ? 1 : spread === "repeat" ? 2 : 0,
+        linearRgb: s.rt.toString(interpolationMethod) === "linearRGB",
+        matrix: {
+          a: read("a", 1),
+          b: read("b", 0),
+          c: read("c", 0),
+          d: read("d", 1),
+          tx: read("tx", 0),
+          ty: read("ty", 0),
+        },
+      });
     }
 
     /** The BitmapData itself, not a copy: the fill shows its later changes, the shape a view of its store. */

@@ -1087,8 +1087,35 @@ switches any fill's texture from clamping to repeating by its
 `addressMode`, so a clipped fill's copy reads as clamping there while
 WebGL, which reads each axis's mode, clamps it. Without scripts, a SWF's
 images are decoded at `start` too, for its bitmap fills. A bitmap line
-(`lineBitmapStyle`, a LINESTYLE2 bitmap fill) and gradients still draw
-their first colour. Each rule is Flash's
+(`lineBitmapStyle`, a LINESTYLE2 bitmap fill) still draws its first
+colour.
+
+Gradient fills, a shape's linear, radial and focal ones and
+`beginGradientFill`'s, are drawn from Flash's own ramp, which adl gives
+pixel for pixel (the `gradients` case and `gradients.ts`'s tests): 256
+colours, each channel interpolated straight between the stops and
+truncated, alpha too, then premultiplied as c · (a + 1) >> 8; in linear
+RGB, interpolated in sRGB's linear light, the ends through it too, which
+takes 255 to 254. The stops fill the ramp in order, a span that goes
+back skipped and the last colour on to the end; no stops are black. A
+pixel takes entry floor(256 · t), t read at its top left corner, not its
+centre; pad clamps, repeat wraps and reflect mirrors t, as a texture's
+clamp, repeat and mirrored repeat do with a ramp of 256 texels. So a
+linear gradient is its ramp as a texture of 256 by 1, sampled nearest,
+through the gradient's matrix (a SWF's square is in twips as its shape
+is, so only the translation goes to pixels) moved half a pixel for the
+corner. A radial one is not affine: its texture is computed over the
+bounds of what it fills, a texel a pixel up to 512 a side, each texel
+the ramp's entry at its corner, so an unscaled shape's pixels are
+Flash's and any spread reaches past the gradient's circle; at a focal
+point off the centre Flash draws the last stop, at a centred one's
+centre the first. `beginGradientFill` refuses a type but `linear` and
+`radial` (ArgumentError 2008) and null colours (TypeError 2007), takes
+null alphas as opaque and null ratios as even, floor(255 · k / (n − 1));
+arrays of different lengths or a ratio outside 0 to 255 draw nothing,
+and stops past 16 are left out. The stage's supersampling softens a hard jump
+inside a fill, such as a repeating gradient's seam, which Flash leaves
+hard. Gradient lines still draw their first colour. Each rule is Flash's
 as the `draw-bitmaps` and `draw-objects` cases trace and draw it under
 adl: a destination pixel takes the source pixel under its centre,
 clamped to the source's edges; the translation is snapped down to

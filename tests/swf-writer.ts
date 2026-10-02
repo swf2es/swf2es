@@ -146,7 +146,7 @@ export interface ShapeSpec {
   id: number;
   bounds: [number, number, number, number];
   /** Solid fills, 0xRRGGBB (DefineShape) or 0xAARRGGBB (DefineShape3), or bitmap fills. */
-  fills: (number | BitmapFill)[];
+  fills: (number | BitmapFill | GradientFillSpec)[];
   /** Lines: width in twips and colour. */
   lines?: { width: number; color: number }[];
   /** Paths, each with the fill it has on its right (fill1) and its line; 1-based, 0 for none. */
@@ -164,6 +164,23 @@ export interface BitmapFill {
   bitmap: number;
   type: 0x40 | 0x41 | 0x42 | 0x43;
   matrix?: { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
+}
+
+/**
+ * A gradient fill: 0x10 linear, 0x12 radial, 0x13 focal; its matrix maps
+ * the gradient square, -16384 to 16384 twips, to the shape's twips.
+ */
+export interface GradientFillSpec {
+  type: 0x10 | 0x12 | 0x13;
+  matrix?: { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
+  /** 0 pad, 1 reflect, 2 repeat. */
+  spread?: number;
+  /** 0 RGB, 1 linear RGB. */
+  interpolation?: number;
+  /** Ratio 0 to 255 and colour, as the shape's fills are. */
+  stops: [number, number][];
+  /** A focal gradient's focal point, -1 to 1. */
+  focal?: number;
 }
 
 /** A DefineShape or DefineShape3 tag. */
@@ -187,9 +204,23 @@ export function shape(spec: ShapeSpec): Uint8Array {
     if (typeof f === "number") {
       w.u8(0);
       color(f);
-    } else {
+    } else if ("bitmap" in f) {
       w.u8(f.type).u16(f.bitmap);
       matrix(w, f.matrix ?? {});
+    } else {
+      w.u8(f.type);
+      matrix(w, f.matrix ?? {});
+      w.ub(2, f.spread ?? 0)
+        .ub(2, f.interpolation ?? 0)
+        .ub(4, f.stops.length);
+      for (const [ratio, c] of f.stops) {
+        w.u8(ratio);
+        color(c);
+      }
+
+      if (f.type === 0x13) {
+        w.u16(Math.round((f.focal ?? 0) * 256) & 0xffff);
+      }
     }
   }
 
