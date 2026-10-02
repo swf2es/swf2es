@@ -3,7 +3,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Bitmap } from "../../../packages/format/dist/index.js";
-import { type DecodedImage, decodeImages } from "../../../packages/player/dist/images.js";
+import {
+  type DecodedImage,
+  decodeImages,
+  decodeInBrowser,
+} from "../../../packages/player/dist/images.js";
 import type { BitmapCharacter, Library } from "../../../packages/player/dist/timeline.js";
 
 function library(definitions: Bitmap[]): { library: Library; characters: BitmapCharacter[] } {
@@ -78,4 +82,38 @@ test("an image no decoder can read is a bitmap of 0 by 0", async () => {
   const none = library([image(3, "gif")]);
   await decodeImages(none.library, null);
   assert.equal(none.characters[0].pixels?.width, 0);
+});
+
+test("what WebCodecs refuses goes to the canvas", async () => {
+  const g = globalThis as Record<string, unknown>;
+  const saved = ["ImageDecoder", "createImageBitmap", "OffscreenCanvas"].map(
+    (k) => [k, g[k]] as const,
+  );
+  g.ImageDecoder = class {
+    decode(): Promise<never> {
+      return Promise.reject(new Error("unsupported"));
+    }
+
+    close(): void {}
+  };
+  g.createImageBitmap = async () => ({ width: 1, height: 1, close() {} });
+  g.OffscreenCanvas = class {
+    width = 1;
+    height = 1;
+
+    getContext() {
+      return {
+        drawImage() {},
+        getImageData: () => ({ data: Uint8ClampedArray.of(1, 2, 3, 4) }),
+      };
+    }
+  };
+  try {
+    const image = await decodeInBrowser(Uint8Array.of(0), "png");
+    assert.deepEqual(image && [image.width, image.height, [...image.rgba]], [1, 1, [1, 2, 3, 4]]);
+  } finally {
+    for (const [k, v] of saved) {
+      g[k] = v;
+    }
+  }
 });

@@ -408,11 +408,7 @@ export class MovieClip extends Container {
         continue;
       }
 
-      const child = displayFor(character, this.library);
-      if (child instanceof BitmapObject) {
-        child.hasImage = place.hasImage;
-      }
-
+      const child = displayFor(character, this.library, place.hasImage);
       child.applyPlace(place);
       child.placeFrame = frame;
       this.placeAtDepth(child, place.depth);
@@ -522,7 +518,7 @@ export class MovieClip extends Container {
         continue;
       }
 
-      const child = displayFor(character, this.library);
+      const child = displayFor(character, this.library, jump.place.hasImage);
       child.applyPlace(jump.place);
       child.placeFrame = jump.frame;
       this.placeAtDepth(child, depth);
@@ -613,7 +609,12 @@ function mergePlace(previous: Place, next: Place): Place {
 }
 
 /** A display object for a character, before its first frame: a shape, or a clip. */
-export function displayFor(character: Character, library: Library): DisplayObject {
+/** `hasImage` is PlaceObject3's flag where a timeline places it, which a bitmap's construction reads. */
+export function displayFor(
+  character: Character,
+  library: Library,
+  hasImage = false,
+): DisplayObject {
   if (character.type === "shape") {
     return new ShapeObject(character);
   }
@@ -624,6 +625,7 @@ export function displayFor(character: Character, library: Library): DisplayObjec
       library.construct ? null : BitmapStore.of(character.pixels ?? INVALID_PIXELS),
     );
     bitmap.character = character;
+    bitmap.hasImage = hasImage;
     return bitmap;
   }
 

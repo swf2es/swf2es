@@ -364,35 +364,41 @@ test("a bitmap a timeline places is a Bitmap, its bound class its data's with Ha
     "PlacedRoot",
     "package { import flash.display.*; import flash.utils.*; public class PlacedRoot extends Sprite { public function PlacedRoot() { var b:Bitmap = getChildAt(0) as Bitmap; trace(getQualifiedClassName(b.bitmapData), b.bitmapData.width, b.bitmapData.getPixel32(1, 0).toString(16)); } } }",
   );
+  // The same, its first frame empty: a jump to frame 2 places the bitmap.
+  const seeking = compile(
+    "SeekRoot",
+    "package { import flash.display.*; import flash.utils.*; public class SeekRoot extends MovieClip { public function SeekRoot() { gotoAndStop(2); var b:Bitmap = getChildAt(0) as Bitmap; trace(getQualifiedClassName(b.bitmapData), b.bitmapData.width); } } }",
+  );
   const pixels = Uint8Array.from([0xff, 1, 2, 3, 0x80, 0x40, 0x20, 0x10]);
-  const bitmapSwf = (hasImage: boolean) =>
+  const bitmapSwf = (hasImage: boolean, seek = false) =>
     w.swf({
       width: 100,
       height: 50,
-      frameCount: 1,
+      frameCount: seek ? 2 : 1,
       tags: [
         w.fileAttributes(true),
         w.tag(36, Uint8Array.from([1, 0, 5, 2, 0, 1, 0, ...zlibCompress(pixels)]), true),
         w.doAbc(data, "PlacedData"),
-        w.doAbc(root, "PlacedRoot"),
+        w.doAbc(seek ? seeking : root, seek ? "SeekRoot" : "PlacedRoot"),
         w.symbolClass([
           [1, "PlacedData"],
-          [0, "PlacedRoot"],
+          [0, seek ? "SeekRoot" : "PlacedRoot"],
         ]),
+        ...(seek ? [w.showFrame()] : []),
         w.place({ depth: 1, character: 1, hasImage: hasImage || undefined }),
         w.showFrame(),
         w.end(),
       ],
     });
 
-  const run = async (hasImage: boolean) => {
+  const run = async (hasImage: boolean, seek = false) => {
     const lines: string[] = [];
     const scripting = new Scripting(await createCodegen(wasm), {
       print: (line) => lines.push(line),
       debugger: true,
     });
     await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-    const player = new Player(bitmapSwf(hasImage), scripting);
+    const player = new Player(bitmapSwf(hasImage, seek), scripting);
     const error = await player.start().then(
       () => null,
       (e: unknown) => scripting.rt.toString(e as avm2.Value),
@@ -405,6 +411,8 @@ test("a bitmap a timeline places is a Bitmap, its bound class its data's with Ha
     lines: ["data 1 1 2", "PlacedData 2 807f4020"],
     error: null,
   });
+  // A jump to the frame that places it constructs it alike.
+  assert.deepEqual(await run(true, true), { lines: ["data 1 1 2", "PlacedData 2"], error: null });
   // Without HasImage Flash takes the class for a display object's: constructed bare, then refused.
   const bare = await run(false);
   assert.deepEqual(bare.lines, ["data -1 -1 0"]);

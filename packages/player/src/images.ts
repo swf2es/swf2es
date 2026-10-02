@@ -36,7 +36,8 @@ export async function decodeInBrowser(
   const type = `image/${format}`;
   try {
     if (format !== "jpeg" && typeof ImageDecoder !== "undefined") {
-      const decoded = await decodeFrame(data, type);
+      // What WebCodecs refuses, the canvas below may still read.
+      const decoded = await decodeFrame(data, type).catch(() => null);
       if (decoded) {
         return decoded;
       }
