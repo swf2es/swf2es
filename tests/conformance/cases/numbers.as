@@ -10,3 +10,10 @@ trace(Math.round(-0.5), Math.round(2.5), Math.floor(-1.5), Math.ceil(-1.5), Math
 trace(int("  42  "), int("0x10"), uint("-1"), int(true), int(3000000000), uint(-0.5));
 // Math.round as floor(x + 0.5): never -0.
 trace(1 / Math.round(-0), 1 / Math.round(-0.5), 1 / Math.round(-0.49), Math.round(NaN), Math.round(2.5), Math.round(-2.5), Math.round(-Infinity));
+// A string's number: an exponent with no digits is left off, a NUL ends it.
+var numberStrings:Array = ["4e", "4e+", "4E-", "4.e", "4.2e", ".e1", "4ex", " 4e ", "e5", "4e\u00005", "4\u00004", "+.5", "."];
+var parsed:Array = [];
+for each (var ns:String in numberStrings) {
+  parsed.push(escape(ns) + "=" + Number(ns));
+}
+trace(parsed.join(" "));

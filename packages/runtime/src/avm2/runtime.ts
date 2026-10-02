@@ -3330,6 +3330,12 @@ export function stringToNumber(s: string): number {
     if (nul > 0 && s.slice(0, nul).trim() !== "") {
       return stringToNumber(s.slice(0, nul));
     }
+
+    // An exponent with no digits, as "4e" or "4e+", is left off.
+    const bare = /^([-+]?(?:\d+\.?\d*|\.\d+))[eE]\+?$/.exec(t);
+    if (bare) {
+      return Number(bare[1]);
+    }
   }
 
   return n;
