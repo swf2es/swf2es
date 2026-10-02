@@ -579,3 +579,42 @@ test("a bitmap a timeline places is a Bitmap, its bound class its data's with Ha
     "TypeError: Error #2022: Class PlacedData$ must inherit from DisplayObject to link to a symbol.",
   );
 });
+
+test("getTimer reads the frame clock, or a host's real clock as it runs on within a frame", {
+  skip,
+}, async () => {
+  const compile = compiler(out);
+  const swf = bare(
+    compile(
+      "ClockReads",
+      `package {
+        import flash.display.Sprite;
+        import flash.utils.getTimer;
+        public class ClockReads extends Sprite {
+          public function ClockReads() { var a:int = getTimer(); var b:int = getTimer(); trace(a, b); }
+        }
+      }`,
+    ),
+    1,
+    "ClockReads",
+  );
+
+  // The frame clock: the first frame's time at 24 fps, the same at each read.
+  const framed: string[] = [];
+  const stepped = new Scripting(await createCodegen(wasm), { print: (l) => framed.push(l) });
+  await stepped.loadLibraries(libraryAbcs(`${out}libraries/`));
+  await new Player(swf, stepped).start();
+  assert.deepEqual(framed, ["42 42"]);
+
+  // A host's clock, read once as the player starts, then at each getTimer:
+  // the time since, which runs on within the frame.
+  let clock = 1000;
+  const real: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (l) => real.push(l),
+    realTime: () => (clock += 2),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  await new Player(swf, scripting).start();
+  assert.deepEqual(real, ["2 4"]);
+});

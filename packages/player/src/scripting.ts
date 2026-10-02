@@ -177,6 +177,13 @@ export class Scripting {
    * one timer set from another keeps the first's pace, not the frame's.
    */
   now = 0;
+  private readonly realTime: (() => number) | null;
+  private readonly realStart: number;
+
+  /** What getTimer tells: milliseconds since the start, by the host's real clock if it gave one, else the frame clock's now. */
+  timer(): number {
+    return this.realTime ? Math.floor(this.realTime() - this.realStart) : Math.round(this.now);
+  }
   /** The timers started, by their Timer objects, and a heap of them by when they fall due. */
   private readonly running = new Map<AsObject, TimerRecord>();
   private readonly timers = new TimerHeap();
@@ -191,8 +198,17 @@ export class Scripting {
       url?: string;
       externalInterface?: ExternalInterfaceHost;
       decodeImage?: ImageDecode | null;
+      /**
+       * A host playing in real time: a monotonic clock in milliseconds, such
+       * as `() => performance.now()`, which getTimer then reads, as Flash's
+       * runs on while a script does. Without one getTimer tells the frame
+       * clock, the same on every run.
+       */
+      realTime?: () => number;
     } = {},
   ) {
+    this.realTime = options.realTime ?? null;
+    this.realStart = this.realTime ? this.realTime() : 0;
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
     this.externalInterface = options.externalInterface ?? null;
     this.fetch = options.fetch ?? null;
