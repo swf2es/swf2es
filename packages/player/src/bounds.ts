@@ -42,7 +42,7 @@ function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
   }
 
   if (d instanceof TextObject) {
-    return { xMin: 0, yMin: 0, xMax: d.width, yMax: d.height };
+    return { xMin: d.left, yMin: d.top, xMax: d.left + d.width, yMax: d.top + d.height };
   }
 
   if (d instanceof ShapeObject && d.shape) {

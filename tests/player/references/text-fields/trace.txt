@@ -1,0 +1,30 @@
+format null null null null null null null null null null null null null null null null null null block
+format2 Verdana 14 16711680 true false true http://x _blank center 1 2 3 4
+format3 13 -1 -4 1.5
+align ArgumentError 2008
+display ok null
+nulls null null null
+field 100 100 true 0 false 0 false 16777215 false false dynamic false none true 0 0 false false normal pixel 0 0 null 1 1 1 0
+default Times New Roman 12 0 false false false   left 0 0 0 0 0 0 false false
+html empty 
+html <P ALIGN="LEFT"><FONT FACE="Times New Roman" SIZE="12" COLOR="#000000" LETTERSPACING="0" KERNING="0">abc</FONT></P>
+got Times New Roman 12 0 false left 0
+textColor 3368601 3368601 3368601
+after set true 20 false <P ALIGN="LEFT"><FONT FACE="Times New Roman" SIZE="20" COLOR="#336699" LETTERSPACING="0" KERNING="0"><B>abc</B></FONT></P>
+append abcde true true true
+dtf Courier 10 65280 <P ALIGN="LEFT"><FONT FACE="Courier" SIZE="10" COLOR="#00FF00" LETTERSPACING="0" KERNING="0">hi</FONT></P>
+set html bold rednextpara&< 18 <P ALIGN="LEFT"><FONT FACE="Courier" SIZE="10" COLOR="#00FF00" LETTERSPACING="0" KERNING="0"><B>bo</B>ld <FONT SIZE="20" COLOR="#FF0000">red<FONT SIZE="10" COLOR="#00FF00">nextpara&amp;&lt;</FONT></FONT></FONT></P>
+multi html one|two|
+newlines a|b|c 5
+type ArgumentError 2008
+autoSize ArgumentError 2008
+antiAliasType ok normal
+gridFitType ok none
+set input true 1193046 true 11259375 true true left false
+rich one|two itund link|dot| <P ALIGN="CENTER"><FONT FACE="Times New Roman" SIZE="12" COLOR="#000000" LETTERSPACING="0" KERNING="0">one</FONT></P><TEXTFORMAT INDENT="3" LEADING="4"><P ALIGN="LEFT"><FONT FACE="Times New Roman" SIZE="12" COLOR="#000000" LETTERSPACING="0" KERNING="0">two <I>it</I><U>und</U> <A HREF="http://a" TARGET="_self"><B><I>link</I></B></A></FONT></P></TEXTFORMAT><LI><FONT FACE="Times New Roman" SIZE="12" COLOR="#000000" LETTERSPACING="0" KERNING="0">dot</FONT></LI>
+partial <TEXTFORMAT LEFTMARGIN="5"><P ALIGN="CENTER"><FONT FACE="Times New Roman" SIZE="12" COLOR="#000000" LETTERSPACING="0" KERNING="0"><A HREF="u" TARGET=""><I><U>on</U></I></A>e</FONT></P></TEXTFORMAT><TEXTFORMAT INDENT="3" LEADING="4"><P ALIGN="LEFT"><FONT FACE="Times New Roman" SIZE="12" COLOR="#000000" LETTERSPACING="0" KERNING="0">two <I>it</I><U>und</U> <A HREF="http://a" TARGET="_self"><B><I>link</I></B></A></FONT></P></TEXTFORMAT><LI><FONT FACE="Times New Roman" SIZE="12" COLOR="#000000" LETTERSPACING="0" KERNING="0">dot</FONT></LI>
+mixed null null null
+reverse RangeError 2006
+past RangeError 2006
+null fmt TypeError 2007
+null text TypeError 2007

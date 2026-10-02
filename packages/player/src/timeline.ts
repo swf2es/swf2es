@@ -5,11 +5,13 @@
 import {
   type Bitmap,
   type EditText,
+  type FontName,
   isBitmapTag,
   type Place,
   readBinaryData,
   readBitmap,
   readEditText,
+  readFontName,
   readFrameLabel,
   readPlace,
   readRemove,
@@ -50,6 +52,13 @@ export interface TextCharacter {
   type: "text";
   id: number;
   definition: EditText;
+  /** The font it names by id, if the SWF defines it: its name and style, which the field shows its text in. */
+  font: FontName | null;
+}
+
+/** DefineFont2 or 3: its name and style, for the fields that name it; the glyphs are not read. */
+export interface FontCharacter extends FontName {
+  type: "font";
 }
 
 /** A bitmap's pixels as every copy of it starts: premultiplied ARGB; 0 by 0 for what Flash cannot read. */
@@ -84,10 +93,11 @@ export type Character =
   | SpriteCharacter
   | BitmapCharacter
   | TextCharacter
-  | BinaryCharacter;
+  | BinaryCharacter
+  | FontCharacter;
 
-/** What a timeline can place: every character but data. */
-export type DisplayCharacter = Exclude<Character, BinaryCharacter>;
+/** What a timeline can place: every character but data and fonts. */
+export type DisplayCharacter = Exclude<Character, BinaryCharacter | FontCharacter>;
 
 /** What Flash makes of a bitmap it cannot read. */
 export const INVALID_PIXELS: BitmapPixels = {
@@ -167,9 +177,21 @@ function timelineOf(
         });
         break;
       }
+      case tags.DefineFont2:
+      case tags.DefineFont3: {
+        const font = readFontName(bytes, t);
+        library.set(font.id, { type: "font", ...font });
+        break;
+      }
       case tags.DefineEditText: {
         const definition = readEditText(bytes, t);
-        library.set(definition.id, { type: "text", id: definition.id, definition });
+        const font = definition.fontId === null ? null : library.get(definition.fontId);
+        library.set(definition.id, {
+          type: "text",
+          id: definition.id,
+          definition,
+          font: font?.type === "font" ? font : null,
+        });
         break;
       }
       case tags.DefineBinaryData: {

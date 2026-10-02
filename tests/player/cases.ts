@@ -1114,6 +1114,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 300,
   },
   {
+    name: "text-fields",
+    swf: (abc) => bare(abc, 1, "TextFields"),
+    script: "TextFields",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "draw-bitmaps",
     swf: drawBitmaps,
     script: "DrawBitmaps",

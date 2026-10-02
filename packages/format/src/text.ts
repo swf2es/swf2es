@@ -1,5 +1,5 @@
 // The editable text character a SWF places on its timeline.
-import { readString } from "./display.js";
+import { readString, utf8 } from "./display.js";
 import { type Rect, SwfReader, type Tag } from "./swf.js";
 
 export interface EditText {
@@ -81,4 +81,30 @@ export function readEditText(bytes: Uint8Array, tag: Tag): EditText {
     html: (flags2 & 0x02) !== 0,
     useOutlines: (flags2 & 0x01) !== 0,
   };
+}
+
+/** A DefineFont2 or DefineFont3's name and style: what a field in it shows its text in, the glyphs left. */
+export interface FontName {
+  id: number;
+  name: string;
+  bold: boolean;
+  italic: boolean;
+}
+
+/** DefineFont2 (48) or DefineFont3 (75): the id, flags, language, then the name, a length-prefixed string. */
+export function readFontName(bytes: Uint8Array, tag: Tag): FontName {
+  const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+  const id = r.u16();
+  const flags = r.u8();
+  r.u8();
+  const length = r.u8();
+  const start = r.pos;
+  let end = Math.min(start + length, r.end);
+  // A trailing NUL, which some tools write, is no part of the name.
+  while (end > start && bytes[end - 1] === 0) {
+    end--;
+  }
+
+  const name = utf8(bytes.subarray(start, end));
+  return { id, name, bold: (flags & 0x01) !== 0, italic: (flags & 0x02) !== 0 };
 }

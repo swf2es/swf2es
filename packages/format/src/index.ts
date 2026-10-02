@@ -55,4 +55,4 @@ export {
   type Tag,
 } from "./swf.js";
 export * as tags from "./tags.js";
-export { type EditText, readEditText } from "./text.js";
+export { type EditText, type FontName, readEditText, readFontName } from "./text.js";

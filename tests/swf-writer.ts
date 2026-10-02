@@ -425,23 +425,66 @@ export function sprite(id: number, frameCount: number, tags: Uint8Array[]): Uint
   return tag(39, concat([new BitWriter().u16(id).u16(frameCount).done(), ...tags]));
 }
 
-/** A timeline TextField with a plain initial value. */
+/**
+ * A DefineEditText: its initial text, its size in twips and alignment (0
+ * left, 1 right, 2 center), and optionally HTML text, multiline, a colour
+ * (0xRRGGBB) and a font by id with its height in twips.
+ */
 export function editText(
   id: number,
   text: string,
   width = 2000,
   height = 400,
   align = 0,
+  options: {
+    html?: boolean;
+    multiline?: boolean;
+    color?: number;
+    font?: number;
+    fontHeight?: number;
+  } = {},
 ): Uint8Array {
   const w = new BitWriter().u16(id);
   rect(w, 0, width, 0, height);
-  w.u8(0x80).u8(align ? 0x20 : 0);
+  const font = options.font !== undefined;
+  w.u8(
+    0x80 |
+      (options.multiline ? 0x20 : 0) |
+      (options.color !== undefined ? 0x04 : 0) |
+      (font ? 0x01 : 0),
+  );
+  w.u8((align ? 0x20 : 0) | (options.html ? 0x02 : 0));
+  if (font) {
+    w.u16(options.font ?? 0).u16(options.fontHeight ?? 240);
+  }
+
+  if (options.color !== undefined) {
+    w.u8(options.color >> 16)
+      .u8(options.color >> 8)
+      .u8(options.color)
+      .u8(0xff);
+  }
+
   if (align) {
     w.u8(align).u16(0).u16(0).u16(0).u16(0);
   }
 
   w.string("").string(text);
   return tag(37, w.done());
+}
+
+/** A DefineFont2 of a name and no glyphs: what a field names to show its text in. */
+export function fontName(id: number, name: string, bold = false, italic = false): Uint8Array {
+  const w = new BitWriter().u16(id);
+  w.u8((bold ? 0x01 : 0) | (italic ? 0x02 : 0))
+    .u8(0)
+    .u8(name.length);
+  for (const c of name) {
+    w.u8(c.charCodeAt(0));
+  }
+
+  w.u16(0);
+  return tag(48, w.done());
 }
 
 /** A whole uncompressed SWF: the header, the frame size and rate, then the tags. */

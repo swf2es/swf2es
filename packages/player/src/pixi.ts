@@ -520,22 +520,7 @@ export class PixiView {
     }
 
     if (o instanceof TextObject) {
-      if (o.text) {
-        const text = new Text({
-          text: o.text,
-          style: { fontFamily: "Arial", fontSize: o.fontSize, fill: o.color, align: o.align },
-        });
-        if (o.align === "center") {
-          text.anchor.x = 0.5;
-          text.x = o.width / 2;
-        } else if (o.align === "right") {
-          text.anchor.x = 1;
-          text.x = o.width;
-        }
-
-        node.art.addChild(text);
-      }
-
+      drawText(o, node.art);
       return;
     }
 
@@ -819,6 +804,86 @@ export class PixiView {
   render(root: DisplayObject): void {
     this.prepare(root);
     this.renderer.render(this.stage);
+  }
+}
+
+/** A Flash font's name as a CSS family: the device fonts as theirs, any other by name, then serif, as Flash's default is. */
+function fontFamily(font: string): string[] {
+  switch (font) {
+    case "_sans":
+      return ["Arial", "Helvetica", "sans-serif"];
+    case "_serif":
+      return ["Times New Roman", "Times", "serif"];
+    case "_typewriter":
+      return ["Courier New", "Courier", "monospace"];
+    default:
+      return [font, "serif"];
+  }
+}
+
+/**
+ * A TextField drawn: its background and border, then its text in the
+ * format of its first character, 2 pixels in from the field's edges as
+ * Flash's gutter is, aligned as its first paragraph, wrapped at the field's
+ * width if it wraps, and clipped to the field where it runs over.
+ */
+function drawText(o: TextObject, art: PixiContainer): void {
+  if (o.background || o.border) {
+    const box = new Graphics().rect(o.left, o.top, o.width, o.height);
+    if (o.background) {
+      box.fill({ color: o.backgroundColor & 0xffffff });
+    }
+
+    if (o.border) {
+      box.stroke({ color: o.borderColor & 0xffffff, width: 1, alignment: 1 });
+    }
+
+    art.addChild(box);
+  }
+
+  const model = o.model;
+  if (!model.text) {
+    return;
+  }
+
+  const f = model.formats[0] ?? model.defaultFormat;
+  const shown = o.displayAsPassword
+    ? "*".repeat(model.text.length)
+    : model.text.replace(/\r/g, "\n");
+  const text = new Text({
+    text: shown,
+    style: {
+      fontFamily: fontFamily(f.font),
+      fontSize: f.size,
+      fill: f.color & 0xffffff,
+      fontWeight: f.bold ? "bold" : "normal",
+      fontStyle: f.italic ? "italic" : "normal",
+      align: f.align === "justify" ? "justify" : (f.align as "left" | "center" | "right"),
+      wordWrap: o.wordWrap,
+      wordWrapWidth: Math.max(1, o.width - 4 - f.leftMargin - f.rightMargin),
+      leading: f.leading,
+      letterSpacing: f.letterSpacing,
+    },
+  });
+  const inner = o.left + 2 + f.leftMargin;
+  text.y = o.top + 2;
+  if (f.align === "center") {
+    text.anchor.x = 0.5;
+    text.x = o.left + o.width / 2;
+  } else if (f.align === "right") {
+    text.anchor.x = 1;
+    text.x = o.left + o.width - 2 - f.rightMargin;
+  } else {
+    text.x = inner + f.indent;
+  }
+
+  art.addChild(text);
+  // Measuring needs a canvas, which there is none of without a DOM, as in node's tests.
+  const measurable = typeof document !== "undefined";
+  if (measurable && (text.width > o.width - 4 || text.height > o.height - 4)) {
+    const clip = new Graphics().rect(o.left, o.top, o.width, o.height).fill({ color: 0xffffff });
+    art.addChild(clip);
+    text.mask = clip;
   }
 }
 
