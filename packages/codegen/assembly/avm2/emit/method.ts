@@ -1640,7 +1640,7 @@ export class MethodEmitter {
       case ops.OP_add:
         this.assign(i);
         if (
-          (this.isNumber(this.src(i, 0)) && this.isNumber(this.src(i, 1))) ||
+          (this.isNumeric(this.src(i, 0)) && this.isNumeric(this.src(i, 1))) ||
           this.concatenates(i)
         ) {
           this.binary(i, " + ");

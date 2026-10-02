@@ -50,6 +50,8 @@ var b:Boolean = true;
 trace(s + i, i + s, s + u, s + b, b + s, s + ns, ns + s, ns + i, ns + b, ns + ns);
 trace("Loading " + int(37.9) + "%", s + n, s + 1e21, s + 0.1, s + -0, s + (-i));
 trace(ns + n, b + i, b + b, s + s + i + u + b);
+var f2:Boolean = false;
+trace(b + n, f2 + i, b + u, f2 + f2, b + f2, -i + b, n + b + i);
 
 // Null checks: one per register until it is written, a loop's header
 // entered again with the register written, and a branch's code in place.
