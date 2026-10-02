@@ -54,13 +54,25 @@ async function load(js: string): Promise<(rt: unknown) => unknown> {
  */
 export async function runSwf2es(builtins: Uint8Array[], abc: Uint8Array): Promise<string[]> {
   const lines: string[] = [];
-  const rt = runtime.createRuntime({ print: (line: string) => lines.push(line) });
   // Each module names the ABCs before it, by the hashes the cache key uses.
   const hashes: string[] = [];
   const hash = (bytes: Uint8Array) => {
     hashes.push(createHash("sha256").update(bytes).digest("hex"));
     return hashes.join("\n");
   };
+  const rt = runtime.createRuntime({
+    print: (line: string) => lines.push(line),
+    // Domain.loadBytes runs the ABC at once, so its module is evaluated, not imported.
+    compileAbc: (bytes: Uint8Array) => {
+      const error = testing.domainAdd(bytes, false);
+      if (error) {
+        return error;
+      }
+
+      const js = testing.domainModule(hash(bytes));
+      return new Function(js.replace(/^export default /, "return "))();
+    },
+  });
 
   testing.domainReset(50);
   for (const bytes of builtins) {

@@ -376,7 +376,12 @@ number formatting (`numbers.ts`), Array's sort (`sort.ts`), ByteArray with
 its capacity and UTF-8 (`bytearray.ts`), AMF3 (`amf.ts`) and JSON
 (`json.ts`) and describeType (`describe.ts`). These are MPL-2.0 as their sources are. Domain memory is
 avmshell's `avmplus.Domain`'s: 1024 bytes of scratch memory until a
-ByteArray is set as it. Date is JavaScript's Date, with avmplus' string
+ByteArray is set as it. The Domain's `loadBytes` compiles its ABC through
+`RuntimeOptions.compileAbc`, which the host gives, as the runtime does not
+include the compiler, and runs it at once; it loads into the one domain
+there is, as the player's Loader does (see Loading SWFs), so a child
+Domain's classes are its parent's too. avmshell's `File` reads and writes
+`RuntimeOptions.files`, in memory by default. Date is JavaScript's Date, with avmplus' string
 formats. flash.concurrent's Mutex and Condition and ByteArray's atomic
 operations are avmplus' on its one thread: locks are counted, a wait ends
 at once, as nothing else can notify it, and Worker.current is the

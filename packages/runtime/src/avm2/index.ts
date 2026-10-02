@@ -23,6 +23,7 @@ export {
   type NativesProvider,
   Runtime,
   type RuntimeOptions,
+  type ShellFiles,
   setStaticVar,
   type Value,
 } from "./runtime.js";

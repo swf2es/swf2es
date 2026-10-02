@@ -121,6 +121,35 @@ export interface RuntimeOptions {
    * default they are the release player's and avmshell's, "Error #1009".
    */
   debugger?: boolean;
+  /**
+   * An ABC compiled for avmshell's Domain.loadBytes, which runs it at once:
+   * its module, or the VerifyError it was rejected with. The host compiles
+   * it, as the runtime does not include the compiler; without it loadBytes
+   * is unsupported.
+   */
+  compileAbc?: (abc: Uint8Array) => ((rt: Runtime) => Abc) | number;
+  /** Where avmshell's File reads and writes: by default in memory, empty at the start. */
+  files?: ShellFiles;
+}
+
+/** avmshell's file system, as its File sees it. */
+export interface ShellFiles {
+  /** A file's bytes, or null if it cannot be opened. */
+  read(name: string): Uint8Array | null;
+  /** Whether the file could be written. */
+  write(name: string, bytes: Uint8Array): boolean;
+}
+
+/** Files that live as long as the runtime. */
+function memoryFiles(): ShellFiles {
+  const files = new Map<string, Uint8Array>();
+  return {
+    read: (name) => files.get(name) ?? null,
+    write: (name, bytes) => {
+      files.set(name, bytes.slice());
+      return true;
+    },
+  };
 }
 
 /** How a class that holds its own elements indexes them. */
@@ -567,6 +596,8 @@ export class AsError extends Error {}
 export class Runtime {
   readonly print: (line: string) => void;
   readonly debugger: boolean;
+  readonly compileAbc: ((abc: Uint8Array) => ((rt: Runtime) => Abc) | number) | null;
+  readonly files: ShellFiles;
   readonly natives: Record<string, (rt: Runtime) => Method>;
   /** Names the scripts define, by local name: the first definition wins. */
   private readonly globals = new Map<string, GlobalName[]>();
@@ -622,6 +653,8 @@ export class Runtime {
   ) {
     this.print = options.print ?? defaultPrint;
     this.debugger = options.debugger ?? false;
+    this.compileAbc = options.compileAbc ?? null;
+    this.files = options.files ?? memoryFiles();
     this.objectTraits = new Traits("Object", null);
     this.objectTraits.dynamic = true;
     this.classTraits = new Traits("Class", this.objectTraits);
