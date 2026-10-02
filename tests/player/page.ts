@@ -1,6 +1,6 @@
 // The test page: plays a SWF in the player, frame by frame, and gives back
 // the frames asked for as PNG data URLs (runSwf), or how long each frame
-// took (benchSwf). chrome.ts calls both.
+// took (benchSwf), scripts and all. chrome.ts calls both.
 //
 // Flash anti-aliases by supersampling on a grid, none at low quality, 2×2
 // at medium and 4×4 at high and best, so the page draws at that many times
@@ -206,7 +206,9 @@ async function benchSwf(base64: string, frames: number, backBuffer = false): Pro
   let name = "";
   try {
     const start = performance.now();
-    const player = new Player(bytes);
+    // A scripted SWF's scripts run in the tick, which their time is part of.
+    const scripting = await scriptingFor(bytes, [], null);
+    const player = new Player(bytes, scripting);
     const renderer = await autoDetectRenderer({
       preference: "webgl",
       width: player.width,
@@ -219,6 +221,11 @@ async function benchSwf(base64: string, frames: number, backBuffer = false): Pro
     });
     document.body.replaceChildren(renderer.canvas);
     const view = new PixiView(renderer);
+    if (scripting) {
+      scripting.drawer = view;
+    }
+
+    await player.start();
     // Which renderer Pixi chose and what it draws with; WebGPU when WebGL
     // could not be had, which the output must say.
     const { gl, gpu } = renderer as unknown as {
