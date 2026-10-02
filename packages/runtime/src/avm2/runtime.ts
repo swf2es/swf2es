@@ -1620,6 +1620,26 @@ export class Runtime {
   }
 
   /**
+   * A method that failed its one test on entry: given fewer arguments than
+   * `required` or more than `max` (-1 for any), else called where the
+   * default XML namespace is not its own (callInDxns).
+   */
+  enter(
+    dxns: Namespace,
+    f: Method,
+    receiver: Value,
+    args: ArrayLike<Value>,
+    required: number,
+    max: number,
+  ): Value {
+    if (args.length < required || (max >= 0 && args.length > max)) {
+      throw this.argumentCountError(required, args.length);
+    }
+
+    return this.callInDxns(dxns, f, receiver, args);
+  }
+
+  /**
    * A method called where the default XML namespace is not the one of the
    * scope it was made in, `dxns`: called again with it, and the caller's
    * back after.

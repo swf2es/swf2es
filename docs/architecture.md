@@ -166,7 +166,7 @@ Each method goes through the same steps, in `codegen`:
 ### Generated code
 
 Each ABC compiles to one ES module. Every method becomes a JavaScript
-function whose registers are `let` variables, and whose blocks are
+function whose registers are `var` variables, and whose blocks are
 structured JavaScript, as Norman Ramsey's "Beyond Relooper" translates a
 reducible control-flow graph by its dominator tree:
 

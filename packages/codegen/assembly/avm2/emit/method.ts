@@ -44,6 +44,8 @@ import { SourceMap } from "./sourcemap";
 const MAX_NESTING: u32 = 500;
 /** No type: a conversion, convert_s or convert_o, that always calls the runtime. */
 const CONVERTS: i32 = -2;
+/** copyOf of a stack register that holds a constant: CONSTANT - the instruction that pushed it. */
+const CONSTANT: i32 = -2;
 
 @final
 export class MethodEmitter {
@@ -70,12 +72,17 @@ export class MethodEmitter {
    * Whether the method being written can see the default XML namespace: a
    * lookup, call or construction that may reach XML, a closure or class it
    * makes, a with scope, or dxns. Only such a method checks, on entry, that
-   * it runs with its scope's (see checkDxns).
+   * it runs with its scope's (see checkEntry).
    */
   seesDxns: bool = false;
   dxnsAt: u32 = 0;
   dxnsMarks: i32 = 0;
-  dxnsCheck: string = "";
+  /** The method's name in its own code, for running it again (see checkEntry). */
+  entryName: string = "";
+  /** The test its arguments' count fails, "" if none; how many it requires and takes, -1 for any. */
+  argsTest: string = "";
+  argsRequired: u32 = 0;
+  argsMax: i32 = -1;
   /** The method being written: its ABC index and body. */
   current: u32 = 0;
   body: i32 = -1;
@@ -129,6 +136,10 @@ export class MethodEmitter {
       this.copyOf[r] = -1;
     }
 
+    if (<u32>this.checked.length < ir.frameSize) {
+      this.checked = new StaticArray<u8>(ir.frameSize);
+    }
+
     const count = traits.paramCount[global];
     // Named, for stacks and profiles: a name its code never binds.
     const name = this.functionName.length ? this.functionName : "$method";
@@ -146,7 +157,7 @@ export class MethodEmitter {
     out.text(") {\n");
     this.dxnsAt = out.length;
     this.dxnsMarks = this.map.count;
-    this.dxnsCheck = `  if (rt.defaultXmlNamespace !== $dx) return rt.callInDxns($dx, ${name}, this, arguments);\n`;
+    this.entryName = name;
     this.seesDxns = false;
     this.prologue(method, global, flags);
     // A method that sets the default XML namespace gives its caller's
@@ -180,7 +191,7 @@ export class MethodEmitter {
       if (!this.unenclosed) {
         this.leaveDxns(dxns);
         out.text("}");
-        this.checkDxns();
+        this.checkEntry();
         return;
       }
 
@@ -209,21 +220,32 @@ export class MethodEmitter {
     out.text("\n");
     this.leaveDxns(dxns);
     out.text("}");
-    this.checkDxns();
+    this.checkEntry();
   }
 
   /**
-   * A method that can see the default XML namespace runs with the one of
-   * the scope it was made in ($dx, see ModuleEmitter.factory), not its
+   * The checks on entry, written first in the method once its code shows
+   * which it needs. Its arguments' count, as MethodEnv's argcOk. And a
+   * method that can see the default XML namespace runs with the one of the
+   * scope it was made in ($dx, see ModuleEmitter.factory), not its
    * caller's: else it runs again with it, and the caller's is back after.
-   * Written first in the method once its code shows it is needed.
+   * With both, one test, as V8 counts each against inlining: rt.enter
+   * throws the count's error or runs the method again, which counts again.
    */
-  checkDxns(): void {
-    if (!this.seesDxns) {
+  checkEntry(): void {
+    const args = this.argsTest;
+    const dxns = "rt.defaultXmlNamespace !== $dx";
+    let check = "";
+    if (this.seesDxns && args.length) {
+      check = `  if (${args} || ${dxns}) return rt.enter($dx, ${this.entryName}, this, arguments, ${this.argsRequired}, ${this.argsMax});\n`;
+    } else if (this.seesDxns) {
+      check = `  if (${dxns}) return rt.callInDxns($dx, ${this.entryName}, this, arguments);\n`;
+    } else if (args.length) {
+      check = `  if (${args}) throw rt.argumentCountError(${this.argsRequired}, arguments.length);\n`;
+    } else {
       return;
     }
 
-    const check = this.dxnsCheck;
     this.out.insert(this.dxnsAt, check);
     this.map.shift(this.dxnsMarks, <u32>check.length);
   }
@@ -456,24 +478,24 @@ export class MethodEmitter {
     // requires, or more than it declares unless it takes the rest.
     const required = count - traits.optionalCount[global];
     const extra = this.domain.allowsExtraArgs(global);
-    if (required > 0 || !extra) {
-      out.text("  if (");
-      if (required > 0) {
-        out.text("arguments.length < ");
-        out.uint(required);
-      }
-
-      if (!extra) {
-        out.text(required > 0 ? " || arguments.length > " : "arguments.length > ");
-        out.uint(count);
-      }
-
-      out.text(") throw rt.argumentCountError(");
-      out.uint(required);
-      out.text(", arguments.length);\n");
+    this.argsRequired = required;
+    this.argsMax = extra ? -1 : <i32>count;
+    if (required > 0 && !extra) {
+      this.argsTest =
+        required === count
+          ? `arguments.length !== ${count}`
+          : `arguments.length < ${required} || arguments.length > ${count}`;
+    } else if (required > 0) {
+      this.argsTest = `arguments.length < ${required}`;
+    } else if (!extra) {
+      this.argsTest = `arguments.length > ${count}`;
+    } else {
+      this.argsTest = "";
     }
 
-    out.text("  let l0 = this");
+    // var, not let: V8 starts a frame's registers undefined, where each
+    // let is initialized with bytecode of its own, which counts against inlining.
+    out.text("  var l0 = this");
     for (let p: u32 = 1; p <= count; p++) {
       out.text(", l");
       out.uint(p);
@@ -543,8 +565,16 @@ export class MethodEmitter {
     this.region = -1;
     const last = k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
     const stack = <i32>(ir.localCount + ir.maxScope);
-    // Every way in wrote its copies.
+    // Every way in wrote its copies. A block written in place has one way
+    // in, the code before it, and keeps what that checked.
     this.uncopy(stack);
+    if (!this.inPlace) {
+      for (let r: u32 = 0; r < ir.frameSize; r++) {
+        this.checked[r] = 0;
+      }
+    }
+
+    this.inPlace = false;
     this.file = this.blockFile[k];
     this.line = this.blockLine[k];
     this.mark();
@@ -607,6 +637,7 @@ export class MethodEmitter {
       this.kept = false;
       this.sunk = false;
       this.instruction(i);
+      this.unchecks(i);
       this.target = -1;
       if (op === ops.OP_swap) {
         // Its one destination is the new top, whose type the IR gives; the
@@ -669,7 +700,7 @@ export class MethodEmitter {
     }
 
     const from = src < stack ? src : this.copyOf[src];
-    if (from < 0) {
+    if (from === -1) {
       return false;
     }
 
@@ -697,7 +728,7 @@ export class MethodEmitter {
     const ir = this.ir;
     const end = min(limit, <i32>ir.frameSize);
     for (let r = <i32>(ir.localCount + ir.maxScope); r < end; r++) {
-      if (this.copyOf[r] >= 0) {
+      if (this.copyOf[r] !== -1) {
         this.writeCopy(r);
       }
     }
@@ -718,11 +749,117 @@ export class MethodEmitter {
     const out = this.out;
     const from = this.copyOf[r];
     this.copyOf[r] = -1;
+    this.checked[r] = 0;
     out.text("    ");
     this.reg(r);
     out.text(" = ");
-    this.reg(from);
+    this.copied(from);
     out.text(";\n");
+  }
+
+  /** Forget the null checks of what instruction i wrote. */
+  private unchecks(i: u32): void {
+    const ir = this.ir;
+    const op = ir.op[i];
+    if (ir.dst[i] >= 0) {
+      this.checked[ir.dst[i]] = 0;
+    }
+
+    if (this.target >= 0) {
+      this.checked[this.target] = 0;
+    }
+
+    if (op === ops.OP_hasnext2) {
+      this.checked[ir.a[i]] = 0;
+      this.checked[ir.b[i]] = 0;
+    } else if (op === ops.OP_swap) {
+      this.checked[ir.src[i]] = 0;
+      this.checked[ir.src[i] + 1] = 0;
+    }
+  }
+
+  /** Whether op pushes a constant, which a stack register can be a copy of. */
+  private pushesConstant(op: u16): bool {
+    switch (op) {
+      case ops.OP_pushbyte:
+      case ops.OP_pushshort:
+      case ops.OP_pushint:
+      case ops.OP_pushuint:
+      case ops.OP_pushdouble:
+      case ops.OP_pushnan:
+      case ops.OP_pushstring:
+      case ops.OP_pushtrue:
+      case ops.OP_pushfalse:
+      case ops.OP_pushnull:
+      case ops.OP_pushundefined:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /** What a copy reads: a register, or the constant instruction `CONSTANT - copy` pushed. */
+  private copied(copy: i32): void {
+    if (copy >= 0) {
+      this.regName(copy);
+      return;
+    }
+
+    const out = this.out;
+    const pool = this.abc.pool;
+    const i = <u32>(CONSTANT - copy);
+    const a = this.ir.a[i];
+    switch (this.ir.op[i]) {
+      case ops.OP_pushbyte:
+      case ops.OP_pushshort:
+        this.literal(<f64>(<i32>a), false);
+        break;
+      case ops.OP_pushint:
+        this.literal(<f64>pool.ints[a], false);
+        break;
+      case ops.OP_pushuint:
+        out.uint(pool.uints[a]);
+        break;
+      case ops.OP_pushdouble:
+        this.literal(pool.doubles[a], true);
+        break;
+      case ops.OP_pushnan:
+        out.text("NaN");
+        break;
+      case ops.OP_pushstring:
+        this.string(a);
+        break;
+      case ops.OP_pushtrue:
+        out.text("true");
+        break;
+      case ops.OP_pushfalse:
+        out.text("false");
+        break;
+      case ops.OP_pushnull:
+        out.text("null");
+        break;
+      default:
+        out.text("undefined");
+    }
+  }
+
+  /** A number read as an operand, a negative one in parentheses, so that `-` before it is no decrement. */
+  private literal(d: f64, double: bool): void {
+    const out = this.out;
+    const negative = d < 0 || (d === 0 && 1 / d < 0);
+    if (negative) {
+      out.byte(0x28); // (
+    }
+
+    if (double) {
+      out.double(d);
+    } else {
+      out.int(<i64>d);
+    }
+
+    if (negative) {
+      out.byte(0x29); // )
+    }
   }
 
   /** Forget every copy from register `from` up: none is needed. */
@@ -740,7 +877,11 @@ export class MethodEmitter {
   /** Register r as read: what it copies, if it is a copy. */
   reg(r: i32): void {
     const copy = this.copyOf[r];
-    this.regName(copy >= 0 ? copy : r);
+    if (copy === -1) {
+      this.regName(r);
+    } else {
+      this.copied(copy);
+    }
   }
 
   /** Register r itself, as written. */
@@ -833,6 +974,10 @@ export class MethodEmitter {
    * so reading it reads what it copies.
    */
   copyOf: StaticArray<i32> = new StaticArray<i32>(0);
+  /** By register: whether it was checked not null since it was last written, in the block being written. */
+  checked: StaticArray<u8> = new StaticArray<u8>(0);
+  /** Whether the block about to be written is written in place, after the one way into it. */
+  inPlace: bool = false;
   /** Whether the instruction just written left its destination a copy, or as it was. */
   kept: bool = false;
   /** The local the instruction being written assigns in place of its stack register, -1 if none; and whether it did. */
@@ -1312,6 +1457,8 @@ export class MethodEmitter {
       // on, a conditional branch's, with its own types, scopes and region.
       out.text("\n");
       this.save();
+      // A loop's header is also entered from its end, with other checks.
+      this.inPlace = !this.loopHeader[t];
       this.node(t);
       this.restore();
       this.mark();
@@ -1331,6 +1478,10 @@ export class MethodEmitter {
       saved.push(this.scopeWith[d]);
     }
 
+    for (let r: u32 = 0; r < ir.frameSize; r++) {
+      saved.push(this.checked[r]);
+    }
+
     saved.push(<i32>this.scopeDepth);
     saved.push(this.region);
     saved.push(this.file);
@@ -1345,6 +1496,10 @@ export class MethodEmitter {
     this.file = saved.pop();
     this.region = saved.pop();
     this.scopeDepth = <u32>saved.pop();
+    for (let r = <i32>ir.frameSize - 1; r >= 0; r--) {
+      this.checked[r] = <u8>saved.pop();
+    }
+
     for (let d = <i32>ir.maxScope - 1; d >= 0; d--) {
       this.scopeWith[d] = <u8>saved.pop();
     }
@@ -1359,6 +1514,14 @@ export class MethodEmitter {
     const ir = this.ir;
     const op = ir.op[i];
     const a = ir.a[i];
+    if (this.pushesConstant(op) && ir.dst[i] >= <i32>(ir.localCount + ir.maxScope)) {
+      // Read as the literal until the register changes or a branch needs
+      // it: V8 then gives the operation the constant in its own bytecode.
+      this.copyOf[ir.dst[i]] = CONSTANT - <i32>i;
+      this.kept = true;
+      return;
+    }
+
     switch (op) {
       case ops.OP_pushbyte:
       case ops.OP_pushshort:
@@ -1455,16 +1618,31 @@ export class MethodEmitter {
         this.assign(i);
         this.convert("", ir.src[i], ir.c[i], this.regType[ir.src[i]]);
         break;
-      case IR_CheckNull:
+      case IR_CheckNull: {
+        // A register checked since it was last written is not null.
+        const copy = this.copyOf[ir.src[i]];
+        const r = copy === -1 ? ir.src[i] : copy;
+        if (r >= 0) {
+          if (this.checked[r]) {
+            return;
+          }
+
+          this.checked[r] = 1;
+        }
+
         out.text("    if (");
         this.reg(ir.src[i]);
         out.text(" == null) throw rt.nullError(");
         this.reg(ir.src[i]);
         out.text(")");
         break;
+      }
       case ops.OP_add:
         this.assign(i);
-        if (this.isNumber(this.src(i, 0)) && this.isNumber(this.src(i, 1))) {
+        if (
+          (this.isNumeric(this.src(i, 0)) && this.isNumeric(this.src(i, 1))) ||
+          this.concatenates(i)
+        ) {
           this.binary(i, " + ");
         } else {
           this.call2("rt.add(", i);
@@ -2405,6 +2583,23 @@ export class MethodEmitter {
     return this.isNumeric(r) || this.builtinOf(r) === BUILTIN_String;
   }
 
+  /**
+   * Whether add i is JavaScript's own `+`: a String and a String, int, uint
+   * or Boolean, whose strings are JavaScript's. null, the one String that
+   * is not a string, adds as a number in both, and Numbers' strings differ.
+   */
+  concatenates(i: u32): bool {
+    const a = this.builtinOf(this.src(i, 0));
+    const b = this.builtinOf(this.src(i, 1));
+    return (a === BUILTIN_String || b === BUILTIN_String) && this.primitive(a) && this.primitive(b);
+  }
+
+  private primitive(bt: u8): bool {
+    return (
+      bt === BUILTIN_String || bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Boolean
+    );
+  }
+
   isNumber(r: i32): bool {
     const bt = this.builtinOf(r);
     return bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Number;
@@ -2519,7 +2714,21 @@ export class MethodEmitter {
       type === from ||
       bt === BUILTIN_Any ||
       (bt === BUILTIN_Number &&
-        (fromBt === BUILTIN_Int || fromBt === BUILTIN_Uint || fromBt === BUILTIN_Number))
+        (fromBt === BUILTIN_Int || fromBt === BUILTIN_Uint || fromBt === BUILTIN_Number)) ||
+      this.upcast(type, from)
+    );
+  }
+
+  /**
+   * Whether a value of class type `from` is one of class `type` already, as
+   * CodegenLIR::coerceToType writes no code for: instances of a subtype
+   * are, and null stays null.
+   */
+  upcast(type: i32, from: i32): bool {
+    return (
+      this.isClassRef(type) &&
+      this.isClassRef(from) &&
+      this.domain.traits.subtypeOf(<u32>from, <u32>type)
     );
   }
 
@@ -2632,6 +2841,11 @@ export class MethodEmitter {
         out.text(")");
         return;
       default:
+        if (this.upcast(type, from)) {
+          this.operand(prefix, r);
+          return;
+        }
+
         // A class's instances, by T: no builtin for the runtime to look for.
         out.text(this.isClassRef(type) ? "rt.coerceTo(" : "rt.coerce(");
         this.operand(prefix, r);
