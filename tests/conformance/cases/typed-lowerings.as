@@ -43,3 +43,11 @@ trace(u + 1, u >> 1, u >>> 1, u & -1);
 var picked:String = i > 0 ? "pos" : "neg";
 trace(picked, i == 5, i === 5, n != 2.5, null == undefined);
 
+// Additions: strings with ints, uints, Booleans, null Strings and Numbers.
+var s:String = "s";
+var ns:String = null;
+var b:Boolean = true;
+trace(s + i, i + s, s + u, s + b, b + s, s + ns, ns + s, ns + i, ns + b, ns + ns);
+trace("Loading " + int(37.9) + "%", s + n, s + 1e21, s + 0.1, s + -0, s + (-i));
+trace(ns + n, b + i, b + b, s + s + i + u + b);
+

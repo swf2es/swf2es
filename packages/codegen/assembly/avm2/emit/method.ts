@@ -1562,7 +1562,10 @@ export class MethodEmitter {
         break;
       case ops.OP_add:
         this.assign(i);
-        if (this.isNumber(this.src(i, 0)) && this.isNumber(this.src(i, 1))) {
+        if (
+          (this.isNumber(this.src(i, 0)) && this.isNumber(this.src(i, 1))) ||
+          this.concatenates(i)
+        ) {
           this.binary(i, " + ");
         } else {
           this.call2("rt.add(", i);
@@ -2501,6 +2504,23 @@ export class MethodEmitter {
   /** Whether register r holds a value of one of the primitive types now. */
   isPrimitive(r: i32): bool {
     return this.isNumeric(r) || this.builtinOf(r) === BUILTIN_String;
+  }
+
+  /**
+   * Whether add i is JavaScript's own `+`: a String and a String, int, uint
+   * or Boolean, whose strings are JavaScript's. null, the one String that
+   * is not a string, adds as a number in both, and Numbers' strings differ.
+   */
+  concatenates(i: u32): bool {
+    const a = this.builtinOf(this.src(i, 0));
+    const b = this.builtinOf(this.src(i, 1));
+    return (a === BUILTIN_String || b === BUILTIN_String) && this.primitive(a) && this.primitive(b);
+  }
+
+  private primitive(bt: u8): bool {
+    return (
+      bt === BUILTIN_String || bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Boolean
+    );
   }
 
   isNumber(r: i32): bool {
