@@ -46,6 +46,12 @@ function rectangleCopy(s: Scripting, r: AsObject | null): Value {
   );
 }
 
+/** The nearest whole number, a half to the even one. */
+function halfEven(v: number): number {
+  const r = Math.round(v);
+  return r - v === 0.5 && r % 2 !== 0 ? r - 1 : r;
+}
+
 function point(s: Scripting, x: number, y: number): Value {
   return s.rt.construct(s.rt.classNamed("flash.geom::Point"), x, y);
 }
@@ -55,7 +61,7 @@ const twips = (v: number) => Math.round(v * 20) / 20;
 
 /** The object's width and height in its parent's space, or what that would be for one with no parent: its bounds through its own matrix. */
 function size(d: DisplayObject): [number, number] {
-  const r = transformRect(bounds(d, true) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 }, d.matrix);
+  const r = transformRect(bounds(d, true) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 }, d.placed);
   return [twips(r.xMax - r.xMin), twips(r.yMax - r.yMin)];
 }
 
@@ -141,11 +147,9 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     declare $cacheAsBitmap: boolean | undefined;
     declare $cacheAsBitmapMatrix: Value;
     declare $filters: Value[] | undefined;
-    declare $mask: Value;
     declare $metaData: Value;
     declare $opaqueBackground: Value;
     declare $scale9Grid: AsObject | null | undefined;
-    declare $scrollRect: AsObject | null | undefined;
     declare $accessibilityProperties: Value;
 
     get name(): string {
@@ -413,15 +417,16 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     get mask(): Value {
-      return this.$mask ?? null;
+      return this.$display.mask?.object ?? null;
     }
 
     set mask(v: Value) {
-      if ((this.$mask ?? null) !== (v ?? null)) {
+      const mask = (v as AsObject | null)?.$display ?? null;
+      if (this.$display.mask !== mask) {
         this.$display.scripted = true;
       }
 
-      this.$mask = v;
+      this.$display.setMask(mask);
     }
 
     get metaData(): Value {
@@ -451,12 +456,23 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     get scrollRect(): Value {
-      return rectangleCopy(s, this.$scrollRect ?? null);
+      const r = this.$display.scrollRect;
+      return r ? rectangle(s, r) : null;
     }
 
+    /** Each edge to a whole pixel, a half to even, as Flash keeps them; drawn from the next render. */
     set scrollRect(v: Value) {
       this.$display.scripted = true;
-      this.$scrollRect = v ? (rectangleCopy(s, v as AsObject) as AsObject) : null;
+      let r: Rect | null = null;
+      if (v) {
+        const [x, y, w, h] = ["x", "y", "width", "height"].map((k) =>
+          Number(s.rt.getProperty(v as AsObject, name(k))),
+        );
+        r = { xMin: halfEven(x), yMin: halfEven(y), xMax: halfEven(x + w), yMax: halfEven(y + h) };
+      }
+
+      this.$display.scrollRect = r;
+      s.scrolled.add(this.$display);
     }
 
     get accessibilityProperties(): Value {

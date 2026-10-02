@@ -18,6 +18,7 @@ import {
   MovieClip,
   ShapeObject,
   TextObject,
+  TRANSFORM,
 } from "./display.js";
 import { decodeImages, decodeInBrowser, type ImageDecode } from "./images.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
@@ -193,6 +194,8 @@ export class Scripting {
   library: Library | null = null;
   /** Whether a script asked the stage to render (Stage.invalidate). */
   invalidated = false;
+  /** The objects whose scrollRect was set since the last frame was drawn, which it takes effect at. */
+  readonly scrolled = new Set<DisplayObject>();
   /** The clip whose frame script is running, while one is: a goto it asks for waits for it to return. */
   inFrameScript: MovieClip | null = null;
   /** The display objects listening for each frame event, in the order they first listened; a broadcast reaches these. */
@@ -1308,6 +1311,14 @@ export class Scripting {
       this.invalidated = false;
       this.broadcast("render");
     }
+
+    // The frame is drawn: the scroll rectangles set since take effect, as Flash's do.
+    for (const d of this.scrolled) {
+      d.scroll = d.scrollRect;
+      d.invalidate(TRANSFORM);
+    }
+
+    this.scrolled.clear();
   }
 }
 

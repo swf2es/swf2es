@@ -1244,6 +1244,39 @@ name. Embedded fonts' glyphs, runs of several formats on screen, text
 metrics (`textWidth`, `autoSize`'s resizing, lines that wrap), input and
 selection are still to come.
 
+### Masks and scroll rectangles
+
+A mask clips what it masks to where its fills are, as adl draws it: the
+fills alone, whole, whatever their alpha, the object's alpha and colour,
+or `visible`; lines draw nothing, and a Bitmap clips to its rectangle,
+transparent pixels and all. Masks nest, each clipping inside the other.
+A timeline's mask is a child placed with a clip depth: it is not drawn,
+and it clips the children after it in render order until one placed at a
+depth beyond its clip depth. A child a script puts among them, or after
+them where nothing deeper ends the range, is clipped with them. Removing
+the mask ends the range. `mask` set on an object makes the
+other object its mask: not drawn, wherever it is. On the display list it
+clips through its own place there. Off the list it clips through its own
+matrix, taken in the stage's space. One mask clips one object, so
+setting it on a second takes it off the first, whose `mask` is then
+null. Neither kind changes bounds or `width`, and a shape hit test
+follows `mask` but not a timeline's masks; a mask itself is never hit,
+and a Bitmap, masking or not, is hit over its whole rectangle. The renderer gives each
+mask to Pixi as a stencil: a timeline's range goes in a container whose
+mask is the clip-depth child, and a mask's lines are hidden while it
+masks. When both objects are cached as bitmaps Flash clips by the
+mask's alpha; that, and a text field as a mask, are still to come.
+
+`scrollRect` is kept as set, its edges rounded to whole pixels half to
+even, so its width and height are the rounded right and bottom less the
+rounded left and top. It takes effect at the next render, as Flash's
+does. From then on the object is drawn shifted by the rectangle's left
+and top and clipped to it, and its bounds in its own space are the
+rectangle's size at (0, 0). Its points go through the shift, in its own
+`localToGlobal` and below, but its `concatenatedMatrix` leaves its own
+shift out, as Flash's does, while its children's take it in. A hit
+test misses outside it.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the

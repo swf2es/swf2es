@@ -3,11 +3,14 @@
 // display.js and player.js leave pixi.js out.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type {
-  DisplayObject,
-  MovieClip,
+import { bounds, toStage } from "../../../packages/player/dist/bounds.js";
+import {
+  Clips,
+  Container,
+  type DisplayObject,
+  type MovieClip,
   ShapeObject,
-  TextObject,
+  type TextObject,
 } from "../../../packages/player/dist/display.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import * as w from "../../swf-writer.ts";
@@ -42,6 +45,13 @@ function movie(...frames: Uint8Array[][]): Player {
   return new Player(
     w.swf({ width: 200, height: 100, frameRate: 24, frameCount: frames.length, tags }),
   );
+}
+
+/** A Shape a script made: one that draws nothing. */
+class Shape extends ShapeObject {
+  constructor() {
+    super(null);
+  }
 }
 
 const depths = (clip: MovieClip) => clip.children.map((c) => c.depth);
@@ -397,4 +407,62 @@ test("jumping forward to any frame of a random timeline ends as playing to it", 
       assert.deepEqual(state(rewound.root), state(played.root), `timeline ${t}, back to ${target}`);
     }
   }
+});
+
+test("a timeline mask clips the children after it until one placed deeper, and those a script puts among them", () => {
+  const player = movie([
+    w.place({ depth: 1, character: 1, clipDepth: 3 }),
+    w.place({ depth: 2, character: 2 }),
+    w.place({ depth: 3, character: 2 }),
+    w.place({ depth: 4, character: 2 }),
+  ]);
+  const root = player.root;
+  const [mask, a, b, c] = root.children;
+  assert.equal(mask.clipDepth, 3);
+
+  // One a script put among them has no depth, and ends no range.
+  const added = new Shape();
+  root.addChildAt(added, 2);
+  const index = (o: DisplayObject) => [mask, a, added, b, c].indexOf(o);
+  const walk = new Clips();
+  const clips: [number, number[]][] = [];
+  for (const child of root.children) {
+    const n = walk.enter(child);
+    clips.push([index(child), walk.masks.slice(0, n).map(index)]);
+  }
+
+  assert.deepEqual(clips, [
+    [0, []],
+    [1, [0]],
+    [2, [0]],
+    [3, [0]],
+    [4, []],
+  ]);
+});
+
+test("a mask clips one object: set on a second, it leaves the first", () => {
+  const [first, second, mask] = [new Shape(), new Shape(), new Shape()];
+  first.setMask(mask);
+  second.setMask(mask);
+  assert.equal(first.mask, null);
+  assert.equal(second.mask, mask);
+  assert.equal(mask.maskOf, second);
+
+  second.setMask(null);
+  assert.equal(mask.maskOf, null);
+});
+
+test("a scrolled object's bounds are its scroll's size at its origin, and its points shift by the scroll", () => {
+  const parent = new Container();
+  const child = new Shape();
+  parent.addChildAt(child, 0);
+  child.setMatrix({ a: 2, b: 0, c: 0, d: 2, tx: 100, ty: 50 });
+  child.scrollRect = { xMin: 10, yMin: 20, xMax: 60, yMax: 60 };
+  // Set but not yet drawn: nothing changes.
+  assert.deepEqual(toStage(child, null), { a: 2, b: 0, c: 0, d: 2, tx: 100, ty: 50 });
+
+  child.scroll = child.scrollRect;
+  assert.deepEqual(bounds(child, true), { xMin: 0, yMin: 0, xMax: 50, yMax: 40 });
+  assert.deepEqual(toStage(child, null), { a: 2, b: 0, c: 0, d: 2, tx: 80, ty: 10 });
+  assert.deepEqual(bounds(parent, true), { xMin: 80, yMin: 10, xMax: 180, yMax: 90 });
 });

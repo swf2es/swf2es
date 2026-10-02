@@ -20,10 +20,12 @@ import {
   Texture,
 } from "pixi.js";
 import { BitmapStore, type GpuCopy } from "./bitmap.js";
+import { toStage } from "./bounds.js";
 import {
   BitmapObject,
   CHILDREN,
   CLEAN,
+  Clips,
   CONTENT,
   Container,
   type DisplayObject,
@@ -32,6 +34,7 @@ import {
   TextObject,
   TRANSFORM,
 } from "./display.js";
+import { shifted } from "./geometry.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients.js";
 import {
   CUBIC,
@@ -388,6 +391,16 @@ interface Node {
   strokes: (Graphics | null)[];
   /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
   bitmap: Sprite | null;
+  /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
+  lines: Graphics[];
+  /** Whether the object is a mask or in one, as of the last sync. */
+  masking: boolean;
+  /** The containers of the children a timeline's mask clips, each masked by it. */
+  groups: PixiContainer[];
+  /** Its scroll's clip: a rectangle in its space, and the container it masks, of the art and children. */
+  scroll: { clip: Graphics; content: PixiContainer } | null;
+  /** Whether it has a mask or a scroll's clip, to be taken off when the object's go. */
+  clipped: boolean;
 }
 
 export class PixiView {
@@ -426,6 +439,10 @@ export class PixiView {
   };
   /** What a fresh view built itself, which it destroys; what it borrowed from `source` stays. */
   private readonly built: GraphicsContext[] = [];
+  /** The objects `mask` was found set on, for the masks to be placed that are not under the root. */
+  private readonly maskees = new Set<WeakRef<DisplayObject>>();
+  /** Where those masks are placed, beside the root. */
+  private readonly offList = new PixiContainer();
 
   /**
    * `fresh` makes a view that draws every object as new and leaves the
@@ -470,6 +487,11 @@ export class PixiView {
         ownFills: false,
         strokes: [],
         bitmap: null,
+        lines: [],
+        masking: false,
+        groups: [],
+        scroll: null,
+        clipped: false,
       };
       node.container.addChild(art);
       this.nodes.set(o, node);
@@ -512,6 +534,7 @@ export class PixiView {
   /** What `o` itself draws, into its node emptied of what it drew before. */
   private draw(o: DisplayObject, node: Node): void {
     node.strokes = [];
+    node.lines = [];
     node.bitmap = null;
     const current = this.current(o);
     if (o instanceof BitmapObject) {
@@ -562,6 +585,7 @@ export class PixiView {
         }
 
         node.art.addChild(strokes);
+        node.lines.push(strokes);
       }
 
       node.strokes.push(borrowed ? null : strokes);
@@ -621,18 +645,34 @@ export class PixiView {
     o: DisplayObject,
     parent: Linear,
     moved: boolean,
-    own: DisplayObject["matrix"] = o.matrix,
+    own: DisplayObject["matrix"] = o.placed,
+    inMask = false,
   ): PixiContainer {
     const node = this.node(o);
     const { container } = node;
-    const dirty = this.fresh ? TRANSFORM | CHILDREN | CONTENT : o.dirty;
+    let dirty = this.fresh ? TRANSFORM | CHILDREN | CONTENT : o.dirty;
+    // A mask is drawn, whatever its visibility, alpha and colour, by its fills alone.
+    const masking = inMask || o.maskOf !== null || o.clipDepth > 0;
+    const remask = masking !== node.masking;
+    node.masking = masking;
+    if (remask) {
+      dirty |= TRANSFORM;
+    }
+
     if (dirty & TRANSFORM) {
       const m = own;
       container.setFromMatrix(new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty));
-      container.visible = o.visible;
+      container.visible = o.visible || masking;
+      // Most objects have neither: they pay one test.
+      if (o.mask || o.scroll || node.clipped) {
+        if (this.clip(o, node) && o instanceof Container) {
+          dirty |= CHILDREN;
+        }
+      }
+
       const ct = o.colorTransform;
       // Multipliers as tint and alpha; offsets need a filter, not yet.
-      container.alpha = ct ? Math.max(0, Math.min(1, ct.aMul)) : 1;
+      container.alpha = ct && !masking ? Math.max(0, Math.min(1, ct.aMul)) : 1;
       container.tint = ct
         ? (Math.round(Math.max(0, Math.min(1, ct.rMul)) * 255) << 16) |
           (Math.round(Math.max(0, Math.min(1, ct.gMul)) * 255) << 8) |
@@ -658,6 +698,12 @@ export class PixiView {
       this.restroke(node);
     }
 
+    if (dirty & CONTENT || remask) {
+      for (const lines of node.lines) {
+        lines.visible = !masking;
+      }
+    }
+
     if (dirty & PIXELS && !(dirty & CONTENT)) {
       // Pixels set since: the textures brought up to date, uploaded where the CPU changed them.
       const bitmaps = gpuBitmaps(this.renderer);
@@ -676,19 +722,16 @@ export class PixiView {
 
     if (o instanceof Container) {
       if (dirty & CHILDREN) {
-        container.removeChildren();
-        container.addChild(node.art);
-        for (const child of o.children) {
-          container.addChild(this.sync(child, node.world, moved));
-        }
-      } else if (moved || o.descendantsDirty) {
+        this.arrange(o, node, moved, masking);
+      } else if (moved || remask || o.descendantsDirty) {
         for (const child of o.children) {
           if (
             moved ||
+            remask ||
             child.dirty !== CLEAN ||
             (child instanceof Container && child.descendantsDirty)
           ) {
-            this.sync(child, node.world, moved);
+            this.sync(child, node.world, moved, child.placed, masking);
           }
         }
       }
@@ -705,13 +748,129 @@ export class PixiView {
     return container;
   }
 
+  /**
+   * The children's containers in render order, under the object's art,
+   * those a timeline's mask clips in a container the mask masks, nested as
+   * the masks are; the masks themselves among them, where their place in
+   * the tree puts them, though not drawn.
+   */
+  private arrange(o: Container, node: Node, moved: boolean, masking: boolean): void {
+    const content = node.scroll?.content ?? node.container;
+    for (const group of node.groups) {
+      group.mask = null;
+      group.destroy();
+    }
+
+    node.groups = [];
+    content.removeChildren();
+    content.addChild(node.art);
+    const clips = new Clips();
+    const open: PixiContainer[] = [];
+    for (const child of o.children) {
+      open.length = clips.enter(child);
+      const into = open.length > 0 ? open[open.length - 1] : content;
+      const container = this.sync(child, node.world, moved, child.placed, masking);
+      into.addChild(container);
+      if (child.clipDepth > 0) {
+        const group = new PixiContainer();
+        group.mask = container;
+        into.addChild(group);
+        open.push(group);
+        node.groups.push(group);
+      }
+    }
+  }
+
+  /**
+   * The object's mask, and its scroll: true where the scroll's clip came
+   * or went, which moves the children. A mask's own mask, or one that is
+   * the object or above it, Pixi could not draw: it is left out.
+   */
+  private clip(o: DisplayObject, node: Node): boolean {
+    const mask = o.mask && !o.maskOf && !o.mask.encloses(o) ? o.mask : null;
+    node.container.mask = mask ? this.node(mask).container : null;
+    if (mask) {
+      this.maskees.add(o.ref);
+    }
+
+    const moved = this.scrollClip(o, node);
+    node.clipped = mask !== null || node.scroll !== null;
+    return moved;
+  }
+
+  /**
+   * The object's scroll, as a clip of its art and children to the
+   * rectangle, which its matrix's shift has moved to its place; true where
+   * the clip came or went, which moves the children.
+   */
+  private scrollClip(o: DisplayObject, node: Node): boolean {
+    const r = o.scroll;
+    const scroll = node.scroll;
+    if (!r) {
+      if (!scroll) {
+        return false;
+      }
+
+      scroll.content.mask = null;
+      node.container.addChild(...scroll.content.removeChildren());
+      scroll.clip.destroy();
+      scroll.content.destroy();
+      node.scroll = null;
+      return true;
+    }
+
+    const clip = scroll?.clip ?? new Graphics();
+    clip
+      .clear()
+      .rect(r.xMin, r.yMin, r.xMax - r.xMin, r.yMax - r.yMin)
+      .fill(0xffffff);
+    if (scroll) {
+      return false;
+    }
+
+    const content = new PixiContainer();
+    const children = node.container.removeChildren();
+    if (children.length > 0) {
+      content.addChild(...children);
+    }
+
+    content.mask = clip;
+    node.container.addChild(clip, content);
+    node.scroll = { clip, content };
+    return true;
+  }
+
+  /**
+   * The masks `mask` set that are not under `root`, off the display list
+   * or elsewhere on it, each in `holder` at its place in the stage's space
+   * (the space a draw draws into, for a draw's), as Flash places such a
+   * mask; the objects they mask synced already.
+   */
+  private placeMasks(root: DisplayObject, holder: PixiContainer): void {
+    holder.removeChildren();
+    for (const ref of this.maskees) {
+      const o = ref.deref();
+      const mask = o?.mask;
+      if (!o || !mask) {
+        this.maskees.delete(ref);
+        continue;
+      }
+
+      if (root.encloses(o) && !root.encloses(mask)) {
+        holder.addChild(this.sync(mask, UNIT, false, toStage(mask, null), true));
+      }
+    }
+  }
+
   /** Bring the stage up to date with `root`'s display list, without drawing. */
   prepare(root: DisplayObject): void {
     const node = this.sync(root, UNIT, false);
     if (node.parent !== this.stage) {
       this.stage.removeChildren();
-      this.stage.addChild(node);
+      this.stage.addChild(node, this.offList);
     }
+
+    this.placeMasks(root, this.offList);
   }
 
   /**
@@ -732,9 +891,11 @@ export class PixiView {
     // Built at the draw's own scale, lines included, as the stage's are,
     // then rendered n times larger: the curves are no finer than on the
     // stage, and widths and hairlines scale with the samples.
-    const node = view.sync(o, [1, 0, 0, 1], true, m);
+    const node = view.sync(o, [1, 0, 0, 1], true, o.scroll ? shifted(m, o.scroll) : m);
     const scaled = new PixiContainer();
-    scaled.addChild(node);
+    const masks = new PixiContainer();
+    scaled.addChild(node, masks);
+    view.placeMasks(o, masks);
     scaled.scale.set(n);
     let target = RenderTexture.create({ width: width * n, height: height * n });
     this.renderer.render({ container: scaled, target, clear: true });

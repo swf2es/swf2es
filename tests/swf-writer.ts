@@ -292,6 +292,8 @@ export interface PlaceSpec {
   move?: boolean;
   matrix?: { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
   name?: string;
+  /** The last depth this object masks, as a mask layer does. */
+  clipDepth?: number;
   /** PlaceObject3's fields; any of them makes the tag one. */
   className?: string;
   hasImage?: boolean;
@@ -319,6 +321,10 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.name !== undefined) {
     flags |= 0x20;
+  }
+
+  if (spec.clipDepth !== undefined) {
+    flags |= 0x40;
   }
 
   // With HasImage and no character Flash reads a class name anyway, so the
@@ -361,6 +367,10 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.name !== undefined) {
     w.string(spec.name);
+  }
+
+  if (spec.clipDepth !== undefined) {
+    w.u16(spec.clipDepth);
   }
 
   if (spec.visible !== undefined) {
