@@ -687,6 +687,23 @@ export function drawBitmap(
     return;
   }
 
+  // Unscaled at a whole pixel, as every snapshot of a display object is
+  // composited: each covered pixel is covered whole and is the source's
+  // own, so it is copied straight, as the general path below would.
+  if (
+    m.a === 1 &&
+    m.b === 0 &&
+    m.c === 0 &&
+    m.d === 1 &&
+    Number.isInteger(m.tx) &&
+    Number.isInteger(m.ty) &&
+    source !== store
+  ) {
+    composite(store, source, area, m.tx, m.ty, ct, mode);
+    store.changed();
+    return;
+  }
+
   // The inverse: from a destination point to the source's.
   const ia = m.d / det;
   const ib = -m.b / det;
@@ -755,6 +772,46 @@ export function drawBitmap(
   }
 
   store.changed();
+}
+
+/** `source` at (tx, ty) composited into `area` of the store, a pixel each. */
+function composite(
+  store: BitmapStore,
+  source: BitmapStore,
+  area: PixelRect,
+  tx: number,
+  ty: number,
+  ct: ColorTransformValues | null,
+  mode: string,
+): void {
+  const into = store.pixels;
+  const from = source.pixels;
+  const opaque = store.transparent ? 0 : 0xff000000;
+  const plain = !ct && mode === "normal";
+  for (let y = area.y; y < area.y + area.height; y++) {
+    let i = y * store.width + area.x;
+    let j = (y - ty) * source.width + (area.x - tx);
+    for (let x = 0; x < area.width; x++, i++, j++) {
+      const p = from[j];
+      if (plain) {
+        // Source over, inline: what blend("normal") computes.
+        const sa = p >>> 24;
+        if (sa === 0) {
+          continue;
+        }
+
+        if (sa === 255) {
+          into[i] = p;
+          continue;
+        }
+
+        into[i] = (sourceOver(p, into[i]) | opaque) >>> 0;
+        continue;
+      }
+
+      put(store, i, mode, ct ? transformed(p, ct) : p);
+    }
+  }
 }
 
 /** A drawn pixel composited into the store by the blend mode, opaque where the store is. */

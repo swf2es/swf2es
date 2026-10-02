@@ -22,6 +22,8 @@ export interface RunOptions {
   timeout?: number;
   onResult?: (index: number, result: PlayerResult) => void;
   mounts?: [string, string][];
+  /** Let Chrome use the machine's GPU, as the bench's --gpu does; software GL otherwise. */
+  gpu?: boolean;
 }
 
 const QUALITIES = ["low", "medium", "high", "best"];
@@ -225,7 +227,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
 
       return results;
     },
-    false,
+    options.gpu ?? false,
     options,
   );
 }

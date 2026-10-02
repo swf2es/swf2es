@@ -303,6 +303,10 @@ interface Node {
   art: PixiContainer;
   /** The layers drawn, a shape's or a drawing's, as of the last redraw. */
   layers: ShapeLayer[];
+  /** Their fills, one context a layer. */
+  fills: GraphicsContext[];
+  /** Whether the fills are this node's own, a drawing's, rather than its character's, which instances share. */
+  ownFills: boolean;
   /** The lines, a Graphics for each layer that has any; null where one has none. */
   strokes: (Graphics | null)[];
   /** A Bitmap's sprite and the version of its store it was uploaded from; null for any other object. */
@@ -313,6 +317,9 @@ export class PixiView {
   readonly stage = new PixiContainer();
   private readonly nodes = new WeakMap<DisplayObject, Node>();
   private readonly fills = new Map<ShapeCharacter, GraphicsContext[]>();
+  /** What a fresh view built itself, which it destroys; what it borrowed from `source` stays. */
+  private readonly built: GraphicsContext[] = [];
+  private readonly builtSprites: Sprite[] = [];
 
   /**
    * `fresh` makes a view that draws every object as new and leaves the
@@ -322,7 +329,31 @@ export class PixiView {
   constructor(
     readonly renderer: Renderer,
     private readonly fresh = false,
+    /** The stage's view, whose geometry and textures a fresh view borrows where they are current. */
+    private readonly source: PixiView | null = null,
   ) {}
+
+  /**
+   * The source view's node for `o`, if what it drew is still `o`'s: built
+   * since the content last changed. Its lines are current for its own
+   * `world` alone.
+   */
+  private current(o: DisplayObject): Node | null {
+    const node = this.source?.nodes.get(o);
+    return node && !(o.dirty & CONTENT) ? node : null;
+  }
+
+  /** Destroy what this fresh view built, and its containers; what it borrowed stays its owner's. */
+  dispose(root: PixiContainer): void {
+    for (const sprite of this.builtSprites) {
+      sprite.destroy({ texture: true, textureSource: true });
+    }
+
+    root.destroy({ children: true });
+    for (const context of this.built) {
+      context.destroy();
+    }
+  }
 
   private node(o: DisplayObject): Node {
     let node = this.nodes.get(o);
@@ -333,6 +364,8 @@ export class PixiView {
         world: [0, 0, 0, 0],
         art,
         layers: [],
+        fills: [],
+        ownFills: false,
         strokes: [],
         bitmap: null,
       };
@@ -351,37 +384,77 @@ export class PixiView {
   private redraw(o: DisplayObject, node: Node): void {
     // A Bitmap's texture and its source are its own: they go with the sprite.
     node.bitmap?.sprite.destroy({ texture: true, textureSource: true });
+    // So are a drawing's fills and every node's lines; a Graphics frees only a context it made.
+    const old = [
+      ...(node.ownFills && !this.fresh ? node.fills : []),
+      ...(this.fresh ? [] : node.strokes.map((g) => g?.context)),
+    ];
     for (const child of node.art.removeChildren()) {
       if (!child.destroyed) {
         child.destroy();
       }
     }
 
+    for (const context of old) {
+      context?.destroy();
+    }
+
     node.strokes = [];
     node.bitmap = null;
+    const current = this.current(o);
     if (o instanceof BitmapObject) {
+      const shown = current?.bitmap;
+      if (this.fresh && shown && o.store && shown.version === o.store.version) {
+        // The stage's texture, as uploaded: a sprite of its own over it.
+        node.art.addChild(new Sprite(shown.sprite.texture));
+        return;
+      }
+
       this.drawBitmap(o, node);
       return;
     }
 
     const shape = o instanceof ShapeObject ? o.shape : null;
     node.layers = o.drawing?.layers ?? shape?.layers ?? [];
+    const build = (layer: ShapeLayer) => {
+      const context = fillContext(layer);
+      if (this.fresh) {
+        this.built.push(context);
+      }
+
+      return context;
+    };
     let fills: GraphicsContext[];
-    if (shape && !o.drawing) {
-      fills = this.fills.get(shape) ?? node.layers.map(fillContext);
+    node.ownFills = false;
+    if (current && current.layers === node.layers && current.fills.length === node.layers.length) {
+      fills = current.fills;
+    } else if (shape && !o.drawing) {
+      fills = this.fills.get(shape) ?? node.layers.map(build);
       this.fills.set(shape, fills);
     } else {
-      fills = node.layers.map(fillContext);
+      fills = node.layers.map(build);
+      node.ownFills = true;
     }
 
+    node.fills = fills;
+    const lines = current && sameLinear(current.world, node.world) ? current.strokes : null;
     node.layers.forEach((layer, i) => {
       node.art.addChild(new Graphics(fills[i]));
-      const strokes = layer.strokes.length ? new Graphics() : null;
+      const borrowed = lines?.[i];
+      const strokes = layer.strokes.length
+        ? borrowed
+          ? new Graphics(borrowed.context)
+          : new Graphics()
+        : null;
       if (strokes) {
+        if (borrowed) {
+          strokes.setFromMatrix(borrowed.localTransform);
+        }
+
         node.art.addChild(strokes);
       }
 
-      node.strokes.push(strokes);
+      node.strokes.push(borrowed ? null : strokes);
     });
     this.restroke(node);
   }
@@ -406,6 +479,10 @@ export class PixiView {
       scaleMode: o.smoothing ? "linear" : "nearest",
     });
     const sprite = new Sprite(new Texture({ source }));
+    if (this.fresh) {
+      this.builtSprites.push(sprite);
+    }
+
     node.art.addChild(sprite);
     node.bitmap = { sprite, source, version: store.version };
   }
@@ -426,6 +503,10 @@ export class PixiView {
       // The new context goes in before the old one goes: the Graphics listens on the one it holds.
       const previous = strokes.context;
       strokes.context = det === 0 ? new GraphicsContext() : strokeContext(layer, m);
+      if (this.fresh) {
+        this.built.push(strokes.context);
+      }
+
       previous.destroy();
       if (det !== 0) {
         strokes.setFromMatrix(new Matrix(m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, 0, 0));
@@ -437,13 +518,19 @@ export class PixiView {
    * Bring `o`'s mirror up to date where it changed, and return it. `parent`
    * is the linear part of its parent's transform on the stage, and `moved`
    * whether that changed, which changes the lines of every shape below.
+   * `own` stands in for `o`'s own matrix, as a draw's matrix does.
    */
-  private sync(o: DisplayObject, parent: Linear, moved: boolean): PixiContainer {
+  private sync(
+    o: DisplayObject,
+    parent: Linear,
+    moved: boolean,
+    own: DisplayObject["matrix"] = o.matrix,
+  ): PixiContainer {
     const node = this.node(o);
     const { container } = node;
     const dirty = this.fresh ? TRANSFORM | CHILDREN | CONTENT : o.dirty;
     if (dirty & TRANSFORM) {
-      const m = o.matrix;
+      const m = own;
       container.setFromMatrix(new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty));
       container.visible = o.visible;
       const ct = o.colorTransform;
@@ -457,7 +544,7 @@ export class PixiView {
     }
 
     if (moved || dirty & TRANSFORM) {
-      const m = o.matrix;
+      const m = own;
       const world: Linear = [
         parent[0] * m.a + parent[2] * m.b,
         parent[1] * m.a + parent[3] * m.b,
@@ -535,40 +622,38 @@ export class PixiView {
   ): Uint32Array {
     // Rendered at samples x samples a pixel and averaged, as Flash covers edges: 4 at its high quality.
     const n = samples;
-    const view = new PixiView(this.renderer, true);
-    const node = view.sync(o, [m.a * n, m.b * n, m.c * n, m.d * n], true);
-    node.setFromMatrix(new Matrix(m.a * n, m.b * n, m.c * n, m.d * n, m.tx * n, m.ty * n));
-    const target = RenderTexture.create({ width: width * n, height: height * n });
-    this.renderer.render({ container: node, target, clear: true });
+    const view = new PixiView(this.renderer, true, this);
+    // Built at the draw's own scale, lines included, as the stage's are,
+    // then rendered n times larger: the curves are no finer than on the
+    // stage, and widths and hairlines scale with the samples.
+    const node = view.sync(o, [1, 0, 0, 1], true, m);
+    const scaled = new PixiContainer();
+    scaled.addChild(node);
+    scaled.scale.set(n);
+    let target = RenderTexture.create({ width: width * n, height: height * n });
+    this.renderer.render({ container: scaled, target, clear: true });
+    view.dispose(scaled);
+    // Averaged on the GPU, halving until a sample a pixel: a linear sample
+    // at the corner four texels share is their mean, so only the final
+    // pixels come back to the CPU.
+    for (let k = n; k > 1; k /= 2) {
+      const half = RenderTexture.create({ width: (width * k) / 2, height: (height * k) / 2 });
+      target.source.scaleMode = "linear";
+      const sprite = new Sprite(target);
+      sprite.scale.set(0.5);
+      this.renderer.render({ container: sprite, target: half, clear: true });
+      sprite.destroy();
+      target.destroy(true);
+      target = half;
+    }
+
     const { pixels } = this.renderer.extract.pixels(target);
-    node.destroy({ children: true, texture: true, textureSource: true });
     target.destroy(true);
     const out = new Uint32Array(width * height);
-    const row = width * n;
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let a = 0;
-        let r = 0;
-        let g = 0;
-        let b = 0;
-        for (let sy = 0; sy < n; sy++) {
-          for (let sx = 0; sx < n; sx++) {
-            const i = ((y * n + sy) * row + x * n + sx) * 4;
-            r += pixels[i];
-            g += pixels[i + 1];
-            b += pixels[i + 2];
-            a += pixels[i + 3];
-          }
-        }
-
-        const k = n * n;
-        out[y * width + x] =
-          ((Math.round(a / k) << 24) |
-            (Math.round(r / k) << 16) |
-            (Math.round(g / k) << 8) |
-            Math.round(b / k)) >>>
-          0;
-      }
+    for (let i = 0; i < out.length; i++) {
+      const j = i * 4;
+      out[i] =
+        ((pixels[j + 3] << 24) | (pixels[j] << 16) | (pixels[j + 1] << 8) | pixels[j + 2]) >>> 0;
     }
 
     return out;

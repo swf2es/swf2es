@@ -956,7 +956,20 @@ the matrix, a pixel wider, within the clip and the bitmap, so its cost is
 the object's size, not the bitmap's; at 4 × 4 samples a pixel averaged
 down, as Flash covers edges at its high quality (`drawWithQuality` takes
 1, 2 or 4 for low, medium and high), in a fresh view
-that leaves the objects' dirty flags to the stage's. Each rule is Flash's
+that leaves the objects' dirty flags to the stage's. The view borrows
+from the stage's what is still current: an object's fills while its
+content is unchanged, its lines while its transform on the stage is the
+draw's too, and a Bitmap's texture while its pixels are, so a draw of
+the stage builds no geometry; it builds lines at the draw's own scale and
+renders the whole n times larger, so curves are no finer than on the
+stage. The samples are averaged on the GPU, halved by linear filtering
+at the corner four texels share, and only the final pixels are read
+back; a snapshot is composited unscaled at a whole pixel, which copies
+each pixel straight. A 1920 × 1080 stage of 1,500 outlined shapes draws
+in about 110 ms on a desktop GPU against Flash's 44 (from 810 before),
+most of it the wait for the GPU before the read; keeping a drawn
+bitmap on the GPU until a script reads it, as Ruffle does, would save
+that. Each rule is Flash's
 as the `draw-bitmaps` and `draw-objects` cases trace and draw it under
 adl: a destination pixel takes the source pixel under its centre,
 clamped to the source's edges; the translation is snapped down to
