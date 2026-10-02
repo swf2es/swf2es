@@ -1186,79 +1186,85 @@ export class BodyDecoder {
       pops += b;
     }
 
-    if (opcode === ops.OP_newobject) {
-      pops = <u64>a * 2;
-    } else if (opcode === ops.OP_newarray) {
-      pops = a;
-    } else if (opcode === ops.OP_callstatic) {
-      if (a >= this.abc.methodCount || !this.callable(a)) {
-        return this.fail(C.kCorruptABCError);
-      }
-    } else if (opcode === ops.OP_dxns) {
-      if (!(this.methodFlags & C.METHOD_SetsDxns)) {
-        return this.fail(C.kIllegalSetDxns);
-      }
+    switch (opcode) {
+      case ops.OP_newobject:
+        pops = <u64>a * 2;
+        break;
+      case ops.OP_newarray:
+        pops = a;
+        break;
+      case ops.OP_callstatic:
+        if (a >= this.abc.methodCount || !this.callable(a)) {
+          return this.fail(C.kCorruptABCError);
+        }
+        break;
+      case ops.OP_dxns:
+        if (!(this.methodFlags & C.METHOD_SetsDxns)) {
+          return this.fail(C.kIllegalSetDxns);
+        }
 
-      if (this.emitPass) {
-        this.emit(opcode, -1, -1, 0, a, 0, 0, pc);
-      }
+        if (this.emitPass) {
+          this.emit(opcode, -1, -1, 0, a, 0, 0, pc);
+        }
 
-      return this.checkString(a);
-    } else if (opcode === ops.OP_debugfile) {
-      if (this.emitPass) {
-        this.emit(opcode, -1, -1, 0, a, 0, 0, pc);
-      }
+        return this.checkString(a);
+      case ops.OP_debugfile:
+        if (this.emitPass) {
+          this.emit(opcode, -1, -1, 0, a, 0, 0, pc);
+        }
 
-      return this.checkString(a);
-    } else if (opcode === ops.OP_kill) {
-      if (!this.checkLocal(a)) {
-        return false;
-      }
+        return this.checkString(a);
+      case ops.OP_kill:
+        if (!this.checkLocal(a)) {
+          return false;
+        }
 
-      if (this.typed) {
-        this.setValue(a, TYPE_Any, 0);
-      }
+        if (this.typed) {
+          this.setValue(a, TYPE_Any, 0);
+        }
 
-      if (this.emitPass) {
-        this.emit(opcode, <i32>a, -1, 0, a, 0, 0, pc);
-      }
+        if (this.emitPass) {
+          this.emit(opcode, <i32>a, -1, 0, a, 0, 0, pc);
+        }
 
-      return true;
-    } else if (
-      opcode === ops.OP_inclocal ||
-      opcode === ops.OP_declocal ||
-      opcode === ops.OP_inclocal_i ||
-      opcode === ops.OP_declocal_i
-    ) {
-      if (!this.checkLocal(a)) {
-        return false;
-      }
+        return true;
+      case ops.OP_inclocal:
+      case ops.OP_declocal:
+      case ops.OP_inclocal_i:
+      case ops.OP_declocal_i: {
+        if (!this.checkLocal(a)) {
+          return false;
+        }
 
-      if (this.typed) {
-        const integer = opcode === ops.OP_inclocal_i || opcode === ops.OP_declocal_i;
-        this.coerce(a, integer ? this.domain.intType : this.domain.numberType);
-      }
+        if (this.typed) {
+          const integer = opcode === ops.OP_inclocal_i || opcode === ops.OP_declocal_i;
+          this.coerce(a, integer ? this.domain.intType : this.domain.numberType);
+        }
 
-      if (this.emitPass) {
-        this.emit(opcode, <i32>a, <i32>a, 1, a, 0, 0, pc);
-      }
+        if (this.emitPass) {
+          this.emit(opcode, <i32>a, <i32>a, 1, a, 0, 0, pc);
+        }
 
-      return true;
-    } else if (opcode === ops.OP_popscope) {
-      if (this.scope === 0) {
-        return this.fail(C.kScopeStackUnderflowError);
+        return true;
       }
+      case ops.OP_popscope:
+        if (this.scope === 0) {
+          return this.fail(C.kScopeStackUnderflowError);
+        }
 
-      this.scope--;
-      if (this.emitPass) {
-        this.emit(opcode, -1, <i32>(this.localCount + this.scope), 1, 0, 0, 0, pc);
-      }
+        this.scope--;
+        if (this.emitPass) {
+          this.emit(opcode, -1, <i32>(this.localCount + this.scope), 1, 0, 0, 0, pc);
+        }
 
-      return true;
-    } else if (opcode === ops.OP_setglobalslot && this.typed) {
-      if (this.scope === 0 && this.outer.size === 0) {
-        return this.fail(C.kNoGlobalScopeError);
-      }
+        return true;
+      case ops.OP_setglobalslot:
+        if (this.typed && this.scope === 0 && this.outer.size === 0) {
+          return this.fail(C.kNoGlobalScopeError);
+        }
+        break;
+      default:
+        break;
     }
 
     if (<u64>this.stack < pops) {

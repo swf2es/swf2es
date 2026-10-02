@@ -147,52 +147,64 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
     const kind = <u8>r.u8();
     let a: u32 = 0;
     let b: u32 = 0;
-    if (kind === C.CONSTANT_Qname || kind === C.CONSTANT_QnameA) {
-      a = r.u30();
-      b = r.u30();
-      if (a >= nsCount || b >= stringCount) {
-        return fail(pool, C.kCpoolIndexRangeError);
-      }
-    } else if (kind === C.CONSTANT_RTQname || kind === C.CONSTANT_RTQnameA) {
-      b = r.u30();
-      if (b >= stringCount) {
-        return fail(pool, C.kCpoolIndexRangeError);
-      }
-    } else if (kind === C.CONSTANT_RTQnameL || kind === C.CONSTANT_RTQnameLA) {
-      // No operands: both come from the stack.
-    } else if (kind === C.CONSTANT_Multiname || kind === C.CONSTANT_MultinameA) {
-      b = r.u30();
-      if (b >= stringCount) {
-        return fail(pool, C.kCpoolIndexRangeError);
-      }
+    switch (kind) {
+      case C.CONSTANT_Qname:
+      case C.CONSTANT_QnameA:
+        a = r.u30();
+        b = r.u30();
+        if (a >= nsCount || b >= stringCount) {
+          return fail(pool, C.kCpoolIndexRangeError);
+        }
+        break;
+      case C.CONSTANT_RTQname:
+      case C.CONSTANT_RTQnameA:
+        b = r.u30();
+        if (b >= stringCount) {
+          return fail(pool, C.kCpoolIndexRangeError);
+        }
+        break;
+      case C.CONSTANT_RTQnameL:
+      case C.CONSTANT_RTQnameLA:
+        // No operands: both come from the stack.
+        break;
+      case C.CONSTANT_Multiname:
+      case C.CONSTANT_MultinameA:
+        b = r.u30();
+        if (b >= stringCount) {
+          return fail(pool, C.kCpoolIndexRangeError);
+        }
 
-      a = r.u30();
-      if (a === 0 || a >= nsSetCount) {
-        return fail(pool, C.kCpoolIndexRangeError);
-      }
-    } else if (kind === C.CONSTANT_MultinameL || kind === C.CONSTANT_MultinameLA) {
-      a = r.u30();
-      if (a === 0 || a >= nsSetCount) {
-        return fail(pool, C.kCpoolIndexRangeError);
-      }
-    } else if (kind === C.CONSTANT_TypeName) {
-      // Forward references are legal; the base kind is checked below.
-      a = r.u30();
-      if (a === 0 || a >= mnCount) {
-        return fail(pool, C.kCpoolIndexRangeError);
-      }
+        a = r.u30();
+        if (a === 0 || a >= nsSetCount) {
+          return fail(pool, C.kCpoolIndexRangeError);
+        }
+        break;
+      case C.CONSTANT_MultinameL:
+      case C.CONSTANT_MultinameLA:
+        a = r.u30();
+        if (a === 0 || a >= nsSetCount) {
+          return fail(pool, C.kCpoolIndexRangeError);
+        }
+        break;
+      case C.CONSTANT_TypeName:
+        // Forward references are legal; the base kind is checked below.
+        a = r.u30();
+        if (a === 0 || a >= mnCount) {
+          return fail(pool, C.kCpoolIndexRangeError);
+        }
 
-      if (r.u30() !== 1) {
-        return fail(pool, C.kCorruptABCError);
-      }
+        if (r.u30() !== 1) {
+          return fail(pool, C.kCorruptABCError);
+        }
 
-      // Parameter 0 is Vector.<*>.
-      b = r.u30();
-      if (b >= mnCount) {
-        return fail(pool, C.kCpoolIndexRangeError);
-      }
-    } else {
-      return fail(pool, r.failed ? C.kCorruptABCError : C.kCpoolEntryWrongTypeError);
+        // Parameter 0 is Vector.<*>.
+        b = r.u30();
+        if (b >= mnCount) {
+          return fail(pool, C.kCpoolIndexRangeError);
+        }
+        break;
+      default:
+        return fail(pool, r.failed ? C.kCorruptABCError : C.kCpoolEntryWrongTypeError);
     }
 
     pool.mnKind[i] = kind;

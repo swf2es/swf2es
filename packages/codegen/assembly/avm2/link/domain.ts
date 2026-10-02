@@ -1074,19 +1074,31 @@ export class Domain {
     const pool = this.abcs[index].pool;
     let number: f64 = 0;
     let count: u32 = 0xffffffff;
-    if (kind === C.CONSTANT_Int) {
-      count = pool.ints.length;
-      number = value < count ? pool.ints[value] : 0;
-    } else if (kind === C.CONSTANT_UInt) {
-      count = pool.uints.length;
-      number = value < count ? pool.uints[value] : 0;
-    } else if (kind === C.CONSTANT_Double) {
-      count = pool.doubles.length;
-      number = value < count ? pool.doubles[value] : 0;
-    } else if (kind === C.CONSTANT_Utf8) {
-      count = pool.stringCount;
-    } else if (kind !== C.CONSTANT_True && kind !== C.CONSTANT_False && kind !== C.CONSTANT_Null) {
-      count = pool.nsCount;
+    switch (kind) {
+      case C.CONSTANT_Int:
+        count = pool.ints.length;
+        number = value < count ? pool.ints[value] : 0;
+        break;
+      case C.CONSTANT_UInt:
+        count = pool.uints.length;
+        number = value < count ? pool.uints[value] : 0;
+        break;
+      case C.CONSTANT_Double:
+        count = pool.doubles.length;
+        number = value < count ? pool.doubles[value] : 0;
+        break;
+      case C.CONSTANT_Utf8:
+        count = pool.stringCount;
+        break;
+      case C.CONSTANT_True:
+      case C.CONSTANT_False:
+      case C.CONSTANT_Null:
+        // The value is the kind; its index is not read.
+        break;
+      default:
+        // A namespace's kinds.
+        count = pool.nsCount;
+        break;
     }
 
     if (value >= count) {
