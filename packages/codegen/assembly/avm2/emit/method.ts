@@ -131,6 +131,10 @@ export class MethodEmitter {
       this.copyOf[r] = -1;
     }
 
+    if (<u32>this.checked.length < ir.frameSize) {
+      this.checked = new StaticArray<u8>(ir.frameSize);
+    }
+
     const count = traits.paramCount[global];
     // Named, for stacks and profiles: a name its code never binds.
     const name = this.functionName.length ? this.functionName : "$method";
@@ -545,8 +549,16 @@ export class MethodEmitter {
     this.region = -1;
     const last = k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
     const stack = <i32>(ir.localCount + ir.maxScope);
-    // Every way in wrote its copies.
+    // Every way in wrote its copies. A block written in place has one way
+    // in, the code before it, and keeps what that checked.
     this.uncopy(stack);
+    if (!this.inPlace) {
+      for (let r: u32 = 0; r < ir.frameSize; r++) {
+        this.checked[r] = 0;
+      }
+    }
+
+    this.inPlace = false;
     this.file = this.blockFile[k];
     this.line = this.blockLine[k];
     this.mark();
@@ -609,6 +621,7 @@ export class MethodEmitter {
       this.kept = false;
       this.sunk = false;
       this.instruction(i);
+      this.unchecks(i);
       this.target = -1;
       if (op === ops.OP_swap) {
         // Its one destination is the new top, whose type the IR gives; the
@@ -720,11 +733,33 @@ export class MethodEmitter {
     const out = this.out;
     const from = this.copyOf[r];
     this.copyOf[r] = -1;
+    this.checked[r] = 0;
     out.text("    ");
     this.reg(r);
     out.text(" = ");
     this.copied(from);
     out.text(";\n");
+  }
+
+  /** Forget the null checks of what instruction i wrote. */
+  private unchecks(i: u32): void {
+    const ir = this.ir;
+    const op = ir.op[i];
+    if (ir.dst[i] >= 0) {
+      this.checked[ir.dst[i]] = 0;
+    }
+
+    if (this.target >= 0) {
+      this.checked[this.target] = 0;
+    }
+
+    if (op === ops.OP_hasnext2) {
+      this.checked[ir.a[i]] = 0;
+      this.checked[ir.b[i]] = 0;
+    } else if (op === ops.OP_swap) {
+      this.checked[ir.src[i]] = 0;
+      this.checked[ir.src[i] + 1] = 0;
+    }
   }
 
   /** Whether op pushes a constant, which a stack register can be a copy of. */
@@ -923,6 +958,10 @@ export class MethodEmitter {
    * so reading it reads what it copies.
    */
   copyOf: StaticArray<i32> = new StaticArray<i32>(0);
+  /** By register: whether it was checked not null since it was last written, in the block being written. */
+  checked: StaticArray<u8> = new StaticArray<u8>(0);
+  /** Whether the block about to be written is written in place, after the one way into it. */
+  inPlace: bool = false;
   /** Whether the instruction just written left its destination a copy, or as it was. */
   kept: bool = false;
   /** The local the instruction being written assigns in place of its stack register, -1 if none; and whether it did. */
@@ -1402,6 +1441,8 @@ export class MethodEmitter {
       // on, a conditional branch's, with its own types, scopes and region.
       out.text("\n");
       this.save();
+      // A loop's header is also entered from its end, with other checks.
+      this.inPlace = !this.loopHeader[t];
       this.node(t);
       this.restore();
       this.mark();
@@ -1421,6 +1462,10 @@ export class MethodEmitter {
       saved.push(this.scopeWith[d]);
     }
 
+    for (let r: u32 = 0; r < ir.frameSize; r++) {
+      saved.push(this.checked[r]);
+    }
+
     saved.push(<i32>this.scopeDepth);
     saved.push(this.region);
     saved.push(this.file);
@@ -1435,6 +1480,10 @@ export class MethodEmitter {
     this.file = saved.pop();
     this.region = saved.pop();
     this.scopeDepth = <u32>saved.pop();
+    for (let r = <i32>ir.frameSize - 1; r >= 0; r--) {
+      this.checked[r] = <u8>saved.pop();
+    }
+
     for (let d = <i32>ir.maxScope - 1; d >= 0; d--) {
       this.scopeWith[d] = <u8>saved.pop();
     }
@@ -1553,13 +1602,25 @@ export class MethodEmitter {
         this.assign(i);
         this.convert("", ir.src[i], ir.c[i], this.regType[ir.src[i]]);
         break;
-      case IR_CheckNull:
+      case IR_CheckNull: {
+        // A register checked since it was last written is not null.
+        const copy = this.copyOf[ir.src[i]];
+        const r = copy === -1 ? ir.src[i] : copy;
+        if (r >= 0) {
+          if (this.checked[r]) {
+            return;
+          }
+
+          this.checked[r] = 1;
+        }
+
         out.text("    if (");
         this.reg(ir.src[i]);
         out.text(" == null) throw rt.nullError(");
         this.reg(ir.src[i]);
         out.text(")");
         break;
+      }
       case ops.OP_add:
         this.assign(i);
         if (

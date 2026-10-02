@@ -51,3 +51,46 @@ trace(s + i, i + s, s + u, s + b, b + s, s + ns, ns + s, ns + i, ns + b, ns + ns
 trace("Loading " + int(37.9) + "%", s + n, s + 1e21, s + 0.1, s + -0, s + (-i));
 trace(ns + n, b + i, b + b, s + s + i + u + b);
 
+// Null checks: one per register until it is written, a loop's header
+// entered again with the register written, and a branch's code in place.
+function walk(start:Base, steps:int):String {
+  var b:Base = start;
+  var out:String = "";
+  for (var k:int = 0; k < steps; k++) {
+    out += b.name;
+    out += b.size;
+    if (k == 1) {
+      b = null;
+    }
+  }
+  return out;
+}
+trace(walk(d, 2));
+try {
+  trace(walk(d, 3));
+} catch (e:Error) {
+  trace("walked into null", e.errorID);
+}
+function twice(b:Base, drop:Boolean):String {
+  var s:String = b.name;
+  if (drop) {
+    b = null;
+  } else {
+    s += b.size;
+  }
+  try {
+    return s + b.name;
+  } catch (e:Error) {
+    return s + " then " + e.errorID;
+  }
+  return s;
+}
+trace(twice(d, false), twice(d, true));
+var o:Object = {a: 1, b: 2};
+var names:Array = [];
+for (var key:String in o) {
+  names.push(key);
+}
+names.sort();
+trace(names, o.a + o.b);
+
