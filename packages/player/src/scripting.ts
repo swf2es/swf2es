@@ -840,6 +840,21 @@ export class Scripting {
     }
   }
 
+  /** What the next frame does after EXIT_FRAME, before the loads' ends: the main SWF's INIT and COMPLETE. */
+  private frameEnds: (() => void)[] = [];
+
+  /**
+   * The main SWF, all of it loaded, as its LoaderInfo tells it: INIT, then
+   * COMPLETE, at the end of its first frame, after EXIT_FRAME, as Flash
+   * (the corpus's loaderinfo_events and delayed_symbolclass).
+   */
+  mainLoaded(info: AsObject): void {
+    this.frameEnds.push(() => {
+      dispatchEvent(this, info, this.event("init"));
+      dispatchEvent(this, info, this.event("complete"));
+    });
+  }
+
   /**
    * Give the loads whose code is linked their content, oldest first, and
    * stop at one still linking: they complete in the order asked. What
@@ -1152,7 +1167,7 @@ export class Scripting {
       this.broadcast("enterFrame");
     }
 
-    const ends = this.completeLoads();
+    const ends = [...this.frameEnds.splice(0), ...this.completeLoads()];
     this.broadcast("frameConstructed");
     this.runFrameScripts(root);
     // What the timeline took off this frame has had its frame; it stops here.

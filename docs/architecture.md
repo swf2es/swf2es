@@ -642,7 +642,10 @@ display list, as Flash has it (Ruffle's `loaderinfo_root` trace; a
 loaded SWF's root is its own root from its constructor on). Its values
 are the loaded SWF's: `bytesLoaded` and `bytesTotal`, `content`, `url`
 and `loaderURL`, `contentType`, the header's version, frame rate, width
-and height, `loader`, `applicationDomain`, `bytes`.
+and height, `loader`, `applicationDomain`, `bytes`. The main SWF's
+dispatches `init` and then `complete` at the end of its first frame,
+after `exitFrame` and before the second (Ruffle's `loaderinfo_events` and
+`delayed_symbolclass` traces), as a loaded SWF's does.
 
 The order is Flash's, traced by adl (the `loads` case; the Flash Player
 traces in Ruffle's corpus agree where they overlap). `loadBytes` tells
