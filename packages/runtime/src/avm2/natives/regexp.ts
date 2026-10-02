@@ -45,7 +45,15 @@ export function regexpNatives(rt: Runtime): Natives {
     }
 
     [`${AS3}::exec`](s: Value = ""): Value {
-      const m = this.$re.exec(rt.toString(s));
+      // As RegExpObject::_exec: a global one from before the start fails,
+      // where JavaScript starts from 0.
+      const re: RegExp = this.$re;
+      if (re.global && re.lastIndex < 0) {
+        re.lastIndex = 0;
+        return null;
+      }
+
+      const m = re.exec(rt.toString(s));
       return m ? matchArray(rt, m) : null;
     }
   }

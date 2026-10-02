@@ -20,3 +20,13 @@ probe("extended scoped", function():* { return [new RegExp("(?x: a b )c d").test
 probe("extended off", function():* { return [new RegExp("a (?-x)b c", "x").test("ab c"), new RegExp("a (?-x)b c", "x").test("abc"), new RegExp("(a (?-x)b )c", "x").test("ab c")].join(","); });
 probe("extended comment", function():* { return new RegExp("(?x)a # the a\nb").test("ab"); });
 probe("comment group", function():* { return [/a(?#a comment)b/.test("ab"), new RegExp("a(?#)b").test("ab")].join(","); });
+// A global exec from a negative lastIndex fails, and starts over.
+var fromBefore:Array = [];
+for each (var li:Number in [-1, 4294967295, 2147483648, -4294967296, 3]) {
+  var gre:RegExp = /abc/gi;
+  gre.lastIndex = li;
+  fromBefore.push(li + ":" + gre.exec("AbcaBcabC") + ":" + gre.lastIndex + ":" + gre.test("Abc"));
+}
+var plain:RegExp = /abc/i;
+plain.lastIndex = -1;
+trace(fromBefore.join(" "), plain.exec("Abc"));
