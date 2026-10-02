@@ -70,17 +70,26 @@ export function successors(em: MethodEmitter, k: u32): void {
 
   const i = end - 1;
   const op = ir.op[i];
-  if (op === ops.OP_jump) {
-    em.succ.push(ir.a[i]);
-  } else if (op === ops.OP_lookupswitch) {
-    em.succ.push(ir.a[i]);
-    for (let c: u32 = 0; c <= <u32>ir.c[i]; c++) {
-      em.succ.push(ir.cases[ir.b[i] + c]);
-    }
-  } else if (op === ops.OP_returnvoid || op === ops.OP_returnvalue || op === ops.OP_throw) {
-    // No successor.
-  } else if (next) {
-    em.succ.push(k + 1);
+  switch (op) {
+    case ops.OP_jump:
+      em.succ.push(ir.a[i]);
+      break;
+    case ops.OP_lookupswitch:
+      em.succ.push(ir.a[i]);
+      for (let c: u32 = 0; c <= <u32>ir.c[i]; c++) {
+        em.succ.push(ir.cases[ir.b[i] + c]);
+      }
+      break;
+    case ops.OP_returnvoid:
+    case ops.OP_returnvalue:
+    case ops.OP_throw:
+      // No successor.
+      break;
+    default:
+      if (next) {
+        em.succ.push(k + 1);
+      }
+      break;
   }
 }
 

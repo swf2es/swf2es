@@ -433,80 +433,96 @@ export class TraitsTable {
       const name = this.nameId;
       const tag = abc.traitTag[i];
       const kind = tag & 0x0f;
-      if (kind === C.TRAIT_Slot || kind === C.TRAIT_Const || kind === C.TRAIT_Class) {
-        // As SlotIdCalcer: explicit ids only where slots may bind early.
-        const id = abc.traitId[i];
-        let slot: u32;
-        if (id === 0 || !early) {
-          slot = ++slotCount;
-        } else {
-          slot = id;
-          if (slotCount < id) {
-            slotCount = id;
+      switch (kind) {
+        case C.TRAIT_Slot:
+        case C.TRAIT_Const:
+        case C.TRAIT_Class: {
+          // As SlotIdCalcer: explicit ids only where slots may bind early.
+          const id = abc.traitId[i];
+          let slot: u32;
+          if (id === 0 || !early) {
+            slot = ++slotCount;
+          } else {
+            slot = id;
+            if (slotCount < id) {
+              slotCount = id;
+            }
           }
-        }
 
-        if (id > nameCount && early) {
-          return C.kCorruptABCError;
-        }
+          if (id > nameCount && early) {
+            return C.kCorruptABCError;
+          }
 
-        // Slots are final, and cannot override anything else.
-        if (slot - 1 < baseSlots) {
-          return C.kIllegalOverrideError;
-        }
+          // Slots are final, and cannot override anything else.
+          if (slot - 1 < baseSlots) {
+            return C.kIllegalOverrideError;
+          }
 
-        if (this.own(t, nsId, name, version) !== BIND_None) {
-          return C.kCorruptABCError;
-        }
+          if (this.own(t, nsId, name, version) !== BIND_None) {
+            return C.kCorruptABCError;
+          }
 
-        if (this.isInterface[t]) {
-          return C.kIllegalSlotError;
-        }
+          if (this.isInterface[t]) {
+            return C.kIllegalSlotError;
+          }
 
-        const bkind = kind === C.TRAIT_Slot ? BKIND_Var : BKIND_Const;
-        this.add(t, nsId, name, version, ((slot - 1) << 3) | bkind);
-      } else if (kind === C.TRAIT_Method) {
-        const baseBinding = this.overridden(t, nsId, nsVersion, name, tag);
-        if (baseBinding < 0) {
-          return C.kIllegalOverrideError;
+          const bkind = kind === C.TRAIT_Slot ? BKIND_Var : BKIND_Const;
+          this.add(t, nsId, name, version, ((slot - 1) << 3) | bkind);
+          break;
         }
-
-        if (baseBinding === BIND_None) {
-          this.add(t, nsId, name, version, (methodCount << 3) | BKIND_Method);
-          methodCount += 1;
-        } else if ((<u32>baseBinding & 7) === BKIND_Method) {
-          this.add(t, nsId, name, version, <u32>baseBinding);
-        } else {
-          return C.kCorruptABCError;
-        }
-      } else if (kind === C.TRAIT_Getter || kind === C.TRAIT_Setter) {
-        // The other accessor of the pair may be defined here already.
-        let baseBinding = <i64>this.own(t, nsId, name, version);
-        if (baseBinding === BIND_None) {
-          baseBinding = this.overridden(t, nsId, nsVersion, name, tag);
+        case C.TRAIT_Method: {
+          const baseBinding = this.overridden(t, nsId, nsVersion, name, tag);
           if (baseBinding < 0) {
             return C.kIllegalOverrideError;
           }
-        }
 
-        const us = kind === C.TRAIT_Getter ? BKIND_Get : BKIND_Set;
-        const them = kind === C.TRAIT_Getter ? BKIND_Set : BKIND_Get;
-        const baseKind = <u32>baseBinding & 7;
-        if (baseBinding === BIND_None) {
-          this.add(t, nsId, name, version, (methodCount << 3) | us);
-          methodCount += 2;
-        } else if (baseKind === BKIND_Get || baseKind === BKIND_Set || baseKind === BKIND_GetSet) {
-          const id = <u32>baseBinding & ~7;
-          this.add(
-            t,
-            nsId,
-            name,
-            version,
-            baseKind === them ? id | BKIND_GetSet : <u32>baseBinding,
-          );
-        } else {
-          return C.kCorruptABCError;
+          if (baseBinding === BIND_None) {
+            this.add(t, nsId, name, version, (methodCount << 3) | BKIND_Method);
+            methodCount += 1;
+          } else if ((<u32>baseBinding & 7) === BKIND_Method) {
+            this.add(t, nsId, name, version, <u32>baseBinding);
+          } else {
+            return C.kCorruptABCError;
+          }
+          break;
         }
+        case C.TRAIT_Getter:
+        case C.TRAIT_Setter: {
+          // The other accessor of the pair may be defined here already.
+          let baseBinding = <i64>this.own(t, nsId, name, version);
+          if (baseBinding === BIND_None) {
+            baseBinding = this.overridden(t, nsId, nsVersion, name, tag);
+            if (baseBinding < 0) {
+              return C.kIllegalOverrideError;
+            }
+          }
+
+          const us = kind === C.TRAIT_Getter ? BKIND_Get : BKIND_Set;
+          const them = kind === C.TRAIT_Getter ? BKIND_Set : BKIND_Get;
+          const baseKind = <u32>baseBinding & 7;
+          if (baseBinding === BIND_None) {
+            this.add(t, nsId, name, version, (methodCount << 3) | us);
+            methodCount += 2;
+          } else if (
+            baseKind === BKIND_Get ||
+            baseKind === BKIND_Set ||
+            baseKind === BKIND_GetSet
+          ) {
+            const id = <u32>baseBinding & ~7;
+            this.add(
+              t,
+              nsId,
+              name,
+              version,
+              baseKind === them ? id | BKIND_GetSet : <u32>baseBinding,
+            );
+          } else {
+            return C.kCorruptABCError;
+          }
+          break;
+        }
+        default:
+          break;
       }
     }
 
