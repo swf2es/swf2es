@@ -778,6 +778,13 @@ asks whether two objects' bounds in the stage's space overlap. The
 corpus's `displayobject_getrect`, `_hittestpoint`, `_hittestpoint_root`
 and `_hittestobject` are the reference, with the `draws` case.
 
+### Sound state
+
+`SoundTransform` keeps its volume and four channel coefficients on each
+AVM2 object. The `pan` getter and setter remain playerglobal's AS3 code,
+which derives them from those coefficients. This stores the values scripts
+read and write; applying them to decoded audio belongs with sound playback.
+
 ### Time
 
 The player keeps a clock of its own, in milliseconds, apart from the
