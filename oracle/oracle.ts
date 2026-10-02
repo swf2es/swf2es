@@ -8,10 +8,19 @@
 //   node oracle/oracle.ts --pull                  pull the image
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { availableParallelism } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readDoAbc, readSwf, tags } from "../packages/format/dist/index.js";
 
 export const IMAGE =
   "ghcr.io/33tu/crossbridge@sha256:486ae832869e84cc25be62d3332ffffde64a8d42cd415f0a3346dddc5c98d84c";
@@ -387,6 +396,169 @@ export function runAbcs(
     exitCode: Number(readFileSync(join(outDir, `${i}.code`), "utf8")),
     output: readFileSync(join(outDir, `${i}.out`), "utf8"),
   }));
+}
+
+/** A C program to build with the image's Crossbridge and run as its avmshell projector. */
+export interface CrossbridgeJob {
+  /** Where the outputs go, relative to outDir: <name> (the projector), .abc, .log, .out, .code and .dump. */
+  name: string;
+  /** Sources and gcc's arguments, as paths relative to the repository root: what the container sees. */
+  gccArgs: string[];
+}
+
+export interface CrossbridgeResult {
+  name: string;
+  compiled: boolean;
+  compileLog: string;
+  exitCode: number | null;
+  output: string;
+  /** The program's ABC, out of the projector: what swf2es runs. */
+  abc: Uint8Array | null;
+  /** abcdump's dump of the ABC. */
+  dump: string | null;
+}
+
+/**
+ * What a build depends on: the image, gcc's arguments, and every file they
+ * name or that sits in a directory they put on the include path.
+ */
+function crossbridgeKey(job: CrossbridgeJob): string {
+  const hash = createHash("sha256").update(IMAGE).update("\0").update(job.gccArgs.join(" "));
+  for (const arg of job.gccArgs) {
+    const path = resolve(root, arg.startsWith("-I") ? arg.slice(2) : arg);
+    const files = !existsSync(path)
+      ? []
+      : statSync(path).isDirectory()
+        ? readdirSync(path)
+            .sort()
+            .map((f) => join(path, f))
+        : [path];
+    for (const f of files) {
+      hash.update("\0").update(f).update("\0").update(readFileSync(f));
+    }
+  }
+
+  return hash.digest("hex");
+}
+
+/**
+ * The ABC of a Crossbridge projector: an avmshell binary with a SWF after
+ * it, then the SWF's length and 0xfa123456, little-endian, and 4 bytes of
+ * zeros; the SWF's one DoABC is the program.
+ */
+function projectorAbc(projector: Uint8Array): Uint8Array {
+  const view = new DataView(projector.buffer, projector.byteOffset, projector.byteLength);
+  const end = projector.length - 4;
+  if (view.getUint32(end - 8, true) !== 0xfa123456) {
+    throw new Error("not a Crossbridge projector");
+  }
+
+  const length = view.getUint32(end - 4, true);
+  const swf = readSwf(projector.subarray(end - 8 - length, end - 8));
+  const tag = swf.tags.find((t) => t.code === tags.DoABC || t.code === tags.DoABC2);
+  if (!tag) {
+    throw new Error("a Crossbridge projector without a DoABC");
+  }
+
+  return readDoAbc(swf.bytes, tag).abc;
+}
+
+/**
+ * Build each job with the image's gcc and run it, then take its ABC out of
+ * the projector and dump it with abcdump, in two containers for the whole
+ * batch. A projector whose build key (see crossbridgeKey) is unchanged is
+ * reused. Each run gets `timeoutSeconds`.
+ */
+export function runCrossbridge(
+  jobs: CrossbridgeJob[],
+  outDir: string,
+  { engine = containerEngine(), timeoutSeconds = 120 } = {},
+): CrossbridgeResult[] {
+  mkdirSync(join(outDir, "tools"), { recursive: true });
+  const out = relative(root, resolve(outDir));
+  if (out.startsWith("..")) {
+    throw new Error(`outDir must be inside ${root}`);
+  }
+
+  const build = jobs.map((job) => {
+    const n = join(outDir, job.name);
+    const key = crossbridgeKey(job);
+    const cached =
+      existsSync(n) && existsSync(`${n}.key`) && readFileSync(`${n}.key`, "utf8") === key;
+    if (!cached) {
+      rmSync(n, { force: true });
+      rmSync(`${n}.key`, { force: true });
+    }
+
+    return { job, key, cached };
+  });
+
+  const run = [
+    `out="${out}"`,
+    ...build.flatMap(({ job, cached }) => [
+      `rm -f "$out/${job.name}.out" "$out/${job.name}.code"`,
+      ...(cached
+        ? []
+        : [
+            `/opt/crossbridge/sdk/usr/bin/gcc ${job.gccArgs.join(" ")} -o "$out/${job.name}" > "$out/${job.name}.log" 2>&1`,
+          ]),
+      `if [ -f "$out/${job.name}" ]; then`,
+      `  timeout ${timeoutSeconds} "$out/${job.name}" > "$out/${job.name}.out" 2>&1; echo $? > "$out/${job.name}.code"`,
+      "fi",
+    ]),
+  ].join("\n");
+  writeFileSync(join(outDir, "crossbridge.sh"), `${run}\n`);
+  let r = container(engine, [`${out}/crossbridge.sh`]);
+  if (r.status !== 0) {
+    throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+  }
+
+  const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : null);
+  const results = build.map(({ job, key, cached }) => {
+    const n = join(outDir, job.name);
+    const compiled = existsSync(n);
+    if (compiled && !cached) {
+      writeFileSync(`${n}.key`, key);
+    }
+
+    const abc = compiled ? projectorAbc(new Uint8Array(readFileSync(n))) : null;
+    if (abc) {
+      writeFileSync(`${n}.abc`, abc);
+    }
+
+    const code = read(`${n}.code`);
+    return {
+      name: job.name,
+      compiled,
+      compileLog: read(`${n}.log`) ?? "",
+      exitCode: code === null ? null : Number(code),
+      output: read(`${n}.out`) ?? "",
+      abc,
+      dump: null as string | null,
+    };
+  });
+
+  const dump = [
+    `out="${out}"`,
+    ...buildAbcdump,
+    ...results
+      .filter((x) => x.abc)
+      .map(
+        (x) =>
+          `(cd "$out" && /opt/crossbridge/sdk/usr/bin/avmshell tools/abcdump.abc -- "${x.name}.abc" > "${x.name}.dump" 2>&1)`,
+      ),
+  ].join("\n");
+  writeFileSync(join(outDir, "crossbridge-dump.sh"), `${dump}\n`);
+  r = container(engine, [`${out}/crossbridge-dump.sh`]);
+  if (r.status !== 0) {
+    throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+  }
+
+  for (const x of results) {
+    x.dump = x.abc ? read(join(outDir, `${x.name}.dump`)) : null;
+  }
+
+  return results;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

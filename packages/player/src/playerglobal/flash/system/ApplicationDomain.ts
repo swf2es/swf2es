@@ -1,6 +1,7 @@
 // flash.system.ApplicationDomain: one domain for now, the current one,
 // whose definitions are the runtime's; child domains come with the
-// compiler's domain forked and the runtime resolving names by domain.
+// compiler's domain forked and the runtime resolving names by domain. Its
+// domain memory is the runtime's too, as avmshell's Domain's is.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 import { qualify } from "../../toplevel.js";
@@ -16,6 +17,18 @@ export function applicationDomainNatives(s: Scripting): avm2.Natives {
 
     static get currentDomain(): Value {
       return s.applicationDomain();
+    }
+
+    static get MIN_DOMAIN_MEMORY_LENGTH(): number {
+      return avm2.GLOBAL_MEMORY_MIN_SIZE;
+    }
+
+    get domainMemory(): Value {
+      return s.rt.memoryProvider;
+    }
+
+    set domainMemory(v: Value) {
+      avm2.setDomainMemory(s.rt, v);
     }
 
     "flash.system:ApplicationDomain::ctor"(parent: Value): void {

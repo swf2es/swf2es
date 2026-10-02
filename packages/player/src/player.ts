@@ -75,6 +75,7 @@ export class Player {
       s.rt.classNamed(this.library.classes.get(0) ?? "flash.display::MovieClip"),
     );
     info.$content = object;
+    s.mainLoaded(info);
     this.root.enterFirstFrame();
     s.frame(this.stage, false);
     this.frameRate = s.frameRate;

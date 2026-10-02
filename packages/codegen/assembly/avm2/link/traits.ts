@@ -455,7 +455,7 @@ export class TraitsTable {
           return C.kIllegalOverrideError;
         }
 
-        if (this.own(t, nsId, name, nsVersion) !== BIND_None) {
+        if (this.own(t, nsId, name, version) !== BIND_None) {
           return C.kCorruptABCError;
         }
 
@@ -481,7 +481,7 @@ export class TraitsTable {
         }
       } else if (kind === C.TRAIT_Getter || kind === C.TRAIT_Setter) {
         // The other accessor of the pair may be defined here already.
-        let baseBinding = <i64>this.own(t, nsId, name, nsVersion);
+        let baseBinding = <i64>this.own(t, nsId, name, version);
         if (baseBinding === BIND_None) {
           baseBinding = this.overridden(t, nsId, nsVersion, name, tag);
           if (baseBinding < 0) {
@@ -800,7 +800,7 @@ export class TraitsTable {
         this.slotSet[slots + slot] = 1;
       } else if (kind === C.TRAIT_Method || kind === C.TRAIT_Getter || kind === C.TRAIT_Setter) {
         this.readName(domain, index, i);
-        const b = this.own(t, this.nameNs, this.nameId, this.nameNsVersion);
+        const b = this.own(t, this.nameNs, this.nameId, this.nameVersion);
         if (b === BIND_None) {
           continue;
         }

@@ -218,8 +218,22 @@ The IR's types decide the JavaScript from the start where that is simple:
 field access, a method bound early a direct call, a coercion to a class
 `rt.coerceTo` (no builtin for the runtime to look for), and a typed
 Vector's element `rt.vectorGetInt` and the like, one for each kind of
-element, so that each sees one kind of array. Anything typed `*` goes
-through the runtime, which does what avmplus does at run time.
+element, so that each sees one kind of array. A domain memory load or
+store at an `int` or `uint` address is in place, on the runtime's view
+of the memory after a range check, and calls the runtime (`rt.li32` and
+the like) only for an address out of range, which it rejects as avmplus
+does. Anything typed `*` goes through the runtime, which does what
+avmplus does at run time.
+
+Two ints or uints multiplied and the product made an int or uint by the
+next instruction, in the same block, are `Math.imul`: avmplus' JIT
+multiplies them as ints (`CodegenLIR::coerceNumberToInt`), which wraps,
+where the double product loses the low bits past 2^53, and compiled C
+such as Crossbridge's depends on it. Its interpreter multiplies doubles,
+and it runs the static initializers, scripts' and classes', so those
+stay double products. The JIT also wraps a product that reaches the
+conversion later in the block or through a local, which swf2es does not
+follow yet; `int-multiply.as` keeps to the forms it does.
 
 ### The object model
 
@@ -362,7 +376,11 @@ its capacity and UTF-8 (`bytearray.ts`), AMF3 (`amf.ts`) and JSON
 (`json.ts`) and describeType (`describe.ts`). These are MPL-2.0 as their sources are. Domain memory is
 avmshell's `avmplus.Domain`'s: 1024 bytes of scratch memory until a
 ByteArray is set as it. Date is JavaScript's Date, with avmplus' string
-formats.
+formats. flash.concurrent's Mutex and Condition and ByteArray's atomic
+operations are avmplus' on its one thread: locks are counted, a wait ends
+at once, as nothing else can notify it, and Worker.current is the
+primordial worker, the one there is (`natives/concurrent.ts`); starting
+another is not supported. Crossbridge's code uses them all as it starts.
 
 `avmplus.describeTypeJSON`, which `describeType` and playerglobal's
 `flash.utils.describeType` build their XML from, is avmplus' TypeDescriber
@@ -624,7 +642,10 @@ display list, as Flash has it (Ruffle's `loaderinfo_root` trace; a
 loaded SWF's root is its own root from its constructor on). Its values
 are the loaded SWF's: `bytesLoaded` and `bytesTotal`, `content`, `url`
 and `loaderURL`, `contentType`, the header's version, frame rate, width
-and height, `loader`, `applicationDomain`, `bytes`.
+and height, `loader`, `applicationDomain`, `bytes`. The main SWF's
+dispatches `init` and then `complete` at the end of its first frame,
+after `exitFrame` and before the second (Ruffle's `loaderinfo_events` and
+`delayed_symbolclass` traces), as a loaded SWF's does.
 
 The order is Flash's, traced by adl (the `loads` case; the Flash Player
 traces in Ruffle's corpus agree where they overlap). `loadBytes` tells
@@ -1080,6 +1101,15 @@ PlaceObject3's `HasImage`, as Flash Pro places one, a bitmap is a
 data an instance of the bound class constructed with (1, 1), else a plain
 `BitmapData`; without `HasImage` Flash takes the bound class for a
 display object's and throws TypeError 2022, which swf2es does too.
+A class SymbolClass binds to a `DefineBinaryData` and that extends
+`ByteArray` starts with its bytes, at position 0; its instances share
+them, each seeing what another writes until one is resized, as under adl
+(the `crossbridge-runtime` case). Crossbridge keeps a C program's data
+so. That case also has what Crossbridge's start asks of the player: the
+domain memory on `ApplicationDomain`, the runtime's one, as avmshell's
+`Domain` has it; `Worker.current`, the primordial (`isSupported` is
+false, where AIR's is true, as no other worker can start); `Telemetry`,
+never connected; and `System.disposeXML`, left to the collector.
 Bitmap fills, in a shape's records and through `beginBitmapFill`, and
 the filters follow, each by what Flash traces and draws under adl.
 
@@ -1094,6 +1124,12 @@ the filters follow, each by what Flash traces and draws under adl.
   above 2^53 writes digits that are neither exact nor a double's, and in
   its JIT a multiplication past 2^53 comes out exact, as as3pb's wire
   checksum shows (`tests/programs` compares all but that line).
+  `tests/programs` also builds C, LZ4's from the com-lz4-as3 submodule
+  with a driver of its own (`tests/programs/lz4`), with the image's
+  Crossbridge, and runs it as avmshell's projector and its ABC in
+  swf2es. That avmshell has Crossbridge's ShellPosix, which swf2es's
+  shell has not, so its start, which then goes as in a player, is left
+  out of the comparison.
   for-in and for each visit an object's dynamic properties in the order
   they were added; avmplus visits them in its hashtable's, which for names
   that are not indexes follows their interned strings' addresses, so the

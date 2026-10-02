@@ -618,6 +618,37 @@ function loading(compile: Compile, script: string, innerFrames: number): Uint8Ar
   });
 }
 
+// What Crossbridge's runtime asks of the player as it starts
+// (scripts/CrossbridgeRuntime.as): a ByteArray subclass bound to
+// DefineBinaryData, as Crossbridge keeps a C program's data, among the rest.
+function crossbridgeRuntime(compile: Compile): Uint8Array {
+  const blob = compile(
+    "Blob",
+    "package { import flash.utils.ByteArray; public class Blob extends ByteArray { public function Blob() { super(); } } }",
+  );
+  const main = compile("CrossbridgeRuntime");
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.binaryData(1, Uint8Array.from([0x68, 0x65, 0x6c, 0x6c, 0x6f, 0xfe, 1, 2])),
+      w.doAbc(blob, "Blob"),
+      w.doAbc(main, "CrossbridgeRuntime"),
+      w.symbolClass([
+        [1, "Blob"],
+        [0, "CrossbridgeRuntime"],
+      ]),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // The SWF's bitmap characters (scripts/BitmapSymbols.as): every kind of
 // bitmap tag, each bound to a class extending BitmapData, and three placed
 // on the timeline with PlaceObject3's HasImage, as Flash Pro places one.
@@ -997,6 +1028,14 @@ export const cases: PlayerCase[] = [
   // Last: the content it unloads plays on in Flash until collected, and its
   // traces would reach the case recorded after it.
   { name: "loads", build: loads, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "crossbridge-runtime",
+    build: crossbridgeRuntime,
+    frames: 2,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "url-stream-close",
     swf: (abc) => bare(abc, 1, "UrlStreamClose"),

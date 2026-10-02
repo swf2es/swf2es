@@ -11,6 +11,7 @@ import type { Drawing } from "./drawing.js";
 import {
   type BitmapCharacter,
   type Character,
+  type DisplayCharacter,
   INVALID_PIXELS,
   type Library,
   type ShapeCharacter,
@@ -394,9 +395,10 @@ export class MovieClip extends Container {
       }
 
       // A new character, or one that replaces what is at the depth.
+      // Data is no display object: Flash places nothing for it.
       const character =
         place.character === null ? null : this.library.characters.get(place.character);
-      if (!character) {
+      if (!character || character.type === "binary") {
         existing?.applyPlace(place);
         continue;
       }
@@ -501,7 +503,7 @@ export class MovieClip extends Container {
 
       const character =
         jump.place.character === null ? null : this.library.characters.get(jump.place.character);
-      if (!character) {
+      if (!character || character.type === "binary") {
         existing?.applyPlace(jump.place);
         continue;
       }
@@ -611,7 +613,7 @@ function mergePlace(previous: Place, next: Place): Place {
 /** A display object for a character, before its first frame: a shape, or a clip. */
 /** `hasImage` is PlaceObject3's flag where a timeline places it, which a bitmap's construction reads. */
 export function displayFor(
-  character: Character,
+  character: DisplayCharacter,
   library: Library,
   hasImage = false,
 ): DisplayObject {
@@ -640,7 +642,7 @@ export function displayFor(
  * and names it on its parent, else a clip's first frame entered. After the
  * placement, as Flash has it, so that the parent and the name are there.
  */
-function construct(display: DisplayObject, character: Character, library: Library): void {
+function construct(display: DisplayObject, character: DisplayCharacter, library: Library): void {
   if (library.construct) {
     library.construct(display, character);
   } else if (display instanceof MovieClip) {
@@ -649,7 +651,7 @@ function construct(display: DisplayObject, character: Character, library: Librar
 }
 
 /** A display object for a character as the timeline would place it, alive, but in no container. */
-export function instantiate(character: Character, library: Library): DisplayObject {
+export function instantiate(character: DisplayCharacter, library: Library): DisplayObject {
   const display = displayFor(character, library);
   construct(display, character, library);
   return display;

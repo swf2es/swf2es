@@ -53,6 +53,9 @@ Totals, encode plus decode, in ms, as roadmap step 7 went:
 | Runtime hot paths (#23) | 207 | 251 |
 | AwayFL JIT, headless, first run | 525 | 689 |
 | AwayFL JIT, headless, runs after | 406–462 | 611–654 |
+| Ruffle 0.6.0 (web, headless Chrome), first run | 1118 | 1389 |
+| Ruffle 0.6.0, runs after | 1165–1355 | 1438–1530 |
+| swf2es with domain memory in place (#80), ab.ts medians | 193 | 194 |
 | PepperFlash | 188 | 83 |
 | avmshell (the oracle, its JIT in a container) | 107 | 74 |
 
@@ -64,6 +67,13 @@ benchmark (as3pb's codecs unchanged since the SWF it plays was built),
 its page read from DevTools screenshots after its first run and after 4
 more. AMF3 and JSON take about 1120 and 2730 ms; they are the runtime's
 own code (amf.ts, json.ts), not generated.
+
+Ruffle, measured on 2026-10-02, plays that SWF the same way, its 0.6.0
+web build served beside it and read from screenshots: after its first
+run and after 4 more, about 6 and 7.5 times swf2es's totals. Its AVM2
+interprets the bytecode; swf2es's figures are node's, as above, since
+the player's getTimer follows its frame clock and cannot time within a
+frame.
 
 From step 7.4 on, a change is timed against the build before it with
 `tests/programs/ab.ts`: both builds run as3pb in turn, interleaved

@@ -6,3 +6,7 @@
 	path = tests/programs/as3pb
 	url = https://github.com/33TU/as3pb.git
 	shallow = true
+[submodule "tests/programs/com-lz4-as3"]
+	path = tests/programs/com-lz4-as3
+	url = https://github.com/33TU/com-lz4-as3.git
+	shallow = true

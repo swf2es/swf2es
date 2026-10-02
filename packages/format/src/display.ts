@@ -249,6 +249,17 @@ export function readSprite(
   return { id, frameCount, tags: readTags(bytes, r.pos, tag.offset + tag.length).tags };
 }
 
+/** DefineBinaryData: a character's bytes, after its id and 4 reserved bytes, which a ByteArray subclass SymbolClass binds to it holds. */
+export function readBinaryData(bytes: Uint8Array, tag: Tag): { id: number; data: Uint8Array } {
+  const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+  const id = r.u16();
+  r.u32();
+  return {
+    id,
+    data: bytes.subarray(Math.min(r.pos, tag.offset + tag.length), tag.offset + tag.length),
+  };
+}
+
 /** SymbolClass's links from character ids to class names; id 0 is the main timeline's class. */
 export function readSymbolClass(bytes: Uint8Array, tag: Tag): Map<number, string> {
   const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);

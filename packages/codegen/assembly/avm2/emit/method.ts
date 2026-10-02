@@ -86,6 +86,12 @@ export class MethodEmitter {
   /** The method being written: its ABC index and body. */
   current: u32 = 0;
   body: i32 = -1;
+  /** Whether the method is a script's or class's initializer, which avmplus runs in its interpreter, not its JIT. */
+  staticInit: bool = false;
+  /** Where the block being written ends: the instruction after its last. */
+  blockLast: u32 = 0;
+  /** By register: whether it holds an int or uint made a Number by the coercion before it, in this block. */
+  promoted: StaticArray<u8> = new StaticArray<u8>(0);
   /**
    * The ABC offsets where the set of handlers covering an instruction can
    * change, sorted; region r is from bounds[r - 1] up to bounds[r]. `t` in
@@ -120,6 +126,7 @@ export class MethodEmitter {
     this.ir = ir;
     this.current = method;
     this.body = this.abc.methodBody[method];
+    this.staticInit = this.isStaticInit(method);
     if (<u32>this.regType.length < ir.frameSize) {
       this.regType = new StaticArray<i32>(ir.frameSize);
     }
@@ -130,6 +137,7 @@ export class MethodEmitter {
 
     if (<u32>this.copyOf.length < ir.frameSize) {
       this.copyOf = new StaticArray<i32>(ir.frameSize);
+      this.promoted = new StaticArray<u8>(ir.frameSize);
     }
 
     for (let r: u32 = 0; r < ir.frameSize; r++) {
@@ -566,8 +574,13 @@ export class MethodEmitter {
     const last = k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
     const stack = <i32>(ir.localCount + ir.maxScope);
     // Every way in wrote its copies. A block written in place has one way
-    // in, the code before it, and keeps what that checked.
+    // in, the code before it, and keeps what that checked; avmplus' JIT
+    // knows no value as it was made from there, a block in place or not.
     this.uncopy(stack);
+    for (let r: u32 = 0; r < ir.frameSize; r++) {
+      this.promoted[r] = 0;
+    }
+
     if (!this.inPlace) {
       for (let r: u32 = 0; r < ir.frameSize; r++) {
         this.checked[r] = 0;
@@ -581,6 +594,14 @@ export class MethodEmitter {
     for (let i = ir.blockFirst[k]; i < last; i++) {
       const op = ir.op[i];
       const dst = ir.dst[i];
+      // A branch's code written in place is another block's: this one's end, for each instruction.
+      this.blockLast = last;
+      // An int or uint the verifier makes a Number, as LIR's i2d and ui2d (see wraps).
+      const promotes =
+        op === IR_Coerce &&
+        dst === ir.src[i] &&
+        this.domain.builtin(ir.c[i]) === BUILTIN_Number &&
+        (this.builtinOf(dst) === BUILTIN_Int || this.builtinOf(dst) === BUILTIN_Uint);
       // What the instruction writes, other than stack registers, is copied
       // first by the stack registers copying it, but for those it takes:
       // it reads them before it writes. And what a branch leaves on the
@@ -648,6 +669,19 @@ export class MethodEmitter {
 
       if (dst >= 0) {
         this.regType[dst] = ir.type[i];
+        this.promoted[dst] = promotes ? 1 : 0;
+      }
+
+      if (op === ops.OP_swap) {
+        this.promoted[ir.src[i]] = 0;
+        this.promoted[ir.src[i] + 1] = 0;
+      } else if (op === ops.OP_hasnext2) {
+        this.promoted[ir.a[i]] = 0;
+        this.promoted[ir.b[i]] = 0;
+      }
+
+      if (this.target >= 0) {
+        this.promoted[this.target] = 0;
       }
 
       if (sinking && this.sunk) {
@@ -1480,6 +1514,7 @@ export class MethodEmitter {
 
     for (let r: u32 = 0; r < ir.frameSize; r++) {
       saved.push(this.checked[r]);
+      saved.push(this.promoted[r]);
     }
 
     saved.push(<i32>this.scopeDepth);
@@ -1497,6 +1532,7 @@ export class MethodEmitter {
     this.region = saved.pop();
     this.scopeDepth = <u32>saved.pop();
     for (let r = <i32>ir.frameSize - 1; r >= 0; r--) {
+      this.promoted[r] = <u8>saved.pop();
       this.checked[r] = <u8>saved.pop();
     }
 
@@ -1654,7 +1690,12 @@ export class MethodEmitter {
         break;
       case ops.OP_multiply:
         this.assign(i);
-        this.binary(i, " * ");
+        if (this.wraps(i)) {
+          this.call2("Math.imul(", i);
+        } else {
+          this.binary(i, " * ");
+        }
+
         break;
       case ops.OP_divide:
         this.assign(i);
@@ -2276,26 +2317,58 @@ export class MethodEmitter {
         out.uint(a);
         out.text("])");
         return true;
-      // Domain memory: loads and stores through the runtime, which checks
-      // their range; sign extensions in plain JavaScript.
+      // Domain memory: in place at an int address, else through the
+      // runtime, which checks the range and converts the address; also
+      // what the code in place calls for an address out of range, so that
+      // the runtime rejects it as avmplus does. Sign extensions in plain
+      // JavaScript.
       case ops.OP_li8:
       case ops.OP_li16:
       case ops.OP_li32:
       case ops.OP_lf32:
       case ops.OP_lf64:
         this.assign(i);
+        if (this.isAddress(src)) {
+          out.text("(");
+          this.inRange(src, op);
+          out.text(" ? rt.view.");
+          out.text(this.viewMethod(op));
+          out.text("(");
+          this.reg(src);
+          out.text(op === ops.OP_li8 ? ")" : ", true)");
+          out.text(" : ");
+        }
+
         out.text("rt.");
         out.text(opcodeNames[op]);
         out.text("(");
         this.reg(src);
         out.text(")");
+        if (this.isAddress(src)) {
+          out.text(")");
+        }
+
         return true;
       case ops.OP_si8:
       case ops.OP_si16:
       case ops.OP_si32:
       case ops.OP_sf32:
       case ops.OP_sf64:
-        out.text("    rt.");
+        // The value's conversion is DataView's own for a number or Boolean.
+        out.text("    ");
+        if (this.isAddress(src + 1) && this.isNumeric(src)) {
+          out.text("if (");
+          this.inRange(src + 1, op);
+          out.text(") rt.view.");
+          out.text(this.viewMethod(op));
+          out.text("(");
+          this.reg(src + 1);
+          out.text(", ");
+          this.reg(src);
+          out.text(op === ops.OP_si8 ? "); else " : ", true); else ");
+        }
+
+        out.text("rt.");
         out.text(opcodeNames[op]);
         out.text("(");
         this.reg(src);
@@ -2598,6 +2671,117 @@ export class MethodEmitter {
     return (
       bt === BUILTIN_String || bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Boolean
     );
+  }
+
+  /**
+   * Whether multiply i is an int multiplication that wraps, as avmplus' JIT
+   * makes one (CodegenLIR::coerceNumberToInt): two ints or uints, which
+   * the verifier makes Numbers just before, whose product is converted to
+   * an int or uint next, in the same block. Its interpreter, which runs
+   * the initializers, multiplies doubles. A product converted after a
+   * merge, or later in the block, stays a double product here, where
+   * avmshell's JIT may still wrap it.
+   */
+  private wraps(i: u32): bool {
+    const ir = this.ir;
+    const next = i + 1;
+    if (
+      this.staticInit ||
+      !this.promoted[this.src(i, 0)] ||
+      !this.promoted[this.src(i, 1)] ||
+      next >= this.blockLast ||
+      ir.src[next] !== ir.dst[i]
+    ) {
+      return false;
+    }
+
+    switch (ir.op[next]) {
+      case ops.OP_convert_i:
+      case ops.OP_coerce_i:
+      case ops.OP_convert_u:
+      case ops.OP_coerce_u:
+        return true;
+      case IR_Coerce: {
+        const bt = this.domain.builtin(ir.c[next]);
+        return bt === BUILTIN_Int || bt === BUILTIN_Uint;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /** Whether method m initializes a script or a class, as avmplus' setStaticInit marks it. */
+  private isStaticInit(m: u32): bool {
+    const abc = this.abc;
+    for (let s = 0; s < abc.scriptInit.length; s++) {
+      if (abc.scriptInit[s] === m) {
+        return true;
+      }
+    }
+
+    for (let c = 0; c < abc.classInit.length; c++) {
+      if (abc.classInit[c] === m) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /** Whether register r is a domain memory address the emitter can use as it is: an int or uint. */
+  private isAddress(r: i32): bool {
+    const bt = this.builtinOf(r);
+    return bt === BUILTIN_Int || bt === BUILTIN_Uint;
+  }
+
+  /** `(a >>> 0) <= rt.memoryLength - size`: whether op's bytes at address register a are all in the domain memory. */
+  private inRange(a: i32, op: u16): void {
+    this.out.text("(");
+    this.reg(a);
+    this.out.text(" >>> 0) <= rt.memoryLength - ");
+    this.out.uint(this.memorySize(op));
+  }
+
+  private memorySize(op: u16): u32 {
+    switch (op) {
+      case ops.OP_li8:
+      case ops.OP_si8:
+        return 1;
+      case ops.OP_li16:
+      case ops.OP_si16:
+        return 2;
+      case ops.OP_lf64:
+      case ops.OP_sf64:
+        return 8;
+      default:
+        return 4;
+    }
+  }
+
+  /** The DataView method that loads or stores as op does, little-endian. */
+  private viewMethod(op: u16): string {
+    switch (op) {
+      case ops.OP_li8:
+        return "getUint8";
+      case ops.OP_li16:
+        return "getUint16";
+      case ops.OP_li32:
+        return "getInt32";
+      case ops.OP_lf32:
+        return "getFloat32";
+      case ops.OP_lf64:
+        return "getFloat64";
+      case ops.OP_si8:
+        return "setUint8";
+      case ops.OP_si16:
+        return "setUint16";
+      case ops.OP_si32:
+        return "setInt32";
+      case ops.OP_sf32:
+        return "setFloat32";
+      default:
+        return "setFloat64";
+    }
   }
 
   isNumber(r: i32): bool {

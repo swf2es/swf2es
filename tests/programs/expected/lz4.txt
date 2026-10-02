@@ -1,0 +1,15 @@
+prose: 2097152 bytes, xxh32 2c1f084e
+  lz4 8291 bytes, xxh32 ed04e65d
+  restored 2097152 bytes, same
+  hc 8289 bytes, xxh32 f00a32d4, same
+  frame 9365 bytes, xxh32 bbaac8fe
+noise: 2097152 bytes, xxh32 b7bb0141
+  lz4 2105378 bytes, xxh32 407e9a68
+  restored 2097152 bytes, same
+  hc 2105373 bytes, xxh32 64d488ac, same
+  frame 2097291 bytes, xxh32 e72ab99c
+records: 2097152 bytes, xxh32 fb03cbcf
+  lz4 376487 bytes, xxh32 9dcf6231
+  restored 2097152 bytes, same
+  hc 190076 bytes, xxh32 a56cc637, same
+  frame 376998 bytes, xxh32 fa7d5d24

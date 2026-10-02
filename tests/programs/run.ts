@@ -5,6 +5,14 @@
 // program also runs compiled by swf2es in node, whose deterministic output
 // must match too, and whose timings are reported.
 //
+// lz4 is LZ4's C compiled by Crossbridge (com-lz4-as3's sources, with the
+// driver in lz4/), built and run as avmshell's projector by the oracle
+// image's own gcc; swf2es runs the projector's ABC. That avmshell has
+// Crossbridge's ShellPosix, which swf2es's shell has not, so there the
+// program starts as in a player: it traces CModule.start's arguments and
+// writes through PlayerKernel, which prefixes its writes. Those are not
+// compared.
+//
 // One line is not compared: as3pb's wire checksum multiplies past 2^53,
 // which the oracle's 32-bit avmshell computes in the x87's extended
 // precision and swf2es in IEEE doubles (docs/architecture.md, "Testing
@@ -22,7 +30,14 @@ import {
   swf2esFacts,
   typedErrors,
 } from "../../oracle/abc-facts.ts";
-import { containerEngine, libraries, type OracleJob, runOracle } from "../../oracle/oracle.ts";
+import {
+  type CrossbridgeJob,
+  containerEngine,
+  libraries,
+  type OracleJob,
+  runCrossbridge,
+  runOracle,
+} from "../../oracle/oracle.ts";
 import { runSwf2es } from "../conformance/swf2es.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -49,8 +64,26 @@ function as3pb(): OracleJob {
   };
 }
 
-if (!existsSync(`${here}as3pb/runtime`)) {
-  console.log("programs: skipped (tests/programs/as3pb missing; run git submodule update --init)");
+/** LZ4's benchmark: the driver and com-lz4-as3's vendored sources, as -O4 as the library builds. */
+function lz4(): CrossbridgeJob {
+  const vendor = "tests/programs/com-lz4-as3/native/vendor";
+  return {
+    name: "lz4",
+    gccArgs: [
+      "-O4",
+      "-DNDEBUG",
+      "-flto-api=tests/programs/com-lz4-as3/native/exports.txt",
+      "-fllvm-opt-opt=-strip",
+      "-disable-telemetry",
+      `-I${vendor}`,
+      "tests/programs/lz4/main.c",
+      ...["lz4", "lz4hc", "lz4frame", "xxhash"].map((f) => `${vendor}/${f}.c`),
+    ],
+  };
+}
+
+if (!existsSync(`${here}as3pb/runtime`) || !existsSync(`${here}com-lz4-as3/native`)) {
+  console.log("programs: skipped (a submodule is missing; run git submodule update --init)");
   process.exit(0);
 }
 
@@ -62,12 +95,17 @@ try {
   process.exit(0);
 }
 
-const programs = [{ name: "as3pb", job: as3pb() }];
-const results = runOracle(
-  programs.map((p) => p.job),
-  `${here}out`,
-  { engine, abcdump: true, timeoutSeconds: 120 },
-);
+// Each program as avmshell ran it, with its ABC and abcdump's dump of it.
+const results = [
+  ...runOracle([as3pb()], `${here}out`, { engine, abcdump: true, timeoutSeconds: 120 }).map(
+    (r) => ({
+      ...r,
+      name: "as3pb",
+      abc: r.compiled ? new Uint8Array(readFileSync(`${here}out/${r.name}.abc`)) : null,
+    }),
+  ),
+  ...runCrossbridge([lz4()], `${here}out`, { engine }),
+];
 
 // What avmshell loads before each program.
 const builtins = libraries(["builtin", "shell_toplevel"], `${here}out/lib`, { engine }).map(
@@ -75,9 +113,9 @@ const builtins = libraries(["builtin", "shell_toplevel"], `${here}out/lib`, { en
 );
 
 let failed = 0;
-for (const [i, r] of results.entries()) {
-  const name = programs[i].name;
-  if (!r.compiled) {
+for (const r of results) {
+  const name = r.name;
+  if (!r.compiled || !r.abc) {
     failed++;
     console.log(`FAIL ${name} did not compile\n${r.compileLog}`);
     continue;
@@ -102,7 +140,7 @@ for (const [i, r] of results.entries()) {
     console.log(output);
   }
 
-  const abc = new Uint8Array(readFileSync(`${here}out/${r.name}.abc`));
+  const abc = r.abc;
   const differences = compareFacts(abcdumpFacts(r.dump ?? ""), swf2esFacts(abc));
   const errors = typedErrors(builtins, abc);
   if (errors.length) {
@@ -125,7 +163,7 @@ for (const [i, r] of results.entries()) {
 
   const seconds = ((performance.now() - started) / 1000).toFixed(1);
   const compared = (all: string[]) => {
-    const kept = all.filter((l) => !l.startsWith("time: "));
+    const kept = withoutPlayerStart(all).filter((l) => !l.startsWith("time: "));
     const at = kept.indexOf("--- Wire checksum ---");
     return at < 0 ? kept : [...kept.slice(0, at + 1), ...kept.slice(at + 2)];
   };
@@ -146,7 +184,7 @@ for (const [i, r] of results.entries()) {
   }
   failed += differences.length ? 1 : 0;
   console.log(`     ${name} in swf2es, ${seconds} s:`);
-  for (const l of lines2.filter((l) => l.startsWith("time: "))) {
+  for (const l of withoutPlayerStart(lines2).filter((l) => l.startsWith("time: "))) {
     console.log(`       ${l.slice(6)}`);
   }
 
@@ -157,4 +195,22 @@ for (const [i, r] of results.entries()) {
 
 if (failed) {
   process.exit(1);
+}
+
+/** A Crossbridge program's output without its start as a player's: up to PlayerKernel's warning, its writes' prefixes, and the empty lines after the last. */
+function withoutPlayerStart(lines: string[]): string[] {
+  const at = lines.findIndex((l) => l.includes("Warning: PlayerKernel instantiated from shell!"));
+  if (at < 0) {
+    return lines;
+  }
+
+  // A write is one trace, of as many lines as it wrote.
+  const rest = lines
+    .slice(at + 1)
+    .flatMap((l) => l.replace(/^\(\d+\) PlayerKernel\.write\(\d+\): /, "").split("\n"));
+  while (rest.at(-1) === "") {
+    rest.pop();
+  }
+
+  return rest;
 }

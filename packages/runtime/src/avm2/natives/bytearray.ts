@@ -582,6 +582,42 @@ export function byteArrayNatives(rt: Runtime): Natives {
       b.clear();
     }
 
+    // As ByteArray::CAS: the int at a word-aligned index within the bytes,
+    // replaced by `next` if it is `expected`; the int there before.
+    atomicCompareAndSwapIntAt(index: Value, expected: Value, next: Value) {
+      const b = bytesOf(rt, this);
+      const at = rt.toInt(index) >>> 0;
+      if (b.length < 4 || at > b.length - 4 || at % 4 !== 0) {
+        throw rt.error("RangeError", 1506);
+      }
+
+      const previous = b.view.getInt32(at, true);
+      if (previous === rt.toInt(expected)) {
+        b.view.setInt32(at, rt.toInt(next), true);
+      }
+
+      return previous;
+    }
+
+    // As ByteArrayObject::atomicCompareAndSwapLength: the length set to
+    // `next` if it is `expected`, as its setter sets it; the length before.
+    // The domain memory refuses a length below its least, as later avmplus
+    // does; the oracle's avmshell sets it.
+    atomicCompareAndSwapLength(expected: Value, next: Value) {
+      const b = bytesOf(rt, this);
+      const length = rt.toInt(next);
+      if (b.subscribed && length < GLOBAL_MEMORY_MIN_SIZE) {
+        throw rt.error("RangeError", 1506);
+      }
+
+      const previous = b.length;
+      if (previous === rt.toInt(expected)) {
+        b.setLength(length >>> 0, true);
+      }
+
+      return previous;
+    }
+
     // Reads.
     readBoolean() {
       const b = bytesOf(rt, this);
@@ -675,8 +711,11 @@ export function byteArrayNatives(rt: Runtime): Natives {
         throw rt.error("RangeError", 2006);
       }
 
+      // A view, not a copy: set copies once, and as memmove where the two
+      // are one ByteArray. A target that grows keeps the view's bytes as
+      // they were.
       const to = bytesOf(rt, bytes);
-      const read = b.read(count);
+      const read = b.readView(count);
       if (offset + count >= to.length) {
         to.setLength(offset + count);
       }
@@ -775,8 +814,9 @@ export function byteArrayNatives(rt: Runtime): Natives {
         throw rt.error("RangeError", 2006);
       }
 
+      // A view, not a copy, as readBytes reads.
       if (count > 0) {
-        b.write(from.buffer.slice(offset, offset + count));
+        b.write(from.buffer.subarray(offset, offset + count));
       }
     }
 
@@ -870,6 +910,37 @@ export function byteArrayNatives(rt: Runtime): Natives {
   return natives;
 }
 
+/**
+ * As DomainEnv::set_globalMemory: the domain memory set to ByteArray `v`, or
+ * to the scratch memory for null; a ByteArray shorter than the least length
+ * fails. avmshell's Domain and the player's ApplicationDomain both set it.
+ */
+export function setDomainMemory(rt: Runtime, v: Value): void {
+  const previous: AsObject | null = rt.memoryProvider;
+  if (v === null || v === undefined) {
+    if (previous) {
+      bytesOf(rt, previous).subscribed = false;
+    }
+
+    rt.memoryProvider = null;
+    rt.memory = rt.scratchMemory;
+    return;
+  }
+
+  const b = bytesOf(rt, v);
+  if (b.length < GLOBAL_MEMORY_MIN_SIZE) {
+    throw rt.error("Error", 1504);
+  }
+
+  b.subscribed = true;
+  b.notify();
+  if (previous && previous !== v) {
+    bytesOf(rt, previous).subscribed = false;
+  }
+
+  rt.memoryProvider = v;
+}
+
 /** avmshell's Domain: its domain memory is the runtime's, a ByteArray or the scratch memory. */
 export function domainNatives(rt: Runtime): Natives {
   const natives: Natives = {};
@@ -887,31 +958,8 @@ export function domainNatives(rt: Runtime): Natives {
       return rt.memoryProvider;
     }
 
-    // As DomainEnv::set_globalMemory: null for the scratch memory; a ByteArray shorter than the least length fails.
     set domainMemory(v: Value) {
-      const previous: AsObject | null = rt.memoryProvider;
-      if (v === null || v === undefined) {
-        if (previous) {
-          bytesOf(rt, previous).subscribed = false;
-        }
-
-        rt.memoryProvider = null;
-        rt.memory = rt.scratchMemory;
-        return;
-      }
-
-      const b = bytesOf(rt, v);
-      if (b.length < GLOBAL_MEMORY_MIN_SIZE) {
-        throw rt.error("Error", 1504);
-      }
-
-      b.subscribed = true;
-      b.notify();
-      if (previous && previous !== v) {
-        bytesOf(rt, previous).subscribed = false;
-      }
-
-      rt.memoryProvider = v;
+      setDomainMemory(rt, v);
     }
   }
 
