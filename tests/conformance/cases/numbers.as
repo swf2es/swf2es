@@ -8,3 +8,5 @@ trace(parseInt("42px"), parseInt("0x1f"), parseInt("777", 8), parseFloat("3.14ab
 trace(isNaN("abc"), isFinite("12"), Number(""), Number(" "), Number("1,5"), Number(null), Number(undefined));
 trace(Math.round(-0.5), Math.round(2.5), Math.floor(-1.5), Math.ceil(-1.5), Math.max(), Math.min(1, "2"));
 trace(int("  42  "), int("0x10"), uint("-1"), int(true), int(3000000000), uint(-0.5));
+// Math.round as floor(x + 0.5): never -0.
+trace(1 / Math.round(-0), 1 / Math.round(-0.5), 1 / Math.round(-0.49), Math.round(NaN), Math.round(2.5), Math.round(-2.5), Math.round(-Infinity));

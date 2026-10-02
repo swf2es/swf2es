@@ -40,7 +40,6 @@ for (const name of [
   "exp",
   "floor",
   "log",
-  "round",
   "sin",
   "sqrt",
   "tan",
@@ -52,6 +51,11 @@ for (const name of [
 }
 
 for (const prefix of ["Math", "Number"]) {
+  // As MathUtils::round, floor(x + 0.5): never -0, as JavaScript's is for -0.5 to -0.
+  numberNatives[`${prefix}.round`] = (rt) => (x: Value) => {
+    const r = Math.round(rt.toNumber(x));
+    return r === 0 ? 0 : r;
+  };
   numberNatives[`${prefix}.atan2`] = (rt) => (y: Value, x: Value) =>
     Math.atan2(rt.toNumber(y), rt.toNumber(x));
   numberNatives[`${prefix}.pow`] = (rt) => (x: Value, y: Value) => rt.toNumber(x) ** rt.toNumber(y);
