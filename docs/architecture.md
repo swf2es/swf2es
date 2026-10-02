@@ -527,6 +527,17 @@ dispatch is part of the first slice: listeners by type and phase on the
 player object, `dispatchEvent` through the player's parent chain, and the
 frame events the player broadcasts.
 
+`MouseEvent` keeps its local coordinates and flags on the event. Its stage
+coordinates are read through the target's current display matrix, so moving
+the target after dispatch changes them without changing `localX` or `localY`.
+Without a target a finite local coordinate gives stage coordinate zero, and
+an unset one stays NaN (`mouseevent_constr` and `mouseevent_stagexy` in the
+corpus). AIR's `playerglobal.abc` adds `commandKey`, `controlKey` and
+`clickCount` to `MouseEvent.toString`; the Flash Player trace in
+`mouseevent_valueof_tostring` has none of them, so that one output still
+differs though its native values match. This slice does not yet dispatch
+mouse input from the host.
+
 A frame runs in the order Flash runs one, which the Flash oracle fixed
 case by case: the timelines advanced, which places children and
 constructs their classes as it goes; `ENTER_FRAME`; `FRAME_CONSTRUCTED`;
