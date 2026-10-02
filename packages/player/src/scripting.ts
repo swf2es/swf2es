@@ -45,6 +45,15 @@ export interface ExternalInterfaceHost {
   objectID?: string | null;
 }
 
+/** A host request's bytes and transport result; a local file reports status 0. */
+export interface FetchResult {
+  bytes: Uint8Array | null;
+  status: number;
+  headers: readonly (readonly [name: string, value: string])[];
+  /** Set for `file:` URLs: Flash reports status 0 and leaves the URL out of #2032. */
+  local?: boolean;
+}
+
 /** AS3 classes placed children are instances of when SymbolClass binds none. */
 const DEFAULT_CLASS = {
   shape: "flash.display::Shape",
@@ -64,6 +73,7 @@ interface Load {
   /** The URL asked for, resolved; null for a load from bytes, which told its progress in the call. */
   url: string | null;
   bytes: Uint8Array;
+  status: number;
   /** What the content's frame does: it returns what the frame's end does, INIT and COMPLETE. */
   ready: (() => () => void) | null;
   /** The IOErrorEvent text the load ended in, as Flash words one. */
@@ -85,7 +95,7 @@ export class Scripting {
   /** How many loads from bytes there have been: each gets a URL of its own under the main SWF's. */
   private dynamic = 0;
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
-  fetch: ((url: string, signal: AbortSignal) => Promise<Uint8Array>) | null = null;
+  fetch: ((url: string, signal: AbortSignal) => Promise<FetchResult>) | null = null;
   /** Decodes the images of a SWF's JPEG tags as it is linked; the browser's by default, null for none. */
   readonly decodeImage: ImageDecode | null;
   /**
@@ -144,11 +154,12 @@ export class Scripting {
   private readonly timers = new TimerHeap();
   quality = "HIGH";
   private readonly hashes: string[] = [];
+  private statusClass: AsObject | null = null;
 
   constructor(
     readonly codegen: Codegen,
     options: avm2.RuntimeOptions & {
-      fetch?: (url: string, signal: AbortSignal) => Promise<Uint8Array>;
+      fetch?: (url: string, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
       externalInterface?: ExternalInterfaceHost;
       decodeImage?: ImageDecode | null;
@@ -572,7 +583,7 @@ export class Scripting {
       return;
     }
 
-    this.enqueue(loader, generation, null, Promise.resolve(bytes));
+    this.enqueue(loader, generation, null, Promise.resolve({ bytes, status: 0, headers: [] }));
   }
 
   /**
@@ -639,20 +650,16 @@ export class Scripting {
   }
 
   /** A URLStream's host request, delivered in a frame after the bytes arrive. */
-  requestBytes(
-    url: string,
-    signal: AbortSignal,
-    deliver: (bytes: Uint8Array | null) => void,
-  ): void {
+  requestBytes(url: string, signal: AbortSignal, deliver: (result: FetchResult) => void): void {
     const resolved = resolve(this.url, url);
     const fetch = this.fetch;
     // Attach both handlers at once; an early rejection must not be unhandled.
     const fetched = (fetch ? fetch(resolved, signal) : Promise.reject()).then(
-      (bytes) => bytes,
-      () => null,
+      (result) => result,
+      () => ({ bytes: null, status: 0, headers: [] }),
     );
-    const completed = fetched.then((bytes) => {
-      this.readyBytes.push(() => deliver(bytes));
+    const completed = fetched.then((result) => {
+      this.readyBytes.push(() => deliver(result));
     });
     this.pendingStreams.add(completed);
     void completed.then(
@@ -662,8 +669,9 @@ export class Scripting {
   }
 
   /** The text a failed stream reports, using Flash Player's message and the resolved URL. */
-  streamError(url: string): string {
-    return `${this.errorText(2032)} URL: ${resolve(this.url, url)}`;
+  streamError(url: string, local = false): string {
+    const text = this.errorText(2032);
+    return local ? text.replace(/\.$/, "") : `${text} URL: ${resolve(this.url, url)}`;
   }
 
   /**
@@ -679,13 +687,14 @@ export class Scripting {
     loader: AsObject,
     generation: number,
     url: string | null,
-    bytes: Promise<Uint8Array>,
+    bytes: Promise<FetchResult>,
   ): void {
     const load: Load = {
       loader,
       generation,
       url,
       bytes: new Uint8Array(0),
+      status: 0,
       ready: null,
       failed: null,
     };
@@ -693,16 +702,17 @@ export class Scripting {
     // Settled at once, not when its turn in the chain comes: a rejection must find its handler.
     const fetched = bytes.then(
       (result) => result,
-      () => null,
+      () => ({ bytes: null, status: 0, headers: [] }),
     );
     this.preparing = this.preparing.then(async () => {
       const result = await fetched;
-      if (!result) {
+      load.status = result.status;
+      if (!result.bytes) {
         load.failed = `${this.errorText(2035)} URL: ${url}`;
         return;
       }
 
-      load.bytes = result;
+      load.bytes = result.bytes;
       try {
         load.ready = await this.prepare(load);
       } catch (e) {
@@ -793,6 +803,13 @@ export class Scripting {
         ends.push(load.ready());
       } else {
         const info = this.loaderInfoOf(load.loader);
+        if (load.url !== null) {
+          dispatchEvent(this, info, this.httpStatus(load.status));
+          if (load.generation !== load.loader.$generation) {
+            continue;
+          }
+        }
+
         const error = this.rt.construct(
           this.rt.classNamed("flash.events::IOErrorEvent"),
           "ioError",
@@ -877,7 +894,15 @@ export class Scripting {
       }
 
       dispatchEvent(this, info, this.event("init"));
-      // An INIT listener that unloads has no COMPLETE, as Flash (the loads-init case).
+      if (!live()) {
+        return;
+      }
+
+      if (load.url !== null) {
+        dispatchEvent(this, info, this.httpStatus(load.status));
+      }
+
+      // An INIT or status listener that unloads has no COMPLETE, as Flash.
       if (live()) {
         dispatchEvent(this, info, this.event("complete"));
       }
@@ -947,6 +972,17 @@ export class Scripting {
   /** A flash.events.Event of `type`. */
   event(type: string, bubbles = false): AsObject {
     return this.rt.construct(this.rt.classNamed("flash.events::Event"), type, bubbles, false);
+  }
+
+  /** Flash Player's status event; AIR-only response properties stay at their defaults. */
+  httpStatus(status: number): AsObject {
+    let cls = this.statusClass;
+    if (!cls) {
+      cls = this.rt.classNamed("flash.events::HTTPStatusEvent");
+      this.statusClass = cls;
+    }
+
+    return this.rt.construct(cls, "httpStatus", false, false, status);
   }
 
   /** The display objects a broadcast of `type` reaches, for EventDispatcher to keep. */

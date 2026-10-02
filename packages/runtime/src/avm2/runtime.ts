@@ -174,6 +174,8 @@ export type NativesProvider =
 export interface ClassHook {
   /** How its instances resolve names, as XML's (Traits.properties). */
   properties?: PropertyHook;
+  /** A playerglobal set-only accessor whose bodyless setter stores in an instance slot. */
+  setOnlySlots?: Record<string, string>;
   create?: (traits: Traits, rt: Runtime) => AsObject;
   /** Its prototype object, when not an Object: an instance of the class, as Date's (its $it is ready). */
   prototype?: (rt: Runtime, cls: AsObject) => AsObject;
@@ -1259,6 +1261,14 @@ export class Runtime {
         return traits.proto[methodKey(id)].call(o);
       case BIND_Method:
         return this.methodClosure(o, traits, id);
+      case BIND_Set: {
+        const slot = this.classHooks[traits.name]?.setOnlySlots?.[mn.name ?? ""];
+        if (slot !== undefined) {
+          return o[slot];
+        }
+
+        throw this.error("ReferenceError", 1077, mn.name ?? "*", traits.name);
+      }
       default:
         throw this.error("ReferenceError", 1077, mn.name ?? "*", traits.name);
     }
@@ -2003,6 +2013,19 @@ export class Runtime {
 
     for (const [d, factory, id] of desc.instance.methods) {
       itraits.proto[methodKey(d)] = this.withId(factory(iscope, base), id);
+    }
+
+    // Playerglobal can declare an accessor whose setter has no ABC body.
+    // Install it here so both direct bound calls and dynamic property writes reach it.
+    if (hooks?.setOnlySlots) {
+      for (const [name, slot] of Object.entries(hooks.setOnlySlots)) {
+        const binding = itraits.find(this.publicName(name));
+        if ((binding & 7) === BIND_Set) {
+          itraits.proto[methodKey((binding >> 3) + 1)] ??= function (this: AsObject, value: Value) {
+            this[slot] = value;
+          };
+        }
+      }
     }
 
     itraits.proto.$init = desc.init(iscope, base);

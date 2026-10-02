@@ -368,5 +368,9 @@
     "flash.utils::unescapeMultiByte",
     "trace"
   ],
-  "hooks": ["flash.display::BitmapData", "flash.display::DisplayObject"]
+  "hooks": [
+    "flash.display::BitmapData",
+    "flash.display::DisplayObject",
+    "flash.events::HTTPStatusEvent"
+  ]
 }

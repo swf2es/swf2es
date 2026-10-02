@@ -38,11 +38,19 @@ async function scriptingFor(
     url: url ? new URL(url, location.href).href : undefined,
     fetch: async (target, signal) => {
       const response = await fetch(target, { signal });
-      if (!response.ok) {
-        throw new Error(`${response.status} for ${target}`);
-      }
+      const headers: [string, string][] = [];
+      response.headers.forEach((value, name) => {
+        headers.push([name, value]);
+      });
 
-      return new Uint8Array(await response.arrayBuffer());
+      // The corpus's files are served over HTTP here, but Flash loaded them from disk.
+      const local = new URL(target).pathname.startsWith("/corpus/");
+      return {
+        bytes: response.ok ? new Uint8Array(await response.arrayBuffer()) : null,
+        status: local ? 0 : response.status,
+        headers: local ? [] : headers,
+        local,
+      };
     },
   });
   const libraries = await Promise.all(

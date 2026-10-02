@@ -18,6 +18,7 @@ import { spriteNatives } from "./flash/display/Sprite.js";
 import { stageNatives } from "./flash/display/Stage.js";
 import { eventNatives } from "./flash/events/Event.js";
 import { eventDispatcherNatives } from "./flash/events/EventDispatcher.js";
+import { httpStatusHooks } from "./flash/events/HTTPStatusEvent.js";
 import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js";
 import { transformNatives } from "./flash/geom/Transform.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
@@ -61,5 +62,5 @@ export function playerNatives(s: Scripting): avm2.Natives {
 }
 
 export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
-  return { ...displayObjectHooks(s), ...bitmapDataHooks(s) };
+  return { ...displayObjectHooks(s), ...bitmapDataHooks(s), ...httpStatusHooks };
 }
