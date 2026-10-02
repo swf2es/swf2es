@@ -741,6 +741,11 @@ export class Runtime {
     if (mn.runtimeName) {
       const part = parts[k];
       if (part?.$local !== undefined && !(part instanceof Namespace)) {
+        // A Proxy's QName of a multiname names its namespaces still.
+        if (part.$mn) {
+          return part.$mn;
+        }
+
         // A QName names its own namespace, null for any, and local name,
         // null for any, and may be an attribute's.
         // Bindings compare interned namespaces: an XML name's has a prefix.

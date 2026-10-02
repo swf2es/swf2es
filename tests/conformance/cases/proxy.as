@@ -4,6 +4,29 @@
 // QName and the arguments; in and delete and for-in go through hasProperty,
 // deleteProperty and the nextName trio; a bound name never reaches them.
 package {
+  public namespace hidden = "http://example.com/hidden";
+}
+package {
+  public class Namespaced {
+    hidden var deep:Number = 7;
+  }
+}
+package {
+  import flash.utils.Proxy;
+  import flash.utils.flash_proxy;
+  // Forwards every name to its target as the name it was given.
+  public class Forward extends Proxy {
+    private var target:*;
+    public function Forward(target:*) { this.target = target; }
+    override flash_proxy function getProperty(name:*):* {
+      return QName(name).uri + "|" + target[name];
+    }
+    override flash_proxy function setProperty(name:*, value:*):void {
+      target[name] = value;
+    }
+  }
+}
+package {
   import flash.utils.Proxy;
   import flash.utils.flash_proxy;
   import avmplus.getQualifiedClassName;
@@ -64,3 +87,11 @@ var values:Array = [];
 for each (var v:* in p) { values.push(v); }
 trace("for each", values);
 trace("string", String(p), p + "");
+// Under use namespace, a name the proxy gets still names that namespace too.
+function forwarded():String {
+  use namespace hidden;
+  var f:Forward = new Forward(new Namespaced());
+  f.deep = 8;
+  return f.deep + " " + f.hidden::deep;
+}
+trace("forwarded", forwarded());

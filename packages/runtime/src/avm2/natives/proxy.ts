@@ -25,12 +25,17 @@ function nameFor(rt: Runtime, mn: Multiname): Value {
     return name;
   }
 
-  // A QName keeps the whole multiname in avmplus; of a set of several it reports the empty URI.
+  // A QName keeps the whole multiname in avmplus; of a set of several it
+  // reports the empty URI, and still names all of them as a lookup's name.
   const ns = mn.namespaces.length > 1 ? publicNs : mn.namespaces.length ? mn.namespaces[0] : null;
   const q = rt.builtinClass("QName").$it.instance();
   q.$ns = ns;
   q.$local = name;
   q.$attr = mn.attribute;
+  if (mn.namespaces.length > 1) {
+    q.$mn = mn;
+  }
+
   return q;
 }
 
