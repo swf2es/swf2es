@@ -1,9 +1,10 @@
-// flash.concurrent's Mutex and Condition, as avmplus' ConcurrencyGlue on its
-// one thread: a mutex is held or not, recursively, and nothing else runs
-// to take it or to notify a condition. Crossbridge makes both on startup
-// whether or not it starts workers.
+// flash.concurrent's Mutex and Condition, and avm2.intrinsics.memory's
+// compare and swap, as avmplus' ConcurrencyGlue on its one thread: a mutex
+// is held or not, recursively, and nothing else runs to take it, to notify
+// a condition or to see memory out of order. Crossbridge uses them all on
+// startup whether or not it starts workers.
 import type { AsObject, Runtime, Value } from "../runtime.js";
-import { type Natives, registerNativeClass } from "./define.js";
+import { type Natives, plain, registerNativeClass } from "./define.js";
 
 /** A mutex's state: how many times this one thread holds it. */
 interface MutexObject extends AsObject {
@@ -91,6 +92,26 @@ export function concurrentNatives(rt: Runtime): Natives {
       }
     }
   }
+
+  // As ConcurrentMemory::casi32: the domain memory's int at a word-aligned
+  // address replaced by `next` if it is `expected`; the int there before.
+  natives["avm2.intrinsics.memory::casi32"] = plain(
+    (address: Value, expected: Value, next: Value) => {
+      const at = rt.toInt(address);
+      const size = rt.memoryLength;
+      if (at % 4 !== 0 || size < 4 || at >>> 0 > size - 4) {
+        throw rt.error("RangeError", 1506);
+      }
+
+      const previous = rt.memory.getInt32(at, true);
+      if (previous === rt.toInt(expected)) {
+        rt.memory.setInt32(at, rt.toInt(next), true);
+      }
+
+      return previous;
+    },
+  );
+  natives["avm2.intrinsics.memory::mfence"] = plain(() => {});
 
   registerNativeClass(natives, "flash.concurrent::Mutex", MutexNatives);
   registerNativeClass(natives, "flash.concurrent::Condition", ConditionNatives);

@@ -582,6 +582,42 @@ export function byteArrayNatives(rt: Runtime): Natives {
       b.clear();
     }
 
+    // As ByteArray::CAS: the int at a word-aligned index within the bytes,
+    // replaced by `next` if it is `expected`; the int there before.
+    atomicCompareAndSwapIntAt(index: Value, expected: Value, next: Value) {
+      const b = bytesOf(rt, this);
+      const at = rt.toInt(index) >>> 0;
+      if (b.length < 4 || at > b.length - 4 || at % 4 !== 0) {
+        throw rt.error("RangeError", 1506);
+      }
+
+      const previous = b.view.getInt32(at, true);
+      if (previous === rt.toInt(expected)) {
+        b.view.setInt32(at, rt.toInt(next), true);
+      }
+
+      return previous;
+    }
+
+    // As ByteArrayObject::atomicCompareAndSwapLength: the length set to
+    // `next` if it is `expected`, as its setter sets it; the length before.
+    // The domain memory refuses a length below its least, as later avmplus
+    // does; the oracle's avmshell sets it.
+    atomicCompareAndSwapLength(expected: Value, next: Value) {
+      const b = bytesOf(rt, this);
+      const length = rt.toInt(next);
+      if (b.subscribed && length < GLOBAL_MEMORY_MIN_SIZE) {
+        throw rt.error("RangeError", 1506);
+      }
+
+      const previous = b.length;
+      if (previous === rt.toInt(expected)) {
+        b.setLength(length >>> 0, true);
+      }
+
+      return previous;
+    }
+
     // Reads.
     readBoolean() {
       const b = bytesOf(rt, this);

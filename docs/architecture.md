@@ -362,7 +362,11 @@ its capacity and UTF-8 (`bytearray.ts`), AMF3 (`amf.ts`) and JSON
 (`json.ts`) and describeType (`describe.ts`). These are MPL-2.0 as their sources are. Domain memory is
 avmshell's `avmplus.Domain`'s: 1024 bytes of scratch memory until a
 ByteArray is set as it. Date is JavaScript's Date, with avmplus' string
-formats.
+formats. flash.concurrent's Mutex and Condition and ByteArray's atomic
+operations are avmplus' on its one thread: locks are counted, a wait ends
+at once, as nothing else can notify it, and Worker.current is the
+primordial worker, the one there is (`natives/concurrent.ts`); starting
+another is not supported. Crossbridge's code uses them all as it starts.
 
 `avmplus.describeTypeJSON`, which `describeType` and playerglobal's
 `flash.utils.describeType` build their XML from, is avmplus' TypeDescriber
