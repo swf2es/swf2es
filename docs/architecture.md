@@ -993,9 +993,12 @@ channel. A texture lives as long as its store: `dispose` frees it, and a
 store collected frees it through a FinalizationRegistry; Pixi's texture
 collector never unloads it, as a texture newer than its store cannot be
 uploaded again. A store larger than the GPU's texture limit stays the
-CPU's. The stage of 1,500 outlined shapes above draws into a 1920 × 1080
-bitmap in about 57 ms against Flash's 44, and with a `getPixel` after
-it in about 67. Each rule is Flash's
+CPU's. A texture starts with no bytes, and a store whose pixels are all
+one colour, as a new bitmap's are, is cleared to it on the GPU rather
+than uploaded; the scan that tells stops at the first pixel that
+differs. The stage of 1,500 outlined shapes above draws into a new
+1920 × 1080 bitmap in about 38 ms against Flash's 44, and with a
+`getPixel` after it in about 65. Each rule is Flash's
 as the `draw-bitmaps` and `draw-objects` cases trace and draw it under
 adl: a destination pixel takes the source pixel under its centre,
 clamped to the source's edges; the translation is snapped down to

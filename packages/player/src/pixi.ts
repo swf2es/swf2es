@@ -719,18 +719,53 @@ class StoreTexture implements GpuCopy {
     height: number,
   ) {
     this.source = new BufferImageSource({
-      resource: new Uint8Array(width * height * 4),
+      // Bytes decide the format, 8 bits a channel; none allocate a float buffer.
+      resource: new Uint8Array(0),
       width,
       height,
       alphaMode: "premultiplied-alpha",
       scaleMode: "nearest",
       autoGarbageCollect: false,
     });
+    // No bytes until the CPU's are uploaded: the first use allocates the
+    // texture without an upload, and a store of one colour is cleared to it.
+    this.source.resource = null as unknown as Uint8Array;
     this.texture = new Texture({ source: this.source });
   }
 
   read(): Uint32Array {
     return argbOf(this.renderer.extract.pixels(this.texture).pixels);
+  }
+
+  /** The store's pixels on the GPU: cleared to their colour where they are all one, as a new bitmap's are, else uploaded. */
+  upload(pixels: Uint32Array): void {
+    const first = pixels[0];
+    let uniform = true;
+    for (let i = 1; i < pixels.length; i++) {
+      if (pixels[i] !== first) {
+        uniform = false;
+        break;
+      }
+    }
+
+    if (!uniform) {
+      this.source.resource = rgbaOf(pixels);
+      this.source.update();
+      return;
+    }
+
+    // Already premultiplied, as the texture holds them; a byte divided by 255 comes back exactly.
+    this.renderer.render({
+      container: EMPTY,
+      target: this.texture,
+      clear: true,
+      clearColor: [
+        ((first >>> 16) & 0xff) / 255,
+        ((first >>> 8) & 0xff) / 255,
+        (first & 0xff) / 255,
+        (first >>> 24) / 255,
+      ],
+    });
   }
 
   /** The texture sampled linearly: a texture's sampling is its source's, which Bitmaps share. */
@@ -798,8 +833,7 @@ class GpuBitmaps {
     }
 
     if (copy.version !== store.version && !store.newerOnGpu) {
-      copy.source.resource = rgbaOf(store.pixels);
-      copy.source.update();
+      copy.upload(store.pixels);
       copy.version = store.version;
     }
 
@@ -820,6 +854,8 @@ class GpuBitmaps {
 }
 
 const gpuBitmapsOf = new WeakMap<Renderer, GpuBitmaps>();
+/** Nothing, rendered to clear a texture. */
+const EMPTY = new PixiContainer();
 
 function gpuBitmaps(renderer: Renderer): GpuBitmaps {
   let bitmaps = gpuBitmapsOf.get(renderer);
