@@ -3,6 +3,7 @@
 // over curveTo.
 import type { Line } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import { BitmapStore } from "../../../bitmap.js";
 import type { DisplayObject } from "../../../display.js";
 import { CONTENT } from "../../../display.js";
 import { Drawing } from "../../../drawing.js";
@@ -62,9 +63,41 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
       drawing(this).beginFill({ type: "solid", color: argb(c[0] ?? 0, a[0] ?? 1) });
     }
 
-    beginBitmapFill(): void {
-      // Until bitmaps draw: a fill with nothing to show, so that the shape has its contours.
-      drawing(this).beginFill({ type: "solid", color: 0 });
+    /** The BitmapData itself, not a copy: the fill shows its later changes, the shape a view of its store. */
+    beginBitmapFill(
+      bitmap: Value,
+      matrix: Value = null,
+      repeat: Value = true,
+      smooth: Value = false,
+    ): void {
+      if (bitmap === null || bitmap === undefined) {
+        throw s.rt.error("TypeError", 2007, "bitmap");
+      }
+
+      const store: BitmapStore | null | undefined = (bitmap as AsObject).$store;
+      if (!store) {
+        throw s.rt.error("ArgumentError", 2015);
+      }
+
+      const read = (k: string, fallback: number) =>
+        matrix === null || matrix === undefined
+          ? fallback
+          : s.rt.toNumber(s.rt.getProperty(matrix as AsObject, s.rt.publicName(k)));
+      store.views.add(this.$display.ref);
+      drawing(this).beginFill({
+        type: "image",
+        image: store,
+        matrix: {
+          a: read("a", 1),
+          b: read("b", 0),
+          c: read("c", 0),
+          d: read("d", 1),
+          tx: read("tx", 0),
+          ty: read("ty", 0),
+        },
+        repeat: !!repeat,
+        smooth: !!smooth,
+      });
     }
 
     endFill(): void {
@@ -182,6 +215,14 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
       const source = (other as AsObject)?.$display?.drawing as Drawing | undefined;
       if (source) {
         drawing(this).copyFrom(source);
+        // Its BitmapData fills watched as the other's are.
+        for (const layer of source.layers) {
+          for (const { fill } of layer.fills) {
+            if (fill.type === "image" && fill.image instanceof BitmapStore) {
+              fill.image.views.add(this.$display.ref);
+            }
+          }
+        }
       } else {
         drawing(this).clear();
       }

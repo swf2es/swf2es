@@ -1019,7 +1019,11 @@ export const cases: PlayerCase[] = [
     script: "BitmapFills",
     frames: 2,
     capture: [1, 2],
-    tolerance: 2,
+    // The smoothed fills: Flash's bilinear samples a few hundredths of a
+    // texel from the GPU's, which shows where texels of far different
+    // colours meet at five times their size, by up to 25 a channel. The
+    // others, and the clipping, the tiling and the red, are exact.
+    tolerance: 25,
     maxOutliers: 0,
   },
   {
