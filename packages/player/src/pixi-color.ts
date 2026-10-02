@@ -21,6 +21,7 @@ import {
   ExtensionType,
   extensions,
   Geometry,
+  Graphics,
   generateTextureBatchBit,
   generateTextureBatchBitGl,
   getBatchSamplersUniformGroup,
@@ -276,14 +277,17 @@ class ColorBatcher extends Batcher {
 }
 
 extensions.add(ColorBatcher);
+// The name set, Pixi's "default" or another a host gives, is kept; a
+// renderable under a colour transform goes to this batcher over it.
 for (const proto of [BatchableGraphics.prototype, BatchableSprite.prototype]) {
   Object.defineProperty(proto, "batcherName", {
     configurable: true,
-    get(this: { renderable?: Colored | null }) {
-      return this.renderable?.flashColor ? NAME : "default";
+    get(this: { renderable?: Colored | null; $batcherName?: string }) {
+      return this.renderable?.flashColor ? NAME : (this.$batcherName ?? "default");
     },
-    // Pixi's constructors set "default": the renderable decides instead.
-    set() {},
+    set(this: { $batcherName?: string }, name: string) {
+      this.$batcherName = name;
+    },
   });
 }
 
@@ -300,6 +304,13 @@ export function setFlashColor(leaf: Container, ct: ColorTransform | null): void 
   }
 
   colored.flashColor = ct;
+  // Pixi draws a large Graphics unbatched, with its own shader, which has no
+  // transform: under one it is batched whatever its size, from then on.
+  if (ct && leaf instanceof Graphics && leaf.context.batchMode !== "batch") {
+    leaf.context.batchMode = "batch";
+    leaf.context.dirty = true;
+  }
+
   const view = leaf as Container & { onViewUpdate?: () => void };
   if ((was === null) !== (ct === null)) {
     const group = (leaf.renderGroup ?? leaf.parentRenderGroup) as { structureDidChange: boolean };

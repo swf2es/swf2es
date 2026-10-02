@@ -1248,7 +1248,7 @@ export const cases: PlayerCase[] = [
   },
   {
     name: "color-transforms",
-    swf: (abc) => bare(abc, 3, "ColorTransforms", 600, 100),
+    swf: (abc) => bare(abc, 3, "ColorTransforms", 600, 150),
     script: "ColorTransforms",
     frames: 3,
     capture: [1, 2, 3],

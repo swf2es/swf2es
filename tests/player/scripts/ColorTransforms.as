@@ -82,6 +82,16 @@ package {
       // ramp and swf2es after, which is documented, not drawn here.
       e.transform.colorTransform = new ColorTransform(0.5, 0.5, 1, 1, 64, 32, 0, 0);
       addChild(e);
+      // A shape Pixi would draw unbatched, of too many vertices: 60 squares,
+      // 240 corners, under an offset; on whole pixels, so their edges are exact.
+      var big:Shape = new Shape();
+      big.graphics.beginFill(0x204080);
+      for (var n:int = 0; n < 60; n++) {
+        big.graphics.drawRect(4 + (n % 30) * 20, 105 + int(n / 30) * 25, 12, 16);
+      }
+      big.graphics.endFill();
+      big.transform.colorTransform = new ColorTransform(1, 1, 1, 1, 150, 0, -64, 0);
+      addChild(big);
       trace("drawn");
 
       // Changed as it plays: another offset (the vertices packed again), then
