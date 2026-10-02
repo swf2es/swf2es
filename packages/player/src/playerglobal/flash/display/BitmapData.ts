@@ -168,14 +168,18 @@ function drawInto(
       return;
     }
 
+    const placed = { ...m, tx: m.tx - x0, ty: m.ty - y0 };
+    // Plain source over goes on the GPU, the store left there until a script reads it.
+    if (
+      !c &&
+      blend === "normal" &&
+      s.drawer.drawInto(store, o.$display, placed, x0, y0, x1 - x0, y1 - y0, samples)
+    ) {
+      return;
+    }
+
     const drawn = new BitmapStore(x1 - x0, y1 - y0, true, 0);
-    drawn.pixels = s.drawer(
-      o.$display,
-      { ...m, tx: m.tx - x0, ty: m.ty - y0 },
-      x1 - x0,
-      y1 - y0,
-      samples,
-    );
+    drawn.pixels = s.drawer.snapshot(o.$display, placed, x1 - x0, y1 - y0, samples);
     drawBitmap(store, drawn, { a: 1, b: 0, c: 0, d: 1, tx: x0, ty: y0 }, c, blend, r, false);
     return;
   }

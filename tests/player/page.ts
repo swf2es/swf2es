@@ -131,8 +131,7 @@ async function runSwf(
     const view = new PixiView(renderer);
     // BitmapData.draw of a display object renders with it, from the document class on.
     if (scripting) {
-      scripting.drawer = (o, m, width, height, samples) =>
-        view.snapshot(o, m, width, height, samples);
+      scripting.drawer = view;
     }
 
     await player.start();

@@ -967,9 +967,39 @@ at the corner four texels share, and only the final pixels are read
 back; a snapshot is composited unscaled at a whole pixel, which copies
 each pixel straight. A 1920 × 1080 stage of 1,500 outlined shapes draws
 in about 110 ms on a desktop GPU against Flash's 44 (from 810 before),
-most of it the wait for the GPU before the read; keeping a drawn
-bitmap on the GPU until a script reads it, as Ruffle does, would save
-that. Each rule is Flash's
+most of it the wait for the GPU before the read.
+Slice five keeps a bitmap's pixels where they were last written, as
+Ruffle does (its `DirtyState`). With a renderer, a store has a GPU
+texture in it, one a renderer, made when a Bitmap first shows it or a
+draw first renders into it, holding the store's premultiplied ARGB exactly, uploaded and read
+back as they are, never premultiplied or divided on the way; every
+Bitmap showing the store samples that one texture, nearest, and a
+smoothed one a second, linearly sampled copy made on the GPU as the
+first changes, since a texture's sampling is its source's in Pixi. A store is newer on
+the CPU or on the GPU: a CPU operation that changes it uploads the whole
+store before the next render that needs it, as now, while `draw` of a
+display object in the `normal` blend mode with no colour transform
+renders straight into the texture, the samples averaged as above and
+the last halving composited source over at the reach, and leaves the
+store newer on the GPU. Reading `pixels`, which every CPU operation does,
+first reads the texture back if the GPU's copy is newer, once, so a
+script that draws the stage into a bitmap and shows it never waits on
+the GPU, and one that then calls `getPixel` waits as before. Any other
+draw (another blend mode, a colour transform, a bitmap source) stays
+the CPU's, after that read. A store a draw left newer on one renderer's
+GPU is read back through that renderer before another uploads it.
+Without a renderer, as in node, a store is the CPU's alone. GPU compositing rounds source over in floating point
+where the CPU's is Flash's 8-bit arithmetic, which parts by at most 1 a
+channel. A texture lives as long as its store: `dispose` frees it, and a
+store collected frees it through a FinalizationRegistry; Pixi's texture
+collector never unloads it, as a texture newer than its store cannot be
+uploaded again. A store larger than the GPU's texture limit stays the
+CPU's. A texture starts with no bytes, and a store whose pixels are all
+one colour, as a new bitmap's are, is cleared to it on the GPU rather
+than uploaded; the scan that tells stops at the first pixel that
+differs. The stage of 1,500 outlined shapes above draws into a new
+1920 × 1080 bitmap in about 38 ms against Flash's 44, and with a
+`getPixel` after it in about 65. Each rule is Flash's
 as the `draw-bitmaps` and `draw-objects` cases trace and draw it under
 adl: a destination pixel takes the source pixel under its centre,
 clamped to the source's edges; the translation is snapped down to

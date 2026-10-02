@@ -45,6 +45,34 @@ export interface ExternalInterfaceHost {
   objectID?: string | null;
 }
 
+type Affine = { a: number; b: number; c: number; d: number; tx: number; ty: number };
+
+/** A renderer's part in BitmapData.draw of a display object. */
+export interface Drawer {
+  /** `o` through `m` into a w x h texture at `samples` a side, read back as premultiplied ARGB. */
+  snapshot(
+    o: DisplayObject,
+    m: Affine,
+    width: number,
+    height: number,
+    samples: number,
+  ): Uint32Array;
+  /**
+   * `o` the same, composited source over into `store` at (x, y) on the GPU,
+   * left there until read; false, having done nothing, where it cannot.
+   */
+  drawInto(
+    store: BitmapStore,
+    o: DisplayObject,
+    m: Affine,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    samples: number,
+  ): boolean;
+}
+
 /** A host request's bytes and transport result; a local file reports status 0. */
 export interface FetchResult {
   bytes: Uint8Array | null;
@@ -107,19 +135,10 @@ export class Scripting {
   /** Decodes the images of a SWF's JPEG tags as it is linked; the browser's by default, null for none. */
   readonly decodeImage: ImageDecode | null;
   /**
-   * How BitmapData.draw renders a display object: `o` through `m` into a
-   * w x h texture at `samples` a side, read back as premultiplied ARGB; set by the host once it
-   * has a renderer (PixiView.snapshot), null where there is none.
+   * How BitmapData.draw renders a display object, set by the host once it
+   * has a renderer (a PixiView); null where there is none.
    */
-  drawer:
-    | ((
-        o: DisplayObject,
-        m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
-        width: number,
-        height: number,
-        samples: number,
-      ) => Uint32Array)
-    | null = null;
+  drawer: Drawer | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
   /**

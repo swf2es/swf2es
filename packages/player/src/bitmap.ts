@@ -53,10 +53,26 @@ export function unmultiply(pixel: number): number {
   return ((a << 24) | (r << 16) | (g << 8) | b) >>> 0;
 }
 
+/**
+ * A store's copy on the GPU, where a renderer keeps one: a texture holding
+ * the same premultiplied ARGB, which a draw may render into.
+ */
+export interface GpuCopy {
+  /** The texture's pixels, read back: premultiplied ARGB, row by row. */
+  read(): Uint32Array;
+  /** Free the texture. */
+  destroy(): void;
+}
+
 export class BitmapStore {
-  /** Premultiplied ARGB, row by row. */
-  pixels: Uint32Array;
-  /** Counts each change, so a sprite drawn from the store knows to upload again. */
+  private cpu: Uint32Array;
+  /** The renderers' copies of the store, one each, for `dispose` to free. */
+  readonly copies = new Set<GpuCopy>();
+  /** The copy a draw wrote last, which reading `pixels` brings back while it is newer; null for none. */
+  gpu: GpuCopy | null = null;
+  /** Whether the GPU's copy was written last, so the CPU's is behind until read. */
+  private gpuNewer = false;
+  /** Counts each change, so a texture of the store knows to upload again. */
   version = 0;
   disposed = false;
   /**
@@ -72,8 +88,39 @@ export class BitmapStore {
     readonly transparent: boolean,
     fill: number,
   ) {
-    this.pixels = new Uint32Array(width * height);
-    this.pixels.fill(this.premultiplied(fill));
+    this.cpu = new Uint32Array(width * height);
+    this.cpu.fill(this.premultiplied(fill));
+  }
+
+  /**
+   * Premultiplied ARGB, row by row. Reading them brings the GPU's copy
+   * back first if a draw wrote it last, once: every CPU operation reads
+   * them, so each sees the store as the GPU left it.
+   */
+  get pixels(): Uint32Array {
+    if (this.gpuNewer && this.gpu) {
+      this.cpu = this.gpu.read();
+    }
+
+    this.gpuNewer = false;
+    return this.cpu;
+  }
+
+  set pixels(pixels: Uint32Array) {
+    this.cpu = pixels;
+    this.gpuNewer = false;
+  }
+
+  /** Whether the GPU's copy is newer than the CPU's, which a read of `pixels` would bring back. */
+  get newerOnGpu(): boolean {
+    return this.gpuNewer;
+  }
+
+  /** A draw wrote `copy`: the store changed, and the CPU's pixels and every other copy are behind it until read. */
+  drawnOnGpu(copy: GpuCopy): void {
+    this.gpu = copy;
+    this.gpuNewer = true;
+    this.changed();
   }
 
   /** A store of its own holding `pixels`, premultiplied already. */
@@ -272,6 +319,12 @@ export class BitmapStore {
 
   dispose(): void {
     this.pixels = new Uint32Array(0);
+    for (const copy of this.copies) {
+      copy.destroy();
+    }
+
+    this.copies.clear();
+    this.gpu = null;
     this.disposed = true;
     this.changed();
   }
