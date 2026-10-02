@@ -479,7 +479,9 @@ export class MethodEmitter {
       out.text(", arguments.length);\n");
     }
 
-    out.text("  let l0 = this");
+    // var, not let: V8 starts a frame's registers undefined, where each
+    // let is initialized with bytecode of its own, which counts against inlining.
+    out.text("  var l0 = this");
     for (let p: u32 = 1; p <= count; p++) {
       out.text(", l");
       out.uint(p);
