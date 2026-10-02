@@ -661,8 +661,7 @@ export class PixiView {
     this.renderer.render({ container: sprite, target: texture, clear: false });
     sprite.destroy();
     drawn.destroy(true);
-    store.drawnOnGpu();
-    bitmaps.current(store);
+    bitmaps.drawn(store);
     return true;
   }
 
@@ -799,9 +798,15 @@ class StoreTexture implements GpuCopy {
   }
 }
 
-/** The textures of a renderer's stores, one a store, made as a Bitmap shows one or a draw renders into it. */
+/**
+ * The textures of a renderer's stores, one a store, made as a Bitmap shows
+ * one or a draw renders into it. Each renderer keeps its own: a store
+ * shown by two has a copy in each, and one a draw wrote is read back
+ * through the renderer that drew it before another uploads it.
+ */
 class GpuBitmaps {
   private readonly limit: number;
+  private readonly copies = new WeakMap<BitmapStore, StoreTexture>();
   private readonly collected = new FinalizationRegistry<StoreTexture>((copy) => copy.destroy());
 
   constructor(private readonly renderer: Renderer) {
@@ -824,15 +829,17 @@ class GpuBitmaps {
       return null;
     }
 
-    let copy = store.gpu as StoreTexture | null;
+    let copy = this.copies.get(store);
     if (!copy) {
       copy = new StoreTexture(this.renderer, this, store.width, store.height);
-      store.gpu = copy;
+      this.copies.set(store, copy);
+      store.copies.add(copy);
       // Unregistered by the copy itself, on dispose.
       this.collected.register(store, copy, copy);
     }
 
-    if (copy.version !== store.version && !store.newerOnGpu) {
+    // Behind the store: its pixels, read back first if another renderer's draw wrote them.
+    if (copy.version !== store.version) {
       copy.upload(store.pixels);
       copy.version = store.version;
     }
@@ -840,10 +847,11 @@ class GpuBitmaps {
     return smoothing ? copy.smoothed() : copy.texture;
   }
 
-  /** A draw left the store's texture as the store now is. */
-  current(store: BitmapStore): void {
-    const copy = store.gpu as StoreTexture | null;
+  /** A draw rendered into this renderer's copy of the store, which now holds the store as it is. */
+  drawn(store: BitmapStore): void {
+    const copy = this.copies.get(store);
     if (copy) {
+      store.drawnOnGpu(copy);
       copy.version = store.version;
     }
   }

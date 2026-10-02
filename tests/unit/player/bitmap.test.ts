@@ -203,7 +203,7 @@ test("a store written on the GPU is read back once, when its pixels are next rea
   const store = new BitmapStore(2, 1, true, 0);
   let reads = 0;
   let destroyed = false;
-  store.gpu = {
+  const copy = {
     read: () => {
       reads++;
       return Uint32Array.of(0xff102030, 0x80402010);
@@ -212,12 +212,13 @@ test("a store written on the GPU is read back once, when its pixels are next rea
       destroyed = true;
     },
   };
+  store.copies.add(copy);
   const seen: boolean[] = [];
   const view = { pixelsChanged: (disposed: boolean) => seen.push(disposed) };
   store.views.add(new WeakRef(view));
 
   const version = store.version;
-  store.drawnOnGpu();
+  store.drawnOnGpu(copy);
   // The change is told and counted at once; nothing comes back yet.
   assert.deepEqual([store.newerOnGpu, store.version, reads, seen], [true, version + 1, 0, [false]]);
 

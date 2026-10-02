@@ -969,9 +969,9 @@ each pixel straight. A 1920 × 1080 stage of 1,500 outlined shapes draws
 in about 110 ms on a desktop GPU against Flash's 44 (from 810 before),
 most of it the wait for the GPU before the read.
 Slice five keeps a bitmap's pixels where they were last written, as
-Ruffle does (its `DirtyState`). With a renderer, a store has one GPU
-texture, made when a Bitmap first shows it or a draw first renders into
-it, holding the store's premultiplied ARGB exactly, uploaded and read
+Ruffle does (its `DirtyState`). With a renderer, a store has a GPU
+texture in it, one a renderer, made when a Bitmap first shows it or a
+draw first renders into it, holding the store's premultiplied ARGB exactly, uploaded and read
 back as they are, never premultiplied or divided on the way; every
 Bitmap showing the store samples that one texture, nearest, and a
 smoothed one a second, linearly sampled copy made on the GPU as the
@@ -986,8 +986,9 @@ first reads the texture back if the GPU's copy is newer, once, so a
 script that draws the stage into a bitmap and shows it never waits on
 the GPU, and one that then calls `getPixel` waits as before. Any other
 draw (another blend mode, a colour transform, a bitmap source) stays
-the CPU's, after that read. Without a renderer, as in node, a store is
-the CPU's alone. GPU compositing rounds source over in floating point
+the CPU's, after that read. A store a draw left newer on one renderer's
+GPU is read back through that renderer before another uploads it.
+Without a renderer, as in node, a store is the CPU's alone. GPU compositing rounds source over in floating point
 where the CPU's is Flash's 8-bit arithmetic, which parts by at most 1 a
 channel. A texture lives as long as its store: `dispose` frees it, and a
 store collected frees it through a FinalizationRegistry; Pixi's texture

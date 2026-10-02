@@ -66,7 +66,9 @@ export interface GpuCopy {
 
 export class BitmapStore {
   private cpu: Uint32Array;
-  /** The renderer's copy of the store, where it keeps one; null without. */
+  /** The renderers' copies of the store, one each, for `dispose` to free. */
+  readonly copies = new Set<GpuCopy>();
+  /** The copy a draw wrote last, which reading `pixels` brings back while it is newer; null for none. */
   gpu: GpuCopy | null = null;
   /** Whether the GPU's copy was written last, so the CPU's is behind until read. */
   private gpuNewer = false;
@@ -114,8 +116,9 @@ export class BitmapStore {
     return this.gpuNewer;
   }
 
-  /** A draw wrote the GPU's copy: the store changed, and the CPU's pixels are behind until read. */
-  drawnOnGpu(): void {
+  /** A draw wrote `copy`: the store changed, and the CPU's pixels and every other copy are behind it until read. */
+  drawnOnGpu(copy: GpuCopy): void {
+    this.gpu = copy;
     this.gpuNewer = true;
     this.changed();
   }
@@ -316,7 +319,11 @@ export class BitmapStore {
 
   dispose(): void {
     this.pixels = new Uint32Array(0);
-    this.gpu?.destroy();
+    for (const copy of this.copies) {
+      copy.destroy();
+    }
+
+    this.copies.clear();
     this.gpu = null;
     this.disposed = true;
     this.changed();
