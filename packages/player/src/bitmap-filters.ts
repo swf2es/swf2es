@@ -7,6 +7,14 @@
 import type { BitmapStore, PixelRect } from "./bitmap.js";
 import type { Filter } from "./filters.js";
 
+/** The filters this filters: the others' rects and pixels are still to come. */
+export const filtersDrawn: ReadonlySet<string> = new Set([
+  "blur",
+  "glow",
+  "dropShadow",
+  "colorMatrix",
+]);
+
 /** How far a filter reaches past what it filters, each way: [x, y], whole pixels. */
 function reach(f: Filter): [number, number] {
   if (f.kind === "blur" || f.kind === "glow" || f.kind === "dropShadow") {
@@ -102,31 +110,45 @@ export function applyFilter(
   dy: number,
   f: Filter,
 ): boolean {
-  if (!["blur", "glow", "dropShadow", "colorMatrix"].includes(f.kind)) {
+  if (!filtersDrawn.has(f.kind)) {
     return false;
   }
 
   const out = filterRect(rect, f);
-  const w = out.width;
-  const h = out.height;
-  if (w <= 0 || h <= 0) {
+  // What the destination shows of the filter's rect, in the filter's
+  // coordinates, and the work: that and as far round it as the filter
+  // reaches into it, so that a rect far past the destination costs nothing.
+  const mx = dx - rect.x;
+  const my = dy - rect.y;
+  const shown = intersect(out, { x: -mx, y: -my, width: dest.width, height: dest.height });
+  if (!shown) {
     return true;
   }
 
-  // The source's premultiplied channels over the filter's rect, transparent past `rect`.
+  const [hx, hy] = halo(f);
+  const work = intersect(out, {
+    x: shown.x - hx,
+    y: shown.y - hy,
+    width: shown.width + 2 * hx,
+    height: shown.height + 2 * hy,
+  }) as PixelRect;
+  const w = work.width;
+  const h = work.height;
+
+  // The source's premultiplied channels over the work, transparent past `rect`.
   const pixels = source.pixels;
   const a = new Float64Array(w * h);
   const r = new Float64Array(w * h);
   const g = new Float64Array(w * h);
   const b = new Float64Array(w * h);
   for (let y = 0; y < h; y++) {
-    const sy = out.y + y;
+    const sy = work.y + y;
     if (sy < rect.y || sy >= rect.y + rect.height || sy < 0 || sy >= source.height) {
       continue;
     }
 
     for (let x = 0; x < w; x++) {
-      const sx = out.x + x;
+      const sx = work.x + x;
       if (sx < rect.x || sx >= rect.x + rect.width || sx < 0 || sx >= source.width) {
         continue;
       }
@@ -147,13 +169,68 @@ export function applyFilter(
       result[i] = ((a[i] << 24) | (r[i] << 16) | (g[i] << 8) | b[i]) >>> 0;
     }
   } else if (f.kind === "colorMatrix") {
-    colorMatrix(dest, result, [a, r, g, b], w, h, f.matrix);
+    colorMatrix(dest, result, [a, r, g, b], work, contentOf(source, rect), f.matrix);
   } else {
     glow(result, [a, r, g, b], w, h, f);
   }
 
-  write(dest, result, out, dx - rect.x, dy - rect.y);
+  write(dest, result, work, mx, my);
   return true;
+}
+
+function intersect(p: PixelRect, q: PixelRect): PixelRect | null {
+  const x0 = Math.max(p.x, q.x);
+  const y0 = Math.max(p.y, q.y);
+  const x1 = Math.min(p.x + p.width, q.x + q.width);
+  const y1 = Math.min(p.y + p.height, q.y + q.height);
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } : null;
+}
+
+/**
+ * How far a pixel's result reaches for the source, each way: a blur's
+ * `quality` runs each reach half its box, whole taps; a shadow's offset,
+ * and the next pixel it samples between, beyond that.
+ */
+function halo(f: Filter): [number, number] {
+  if (f.kind === "colorMatrix") {
+    return [0, 0];
+  }
+
+  let hx = f.quality * Math.ceil((f.blurX || 0) / 2);
+  let hy = f.quality * Math.ceil((f.blurY || 0) / 2);
+  if (f.kind === "dropShadow") {
+    const radians = ((f.angle || 0) * Math.PI) / 180;
+    hx += Math.ceil(Math.abs((f.distance || 0) * Math.cos(radians))) + 1;
+    hy += Math.ceil(Math.abs((f.distance || 0) * Math.sin(radians))) + 1;
+  }
+
+  return [hx, hy];
+}
+
+/** The bounds of the pixels of `rect` of the source that are not transparent: null for none. */
+function contentOf(source: BitmapStore, rect: PixelRect): PixelRect | null {
+  const area = intersect(rect, { x: 0, y: 0, width: source.width, height: source.height });
+  if (!area) {
+    return null;
+  }
+
+  const pixels = source.pixels;
+  let x0 = Number.POSITIVE_INFINITY;
+  let y0 = Number.POSITIVE_INFINITY;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = area.y; y < area.y + area.height; y++) {
+    for (let x = area.x; x < area.x + area.width; x++) {
+      if (pixels[y * source.width + x] >>> 24) {
+        x0 = Math.min(x0, x);
+        y0 = Math.min(y0, y);
+        x1 = Math.max(x1, x);
+        y1 = Math.max(y1, y);
+      }
+    }
+  }
+
+  return x1 < 0 ? null : { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
 }
 
 /**
@@ -167,8 +244,8 @@ function colorMatrix(
   dest: BitmapStore,
   result: Uint32Array,
   [a, r, g, b]: Float64Array[],
-  w: number,
-  h: number,
+  work: PixelRect,
+  content: PixelRect | null,
   m: number[],
 ): void {
   const map = (c: number[]) =>
@@ -185,26 +262,22 @@ function colorMatrix(
   result.fill(
     dest.premultiplied(((empty[3] << 24) | (empty[0] << 16) | (empty[1] << 8) | empty[2]) >>> 0),
   );
-
-  // What the source has: the bounds of its pixels that are not transparent, and one more each way.
-  let x0 = w;
-  let y0 = h;
-  let x1 = -1;
-  let y1 = -1;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (a[y * w + x] > 0) {
-        x0 = Math.min(x0, x);
-        y0 = Math.min(y0, y);
-        x1 = Math.max(x1, x);
-        y1 = Math.max(y1, y);
-      }
-    }
+  if (!content) {
+    return;
   }
 
-  for (let y = Math.max(0, y0 - 1); y <= Math.min(h - 1, y1 + 1); y++) {
-    for (let x = Math.max(0, x0 - 1); x <= Math.min(w - 1, x1 + 1); x++) {
-      const i = y * w + x;
+  // What the source has, and one more each way, as far as the work goes.
+  const near = intersect(
+    { x: content.x - 1, y: content.y - 1, width: content.width + 2, height: content.height + 2 },
+    work,
+  );
+  if (!near) {
+    return;
+  }
+
+  for (let y = near.y; y < near.y + near.height; y++) {
+    for (let x = near.x; x < near.x + near.width; x++) {
+      const i = (y - work.y) * work.width + (x - work.x);
       const s = a[i] > 0 ? 255 / a[i] : 0;
       const [nr, ng, nb, na] = map([r[i] * s, g[i] * s, b[i] * s, a[i]]);
       const p = (c: number) => Math.floor((c * na) / 255);

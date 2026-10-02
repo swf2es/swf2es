@@ -3,7 +3,7 @@
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
 import { BitmapStore, type PixelRect } from "../../../bitmap.js";
-import { applyFilter, filterRect } from "../../../bitmap-filters.js";
+import { applyFilter, filterRect, filtersDrawn } from "../../../bitmap-filters.js";
 import {
   type Affine,
   alphaAt,
@@ -357,7 +357,12 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
     generateFilterRect(sourceRect: Value, filter: Value): Value {
       storeOf(s, this);
-      const r = filterRect(rectOf(s, sourceRect), filterOf(filter));
+      const f = filterOf(filter);
+      if (!filtersDrawn.has(f.kind)) {
+        throw s.rt.unsupported(`BitmapData.generateFilterRect with a ${f.kind} filter`);
+      }
+
+      const r = filterRect(rectOf(s, sourceRect), f);
       return s.rt.construct(s.rt.classNamed("flash.geom::Rectangle"), r.x, r.y, r.width, r.height);
     }
 
