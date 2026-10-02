@@ -26,9 +26,9 @@ export function graphicsOf(s: Scripting, o: AsObject): AsObject {
   return o.$graphics;
 }
 
-/** 0xAARRGGBB of a color and an alpha in [0, 1]. */
+/** 0xAARRGGBB of a color and an alpha in [0, 1], the alpha a byte floored as Flash stores it (0.5 is 127). */
 function argb(color: Value, alpha: Value): number {
-  const a = Math.round(Math.max(0, Math.min(1, Number(alpha))) * 255);
+  const a = Math.floor(Math.max(0, Math.min(1, Number(alpha))) * 255);
   return ((a << 24) | (Number(color) & 0xffffff)) >>> 0;
 }
 
