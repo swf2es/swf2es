@@ -183,7 +183,7 @@ function keepClamped(source: { style: object }): void {
 }
 
 /** How a view paints a fill over a region of the shape: a resolved bitmap's or gradient's through its renderer's textures. */
-type Painter = (fill: Paint, region: Area) => FillInput;
+type Painter = (fill: Paint, region: () => Area) => FillInput;
 
 /** The bounds of a fill's contours, whole pixels out. */
 function regionOf(contours: Path[]): Area {
@@ -289,7 +289,8 @@ function transformPath(path: Path, m: Linear): Path {
 function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContext {
   const context = new GraphicsContext();
   for (const { fill, contours, winding } of layer.fills) {
-    const style = painter(fill, regionOf(contours));
+    // The region is a radial gradient's alone to need: flattening the contours is not free.
+    const style = painter(fill, () => regionOf(contours));
     const inside = (depth: number, sum: number) =>
       winding === "nonZero" ? sum !== 0 : depth % 2 === 0;
     const fillRegion = (region: Region, depth: number, sum: number) => {
@@ -381,7 +382,8 @@ export class PixiView {
     if (fill.type === "gradient") {
       const m = fill.matrix;
       const drawn =
-        m.a * m.d - m.b * m.c !== 0 && gpuBitmaps(this.renderer).gradientTexture(fill, region);
+        m.a * m.d - m.b * m.c !== 0 &&
+        gpuBitmaps(this.renderer).gradientTexture(fill, fill.radial ? region() : null);
       return drawn ? { ...drawn, textureSpace: "global" } : { color: 0, alpha: 0 };
     }
 
@@ -978,7 +980,11 @@ class GpuBitmaps {
     this.collected.unregister(copy);
   }
 
-  private readonly gradients = new WeakMap<GradientFill, { texture: Texture; matrix: Matrix }>();
+  /** Each gradient's texture: a radial one's for the region it was made over, made again for another. */
+  private readonly gradients = new WeakMap<
+    GradientFill,
+    { region: string; texture: Texture; matrix: Matrix }
+  >();
   private readonly gradientsCollected = new FinalizationRegistry<Texture>((t) => t.destroy(true));
 
   /**
@@ -987,12 +993,23 @@ class GpuBitmaps {
    * spread as the texture wraps, moved half a pixel so that a pixel's
    * centre reads what Flash reads at its corner. A radial one is computed
    * over the region it fills, a texel a pixel (up to RADIAL_MAX a side),
-   * sampled linearly.
+   * sampled linearly, and made again, the old one freed, when the region
+   * changes, as a drawing's path grows.
    */
-  gradientTexture(fill: GradientFill, region: Area): { texture: Texture; matrix: Matrix } | null {
+  gradientTexture(
+    fill: GradientFill,
+    area: Area | null,
+  ): { texture: Texture; matrix: Matrix } | null {
+    const region = area ?? { x: 0, y: 0, width: 1, height: 1 };
+    const key = area ? `${area.x} ${area.y} ${area.width} ${area.height}` : "";
     const made = this.gradients.get(fill);
-    if (made) {
+    if (made?.region === key) {
       return made;
+    }
+
+    if (made) {
+      this.gradientsCollected.unregister(made);
+      made.texture.destroy(true);
     }
 
     const colors = ramp(fill.stops, fill.linearRgb);
@@ -1024,9 +1041,9 @@ class GpuBitmaps {
           .append(new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty))
           // Texels to the gradient square, -819.2 to 819.2 a side.
           .append(new Matrix(1638.4 / 256, 0, 0, 1638.4, -819.2, -819.2));
-    const result = { texture, matrix };
+    const result = { region: key, texture, matrix };
     this.gradients.set(fill, result);
-    this.gradientsCollected.register(fill, texture);
+    this.gradientsCollected.register(fill, texture, result);
     return result;
   }
 }

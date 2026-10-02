@@ -96,3 +96,46 @@ test("a radial gradient's centre is the first stop, a focal point off it the las
   const focal = radialPixels(colors, m, 0.5, 0, region, 20, 20);
   assert.equal(focal[10 * 20 + 15], 0xffffffff);
 });
+
+test("a radial gradient's texture is made again when what it fills grows", async () => {
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
+  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
+  const { PixiView } = await import("../../../packages/player/dist/pixi.js");
+  const renderer = { render: () => {} } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const shape = new ShapeObject(null);
+  const drawing = new Drawing();
+  const fill = {
+    type: "gradient" as const,
+    radial: true,
+    focal: 0,
+    stops: stops([0, 0xff000000], [255, 0xffffffff]),
+    spread: 0,
+    linearRgb: false,
+    matrix: { a: 10 / 1638.4, b: 0, c: 0, d: 10 / 1638.4, tx: 5, ty: 5 },
+  };
+  const square = (side: number) => {
+    drawing.moveTo(0, 0);
+    drawing.lineTo(side, 0);
+    drawing.lineTo(side, side);
+    drawing.lineTo(0, side);
+    drawing.lineTo(0, 0);
+  };
+  drawing.beginFill(fill);
+  square(10);
+  shape.drawing = drawing;
+  // The texture the shape's first fill draws with, a texel a pixel of its region.
+  const width = () => {
+    view.prepare(shape);
+    const graphics = view.stage.children[0].children[0].children[0] as unknown as {
+      context: { instructions: { data: { style: { texture: { source: { width: number } } } } }[] };
+    };
+    return graphics.context.instructions[0].data.style.texture.source.width;
+  };
+  assert.equal(width(), 10);
+
+  // The same fill's path carried on, out to 20 by 20.
+  square(20);
+  shape.invalidate(CONTENT);
+  assert.equal(width(), 20);
+});
