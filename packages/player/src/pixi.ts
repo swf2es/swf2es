@@ -8,6 +8,7 @@
 import type { Fill, Line } from "@swf2es/format";
 import {
   BufferImageSource,
+  type FillInput,
   Graphics,
   GraphicsContext,
   Matrix,
@@ -17,7 +18,7 @@ import {
   Sprite,
   Texture,
 } from "pixi.js";
-import type { BitmapStore, GpuCopy } from "./bitmap.js";
+import { BitmapStore, type GpuCopy } from "./bitmap.js";
 import {
   BitmapObject,
   CHILDREN,
@@ -36,11 +37,12 @@ import {
   LINE,
   MOVE,
   orientation,
+  type Paint,
   type Path,
   pointsOf,
   type ShapeLayer,
 } from "./shapes.js";
-import type { ShapeCharacter } from "./timeline.js";
+import type { BitmapCharacter, ShapeCharacter } from "./timeline.js";
 
 /** A contour flattened to a polygon, for telling which contours hold which. */
 interface Region {
@@ -154,15 +156,32 @@ function trace(context: GraphicsContext, path: Path): void {
   }
 }
 
-/** A fill's paint: a solid colour for now; gradients and bitmaps as their first colour. */
+/**
+ * A fill's paint, but a resolved bitmap's, which the view gives: a solid
+ * colour; a gradient as its first colour, for now; and a bitmap fill of a
+ * bitmap the SWF lacks red, as Flash draws one.
+ */
 function paint(fill: Fill): { color: number; alpha: number } {
   const argb =
     fill.type === "solid"
       ? fill.color
       : fill.type === "bitmap"
-        ? 0xff000000
+        ? 0xffff0000
         : (fill.gradient.stops[0]?.color ?? 0xff000000);
   return { color: argb & 0xffffff, alpha: (argb >>> 24) / 255 };
+}
+
+/** How a view paints a fill: a resolved bitmap's through its renderer's textures. */
+type Painter = (fill: Paint) => FillInput;
+
+/** The store a SWF bitmap's fills draw from, one for all its shapes; null until its image is decoded. */
+function characterStore(character: BitmapCharacter): BitmapStore | null {
+  if (!character.pixels) {
+    return null;
+  }
+
+  character.store ??= BitmapStore.of(character.pixels);
+  return character.store;
 }
 
 /** The linear part of a matrix, [a, b, c, d]: all a stroke's width depends on. */
@@ -231,10 +250,10 @@ function transformPath(path: Path, m: Linear): Path {
  * for non-zero: a region inside where its parent is not is filled, with
  * the first regions below it that are not cut out as holes, and so on in.
  */
-function fillContext(layer: ShapeLayer): GraphicsContext {
+function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContext {
   const context = new GraphicsContext();
   for (const { fill, contours, winding } of layer.fills) {
-    const style = paint(fill);
+    const style = painter(fill);
     const inside = (depth: number, sum: number) =>
       winding === "nonZero" ? sum !== 0 : depth % 2 === 0;
     const fillRegion = (region: Region, depth: number, sum: number) => {
@@ -317,6 +336,25 @@ export class PixiView {
   readonly stage = new PixiContainer();
   private readonly nodes = new WeakMap<DisplayObject, Node>();
   private readonly fills = new Map<ShapeCharacter, GraphicsContext[]>();
+  /**
+   * A fill painted: a bitmap's from its store's texture sampled as the fill
+   * samples, in global texture space so that its matrix maps the bitmap's
+   * pixels to the shape's; nothing for a bitmap that has no texture.
+   */
+  private readonly painter: Painter = (fill) => {
+    if (fill.type !== "image") {
+      return paint(fill);
+    }
+
+    const store = fill.image instanceof BitmapStore ? fill.image : characterStore(fill.image);
+    const texture = store && gpuBitmaps(this.renderer).fillTexture(store, fill.repeat, fill.smooth);
+    if (!texture) {
+      return { color: 0, alpha: 0 };
+    }
+
+    const m = fill.matrix;
+    return { texture, matrix: new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty), textureSpace: "global" };
+  };
   /** What a fresh view built itself, which it destroys; what it borrowed from `source` stays. */
   private readonly built: GraphicsContext[] = [];
 
@@ -405,7 +443,7 @@ export class PixiView {
     const shape = o instanceof ShapeObject ? o.shape : null;
     node.layers = o.drawing?.layers ?? shape?.layers ?? [];
     const build = (layer: ShapeLayer) => {
-      const context = fillContext(layer);
+      const context = fillContext(layer, this.painter);
       if (this.fresh) {
         this.built.push(context);
       }
@@ -534,9 +572,22 @@ export class PixiView {
       this.redraw(o, node);
     } else if (moved && node.strokes.some((g) => g)) {
       this.restroke(node);
-    } else if (dirty & PIXELS && node.bitmap && o instanceof BitmapObject && o.store) {
-      // Pixels set since: the texture brought up to date, uploaded where the CPU changed them.
-      gpuBitmaps(this.renderer).texture(o.store, o.smoothing);
+    }
+
+    if (dirty & PIXELS && !(dirty & CONTENT)) {
+      // Pixels set since: the textures brought up to date, uploaded where the CPU changed them.
+      const bitmaps = gpuBitmaps(this.renderer);
+      if (node.bitmap && o instanceof BitmapObject && o.store) {
+        bitmaps.texture(o.store, o.smoothing);
+      }
+
+      for (const layer of node.layers) {
+        for (const { fill } of layer.fills) {
+          if (fill.type === "image" && fill.image instanceof BitmapStore) {
+            bitmaps.fillTexture(fill.image, fill.repeat, fill.smooth);
+          }
+        }
+      }
     }
 
     if (o instanceof Container) {
@@ -708,8 +759,12 @@ class StoreTexture implements GpuCopy {
   readonly texture: Texture;
   /** The store's version the texture holds. */
   version = -1;
-  /** The same pixels sampled linearly, for a smoothed Bitmap, copied on the GPU as the texture changes. */
-  private smooth: { texture: RenderTexture; version: number } | null = null;
+  /**
+   * The same pixels sampled otherwise, copied on the GPU as the texture
+   * changes: linearly for a smoothed Bitmap, and repeating or clamped,
+   * either way, for bitmap fills; by "linear repeat".
+   */
+  private readonly variants = new Map<string, { texture: RenderTexture; version: number }>();
 
   constructor(
     private readonly renderer: Renderer,
@@ -767,34 +822,51 @@ class StoreTexture implements GpuCopy {
     });
   }
 
-  /** The texture sampled linearly: a texture's sampling is its source's, which Bitmaps share. */
-  smoothed(): Texture {
-    if (!this.smooth) {
-      this.smooth = {
-        texture: RenderTexture.create({
-          width: this.source.width,
-          height: this.source.height,
-          scaleMode: "linear",
-          autoGarbageCollect: false,
-        }),
-        version: -1,
-      };
+  /**
+   * The texture sampled linearly or not, repeating or clamped: a
+   * texture's sampling is its source's in Pixi, so each way is a copy.
+   */
+  sampled(linear: boolean, repeat: boolean): Texture {
+    const key = `${linear} ${repeat}`;
+    let variant = this.variants.get(key);
+    if (!variant) {
+      const texture = RenderTexture.create({
+        width: this.source.width,
+        height: this.source.height,
+        scaleMode: linear ? "linear" : "nearest",
+        addressMode: repeat ? "repeat" : "clamp-to-edge",
+        autoGarbageCollect: false,
+      });
+      if (!repeat) {
+        // Pixi turns a fill's clamped texture to repeating when its
+        // addressMode says clamp-to-edge; WebGL reads each axis's mode,
+        // which stays clamped.
+        Object.defineProperty(texture.source.style, "addressMode", {
+          get: () => "clamp",
+          set: () => {},
+        });
+      }
+
+      variant = { texture, version: -1 };
+      this.variants.set(key, variant);
     }
 
-    if (this.smooth.version !== this.version) {
+    if (variant.version !== this.version) {
       const sprite = new Sprite(this.texture);
-      this.renderer.render({ container: sprite, target: this.smooth.texture, clear: true });
+      this.renderer.render({ container: sprite, target: variant.texture, clear: true });
       sprite.destroy();
-      this.smooth.version = this.version;
+      variant.version = this.version;
     }
 
-    return this.smooth.texture;
+    return variant.texture;
   }
 
   destroy(): void {
     this.bitmaps.forget(this);
     this.texture.destroy(true);
-    this.smooth?.texture.destroy(true);
+    for (const { texture } of this.variants.values()) {
+      texture.destroy(true);
+    }
   }
 }
 
@@ -844,7 +916,16 @@ class GpuBitmaps {
       copy.version = store.version;
     }
 
-    return smoothing ? copy.smoothed() : copy.texture;
+    return smoothing ? copy.sampled(true, false) : copy.texture;
+  }
+
+  /** The store's texture for a bitmap fill: repeating or clamped, smoothed or not, up to date. */
+  fillTexture(store: BitmapStore, repeat: boolean, smooth: boolean): Texture | null {
+    if (!this.texture(store)) {
+      return null;
+    }
+
+    return (this.copies.get(store) as StoreTexture).sampled(smooth, repeat);
   }
 
   /** A draw rendered into this renderer's copy of the store, which now holds the store as it is. */

@@ -4,7 +4,9 @@
 // its fill1 as it goes and to its fill0 reversed, so that each fill's edges
 // join end to start into closed contours, filled even-odd. Lines stroke the
 // edges they are set on, joined where one edge starts where the last ended.
-import type { Fill, Line, Shape } from "@swf2es/format";
+import type { Fill, Line, Matrix, Shape } from "@swf2es/format";
+import type { BitmapStore } from "./bitmap.js";
+import type { BitmapCharacter } from "./timeline.js";
 
 /**
  * Path commands, flat: 1 x y (move), 2 x y (line), 3 cx cy x y (quadratic
@@ -188,8 +190,23 @@ function quadraticRoots(a: number, b: number, c: number): number[] {
   return [(-b + s) / (2 * a), (-b - s) / (2 * a)];
 }
 
+/**
+ * A bitmap fill the player resolved: of a SWF's bitmap character, or of a
+ * BitmapData's store through beginBitmapFill, the matrix in pixels.
+ */
+export interface ImageFill {
+  type: "image";
+  image: BitmapCharacter | BitmapStore;
+  matrix: Matrix;
+  repeat: boolean;
+  smooth: boolean;
+}
+
+/** A fill as the player paints it: the SWF's, a bitmap fill of a bitmap it lacks among them, or a resolved one. */
+export type Paint = Fill | ImageFill;
+
 export interface ShapeLayer {
-  fills: { fill: Fill; contours: Path[]; winding: Winding }[];
+  fills: { fill: Paint; contours: Path[]; winding: Winding }[];
   strokes: { line: Line; paths: Path[] }[];
 }
 
@@ -271,9 +288,28 @@ function contours(edges: Edge[]): Path[] {
 }
 
 /** The layers a shape draws, in order: each layer's fills, then its lines. */
-export function shapeLayers(shape: Shape): ShapeLayer[] {
+export function shapeLayers(
+  shape: Shape,
+  bitmap: (id: number) => BitmapCharacter | null = () => null,
+): ShapeLayer[] {
   const layers: ShapeLayer[] = [];
-  let fills = shape.fills;
+  // A bitmap fill's bitmap, its matrix from twips to pixels; one the SWF lacks stays the SWF's fill.
+  const paint = (fill: Fill): Paint => {
+    const image = fill.type === "bitmap" ? bitmap(fill.bitmap) : null;
+    if (fill.type !== "bitmap" || !image) {
+      return fill;
+    }
+
+    const m = fill.matrix;
+    return {
+      type: "image",
+      image,
+      matrix: { a: m.a / 20, b: m.b / 20, c: m.c / 20, d: m.d / 20, tx: m.tx / 20, ty: m.ty / 20 },
+      repeat: fill.repeat,
+      smooth: fill.smooth,
+    };
+  };
+  let fills = shape.fills.map(paint);
   let lines = shape.lines;
   let fillEdges: Edge[][] = fills.map(() => []);
   let strokes: Path[][] = lines.map(() => []);
@@ -337,7 +373,7 @@ export function shapeLayers(shape: Shape): ShapeLayer[] {
       if (r.styles) {
         // New styles: what came before is a layer of its own, drawn first.
         flush();
-        fills = r.styles.fills;
+        fills = r.styles.fills.map(paint);
         lines = r.styles.lines;
         fillEdges = fills.map(() => []);
         strokes = lines.map(() => []);

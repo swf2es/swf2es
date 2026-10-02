@@ -100,6 +100,14 @@ export class DisplayObject {
   /** What changed since the renderer last synced it: TRANSFORM, CHILDREN, CONTENT. */
   dirty = TRANSFORM | CONTENT;
 
+  /** This object, weakly, as a store it shows or fills with holds it. */
+  readonly ref = new WeakRef(this);
+
+  /** A store it shows or fills with changed its pixels, or was disposed. */
+  pixelsChanged(disposed: boolean): void {
+    this.invalidate(disposed ? CONTENT : PIXELS);
+  }
+
   /** Mark a change, and that its ancestors have a changed descendant. */
   invalidate(what: number): void {
     this.dirty |= what;
@@ -231,8 +239,6 @@ function swap(existing: DisplayObject, character: Character): void {
 /** A Bitmap: a display object that shows a BitmapData's pixels, its bounds the data's size. */
 export class BitmapObject extends DisplayObject {
   private shown: BitmapStore | null = null;
-  /** This object, weakly, as its store holds it. */
-  private readonly ref = new WeakRef(this);
   smoothing = false;
   pixelSnapping = "auto";
   /** The SWF's bitmap it shows a copy of, placed by a timeline or made by its class; null for one a script made. */
@@ -255,11 +261,6 @@ export class BitmapObject extends DisplayObject {
     this.shown = store;
     store?.views.add(this.ref);
     this.invalidate(CONTENT);
-  }
-
-  /** The store's pixels changed, or it was disposed. */
-  pixelsChanged(disposed: boolean): void {
-    this.invalidate(disposed ? CONTENT : PIXELS);
   }
 }
 

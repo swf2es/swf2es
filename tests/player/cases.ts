@@ -852,6 +852,73 @@ function bitmapSymbols(compile: Compile): Uint8Array {
   });
 }
 
+// Bitmap fills (scripts/BitmapFills.as): a 4 x 4 bitmap, every pixel its
+// own colour and one translucent, filling a rect larger than it at five
+// times its size in each of the four fill types, the bitmap's origin 10
+// pixels in, so that clipping and repeating show; and a fill whose bitmap
+// the SWF does not define.
+function bitmapFills(abc: Uint8Array): Uint8Array {
+  const pixels: number[] = [];
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      const argb =
+        x === 3 && y === 3
+          ? 0x80808080
+          : 0xff000000 | ((x * 80) << 16) | ((y * 80) << 8) | (x === 2 && y === 1 ? 0 : 0xc0);
+      pixels.push(argb >>> 24, (argb >> 16) & 0xff, (argb >> 8) & 0xff, argb & 0xff);
+    }
+  }
+
+  const bitmap = w.tag(
+    36,
+    Uint8Array.from([1, 0, 5, 4, 0, 4, 0, ...zlibCompress(Uint8Array.from(pixels))]),
+    true,
+  );
+  const rect = (id: number, fill: w.BitmapFill | number) =>
+    w.shape({
+      id,
+      bounds: [0, 900, 0, 800],
+      fills: [fill],
+      paths: [
+        {
+          fill1: 1,
+          commands: [
+            { move: [0, 0] },
+            { line: [900, 0] },
+            { line: [900, 800] },
+            { line: [0, 800] },
+            { line: [0, 0] },
+          ],
+        },
+      ],
+      version: 3,
+    });
+  const scaled = { a: 100, d: 100, tx: 200, ty: 200 };
+  const types = [0x40, 0x41, 0x42, 0x43] as const;
+  return w.swf({
+    width: 200,
+    height: 150,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      bitmap,
+      ...types.map((type, i) => rect(10 + i, { bitmap: 1, type, matrix: scaled })),
+      rect(20, { bitmap: 99, type: 0x41, matrix: scaled }),
+      w.doAbc(abc, "BitmapFills"),
+      w.symbolClass([[0, "BitmapFills"]]),
+      ...types.map((_, i) =>
+        w.place({ depth: 1 + i, character: 10 + i, matrix: { tx: (5 + i * 50) * 20, ty: 100 } }),
+      ),
+      w.place({ depth: 5, character: 20, matrix: { tx: 100, ty: 2100 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
@@ -944,6 +1011,19 @@ export const cases: PlayerCase[] = [
     frames: 1,
     capture: [],
     tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "bitmap-fills",
+    swf: bitmapFills,
+    script: "BitmapFills",
+    frames: 2,
+    capture: [1, 2],
+    // The smoothed fills: Flash's bilinear samples a few hundredths of a
+    // texel from the GPU's, which shows where texels of far different
+    // colours meet at five times their size, by up to 25 a channel. The
+    // others, and the clipping, the tiling and the red, are exact.
+    tolerance: 25,
     maxOutliers: 0,
   },
   {

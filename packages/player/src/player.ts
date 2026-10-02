@@ -5,6 +5,7 @@
 // follow; then the frame is drawn.
 import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
 import { Container, type DisplayObject, MovieClip } from "./display.js";
+import { decodeImages, decodeInBrowser } from "./images.js";
 import type { Scripting } from "./scripting.js";
 import { type Library, readLibrary } from "./timeline.js";
 
@@ -23,8 +24,9 @@ export class Player {
   readonly background: number;
 
   /**
-   * Without scripts the player is ready at once; with them, `start`
-   * loads the SWF's code and constructs the root, which is asynchronous.
+   * Without scripts the player is ready at once, but for the images of
+   * its bitmap fills, which `start` decodes; with them, `start` loads the
+   * SWF's code and constructs the root, which is asynchronous.
    */
   constructor(
     readonly bytes: Uint8Array,
@@ -52,6 +54,8 @@ export class Player {
   async start(): Promise<void> {
     const s = this.scripting;
     if (!s) {
+      // Its bitmap fills' images, which a SWF with scripts decodes as it links.
+      await decodeImages(this.library, decodeInBrowser);
       return;
     }
 

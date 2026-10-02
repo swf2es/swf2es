@@ -3,7 +3,7 @@
 // A fill or a stroke is a layer of its own, in the order begun, as Flash
 // draws them: commands go to the fill and the stroke open at the time, each
 // moveTo starting a contour of the fill and a path of the stroke.
-import type { Fill, Line } from "@swf2es/format";
+import type { Line } from "@swf2es/format";
 import { type Rect, union } from "./geometry.js";
 import {
   CUBIC,
@@ -11,6 +11,7 @@ import {
   extent,
   LINE,
   MOVE,
+  type Paint,
   type Path,
   type ShapeLayer,
   type Winding,
@@ -23,14 +24,14 @@ const COS_45 = Math.SQRT1_2;
 
 export class Drawing {
   readonly layers: ShapeLayer[] = [];
-  private fill: { fill: Fill; contours: Path[]; winding: Winding } | null = null;
+  private fill: { fill: Paint; contours: Path[]; winding: Winding } | null = null;
   /** The layer the open fill is in, for the entries a change of winding adds beside it. */
   private fillLayer: ShapeLayer | null = null;
   private stroke: { line: Line; paths: Path[] } | null = null;
   private x = 0;
   private y = 0;
 
-  beginFill(fill: Fill): void {
+  beginFill(fill: Paint): void {
     this.endFill();
     this.fill = { fill, contours: [], winding: "evenOdd" };
     this.fillLayer = { fills: [this.fill], strokes: [] };

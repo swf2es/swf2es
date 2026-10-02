@@ -18,6 +18,7 @@ import {
   type Tag,
   tags,
 } from "@swf2es/format";
+import type { BitmapStore } from "./bitmap.js";
 import type { DisplayObject } from "./display.js";
 import { type ShapeLayer, shapeLayers } from "./shapes.js";
 
@@ -57,6 +58,8 @@ export interface BitmapCharacter {
   definition: Bitmap;
   /** Set when the SWF is read for the lossless formats, and once decoded for an image; null until then. */
   pixels: BitmapPixels | null;
+  /** The store bitmap fills draw it from, one for every shape; made when one is first drawn. */
+  store?: BitmapStore;
 }
 
 /** DefineBinaryData's bytes, which a ByteArray subclass bound to them starts with. */
@@ -129,7 +132,17 @@ function timelineOf(
       case tags.DefineShape3:
       case tags.DefineShape4: {
         const shape = readShape(bytes, t.code, t.offset, t.length);
-        library.set(shape.id, { type: "shape", id: shape.id, shape, layers: shapeLayers(shape) });
+        // Its bitmap fills' bitmaps, which a SWF defines before the shapes that use them.
+        const bitmap = (id: number) => {
+          const c = library.get(id);
+          return c?.type === "bitmap" ? c : null;
+        };
+        library.set(shape.id, {
+          type: "shape",
+          id: shape.id,
+          shape,
+          layers: shapeLayers(shape, bitmap),
+        });
         break;
       }
       case tags.DefineSprite: {
