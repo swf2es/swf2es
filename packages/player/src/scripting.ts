@@ -20,6 +20,7 @@ import {
   TextObject,
   TRANSFORM,
 } from "./display.js";
+import { FontSet } from "./fonts.js";
 import { decodeImages, decodeInBrowser, type ImageDecode } from "./images.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
@@ -615,6 +616,7 @@ export class Scripting {
       classes: new Map(),
       construct: null,
       removing: null,
+      fonts: new FontSet(),
     };
     for (let t: typeof traits | null = traits; t; t = t.base as typeof traits | null) {
       // A display object's class bound to data has no display of it.
@@ -622,7 +624,9 @@ export class Scripting {
       if (symbol && symbol.character.type !== "binary" && symbol.character.type !== "font") {
         if (symbol.character.type === "text") {
           // A new linked TextField has its symbol's bounds, but not its timeline's initial text.
-          return new TextObject(symbol.character, false);
+          const text = new TextObject(symbol.character, false);
+          text.fonts = symbol.library.fonts;
+          return text;
         }
 
         return displayFor(symbol.character, symbol.library);
@@ -641,7 +645,9 @@ export class Scripting {
       }
 
       if (t.name === "flash.text::TextField") {
-        return new TextObject(null);
+        const text = new TextObject(null);
+        text.fonts = library.fonts;
+        return text;
       }
     }
 

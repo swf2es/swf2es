@@ -70,3 +70,24 @@ test("a long append keeps a format for every character", async () => {
   model.replace(1, 199_000, "y");
   assert.deepEqual([model.text.length, model.formats.length], [1_004, 1_004]);
 });
+
+test("a long unbroken word wraps between its characters in time that grows with it, not its square", async () => {
+  const { layoutText } = await import("../../../packages/player/dist/text-layout.js");
+  const { DEFAULT_FORMAT } = await import("../../../packages/player/dist/text.js");
+  const n = 64_000;
+  const started = performance.now();
+  const layout = layoutText({
+    text: "x".repeat(n),
+    formats: new Array(n).fill(DEFAULT_FORMAT),
+    defaultFormat: DEFAULT_FORMAT,
+    width: 60,
+    wordWrap: true,
+    embedFonts: false,
+    fonts: null,
+  });
+  // Node's stand-in device font: 6 pixels a character at 12, 9 to the 56 pixels inside the gutters.
+  assert.equal(layout.lines.length, Math.ceil(n / 9));
+  assert.ok(layout.lines.every((line, i) => line.start === i * 9));
+  // Some 40 ms; measured again for each line it took seconds.
+  assert.ok(performance.now() - started < 2000);
+});

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readEditText, tags } from "../../../packages/format/dist/index.js";
-import { BitWriter, rect } from "../../swf-writer.ts";
+import { glyphOf, readEditText, readFont, tags } from "../../../packages/format/dist/index.js";
+import { BitWriter, font3, rect } from "../../swf-writer.ts";
 
 test("DefineEditText reads conditional fields before the variable and initial text", () => {
   const w = new BitWriter().u16(17);
@@ -48,4 +48,54 @@ test("DefineEditText without initial text still reads its variable", () => {
   assert.equal(edit.variable, "status");
   assert.equal(edit.text, "");
   assert.equal(edit.fontHeight, null);
+});
+
+test("DefineFont3 reads its glyphs in code order, their outlines, and the layout", () => {
+  const tag = font3({
+    id: 4,
+    name: "Probe",
+    bold: true,
+    ascent: 800,
+    descent: 200,
+    leading: 100,
+    glyphs: [
+      { char: "b", advance: 700, boxes: [[50, -750, 650, 0]] },
+      { char: "a", advance: 500, boxes: [[50, -500, 450, 0]] },
+      { char: " ", advance: 250, boxes: [] },
+    ],
+    kerning: [["a", "b", -100]],
+  });
+  // The tag's header: a long one, code 75.
+  const font = readFont(tag, {
+    code: tags.DefineFont3,
+    offset: 6,
+    length: tag.length - 6,
+    long: true,
+  });
+  assert.deepEqual(
+    [font.id, font.name, font.bold, font.italic, font.em],
+    [4, "Probe", true, false, 20480],
+  );
+  assert.deepEqual(
+    font.glyphs.map((g) => [String.fromCharCode(g.code), g.advance]),
+    [
+      [" ", 5000],
+      ["a", 10000],
+      ["b", 14000],
+    ],
+  );
+  assert.deepEqual(
+    [font.layout, font.ascent, font.descent, font.leading],
+    [true, 16000, 4000, 2000],
+  );
+  assert.equal(font.kerning.get((97 << 16) | 98), -2000);
+  assert.deepEqual(font.glyphs[1].bounds, { xMin: 1000, xMax: 9000, yMin: -10000, yMax: 0 });
+  // A rectangle: a move and four edges.
+  assert.deepEqual(
+    font.glyphs[1].records.map((r) => r.type),
+    ["style", "line", "line", "line", "line"],
+  );
+  assert.equal(font.glyphs[0].records.length, 0);
+  assert.equal(glyphOf(font, 98)?.advance, 14000);
+  assert.equal(glyphOf(font, 99), null);
 });

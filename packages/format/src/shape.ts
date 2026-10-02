@@ -276,7 +276,7 @@ function readLines(r: SwfReader, version: number): Line[] {
 }
 
 /** The records from the reader's position: fill and line bit counts first, then records to the end record. */
-function readRecords(
+export function readRecords(
   r: SwfReader,
   version: number,
 ): { records: ShapeRecord[]; truncated: boolean } {

@@ -497,6 +497,130 @@ export function fontName(id: number, name: string, bold = false, italic = false)
   return tag(48, w.done());
 }
 
+/** A glyph of a test font: a character, its advance and its outline's rectangles, in em units of 1024, y down from the baseline. */
+export interface GlyphSpec {
+  char: string;
+  advance: number;
+  boxes: [number, number, number, number][];
+}
+
+export interface FontSpec {
+  id: number;
+  name: string;
+  bold?: boolean;
+  italic?: boolean;
+  /** In em units of 1024. */
+  ascent: number;
+  descent: number;
+  leading?: number;
+  glyphs: GlyphSpec[];
+  /** Pairs of characters and the adjustment between them, in em units. */
+  kerning?: [string, string, number][];
+}
+
+/**
+ * A DefineFont3: glyphs of rectangles, with the layout (ascent, descent,
+ * leading, advances, bounds and kerning). Its coordinates are twentieths
+ * of DefineFont2's, 20480 to the em.
+ */
+export function font3(spec: FontSpec): Uint8Array {
+  const scale = 20;
+  // Flash finds a character by a binary search of the codes: they go in order.
+  const sorted = [...spec.glyphs].sort((a, b) => a.char.charCodeAt(0) - b.char.charCodeAt(0));
+  const glyphs = sorted.map((g) => {
+    const w = new BitWriter();
+    w.ub(4, 1).ub(4, 0);
+    let x = 0;
+    let y = 0;
+    const edge = (dx: number, dy: number) => {
+      const n = Math.max(2, sbits(dx, dy));
+      w.ub(1, 1)
+        .ub(1, 1)
+        .ub(4, n - 2)
+        .ub(1, 1)
+        .sb(n, dx)
+        .sb(n, dy);
+    };
+    for (const [k, [x0, y0, x1, y1]] of g.boxes.entries()) {
+      const [l, t, r, b] = [x0, y0, x1, y1].map((v) => v * scale);
+      // Move, with the fill at the path's start.
+      w.ub(1, 0).ub(5, k === 0 ? 1 | 4 : 1);
+      const n = sbits(l, t);
+      w.ub(5, n).sb(n, l).sb(n, t);
+      if (k === 0) {
+        w.ub(1, 1);
+      }
+
+      x = l;
+      y = t;
+      for (const [px, py] of [
+        [r, t],
+        [r, b],
+        [l, b],
+        [l, t],
+      ]) {
+        edge(px - x, py - y);
+        x = px;
+        y = py;
+      }
+    }
+
+    w.ub(1, 0).ub(5, 0);
+    return w.done();
+  });
+
+  const w = new BitWriter().u16(spec.id);
+  // HasLayout, WideOffsets, WideCodes, italic, bold.
+  w.u8(0x80 | 0x08 | 0x04 | (spec.italic ? 0x02 : 0) | (spec.bold ? 0x01 : 0)).u8(0);
+  w.u8(spec.name.length);
+  for (const c of spec.name) {
+    w.u8(c.charCodeAt(0));
+  }
+
+  w.u16(glyphs.length);
+  // Offsets from the offset table's start, 4 bytes each, then the code table's.
+  let at = (glyphs.length + 1) * 4;
+  for (const g of glyphs) {
+    w.u32(at);
+    at += g.length;
+  }
+
+  w.u32(at);
+  for (const g of glyphs) {
+    w.raw(g);
+  }
+
+  for (const g of sorted) {
+    w.u16(g.char.charCodeAt(0));
+  }
+
+  w.u16(spec.ascent * scale)
+    .u16(spec.descent * scale)
+    .u16((spec.leading ?? 0) * scale);
+  for (const g of sorted) {
+    w.u16((g.advance * scale) & 0xffff);
+  }
+
+  for (const g of sorted) {
+    const xs = g.boxes.flatMap((b) => [b[0], b[2]]);
+    const ys = g.boxes.flatMap((b) => [b[1], b[3]]);
+    const [x0, x1, y0, y1] = xs.length
+      ? [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)].map((v) => v * scale)
+      : [0, 0, 0, 0];
+    rect(w, x0, x1, y0, y1);
+  }
+
+  const kerning = spec.kerning ?? [];
+  w.u16(kerning.length);
+  for (const [a, b, adjust] of kerning) {
+    w.u16(a.charCodeAt(0))
+      .u16(b.charCodeAt(0))
+      .u16((adjust * scale) & 0xffff);
+  }
+
+  return tag(75, w.done(), true);
+}
+
 /** A whole uncompressed SWF: the header, the frame size and rate, then the tags. */
 export function swf(options: {
   version?: number;

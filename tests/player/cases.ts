@@ -1099,6 +1099,54 @@ function clipDepths(abc: Uint8Array): Uint8Array {
   });
 }
 
+/**
+ * "Probe", a font of rectangles: advances of half an em and more, a glyph
+ * of two boxes, a space and a kerning pair, so that its layout in adl
+ * shows Flash's rules with numbers that tell them apart.
+ */
+export const probeFont = (id: number): Uint8Array =>
+  w.font3({
+    id,
+    name: "Probe",
+    ascent: 800,
+    descent: 200,
+    leading: 100,
+    glyphs: [
+      { char: "a", advance: 500, boxes: [[50, -500, 450, 0]] },
+      { char: "b", advance: 700, boxes: [[50, -750, 650, 0]] },
+      {
+        char: "c",
+        advance: 300,
+        boxes: [
+          [30, -400, 270, 0],
+          [30, 0, 100, 150],
+        ],
+      },
+      { char: " ", advance: 250, boxes: [] },
+      { char: "W", advance: 1000, boxes: [[0, -700, 1000, 0]] },
+    ],
+    kerning: [["a", "b", -100]],
+  });
+
+// Text laid out in Probe (scripts/TextLayout.as).
+function textLayout(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 400,
+    height: 300,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      probeFont(1),
+      w.doAbc(abc, "TextLayout"),
+      w.symbolClass([[0, "TextLayout"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
@@ -1256,6 +1304,15 @@ export const cases: PlayerCase[] = [
     // line's round caps, anti-aliased each rasteriser's way: 48 channels a frame.
     tolerance: 2,
     maxOutliers: 60,
+  },
+  {
+    name: "text-layout",
+    swf: textLayout,
+    script: "TextLayout",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
   },
   {
     name: "text-fields",

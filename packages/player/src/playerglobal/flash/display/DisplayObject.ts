@@ -292,6 +292,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       if (d instanceof TextObject) {
         d.width = value / (Math.abs(d.scaleX) || 1);
         d.invalidate(CONTENT);
+        d.fit();
         return;
       }
 
@@ -325,6 +326,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       if (d instanceof TextObject) {
         d.height = value / (Math.abs(d.scaleY) || 1);
         d.invalidate(CONTENT);
+        d.fit();
         return;
       }
 

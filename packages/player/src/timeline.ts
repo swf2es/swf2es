@@ -5,13 +5,14 @@
 import {
   type Bitmap,
   type EditText,
+  type Font,
   type FontName,
   isBitmapTag,
   type Place,
   readBinaryData,
   readBitmap,
   readEditText,
-  readFontName,
+  readFont,
   readFrameLabel,
   readPlace,
   readRemove,
@@ -24,6 +25,7 @@ import {
 } from "@swf2es/format";
 import type { BitmapStore } from "./bitmap.js";
 import type { DisplayObject } from "./display.js";
+import { FontSet } from "./fonts.js";
 import { type ShapeLayer, shapeLayers } from "./shapes.js";
 
 export type FrameCommand = { type: "place"; place: Place } | { type: "remove"; depth: number };
@@ -56,9 +58,10 @@ export interface TextCharacter {
   font: FontName | null;
 }
 
-/** DefineFont2 or 3: its name and style, for the fields that name it; the glyphs are not read. */
+/** DefineFont2 or 3: its name and style, for the fields that name it, and its glyphs and layout. */
 export interface FontCharacter extends FontName {
   type: "font";
+  font: Font;
 }
 
 /** A bitmap's pixels as every copy of it starts: premultiplied ARGB; 0 by 0 for what Flash cannot read. */
@@ -121,6 +124,8 @@ export interface Library {
   /** Told before a timeline child goes, for the events a script sees; null in an AVM1 movie. */
   /** Tells of a display object about to lose its parent, and whether the timeline takes it (a script's removal otherwise). */
   removing: ((display: DisplayObject, byTimeline: boolean) => void) | null;
+  /** The SWF's embedded fonts, by name, which its fields lay their text out in. */
+  fonts: FontSet;
 }
 
 function timelineOf(
@@ -179,8 +184,15 @@ function timelineOf(
       }
       case tags.DefineFont2:
       case tags.DefineFont3: {
-        const font = readFontName(bytes, t);
-        library.set(font.id, { type: "font", ...font });
+        const font = readFont(bytes, t);
+        library.set(font.id, {
+          type: "font",
+          id: font.id,
+          name: font.name,
+          bold: font.bold,
+          italic: font.italic,
+          font,
+        });
         break;
       }
       case tags.DefineEditText: {
@@ -233,5 +245,12 @@ function timelineOf(
 export function readLibrary(swf: Swf): Library {
   const characters = new Map<number, Character>();
   const root = timelineOf(swf.bytes, swf.tags, swf.frameCount, characters, { tables: null });
-  return { characters, root, classes: new Map(), construct: null, removing: null };
+  const fonts = new FontSet();
+  for (const c of characters.values()) {
+    if (c.type === "font") {
+      fonts.add(c.font);
+    }
+  }
+
+  return { characters, root, classes: new Map(), construct: null, removing: null, fonts };
 }

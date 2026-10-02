@@ -1266,9 +1266,41 @@ from the field's edges as Flash's gutter is, aligned as the first
 paragraph, wrapped at the field's width where it wraps, and clipped to
 the field where it runs over; a device font (`_sans`, `_serif`,
 `_typewriter`) is the browser's of that kind, any other font by its
-name. Embedded fonts' glyphs, runs of several formats on screen, text
-metrics (`textWidth`, `autoSize`'s resizing, lines that wrap), input and
-selection are still to come.
+name. Embedded fonts' glyphs, runs of several formats on screen, input
+and selection are still to come.
+
+A field's text is laid out by swf2es, as Flash lays it out, never by the
+browser: lines, and each character's place on them, are what
+`textWidth`, `textHeight`, the line and character queries and
+`autoSize` report, and what the renderer draws. A font embedded with
+`embedFonts` is a DefineFont2 or DefineFont3, found by name, its own
+size and its advances, kerning, ascent and descent from the tag, so its
+layout is Flash's to the twip. adl, with fonts of rectangles built by
+the tests' SWF writer, sets the rules. A character's advance is its
+glyph's at the format's size, which is a whole number, truncated to
+twips, plus `letterSpacing`. A kerning pair, with `kerning` on, shortens
+the second character's advance. A character the font lacks takes no
+room and has no boundaries; a font's characters are found by a binary
+search of its code table. A line is as tall as its tallest run's ascent
+and descent, each truncated to twips, plus the format's `leading` (not
+the font's); its width counts its trailing spaces. Lines break at a
+newline, and with `wordWrap` before a word that does not fit without
+its trailing space (one ending at the room's edge fits), or between
+characters for a word longer than the line. A line starts 2 pixels in,
+the gutter, then the margin, block indent and, on a paragraph's first
+line, its indent, and a bullet's 36 pixels; centred, it is placed in
+the room left, right-aligned one twip further left, and justified, a
+wrapped line but the paragraph's last has its inner spaces share the
+room. `textHeight` is the lines' heights, leading and all, less the
+last one's leading where there are two lines or more; a last line left
+empty by a newline does not count. adl's `numLines` can lag a
+relayout until the next one, which swf2es's does not; tab stops, and
+the boundaries adl leaves out for lines beyond the field's height, are
+still to come.
+`autoSize` makes the field the text's size and 4 pixels, keeping its
+left, centre or right edge. A device font's metrics are the browser's
+font's, measured by the host, which Flash's own system fonts differ
+from.
 
 ### Colour transforms
 
