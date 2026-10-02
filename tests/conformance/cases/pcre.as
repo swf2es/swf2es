@@ -37,3 +37,15 @@ for each (var li:Number in [-1, 4294967295, 2147483648, -4294967296, 3]) {
 var plain:RegExp = /abc/i;
 plain.lastIndex = -1;
 trace(fromBefore.join(" "), plain.exec("Abc"));
+// Multiline where each anchor stands: the m flag, then (?m) and (?-m) inline.
+var inline:Array = [
+  new RegExp("(?-m:^x)", "m").test("a\nx"),
+  new RegExp("(?m:^x)", "").test("a\nx"),
+  new RegExp("(?m)^x", "").test("a\nx"),
+  new RegExp("a(?-m)$", "m").test("a\nb"),
+  new RegExp("(?:(?-m)^b)|^x", "m").test("a\nx"),
+  new RegExp("(?-m:(?m:^x))", "m").test("a\nx"),
+  new RegExp("(?m:x$)\\n", "").test("x\n"),
+  escape("a\n\n".replace(new RegExp("(?m)^", "g"), "#")),
+];
+trace(inline.join(" "));
