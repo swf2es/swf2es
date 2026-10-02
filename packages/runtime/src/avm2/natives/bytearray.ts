@@ -958,29 +958,3 @@ export function setDomainMemory(rt: Runtime, v: Value): void {
 
   rt.memoryProvider = v;
 }
-
-/** avmshell's Domain: its domain memory is the runtime's, a ByteArray or the scratch memory. */
-export function domainNatives(rt: Runtime): Natives {
-  const natives: Natives = {};
-
-  class DomainNatives {
-    static get currentDomain(): Value {
-      return rt.currentDomain();
-    }
-
-    static get MIN_DOMAIN_MEMORY_LENGTH(): number {
-      return GLOBAL_MEMORY_MIN_SIZE;
-    }
-
-    get domainMemory(): Value {
-      return rt.memoryProvider;
-    }
-
-    set domainMemory(v: Value) {
-      setDomainMemory(rt, v);
-    }
-  }
-
-  registerNativeClass(natives, "avmplus::Domain", DomainNatives);
-  return natives;
-}

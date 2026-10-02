@@ -8,7 +8,7 @@
 // 1 for a VerifyError or an AS3 exception nothing caught; or { path, lines,
 // error } with what of the host's stopped it, and the lines before.
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { testing } from "../unit/codegen/testing-module.ts";
 
@@ -20,6 +20,8 @@ const runtime = await import(
 process.env.TZ = "UTC";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
+// avmshell's working directory as the oracle runs it, the repository, which some tests read files from.
+const workDir = fileURLToPath(new URL("../../", import.meta.url));
 const builtins = ["builtin", "shell_toplevel"].map(
   (name) => new Uint8Array(readFileSync(`${here}out/lib/${name}.abc`)),
 );
@@ -29,6 +31,33 @@ type Module = (rt: unknown) => unknown;
 async function load(js: string): Promise<Module> {
   const url = `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`;
   return (await import(url)).default;
+}
+
+/** A module evaluated at once, as Domain.loadBytes runs one: its source is one `export default function`. */
+function evaluate(js: string): Module {
+  return new Function(js.replace(/^export default /, "return "))();
+}
+
+/** The working directory's files, and those a test writes, kept in memory, not written there. */
+function testFiles() {
+  const written = new Map<string, Uint8Array>();
+  return {
+    read(name: string): Uint8Array | null {
+      const file = `${workDir}${name}`;
+      const bytes = written.get(name);
+      if (bytes) {
+        return bytes;
+      }
+
+      return existsSync(file) && statSync(file).isFile()
+        ? new Uint8Array(readFileSync(file))
+        : null;
+    },
+    write(name: string, bytes: Uint8Array): boolean {
+      written.set(name, bytes.slice());
+      return true;
+    },
+  };
 }
 
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -63,12 +92,25 @@ const builtinModules: Module[] = [];
 
 /** Run `abc`, tracing into `lines`: avmshell's exit code for how it ended. */
 async function run(abc: Uint8Array, lines: string[]): Promise<number> {
-  const rt = runtime.createRuntime({ print: (line: string) => lines.push(line) });
+  const hashes = linkBuiltins();
+  const rt = runtime.createRuntime({
+    print: (line: string) => lines.push(line),
+    // Domain.loadBytes: the ABC added to the domain after the others, as avmshell loads it.
+    compileAbc: (bytes: Uint8Array) => {
+      const error = testing.domainAdd(bytes, false);
+      if (error) {
+        return error;
+      }
+
+      hashes.push(sha(bytes));
+      return evaluate(testing.domainModule(hashes.join("\n")));
+    },
+    files: testFiles(),
+  });
   for (const module of builtinModules) {
     module(rt);
   }
 
-  const hashes = linkBuiltins();
   const error = testing.domainAdd(abc, false);
   if (error) {
     lines.push(`VerifyError: Error #${error}`);

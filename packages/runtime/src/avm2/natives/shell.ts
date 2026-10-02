@@ -1,5 +1,6 @@
-// avmshell's own classes, which a player has not: its System, and its
-// Worker as the one that runs, the primordial, with no others to start.
+// avmshell's own classes, which a player has not: its System, File and
+// Domain, and its Worker as the one that runs, the primordial, with no
+// others to start.
 import {
   type AsObject,
   type ClassHook,
@@ -7,6 +8,7 @@ import {
   setStaticVar,
   type Value,
 } from "../runtime.js";
+import { bytesOf, fromUtf8, GLOBAL_MEMORY_MIN_SIZE, setDomainMemory, utf8 } from "./bytearray.js";
 import { elements, type Natives, registerNativeClass } from "./define.js";
 
 const started = Date.now();
@@ -42,9 +44,55 @@ const SHELL_FEATURES = [
   .map((f) => `${f};`)
   .join("");
 
-/** System's natives, for `rt`: all static, as avmshell has them. */
+/** The SWF versions avmplus' BugCompatibility names, which Domain.loadBytes takes. */
+const SWF_VERSIONS = { first: 9, last: 31 };
+
+/** As FileClass::read: UTF-16 after its byte order mark, else UTF-8, not strict. */
+function decodeText(bytes: Uint8Array): string {
+  if (bytes.length >= 3) {
+    if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+      return fromUtf8(bytes.subarray(3));
+    }
+
+    const big = bytes[0] === 0xfe && bytes[1] === 0xff;
+    if (big || (bytes[0] === 0xff && bytes[1] === 0xfe)) {
+      const units: string[] = [];
+      for (let i = 2; i + 1 < bytes.length; i += 2) {
+        const unit = big ? (bytes[i] << 8) | bytes[i + 1] : bytes[i] | (bytes[i + 1] << 8);
+        units.push(String.fromCharCode(unit));
+      }
+
+      return units.join("");
+    }
+  }
+
+  return fromUtf8(bytes);
+}
+
+/** avmshell's System, File and Domain natives, for `rt`, and its Worker's. */
 export function shellNatives(rt: Runtime): Natives {
   const natives: Natives = {};
+
+  const fileName = (name: Value): string => {
+    if (name === null || name === undefined) {
+      throw rt.error("ArgumentError", 1507, "filename");
+    }
+
+    return rt.toString(name);
+  };
+  const readFile = (name: string): Uint8Array => {
+    const bytes = rt.files.read(name);
+    if (bytes === null) {
+      throw rt.error("Error", 1500, name);
+    }
+
+    return bytes;
+  };
+  const writeFile = (name: string, bytes: Uint8Array): void => {
+    if (!rt.files.write(name, bytes)) {
+      throw rt.error("Error", 1501, name);
+    }
+  };
 
   class SystemNatives {
     // avmshell's console skips NUL characters, which strings may hold.
@@ -114,6 +162,108 @@ export function shellNatives(rt: Runtime): Natives {
     static pauseForGCIfCollectionImminent(_imminence: Value): void {}
   }
 
+  // The files are the runtime's (RuntimeOptions.files), in avmshell's
+  // working directory.
+  class FileNatives {
+    static exists(filename: Value): boolean {
+      return rt.files.read(fileName(filename)) !== null;
+    }
+
+    static read(filename: Value): string {
+      return decodeText(readFile(fileName(filename)));
+    }
+
+    static write(filename: Value, data: Value): void {
+      const name = fileName(filename);
+      if (data === null || data === undefined) {
+        throw rt.error("ArgumentError", 1507, "data");
+      }
+
+      writeFile(name, utf8(rt.toString(data)));
+    }
+
+    static readByteArray(filename: Value): Value {
+      const bytes = readFile(fileName(filename));
+      const o = rt.construct(rt.classNamed("flash.utils::ByteArray")) as AsObject;
+      const b = bytesOf(rt, o);
+      b.write(bytes);
+      b.position = 0;
+      return o;
+    }
+
+    static writeByteArray(filename: Value, bytes: Value): boolean {
+      const name = fileName(filename);
+      const b = bytesOf(rt, bytes);
+      writeFile(name, b.buffer.subarray(0, b.length));
+      return true;
+    }
+  }
+
+  // Every Domain is the runtime's one: a child sees its parent's
+  // definitions, and what it loads every other sees, which avmshell's
+  // tests do not tell apart. Its domain memory is the runtime's too.
+  class DomainNatives {
+    static get currentDomain(): Value {
+      return rt.currentDomain();
+    }
+
+    static get MIN_DOMAIN_MEMORY_LENGTH(): number {
+      return GLOBAL_MEMORY_MIN_SIZE;
+    }
+
+    "avmplus:Domain::init"(_base: Value): void {}
+
+    // As DomainObject::loadBytes: the ABC compiled by the host, then its
+    // entry point run.
+    loadBytes(bytes: Value, swfVersion: Value): Value {
+      if (bytes === null || bytes === undefined) {
+        throw rt.error("TypeError", 1507, "bytes");
+      }
+
+      const version = rt.toUint(swfVersion ?? 0);
+      if (version !== 0 && (version < SWF_VERSIONS.first || version > SWF_VERSIONS.last)) {
+        throw rt.error("TypeError", 1508, "swfVersion");
+      }
+
+      if (!rt.compileAbc) {
+        throw rt.unsupported("Domain.loadBytes without RuntimeOptions.compileAbc");
+      }
+
+      const b = bytesOf(rt, bytes);
+      const compiled = rt.compileAbc(b.buffer.slice(0, b.length));
+      if (typeof compiled === "number") {
+        throw rt.error("VerifyError", compiled);
+      }
+
+      rt.run(compiled(rt));
+      return undefined;
+    }
+
+    // As DomainObject::getClass: "a.b.C" names C in package a.b.
+    getClass(className: Value): Value {
+      if (className === null || className === undefined) {
+        throw rt.error("ArgumentError", 1507, "name");
+      }
+
+      const name = rt.toString(className);
+      const dot = name.lastIndexOf(".");
+      const cls = rt.classNamed(dot < 0 ? name : `${name.slice(0, dot)}::${name.slice(dot + 1)}`);
+      if (cls === null || typeof cls !== "object" || cls.$it === undefined) {
+        throw rt.error("TypeError", 1034, rt.toString(cls), "Class");
+      }
+
+      return cls;
+    }
+
+    get domainMemory(): Value {
+      return rt.memoryProvider;
+    }
+
+    set domainMemory(v: Value) {
+      setDomainMemory(rt, v);
+    }
+  }
+
   class WorkerNatives {
     declare $shared: Map<string, Value>;
 
@@ -162,6 +312,8 @@ export function shellNatives(rt: Runtime): Natives {
   }
 
   registerNativeClass(natives, "avmplus::System", SystemNatives);
+  registerNativeClass(natives, "avmplus::File", FileNatives);
+  registerNativeClass(natives, "avmplus::Domain", DomainNatives);
   registerNativeClass(natives, "flash.system::Worker", WorkerNatives);
   registerNativeClass(natives, "flash.system::WorkerDomain", WorkerDomainNatives);
   return natives;
