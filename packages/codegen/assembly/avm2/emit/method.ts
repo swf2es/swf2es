@@ -2519,7 +2519,21 @@ export class MethodEmitter {
       type === from ||
       bt === BUILTIN_Any ||
       (bt === BUILTIN_Number &&
-        (fromBt === BUILTIN_Int || fromBt === BUILTIN_Uint || fromBt === BUILTIN_Number))
+        (fromBt === BUILTIN_Int || fromBt === BUILTIN_Uint || fromBt === BUILTIN_Number)) ||
+      this.upcast(type, from)
+    );
+  }
+
+  /**
+   * Whether a value of class type `from` is one of class `type` already, as
+   * CodegenLIR::coerceToType writes no code for: instances of a subtype
+   * are, and null stays null.
+   */
+  upcast(type: i32, from: i32): bool {
+    return (
+      this.isClassRef(type) &&
+      this.isClassRef(from) &&
+      this.domain.traits.subtypeOf(<u32>from, <u32>type)
     );
   }
 
@@ -2632,6 +2646,11 @@ export class MethodEmitter {
         out.text(")");
         return;
       default:
+        if (this.upcast(type, from)) {
+          this.operand(prefix, r);
+          return;
+        }
+
         // A class's instances, by T: no builtin for the runtime to look for.
         out.text(this.isClassRef(type) ? "rt.coerceTo(" : "rt.coerce(");
         this.operand(prefix, r);
