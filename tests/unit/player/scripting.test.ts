@@ -468,7 +468,11 @@ test("LoaderInfo reports HTTP status between init and complete, and before an I/
 
 test("timers fire in the order of their times, each at its own time", { skip }, async () => {
   const lines: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    // The frame clock: what the timers trace of getTimer is the same on every run.
+    realTime: null,
+  });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
   // A 10 fps root: the clock is at 100 as the constructor starts the timers, at 400 after three ticks.
   const player = new Player(bare(compiler(out)("Timers"), 4), scripting);
@@ -485,7 +489,11 @@ test("timers due at once fire in the order started, after others around them wer
   skip,
 }, async () => {
   const lines: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    // The frame clock: what the timers trace of getTimer is the same on every run.
+    realTime: null,
+  });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
   // Five timers started A to E, three stopped at once: B and C, both due at 300, keep their order.
   const player = new Player(bare(compiler(out)("TimerTies"), 3), scripting);
@@ -498,7 +506,11 @@ test("timers due at once fire in the order started, after others around them wer
 
 test("a timer whose closure throws keeps running and fires again", { skip }, async () => {
   const lines: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    // The frame clock: what the timers trace of getTimer is the same on every run.
+    realTime: null,
+  });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
   const player = new Player(bare(compiler(out)("TimerThrows"), 3), scripting);
   player.frameRate = 10;
@@ -580,7 +592,7 @@ test("a bitmap a timeline places is a Bitmap, its bound class its data's with Ha
   );
 });
 
-test("getTimer reads the frame clock, or a host's real clock as it runs on within a frame", {
+test("getTimer reads the real clock as it runs on within a frame, or the frame clock if asked", {
   skip,
 }, async () => {
   const compile = compiler(out);
@@ -601,7 +613,10 @@ test("getTimer reads the frame clock, or a host's real clock as it runs on withi
 
   // The frame clock: the first frame's time at 24 fps, the same at each read.
   const framed: string[] = [];
-  const stepped = new Scripting(await createCodegen(wasm), { print: (l) => framed.push(l) });
+  const stepped = new Scripting(await createCodegen(wasm), {
+    print: (l) => framed.push(l),
+    realTime: null,
+  });
   await stepped.loadLibraries(libraryAbcs(`${out}libraries/`));
   await new Player(swf, stepped).start();
   assert.deepEqual(framed, ["42 42"]);
@@ -617,4 +632,30 @@ test("getTimer reads the frame clock, or a host's real clock as it runs on withi
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
   await new Player(swf, scripting).start();
   assert.deepEqual(real, ["2 4"]);
+});
+
+test("getTimer runs on in real time by default", { skip }, async () => {
+  const swf = bare(
+    compiler(out)(
+      "ClockRuns",
+      `package {
+        import flash.display.Sprite;
+        import flash.utils.getTimer;
+        public class ClockRuns extends Sprite {
+          public function ClockRuns() {
+            var start:int = getTimer();
+            for (var n:int = 0; getTimer() == start && n < 100000000; n++) {}
+            trace(getTimer() > start);
+          }
+        }
+      }`,
+    ),
+    1,
+    "ClockRuns",
+  );
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  await new Player(swf, scripting).start();
+  assert.deepEqual(lines, ["true"]);
 });

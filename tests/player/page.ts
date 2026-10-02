@@ -35,6 +35,8 @@ async function scriptingFor(
     print: (line) => trace.push(...line.split("\n")),
     // The debugger player, as adl is and as Ruffle's traces were recorded: errors carry their text.
     debugger: true,
+    // The frame clock: traces that tell getTimer are the same on every run.
+    realTime: null,
     url: url ? new URL(url, location.href).href : undefined,
     fetch: async (request, signal) => {
       const response = await fetch(request.url, {

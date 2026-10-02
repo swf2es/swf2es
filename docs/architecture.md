@@ -851,12 +851,17 @@ as many frames as it is worth, five at most after a long pause and the
 rest let go, as Ruffle paces, so a stall does not become a spiral of
 catch-up. Frame pacing and the clock are related but not one counter:
 the clock may run on within a frame later, where the frame count cannot.
-`getTimer` tells the clock, which a frame moves and nothing else, unless
-the host gives `Scripting` a real clock (`realTime`, such as
-`performance.now`): then it tells the real milliseconds since the player
-started, which run on while a script does, as Flash's do, so that code
-timing itself within a frame, as benchmarks and Crossbridge's C do, sees
-the time pass. Timers fire by the frame clock either way.
+`getTimer` tells real time, as Flash's does: the whole milliseconds,
+truncated, since the `Scripting` was made, by `performance.now` or the
+`realTime` clock a host gives, running on while a script does, so that
+code timing itself within a frame, as benchmarks and Crossbridge's C
+do, sees the time pass, and a game's motion follows the time between
+frames. `realTime: null` makes it tell the frame clock instead, rounded
+as it was, the same on every run: the player's cases and the corpus
+(`tests/player/page.ts`) and the node tests that trace it ask for that.
+Timers fire by the frame clock either way; a host playing in real time
+drives it through `advance(dt)`, so it never runs ahead of the real one,
+and a timer's `getTimer() - start >= delay` still holds.
 
 `flash.utils.Timer` is playerglobal's own in all but three natives: the
 counting, `delay`'s range (RangeError #2066), `reset` and the events are
