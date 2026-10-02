@@ -1388,14 +1388,16 @@ export const cases: PlayerCase[] = [
   },
   {
     name: "convolution-draw",
-    swf: (abc) => bare(abc, 1, "ConvolutionDraw", 396, 132),
+    swf: (abc) => bare(abc, 1, "ConvolutionDraw", 396, 198),
     script: "ConvolutionDraw",
     frames: 1,
     capture: [1],
     // The page's four samples a pixel premultiply a half-transparent
-    // object's colour a level or so off adl's: within 3 a channel.
+    // object's colour a level or so off adl's: within 3 a channel. A 0 × 3
+    // kernel's copy reads a row past adl's bitmap of the object, and adl
+    // draws what memory lies there: 10 pixels, transparent here.
     tolerance: 3,
-    maxOutliers: 0,
+    maxOutliers: 10,
   },
   {
     name: "filters",

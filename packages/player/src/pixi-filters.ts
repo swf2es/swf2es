@@ -422,6 +422,31 @@ class ConvolutionFilter extends FlashFilter {
   }
 }
 
+/**
+ * A convolution with no taps as adl draws it, a copy moved up and left by
+ * the half of the other size: one tap there, of 1, the edges transparent.
+ */
+function emptyKernel(f: FilterRecord): FilterRecord {
+  const hx = f.matrixX >> 1;
+  const hy = f.matrixY >> 1;
+  const matrixX = 2 * hx + 1;
+  const matrixY = 2 * hy + 1;
+  const matrix = new Array(matrixX * matrixY).fill(0);
+  matrix[matrix.length - 1] = 1;
+  return {
+    ...f,
+    matrixX,
+    matrixY,
+    matrix,
+    divisor: 1,
+    bias: 0,
+    clamp: false,
+    color: 0,
+    alpha: 0,
+    preserveAlpha: false,
+  };
+}
+
 /** The Pixi filters a display object's filter records draw as: those swf2es draws yet, in their order. */
 export function displayFilters(records: readonly FilterRecord[]): Filter[] {
   const out: Filter[] = [];
@@ -434,7 +459,7 @@ export function displayFilters(records: readonly FilterRecord[]): Filter[] {
     } else if (f.kind === "colorMatrix") {
       filter = new ColorMatrixFilter(f);
     } else if (f.kind === "convolution") {
-      filter = new ConvolutionFilter(f);
+      filter = new ConvolutionFilter(f.matrixX * f.matrixY > 0 ? f : emptyKernel(f));
     }
 
     if (filter) {

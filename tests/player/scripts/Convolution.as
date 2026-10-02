@@ -144,6 +144,17 @@ package {
       dump("into opaque, alpha convolved", opaque);
       opaque.applyFilter(half, half.rect, new Point(0, 0), new ConvolutionFilter(1, 1, [1]));
       dump("into opaque, copied", opaque);
+      // An empty kernel copies the source rect, to where the grown rect's corner lands.
+      var empty:Array = [new ConvolutionFilter(), new ConvolutionFilter(0, 0, [], 1, 64, false),
+        new ConvolutionFilter(0, 3, [1, 1, 1], 1, 0, false), new ConvolutionFilter(3, 0, [1, 1, 1], 1, 10)];
+      for each (var e:ConvolutionFilter in empty) {
+        var into:BitmapData = new BitmapData(7, 6, true, 0xff0000ff);
+        into.applyFilter(half, new Rectangle(1, 1, 4, 3), new Point(2, 2), e);
+        dump("empty " + e.matrixX + "x" + e.matrixY + ", rect " + into.generateFilterRect(new Rectangle(1, 1, 4, 3), e), into);
+      }
+      var opaqueInto:BitmapData = new BitmapData(7, 6, false, 0x0000ff);
+      opaqueInto.applyFilter(half, half.rect, new Point(0, 0), new ConvolutionFilter());
+      dump("empty into opaque", opaqueInto);
       var self:BitmapData = s.clone();
       self.applyFilter(self, self.rect, new Point(0, 0), new ConvolutionFilter(3, 3, [1, 1, 1, 1, 1, 1, 1, 1, 1], 9));
       dump("in place", self);

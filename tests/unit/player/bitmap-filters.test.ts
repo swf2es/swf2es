@@ -131,3 +131,23 @@ test("a convolution reads the source past its rect, and clamps or colours past t
   });
   assert.equal(d.pixels[0], 0xff00ff00);
 });
+
+test("a convolution with no taps copies the source, from the corner of the rect the other size grows", () => {
+  // The default filter, 0 by 0: a 2 by 2 red bitmap comes out as it went in.
+  const red = new BitmapStore(2, 2, true, 0xffff0000);
+  const d = new BitmapStore(2, 2, true, 0);
+  applyFilter(d, red, { x: 0, y: 0, width: 2, height: 2 }, 0, 0, filterDefaults("convolution"));
+  assert.deepEqual([...d.pixels], [0xffff0000, 0xffff0000, 0xffff0000, 0xffff0000]);
+
+  // 0 by 3 grows the rect a row each way: the copy lands a row up, and is as tall as the rect.
+  const s = new BitmapStore(1, 3, true, 0);
+  s.setPixel32(0, 0, 0xff000001);
+  s.setPixel32(0, 1, 0xff000002);
+  s.setPixel32(0, 2, 0xff000003);
+  const into = new BitmapStore(1, 4, true, 0xff0000ff);
+  applyFilter(into, s, { x: 0, y: 1, width: 1, height: 1 }, 0, 2, {
+    ...filterDefaults("convolution"),
+    matrixY: 3,
+  });
+  assert.deepEqual([...into.pixels], [0xff0000ff, 0xff000002, 0xff000003, 0xff0000ff]);
+});

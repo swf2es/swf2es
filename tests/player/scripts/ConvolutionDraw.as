@@ -5,7 +5,8 @@ package {
 
   // Convolutions drawn on display objects as adl draws them: blurs and
   // sharpens of a two-colour square, an emboss, a shift, the edges clamped
-  // or coloured, alpha convolved, and how far the filter's region reaches.
+  // or coloured, alpha convolved, how far the filter's region reaches, and
+  // empty kernels.
   public class ConvolutionDraw extends Sprite {
     private function cell(k:int, filters:Array, alpha:Number = 1, scale:Number = 1):void {
       var x:Number = (k % 6) * 66;
@@ -41,6 +42,10 @@ package {
       cell(9, [new ConvolutionFilter(3, 3, [0, 0, 0, 0, 0, 0, 0, 0, 1], 1, 0, false, false, 0x0000ff, 0.5)]);
       cell(10, [new ConvolutionFilter(3, 3, [1, 2, 1, 2, 4, 2, 1, 2, 1], 16)], 1, 1.5);
       cell(11, [new ConvolutionFilter(3, 3, [0, 1, 0, 1, -4, 1, 0, 1, 0], 1, 128, false)]);
+      // An empty kernel leaves the object as it is.
+      cell(12, [new ConvolutionFilter()]);
+      cell(13, [new ConvolutionFilter(0, 0, [], 1, 64, false)]);
+      cell(14, [new ConvolutionFilter(0, 3, [1, 1, 1], 1, 0, false)]);
       trace("drawn");
     }
   }

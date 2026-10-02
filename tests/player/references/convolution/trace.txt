@@ -514,6 +514,41 @@ into opaque, copied
  - ffff7f40 ff20607f ffff7f40 ffff7f40 -
  - ffff7f40 ffff7f40 ffff7f40 ffff7f40 -
  - - - - - -
+empty 0x0, rect (x=1, y=1, w=4, h=3)
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+ ff0000ff ff0000ff 80ff7f40 80ff7f40 80ff7f40 80ff7f40 ff0000ff
+ ff0000ff ff0000ff 80ff7f40 4020607f 80ff7f40 80ff7f40 ff0000ff
+ ff0000ff ff0000ff 80ff7f40 80ff7f40 80ff7f40 80ff7f40 ff0000ff
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+empty 0x0, rect (x=1, y=1, w=4, h=3)
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+ ff0000ff ff0000ff 80ff7f40 80ff7f40 80ff7f40 80ff7f40 ff0000ff
+ ff0000ff ff0000ff 80ff7f40 4020607f 80ff7f40 80ff7f40 ff0000ff
+ ff0000ff ff0000ff 80ff7f40 80ff7f40 80ff7f40 80ff7f40 ff0000ff
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+empty 0x3, rect (x=1, y=0, w=4, h=5)
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+ ff0000ff ff0000ff 80ff7f40 80ff7f40 80ff7f40 80ff7f40 ff0000ff
+ ff0000ff ff0000ff 80ff7f40 4020607f 80ff7f40 80ff7f40 ff0000ff
+ ff0000ff ff0000ff 80ff7f40 80ff7f40 80ff7f40 80ff7f40 ff0000ff
+ ff0000ff ff0000ff 0 0 0 0 ff0000ff
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+empty 3x0, rect (x=0, y=1, w=6, h=3)
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+ ff0000ff 80ff7f40 80ff7f40 80ff7f40 80ff7f40 0 ff0000ff
+ ff0000ff 80ff7f40 4020607f 80ff7f40 80ff7f40 0 ff0000ff
+ ff0000ff 80ff7f40 80ff7f40 80ff7f40 80ff7f40 0 ff0000ff
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+empty into opaque
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+ ff0000ff ff80409f ff80409f ff80409f ff80409f ff0000ff ff0000ff
+ ff0000ff ff80409f ff0818df ff80409f ff80409f ff0000ff ff0000ff
+ ff0000ff ff80409f ff80409f ff80409f ff80409f ff0000ff ff0000ff
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
+ ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff
 in place
  ff080a40 ff190a40 ff320a40 ff4b0a40 ff640a40 ff7d0a40 ff960a40 ffaf0a40 ffc80a40 ffd80a40
  ff081e40 ff161a40 ff2f1a40 ff481a40 ff611a40 ff7a1a40 ff931a40 ffac1a40 ffc51a40 ffd81e40

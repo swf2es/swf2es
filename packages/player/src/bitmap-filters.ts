@@ -4,7 +4,7 @@
 // the destination; a blur's runs truncated to 8 bits each, a glow's alpha
 // from the blur so truncated times strength, a colour matrix of straight
 // colour, rounded, a convolution of straight colour, truncated.
-import { type BitmapStore, type PixelRect, unmultiply } from "./bitmap.js";
+import { type BitmapStore, over, type PixelRect, unmultiply } from "./bitmap.js";
 import type { Filter } from "./filters.js";
 
 /** The filters this filters: the others' rects and pixels are still to come. */
@@ -127,6 +127,11 @@ export function applyFilter(
   const my = dy - rect.y;
   const shown = intersect(out, { x: -mx, y: -my, width: dest.width, height: dest.height });
   if (!shown) {
+    return true;
+  }
+
+  if (f.kind === "convolution" && (f.matrixX === 0 || f.matrixY === 0)) {
+    copyEmpty(dest, source, rect, out, shown, mx, my);
     return true;
   }
 
@@ -294,6 +299,43 @@ function colorMatrix(
       result[i] = ((na << 24) | (p(nr) << 16) | (p(ng) << 8) | p(nb)) >>> 0;
     }
   }
+}
+
+/**
+ * What adl makes of a convolution with no taps: a copy, of as much of the
+ * source as the filter's rect is big (the other size of the matrix still
+ * grows it) from the source rect's corner, to that rect's corner; over
+ * what an opaque destination has, into a transparent one as it is; what
+ * lies past the source left as it was. `shown` is what the destination
+ * shows of `out`, and (mx, my) moves both there.
+ */
+function copyEmpty(
+  dest: BitmapStore,
+  source: BitmapStore,
+  rect: PixelRect,
+  out: PixelRect,
+  shown: PixelRect,
+  mx: number,
+  my: number,
+): void {
+  const target = dest.pixels;
+  for (let y = shown.y; y < shown.y + shown.height; y++) {
+    const sy = rect.y + y - out.y;
+    if (sy < 0 || sy >= source.height) {
+      continue;
+    }
+
+    for (let x = shown.x; x < shown.x + shown.width; x++) {
+      const sx = rect.x + x - out.x;
+      if (sx >= 0 && sx < source.width) {
+        const p = source.pixels[sy * source.width + sx];
+        const at = (y + my) * dest.width + x + mx;
+        target[at] = dest.transparent ? p : over(p, target[at]);
+      }
+    }
+  }
+
+  dest.changed();
 }
 
 /**

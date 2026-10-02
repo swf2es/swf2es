@@ -367,7 +367,7 @@ export class BitmapStore {
 }
 
 /** Source over destination, both premultiplied, as Flash does: s + ((d * (256 - sa)) >> 8) a channel. */
-function over(s: number, d: number): number {
+export function over(s: number, d: number): number {
   const sa = s >>> 24;
   if (sa === 255) {
     return s >>> 0;

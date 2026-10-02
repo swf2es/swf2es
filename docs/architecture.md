@@ -1399,7 +1399,11 @@ the colour premultiplied truncating. The wrap makes a divisor of 1.1 to
 2 turn and shrink the weights (by 2 they negate), and that way's last
 tap reads the centre pixel, not the one right and down of it. Both ways
 are in `bitmap-filters.ts`, and the `convolution` case matches adl's
-numbers for each, to the bit.
+numbers for each, to the bit. A matrix with no taps (0 by anything, the
+default filter's) copies instead: as much of the source as the grown rect
+is big, from the source rect's corner, to the grown rect's corner, over
+an opaque destination's pixels; what lies past the source stays as it
+was.
 
 The renderer draws a display object's blur, glow, drop shadow, colour
 matrix and convolution as adl does (`pixi-filters.ts`), before its blend mode: a blur is
@@ -1415,7 +1419,10 @@ alone. A colour matrix maps each pixel's straight colour, offsets in
 255ths, transparent pixels within the object's bounds too. A convolution
 filters, as applyFilter does, a bitmap of the object's pixels and one
 more right and down, its edge pixels clamped or coloured past that, and
-draws the rect so grown; each pixel's texels read its centre alike. The
+draws the rect so grown; each pixel's texels read its centre alike. One
+with no taps moves the object up and left by half the other size, a
+single tap there. (adl's copy then reads a row past its bitmap and draws
+what memory lies there; swf2es leaves that row transparent.) The
 passes
 are Pixi filters at the target's resolution, for WebGL: under WebGPU,
 where Pixi would skip an object's whole chain for one it cannot run,
