@@ -61,3 +61,51 @@ test("a store shown by two renderers has a copy in each, and what one drew reach
   store.dispose();
   assert.equal(store.copies.size, 0);
 });
+
+test("a timeline mask's range goes in a container it masks, a scroll clips the rest, and a mask off the list sits beside the root", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const [mask, , , c] = [1, 2, 3, 4].map((depth) => {
+    const child = new Container();
+    root.placeAtDepth(child, depth);
+    return child;
+  });
+  mask.clipDepth = 3;
+  view.prepare(root);
+
+  const top = view.stage.children[0];
+  const [art, maskContainer, group, cContainer] = top.children;
+  assert.equal(top.children.length, 4);
+  assert.equal(art.children.length, 0);
+  assert.equal(group.mask, maskContainer);
+  assert.equal(group.children.length, 2);
+  assert.ok(!cContainer.mask);
+  assert.equal(maskContainer.includeInBuild, false);
+
+  // Scrolled: its art and children go in a container the scroll's rectangle masks.
+  root.scroll = { xMin: 5, yMin: 5, xMax: 25, yMax: 15 };
+  root.invalidate(1);
+  view.prepare(root);
+  const [clip, content] = top.children;
+  assert.equal(top.children.length, 2);
+  assert.equal(content.mask, clip);
+  assert.equal(content.children.length, 4);
+  assert.deepEqual([top.x, top.y], [-5, -5]);
+
+  // A mask off the list clips from beside the root, at its own place.
+  const off = new Container();
+  off.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 30, ty: 40 });
+  c.setMask(off);
+  view.prepare(root);
+  const holder = view.stage.children[1];
+  assert.equal(holder.children.length, 1);
+  assert.equal(holder.children[0].x, 30);
+  const cNode = content.children[3];
+  assert.equal(cNode.mask, holder.children[0]);
+
+  // And none once the mask is taken off.
+  c.setMask(null);
+  view.prepare(root);
+  assert.equal(holder.children.length, 0);
+  assert.ok(!cNode.mask);
+});

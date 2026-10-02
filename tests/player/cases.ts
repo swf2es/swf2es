@@ -202,10 +202,16 @@ export function scripted(abc: Uint8Array): Uint8Array {
 
 // A root of `frames` frames with `abc` as its code and nothing placed: for
 // what the scripts alone do (scripts/Events.as, and the node tests' loads).
-export function bare(abc: Uint8Array, frames = 2, documentClass = "Main"): Uint8Array {
+export function bare(
+  abc: Uint8Array,
+  frames = 2,
+  documentClass = "Main",
+  width = 100,
+  height = 50,
+): Uint8Array {
   return w.swf({
-    width: 100,
-    height: 50,
+    width,
+    height,
     frameRate: 24,
     frameCount: frames,
     tags: [
@@ -990,6 +996,109 @@ function gradients(abc: Uint8Array): Uint8Array {
   });
 }
 
+/** A rectangle's path, in pixels. */
+function rectPath(x: number, y: number, width: number, height: number): w.PathCommand[] {
+  const [l, t, r, b] = [x * 20, y * 20, (x + width) * 20, (y + height) * 20];
+  return [{ move: [l, t] }, { line: [r, t] }, { line: [r, b] }, { line: [l, b] }, { line: [l, t] }];
+}
+
+/** A circle's path, in pixels: eight quadratics, as Flash's drawCircle. */
+function circlePath(cx: number, cy: number, r: number): w.PathCommand[] {
+  const at = (radius: number, angle: number): [number, number] => [
+    Math.round((cx + radius * Math.cos(angle)) * 20),
+    Math.round((cy + radius * Math.sin(angle)) * 20),
+  ];
+  const path: w.PathCommand[] = [{ move: at(r, 0) }];
+  for (let i = 1; i <= 8; i++) {
+    path.push({
+      curve: [
+        ...at(r / Math.cos(Math.PI / 8), ((i - 0.5) * Math.PI) / 4),
+        ...at(r, (i * Math.PI) / 4),
+      ],
+    });
+  }
+
+  return path;
+}
+
+// Timeline masks (scripts/ClipDepths.as): five cells of a yellow ground, a
+// mask at the next depth clipping red and blue, then green above the
+// range. The first mask's lines must clip nothing; into the second the
+// script puts black among the clipped and magenta on top; the third is a
+// sprite of two circles the script hides; the script takes the fourth
+// away; the fifth clips to the top depth, so what the script adds on top
+// is clipped too.
+function clipDepths(abc: Uint8Array): Uint8Array {
+  const rect = (id: number, color: number, x: number, y: number, width: number, height: number) =>
+    w.shape({
+      id,
+      bounds: [x * 20, (x + width) * 20, y * 20, (y + height) * 20],
+      fills: [color],
+      paths: [{ fill1: 1, commands: rectPath(x, y, width, height) }],
+    });
+  const cells: Uint8Array[] = [];
+  for (const [k, mask] of [2, 2, 6, 2].entries()) {
+    const at = { tx: k * 2000 };
+    const cell = "ABCD"[k];
+    const base = k * 10;
+    cells.push(
+      w.place({ depth: base + 1, character: 1, matrix: at }),
+      w.place({
+        depth: base + 2,
+        character: mask,
+        matrix: at,
+        name: `m${cell}`,
+        clipDepth: base + 4,
+      }),
+      w.place({ depth: base + 3, character: 3, matrix: at, name: `r${cell}` }),
+      w.place({ depth: base + 4, character: 4, matrix: at, name: `b${cell}` }),
+      w.place({ depth: base + 5, character: 5, matrix: at }),
+    );
+  }
+
+  return w.swf({
+    width: 500,
+    height: 100,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      rect(1, 0xffff00, 0, 0, 100, 100),
+      // A circle of radius 20 inside a line 20 wide: radius 30 if lines clipped.
+      w.shape({
+        id: 2,
+        bounds: [400, 1600, 400, 1600],
+        fills: [0x00ff00],
+        lines: [{ width: 400, color: 0x000000 }],
+        paths: [{ fill1: 1, line: 1, commands: circlePath(50, 50, 20) }],
+      }),
+      rect(3, 0xff0000, 0, 0, 100, 50),
+      rect(4, 0x0000ff, 0, 50, 100, 50),
+      rect(5, 0x00ff00, 40, 0, 20, 100),
+      w.shape({
+        id: 7,
+        bounds: [300, 1700, 700, 1300],
+        fills: [0x00ff00],
+        paths: [
+          { fill1: 1, commands: circlePath(30, 50, 15) },
+          { fill1: 1, commands: circlePath(70, 50, 15) },
+        ],
+      }),
+      w.sprite(6, 1, [w.place({ depth: 1, character: 7 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "ClipDepths"),
+      w.symbolClass([[0, "ClipDepths"]]),
+      ...cells,
+      w.place({ depth: 41, character: 1, matrix: { tx: 8000 } }),
+      w.place({ depth: 42, character: 2, matrix: { tx: 8000 }, name: "mE", clipDepth: 1000 }),
+      w.place({ depth: 43, character: 3, matrix: { tx: 8000 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
@@ -1111,6 +1220,30 @@ export const cases: PlayerCase[] = [
     // misses the pixel's corner; and a few of the focal rings: some 240
     // channels in all, where a gradient drawn wrong is thousands.
     tolerance: 8,
+    maxOutliers: 300,
+  },
+  {
+    name: "masks",
+    swf: (abc) => bare(abc, 3, "Masks", 400, 300),
+    script: "Masks",
+    frames: 3,
+    capture: [3],
+    // Mask edges: Flash's anti-aliasing covers a little more of the edge
+    // pixels than the stencil's samples (a circle of radius 30 covers 2848
+    // pixels in Flash, 2836 here), by up to 80 a channel along the
+    // circles; some 390 channels beyond 32, where a mask misplaced by a
+    // pixel is thousands.
+    tolerance: 32,
+    maxOutliers: 450,
+  },
+  {
+    name: "clip-depths",
+    swf: clipDepths,
+    script: "ClipDepths",
+    frames: 2,
+    capture: [2],
+    // Mask edges, as in "masks": some 230 channels beyond 32 along the circles.
+    tolerance: 32,
     maxOutliers: 300,
   },
   {
