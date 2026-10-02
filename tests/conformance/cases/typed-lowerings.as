@@ -94,3 +94,22 @@ for (var key:String in o) {
 names.sort();
 trace(names, o.a + o.b);
 
+// The count of arguments, with and without the default XML namespace.
+function noXml(a:int, b:int):int { return a + b; }
+function seesXml(a:int, b:int = 2):String { var x:XML = <x/>; return x.name() + (a + b); }
+function setsXml(a:int):String { default xml namespace = "urn:a"; var x:XML = <y/>; return x.name() + a; }
+trace(noXml(1, 2), seesXml(1), seesXml(1, 3), setsXml(4), new XML("<z/>").name());
+var f:Function = noXml;
+var g:Function = seesXml;
+for each (var args:Array in [[], [1], [1, 2], [1, 2, 3]]) {
+  try {
+    trace(args.length, f.apply(null, args));
+  } catch (e:ArgumentError) {
+    trace(args.length, "noXml", e.errorID);
+  }
+  try {
+    trace(args.length, g.apply(null, args));
+  } catch (e:ArgumentError) {
+    trace(args.length, "seesXml", e.errorID);
+  }
+}

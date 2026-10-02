@@ -72,12 +72,17 @@ export class MethodEmitter {
    * Whether the method being written can see the default XML namespace: a
    * lookup, call or construction that may reach XML, a closure or class it
    * makes, a with scope, or dxns. Only such a method checks, on entry, that
-   * it runs with its scope's (see checkDxns).
+   * it runs with its scope's (see checkEntry).
    */
   seesDxns: bool = false;
   dxnsAt: u32 = 0;
   dxnsMarks: i32 = 0;
-  dxnsCheck: string = "";
+  /** The method's name in its own code, for running it again (see checkEntry). */
+  entryName: string = "";
+  /** The test its arguments' count fails, "" if none; how many it requires and takes, -1 for any. */
+  argsTest: string = "";
+  argsRequired: u32 = 0;
+  argsMax: i32 = -1;
   /** The method being written: its ABC index and body. */
   current: u32 = 0;
   body: i32 = -1;
@@ -152,7 +157,7 @@ export class MethodEmitter {
     out.text(") {\n");
     this.dxnsAt = out.length;
     this.dxnsMarks = this.map.count;
-    this.dxnsCheck = `  if (rt.defaultXmlNamespace !== $dx) return rt.callInDxns($dx, ${name}, this, arguments);\n`;
+    this.entryName = name;
     this.seesDxns = false;
     this.prologue(method, global, flags);
     // A method that sets the default XML namespace gives its caller's
@@ -186,7 +191,7 @@ export class MethodEmitter {
       if (!this.unenclosed) {
         this.leaveDxns(dxns);
         out.text("}");
-        this.checkDxns();
+        this.checkEntry();
         return;
       }
 
@@ -215,21 +220,32 @@ export class MethodEmitter {
     out.text("\n");
     this.leaveDxns(dxns);
     out.text("}");
-    this.checkDxns();
+    this.checkEntry();
   }
 
   /**
-   * A method that can see the default XML namespace runs with the one of
-   * the scope it was made in ($dx, see ModuleEmitter.factory), not its
+   * The checks on entry, written first in the method once its code shows
+   * which it needs. Its arguments' count, as MethodEnv's argcOk. And a
+   * method that can see the default XML namespace runs with the one of the
+   * scope it was made in ($dx, see ModuleEmitter.factory), not its
    * caller's: else it runs again with it, and the caller's is back after.
-   * Written first in the method once its code shows it is needed.
+   * With both, one test, as V8 counts each against inlining: rt.enter
+   * throws the count's error or runs the method again, which counts again.
    */
-  checkDxns(): void {
-    if (!this.seesDxns) {
+  checkEntry(): void {
+    const args = this.argsTest;
+    const dxns = "rt.defaultXmlNamespace !== $dx";
+    let check = "";
+    if (this.seesDxns && args.length) {
+      check = `  if (${args} || ${dxns}) return rt.enter($dx, ${this.entryName}, this, arguments, ${this.argsRequired}, ${this.argsMax});\n`;
+    } else if (this.seesDxns) {
+      check = `  if (${dxns}) return rt.callInDxns($dx, ${this.entryName}, this, arguments);\n`;
+    } else if (args.length) {
+      check = `  if (${args}) throw rt.argumentCountError(${this.argsRequired}, arguments.length);\n`;
+    } else {
       return;
     }
 
-    const check = this.dxnsCheck;
     this.out.insert(this.dxnsAt, check);
     this.map.shift(this.dxnsMarks, <u32>check.length);
   }
@@ -462,21 +478,19 @@ export class MethodEmitter {
     // requires, or more than it declares unless it takes the rest.
     const required = count - traits.optionalCount[global];
     const extra = this.domain.allowsExtraArgs(global);
-    if (required > 0 || !extra) {
-      out.text("  if (");
-      if (required > 0) {
-        out.text("arguments.length < ");
-        out.uint(required);
-      }
-
-      if (!extra) {
-        out.text(required > 0 ? " || arguments.length > " : "arguments.length > ");
-        out.uint(count);
-      }
-
-      out.text(") throw rt.argumentCountError(");
-      out.uint(required);
-      out.text(", arguments.length);\n");
+    this.argsRequired = required;
+    this.argsMax = extra ? -1 : <i32>count;
+    if (required > 0 && !extra) {
+      this.argsTest =
+        required === count
+          ? `arguments.length !== ${count}`
+          : `arguments.length < ${required} || arguments.length > ${count}`;
+    } else if (required > 0) {
+      this.argsTest = `arguments.length < ${required}`;
+    } else if (!extra) {
+      this.argsTest = `arguments.length > ${count}`;
+    } else {
+      this.argsTest = "";
     }
 
     // var, not let: V8 starts a frame's registers undefined, where each
