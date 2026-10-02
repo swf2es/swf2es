@@ -16,6 +16,7 @@ import {
   type Renderer,
   RenderTexture,
   Sprite,
+  Text,
   Texture,
 } from "pixi.js";
 import { BitmapStore, type GpuCopy } from "./bitmap.js";
@@ -28,6 +29,7 @@ import {
   type DisplayObject,
   PIXELS,
   ShapeObject,
+  TextObject,
   TRANSFORM,
 } from "./display.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients.js";
@@ -517,6 +519,11 @@ export class PixiView {
       return;
     }
 
+    if (o instanceof TextObject) {
+      drawText(o, node.art);
+      return;
+    }
+
     const shape = o instanceof ShapeObject ? o.shape : null;
     node.layers = o.drawing?.layers ?? shape?.layers ?? [];
     const build = (layer: ShapeLayer) => {
@@ -797,6 +804,109 @@ export class PixiView {
   render(root: DisplayObject): void {
     this.prepare(root);
     this.renderer.render(this.stage);
+  }
+}
+
+/** A Flash font's name as a CSS family: the device fonts as theirs, any other by name, then serif, as Flash's default is. */
+function fontFamily(font: string): string[] {
+  switch (font) {
+    case "_sans":
+      return ["Arial", "Helvetica", "sans-serif"];
+    case "_serif":
+      return ["Times New Roman", "Times", "serif"];
+    case "_typewriter":
+      return ["Courier New", "Courier", "monospace"];
+    default:
+      return [font, "serif"];
+  }
+}
+
+/**
+ * Whether text laid out at (x, y), `width` by `height`, reaches outside its
+ * field, which then clips it: where it lies, as a margin or an indent puts
+ * it, not its size alone.
+ */
+export function overruns(
+  field: { left: number; top: number; width: number; height: number },
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): boolean {
+  return (
+    x < field.left ||
+    y < field.top ||
+    x + width > field.left + field.width ||
+    y + height > field.top + field.height
+  );
+}
+
+/**
+ * A TextField drawn: its background and border, then its text in the
+ * format of its first character, 2 pixels in from the field's edges as
+ * Flash's gutter is, aligned as its first paragraph, wrapped at the field's
+ * width if it wraps, and clipped to the field where it runs over.
+ */
+function drawText(o: TextObject, art: PixiContainer): void {
+  if (o.background || o.border) {
+    const box = new Graphics().rect(o.left, o.top, o.width, o.height);
+    if (o.background) {
+      box.fill({ color: o.backgroundColor & 0xffffff });
+    }
+
+    if (o.border) {
+      box.stroke({ color: o.borderColor & 0xffffff, width: 1, alignment: 1 });
+    }
+
+    art.addChild(box);
+  }
+
+  const model = o.model;
+  if (!model.text) {
+    return;
+  }
+
+  const f = model.formats[0] ?? model.defaultFormat;
+  const shown = o.displayAsPassword
+    ? "*".repeat(model.text.length)
+    : model.text.replace(/\r/g, "\n");
+  const text = new Text({
+    text: shown,
+    style: {
+      fontFamily: fontFamily(f.font),
+      fontSize: f.size,
+      fill: f.color & 0xffffff,
+      fontWeight: f.bold ? "bold" : "normal",
+      fontStyle: f.italic ? "italic" : "normal",
+      align: f.align === "justify" ? "justify" : (f.align as "left" | "center" | "right"),
+      wordWrap: o.wordWrap,
+      wordWrapWidth: Math.max(1, o.width - 4 - f.leftMargin - f.rightMargin),
+      leading: f.leading,
+      letterSpacing: f.letterSpacing,
+    },
+  });
+  const inner = o.left + 2 + f.leftMargin;
+  text.y = o.top + 2;
+  if (f.align === "center") {
+    text.anchor.x = 0.5;
+    text.x = o.left + o.width / 2;
+  } else if (f.align === "right") {
+    text.anchor.x = 1;
+    text.x = o.left + o.width - 2 - f.rightMargin;
+  } else {
+    text.x = inner + f.indent;
+  }
+
+  art.addChild(text);
+  // Measuring needs a canvas, which there is none of without a DOM, as in node's tests.
+  const measurable = typeof document !== "undefined";
+  if (
+    measurable &&
+    overruns(o, text.x - text.anchor.x * text.width, text.y, text.width, text.height)
+  ) {
+    const clip = new Graphics().rect(o.left, o.top, o.width, o.height).fill({ color: 0xffffff });
+    art.addChild(clip);
+    text.mask = clip;
   }
 }
 

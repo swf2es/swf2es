@@ -8,6 +8,7 @@ import { type ColorTransform, IDENTITY, type Matrix, type Place } from "@swf2es/
 import type { avm2 } from "@swf2es/runtime";
 import { BitmapStore } from "./bitmap.js";
 import type { Drawing } from "./drawing.js";
+import { TextModel } from "./text.js";
 import {
   type BitmapCharacter,
   type Character,
@@ -15,6 +16,7 @@ import {
   INVALID_PIXELS,
   type Library,
   type ShapeCharacter,
+  type TextCharacter,
   type Timeline,
 } from "./timeline.js";
 
@@ -218,6 +220,105 @@ export class ShapeObject extends DisplayObject {
 }
 
 /**
+ * A TextField: placed by DefineEditText, or made by a script. Its text and
+ * formats are a TextModel; a timeline's starts with its tag's text, read
+ * as HTML if the tag says so, in the format the tag gives.
+ */
+export class TextObject extends DisplayObject {
+  readonly model = new TextModel();
+  /** The field's rectangle, in its own pixels: from (left, top), width by height. */
+  left = 0;
+  top = 0;
+  width = 100;
+  height = 100;
+  border = false;
+  borderColor = 0;
+  background = false;
+  backgroundColor = 0xffffff;
+  multiline = false;
+  wordWrap = false;
+  type = "dynamic";
+  embedFonts = false;
+  autoSize = "none";
+  selectable = true;
+  maxChars = 0;
+  displayAsPassword = false;
+  condenseWhite = false;
+  antiAliasType = "normal";
+  gridFitType = "pixel";
+  sharpness = 0;
+  thickness = 0;
+  restrict: string | null = null;
+  mouseWheelEnabled = true;
+  alwaysShowSelection = false;
+  useRichTextClipboard = false;
+  scrollH = 0;
+  scrollV = 1;
+
+  constructor(
+    readonly definition: TextCharacter | null,
+    initialText = true,
+  ) {
+    super();
+    this.character = definition;
+    const edit = definition?.definition;
+    if (!edit) {
+      return;
+    }
+
+    this.left = edit.bounds.xMin / 20;
+    this.top = edit.bounds.yMin / 20;
+    this.width = (edit.bounds.xMax - edit.bounds.xMin) / 20;
+    this.height = (edit.bounds.yMax - edit.bounds.yMin) / 20;
+    this.multiline = edit.multiline;
+    this.wordWrap = edit.wordWrap;
+    this.type = edit.readOnly ? "dynamic" : "input";
+    this.displayAsPassword = edit.password;
+    this.autoSize = edit.autoSize ? "left" : "none";
+    this.selectable = edit.selectable;
+    // A border in the tag is Flash's border and white background together.
+    this.border = edit.border;
+    this.background = edit.border;
+    this.maxChars = edit.maxLength ?? 0;
+    this.embedFonts = edit.useOutlines;
+    const font = definition?.font;
+    const color = edit.color;
+    this.model.defaultFormat = {
+      ...this.model.defaultFormat,
+      font: font?.name ?? edit.fontClass ?? this.model.defaultFormat.font,
+      bold: font?.bold ?? false,
+      italic: font?.italic ?? false,
+      size: edit.fontHeight === null ? 12 : edit.fontHeight / 20,
+      // RGBA as the tag stores it.
+      color:
+        color === null ? 0 : ((color & 0xff) << 16) | (color & 0xff00) | ((color >>> 16) & 0xff),
+      align: ["left", "right", "center", "justify"][edit.align] ?? "left",
+      leftMargin: edit.leftMargin / 20,
+      rightMargin: edit.rightMargin / 20,
+      indent: edit.indent / 20,
+      leading: edit.leading / 20,
+    };
+    if (!initialText) {
+      this.model.setText("");
+    } else if (edit.html) {
+      this.model.setHtml(edit.text, edit.multiline);
+    } else {
+      this.model.setText(edit.text);
+    }
+  }
+
+  /** The text, \r between its lines. */
+  get text(): string {
+    return this.model.text;
+  }
+
+  /** The alignment of its first paragraph. */
+  get align(): string {
+    return (this.model.formats[0] ?? this.model.defaultFormat).align;
+  }
+}
+
+/**
  * Another character placed in a child's stead, with the move flag: Flash
  * makes no new object, and only a Shape no script has touched takes the
  * new shape's graphic; a clip, a Shape a script set a property of, and a
@@ -399,7 +500,7 @@ export class MovieClip extends Container {
       // Data is no display object: Flash places nothing for it.
       const character =
         place.character === null ? null : this.library.characters.get(place.character);
-      if (!character || character.type === "binary") {
+      if (!character || character.type === "binary" || character.type === "font") {
         existing?.applyPlace(place);
         continue;
       }
@@ -504,7 +605,7 @@ export class MovieClip extends Container {
 
       const character =
         jump.place.character === null ? null : this.library.characters.get(jump.place.character);
-      if (!character || character.type === "binary") {
+      if (!character || character.type === "binary" || character.type === "font") {
         existing?.applyPlace(jump.place);
         continue;
       }
@@ -630,6 +731,10 @@ export function displayFor(
     bitmap.character = character;
     bitmap.hasImage = hasImage;
     return bitmap;
+  }
+
+  if (character.type === "text") {
+    return new TextObject(character);
   }
 
   const clip = new MovieClip(character.timeline, library);

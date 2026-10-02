@@ -17,6 +17,7 @@ import {
   EMPTY_TIMELINE,
   MovieClip,
   ShapeObject,
+  TextObject,
 } from "./display.js";
 import { decodeImages, decodeInBrowser, type ImageDecode } from "./images.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
@@ -114,6 +115,7 @@ const DEFAULT_CLASS = {
   shape: "flash.display::Shape",
   sprite: "flash.display::MovieClip",
   bitmap: "flash.display::Bitmap",
+  text: "flash.text::TextField",
 };
 
 /**
@@ -590,7 +592,12 @@ export class Scripting {
     for (let t: typeof traits | null = traits; t; t = t.base as typeof traits | null) {
       // A display object's class bound to data has no display of it.
       const symbol = this.symbols.get(t.name);
-      if (symbol && symbol.character.type !== "binary") {
+      if (symbol && symbol.character.type !== "binary" && symbol.character.type !== "font") {
+        if (symbol.character.type === "text") {
+          // A new linked TextField has its symbol's bounds, but not its timeline's initial text.
+          return new TextObject(symbol.character, false);
+        }
+
         return displayFor(symbol.character, symbol.library);
       }
 
@@ -604,6 +611,10 @@ export class Scripting {
 
       if (t.name === "flash.display::Bitmap") {
         return new BitmapObject(null);
+      }
+
+      if (t.name === "flash.text::TextField") {
+        return new TextObject(null);
       }
     }
 

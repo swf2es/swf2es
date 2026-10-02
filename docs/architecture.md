@@ -1189,6 +1189,41 @@ never connected; and `System.disposeXML`, left to the collector.
 Bitmap fills, in a shape's records and through `beginBitmapFill`, and
 the filters follow, each by what Flash traces and draws under adl.
 
+### Text
+
+A `TextField` is a display object of its own kind (`TextObject`), placed
+by a timeline's DefineEditText or made by a script, 100 by 100 pixels and
+empty, as adl makes one. Its text is a `TextModel` (`text.ts`): the
+characters, `\r` between lines as Flash keeps them (`\n` is made one),
+each with its own format, and a default format, Flash's Times New Roman
+12 for a new field and the tag's for a timeline's (its font's name from
+the DefineFont2 or 3 it names, its height, colour, alignment, margins,
+indent and leading). `text` and `htmlText` set the text in the default
+format; `appendText` and `replaceText` put theirs in the format of the
+character before; `getTextFormat` of a range gives null for what its
+characters differ in, and `setTextFormat` sets what a TextFormat sets.
+`htmlText` is written as adl writes it: a `P` for each paragraph (an
+`LI` alone for a bullet's), in a `TEXTFORMAT` for its margins, indent,
+leading or tab stops, with a `FONT` of all five font attributes and,
+for each later run, a `FONT` inside it of what changed; `A`, `B`, `I`
+and `U` about a run's text, in that order out to in. It is read as adl
+reads it, a paragraph's end and a `BR` a line only in a multiline field.
+A TextFormat keeps each value as Flash converts it, null for one it does
+not set: whole numbers rounded, a half away from zero, `align` one of
+Flash's or ArgumentError 2008, an unknown `display` null. The `text-fields`
+case traces all of this, defaults, HTML and refusals, against adl.
+
+Setting a TextField's `width` or `height` resizes its field, as Flash
+does, not its scale. The renderer draws the background and border, then
+the text in its first character's format with Pixi's Text, 2 pixels in
+from the field's edges as Flash's gutter is, aligned as the first
+paragraph, wrapped at the field's width where it wraps, and clipped to
+the field where it runs over; a device font (`_sans`, `_serif`,
+`_typewriter`) is the browser's of that kind, any other font by its
+name. Embedded fonts' glyphs, runs of several formats on screen, text
+metrics (`textWidth`, `autoSize`'s resizing, lines that wrap), input and
+selection are still to come.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the

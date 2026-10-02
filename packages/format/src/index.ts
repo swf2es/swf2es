@@ -16,7 +16,6 @@ export {
   zlibCompress,
   zlibUncompress,
 } from "./compression.js";
-
 export {
   type Place,
   readBinaryData,
@@ -25,9 +24,9 @@ export {
   readPlace,
   readRemove,
   readSprite,
+  readString,
   readSymbolClass,
 } from "./display.js";
-
 export {
   type ColorTransform,
   type Fill,
@@ -42,7 +41,6 @@ export {
   type Shape,
   type ShapeRecord,
 } from "./shape.js";
-
 export {
   backgroundColor,
   isAs3,
@@ -56,5 +54,5 @@ export {
   SwfReader,
   type Tag,
 } from "./swf.js";
-
 export * as tags from "./tags.js";
+export { type EditText, type FontName, readEditText, readFontName } from "./text.js";

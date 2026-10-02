@@ -7,6 +7,7 @@ import type {
   DisplayObject,
   MovieClip,
   ShapeObject,
+  TextObject,
 } from "../../../packages/player/dist/display.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import * as w from "../../swf-writer.ts";
@@ -44,6 +45,29 @@ function movie(...frames: Uint8Array[][]): Player {
 }
 
 const depths = (clip: MovieClip) => clip.children.map((c) => c.depth);
+
+test("a named DefineEditText is placed as a TextField with its initial value", () => {
+  const player = new Player(
+    w.swf({
+      width: 200,
+      height: 100,
+      frameCount: 1,
+      tags: [
+        w.editText(3, "Loading", 2000, 400, 2),
+        w.place({ depth: 1, character: 3, name: "caption" }),
+        w.showFrame(),
+        w.end(),
+      ],
+    }),
+  );
+  const field = player.root.depths.get(1) as TextObject;
+
+  assert.equal(field.name, "caption");
+  assert.equal(field.text, "Loading");
+  assert.equal(field.width, 100);
+  assert.equal(field.height, 20);
+  assert.equal(field.align, "center");
+});
 
 test("children are in render order, which is depth order for the timeline's", () => {
   const { root } = movie([

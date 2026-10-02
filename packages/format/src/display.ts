@@ -34,7 +34,7 @@ export interface Place {
   clipActions: Uint8Array | null;
 }
 
-function readString(r: SwfReader): string {
+export function readString(r: SwfReader): string {
   const start = r.pos;
   while (r.pos < r.end && r.bytes[r.pos] !== 0) {
     r.pos++;
@@ -50,7 +50,7 @@ function readString(r: SwfReader): string {
  * (fromUtf8 in the runtime): a malformed or overlong sequence is no
  * sequence, and its first byte stands for itself.
  */
-function utf8(bytes: Uint8Array): string {
+export function utf8(bytes: Uint8Array): string {
   let s = "";
   const length = bytes.length;
 
