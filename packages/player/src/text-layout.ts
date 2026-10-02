@@ -328,28 +328,18 @@ function wrap(
   let width = 0;
   let i = from;
   while (i < measures.length) {
-    // The next word: its characters, then its spaces.
+    // The next word, measured only until it runs past the room: a word
+    // longer than many lines is not measured again for each of them.
     let wordEnd = i;
     let wordWidth = width;
     while (wordEnd < measures.length && text[start + wordEnd] !== " ") {
       wordWidth += measures[wordEnd].advance;
+      if (wordWidth > room) {
+        // On a line of its own, it breaks before the character that runs past, one at least.
+        return i > from ? i : Math.max(wordEnd, from + 1);
+      }
+
       wordEnd++;
-    }
-
-    if (wordWidth > room && wordEnd > i) {
-      if (i > from) {
-        return i;
-      }
-
-      // A word longer than the line breaks between its characters, one at least.
-      let j = i;
-      let w = width;
-      while (j < wordEnd && (j === from || w + measures[j].advance <= room)) {
-        w += measures[j].advance;
-        j++;
-      }
-
-      return j;
     }
 
     width = wordWidth;
