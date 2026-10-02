@@ -822,6 +822,26 @@ function fontFamily(font: string): string[] {
 }
 
 /**
+ * Whether text laid out at (x, y), `width` by `height`, reaches outside its
+ * field, which then clips it: where it lies, as a margin or an indent puts
+ * it, not its size alone.
+ */
+export function overruns(
+  field: { left: number; top: number; width: number; height: number },
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): boolean {
+  return (
+    x < field.left ||
+    y < field.top ||
+    x + width > field.left + field.width ||
+    y + height > field.top + field.height
+  );
+}
+
+/**
  * A TextField drawn: its background and border, then its text in the
  * format of its first character, 2 pixels in from the field's edges as
  * Flash's gutter is, aligned as its first paragraph, wrapped at the field's
@@ -880,7 +900,10 @@ function drawText(o: TextObject, art: PixiContainer): void {
   art.addChild(text);
   // Measuring needs a canvas, which there is none of without a DOM, as in node's tests.
   const measurable = typeof document !== "undefined";
-  if (measurable && (text.width > o.width - 4 || text.height > o.height - 4)) {
+  if (
+    measurable &&
+    overruns(o, text.x - text.anchor.x * text.width, text.y, text.width, text.height)
+  ) {
     const clip = new Graphics().rect(o.left, o.top, o.width, o.height).fill({ color: 0xffffff });
     art.addChild(clip);
     text.mask = clip;

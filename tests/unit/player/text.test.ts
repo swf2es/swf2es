@@ -50,3 +50,23 @@ test("a centred field's text is centred in it, past its 2 pixel gutter from the 
   };
   assert.deepEqual([text.x, text.y, text.anchor.x], [100, 2, 0.5]);
 });
+
+test("text a margin moves past its field's edge is clipped, though it is narrower than the field", async () => {
+  const { overruns } = await import("../../../packages/player/dist/pixi.js");
+  const field = { left: 0, top: 0, width: 100, height: 20 };
+  // 30 pixels of text from an 80 pixel margin, past the 2 pixel gutter: out to 112.
+  assert.equal(overruns(field, 82, 2, 30, 14), true);
+  assert.equal(overruns(field, 2, 2, 30, 14), false);
+  assert.equal(overruns(field, 2, -1, 30, 14), true);
+});
+
+test("a long append keeps a format for every character", async () => {
+  const { TextModel } = await import("../../../packages/player/dist/text.js");
+  const model = new TextModel();
+  model.setText("ab");
+  model.replace(2, 2, "x".repeat(200_000));
+  assert.equal(model.text.length, 200_002);
+  assert.equal(model.formats.length, 200_002);
+  model.replace(1, 199_000, "y");
+  assert.deepEqual([model.text.length, model.formats.length], [1_004, 1_004]);
+});
