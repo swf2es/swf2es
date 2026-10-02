@@ -973,7 +973,9 @@ Ruffle does (its `DirtyState`). With a renderer, a store has one GPU
 texture, made when a Bitmap first shows it or a draw first renders into
 it, holding the store's premultiplied ARGB exactly, uploaded and read
 back as they are, never premultiplied or divided on the way; every
-Bitmap showing the store samples that one texture. A store is newer on
+Bitmap showing the store samples that one texture, nearest, and a
+smoothed one a second, linearly sampled copy made on the GPU as the
+first changes, since a texture's sampling is its source's in Pixi. A store is newer on
 the CPU or on the GPU: a CPU operation that changes it uploads the whole
 store before the next render that needs it, as now, while `draw` of a
 display object in the `normal` blend mode with no colour transform
@@ -991,7 +993,9 @@ channel. A texture lives as long as its store: `dispose` frees it, and a
 store collected frees it through a FinalizationRegistry; Pixi's texture
 collector never unloads it, as a texture newer than its store cannot be
 uploaded again. A store larger than the GPU's texture limit stays the
-CPU's. Each rule is Flash's
+CPU's. The stage of 1,500 outlined shapes above draws into a 1920 × 1080
+bitmap in about 57 ms against Flash's 44, and with a `getPixel` after
+it in about 67. Each rule is Flash's
 as the `draw-bitmaps` and `draw-objects` cases trace and draw it under
 adl: a destination pixel takes the source pixel under its centre,
 clamped to the source's edges; the translation is snapped down to

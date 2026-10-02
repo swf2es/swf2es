@@ -198,3 +198,35 @@ test("a draw at a whole pixel, unscaled, composites as the general path does", (
     }
   }
 });
+
+test("a store written on the GPU is read back once, when its pixels are next read", () => {
+  const store = new BitmapStore(2, 1, true, 0);
+  let reads = 0;
+  let destroyed = false;
+  store.gpu = {
+    read: () => {
+      reads++;
+      return Uint32Array.of(0xff102030, 0x80402010);
+    },
+    destroy: () => {
+      destroyed = true;
+    },
+  };
+  const seen: boolean[] = [];
+  const view = { pixelsChanged: (disposed: boolean) => seen.push(disposed) };
+  store.views.add(new WeakRef(view));
+
+  const version = store.version;
+  store.drawnOnGpu();
+  // The change is told and counted at once; nothing comes back yet.
+  assert.deepEqual([store.newerOnGpu, store.version, reads, seen], [true, version + 1, 0, [false]]);
+
+  assert.equal(store.getPixel32(0, 0).toString(16), "ff102030");
+  assert.equal(store.getPixel32(1, 0).toString(16), "807f4020");
+  assert.deepEqual([store.newerOnGpu, reads], [false, 1]);
+
+  store.dispose();
+  assert.equal(destroyed, true);
+  assert.equal(store.gpu, null);
+  assert.deepEqual(seen, [false, true]);
+});

@@ -17,7 +17,7 @@ import {
   Sprite,
   Texture,
 } from "pixi.js";
-import { unmultiply } from "./bitmap.js";
+import type { BitmapStore, GpuCopy } from "./bitmap.js";
 import {
   BitmapObject,
   CHILDREN,
@@ -309,8 +309,8 @@ interface Node {
   ownFills: boolean;
   /** The lines, a Graphics for each layer that has any; null where one has none. */
   strokes: (Graphics | null)[];
-  /** A Bitmap's sprite and the version of its store it was uploaded from; null for any other object. */
-  bitmap: { sprite: Sprite; source: BufferImageSource; version: number } | null;
+  /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
+  bitmap: Sprite | null;
 }
 
 export class PixiView {
@@ -319,7 +319,6 @@ export class PixiView {
   private readonly fills = new Map<ShapeCharacter, GraphicsContext[]>();
   /** What a fresh view built itself, which it destroys; what it borrowed from `source` stays. */
   private readonly built: GraphicsContext[] = [];
-  private readonly builtSprites: Sprite[] = [];
 
   /**
    * `fresh` makes a view that draws every object as new and leaves the
@@ -345,10 +344,6 @@ export class PixiView {
 
   /** Destroy what this fresh view built, and its containers; what it borrowed stays its owner's. */
   dispose(root: PixiContainer): void {
-    for (const sprite of this.builtSprites) {
-      sprite.destroy({ texture: true, textureSource: true });
-    }
-
     root.destroy({ children: true });
     for (const context of this.built) {
       context.destroy();
@@ -382,9 +377,9 @@ export class PixiView {
    * its own and change.
    */
   private redraw(o: DisplayObject, node: Node): void {
-    // A Bitmap's texture and its source are its own: they go with the sprite.
-    node.bitmap?.sprite.destroy({ texture: true, textureSource: true });
-    // So are a drawing's fills and every node's lines; a Graphics frees only a context it made.
+    // A Bitmap's texture is its store's: only the sprite goes.
+    node.bitmap?.destroy();
+    // A drawing's fills and every node's lines; a Graphics frees only a context it made.
     const old = [
       ...(node.ownFills && !this.fresh ? node.fills : []),
       ...(this.fresh ? [] : node.strokes.map((g) => g?.context)),
@@ -403,13 +398,6 @@ export class PixiView {
     node.bitmap = null;
     const current = this.current(o);
     if (o instanceof BitmapObject) {
-      const shown = current?.bitmap;
-      if (this.fresh && shown && o.store && shown.version === o.store.version) {
-        // The stage's texture, as uploaded: a sprite of its own over it.
-        node.art.addChild(new Sprite(shown.sprite.texture));
-        return;
-      }
-
       this.drawBitmap(o, node);
       return;
     }
@@ -460,31 +448,18 @@ export class PixiView {
   }
 
   /**
-   * A Bitmap as a sprite over a texture uploaded from its store's pixels,
-   * nearest-neighbour unless it smooths; nothing for no store, one
-   * disposed, or one of 0 by 0 that Flash could not read. The store counts
-   * its changes, and `sync` uploads again when the count moves.
+   * A Bitmap as a sprite over its store's texture, which every Bitmap of
+   * the store shares; nothing for no store, one disposed, one of 0 by 0
+   * that Flash could not read, or one too large for a texture.
    */
   private drawBitmap(o: BitmapObject, node: Node): void {
-    const store = o.store;
-    if (!store || store.disposed || store.width === 0) {
+    const texture = o.store && gpuBitmaps(this.renderer).texture(o.store, o.smoothing);
+    if (!texture) {
       return;
     }
 
-    const source = new BufferImageSource({
-      resource: rgba(store.pixels),
-      width: store.width,
-      height: store.height,
-      alphaMode: "premultiply-alpha-on-upload",
-      scaleMode: o.smoothing ? "linear" : "nearest",
-    });
-    const sprite = new Sprite(new Texture({ source }));
-    if (this.fresh) {
-      this.builtSprites.push(sprite);
-    }
-
-    node.art.addChild(sprite);
-    node.bitmap = { sprite, source, version: store.version };
+    node.bitmap = new Sprite(texture);
+    node.art.addChild(node.bitmap);
   }
 
   /**
@@ -560,12 +535,8 @@ export class PixiView {
     } else if (moved && node.strokes.some((g) => g)) {
       this.restroke(node);
     } else if (dirty & PIXELS && node.bitmap && o instanceof BitmapObject && o.store) {
-      // Pixels set since the upload: the same texture, uploaded again.
-      if (o.store.version !== node.bitmap.version) {
-        node.bitmap.source.resource = rgba(o.store.pixels);
-        node.bitmap.source.update();
-        node.bitmap.version = o.store.version;
-      }
+      // Pixels set since: the texture brought up to date, uploaded where the CPU changed them.
+      gpuBitmaps(this.renderer).texture(o.store, o.smoothing);
     }
 
     if (o instanceof Container) {
@@ -610,17 +581,17 @@ export class PixiView {
 
   /**
    * `o` drawn alone, as BitmapData.draw takes a display object: through `m`
-   * in place of its own transform, into a w x h texture, read back as
-   * premultiplied ARGB. A fresh view does it, so the stage's is untouched.
+   * into a w x h texture, rendered at `samples` a side and averaged on the
+   * GPU, as Flash covers edges (4 at its high quality). A fresh view does
+   * it, borrowing the stage's current geometry, so the stage's is untouched.
    */
-  snapshot(
+  private sampled(
     o: DisplayObject,
     m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
     width: number,
     height: number,
-    samples = 4,
-  ): Uint32Array {
-    // Rendered at samples x samples a pixel and averaged, as Flash covers edges: 4 at its high quality.
+    samples: number,
+  ): RenderTexture {
     const n = samples;
     const view = new PixiView(this.renderer, true, this);
     // Built at the draw's own scale, lines included, as the stage's are,
@@ -633,9 +604,7 @@ export class PixiView {
     let target = RenderTexture.create({ width: width * n, height: height * n });
     this.renderer.render({ container: scaled, target, clear: true });
     view.dispose(scaled);
-    // Averaged on the GPU, halving until a sample a pixel: a linear sample
-    // at the corner four texels share is their mean, so only the final
-    // pixels come back to the CPU.
+    // Halved until a sample a pixel: a linear sample at the corner four texels share is their mean.
     for (let k = n; k > 1; k /= 2) {
       const half = RenderTexture.create({ width: (width * k) / 2, height: (height * k) / 2 });
       target.source.scaleMode = "linear";
@@ -647,16 +616,54 @@ export class PixiView {
       target = half;
     }
 
-    const { pixels } = this.renderer.extract.pixels(target);
+    return target;
+  }
+
+  /** `o` drawn alone, as `sampled`, read back as premultiplied ARGB. */
+  snapshot(
+    o: DisplayObject,
+    m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
+    width: number,
+    height: number,
+    samples = 4,
+  ): Uint32Array {
+    const target = this.sampled(o, m, width, height, samples);
+    const pixels = argbOf(this.renderer.extract.pixels(target).pixels);
     target.destroy(true);
-    const out = new Uint32Array(width * height);
-    for (let i = 0; i < out.length; i++) {
-      const j = i * 4;
-      out[i] =
-        ((pixels[j + 3] << 24) | (pixels[j] << 16) | (pixels[j + 1] << 8) | pixels[j + 2]) >>> 0;
+    return pixels;
+  }
+
+  /**
+   * `o` drawn into `store` on the GPU, as `sampled`, source over at (x, y)
+   * with nothing read back: the store is then newer on the GPU. False,
+   * having done nothing, where the store can have no texture.
+   */
+  drawInto(
+    store: BitmapStore,
+    o: DisplayObject,
+    m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    samples = 4,
+  ): boolean {
+    const bitmaps = gpuBitmaps(this.renderer);
+    const texture = bitmaps.texture(store);
+    if (!texture) {
+      return false;
     }
 
-    return out;
+    // Into a texture of its own first: the object may show the store itself.
+    const drawn = this.sampled(o, m, width, height, samples);
+    const sprite = new Sprite(drawn);
+    sprite.position.set(x, y);
+    this.renderer.render({ container: sprite, target: texture, clear: false });
+    sprite.destroy();
+    drawn.destroy(true);
+    store.drawnOnGpu();
+    bitmaps.current(store);
+    return true;
   }
 
   /** Draw `root`'s display list, synced first. */
@@ -666,16 +673,160 @@ export class PixiView {
   }
 }
 
-/** A store's premultiplied ARGB pixels as the straight RGBA bytes a texture upload takes. */
-function rgba(pixels: Uint32Array): Uint8Array {
+/** Premultiplied ARGB as the RGBA bytes a texture holds, still premultiplied. */
+function rgbaOf(pixels: Uint32Array): Uint8Array {
   const out = new Uint8Array(pixels.length * 4);
   for (let i = 0; i < pixels.length; i++) {
-    const p = unmultiply(pixels[i]);
-    out[i * 4] = (p >>> 16) & 0xff;
-    out[i * 4 + 1] = (p >>> 8) & 0xff;
-    out[i * 4 + 2] = p & 0xff;
-    out[i * 4 + 3] = p >>> 24;
+    const p = pixels[i];
+    const j = i * 4;
+    out[j] = (p >>> 16) & 0xff;
+    out[j + 1] = (p >>> 8) & 0xff;
+    out[j + 2] = p & 0xff;
+    out[j + 3] = p >>> 24;
   }
 
   return out;
+}
+
+/** RGBA bytes read from a texture as premultiplied ARGB. */
+function argbOf(bytes: Uint8Array | Uint8ClampedArray): Uint32Array {
+  const out = new Uint32Array(bytes.length / 4);
+  for (let i = 0; i < out.length; i++) {
+    const j = i * 4;
+    out[i] = ((bytes[j + 3] << 24) | (bytes[j] << 16) | (bytes[j + 1] << 8) | bytes[j + 2]) >>> 0;
+  }
+
+  return out;
+}
+
+/**
+ * A store's texture: its premultiplied ARGB exactly, uploaded as it is and
+ * rendered into by draws. Pixi's collector never unloads it, as content a
+ * draw left there could not be uploaded again.
+ */
+class StoreTexture implements GpuCopy {
+  readonly source: BufferImageSource;
+  readonly texture: Texture;
+  /** The store's version the texture holds. */
+  version = -1;
+  /** The same pixels sampled linearly, for a smoothed Bitmap, copied on the GPU as the texture changes. */
+  private smooth: { texture: RenderTexture; version: number } | null = null;
+
+  constructor(
+    private readonly renderer: Renderer,
+    private readonly bitmaps: GpuBitmaps,
+    width: number,
+    height: number,
+  ) {
+    this.source = new BufferImageSource({
+      resource: new Uint8Array(width * height * 4),
+      width,
+      height,
+      alphaMode: "premultiplied-alpha",
+      scaleMode: "nearest",
+      autoGarbageCollect: false,
+    });
+    this.texture = new Texture({ source: this.source });
+  }
+
+  read(): Uint32Array {
+    return argbOf(this.renderer.extract.pixels(this.texture).pixels);
+  }
+
+  /** The texture sampled linearly: a texture's sampling is its source's, which Bitmaps share. */
+  smoothed(): Texture {
+    if (!this.smooth) {
+      this.smooth = {
+        texture: RenderTexture.create({
+          width: this.source.width,
+          height: this.source.height,
+          scaleMode: "linear",
+          autoGarbageCollect: false,
+        }),
+        version: -1,
+      };
+    }
+
+    if (this.smooth.version !== this.version) {
+      const sprite = new Sprite(this.texture);
+      this.renderer.render({ container: sprite, target: this.smooth.texture, clear: true });
+      sprite.destroy();
+      this.smooth.version = this.version;
+    }
+
+    return this.smooth.texture;
+  }
+
+  destroy(): void {
+    this.bitmaps.forget(this);
+    this.texture.destroy(true);
+    this.smooth?.texture.destroy(true);
+  }
+}
+
+/** The textures of a renderer's stores, one a store, made as a Bitmap shows one or a draw renders into it. */
+class GpuBitmaps {
+  private readonly limit: number;
+  private readonly collected = new FinalizationRegistry<StoreTexture>((copy) => copy.destroy());
+
+  constructor(private readonly renderer: Renderer) {
+    const gl = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl;
+    this.limit = gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 8192;
+  }
+
+  /**
+   * The store's texture, made if it has none and uploaded if the CPU
+   * changed the store since; null for one disposed, of 0 by 0, or larger
+   * than a texture may be. Smoothed, it is a linearly sampled copy.
+   */
+  texture(store: BitmapStore, smoothing?: boolean): Texture | null {
+    if (
+      store.disposed ||
+      store.width === 0 ||
+      store.width > this.limit ||
+      store.height > this.limit
+    ) {
+      return null;
+    }
+
+    let copy = store.gpu as StoreTexture | null;
+    if (!copy) {
+      copy = new StoreTexture(this.renderer, this, store.width, store.height);
+      store.gpu = copy;
+      // Unregistered by the copy itself, on dispose.
+      this.collected.register(store, copy, copy);
+    }
+
+    if (copy.version !== store.version && !store.newerOnGpu) {
+      copy.source.resource = rgbaOf(store.pixels);
+      copy.source.update();
+      copy.version = store.version;
+    }
+
+    return smoothing ? copy.smoothed() : copy.texture;
+  }
+
+  /** A draw left the store's texture as the store now is. */
+  current(store: BitmapStore): void {
+    const copy = store.gpu as StoreTexture | null;
+    if (copy) {
+      copy.version = store.version;
+    }
+  }
+
+  forget(copy: StoreTexture): void {
+    this.collected.unregister(copy);
+  }
+}
+
+const gpuBitmapsOf = new WeakMap<Renderer, GpuBitmaps>();
+
+function gpuBitmaps(renderer: Renderer): GpuBitmaps {
+  let bitmaps = gpuBitmapsOf.get(renderer);
+  if (!bitmaps) {
+    bitmaps = new GpuBitmaps(renderer);
+    gpuBitmapsOf.set(renderer, bitmaps);
+  }
+
+  return bitmaps;
 }

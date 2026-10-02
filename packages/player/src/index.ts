@@ -13,6 +13,6 @@ export {
 } from "./display.js";
 export { PixiView } from "./pixi.js";
 export { Player } from "./player.js";
-export { type FetchRequest, type FetchResult, Scripting } from "./scripting.js";
+export { type Drawer, type FetchRequest, type FetchResult, Scripting } from "./scripting.js";
 export { type Path, type ShapeLayer, shapeLayers } from "./shapes.js";
 export { type Character, type Library, readLibrary, type Timeline } from "./timeline.js";
