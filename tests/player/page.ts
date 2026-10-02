@@ -126,6 +126,8 @@ async function runSwf(
       antialias: false,
       preserveDrawingBuffer: true,
       resolution: n,
+      // Blend modes read what is below them from it (pixi-blend.ts).
+      useBackBuffer: true,
     });
     const samples = document.createElement("canvas");
     samples.width = renderer.canvas.width;
@@ -195,7 +197,7 @@ interface Bench {
  * GPU is waited for, so that what it does counts; Chrome's software GL
  * does it on the CPU anyway, and the result says which drew.
  */
-async function benchSwf(base64: string, frames: number): Promise<Bench> {
+async function benchSwf(base64: string, frames: number, backBuffer = false): Promise<Bench> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
   const sync: number[] = [];
@@ -212,6 +214,8 @@ async function benchSwf(base64: string, frames: number): Promise<Bench> {
       background: player.background,
       antialias: false,
       resolution: 1,
+      // As a host that draws blend modes makes it: a full-screen copy a frame.
+      useBackBuffer: backBuffer,
     });
     document.body.replaceChildren(renderer.canvas);
     const view = new PixiView(renderer);

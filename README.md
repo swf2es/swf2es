@@ -22,6 +22,34 @@ tests/       unit and conformance tests
 docs/        design, references, benchmarks and roadmap
 ```
 
+## Embedding the player
+
+A page plays a SWF with a `Player` and draws it with a `PixiView` over a
+Pixi renderer it makes itself:
+
+```ts
+const renderer = await autoDetectRenderer({
+  preference: "webgl",
+  width: player.width,
+  height: player.height,
+  background: player.background,
+  // Required for blend modes: they read what is below from the back buffer,
+  // and without it draw as normal (the view warns once). It costs one
+  // full-screen copy a frame on the GPU.
+  useBackBuffer: true,
+});
+const view = new PixiView(renderer);
+const unbind = view.bindPointer(player); // mouse input, until unbind()
+await player.start();
+// Each animation frame:
+player.advance(elapsedMs);
+view.render(player.root);
+```
+
+`Scripting` runs the SWF's ActionScript 3 and needs `builtin.abc` and
+`playerglobal.abc`, which the host loads (`scripting.loadLibraries`);
+Adobe's `playerglobal.abc` is not part of this repository.
+
 ## Development
 
 ```sh

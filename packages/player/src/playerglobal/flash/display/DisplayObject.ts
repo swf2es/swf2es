@@ -143,7 +143,6 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
   class DisplayObjectNatives {
     declare $display: DisplayObject;
     declare $transform: AsObject | undefined;
-    declare $blendMode: string | undefined;
     declare $cacheAsBitmap: boolean | undefined;
     declare $cacheAsBitmapMatrix: Value;
     declare $filters: Value[] | undefined;
@@ -376,7 +375,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     get blendMode(): string {
-      return this.$blendMode ?? "normal";
+      return this.$display.blendMode;
     }
 
     set blendMode(v: Value) {
@@ -386,8 +385,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       }
 
       this.$display.scripted = true;
-
-      this.$blendMode = mode;
+      this.$display.setBlendMode(mode);
     }
 
     get cacheAsBitmap(): boolean {

@@ -1347,6 +1347,19 @@ export const cases: PlayerCase[] = [
     maxOutliers: 40,
   },
   {
+    name: "blend-modes",
+    swf: (abc) => bare(abc, 1, "BlendModes", 700, 200),
+    script: "BlendModes",
+    frames: 1,
+    capture: [1],
+    // Within 3 a channel, the layer's 8-bit round trip; beyond, a pixel's
+    // line along the alpha cell's squares, where the filter's sampling of
+    // the layer softens its edge and Flash leaves the ground (up to 42):
+    // 180 channels in all.
+    tolerance: 3,
+    maxOutliers: 200,
+  },
+  {
     name: "text-fields",
     swf: (abc) => bare(abc, 1, "TextFields"),
     script: "TextFields",

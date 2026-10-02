@@ -248,12 +248,17 @@ export interface BenchResult {
 }
 
 /** Play `swf` for `frames` frames in the player, timing each; see page.ts's benchSwf. `gpu` lets Chrome use one. */
-export function benchPlayer(swf: Uint8Array, frames: number, gpu = false): Promise<BenchResult> {
+export function benchPlayer(
+  swf: Uint8Array,
+  frames: number,
+  gpu = false,
+  backBuffer = false,
+): Promise<BenchResult> {
   return withPage(
     "benchSwf",
     async (evaluate) => {
       const { value, exception } = await evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer})`,
       );
       return (
         value ?? {
