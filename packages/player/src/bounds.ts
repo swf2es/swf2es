@@ -18,11 +18,11 @@ import { flatten, inside, orientation, type ShapeLayer } from "./shapes.js";
 const TWIPS = 20;
 const IDENTITY: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
 
-/** The matrix from `d`'s space to the stage's (`stage` itself excluded), through every parent. */
+/** The matrix from `d`'s space to the stage's (`stage` itself excluded), through every parent, scroll shifts and all. */
 export function toStage(d: DisplayObject, stage: DisplayObject | null): Matrix {
-  let m = d.matrix;
+  let m = d.placed;
   for (let p = d.parent; p && p !== stage; p = p.parent) {
-    m = concat(m, p.matrix);
+    m = concat(m, p.placed);
   }
 
   return m;
@@ -58,14 +58,23 @@ function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
   return null;
 }
 
-/** `d`'s bounds in its own space, its children's included: null for an object with nothing in it. */
+/**
+ * `d`'s bounds in its own space, its children's included: null for an
+ * object with nothing in it. A scrolled object's are its scroll's size at
+ * (0, 0), whatever it draws, as Flash reports them; masks clip none.
+ */
 export function bounds(d: DisplayObject, lines: boolean): Rect | null {
+  const scroll = d.scroll;
+  if (scroll) {
+    return { xMin: 0, yMin: 0, xMax: scroll.xMax - scroll.xMin, yMax: scroll.yMax - scroll.yMin };
+  }
+
   let r = ownBounds(d, lines);
   if (d instanceof Container) {
     for (const child of d.children) {
       const b = bounds(child, lines);
       if (b) {
-        r = union(r, transformRect(b, child.matrix));
+        r = union(r, transformRect(b, child.placed));
       }
     }
   }
@@ -123,7 +132,46 @@ export function hitsPoint(
   // point on a shape's right edge hits, one on its left, top or bottom edge
   // does not (the corpus's displayobject_hittestpoint_boundary).
   const [lx, ly] = apply(toLocal, x - 0.5, y);
-  return drawnAt(d, lx, ly);
+  const probe = { x: x - 0.5, y, root };
+  return drawnAt(d, lx, ly, probe, false) && !clippedAbove(d, probe);
+}
+
+/** Whether a mask or a scroll above `d` leaves the probe out. */
+function clippedAbove(d: DisplayObject, probe: Probe): boolean {
+  for (let p = d.parent; p; p = p.parent) {
+    if (p.mask && !p.maskOf && !p.mask.encloses(p) && !inMask(p.mask, probe)) {
+      return true;
+    }
+
+    const scroll = p.scroll;
+    const toLocal = scroll && invert(toStage(p, probe.root));
+    if (scroll && toLocal) {
+      const [x, y] = apply(toLocal, probe.x, probe.y);
+      if (!(x >= scroll.xMin && x < scroll.xMax && y >= scroll.yMin && y < scroll.yMax)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/** The point a shape test asks of, in the root's space: masks are found from it. */
+interface Probe {
+  x: number;
+  y: number;
+  root: DisplayObject | null;
+}
+
+/** Whether the probe is on `mask`'s fills, where it is: its lines clip nothing. */
+function inMask(mask: DisplayObject, probe: Probe): boolean {
+  const toLocal = invert(toStage(mask, probe.root));
+  if (!toLocal) {
+    return false;
+  }
+
+  const [x, y] = apply(toLocal, probe.x, probe.y);
+  return drawnAt(mask, x, y, probe, true);
 }
 
 /** Whether a SWF's root, the main one's or a loaded one's, is `d` or above it. */
@@ -137,8 +185,22 @@ function underRoot(d: DisplayObject): boolean {
   return false;
 }
 
-/** Whether (x, y), in `d`'s space, is on a fill or a line of `d` or of a child. */
-function drawnAt(d: DisplayObject, x: number, y: number): boolean {
+/**
+ * Whether (x, y), in `d`'s space, is on a fill or a line of `d` or of a
+ * child, within the scroll and the masks that clip it. As a mask (`mask`)
+ * its lines count for nothing and its own mask is not asked, so that two
+ * masks of each other end.
+ */
+function drawnAt(d: DisplayObject, x: number, y: number, probe: Probe, mask: boolean): boolean {
+  const scroll = d.scroll;
+  if (scroll && !(x >= scroll.xMin && x < scroll.xMax && y >= scroll.yMin && y < scroll.yMax)) {
+    return false;
+  }
+
+  if (!mask && d.mask && !d.maskOf && !d.mask.encloses(d) && !inMask(d.mask, probe)) {
+    return false;
+  }
+
   const layers: ShapeLayer[] =
     d.drawing?.layers ?? (d instanceof ShapeObject ? (d.shape?.layers ?? []) : []);
   for (const layer of layers) {
@@ -160,6 +222,10 @@ function drawnAt(d: DisplayObject, x: number, y: number): boolean {
       }
     }
 
+    if (mask) {
+      continue;
+    }
+
     for (const { line, paths } of layer.strokes) {
       const half = Math.max(line.width / TWIPS, 1) / 2;
       for (const path of paths) {
@@ -171,13 +237,16 @@ function drawnAt(d: DisplayObject, x: number, y: number): boolean {
   }
 
   if (d instanceof Container) {
+    // Masks are not drawn; a timeline's clip no hit test, as Flash's do not.
     for (const child of d.children) {
-      const toChild = invert(child.matrix);
-      if (toChild) {
-        const [cx, cy] = apply(toChild, x, y);
-        if (drawnAt(child, cx, cy)) {
-          return true;
-        }
+      const toChild = invert(child.placed);
+      if (
+        toChild &&
+        child.clipDepth === 0 &&
+        child.maskOf === null &&
+        drawnAt(child, ...apply(toChild, x, y), probe, mask)
+      ) {
+        return true;
       }
     }
   }

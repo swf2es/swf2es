@@ -87,3 +87,12 @@ export function contains(r: Rect, x: number, y: number): boolean {
 export function overlaps(a: Rect, b: Rect): boolean {
   return a.xMin <= b.xMax && b.xMin <= a.xMax && a.yMin <= b.yMax && b.yMin <= a.yMax;
 }
+
+/** `m` after a shift of (-left, -top) of `r`: a scrolled object's, its scroll's corner at its origin. */
+export function shifted(m: Matrix, r: Rect): Matrix {
+  return {
+    ...m,
+    tx: m.tx - m.a * r.xMin - m.c * r.yMin,
+    ty: m.ty - m.b * r.xMin - m.d * r.yMin,
+  };
+}

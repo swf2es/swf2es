@@ -8,6 +8,7 @@ import { type ColorTransform, IDENTITY, type Matrix, type Place } from "@swf2es/
 import type { avm2 } from "@swf2es/runtime";
 import { BitmapStore } from "./bitmap.js";
 import type { Drawing } from "./drawing.js";
+import { type Rect, shifted } from "./geometry.js";
 import { TextModel } from "./text.js";
 import {
   type BitmapCharacter,
@@ -104,6 +105,21 @@ export class DisplayObject {
 
   /** This object, weakly, as a store it shows or fills with holds it. */
   readonly ref = new WeakRef(this);
+  /**
+   * The last depth this clips, as a timeline's mask, or 0: a mask is not
+   * drawn, and clips the children after it until one placed deeper.
+   */
+  clipDepth = 0;
+  /** The object `mask` set clips this one to; and the one it clips, for such a mask. */
+  mask: DisplayObject | null = null;
+  maskOf: DisplayObject | null = null;
+  /**
+   * scrollRect as set, its edges whole pixels, and as the last render took
+   * it, which the drawing, bounds and points go by: Flash's takes effect
+   * when it next draws.
+   */
+  scrollRect: Rect | null = null;
+  scroll: Rect | null = null;
 
   /** A store it shows or fills with changed its pixels, or was disposed. */
   pixelsChanged(disposed: boolean): void {
@@ -116,6 +132,50 @@ export class DisplayObject {
     for (let p = this.parent; p && !p.descendantsDirty; p = p.parent) {
       p.descendantsDirty = true;
     }
+  }
+
+  /** Its matrix after its scroll's shift: from what it draws to its parent's space. */
+  get placed(): Matrix {
+    return this.scroll ? shifted(this.matrix, this.scroll) : this.matrix;
+  }
+
+  /** Whether `o` is this or under it. */
+  encloses(o: DisplayObject): boolean {
+    for (let p: DisplayObject | null = o; p; p = p.parent) {
+      if (p === this) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Clip this to `mask`'s fills, or to nothing for null. A mask clips one
+   * object: set on another it leaves the one before, as Flash's does.
+   */
+  setMask(mask: DisplayObject | null): void {
+    if (this.mask === mask) {
+      return;
+    }
+
+    if (this.mask) {
+      this.mask.maskOf = null;
+      this.mask.invalidate(TRANSFORM);
+    }
+
+    if (mask?.maskOf) {
+      mask.maskOf.mask = null;
+      mask.maskOf.invalidate(TRANSFORM);
+    }
+
+    this.mask = mask;
+    if (mask) {
+      mask.maskOf = this;
+      mask.invalidate(TRANSFORM);
+    }
+
+    this.invalidate(TRANSFORM);
   }
 
   /**
@@ -204,6 +264,19 @@ export class DisplayObject {
     if (place.visible !== null) {
       this.visible = place.visible;
       this.invalidate(TRANSFORM);
+    }
+
+    // Apart, and once tested: applyPlace runs for each move of each frame, and grown it is no longer inlined.
+    if (place.clipDepth !== null) {
+      this.setClipDepth(place.clipDepth);
+    }
+  }
+
+  private setClipDepth(depth: number): void {
+    if (depth !== this.clipDepth) {
+      this.clipDepth = depth;
+      this.invalidate(TRANSFORM);
+      this.parent?.invalidate(CHILDREN);
     }
   }
 }
@@ -437,6 +510,34 @@ export class Container extends DisplayObject {
     this.children[i] = b;
     this.children[j] = a;
     this.invalidate(CHILDREN);
+  }
+}
+
+/**
+ * A walk of a container's children in render order, for the timeline
+ * masks that clip each: a mask clips the children after it until one
+ * placed deeper than its clip depth; one a script put among them has no
+ * depth and ends nothing. A class, not a generator: the renderer walks
+ * every child each time a container's children change.
+ */
+export class Clips {
+  /** The masks open, outermost first. */
+  readonly masks: DisplayObject[] = [];
+
+  /** The next child: how many of `masks`, from the first, clip it; it clips those after it, if a mask. */
+  enter(child: DisplayObject): number {
+    const depth = child.depth;
+    const masks = this.masks;
+    while (depth !== null && masks.length > 0 && masks[masks.length - 1].clipDepth < depth) {
+      masks.pop();
+    }
+
+    const n = masks.length;
+    if (child.clipDepth > 0) {
+      masks.push(child);
+    }
+
+    return n;
   }
 }
 

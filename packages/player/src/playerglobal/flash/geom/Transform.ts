@@ -5,6 +5,7 @@ import type { Matrix as Linear } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { toStage } from "../../../bounds.js";
 import { type DisplayObject, TRANSFORM } from "../../../display.js";
+import { concat } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
@@ -108,8 +109,11 @@ export function transformNatives(s: Scripting): avm2.Natives {
       }
     }
 
+    /** Its own scroll's shift left out, as Flash's does, its parents' taken in. */
     get concatenatedMatrix(): Value {
-      return matrixObject(s, toStage(this.$display, s.stage));
+      const d = this.$display;
+      const up = d.parent && d.parent !== s.stage ? toStage(d.parent, s.stage) : null;
+      return matrixObject(s, up ? concat(d.matrix, up) : d.matrix);
     }
 
     /** The color transform to the stage: multipliers multiplied, offsets carried through the parents' multipliers. */

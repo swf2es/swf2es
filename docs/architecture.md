@@ -1249,7 +1249,8 @@ other object its mask: not drawn, wherever it is. On the display list it
 clips through its own place there. Off the list it clips through its own
 matrix, taken in the stage's space. One mask clips one object, so
 setting it on a second takes it off the first, whose `mask` is then
-null. Neither kind changes bounds or `width`. The renderer gives each
+null. Neither kind changes bounds or `width`, and a shape hit test
+follows `mask` but not a timeline's masks. The renderer gives each
 mask to Pixi as a stencil: a timeline's range goes in a container whose
 mask is the clip-depth child, and a mask's lines are hidden while it
 masks. When both objects are cached as bitmaps Flash clips by the
@@ -1262,7 +1263,8 @@ does. From then on the object is drawn shifted by the rectangle's left
 and top and clipped to it, and its bounds in its own space are the
 rectangle's size at (0, 0). Its points go through the shift, in its own
 `localToGlobal` and below, but its `concatenatedMatrix` leaves its own
-shift out, as Flash's does, while its children's take it in.
+shift out, as Flash's does, while its children's take it in. A hit
+test misses outside it.
 
 ## Testing against oracles
 
