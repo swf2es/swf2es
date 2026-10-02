@@ -91,6 +91,24 @@ export interface FetchRequest {
   body: Uint8Array | null;
 }
 
+/** A TCP connection supplied by the embedding host. */
+export interface SocketTransport {
+  send(bytes: Uint8Array): void;
+  close(): void;
+}
+
+/** Transport notifications; the player delivers them to ActionScript on a frame. */
+export interface SocketEvents {
+  open(): void;
+  data(bytes: Uint8Array): void;
+  close(): void;
+  error(message: string): void;
+}
+
+export interface SocketHost {
+  connect(host: string, port: number, events: SocketEvents): SocketTransport;
+}
+
 /** AS3 classes placed children are instances of when SymbolClass binds none. */
 const DEFAULT_CLASS = {
   shape: "flash.display::Shape",
@@ -120,6 +138,7 @@ interface Load {
 export class Scripting {
   readonly rt: avm2.Runtime;
   readonly externalInterface: ExternalInterfaceHost | null;
+  readonly socket: SocketHost | null;
   /** The character, and its SWF's library, each class SymbolClass bound makes, for a `new` of the class from a script. */
   readonly symbols = new Map<string, { character: Character; library: Library }>();
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
@@ -129,6 +148,11 @@ export class Scripting {
   private readonly pendingStreams = new Set<Promise<void>>();
   /** Completed host byte requests delivered at the next frame, with scripts on the player thread. */
   private readonly readyBytes: (() => void)[] = [];
+
+  /** Cross a host callback into the next player frame, where scripts may run. */
+  deferHostEvent(deliver: () => void): void {
+    this.readyBytes.push(deliver);
+  }
   /** How many loads from bytes there have been: each gets a URL of its own under the main SWF's. */
   private dynamic = 0;
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
@@ -201,6 +225,7 @@ export class Scripting {
       fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
       externalInterface?: ExternalInterfaceHost;
+      socket?: SocketHost;
       decodeImage?: ImageDecode | null;
       /**
        * The clock getTimer reads, a monotonic one in milliseconds: by default
@@ -216,6 +241,7 @@ export class Scripting {
     this.realStart = this.realTime ? this.realTime() : 0;
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
     this.externalInterface = options.externalInterface ?? null;
+    this.socket = options.socket ?? null;
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
     this.rt = new avm2.Runtime(
