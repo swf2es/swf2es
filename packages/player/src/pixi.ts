@@ -19,6 +19,7 @@ import {
   Container as PixiContainer,
   Rectangle,
   type Renderer,
+  RendererType,
   RenderTexture,
   Sprite,
   Text,
@@ -486,6 +487,8 @@ export class PixiView {
 
   /** What a fresh view built itself, which it destroys; what it borrowed from `source` stays. */
   private readonly built: GraphicsContext[] = [];
+  /** The filters a fresh view made, which it destroys with the rest. */
+  private readonly builtFilters: Filter[] = [];
   /** The objects `mask` was found set on, for the masks to be placed that are not under the root. */
   private readonly maskees = new Set<WeakRef<DisplayObject>>();
   /** Where those masks are placed, beside the root. */
@@ -559,6 +562,11 @@ export class PixiView {
     root.destroy({ children: true });
     for (const context of this.built) {
       destroyContext(context);
+    }
+
+    // A container destroyed lets go of its filters without destroying them.
+    for (const filter of this.builtFilters) {
+      filter.destroy();
     }
   }
 
@@ -769,7 +777,13 @@ export class PixiView {
           f.destroy();
         }
 
-        node.filters = displayFilters(records);
+        // Flash's filters are WebGL's alone; Pixi skips a chain with one it
+        // cannot run, so under WebGPU they are left out and the blend kept.
+        node.filters = this.renderer.type === RendererType.WEBGPU ? [] : displayFilters(records);
+        if (this.fresh) {
+          this.builtFilters.push(...node.filters);
+        }
+
         const blending = blendFilters(blend);
         container.filters =
           node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;

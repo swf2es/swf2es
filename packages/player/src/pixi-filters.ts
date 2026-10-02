@@ -135,6 +135,12 @@ abstract class FlashFilter extends Filter {
 class BlurFilter extends FlashFilter {
   private readonly pass = new BoxPass();
 
+  /** Its box's pass too, a filter of its own. */
+  destroy(): void {
+    this.pass.destroy();
+    super.destroy();
+  }
+
   constructor(private readonly f: FilterRecord) {
     super({
       glProgram: GlProgram.from({ vertex: VERTEX, fragment: BOX, name: "flash-blur" }),
@@ -194,6 +200,12 @@ void main(void) {
 
 class GlowFilter extends FlashFilter {
   private readonly pass = new BoxPass();
+
+  /** Its box's pass too, a filter of its own. */
+  destroy(): void {
+    this.pass.destroy();
+    super.destroy();
+  }
 
   constructor(private readonly f: FilterRecord) {
     const shadow = f.kind === "dropShadow";

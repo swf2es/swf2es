@@ -163,3 +163,53 @@ test("Pixi pointer delivery scales to SWF coordinates and stops on unbind", () =
   view.stage.emit("pointerdown", event as never);
   assert.equal(calls.length, 1);
 });
+
+test("Flash's filters are left out under WebGPU, and a fresh view destroys those it made", async () => {
+  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    Filter: { prototype: { destroy: (...args: unknown[]) => void } };
+    DOMAdapter: { get(): object; set(adapter: object): void };
+  };
+  // Node has no canvas, whose WebGL Pixi asks a program's precision of: one without a context.
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  const blurred = () => {
+    const o = new Container();
+    o.filters = [{ ...filterDefaults("blur"), blurX: 4, blurY: 4 }];
+    return o;
+  };
+  const filtersOf = (view: InstanceType<typeof PixiView>) =>
+    (view.stage.children[0] as unknown as { filters: unknown[] | null }).filters;
+
+  // WebGL (1) gets the blur; WebGPU (2) none, for Pixi would skip the whole chain.
+  for (const [type, count] of [
+    [1, 1],
+    [2, 0],
+  ]) {
+    const { renderer } = standIn([]);
+    (renderer as unknown as { type: number }).type = type;
+    const view = new PixiView(renderer);
+    view.prepare(blurred());
+    assert.equal(filtersOf(view)?.length ?? 0, count);
+  }
+
+  // A draw's fresh view: its blur and the blur's own pass destroyed with it.
+  const destroy = pixi.Filter.prototype.destroy;
+  let destroyed = 0;
+  pixi.Filter.prototype.destroy = function (this: unknown, ...args: unknown[]) {
+    destroyed++;
+    destroy.apply(this, args);
+  };
+  try {
+    const { renderer } = standIn([0, 0, 0, 0]);
+    (renderer as unknown as { type: number }).type = 1;
+    new PixiView(renderer).snapshot(blurred(), { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }, 1, 1, 1);
+  } finally {
+    pixi.Filter.prototype.destroy = destroy;
+    pixi.DOMAdapter.set(adapter);
+  }
+
+  assert.ok(destroyed >= 2);
+});

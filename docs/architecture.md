@@ -1392,9 +1392,11 @@ knocked out, the object is left out. A drop shadow is a glow from
 distance × (cos, sin) of its angle back, and with `hideObject` drawn
 alone. A colour matrix maps each pixel's straight colour, offsets in
 255ths, transparent pixels within the object's bounds too. The passes
-are Pixi filters at the target's resolution, for WebGL. Bevels,
-convolution, displacement maps and gradient glows and bevels are still
-to come.
+are Pixi filters at the target's resolution, for WebGL: under WebGPU,
+where Pixi would skip an object's whole chain for one it cannot run,
+they are left out and a blend mode is kept. A view made for one draw
+destroys the filters it made with it. Bevels, convolution, displacement
+maps and gradient glows and bevels are still to come.
 
 ### Masks and scroll rectangles
 
