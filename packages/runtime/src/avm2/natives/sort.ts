@@ -8,6 +8,7 @@
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 import { publicNs, qname } from "../names.js";
 import type { AsObject, Runtime, Value } from "../runtime.js";
+import { lowerCase } from "./case.js";
 
 export const kCaseInsensitive = 1;
 export const kDescending = 2;
@@ -29,8 +30,8 @@ function stringCompare(rt: Runtime, lower: boolean): Compare {
     let a = rt.toString(x);
     let b = rt.toString(y);
     if (lower) {
-      a = a.toLowerCase();
-      b = b.toLowerCase();
+      a = lowerCase(a);
+      b = lowerCase(b);
     }
 
     return a < b ? -1 : a > b ? 1 : 0;

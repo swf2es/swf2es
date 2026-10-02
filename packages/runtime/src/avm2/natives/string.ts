@@ -1,5 +1,6 @@
 // String: `this` is the string.
 import type { ClassHook, Value } from "../runtime.js";
+import { lowerCase, upperCase } from "./case.js";
 import { AS3, conversion, type Natives, plain } from "./define.js";
 import { compile, matchArray, replacement as replacementOf } from "./regexp.js";
 
@@ -56,10 +57,10 @@ export const stringNatives: Natives = {
       return this.substr(rt.toNumber(start), rt.toNumber(length));
     },
   [`String#${AS3}::toLowerCase`]: plain(function (this: string) {
-    return this.toLowerCase();
+    return lowerCase(this);
   }),
   [`String#${AS3}::toUpperCase`]: plain(function (this: string) {
-    return this.toUpperCase();
+    return upperCase(this);
   }),
   "String#String::_indexOf": plain(function (this: string, s: string, i = 0) {
     return this.indexOf(s, i);

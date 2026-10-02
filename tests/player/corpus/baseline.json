@@ -978,7 +978,7 @@
   "avm2/stored_properties": {"matched":11,"lines":11,"traced":11,"error":null},
   "avm2/strict_equality": {"matched":34,"lines":34,"traced":34,"error":null},
   "avm2/string_call": {"matched":13,"lines":13,"traced":13,"error":null},
-  "avm2/string_case": {"matched":4,"lines":24,"traced":24,"error":null},
+  "avm2/string_case": {"matched":24,"lines":24,"traced":24,"error":null},
   "avm2/string_char_at": {"matched":25,"lines":28,"traced":28,"error":null},
   "avm2/string_char_code_at": {"matched":28,"lines":28,"traced":28,"error":null},
   "avm2/string_concat_fromcharcode": {"matched":25,"lines":37,"traced":36,"error":null},

@@ -11,6 +11,37 @@ import { elements, type Natives, registerNativeClass } from "./define.js";
 
 const started = Date.now();
 
+/** System.getFeatures as the oracle's avmshell gives it. */
+const SHELL_FEATURES = [
+  "AVMSYSTEM_32BIT",
+  "AVMSYSTEM_UNALIGNED_INT_ACCESS",
+  "AVMSYSTEM_UNALIGNED_FP_ACCESS",
+  "AVMSYSTEM_LITTLE_ENDIAN",
+  "AVMSYSTEM_IA32",
+  "AVMSYSTEM_UNIX",
+  "AVMFEATURE_JIT",
+  "AVMFEATURE_ALCHEMY_POSIX",
+  "AVMFEATURE_COMPILEPOLICY",
+  "AVMFEATURE_ABC_INTERP",
+  "AVMFEATURE_SELFTEST",
+  "AVMFEATURE_EVAL",
+  "AVMFEATURE_PROTECT_JITMEM",
+  "AVMFEATURE_SHARED_GCHEAP",
+  "AVMFEATURE_CACHE_GQCN",
+  "AVMFEATURE_SAFEPOINTS",
+  "AVMFEATURE_INTERRUPT_SAFEPOINT_POLL",
+  "AVMFEATURE_SWF12",
+  "AVMFEATURE_SWF13",
+  "AVMFEATURE_SWF14",
+  "AVMFEATURE_SWF15",
+  "AVMFEATURE_SWF16",
+  "AVMFEATURE_SWF17",
+  "AVMFEATURE_SWF18",
+  "AVMTWEAK_EXACT_TRACING",
+]
+  .map((f) => `${f};`)
+  .join("");
+
 /** System's natives, for `rt`: all static, as avmshell has them. */
 export function shellNatives(rt: Runtime): Natives {
   const natives: Natives = {};
@@ -59,6 +90,28 @@ export function shellNatives(rt: Runtime): Natives {
     }
 
     static exit(): void {}
+
+    // A number's one representation: avmplus' makes a double that is an int one.
+    static canonicalizeNumber(a: Value): Value {
+      return a;
+    }
+
+    static isGlobal(o: Value): boolean {
+      return o !== null && typeof o === "object" && rt.traitsOf(o).isGlobal;
+    }
+
+    // The oracle's avmshell's, which swf2es stands in for: 32-bit, as its
+    // ByteArrays are limited (kMaxCapacity in bytearray.ts).
+    static getFeatures(): string {
+      return SHELL_FEATURES;
+    }
+
+    // JavaScript's collector decides when to collect.
+    static forceFullCollection(): void {}
+
+    static queueCollection(): void {}
+
+    static pauseForGCIfCollectionImminent(_imminence: Value): void {}
   }
 
   class WorkerNatives {

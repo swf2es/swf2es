@@ -244,6 +244,8 @@ export class Traits {
   cls: AsObject | null = null;
   interfaces = new Set<Traits>();
   dynamic = false;
+  /** Whether it is a script's global object's, as System.isGlobal asks. */
+  isGlobal = false;
   /**
    * Whether a dynamic class's instances refuse any name but their own and
    * an index, getting it or setting it, as a Vector's do: they delete one,
@@ -807,6 +809,7 @@ export class Runtime {
 
       const traits = new Traits("global", this.objectTraits);
       traits.dynamic = true;
+      traits.isGlobal = true;
       traits.describe(script.desc.traits);
       const g = traits.instance();
       const scope = Object.assign([g], { w: 0 });
@@ -1089,20 +1092,16 @@ export class Runtime {
 
   /** obj[i] = v for a number i, as avmplus' setUintProperty. */
   setIndexed(o: Value, mn: Multiname, i: number, v: Value): void {
-    if (
-      typeof o === "object" &&
-      o !== null &&
-      i >>> 0 === i &&
-      i !== 0xffffffff &&
-      mn.elementName
-    ) {
+    if (typeof o === "object" && o !== null && i >>> 0 === i && mn.elementName) {
+      // The JIT hands a typed index to setUintProperty even at 2^32-1, which is no
+      // property name: a ByteArray fails to grow to it, a Vector is out of range.
       const traits: Traits | undefined = o.$traits;
       if (traits?.setIndex) {
         traits.setIndex(o, i, v, this);
         return;
       }
 
-      if (o.$a !== undefined) {
+      if (o.$a !== undefined && i !== 0xffffffff) {
         o.$a[i] = v;
         return;
       }
@@ -2431,13 +2430,23 @@ export class Runtime {
       }
     }
 
-    const pa = a !== null && typeof a === "object" ? this.toPrimitive(a, this.hintOf(a)) : a;
-    const pb = b !== null && typeof b === "object" ? this.toPrimitive(b, this.hintOf(b)) : b;
+    // A Namespace is a primitive atom to avmplus' op_add: it concatenates only beside a
+    // string, and otherwise adds as NaN.
+    const pa = this.addend(a);
+    const pb = this.addend(b);
     if (typeof pa === "string" || typeof pb === "string") {
       return this.toString(pa) + this.toString(pb);
     }
 
     return this.toNumber(pa) + this.toNumber(pb);
+  }
+
+  private addend(v: Value): Value {
+    if (v === null || typeof v !== "object" || v instanceof Namespace) {
+      return v;
+    }
+
+    return this.toPrimitive(v, this.hintOf(v));
   }
 
   private hintOf(o: AsObject): "number" | "string" {
