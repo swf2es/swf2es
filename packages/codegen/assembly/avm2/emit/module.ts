@@ -427,7 +427,7 @@ export class ModuleEmitter {
       }
 
       traits.readName(domain, this.index, i);
-      const b = traits.own(t, traits.nameNs, traits.nameId, traits.nameNsVersion);
+      const b = traits.own(t, traits.nameNs, traits.nameId, traits.nameVersion);
       const slot = b >> 3;
       out.text(first ? "[" : ", [");
       first = false;
@@ -548,7 +548,7 @@ export class ModuleEmitter {
 
       const kind = abc.traitTag[i] & 0x0f;
       traits.readName(this.domain, this.index, i);
-      const b = traits.own(t, traits.nameNs, traits.nameId, traits.nameNsVersion);
+      const b = traits.own(t, traits.nameNs, traits.nameId, traits.nameVersion);
       out.text(count++ ? ", [" : ", meta: [[");
       out.uint(kind);
       out.text(", ");
