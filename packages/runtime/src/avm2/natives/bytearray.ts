@@ -711,8 +711,11 @@ export function byteArrayNatives(rt: Runtime): Natives {
         throw rt.error("RangeError", 2006);
       }
 
+      // A view, not a copy: set copies once, and as memmove where the two
+      // are one ByteArray. A target that grows keeps the view's bytes as
+      // they were.
       const to = bytesOf(rt, bytes);
-      const read = b.read(count);
+      const read = b.readView(count);
       if (offset + count >= to.length) {
         to.setLength(offset + count);
       }
@@ -811,8 +814,9 @@ export function byteArrayNatives(rt: Runtime): Natives {
         throw rt.error("RangeError", 2006);
       }
 
+      // A view, not a copy, as readBytes reads.
       if (count > 0) {
-        b.write(from.buffer.slice(offset, offset + count));
+        b.write(from.buffer.subarray(offset, offset + count));
       }
     }
 
