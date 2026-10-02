@@ -1377,11 +1377,36 @@ offset between pixels, linearly with weights in 256ths. A colour matrix
 maps straight colour, rounded, the pixels about what the source has
 premultiplied truncated and the rest of the rect the map of a
 transparent pixel. The `apply-filter` case matches adl's numbers to the
-bit. Bevels, convolution, displacement maps and gradient filters throw
-as not supported yet.
+bit. Bevels, displacement maps and gradient filters throw as not
+supported yet.
 
-The renderer draws a display object's blur, glow, drop shadow and colour
-matrix as adl does (`pixi-filters.ts`), before its blend mode: a blur is
+A convolution grows the rect by half its matrix, rounded down, each way.
+Its taps read the source's straight colour, unmultiplied as getPixel32
+does, past the source rect too: only past the bitmap's edge does a tap
+take the nearest edge pixel, or with `clamp` false the filter's colour.
+The kernel is not flipped: tap (i, j) of a matrix x by y reads the pixel
+(i − ⌊x/2⌋, j − ⌊y/2⌋) from the one it makes. The sum is divided (a
+divisor of 0 counts as 1), the bias added, each channel clamped and
+truncated; `preserveAlpha` keeps the source pixel's alpha, else alpha is
+summed as the colours are; the colour is then premultiplied by that
+alpha as setPixel32 does, or kept straight in an opaque destination.
+adl takes another way for a 3 × 3 kernel of whole weights whose positive
+and negative sums each stay within 127, with a divisor from 1.1 (all
+weights positive) or past 2.0001 (any negative), at pixels whose taps
+all lie in the bitmap: in fixed point, the integer sum times 65536 ÷
+divisor, truncated, plus one, wrapped to a short, shifted down 16 bits,
+the colour premultiplied truncating. The wrap makes a divisor of 1.1 to
+2 turn and shrink the weights (by 2 they negate), and that way's last
+tap reads the centre pixel, not the one right and down of it. Both ways
+are in `bitmap-filters.ts`, and the `convolution` case matches adl's
+numbers for each, to the bit. A matrix with no taps (0 by anything, the
+default filter's) copies instead: as much of the source as the grown rect
+is big, from the source rect's corner, to the grown rect's corner, over
+an opaque destination's pixels; what lies past the source stays as it
+was.
+
+The renderer draws a display object's blur, glow, drop shadow, colour
+matrix and convolution as adl does (`pixi-filters.ts`), before its blend mode: a blur is
 a box blurX by blurY pixels wide, the pixels at its ends weighted by how
 much of them it covers, run `quality` times each way and truncated to 8
 bits each time, so that blur 2.5 weighs 0.3, 0.4 and 0.3, and the filter
@@ -1391,12 +1416,19 @@ behind the object, or, inner, one less that inside it over the object;
 knocked out, the object is left out. A drop shadow is a glow from
 distance × (cos, sin) of its angle back, and with `hideObject` drawn
 alone. A colour matrix maps each pixel's straight colour, offsets in
-255ths, transparent pixels within the object's bounds too. The passes
+255ths, transparent pixels within the object's bounds too. A convolution
+filters, as applyFilter does, a bitmap of the object's pixels and one
+more right and down, its edge pixels clamped or coloured past that, and
+draws the rect so grown; each pixel's texels read its centre alike. One
+with no taps moves the object up and left by half the other size, a
+single tap there. (adl's copy then reads a row past its bitmap and draws
+what memory lies there; swf2es leaves that row transparent.) The
+passes
 are Pixi filters at the target's resolution, for WebGL: under WebGPU,
 where Pixi would skip an object's whole chain for one it cannot run,
 they are left out and a blend mode is kept. A view made for one draw
-destroys the filters it made with it. Bevels, convolution, displacement
-maps and gradient glows and bevels are still to come.
+destroys the filters it made with it. Bevels, displacement maps and
+gradient glows and bevels are still to come.
 
 ### Masks and scroll rectangles
 

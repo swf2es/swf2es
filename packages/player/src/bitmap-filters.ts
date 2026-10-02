@@ -3,8 +3,8 @@
 // source, what lies outside the source rect transparent, written whole into
 // the destination; a blur's runs truncated to 8 bits each, a glow's alpha
 // from the blur so truncated times strength, a colour matrix of straight
-// colour, rounded.
-import type { BitmapStore, PixelRect } from "./bitmap.js";
+// colour, rounded, a convolution of straight colour, truncated.
+import { type BitmapStore, over, type PixelRect, unmultiply } from "./bitmap.js";
 import type { Filter } from "./filters.js";
 
 /** The filters this filters: the others' rects and pixels are still to come. */
@@ -13,6 +13,7 @@ export const filtersDrawn: ReadonlySet<string> = new Set([
   "glow",
   "dropShadow",
   "colorMatrix",
+  "convolution",
 ]);
 
 /** How far a filter reaches past what it filters, each way: [x, y], whole pixels. */
@@ -20,6 +21,10 @@ function reach(f: Filter): [number, number] {
   if (f.kind === "blur" || f.kind === "glow" || f.kind === "dropShadow") {
     const quality = Math.max(0, f.quality);
     return [Math.ceil(((f.blurX || 0) * quality) / 2), Math.ceil(((f.blurY || 0) * quality) / 2)];
+  }
+
+  if (f.kind === "convolution") {
+    return [f.matrixX >> 1, f.matrixY >> 1];
   }
 
   return [0, 0];
@@ -122,6 +127,16 @@ export function applyFilter(
   const my = dy - rect.y;
   const shown = intersect(out, { x: -mx, y: -my, width: dest.width, height: dest.height });
   if (!shown) {
+    return true;
+  }
+
+  if (f.kind === "convolution" && (f.matrixX === 0 || f.matrixY === 0)) {
+    copyEmpty(dest, source, rect, out, shown, mx, my);
+    return true;
+  }
+
+  if (f.kind === "convolution") {
+    write(dest, convolve(source, shown, f, dest.transparent), shown, mx, my);
     return true;
   }
 
@@ -284,6 +299,193 @@ function colorMatrix(
       result[i] = ((na << 24) | (p(nr) << 16) | (p(ng) << 8) | p(nb)) >>> 0;
     }
   }
+}
+
+/**
+ * What adl makes of a convolution with no taps: a copy, of as much of the
+ * source as the filter's rect is big (the other size of the matrix still
+ * grows it) from the source rect's corner, to that rect's corner; over
+ * what an opaque destination has, into a transparent one as it is; what
+ * lies past the source left as it was, and in place the source as it was
+ * before. `shown` is what the destination shows of `out`, and (mx, my)
+ * moves both there.
+ */
+function copyEmpty(
+  dest: BitmapStore,
+  source: BitmapStore,
+  rect: PixelRect,
+  out: PixelRect,
+  shown: PixelRect,
+  mx: number,
+  my: number,
+): void {
+  const target = dest.pixels;
+  const pixels = source === dest ? source.pixels.slice() : source.pixels;
+  for (let y = shown.y; y < shown.y + shown.height; y++) {
+    const sy = rect.y + y - out.y;
+    if (sy < 0 || sy >= source.height) {
+      continue;
+    }
+
+    for (let x = shown.x; x < shown.x + shown.width; x++) {
+      const sx = rect.x + x - out.x;
+      if (sx >= 0 && sx < source.width) {
+        const p = pixels[sy * source.width + sx];
+        const at = (y + my) * dest.width + x + mx;
+        target[at] = dest.transparent ? p : over(p, target[at]);
+      }
+    }
+  }
+
+  dest.changed();
+}
+
+/**
+ * A convolution over `area` of the source, as adl computes it: each tap
+ * reads the source's straight colour, past the rect too, and past the
+ * bitmap the nearest edge's or the filter's colour; the sum divided (0
+ * counting as 1), the bias added, clamped and truncated, the alpha the
+ * source's where the filter keeps it; the colour premultiplied by that alpha,
+ * or kept straight for an opaque destination.
+ */
+function convolve(
+  source: BitmapStore,
+  area: PixelRect,
+  f: Filter,
+  transparent: boolean,
+): Uint32Array {
+  const cols = f.matrixX;
+  const rows = f.matrixY;
+  const hx = cols >> 1;
+  const hy = rows >> 1;
+  const divisor = f.divisor || 1;
+  const matrix = Array.from({ length: cols * rows }, (_, k) => f.matrix[k] || 0);
+  const weights = matrix.map((m) => m / divisor);
+  const integer = integerKernel(matrix, divisor);
+  const sw = source.width;
+  const sh = source.height;
+
+  // The straight colour of the pixels the taps reach, clamped to the bitmap,
+  // and after them the filter's colour.
+  const clampX = (x: number) => Math.max(0, Math.min(sw - 1, x));
+  const clampY = (y: number) => Math.max(0, Math.min(sh - 1, y));
+  const x0 = clampX(area.x - hx);
+  const y0 = clampY(area.y - hy);
+  const nw = clampX(area.x + area.width + cols - hx - 2) - x0 + 1;
+  const nh = clampY(area.y + area.height + rows - hy - 2) - y0 + 1;
+  const near = new Float64Array(nw * nh * 4 + 4);
+  for (let y = 0; y < nh; y++) {
+    for (let x = 0; x < nw; x++) {
+      const p = unmultiply(source.pixels[(y0 + y) * sw + x0 + x]);
+      const i = (y * nw + x) * 4;
+      near[i] = (p >>> 16) & 0xff;
+      near[i + 1] = (p >>> 8) & 0xff;
+      near[i + 2] = p & 0xff;
+      near[i + 3] = source.transparent ? p >>> 24 : 255;
+    }
+  }
+
+  const colour = nw * nh * 4;
+  near.set(
+    [(f.color >> 16) & 0xff, (f.color >> 8) & 0xff, f.color & 0xff, Math.floor(f.alpha * 255)],
+    colour,
+  );
+  const at = (x: number, y: number) =>
+    !f.clamp && (x < 0 || x >= sw || y < 0 || y >= sh)
+      ? colour
+      : ((clampY(y) - y0) * nw + clampX(x) - x0) * 4;
+  // The taps that weigh anything: where each reads from the pixel, and its
+  // place in `near` from the pixel's where it lies in the bitmap.
+  const tapsOf = (ws: number[], centreLast: boolean) => {
+    const taps = { dx: [] as number[], dy: [] as number[], w: [] as number[], at: [] as number[] };
+    for (let k = 0; k < ws.length; k++) {
+      if (ws[k] !== 0) {
+        const last = centreLast && k === ws.length - 1;
+        const dx = last ? 0 : (k % cols) - hx;
+        const dy = last ? 0 : Math.floor(k / cols) - hy;
+        taps.dx.push(dx);
+        taps.dy.push(dy);
+        taps.w.push(ws[k]);
+        taps.at.push((dy * nw + dx) * 4);
+      }
+    }
+
+    return taps;
+  };
+  const general = tapsOf(weights, false);
+  const fixedTaps = tapsOf(matrix, true);
+  const value = (v: number) => Math.max(0, Math.min(255, v + f.bias)) || 0;
+  // A channel's sum premultiplied by `by`: truncating the fixed-point way, the other as the store does.
+  const channel = (v: number, by: number, fixed: boolean) => {
+    // A hair over, so that a value the sum hits exactly stays.
+    const straight = Math.floor(value(v) + 1e-7);
+    return fixed ? Math.floor((straight * by) / 255) : ((straight * by + 127) / 255) | 0;
+  };
+
+  const result = new Uint32Array(area.width * area.height);
+  for (let y = 0; y < area.height; y++) {
+    const sy = area.y + y;
+    for (let x = 0; x < area.width; x++) {
+      const sx = area.x + x;
+      const fixed = integer !== null && sx >= 1 && sx < sw - 1 && sy >= 1 && sy < sh - 1;
+      const taps = fixed ? fixedTaps : general;
+      const inside = sx >= hx && sx <= sw - cols + hx && sy >= hy && sy <= sh - rows + hy;
+      const base = ((sy - y0) * nw + sx - x0) * 4;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      for (let k = 0; k < taps.w.length; k++) {
+        const i = inside ? base + taps.at[k] : at(sx + taps.dx[k], sy + taps.dy[k]);
+        const w = taps.w[k];
+        r += near[i] * w;
+        g += near[i + 1] * w;
+        b += near[i + 2] * w;
+        a += near[i + 3] * w;
+      }
+
+      if (fixed) {
+        r = Math.floor((r * (integer as number)) / 65536);
+        g = Math.floor((g * (integer as number)) / 65536);
+        b = Math.floor((b * (integer as number)) / 65536);
+        a = Math.floor((a * (integer as number)) / 65536);
+      }
+
+      const alpha = Math.floor((f.preserveAlpha ? near[at(sx, sy) + 3] : value(a)) + 1e-7);
+      const by = transparent ? alpha : 255;
+      result[y * area.width + x] =
+        ((alpha << 24) |
+          (channel(r, by, fixed) << 16) |
+          (channel(g, by, fixed) << 8) |
+          channel(b, by, fixed)) >>>
+        0;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * The reciprocal adl divides a 3 × 3 kernel by in fixed point, where it
+ * takes that way, which it does inside the bitmap for whole weights whose
+ * positive and negative sums each stay within 127 and a divisor from 1.1,
+ * or past 2.0001 with a negative weight: 65536 / divisor, truncated, plus
+ * one, wrapped to a short. That way also reads the centre for the last tap.
+ * Null where it takes the other.
+ */
+export function integerKernel(matrix: number[], divisor: number): number | null {
+  if (matrix.length !== 9 || !matrix.every(Number.isInteger)) {
+    return null;
+  }
+
+  const positive = matrix.reduce((s, m) => s + Math.max(0, m), 0);
+  const negative = matrix.reduce((s, m) => s + Math.min(0, m), 0);
+  const enough = negative < 0 ? divisor > Math.fround(2.0001) : divisor >= Math.fround(1.1);
+  if (positive > 127 || negative < -127 || !enough) {
+    return null;
+  }
+
+  return ((Math.floor(65536 / divisor) + 1) << 16) >> 16;
 }
 
 /**
