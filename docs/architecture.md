@@ -1039,7 +1039,28 @@ JPEG XR, which Flash also writes, are not supported yet. The
 compression's file is Flash's byte for byte, as pako and zlib deflate
 alike. `getPixels` and
 `copyPixelsToByteArray` write their bytes in one pass, about 13 ms for
-1080p as in Flash. Each rule is Flash's
+1080p as in Flash.
+Slice six is bitmap fills: a shape's fill of type 0x40 to 0x43 and
+`Graphics.beginBitmapFill`. Each maps the bitmap's pixels into the shape
+by its matrix (a SWF's in twips, so divided by 20; `beginBitmapFill`'s in
+pixels, the identity by default, repeating and not smoothed), and
+`bitmap-fills` shows what Flash draws: a repeating fill tiles the bitmap,
+a clipped one carries its edge pixels on beyond it, smoothed is bilinear
+and not smoothed nearest, and a fill whose bitmap the SWF does not
+define is solid red. A SWF's bitmap fill is resolved to its bitmap
+character as the shape is read, the bitmaps being defined first, and is
+drawn from one store made of the character's pixels; `beginBitmapFill`
+keeps the BitmapData's store itself, so the fill shows its later changes,
+the shape a view of the store as a Bitmap is. The renderer draws a fill
+as a Pixi texture fill in global texture space, the matrix as it is,
+sampling a copy of the store's texture kept for the fill's repeat and
+smoothing: a texture's sampling is its source's in Pixi, which also
+switches any fill's texture from clamping to repeating by its
+`addressMode`, so a clipped fill's copy reads as clamping there while
+WebGL, which reads each axis's mode, clamps it. Without scripts, a SWF's
+images are decoded at `start` too, for its bitmap fills. A bitmap line
+(`lineBitmapStyle`, a LINESTYLE2 bitmap fill) and gradients still draw
+their first colour. Each rule is Flash's
 as the `draw-bitmaps` and `draw-objects` cases trace and draw it under
 adl: a destination pixel takes the source pixel under its centre,
 clamped to the source's edges; the translation is snapped down to

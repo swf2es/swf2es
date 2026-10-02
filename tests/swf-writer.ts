@@ -145,14 +145,25 @@ export type PathCommand =
 export interface ShapeSpec {
   id: number;
   bounds: [number, number, number, number];
-  /** Solid fills, 0xRRGGBB (DefineShape) or 0xAARRGGBB (DefineShape3). */
-  fills: number[];
+  /** Solid fills, 0xRRGGBB (DefineShape) or 0xAARRGGBB (DefineShape3), or bitmap fills. */
+  fills: (number | BitmapFill)[];
   /** Lines: width in twips and colour. */
   lines?: { width: number; color: number }[];
   /** Paths, each with the fill it has on its right (fill1) and its line; 1-based, 0 for none. */
   paths: { fill1: number; fill0?: number; line?: number; commands: PathCommand[] }[];
   /** 1 DefineShape (RGB), 3 DefineShape3 (RGBA). */
   version?: 1 | 3;
+}
+
+/**
+ * A bitmap fill: 0x40 repeating and smoothed, 0x41 clipped and smoothed,
+ * 0x42 repeating, 0x43 clipped; its matrix maps the bitmap's pixels to
+ * the shape's twips.
+ */
+export interface BitmapFill {
+  bitmap: number;
+  type: 0x40 | 0x41 | 0x42 | 0x43;
+  matrix?: { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
 }
 
 /** A DefineShape or DefineShape3 tag. */
@@ -173,8 +184,13 @@ export function shape(spec: ShapeSpec): Uint8Array {
   };
   w.u8(spec.fills.length);
   for (const f of spec.fills) {
-    w.u8(0);
-    color(f);
+    if (typeof f === "number") {
+      w.u8(0);
+      color(f);
+    } else {
+      w.u8(f.type).u16(f.bitmap);
+      matrix(w, f.matrix ?? {});
+    }
   }
 
   w.u8(lines.length);
