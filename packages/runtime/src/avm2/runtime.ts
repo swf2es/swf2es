@@ -2434,13 +2434,23 @@ export class Runtime {
       }
     }
 
-    const pa = a !== null && typeof a === "object" ? this.toPrimitive(a, this.hintOf(a)) : a;
-    const pb = b !== null && typeof b === "object" ? this.toPrimitive(b, this.hintOf(b)) : b;
+    // A Namespace is a primitive atom to avmplus' op_add: it concatenates only beside a
+    // string, and otherwise adds as NaN.
+    const pa = this.addend(a);
+    const pb = this.addend(b);
     if (typeof pa === "string" || typeof pb === "string") {
       return this.toString(pa) + this.toString(pb);
     }
 
     return this.toNumber(pa) + this.toNumber(pb);
+  }
+
+  private addend(v: Value): Value {
+    if (v === null || typeof v !== "object" || v instanceof Namespace) {
+      return v;
+    }
+
+    return this.toPrimitive(v, this.hintOf(v));
   }
 
   private hintOf(o: AsObject): "number" | "string" {

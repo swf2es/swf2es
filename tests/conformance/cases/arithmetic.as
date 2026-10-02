@@ -18,3 +18,9 @@ trace("compare", 1 < 2, "10" < "9", 10 < "9", "a" < "b", NaN < 1, NaN >= 1, null
 trace("equals", 1 == "1", null == undefined, null == 0, "" == 0, true == 1, "1" === 1, NaN == NaN);
 trace("unary", -s, +s, +"", +" 12 ", +"0x1A", +"1e3", +"abc", -"-5");
 trace("not", !0, !"", !"a", !null, !NaN, !{});
+// A Namespace is a primitive to add: beside a string it concatenates as its
+// uri, beside anything else it adds as NaN.
+var ns:Namespace = new Namespace("p", "http://u/");
+var nsAny:* = ns;
+trace(nsAny + 1, 1 + nsAny, nsAny + 1.5, nsAny + null, nsAny + true, nsAny + undefined);
+trace(nsAny + "s", "s" + nsAny, nsAny + nsAny, nsAny + [], nsAny + {}, nsAny + new QName(ns, "n"));
