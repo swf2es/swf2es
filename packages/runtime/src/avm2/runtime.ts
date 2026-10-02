@@ -130,7 +130,20 @@ export interface RuntimeOptions {
   compileAbc?: (abc: Uint8Array) => ((rt: Runtime) => Abc) | number;
   /** Where avmshell's File reads and writes: by default in memory, empty at the start. */
   files?: ShellFiles;
+  /**
+   * The SWF version whose behaviour avmplus keeps where it changed (its
+   * BugCompatibility): avmshell's, 31, by default. A player sets its main
+   * SWF's.
+   */
+  swfVersion?: number;
 }
+
+/**
+ * A sealed Array subclass's elements from SWF 13, as avmplus' ArrayObject
+ * keeps none for one: never any. Shared and frozen; what writes elements
+ * checks for it, and fails as a sealed object does.
+ */
+export const SEALED_ELEMENTS: Value[] = Object.freeze([]) as unknown as Value[];
 
 /** avmshell's file system, as its File sees it. */
 export interface ShellFiles {
@@ -598,6 +611,8 @@ export class Runtime {
   readonly debugger: boolean;
   readonly compileAbc: ((abc: Uint8Array) => ((rt: Runtime) => Abc) | number) | null;
   readonly files: ShellFiles;
+  /** See RuntimeOptions.swfVersion. */
+  swfVersion: number;
   readonly natives: Record<string, (rt: Runtime) => Method>;
   /** Names the scripts define, by local name: the first definition wins. */
   private readonly globals = new Map<string, GlobalName[]>();
@@ -657,6 +672,7 @@ export class Runtime {
     this.debugger = options.debugger ?? false;
     this.compileAbc = options.compileAbc ?? null;
     this.files = options.files ?? memoryFiles();
+    this.swfVersion = options.swfVersion ?? 31;
     this.objectTraits = new Traits("Object", null);
     this.objectTraits.dynamic = true;
     this.classTraits = new Traits("Class", this.objectTraits);
@@ -1136,7 +1152,7 @@ export class Runtime {
         return;
       }
 
-      if (o.$a !== undefined && i !== 0xffffffff) {
+      if (o.$a !== undefined && o.$a !== SEALED_ELEMENTS && i !== 0xffffffff) {
         o.$a[i] = v;
         return;
       }
@@ -1397,7 +1413,7 @@ export class Runtime {
 
     const name = mn.dynamicName();
     if (name !== null && typeof o === "object") {
-      if (traits.setIndex || o.$a !== undefined) {
+      if (traits.setIndex || (o.$a !== undefined && o.$a !== SEALED_ELEMENTS)) {
         const i = traits.index ? traits.index(o, name, this) : arrayIndex(name);
         if (i >= 0) {
           if (traits.setIndex) {
@@ -1451,7 +1467,7 @@ export class Runtime {
 
     const name = mn.dynamicName();
     if (name !== null && typeof o === "object") {
-      if (o.$a !== undefined) {
+      if (o.$a !== undefined && o.$a !== SEALED_ELEMENTS) {
         const i = arrayIndex(name);
         if (i >= 0) {
           return delete o.$a[i];

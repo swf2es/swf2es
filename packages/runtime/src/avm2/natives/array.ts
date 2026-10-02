@@ -1,7 +1,29 @@
 // Array: its natives, and its instances' element storage.
-import type { AsObject, ClassHook, Value } from "../runtime.js";
+import {
+  type AsObject,
+  type ClassHook,
+  type Runtime,
+  SEALED_ELEMENTS,
+  type Value,
+} from "../runtime.js";
 import { AS3, eachElement, elements, type Natives, plain, withStorage } from "./define.js";
 import { sort, sortOn } from "./sort.js";
+
+/**
+ * Whether `o` is a sealed Array subclass's instance, which has no elements:
+ * one added fails as a sealed object's property does, ReferenceError 1056.
+ */
+function sealed(rt: Runtime, o: AsObject, adding: number): boolean {
+  if (o.$a !== SEALED_ELEMENTS) {
+    return false;
+  }
+
+  if (adding > 0) {
+    throw rt.error("ReferenceError", 1056, "0", o.$traits.name);
+  }
+
+  return true;
+}
 
 export const arrayNatives: Natives = {
   // Array
@@ -10,32 +32,42 @@ export const arrayNatives: Natives = {
   }),
   "Array#set:length": (rt) =>
     function (this: AsObject, n: Value) {
-      this.$a.length = rt.toUint(n);
+      if (!sealed(rt, this, 0)) {
+        this.$a.length = rt.toUint(n);
+      }
     },
-  [`Array#${AS3}::push`]: plain(function (this: AsObject, ...args: Value[]) {
-    return this.$a.push(...args);
-  }),
-  [`Array#${AS3}::pop`]: plain(function (this: AsObject) {
-    return this.$a.pop();
-  }),
-  [`Array#${AS3}::unshift`]: plain(function (this: AsObject, ...args: Value[]) {
-    return this.$a.unshift(...args);
-  }),
+  [`Array#${AS3}::push`]: (rt) =>
+    function (this: AsObject, ...args: Value[]) {
+      return sealed(rt, this, args.length) ? 0 : this.$a.push(...args);
+    },
+  [`Array#${AS3}::pop`]: (rt) =>
+    function (this: AsObject) {
+      return sealed(rt, this, 0) ? undefined : this.$a.pop();
+    },
+  [`Array#${AS3}::unshift`]: (rt) =>
+    function (this: AsObject, ...args: Value[]) {
+      return sealed(rt, this, args.length) ? 0 : this.$a.unshift(...args);
+    },
   [`Array#${AS3}::insertAt`]: (rt) =>
     function (this: AsObject, i: Value, v: Value) {
-      this.$a.splice(rt.toInt(i), 0, v);
+      if (!sealed(rt, this, 1)) {
+        this.$a.splice(rt.toInt(i), 0, v);
+      }
     },
   [`Array#${AS3}::removeAt`]: (rt) =>
     function (this: AsObject, i: Value) {
-      return this.$a.splice(rt.toInt(i), 1)[0];
+      return sealed(rt, this, 0) ? undefined : this.$a.splice(rt.toInt(i), 1)[0];
     },
-  "Array.Array::_pop": plain((o: AsObject) => o.$a.pop()),
-  "Array.Array::_shift": plain((o: AsObject) => o.$a.shift()),
+  "Array.Array::_pop": (rt) => (o: AsObject) => (sealed(rt, o, 0) ? undefined : o.$a.pop()),
+  "Array.Array::_shift": (rt) => (o: AsObject) => (sealed(rt, o, 0) ? undefined : o.$a.shift()),
   "Array.Array::_reverse": plain((o: AsObject) => {
     o.$a.reverse();
     return o;
   }),
-  "Array.Array::_unshift": plain((o: AsObject, args: Value) => o.$a.unshift(...elements(args))),
+  "Array.Array::_unshift": (rt) => (o: AsObject, args: Value) => {
+    const a = elements(args);
+    return sealed(rt, o, a.length) ? 0 : o.$a.unshift(...a);
+  },
   "Array.Array::_concat": (rt) => (o: AsObject, args: Value) => {
     const out = o.$a.slice();
     for (const a of elements(args)) {
@@ -53,6 +85,10 @@ export const arrayNatives: Natives = {
   "Array.Array::_splice": (rt) => (o: AsObject, args: Value) => {
     const a = elements(args);
     if (a.length === 0) {
+      return rt.array([]);
+    }
+
+    if (sealed(rt, o, a.length - 2)) {
       return rt.array([]);
     }
 
@@ -94,7 +130,16 @@ export const arrayNatives: Natives = {
 
 export const arrayHooks: Record<string, ClassHook> = {
   Array: {
-    create: withStorage,
+    // A subclass that is not dynamic has no elements from SWF 13 (avmplus'
+    // bugzilla 654807); before, it keeps them, as here.
+    create: (traits, rt) => {
+      const o = withStorage(traits);
+      if (!traits.dynamic && rt.swfVersion >= 13) {
+        o.$a = SEALED_ELEMENTS;
+      }
+
+      return o;
+    },
     // Array.prototype is an Array, empty.
     prototype: (_rt, cls) => cls.$it.instance(),
     call: (rt, cls, args) => rt.constructClass(cls, args),

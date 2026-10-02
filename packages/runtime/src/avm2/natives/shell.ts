@@ -118,7 +118,7 @@ export function shellNatives(rt: Runtime): Natives {
     }
 
     static get swfVersion(): number {
-      return 31;
+      return rt.swfVersion;
     }
 
     static get apiVersion(): number {
