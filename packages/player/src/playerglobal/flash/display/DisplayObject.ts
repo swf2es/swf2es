@@ -3,7 +3,7 @@
 import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { bounds, boundsIn, hitsObject, hitsPoint, toStage } from "../../../bounds.js";
-import { type DisplayObject, TRANSFORM } from "../../../display.js";
+import { CONTENT, type DisplayObject, TextObject, TRANSFORM } from "../../../display.js";
 import { type Rect, transformRect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
 import { colorOf, matrixOf } from "../geom/Transform.js";
@@ -282,6 +282,13 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       }
 
       const d = this.$display;
+      // A TextField's is its field's, resized at its scale, the text as it was.
+      if (d instanceof TextObject) {
+        d.width = value / (Math.abs(d.scaleX) || 1);
+        d.invalidate(CONTENT);
+        return;
+      }
+
       d.scripted = true;
       const r = bounds(d, true);
       const base = r ? twips(r.xMax - r.xMin) : 0;
@@ -308,6 +315,13 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       }
 
       const d = this.$display;
+      // A TextField's is its field's, resized at its scale, the text as it was.
+      if (d instanceof TextObject) {
+        d.height = value / (Math.abs(d.scaleY) || 1);
+        d.invalidate(CONTENT);
+        return;
+      }
+
       d.scripted = true;
       const r = bounds(d, true);
       const base = r ? twips(r.yMax - r.yMin) : 0;
