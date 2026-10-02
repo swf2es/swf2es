@@ -39,16 +39,17 @@ test("a field's tag text is read as HTML where the tag says so, in the tag's fon
   assert.equal(field.model.formats[4].color, 0xff0000);
 });
 
-test("a centred field's text is centred in it, past its 2 pixel gutter from the top", () => {
+test("a centred field's text is drawn where its layout centres it, past the 2 pixel gutter", () => {
   const field = placed(w.editText(3, "Loading", 4000, 400, 2));
   const view = new PixiView({} as ConstructorParameters<typeof PixiView>[0]);
   view.prepare(field);
-  const text = view.stage.children[0].children[0].children[0] as unknown as {
+  const line = field.layout.lines[0];
+  const text = view.stage.children[0].children[0].children[0].children[0] as unknown as {
     x: number;
-    y: number;
-    anchor: { x: number };
   };
-  assert.deepEqual([text.x, text.y, text.anchor.x], [100, 2, 0.5]);
+  assert.equal(text.x, line.x / 20);
+  // Centred in the 196 pixels past the gutters: as far from the right edge as the left.
+  assert.equal(line.x / 20 - 2, 200 - 2 - (line.x + line.width) / 20);
 });
 
 test("text a margin moves past its field's edge is clipped, though it is narrower than the field", async () => {

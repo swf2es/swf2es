@@ -17,6 +17,8 @@ export interface LaidChar {
   index: number;
   x: number;
   advance: number;
+  /** Its pair's kerning, which shortens its advance and, drawn, moves it: its boundaries stay where they were. */
+  kern: number;
   /** Its embedded font and glyph; null for a device font's character, or one the font lacks. */
   font: Font | null;
   glyph: Glyph | null;
@@ -63,6 +65,7 @@ interface Measure {
   font: Font | null;
   glyph: Glyph | null;
   advance: number;
+  kern: number;
   ascent: number;
   descent: number;
   shown: boolean;
@@ -98,26 +101,21 @@ function measure(field: LayoutField, code: number, format: CharFormat, previous:
   if (field.embedFonts) {
     const font = field.fonts?.find(format.font, format.bold, format.italic) ?? null;
     if (!font?.layout) {
-      return { font, glyph: null, advance: 0, ascent: 0, descent: 0, shown: false };
+      return { font, glyph: null, advance: 0, kern: 0, ascent: 0, descent: 0, shown: false };
     }
 
     const ascent = twips(font.ascent, size, font.em);
     const descent = twips(font.descent, size, font.em);
     const glyph = glyphOf(font, code);
     if (!glyph) {
-      return { font, glyph: null, advance: 0, ascent, descent, shown: false };
+      return { font, glyph: null, advance: 0, kern: 0, ascent, descent, shown: false };
     }
 
-    let advance = twips(glyph.advance, size, font.em) + spacing;
     // A pair's kerning shortens the second character, as adl has it.
-    if (format.kerning && previous >= 0) {
-      const kern = font.kerning.get((previous << 16) | code);
-      if (kern) {
-        advance += twips(kern, size, font.em);
-      }
-    }
-
-    return { font, glyph, advance, ascent, descent, shown: true };
+    const pair = format.kerning && previous >= 0 ? font.kerning.get((previous << 16) | code) : 0;
+    const kern = pair ? twips(pair, size, font.em) : 0;
+    const advance = twips(glyph.advance, size, font.em) + spacing + kern;
+    return { font, glyph, advance, kern, ascent, descent, shown: true };
   }
 
   const m = deviceMetrics(format.font, size, format.bold, format.italic);
@@ -125,6 +123,7 @@ function measure(field: LayoutField, code: number, format: CharFormat, previous:
     font: null,
     glyph: null,
     advance: twips(m.advance(String.fromCharCode(code)), size, size) + spacing,
+    kern: 0,
     ascent: twips(m.ascent, size, size),
     descent: twips(m.descent, size, size),
     shown: true,
@@ -189,6 +188,7 @@ export function layoutText(field: LayoutField): TextLayout {
           index: start + i,
           x,
           advance: m.advance,
+          kern: m.kern,
           font: m.font,
           glyph: m.glyph,
           shown: m.shown,
@@ -210,6 +210,7 @@ export function layoutText(field: LayoutField): TextLayout {
           index: end,
           x,
           advance: 0,
+          kern: 0,
           font: null,
           glyph: null,
           shown: false,
@@ -395,4 +396,23 @@ export function lineOf(layout: TextLayout, index: number): number {
   }
 
   return lo;
+}
+
+/** The lines of a field's layout that fit its height from line `first`: one at least. */
+export function shownLines(field: { layout: TextLayout; height: number }, first: number): number {
+  const lines = field.layout.lines;
+  const room = field.height * TWIPS - 2 * GUTTER;
+  let n = 0;
+  let used = 0;
+  for (let i = first; i < lines.length; i++) {
+    used += lines[i].ascent + lines[i].descent;
+    if (n > 0 && used > room) {
+      break;
+    }
+
+    used += lines[i].leading;
+    n++;
+  }
+
+  return Math.max(1, n);
 }

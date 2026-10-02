@@ -5,7 +5,7 @@ import { avm2 } from "@swf2es/runtime";
 import { CONTENT, type TextObject } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
 import { applied, emptyFormat, type PartialFormat } from "../../../text.js";
-import { GUTTER, lineOf } from "../../../text-layout.js";
+import { GUTTER, lineOf, shownLines } from "../../../text-layout.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -80,24 +80,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
 
     return i;
   };
-  /** The lines that fit the field's height from the first shown, scrollV: one at least. */
-  const shownLines = (field: TextObject, first: number): number => {
-    const lines = field.layout.lines;
-    const room = field.height * 20 - 2 * GUTTER;
-    let n = 0;
-    let used = 0;
-    for (let i = first; i < lines.length; i++) {
-      used += lines[i].ascent + lines[i].descent;
-      if (n > 0 && used > room) {
-        break;
-      }
 
-      used += lines[i].leading;
-      n++;
-    }
-
-    return Math.max(1, n);
-  };
   /** [begin, end) as getTextFormat and setTextFormat take them: -1 for the start or the end; RangeError 2006 past them. */
   const range = (field: TextObject, begin: Value, end: Value): [number, number] => {
     const length = field.model.text.length;

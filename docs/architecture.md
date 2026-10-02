@@ -1260,14 +1260,17 @@ Flash's or ArgumentError 2008, an unknown `display` null. The `text-fields`
 case traces all of this, defaults, HTML and refusals, against adl.
 
 Setting a TextField's `width` or `height` resizes its field, as Flash
-does, not its scale. The renderer draws the background and border, then
-the text in its first character's format with Pixi's Text, 2 pixels in
-from the field's edges as Flash's gutter is, aligned as the first
-paragraph, wrapped at the field's width where it wraps, and clipped to
-the field where it runs over; a device font (`_sans`, `_serif`,
-`_typewriter`) is the browser's of that kind, any other font by its
-name. Embedded fonts' glyphs, runs of several formats on screen, input
-and selection are still to come.
+does, not its scale. The renderer draws the background, the border over
+the pixels at both edges, then the text as its layout (below) places it,
+from the line scrolled to and no line that fits only part of the way,
+clipped inside the gutter: a character of an embedded font as its glyph's
+fill, a shape made once for the glyph and shared by every character
+drawn in it, scaled to its size, tinted its colour, and moved by its
+pair's kerning (its boundaries stay); a run of a device font in one
+format as one Pixi Text on the line's baseline. A device font
+(`_sans`, `_serif`, `_typewriter`) is the browser's of that kind, any
+other by its name. Bullets, underlines, input and selection are still
+to come.
 
 A field's text is laid out by swf2es, as Flash lays it out, never by the
 browser: lines, and each character's place on them, are what
