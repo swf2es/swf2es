@@ -22,7 +22,7 @@ import {
   IR_Nip,
   Ir,
 } from "../ir/ir";
-import { Domain, NS_Private, URI_None } from "../link/domain";
+import { Domain } from "../link/domain";
 import {
   BUILTIN_Any,
   BUILTIN_Boolean,
@@ -30,14 +30,12 @@ import {
   BUILTIN_Namespace,
   BUILTIN_Number,
   BUILTIN_Object,
-  BUILTIN_Other,
   BUILTIN_String,
   BUILTIN_Uint,
-  TRAITS_Instance,
-  TraitsTable,
   TYPE_Any,
 } from "../link/traits";
 import { Output } from "./output";
+import { constant, isClassRef, poolString, typeRef } from "./refs";
 import { SourceMap } from "./sourcemap";
 
 /** The deepest structured code a method is given; one deeper keeps the dispatcher. */
@@ -452,7 +450,7 @@ export class MethodEmitter {
         out.text("      ");
         if (type >= 0) {
           out.text("if (rt.catches(x, ");
-          this.typeRef(type);
+          typeRef(this, type);
           out.text(")) ");
         }
 
@@ -516,7 +514,7 @@ export class MethodEmitter {
         out.uint(p);
         out.text(" ? ");
         const o = abc.methodOptionalStart[method] + p - first - 1;
-        this.constant(abc.optionalValue[o], abc.optionalKind[o], type);
+        constant(this, abc.optionalValue[o], abc.optionalKind[o], type);
         out.text(" : ");
       }
 
@@ -861,7 +859,7 @@ export class MethodEmitter {
         out.text("NaN");
         break;
       case ops.OP_pushstring:
-        this.string(a);
+        poolString(this, a);
         break;
       case ops.OP_pushtrue:
         out.text("true");
@@ -1422,7 +1420,7 @@ export class MethodEmitter {
     const type = ir.handlerType[h];
     if (type >= 0) {
       out.text(" && rt.catches(x, ");
-      this.typeRef(type);
+      typeRef(this, type);
       out.text(")");
     }
 
@@ -1582,7 +1580,7 @@ export class MethodEmitter {
         break;
       case ops.OP_pushstring:
         this.assign(i);
-        this.string(a);
+        poolString(this, a);
         break;
       case ops.OP_pushtrue:
         this.assign(i);
@@ -2034,7 +2032,7 @@ export class MethodEmitter {
 
         // By the interface's dispatch id, which its layout maps to a name.
         out.text("rt.callInterface(");
-        this.typeRef(this.regType[src]);
+        typeRef(this, this.regType[src]);
         out.text(", ");
         out.uint(a);
         out.text(", ");
@@ -2400,7 +2398,7 @@ export class MethodEmitter {
         return true;
       case ops.OP_dxns:
         out.text("    rt.setDefaultXmlNamespace(");
-        this.string(a);
+        poolString(this, a);
         out.text(")");
         return true;
       case ops.OP_dxnslate:
@@ -2569,7 +2567,7 @@ export class MethodEmitter {
       bt === BUILTIN_Namespace;
     if (primitive) {
       out.text("rt.prototypeOf(");
-      this.typeRef(type);
+      typeRef(this, type);
       out.text(").$m");
       out.uint(disp);
       out.text(".call(");
@@ -2587,7 +2585,7 @@ export class MethodEmitter {
       out.text(".$m");
       out.uint(disp);
       out.text(" ?? rt.prototypeOf(");
-      this.typeRef(type);
+      typeRef(this, type);
       out.text(").$m");
       out.uint(disp);
       out.text(").call(");
@@ -2928,8 +2926,8 @@ export class MethodEmitter {
    */
   upcast(type: i32, from: i32): bool {
     return (
-      this.isClassRef(type) &&
-      this.isClassRef(from) &&
+      isClassRef(this, type) &&
+      isClassRef(this, from) &&
       this.domain.traits.subtypeOf(<u32>from, <u32>type)
     );
   }
@@ -3049,10 +3047,10 @@ export class MethodEmitter {
         }
 
         // A class's instances, by T: no builtin for the runtime to look for.
-        out.text(this.isClassRef(type) ? "rt.coerceTo(" : "rt.coerce(");
+        out.text(isClassRef(this, type) ? "rt.coerceTo(" : "rt.coerce(");
         this.operand(prefix, r);
         out.text(", ");
-        this.typeRef(type);
+        typeRef(this, type);
         out.text(")");
     }
   }
@@ -3063,243 +3061,6 @@ export class MethodEmitter {
       this.out.uint(<u64>r);
     } else {
       this.reg(r);
-    }
-  }
-
-  /**
-   * Type t in a method: an entry of the module's table T, made once when
-   * the module loads, for a class or Vector; the builtin types, and * as
-   * null, as they are.
-   */
-  /** Whether typeRef writes type t as T[k], a class's instances; else a literal. */
-  isClassRef(t: i32): bool {
-    // What typeExpr writes as a literal stays one: *, the builtins it names
-    // by string, and a type that is not a class's instances.
-    const bt = t < 0 ? BUILTIN_Any : this.domain.builtin(t);
-    return (
-      t >= 0 &&
-      (bt === BUILTIN_Other || bt === BUILTIN_Namespace) &&
-      t !== this.domain.voidType &&
-      this.domain.traits.kind[t] === TRAITS_Instance
-    );
-  }
-
-  typeRef(t: i32): void {
-    const out = this.out;
-    if (!this.isClassRef(t)) {
-      this.typeExpr(t);
-      return;
-    }
-
-    if (!this.typeIndex.has(t)) {
-      this.typeIndex.set(t, <u32>this.types.length);
-      this.types.push(t);
-    }
-
-    out.text("T[");
-    out.uint(this.typeIndex.get(t));
-    out.text("]");
-  }
-
-  /**
-   * A reference to type t for the runtime, by name, as types are known
-   * across modules: null for *, a string for the builtin primitive types,
-   * rt.cls(namespace, "Name") for a class, rt.vector(type) for Vector.<T>.
-   */
-  typeExpr(t: i32): void {
-    const out = this.out;
-    const domain = this.domain;
-    const traits = domain.traits;
-    if (t < 0) {
-      out.text("null");
-      return;
-    }
-
-    switch (domain.builtin(t)) {
-      case BUILTIN_Int:
-        out.text('"int"');
-        return;
-      case BUILTIN_Uint:
-        out.text('"uint"');
-        return;
-      case BUILTIN_Number:
-        out.text('"Number"');
-        return;
-      case BUILTIN_Boolean:
-        out.text('"Boolean"');
-        return;
-      case BUILTIN_String:
-        out.text('"String"');
-        return;
-      case BUILTIN_Object:
-        out.text('"Object"');
-        return;
-      default:
-        break;
-    }
-
-    if (t === domain.voidType) {
-      out.text('"void"');
-    } else if (traits.kind[t] !== TRAITS_Instance) {
-      out.text("null");
-    } else if (traits.param[t] !== TYPE_Any) {
-      out.text("rt.vector(");
-      this.typeExpr(traits.param[t]);
-      out.text(")");
-    } else {
-      const index = traits.abc[t];
-      const abc = domain.abcs[index];
-      const pool = abc.pool;
-      let mn = abc.instanceName[traits.owner[t]];
-      if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
-        mn = pool.mnA[mn];
-      }
-
-      let ns = pool.mnA[mn];
-      if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
-        ns = pool.nsSetMembers[pool.nsSetStart[ns]];
-      }
-
-      const name = domain.abcString[index][pool.mnB[mn]];
-      out.text("rt.cls(");
-      const id = domain.abcNs[index][ns];
-      if (domain.nsType[id] === NS_Private && index === this.index) {
-        // A private namespace is its module's own object, N[k], which its
-        // definitions are bound in, not one made again from its URI.
-        out.text("N[");
-        out.uint(ns);
-        out.text("]");
-      } else {
-        this.namespace(id);
-      }
-
-      out.text(", ");
-      out.string(domain.stringPtr[name], domain.stringLength[name]);
-      out.text(")");
-    }
-  }
-
-  /** A non-private namespace by its interned id, as rt.ns(type, uri). */
-  namespace(id: u32): void {
-    const out = this.out;
-    out.text("rt.ns(");
-    out.uint(this.domain.nsType[id]);
-    out.text(", ");
-    this.uri(this.domain.nsUri[id]);
-    out.text(")");
-  }
-
-  uri(id: u32): void {
-    if (id === URI_None) {
-      this.out.text("null");
-      return;
-    }
-
-    const domain = this.domain;
-    this.out.string(domain.stringPtr[id], domain.stringLength[id]);
-  }
-
-  /** "uri::name", or just the name in a public namespace with an empty URI. */
-  qualified(ns: u32, name: u32): string {
-    const domain = this.domain;
-    const nameText = String.UTF8.decodeUnsafe(domain.stringPtr[name], domain.stringLength[name]);
-    const uri = domain.nsUri[ns];
-    if (uri === URI_None) {
-      return nameText;
-    }
-
-    const uriText = String.UTF8.decodeUnsafe(domain.stringPtr[uri], domain.stringLength[uri]);
-    return uriText.length ? `${uriText}::${nameText}` : nameText;
-  }
-
-  /** The qualified name of the class traits t belong to. */
-  className(traits: TraitsTable, t: u32): string {
-    const domain = this.domain;
-    const index = traits.abc[t];
-    const abc = domain.abcs[index];
-    const pool = abc.pool;
-    let mn = abc.instanceName[traits.owner[t]];
-    if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
-      mn = pool.mnA[mn];
-    }
-
-    let ns = pool.mnA[mn];
-    if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
-      ns = pool.nsSetMembers[pool.nsSetStart[ns]];
-    }
-
-    return this.qualified(domain.abcNs[index][ns], domain.abcString[index][pool.mnB[mn]]);
-  }
-
-  /** Pool string `index` as a JavaScript string literal. */
-  string(index: u32): void {
-    const pool = this.abc.pool;
-    this.out.string(this.base + pool.stringStart[index], pool.stringLength[index]);
-  }
-
-  /**
-   * A constant of default-value kind `kind`, index `value`, for a slot or
-   * parameter of `type`; value 0 is the type's own default.
-   */
-  constant(value: u32, kind: u8, type: i32): void {
-    const out = this.out;
-    const pool = this.abc.pool;
-    if (value === 0) {
-      this.defaultOf(type);
-      return;
-    }
-
-    switch (kind) {
-      case 0x03:
-        out.int(pool.ints[value]);
-        return;
-      case 0x04:
-        out.uint(pool.uints[value]);
-        return;
-      case 0x06:
-        out.double(pool.doubles[value]);
-        return;
-      case 0x01:
-        this.string(value);
-        return;
-      case 0x0a:
-        out.text("false");
-        return;
-      case 0x0b:
-        out.text("true");
-        return;
-      case 0x0c:
-        out.text("null");
-        return;
-      default:
-        // A namespace, as the Namespace object it is to AS3.
-        out.text("rt.namespace(N[");
-        out.uint(value);
-        out.text("])");
-        return;
-    }
-  }
-
-  /** The value a slot or parameter of `type` has before anything is stored. */
-  defaultOf(type: i32): void {
-    const out = this.out;
-    switch (this.domain.builtin(type)) {
-      case BUILTIN_Any:
-        out.text("undefined");
-        return;
-      case BUILTIN_Int:
-      case BUILTIN_Uint:
-        out.text("0");
-        return;
-      case BUILTIN_Number:
-        out.text("NaN");
-        return;
-      case BUILTIN_Boolean:
-        out.text("false");
-        return;
-      default:
-        out.text("null");
-        return;
     }
   }
 }
