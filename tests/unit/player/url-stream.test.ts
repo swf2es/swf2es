@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { avm2 } from "@swf2es/runtime";
 import { urlStreamNatives } from "../../../packages/player/dist/playerglobal/flash/net/URLStream.js";
-import type { Scripting } from "../../../packages/player/dist/scripting.js";
+import type { FetchResult, Scripting } from "../../../packages/player/dist/scripting.js";
 
 test("URLStream delivers fetched bytes on a frame and discards a closed request", () => {
   const events: string[] = [];
@@ -10,7 +10,7 @@ test("URLStream delivers fetched bytes on a frame and discards a closed request"
   const requests: {
     url: string;
     signal: AbortSignal;
-    deliver: (bytes: Uint8Array | null) => void;
+    deliver: (result: FetchResult) => void;
   }[] = [];
   const rt = {
     defaultObjectEncoding: 3,
@@ -32,22 +32,29 @@ test("URLStream delivers fetched bytes on a frame and discards a closed request"
   const scripting = {
     rt,
     event: (type: string) => ({ $type: type, $stopped: 0 }),
-    requestBytes: (url: string, signal: AbortSignal, deliver: (bytes: Uint8Array | null) => void) =>
+    httpStatus: (status: number) => ({ $type: "httpStatus", $status: status, $stopped: 0 }),
+    requestBytes: (url: string, signal: AbortSignal, deliver: (result: FetchResult) => void) =>
       requests.push({ url, signal, deliver }),
-    streamError: (url: string) => `Error #2032: Stream Error. URL: http://example.test/${url}`,
+    streamError: (url: string, local = false) =>
+      local
+        ? "Error #2032: Stream Error"
+        : `Error #2032: Stream Error. URL: http://example.test/${url}`,
   } as unknown as Scripting;
   const natives = urlStreamNatives(scripting);
   const key = (name: string) => natives[`flash.net::URLStream#${name}`](scripting.rt);
   const stream: Record<string, unknown> = {
     $listeners: new Map(
-      ["open", "progress", "complete", "ioError"].map((type) => [
+      ["open", "progress", "httpStatus", "complete", "ioError"].map((type) => [
         type,
         [
           {
-            fn: (event: { $text?: string }) => {
+            fn: (event: { $text?: string; $status?: number }) => {
               events.push(type);
               if (type === "ioError" && event.$text) {
                 errors.push(event.$text);
+              }
+              if (type === "httpStatus") {
+                errors.push(`status=${event.$status}`);
               }
             },
             capture: false,
@@ -64,8 +71,8 @@ test("URLStream delivers fetched bytes on a frame and discards a closed request"
   key("load").call(stream, { url: "data.bin" });
   assert.equal(requests[0].url, "data.bin");
   assert.equal(key("get:bytesAvailable").call(stream), 0);
-  requests[0].deliver(new Uint8Array([1, 2, 3]));
-  assert.deepEqual(events, ["open", "progress", "complete"]);
+  requests[0].deliver({ bytes: new Uint8Array([1, 2, 3]), status: 200, headers: [] });
+  assert.deepEqual(events, ["open", "progress", "httpStatus", "complete"]);
   assert.equal(key("get:bytesAvailable").call(stream), 3);
   assert.deepEqual(
     [...avm2.bytesOf(scripting.rt, stream.$buffer as avm2.AsObject).buffer.subarray(0, 3)],
@@ -76,13 +83,22 @@ test("URLStream delivers fetched bytes on a frame and discards a closed request"
   key("close").call(stream);
   assert.throws(() => key("close").call(stream), /2029/);
   assert.equal(requests[1].signal.aborted, true);
-  requests[1].deliver(new Uint8Array([4]));
-  assert.deepEqual(events, ["open", "progress", "complete"]);
+  requests[1].deliver({ bytes: new Uint8Array([4]), status: 200, headers: [] });
+  assert.deepEqual(events, ["open", "progress", "httpStatus", "complete"]);
   assert.equal(key("get:bytesAvailable").call(stream), 0);
 
   key("load").call(stream, { url: "missing.bin" });
-  requests[2].deliver(null);
-  assert.deepEqual(events, ["open", "progress", "complete", "ioError"]);
-  assert.deepEqual(errors, ["Error #2032: Stream Error. URL: http://example.test/missing.bin"]);
+  requests[2].deliver({ bytes: null, status: 404, headers: [] });
+  assert.deepEqual(events, ["open", "progress", "httpStatus", "complete", "httpStatus", "ioError"]);
+  assert.deepEqual(errors, [
+    "status=200",
+    "status=404",
+    "Error #2032: Stream Error. URL: http://example.test/missing.bin",
+  ]);
   assert.equal(key("get:connected").call(stream), false);
+
+  key("load").call(stream, { url: "local.bin" });
+  requests[3].deliver({ bytes: null, status: 0, headers: [], local: true });
+  assert.deepEqual(events.slice(-2), ["httpStatus", "ioError"]);
+  assert.deepEqual(errors.slice(-2), ["status=0", "Error #2032: Stream Error"]);
 });

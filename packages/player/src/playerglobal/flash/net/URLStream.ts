@@ -39,7 +39,7 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
       const abort = new AbortController();
       this.$abort = abort;
       const url = s.rt.toString(s.rt.getProperty(request, s.rt.publicName("url")));
-      s.requestBytes(url, abort.signal, (bytes) => {
+      s.requestBytes(url, abort.signal, ({ bytes, status, local }) => {
         if (this.$generation !== generation) {
           return;
         }
@@ -47,6 +47,11 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
         this.$abort = null;
         if (bytes === null) {
           this.$connected = false;
+          dispatchEvent(s, this, s.httpStatus(status));
+          if (this.$generation !== generation) {
+            return;
+          }
+
           dispatchEvent(
             s,
             this,
@@ -55,7 +60,7 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
               "ioError",
               false,
               false,
-              s.streamError(url),
+              s.streamError(url, local),
             ) as AsObject,
           );
           return;
@@ -82,6 +87,11 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
             bytes.length,
           ) as AsObject,
         );
+        if (this.$generation !== generation) {
+          return;
+        }
+
+        dispatchEvent(s, this, s.httpStatus(status));
         if (this.$generation !== generation) {
           return;
         }

@@ -675,14 +675,19 @@ track callers, so it is the SWF the `Loader` is on the display list of when
 it loads, else the main one (Ruffle's `loader_loaderurl` adds the loader first, as SWFs
 usually do).
 
-`URLStream` uses the same host fetch. Its bytes arrive on the player thread
-in a later frame, with `OPEN`, `PROGRESS` and `COMPLETE`, or `IO_ERROR` on
-failure. Its fetches are independent of Loader's ordered preparation, so a
+`URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
+status and headers. Its result arrives on the player thread in a later frame.
+A successful stream reports `OPEN`, `PROGRESS`, `HTTP_STATUS`, `COMPLETE`;
+a failed one reports `HTTP_STATUS` before `IO_ERROR`. A URL load through
+`Loader` reports status on its `LoaderInfo` between `INIT` and `COMPLETE`,
+or before `IO_ERROR` on failure. A local file reports status 0 and no
+response headers. The host's response URL and headers are not surfaced by
+the Flash Player path; AIR-only `HTTP_RESPONSE_STATUS` is not sent.
+Stream fetches are independent of Loader's ordered preparation, so a
 stalled stream cannot hold up a later Loader; `settled()` waits for both
 when a host explicitly asks it to. A new load or `close` aborts the old
 request, and `close` without one throws IOError #2029 as Flash does; reads use the
-runtime's ByteArray DataInput implementation. The host currently returns
-only bytes, so no HTTP status or response headers are reported. Relative
+runtime's ByteArray DataInput implementation. Relative
 URLs resolve against the main SWF until the runtime tracks the creator of
 each stream.
 The Flash cases use `loadBytes`, the inner SWF carried in the outer's

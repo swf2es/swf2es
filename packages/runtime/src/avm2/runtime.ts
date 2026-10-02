@@ -174,6 +174,8 @@ export type NativesProvider =
 export interface ClassHook {
   /** How its instances resolve names, as XML's (Traits.properties). */
   properties?: PropertyHook;
+  /** A playerglobal set-only accessor whose bodyless setter stores in an instance slot. */
+  setOnlySlots?: Record<string, string>;
   create?: (traits: Traits, rt: Runtime) => AsObject;
   /** Its prototype object, when not an Object: an instance of the class, as Date's (its $it is ready). */
   prototype?: (rt: Runtime, cls: AsObject) => AsObject;
@@ -1259,6 +1261,14 @@ export class Runtime {
         return traits.proto[methodKey(id)].call(o);
       case BIND_Method:
         return this.methodClosure(o, traits, id);
+      case BIND_Set: {
+        const slot = this.classHooks[traits.name]?.setOnlySlots?.[mn.name ?? ""];
+        if (slot !== undefined) {
+          return o[slot];
+        }
+
+        throw this.error("ReferenceError", 1077, mn.name ?? "*", traits.name);
+      }
       default:
         throw this.error("ReferenceError", 1077, mn.name ?? "*", traits.name);
     }
@@ -1320,7 +1330,16 @@ export class Runtime {
         case BIND_Var:
           o[slotKey(id)] = this.coerce(v, traits.slotType(id));
           return;
-        case BIND_Set:
+        case BIND_Set: {
+          const slot = this.classHooks[traits.name]?.setOnlySlots?.[mn.name ?? ""];
+          if (slot !== undefined) {
+            o[slot] = v;
+            return;
+          }
+
+          traits.proto[methodKey(id + 1)].call(o, v);
+          return;
+        }
         case BIND_GetSet:
           traits.proto[methodKey(id + 1)].call(o, v);
           return;
@@ -1675,7 +1694,16 @@ export class Runtime {
     const b = traits.find(mn);
     const id = b >> 3;
     switch (b & 7) {
-      case BIND_Set:
+      case BIND_Set: {
+        const slot = this.classHooks[traits.name]?.setOnlySlots?.[mn.name ?? ""];
+        if (slot !== undefined) {
+          o[slot] = v;
+          return;
+        }
+
+        traits.proto[methodKey(id + 1)].call(o, v);
+        return;
+      }
       case BIND_GetSet:
         traits.proto[methodKey(id + 1)].call(o, v);
         return;

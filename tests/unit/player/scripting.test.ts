@@ -94,15 +94,15 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
       fetches.push(url);
       signal.addEventListener("abort", () => aborted.push(url));
       if (url.endsWith("inner.swf") || url.endsWith("deep.swf")) {
-        return inner;
+        return { bytes: inner, status: 200, headers: [] };
       }
 
       if (url.endsWith("nested.swf")) {
-        return nested;
+        return { bytes: nested, status: 200, headers: [] };
       }
 
       if (url.endsWith("replacer.swf")) {
-        return replacer;
+        return { bytes: replacer, status: 200, headers: [] };
       }
 
       throw new Error("404");
@@ -288,7 +288,9 @@ test("a stalled URLStream does not hold up a later Loader load", { skip }, async
     print: () => {},
     url: "http://example.test/outer.swf",
     fetch: (url) =>
-      url.endsWith("never.bin") ? new Promise<Uint8Array>(() => {}) : Promise.resolve(inner),
+      url.endsWith("never.bin")
+        ? new Promise(() => {})
+        : Promise.resolve({ bytes: inner, status: 200, headers: [] }),
   });
   assert.equal(
     scripting.streamError("missing.bin"),
@@ -320,6 +322,75 @@ test("a stalled URLStream does not hold up a later Loader load", { skip }, async
 
   player.tick();
   assert.ok(loader.$content);
+});
+
+test("LoaderInfo reports HTTP status between init and complete, and before an I/O error", {
+  skip,
+}, async () => {
+  const compile = compiler(out);
+  const inner = innerSwf(compile("Inner"));
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: () => {},
+    url: "http://example.test/outer.swf",
+    fetch: async (url) =>
+      url.endsWith("inner.swf")
+        ? { bytes: inner, status: 200, headers: [] }
+        : { bytes: null, status: 404, headers: [] },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  assert.equal(
+    scripting.rt.toString(scripting.httpStatus(200)),
+    '[HTTPStatusEvent type="httpStatus" bubbles=false cancelable=false eventPhase=2 status=200 redirected=false responseURL=null]',
+  );
+  const root = compile(
+    "StreamLoaderRoot",
+    "package { import flash.display.Sprite; public class StreamLoaderRoot extends Sprite {} }",
+  );
+  const player = new Player(bare(root, 1, "StreamLoaderRoot"), scripting);
+  await player.start();
+
+  const loader = scripting.rt.construct(
+    scripting.rt.classNamed("flash.display::Loader"),
+  ) as avm2.AsObject;
+  scripting.requestLoadUrl(loader, "inner.swf");
+  const events: string[] = [];
+  const info = loader.$loaderInfo as avm2.AsObject;
+  info.$listeners = new Map(
+    ["open", "progress", "init", "httpStatus", "complete", "ioError"].map((type) => [
+      type,
+      [
+        {
+          fn: {
+            $f: (event: avm2.AsObject) => {
+              events.push(
+                type === "httpStatus"
+                  ? `${type}:${scripting.rt.getProperty(event, scripting.rt.publicName("status"))}`
+                  : type,
+              );
+            },
+          },
+          capture: false,
+          priority: 0,
+        },
+      ],
+    ]),
+  );
+
+  await scripting.settled();
+  player.tick();
+  assert.deepEqual(events.splice(0), [
+    "open",
+    "progress",
+    "progress",
+    "init",
+    "httpStatus:200",
+    "complete",
+  ]);
+
+  scripting.requestLoadUrl(loader, "missing.swf");
+  await scripting.settled();
+  player.tick();
+  assert.deepEqual(events, ["httpStatus:404", "ioError"]);
 });
 
 test("timers fire in the order of their times, each at its own time", { skip }, async () => {
