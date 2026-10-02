@@ -43,6 +43,7 @@ import { deviceMetrics, fontFamily } from "./fonts.js";
 import { shifted } from "./geometry.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients.js";
 import type { PointerState } from "./input.js";
+import { blendFilters } from "./pixi-blend.js";
 import { setFlashColor } from "./pixi-color.js";
 import type { Player } from "./player.js";
 import {
@@ -415,6 +416,8 @@ interface Node {
   /** Its colour transform from the stage down, null for none, and its parent's that it was made from. */
   color: ColorTransform | null;
   inherited: ColorTransform | null;
+  /** The blend mode its filters composite it in. */
+  blend: string;
 }
 
 export class PixiView {
@@ -549,6 +552,7 @@ export class PixiView {
         clipped: false,
         color: null,
         inherited: null,
+        blend: "normal",
       };
       node.container.addChild(art);
       this.nodes.set(o, node);
@@ -722,6 +726,12 @@ export class PixiView {
       const m = own;
       container.setFromMatrix(new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty));
       container.visible = o.visible || masking;
+      // A blend mode composites the object as a layer (pixi-blend.ts); a mask is its fills alone.
+      const blend = masking ? "normal" : o.blendMode;
+      if (blend !== node.blend) {
+        node.blend = blend;
+        container.filters = blendFilters(blend);
+      }
       // Most objects have neither: they pay one test.
       if (o.mask || o.scroll || node.clipped) {
         if (this.clip(o, node) && o instanceof Container) {

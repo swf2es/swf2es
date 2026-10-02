@@ -126,6 +126,8 @@ async function runSwf(
       antialias: false,
       preserveDrawingBuffer: true,
       resolution: n,
+      // Blend modes read what is below them from it (pixi-blend.ts).
+      useBackBuffer: true,
     });
     const samples = document.createElement("canvas");
     samples.width = renderer.canvas.width;

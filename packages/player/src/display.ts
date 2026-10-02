@@ -31,6 +31,25 @@ export const CONTENT = 4;
 /** A Bitmap's pixels changed in place: the texture uploads again, nothing is rebuilt. */
 export const PIXELS = 8;
 
+/** The blend modes by the number PlaceObject3 gives them: 0 and 1 are normal. */
+export const BLEND_MODES = [
+  "normal",
+  "normal",
+  "layer",
+  "multiply",
+  "screen",
+  "lighten",
+  "darken",
+  "difference",
+  "add",
+  "subtract",
+  "invert",
+  "alpha",
+  "erase",
+  "overlay",
+  "hardlight",
+];
+
 /** Display objects are numbered as they are made: Flash runs orphans' scripts newest first. */
 let made = 0;
 
@@ -122,6 +141,8 @@ export class DisplayObject {
    */
   scrollRect: Rect | null = null;
   scroll: Rect | null = null;
+  /** Its blend mode, as BlendMode names it. */
+  blendMode = "normal";
 
   /** A store it shows or fills with changed its pixels, or was disposed. */
   pixelsChanged(disposed: boolean): void {
@@ -269,16 +290,29 @@ export class DisplayObject {
     }
 
     // Apart, and once tested: applyPlace runs for each move of each frame, and grown it is no longer inlined.
-    if (place.clipDepth !== null) {
-      this.setClipDepth(place.clipDepth);
+    if (place.clipDepth !== null || place.blendMode !== null) {
+      this.applyRare(place);
     }
   }
 
-  private setClipDepth(depth: number): void {
-    if (depth !== this.clipDepth) {
-      this.clipDepth = depth;
+  /** What a place sets that few do: a clip depth, a blend mode. */
+  private applyRare(place: Place): void {
+    if (place.clipDepth !== null && place.clipDepth !== this.clipDepth) {
+      this.clipDepth = place.clipDepth;
       this.invalidate(TRANSFORM);
       this.parent?.invalidate(CHILDREN);
+    }
+
+    if (place.blendMode !== null) {
+      this.setBlendMode(BLEND_MODES[place.blendMode] ?? "normal");
+    }
+  }
+
+  /** How it is composited with what is below it (BLEND_MODES). */
+  setBlendMode(mode: string): void {
+    if (mode !== this.blendMode) {
+      this.blendMode = mode;
+      this.invalidate(TRANSFORM);
     }
   }
 }
