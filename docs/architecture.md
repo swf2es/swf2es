@@ -77,6 +77,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `runtime` | AS3/AS2 language semantics called by generated code             | format                    |
 | `player`  | display list, timeline, playerglobal, AVM1 globals, renderers   | format, codegen, runtime  |
 | `cli`     | ahead-of-time compiler command                                  | format, codegen           |
+| `player-hosts` | optional host transports for the player: Node TCP, a WebSocket relay | player          |
 
 `runtime` contains only the language, with no display list, so it runs in node
 next to avmshell. It uses `format` for what both need, such as compression
