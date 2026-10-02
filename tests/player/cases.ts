@@ -919,6 +919,77 @@ function bitmapFills(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Gradient fills (scripts/Gradients.as): the SWF's linear, radial and
+// focal gradients, the gradient square scaled into 60 by 30 pixel rects.
+function gradients(abc: Uint8Array): Uint8Array {
+  const rect = (id: number, fill: w.GradientFillSpec) =>
+    w.shape({
+      id,
+      bounds: [0, 1200, 0, 600],
+      fills: [fill],
+      paths: [
+        {
+          fill1: 1,
+          commands: [
+            { move: [0, 0] },
+            { line: [1200, 0] },
+            { line: [1200, 600] },
+            { line: [0, 600] },
+            { line: [0, 0] },
+          ],
+        },
+      ],
+      version: 3,
+    });
+  // The square, 32768 twips a side, to 60 by 30 pixels (1200 by 600 twips) centred in the rect.
+  const fit = { a: 1200 / 32768, d: 600 / 32768, tx: 600, ty: 300 };
+  return w.swf({
+    width: 220,
+    height: 160,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      rect(10, {
+        type: 0x10,
+        matrix: fit,
+        stops: [
+          [0, 0xffff0000],
+          [128, 0x7f00ff00],
+          [255, 0xff0000ff],
+        ],
+      }),
+      rect(11, {
+        type: 0x12,
+        matrix: { a: 400 / 32768, d: 400 / 32768, tx: 600, ty: 300 },
+        spread: 1,
+        stops: [
+          [0, 0xff000000],
+          [255, 0xffffcc00],
+        ],
+      }),
+      rect(12, {
+        type: 0x13,
+        matrix: fit,
+        interpolation: 1,
+        focal: 0.6,
+        stops: [
+          [0, 0xffffffff],
+          [255, 0xff800080],
+        ],
+      }),
+      w.doAbc(abc, "Gradients"),
+      w.symbolClass([[0, "Gradients"]]),
+      ...[10, 11, 12].map((character, i) =>
+        w.place({ depth: 1 + i, character, matrix: { tx: (5 + i * 70) * 20, ty: 100 } }),
+      ),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
@@ -1025,6 +1096,22 @@ export const cases: PlayerCase[] = [
     // others, and the clipping, the tiling and the red, are exact.
     tolerance: 25,
     maxOutliers: 0,
+  },
+  {
+    name: "gradients",
+    swf: gradients,
+    script: "Gradients",
+    frames: 1,
+    capture: [1],
+    // The ramps are Flash's exactly, and most pixels within 3. Apart: the
+    // rotated repeating gradient's seam, where the stage's supersampling
+    // softens the jump from the last colour to the first that Flash leaves
+    // hard (some 75 pixels); the pixel at the focal point, where Flash's
+    // fixed point still draws the last stop though the SWF's 8.8 focus
+    // misses the pixel's corner; and a few of the focal rings: some 240
+    // channels in all, where a gradient drawn wrong is thousands.
+    tolerance: 8,
+    maxOutliers: 300,
   },
   {
     name: "draw-bitmaps",
