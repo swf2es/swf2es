@@ -177,6 +177,17 @@ export class Scripting {
    * one timer set from another keeps the first's pace, not the frame's.
    */
   now = 0;
+  private readonly realTime: (() => number) | null;
+  private readonly realStart: number;
+
+  /**
+   * What getTimer tells: whole milliseconds since the start, by the real
+   * clock, truncated as Flash's are, or by the frame clock's now, rounded
+   * as it always has been, so that the traces recorded by it stay.
+   */
+  timer(): number {
+    return this.realTime ? Math.floor(this.realTime() - this.realStart) : Math.round(this.now);
+  }
   /** The timers started, by their Timer objects, and a heap of them by when they fall due. */
   private readonly running = new Map<AsObject, TimerRecord>();
   private readonly timers = new TimerHeap();
@@ -191,8 +202,18 @@ export class Scripting {
       url?: string;
       externalInterface?: ExternalInterfaceHost;
       decodeImage?: ImageDecode | null;
+      /**
+       * The clock getTimer reads, a monotonic one in milliseconds: by default
+       * `performance.now`, as Flash's runs on in real time, while a script
+       * does too; null for the frame clock, which a frame moves and nothing
+       * else, the same on every run, as tests that compare traces want.
+       */
+      realTime?: (() => number) | null;
     } = {},
   ) {
+    this.realTime = options.realTime === undefined ? defaultClock() : options.realTime;
+    // getTimer's zero: when the player is made, as Flash's is when it starts.
+    this.realStart = this.realTime ? this.realTime() : 0;
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
     this.externalInterface = options.externalInterface ?? null;
     this.fetch = options.fetch ?? null;
@@ -1231,6 +1252,11 @@ export class Scripting {
       this.broadcast("render");
     }
   }
+}
+
+/** The real clock where the host has one, browsers and node alike; else none, and the frame clock. */
+function defaultClock(): (() => number) | null {
+  return typeof performance !== "undefined" ? () => performance.now() : null;
 }
 
 /** A load's failure, worded as its IOErrorEvent's text. */
