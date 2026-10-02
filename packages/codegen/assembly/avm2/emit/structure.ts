@@ -27,7 +27,7 @@ export function terminates(em: MethodEmitter, k: u32): bool {
 }
 
 /** Whether op branches on a condition. */
-export function conditional(_em: MethodEmitter, op: u16): bool {
+export function conditional(op: u16): bool {
   return (
     (op >= ops.OP_ifnlt && op <= ops.OP_ifnge) || (op >= ops.OP_iftrue && op <= ops.OP_ifstrictne)
   );
@@ -56,7 +56,7 @@ export function successors(em: MethodEmitter, k: u32): void {
 
   em.normalStart[k] = <u32>em.succ.length;
   for (let i = first; i < end; i++) {
-    if (conditional(em, ir.op[i])) {
+    if (conditional(ir.op[i])) {
       em.succ.push(ir.a[i]);
     }
   }
