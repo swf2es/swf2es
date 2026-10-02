@@ -2276,26 +2276,58 @@ export class MethodEmitter {
         out.uint(a);
         out.text("])");
         return true;
-      // Domain memory: loads and stores through the runtime, which checks
-      // their range; sign extensions in plain JavaScript.
+      // Domain memory: in place at an int address, else through the
+      // runtime, which checks the range and converts the address; also
+      // what the code in place calls for an address out of range, so that
+      // the runtime rejects it as avmplus does. Sign extensions in plain
+      // JavaScript.
       case ops.OP_li8:
       case ops.OP_li16:
       case ops.OP_li32:
       case ops.OP_lf32:
       case ops.OP_lf64:
         this.assign(i);
+        if (this.isAddress(src)) {
+          out.text("(");
+          this.inRange(src, op);
+          out.text(" ? rt.view.");
+          out.text(this.viewMethod(op));
+          out.text("(");
+          this.reg(src);
+          out.text(op === ops.OP_li8 ? ")" : ", true)");
+          out.text(" : ");
+        }
+
         out.text("rt.");
         out.text(opcodeNames[op]);
         out.text("(");
         this.reg(src);
         out.text(")");
+        if (this.isAddress(src)) {
+          out.text(")");
+        }
+
         return true;
       case ops.OP_si8:
       case ops.OP_si16:
       case ops.OP_si32:
       case ops.OP_sf32:
       case ops.OP_sf64:
-        out.text("    rt.");
+        // The value's conversion is DataView's own for a number or Boolean.
+        out.text("    ");
+        if (this.isAddress(src + 1) && this.isNumeric(src)) {
+          out.text("if (");
+          this.inRange(src + 1, op);
+          out.text(") rt.view.");
+          out.text(this.viewMethod(op));
+          out.text("(");
+          this.reg(src + 1);
+          out.text(", ");
+          this.reg(src);
+          out.text(op === ops.OP_si8 ? "); else " : ", true); else ");
+        }
+
+        out.text("rt.");
         out.text(opcodeNames[op]);
         out.text("(");
         this.reg(src);
@@ -2598,6 +2630,62 @@ export class MethodEmitter {
     return (
       bt === BUILTIN_String || bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Boolean
     );
+  }
+
+  /** Whether register r is a domain memory address the emitter can use as it is: an int or uint. */
+  private isAddress(r: i32): bool {
+    const bt = this.builtinOf(r);
+    return bt === BUILTIN_Int || bt === BUILTIN_Uint;
+  }
+
+  /** `(a >>> 0) <= rt.memoryLength - size`: whether op's bytes at address register a are all in the domain memory. */
+  private inRange(a: i32, op: u16): void {
+    this.out.text("(");
+    this.reg(a);
+    this.out.text(" >>> 0) <= rt.memoryLength - ");
+    this.out.uint(this.memorySize(op));
+  }
+
+  private memorySize(op: u16): u32 {
+    switch (op) {
+      case ops.OP_li8:
+      case ops.OP_si8:
+        return 1;
+      case ops.OP_li16:
+      case ops.OP_si16:
+        return 2;
+      case ops.OP_lf64:
+      case ops.OP_sf64:
+        return 8;
+      default:
+        return 4;
+    }
+  }
+
+  /** The DataView method that loads or stores as op does, little-endian. */
+  private viewMethod(op: u16): string {
+    switch (op) {
+      case ops.OP_li8:
+        return "getUint8";
+      case ops.OP_li16:
+        return "getUint16";
+      case ops.OP_li32:
+        return "getInt32";
+      case ops.OP_lf32:
+        return "getFloat32";
+      case ops.OP_lf64:
+        return "getFloat64";
+      case ops.OP_si8:
+        return "setUint8";
+      case ops.OP_si16:
+        return "setUint16";
+      case ops.OP_si32:
+        return "setInt32";
+      case ops.OP_sf32:
+        return "setFloat32";
+      default:
+        return "setFloat64";
+    }
   }
 
   isNumber(r: i32): bool {

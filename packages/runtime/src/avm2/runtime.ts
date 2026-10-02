@@ -576,8 +576,13 @@ export class Runtime {
    * as it, or, as avmplus' DomainEnv, 1024 bytes of scratch memory.
    */
   readonly scratchMemory = new DataView(new ArrayBuffer(1024));
-  /** The domain memory, and its length kept with it for mops: fields, not an accessor and DataView's getter. */
-  private view: DataView = this.scratchMemory;
+  /**
+   * The domain memory, and its length kept with it for mops: fields, not an
+   * accessor and DataView's getter. Generated code reads both for the loads
+   * and stores it writes in place, and calls li8 and the others only for an
+   * address out of range, which they reject.
+   */
+  view: DataView = this.scratchMemory;
   memoryLength: number = this.scratchMemory.byteLength;
   memoryProvider: AsObject | null = null;
   /** ByteArray.defaultObjectEncoding: AMF3 until set. */

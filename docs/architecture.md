@@ -218,8 +218,12 @@ The IR's types decide the JavaScript from the start where that is simple:
 field access, a method bound early a direct call, a coercion to a class
 `rt.coerceTo` (no builtin for the runtime to look for), and a typed
 Vector's element `rt.vectorGetInt` and the like, one for each kind of
-element, so that each sees one kind of array. Anything typed `*` goes
-through the runtime, which does what avmplus does at run time.
+element, so that each sees one kind of array. A domain memory load or
+store at an `int` or `uint` address is in place, on the runtime's view
+of the memory after a range check, and calls the runtime (`rt.li32` and
+the like) only for an address out of range, which it rejects as avmplus
+does. Anything typed `*` goes through the runtime, which does what
+avmplus does at run time.
 
 ### The object model
 
