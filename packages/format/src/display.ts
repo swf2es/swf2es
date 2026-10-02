@@ -22,6 +22,8 @@ export interface Place {
   clipDepth: number | null;
   /** PlaceObject3's class name, for a character made by a class. */
   className: string | null;
+  /** PlaceObject3's HasImage: the character is a bitmap, as Flash Pro marks one it places. */
+  hasImage: boolean;
   blendMode: number | null;
   cacheAsBitmap: boolean | null;
   visible: boolean | null;
@@ -102,6 +104,7 @@ export function readPlace(bytes: Uint8Array, tag: Tag): Place {
     name: null,
     clipDepth: null,
     className: null,
+    hasImage: false,
     blendMode: null,
     cacheAsBitmap: null,
     visible: null,
@@ -129,6 +132,7 @@ export function readPlace(bytes: Uint8Array, tag: Tag): Place {
   // SWF19 has a class name follow HasImage with a character; Flash reads
   // one with HasImage only without a character, as Ruffle's reader notes.
   const hasImage = (flags2 & 0x10) !== 0;
+  place.hasImage = hasImage;
   if (flags2 & 0x08 || (hasImage && !(flags & 0x02))) {
     place.className = readString(r);
   }

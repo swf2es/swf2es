@@ -29,6 +29,8 @@ export interface Tag {
   /** Offset of the body in the decompressed file, after the tag's header. */
   offset: number;
   length: number;
+  /** Whether the header was the long form, which Flash requires of a bitmap tag. */
+  long: boolean;
 }
 
 export interface Swf {
@@ -159,16 +161,17 @@ export function readTags(
     const codeAndLength = r.u16();
     const code = codeAndLength >> 6;
     let length = codeAndLength & 0x3f;
-    if (length === 0x3f) {
+    const long = length === 0x3f;
+    if (long) {
       length = r.u32();
     }
 
     if (r.pos + length > end) {
-      tags.push({ code, offset: r.pos, length: Math.max(0, end - r.pos) });
+      tags.push({ code, offset: r.pos, length: Math.max(0, end - r.pos), long });
       return { tags, truncated: true };
     }
 
-    tags.push({ code, offset: r.pos, length });
+    tags.push({ code, offset: r.pos, length, long });
     r.pos += length;
     if (code === End) {
       break;

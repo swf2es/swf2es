@@ -4,6 +4,7 @@
  * DOM and node APIs.
  */
 
+export { type Bitmap, isBitmapTag, readBitmap } from "./bitmap.js";
 export {
   CompressedDataError,
   decompressSwf,
