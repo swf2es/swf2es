@@ -2579,6 +2579,24 @@ export class MethodEmitter {
       return;
     }
 
+    // An Object may be a primitive, or a Namespace, whose methods are its
+    // class prototype's; any other object has its own.
+    if (bt === BUILTIN_Object) {
+      out.text("(");
+      this.reg(src);
+      out.text(".$m");
+      out.uint(disp);
+      out.text(" ?? rt.prototypeOf(");
+      this.typeRef(type);
+      out.text(").$m");
+      out.uint(disp);
+      out.text(").call(");
+      this.reg(src);
+      this.args(src + 1, argc);
+      out.text(")");
+      return;
+    }
+
     this.reg(src);
     out.text(".$m");
     out.uint(disp);
