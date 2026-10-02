@@ -32,13 +32,47 @@ const uri = (name: string, f: (s: string) => string) =>
     try {
       return f(s);
     } catch (e) {
-      if (e instanceof URIError) {
+      if (!(e instanceof URIError)) {
+        throw e;
+      }
+
+      const decoded = f === decodeURI || f === decodeURIComponent ? surrogates(s, f) : null;
+      if (decoded === null) {
         throw rt.error("URIError", 1052, name);
       }
 
-      throw e;
+      return decoded;
     }
   });
+
+/** A UTF-8 encoded surrogate, which JavaScript's decoding refuses. */
+const ENCODED_SURROGATE = /%[eE][dD]%[aAbB][0-9a-fA-F]%[89aAbB][0-9a-fA-F]/g;
+
+/**
+ * As Toplevel::decode, which decodes a surrogate's code point as any other
+ * (Utf8ToUcs4): the parts between them JavaScript's, or null if one fails.
+ */
+function surrogates(s: string, f: (s: string) => string): string | null {
+  const out: string[] = [];
+  let at = 0;
+  for (const m of s.matchAll(ENCODED_SURROGATE)) {
+    const b1 = Number.parseInt(m[0].slice(4, 6), 16);
+    const b2 = Number.parseInt(m[0].slice(7, 9), 16);
+    out.push(s.slice(at, m.index), String.fromCharCode(0xd000 | ((b1 & 0x3f) << 6) | (b2 & 0x3f)));
+    at = m.index + m[0].length;
+  }
+
+  if (at === 0) {
+    return null;
+  }
+
+  out.push(s.slice(at));
+  try {
+    return out.map((part, i) => (i % 2 === 0 ? f(part) : part)).join("");
+  } catch {
+    return null;
+  }
+}
 
 export const toplevelNatives: Natives = {
   // Global functions

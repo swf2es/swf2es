@@ -9,6 +9,10 @@ export const vectorNatives: Natives = {};
 export const vectorHooks: Record<string, ClassHook> = {
   [`${VEC}::Vector`]: {
     apply: (rt, _factory, params) => vectorOf(rt, params[0] ?? null),
+    // As VectorClass::construct: only a Vector of some type is constructed.
+    construct: (rt) => {
+      throw rt.error("TypeError", 1007);
+    },
   },
 };
 

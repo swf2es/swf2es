@@ -45,7 +45,15 @@ export function regexpNatives(rt: Runtime): Natives {
     }
 
     [`${AS3}::exec`](s: Value = ""): Value {
-      const m = this.$re.exec(rt.toString(s));
+      // As RegExpObject::_exec: a global one from before the start fails,
+      // where JavaScript starts from 0.
+      const re: RegExp = this.$re;
+      if (re.global && re.lastIndex < 0) {
+        re.lastIndex = 0;
+        return null;
+      }
+
+      const m = re.exec(rt.toString(s));
       return m ? matchArray(rt, m) : null;
     }
   }
@@ -101,7 +109,7 @@ function newRegExp(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
  */
 export function compile(source: string, flags: string, extended = false): RegExp {
   try {
-    const re = new RegExp(fromPcre(source, extended), flags);
+    const re = new RegExp(fromPcre(source, extended, flags.includes("m")), flags);
     // V8 compiles on the first match, where a pattern too large throws: here, once.
     re.test("");
     re.lastIndex = 0;
@@ -135,20 +143,24 @@ export function replacement(re: RegExp, text: string): string {
  *   of the group they are in, and (?i:...) as it is;
  * - extended mode, the x flag, and (?x) and (?x:...) within: whitespace
  *   and # comments dropped where it is on;
- * - a comment group (?#...) dropped.
+ * - a comment group (?#...) dropped;
+ * - in multiline mode, ^ and $ at PCRE's newlines (LINE_START, LINE_END),
+ *   multiline as the m flag, (?m) and (?-m) have it where each stands.
  * Escapes and character classes are left as they are.
  */
-function fromPcre(source: string, extended: boolean): string {
-  if (!extended && !source.includes("(?")) {
+function fromPcre(source: string, extended: boolean, multiline: boolean): string {
+  if (!extended && !source.includes("(?") && !(multiline && /[$^]/.test(source))) {
     return source;
   }
 
   let out = "";
   let x = extended;
+  let m = multiline;
   // For each open group, and the pattern itself: the modifier groups to
   // close with it, and whether x was on where it opened.
   const closers: number[] = [0];
   const outerX: boolean[] = [x];
+  const outerM: boolean[] = [m];
   let inClass = false;
   for (let i = 0; i < source.length; i++) {
     const c = source[i];
@@ -185,12 +197,19 @@ function fromPcre(source: string, extended: boolean): string {
     if (c === ")") {
       out += ")".repeat(closers.pop() ?? 0);
       x = outerX.pop() ?? extended;
+      m = outerM.pop() ?? multiline;
       if (!closers.length) {
         closers.push(0);
         outerX.push(x);
+        outerM.push(m);
       }
 
       out += c;
+      continue;
+    }
+
+    if (m && (c === "^" || c === "$")) {
+      out += c === "^" ? LINE_START : LINE_END;
       continue;
     }
 
@@ -210,6 +229,7 @@ function fromPcre(source: string, extended: boolean): string {
       i += 3;
       closers.push(0);
       outerX.push(x);
+      outerM.push(m);
       continue;
     }
 
@@ -230,6 +250,7 @@ function fromPcre(source: string, extended: boolean): string {
       if (scoped) {
         closers.push(0);
         outerX.push(x);
+        outerM.push(m);
         out += js ? `(?${js}:` : "(?:";
       } else if (js) {
         out += `(?${js}:`;
@@ -242,6 +263,12 @@ function fromPcre(source: string, extended: boolean): string {
         x = false;
       }
 
+      if (on.includes("m")) {
+        m = true;
+      } else if (off.includes("m")) {
+        m = false;
+      }
+
       i += flags[0].length - 1;
       continue;
     }
@@ -249,10 +276,20 @@ function fromPcre(source: string, extended: boolean): string {
     out += c;
     closers.push(0);
     outerX.push(x);
+    outerM.push(m);
   }
 
   return out + ")".repeat(closers[0]);
 }
+
+// PCRE's newlines, as avmplus builds it: any of these, \r\n as one.
+const NEWLINE = "[\\n\\r\\v\\f\\x85\\u2028\\u2029]";
+
+/** Multiline ^: the start, or after a newline, but not at the end, nor within \r\n. */
+const LINE_START = `(?:(?<![\\s\\S])|(?<=${NEWLINE})(?!(?<=\\r)\\n)(?=[\\s\\S]))`;
+
+/** Multiline $: the end, or before any newline. */
+const LINE_END = `(?=${NEWLINE}|(?![\\s\\S]))`;
 
 const modifiers = (on: string, off: string) => (on || off ? `${on}${off ? `-${off}` : ""}` : "");
 

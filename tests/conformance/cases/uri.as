@@ -28,3 +28,18 @@ probe("undefined and null", function():* { return [escape(undefined), escape(nul
 probe("lengths", function():* { return [escape.length, unescape.length, encodeURI.length, decodeURIComponent.length, parseInt.length, parseFloat.length, isNaN.length, isFinite.length, trace.length].join(","); });
 var m:M = new M();
 probe("method lengths", function():* { return [m.two.length, M.none.length, function(a, b, c):void {}.length].join(","); });
+// A surrogate's UTF-8 decodes as its code unit; what else is malformed still fails.
+function units(s:String):String {
+  var out:Array = [];
+  for (var i:int = 0; i < s.length; i++) {
+    out.push(s.charCodeAt(i).toString(16));
+  }
+  return out.join(",");
+}
+for each (var enc:String in ["%ED%B0%80%ED%A0%80", "a%ED%A0%80b%20c", "%ED%BF%BF%3B", "%E4%ED%B0%80", "%ED%B0", "%ED%C0%80"]) {
+  var results:Array = [];
+  for each (var dec:Function in [decodeURI, decodeURIComponent]) {
+    try { results.push(units(dec(enc))); } catch (e:Error) { results.push(e); }
+  }
+  trace(enc, results.join(" | "));
+}

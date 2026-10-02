@@ -12,6 +12,10 @@
 // derives one (docs/architecture.md, "Modules and the bootstrap").
 
 import {
+  CONSTANT_Multiname,
+  CONSTANT_MultinameA,
+  CONSTANT_MultinameL,
+  CONSTANT_MultinameLA,
   CONSTANT_Qname,
   CONSTANT_RTQname,
   CONSTANT_RTQnameA,
@@ -1122,7 +1126,21 @@ export class Runtime {
       return undefined;
     }
 
-    throw this.error("ReferenceError", 1069, mn.name ?? "*", traits.name);
+    // As ScriptObject::getMultinameProperty: an object's namespace set that
+    // is no dynamic name has an error of its own; a primitive's has not.
+    const object = typeof o === "object" && o !== null && !(o instanceof Namespace);
+    const nsset =
+      object &&
+      (mn.kind === CONSTANT_Multiname ||
+        mn.kind === CONSTANT_MultinameA ||
+        mn.kind === CONSTANT_MultinameL ||
+        mn.kind === CONSTANT_MultinameLA);
+    throw this.error(
+      "ReferenceError",
+      name === null && nsset ? 1081 : 1069,
+      mn.name ?? "*",
+      traits.name,
+    );
   }
 
   /**
@@ -2387,7 +2405,13 @@ export class Runtime {
   }
 
   isTypeLate(v: Value, cls: Value): boolean {
-    if (cls === null || typeof cls !== "object" || !cls.$it) {
+    // As Toplevel::toClassITraits: what is not an object, a Namespace
+    // among them, as a null or undefined one is; an object not a class 1041.
+    if (cls === null || typeof cls !== "object" || cls instanceof Namespace) {
+      throw this.error("TypeError", cls === undefined ? 1010 : 1009);
+    }
+
+    if (!cls.$it) {
       throw this.error("TypeError", 1041);
     }
 
@@ -2480,14 +2504,13 @@ export class Runtime {
       return properties.toString(this, o);
     }
 
+    // As ScriptObject::defaultValue: each called as a property, so one
+    // that is not a function is TypeError 1006; a Namespace is a primitive.
     const order = hint === "string" ? ["toString", "valueOf"] : ["valueOf", "toString"];
     for (const name of order) {
-      const f = this.getProperty(o, qname(publicNs, name));
-      if (f !== null && typeof f === "object" && (f.$f || f.$it)) {
-        const v = this.callValue(f, o, [], null);
-        if (v === null || typeof v !== "object") {
-          return v;
-        }
+      const v = this.callProperty(o, qname(publicNs, name));
+      if (v === null || typeof v !== "object" || v instanceof Namespace) {
+        return v;
       }
     }
 
@@ -3306,6 +3329,12 @@ export function stringToNumber(s: string): number {
     const nul = s.indexOf("\0");
     if (nul > 0 && s.slice(0, nul).trim() !== "") {
       return stringToNumber(s.slice(0, nul));
+    }
+
+    // An exponent with no digits, as "4e" or "4e+", is left off.
+    const bare = /^([-+]?(?:\d+\.?\d*|\.\d+))[eE]\+?$/.exec(t);
+    if (bare) {
+      return Number(bare[1]);
     }
   }
 

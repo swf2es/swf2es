@@ -2,6 +2,12 @@
 // calls of non-functions, reads of missing names, and writes the traits
 // do not allow.
 package {
+  public interface IEmpty {}
+}
+package {
+  public class Empty implements IEmpty {}
+}
+package {
   public class Thing {
     public const fixed:int = 1;
     public function method(a:int, b:int):int { return a + b; }
@@ -47,3 +53,22 @@ construct("new on undefined", function():* { var n:* = undefined; return new n.m
 String.prototype.made = String;
 construct("new from prototype", function():* { var s:* = "s"; return "[" + new s.made() + "]"; });
 delete String.prototype.made;
+// ToPrimitive calls valueOf and toString as properties: one that is not a
+// function fails as a call does; an object result goes on to the other.
+function NoValueOf() { this.valueOf = undefined; }
+function ObjectValueOf() { this.valueOf = function():* { return {}; }; this.toString = function():* { return "s"; }; }
+construct("valueOf undefined", function():* { return new NoValueOf() + 1; });
+construct("valueOf object", function():* { return new ObjectValueOf() + 1; });
+// as with what is not a class: a primitive as null, an object not a class 1041.
+construct("as string", function():* { var t:* = "hello"; return 1 as t; });
+construct("as undefined", function():* { var t:* = undefined; return 1 as t; });
+construct("as namespace", function():* { var t:* = cns; return 1 as t; });
+construct("as object", function():* { var t:* = {}; return 1 as t; });
+// A missing name read through an interface's namespace set.
+construct("interface read", function():* { var e:IEmpty = new Empty(); return e["x"] + " " + Object(e).missing; });
+construct("interface ns read", function():* { var e:IEmpty = new Empty(); return e.missing; });
+// x.* reads every name: an object's namespace set fails with 1081, a primitive's with 1069.
+construct("wildcard object", function():* { var o:* = {a: 1}; return o.*; });
+construct("wildcard array", function():* { var a:* = [1]; return a.*; });
+construct("wildcard string", function():* { var s:* = "s"; return s.*; });
+construct("wildcard namespace", function():* { var n:* = cns; return n.*; });

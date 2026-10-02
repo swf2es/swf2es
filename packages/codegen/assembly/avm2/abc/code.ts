@@ -29,7 +29,7 @@ import {
   Ir,
 } from "../ir/ir";
 import { Domain } from "../link/domain";
-import { BIND_None, Scope, TYPE_Any } from "../link/traits";
+import { BIND_None, Scope, TRAITS_Instance, TYPE_Any } from "../link/traits";
 import {
   BIND_Ambiguous,
   bindingType,
@@ -2323,7 +2323,17 @@ export class BodyDecoder {
       }
     }
 
-    return this.emitOn(opcode, -1, <i32>obj, n, mn, 0, 0);
+    // An instance's const initialized anywhere but in its declarer's
+    // initializer is written as setproperty writes it: ReferenceError 1074.
+    // A global's is left to initproperty: a SWF loaded again into the one
+    // domain initializes its classes on the first load's global.
+    const late =
+      kind === 3 &&
+      opcode === ops.OP_initproperty &&
+      type >= 0 &&
+      domain.traits.kind[type] === TRAITS_Instance;
+    const write = late ? ops.OP_setproperty : opcode;
+    return this.emitOn(write, -1, <i32>obj, n, mn, 0, 0);
   }
 
   /** As Verifier::emitCallproperty and emitCallpropertyMethod. */

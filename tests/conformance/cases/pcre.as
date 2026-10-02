@@ -20,3 +20,32 @@ probe("extended scoped", function():* { return [new RegExp("(?x: a b )c d").test
 probe("extended off", function():* { return [new RegExp("a (?-x)b c", "x").test("ab c"), new RegExp("a (?-x)b c", "x").test("abc"), new RegExp("(a (?-x)b )c", "x").test("ab c")].join(","); });
 probe("extended comment", function():* { return new RegExp("(?x)a # the a\nb").test("ab"); });
 probe("comment group", function():* { return [/a(?#a comment)b/.test("ab"), new RegExp("a(?#)b").test("ab")].join(","); });
+// Multiline ^ and $ at PCRE's newlines: ^ never at the very end nor within \r\n.
+var lineSubjects:Array = ["a\nb\n", "a\rb\r", "a\r\nb", "a" + String.fromCharCode(0x2028) + "b", "\n", "", "a\n\n", " foo\n  bar\n"];
+var anchored:Array = [];
+for each (var ls:String in lineSubjects) {
+  anchored.push(escape(ls.replace(/^/gm, "#")) + " " + escape(ls.replace(/$/gm, "#")) + " " + escape(ls.replace(/^ */gm, "*")));
+}
+trace(anchored.join(" | "));
+// A global exec from a negative lastIndex fails, and starts over.
+var fromBefore:Array = [];
+for each (var li:Number in [-1, 4294967295, 2147483648, -4294967296, 3]) {
+  var gre:RegExp = /abc/gi;
+  gre.lastIndex = li;
+  fromBefore.push(li + ":" + gre.exec("AbcaBcabC") + ":" + gre.lastIndex + ":" + gre.test("Abc"));
+}
+var plain:RegExp = /abc/i;
+plain.lastIndex = -1;
+trace(fromBefore.join(" "), plain.exec("Abc"));
+// Multiline where each anchor stands: the m flag, then (?m) and (?-m) inline.
+var inline:Array = [
+  new RegExp("(?-m:^x)", "m").test("a\nx"),
+  new RegExp("(?m:^x)", "").test("a\nx"),
+  new RegExp("(?m)^x", "").test("a\nx"),
+  new RegExp("a(?-m)$", "m").test("a\nb"),
+  new RegExp("(?:(?-m)^b)|^x", "m").test("a\nx"),
+  new RegExp("(?-m:(?m:^x))", "m").test("a\nx"),
+  new RegExp("(?m:x$)\\n", "").test("x\n"),
+  escape("a\n\n".replace(new RegExp("(?m)^", "g"), "#")),
+];
+trace(inline.join(" "));
