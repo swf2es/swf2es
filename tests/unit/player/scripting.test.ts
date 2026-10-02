@@ -342,6 +342,10 @@ test("LoaderInfo reports HTTP status between init and complete, and before an I/
     scripting.rt.toString(scripting.httpStatus(200)),
     '[HTTPStatusEvent type="httpStatus" bubbles=false cancelable=false eventPhase=2 status=200 redirected=false responseURL=null]',
   );
+  const statusEvent = scripting.httpStatus(200);
+  const responseURL = scripting.rt.publicName("responseURL");
+  scripting.rt.setProperty(statusEvent, responseURL, "http://example.test/inner.swf");
+  assert.equal(scripting.rt.getProperty(statusEvent, responseURL), "http://example.test/inner.swf");
   const root = compile(
     "StreamLoaderRoot",
     "package { import flash.display.Sprite; public class StreamLoaderRoot extends Sprite {} }",

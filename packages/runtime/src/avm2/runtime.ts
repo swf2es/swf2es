@@ -1330,16 +1330,7 @@ export class Runtime {
         case BIND_Var:
           o[slotKey(id)] = this.coerce(v, traits.slotType(id));
           return;
-        case BIND_Set: {
-          const slot = this.classHooks[traits.name]?.setOnlySlots?.[mn.name ?? ""];
-          if (slot !== undefined) {
-            o[slot] = v;
-            return;
-          }
-
-          traits.proto[methodKey(id + 1)].call(o, v);
-          return;
-        }
+        case BIND_Set:
         case BIND_GetSet:
           traits.proto[methodKey(id + 1)].call(o, v);
           return;
@@ -1694,16 +1685,7 @@ export class Runtime {
     const b = traits.find(mn);
     const id = b >> 3;
     switch (b & 7) {
-      case BIND_Set: {
-        const slot = this.classHooks[traits.name]?.setOnlySlots?.[mn.name ?? ""];
-        if (slot !== undefined) {
-          o[slot] = v;
-          return;
-        }
-
-        traits.proto[methodKey(id + 1)].call(o, v);
-        return;
-      }
+      case BIND_Set:
       case BIND_GetSet:
         traits.proto[methodKey(id + 1)].call(o, v);
         return;
@@ -2031,6 +2013,19 @@ export class Runtime {
 
     for (const [d, factory, id] of desc.instance.methods) {
       itraits.proto[methodKey(d)] = this.withId(factory(iscope, base), id);
+    }
+
+    // Playerglobal can declare an accessor whose setter has no ABC body.
+    // Install it here so both direct bound calls and dynamic property writes reach it.
+    if (hooks?.setOnlySlots) {
+      for (const [name, slot] of Object.entries(hooks.setOnlySlots)) {
+        const binding = itraits.find(this.publicName(name));
+        if ((binding & 7) === BIND_Set) {
+          itraits.proto[methodKey((binding >> 3) + 1)] ??= function (this: AsObject, value: Value) {
+            this[slot] = value;
+          };
+        }
+      }
     }
 
     itraits.proto.$init = desc.init(iscope, base);
