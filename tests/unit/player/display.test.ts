@@ -53,7 +53,7 @@ test("a named DefineEditText is placed as a TextField with its initial value", (
       height: 100,
       frameCount: 1,
       tags: [
-        w.editText(3, "Loading", 2000, 400),
+        w.editText(3, "Loading", 2000, 400, 2),
         w.place({ depth: 1, character: 3, name: "caption" }),
         w.showFrame(),
         w.end(),
@@ -66,6 +66,7 @@ test("a named DefineEditText is placed as a TextField with its initial value", (
   assert.equal(field.text, "Loading");
   assert.equal(field.width, 100);
   assert.equal(field.height, 20);
+  assert.equal(field.align, "center");
 });
 
 test("children are in render order, which is depth order for the timeline's", () => {

@@ -521,12 +521,19 @@ export class PixiView {
 
     if (o instanceof TextObject) {
       if (o.text) {
-        node.art.addChild(
-          new Text({
-            text: o.text,
-            style: { fontFamily: "Arial", fontSize: o.fontSize, fill: o.color },
-          }),
-        );
+        const text = new Text({
+          text: o.text,
+          style: { fontFamily: "Arial", fontSize: o.fontSize, fill: o.color, align: o.align },
+        });
+        if (o.align === "center") {
+          text.anchor.x = 0.5;
+          text.x = o.width / 2;
+        } else if (o.align === "right") {
+          text.anchor.x = 1;
+          text.x = o.width;
+        }
+
+        node.art.addChild(text);
       }
 
       return;

@@ -225,6 +225,7 @@ export class TextObject extends DisplayObject {
   height: number;
   color: number;
   fontSize: number;
+  align: "left" | "center" | "right";
 
   constructor(
     readonly definition: TextCharacter | null,
@@ -241,6 +242,7 @@ export class TextObject extends DisplayObject {
         ? 0
         : ((edit.color & 0xff) << 16) | (edit.color & 0xff00) | ((edit.color >>> 16) & 0xff);
     this.fontSize = edit?.fontHeight ? edit.fontHeight / 20 : 12;
+    this.align = edit?.align === 2 ? "center" : edit?.align === 1 ? "right" : "left";
   }
 }
 

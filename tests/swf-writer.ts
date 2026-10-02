@@ -426,10 +426,21 @@ export function sprite(id: number, frameCount: number, tags: Uint8Array[]): Uint
 }
 
 /** A timeline TextField with a plain initial value. */
-export function editText(id: number, text: string, width = 2000, height = 400): Uint8Array {
+export function editText(
+  id: number,
+  text: string,
+  width = 2000,
+  height = 400,
+  align = 0,
+): Uint8Array {
   const w = new BitWriter().u16(id);
   rect(w, 0, width, 0, height);
-  w.u8(0x80).u8(0).string("").string(text);
+  w.u8(0x80).u8(align ? 0x20 : 0);
+  if (align) {
+    w.u8(align).u16(0).u16(0).u16(0).u16(0);
+  }
+
+  w.string("").string(text);
   return tag(37, w.done());
 }
 
