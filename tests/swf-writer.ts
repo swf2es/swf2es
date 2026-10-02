@@ -113,9 +113,10 @@ export function matrix(
   w.ub(5, n).sb(n, tx).sb(n, ty).align();
 }
 
-export function tag(code: number, body: Uint8Array): Uint8Array {
+/** A tag; `long` writes the long header even for a short body, as Flash requires of bitmap tags. */
+export function tag(code: number, body: Uint8Array, long = false): Uint8Array {
   const w = new BitWriter();
-  if (body.length < 0x3f) {
+  if (body.length < 0x3f && !long) {
     w.u16((code << 6) | body.length);
   } else {
     w.u16((code << 6) | 0x3f).u32(body.length);
