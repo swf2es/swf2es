@@ -16,29 +16,10 @@
 //
 // A BodyDecoder is made once per ABC and reused for every body: its scratch
 // buffers and its output only grow, so decoding allocates nothing per body.
-import {
-  IR_CallGetter,
-  IR_CallInterface,
-  IR_CallSetter,
-  IR_CheckNull,
-  IR_Coerce,
-  IR_FindPropGlobal,
-  IR_FindPropGlobalStrict,
-  IR_GetGlobalScope,
-  IR_Nip,
-  Ir,
-} from "../ir/ir";
+import { IR_CheckNull, IR_Coerce, Ir } from "../ir/ir";
 import { Domain } from "../link/domain";
-import { BIND_None, Scope, TRAITS_Instance, TYPE_Any } from "../link/traits";
-import {
-  BIND_Ambiguous,
-  bindingType,
-  canAssign,
-  commonBase,
-  getBinding,
-  isBindingName,
-  isNumeric,
-} from "../link/types";
+import { Scope, TYPE_Any } from "../link/traits";
+import { BIND_Ambiguous, canAssign, commonBase, isNumeric } from "../link/types";
 import { Abc } from "./abc";
 import * as C from "./constants";
 import * as ops from "./opcodes";
@@ -64,6 +45,24 @@ import {
   STACK_Multiname,
 } from "./opcodes";
 import { ConstantPool } from "./pool";
+import {
+  binding,
+  callProperty,
+  callStatic,
+  callSuper,
+  coerceArgs,
+  coerceSuper,
+  findDef,
+  findProperty,
+  getProperty,
+  getSuper,
+  globalScope,
+  propertyDepth,
+  readBinding,
+  setProperty,
+  slot,
+  typeName,
+} from "./properties";
 import { Reader } from "./reader";
 
 /**
@@ -128,14 +127,14 @@ const START: u8 = 1;
 const INSIDE: u8 = 2;
 
 // Frame value flags.
-const NOT_NULL: u8 = 1;
-const WITH: u8 = 2;
+export const NOT_NULL: u8 = 1;
+export const WITH: u8 = 2;
 
 // Multiname parts, as avmplus' Multiname flags.
-const MN_Attr: u8 = 1;
-const MN_Rtns: u8 = 2;
-const MN_Rtname: u8 = 4;
-const MN_QName: u8 = 8;
+export const MN_Attr: u8 = 1;
+export const MN_Rtns: u8 = 2;
+export const MN_Rtname: u8 = 4;
+export const MN_QName: u8 = 8;
 
 @final
 export class BodyDecoder {
@@ -574,7 +573,7 @@ export class BodyDecoder {
       const name = abc.exceptionName[h];
       let type = TYPE_Any;
       if (typed && abc.exceptionType[h] !== 0) {
-        type = this.typeName(abc.exceptionType[h]);
+        type = typeName(this, abc.exceptionType[h]);
         if (type < TYPE_Any) {
           return false;
         }
@@ -1425,18 +1424,18 @@ export class BodyDecoder {
         return this.push(domain.functionType, NOT_NULL);
       case ops.OP_getlex: {
         // The scope object found is the receiver of the get.
-        if (!this.findProperty(ops.OP_findpropstrict, a)) {
+        if (!findProperty(this, ops.OP_findpropstrict, a)) {
           return false;
         }
 
         this.stack++;
-        const got = this.getProperty(a, 1);
+        const got = getProperty(this, a, 1);
         this.stack--;
         return got;
       }
       case ops.OP_findpropstrict:
       case ops.OP_findproperty:
-        return this.findProperty(opcode, a);
+        return findProperty(this, opcode, a);
       case ops.OP_newclass:
         if (this.emitPass && !this.captureClass(a)) {
           return false;
@@ -1447,16 +1446,16 @@ export class BodyDecoder {
         this.rowC = domain.staticTraitsOf(this.index, a);
         return true;
       case ops.OP_finddef:
-        return this.findDef(a);
+        return findDef(this, a);
       case ops.OP_setproperty:
       case ops.OP_initproperty:
-        return this.setProperty(opcode, a);
+        return setProperty(this, opcode, a);
       case ops.OP_getproperty: {
-        const n = this.propertyDepth(a, 1);
-        return n > 0 && this.getProperty(a, n);
+        const n = propertyDepth(this, a, 1);
+        return n > 0 && getProperty(this, a, n);
       }
       case ops.OP_getdescendants: {
-        const n = this.propertyDepth(a, 1);
+        const n = propertyDepth(this, a, 1);
         if (n === 0) {
           return false;
         }
@@ -1469,7 +1468,7 @@ export class BodyDecoder {
         this.checkNull(top);
         return true;
       case ops.OP_deleteproperty: {
-        const n = this.propertyDepth(a, 1);
+        const n = propertyDepth(this, a, 1);
         if (n === 0) {
           return false;
         }
@@ -1478,7 +1477,7 @@ export class BodyDecoder {
         return this.popPush(n, domain.booleanType, NOT_NULL);
       }
       case ops.OP_astype: {
-        const t = this.typeName(a);
+        const t = typeName(this, a);
         if (t < TYPE_Any) {
           return false;
         }
@@ -1500,7 +1499,7 @@ export class BodyDecoder {
       }
       // The conversion is the instruction itself, which only retypes the value.
       case ops.OP_coerce: {
-        const t = this.typeName(a);
+        const t = typeName(this, a);
         if (t < TYPE_Any) {
           return false;
         }
@@ -1542,7 +1541,7 @@ export class BodyDecoder {
         this.coerce(top, domain.traits.returnType[this.global]);
         return true;
       case ops.OP_istype:
-        if (this.typeName(a) < TYPE_Any) {
+        if (typeName(this, a) < TYPE_Any) {
           return false;
         }
 
@@ -1555,7 +1554,7 @@ export class BodyDecoder {
       case ops.OP_typeof:
         return this.popPush(1, domain.stringType, NOT_NULL);
       case ops.OP_callstatic:
-        return this.callStatic(a, b);
+        return callStatic(this, a, b);
       case ops.OP_call:
         return this.popPush(a + 2, TYPE_Any, 0);
       case ops.OP_construct: {
@@ -1577,21 +1576,21 @@ export class BodyDecoder {
       case ops.OP_callproperty:
       case ops.OP_callproplex:
       case ops.OP_callpropvoid:
-        return this.callProperty(opcode, a, b);
+        return callProperty(this, opcode, a, b);
       case ops.OP_constructprop: {
-        const n = this.propertyDepth(a, b + 1);
+        const n = propertyDepth(this, a, b + 1);
         if (n === 0) {
           return false;
         }
 
         const obj = this.peek(n);
         const type = this.typeOf(obj);
-        const binding = this.binding(type, a);
-        if (binding === BIND_Ambiguous) {
+        const found = binding(this, type, a);
+        if (found === BIND_Ambiguous) {
           return false;
         }
 
-        const ctraits = this.readBinding(type, binding);
+        const ctraits = readBinding(this, type, found);
         if (ctraits < TYPE_Any) {
           return false;
         }
@@ -1605,17 +1604,17 @@ export class BodyDecoder {
         return this.popPush(a + 1, TYPE_Any, NOT_NULL);
       case ops.OP_callsuper:
       case ops.OP_callsupervoid:
-        return this.callSuper(opcode, a, b);
+        return callSuper(this, opcode, a, b);
       case ops.OP_getsuper:
-        return this.getSuper(a);
+        return getSuper(this, a);
       case ops.OP_setsuper: {
-        const n = this.propertyDepth(a, 2);
+        const n = propertyDepth(this, a, 2);
         if (n === 0) {
           return false;
         }
 
         const obj = this.peek(n);
-        if (this.coerceSuper(obj) < TYPE_Any) {
+        if (coerceSuper(this, obj) < TYPE_Any) {
           return false;
         }
 
@@ -1624,13 +1623,13 @@ export class BodyDecoder {
       }
       case ops.OP_constructsuper: {
         const obj = this.peek(a + 1);
-        const base = this.coerceSuper(obj);
+        const base = coerceSuper(this, obj);
         if (base < TYPE_Any) {
           return false;
         }
 
         const init = domain.traits.init[base];
-        if (init >= 0 && !this.coerceArgs(<u32>init, a)) {
+        if (init >= 0 && !coerceArgs(this, <u32>init, a)) {
           return false;
         }
 
@@ -1688,15 +1687,15 @@ export class BodyDecoder {
         return this.push(outer.types[a], NOT_NULL);
       }
       case ops.OP_getglobalscope:
-        return this.globalScope() >= TYPE_Any;
+        return globalScope(this) >= TYPE_Any;
       case ops.OP_getglobalslot: {
-        const global = this.globalScope();
+        const global = globalScope(this);
         if (global < TYPE_Any) {
           return false;
         }
 
         // The global object pushed is replaced by the slot's value.
-        const slotType = this.slot(global, a - 1);
+        const slotType = slot(this, global, a - 1);
         return (
           slotType >= TYPE_Any && this.push(slotType, domain.typeNotNull(slotType) ? NOT_NULL : 0)
         );
@@ -1704,7 +1703,7 @@ export class BodyDecoder {
       case ops.OP_setglobalslot: {
         const outer = this.outer;
         const global = outer.size > 0 ? outer.types[0] : this.typeOf(this.localCount);
-        const slotType = this.slot(global, a - 1);
+        const slotType = slot(this, global, a - 1);
         if (slotType < TYPE_Any) {
           return false;
         }
@@ -1713,7 +1712,7 @@ export class BodyDecoder {
         return true;
       }
       case ops.OP_getslot: {
-        const slotType = this.slot(this.typeOf(top), a - 1);
+        const slotType = slot(this, this.typeOf(top), a - 1);
         if (slotType < TYPE_Any) {
           return false;
         }
@@ -1722,7 +1721,7 @@ export class BodyDecoder {
         return this.popPush(1, slotType, domain.typeNotNull(slotType) ? NOT_NULL : 0);
       }
       case ops.OP_setslot: {
-        const slotType = this.slot(this.typeOf(this.peek(2)), a - 1);
+        const slotType = slot(this, this.typeOf(this.peek(2)), a - 1);
         if (slotType < TYPE_Any) {
           return false;
         }
@@ -1912,334 +1911,6 @@ export class BodyDecoder {
     return this.typeOf(this.peek(n)) === type ? true : this.fail(C.kIllegalOperandTypeError);
   }
 
-  /**
-   * As Verifier::checkPropertyMultiname: count the runtime parts of
-   * multiname `mn` above the `n` values below them, checking that a runtime
-   * name with a namespace is a String and a runtime namespace a Namespace.
-   * Returns the depth of the receiver, or 0 after recording an error.
-   */
-  propertyDepth(mn: u32, n: u32): u32 {
-    const domain = this.domain;
-    const parts = nameParts(this.abc.pool, mn);
-    if (parts & MN_Rtname) {
-      if (parts & MN_QName && !this.peekType(n, domain.stringType)) {
-        return 0;
-      }
-
-      n++;
-    }
-
-    if (parts & MN_Rtns) {
-      if (!this.peekType(n, domain.namespaceType)) {
-        return 0;
-      }
-
-      n++;
-    }
-
-    return n;
-  }
-
-  /** The binding of `mn` on `type`, recording 1008 if it is ambiguous. */
-  binding(type: i32, mn: u32): u32 {
-    const b = getBinding(this.domain, this.index, type, mn);
-    if (b === BIND_Ambiguous) {
-      this.fail(C.kAmbiguousBindingError);
-    }
-
-    return b;
-  }
-
-  /** As Verifier::readBinding: resolve `type`, then the type of its binding b; below TYPE_Any on error. */
-  readBinding(type: i32, b: u32): i32 {
-    if (type < 0) {
-      return TYPE_Any;
-    }
-
-    const domain = this.domain;
-    const error = domain.traits.resolve(domain, <u32>type);
-    if (error) {
-      this.fail(error);
-      return -2;
-    }
-
-    return bindingType(domain, type, b);
-  }
-
-  /** As Verifier::checkTypeName: the type multiname `mn` names; below TYPE_Any on error. */
-  typeName(mn: u32): i32 {
-    const pool = this.abc.pool;
-    if (mn === 0 || mn >= pool.multinameCount) {
-      this.fail(C.kCpoolIndexRangeError);
-      return -2;
-    }
-
-    const domain = this.domain;
-    const t = domain.checkTypeName(this.index, mn);
-    if (t < TYPE_Any) {
-      this.fail(domain.typeError);
-    }
-
-    return t;
-  }
-
-  /**
-   * As Verifier::emitCoerceArgs: method m must take `argc` arguments, which
-   * become its parameter types, and the receiver below them its receiver type.
-   */
-  coerceArgs(m: u32, argc: u32): bool {
-    const domain = this.domain;
-    const traits = domain.traits;
-    const error = traits.sign(domain, m);
-    if (error) {
-      return this.fail(error);
-    }
-
-    const count = traits.paramCount[m];
-    const required = count - traits.optionalCount[m];
-    if (argc < required || (argc > count && !domain.allowsExtraArgs(m))) {
-      return this.fail(C.kWrongArgumentCountError);
-    }
-
-    const start = traits.paramStart[m];
-    for (let k: u32 = 1; k <= argc; k++) {
-      const target = k <= count ? traits.paramType[start + k - 1] : TYPE_Any;
-      this.coerce(this.peek(argc - k + 1), target);
-    }
-
-    this.coerce(this.peek(argc + 1), traits.receiverType[m]);
-    return true;
-  }
-
-  /** As Verifier::emitCoerceSuper: the receiver at i becomes the declaring class's base. */
-  coerceSuper(i: u32): i32 {
-    const base = this.declarer >= 0 ? this.domain.traits.base[this.declarer] : -1;
-    if (base < 0) {
-      this.fail(C.kIllegalSuperCallError);
-      return -2;
-    }
-
-    this.coerce(i, base);
-    this.rowC = base;
-    return base;
-  }
-
-  /**
-   * As Verifier::checkEarlySlotBinding and checkSlot: `type` must come from
-   * this ABC and allow early binding, and have slot `slot`, whose type this
-   * returns; below TYPE_Any on error.
-   */
-  slot(type: i32, slot: u32): i32 {
-    const domain = this.domain;
-    const traits = domain.traits;
-    if (type < 0 || traits.abc[type] !== this.index || !traits.allowEarlyBinding(<u32>type)) {
-      this.fail(C.kIllegalEarlyBindingError);
-      return -2;
-    }
-
-    const error = traits.resolve(domain, <u32>type);
-    if (error) {
-      this.fail(error);
-      return -2;
-    }
-
-    if (slot >= traits.slotCount[type]) {
-      this.fail(C.kSlotExceedsCountError);
-      return -2;
-    }
-
-    return traits.slotType[traits.slotStart[type] + slot];
-  }
-
-  /** As Verifier::checkGetGlobalScope: push the global object; its type, below TYPE_Any on error. */
-  globalScope(): i32 {
-    const outer = this.outer;
-    if (outer.size > 0) {
-      const t = outer.types[0];
-      this.push(t, NOT_NULL);
-      return t;
-    }
-
-    if (this.scope === 0) {
-      this.fail(C.kGetScopeObjectBoundsError);
-      return -2;
-    }
-
-    const i = this.localCount;
-    this.push(this.typeOf(i), this.valueFlags[i] & NOT_NULL);
-    return this.typeOf(i);
-  }
-
-  /**
-   * As Verifier::emitFindProperty: the scope object a name is found on, from
-   * the innermost scope out, stopping at a with scope, then the scripts that
-   * define it; else an Object, after the runtime name parts are popped.
-   */
-  findProperty(opcode: u8, mn: u32): bool {
-    const domain = this.domain;
-    const outer = this.outer;
-    const top = <i32>(this.stackBase + this.stack);
-    let global = false;
-    if (isBindingName(domain, this.index, mn)) {
-      // With no outer scopes, the global object is a local scope, which is not bound early.
-      const base = this.localCount + (outer.size === 0 ? 1 : 0);
-      let i = <i32>(this.localCount + this.scope) - 1;
-      for (; i >= <i32>base; i--) {
-        const b = this.binding(this.typeOf(<u32>i), mn);
-        if (b === BIND_Ambiguous) {
-          return false;
-        }
-
-        if (b !== 0) {
-          this.push(this.typeOf(<u32>i), this.valueFlags[i] & NOT_NULL);
-          return this.emitFound(ops.OP_getscopeobject, top, i, <u32>i - this.localCount, 0);
-        }
-
-        if (this.valueFlags[i] & WITH) {
-          break;
-        }
-      }
-
-      if (i < <i32>base) {
-        let j = <i32>outer.size - 1;
-        for (; j > 0; j--) {
-          const t = outer.types[j];
-          const b = this.binding(t, mn);
-          if (b === BIND_Ambiguous) {
-            return false;
-          }
-
-          if (b !== 0) {
-            this.push(t, NOT_NULL);
-            return this.emitFound(ops.OP_getouterscope, top, -1, <u32>j, 0);
-          }
-
-          if (outer.withs[j]) {
-            break;
-          }
-        }
-
-        if (j <= 0) {
-          const script = domain.findScript(this.index, mn);
-          if (script >= 0) {
-            this.push(script, NOT_NULL);
-
-            // Defined by this very script: its global object.
-            if (domain.traits.init[script] === <i32>this.global) {
-              return outer.size > 0
-                ? this.emitFound(ops.OP_getouterscope, top, -1, 0, 0)
-                : this.emitFound(IR_GetGlobalScope, top, -1, 0, 0);
-            }
-
-            return this.emitFound(ops.OP_finddef, top, -1, mn, script);
-          }
-
-          global = true;
-        }
-      }
-    }
-
-    const n = this.propertyDepth(mn, 1);
-    if (n === 0) {
-      return false;
-    }
-
-    this.popPush(n - 1, domain.objectType(), NOT_NULL);
-    if (global) {
-      const op = opcode === ops.OP_findproperty ? IR_FindPropGlobal : IR_FindPropGlobalStrict;
-      return this.emitFound(op, top, -1, mn, 0);
-    }
-
-    const at = <i32>(this.stackBase + this.stack) - <i32>(n - 1);
-    if (this.emitPass) {
-      this.emit(opcode, at, at, n - 1, mn, 0, 0, this.pc);
-      this.emitted = true;
-    }
-
-    return true;
-  }
-
-  /** The IR of where a name was found, pushed into register `dst`. */
-  emitFound(op: u16, dst: i32, src: i32, a: u32, c: i32): bool {
-    if (this.emitPass) {
-      this.emit(op, dst, src, src >= 0 ? 1 : 0, a, 0, c, this.pc);
-      this.emitted = true;
-    }
-
-    return true;
-  }
-
-  /** As Verifier's OP_finddef: the global object of the script that defines `mn`, else Object. */
-  findDef(mn: u32): bool {
-    const domain = this.domain;
-    const script = domain.findScript(this.index, mn);
-    return this.push(script >= 0 ? script : domain.objectType(), NOT_NULL);
-  }
-
-  /**
-   * As Verifier::emitGetProperty: a slot's or getter's type when the name
-   * binds early, a Vector's element type for a numeric index, else *.
-   */
-  getProperty(mn: u32, n: u32): bool {
-    const domain = this.domain;
-    const obj = this.peek(n);
-    const type = this.typeOf(obj);
-    const b = this.binding(type, mn);
-    if (b === BIND_Ambiguous) {
-      return false;
-    }
-
-    let propType = this.readBinding(type, b);
-    if (propType < TYPE_Any) {
-      return false;
-    }
-
-    this.checkNull(obj);
-    const kind = b & 7;
-    if (kind === 2 || kind === 3) {
-      // The builtin global's Math and Number are never null.
-      const notNull =
-        domain.traits.abc[type] === domain.builtinAbc && domain.isMathOrNumber(this.index, mn);
-      this.popPush(n, propType, notNull ? NOT_NULL : 0);
-      return this.emitOn(ops.OP_getslot, <i32>obj, <i32>obj, 1, b >> 3, 0, 0);
-    }
-
-    if (kind === 5 || kind === 7) {
-      const getter = domain.traits.dispatch[domain.traits.dispatchStart[type] + (b >> 3)];
-      if (getter >= 0 && !this.coerceArgs(<u32>getter, 0)) {
-        return false;
-      }
-
-      this.popPush(n, propType, domain.typeNotNull(propType) ? NOT_NULL : 0);
-      // An interface's accessor has no dispatch id of its own on the
-      // receiver: its name finds the receiver's.
-      if (domain.traits.isInterface[type]) {
-        return this.emitOn(ops.OP_getproperty, <i32>obj, <i32>obj, n, mn, 0, 0);
-      }
-
-      return this.emitOn(IR_CallGetter, <i32>obj, <i32>obj, 1, b >> 3, 0, getter);
-    }
-
-    if (propType === TYPE_Any && this.numericIndex(mn)) {
-      if (type === domain.vectorIntType) {
-        propType = domain.intType;
-      } else if (type === domain.vectorUintType) {
-        propType = domain.uintType;
-      } else if (type === domain.vectorDoubleType) {
-        propType = domain.numberType;
-      } else if (
-        type >= 0 &&
-        domain.vectorObjectType >= 0 &&
-        domain.traits.subtypeOf(<u32>type, <u32>domain.vectorObjectType)
-      ) {
-        propType = domain.traits.param[type];
-      }
-    }
-
-    this.popPush(n, propType, domain.typeNotNull(propType) ? NOT_NULL : 0);
-    return this.emitOn(ops.OP_getproperty, <i32>obj, <i32>obj, n, mn, 0, 0);
-  }
-
   /** Write the instruction's own IR row, instead of the generic one. */
   emitOn(op: u16, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32): bool {
     if (this.emitPass) {
@@ -2248,242 +1919,6 @@ export class BodyDecoder {
     }
 
     return true;
-  }
-
-  /**
-   * Whether multiname `mn` is a runtime name in a public namespace, not an
-   * attribute, and the top of the stack, its name, is a number.
-   */
-  numericIndex(mn: u32): bool {
-    const domain = this.domain;
-    const parts = nameParts(this.abc.pool, mn);
-    if (parts & MN_Attr || !(parts & MN_Rtname) || !domain.hasPublicNamespace(this.index, mn)) {
-      return false;
-    }
-
-    const t = this.typeOf(this.peek(1));
-    return t === domain.intType || t === domain.uintType || t === domain.numberType;
-  }
-
-  /** As Verifier's OP_setproperty and OP_initproperty. */
-  setProperty(opcode: u8, mn: u32): bool {
-    const domain = this.domain;
-    const n = this.propertyDepth(mn, 2);
-    if (n === 0) {
-      return false;
-    }
-
-    const obj = this.peek(n);
-    const type = this.typeOf(obj);
-    const b = this.binding(type, mn);
-    if (b === BIND_Ambiguous) {
-      return false;
-    }
-
-    const propType = this.readBinding(type, b);
-    if (propType < TYPE_Any) {
-      return false;
-    }
-
-    this.checkNull(obj);
-    const kind = b & 7;
-    const top = this.peek(1);
-
-    // A var, or a const set by the initializer of the traits declaring it.
-    if (
-      kind === 2 ||
-      (kind === 3 &&
-        opcode === ops.OP_initproperty &&
-        domain.initOfDeclarer(type, this.index, mn) === <i32>this.global)
-    ) {
-      this.coerce(top, propType);
-      return this.emitOn(ops.OP_setslot, -1, <i32>obj, 2, b >> 3, 0, 0);
-    }
-
-    if (kind === 6 || kind === 7) {
-      const setter = domain.traits.dispatch[domain.traits.dispatchStart[type] + (b >> 3) + 1];
-      if (setter >= 0 && !this.coerceArgs(<u32>setter, 1)) {
-        return false;
-      }
-
-      if (domain.traits.isInterface[type]) {
-        return this.emitOn(opcode, -1, <i32>obj, n, mn, 0, 0);
-      }
-
-      return this.emitOn(IR_CallSetter, -1, <i32>obj, 2, (b >> 3) + 1, 0, setter);
-    }
-
-    if (this.numericIndex(mn)) {
-      if (type === domain.vectorIntType) {
-        this.coerce(top, domain.intType);
-      } else if (type === domain.vectorUintType) {
-        this.coerce(top, domain.uintType);
-      } else if (type === domain.vectorDoubleType) {
-        this.coerce(top, domain.numberType);
-      }
-    }
-
-    // An instance's const initialized anywhere but in its declarer's
-    // initializer is written as setproperty writes it: ReferenceError 1074.
-    // A global's is left to initproperty: a SWF loaded again into the one
-    // domain initializes its classes on the first load's global.
-    const late =
-      kind === 3 &&
-      opcode === ops.OP_initproperty &&
-      type >= 0 &&
-      domain.traits.kind[type] === TRAITS_Instance;
-    const write = late ? ops.OP_setproperty : opcode;
-    return this.emitOn(write, -1, <i32>obj, n, mn, 0, 0);
-  }
-
-  /** As Verifier::emitCallproperty and emitCallpropertyMethod. */
-  callProperty(opcode: u8, mn: u32, argc: u32): bool {
-    const domain = this.domain;
-    const traits = domain.traits;
-    const n = this.propertyDepth(mn, argc + 1);
-    if (n === 0) {
-      return false;
-    }
-
-    const obj = this.peek(n);
-    const type = this.typeOf(obj);
-    if (type >= 0) {
-      const error = traits.resolve(domain, <u32>type);
-      if (error) {
-        return this.fail(error);
-      }
-    }
-
-    let b = this.binding(type, mn);
-    if (b === BIND_Ambiguous) {
-      return false;
-    }
-
-    this.checkNull(obj);
-    const voidCall = opcode === ops.OP_callpropvoid;
-    if ((b & 7) === 1) {
-      b = this.fasterCall(type, mn, b, argc);
-      const m = traits.dispatch[traits.dispatchStart[type] + (b >> 3)];
-      if (m >= 0) {
-        const signError = traits.sign(domain, <u32>m);
-        if (signError) {
-          return this.fail(signError);
-        }
-
-        const count = traits.paramCount[m];
-        const required = count - traits.optionalCount[m];
-        if (argc >= required && (argc <= count || domain.allowsExtraArgs(<u32>m))) {
-          if (!this.coerceArgs(<u32>m, argc)) {
-            return false;
-          }
-
-          const result = traits.returnType[m];
-          this.popPush(n, result, domain.typeNotNull(result) ? NOT_NULL : 0);
-
-          // An interface's method has no dispatch id of its own on the receiver.
-          const call = traits.isInterface[type] ? IR_CallInterface : ops.OP_callmethod;
-          return this.emitOn(call, voidCall ? -1 : <i32>obj, <i32>obj, n, b >> 3, argc, m);
-        }
-      }
-    } else if (((b & 7) === 2 || (b & 7) === 3) && argc === 1) {
-      // Calling a class slot with one argument converts or coerces to the class.
-      const slotType = bindingType(domain, type, b);
-      const converted = domain.conversionOf(slotType);
-      const top = this.peek(1);
-      if (converted !== -2) {
-        if (converted >= 0 && domain.isConversion(slotType)) {
-          this.setValue(top, converted, NOT_NULL);
-          this.emitOn(this.conversionOp(converted), <i32>top, <i32>top, 1, 0, 0, 0);
-        } else {
-          this.coerce(top, converted);
-        }
-
-        this.emitted = this.emitPass;
-        if (voidCall) {
-          return true;
-        }
-
-        const flags = this.valueFlags[top];
-        const value = this.typeOf(top);
-        this.popPush(n, value, flags & NOT_NULL);
-        return this.emitOn(IR_Nip, <i32>obj, <i32>obj, n, 0, 0, 0);
-      }
-    }
-
-    this.popPush(n, TYPE_Any, 0);
-    return this.emitOn(opcode, voidCall ? -1 : <i32>obj, <i32>obj, n, mn, argc, 0);
-  }
-
-  /** The convert opcode that gives `type`, one of the builtin conversions. */
-  conversionOp(type: i32): u16 {
-    const domain = this.domain;
-    if (type === domain.intType) {
-      return ops.OP_convert_i;
-    }
-
-    if (type === domain.uintType) {
-      return ops.OP_convert_u;
-    }
-
-    if (type === domain.numberType) {
-      return ops.OP_convert_d;
-    }
-
-    return type === domain.booleanType ? ops.OP_convert_b : ops.OP_convert_s;
-  }
-
-  /**
-   * As Verifier::findMathFunction and findStringFunction: Math's and
-   * String's methods have variants named with a leading underscore for
-   * arguments of the right types, which Math's numbers and String's exactly
-   * its parameter types.
-   */
-  fasterCall(type: i32, mn: u32, b: u32, argc: u32): u32 {
-    const domain = this.domain;
-    if (type < 0 || (type !== domain.mathStatic && type !== domain.stringType)) {
-      return b;
-    }
-
-    const name = domain.underscored(this.index, mn);
-    const traits = domain.traits;
-    const faster = name < 0 ? BIND_None : traits.findName(type, <u32>name);
-    if ((faster & 7) !== 1) {
-      return b;
-    }
-
-    const m = traits.dispatch[traits.dispatchStart[type] + (faster >> 3)];
-    if (m < 0 || traits.sign(domain, <u32>m)) {
-      return b;
-    }
-
-    const count = traits.paramCount[m];
-    const start = traits.paramStart[m];
-    if (type === domain.mathStatic) {
-      if (argc !== count) {
-        return b;
-      }
-
-      for (let k: u32 = 1; k <= argc; k++) {
-        const t = this.typeOf(this.peek(argc - k + 1));
-        if (t === TYPE_Any || !isNumeric(domain, t)) {
-          return b;
-        }
-      }
-
-      return faster;
-    }
-
-    if (argc < count - traits.optionalCount[m] || argc > count) {
-      return b;
-    }
-
-    for (let k: u32 = 1; k <= argc; k++) {
-      if (this.typeOf(this.peek(argc - k + 1)) !== traits.paramType[start + k - 1]) {
-        return b;
-      }
-    }
-
-    return faster;
   }
 
   /** The scope chain `outer` and the scopes pushed so far, with an optional last entry and extra. */
@@ -2590,104 +2025,6 @@ export class BodyDecoder {
     return true;
   }
 
-  /** As Verifier's OP_callstatic: a bound method, called with its signature. */
-  callStatic(m: u32, argc: u32): bool {
-    const domain = this.domain;
-    const traits = domain.traits;
-    const global = domain.methodStart[this.index] + m;
-    const error = traits.sign(domain, global);
-    if (error) {
-      return this.fail(error);
-    }
-
-    if (traits.receiverType[global] === TYPE_Any) {
-      return this.fail(C.kDanglingFunctionError);
-    }
-
-    this.checkNull(this.peek(argc + 1));
-    if (!this.coerceArgs(global, argc)) {
-      return false;
-    }
-
-    const result = traits.returnType[global];
-    this.rowC = <i32>global;
-    return this.popPush(argc + 1, result, domain.typeNotNull(result) ? NOT_NULL : 0);
-  }
-
-  /** As Verifier's OP_callsuper and OP_callsupervoid. */
-  callSuper(opcode: u8, mn: u32, argc: u32): bool {
-    const domain = this.domain;
-    const traits = domain.traits;
-    const n = this.propertyDepth(mn, argc + 1);
-    if (n === 0) {
-      return false;
-    }
-
-    const obj = this.peek(n);
-    const base = this.coerceSuper(obj);
-    if (base < TYPE_Any) {
-      return false;
-    }
-
-    const b = this.binding(base, mn);
-    if (b === BIND_Ambiguous) {
-      return false;
-    }
-
-    let result = TYPE_Any;
-    if ((b & 7) === 1) {
-      const error = traits.resolve(domain, <u32>base);
-      if (error) {
-        return this.fail(error);
-      }
-
-      const m = traits.dispatch[traits.dispatchStart[base] + (b >> 3)];
-      if (m < 0) {
-        return this.fail(C.kCorruptABCError);
-      }
-
-      const signError = traits.sign(domain, <u32>m);
-      if (signError) {
-        return this.fail(signError);
-      }
-
-      result = traits.returnType[m];
-    }
-
-    this.checkNull(obj);
-    return opcode === ops.OP_callsupervoid
-      ? true
-      : this.popPush(n, result, domain.typeNotNull(result) ? NOT_NULL : 0);
-  }
-
-  /** As Verifier's OP_getsuper. */
-  getSuper(mn: u32): bool {
-    const domain = this.domain;
-    const n = this.propertyDepth(mn, 1);
-    if (n === 0) {
-      return false;
-    }
-
-    const obj = this.peek(n);
-    const base = this.coerceSuper(obj);
-    if (base < TYPE_Any) {
-      return false;
-    }
-
-    const b = this.binding(base, mn);
-    if (b === BIND_Ambiguous) {
-      return false;
-    }
-
-    const propType = this.readBinding(base, b);
-    if (propType < TYPE_Any) {
-      return false;
-    }
-
-    this.checkNull(obj);
-    return this.popPush(n, propType, domain.typeNotNull(propType) ? NOT_NULL : 0);
-  }
-
   checkString(index: u32): bool {
     return index === 0 || index >= this.abc.pool.stringCount
       ? this.fail(C.kCpoolIndexRangeError)
@@ -2766,7 +2103,7 @@ function isAttribute(pool: ConstantPool, index: u32): bool {
 }
 
 /** A multiname's MN_* parts, as avmplus' Multiname flags. */
-function nameParts(pool: ConstantPool, index: u32): u8 {
+export function nameParts(pool: ConstantPool, index: u32): u8 {
   let kind = pool.mnKind[index];
   if (kind === C.CONSTANT_TypeName) {
     kind = pool.mnKind[pool.mnA[index]];

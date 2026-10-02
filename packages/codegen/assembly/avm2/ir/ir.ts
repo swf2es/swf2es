@@ -15,6 +15,28 @@
 // decisions made explicit, such as a slot bound early (getslot), a method
 // called by dispatch id (callmethod), where a name was found (getscopeobject,
 // getouterscope, finddef), and every coercion and null check.
+//
+// What a, b and c hold depends on the instruction:
+// - An ABC opcode as it is: a and b its operands as the ABC has them (a
+//   multiname, a local, a pool index; an argument count), c the type or
+//   method the verifier settled for it (coerce's type, newfunction's method,
+//   newclass's static traits, callsuper's base, callstatic's method), else 0.
+// - getslot, setslot, getglobalslot, setglobalslot: a the slot from 0, where
+//   the ABC counts from 1.
+// - getlocal, setlocal and their short forms: src or dst the local itself.
+// - A jump or conditional branch: a the target block. lookupswitch: a the
+//   default block, b where its targets start in `cases`, c their count - 1.
+// - getscopeobject: a the scope's index, src its register. getouterscope: a
+//   the outer scope's index. finddef: a the multiname, c the script.
+// - callmethod: a the method's dispatch id in the receiver's type, b the
+//   argument count, c the method (domain-wide id).
+//
+// A dispatch id is a slot in a class's own layout: a subclass keeps its
+// base's, so an early bound call by one is right for any receiver of the
+// type; an interface's are its own, which an implementing class need not
+// share (IR_CallInterface, and an interface's accessors, go by name); and a
+// primitive, which a value of type Object can be, has none (the emitter
+// calls its class prototype's method).
 import { OP_lookupswitch } from "../abc/opcodes";
 
 // Instructions beyond the ABC's opcodes.
@@ -22,11 +44,15 @@ import { OP_lookupswitch } from "../abc/opcodes";
 export const IR_Coerce: u16 = 0x100;
 /** Throw a TypeError if src is null or undefined. */
 export const IR_CheckNull: u16 = 0x101;
-/** dst = the getter of dispatch id `a` of src's type, called on src. */
+/** dst = the getter of dispatch id `a` of src's type, called on src; c the getter (domain-wide id). */
 export const IR_CallGetter: u16 = 0x102;
-/** The setter of dispatch id `a` of src's type, called on src with src + 1. */
+/** The setter of dispatch id `a` of src's type, called on src with src + 1; c the setter. */
 export const IR_CallSetter: u16 = 0x103;
-/** dst = method `c` (domain-wide id) of an interface, called on src with `b` arguments. */
+/**
+ * dst = an interface's method, called on src with `b` arguments: `a` its
+ * dispatch id in the interface's layout, which names it, c the method
+ * (domain-wide id). The receiver's own layout may place it elsewhere.
+ */
 export const IR_CallInterface: u16 = 0x104;
 /** dst = the global object's property `a`, looked up at run time (findpropglobal). */
 export const IR_FindPropGlobal: u16 = 0x105;
@@ -76,7 +102,7 @@ export class Ir {
   handlerType: StaticArray<i32> = new StaticArray<i32>(0);
   handlerScope: StaticArray<i32> = new StaticArray<i32>(0);
 
-  /** lookupswitch targets as block numbers; an instruction's are cases[b .. b + a]. */
+  /** lookupswitch targets as block numbers; an instruction's are cases[b .. b + c]. */
   cases: StaticArray<u32> = new StaticArray<u32>(0);
   caseCount: u32 = 0;
 

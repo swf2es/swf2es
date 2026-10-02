@@ -22,7 +22,7 @@ import {
   IR_Nip,
   Ir,
 } from "../ir/ir";
-import { Domain, NS_Private, URI_None } from "../link/domain";
+import { Domain } from "../link/domain";
 import {
   BUILTIN_Any,
   BUILTIN_Boolean,
@@ -30,20 +30,34 @@ import {
   BUILTIN_Namespace,
   BUILTIN_Number,
   BUILTIN_Object,
-  BUILTIN_Other,
   BUILTIN_String,
   BUILTIN_Uint,
-  TRAITS_Instance,
-  TraitsTable,
   TYPE_Any,
 } from "../link/traits";
+import { inRange, isAddress, viewMethod } from "./memory";
 import { Output } from "./output";
+import { constant, poolString, typeRef } from "./refs";
 import { SourceMap } from "./sourcemap";
+import { analyze, branchTo, conditional, enclosed, node, terminates } from "./structure";
+import {
+  binary,
+  binaryInt,
+  branch,
+  call2,
+  compare,
+  concatenates,
+  conversion,
+  conversionType,
+  convert,
+  isNumber,
+  isNumeric,
+  isStaticInit,
+  keeps,
+  wraps,
+} from "./values";
 
 /** The deepest structured code a method is given; one deeper keeps the dispatcher. */
-const MAX_NESTING: u32 = 500;
-/** No type: a conversion, convert_s or convert_o, that always calls the runtime. */
-const CONVERTS: i32 = -2;
+export const MAX_NESTING: u32 = 500;
 /** copyOf of a stack register that holds a constant: CONSTANT - the instruction that pushed it. */
 const CONSTANT: i32 = -2;
 
@@ -126,7 +140,7 @@ export class MethodEmitter {
     this.ir = ir;
     this.current = method;
     this.body = this.abc.methodBody[method];
-    this.staticInit = this.isStaticInit(method);
+    this.staticInit = isStaticInit(this, method);
     if (<u32>this.regType.length < ir.frameSize) {
       this.regType = new StaticArray<i32>(ir.frameSize);
     }
@@ -185,7 +199,7 @@ export class MethodEmitter {
 
     // Structured control flow where the graph is reducible and each
     // handler's try encloses the code it covers; else the dispatcher.
-    if (this.analyze()) {
+    if (analyze(this)) {
       const start = out.length;
       if (handled) {
         out.text("  let t = 0;\n");
@@ -194,7 +208,7 @@ export class MethodEmitter {
       this.structured = true;
       this.unenclosed = false;
       this.tryStack.length = 0;
-      this.node(0);
+      node(this, 0);
       this.structured = false;
       if (!this.unenclosed) {
         this.leaveDxns(dxns);
@@ -452,7 +466,7 @@ export class MethodEmitter {
         out.text("      ");
         if (type >= 0) {
           out.text("if (rt.catches(x, ");
-          this.typeRef(type);
+          typeRef(this, type);
           out.text(")) ");
         }
 
@@ -516,11 +530,11 @@ export class MethodEmitter {
         out.uint(p);
         out.text(" ? ");
         const o = abc.methodOptionalStart[method] + p - first - 1;
-        this.constant(abc.optionalValue[o], abc.optionalKind[o], type);
+        constant(this, abc.optionalValue[o], abc.optionalKind[o], type);
         out.text(" : ");
       }
 
-      this.convert("p", <i32>p, type, TYPE_Any);
+      convert(this, "p", <i32>p, type, TYPE_Any);
     }
 
     let local = count + 1;
@@ -617,7 +631,7 @@ export class MethodEmitter {
         this.copyAll(<i32>ir.b[i], frame);
       } else if (op === ops.OP_popscope) {
         this.copyAll(ir.src[i], frame);
-      } else if (this.conditional(op) || op === ops.OP_lookupswitch) {
+      } else if (conditional(op) || op === ops.OP_lookupswitch) {
         this.copyBelow(ir.src[i]);
       } else if (op === ops.OP_jump) {
         this.copyBelow(<i32>ir.frameSize);
@@ -646,7 +660,7 @@ export class MethodEmitter {
           out.int(region);
           out.text(";\n");
           this.region = region;
-          if (this.structured && !this.enclosed(region)) {
+          if (this.structured && !enclosed(this, region)) {
             this.unenclosed = true;
           }
         }
@@ -693,7 +707,7 @@ export class MethodEmitter {
         continue;
       }
 
-      if (this.conditional(op) || op === ops.OP_lookupswitch) {
+      if (conditional(op) || op === ops.OP_lookupswitch) {
         // What the branch took is gone, and the rest is written.
         this.uncopy(stack);
       } else if (op === ops.OP_swap) {
@@ -715,7 +729,7 @@ export class MethodEmitter {
       }
     }
 
-    if (!this.terminates(k)) {
+    if (!terminates(this, k)) {
       this.copyBelow(<i32>ir.frameSize);
     }
   }
@@ -861,7 +875,7 @@ export class MethodEmitter {
         out.text("NaN");
         break;
       case ops.OP_pushstring:
-        this.string(a);
+        poolString(this, a);
         break;
       case ops.OP_pushtrue:
         out.text("true");
@@ -955,7 +969,7 @@ export class MethodEmitter {
   /** `b = n; continue;` to block n. */
   goto(block: u32): void {
     if (this.structured) {
-      this.branchTo(block);
+      branchTo(this, block);
       return;
     }
 
@@ -1024,527 +1038,6 @@ export class MethodEmitter {
   structured: bool = false;
   currentBlock: u32 = 0;
 
-  /** The index after block k's last instruction, and its first. */
-  private blockEnd(k: u32): u32 {
-    const ir = this.ir;
-    return k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
-  }
-
-  /** Whether block k ends in a branch, return or throw, not falling through. */
-  private terminates(k: u32): bool {
-    const ir = this.ir;
-    const end = this.blockEnd(k);
-    if (end === ir.blockFirst[k]) {
-      return false;
-    }
-
-    const op = ir.op[end - 1];
-    return (
-      op === ops.OP_jump ||
-      op === ops.OP_lookupswitch ||
-      op === ops.OP_returnvoid ||
-      op === ops.OP_returnvalue ||
-      op === ops.OP_throw
-    );
-  }
-
-  /** Whether op branches on a condition. */
-  private conditional(op: u16): bool {
-    return (
-      (op >= ops.OP_ifnlt && op <= ops.OP_ifnge) || (op >= ops.OP_iftrue && op <= ops.OP_ifstrictne)
-    );
-  }
-
-  /**
-   * Block k's successors: the handlers covering any of it, the table's last
-   * first; then every conditional branch in it (a block starts only where
-   * something branches to, so one may be in the middle), then what its
-   * last instruction does, or its fall-through.
-   */
-  private successors(k: u32): void {
-    const ir = this.ir;
-    const first = ir.blockFirst[k];
-    const end = this.blockEnd(k);
-    const next = k + 1 < ir.blockCount;
-    if (end > first) {
-      const from = ir.pc[first];
-      const to = ir.pc[end - 1];
-      for (let h = <i32>ir.handlerCount - 1; h >= 0; h--) {
-        if (ir.handlerFrom[h] <= to && ir.handlerTo[h] > from) {
-          this.succ.push(ir.handlerBlock[h]);
-        }
-      }
-    }
-
-    this.normalStart[k] = <u32>this.succ.length;
-    for (let i = first; i < end; i++) {
-      if (this.conditional(ir.op[i])) {
-        this.succ.push(ir.a[i]);
-      }
-    }
-
-    if (end === first) {
-      if (next) {
-        this.succ.push(k + 1);
-      }
-      return;
-    }
-
-    const i = end - 1;
-    const op = ir.op[i];
-    if (op === ops.OP_jump) {
-      this.succ.push(ir.a[i]);
-    } else if (op === ops.OP_lookupswitch) {
-      this.succ.push(ir.a[i]);
-      for (let c: u32 = 0; c <= <u32>ir.c[i]; c++) {
-        this.succ.push(ir.cases[ir.b[i] + c]);
-      }
-    } else if (op === ops.OP_returnvoid || op === ops.OP_returnvalue || op === ops.OP_throw) {
-      // No successor.
-    } else if (next) {
-      this.succ.push(k + 1);
-    }
-  }
-
-  /**
-   * The analysis the translation needs: successors and predecessors, a
-   * reverse postorder, dominators (Cooper, Harvey and Kennedy's), each
-   * block's children in the dominator tree, loop headers and forward edge
-   * counts. False if the graph is irreducible: a retreating edge whose
-   * target does not dominate its source.
-   */
-  analyze(): bool {
-    const ir = this.ir;
-    const n = ir.blockCount;
-    if (<u32>this.rpo.length < n) {
-      const size = max(n, 64);
-      this.succStart = new StaticArray<u32>(size + 1);
-      this.predStart = new StaticArray<u32>(size + 1);
-      this.childStart = new StaticArray<u32>(size + 1);
-      this.rpo = new StaticArray<i32>(size);
-      this.order = new StaticArray<u32>(size);
-      this.idom = new StaticArray<i32>(size);
-      this.forwardIn = new StaticArray<u32>(size);
-      this.loopHeader = new StaticArray<u8>(size);
-      this.fill = new StaticArray<u32>(size);
-      this.handlerOf = new StaticArray<i32>(size);
-      this.normalStart = new StaticArray<u32>(size);
-    }
-
-    this.succ.length = 0;
-    for (let k: u32 = 0; k < n; k++) {
-      this.succStart[k] = <u32>this.succ.length;
-      this.successors(k);
-      this.rpo[k] = -1;
-      this.idom[k] = -1;
-      this.forwardIn[k] = 0;
-      this.loopHeader[k] = 0;
-      this.handlerOf[k] = -1;
-    }
-
-    // Each handler's own block, one block to a handler.
-    for (let h: u32 = 0; h < ir.handlerCount; h++) {
-      const block = ir.handlerBlock[h];
-      if (this.handlerOf[block] >= 0) {
-        return false;
-      }
-
-      this.handlerOf[block] = <i32>h;
-    }
-
-    this.succStart[n] = <u32>this.succ.length;
-
-    // A depth-first walk from the entry: postorder, reversed. -2 marks a block on the way.
-    const stack = this.dfsStack;
-    const edge = this.dfsEdge;
-    stack.length = 0;
-    edge.length = 0;
-    stack.push(0);
-    edge.push(0);
-    this.rpo[0] = -2;
-    let post = n;
-    while (stack.length) {
-      const top = stack.length - 1;
-      const k = stack[top];
-      const e = edge[top];
-      if (this.succStart[k] + e < this.succStart[k + 1]) {
-        edge[top] = e + 1;
-        const s = this.succ[this.succStart[k] + e];
-        if (this.rpo[s] === -1) {
-          this.rpo[s] = -2;
-          stack.push(s);
-          edge.push(0);
-        }
-      } else {
-        stack.pop();
-        edge.pop();
-        this.rpo[k] = <i32>--post;
-      }
-    }
-
-    // Reachable blocks, numbered from 0 in reverse postorder.
-    const reachable = n - post;
-    this.reachable = reachable;
-    for (let k: u32 = 0; k < n; k++) {
-      if (this.rpo[k] >= 0) {
-        this.rpo[k] -= <i32>post;
-        this.order[this.rpo[k]] = k;
-      }
-    }
-
-    // Predecessors, by counting then filling.
-    for (let k: u32 = 0; k <= n; k++) {
-      this.predStart[k] = 0;
-    }
-
-    for (let e: u32 = 0; e < <u32>this.succ.length; e++) {
-      this.predStart[this.succ[e] + 1]++;
-    }
-
-    for (let k: u32 = 0; k < n; k++) {
-      this.predStart[k + 1] += this.predStart[k];
-      this.fill[k] = this.predStart[k];
-    }
-
-    this.pred.length = this.succ.length;
-    for (let p: u32 = 0; p < n; p++) {
-      for (let e = this.succStart[p]; e < this.succStart[p + 1]; e++) {
-        const s = this.succ[e];
-        this.pred[this.fill[s]++] = p;
-      }
-    }
-
-    // Dominators, iterated to a fixed point in reverse postorder.
-    this.idom[0] = 0;
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (let r: u32 = 1; r < reachable; r++) {
-        const b = this.order[r];
-        let dom: i32 = -1;
-        for (let e = this.predStart[b]; e < this.predStart[b + 1]; e++) {
-          const p = this.pred[e];
-          if (this.rpo[p] >= 0 && this.idom[p] >= 0) {
-            dom = dom < 0 ? <i32>p : this.intersect(<u32>dom, p);
-          }
-        }
-
-        if (dom !== this.idom[b]) {
-          this.idom[b] = dom;
-          changed = true;
-        }
-      }
-    }
-
-    // Edges: forward ones counted, retreating ones back edges to a
-    // dominator, or irreducible. A handler's are forward, and its only ones.
-    for (let r: u32 = 0; r < reachable; r++) {
-      const p = this.order[r];
-      for (let e = this.succStart[p]; e < this.succStart[p + 1]; e++) {
-        const s = this.succ[e];
-        if (e < this.normalStart[p]) {
-          if (this.rpo[s] <= this.rpo[p]) {
-            return false;
-          }
-
-          continue;
-        }
-
-        if (this.handlerOf[s] >= 0) {
-          return false;
-        }
-
-        if (this.rpo[s] > this.rpo[p]) {
-          this.forwardIn[s]++;
-        } else if (this.dominates(s, p)) {
-          this.loopHeader[s] = 1;
-        } else {
-          return false;
-        }
-      }
-    }
-
-    // The dominator tree's children, each block's in reverse postorder.
-    for (let k: u32 = 0; k <= n; k++) {
-      this.childStart[k] = 0;
-    }
-
-    for (let r: u32 = 1; r < reachable; r++) {
-      this.childStart[this.idom[this.order[r]] + 1]++;
-    }
-
-    for (let k: u32 = 0; k < n; k++) {
-      this.childStart[k + 1] += this.childStart[k];
-      this.fill[k] = this.childStart[k];
-    }
-
-    this.child.length = reachable > 0 ? reachable - 1 : 0;
-    for (let r: u32 = 1; r < reachable; r++) {
-      const y = this.order[r];
-      this.child[this.fill[this.idom[y]]++] = y;
-    }
-
-    // The translation recurses, and its code nests, along the dominator
-    // tree: a block's code at most as deep as its dominator's, and a
-    // labelled block for each of that one's merge children, a loop and an
-    // if's braces around it. Deeper than engines parse keeps the dispatcher.
-    this.fill[0] = this.loopHeader[0];
-    for (let r: u32 = 1; r < reachable; r++) {
-      const b = this.order[r];
-      const d = <u32>this.idom[b];
-      let merges: u32 = 0;
-      for (let c = this.childStart[d]; c < this.childStart[d + 1]; c++) {
-        const y = this.child[c];
-        merges += this.handlerOf[y] >= 0 ? 2 : this.forwardIn[y] >= 2 ? 1 : 0;
-      }
-
-      const nesting = this.fill[d] + merges + this.loopHeader[b] + 1;
-      if (nesting > MAX_NESTING) {
-        return false;
-      }
-
-      this.fill[b] = nesting;
-    }
-
-    return true;
-  }
-
-  private intersect(a: u32, b: u32): u32 {
-    let x = a;
-    let y = b;
-    while (x !== y) {
-      while (this.rpo[x] > this.rpo[y]) {
-        x = <u32>this.idom[x];
-      }
-
-      while (this.rpo[y] > this.rpo[x]) {
-        y = <u32>this.idom[y];
-      }
-    }
-
-    return x;
-  }
-
-  /** Whether block a dominates block b. */
-  private dominates(a: u32, b: u32): bool {
-    let x = b;
-    while (x !== a) {
-      if (x === 0) {
-        return false;
-      }
-
-      x = <u32>this.idom[x];
-    }
-
-    return true;
-  }
-
-  /** Block x and what it dominates: in a loop if it heads one. */
-  node(x: u32): void {
-    const out = this.out;
-    // Its children in the dominator tree that are merge nodes or handlers, the latest first.
-    const merges: u32[] = [];
-    for (let c = this.childStart[x + 1]; c > this.childStart[x]; c--) {
-      const y = this.child[c - 1];
-      if (this.forwardIn[y] >= 2 || this.handlerOf[y] >= 0) {
-        merges.push(y);
-      }
-    }
-
-    if (this.loopHeader[x]) {
-      out.text("  L");
-      out.uint(x);
-      out.text(": for (;;) {\n");
-      this.within(x, merges, 0);
-      out.text("  }\n");
-    } else {
-      this.within(x, merges, 0);
-    }
-  }
-
-  /** Block x's code inside a labelled block for each merge node from j, each followed by its code. */
-  private within(x: u32, merges: u32[], j: i32): void {
-    const out = this.out;
-    if (j === merges.length) {
-      this.structuredBlock(x);
-      return;
-    }
-
-    const y = merges[j];
-    out.text("  L");
-    out.uint(y);
-    out.text(": {\n");
-    const h = this.handlerOf[y];
-    if (h >= 0) {
-      out.text("  try {\n");
-      this.tryStack.push(<u32>h);
-      this.within(x, merges, j + 1);
-      this.tryStack.pop();
-      out.text("  } catch (e) {\n");
-      this.catchClause(<u32>h, y);
-      out.text("  }\n");
-    } else {
-      this.within(x, merges, j + 1);
-    }
-
-    out.text("  }\n");
-    this.node(y);
-  }
-
-  /**
-   * Handler h's catch, around the code before its block y: the exception
-   * if it came from one of h's regions and has its type, else on.
-   */
-  private catchClause(h: u32, y: u32): void {
-    const out = this.out;
-    const ir = this.ir;
-    let low: u32 = 0;
-    let high: u32 = 0;
-    for (let r: u32 = 1; r < this.boundCount; r++) {
-      const start = this.bounds[r - 1];
-      if (this.covered[r - 1] && start >= ir.handlerFrom[h] && start < ir.handlerTo[h]) {
-        low = low ? low : r;
-        high = r;
-      }
-    }
-
-    out.text("    const x = rt.caught(e);\n    if (");
-    if (low === high) {
-      out.text("t === ");
-      out.uint(low);
-    } else {
-      out.text("t >= ");
-      out.uint(low);
-      out.text(" && t <= ");
-      out.uint(high);
-    }
-
-    const type = ir.handlerType[h];
-    if (type >= 0) {
-      out.text(" && rt.catches(x, ");
-      this.typeRef(type);
-      out.text(")");
-    }
-
-    out.text(") { ");
-    this.regName(<i32>(ir.localCount + ir.maxScope));
-    out.text(" = x; break L");
-    out.uint(y);
-    out.text("; }\n    throw e;\n");
-  }
-
-  /** Whether the handlers covering region r have their trys open, innermost first in the table's order. */
-  private enclosed(r: i32): bool {
-    if (r === 0) {
-      return true;
-    }
-
-    const ir = this.ir;
-    const start = this.bounds[r - 1];
-    let below = this.tryStack.length;
-    for (let h: u32 = 0; h < ir.handlerCount; h++) {
-      if (start < ir.handlerFrom[h] || start >= ir.handlerTo[h]) {
-        continue;
-      }
-
-      let at = below - 1;
-      while (at >= 0 && this.tryStack[at] !== h) {
-        at--;
-      }
-
-      if (at < 0) {
-        return false;
-      }
-
-      below = at;
-    }
-
-    return true;
-  }
-
-  /** Block k's instructions, and its fall-through as an explicit branch. */
-  private structuredBlock(k: u32): void {
-    this.currentBlock = k;
-    this.blockBody(k);
-    if (!this.terminates(k) && k + 1 < this.ir.blockCount) {
-      this.currentBlock = k;
-      this.out.text("    ");
-      this.branchTo(k + 1);
-      this.out.text("\n");
-    }
-  }
-
-  /** A branch from the current block to block t. */
-  private branchTo(t: u32): void {
-    const out = this.out;
-    const from = this.currentBlock;
-    if (this.loopHeader[t] && this.rpo[t] <= this.rpo[from]) {
-      out.text("continue L");
-      out.uint(t);
-      out.text(";");
-    } else if (this.forwardIn[t] >= 2) {
-      out.text("break L");
-      out.uint(t);
-      out.text(";");
-    } else {
-      // Its only way in: its code here, and then the block branching goes
-      // on, a conditional branch's, with its own types, scopes and region.
-      out.text("\n");
-      this.save();
-      // A loop's header is also entered from its end, with other checks.
-      this.inPlace = !this.loopHeader[t];
-      this.node(t);
-      this.restore();
-      this.mark();
-      this.currentBlock = from;
-    }
-  }
-
-  /** Push what writing a block follows: its registers' types, scopes and region. */
-  private save(): void {
-    const ir = this.ir;
-    const saved = this.saved;
-    for (let r: u32 = 0; r < ir.frameSize; r++) {
-      saved.push(this.regType[r]);
-    }
-
-    for (let d: u32 = 0; d < ir.maxScope; d++) {
-      saved.push(this.scopeWith[d]);
-    }
-
-    for (let r: u32 = 0; r < ir.frameSize; r++) {
-      saved.push(this.checked[r]);
-      saved.push(this.promoted[r]);
-    }
-
-    saved.push(<i32>this.scopeDepth);
-    saved.push(this.region);
-    saved.push(this.file);
-    saved.push(<i32>this.line);
-  }
-
-  /** Pop what save pushed. */
-  private restore(): void {
-    const ir = this.ir;
-    const saved = this.saved;
-    this.line = <u32>saved.pop();
-    this.file = saved.pop();
-    this.region = saved.pop();
-    this.scopeDepth = <u32>saved.pop();
-    for (let r = <i32>ir.frameSize - 1; r >= 0; r--) {
-      this.promoted[r] = <u8>saved.pop();
-      this.checked[r] = <u8>saved.pop();
-    }
-
-    for (let d = <i32>ir.maxScope - 1; d >= 0; d--) {
-      this.scopeWith[d] = <u8>saved.pop();
-    }
-
-    for (let r = <i32>ir.frameSize - 1; r >= 0; r--) {
-      this.regType[r] = saved.pop();
-    }
-  }
-
   instruction(i: u32): void {
     const out = this.out;
     const ir = this.ir;
@@ -1582,7 +1075,7 @@ export class MethodEmitter {
         break;
       case ops.OP_pushstring:
         this.assign(i);
-        this.string(a);
+        poolString(this, a);
         break;
       case ops.OP_pushtrue:
         this.assign(i);
@@ -1646,13 +1139,13 @@ export class MethodEmitter {
       case ops.OP_debug:
         return;
       case IR_Coerce:
-        if (ir.dst[i] === ir.src[i] && this.keeps(ir.c[i], this.regType[ir.src[i]])) {
+        if (ir.dst[i] === ir.src[i] && keeps(this, ir.c[i], this.regType[ir.src[i]])) {
           this.kept = true;
           return;
         }
 
         this.assign(i);
-        this.convert("", ir.src[i], ir.c[i], this.regType[ir.src[i]]);
+        convert(this, "", ir.src[i], ir.c[i], this.regType[ir.src[i]]);
         break;
       case IR_CheckNull: {
         // A register checked since it was last written is not null.
@@ -1676,71 +1169,71 @@ export class MethodEmitter {
       case ops.OP_add:
         this.assign(i);
         if (
-          (this.isNumeric(this.src(i, 0)) && this.isNumeric(this.src(i, 1))) ||
-          this.concatenates(i)
+          (isNumeric(this, this.src(i, 0)) && isNumeric(this, this.src(i, 1))) ||
+          concatenates(this, i)
         ) {
-          this.binary(i, " + ");
+          binary(this, i, " + ");
         } else {
-          this.call2("rt.add(", i);
+          call2(this, "rt.add(", i);
         }
         break;
       case ops.OP_subtract:
         this.assign(i);
-        this.binary(i, " - ");
+        binary(this, i, " - ");
         break;
       case ops.OP_multiply:
         this.assign(i);
-        if (this.wraps(i)) {
-          this.call2("Math.imul(", i);
+        if (wraps(this, i)) {
+          call2(this, "Math.imul(", i);
         } else {
-          this.binary(i, " * ");
+          binary(this, i, " * ");
         }
 
         break;
       case ops.OP_divide:
         this.assign(i);
-        this.binary(i, " / ");
+        binary(this, i, " / ");
         break;
       case ops.OP_modulo:
         this.assign(i);
-        this.binary(i, " % ");
+        binary(this, i, " % ");
         break;
       case ops.OP_add_i:
         this.assign(i);
-        this.binaryInt(i, " + ");
+        binaryInt(this, i, " + ");
         break;
       case ops.OP_subtract_i:
         this.assign(i);
-        this.binaryInt(i, " - ");
+        binaryInt(this, i, " - ");
         break;
       case ops.OP_multiply_i:
         // int multiplication wraps as Math.imul does, not as a double product.
         this.assign(i);
-        this.call2("Math.imul(", i);
+        call2(this, "Math.imul(", i);
         break;
       case ops.OP_bitand:
         this.assign(i);
-        this.binary(i, " & ");
+        binary(this, i, " & ");
         break;
       case ops.OP_bitor:
         this.assign(i);
-        this.binary(i, " | ");
+        binary(this, i, " | ");
         break;
       case ops.OP_bitxor:
         this.assign(i);
-        this.binary(i, " ^ ");
+        binary(this, i, " ^ ");
         break;
       case ops.OP_lshift:
         this.assign(i);
-        this.binary(i, " << ");
+        binary(this, i, " << ");
         break;
       case ops.OP_rshift:
         this.assign(i);
-        this.binary(i, " >> ");
+        binary(this, i, " >> ");
         break;
       case ops.OP_urshift:
         this.assign(i);
-        this.binary(i, " >>> ");
+        binary(this, i, " >>> ");
         break;
       case ops.OP_bitnot:
         this.assign(i);
@@ -1800,7 +1293,7 @@ export class MethodEmitter {
       case ops.OP_greaterthan:
       case ops.OP_greaterequals:
         this.assign(i);
-        this.compare(i, op, false);
+        compare(this, i, op, false);
         break;
       case ops.OP_convert_i:
       case ops.OP_coerce_i:
@@ -1819,14 +1312,14 @@ export class MethodEmitter {
         // A conversion that changes nothing, in place, is no code.
         if (
           ir.dst[i] === ir.src[i] &&
-          this.keeps(this.conversionType(<u8>op, i), this.regType[ir.src[i]])
+          keeps(this, conversionType(this, <u8>op, i), this.regType[ir.src[i]])
         ) {
           this.kept = true;
           return;
         }
 
         this.assign(i);
-        this.conversion(i, <u8>op);
+        conversion(this, i, <u8>op);
         break;
       case ops.OP_jump:
         out.text("    ");
@@ -1852,7 +1345,7 @@ export class MethodEmitter {
       case ops.OP_ifnle:
       case ops.OP_ifngt:
       case ops.OP_ifnge:
-        this.branch(i, <u8>op);
+        branch(this, i, <u8>op);
         break;
       case ops.OP_lookupswitch: {
         // An index out of range, or not an int, takes the default.
@@ -2034,7 +1527,7 @@ export class MethodEmitter {
 
         // By the interface's dispatch id, which its layout maps to a name.
         out.text("rt.callInterface(");
-        this.typeRef(this.regType[src]);
+        typeRef(this, this.regType[src]);
         out.text(", ");
         out.uint(a);
         out.text(", ");
@@ -2122,7 +1615,7 @@ export class MethodEmitter {
       case ops.OP_in:
         this.assign(i);
         // `name in object`.
-        this.call2("rt.in(", i);
+        call2(this, "rt.in(", i);
         return true;
       case ops.OP_callproperty:
       case ops.OP_callproplex:
@@ -2270,7 +1763,7 @@ export class MethodEmitter {
         return true;
       case ops.OP_hasnext:
         this.assign(i);
-        this.call2("rt.hasNext(", i);
+        call2(this, "rt.hasNext(", i);
         return true;
       case ops.OP_hasnext2: {
         // hasnext2 updates its two locals: the object and the index.
@@ -2290,23 +1783,23 @@ export class MethodEmitter {
       }
       case ops.OP_nextname:
         this.assign(i);
-        this.call2("rt.nextName(", i);
+        call2(this, "rt.nextName(", i);
         return true;
       case ops.OP_nextvalue:
         this.assign(i);
-        this.call2("rt.nextValue(", i);
+        call2(this, "rt.nextValue(", i);
         return true;
       case ops.OP_instanceof:
         this.assign(i);
-        this.call2("rt.instanceOf(", i);
+        call2(this, "rt.instanceOf(", i);
         return true;
       case ops.OP_istypelate:
         this.assign(i);
-        this.call2("rt.isTypeLate(", i);
+        call2(this, "rt.isTypeLate(", i);
         return true;
       case ops.OP_astypelate:
         this.assign(i);
-        this.call2("rt.asTypeLate(", i);
+        call2(this, "rt.asTypeLate(", i);
         return true;
       case ops.OP_istype:
       case ops.OP_astype:
@@ -2328,11 +1821,11 @@ export class MethodEmitter {
       case ops.OP_lf32:
       case ops.OP_lf64:
         this.assign(i);
-        if (this.isAddress(src)) {
+        if (isAddress(this, src)) {
           out.text("(");
-          this.inRange(src, op);
+          inRange(this, src, op);
           out.text(" ? rt.view.");
-          out.text(this.viewMethod(op));
+          out.text(viewMethod(op));
           out.text("(");
           this.reg(src);
           out.text(op === ops.OP_li8 ? ")" : ", true)");
@@ -2344,7 +1837,7 @@ export class MethodEmitter {
         out.text("(");
         this.reg(src);
         out.text(")");
-        if (this.isAddress(src)) {
+        if (isAddress(this, src)) {
           out.text(")");
         }
 
@@ -2356,11 +1849,11 @@ export class MethodEmitter {
       case ops.OP_sf64:
         // The value's conversion is DataView's own for a number or Boolean.
         out.text("    ");
-        if (this.isAddress(src + 1) && this.isNumeric(src)) {
+        if (isAddress(this, src + 1) && isNumeric(this, src)) {
           out.text("if (");
-          this.inRange(src + 1, op);
+          inRange(this, src + 1, op);
           out.text(") rt.view.");
-          out.text(this.viewMethod(op));
+          out.text(viewMethod(op));
           out.text("(");
           this.reg(src + 1);
           out.text(", ");
@@ -2400,7 +1893,7 @@ export class MethodEmitter {
         return true;
       case ops.OP_dxns:
         out.text("    rt.setDefaultXmlNamespace(");
-        this.string(a);
+        poolString(this, a);
         out.text(")");
         return true;
       case ops.OP_dxnslate:
@@ -2524,7 +2017,7 @@ export class MethodEmitter {
   }
 
   indexed(a: u32, r: i32): bool {
-    return this.abc.pool.mnKind[a] === C.CONSTANT_MultinameL && this.isNumber(r);
+    return this.abc.pool.mnKind[a] === C.CONSTANT_MultinameL && isNumber(this, r);
   }
 
   /** `, r, r+1, ...` for `count` arguments from register `from`. */
@@ -2569,7 +2062,7 @@ export class MethodEmitter {
       bt === BUILTIN_Namespace;
     if (primitive) {
       out.text("rt.prototypeOf(");
-      this.typeRef(type);
+      typeRef(this, type);
       out.text(").$m");
       out.uint(disp);
       out.text(".call(");
@@ -2587,7 +2080,7 @@ export class MethodEmitter {
       out.text(".$m");
       out.uint(disp);
       out.text(" ?? rt.prototypeOf(");
-      this.typeRef(type);
+      typeRef(this, type);
       out.text(").$m");
       out.uint(disp);
       out.text(").call(");
@@ -2603,703 +2096,5 @@ export class MethodEmitter {
     out.text("(");
     this.list(src + 1, argc);
     out.text(")");
-  }
-
-  /**
-   * The comparison `op` of instruction i's two operands, negated if `not`:
-   * JavaScript's own operator where the types make it AS3's, else the
-   * runtime's. For numbers and Booleans the relational operators and ==
-   * are the same in both, NaN included; === is for any two primitives; and
-   * == for two Strings, null included. A String compared otherwise would
-   * convert as JavaScript does, which differs from AS3 for "0b1".
-   */
-  compare(i: u32, op: u16, not: bool): void {
-    const out = this.out;
-    const a = this.src(i, 0);
-    const b = this.src(i, 1);
-    const numeric = this.isNumeric(a) && this.isNumeric(b);
-    const strings = this.builtinOf(a) === BUILTIN_String && this.builtinOf(b) === BUILTIN_String;
-    let js = "";
-    let runtime = "";
-    switch (op) {
-      case ops.OP_equals:
-        js = numeric || strings ? " == " : "";
-        runtime = "rt.equals(";
-        break;
-      case ops.OP_strictequals:
-        js = this.isPrimitive(a) && this.isPrimitive(b) ? " === " : "";
-        runtime = "rt.strictEquals(";
-        break;
-      case ops.OP_lessthan:
-        js = numeric ? " < " : "";
-        runtime = "rt.lessThan(";
-        break;
-      case ops.OP_lessequals:
-        js = numeric ? " <= " : "";
-        runtime = "rt.lessEquals(";
-        break;
-      case ops.OP_greaterthan:
-        js = numeric ? " > " : "";
-        runtime = "rt.greaterThan(";
-        break;
-      default:
-        js = numeric ? " >= " : "";
-        runtime = "rt.greaterEquals(";
-        break;
-    }
-
-    if (js.length === 0) {
-      if (not) {
-        out.text("!");
-      }
-
-      this.call2(runtime, i);
-      return;
-    }
-
-    out.text(not ? "!(" : "(");
-    this.reg(a);
-    out.text(js);
-    this.reg(b);
-    out.text(")");
-  }
-
-  /** Whether register r holds an int, uint, Number or Boolean now. */
-  isNumeric(r: i32): bool {
-    return this.isNumber(r) || this.builtinOf(r) === BUILTIN_Boolean;
-  }
-
-  /** Whether register r holds a value of one of the primitive types now. */
-  isPrimitive(r: i32): bool {
-    return this.isNumeric(r) || this.builtinOf(r) === BUILTIN_String;
-  }
-
-  /**
-   * Whether add i is JavaScript's own `+`: a String and a String, int, uint
-   * or Boolean, whose strings are JavaScript's. null, the one String that
-   * is not a string, adds as a number in both, and Numbers' strings differ.
-   */
-  concatenates(i: u32): bool {
-    const a = this.builtinOf(this.src(i, 0));
-    const b = this.builtinOf(this.src(i, 1));
-    return (a === BUILTIN_String || b === BUILTIN_String) && this.primitive(a) && this.primitive(b);
-  }
-
-  private primitive(bt: u8): bool {
-    return (
-      bt === BUILTIN_String || bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Boolean
-    );
-  }
-
-  /**
-   * Whether multiply i is an int multiplication that wraps, as avmplus' JIT
-   * makes one (CodegenLIR::coerceNumberToInt): two ints or uints, which
-   * the verifier makes Numbers just before, whose product is converted to
-   * an int or uint next, in the same block. Its interpreter, which runs
-   * the initializers, multiplies doubles. A product converted after a
-   * merge, or later in the block, stays a double product here, where
-   * avmshell's JIT may still wrap it.
-   */
-  private wraps(i: u32): bool {
-    const ir = this.ir;
-    const next = i + 1;
-    if (
-      this.staticInit ||
-      !this.promoted[this.src(i, 0)] ||
-      !this.promoted[this.src(i, 1)] ||
-      next >= this.blockLast ||
-      ir.src[next] !== ir.dst[i]
-    ) {
-      return false;
-    }
-
-    switch (ir.op[next]) {
-      case ops.OP_convert_i:
-      case ops.OP_coerce_i:
-      case ops.OP_convert_u:
-      case ops.OP_coerce_u:
-        return true;
-      case IR_Coerce: {
-        const bt = this.domain.builtin(ir.c[next]);
-        return bt === BUILTIN_Int || bt === BUILTIN_Uint;
-      }
-      default:
-        return false;
-    }
-  }
-
-  /** Whether method m initializes a script or a class, as avmplus' setStaticInit marks it. */
-  private isStaticInit(m: u32): bool {
-    const abc = this.abc;
-    for (let s = 0; s < abc.scriptInit.length; s++) {
-      if (abc.scriptInit[s] === m) {
-        return true;
-      }
-    }
-
-    for (let c = 0; c < abc.classInit.length; c++) {
-      if (abc.classInit[c] === m) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /** Whether register r is a domain memory address the emitter can use as it is: an int or uint. */
-  private isAddress(r: i32): bool {
-    const bt = this.builtinOf(r);
-    return bt === BUILTIN_Int || bt === BUILTIN_Uint;
-  }
-
-  /** `(a >>> 0) <= rt.memoryLength - size`: whether op's bytes at address register a are all in the domain memory. */
-  private inRange(a: i32, op: u16): void {
-    this.out.text("(");
-    this.reg(a);
-    this.out.text(" >>> 0) <= rt.memoryLength - ");
-    this.out.uint(this.memorySize(op));
-  }
-
-  private memorySize(op: u16): u32 {
-    switch (op) {
-      case ops.OP_li8:
-      case ops.OP_si8:
-        return 1;
-      case ops.OP_li16:
-      case ops.OP_si16:
-        return 2;
-      case ops.OP_lf64:
-      case ops.OP_sf64:
-        return 8;
-      default:
-        return 4;
-    }
-  }
-
-  /** The DataView method that loads or stores as op does, little-endian. */
-  private viewMethod(op: u16): string {
-    switch (op) {
-      case ops.OP_li8:
-        return "getUint8";
-      case ops.OP_li16:
-        return "getUint16";
-      case ops.OP_li32:
-        return "getInt32";
-      case ops.OP_lf32:
-        return "getFloat32";
-      case ops.OP_lf64:
-        return "getFloat64";
-      case ops.OP_si8:
-        return "setUint8";
-      case ops.OP_si16:
-        return "setUint16";
-      case ops.OP_si32:
-        return "setInt32";
-      case ops.OP_sf32:
-        return "setFloat32";
-      default:
-        return "setFloat64";
-    }
-  }
-
-  isNumber(r: i32): bool {
-    const bt = this.builtinOf(r);
-    return bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Number;
-  }
-
-  binary(i: u32, operator: string): void {
-    this.reg(this.src(i, 0));
-    this.out.text(operator);
-    this.reg(this.src(i, 1));
-  }
-
-  binaryInt(i: u32, operator: string): void {
-    this.binary(i, operator);
-    this.out.text(" | 0");
-  }
-
-  call2(fn: string, i: u32): void {
-    this.out.text(fn);
-    this.reg(this.src(i, 0));
-    this.out.text(", ");
-    this.reg(this.src(i, 1));
-    this.out.text(")");
-  }
-
-  /** A conditional branch comparing two values; the `n` forms are true when the comparison is not. */
-  branch(i: u32, op: u8): void {
-    const out = this.out;
-    out.text("    if (");
-    switch (op) {
-      case ops.OP_ifeq:
-        this.compare(i, ops.OP_equals, false);
-        break;
-      case ops.OP_ifne:
-        this.compare(i, ops.OP_equals, true);
-        break;
-      case ops.OP_ifstricteq:
-        this.compare(i, ops.OP_strictequals, false);
-        break;
-      case ops.OP_ifstrictne:
-        this.compare(i, ops.OP_strictequals, true);
-        break;
-      case ops.OP_iflt:
-        this.compare(i, ops.OP_lessthan, false);
-        break;
-      case ops.OP_ifle:
-        this.compare(i, ops.OP_lessequals, false);
-        break;
-      case ops.OP_ifgt:
-        this.compare(i, ops.OP_greaterthan, false);
-        break;
-      case ops.OP_ifge:
-        this.compare(i, ops.OP_greaterequals, false);
-        break;
-      case ops.OP_ifnlt:
-        this.compare(i, ops.OP_lessthan, true);
-        break;
-      case ops.OP_ifnle:
-        this.compare(i, ops.OP_lessequals, true);
-        break;
-      case ops.OP_ifngt:
-        this.compare(i, ops.OP_greaterthan, true);
-        break;
-      default:
-        this.compare(i, ops.OP_greaterequals, true);
-        break;
-    }
-
-    out.text(") { ");
-    this.goto(this.ir.a[i]);
-    out.text(" }");
-  }
-
-  /** The type a conversion instruction gives, or CONVERTS for one that always calls the runtime. */
-  conversionType(op: u8, i: u32): i32 {
-    const domain = this.domain;
-    switch (op) {
-      case ops.OP_convert_i:
-      case ops.OP_coerce_i:
-        return domain.intType;
-      case ops.OP_convert_u:
-      case ops.OP_coerce_u:
-        return domain.uintType;
-      case ops.OP_convert_d:
-      case ops.OP_coerce_d:
-        return domain.numberType;
-      case ops.OP_convert_b:
-      case ops.OP_coerce_b:
-        return domain.booleanType;
-      case ops.OP_coerce_s:
-        return domain.stringType;
-      case ops.OP_coerce_o:
-        return domain.objectType();
-      case ops.OP_coerce:
-        return this.ir.c[i];
-      case ops.OP_coerce_a:
-        return TYPE_Any;
-      default:
-        return CONVERTS;
-    }
-  }
-
-  /** Whether converting a value of type `from` to `type` gives the value itself, as convert writes no code for. */
-  keeps(type: i32, from: i32): bool {
-    if (type === CONVERTS) {
-      return false;
-    }
-
-    const domain = this.domain;
-    const bt = domain.builtin(type);
-    const fromBt = domain.builtin(from);
-    return (
-      type === from ||
-      bt === BUILTIN_Any ||
-      (bt === BUILTIN_Number &&
-        (fromBt === BUILTIN_Int || fromBt === BUILTIN_Uint || fromBt === BUILTIN_Number)) ||
-      this.upcast(type, from)
-    );
-  }
-
-  /**
-   * Whether a value of class type `from` is one of class `type` already, as
-   * CodegenLIR::coerceToType writes no code for: instances of a subtype
-   * are, and null stays null.
-   */
-  upcast(type: i32, from: i32): bool {
-    return (
-      this.isClassRef(type) &&
-      this.isClassRef(from) &&
-      this.domain.traits.subtypeOf(<u32>from, <u32>type)
-    );
-  }
-
-  /** The conversion instructions: the value of src as the type they give. */
-  conversion(i: u32, op: u8): void {
-    const domain = this.domain;
-    const src = this.ir.src[i];
-    const from = this.regType[src];
-    switch (op) {
-      case ops.OP_convert_i:
-      case ops.OP_coerce_i:
-        this.convert("", src, domain.intType, from);
-        break;
-      case ops.OP_convert_u:
-      case ops.OP_coerce_u:
-        this.convert("", src, domain.uintType, from);
-        break;
-      case ops.OP_convert_d:
-      case ops.OP_coerce_d:
-        this.convert("", src, domain.numberType, from);
-        break;
-      case ops.OP_convert_b:
-      case ops.OP_coerce_b:
-        this.convert("", src, domain.booleanType, from);
-        break;
-      case ops.OP_convert_s:
-        // Unlike coerce_s, null and undefined become "null" and "undefined".
-        this.out.text("rt.toString(");
-        this.reg(src);
-        this.out.text(")");
-        break;
-      case ops.OP_coerce_s:
-        this.convert("", src, domain.stringType, from);
-        break;
-      case ops.OP_convert_o:
-        this.out.text("rt.toObject(");
-        this.reg(src);
-        this.out.text(")");
-        break;
-      case ops.OP_coerce_o:
-        this.convert("", src, domain.objectType(), from);
-        break;
-      case ops.OP_coerce:
-        this.convert("", src, this.ir.c[i], from);
-        break;
-      default:
-        this.reg(src);
-        break;
-    }
-  }
-
-  /**
-   * Register r (or `prefix` + r, for a parameter) converted to `type` from
-   * `from`, as avmplus' coercions: nothing when it is that type already,
-   * plain JavaScript for numbers and booleans, the runtime otherwise.
-   */
-  convert(prefix: string, r: i32, type: i32, from: i32): void {
-    const out = this.out;
-    const domain = this.domain;
-    const bt = domain.builtin(type);
-    const fromBt = domain.builtin(from);
-    if (type === from || bt === BUILTIN_Any) {
-      this.operand(prefix, r);
-      return;
-    }
-
-    const numeric = fromBt === BUILTIN_Int || fromBt === BUILTIN_Uint || fromBt === BUILTIN_Number;
-    switch (bt) {
-      case BUILTIN_Int:
-        if (numeric || fromBt === BUILTIN_Boolean) {
-          this.operand(prefix, r);
-          out.text(" | 0");
-        } else {
-          out.text("rt.toInt(");
-          this.operand(prefix, r);
-          out.text(")");
-        }
-        return;
-      case BUILTIN_Uint:
-        if (numeric || fromBt === BUILTIN_Boolean) {
-          this.operand(prefix, r);
-          out.text(" >>> 0");
-        } else {
-          out.text("rt.toUint(");
-          this.operand(prefix, r);
-          out.text(")");
-        }
-        return;
-      case BUILTIN_Number:
-        if (numeric) {
-          this.operand(prefix, r);
-        } else {
-          out.text("rt.toNumber(");
-          this.operand(prefix, r);
-          out.text(")");
-        }
-        return;
-      case BUILTIN_Boolean:
-        out.text("!!");
-        this.operand(prefix, r);
-        return;
-      case BUILTIN_String:
-        out.text("rt.coerceString(");
-        this.operand(prefix, r);
-        out.text(")");
-        return;
-      case BUILTIN_Object:
-        out.text("rt.coerceObject(");
-        this.operand(prefix, r);
-        out.text(")");
-        return;
-      default:
-        if (this.upcast(type, from)) {
-          this.operand(prefix, r);
-          return;
-        }
-
-        // A class's instances, by T: no builtin for the runtime to look for.
-        out.text(this.isClassRef(type) ? "rt.coerceTo(" : "rt.coerce(");
-        this.operand(prefix, r);
-        out.text(", ");
-        this.typeRef(type);
-        out.text(")");
-    }
-  }
-
-  operand(prefix: string, r: i32): void {
-    if (prefix.length) {
-      this.out.text(prefix);
-      this.out.uint(<u64>r);
-    } else {
-      this.reg(r);
-    }
-  }
-
-  /**
-   * Type t in a method: an entry of the module's table T, made once when
-   * the module loads, for a class or Vector; the builtin types, and * as
-   * null, as they are.
-   */
-  /** Whether typeRef writes type t as T[k], a class's instances; else a literal. */
-  isClassRef(t: i32): bool {
-    // What typeExpr writes as a literal stays one: *, the builtins it names
-    // by string, and a type that is not a class's instances.
-    const bt = t < 0 ? BUILTIN_Any : this.domain.builtin(t);
-    return (
-      t >= 0 &&
-      (bt === BUILTIN_Other || bt === BUILTIN_Namespace) &&
-      t !== this.domain.voidType &&
-      this.domain.traits.kind[t] === TRAITS_Instance
-    );
-  }
-
-  typeRef(t: i32): void {
-    const out = this.out;
-    if (!this.isClassRef(t)) {
-      this.typeExpr(t);
-      return;
-    }
-
-    if (!this.typeIndex.has(t)) {
-      this.typeIndex.set(t, <u32>this.types.length);
-      this.types.push(t);
-    }
-
-    out.text("T[");
-    out.uint(this.typeIndex.get(t));
-    out.text("]");
-  }
-
-  /**
-   * A reference to type t for the runtime, by name, as types are known
-   * across modules: null for *, a string for the builtin primitive types,
-   * rt.cls(namespace, "Name") for a class, rt.vector(type) for Vector.<T>.
-   */
-  typeExpr(t: i32): void {
-    const out = this.out;
-    const domain = this.domain;
-    const traits = domain.traits;
-    if (t < 0) {
-      out.text("null");
-      return;
-    }
-
-    switch (domain.builtin(t)) {
-      case BUILTIN_Int:
-        out.text('"int"');
-        return;
-      case BUILTIN_Uint:
-        out.text('"uint"');
-        return;
-      case BUILTIN_Number:
-        out.text('"Number"');
-        return;
-      case BUILTIN_Boolean:
-        out.text('"Boolean"');
-        return;
-      case BUILTIN_String:
-        out.text('"String"');
-        return;
-      case BUILTIN_Object:
-        out.text('"Object"');
-        return;
-      default:
-        break;
-    }
-
-    if (t === domain.voidType) {
-      out.text('"void"');
-    } else if (traits.kind[t] !== TRAITS_Instance) {
-      out.text("null");
-    } else if (traits.param[t] !== TYPE_Any) {
-      out.text("rt.vector(");
-      this.typeExpr(traits.param[t]);
-      out.text(")");
-    } else {
-      const index = traits.abc[t];
-      const abc = domain.abcs[index];
-      const pool = abc.pool;
-      let mn = abc.instanceName[traits.owner[t]];
-      if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
-        mn = pool.mnA[mn];
-      }
-
-      let ns = pool.mnA[mn];
-      if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
-        ns = pool.nsSetMembers[pool.nsSetStart[ns]];
-      }
-
-      const name = domain.abcString[index][pool.mnB[mn]];
-      out.text("rt.cls(");
-      const id = domain.abcNs[index][ns];
-      if (domain.nsType[id] === NS_Private && index === this.index) {
-        // A private namespace is its module's own object, N[k], which its
-        // definitions are bound in, not one made again from its URI.
-        out.text("N[");
-        out.uint(ns);
-        out.text("]");
-      } else {
-        this.namespace(id);
-      }
-
-      out.text(", ");
-      out.string(domain.stringPtr[name], domain.stringLength[name]);
-      out.text(")");
-    }
-  }
-
-  /** A non-private namespace by its interned id, as rt.ns(type, uri). */
-  namespace(id: u32): void {
-    const out = this.out;
-    out.text("rt.ns(");
-    out.uint(this.domain.nsType[id]);
-    out.text(", ");
-    this.uri(this.domain.nsUri[id]);
-    out.text(")");
-  }
-
-  uri(id: u32): void {
-    if (id === URI_None) {
-      this.out.text("null");
-      return;
-    }
-
-    const domain = this.domain;
-    this.out.string(domain.stringPtr[id], domain.stringLength[id]);
-  }
-
-  /** "uri::name", or just the name in a public namespace with an empty URI. */
-  qualified(ns: u32, name: u32): string {
-    const domain = this.domain;
-    const nameText = String.UTF8.decodeUnsafe(domain.stringPtr[name], domain.stringLength[name]);
-    const uri = domain.nsUri[ns];
-    if (uri === URI_None) {
-      return nameText;
-    }
-
-    const uriText = String.UTF8.decodeUnsafe(domain.stringPtr[uri], domain.stringLength[uri]);
-    return uriText.length ? `${uriText}::${nameText}` : nameText;
-  }
-
-  /** The qualified name of the class traits t belong to. */
-  className(traits: TraitsTable, t: u32): string {
-    const domain = this.domain;
-    const index = traits.abc[t];
-    const abc = domain.abcs[index];
-    const pool = abc.pool;
-    let mn = abc.instanceName[traits.owner[t]];
-    if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
-      mn = pool.mnA[mn];
-    }
-
-    let ns = pool.mnA[mn];
-    if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
-      ns = pool.nsSetMembers[pool.nsSetStart[ns]];
-    }
-
-    return this.qualified(domain.abcNs[index][ns], domain.abcString[index][pool.mnB[mn]]);
-  }
-
-  /** Pool string `index` as a JavaScript string literal. */
-  string(index: u32): void {
-    const pool = this.abc.pool;
-    this.out.string(this.base + pool.stringStart[index], pool.stringLength[index]);
-  }
-
-  /**
-   * A constant of default-value kind `kind`, index `value`, for a slot or
-   * parameter of `type`; value 0 is the type's own default.
-   */
-  constant(value: u32, kind: u8, type: i32): void {
-    const out = this.out;
-    const pool = this.abc.pool;
-    if (value === 0) {
-      this.defaultOf(type);
-      return;
-    }
-
-    switch (kind) {
-      case 0x03:
-        out.int(pool.ints[value]);
-        return;
-      case 0x04:
-        out.uint(pool.uints[value]);
-        return;
-      case 0x06:
-        out.double(pool.doubles[value]);
-        return;
-      case 0x01:
-        this.string(value);
-        return;
-      case 0x0a:
-        out.text("false");
-        return;
-      case 0x0b:
-        out.text("true");
-        return;
-      case 0x0c:
-        out.text("null");
-        return;
-      default:
-        // A namespace, as the Namespace object it is to AS3.
-        out.text("rt.namespace(N[");
-        out.uint(value);
-        out.text("])");
-        return;
-    }
-  }
-
-  /** The value a slot or parameter of `type` has before anything is stored. */
-  defaultOf(type: i32): void {
-    const out = this.out;
-    switch (this.domain.builtin(type)) {
-      case BUILTIN_Any:
-        out.text("undefined");
-        return;
-      case BUILTIN_Int:
-      case BUILTIN_Uint:
-        out.text("0");
-        return;
-      case BUILTIN_Number:
-        out.text("NaN");
-        return;
-      case BUILTIN_Boolean:
-        out.text("false");
-        return;
-      default:
-        out.text("null");
-        return;
-    }
   }
 }

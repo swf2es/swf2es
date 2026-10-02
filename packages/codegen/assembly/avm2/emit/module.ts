@@ -30,6 +30,7 @@ import { Domain, NS_Private } from "../link/domain";
 import { TRAITS_Class, TRAITS_Instance } from "../link/traits";
 import { MethodEmitter } from "./method";
 import { Output } from "./output";
+import { className, constant, namespace, poolString, qualified, typeExpr, uri } from "./refs";
 
 @final
 export class ModuleEmitter {
@@ -101,10 +102,10 @@ export class ModuleEmitter {
       const id = ids[i];
       if (domain.nsType[id] === NS_Private) {
         out.text("rt.privateNs(");
-        this.methods.uri(domain.nsUri[id]);
+        uri(this.methods, domain.nsUri[id]);
         out.text(")");
       } else {
-        this.methods.namespace(id);
+        namespace(this.methods, id);
       }
     }
 
@@ -188,7 +189,7 @@ export class ModuleEmitter {
       kind === C.CONSTANT_MultinameA;
     const name = hasName ? pool.mnB[i] : 0;
     if (name) {
-      this.methods.string(name);
+      poolString(this.methods, name);
     } else {
       out.text("null");
     }
@@ -280,7 +281,7 @@ export class ModuleEmitter {
     out.text(")(");
     for (let k = 0; k < types.length; k++) {
       out.text(k ? ", " : "");
-      methods.typeExpr(types[k]);
+      typeExpr(methods, types[k]);
     }
 
     out.text(")");
@@ -365,7 +366,7 @@ export class ModuleEmitter {
     if (t >= 0) {
       const kind = traits.kind[t];
       if (kind === TRAITS_Instance || kind === TRAITS_Class) {
-        text = this.methods.className(traits, <u32>t);
+        text = className(this.methods, traits, <u32>t);
         text += kind === TRAITS_Class ? "." : "#";
       }
 
@@ -383,7 +384,7 @@ export class ModuleEmitter {
           }
 
           traits.readName(domain, this.index, i);
-          text += this.methods.qualified(traits.nameNs, traits.nameId);
+          text += qualified(this.methods, traits.nameNs, traits.nameId);
           return text;
         }
       }
@@ -437,11 +438,11 @@ export class ModuleEmitter {
       if (kind === C.TRAIT_Class) {
         out.text("null");
       } else {
-        this.methods.constant(abc.traitValue[i], abc.traitValueKind[i], type);
+        constant(this.methods, abc.traitValue[i], abc.traitValueKind[i], type);
       }
 
       out.text(", ");
-      this.methods.typeExpr(type);
+      typeExpr(this.methods, type);
       out.text("]");
     }
 
@@ -456,7 +457,7 @@ export class ModuleEmitter {
         out.uint(this.poolIndexOf(ns));
         out.text("]");
       } else {
-        this.methods.namespace(ns);
+        namespace(this.methods, ns);
       }
 
       out.text(", ");
@@ -514,7 +515,7 @@ export class ModuleEmitter {
     }
 
     if (returns) {
-      this.methods.typeExpr(traits.returnType[m]);
+      typeExpr(this.methods, traits.returnType[m]);
       out.text(", ");
     }
 
@@ -522,7 +523,7 @@ export class ModuleEmitter {
     const start = traits.paramStart[m];
     for (let p: u32 = 0; p < traits.paramCount[m]; p++) {
       out.text(p ? ", " : "");
-      this.methods.typeExpr(traits.paramType[start + p]);
+      typeExpr(this.methods, traits.paramType[start + p]);
     }
 
     out.text("], ");
