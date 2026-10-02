@@ -5,15 +5,53 @@ import { avm2 } from "@swf2es/runtime";
 import { CONTENT, type TextObject } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
 import { applied, emptyFormat, type PartialFormat } from "../../../text.js";
+import { GUTTER, lineOf } from "../../../text-layout.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
 const ALIGNS = ["left", "center", "right", "justify", "start", "end"];
 
-/** A number Flash keeps as an int: rounded, a half away from zero (12.7 is 13, -3.5 is -4). */
+/** A number Flash keeps as an int: rounded, a half to even (12.7 is 13, -3.5 is -4, 10.5 is 10, 11.5 is 12). */
 function rounded(v: number): number {
-  return Math.sign(v) * Math.round(Math.abs(v));
+  const r = Math.round(v);
+  return r - v === 0.5 && r % 2 !== 0 ? r - 1 : r;
+}
+
+/** The line a point in the field is on, by the lines' tops and heights: -1 for none. */
+function lineAtPoint(field: TextObject, x: number, y: number): number {
+  const layout = field.layout;
+  if (x < 0 || x > field.width * 20) {
+    return -1;
+  }
+
+  for (const [i, line] of layout.lines.entries()) {
+    if (y >= line.y && y < line.y + line.ascent + line.descent + line.leading) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+/** The last first line a scroll can show: the lines after it fit the field's height. */
+function maxScrollV(field: TextObject): number {
+  const lines = field.layout.lines;
+  const room = field.height * 20 - 2 * GUTTER;
+  let used = 0;
+  let first = lines.length;
+  while (first > 0) {
+    const line = lines[first - 1];
+    const next = used + line.ascent + line.descent + (first < lines.length ? line.leading : 0);
+    if (next > room && first < lines.length) {
+      break;
+    }
+
+    used = next;
+    first--;
+  }
+
+  return Math.max(1, first + 1);
 }
 
 export function textFieldNatives(s: Scripting): avm2.Natives {
@@ -28,7 +66,38 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     o.$format = { ...values, tabStops: values.tabStops ? [...values.tabStops] : null };
     return o;
   };
-  const changed = (o: { $display: TextObject }) => o.$display.invalidate(CONTENT);
+  /** The text or the field changed: drawn again, and fitted to its text under autoSize. */
+  const changed = (o: { $display: TextObject }) => {
+    o.$display.invalidate(CONTENT);
+    o.$display.fit();
+  };
+  /** A line's index, or RangeError 2006 past the lines. */
+  const lineAt = (field: TextObject, v: Value): number => {
+    const i = s.rt.toInt(v);
+    if (i < 0 || i >= field.layout.lines.length) {
+      throw s.rt.error("RangeError", 2006);
+    }
+
+    return i;
+  };
+  /** The lines that fit the field's height from the first shown, scrollV: one at least. */
+  const shownLines = (field: TextObject, first: number): number => {
+    const lines = field.layout.lines;
+    const room = field.height * 20 - 2 * GUTTER;
+    let n = 0;
+    let used = 0;
+    for (let i = first; i < lines.length; i++) {
+      used += lines[i].ascent + lines[i].descent;
+      if (n > 0 && used > room) {
+        break;
+      }
+
+      used += lines[i].leading;
+      n++;
+    }
+
+    return Math.max(1, n);
+  };
   /** [begin, end) as getTextFormat and setTextFormat take them: -1 for the start or the end; RangeError 2006 past them. */
   const range = (field: TextObject, begin: Value, end: Value): [number, number] => {
     const length = field.model.text.length;
@@ -269,6 +338,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     }
     set autoSize(v: Value) {
       this.$display.autoSize = choice(v, ["none", "left", "right", "center"], "autoSize");
+      this.$display.fit();
     }
     get antiAliasType(): string {
       return this.$display.antiAliasType;
@@ -336,6 +406,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     }
     set embedFonts(v: Value) {
       this.$display.embedFonts = !!v;
+      changed(this);
     }
     get selectable(): boolean {
       return this.$display.selectable;
@@ -399,21 +470,103 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       this.$display.useRichTextClipboard = !!v;
     }
 
-    // Lines are the text's own, \r apart; a wrapped field's are not counted without its layout.
+    get textWidth(): number {
+      return this.$display.layout.width / 20;
+    }
+    get textHeight(): number {
+      return this.$display.layout.height / 20;
+    }
+    // Laid out now: adl's count can lag a relayout until the next.
     get numLines(): number {
-      return this.$display.model.text.split("\r").length;
+      return this.$display.layout.lines.length;
+    }
+    getLineMetrics(lineIndex: Value): Value {
+      const line = this.$display.layout.lines[lineAt(this.$display, lineIndex)];
+      return s.rt.construct(
+        s.rt.classNamed("flash.text::TextLineMetrics"),
+        line.x / 20,
+        line.width / 20,
+        (line.ascent + line.descent + line.leading) / 20,
+        line.ascent / 20,
+        line.descent / 20,
+        line.leading / 20,
+      );
+    }
+    getLineLength(lineIndex: Value): number {
+      const line = this.$display.layout.lines[lineAt(this.$display, lineIndex)];
+      return line.end - line.start;
+    }
+    getLineOffset(lineIndex: Value): number {
+      return this.$display.layout.lines[lineAt(this.$display, lineIndex)].start;
+    }
+    getLineText(lineIndex: Value): string {
+      const line = this.$display.layout.lines[lineAt(this.$display, lineIndex)];
+      return this.$display.model.text.slice(line.start, line.end);
+    }
+    getLineIndexOfChar(charIndex: Value): number {
+      const i = s.rt.toInt(charIndex);
+      const field = this.$display;
+      if (i < 0 || i >= field.model.text.length) {
+        return -1;
+      }
+
+      return lineOf(field.layout, i);
+    }
+    /** Where a character is, in the field: null for one past the text, a newline, or one its font lacks. */
+    getCharBoundaries(charIndex: Value): Value {
+      const i = s.rt.toInt(charIndex);
+      const field = this.$display;
+      if (i < 0 || i >= field.model.text.length) {
+        return null;
+      }
+
+      const line = field.layout.lines[lineOf(field.layout, i)];
+      const c = line.chars[i - line.start];
+      if (!c?.shown) {
+        return null;
+      }
+
+      return s.rt.construct(
+        s.rt.classNamed("flash.geom::Rectangle"),
+        c.x / 20,
+        line.y / 20,
+        c.advance / 20,
+        (line.ascent + line.descent) / 20,
+      );
+    }
+    getLineIndexAtPoint(x: Value, y: Value): number {
+      return lineAtPoint(this.$display, s.rt.toNumber(x) * 20, s.rt.toNumber(y) * 20);
+    }
+    getCharIndexAtPoint(x: Value, y: Value): number {
+      const field = this.$display;
+      const px = s.rt.toNumber(x) * 20;
+      const i = lineAtPoint(field, px, s.rt.toNumber(y) * 20);
+      if (i < 0) {
+        return -1;
+      }
+
+      for (const c of field.layout.lines[i].chars) {
+        if (c.shown && px >= c.x && px < c.x + c.advance) {
+          return c.index;
+        }
+      }
+
+      return -1;
     }
     get scrollV(): number {
       return this.$display.scrollV;
     }
     set scrollV(v: Value) {
-      this.$display.scrollV = Math.max(1, s.rt.toInt(v));
+      const field = this.$display;
+      field.scrollV = Math.max(1, Math.min(s.rt.toInt(v), maxScrollV(field)));
+      changed(this);
     }
     get maxScrollV(): number {
-      return 1;
+      return maxScrollV(this.$display);
     }
     get bottomScrollV(): number {
-      return this.$display.model.text.split("\r").length;
+      const field = this.$display;
+      return field.scrollV + shownLines(field, field.scrollV - 1) - 1;
     }
     get scrollH(): number {
       return this.$display.scrollH;

@@ -98,10 +98,23 @@ export class TextModel {
   text = "";
   /** Each character's format; runs share one object. */
   formats: CharFormat[] = [];
-  defaultFormat: CharFormat = { ...DEFAULT_FORMAT };
+  /** Counts the changes, text, formats or the default, for a layout to know it is current. */
+  revision = 0;
+  private fallback: CharFormat = { ...DEFAULT_FORMAT };
+
+  /** The format of text set as a whole, and of an empty field's line. */
+  get defaultFormat(): CharFormat {
+    return this.fallback;
+  }
+
+  set defaultFormat(format: CharFormat) {
+    this.fallback = format;
+    this.revision++;
+  }
 
   /** The text, all in the default format, as `text` sets it. */
   setText(text: string): void {
+    this.revision++;
     this.text = normalize(text);
     this.formats = new Array(this.text.length).fill(this.defaultFormat);
   }
@@ -112,6 +125,7 @@ export class TextModel {
    * else the default.
    */
   replace(begin: number, end: number, text: string): void {
+    this.revision++;
     const inserted = normalize(text);
     const format = this.formats[begin - 1] ?? this.formats[begin] ?? this.defaultFormat;
     this.text = this.text.slice(0, begin) + inserted + this.text.slice(end);
@@ -142,6 +156,7 @@ export class TextModel {
 
   /** [begin, end) given what `change` sets, as setTextFormat does. */
   setFormat(change: PartialFormat, begin: number, end: number): void {
+    this.revision++;
     const made = new Map<CharFormat, CharFormat>();
     for (let i = begin; i < end; i++) {
       const old = this.formats[i];
@@ -261,6 +276,7 @@ export class TextModel {
    * only in a multiline field.
    */
   setHtml(html: string, multiline: boolean): void {
+    this.revision++;
     let text = "";
     const formats: CharFormat[] = [];
     const stack: CharFormat[] = [this.defaultFormat];

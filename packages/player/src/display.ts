@@ -8,8 +8,10 @@ import { type ColorTransform, IDENTITY, type Matrix, type Place } from "@swf2es/
 import type { avm2 } from "@swf2es/runtime";
 import { BitmapStore } from "./bitmap.js";
 import type { Drawing } from "./drawing.js";
+import type { FontSet } from "./fonts.js";
 import { type Rect, shifted } from "./geometry.js";
 import { TextModel } from "./text.js";
+import { GUTTER, layoutText, type TextLayout } from "./text-layout.js";
 import {
   type BitmapCharacter,
   type Character,
@@ -299,6 +301,9 @@ export class ShapeObject extends DisplayObject {
  */
 export class TextObject extends DisplayObject {
   readonly model = new TextModel();
+  /** The embedded fonts its text may be in: its SWF's. */
+  fonts: FontSet | null = null;
+  private laid: { key: string; layout: TextLayout } | null = null;
   /** The field's rectangle, in its own pixels: from (left, top), width by height. */
   left = 0;
   top = 0;
@@ -378,6 +383,59 @@ export class TextObject extends DisplayObject {
     } else {
       this.model.setText(edit.text);
     }
+  }
+
+  /** Its text laid out, as of now: made again only when the text, its formats or the field changed. */
+  get layout(): TextLayout {
+    const key = `${this.model.revision}|${this.width}|${this.wordWrap}|${this.embedFonts}`;
+    if (this.laid?.key !== key) {
+      this.laid = {
+        key,
+        layout: layoutText({
+          text: this.model.text,
+          formats: this.model.formats,
+          defaultFormat: this.model.defaultFormat,
+          width: this.width,
+          wordWrap: this.wordWrap,
+          embedFonts: this.embedFonts,
+          fonts: this.fonts,
+        }),
+      };
+    }
+
+    return this.laid.layout;
+  }
+
+  /**
+   * Fit the field to its text, as autoSize does: its height to the text's
+   * and the gutters, and its width too unless it wraps, keeping its left,
+   * centre or right edge where it was.
+   */
+  fit(): void {
+    if (this.autoSize === "none") {
+      return;
+    }
+
+    const layout = this.layout;
+    const height = (layout.height + 2 * GUTTER) / 20;
+    if (!this.wordWrap) {
+      const width = (layout.width + 2 * GUTTER) / 20;
+      const moved =
+        this.autoSize === "center"
+          ? (this.width - width) / 2
+          : this.autoSize === "right"
+            ? this.width - width
+            : 0;
+      if (moved !== 0) {
+        this.matrix = { ...this.matrix, tx: Math.round((this.matrix.tx + moved) * 20) / 20 };
+        this.invalidate(TRANSFORM);
+      }
+
+      this.width = width;
+    }
+
+    this.height = height;
+    this.invalidate(CONTENT);
   }
 
   /** The text, \r between its lines. */
@@ -835,7 +893,9 @@ export function displayFor(
   }
 
   if (character.type === "text") {
-    return new TextObject(character);
+    const text = new TextObject(character);
+    text.fonts = library.fonts;
+    return text;
   }
 
   const clip = new MovieClip(character.timeline, library);
