@@ -183,7 +183,20 @@ function keepClamped(source: { style: object }): void {
 }
 
 /** How a view paints a fill over a region of the shape: a resolved bitmap's or gradient's through its renderer's textures. */
-type Painter = (fill: Paint, region: () => Area) => FillInput;
+type Painter = (fill: Paint, region: () => Area, hold: (release: () => void) => void) => FillInput;
+
+/** What each fill context holds of the textures its gradients use, given back as it is destroyed. */
+const holds = new WeakMap<GraphicsContext, (() => void)[]>();
+
+/** A context destroyed, the textures it held given back first: a fill's, or lines', which hold none. */
+function destroyContext(context: GraphicsContext): void {
+  for (const release of holds.get(context) ?? []) {
+    release();
+  }
+
+  holds.delete(context);
+  context.destroy();
+}
 
 /** The bounds of a fill's contours, whole pixels out. */
 function regionOf(contours: Path[]): Area {
@@ -288,9 +301,15 @@ function transformPath(path: Path, m: Linear): Path {
  */
 function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContext {
   const context = new GraphicsContext();
+  const held: (() => void)[] = [];
+  holds.set(context, held);
   for (const { fill, contours, winding } of layer.fills) {
     // The region is a radial gradient's alone to need: flattening the contours is not free.
-    const style = painter(fill, () => regionOf(contours));
+    const style = painter(
+      fill,
+      () => regionOf(contours),
+      (release) => held.push(release),
+    );
     const inside = (depth: number, sum: number) =>
       winding === "nonZero" ? sum !== 0 : depth % 2 === 0;
     const fillRegion = (region: Region, depth: number, sum: number) => {
@@ -378,13 +397,16 @@ export class PixiView {
    * samples, in global texture space so that its matrix maps the bitmap's
    * pixels to the shape's; nothing for a bitmap that has no texture.
    */
-  private readonly painter: Painter = (fill, region) => {
+  private readonly painter: Painter = (fill, region, hold) => {
     if (fill.type === "gradient") {
       const m = fill.matrix;
-      const drawn =
-        m.a * m.d - m.b * m.c !== 0 &&
-        gpuBitmaps(this.renderer).gradientTexture(fill, fill.radial ? region() : null);
-      return drawn ? { ...drawn, textureSpace: "global" } : { color: 0, alpha: 0 };
+      if (m.a * m.d - m.b * m.c === 0) {
+        return { color: 0, alpha: 0 };
+      }
+
+      const held = gpuBitmaps(this.renderer).gradientTexture(fill, fill.radial ? region() : null);
+      hold(held.release);
+      return { texture: held.texture, matrix: held.matrix, textureSpace: "global" };
     }
 
     if (fill.type !== "image") {
@@ -429,7 +451,7 @@ export class PixiView {
   dispose(root: PixiContainer): void {
     root.destroy({ children: true });
     for (const context of this.built) {
-      context.destroy();
+      destroyContext(context);
     }
   }
 
@@ -473,10 +495,20 @@ export class PixiView {
       }
     }
 
-    for (const context of old) {
-      context?.destroy();
+    // Destroyed after the new ones are made, so that a texture they share is kept, not made again.
+    try {
+      this.draw(o, node);
+    } finally {
+      for (const context of old) {
+        if (context) {
+          destroyContext(context);
+        }
+      }
     }
+  }
 
+  /** What `o` itself draws, into its node emptied of what it drew before. */
+  private draw(o: DisplayObject, node: Node): void {
     node.strokes = [];
     node.bitmap = null;
     const current = this.current(o);
@@ -980,36 +1012,37 @@ class GpuBitmaps {
     this.collected.unregister(copy);
   }
 
-  /** Each gradient's texture: a radial one's for the region it was made over, made again for another. */
-  private readonly gradients = new WeakMap<
-    GradientFill,
-    { region: string; texture: Texture; matrix: Matrix }
-  >();
+  /**
+   * Each gradient's textures by region: one for a linear gradient, one for
+   * each region a radial one fills, which `drawPath` and `copyFrom` can make
+   * several of, each held by the contexts that draw with it.
+   */
+  private readonly gradients = new WeakMap<GradientFill, Map<string, GradientTexture>>();
   private readonly gradientsCollected = new FinalizationRegistry<Texture>((t) => t.destroy(true));
 
   /**
    * A gradient's texture and the matrix from its texels to the shape, made
-   * once. A linear one is its ramp of 256 colours, sampled nearest and
+   * once for each region and held: given back with `release` by each
+   * context that took it, and freed when the last does, or when the fill is
+   * collected. A linear one is its ramp of 256 colours, sampled nearest and
    * spread as the texture wraps, moved half a pixel so that a pixel's
    * centre reads what Flash reads at its corner. A radial one is computed
    * over the region it fills, a texel a pixel (up to RADIAL_MAX a side),
-   * sampled linearly, and made again, the old one freed, when the region
-   * changes, as a drawing's path grows.
+   * sampled linearly.
    */
-  gradientTexture(
-    fill: GradientFill,
-    area: Area | null,
-  ): { texture: Texture; matrix: Matrix } | null {
+  gradientTexture(fill: GradientFill, area: Area | null): GradientTexture {
     const region = area ?? { x: 0, y: 0, width: 1, height: 1 };
     const key = area ? `${area.x} ${area.y} ${area.width} ${area.height}` : "";
-    const made = this.gradients.get(fill);
-    if (made?.region === key) {
-      return made;
+    let made = this.gradients.get(fill);
+    if (!made) {
+      made = new Map();
+      this.gradients.set(fill, made);
     }
 
-    if (made) {
-      this.gradientsCollected.unregister(made);
-      made.texture.destroy(true);
+    const known = made.get(key);
+    if (known) {
+      known.uses++;
+      return known;
     }
 
     const colors = ramp(fill.stops, fill.linearRgb);
@@ -1041,11 +1074,31 @@ class GpuBitmaps {
           .append(new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty))
           // Texels to the gradient square, -819.2 to 819.2 a side.
           .append(new Matrix(1638.4 / 256, 0, 0, 1638.4, -819.2, -819.2));
-    const result = { region: key, texture, matrix };
-    this.gradients.set(fill, result);
-    this.gradientsCollected.register(fill, texture, result);
-    return result;
+    const byRegion = made;
+    const entry: GradientTexture = {
+      texture,
+      matrix,
+      uses: 1,
+      release: () => {
+        if (--entry.uses === 0) {
+          byRegion.delete(key);
+          this.gradientsCollected.unregister(entry);
+          texture.destroy(true);
+        }
+      },
+    };
+    made.set(key, entry);
+    this.gradientsCollected.register(fill, texture, entry);
+    return entry;
   }
+}
+
+/** A gradient's texture for a region, and how many contexts hold it. */
+interface GradientTexture {
+  texture: Texture;
+  matrix: Matrix;
+  uses: number;
+  release: () => void;
 }
 
 const gpuBitmapsOf = new WeakMap<Renderer, GpuBitmaps>();

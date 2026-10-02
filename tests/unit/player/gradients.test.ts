@@ -139,3 +139,68 @@ test("a radial gradient's texture is made again when what it fills grows", async
   shape.invalidate(CONTENT);
   assert.equal(width(), 20);
 });
+
+test("a radial fill's textures live while any context draws with them", async () => {
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
+  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
+  const { PixiView } = await import("../../../packages/player/dist/pixi.js");
+  const renderer = { render: () => {} } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const fill = {
+    type: "gradient" as const,
+    radial: true,
+    focal: 0,
+    stops: stops([0, 0xff000000], [255, 0xffffffff]),
+    spread: 0,
+    linearRgb: false,
+    matrix: { a: 10 / 1638.4, b: 0, c: 0, d: 10 / 1638.4, tx: 5, ty: 5 },
+  };
+  type Style = { texture: { destroyed: boolean; source: { width: number } } };
+  // The textures of a shape's first layer's fills, as its Graphics draws them.
+  const textures = (shape: InstanceType<typeof ShapeObject>, at: number) => {
+    view.prepare(shape);
+    const graphics = view.stage.children[0].children[at].children[0] as unknown as {
+      context: { instructions: { action: string; data: { style: Style } }[] };
+    };
+    return graphics.context.instructions
+      .filter((i) => i.action === "fill")
+      .map((i) => [i.data.style.texture.source.width, i.data.style.texture.destroyed]);
+  };
+  const square = (side: number) => [0, 0, side, 0, side, side, 0, side, 0, 0];
+
+  // drawPath with another winding makes a second entry of the one fill, over another region.
+  const shape = new ShapeObject(null);
+  const drawing = new Drawing();
+  drawing.beginFill(fill);
+  drawing.drawPath([1, 2, 2, 2, 2], square(10), "evenOdd");
+  drawing.drawPath([1, 2, 2, 2, 2], square(20), "nonZero");
+  shape.drawing = drawing;
+  assert.deepEqual(textures(shape, 0), [
+    [10, false],
+    [20, false],
+  ]);
+
+  // copyFrom shares the fill; the copy's path grows; the original's texture stays.
+  const original = new ShapeObject(null);
+  const first = new Drawing();
+  first.beginFill(fill);
+  first.drawPath([1, 2, 2, 2, 2], square(10), "evenOdd");
+  original.drawing = first;
+  const copy = new ShapeObject(null);
+  const second = new Drawing();
+  second.copyFrom(first);
+  copy.drawing = second;
+  const both = new (await import("../../../packages/player/dist/display.js")).Container();
+  both.addChildAt(original, 0);
+  both.addChildAt(copy, 1);
+  view.prepare(both);
+  second.drawPath([1, 2, 2, 2, 2], square(20), "evenOdd");
+  copy.invalidate(CONTENT);
+  view.prepare(both);
+  const kept = (
+    view.stage.children[0].children[1].children[0].children[0] as unknown as {
+      context: { instructions: { data: { style: Style } }[] };
+    }
+  ).context.instructions[0].data.style.texture;
+  assert.deepEqual([kept.source.width, kept.destroyed], [10, false]);
+});
