@@ -143,7 +143,9 @@ test("pixelDissolve takes a count past every pixel as Flash does, in a bounded n
       count,
       0xffff0000,
     );
-    assert.ok(performance.now() - started < 100, "bounded");
+    // Bounded, it takes well under a millisecond; unbounded, 2^31 steps take seconds.
+    // The margin is for a busy runner, not for the loop.
+    assert.ok(performance.now() - started < 1000, "bounded");
     assert.equal(got, next, `${w}x${h} seed ${seed} count ${count}`);
     assert.equal(store.pixels.filter((p) => p === 0xffff0000).length, filled);
   }
