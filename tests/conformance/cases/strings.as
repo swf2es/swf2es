@@ -22,3 +22,7 @@ function matches(s:String, re:RegExp):String {
 }
 trace(matches("ABC abc", /z/ig), matches("ABC abc", /z/i), matches("aXbXc", /X/g));
 trace(matches("abc", /x*/g), matches("aab", /a*/g), matches("aaxb", /a|x*/g), matches("éaéa", /a/g));
+// lastIndexOf from before the start finds nothing, even the empty string.
+var gero:String = "Gero";
+var gi:int = -1;
+trace(gero.lastIndexOf("G", -1), gero.lastIndexOf("G", gi), gero.lastIndexOf("G", -0.5), gero.lastIndexOf("", -1), gero.lastIndexOf("o", NaN), String.prototype.lastIndexOf.call(gero, "G", -2));

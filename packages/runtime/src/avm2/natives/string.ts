@@ -27,7 +27,9 @@ export const stringNatives: Natives = {
     },
   [`String#${AS3}::lastIndexOf`]: (rt) =>
     function (this: string, s: Value = "undefined", i: Value = 0x7fffffff) {
-      return this.lastIndexOf(rt.toString(s), rt.toNumber(i));
+      // As String::lastIndexOf, from INTCLAMP: from before the start nothing matches.
+      const at = rt.toNumber(i);
+      return at <= -1 ? -1 : this.lastIndexOf(rt.toString(s), at);
     },
   [`String#${AS3}::localeCompare`]: (rt) =>
     function (this: string, other: Value) {
@@ -66,7 +68,7 @@ export const stringNatives: Natives = {
     return this.indexOf(s, i);
   }),
   "String#String::_lastIndexOf": plain(function (this: string, s: string, i = 0x7fffffff) {
-    return this.lastIndexOf(s, i);
+    return i < 0 ? -1 : this.lastIndexOf(s, i);
   }),
   "String#String::_slice": plain(function (this: string, start = 0, end = 0x7fffffff) {
     return this.slice(start, end);
