@@ -1,5 +1,5 @@
-// No JavaScript bridge is attached to a player instance yet. Report an
-// unavailable host rather than claiming calls can cross into the page.
+// playerglobal's private ExternalInterface natives use the optional host
+// given to Scripting. Without one, available is false and calls throw #2067.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 
