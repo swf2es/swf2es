@@ -620,6 +620,8 @@ export class Runtime {
   memoryProvider: AsObject | null = null;
   /** ByteArray.defaultObjectEncoding: AMF3 until set. */
   defaultObjectEncoding = 3;
+  /** ObjectEncoding.dynamicPropertyWriter: what writes a dynamic object's own properties in AMF3, if anything. */
+  dynamicPropertyWriter: AsObject | null = null;
   private domain: AsObject | null = null;
   /** Class aliases, as registerClassAlias sets them, both ways. */
   private readonly aliases = new Map<string, AsObject>();

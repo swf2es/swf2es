@@ -5,14 +5,16 @@
 // not -0, and within 29 bits (avmshell is a 32-bit build). Doubles and
 // Vector elements are big-endian whatever the ByteArray's byte order: avmplus
 // writes AMF through a wrapper of its own.
-// Dates too, as a reference or their time, and Dictionaries, by name or
-// object key; XML is not supported yet.
+// Dates too, as a reference or their time, Dictionaries, by name or object
+// key, XML, as a reference or its toXMLString, and an IExternalizable by
+// its writeExternal and readExternal.
 //
 // Translated from avmplus' core/AvmSerializer.cpp, this file is subject to
 // the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
-import { NS_Public, publicNs, qname } from "./names.js";
+import { NS_PackageInternal, NS_Public, namespace, publicNs, qname } from "./names.js";
 import { type Bytes, bytesOf, fromUtf8, utf8 } from "./natives/bytearray.js";
+import { xmlToXMLString } from "./natives/xml/xml.js";
 import type { AsObject, Runtime, Traits, Value } from "./runtime.js";
 
 const kUndefined = 0;
@@ -22,9 +24,11 @@ const kTrue = 3;
 const kInteger = 4;
 const kDouble = 5;
 const kString = 6;
+const kXmlDocument = 7;
 const kDate = 8;
 const kArray = 9;
 const kObject = 10;
+const kXml = 11;
 const kByteArray = 12;
 const kVectorInt = 13;
 const kVectorUint = 14;
@@ -38,11 +42,36 @@ const VECTOR_KINDS: Record<string, number> = {
   "__AS3__.vec::Vector$double": kVectorDouble,
 };
 
-/** A class's AMF3 description: its alias, its sealed properties' names, and whether it is dynamic. */
+/** A class's AMF3 description: its alias, its sealed properties' names, whether it is dynamic, and externalizable. */
 interface ClassInfo {
   name: string;
   sealed: string[];
   dynamic: boolean;
+  externalizable: boolean;
+}
+
+/**
+ * Where an IExternalizable's writeExternal writes or its readExternal
+ * reads, as flash.utils' ObjectOutput and ObjectInput see the stream: its
+ * ByteArray, and the byte order and encoding of their own, big-endian AMF3
+ * until set, whatever the ByteArray's.
+ */
+export interface ExternalStream {
+  readonly bytes: Bytes;
+  littleEndian: boolean;
+  objectEncoding: number;
+}
+
+function isExternalizable(rt: Runtime, traits: Traits): boolean {
+  return traits.isSubtypeOf(rt.classNamed("flash.utils::IExternalizable").$it);
+}
+
+/** One of flash.utils' internal ObjectOutput or ObjectInput, over `stream`. */
+function externalStream(rt: Runtime, name: string, stream: ExternalStream): AsObject {
+  const cls = rt.resolveName(qname(namespace(NS_PackageInternal, "flash.utils"), name));
+  const o = rt.constructClass(cls, []);
+  o.$amf = stream;
+  return o;
 }
 
 /** The traits a class's instances have, and their superclasses', for tests of what a value is. */
@@ -78,6 +107,16 @@ function vectorKind(traits: Traits): number {
  * the traits and then their bases', but [Transient] ones.
  */
 function classInfoOf(rt: Runtime, traits: Traits): ClassInfo {
+  // An IExternalizable writes itself, and is read back as its alias's class.
+  if (isExternalizable(rt, traits)) {
+    const name = rt.aliasOf(traits);
+    if (name === "") {
+      throw rt.error("ArgumentError", 2004);
+    }
+
+    return { name, sealed: [], dynamic: traits.dynamic, externalizable: true };
+  }
+
   const sealed: string[] = [];
   for (let t: Traits | null = traits; t; t = t.base) {
     for (const [name, list] of t.bindings) {
@@ -91,19 +130,25 @@ function classInfoOf(rt: Runtime, traits: Traits): ClassInfo {
     }
   }
 
-  return { name: rt.aliasOf(traits), sealed, dynamic: traits.dynamic };
+  return { name: rt.aliasOf(traits), sealed, dynamic: traits.dynamic, externalizable: false };
 }
 
 /** An AMF3 writer over a ByteArray, for one writeObject. */
-class Writer {
+export class Writer implements ExternalStream {
   private readonly strings = new Map<string, number>();
   private readonly objects = new Map<object, number>();
   private readonly traits = new Map<Traits, [number, ClassInfo]>();
+  littleEndian = false;
+  objectEncoding = 3;
 
   constructor(
     private readonly rt: Runtime,
     private readonly out: Bytes,
   ) {}
+
+  get bytes(): Bytes {
+    return this.out;
+  }
 
   private u8(v: number): void {
     const at = this.out.shortWrite(1);
@@ -228,7 +273,13 @@ class Writer {
     } else if (isA(traits, "flash.utils::Dictionary")) {
       this.dictionary(v);
     } else if (isA(traits, "XML")) {
-      throw rt.unsupported(`AMF3 for ${traits.name}`);
+      // As WriteXML: toXMLString, as toString leaves out a simple element's tags.
+      this.u8(kXml);
+      if (!this.reference(v)) {
+        const bytes = utf8(xmlToXMLString(rt, v.$node));
+        this.uint29((bytes.length << 1) | 1);
+        this.out.write(bytes);
+      }
     } else {
       this.u8(kObject);
       this.object(v, traits);
@@ -353,7 +404,8 @@ class Writer {
       const info = classInfoOf(this.rt, traits);
       known = [this.traits.size, info];
       this.traits.set(traits, known);
-      this.uint29(3 | (info.dynamic ? 8 : 0) | (info.sealed.length << 4));
+      const flags = (info.externalizable ? 4 : 0) | (info.dynamic ? 8 : 0);
+      this.uint29(3 | flags | (info.sealed.length << 4));
       this.string(info.name);
       for (const name of info.sealed) {
         this.string(name);
@@ -361,36 +413,82 @@ class Writer {
     }
 
     const info = known[1];
+    if (info.externalizable) {
+      const write = this.rt.getProperty(o, qname(publicNs, "writeExternal"));
+      if (write?.$f) {
+        this.rt.callValue(write, o, [externalStream(this.rt, "ObjectOutput", this)], null);
+      }
+
+      return;
+    }
+
     for (const name of info.sealed) {
       this.value(this.rt.getProperty(o, qname(publicNs, name)));
     }
 
     if (info.dynamic) {
-      for (const name of this.rt.enumerableNames(o)) {
-        const value = this.rt.getProperty(o, qname(publicNs, name));
-        if (value?.$f || name.length === 0) {
-          continue;
-        }
+      const writer = this.rt.dynamicPropertyWriter;
+      if (writer) {
+        this.dynamicProperties(writer, o);
+      } else {
+        for (const name of this.rt.enumerableNames(o)) {
+          const value = this.rt.getProperty(o, qname(publicNs, name));
+          if (value?.$f || name.length === 0) {
+            continue;
+          }
 
-        this.string(name);
-        this.value(value);
+          this.string(name);
+          this.value(value);
+        }
       }
 
       this.string("");
     }
   }
+
+  /**
+   * As ObjectEncoding.dynamicPropertyWriter has it: its
+   * writeDynamicProperties called with the object and a
+   * DynamicPropertyOutput that writes here, if it is an object.
+   */
+  private dynamicProperties(writer: AsObject, o: AsObject): void {
+    const rt = this.rt;
+    const f = rt.getProperty(writer, qname(publicNs, "writeDynamicProperties"));
+    if (f === null || typeof f !== "object") {
+      return;
+    }
+
+    const cls = rt.resolveName(
+      qname(namespace(NS_PackageInternal, "flash.net"), "DynamicPropertyOutput"),
+    );
+    const output = rt.constructClass(cls, []);
+    output.$amf = this;
+    rt.callValue(f, writer, [o, output], null);
+  }
+
+  /** As WriteDynamicProperty: a name and its value, whatever they are. */
+  dynamicProperty(name: string, value: Value): void {
+    this.string(name);
+    this.value(value);
+  }
 }
 
 /** An AMF3 reader over a ByteArray, for one readObject. */
-class Reader {
+export class Reader implements ExternalStream {
   private readonly strings: string[] = [];
   private readonly objects: AsObject[] = [];
   private readonly classes: [ClassInfo, AsObject][] = [];
+  littleEndian = false;
+  objectEncoding = 3;
 
   constructor(
     private readonly rt: Runtime,
     private readonly input: Bytes,
   ) {}
+
+  get bytes(): Bytes {
+    return this.input;
+  }
 
   private u8(): number {
     const at = this.input.shortRead(1);
@@ -573,11 +671,20 @@ class Reader {
       case kVectorDouble:
       case kVectorObject:
         return this.vector(type);
-      default:
-        if (type === 7 || type === 8 || type === 11 || type === 17) {
-          throw rt.unsupported(`AMF3 marker ${type}`);
+      case kXmlDocument:
+      case kXml: {
+        // As ReadXML: an XMLDocument's too is read as XML, made from its text.
+        const ref = this.uint29();
+        if ((ref & 1) === 0) {
+          return this.find(this.objects, ref >>> 1);
         }
 
+        const text = fromUtf8(this.input.readView(ref >>> 1));
+        const xml = rt.constructClass(rt.builtinClass("XML"), [text]);
+        this.objects.push(xml);
+        return xml;
+      }
+      default:
         throw rt.error("RangeError", 2006);
     }
   }
@@ -680,10 +787,7 @@ class Reader {
     if ((ref & 3) === 1) {
       entry = this.find(this.classes, ref >>> 2);
     } else {
-      if (ref & 4) {
-        throw rt.unsupported("AMF3 IExternalizable");
-      }
-
+      const externalizable = (ref & 4) !== 0;
       const dynamic = (ref & 8) !== 0;
       const count = ref >>> 4;
       const name = this.string();
@@ -692,14 +796,27 @@ class Reader {
         sealed.push(this.string());
       }
 
-      // An unknown alias reads as an Object.
-      entry = [{ name, sealed, dynamic }, rt.classByAlias(name, true)];
+      // An unknown alias reads as an Object, which cannot read itself.
+      const cls = rt.classByAlias(name, true);
+      if (externalizable && !isExternalizable(rt, cls.$it)) {
+        throw rt.error("ArgumentError", 2173, name);
+      }
+
+      entry = [{ name, sealed, dynamic, externalizable }, cls];
       this.classes.push(entry);
     }
 
     const [info, cls] = entry;
     const o = rt.constructClass(cls, []);
     this.objects.push(o);
+    if (info.externalizable) {
+      const read = rt.getProperty(o, qname(publicNs, "readExternal"));
+      if (read?.$f) {
+        rt.callValue(read, o, [externalStream(rt, "ObjectInput", this)], null);
+      }
+
+      return o;
+    }
     for (const name of info.sealed) {
       this.set(o, name, this.value());
     }

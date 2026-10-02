@@ -1630,7 +1630,7 @@ function toXMLStringOf(
   out.push("</", qualified, ">");
 }
 
-function xmlToXMLString(rt: Runtime, node: XMLNode): string {
+export function xmlToXMLString(rt: Runtime, node: XMLNode): string {
   const out: string[] = [];
   toXMLStringOf(rt, node, [], 0, out);
   return out.join("");
