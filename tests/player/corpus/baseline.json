@@ -669,7 +669,7 @@
   "avm2/matrix3d_transpose": {"matched":0,"lines":5,"traced":0,"error":"Error: swf2es: native flash.geom::Matrix3D#flash.geom:Matrix3D::ctor is not supported yet"},
   "avm2/method_association": {"matched":5,"lines":5,"traced":5,"error":null},
   "avm2/method_without_body": {"matched":1,"lines":3,"traced":3,"error":null},
-  "avm2/missing_external_interface": {"matched":0,"lines":10,"traced":0,"error":"Error: swf2es: native flash.external::ExternalInterface.get:available is not supported yet"},
+  "avm2/missing_external_interface": {"matched":10,"lines":10,"traced":10,"error":null},
   "avm2/modulo": {"matched":1058,"lines":1058,"traced":1058,"error":null},
   "avm2/morph_shape": {"matched":0,"lines":2,"traced":1,"error":null},
   "avm2/mouseevent_constr": {"matched":1,"lines":66,"traced":1,"error":"Error: swf2es: native flash.events::MouseEvent#set:localX is not supported yet"},

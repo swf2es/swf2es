@@ -26,6 +26,17 @@ import { type Character, type Library, readLibrary } from "./timeline.js";
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
+/** The host side of playerglobal's synchronous ExternalInterface protocol. */
+export interface ExternalInterfaceHost {
+  /** JavaScript source from playerglobal; the host decides whether to evaluate it. */
+  evalJS(source: string): string | null;
+  /** An XML invocation when evalJS declined the call. */
+  callOut(request: string): string | null;
+  /** A wrapper produced by playerglobal. Its arguments and result use AVM2 values. */
+  addCallback(name: string, callback: ((request: string, args: Value[]) => Value) | null): void;
+  objectID?: string | null;
+}
+
 /** AS3 classes placed children are instances of when SymbolClass binds none. */
 const DEFAULT_CLASS = { shape: "flash.display::Shape", sprite: "flash.display::MovieClip" };
 
@@ -49,6 +60,7 @@ interface Load {
 
 export class Scripting {
   readonly rt: avm2.Runtime;
+  readonly externalInterface: ExternalInterfaceHost | null;
   /** The character, and its SWF's library, each class SymbolClass bound makes, for a `new` of the class from a script. */
   readonly symbols = new Map<string, { character: Character; library: Library }>();
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
@@ -106,8 +118,10 @@ export class Scripting {
     options: avm2.RuntimeOptions & {
       fetch?: (url: string, signal: AbortSignal) => Promise<Uint8Array>;
       url?: string;
+      externalInterface?: ExternalInterfaceHost;
     } = {},
   ) {
+    this.externalInterface = options.externalInterface ?? null;
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
     this.rt = new avm2.Runtime(
