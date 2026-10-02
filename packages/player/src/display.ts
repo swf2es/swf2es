@@ -15,6 +15,7 @@ import {
   INVALID_PIXELS,
   type Library,
   type ShapeCharacter,
+  type TextCharacter,
   type Timeline,
 } from "./timeline.js";
 
@@ -214,6 +215,32 @@ export class ShapeObject extends DisplayObject {
     super();
     this.shape = shape;
     this.character = shape;
+  }
+}
+
+/** A TextField placed by DefineEditText, or one a script creates. */
+export class TextObject extends DisplayObject {
+  text: string;
+  width: number;
+  height: number;
+  color: number;
+  fontSize: number;
+
+  constructor(
+    readonly definition: TextCharacter | null,
+    initialText = true,
+  ) {
+    super();
+    const edit = definition?.definition;
+    this.character = definition;
+    this.text = initialText ? (edit?.text ?? "") : "";
+    this.width = edit ? (edit.bounds.xMax - edit.bounds.xMin) / 20 : 100;
+    this.height = edit ? (edit.bounds.yMax - edit.bounds.yMin) / 20 : 100;
+    this.color =
+      edit?.color === null || edit?.color === undefined
+        ? 0
+        : ((edit.color & 0xff) << 16) | (edit.color & 0xff00) | ((edit.color >>> 16) & 0xff);
+    this.fontSize = edit?.fontHeight ? edit.fontHeight / 20 : 12;
   }
 }
 
@@ -630,6 +657,10 @@ export function displayFor(
     bitmap.character = character;
     bitmap.hasImage = hasImage;
     return bitmap;
+  }
+
+  if (character.type === "text") {
+    return new TextObject(character);
   }
 
   const clip = new MovieClip(character.timeline, library);

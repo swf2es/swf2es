@@ -425,6 +425,14 @@ export function sprite(id: number, frameCount: number, tags: Uint8Array[]): Uint
   return tag(39, concat([new BitWriter().u16(id).u16(frameCount).done(), ...tags]));
 }
 
+/** A timeline TextField with a plain initial value. */
+export function editText(id: number, text: string, width = 2000, height = 400): Uint8Array {
+  const w = new BitWriter().u16(id);
+  rect(w, 0, width, 0, height);
+  w.u8(0x80).u8(0).string("").string(text);
+  return tag(37, w.done());
+}
+
 /** A whole uncompressed SWF: the header, the frame size and rate, then the tags. */
 export function swf(options: {
   version?: number;

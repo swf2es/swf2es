@@ -34,7 +34,7 @@ export interface Place {
   clipActions: Uint8Array | null;
 }
 
-function readString(r: SwfReader): string {
+export function readString(r: SwfReader): string {
   const start = r.pos;
   while (r.pos < r.end && r.bytes[r.pos] !== 0) {
     r.pos++;

@@ -4,10 +4,12 @@
 // file is there.
 import {
   type Bitmap,
+  type EditText,
   isBitmapTag,
   type Place,
   readBinaryData,
   readBitmap,
+  readEditText,
   readFrameLabel,
   readPlace,
   readRemove,
@@ -44,6 +46,12 @@ export interface SpriteCharacter {
   timeline: Timeline;
 }
 
+export interface TextCharacter {
+  type: "text";
+  id: number;
+  definition: EditText;
+}
+
 /** A bitmap's pixels as every copy of it starts: premultiplied ARGB; 0 by 0 for what Flash cannot read. */
 export interface BitmapPixels {
   width: number;
@@ -71,7 +79,12 @@ export interface BinaryCharacter {
   shared?: Uint8Array<ArrayBuffer>;
 }
 
-export type Character = ShapeCharacter | SpriteCharacter | BitmapCharacter | BinaryCharacter;
+export type Character =
+  | ShapeCharacter
+  | SpriteCharacter
+  | BitmapCharacter
+  | TextCharacter
+  | BinaryCharacter;
 
 /** What a timeline can place: every character but data. */
 export type DisplayCharacter = Exclude<Character, BinaryCharacter>;
@@ -152,6 +165,11 @@ function timelineOf(
           id: sprite.id,
           timeline: timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg),
         });
+        break;
+      }
+      case tags.DefineEditText: {
+        const definition = readEditText(bytes, t);
+        library.set(definition.id, { type: "text", id: definition.id, definition });
         break;
       }
       case tags.DefineBinaryData: {

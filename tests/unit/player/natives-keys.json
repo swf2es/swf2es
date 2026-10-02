@@ -421,6 +421,8 @@
     "flash.system::WorkerDomain#createWorker",
     "flash.system::WorkerDomain#listWorkers",
     "flash.system::WorkerDomain.get:isSupported",
+    "flash.text::TextField#get:text",
+    "flash.text::TextField#set:text",
     "flash.utils::Timer#flash.utils:Timer::_start",
     "flash.utils::Timer#flash.utils:Timer::_timerDispatch",
     "flash.utils::Timer#get:running",

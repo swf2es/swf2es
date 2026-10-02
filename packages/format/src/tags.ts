@@ -16,6 +16,7 @@ export const RemoveObject2 = 28;
 export const DefineShape3 = 32;
 export const DefineBitsJPEG3 = 35;
 export const DefineBitsLossless2 = 36;
+export const DefineEditText = 37;
 export const DefineSprite = 39;
 export const FrameLabel = 43;
 export const FileAttributes = 69;

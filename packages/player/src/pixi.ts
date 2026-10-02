@@ -16,6 +16,7 @@ import {
   type Renderer,
   RenderTexture,
   Sprite,
+  Text,
   Texture,
 } from "pixi.js";
 import { BitmapStore, type GpuCopy } from "./bitmap.js";
@@ -28,6 +29,7 @@ import {
   type DisplayObject,
   PIXELS,
   ShapeObject,
+  TextObject,
   TRANSFORM,
 } from "./display.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients.js";
@@ -514,6 +516,19 @@ export class PixiView {
     const current = this.current(o);
     if (o instanceof BitmapObject) {
       this.drawBitmap(o, node);
+      return;
+    }
+
+    if (o instanceof TextObject) {
+      if (o.text) {
+        node.art.addChild(
+          new Text({
+            text: o.text,
+            style: { fontFamily: "Arial", fontSize: o.fontSize, fill: o.color },
+          }),
+        );
+      }
+
       return;
     }
 
