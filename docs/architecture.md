@@ -225,6 +225,16 @@ the like) only for an address out of range, which it rejects as avmplus
 does. Anything typed `*` goes through the runtime, which does what
 avmplus does at run time.
 
+Two ints or uints multiplied and the product made an int or uint by the
+next instruction, in the same block, are `Math.imul`: avmplus' JIT
+multiplies them as ints (`CodegenLIR::coerceNumberToInt`), which wraps,
+where the double product loses the low bits past 2^53, and compiled C
+such as Crossbridge's depends on it. Its interpreter multiplies doubles,
+and it runs the static initializers, scripts' and classes', so those
+stay double products. The JIT also wraps a product that reaches the
+conversion later in the block or through a local, which swf2es does not
+follow yet; `int-multiply.as` keeps to the forms it does.
+
 ### The object model
 
 An AS3 object is a JavaScript object made from its traits' prototype,
