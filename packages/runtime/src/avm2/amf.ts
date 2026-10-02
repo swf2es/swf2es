@@ -62,8 +62,19 @@ export interface ExternalStream {
   objectEncoding: number;
 }
 
+// Whether a class is an IExternalizable, by its traits: each writeObject
+// describes its classes afresh, and looking the interface up by name each
+// time cost AMF3 a tenth of its time.
+const externalizable = new WeakMap<Traits, boolean>();
+
 function isExternalizable(rt: Runtime, traits: Traits): boolean {
-  return traits.isSubtypeOf(rt.classNamed("flash.utils::IExternalizable").$it);
+  let is = externalizable.get(traits);
+  if (is === undefined) {
+    is = traits.isSubtypeOf(rt.classNamed("flash.utils::IExternalizable").$it);
+    externalizable.set(traits, is);
+  }
+
+  return is;
 }
 
 /** One of flash.utils' internal ObjectOutput or ObjectInput, over `stream`. */
