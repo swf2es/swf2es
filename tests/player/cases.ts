@@ -1360,6 +1360,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 200,
   },
   {
+    name: "filter-objects",
+    swf: (abc) => bare(abc, 1, "FilterObjects"),
+    script: "FilterObjects",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "text-fields",
     swf: (abc) => bare(abc, 1, "TextFields"),
     script: "TextFields",

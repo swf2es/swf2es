@@ -21,6 +21,7 @@ import { eventDispatcherNatives } from "./flash/events/EventDispatcher.js";
 import { httpStatusHooks } from "./flash/events/HTTPStatusEvent.js";
 import { mouseEventNatives } from "./flash/events/MouseEvent.js";
 import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js";
+import { filterHooks, filterNatives } from "./flash/filters/filters.js";
 import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
 import { transformNatives } from "./flash/geom/Transform.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
@@ -68,6 +69,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...socketNatives(s),
     ...transformNatives(s),
     ...matrix3DNatives(s),
+    ...filterNatives(s),
     ...soundTransformNatives(s),
     ...graphicsNatives(s),
     ...shapeNatives(s),
@@ -82,6 +84,7 @@ export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
     ...bitmapDataHooks(s),
     ...byteArrayHooks(s),
     ...httpStatusHooks,
+    ...filterHooks,
     ...workerHooks(),
   };
 }

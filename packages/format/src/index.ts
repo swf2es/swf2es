@@ -27,6 +27,7 @@ export {
   readString,
   readSymbolClass,
 } from "./display.js";
+export { type FilterColor, readFilters, type SwfFilter } from "./filters.js";
 export { type Font, type Glyph, glyphOf, readFont } from "./font.js";
 export {
   type ColorTransform,

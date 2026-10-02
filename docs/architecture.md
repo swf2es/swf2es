@@ -1341,6 +1341,24 @@ The `blend-modes` case draws each over two grounds against adl. Pixi
 reads the back buffer only from a renderer made with `useBackBuffer:
 true`, which a host passes; without it the modes draw as normal.
 
+### Filters
+
+A filter object keeps its values as adl converts them, in a record of its
+kind's (`filters.ts`): blurs clamped to 0–255, NaN kept; quality and a
+convolution's size whole and clamped, to 15; alphas in 255ths; colours 24
+bits; strength in 256ths, to 255; an angle within a turn either way,
+through radians and back; a convolution's divisor, bias and matrix, a
+colour matrix and a displacement's scale as floats, the colour matrix 20
+values and a hole in it 0; a gradient's stops at most 16, its colours
+setting their count, its alphas filling to it with 1, its ratios making it
+fewer; a number past an int's range, as x87 converts it, 0. A display
+object holds records too, from its `filters` or a PlaceObject3's list (a
+bevel's highlight before its shadow, as adl reads it), and gives copies
+back, so `filters === filters` is false and a filter changed after it was
+set changes nothing. BitmapFilter is abstract, and restricted: a script's
+class extending it is refused, while one extending a filter of
+playerglobal's is made. Drawing the filters is still to come.
+
 ### Masks and scroll rectangles
 
 A mask clips what it masks to where its fills are, as adl draws it: the
