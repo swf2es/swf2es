@@ -556,6 +556,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     }
     set scrollH(v: Value) {
       this.$display.scrollH = Math.max(0, s.rt.toInt(v));
+      this.$display.invalidate(CONTENT);
     }
     get maxScrollH(): number {
       return 0;

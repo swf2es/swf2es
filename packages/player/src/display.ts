@@ -387,12 +387,14 @@ export class TextObject extends DisplayObject {
 
   /** Its text laid out, as of now: made again only when the text, its formats or the field changed. */
   get layout(): TextLayout {
-    const key = `${this.model.revision}|${this.width}|${this.wordWrap}|${this.embedFonts}`;
+    const key = `${this.model.revision}|${this.width}|${this.wordWrap}|${this.embedFonts}|${this.displayAsPassword}`;
     if (this.laid?.key !== key) {
+      const text = this.model.text;
       this.laid = {
         key,
         layout: layoutText({
-          text: this.model.text,
+          // A password's characters are laid out, and drawn, as asterisks; its lines stay.
+          text: this.displayAsPassword ? text.replace(/[^\r]/g, "*") : text,
           formats: this.model.formats,
           defaultFormat: this.model.defaultFormat,
           width: this.width,

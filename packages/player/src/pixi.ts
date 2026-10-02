@@ -1131,6 +1131,7 @@ function drawText(o: TextObject, art: PixiContainer): void {
   const text = new PixiContainer();
   let bottom = 0;
   let right = 0;
+  let left = Number.POSITIVE_INFINITY;
   for (let l = first; l <= last; l++) {
     const line = layout.lines[l];
     const baseline = (dy + line.y + line.ascent) / 20;
@@ -1168,6 +1169,7 @@ function drawText(o: TextObject, art: PixiContainer): void {
     flush();
     bottom = Math.max(bottom, dy + line.y + line.ascent + line.descent);
     right = Math.max(right, dx + line.x + line.width);
+    left = Math.min(left, dx + line.x);
   }
 
   art.addChild(text);
@@ -1178,7 +1180,9 @@ function drawText(o: TextObject, art: PixiContainer): void {
     width: o.width - (2 * GUTTER) / 20,
     height: o.height - (2 * GUTTER) / 20,
   };
-  if (overruns(inner, inner.left, inner.top, right / 20 - inner.left, bottom / 20 - inner.top)) {
+  // Where the text lies, scrolled: a scroll left of the gutter clips as one past the right does.
+  const top = (dy + layout.lines[first].y) / 20;
+  if (overruns(inner, left / 20, top, (right - left) / 20, bottom / 20 - top)) {
     const clip = new Graphics()
       .rect(inner.left, inner.top, Math.max(0, inner.width), Math.max(0, inner.height))
       .fill({ color: 0xffffff });
