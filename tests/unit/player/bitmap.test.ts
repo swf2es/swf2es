@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { BitmapStore, premultiply, unmultiply } from "../../../packages/player/dist/bitmap.js";
+import { drawBitmap } from "../../../packages/player/dist/bitmap-ops.js";
 import { BitmapObject } from "../../../packages/player/dist/display.js";
 
 setFlagsFromString("--expose-gc");
@@ -148,5 +149,52 @@ test("pixelDissolve takes a count past every pixel as Flash does, in a bounded n
     assert.ok(performance.now() - started < 1000, "bounded");
     assert.equal(got, next, `${w}x${h} seed ${seed} count ${count}`);
     assert.equal(store.pixels.filter((p) => p === 0xffff0000).length, filled);
+  }
+});
+
+test("a draw at a whole pixel, unscaled, composites as the general path does", () => {
+  let seed = 3;
+  const random = () => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return seed;
+  };
+  const filled = (width: number, height: number, transparent: boolean) => {
+    const store = new BitmapStore(width, height, transparent, 0);
+    for (let i = 0; i < store.pixels.length; i++) {
+      store.pixels[i] = store.premultiplied(random() | (i % 3 === 0 ? 0 : 0x40000000));
+    }
+
+    return store;
+  };
+  const source = filled(7, 5, true);
+  const ct = { rMul: 0.5, gMul: 1, bMul: 1.5, aMul: 0.75, rAdd: 10, gAdd: -20, bAdd: 0, aAdd: 5 };
+  for (const transparent of [true, false]) {
+    for (const mode of ["normal", "multiply", "difference", "invert"]) {
+      for (const colors of [null, ct]) {
+        const clip = { x: 1, y: 0, width: 8, height: 6 };
+        const fast = filled(10, 8, transparent);
+        const general = fast.clone();
+        // A skew too small to move any sample keeps the general path.
+        drawBitmap(
+          fast,
+          source,
+          { a: 1, b: 0, c: 0, d: 1, tx: 3, ty: 2 },
+          colors,
+          mode,
+          clip,
+          false,
+        );
+        drawBitmap(
+          general,
+          source,
+          { a: 1, b: 0, c: 1e-12, d: 1, tx: 3, ty: 2 },
+          colors,
+          mode,
+          clip,
+          false,
+        );
+        assert.deepEqual(fast.pixels, general.pixels, `${mode} ${transparent} ${!!colors}`);
+      }
+    }
   }
 });
