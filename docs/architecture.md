@@ -1509,7 +1509,7 @@ malformed ABC with a VerifyError, never trap. `tests/fuzz/abc.ts` mutates
 seed ABCs (the unit tests' hand-built ones and the conformance cases) a
 few bytes at a time, mostly toward the end, where the method bodies are,
 and checks that the compiler does not trap, that a module it accepts
-parses as JavaScript, and that each of its methods compiled alone is its
+imports as an ES module, and that each of its methods compiled alone is its
 entry in the module. A seeded generator makes a run repeat; a failing case
 is written to `tests/fuzz/out/failures/`. `pnpm test` runs a short round,
 `pnpm test:checked` the same in the build that checks every array access,

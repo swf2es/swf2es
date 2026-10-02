@@ -5,7 +5,7 @@
 // avmshell loads; then
 //
 //   - the compiler did not trap;
-//   - a module it accepted is JavaScript that parses;
+//   - a module it accepted imports as an ES module;
 //   - each method compiled alone, as the JIT compiles it, is byte for byte
 //     its entry in the module (docs/architecture.md's JIT/AOT invariant).
 //
@@ -181,8 +181,10 @@ for (let k = 0; k < caseCount; k++) {
 
     accepted++;
     const module: string = testing.domainModule([...builtinHashes, sha(abc)].join("\n"));
+    // Imported as the player imports it: an ES module, strict, where
+    // await is reserved; its body only defines the function it exports.
     try {
-      new Function(module.replace(/^export default /, "return "));
+      await import(`data:text/javascript;base64,${Buffer.from(module).toString("base64")}`);
     } catch (e) {
       fail(abc, `a module that does not parse (${(e as Error).message})`);
       continue;
