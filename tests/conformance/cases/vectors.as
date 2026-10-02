@@ -85,3 +85,8 @@ var src:Vector.<Object>;
 vprobe("convert source cleared", function():* { src = new <Object>[1, { valueOf: function():Number { src.length = 0; return 2; } }, 3]; var w:Vector.<int> = Vector.<int>(src); return w.length + " " + w + " " + src.length; });
 vprobe("unshift fixed", function():* { v = new <int>[1, 2]; var r:* = v.unshift(fixing(7)); return r + " " + v.length + " " + v + " " + v.fixed; });
 vprobe("splice grown", function():* { v = new <int>[1, 2, 3]; var r:* = v.splice(1, 1, growing(7)); return r + " " + v.length + " " + v; });
+// Vector itself, with no type, is not constructed; Vector.<T> made at run time is.
+var unspecialized:Class = Vector;
+try { new unspecialized(); trace("made"); } catch (e:Error) { trace("unspecialized", e); }
+var late:* = Vector;
+trace("late", new (late.<int>)(2).length);
