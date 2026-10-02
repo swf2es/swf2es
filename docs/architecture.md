@@ -677,7 +677,10 @@ usually do).
 
 `URLStream` uses the same host fetch. Its bytes arrive on the player thread
 in a later frame, with `OPEN`, `PROGRESS` and `COMPLETE`, or `IO_ERROR` on
-failure. A new load or `close` aborts the old request; reads use the
+failure. Its fetches are independent of Loader's ordered preparation, so a
+stalled stream cannot hold up a later Loader; `settled()` waits for both
+when a host explicitly asks it to. A new load or `close` aborts the old
+request, and `close` without one throws IOError #2029 as Flash does; reads use the
 runtime's ByteArray DataInput implementation. The host currently returns
 only bytes, so no HTTP status or response headers are reported. Relative
 URLs resolve against the main SWF until the runtime tracks the creator of

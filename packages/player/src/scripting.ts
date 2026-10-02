@@ -66,6 +66,8 @@ export class Scripting {
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
   private preparing: Promise<void> = Promise.resolve();
+  /** Stream fetches are independent of Loader's ordered preparation chain. */
+  private readonly pendingStreams = new Set<Promise<void>>();
   /** Completed host byte requests delivered at the next frame, with scripts on the player thread. */
   private readonly readyBytes: (() => void)[] = [];
   /** How many loads from bytes there have been: each gets a URL of its own under the main SWF's. */
@@ -586,7 +588,16 @@ export class Scripting {
     const completed = fetched.then((bytes) => {
       this.readyBytes.push(() => deliver(bytes));
     });
-    this.preparing = Promise.all([this.preparing, completed]).then(() => {});
+    this.pendingStreams.add(completed);
+    void completed.then(
+      () => this.pendingStreams.delete(completed),
+      () => this.pendingStreams.delete(completed),
+    );
+  }
+
+  /** The text a failed stream reports, using Flash Player's message and the resolved URL. */
+  streamError(url: string): string {
+    return `${this.errorText(2032)} URL: ${resolve(this.url, url)}`;
   }
 
   /**
@@ -595,7 +606,7 @@ export class Scripting {
    * the frame after its request, as Flash's loadBytes does.
    */
   settled(): Promise<void> {
-    return this.preparing;
+    return Promise.all([this.preparing, ...this.pendingStreams]).then(() => {});
   }
 
   private enqueue(
@@ -636,7 +647,7 @@ export class Scripting {
 
   /** "Error #id: message", as Flash's IOErrorEvent texts begin, debugger or not. */
   private errorText(id: number): string {
-    return `Error #${id}: ${avm2.messages[id]}`;
+    return `Error #${id}: ${avm2.errorMessages[id]}`;
   }
 
   /** The SWF read and its code linked, off the frame; what the frame then does with it. */

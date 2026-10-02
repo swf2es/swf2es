@@ -13,6 +13,12 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
     (stream.$buffer ??= s.rt.construct(s.rt.classNamed("flash.utils::ByteArray")) as AsObject);
   const read = (stream: AsObject, method: string, ...args: Value[]): Value =>
     s.rt.callProperty(bufferOf(stream), s.rt.publicName(method), ...args);
+  const stop = (stream: AsObject): void => {
+    stream.$generation = (stream.$generation ?? 0) + 1;
+    stream.$abort?.abort();
+    stream.$abort = null;
+    stream.$connected = false;
+  };
 
   class URLStreamNatives {
     declare $buffer: AsObject | undefined;
@@ -49,7 +55,7 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
               "ioError",
               false,
               false,
-              "Error #2032: Stream Error",
+              s.streamError(url),
             ) as AsObject,
           );
           return;
@@ -93,14 +99,15 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
     }
 
     close(): void {
-      this.$generation = (this.$generation ?? 0) + 1;
-      this.$abort?.abort();
-      this.$abort = null;
-      this.$connected = false;
+      if (!this.$abort && !this.$connected) {
+        throw s.rt.error("flash.errors::IOError", 2029);
+      }
+
+      stop(this);
     }
 
     stop(): void {
-      this.close();
+      stop(this);
     }
 
     readBytes(bytes: Value, offset: Value = 0, length: Value = 0): void {
