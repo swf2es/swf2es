@@ -36,12 +36,15 @@ test("URLStream delivers fetched bytes on a frame and discards a closed request"
     requestBytes: (
       request: { url: string },
       signal: AbortSignal,
-      deliver: (result: FetchResult) => void,
-    ) => requests.push({ url: request.url, signal, deliver }),
+      deliver: (result: FetchResult, url: string) => void,
+    ) =>
+      requests.push({
+        url: request.url,
+        signal,
+        deliver: (result) => deliver(result, new URL(request.url, "http://example.test/").href),
+      }),
     streamError: (url: string, local = false) =>
-      local
-        ? "Error #2032: Stream Error"
-        : `Error #2032: Stream Error. URL: http://example.test/${url}`,
+      local ? "Error #2032: Stream Error" : `Error #2032: Stream Error. URL: ${url}`,
   } as unknown as Scripting;
   const natives = urlStreamNatives(scripting);
   const key = (name: string) => natives[`flash.net::URLStream#${name}`](scripting.rt);
@@ -90,13 +93,13 @@ test("URLStream delivers fetched bytes on a frame and discards a closed request"
   assert.deepEqual(events, ["open", "progress", "httpStatus", "complete"]);
   assert.equal(key("get:bytesAvailable").call(stream), 0);
 
-  key("load").call(stream, { url: "missing.bin" });
+  key("load").call(stream, { url: "missing.bin?new=2" });
   requests[2].deliver({ bytes: null, status: 404, headers: [] });
   assert.deepEqual(events, ["open", "progress", "httpStatus", "complete", "httpStatus", "ioError"]);
   assert.deepEqual(errors, [
     "status=200",
     "status=404",
-    "Error #2032: Stream Error. URL: http://example.test/missing.bin",
+    "Error #2032: Stream Error. URL: http://example.test/missing.bin?new=2",
   ]);
   assert.equal(key("get:connected").call(stream), false);
 

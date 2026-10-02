@@ -38,9 +38,8 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
       this.$buffer = undefined;
       const abort = new AbortController();
       this.$abort = abort;
-      const url = s.rt.toString(s.rt.getProperty(request, s.rt.publicName("url")));
       const source = request as AsObject;
-      s.requestBytes(source, abort.signal, ({ bytes, status, local }) => {
+      s.requestBytes(source, abort.signal, ({ bytes, status, local }, url) => {
         if (this.$generation !== generation) {
           return;
         }

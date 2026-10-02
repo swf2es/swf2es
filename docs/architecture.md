@@ -676,7 +676,8 @@ it loads, else the main one (Ruffle's `loader_loaderurl` adds the loader first, 
 usually do).
 
 `URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
-status and headers. A `URLRequest`'s GET data is appended to the query;
+status and headers. A `URLRequest`'s GET string or URLVariables data is appended to the query;
+GET ByteArray data is currently left out and has not been checked against Flash;
 other methods send its string, URLVariables or ByteArray data as the body.
 Only POST forwards custom headers in the browser player, as Flash Player does;
 the host's fetch decides which requests its environment permits. The result

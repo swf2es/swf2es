@@ -661,7 +661,7 @@ export class Scripting {
   requestBytes(
     request: AsObject | string,
     signal: AbortSignal,
-    deliver: (result: FetchResult) => void,
+    deliver: (result: FetchResult, url: string) => void,
   ): void {
     const outgoing = this.fetchRequest(request, this.url);
     const fetch = this.fetch;
@@ -671,7 +671,7 @@ export class Scripting {
       () => ({ bytes: null, status: 0, headers: [] }),
     );
     const completed = fetched.then((result) => {
-      this.readyBytes.push(() => deliver(result));
+      this.readyBytes.push(() => deliver(result, outgoing.url));
     });
     this.pendingStreams.add(completed);
     void completed.then(
