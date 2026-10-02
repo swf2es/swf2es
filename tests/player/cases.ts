@@ -1378,6 +1378,18 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "filters",
+    swf: (abc) => bare(abc, 1, "FiltersDraw", 396, 132),
+    script: "FiltersDraw",
+    frames: 1,
+    capture: [1],
+    // The page blurs at its four samples a pixel and averages them, where
+    // adl blurs whole pixels: within 4 a channel but along the glows'
+    // edges, up to 11, 12 channels beyond 8.
+    tolerance: 8,
+    maxOutliers: 20,
+  },
+  {
     name: "text-fields",
     swf: (abc) => bare(abc, 1, "TextFields"),
     script: "TextFields",
