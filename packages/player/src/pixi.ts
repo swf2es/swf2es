@@ -11,6 +11,7 @@ import {
   CanvasTextMetrics,
   type FederatedPointerEvent,
   type FillInput,
+  type Filter,
   fontStringFromTextStyle,
   Graphics,
   GraphicsContext,
@@ -18,6 +19,7 @@ import {
   Container as PixiContainer,
   Rectangle,
   type Renderer,
+  RendererType,
   RenderTexture,
   Sprite,
   Text,
@@ -39,12 +41,14 @@ import {
   TextObject,
   TRANSFORM,
 } from "./display.js";
+import type { Filter as FilterRecord } from "./filters.js";
 import { deviceMetrics, fontFamily } from "./fonts.js";
 import { shifted } from "./geometry.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients.js";
 import type { PointerState } from "./input.js";
 import { blendFilters } from "./pixi-blend.js";
 import { setFlashColor } from "./pixi-color.js";
+import { displayFilters } from "./pixi-filters.js";
 import type { Player } from "./player.js";
 import {
   CUBIC,
@@ -386,6 +390,8 @@ function strokeContext(layer: ShapeLayer, m: Linear): GraphicsContext {
   return context;
 }
 
+const NO_RECORDS: readonly FilterRecord[] = [];
+
 /** What the view keeps for a display object. */
 interface Node {
   container: PixiContainer;
@@ -418,6 +424,9 @@ interface Node {
   inherited: ColorTransform | null;
   /** The blend mode its filters composite it in. */
   blend: string;
+  /** Its filters' records as of the last sync, and the Pixi filters made of them, its own. */
+  filterRecords: readonly FilterRecord[];
+  filters: Filter[];
 }
 
 export class PixiView {
@@ -478,6 +487,8 @@ export class PixiView {
 
   /** What a fresh view built itself, which it destroys; what it borrowed from `source` stays. */
   private readonly built: GraphicsContext[] = [];
+  /** The filters a fresh view made, which it destroys with the rest. */
+  private readonly builtFilters: Filter[] = [];
   /** The objects `mask` was found set on, for the masks to be placed that are not under the root. */
   private readonly maskees = new Set<WeakRef<DisplayObject>>();
   /** Where those masks are placed, beside the root. */
@@ -552,6 +563,11 @@ export class PixiView {
     for (const context of this.built) {
       destroyContext(context);
     }
+
+    // A container destroyed lets go of its filters without destroying them.
+    for (const filter of this.builtFilters) {
+      filter.destroy();
+    }
   }
 
   private node(o: DisplayObject): Node {
@@ -575,6 +591,8 @@ export class PixiView {
         color: null,
         inherited: null,
         blend: "normal",
+        filterRecords: NO_RECORDS,
+        filters: [],
       };
       node.container.addChild(art);
       this.nodes.set(o, node);
@@ -749,14 +767,31 @@ export class PixiView {
       container.setFromMatrix(new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty));
       container.visible = o.visible || masking;
       // A blend mode composites the object as a layer (pixi-blend.ts); a mask is its fills alone.
+      // Its filters, then its blend: adl filters the object, then blends what they make.
       const blend = masking ? "normal" : o.blendMode;
-      if (blend !== node.blend) {
+      const records = masking ? NO_RECORDS : o.filters;
+      if (blend !== node.blend || records !== node.filterRecords) {
         node.blend = blend;
-        container.filters = blendFilters(blend);
+        node.filterRecords = records;
+        for (const f of node.filters) {
+          f.destroy();
+        }
+
+        // Flash's filters are WebGL's alone; Pixi skips a chain with one it
+        // cannot run, so under WebGPU they are left out and the blend kept.
+        node.filters = this.renderer.type === RendererType.WEBGPU ? [] : displayFilters(records);
+        if (this.fresh) {
+          this.builtFilters.push(...node.filters);
+        }
+
+        const blending = blendFilters(blend);
+        container.filters =
+          node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;
         if (blend !== "normal" && blend !== "layer") {
           this.checkBackBuffer();
         }
       }
+
       // Most objects have neither: they pay one test.
       if (o.mask || o.scroll || node.clipped) {
         if (this.clip(o, node) && o instanceof Container) {

@@ -1378,7 +1378,25 @@ maps straight colour, rounded, the pixels about what the source has
 premultiplied truncated and the rest of the rect the map of a
 transparent pixel. The `apply-filter` case matches adl's numbers to the
 bit. Bevels, convolution, displacement maps and gradient filters throw
-as not supported yet. Drawing the filters is still to come.
+as not supported yet.
+
+The renderer draws a display object's blur, glow, drop shadow and colour
+matrix as adl does (`pixi-filters.ts`), before its blend mode: a blur is
+a box blurX by blurY pixels wide, the pixels at its ends weighted by how
+much of them it covers, run `quality` times each way and truncated to 8
+bits each time, so that blur 2.5 weighs 0.3, 0.4 and 0.3, and the filter
+reaches quality × blur / 2 pixels out. A glow is the object's alpha so
+blurred, times strength (clamped to 1) and alpha, in its colour, drawn
+behind the object, or, inner, one less that inside it over the object;
+knocked out, the object is left out. A drop shadow is a glow from
+distance × (cos, sin) of its angle back, and with `hideObject` drawn
+alone. A colour matrix maps each pixel's straight colour, offsets in
+255ths, transparent pixels within the object's bounds too. The passes
+are Pixi filters at the target's resolution, for WebGL: under WebGPU,
+where Pixi would skip an object's whole chain for one it cannot run,
+they are left out and a blend mode is kept. A view made for one draw
+destroys the filters it made with it. Bevels, convolution, displacement
+maps and gradient glows and bevels are still to come.
 
 ### Masks and scroll rectangles
 
