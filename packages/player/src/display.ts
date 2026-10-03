@@ -883,11 +883,21 @@ export class MovieClip extends Container {
   }
 
   /**
+   * First-frame children placed but not yet made alive: placed before the
+   * clip's class constructor runs, made by Sprite's constructChildren in its
+   * super(), as Flash has a constructor find them (`instantiation_on_enter_frame`).
+   */
+  private held: { display: DisplayObject; character: DisplayCharacter }[] = [];
+
+  /**
    * Run frame `frame`'s commands as the playhead reaches it: place, move and
    * remove the timeline's children. A place without the move flag at a depth
    * already taken is let be, as Flash lets it (`same-depth`).
+   * A new child is made alive at once, or `later`: by the frame's construct
+   * phase, after ENTER_FRAME, for a frame played on; by constructChildren,
+   * held, for a clip's first frame.
    */
-  private runFrame(frame: number): void {
+  private runFrame(frame: number, later: "frame" | "held" | null = null): void {
     for (const command of this.timeline.frames[frame - 1] ?? []) {
       if (command.type === "remove") {
         this.removeAtDepth(command.depth);
@@ -925,7 +935,13 @@ export class MovieClip extends Container {
       child.applyPlace(place);
       child.placeFrame = frame;
       this.placeAtDepth(child, place.depth);
-      construct(child, character, this.library);
+      if (later === "held" && this.library.construct) {
+        this.held.push({ display: child, character });
+      } else if (later === "frame" && this.library.constructLater) {
+        this.library.constructLater(child, character);
+      } else {
+        construct(child, character, this.library);
+      }
     }
   }
 
@@ -1056,14 +1072,24 @@ export class MovieClip extends Container {
     }
   }
 
-  /** The first frame, as a clip runs it when it is made; once. */
+  /** The first frame, as a clip runs it when it is made, its children placed and made alive; once. */
   enterFirstFrame(): void {
+    this.placeFirstFrame();
+    for (const { display, character } of this.held.splice(0)) {
+      if (!display.object && display.parent === this) {
+        construct(display, character, this.library);
+      }
+    }
+  }
+
+  /** The first frame's children placed, to be made alive by enterFirstFrame; once. */
+  placeFirstFrame(): void {
     if (this.currentFrame !== 0) {
       return;
     }
 
     this.currentFrame = 1;
-    this.runFrame(1);
+    this.runFrame(1, "held");
   }
 
   /**
@@ -1086,7 +1112,7 @@ export class MovieClip extends Container {
     }
 
     this.currentFrame++;
-    this.runFrame(this.currentFrame);
+    this.runFrame(this.currentFrame, "frame");
   }
 }
 

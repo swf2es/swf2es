@@ -172,6 +172,12 @@ export class Scripting {
   readonly externalInterface: ExternalInterfaceHost | null;
   /** How many calls the page has made into the SWF's ExternalInterface callbacks, which run outside a frame. */
   hostCalls = 0;
+  /** Children frames played on placed, to be made alive in the frame's construct phase. */
+  private readonly toConstruct: {
+    display: DisplayObject;
+    character: DisplayCharacter;
+    library: Library;
+  }[] = [];
   readonly socket: SocketHost | null;
   /**
    * The character, and its SWF's library, each class SymbolClass bound
@@ -402,6 +408,16 @@ export class Scripting {
     }
 
     library.construct = (display, character) => this.construct(display, character, library);
+    library.constructLater = (display, character) => {
+      // Its class is ready as the frame plays, its script run, as the frame's
+      // tags have it in Flash; only the instance waits (`delayed_symbolclass`).
+      const name = library.classes.get(character.id);
+      if (name) {
+        this.rt.classNamed(name, library.domain ?? null);
+      }
+
+      this.toConstruct.push({ display, character, library });
+    };
     library.removing = (display, byTimeline) => this.removing(display, byTimeline);
   }
 
@@ -467,6 +483,11 @@ export class Scripting {
    * frame is entered by Sprite's constructChildren on the way.
    */
   construct(display: DisplayObject, character: DisplayCharacter, library: Library): void {
+    // Its first frame's children are there before its constructor runs, made alive in its super().
+    if (display instanceof MovieClip) {
+      display.placeFirstFrame();
+    }
+
     const name = library.classes.get(character.id) ?? DEFAULT_CLASS[character.type];
     const domain = library.domain ?? null;
     // A button's states are made before its constructor runs, as Flash has
@@ -1259,6 +1280,7 @@ export class Scripting {
     this.bind(swf, library);
     const root = new MovieClip(library.root, library);
     root.loaderInfo = info;
+    root.placeFirstFrame();
     const object = this.constructAs(
       root,
       this.rt.classNamed(library.classes.get(0) ?? "flash.display::MovieClip", load.domain),
@@ -1476,6 +1498,16 @@ export class Scripting {
     if (entered) {
       this.frames++;
       this.broadcast("enterFrame");
+    }
+
+    // The construct phase: what the frames placed is made alive after
+    // ENTER_FRAME, before frameConstructed; until then a script finds it in
+    // numChildren but getChildAt gives null (`instantiation_on_enter_frame`).
+    // One taken off since is never made.
+    for (const { display, character, library } of this.toConstruct.splice(0)) {
+      if (!display.object && display.parent) {
+        this.construct(display, character, library);
+      }
     }
 
     const ends = [...this.frameEnds.splice(0), ...this.completeLoads()];

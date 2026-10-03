@@ -590,14 +590,23 @@ depends on which VM drives them.
 
 Construction follows Flash's order, which playerglobal's own constructors
 fix: `Sprite()` calls its private native `constructChildren()` after
-`constructsuper`, so a symbol's first frame is placed, and its children's
-classes constructed, before the subclass's constructor body runs and can
-reach them by name. The player constructs a timeline child whose symbol
-has a class by making its player object, setting it as the one pending,
-and calling `rt.construct(cls)`: the `create` hook takes the pending
-object instead of making one, and `constructChildren` runs the clip's
-first frame. A `new Sprite()` from a script finds nothing pending and gets
-a fresh player object. `EventDispatcher()` calls its private native
+`constructsuper`, so a symbol's first frame's children's classes are
+constructed before the subclass's constructor body runs and can reach
+them by name. The player constructs a timeline child whose symbol has a
+class by making its player object, placing its first frame's children,
+setting it as the one pending, and calling `rt.construct(cls)`: the
+`create` hook takes the pending object instead of making one, and
+`constructChildren` makes the placed children alive, so the constructor
+finds them in `numChildren` before `super()` and constructed after it, as
+the main and a loaded root do too (`instantiation_on_enter_frame`). A `new
+Sprite()` from a script finds nothing pending, gets a fresh player object,
+and places its first frame in `constructChildren`. A frame played on
+places its new children at once, but makes their AS3 objects only after
+`ENTER_FRAME`, in a construct phase before `frameConstructed`: until then
+a script counts them in `numChildren` and `getChildAt` gives null. Their
+classes are ready as the frame plays, their scripts run, and one taken off
+before the phase is never made (`delayed_symbolclass`). A goto makes what
+it places at once. `EventDispatcher()` calls its private native
 `ctor`, and `InteractiveObject()` calls `addEventListener`, so event
 dispatch is part of the first slice: listeners by type and phase on the
 player object, `dispatchEvent` through the player's parent chain, and the
