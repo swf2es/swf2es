@@ -250,8 +250,9 @@ async function benchSwf(
         ? `WebGPU, ${gpu.adapter.info?.description || gpu.adapter.info?.vendor || "unknown adapter"}`
         : "unknown renderer";
     const finish = async () => {
+      // Chrome's finish returns before the GPU process has drawn; a read waits for it.
       if (gl) {
-        gl.finish();
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
       } else if (gpu) {
         await gpu.device.queue.onSubmittedWorkDone();
       }

@@ -537,6 +537,15 @@ frames, at most 4096 of them, before it is destroyed. A drawing's lines
 are its own, as it changes.
 Tessellating lines, round joins most of all, was the largest part of a
 frame of a dozen animated instances; `bench.ts --rig N` measures it.
+Fills and lines are drawn unbatched, each Graphics a draw of its own
+geometry under its transform. Pixi batches small Graphics by packing their
+vertices, already transformed, into one buffer, which it packs and uploads
+again whenever its render group changes structure: on most frames of an
+animation, whose timelines add and remove children. Larger ones it draws
+alone anyway, so batches and those alternate, switching programs at each.
+Unbatched, a shape's geometry is uploaded once: more draw calls, but far
+fewer program switches and uploads, and `bench.ts --rig 32` draws in half
+the time on a GPU and a quarter of it under software GL.
 
 Flash anti-aliases by supersampling on a grid: none at low quality, 2×2 at
 medium, 4×4 at high and best. The test page draws the same way, at that

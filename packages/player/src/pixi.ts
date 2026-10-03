@@ -315,6 +315,20 @@ function transformPath(path: Path, m: Linear): Path {
 }
 
 /**
+ * A context for a shape's fills or lines, drawn on its own, never batched.
+ * A batch holds its vertices on the stage, so Pixi repacks and uploads
+ * them all again whenever anything in the render group changes structure,
+ * as a timeline does on most frames; and between batches and the large
+ * shapes Pixi draws alone anyway it switches programs. Alone, a shape's
+ * geometry is uploaded once and only its transform changes.
+ */
+function shapeContext(): GraphicsContext {
+  const context = new GraphicsContext();
+  context.batchMode = "no-batch";
+  return context;
+}
+
+/**
  * A layer's fills, which are the same for every instance of the shape.
  * Each contour's region is inside or not by the fill's rule, by its depth
  * in the containment for even-odd, by the sum of orientations around it
@@ -322,7 +336,7 @@ function transformPath(path: Path, m: Linear): Path {
  * the first regions below it that are not cut out as holes, and so on in.
  */
 function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContext {
-  const context = new GraphicsContext();
+  const context = shapeContext();
   const held: (() => void)[] = [];
   holds.set(context, held);
   for (const { fill, contours, winding } of layer.fills) {
@@ -378,7 +392,7 @@ function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContext {
 
 /** A layer's lines as seen through `m`, drawn in its space so that their width is even. */
 function strokeContext(layer: ShapeLayer, m: Linear): GraphicsContext {
-  const context = new GraphicsContext();
+  const context = shapeContext();
   for (const { line, paths } of layer.strokes) {
     context.beginPath();
     for (const path of paths) {

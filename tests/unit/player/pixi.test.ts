@@ -344,6 +344,41 @@ async function withClock(run: (clock: { at: number }) => Promise<void> | void): 
   }
 }
 
+test("a shape's fills and lines are drawn unbatched", async () => {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { MOVE, LINE } = await import("../../../packages/player/dist/shapes.js");
+  const view = new PixiView(standIn([]).renderer);
+  const line = {
+    width: 40,
+    color: 0xff000000,
+    startCap: 0,
+    endCap: 0,
+    join: 0,
+    miterLimit: 3,
+    noHScale: false,
+    noVScale: false,
+    pixelHinting: false,
+    noClose: false,
+    fill: null,
+  };
+  const character = {
+    type: "shape" as const,
+    id: 1,
+    shape: {} as never,
+    layers: [{ fills: [], strokes: [{ line, paths: [[MOVE, 0, 0, LINE, 10, 0, LINE, 10, 10]] }] }],
+  } as unknown as ConstructorParameters<typeof ShapeObject>[0];
+  const root = new Container();
+  root.placeAtDepth(new ShapeObject(character), 1);
+  view.prepare(root);
+
+  // The fills' Graphics, then the lines'.
+  const art = view.stage.children[0].children[1].children[0];
+  const modes = art.children.map(
+    (g) => (g as unknown as { context: { batchMode: string } }).context.batchMode,
+  );
+  assert.deepEqual(modes, ["no-batch", "no-batch"]);
+});
+
 test("an object off the list gives its lines back, and has them again when it comes back", async () => {
   const { ShapeObject } = await import("../../../packages/player/dist/display.js");
   const { MOVE, LINE } = await import("../../../packages/player/dist/shapes.js");
