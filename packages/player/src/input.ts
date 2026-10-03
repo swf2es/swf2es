@@ -73,6 +73,8 @@ export function pointerTarget(
 
 /** Mouse events on the player's display list, independent of a renderer. */
 export class PointerInput {
+  /** How many pointer events it has handled: each may run scripts and change a button's state. */
+  handled = 0;
   private hover: DisplayObject | null = null;
   private pressed: DisplayObject | null = null;
 
@@ -107,6 +109,7 @@ export class PointerInput {
   }
 
   handle(type: "move" | "down" | "up" | "leave", p: PointerState): void {
+    this.handled++;
     const s = this.scripting;
     s.mouseStageX = p.x;
     s.mouseStageY = p.y;

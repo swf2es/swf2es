@@ -139,4 +139,6 @@ test("a pointer down dispatches capture, target and bubble with target-local coo
   input.handle("leave", { x: 120, y: 5, button: 0, buttons: 1 });
   input.handle("up", { x: 120, y: 5, button: 0, buttons: 0 });
   assert.deepEqual(heard, ["capture", "target", "bubble"]);
+  // Each event counts as a change a host draws for.
+  assert.equal(input.handled, 3);
 });

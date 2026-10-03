@@ -165,6 +165,8 @@ export class Scripting {
   readonly mainDomain: avm2.Domain;
   readonly screenCapabilities: Readonly<ScreenCapabilities>;
   readonly externalInterface: ExternalInterfaceHost | null;
+  /** How many calls the page has made into the SWF's ExternalInterface callbacks, which run outside a frame. */
+  hostCalls = 0;
   readonly socket: SocketHost | null;
   /**
    * The character, and its SWF's library, each class SymbolClass bound

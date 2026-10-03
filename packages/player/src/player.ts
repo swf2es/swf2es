@@ -91,15 +91,31 @@ export class Player {
 
   /** Time a host has let pass, in ms, still to be played as frames. */
   private owed = 0;
+  /** Frames played. */
+  private played = 0;
+
+  /**
+   * A count that moves whenever what the player shows may have changed: a
+   * frame played, a pointer event, or a call from the page into one of the
+   * SWF's ExternalInterface callbacks. Nothing else runs its scripts
+   * between frames: loads and socket data arrive in a frame. A host that
+   * draws only when this moved draws every frame Flash would, and none in
+   * between, once it has drawn after start; what the host itself changes,
+   * a resize, it draws for itself.
+   */
+  get changes(): number {
+    return this.played + (this.pointer?.handled ?? 0) + (this.scripting?.hostCalls ?? 0);
+  }
 
   /**
    * Play what `dt` milliseconds are worth, a frame per frame's duration at
    * the frame rate, the rest kept for the next call; at most MAX_CATCH_UP
    * frames at once, so that a long pause does not become a spiral of
    * catching up, as Ruffle paces. A host playing in real time calls this
-   * each animation frame; the tests step frames with tick().
+   * each animation frame; the tests step frames with tick(). Returns how
+   * many frames it played.
    */
-  advance(dt: number): void {
+  advance(dt: number): number {
     this.owed += Math.max(0, dt);
     let n = 0;
     while (n < MAX_CATCH_UP && this.owed >= 1000 / this.frameRate) {
@@ -112,6 +128,8 @@ export class Player {
     if (this.owed >= 1000 / this.frameRate) {
       this.owed = 0;
     }
+
+    return n;
   }
 
   /**
@@ -121,6 +139,7 @@ export class Player {
    * takes off still has its frame, as in Flash. Then the frame's scripts.
    */
   tick(): void {
+    this.played++;
     this.scripting?.beginFrame(1000 / this.frameRate);
     const clips: MovieClip[] = [];
     const collect = (o: DisplayObject) => {

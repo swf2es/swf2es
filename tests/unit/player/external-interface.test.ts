@@ -19,7 +19,7 @@ function scripting(host: ExternalInterfaceHost | null): Scripting {
     hasNext: (_object: unknown, index: number) => (index < 2 ? index + 1 : 0),
     nextName: (_object: unknown, index: number) => ["first", "second"][index - 1],
   };
-  return { rt, externalInterface: host } as unknown as Scripting;
+  return { rt, externalInterface: host, hostCalls: 0 } as unknown as Scripting;
 }
 
 test("ExternalInterface reports an unavailable host and keeps callbacks per player", () => {
@@ -78,6 +78,8 @@ test("ExternalInterface reports an unavailable host and keeps callbacks per play
   const closure = { $f: (request: string, args: { $a: unknown[] }) => `${request}:${args.$a}` };
   a[`${PRIVATE}_addCallback`](first.rt).call(null, "ready", closure, false);
   assert.equal(callbacks.current?.("message", [1, 2]), "message:1,2");
+  // A call from the page runs outside a frame: a change a host draws for.
+  assert.equal(first.hostCalls, 1);
   a[`${PRIVATE}_addCallback`](first.rt).call(null, "ready", closure, true);
   assert.equal(callbacks.current, null);
   assert.deepEqual(calls.slice(2), ["callback ready", "callback ready"]);
