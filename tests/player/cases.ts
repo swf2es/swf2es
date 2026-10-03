@@ -153,6 +153,55 @@ function loops(as3: boolean): Uint8Array {
   });
 }
 
+// Three instances of a sprite whose outlined shape turns and swells on a
+// loop of three frames, in step, so that they see its lines alike and the
+// renderer shares them, and the loop comes back to the lines it had; and a
+// sprite whose loop leaves theirs on its second frame and comes back.
+function sharedLines(): Uint8Array {
+  const turn = (angle: number, scale: number, skew = 0) => ({
+    a: scale * Math.cos(angle),
+    b: scale * Math.sin(angle),
+    c: -scale * Math.sin(angle) + skew,
+    d: scale * Math.cos(angle),
+    tx: 0,
+    ty: 0,
+  });
+  const loop = [turn(0.5, 0.5), turn(-0.3, 0.7, 0.2), turn(1.2, 0.6)];
+  const other = [loop[0], turn(0.9, 0.8), loop[2]];
+  const sprite = (id: number, frames: typeof loop) =>
+    w.sprite(id, frames.length, [
+      ...frames.flatMap((matrix, f) => [
+        f === 0
+          ? w.place({ depth: 1, character: 1, matrix })
+          : w.place({ depth: 1, move: true, matrix }),
+        w.showFrame(),
+      ]),
+      w.end(),
+    ]);
+  return w.swf({
+    width: 400,
+    height: 200,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      outlined,
+      sprite(2, loop),
+      sprite(3, other),
+      ...[0, 1, 2, 3].map((i) =>
+        w.place({
+          depth: i + 1,
+          character: i < 3 ? 2 : 3,
+          matrix: { tx: 1000 + i * 1800, ty: 2000 },
+        }),
+      ),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Frame 1 places a square with no matrix and frame 2 moves it: when the
 // root loops, Flash shows frame 3 as it showed frame 1, the square back at
 // the origin, though frame 1's place says nothing about where.
@@ -1174,6 +1223,16 @@ const rewound = { frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 };
 export const cases: PlayerCase[] = [
   { name: "moves", swf: moves(true), ...moved },
   { name: "moves-avm1", swf: moves(false), ...moved },
+  {
+    name: "shared-lines",
+    swf: sharedLines(),
+    frames: 5,
+    capture: [1, 2, 3, 4, 5],
+    // The curved, turned lines anti-alias within a quarter pixel of Flash's,
+    // as for `moves`; frames 4 and 5 come out as 1 and 2 did.
+    tolerance: 32,
+    maxOutliers: 1300,
+  },
   { name: "depths", swf: depths, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
   { name: "loops", swf: loops(true), ...looped },
   { name: "loops-avm1", swf: loops(false), ...looped },
