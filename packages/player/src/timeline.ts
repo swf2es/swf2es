@@ -9,6 +9,7 @@ import {
   type Font,
   type FontName,
   isBitmapTag,
+  type MorphShape,
   type Place,
   readBinaryData,
   readBitmap,
@@ -16,6 +17,7 @@ import {
   readEditText,
   readFont,
   readFrameLabel,
+  readMorphShape,
   readPlace,
   readRemove,
   readSceneData,
@@ -65,6 +67,16 @@ export interface ShapeCharacter {
   id: number;
   shape: Shape;
   layers: ShapeLayer[];
+}
+
+/** DefineMorphShape or DefineMorphShape2, and its latest blends by ratio, least recent first (morph.ts). */
+export interface MorphCharacter {
+  type: "morph";
+  id: number;
+  morph: MorphShape;
+  blends: Map<number, ShapeCharacter>;
+  /** Its bitmap fills' bitmaps. */
+  bitmap: (id: number) => BitmapCharacter | null;
 }
 
 export interface SpriteCharacter {
@@ -130,6 +142,7 @@ export interface SoundCharacter {
 
 export type Character =
   | ShapeCharacter
+  | MorphCharacter
   | SpriteCharacter
   | ButtonCharacter
   | BitmapCharacter
@@ -290,6 +303,21 @@ function timelineOf(
         };
         const shape = shapeOf(bytes, t, bitmap);
         library.set(shape.id, shape);
+        break;
+      }
+      case tags.DefineMorphShape:
+      case tags.DefineMorphShape2: {
+        const morph = readMorphShape(bytes, t.code, t.offset, t.length);
+        library.set(morph.id, {
+          type: "morph",
+          id: morph.id,
+          morph,
+          blends: new Map(),
+          bitmap: (id) => {
+            const c = library.get(id);
+            return c?.type === "bitmap" ? c : null;
+          },
+        });
         break;
       }
       case tags.DefineSprite: {

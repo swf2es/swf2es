@@ -1701,6 +1701,130 @@ function textDraw(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Three morph shapes: one whose straight edges pair with curves as its
+// fill, line width and colour change; one of two paths with a turning
+// gradient, in a DefineMorphShape2; and two regions of two colours whose
+// shared edge, fill0 on one side and fill1 on the other, moves. The
+// timeline sets ratios, swaps a shape for a morph and back with the move
+// flag, and loops onto a shape a rewind keeps.
+function morphs(): Uint8Array {
+  const bend = w.morphShape({
+    id: 1,
+    startBounds: [-20, 1220, -20, 1220],
+    endBounds: [-280, 1480, -280, 1480],
+    fills: [{ start: 0xffcc3300, end: 0xff0033cc }],
+    lines: [{ startWidth: 40, endWidth: 160, startColor: 0xff000000, endColor: 0xff00a000 }],
+    start: [
+      {
+        fill0: 1,
+        line: 1,
+        commands: [
+          { move: [0, 0] },
+          { line: [1200, 0] },
+          { line: [1200, 1200] },
+          { line: [0, 1200] },
+          { line: [0, 0] },
+        ],
+      },
+    ],
+    end: [
+      [
+        { move: [600, -200] },
+        { curve: [1400, -200, 1400, 600] },
+        { line: [600, 1400] },
+        { curve: [-200, 1400, -200, 600] },
+        { line: [600, -200] },
+      ],
+    ],
+  });
+  const turn = w.morphShape({
+    id: 2,
+    version: 2,
+    startBounds: [-40, 1840, -40, 1040],
+    endBounds: [-40, 1940, 160, 1240],
+    fills: [
+      {
+        type: 0x10,
+        startMatrix: { a: 0.05, d: 0.05, tx: 900, ty: 500 },
+        endMatrix: { a: 0, b: 0.05, c: -0.05, d: 0, tx: 900, ty: 700 },
+        stops: [
+          [0, 0xffffff00, 0, 0xff00ffff],
+          [255, 0xffff0000, 128, 0x80000080],
+        ],
+      },
+    ],
+    lines: [{ startWidth: 20, endWidth: 80, startColor: 0xff404040, endColor: 0xffff00ff }],
+    start: [
+      {
+        fill0: 1,
+        line: 1,
+        commands: [{ move: [0, 0] }, { line: [1200, 0] }, { line: [600, 1000] }, { line: [0, 0] }],
+      },
+      { fill0: 1, line: 1, commands: rectPath(70, 0, 20, 20) },
+    ],
+    end: [
+      [{ move: [0, 200] }, { line: [1200, 200] }, { line: [600, 1200] }, { line: [0, 200] }],
+      rectPath(65, 40, 30, 20),
+    ],
+  });
+  // The left region's outline, the right's, then the edge between them at x.
+  const regions = (x: number, height: number): w.PathCommand[][] => [
+    [{ move: [x, 0] }, { line: [0, 0] }, { line: [0, height] }, { line: [x, height] }],
+    [{ move: [x, height] }, { line: [1200, height] }, { line: [1200, 0] }, { line: [x, 0] }],
+    [{ move: [x, height] }, { line: [x, 0] }],
+  ];
+  const [left, right, between] = regions(300, 600);
+  const split = w.morphShape({
+    id: 4,
+    startBounds: [0, 1200, 0, 600],
+    endBounds: [0, 1200, 0, 1000],
+    fills: [
+      { start: 0xffff0000, end: 0xffffaa00 },
+      { start: 0xff0000ff, end: 0xff00aaff },
+    ],
+    start: [
+      { fill0: 1, commands: left },
+      { fill0: 2, commands: right },
+      { fill0: 1, fill1: 2, commands: between },
+    ],
+    end: regions(900, 1000),
+  });
+  return w.swf({
+    width: 320,
+    height: 200,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xeeeeee),
+      bend,
+      turn,
+      split,
+      square(3, 0x00aa00, 800),
+      w.place({ depth: 1, character: 1, matrix: { tx: 400, ty: 400 } }),
+      w.place({ depth: 2, character: 2, matrix: { tx: 2400, ty: 400 }, ratio: 32768 }),
+      w.place({ depth: 3, character: 3, matrix: { tx: 4800, ty: 400 } }),
+      w.place({ depth: 5, character: 4, matrix: { tx: 4600, ty: 2600 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, ratio: 16384 }),
+      w.place({ depth: 2, move: true, ratio: 65535 }),
+      w.place({ depth: 3, move: true, character: 1, ratio: 49152 }),
+      w.place({ depth: 5, move: true, ratio: 32768 }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, character: 3 }),
+      w.place({ depth: 2, move: true, character: 1 }),
+      w.place({ depth: 3, move: true, ratio: 65535 }),
+      w.place({ depth: 5, move: true, ratio: 65535 }),
+      w.showFrame(),
+      w.remove(1),
+      w.place({ depth: 1, character: 3, matrix: { tx: 400, ty: 2200 } }),
+      w.place({ depth: 4, character: 1, matrix: { tx: 2400, ty: 2200 }, ratio: 40000 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
@@ -1720,6 +1844,16 @@ export const cases: PlayerCase[] = [
     maxOutliers: 1300,
   },
   { name: "fill-holes", swf: fillHoles(), frames: 1, capture: [1], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "morph-shapes",
+    swf: morphs(),
+    frames: 6,
+    capture: [1, 2, 3, 4, 5, 6],
+    // The thick curved lines anti-alias within a pixel of Flash's, as for
+    // `shared-lines`, the end shape's too: some 570 pixels in frame 4.
+    tolerance: 32,
+    maxOutliers: 800,
+  },
   { name: "depths", swf: depths, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
   { name: "loops", swf: loops(true), ...looped },
   { name: "loops-avm1", swf: loops(false), ...looped },

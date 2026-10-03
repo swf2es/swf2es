@@ -47,6 +47,7 @@ import { deviceMetrics, fontFamily } from "./fonts.js";
 import { shifted } from "./geometry.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients.js";
 import type { PointerState } from "./input.js";
+import { blendLayers, droppedLayers } from "./morph.js";
 import { blendFilters } from "./pixi-blend.js";
 import { setFlashColor } from "./pixi-color.js";
 import { displayFilters, FilterChain, rgbaOf } from "./pixi-filters.js";
@@ -441,7 +442,8 @@ const IDLE_MOST = 4096;
  * turn. Contexts are counted as they are taken and given back, a removed
  * object's too; one no longer taken waits among the idle, destroyed after
  * IDLE_MS or, the oldest first, past IDLE_MOST. Only a character's layers
- * are shared, which never change.
+ * are shared, which never change, and a blend's while its morph keeps it:
+ * one it has dropped is never drawn from again, so its lines go at once.
  */
 class StrokeContexts {
   private readonly byLayer = new WeakMap<ShapeLayer, Map<string, GraphicsContext>>();
@@ -449,6 +451,8 @@ class StrokeContexts {
   private readonly keys = new Map<GraphicsContext, [ShapeLayer, string]>();
   /** Contexts no one holds, oldest first, with the time each went idle. */
   private readonly idle = new Map<GraphicsContext, number>();
+  /** The idle ones of blends, which go as soon as their morph drops the blend. */
+  private readonly idleBlends = new Set<GraphicsContext>();
 
   constructor(private readonly counts: { strokeContexts: number; strokeReuses: number }) {}
 
@@ -464,6 +468,7 @@ class StrokeContexts {
     if (context) {
       this.counts.strokeReuses++;
       this.idle.delete(context);
+      this.idleBlends.delete(context);
     } else {
       context = linesContext(layer, m, least);
       this.counts.strokeContexts++;
@@ -489,14 +494,30 @@ class StrokeContexts {
     }
 
     this.uses.delete(context);
+    const layer = (this.keys.get(context) as [ShapeLayer, string])[0];
+    if (droppedLayers.has(layer)) {
+      this.drop(context);
+      return;
+    }
+
     this.idle.set(context, performance.now());
+    if (blendLayers.has(layer)) {
+      this.idleBlends.add(context);
+    }
+
     if (this.idle.size > IDLE_MOST) {
       this.drop(this.idle.keys().next().value as GraphicsContext);
     }
   }
 
-  /** A frame prepared: the contexts idle too long go. */
+  /** A frame prepared: the contexts idle too long go, and those of blends their morph dropped. */
   tick(): void {
+    for (const context of this.idleBlends) {
+      if (droppedLayers.has((this.keys.get(context) as [ShapeLayer, string])[0])) {
+        this.drop(context);
+      }
+    }
+
     const now = performance.now();
     for (const [context, since] of this.idle) {
       if (now - since < IDLE_MS) {
@@ -509,6 +530,7 @@ class StrokeContexts {
 
   private drop(context: GraphicsContext): void {
     this.idle.delete(context);
+    this.idleBlends.delete(context);
     const [layer, key] = this.keys.get(context) as [ShapeLayer, string];
     this.keys.delete(context);
     this.byLayer.get(layer)?.delete(key);
@@ -562,11 +584,14 @@ interface Node {
   layers: ShapeLayer[];
   /** Their fills, one context a layer. */
   fills: GraphicsContext[];
-  /** Whether the fills are this node's own, a drawing's, rather than its character's, which instances share. */
+  /**
+   * Whether the fills are this node's own, a drawing's or a blend's, not its character's, which
+   * instances share.
+   */
   ownFills: boolean;
   /** The lines, a Graphics for each layer that has any; null where one has none. */
   strokes: (LinesGraphics | null)[];
-  /** Whether the layers are a character's, whose lines' contexts instances share. */
+  /** Whether the layers are a character's or a blend's, whose lines' contexts instances share. */
   sharedLines: boolean;
   /** The children as of the last arrangement, to know those that left. */
   kids: readonly DisplayObject[];
@@ -794,7 +819,8 @@ export class PixiView {
   private redraw(o: DisplayObject, node: Node): void {
     // A Bitmap's texture is its store's: only the sprite goes.
     node.bitmap?.destroy();
-    // A drawing's fills and every node's lines; a Graphics frees only a context it made.
+    // A drawing's or blend's fills, and every node's lines; a Graphics frees only a context it
+    // made.
     const old = node.ownFills && !this.fresh ? node.fills : [];
     const oldLines = this.fresh ? [] : node.strokes.map((g) => g?.context);
     // A text's characters are in a container of their own; their shared glyph fills stay, not being theirs.
@@ -836,7 +862,7 @@ export class PixiView {
       return;
     }
 
-    const shape = o instanceof ShapeObject ? o.shape : null;
+    const shape = o instanceof ShapeObject ? o.drawn() : null;
     node.layers = o.drawing?.layers ?? shape?.layers ?? [];
     const build = (layer: ShapeLayer) => {
       const context = fillContext(layer, this.painter);
@@ -850,16 +876,20 @@ export class PixiView {
     node.ownFills = false;
     if (current && current.layers === node.layers && current.fills.length === node.layers.length) {
       fills = current.fills;
-    } else if (shape && !o.drawing) {
+    } else if (shape && !o.drawing && !(o instanceof ShapeObject && o.morph)) {
       fills = this.fills.get(shape) ?? node.layers.map(build);
       this.fills.set(shape, fills);
     } else {
+      // A drawing's, or a morph's blend, one of as many as its ratios: kept
+      // with the shapes', they would outlive it.
       fills = node.layers.map(build);
       node.ownFills = true;
     }
 
     node.fills = fills;
-    node.sharedLines = !this.fresh && !node.ownFills && shape !== null;
+    // A blend's layers never change, so its lines are shared as a shape's: instances in step stroke
+    // once.
+    node.sharedLines = !this.fresh && !o.drawing && shape !== null;
     const lines =
       current &&
       sameLinear(current.world, node.world) &&

@@ -519,3 +519,70 @@ test("an object off the list gives its lines back, and has them again when it co
     assert.equal(linesOf().destroyed, false);
   });
 });
+
+test("a tween's lines go once its morph drops their blend, not idle for a ratio never drawn again", async () => {
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
+  const { readMorphShape, readSwf } = await import("../../../packages/format/dist/index.js");
+  const w = await import("../../swf-writer.ts");
+  const square: import("../../swf-writer.ts").PathCommand[] = [
+    { move: [0, 0] },
+    { line: [400, 0] },
+    { line: [400, 400] },
+    { line: [0, 400] },
+    { line: [0, 0] },
+  ];
+  const swf = readSwf(
+    w.swf({
+      width: 50,
+      height: 50,
+      frameRate: 12,
+      frameCount: 1,
+      tags: [
+        w.morphShape({
+          id: 1,
+          startBounds: [0, 400, 0, 400],
+          endBounds: [0, 400, 0, 400],
+          fills: [],
+          lines: [{ startWidth: 20, endWidth: 80, startColor: 0xff000000, endColor: 0xff000000 }],
+          start: [{ line: 1, commands: square }],
+          end: [square],
+        }),
+      ],
+    }),
+  );
+  const t = swf.tags[0];
+  const morph = readMorphShape(swf.bytes, t.code, t.offset, t.length);
+  const shape = ShapeObject.ofMorph({
+    type: "morph",
+    id: 1,
+    morph,
+    blends: new Map(),
+    bitmap: () => null,
+  });
+  const root = new Container();
+  root.placeAtDepth(shape, 1);
+  const view = new PixiView(standIn([]).renderer);
+  type Lines = { context: { destroyed: boolean } };
+  const lines = () =>
+    (view.stage.children[0].children[1].children[0].children[1] as unknown as Lines).context;
+  const draw = (ratio: number) => {
+    shape.ratio = ratio;
+    shape.invalidate(CONTENT);
+    view.prepare(root);
+  };
+
+  view.prepare(root);
+  const first = lines();
+
+  // Given back as the tween moves on, it idles while its blend is kept.
+  draw(1000);
+  assert.equal(first.destroyed, false);
+
+  // Sixteen ratios later its blend is dropped, and the next frame its lines.
+  for (let ratio = 2000; ratio <= 17000; ratio += 1000) {
+    draw(ratio);
+  }
+
+  assert.equal(first.destroyed, true);
+  assert.equal(lines().destroyed, false);
+});
