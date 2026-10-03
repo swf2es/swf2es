@@ -153,7 +153,7 @@ async function runSwf(
       }
 
       if (capture.includes(frame)) {
-        view.render(player.root);
+        view.render(player.stage);
         samples.getContext("2d")?.drawImage(renderer.canvas, 0, 0);
         downsample(samples, output, n);
         images[frame] = output.toDataURL("image/png");
@@ -262,7 +262,7 @@ async function benchSwf(
     const heapNow = () =>
       (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ??
       0;
-    view.render(player.root);
+    view.render(player.stage);
     await finish();
     const first = performance.now() - start;
     const heapBefore = heapNow();
@@ -270,7 +270,7 @@ async function benchSwf(
       const before = performance.now();
       player.tick();
       const ticked = performance.now();
-      view.prepare(player.root);
+      view.prepare(player.stage);
       const synced = performance.now();
       renderer.render(view.stage);
       const drawn = performance.now();
@@ -282,7 +282,7 @@ async function benchSwf(
       // Renders no tick came before, as a host that draws on every animation frame does.
       for (let k = 0; k < idleRenders; k++) {
         const begun = performance.now();
-        view.render(player.root);
+        view.render(player.stage);
         await finish();
         idle.push(performance.now() - begun);
       }

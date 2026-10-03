@@ -2104,6 +2104,16 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "stage-children",
+    swf: bare,
+    script: "StageChildren",
+    frames: 4,
+    capture: [1, 2, 3, 4],
+    tolerance: 0,
+    maxOutliers: 0,
+    alone: true,
+  },
+  {
     name: "definitions",
     build: definitions,
     frames: 1,
