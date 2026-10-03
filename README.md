@@ -48,7 +48,7 @@ let drawn = -1;
 player.advance(elapsedMs);
 if (player.changes !== drawn) {
   drawn = player.changes;
-  view.render(player.root);
+  view.render(player.stage);
 }
 ```
 

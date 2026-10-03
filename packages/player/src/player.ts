@@ -16,7 +16,11 @@ const MAX_CATCH_UP = 5;
 export class Player {
   readonly swf: Swf;
   readonly root: MovieClip;
-  /** The stage, which holds the root; with scripts, flash.display.Stage's other face. */
+  /**
+   * The stage, which holds the root and what scripts put beside it, as a
+   * loader does the SWF it loads: what a host draws. With scripts,
+   * flash.display.Stage's other face.
+   */
   readonly stage = new Container();
   readonly library: Library;
   readonly width: number;

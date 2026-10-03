@@ -1,0 +1,6 @@
+red true false true false true
+blue true false true true false
+own root true
+red removed null null false
+red again true false true false false
+cleared
