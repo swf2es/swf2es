@@ -51,7 +51,9 @@ requires:
    interchangeable. An ABC's layouts depend on those it links
    against, since its slot and dispatch ids follow its base classes', so a
    module also records their hashes and the runtime refuses it when the
-   ABCs loaded before it differ.
+   ABCs loaded before it differ. In a child application domain, what the
+   domain was recorded to find (`found`) binds names and types too, so the
+   key names those findings, each by the hash of the ABC that defines it.
 
 CI checks both (`pnpm determinism`, `tests/conformance/determinism.ts`),
 over the builtins, then each conformance case (also compiled with asc's

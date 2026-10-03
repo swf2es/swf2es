@@ -141,9 +141,10 @@ export interface FoundDefinition {
   nsKind: number;
   uri: string;
   name: string;
-  /** The ABC that defines it: its domain's number, and its position among the ABCs loaded there. */
+  /** The ABC that defines it: its domain's number, its position among the ABCs loaded there, and its hash. */
   domain: number;
   index: number;
+  hash: string;
   /** Found as a type, as avmplus finds traits, else by name, as it finds scripts. */
   asType: boolean;
 }
@@ -1216,6 +1217,7 @@ export class Runtime {
                 name,
                 domain: abc.domain.id,
                 index: abc.index,
+                hash: abc.hash,
                 asType,
               });
             }

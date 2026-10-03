@@ -11,14 +11,34 @@ import { instantiate } from "./codegen.js";
 /** Bumped whenever generated code or the runtime ABI it calls changes. */
 export const COMPILER_VERSION = "0.0.0";
 
+/** A finding as a cache key names it: the defining ABC by its hash (see FoundDefinition). */
+export interface FoundKey {
+  nsKind: number;
+  uri: string;
+  name: string;
+  hash: string;
+  asType: boolean;
+}
+
 /**
  * Cache key for compiled output. Browser caches, the AOT server and the JIT
  * all use this key, so their results are interchangeable. `linked` are the
  * hashes of the ABCs loaded before this one, in order, whose layouts the
- * output depends on.
+ * output depends on; `found`, what its application domain was recorded to
+ * find (Codegen.found), which binds its names and types too.
  */
-export function cacheKey(abcHash: string, linked: string[] = []): string {
-  return `swf2es@${COMPILER_VERSION}:${[...linked, abcHash].join("+")}`;
+export function cacheKey(abcHash: string, linked: string[] = [], found: FoundKey[] = []): string {
+  const key = `swf2es@${COMPILER_VERSION}:${[...linked, abcHash].join("+")}`;
+  if (found.length === 0) {
+    return key;
+  }
+
+  // In one order whatever order they were found in; JSON keeps a URI or a
+  // name that holds a separator from reading as two.
+  const findings = found
+    .map((f) => JSON.stringify([f.asType ? 1 : 0, f.nsKind, f.uri, f.name, f.hash]))
+    .sort();
+  return `${key}:found[${findings.join(",")}]`;
 }
 
 /**

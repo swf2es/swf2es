@@ -25,6 +25,33 @@ test("wrapper and wasm agree on the compiler version", async () => {
   assert.equal(cacheKey("abc123", ["b1", "s2"]), `swf2es@${COMPILER_VERSION}:b1+s2+abc123`);
 });
 
+test("a cache key names what the ABC's application domain was recorded to find", () => {
+  const found = (name: string, hash: string, asType = true) => ({
+    nsKind: 0,
+    uri: "p",
+    name,
+    hash,
+    asType,
+  });
+  const plain = cacheKey("abc123", ["b1"]);
+  const child = cacheKey("abc123", ["b1"], [found("C", "child")]);
+  assert.equal(cacheKey("abc123", ["b1"], []), plain);
+  assert.notEqual(child, plain);
+  // Another definition, the same one by name rather than as a type, or a
+  // name that would spell the same with a separator in it: another key.
+  assert.notEqual(cacheKey("abc123", ["b1"], [found("C", "parent")]), child);
+  assert.notEqual(cacheKey("abc123", ["b1"], [found("C", "child", false)]), child);
+  assert.notEqual(
+    cacheKey("abc123", ["b1"], [{ ...found("C", "child"), uri: "p::C" }]),
+    cacheKey("abc123", ["b1"], [{ ...found("C::C", "child"), uri: "p" }]),
+  );
+  // The same findings in another order: the same key.
+  assert.equal(
+    cacheKey("abc123", ["b1"], [found("C", "child"), found("D", "child")]),
+    cacheKey("abc123", ["b1"], [found("D", "child"), found("C", "child")]),
+  );
+});
+
 test("reads the ABC version header", async () => {
   const codegen = await createCodegen(module);
   // Flash Player 9+ ABC: minor 16, major 46 (both little-endian u16).
