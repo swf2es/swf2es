@@ -13,6 +13,12 @@
 // Each job's traces go to stdout between the lines "\x01swf2es:begin <id>"
 // and "\x01swf2es:end <id>", and an error nothing caught as
 // "\x01swf2es:error <text>", so that oracle/flash.ts can tell them apart.
+// After a job ends, its content is unloaded, "\x01swf2es:settle <id>" is
+// traced, and the next job starts SETTLE frames later: a listener of the
+// last frame's EXIT_FRAME that runs after the harness's traces after the
+// end, in no job's output, and what the content goes on doing after it is
+// unloaded, an orphan movie of its own playing on, traces after the settle
+// mark, which tells oracle/flash.ts to run the jobs after it again.
 //
 // Frame 1 is the frame the SWF's INIT follows: its first frame, constructed
 // and with its scripts run. Frame k is captured at the (k-1)th EXIT_FRAME
@@ -48,6 +54,10 @@ package {
     private var socket:Socket = new Socket();
     private var input:ByteArray = new ByteArray();
     private var loader:Loader;
+    /** A job is running, or the last one's content is settling. */
+    private var busy:Boolean = false;
+    private var settling:int;
+    private static const SETTLE:int = 3;
     private var id:uint;
     private var background:uint;
     private var width_:int;
@@ -82,7 +92,7 @@ package {
     /** Buffer what arrives; start a job once one has arrived whole. */
     private function received(_:ProgressEvent):void {
       socket.readBytes(input, input.length);
-      if (!loader) {
+      if (!busy) {
         next();
       }
     }
@@ -140,6 +150,7 @@ package {
       stage.frameRate = frameRate;
       stage.quality = quality;
       frame = 0;
+      busy = true;
       trace("\x01swf2es:begin " + id);
       loader = new Loader();
       loader.uncaughtErrorEvents.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, uncaught);
@@ -210,9 +221,21 @@ package {
       loader.unloadAndStop();
       removeChild(loader);
       loader = null;
+      trace("\x01swf2es:settle " + id);
       socket.writeByte(2);
       socket.writeUnsignedInt(id);
       socket.flush();
+      settling = SETTLE;
+      addEventListener(Event.ENTER_FRAME, settle);
+    }
+
+    private function settle(_:Event):void {
+      if (--settling > 0) {
+        return;
+      }
+
+      removeEventListener(Event.ENTER_FRAME, settle);
+      busy = false;
       next();
     }
   }
