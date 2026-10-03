@@ -32,6 +32,6 @@ export function readSound(bytes: Uint8Array, tag: Tag): Sound {
     channels,
     sampleCount,
     seekSamples,
-    data: bytes.slice(r.pos, tag.offset + tag.length),
+    data: bytes.subarray(r.pos, tag.offset + tag.length),
   };
 }

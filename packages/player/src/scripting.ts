@@ -176,6 +176,13 @@ interface Symbol {
   library: Library;
 }
 
+interface SharedAudio {
+  definition: WeakRef<Sound>;
+  decoded: WeakRef<DecodedSound> | null;
+  pending: Promise<DecodedSound> | null;
+  serial: number;
+}
+
 export class Scripting {
   readonly rt: avm2.Runtime;
   /**
@@ -200,11 +207,19 @@ export class Scripting {
   }[] = [];
   readonly socket: SocketHost | null;
   readonly audio: AudioHost | null;
-  private readonly audioClips = new WeakMap<SoundCharacter, Promise<DecodedSound>>();
-  private readonly sharedAudio = new Map<
-    number,
-    { definition: Sound; clip: Promise<DecodedSound> }[]
-  >();
+  private readonly audioEntries = new WeakMap<SoundCharacter, SharedAudio>();
+  private readonly sharedAudio = new Map<number, SharedAudio[]>();
+  private readonly sharedAudioGone = new FinalizationRegistry<{
+    hash: number;
+    entry: SharedAudio;
+    serial: number;
+  }>(({ hash, entry, serial }) => {
+    if (entry.serial !== serial || entry.definition.deref()) {
+      return;
+    }
+
+    this.removeSharedAudio(hash, entry);
+  });
   /**
    * The character, and its SWF's library, each class SymbolClass bound
    * makes, for a `new` of the class from a script: by the module that
@@ -389,9 +404,8 @@ export class Scripting {
     library.domain = this.mainDomain;
     this.rt.swfVersion = swf.header.version;
     const decoded = decodeImages(library, this.decodeImage);
-    const sounds = this.prepareSounds(library);
     const run = await this.link(swf, this.mainDomain, this.url);
-    await Promise.all([decoded, sounds]);
+    await decoded;
     run();
     this.bind(swf, library);
   }
@@ -654,37 +668,75 @@ export class Scripting {
     return null;
   }
 
-  /** Decode each embedded sound once per player, including across instances of its bound class. */
+  /** Decode a sound on first play; live libraries can share an identical decode. */
   soundClip(character: SoundCharacter): Promise<DecodedSound> | null {
     if (!this.audio) {
       return null;
     }
 
-    let clip = this.audioClips.get(character);
-    if (!clip) {
-      const definition = character.definition;
-      const hash = soundHash(definition);
-      const matches = this.sharedAudio.get(hash) ?? [];
-      clip = matches.find((entry) => sameSound(entry.definition, definition))?.clip;
-      if (!clip) {
-        clip = this.audio.decode(definition);
-        matches.push({ definition, clip });
-        this.sharedAudio.set(hash, matches);
-      }
-
-      this.audioClips.set(character, clip);
+    const own = this.audioEntries.get(character);
+    if (own?.pending) {
+      return own.pending;
     }
 
+    const ownDecoded = own?.decoded?.deref();
+    if (ownDecoded) {
+      return Promise.resolve(ownDecoded);
+    }
+
+    const definition = character.definition;
+    const hash = soundHash(definition);
+    for (const entry of this.sharedAudio.get(hash) ?? []) {
+      const prior = entry.definition.deref();
+      if (!prior || !sameSound(prior, definition)) {
+        continue;
+      }
+
+      const decoded = entry.decoded?.deref();
+      const clip = entry.pending ?? (decoded ? Promise.resolve(decoded) : null);
+      if (clip) {
+        entry.definition = new WeakRef(definition);
+        this.sharedAudioGone.register(definition, {
+          hash,
+          entry,
+          serial: ++entry.serial,
+        });
+        this.audioEntries.set(character, entry);
+        return clip;
+      }
+    }
+
+    const entry: SharedAudio = {
+      definition: new WeakRef(definition),
+      decoded: null,
+      pending: null,
+      serial: 1,
+    };
+    const audio = this.audio;
+    const clip = Promise.resolve().then(() => audio.decode(definition));
+    entry.pending = clip;
+    const matches = this.sharedAudio.get(hash) ?? [];
+    matches.push(entry);
+    this.sharedAudio.set(hash, matches);
+    this.sharedAudioGone.register(definition, { hash, entry, serial: 1 });
+    void clip.then(
+      (decoded) => {
+        entry.decoded = new WeakRef(decoded);
+        entry.pending = null;
+      },
+      () => this.removeSharedAudio(hash, entry),
+    );
+    this.audioEntries.set(character, entry);
     return clip;
   }
 
-  /** A bound Sound class can play as soon as the SWF's first script runs. */
-  private async prepareSounds(library: Library): Promise<void> {
-    await Promise.all(
-      [...library.characters.values()]
-        .filter((character): character is SoundCharacter => character.type === "sound")
-        .map((character) => this.soundClip(character)?.catch(() => null)),
-    );
+  private removeSharedAudio(hash: number, entry: SharedAudio): void {
+    const matches = this.sharedAudio.get(hash)?.filter((candidate) => candidate !== entry) ?? [];
+    if (matches.length > 0) {
+      this.sharedAudio.set(hash, matches);
+    } else {
+      this.sharedAudio.delete(hash);
+    }
   }
 
   /** What SymbolClass bound the class of `traits` to, if anything: by its defining module, then its name. */
@@ -1251,10 +1303,9 @@ export class Scripting {
     const library = readLibrary(swf);
     library.domain = load.domain;
     const decoded = decodeImages(library, this.decodeImage);
-    const sounds = this.prepareSounds(library);
     // One from bytes is its Loader's SWF's, as far as its own URL goes.
     const run = await this.link(swf, load.domain, load.url ?? this.ownerUrl(load.loader));
-    await Promise.all([decoded, sounds]);
+    await decoded;
     return () => this.complete(load, swf, library, run);
   }
 

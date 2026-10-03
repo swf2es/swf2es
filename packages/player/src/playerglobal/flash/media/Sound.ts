@@ -98,7 +98,7 @@ export function finishSounds(s: Scripting): void {
       continue;
     }
 
-    const duration = (state.sound.length - state.start) * (state.loops + 1);
+    const duration = (state.sound.length - state.start) * Math.max(1, state.loops);
     if (s.now - state.started < duration) {
       continue;
     }
@@ -122,17 +122,37 @@ export function soundNatives(s: Scripting): avm2.Natives {
       }
     }
   };
+  const discardChannel = (state: ChannelState): void => {
+    state.stopped = true;
+    const active = channels.get(s);
+    for (const channel of active ?? []) {
+      if ((channel.$channel as ChannelState) === state) {
+        active?.delete(channel);
+        break;
+      }
+    }
+  };
   const startAudio = (state: ChannelState): void => {
     const sound = state.sound;
     const task = sound.character ? s.soundClip(sound.character) : sound.clip;
-    void task?.then(
-      (clip) => {
-        if (!state.stopped) {
-          state.playing = clip.play(state.start, state.loops, state.mix);
+    void task
+      ?.then(
+        (clip) => {
+          if (!state.stopped) {
+            state.playing = clip.play(state.start, state.loops, state.mix);
+          }
+        },
+        () => {
+          if (!sound.character) {
+            discardChannel(state);
+          }
+        },
+      )
+      .catch(() => {
+        if (!sound.character) {
+          discardChannel(state);
         }
-      },
-      () => {},
-    );
+      });
   };
 
   class SoundNatives {
@@ -201,6 +221,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
         }
 
         if (!s.audio) {
+          discardPending(sound);
           dispatchEvent(s, this as AsObject, s.event("complete"));
           return;
         }

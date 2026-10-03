@@ -31,4 +31,5 @@ test("DefineSound keeps its sample metadata and excludes the MP3 seek word", () 
     seekSamples: -2,
     data: new Uint8Array([1, 2, 3]),
   });
+  assert.equal(definition.data.buffer, movie.bytes.buffer);
 });

@@ -1052,9 +1052,9 @@ transform it receives, with the channel coefficients truncated to hundredths
 as Flash's sound-transform corpus trace shows, and the four gains reach the
 browser's left and right outputs through Web Audio. `Sound` classes bound by
 SymbolClass to a DefineSound tag find its encoded samples in the library.
-The player decodes MP3 or uncompressed 8/16-bit sound once per unique tag
-payload per player, sharing a decode when separate loads contain the same
-sound. Decoding finishes while each SWF links, before its first script runs. The parser leaves the
+The player decodes MP3 or uncompressed 8/16-bit sound on first play, sharing
+a decode when separate loads contain the same sound. The shared cache holds
+decoded audio weakly, so an unused sound can be collected. The parser leaves the
 MP3 seek word out of the encoded bytes; the tag's sample count and rate,
 not the decoder's duration, give the embedded sound's `length`.
 

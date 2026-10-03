@@ -47,14 +47,25 @@ export function browserAudioHost(): AudioHost | null {
           source.data.byteOffset,
           source.data.byteLength,
         );
-        for (let i = 0; i < source.sampleCount; i++) {
-          for (let channel = 0; channel < source.channels; channel++) {
-            const at = i * source.channels + channel;
-            const sample =
-              source.sampleSize === 8
-                ? (view.getUint8(at) - 128) / 128
-                : view.getInt16(at * 2, source.format === 3) / 32768;
-            buffer.getChannelData(channel)[i] = sample;
+        const channels = Array.from({ length: source.channels }, (_, i) =>
+          buffer.getChannelData(i),
+        );
+        const bytesPerFrame = source.channels * (source.sampleSize / 8);
+        const frames = Math.min(
+          source.sampleCount,
+          Math.floor(source.data.byteLength / bytesPerFrame),
+        );
+        if (source.sampleSize === 8) {
+          for (let i = 0; i < frames; i++) {
+            for (let channel = 0; channel < source.channels; channel++) {
+              channels[channel][i] = (view.getUint8(i * bytesPerFrame + channel) - 128) / 128;
+            }
+          }
+        } else {
+          for (let i = 0; i < frames; i++) {
+            for (let channel = 0; channel < source.channels; channel++) {
+              channels[channel][i] = view.getInt16(i * bytesPerFrame + channel * 2, true) / 32768;
+            }
           }
         }
       } else {
@@ -71,13 +82,25 @@ export function browserAudioHost(): AudioHost | null {
 
           const sourceNode = ctx.createBufferSource();
           let ended = false;
-          sourceNode.onended = () => {
+          const finish = () => {
+            if (ended) {
+              return;
+            }
+
             ended = true;
+            sourceNode.disconnect();
+            splitter.disconnect();
+            for (const gain of gains) {
+              gain.disconnect();
+            }
+
+            merger.disconnect();
           };
           sourceNode.buffer = buffer;
           const splitter = ctx.createChannelSplitter(2);
           const merger = ctx.createChannelMerger(2);
           const gains = Array.from({ length: 4 }, () => ctx.createGain());
+          sourceNode.onended = finish;
           sourceNode.connect(splitter);
           splitter.connect(gains[0], 0);
           splitter.connect(gains[1], 0);
@@ -95,12 +118,12 @@ export function browserAudioHost(): AudioHost | null {
             gains[3].gain.value = next.volume * next.rightToRight;
           };
           setMix(mix);
-          sourceNode.loop = loops > 0;
+          sourceNode.loop = loops > 1;
           sourceNode.loopStart = offset;
           sourceNode.loopEnd = buffer.duration;
           sourceNode.start(0, offset);
-          if (loops > 0) {
-            sourceNode.stop(ctx.currentTime + (buffer.duration - offset) * (loops + 1));
+          if (loops > 1) {
+            sourceNode.stop(ctx.currentTime + (buffer.duration - offset) * loops);
           }
 
           void ctx.resume().catch(() => {});
@@ -108,6 +131,7 @@ export function browserAudioHost(): AudioHost | null {
             stop: () => {
               if (!ended) {
                 sourceNode.stop();
+                finish();
               }
             },
             setMix,
