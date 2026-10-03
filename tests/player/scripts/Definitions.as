@@ -1,7 +1,8 @@
 // ApplicationDomain's lookups of the current domain: a class whose lazy
 // script throws as it runs (scripts/DefinitionsBad.as), which hasDefinition
-// reports as not defined while getDefinition lets its error through, and
-// names nothing defines, refused by their local names.
+// reports as not defined, before getDefinition and after, while
+// getDefinition lets its error through each time; and names nothing
+// defines, refused by their local names.
 package {
   import flash.display.Sprite;
   import flash.system.ApplicationDomain;
@@ -12,6 +13,7 @@ package {
       probe("has Bad", function():* { return d.hasDefinition("Bad"); });
       probe("get Bad", function():* { return d.getDefinition("Bad"); });
       probe("get Bad again", function():* { return d.getDefinition("Bad"); });
+      probe("has Bad after gets", function():* { return d.hasDefinition("Bad"); });
       probe("has Missing", function():* { return d.hasDefinition("Missing"); });
       probe("get Missing", function():* { return d.getDefinition("Missing"); });
       probe("get some.pkg.Missing", function():* { return d.getDefinition("some.pkg.Missing"); });

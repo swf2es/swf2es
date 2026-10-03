@@ -16,14 +16,15 @@ export function applicationDomainNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
   const domainOf = (o: AsObject): avm2.Domain => o.$domain ?? s.mainDomain;
-  // Not defined, as Flash has it, for a name whose script throws as it runs too.
+  // Not defined, as Flash has it, for a name whose script throws as it
+  // runs too: a script that threw runs again, as for getDefinition.
   const has = (o: AsObject, name: Value): boolean => {
     if (name === null || name === undefined) {
       return false;
     }
 
     try {
-      s.rt.classNamed(qualify(String(name)), domainOf(o));
+      s.rt.definitionNamed(qualify(String(name)), domainOf(o));
       return true;
     } catch {
       return false;
