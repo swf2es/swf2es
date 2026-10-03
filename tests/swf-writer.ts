@@ -696,6 +696,83 @@ export interface FontSpec {
   kerning?: [string, string, number][];
 }
 
+/** A DefineText's record: what it sets, and its glyphs as index into the font and advance, in twips. */
+export interface TextRecordSpec {
+  font?: number;
+  /** In twips, with the font. */
+  height?: number;
+  /** 0xRRGGBB (DefineText) or 0xAARRGGBB (DefineText2). */
+  color?: number;
+  x?: number;
+  y?: number;
+  glyphs: [number, number][];
+}
+
+/** A DefineText (version 1, RGB) or DefineText2 (2, RGBA). */
+export function staticText(spec: {
+  id: number;
+  bounds: [number, number, number, number];
+  matrix?: MatrixSpec;
+  records: TextRecordSpec[];
+  version?: 1 | 2;
+}): Uint8Array {
+  const version = spec.version ?? 1;
+  const glyphs = spec.records.flatMap((r) => r.glyphs);
+  const glyphBits = Math.max(1, ubits(Math.max(0, ...glyphs.map(([index]) => index))));
+  const advanceBits = Math.max(1, sbits(...glyphs.map(([, advance]) => advance)));
+  const w = new BitWriter();
+  w.u16(spec.id);
+  rect(w, ...spec.bounds);
+  matrix(w, spec.matrix ?? {});
+  w.u8(glyphBits).u8(advanceBits);
+  for (const r of spec.records) {
+    const font = r.font !== undefined;
+    const color = r.color !== undefined;
+    w.u8(
+      0x80 |
+        (font ? 0x08 : 0) |
+        (color ? 0x04 : 0) |
+        (r.y !== undefined ? 0x02 : 0) |
+        (r.x !== undefined ? 0x01 : 0),
+    );
+    if (font) {
+      w.u16(r.font ?? 0);
+    }
+
+    if (color) {
+      const c = r.color ?? 0;
+      w.u8(c >> 16)
+        .u8(c >> 8)
+        .u8(c);
+      if (version === 2) {
+        w.u8(c >>> 24);
+      }
+    }
+
+    if (r.x !== undefined) {
+      w.u16(r.x & 0xffff);
+    }
+
+    if (r.y !== undefined) {
+      w.u16(r.y & 0xffff);
+    }
+
+    if (font) {
+      w.u16(r.height ?? 0);
+    }
+
+    w.u8(r.glyphs.length);
+    for (const [index, advance] of r.glyphs) {
+      w.ub(glyphBits, index).sb(advanceBits, advance);
+    }
+
+    w.align();
+  }
+
+  w.u8(0);
+  return tag(version === 2 ? 33 : 11, w.done());
+}
+
 /**
  * A DefineFont3: glyphs of rectangles, with the layout (ascent, descent,
  * leading, advances, bounds and kerning). Its coordinates are twentieths

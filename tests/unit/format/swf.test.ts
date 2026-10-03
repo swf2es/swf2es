@@ -10,6 +10,7 @@ import {
   readSceneData,
   readShape,
   readSprite,
+  readStaticText,
   readSwf,
   readSymbolClass,
   tags,
@@ -411,4 +412,57 @@ test("an offset back among a morph's styles is not followed: the end's records c
   assert.equal(m.start.length, 5);
   assert.equal(m.end.length, 5);
   assert.equal(m.truncated, false);
+});
+
+test("static text's records read as written, each setting only what its flags say", () => {
+  const text = w.staticText({
+    id: 7,
+    version: 2,
+    bounds: [0, 800, -400, 200],
+    matrix: { tx: 100 },
+    records: [
+      {
+        font: 3,
+        height: 400,
+        color: 0x80112233,
+        x: 10,
+        y: -20,
+        glyphs: [
+          [2, 300],
+          [0, -40],
+        ],
+      },
+      { y: 200, glyphs: [[5, 120]] },
+    ],
+  });
+  const swf = readSwf(
+    w.swf({ width: 100, height: 50, frameRate: 12, frameCount: 1, tags: [text] }),
+  );
+  const t = swf.tags[0];
+  assert.equal(t.code, tags.DefineText2);
+
+  const s = readStaticText(swf.bytes, t);
+  assert.equal(s.id, 7);
+  assert.equal(s.matrix.tx, 100);
+  assert.deepEqual(s.records, [
+    {
+      font: 3,
+      color: 0x80112233,
+      x: 10,
+      y: -20,
+      height: 400,
+      glyphs: [
+        { index: 2, advance: 300 },
+        { index: 0, advance: -40 },
+      ],
+    },
+    {
+      font: null,
+      color: null,
+      x: null,
+      y: 200,
+      height: null,
+      glyphs: [{ index: 5, advance: 120 }],
+    },
+  ]);
 });
