@@ -13,6 +13,8 @@ export {
 } from "./display.js";
 export { PixiView } from "./pixi.js";
 export { Player } from "./player.js";
+export type { SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
+export type { PlatformCapabilities } from "./playerglobal/flash/system/Capabilities.js";
 export {
   type Drawer,
   type FetchRequest,

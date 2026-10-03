@@ -23,6 +23,7 @@ export {
   type CompileUnit,
   type Domain,
   type FoundDefinition,
+  frameScripts,
   type Method,
   type NativesProvider,
   Runtime,

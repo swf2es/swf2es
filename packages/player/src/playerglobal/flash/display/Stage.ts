@@ -1,7 +1,9 @@
-// flash.display.Stage: the stage's size and frame rate, and invalidate,
-// which asks for a RENDER event before the frame is drawn.
+// flash.display.Stage: the stage's size and frame rate, invalidate, which
+// asks for a RENDER event before the frame is drawn, and the two container
+// methods Stage declares native again, which do as a container's do.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
+import { containerNatives } from "./DisplayObjectContainer.js";
 
 type Value = avm2.Value;
 
@@ -91,5 +93,11 @@ export function stageNatives(s: Scripting): avm2.Natives {
   }
 
   avm2.registerNativeClass(natives, "flash.display::Stage", StageNatives);
+  const container = containerNatives(s);
+  for (const name of ["removeChildAt", "swapChildrenAt"]) {
+    natives[`flash.display::Stage#${name}`] =
+      container[`flash.display::DisplayObjectContainer#${name}`];
+  }
+
   return natives;
 }
