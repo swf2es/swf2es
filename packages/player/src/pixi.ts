@@ -49,7 +49,7 @@ import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients
 import type { PointerState } from "./input.js";
 import { blendFilters } from "./pixi-blend.js";
 import { setFlashColor } from "./pixi-color.js";
-import { displayFilters, rgbaOf } from "./pixi-filters.js";
+import { displayFilters, FilterChain, rgbaOf } from "./pixi-filters.js";
 import type { Player } from "./player.js";
 import {
   CUBIC,
@@ -1003,7 +1003,7 @@ export class PixiView {
 
         // Flash's filters are WebGL's alone; Pixi skips a chain with one it
         // cannot run, so under WebGPU they are left out and the blend kept.
-        node.filters =
+        const chain =
           this.renderer.type === RendererType.WEBGPU
             ? []
             : displayFilters(records, (map) => {
@@ -1013,6 +1013,7 @@ export class PixiView {
                   ? gpuBitmaps(this.renderer).texture(store, false)
                   : null;
               });
+        node.filters = chain.length > 0 ? [new FilterChain(chain, container)] : [];
         if (this.fresh) {
           this.builtFilters.push(...node.filters);
         }
@@ -1102,6 +1103,20 @@ export class PixiView {
           }
         }
       }
+    }
+
+    // What its filters' kept output was drawn from changed, but for a move.
+    const chain = node.filters[0];
+    if (
+      chain instanceof FilterChain &&
+      (dirty & ~TRANSFORM ||
+        moved ||
+        remask ||
+        recolor ||
+        this.rescaled ||
+        (o instanceof Container && o.descendantsDirty))
+    ) {
+      chain.changed();
     }
 
     if (o instanceof Container) {

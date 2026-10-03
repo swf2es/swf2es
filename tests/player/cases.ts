@@ -1998,6 +1998,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 20,
   },
   {
+    name: "filter-cache",
+    swf: (abc) => bare(abc, 6, "FilterCache", 260, 100),
+    script: "FilterCache",
+    frames: 6,
+    capture: [1, 2, 3, 4, 5, 6],
+    // As "filters": the page's samples against adl's whole pixels, here
+    // along the turned square's blurred edges, up to 12 a channel.
+    tolerance: 8,
+    maxOutliers: 60,
+  },
+  {
     name: "text-fields",
     swf: (abc) => bare(abc, 1, "TextFields"),
     script: "TextFields",

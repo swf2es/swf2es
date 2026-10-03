@@ -1643,6 +1643,21 @@ where Pixi would skip an object's whole chain for one it cannot run,
 they are left out and a blend mode is kept. A view made for one draw
 destroys the filters it made with it.
 
+As Flash caches a filtered object as a bitmap, an object's filters run
+as one chain (`FilterChain`) whose output is kept and drawn again until
+what it was run on changes: the object or anything below it, its
+transform other than a move, the colour and alpha it is drawn in, or how
+much of it the screen shows. A wide blur's passes read blur × resolution
+texels a pixel over an area grown by its reach, so their cost rises with
+the cube of the resolution; kept, a still object costs one copy a frame.
+One that changes frame after frame is filtered straight to the target,
+with no copy kept. (adl's capture of an object whose child moved within
+its bounds keeps the child where it was too; swf2es draws it once, where
+it is.) Each pass lets go of the pool's textures it drew with, which the
+pool destroys as the screen's size changes, and a blend's copy of what
+is behind is held to its texture's size, which Pixi rounds a pixel short
+of the copy at some resolutions.
+
 ### Masks and scroll rectangles
 
 A mask clips what it masks to where its fills are, as adl draws it: the

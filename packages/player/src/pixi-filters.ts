@@ -11,6 +11,7 @@
 // alone: each pass is a filter of its own.
 import {
   BufferImageSource,
+  type Container,
   Filter,
   type FilterSystem,
   GlProgram,
@@ -907,4 +908,144 @@ export function displayFilters(
   }
 
   return out;
+}
+
+const COPY = `in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+void main(void) {
+  finalColor = texture(uTexture, vTextureCoord);
+}`;
+
+/** Where a chain's input lay, and how big it was, when its output was kept. */
+interface Kept {
+  texture: Texture;
+  width: number;
+  height: number;
+  resolution: number;
+  /** The input's corner from the object's origin, in texels: a clip at the screen's edge moves it. */
+  dx: number;
+  dy: number;
+  colorAlpha: number;
+}
+
+/**
+ * A display object's filters as one, their output kept and drawn again
+ * while nothing they were run on changed, as Flash caches a filtered
+ * object as a bitmap: the object, all below it, its transform but for a
+ * move, the colour and alpha it is drawn in, and how much of it the
+ * screen shows. The owner calls `changed()` for what Pixi cannot see.
+ * One changing frame after frame is filtered straight to the target,
+ * with no copy kept.
+ */
+export class FilterChain extends Filter {
+  private kept: Kept | null = null;
+  private stale = true;
+  /** Frames in a row its object changed in. */
+  private changing = 0;
+
+  constructor(
+    readonly filters: Filter[],
+    private readonly owner: Container,
+  ) {
+    super({
+      glProgram: GlProgram.from({ vertex: VERTEX, fragment: COPY, name: "flash-filter-copy" }),
+      resources: {},
+    });
+    this.padding = filters.reduce((sum, f) => sum + f.padding, 0);
+    this.resolution = "inherit";
+  }
+
+  /** What it was run on changed: run it again. */
+  changed(): void {
+    this.stale = true;
+  }
+
+  apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
+    const resolution = input.source.resolution;
+    // The input's corner on the screen, which Pixi keeps to itself.
+    const bounds = (
+      system as unknown as { _activeFilterData: { bounds: { minX: number; minY: number } } }
+    )._activeFilterData.bounds;
+    const m = this.owner.worldTransform;
+    const dx = (bounds.minX - m.tx) * resolution;
+    const dy = (bounds.minY - m.ty) * resolution;
+    const colorAlpha = this.owner.groupColorAlpha;
+    const kept = this.kept;
+    // A move may put the input's corner a texel either way; more is the screen's edge cutting it.
+    if (
+      kept &&
+      !this.stale &&
+      kept.width === input.frame.width &&
+      kept.height === input.frame.height &&
+      kept.resolution === resolution &&
+      Math.abs(kept.dx - dx) <= 1 &&
+      Math.abs(kept.dy - dy) <= 1 &&
+      kept.colorAlpha === colorAlpha
+    ) {
+      this.changing = 0;
+      system.applyFilter(this, kept.texture, output, clear);
+      return;
+    }
+
+    // Kept, with nothing changed, only after being filtered straight: kept again now.
+    this.changing = this.stale || kept ? this.changing + 1 : 0;
+    this.stale = false;
+    this.release();
+    if (this.changing > 1) {
+      this.run(system, input, output, clear);
+      return;
+    }
+
+    const texture = TexturePool.getSameSizeTexture(input);
+    this.run(system, input, texture, true);
+    this.kept = {
+      texture,
+      width: input.frame.width,
+      height: input.frame.height,
+      resolution,
+      dx,
+      dy,
+      colorAlpha,
+    };
+    system.applyFilter(this, texture, output, clear);
+  }
+
+  /** The filters in turn, as Pixi runs a chain, through a texture of the pool between them. */
+  private run(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
+    const filters = this.filters;
+    if (filters.length === 1) {
+      filters[0].apply(system, input, output, clear);
+      return;
+    }
+
+    const temps = [TexturePool.getSameSizeTexture(input), TexturePool.getSameSizeTexture(input)];
+    let from = input;
+    for (let i = 0; i < filters.length - 1; i++) {
+      filters[i].apply(system, from, temps[i % 2], true);
+      from = temps[i % 2];
+    }
+
+    filters[filters.length - 1].apply(system, from, output, clear);
+    for (const t of temps) {
+      TexturePool.returnTexture(t);
+    }
+  }
+
+  private release(): void {
+    if (this.kept) {
+      TexturePool.returnTexture(this.kept.texture);
+      this.kept = null;
+    }
+  }
+
+  /** Its filters too, and the output it kept. */
+  destroy(): void {
+    this.release();
+    for (const f of this.filters) {
+      f.destroy();
+    }
+
+    super.destroy();
+  }
 }
