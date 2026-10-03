@@ -92,6 +92,12 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
         const made = s.pending === null;
         const display = s.pending ?? s.displayFor(traits);
         s.pending = null;
+        // Flash names each display object without a name of its own as it
+        // is made, instance1, instance2, ..., the stage aside.
+        if (display.name === "" && display !== s.stage) {
+          display.name = `instance${++s.instances}`;
+        }
+
         o.$display = display;
         display.object = o;
         if (made) {

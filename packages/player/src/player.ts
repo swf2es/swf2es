@@ -78,6 +78,8 @@ export class Player {
     info.$loaded = this.bytes.length;
     info.$url = s.url;
     this.root.loaderInfo = info;
+    // The main SWF's root is root1, as Flash names the root at depth 0.
+    this.root.name = "root1";
     const object = s.constructAs(
       this.root,
       s.rt.classNamed(this.library.classes.get(0) ?? "flash.display::MovieClip", s.mainDomain),

@@ -267,6 +267,8 @@ export class Scripting {
   private readonly reported = new Map<number, Set<string>>();
   /** Modules imported, each under a script name of its own for Runtime.codeDomain. */
   private modules = 0;
+  /** Display objects made with an AS3 object, which Flash numbers for their default names. */
+  instances = 0;
   private statusClass: AsObject | null = null;
 
   constructor(
@@ -469,7 +471,7 @@ export class Scripting {
     // Flash gives the parent a property of the child's instance name, which
     // a sealed class without it refuses: ReferenceError #1056, as Flash.
     const parent = display.parent?.object;
-    if (parent && display.name) {
+    if (parent && display.timelineNamed) {
       this.rt.setProperty(parent, avm2.qname(avm2.publicNs, display.name), object);
     }
 
@@ -596,7 +598,7 @@ export class Scripting {
 
     this.orphan(display, !byTimeline);
     const parent = display.parent?.object;
-    if (byTimeline && parent && display.name) {
+    if (byTimeline && parent && display.timelineNamed) {
       const name = avm2.qname(avm2.publicNs, display.name);
       if (this.rt.getProperty(parent, name) === display.object) {
         this.rt.setProperty(parent, name, null);

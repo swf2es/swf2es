@@ -107,6 +107,8 @@ export class DisplayObject {
   /** The frame of its parent's timeline that placed it, 1 the first; 0 for one a script added. */
   placeFrame = 0;
   name = "";
+  /** Whether its name is one the timeline gave it, which its parent has a property of; not a default instanceN. */
+  timelineNamed = false;
   /**
    * Its transform in its parent, translation in pixels: made from the
    * scales, rotation and skew below, which are the object's own, as Flash
@@ -294,6 +296,7 @@ export class DisplayObject {
 
     if (place.name !== null) {
       this.name = place.name;
+      this.timelineNamed = true;
     }
 
     if (place.visible !== null) {
