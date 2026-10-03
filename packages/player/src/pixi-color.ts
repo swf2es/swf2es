@@ -304,8 +304,8 @@ export function setFlashColor(leaf: Container, ct: ColorTransform | null): void 
   }
 
   colored.flashColor = ct;
-  // Pixi draws a large Graphics unbatched, with its own shader, which has no
-  // transform: under one it is batched whatever its size, from then on.
+  // An unbatched Graphics, as a shape's are (pixi.ts), Pixi draws with its
+  // own shader, which has no transform: under one it is batched, from then on.
   if (ct && leaf instanceof Graphics && leaf.context.batchMode !== "batch") {
     leaf.context.batchMode = "batch";
     leaf.context.dirty = true;
