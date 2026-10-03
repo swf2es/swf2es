@@ -1121,6 +1121,7 @@ export class PixiView {
         remask ||
         recolor ||
         this.rescaled ||
+        // A scroll moves what is drawn within the input; any move of a scrolled object counts.
         (dirty & TRANSFORM && (o.scroll || node.scroll)) ||
         (o instanceof Container && o.descendantsDirty))
     ) {

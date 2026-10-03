@@ -1658,10 +1658,10 @@ undrawn: a child moved within its parent's bounds shows in its capture
 where it was as well as where it is, and a mask from outside the object
 that moves leaves it clipped as it was. swf2es draws the child once,
 where it is now, and also keeps the output for such a mask, unless the
-object's bounds change with it. Each pass lets go of the pool's textures it drew with, which the
-pool destroys as the screen's size changes, and a blend's copy of what
-is behind is held to its texture's size, which Pixi rounds a pixel short
-of the copy at some resolutions.
+object's bounds change with it. Each pass lets go of the pool's textures
+it drew with, which the pool destroys as the screen's size changes, and
+a blend's copy of what is behind is held to its texture's size, which
+Pixi rounds a pixel short of the copy at some resolutions.
 
 ### Masks and scroll rectangles
 

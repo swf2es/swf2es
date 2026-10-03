@@ -928,18 +928,21 @@ void main(void) {
   finalColor = texture(uTexture, vTextureCoord);
 }`;
 
-/** What a chain's output depends on beyond its object: its input's size and place, and the colour it is drawn in. */
+/**
+ * What a chain's output depends on beyond its object: its input's size
+ * and place, and the colour it is drawn in.
+ */
 interface Input {
   width: number;
   height: number;
   resolution: number;
-  /** The input's corner from the object's origin, in texels: a clip at the screen's edge moves it. */
+  /** Its corner from the object's origin, in texels: a clip at the screen's edge moves it. */
   dx: number;
   dy: number;
   colorAlpha: number;
 }
 
-/** Whether `a` and `b` give the same output: a move may put the input's corner a texel either way. */
+/** Whether `a` and `b` give the same output: a move may shift the corner a texel either way. */
 function sameInput(a: Input, b: Input): boolean {
   return (
     a.width === b.width &&
@@ -962,7 +965,7 @@ function sameInput(a: Input, b: Input): boolean {
  */
 export class FilterChain extends Filter {
   /** The input last run on, and the output kept of it, if any. */
-  private input: Input | null = null;
+  private ran: Input | null = null;
   private kept: Texture | null = null;
   private stale = true;
   /** Runs in a row its object changed for. */
@@ -989,7 +992,7 @@ export class FilterChain extends Filter {
   /** The output kept let go of, as its object leaves the display list. */
   forget(): void {
     this.release();
-    this.input = null;
+    this.ran = null;
   }
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
@@ -1012,7 +1015,7 @@ export class FilterChain extends Filter {
       dy: (bounds.minY - m.ty) * resolution,
       colorAlpha: this.owner.groupColorAlpha,
     };
-    const same = this.input !== null && sameInput(this.input, now);
+    const same = this.ran !== null && sameInput(this.ran, now);
     if (same && !this.stale && this.kept) {
       this.changing = 0;
       system.applyFilter(this, this.kept, output, clear);
@@ -1022,7 +1025,7 @@ export class FilterChain extends Filter {
     // Unchanged but not kept, as after being filtered straight: kept now.
     this.changing = this.stale || !same ? this.changing + 1 : 0;
     this.stale = false;
-    this.input = now;
+    this.ran = now;
     this.release();
     if (this.changing > 1) {
       this.run(system, input, output, clear);
