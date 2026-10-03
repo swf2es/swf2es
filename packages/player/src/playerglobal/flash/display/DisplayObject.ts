@@ -3,7 +3,13 @@
 import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { bounds, boundsIn, hitsObject, hitsPoint, toStage } from "../../../bounds.js";
-import { CONTENT, type DisplayObject, TextObject, TRANSFORM } from "../../../display.js";
+import {
+  ButtonObject,
+  CONTENT,
+  type DisplayObject,
+  TextObject,
+  TRANSFORM,
+} from "../../../display.js";
 import { copyFilter } from "../../../filters.js";
 import { apply, invert, type Rect, transformRect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
@@ -92,6 +98,12 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
         const made = s.pending === null;
         const display = s.pending ?? s.displayFor(traits);
         s.pending = null;
+        // Flash names each display object without a name of its own as it
+        // is made, instance1, instance2, ..., the stage aside.
+        if (display.name === "" && display !== s.stage) {
+          display.name = `instance${++s.instances}`;
+        }
+
         o.$display = display;
         display.object = o;
         if (made) {
@@ -239,8 +251,10 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       d.invalidate(TRANSFORM);
     }
 
+    // A button's state has none: the button is no container to a script.
     get parent(): Value {
-      return this.$display.parent?.object ?? null;
+      const parent = this.$display.parent;
+      return parent instanceof ButtonObject ? null : (parent?.object ?? null);
     }
 
     get stage(): Value {

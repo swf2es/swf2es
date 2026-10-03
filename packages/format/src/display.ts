@@ -192,7 +192,7 @@ export function readPlace(bytes: Uint8Array, tag: Tag): Place {
 }
 
 /** Filter sizes by id, as FILTER's variants lay them out (6 and 7 have variable length). */
-function readFilterBytes(r: SwfReader): Uint8Array {
+export function readFilterBytes(r: SwfReader): Uint8Array {
   const start = r.pos;
   const count = r.u8();
 

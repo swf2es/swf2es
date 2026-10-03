@@ -5,6 +5,11 @@
 // placed, by depth, which is how SWF tags address them; a child the
 // timeline places goes before the first child of a greater depth.
 import {
+  BUTTON_DOWN,
+  BUTTON_HIT_TEST,
+  BUTTON_OVER,
+  BUTTON_UP,
+  type ButtonRecord,
   type ColorTransform,
   IDENTITY,
   type Matrix,
@@ -21,6 +26,7 @@ import { TextModel } from "./text.js";
 import { GUTTER, layoutText, type TextLayout } from "./text-layout.js";
 import {
   type BitmapCharacter,
+  type ButtonCharacter,
   type Character,
   type DisplayCharacter,
   INVALID_PIXELS,
@@ -107,6 +113,8 @@ export class DisplayObject {
   /** The frame of its parent's timeline that placed it, 1 the first; 0 for one a script added. */
   placeFrame = 0;
   name = "";
+  /** Whether its name is one the timeline gave it, which its parent has a property of; not a default instanceN. */
+  timelineNamed = false;
   /**
    * Its transform in its parent, translation in pixels: made from the
    * scales, rotation and skew below, which are the object's own, as Flash
@@ -294,6 +302,7 @@ export class DisplayObject {
 
     if (place.name !== null) {
       this.name = place.name;
+      this.timelineNamed = true;
     }
 
     if (place.visible !== null) {
@@ -622,6 +631,181 @@ export class Container extends DisplayObject {
     this.children[j] = a;
     this.invalidate(CHILDREN);
   }
+}
+
+/** The state a button shows, as the pointer has it. */
+export type ButtonState = "up" | "over" | "down";
+
+/**
+ * A button (SimpleButton): four states, each a display object, of which it
+ * shows the up, over or down one, as the pointer has it, and hit tests with
+ * the fourth. The state it shows is its one child, which it is drawn and
+ * bounded by; the others are its own, off the display list, but each has
+ * its frames as Flash's do (`frameChildren`). Not a container to a script.
+ */
+export class ButtonObject extends Container {
+  upState: DisplayObject | null = null;
+  overState: DisplayObject | null = null;
+  downState: DisplayObject | null = null;
+  hitTestState: DisplayObject | null = null;
+  state: ButtonState = "up";
+  /** Its states' next frame scripts run up, over, down, hit: the first, in a SWF after 9 (Scripting.construct). */
+  firstScripts = false;
+  enabled = true;
+  useHandCursor = true;
+  trackAsMenu = false;
+
+  /** The display object of state `state`. */
+  stateObject(state: ButtonState): DisplayObject | null {
+    return state === "up" ? this.upState : state === "over" ? this.overState : this.downState;
+  }
+
+  /** Show state `state`. */
+  setState(state: ButtonState): void {
+    this.state = state;
+    this.show();
+  }
+
+  /**
+   * Have the state it is in be its one child, as it is now. The states it
+   * does not show are parented to nothing, as Flash has them once made.
+   */
+  show(): void {
+    const current = this.stateObject(this.state);
+    for (const child of [...this.children]) {
+      if (child !== current) {
+        this.removeChild(child);
+      }
+    }
+
+    for (const state of [this.upState, this.overState, this.downState, this.hitTestState]) {
+      if (state && state !== current && state.parent === this && !this.children.includes(state)) {
+        state.parent = null;
+      }
+    }
+
+    if (current && !this.children.includes(current)) {
+      if (current.parent !== this) {
+        current.parent?.removeChild(current);
+      }
+
+      this.children.splice(0, 0, current);
+      current.parent = this;
+      this.invalidate(CHILDREN);
+    }
+  }
+}
+
+/**
+ * Make a button's states from its records, as Flash does when the button
+ * is made, up, over, down, then hit test: each state the one character it
+ * shows, else a container of its characters by depth, one for none too. A
+ * character in several states is made once for each. `made` brings a
+ * character to life once placed, and `holderMade` each container, once all
+ * four states' characters are, as Flash names them after those; the hit
+ * test state takes only the records' transforms.
+ */
+export function buttonStates(
+  button: ButtonObject,
+  character: ButtonCharacter,
+  library: Library,
+  made: (display: DisplayObject, character: DisplayCharacter) => void,
+  holderMade: (holder: Container) => void,
+): void {
+  const holders: Container[] = [];
+  const state = (flag: number): DisplayObject => {
+    const parts: { display: DisplayObject; character: DisplayCharacter; record: ButtonRecord }[] =
+      [];
+    for (const record of character.records) {
+      const c = record.states & flag ? library.characters.get(record.character) : undefined;
+      if (c && c.type !== "binary" && c.type !== "font") {
+        const display = displayFor(c, library);
+        display.applyPlace(recordPlace(record, flag !== BUTTON_HIT_TEST));
+        parts.push({ display, character: c, record });
+      }
+    }
+
+    // Made as the button's, under it, though in no container's list: a
+    // script sees the stage from them, and no parent above them.
+    if (parts.length === 1) {
+      parts[0].display.parent = button;
+      made(parts[0].display, parts[0].character);
+      return parts[0].display;
+    }
+
+    const holder = new Container();
+    holder.parent = button;
+    for (const part of parts) {
+      holder.placeAtDepth(part.display, part.record.depth);
+      made(part.display, part.character);
+    }
+
+    holders.push(holder);
+    return holder;
+  };
+
+  button.upState = state(BUTTON_UP);
+  button.overState = state(BUTTON_OVER);
+  button.downState = state(BUTTON_DOWN);
+  button.hitTestState = state(BUTTON_HIT_TEST);
+  for (const holder of holders) {
+    holderMade(holder);
+  }
+
+  button.show();
+}
+
+/** A button record as a place of its character: its transform, and, but in the hit test state, its look. */
+function recordPlace(record: ButtonRecord, look: boolean): Place {
+  return {
+    depth: record.depth,
+    move: false,
+    character: record.character,
+    matrix: record.matrix,
+    colorTransform: look ? record.colorTransform : null,
+    ratio: null,
+    name: null,
+    clipDepth: null,
+    className: null,
+    hasImage: false,
+    blendMode: look ? record.blendMode : null,
+    cacheAsBitmap: null,
+    visible: null,
+    opaqueBackground: null,
+    filters: look ? record.filters : null,
+    clipActions: null,
+  };
+}
+
+/**
+ * The display objects whose frame scripts a display object's run: those
+ * whose frames its frames run, but a button's first, in a SWF after 9, up,
+ * over, down, then hit test, as Flash runs them while the button is made.
+ */
+export function scriptChildren(d: DisplayObject): readonly DisplayObject[] {
+  if (d instanceof ButtonObject && d.firstScripts) {
+    d.firstScripts = false;
+    return [d.upState, d.overState, d.downState, d.hitTestState].filter(
+      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
+    );
+  }
+
+  return frameChildren(d);
+}
+
+/**
+ * The display objects whose frames a display object's frames run: a
+ * container's children, and all a button's states, as Ruffle orders them,
+ * the hit test state first, whichever it shows.
+ */
+export function frameChildren(d: DisplayObject): readonly DisplayObject[] {
+  if (d instanceof ButtonObject) {
+    return [d.hitTestState, d.upState, d.downState, d.overState].filter(
+      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
+    );
+  }
+
+  return d instanceof Container ? d.children : [];
 }
 
 /**
@@ -953,6 +1137,14 @@ export function displayFor(
     return text;
   }
 
+  // Its states are made where it is constructed (Scripting.construct).
+  if (character.type === "button") {
+    const button = new ButtonObject();
+    button.character = character;
+    button.trackAsMenu = character.trackAsMenu;
+    return button;
+  }
+
   const clip = new MovieClip(character.timeline, library);
   clip.character = character;
   return clip;
@@ -969,6 +1161,14 @@ function construct(display: DisplayObject, character: DisplayCharacter, library:
     library.construct(display, character);
   } else if (display instanceof MovieClip) {
     display.enterFirstFrame();
+  } else if (display instanceof ButtonObject && character.type === "button") {
+    buttonStates(
+      display,
+      character,
+      library,
+      (d, c) => construct(d, c, library),
+      () => {},
+    );
   }
 }
 

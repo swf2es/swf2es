@@ -14,6 +14,7 @@ import { loaderNatives } from "./flash/display/Loader.js";
 import { loaderInfoNatives } from "./flash/display/LoaderInfo.js";
 import { movieClipNatives } from "./flash/display/MovieClip.js";
 import { shapeNatives } from "./flash/display/Shape.js";
+import { simpleButtonNatives } from "./flash/display/SimpleButton.js";
 import { spriteNatives } from "./flash/display/Sprite.js";
 import { stageNatives } from "./flash/display/Stage.js";
 import { eventNatives } from "./flash/events/Event.js";
@@ -73,6 +74,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...soundTransformNatives(s),
     ...graphicsNatives(s),
     ...shapeNatives(s),
+    ...simpleButtonNatives(s),
     ...timerNatives(s),
     ...textFieldNatives(s),
   };

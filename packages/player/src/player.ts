@@ -4,7 +4,7 @@
 // advance until the next); with scripts, the frame's events and scripts
 // follow; then the frame is drawn.
 import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
-import { Container, type DisplayObject, MovieClip } from "./display.js";
+import { Container, type DisplayObject, frameChildren, MovieClip } from "./display.js";
 import { decodeImages, decodeInBrowser } from "./images.js";
 import { PointerInput } from "./input.js";
 import type { Scripting } from "./scripting.js";
@@ -78,6 +78,8 @@ export class Player {
     info.$loaded = this.bytes.length;
     info.$url = s.url;
     this.root.loaderInfo = info;
+    // The main SWF's root is root1, as Flash names the root at depth 0.
+    this.root.name = "root1";
     const object = s.constructAs(
       this.root,
       s.rt.classNamed(this.library.classes.get(0) ?? "flash.display::MovieClip", s.mainDomain),
@@ -147,10 +149,9 @@ export class Player {
         clips.push(o);
       }
 
-      if (o instanceof Container) {
-        for (const child of o.children) {
-          collect(child);
-        }
+      // A button's states all play, whichever it shows.
+      for (const child of frameChildren(o)) {
+        collect(child);
       }
     };
     collect(this.stage);

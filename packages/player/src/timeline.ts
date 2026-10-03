@@ -4,6 +4,7 @@
 // file is there.
 import {
   type Bitmap,
+  type ButtonRecord,
   type EditText,
   type Font,
   type FontName,
@@ -11,6 +12,7 @@ import {
   type Place,
   readBinaryData,
   readBitmap,
+  readButton,
   readEditText,
   readFont,
   readFrameLabel,
@@ -77,6 +79,14 @@ export interface TextCharacter {
   font: FontName | null;
 }
 
+/** DefineButton or DefineButton2: the characters it shows in each state. */
+export interface ButtonCharacter {
+  type: "button";
+  id: number;
+  records: ButtonRecord[];
+  trackAsMenu: boolean;
+}
+
 /** DefineFont2 or 3: its name and style, for the fields that name it, and its glyphs and layout. */
 export interface FontCharacter extends FontName {
   type: "font";
@@ -113,6 +123,7 @@ export interface BinaryCharacter {
 export type Character =
   | ShapeCharacter
   | SpriteCharacter
+  | ButtonCharacter
   | BitmapCharacter
   | TextCharacter
   | BinaryCharacter
@@ -147,6 +158,8 @@ export interface Library {
   fonts: FontSet;
   /** The application domain its code was loaded into, where its class names resolve; the root's if none. */
   domain?: avm2.Domain;
+  /** The SWF's version, which some behaviour of what it places follows. */
+  version?: number;
 }
 
 /**
@@ -277,6 +290,17 @@ function timelineOf(
         });
         break;
       }
+      case tags.DefineButton:
+      case tags.DefineButton2: {
+        const button = readButton(bytes, t);
+        library.set(button.id, {
+          type: "button",
+          id: button.id,
+          records: button.records,
+          trackAsMenu: button.trackAsMenu,
+        });
+        break;
+      }
       case tags.DefineFont2:
       case tags.DefineFont3: {
         const font = readFont(bytes, t);
@@ -363,5 +387,13 @@ export function readLibrary(swf: Swf): Library {
     }
   }
 
-  return { characters, root, classes: new Map(), construct: null, removing: null, fonts };
+  return {
+    characters,
+    root,
+    classes: new Map(),
+    construct: null,
+    removing: null,
+    fonts,
+    version: swf.header.version,
+  };
 }
