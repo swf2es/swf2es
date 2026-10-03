@@ -680,7 +680,11 @@ its own inside, and the frame's own phases then find the scripts already
 run. A script's goto on itself waits for it even while another clip's
 cycle runs inside it. Two scripts that send their clip to each other's
 frame nest cycles without end; Flash gives up some 1400 deep, and the
-player throws AS3's stack overflow, #1023, at 256.
+player throws AS3's stack overflow, #1023, at 256, after which no goto
+cycle runs for the rest of the frame, so scripts that catch it cannot
+start it over. A frame script that asks for a goto and then throws still
+has its goto, and the scripts after it still run, as adl has it; the
+error reaches the host when the frame's scripts are done.
 
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,

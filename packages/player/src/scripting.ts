@@ -174,6 +174,8 @@ export class Scripting {
   hostCalls = 0;
   /** How many goto cycles run inside one another now. */
   private cycles = 0;
+  /** Whether they nested too deep this frame, which stops them all till the next. */
+  private overflowed = false;
   /** Children frames played on placed, to be made alive in the frame's construct phase. */
   private readonly toConstruct: {
     display: DisplayObject;
@@ -1436,10 +1438,17 @@ export class Scripting {
    * left, bounded, as a script that jumps on every run would never settle.
    */
   runFrameScripts(root: DisplayObject): void {
-    for (let round = 0; round < 64; round++) {
+    // A script's error waits for the phase to end: its goto still happens,
+    // and the scripts after it still run, as in Flash (`goto-throws`).
+    const errors: unknown[] = [];
+    for (let round = 0; round < 64 && !this.overflowed; round++) {
       let ran = false;
       const own = (o: MovieClip) => {
-        for (let jumps = 0; jumps < 64 && o.scriptedFrame !== o.currentFrame; jumps++) {
+        for (
+          let jumps = 0;
+          jumps < 64 && o.scriptedFrame !== o.currentFrame && !this.overflowed;
+          jumps++
+        ) {
           o.scriptedFrame = o.currentFrame;
           const script = o.frameScripts.get(o.currentFrame);
           if (!script) {
@@ -1453,18 +1462,24 @@ export class Scripting {
           this.inFrameScript = o;
           try {
             this.rt.call(script, o.object);
+          } catch (error) {
+            errors.push(error);
           } finally {
             this.inFrameScript = outer;
           }
 
-          // The goto the script asked for, now that it has returned; the
-          // frame it lands on has its script run next, in this same phase,
-          // or, from version 10, in the goto's own cycle.
+          // The goto the script asked for, now that it has returned, or
+          // thrown; the frame it lands on has its script run next, in this
+          // same phase, or, from version 10, in the goto's own cycle.
           if (o.queuedGoto !== null) {
             const frame = o.queuedGoto;
             o.queuedGoto = null;
             o.gotoFrame(frame);
-            this.gotoCycle(o);
+            try {
+              this.gotoCycle(o);
+            } catch (error) {
+              errors.push(error);
+            }
           }
         }
       };
@@ -1492,8 +1507,12 @@ export class Scripting {
       }
 
       if (!ran) {
-        return;
+        break;
       }
+    }
+
+    if (errors.length > 0) {
+      throw errors[0];
     }
   }
 
@@ -1511,8 +1530,15 @@ export class Scripting {
 
     // Two scripts that send their clip to each other's frame nest cycles
     // without end, in Flash till it gives up some 1400 deep; here a script's
-    // stack overflow, before the JavaScript stack's.
+    // stack overflow, before the JavaScript stack's. Overflowed once, no
+    // cycle runs and no script loop goes on for the rest of the frame, so a
+    // script that catches the error cannot start it over.
+    if (this.overflowed) {
+      return;
+    }
+
     if (this.cycles >= MAX_GOTO_CYCLES) {
+      this.overflowed = true;
       throw this.rt.error("Error", 1023);
     }
 
@@ -1550,6 +1576,7 @@ export class Scripting {
    * ENTER_FRAME: Flash goes to FRAME_CONSTRUCTED, the scripts and EXIT_FRAME.
    */
   frame(root: DisplayObject, entered = true): void {
+    this.overflowed = false;
     if (entered) {
       this.frames++;
       this.broadcast("enterFrame");
