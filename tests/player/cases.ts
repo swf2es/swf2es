@@ -1744,6 +1744,48 @@ function staticTexts(): Uint8Array {
   });
 }
 
+// Static text in Probe over a red square, given drop shadows by
+// scripts/StaticTextFilters.as.
+function staticTextFilters(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xcc0000, 3600),
+      probeFont(5),
+      w.staticText({
+        id: 2,
+        bounds: [0, 3300, -1000, 300],
+        records: [
+          {
+            font: 5,
+            height: 1200,
+            color: 0xffffff,
+            x: 0,
+            y: 0,
+            glyphs: [
+              [2, 700],
+              [3, 900],
+              [4, 500],
+              [1, 1300],
+            ],
+          },
+        ],
+      }),
+      w.doAbc(abc, "StaticTextFilters"),
+      w.symbolClass([[0, "StaticTextFilters"]]),
+      w.place({ depth: 1, character: 1, matrix: { tx: 200, ty: 200 } }),
+      w.place({ depth: 2, character: 2, matrix: { tx: 600, ty: 1600 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Text laid out in Probe (scripts/TextLayout.as).
 function textLayout(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -1932,6 +1974,18 @@ export const cases: PlayerCase[] = [
     capture: [1],
     tolerance: 32,
     maxOutliers: 100,
+  },
+  {
+    name: "static-text-filters",
+    swf: staticTextFilters,
+    script: "StaticTextFilters",
+    frames: 1,
+    capture: [1],
+    // The glyphs' edges, where the sharp shadow meets the glow, differ by
+    // up to 52 a channel along some 120 pixels: the page's four samples a
+    // pixel against adl's whole pixels, as for `filters`.
+    tolerance: 32,
+    maxOutliers: 200,
   },
   {
     name: "morph-shapes",
