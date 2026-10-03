@@ -349,22 +349,38 @@ function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContext {
     );
     const inside = (depth: number, sum: number) =>
       winding === "nonZero" ? sum !== 0 : depth % 2 === 0;
+    // A region's holes are cut together, then the islands in them filled.
+    // Pixi's cut() goes to the fill before the last too once the last has a
+    // hole, so a second cut, or one after an island, would land a hole in
+    // another region, which then fills across to it.
     const fillRegion = (region: Region, depth: number, sum: number) => {
       context.beginPath();
       trace(context, region.path);
       context.closePath().fill(style);
-      holes(region, depth, sum);
+      const cut: [Region, number, number][] = [];
+      holes(region, depth, sum, cut);
+      if (cut.length === 0) {
+        return;
+      }
+
+      context.beginPath();
+      for (const [hole] of cut) {
+        trace(context, hole.path);
+        context.closePath();
+      }
+
+      context.cut();
+      for (const [hole, d, s] of cut) {
+        islands(hole, d, s);
+      }
     };
-    const holes = (region: Region, depth: number, sum: number) => {
+    const holes = (region: Region, depth: number, sum: number, cut: [Region, number, number][]) => {
       for (const child of region.children) {
         const s = sum + orientation(child.points);
         if (inside(depth + 1, s)) {
-          holes(child, depth + 1, s);
+          holes(child, depth + 1, s, cut);
         } else {
-          context.beginPath();
-          trace(context, child.path);
-          context.closePath().cut();
-          islands(child, depth + 1, s);
+          cut.push([child, depth + 1, s]);
         }
       }
     };

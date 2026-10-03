@@ -1492,6 +1492,44 @@ function gradients(abc: Uint8Array): Uint8Array {
 }
 
 /** A rectangle's path, in pixels. */
+// One fill's regions and holes, as Pixi cuts them: a square, then one with
+// two holes, then one with a hole holding an island and a second hole.
+// Each hole is its own region's, not the region drawn before it.
+function fillHoles(): Uint8Array {
+  const squares: [number, number, number, number][] = [
+    [5, 5, 30, 30],
+    [50, 5, 45, 45],
+    [55, 10, 15, 15],
+    [75, 30, 15, 15],
+    [110, 5, 45, 45],
+    [115, 10, 20, 20],
+    [120, 15, 10, 10],
+    [140, 30, 10, 10],
+  ];
+  return w.swf({
+    width: 200,
+    height: 60,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.shape({
+        id: 1,
+        bounds: [0, 4000, 0, 1200],
+        fills: [0xcc3300],
+        paths: squares.map(([x, y, width, height]) => ({
+          fill1: 1,
+          commands: rectPath(x, y, width, height),
+        })),
+      }),
+      w.place({ depth: 1, character: 1 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 function rectPath(x: number, y: number, width: number, height: number): w.PathCommand[] {
   const [l, t, r, b] = [x * 20, y * 20, (x + width) * 20, (y + height) * 20];
   return [{ move: [l, t] }, { line: [r, t] }, { line: [r, b] }, { line: [l, b] }, { line: [l, t] }];
@@ -1679,6 +1717,7 @@ export const cases: PlayerCase[] = [
     tolerance: 32,
     maxOutliers: 1300,
   },
+  { name: "fill-holes", swf: fillHoles(), frames: 1, capture: [1], tolerance: 0, maxOutliers: 0 },
   { name: "depths", swf: depths, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
   { name: "loops", swf: loops(true), ...looped },
   { name: "loops-avm1", swf: loops(false), ...looped },

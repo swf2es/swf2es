@@ -523,7 +523,9 @@ object marks itself changed. A shape's fills are immutable
 `GraphicsContext`s shared by its instances, built from Flash's edges
 (`shapes.ts`: each edge goes to its right fill forward and its left fill
 reversed, joined into contours) and filled even-odd through a containment
-tree of the contours, holes cut. Its lines are drawn in the stage's axes,
+tree of the contours, holes cut: all of a region's at once, before the
+islands in them, since Pixi's `cut()` also lands a hole in the fill
+before the last once the last has one (`fill-holes`). Its lines are drawn in the stage's axes,
 because Flash strokes a transformed line with one width all along, not the
 local width stretched by the transform: so a line's context depends on the
 linear part of its transform on the stage, and is kept by layer and that
