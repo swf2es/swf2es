@@ -4,7 +4,7 @@
 // from the root of the chain down, as addBindings adds them, so a derived
 // class's binding stands over its base's; their order is the hashtable's
 // in avmplus, keyed by string addresses, which nothing reproduces.
-import { type Namespace, NS_Public } from "../names.js";
+import { formatClassName, type Namespace, NS_Public } from "../names.js";
 import {
   type AsObject,
   BIND_Const,
@@ -140,20 +140,6 @@ function chooseTraits(rt: Runtime, v: Value): Traits | string {
 /** As Traits::formatClassName: the qualified name, a class's statics' without their trailing $. */
 function className(t: Traits): string {
   return formatClassName(t.name);
-}
-
-/** The builtin Vector classes, which avmplus names as the types they are vectors of. */
-const VECTOR_NAMES: Record<string, string> = {
-  "__AS3__.vec::Vector$int": "__AS3__.vec::Vector.<int>",
-  "__AS3__.vec::Vector$uint": "__AS3__.vec::Vector.<uint>",
-  "__AS3__.vec::Vector$double": "__AS3__.vec::Vector.<Number>",
-  "__AS3__.vec::Vector$object": "__AS3__.vec::Vector.<*>",
-};
-
-/** A traits' name as avmplus writes it: a class's statics' without their trailing $, a builtin Vector's as Vector.<T>. */
-export function formatClassName(name: string): string {
-  const own = name.endsWith("$") ? name.slice(0, -1) : name;
-  return VECTOR_NAMES[own] ?? own;
 }
 
 /** A type's name as describeClassName gives it: * for none, else the class's qualified name. */

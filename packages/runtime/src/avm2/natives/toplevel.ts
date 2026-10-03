@@ -1,8 +1,9 @@
 // The global functions, bugzilla, and Error.
+
+import { formatClassName } from "../names.js";
 import { errorMessages } from "../player-messages.js";
 import type { ClassHook, Runtime, Value } from "../runtime.js";
 import { type Natives, plain } from "./define.js";
-import { formatClassName } from "./describe.js";
 import { qualifiedClassName } from "./object.js";
 
 /** A String argument as avmplus has it: null, as undefined coerced to String is, as "null". */
