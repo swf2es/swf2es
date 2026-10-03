@@ -444,6 +444,7 @@ function gotoChildren(abc: Uint8Array): Uint8Array {
       body(11),
       body(12),
       body(13),
+      body(14),
       w.doAbc(abc, "GotoChildren"),
       w.symbolClass([
         [0, "Main"],
@@ -456,6 +457,7 @@ function gotoChildren(abc: Uint8Array): Uint8Array {
         [11, "Same"],
         [12, "Nested"],
         [13, "Pooled"],
+        [14, "Bound"],
       ]),
       w.place({ depth: 1, character: 3, name: "forward" }),
       w.place({ depth: 2, character: 4, name: "forwardStop" }),
@@ -468,7 +470,9 @@ function gotoChildren(abc: Uint8Array): Uint8Array {
       w.place({ depth: 9, character: 11, name: "same" }),
       w.place({ depth: 10, character: 12, name: "nested" }),
       w.place({ depth: 11, character: 13, name: "pooled" }),
-      ...Array.from({ length: 12 }, () => w.showFrame()),
+      w.showFrame(),
+      w.place({ depth: 12, character: 14, name: "bound" }),
+      ...Array.from({ length: 11 }, () => w.showFrame()),
       w.end(),
     ],
   });
