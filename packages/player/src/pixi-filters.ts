@@ -11,6 +11,7 @@
 // alone: each pass is a filter of its own.
 import {
   BufferImageSource,
+  type Container,
   Filter,
   type FilterSystem,
   GlProgram,
@@ -64,6 +65,14 @@ void main(void) {
   vec4 c = sum / uWidth;
   finalColor = ${TRUNCATE};
 }`;
+
+/**
+ * A pool's texture let go of once drawn with: the pool destroys idle ones
+ * as the screen's size changes, which Pixi warns of while a shader holds them.
+ */
+function unbind(filter: Filter, name: string): void {
+  filter.resources[name] = PixiTexture.WHITE.source;
+}
 
 class BoxPass extends Filter {
   constructor() {
@@ -268,6 +277,7 @@ class GlowFilter extends FlashFilter {
     );
     this.resources.uBlurred = blurred.source;
     system.applyFilter(this, input, output, clear);
+    unbind(this, "uBlurred");
     TexturePool.returnTexture(blurred);
   }
 }
@@ -370,6 +380,7 @@ class BevelFilter extends FlashFilter {
     );
     this.resources.uBlurred = blurred.source;
     system.applyFilter(this, input, output, clear);
+    unbind(this, "uBlurred");
     TexturePool.returnTexture(blurred);
   }
 }
@@ -534,6 +545,7 @@ class GradientFilter extends FlashFilter {
     region[2] = input.frame.width - this.inset + 1 + right;
     region[3] = input.frame.height - this.inset + 1 + bottom;
     system.applyFilter(this, input, output, clear);
+    unbind(this, "uBlurred");
     TexturePool.returnTexture(blurred);
   }
 }
@@ -907,4 +919,165 @@ export function displayFilters(
   }
 
   return out;
+}
+
+const COPY = `in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+void main(void) {
+  finalColor = texture(uTexture, vTextureCoord);
+}`;
+
+/**
+ * What a chain's output depends on beyond its object: its input's size
+ * and place, and the colour it is drawn in.
+ */
+interface Input {
+  width: number;
+  height: number;
+  resolution: number;
+  /** Its corner from the object's origin, in texels: a clip at the screen's edge moves it. */
+  dx: number;
+  dy: number;
+  colorAlpha: number;
+}
+
+/** Whether `a` and `b` give the same output: a move may shift the corner a texel either way. */
+function sameInput(a: Input, b: Input): boolean {
+  return (
+    a.width === b.width &&
+    a.height === b.height &&
+    a.resolution === b.resolution &&
+    Math.abs(a.dx - b.dx) <= 1 &&
+    Math.abs(a.dy - b.dy) <= 1 &&
+    a.colorAlpha === b.colorAlpha
+  );
+}
+
+/**
+ * A display object's filters as one, their output kept and drawn again
+ * while nothing they were run on changed, as Flash caches a filtered
+ * object as a bitmap: the object, all below it, its transform but for a
+ * move, the colour and alpha it is drawn in, and how much of it the
+ * screen shows. The owner calls `changed()` for what Pixi cannot see.
+ * One changing frame after frame is filtered straight to the target,
+ * with no copy kept; so is one that `keeps` not, drawn once.
+ */
+export class FilterChain extends Filter {
+  /** The input last run on, and the output kept of it, if any. */
+  private ran: Input | null = null;
+  private kept: Texture | null = null;
+  private stale = true;
+  /** Runs in a row its object changed for. */
+  private changing = 0;
+
+  constructor(
+    readonly filters: Filter[],
+    private readonly owner: Container,
+    private readonly keeps = true,
+  ) {
+    super({
+      glProgram: GlProgram.from({ vertex: VERTEX, fragment: COPY, name: "flash-filter-copy" }),
+      resources: {},
+    });
+    this.padding = filters.reduce((sum, f) => sum + f.padding, 0);
+    this.resolution = "inherit";
+  }
+
+  /** What it was run on changed: run it again. */
+  changed(): void {
+    this.stale = true;
+  }
+
+  /** The output kept let go of, as its object leaves the display list. */
+  forget(): void {
+    this.release();
+    this.ran = null;
+  }
+
+  apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
+    if (!this.keeps) {
+      this.run(system, input, output, clear);
+      return;
+    }
+
+    const resolution = input.source.resolution;
+    // The input's corner on the screen, which Pixi 8 keeps to itself.
+    const bounds = (
+      system as unknown as { _activeFilterData: { bounds: { minX: number; minY: number } } }
+    )._activeFilterData.bounds;
+    const m = this.owner.worldTransform;
+    const now: Input = {
+      width: input.frame.width,
+      height: input.frame.height,
+      resolution,
+      dx: (bounds.minX - m.tx) * resolution,
+      dy: (bounds.minY - m.ty) * resolution,
+      colorAlpha: this.owner.groupColorAlpha,
+    };
+    const same = this.ran !== null && sameInput(this.ran, now);
+    if (same && !this.stale && this.kept) {
+      this.changing = 0;
+      system.applyFilter(this, this.kept, output, clear);
+      return;
+    }
+
+    // Unchanged but not kept, as after being filtered straight: kept now.
+    this.changing = this.stale || !same ? this.changing + 1 : 0;
+    this.stale = false;
+    this.ran = now;
+    this.release();
+    if (this.changing > 1) {
+      this.run(system, input, output, clear);
+      return;
+    }
+
+    const kept = TexturePool.getSameSizeTexture(input);
+    this.run(system, input, kept, true);
+    this.kept = kept;
+    system.applyFilter(this, kept, output, clear);
+  }
+
+  /** The filters in turn, as Pixi runs a chain, through a texture of the pool between them. */
+  private run(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
+    const filters = this.filters;
+    if (filters.length === 1) {
+      filters[0].apply(system, input, output, clear);
+      return;
+    }
+
+    const temps = [TexturePool.getSameSizeTexture(input)];
+    if (filters.length > 2) {
+      temps.push(TexturePool.getSameSizeTexture(input));
+    }
+
+    let from = input;
+    for (let i = 0; i < filters.length - 1; i++) {
+      const to = temps[i % temps.length];
+      filters[i].apply(system, from, to, true);
+      from = to;
+    }
+
+    filters[filters.length - 1].apply(system, from, output, clear);
+    for (const t of temps) {
+      TexturePool.returnTexture(t);
+    }
+  }
+
+  private release(): void {
+    if (this.kept) {
+      TexturePool.returnTexture(this.kept);
+      this.kept = null;
+    }
+  }
+
+  /** Its filters too, and the output it kept. */
+  destroy(): void {
+    this.release();
+    for (const f of this.filters) {
+      f.destroy();
+    }
+
+    super.destroy();
+  }
 }
