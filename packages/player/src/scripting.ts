@@ -766,6 +766,7 @@ export class Scripting {
       root: EMPTY_TIMELINE,
       classes: new Map(),
       construct: null,
+      constructLater: null,
       removing: null,
       fonts: new FontSet(),
     };
@@ -1504,9 +1505,10 @@ export class Scripting {
     // ENTER_FRAME, before frameConstructed; until then a script finds it in
     // numChildren but getChildAt gives null (`instantiation_on_enter_frame`).
     // One taken off since is never made.
-    for (const { display, character, library } of this.toConstruct.splice(0)) {
-      if (!display.object && display.parent) {
-        this.construct(display, character, library);
+    // One at a time: a constructor that throws leaves the rest for the next frame, not lost.
+    for (let next = this.toConstruct.shift(); next; next = this.toConstruct.shift()) {
+      if (!next.display.object && next.display.parent) {
+        this.construct(next.display, next.character, next.library);
       }
     }
 

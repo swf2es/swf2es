@@ -152,7 +152,7 @@ export interface Library {
    */
   construct: ((display: DisplayObject, character: DisplayCharacter) => void) | null;
   /** Has the AS3 object of a child a frame played on placed made in the frame's construct phase; null where there are no scripts. */
-  constructLater?: ((display: DisplayObject, character: DisplayCharacter) => void) | null;
+  constructLater: ((display: DisplayObject, character: DisplayCharacter) => void) | null;
   /** Told before a timeline child goes, for the events a script sees; null in an AVM1 movie. */
   /** Tells of a display object about to lose its parent, and whether the timeline takes it (a script's removal otherwise). */
   removing: ((display: DisplayObject, byTimeline: boolean) => void) | null;
@@ -394,6 +394,7 @@ export function readLibrary(swf: Swf): Library {
     root,
     classes: new Map(),
     construct: null,
+    constructLater: null,
     removing: null,
     fonts,
     version: swf.header.version,

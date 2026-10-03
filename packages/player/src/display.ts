@@ -947,7 +947,9 @@ export class MovieClip extends Container {
 
   /**
    * Jump to frame `frame`, as Flash does rather than by running the frames
-   * between: the children the timeline placed after it go, the frames up to
+   * between: the children the timeline placed after it go (but one at a
+   * depth the frames up to it first place at without the move flag, which
+   * stays, and has what they do there after done to it), the frames up to
    * it (from the first, for a rewind) are replayed into one jump per depth,
    * and each jump changes the child still at its depth, or makes one where
    * the frames placed one anew, or where a rewind ends on another
@@ -960,13 +962,27 @@ export class MovieClip extends Container {
     const target = Math.max(1, Math.min(frame, this.totalFrames));
     const rewind = target < this.currentFrame;
     const jumps = new Map<number, Jump>();
-    // Depths the replay first places at without the move flag: on a rewind,
-    // a child there placed after the target finds that place let be, as at a
-    // taken depth, and stays (`same-depth`, at the loop).
-    const taken = new Set<number>();
+    // On a rewind, a child placed after the target at a depth the replay
+    // first places at without the move flag stays, that place let be as at
+    // a taken depth (`same-depth`, at the loop); what the frames then do at
+    // the depth is done to it, as frame by frame, till a removal takes it.
+    // By depth, what is to be done to it, merged; null for nothing yet.
+    const later = new Set<number>();
+    if (rewind) {
+      for (const [depth, child] of this.depths) {
+        if (child.placeFrame > target) {
+          later.add(depth);
+        }
+      }
+    }
+
+    const kept = new Map<number, Place | null>();
+    const seen = new Set<number>();
     for (let f = (rewind ? 0 : this.currentFrame) + 1; f <= target; f++) {
       for (const command of this.timeline.frames[f - 1] ?? []) {
         if (command.type === "remove") {
+          seen.add(command.depth);
+          kept.delete(command.depth);
           jumps.delete(command.depth);
           // Going forward, a removal between the frames takes effect.
           if (!rewind) {
@@ -977,10 +993,24 @@ export class MovieClip extends Container {
         }
 
         const place = command.place;
-        const jump = jumps.get(place.depth) ?? { before: null, place: null, frame: f };
-        if (rewind && !jumps.has(place.depth) && place.character !== null && !place.move) {
-          taken.add(place.depth);
+        const first = !seen.has(place.depth);
+        seen.add(place.depth);
+        if (first && later.has(place.depth) && place.character !== null && !place.move) {
+          kept.set(place.depth, null);
+          continue;
         }
+
+        // The kept child: a place there is let be, a change is done to it.
+        if (kept.has(place.depth)) {
+          if (place.move) {
+            const done = kept.get(place.depth);
+            kept.set(place.depth, done ? mergePlace(done, place) : place);
+          }
+
+          continue;
+        }
+
+        const jump = jumps.get(place.depth) ?? { before: null, place: null, frame: f };
 
         // A rewind replays from an empty display list, so what the frames do
         // at a depth nothing has placed yet is known: a change does nothing,
@@ -1010,32 +1040,41 @@ export class MovieClip extends Container {
       }
     }
 
-    // What the timeline placed after the target goes, but where the replay's
-    // place at its depth is let be.
+    // What the timeline placed after the target goes, but the kept; and,
+    // replayed from the first frame, a depth the frames left empty is empty.
     if (rewind) {
       for (const child of [...this.depths.values()]) {
-        if (child.placeFrame > target && child.depth !== null && !taken.has(child.depth)) {
-          this.removeAtDepth(child.depth);
+        const depth = child.depth;
+        if (depth === null || kept.has(depth)) {
+          continue;
         }
-      }
-    }
 
-    // Replayed from the first frame, a depth the frames left empty is empty.
-    if (rewind) {
-      for (const child of [...this.depths.values()]) {
-        if (child.placeFrame > 0 && child.depth !== null && !jumps.has(child.depth)) {
-          this.removeAtDepth(child.depth);
+        if (child.placeFrame > target || (child.placeFrame > 0 && !jumps.has(depth))) {
+          this.removeAtDepth(depth);
         }
       }
     }
 
     // On the frame before its children are made: one constructed now sees it there, as in Flash.
     this.currentFrame = target;
-    for (const [depth, jump] of jumps) {
+    for (const [depth, done] of kept) {
       const existing = this.depths.get(depth);
-      if (rewind && existing && existing.placeFrame > target && taken.has(depth)) {
+      if (!existing || !done) {
         continue;
       }
+
+      // With the move flag the child stays, another character or not.
+      const character =
+        done.character === null ? null : this.library.characters.get(done.character);
+      if (character && character.type !== "binary" && character.type !== "font") {
+        swap(existing, character);
+      }
+
+      existing.applyPlace(done);
+    }
+
+    for (const [depth, jump] of jumps) {
+      const existing = this.depths.get(depth);
 
       if (existing && jump.before) {
         existing.applyPlace(jump.before);
@@ -1075,9 +1114,10 @@ export class MovieClip extends Container {
   /** The first frame, as a clip runs it when it is made, its children placed and made alive; once. */
   enterFirstFrame(): void {
     this.placeFirstFrame();
-    for (const { display, character } of this.held.splice(0)) {
-      if (!display.object && display.parent === this) {
-        construct(display, character, this.library);
+    // One at a time: a constructor that throws leaves the rest held, not lost.
+    for (let next = this.held.shift(); next; next = this.held.shift()) {
+      if (!next.display.object && next.display.parent === this) {
+        construct(next.display, next.character, this.library);
       }
     }
   }
