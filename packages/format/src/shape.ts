@@ -531,9 +531,12 @@ export function readMorphShape(
   const fills = readMorphFills(r);
   const lines = readMorphLines(r, version);
 
-  // A style change in either end's records brings no new styles: version 1 reads none.
-  const start = readRecords(r, 1);
-  if (endOffset !== 0 && endAt <= r.end) {
+  // The start's records stop at the end's, where the offset is in the tag:
+  // one missing its end record reads no further. A style change in either
+  // end's records brings no new styles: version 1 reads none.
+  const offsetValid = endOffset !== 0 && endAt >= r.pos && endAt <= r.end;
+  const start = readRecords(offsetValid ? new SwfReader(r.bytes, r.pos, endAt) : r, 1);
+  if (offsetValid) {
     r.pos = endAt;
   }
 
