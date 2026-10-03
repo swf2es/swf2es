@@ -647,6 +647,13 @@ runs, parents' scripts before their children's (`nested`); the clips
 whose scripts are to run are fixed as the phase begins, so one a script
 removes still runs its own (`loads`, `orphans`).
 
+In a SWF of version 9 or earlier, a clip a script sends to a frame, by a
+goto from a frame script, a listener or anyone, sits the next frame out
+with everything in it: none of them advances, and from the frame after
+they go on as before. From version 10 a goto leaves the frames that
+follow as they were (`goto-children`, recorded as version 9). A clip's own
+SWF decides, so a version 9 SWF loaded into a later one keeps the rule.
+
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,
 is one scene named "" whose labels are its FrameLabel tags (`scenes`,

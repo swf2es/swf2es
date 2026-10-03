@@ -403,6 +403,68 @@ function frameLabels(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Bodies of ten frames, each holding a looping kid of four and another in a
+// one-frame mid sprite, bound to the classes in scripts/GotoChildren.as that
+// jump or stop in different ways, one unbound that never jumps, and a loop
+// on the root.
+function gotoChildren(abc: Uint8Array): Uint8Array {
+  const body = (id: number) =>
+    w.sprite(id, 10, [
+      w.place({ depth: 1, character: 2, name: "kid" }),
+      w.place({ depth: 2, character: 10, name: "mid" }),
+      ...Array.from({ length: 10 }, () => w.showFrame()),
+      w.end(),
+    ]);
+  return w.swf({
+    version: 9,
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 12,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 4, [
+        w.place({ depth: 1, character: 1 }),
+        w.showFrame(),
+        w.showFrame(),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.sprite(10, 1, [w.place({ depth: 1, character: 2, name: "kid" }), w.showFrame(), w.end()]),
+      body(3),
+      body(4),
+      body(5),
+      body(6),
+      body(7),
+      body(8),
+      body(9),
+      w.doAbc(abc, "GotoChildren"),
+      w.symbolClass([
+        [0, "Main"],
+        [3, "Forward"],
+        [4, "ForwardStop"],
+        [5, "Back"],
+        [6, "Listener"],
+        [8, "ForwardPlay"],
+        [9, "Stopper"],
+      ]),
+      w.place({ depth: 1, character: 3, name: "forward" }),
+      w.place({ depth: 2, character: 4, name: "forwardStop" }),
+      w.place({ depth: 3, character: 5, name: "back" }),
+      w.place({ depth: 4, character: 6, name: "listener" }),
+      w.place({ depth: 5, character: 7, name: "plain" }),
+      w.place({ depth: 6, character: 2, name: "loose" }),
+      w.place({ depth: 7, character: 8, name: "forwardPlay" }),
+      w.place({ depth: 8, character: 9, name: "stopper" }),
+      ...Array.from({ length: 12 }, () => w.showFrame()),
+      w.end(),
+    ],
+  });
+}
+
 // A root with nothing placed and a bound Box symbol, with scripts/AddChild.as adding Boxes.
 function added(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -1379,6 +1441,15 @@ export const cases: PlayerCase[] = [
     swf: frameLabels,
     script: "FrameLabels",
     frames: 8,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "goto-children",
+    swf: gotoChildren,
+    script: "GotoChildren",
+    frames: 10,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

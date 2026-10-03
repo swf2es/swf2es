@@ -860,6 +860,12 @@ export class MovieClip extends Container {
   scriptedFrame = 0;
   /** A goto a frame script asked for, taken when the script returns, as Flash defers it; null for none. */
   queuedGoto: number | null = null;
+  /**
+   * Whether a script's goto in a SWF of version 9 or earlier has it sit
+   * the next frame out, with all in it, as Flash has such a clip
+   * (`goto-children`); from version 10 a goto leaves its frames as they were.
+   */
+  skipsNextFrame = false;
 
   constructor(
     readonly timeline: Timeline,
