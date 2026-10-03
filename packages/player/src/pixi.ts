@@ -48,7 +48,7 @@ import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients
 import type { PointerState } from "./input.js";
 import { blendFilters } from "./pixi-blend.js";
 import { setFlashColor } from "./pixi-color.js";
-import { displayFilters } from "./pixi-filters.js";
+import { displayFilters, rgbaOf } from "./pixi-filters.js";
 import type { Player } from "./player.js";
 import {
   CUBIC,
@@ -1281,21 +1281,6 @@ function deviceRun(o: TextObject, run: LaidChar[], dx: number, baseline: number)
       : CanvasTextMetrics.measureFont(fontStringFromTextStyle(t.style)).ascent;
   t.position.set((dx + run[0].x) / 20, baseline - ascent);
   return t;
-}
-
-/** Premultiplied ARGB as the RGBA bytes a texture holds, still premultiplied. */
-function rgbaOf(pixels: Uint32Array): Uint8Array {
-  const out = new Uint8Array(pixels.length * 4);
-  for (let i = 0; i < pixels.length; i++) {
-    const p = pixels[i];
-    const j = i * 4;
-    out[j] = (p >>> 16) & 0xff;
-    out[j + 1] = (p >>> 8) & 0xff;
-    out[j + 2] = p & 0xff;
-    out[j + 3] = p >>> 24;
-  }
-
-  return out;
 }
 
 /** RGBA bytes read from a texture as premultiplied ARGB. */

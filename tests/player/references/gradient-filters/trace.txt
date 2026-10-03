@@ -1,0 +1,97 @@
+glow default
+ row 0 0 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0 0 0
+ col 0 0 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0 0 0
+glow rgb
+ row ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffd52900 ff817d00 ff2bd300 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff2bd300 ff817d00 ffd52900 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+ col ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffd52900 ff817d00 ff2bd300 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff2bd300 ff817d00 ffd52900 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+glow rgb strength 2
+ row ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffab5300 ff03fb00 ff0056a8 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff0056a8 ff03fb00 ffab5300 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+ col ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffab5300 ff03fb00 ff0056a8 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff0056a8 ff03fb00 ffab5300 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+glow rgb inner
+ row 0 0 0 0 0 0 0 0 ff00d628 ff00807e ff002cd2 ff0000ff ff0000ff ff0000ff ff0000ff ff002cd2 ff00807e ff00d628 0 0 0 0 0 0 0 0
+ col 0 0 0 0 0 0 0 0 ff00d628 ff00807e ff002cd2 ff0000ff ff0000ff ff0000ff ff0000ff ff002cd2 ff00807e ff00d628 0 0 0 0 0 0 0 0
+glow rgb full
+ row ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffd52900 ff817d00 ff2bd300 ff00d628 ff00807e ff002cd2 ff0000ff ff0000ff ff0000ff ff0000ff ff002cd2 ff00807e ff00d628 ff2bd300 ff817d00 ffd52900 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+ col ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffd52900 ff817d00 ff2bd300 ff00d628 ff00807e ff002cd2 ff0000ff ff0000ff ff0000ff ff0000ff ff002cd2 ff00807e ff00d628 ff2bd300 ff817d00 ffd52900 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+glow rgb knockout
+ row ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffd52900 ff817d00 ff2bd300 0 0 0 0 0 0 0 0 0 0 ff2bd300 ff817d00 ffd52900 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+ col ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffd52900 ff817d00 ff2bd300 0 0 0 0 0 0 0 0 0 0 ff2bd300 ff817d00 ffd52900 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+glow rgb inner knockout
+ row 0 0 0 0 0 0 0 0 ff00d628 ff00807e ff002cd2 ff0000ff ff0000ff ff0000ff ff0000ff ff002cd2 ff00807e ff00d628 0 0 0 0 0 0 0 0
+ col 0 0 0 0 0 0 0 0 ff00d628 ff00807e ff002cd2 ff0000ff ff0000ff ff0000ff ff0000ff ff002cd2 ff00807e ff00d628 0 0 0 0 0 0 0 0
+glow rgb full knockout
+ row ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffd52900 ff817d00 ff2bd300 ff00d628 ff00807e ff002cd2 ff0000ff ff0000ff ff0000ff ff0000ff ff002cd2 ff00807e ff00d628 ff2bd300 ff817d00 ffd52900 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+ col ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffd52900 ff817d00 ff2bd300 ff00d628 ff00807e ff002cd2 ff0000ff ff0000ff ff0000ff ff0000ff ff002cd2 ff00807e ff00d628 ff2bd300 ff817d00 ffd52900 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+glow alphas
+ row 0 0 0 0 fffffff 2fffd3d3 4fffb1b1 6fff9191 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 6fff9191 4fffb1b1 2fffd3d3 fffffff 0 0 0 0
+ col 0 0 0 0 effffff 2cffd6d6 4affb7b7 68ff9595 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 68ff9595 4affb7b7 2cffd6d6 effffff 0 0 0 0
+glow half alphas
+ row 7fff0000 7fff0000 7fff0000 7fff0000 7bf0000e 73d0002f 6bb0004f 6390006f ff286d33 ff1a7239 ff0e783d ff047d3f ff00803f ff00803f ff047d3f ff0e783d ff1a7239 ff286d33 6390006f 6bb0004f 73d0002f 7bf0000e 7fff0000 7fff0000 7fff0000 7fff0000
+ col 7fff0000 7fff0000 7fff0000 7fff0000 7bf0000c 73d2002a 6cb60049 64960068 ff2c6c31 ff1e7137 ff12763b ff087b3e ff047d3f ff047d3f ff087b3e ff12763b ff1e7137 ff2c6c31 64960068 6cb60049 73d2002a 7bf0000c 7fff0000 7fff0000 7fff0000 7fff0000
+glow narrow
+ row ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ff728c00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff728c00 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+ col ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffcc3300 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ffcc3300 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+glow one stop
+ row ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000
+ col ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000
+glow offset 3 a0
+ row ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff0000ff ff0040be ff00c03e ff41bd00 ffc13d00 ffff0000 ffff0000 ffff0000
+ col ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffc13d00 ff41bd00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff41bd00 ffc13d00 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+glow offset -2.5 a90
+ row ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffc13d00 ff41bd00 ff00c03e ff0040be ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0040be ff00c03e ff41bd00 ffc13d00 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+ col ffff0000 ffff0000 ffff0000 ffe11d00 ff817d00 ff01fd00 ff00807e ff0020de ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff ff0020de ff00807e ff01fd00 ff817d00 ffe11d00 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+glow quality 2
+ row ffff0000 ffff0000 ffff0000 ffff0000 fff90500 ffd92500 ff996500 ff39c500 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff39c500 ff996500 ffd92500 fff90500 ffff0000 ffff0000 ffff0000 ffff0000
+ col ffff0000 ffff0000 ffff0000 ffff0000 fff90500 ffd92500 ff9b6300 ff3dc100 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff3dc100 ff9b6300 ffd92500 fff90500 ffff0000 ffff0000 ffff0000 ffff0000
+glow half source
+ row ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffeb1300 ffbf3f00 ff956900 ff359e00 ff1fb400 ff0ac900 ff00d400 ff00d400 ff00d400 ff00d400 ff0ac900 ff1fb400 ff359e00 ff956900 ffbf3f00 ffeb1300 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+ col ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffeb1300 ffbf3f00 ff956900 ff359e00 ff1fb400 ff0ac900 ff00d400 ff00d400 ff00d400 ff00d400 ff0ac900 ff1fb400 ff359e00 ff956900 ffbf3f00 ffeb1300 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+glow half source inner
+ row 0 0 0 0 0 0 0 0 806c9300 8040bf00 8016e900 8000ff00 8000ff00 8000ff00 8000ff00 8016e900 8040bf00 806c9300 0 0 0 0 0 0 0 0
+ col 0 0 0 0 0 0 0 0 806c9300 8040bf00 8016e900 8000ff00 8000ff00 8000ff00 8000ff00 8016e900 8040bf00 806c9300 0 0 0 0 0 0 0 0
+glow half source full
+ row ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffeb1300 ffbf3f00 ff956900 ff6b9300 ff3fbf00 ff15e900 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff15e900 ff3fbf00 ff6b9300 ff956900 ffbf3f00 ffeb1300 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+ col ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffeb1300 ffbf3f00 ff956900 ff6b9300 ff3fbf00 ff15e900 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff15e900 ff3fbf00 ff6b9300 ff956900 ffbf3f00 ffeb1300 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+bevel default
+ row 0 0 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0 0 0
+ col 0 0 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0 0 0
+bevel rgb a0
+ row 0 0 0 0 0 0 0 0 ff0000ff ff0000ff ff003ec0 ff00be40 ff00ff00 ff00ff00 ff3fbf00 ffbf3f00 ffff0000 ffff0000 0 0 0 0 0 0 0 0
+ col 0 0 0 0 0 0 0 0 ff2fcf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff2fcf00 0 0 0 0 0 0 0 0
+bevel rgb a90 strength 2
+ row 0 0 0 0 0 0 0 0 ff00d628 ff00c638 ff00be40 ff00be40 ff00be40 ff00be40 ff00be40 ff00be40 ff00c638 ff00d628 0 0 0 0 0 0 0 0
+ col 0 0 0 0 0 0 0 0 ff0000ff ff0000ff ff0000ff ff003ec0 ff00be40 ff3fbf00 ffbf3f00 ffff0000 ffff0000 ffff0000 0 0 0 0 0 0 0 0
+bevel rgb sharp
+ row 0 0 0 0 0 0 0 0 ff0000ff ff0000ff ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ffff0000 ffff0000 0 0 0 0 0 0 0 0
+ col 0 0 0 0 0 0 0 0 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 0 0 0 0 0 0 0 0
+bevel rgb outer
+ row ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00c03e ff0040be ff0000ff ff0000ff ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ffff0000 ffff0000 ffbf3f00 ff3fbf00 ff00ff00 ff00ff00 ff00ff00 ff00ff00
+ col ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff0fef00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff0fef00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00
+bevel rgb full
+ row ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff3fbf00 ffbf3f00 ffff0000 ffff0000 ffff0000 ffff0000 ffbf3f00 ff3fbf00 ff00ff00 ff00ff00 ff00be40 ff003ec0 ff0000ff ff0000ff ff0000ff ff0000ff ff0040be ff00c03e ff00ff00 ff00ff00 ff00ff00 ff00ff00
+ col ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ee10 ff00ce30 ff00be40 ff00be40 ff00be40 ff00be40 ff00be40 ff00be40 ff00be40 ff00be40 ff00ce30 ff00ee10 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00
+bevel rgb knockout
+ row 0 0 0 0 0 0 0 0 ff0000ff ff0000ff ff003ec0 ff00be40 ff00ff00 ff00ff00 ff3fbf00 ffbf3f00 ffff0000 ffff0000 0 0 0 0 0 0 0 0
+ col 0 0 0 0 0 0 0 0 ff2fcf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff2fcf00 0 0 0 0 0 0 0 0
+bevel rgb outer knockout
+ row ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00c03e ff0040be ff0000ff ff0000ff 0 0 0 0 0 0 0 0 0 0 ffff0000 ffff0000 ffbf3f00 ff3fbf00 ff00ff00 ff00ff00 ff00ff00 ff00ff00
+ col ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff0fef00 0 0 0 0 0 0 0 0 0 0 ff0fef00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00
+bevel rgb full knockout
+ row ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00c03e ff0040be ff0000ff ff0000ff ff0000ff ff0000ff ff003ec0 ff00be40 ff00ff00 ff00ff00 ff3fbf00 ffbf3f00 ffff0000 ffff0000 ffff0000 ffff0000 ffbf3f00 ff3fbf00 ff00ff00 ff00ff00 ff00ff00 ff00ff00
+ col ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff0fef00 ff2fcf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff3fbf00 ff2fcf00 ff0fef00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00
+bevel alphas
+ row 0 0 0 0 3e5f5f5f be1f1f1f ff000000 ff000000 ff000000 ff000000 ff174117 ff189718 ff00aa00 ff00aa00 ff27a727 ffa7d2a7 ffffffff ffffffff ffffffff ffffffff bfdedede 3f9e9e9e 0 0 0 0
+ col 0 0 0 0 0 0 0 f888888 ff1ca61c ff27a727 ff27a727 ff27a727 ff27a727 ff27a727 ff27a727 ff27a727 ff27a727 ff1ca61c f888888 0 0 0 0 0 0 0
+bevel middle alpha
+ row ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000
+ col ffff0000 ffff0000 ffff0000 ffff0000 ffc00000 ff400000 ff000000 ff000000 ff000000 ff000000 ff3e0000 ffbe0000 ffff0000 ffff0000 ffff3f3f ffffbfbf ffffffff ffffffff ffffffff ffffffff ffffbfbf ffff3f3f ffff0000 ffff0000 ffff0000 ffff0000
+bevel uneven
+ row ff877800 ff877800 ff877800 ff6a9400 ff2ed000 ff00de00 ff004a00 ff000000 ff000000 ff004500 ff00d900 ff2dd200 ff699600 ffa55a00 ffe11e00 ffff3f3f ffffbfbf ffffffff ffffffff ffffbfbf ffff3f3f ffe11e00 ffa55a00 ff877800 ff877800 ff877800
+ col ff877800 ff877800 ff877800 ff877800 ff877800 ff877800 ff926c00 ffa85600 ffbf3f00 ffd52900 ffe11e00 ffe11e00 ffe11e00 ffe11e00 ffe11e00 ffe11e00 ffd52900 ffbf3f00 ffa85600 ff926c00 ff877800 ff877800 ff877800 ff877800 ff877800 ff877800
+bevel half source
+ row 0 0 0 0 0 0 0 0 80007e7f 80007e7f 80009d60 8000dd20 8000ff00 8000ff00 8020df00 80609f00 807f7f00 807f7f00 0 0 0 0 0 0 0 0
+ col 0 0 0 0 0 0 0 0 8018e700 8020df00 8020df00 8020df00 8020df00 8020df00 8020df00 8020df00 8020df00 8018e700 0 0 0 0 0 0 0 0
+bevel half source outer
+ row ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00de20 ff009e60 ff007e80 ff007e80 ff009440 ff009440 ff00a430 ff00c410 ff00d400 ff00d400 ff0fc400 ff2fa400 ff3f9400 ff3f9400 ff7f7f00 ff7f7f00 ff5f9f00 ff1fdf00 ff00ff00 ff00ff00 ff00ff00 ff00ff00
+ col ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff07f700 ff0bc800 ff0fc400 ff0fc400 ff0fc400 ff0fc400 ff0fc400 ff0fc400 ff0fc400 ff0fc400 ff0bc800 ff07f700 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00
+rect (x=10, y=10, w=24, h=24) (x=10, y=7, w=29, h=32) (x=10, y=7, w=29, h=32) (x=6, y=6, w=28, h=28) (x=1, y=1, w=38, h=38) (x=5, y=7, w=30, h=26)

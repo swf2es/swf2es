@@ -10,6 +10,7 @@
 // right and down, as BitmapData.applyFilter does. WebGL
 // alone: each pass is a filter of its own.
 import {
+  BufferImageSource,
   Filter,
   type FilterSystem,
   GlProgram,
@@ -18,7 +19,7 @@ import {
   type Texture,
   TexturePool,
 } from "pixi.js";
-import { integerKernel } from "./bitmap-filters.js";
+import { filterRect, gradientTable, integerKernel } from "./bitmap-filters.js";
 import type { Filter as FilterRecord } from "./filters.js";
 
 const VERTEX = `in vec2 aPosition;
@@ -373,6 +374,170 @@ class BevelFilter extends FlashFilter {
   }
 }
 
+/** Premultiplied ARGB as the RGBA bytes a texture holds, still premultiplied. */
+export function rgbaOf(pixels: Uint32Array): Uint8Array {
+  const out = new Uint8Array(pixels.length * 4);
+  for (let i = 0; i < pixels.length; i++) {
+    const p = pixels[i];
+    const j = i * 4;
+    out[j] = (p >>> 16) & 0xff;
+    out[j + 1] = (p >>> 8) & 0xff;
+    out[j + 2] = p & 0xff;
+    out[j + 3] = p >>> 24;
+  }
+
+  return out;
+}
+
+/**
+ * How a bevel or a gradient filter places its layer (premultiplied) on the
+ * object's pixel, as bitmap-filters' placer does: masked to where the
+ * object is (uType 0, inner) or, knocked out, is not (1, outer); inner
+ * atop it, outer behind it, full (2) over it, knocked out alone.
+ */
+const PLACE = `vec4 place(vec4 src, vec4 layer) {
+  float m = uType < 0.5 ? src.a : (uType < 1.5 && uKnockout > 0.5 ? 1.0 - src.a : 1.0);
+  vec4 masked = layer * m;
+  if (uKnockout > 0.5) {
+    return masked;
+  }
+  if (uType > 0.5 && uType < 1.5) {
+    return src + masked * (1.0 - src.a);
+  }
+  return masked + src * (1.0 - (uType < 0.5 ? layer.a : masked.a));
+}`;
+
+/**
+ * A gradient glow: the input's blurred alpha (uBlurred) from uOffset back,
+ * as a shadow reads it, times strength, picking a texel of the gradient
+ * (uGradient, 256 wide); a gradient bevel (uBevel 1): the difference of
+ * that alpha on and back, the middle of the gradient where they agree.
+ * Each pixel is evaluated once, at its centre, in 255ths truncated.
+ */
+const GRADIENT = `in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+uniform sampler2D uBlurred;
+uniform sampler2D uGradient;
+uniform highp vec4 uInputSize;
+uniform float uStrength;
+uniform vec2 uOffset;
+uniform float uType;
+uniform float uKnockout;
+uniform float uBevel;
+uniform vec4 uRegion;
+${PLACE}
+float alphaAt(vec2 at) {
+  return floor(texture(uBlurred, at).a * 255.0 + 0.001);
+}
+void main(void) {
+  vec2 p = floor(vTextureCoord * uInputSize.xy) + 0.5;
+  // Past the filter's rect it draws nothing, though its gradient may have colour at 0.
+  if (any(lessThan(p, uRegion.xy)) || any(greaterThanEqual(p, uRegion.zw))) {
+    finalColor = vec4(0.0);
+    return;
+  }
+  vec2 at = p * uInputSize.zw;
+  vec4 src = texture(uTexture, at);
+  vec2 step_ = uOffset * uInputSize.zw;
+  float index;
+  if (uBevel > 0.5) {
+    float d = clamp(floor((alphaAt(at + step_) - alphaAt(at - step_)) * uStrength), -255.0, 255.0);
+    index = floor((d + 256.0) / 2.0);
+  } else {
+    index = min(255.0, floor(alphaAt(at - step_) * uStrength + 0.001));
+  }
+  vec4 layer = texture(uGradient, vec2((index + 0.5) / 256.0, 0.5));
+  vec4 c = place(src, layer);
+  finalColor = ${TRUNCATE};
+}`;
+
+class GradientFilter extends FlashFilter {
+  private readonly pass = new BoxPass();
+  private readonly gradient: PixiTexture;
+
+  /** Its box's pass and its gradient too. */
+  destroy(): void {
+    this.pass.destroy();
+    this.gradient.destroy(true);
+    super.destroy();
+  }
+
+  constructor(private readonly f: FilterRecord) {
+    const radians = ((f.angle || 0) * Math.PI) / 180;
+    const distance = f.distance || 0;
+    const gradient = new PixiTexture({
+      source: new BufferImageSource({
+        resource: rgbaOf(gradientTable(f)),
+        width: 256,
+        height: 1,
+        alphaMode: "premultiplied-alpha",
+        scaleMode: "nearest",
+        addressMode: "clamp-to-edge",
+      }),
+    });
+    super({
+      glProgram: GlProgram.from({
+        vertex: VERTEX,
+        fragment: GRADIENT,
+        name: "flash-gradient-filter",
+      }),
+      resources: {
+        gradientUniforms: {
+          uStrength: { value: f.strength, type: "f32" },
+          uOffset: {
+            value: new Float32Array([distance * Math.cos(radians), distance * Math.sin(radians)]),
+            type: "vec2<f32>",
+          },
+          uType: { value: f.type === "inner" ? 0 : f.type === "outer" ? 1 : 2, type: "f32" },
+          uKnockout: { value: f.knockout ? 1 : 0, type: "f32" },
+          uBevel: { value: f.kind === "gradientBevel" ? 1 : 0, type: "f32" },
+          uRegion: { value: new Float32Array(4), type: "vec4<f32>" },
+        },
+        uBlurred: PixiTexture.WHITE.source,
+        uGradient: gradient.source,
+      },
+    });
+    this.gradient = gradient;
+    // The rect's growth each way, as applyFilter's: left, top, right, bottom.
+    const rect = filterRect({ x: 0, y: 0, width: 1, height: 1 }, f);
+    this.grows = [-rect.x, -rect.y, rect.x + rect.width - 1, rect.y + rect.height - 1];
+    this.padding = Math.max(...this.grows) + 1;
+  }
+
+  /** How far the filter's rect grows past the object, each way: left, top, right, bottom. */
+  private readonly grows: number[];
+
+  /** How far in from the input's frame the object's pixels start: this and the later filters' padding. */
+  inset = 0;
+
+  apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
+    const f = this.f;
+    const blurred = TexturePool.getSameSizeTexture(input);
+    blur(
+      system,
+      this.pass,
+      input,
+      blurred,
+      f.blurX || 0,
+      f.blurY || 0,
+      f.quality,
+      this.texels(input),
+      true,
+    );
+    this.resources.uBlurred = blurred.source;
+    // The object's pixels and one more right and down, as adl's bitmap of it, grown by the rect.
+    const region = this.resources.gradientUniforms.uniforms.uRegion as Float32Array;
+    const [left, top, right, bottom] = this.grows;
+    region[0] = this.inset - left;
+    region[1] = this.inset - top;
+    region[2] = input.frame.width - this.inset + 1 + right;
+    region[3] = input.frame.height - this.inset + 1 + bottom;
+    system.applyFilter(this, input, output, clear);
+    TexturePool.returnTexture(blurred);
+  }
+}
+
 /** A colour matrix of a pixel's straight colour, its offsets in 255ths, transparent pixels too. */
 const MATRIX = `in vec2 vTextureCoord;
 out vec4 finalColor;
@@ -564,6 +729,8 @@ export function displayFilters(records: readonly FilterRecord[]): Filter[] {
       filter = new ColorMatrixFilter(f);
     } else if (f.kind === "bevel") {
       filter = new BevelFilter(f);
+    } else if (f.kind === "gradientGlow" || f.kind === "gradientBevel") {
+      filter = new GradientFilter(f);
     } else if (f.kind === "convolution") {
       filter = new ConvolutionFilter(f.matrixX * f.matrixY > 0 ? f : emptyKernel(f));
     }
@@ -578,7 +745,7 @@ export function displayFilters(records: readonly FilterRecord[]): Filter[] {
   for (let i = out.length - 1; i >= 0; i--) {
     inset += out[i].padding;
     const filter = out[i];
-    if (filter instanceof ConvolutionFilter) {
+    if (filter instanceof ConvolutionFilter || filter instanceof GradientFilter) {
       filter.inset = inset;
     }
   }
