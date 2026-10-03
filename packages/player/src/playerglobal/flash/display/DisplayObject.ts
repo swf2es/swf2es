@@ -7,7 +7,7 @@ import { CONTENT, type DisplayObject, TextObject, TRANSFORM } from "../../../dis
 import { copyFilter } from "../../../filters.js";
 import { apply, invert, type Rect, transformRect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
-import { filterClassName, filterKindOf, recordOf } from "../filters/filters.js";
+import { copyMap, filterClassName, filterKindOf, recordOf } from "../filters/filters.js";
 import { colorOf, matrixOf } from "../geom/Transform.js";
 
 type AsObject = avm2.AsObject;
@@ -429,7 +429,15 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
           throw s.rt.error("ArgumentError", 2005, 0, "Filter");
         }
 
-        return copyFilter(recordOf(item as AsObject, kind));
+        const f = copyFilter(recordOf(item as AsObject, kind));
+        // A displacement map's pixels are taken as they are, as Flash takes
+        // them: the object draws with those, whatever is drawn on the map
+        // after, till its filters are set again; the map itself it keeps.
+        if (f.kind === "displacementMap" && f.mapBitmap) {
+          f.mapSnapshot = copyMap(s, f.mapBitmap);
+        }
+
+        return f;
       });
       this.$display.filters = filters;
       this.$display.invalidate(TRANSFORM);

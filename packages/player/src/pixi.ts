@@ -937,7 +937,16 @@ export class PixiView {
 
         // Flash's filters are WebGL's alone; Pixi skips a chain with one it
         // cannot run, so under WebGPU they are left out and the blend kept.
-        node.filters = this.renderer.type === RendererType.WEBGPU ? [] : displayFilters(records);
+        node.filters =
+          this.renderer.type === RendererType.WEBGPU
+            ? []
+            : displayFilters(records, (map) => {
+                // A displacement map's map: its store's texture, brought up to date as it is read.
+                const store = (map as { $store?: BitmapStore }).$store;
+                return store && !store.disposed
+                  ? gpuBitmaps(this.renderer).texture(store, false)
+                  : null;
+              });
         if (this.fresh) {
           this.builtFilters.push(...node.filters);
         }

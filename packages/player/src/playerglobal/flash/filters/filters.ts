@@ -2,6 +2,7 @@
 // record (`$filter`) that DisplayObject.filters copies to and from the display
 // object's (filters.ts in the player), so a filter read back is a copy.
 import { avm2 } from "@swf2es/runtime";
+import type { BitmapStore } from "../../../bitmap.js";
 import { type Filter, type FilterKind, filterDefaults } from "../../../filters.js";
 import type { Scripting } from "../../../scripting.js";
 
@@ -35,6 +36,28 @@ export function filterKindOf(rt: avm2.Runtime, o: AsObject): FilterKind | null {
   }
 
   return null;
+}
+
+/**
+ * A copy of a displacement map's BitmapData, made as Flash makes it: a
+ * plain BitmapData of the same pixels, not through the object's own
+ * clone, which a script may override. Null for none, or one disposed.
+ */
+export function copyMap(s: Scripting, map: object | null): AsObject | null {
+  const store = (map as { $store?: BitmapStore } | null)?.$store;
+  if (!store || store.disposed) {
+    return null;
+  }
+
+  const o = s.rt.construct(
+    s.rt.classNamed("flash.display::BitmapData"),
+    store.width,
+    store.height,
+    store.transparent,
+    0,
+  ) as AsObject;
+  o.$store = store.clone();
+  return o;
 }
 
 /** The record of a filter object, made with the kind's defaults when first touched. */
@@ -177,7 +200,7 @@ export function filterNatives(s: Scripting): avm2.Natives {
     displacementMap: {
       // A copy each way, as adl gives one: the map's pixels, the point in whole pixels.
       mapBitmap: [
-        (f) => (f.mapBitmap ? s.rt.callProperty(f.mapBitmap, s.rt.publicName("clone")) : null),
+        (f) => copyMap(s, f.mapBitmap),
         (f, v) => {
           f.mapBitmap = (v as AsObject | null) ?? null;
         },

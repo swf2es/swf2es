@@ -538,6 +538,146 @@ class GradientFilter extends FlashFilter {
   }
 }
 
+/**
+ * A displacement map, in the input's pixels from its frame's corner: each
+ * pixel of the object's (uBox) where the map lies (uMapAt, uMapSize) takes
+ * the input at itself moved by the map's channel (uComponents picks one
+ * for x, one for y) less 128, times scale, in 256ths toward 0, between
+ * pixels with weights in 256ths; past the object's pixels as uMode says:
+ * 0 wrap, 1 clamp, 2 its own place, 3 uColor, which also fills uGrow pixels
+ * round the object, as adl's drawing of it does. Each pixel once, at its
+ * centre.
+ */
+const DISPLACE = `in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+uniform sampler2D uMap;
+uniform highp vec4 uInputSize;
+uniform vec4 uBox;
+uniform vec4 uMapAt;
+uniform vec4 uComponentX;
+uniform vec4 uComponentY;
+uniform vec2 uScale;
+uniform float uMode;
+uniform vec4 uColor;
+uniform vec2 uGrow;
+vec4 read(vec2 at, vec2 own) {
+  vec2 size = uBox.zw - uBox.xy;
+  vec2 i = at - uBox.xy;
+  if (any(lessThan(i, vec2(0.0))) || any(greaterThanEqual(i, size))) {
+    if (uMode < 0.5) {
+      i = mod(i, size);
+    } else if (uMode < 2.5) {
+      i = clamp(i, vec2(0.0), size - 1.0);
+    } else {
+      return uColor;
+    }
+  }
+  return texture(uTexture, (uBox.xy + i + 0.5) * uInputSize.zw);
+}
+void main(void) {
+  vec2 p = floor(vTextureCoord * uInputSize.xy);
+  vec4 own = texture(uTexture, (p + 0.5) * uInputSize.zw);
+  vec2 m = p - uMapAt.xy;
+  if (any(lessThan(p, uBox.xy)) || any(greaterThanEqual(p, uBox.zw))) {
+    bool near = all(greaterThanEqual(p, uBox.xy - uGrow)) && all(lessThan(p, uBox.zw + uGrow));
+    finalColor = uMode > 2.5 && near ? uColor : vec4(0.0);
+    return;
+  }
+  if (any(lessThan(m, vec2(0.0))) || any(greaterThanEqual(m, uMapAt.zw))) {
+    finalColor = own;
+    return;
+  }
+  vec4 map = texture(uMap, (m + 0.5) / uMapAt.zw);
+  vec4 straight = map.a > 0.0 ? vec4(map.rgb / map.a, map.a) : vec4(0.0);
+  vec2 c = floor(vec2(dot(straight, uComponentX), dot(straight, uComponentY)) * 255.0 + 0.5);
+  // None picked: no move.
+  c = vec2(uComponentX == vec4(0.0) ? 128.0 : c.x, uComponentY == vec4(0.0) ? 128.0 : c.y);
+  // Toward 0, without trunc, which GLSL ES 1 has not.
+  vec2 moved = (c - 128.0) * uScale;
+  vec2 q = p * 256.0 + sign(moved) * floor(abs(moved));
+  vec2 whole = floor(q / 256.0);
+  vec2 f = q - whole * 256.0;
+  if (uMode > 1.5 && uMode < 2.5) {
+    vec2 i = whole - uBox.xy;
+    vec2 size = uBox.zw - uBox.xy;
+    whole = vec2(i.x < 0.0 || i.x >= size.x ? p.x : whole.x, i.y < 0.0 || i.y >= size.y ? p.y : whole.y);
+  }
+  float w00 = floor((256.0 - f.x) * (256.0 - f.y) / 256.0);
+  float w10 = floor(f.x * (256.0 - f.y) / 256.0);
+  float w01 = floor((256.0 - f.x) * f.y / 256.0);
+  float w11 = floor(f.x * f.y / 256.0);
+  vec4 v = read(whole, p) * w00 + read(whole + vec2(1.0, 0.0), p) * w10 +
+    read(whole + vec2(0.0, 1.0), p) * w01 + read(whole + vec2(1.0, 1.0), p) * w11;
+  vec4 c8 = floor(v * 255.0 / 256.0 + 0.001) / 255.0;
+  finalColor = c8;
+}`;
+
+class DisplacementFilter extends FlashFilter {
+  /** How far in from the input's frame the object's pixels start: this and the later filters' padding. */
+  inset = 0;
+
+  constructor(
+    private readonly f: FilterRecord,
+    private readonly map: Texture,
+  ) {
+    const pick = (c: number) =>
+      new Float32Array([c === 1 ? 1 : 0, c === 2 ? 1 : 0, c === 4 ? 1 : 0, c === 8 ? 1 : 0]);
+    // Colour mode draws half the scale round the object, as adl does.
+    const grow =
+      f.mode === "color"
+        ? [Math.floor(Math.abs(f.scaleX) / 2) || 0, Math.floor(Math.abs(f.scaleY) / 2) || 0]
+        : [0, 0];
+    const a = Math.floor(f.alpha * 255) / 255;
+    super({
+      glProgram: GlProgram.from({ vertex: VERTEX, fragment: DISPLACE, name: "flash-displacement" }),
+      resources: {
+        displaceUniforms: {
+          uBox: { value: new Float32Array(4), type: "vec4<f32>" },
+          uMapAt: { value: new Float32Array(4), type: "vec4<f32>" },
+          uComponentX: { value: pick(f.componentX), type: "vec4<f32>" },
+          uComponentY: { value: pick(f.componentY), type: "vec4<f32>" },
+          uScale: { value: new Float32Array([f.scaleX || 0, f.scaleY || 0]), type: "vec2<f32>" },
+          uMode: {
+            value: ["wrap", "clamp", "ignore", "color"].indexOf(f.mode),
+            type: "f32",
+          },
+          uColor: {
+            value: new Float32Array([
+              (((f.color >> 16) & 0xff) / 255) * a,
+              (((f.color >> 8) & 0xff) / 255) * a,
+              ((f.color & 0xff) / 255) * a,
+              a,
+            ]),
+            type: "vec4<f32>",
+          },
+          uGrow: { value: new Float32Array(grow), type: "vec2<f32>" },
+        },
+        uMap: PixiTexture.EMPTY.source,
+      },
+    });
+    this.padding = Math.max(...grow) + 1;
+  }
+
+  apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
+    const map = this.map;
+    const u = this.resources.displaceUniforms.uniforms;
+    const box = u.uBox as Float32Array;
+    // The object's pixels and one more right and down, as adl's bitmap of it.
+    box[0] = this.inset;
+    box[1] = this.inset;
+    box[2] = input.frame.width - this.inset + 1;
+    box[3] = input.frame.height - this.inset + 1;
+    const at = u.uMapAt as Float32Array;
+    at[0] = this.inset + this.f.mapPoint[0];
+    at[1] = this.inset + this.f.mapPoint[1];
+    at[2] = map.width;
+    at[3] = map.height;
+    this.resources.uMap = map.source;
+    system.applyFilter(this, input, output, clear);
+  }
+}
+
 /** A colour matrix of a pixel's straight colour, its offsets in 255ths, transparent pixels too. */
 const MATRIX = `in vec2 vTextureCoord;
 out vec4 finalColor;
@@ -716,8 +856,14 @@ function emptyKernel(f: FilterRecord): FilterRecord {
   };
 }
 
+/** The texture of a displacement map's map, as its renderer holds it; null for none. */
+export type MapTexture = (map: object) => Texture | null;
+
 /** The Pixi filters a display object's filter records draw as: those swf2es draws yet, in their order. */
-export function displayFilters(records: readonly FilterRecord[]): Filter[] {
+export function displayFilters(
+  records: readonly FilterRecord[],
+  mapTexture: MapTexture = () => null,
+): Filter[] {
   const out: Filter[] = [];
   for (const f of records) {
     let filter: FlashFilter | null = null;
@@ -731,6 +877,12 @@ export function displayFilters(records: readonly FilterRecord[]): Filter[] {
       filter = new BevelFilter(f);
     } else if (f.kind === "gradientGlow" || f.kind === "gradientBevel") {
       filter = new GradientFilter(f);
+    } else if (f.kind === "displacementMap") {
+      // Its map, a copy the object took when its filters were set, as a
+      // texture now, never in a pass; with none it leaves the object be.
+      const map = f.mapSnapshot ?? f.mapBitmap;
+      const texture = map ? mapTexture(map) : null;
+      filter = texture ? new DisplacementFilter(f, texture) : null;
     } else if (f.kind === "convolution") {
       filter = new ConvolutionFilter(f.matrixX * f.matrixY > 0 ? f : emptyKernel(f));
     }
@@ -745,7 +897,11 @@ export function displayFilters(records: readonly FilterRecord[]): Filter[] {
   for (let i = out.length - 1; i >= 0; i--) {
     inset += out[i].padding;
     const filter = out[i];
-    if (filter instanceof ConvolutionFilter || filter instanceof GradientFilter) {
+    if (
+      filter instanceof ConvolutionFilter ||
+      filter instanceof GradientFilter ||
+      filter instanceof DisplacementFilter
+    ) {
       filter.inset = inset;
     }
   }

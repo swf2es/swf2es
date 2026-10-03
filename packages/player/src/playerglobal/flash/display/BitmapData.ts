@@ -365,19 +365,36 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("flash.errors::IllegalOperationError", 2077);
       }
 
-      if (!applyFilter(store, from, r, dx, dy, f)) {
+      // A displacement map's map as it is now, not as it was when set.
+      const map =
+        f.kind === "displacementMap" && f.mapBitmap ? storeOf(s, f.mapBitmap as AsObject) : null;
+      if (!applyFilter(store, from, r, dx, dy, f, map)) {
         throw s.rt.unsupported(`BitmapData.applyFilter with a ${f.kind} filter`);
       }
     }
 
     generateFilterRect(sourceRect: Value, filter: Value): Value {
-      storeOf(s, this);
+      const store = storeOf(s, this);
       const f = filterOf(filter);
       if (!filtersDrawn.has(f.kind)) {
         throw s.rt.unsupported(`BitmapData.generateFilterRect with a ${f.kind} filter`);
       }
 
-      const r = filterRect(rectOf(s, sourceRect), f);
+      // The rect within the bitmap first; a displacement map's result within it too.
+      const within = (r: PixelRect): PixelRect => {
+        const x0 = Math.max(0, r.x);
+        const y0 = Math.max(0, r.y);
+        const x1 = Math.min(store.width, r.x + r.width);
+        const y1 = Math.min(store.height, r.y + r.height);
+        return x1 > x0 && y1 > y0
+          ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
+          : { x: 0, y: 0, width: 0, height: 0 };
+      };
+      let r = filterRect(within(rectOf(s, sourceRect)), f);
+      if (f.kind === "displacementMap") {
+        r = within(r);
+      }
+
       return s.rt.construct(s.rt.classNamed("flash.geom::Rectangle"), r.x, r.y, r.width, r.height);
     }
 

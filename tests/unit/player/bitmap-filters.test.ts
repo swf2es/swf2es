@@ -57,13 +57,32 @@ test("a destination showing part of a filter's result shows what the whole resul
       ratios: [0, 128, 255],
       type: "outer",
     },
+    {
+      ...filterDefaults("displacementMap"),
+      mapBitmap: {},
+      mapPoint: [3, 2] as [number, number],
+      componentX: 1,
+      componentY: 2,
+      scaleX: 9.5,
+      scaleY: -6,
+      mode: "color",
+      color: 0x00ff00,
+      alpha: 0.5,
+    },
   ];
+  // A displacement's map: each pixel its own move.
+  const map = new BitmapStore(30, 30, true, 0);
+  for (let i = 0; i < map.pixels.length; i++) {
+    map.setPixel32(i % 30, Math.floor(i / 30), (0xff000080 | (((i * 37) & 0xffff) << 8)) >>> 0);
+  }
+
   for (const f of filters) {
+    const m = f.kind === "displacementMap" ? map : null;
     const whole = new BitmapStore(60, 60, true, 0xff0000ff);
-    applyFilter(whole, source(), { x: 0, y: 0, width: 40, height: 40 }, 10, 10, f);
+    applyFilter(whole, source(), { x: 0, y: 0, width: 40, height: 40 }, 10, 10, f, m);
     // A window of 9 by 7, at a corner of the squares, where the filter reaches past it.
     const part = new BitmapStore(9, 7, true, 0xff0000ff);
-    applyFilter(part, source(), { x: 0, y: 0, width: 40, height: 40 }, 10 - 31, 10 - 25, f);
+    applyFilter(part, source(), { x: 0, y: 0, width: 40, height: 40 }, 10 - 31, 10 - 25, f, m);
     for (let y = 0; y < 7; y++) {
       for (let x = 0; x < 9; x++) {
         assert.equal(

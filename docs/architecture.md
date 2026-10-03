@@ -1452,8 +1452,21 @@ the source too, it takes the middle. With no stops either draws nothing
 but the source. Both place their layer as the bevel does, masked by
 rounding, (c × m + 127) / 255; a gradient glow's rect is a shadow's, a
 gradient bevel's a bevel's, and as the table may have colour at 0 they
-fill it. The `apply-filter` case matches adl's numbers to the bit.
-Displacement maps throw as not supported yet.
+fill it. A displacement map moves each pixel of the source rect by the
+map's channels there, read unmultiplied, the map placed at the rect's
+corner and its point, the one named channel less 128 times scale, in
+256ths toward 0 (none named, or several, moves nothing); it reads the
+source between pixels, the four corners' weights in 256ths each
+truncated; past the rect as the mode says: wrapped, clamped, its own
+place where the whole pixel it lands on is past it (ignore), or the
+filter's colour; where the map is not, or there is none, it keeps its
+own. Its rect grows by a quarter of each scale, whole, and none with no
+map; `generateFilterRect` takes any filter's rect within the bitmap first,
+and a displacement's result within it too. applyFilter writes the rect
+alone: adl, displacing a rect moved elsewhere, fills its grown rect from
+the rect's corner, shifted, and into an opaque destination leaves alpha,
+quirks swf2es does not take on. The map is read as it is when applied.
+The `apply-filter` case matches adl's numbers to the bit.
 
 A convolution grows the rect by half its matrix, rounded down, each way.
 Its taps read the source's straight colour, unmultiplied as getPixel32
@@ -1494,7 +1507,12 @@ alone. A bevel is the object's alpha so blurred, read at its offset on
 and back, as applyFilter has it, each pixel evaluated once at its centre;
 a gradient glow and a gradient bevel pick from their table, a texture
 256 wide, and draw only within the filter's rect of adl's bitmap of the
-object, its pixels and one more right and down.
+object, its pixels and one more right and down. A displacement map
+reads the object's pixels as applyFilter reads the source, with the map
+as it was when the object's filters were set, as Flash copies it then
+(reading them back gives the live map, and setting them again takes it
+anew); one with no map makes no pass. In colour mode it fills half the
+scale round the object with the colour, as adl draws it.
 A colour matrix maps each pixel's straight colour, offsets in
 255ths, transparent pixels within the object's bounds too. A convolution
 filters, as applyFilter does, a bitmap of the object's pixels and one
@@ -1507,8 +1525,7 @@ passes
 are Pixi filters at the target's resolution, for WebGL: under WebGPU,
 where Pixi would skip an object's whole chain for one it cannot run,
 they are left out and a blend mode is kept. A view made for one draw
-destroys the filters it made with it. Displacement maps are still to
-come.
+destroys the filters it made with it.
 
 ### Masks and scroll rectangles
 
