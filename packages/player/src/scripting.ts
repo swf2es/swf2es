@@ -1453,11 +1453,13 @@ export class Scripting {
           }
 
           // The goto the script asked for, now that it has returned; the
-          // frame it lands on has its script run next, in this same phase.
+          // frame it lands on has its script run next, in this same phase,
+          // or, from version 10, in the goto's own cycle.
           if (o.queuedGoto !== null) {
             const frame = o.queuedGoto;
             o.queuedGoto = null;
             o.gotoFrame(frame);
+            this.gotoCycle(o);
           }
         }
       };
@@ -1488,6 +1490,23 @@ export class Scripting {
         return;
       }
     }
+  }
+
+  /**
+   * What a goto that has happened runs in a SWF of version 10 or later, as
+   * Flash does, from a listener, a frame script once it returns, or anyone:
+   * FRAME_CONSTRUCTED, the frame scripts due on the whole display list, the
+   * goto's frame's among them, and EXIT_FRAME (`goto-cycle`). What the goto
+   * placed it made alive already. Version 9 runs none (`goto-children`).
+   */
+  gotoCycle(clip: MovieClip): void {
+    if ((clip.library.version ?? 10) < 10 || !this.stage) {
+      return;
+    }
+
+    this.broadcast("frameConstructed");
+    this.runFrameScripts(this.stage);
+    this.broadcast("exitFrame");
   }
 
   /**

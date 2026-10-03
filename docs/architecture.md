@@ -669,6 +669,14 @@ flag. From version 10 a goto leaves the frames that follow as they were.
 The version is the clip's own SWF's, which the case does not try across
 a loaded SWF.
 
+From version 10 a goto, once it happens, runs a frame of its own: what it
+placed is made alive, then `FRAME_CONSTRUCTED` is broadcast, the frame
+scripts due anywhere on the display list run, the goto's new frame's among
+them, and `EXIT_FRAME` is broadcast, all before the goto returns to a
+listener that asked for it, or before the frame script that asked for it
+is left behind (`goto-cycle`). A goto in one of those scripts runs its own
+inside, and the frame's own phases then find the scripts already run.
+
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,
 is one scene named "" whose labels are its FrameLabel tags (`scenes`,
