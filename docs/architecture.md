@@ -515,28 +515,31 @@ only, so the player implements all of it.
 
 ## The player
 
-The player keeps Flash's display list and timeline (`packages/player/src`:
-`timeline.ts` reads a SWF's definitions and frames, `display.ts` is the
-display list), and PixiJS only mirrors it (`pixi.ts`): a container per
-display object, kept from frame to frame and updated where the display
-object marks itself changed. A shape's fills are immutable
-`GraphicsContext`s shared by its instances, built from Flash's edges
-(`shapes.ts`: each edge goes to its right fill forward and its left fill
-reversed, joined into contours) and filled even-odd through a containment
-tree of the contours, holes cut. Its lines are drawn in the stage's axes,
-because Flash strokes a transformed line with one width all along, not the
-local width stretched by the transform: so a line's context depends on the
-linear part of its transform on the stage, and is kept by layer and that
+The player keeps Flash's display list and timeline
+(`packages/player/src`: `timeline.ts` reads a SWF's definitions and
+frames, `display.ts` is the display list), and PixiJS only mirrors it
+(`pixi.ts`): a container per display object, kept from frame to frame
+and updated where the display object marks itself changed. A shape's
+fills are immutable `GraphicsContext`s shared by its instances, built
+from Flash's edges (`shapes.ts`: each edge goes to its right fill
+forward and its left fill reversed, joined into contours) and filled
+even-odd through a containment tree of the contours, holes cut: all of a
+region's at once, before the islands in them, since Pixi's `cut()` also
+lands a hole in the fill before the last once the last has one
+(`fill-holes`). Its lines are drawn in the stage's axes, because Flash
+strokes a transformed line with one width all along, not the local width
+stretched by the transform: so a line's context depends on the linear
+part of its transform on the stage, and is kept by layer and that
 transform, exactly, shared by every instance that sees the layer alike
 (a crowd of one creature in step) and found again when one comes back to
 it (a loop's next turn). Contexts are counted as instances take and give
 them back, and an object that leaves the list gives back its own and its
-descendants', drawn again if it returns; one no one holds stays idle
-5 s, by the clock, not renders, which a host may make many of between
+descendants', drawn again if it returns; one no one holds stays idle 5
+s, by the clock, not renders, which a host may make many of between
 frames, at most 4096 of them, before it is destroyed. A drawing's lines
 are its own, as it changes. No line is thinner than a pixel of the
-screen, which is how wide Flash draws a hairline however far its stage is
-zoomed: `PixiView.screenScale` screen pixels to a stage pixel, the
+screen, which is how wide Flash draws a hairline however far its stage
+is zoomed: `PixiView.screenScale` screen pixels to a stage pixel, the
 renderer's resolution unless the host says otherwise, as the test page,
 drawing finer to average down, does. A host showing the stage at three
 times its size so draws thin outlines a screen pixel wide, as Flash
@@ -547,17 +550,34 @@ members each load the same SWF draws with one set of fills and lines, not
 one per load, whose lines alone overran the idle limit and were
 tessellated again on every turn of their loop. A shape filled with a
 bitmap keeps to its own SWF, whose bitmap it is.
+A morph shape (DefineMorphShape, DefineMorphShape2) is two shapes whose
+edges pair in order; a `MorphShape` shows their blend at the ratio its
+placements give (`morph.ts`), a shape like any other, so it draws,
+bounds and hit-tests as one. The blend mixes where the ends' points lie,
+not their deltas, a straight edge paired with a curve as a curve, and
+keeps them to whole twips, so a closed path stays closed for `shapes.ts`
+to join. A morph keeps only its 16 latest blends, which instances in step
+share, and a MorphShape's node builds its own fills, freed as it draws
+the next or, once it is gone, by Pixi's collector, as a drawing's are:
+a tween asks for a new ratio on each frame, which the shapes' shared
+fills, kept for as long as the view, would hoard. Its lines are shared
+as a shape's, a blend's layers never changing. Flash takes a
+new ratio on only as it draws: a script that moves the timeline and
+asks for bounds before the next render gets the last drawn blend's
+(`morph-shapes`, the corpus's `hittest_morph`). Only a timeline makes a
+`MorphShape`; a script's `new` is refused, #2012.
 Tessellating lines, round joins most of all, was the largest part of a
 frame of a dozen animated instances; `bench.ts --rig N` measures it.
 Fills and lines are drawn unbatched, each Graphics a draw of its own
-geometry under its transform. Pixi batches small Graphics by packing their
-vertices, already transformed, into one buffer, which it packs and uploads
-again whenever its render group changes structure: on most frames of an
-animation, whose timelines add and remove children. Larger ones it draws
-alone anyway, so batches and those alternate, switching programs at each.
-Unbatched, a shape's geometry is uploaded once: more draw calls, but far
-fewer program switches and uploads, and `bench.ts --rig 32` draws in half
-the time on a GPU and a quarter of it under software GL.
+geometry under its transform. Pixi batches small Graphics by packing
+their vertices, already transformed, into one buffer, which it packs and
+uploads again whenever its render group changes structure: on most
+frames of an animation, whose timelines add and remove children. Larger
+ones it draws alone anyway, so batches and those alternate, switching
+programs at each. Unbatched, a shape's geometry is uploaded once: more
+draw calls, but far fewer program switches and uploads, and `bench.ts
+--rig 32` draws in half the time on a GPU and a quarter of it under
+software GL.
 
 Flash anti-aliases by supersampling on a grid: none at low quality, 2×2 at
 medium, 4×4 at high and best. The test page draws the same way, at that
@@ -714,8 +734,9 @@ Only a name from the SWF gives its parent a property of it.
 
 A `PlaceObject` with the move flag that names another character at an
 occupied depth makes no new object in Flash: the child stays, the same
-AS3 object with its matrix, sign and angle, and only a `Shape` no script
-has touched takes the new shape's graphic. A clip, a touched `Shape`,
+AS3 object with its matrix, sign and angle, and only a `Shape` or
+`MorphShape` no script has touched takes the new shape's or morph's
+graphic, either kind for either. A clip, a touched `Shape`,
 and a `Shape` a sprite is placed over all stay as they were. What
 touches, by the `replaces` case's 26 depths: the transform properties
 (`x = x` counts), `alpha`, `filters`, `blendMode`, `scrollRect`,
@@ -737,8 +758,11 @@ names, playing or in a goto's replay (`same-depth`, the corpus's
 character where nothing is places nothing (`rewind-first`). A rewind, the loop to the first frame
 among them, takes off what the timeline placed after the target, but for
 a child at a depth the frames replayed end on a place without the move
-flag at: that child stays, its character too, and takes the place, its
-transform given anew as for a first placing, and the moves after it
+flag at: that child stays, a clip its character too, and takes the
+place, its transform given anew as for a first placing, and the moves
+after it; an untouched `Shape` or `MorphShape` takes the place's shape or
+morph there, as a move's would (`morph-shapes`, where the loop puts a
+morph back over a shape placed later)
 (`same-depth`, `rewind-first`); what comes before that place at the
 depth, a removal among it, does not matter. Flash's matrix is
 exact at the quarter turns, 0 and not the doubles' cosine of 90°, so the
