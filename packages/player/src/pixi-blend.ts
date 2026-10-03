@@ -2,7 +2,19 @@
 // modes"): the object drawn as a layer, its children together, then that
 // layer blended with what is below by the mode's formula, which a filter
 // that reads the back buffer computes. Colours are premultiplied.
-import { AlphaFilter, BlendModeFilter, type Filter } from "pixi.js";
+import { AlphaFilter, BlendModeFilter, type Filter, RenderTargetSystem } from "pixi.js";
+
+// A blend's back texture is sized with a hair of tolerance for rounding,
+// and the copy of what is behind into it without: at some resolutions the
+// copy is a pixel taller or wider than the texture, which GL refuses
+// (copyTexSubImage2D's offset overflow), and the blend reads nothing. The
+// copy is held to the texture.
+const copyToTexture = RenderTargetSystem.prototype.copyToTexture;
+RenderTargetSystem.prototype.copyToTexture = function (source, destination, from, size, to) {
+  size.width = Math.min(size.width, destination.source.pixelWidth - to.x);
+  size.height = Math.min(size.height, destination.source.pixelHeight - to.y);
+  return copyToTexture.call(this, source, destination, from, size, to);
+};
 
 /** Each separable mode's B(back, front) of straight colours, GLSL and WGSL. */
 const SEPARABLE: Record<string, [string, string]> = {
