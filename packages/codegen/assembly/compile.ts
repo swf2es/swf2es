@@ -23,12 +23,40 @@ export function domainReset(apiVersion: i32): void {
   verified = null;
 }
 
-/** Add an ABC to the domain; 0, or the VerifyError it was rejected with. */
-export function domainAdd(bytes: Uint8Array, builtin: bool): i32 {
+/**
+ * Add an ABC to the domain, loaded into application domain `appDomain`
+ * (0, the root, or one domainChild made); 0, or the VerifyError it was
+ * rejected with.
+ */
+export function domainAdd(bytes: Uint8Array, builtin: bool, appDomain: i32 = 0): i32 {
   const buffer = new StaticArray<u8>(bytes.length + PADDING);
   memory.copy(changetype<usize>(buffer), bytes.dataStart, bytes.length);
   verified = null;
-  return domain.add(buffer, bytes.length, builtin).error;
+  return domain.add(buffer, bytes.length, builtin, <u32>appDomain).error;
+}
+
+/** A new application domain, a child of `parent`'s: its number. */
+export function domainChild(parent: i32): i32 {
+  return <i32>domain.childDomain(<u32>parent);
+}
+
+/**
+ * Record what application domain `appDomain` has found by a name, in the
+ * namespace of kind `nsKind` and URI `uri`, as the runtime reports it where
+ * it is not the first definition from the root down: the definition ABC
+ * `abc` gives the name, its script's binding by name, or its class as a
+ * type (`asType`). What the domain's later ABCs compile against.
+ */
+export function domainFound(
+  appDomain: i32,
+  nsKind: i32,
+  uri: string,
+  name: string,
+  abc: i32,
+  asType: bool,
+): void {
+  verified = null;
+  domain.addFound(<u32>appDomain, <u8>nsKind, uri, name, <u32>abc, asType);
 }
 
 /** Each body of ABC `index`'s VerifyError, 0 if it verified, -1 if nothing runs it; verified once per ABC asked for. */

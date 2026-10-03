@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { testing } from "../unit/codegen/testing-module.ts";
+import type { CompileUnit } from "./abc-compiler.ts";
 import { abcCompiler } from "./abc-compiler.ts";
 
 // SWF2ES_RUNTIME=<dir> loads another build of the runtime's dist, to compare two (tests/programs/ab.ts).
@@ -59,7 +60,7 @@ export async function runSwf2es(builtins: Uint8Array[], abc: Uint8Array): Promis
   const rt = runtime.createRuntime({
     print: (line: string) => lines.push(line),
     // Domain.loadBytes runs the ABC at once, so its module is evaluated, not imported.
-    compileAbc: (bytes: Uint8Array, linked: string[]) => compiler.compileAbc(bytes, linked),
+    compileAbc: (bytes: Uint8Array, unit: CompileUnit) => compiler.compileAbc(bytes, unit),
   });
 
   compiler.reset();

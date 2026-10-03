@@ -54,7 +54,8 @@ export class ModuleEmitter {
   /**
    * Write the whole module; the result is in `out`. `hashes` are the
    * hashes of the domain's ABCs, in load order, up to and including this
-   * one, as the host computes them for the cache key.
+   * one, as the host computes them for the cache key; it is compiled after
+   * those its application domain sees.
    */
   module(hashes: string[]): void {
     const out = this.out;
@@ -66,11 +67,19 @@ export class ModuleEmitter {
     out.text("  const A = rt.abc({\n    hash: ");
     this.text(this.index < <u32>hashes.length ? hashes[this.index] : "");
     out.text(",\n    linked: [");
+    const domain = this.domain;
+    const own = domain.abcDomain[this.index];
+    let first = true;
     for (let i: u32 = 0; i < this.index; i++) {
-      if (i) {
+      if (!domain.sees(own, domain.abcDomain[i])) {
+        continue;
+      }
+
+      if (!first) {
         out.text(", ");
       }
 
+      first = false;
       this.text(i < <u32>hashes.length ? hashes[i] : "");
     }
 

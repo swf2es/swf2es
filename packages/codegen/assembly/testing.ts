@@ -317,9 +317,16 @@ export function benchDecode(bytes: Uint8Array, rounds: i32): i32 {
 
 /**
  * The domain's binding of `name` in the namespace of type `type` (NS_*) and
- * URI `uri`, visible at `version`: "abc A script S trait T", or "none".
+ * URI `uri`, visible at `version` from application domain `appDomain`:
+ * "abc A script S trait T", or "none".
  */
-export function domainFind(type: u8, uri: string, name: string, version: i32): string {
+export function domainFind(
+  type: u8,
+  uri: string,
+  name: string,
+  version: i32,
+  appDomain: i32 = 0,
+): string {
   const uriBytes = String.UTF8.encode(uri);
   const nameBytes = String.UTF8.encode(name);
   const uriId = domain.findString(changetype<usize>(uriBytes), uriBytes.byteLength);
@@ -329,7 +336,7 @@ export function domainFind(type: u8, uri: string, name: string, version: i32): s
   }
 
   const ns = domain.findNamespace(type, uriId);
-  const b = ns < 0 ? -1 : domain.find(ns, nameId, <u8>version);
+  const b = ns < 0 ? -1 : domain.find(ns, nameId, <u8>version, <u32>appDomain);
   if (b < 0) {
     return "none";
   }
@@ -337,7 +344,7 @@ export function domainFind(type: u8, uri: string, name: string, version: i32): s
   return `abc ${domain.bindingAbc[b]} script ${domain.bindingScript[b]} trait ${domain.bindingTrait[b]}`;
 }
 
-/** Counts of the domain's tables, then the URIs builtin ABCs version, sorted. */
+/** Counts of the domain's tables and recorded findings, then the URIs builtin ABCs version, sorted. */
 export function domainSummary(): string {
   const uris: string[] = [];
   for (let i = 0; i < domain.versioned.length; i++) {
@@ -347,7 +354,7 @@ export function domainSummary(): string {
   }
 
   uris.sort();
-  return `strings ${domain.stringPtr.length} namespaces ${domain.nsType.length} bindings ${domain.bindingNs.length} versioned ${uris.join(",")}`;
+  return `strings ${domain.stringPtr.length} namespaces ${domain.nsType.length} bindings ${domain.bindingNs.length} found ${domain.cachedDomain.length} versioned ${uris.join(",")}`;
 }
 
 /** The domain's bindings in load order: "uri::name version V abc A trait T". */
@@ -817,7 +824,9 @@ function hex(kind: u8): string {
 
 export {
   domainAdd,
+  domainChild,
   domainEmitEach,
+  domainFound,
   domainModule,
   domainModuleEntries,
   domainReset,

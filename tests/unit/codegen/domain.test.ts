@@ -54,6 +54,50 @@ test("names are interned across ABCs, and the first definition wins", () => {
   assert.match(testing.domainSummary() as string, /^strings 4 namespaces 2 bindings 3 /);
 });
 
+test("application domains see their chain's names, from the root down, and what they found", () => {
+  testing.domainReset(SWF_31);
+  const at = (d: number, uri: string, name: string) =>
+    testing.domainFind(NS_PUBLIC, uri, name, SWF_31, d) as string;
+  assert.equal(testing.domainAdd(definitions([["p", "a"]]), false), 0);
+  const child = testing.domainChild(0) as number;
+  const sibling = testing.domainChild(0) as number;
+  assert.equal(
+    testing.domainAdd(
+      definitions([
+        ["p", "b"],
+        ["p", "c"],
+      ]),
+      false,
+      child,
+    ),
+    0,
+  );
+  assert.equal(testing.domainAdd(definitions([["p", "b"]]), false, sibling), 0);
+  assert.equal(at(child, "p", "a"), "abc 0 script 0 trait 0");
+  assert.equal(at(child, "p", "b"), "abc 1 script 0 trait 0");
+  assert.equal(at(sibling, "p", "b"), "abc 2 script 0 trait 0");
+  assert.equal(at(0, "p", "b"), "none");
+
+  // The root defines b too: each child finds the root's, first from the
+  // root down, until the runtime reports that one has found its own.
+  assert.equal(testing.domainAdd(definitions([["p", "b"]]), false), 0);
+  assert.equal(at(child, "p", "b"), "abc 3 script 0 trait 0");
+  testing.domainFound(child, NS_PUBLIC, "p", "b", 1, false);
+  assert.equal(at(child, "p", "b"), "abc 1 script 0 trait 0");
+  // Reported again, as the runtime does for each ABC the domain loads, it is kept once.
+  testing.domainFound(child, NS_PUBLIC, "p", "b", 1, false);
+  assert.match(testing.domainSummary() as string, / found 1 /);
+  assert.equal(at(sibling, "p", "b"), "abc 3 script 0 trait 0");
+  assert.equal(at(child, "p", "c"), "abc 1 script 0 trait 1");
+
+  // A module is compiled after the ABCs its domain sees, in load order.
+  assert.equal(testing.domainAdd(definitions([["p", "d"]]), false, child), 0);
+  assert.match(
+    testing.domainModule("h0\nh1\nh2\nh3\nh4") as string,
+    /linked: \["h0", "h1", "h3"\]/,
+  );
+});
+
 test("an ABC that does not parse is not added", () => {
   testing.domainReset(SWF_31);
   assert.equal(testing.domainAdd(abc({}, tables({ methods: [{ flags: 0x20 }] })), false), 1079);

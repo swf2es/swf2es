@@ -19,6 +19,8 @@ export { errorMessages } from "./player-messages.js";
 export {
   type AsObject,
   type ClassHook,
+  type CompileUnit,
+  type FoundDefinition,
   type Method,
   type NativesProvider,
   Runtime,
