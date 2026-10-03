@@ -1664,8 +1664,9 @@ function textDraw(abc: Uint8Array): Uint8Array {
 // Three morph shapes: one whose straight edges pair with curves as its
 // fill, line width and colour change; one of two paths with a turning
 // gradient, in a DefineMorphShape2; and two regions of two colours whose
-// shared edge, fill0 on one side and fill1 on the other, moves. The timeline sets ratios, swaps a shape for a
-// morph and back with the move flag, and loops onto a shape a rewind keeps.
+// shared edge, fill0 on one side and fill1 on the other, moves. The
+// timeline sets ratios, swaps a shape for a morph and back with the move
+// flag, and loops onto a shape a rewind keeps.
 function morphs(): Uint8Array {
   const bend = w.morphShape({
     id: 1,

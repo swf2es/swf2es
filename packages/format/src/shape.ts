@@ -458,7 +458,10 @@ function readMorphFills(r: SwfReader): { start: Fill; end: Fill }[] {
   return fills;
 }
 
-/** MORPHLINESTYLE (version 1) or MORPHLINESTYLE2 (2): both widths, then colours or LINESTYLE2's flags and a fill. */
+/**
+ * MORPHLINESTYLE (version 1) or MORPHLINESTYLE2 (2): both widths, then colours, or flags and a
+ * fill.
+ */
 function readMorphLines(r: SwfReader, version: number): { start: Line; end: Line }[] {
   let count = r.u8();
   if (count === 0xff) {
@@ -531,8 +534,8 @@ export function readMorphShape(
   const fills = readMorphFills(r);
   const lines = readMorphLines(r, version);
 
-  // The start's records stop at the end's, where the offset is in the tag:
-  // one missing its end record reads no further. A style change in either
+  // The start's records stop at the end's, where the offset lies past the
+  // styles and in the tag: one missing its end record reads no further. A style change in either
   // end's records brings no new styles: version 1 reads none.
   const offsetValid = endOffset !== 0 && endAt >= r.pos && endAt <= r.end;
   const start = readRecords(offsetValid ? new SwfReader(r.bytes, r.pos, endAt) : r, 1);

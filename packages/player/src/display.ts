@@ -356,6 +356,8 @@ export class ShapeObject extends DisplayObject {
    * blend's, as Flash's are (the corpus's hittest_morph).
    */
   ratio = 0;
+  /** The morph and ratio `shape` is the blend of. */
+  private blended: { morph: MorphCharacter; ratio: number } | null = null;
 
   constructor(shape: ShapeCharacter | null) {
     super();
@@ -367,6 +369,7 @@ export class ShapeObject extends DisplayObject {
   static ofMorph(morph: MorphCharacter): ShapeObject {
     const object = new ShapeObject(morphAt(morph, 0));
     object.morph = morph;
+    object.blended = { morph, ratio: 0 };
     object.character = morph;
     return object;
   }
@@ -385,8 +388,11 @@ export class ShapeObject extends DisplayObject {
 
   /** The shape to draw now: a MorphShape's blend at its ratio, which it keeps from here. */
   drawn(): ShapeCharacter | null {
-    if (this.morph) {
+    // The blend it has is kept while its morph and ratio are: asking the
+    // morph again would turn over its few latest blends for nothing.
+    if (this.morph && (this.blended?.morph !== this.morph || this.blended.ratio !== this.ratio)) {
       this.shape = morphAt(this.morph, this.ratio);
+      this.blended = { morph: this.morph, ratio: this.ratio };
     }
 
     return this.shape;

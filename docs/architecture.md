@@ -555,8 +555,10 @@ not their deltas, a straight edge paired with a curve as a curve, and
 keeps them to whole twips, so a closed path stays closed for `shapes.ts`
 to join. A morph keeps only its 16 latest blends, which instances in step
 share, and a MorphShape's node builds its own fills, freed as it draws
-the next: a tween asks for a new ratio on each frame, which the shapes'
-shared fills, kept for as long as the view, would hoard. Flash takes a
+the next or, once it is gone, by Pixi's collector, as a drawing's are:
+a tween asks for a new ratio on each frame, which the shapes' shared
+fills, kept for as long as the view, would hoard. Its lines are shared
+as a shape's, a blend's layers never changing. Flash takes a
 new ratio on only as it draws: a script that moves the timeline and
 asks for bounds before the next render gets the last drawn blend's
 (`morph-shapes`, the corpus's `hittest_morph`). Only a timeline makes a

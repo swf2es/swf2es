@@ -544,11 +544,14 @@ interface Node {
   layers: ShapeLayer[];
   /** Their fills, one context a layer. */
   fills: GraphicsContext[];
-  /** Whether the fills are this node's own, a drawing's, rather than its character's, which instances share. */
+  /**
+   * Whether the fills are this node's own, a drawing's or a blend's, not its character's, which
+   * instances share.
+   */
   ownFills: boolean;
   /** The lines, a Graphics for each layer that has any; null where one has none. */
   strokes: (LinesGraphics | null)[];
-  /** Whether the layers are a character's, whose lines' contexts instances share. */
+  /** Whether the layers are a character's or a blend's, whose lines' contexts instances share. */
   sharedLines: boolean;
   /** The children as of the last arrangement, to know those that left. */
   kids: readonly DisplayObject[];
@@ -776,7 +779,8 @@ export class PixiView {
   private redraw(o: DisplayObject, node: Node): void {
     // A Bitmap's texture is its store's: only the sprite goes.
     node.bitmap?.destroy();
-    // A drawing's fills and every node's lines; a Graphics frees only a context it made.
+    // A drawing's or blend's fills, and every node's lines; a Graphics frees only a context it
+    // made.
     const old = node.ownFills && !this.fresh ? node.fills : [];
     const oldLines = this.fresh ? [] : node.strokes.map((g) => g?.context);
     // A text's characters are in a container of their own; their shared glyph fills stay, not being theirs.
@@ -832,7 +836,7 @@ export class PixiView {
     node.ownFills = false;
     if (current && current.layers === node.layers && current.fills.length === node.layers.length) {
       fills = current.fills;
-    } else if (shape && !o.drawing && !(o as ShapeObject).morph) {
+    } else if (shape && !o.drawing && !(o instanceof ShapeObject && o.morph)) {
       fills = this.fills.get(shape) ?? node.layers.map(build);
       this.fills.set(shape, fills);
     } else {
@@ -843,7 +847,9 @@ export class PixiView {
     }
 
     node.fills = fills;
-    node.sharedLines = !this.fresh && !node.ownFills && shape !== null;
+    // A blend's layers never change, so its lines are shared as a shape's: instances in step stroke
+    // once.
+    node.sharedLines = !this.fresh && !o.drawing && shape !== null;
     const lines =
       current &&
       sameLinear(current.world, node.world) &&

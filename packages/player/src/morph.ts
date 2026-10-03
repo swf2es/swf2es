@@ -14,7 +14,7 @@ import type {
 import { shapeLayers } from "./shapes.js";
 import type { MorphCharacter, ShapeCharacter } from "./timeline.js";
 
-/** How many blends a morph keeps: the last ratios asked for, enough for instances in step to share them. */
+/** How many blends a morph keeps: its latest ratios, enough for instances in step to share them. */
 const KEPT_BLENDS = 16;
 
 /**
@@ -127,7 +127,10 @@ type Point = { x: number; y: number };
 
 const NO_EDGE: Edge = { type: "line", dx: 0, dy: 0 };
 
-/** An edge from `pen` in absolute twips: its control point, halfway along a straight one, and its anchor. */
+/**
+ * An edge from `pen` in absolute twips: its control point, halfway along a straight one, and
+ * anchor.
+ */
 function absolute(e: Edge, pen: Point): { control: Point; anchor: Point; straight: boolean } {
   if (e.type === "line") {
     const anchor = { x: pen.x + e.dx, y: pen.y + e.dy };
@@ -142,7 +145,9 @@ function absolute(e: Edge, pen: Point): { control: Point; anchor: Point; straigh
   return { control, anchor: { x: control.x + e.ax, y: control.y + e.ay }, straight: false };
 }
 
-/** Two points mixed, to the twip: whole twips keep the pen's sums exact, so a closed path stays closed. */
+/**
+ * Two points mixed, to the twip: whole twips keep the pen's sums exact, and closed paths closed.
+ */
 const mixPoint = (a: Point, b: Point, t: number): Point => ({
   x: Math.round(mix(a.x, b.x, t)),
   y: Math.round(mix(a.y, b.y, t)),
