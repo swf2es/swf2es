@@ -466,3 +466,34 @@ test("static text's records read as written, each setting only what its flags sa
     },
   ]);
 });
+
+test("a static text record the tag's end cuts off is left out", () => {
+  const text = w.staticText({
+    id: 7,
+    bounds: [0, 800, -400, 200],
+    records: [
+      { font: 3, height: 400, glyphs: [[2, 300]] },
+      {
+        glyphs: [
+          [5, 120],
+          [6, 120],
+          [7, 120],
+        ],
+      },
+    ],
+  });
+  // The tag cut short inside its second record's glyphs.
+  const whole = readSwf(
+    w.swf({ width: 100, height: 50, frameRate: 12, frameCount: 1, tags: [text] }),
+  );
+  const t = whole.tags[0];
+  const short = w.tag(11, whole.bytes.slice(t.offset, t.offset + t.length - 3), true);
+  const swf = readSwf(
+    w.swf({ width: 100, height: 50, frameRate: 12, frameCount: 1, tags: [short] }),
+  );
+  const s = readStaticText(swf.bytes, swf.tags[0]);
+  assert.deepEqual(
+    s.records.map((r) => r.glyphs.length),
+    [1],
+  );
+});

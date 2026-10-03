@@ -169,6 +169,11 @@ export function readStaticText(bytes: Uint8Array, tag: Tag): StaticText {
       glyphs.push({ index: r.ub(glyphBits), advance: r.sb(advanceBits) });
     }
 
+    // A record the tag's end cuts off is left out, not read as zeros.
+    if (r.overrun) {
+      break;
+    }
+
     r.align();
     records.push({ font, color, x, y, height, glyphs });
   }
