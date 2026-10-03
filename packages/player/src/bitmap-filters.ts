@@ -618,32 +618,49 @@ export function integerKernel(matrix: number[], divisor: number): number | null 
 }
 
 /**
- * A plane (w × h) read between its pixels, linearly, with weights in
- * 256ths, truncated, as adl's fixed point has them; `outside` past it.
+ * The plane (w × h) read at every pixel moved by (ox, oy), between pixels
+ * linearly, with weights in 256ths, truncated, as adl's fixed point has
+ * them; `outside` past it. Each column's and row's whole part and weight
+ * are computed once.
  */
-function sampler(
+function shifted(
   plane: Int32Array,
   w: number,
   h: number,
+  ox: number,
+  oy: number,
   outside: number,
-  whole = true,
-): (x: number, y: number) => number {
-  const at = (x: number, y: number) =>
-    x >= 0 && x < w && y >= 0 && y < h ? plane[y * w + x] : outside;
-  return (x, y) => {
-    const x0 = Math.floor(x);
-    const y0 = Math.floor(y);
-    const fx = Math.floor((x - x0) * 256) / 256;
-    const fy = Math.floor((y - y0) * 256) / 256;
-    if (fx === 0 && fy === 0) {
-      return at(x0, y0);
-    }
+): Int32Array {
+  const xs = new Int32Array(w);
+  const fxs = new Float64Array(w);
+  for (let x = 0; x < w; x++) {
+    const at = x + ox;
+    xs[x] = Math.floor(at);
+    fxs[x] = Math.floor((at - xs[x]) * 256) / 256;
+  }
 
-    const top = at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx;
-    const bottom = at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx;
-    const v = top * (1 - fy) + bottom * fy;
-    return whole ? Math.floor(v + 1e-7) : v;
-  };
+  const out = new Int32Array(w * h);
+  const value = (x: number, y: number) =>
+    x >= 0 && x < w && y >= 0 && y < h ? plane[y * w + x] : outside;
+  for (let y = 0; y < h; y++) {
+    const at = y + oy;
+    const y0 = Math.floor(at);
+    const fy = Math.floor((at - y0) * 256) / 256;
+    for (let x = 0; x < w; x++) {
+      const x0 = xs[x];
+      const fx = fxs[x];
+      if (fx === 0 && fy === 0) {
+        out[y * w + x] = value(x0, y0);
+        continue;
+      }
+
+      const top = value(x0, y0) * (1 - fx) + value(x0 + 1, y0) * fx;
+      const bottom = value(x0, y0 + 1) * (1 - fx) + value(x0 + 1, y0 + 1) * fx;
+      out[y * w + x] = Math.floor(top * (1 - fy) + bottom * fy + 1e-7);
+    }
+  }
+
+  return out;
 }
 
 /**
@@ -664,48 +681,65 @@ function bevel(
 ): void {
   const blurred = new Int32Array(a);
   blur([blurred], w, h, f);
-  const sample = sampler(blurred, w, h, 0);
   const radians = ((f.angle || 0) * Math.PI) / 180;
   // As a shadow's. Off the axes adl reads about a 256th further out, which
   // this does not: within 2 a channel there.
   const ox = (f.distance || 0) * Math.cos(radians);
   const oy = (f.distance || 0) * Math.sin(radians);
+  const on = shifted(blurred, w, h, ox, oy, 0);
+  const back = shifted(blurred, w, h, -ox, -oy, 0);
   const channels = (c: number) => [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
   const [hr, hg, hb] = channels(f.highlightColor);
   const [sr, sg, sb] = channels(f.shadowColor);
+  const highlightAlpha = f.highlightAlpha;
+  const shadowAlpha = f.shadowAlpha;
+  const strength = f.strength;
+  const inner = f.type === "inner";
+  const outer = f.type === "outer";
+  const knockout = f.knockout;
+  // One over another, as the store draws: top + bottom × (256 − top's alpha) / 256, truncated.
+  const over = (top: number, ta: number, bottom: number) =>
+    Math.min(255, top + ((bottom * (256 - ta)) >> 8));
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
-      const d = sample(x + ox, y + oy) - sample(x - ox, y - oy);
+      const d = on[i] - back[i];
       const lit = d > 0;
       // Its alpha rounds, where a glow's truncates.
       const la = Math.round(
-        Math.min(255, Math.floor(Math.abs(d) * f.strength)) *
-          (lit ? f.highlightAlpha : f.shadowAlpha),
+        Math.min(255, Math.floor(Math.abs(d) * strength)) * (lit ? highlightAlpha : shadowAlpha),
       );
       // The bevel's colour, premultiplied, masked to where the source is, or,
       // knocked out, is not; an outer one that is not lies behind it whole.
       const sa = a[i];
-      const m = f.type === "inner" ? sa : f.type === "outer" && f.knockout ? 255 - sa : 255;
-      const layer = (c: number) => Math.floor((Math.floor((c * la) / 255) * m) / 255);
+      const m = inner ? sa : outer && knockout ? 255 - sa : 255;
       const lA = Math.floor((la * m) / 255);
-      const lr = layer(lit ? hr : sr);
-      const lg = layer(lit ? hg : sg);
-      const lb = layer(lit ? hb : sb);
-      // One over another, as the store draws: top + bottom × (256 − top's alpha) / 256, truncated.
-      const over = (top: number, ta: number, bottom: number) => top + ((bottom * (256 - ta)) >> 8);
-      let out: number[];
-      if (f.knockout) {
-        out = [lA, lr, lg, lb];
-      } else if (f.type === "outer") {
-        out = [over(sa, sa, lA), over(r[i], sa, lr), over(g[i], sa, lg), over(b[i], sa, lb)];
+      const lr = Math.floor((Math.floor(((lit ? hr : sr) * la) / 255) * m) / 255);
+      const lg = Math.floor((Math.floor(((lit ? hg : sg) * la) / 255) * m) / 255);
+      const lb = Math.floor((Math.floor(((lit ? hb : sb) * la) / 255) * m) / 255);
+      let oa: number;
+      let or: number;
+      let og: number;
+      let ob: number;
+      if (knockout) {
+        oa = lA;
+        or = lr;
+        og = lg;
+        ob = lb;
+      } else if (outer) {
+        oa = over(sa, sa, lA);
+        or = over(r[i], sa, lr);
+        og = over(g[i], sa, lg);
+        ob = over(b[i], sa, lb);
       } else {
         // Inner lies atop the source, full over it: what is left shows through either way.
-        const ta = f.type === "inner" ? la : lA;
-        out = [over(lA, ta, sa), over(lr, ta, r[i]), over(lg, ta, g[i]), over(lb, ta, b[i])];
+        const ta = inner ? la : lA;
+        oa = over(lA, ta, sa);
+        or = over(lr, ta, r[i]);
+        og = over(lg, ta, g[i]);
+        ob = over(lb, ta, b[i]);
       }
 
-      const [oa, or, og, ob] = out.map((v) => Math.min(255, v));
       result[i] =
         ((oa << 24) | (Math.min(or, oa) << 16) | (Math.min(og, oa) << 8) | Math.min(ob, oa)) >>> 0;
     }
@@ -732,7 +766,7 @@ function glow(
   // A shadow's offset, which adl samples the blurred alpha at between pixels, linearly.
   const ox = shadow ? (f.distance || 0) * Math.cos(radians) : 0;
   const oy = shadow ? (f.distance || 0) * Math.sin(radians) : 0;
-  const sample = sampler(blurred, w, h, f.inner ? 255 : 0);
+  const moved = shifted(blurred, w, h, -ox, -oy, f.inner ? 255 : 0);
   const cr = (f.color >> 16) & 0xff;
   const cg = (f.color >> 8) & 0xff;
   const cb = f.color & 0xff;
@@ -741,7 +775,7 @@ function glow(
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
-      const blurA = sample(x - ox, y - oy);
+      const blurA = moved[i];
       const sa = a[i];
       let ga = Math.floor(Math.min(255, Math.floor(blurA * f.strength)) * f.alpha);
       if (f.inner) {
