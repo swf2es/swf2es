@@ -7,7 +7,7 @@ import { CONTENT, type DisplayObject, TextObject, TRANSFORM } from "../../../dis
 import { copyFilter } from "../../../filters.js";
 import { apply, invert, type Rect, transformRect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
-import { filterClassName, filterKindOf, recordOf } from "../filters/filters.js";
+import { copyMap, filterClassName, filterKindOf, recordOf } from "../filters/filters.js";
 import { colorOf, matrixOf } from "../geom/Transform.js";
 
 type AsObject = avm2.AsObject;
@@ -434,10 +434,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         // them: the object draws with those, whatever is drawn on the map
         // after, till its filters are set again; the map itself it keeps.
         if (f.kind === "displacementMap" && f.mapBitmap) {
-          f.mapSnapshot = s.rt.callProperty(
-            f.mapBitmap as AsObject,
-            s.rt.publicName("clone"),
-          ) as AsObject;
+          f.mapSnapshot = copyMap(s, f.mapBitmap);
         }
 
         return f;

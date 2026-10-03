@@ -260,4 +260,6 @@ map changed after
  ff280040 ff3c0040 ff500040 80640040 ff780040 ff8c0040 ffa00040 ffb40040 80c70040 ffdc0040 80000040 ff140040
  ff281e40 ff3c1e40 80501e40 ff641e40 ff781e40 ff8c1e40 ffa01e40 80b31e40 ffc81e40 ffdc1e40 ff001e40 ff141e40
 rect grows 0:0,0 3:0,0 4:1,0 7.9:1,0 8:2,1 16:4,2 100:25,12 255:63,31 -8:2,1
+clones after filters set 0
+clones after mapBitmap read 0 false false
 rect (x=3, y=3, w=14, h=14) (x=0, y=0, w=40, h=40) (x=28, y=28, w=12, h=12) (x=5, y=5, w=10, h=10) (x=26, y=26, w=18, h=18) (x=-4, y=-4, w=18, h=18)

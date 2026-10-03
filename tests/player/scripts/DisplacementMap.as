@@ -112,6 +112,14 @@ package {
         grows.push(sc + ":" + (500 - g.x) + "," + (500 - g.y));
       }
       trace("rect grows", grows.join(" "));
+      // A map whose clone a script overrides: Flash copies it without asking.
+      var counted:CountingMap = new CountingMap(4, 4, true, 0xffc0c080);
+      var cf:DisplacementMapFilter = new DisplacementMapFilter(counted, new Point(0, 0), R, G, 8, 8);
+      var holder:Shape = new Shape();
+      holder.filters = [cf];
+      trace("clones after filters set", CountingMap.clones);
+      var back:BitmapData = cf.mapBitmap;
+      trace("clones after mapBitmap read", CountingMap.clones, back is CountingMap, back == counted);
       trace("rect", b40.generateFilterRect(new Rectangle(5, 5, 10, 10), lf),
         b40.generateFilterRect(new Rectangle(5, 5, 10, 10), new DisplacementMapFilter(flat(0xffc0c080, 4, 3), new Point(30, 30), R, G, 100, 100)),
         b40.generateFilterRect(new Rectangle(30, 30, 20, 20), lf),
@@ -119,5 +127,21 @@ package {
         b40.generateFilterRect(new Rectangle(30, 30, 20, 20), new BlurFilter(8, 8)),
         b40.generateFilterRect(new Rectangle(-10, -10, 20, 20), new GlowFilter()));
     }
+  }
+}
+
+import flash.display.BitmapData;
+
+/** A map that counts the times its clone is called. */
+class CountingMap extends BitmapData {
+  public static var clones:int = 0;
+
+  public function CountingMap(w:int, h:int, transparent:Boolean, fill:uint) {
+    super(w, h, transparent, fill);
+  }
+
+  override public function clone():BitmapData {
+    clones++;
+    return super.clone();
   }
 }
