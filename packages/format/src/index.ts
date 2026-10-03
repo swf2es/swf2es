@@ -23,9 +23,11 @@ export {
   readFrameLabel,
   readPlace,
   readRemove,
+  readSceneData,
   readSprite,
   readString,
   readSymbolClass,
+  type SceneData,
 } from "./display.js";
 export { type FilterColor, readFilters, type SwfFilter } from "./filters.js";
 export { type Font, type Glyph, glyphOf, readFont } from "./font.js";

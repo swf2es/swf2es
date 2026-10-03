@@ -6,6 +6,7 @@ import {
   readFilters,
   readPlace,
   readRemove,
+  readSceneData,
   readShape,
   readSprite,
   readSwf,
@@ -235,4 +236,33 @@ test("a FILTERLIST reads its blur, glow and bevel, the bevel's highlight first a
     { rgb: 0xffffff, alpha: 0xff },
   ]);
   assert.deepEqual([bevel.onTop, bevel.passes], [true, 1]);
+});
+
+test("scene data reads its scenes and labels, and stops at the tag's end", () => {
+  const data = w.sceneData(
+    [
+      [0, "Intro"],
+      [200, "Main"],
+    ],
+    [[3, "go"]],
+  );
+  const swf = readSwf(
+    w.swf({ width: 1, height: 1, frameRate: 1, frameCount: 1, tags: [data, w.end()] }),
+  );
+  const tag = swf.tags.find((t) => t.code === tags.DefineSceneAndFrameLabelData);
+  assert.ok(tag);
+  assert.deepEqual(readSceneData(swf.bytes, tag), {
+    scenes: [
+      { frame: 0, name: "Intro" },
+      { frame: 200, name: "Main" },
+    ],
+    labels: [{ frame: 3, name: "go" }],
+  });
+
+  // Cut inside "Main": a count past the bytes there are reads what there is.
+  const cut = { ...tag, length: tag.length - 8 };
+  assert.deepEqual(readSceneData(swf.bytes, cut), {
+    scenes: [{ frame: 0, name: "Intro" }],
+    labels: [],
+  });
 });

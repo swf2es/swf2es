@@ -980,4 +980,10 @@ export function instantiate(character: DisplayCharacter, library: Library): Disp
 }
 
 /** A timeline of one empty frame: a clip a script makes. */
-export const EMPTY_TIMELINE: Timeline = { frames: [[]], labels: new Map() };
+export const EMPTY_TIMELINE: Timeline = {
+  frames: [[]],
+  labels: [],
+  gotoLabels: [],
+  frameLabels: new Map(),
+  scenes: [{ name: "", frame: 1 }],
+};

@@ -27,5 +27,6 @@ export const DefineFont3 = 75;
 export const SymbolClass = 76;
 export const DoABC2 = 82;
 export const DefineShape4 = 83;
+export const DefineSceneAndFrameLabelData = 86;
 export const DefineBinaryData = 87;
 export const DefineBitsJPEG4 = 90;
