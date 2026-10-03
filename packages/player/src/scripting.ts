@@ -143,6 +143,7 @@ export interface SocketHost {
 /** AS3 classes placed children are instances of when SymbolClass binds none. */
 const DEFAULT_CLASS = {
   shape: "flash.display::Shape",
+  morph: "flash.display::MorphShape",
   sprite: "flash.display::MovieClip",
   button: "flash.display::SimpleButton",
   bitmap: "flash.display::Bitmap",
@@ -962,6 +963,11 @@ export class Scripting {
 
       if (t.name === "flash.display::Shape") {
         return new ShapeObject(null);
+      }
+
+      // Only a timeline makes a MorphShape.
+      if (t.name === "flash.display::MorphShape") {
+        throw this.rt.error("ArgumentError", 2012, "MorphShape$");
       }
 
       if (t.name === "flash.display::Bitmap") {

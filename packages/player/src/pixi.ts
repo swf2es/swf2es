@@ -818,7 +818,7 @@ export class PixiView {
       return;
     }
 
-    const shape = o instanceof ShapeObject ? o.shape : null;
+    const shape = o instanceof ShapeObject ? o.drawn() : null;
     node.layers = o.drawing?.layers ?? shape?.layers ?? [];
     const build = (layer: ShapeLayer) => {
       const context = fillContext(layer, this.painter);

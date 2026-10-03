@@ -22,6 +22,7 @@ import type { Drawing } from "./drawing.js";
 import { type Filter, filterOfSwf } from "./filters.js";
 import type { FontSet } from "./fonts.js";
 import { type Rect, shifted } from "./geometry.js";
+import { morphAt } from "./morph.js";
 import { TextModel } from "./text.js";
 import { GUTTER, layoutText, type TextLayout } from "./text-layout.js";
 import {
@@ -31,6 +32,7 @@ import {
   type DisplayCharacter,
   INVALID_PIXELS,
   type Library,
+  type MorphCharacter,
   type ShapeCharacter,
   type TextCharacter,
   type Timeline,
@@ -344,13 +346,50 @@ export class DisplayObject {
 }
 
 export class ShapeObject extends DisplayObject {
-  /** The shape it draws; null for a Shape a script made, which draws nothing yet. */
+  /** The shape it draws, or last drew; null for a Shape a script made, which draws nothing yet. */
   shape: ShapeCharacter | null;
+  /** A MorphShape's morph, which `shape` is a blend of. */
+  morph: MorphCharacter | null = null;
+  /**
+   * The ratio its placements gave. A MorphShape takes it on when it is next
+   * drawn (drawn): until then its bounds and hit tests are the last drawn
+   * blend's, as Flash's are (the corpus's hittest_morph).
+   */
+  ratio = 0;
 
   constructor(shape: ShapeCharacter | null) {
     super();
     this.shape = shape;
     this.character = shape;
+  }
+
+  /** A MorphShape, its morph's start until it is drawn at another ratio. */
+  static ofMorph(morph: MorphCharacter): ShapeObject {
+    const object = new ShapeObject(morphAt(morph, 0));
+    object.morph = morph;
+    object.character = morph;
+    return object;
+  }
+
+  override applyPlace(place: Place): void {
+    super.applyPlace(place);
+    if (place.ratio === null || place.ratio === this.ratio) {
+      return;
+    }
+
+    this.ratio = place.ratio;
+    if (this.morph) {
+      this.invalidate(CONTENT);
+    }
+  }
+
+  /** The shape to draw now: a MorphShape's blend at its ratio, which it keeps from here. */
+  drawn(): ShapeCharacter | null {
+    if (this.morph) {
+      this.shape = morphAt(this.morph, this.ratio);
+    }
+
+    return this.shape;
   }
 }
 
@@ -512,22 +551,29 @@ export class TextObject extends DisplayObject {
 }
 
 /**
- * Another character placed in a child's stead, with the move flag: Flash
- * makes no new object, and only a Shape no script has touched takes the
- * new shape's graphic; a clip, a Shape a script set a property of, and a
- * Shape a sprite is placed over all stay as they are (`replaces`).
+ * Another character placed in a child's stead, with the move flag or where
+ * a rewind keeps the child: Flash makes no new object, and only a Shape or
+ * MorphShape no script has touched takes the new shape's or morph's
+ * graphic; a clip, a Shape a script set a property of, and a Shape a
+ * sprite is placed over all stay as they are (`replaces`).
  */
 function swap(existing: DisplayObject, character: Character): void {
-  if (
-    existing instanceof ShapeObject &&
-    character.type === "shape" &&
-    !existing.scripted &&
-    existing.shape !== character
-  ) {
-    existing.shape = character;
-    existing.character = character;
-    existing.invalidate(CONTENT);
+  if (!(existing instanceof ShapeObject) || existing.scripted || existing.character === character) {
+    return;
   }
+
+  if (character.type === "morph") {
+    existing.morph = character;
+    existing.shape = morphAt(character, existing.ratio);
+  } else if (character.type === "shape") {
+    existing.morph = null;
+    existing.shape = character;
+  } else {
+    return;
+  }
+
+  existing.character = character;
+  existing.invalidate(CONTENT);
 }
 
 /** A Bitmap: a display object that shows a BitmapData's pixels, its bounds the data's size. */
@@ -1032,9 +1078,10 @@ export class MovieClip extends Container {
 
     // On a rewind, what the timeline placed after the target goes, but where
     // the frames replayed end on a place without the move flag: that child
-    // stays, its character too, and takes the place, as Flash keeps it
-    // (`same-depth` at the loop, `rewind-first`). Replayed from the first
-    // frame, a depth the frames left empty is empty.
+    // stays and takes the place, as Flash keeps it (`same-depth` at the
+    // loop, `rewind-first`), a clip its character and a shape the place's
+    // (swap, `morph-shapes`). Replayed from the first frame, a depth the
+    // frames left empty is empty.
     const kept = new Set<number>();
     if (rewind) {
       for (const child of [...this.depths.values()]) {
@@ -1057,6 +1104,12 @@ export class MovieClip extends Container {
     for (const [depth, jump] of jumps) {
       const existing = this.depths.get(depth);
       if (existing && kept.has(depth) && jump.place) {
+        const id = jump.place.character;
+        const character = id === null ? undefined : this.library.characters.get(id);
+        if (character) {
+          swap(existing, character);
+        }
+
         existing.applyPlace(jump.place);
         continue;
       }
@@ -1205,6 +1258,10 @@ export function displayFor(
 ): DisplayObject {
   if (character.type === "shape") {
     return new ShapeObject(character);
+  }
+
+  if (character.type === "morph") {
+    return ShapeObject.ofMorph(character);
   }
 
   if (character.type === "bitmap") {

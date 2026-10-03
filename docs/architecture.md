@@ -547,6 +547,17 @@ members each load the same SWF draws with one set of fills and lines, not
 one per load, whose lines alone overran the idle limit and were
 tessellated again on every turn of their loop. A shape filled with a
 bitmap keeps to its own SWF, whose bitmap it is.
+A morph shape (DefineMorphShape, DefineMorphShape2) is two shapes whose
+edges pair in order; a `MorphShape` shows their blend at the ratio its
+placements give (`morph.ts`), a shape like any other made once per
+ratio, so it draws, bounds and hit-tests as one. The blend mixes where the
+ends' points lie, not their deltas, a straight edge paired with a curve
+as a curve, and keeps them to whole twips, so a closed path stays closed
+for `shapes.ts` to join. Flash fills a morph's paths with their fill0
+alone, and takes a new ratio on only as it draws: a script that moves
+the timeline and asks for bounds before the next render gets the last
+drawn blend's (`morph-shapes`, the corpus's `hittest_morph`). Only a
+timeline makes a `MorphShape`; a script's `new` is refused, #2012.
 Tessellating lines, round joins most of all, was the largest part of a
 frame of a dozen animated instances; `bench.ts --rig N` measures it.
 Fills and lines are drawn unbatched, each Graphics a draw of its own
@@ -714,8 +725,9 @@ Only a name from the SWF gives its parent a property of it.
 
 A `PlaceObject` with the move flag that names another character at an
 occupied depth makes no new object in Flash: the child stays, the same
-AS3 object with its matrix, sign and angle, and only a `Shape` no script
-has touched takes the new shape's graphic. A clip, a touched `Shape`,
+AS3 object with its matrix, sign and angle, and only a `Shape` or
+`MorphShape` no script has touched takes the new shape's or morph's
+graphic, either kind for either. A clip, a touched `Shape`,
 and a `Shape` a sprite is placed over all stay as they were. What
 touches, by the `replaces` case's 26 depths: the transform properties
 (`x = x` counts), `alpha`, `filters`, `blendMode`, `scrollRect`,
@@ -737,8 +749,11 @@ names, playing or in a goto's replay (`same-depth`, the corpus's
 character where nothing is places nothing (`rewind-first`). A rewind, the loop to the first frame
 among them, takes off what the timeline placed after the target, but for
 a child at a depth the frames replayed end on a place without the move
-flag at: that child stays, its character too, and takes the place, its
-transform given anew as for a first placing, and the moves after it
+flag at: that child stays, a clip its character too, and takes the
+place, its transform given anew as for a first placing, and the moves
+after it; an untouched `Shape` or `MorphShape` takes the place's shape or
+morph there, as a move's would (`morph-shapes`, where the loop puts a
+morph back over a shape placed later)
 (`same-depth`, `rewind-first`); what comes before that place at the
 depth, a removal among it, does not matter. Flash's matrix is
 exact at the quarter turns, 0 and not the doubles' cosine of 90°, so the
