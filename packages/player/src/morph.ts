@@ -11,8 +11,19 @@ import type {
   Shape,
   ShapeRecord,
 } from "@swf2es/format";
+import type { ShapeLayer } from "./shapes.js";
 import { shapeLayers } from "./shapes.js";
 import type { MorphCharacter, ShapeCharacter } from "./timeline.js";
+
+/**
+ * The layers of blends a morph no longer keeps. The renderer shares a
+ * blend's lines while it is kept; one made again for the same ratio has
+ * layers of its own, so lines kept for these would never be found again.
+ */
+export const droppedLayers = new WeakSet<ShapeLayer>();
+
+/** The layers of every blend made, whose lines the renderer watches for their dropping. */
+export const blendLayers = new WeakSet<ShapeLayer>();
 
 /** How many blends a morph keeps: its latest ratios, enough for instances in step to share them. */
 const KEPT_BLENDS = 16;
@@ -36,11 +47,19 @@ export function morphAt(character: MorphCharacter, ratio: number): ShapeCharacte
       shape: blended,
       layers: shapeLayers(blended, character.bitmap),
     };
+    for (const layer of shape.layers) {
+      blendLayers.add(layer);
+    }
   }
 
   blends.set(ratio, shape);
   if (blends.size > KEPT_BLENDS) {
-    blends.delete(blends.keys().next().value as number);
+    const oldest = blends.keys().next().value as number;
+    for (const layer of blends.get(oldest)?.layers ?? []) {
+      droppedLayers.add(layer);
+    }
+
+    blends.delete(oldest);
   }
 
   return shape;

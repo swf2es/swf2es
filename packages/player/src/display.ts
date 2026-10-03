@@ -356,8 +356,11 @@ export class ShapeObject extends DisplayObject {
    * blend's, as Flash's are (the corpus's hittest_morph).
    */
   ratio = 0;
-  /** The morph and ratio `shape` is the blend of. */
-  private blended: { morph: MorphCharacter; ratio: number } | null = null;
+  /**
+   * The blend drawn() last made, and its morph and ratio: it stands while
+   * `shape` is still it, which a swap to a shape is not.
+   */
+  private blended: { morph: MorphCharacter; ratio: number; shape: ShapeCharacter } | null = null;
 
   constructor(shape: ShapeCharacter | null) {
     super();
@@ -367,9 +370,10 @@ export class ShapeObject extends DisplayObject {
 
   /** A MorphShape, its morph's start until it is drawn at another ratio. */
   static ofMorph(morph: MorphCharacter): ShapeObject {
-    const object = new ShapeObject(morphAt(morph, 0));
+    const shape = morphAt(morph, 0);
+    const object = new ShapeObject(shape);
     object.morph = morph;
-    object.blended = { morph, ratio: 0 };
+    object.blended = { morph, ratio: 0, shape };
     object.character = morph;
     return object;
   }
@@ -390,9 +394,13 @@ export class ShapeObject extends DisplayObject {
   drawn(): ShapeCharacter | null {
     // The blend it has is kept while its morph and ratio are: asking the
     // morph again would turn over its few latest blends for nothing.
-    if (this.morph && (this.blended?.morph !== this.morph || this.blended.ratio !== this.ratio)) {
+    const b = this.blended;
+    if (
+      this.morph &&
+      (b?.morph !== this.morph || b.ratio !== this.ratio || b.shape !== this.shape)
+    ) {
       this.shape = morphAt(this.morph, this.ratio);
-      this.blended = { morph: this.morph, ratio: this.ratio };
+      this.blended = { morph: this.morph, ratio: this.ratio, shape: this.shape };
     }
 
     return this.shape;

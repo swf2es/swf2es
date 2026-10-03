@@ -137,3 +137,55 @@ test("a MorphShape keeps the blend it last drew until it is drawn at a new ratio
   assert.equal(shape.drawn(), morphAt(c, 65535));
   assert.equal(shape.shape, morphAt(c, 65535));
 });
+
+test("a MorphShape swapped to a shape and back to its morph at the same ratio draws the morph", async () => {
+  const { Player } = await import("../../../packages/player/dist/player.js");
+  const square = w.shape({
+    id: 2,
+    bounds: [0, 200, 0, 200],
+    fills: [0x00ff00],
+    paths: [
+      {
+        fill1: 1,
+        commands: [
+          { move: [0, 0] },
+          { line: [200, 0] },
+          { line: [200, 200] },
+          { line: [0, 200] },
+          { line: [0, 0] },
+        ],
+      },
+    ],
+  });
+  const player = new Player(
+    w.swf({
+      width: 100,
+      height: 100,
+      frameRate: 12,
+      frameCount: 3,
+      tags: [
+        tag,
+        square,
+        w.place({ depth: 1, character: 1, ratio: 30000 }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, character: 2 }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, character: 1 }),
+        w.showFrame(),
+        w.end(),
+      ],
+    }),
+  );
+  const drawn = () => (player.root.depths.get(1) as InstanceType<typeof ShapeObject>).drawn();
+  assert.equal(drawn()?.id, 1);
+
+  player.tick();
+  assert.equal(drawn()?.id, 2);
+
+  player.tick();
+  const shape = drawn();
+  assert.equal(shape?.id, 1);
+  const morph = (player.root.depths.get(1) as InstanceType<typeof ShapeObject>).morph;
+  assert.ok(morph);
+  assert.equal(shape, morphAt(morph, 30000));
+});
