@@ -1,5 +1,6 @@
-// avmshell's Domain: an ABC loaded and run at once, a class found by its
-// name, and what loadBytes and getClass refuse.
+// avmshell's Domain: an ABC loaded and run at once into a domain of its
+// own, a class found by its name there, and what loadBytes and getClass
+// refuse.
 import avmplus.Domain;
 import flash.utils.ByteArray;
 // A small ABC: package loaded's class Loaded, and a script that traces.
@@ -23,11 +24,23 @@ var d:Domain = new Domain(Domain.currentDomain);
 probe("load", function():* { return d.loadBytes(bytes(LOADED), 10); });
 probe("child", function():* { return d.getClass("loaded.Loaded"); });
 probe("child Object", function():* { return d.getClass("Object") === Object; });
+// A child's definitions are its own: not its parent's, nor a sibling's,
+// which defines them again; a grandchild sees its parent's.
+var childClass:Class = d.getClass("loaded.Loaded");
+probe("parent", function():* { return Domain.currentDomain.getClass("loaded.Loaded"); });
+var sibling:Domain = new Domain(Domain.currentDomain);
+probe("load sibling", function():* { return sibling.loadBytes(bytes(LOADED)); });
+probe("sibling's own", function():* { return sibling.getClass("loaded.Loaded") !== childClass; });
+var grandchild:Domain = new Domain(d);
+probe("grandchild", function():* { return grandchild.getClass("loaded.Loaded") === childClass; });
 var e:Domain = Domain.currentDomain;
 probe("load current", function():* { return e.loadBytes(bytes(LOADED)); });
 probe("current", function():* { return new (e.getClass("loaded.Loaded"))(); });
 probe("current again", function():* { return new (Domain.currentDomain.getClass("loaded.Loaded"))(); });
 probe("child after", function():* { return d.getClass("loaded.Loaded"); });
+// Then the parent defines the name too: whose class the child finds now.
+probe("child after is the parent's", function():* { return d.getClass("loaded.Loaded") === e.getClass("loaded.Loaded"); });
+probe("child after is its own", function():* { return d.getClass("loaded.Loaded") === childClass; });
 probe("missing class", function():* { return d.getClass("loaded.Missing"); });
 probe("not a class", function():* { return d.getClass("trace"); });
 probe("null name", function():* { return d.getClass(null); });

@@ -381,11 +381,18 @@ number formatting (`numbers.ts`), Array's sort (`sort.ts`), ByteArray with
 its capacity and UTF-8 (`bytearray.ts`), AMF3 (`amf.ts`) and JSON
 (`json.ts`) and describeType (`describe.ts`). These are MPL-2.0 as their sources are. Domain memory is
 avmshell's `avmplus.Domain`'s: 1024 bytes of scratch memory until a
-ByteArray is set as it. The Domain's `loadBytes` compiles its ABC through
-`RuntimeOptions.compileAbc`, which the host gives, as the runtime does not
-include the compiler, and runs it at once; it loads into the one domain
-there is, as the player's Loader does (see Loading SWFs), so a child
-Domain's classes are its parent's too. avmshell's `File` reads and writes
+ByteArray is set as it. Each Domain is one of the runtime's application
+domains (`Domain` in `runtime.ts`), as avmplus' DomainMgr keeps them: a
+name a domain's chain defines already is not added again, and a lookup
+takes what a domain of the chain has found before, from the name's own
+domain up, else the first loaded, from the root down, and keeps it, so a
+child that found its own class keeps it when its parent defines the name
+later. Every name a module makes is looked up in the domain the module was
+loaded into (`Runtime.loadInto`); everything else loads into the root. The
+Domain's `loadBytes` compiles its ABC through `RuntimeOptions.compileAbc`,
+which the host gives, as the runtime does not include the compiler, after
+the ABCs its domain's modules were compiled after, and runs it at once.
+avmshell's `File` reads and writes
 `RuntimeOptions.files`, in memory by default. Date is JavaScript's Date, with avmplus' string
 formats. flash.concurrent's Mutex and Condition and ByteArray's atomic
 operations are avmplus' on its one thread: locks are counted, a wait ends
@@ -785,8 +792,9 @@ defines again shadows the parent's for its own code, and
 `LoaderInfo.applicationDomain.getDefinition` finds it
 (`loader_duplicate_class`). That needs two things: the compiler's domain
 forked, a new domain sharing the ABCs loaded so far, and the runtime
-resolving names by the domain of the module asking. The first slice has
-neither: it loads into the current domain, as a `LoaderContext` with
+resolving names by the domain of the module asking, which it does for
+avmshell's Domain (see the runtime's builtins). The player does neither
+yet: it loads into the current domain, as a `LoaderContext` with
 `ApplicationDomain.currentDomain` asks. There, as in Flash, a class the
 loaded SWF defines again is ignored for the one the domain has, so a SWF
 loaded twice makes instances of its first load's classes (the node

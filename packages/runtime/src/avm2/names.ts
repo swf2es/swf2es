@@ -5,6 +5,7 @@
 // identity. A private namespace is only ever equal to itself.
 
 /** Namespace kinds, numbered as the compiler's NS_* constants. */
+import type { Domain } from "./runtime.js";
 export const NS_Public = 0;
 export const NS_PackageInternal = 1;
 export const NS_Protected = 2;
@@ -98,6 +99,11 @@ export class Multiname {
   private local: string | null | undefined;
   /** How a key's name is made, as the object's string, when a lookup first needs it. */
   private nameOf: ((key: unknown) => string) | null = null;
+  /**
+   * The application domain whose definitions the name is looked up in: its
+   * module's, or the one of the name it was made from; null for the root.
+   */
+  domain: Domain | null = null;
 
   constructor(
     readonly kind: number,
