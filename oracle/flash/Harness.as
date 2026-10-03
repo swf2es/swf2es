@@ -146,8 +146,9 @@ package {
       loader.contentLoaderInfo.addEventListener(Event.INIT, function(_:Event):void {
         frame = 1;
         lag = loader.contentLoaderInfo.actionScriptVersion == 2 ? 1 : 0;
-        captureIf();
+        // Listening first: a job of no frames ends here, and done stops it.
         addEventListener(Event.EXIT_FRAME, exitFrame);
+        captureIf();
       });
       addChild(loader);
       var context:LoaderContext = new LoaderContext();
@@ -198,6 +199,10 @@ package {
     }
 
     private function done():void {
+      if (!loader) {
+        return;
+      }
+
       removeEventListener(Event.EXIT_FRAME, exitFrame);
       // The run ends before the content goes: what its listeners trace as
       // it is unloaded is the harness's doing, not the SWF's.
