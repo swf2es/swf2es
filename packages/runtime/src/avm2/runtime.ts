@@ -114,6 +114,8 @@ export interface AbcDesc {
 /** A loaded module: what `rt.abc` returns, and methods reach as A. */
 export interface Abc extends AbcDesc {
   scriptStates: Script[];
+  /** The domain it was loaded into. */
+  domain: Domain;
 }
 
 export interface RuntimeOptions {
@@ -683,7 +685,7 @@ export class Runtime {
   /** The root application domain, the builtins' and the main SWF's; and the one modules load into now. */
   readonly root = new Domain(null);
   private loading: Domain = this.root;
-  /** Class references by namespace, which is interned or private, then name. */
+  /** Vector.<T>'s references, by T's. */
   private readonly vectorRefs = new Map<TypeRef, VectorRef>();
   /**
    * The domain memory the domain memory instructions use: the ByteArray set
@@ -914,6 +916,7 @@ export class Runtime {
 
     loaded.push(desc.hash);
     const abc = desc as Abc;
+    abc.domain = domain;
     for (const name of abc.names) {
       if (name instanceof TypeName) {
         name.names = abc.names;
@@ -2380,11 +2383,17 @@ export class Runtime {
       return name;
     }
 
-    const i = name.lastIndexOf("::");
-    const ns = i < 0 ? publicNs : namespace(NS_Public, name.slice(0, i));
-    const ref = this.cls(ns, i < 0 ? name : name.slice(i + 2));
-    ref.cls = cls;
-    return ref;
+    // The class's own reference: one by its name could find another class,
+    // as in a domain that defines the name again.
+    if (cls.$ref?.cls !== cls) {
+      const i = name.lastIndexOf("::");
+      const ns = i < 0 ? publicNs : namespace(NS_Public, name.slice(0, i));
+      const abc = cls.$it.abc as Abc | null;
+      cls.$ref = new ClassRef(ns, i < 0 ? name : name.slice(i + 2), abc?.domain ?? this.root);
+      cls.$ref.cls = cls;
+    }
+
+    return cls.$ref;
   }
 
   /**
