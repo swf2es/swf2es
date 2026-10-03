@@ -387,7 +387,10 @@ name a domain's chain defines already is not added again, and a lookup
 takes what a domain of the chain has found before, from the name's own
 domain up, else the first loaded, from the root down, and keeps it, so a
 child that found its own class keeps it when its parent defines the name
-later. Every name a module makes is looked up in the domain the module was
+later. A type, a coercion's or a base class's, is found the same way
+through caches of its own, as avmplus finds traits, so a class a child
+found by name is not the type it finds once its parent defines the name,
+and a class extending it is rejected, as avmplus rejects it. Every name a module makes is looked up in the domain the module was
 loaded into (`Runtime.loadInto`); everything else loads into the root. The
 Domain's `loadBytes` compiles its ABC through `RuntimeOptions.compileAbc`,
 which the host gives, as the runtime does not include the compiler, after

@@ -624,11 +624,14 @@ interface GlobalName {
  * An application domain, as avmplus' Domain: the scripts its modules
  * define, by name, a name its chain defines already not again (see
  * Runtime.abc); the definitions it has found, by name, which it keeps
- * (see Runtime.findScript); and the ABCs loaded into it, by hash.
+ * (see Runtime.findScript), as names and, apart, as types; and the ABCs
+ * loaded into it, by hash.
  */
 export class Domain {
   readonly globals = new Map<string, GlobalName[]>();
   readonly cached = new Map<string, GlobalName[]>();
+  /** As avmplus' m_cachedTraits, which a name's lookup never fills, nor a type's m_cachedScripts. */
+  readonly types = new Map<string, GlobalName[]>();
   readonly classRefs = new Map<Namespace, Map<string, ClassRef>>();
   readonly own: string[] = [];
 
@@ -1084,20 +1087,23 @@ export class Runtime {
    * domain of the chain has found before, from the name's own up; else the
    * first loaded, from the root down. Either is kept by the name's domain,
    * and one loaded by the domain that loaded it, so a child that found its
-   * own keeps it when its parent defines the name later.
+   * own keeps it when its parent defines the name later. A type is found
+   * the same way through caches of its own (`asType`), as avmplus finds
+   * traits, so a class a child found by name is not the type it finds.
    */
-  findScript(mn: Multiname): Script | null {
+  findScript(mn: Multiname, asType = false): Script | null {
     const name = mn.name;
     if (name === null) {
       return null;
     }
 
     const domain = mn.domain ?? this.root;
+    const cache = (d: Domain) => (asType ? d.types : d.cached);
     for (let d: Domain | null = domain; d; d = d.parent) {
-      const found = match(d.cached, mn, name);
+      const found = match(cache(d), mn, name);
       if (found) {
         if (d !== domain) {
-          add(domain.cached, found, name);
+          add(cache(domain), found, name);
         }
 
         return found.script;
@@ -1112,8 +1118,8 @@ export class Runtime {
     for (let k = chain.length - 1; k >= 0; k--) {
       const found = match(chain[k].globals, mn, name);
       if (found) {
-        add(chain[k].cached, found, name);
-        add(domain.cached, found, name);
+        add(cache(chain[k]), found, name);
+        add(cache(domain), found, name);
         return found.script;
       }
     }
@@ -2233,6 +2239,13 @@ export class Runtime {
     const abc = desc.abc as Abc;
     const name = abc.names[desc.name] as Multiname;
     const qualified = qualifiedName(name);
+    // avmplus links a class to the base its name finds as a type, and
+    // rejects one made from another, as a child's class it found by name
+    // after its parent defined the name too.
+    if (this.children && base && this.typeNamed(abc.names[desc.base] as Multiname) !== base) {
+      throw this.error("VerifyError", 1107);
+    }
+
     const baseTraits: Traits | null = base ? base.$it : null;
     let itraits: Traits;
     if (qualified === "Object") {
@@ -2395,7 +2408,7 @@ export class Runtime {
 
     const mn = qname(ref.ns, ref.name);
     mn.domain = ref.domain === this.root ? null : ref.domain;
-    let cls = this.getProperty(this.findDef(mn), mn);
+    let cls = this.typeNamed(mn);
     if (cls === null || cls === undefined || !cls.$it) {
       cls = this.defining.get(ref.ns.uri ? `${ref.ns.uri}::${ref.name}` : ref.name);
       if (!cls) {
@@ -2439,6 +2452,16 @@ export class Runtime {
     const cls = this.getProperty(this.findDef(mn), mn);
     (mn as Multiname & { $cls?: AsObject }).$cls = cls;
     return cls;
+  }
+
+  /** The class `mn` names as a type, as avmplus finds traits (see findScript). */
+  private typeNamed(mn: Multiname): Value {
+    const script = this.findScript(mn, true);
+    if (!script) {
+      throw this.error("ReferenceError", 1065, mn.toString());
+    }
+
+    return this.getProperty(this.initScript(script), mn);
   }
 
   refOf(cls: AsObject): TypeRef {
