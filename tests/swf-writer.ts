@@ -411,9 +411,16 @@ export function fileAttributes(as3: boolean): Uint8Array {
   return tag(69, new BitWriter().u32(as3 ? 0x08 : 0).done());
 }
 
-/** A DoABC (code 82) tag, run at once. */
-export function doAbc(abc: Uint8Array, name = ""): Uint8Array {
-  return tag(82, new BitWriter().u32(0).string(name).raw(abc).done());
+/** A DoABC (code 82) tag, run at once, or, `lazy`, when something first looks up what it defines. */
+export function doAbc(abc: Uint8Array, name = "", lazy = false): Uint8Array {
+  return tag(
+    82,
+    new BitWriter()
+      .u32(lazy ? 1 : 0)
+      .string(name)
+      .raw(abc)
+      .done(),
+  );
 }
 
 export function symbolClass(symbols: [number, string][]): Uint8Array {

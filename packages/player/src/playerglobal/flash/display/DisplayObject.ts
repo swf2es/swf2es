@@ -253,7 +253,12 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     /** The LoaderInfo of the SWF this is in; null off the display list. */
+    // The stage's is the main SWF's, as Flash's.
     get loaderInfo(): Value {
+      if (this.$display === s.stage) {
+        return s.root?.loaderInfo ?? null;
+      }
+
       return rootOf(this.$display)?.loaderInfo ?? null;
     }
 

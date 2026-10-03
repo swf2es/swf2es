@@ -570,6 +570,7 @@
     "flash.system::ApplicationDomain#get:domainMemory",
     "flash.system::ApplicationDomain#get:parentDomain",
     "flash.system::ApplicationDomain#getDefinition",
+    "flash.system::ApplicationDomain#getQualifiedDefinitionNames",
     "flash.system::ApplicationDomain#hasDefinition",
     "flash.system::ApplicationDomain#set:domainMemory",
     "flash.system::ApplicationDomain.get:MIN_DOMAIN_MEMORY_LENGTH",

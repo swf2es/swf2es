@@ -80,7 +80,7 @@ export class Player {
     this.root.loaderInfo = info;
     const object = s.constructAs(
       this.root,
-      s.rt.classNamed(this.library.classes.get(0) ?? "flash.display::MovieClip"),
+      s.rt.classNamed(this.library.classes.get(0) ?? "flash.display::MovieClip", s.mainDomain),
     );
     info.$content = object;
     s.mainLoaded(info);

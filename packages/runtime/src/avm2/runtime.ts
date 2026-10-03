@@ -642,7 +642,8 @@ interface Script {
   desc: ScriptDesc;
   abc: Abc;
   global: AsObject | null;
-  state: 0 | 1 | 2;
+  /** Not run, running, run, or failed: its initializer threw, which avmplus keeps as run. */
+  state: 0 | 1 | 2 | 3;
 }
 
 interface GlobalName {
@@ -773,6 +774,7 @@ export class Runtime {
    */
   private readonly moduleDomains = new Map<string, Domain>();
   private readonly unlocated: [Error, Domain][] = [];
+  private loadingBuiltin = false;
   private children = false;
   /** Vector.<T>'s references, by T's. */
   private readonly vectorRefs = new Map<TypeRef, VectorRef>();
@@ -901,14 +903,21 @@ export class Runtime {
     return this.root;
   }
 
-  /** `f`, which loads modules, with what it loads going into `domain`. */
-  loadInto<T>(domain: Domain, f: () => T): T {
+  /**
+   * `f`, which loads modules, with what it loads going into `domain`;
+   * `builtin` for a player's own, whose code is not a domain's to
+   * codeDomain, as avmplus skips builtin frames for the code context.
+   */
+  loadInto<T>(domain: Domain, f: () => T, builtin = false): T {
     const previous = this.loading;
+    const wasBuiltin = this.loadingBuiltin;
     this.loading = domain;
+    this.loadingBuiltin = builtin;
     try {
       return f();
     } finally {
       this.loading = previous;
+      this.loadingBuiltin = wasBuiltin;
     }
   }
 
@@ -1038,7 +1047,9 @@ export class Runtime {
     abc.index = domain.own.length;
     domain.own.push(desc.hash);
     domain.ownOrder.push(this.loads++);
-    this.unlocated.push([new Error(), domain]);
+    if (!this.loadingBuiltin) {
+      this.unlocated.push([new Error(), domain]);
+    }
     for (const name of abc.names) {
       if (name instanceof TypeName) {
         name.names = abc.names;
@@ -1093,7 +1104,7 @@ export class Runtime {
   }
 
   /** Run a script's initializer, once. */
-  initScript(script: Script): AsObject {
+  initScript(script: Script, retry = false): AsObject {
     // As avmplus' Toplevel, which is made from the script defining Object
     // before any other runs: builtin scripts refer to each other, as the
     // one defining Object makes XML while XML's needs Object.
@@ -1106,9 +1117,15 @@ export class Runtime {
     }
 
     const g = this.globalOf(script);
-    if (script.state === 0) {
+    if (script.state === 0 || (retry && script.state === 3)) {
       script.state = 1;
-      script.desc.init(this.empty, null).call(g);
+      try {
+        script.desc.init(this.empty, null).call(g);
+      } catch (e) {
+        script.state = 3;
+        throw e;
+      }
+
       script.state = 2;
     }
 
@@ -2358,11 +2375,27 @@ export class Runtime {
     const abc = desc.abc as Abc;
     const name = abc.names[desc.name] as Multiname;
     const qualified = qualifiedName(name);
-    // avmplus links a class to the base its name finds as a type, and
-    // rejects one made from another, as a child's class it found by name
-    // after its parent defined the name too.
-    if (this.children && base && this.typeNamed(abc.names[desc.base] as Multiname) !== base) {
-      throw this.error("VerifyError", 1107);
+    // As MethodEnv::newclass: a class with a base needs one (#1009), and
+    // one whose traits are the base's it linked to, which avmplus finds as
+    // a type (#1108). Compared by definition, as avmplus compares traits: a
+    // class made twice is one class. Where the base is the class its name
+    // finds by name, but not the one it finds as a type, as for a child's
+    // class it found by name after its parent defined the name too,
+    // avmshell rejects the class sooner, as corrupt (#1107). Only a class
+    // that exists is compared: the check runs no script.
+    if (desc.base && (base === null || base === undefined)) {
+      throw this.error("TypeError", 1009);
+    }
+
+    if (this.children && base) {
+      const baseName = abc.names[desc.base] as Multiname;
+      const script = this.findScript(baseName, true);
+      const expected = script?.global ? this.getProperty(script.global, baseName) : undefined;
+      if (expected?.$it && expected.$desc !== base.$desc) {
+        const byName = this.findScript(baseName);
+        const named = byName?.global ? this.getProperty(byName.global, baseName) : undefined;
+        throw this.error("VerifyError", named === base ? 1107 : 1108);
+      }
     }
 
     const baseTraits: Traits | null = base ? base.$it : null;
@@ -2553,6 +2586,53 @@ export class Runtime {
     const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
     mn.domain = domain === this.root ? null : domain;
     return this.resolveName(mn);
+  }
+
+  /**
+   * The names `domain`'s own modules define, private ones left out, as
+   * Flash's ApplicationDomain.getQualifiedDefinitionNames lists them:
+   * "pkg::Name", or the name alone in the top-level package.
+   */
+  definitionNames(domain: Domain): string[] {
+    const names: string[] = [];
+    for (const [name, list] of domain.globals) {
+      for (const g of list) {
+        if (g.ns.kind !== NS_Private) {
+          names.push(g.ns.uri ? `${g.ns.uri}::${name}` : name);
+        }
+      }
+    }
+
+    return names;
+  }
+
+  /**
+   * What `qualified` names in `domain`, as Flash's
+   * ApplicationDomain.getDefinition finds it: a name no script defines is
+   * refused by its local name, and a script whose initializer threw runs
+   * again, its error coming through each time, where a name's lookup by
+   * code keeps it as run, as avmplus does.
+   */
+  definitionNamed(qualified: string, domain: Domain): Value {
+    const i = qualified.lastIndexOf("::");
+    const local = i < 0 ? qualified : qualified.slice(i + 2);
+    const mn = qname(i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i)), local);
+    mn.domain = domain === this.root ? null : domain;
+    const script = this.findScript(mn);
+    if (!script) {
+      throw this.error("ReferenceError", 1065, local);
+    }
+
+    return this.getProperty(this.initScript(script, true), mn);
+  }
+
+  /** The module whose script defines `qualified` for `domain`, or null: by it a player keys what SymbolClass binds. */
+  definingAbc(qualified: string, domain: Domain): Abc | null {
+    const i = qualified.lastIndexOf("::");
+    const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));
+    const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
+    mn.domain = domain === this.root ? null : domain;
+    return this.findScript(mn)?.abc ?? null;
   }
 
   /** The class a multiname or TypeName names. */

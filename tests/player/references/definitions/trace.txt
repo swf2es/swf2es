@@ -1,0 +1,9 @@
+has Bad false
+get Bad Error: boom
+get Bad again Error: boom
+has Bad after gets false
+has Missing false
+get Missing ReferenceError: Error #1065: Variable Missing is not defined.
+get some.pkg.Missing ReferenceError: Error #1065: Variable Missing is not defined.
+has null false
+get Main [class Main]

@@ -41,6 +41,8 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
     declare $bytes: Uint8Array | null;
     declare $swf: SwfFacts | null;
     declare $url: string | null;
+    /** The application domain its content loads into, as its load chose it; unset for the main SWF's. */
+    declare $domain: avm2.Domain | undefined;
     /** The URL the content gets when it is placed, for a load from bytes. */
     declare $dynamic: string | undefined;
     /** The URL of the SWF the Loader belongs to, even before its first load. */
@@ -78,9 +80,10 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
       return this.$total;
     }
 
+    // The domain its load chose (Scripting.loadDomain), or the main SWF's.
     get applicationDomain(): Value {
       factsOf(s, this);
-      return s.applicationDomain();
+      return s.applicationDomainOf(this.$domain ?? s.mainDomain);
     }
 
     get swfVersion(): number {

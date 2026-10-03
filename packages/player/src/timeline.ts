@@ -23,6 +23,7 @@ import {
   type Tag,
   tags,
 } from "@swf2es/format";
+import type { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "./bitmap.js";
 import type { DisplayObject } from "./display.js";
 import { FontSet } from "./fonts.js";
@@ -126,6 +127,8 @@ export interface Library {
   removing: ((display: DisplayObject, byTimeline: boolean) => void) | null;
   /** The SWF's embedded fonts, by name, which its fields lay their text out in. */
   fonts: FontSet;
+  /** The application domain its code was loaded into, where its class names resolve; the root's if none. */
+  domain?: avm2.Domain;
 }
 
 function timelineOf(

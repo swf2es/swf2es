@@ -17,9 +17,11 @@ export { type NativeClass, plain, registerNativeClass } from "./natives/define.j
 export { builtinHooks, builtinNatives } from "./natives/index.js";
 export { errorMessages } from "./player-messages.js";
 export {
+  type Abc,
   type AsObject,
   type ClassHook,
   type CompileUnit,
+  type Domain,
   type FoundDefinition,
   type Method,
   type NativesProvider,
