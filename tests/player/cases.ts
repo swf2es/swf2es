@@ -1400,6 +1400,27 @@ export const cases: PlayerCase[] = [
     maxOutliers: 10,
   },
   {
+    name: "bevel",
+    swf: (abc) => bare(abc, 1, "Bevel"),
+    script: "Bevel",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "bevel-draw",
+    swf: (abc) => bare(abc, 1, "BevelDraw", 396, 198),
+    script: "BevelDraw",
+    frames: 1,
+    capture: [1],
+    // The page blurs at its four samples a pixel, where adl blurs whole
+    // pixels, and off the axes adl reads its offset a 256th further out:
+    // within 12 a channel, most within 4.
+    tolerance: 12,
+    maxOutliers: 0,
+  },
+  {
     name: "filters",
     swf: (abc) => bare(abc, 1, "FiltersDraw", 396, 132),
     script: "FiltersDraw",

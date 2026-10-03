@@ -4,7 +4,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BitmapStore } from "../../../packages/player/dist/bitmap.js";
-import { applyFilter, integerKernel } from "../../../packages/player/dist/bitmap-filters.js";
+import {
+  applyFilter,
+  filterRect,
+  integerKernel,
+} from "../../../packages/player/dist/bitmap-filters.js";
 import { filterDefaults } from "../../../packages/player/dist/filters.js";
 
 /** A 40 by 40 source: a half-alpha red square and an opaque green one. */
@@ -36,6 +40,8 @@ test("a destination showing part of a filter's result shows what the whole resul
       bias: 9,
       preserveAlpha: false,
     },
+    { ...filterDefaults("bevel"), distance: 3, angle: 30, type: "full", blurX: 3, blurY: 2 },
+    { ...filterDefaults("bevel"), type: "outer", knockout: true },
   ];
   for (const f of filters) {
     const whole = new BitmapStore(60, 60, true, 0xff0000ff);
@@ -165,4 +171,44 @@ test("a convolution with no taps copies in place from the pixels as they were", 
   const left = rgb();
   applyFilter(left, left, { x: 1, y: 0, width: 2, height: 1 }, 0, 0, empty);
   assert.deepEqual([...left.pixels], [0xff00ff00, 0xff0000ff, 0xff0000ff]);
+});
+
+test("a filter's rect grows as adl's generateFilterRect grows it", () => {
+  const r = { x: 150, y: 150, width: 20, height: 20 };
+  const grown = (f: Parameters<typeof filterRect>[1]) => {
+    const g = filterRect(r, f);
+    return [r.x - g.x, r.y - g.y, g.x + g.width - r.x - r.width, g.y + g.height - r.y - r.height];
+  };
+  // From adl: blur and glow at qualities 1, 2, 3, 15; a blur under 1 counts as 1.
+  const cases: [number, number, number, number][] = [
+    [0, 1, 1, 1],
+    [2, 1, 1, 2],
+    [4.5, 1, 3, 3],
+    [6, 2, 7, 7],
+    [255, 2, 268, 268],
+    [2.5, 3, 4, 4],
+    [255, 3, 345, 345],
+    [0, 15, 4, 4],
+    [7.5, 15, 27, 27],
+  ];
+  for (const [blur, quality, blurGrows, glowGrows] of cases) {
+    assert.equal(grown({ ...filterDefaults("blur"), blurX: blur, quality })[0], blurGrows);
+    assert.equal(grown({ ...filterDefaults("glow"), blurX: blur, quality })[0], glowGrows);
+  }
+
+  assert.equal(grown({ ...filterDefaults("blur"), quality: 0 })[0], 0);
+  // A shadow grows by its offset on the side it moves to, never inward; a bevel by its size both ways.
+  const shadow = { ...filterDefaults("dropShadow"), blurX: 2, blurY: 2, distance: 3.5 };
+  assert.deepEqual(grown({ ...shadow, angle: 0 }), [0, 2, 5, 2]);
+  assert.deepEqual(grown({ ...shadow, angle: 210 }), [6, 4, 0, 0]);
+  assert.deepEqual(grown({ ...shadow, distance: -3.5, angle: 90 }), [2, 6, 2, 0]);
+  const bevel = {
+    ...filterDefaults("bevel"),
+    blurX: 3,
+    blurY: 5,
+    quality: 2,
+    distance: 6,
+    angle: 30,
+  };
+  assert.deepEqual(grown(bevel), [9, 9, 9, 9]);
 });

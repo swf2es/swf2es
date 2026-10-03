@@ -4,8 +4,10 @@
 // each run truncated to 8 bits; a glow and a shadow are the object's alpha
 // so blurred, times strength and alpha, in their colour, behind or inside
 // it; a colour matrix maps each pixel's straight colour, transparent ones
-// too; a convolution sums its taps' straight colour over the object's
-// pixels and one more right and down, as BitmapData.applyFilter does. WebGL
+// too; a bevel is the object's alpha so blurred, read on and back by its
+// offset, their difference in its highlight or shadow colour; a convolution
+// sums its taps' straight colour over the object's pixels and one more
+// right and down, as BitmapData.applyFilter does. WebGL
 // alone: each pass is a filter of its own.
 import {
   Filter,
@@ -269,6 +271,108 @@ class GlowFilter extends FlashFilter {
   }
 }
 
+/**
+ * A bevel: the input's blurred alpha (uBlurred) from uOffset texels on and
+ * back; their difference times strength, clamped, times the colour's alpha,
+ * the highlight where on is more and the shadow where it is less. Inner
+ * (uType 0) atop the object, outer (1) behind it, full (2) over it;
+ * knocked out, alone, masked to where the object is (inner) or is not
+ * (outer).
+ */
+const BEVEL = `in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+uniform sampler2D uBlurred;
+uniform highp vec4 uInputSize;
+uniform vec3 uHighlight;
+uniform vec3 uShadow;
+uniform float uHighlightAlpha;
+uniform float uShadowAlpha;
+uniform float uStrength;
+uniform vec2 uOffset;
+uniform float uType;
+uniform float uKnockout;
+void main(void) {
+  // The pixel's centre, which all its texels read alike, as adl's one pixel.
+  vec2 at = (floor(vTextureCoord * uInputSize.xy) + 0.5) * uInputSize.zw;
+  vec4 src = texture(uTexture, at);
+  vec2 step_ = uOffset * uInputSize.zw;
+  // In 255ths, each read truncated, as adl's are.
+  float on = floor(texture(uBlurred, at + step_).a * 255.0 + 0.001);
+  float back = floor(texture(uBlurred, at - step_).a * 255.0 + 0.001);
+  float d = on - back;
+  bool lit = d > 0.0;
+  float strong = min(255.0, floor(abs(d) * uStrength + 0.001));
+  float la = floor(strong * (lit ? uHighlightAlpha : uShadowAlpha) + 0.5) / 255.0;
+  float m = uType < 0.5 ? src.a : (uType < 1.5 && uKnockout > 0.5 ? 1.0 - src.a : 1.0);
+  vec4 layer = vec4((lit ? uHighlight : uShadow) * la, la) * m;
+  vec4 c;
+  if (uKnockout > 0.5) {
+    c = layer;
+  } else if (uType > 0.5 && uType < 1.5) {
+    c = src + layer * (1.0 - src.a);
+  } else {
+    c = layer + src * (1.0 - (uType < 0.5 ? la : layer.a));
+  }
+  finalColor = ${TRUNCATE};
+}`;
+
+class BevelFilter extends FlashFilter {
+  private readonly pass = new BoxPass();
+
+  /** Its box's pass too, a filter of its own. */
+  destroy(): void {
+    this.pass.destroy();
+    super.destroy();
+  }
+
+  constructor(private readonly f: FilterRecord) {
+    const rgb = (c: number) =>
+      new Float32Array([((c >> 16) & 0xff) / 255, ((c >> 8) & 0xff) / 255, (c & 0xff) / 255]);
+    const radians = ((f.angle || 0) * Math.PI) / 180;
+    const distance = f.distance || 0;
+    super({
+      glProgram: GlProgram.from({ vertex: VERTEX, fragment: BEVEL, name: "flash-bevel" }),
+      resources: {
+        bevelUniforms: {
+          uHighlight: { value: rgb(f.highlightColor), type: "vec3<f32>" },
+          uShadow: { value: rgb(f.shadowColor), type: "vec3<f32>" },
+          uHighlightAlpha: { value: f.highlightAlpha, type: "f32" },
+          uShadowAlpha: { value: f.shadowAlpha, type: "f32" },
+          uStrength: { value: f.strength, type: "f32" },
+          uOffset: {
+            value: new Float32Array([distance * Math.cos(radians), distance * Math.sin(radians)]),
+            type: "vec2<f32>",
+          },
+          uType: { value: f.type === "inner" ? 0 : f.type === "outer" ? 1 : 2, type: "f32" },
+          uKnockout: { value: f.knockout ? 1 : 0, type: "f32" },
+        },
+        uBlurred: PixiTexture.WHITE.source,
+      },
+    });
+    this.padding = Math.ceil((f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance));
+  }
+
+  apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
+    const f = this.f;
+    const blurred = TexturePool.getSameSizeTexture(input);
+    blur(
+      system,
+      this.pass,
+      input,
+      blurred,
+      f.blurX || 0,
+      f.blurY || 0,
+      f.quality,
+      this.texels(input),
+      true,
+    );
+    this.resources.uBlurred = blurred.source;
+    system.applyFilter(this, input, output, clear);
+    TexturePool.returnTexture(blurred);
+  }
+}
+
 /** A colour matrix of a pixel's straight colour, its offsets in 255ths, transparent pixels too. */
 const MATRIX = `in vec2 vTextureCoord;
 out vec4 finalColor;
@@ -458,6 +562,8 @@ export function displayFilters(records: readonly FilterRecord[]): Filter[] {
       filter = new GlowFilter(f);
     } else if (f.kind === "colorMatrix") {
       filter = new ColorMatrixFilter(f);
+    } else if (f.kind === "bevel") {
+      filter = new BevelFilter(f);
     } else if (f.kind === "convolution") {
       filter = new ConvolutionFilter(f.matrixX * f.matrixY > 0 ? f : emptyKernel(f));
     }

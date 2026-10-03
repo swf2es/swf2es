@@ -1,9 +1,10 @@
 // BitmapData.applyFilter and generateFilterRect, on the CPU, as adl
-// computes them (docs/architecture.md, "Filters"): the filter's rect of the
-// source, what lies outside the source rect transparent, written whole into
-// the destination; a blur's runs truncated to 8 bits each, a glow's alpha
-// from the blur so truncated times strength, a colour matrix of straight
-// colour, rounded, a convolution of straight colour, truncated.
+// computes them (docs/architecture.md, "Filters"): the source filtered, past
+// the source rect too, and the filter's rect written whole into the
+// destination; a blur's runs truncated to 8 bits each, a glow's alpha from
+// the blur so truncated times strength, a bevel's from the difference of two
+// reads of it, a colour matrix of straight colour, rounded, a convolution of
+// straight colour, truncated.
 import { type BitmapStore, over, type PixelRect, unmultiply } from "./bitmap.js";
 import type { Filter } from "./filters.js";
 
@@ -14,40 +15,88 @@ export const filtersDrawn: ReadonlySet<string> = new Set([
   "dropShadow",
   "colorMatrix",
   "convolution",
+  "bevel",
 ]);
 
-/** How far a filter reaches past what it filters, each way: [x, y], whole pixels. */
-function reach(f: Filter): [number, number] {
-  if (f.kind === "blur" || f.kind === "glow" || f.kind === "dropShadow") {
-    const quality = Math.max(0, f.quality);
-    return [Math.ceil(((f.blurX || 0) * quality) / 2), Math.ceil(((f.blurY || 0) * quality) / 2)];
+/**
+ * How far adl's rect for a blur of `quality` passes reaches, a blur below
+ * 1 counting as 1: the passes' spread, which grows slower than their
+ * number, as a float, times the blur; for a blur that rounded up from a
+ * quarter, for the others half to even from a half, as x87 rounds.
+ */
+const PASS_SPREADS = [
+  1.0, 2.1, 2.7, 3.1, 3.5, 3.8, 4.0, 4.2, 4.4, 4.6, 5.0, 6.0, 6.0, 7.0, 7.0,
+].map((spread) => Math.fround(spread) / 2);
+
+function spreadOf(blur: number, quality: number, kind: string): number {
+  if (quality < 1) {
+    return 0;
   }
 
+  const x = Math.max(blur || 0, 1) * PASS_SPREADS[Math.min(quality, 15) - 1];
+  if (kind === "blur") {
+    return Math.floor(x + 0.75);
+  }
+
+  const v = x + 0.5;
+  const whole = Math.floor(v);
+  return v - whole === 0.5 ? whole + (whole % 2) : Math.round(v);
+}
+
+/** How far a filter's rect reaches past what it filters, each way, before any offset: [x, y], whole pixels. */
+function reach(f: Filter): [number, number] {
   if (f.kind === "convolution") {
     return [f.matrixX >> 1, f.matrixY >> 1];
   }
 
-  return [0, 0];
-}
-
-/** The rect a filter makes of `rect`, as generateFilterRect gives it: grown by its reach, and by a shadow's offset where it moves out. */
-export function filterRect(rect: PixelRect, f: Filter): PixelRect {
-  const [rx, ry] = reach(f);
-  let x0 = rect.x - rx;
-  let y0 = rect.y - ry;
-  let x1 = rect.x + rect.width + rx;
-  let y1 = rect.y + rect.height + ry;
-  if (f.kind === "dropShadow" && !f.inner) {
-    const radians = ((f.angle || 0) * Math.PI) / 180;
-    const ox = (f.distance || 0) * Math.cos(radians);
-    const oy = (f.distance || 0) * Math.sin(radians);
-    x0 = Math.min(x0, Math.floor(rect.x - rx + ox));
-    y0 = Math.min(y0, Math.floor(rect.y - ry + oy));
-    x1 = Math.max(x1, Math.ceil(rect.x + rect.width + rx + ox));
-    y1 = Math.max(y1, Math.ceil(rect.y + rect.height + ry + oy));
+  if (f.kind === "colorMatrix" || f.kind === "displacementMap") {
+    return [0, 0];
   }
 
-  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+  return [spreadOf(f.blurX, f.quality, f.kind), spreadOf(f.blurY, f.quality, f.kind)];
+}
+
+/**
+ * A shadow's or a bevel's offset in whole pixels, down: [x, y]. adl has it
+ * in 256ths, to the nearest, so the cosine of 90° is 0, not just under it,
+ * and 6 × sin 30° is 3, not just under.
+ */
+function offsetOf(f: Filter): [number, number] {
+  const radians = ((f.angle || 0) * Math.PI) / 180;
+  const whole = (v: number) => Math.floor(Math.round(v * 256) / 256);
+  return [
+    whole((f.distance || 0) * Math.cos(radians)),
+    whole((f.distance || 0) * Math.sin(radians)),
+  ];
+}
+
+/**
+ * The rect a filter makes of `rect`, as generateFilterRect gives it: grown
+ * by its reach; a shadow's, inner too, by its offset where it moves and
+ * less it on the other side, never inward; a bevel's by the offset's size
+ * both ways.
+ */
+export function filterRect(rect: PixelRect, f: Filter): PixelRect {
+  const [rx, ry] = reach(f);
+  let [left, right, top, bottom] = [rx, rx, ry, ry];
+  if (f.kind === "dropShadow") {
+    const [ox, oy] = offsetOf(f);
+    left = Math.max(0, rx - ox);
+    right = Math.max(0, rx + ox);
+    top = Math.max(0, ry - oy);
+    bottom = Math.max(0, ry + oy);
+  } else if (f.kind === "bevel" || f.kind === "gradientBevel") {
+    const [ox, oy] = offsetOf(f);
+    left = right = rx + Math.abs(ox);
+    top = bottom = ry + Math.abs(oy);
+  }
+
+  return {
+    x: rect.x - left,
+    y: rect.y - top,
+    width: rect.width + left + right,
+    height: rect.height + top + bottom,
+  };
 }
 
 /**
@@ -166,29 +215,31 @@ export function applyFilter(
   }
 
   if (f.kind === "convolution") {
-    write(dest, convolve(source, shown, f, dest.transparent), shown, mx, my);
+    write(dest, convolve(source, shown, f, dest.transparent), shown, shown, mx, my);
     return true;
   }
 
+  // The work: what is shown and as far round it as the filter reaches into
+  // it, which may be past the rect, whose edge cuts what is written alone.
   const [hx, hy] = halo(f);
-  const work = intersect(out, {
+  const work = {
     x: shown.x - hx,
     y: shown.y - hy,
     width: shown.width + 2 * hx,
     height: shown.height + 2 * hy,
-  }) as PixelRect;
+  };
   const w = work.width;
   const h = work.height;
 
-  // The source's premultiplied channels over the work, transparent past `rect`.
+  // The source's premultiplied channels over the work, past `rect` too, as
+  // far as the bitmap goes.
   const pixels = source.pixels;
   const sw = source.width;
   const a = new Int32Array(w * h);
   const r = new Int32Array(w * h);
   const g = new Int32Array(w * h);
   const b = new Int32Array(w * h);
-  const inside = intersect(rect, work);
-  const from = inside && intersect(inside, { x: 0, y: 0, width: sw, height: source.height });
+  const from = intersect(work, { x: 0, y: 0, width: sw, height: source.height });
   if (from) {
     for (let sy = from.y; sy < from.y + from.height; sy++) {
       let i = (sy - work.y) * w + from.x - work.x;
@@ -210,11 +261,13 @@ export function applyFilter(
     }
   } else if (f.kind === "colorMatrix") {
     colorMatrix(dest, result, [a, r, g, b], work, contentOf(source, rect), f.matrix);
+  } else if (f.kind === "bevel") {
+    bevel(result, [a, r, g, b], w, h, f);
   } else {
     glow(result, [a, r, g, b], w, h, f);
   }
 
-  write(dest, result, work, mx, my);
+  write(dest, result, work, shown, mx, my);
   return true;
 }
 
@@ -238,7 +291,7 @@ function halo(f: Filter): [number, number] {
 
   let hx = f.quality * Math.ceil((f.blurX || 0) / 2);
   let hy = f.quality * Math.ceil((f.blurY || 0) / 2);
-  if (f.kind === "dropShadow") {
+  if (f.kind === "dropShadow" || f.kind === "bevel") {
     const radians = ((f.angle || 0) * Math.PI) / 180;
     hx += Math.ceil(Math.abs((f.distance || 0) * Math.cos(radians))) + 1;
     hy += Math.ceil(Math.abs((f.distance || 0) * Math.sin(radians))) + 1;
@@ -565,6 +618,101 @@ export function integerKernel(matrix: number[], divisor: number): number | null 
 }
 
 /**
+ * A plane (w × h) read between its pixels, linearly, with weights in
+ * 256ths, truncated, as adl's fixed point has them; `outside` past it.
+ */
+function sampler(
+  plane: Int32Array,
+  w: number,
+  h: number,
+  outside: number,
+  whole = true,
+): (x: number, y: number) => number {
+  const at = (x: number, y: number) =>
+    x >= 0 && x < w && y >= 0 && y < h ? plane[y * w + x] : outside;
+  return (x, y) => {
+    const x0 = Math.floor(x);
+    const y0 = Math.floor(y);
+    const fx = Math.floor((x - x0) * 256) / 256;
+    const fy = Math.floor((y - y0) * 256) / 256;
+    if (fx === 0 && fy === 0) {
+      return at(x0, y0);
+    }
+
+    const top = at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx;
+    const bottom = at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx;
+    const v = top * (1 - fy) + bottom * fy;
+    return whole ? Math.floor(v + 1e-7) : v;
+  };
+}
+
+/**
+ * A bevel: the source's alpha blurred, truncated, read from the offset
+ * forward and back; their difference, times strength (to 255) and the
+ * colour's alpha, rounded, the highlight where forward is more and the
+ * shadow where it is less. Inner, it lies atop the source, which keeps its
+ * alpha; outer, behind it; full, over it; knocked out, alone, masked to
+ * where the source is (inner) or is not (outer). Each over another as the
+ * store draws, truncated.
+ */
+function bevel(
+  result: Uint32Array,
+  [a, r, g, b]: Int32Array[],
+  w: number,
+  h: number,
+  f: Filter,
+): void {
+  const blurred = new Int32Array(a);
+  blur([blurred], w, h, f);
+  const sample = sampler(blurred, w, h, 0);
+  const radians = ((f.angle || 0) * Math.PI) / 180;
+  // As a shadow's. Off the axes adl reads about a 256th further out, which
+  // this does not: within 2 a channel there.
+  const ox = (f.distance || 0) * Math.cos(radians);
+  const oy = (f.distance || 0) * Math.sin(radians);
+  const channels = (c: number) => [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
+  const [hr, hg, hb] = channels(f.highlightColor);
+  const [sr, sg, sb] = channels(f.shadowColor);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const d = sample(x + ox, y + oy) - sample(x - ox, y - oy);
+      const lit = d > 0;
+      // Its alpha rounds, where a glow's truncates.
+      const la = Math.round(
+        Math.min(255, Math.floor(Math.abs(d) * f.strength)) *
+          (lit ? f.highlightAlpha : f.shadowAlpha),
+      );
+      // The bevel's colour, premultiplied, masked to where the source is, or,
+      // knocked out, is not; an outer one that is not lies behind it whole.
+      const sa = a[i];
+      const m = f.type === "inner" ? sa : f.type === "outer" && f.knockout ? 255 - sa : 255;
+      const layer = (c: number) => Math.floor((Math.floor((c * la) / 255) * m) / 255);
+      const lA = Math.floor((la * m) / 255);
+      const lr = layer(lit ? hr : sr);
+      const lg = layer(lit ? hg : sg);
+      const lb = layer(lit ? hb : sb);
+      // One over another, as the store draws: top + bottom × (256 − top's alpha) / 256, truncated.
+      const over = (top: number, ta: number, bottom: number) => top + ((bottom * (256 - ta)) >> 8);
+      let out: number[];
+      if (f.knockout) {
+        out = [lA, lr, lg, lb];
+      } else if (f.type === "outer") {
+        out = [over(sa, sa, lA), over(r[i], sa, lr), over(g[i], sa, lg), over(b[i], sa, lb)];
+      } else {
+        // Inner lies atop the source, full over it: what is left shows through either way.
+        const ta = f.type === "inner" ? la : lA;
+        out = [over(lA, ta, sa), over(lr, ta, r[i]), over(lg, ta, g[i]), over(lb, ta, b[i])];
+      }
+
+      const [oa, or, og, ob] = out.map((v) => Math.min(255, v));
+      result[i] =
+        ((oa << 24) | (Math.min(or, oa) << 16) | (Math.min(og, oa) << 8) | Math.min(ob, oa)) >>> 0;
+    }
+  }
+}
+
+/**
  * A glow or a shadow: the source's alpha blurred, truncated, times strength
  * (to 255) and alpha, in its colour, from the offset back for a shadow;
  * behind the source, or inside it for an inner one, or alone.
@@ -584,23 +732,7 @@ function glow(
   // A shadow's offset, which adl samples the blurred alpha at between pixels, linearly.
   const ox = shadow ? (f.distance || 0) * Math.cos(radians) : 0;
   const oy = shadow ? (f.distance || 0) * Math.sin(radians) : 0;
-  const outside = f.inner ? 255 : 0;
-  const at = (x: number, y: number) =>
-    x >= 0 && x < w && y >= 0 && y < h ? blurred[y * w + x] : outside;
-  const sample = (x: number, y: number) => {
-    const x0 = Math.floor(x);
-    const y0 = Math.floor(y);
-    // Weights in 256ths, truncated, as adl's fixed point has them.
-    const fx = Math.floor((x - x0) * 256) / 256;
-    const fy = Math.floor((y - y0) * 256) / 256;
-    if (fx === 0 && fy === 0) {
-      return at(x0, y0);
-    }
-
-    const top = at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx;
-    const bottom = at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx;
-    return Math.floor(top * (1 - fy) + bottom * fy + 1e-7);
-  };
+  const sample = sampler(blurred, w, h, f.inner ? 255 : 0);
   const cr = (f.color >> 16) & 0xff;
   const cg = (f.color >> 8) & 0xff;
   const cb = f.color & 0xff;
@@ -659,17 +791,18 @@ function glow(
   }
 }
 
-/** `pixels` over `rect` into `dest`, moved by (mx, my), clipped; an opaque store keeps its alpha. */
+/** `part` of `pixels`, which cover `rect`, into `dest`, moved by (mx, my), clipped; an opaque store keeps its alpha. */
 function write(
   dest: BitmapStore,
   pixels: Uint32Array,
   rect: PixelRect,
+  part: PixelRect,
   mx: number,
   my: number,
 ): void {
   const target = dest.pixels;
   const to = intersect(
-    { x: rect.x + mx, y: rect.y + my, width: rect.width, height: rect.height },
+    { x: part.x + mx, y: part.y + my, width: part.width, height: part.height },
     { x: 0, y: 0, width: dest.width, height: dest.height },
   );
   if (to) {

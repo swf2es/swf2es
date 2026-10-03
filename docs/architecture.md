@@ -1368,12 +1368,20 @@ class extending it is refused, while one extending a filter of
 playerglobal's is made.
 
 BitmapData's `applyFilter` filters on the CPU, as adl computes
-(`bitmap-filters.ts`): the source's premultiplied channels over the
-filter's rect, what lies outside the source rect transparent, written
-whole into the destination, moved to its point and clipped; an opaque
-destination keeps its alpha. `generateFilterRect` grows a rect by
-ceil(blur × quality / 2) each way, and a shadow's by its offset too. A
-blur is a box of fractional width, its end pixels weighted by their
+(`bitmap-filters.ts`): the source's premultiplied channels, past the
+source rect too as far as the bitmap goes, filtered, and the filter's
+rect of them written whole into the destination, moved to its point and
+clipped; an opaque destination keeps its alpha, and refuses a glow, a
+shadow, a bevel and the gradient filters with IllegalOperationError
+#2077. `generateFilterRect` grows a rect each way by the passes' spread
+times the blur, a blur below 1 counting as 1: Ruffle's per-quality
+spreads (1.0, 2.1, 2.7, 3.1 … 7.0) as floats, halved, rounded up from a
+quarter for a blur and half to even from a half for the others, as x87
+rounds, which the `rect` lines of `apply-filter` pin; a shadow's, inner
+too, by its offset in whole pixels (to the nearest 256th, then down) on
+the side it moves to, less it on the other, never inward; a bevel's by
+the offset's size both ways. At high qualities the rect is less than the
+passes' reach, and cuts what they spread. A blur is a box of fractional width, its end pixels weighted by their
 part, run along x and then y `quality` times, each value truncated to
 8 bits. A glow's alpha is that blur of the source's alpha (of 255 less
 it, for an inner one), truncated, times strength to 255 and alpha, over
@@ -1381,9 +1389,19 @@ or under the source as the display's are; a shadow samples it from its
 offset between pixels, linearly with weights in 256ths. A colour matrix
 maps straight colour, rounded, the pixels about what the source has
 premultiplied truncated and the rest of the rect the map of a
-transparent pixel. The `apply-filter` case matches adl's numbers to the
-bit. Bevels, displacement maps and gradient filters throw as not
-supported yet.
+transparent pixel. A bevel is the source's alpha so blurred, read from
+its offset on and back between pixels, as a shadow reads; their
+difference times strength, to 255, times the colour's alpha, rounded, in
+the highlight colour where on is more and the shadow colour where it is
+less. Inner, it lies atop the source, which keeps its alpha; outer,
+behind it; full, over it; knocked out, alone, masked to where the source
+is (inner) or is not (outer); each over another as the store draws it,
+s + d × (256 − sa) / 256 truncated. Off the axes adl reads the offset
+about a 256th further out, which swf2es does not find a rule for: there
+a channel may be 2 off, so the `bevel` case, to the bit, keeps to the
+axes, and `bevel-draw` has the angles between. The `apply-filter` case
+matches adl's numbers to the bit. Displacement maps and gradient filters
+throw as not supported yet.
 
 A convolution grows the rect by half its matrix, rounded down, each way.
 Its taps read the source's straight colour, unmultiplied as getPixel32
@@ -1411,7 +1429,7 @@ an opaque destination's pixels; what lies past the source stays as it
 was.
 
 The renderer draws a display object's blur, glow, drop shadow, colour
-matrix and convolution as adl does (`pixi-filters.ts`), before its blend mode: a blur is
+matrix, bevel and convolution as adl does (`pixi-filters.ts`), before its blend mode: a blur is
 a box blurX by blurY pixels wide, the pixels at its ends weighted by how
 much of them it covers, run `quality` times each way and truncated to 8
 bits each time, so that blur 2.5 weighs 0.3, 0.4 and 0.3, and the filter
@@ -1420,7 +1438,9 @@ blurred, times strength (clamped to 1) and alpha, in its colour, drawn
 behind the object, or, inner, one less that inside it over the object;
 knocked out, the object is left out. A drop shadow is a glow from
 distance × (cos, sin) of its angle back, and with `hideObject` drawn
-alone. A colour matrix maps each pixel's straight colour, offsets in
+alone. A bevel is the object's alpha so blurred, read at its offset on
+and back, as applyFilter has it, each pixel evaluated once at its centre.
+A colour matrix maps each pixel's straight colour, offsets in
 255ths, transparent pixels within the object's bounds too. A convolution
 filters, as applyFilter does, a bitmap of the object's pixels and one
 more right and down, its edge pixels clamped or coloured past that, and
@@ -1432,8 +1452,8 @@ passes
 are Pixi filters at the target's resolution, for WebGL: under WebGPU,
 where Pixi would skip an object's whole chain for one it cannot run,
 they are left out and a blend mode is kept. A view made for one draw
-destroys the filters it made with it. Bevels, displacement maps and
-gradient glows and bevels are still to come.
+destroys the filters it made with it. Displacement maps and gradient
+glows and bevels are still to come.
 
 ### Masks and scroll rectangles
 
