@@ -2358,11 +2358,27 @@ export class Runtime {
     const abc = desc.abc as Abc;
     const name = abc.names[desc.name] as Multiname;
     const qualified = qualifiedName(name);
-    // avmplus links a class to the base its name finds as a type, and
-    // rejects one made from another, as a child's class it found by name
-    // after its parent defined the name too.
-    if (this.children && base && this.typeNamed(abc.names[desc.base] as Multiname) !== base) {
-      throw this.error("VerifyError", 1107);
+    // As MethodEnv::newclass: a class with a base needs one (#1009), and
+    // one whose traits are the base's it linked to, which avmplus finds as
+    // a type (#1108). Compared by definition, as avmplus compares traits: a
+    // class made twice is one class. Where the base is the class its name
+    // finds by name, but not the one it finds as a type, as for a child's
+    // class it found by name after its parent defined the name too,
+    // avmshell rejects the class sooner, as corrupt (#1107). Only a class
+    // that exists is compared: the check runs no script.
+    if (desc.base && (base === null || base === undefined)) {
+      throw this.error("TypeError", 1009);
+    }
+
+    if (this.children && base) {
+      const baseName = abc.names[desc.base] as Multiname;
+      const script = this.findScript(baseName, true);
+      const expected = script?.global ? this.getProperty(script.global, baseName) : undefined;
+      if (expected?.$it && expected.$desc !== base.$desc) {
+        const byName = this.findScript(baseName);
+        const named = byName?.global ? this.getProperty(byName.global, baseName) : undefined;
+        throw this.error("VerifyError", named === base ? 1107 : 1108);
+      }
     }
 
     const baseTraits: Traits | null = base ? base.$it : null;
