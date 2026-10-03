@@ -1660,7 +1660,11 @@ passes
 are Pixi filters at the target's resolution, for WebGL: under WebGPU,
 where Pixi would skip an object's whole chain for one it cannot run,
 they are left out and a blend mode is kept. A view made for one draw
-destroys the filters it made with it.
+destroys the filters it made with it. The object goes into its chain, or
+a blend mode's filter, multisampled as the target is (Pixi's filters
+default to none): a filtered caption's edges were stepped beside its
+unfiltered neighbours' smooth ones, for some 0.1 ms of GPU time a frame
+on a screen of filters and blends.
 
 As Flash caches a filtered object as a bitmap, an object's filters run
 as one chain (`FilterChain`) whose output is kept and drawn again until

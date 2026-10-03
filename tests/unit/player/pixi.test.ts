@@ -519,3 +519,36 @@ test("an object off the list gives its lines back, and has them again when it co
     assert.equal(linesOf().destroyed, false);
   });
 });
+
+test("a filtered or blended object is drawn into its filters multisampled as its target is", async () => {
+  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    DOMAdapter: { get(): object; set(adapter: object): void };
+  };
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  try {
+    const filtered = new Container();
+    filtered.filters = [{ ...filterDefaults("glow"), blurX: 4, blurY: 4 }];
+    const blended = new Container();
+    blended.blendMode = "multiply";
+    for (const o of [filtered, blended]) {
+      const { renderer } = standIn([]);
+      (renderer as unknown as { type: number }).type = 1;
+      const view = new PixiView(renderer);
+      view.prepare(o);
+      const filters = (view.stage.children[0] as unknown as { filters: { antialias: string }[] })
+        .filters;
+      assert.ok(filters.length > 0);
+      // Pixi's default, "off", would leave the object's edges stepped.
+      assert.deepEqual(
+        filters.map((f) => f.antialias),
+        filters.map(() => "inherit"),
+      );
+    }
+  } finally {
+    pixi.DOMAdapter.set(adapter);
+  }
+});

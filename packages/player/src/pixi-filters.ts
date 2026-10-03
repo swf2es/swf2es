@@ -982,6 +982,11 @@ export class FilterChain extends Filter {
     });
     this.padding = filters.reduce((sum, f) => sum + f.padding, 0);
     this.resolution = "inherit";
+    // The object is drawn into the chain's input as the target draws, with
+    // its multisampling: Pixi's filters default to none, which left a
+    // filtered object's edges stepped beside its unfiltered neighbours'.
+    // Any filter of an object that says "off" turns it off for all of them.
+    this.antialias = "inherit";
   }
 
   /** What it was run on changed: run it again. */
