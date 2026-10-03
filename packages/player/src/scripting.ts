@@ -1439,14 +1439,17 @@ export class Scripting {
    */
   runFrameScripts(root: DisplayObject): void {
     // A script's error waits for the phase to end: its goto still happens,
-    // and the scripts after it still run, as in Flash (`goto-throws`).
+    // and the scripts after it still run, as in Flash (the unit test "a
+    // frame script's goto happens though the script throws after it").
     const errors: unknown[] = [];
-    for (let round = 0; round < 64 && !this.overflowed; round++) {
+    // Overflowed, cycles stop their script loops; the frame's own pass goes on.
+    const stopped = () => this.overflowed && this.cycles > 0;
+    for (let round = 0; round < 64 && !stopped(); round++) {
       let ran = false;
       const own = (o: MovieClip) => {
         for (
           let jumps = 0;
-          jumps < 64 && o.scriptedFrame !== o.currentFrame && !this.overflowed;
+          jumps < 64 && o.scriptedFrame !== o.currentFrame && !stopped();
           jumps++
         ) {
           o.scriptedFrame = o.currentFrame;
@@ -1531,8 +1534,9 @@ export class Scripting {
     // Two scripts that send their clip to each other's frame nest cycles
     // without end, in Flash till it gives up some 1400 deep; here a script's
     // stack overflow, before the JavaScript stack's. Overflowed once, no
-    // cycle runs and no script loop goes on for the rest of the frame, so a
-    // script that catches the error cannot start it over.
+    // cycle runs for the rest of the frame, and the cycles under way stop
+    // their script loops, so a script that catches the error cannot start
+    // it over; the frame's own scripts still run.
     if (this.overflowed) {
       return;
     }

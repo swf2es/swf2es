@@ -417,15 +417,13 @@ test("jumping forward to any frame of a random timeline ends as playing to it", 
     }
   };
 
-  // The frames played one by one, as the player plays them, from `start`:
-  // a place fills an empty depth only, a change is done to what is there,
-  // another character in its stead places it where nothing is, and a
-  // removal empties the depth.
+  // The frames played one by one, as the player plays them: a place fills an
+  // empty depth only, a change is done to what is there, another character
+  // in its stead too and nothing where nothing is, and a removal empties
+  // the depth (the player's rewind-first case).
   type Cell = { depth: number; character: number; tx: number; placeFrame: number };
-  // A cell, and whether a place without the move flag made it.
-  type Played = Cell & { placed: boolean };
-  const played = (said: Said[][], to: number): Played[] => {
-    const at = new Map<number, Played>();
+  const played = (said: Said[][], to: number): Cell[] => {
+    const at = new Map<number, Cell>();
     for (let f = 1; f <= to; f++) {
       for (const c of said[f - 1]) {
         const cell = at.get(c.depth);
@@ -435,16 +433,17 @@ test("jumping forward to any frame of a random timeline ends as playing to it", 
           if (cell) {
             cell.tx = c.tx;
           }
-        } else if (cell && c.kind === "instead") {
-          cell.character = c.character;
-          cell.tx = c.tx ?? cell.tx;
+        } else if (c.kind === "instead") {
+          if (cell) {
+            cell.character = c.character;
+            cell.tx = c.tx ?? cell.tx;
+          }
         } else if (!cell) {
           at.set(c.depth, {
             depth: c.depth,
             character: c.character,
             tx: c.tx ?? 0,
             placeFrame: f,
-            placed: c.kind === "place",
           });
         }
       }
@@ -495,8 +494,9 @@ test("jumping forward to any frame of a random timeline ends as playing to it", 
           .filter((cell) => cell.placeFrame > target)
           .map((cell) => [cell.depth, cell]),
       );
-      const expected = played(said, target).map(({ placed, ...cell }) => {
-        const kept = placed ? later.get(cell.depth) : undefined;
+      // Only a place without the move flag fills a depth, so every cell is one.
+      const expected = played(said, target).map((cell) => {
+        const kept = later.get(cell.depth);
         return kept ? { ...cell, character: kept.character, placeFrame: kept.placeFrame } : cell;
       });
       rewound.root.gotoFrame(target);

@@ -748,8 +748,9 @@ test("scripts that catch the stack overflow of their goto cycles stop soon, not 
   const player = new Player(swf, scripting);
   await player.start();
   const runs = Number(lines.at(-1)?.split(" ")[1]);
-  // The chain to the overflow, and no more.
-  assert.ok(runs > 256 && runs < 300, `${runs} runs`);
+  // The chain to the overflow, then the frame's own pass, bounded by its
+  // rounds, not cycles started over.
+  assert.ok(runs > 256 && runs < 10000, `${runs} runs`);
 });
 
 test("a timer whose closure throws keeps running and fires again", { skip }, async () => {

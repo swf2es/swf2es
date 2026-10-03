@@ -1,7 +1,9 @@
 // A rewind past frames whose first command at a depth does nothing: frame
 // 1 moves depth 1 and removes depth 2 while both are empty, frame 2 places
 // an A at each, frame 3 removes them and places a B, and frame 4's script
-// sends the root back to frame 2. Main traces what holds each depth.
+// sends the root back to frame 2. Depth 5 is moved to a C after its A, and
+// depth 6 gets a C by a move where nothing is, before their Bs. Main traces
+// what holds each depth.
 package {
   import flash.display.DisplayObject;
   import flash.display.MovieClip;
@@ -14,6 +16,10 @@ package {
 
   public class B extends MovieClip {
     public function B() { trace("made B"); }
+  }
+
+  public class C extends MovieClip {
+    public function C() { trace("made C"); }
   }
 
   public class Main extends MovieClip {

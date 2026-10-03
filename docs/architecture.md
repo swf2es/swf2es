@@ -733,7 +733,8 @@ is its own, and makes a new one for another (Ruffle's
 new one on the rewind that ends on the other shape). A `PlaceObject`
 without the move flag at a depth already taken is let be, whatever it
 names, playing or in a goto's replay (`same-depth`, the corpus's
-`place_object_same_depth_frame`). A rewind, the loop to the first frame
+`place_object_same_depth_frame`), and one with the move flag that names a
+character where nothing is places nothing (`rewind-first`). A rewind, the loop to the first frame
 among them, takes off what the timeline placed after the target, but for
 a child at a depth the frames replayed end on a place without the move
 flag at: that child stays, its character too, and takes the place, its

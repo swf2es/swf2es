@@ -930,10 +930,14 @@ export class MovieClip extends Container {
         continue;
       }
 
-      // With the move flag the child stays, another character or not.
-      if (place.move && existing) {
-        swap(existing, character);
-        existing.applyPlace(place);
+      // With the move flag the child stays, another character or not; and
+      // where there is none, the move places nothing (`rewind-first`).
+      if (place.move) {
+        if (existing) {
+          swap(existing, character);
+          existing.applyPlace(place);
+        }
+
         continue;
       }
 
@@ -1000,17 +1004,21 @@ export class MovieClip extends Container {
         } else if (!place.move && (jump.place || (!rewind && this.depths.has(place.depth)))) {
           // At a depth taken by then, as frame by frame: let be.
           continue;
-        } else if (!place.move || (rewind && !jump.place)) {
+        } else if (!place.move) {
           // Anew: the child starts from nothing, and from here.
           jump.before = null;
-          jump.place = rewind ? asFirstPlaced({ ...place, move: false }) : place;
+          jump.place = rewind ? asFirstPlaced(place) : place;
           jump.frame = f;
-          jump.placed = !place.move;
+          jump.placed = true;
         } else if (jump.place) {
           jump.place = mergePlace(jump.place, place);
-        } else {
+        } else if (!rewind && this.depths.has(place.depth)) {
           jump.place = place;
           jump.frame = f;
+        } else {
+          // Another character with the move flag where nothing is: as frame
+          // by frame, nothing is placed (`rewind-first`).
+          continue;
         }
 
         jumps.set(place.depth, jump);
