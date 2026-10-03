@@ -20,9 +20,11 @@ import {
   readRemove,
   readSceneData,
   readShape,
+  readSound,
   readSprite,
   type SceneData,
   type Shape,
+  type Sound,
   type Swf,
   type Tag,
   tags,
@@ -120,6 +122,12 @@ export interface BinaryCharacter {
   shared?: Uint8Array<ArrayBuffer>;
 }
 
+export interface SoundCharacter {
+  type: "sound";
+  id: number;
+  definition: Sound;
+}
+
 export type Character =
   | ShapeCharacter
   | SpriteCharacter
@@ -127,10 +135,11 @@ export type Character =
   | BitmapCharacter
   | TextCharacter
   | BinaryCharacter
-  | FontCharacter;
+  | FontCharacter
+  | SoundCharacter;
 
 /** What a timeline can place: every character but data and fonts. */
-export type DisplayCharacter = Exclude<Character, BinaryCharacter | FontCharacter>;
+export type DisplayCharacter = Exclude<Character, BinaryCharacter | FontCharacter | SoundCharacter>;
 
 /** What Flash makes of a bitmap it cannot read. */
 export const INVALID_PIXELS: BitmapPixels = {
@@ -330,6 +339,11 @@ function timelineOf(
       case tags.DefineBinaryData: {
         const { id, data } = readBinaryData(bytes, t);
         library.set(id, { type: "binary", id, data });
+        break;
+      }
+      case tags.DefineSound: {
+        const definition = readSound(bytes, t);
+        library.set(definition.id, { type: "sound", id: definition.id, definition });
         break;
       }
       case tags.JPEGTables:
