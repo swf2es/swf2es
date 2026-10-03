@@ -9,6 +9,7 @@ export const DefineBits = 6;
 export const DefineButton = 7;
 export const JPEGTables = 8;
 export const SetBackgroundColor = 9;
+export const DefineSound = 14;
 export const DefineButtonSound = 17;
 export const DefineBitsLossless = 20;
 export const DefineBitsJPEG2 = 21;

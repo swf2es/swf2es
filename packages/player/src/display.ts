@@ -718,7 +718,7 @@ export function buttonStates(
       [];
     for (const record of character.records) {
       const c = record.states & flag ? library.characters.get(record.character) : undefined;
-      if (c && c.type !== "binary" && c.type !== "font") {
+      if (c && c.type !== "binary" && c.type !== "font" && c.type !== "sound") {
         const display = displayFor(c, library);
         display.applyPlace(recordPlace(record, flag !== BUTTON_HIT_TEST));
         parts.push({ display, character: c, record });
@@ -925,7 +925,12 @@ export class MovieClip extends Container {
       // Data is no display object: Flash places nothing for it.
       const character =
         place.character === null ? null : this.library.characters.get(place.character);
-      if (!character || character.type === "binary" || character.type === "font") {
+      if (
+        !character ||
+        character.type === "binary" ||
+        character.type === "font" ||
+        character.type === "sound"
+      ) {
         existing?.applyPlace(place);
         continue;
       }
@@ -1066,7 +1071,12 @@ export class MovieClip extends Container {
 
       const character =
         jump.place.character === null ? null : this.library.characters.get(jump.place.character);
-      if (!character || character.type === "binary" || character.type === "font") {
+      if (
+        !character ||
+        character.type === "binary" ||
+        character.type === "font" ||
+        character.type === "sound"
+      ) {
         existing?.applyPlace(jump.place);
         continue;
       }

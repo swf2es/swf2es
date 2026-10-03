@@ -6,8 +6,17 @@
 // hook that takes the display object the player has pending, when the
 // player constructs a timeline child's class, or makes one for a `new`.
 import type { Codegen } from "@swf2es/codegen";
-import { isAs3, readDoAbc, readSwf, readSymbolClass, type Swf, tags } from "@swf2es/format";
+import {
+  isAs3,
+  readDoAbc,
+  readSwf,
+  readSymbolClass,
+  type Sound,
+  type Swf,
+  tags,
+} from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import { type AudioHost, browserAudioHost, type DecodedSound } from "./audio.js";
 import { BitmapStore } from "./bitmap.js";
 import {
   BitmapObject,
@@ -27,6 +36,7 @@ import { FontSet } from "./fonts.js";
 import { decodeImages, decodeInBrowser, type ImageDecode } from "./images.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
+import { finishSounds } from "./playerglobal/flash/media/Sound.js";
 import { defaultStorage, type SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
 import {
   type PlatformCapabilities,
@@ -42,6 +52,7 @@ import {
   INVALID_PIXELS,
   type Library,
   readLibrary,
+  type SoundCharacter,
 } from "./timeline.js";
 
 type AsObject = avm2.AsObject;
@@ -165,6 +176,13 @@ interface Symbol {
   library: Library;
 }
 
+interface SharedAudio {
+  definition: WeakRef<Sound>;
+  decoded: DecodedSound | null;
+  pending: Promise<DecodedSound> | null;
+  serial: number;
+}
+
 export class Scripting {
   readonly rt: avm2.Runtime;
   /**
@@ -188,6 +206,20 @@ export class Scripting {
     library: Library;
   }[] = [];
   readonly socket: SocketHost | null;
+  readonly audio: AudioHost | null;
+  private readonly audioEntries = new WeakMap<SoundCharacter, SharedAudio>();
+  private readonly sharedAudio = new Map<number, SharedAudio[]>();
+  private readonly sharedAudioGone = new FinalizationRegistry<{
+    hash: number;
+    entry: SharedAudio;
+    serial: number;
+  }>(({ hash, entry, serial }) => {
+    if (entry.serial !== serial || entry.definition.deref()) {
+      return;
+    }
+
+    this.removeSharedAudio(hash, entry);
+  });
   /**
    * The character, and its SWF's library, each class SymbolClass bound
    * makes, for a `new` of the class from a script: by the module that
@@ -199,8 +231,17 @@ export class Scripting {
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
   private preparing: Promise<void> = Promise.resolve();
-  /** Stream fetches are independent of Loader's ordered preparation chain. */
-  private readonly pendingStreams = new Set<Promise<void>>();
+  /** Host requests are independent of Loader's ordered preparation chain. */
+  private readonly pendingRequests = new Set<Promise<void>>();
+
+  /** Keep an asynchronous host task visible to settled(). */
+  trackRequest(task: Promise<void>): void {
+    this.pendingRequests.add(task);
+    void task.then(
+      () => this.pendingRequests.delete(task),
+      () => this.pendingRequests.delete(task),
+    );
+  }
   /** Completed host byte requests delivered at the next frame, with scripts on the player thread. */
   private readonly readyBytes: (() => void)[] = [];
 
@@ -308,6 +349,7 @@ export class Scripting {
       platform?: Partial<PlatformCapabilities>;
       externalInterface?: ExternalInterfaceHost;
       socket?: SocketHost;
+      audio?: AudioHost | null;
       decodeImage?: ImageDecode | null;
       screenCapabilities?: Partial<ScreenCapabilities>;
       /**
@@ -335,6 +377,7 @@ export class Scripting {
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
     this.externalInterface = options.externalInterface ?? null;
     this.socket = options.socket ?? null;
+    this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
     this.storage = options.storage ?? defaultStorage();
@@ -613,6 +656,89 @@ export class Scripting {
     return null;
   }
 
+  /** A DefineSound a class or one of its bases was bound to. */
+  soundSymbol(traits: SymbolTraits): SoundCharacter | null {
+    for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
+      const symbol = this.symbolOf(t);
+      if (symbol) {
+        return symbol.character.type === "sound" ? symbol.character : null;
+      }
+    }
+
+    return null;
+  }
+
+  /** Decode a sound on first play; live libraries can share an identical decode. */
+  soundClip(character: SoundCharacter): Promise<DecodedSound> | null {
+    if (!this.audio) {
+      return null;
+    }
+
+    const own = this.audioEntries.get(character);
+    if (own?.pending) {
+      return own.pending;
+    }
+
+    const ownDecoded = own?.decoded;
+    if (ownDecoded) {
+      return Promise.resolve(ownDecoded);
+    }
+
+    const definition = character.definition;
+    const hash = soundHash(definition);
+    for (const entry of this.sharedAudio.get(hash) ?? []) {
+      const prior = entry.definition.deref();
+      if (!prior || !sameSound(prior, definition)) {
+        continue;
+      }
+
+      const decoded = entry.decoded;
+      const clip = entry.pending ?? (decoded ? Promise.resolve(decoded) : null);
+      if (clip) {
+        entry.definition = new WeakRef(definition);
+        this.sharedAudioGone.register(definition, {
+          hash,
+          entry,
+          serial: ++entry.serial,
+        });
+        this.audioEntries.set(character, entry);
+        return clip;
+      }
+    }
+
+    const entry: SharedAudio = {
+      definition: new WeakRef(definition),
+      decoded: null,
+      pending: null,
+      serial: 1,
+    };
+    const audio = this.audio;
+    const clip = Promise.resolve().then(() => audio.decode(definition));
+    entry.pending = clip;
+    const matches = this.sharedAudio.get(hash) ?? [];
+    matches.push(entry);
+    this.sharedAudio.set(hash, matches);
+    this.sharedAudioGone.register(definition, { hash, entry, serial: 1 });
+    void clip.then(
+      (decoded) => {
+        entry.decoded = decoded;
+        entry.pending = null;
+      },
+      () => this.removeSharedAudio(hash, entry),
+    );
+    this.audioEntries.set(character, entry);
+    return clip;
+  }
+
+  private removeSharedAudio(hash: number, entry: SharedAudio): void {
+    const matches = this.sharedAudio.get(hash)?.filter((candidate) => candidate !== entry) ?? [];
+    if (matches.length > 0) {
+      this.sharedAudio.set(hash, matches);
+    } else {
+      this.sharedAudio.delete(hash);
+    }
+  }
+
   /** What SymbolClass bound the class of `traits` to, if anything: by its defining module, then its name. */
   private symbolOf(traits: SymbolTraits): Symbol | undefined {
     const abc = (traits.abc as avm2.Abc | null | undefined) ?? null;
@@ -804,7 +930,12 @@ export class Scripting {
     for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
       // A display object's class bound to data has no display of it.
       const symbol = this.symbolOf(t);
-      if (symbol && symbol.character.type !== "binary" && symbol.character.type !== "font") {
+      if (
+        symbol &&
+        symbol.character.type !== "binary" &&
+        symbol.character.type !== "font" &&
+        symbol.character.type !== "sound"
+      ) {
         if (symbol.character.type === "text") {
           // A new linked TextField has its symbol's bounds, but not its timeline's initial text.
           const text = new TextObject(symbol.character, false);
@@ -1051,11 +1182,7 @@ export class Scripting {
     const completed = fetched.then((result) => {
       this.readyBytes.push(() => deliver(result, outgoing.url));
     });
-    this.pendingStreams.add(completed);
-    void completed.then(
-      () => this.pendingStreams.delete(completed),
-      () => this.pendingStreams.delete(completed),
-    );
+    this.trackRequest(completed);
   }
 
   /** Snapshot a URLRequest at load time, before scripts can change its data or headers. */
@@ -1118,7 +1245,7 @@ export class Scripting {
    * the frame after its request, as Flash's loadBytes does.
    */
   settled(): Promise<void> {
-    return Promise.all([this.preparing, ...this.pendingStreams]).then(() => {});
+    return Promise.all([this.preparing, ...this.pendingRequests]).then(() => {});
   }
 
   private enqueue(
@@ -1624,6 +1751,7 @@ export class Scripting {
    */
   frame(root: DisplayObject, entered = true): void {
     this.overflowed = false;
+    finishSounds(this);
     if (entered) {
       this.frames++;
       this.broadcast("enterFrame");
@@ -1664,6 +1792,49 @@ export class Scripting {
 
 /** How deep goto cycles may nest before a goto throws a stack overflow, Error #1023. */
 const MAX_GOTO_CYCLES = 256;
+
+/** Compare the bytes too: a 32-bit hash only narrows a bucket, never decides identity. */
+function sameSound(a: Sound, b: Sound): boolean {
+  if (
+    a.format !== b.format ||
+    a.sampleRate !== b.sampleRate ||
+    a.sampleSize !== b.sampleSize ||
+    a.channels !== b.channels ||
+    a.sampleCount !== b.sampleCount ||
+    a.seekSamples !== b.seekSamples ||
+    a.data.length !== b.data.length
+  ) {
+    return false;
+  }
+
+  for (let i = 0; i < a.data.length; i++) {
+    if (a.data[i] !== b.data[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function soundHash(sound: Sound): number {
+  let hash = 0x811c9dc5;
+  for (const value of [
+    sound.format,
+    sound.sampleRate,
+    sound.sampleSize,
+    sound.channels,
+    sound.sampleCount,
+    sound.seekSamples,
+  ]) {
+    hash = Math.imul(hash ^ value, 0x01000193);
+  }
+
+  for (const byte of sound.data) {
+    hash = Math.imul(hash ^ byte, 0x01000193);
+  }
+
+  return hash >>> 0;
+}
 
 /** The real clock where the host has one, browsers and node alike; else none, and the frame clock. */
 function defaultClock(): (() => number) | null {

@@ -54,6 +54,7 @@ export {
   type Shape,
   type ShapeRecord,
 } from "./shape.js";
+export { readSound, type Sound } from "./sound.js";
 export {
   backgroundColor,
   isAs3,

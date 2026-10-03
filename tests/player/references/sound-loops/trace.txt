@@ -1,0 +1,3 @@
+frame 20 true,true,false,false
+frame 30 true,true,true,false
+frame 42 true,true,true,true

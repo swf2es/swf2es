@@ -1,0 +1,5 @@
+embedded 11025 11025 1000 false false null
+channel [object SoundChannel] 0
+copy 1
+set 0.25
+past end null

@@ -1047,8 +1047,27 @@ and `_hittestobject` are the reference, with the `draws` case.
 
 `SoundTransform` keeps its volume and four channel coefficients on each
 AVM2 object. The `pan` getter and setter remain playerglobal's AS3 code,
-which derives them from those coefficients. This stores the values scripts
-read and write; applying them to decoded audio belongs with sound playback.
+which derives them from those coefficients. A `SoundChannel` copies the
+transform it receives, with the channel coefficients truncated to hundredths
+as Flash's sound-transform corpus trace shows, and the four gains reach the
+browser's left and right outputs through Web Audio. `Sound` classes bound by
+SymbolClass to a DefineSound tag find its encoded samples in the library.
+The player decodes MP3 or uncompressed 8/16-bit sound on first play, sharing
+a decode when separate loads contain the same sound. The shared cache holds
+decoded audio while a sound uses it; entries leave when no SWF holds their
+sound definition, so unused audio can be collected. The parser leaves the
+MP3 seek word out of the encoded bytes; the tag's sample count and rate,
+not the decoder's duration, give the embedded sound's `length`.
+
+An external `Sound.load` uses the same host fetch as `URLStream`; its
+open, progress and complete or error reach ActionScript on a frame, after
+the host has decoded it. `Sound.play` gets a channel immediately, with
+start time, repeats, stop and sound transform. Sound-complete is delivered
+on a frame. A page may provide an `AudioHost` to `Scripting`; without one,
+the player keeps the script-visible sound state but emits no audio.
+DefineSound's ADPCM, Nellymoser and Speex formats, timeline StartSound and
+stream tags, ByteArray sound loading, ID3 and SoundMixer are later slices.
+MP3 seek samples are parsed but not yet applied to decoded browser audio.
 
 ### Time
 
