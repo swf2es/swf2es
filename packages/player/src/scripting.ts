@@ -36,12 +36,12 @@ import { FontSet } from "./fonts.js";
 import { decodeImages, decodeInBrowser, type ImageDecode } from "./images.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
+import { finishSounds } from "./playerglobal/flash/media/Sound.js";
 import { defaultStorage, type SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
 import {
   type PlatformCapabilities,
   platformCapabilities,
 } from "./playerglobal/flash/system/Capabilities.js";
-import { finishSounds } from "./playerglobal/flash/media/Sound.js";
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
 import { sha256 } from "./sha256.js";
 import {
@@ -178,7 +178,7 @@ interface Symbol {
 
 interface SharedAudio {
   definition: WeakRef<Sound>;
-  decoded: WeakRef<DecodedSound> | null;
+  decoded: DecodedSound | null;
   pending: Promise<DecodedSound> | null;
   serial: number;
 }
@@ -679,7 +679,7 @@ export class Scripting {
       return own.pending;
     }
 
-    const ownDecoded = own?.decoded?.deref();
+    const ownDecoded = own?.decoded;
     if (ownDecoded) {
       return Promise.resolve(ownDecoded);
     }
@@ -692,7 +692,7 @@ export class Scripting {
         continue;
       }
 
-      const decoded = entry.decoded?.deref();
+      const decoded = entry.decoded;
       const clip = entry.pending ?? (decoded ? Promise.resolve(decoded) : null);
       if (clip) {
         entry.definition = new WeakRef(definition);
@@ -721,7 +721,7 @@ export class Scripting {
     this.sharedAudioGone.register(definition, { hash, entry, serial: 1 });
     void clip.then(
       (decoded) => {
-        entry.decoded = new WeakRef(decoded);
+        entry.decoded = decoded;
         entry.pending = null;
       },
       () => this.removeSharedAudio(hash, entry),

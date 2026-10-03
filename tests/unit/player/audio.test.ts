@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { createCodegen } from "@swf2es/codegen";
 import { readSwf, type Sound, tags } from "../../../packages/format/dist/index.js";
 import { browserAudioHost, type DecodedSound } from "../../../packages/player/dist/audio.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
 import { readLibrary, type SoundCharacter } from "../../../packages/player/dist/timeline.js";
 import { BitWriter, end, showFrame, swf, tag } from "../../swf-writer.ts";
+
+setFlagsFromString("--expose-gc");
+const gc = runInNewContext("gc") as () => void;
 
 test("browser audio decodes SWF PCM and plays through its four channel coefficients", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
@@ -161,6 +166,46 @@ test("identical sounds in separate SWF libraries share one decode per player", a
   };
   await scripting.soundClip(changed);
   assert.equal(decodes, 2);
+});
+
+test("a live sound keeps its decoded audio across garbage collection", async () => {
+  const wasm = await WebAssembly.compile(
+    await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
+  );
+  let decodes = 0;
+  const scripting = new Scripting(await createCodegen(wasm), {
+    audio: {
+      async decode() {
+        decodes++;
+        return { durationMs: 1000, play: () => null };
+      },
+    },
+  });
+  const character: SoundCharacter = {
+    type: "sound",
+    id: 1,
+    definition: {
+      id: 1,
+      format: 2,
+      sampleRate: 11025,
+      sampleSize: 16,
+      channels: 1,
+      sampleCount: 11025,
+      seekSamples: 0,
+      data: new Uint8Array([1, 2, 3]),
+    },
+  };
+
+  await scripting.soundClip(character);
+  // The decoded clip's first promise must have settled before collection.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  for (let i = 0; i < 3; i++) {
+    gc();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  await scripting.soundClip(character);
+  assert.equal(decodes, 1);
 });
 
 test("a SWF with an unused embedded sound starts without decoding it", async () => {
