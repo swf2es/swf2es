@@ -1,0 +1,43 @@
+integerValue | has false | get error 1065 | byName error 1065
+Vector.<integerValue> | has false | get error 1065 | byName error 1065
+Vector.<integerValueX> | has false | get error 1065 | byName error 1065
+Vector.<foo> | has false | get error 1065 | byName error 1065
+Vector.<Foo> | has false | get error 1065 | byName error 1065
+Vector.<abc> | has false | get error 1065 | byName error 1065
+Vector.<x> | has false | get error 1065 | byName error 1065
+Vector.<Vector> | has false | get error 1065 | byName error 1065
+Vector.<vector> | has false | get error 1065 | byName error 1065
+Vector.<void> | has false | get error 1065 | byName error 1065
+Vector.<null> | has false | get error 1065 | byName error 1065
+Vector.<undefined> | has true | get error 1107 | byName error 1107
+Vector.<> | has false | get error 1065 | byName error 1065
+Vector.< > | has false | get error 1065 | byName error 1065
+Vector.<*> | has false | get error 1065 | byName error 1065
+Vector.<int> | has true | get [class Vector.<int>] | byName [class Vector.<int>]
+Vector.<String> | has true | get [class Vector.<String>] | byName [class Vector.<String>]
+Vector.<string> | has false | get error 1065 | byName error 1065
+Vector.<Object> | has true | get [class Vector.<Object>] | byName [class Vector.<Object>]
+Vector.<Sprite> | has false | get error 1065 | byName error 1065
+Vector.<flash.display.Sprite> | has true | get [class Vector.<flash.display::Sprite>] | byName [class Vector.<flash.display::Sprite>]
+Vector.<flash.display::Sprite> | has true | get [class Vector.<flash.display::Sprite>] | byName [class Vector.<flash.display::Sprite>]
+Vector.<pkg.Missing> | has false | get error 1065 | byName error 1065
+Vector.<pkg::Missing> | has false | get error 1065 | byName error 1065
+Vector.<__AS3__.vec::Vector> | has true | get [class Vector.<__AS3__.vec::Vector>] | byName [class Vector.<__AS3__.vec::Vector>]
+Vector.<__AS3__.vec.Vector> | has true | get [class Vector.<__AS3__.vec::Vector>] | byName [class Vector.<__AS3__.vec::Vector>]
+Vector.<Vector.<int>> | has true | get [class Vector.<__AS3__.vec::Vector.<int>>] | byName [class Vector.<__AS3__.vec::Vector.<int>>]
+Vector.<Vector.<integerValue>> | has false | get error 1065 | byName error 1065
+Vector.<trace> | has true | get error 1107 | byName error 1107
+Vector.<flash.utils.getTimer> | has true | get error 1107 | byName error 1107
+Vector.<Math> | has true | get [class Vector.<Math>] | byName [class Vector.<Math>]
+Vector.<JSON> | has true | get [class Vector.<JSON>] | byName [class Vector.<JSON>]
+Vector.<Main> | has true | get [class Vector.<Main>] | byName [class Vector.<Main>]
+Vector.<1> | has false | get error 1065 | byName error 1065
+Vector.<a b> | has false | get error 1065 | byName error 1065
+Vector.<a.b> | has false | get error 1065 | byName error 1065
+Vector.<counter> | has true | get error 1107 | byName error 1107
+counter | has true | get 7 | byName 7
+::Math | has true | get [class Math] | byName [class Math]
+.Math | has true | get [class Math] | byName [class Math]
+::JSON | has true | get [class JSON] | byName [class JSON]
+.JSON | has true | get [class JSON] | byName [class JSON]
+JSON | has true | get [class JSON] | byName [class JSON]

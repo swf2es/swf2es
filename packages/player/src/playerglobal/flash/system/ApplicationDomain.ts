@@ -26,8 +26,16 @@ export function applicationDomainNatives(s: Scripting): avm2.Natives {
       return false;
     }
 
+    // A Vector of a definition that is not a class is defined, though
+    // getDefinition refuses it; an error, the requested name's or one an
+    // initializer the lookup ran threw, leaves the name not defined.
     try {
-      definitionOf(o, name);
+      definitionNamed(
+        s.rt,
+        String(name),
+        (q) => s.rt.definitionNamed(q, domainOf(o)),
+        () => true,
+      );
       return true;
     } catch {
       return false;

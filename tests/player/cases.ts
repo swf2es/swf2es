@@ -645,7 +645,8 @@ function loads(compile: Compile): Uint8Array {
 // SWF has one frame: a clip taken off the display list plays on in Flash,
 // which is not this case's.
 // A document class that looks definitions up (scripts/Definitions.as), and
-// a lazy DoABC whose script throws when it runs (scripts/DefinitionsBad.as).
+// lazy DoABCs whose scripts throw when they run (scripts/DefinitionsBad.as,
+// scripts/DefinitionsIndirect.as).
 function definitions(compile: Compile): Uint8Array {
   return w.swf({
     width: 100,
@@ -656,6 +657,7 @@ function definitions(compile: Compile): Uint8Array {
       w.fileAttributes(true),
       w.backgroundColor(0xffffff),
       w.doAbc(compile("DefinitionsBad"), "DefinitionsBad", true),
+      w.doAbc(compile("DefinitionsIndirect"), "DefinitionsIndirect", true),
       w.doAbc(compile("Definitions"), "Definitions"),
       w.symbolClass([[0, "Main"]]),
       w.showFrame(),
@@ -1647,6 +1649,15 @@ export const cases: PlayerCase[] = [
   },
   // The unload at INIT follows frame 2's capture (see the harness): frame 3 shows it.
   { name: "loads-init", build: loadsInit, frames: 3, capture: [3], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "vector-definitions",
+    swf: bare,
+    script: "VectorDefinitions",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "definitions",
     build: definitions,
