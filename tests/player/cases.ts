@@ -1663,6 +1663,197 @@ export const probeFont = (id: number): Uint8Array =>
     kerning: [["a", "b", -100]],
   });
 
+// Static text in Probe, defined before the font it uses: a DefineText of
+// two lines in two colours, and a DefineText2 turned and scaled by its
+// matrix, a run in half-transparent green, one of a font the SWF lacks,
+// which shows nothing, and a smaller line below.
+function staticTexts(): Uint8Array {
+  return w.swf({
+    width: 320,
+    height: 160,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.staticText({
+        id: 1,
+        bounds: [0, 1400, -400, 800],
+        matrix: { tx: 400, ty: 1000 },
+        records: [
+          {
+            font: 5,
+            height: 400,
+            color: 0x0000cc,
+            x: 0,
+            y: 0,
+            glyphs: [
+              [2, 300],
+              [3, 400],
+              [4, 200],
+            ],
+          },
+          {
+            color: 0xcc0000,
+            x: 0,
+            y: 600,
+            glyphs: [
+              [1, 450],
+              [2, 200],
+            ],
+          },
+        ],
+      }),
+      probeFont(5),
+      w.staticText({
+        id: 2,
+        version: 2,
+        bounds: [0, 1800, -600, 1000],
+        matrix: { a: 1.2, b: 0.3, c: -0.3, d: 1.2, tx: 3200, ty: 800 },
+        records: [
+          {
+            font: 5,
+            height: 600,
+            color: 0x80008000,
+            x: 0,
+            y: 0,
+            glyphs: [
+              [2, 400],
+              [3, 500],
+            ],
+          },
+          { font: 99, height: 400, glyphs: [[2, 300]] },
+          {
+            font: 5,
+            height: 300,
+            color: 0xff000000,
+            x: 200,
+            y: 900,
+            glyphs: [
+              [4, 200],
+              [1, 300],
+            ],
+          },
+        ],
+      }),
+      w.place({ depth: 1, character: 1, matrix: { tx: 200, ty: 200 } }),
+      w.place({ depth: 2, character: 2 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// Static text in Probe over a red square, given drop shadows by
+// scripts/StaticTextFilters.as.
+function staticTextFilters(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xcc0000, 3600),
+      probeFont(5),
+      w.staticText({
+        id: 2,
+        bounds: [0, 3300, -1000, 300],
+        records: [
+          {
+            font: 5,
+            height: 1200,
+            color: 0xffffff,
+            x: 0,
+            y: 0,
+            glyphs: [
+              [2, 700],
+              [3, 900],
+              [4, 500],
+              [1, 1300],
+            ],
+          },
+        ],
+      }),
+      w.doAbc(abc, "StaticTextFilters"),
+      w.symbolClass([[0, "StaticTextFilters"]]),
+      w.place({ depth: 1, character: 1, matrix: { tx: 200, ty: 200 } }),
+      w.place({ depth: 2, character: 2, matrix: { tx: 600, ty: 1600 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// Static text in Probe for scripts/StaticTextProbe.as: a text of two
+// lines, one that sets no colour, and one whose middle glyph is past the
+// font's, which moves no pen.
+function staticTextProbe(abc: Uint8Array): Uint8Array {
+  const ab: [number, number][] = [
+    [2, 300],
+    [3, 400],
+  ];
+  return w.swf({
+    width: 200,
+    height: 120,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      probeFont(5),
+      w.staticText({
+        id: 1,
+        version: 2,
+        bounds: [0, 1400, -800, 800],
+        records: [
+          { font: 5, height: 400, color: 0xff000000, x: 0, y: 0, glyphs: ab },
+          {
+            y: 600,
+            glyphs: [
+              [1, 450],
+              [4, 200],
+            ],
+          },
+        ],
+      }),
+      w.staticText({
+        id: 2,
+        bounds: [0, 1400, -800, 300],
+        records: [{ font: 5, height: 400, x: 0, y: 0, glyphs: ab }],
+      }),
+      w.staticText({
+        id: 3,
+        version: 2,
+        bounds: [0, 1400, -800, 300],
+        records: [
+          {
+            font: 5,
+            height: 400,
+            color: 0xff0000cc,
+            x: 0,
+            y: 0,
+            glyphs: [
+              [2, 300],
+              [40, 600],
+              [3, 400],
+            ],
+          },
+        ],
+      }),
+      w.doAbc(abc, "StaticTextProbe"),
+      w.symbolClass([[0, "StaticTextProbe"]]),
+      w.place({ depth: 1, character: 1, matrix: { tx: 800, ty: 800 } }),
+      w.place({ depth: 2, character: 2, matrix: { tx: 800, ty: 2000 } }),
+      w.place({ depth: 3, character: 3, matrix: { tx: 2400, ty: 800 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Text laid out in Probe (scripts/TextLayout.as).
 function textLayout(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -1844,6 +2035,35 @@ export const cases: PlayerCase[] = [
     maxOutliers: 1300,
   },
   { name: "fill-holes", swf: fillHoles(), frames: 1, capture: [1], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "static-text",
+    swf: staticTexts(),
+    frames: 1,
+    capture: [1],
+    tolerance: 32,
+    maxOutliers: 100,
+  },
+  {
+    name: "static-text-probe",
+    swf: staticTextProbe,
+    script: "StaticTextProbe",
+    frames: 2,
+    capture: [1],
+    tolerance: 32,
+    maxOutliers: 20,
+  },
+  {
+    name: "static-text-filters",
+    swf: staticTextFilters,
+    script: "StaticTextFilters",
+    frames: 1,
+    capture: [1],
+    // The glyphs' edges, where the sharp shadow meets the glow, differ by
+    // up to 52 a channel along some 120 pixels: the page's four samples a
+    // pixel against adl's whole pixels, as for `filters`.
+    tolerance: 32,
+    maxOutliers: 200,
+  },
   {
     name: "morph-shapes",
     swf: morphs(),

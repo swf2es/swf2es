@@ -23,6 +23,7 @@ import { type Filter, filterOfSwf } from "./filters.js";
 import type { FontSet } from "./fonts.js";
 import { type Rect, shifted } from "./geometry.js";
 import { morphAt } from "./morph.js";
+import { type PlacedGlyph, placeGlyphs } from "./static-text.js";
 import { TextModel } from "./text.js";
 import { GUTTER, layoutText, type TextLayout } from "./text-layout.js";
 import {
@@ -34,6 +35,7 @@ import {
   type Library,
   type MorphCharacter,
   type ShapeCharacter,
+  type StaticTextCharacter,
   type TextCharacter,
   type Timeline,
 } from "./timeline.js";
@@ -404,6 +406,29 @@ export class ShapeObject extends DisplayObject {
     }
 
     return this.shape;
+  }
+}
+
+/** A StaticText: DefineText's glyphs, which only a timeline places; its bounds the tag's. */
+export class StaticTextObject extends DisplayObject {
+  private laidGlyphs: { glyphs: PlacedGlyph[]; text: string | null } | null = null;
+
+  constructor(
+    readonly definition: StaticTextCharacter,
+    private readonly characters: Map<number, Character>,
+  ) {
+    super();
+    this.character = definition;
+  }
+
+  /**
+   * Its glyphs as placed, and its text, found the first time they are
+   * asked for: by then its SWF's fonts are all read, those defined after it
+   * too.
+   */
+  get glyphs(): { glyphs: PlacedGlyph[]; text: string | null } {
+    this.laidGlyphs ??= placeGlyphs(this.definition, this.characters);
+    return this.laidGlyphs;
   }
 }
 
@@ -1286,6 +1311,10 @@ export function displayFor(
     bitmap.character = character;
     bitmap.hasImage = hasImage;
     return bitmap;
+  }
+
+  if (character.type === "static") {
+    return new StaticTextObject(character, library.characters);
   }
 
   if (character.type === "text") {

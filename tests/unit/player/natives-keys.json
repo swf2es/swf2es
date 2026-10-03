@@ -706,6 +706,7 @@
     "flash.system::WorkerDomain#createWorker",
     "flash.system::WorkerDomain#listWorkers",
     "flash.system::WorkerDomain.get:isSupported",
+    "flash.text::StaticText#get:text",
     "flash.text::TextField#appendText",
     "flash.text::TextField#get:alwaysShowSelection",
     "flash.text::TextField#get:antiAliasType",

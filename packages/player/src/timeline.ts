@@ -24,9 +24,11 @@ import {
   readShape,
   readSound,
   readSprite,
+  readStaticText,
   type SceneData,
   type Shape,
   type Sound,
+  type StaticText,
   type Swf,
   type Tag,
   tags,
@@ -93,6 +95,13 @@ export interface TextCharacter {
   font: FontName | null;
 }
 
+/** DefineText or DefineText2: glyphs of its SWF's fonts, which it finds as it is shown (static-text.ts). */
+export interface StaticTextCharacter {
+  type: "static";
+  id: number;
+  definition: StaticText;
+}
+
 /** DefineButton or DefineButton2: the characters it shows in each state. */
 export interface ButtonCharacter {
   type: "button";
@@ -147,6 +156,7 @@ export type Character =
   | ButtonCharacter
   | BitmapCharacter
   | TextCharacter
+  | StaticTextCharacter
   | BinaryCharacter
   | FontCharacter
   | SoundCharacter;
@@ -351,6 +361,12 @@ function timelineOf(
           italic: font.italic,
           font,
         });
+        break;
+      }
+      case tags.DefineText:
+      case tags.DefineText2: {
+        const definition = readStaticText(bytes, t);
+        library.set(definition.id, { type: "static", id: definition.id, definition });
         break;
       }
       case tags.DefineEditText: {

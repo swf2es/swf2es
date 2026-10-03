@@ -39,6 +39,7 @@ import {
   type DisplayObject,
   PIXELS,
   ShapeObject,
+  StaticTextObject,
   TextObject,
   TRANSFORM,
 } from "./display.js";
@@ -862,6 +863,11 @@ export class PixiView {
       return;
     }
 
+    if (o instanceof StaticTextObject) {
+      drawStaticText(o, node.art);
+      return;
+    }
+
     const shape = o instanceof ShapeObject ? o.drawn() : null;
     node.layers = o.drawing?.layers ?? shape?.layers ?? [];
     const build = (layer: ShapeLayer) => {
@@ -1586,6 +1592,29 @@ function drawText(o: TextObject, art: PixiContainer): void {
     art.addChild(clip);
     text.mask = clip;
   }
+}
+
+/** Static text: each glyph's shared fill, at its height and in its colour, under the text's matrix. */
+function drawStaticText(o: StaticTextObject, art: PixiContainer): void {
+  const m = o.definition.definition.matrix;
+  const text = new PixiContainer();
+  text.setFromMatrix(new Matrix(m.a, m.b, m.c, m.d, m.tx / 20, m.ty / 20));
+  for (const placed of o.glyphs.glyphs) {
+    const fill = glyphFill(placed.glyph);
+    if (!fill) {
+      continue;
+    }
+
+    // The fill is in the font's units over 20: a height in twips over the em puts it in pixels.
+    const g = new Graphics(fill);
+    g.scale.set(placed.height / placed.font.em);
+    g.position.set(placed.x / 20, placed.y / 20);
+    g.tint = placed.color & 0xffffff;
+    g.alpha = (placed.color >>> 24) / 255;
+    text.addChild(g);
+  }
+
+  art.addChild(text);
 }
 
 /** A run of a device font's characters in one format, as Pixi Text from where the layout put its first, on the baseline. */

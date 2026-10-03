@@ -1,0 +1,4 @@
+"ab\nWc" "ab"
+glyph true true
+gap false true
+clear false true

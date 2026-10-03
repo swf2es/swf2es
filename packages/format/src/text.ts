@@ -1,6 +1,9 @@
-// The editable text character a SWF places on its timeline.
+// The text characters a SWF places on its timeline: editable text
+// (DefineEditText) and static text (DefineText, DefineText2).
 import { readString, utf8 } from "./display.js";
+import { type Matrix, readMatrix } from "./shape.js";
 import { type Rect, SwfReader, type Tag } from "./swf.js";
+import { DefineText2 } from "./tags.js";
 
 export interface EditText {
   id: number;
@@ -107,4 +110,73 @@ export function readFontName(bytes: Uint8Array, tag: Tag): FontName {
 
   const name = utf8(bytes.subarray(start, end));
   return { id, name, bold: (flags & 0x01) !== 0, italic: (flags & 0x02) !== 0 };
+}
+
+/** A run of DefineText's glyphs: what its record sets, null where it keeps the run before's. */
+export interface TextRecord {
+  font: number | null;
+  /** 0xAARRGGBB; DefineText's opaque. */
+  color: number | null;
+  /** The pen's place, in twips. */
+  x: number | null;
+  y: number | null;
+  /** The glyphs' height, in twips; set with the font. */
+  height: number | null;
+  /** Each glyph's index into the font's glyphs, and the pen's advance after it, in twips. */
+  glyphs: { index: number; advance: number }[];
+}
+
+/** DefineText or DefineText2: static text, glyphs of embedded fonts placed by the authoring tool. */
+export interface StaticText {
+  id: number;
+  bounds: Rect;
+  matrix: Matrix;
+  records: TextRecord[];
+}
+
+/** DefineText (11) or DefineText2 (33, whose colours have alpha), up to its end record or the tag's end. */
+export function readStaticText(bytes: Uint8Array, tag: Tag): StaticText {
+  const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+  const alpha = tag.code === DefineText2;
+  const id = r.u16();
+  const bounds = r.rect();
+  const matrix = readMatrix(r);
+  const glyphBits = r.u8();
+  const advanceBits = r.u8();
+  const records: TextRecord[] = [];
+  for (;;) {
+    const flags = r.u8();
+    if (flags === 0 || r.overrun) {
+      break;
+    }
+
+    const font = flags & 0x08 ? r.u16() : null;
+    let color: number | null = null;
+    if (flags & 0x04) {
+      const red = r.u8();
+      const green = r.u8();
+      const blue = r.u8();
+      const a = alpha ? r.u8() : 255;
+      color = ((a << 24) | (red << 16) | (green << 8) | blue) >>> 0;
+    }
+
+    const x = flags & 0x01 ? r.s16() : null;
+    const y = flags & 0x02 ? r.s16() : null;
+    const height = font !== null ? r.u16() : null;
+    const count = r.u8();
+    const glyphs: { index: number; advance: number }[] = [];
+    for (let i = 0; i < count && !r.overrun; i++) {
+      glyphs.push({ index: r.ub(glyphBits), advance: r.sb(advanceBits) });
+    }
+
+    // A record the tag's end cuts off is left out, not read as zeros.
+    if (r.overrun) {
+      break;
+    }
+
+    r.align();
+    records.push({ font, color, x, y, height, glyphs });
+  }
+
+  return { id, bounds, matrix, records };
 }

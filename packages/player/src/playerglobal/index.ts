@@ -38,6 +38,7 @@ import { capabilitiesNatives } from "./flash/system/Capabilities.js";
 import { securityNatives } from "./flash/system/Security.js";
 import { systemNatives } from "./flash/system/System.js";
 import { workerHooks, workerNatives } from "./flash/system/Worker.js";
+import { staticTextNatives } from "./flash/text/StaticText.js";
 import { textFieldNatives } from "./flash/text/TextField.js";
 import { byteArrayHooks } from "./flash/utils/ByteArray.js";
 import { timerNatives } from "./flash/utils/Timer.js";
@@ -80,6 +81,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...shapeNatives(s),
     ...simpleButtonNatives(s),
     ...timerNatives(s),
+    ...staticTextNatives(),
     ...textFieldNatives(s),
   };
 }

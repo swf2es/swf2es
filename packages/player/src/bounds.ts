@@ -2,7 +2,14 @@
 // and hit tests"): a SWF shape's recorded rectangles, a drawing's true
 // extent, a container's children's through their matrices.
 import type { Matrix } from "@swf2es/format";
-import { BitmapObject, Container, type DisplayObject, ShapeObject, TextObject } from "./display.js";
+import {
+  BitmapObject,
+  Container,
+  type DisplayObject,
+  ShapeObject,
+  StaticTextObject,
+  TextObject,
+} from "./display.js";
 import {
   apply,
   concat,
@@ -14,6 +21,7 @@ import {
   union,
 } from "./geometry.js";
 import { flatten, inside, orientation, type ShapeLayer } from "./shapes.js";
+import { hitsGlyph } from "./static-text.js";
 
 const TWIPS = 20;
 const IDENTITY: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
@@ -43,6 +51,16 @@ function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
 
   if (d instanceof TextObject) {
     return { xMin: d.left, yMin: d.top, xMax: d.left + d.width, yMax: d.top + d.height };
+  }
+
+  if (d instanceof StaticTextObject) {
+    const r = d.definition.definition.bounds;
+    return {
+      xMin: r.xMin / TWIPS,
+      yMin: r.yMin / TWIPS,
+      xMax: r.xMax / TWIPS,
+      yMax: r.yMax / TWIPS,
+    };
   }
 
   if (d instanceof ShapeObject && d.shape) {
@@ -244,6 +262,10 @@ function drawnAt(
   if (d instanceof BitmapObject) {
     const store = d.store;
     return !!store && !store.disposed && x >= 0 && x < store.width && y >= 0 && y < store.height;
+  }
+
+  if (d instanceof StaticTextObject) {
+    return hitsGlyph(d.definition, d.glyphs.glyphs, x, y, mask);
   }
 
   const layers: ShapeLayer[] =
