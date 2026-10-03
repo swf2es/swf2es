@@ -2053,7 +2053,7 @@
   "regress/security/bug_663469": {"passed":5,"failed":0,"exitCode":0,"error":null},
   "regress/security/bug_689243a": {"passed":0,"failed":0,"exitCode":1,"error":null},
   "regress/security/bug_689243b": {"passed":3,"failed":0,"exitCode":0,"error":null},
-  "regress/vector_domain_bug": {"passed":0,"failed":0,"exitCode":1,"error":null},
+  "regress/vector_domain_bug": {"passed":1,"failed":0,"exitCode":0,"error":null},
   "spidermonkey/js1_1/regress/function-001": {"passed":1,"failed":0,"exitCode":0,"error":null},
   "spidermonkey/js1_2/Array/array_split_1": {"passed":4,"failed":0,"exitCode":0,"error":null},
   "spidermonkey/js1_2/Array/general1": {"passed":6,"failed":0,"exitCode":0,"error":null},

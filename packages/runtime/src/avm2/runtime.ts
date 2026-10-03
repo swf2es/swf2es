@@ -114,6 +114,8 @@ export interface AbcDesc {
 /** A loaded module: what `rt.abc` returns, and methods reach as A. */
 export interface Abc extends AbcDesc {
   scriptStates: Script[];
+  /** The domain it was loaded into. */
+  domain: Domain;
 }
 
 export interface RuntimeOptions {
@@ -128,10 +130,13 @@ export interface RuntimeOptions {
   /**
    * An ABC compiled for avmshell's Domain.loadBytes, which runs it at once:
    * its module, or the VerifyError it was rejected with. The host compiles
-   * it, as the runtime does not include the compiler; without it loadBytes
-   * is unsupported.
+   * it after the ABCs `linked` names by their hashes, the domain's it loads
+   * into, as the runtime does not include the compiler; without it
+   * loadBytes is unsupported. Each module it evaluates needs a script of
+   * its own in stacks, a sourceURL comment, for Domain.currentDomain to
+   * find its code (see Runtime.codeDomain).
    */
-  compileAbc?: (abc: Uint8Array) => ((rt: Runtime) => Abc) | number;
+  compileAbc?: (abc: Uint8Array, linked: string[]) => ((rt: Runtime) => Abc) | number;
   /** Where avmshell's File reads and writes: by default in memory, empty at the start. */
   files?: ShellFiles;
   /**
@@ -564,6 +569,8 @@ export class ClassRef {
   constructor(
     readonly ns: Namespace,
     readonly name: string,
+    /** The domain its module was loaded into, which it is resolved in. */
+    readonly domain: Domain,
   ) {}
 }
 
@@ -613,21 +620,109 @@ interface GlobalName {
   script: Script;
 }
 
+/**
+ * An application domain, as avmplus' Domain: the scripts its modules
+ * define, by name, a name its chain defines already not again (see
+ * Runtime.abc); the definitions it has found, by name, which it keeps
+ * (see Runtime.findScript), as names and, apart, as types; and the ABCs
+ * loaded into it, by hash.
+ */
+export class Domain {
+  readonly globals = new Map<string, GlobalName[]>();
+  readonly cached = new Map<string, GlobalName[]>();
+  /** As avmplus' m_cachedTraits, which a name's lookup never fills, nor a type's m_cachedScripts. */
+  readonly types = new Map<string, GlobalName[]>();
+  readonly classRefs = new Map<Namespace, Map<string, ClassRef>>();
+  readonly own: string[] = [];
+
+  constructor(readonly parent: Domain | null) {}
+
+  /**
+   * The ABCs a module loaded into it now is compiled after: its parent's,
+   * including those loaded after it was made, then its own.
+   */
+  chain(): string[] {
+    return this.parent ? [...this.parent.chain(), ...this.own] : [...this.own];
+  }
+}
+
+/**
+ * The scripts a stack's frames name, innermost first: V8's "at f (script:1:2)"
+ * and "at script:1:2", and SpiderMonkey's and JavaScriptCore's "f@script:1:2".
+ */
+function frameScripts(stack: string | undefined): string[] {
+  const scripts: string[] = [];
+  for (const line of stack?.split("\n") ?? []) {
+    const m =
+      /^\s*at .*? \((.*):\d+:\d+\)$/.exec(line) ??
+      /^\s*at (.*):\d+:\d+$/.exec(line) ??
+      /@(.*):\d+:\d+$/.exec(line);
+    if (m) {
+      scripts.push(m[1]);
+    }
+  }
+
+  return scripts;
+}
+
+/** The definition of a table's that `mn` names: its namespaces in order, each at a version it sees. */
+function match(table: Map<string, GlobalName[]>, mn: Multiname, name: string): GlobalName | null {
+  const list = table.get(name);
+  if (!list) {
+    return null;
+  }
+
+  for (let i = 0; i < mn.namespaces.length; i++) {
+    const ns = mn.namespaces[i];
+    for (const g of list) {
+      if (g.ns === ns && g.version <= mn.versions[i]) {
+        return g;
+      }
+    }
+  }
+
+  return null;
+}
+
+/** Add a definition to a table, unless it has one of that name in that namespace. */
+function add(table: Map<string, GlobalName[]>, g: GlobalName, name: string): void {
+  let list = table.get(name);
+  if (!list) {
+    list = [];
+    table.set(name, list);
+  }
+
+  if (!list.some((other) => other.ns === g.ns)) {
+    list.push(g);
+  }
+}
+
 /** Thrown for an AS3 exception that is an Error the runtime made, before its class existed. */
 export class AsError extends Error {}
 
 export class Runtime {
   readonly print: (line: string) => void;
   readonly debugger: boolean;
-  readonly compileAbc: ((abc: Uint8Array) => ((rt: Runtime) => Abc) | number) | null;
+  readonly compileAbc:
+    | ((abc: Uint8Array, linked: string[]) => ((rt: Runtime) => Abc) | number)
+    | null;
   readonly files: ShellFiles;
   /** See RuntimeOptions.swfVersion. */
   swfVersion: number;
   readonly natives: Record<string, (rt: Runtime) => Method>;
   /** Names the scripts define, by local name: the first definition wins. */
-  private readonly globals = new Map<string, GlobalName[]>();
-  /** Class references by namespace, which is interned or private, then name. */
-  private readonly classRefs = new Map<Namespace, Map<string, ClassRef>>();
+  /** The root application domain, the builtins' and the main SWF's; and the one modules load into now. */
+  readonly root = new Domain(null);
+  private loading: Domain = this.root;
+  /**
+   * The domain of each loaded module's code, by the script a stack's frame
+   * names it with (see codeDomain); found from the stacks its loads took,
+   * which wait in `unlocated` until a domain other than the root exists.
+   */
+  private readonly moduleDomains = new Map<string, Domain>();
+  private readonly unlocated: [Error, Domain][] = [];
+  private children = false;
+  /** Vector.<T>'s references, by T's. */
   private readonly vectorRefs = new Map<TypeRef, VectorRef>();
   /**
    * The domain memory the domain memory instructions use: the ByteArray set
@@ -647,12 +742,9 @@ export class Runtime {
   defaultObjectEncoding = 3;
   /** ObjectEncoding.dynamicPropertyWriter: what writes a dynamic object's own properties in AMF3, if anything. */
   dynamicPropertyWriter: AsObject | null = null;
-  private domain: AsObject | null = null;
   /** Class aliases, as registerClassAlias sets them, both ways. */
   private readonly aliases = new Map<string, AsObject>();
   private readonly aliasByTraits = new Map<Traits, string>();
-  /** The hashes of the modules loaded, in order. */
-  private readonly loaded: string[] = [];
   /** The builtin classes' traits, made before their classes so the bootstrap can refer to them. */
   readonly objectTraits: Traits;
   readonly classTraits: Traits;
@@ -710,13 +802,62 @@ export class Runtime {
   ): Multiname {
     const attribute =
       kind === 0x0d || kind === 0x10 || kind === 0x12 || kind === 0x0e || kind === 0x1c;
-    return new Multiname(
+    const mn = new Multiname(
       kind,
       indices.map((i) => N[i]),
       indices.map((i) => V[i]),
       name,
       attribute,
     );
+    mn.domain = this.loading === this.root ? null : this.loading;
+    return mn;
+  }
+
+  /** A domain whose definitions are looked up after `parent`'s, as `new ApplicationDomain(parent)`. */
+  childDomain(parent: Domain = this.root): Domain {
+    this.children = true;
+    return new Domain(parent);
+  }
+
+  /**
+   * The domain of the innermost code on the stack that a module defines,
+   * as avmplus' AvmCore::codeContext; the root without one. A frame is a
+   * module's by its script, so a host gives each module a script of its
+   * own: its URL, or a sourceURL comment for code it evaluates.
+   */
+  codeDomain(): Domain {
+    if (!this.children) {
+      return this.root;
+    }
+
+    for (const [error, domain] of this.unlocated) {
+      // Its first frame is abc's own, its second the module's factory.
+      const at = frameScripts(error.stack)[1];
+      if (at) {
+        this.moduleDomains.set(at, domain);
+      }
+    }
+
+    this.unlocated.length = 0;
+    for (const at of frameScripts(new Error().stack)) {
+      const domain = this.moduleDomains.get(at);
+      if (domain) {
+        return domain;
+      }
+    }
+
+    return this.root;
+  }
+
+  /** `f`, which loads modules, with what it loads going into `domain`. */
+  loadInto<T>(domain: Domain, f: () => T): T {
+    const previous = this.loading;
+    this.loading = domain;
+    try {
+      return f();
+    } finally {
+      this.loading = previous;
+    }
   }
 
   typeName(_N: Namespace[], _V: number[], _S: number[][], base: number, param: number): TypeName {
@@ -753,22 +894,28 @@ export class Runtime {
         // A QName names its own namespace, null for any, and local name,
         // null for any, and may be an attribute's.
         // Bindings compare interned namespaces: an XML name's has a prefix.
-        return new Multiname(
+        const qualified = new Multiname(
           CONSTANT_Qname,
           [part.$ns ? part.$ns.interned : null],
           [255],
           part.$local,
           mn.attribute || part.$attr === true,
         );
+        qualified.domain = mn.domain;
+        return qualified;
       } else if (typeof part === "object" && part !== null) {
         // Its string only once a lookup needs it: a Dictionary does not.
-        return Multiname.keyed(kind, namespaces, versions, part, mn.attribute, this.keyName);
+        const keyed = Multiname.keyed(kind, namespaces, versions, part, mn.attribute, this.keyName);
+        keyed.domain = mn.domain;
+        return keyed;
       } else {
         name = typeof part === "string" ? part : this.toString(part);
       }
     }
 
-    return new Multiname(kind, namespaces, versions, name, mn.attribute);
+    const named = new Multiname(kind, namespaces, versions, name, mn.attribute);
+    named.domain = mn.domain;
+    return named;
   }
 
   /** An object's string, as the name of an object that is not a Dictionary. */
@@ -793,15 +940,16 @@ export class Runtime {
   }
 
   cls(ns: Namespace, name: string): ClassRef {
-    let byName = this.classRefs.get(ns);
+    const domain = this.loading;
+    let byName = domain.classRefs.get(ns);
     if (!byName) {
       byName = new Map();
-      this.classRefs.set(ns, byName);
+      domain.classRefs.set(ns, byName);
     }
 
     let ref = byName.get(name);
     if (!ref) {
-      ref = new ClassRef(ns, name);
+      ref = new ClassRef(ns, name, domain);
       byName.set(name, ref);
     }
 
@@ -822,16 +970,21 @@ export class Runtime {
 
   /** Load a module: its scripts' names become visible; the entry script of a non-builtin module runs. */
   abc(desc: AbcDesc): Abc {
-    // Its layouts are those of its ABC after exactly these ABCs.
+    // Its layouts are those of its ABC after exactly these ABCs; the
+    // root's, which a player loads thousands into, are not copied.
+    const domain = this.loading;
+    const loaded = domain.parent ? domain.chain() : domain.own;
     const linked = desc.linked;
-    if (linked.length !== this.loaded.length || linked.some((h, i) => h !== this.loaded[i])) {
+    if (linked.length !== loaded.length || linked.some((h, i) => h !== loaded[i])) {
       throw new Error(
-        `swf2es: a module compiled after [${linked.join(", ")}] cannot load after [${this.loaded.join(", ")}]`,
+        `swf2es: a module compiled after [${linked.join(", ")}] cannot load after [${loaded.join(", ")}]`,
       );
     }
 
-    this.loaded.push(desc.hash);
+    domain.own.push(desc.hash);
     const abc = desc as Abc;
+    abc.domain = domain;
+    this.unlocated.push([new Error(), domain]);
     for (const name of abc.names) {
       if (name instanceof TypeName) {
         name.names = abc.names;
@@ -843,16 +996,12 @@ export class Runtime {
     }
 
     abc.scriptStates = abc.scripts.map((s) => ({ desc: s, abc, global: null, state: 0 }));
+    // As DomainMgr::addNamedScript: a name the domain's chain defines
+    // already, cached or loaded, is unreachable, and not added.
     for (const script of abc.scriptStates) {
       for (const [ns, version, name] of script.desc.traits.bindings) {
-        let list = this.globals.get(name);
-        if (!list) {
-          list = [];
-          this.globals.set(name, list);
-        }
-
-        if (!list.some((g) => g.ns === ns)) {
-          list.push({ ns, version, script });
+        if (!this.definedInChain(domain, name, ns)) {
+          add(domain.globals, { ns, version, script }, name);
         }
       }
     }
@@ -932,27 +1081,64 @@ export class Runtime {
     return script;
   }
 
-  /** The script that defines `mn`, or null. */
-  findScript(mn: Multiname): Script | null {
-    if (mn.name === null) {
+  /**
+   * The script that defines `mn` in its domain, or null, as
+   * DomainMgr::findScriptInDomainByMultinameImpl finds it: a definition a
+   * domain of the chain has found before, from the name's own up; else the
+   * first loaded, from the root down. Either is kept by the name's domain,
+   * and one loaded by the domain that loaded it, so a child that found its
+   * own keeps it when its parent defines the name later. A type is found
+   * the same way through caches of its own (`asType`), as avmplus finds
+   * traits, so a class a child found by name is not the type it finds.
+   */
+  findScript(mn: Multiname, asType = false): Script | null {
+    const name = mn.name;
+    if (name === null) {
       return null;
     }
 
-    const list = this.globals.get(mn.name);
-    if (!list) {
-      return null;
-    }
-
-    for (let i = 0; i < mn.namespaces.length; i++) {
-      const ns = mn.namespaces[i];
-      for (const g of list) {
-        if (g.ns === ns && g.version <= mn.versions[i]) {
-          return g.script;
+    const domain = mn.domain ?? this.root;
+    const cache = (d: Domain) => (asType ? d.types : d.cached);
+    for (let d: Domain | null = domain; d; d = d.parent) {
+      const found = match(cache(d), mn, name);
+      if (found) {
+        if (d !== domain) {
+          add(cache(domain), found, name);
         }
+
+        return found.script;
+      }
+    }
+
+    const chain: Domain[] = [];
+    for (let d: Domain | null = domain; d; d = d.parent) {
+      chain.push(d);
+    }
+
+    for (let k = chain.length - 1; k >= 0; k--) {
+      const found = match(chain[k].globals, mn, name);
+      if (found) {
+        add(cache(chain[k]), found, name);
+        add(cache(domain), found, name);
+        return found.script;
       }
     }
 
     return null;
+  }
+
+  /** Whether `domain`'s chain defines `name` in `ns`, cached or loaded, without keeping what it finds. */
+  private definedInChain(domain: Domain, name: string, ns: Namespace): boolean {
+    for (let d: Domain | null = domain; d; d = d.parent) {
+      if (
+        d.cached.get(name)?.some((g) => g.ns === ns) ||
+        d.globals.get(name)?.some((g) => g.ns === ns)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   // Scopes and name lookup.
@@ -2053,6 +2239,13 @@ export class Runtime {
     const abc = desc.abc as Abc;
     const name = abc.names[desc.name] as Multiname;
     const qualified = qualifiedName(name);
+    // avmplus links a class to the base its name finds as a type, and
+    // rejects one made from another, as a child's class it found by name
+    // after its parent defined the name too.
+    if (this.children && base && this.typeNamed(abc.names[desc.base] as Multiname) !== base) {
+      throw this.error("VerifyError", 1107);
+    }
+
     const baseTraits: Traits | null = base ? base.$it : null;
     let itraits: Traits;
     if (qualified === "Object") {
@@ -2214,7 +2407,8 @@ export class Runtime {
     }
 
     const mn = qname(ref.ns, ref.name);
-    let cls = this.getProperty(this.findDef(mn), mn);
+    mn.domain = ref.domain === this.root ? null : ref.domain;
+    let cls = this.typeNamed(mn);
     if (cls === null || cls === undefined || !cls.$it) {
       cls = this.defining.get(ref.ns.uri ? `${ref.ns.uri}::${ref.name}` : ref.name);
       if (!cls) {
@@ -2234,10 +2428,12 @@ export class Runtime {
    * run; a ReferenceError if no script defines it. What a SWF's SymbolClass
    * and a player's lookups by name go through.
    */
-  classNamed(qualified: string): AsObject {
+  classNamed(qualified: string, domain: Domain | null = null): AsObject {
     const i = qualified.lastIndexOf("::");
     const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));
-    return this.resolveName(qname(ns, i < 0 ? qualified : qualified.slice(i + 2)));
+    const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
+    mn.domain = domain === this.root ? null : domain;
+    return this.resolveName(mn);
   }
 
   /** The class a multiname or TypeName names. */
@@ -2258,6 +2454,16 @@ export class Runtime {
     return cls;
   }
 
+  /** The class `mn` names as a type, as avmplus finds traits (see findScript). */
+  private typeNamed(mn: Multiname): Value {
+    const script = this.findScript(mn, true);
+    if (!script) {
+      throw this.error("ReferenceError", 1065, mn.toString());
+    }
+
+    return this.getProperty(this.initScript(script), mn);
+  }
+
   refOf(cls: AsObject): TypeRef {
     const name: string = cls.$it.name;
     // The builtins a coercion converts to go by name, as a module names them.
@@ -2265,11 +2471,17 @@ export class Runtime {
       return name;
     }
 
-    const i = name.lastIndexOf("::");
-    const ns = i < 0 ? publicNs : namespace(NS_Public, name.slice(0, i));
-    const ref = this.cls(ns, i < 0 ? name : name.slice(i + 2));
-    ref.cls = cls;
-    return ref;
+    // The class's own reference: one by its name could find another class,
+    // as in a domain that defines the name again.
+    if (cls.$ref?.cls !== cls) {
+      const i = name.lastIndexOf("::");
+      const ns = i < 0 ? publicNs : namespace(NS_Public, name.slice(0, i));
+      const abc = cls.$it.abc as Abc | null;
+      cls.$ref = new ClassRef(ns, i < 0 ? name : name.slice(i + 2), abc?.domain ?? this.root);
+      cls.$ref.cls = cls;
+    }
+
+    return cls.$ref;
   }
 
   /**
@@ -2986,12 +3198,15 @@ export class Runtime {
     return this.names(o).filter((n): n is string => typeof n === "string" && !o.$dontEnum?.has(n));
   }
 
-  /** avmshell's avmplus.Domain.currentDomain: an instance of Domain, without running its constructor. */
+  /**
+   * avmshell's avmplus.Domain.currentDomain, as DomainClass::get_currentDomain:
+   * a new instance of Domain, without running its constructor, for the
+   * calling code's domain.
+   */
   currentDomain(): AsObject {
-    this.domain ??= this.resolve(
-      this.cls(namespace(NS_Public, "avmplus"), "Domain"),
-    ).$it.instance();
-    return this.domain;
+    const domain = this.resolve(this.cls(namespace(NS_Public, "avmplus"), "Domain")).$it.instance();
+    domain.$domain = this.codeDomain();
+    return domain;
   }
 
   /** `address` as an int, once checked that the domain memory holds `size` bytes there. */

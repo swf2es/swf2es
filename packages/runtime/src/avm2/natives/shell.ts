@@ -4,6 +4,7 @@
 import {
   type AsObject,
   type ClassHook,
+  type Domain,
   type Runtime,
   setStaticVar,
   type Value,
@@ -199,9 +200,11 @@ export function shellNatives(rt: Runtime): Natives {
     }
   }
 
-  // Every Domain is the runtime's one: a child sees its parent's
-  // definitions, and what it loads every other sees, which avmshell's
-  // tests do not tell apart. Its domain memory is the runtime's too.
+  // Each Domain is one of the runtime's: a child's definitions after its
+  // parent's, its own invisible to the parent and to its siblings. Their
+  // domain memory is the runtime's one.
+  const domainOf = (o: AsObject): Domain => o.$domain ?? rt.root;
+
   class DomainNatives {
     static get currentDomain(): Value {
       return rt.currentDomain();
@@ -211,11 +214,16 @@ export function shellNatives(rt: Runtime): Natives {
       return GLOBAL_MEMORY_MIN_SIZE;
     }
 
-    "avmplus:Domain::init"(_base: Value): void {}
+    // As DomainObject::init: a domain after `base`'s. A null base makes
+    // avmshell a domain of its own, with builtins of its own, which here
+    // are the root's.
+    "avmplus:Domain::init"(this: AsObject, base: Value): void {
+      this.$domain = rt.childDomain(base ? domainOf(base) : rt.root);
+    }
 
     // As DomainObject::loadBytes: the ABC compiled by the host, then its
     // entry point run.
-    loadBytes(bytes: Value, swfVersion: Value): Value {
+    loadBytes(this: AsObject, bytes: Value, swfVersion: Value): Value {
       if (bytes === null || bytes === undefined) {
         throw rt.error("TypeError", 1507, "bytes");
       }
@@ -229,25 +237,27 @@ export function shellNatives(rt: Runtime): Natives {
         throw rt.unsupported("Domain.loadBytes without RuntimeOptions.compileAbc");
       }
 
+      const domain = domainOf(this);
       const b = bytesOf(rt, bytes);
-      const compiled = rt.compileAbc(b.buffer.slice(0, b.length));
+      const compiled = rt.compileAbc(b.buffer.slice(0, b.length), domain.chain());
       if (typeof compiled === "number") {
         throw rt.error("VerifyError", compiled);
       }
 
-      rt.run(compiled(rt));
+      rt.run(rt.loadInto(domain, () => compiled(rt)));
       return undefined;
     }
 
     // As DomainObject::getClass: "a.b.C" names C in package a.b.
-    getClass(className: Value): Value {
+    getClass(this: AsObject, className: Value): Value {
       if (className === null || className === undefined) {
         throw rt.error("ArgumentError", 1507, "name");
       }
 
       const name = rt.toString(className);
       const dot = name.lastIndexOf(".");
-      const cls = rt.classNamed(dot < 0 ? name : `${name.slice(0, dot)}::${name.slice(dot + 1)}`);
+      const qualified = dot < 0 ? name : `${name.slice(0, dot)}::${name.slice(dot + 1)}`;
+      const cls = rt.classNamed(qualified, domainOf(this));
       if (cls === null || typeof cls !== "object" || cls.$it === undefined) {
         throw rt.error("TypeError", 1034, rt.toString(cls), "Class");
       }

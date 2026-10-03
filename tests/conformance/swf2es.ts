@@ -1,11 +1,11 @@
 // Runs an ABC compiled by swf2es in node: the builtins avmshell loads, then
 // the ABC, each compiled to a module and loaded into one runtime, whose
 // trace output is the result.
-import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { testing } from "../unit/codegen/testing-module.ts";
+import { abcCompiler } from "./abc-compiler.ts";
 
 // SWF2ES_RUNTIME=<dir> loads another build of the runtime's dist, to compare two (tests/programs/ab.ts).
 const runtime = await import(
@@ -55,41 +55,29 @@ async function load(js: string): Promise<(rt: unknown) => unknown> {
 export async function runSwf2es(builtins: Uint8Array[], abc: Uint8Array): Promise<string[]> {
   const lines: string[] = [];
   // Each module names the ABCs before it, by the hashes the cache key uses.
-  const hashes: string[] = [];
-  const hash = (bytes: Uint8Array) => {
-    hashes.push(createHash("sha256").update(bytes).digest("hex"));
-    return hashes.join("\n");
-  };
+  const compiler = abcCompiler(testing);
   const rt = runtime.createRuntime({
     print: (line: string) => lines.push(line),
     // Domain.loadBytes runs the ABC at once, so its module is evaluated, not imported.
-    compileAbc: (bytes: Uint8Array) => {
-      const error = testing.domainAdd(bytes, false);
-      if (error) {
-        return error;
-      }
-
-      const js = testing.domainModule(hash(bytes));
-      return new Function(js.replace(/^export default /, "return "))();
-    },
+    compileAbc: (bytes: Uint8Array, linked: string[]) => compiler.compileAbc(bytes, linked),
   });
 
-  testing.domainReset(50);
+  compiler.reset();
   for (const bytes of builtins) {
-    const error = testing.domainAdd(bytes, true);
+    const error = compiler.add(bytes, true);
     if (error) {
       throw new Error(`a builtin failed to link: error ${error}`);
     }
 
-    (await load(testing.domainModule(hash(bytes))))(rt);
+    (await load(testing.domainModule(compiler.linked())))(rt);
   }
 
-  const error = testing.domainAdd(abc, false);
+  const error = compiler.add(abc, false);
   if (error) {
     return [`VerifyError: Error #${error}`];
   }
 
-  const A = (await load(testing.domainModule(hash(abc))))(rt);
+  const A = (await load(testing.domainModule(compiler.linked())))(rt);
   try {
     rt.run(A);
   } catch (e) {

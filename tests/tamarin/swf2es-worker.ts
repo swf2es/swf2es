@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { abcCompiler } from "../conformance/abc-compiler.ts";
 import { testing } from "../unit/codegen/testing-module.ts";
 
 const runtime = await import(
@@ -31,11 +32,6 @@ type Module = (rt: unknown) => unknown;
 async function load(js: string): Promise<Module> {
   const url = `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`;
   return (await import(url)).default;
-}
-
-/** A module evaluated at once, as Domain.loadBytes runs one: its source is one `export default function`. */
-function evaluate(js: string): Module {
-  return new Function(js.replace(/^export default /, "return "))();
 }
 
 /** The working directory's files, and those a test writes, kept in memory, not written there. */
@@ -62,22 +58,6 @@ function testFiles() {
 
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-/** A new domain holding the builtins, linked; each module names the ABCs before it by their hashes. */
-function linkBuiltins(): string[] {
-  testing.domainReset(50);
-  const hashes: string[] = [];
-  for (const bytes of builtins) {
-    const error = testing.domainAdd(bytes, true);
-    if (error) {
-      throw new Error(`a builtin failed to link: error ${error}`);
-    }
-
-    hashes.push(sha(bytes));
-  }
-
-  return hashes;
-}
-
 // The builtins' modules, compiled once: each test's runtime runs them.
 const builtinModules: Module[] = [];
 {
@@ -92,33 +72,29 @@ const builtinModules: Module[] = [];
 
 /** Run `abc`, tracing into `lines`: avmshell's exit code for how it ended. */
 async function run(abc: Uint8Array, lines: string[]): Promise<number> {
-  const hashes = linkBuiltins();
+  const compiler = abcCompiler(testing);
+  compiler.reset();
+  for (const bytes of builtins) {
+    compiler.add(bytes, true);
+  }
+
   const rt = runtime.createRuntime({
     print: (line: string) => lines.push(line),
-    // Domain.loadBytes: the ABC added to the domain after the others, as avmshell loads it.
-    compileAbc: (bytes: Uint8Array) => {
-      const error = testing.domainAdd(bytes, false);
-      if (error) {
-        return error;
-      }
-
-      hashes.push(sha(bytes));
-      return evaluate(testing.domainModule(hashes.join("\n")));
-    },
+    // Domain.loadBytes: the ABC compiled after its domain's, as avmshell loads it.
+    compileAbc: (bytes: Uint8Array, linked: string[]) => compiler.compileAbc(bytes, linked),
     files: testFiles(),
   });
   for (const module of builtinModules) {
     module(rt);
   }
 
-  const error = testing.domainAdd(abc, false);
+  const error = compiler.add(abc, false);
   if (error) {
     lines.push(`VerifyError: Error #${error}`);
     return 1;
   }
 
-  hashes.push(sha(abc));
-  const A = (await load(testing.domainModule(hashes.join("\n"))))(rt);
+  const A = (await load(testing.domainModule(compiler.linked())))(rt);
   try {
     rt.run(A);
   } catch (e) {
