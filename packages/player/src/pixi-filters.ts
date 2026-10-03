@@ -66,6 +66,14 @@ void main(void) {
   finalColor = ${TRUNCATE};
 }`;
 
+/**
+ * A pool's texture let go of once drawn with: the pool destroys idle ones
+ * as the screen's size changes, which Pixi warns of while a shader holds them.
+ */
+function unbind(filter: Filter, name: string): void {
+  filter.resources[name] = PixiTexture.WHITE.source;
+}
+
 class BoxPass extends Filter {
   constructor() {
     super({
@@ -269,6 +277,7 @@ class GlowFilter extends FlashFilter {
     );
     this.resources.uBlurred = blurred.source;
     system.applyFilter(this, input, output, clear);
+    unbind(this, "uBlurred");
     TexturePool.returnTexture(blurred);
   }
 }
@@ -371,6 +380,7 @@ class BevelFilter extends FlashFilter {
     );
     this.resources.uBlurred = blurred.source;
     system.applyFilter(this, input, output, clear);
+    unbind(this, "uBlurred");
     TexturePool.returnTexture(blurred);
   }
 }
@@ -535,6 +545,7 @@ class GradientFilter extends FlashFilter {
     region[2] = input.frame.width - this.inset + 1 + right;
     region[3] = input.frame.height - this.inset + 1 + bottom;
     system.applyFilter(this, input, output, clear);
+    unbind(this, "uBlurred");
     TexturePool.returnTexture(blurred);
   }
 }
