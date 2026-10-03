@@ -44,7 +44,9 @@ package {
       // a child the frame places, and getChildAt gives null for it.
       addEventListener(Event.EXIT_FRAME, function(_:Event):void {
         if (++step == 2) {
-          trace("frame 2", numChildren, rel(getChildAt(numChildren - 1).name), rel(new Sprite().name));
+          var placed:DisplayObjectContainer = DisplayObjectContainer(getChildAt(numChildren - 1));
+          trace("frame 2", numChildren, rel(placed.name), rel(placed.getChildAt(0).name),
+            rel(new Sprite().name));
         }
       });
     }
