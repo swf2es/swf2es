@@ -292,6 +292,11 @@ test("instances that see a character alike share its lines, which live while one
   assert.equal(lines(0), shared);
   assert.deepEqual(view.counts, { strokeContexts: 2, strokeReuses: 2 });
 
+  // Swapped in, not listened on: a shared context gathers no listener an instance.
+  const listened = lines(0) as unknown as { listenerCount(event: string): number };
+  assert.equal(listened.listenerCount("update"), 0);
+  assert.equal(listened.listenerCount("unload"), 0);
+
   // Drawn anew, its content changed: still the character's lines, shared.
   a.invalidate(CONTENT);
   view.prepare(root);

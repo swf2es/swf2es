@@ -435,8 +435,7 @@ class StrokeContexts {
   constructor(private readonly counts: { strokeContexts: number; strokeReuses: number }) {}
 
   /** The layer's lines seen through `m`, taken: made or found. */
-  take(layer: ShapeLayer, m: Linear, least: number): GraphicsContext {
-    const key = `${m[0]},${m[1]},${m[2]},${m[3]},${least}`;
+  take(layer: ShapeLayer, m: Linear, least: number, key = linesKey(m, least)): GraphicsContext {
     let contexts = this.byLayer.get(layer);
     if (!contexts) {
       contexts = new Map();
@@ -499,6 +498,34 @@ class StrokeContexts {
   }
 }
 
+/** The key a layer's lines seen through `m`, at least `least` wide, are kept by. */
+function linesKey(m: Linear, least: number): string {
+  return `${m[0]},${m[1]},${m[2]},${m[3]},${least}`;
+}
+
+/**
+ * A Graphics of an object's lines, whose context is swapped for the
+ * transform's as the object turns: without Pixi's listening on it, as a
+ * line context never changes once built and is destroyed only once no one
+ * holds it, and a shared one's listeners, one an instance, made each swap
+ * search them all.
+ */
+class LinesGraphics extends Graphics {
+  constructor(context?: GraphicsContext) {
+    super(context);
+    this.context.off("update", this.onViewUpdate, this);
+    this.context.off("unload", this.unload, this);
+  }
+
+  /** Draw `context` instead. */
+  swap(context: GraphicsContext): void {
+    if (context !== this.context) {
+      (this as unknown as { _context: GraphicsContext })._context = context;
+      this.onViewUpdate();
+    }
+  }
+}
+
 /** A layer's lines seen through `m`, nothing where `m` flattens them. */
 function linesContext(layer: ShapeLayer, m: Linear, least: number): GraphicsContext {
   return m[0] * m[3] - m[1] * m[2] === 0 ? new GraphicsContext() : strokeContext(layer, m, least);
@@ -520,7 +547,7 @@ interface Node {
   /** Whether the fills are this node's own, a drawing's, rather than its character's, which instances share. */
   ownFills: boolean;
   /** The lines, a Graphics for each layer that has any; null where one has none. */
-  strokes: (Graphics | null)[];
+  strokes: (LinesGraphics | null)[];
   /** Whether the layers are a character's, whose lines' contexts instances share. */
   sharedLines: boolean;
   /** The children as of the last arrangement, to know those that left. */
@@ -530,7 +557,7 @@ interface Node {
   /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
   bitmap: Sprite | null;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
-  lines: Graphics[];
+  lines: LinesGraphics[];
   /** Whether the object is a mask or in one, as of the last sync. */
   masking: boolean;
   /** The containers of the children a timeline's mask clips, each masked by it. */
@@ -826,8 +853,8 @@ export class PixiView {
       const borrowed = lines?.[i];
       const strokes = layer.strokes.length
         ? borrowed
-          ? new Graphics(borrowed.context)
-          : new Graphics()
+          ? new LinesGraphics(borrowed.context)
+          : new LinesGraphics()
         : null;
       if (strokes) {
         if (borrowed) {
@@ -872,7 +899,7 @@ export class PixiView {
     for (const strokes of node.strokes) {
       if (strokes) {
         const previous = strokes.context;
-        strokes.context = new GraphicsContext();
+        strokes.swap(new GraphicsContext());
         this.lines.give(previous);
       }
     }
@@ -897,18 +924,23 @@ export class PixiView {
   private restroke(node: Node): void {
     const m = node.world;
     const det = m[0] * m[3] - m[1] * m[2];
+    const least = this.leastWidth;
+    // One key and one inverse for all its layers.
+    const key = linesKey(m, least);
+    const inverse =
+      det === 0 ? null : new Matrix(m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, 0, 0);
     node.layers.forEach((layer, i) => {
       const strokes = node.strokes[i];
       if (!strokes) {
         return;
       }
 
-      // The new context goes in before the old one goes: the Graphics listens on the one it holds.
+      // The new context goes in before the old one goes back, as it may be the same.
       const previous = strokes.context;
       if (node.sharedLines) {
-        strokes.context = this.lines.take(layer, m, this.leastWidth);
+        strokes.swap(this.lines.take(layer, m, least, key));
       } else {
-        strokes.context = linesContext(layer, m, this.leastWidth);
+        strokes.swap(linesContext(layer, m, least));
         this.counts.strokeContexts++;
         if (this.fresh) {
           this.built.push(strokes.context);
@@ -916,8 +948,8 @@ export class PixiView {
       }
 
       this.lines.give(previous);
-      if (det !== 0) {
-        strokes.setFromMatrix(new Matrix(m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, 0, 0));
+      if (inverse) {
+        strokes.setFromMatrix(inverse);
       }
     });
   }
