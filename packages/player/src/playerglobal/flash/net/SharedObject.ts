@@ -34,32 +34,66 @@ export interface SharedObjectStorage {
   keys(): string[];
 }
 
-/** The default storage: localStorage where the host has it, base64 under a prefix; memory otherwise. */
+/**
+ * The default storage: localStorage, base64 under a prefix, where the host
+ * has it and lets it be read; memory otherwise. localStorage is first reached
+ * when a SWF first uses a shared object, since merely reading it can throw
+ * (a SecurityError where site data is blocked). A write it refuses, a full
+ * quota say, throws, which flush reports as Error #2130.
+ */
 export function defaultStorage(): SharedObjectStorage {
-  const local = (globalThis as { localStorage?: Storage }).localStorage;
-  if (!local) {
-    const memory = new Map<string, Uint8Array>();
-    return {
-      get: (key) => memory.get(key) ?? null,
-      set: (key, bytes) => memory.set(key, bytes.slice()),
-      remove: (key) => memory.delete(key),
-      keys: () => [...memory.keys()],
-    };
-  }
+  const memory = new Map<string, Uint8Array>();
+  const inMemory: SharedObjectStorage = {
+    get: (key) => memory.get(key) ?? null,
+    set: (key, bytes) => {
+      memory.set(key, bytes.slice());
+    },
+    remove: (key) => {
+      memory.delete(key);
+    },
+    keys: () => [...memory.keys()],
+  };
+  let chosen: SharedObjectStorage | undefined;
+  const storage = (): SharedObjectStorage => {
+    if (!chosen) {
+      let local: Storage | undefined;
+      try {
+        local = (globalThis as { localStorage?: Storage }).localStorage;
+        local?.getItem(PREFIX);
+      } catch {
+        local = undefined;
+      }
 
-  const PREFIX = "swf2es:so:";
+      chosen = local ? localStorageOf(local) : inMemory;
+    }
+
+    return chosen;
+  };
+
+  return {
+    get: (key) => storage().get(key),
+    set: (key, bytes) => storage().set(key, bytes),
+    remove: (key) => storage().remove(key),
+    keys: () => storage().keys(),
+  };
+}
+
+const PREFIX = "swf2es:so:";
+
+function localStorageOf(local: Storage): SharedObjectStorage {
   return {
     get: (key) => {
       const text = local.getItem(PREFIX + key);
       return text === null ? null : Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
     },
     set: (key, bytes) => {
-      let text = "";
-      for (const b of bytes) {
-        text += String.fromCharCode(b);
+      // In chunks: one String.fromCharCode of every byte overflows the stack.
+      const parts: string[] = [];
+      for (let i = 0; i < bytes.length; i += 0x2000) {
+        parts.push(String.fromCharCode(...bytes.subarray(i, i + 0x2000)));
       }
 
-      local.setItem(PREFIX + key, btoa(text));
+      local.setItem(PREFIX + key, btoa(parts.join("")));
     },
     remove: (key) => local.removeItem(PREFIX + key),
     keys: () => {
@@ -100,49 +134,44 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       throw s.rt.unsupported("an AMF0 SharedObject");
     }
 
-    const entries: number[] = [];
-    const amf3 = o.$encoding === 3;
+    // Chunks joined once at the end: a value can be large enough that
+    // spreading its bytes into one call would overflow the stack.
+    const chunks: Uint8Array[] = [];
     for (const [key, value] of o.$data.$d ?? new Map()) {
       const name = encoder.encode(String(key));
-      if (amf3) {
-        u29(entries, (name.length << 1) | 1);
-      } else {
-        entries.push(name.length >> 8, name.length & 0xff);
-      }
-
-      entries.push(...name);
+      chunks.push(u29((name.length << 1) | 1), name);
       const array = byteArray(o.$encoding);
       s.rt.callProperty(array, avm2.qname(avm2.publicNs, "writeObject"), value);
       const b = avm2.bytesOf(s.rt, array);
-      entries.push(...b.buffer.subarray(0, b.length), 0);
+      chunks.push(b.buffer.subarray(0, b.length), END);
     }
 
-    if (entries.length === 0) {
+    if (chunks.length === 0) {
       return new Uint8Array(0);
     }
 
     const name = encoder.encode(o.$name);
-    const body = [
-      ...[0x54, 0x43, 0x53, 0x4f, 0, 4, 0, 0, 0, 0],
-      name.length >> 8,
-      name.length & 0xff,
-      ...name,
-      0,
-      0,
-      0,
-      amf3 ? 3 : 0,
-      ...entries,
-    ];
-    const n = body.length;
-    return new Uint8Array([
-      0x00,
-      0xbf,
-      n >>> 24,
-      (n >> 16) & 0xff,
-      (n >> 8) & 0xff,
-      n & 0xff,
-      ...body,
-    ]);
+    const header = new Uint8Array(6 + 10 + 2 + name.length + 4);
+    header.set([0x00, 0xbf], 0);
+    header.set([0x54, 0x43, 0x53, 0x4f, 0, 4, 0, 0, 0, 0], 6);
+    header.set([name.length >> 8, name.length & 0xff], 16);
+    header.set(name, 18);
+    header[header.length - 1] = 3;
+    let n = header.length;
+    for (const chunk of chunks) {
+      n += chunk.length;
+    }
+
+    const file = new Uint8Array(n);
+    file.set(header);
+    new DataView(file.buffer).setUint32(2, n - 6);
+    let at = header.length;
+    for (const chunk of chunks) {
+      file.set(chunk, at);
+      at += chunk.length;
+    }
+
+    return file;
   };
 
   /** The data a .sol file holds, or null for one it cannot read. */
@@ -193,7 +222,7 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     declare $encoding: number;
     declare $client: Value;
 
-    static getLocal(name: Value, localPath: Value, _secure: Value): Value {
+    static getLocal(name: Value, localPath: Value, secure: Value): Value {
       if (name === null || name === undefined) {
         throw s.rt.error("TypeError", 2007, "name");
       }
@@ -204,12 +233,28 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       }
 
       const url = new URL(s.url, "file:///");
+      // A secure one only for a SWF that came over HTTPS; adl, whose SWFs
+      // never do, refuses it so.
+      if (secure && url.protocol !== "https:") {
+        throw s.rt.error("Error", 2134);
+      }
+
       // By default the SWF's own path, file name and all, which is never a
       // directory's; one known by no file name is kept apart from its
-      // directory's as well.
+      // directory's as well. A path it names must lead to the SWF: "/" or
+      // one of the directories above it, as adl refuses any other.
       const own = url.pathname.endsWith("/") ? `${url.pathname}[swf]` : url.pathname;
-      const path = localPath === null || localPath === undefined ? own : s.rt.toString(localPath);
-      const key = `${url.host}${path.startsWith("/") ? "" : "/"}${path}/${text}`;
+      let path = own;
+      if (localPath !== null && localPath !== undefined) {
+        path = s.rt.toString(localPath);
+        const directory = path.endsWith("/") ? path : `${path}/`;
+        if (path !== own && !own.startsWith(directory)) {
+          throw s.rt.error("Error", 2134);
+        }
+      }
+
+      // Secure ones apart: a SWF that comes over HTTP never sees them.
+      const key = `${url.host}${path.startsWith("/") ? "" : "/"}${path}/${text}${secure ? "#secure" : ""}`;
       const known = open.get(key);
       if (known) {
         return known;
@@ -289,15 +334,20 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
 
     setDirty(_name: Value): void {}
 
-    // Flush returns true, which flush reports as FLUSHED.
+    // Flush returns true, which flush reports as FLUSHED, or false for #2130.
     "flash.net:SharedObject::invoke"(code: Value, ..._args: Value[]): Value {
       switch (s.rt.toUint(code)) {
         case FLUSH: {
           const file = serialize(this);
-          if (file.length) {
-            s.storage.set(this.$key, file);
-          } else {
-            s.storage.remove(this.$key);
+          try {
+            if (file.length) {
+              s.storage.set(this.$key, file);
+            } else {
+              s.storage.remove(this.$key);
+            }
+          } catch {
+            // Storage that refuses the write, which flush reports as #2130.
+            return false;
           }
 
           return true;
@@ -320,17 +370,27 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
   return natives;
 }
 
+/** The 0 after each value. */
+const END = new Uint8Array(1);
+
 /** An AMF3 U29: 1 to 4 bytes, 7 bits each but the fourth's 8. */
-function u29(out: number[], n: number): void {
+function u29(n: number): Uint8Array {
   if (n < 0x80) {
-    out.push(n);
-  } else if (n < 0x4000) {
-    out.push((n >> 7) | 0x80, n & 0x7f);
-  } else if (n < 0x200000) {
-    out.push((n >> 14) | 0x80, ((n >> 7) & 0x7f) | 0x80, n & 0x7f);
-  } else {
-    out.push((n >> 22) | 0x80, ((n >> 15) & 0x7f) | 0x80, ((n >> 8) & 0x7f) | 0x80, n & 0xff);
+    return Uint8Array.of(n);
   }
+  if (n < 0x4000) {
+    return Uint8Array.of((n >> 7) | 0x80, n & 0x7f);
+  }
+  if (n < 0x200000) {
+    return Uint8Array.of((n >> 14) | 0x80, ((n >> 7) & 0x7f) | 0x80, n & 0x7f);
+  }
+
+  return Uint8Array.of(
+    (n >> 22) | 0x80,
+    ((n >> 15) & 0x7f) | 0x80,
+    ((n >> 8) & 0x7f) | 0x80,
+    n & 0xff,
+  );
 }
 
 /** The U29 at `at`, and where what follows it starts. */

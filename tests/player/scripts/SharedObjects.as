@@ -28,6 +28,10 @@ package {
       trace("setProperty", so.data.p);
       trace("client", so.client === so);
       trace("root path", so === SharedObject.getLocal("swf2esTest", "/"));
+      probe("secure", function():* { return SharedObject.getLocal("swf2esTest", null, true); });
+      probe("outside", function():* { return SharedObject.getLocal("swf2esTest", "/outside"); });
+      probe("outside nested", function():* { return SharedObject.getLocal("swf2esTest", "/outside/deeper"); });
+      probe("relative", function():* { return SharedObject.getLocal("swf2esTest", "outside"); });
       var names:Array = ["a b", "a~b", "a%b", "a&b", "a\\b", "a;b", "a:b", "a\"b", "a'b", "a,b",
         "a<b", "a>b", "a?b", "a#b", "", "a/b", "a.b", "a-b", "a_b", "a+b", "a@b", "a=b", "a$b"];
       for each (var name:String in names) {
@@ -44,6 +48,14 @@ package {
         trace("name null ok");
       } catch (e:Error) {
         trace("name null", e.errorID);
+      }
+    }
+
+    private static function probe(name:String, f:Function):void {
+      try {
+        trace(name, f());
+      } catch (e:Error) {
+        trace(name, e.errorID, e);
       }
     }
 

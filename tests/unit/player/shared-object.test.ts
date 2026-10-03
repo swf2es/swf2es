@@ -29,6 +29,7 @@ const script = (name: string, body: string) => ({
   source: `package {
   import flash.display.Sprite;
   import flash.net.SharedObject;
+  import flash.utils.ByteArray;
   public class Main extends Sprite {
     public function Main() {
       ${body}
@@ -36,6 +37,42 @@ const script = (name: string, body: string) => ({
   }
 }`,
 });
+
+type Storage = NonNullable<ConstructorParameters<typeof Scripting>[1]>["storage"];
+
+/** The trace of `abc`'s run in a player for a SWF at `url`, keeping its objects in `storage`. */
+async function run(abc: Uint8Array, url: string, storage?: Storage): Promise<string[]> {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    storage,
+    url,
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  await new Player(bare(abc, 1), scripting).start();
+  return lines;
+}
+
+/** Storage in a map, whose writes `refuse` makes throw. */
+function mapStorage(refuse = false) {
+  const stored = new Map<string, Uint8Array>();
+  const storage = {
+    get: (key: string) => stored.get(key) ?? null,
+    set: (key: string, bytes: Uint8Array) => {
+      if (refuse) {
+        throw new Error("quota");
+      }
+
+      stored.set(key, bytes);
+    },
+    remove: (key: string) => {
+      stored.delete(key);
+    },
+    keys: () => [...stored.keys()],
+  };
+
+  return { stored, storage };
+}
 
 test("a SharedObject's data is kept in the host's storage, as Flash's AMF3 .sol file, from one run to the next", {
   skip,
@@ -62,26 +99,10 @@ test("a SharedObject's data is kept in the host's storage, as Flash's AMF3 .sol 
     ],
     out,
   );
-  const stored = new Map<string, Uint8Array>();
-  const storage = {
-    get: (key: string) => stored.get(key) ?? null,
-    set: (key: string, bytes: Uint8Array) => stored.set(key, bytes),
-    remove: (key: string) => stored.delete(key),
-    keys: () => [...stored.keys()],
-  };
-  const run = async (name: string): Promise<string[]> => {
-    const lines: string[] = [];
-    const scripting = new Scripting(await createCodegen(wasm), {
-      print: (line) => lines.push(line),
-      storage,
-      url: "http://example.test/games/main.swf",
-    });
-    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-    await new Player(bare(abcs.get(name) as Uint8Array, 1), scripting).start();
-    return lines;
-  };
+  const { stored, storage } = mapStorage();
+  const url = "http://example.test/games/main.swf";
 
-  assert.deepEqual(await run("SharedWrite"), ["flushed"]);
+  assert.deepEqual(await run(abcs.get("SharedWrite") as Uint8Array, url, storage), ["flushed"]);
   // Keyed by host, the SWF's path, and the name; a .sol file, AMF3 by default.
   const kept = stored.get("example.test/games/main.swf/kept") as Uint8Array;
   assert.deepEqual([...kept.subarray(0, 2)], [0x00, 0xbf]);
@@ -91,6 +112,129 @@ test("a SharedObject's data is kept in the host's storage, as Flash's AMF3 .sol 
   // Read back by another player, as a later visit to the page would, its size the
   // file's: a 26-byte header for "kept", then 5, 9, 10 and 10 bytes of entries.
   // Clear takes the file out.
-  assert.deepEqual(await run("SharedRead"), ["7 text 1,2 true 60", "1.5", "0"]);
+  assert.deepEqual(await run(abcs.get("SharedRead") as Uint8Array, url, storage), [
+    "7 text 1,2 true 60",
+    "1.5",
+    "0",
+  ]);
   assert.ok(!stored.has("example.test/games/main.swf/kept"));
+});
+
+test("a SharedObject holds values too large to spread into one call", { skip }, async () => {
+  const abcs = compileScripts(
+    [
+      script(
+        "SharedLarge",
+        `var so:SharedObject = SharedObject.getLocal("large");
+      var b:ByteArray = new ByteArray();
+      b.length = 150000;
+      b[149999] = 9;
+      so.data.b = b;
+      trace(so.size, so.flush());`,
+      ),
+      script(
+        "SharedLargeRead",
+        `var b:ByteArray = SharedObject.getLocal("large").data.b;
+      trace(b.length, b[149999]);`,
+      ),
+    ],
+    out,
+  );
+  const { storage } = mapStorage();
+  const url = "http://example.test/main.swf";
+
+  // A 27-byte header for "large", the name's 2 bytes, the ByteArray's marker,
+  // 3-byte length and bytes, and the 0 after it.
+  assert.deepEqual(await run(abcs.get("SharedLarge") as Uint8Array, url, storage), [
+    "150034 flushed",
+  ]);
+  assert.deepEqual(await run(abcs.get("SharedLargeRead") as Uint8Array, url, storage), [
+    "150000 9",
+  ]);
+});
+
+test("a secure SharedObject is for a SWF that came over HTTPS, kept apart", { skip }, async () => {
+  const abcs = compileScripts(
+    [
+      script(
+        "SharedSecure",
+        `try {
+        var so:SharedObject = SharedObject.getLocal("guarded", null, true);
+        so.data.n = 1;
+        trace(so.flush(), so === SharedObject.getLocal("guarded"));
+      } catch (e:Error) {
+        trace(e.errorID);
+      }`,
+      ),
+    ],
+    out,
+  );
+  const { stored, storage } = mapStorage();
+  const abc = abcs.get("SharedSecure") as Uint8Array;
+
+  assert.deepEqual(await run(abc, "https://example.test/main.swf", storage), ["flushed false"]);
+  assert.deepEqual([...stored.keys()], ["example.test/main.swf/guarded#secure"]);
+  assert.deepEqual(await run(abc, "http://example.test/main.swf", storage), ["2134"]);
+});
+
+test("a flush the storage refuses is Error #2130", { skip }, async () => {
+  const abcs = compileScripts(
+    [
+      script(
+        "SharedRefused",
+        `var so:SharedObject = SharedObject.getLocal("refused");
+      so.data.n = 1;
+      try {
+        so.flush();
+      } catch (e:Error) {
+        trace(e.errorID);
+      }`,
+      ),
+    ],
+    out,
+  );
+
+  assert.deepEqual(
+    await run(
+      abcs.get("SharedRefused") as Uint8Array,
+      "http://example.test/main.swf",
+      mapStorage(true).storage,
+    ),
+    ["2130"],
+  );
+});
+
+test("a host whose localStorage throws when read keeps SharedObjects in memory", {
+  skip,
+}, async () => {
+  const abcs = compileScripts(
+    [
+      script(
+        "SharedBlocked",
+        `var so:SharedObject = SharedObject.getLocal("blocked");
+      so.data.n = 1;
+      trace(so.flush(), SharedObject.getLocal("blocked").data.n);`,
+      ),
+    ],
+    out,
+  );
+  const had = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    get() {
+      throw new DOMException("blocked", "SecurityError");
+    },
+  });
+  try {
+    assert.deepEqual(
+      await run(abcs.get("SharedBlocked") as Uint8Array, "http://example.test/main.swf"),
+      ["flushed 1"],
+    );
+  } finally {
+    if (had) {
+      Object.defineProperty(globalThis, "localStorage", had);
+    } else {
+      delete (globalThis as { localStorage?: unknown }).localStorage;
+    }
+  }
 });

@@ -12,6 +12,10 @@ cleared 0 0
 setProperty 5
 client true
 root path false
+secure 2134 Error: Error #2134: Cannot create SharedObject.
+outside 2134 Error: Error #2134: Cannot create SharedObject.
+outside nested 2134 Error: Error #2134: Cannot create SharedObject.
+relative 2134 Error: Error #2134: Cannot create SharedObject.
 name a b 2134
 name a~b 2134
 name a%b ok
