@@ -622,17 +622,22 @@ interface GlobalName {
  * An application domain, as avmplus' Domain: the scripts its modules
  * define, by name, a name its chain defines already not again (see
  * Runtime.abc); the definitions it has found, by name, which it keeps
- * (see Runtime.findScript); and the ABCs its modules are compiled after,
- * its parent's when it was made, then its own.
+ * (see Runtime.findScript); and the ABCs loaded into it, by hash.
  */
 export class Domain {
   readonly globals = new Map<string, GlobalName[]>();
   readonly cached = new Map<string, GlobalName[]>();
   readonly classRefs = new Map<Namespace, Map<string, ClassRef>>();
-  readonly loaded: string[];
+  readonly own: string[] = [];
 
-  constructor(readonly parent: Domain | null) {
-    this.loaded = parent ? [...parent.loaded] : [];
+  constructor(readonly parent: Domain | null) {}
+
+  /**
+   * The ABCs a module loaded into it now is compiled after: its parent's,
+   * including those loaded after it was made, then its own.
+   */
+  chain(): string[] {
+    return this.parent ? [...this.parent.chain(), ...this.own] : [...this.own];
   }
 }
 
@@ -903,10 +908,10 @@ export class Runtime {
 
   /** Load a module: its scripts' names become visible; the entry script of a non-builtin module runs. */
   abc(desc: AbcDesc): Abc {
-    // Its layouts are those of its ABC after exactly these ABCs: its
-    // domain's, its parent's when it was made and then its own.
+    // Its layouts are those of its ABC after exactly these ABCs; the
+    // root's, which a player loads thousands into, are not copied.
     const domain = this.loading;
-    const loaded = domain.loaded;
+    const loaded = domain.parent ? domain.chain() : domain.own;
     const linked = desc.linked;
     if (linked.length !== loaded.length || linked.some((h, i) => h !== loaded[i])) {
       throw new Error(
@@ -914,7 +919,7 @@ export class Runtime {
       );
     }
 
-    loaded.push(desc.hash);
+    domain.own.push(desc.hash);
     const abc = desc as Abc;
     abc.domain = domain;
     for (const name of abc.names) {
