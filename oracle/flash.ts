@@ -106,12 +106,17 @@ function descriptor(content: string, id: string): string {
 `;
 }
 
-function jobKey(job: FlashJob): string {
+/**
+ * A job's cache key: what decides what Flash gives for it, the adl it runs
+ * in among it. A job run alone is keyed apart, and one not, as before.
+ */
+export function jobKey(job: FlashJob): string {
   return createHash("sha256")
     .update(job.swf)
     .update(
       `\n${job.frames}\n${job.quality ?? "high"}\n${job.capture.join(",")}\n${readFileSync(harnessSource)}`,
     )
+    .update(job.alone ? "\nalone" : "")
     .digest("hex");
 }
 

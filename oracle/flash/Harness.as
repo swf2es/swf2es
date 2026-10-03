@@ -18,7 +18,9 @@
 // last frame's EXIT_FRAME that runs after the harness's traces after the
 // end, in no job's output, and what the content goes on doing after it is
 // unloaded, an orphan movie of its own playing on, traces after the settle
-// mark, which tells oracle/flash.ts to run the jobs after it again.
+// mark, which tells oracle/flash.ts to run the jobs after it again. Content
+// that traces only now and then, not in those frames, is not caught: a
+// case that leaves such content running runs alone (FlashJob.alone).
 //
 // Frame 1 is the frame the SWF's INIT follows: its first frame, constructed
 // and with its scripts run. Frame k is captured at the (k-1)th EXIT_FRAME
