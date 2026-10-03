@@ -270,7 +270,7 @@ async function benchSwf(
       const before = performance.now();
       player.tick();
       const ticked = performance.now();
-      view.prepare(player.root);
+      view.prepare(player.stage);
       const synced = performance.now();
       renderer.render(view.stage);
       const drawn = performance.now();
