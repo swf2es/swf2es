@@ -602,6 +602,48 @@ test("timers due at once fire in the order started, after others around them wer
   assert.deepEqual(lines, ["B 300", "C 300"]);
 });
 
+test("frame scripts that send their clip to each other's frame end in a stack overflow, not the page's", {
+  skip,
+}, async () => {
+  // In a SWF of version 10 each goto runs a cycle inside the last; Flash nests
+  // them till it gives up. The player throws AS3's Error #1023 at its depth.
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Bounce extends MovieClip {
+      public function Bounce() {
+        addFrameScript(0, function():void { gotoAndStop(2); }, 1, function():void { gotoAndStop(1); });
+      }
+    }
+    public class Main extends MovieClip {}
+  }`;
+  const swf = w.swf({
+    version: 10,
+    width: 20,
+    height: 20,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(2, 2, [w.showFrame(), w.showFrame(), w.end()]),
+      w.doAbc(compiler(out)("Bounce", source)),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Bounce"],
+      ]),
+      w.place({ depth: 1, character: 2 }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const scripting = new Scripting(await createCodegen(wasm), { print: () => {} });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(swf, scripting);
+  await assert.rejects(player.start(), (e: unknown) => {
+    assert.match(scripting.rt.toString(e as avm2.Value), /1023/);
+    return true;
+  });
+});
+
 test("a timer whose closure throws keeps running and fires again", { skip }, async () => {
   const lines: string[] = [];
   const scripting = new Scripting(await createCodegen(wasm), {

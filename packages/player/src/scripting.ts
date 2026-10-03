@@ -172,6 +172,8 @@ export class Scripting {
   readonly externalInterface: ExternalInterfaceHost | null;
   /** How many calls the page has made into the SWF's ExternalInterface callbacks, which run outside a frame. */
   hostCalls = 0;
+  /** How many goto cycles run inside one another now. */
+  private cycles = 0;
   /** Children frames played on placed, to be made alive in the frame's construct phase. */
   private readonly toConstruct: {
     display: DisplayObject;
@@ -1445,11 +1447,14 @@ export class Scripting {
           }
 
           ran = true;
+          // The clip whose script runs, the one before it again after: a
+          // goto's cycle runs scripts inside another's (`goto-cycle-nested`).
+          const outer = this.inFrameScript;
           this.inFrameScript = o;
           try {
             this.rt.call(script, o.object);
           } finally {
-            this.inFrameScript = null;
+            this.inFrameScript = outer;
           }
 
           // The goto the script asked for, now that it has returned; the
@@ -1504,9 +1509,39 @@ export class Scripting {
       return;
     }
 
-    this.broadcast("frameConstructed");
-    this.runFrameScripts(this.stage);
-    this.broadcast("exitFrame");
+    // Two scripts that send their clip to each other's frame nest cycles
+    // without end, in Flash till it gives up some 1400 deep; here a script's
+    // stack overflow, before the JavaScript stack's.
+    if (this.cycles >= MAX_GOTO_CYCLES) {
+      throw this.rt.error("Error", 1023);
+    }
+
+    this.cycles++;
+    try {
+      // What frames placed and has yet to be made alive is made first.
+      this.constructPending();
+      this.broadcast("frameConstructed");
+      this.runFrameScripts(this.stage);
+      this.broadcast("exitFrame");
+    } finally {
+      this.cycles--;
+    }
+  }
+
+  /**
+   * The construct phase: what the frames placed is made alive after
+   * ENTER_FRAME, before frameConstructed, or as a goto's cycle begins;
+   * until then a script finds it in numChildren but getChildAt gives null
+   * (`instantiation_on_enter_frame`). One taken off since is never made,
+   * and one at a time, so a constructor that throws leaves the rest for
+   * later rather than losing them.
+   */
+  private constructPending(): void {
+    for (let next = this.toConstruct.shift(); next; next = this.toConstruct.shift()) {
+      if (!next.display.object && next.display.parent) {
+        this.construct(next.display, next.character, next.library);
+      }
+    }
   }
 
   /**
@@ -1520,16 +1555,7 @@ export class Scripting {
       this.broadcast("enterFrame");
     }
 
-    // The construct phase: what the frames placed is made alive after
-    // ENTER_FRAME, before frameConstructed; until then a script finds it in
-    // numChildren but getChildAt gives null (`instantiation_on_enter_frame`).
-    // One taken off since is never made.
-    // One at a time: a constructor that throws leaves the rest for the next frame, not lost.
-    for (let next = this.toConstruct.shift(); next; next = this.toConstruct.shift()) {
-      if (!next.display.object && next.display.parent) {
-        this.construct(next.display, next.character, next.library);
-      }
-    }
+    this.constructPending();
 
     const ends = [...this.frameEnds.splice(0), ...this.completeLoads()];
     this.broadcast("frameConstructed");
@@ -1561,6 +1587,9 @@ export class Scripting {
     this.scrolled.clear();
   }
 }
+
+/** How deep goto cycles may nest before a goto throws a stack overflow, Error #1023. */
+const MAX_GOTO_CYCLES = 256;
 
 /** The real clock where the host has one, browsers and node alike; else none, and the frame clock. */
 function defaultClock(): (() => number) | null {
