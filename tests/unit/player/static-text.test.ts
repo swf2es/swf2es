@@ -83,7 +83,7 @@ test("its text is null where a glyph has no font or one the SWF lacks, or where 
   );
 });
 
-test("a record on the same line adds no line feed; one back on the line before does", () => {
+test("a record on the same line adds no line feed; one on another line does, by the rule adl showed going down", () => {
   const text = (records: w.TextRecordSpec[]) => placeGlyphs(...read(records)).text;
   assert.equal(
     text([

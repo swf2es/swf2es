@@ -265,7 +265,7 @@ function drawnAt(
   }
 
   if (d instanceof StaticTextObject) {
-    return hitsGlyph(d.definition, d.glyphs.glyphs, x, y);
+    return hitsGlyph(d.definition, d.glyphs.glyphs, x, y, mask);
   }
 
   const layers: ShapeLayer[] =

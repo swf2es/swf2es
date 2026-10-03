@@ -255,13 +255,13 @@ async function runAdl(jobs: FlashJob[], timeout: number): Promise<FlashResult[]>
   return results;
 }
 
+/** A line of Wine's debug channels, as `0120:fixme:win:IsImmersiveProcess (FFFFFFFF): stub`, its pid first with +pid. */
+const WINE_DEBUG = /^[0-9a-f]{4,}(:[0-9a-f]{4,})?:(fixme|err|warn|trace):/;
+
 /**
  * Each job's traces, between its begin and end marks; a job leaked if
  * anything is traced after its settle mark, before the next job begins.
  */
-/** A line of Wine's debug channels, as `0120:fixme:win:IsImmersiveProcess (FFFFFFFF): stub`. */
-const WINE_DEBUG = /^[0-9a-f]{4}:(fixme|err|warn|trace):/;
-
 function splitOutput(stdout: string, results: FlashResult[]): void {
   let current: FlashResult | null = null;
   let settled: FlashResult | null = null;

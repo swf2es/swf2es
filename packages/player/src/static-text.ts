@@ -96,13 +96,15 @@ function outlineOf(glyph: Glyph): Path[] {
 /**
  * Whether the point (x, y), in the text's own pixels, is on one of its
  * glyphs: Flash hits static text by its glyphs' outlines, not its bounds,
- * and a glyph it draws transparent not at all.
+ * and a glyph it draws transparent not at all, but as a mask, which clips
+ * by its fills whatever their colour.
  */
 export function hitsGlyph(
   character: StaticTextCharacter,
   glyphs: PlacedGlyph[],
   x: number,
   y: number,
+  mask = false,
 ): boolean {
   const m = character.definition.matrix;
   const det = m.a * m.d - m.b * m.c;
@@ -116,7 +118,7 @@ export function hitsGlyph(
   const tx = (m.d * px - m.c * py) / det;
   const ty = (m.a * py - m.b * px) / det;
   for (const g of glyphs) {
-    if (g.color >>> 24 === 0 || g.height === 0) {
+    if ((!mask && g.color >>> 24 === 0) || g.height === 0) {
       continue;
     }
 
