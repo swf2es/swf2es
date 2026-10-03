@@ -392,30 +392,30 @@ function strokeContext(layer: ShapeLayer, m: Linear): GraphicsContext {
 }
 
 /**
- * How long, in frames prepared, lines' contexts no instance uses are kept
- * for one to come back to, as a loop does (5 s at 24 frames a second), and
- * how many at most. By age, not count: a loop longer than a count would
- * find each context gone just before it came round to it.
+ * How long, in milliseconds, lines' contexts no instance uses are kept for
+ * one to come back to, as a loop does, and how many at most. By age, not
+ * count: a loop longer than a count would find each context gone just
+ * before it came round to it; and by time, not renders, which a host may
+ * make many of between a SWF's frames.
  */
-const IDLE_FRAMES = 120;
+const IDLE_MS = 5000;
 const IDLE_MOST = 4096;
 
 /**
  * Lines' contexts by shape layer and the linear transform they are seen
  * through, shared by every instance that sees a character's layer alike:
  * instances of one creature in step, or one instance on its loop's next
- * turn. Contexts are counted as they are taken and given back; one no
- * longer taken waits among the idle, destroyed after IDLE_FRAMES or, the
- * oldest first, past IDLE_MOST. Only a character's layers are shared,
- * which never change.
+ * turn. Contexts are counted as they are taken and given back, a removed
+ * object's too; one no longer taken waits among the idle, destroyed after
+ * IDLE_MS or, the oldest first, past IDLE_MOST. Only a character's layers
+ * are shared, which never change.
  */
 class StrokeContexts {
   private readonly byLayer = new WeakMap<ShapeLayer, Map<string, GraphicsContext>>();
   private readonly uses = new Map<GraphicsContext, number>();
   private readonly keys = new Map<GraphicsContext, [ShapeLayer, string]>();
-  /** Contexts no one holds, oldest first, with the frame each went idle. */
+  /** Contexts no one holds, oldest first, with the time each went idle. */
   private readonly idle = new Map<GraphicsContext, number>();
-  private frame = 0;
 
   constructor(private readonly counts: { strokeContexts: number; strokeReuses: number }) {}
 
@@ -457,7 +457,7 @@ class StrokeContexts {
     }
 
     this.uses.delete(context);
-    this.idle.set(context, this.frame);
+    this.idle.set(context, performance.now());
     if (this.idle.size > IDLE_MOST) {
       this.drop(this.idle.keys().next().value as GraphicsContext);
     }
@@ -465,9 +465,9 @@ class StrokeContexts {
 
   /** A frame prepared: the contexts idle too long go. */
   tick(): void {
-    this.frame++;
+    const now = performance.now();
     for (const [context, since] of this.idle) {
-      if (since > this.frame - IDLE_FRAMES) {
+      if (now - since < IDLE_MS) {
         break;
       }
 
@@ -508,6 +508,10 @@ interface Node {
   strokes: (Graphics | null)[];
   /** Whether the layers are a character's, whose lines' contexts instances share. */
   sharedLines: boolean;
+  /** The children as of the last arrangement, to know those that left. */
+  kids: readonly DisplayObject[];
+  /** Whether its lines were given back as it left the list: drawn again for its transform if it comes back. */
+  released: boolean;
   /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
   bitmap: Sprite | null;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
@@ -687,6 +691,8 @@ export class PixiView {
         ownFills: false,
         strokes: [],
         sharedLines: false,
+        kids: [],
+        released: false,
         bitmap: null,
         lines: [],
         masking: false,
@@ -819,6 +825,32 @@ export class PixiView {
   }
 
   /**
+   * An object off the list, and all below it: their lines given back, so
+   * that the cache can let them go, and drawn again if they come back.
+   */
+  private release(o: DisplayObject): void {
+    const node = this.nodes.get(o);
+    if (!node || node.released) {
+      return;
+    }
+
+    node.released = true;
+    for (const strokes of node.strokes) {
+      if (strokes) {
+        const previous = strokes.context;
+        strokes.context = new GraphicsContext();
+        this.lines.give(previous);
+      }
+    }
+
+    if (o instanceof Container) {
+      for (const child of o.children) {
+        this.release(child);
+      }
+    }
+  }
+
+  /**
    * Draw the lines again for the object's transform on the stage: in the
    * stage's axes, under the inverse of that transform's linear part.
    */
@@ -867,6 +899,13 @@ export class PixiView {
     const node = this.node(o);
     const { container } = node;
     let dirty = this.fresh ? TRANSFORM | CHILDREN | CONTENT : o.dirty;
+    if (node.released) {
+      // Back from off the list: its transform as if unknown, so that it and all below draw their lines again.
+      node.released = false;
+      node.world = [Number.NaN, Number.NaN, Number.NaN, Number.NaN];
+      dirty |= TRANSFORM;
+    }
+
     // A mask is drawn, whatever its visibility, alpha and colour, by its fills alone.
     const masking = inMask || o.maskOf !== null || o.clipDepth > 0;
     const remask = masking !== node.masking;
@@ -1029,6 +1068,18 @@ export class PixiView {
     node.groups = [];
     content.removeChildren();
     content.addChild(node.art);
+    // Those that left the list give their lines back, all the way down; one
+    // moved to another parent is drawn there, perhaps already this frame.
+    if (!this.fresh) {
+      for (const kid of node.kids) {
+        if (kid.parent === null) {
+          this.release(kid);
+        }
+      }
+
+      node.kids = [...o.children];
+    }
+
     const clips = new Clips();
     const open: PixiContainer[] = [];
     for (const child of o.children) {

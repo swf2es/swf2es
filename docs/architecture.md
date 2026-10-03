@@ -513,8 +513,11 @@ linear part of its transform on the stage, and is kept by layer and that
 transform, exactly, shared by every instance that sees the layer alike
 (a crowd of one creature in step) and found again when one comes back to
 it (a loop's next turn). Contexts are counted as instances take and give
-them back; one no one holds stays idle 120 frames, at most 4096 of them,
-before it is destroyed. A drawing's lines are its own, as it changes.
+them back, and an object that leaves the list gives back its own and its
+descendants', drawn again if it returns; one no one holds stays idle
+5 s, by the clock, not renders, which a host may make many of between
+frames, at most 4096 of them, before it is destroyed. A drawing's lines
+are its own, as it changes.
 Tessellating lines, round joins most of all, was the largest part of a
 frame of a dozen animated instances; `bench.ts --rig N` measures it.
 
