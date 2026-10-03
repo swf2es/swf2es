@@ -1716,6 +1716,29 @@ export class Domain {
       return;
     }
 
+    // A domain's finding never changes, and the runtime reports it again
+    // for each ABC the domain loads: one already recorded is left as it is.
+    const table = this.cached;
+    let slot = table.start(hashPair(<u32>ns, <u32>nameId));
+    while (true) {
+      const id = table.at(slot);
+      if (id < 0) {
+        break;
+      }
+
+      if (
+        this.cachedDomain[id] === domain &&
+        this.cachedNs[id] === <u32>ns &&
+        this.cachedName[id] === <u32>nameId &&
+        this.cachedBinding[id] === binding &&
+        this.cachedClass[id] === cls
+      ) {
+        return;
+      }
+
+      slot = table.next(slot);
+    }
+
     const id = <u32>this.cachedDomain.length;
     this.cachedDomain.push(domain);
     this.cachedNs.push(<u32>ns);

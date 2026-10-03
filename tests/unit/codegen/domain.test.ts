@@ -84,6 +84,9 @@ test("application domains see their chain's names, from the root down, and what 
   assert.equal(at(child, "p", "b"), "abc 3 script 0 trait 0");
   testing.domainFound(child, NS_PUBLIC, "p", "b", 1, false);
   assert.equal(at(child, "p", "b"), "abc 1 script 0 trait 0");
+  // Reported again, as the runtime does for each ABC the domain loads, it is kept once.
+  testing.domainFound(child, NS_PUBLIC, "p", "b", 1, false);
+  assert.match(testing.domainSummary() as string, / found 1 /);
   assert.equal(at(sibling, "p", "b"), "abc 3 script 0 trait 0");
   assert.equal(at(child, "p", "c"), "abc 1 script 0 trait 1");
 

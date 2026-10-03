@@ -16,6 +16,7 @@ export interface CompileUnit {
     name: string;
     domain: number;
     index: number;
+    hash: string;
     asType: boolean;
   }[];
 }
@@ -27,6 +28,8 @@ export function abcCompiler(testing: any) {
   let domains = new Map<number, number>([[0, 0]]);
   let abcs = new Map<number, number[]>([[0, []]]);
   let added = 0;
+  // The findings each domain has been told, reported once.
+  let reported = new Map<number, Set<string>>();
   // Every ABC's hash, in load order, as the compiler names a module's.
   let hashes: string[] = [];
   let evaluated = 0;
@@ -51,6 +54,7 @@ export function abcCompiler(testing: any) {
       testing.domainReset(50);
       domains = new Map([[0, 0]]);
       abcs = new Map([[0, []]]);
+      reported = new Map();
       added = 0;
       hashes = [];
     },
@@ -65,9 +69,13 @@ export function abcCompiler(testing: any) {
       }
 
       const domain = unit.domains[0];
+      const told = reported.get(domain) ?? new Set<string>();
+      reported.set(domain, told);
       for (const f of unit.found) {
+        const key = JSON.stringify([f.asType, f.nsKind, f.uri, f.name, f.domain, f.index]);
         const abc = abcs.get(f.domain)?.[f.index];
-        if (abc !== undefined) {
+        if (abc !== undefined && !told.has(key)) {
+          told.add(key);
           testing.domainFound(domains.get(domain), f.nsKind, f.uri, f.name, abc, f.asType);
         }
       }

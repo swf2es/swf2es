@@ -344,7 +344,7 @@ export function domainFind(
   return `abc ${domain.bindingAbc[b]} script ${domain.bindingScript[b]} trait ${domain.bindingTrait[b]}`;
 }
 
-/** Counts of the domain's tables, then the URIs builtin ABCs version, sorted. */
+/** Counts of the domain's tables and recorded findings, then the URIs builtin ABCs version, sorted. */
 export function domainSummary(): string {
   const uris: string[] = [];
   for (let i = 0; i < domain.versioned.length; i++) {
@@ -354,7 +354,7 @@ export function domainSummary(): string {
   }
 
   uris.sort();
-  return `strings ${domain.stringPtr.length} namespaces ${domain.nsType.length} bindings ${domain.bindingNs.length} versioned ${uris.join(",")}`;
+  return `strings ${domain.stringPtr.length} namespaces ${domain.nsType.length} bindings ${domain.bindingNs.length} found ${domain.cachedDomain.length} versioned ${uris.join(",")}`;
 }
 
 /** The domain's bindings in load order: "uri::name version V abc A trait T". */
