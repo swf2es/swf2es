@@ -145,15 +145,35 @@ interface Load {
   ready: (() => () => void) | null;
   /** The IOErrorEvent text the load ended in, as Flash words one. */
   failed: string | null;
+  /** The application domain its code loads into, as the Loader's context chose it when asked. */
+  domain: avm2.Domain;
+}
+
+/** What SymbolClass bound a class to: a character of a SWF's library. */
+interface Symbol {
+  character: Character;
+  library: Library;
 }
 
 export class Scripting {
   readonly rt: avm2.Runtime;
+  /**
+   * The main SWF's application domain, a child of the runtime's root, which
+   * holds the player's own classes as Flash's system domain does: a domain
+   * made without a parent is the main one's sibling, and sees none of it.
+   */
+  readonly mainDomain: avm2.Domain;
   readonly screenCapabilities: Readonly<ScreenCapabilities>;
   readonly externalInterface: ExternalInterfaceHost | null;
   readonly socket: SocketHost | null;
-  /** The character, and its SWF's library, each class SymbolClass bound makes, for a `new` of the class from a script. */
-  readonly symbols = new Map<string, { character: Character; library: Library }>();
+  /**
+   * The character, and its SWF's library, each class SymbolClass bound
+   * makes, for a `new` of the class from a script: by the module that
+   * defines the class, as the SWF's domain found it, then its name, so a
+   * class of the same name in another domain has its own; null for a name
+   * nothing defined when it was bound.
+   */
+  readonly symbols = new Map<avm2.Abc | null, Map<string, Symbol>>();
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
   private preparing: Promise<void> = Promise.resolve();
@@ -235,6 +255,16 @@ export class Scripting {
   private readonly timers = new TimerHeap();
   quality = "HIGH";
   private readonly hashes: string[] = [];
+  /**
+   * The compiler's application domain for each of the runtime's, by its
+   * number; the compiler's index of each ABC added into one, in order; and
+   * the findings each has been told (see add).
+   */
+  private readonly codegenDomains = new Map<number, number>([[0, 0]]);
+  private readonly codegenAbcs = new Map<number, number[]>([[0, []]]);
+  private readonly reported = new Map<number, Set<string>>();
+  /** Modules imported, each under a script name of its own for Runtime.codeDomain. */
+  private modules = 0;
   private statusClass: AsObject | null = null;
 
   constructor(
@@ -278,22 +308,24 @@ export class Scripting {
       { ...avm2.builtinHooks(), ...playerHooks(this) },
       options,
     );
+    this.mainDomain = this.rt.childDomain(this.rt.root);
     this.codegen.reset(50);
   }
 
   /** Load the libraries the SWF's code links against (builtin, playerglobal), whose scripts run on first use. */
   async loadLibraries(abcs: Uint8Array[]): Promise<void> {
     for (const abc of abcs) {
-      await this.load(abc, true);
+      await this.compileAt(await this.add(abc, true, this.rt.root), this.rt.root, true);
     }
   }
 
   /** Load the SWF's DoABCs in tag order, each run unless its lazy flag defers it to first use, then its SymbolClass. */
   async loadSwf(swf: Swf, library: Library): Promise<void> {
     this.library = library;
+    library.domain = this.mainDomain;
     this.rt.swfVersion = swf.header.version;
     const decoded = decodeImages(library, this.decodeImage);
-    const run = await this.link(swf);
+    const run = await this.link(swf, this.mainDomain);
     await decoded;
     run();
     this.bind(swf, library);
@@ -304,7 +336,7 @@ export class Scripting {
    * each unless its lazy flag defers it to first use. Linking is
    * asynchronous, running is not, so a load can run its code in a frame.
    */
-  private async link(swf: Swf): Promise<() => void> {
+  private async link(swf: Swf, domain: avm2.Domain): Promise<() => void> {
     // Every DoABC added before any compiles: avmplus has a frame's ABCs all
     // loaded before it verifies a method, so a class in the first tag may
     // extend or name one in the last (the corpus's property_priority).
@@ -312,13 +344,13 @@ export class Scripting {
     for (const t of swf.tags) {
       if (t.code === tags.DoABC || t.code === tags.DoABC2) {
         const { lazy, abc } = readDoAbc(swf.bytes, t);
-        added.push({ index: await this.add(abc, false), lazy });
+        added.push({ index: await this.add(abc, false, domain), lazy });
       }
     }
 
     const runs: (() => void)[] = [];
     for (const { index, lazy } of added) {
-      const linked = await this.compileAt(index);
+      const linked = await this.compileAt(index, domain);
       if (!lazy) {
         runs.push(() => this.rt.run(linked));
       }
@@ -333,6 +365,7 @@ export class Scripting {
 
   /** SymbolClass: bind the SWF's characters to their classes, in its library, and the library to this. */
   private bind(swf: Swf, library: Library): void {
+    const domain = library.domain ?? this.mainDomain;
     for (const t of swf.tags) {
       if (t.code === tags.SymbolClass) {
         for (const [id, name] of readSymbolClass(swf.bytes, t)) {
@@ -340,7 +373,20 @@ export class Scripting {
           library.classes.set(id, qualified);
           const character = library.characters.get(id);
           if (character) {
-            this.symbols.set(qualified, { character, library });
+            const abc = this.rt.definingAbc(qualified, domain);
+            let byName = this.symbols.get(abc);
+            if (!byName) {
+              byName = new Map();
+              this.symbols.set(abc, byName);
+            }
+
+            // A class keeps the symbol first bound to it: another SWF that
+            // binds it, one that finds it in a parent's domain, makes its own
+            // timeline's instances of it but not a script's (the corpus's
+            // loader_duplicate_class).
+            if (!byName.has(qualified)) {
+              byName.set(qualified, { character, library });
+            }
           }
         }
       }
@@ -350,27 +396,59 @@ export class Scripting {
     library.removing = (display, byTimeline) => this.removing(display, byTimeline);
   }
 
-  /** An ABC compiled and linked into the runtime, its scripts not yet run: what `rt.run` takes. */
-  private async load(abc: Uint8Array, builtin: boolean): Promise<Value> {
-    return this.compileAt(await this.add(abc, builtin));
-  }
+  /**
+   * An ABC added to the compiler's domain, into the application domain of
+   * the runtime's `domain`, linked against what that domain sees of those
+   * before it, with what it has found: its index among all added.
+   */
+  private async add(abc: Uint8Array, builtin: boolean, domain: avm2.Domain): Promise<number> {
+    const target = this.codegenDomainOf(domain);
+    if (domain !== this.rt.root) {
+      const told = this.reported.get(domain.id) ?? new Set<string>();
+      this.reported.set(domain.id, told);
+      for (const f of this.rt.compileUnit(domain).found) {
+        const key = JSON.stringify([f.asType, f.nsKind, f.uri, f.name, f.domain, f.index]);
+        const at = this.codegenAbcs.get(f.domain)?.[f.index];
+        if (at !== undefined && !told.has(key)) {
+          told.add(key);
+          this.codegen.found({ ...f, domain: target, abc: at });
+        }
+      }
+    }
 
-  /** An ABC added to the domain, linked against those before it: its index among them. */
-  private async add(abc: Uint8Array, builtin: boolean): Promise<number> {
-    const error = this.codegen.add(abc, builtin);
+    const error = this.codegen.add(abc, builtin, target);
     if (error) {
       throw new Error(`an ABC was rejected: VerifyError #${error}`);
     }
 
+    this.codegenAbcs.get(domain.id)?.push(this.hashes.length);
     this.hashes.push(await sha256(abc));
     return this.hashes.length - 1;
   }
 
-  /** ABC `index`'s module, compiled against every ABC added so far, loaded into the runtime. */
-  private async compileAt(index: number): Promise<Value> {
+  /** The compiler's application domain for the runtime's `domain`, made with its ancestors' as needed. */
+  private codegenDomainOf(domain: avm2.Domain): number {
+    let target = this.codegenDomains.get(domain.id);
+    if (target === undefined) {
+      target = this.codegen.childDomain(this.codegenDomainOf(domain.parent ?? this.rt.root));
+      this.codegenDomains.set(domain.id, target);
+      this.codegenAbcs.set(domain.id, []);
+    }
+
+    return target;
+  }
+
+  /**
+   * ABC `index`'s module, compiled against every ABC added so far that its
+   * domain sees, loaded into the runtime's `domain`; `builtin` for the
+   * player's own libraries. Each is imported under a script name of its
+   * own, by which Runtime.codeDomain finds the domain of the code running.
+   */
+  private async compileAt(index: number, domain: avm2.Domain, builtin = false): Promise<Value> {
     const { module } = this.codegen.compile(this.hashes, index);
-    const factory = (await import(`data:text/javascript,${encodeURIComponent(module)}`)).default;
-    return factory(this.rt);
+    const named = `${module}//# sourceURL=swf2es-${++this.modules}.js\n`;
+    const factory = (await import(`data:text/javascript,${encodeURIComponent(named)}`)).default;
+    return this.rt.loadInto(domain, () => factory(this.rt), builtin);
   }
 
   /**
@@ -381,10 +459,11 @@ export class Scripting {
    */
   construct(display: DisplayObject, character: DisplayCharacter, library: Library): void {
     const name = library.classes.get(character.id) ?? DEFAULT_CLASS[character.type];
+    const domain = library.domain ?? null;
     const object =
       character.type === "bitmap" && display instanceof BitmapObject
-        ? this.constructBitmap(display, name)
-        : this.constructAs(display, this.rt.classNamed(name));
+        ? this.constructBitmap(display, name, domain)
+        : this.constructAs(display, this.rt.classNamed(name, domain));
     // Flash gives the parent a property of the child's instance name, which
     // a sealed class without it refuses: ReferenceError #1056, as Flash.
     const parent = display.parent?.object;
@@ -401,8 +480,12 @@ export class Scripting {
    * (1, 1) where PlaceObject3 has HasImage; without it Flash constructs
    * the class as a display object's and refuses it, TypeError 2022.
    */
-  private constructBitmap(display: BitmapObject, name: string): AsObject {
-    const cls = this.rt.classNamed(name);
+  private constructBitmap(
+    display: BitmapObject,
+    name: string,
+    domain: avm2.Domain | null,
+  ): AsObject {
+    const cls = this.rt.classNamed(name, domain);
     if (!extendsClass(cls, "flash.display::BitmapData")) {
       return this.constructAs(display, cls);
     }
@@ -417,9 +500,9 @@ export class Scripting {
   }
 
   /** The bitmap a class SymbolClass bound is of, if `traits` or a base is one's. */
-  bitmapSymbol(traits: { name: string; base: unknown }): BitmapCharacter | null {
-    for (let t: typeof traits | null = traits; t; t = t.base as typeof traits | null) {
-      const symbol = this.symbols.get(t.name);
+  bitmapSymbol(traits: SymbolTraits): BitmapCharacter | null {
+    for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
+      const symbol = this.symbolOf(t);
       if (symbol) {
         return symbol.character.type === "bitmap" ? symbol.character : null;
       }
@@ -433,9 +516,9 @@ export class Scripting {
    * `traits` or a base is one's: one buffer for all its instances, which
    * see each other's writes, as Flash's.
    */
-  binarySymbol(traits: { name: string; base: unknown }): Uint8Array<ArrayBuffer> | null {
-    for (let t: typeof traits | null = traits; t; t = t.base as typeof traits | null) {
-      const symbol = this.symbols.get(t.name);
+  binarySymbol(traits: SymbolTraits): Uint8Array<ArrayBuffer> | null {
+    for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
+      const symbol = this.symbolOf(t);
       if (symbol) {
         const character = symbol.character;
         if (character.type !== "binary") {
@@ -448,6 +531,12 @@ export class Scripting {
     }
 
     return null;
+  }
+
+  /** What SymbolClass bound the class of `traits` to, if anything: by its defining module, then its name. */
+  private symbolOf(traits: SymbolTraits): Symbol | undefined {
+    const abc = (traits.abc as avm2.Abc | null | undefined) ?? null;
+    return this.symbols.get(abc)?.get(traits.name) ?? this.symbols.get(null)?.get(traits.name);
   }
 
   /** A new plain BitmapData of a bitmap's pixels, as a Bitmap of the bitmap gets. */
@@ -606,10 +695,7 @@ export class Scripting {
    * character of a class SymbolClass bound, if the class or a base of it
    * is one, else an empty clip, shape or container by the nearest base.
    */
-  displayFor(traits: {
-    name: string;
-    base: { name: string; base: unknown } | null;
-  }): DisplayObject {
+  displayFor(traits: SymbolTraits): DisplayObject {
     const library: Library = this.library ?? {
       characters: new Map(),
       root: EMPTY_TIMELINE,
@@ -618,9 +704,9 @@ export class Scripting {
       removing: null,
       fonts: new FontSet(),
     };
-    for (let t: typeof traits | null = traits; t; t = t.base as typeof traits | null) {
+    for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
       // A display object's class bound to data has no display of it.
-      const symbol = this.symbols.get(t.name);
+      const symbol = this.symbolOf(t);
       if (symbol && symbol.character.type !== "binary" && symbol.character.type !== "font") {
         if (symbol.character.type === "text") {
           // A new linked TextField has its symbol's bounds, but not its timeline's initial text.
@@ -684,9 +770,30 @@ export class Scripting {
     };
   }
 
-  /** The one ApplicationDomain there is until child domains, the current one: a new object at each ask, as Flash's. */
-  applicationDomain(): AsObject {
-    return this.rt.construct(this.rt.classNamed("flash.system::ApplicationDomain"), null);
+  /** An ApplicationDomain object for the runtime's `domain`: a new one at each ask, as Flash's, without running its constructor. */
+  applicationDomainOf(domain: avm2.Domain): AsObject {
+    const object = this.rt.classNamed("flash.system::ApplicationDomain").$it.instance();
+    object.$domain = domain;
+    return object;
+  }
+
+  /**
+   * The domain a load goes into: the LoaderContext's applicationDomain, or
+   * by default a new child of the domain of the code that asked, as
+   * Flash's `new ApplicationDomain(ApplicationDomain.currentDomain)`.
+   */
+  loadDomain(applicationDomain: Value): avm2.Domain {
+    const chosen: avm2.Domain | undefined = applicationDomain?.$domain;
+    return chosen ?? this.rt.childDomain(this.codeDomain());
+  }
+
+  /**
+   * The domain of the code that asks (Runtime.codeDomain): the main SWF's
+   * when no SWF's code is on the stack, only the player's.
+   */
+  codeDomain(): avm2.Domain {
+    const domain = this.rt.codeDomain();
+    return domain === this.rt.root ? this.mainDomain : domain;
   }
 
   /**
@@ -704,8 +811,8 @@ export class Scripting {
    * the call, the URL still null; the content comes in a later frame, under
    * a URL of the bytes' own.
    */
-  requestLoad(loader: AsObject, bytes: Uint8Array): void {
-    const begun = this.begin(loader);
+  requestLoad(loader: AsObject, bytes: Uint8Array, domain = this.loadDomain(null)): void {
+    const begun = this.begin(loader, domain);
     if (!begun) {
       return;
     }
@@ -725,7 +832,13 @@ export class Scripting {
       return;
     }
 
-    this.enqueue(loader, generation, null, Promise.resolve({ bytes, status: 0, headers: [] }));
+    this.enqueue(
+      loader,
+      generation,
+      null,
+      Promise.resolve({ bytes, status: 0, headers: [] }),
+      domain,
+    );
   }
 
   /**
@@ -735,7 +848,10 @@ export class Scripting {
    * may load anew themselves, and that load is then the one that counts:
    * null tells the caller so.
    */
-  private begin(loader: AsObject): { info: AsObject; generation: number } | null {
+  private begin(
+    loader: AsObject,
+    domain: avm2.Domain,
+  ): { info: AsObject; generation: number } | null {
     this.closeLoad(loader);
     const generation: number = loader.$generation;
     this.dropContent(loader);
@@ -745,6 +861,7 @@ export class Scripting {
 
     const info = this.loaderInfoOf(loader);
     info.$loaderURL = this.ownerUrl(loader);
+    info.$domain = domain;
     return { info, generation };
   }
 
@@ -772,8 +889,12 @@ export class Scripting {
   }
 
   /** A Loader's load of a URL: the host fetches it, resolved, and the load completes in a frame after the bytes arrive. */
-  requestLoadUrl(loader: AsObject, request: AsObject | string): void {
-    const begun = this.begin(loader);
+  requestLoadUrl(
+    loader: AsObject,
+    request: AsObject | string,
+    domain = this.loadDomain(null),
+  ): void {
+    const begun = this.begin(loader, domain);
     if (!begun) {
       return;
     }
@@ -788,6 +909,7 @@ export class Scripting {
       generation,
       outgoing.url,
       fetch ? fetch(outgoing, abort.signal) : Promise.reject(),
+      domain,
     );
   }
 
@@ -882,11 +1004,13 @@ export class Scripting {
     generation: number,
     url: string | null,
     bytes: Promise<FetchResult>,
+    domain: avm2.Domain,
   ): void {
     const load: Load = {
       loader,
       generation,
       url,
+      domain,
       bytes: new Uint8Array(0),
       status: 0,
       ready: null,
@@ -928,8 +1052,9 @@ export class Scripting {
     }
 
     const library = readLibrary(swf);
+    library.domain = load.domain;
     const decoded = decodeImages(library, this.decodeImage);
-    const run = await this.link(swf);
+    const run = await this.link(swf, load.domain);
     await decoded;
     return () => this.complete(load, swf, library, run);
   }
@@ -1082,7 +1207,7 @@ export class Scripting {
     root.loaderInfo = info;
     const object = this.constructAs(
       root,
-      this.rt.classNamed(library.classes.get(0) ?? "flash.display::MovieClip"),
+      this.rt.classNamed(library.classes.get(0) ?? "flash.display::MovieClip", load.domain),
     );
     dispatchEvent(this, object, this.event("added", true));
     // The SWF's own code has run by now, its document class's constructor
@@ -1339,6 +1464,13 @@ function defaultClock(): (() => number) | null {
 
 /** A load's failure, worded as its IOErrorEvent's text. */
 class LoadError extends Error {}
+
+/** A class's traits as the symbol lookups read them: its name, its module, its base's. */
+interface SymbolTraits {
+  name: string;
+  abc?: unknown;
+  base: unknown;
+}
 
 interface TimerRecord {
   object: AsObject;

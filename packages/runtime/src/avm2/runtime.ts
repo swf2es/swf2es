@@ -773,6 +773,7 @@ export class Runtime {
    */
   private readonly moduleDomains = new Map<string, Domain>();
   private readonly unlocated: [Error, Domain][] = [];
+  private loadingBuiltin = false;
   private children = false;
   /** Vector.<T>'s references, by T's. */
   private readonly vectorRefs = new Map<TypeRef, VectorRef>();
@@ -901,14 +902,21 @@ export class Runtime {
     return this.root;
   }
 
-  /** `f`, which loads modules, with what it loads going into `domain`. */
-  loadInto<T>(domain: Domain, f: () => T): T {
+  /**
+   * `f`, which loads modules, with what it loads going into `domain`;
+   * `builtin` for a player's own, whose code is not a domain's to
+   * codeDomain, as avmplus skips builtin frames for the code context.
+   */
+  loadInto<T>(domain: Domain, f: () => T, builtin = false): T {
     const previous = this.loading;
+    const wasBuiltin = this.loadingBuiltin;
     this.loading = domain;
+    this.loadingBuiltin = builtin;
     try {
       return f();
     } finally {
       this.loading = previous;
+      this.loadingBuiltin = wasBuiltin;
     }
   }
 
@@ -1038,7 +1046,9 @@ export class Runtime {
     abc.index = domain.own.length;
     domain.own.push(desc.hash);
     domain.ownOrder.push(this.loads++);
-    this.unlocated.push([new Error(), domain]);
+    if (!this.loadingBuiltin) {
+      this.unlocated.push([new Error(), domain]);
+    }
     for (const name of abc.names) {
       if (name instanceof TypeName) {
         name.names = abc.names;
@@ -2569,6 +2579,33 @@ export class Runtime {
     const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
     mn.domain = domain === this.root ? null : domain;
     return this.resolveName(mn);
+  }
+
+  /**
+   * The names `domain`'s own modules define, private ones left out, as
+   * Flash's ApplicationDomain.getQualifiedDefinitionNames lists them:
+   * "pkg::Name", or the name alone in the top-level package.
+   */
+  definitionNames(domain: Domain): string[] {
+    const names: string[] = [];
+    for (const [name, list] of domain.globals) {
+      for (const g of list) {
+        if (g.ns.kind !== NS_Private) {
+          names.push(g.ns.uri ? `${g.ns.uri}::${name}` : name);
+        }
+      }
+    }
+
+    return names;
+  }
+
+  /** The module whose script defines `qualified` for `domain`, or null: by it a player keys what SymbolClass binds. */
+  definingAbc(qualified: string, domain: Domain): Abc | null {
+    const i = qualified.lastIndexOf("::");
+    const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));
+    const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
+    mn.domain = domain === this.root ? null : domain;
+    return this.findScript(mn)?.abc ?? null;
   }
 
   /** The class a multiname or TypeName names. */

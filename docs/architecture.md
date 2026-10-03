@@ -824,17 +824,26 @@ script as base64; the oracle runs under AIR, which refuses code from
 bytes unless the `LoaderContext` has `allowCodeImport`, which Flash
 Player does not need.
 
-Flash loads into a child `ApplicationDomain` by default: the parent
-cannot see the loaded SWF's classes by name, a class the loaded SWF
-defines again shadows the parent's for its own code, and
-`LoaderInfo.applicationDomain.getDefinition` finds it
-(`loader_duplicate_class`). The compiler and the runtime both have
-application domains, which avmshell's Domain uses (see the runtime's
-builtins). The player does not yet: it loads into the current domain, as a `LoaderContext` with
-`ApplicationDomain.currentDomain` asks. There, as in Flash, a class the
-loaded SWF defines again is ignored for the one the domain has, so a SWF
-loaded twice makes instances of its first load's classes (the node
-test). Child domains are the slice after.
+The player's application domains are the runtime's and the compiler's
+(see the runtime's builtins and Linking). The root is Flash's system
+domain, the player's own classes; the main SWF loads into a child of it
+(`Scripting.mainDomain`), so `new ApplicationDomain(null)` sees none of
+the main SWF's classes, and the main SWF's `parentDomain` is null, as
+Flash hides the system domain. A Loader loads into its `LoaderContext`'s
+`applicationDomain`, or by default into a new child of the domain of the
+code that asked: the parent cannot see the loaded SWF's classes by name,
+a class it defines again is ignored for the one its domain's chain has,
+and `LoaderInfo.applicationDomain.getDefinition` finds its own
+(`loader_duplicate_class`). The domain of the code that asks, for
+`ApplicationDomain.currentDomain`, `getDefinitionByName` and a load's
+default, is `Runtime.codeDomain`'s, so each module is imported under a
+`sourceURL` of its own, and the player's own modules load as builtin,
+whose frames do not count, as avmplus skips builtin code. SymbolClass
+binds a character to the class its name finds in the SWF's domain, by
+the module that defines it, so the same name in another domain is
+another class; a class keeps the symbol first bound to it, so another
+SWF binding a parent's class makes its own timeline's instances of the
+class, but `new` makes the first's.
 
 A SWF the player loads is in the position the oracle's harness puts
 every SWF in, so what the harness could not judge for a main movie, the

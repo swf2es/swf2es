@@ -245,8 +245,9 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
   const contentOf = (loader: number) => (player.root.children[loader] as Container).children[0];
   const first = contentOf(0);
 
-  // The same SWF again, into the one domain: its classes are the first
-  // load's, as Flash keeps a domain's definitions, and it plays on its own.
+  // The same SWF again, into a child domain of its own, as a Loader without
+  // a context loads: its classes are its own, not the first load's, and it
+  // plays on its own.
   // The closed load and the replaced one come to nothing; the replacement
   // loads. A loaded SWF's own load resolves against it.
   await scripting.settled();
@@ -283,7 +284,7 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
   const second = contentOf(2);
   assert.ok(first.object && second.object);
   assert.notEqual(first.object, second.object);
-  assert.equal(Object.getPrototypeOf(second.object), Object.getPrototypeOf(first.object));
+  assert.notEqual(Object.getPrototypeOf(second.object), Object.getPrototypeOf(first.object));
 
   // The reload: the first Loader's content went at the call, and the new
   // content comes as a first load's does; the one unloaded before its bytes

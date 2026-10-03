@@ -41,14 +41,22 @@ export function loaderNatives(s: Scripting): avm2.Natives {
 
     // Both take the LoaderContext's fields after the source: checkPolicyFile,
     // applicationDomain, securityDomain, requestedContentParent, parameters,
-    // the JPEG deblocking, allowCodeImport and imageDecodingPolicy. The one
-    // domain there is is the current, so they are not read yet.
-    "flash.display:Loader::_loadBytes"(bytes: Value): void {
-      s.requestLoad(this, copyOf(s, bytes));
+    // the JPEG deblocking, allowCodeImport and imageDecodingPolicy. Only
+    // applicationDomain is read, for where the content's code loads.
+    "flash.display:Loader::_loadBytes"(
+      bytes: Value,
+      _checkPolicyFile: Value,
+      applicationDomain: Value,
+    ): void {
+      s.requestLoad(this, copyOf(s, bytes), s.loadDomain(applicationDomain));
     }
 
-    "flash.display:Loader::_load"(request: Value): void {
-      s.requestLoadUrl(this, request as AsObject);
+    "flash.display:Loader::_load"(
+      request: Value,
+      _checkPolicyFile: Value,
+      applicationDomain: Value,
+    ): void {
+      s.requestLoadUrl(this, request as AsObject, s.loadDomain(applicationDomain));
     }
 
     "flash.display:Loader::_unload"(stopAllMovieClips: Value, _gc: Value): void {

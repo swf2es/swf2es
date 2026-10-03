@@ -1,7 +1,10 @@
-// flash.system.ApplicationDomain: one domain for now, the current one,
-// whose definitions are the runtime's; child domains come with the
-// compiler's domain forked and the runtime resolving names by domain. Its
-// domain memory is the runtime's too, as avmshell's Domain's is.
+// flash.system.ApplicationDomain: one of the runtime's application
+// domains (avm2.Domain), kept on the object as $domain: a child's
+// definitions after its parent's, its own invisible to its parent and to
+// its siblings. The root is Flash's system domain, the player's classes,
+// and the main SWF's is its child (Scripting.mainDomain), so `new
+// ApplicationDomain(null)` sees none of the main SWF's. Its domain memory
+// is the runtime's one, as avmshell's Domain's is.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 import { qualify } from "../../toplevel.js";
@@ -12,11 +15,26 @@ type Value = avm2.Value;
 export function applicationDomainNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
-  class ApplicationDomainNatives {
-    declare $parent: AsObject | null;
+  const domainOf = (o: AsObject): avm2.Domain => o.$domain ?? s.mainDomain;
+  const has = (o: AsObject, name: Value): boolean => {
+    if (name === null || name === undefined) {
+      return false;
+    }
 
+    try {
+      s.rt.classNamed(qualify(String(name)), domainOf(o));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  class ApplicationDomainNatives {
+    declare $domain: avm2.Domain | undefined;
+
+    // The domain of the code that asks, as Flash's.
     static get currentDomain(): Value {
-      return s.applicationDomain();
+      return s.applicationDomainOf(s.codeDomain());
     }
 
     static get MIN_DOMAIN_MEMORY_LENGTH(): number {
@@ -32,24 +50,34 @@ export function applicationDomainNatives(s: Scripting): avm2.Natives {
     }
 
     "flash.system:ApplicationDomain::ctor"(parent: Value): void {
-      this.$parent = parent ?? null;
+      this.$domain = s.rt.childDomain(parent ? domainOf(parent) : s.rt.root);
     }
 
+    // The system domain, the root, is no script's to see: the main SWF's has no parent.
     get parentDomain(): Value {
-      return this.$parent;
+      const parent = domainOf(this).parent;
+      return parent && parent !== s.rt.root ? s.applicationDomainOf(parent) : null;
     }
 
+    getQualifiedDefinitionNames(): Value {
+      const cls = s.rt.resolve(s.rt.vector("String"));
+      const names = cls.$it.instance();
+      names.$a = s.rt.definitionNames(domainOf(this));
+      return names;
+    }
+
+    // A name not defined is refused with its local name, as Flash's message has it.
     getDefinition(name: Value): Value {
-      return s.rt.classNamed(qualify(String(name)));
+      const qualified = qualify(String(name));
+      if (!has(this, name)) {
+        throw s.rt.error("ReferenceError", 1065, qualified.replace(/^.*::/, ""));
+      }
+
+      return s.rt.classNamed(qualified, domainOf(this));
     }
 
     hasDefinition(name: Value): boolean {
-      try {
-        s.rt.classNamed(qualify(String(name)));
-        return true;
-      } catch {
-        return false;
-      }
+      return has(this, name);
     }
   }
 
