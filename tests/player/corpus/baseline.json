@@ -928,7 +928,7 @@
   "avm2/soundchannel_soundtransform_exists": {"matched":6,"lines":6,"traced":6,"error":null},
   "avm2/soundmixer_buffertime": {"matched":1,"lines":5,"traced":1,"error":"Error: swf2es: native flash.media::SoundMixer.get:bufferTime is not supported yet"},
   "avm2/soundmixer_soundtransform": {"matched":1,"lines":900,"traced":1,"error":"Error: swf2es: native flash.media::SoundMixer.get:soundTransform is not supported yet"},
-  "avm2/soundmixer_stopall": {"matched":1,"lines":6,"traced":1,"error":"Error: swf2es: native flash.media::Sound#flash.media:Sound::_load is not supported yet"},
+  "avm2/soundmixer_stopall": {"matched":5,"lines":6,"traced":5,"error":"Error: swf2es: native flash.media::SoundMixer.stopAll is not supported yet"},
   "avm2/soundtransform": {"matched":442,"lines":442,"traced":442,"error":null},
   "avm2/space_justifier_clone": {"matched":0,"lines":12,"traced":0,"error":"Error: swf2es: native flash.text.engine::TextJustifier#flash.text.engine:TextJustifier::setLocale is not supported yet"},
   "avm2/sprite_with_frames": {"matched":0,"lines":0,"traced":0,"error":null},
