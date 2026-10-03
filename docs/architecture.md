@@ -669,6 +669,19 @@ flag. From version 10 a goto leaves the frames that follow as they were.
 The version is the clip's own SWF's, which the case does not try across
 a loaded SWF.
 
+From version 10 a goto, once it happens, runs a frame of its own: what it
+placed is made alive, and anything frames placed that is still waiting to
+be, then `FRAME_CONSTRUCTED` is broadcast, the frame scripts due anywhere
+on the display list run, the goto's new frame's among them, and
+`EXIT_FRAME` is broadcast, all before the goto returns to a listener that
+asked for it, or before the frame script that asked for it is left behind
+(`goto-cycle`, `goto-cycle-nested`). A goto in one of those scripts runs
+its own inside, and the frame's own phases then find the scripts already
+run. A script's goto on itself waits for it even while another clip's
+cycle runs inside it. Two scripts that send their clip to each other's
+frame nest cycles without end; Flash gives up some 1400 deep, and the
+player throws AS3's stack overflow, #1023, at 256.
+
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,
 is one scene named "" whose labels are its FrameLabel tags (`scenes`,

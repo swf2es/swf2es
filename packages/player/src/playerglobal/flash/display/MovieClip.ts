@@ -91,6 +91,7 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
       clip.queuedGoto = frame;
     } else {
       clip.gotoFrame(frame);
+      s.gotoCycle(clip);
     }
   };
 

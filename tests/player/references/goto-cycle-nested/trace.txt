@@ -1,0 +1,10 @@
+B script 1
+A script 2
+B after goto 1
+B script 3
+L enterFrame, goto 3
+made Y
+made X
+Main script 2
+L script 3
+L after goto 3 [object X]

@@ -172,6 +172,8 @@ export class Scripting {
   readonly externalInterface: ExternalInterfaceHost | null;
   /** How many calls the page has made into the SWF's ExternalInterface callbacks, which run outside a frame. */
   hostCalls = 0;
+  /** How many goto cycles run inside one another now. */
+  private cycles = 0;
   /** Children frames played on placed, to be made alive in the frame's construct phase. */
   private readonly toConstruct: {
     display: DisplayObject;
@@ -1445,19 +1447,24 @@ export class Scripting {
           }
 
           ran = true;
+          // The clip whose script runs, the one before it again after: a
+          // goto's cycle runs scripts inside another's (`goto-cycle-nested`).
+          const outer = this.inFrameScript;
           this.inFrameScript = o;
           try {
             this.rt.call(script, o.object);
           } finally {
-            this.inFrameScript = null;
+            this.inFrameScript = outer;
           }
 
           // The goto the script asked for, now that it has returned; the
-          // frame it lands on has its script run next, in this same phase.
+          // frame it lands on has its script run next, in this same phase,
+          // or, from version 10, in the goto's own cycle.
           if (o.queuedGoto !== null) {
             const frame = o.queuedGoto;
             o.queuedGoto = null;
             o.gotoFrame(frame);
+            this.gotoCycle(o);
           }
         }
       };
@@ -1491,6 +1498,53 @@ export class Scripting {
   }
 
   /**
+   * What a goto that has happened runs in a SWF of version 10 or later, as
+   * Flash does, from a listener, a frame script once it returns, or anyone:
+   * FRAME_CONSTRUCTED, the frame scripts due on the whole display list, the
+   * goto's frame's among them, and EXIT_FRAME (`goto-cycle`). What the goto
+   * placed it made alive already. Version 9 runs none (`goto-children`).
+   */
+  gotoCycle(clip: MovieClip): void {
+    if ((clip.library.version ?? 10) < 10 || !this.stage) {
+      return;
+    }
+
+    // Two scripts that send their clip to each other's frame nest cycles
+    // without end, in Flash till it gives up some 1400 deep; here a script's
+    // stack overflow, before the JavaScript stack's.
+    if (this.cycles >= MAX_GOTO_CYCLES) {
+      throw this.rt.error("Error", 1023);
+    }
+
+    this.cycles++;
+    try {
+      // What frames placed and has yet to be made alive is made first.
+      this.constructPending();
+      this.broadcast("frameConstructed");
+      this.runFrameScripts(this.stage);
+      this.broadcast("exitFrame");
+    } finally {
+      this.cycles--;
+    }
+  }
+
+  /**
+   * The construct phase: what the frames placed is made alive after
+   * ENTER_FRAME, before frameConstructed, or as a goto's cycle begins;
+   * until then a script finds it in numChildren but getChildAt gives null
+   * (`instantiation_on_enter_frame`). One taken off since is never made,
+   * and one at a time, so a constructor that throws leaves the rest for
+   * later rather than losing them.
+   */
+  private constructPending(): void {
+    for (let next = this.toConstruct.shift(); next; next = this.toConstruct.shift()) {
+      if (!next.display.object && next.display.parent) {
+        this.construct(next.display, next.character, next.library);
+      }
+    }
+  }
+
+  /**
    * What follows the timelines' advance in a frame: the frame events and
    * scripts, in Flash's order. The first frame, after construction, has no
    * ENTER_FRAME: Flash goes to FRAME_CONSTRUCTED, the scripts and EXIT_FRAME.
@@ -1501,16 +1555,7 @@ export class Scripting {
       this.broadcast("enterFrame");
     }
 
-    // The construct phase: what the frames placed is made alive after
-    // ENTER_FRAME, before frameConstructed; until then a script finds it in
-    // numChildren but getChildAt gives null (`instantiation_on_enter_frame`).
-    // One taken off since is never made.
-    // One at a time: a constructor that throws leaves the rest for the next frame, not lost.
-    for (let next = this.toConstruct.shift(); next; next = this.toConstruct.shift()) {
-      if (!next.display.object && next.display.parent) {
-        this.construct(next.display, next.character, next.library);
-      }
-    }
+    this.constructPending();
 
     const ends = [...this.frameEnds.splice(0), ...this.completeLoads()];
     this.broadcast("frameConstructed");
@@ -1542,6 +1587,9 @@ export class Scripting {
     this.scrolled.clear();
   }
 }
+
+/** How deep goto cycles may nest before a goto throws a stack overflow, Error #1023. */
+const MAX_GOTO_CYCLES = 256;
 
 /** The real clock where the host has one, browsers and node alike; else none, and the frame clock. */
 function defaultClock(): (() => number) | null {

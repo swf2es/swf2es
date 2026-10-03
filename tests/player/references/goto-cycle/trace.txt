@@ -1,0 +1,27 @@
+Main frameConstructed 0
+A script 1
+Main exitFrame 0
+L enterFrame, goto 3
+made Y
+Main frameConstructed 0
+A script 2
+B script 2, goto 4
+B after goto 2 0
+made X
+Main frameConstructed 0
+B script 4
+L script 3
+Main exitFrame 0
+Main exitFrame 0
+L after goto 3 1
+Main enterFrame 1
+Main frameConstructed 1
+Main exitFrame 1
+Main enterFrame 2
+Main frameConstructed 2
+A script 3
+Main exitFrame 2
+Main enterFrame 3
+Main frameConstructed 3
+A script 4
+Main exitFrame 3

@@ -544,6 +544,86 @@ function sameDepth(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Clips of four frames bound to scripts/GotoCycle.as's A, B and L, B's
+// fourth frame placing an X and L's third a Y, in a SWF of version 10.
+function gotoCycle(abc: Uint8Array): Uint8Array {
+  const frames = (id: number, extra: Uint8Array[][]) =>
+    w.sprite(id, 4, [...extra.flatMap((tags) => [...tags, w.showFrame()]), w.end()]);
+  return w.swf({
+    version: 10,
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 8,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.sprite(3, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      frames(4, [[], [], [], []]),
+      frames(5, [[], [], [], [w.place({ depth: 1, character: 2 })]]),
+      frames(6, [[], [], [w.place({ depth: 1, character: 3 })], []]),
+      w.doAbc(abc, "GotoCycle"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "X"],
+        [3, "Y"],
+        [4, "A"],
+        [5, "B"],
+        [6, "L"],
+      ]),
+      w.place({ depth: 1, character: 4 }),
+      w.place({ depth: 2, character: 5 }),
+      w.place({ depth: 3, character: 6 }),
+      ...Array.from({ length: 8 }, () => w.showFrame()),
+      w.end(),
+    ],
+  });
+}
+
+// Clips bound to scripts/GotoCycleNested.as's A, B and L, L's third frame
+// placing a Y, and the root's second an X, in a SWF of version 10.
+function gotoCycleNested(abc: Uint8Array): Uint8Array {
+  const frames = (id: number, extra: Uint8Array[][]) =>
+    w.sprite(id, 4, [...extra.flatMap((tags) => [...tags, w.showFrame()]), w.end()]);
+  return w.swf({
+    version: 10,
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.sprite(3, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      frames(4, [[], [], [], []]),
+      frames(5, [[], [], [], []]),
+      frames(6, [[], [], [w.place({ depth: 1, character: 3 })], []]),
+      w.doAbc(abc, "GotoCycleNested"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "X"],
+        [3, "Y"],
+        [4, "A"],
+        [5, "B"],
+        [6, "L"],
+      ]),
+      w.place({ depth: 1, character: 4, name: "a" }),
+      w.place({ depth: 2, character: 5, name: "b" }),
+      w.place({ depth: 3, character: 6, name: "l" }),
+      w.showFrame(),
+      w.place({ depth: 4, character: 2 }),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A root with nothing placed and a bound Box symbol, with scripts/AddChild.as adding Boxes.
 function added(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -1547,6 +1627,24 @@ export const cases: PlayerCase[] = [
     swf: sameDepth,
     script: "SameDepth",
     frames: 12,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "goto-cycle",
+    swf: gotoCycle,
+    script: "GotoCycle",
+    frames: 6,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "goto-cycle-nested",
+    swf: gotoCycleNested,
+    script: "GotoCycleNested",
+    frames: 4,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,
