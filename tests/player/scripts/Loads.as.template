@@ -56,7 +56,7 @@ package {
 
     private function frame3():void {
       var info:* = loader.contentLoaderInfo;
-      trace("outer frame 3", MovieClip(loader.content).currentFrame, info.swfVersion, info.frameRate, info.width, info.height, info.contentType, info.actionScriptVersion, info.applicationDomain == ApplicationDomain.currentDomain, ApplicationDomain.currentDomain == ApplicationDomain.currentDomain, info.applicationDomain.hasDefinition("Inner"), ApplicationDomain.currentDomain.hasDefinition("Inner"), String(info.url).indexOf("/[[DYNAMIC]]/1") > 0, info.loaderURL == loaderInfo.url);
+      trace("outer frame 3", MovieClip(loader.content).currentFrame, info.swfVersion, info.frameRate, info.width, info.height, info.contentType, info.actionScriptVersion, info.applicationDomain == ApplicationDomain.currentDomain, ApplicationDomain.currentDomain == ApplicationDomain.currentDomain, info.applicationDomain.hasDefinition("Inner"), ApplicationDomain.currentDomain.hasDefinition("Inner"), /\/\[\[DYNAMIC\]\]\/\d+$/.test(info.url), info.loaderURL == loaderInfo.url);
       loader.unload();
       trace("unloaded", loader.content == null, info.content == null, loader.numChildren);
     }
