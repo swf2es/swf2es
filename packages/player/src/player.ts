@@ -146,6 +146,11 @@ export class Player {
     const clips: MovieClip[] = [];
     const collect = (o: DisplayObject) => {
       if (o instanceof MovieClip) {
+        // One a goto made sit this frame out takes all in it along.
+        if (o.skipsAfter >= 0 && o.skipsAfter === this.scripting?.frames) {
+          return;
+        }
+
         clips.push(o);
       }
 

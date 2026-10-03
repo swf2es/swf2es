@@ -83,6 +83,10 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
   };
   /** Jump to `frame`: at once, or when the frame script asking returns, as Flash defers a goto from one. */
   const goto = (clip: MovieClip, frame: number) => {
+    if ((clip.library.version ?? 10) <= 9) {
+      clip.skipsAfter = s.frames;
+    }
+
     if (s.inFrameScript === clip) {
       clip.queuedGoto = frame;
     } else {
