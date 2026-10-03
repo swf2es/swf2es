@@ -1757,6 +1757,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "shared-objects",
+    swf: bare,
+    script: "SharedObjects",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "definitions",
     build: definitions,
     frames: 1,

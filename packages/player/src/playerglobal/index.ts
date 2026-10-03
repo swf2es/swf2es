@@ -27,6 +27,7 @@ import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
 import { transformNatives } from "./flash/geom/Transform.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
 import { fileFilterNatives } from "./flash/net/FileFilter.js";
+import { sharedObjectNatives } from "./flash/net/SharedObject.js";
 import { socketNatives } from "./flash/net/Socket.js";
 import { urlRequestNatives } from "./flash/net/URLRequest.js";
 import { urlStreamNatives } from "./flash/net/URLStream.js";
@@ -68,6 +69,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...interactiveObjectNatives(s),
     ...fileFilterNatives(s),
     ...socketNatives(s),
+    ...sharedObjectNatives(s),
     ...transformNatives(s),
     ...matrix3DNatives(s),
     ...filterNatives(s),

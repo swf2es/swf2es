@@ -1,0 +1,38 @@
+same true
+other false
+data [object Object] 0
+size empty 0
+encoding 3 3
+size n 37
+size s 46
+size all 69
+flush flushed
+size after flush 69 4
+cleared 0 0
+setProperty 5
+client true
+root path false
+name a b 2134
+name a~b 2134
+name a%b ok
+name a&b 2134
+name a\b 2134
+name a;b 2134
+name a:b 2134
+name a"b 2134
+name a'b 2134
+name a,b 2134
+name a<b 2134
+name a>b 2134
+name a?b 2134
+name a#b 2134
+name  2134
+name a/b ok
+name a.b ok
+name a-b ok
+name a_b ok
+name a+b ok
+name a@b ok
+name a=b ok
+name a$b ok
+name null 2007

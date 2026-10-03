@@ -27,6 +27,7 @@ import { FontSet } from "./fonts.js";
 import { decodeImages, decodeInBrowser, type ImageDecode } from "./images.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
+import { defaultStorage, type SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
 import { sha256 } from "./sha256.js";
 import {
@@ -206,6 +207,8 @@ export class Scripting {
   drawer: Drawer | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
+  /** Where local SharedObjects are kept (flash/net/SharedObject.ts). */
+  readonly storage: SharedObjectStorage;
   /**
    * Clips taken off the display list, which play on as Flash's do: held
    * weakly, as Ruffle holds them, so one nothing refers to stops as Flash's
@@ -281,6 +284,8 @@ export class Scripting {
     options: avm2.RuntimeOptions & {
       fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
+      /** Where local SharedObjects are kept: localStorage by default where the host has it, else memory. */
+      storage?: SharedObjectStorage;
       externalInterface?: ExternalInterfaceHost;
       socket?: SocketHost;
       decodeImage?: ImageDecode | null;
@@ -312,6 +317,7 @@ export class Scripting {
     this.socket = options.socket ?? null;
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
+    this.storage = options.storage ?? defaultStorage();
     this.rt = new avm2.Runtime(
       (rt) => ({ ...avm2.builtinNatives(rt), ...playerNatives(this) }),
       { ...avm2.builtinHooks(), ...playerHooks(this) },
