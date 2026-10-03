@@ -1,0 +1,109 @@
+default at 0
+ row 0 0 0 0 0 0 ffffffff ffffffff ffe0f5e0 ffa0dfa0 ff40bf40 ff007f00 ff003f00 ff001500 ff000000 ff000000 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ff006700 ff004d00 ff003f00 ff003f00 ff003f00 ff003f00 ff003f00 ff003f00 ff004d00 ff006700 0 0 0 0 0 0
+sharp d1 a0
+ row 0 0 0 0 0 0 ffffffff ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff000000 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0
+sharp d2 a90
+ row 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ffff0000 ffff0000 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff0000ff ff0000ff 0 0 0 0 0 0
+sharp d1 a180
+ row 0 0 0 0 0 0 ff000000 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ffffffff 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0
+sharp d2.5 a-90
+ row 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ff000000 ff000000 ff005500 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff80d580 ffffffff ffffffff 0 0 0 0 0 0
+sharp d0
+ row 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0
+sharp d-2
+ row 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ff000000 ff000000 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ffffffff ffffffff 0 0 0 0 0 0
+blur 4 strength 1
+ row 0 0 0 0 0 0 ffffffff ffffffff ffe0f5e0 ffa0dfa0 ff40bf40 ff007f00 ff003f00 ff001500 ff000000 ff000000 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ff006700 ff004d00 ff003f00 ff003f00 ff003f00 ff003f00 ff003f00 ff003f00 ff004d00 ff006700 0 0 0 0 0 0
+blur 4 strength 2
+ row 0 0 0 0 0 0 ff50c450 ff70cf70 ff80d580 ff80d580 ff80d580 ff80d580 ff80d580 ff80d580 ff70cf70 ff50c450 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ffffffff ffffffff ffffffff ffffffff ff80d580 ff005500 ff000000 ff000000 ff000000 ff000000 0 0 0 0 0 0
+blur 6 strength 0.5
+ row 0 0 0 0 0 0 ff005c00 ff006a00 ff007800 ff008600 ff009c00 ff15b115 ff35bb35 ff4ac24a ff60ca60 ff75d175 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ff1fb41f ff28b728 ff31ba31 ff35bb35 ff35bb35 ff35bb35 ff35bb35 ff31ba31 ff28b728 ff1fb41f 0 0 0 0 0 0
+blur 4 quality 2
+ row 0 0 0 0 0 0 fff2fbf2 ffdcf3dc ffb2e5b2 ff74d074 ff28b728 ff008f00 ff005c00 ff003300 ff001700 ff000900 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ff007a00 ff006c00 ff006200 ff005d00 ff005c00 ff005c00 ff005d00 ff006200 ff006c00 ff007a00 0 0 0 0 0 0
+blur 5x2
+ row 0 0 0 0 0 0 ffffff00 ffccee00 ff99dd00 ff66cc00 ff33bb00 ff338833 ff666666 ff994499 ffcc22cc ffff00ff 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ff4d764d ff666666 ff666666 ff666666 ff666666 ff666666 ff666666 ff666666 ff666666 ff4d764d 0 0 0 0 0 0
+alphas
+ row 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ff7fd47f ff7fd47f ff60ca60 ff20b420 ff00aa00 ff00aa00 ff009f00 ff008a00 ff008000 ff008000 0 0 0 0 0 0
+outer
+ row 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0
+ col 0 0 3fffffff bffefefe ffffffff ffffffff ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff000000 ff000000 bf000000 3f000000 0 0
+full
+ row 0 0 0 0 0 0 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0 0 0
+ col 0 0 3fffffff bffefefe ffffffff ffffffff ffffffff ffffffff ffc0eac0 ff40bf40 ff00aa00 ff00aa00 ff007f00 ff002a00 ff000000 ff000000 ff000000 ff000000 bf000000 3f000000 0 0
+inner knockout
+ row 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ col 0 0 0 0 0 0 ffffffff ffffffff c0ffffff 40ffffff 0 0 40000000 c0000000 ff000000 ff000000 0 0 0 0 0 0
+outer knockout
+ row 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ col 0 0 3fffffff bffefefe ffffffff ffffffff 0 0 0 0 0 0 0 0 0 0 ff000000 ff000000 bf000000 3f000000 0 0
+full knockout
+ row 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ col 0 0 3fffffff bffefefe ffffffff ffffffff ffffffff ffffffff c0ffffff 40ffffff 0 0 40000000 c0000000 ff000000 ff000000 ff000000 ff000000 bf000000 3f000000 0 0
+half source
+ row 0 0 0 0 0 0 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 0 0 0 0 0 0
+ col 0 0 0 0 0 0 807fd37f 807fd37f 8060c960 8020b320 8000a900 8000a900 80009300 80006a00 80005400 80005400 0 0 0 0 0 0
+half source outer
+ row 0 0 0 0 0 0 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 0 0 0 0 0 0
+ col 0 0 20ffffff 60ffffff 80ffffff 80ffffff c055c655 c055c655 b045c045 901cb31c 8000a900 8000a900 90009600 b0007b00 c0007100 c0007100 80000000 80000000 60000000 20000000 0 0
+half source full
+ row 0 0 0 0 0 0 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 8000a900 0 0 0 0 0 0
+ col 0 0 20ffffff 60ffffff 80ffffff 80ffffff c0aae2aa c0aae2aa b08bd78b 9039bc39 8000a900 8000a900 90008300 b0004d00 c0003800 c0003800 80000000 80000000 60000000 20000000 0 0
+into opaque 2077 Error #2077: This filter operation cannot be performed with the specified input parameters.
+into opaque outer 2077 Error #2077: This filter operation cannot be performed with the specified input parameters.
+strength 8
+ row 0 0 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ffff8000 ff00aa00 ff00aa00 ff0080ff ff0080ff ff0080ff ff0080ff ff0080ff ff0080ff ff0080ff ff0080ff 0 0
+ col 0 0 0 0 0 78007fff ff0083e8 ff0080ff ff0080ff ff0080ff ff0080ff ff0080ff ff0080ff ff0080ff ff0080ff ff0083e8 78007fff 0 0 0 0 0
+opaque [object BlurFilter] ok
+opaque [object GlowFilter] 2077 flash.errors::IllegalOperationError
+opaque [object DropShadowFilter] 2077 flash.errors::IllegalOperationError
+opaque [object ColorMatrixFilter] ok
+opaque [object ConvolutionFilter] ok
+opaque [object BevelFilter] 2077 flash.errors::IllegalOperationError
+opaque [object GradientGlowFilter] 2077 flash.errors::IllegalOperationError
+opaque [object GradientBevelFilter] 2077 flash.errors::IllegalOperationError
+rect (x=6, y=6, w=28, h=28) (x=1, y=1, w=38, h=38) (x=1, y=1, w=38, h=38) (x=1, y=1, w=38, h=38) (x=9, y=9, w=22, h=22)
+subrect
+ . . . . . . . . . . . . . . . .
+ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .
+ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .
+ fffffff 2fffffff 3fffffff 3fffffff 30ffffff 10ffffff 0 0 10000000 30000000 3f000000 3f000000 2f000000 f000000 0 .
+ 2fffffff 8fffffff bffefefe ffbfeabf ff90da90 ff30ba30 ff00aa00 ff00aa00 ff008a00 ff004a00 ff002b00 bf000000 8f000000 2f000000 0 .
+ 3fffffff bffefefe f7ffffff ffeffaef ffb8e7b8 ff40bf40 ff08ac08 ff10af10 ff008400 ff002a00 ff000000 ff000000 bf000000 3f000000 0 .
+ 3fffffff bffefefe efffffff ffdff4df ffb0e5b0 a0ff6666 ff10af10 ff20b420 ff008a00 ff002a00 ff000000 ff000000 bf000000 3f000000 0 .
+ 3fffffff bffefefe f7ffffff ffeffaef ffb8e7b8 ff40bf40 ff08ac08 ff10af10 ff008400 ff002a00 ff000000 ff000000 bf000000 3f000000 0 .
+ 3fffffff bffefefe ffffffff ffffffff ffc0eac0 ff40bf40 ff00aa00 ff00aa00 ff007f00 ff002a00 ff000000 ff000000 bf000000 3f000000 0 .
+ 3fffffff bffefefe ffffffff ffffffff ffc0eac0 ff40bf40 ff00aa00 ff00aa00 ff007f00 ff002a00 ff000000 ff000000 bf000000 3f000000 0 .
+ 3fffffff bffefefe ffffffff ffffffff ffc0eac0 ff40bf40 ff00aa00 ff00aa00 ff007f00 ff002a00 ff000000 ff000000 bf000000 3f000000 0 .
+ 2fffffff 8fffffff bffefefe ffbfeabf ff90da90 ff30ba30 ff00aa00 ff00aa00 ff008a00 ff004a00 ff002b00 bf000000 8f000000 2f000000 0 .
+ . . . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . . . .
+in place
+ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 0 0 0 0 ffbfeabf ffeffaef ffdff4df ffeffaef ffffffff ffffffff ffffffff ffbfeabf 0 0 0 0
+ 0 0 0 0 ff90da90 ffb8e7b8 ffb0e5b0 ffb8e7b8 ffc0eac0 ffc0eac0 ffc0eac0 ff90da90 0 0 0 0
+ 0 0 0 0 ff30ba30 ff40bf40 80ff4040 ff40bf40 ff40bf40 ff40bf40 ff40bf40 ff30ba30 0 0 0 0
+ 0 0 0 0 ff00aa00 ff08ac08 ff10af10 ff08ac08 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0
+ 0 0 0 0 ff00aa00 ff10af10 ff20b420 ff10af10 ff00aa00 ff00aa00 ff00aa00 ff00aa00 0 0 0 0
+ 0 0 0 0 ff008a00 ff008400 ff008a00 ff008400 ff007f00 ff007f00 ff007f00 ff008a00 0 0 0 0
+ 0 0 0 0 ff004a00 ff002a00 ff002a00 ff002a00 ff002a00 ff002a00 ff002a00 ff004a00 0 0 0 0
+ 0 0 0 0 ff002b00 ff000000 ff000000 ff000000 ff000000 ff000000 ff000000 ff002b00 0 0 0 0
+ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0

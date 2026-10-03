@@ -98,10 +98,59 @@ package {
       trace("opaque", o.join(" "));
         }
 
+    private function rects():void {
+      var b:BitmapData = new BitmapData(400, 400);
+      var r:Rectangle = new Rectangle(150, 150, 20, 20);
+      var grown:Function = function(f:BitmapFilter):String {
+        var g:Rectangle = b.generateFilterRect(r, f);
+        return [r.x - g.x, r.y - g.y, g.right - r.right, g.bottom - r.bottom].join(",");
+      };
+      var blurs:Array = [0, 0.5, 2, 2.5, 4, 4.5, 6, 7.5, 15.3, 100, 255];
+      for each (var q:int in [0, 1, 2, 3, 7, 15]) {
+        var row:Array = [];
+        for each (var bl:Number in blurs) {
+          row.push(grown(new BlurFilter(bl, bl / 2, q)) + "/" + grown(new GlowFilter(0, 1, bl, bl / 2, 1, q)));
+        }
+        trace("rects q" + q, row.join(" "));
+      }
+      var shadows:Array = [];
+      for each (var a:Number in [0, 90, 210, -45]) {
+        for each (var d:Number in [3.5, -3.5]) {
+          shadows.push(grown(new DropShadowFilter(d, a, 0, 1, 2, 2, 1, 1)) + "/" +
+            grown(new DropShadowFilter(d, a, 0, 1, 2, 2, 1, 1, true)));
+        }
+      }
+      trace("shadow rects", shadows.join(" "));
+      // A glow with no blur still writes a ring a pixel wide.
+      var src:BitmapData = new BitmapData(10, 10, true, 0);
+      src.fillRect(new Rectangle(3, 3, 4, 4), 0xff00ff00);
+      var dst:BitmapData = new BitmapData(10, 10, true, 0xff0000ff);
+      dst.applyFilter(src, new Rectangle(3, 3, 4, 4), new Point(3, 3), new GlowFilter(0xff0000, 1, 0, 0, 1, 1));
+      dump("glow 0", dst);
+      // A rect that cuts the source: the filters read past it.
+      var cut:BitmapData = new BitmapData(16, 16, true, 0);
+      cut.fillRect(new Rectangle(4, 4, 8, 8), 0xff00aa00);
+      for each (var cf:BitmapFilter in [new BlurFilter(4, 4, 1), new GlowFilter(0xff0000, 1, 4, 4, 2, 1),
+          new DropShadowFilter(3, 90, 0, 1, 2, 2, 1, 1)]) {
+        var into:BitmapData = new BitmapData(16, 14, true, 0xff0000ff);
+        into.applyFilter(cut, new Rectangle(3, 3, 9, 6), new Point(2, 3), cf);
+        dump("cut " + cf, into);
+      }
+      // A blur's passes spread past its rect, which cuts them.
+      var one:BitmapData = new BitmapData(80, 3, true, 0);
+      one.setPixel32(40, 1, 0xffffffff);
+      var wide:BitmapData = new BitmapData(80, 3, true, 0);
+      wide.applyFilter(one, new Rectangle(40, 1, 1, 1), new Point(40, 1), new BlurFilter(20, 0, 3));
+      var out:Array = [];
+      for (var x:int = 6; x <= 74; x++) out.push(wide.getPixel32(x, 1) >>> 24);
+      trace("blur 20 q3", out.join(" "));
+    }
+
     public function ApplyFilter() {
       kernels();
       glows();
       regions();
+      rects();
     }
   }
 }

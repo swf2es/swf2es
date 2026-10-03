@@ -27,6 +27,16 @@ import { encodePng } from "../../../png.js";
 import type { Scripting } from "../../../scripting.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../timeline.js";
 import { filterKindOf, recordOf } from "../filters/filters.js";
+
+/** The filters with a glow, a shadow or a bevel, which an opaque destination refuses. */
+const GLOWS: ReadonlySet<string> = new Set([
+  "glow",
+  "dropShadow",
+  "bevel",
+  "gradientGlow",
+  "gradientBevel",
+]);
+
 import { colorOf } from "../geom/Transform.js";
 
 type Value = avm2.Value;
@@ -350,6 +360,11 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const r = rectOf(s, sourceRect);
       const [dx, dy] = pointOf(s, destPoint, "destPoint");
       const f = filterOf(filter);
+      // adl draws none of the filters with a glow into an opaque destination.
+      if (!store.transparent && GLOWS.has(f.kind)) {
+        throw s.rt.error("flash.errors::IllegalOperationError", 2077);
+      }
+
       if (!applyFilter(store, from, r, dx, dy, f)) {
         throw s.rt.unsupported(`BitmapData.applyFilter with a ${f.kind} filter`);
       }
