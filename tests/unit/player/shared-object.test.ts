@@ -10,7 +10,8 @@ import { bare } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compileScripts } from "../../player/scripts.ts";
 
-const out = fileURLToPath(new URL("../out/player/", import.meta.url));
+// Its own: node runs test files at once, and a compile writes its job list into `out`.
+const out = fileURLToPath(new URL("../out/player-shared-object/", import.meta.url));
 
 let skip: string | false = false;
 try {
