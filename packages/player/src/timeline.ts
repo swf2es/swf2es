@@ -131,6 +131,81 @@ export interface Library {
   domain?: avm2.Domain;
 }
 
+/**
+ * Shapes by their tag's bytes, shared by every SWF that defines one alike:
+ * a SWF loaded again, as each of a crowd of one creature may be, draws
+ * with the first's fills and lines, which the renderer keeps by shape,
+ * rather than building and holding its own. A shape filled with a bitmap
+ * keeps to its SWF, whose bitmap it is. Held weakly: one no library holds
+ * goes, and its entry after it.
+ */
+const sharedShapes = new Map<number, { tag: Uint8Array; shape: WeakRef<ShapeCharacter> }[]>();
+const sharedGone = new FinalizationRegistry<{ hash: number; tag: Uint8Array }>(({ hash, tag }) => {
+  const list = sharedShapes.get(hash)?.filter((entry) => entry.tag !== tag) ?? [];
+  if (list.length > 0) {
+    sharedShapes.set(hash, list);
+  } else {
+    sharedShapes.delete(hash);
+  }
+});
+
+/** FNV-1a over the tag's code and bytes. */
+function tagHash(code: number, tag: Uint8Array): number {
+  let hash = Math.imul(0x811c9dc5 ^ code, 0x01000193);
+  for (let i = 0; i < tag.length; i++) {
+    hash = Math.imul(hash ^ tag[i], 0x01000193);
+  }
+
+  return hash >>> 0;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/** The shape a DefineShape tag defines, as another SWF defined it alike if one did. */
+function shapeOf(
+  bytes: Uint8Array,
+  t: Tag,
+  bitmap: (id: number) => BitmapCharacter | null,
+): ShapeCharacter {
+  const tag = bytes.subarray(t.offset, t.offset + t.length);
+  const hash = tagHash(t.code, tag);
+  for (const entry of sharedShapes.get(hash) ?? []) {
+    const shared = entry.shape.deref();
+    if (shared && sameBytes(entry.tag, tag)) {
+      return shared;
+    }
+  }
+
+  const shape = readShape(bytes, t.code, t.offset, t.length);
+  let filled = false;
+  const layers = shapeLayers(shape, (id) => {
+    filled = true;
+    return bitmap(id);
+  });
+  const character: ShapeCharacter = { type: "shape", id: shape.id, shape, layers };
+  if (!filled) {
+    const own = tag.slice();
+    const list = sharedShapes.get(hash) ?? [];
+    list.push({ tag: own, shape: new WeakRef(character) });
+    sharedShapes.set(hash, list);
+    sharedGone.register(character, { hash, tag: own });
+  }
+
+  return character;
+}
+
 function timelineOf(
   bytes: Uint8Array,
   list: Tag[],
@@ -162,18 +237,13 @@ function timelineOf(
       case tags.DefineShape2:
       case tags.DefineShape3:
       case tags.DefineShape4: {
-        const shape = readShape(bytes, t.code, t.offset, t.length);
         // Its bitmap fills' bitmaps, which a SWF defines before the shapes that use them.
         const bitmap = (id: number) => {
           const c = library.get(id);
           return c?.type === "bitmap" ? c : null;
         };
-        library.set(shape.id, {
-          type: "shape",
-          id: shape.id,
-          shape,
-          layers: shapeLayers(shape, bitmap),
-        });
+        const shape = shapeOf(bytes, t, bitmap);
+        library.set(shape.id, shape);
         break;
       }
       case tags.DefineSprite: {

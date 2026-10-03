@@ -535,6 +535,12 @@ descendants', drawn again if it returns; one no one holds stays idle
 5 s, by the clock, not renders, which a host may make many of between
 frames, at most 4096 of them, before it is destroyed. A drawing's lines
 are its own, as it changes.
+Shapes are shared across SWFs too: a DefineShape tag whose bytes another
+SWF defined alike gives that SWF's shape, held weakly, so a crowd whose
+members each load the same SWF draws with one set of fills and lines, not
+one per load, whose lines alone overran the idle limit and were
+tessellated again on every turn of their loop. A shape filled with a
+bitmap keeps to its own SWF, whose bitmap it is.
 Tessellating lines, round joins most of all, was the largest part of a
 frame of a dozen animated instances; `bench.ts --rig N` measures it.
 Fills and lines are drawn unbatched, each Graphics a draw of its own
