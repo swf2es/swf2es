@@ -391,7 +391,14 @@ later. Every name a module makes is looked up in the domain the module was
 loaded into (`Runtime.loadInto`); everything else loads into the root. The
 Domain's `loadBytes` compiles its ABC through `RuntimeOptions.compileAbc`,
 which the host gives, as the runtime does not include the compiler, after
-the ABCs its domain's modules were compiled after, and runs it at once.
+the domain's chain as it is then: its parent's, with what the parent
+loaded after the child was made, then its own. It runs the ABC at once.
+`Domain.currentDomain` is the domain of the innermost code on the stack
+that a module defines, as avmplus' code context, so a child's method
+called by the parent's code sees the child's. The runtime finds a frame's
+module by the script the stack names, recorded when the module loads, so
+a host gives each module a script of its own, a `sourceURL` comment for
+code it evaluates (`Runtime.codeDomain`).
 avmshell's `File` reads and writes
 `RuntimeOptions.files`, in memory by default. Date is JavaScript's Date, with avmplus' string
 formats. flash.concurrent's Mutex and Condition and ByteArray's atomic

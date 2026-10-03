@@ -10,6 +10,7 @@ const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("he
 export function abcCompiler(testing: any) {
   const known = new Map<string, { bytes: Uint8Array; builtin: boolean }>();
   let held: string[] = [];
+  let evaluated = 0;
 
   /** Add an ABC after those held: 0, or the VerifyError it was rejected with. */
   const add = (bytes: Uint8Array, builtin: boolean): number => {
@@ -50,8 +51,10 @@ export function abcCompiler(testing: any) {
         return error;
       }
 
+      // A script of its own, by which Runtime.codeDomain finds its frames.
       const js: string = testing.domainModule(held.join("\n"));
-      return new Function(js.replace(/^export default /, "return "))();
+      const script = `${js.replace(/^export default /, "return ")}//# sourceURL=loaded-${evaluated++}.js\n`;
+      return new Function(script)();
     },
   };
 }

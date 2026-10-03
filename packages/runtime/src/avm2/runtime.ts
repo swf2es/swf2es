@@ -132,7 +132,9 @@ export interface RuntimeOptions {
    * its module, or the VerifyError it was rejected with. The host compiles
    * it after the ABCs `linked` names by their hashes, the domain's it loads
    * into, as the runtime does not include the compiler; without it
-   * loadBytes is unsupported.
+   * loadBytes is unsupported. Each module it evaluates needs a script of
+   * its own in stacks, a sourceURL comment, for Domain.currentDomain to
+   * find its code (see Runtime.codeDomain).
    */
   compileAbc?: (abc: Uint8Array, linked: string[]) => ((rt: Runtime) => Abc) | number;
   /** Where avmshell's File reads and writes: by default in memory, empty at the start. */
@@ -641,6 +643,25 @@ export class Domain {
   }
 }
 
+/**
+ * The scripts a stack's frames name, innermost first: V8's "at f (script:1:2)"
+ * and "at script:1:2", and SpiderMonkey's and JavaScriptCore's "f@script:1:2".
+ */
+function frameScripts(stack: string | undefined): string[] {
+  const scripts: string[] = [];
+  for (const line of stack?.split("\n") ?? []) {
+    const m =
+      /^\s*at .*? \((.*):\d+:\d+\)$/.exec(line) ??
+      /^\s*at (.*):\d+:\d+$/.exec(line) ??
+      /@(.*):\d+:\d+$/.exec(line);
+    if (m) {
+      scripts.push(m[1]);
+    }
+  }
+
+  return scripts;
+}
+
 /** The definition of a table's that `mn` names: its namespaces in order, each at a version it sees. */
 function match(table: Map<string, GlobalName[]>, mn: Multiname, name: string): GlobalName | null {
   const list = table.get(name);
@@ -690,6 +711,14 @@ export class Runtime {
   /** The root application domain, the builtins' and the main SWF's; and the one modules load into now. */
   readonly root = new Domain(null);
   private loading: Domain = this.root;
+  /**
+   * The domain of each loaded module's code, by the script a stack's frame
+   * names it with (see codeDomain); found from the stacks its loads took,
+   * which wait in `unlocated` until a domain other than the root exists.
+   */
+  private readonly moduleDomains = new Map<string, Domain>();
+  private readonly unlocated: [Error, Domain][] = [];
+  private children = false;
   /** Vector.<T>'s references, by T's. */
   private readonly vectorRefs = new Map<TypeRef, VectorRef>();
   /**
@@ -710,7 +739,6 @@ export class Runtime {
   defaultObjectEncoding = 3;
   /** ObjectEncoding.dynamicPropertyWriter: what writes a dynamic object's own properties in AMF3, if anything. */
   dynamicPropertyWriter: AsObject | null = null;
-  private domain: AsObject | null = null;
   /** Class aliases, as registerClassAlias sets them, both ways. */
   private readonly aliases = new Map<string, AsObject>();
   private readonly aliasByTraits = new Map<Traits, string>();
@@ -784,7 +812,38 @@ export class Runtime {
 
   /** A domain whose definitions are looked up after `parent`'s, as `new ApplicationDomain(parent)`. */
   childDomain(parent: Domain = this.root): Domain {
+    this.children = true;
     return new Domain(parent);
+  }
+
+  /**
+   * The domain of the innermost code on the stack that a module defines,
+   * as avmplus' AvmCore::codeContext; the root without one. A frame is a
+   * module's by its script, so a host gives each module a script of its
+   * own: its URL, or a sourceURL comment for code it evaluates.
+   */
+  codeDomain(): Domain {
+    if (!this.children) {
+      return this.root;
+    }
+
+    for (const [error, domain] of this.unlocated) {
+      // Its first frame is abc's own, its second the module's factory.
+      const at = frameScripts(error.stack)[1];
+      if (at) {
+        this.moduleDomains.set(at, domain);
+      }
+    }
+
+    this.unlocated.length = 0;
+    for (const at of frameScripts(new Error().stack)) {
+      const domain = this.moduleDomains.get(at);
+      if (domain) {
+        return domain;
+      }
+    }
+
+    return this.root;
   }
 
   /** `f`, which loads modules, with what it loads going into `domain`. */
@@ -922,6 +981,7 @@ export class Runtime {
     domain.own.push(desc.hash);
     const abc = desc as Abc;
     abc.domain = domain;
+    this.unlocated.push([new Error(), domain]);
     for (const name of abc.names) {
       if (name instanceof TypeName) {
         name.names = abc.names;
@@ -3115,12 +3175,15 @@ export class Runtime {
     return this.names(o).filter((n): n is string => typeof n === "string" && !o.$dontEnum?.has(n));
   }
 
-  /** avmshell's avmplus.Domain.currentDomain: an instance of Domain, without running its constructor. */
+  /**
+   * avmshell's avmplus.Domain.currentDomain, as DomainClass::get_currentDomain:
+   * a new instance of Domain, without running its constructor, for the
+   * calling code's domain.
+   */
   currentDomain(): AsObject {
-    this.domain ??= this.resolve(
-      this.cls(namespace(NS_Public, "avmplus"), "Domain"),
-    ).$it.instance();
-    return this.domain;
+    const domain = this.resolve(this.cls(namespace(NS_Public, "avmplus"), "Domain")).$it.instance();
+    domain.$domain = this.codeDomain();
+    return domain;
   }
 
   /** `address` as an int, once checked that the domain memory holds `size` bytes there. */

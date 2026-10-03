@@ -200,11 +200,9 @@ export function shellNatives(rt: Runtime): Natives {
     }
   }
 
-  // Every Domain is the runtime's one: a child sees its parent's
-  // definitions, and what it loads every other sees, which avmshell's
-  // tests do not tell apart. Its domain memory is the runtime's too.
   // Each Domain is one of the runtime's: a child's definitions after its
-  // parent's, its own invisible to the parent and to its siblings.
+  // parent's, its own invisible to the parent and to its siblings. Their
+  // domain memory is the runtime's one.
   const domainOf = (o: AsObject): Domain => o.$domain ?? rt.root;
 
   class DomainNatives {
