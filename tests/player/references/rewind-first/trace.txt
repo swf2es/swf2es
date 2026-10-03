@@ -1,0 +1,13 @@
+made A
+made A
+frame 1 A@70 A@80
+made A
+made A
+made A
+frame 2 A@0 A@10 A@70 A@90
+made B
+made B
+made B
+frame 3 B@30 B@40 A@70 B@100
+frame 2 B@0 B@10 A@70 B@90
+frame 2 B@0 B@10 A@70 B@90

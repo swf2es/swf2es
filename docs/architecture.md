@@ -730,9 +730,12 @@ new one on the rewind that ends on the other shape). A `PlaceObject`
 without the move flag at a depth already taken is let be, whatever it
 names, playing or in a goto's replay (`same-depth`, the corpus's
 `place_object_same_depth_frame`). A rewind, the loop to the first frame
-among them, takes off what the timeline placed after the target, but a
-child at a depth the replayed frames first place at without the move
-flag stays as it is, that place let be as at a taken depth. Flash's matrix is
+among them, takes off what the timeline placed after the target, but for
+a child at a depth the frames replayed end on a place without the move
+flag at: that child stays, its character too, and takes the place, its
+transform given anew as for a first placing, and the moves after it
+(`same-depth`, `rewind-first`); what comes before that place at the
+depth, a removal among it, does not matter. Flash's matrix is
 exact at the quarter turns, 0 and not the doubles' cosine of 90°, so the
 player's is.
 
