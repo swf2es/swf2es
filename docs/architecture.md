@@ -1054,7 +1054,8 @@ browser's left and right outputs through Web Audio. `Sound` classes bound by
 SymbolClass to a DefineSound tag find its encoded samples in the library.
 The player decodes MP3 or uncompressed 8/16-bit sound on first play, sharing
 a decode when separate loads contain the same sound. The shared cache holds
-decoded audio weakly, so an unused sound can be collected. The parser leaves the
+decoded audio while a sound uses it; entries leave when no SWF holds their
+sound definition, so unused audio can be collected. The parser leaves the
 MP3 seek word out of the encoded bytes; the tag's sample count and rate,
 not the decoder's duration, give the embedded sound's `length`.
 
