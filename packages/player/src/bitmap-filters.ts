@@ -5,7 +5,7 @@
 // the blur so truncated times strength, a bevel's from the difference of two
 // reads of it, a colour matrix of straight colour, rounded, a convolution of
 // straight colour, truncated.
-import { type BitmapStore, over, type PixelRect, unmultiply } from "./bitmap.js";
+import { type BitmapStore, over, type PixelRect, premultiply, unmultiply } from "./bitmap.js";
 import type { Filter } from "./filters.js";
 import { ramp } from "./gradients.js";
 
@@ -19,6 +19,7 @@ export const filtersDrawn: ReadonlySet<string> = new Set([
   "bevel",
   "gradientGlow",
   "gradientBevel",
+  "displacementMap",
 ]);
 
 /**
@@ -52,8 +53,15 @@ function reach(f: Filter): [number, number] {
     return [f.matrixX >> 1, f.matrixY >> 1];
   }
 
-  if (f.kind === "colorMatrix" || f.kind === "displacementMap") {
+  if (f.kind === "colorMatrix") {
     return [0, 0];
+  }
+
+  // A displacement map's reach, by its scale, as adl reckons it: a quarter of it, whole; none with no map.
+  if (f.kind === "displacementMap") {
+    return f.mapBitmap
+      ? [Math.floor(Math.abs(f.scaleX) / 4) || 0, Math.floor(Math.abs(f.scaleY) / 4) || 0]
+      : [0, 0];
   }
 
   return [spreadOf(f.blurX, f.quality, f.kind), spreadOf(f.blurY, f.quality, f.kind)];
@@ -196,6 +204,7 @@ export function applyFilter(
   dx: number,
   dy: number,
   f: Filter,
+  map: BitmapStore | null = null,
 ): boolean {
   if (!filtersDrawn.has(f.kind)) {
     return false;
@@ -207,8 +216,15 @@ export function applyFilter(
   // reaches into it, so that a rect far past the destination costs nothing.
   const mx = dx - rect.x;
   const my = dy - rect.y;
-  const shown = intersect(out, { x: -mx, y: -my, width: dest.width, height: dest.height });
+  // A displacement map writes the rect alone: what adl writes past it is a quirk of its own.
+  const written = f.kind === "displacementMap" ? rect : out;
+  const shown = intersect(written, { x: -mx, y: -my, width: dest.width, height: dest.height });
   if (!shown) {
+    return true;
+  }
+
+  if (f.kind === "displacementMap") {
+    write(dest, displace(source, rect, shown, f, map), shown, shown, mx, my);
     return true;
   }
 
@@ -393,6 +409,117 @@ function colorMatrix(
         0;
     }
   }
+}
+
+/** The channel of an unmultiplied pixel a displacement reads: red 1, green 2, blue 4, alpha 8; any other none, 128. */
+function channelOf(pixel: number, component: number): number {
+  switch (component) {
+    case 1:
+      return (pixel >>> 16) & 0xff;
+    case 2:
+      return (pixel >>> 8) & 0xff;
+    case 4:
+      return pixel & 0xff;
+    case 8:
+      return pixel >>> 24;
+    default:
+      return 128;
+  }
+}
+
+/**
+ * A displacement map over `area` of the source: each pixel takes the
+ * source's at itself moved by the map's channels there, (c − 128) × scale
+ * / 256, between pixels linearly with weights in 256ths; past the source
+ * rect as the mode says: wrapped, clamped, the pixel's own (ignore) or the
+ * filter's colour. Where the map is not, it keeps its own.
+ */
+function displace(
+  source: BitmapStore,
+  rect: PixelRect,
+  area: PixelRect,
+  f: Filter,
+  map: BitmapStore | null,
+): Uint32Array {
+  const pixels = source.pixels;
+  const sw = source.width;
+  const own = (x: number, y: number) =>
+    x >= 0 && y >= 0 && x < sw && y < source.height ? pixels[y * sw + x] : 0;
+  const a = Math.floor(f.alpha * 255);
+  const colour = premultiply(((a << 24) | (f.color & 0xffffff)) >>> 0);
+  const result = new Uint32Array(area.width * area.height);
+  for (let y = 0; y < area.height; y++) {
+    const sy = area.y + y;
+    for (let x = 0; x < area.width; x++) {
+      const sx = area.x + x;
+      const mx = sx - rect.x - f.mapPoint[0];
+      const my = sy - rect.y - f.mapPoint[1];
+      if (!map || mx < 0 || my < 0 || mx >= map.width || my >= map.height) {
+        result[y * area.width + x] = own(sx, sy);
+        continue;
+      }
+
+      const m = unmultiply(map.pixels[my * map.width + mx]);
+      // Where to read, in 256ths, the offset truncated toward 0 as adl's fixed point has it.
+      const px = sx * 256 + Math.trunc((channelOf(m, f.componentX) - 128) * f.scaleX);
+      const py = sy * 256 + Math.trunc((channelOf(m, f.componentY) - 128) * f.scaleY);
+      let x0 = px >> 8;
+      let y0 = py >> 8;
+      const fx = px & 255;
+      const fy = py & 255;
+      const left = rect.x;
+      const top = rect.y;
+      const right = rect.x + rect.width - 1;
+      const bottom = rect.y + rect.height - 1;
+      // Ignoring, a place past the rect takes the pixel's own, its fraction kept.
+      if (f.mode === "ignore") {
+        x0 = x0 < left || x0 > right ? sx : x0;
+        y0 = y0 < top || y0 > bottom ? sy : y0;
+      }
+
+      const at = (cx: number, cy: number) => {
+        let ix = cx - rect.x;
+        let iy = cy - rect.y;
+        if (ix >= 0 && iy >= 0 && ix < rect.width && iy < rect.height) {
+          return own(cx, cy);
+        }
+
+        if (f.mode === "wrap") {
+          ix = ((ix % rect.width) + rect.width) % rect.width;
+          iy = ((iy % rect.height) + rect.height) % rect.height;
+        } else if (f.mode === "color") {
+          return colour;
+        } else {
+          ix = Math.max(0, Math.min(rect.width - 1, ix));
+          iy = Math.max(0, Math.min(rect.height - 1, iy));
+        }
+
+        return own(rect.x + ix, rect.y + iy);
+      };
+      // The corners' weights in 256ths, each truncated, as adl's fixed point has them.
+      const w00 = ((256 - fx) * (256 - fy)) >> 8;
+      const w10 = (fx * (256 - fy)) >> 8;
+      const w01 = ((256 - fx) * fy) >> 8;
+      const w11 = (fx * fy) >> 8;
+      const c00 = at(x0, y0);
+      const c10 = at(x0 + 1, y0);
+      const c01 = at(x0, y0 + 1);
+      const c11 = at(x0 + 1, y0 + 1);
+      let out = 0;
+      for (const shift of [24, 16, 8, 0]) {
+        const v =
+          ((c00 >>> shift) & 0xff) * w00 +
+          ((c10 >>> shift) & 0xff) * w10 +
+          ((c01 >>> shift) & 0xff) * w01 +
+          ((c11 >>> shift) & 0xff) * w11;
+        out |= (v >> 8) << shift;
+      }
+
+      result[y * area.width + x] = out >>> 0;
+    }
+  }
+
+  return result;
 }
 
 /**
