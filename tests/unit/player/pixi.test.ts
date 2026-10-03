@@ -399,6 +399,20 @@ test("an object off the list gives its lines back, and has them again when it co
     assert.notEqual(linesOf(), held);
     assert.deepEqual(view.counts, { strokeContexts: 2, strokeReuses: 0 });
 
+    // The branch off the list, then the shape off the branch, before a render:
+    // the shape still gives its lines back, as the branch last drew it.
+    const again = linesOf();
+    root.removeChild(branch);
+    branch.removeChild(shape);
+    view.prepare(root);
+    clock.at += 6000;
+    view.prepare(root);
+    assert.equal(again.destroyed, true);
+    branch.placeAtDepth(shape, 1);
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+    assert.equal(linesOf().destroyed, false);
+
     // Many made and taken off: none stay held, and all go once idle.
     const made: Lines["context"][] = [];
     for (let k = 0; k < 50; k++) {

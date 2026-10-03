@@ -843,10 +843,16 @@ export class PixiView {
       }
     }
 
+    // Those it last drew, which may since have left it too, and any it has now.
+    const kids = new Set(node.kids);
     if (o instanceof Container) {
       for (const child of o.children) {
-        this.release(child);
+        kids.add(child);
       }
+    }
+
+    for (const kid of kids) {
+      this.release(kid);
     }
   }
 
