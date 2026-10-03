@@ -20,6 +20,8 @@ export interface PlayerCase {
   /** Ruffle's rule: a channel differing by more than `tolerance` is an outlier. */
   tolerance: number;
   maxOutliers: number;
+  /** Drawn in Flash in an adl of its own (FlashJob.alone). */
+  alone?: boolean;
 }
 
 const square = (id: number, color: number, size = 1000) =>
@@ -1570,9 +1572,11 @@ export const cases: PlayerCase[] = [
     // The page's four samples a pixel premultiply a half-transparent
     // object's colour a level or so off adl's: within 3 a channel. A 0 × 3
     // kernel's copy reads a row past adl's bitmap of the object, and adl
-    // draws what memory lies there: 10 pixels, transparent here.
+    // draws what memory lies there: 10 pixels, transparent in an adl of its
+    // own, another job's pixels after one.
     tolerance: 3,
     maxOutliers: 10,
+    alone: true,
   },
   {
     name: "bevel",

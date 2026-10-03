@@ -13,6 +13,14 @@
 // Each job's traces go to stdout between the lines "\x01swf2es:begin <id>"
 // and "\x01swf2es:end <id>", and an error nothing caught as
 // "\x01swf2es:error <text>", so that oracle/flash.ts can tell them apart.
+// After a job ends, its content is unloaded, "\x01swf2es:settle <id>" is
+// traced, and the next job starts SETTLE frames later: a listener of the
+// last frame's EXIT_FRAME that runs after the harness's traces after the
+// end, in no job's output, and what the content goes on doing after it is
+// unloaded, an orphan movie of its own playing on, traces after the settle
+// mark, which tells oracle/flash.ts to run the jobs after it again. Content
+// that traces only now and then, not in those frames, is not caught: a
+// case that leaves such content running runs alone (FlashJob.alone).
 //
 // Frame 1 is the frame the SWF's INIT follows: its first frame, constructed
 // and with its scripts run. Frame k is captured at the (k-1)th EXIT_FRAME
@@ -48,6 +56,10 @@ package {
     private var socket:Socket = new Socket();
     private var input:ByteArray = new ByteArray();
     private var loader:Loader;
+    /** A job is running, or the last one's content is settling. */
+    private var busy:Boolean = false;
+    private var settling:int;
+    private static const SETTLE:int = 3;
     private var id:uint;
     private var background:uint;
     private var width_:int;
@@ -82,7 +94,7 @@ package {
     /** Buffer what arrives; start a job once one has arrived whole. */
     private function received(_:ProgressEvent):void {
       socket.readBytes(input, input.length);
-      if (!loader) {
+      if (!busy) {
         next();
       }
     }
@@ -140,14 +152,16 @@ package {
       stage.frameRate = frameRate;
       stage.quality = quality;
       frame = 0;
+      busy = true;
       trace("\x01swf2es:begin " + id);
       loader = new Loader();
       loader.uncaughtErrorEvents.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, uncaught);
       loader.contentLoaderInfo.addEventListener(Event.INIT, function(_:Event):void {
         frame = 1;
         lag = loader.contentLoaderInfo.actionScriptVersion == 2 ? 1 : 0;
-        captureIf();
+        // Listening first: a job of no frames ends here, and done stops it.
         addEventListener(Event.EXIT_FRAME, exitFrame);
+        captureIf();
       });
       addChild(loader);
       var context:LoaderContext = new LoaderContext();
@@ -198,6 +212,10 @@ package {
     }
 
     private function done():void {
+      if (!loader) {
+        return;
+      }
+
       removeEventListener(Event.EXIT_FRAME, exitFrame);
       // The run ends before the content goes: what its listeners trace as
       // it is unloaded is the harness's doing, not the SWF's.
@@ -205,9 +223,21 @@ package {
       loader.unloadAndStop();
       removeChild(loader);
       loader = null;
+      trace("\x01swf2es:settle " + id);
       socket.writeByte(2);
       socket.writeUnsignedInt(id);
       socket.flush();
+      settling = SETTLE;
+      addEventListener(Event.ENTER_FRAME, settle);
+    }
+
+    private function settle(_:Event):void {
+      if (--settling > 0) {
+        return;
+      }
+
+      removeEventListener(Event.ENTER_FRAME, settle);
+      busy = false;
       next();
     }
   }

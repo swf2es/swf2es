@@ -33,6 +33,11 @@ export interface FlashJob {
   /** Stage quality, as Flash's StageQuality: "low", "medium", "high" (the default) or "best". */
   quality?: string;
   capture: number[];
+  /**
+   * Run in an adl of its own: what it draws depends on the run before it,
+   * as a read past a bitmap draws the memory another job left there.
+   */
+  alone?: boolean;
 }
 
 export interface FlashResult {
@@ -44,6 +49,8 @@ export interface FlashResult {
   images: Map<number, Uint8Array>;
   /** Whether the job ended before its frames had run, as a timeout or a crash. */
   incomplete: boolean;
+  /** Whether its content traced after it was unloaded: it runs on, and would trace in the jobs after it. */
+  leaked?: boolean;
 }
 
 const MARK = "\x01swf2es:";
@@ -99,12 +106,17 @@ function descriptor(content: string, id: string): string {
 `;
 }
 
-function jobKey(job: FlashJob): string {
+/**
+ * A job's cache key: what decides what Flash gives for it, the adl it runs
+ * in among it. A job run alone is keyed apart, and one not, as before.
+ */
+export function jobKey(job: FlashJob): string {
   return createHash("sha256")
     .update(job.swf)
     .update(
       `\n${job.frames}\n${job.quality ?? "high"}\n${job.capture.join(",")}\n${readFileSync(harnessSource)}`,
     )
+    .update(job.alone ? "\nalone" : "")
     .digest("hex");
 }
 
@@ -243,15 +255,24 @@ async function runAdl(jobs: FlashJob[], timeout: number): Promise<FlashResult[]>
   return results;
 }
 
-/** Each job's traces, between its begin and end marks. */
+/**
+ * Each job's traces, between its begin and end marks; a job leaked if
+ * anything is traced after its settle mark, before the next job begins.
+ */
 function splitOutput(stdout: string, results: FlashResult[]): void {
   let current: FlashResult | null = null;
+  let settled: FlashResult | null = null;
   for (const raw of stdout.split("\n")) {
     const line = raw.replace(/\r+$/, "");
     if (line.startsWith(`${MARK}begin `)) {
       current = results[Number(line.slice(MARK.length + 6))] ?? null;
+      settled = null;
     } else if (line.startsWith(`${MARK}end `)) {
       current = null;
+    } else if (line.startsWith(`${MARK}settle `)) {
+      settled = results[Number(line.slice(MARK.length + 7))] ?? null;
+    } else if (settled && line !== "") {
+      settled.leaked = true;
     } else if (line.startsWith(`${MARK}error `)) {
       current?.errors.push(line.slice(MARK.length + 6));
     } else if (current) {
@@ -301,7 +322,8 @@ function writeCache(key: string, result: FlashResult): void {
 
 /**
  * Run each job in Flash, from the cache where it ran before. Uncached jobs
- * run in one adl. A job that sends nothing for `timeout` ms beyond its
+ * run in one adl; those after a job whose content leaked, running on after
+ * it was unloaded, run again in another, clean of it. A job that sends nothing for `timeout` ms beyond its
  * frames' time comes back incomplete, and is not cached.
  */
 export async function runFlash(jobs: FlashJob[], timeout = 20_000): Promise<FlashResult[]> {
@@ -314,25 +336,44 @@ export async function runFlash(jobs: FlashJob[], timeout = 20_000): Promise<Flas
   // again in another. It runs once more, first in the next, as adl now and then
   // stalls on a SWF that runs well alone, before it comes back incomplete.
   while (todo.length) {
-    const longest = Math.max(...todo.map((t) => (t.job.frames / frameRate(t.job.swf)) * 1000));
+    // A job that runs alone has an adl of its own; the others share one, up to it.
+    const next = todo.findIndex((t, k) => k > 0 && t.job.alone);
+    const size = todo[0].job.alone ? 1 : next < 0 ? todo.length : next;
+    const batch = todo.slice(0, size);
+    const later = todo.slice(size);
+    const longest = Math.max(...batch.map((t) => (t.job.frames / frameRate(t.job.swf)) * 1000));
     const ran = await runAdl(
-      todo.map((t) => t.job),
+      batch.map((t) => t.job),
       timeout + longest,
     );
     let failed = ran.findIndex((r) => r.incomplete);
     if (failed < 0) {
-      failed = todo.length;
+      failed = batch.length;
     }
 
-    for (let k = 0; k < Math.min(failed, todo.length); k++) {
-      const { i } = todo[k];
+    // A job whose content ran on after it was unloaded is kept, and those
+    // after it, which its content may have traced in, run again in another.
+    const leaked = ran.findIndex((r) => r.leaked);
+    if (leaked >= 0 && leaked < failed) {
+      for (let k = 0; k <= leaked; k++) {
+        const { i } = batch[k];
+        results[i] = ran[k];
+        writeCache(keys[i], ran[k]);
+      }
+
+      todo = [...batch.slice(leaked + 1), ...later];
+      continue;
+    }
+
+    for (let k = 0; k < Math.min(failed, batch.length); k++) {
+      const { i } = batch[k];
       results[i] = ran[k];
       writeCache(keys[i], ran[k]);
     }
 
-    const rest = todo.slice(failed + 1);
-    if (failed < todo.length) {
-      const stalled = todo[failed];
+    const rest = batch.slice(failed + 1);
+    if (failed < batch.length) {
+      const stalled = batch[failed];
       if (stalled.tries === 0) {
         rest.unshift({ ...stalled, tries: 1 });
       } else {
@@ -340,7 +381,7 @@ export async function runFlash(jobs: FlashJob[], timeout = 20_000): Promise<Flas
       }
     }
 
-    todo = rest;
+    todo = [...rest, ...later];
   }
 
   return results as FlashResult[];
