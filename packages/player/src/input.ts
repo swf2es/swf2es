@@ -1,7 +1,13 @@
 // Browser pointer input enters here; Flash chooses targets from its display
 // list, while Pixi only supplies the pointer's position and buttons.
 import { hitsOwnPoint, toStage } from "./bounds.js";
-import { BitmapObject, Container, type DisplayObject, ShapeObject } from "./display.js";
+import {
+  BitmapObject,
+  ButtonObject,
+  Container,
+  type DisplayObject,
+  ShapeObject,
+} from "./display.js";
 import { apply, invert } from "./geometry.js";
 import { dispatchEvent } from "./playerglobal/flash/events/EventDispatcher.js";
 import type { Scripting } from "./scripting.js";
@@ -41,6 +47,25 @@ export function pointerTarget(
       d.object.$mouseChildren === false
     ) {
       return { hit: false, target: null };
+    }
+
+    // A button is hit where its hit test state is, whatever state it shows,
+    // and is the target itself, its states' objects never. The hit test
+    // state is in no container: it is tested as the button's child.
+    if (d instanceof ButtonObject) {
+      const area = d.hitTestState;
+      if (!area) {
+        return { hit: false, target: null };
+      }
+
+      const parent = area.parent;
+      area.parent = d;
+      try {
+        const hit = pick(area).hit;
+        return { hit, target: hit && interactive(d) ? d : null };
+      } finally {
+        area.parent = parent;
+      }
     }
 
     if (d instanceof Container) {
@@ -119,10 +144,12 @@ export class PointerInput {
 
     if (target !== this.hover) {
       if (this.hover) {
+        buttonState(this.hover, "up");
         this.send("mouseOut", this.hover, p, down);
       }
 
       if (target) {
+        buttonState(target, down && target === this.pressed ? "down" : "over");
         this.send("mouseOver", target, p, down);
       }
 
@@ -136,10 +163,12 @@ export class PointerInput {
     } else if (type === "down" && (p.button ?? 0) === 0) {
       this.pressed = target;
       if (target) {
+        buttonState(target, "down");
         this.send("mouseDown", target, p, true);
       }
     } else if (type === "up" && (p.button ?? 0) === 0) {
       if (target) {
+        buttonState(target, "over");
         this.send("mouseUp", target, p, false);
       }
 
@@ -149,5 +178,12 @@ export class PointerInput {
 
       this.pressed = null;
     }
+  }
+}
+
+/** Show state `state` of `d`, if it is an enabled button: the pointer moves a disabled one through none. */
+function buttonState(d: DisplayObject, state: "up" | "over" | "down"): void {
+  if (d instanceof ButtonObject && d.enabled) {
+    d.setState(state);
   }
 }

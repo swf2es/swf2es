@@ -6,6 +6,15 @@
 
 export { type Bitmap, isBitmapTag, readBitmap } from "./bitmap.js";
 export {
+  BUTTON_DOWN,
+  BUTTON_HIT_TEST,
+  BUTTON_OVER,
+  BUTTON_UP,
+  type Button,
+  type ButtonRecord,
+  readButton,
+} from "./button.js";
+export {
   CompressedDataError,
   decompressSwf,
   deflateCompress,

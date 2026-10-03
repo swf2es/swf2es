@@ -3,7 +3,13 @@
 import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { bounds, boundsIn, hitsObject, hitsPoint, toStage } from "../../../bounds.js";
-import { CONTENT, type DisplayObject, TextObject, TRANSFORM } from "../../../display.js";
+import {
+  ButtonObject,
+  CONTENT,
+  type DisplayObject,
+  TextObject,
+  TRANSFORM,
+} from "../../../display.js";
 import { copyFilter } from "../../../filters.js";
 import { apply, invert, type Rect, transformRect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
@@ -245,8 +251,10 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       d.invalidate(TRANSFORM);
     }
 
+    // A button's state has none: the button is no container to a script.
     get parent(): Value {
-      return this.$display.parent?.object ?? null;
+      const parent = this.$display.parent;
+      return parent instanceof ButtonObject ? null : (parent?.object ?? null);
     }
 
     get stage(): Value {

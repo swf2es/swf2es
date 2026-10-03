@@ -11,12 +11,15 @@ import { avm2 } from "@swf2es/runtime";
 import { BitmapStore } from "./bitmap.js";
 import {
   BitmapObject,
+  ButtonObject,
+  buttonStates,
   Container,
   type DisplayObject,
   displayFor,
   EMPTY_TIMELINE,
   MovieClip,
   ShapeObject,
+  scriptChildren,
   TextObject,
   TRANSFORM,
 } from "./display.js";
@@ -28,6 +31,7 @@ import { playerHooks, playerNatives } from "./playerglobal/index.js";
 import { sha256 } from "./sha256.js";
 import {
   type BitmapCharacter,
+  type ButtonCharacter,
   type Character,
   type DisplayCharacter,
   INVALID_PIXELS,
@@ -124,6 +128,7 @@ export interface SocketHost {
 const DEFAULT_CLASS = {
   shape: "flash.display::Shape",
   sprite: "flash.display::MovieClip",
+  button: "flash.display::SimpleButton",
   bitmap: "flash.display::Bitmap",
   text: "flash.text::TextField",
 };
@@ -464,6 +469,25 @@ export class Scripting {
   construct(display: DisplayObject, character: DisplayCharacter, library: Library): void {
     const name = library.classes.get(character.id) ?? DEFAULT_CLASS[character.type];
     const domain = library.domain ?? null;
+    // A button's states are made before its constructor runs, as Flash has
+    // them; in a SWF after 9, one whose up state has a clip has a frame run
+    // then too, its states' scripts up, over, down, hit. The scripts are
+    // the button's own: a parent being made has registered none yet.
+    if (display instanceof ButtonObject && character.type === "button") {
+      // Named before its states, as Flash names an object when it is made.
+      if (display.name === "") {
+        display.name = `instance${++this.instances}`;
+      }
+
+      this.makeButtonStates(display, character, library);
+      if ((library.version ?? 10) > 9 && hasClip(display.upState)) {
+        display.firstScripts = true;
+        this.broadcast("frameConstructed");
+        this.runFrameScripts(display);
+        this.broadcast("exitFrame");
+      }
+    }
+
     const object =
       character.type === "bitmap" && display instanceof BitmapObject
         ? this.constructBitmap(display, name, domain)
@@ -699,6 +723,22 @@ export class Scripting {
    * character of a class SymbolClass bound, if the class or a base of it
    * is one, else an empty clip, shape or container by the nearest base.
    */
+  /** A button's states from its records, each a Sprite of its characters where it has other than one, all constructed. */
+  private makeButtonStates(
+    button: ButtonObject,
+    character: ButtonCharacter,
+    library: Library,
+  ): void {
+    const sprite = this.rt.classNamed("flash.display::Sprite");
+    buttonStates(
+      button,
+      character,
+      library,
+      (display, c) => this.construct(display, c, library),
+      (holder) => this.constructAs(holder, sprite),
+    );
+  }
+
   displayFor(traits: SymbolTraits): DisplayObject {
     const library: Library = this.library ?? {
       characters: new Map(),
@@ -719,7 +759,17 @@ export class Scripting {
           return text;
         }
 
-        return displayFor(symbol.character, symbol.library);
+        const display = displayFor(symbol.character, symbol.library);
+        // A bound button a script makes has its states, as a timeline's does.
+        if (display instanceof ButtonObject && symbol.character.type === "button") {
+          this.makeButtonStates(display, symbol.character, symbol.library);
+        }
+
+        return display;
+      }
+
+      if (t.name === "flash.display::SimpleButton") {
+        return new ButtonObject();
       }
 
       if (t.name === "flash.display::MovieClip") {
@@ -1394,10 +1444,8 @@ export class Scripting {
           queue.push(o);
         }
 
-        if (o instanceof Container) {
-          for (const child of o.children) {
-            visit(child);
-          }
+        for (const child of scriptChildren(o)) {
+          visit(child);
         }
       };
       for (const orphan of this.orphanRoots()) {
@@ -1632,4 +1680,12 @@ function extendsClass(cls: AsObject, name: string): boolean {
   }
 
   return false;
+}
+
+/** Whether a button's state is a clip or holds one among its own children. */
+function hasClip(state: DisplayObject | null): boolean {
+  return (
+    state instanceof MovieClip ||
+    (state instanceof Container && state.children.some((c) => c instanceof MovieClip))
+  );
 }
