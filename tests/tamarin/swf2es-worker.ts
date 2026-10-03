@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import type { CompileUnit } from "../conformance/abc-compiler.ts";
 import { abcCompiler } from "../conformance/abc-compiler.ts";
 import { testing } from "../unit/codegen/testing-module.ts";
 
@@ -81,7 +82,7 @@ async function run(abc: Uint8Array, lines: string[]): Promise<number> {
   const rt = runtime.createRuntime({
     print: (line: string) => lines.push(line),
     // Domain.loadBytes: the ABC compiled after its domain's, as avmshell loads it.
-    compileAbc: (bytes: Uint8Array, linked: string[]) => compiler.compileAbc(bytes, linked),
+    compileAbc: (bytes: Uint8Array, unit: CompileUnit) => compiler.compileAbc(bytes, unit),
     files: testFiles(),
   });
   for (const module of builtinModules) {

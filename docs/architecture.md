@@ -17,7 +17,9 @@ calls (see [benchmarks.md](benchmarks.md#the-assemblyscript-runtime)).
 
 The wrapper's `Codegen` (`createCodegen` in `packages/codegen/src`) is the
 compiler's whole API: `reset` starts a domain, `add` links an ABC into it
-after those before, and the last one added compiles with `compile`, whole,
+after those before, into one of its application domains (`childDomain`
+makes one, `found` records what one has found, see Linking), and the last
+one added compiles with `compile`, whole,
 to its module, source map and the entry of each method, or with
 `compileMethods`, a method at a time as the JIT compiles each on its first
 call. Both go through `assembly/compile.ts`, which the test build
@@ -106,6 +108,12 @@ three, with the same VerifyError numbers:
    and VM-internal names stay hidden. While an ABC loads, its classes link
    to base classes and interfaces defined by earlier ABCs' scripts or by
    its own earlier classes, as avmplus' `AbcParser` links them.
+   The domain's ABCs are loaded into application domains, a tree whose
+   root is 0, as avmplus' DomainMgr keeps them: an ABC sees the names its
+   own application domain and its ancestors define, the first from the
+   root down, unless the runtime has reported that the domain finds
+   another (`found`: what its caches hold, by name or as a type), and its
+   module names as `linked` the ABCs it sees, in load order.
    Each class's, script's and activation's traits then lay out their
    members, binding names to slot and dispatch ids after their base's
    (`link/traits.ts`). Types resolve later, when a class is first used:
@@ -393,9 +401,16 @@ found by name is not the type it finds once its parent defines the name,
 and a class extending it is rejected, as avmplus rejects it. Every name a module makes is looked up in the domain the module was
 loaded into (`Runtime.loadInto`); everything else loads into the root. The
 Domain's `loadBytes` compiles its ABC through `RuntimeOptions.compileAbc`,
-which the host gives, as the runtime does not include the compiler, after
-the domain's chain as it is then: its parent's, with what the parent
-loaded after the child was made, then its own. It runs the ABC at once.
+which the host gives, as the runtime does not include the compiler, into
+the compiler's application domain of the same number, after what the
+domain sees then: its parent's ABCs, with those the parent loaded after
+the child was made, and its own, in load order. With it go the domain's
+findings that are not the first definition from the root down, what its
+caches hold (`Runtime.compileUnit`), so the compiler binds the ABC's names
+and types as the runtime will find them. It runs the ABC at once. The
+compiler binds them as the domain finds them when it compiles; avmplus
+binds each method's when it verifies it, on its first call, so a name
+nothing has found yet that a parent defines in between binds differently.
 `Domain.currentDomain` is the domain of the innermost code on the stack
 that a module defines, as avmplus' code context, so a child's method
 called by the parent's code sees the child's. The runtime finds a frame's
@@ -800,11 +815,9 @@ Flash loads into a child `ApplicationDomain` by default: the parent
 cannot see the loaded SWF's classes by name, a class the loaded SWF
 defines again shadows the parent's for its own code, and
 `LoaderInfo.applicationDomain.getDefinition` finds it
-(`loader_duplicate_class`). That needs two things: the compiler's domain
-forked, a new domain sharing the ABCs loaded so far, and the runtime
-resolving names by the domain of the module asking, which it does for
-avmshell's Domain (see the runtime's builtins). The player does neither
-yet: it loads into the current domain, as a `LoaderContext` with
+(`loader_duplicate_class`). The compiler and the runtime both have
+application domains, which avmshell's Domain uses (see the runtime's
+builtins). The player does not yet: it loads into the current domain, as a `LoaderContext` with
 `ApplicationDomain.currentDomain` asks. There, as in Flash, a class the
 loaded SWF defines again is ignored for the one the domain has, so a SWF
 loaded twice makes instances of its first load's classes (the node

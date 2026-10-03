@@ -239,7 +239,7 @@ export function shellNatives(rt: Runtime): Natives {
 
       const domain = domainOf(this);
       const b = bytesOf(rt, bytes);
-      const compiled = rt.compileAbc(b.buffer.slice(0, b.length), domain.chain());
+      const compiled = rt.compileAbc(b.buffer.slice(0, b.length), rt.compileUnit(domain));
       if (typeof compiled === "number") {
         throw rt.error("VerifyError", compiled);
       }

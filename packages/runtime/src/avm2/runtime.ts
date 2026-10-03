@@ -114,8 +114,38 @@ export interface AbcDesc {
 /** A loaded module: what `rt.abc` returns, and methods reach as A. */
 export interface Abc extends AbcDesc {
   scriptStates: Script[];
-  /** The domain it was loaded into. */
+  /** The domain it was loaded into, and its position among the ABCs loaded there. */
   domain: Domain;
+  index: number;
+}
+
+/**
+ * What an ABC loaded into a domain compiles in: what the compiler needs to
+ * bind its names as the runtime will find them (see RuntimeOptions.compileAbc).
+ */
+export interface CompileUnit {
+  /** The hashes of the ABCs it is compiled after, its domain's chain, as its module names them. */
+  linked: string[];
+  /** Its domain and the domain's ancestors, by number, from the domain up to the root, 0. */
+  domains: number[];
+  /**
+   * What the domain finds, by name or as a type, that is not the first
+   * definition from the root down, as its caches hold it.
+   */
+  found: FoundDefinition[];
+}
+
+/** A definition a domain finds (see CompileUnit.found). */
+export interface FoundDefinition {
+  /** The name's namespace, by kind (NS_Public...) and URI, and the name. */
+  nsKind: number;
+  uri: string;
+  name: string;
+  /** The ABC that defines it: its domain's number, and its position among the ABCs loaded there. */
+  domain: number;
+  index: number;
+  /** Found as a type, as avmplus finds traits, else by name, as it finds scripts. */
+  asType: boolean;
 }
 
 export interface RuntimeOptions {
@@ -130,13 +160,13 @@ export interface RuntimeOptions {
   /**
    * An ABC compiled for avmshell's Domain.loadBytes, which runs it at once:
    * its module, or the VerifyError it was rejected with. The host compiles
-   * it after the ABCs `linked` names by their hashes, the domain's it loads
-   * into, as the runtime does not include the compiler; without it
-   * loadBytes is unsupported. Each module it evaluates needs a script of
-   * its own in stacks, a sourceURL comment, for Domain.currentDomain to
-   * find its code (see Runtime.codeDomain).
+   * it, as the runtime does not include the compiler, into the domain
+   * `unit` names, with its findings; without it loadBytes is unsupported.
+   * Each module it evaluates needs a script of its own in stacks, a
+   * sourceURL comment, for Domain.currentDomain to find its code (see
+   * Runtime.codeDomain).
    */
-  compileAbc?: (abc: Uint8Array, linked: string[]) => ((rt: Runtime) => Abc) | number;
+  compileAbc?: (abc: Uint8Array, unit: CompileUnit) => ((rt: Runtime) => Abc) | number;
   /** Where avmshell's File reads and writes: by default in memory, empty at the start. */
   files?: ShellFiles;
   /**
@@ -634,15 +664,34 @@ export class Domain {
   readonly types = new Map<string, GlobalName[]>();
   readonly classRefs = new Map<Namespace, Map<string, ClassRef>>();
   readonly own: string[] = [];
+  /** Each of its ABCs' place among all the runtime loads. */
+  readonly ownOrder: number[] = [];
 
-  constructor(readonly parent: Domain | null) {}
+  constructor(
+    readonly parent: Domain | null,
+    /** Its number in its runtime, which a host's compiler knows it by: the root's is 0. */
+    readonly id: number,
+  ) {}
 
   /**
-   * The ABCs a module loaded into it now is compiled after: its parent's,
-   * including those loaded after it was made, then its own.
+   * The ABCs a module loaded into it now is compiled after: its own and
+   * its ancestors', including those loaded after it was made, in the order
+   * they loaded.
    */
   chain(): string[] {
-    return this.parent ? [...this.parent.chain(), ...this.own] : [...this.own];
+    if (!this.parent) {
+      return [...this.own];
+    }
+
+    const loads: [number, string][] = [];
+    for (let d: Domain | null = this; d; d = d.parent) {
+      const { own, ownOrder } = d;
+      for (let i = 0; i < own.length; i++) {
+        loads.push([ownOrder[i], own[i]]);
+      }
+    }
+
+    return loads.sort((a, b) => a[0] - b[0]).map(([, hash]) => hash);
   }
 }
 
@@ -704,7 +753,7 @@ export class Runtime {
   readonly print: (line: string) => void;
   readonly debugger: boolean;
   readonly compileAbc:
-    | ((abc: Uint8Array, linked: string[]) => ((rt: Runtime) => Abc) | number)
+    | ((abc: Uint8Array, unit: CompileUnit) => ((rt: Runtime) => Abc) | number)
     | null;
   readonly files: ShellFiles;
   /** See RuntimeOptions.swfVersion. */
@@ -712,7 +761,9 @@ export class Runtime {
   readonly natives: Record<string, (rt: Runtime) => Method>;
   /** Names the scripts define, by local name: the first definition wins. */
   /** The root application domain, the builtins' and the main SWF's; and the one modules load into now. */
-  readonly root = new Domain(null);
+  readonly root = new Domain(null, 0);
+  private domainCount = 1;
+  private loads = 0;
   private loading: Domain = this.root;
   /**
    * The domain of each loaded module's code, by the script a stack's frame
@@ -816,7 +867,7 @@ export class Runtime {
   /** A domain whose definitions are looked up after `parent`'s, as `new ApplicationDomain(parent)`. */
   childDomain(parent: Domain = this.root): Domain {
     this.children = true;
-    return new Domain(parent);
+    return new Domain(parent, this.domainCount++);
   }
 
   /**
@@ -981,9 +1032,11 @@ export class Runtime {
       );
     }
 
-    domain.own.push(desc.hash);
     const abc = desc as Abc;
     abc.domain = domain;
+    abc.index = domain.own.length;
+    domain.own.push(desc.hash);
+    domain.ownOrder.push(this.loads++);
     this.unlocated.push([new Error(), domain]);
     for (const name of abc.names) {
       if (name instanceof TypeName) {
@@ -1121,6 +1174,70 @@ export class Runtime {
         add(cache(chain[k]), found, name);
         add(cache(domain), found, name);
         return found.script;
+      }
+    }
+
+    return null;
+  }
+
+  /** What an ABC loaded into `domain` now compiles in. */
+  compileUnit(domain: Domain): CompileUnit {
+    const domains: number[] = [];
+    for (let d: Domain | null = domain; d; d = d.parent) {
+      domains.push(d.id);
+    }
+
+    return { linked: domain.chain(), domains, found: this.foundIn(domain) };
+  }
+
+  /**
+   * What `domain` finds, by name and as a type, that is not the first
+   * definition from the root down: what a cache of its chain holds, from
+   * the domain up. The root's caches hold only its own first definitions.
+   */
+  private foundIn(domain: Domain): FoundDefinition[] {
+    const found: FoundDefinition[] = [];
+    for (const asType of [false, true]) {
+      const seen = new Set<string>();
+      for (let d: Domain | null = domain; d?.parent; d = d.parent) {
+        for (const [name, list] of asType ? d.types : d.cached) {
+          for (const g of list) {
+            const key = `${g.ns.kind}:${g.ns.uri}::${name}`;
+            if (seen.has(key) || g.ns.uri === null || g.ns.kind === NS_Private) {
+              continue;
+            }
+
+            seen.add(key);
+            if (this.firstLoaded(domain, name, g.ns) !== g.script) {
+              const abc = g.script.abc;
+              found.push({
+                nsKind: g.ns.kind,
+                uri: g.ns.uri,
+                name,
+                domain: abc.domain.id,
+                index: abc.index,
+                asType,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return found;
+  }
+
+  /** The script that first defines `name` in `ns` for `domain`, from the root down. */
+  private firstLoaded(domain: Domain, name: string, ns: Namespace): Script | null {
+    const chain: Domain[] = [];
+    for (let d: Domain | null = domain; d; d = d.parent) {
+      chain.push(d);
+    }
+
+    for (let k = chain.length - 1; k >= 0; k--) {
+      const g = chain[k].globals.get(name)?.find((other) => other.ns === ns);
+      if (g) {
+        return g.script;
       }
     }
 
