@@ -562,9 +562,9 @@ function swap(existing: DisplayObject, character: Character): void {
     return;
   }
 
+  // A morph is blended when it is next drawn, at the ratio the place gives.
   if (character.type === "morph") {
     existing.morph = character;
-    existing.shape = morphAt(character, existing.ratio);
   } else if (character.type === "shape") {
     existing.morph = null;
     existing.shape = character;

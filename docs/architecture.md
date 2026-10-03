@@ -549,15 +549,18 @@ tessellated again on every turn of their loop. A shape filled with a
 bitmap keeps to its own SWF, whose bitmap it is.
 A morph shape (DefineMorphShape, DefineMorphShape2) is two shapes whose
 edges pair in order; a `MorphShape` shows their blend at the ratio its
-placements give (`morph.ts`), a shape like any other made once per
-ratio, so it draws, bounds and hit-tests as one. The blend mixes where the
-ends' points lie, not their deltas, a straight edge paired with a curve
-as a curve, and keeps them to whole twips, so a closed path stays closed
-for `shapes.ts` to join. Flash fills a morph's paths with their fill0
-alone, and takes a new ratio on only as it draws: a script that moves
-the timeline and asks for bounds before the next render gets the last
-drawn blend's (`morph-shapes`, the corpus's `hittest_morph`). Only a
-timeline makes a `MorphShape`; a script's `new` is refused, #2012.
+placements give (`morph.ts`), a shape like any other, so it draws,
+bounds and hit-tests as one. The blend mixes where the ends' points lie,
+not their deltas, a straight edge paired with a curve as a curve, and
+keeps them to whole twips, so a closed path stays closed for `shapes.ts`
+to join. A morph keeps only its 16 latest blends, which instances in step
+share, and a MorphShape's node builds its own fills, freed as it draws
+the next: a tween asks for a new ratio on each frame, which the shapes'
+shared fills, kept for as long as the view, would hoard. Flash takes a
+new ratio on only as it draws: a script that moves the timeline and
+asks for bounds before the next render gets the last drawn blend's
+(`morph-shapes`, the corpus's `hittest_morph`). Only a timeline makes a
+`MorphShape`; a script's `new` is refused, #2012.
 Tessellating lines, round joins most of all, was the largest part of a
 frame of a dozen animated instances; `bench.ts --rig N` measures it.
 Fills and lines are drawn unbatched, each Graphics a draw of its own

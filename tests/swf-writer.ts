@@ -267,7 +267,7 @@ export interface MorphShapeSpec {
   fills: MorphFillSpec[];
   /** Widths in twips, colours 0xAARRGGBB. */
   lines?: { startWidth: number; endWidth: number; startColor: number; endColor: number }[];
-  /** The start's paths, with their styles: Flash fills a morph's with fill0 alone. */
+  /** The start's paths, with their styles. */
   start: { fill1?: number; fill0?: number; line?: number; commands: PathCommand[] }[];
   /** The end's: the start's edges in order, its moves where the start has them. */
   end: PathCommand[][];

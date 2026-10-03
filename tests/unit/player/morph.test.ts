@@ -90,7 +90,7 @@ test("a morph blends to its start and its end, a straight edge paired with a cur
   assert.deepEqual(end.bounds, { xMin: -200, xMax: 1400, yMin: -200, yMax: 1400 });
 });
 
-test("a blend's points are whole twips and its paths stay closed; fill1 is dropped, as Flash fills a morph with fill0", () => {
+test("a blend's points are whole twips, its paths stay closed and keep both their fills", () => {
   const c = character();
   const half = morphAt(c, 21845).shape;
   const at = pens(half.records);
@@ -101,8 +101,22 @@ test("a blend's points are whole twips and its paths stay closed; fill1 is dropp
 
   const style = half.records[0];
   assert.equal(style.type === "style" && style.fill0, 1);
-  assert.equal(style.type === "style" && style.fill1, 0);
+  assert.equal(style.type === "style" && style.fill1, 2);
   assert.equal(morphAt(c, 21845).shape, half);
+});
+
+test("a morph keeps its 16 latest blends, the one asked for again among them", () => {
+  const c = character();
+  const first = morphAt(c, 0);
+  for (let ratio = 1; ratio < 16; ratio++) {
+    morphAt(c, ratio);
+  }
+
+  assert.equal(morphAt(c, 0), first);
+  morphAt(c, 100);
+  assert.equal(c.blends.size, 16);
+  assert.equal(c.blends.has(1), false);
+  assert.equal(morphAt(c, 0), first);
 });
 
 test("a MorphShape keeps the blend it last drew until it is drawn at a new ratio", () => {

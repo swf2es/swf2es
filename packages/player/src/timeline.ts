@@ -69,7 +69,7 @@ export interface ShapeCharacter {
   layers: ShapeLayer[];
 }
 
-/** DefineMorphShape or DefineMorphShape2, and its blends by ratio as they are made (morph.ts). */
+/** DefineMorphShape or DefineMorphShape2, and its latest blends by ratio, least recent first (morph.ts). */
 export interface MorphCharacter {
   type: "morph";
   id: number;

@@ -1,6 +1,6 @@
 // Morph shapes: DefineMorphShape's two ends blended at a placement's ratio
 // into a shape like any other, which the player draws, bounds and hit-tests
-// as it does a DefineShape's. The blend at each ratio is made once.
+// as it does a DefineShape's. A morph keeps its latest blends only.
 import type {
   Fill,
   Gradient,
@@ -14,10 +14,21 @@ import type {
 import { shapeLayers } from "./shapes.js";
 import type { MorphCharacter, ShapeCharacter } from "./timeline.js";
 
-/** The shape `character` is at `ratio`, 0 its start to 65535 its end; made the first time it is asked for. */
+/** How many blends a morph keeps: the last ratios asked for, enough for instances in step to share them. */
+const KEPT_BLENDS = 16;
+
+/**
+ * The shape `character` is at `ratio`, 0 its start to 65535 its end: made
+ * the first time it is asked for and kept while it is among the morph's
+ * latest, as a tween asks for a new ratio on each frame.
+ */
 export function morphAt(character: MorphCharacter, ratio: number): ShapeCharacter {
-  let shape = character.blends.get(ratio);
-  if (!shape) {
+  const blends = character.blends;
+  let shape = blends.get(ratio);
+  if (shape) {
+    // Last in the map's order, the most recently asked for.
+    blends.delete(ratio);
+  } else {
     const blended = blend(character.morph, ratio / 65535);
     shape = {
       type: "shape",
@@ -25,7 +36,11 @@ export function morphAt(character: MorphCharacter, ratio: number): ShapeCharacte
       shape: blended,
       layers: shapeLayers(blended, character.bitmap),
     };
-    character.blends.set(ratio, shape);
+  }
+
+  blends.set(ratio, shape);
+  if (blends.size > KEPT_BLENDS) {
+    blends.delete(blends.keys().next().value as number);
   }
 
   return shape;
@@ -138,8 +153,7 @@ const mixPoint = (a: Point, b: Point, t: number): Point => ({
  * one with a curve as a curve, and their points are mixed where they lie,
  * not their deltas. A style change is the start's, its move mixed with
  * the end's where the end has one there, else with the end's pen; a move
- * only the end has moves the pen from the start's. Flash fills a morph's
- * paths with their fill0 alone: one with only a fill1 shows no fill.
+ * only the end has moves the pen from the start's.
  */
 function blend(morph: MorphShape, t: number): Shape {
   const records: ShapeRecord[] = [];
@@ -167,11 +181,7 @@ function blend(morph: MorphShape, t: number): Shape {
         pen = mixPoint(startPen, endPen, t);
       }
 
-      records.push({
-        ...s,
-        moveTo: moves ? pen : null,
-        fill1: s.fill1 === null ? null : 0,
-      } satisfies Style);
+      records.push({ ...s, moveTo: moves ? pen : null } satisfies Style);
       i++;
       continue;
     }

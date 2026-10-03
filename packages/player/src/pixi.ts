@@ -832,10 +832,12 @@ export class PixiView {
     node.ownFills = false;
     if (current && current.layers === node.layers && current.fills.length === node.layers.length) {
       fills = current.fills;
-    } else if (shape && !o.drawing) {
+    } else if (shape && !o.drawing && !(o as ShapeObject).morph) {
       fills = this.fills.get(shape) ?? node.layers.map(build);
       this.fills.set(shape, fills);
     } else {
+      // A drawing's, or a morph's blend, one of as many as its ratios: kept
+      // with the shapes', they would outlive it.
       fills = node.layers.map(build);
       node.ownFills = true;
     }

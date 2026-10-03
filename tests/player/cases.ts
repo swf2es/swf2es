@@ -1661,10 +1661,10 @@ function textDraw(abc: Uint8Array): Uint8Array {
   });
 }
 
-// Two morph shapes: one whose straight edges pair with curves as its fill,
-// line width and colour change; one of two paths with a turning gradient,
-// in a DefineMorphShape2, and a third path with only a fill1, which Flash
-// leaves unfilled in a morph. The timeline sets ratios, swaps a shape for a
+// Three morph shapes: one whose straight edges pair with curves as its
+// fill, line width and colour change; one of two paths with a turning
+// gradient, in a DefineMorphShape2; and two regions of two colours whose
+// shared edge, fill0 on one side and fill1 on the other, moves. The timeline sets ratios, swaps a shape for a
 // morph and back with the move flag, and loops onto a shape a rewind keeps.
 function morphs(): Uint8Array {
   const bend = w.morphShape({
@@ -1724,8 +1724,29 @@ function morphs(): Uint8Array {
     end: [
       [{ move: [0, 200] }, { line: [1200, 200] }, { line: [600, 1200] }, { line: [0, 200] }],
       rectPath(65, 40, 30, 20),
-      rectPath(65, 60, 30, 10),
     ],
+  });
+  // The left region's outline, the right's, then the edge between them at x.
+  const regions = (x: number, height: number): w.PathCommand[][] => [
+    [{ move: [x, 0] }, { line: [0, 0] }, { line: [0, height] }, { line: [x, height] }],
+    [{ move: [x, height] }, { line: [1200, height] }, { line: [1200, 0] }, { line: [x, 0] }],
+    [{ move: [x, height] }, { line: [x, 0] }],
+  ];
+  const [left, right, between] = regions(300, 600);
+  const split = w.morphShape({
+    id: 4,
+    startBounds: [0, 1200, 0, 600],
+    endBounds: [0, 1200, 0, 1000],
+    fills: [
+      { start: 0xffff0000, end: 0xffffaa00 },
+      { start: 0xff0000ff, end: 0xff00aaff },
+    ],
+    start: [
+      { fill0: 1, commands: left },
+      { fill0: 2, commands: right },
+      { fill0: 1, fill1: 2, commands: between },
+    ],
+    end: regions(900, 1000),
   });
   return w.swf({
     width: 320,
@@ -1737,18 +1758,22 @@ function morphs(): Uint8Array {
       w.backgroundColor(0xeeeeee),
       bend,
       turn,
+      split,
       square(3, 0x00aa00, 800),
       w.place({ depth: 1, character: 1, matrix: { tx: 400, ty: 400 } }),
       w.place({ depth: 2, character: 2, matrix: { tx: 2400, ty: 400 }, ratio: 32768 }),
       w.place({ depth: 3, character: 3, matrix: { tx: 4800, ty: 400 } }),
+      w.place({ depth: 5, character: 4, matrix: { tx: 4600, ty: 2600 } }),
       w.showFrame(),
       w.place({ depth: 1, move: true, ratio: 16384 }),
       w.place({ depth: 2, move: true, ratio: 65535 }),
       w.place({ depth: 3, move: true, character: 1, ratio: 49152 }),
+      w.place({ depth: 5, move: true, ratio: 32768 }),
       w.showFrame(),
       w.place({ depth: 1, move: true, character: 3 }),
       w.place({ depth: 2, move: true, character: 1 }),
       w.place({ depth: 3, move: true, ratio: 65535 }),
+      w.place({ depth: 5, move: true, ratio: 65535 }),
       w.showFrame(),
       w.remove(1),
       w.place({ depth: 1, character: 3, matrix: { tx: 400, ty: 2200 } }),
