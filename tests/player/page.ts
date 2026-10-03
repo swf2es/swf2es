@@ -179,12 +179,17 @@ function describe(e: unknown, scripting: Scripting | null): string {
 }
 
 interface Bench {
+  /** The view's counts at the end, and the JS heap in use before and after, where Chrome tells. */
+  counts: Record<string, number>;
+  heap: [number, number];
   tick: number[];
   sync: number[];
   /** Pixi's part of the draw: its instructions and batches, and the GL calls issued. */
   draw: number[];
   /** GL's part: the wait for what was issued to finish. */
   gl: number[];
+  /** Each render after a frame's with no tick between, whole: sync, draw and GL. */
+  idle: number[];
   first: number;
   /** The GL renderer that drew: SwiftShader, or a GPU's name. */
   renderer: string;
@@ -197,12 +202,18 @@ interface Bench {
  * GPU is waited for, so that what it does counts; Chrome's software GL
  * does it on the CPU anyway, and the result says which drew.
  */
-async function benchSwf(base64: string, frames: number, backBuffer = false): Promise<Bench> {
+async function benchSwf(
+  base64: string,
+  frames: number,
+  backBuffer = false,
+  idleRenders = 0,
+): Promise<Bench> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
   const sync: number[] = [];
   const draw: number[] = [];
   const finished: number[] = [];
+  const idle: number[] = [];
   let name = "";
   try {
     const start = performance.now();
@@ -245,9 +256,13 @@ async function benchSwf(base64: string, frames: number, backBuffer = false): Pro
         await gpu.device.queue.onSubmittedWorkDone();
       }
     };
+    const heapNow = () =>
+      (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ??
+      0;
     view.render(player.root);
     await finish();
     const first = performance.now() - start;
+    const heapBefore = heapNow();
     for (let frame = 2; frame <= frames; frame++) {
       const before = performance.now();
       player.tick();
@@ -261,12 +276,43 @@ async function benchSwf(base64: string, frames: number, backBuffer = false): Pro
       sync.push(synced - ticked);
       draw.push(drawn - synced);
       finished.push(performance.now() - drawn);
+      // Renders no tick came before, as a host that draws on every animation frame does.
+      for (let k = 0; k < idleRenders; k++) {
+        const begun = performance.now();
+        view.render(player.root);
+        await finish();
+        idle.push(performance.now() - begun);
+      }
     }
 
+    const counts = { ...view.counts };
+    const heap: [number, number] = [heapBefore, heapNow()];
     renderer.destroy();
-    return { tick, sync, draw, gl: finished, first, renderer: name, error: null };
+    return {
+      counts,
+      heap,
+      tick,
+      sync,
+      draw,
+      gl: finished,
+      idle,
+      first,
+      renderer: name,
+      error: null,
+    };
   } catch (e) {
-    return { tick, sync, draw, gl: finished, first: 0, renderer: name, error: describe(e, null) };
+    return {
+      counts: {},
+      heap: [0, 0],
+      tick,
+      sync,
+      draw,
+      gl: finished,
+      idle,
+      first: 0,
+      renderer: name,
+      error: describe(e, null),
+    };
   }
 }
 

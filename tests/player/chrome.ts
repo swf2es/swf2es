@@ -238,10 +238,13 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
  * which GL renderer drew.
  */
 export interface BenchResult {
+  counts: Record<string, number>;
+  heap: [number, number];
   tick: number[];
   sync: number[];
   draw: number[];
   gl: number[];
+  idle: number[];
   first: number;
   renderer: string;
   error: string | null;
@@ -253,19 +256,23 @@ export function benchPlayer(
   frames: number,
   gpu = false,
   backBuffer = false,
+  idleRenders = 0,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
     async (evaluate) => {
       const { value, exception } = await evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders})`,
       );
       return (
         value ?? {
+          counts: {},
+          heap: [0, 0],
           tick: [],
           sync: [],
           draw: [],
           gl: [],
+          idle: [],
           first: 0,
           renderer: "",
           error: exception ?? "no result",

@@ -431,6 +431,8 @@ interface Node {
 
 export class PixiView {
   readonly stage = new PixiContainer();
+  /** What the view has built since it was made, for measuring: lines' contexts made and reused. */
+  readonly counts = { strokeContexts: 0, strokeReuses: 0 };
   private readonly nodes = new WeakMap<DisplayObject, Node>();
   private readonly fills = new Map<ShapeCharacter, GraphicsContext[]>();
   /**
@@ -726,6 +728,7 @@ export class PixiView {
       // The new context goes in before the old one goes: the Graphics listens on the one it holds.
       const previous = strokes.context;
       strokes.context = det === 0 ? new GraphicsContext() : strokeContext(layer, m);
+      this.counts.strokeContexts++;
       if (this.fresh) {
         this.built.push(strokes.context);
       }

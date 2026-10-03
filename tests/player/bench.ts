@@ -11,7 +11,16 @@
 // --back-buffer makes the renderer as a host that draws blend modes must,
 // with Pixi's back buffer.
 //
-//   node tests/player/bench.ts [--shapes N] [--frames N] [--gpu] [--back-buffer] [--json]
+// --rig N plays instead N instances of one animated character, a sprite of
+// 12 outlined parts that turn and swell on a loop of 24 frames, all in
+// step, as a game's crowd of the same creature does: what the lines cost
+// when only their transforms change.
+//
+// --idle K renders K times more after each frame with no tick between, as
+// a host that draws on every animation frame does, and times those apart.
+//
+//   node tests/player/bench.ts [--shapes N | --rig N] [--frames N] [--idle K] [--gpu]
+//     [--back-buffer] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 
@@ -21,6 +30,8 @@ const option = (name: string, fallback: number) => {
   return i >= 0 ? Number(args[i + 1]) : fallback;
 };
 const shapes = option("shapes", 2000);
+const rig = option("rig", 0);
+const idleRenders = option("idle", 0);
 const frames = option("frames", 120);
 const WARMUP = 10;
 const WIDTH = 800;
@@ -152,17 +163,90 @@ function synthetic(): Uint8Array {
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: frames, tags });
 }
 
+/** A part of the rig: a polygon of `sides`, filled and outlined thick, so that its joins are many and round. */
+function part(id: number, sides: number): Uint8Array {
+  const r = 300;
+  const point = (k: number): [number, number] => [
+    Math.round(r * Math.cos((2 * Math.PI * k) / sides)),
+    Math.round(r * Math.sin((2 * Math.PI * k) / sides) * 0.6),
+  ];
+  const path: ({ move: [number, number] } | { line: [number, number] })[] = [{ move: point(0) }];
+  for (let k = 1; k <= sides; k++) {
+    path.push({ line: point(k) });
+  }
+
+  return w.shape({
+    id,
+    bounds: [-r - 60, r + 60, -r - 60, r + 60],
+    fills: [0xff000000 | ((id * 0x2a6f3d) & 0xffffff)],
+    lines: [{ width: 60, color: 0xff101010 }],
+    paths: [{ fill1: 1, line: 1, commands: path }],
+  });
+}
+
+/** The rig: `count` instances of a sprite whose 12 parts turn and swell on a loop of 24 frames. */
+function rigSwf(count: number): Uint8Array {
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
+  for (let i = 0; i < 4; i++) {
+    tags.push(part(11 + i, 12 + 6 * i));
+  }
+
+  const loop = 24;
+  const sprite: Uint8Array[] = [];
+  for (let f = 0; f < loop; f++) {
+    for (let i = 0; i < 12; i++) {
+      const t = (2 * Math.PI * f) / loop;
+      const a = 0.4 * Math.sin(t + i) * (i % 2 ? 1 : -1);
+      const s = 1 + 0.25 * Math.sin(t * 2 + i);
+      const matrix = {
+        a: s * Math.cos(a),
+        b: s * Math.sin(a),
+        c: -s * Math.sin(a),
+        d: s * Math.cos(a),
+        tx: Math.round(400 * Math.cos(i)),
+        ty: Math.round(400 * Math.sin(i * 1.7)),
+      };
+      sprite.push(
+        f === 0
+          ? w.place({ depth: i + 1, character: 11 + (i % 4), matrix })
+          : w.place({ depth: i + 1, move: true, matrix }),
+      );
+    }
+
+    sprite.push(w.showFrame());
+  }
+
+  tags.push(w.sprite(20, loop, sprite));
+  const columns = Math.ceil(Math.sqrt(count));
+  for (let i = 0; i < count; i++) {
+    tags.push(
+      w.place({
+        depth: i + 1,
+        character: 20,
+        matrix: {
+          tx: Math.round(((i % columns) + 0.5) * (WIDTH / columns) * TWIPS),
+          ty: Math.round((Math.floor(i / columns) + 0.5) * (HEIGHT / columns) * TWIPS),
+        },
+      }),
+    );
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
 const quantile = (values: number[], q: number) => {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0;
 };
 
-const swf = synthetic();
+const swf = rig > 0 ? rigSwf(rig) : synthetic();
 const result = await benchPlayer(
   swf,
   frames,
   args.includes("--gpu"),
   args.includes("--back-buffer"),
+  idleRenders,
 );
 if (result.error) {
   console.error(result.error);
@@ -176,7 +260,9 @@ const gl = result.gl.slice(WARMUP);
 const total = tick.map((t, i) => t + sync[i] + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
-  shapes,
+  shapes: rig > 0 ? `rig of ${rig}` : shapes,
+  counts: result.counts,
+  heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   frames,
   swfBytes: swf.length,
   renderer: result.renderer,
@@ -186,17 +272,26 @@ const summary = {
   draw: stats(draw),
   gl: stats(gl),
   frame: stats(total),
+  idle: stats(result.idle.slice(WARMUP * idleRenders)),
 };
 if (args.includes("--json")) {
   console.log(JSON.stringify(summary));
 } else {
   const ms = (v: number) => `${v.toFixed(2)} ms`;
   console.log(
-    `${shapes} shapes, ${frames} frames, SWF of ${swf.length} bytes; first frame ${ms(result.first)}; drawn by ${result.renderer}`,
+    `${summary.shapes}${rig > 0 ? "" : " shapes"}, ${frames} frames, SWF of ${swf.length} bytes; first frame ${ms(result.first)}; drawn by ${result.renderer}`,
+  );
+  console.log(
+    `  counts  ${JSON.stringify(result.counts)}; JS heap ${summary.heapMb[0]} to ${summary.heapMb[1]} MB`,
   );
   console.log(`  tick    median ${ms(summary.tick.median)}  p90 ${ms(summary.tick.p90)}`);
   console.log(`  sync    median ${ms(summary.sync.median)}  p90 ${ms(summary.sync.p90)}`);
   console.log(`  draw    median ${ms(summary.draw.median)}  p90 ${ms(summary.draw.p90)}`);
   console.log(`  gl      median ${ms(summary.gl.median)}  p90 ${ms(summary.gl.p90)}`);
+  if (idleRenders > 0) {
+    console.log(
+      `  idle    median ${ms(summary.idle.median)}  p90 ${ms(summary.idle.p90)} a render`,
+    );
+  }
   console.log(`  frame   median ${ms(summary.frame.median)}  p90 ${ms(summary.frame.p90)}`);
 }
