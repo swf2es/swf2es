@@ -281,6 +281,8 @@ export class Scripting {
   private readonly reported = new Map<number, Set<string>>();
   /** Modules imported, each under a script name of its own for Runtime.codeDomain. */
   private modules = 0;
+  /** The URL of the SWF each module's code came from, by its script name, for codeUrl. */
+  private readonly moduleUrls = new Map<string, string>();
   /** Display objects made with an AS3 object, which Flash numbers for their default names. */
   instances = 0;
   private statusClass: AsObject | null = null;
@@ -349,7 +351,7 @@ export class Scripting {
     library.domain = this.mainDomain;
     this.rt.swfVersion = swf.header.version;
     const decoded = decodeImages(library, this.decodeImage);
-    const run = await this.link(swf, this.mainDomain);
+    const run = await this.link(swf, this.mainDomain, this.url);
     await decoded;
     run();
     this.bind(swf, library);
@@ -360,7 +362,7 @@ export class Scripting {
    * each unless its lazy flag defers it to first use. Linking is
    * asynchronous, running is not, so a load can run its code in a frame.
    */
-  private async link(swf: Swf, domain: avm2.Domain): Promise<() => void> {
+  private async link(swf: Swf, domain: avm2.Domain, url: string): Promise<() => void> {
     // Every DoABC added before any compiles: avmplus has a frame's ABCs all
     // loaded before it verifies a method, so a class in the first tag may
     // extend or name one in the last (the corpus's property_priority).
@@ -374,7 +376,7 @@ export class Scripting {
 
     const runs: (() => void)[] = [];
     for (const { index, lazy } of added) {
-      const linked = await this.compileAt(index, domain);
+      const linked = await this.compileAt(index, domain, false, url);
       if (!lazy) {
         runs.push(() => this.rt.run(linked));
       }
@@ -468,9 +470,19 @@ export class Scripting {
    * player's own libraries. Each is imported under a script name of its
    * own, by which Runtime.codeDomain finds the domain of the code running.
    */
-  private async compileAt(index: number, domain: avm2.Domain, builtin = false): Promise<Value> {
+  private async compileAt(
+    index: number,
+    domain: avm2.Domain,
+    builtin = false,
+    url?: string,
+  ): Promise<Value> {
     const { module } = this.codegen.compile(this.hashes, index);
-    const named = `${module}//# sourceURL=swf2es-${++this.modules}.js\n`;
+    const script = `swf2es-${++this.modules}.js`;
+    if (url !== undefined) {
+      this.moduleUrls.set(script, url);
+    }
+
+    const named = `${module}//# sourceURL=${script}\n`;
     const factory = (await import(`data:text/javascript,${encodeURIComponent(named)}`)).default;
     return this.rt.loadInto(domain, () => factory(this.rt), builtin);
   }
@@ -866,6 +878,21 @@ export class Scripting {
   }
 
   /**
+   * The URL of the SWF whose code asks, the innermost on the stack, as
+   * Flash's code context has it; the main SWF's when only the player's is.
+   */
+  codeUrl(): string {
+    for (const at of avm2.frameScripts(new Error().stack)) {
+      const url = this.moduleUrls.get(at);
+      if (url !== undefined) {
+        return url;
+      }
+    }
+
+    return this.url;
+  }
+
+  /**
    * The URL of the SWF a Loader belongs to, which its content's loaderURL
    * reports and its relative URLs resolve against: Flash's is the SWF whose
    * code made the Loader, which the runtime does not track, so it is the
@@ -1123,7 +1150,8 @@ export class Scripting {
     const library = readLibrary(swf);
     library.domain = load.domain;
     const decoded = decodeImages(library, this.decodeImage);
-    const run = await this.link(swf, load.domain);
+    // One from bytes is its Loader's SWF's, as far as its own URL goes.
+    const run = await this.link(swf, load.domain, load.url ?? this.ownerUrl(load.loader));
     await decoded;
     return () => this.complete(load, swf, library, run);
   }

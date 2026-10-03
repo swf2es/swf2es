@@ -702,7 +702,7 @@ export class Domain {
  * The scripts a stack's frames name, innermost first: V8's "at f (script:1:2)"
  * and "at script:1:2", and SpiderMonkey's and JavaScriptCore's "f@script:1:2".
  */
-function frameScripts(stack: string | undefined): string[] {
+export function frameScripts(stack: string | undefined): string[] {
   const scripts: string[] = [];
   for (const line of stack?.split("\n") ?? []) {
     const m =

@@ -24,15 +24,15 @@ const wasm = await WebAssembly.compile(
   await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
 );
 
-/** A document class that runs `body` with `so`, a SharedObject, in scope. */
-const script = (name: string, body: string) => ({
+/** A document class, `Main` unless named, that runs `body` with `so`, a SharedObject, in scope. */
+const script = (name: string, body: string, className = "Main") => ({
   name,
   source: `package {
   import flash.display.Sprite;
   import flash.net.SharedObject;
   import flash.utils.ByteArray;
-  public class Main extends Sprite {
-    public function Main() {
+  public class ${className} extends Sprite {
+    public function ${className}() {
       ${body}
     }
   }
@@ -238,4 +238,56 @@ test("a host whose localStorage throws when read keeps SharedObjects in memory",
       delete (globalThis as { localStorage?: unknown }).localStorage;
     }
   }
+});
+
+test("a loaded SWF's SharedObject is its own, by its URL, not the main SWF's", {
+  skip,
+}, async () => {
+  const abcs = compileScripts(
+    [
+      script(
+        "SharedOuter",
+        `var so:SharedObject = SharedObject.getLocal("prefs");
+      so.data.who = "outer";
+      so.flush();
+      var loader:flash.display.Loader = new flash.display.Loader();
+      loader.load(new flash.net.URLRequest("child/inner.swf"));
+      addChild(loader);`,
+      ),
+      script(
+        "SharedInner",
+        `var so:SharedObject = SharedObject.getLocal("prefs");
+      trace(so.data.who, SharedObject.getLocal("prefs", "/child") !== null);
+      so.data.who = "inner";
+      so.flush();`,
+        // Not Main, which the child's domain would find in its parent's.
+        "Inner",
+      ),
+    ],
+    out,
+  );
+  const { stored, storage } = mapStorage();
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    storage,
+    url: "http://example.test/outer.swf",
+    fetch: async () => ({
+      bytes: bare(abcs.get("SharedInner") as Uint8Array, 1, "Inner"),
+      status: 200,
+      headers: [],
+    }),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(abcs.get("SharedOuter") as Uint8Array, 1), scripting);
+  await player.start();
+  await scripting.settled();
+  player.tick();
+
+  // The child's own path, under which "/child" is one of its directories.
+  assert.deepEqual(lines, ["undefined true"]);
+  assert.deepEqual([...stored.keys()].sort(), [
+    "example.test/child/inner.swf/prefs",
+    "example.test/outer.swf/prefs",
+  ]);
 });
