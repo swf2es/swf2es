@@ -53,18 +53,23 @@ function tool(name: string): string {
   return process.env[name.toUpperCase()] ?? name;
 }
 
-/** The harness's SWF, compiled again when its source changes. */
+// Traces kept; AIR's float type off, as Flash Player content has none.
+const HARNESS_FLAGS = ["-compiler.float=false", "-omit-trace-statements=false"];
+
+/** The harness's SWF, compiled again when its source or its flags change. */
 function harness(): string {
   const source = readFileSync(harnessSource);
-  const hash = createHash("sha256").update(source).digest("hex").slice(0, 16);
+  const hash = createHash("sha256")
+    .update(source)
+    .update(HARNESS_FLAGS.join(" "))
+    .digest("hex")
+    .slice(0, 16);
   const swf = join(out, `Harness-${hash}.swf`);
   if (!existsSync(swf)) {
     mkdirSync(out, { recursive: true });
-    const result = spawnSync(
-      tool("amxmlc"),
-      ["-omit-trace-statements=false", "-output", swf, harnessSource],
-      { encoding: "utf8" },
-    );
+    const result = spawnSync(tool("amxmlc"), [...HARNESS_FLAGS, "-output", swf, harnessSource], {
+      encoding: "utf8",
+    });
     if (!existsSync(swf)) {
       throw new Error(`amxmlc failed:\n${result.stdout}${result.stderr}`);
     }
