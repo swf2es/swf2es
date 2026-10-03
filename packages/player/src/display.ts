@@ -861,11 +861,14 @@ export class MovieClip extends Container {
   /** A goto a frame script asked for, taken when the script returns, as Flash defers it; null for none. */
   queuedGoto: number | null = null;
   /**
-   * Whether a script's goto in a SWF of version 9 or earlier has it sit
-   * the next frame out, with all in it, as Flash has such a clip
-   * (`goto-children`); from version 10 a goto leaves its frames as they were.
+   * The frame count (Scripting.frames) at a script's goto in a SWF of
+   * version 9 or earlier, a goto to the frame it is on among them: the next
+   * frame it sits out, with all in it, as Flash has such a clip
+   * (`goto-children`). A stamp, not a flag: one a skipped parent took along,
+   * or a clip no frame reached, is past by the frame after and never skips.
+   * From version 10 a goto leaves its frames as they were.
    */
-  skipsNextFrame = false;
+  skipsAfter = -1;
 
   constructor(
     readonly timeline: Timeline,

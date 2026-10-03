@@ -648,11 +648,17 @@ whose scripts are to run are fixed as the phase begins, so one a script
 removes still runs its own (`loads`, `orphans`).
 
 In a SWF of version 9 or earlier, a clip a script sends to a frame, by a
-goto from a frame script, a listener or anyone, sits the next frame out
-with everything in it: none of them advances, and from the frame after
-they go on as before. From version 10 a goto leaves the frames that
-follow as they were (`goto-children`, recorded as version 9). A clip's own
-SWF decides, so a version 9 SWF loaded into a later one keeps the rule.
+goto from its frame script, its listener or another clip's, sits the next
+frame out with everything in it: none of them advances, and from the
+frame after they go on as before (`goto-children`, recorded as version
+9). A goto to the frame it is on counts, so one sent there at every
+`ENTER_FRAME` stands still with all in it; a clip off the display list
+sits its next frame out there and no later one; and a kid sent to a frame
+in the frame its parent was sits out the parent's frame only, not one
+more. The player keeps the frame count of the goto on the clip, not a
+flag. From version 10 a goto leaves the frames that follow as they were.
+The version is the clip's own SWF's, which the case does not try across
+a loaded SWF.
 
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,

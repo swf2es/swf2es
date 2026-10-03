@@ -2,7 +2,9 @@
 // a looping kid, and another in a one-frame mid clip, and jumps or stops in
 // its own way; Main traces every frame where each body and its kids are,
 // at ENTER_FRAME and at EXIT_FRAME, beside a body that never jumps and a
-// loop on the root.
+// loop on the root. Same goes to the frame it is on at every ENTER_FRAME,
+// Nested jumps and sends its kid to a frame in one script, and Pooled is
+// taken off, sent to a frame while off, and put back three frames later.
 package {
   import flash.display.MovieClip;
   import flash.events.Event;
@@ -79,6 +81,34 @@ package {
     }
   }
 
+  // At every ENTER_FRAME, to the frame it is on, playing on.
+  public class Same extends MovieClip {
+    public var kid:MovieClip;
+    public var mid:MovieClip;
+
+    public function Same() {
+      addEventListener(Event.ENTER_FRAME, function(_:Event):void { gotoAndPlay(currentFrame); });
+    }
+  }
+
+  // From frame 2's script, forward to 8 stopped, and its kid to 3.
+  public class Nested extends MovieClip {
+    public var kid:MovieClip;
+    public var mid:MovieClip;
+
+    public function Nested() {
+      addFrameScript(1, function():void {
+        gotoAndStop(8);
+        kid.gotoAndPlay(3);
+      });
+    }
+  }
+
+  public class Pooled extends MovieClip {
+    public var kid:MovieClip;
+    public var mid:MovieClip;
+  }
+
   public class Main extends MovieClip {
     public var forward:Forward;
     public var forwardStop:ForwardStop;
@@ -86,6 +116,9 @@ package {
     public var listener:Listener;
     public var forwardPlay:ForwardPlay;
     public var stopper:Stopper;
+    public var same:Same;
+    public var nested:Nested;
+    public var pooled:Pooled;
     public var plain:MovieClip;
     public var loose:MovieClip;
     private var n:int = 0;
@@ -94,6 +127,12 @@ package {
       addEventListener(Event.ENTER_FRAME, function(_:Event):void {
         n++;
         trace("enter " + n, where());
+        if (n == 2) {
+          removeChild(pooled);
+          pooled.gotoAndStop(5);
+        } else if (n == 5) {
+          addChild(pooled);
+        }
       });
       addEventListener(Event.EXIT_FRAME, function(_:Event):void {
         trace("exit  " + n, where());
@@ -102,7 +141,7 @@ package {
 
     private function where():String {
       var out:Array = [];
-      for each (var name:String in ["forward", "forwardStop", "forwardPlay", "stopper", "back", "listener", "plain"]) {
+      for each (var name:String in ["forward", "forwardStop", "forwardPlay", "stopper", "back", "listener", "plain", "same", "nested", "pooled"]) {
         var body:MovieClip = this[name] as MovieClip;
         if (!body) {
           out.push(name + " -");
