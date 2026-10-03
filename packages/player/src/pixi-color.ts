@@ -22,6 +22,7 @@ import {
   extensions,
   Geometry,
   Graphics,
+  type GraphicsContext,
   generateTextureBatchBit,
   generateTextureBatchBitGl,
   getBatchSamplersUniformGroup,
@@ -161,12 +162,24 @@ class ColorGeometry extends Geometry {
 /** Shaders by texture count: every batcher of one count shares one. */
 const shaders = new Map<number, ColorShader>();
 
-/** The straight colour, ABGR as the colour attribute reads it: a fill's own, else white. */
+/**
+ * The straight colour, ABGR as the colour attribute reads it: a fill's own,
+ * else white, times the renderable's own tint and alpha, a glyph's colour
+ * as text draws it. Not its group's: what its ancestors' colour transforms
+ * make is in its flashColor, and their tint stays white under one.
+ */
 function straight(element: Extra): number {
-  const rgb = element.baseColor ?? 0xffffff;
-  const alpha = element.alpha ?? 1;
+  const own = element.renderable as
+    | (Container & { tint: number; alpha: number })
+    | null
+    | undefined;
+  const fill = element.baseColor ?? 0xffffff;
+  const tint = own?.tint ?? 0xffffff;
+  const channel = (shift: number) =>
+    Math.round((((fill >> shift) & 0xff) * ((tint >> shift) & 0xff)) / 255);
+  const alpha = (element.alpha ?? 1) * (own?.alpha ?? 1);
   return (
-    (((alpha * 255) << 24) | ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff)) >>> 0
+    ((Math.round(alpha * 255) << 24) | (channel(0) << 16) | (channel(8) << 8) | channel(16)) >>> 0
   );
 }
 
@@ -296,6 +309,66 @@ for (const proto of [BatchableGraphics.prototype, BatchableSprite.prototype]) {
  * null. Moving between batchers rebuilds the render group's instructions;
  * another transform in the same batcher packs the vertices again.
  */
+/** Each unbatched context's batched copy, made when a Graphics drawing it is first colour-transformed. */
+const batchedCopies = new WeakMap<GraphicsContext, GraphicsContext>();
+
+/** `context`, or its batched copy where it is unbatched. */
+function batched(context: GraphicsContext): GraphicsContext {
+  if (context.batchMode === "batch") {
+    return context;
+  }
+
+  let copy = batchedCopies.get(context);
+  if (!copy) {
+    copy = context.clone();
+    copy.batchMode = "batch";
+    batchedCopies.set(context, copy);
+  }
+
+  return copy;
+}
+
+/** A context destroyed: its batched copy too, if it has one. */
+export function dropBatchedCopy(context: GraphicsContext): void {
+  const copy = batchedCopies.get(context);
+  if (copy) {
+    batchedCopies.delete(context);
+    copy.destroy();
+  }
+}
+
+/**
+ * A Graphics that may show another context than the one it stands for: the
+ * shared one it was given (`shared`), and `show` to draw another, as a
+ * shape's lines swap theirs (pixi.ts, LinesGraphics).
+ */
+export type SharingGraphics = Graphics & {
+  shared?: GraphicsContext;
+  show?: (context: GraphicsContext) => void;
+};
+
+/**
+ * The context a Graphics should draw under `ct`: an unbatched one, as a
+ * shape's are (pixi.ts), Pixi draws with its own shader, which has no
+ * colour transform, so under one it draws a batched copy. The context it
+ * stands for is shared by every instance of a character, and every text in
+ * a font, and is never changed: switched to batched, the Graphics of the
+ * others, made unbatched, drew nothing.
+ */
+export function showFor(g: SharingGraphics, ct: ColorTransform | null): void {
+  const shared = g.shared ?? g.context;
+  const want = ct ? batched(shared) : shared;
+  if (g.context !== want) {
+    if (g.show) {
+      g.show(want);
+    } else {
+      g.context = want;
+    }
+  }
+
+  g.shared = shared;
+}
+
 export function setFlashColor(leaf: Container, ct: ColorTransform | null): void {
   const colored = leaf as Colored;
   const was = colored.flashColor ?? null;
@@ -304,11 +377,8 @@ export function setFlashColor(leaf: Container, ct: ColorTransform | null): void 
   }
 
   colored.flashColor = ct;
-  // An unbatched Graphics, as a shape's are (pixi.ts), Pixi draws with its
-  // own shader, which has no transform: under one it is batched, from then on.
-  if (ct && leaf instanceof Graphics && leaf.context.batchMode !== "batch") {
-    leaf.context.batchMode = "batch";
-    leaf.context.dirty = true;
+  if (leaf instanceof Graphics) {
+    showFor(leaf, ct);
   }
 
   const view = leaf as Container & { onViewUpdate?: () => void };

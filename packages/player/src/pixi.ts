@@ -50,7 +50,7 @@ import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients
 import type { PointerState } from "./input.js";
 import { blendLayers, droppedLayers } from "./morph.js";
 import { blendFilters } from "./pixi-blend.js";
-import { setFlashColor } from "./pixi-color.js";
+import { dropBatchedCopy, setFlashColor, showFor } from "./pixi-color.js";
 import { displayFilters, FilterChain, rgbaOf } from "./pixi-filters.js";
 import type { Player } from "./player.js";
 import {
@@ -219,6 +219,7 @@ function destroyContext(context: GraphicsContext): void {
   }
 
   holds.delete(context);
+  dropBatchedCopy(context);
   context.destroy();
 }
 
@@ -552,14 +553,25 @@ function linesKey(m: Linear, least: number): string {
  * search them all.
  */
 class LinesGraphics extends Graphics {
+  /** The context it stands for, which the cache counts: what it draws, or that drawn as a batched copy (showFor). */
+  shared: GraphicsContext;
+  declare flashColor?: ColorTransform | null;
+
   constructor(context?: GraphicsContext) {
     super(context);
+    this.shared = this.context;
     this.context.off("update", this.onViewUpdate, this);
     this.context.off("unload", this.unload, this);
   }
 
-  /** Draw `context` instead. */
+  /** Stand for `context` instead, drawn as its colour transform needs. */
   swap(context: GraphicsContext): void {
+    this.shared = context;
+    showFor(this, this.flashColor ?? null);
+  }
+
+  /** Draw `context`, not listening on it, as a shared context gathers no listener an instance. */
+  show(context: GraphicsContext): void {
     if (context !== this.context) {
       (this as unknown as { _context: GraphicsContext })._context = context;
       this.onViewUpdate();
@@ -823,7 +835,7 @@ export class PixiView {
     // A drawing's or blend's fills, and every node's lines; a Graphics frees only a context it
     // made.
     const old = node.ownFills && !this.fresh ? node.fills : [];
-    const oldLines = this.fresh ? [] : node.strokes.map((g) => g?.context);
+    const oldLines = this.fresh ? [] : node.strokes.map((g) => g?.shared);
     // A text's characters are in a container of their own; their shared glyph fills stay, not being theirs.
     for (const child of node.art.removeChildren()) {
       if (!child.destroyed) {
@@ -907,7 +919,7 @@ export class PixiView {
       const borrowed = lines?.[i];
       const strokes = layer.strokes.length
         ? borrowed
-          ? new LinesGraphics(borrowed.context)
+          ? new LinesGraphics(borrowed.shared)
           : new LinesGraphics()
         : null;
       if (strokes) {
@@ -957,7 +969,7 @@ export class PixiView {
 
     for (const strokes of node.strokes) {
       if (strokes) {
-        const previous = strokes.context;
+        const previous = strokes.shared;
         strokes.swap(new GraphicsContext());
         this.lines.give(previous);
       }
@@ -995,14 +1007,14 @@ export class PixiView {
       }
 
       // The new context goes in before the old one goes back, as it may be the same.
-      const previous = strokes.context;
+      const previous = strokes.shared;
       if (node.sharedLines) {
         strokes.swap(this.lines.take(layer, m, least, key));
       } else {
         strokes.swap(linesContext(layer, m, least));
         this.counts.strokeContexts++;
         if (this.fresh) {
-          this.built.push(strokes.context);
+          this.built.push(strokes.shared);
         }
       }
 
