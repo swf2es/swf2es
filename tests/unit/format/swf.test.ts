@@ -4,6 +4,7 @@ import {
   backgroundColor,
   isAs3,
   readFilters,
+  readMorphShape,
   readPlace,
   readRemove,
   readSceneData,
@@ -265,4 +266,78 @@ test("scene data reads its scenes and labels, and stops at the tag's end", () =>
     scenes: [{ frame: 0, name: "Intro" }],
     labels: [],
   });
+});
+
+test("a morph shape's paired styles and both ends' records read as written", () => {
+  const morph = w.morphShape({
+    id: 4,
+    version: 2,
+    startBounds: [0, 400, 0, 400],
+    endBounds: [0, 800, 0, 400],
+    fills: [
+      {
+        type: 0x10,
+        startMatrix: { a: 0.5, d: 0.5 },
+        endMatrix: { a: 0.5, d: 0.5, tx: 200 },
+        stops: [
+          [0, 0xffff0000, 10, 0x80ff0000],
+          [255, 0xff0000ff, 200, 0xff00ff00],
+        ],
+      },
+    ],
+    lines: [{ startWidth: 20, endWidth: 60, startColor: 0xff000000, endColor: 0xffffffff }],
+    start: [
+      {
+        fill0: 1,
+        line: 1,
+        commands: [{ move: [0, 0] }, { line: [400, 0] }, { line: [400, 400] }, { line: [0, 0] }],
+      },
+    ],
+    end: [
+      [{ move: [0, 100] }, { curve: [400, 0, 800, 100] }, { line: [800, 400] }, { line: [0, 100] }],
+    ],
+  });
+  const swf = readSwf(
+    w.swf({ width: 100, height: 50, frameRate: 12, frameCount: 1, tags: [morph, w.end()] }),
+  );
+  const t = swf.tags[0];
+  assert.equal(t.code, tags.DefineMorphShape2);
+
+  const m = readMorphShape(swf.bytes, t.code, t.offset, t.length);
+  assert.equal(m.id, 4);
+  assert.deepEqual(m.endBounds, { xMin: 0, xMax: 800, yMin: 0, yMax: 400 });
+  assert.deepEqual(m.endEdgeBounds, m.endBounds);
+  assert.equal(m.truncated, false);
+  const { start, end } = m.fills[0];
+  assert.equal(start.type, "linear");
+  assert.equal(end.type, "linear");
+  if (start.type !== "linear" || end.type !== "linear") {
+    return;
+  }
+
+  assert.deepEqual(start.gradient.stops, [
+    { ratio: 0, color: 0xffff0000 },
+    { ratio: 255, color: 0xff0000ff },
+  ]);
+  assert.deepEqual(end.gradient.stops, [
+    { ratio: 10, color: 0x80ff0000 },
+    { ratio: 200, color: 0xff00ff00 },
+  ]);
+  assert.equal(end.gradient.matrix.tx, 200);
+  assert.deepEqual(
+    m.lines.map((l) => [l.start.width, l.start.color, l.end.width, l.end.color]),
+    [[20, 0xff000000, 60, 0xffffffff]],
+  );
+  assert.deepEqual(m.start, [
+    { type: "style", moveTo: { x: 0, y: 0 }, fill0: 1, fill1: 0, line: 1, styles: null },
+    { type: "line", dx: 400, dy: 0 },
+    { type: "line", dx: 0, dy: 400 },
+    { type: "line", dx: -400, dy: -400 },
+  ]);
+  assert.deepEqual(m.end, [
+    { type: "style", moveTo: { x: 0, y: 100 }, fill0: null, fill1: null, line: null, styles: null },
+    { type: "curve", cx: 400, cy: -100, ax: 400, ay: 100 },
+    { type: "line", dx: 0, dy: 300 },
+    { type: "line", dx: -800, dy: -300 },
+  ]);
 });
