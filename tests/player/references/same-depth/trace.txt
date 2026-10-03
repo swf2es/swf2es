@@ -1,0 +1,14 @@
+made A
+frame 1 1 A
+made E
+frame 2 2 A E
+made D
+frame 3 2 D E
+frame 4 2 D E
+frame 5 1 D
+made E
+frame 6 2 D E
+made D
+frame 7 2 D E
+made E
+made D

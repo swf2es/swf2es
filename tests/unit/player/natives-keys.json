@@ -111,6 +111,7 @@
     "flash.display::DisplayObjectContainer#set:mouseChildren",
     "flash.display::DisplayObjectContainer#set:tabChildren",
     "flash.display::DisplayObjectContainer#setChildIndex",
+    "flash.display::DisplayObjectContainer#stopAllMovieClips",
     "flash.display::DisplayObjectContainer#swapChildren",
     "flash.display::DisplayObjectContainer#swapChildrenAt",
     "flash.display::FrameLabel#flash.display:FrameLabel::ctor",

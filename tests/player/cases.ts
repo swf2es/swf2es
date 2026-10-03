@@ -502,6 +502,48 @@ function instanceNames(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Places without the move flag at a taken depth, for scripts/SameDepth.as.
+function sameDepth(abc: Uint8Array): Uint8Array {
+  const clip = (id: number) =>
+    w.sprite(id, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]);
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      clip(2),
+      clip(3),
+      clip(4),
+      clip(5),
+      clip(6),
+      w.doAbc(abc, "SameDepth"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "A"],
+        [3, "B"],
+        [4, "C"],
+        [5, "D"],
+        [6, "E"],
+      ]),
+      w.place({ depth: 1, character: 2 }),
+      w.place({ depth: 1, character: 3 }),
+      w.showFrame(),
+      w.place({ depth: 1, character: 4 }),
+      w.place({ depth: 2, character: 6 }),
+      w.showFrame(),
+      w.remove(1),
+      w.place({ depth: 1, character: 5 }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A root with nothing placed and a bound Box symbol, with scripts/AddChild.as adding Boxes.
 function added(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -1496,6 +1538,15 @@ export const cases: PlayerCase[] = [
     swf: instanceNames,
     script: "InstanceNames",
     frames: 6,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "same-depth",
+    swf: sameDepth,
+    script: "SameDepth",
+    frames: 12,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

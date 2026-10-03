@@ -1,7 +1,7 @@
 // flash.display.DisplayObjectContainer: children by index, as AS3 sees
 // them, over the player's render-ordered list.
 import { avm2 } from "@swf2es/runtime";
-import type { Container, DisplayObject } from "../../../display.js";
+import { Container, type DisplayObject, MovieClip } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
@@ -66,6 +66,22 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     get numChildren(): number {
       return this.$display.children.length;
+    }
+
+    /** Itself, if a clip, and every clip in it stopped, those not yet made alive too. */
+    stopAllMovieClips(): void {
+      const stop = (d: DisplayObject) => {
+        if (d instanceof MovieClip) {
+          d.playing = false;
+        }
+
+        if (d instanceof Container) {
+          for (const child of d.children) {
+            stop(child);
+          }
+        }
+      };
+      stop(this.$display);
     }
 
     addChild(child: Value): Value {

@@ -80,6 +80,8 @@ export class Player {
     this.root.loaderInfo = info;
     // The main SWF's root is root1, as Flash names the root at depth 0.
     this.root.name = "root1";
+    // Its first frame's children are there before the document class's constructor runs.
+    this.root.placeFirstFrame();
     const object = s.constructAs(
       this.root,
       s.rt.classNamed(this.library.classes.get(0) ?? "flash.display::MovieClip", s.mainDomain),

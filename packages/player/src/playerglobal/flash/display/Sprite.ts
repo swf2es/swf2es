@@ -1,6 +1,7 @@
 // flash.display.Sprite: its constructor's private native constructChildren
-// places a symbol's first frame, so that the subclass's constructor finds
-// the children by name; a Sprite a script makes has none.
+// makes a symbol's first frame alive, placed before the constructor for a
+// timeline's child and here for a script's, so that the subclass's
+// constructor finds the children by name; a Sprite a script makes has none.
 import { avm2 } from "@swf2es/runtime";
 import { type DisplayObject, MovieClip } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
@@ -20,7 +21,7 @@ export function spriteNatives(s: Scripting): avm2.Natives {
 
     "flash.display:Sprite::constructChildren"(): void {
       const d = this.$display;
-      if (d instanceof MovieClip && d.currentFrame === 0) {
+      if (d instanceof MovieClip) {
         d.enterFirstFrame();
       }
     }

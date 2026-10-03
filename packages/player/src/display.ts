@@ -883,11 +883,21 @@ export class MovieClip extends Container {
   }
 
   /**
-   * Run frame `frame`'s commands as the playhead reaches it: place, move and
-   * remove the timeline's children. A place without the move flag makes a
-   * new child even where the same character is at the depth; a goto does not.
+   * First-frame children placed but not yet made alive: placed before the
+   * clip's class constructor runs, made by Sprite's constructChildren in its
+   * super(), as Flash has a constructor find them (`instantiation_on_enter_frame`).
    */
-  private runFrame(frame: number): void {
+  private held: { display: DisplayObject; character: DisplayCharacter }[] = [];
+
+  /**
+   * Run frame `frame`'s commands as the playhead reaches it: place, move and
+   * remove the timeline's children. A place without the move flag at a depth
+   * already taken is let be, as Flash lets it (`same-depth`).
+   * A new child is made alive at once, or `later`: by the frame's construct
+   * phase, after ENTER_FRAME, for a frame played on; by constructChildren,
+   * held, for a clip's first frame.
+   */
+  private runFrame(frame: number, later: "frame" | "held" | null = null): void {
     for (const command of this.timeline.frames[frame - 1] ?? []) {
       if (command.type === "remove") {
         this.removeAtDepth(command.depth);
@@ -896,6 +906,10 @@ export class MovieClip extends Container {
 
       const place = command.place;
       const existing = this.depths.get(place.depth);
+      if (!place.move && existing) {
+        continue;
+      }
+
       if (place.move && existing && place.character === null) {
         existing.applyPlace(place);
         continue;
@@ -921,13 +935,21 @@ export class MovieClip extends Container {
       child.applyPlace(place);
       child.placeFrame = frame;
       this.placeAtDepth(child, place.depth);
-      construct(child, character, this.library);
+      if (later === "held" && this.library.construct) {
+        this.held.push({ display: child, character });
+      } else if (later === "frame" && this.library.constructLater) {
+        this.library.constructLater(child, character);
+      } else {
+        construct(child, character, this.library);
+      }
     }
   }
 
   /**
    * Jump to frame `frame`, as Flash does rather than by running the frames
-   * between: the children the timeline placed after it go, the frames up to
+   * between: the children the timeline placed after it go (but one at a
+   * depth the frames up to it first place at without the move flag, which
+   * stays, and has what they do there after done to it), the frames up to
    * it (from the first, for a rewind) are replayed into one jump per depth,
    * and each jump changes the child still at its depth, or makes one where
    * the frames placed one anew, or where a rewind ends on another
@@ -939,18 +961,28 @@ export class MovieClip extends Container {
   gotoFrame(frame: number): void {
     const target = Math.max(1, Math.min(frame, this.totalFrames));
     const rewind = target < this.currentFrame;
+    const jumps = new Map<number, Jump>();
+    // On a rewind, a child placed after the target at a depth the replay
+    // first places at without the move flag stays, that place let be as at
+    // a taken depth (`same-depth`, at the loop); what the frames then do at
+    // the depth is done to it, as frame by frame, till a removal takes it.
+    // By depth, what is to be done to it, merged; null for nothing yet.
+    const later = new Set<number>();
     if (rewind) {
-      for (const child of [...this.depths.values()]) {
-        if (child.placeFrame > target && child.depth !== null) {
-          this.removeAtDepth(child.depth);
+      for (const [depth, child] of this.depths) {
+        if (child.placeFrame > target) {
+          later.add(depth);
         }
       }
     }
 
-    const jumps = new Map<number, Jump>();
+    const kept = new Map<number, Place | null>();
+    const seen = new Set<number>();
     for (let f = (rewind ? 0 : this.currentFrame) + 1; f <= target; f++) {
       for (const command of this.timeline.frames[f - 1] ?? []) {
         if (command.type === "remove") {
+          seen.add(command.depth);
+          kept.delete(command.depth);
           jumps.delete(command.depth);
           // Going forward, a removal between the frames takes effect.
           if (!rewind) {
@@ -961,7 +993,25 @@ export class MovieClip extends Container {
         }
 
         const place = command.place;
+        const first = !seen.has(place.depth);
+        seen.add(place.depth);
+        if (first && later.has(place.depth) && place.character !== null && !place.move) {
+          kept.set(place.depth, null);
+          continue;
+        }
+
+        // The kept child: a place there is let be, a change is done to it.
+        if (kept.has(place.depth)) {
+          if (place.move) {
+            const done = kept.get(place.depth);
+            kept.set(place.depth, done ? mergePlace(done, place) : place);
+          }
+
+          continue;
+        }
+
         const jump = jumps.get(place.depth) ?? { before: null, place: null, frame: f };
+
         // A rewind replays from an empty display list, so what the frames do
         // at a depth nothing has placed yet is known: a change does nothing,
         // and a place in a child's stead places anew.
@@ -971,6 +1021,9 @@ export class MovieClip extends Container {
           } else if (!rewind) {
             jump.before = jump.before ? mergePlace(jump.before, place) : place;
           }
+        } else if (!place.move && (jump.place || (!rewind && this.depths.has(place.depth)))) {
+          // At a depth taken by then, as frame by frame: let be.
+          continue;
         } else if (!place.move || (rewind && !jump.place)) {
           // Anew: the child starts from nothing, and from here.
           jump.before = null;
@@ -987,19 +1040,42 @@ export class MovieClip extends Container {
       }
     }
 
-    // Replayed from the first frame, a depth the frames left empty is empty.
+    // What the timeline placed after the target goes, but the kept; and,
+    // replayed from the first frame, a depth the frames left empty is empty.
     if (rewind) {
       for (const child of [...this.depths.values()]) {
-        if (child.placeFrame > 0 && child.depth !== null && !jumps.has(child.depth)) {
-          this.removeAtDepth(child.depth);
+        const depth = child.depth;
+        if (depth === null || kept.has(depth)) {
+          continue;
+        }
+
+        if (child.placeFrame > target || (child.placeFrame > 0 && !jumps.has(depth))) {
+          this.removeAtDepth(depth);
         }
       }
     }
 
     // On the frame before its children are made: one constructed now sees it there, as in Flash.
     this.currentFrame = target;
+    for (const [depth, done] of kept) {
+      const existing = this.depths.get(depth);
+      if (!existing || !done) {
+        continue;
+      }
+
+      // With the move flag the child stays, another character or not.
+      const character =
+        done.character === null ? null : this.library.characters.get(done.character);
+      if (character && character.type !== "binary" && character.type !== "font") {
+        swap(existing, character);
+      }
+
+      existing.applyPlace(done);
+    }
+
     for (const [depth, jump] of jumps) {
       const existing = this.depths.get(depth);
+
       if (existing && jump.before) {
         existing.applyPlace(jump.before);
       }
@@ -1035,14 +1111,25 @@ export class MovieClip extends Container {
     }
   }
 
-  /** The first frame, as a clip runs it when it is made; once. */
+  /** The first frame, as a clip runs it when it is made, its children placed and made alive; once. */
   enterFirstFrame(): void {
+    this.placeFirstFrame();
+    // One at a time: a constructor that throws leaves the rest held, not lost.
+    for (let next = this.held.shift(); next; next = this.held.shift()) {
+      if (!next.display.object && next.display.parent === this) {
+        construct(next.display, next.character, this.library);
+      }
+    }
+  }
+
+  /** The first frame's children placed, to be made alive by enterFirstFrame; once. */
+  placeFirstFrame(): void {
     if (this.currentFrame !== 0) {
       return;
     }
 
     this.currentFrame = 1;
-    this.runFrame(1);
+    this.runFrame(1, "held");
   }
 
   /**
@@ -1065,7 +1152,7 @@ export class MovieClip extends Container {
     }
 
     this.currentFrame++;
-    this.runFrame(this.currentFrame);
+    this.runFrame(this.currentFrame, "frame");
   }
 }
 

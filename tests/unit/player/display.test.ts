@@ -168,14 +168,15 @@ test("a goto replays the frames between, forward and back", () => {
   assert.equal(root.depths.get(2), second);
 });
 
-test("a place without the move flag makes a new child; with it, changes the one there", () => {
+test("a place without the move flag at a taken depth is let be; with it, changes the one there", () => {
+  // As Flash has it (the player's same-depth case): the child there stays.
   const replaced = movie(
     [w.place({ depth: 1, character: 1 })],
     [w.place({ depth: 1, character: 1 })],
   );
   const before = replaced.root.depths.get(1);
   replaced.tick();
-  assert.notEqual(replaced.root.depths.get(1), before);
+  assert.equal(replaced.root.depths.get(1), before);
   assert.equal(replaced.root.children.length, 1);
 
   const moved = movie(
@@ -239,16 +240,15 @@ test("a rewind puts back what the first frame's place left unsaid", () => {
   assert.equal(square?.matrix.tx, 0);
 });
 
-test("a goto forward makes a new child where the frame places the character anew", () => {
-  // As frame by frame would (see the place without the move flag above);
-  // only a rewind, or a place in the child's stead, keeps it.
+test("a goto forward lets a taken depth be where the frame places a character without the move flag", () => {
+  // As frame by frame would (see the place without the move flag above).
   const jumped = movie(
     [w.place({ depth: 1, character: 1 })],
     [w.place({ depth: 1, character: 1 })],
   );
   const before = jumped.root.depths.get(1);
   jumped.root.gotoFrame(2);
-  assert.notEqual(jumped.root.depths.get(1), before);
+  assert.equal(jumped.root.depths.get(1), before);
   assert.equal(jumped.root.children.length, 1);
 
   const replaced = movie(
@@ -262,8 +262,8 @@ test("a goto forward makes a new child where the frame places the character anew
 });
 
 test("a goto forward leaves the display list as playing the frames would", () => {
-  // Frame 1 places the square, frame 2 moves it, frame 3 places it anew with
-  // no matrix: a jump must not hand the new square the moved one's place.
+  // Frame 1 places the square, frame 2 moves it, frame 3 places it without
+  // the move flag at its taken depth: played or jumped, the moved one stays.
   const anew = () =>
     movie(
       [w.place({ depth: 1, character: 1 })],
@@ -276,9 +276,9 @@ test("a goto forward leaves the display list as playing the frames would", () =>
   const jumped = anew();
   const before = jumped.root.depths.get(1);
   jumped.root.gotoFrame(3);
-  assert.equal(played.root.depths.get(1)?.matrix.tx, 0);
-  assert.equal(jumped.root.depths.get(1)?.matrix.tx, 0);
-  assert.notEqual(jumped.root.depths.get(1), before);
+  assert.equal(played.root.depths.get(1)?.matrix.tx, 50);
+  assert.equal(jumped.root.depths.get(1)?.matrix.tx, 50);
+  assert.equal(jumped.root.depths.get(1), before);
 
   // In the square's stead, the other character keeps its place both ways.
   const instead = () =>
@@ -299,9 +299,9 @@ test("a goto forward leaves the display list as playing the frames would", () =>
   }
 });
 
-test("a jump remembers a character placed anew through what follows", () => {
-  // Frame 2 places the square anew, frame 3 places it in its own stead: the
-  // child is frame 2's, not frame 1's, whether played or jumped to.
+test("a jump lets a taken depth be through what follows, as playing does", () => {
+  // Frame 2's place without the move flag finds the depth taken and is let
+  // be; frame 3 moves frame 1's square, whether played or jumped to.
   const anew = () =>
     movie(
       [w.place({ depth: 1, character: 1 })],
@@ -320,10 +320,46 @@ test("a jump remembers a character placed anew through what follows", () => {
     [jumped, jumpedFirst],
   ] as const) {
     const child = player.root.depths.get(1);
-    assert.notEqual(child, first);
+    assert.equal(child, first);
     assert.equal(child?.matrix.tx, 50);
-    assert.equal(child?.placeFrame, 2);
+    assert.equal(child?.placeFrame, 1);
   }
+});
+
+test("a rewind keeps a later child only till the frames replayed remove it, and does their changes to it", () => {
+  // Frame 2 removes what frame 1 placed: back to frame 3, the child kept
+  // at first goes there, and frame 3's square is what stays.
+  const removed = movie(
+    [w.place({ depth: 1, character: 1 })],
+    [w.remove(1)],
+    [w.place({ depth: 1, character: 2 })],
+    [w.remove(1), w.place({ depth: 1, character: 1 })],
+    [],
+  );
+  for (let f = 1; f < 5; f++) {
+    removed.tick();
+  }
+
+  removed.root.gotoFrame(3);
+  assert.equal(removed.root.depths.get(1)?.character?.id, 2);
+  assert.equal(removed.root.depths.get(1)?.placeFrame, 3);
+
+  // Frame 2 moves the depth: back to it, the kept child is moved.
+  const moved = movie(
+    [w.place({ depth: 1, character: 1 })],
+    [w.place({ depth: 1, move: true, matrix: { tx: 1000 } })],
+    [w.remove(1), w.place({ depth: 1, character: 2 })],
+    [],
+  );
+  for (let f = 1; f < 4; f++) {
+    moved.tick();
+  }
+
+  const kept = moved.root.depths.get(1);
+  moved.root.gotoFrame(2);
+  assert.equal(moved.root.depths.get(1), kept);
+  assert.equal(kept?.character?.id, 2);
+  assert.equal(kept?.matrix.tx, 50);
 });
 
 /** What a container's timeline children are, comparably between two players. */
@@ -350,26 +386,70 @@ test("jumping forward to any frame of a random timeline ends as playing to it", 
     seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
     return (seed >>> 8) % n;
   };
-  const command = (): Uint8Array => {
+  // Each command's tag, and what it says, for the model below.
+  type Said =
+    | { kind: "place" | "instead"; depth: number; character: number; tx?: number }
+    | { kind: "move"; depth: number; tx: number }
+    | { kind: "remove"; depth: number };
+  const command = (): [Uint8Array, Said] => {
     const depth = 1 + random(3);
     const character = 1 + random(2);
     const matrix = random(2) ? { tx: 200 * (1 + random(9)) } : undefined;
+    const tx = matrix && matrix.tx / 20;
     switch (random(4)) {
       case 0:
-        return w.place({ depth, character, matrix });
+        return [w.place({ depth, character, matrix }), { kind: "place", depth, character, tx }];
       case 1:
-        return w.place({ depth, character, move: true, matrix });
+        return [
+          w.place({ depth, character, move: true, matrix }),
+          { kind: "instead", depth, character, tx },
+        ];
       case 2:
-        return w.place({ depth, move: true, matrix: matrix ?? { tx: 0 } });
+        return [
+          w.place({ depth, move: true, matrix: matrix ?? { tx: 0 } }),
+          { kind: "move", depth, tx: tx ?? 0 },
+        ];
       default:
-        return w.remove(depth);
+        return [w.remove(depth), { kind: "remove", depth }];
     }
   };
 
+  // The frames played one by one, as the player plays them, from `start`:
+  // a place fills an empty depth only, a change is done to what is there,
+  // another character in its stead places it where nothing is, and a
+  // removal empties the depth.
+  type Cell = { depth: number; character: number; tx: number; placeFrame: number };
+  const played = (said: Said[][], to: number, start: Cell[]) => {
+    const at = new Map(start.map((cell) => [cell.depth, { ...cell }]));
+    for (let f = 1; f <= to; f++) {
+      for (const c of said[f - 1]) {
+        const cell = at.get(c.depth);
+        if (c.kind === "remove") {
+          at.delete(c.depth);
+        } else if (c.kind === "move") {
+          if (cell) {
+            cell.tx = c.tx;
+          }
+        } else if (cell && c.kind === "instead") {
+          cell.character = c.character;
+          cell.tx = c.tx ?? cell.tx;
+        } else if (!cell) {
+          at.set(c.depth, { depth: c.depth, character: c.character, tx: c.tx ?? 0, placeFrame: f });
+        }
+      }
+    }
+
+    return [...at.values()].sort((a, b) => a.depth - b.depth);
+  };
+  const state = (root: MovieClip) =>
+    snapshot(root, new Map()).map(({ sameAsFirst: _, ...rest }) => rest as Cell);
+
   for (let t = 0; t < 1000; t++) {
-    const frames = Array.from({ length: 2 + random(4) }, () =>
+    const timeline = Array.from({ length: 2 + random(4) }, () =>
       Array.from({ length: random(4) }, command),
     );
+    const frames = timeline.map((frame) => frame.map(([tag]) => tag));
+    const said = timeline.map((frame) => frame.map(([, c]) => c));
     for (let target = 2; target <= frames.length; target++) {
       const played = movie(...frames);
       const playedFirst = new Map([...played.root.depths].map(([d, c]) => [d, c]));
@@ -388,23 +468,33 @@ test("jumping forward to any frame of a random timeline ends as playing to it", 
     }
 
     // A rewind from the last frame to each earlier one shows what playing
-    // to it shows, though it keeps the children it can rather than make
-    // them again, so which object is which is not compared.
-    const state = (root: MovieClip) =>
-      snapshot(root, new Map()).map(({ sameAsFirst: _, ...rest }) => rest);
+    // to it shows from an empty display list, but for the children placed
+    // after the target at depths whose first command in the frames to it
+    // is a place without the move flag: those stay, that place let be, and
+    // the frames are played on them (the player's same-depth case). Which
+    // object is which is not compared: the rewind keeps those it can.
     for (let target = 1; target < frames.length; target++) {
-      const played = movie(...frames);
-      for (let f = 1; f < target; f++) {
-        played.tick();
-      }
-
       const rewound = movie(...frames);
       for (let f = 1; f < frames.length; f++) {
         rewound.tick();
       }
 
+      const firstSaid = new Map<number, Said>();
+      for (const c of said.slice(0, target).flat()) {
+        if (!firstSaid.has(c.depth)) {
+          firstSaid.set(c.depth, c);
+        }
+      }
+
+      const kept = state(rewound.root).filter(
+        (cell) => cell.placeFrame > target && firstSaid.get(cell.depth)?.kind === "place",
+      );
       rewound.root.gotoFrame(target);
-      assert.deepEqual(state(rewound.root), state(played.root), `timeline ${t}, back to ${target}`);
+      assert.deepEqual(
+        state(rewound.root),
+        played(said, target, kept),
+        `timeline ${t}, back to ${target}`,
+      );
     }
   }
 });
