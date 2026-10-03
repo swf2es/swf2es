@@ -25,7 +25,9 @@ export function abcVersion(abc: Uint8Array): i32 {
 // The compiler: see compile.ts.
 export {
   domainAdd,
+  domainChild,
   domainEmitEach,
+  domainFound,
   domainModule,
   domainModuleEntries,
   domainReset,

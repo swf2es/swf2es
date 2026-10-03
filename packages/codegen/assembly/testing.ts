@@ -317,9 +317,16 @@ export function benchDecode(bytes: Uint8Array, rounds: i32): i32 {
 
 /**
  * The domain's binding of `name` in the namespace of type `type` (NS_*) and
- * URI `uri`, visible at `version`: "abc A script S trait T", or "none".
+ * URI `uri`, visible at `version` from application domain `appDomain`:
+ * "abc A script S trait T", or "none".
  */
-export function domainFind(type: u8, uri: string, name: string, version: i32): string {
+export function domainFind(
+  type: u8,
+  uri: string,
+  name: string,
+  version: i32,
+  appDomain: i32 = 0,
+): string {
   const uriBytes = String.UTF8.encode(uri);
   const nameBytes = String.UTF8.encode(name);
   const uriId = domain.findString(changetype<usize>(uriBytes), uriBytes.byteLength);
@@ -329,7 +336,7 @@ export function domainFind(type: u8, uri: string, name: string, version: i32): s
   }
 
   const ns = domain.findNamespace(type, uriId);
-  const b = ns < 0 ? -1 : domain.find(ns, nameId, <u8>version);
+  const b = ns < 0 ? -1 : domain.find(ns, nameId, <u8>version, <u32>appDomain);
   if (b < 0) {
     return "none";
   }
@@ -817,7 +824,9 @@ function hex(kind: u8): string {
 
 export {
   domainAdd,
+  domainChild,
   domainEmitEach,
+  domainFound,
   domainModule,
   domainModuleEntries,
   domainReset,

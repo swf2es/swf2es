@@ -21,6 +21,24 @@ export function cacheKey(abcHash: string, linked: string[] = []): string {
   return `swf2es@${COMPILER_VERSION}:${[...linked, abcHash].join("+")}`;
 }
 
+/**
+ * A definition an application domain has found by name, or as a type,
+ * which is not the first one from the root down, as the runtime reports it:
+ * what the domain's later ABCs compile against (see Codegen.found).
+ */
+export interface FoundDefinition {
+  /** The application domain that found it. */
+  domain: number;
+  /** The name's namespace: its kind (0 public, 1 package-internal, ...) and URI. */
+  nsKind: number;
+  uri: string;
+  name: string;
+  /** The ABC that defines it, by its position among those added. */
+  abc: number;
+  /** Found as a type (avmplus' cached traits), else by name (cached scripts). */
+  asType: boolean;
+}
+
 export interface AbcVersion {
   major: number;
   minor: number;
@@ -45,8 +63,16 @@ export interface Codegen {
   abcVersion(abc: Uint8Array): AbcVersion | null;
   /** Start a domain whose user ABCs have API version `apiVersion`: Flash Player's, 50, by default. */
   reset(apiVersion?: number): void;
-  /** Add an ABC, linking it against those before it; 0, or the VerifyError it was rejected with (then it is not added). */
-  add(abc: Uint8Array, builtin?: boolean): number;
+  /**
+   * Add an ABC, loaded into application domain `appDomain` (0, the root, by
+   * default), linking it against what that domain sees of those before it;
+   * 0, or the VerifyError it was rejected with (then it is not added).
+   */
+  add(abc: Uint8Array, builtin?: boolean, appDomain?: number): number;
+  /** A new application domain, a child of `parent`: its number. */
+  childDomain(parent: number): number;
+  /** Record a definition an application domain has found; it holds for the ABCs added after. */
+  found(definition: FoundDefinition): void;
   /**
    * ABC `index` compiled whole, the last added by default, against every ABC
    * added so far, later ones included, so a SWF's DoABCs may all be added
@@ -114,13 +140,19 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       added = 0;
       collected(wasm.domainReset(apiVersion));
     },
-    add(abc, builtin = false) {
-      const error = collected(wasm.domainAdd(abc, builtin));
+    add(abc, builtin = false, appDomain = 0) {
+      const error = collected(wasm.domainAdd(abc, builtin, appDomain));
       if (error === 0) {
         added++;
       }
 
       return error;
+    },
+    childDomain(parent) {
+      return collected(wasm.domainChild(parent));
+    },
+    found(d) {
+      collected(wasm.domainFound(d.domain, d.nsKind, d.uri, d.name, d.abc, d.asType));
     },
     compile(hashes = [], index = -1) {
       last("compile");

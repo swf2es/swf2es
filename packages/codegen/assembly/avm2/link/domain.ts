@@ -8,6 +8,11 @@
 // or else to an earlier class of the same ABC. Once the ABC has linked, the
 // classes its scripts define become visible to later ABCs.
 //
+// ABCs load into application domains, as avmplus' DomainMgr keeps them: a
+// tree whose root is domain 0. An ABC sees what its own domain and its
+// ancestors define: what one of them has found before, as the runtime
+// reports it (see addFound), else the first definition from the root down.
+//
 // Namespaces follow avmplus' AbcParser: two are the same if their kind and
 // URI are; a private namespace is only ever equal to itself. A URI may end
 // in an API version mark (U+E294 + version), which builtin ABCs use to say
@@ -170,6 +175,24 @@ export class Domain {
   loads: i32 = 0;
   /** Each ABC's load number, the owner of its own class names. */
   abcOwner: i32[] = [];
+  /** Each domain's parent, -1 for the root, and its depth. */
+  domainParent: i32[] = [-1];
+  domainDepth: u32[] = [0];
+  /** The domain of each ABC, and of each class name. */
+  abcDomain: u32[] = [];
+  typeDomain: u32[] = [];
+  /**
+   * What a domain finds, as the runtime reports it where that is not the
+   * first definition from the root down: a script's binding, found by
+   * name, or a class, found as a type (avmplus' cached scripts and traits).
+   * The runtime reports all a domain finds so, its ancestors' included.
+   */
+  cachedDomain: u32[] = [];
+  cachedNs: u32[] = [];
+  cachedName: u32[] = [];
+  cachedBinding: i32[] = [];
+  cachedClass: i32[] = [];
+  cached: IdTable = new IdTable();
   /** Strings interned from text rather than an ABC, kept for their bytes. */
   texts: ArrayBuffer[] = [];
 
@@ -221,7 +244,7 @@ export class Domain {
    * Parse and add the ABC in `buffer`, whose first `length` bytes are the ABC
    * and the rest PADDING. Returns the ABC; check its `error`.
    */
-  add(buffer: StaticArray<u8>, length: u32, builtin: bool): Abc {
+  add(buffer: StaticArray<u8>, length: u32, builtin: bool, domain: u32 = 0): Abc {
     const base = changetype<usize>(buffer);
     const abc = readAbc(base, length, builtin);
     if (abc.error) {
@@ -230,6 +253,7 @@ export class Domain {
 
     const index = <u32>this.abcs.length;
     this.abcs.push(abc);
+    this.abcDomain.push(domain);
     this.abcBase.push(base);
     this.buffers.push(buffer);
     this.loads++;
@@ -261,6 +285,7 @@ export class Domain {
       this.scriptTraits.length = index;
       this.bodyTraits.length = index;
       this.abcOwner.length = index;
+      this.abcDomain.length = index;
       this.methodStart.length = index;
       this.methodAbcIndex.length = methodCount;
       this.traits.truncate(traitsCount);
@@ -383,7 +408,7 @@ export class Domain {
       this.classStatic.push(-1);
       this.findBuiltinTypes();
       const empty = this.internNamespace(NS_Public, this.internText(""));
-      this.nameType(empty, this.internText("void"), API_AllVersions, this.voidClass, -1);
+      this.nameType(empty, this.internText("void"), API_AllVersions, this.voidClass, -1, 0);
       this.transientName = this.internText("Transient");
       this.versionName = this.internText("Version");
       this.nativeName = this.internText("native");
@@ -638,14 +663,14 @@ export class Domain {
     const name = this.abcString[index][pool.mnB[mn]];
     if (pool.mnKind[mn] === C.CONSTANT_Qname) {
       const ns = pool.mnA[mn];
-      return this.scriptOf(this.find(ids[ns], name, versions[ns]));
+      return this.scriptOf(this.find(ids[ns], name, versions[ns], this.abcDomain[index]));
     }
 
     const set = pool.mnA[mn];
     let found = -1;
     for (let m = pool.nsSetStart[set]; m < pool.nsSetStart[set + 1]; m++) {
       const ns = pool.nsSetMembers[m];
-      const script = this.scriptOf(this.find(ids[ns], name, versions[ns]));
+      const script = this.scriptOf(this.find(ids[ns], name, versions[ns], this.abcDomain[index]));
       if (script >= 0) {
         if (found >= 0 && found !== script) {
           return -1;
@@ -1166,11 +1191,16 @@ export class Domain {
    * script defines, else one of the ABC's own; -1 if none.
    */
   findType(index: u32, ns: u32, name: u32, version: u8): i32 {
-    const found = this.findTypeOf(ns, name, version, -1);
+    const found = this.findTypeOf(ns, name, version, -1, this.abcDomain[index]);
     return found >= 0 ? found : this.findTypeOf(ns, name, version, this.abcOwner[index]);
   }
 
-  findTypeOf(ns: u32, name: u32, version: u8, owner: i32): i32 {
+  /** A class name's class, of ABC `owner`'s own or else one `domain` sees; -1 if none. */
+  findTypeOf(ns: u32, name: u32, version: u8, owner: i32, domain: u32 = 0): i32 {
+    if (owner < 0 && this.domainParent.length > 1) {
+      return this.findTypeIn(ns, name, version, domain);
+    }
+
     const hash = hashPair(ns, name);
     const table = this.types;
     let slot = table.start(hash);
@@ -1193,8 +1223,9 @@ export class Domain {
     }
   }
 
-  nameType(ns: u32, name: u32, version: u8, id: i32, owner: i32): void {
+  nameType(ns: u32, name: u32, version: u8, id: i32, owner: i32, domain: u32): void {
     const type = <u32>this.typeNs.length;
+    this.typeDomain.push(domain);
     this.typeNs.push(ns);
     this.typeName.push(name);
     this.typeVersion.push(version);
@@ -1221,7 +1252,14 @@ export class Domain {
     const version = this.abcNsVersion[index][ns];
     const name = this.abcString[index][pool.mnB[mn]];
     if (this.findType(index, nsId, name, version) < 0) {
-      this.nameType(nsId, name, version, <i32>(this.classStart[index] + i), this.abcOwner[index]);
+      this.nameType(
+        nsId,
+        name,
+        version,
+        <i32>(this.classStart[index] + i),
+        this.abcOwner[index],
+        this.abcDomain[index],
+      );
     }
   }
 
@@ -1264,9 +1302,13 @@ export class Domain {
 
       const nsId = ids[ns];
       const name = strings[pool.mnB[mn]];
-      if (this.nsType[nsId] !== NS_Private && this.findTypeOf(nsId, name, version, -1) < 0) {
+      const domain = this.abcDomain[index];
+      if (
+        this.nsType[nsId] !== NS_Private &&
+        this.findTypeOf(nsId, name, version, -1, domain) < 0
+      ) {
         const id = this.classStart[index] + abc.traitIndex[t];
-        this.nameType(nsId, name, version, <i32>id, -1);
+        this.nameType(nsId, name, version, <i32>id, -1, domain);
       }
     }
   }
@@ -1363,10 +1405,15 @@ export class Domain {
   }
 
   /**
-   * The binding of `name` in namespace `ns` visible at `version`, or -1:
-   * the first one loaded, as a domain keeps the first definition of a name.
+   * The binding of `name` in namespace `ns` visible at `version` from
+   * `domain`, or -1: the first one loaded, as a domain keeps the first
+   * definition of a name.
    */
-  find(ns: u32, name: u32, version: u8): i32 {
+  find(ns: u32, name: u32, version: u8, domain: u32 = 0): i32 {
+    if (this.domainParent.length > 1) {
+      return this.findIn(ns, name, version, domain);
+    }
+
     const hash = hashPair(ns, name);
     const table = this.bindings;
     let slot = table.start(hash);
@@ -1506,6 +1553,177 @@ export class Domain {
     }
 
     return v;
+  }
+
+  /** A new domain, a child of `parent`. */
+  childDomain(parent: u32): u32 {
+    const id = <u32>this.domainParent.length;
+    this.domainParent.push(<i32>parent);
+    this.domainDepth.push(this.domainDepth[parent] + 1);
+    return id;
+  }
+
+  /** Whether `domain` sees what `other` defines: `other` is it or an ancestor. */
+  sees(domain: u32, other: u32): bool {
+    let d = <i32>domain;
+    while (d >= 0) {
+      if (<u32>d === other) {
+        return true;
+      }
+
+      d = this.domainParent[d];
+    }
+
+    return false;
+  }
+
+  /**
+   * What `domain` has found by `ns` and `name`, as the runtime reports it
+   * (see addFound): a binding, or as a type a class; -1 if none.
+   */
+  findCached(ns: u32, name: u32, version: u8, domain: u32, asType: bool): i32 {
+    const table = this.cached;
+    let slot = table.start(hashPair(ns, name));
+    while (true) {
+      const id = table.at(slot);
+      if (id < 0) {
+        return -1;
+      }
+
+      const target = asType ? this.cachedClass[id] : this.cachedBinding[id];
+      if (
+        this.cachedDomain[id] === domain &&
+        this.cachedNs[id] === ns &&
+        this.cachedName[id] === name &&
+        target >= 0
+      ) {
+        return !asType && this.bindingVersion[target] > version ? -1 : target;
+      }
+
+      slot = table.next(slot);
+    }
+  }
+
+  /** find, from a domain other than the root's only one. */
+  findIn(ns: u32, name: u32, version: u8, domain: u32): i32 {
+    const cached = this.findCached(ns, name, version, domain, false);
+    if (cached >= 0) {
+      return cached;
+    }
+
+    const table = this.bindings;
+    let slot = table.start(hashPair(ns, name));
+    let best: i32 = -1;
+    let bestDepth: u32 = 0;
+    while (true) {
+      const id = table.at(slot);
+      if (id < 0) {
+        return best;
+      }
+
+      const d = this.abcDomain[this.bindingAbc[id]];
+      if (
+        this.bindingNs[id] === ns &&
+        this.bindingName[id] === name &&
+        this.bindingVersion[id] <= version &&
+        (best < 0 || this.domainDepth[d] < bestDepth) &&
+        this.sees(domain, d)
+      ) {
+        best = id;
+        bestDepth = this.domainDepth[d];
+      }
+
+      slot = table.next(slot);
+    }
+  }
+
+  /** findTypeOf for the names scripts define, from a domain other than the root's only one. */
+  findTypeIn(ns: u32, name: u32, version: u8, domain: u32): i32 {
+    const cached = this.findCached(ns, name, version, domain, true);
+    if (cached >= 0) {
+      return cached;
+    }
+
+    const table = this.types;
+    let slot = table.start(hashPair(ns, name));
+    let best: i32 = -1;
+    let bestDepth: u32 = 0;
+    while (true) {
+      const id = table.at(slot);
+      if (id < 0) {
+        return best;
+      }
+
+      const d = this.typeDomain[id];
+      if (
+        this.typeNs[id] === ns &&
+        this.typeName[id] === name &&
+        this.typeVersion[id] <= version &&
+        this.typeOwner[id] === -1 &&
+        (best < 0 || this.domainDepth[d] < bestDepth) &&
+        this.sees(domain, d)
+      ) {
+        best = <i32>this.typeClass[id];
+        bestDepth = this.domainDepth[d];
+      }
+
+      slot = table.next(slot);
+    }
+  }
+
+  /**
+   * Record that `domain` has found the definition ABC `abc` gives `name`
+   * in the namespace of kind `type` and URI `uri`: by name, its script's
+   * binding, or as a type, its class. A name no ABC spells is not recorded.
+   */
+  addFound(domain: u32, type: u8, uri: string, name: string, abc: u32, asType: bool): void {
+    const uriId = this.findText(uri);
+    const nameId = this.findText(name);
+    const ns = uriId < 0 ? -1 : this.findNamespace(type, <u32>uriId);
+    if (nameId < 0 || ns < 0) {
+      return;
+    }
+
+    let binding: i32 = -1;
+    let cls: i32 = -1;
+    if (asType) {
+      for (let id = 0; id < this.typeNs.length; id++) {
+        const c = this.typeClass[id];
+        if (
+          this.typeNs[id] === <u32>ns &&
+          this.typeName[id] === <u32>nameId &&
+          <i32>c !== this.voidClass &&
+          this.classAbc[c] === abc
+        ) {
+          cls = <i32>c;
+          break;
+        }
+      }
+    } else {
+      for (let id = 0; id < this.bindingNs.length; id++) {
+        if (
+          this.bindingNs[id] === <u32>ns &&
+          this.bindingName[id] === <u32>nameId &&
+          this.bindingAbc[id] === abc
+        ) {
+          binding = id;
+          break;
+        }
+      }
+    }
+
+    if (binding < 0 && cls < 0) {
+      return;
+    }
+
+    const id = <u32>this.cachedDomain.length;
+    this.cachedDomain.push(domain);
+    this.cachedNs.push(<u32>ns);
+    this.cachedName.push(<u32>nameId);
+    this.cachedBinding.push(binding);
+    this.cachedClass.push(cls);
+    this.cached.insert(hashPair(<u32>ns, <u32>nameId), id);
+    this.clearBindingMemo();
   }
 
   bind(ns: u32, name: u32, version: u8, abc: u32, script: u32, trait: u32): void {

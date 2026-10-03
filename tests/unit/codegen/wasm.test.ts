@@ -35,6 +35,16 @@ test("reads the ABC version header", async () => {
   assert.equal(codegen.abcVersion(new Uint8Array([16, 0, 46])), null);
 });
 
+test("the wrapper makes application domains, numbered from the root's 0", async () => {
+  const codegen = await createCodegen(module);
+  codegen.reset();
+  const child = codegen.childDomain(0);
+  assert.equal(child, 1);
+  assert.equal(codegen.childDomain(child), 2);
+  // A finding no ABC can satisfy is left out, not a trap.
+  codegen.found({ domain: child, nsKind: 0, uri: "p", name: "a", abc: 0, asType: true });
+});
+
 const generated = new URL("../../../oracle/avmplus/generated/", import.meta.url);
 const skip = !existsSync(generated) && "oracle/avmplus missing";
 
