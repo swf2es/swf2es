@@ -520,6 +520,45 @@ test("an object off the list gives its lines back, and has them again when it co
   });
 });
 
+test("a filtered or blended object is drawn into its filters multisampled as its target is", async () => {
+  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    DOMAdapter: { get(): object; set(adapter: object): void };
+  };
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  try {
+    const filtered = new Container();
+    filtered.filters = [{ ...filterDefaults("glow"), blurX: 4, blurY: 4 }];
+    const blended = new Container();
+    blended.blendMode = "multiply";
+    const layer = new Container();
+    layer.blendMode = "layer";
+    // Both: one filter left "off" would turn multisampling off for all of them.
+    const both = new Container();
+    both.filters = [{ ...filterDefaults("glow"), blurX: 4, blurY: 4 }];
+    both.blendMode = "overlay";
+    for (const o of [filtered, blended, layer, both]) {
+      const { renderer } = standIn([]);
+      (renderer as unknown as { type: number }).type = 1;
+      const view = new PixiView(renderer);
+      view.prepare(o);
+      const filters = (view.stage.children[0] as unknown as { filters: { antialias: string }[] })
+        .filters;
+      assert.ok(filters.length > 0);
+      // Pixi's default, "off", would leave the object's edges stepped.
+      assert.deepEqual(
+        filters.map((f) => f.antialias),
+        filters.map(() => "inherit"),
+      );
+    }
+  } finally {
+    pixi.DOMAdapter.set(adapter);
+  }
+});
+
 test("a tween's lines go once its morph drops their blend, not idle for a ratio never drawn again", async () => {
   const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
   const { readMorphShape, readSwf } = await import("../../../packages/format/dist/index.js");

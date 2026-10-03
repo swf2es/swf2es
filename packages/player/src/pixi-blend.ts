@@ -97,6 +97,7 @@ function blendFilter(mode: string): Filter {
   // whole composite, back included, so it replaces what is there, which
   // alpha and erase make more transparent.
   filter.resolution = "inherit";
+  filter.antialias = "inherit";
   filter.blendMode = "none";
   return filter;
 }
@@ -118,6 +119,7 @@ export function blendFilters(mode: string): Filter[] | null {
     if (mode === "layer") {
       const layer = new AlphaFilter({ alpha: 1 });
       layer.resolution = "inherit";
+      layer.antialias = "inherit";
       made = [layer];
     } else {
       made = [blendFilter(mode)];
