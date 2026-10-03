@@ -506,9 +506,20 @@ object marks itself changed. A shape's fills are immutable
 `GraphicsContext`s shared by its instances, built from Flash's edges
 (`shapes.ts`: each edge goes to its right fill forward and its left fill
 reversed, joined into contours) and filled even-odd through a containment
-tree of the contours, holes cut. Its lines are drawn for each instance, in
-the stage's axes, because Flash strokes a transformed line with one width
-all along, not the local width stretched by the transform.
+tree of the contours, holes cut. Its lines are drawn in the stage's axes,
+because Flash strokes a transformed line with one width all along, not the
+local width stretched by the transform: so a line's context depends on the
+linear part of its transform on the stage, and is kept by layer and that
+transform, exactly, shared by every instance that sees the layer alike
+(a crowd of one creature in step) and found again when one comes back to
+it (a loop's next turn). Contexts are counted as instances take and give
+them back, and an object that leaves the list gives back its own and its
+descendants', drawn again if it returns; one no one holds stays idle
+5 s, by the clock, not renders, which a host may make many of between
+frames, at most 4096 of them, before it is destroyed. A drawing's lines
+are its own, as it changes.
+Tessellating lines, round joins most of all, was the largest part of a
+frame of a dozen animated instances; `bench.ts --rig N` measures it.
 
 Flash anti-aliases by supersampling on a grid: none at low quality, 2×2 at
 medium, 4×4 at high and best. The test page draws the same way, at that

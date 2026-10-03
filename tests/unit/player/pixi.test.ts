@@ -236,3 +236,200 @@ test("a convolution pads its reach and the pixel adl adds, and knows the padding
     pixi.DOMAdapter.set(adapter);
   }
 });
+
+test("instances that see a character alike share its lines, which live while one holds them", async () => {
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
+  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
+  const { MOVE, LINE } = await import("../../../packages/player/dist/shapes.js");
+  const view = new PixiView(standIn([]).renderer);
+  const line = {
+    width: 40,
+    color: 0xff000000,
+    startCap: 0,
+    endCap: 0,
+    join: 0,
+    miterLimit: 3,
+    noHScale: false,
+    noVScale: false,
+    pixelHinting: false,
+    noClose: false,
+    fill: null,
+  };
+  const character = {
+    type: "shape" as const,
+    id: 1,
+    shape: {} as never,
+    layers: [{ fills: [], strokes: [{ line, paths: [[MOVE, 0, 0, LINE, 10, 0, LINE, 10, 10]] }] }],
+  } as unknown as ConstructorParameters<typeof ShapeObject>[0];
+  const root = new Container();
+  const [a, b] = [1, 2].map((depth) => {
+    const shape = new ShapeObject(character);
+    shape.setMatrix({ a: 2, b: 0, c: 0, d: 2, tx: depth * 20, ty: 0 });
+    root.placeAtDepth(shape, depth);
+    return shape;
+  });
+  type Lines = { context: { destroyed: boolean } };
+  const lines = (i: number) =>
+    (view.stage.children[0].children[1 + i].children[0].children[1] as unknown as Lines).context;
+  const turn = (shape: InstanceType<typeof ShapeObject>, s: number) =>
+    shape.setMatrix({ ...shape.matrix, a: s, d: s });
+
+  // Seen alike, one context for both.
+  view.prepare(root);
+  assert.equal(lines(0), lines(1));
+  assert.deepEqual(view.counts, { strokeContexts: 1, strokeReuses: 1 });
+
+  // One turns: a context of its own; the other's stays, held.
+  turn(a, 3);
+  view.prepare(root);
+  const shared = lines(1);
+  assert.notEqual(lines(0), shared);
+  assert.equal(shared.destroyed, false);
+
+  // It turns back: the context it had is found, not made again.
+  turn(a, 2);
+  view.prepare(root);
+  assert.equal(lines(0), shared);
+  assert.deepEqual(view.counts, { strokeContexts: 2, strokeReuses: 2 });
+
+  // Drawn anew, its content changed: still the character's lines, shared.
+  a.invalidate(CONTENT);
+  view.prepare(root);
+  assert.equal(lines(0), shared);
+  assert.equal(shared.destroyed, false);
+
+  // A drawing's lines are its own, as its layers change.
+  for (const depth of [3, 4]) {
+    const shape = new ShapeObject(null);
+    const drawing = new Drawing();
+    drawing.lineStyle(line);
+    drawing.moveTo(0, 0);
+    drawing.lineTo(10, 10);
+    shape.drawing = drawing;
+    root.placeAtDepth(shape, depth);
+  }
+
+  view.prepare(root);
+  assert.notEqual(lines(2), lines(3));
+
+  // Idle a while: those no one holds go after 5 s, however many renders, the held stay.
+  const first = lines(0);
+  b.setMatrix({ ...b.matrix, a: 5, d: 5 });
+  turn(a, 6);
+  await withClock(async (clock) => {
+    view.prepare(root);
+    for (let k = 0; k < 500; k++) {
+      clock.at += 9;
+      view.prepare(root);
+    }
+
+    assert.equal(first.destroyed, false);
+    clock.at += 1000;
+    view.prepare(root);
+    assert.equal(first.destroyed, true);
+  });
+  assert.equal(lines(0).destroyed, false);
+  assert.equal(lines(1).destroyed, false);
+});
+
+/** `performance.now` as a clock the test moves, for what it runs. */
+async function withClock(run: (clock: { at: number }) => Promise<void> | void): Promise<void> {
+  const clock = { at: performance.now() };
+  const now = performance.now;
+  performance.now = () => clock.at;
+  try {
+    await run(clock);
+  } finally {
+    performance.now = now;
+  }
+}
+
+test("an object off the list gives its lines back, and has them again when it comes back", async () => {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { MOVE, LINE } = await import("../../../packages/player/dist/shapes.js");
+  const view = new PixiView(standIn([]).renderer);
+  const line = {
+    width: 40,
+    color: 0xff000000,
+    startCap: 0,
+    endCap: 0,
+    join: 0,
+    miterLimit: 3,
+    noHScale: false,
+    noVScale: false,
+    pixelHinting: false,
+    noClose: false,
+    fill: null,
+  };
+  const character = {
+    type: "shape" as const,
+    id: 1,
+    shape: {} as never,
+    layers: [{ fills: [], strokes: [{ line, paths: [[MOVE, 0, 0, LINE, 10, 0, LINE, 10, 10]] }] }],
+  } as unknown as ConstructorParameters<typeof ShapeObject>[0];
+  type Lines = { context: { destroyed: boolean } };
+  const root = new Container();
+  // A shape in a container, so that what leaves is a whole branch.
+  const branch = new Container();
+  const shape = new ShapeObject(character);
+  shape.setMatrix({ a: 3, b: 0, c: 0, d: 3, tx: 0, ty: 0 });
+  branch.placeAtDepth(shape, 1);
+  root.placeAtDepth(branch, 1);
+  const linesOf = () =>
+    (view.stage.children[0].children[1].children[1].children[0].children[1] as unknown as Lines)
+      .context;
+
+  await withClock(async (clock) => {
+    view.prepare(root);
+    const held = linesOf();
+    assert.deepEqual(view.counts, { strokeContexts: 1, strokeReuses: 0 });
+
+    // Off the list: given back, then gone once idle long enough.
+    root.removeChild(branch);
+    view.prepare(root);
+    assert.equal(held.destroyed, false);
+    clock.at += 6000;
+    view.prepare(root);
+    assert.equal(held.destroyed, true);
+
+    // Back on: drawn again, not with the context destroyed.
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+    assert.equal(linesOf().destroyed, false);
+    assert.notEqual(linesOf(), held);
+    assert.deepEqual(view.counts, { strokeContexts: 2, strokeReuses: 0 });
+
+    // The branch off the list, then the shape off the branch, before a render:
+    // the shape still gives its lines back, as the branch last drew it.
+    const again = linesOf();
+    root.removeChild(branch);
+    branch.removeChild(shape);
+    view.prepare(root);
+    clock.at += 6000;
+    view.prepare(root);
+    assert.equal(again.destroyed, true);
+    branch.placeAtDepth(shape, 1);
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+    assert.equal(linesOf().destroyed, false);
+
+    // Many made and taken off: none stay held, and all go once idle.
+    const made: Lines["context"][] = [];
+    for (let k = 0; k < 50; k++) {
+      const other = new ShapeObject(character);
+      other.setMatrix({ a: 1 + k / 10, b: 0, c: 0, d: 1, tx: 0, ty: 0 });
+      root.placeAtDepth(other, 10);
+      view.prepare(root);
+      made.push(
+        (view.stage.children[0].children[2].children[0].children[1] as unknown as Lines).context,
+      );
+      root.removeChild(other);
+      view.prepare(root);
+    }
+
+    clock.at += 6000;
+    view.prepare(root);
+    assert.ok(made.every((context) => context.destroyed));
+    assert.equal(linesOf().destroyed, false);
+  });
+});

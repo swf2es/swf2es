@@ -1,8 +1,9 @@
 // Draws the display list with PixiJS. Pixi only mirrors it: one container
 // for each display object, kept from frame to frame and updated where the
 // display object says it changed. A shape's fills are immutable
-// GraphicsContexts shared by all its instances; its lines are drawn for
-// each instance, as their width depends on its transform. Flash fills
+// GraphicsContexts shared by all its instances; its lines depend on its
+// transform, as their width does, and are shared by the instances that see
+// them through the same one (StrokeContexts). Flash fills
 // even-odd; a fill of several contours is drawn from their containment
 // tree, holes cut, as Pixi's own grouping of holes misses nested islands.
 import type { ColorTransform, Fill, Glyph, Line } from "@swf2es/format";
@@ -390,6 +391,104 @@ function strokeContext(layer: ShapeLayer, m: Linear): GraphicsContext {
   return context;
 }
 
+/**
+ * How long, in milliseconds, lines' contexts no instance uses are kept for
+ * one to come back to, as a loop does, and how many at most. By age, not
+ * count: a loop longer than a count would find each context gone just
+ * before it came round to it; and by time, not renders, which a host may
+ * make many of between a SWF's frames.
+ */
+const IDLE_MS = 5000;
+const IDLE_MOST = 4096;
+
+/**
+ * Lines' contexts by shape layer and the linear transform they are seen
+ * through, shared by every instance that sees a character's layer alike:
+ * instances of one creature in step, or one instance on its loop's next
+ * turn. Contexts are counted as they are taken and given back, a removed
+ * object's too; one no longer taken waits among the idle, destroyed after
+ * IDLE_MS or, the oldest first, past IDLE_MOST. Only a character's layers
+ * are shared, which never change.
+ */
+class StrokeContexts {
+  private readonly byLayer = new WeakMap<ShapeLayer, Map<string, GraphicsContext>>();
+  private readonly uses = new Map<GraphicsContext, number>();
+  private readonly keys = new Map<GraphicsContext, [ShapeLayer, string]>();
+  /** Contexts no one holds, oldest first, with the time each went idle. */
+  private readonly idle = new Map<GraphicsContext, number>();
+
+  constructor(private readonly counts: { strokeContexts: number; strokeReuses: number }) {}
+
+  /** The layer's lines seen through `m`, taken: made or found. */
+  take(layer: ShapeLayer, m: Linear): GraphicsContext {
+    const key = `${m[0]},${m[1]},${m[2]},${m[3]}`;
+    let contexts = this.byLayer.get(layer);
+    if (!contexts) {
+      contexts = new Map();
+      this.byLayer.set(layer, contexts);
+    }
+
+    let context = contexts.get(key);
+    if (context) {
+      this.counts.strokeReuses++;
+      this.idle.delete(context);
+    } else {
+      context = linesContext(layer, m);
+      this.counts.strokeContexts++;
+      contexts.set(key, context);
+      this.keys.set(context, [layer, key]);
+    }
+
+    this.uses.set(context, (this.uses.get(context) ?? 0) + 1);
+    return context;
+  }
+
+  /** Give a context back: one of these goes idle when no one holds it; any other is destroyed. */
+  give(context: GraphicsContext): void {
+    const uses = this.uses.get(context);
+    if (uses === undefined) {
+      destroyContext(context);
+      return;
+    }
+
+    if (uses > 1) {
+      this.uses.set(context, uses - 1);
+      return;
+    }
+
+    this.uses.delete(context);
+    this.idle.set(context, performance.now());
+    if (this.idle.size > IDLE_MOST) {
+      this.drop(this.idle.keys().next().value as GraphicsContext);
+    }
+  }
+
+  /** A frame prepared: the contexts idle too long go. */
+  tick(): void {
+    const now = performance.now();
+    for (const [context, since] of this.idle) {
+      if (now - since < IDLE_MS) {
+        break;
+      }
+
+      this.drop(context);
+    }
+  }
+
+  private drop(context: GraphicsContext): void {
+    this.idle.delete(context);
+    const [layer, key] = this.keys.get(context) as [ShapeLayer, string];
+    this.keys.delete(context);
+    this.byLayer.get(layer)?.delete(key);
+    destroyContext(context);
+  }
+}
+
+/** A layer's lines seen through `m`, nothing where `m` flattens them. */
+function linesContext(layer: ShapeLayer, m: Linear): GraphicsContext {
+  return m[0] * m[3] - m[1] * m[2] === 0 ? new GraphicsContext() : strokeContext(layer, m);
+}
+
 const NO_RECORDS: readonly FilterRecord[] = [];
 
 /** What the view keeps for a display object. */
@@ -407,6 +506,12 @@ interface Node {
   ownFills: boolean;
   /** The lines, a Graphics for each layer that has any; null where one has none. */
   strokes: (Graphics | null)[];
+  /** Whether the layers are a character's, whose lines' contexts instances share. */
+  sharedLines: boolean;
+  /** The children as of the last arrangement, to know those that left. */
+  kids: readonly DisplayObject[];
+  /** Whether its lines were given back as it left the list: drawn again for its transform if it comes back. */
+  released: boolean;
   /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
   bitmap: Sprite | null;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
@@ -431,6 +536,9 @@ interface Node {
 
 export class PixiView {
   readonly stage = new PixiContainer();
+  /** What the view has built since it was made, for measuring: lines' contexts made and reused. */
+  readonly counts = { strokeContexts: 0, strokeReuses: 0 };
+  private readonly lines = new StrokeContexts(this.counts);
   private readonly nodes = new WeakMap<DisplayObject, Node>();
   private readonly fills = new Map<ShapeCharacter, GraphicsContext[]>();
   /**
@@ -582,6 +690,9 @@ export class PixiView {
         fills: [],
         ownFills: false,
         strokes: [],
+        sharedLines: false,
+        kids: [],
+        released: false,
         bitmap: null,
         lines: [],
         masking: false,
@@ -610,10 +721,8 @@ export class PixiView {
     // A Bitmap's texture is its store's: only the sprite goes.
     node.bitmap?.destroy();
     // A drawing's fills and every node's lines; a Graphics frees only a context it made.
-    const old = [
-      ...(node.ownFills && !this.fresh ? node.fills : []),
-      ...(this.fresh ? [] : node.strokes.map((g) => g?.context)),
-    ];
+    const old = node.ownFills && !this.fresh ? node.fills : [];
+    const oldLines = this.fresh ? [] : node.strokes.map((g) => g?.context);
     // A text's characters are in a container of their own; their shared glyph fills stay, not being theirs.
     for (const child of node.art.removeChildren()) {
       if (!child.destroyed) {
@@ -626,8 +735,12 @@ export class PixiView {
       this.draw(o, node);
     } finally {
       for (const context of old) {
+        destroyContext(context);
+      }
+
+      for (const context of oldLines) {
         if (context) {
-          destroyContext(context);
+          this.lines.give(context);
         }
       }
     }
@@ -672,6 +785,7 @@ export class PixiView {
     }
 
     node.fills = fills;
+    node.sharedLines = !this.fresh && !node.ownFills && shape !== null;
     const lines = current && sameLinear(current.world, node.world) ? current.strokes : null;
     node.layers.forEach((layer, i) => {
       node.art.addChild(new Graphics(fills[i]));
@@ -711,6 +825,38 @@ export class PixiView {
   }
 
   /**
+   * An object off the list, and all below it: their lines given back, so
+   * that the cache can let them go, and drawn again if they come back.
+   */
+  private release(o: DisplayObject): void {
+    const node = this.nodes.get(o);
+    if (!node || node.released) {
+      return;
+    }
+
+    node.released = true;
+    for (const strokes of node.strokes) {
+      if (strokes) {
+        const previous = strokes.context;
+        strokes.context = new GraphicsContext();
+        this.lines.give(previous);
+      }
+    }
+
+    // Those it last drew, which may since have left it too, and any it has now.
+    const kids = new Set(node.kids);
+    if (o instanceof Container) {
+      for (const child of o.children) {
+        kids.add(child);
+      }
+    }
+
+    for (const kid of kids) {
+      this.release(kid);
+    }
+  }
+
+  /**
    * Draw the lines again for the object's transform on the stage: in the
    * stage's axes, under the inverse of that transform's linear part.
    */
@@ -725,12 +871,17 @@ export class PixiView {
 
       // The new context goes in before the old one goes: the Graphics listens on the one it holds.
       const previous = strokes.context;
-      strokes.context = det === 0 ? new GraphicsContext() : strokeContext(layer, m);
-      if (this.fresh) {
-        this.built.push(strokes.context);
+      if (node.sharedLines) {
+        strokes.context = this.lines.take(layer, m);
+      } else {
+        strokes.context = linesContext(layer, m);
+        this.counts.strokeContexts++;
+        if (this.fresh) {
+          this.built.push(strokes.context);
+        }
       }
 
-      previous.destroy();
+      this.lines.give(previous);
       if (det !== 0) {
         strokes.setFromMatrix(new Matrix(m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, 0, 0));
       }
@@ -754,6 +905,13 @@ export class PixiView {
     const node = this.node(o);
     const { container } = node;
     let dirty = this.fresh ? TRANSFORM | CHILDREN | CONTENT : o.dirty;
+    if (node.released) {
+      // Back from off the list: its transform as if unknown, so that it and all below draw their lines again.
+      node.released = false;
+      node.world = [Number.NaN, Number.NaN, Number.NaN, Number.NaN];
+      dirty |= TRANSFORM;
+    }
+
     // A mask is drawn, whatever its visibility, alpha and colour, by its fills alone.
     const masking = inMask || o.maskOf !== null || o.clipDepth > 0;
     const remask = masking !== node.masking;
@@ -916,6 +1074,18 @@ export class PixiView {
     node.groups = [];
     content.removeChildren();
     content.addChild(node.art);
+    // Those that left the list give their lines back, all the way down; one
+    // moved to another parent is drawn there, perhaps already this frame.
+    if (!this.fresh) {
+      for (const kid of node.kids) {
+        if (kid.parent === null) {
+          this.release(kid);
+        }
+      }
+
+      node.kids = [...o.children];
+    }
+
     const clips = new Clips();
     const open: PixiContainer[] = [];
     for (const child of o.children) {
@@ -1016,6 +1186,7 @@ export class PixiView {
 
   /** Bring the stage up to date with `root`'s display list, without drawing. */
   prepare(root: DisplayObject): void {
+    this.lines.tick();
     const node = this.sync(root, UNIT, false);
     if (node.parent !== this.stage) {
       this.stage.removeChildren();
