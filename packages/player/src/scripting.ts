@@ -28,6 +28,10 @@ import { decodeImages, decodeInBrowser, type ImageDecode } from "./images.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import { defaultStorage, type SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
+import {
+  type PlatformCapabilities,
+  platformCapabilities,
+} from "./playerglobal/flash/system/Capabilities.js";
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
 import { sha256 } from "./sha256.js";
 import {
@@ -209,6 +213,8 @@ export class Scripting {
   url = "file:///";
   /** Where local SharedObjects are kept (flash/net/SharedObject.ts). */
   readonly storage: SharedObjectStorage;
+  /** What Capabilities reports of the system (flash/system/Capabilities.ts). */
+  readonly platform: PlatformCapabilities;
   /**
    * Clips taken off the display list, which play on as Flash's do: held
    * weakly, as Ruffle holds them, so one nothing refers to stops as Flash's
@@ -286,6 +292,8 @@ export class Scripting {
       url?: string;
       /** Where local SharedObjects are kept: localStorage by default where the host has it, else memory. */
       storage?: SharedObjectStorage;
+      /** What Capabilities reports of the system: by default the browser's, as Flash Player 32's plugin. */
+      platform?: Partial<PlatformCapabilities>;
       externalInterface?: ExternalInterfaceHost;
       socket?: SocketHost;
       decodeImage?: ImageDecode | null;
@@ -318,6 +326,7 @@ export class Scripting {
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
     this.storage = options.storage ?? defaultStorage();
+    this.platform = { ...platformCapabilities(), ...options.platform };
     this.rt = new avm2.Runtime(
       (rt) => ({ ...avm2.builtinNatives(rt), ...playerNatives(this) }),
       { ...avm2.builtinHooks(), ...playerHooks(this) },
