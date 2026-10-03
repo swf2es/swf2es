@@ -233,3 +233,17 @@ export class TypeName {
 export function qname(ns: Namespace, name: string): Multiname {
   return new Multiname(CONSTANT_Qname, [ns], [255], name, false);
 }
+
+/** The builtin Vector classes, which avmplus names as the types they are vectors of. */
+const VECTOR_NAMES: Record<string, string> = {
+  "__AS3__.vec::Vector$int": "__AS3__.vec::Vector.<int>",
+  "__AS3__.vec::Vector$uint": "__AS3__.vec::Vector.<uint>",
+  "__AS3__.vec::Vector$double": "__AS3__.vec::Vector.<Number>",
+  "__AS3__.vec::Vector$object": "__AS3__.vec::Vector.<*>",
+};
+
+/** A traits' name as avmplus writes it: a class's statics' without their trailing $, a builtin Vector's as Vector.<T>. */
+export function formatClassName(name: string): string {
+  const own = name.endsWith("$") ? name.slice(0, -1) : name;
+  return VECTOR_NAMES[own] ?? own;
+}

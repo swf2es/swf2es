@@ -16,6 +16,30 @@ export function qualify(name: string): string {
   return i < 0 ? name : `${name.slice(0, i)}::${name.slice(i + 1)}`;
 }
 
+/**
+ * What `name` names in `domain`, as getDefinitionByName and
+ * ApplicationDomain's lookups take a name: "pkg.Name" or "pkg::Name", or a
+ * Vector, "Vector.<T>" with or without its package, T named either way, a
+ * Vector too or *, else not defined (#1065); `find` looks a plain name up.
+ */
+export function definitionNamed(
+  rt: avm2.Runtime,
+  name: string,
+  find: (qualified: string) => avm2.Value,
+): avm2.Value {
+  const vector = /^(?:__AS3__\.vec(?:::|\.))?Vector\.<(.+)>$/.exec(name);
+  if (vector) {
+    const param = vector[1] === "*" ? null : definitionNamed(rt, vector[1], find);
+    if (param !== null && !param?.$it) {
+      throw rt.error("ReferenceError", 1065, name);
+    }
+
+    return rt.applyType(rt.classNamed("__AS3__.vec::Vector"), [param]);
+  }
+
+  return find(qualify(name));
+}
+
 const UTF8 = new TextEncoder();
 
 export function toplevelNatives(s: Scripting): avm2.Natives {
@@ -27,7 +51,7 @@ export function toplevelNatives(s: Scripting): avm2.Natives {
       },
     // Looked up in the domain of the code that asks, as Flash's.
     "flash.utils::getDefinitionByName": (rt) => (name: Value) =>
-      rt.classNamed(qualify(rt.toString(name)), s.codeDomain()),
+      definitionNamed(rt, rt.toString(name), (q) => rt.classNamed(q, s.codeDomain())),
     // The alias registerClassAlias gave the value's class, which describeType writes; null for none.
     "flash.utils::getAliasName": (rt) => (v: Value) => {
       if (v === null || v === undefined) {

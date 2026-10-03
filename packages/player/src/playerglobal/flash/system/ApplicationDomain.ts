@@ -7,7 +7,7 @@
 // is the runtime's one, as avmshell's Domain's is.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
-import { qualify } from "../../toplevel.js";
+import { definitionNamed } from "../../toplevel.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -16,6 +16,9 @@ export function applicationDomainNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
   const domainOf = (o: AsObject): avm2.Domain => o.$domain ?? s.mainDomain;
+  const definitionOf = (o: AsObject, name: Value): Value =>
+    definitionNamed(s.rt, String(name), (q) => s.rt.definitionNamed(q, domainOf(o)));
+
   // Not defined, as Flash has it, for a name whose script throws as it
   // runs too: a script that threw runs again, as for getDefinition.
   const has = (o: AsObject, name: Value): boolean => {
@@ -24,7 +27,7 @@ export function applicationDomainNatives(s: Scripting): avm2.Natives {
     }
 
     try {
-      s.rt.definitionNamed(qualify(String(name)), domainOf(o));
+      definitionOf(o, name);
       return true;
     } catch {
       return false;
@@ -70,7 +73,7 @@ export function applicationDomainNatives(s: Scripting): avm2.Natives {
 
     // As Flash's: an initializer's error comes through (Runtime.definitionNamed).
     getDefinition(name: Value): Value {
-      return s.rt.definitionNamed(qualify(String(name)), domainOf(this));
+      return definitionOf(this, name);
     }
 
     hasDefinition(name: Value): boolean {

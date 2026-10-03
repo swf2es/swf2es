@@ -1,9 +1,8 @@
 // Object, Class, Function, Namespace and QName: their natives, and what
 // calling or constructing Object, Namespace, QName or Function does.
-import { Namespace, prefixOf, publicNs, qname } from "../names.js";
+import { formatClassName, Namespace, prefixOf, publicNs, qname } from "../names.js";
 import { type AsObject, type ClassHook, NOT_FOUND, type Runtime, type Value } from "../runtime.js";
 import { AS3, elements, type Natives, plain } from "./define.js";
-import { formatClassName } from "./describe.js";
 import { constructNamespace, newNamespace } from "./xml/xml.js";
 
 export const objectNatives: Natives = {
@@ -167,9 +166,11 @@ function newQName(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
   return o;
 }
 
+/** A class's name without its package, as its toString has it: a Vector's parameter keeps its own, "Vector.<pkg::T>". */
 function shortName(qualified: string): string {
-  const i = qualified.lastIndexOf("::");
-  return i < 0 ? qualified : qualified.slice(i + 2);
+  const name = formatClassName(qualified);
+  const i = name.indexOf("::");
+  return i < 0 ? name : name.slice(i + 2);
 }
 
 export function qualifiedClassName(rt: Runtime, v: Value): string {
