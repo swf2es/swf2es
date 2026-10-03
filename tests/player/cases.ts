@@ -1999,10 +1999,10 @@ export const cases: PlayerCase[] = [
   },
   {
     name: "filter-cache",
-    swf: (abc) => bare(abc, 6, "FilterCache", 260, 100),
+    swf: (abc) => bare(abc, 7, "FilterCache", 380, 100),
     script: "FilterCache",
-    frames: 6,
-    capture: [1, 2, 3, 4, 5, 6],
+    frames: 7,
+    capture: [1, 2, 3, 4, 5, 6, 7],
     // As "filters": the page's samples against adl's whole pixels, here
     // along the turned square's blurred edges, up to 12 a channel.
     tolerance: 8,

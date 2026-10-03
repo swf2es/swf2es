@@ -928,9 +928,8 @@ void main(void) {
   finalColor = texture(uTexture, vTextureCoord);
 }`;
 
-/** Where a chain's input lay, and how big it was, when its output was kept. */
-interface Kept {
-  texture: Texture;
+/** What a chain's output depends on beyond its object: its input's size and place, and the colour it is drawn in. */
+interface Input {
   width: number;
   height: number;
   resolution: number;
@@ -940,6 +939,18 @@ interface Kept {
   colorAlpha: number;
 }
 
+/** Whether `a` and `b` give the same output: a move may put the input's corner a texel either way. */
+function sameInput(a: Input, b: Input): boolean {
+  return (
+    a.width === b.width &&
+    a.height === b.height &&
+    a.resolution === b.resolution &&
+    Math.abs(a.dx - b.dx) <= 1 &&
+    Math.abs(a.dy - b.dy) <= 1 &&
+    a.colorAlpha === b.colorAlpha
+  );
+}
+
 /**
  * A display object's filters as one, their output kept and drawn again
  * while nothing they were run on changed, as Flash caches a filtered
@@ -947,17 +958,20 @@ interface Kept {
  * move, the colour and alpha it is drawn in, and how much of it the
  * screen shows. The owner calls `changed()` for what Pixi cannot see.
  * One changing frame after frame is filtered straight to the target,
- * with no copy kept.
+ * with no copy kept; so is one that `keeps` not, drawn once.
  */
 export class FilterChain extends Filter {
-  private kept: Kept | null = null;
+  /** The input last run on, and the output kept of it, if any. */
+  private input: Input | null = null;
+  private kept: Texture | null = null;
   private stale = true;
-  /** Frames in a row its object changed in. */
+  /** Runs in a row its object changed for. */
   private changing = 0;
 
   constructor(
     readonly filters: Filter[],
     private readonly owner: Container,
+    private readonly keeps = true,
   ) {
     super({
       glProgram: GlProgram.from({ vertex: VERTEX, fragment: COPY, name: "flash-filter-copy" }),
@@ -972,54 +986,53 @@ export class FilterChain extends Filter {
     this.stale = true;
   }
 
+  /** The output kept let go of, as its object leaves the display list. */
+  forget(): void {
+    this.release();
+    this.input = null;
+  }
+
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
+    if (!this.keeps) {
+      this.run(system, input, output, clear);
+      return;
+    }
+
     const resolution = input.source.resolution;
-    // The input's corner on the screen, which Pixi keeps to itself.
+    // The input's corner on the screen, which Pixi 8 keeps to itself.
     const bounds = (
       system as unknown as { _activeFilterData: { bounds: { minX: number; minY: number } } }
     )._activeFilterData.bounds;
     const m = this.owner.worldTransform;
-    const dx = (bounds.minX - m.tx) * resolution;
-    const dy = (bounds.minY - m.ty) * resolution;
-    const colorAlpha = this.owner.groupColorAlpha;
-    const kept = this.kept;
-    // A move may put the input's corner a texel either way; more is the screen's edge cutting it.
-    if (
-      kept &&
-      !this.stale &&
-      kept.width === input.frame.width &&
-      kept.height === input.frame.height &&
-      kept.resolution === resolution &&
-      Math.abs(kept.dx - dx) <= 1 &&
-      Math.abs(kept.dy - dy) <= 1 &&
-      kept.colorAlpha === colorAlpha
-    ) {
+    const now: Input = {
+      width: input.frame.width,
+      height: input.frame.height,
+      resolution,
+      dx: (bounds.minX - m.tx) * resolution,
+      dy: (bounds.minY - m.ty) * resolution,
+      colorAlpha: this.owner.groupColorAlpha,
+    };
+    const same = this.input !== null && sameInput(this.input, now);
+    if (same && !this.stale && this.kept) {
       this.changing = 0;
-      system.applyFilter(this, kept.texture, output, clear);
+      system.applyFilter(this, this.kept, output, clear);
       return;
     }
 
-    // Kept, with nothing changed, only after being filtered straight: kept again now.
-    this.changing = this.stale || kept ? this.changing + 1 : 0;
+    // Unchanged but not kept, as after being filtered straight: kept now.
+    this.changing = this.stale || !same ? this.changing + 1 : 0;
     this.stale = false;
+    this.input = now;
     this.release();
     if (this.changing > 1) {
       this.run(system, input, output, clear);
       return;
     }
 
-    const texture = TexturePool.getSameSizeTexture(input);
-    this.run(system, input, texture, true);
-    this.kept = {
-      texture,
-      width: input.frame.width,
-      height: input.frame.height,
-      resolution,
-      dx,
-      dy,
-      colorAlpha,
-    };
-    system.applyFilter(this, texture, output, clear);
+    const kept = TexturePool.getSameSizeTexture(input);
+    this.run(system, input, kept, true);
+    this.kept = kept;
+    system.applyFilter(this, kept, output, clear);
   }
 
   /** The filters in turn, as Pixi runs a chain, through a texture of the pool between them. */
@@ -1030,11 +1043,16 @@ export class FilterChain extends Filter {
       return;
     }
 
-    const temps = [TexturePool.getSameSizeTexture(input), TexturePool.getSameSizeTexture(input)];
+    const temps = [TexturePool.getSameSizeTexture(input)];
+    if (filters.length > 2) {
+      temps.push(TexturePool.getSameSizeTexture(input));
+    }
+
     let from = input;
     for (let i = 0; i < filters.length - 1; i++) {
-      filters[i].apply(system, from, temps[i % 2], true);
-      from = temps[i % 2];
+      const to = temps[i % temps.length];
+      filters[i].apply(system, from, to, true);
+      from = to;
     }
 
     filters[filters.length - 1].apply(system, from, output, clear);
@@ -1045,7 +1063,7 @@ export class FilterChain extends Filter {
 
   private release(): void {
     if (this.kept) {
-      TexturePool.returnTexture(this.kept.texture);
+      TexturePool.returnTexture(this.kept);
       this.kept = null;
     }
   }

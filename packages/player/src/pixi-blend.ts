@@ -8,7 +8,7 @@ import { AlphaFilter, BlendModeFilter, type Filter, RenderTargetSystem } from "p
 // and the copy of what is behind into it without: at some resolutions the
 // copy is a pixel taller or wider than the texture, which GL refuses
 // (copyTexSubImage2D's offset overflow), and the blend reads nothing. The
-// copy is held to the texture.
+// copy is held to the texture, for every renderer on the page.
 const copyToTexture = RenderTargetSystem.prototype.copyToTexture;
 RenderTargetSystem.prototype.copyToTexture = function (source, destination, from, size, to) {
   size.width = Math.min(size.width, destination.source.pixelWidth - to.x);

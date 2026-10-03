@@ -896,6 +896,11 @@ export class PixiView {
     }
 
     node.released = true;
+    const chain = node.filters[0];
+    if (chain instanceof FilterChain) {
+      chain.forget();
+    }
+
     for (const strokes of node.strokes) {
       if (strokes) {
         const previous = strokes.context;
@@ -1013,7 +1018,8 @@ export class PixiView {
                   ? gpuBitmaps(this.renderer).texture(store, false)
                   : null;
               });
-        node.filters = chain.length > 0 ? [new FilterChain(chain, container)] : [];
+        // A view drawn once keeps no output.
+        node.filters = chain.length > 0 ? [new FilterChain(chain, container, !this.fresh)] : [];
         if (this.fresh) {
           this.builtFilters.push(...node.filters);
         }
@@ -1106,6 +1112,7 @@ export class PixiView {
     }
 
     // What its filters' kept output was drawn from changed, but for a move.
+    // (A mask from outside it does not count: adl keeps the output, clipped as it was.)
     const chain = node.filters[0];
     if (
       chain instanceof FilterChain &&
@@ -1114,6 +1121,7 @@ export class PixiView {
         remask ||
         recolor ||
         this.rescaled ||
+        (dirty & TRANSFORM && (o.scroll || node.scroll)) ||
         (o instanceof Container && o.descendantsDirty))
     ) {
       chain.changed();

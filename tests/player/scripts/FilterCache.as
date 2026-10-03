@@ -2,19 +2,23 @@ package {
   import flash.display.*;
   import flash.events.Event;
   import flash.filters.*;
+  import flash.geom.Rectangle;
 
   // Filtered objects that stay put a frame, then change: one moved, one
   // whose child is drawn again, one scaled and then turned, one whose
   // filters are set anew; then their parent moved and scaled, and a
-  // grandchild moved. Flash draws a filtered object again for each. (A
-  // child moved within its parent's bounds adl leaves drawn where it was
-  // too, in its capture, which is left out.)
+  // grandchild moved; and one scrolled a pixel. Flash draws a filtered
+  // object again for each. adl does not for a child moved within its
+  // parent's bounds, which its capture shows where it was too, nor for a
+  // mask from outside that moved, which it shows clipped as it was: both
+  // are left out.
   public class FilterCache extends Sprite {
     private var group:Sprite = new Sprite();
     private var moved:Sprite;
     private var redrawn:Sprite;
     private var scaled:Sprite;
     private var refiltered:Sprite;
+    private var scrolled:Sprite;
     private var frame:int = 0;
 
     private function square(color:uint, x:Number, y:Number, size:Number):Shape {
@@ -42,13 +46,28 @@ package {
 
     public function FilterCache() {
       graphics.beginFill(0x808080);
-      graphics.drawRect(0, 0, 260, 100);
+      graphics.drawRect(0, 0, 380, 100);
       graphics.endFill();
       addChild(group);
       moved = cell(0, [new GlowFilter(0xff0000, 1, 6, 6, 2, 1)]);
       redrawn = cell(1, [new DropShadowFilter(4, 45, 0, 1, 4, 4, 1, 1)]);
       scaled = cell(2, [new BlurFilter(4, 4, 2)]);
       refiltered = cell(3, [new GlowFilter(0xffffff, 1, 8, 8, 2, 3)]);
+      // A child of a filtered object masked by a shape outside it.
+      var masked:Sprite = cell(4, [new GlowFilter(0xff00ff, 1, 4, 4, 2, 1)]);
+      var outside:Shape = square(0xffffff, masked.x - 12, masked.y - 12, 16);
+      addChild(outside);
+      masked.getChildAt(0).mask = outside;
+      // A filtered object scrolled by its scrollRect.
+      scrolled = new Sprite();
+      for (var i:int = 0; i < 6; i++) {
+        scrolled.addChild(square(i % 2 ? 0x0033cc : 0xffcc00, i * 6, 0, 6));
+      }
+      scrolled.scrollRect = new Rectangle(0, 0, 24, 6);
+      scrolled.x = 318;
+      scrolled.y = 37;
+      scrolled.filters = [new DropShadowFilter(4, 45, 0, 1, 2, 2, 1, 1)];
+      addChild(scrolled);
       addEventListener(Event.ENTER_FRAME, tick);
       trace("drawn");
     }
@@ -73,6 +92,8 @@ package {
         group.scaleY = 0.75;
         (refiltered.getChildAt(1) as Sprite).getChildAt(0).y = 8;
       } else if (frame == 6) {
+        scrolled.scrollRect = new Rectangle(1, 0, 24, 6);
+      } else if (frame == 7) {
         removeEventListener(Event.ENTER_FRAME, tick);
         trace("done");
       }
