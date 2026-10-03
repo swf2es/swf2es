@@ -884,8 +884,8 @@ export class MovieClip extends Container {
 
   /**
    * Run frame `frame`'s commands as the playhead reaches it: place, move and
-   * remove the timeline's children. A place without the move flag makes a
-   * new child even where the same character is at the depth; a goto does not.
+   * remove the timeline's children. A place without the move flag at a depth
+   * already taken is let be, as Flash lets it (`same-depth`).
    */
   private runFrame(frame: number): void {
     for (const command of this.timeline.frames[frame - 1] ?? []) {
@@ -896,6 +896,10 @@ export class MovieClip extends Container {
 
       const place = command.place;
       const existing = this.depths.get(place.depth);
+      if (!place.move && existing) {
+        continue;
+      }
+
       if (place.move && existing && place.character === null) {
         existing.applyPlace(place);
         continue;
@@ -939,15 +943,11 @@ export class MovieClip extends Container {
   gotoFrame(frame: number): void {
     const target = Math.max(1, Math.min(frame, this.totalFrames));
     const rewind = target < this.currentFrame;
-    if (rewind) {
-      for (const child of [...this.depths.values()]) {
-        if (child.placeFrame > target && child.depth !== null) {
-          this.removeAtDepth(child.depth);
-        }
-      }
-    }
-
     const jumps = new Map<number, Jump>();
+    // Depths the replay first places at without the move flag: on a rewind,
+    // a child there placed after the target finds that place let be, as at a
+    // taken depth, and stays (`same-depth`, at the loop).
+    const taken = new Set<number>();
     for (let f = (rewind ? 0 : this.currentFrame) + 1; f <= target; f++) {
       for (const command of this.timeline.frames[f - 1] ?? []) {
         if (command.type === "remove") {
@@ -962,6 +962,10 @@ export class MovieClip extends Container {
 
         const place = command.place;
         const jump = jumps.get(place.depth) ?? { before: null, place: null, frame: f };
+        if (rewind && !jumps.has(place.depth) && place.character !== null && !place.move) {
+          taken.add(place.depth);
+        }
+
         // A rewind replays from an empty display list, so what the frames do
         // at a depth nothing has placed yet is known: a change does nothing,
         // and a place in a child's stead places anew.
@@ -971,6 +975,9 @@ export class MovieClip extends Container {
           } else if (!rewind) {
             jump.before = jump.before ? mergePlace(jump.before, place) : place;
           }
+        } else if (!place.move && (jump.place || (!rewind && this.depths.has(place.depth)))) {
+          // At a depth taken by then, as frame by frame: let be.
+          continue;
         } else if (!place.move || (rewind && !jump.place)) {
           // Anew: the child starts from nothing, and from here.
           jump.before = null;
@@ -987,6 +994,16 @@ export class MovieClip extends Container {
       }
     }
 
+    // What the timeline placed after the target goes, but where the replay's
+    // place at its depth is let be.
+    if (rewind) {
+      for (const child of [...this.depths.values()]) {
+        if (child.placeFrame > target && child.depth !== null && !taken.has(child.depth)) {
+          this.removeAtDepth(child.depth);
+        }
+      }
+    }
+
     // Replayed from the first frame, a depth the frames left empty is empty.
     if (rewind) {
       for (const child of [...this.depths.values()]) {
@@ -1000,6 +1017,10 @@ export class MovieClip extends Container {
     this.currentFrame = target;
     for (const [depth, jump] of jumps) {
       const existing = this.depths.get(depth);
+      if (rewind && existing && existing.placeFrame > target && taken.has(depth)) {
+        continue;
+      }
+
       if (existing && jump.before) {
         existing.applyPlace(jump.before);
       }

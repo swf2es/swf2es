@@ -704,7 +704,13 @@ forward does the same, whatever the frames between named at the depth;
 a rewind keeps the child only if the character the frames finally name
 is its own, and makes a new one for another (Ruffle's
 `place_object_replace_2`: the same object through two forward jumps, a
-new one on the rewind that ends on the other shape). Flash's matrix is
+new one on the rewind that ends on the other shape). A `PlaceObject`
+without the move flag at a depth already taken is let be, whatever it
+names, playing or in a goto's replay (`same-depth`, the corpus's
+`place_object_same_depth_frame`). A rewind, the loop to the first frame
+among them, takes off what the timeline placed after the target, but a
+child at a depth the replayed frames first place at without the move
+flag stays as it is, that place let be as at a taken depth. Flash's matrix is
 exact at the quarter turns, 0 and not the doubles' cosine of 90°, so the
 player's is.
 

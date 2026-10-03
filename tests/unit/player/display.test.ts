@@ -168,14 +168,15 @@ test("a goto replays the frames between, forward and back", () => {
   assert.equal(root.depths.get(2), second);
 });
 
-test("a place without the move flag makes a new child; with it, changes the one there", () => {
+test("a place without the move flag at a taken depth is let be; with it, changes the one there", () => {
+  // As Flash has it (the player's same-depth case): the child there stays.
   const replaced = movie(
     [w.place({ depth: 1, character: 1 })],
     [w.place({ depth: 1, character: 1 })],
   );
   const before = replaced.root.depths.get(1);
   replaced.tick();
-  assert.notEqual(replaced.root.depths.get(1), before);
+  assert.equal(replaced.root.depths.get(1), before);
   assert.equal(replaced.root.children.length, 1);
 
   const moved = movie(
@@ -239,16 +240,15 @@ test("a rewind puts back what the first frame's place left unsaid", () => {
   assert.equal(square?.matrix.tx, 0);
 });
 
-test("a goto forward makes a new child where the frame places the character anew", () => {
-  // As frame by frame would (see the place without the move flag above);
-  // only a rewind, or a place in the child's stead, keeps it.
+test("a goto forward lets a taken depth be where the frame places a character without the move flag", () => {
+  // As frame by frame would (see the place without the move flag above).
   const jumped = movie(
     [w.place({ depth: 1, character: 1 })],
     [w.place({ depth: 1, character: 1 })],
   );
   const before = jumped.root.depths.get(1);
   jumped.root.gotoFrame(2);
-  assert.notEqual(jumped.root.depths.get(1), before);
+  assert.equal(jumped.root.depths.get(1), before);
   assert.equal(jumped.root.children.length, 1);
 
   const replaced = movie(
@@ -262,8 +262,8 @@ test("a goto forward makes a new child where the frame places the character anew
 });
 
 test("a goto forward leaves the display list as playing the frames would", () => {
-  // Frame 1 places the square, frame 2 moves it, frame 3 places it anew with
-  // no matrix: a jump must not hand the new square the moved one's place.
+  // Frame 1 places the square, frame 2 moves it, frame 3 places it without
+  // the move flag at its taken depth: played or jumped, the moved one stays.
   const anew = () =>
     movie(
       [w.place({ depth: 1, character: 1 })],
@@ -276,9 +276,9 @@ test("a goto forward leaves the display list as playing the frames would", () =>
   const jumped = anew();
   const before = jumped.root.depths.get(1);
   jumped.root.gotoFrame(3);
-  assert.equal(played.root.depths.get(1)?.matrix.tx, 0);
-  assert.equal(jumped.root.depths.get(1)?.matrix.tx, 0);
-  assert.notEqual(jumped.root.depths.get(1), before);
+  assert.equal(played.root.depths.get(1)?.matrix.tx, 50);
+  assert.equal(jumped.root.depths.get(1)?.matrix.tx, 50);
+  assert.equal(jumped.root.depths.get(1), before);
 
   // In the square's stead, the other character keeps its place both ways.
   const instead = () =>
@@ -299,9 +299,9 @@ test("a goto forward leaves the display list as playing the frames would", () =>
   }
 });
 
-test("a jump remembers a character placed anew through what follows", () => {
-  // Frame 2 places the square anew, frame 3 places it in its own stead: the
-  // child is frame 2's, not frame 1's, whether played or jumped to.
+test("a jump lets a taken depth be through what follows, as playing does", () => {
+  // Frame 2's place without the move flag finds the depth taken and is let
+  // be; frame 3 moves frame 1's square, whether played or jumped to.
   const anew = () =>
     movie(
       [w.place({ depth: 1, character: 1 })],
@@ -320,9 +320,9 @@ test("a jump remembers a character placed anew through what follows", () => {
     [jumped, jumpedFirst],
   ] as const) {
     const child = player.root.depths.get(1);
-    assert.notEqual(child, first);
+    assert.equal(child, first);
     assert.equal(child?.matrix.tx, 50);
-    assert.equal(child?.placeFrame, 2);
+    assert.equal(child?.placeFrame, 1);
   }
 });
 
@@ -389,9 +389,13 @@ test("jumping forward to any frame of a random timeline ends as playing to it", 
 
     // A rewind from the last frame to each earlier one shows what playing
     // to it shows, though it keeps the children it can rather than make
-    // them again, so which object is which is not compared.
-    const state = (root: MovieClip) =>
-      snapshot(root, new Map()).map(({ sameAsFirst: _, ...rest }) => rest);
+    // them again, so which object is which is not compared; and but where a
+    // child placed after the target stays, its depth's place in the frames
+    // replayed let be, as Flash keeps it (the player's same-depth case).
+    const state = (root: MovieClip, kept: Set<number>) =>
+      snapshot(root, new Map())
+        .filter(({ depth }) => !kept.has(depth))
+        .map(({ sameAsFirst: _, ...rest }) => rest);
     for (let target = 1; target < frames.length; target++) {
       const played = movie(...frames);
       for (let f = 1; f < target; f++) {
@@ -404,7 +408,14 @@ test("jumping forward to any frame of a random timeline ends as playing to it", 
       }
 
       rewound.root.gotoFrame(target);
-      assert.deepEqual(state(rewound.root), state(played.root), `timeline ${t}, back to ${target}`);
+      const kept = new Set(
+        [...rewound.root.depths].filter(([, c]) => c.placeFrame > target).map(([d]) => d),
+      );
+      assert.deepEqual(
+        state(rewound.root, kept),
+        state(played.root, kept),
+        `timeline ${t}, back to ${target}`,
+      );
     }
   }
 });
