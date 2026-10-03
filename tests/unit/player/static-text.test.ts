@@ -42,7 +42,7 @@ test("a record keeps the font, height, colour and pen of the one before, and adv
     { y: 600, glyphs: [[1, 50]] },
   ]);
   const { glyphs, text: chars } = placeGlyphs(text, characters);
-  assert.equal(chars, "abW");
+  assert.equal(chars, "ab\nW");
   assert.deepEqual(
     glyphs.map((g) => [String.fromCharCode(g.glyph.code), g.x, g.y, g.height, g.color]),
     [
@@ -80,5 +80,49 @@ test("its text is null where a glyph has no font or one the SWF lacks, or where 
   assert.deepEqual(
     placeGlyphs(missing[0], characters).glyphs.map((g) => String.fromCharCode(g.glyph.code)),
     ["b"],
+  );
+});
+
+test("a record on the same line adds no line feed; one back on the line before does", () => {
+  const text = (records: w.TextRecordSpec[]) => placeGlyphs(...read(records)).text;
+  assert.equal(
+    text([
+      { font: 5, height: 100, y: 0, glyphs: [[2, 50]] },
+      { x: 400, glyphs: [[3, 0]] },
+    ]),
+    "ab",
+  );
+  assert.equal(
+    text([
+      { font: 5, height: 100, y: 0, glyphs: [[2, 0]] },
+      { y: 600, glyphs: [] },
+      { y: 1200, glyphs: [[3, 0]] },
+      { y: 0, glyphs: [[4, 0]] },
+    ]),
+    "a\nb\nc",
+  );
+});
+
+test("a text that sets no colour is transparent, and a glyph past its font moves no pen", () => {
+  const { glyphs, text } = placeGlyphs(
+    ...read([
+      {
+        font: 5,
+        height: 400,
+        glyphs: [
+          [2, 300],
+          [40, 600],
+          [3, 0],
+        ],
+      },
+    ]),
+  );
+  assert.equal(text, null);
+  assert.deepEqual(
+    glyphs.map((g) => [String.fromCharCode(g.glyph.code), g.x, g.color]),
+    [
+      ["a", 0, 0],
+      ["b", 300, 0],
+    ],
   );
 });

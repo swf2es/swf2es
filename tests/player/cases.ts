@@ -1786,6 +1786,74 @@ function staticTextFilters(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Static text in Probe for scripts/StaticTextProbe.as: a text of two
+// lines, one that sets no colour, and one whose middle glyph is past the
+// font's, which moves no pen.
+function staticTextProbe(abc: Uint8Array): Uint8Array {
+  const ab: [number, number][] = [
+    [2, 300],
+    [3, 400],
+  ];
+  return w.swf({
+    width: 200,
+    height: 120,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      probeFont(5),
+      w.staticText({
+        id: 1,
+        version: 2,
+        bounds: [0, 1400, -800, 800],
+        records: [
+          { font: 5, height: 400, color: 0xff000000, x: 0, y: 0, glyphs: ab },
+          {
+            y: 600,
+            glyphs: [
+              [1, 450],
+              [4, 200],
+            ],
+          },
+        ],
+      }),
+      w.staticText({
+        id: 2,
+        bounds: [0, 1400, -800, 300],
+        records: [{ font: 5, height: 400, x: 0, y: 0, glyphs: ab }],
+      }),
+      w.staticText({
+        id: 3,
+        version: 2,
+        bounds: [0, 1400, -800, 300],
+        records: [
+          {
+            font: 5,
+            height: 400,
+            color: 0xff0000cc,
+            x: 0,
+            y: 0,
+            glyphs: [
+              [2, 300],
+              [40, 600],
+              [3, 400],
+            ],
+          },
+        ],
+      }),
+      w.doAbc(abc, "StaticTextProbe"),
+      w.symbolClass([[0, "StaticTextProbe"]]),
+      w.place({ depth: 1, character: 1, matrix: { tx: 800, ty: 800 } }),
+      w.place({ depth: 2, character: 2, matrix: { tx: 800, ty: 2000 } }),
+      w.place({ depth: 3, character: 3, matrix: { tx: 2400, ty: 800 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Text laid out in Probe (scripts/TextLayout.as).
 function textLayout(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -1974,6 +2042,15 @@ export const cases: PlayerCase[] = [
     capture: [1],
     tolerance: 32,
     maxOutliers: 100,
+  },
+  {
+    name: "static-text-probe",
+    swf: staticTextProbe,
+    script: "StaticTextProbe",
+    frames: 2,
+    capture: [1],
+    tolerance: 32,
+    maxOutliers: 20,
   },
   {
     name: "static-text-filters",

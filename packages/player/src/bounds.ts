@@ -21,6 +21,7 @@ import {
   union,
 } from "./geometry.js";
 import { flatten, inside, orientation, type ShapeLayer } from "./shapes.js";
+import { hitsGlyph } from "./static-text.js";
 
 const TWIPS = 20;
 const IDENTITY: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
@@ -263,10 +264,8 @@ function drawnAt(
     return !!store && !store.disposed && x >= 0 && x < store.width && y >= 0 && y < store.height;
   }
 
-  // Static text over its tag's rectangle: its glyphs' outlines are not tested yet.
   if (d instanceof StaticTextObject) {
-    const r = d.definition.definition.bounds;
-    return x >= r.xMin / TWIPS && x < r.xMax / TWIPS && y >= r.yMin / TWIPS && y < r.yMax / TWIPS;
+    return hitsGlyph(d.definition, d.glyphs.glyphs, x, y);
   }
 
   const layers: ShapeLayer[] =

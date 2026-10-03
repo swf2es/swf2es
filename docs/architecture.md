@@ -1517,13 +1517,23 @@ Static text (DefineText, DefineText2) is a `StaticText`: its records'
 glyphs where the authoring tool put them, each record keeping the font,
 height, colour and pen of the one before (`static-text.ts`), drawn with
 the glyph fills a field's embedded text shares, under the tag's matrix.
-A font is found as the text is shown, as Flash finds it, so one the SWF
-defines after the text still draws it (`static-text`); a glyph of a font
-the SWF lacks draws nothing. `text` is the glyphs' characters, and null
-where any glyph has no font or there are none (the corpus's
-`statictext_text`). Only a timeline makes one: a script's `new` is
-refused, #2012. It is hit over its tag's rectangle; its glyphs' outlines
-are not tested yet.
+A text that sets no colour draws nothing, as adl draws it. A font is
+found as the text is shown, as Flash finds it, so one the SWF defines
+after the text still draws it (`static-text`); a glyph of a font the SWF
+lacks, or past its font's glyphs, draws nothing and moves no pen. Only
+DefineFont2 and DefineFont3 are read: older static text, in DefineFont
+and DefineFontInfo, draws nothing, and a device font's, whose glyphs
+have no outlines, draws nothing where Flash draws it in a system font.
+`text` is the glyphs' characters, a line feed before a record's first
+where its line is not the last glyph's, and null where any glyph has no
+font or there are none (`static-text-probe`, the corpus's
+`statictext_text`; adl reads a glyph past its font as another
+character). Only a timeline makes one: a script's `new` is refused,
+#2012. It is hit by its glyphs' outlines, a transparent one not at all,
+and without the shape flag over its tag's rectangle; it is no
+InteractiveObject, so the mouse finds its parent there. adl clips a
+filtered one to its bounds, as it caches it as a bitmap of them; the
+player does not, which only shows for a glyph past them.
 
 ### Colour transforms
 

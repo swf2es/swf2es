@@ -421,18 +421,14 @@ export class StaticTextObject extends DisplayObject {
     this.character = definition;
   }
 
-  /** Its glyphs as placed, and its text; kept once every font is found, as one defined later may yet come. */
+  /**
+   * Its glyphs as placed, and its text, found the first time they are
+   * asked for: by then its SWF's fonts are all read, those defined after it
+   * too.
+   */
   get glyphs(): { glyphs: PlacedGlyph[]; text: string | null } {
-    if (this.laidGlyphs) {
-      return this.laidGlyphs;
-    }
-
-    const placed = placeGlyphs(this.definition, this.characters);
-    if (placed.text !== null || placed.glyphs.length === 0) {
-      this.laidGlyphs = placed;
-    }
-
-    return placed;
+    this.laidGlyphs ??= placeGlyphs(this.definition, this.characters);
+    return this.laidGlyphs;
   }
 }
 
