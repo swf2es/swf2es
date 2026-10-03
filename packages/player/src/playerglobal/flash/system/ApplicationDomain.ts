@@ -16,6 +16,7 @@ export function applicationDomainNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
   const domainOf = (o: AsObject): avm2.Domain => o.$domain ?? s.mainDomain;
+  // Not defined, as Flash has it, for a name whose script throws as it runs too.
   const has = (o: AsObject, name: Value): boolean => {
     if (name === null || name === undefined) {
       return false;
@@ -66,14 +67,9 @@ export function applicationDomainNatives(s: Scripting): avm2.Natives {
       return names;
     }
 
-    // A name not defined is refused with its local name, as Flash's message has it.
+    // As Flash's: an initializer's error comes through (Runtime.definitionNamed).
     getDefinition(name: Value): Value {
-      const qualified = qualify(String(name));
-      if (!has(this, name)) {
-        throw s.rt.error("ReferenceError", 1065, qualified.replace(/^.*::/, ""));
-      }
-
-      return s.rt.classNamed(qualified, domainOf(this));
+      return s.rt.definitionNamed(qualify(String(name)), domainOf(this));
     }
 
     hasDefinition(name: Value): boolean {

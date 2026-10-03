@@ -843,7 +843,11 @@ binds a character to the class its name finds in the SWF's domain, by
 the module that defines it, so the same name in another domain is
 another class; a class keeps the symbol first bound to it, so another
 SWF binding a parent's class makes its own timeline's instances of the
-class, but `new` makes the first's.
+class, but `new` makes the first's. `ApplicationDomain.getDefinition`
+lets the error of a lazy script's initializer through, running it again
+at each call, where `hasDefinition` says false and a lookup by code keeps
+the script as run, as avmplus does (`Runtime.definitionNamed`, the
+`definitions` case).
 
 A SWF the player loads is in the position the oracle's harness puts
 every SWF in, so what the harness could not judge for a main movie, the
