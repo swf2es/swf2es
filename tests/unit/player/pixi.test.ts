@@ -534,7 +534,13 @@ test("a filtered or blended object is drawn into its filters multisampled as its
     filtered.filters = [{ ...filterDefaults("glow"), blurX: 4, blurY: 4 }];
     const blended = new Container();
     blended.blendMode = "multiply";
-    for (const o of [filtered, blended]) {
+    const layer = new Container();
+    layer.blendMode = "layer";
+    // Both: one filter left "off" would turn multisampling off for all of them.
+    const both = new Container();
+    both.filters = [{ ...filterDefaults("glow"), blurX: 4, blurY: 4 }];
+    both.blendMode = "overlay";
+    for (const o of [filtered, blended, layer, both]) {
       const { renderer } = standIn([]);
       (renderer as unknown as { type: number }).type = 1;
       const view = new PixiView(renderer);
