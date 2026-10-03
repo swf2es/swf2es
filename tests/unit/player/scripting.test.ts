@@ -644,6 +644,115 @@ test("frame scripts that send their clip to each other's frame end in a stack ov
   });
 });
 
+/** A SWF of `version` whose root places Bound, a clip of `frames` frames bound to the script's class. */
+function boundClip(abc: Uint8Array, version: number, frames: number): Uint8Array {
+  return w.swf({
+    version,
+    width: 20,
+    height: 20,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(2, frames, [...Array.from({ length: frames }, () => w.showFrame()), w.end()]),
+      w.doAbc(abc),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Bound"],
+      ]),
+      w.place({ depth: 1, character: 2, name: "bound" }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+test("a frame script's goto happens though the script throws after it, as in Flash", {
+  skip,
+}, async () => {
+  // adl: the clip goes to frame 3 and runs its script there, the error reported apart.
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Bound extends MovieClip {
+      public function Bound() {
+        addFrameScript(0, function():void { gotoAndStop(3); throw new Error("after the goto"); },
+          2, function():void { trace("script 3"); });
+      }
+    }
+    public class Main extends MovieClip {
+      public var bound:Bound;
+    }
+  }`;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(boundClip(compiler(out)("GotoThrows", source), 10, 4), scripting);
+  await assert.rejects(player.start());
+  const bound = (player.root as unknown as Container).children[0] as MovieClip;
+  assert.equal(bound.currentFrame, 3);
+  assert.deepEqual(lines, ["script 3"]);
+});
+
+test("scripts that catch the stack overflow of their goto cycles stop soon, not after millions of runs", {
+  skip,
+}, async () => {
+  // Two clips that send each other to the other frame, at once, as a goto on
+  // another clip is: each cycle runs inside the last, and each script
+  // catches the overflow, which must not set the cycles going again.
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Bound extends MovieClip {
+      public static var runs:int = 0;
+      public function Bound() {
+        addFrameScript(0, swap, 1, swap);
+      }
+      private function swap():void {
+        runs++;
+        var peer:MovieClip = MovieClip(parent).getChildByName(name == "a" ? "b" : "a") as MovieClip;
+        try {
+          peer.gotoAndStop(peer.currentFrame == 1 ? 2 : 1);
+        } catch (e:Error) {}
+      }
+    }
+    public class Main extends MovieClip {
+      public var a:Bound;
+      public var b:Bound;
+      public function Main() {
+        addEventListener("exitFrame", function(_:*):void { trace("runs", Bound.runs); });
+      }
+    }
+  }`;
+  const swf = w.swf({
+    version: 10,
+    width: 20,
+    height: 20,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(2, 2, [w.showFrame(), w.showFrame(), w.end()]),
+      w.doAbc(compiler(out)("CaughtOverflow", source)),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Bound"],
+      ]),
+      w.place({ depth: 1, character: 2, name: "a" }),
+      w.place({ depth: 2, character: 2, name: "b" }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(swf, scripting);
+  await player.start();
+  const runs = Number(lines.at(-1)?.split(" ")[1]);
+  // The chain to the overflow, then the frame's own pass, bounded by its
+  // rounds, not cycles started over.
+  assert.ok(runs > 256 && runs < 10000, `${runs} runs`);
+});
+
 test("a timer whose closure throws keeps running and fires again", { skip }, async () => {
   const lines: string[] = [];
   const scripting = new Scripting(await createCodegen(wasm), {

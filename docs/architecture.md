@@ -680,7 +680,11 @@ its own inside, and the frame's own phases then find the scripts already
 run. A script's goto on itself waits for it even while another clip's
 cycle runs inside it. Two scripts that send their clip to each other's
 frame nest cycles without end; Flash gives up some 1400 deep, and the
-player throws AS3's stack overflow, #1023, at 256.
+player throws AS3's stack overflow, #1023, at 256, after which no goto
+cycle runs for the rest of the frame, so scripts that catch it cannot
+start it over. A frame script that asks for a goto and then throws still
+has its goto, and the scripts after it still run, as adl has it; the
+error reaches the host when the frame's scripts are done.
 
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,
@@ -729,10 +733,14 @@ is its own, and makes a new one for another (Ruffle's
 new one on the rewind that ends on the other shape). A `PlaceObject`
 without the move flag at a depth already taken is let be, whatever it
 names, playing or in a goto's replay (`same-depth`, the corpus's
-`place_object_same_depth_frame`). A rewind, the loop to the first frame
-among them, takes off what the timeline placed after the target, but a
-child at a depth the replayed frames first place at without the move
-flag stays as it is, that place let be as at a taken depth. Flash's matrix is
+`place_object_same_depth_frame`), and one with the move flag that names a
+character where nothing is places nothing (`rewind-first`). A rewind, the loop to the first frame
+among them, takes off what the timeline placed after the target, but for
+a child at a depth the frames replayed end on a place without the move
+flag at: that child stays, its character too, and takes the place, its
+transform given anew as for a first placing, and the moves after it
+(`same-depth`, `rewind-first`); what comes before that place at the
+depth, a removal among it, does not matter. Flash's matrix is
 exact at the quarter turns, 0 and not the doubles' cosine of 90°, so the
 player's is.
 

@@ -3,8 +3,9 @@
 // its own way; Main traces every frame where each body and its kids are,
 // at ENTER_FRAME and at EXIT_FRAME, beside a body that never jumps and a
 // loop on the root. Same goes to the frame it is on at every ENTER_FRAME,
-// Nested jumps and sends its kid to a frame in one script, and Pooled is
-// taken off, sent to a frame while off, and put back three frames later.
+// Nested jumps and sends its kid to a frame in one script, Pooled is
+// taken off, sent to a frame while off, and put back three frames later,
+// and Bound, placed on the root's frame 2, jumps in its constructor.
 package {
   import flash.display.MovieClip;
   import flash.events.Event;
@@ -104,6 +105,16 @@ package {
     }
   }
 
+  // Placed on frame 2: from its constructor, to 3 playing.
+  public class Bound extends MovieClip {
+    public var kid:MovieClip;
+    public var mid:MovieClip;
+
+    public function Bound() {
+      gotoAndPlay(3);
+    }
+  }
+
   public class Pooled extends MovieClip {
     public var kid:MovieClip;
     public var mid:MovieClip;
@@ -119,6 +130,7 @@ package {
     public var same:Same;
     public var nested:Nested;
     public var pooled:Pooled;
+    public var bound:Bound;
     public var plain:MovieClip;
     public var loose:MovieClip;
     private var n:int = 0;
@@ -141,7 +153,7 @@ package {
 
     private function where():String {
       var out:Array = [];
-      for each (var name:String in ["forward", "forwardStop", "forwardPlay", "stopper", "back", "listener", "plain", "same", "nested", "pooled"]) {
+      for each (var name:String in ["forward", "forwardStop", "forwardPlay", "stopper", "back", "listener", "plain", "same", "nested", "pooled", "bound"]) {
         var body:MovieClip = this[name] as MovieClip;
         if (!body) {
           out.push(name + " -");

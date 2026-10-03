@@ -444,6 +444,7 @@ function gotoChildren(abc: Uint8Array): Uint8Array {
       body(11),
       body(12),
       body(13),
+      body(14),
       w.doAbc(abc, "GotoChildren"),
       w.symbolClass([
         [0, "Main"],
@@ -456,6 +457,7 @@ function gotoChildren(abc: Uint8Array): Uint8Array {
         [11, "Same"],
         [12, "Nested"],
         [13, "Pooled"],
+        [14, "Bound"],
       ]),
       w.place({ depth: 1, character: 3, name: "forward" }),
       w.place({ depth: 2, character: 4, name: "forwardStop" }),
@@ -468,7 +470,9 @@ function gotoChildren(abc: Uint8Array): Uint8Array {
       w.place({ depth: 9, character: 11, name: "same" }),
       w.place({ depth: 10, character: 12, name: "nested" }),
       w.place({ depth: 11, character: 13, name: "pooled" }),
-      ...Array.from({ length: 12 }, () => w.showFrame()),
+      w.showFrame(),
+      w.place({ depth: 12, character: 14, name: "bound" }),
+      ...Array.from({ length: 11 }, () => w.showFrame()),
       w.end(),
     ],
   });
@@ -618,6 +622,65 @@ function gotoCycleNested(abc: Uint8Array): Uint8Array {
       w.place({ depth: 4, character: 2 }),
       w.showFrame(),
       w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// Frames whose first command at a depth does nothing, then a rewind past
+// them, a place without the move flag at a taken depth 3 on frame 2, and
+// at depth 4 a place, a removal and a place again before the rewind's
+// target, at depth 5 a move to another character after a place, and at
+// depth 6 a move with a character where nothing is, for scripts/RewindFirst.as.
+function rewindFirst(abc: Uint8Array): Uint8Array {
+  const clip = (id: number) =>
+    w.sprite(id, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]);
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      clip(2),
+      clip(3),
+      clip(4),
+      w.doAbc(abc, "RewindFirst"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "A"],
+        [3, "B"],
+        [4, "C"],
+      ]),
+      w.place({ depth: 1, move: true, matrix: { tx: 400 } }),
+      w.remove(2),
+      w.place({ depth: 3, character: 2, matrix: { tx: 1400 } }),
+      w.place({ depth: 4, character: 2, matrix: { tx: 1600 } }),
+      w.place({ depth: 5, character: 2, matrix: { tx: 2200 } }),
+      w.showFrame(),
+      w.place({ depth: 1, character: 2 }),
+      w.place({ depth: 2, character: 2, matrix: { tx: 200 } }),
+      w.place({ depth: 3, character: 3, matrix: { tx: 1200 } }),
+      w.remove(4),
+      w.place({ depth: 4, character: 2, matrix: { tx: 1800 } }),
+      w.place({ depth: 5, move: true, character: 4 }),
+      w.place({ depth: 6, move: true, character: 4, matrix: { tx: 2600 } }),
+      w.showFrame(),
+      w.remove(1),
+      w.remove(2),
+      w.place({ depth: 1, character: 3, matrix: { tx: 600 } }),
+      w.place({ depth: 2, character: 3, matrix: { tx: 800 } }),
+      w.remove(4),
+      w.place({ depth: 4, character: 3, matrix: { tx: 2000 } }),
+      w.remove(5),
+      w.place({ depth: 5, character: 3, matrix: { tx: 2400 } }),
+      w.remove(6),
+      w.place({ depth: 6, character: 3, matrix: { tx: 2800 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, matrix: { tx: 1000 } }),
       w.showFrame(),
       w.end(),
     ],
@@ -1645,6 +1708,15 @@ export const cases: PlayerCase[] = [
     swf: gotoCycleNested,
     script: "GotoCycleNested",
     frames: 4,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "rewind-first",
+    swf: rewindFirst,
+    script: "RewindFirst",
+    frames: 7,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,
