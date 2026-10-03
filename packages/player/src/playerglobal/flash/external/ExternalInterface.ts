@@ -50,7 +50,10 @@ export function externalInterfaceNatives(s: Scripting): avm2.Natives {
         s.rt.toString(name),
         remove || closure === null || closure === undefined
           ? null
-          : (request, args) => s.rt.callValue(closure, null, [request, s.rt.array(args)], null),
+          : (request, args) => {
+              s.hostCalls++;
+              return s.rt.callValue(closure, null, [request, s.rt.array(args)], null);
+            },
       );
     }
 

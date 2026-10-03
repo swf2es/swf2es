@@ -41,9 +41,15 @@ const renderer = await autoDetectRenderer({
 const view = new PixiView(renderer);
 const unbind = view.bindPointer(player); // mouse input, until unbind()
 await player.start();
-// Each animation frame:
+let drawn = -1;
+// Each animation frame: play what the time is worth, and draw only when a
+// frame ran, input came or the page called into the SWF since the last
+// draw; the frames between would draw the same picture.
 player.advance(elapsedMs);
-view.render(player.root);
+if (player.changes !== drawn) {
+  drawn = player.changes;
+  view.render(player.root);
+}
 ```
 
 `Scripting` runs the SWF's ActionScript 3 and needs `builtin.abc` and
