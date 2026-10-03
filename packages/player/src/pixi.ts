@@ -1522,6 +1522,7 @@ function drawText(o: TextObject, art: PixiContainer): void {
   }
 
   if (!o.model.text) {
+    drawCaret(o, art);
     return;
   }
 
@@ -1592,6 +1593,8 @@ function drawText(o: TextObject, art: PixiContainer): void {
     art.addChild(clip);
     text.mask = clip;
   }
+
+  drawCaret(o, art);
 }
 
 /** Static text: each glyph's shared fill, at its height and in its colour, under the text's matrix. */
@@ -1615,6 +1618,53 @@ function drawStaticText(o: StaticTextObject, art: PixiContainer): void {
   }
 
   art.addChild(text);
+}
+
+/**
+ * A focused input field's caret, a pixel wide and its line's height, in
+ * the colour of the text before it, and its selection shaded under it.
+ */
+function drawCaret(o: TextObject, art: PixiContainer): void {
+  if (!o.focused || o.type !== "input") {
+    return;
+  }
+
+  const layout = o.layout;
+  const lines = layout.lines;
+  if (lines.length === 0) {
+    return;
+  }
+
+  const first = Math.min(Math.max(0, o.scrollV - 1), lines.length - 1);
+  const dx = o.left * 20 - o.scrollH * 20;
+  const dy = o.top * 20 - (lines[first].y - GUTTER);
+  // Where index i is drawn: its line, and its x, the line's end past its last character.
+  const place = (i: number) => {
+    const line = lines.find((l) => i < l.end) ?? lines[lines.length - 1];
+    const c = line.chars[i - line.start];
+    const shown = line.chars.filter((ch) => ch.shown);
+    const last = shown[shown.length - 1];
+    const x = c?.shown ? c.x : last ? last.x + last.advance : line.x;
+    return { line, x: (dx + x) / 20 };
+  };
+  const g = new Graphics();
+  const [begin, end] = o.selection;
+  if (begin < end) {
+    const from = place(begin);
+    const to = place(end);
+    if (from.line === to.line) {
+      const top = (dy + from.line.y) / 20;
+      const height = (from.line.ascent + from.line.descent) / 20;
+      g.rect(from.x, top, to.x - from.x, height).fill({ color: 0x3399ff, alpha: 0.4 });
+    }
+  }
+
+  const at = place(o.caret);
+  const format = o.model.formats[Math.max(0, o.caret - 1)] ?? o.model.defaultFormat;
+  const top = (dy + at.line.y) / 20;
+  const height = Math.max(1, (at.line.ascent + at.line.descent) / 20);
+  g.rect(at.x, top, 1, height).fill({ color: format.color & 0xffffff });
+  art.addChild(g);
 }
 
 /** A run of a device font's characters in one format, as Pixi Text from where the layout put its first, on the baseline. */

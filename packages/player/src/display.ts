@@ -470,6 +470,11 @@ export class TextObject extends DisplayObject {
   useRichTextClipboard = false;
   scrollH = 0;
   scrollV = 1;
+  /** The selection, from the end it was started at to the caret, as text indices; empty, a caret alone. */
+  anchor = 0;
+  caret = 0;
+  /** Whether it has the keyboard's focus, an input field then showing its caret. */
+  focused = false;
 
   constructor(
     readonly definition: TextCharacter | null,
@@ -586,6 +591,19 @@ export class TextObject extends DisplayObject {
   /** The alignment of its first paragraph. */
   get align(): string {
     return (this.model.formats[0] ?? this.model.defaultFormat).align;
+  }
+
+  /** The selection's first and last index, in order. */
+  get selection(): [number, number] {
+    return this.anchor <= this.caret ? [this.anchor, this.caret] : [this.caret, this.anchor];
+  }
+
+  /** Select from `anchor` to `caret`, each kept within the text; a focused field shows its caret there. */
+  select(anchor: number, caret: number): void {
+    const length = this.model.text.length;
+    this.anchor = Math.max(0, Math.min(length, anchor));
+    this.caret = Math.max(0, Math.min(length, caret));
+    this.invalidate(CONTENT);
   }
 }
 

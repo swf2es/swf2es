@@ -10,6 +10,7 @@ import {
   StaticTextObject,
 } from "./display.js";
 import { apply, invert } from "./geometry.js";
+import type { KeyboardInput } from "./keyboard.js";
 import { dispatchEvent } from "./playerglobal/flash/events/EventDispatcher.js";
 import type { Scripting } from "./scripting.js";
 
@@ -107,6 +108,8 @@ export class PointerInput {
   constructor(
     private readonly stage: Container,
     private readonly scripting: Scripting,
+    /** What a press tells the keyboard: which field it focuses, and where its caret goes. */
+    private readonly keyboard: KeyboardInput | null = null,
   ) {}
 
   private send(type: string, target: DisplayObject, p: PointerState, buttonDown: boolean): void {
@@ -163,6 +166,12 @@ export class PointerInput {
       }
     } else if (type === "down" && (p.button ?? 0) === 0) {
       this.pressed = target;
+      if (this.keyboard) {
+        const m = target && invert(toStage(target, this.stage));
+        const [x, y] = m ? apply(m, p.x, p.y) : [0, 0];
+        this.keyboard.pressed(target, x, y);
+      }
+
       if (target) {
         buttonState(target, "down");
         this.send("mouseDown", target, p, true);

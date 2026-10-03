@@ -1535,6 +1535,29 @@ InteractiveObject, so the mouse finds its parent there. adl clips a
 filtered one to its bounds, as it caches it as a bitmap of them; the
 player does not, which only shows for a glyph past them.
 
+### Keyboard and focus
+
+A host gives the player its keys (`bindKeyboard`, `keyboard.ts`): each
+goes to `stage.focus`, or the stage where nothing has focus, as a
+`KeyboardEvent` that bubbles, the browser's legacy key code standing for
+Flash's, which it matches. A focused input field then edits with it: a
+character typed goes in at the caret, over the selection, as Flash's
+order has it, a `TextEvent.TEXT_INPUT` a listener may cancel first, then
+`Event.CHANGE`; `restrict` and `maxChars` keep out what they do not
+allow. Backspace, Delete, the arrows, Home and End move and delete, Shift
+extends the selection, Ctrl+A selects all, and Enter adds a line only
+to a multiline field. A click on an input field gives it focus, its
+caret at the nearer side of the character clicked; a click elsewhere
+takes focus from a field. Tab moves among the stage's input fields, by
+`tabIndex` where any has one, else in reading order, selecting the
+field's text; `stage.focus` set by a script moves focus too, and every
+move is a `focusOut` and a `focusIn`, each naming the other. A focused
+field draws its caret, unblinking, a pixel wide in the colour of the text
+before it, and a selection on one line shaded. While a field of the SWF
+has focus, the host keeps the browser from acting on keys too. adl
+cannot be typed into, so none of this is recorded against Flash; there
+is no IME, no clipboard, and no scrolling to keep the caret in view.
+
 ### Colour transforms
 
 A colour transform acts on what each shape, bitmap and text field draws
