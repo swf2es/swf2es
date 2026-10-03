@@ -1,0 +1,39 @@
+constructed 1 Intro
+step 1 2 5 Intro 2 middle middle start@1,middle@2
+root scenes Intro/2[start@1,middle@2] Main/3[go@2]
+kid scenes /4[walk@1,run@3]
+kid 2 4  4 walk null walk@1,run@3
+same scene false false
+step 2 1 5 Main 3 middle null go@2
+step 3 2 5 Main 3 go go go@2
+gotoAndStop(2, Main) 2 5 Main 3 go go go@2
+step 4 2 5 Main 3 go go go@2
+prevScene 1 5 Intro 2 start start start@1,middle@2
+step 5 2 5 Intro 2 middle middle start@1,middle@2
+nextScene 1 5 Main 3 middle null go@2
+step 6 2 5 Main 3 go go go@2
+gotoAndStop(1) 1 5 Main 3 middle null go@2
+step 7 1 5 Main 3 middle null go@2
+gotoAndStop(go, Main) 2 5 Main 3 go go go@2
+step 8 2 5 Main 3 go go go@2
+threw 2109 ArgumentError Error #2109: Frame label fl_a not found in scene Main.
+step 9 2 5 Main 3 go go go@2
+gotoAndPlay(start, Intro) 1 5 Intro 2 start start start@1,middle@2
+step 10 2 5 Intro 2 middle middle start@1,middle@2
+kid run 3 4  4 run run walk@1,run@3
+prevScene in Intro 1 5 Intro 2 start start start@1,middle@2
+step 11 2 5 Intro 2 middle middle start@1,middle@2
+gotoAndStop(middle) from Intro 2 5 Intro 2 middle middle start@1,middle@2
+step 12 2 5 Intro 2 middle middle start@1,middle@2
+threw 2109 ArgumentError Error #2109: Frame label go not found in scene Intro.
+step 13 2 5 Intro 2 middle middle start@1,middle@2
+threw 2108 ArgumentError Error #2108: Scene Nope was not found.
+step 14 2 5 Intro 2 middle middle start@1,middle@2
+threw 2108 ArgumentError Error #2108: Scene Intro was not found.
+step 15 2 5 Intro 2 middle middle start@1,middle@2
+gotoAndStop(3, Main) 3 5 Main 3 go fl_a go@2
+step 16 3 5 Main 3 go fl_a go@2
+nextScene in Main 1 5 Main 3 middle null go@2
+step 17 2 5 Main 3 go go go@2
+kid nope 1 4  4 walk walk walk@1,run@3
+kid 2 as a string 2 4  4 walk null walk@1,run@3

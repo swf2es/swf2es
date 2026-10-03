@@ -16,8 +16,10 @@ import {
   readFrameLabel,
   readPlace,
   readRemove,
+  readSceneData,
   readShape,
   readSprite,
+  type SceneData,
   type Shape,
   type Swf,
   type Tag,
@@ -31,11 +33,27 @@ import { type ShapeLayer, shapeLayers } from "./shapes.js";
 
 export type FrameCommand = { type: "place"; place: Place } | { type: "remove"; depth: number };
 
+/** A frame's name, or a scene's, and its frame, 1 the first. */
+export interface FrameName {
+  name: string;
+  frame: number;
+}
+
 export interface Timeline {
   /** Frame k's commands at index k - 1. */
   frames: FrameCommand[][];
-  /** Labels by name: the frame they are on, 1 the first. */
-  labels: Map<string, number>;
+  /**
+   * The labels scripts read, in frame order: the scene data's where the
+   * SWF has it (a root's DefineSceneAndFrameLabelData), even none, its
+   * FrameLabel tags otherwise. One after the last frame is kept.
+   */
+  labels: FrameName[];
+  /** The labels a goto finds: those, or the FrameLabel tags where the scene data has none. */
+  gotoLabels: FrameName[];
+  /** The FrameLabel tags by frame, which currentFrameLabel reads, scene data or not. */
+  frameLabels: Map<number, string>;
+  /** Scenes by their first frame, in order; one unnamed scene of every frame without scene data. */
+  scenes: FrameName[];
 }
 
 export interface ShapeCharacter {
@@ -214,7 +232,8 @@ function timelineOf(
   jpeg: { tables: Uint8Array | null },
 ): Timeline {
   const frames: FrameCommand[][] = [[]];
-  const labels = new Map<string, number>();
+  const frameLabels = new Map<number, string>();
+  let scenes: SceneData | null = null;
   for (const t of list) {
     const frame = frames[frames.length - 1];
     switch (t.code) {
@@ -231,7 +250,10 @@ function timelineOf(
         frame.push({ type: "remove", depth: readRemove(bytes, t) });
         break;
       case tags.FrameLabel:
-        labels.set(readFrameLabel(bytes, t), frames.length);
+        frameLabels.set(frames.length, readFrameLabel(bytes, t));
+        break;
+      case tags.DefineSceneAndFrameLabelData:
+        scenes = readSceneData(bytes, t);
         break;
       case tags.DefineShape:
       case tags.DefineShape2:
@@ -311,7 +333,23 @@ function timelineOf(
     frames.push([]);
   }
 
-  return { frames, labels };
+  // Scene data counts frames from 0; a frame name from 1, as scripts do.
+  const named = (list: { frame: number; name: string }[]) =>
+    list.map(({ frame, name }) => ({ name, frame: frame + 1 }));
+  // Scene data that names no scene is none, as Flash reads it; its first
+  // scene starts the timeline whatever frame it gives.
+  const data = (scenes as SceneData | null)?.scenes.length ? (scenes as SceneData) : null;
+  const tagged = [...frameLabels].map(([frame, name]) => ({ name, frame }));
+  const labels = data ? named(data.labels).sort((a, b) => a.frame - b.frame) : tagged;
+  const sceneList = data ? named(data.scenes) : [{ name: "", frame: 1 }];
+  sceneList[0].frame = 1;
+  return {
+    frames,
+    labels,
+    gotoLabels: labels.length > 0 ? labels : tagged,
+    frameLabels,
+    scenes: sceneList,
+  };
 }
 
 /** The characters a SWF defines, and its root timeline. */

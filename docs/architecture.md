@@ -641,6 +641,26 @@ runs, parents' scripts before their children's (`nested`); the clips
 whose scripts are to run are fixed as the phase begins, so one a script
 removes still runs its own (`loads`, `orphans`).
 
+A root's scenes and labels come from its DefineSceneAndFrameLabelData;
+a timeline without one, or whose data names no scene, a sprite's always,
+is one scene named "" whose labels are its FrameLabel tags (`scenes`,
+`frame-labels`). The first scene starts at frame 1 whatever its data says,
+and a goto finds the FrameLabel tags' labels where the data lists none,
+though scripts read none there (the corpus's `movieclip_currentlabels_dupes2`
+and `movieclip_goto_scene_last_frame_label`). To a script,
+`currentFrame` counts from its scene's first frame, while `totalFrames`
+is the whole timeline's. `currentScene.labels`, which `currentLabels`
+reads, are the scene's labels counted from its first frame;
+`currentLabel` is the last label at or before the frame in any scene;
+and `currentFrameLabel` reads FrameLabel tags alone, scene data or not.
+`scenes` and `currentScene` make new objects at each read. A goto's
+frame number counts from the scene it names, or the clip's, and a label
+is found in that scene only: an unknown scene throws #2108, and an
+unknown label #2109 where the timeline has named scenes, while in an
+unnamed one it is the number 0, frame 1. `prevScene` and `nextScene` go
+to the first frame of the scene before or after, or of their own past
+either end, and play.
+
 A `PlaceObject` with the move flag that names another character at an
 occupied depth makes no new object in Flash: the child stays, the same
 AS3 object with its matrix, sign and angle, and only a `Shape` no script

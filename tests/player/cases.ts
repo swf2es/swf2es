@@ -325,6 +325,82 @@ function gotos(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A root of two scenes, Intro (frames 1 and 2) and Main (3 to 5), with
+// labels in its scene data, FrameLabel tags alike as Flash's authoring
+// tool writes them, and one more FrameLabel on frame 5 the data leaves
+// out; and a
+// sprite labelled by FrameLabel tags alone; scripts/Scenes.as walks them.
+function scenes(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 5,
+    tags: [
+      w.fileAttributes(true),
+      w.sceneData(
+        [
+          [0, "Intro"],
+          [2, "Main"],
+        ],
+        [
+          [0, "start"],
+          [1, "middle"],
+          [3, "go"],
+        ],
+      ),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 4, [
+        w.frameLabel("walk"),
+        w.place({ depth: 1, character: 1 }),
+        w.showFrame(),
+        w.showFrame(),
+        w.frameLabel("run"),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc, "Scenes"),
+      w.symbolClass([[0, "Main"]]),
+      w.frameLabel("start"),
+      w.place({ depth: 1, character: 2, name: "kid" }),
+      w.showFrame(),
+      w.frameLabel("middle"),
+      w.showFrame(),
+      w.showFrame(),
+      w.frameLabel("go"),
+      w.showFrame(),
+      w.frameLabel("fl_a"),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A root labelled by FrameLabel tags alone, no scene data; scripts/FrameLabels.as reads it.
+function frameLabels(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "FrameLabels"),
+      w.symbolClass([[0, "Main"]]),
+      w.frameLabel("a"),
+      w.showFrame(),
+      w.showFrame(),
+      w.frameLabel("b"),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A root with nothing placed and a bound Box symbol, with scripts/AddChild.as adding Boxes.
 function added(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -1282,6 +1358,24 @@ export const cases: PlayerCase[] = [
     script: "Init",
     frames: 1,
     capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "scenes",
+    swf: scenes,
+    script: "Scenes",
+    frames: 40,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "frame-labels",
+    swf: frameLabels,
+    script: "FrameLabels",
+    frames: 8,
+    capture: [],
     tolerance: 0,
     maxOutliers: 0,
   },
