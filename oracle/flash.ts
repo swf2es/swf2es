@@ -259,11 +259,20 @@ async function runAdl(jobs: FlashJob[], timeout: number): Promise<FlashResult[]>
  * Each job's traces, between its begin and end marks; a job leaked if
  * anything is traced after its settle mark, before the next job begins.
  */
+/** A line of Wine's debug channels, as `0120:fixme:win:IsImmersiveProcess (FFFFFFFF): stub`. */
+const WINE_DEBUG = /^[0-9a-f]{4}:(fixme|err|warn|trace):/;
+
 function splitOutput(stdout: string, results: FlashResult[]): void {
   let current: FlashResult | null = null;
   let settled: FlashResult | null = null;
   for (const raw of stdout.split("\n")) {
     const line = raw.replace(/\r+$/, "");
+    // Wine's own debug lines share AIR's stderr; one written while a job
+    // runs would read as its trace.
+    if (WINE_DEBUG.test(line)) {
+      continue;
+    }
+
     if (line.startsWith(`${MARK}begin `)) {
       current = results[Number(line.slice(MARK.length + 6))] ?? null;
       settled = null;
