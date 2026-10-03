@@ -238,6 +238,47 @@ export function readFrameLabel(bytes: Uint8Array, tag: Tag): string {
   return readString(new SwfReader(bytes, tag.offset, tag.offset + tag.length));
 }
 
+/** A root's scenes and frame labels, each frame counted from 0 the first. */
+export interface SceneData {
+  scenes: { frame: number; name: string }[];
+  labels: { frame: number; name: string }[];
+}
+
+/** An EncodedU32: seven bits a byte, low first, while the top bit is set. */
+function encodedU32(r: SwfReader): number {
+  let value = 0;
+  for (let shift = 0; shift < 35; shift += 7) {
+    const b = r.u8();
+    value += (b & 0x7f) * 2 ** shift;
+    if (!(b & 0x80)) {
+      break;
+    }
+  }
+
+  return value >>> 0;
+}
+
+/** DefineSceneAndFrameLabelData; a count past the tag's end stops where its bytes do. */
+export function readSceneData(bytes: Uint8Array, tag: Tag): SceneData {
+  const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+  const list = () => {
+    const out: { frame: number; name: string }[] = [];
+    const count = encodedU32(r);
+    for (let i = 0; i < count && !r.overrun; i++) {
+      const frame = encodedU32(r);
+      const name = readString(r);
+      if (!r.overrun) {
+        out.push({ frame, name });
+      }
+    }
+
+    return out;
+  };
+  const scenes = list();
+
+  return { scenes, labels: list() };
+}
+
 /** A DefineSprite's id, frame count and its own tags. */
 export function readSprite(
   bytes: Uint8Array,

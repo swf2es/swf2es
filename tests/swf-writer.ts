@@ -406,6 +406,38 @@ export function backgroundColor(rgb: number): Uint8Array {
   );
 }
 
+/** FrameLabel: a name for the frame it is in. */
+export function frameLabel(name: string): Uint8Array {
+  return tag(43, new BitWriter().string(name).done());
+}
+
+/** An EncodedU32: seven bits a byte, low first, the top bit set on all but the last. */
+function encodedU32(w: BitWriter, v: number): BitWriter {
+  let rest = v >>> 0;
+  while (rest >= 0x80) {
+    w.u8((rest & 0x7f) | 0x80);
+    rest >>>= 7;
+  }
+
+  return w.u8(rest);
+}
+
+/** DefineSceneAndFrameLabelData: scenes by their first frame, 0 the first, and labels by frame, 0 the first. */
+export function sceneData(scenes: [number, string][], labels: [number, string][]): Uint8Array {
+  const w = new BitWriter();
+  encodedU32(w, scenes.length);
+  for (const [offset, name] of scenes) {
+    encodedU32(w, offset).string(name);
+  }
+
+  encodedU32(w, labels.length);
+  for (const [frame, name] of labels) {
+    encodedU32(w, frame).string(name);
+  }
+
+  return tag(86, w.done());
+}
+
 /** FileAttributes: ActionScript 3, as a SWF with a DoABC needs. */
 export function fileAttributes(as3: boolean): Uint8Array {
   return tag(69, new BitWriter().u32(as3 ? 0x08 : 0).done());
