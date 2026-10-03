@@ -329,7 +329,8 @@ test("a jump lets a taken depth be through what follows, as playing does", () =>
 test("a rewind keeps a later child where the frames replayed end on a place, and gives it the place", () => {
   // Frame 2 removes what frame 1 placed and frame 3 places again: back to
   // frame 3, the square frame 4 placed stays, frame 3's place its own, as
-  // Flash keeps one (the player's rewind-first case).
+  // Flash keeps one (the player's rewind-first case), and shows frame 3's
+  // shape, as Flash draws it (morph-shapes).
   const removed = movie(
     [w.place({ depth: 1, character: 1 })],
     [w.remove(1)],
@@ -344,10 +345,10 @@ test("a rewind keeps a later child where the frames replayed end on a place, and
   const later = removed.root.depths.get(1);
   removed.root.gotoFrame(3);
   assert.equal(removed.root.depths.get(1), later);
-  assert.equal(later?.character?.id, 1);
+  assert.equal(later?.character?.id, 2);
   assert.equal(later?.placeFrame, 4);
 
-  // Frame 2 moves the depth: back to it, the kept child has the move too.
+  // Frame 2 moves the depth: back to it, the kept child has the move too, and frame 1's shape.
   const moved = movie(
     [w.place({ depth: 1, character: 1 })],
     [w.place({ depth: 1, move: true, matrix: { tx: 1000 } })],
@@ -361,7 +362,7 @@ test("a rewind keeps a later child where the frames replayed end on a place, and
   const kept = moved.root.depths.get(1);
   moved.root.gotoFrame(2);
   assert.equal(moved.root.depths.get(1), kept);
-  assert.equal(kept?.character?.id, 2);
+  assert.equal(kept?.character?.id, 1);
   assert.equal(kept?.matrix.tx, 50);
 });
 
@@ -480,9 +481,9 @@ test("jumping forward to any frame of a random timeline ends as playing to it", 
     // A rewind from the last frame to each earlier one shows what playing
     // to it shows, but for a child placed after the target at a depth the
     // frames to it end on a place without the move flag at: it stays, its
-    // character and frame its own, and takes the place's (the player's
-    // rewind-first case). Which object is which is not compared: the rewind
-    // keeps those it can.
+    // frame its own, and takes the place, a shape's character with it (the
+    // player's rewind-first and morph-shapes cases). Which object is which
+    // is not compared: the rewind keeps those it can.
     for (let target = 1; target < frames.length; target++) {
       const rewound = movie(...frames);
       for (let f = 1; f < frames.length; f++) {
@@ -497,7 +498,7 @@ test("jumping forward to any frame of a random timeline ends as playing to it", 
       // Only a place without the move flag fills a depth, so every cell is one.
       const expected = played(said, target).map((cell) => {
         const kept = later.get(cell.depth);
-        return kept ? { ...cell, character: kept.character, placeFrame: kept.placeFrame } : cell;
+        return kept ? { ...cell, placeFrame: kept.placeFrame } : cell;
       });
       rewound.root.gotoFrame(target);
       assert.deepEqual(state(rewound.root), expected, `timeline ${t}, back to ${target}`);

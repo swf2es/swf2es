@@ -4,6 +4,7 @@ import {
   backgroundColor,
   isAs3,
   readFilters,
+  readMorphShape,
   readPlace,
   readRemove,
   readSceneData,
@@ -265,4 +266,149 @@ test("scene data reads its scenes and labels, and stops at the tag's end", () =>
     scenes: [{ frame: 0, name: "Intro" }],
     labels: [],
   });
+});
+
+test("a morph shape's paired styles and both ends' records read as written", () => {
+  const morph = w.morphShape({
+    id: 4,
+    version: 2,
+    startBounds: [0, 400, 0, 400],
+    endBounds: [0, 800, 0, 400],
+    fills: [
+      {
+        type: 0x10,
+        startMatrix: { a: 0.5, d: 0.5 },
+        endMatrix: { a: 0.5, d: 0.5, tx: 200 },
+        stops: [
+          [0, 0xffff0000, 10, 0x80ff0000],
+          [255, 0xff0000ff, 200, 0xff00ff00],
+        ],
+      },
+    ],
+    lines: [{ startWidth: 20, endWidth: 60, startColor: 0xff000000, endColor: 0xffffffff }],
+    start: [
+      {
+        fill0: 1,
+        line: 1,
+        commands: [{ move: [0, 0] }, { line: [400, 0] }, { line: [400, 400] }, { line: [0, 0] }],
+      },
+    ],
+    end: [
+      [{ move: [0, 100] }, { curve: [400, 0, 800, 100] }, { line: [800, 400] }, { line: [0, 100] }],
+    ],
+  });
+  const swf = readSwf(
+    w.swf({ width: 100, height: 50, frameRate: 12, frameCount: 1, tags: [morph, w.end()] }),
+  );
+  const t = swf.tags[0];
+  assert.equal(t.code, tags.DefineMorphShape2);
+
+  const m = readMorphShape(swf.bytes, t.code, t.offset, t.length);
+  assert.equal(m.id, 4);
+  assert.deepEqual(m.endBounds, { xMin: 0, xMax: 800, yMin: 0, yMax: 400 });
+  assert.deepEqual(m.endEdgeBounds, m.endBounds);
+  assert.equal(m.truncated, false);
+  const { start, end } = m.fills[0];
+  assert.equal(start.type, "linear");
+  assert.equal(end.type, "linear");
+  if (start.type !== "linear" || end.type !== "linear") {
+    return;
+  }
+
+  assert.deepEqual(start.gradient.stops, [
+    { ratio: 0, color: 0xffff0000 },
+    { ratio: 255, color: 0xff0000ff },
+  ]);
+  assert.deepEqual(end.gradient.stops, [
+    { ratio: 10, color: 0x80ff0000 },
+    { ratio: 200, color: 0xff00ff00 },
+  ]);
+  assert.equal(end.gradient.matrix.tx, 200);
+  assert.deepEqual(
+    m.lines.map((l) => [l.start.width, l.start.color, l.end.width, l.end.color]),
+    [[20, 0xff000000, 60, 0xffffffff]],
+  );
+  assert.deepEqual(m.start, [
+    { type: "style", moveTo: { x: 0, y: 0 }, fill0: 1, fill1: 0, line: 1, styles: null },
+    { type: "line", dx: 400, dy: 0 },
+    { type: "line", dx: 0, dy: 400 },
+    { type: "line", dx: -400, dy: -400 },
+  ]);
+  assert.deepEqual(m.end, [
+    { type: "style", moveTo: { x: 0, y: 100 }, fill0: null, fill1: null, line: null, styles: null },
+    { type: "curve", cx: 400, cy: -100, ax: 400, ay: 100 },
+    { type: "line", dx: 0, dy: 300 },
+    { type: "line", dx: -800, dy: -300 },
+  ]);
+});
+
+/** A DefineMorphShape of one solid fill from bounds, offset and the bytes after the offset field. */
+function morphTag(offset: number, rest: Uint8Array): Uint8Array {
+  const w8 = new w.BitWriter();
+  w8.u16(1);
+  w.rect(w8, 0, 400, 0, 400);
+  w.rect(w8, 0, 400, 0, 400);
+  w8.u32(offset).raw(rest);
+  return w.tag(tags.DefineMorphShape, w8.done(), true);
+}
+
+/**
+ * Records of one fill's square from (0, 0), with or without the end record;
+ * `moveBits` sets where the last byte's padding starts.
+ */
+function squareRecords(fillBits: number, closed: boolean, moveBits = 1): Uint8Array {
+  const r = new w.BitWriter();
+  r.ub(4, fillBits).ub(4, 0);
+  // A style change: move to (0, 0) and, with fill bits, fill0 1.
+  r.ub(1, 0)
+    .ub(5, fillBits ? 3 : 1)
+    .ub(5, moveBits)
+    .sb(moveBits, 0)
+    .sb(moveBits, 0);
+  if (fillBits) {
+    r.ub(fillBits, 1);
+  }
+
+  for (const [dx, dy] of [
+    [400, 0],
+    [0, 400],
+    [-400, 0],
+    [0, -400],
+  ]) {
+    r.ub(1, 1).ub(1, 1).ub(4, 8).ub(1, 1).sb(10, dx).sb(10, dy);
+  }
+
+  if (closed) {
+    r.ub(1, 0).ub(5, 0);
+  }
+
+  return r.done();
+}
+
+const styles = new w.BitWriter().u8(1).u8(0).u32(0xff0000ff).u32(0xff00ff00).u8(0).done();
+
+function readMorph(tag: Uint8Array) {
+  const swf = readSwf(w.swf({ width: 20, height: 20, frameRate: 12, frameCount: 1, tags: [tag] }));
+  return readMorphShape(swf.bytes, swf.tags[0].code, swf.tags[0].offset, swf.tags[0].length);
+}
+
+test("a morph's start records stop at the end's offset, though they lack their end record", () => {
+  // Four bits of padding, then the end's header of 8 fill bits: read on,
+  // they make a fill0 change, not an end record.
+  const start = squareRecords(1, false, 2);
+  const end = squareRecords(8, true);
+  const m = readMorph(
+    morphTag(styles.length + start.length, new Uint8Array([...styles, ...start, ...end])),
+  );
+  assert.equal(m.start.length, 5);
+  assert.equal(m.end.length, 5);
+});
+
+test("an offset back among a morph's styles is not followed: the end's records come after the start's", () => {
+  const m = readMorph(
+    morphTag(1, new Uint8Array([...styles, ...squareRecords(1, true), ...squareRecords(0, true)])),
+  );
+  assert.equal(m.start.length, 5);
+  assert.equal(m.end.length, 5);
+  assert.equal(m.truncated, false);
 });

@@ -78,6 +78,16 @@ export function sbits(...values: number[]): number {
   return n;
 }
 
+/** Bits for an unsigned value in UB[n]. */
+function ubits(v: number): number {
+  let n = 0;
+  while (v >= 2 ** n) {
+    n++;
+  }
+
+  return n;
+}
+
 export function rect(w: BitWriter, xMin: number, xMax: number, yMin: number, yMax: number): void {
   const n = sbits(xMin, xMax, yMin, yMax);
   w.align().ub(5, n).sb(n, xMin).sb(n, xMax).sb(n, yMin).sb(n, yMax).align();
@@ -233,21 +243,141 @@ export function shape(spec: ShapeSpec): Uint8Array {
   const fillBits = sbits(spec.fills.length);
   const lineBits = sbits(lines.length);
   w.ub(4, fillBits).ub(4, lineBits);
+  edges(w, spec.paths, fillBits, lineBits);
+  return tag(version === 3 ? 32 : 2, w.done());
+}
+
+type MatrixSpec = { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
+
+/** A morph fill: a solid colour, or a linear or radial gradient, at both ends; colours 0xAARRGGBB. */
+export type MorphFillSpec =
+  | { start: number; end: number }
+  | {
+      type: 0x10 | 0x12;
+      startMatrix?: MatrixSpec;
+      endMatrix?: MatrixSpec;
+      /** Each stop's start ratio and colour, then its end ratio and colour. */
+      stops: [number, number, number, number][];
+    };
+
+export interface MorphShapeSpec {
+  id: number;
+  startBounds: [number, number, number, number];
+  endBounds: [number, number, number, number];
+  fills: MorphFillSpec[];
+  /** Widths in twips, colours 0xAARRGGBB. */
+  lines?: { startWidth: number; endWidth: number; startColor: number; endColor: number }[];
+  /** The start's paths, with their styles. */
+  start: { fill1?: number; fill0?: number; line?: number; commands: PathCommand[] }[];
+  /** The end's: the start's edges in order, its moves where the start has them. */
+  end: PathCommand[][];
+  /** 1 DefineMorphShape, 2 DefineMorphShape2. */
+  version?: 1 | 2;
+}
+
+/** A DefineMorphShape or DefineMorphShape2 tag. */
+export function morphShape(spec: MorphShapeSpec): Uint8Array {
+  const version = spec.version ?? 1;
+  const lines = spec.lines ?? [];
+  const color = (w: BitWriter, c: number) =>
+    w
+      .u8(c >> 16)
+      .u8(c >> 8)
+      .u8(c)
+      .u8(c >>> 24);
+
+  // The styles and the start's records, which the offset before them spans.
+  const body = new BitWriter();
+  body.u8(spec.fills.length);
+  for (const f of spec.fills) {
+    if ("start" in f) {
+      body.u8(0);
+      color(body, f.start);
+      color(body, f.end);
+      continue;
+    }
+
+    body.u8(f.type);
+    matrix(body, f.startMatrix ?? {});
+    matrix(body, f.endMatrix ?? {});
+    body.u8(f.stops.length);
+    for (const [startRatio, startColor, endRatio, endColor] of f.stops) {
+      body.u8(startRatio);
+      color(body, startColor);
+      body.u8(endRatio);
+      color(body, endColor);
+    }
+  }
+
+  body.u8(lines.length);
+  for (const l of lines) {
+    body.u16(l.startWidth).u16(l.endWidth);
+    if (version === 2) {
+      // Round caps and joins, no fill, scaled: LINESTYLE2's flags all zero.
+      body.u16(0);
+    }
+
+    color(body, l.startColor);
+    color(body, l.endColor);
+  }
+
+  const fillBits = ubits(spec.fills.length);
+  const lineBits = ubits(lines.length);
+  body.ub(4, fillBits).ub(4, lineBits);
+  edges(body, spec.start, fillBits, lineBits);
+  const startPart = body.done();
+
+  const end = new BitWriter();
+  end.ub(4, 0).ub(4, 0);
+  edges(
+    end,
+    spec.end.map((commands) => ({ commands })),
+    0,
+    0,
+  );
+
+  const w = new BitWriter();
+  w.u16(spec.id);
+  rect(w, ...spec.startBounds);
+  rect(w, ...spec.endBounds);
+  if (version === 2) {
+    rect(w, ...spec.startBounds);
+    rect(w, ...spec.endBounds);
+    // UsesScalingStrokes where there are lines.
+    w.u8(lines.length ? 1 : 0);
+  }
+
+  w.u32(startPart.length).raw(startPart).raw(end.done());
+  return tag(version === 2 ? 84 : 46, w.done());
+}
+
+/**
+ * A shape's records from the pen at (0, 0), to and with the end record:
+ * each path's first move sets its styles, given `fillBits` and `lineBits`
+ * (0 and 0 for a morph's end, whose moves set none).
+ */
+function edges(
+  w: BitWriter,
+  paths: { fill1?: number; fill0?: number; line?: number; commands: PathCommand[] }[],
+  fillBits: number,
+  lineBits: number,
+): void {
+  const styled = fillBits > 0 || lineBits > 0;
   let x = 0;
   let y = 0;
-  for (const path of spec.paths) {
+  for (const path of paths) {
     for (const [k, cmd] of path.commands.entries()) {
       if ("move" in cmd) {
         const [mx, my] = cmd.move;
         // A style change: move, and at a path's start its styles.
-        const setStyles = k === 0;
+        const setStyles = k === 0 && styled;
         const flags = 1 | (setStyles ? 2 | 4 | 8 : 0);
         w.ub(1, 0).ub(5, flags);
         const n = sbits(mx, my);
         w.ub(5, n).sb(n, mx).sb(n, my);
         if (setStyles) {
           w.ub(fillBits, path.fill0 ?? 0)
-            .ub(fillBits, path.fill1)
+            .ub(fillBits, path.fill1 ?? 0)
             .ub(lineBits, path.line ?? 0);
         }
 
@@ -283,7 +413,6 @@ export function shape(spec: ShapeSpec): Uint8Array {
   }
 
   w.ub(1, 0).ub(5, 0);
-  return tag(version === 3 ? 32 : 2, w.done());
 }
 
 export interface PlaceSpec {
@@ -291,6 +420,8 @@ export interface PlaceSpec {
   character?: number;
   move?: boolean;
   matrix?: { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
+  /** A morph shape's ratio, 0 to 65535. */
+  ratio?: number;
   name?: string;
   /** The last depth this object masks, as a mask layer does. */
   clipDepth?: number;
@@ -317,6 +448,10 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.matrix) {
     flags |= 0x04;
+  }
+
+  if (spec.ratio !== undefined) {
+    flags |= 0x10;
   }
 
   if (spec.name !== undefined) {
@@ -363,6 +498,10 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.matrix) {
     matrix(w, spec.matrix);
+  }
+
+  if (spec.ratio !== undefined) {
+    w.u16(spec.ratio);
   }
 
   if (spec.name !== undefined) {
