@@ -474,6 +474,34 @@ function gotoChildren(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Timeline children named and not, shapes and sprites, one inside a sprite,
+// and one placed on frame 2, for scripts/InstanceNames.as to read the names of.
+function instanceNames(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "InstanceNames"),
+      w.symbolClass([[0, "Main"]]),
+      w.place({ depth: 1, character: 1 }),
+      w.place({ depth: 2, character: 2, name: "a" }),
+      w.place({ depth: 3, character: 2 }),
+      w.place({ depth: 4, character: 1 }),
+      w.showFrame(),
+      w.place({ depth: 5, character: 2 }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A root with nothing placed and a bound Box symbol, with scripts/AddChild.as adding Boxes.
 function added(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -1459,6 +1487,15 @@ export const cases: PlayerCase[] = [
     swf: gotoChildren,
     script: "GotoChildren",
     frames: 10,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "instance-names",
+    swf: instanceNames,
+    script: "InstanceNames",
+    frames: 6,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

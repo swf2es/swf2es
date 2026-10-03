@@ -680,6 +680,12 @@ unnamed one it is the number 0, frame 1. `prevScene` and `nextScene` go
 to the first frame of the scene before or after, or of their own past
 either end, and play.
 
+A display object nobody named is named as its AS3 object is made,
+`instance` and the next of one count for the player, which every SWF it
+loads shares: a timeline child the SWF names takes none, nor does the
+main SWF's root, `root1`, and the stage has no name (`instance-names`).
+Only a name from the SWF gives its parent a property of it.
+
 A `PlaceObject` with the move flag that names another character at an
 occupied depth makes no new object in Flash: the child stays, the same
 AS3 object with its matrix, sign and angle, and only a `Shape` no script
