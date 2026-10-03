@@ -47,6 +47,12 @@ export interface Filter {
   preserveAlpha: boolean;
   /** The AS3 BitmapData a displacement map reads. */
   mapBitmap: object | null;
+  /**
+   * A display object's displacement map as it was when its filters were
+   * set, which it draws with: a copy of `mapBitmap`, which stays the live
+   * one that reading `filters` back gives. Null where not taken.
+   */
+  mapSnapshot?: object | null;
   mapPoint: [number, number];
   componentX: number;
   componentY: number;

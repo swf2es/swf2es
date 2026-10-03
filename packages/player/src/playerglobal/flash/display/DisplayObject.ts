@@ -429,7 +429,18 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
           throw s.rt.error("ArgumentError", 2005, 0, "Filter");
         }
 
-        return copyFilter(recordOf(item as AsObject, kind));
+        const f = copyFilter(recordOf(item as AsObject, kind));
+        // A displacement map's pixels are taken as they are, as Flash takes
+        // them: the object draws with those, whatever is drawn on the map
+        // after, till its filters are set again; the map itself it keeps.
+        if (f.kind === "displacementMap" && f.mapBitmap) {
+          f.mapSnapshot = s.rt.callProperty(
+            f.mapBitmap as AsObject,
+            s.rt.publicName("clone"),
+          ) as AsObject;
+        }
+
+        return f;
       });
       this.$display.filters = filters;
       this.$display.invalidate(TRANSFORM);

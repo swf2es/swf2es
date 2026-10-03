@@ -1508,8 +1508,10 @@ and back, as applyFilter has it, each pixel evaluated once at its centre;
 a gradient glow and a gradient bevel pick from their table, a texture
 256 wide, and draw only within the filter's rect of adl's bitmap of the
 object, its pixels and one more right and down. A displacement map
-reads the object's pixels as applyFilter reads the source, the map's
-texture taken when the filters are set; in colour mode it fills half the
+reads the object's pixels as applyFilter reads the source, with the map
+as it was when the object's filters were set, as Flash copies it then
+(reading them back gives the live map, and setting them again takes it
+anew); one with no map makes no pass. In colour mode it fills half the
 scale round the object with the colour, as adl draws it.
 A colour matrix maps each pixel's straight colour, offsets in
 255ths, transparent pixels within the object's bounds too. A convolution

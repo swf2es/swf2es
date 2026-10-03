@@ -619,7 +619,7 @@ class DisplacementFilter extends FlashFilter {
 
   constructor(
     private readonly f: FilterRecord,
-    private readonly mapTexture: () => Texture | null,
+    private readonly map: Texture,
   ) {
     const pick = (c: number) =>
       new Float32Array([c === 1 ? 1 : 0, c === 2 ? 1 : 0, c === 4 ? 1 : 0, c === 8 ? 1 : 0]);
@@ -660,12 +660,7 @@ class DisplacementFilter extends FlashFilter {
   }
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
-    const map = this.mapTexture();
-    if (!map) {
-      system.applyFilter(copyFilter(), input, output, clear);
-      return;
-    }
-
+    const map = this.map;
     const u = this.resources.displaceUniforms.uniforms;
     const box = u.uBox as Float32Array;
     // The object's pixels and one more right and down, as adl's bitmap of it.
@@ -681,26 +676,6 @@ class DisplacementFilter extends FlashFilter {
     this.resources.uMap = map.source;
     system.applyFilter(this, input, output, clear);
   }
-}
-
-/** A filter that passes its input on as it is, made once, when first needed. */
-let copy: Filter | null = null;
-
-function copyFilter(): Filter {
-  copy ??= new Filter({
-    glProgram: GlProgram.from({
-      vertex: VERTEX,
-      fragment: `in vec2 vTextureCoord;
-out vec4 finalColor;
-uniform sampler2D uTexture;
-void main(void) {
-  finalColor = texture(uTexture, vTextureCoord);
-}`,
-      name: "flash-copy",
-    }),
-    resources: {},
-  });
-  return copy;
 }
 
 /** A colour matrix of a pixel's straight colour, its offsets in 255ths, transparent pixels too. */
@@ -903,9 +878,11 @@ export function displayFilters(
     } else if (f.kind === "gradientGlow" || f.kind === "gradientBevel") {
       filter = new GradientFilter(f);
     } else if (f.kind === "displacementMap") {
-      const map = f.mapBitmap;
+      // Its map, a copy the object took when its filters were set, as a
+      // texture now, never in a pass; with none it leaves the object be.
+      const map = f.mapSnapshot ?? f.mapBitmap;
       const texture = map ? mapTexture(map) : null;
-      filter = new DisplacementFilter(f, () => texture);
+      filter = texture ? new DisplacementFilter(f, texture) : null;
     } else if (f.kind === "convolution") {
       filter = new ConvolutionFilter(f.matrixX * f.matrixY > 0 ? f : emptyKernel(f));
     }

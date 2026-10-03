@@ -1519,6 +1519,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "displacement-live",
+    swf: (abc) => bare(abc, 3, "DisplacementLive", 140, 70),
+    script: "DisplacementLive",
+    frames: 3,
+    capture: [1, 2, 3],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "filters",
     swf: (abc) => bare(abc, 1, "FiltersDraw", 396, 132),
     script: "FiltersDraw",
