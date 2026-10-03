@@ -1491,10 +1491,11 @@ function gradients(abc: Uint8Array): Uint8Array {
   });
 }
 
-/** A rectangle's path, in pixels. */
-// One fill's regions and holes, as Pixi cuts them: a square, then one with
-// two holes, then one with a hole holding an island and a second hole.
-// Each hole is its own region's, not the region drawn before it.
+/**
+ * One fill's regions and holes, as Pixi cuts them: a square, then one with
+ * two holes, then one with a hole holding an island and a second hole.
+ * Each hole is its own region's, not the region drawn before it.
+ */
 function fillHoles(): Uint8Array {
   const squares: [number, number, number, number][] = [
     [5, 5, 30, 30],
@@ -1530,6 +1531,7 @@ function fillHoles(): Uint8Array {
   });
 }
 
+/** A rectangle's path, in pixels. */
 function rectPath(x: number, y: number, width: number, height: number): w.PathCommand[] {
   const [l, t, r, b] = [x * 20, y * 20, (x + width) * 20, (y + height) * 20];
   return [{ move: [l, t] }, { line: [r, t] }, { line: [r, b] }, { line: [l, b] }, { line: [l, t] }];

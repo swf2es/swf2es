@@ -357,6 +357,7 @@ function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContext {
       context.beginPath();
       trace(context, region.path);
       context.closePath().fill(style);
+
       const cut: [Region, number, number][] = [];
       holes(region, depth, sum, cut);
       if (cut.length === 0) {
@@ -370,6 +371,7 @@ function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContext {
       }
 
       context.cut();
+
       for (const [hole, d, s] of cut) {
         islands(hole, d, s);
       }
