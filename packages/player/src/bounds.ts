@@ -2,7 +2,14 @@
 // and hit tests"): a SWF shape's recorded rectangles, a drawing's true
 // extent, a container's children's through their matrices.
 import type { Matrix } from "@swf2es/format";
-import { BitmapObject, Container, type DisplayObject, ShapeObject, TextObject } from "./display.js";
+import {
+  BitmapObject,
+  Container,
+  type DisplayObject,
+  ShapeObject,
+  StaticTextObject,
+  TextObject,
+} from "./display.js";
 import {
   apply,
   concat,
@@ -43,6 +50,16 @@ function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
 
   if (d instanceof TextObject) {
     return { xMin: d.left, yMin: d.top, xMax: d.left + d.width, yMax: d.top + d.height };
+  }
+
+  if (d instanceof StaticTextObject) {
+    const r = d.definition.definition.bounds;
+    return {
+      xMin: r.xMin / TWIPS,
+      yMin: r.yMin / TWIPS,
+      xMax: r.xMax / TWIPS,
+      yMax: r.yMax / TWIPS,
+    };
   }
 
   if (d instanceof ShapeObject && d.shape) {
@@ -244,6 +261,12 @@ function drawnAt(
   if (d instanceof BitmapObject) {
     const store = d.store;
     return !!store && !store.disposed && x >= 0 && x < store.width && y >= 0 && y < store.height;
+  }
+
+  // Static text over its tag's rectangle: its glyphs' outlines are not tested yet.
+  if (d instanceof StaticTextObject) {
+    const r = d.definition.definition.bounds;
+    return x >= r.xMin / TWIPS && x < r.xMax / TWIPS && y >= r.yMin / TWIPS && y < r.yMax / TWIPS;
   }
 
   const layers: ShapeLayer[] =

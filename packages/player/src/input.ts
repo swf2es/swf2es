@@ -7,6 +7,7 @@ import {
   Container,
   type DisplayObject,
   ShapeObject,
+  StaticTextObject,
 } from "./display.js";
 import { apply, invert } from "./geometry.js";
 import { dispatchEvent } from "./playerglobal/flash/events/EventDispatcher.js";
@@ -31,7 +32,7 @@ export function pointerTarget(
   height: number,
 ): DisplayObject | null {
   const interactive = (d: DisplayObject): boolean =>
-    !(d instanceof ShapeObject || d instanceof BitmapObject) &&
+    !(d instanceof ShapeObject || d instanceof BitmapObject || d instanceof StaticTextObject) &&
     !!d.object &&
     d.object.$mouseEnabled !== false;
   const pick = (d: DisplayObject): { hit: boolean; target: DisplayObject | null } => {

@@ -1513,6 +1513,18 @@ left, centre or right edge. A device font's metrics are the browser's
 font's, measured by the host, which Flash's own system fonts differ
 from.
 
+Static text (DefineText, DefineText2) is a `StaticText`: its records'
+glyphs where the authoring tool put them, each record keeping the font,
+height, colour and pen of the one before (`static-text.ts`), drawn with
+the glyph fills a field's embedded text shares, under the tag's matrix.
+A font is found as the text is shown, as Flash finds it, so one the SWF
+defines after the text still draws it (`static-text`); a glyph of a font
+the SWF lacks draws nothing. `text` is the glyphs' characters, and null
+where any glyph has no font or there are none (the corpus's
+`statictext_text`). Only a timeline makes one: a script's `new` is
+refused, #2012. It is hit over its tag's rectangle; its glyphs' outlines
+are not tested yet.
+
 ### Colour transforms
 
 A colour transform acts on what each shape, bitmap and text field draws

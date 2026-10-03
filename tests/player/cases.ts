@@ -1663,6 +1663,87 @@ export const probeFont = (id: number): Uint8Array =>
     kerning: [["a", "b", -100]],
   });
 
+// Static text in Probe, defined before the font it uses: a DefineText of
+// two lines in two colours, and a DefineText2 turned and scaled by its
+// matrix, a run in half-transparent green, one of a font the SWF lacks,
+// which shows nothing, and a smaller line below.
+function staticTexts(): Uint8Array {
+  return w.swf({
+    width: 320,
+    height: 160,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.staticText({
+        id: 1,
+        bounds: [0, 1400, -400, 800],
+        matrix: { tx: 400, ty: 1000 },
+        records: [
+          {
+            font: 5,
+            height: 400,
+            color: 0x0000cc,
+            x: 0,
+            y: 0,
+            glyphs: [
+              [2, 300],
+              [3, 400],
+              [4, 200],
+            ],
+          },
+          {
+            color: 0xcc0000,
+            x: 0,
+            y: 600,
+            glyphs: [
+              [1, 450],
+              [2, 200],
+            ],
+          },
+        ],
+      }),
+      probeFont(5),
+      w.staticText({
+        id: 2,
+        version: 2,
+        bounds: [0, 1800, -600, 1000],
+        matrix: { a: 1.2, b: 0.3, c: -0.3, d: 1.2, tx: 3200, ty: 800 },
+        records: [
+          {
+            font: 5,
+            height: 600,
+            color: 0x80008000,
+            x: 0,
+            y: 0,
+            glyphs: [
+              [2, 400],
+              [3, 500],
+            ],
+          },
+          { font: 99, height: 400, glyphs: [[2, 300]] },
+          {
+            font: 5,
+            height: 300,
+            color: 0xff000000,
+            x: 200,
+            y: 900,
+            glyphs: [
+              [4, 200],
+              [1, 300],
+            ],
+          },
+        ],
+      }),
+      w.place({ depth: 1, character: 1, matrix: { tx: 200, ty: 200 } }),
+      w.place({ depth: 2, character: 2 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Text laid out in Probe (scripts/TextLayout.as).
 function textLayout(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -1844,6 +1925,14 @@ export const cases: PlayerCase[] = [
     maxOutliers: 1300,
   },
   { name: "fill-holes", swf: fillHoles(), frames: 1, capture: [1], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "static-text",
+    swf: staticTexts(),
+    frames: 1,
+    capture: [1],
+    tolerance: 32,
+    maxOutliers: 100,
+  },
   {
     name: "morph-shapes",
     swf: morphs(),

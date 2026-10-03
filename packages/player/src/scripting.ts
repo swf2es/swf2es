@@ -148,6 +148,7 @@ const DEFAULT_CLASS = {
   button: "flash.display::SimpleButton",
   bitmap: "flash.display::Bitmap",
   text: "flash.text::TextField",
+  static: "flash.text::StaticText",
 };
 
 /**
@@ -965,9 +966,13 @@ export class Scripting {
         return new ShapeObject(null);
       }
 
-      // Only a timeline makes a MorphShape.
+      // Only a timeline makes a MorphShape or a StaticText.
       if (t.name === "flash.display::MorphShape") {
         throw this.rt.error("ArgumentError", 2012, "MorphShape$");
+      }
+
+      if (t.name === "flash.text::StaticText") {
+        throw this.rt.error("ArgumentError", 2012, "StaticText$");
       }
 
       if (t.name === "flash.display::Bitmap") {
