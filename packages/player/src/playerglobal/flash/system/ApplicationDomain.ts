@@ -7,7 +7,7 @@
 // is the runtime's one, as avmshell's Domain's is.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
-import { definitionNamed } from "../../toplevel.js";
+import { definitionNamed, isVectorOfNotAClass } from "../../toplevel.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -29,8 +29,9 @@ export function applicationDomainNatives(s: Scripting): avm2.Natives {
     try {
       definitionOf(o, name);
       return true;
-    } catch {
-      return false;
+    } catch (e) {
+      // A Vector of a definition that is not a class is defined, though getDefinition refuses it.
+      return isVectorOfNotAClass(e);
     }
   };
 

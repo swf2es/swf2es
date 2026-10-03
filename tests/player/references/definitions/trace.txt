@@ -2,6 +2,9 @@ has Bad false
 get Bad Error: boom
 get Bad again Error: boom
 has Bad after gets false
+byName Bad Error: boom
+byName Bad again Error: boom
+byName some.pkg.Missing ReferenceError: Error #1065: Variable Missing is not defined.
 has Missing false
 get Missing ReferenceError: Error #1065: Variable Missing is not defined.
 get some.pkg.Missing ReferenceError: Error #1065: Variable Missing is not defined.

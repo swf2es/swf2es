@@ -16,11 +16,21 @@ export function qualify(name: string): string {
   return i < 0 ? name : `${name.slice(0, i)}::${name.slice(i + 1)}`;
 }
 
+/** The errors definitionNamed throws for a Vector of a definition that is not a class. */
+const notClasses = new WeakSet<object>();
+
+/** Whether `e` is definitionNamed's error for a Vector of a definition that is not a class, which Flash's hasDefinition counts as defined. */
+export function isVectorOfNotAClass(e: unknown): boolean {
+  return typeof e === "object" && e !== null && notClasses.has(e);
+}
+
 /**
  * What `name` names in `domain`, as getDefinitionByName and
  * ApplicationDomain's lookups take a name: "pkg.Name" or "pkg::Name", or a
- * Vector, "Vector.<T>" with or without its package, T named either way, a
- * Vector too or *, else not defined (#1065); `find` looks a plain name up.
+ * Vector, "Vector.<T>" with or without its package, T named either way or
+ * a Vector too; `find` looks a plain name up. As Flash's, T is looked up
+ * as any definition, * among those not defined (#1065), and one that is
+ * not a class makes the Vector corrupt (#1107).
  */
 export function definitionNamed(
   rt: avm2.Runtime,
@@ -29,9 +39,11 @@ export function definitionNamed(
 ): avm2.Value {
   const vector = /^(?:__AS3__\.vec(?:::|\.))?Vector\.<(.+)>$/.exec(name);
   if (vector) {
-    const param = vector[1] === "*" ? null : definitionNamed(rt, vector[1], find);
-    if (param !== null && !param?.$it) {
-      throw rt.error("ReferenceError", 1065, name);
+    const param = definitionNamed(rt, vector[1], find);
+    if (!param?.$it) {
+      const error = rt.error("VerifyError", 1107);
+      notClasses.add(error);
+      throw error;
     }
 
     return rt.applyType(rt.classNamed("__AS3__.vec::Vector"), [param]);
@@ -51,7 +63,7 @@ export function toplevelNatives(s: Scripting): avm2.Natives {
       },
     // Looked up in the domain of the code that asks, as Flash's.
     "flash.utils::getDefinitionByName": (rt) => (name: Value) =>
-      definitionNamed(rt, rt.toString(name), (q) => rt.classNamed(q, s.codeDomain())),
+      definitionNamed(rt, rt.toString(name), (q) => rt.definitionNamed(q, s.codeDomain())),
     // The alias registerClassAlias gave the value's class, which describeType writes; null for none.
     "flash.utils::getAliasName": (rt) => (v: Value) => {
       if (v === null || v === undefined) {
