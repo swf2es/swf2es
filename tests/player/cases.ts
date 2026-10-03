@@ -1421,6 +1421,27 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "gradient-filters",
+    swf: (abc) => bare(abc, 1, "GradientFilters"),
+    script: "GradientFilters",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "gradient-draw",
+    swf: (abc) => bare(abc, 1, "GradientDraw", 396, 198),
+    script: "GradientDraw",
+    frames: 1,
+    capture: [1],
+    // The page blurs at its four samples a pixel, where adl blurs whole
+    // pixels: within 12 a channel, but for the corners of a bevel at 45°,
+    // where adl reads its offset a 256th further out (5, up to 18).
+    tolerance: 12,
+    maxOutliers: 5,
+  },
+  {
     name: "filters",
     swf: (abc) => bare(abc, 1, "FiltersDraw", 396, 132),
     script: "FiltersDraw",

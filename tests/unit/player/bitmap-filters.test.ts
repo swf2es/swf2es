@@ -42,6 +42,21 @@ test("a destination showing part of a filter's result shows what the whole resul
     },
     { ...filterDefaults("bevel"), distance: 3, angle: 30, type: "full", blurX: 3, blurY: 2 },
     { ...filterDefaults("bevel"), type: "outer", knockout: true },
+    {
+      ...filterDefaults("gradientGlow"),
+      colors: [0xff0000, 0x00ff00, 0x0000ff],
+      alphas: [1, 0.5, 1],
+      ratios: [0, 128, 255],
+      distance: 2.5,
+      type: "full",
+    },
+    {
+      ...filterDefaults("gradientBevel"),
+      colors: [0xffffff, 0x808080, 0],
+      alphas: [1, 0, 1],
+      ratios: [0, 128, 255],
+      type: "outer",
+    },
   ];
   for (const f of filters) {
     const whole = new BitmapStore(60, 60, true, 0xff0000ff);

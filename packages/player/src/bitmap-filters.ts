@@ -7,6 +7,7 @@
 // straight colour, truncated.
 import { type BitmapStore, over, type PixelRect, unmultiply } from "./bitmap.js";
 import type { Filter } from "./filters.js";
+import { ramp } from "./gradients.js";
 
 /** The filters this filters: the others' rects and pixels are still to come. */
 export const filtersDrawn: ReadonlySet<string> = new Set([
@@ -16,6 +17,8 @@ export const filtersDrawn: ReadonlySet<string> = new Set([
   "colorMatrix",
   "convolution",
   "bevel",
+  "gradientGlow",
+  "gradientBevel",
 ]);
 
 /**
@@ -79,7 +82,7 @@ function offsetOf(f: Filter): [number, number] {
 export function filterRect(rect: PixelRect, f: Filter): PixelRect {
   const [rx, ry] = reach(f);
   let [left, right, top, bottom] = [rx, rx, ry, ry];
-  if (f.kind === "dropShadow") {
+  if (f.kind === "dropShadow" || f.kind === "gradientGlow") {
     const [ox, oy] = offsetOf(f);
     left = Math.max(0, rx - ox);
     right = Math.max(0, rx + ox);
@@ -263,6 +266,10 @@ export function applyFilter(
     colorMatrix(dest, result, [a, r, g, b], work, contentOf(source, rect), f.matrix);
   } else if (f.kind === "bevel") {
     bevel(result, [a, r, g, b], w, h, f);
+  } else if (f.kind === "gradientGlow") {
+    gradientGlow(result, [a, r, g, b], w, h, f);
+  } else if (f.kind === "gradientBevel") {
+    gradientBevel(result, [a, r, g, b], w, h, f);
   } else {
     glow(result, [a, r, g, b], w, h, f);
   }
@@ -291,7 +298,7 @@ function halo(f: Filter): [number, number] {
 
   let hx = f.quality * Math.ceil((f.blurX || 0) / 2);
   let hy = f.quality * Math.ceil((f.blurY || 0) / 2);
-  if (f.kind === "dropShadow" || f.kind === "bevel") {
+  if (f.kind !== "blur" && f.kind !== "glow") {
     const radians = ((f.angle || 0) * Math.PI) / 180;
     hx += Math.ceil(Math.abs((f.distance || 0) * Math.cos(radians))) + 1;
     hy += Math.ceil(Math.abs((f.distance || 0) * Math.sin(radians))) + 1;
@@ -694,55 +701,169 @@ function bevel(
   const highlightAlpha = f.highlightAlpha;
   const shadowAlpha = f.shadowAlpha;
   const strength = f.strength;
+  const place = placer(f);
+  for (let i = 0; i < w * h; i++) {
+    const d = on[i] - back[i];
+    const lit = d > 0;
+    // Its alpha rounds, where a glow's truncates.
+    const la = Math.round(
+      Math.min(255, Math.floor(Math.abs(d) * strength)) * (lit ? highlightAlpha : shadowAlpha),
+    );
+    result[i] = place(
+      a[i],
+      r[i],
+      g[i],
+      b[i],
+      la,
+      Math.floor(((lit ? hr : sr) * la) / 255),
+      Math.floor(((lit ? hg : sg) * la) / 255),
+      Math.floor(((lit ? hb : sb) * la) / 255),
+    );
+  }
+}
+
+/**
+ * How a bevel or a gradient filter places its layer (premultiplied, alpha
+ * la) on the source's pixel: masked, rounding, to where the source is
+ * (inner) or, knocked out, is not (outer); inner atop the source, which keeps its
+ * alpha, outer behind it, full over it, knocked out alone; each over
+ * another as the store draws, top + bottom × (256 − top's alpha) / 256,
+ * truncated.
+ */
+function placer(
+  f: Filter,
+): (
+  sa: number,
+  sr: number,
+  sg: number,
+  sb: number,
+  la: number,
+  lr: number,
+  lg: number,
+  lb: number,
+) => number {
   const inner = f.type === "inner";
   const outer = f.type === "outer";
   const knockout = f.knockout;
-  // One over another, as the store draws: top + bottom × (256 − top's alpha) / 256, truncated.
   const over = (top: number, ta: number, bottom: number) =>
     Math.min(255, top + ((bottom * (256 - ta)) >> 8));
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = y * w + x;
-      const d = on[i] - back[i];
-      const lit = d > 0;
-      // Its alpha rounds, where a glow's truncates.
-      const la = Math.round(
-        Math.min(255, Math.floor(Math.abs(d) * strength)) * (lit ? highlightAlpha : shadowAlpha),
-      );
-      // The bevel's colour, premultiplied, masked to where the source is, or,
-      // knocked out, is not; an outer one that is not lies behind it whole.
-      const sa = a[i];
-      const m = inner ? sa : outer && knockout ? 255 - sa : 255;
-      const lA = Math.floor((la * m) / 255);
-      const lr = Math.floor((Math.floor(((lit ? hr : sr) * la) / 255) * m) / 255);
-      const lg = Math.floor((Math.floor(((lit ? hg : sg) * la) / 255) * m) / 255);
-      const lb = Math.floor((Math.floor(((lit ? hb : sb) * la) / 255) * m) / 255);
-      let oa: number;
-      let or: number;
-      let og: number;
-      let ob: number;
-      if (knockout) {
-        oa = lA;
-        or = lr;
-        og = lg;
-        ob = lb;
-      } else if (outer) {
-        oa = over(sa, sa, lA);
-        or = over(r[i], sa, lr);
-        og = over(g[i], sa, lg);
-        ob = over(b[i], sa, lb);
-      } else {
-        // Inner lies atop the source, full over it: what is left shows through either way.
-        const ta = inner ? la : lA;
-        oa = over(lA, ta, sa);
-        or = over(lr, ta, r[i]);
-        og = over(lg, ta, g[i]);
-        ob = over(lb, ta, b[i]);
-      }
-
-      result[i] =
-        ((oa << 24) | (Math.min(or, oa) << 16) | (Math.min(og, oa) << 8) | Math.min(ob, oa)) >>> 0;
+  return (sa, sr, sg, sb, la, lr, lg, lb) => {
+    const m = inner ? sa : outer && knockout ? 255 - sa : 255;
+    const mA = Math.floor((la * m + 127) / 255);
+    const mr = Math.floor((lr * m + 127) / 255);
+    const mg = Math.floor((lg * m + 127) / 255);
+    const mb = Math.floor((lb * m + 127) / 255);
+    let oa: number;
+    let or: number;
+    let og: number;
+    let ob: number;
+    if (knockout) {
+      oa = mA;
+      or = mr;
+      og = mg;
+      ob = mb;
+    } else if (outer) {
+      oa = over(sa, sa, mA);
+      or = over(sr, sa, mr);
+      og = over(sg, sa, mg);
+      ob = over(sb, sa, mb);
+    } else {
+      // What is left shows through, by the layer's own alpha atop, by its masked one over.
+      const ta = inner ? la : mA;
+      oa = over(mA, ta, sa);
+      or = over(mr, ta, sr);
+      og = over(mg, ta, sg);
+      ob = over(mb, ta, sb);
     }
+
+    return (
+      ((oa << 24) | (Math.min(or, oa) << 16) | (Math.min(og, oa) << 8) | Math.min(ob, oa)) >>> 0
+    );
+  };
+}
+
+/** A gradient filter's 256 colours, premultiplied, from its stops, as a gradient fill's ramp; with none, none. */
+export function gradientTable(f: Filter): Uint32Array {
+  if (f.colors.length === 0) {
+    return new Uint32Array(256);
+  }
+
+  const stops = f.colors.map((c, k) => ({
+    ratio: f.ratios[k],
+    color: ((Math.round((f.alphas[k] ?? 1) * 255) << 24) | (c & 0xffffff)) >>> 0,
+  }));
+  return ramp(stops, false);
+}
+
+/**
+ * A gradient glow: the source's alpha blurred, truncated, from its offset
+ * back as a shadow's, times strength to 255, picking its colour and alpha
+ * from the gradient; placed as a bevel's layer is.
+ */
+function gradientGlow(
+  result: Uint32Array,
+  [a, r, g, b]: Int32Array[],
+  w: number,
+  h: number,
+  f: Filter,
+): void {
+  const blurred = new Int32Array(a);
+  blur([blurred], w, h, f);
+  const radians = ((f.angle || 0) * Math.PI) / 180;
+  const ox = (f.distance || 0) * Math.cos(radians);
+  const oy = (f.distance || 0) * Math.sin(radians);
+  const moved = shifted(blurred, w, h, -ox, -oy, 0);
+  const table = gradientTable(f);
+  const place = placer(f);
+  for (let i = 0; i < w * h; i++) {
+    const c = table[Math.min(255, Math.floor(moved[i] * f.strength))];
+    result[i] = place(
+      a[i],
+      r[i],
+      g[i],
+      b[i],
+      c >>> 24,
+      (c >>> 16) & 0xff,
+      (c >>> 8) & 0xff,
+      c & 0xff,
+    );
+  }
+}
+
+/**
+ * A gradient bevel: a bevel's difference, the source's alpha blurred and
+ * read on and back by its offset, picking its colour and alpha from the
+ * gradient, the middle where they agree; placed as a bevel's layer is.
+ */
+function gradientBevel(
+  result: Uint32Array,
+  [a, r, g, b]: Int32Array[],
+  w: number,
+  h: number,
+  f: Filter,
+): void {
+  const blurred = new Int32Array(a);
+  blur([blurred], w, h, f);
+  const radians = ((f.angle || 0) * Math.PI) / 180;
+  const ox = (f.distance || 0) * Math.cos(radians);
+  const oy = (f.distance || 0) * Math.sin(radians);
+  const on = shifted(blurred, w, h, ox, oy, 0);
+  const back = shifted(blurred, w, h, -ox, -oy, 0);
+  const table = gradientTable(f);
+  const place = placer(f);
+  for (let i = 0; i < w * h; i++) {
+    const d = Math.max(-255, Math.min(255, Math.floor((on[i] - back[i]) * f.strength)));
+    const c = table[Math.floor((d + 256) / 2)];
+    result[i] = place(
+      a[i],
+      r[i],
+      g[i],
+      b[i],
+      c >>> 24,
+      (c >>> 16) & 0xff,
+      (c >>> 8) & 0xff,
+      c & 0xff,
+    );
   }
 }
 

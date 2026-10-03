@@ -1399,9 +1399,17 @@ is (inner) or is not (outer); each over another as the store draws it,
 s + d × (256 − sa) / 256 truncated. Off the axes adl reads the offset
 about a 256th further out, which swf2es does not find a rule for: there
 a channel may be 2 off, so the `bevel` case, to the bit, keeps to the
-axes, and `bevel-draw` has the angles between. The `apply-filter` case
-matches adl's numbers to the bit. Displacement maps and gradient filters
-throw as not supported yet.
+axes, and `bevel-draw` has the angles between. A gradient glow is a
+glow's alpha (from its offset back, as a shadow's) times strength, to
+255, picking its colour and alpha from a 256-entry table of its stops,
+built as a gradient fill's ramp; a gradient bevel's difference, times
+strength, picks entry (d + 256) / 2, so where on and back agree, outside
+the source too, it takes the middle. With no stops either draws nothing
+but the source. Both place their layer as the bevel does, masked by
+rounding, (c × m + 127) / 255; a gradient glow's rect is a shadow's, a
+gradient bevel's a bevel's, and as the table may have colour at 0 they
+fill it. The `apply-filter` case matches adl's numbers to the bit.
+Displacement maps throw as not supported yet.
 
 A convolution grows the rect by half its matrix, rounded down, each way.
 Its taps read the source's straight colour, unmultiplied as getPixel32
@@ -1439,7 +1447,10 @@ behind the object, or, inner, one less that inside it over the object;
 knocked out, the object is left out. A drop shadow is a glow from
 distance × (cos, sin) of its angle back, and with `hideObject` drawn
 alone. A bevel is the object's alpha so blurred, read at its offset on
-and back, as applyFilter has it, each pixel evaluated once at its centre.
+and back, as applyFilter has it, each pixel evaluated once at its centre;
+a gradient glow and a gradient bevel pick from their table, a texture
+256 wide, and draw only within the filter's rect of adl's bitmap of the
+object, its pixels and one more right and down.
 A colour matrix maps each pixel's straight colour, offsets in
 255ths, transparent pixels within the object's bounds too. A convolution
 filters, as applyFilter does, a bitmap of the object's pixels and one
@@ -1452,8 +1463,8 @@ passes
 are Pixi filters at the target's resolution, for WebGL: under WebGPU,
 where Pixi would skip an object's whole chain for one it cannot run,
 they are left out and a blend mode is kept. A view made for one draw
-destroys the filters it made with it. Displacement maps and gradient
-glows and bevels are still to come.
+destroys the filters it made with it. Displacement maps are still to
+come.
 
 ### Masks and scroll rectangles
 
