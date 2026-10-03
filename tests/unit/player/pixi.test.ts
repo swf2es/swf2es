@@ -379,6 +379,52 @@ test("a shape's fills and lines are drawn unbatched", async () => {
   assert.deepEqual(modes, ["no-batch", "no-batch"]);
 });
 
+test("the thinnest line is a pixel of the screen, however many the renderer draws a stage pixel with", async () => {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { MOVE, LINE } = await import("../../../packages/player/dist/shapes.js");
+  const renderer = { ...standIn([]).renderer, resolution: 3 } as unknown as ConstructorParameters<
+    typeof PixiView
+  >[0];
+  const view = new PixiView(renderer);
+  const hairline = {
+    width: 1,
+    color: 0xff000000,
+    startCap: 0,
+    endCap: 0,
+    join: 0,
+    miterLimit: 3,
+    noHScale: false,
+    noVScale: false,
+    pixelHinting: false,
+    noClose: false,
+    fill: null,
+  };
+  const character = {
+    type: "shape" as const,
+    id: 1,
+    shape: {} as never,
+    layers: [{ fills: [], strokes: [{ line: hairline, paths: [[MOVE, 0, 0, LINE, 10, 0]] }] }],
+  } as unknown as ConstructorParameters<typeof ShapeObject>[0];
+  const root = new Container();
+  root.placeAtDepth(new ShapeObject(character), 1);
+  type Stroked = { instructions: { action: string; data: { style: { width: number } } }[] };
+  const width = () => {
+    const lines = view.stage.children[0].children[1].children[0].children[1] as unknown as {
+      context: Stroked;
+    };
+    return lines.context.instructions.find((i) => i.action === "stroke")?.data.style.width;
+  };
+
+  // Shown three screen pixels to the stage's, as a zoomed stage is: a third of a stage pixel.
+  view.prepare(root);
+  assert.equal(width(), 1 / 3);
+
+  // Averaged down to the screen, as the test page draws: a whole one, drawn again unasked.
+  view.screenScale = 1;
+  view.prepare(root);
+  assert.equal(width(), 1);
+});
+
 test("an object off the list gives its lines back, and has them again when it comes back", async () => {
   const { ShapeObject } = await import("../../../packages/player/dist/display.js");
   const { MOVE, LINE } = await import("../../../packages/player/dist/shapes.js");

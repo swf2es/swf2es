@@ -137,6 +137,8 @@ async function runSwf(
     output.height = player.height;
     document.body.replaceChildren(output);
     const view = new PixiView(renderer);
+    // Drawn n times finer to be averaged down: the screen is the output canvas.
+    view.screenScale = 1;
     // BitmapData.draw of a display object renders with it, from the document class on.
     if (scripting) {
       scripting.drawer = view;

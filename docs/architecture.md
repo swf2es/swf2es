@@ -534,7 +534,13 @@ them back, and an object that leaves the list gives back its own and its
 descendants', drawn again if it returns; one no one holds stays idle
 5 s, by the clock, not renders, which a host may make many of between
 frames, at most 4096 of them, before it is destroyed. A drawing's lines
-are its own, as it changes.
+are its own, as it changes. No line is thinner than a pixel of the
+screen, which is how wide Flash draws a hairline however far its stage is
+zoomed: `PixiView.screenScale` screen pixels to a stage pixel, the
+renderer's resolution unless the host says otherwise, as the test page,
+drawing finer to average down, does. A host showing the stage at three
+times its size so draws thin outlines a screen pixel wide, as Flash
+does, not three.
 Shapes are shared across SWFs too: a DefineShape tag whose bytes another
 SWF defined alike gives that SWF's shape, held weakly, so a crowd whose
 members each load the same SWF draws with one set of fills and lines, not

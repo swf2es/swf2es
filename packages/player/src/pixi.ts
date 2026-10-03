@@ -265,12 +265,13 @@ function sameLinear(p: Linear, q: Linear): boolean {
 }
 
 /**
- * A line's width on screen. Flash strokes a transformed shape with one
+ * A line's width on the stage. Flash strokes a transformed shape with one
  * width all along, not the local width stretched by the transform: the
  * width scaled by the transform's (a + c, b + d) as a line's scale mode
- * allows, never under a pixel, which is also how wide a hairline is.
+ * allows, never under `least`, a pixel of the screen it is shown on, which
+ * is also how wide a hairline is.
  */
-function screenWidth(line: Line, m: Linear): number {
+function screenWidth(line: Line, m: Linear, least: number): number {
   const sx = Math.abs(m[0] + m[2]);
   const sy = Math.abs(m[1] + m[3]);
   const scale = line.noHScale
@@ -280,14 +281,14 @@ function screenWidth(line: Line, m: Linear): number {
     : line.noVScale
       ? sx
       : Math.sqrt((sx * sx + sy * sy) / 2);
-  return Math.max(1, (line.width / 20) * scale);
+  return Math.max(least, (line.width / 20) * scale);
 }
 
-function stroke(line: Line, m: Linear): Parameters<GraphicsContext["stroke"]>[0] {
+function stroke(line: Line, m: Linear, least: number): Parameters<GraphicsContext["stroke"]>[0] {
   const caps = ["round", "butt", "square"] as const;
   const joins = ["round", "bevel", "miter"] as const;
   return {
-    width: screenWidth(line, m),
+    width: screenWidth(line, m, least),
     color: line.color & 0xffffff,
     alpha: (line.color >>> 24) / 255,
     cap: caps[line.startCap] ?? "round",
@@ -391,7 +392,7 @@ function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContext {
 }
 
 /** A layer's lines as seen through `m`, drawn in its space so that their width is even. */
-function strokeContext(layer: ShapeLayer, m: Linear): GraphicsContext {
+function strokeContext(layer: ShapeLayer, m: Linear, least: number): GraphicsContext {
   const context = shapeContext();
   for (const { line, paths } of layer.strokes) {
     context.beginPath();
@@ -399,7 +400,7 @@ function strokeContext(layer: ShapeLayer, m: Linear): GraphicsContext {
       trace(context, transformPath(path, m));
     }
 
-    context.stroke(stroke(line, m));
+    context.stroke(stroke(line, m, least));
   }
 
   return context;
@@ -434,8 +435,8 @@ class StrokeContexts {
   constructor(private readonly counts: { strokeContexts: number; strokeReuses: number }) {}
 
   /** The layer's lines seen through `m`, taken: made or found. */
-  take(layer: ShapeLayer, m: Linear): GraphicsContext {
-    const key = `${m[0]},${m[1]},${m[2]},${m[3]}`;
+  take(layer: ShapeLayer, m: Linear, least: number): GraphicsContext {
+    const key = `${m[0]},${m[1]},${m[2]},${m[3]},${least}`;
     let contexts = this.byLayer.get(layer);
     if (!contexts) {
       contexts = new Map();
@@ -447,7 +448,7 @@ class StrokeContexts {
       this.counts.strokeReuses++;
       this.idle.delete(context);
     } else {
-      context = linesContext(layer, m);
+      context = linesContext(layer, m, least);
       this.counts.strokeContexts++;
       contexts.set(key, context);
       this.keys.set(context, [layer, key]);
@@ -499,8 +500,8 @@ class StrokeContexts {
 }
 
 /** A layer's lines seen through `m`, nothing where `m` flattens them. */
-function linesContext(layer: ShapeLayer, m: Linear): GraphicsContext {
-  return m[0] * m[3] - m[1] * m[2] === 0 ? new GraphicsContext() : strokeContext(layer, m);
+function linesContext(layer: ShapeLayer, m: Linear, least: number): GraphicsContext {
+  return m[0] * m[3] - m[1] * m[2] === 0 ? new GraphicsContext() : strokeContext(layer, m, least);
 }
 
 const NO_RECORDS: readonly FilterRecord[] = [];
@@ -621,6 +622,20 @@ export class PixiView {
    * objects' dirty flags as they were, for a one-off render such as
    * BitmapData.draw's, so the stage's own view still sees each change.
    */
+  /**
+   * How many screen pixels a stage pixel covers, for the thinnest line,
+   * which Flash draws a pixel of the screen wide however far the stage is
+   * zoomed. The renderer's resolution unless set: a host that renders
+   * finer than the screen to average down, as the test page does, sets it
+   * to what the screen shows. A fresh view draws a BitmapData's pixels,
+   * which are the stage's, so its thinnest line is a pixel.
+   */
+  screenScale: number | null = null;
+  /** The thinnest line it last drew the stage's lines with; a change draws them all again. */
+  private strokedAt = 0;
+  /** Whether this prepare draws every line again, the screen's scale having changed. */
+  private rescaled = false;
+
   constructor(
     readonly renderer: Renderer,
     private readonly fresh = false,
@@ -800,7 +815,12 @@ export class PixiView {
 
     node.fills = fills;
     node.sharedLines = !this.fresh && !node.ownFills && shape !== null;
-    const lines = current && sameLinear(current.world, node.world) ? current.strokes : null;
+    const lines =
+      current &&
+      sameLinear(current.world, node.world) &&
+      this.source?.leastWidth === this.leastWidth
+        ? current.strokes
+        : null;
     node.layers.forEach((layer, i) => {
       node.art.addChild(new Graphics(fills[i]));
       const borrowed = lines?.[i];
@@ -886,9 +906,9 @@ export class PixiView {
       // The new context goes in before the old one goes: the Graphics listens on the one it holds.
       const previous = strokes.context;
       if (node.sharedLines) {
-        strokes.context = this.lines.take(layer, m);
+        strokes.context = this.lines.take(layer, m, this.leastWidth);
       } else {
-        strokes.context = linesContext(layer, m);
+        strokes.context = linesContext(layer, m, this.leastWidth);
         this.counts.strokeContexts++;
         if (this.fresh) {
           this.built.push(strokes.context);
@@ -1020,7 +1040,7 @@ export class PixiView {
 
     if (dirty & CONTENT) {
       this.redraw(o, node);
-    } else if (moved && node.strokes.some((g) => g)) {
+    } else if ((moved || this.rescaled) && node.strokes.some((g) => g)) {
       this.restroke(node);
     }
 
@@ -1055,11 +1075,12 @@ export class PixiView {
     if (o instanceof Container) {
       if (dirty & CHILDREN) {
         this.arrange(o, node, moved, masking);
-      } else if (moved || remask || recolor || o.descendantsDirty) {
+      } else if (moved || remask || recolor || this.rescaled || o.descendantsDirty) {
         for (const child of o.children) {
           if (
             moved ||
             remask ||
+            this.rescaled ||
             recolor ||
             child.dirty !== CLEAN ||
             (child instanceof Container && child.descendantsDirty)
@@ -1208,9 +1229,17 @@ export class PixiView {
   }
 
   /** Bring the stage up to date with `root`'s display list, without drawing. */
+  /** The thinnest line, in stage pixels: a pixel of the screen. */
+  private get leastWidth(): number {
+    return this.fresh ? 1 : 1 / (this.screenScale ?? this.renderer.resolution ?? 1);
+  }
+
   prepare(root: DisplayObject): void {
     this.lines.tick();
+    this.rescaled = this.leastWidth !== this.strokedAt;
+    this.strokedAt = this.leastWidth;
     const node = this.sync(root, UNIT, false);
+    this.rescaled = false;
     if (node.parent !== this.stage) {
       this.stage.removeChildren();
       this.stage.addChild(node, this.offList);
