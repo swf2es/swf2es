@@ -366,6 +366,56 @@ test("a rewind keeps a later child where the frames replayed end on a place, and
   assert.equal(kept?.matrix.tx, 50);
 });
 
+test("a rewind keeps a later clip only where the place replayed gives its ratio", () => {
+  // Frame 2 puts another clip at depth 1, as authoring tools place one,
+  // with a ratio of its own: back to frame 1, frame 1's clip is made anew,
+  // as Flash does (the player's rewind-ratio case). Placed with frame 1's
+  // ratio, the later clip stays.
+  const clips = (ratio: number) => {
+    const clip = (id: number, square: number) =>
+      w.sprite(id, 1, [w.place({ depth: 1, character: square }), w.showFrame(), w.end()]);
+    return movie(
+      [clip(3, 1), clip(4, 2), w.place({ depth: 1, character: 3 })],
+      [w.remove(1), w.place({ depth: 1, character: 4, ratio })],
+      [],
+    );
+  };
+
+  for (const [ratio, character] of [
+    [1, 3],
+    [0, 4],
+  ]) {
+    const player = clips(ratio);
+    for (let f = 1; f < 3; f++) {
+      player.tick();
+    }
+
+    const later = player.root.depths.get(1);
+    player.root.gotoFrame(1);
+    const child = player.root.depths.get(1);
+    assert.equal(child?.character?.id, character);
+    assert.equal(child === later, character === 4);
+    assert.deepEqual(depths(player.root), [1]);
+  }
+
+  // A move to another ratio after the target: the clip frame 1 placed is made anew too.
+  const moved = movie(
+    [w.sprite(3, 1, [w.showFrame(), w.end()]), w.place({ depth: 1, character: 3 })],
+    [w.place({ depth: 1, move: true, ratio: 9 })],
+    [],
+  );
+  for (let f = 1; f < 3; f++) {
+    moved.tick();
+  }
+
+  const first = moved.root.depths.get(1);
+  moved.root.gotoFrame(1);
+  const again = moved.root.depths.get(1);
+  assert.notEqual(again, first);
+  assert.equal(again?.character?.id, 3);
+  assert.equal(again?.ratio, 0);
+});
+
 /** What a container's timeline children are, comparably between two players. */
 function snapshot(root: MovieClip, original: Map<number, DisplayObject | undefined>) {
   return [...root.depths.keys()].sort().map((depth) => {
