@@ -179,7 +179,14 @@ export class PointerInput {
     private readonly keyboard: KeyboardInput | null = null,
   ) {}
 
-  private send(type: string, target: DisplayObject, p: PointerState, buttonDown: boolean): void {
+  private send(
+    type: string,
+    target: DisplayObject,
+    p: PointerState,
+    buttonDown: boolean,
+    bubbles = true,
+    related: DisplayObject | null = null,
+  ): void {
     if (!target.object) {
       return;
     }
@@ -190,11 +197,11 @@ export class PointerInput {
     const event = s.rt.construct(
       s.rt.classNamed("flash.events::MouseEvent"),
       type,
-      true,
+      bubbles,
       false,
       x,
       y,
-      null,
+      related?.object ?? null,
       !!p.ctrlKey,
       !!p.altKey,
       !!p.shiftKey,
@@ -249,14 +256,37 @@ export class PointerInput {
     }
 
     if (target !== this.hover) {
-      if (this.hover) {
-        buttonState(this.hover, "up");
-        this.send("mouseOut", this.hover, p, down);
+      const previous = this.hover;
+      const entered = new Set<DisplayObject>();
+      for (let d = target; d; d = d.parent) {
+        entered.add(d);
+      }
+
+      let common: DisplayObject | null = this.stage;
+      if (previous && target) {
+        for (let d: DisplayObject | null = previous; d; d = d.parent) {
+          if (entered.has(d)) {
+            common = d;
+            break;
+          }
+        }
+      }
+
+      if (previous) {
+        buttonState(previous, "up");
+        this.send("mouseOut", previous, p, down, true, target);
+        for (let d: DisplayObject | null = previous; d && d !== common; d = d.parent) {
+          this.send("rollOut", d, p, down, false, target);
+        }
       }
 
       if (target) {
         buttonState(target, down && target === this.pressed ? "down" : "over");
-        this.send("mouseOver", target, p, down);
+        for (let d: DisplayObject | null = target; d && d !== common; d = d.parent) {
+          this.send("rollOver", d, p, down, false, previous);
+        }
+
+        this.send("mouseOver", target, p, down, true, previous);
       }
 
       this.hover = target;
