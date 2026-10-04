@@ -758,3 +758,64 @@ test("a tween's lines go once its morph drops their blend, not idle for a ratio 
   assert.equal(first.destroyed, true);
   assert.equal(lines().destroyed, false);
 });
+
+test("a blend's copy of what is behind it is held to the target and the texture, and clears what it misses", async () => {
+  // Loaded with the view, it patches the copy for every renderer.
+  await import("../../../packages/player/dist/pixi-blend.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const { RenderTargetSystem } = (await import(entry)) as {
+    RenderTargetSystem: {
+      prototype: { copyToTexture(this: unknown, ...args: unknown[]): unknown };
+    };
+  };
+  type Copy = [number, number, number, number, number, number];
+  // A target of 893×150 pixels and a back texture of 256×128.
+  const copy = (from: [number, number], size: [number, number], to: [number, number] = [0, 0]) => {
+    const copies: Copy[] = [];
+    const clears: unknown[] = [];
+    const system = {
+      getRenderTarget: () => ({ pixelWidth: 893, pixelHeight: 150 }),
+      adaptor: {
+        copyToTexture: (
+          _source: unknown,
+          _destination: unknown,
+          o: { x: number; y: number },
+          s: { width: number; height: number },
+          d: { x: number; y: number },
+        ) => copies.push([o.x, o.y, s.width, s.height, d.x, d.y]),
+      },
+      push: (options: { clearColor: unknown }) => clears.push(options.clearColor),
+      pop: () => {},
+    };
+    const destination = { source: { pixelWidth: 256, pixelHeight: 128 } };
+    RenderTargetSystem.prototype.copyToTexture.call(
+      system,
+      {},
+      destination,
+      { x: from[0], y: from[1] },
+      { width: size[0], height: size[1] },
+      { x: to[0], y: to[1] },
+    );
+    return { copies, clears };
+  };
+
+  // Inside: copied as asked, nothing cleared.
+  assert.deepEqual(copy([10, 20], [100, 50]), { copies: [[10, 20, 100, 50, 0, 0]], clears: [] });
+  // A hair wider and taller than the texture: held to it, and nothing missed.
+  assert.deepEqual(copy([10, 20], [257, 129]), { copies: [[10, 20, 256, 128, 0, 0]], clears: [] });
+  // Past the top-left: what the target has goes where it belongs, the rest is cleared.
+  assert.deepEqual(copy([-4, -6], [100, 50]), {
+    copies: [[0, 0, 96, 44, 4, 6]],
+    clears: [[0, 0, 0, 0]],
+  });
+  // Past the bottom-right: the copy stops at the target's edge.
+  assert.deepEqual(copy([850, 120], [100, 50]), {
+    copies: [[850, 120, 43, 30, 0, 0]],
+    clears: [[0, 0, 0, 0]],
+  });
+  // Wholly beyond, which Pixi's own clamp left as a width of -1 or a height
+  // of -3 that GL refused: no copy, only a clear.
+  assert.deepEqual(copy([894, 150], [10, 75]), { copies: [], clears: [[0, 0, 0, 0]] });
+  assert.deepEqual(copy([205, -4], [174, 1]), { copies: [], clears: [[0, 0, 0, 0]] });
+});

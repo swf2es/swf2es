@@ -2,18 +2,53 @@
 // modes"): the object drawn as a layer, its children together, then that
 // layer blended with what is below by the mode's formula, which a filter
 // that reads the back buffer computes. Colours are premultiplied.
-import { AlphaFilter, BlendModeFilter, type Filter, RenderTargetSystem } from "pixi.js";
+import { AlphaFilter, BlendModeFilter, CLEAR, type Filter, RenderTargetSystem } from "pixi.js";
 
-// A blend's back texture is sized with a hair of tolerance for rounding,
-// and the copy of what is behind into it without: at some resolutions the
-// copy is a pixel taller or wider than the texture, which GL refuses
-// (copyTexSubImage2D's offset overflow), and the blend reads nothing. The
-// copy is held to the texture, for every renderer on the page.
+// The copy of what is behind a blend into its back texture, held to both:
+// - The texture is sized with a hair of tolerance for rounding, and the
+//   copy without, so at some resolutions the copy is a pixel taller or
+//   wider than the texture, which GL refuses (copyTexSubImage2D's offset
+//   overflow), and the blend reads nothing.
+// - An object at or past the target's edge asks for pixels the target does
+//   not have; Pixi's own clamp then leaves a width or height below zero,
+//   which GL refuses (GL_INVALID_VALUE) and WebGPU fails its frame for.
+// What the target does not have is behind nothing, so the texture, taken
+// from a pool with what it last held, is cleared first wherever the copy
+// does not reach. Patched for every renderer on the page.
 const copyToTexture = RenderTargetSystem.prototype.copyToTexture;
+const TRANSPARENT: [number, number, number, number] = [0, 0, 0, 0];
 RenderTargetSystem.prototype.copyToTexture = function (source, destination, from, size, to) {
-  size.width = Math.min(size.width, destination.source.pixelWidth - to.x);
-  size.height = Math.min(size.height, destination.source.pixelHeight - to.y);
-  return copyToTexture.call(this, source, destination, from, size, to);
+  const target = this.getRenderTarget(source);
+  const { pixelWidth, pixelHeight } = destination.source;
+  // What the texture can take of what was asked, and of that what the target has.
+  const reachX = Math.min(to.x + size.width, pixelWidth);
+  const reachY = Math.min(to.y + size.height, pixelHeight);
+  const skipX = Math.max(0, -from.x, -to.x);
+  const skipY = Math.max(0, -from.y, -to.y);
+  const x = from.x + skipX;
+  const y = from.y + skipY;
+  const toX = to.x + skipX;
+  const toY = to.y + skipY;
+  const width = Math.min(reachX - toX, target.pixelWidth - x);
+  const height = Math.min(reachY - toY, target.pixelHeight - y);
+  if (width < reachX - Math.max(to.x, 0) || height < reachY - Math.max(to.y, 0)) {
+    // The caller binds its own target next, as FilterSystem.push does.
+    this.push({ target: destination, clear: CLEAR.COLOR, clearColor: TRANSPARENT });
+    this.pop();
+  }
+
+  if (width <= 0 || height <= 0) {
+    return destination;
+  }
+
+  return copyToTexture.call(
+    this,
+    source,
+    destination,
+    { x, y },
+    { width, height },
+    { x: toX, y: toY },
+  );
 };
 
 /** Each separable mode's B(back, front) of straight colours, GLSL and WGSL. */

@@ -2618,6 +2618,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 200,
   },
   {
+    name: "blend-edges",
+    swf: (abc) => bare(abc, 1, "BlendEdges", 200, 150),
+    script: "BlendEdges",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "filter-objects",
     swf: (abc) => bare(abc, 1, "FilterObjects"),
     script: "FilterObjects",
