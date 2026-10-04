@@ -2203,6 +2203,24 @@ function staticTextFilters(abc: Uint8Array): Uint8Array {
   });
 }
 
+function textAntiAlias(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 116,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0x8185a6),
+      probeFont(1),
+      w.doAbc(abc, "TextAntiAlias"),
+      w.symbolClass([[0, "TextAntiAlias"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Static text in Probe for scripts/StaticTextProbe.as: a text of two
 // lines, one that sets no colour, and one whose middle glyph is past the
 // font's, which moves no pen.
@@ -2760,6 +2778,17 @@ export const cases: PlayerCase[] = [
     // pixel against adl's whole pixels, as for `filters`.
     tolerance: 32,
     maxOutliers: 200,
+  },
+  {
+    name: "text-anti-alias",
+    swf: textAntiAlias,
+    script: "TextAntiAlias",
+    frames: 1,
+    capture: [1],
+    // Flash hints advanced text at small sizes; its edge coverage differs
+    // even when the glyphs meet the same pixel centres.
+    tolerance: 32,
+    maxOutliers: 430,
   },
   {
     name: "morph-shapes",

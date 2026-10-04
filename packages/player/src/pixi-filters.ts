@@ -237,7 +237,10 @@ class GlowFilter extends BlurredFilter {
     super.destroy();
   }
 
-  constructor(private readonly f: FilterRecord) {
+  constructor(
+    private readonly f: FilterRecord,
+    private readonly narrowTextShadow: boolean,
+  ) {
     const shadow = f.kind === "dropShadow";
     const radians = ((f.angle || 0) * Math.PI) / 180;
     const distance = shadow ? f.distance || 0 : 0;
@@ -270,6 +273,8 @@ class GlowFilter extends BlurredFilter {
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const f = this.f;
+    // Hinted embedded text has a slightly tighter zero-offset shadow in Flash.
+    const inset = this.narrowTextShadow && f.kind === "dropShadow" && !f.distance ? 0.5 : 0;
     const resolution = this.texels(input);
     const offset = this.resources.glowUniforms.uniforms.uOffset as Float32Array;
     const radians = ((f.angle || 0) * Math.PI) / 180;
@@ -283,8 +288,8 @@ class GlowFilter extends BlurredFilter {
       this.pass,
       input,
       blurred,
-      f.blurX || 0,
-      f.blurY || 0,
+      Math.max(0, (f.blurX || 0) - inset),
+      Math.max(0, (f.blurY || 0) - inset),
       f.quality,
       resolution,
       true,
@@ -887,6 +892,7 @@ export type MapTexture = (map: object) => Texture | null;
 export function displayFilters(
   records: readonly FilterRecord[],
   mapTexture: MapTexture = () => null,
+  narrowTextShadow = false,
 ): Filter[] {
   const out: Filter[] = [];
   for (const f of records) {
@@ -894,7 +900,7 @@ export function displayFilters(
     if (f.kind === "blur") {
       filter = new BlurFilter(f);
     } else if (f.kind === "glow" || f.kind === "dropShadow") {
-      filter = new GlowFilter(f);
+      filter = new GlowFilter(f, narrowTextShadow);
     } else if (f.kind === "colorMatrix") {
       filter = new ColorMatrixFilter(f);
     } else if (f.kind === "bevel") {
