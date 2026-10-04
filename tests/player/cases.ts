@@ -3004,6 +3004,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "crypto-random",
+    swf: (abc) => bare(abc, 1, "CryptoRandom"),
+    script: "CryptoRandom",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "mouse-visibility",
     swf: (abc) => bare(abc, 1, "MouseVisibility"),
     script: "MouseVisibility",
