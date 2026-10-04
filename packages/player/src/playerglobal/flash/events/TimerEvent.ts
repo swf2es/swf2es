@@ -1,5 +1,6 @@
 // flash.events.TimerEvent's one native: updateAfterEvent, which asks for a
-// redraw before the next frame, as MouseEvent's and KeyboardEvent's do.
+// redraw, as MouseEvent's and KeyboardEvent's do. Timers fire as a frame
+// starts here, so the frame's own drawing mostly answers it already.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 

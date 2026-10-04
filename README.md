@@ -43,9 +43,10 @@ const unbind = view.bindPointer(player); // mouse input, until unbind()
 const unbindKeys = bindKeyboard(player, window); // keys, and typing into the SWF's fields
 await player.start();
 let drawn = -1;
-// Each animation frame: play what the time is worth, and draw only when a
-// frame ran, input came or the page called into the SWF since the last
-// draw; the frames between would draw the same picture.
+// Each animation frame: play what the time is worth, and draw only when
+// `changes` moved: a frame ran, a key, a pointer event that changes what
+// shows, updateAfterEvent, or a call from the page into the SWF; the
+// frames between would draw the same picture.
 player.advance(elapsedMs);
 if (player.changes !== drawn) {
   drawn = player.changes;

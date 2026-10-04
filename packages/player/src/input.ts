@@ -226,9 +226,10 @@ export class PointerInput {
       type === "leave" ? null : pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
     const down = (p.buttons ?? 0) & 1 ? true : type === "down" && (p.button ?? 0) === 0;
 
-    // What may show at once, rather than at the next frame, as Ruffle
-    // redraws: a press, a release or a leave, a hover that moves on or off
-    // a button or a sprite in buttonMode, a drag selecting text.
+    // What may show at once, rather than at the next frame: a hover that
+    // moves on or off a button or a sprite in buttonMode, as Ruffle redraws
+    // for, and more than Ruffle, any press, release or leave, which may move
+    // focus and a caret, and a drag selecting text.
     if (
       type !== "move" ||
       (target !== this.hover && (buttonLike(target) || buttonLike(this.hover)))

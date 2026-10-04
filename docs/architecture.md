@@ -1163,9 +1163,10 @@ rest let go, as Ruffle paces, so a stall does not become a spiral of
 catch-up. It returns how many it ran, and `Player.changes` counts what
 may change the picture: each frame, each key, each call from the page
 into an ExternalInterface callback, each `updateAfterEvent`, and the
-pointer events that change what shows at once, as Ruffle redraws for
-them: a press, a release, a leave, a hover that moves on or off a button
-or a sprite in `buttonMode`, a drag selecting text. A plain move does
+pointer events that change what shows at once: a hover that moves on or
+off a button or a sprite in `buttonMode`, as Ruffle redraws for, and,
+more than Ruffle, any press, release or leave, which may move focus and
+a caret, and a drag selecting text. A plain move does
 not: what its listeners change shows at the next frame, as in Flash, so
 a fast mouse draws a 24 fps SWF 24 times a second, not at the screen's
 rate. Loads and socket data are delivered in a frame. A host

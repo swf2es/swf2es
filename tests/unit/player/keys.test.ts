@@ -33,3 +33,19 @@ test("playerglobal's natives and hooks register under the recorded names, no mor
     assert.deepEqual({ kind, missing, extra }, { kind, missing: [], extra: [] });
   }
 });
+
+test("updateAfterEvent of mouse, key and timer events asks for a redraw, and throws no longer", async () => {
+  const wasm = await WebAssembly.compile(
+    await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
+  );
+  const s = new Scripting(await createCodegen(wasm));
+  const natives = playerNatives(s);
+  for (const cls of ["MouseEvent", "KeyboardEvent", "TimerEvent"]) {
+    const method = natives[`flash.events::${cls}#updateAfterEvent`](s.rt) as (
+      this: unknown,
+    ) => void;
+    method.call({});
+  }
+
+  assert.equal(s.updates, 3);
+});
