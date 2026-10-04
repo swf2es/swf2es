@@ -2,7 +2,14 @@
 // modes"): the object drawn as a layer, its children together, then that
 // layer blended with what is below by the mode's formula, which a filter
 // that reads the back buffer computes. Colours are premultiplied.
-import { AlphaFilter, BlendModeFilter, type Filter, RenderTargetSystem } from "pixi.js";
+import {
+  AlphaFilter,
+  BlendModeFilter,
+  type Filter,
+  FilterSystem,
+  RenderTargetSystem,
+  TexturePool,
+} from "pixi.js";
 
 // The copy of what is behind a blend into its back texture, held to both:
 // - The texture is sized with a hair of tolerance for rounding, and the
@@ -43,6 +50,37 @@ RenderTargetSystem.prototype.copyToTexture = function (source, destination, from
     { width, height },
     { x: toX, y: toY },
   );
+};
+
+// What is behind a blend is copied from the pixels its bounds cover, which
+// Pixi has put on whole pixels of the target but keeps in stage units, as
+// k · (1/r): at a resolution such as 1.62, as a host fitting the stage to
+// its page gives, k · (1/r) · r can fall a hair short of k, and Pixi's floor
+// took the pixel before it. The blend then read what was behind it a pixel
+// off at those positions alone, so a moving blend shook what showed through
+// it. The corner and the size are rounded instead; the patch above holds
+// the copy to the target and the texture.
+FilterSystem.prototype.getBackTexture = function (target, bounds, previous) {
+  const resolution = target.colorTexture.source.resolution;
+  const back = TexturePool.getOptimalTexture({
+    width: bounds.width,
+    height: bounds.height,
+    resolution,
+  });
+  const x = previous ? bounds.minX - previous.minX : bounds.minX;
+  const y = previous ? bounds.minY - previous.minY : bounds.minY;
+  this.renderer.renderTarget.copyToTexture(
+    target,
+    back,
+    { x: Math.round(x * resolution), y: Math.round(y * resolution) },
+    {
+      width: Math.round(bounds.width * resolution),
+      height: Math.round(bounds.height * resolution),
+    },
+    { x: 0, y: 0 },
+  );
+
+  return back;
 };
 
 /** Each separable mode's B(back, front) of straight colours, GLSL and WGSL. */
