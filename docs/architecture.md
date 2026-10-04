@@ -1197,10 +1197,28 @@ An external `Sound.load` uses the same host fetch as `URLStream`; its
 open, progress and complete or error reach ActionScript on a frame, after
 the host has decoded it. `Sound.play` gets a channel immediately, with
 start time, repeats, stop and sound transform. Sound-complete is delivered
-on a frame. A page may provide an `AudioHost` to `Scripting`; without one,
-the player keeps the script-visible sound state but emits no audio.
+on a frame. A stopped channel's `position` stays where it stopped. A page
+may provide an `AudioHost` to `Scripting`; without one, the player keeps
+the script-visible sound state but emits no audio.
+
+`SoundMixer.soundTransform` is one transform per player, stored in
+hundredths as a channel's is, and its getter returns a copy. What a channel
+sends to the device is its own transform and the mixer's, combined as
+Ruffle's `SoundTransform::concat` computes them (only two transforms that
+both cross channels depend on the order, which no trace shows), so setting the mixer's updates
+every playing channel through `PlayingSound.setMix` and applies to every
+later one. `SimpleButton.soundTransform` reads and writes the mixer's, as
+in Flash (the `sound-mixer` case and the corpus's
+`simplebutton_soundtransform`). `stopAll` stops every channel without a
+sound-complete. `bufferTime` is kept, 5 seconds at first, and rejects a
+negative one with RangeError #2027; `areSoundsInaccessible` is false.
+`computeSpectrum` writes 512 zero floats and rewinds the ByteArray, which
+is what Ruffle writes with no sample history and what Flash writes while
+nothing plays: the player reads no output back from the device. AIR's
+`audioPlaybackMode` and `useSpeakerphoneForVoice` are kept and checked as
+AIR checks them; their API version hides them from a SWF.
 DefineSound's ADPCM, Nellymoser and Speex formats, timeline StartSound and
-stream tags, ByteArray sound loading, ID3 and SoundMixer are later slices.
+stream tags, ByteArray sound loading and ID3 are later slices.
 MP3 seek samples are parsed but not yet applied to decoded browser audio.
 
 ### Time

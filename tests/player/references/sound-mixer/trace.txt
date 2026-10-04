@@ -1,0 +1,30 @@
+default 1 0 1 0 0 1
+copy false true
+copy volume 1
+assigned 0.33 -0.48839999999999995 1.22 0 0 0.7
+assigned same false
+assigned later 0.33
+odd 2.5 0 1 -0.12 0.33 1.23
+null transform 2007 Error #2007: Parameter sndTransform must be non-null.
+after null 2.5 0 1 -0.12 0.33 1.23
+button 2.5 0 1 -0.12 0.33 1.23
+button global 0.7 1 0 0 0 1.41
+button copy false
+bufferTime 5
+bufferTime 120
+bufferTime 2
+negative bufferTime 2027 Error #2027: Parameter bufferTime must be a non-negative number; got -3.
+bufferTime 2
+inaccessible false
+empty 2048 0 0
+long 2048 0 0
+fft 2048 0 0
+stretch 2048 0 0
+null spectrum 2007 Error #2007: Parameter sound must be non-null.
+local 1 0
+stopAll undefined
+after stopAll 0.5 0.2604000000000001 0.86 0 0 1.11
+frozen true
+events later complete
+frozen true
+later ended true
