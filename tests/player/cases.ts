@@ -1854,6 +1854,62 @@ function staticTextProbe(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Two clips of one outlined shape and one static text in Probe, for
+// scripts/SharedColors.as, which colour-transforms the first and then
+// takes the transform off: the second shares the first's fills and glyphs.
+function sharedColors(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 80,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.shape({
+        id: 1,
+        bounds: [-40, 840, -40, 840],
+        fills: [0xcc3300],
+        lines: [{ width: 80, color: 0x004400 }],
+        paths: [{ fill1: 1, line: 1, commands: rectPath(0, 0, 40, 40) }],
+      }),
+      probeFont(5),
+      w.staticText({
+        id: 2,
+        bounds: [0, 1600, -800, 200],
+        records: [
+          {
+            font: 5,
+            height: 600,
+            color: 0x000080,
+            x: 0,
+            y: 0,
+            glyphs: [
+              [2, 400],
+              [3, 500],
+              [4, 400],
+            ],
+          },
+        ],
+      }),
+      w.sprite(3, 1, [
+        w.place({ depth: 1, character: 1 }),
+        w.place({ depth: 2, character: 2, matrix: { tx: 1000, ty: 700 } }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc, "SharedColors"),
+      w.symbolClass([[0, "SharedColors"]]),
+      w.place({ depth: 1, character: 3, matrix: { tx: 200, ty: 200 } }),
+      w.place({ depth: 2, character: 3, matrix: { tx: 2200, ty: 200 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Text laid out in Probe (scripts/TextLayout.as).
 function textLayout(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -2073,6 +2129,15 @@ export const cases: PlayerCase[] = [
     // `shared-lines`, the end shape's too: some 570 pixels in frame 4.
     tolerance: 32,
     maxOutliers: 800,
+  },
+  {
+    name: "shared-colors",
+    swf: sharedColors,
+    script: "SharedColors",
+    frames: 3,
+    capture: [1, 2, 3],
+    tolerance: 32,
+    maxOutliers: 60,
   },
   { name: "depths", swf: depths, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
   { name: "loops", swf: loops(true), ...looped },

@@ -1549,7 +1549,15 @@ alpha for a transform that only multiplies, by 0 to 1, as most do. Any
 other, with an offset or a multiplier beyond 0–1, sends what is drawn
 under it to a batcher of swf2es's own, whose shader takes each vertex's
 whole transform, concatenated from the stage down, and applies it to the
-straight colour; such objects still batch together. A gradient there is
+straight colour; such objects still batch together. A shape's fills, a
+glyph's and a layer's lines are drawn from unbatched contexts that are
+shared, by a character's instances, a font's text and instances in step,
+so one drawn under such a transform draws a batched copy instead, made
+once, and the context itself never changes: switched to batched, the
+other instances' Graphics, set up unbatched, drew nothing
+(`shared-colors`). A shape's lines keep standing for the shared context,
+which their cache counts. A glyph's colour, its Graphics' tint, goes into the
+vertex colour there too. A gradient there is
 transformed pixel by pixel, which clamps after the ramp where Flash clamps
 its stops, so the two part only where a transformed stop is clamped.
 
