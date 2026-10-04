@@ -57,7 +57,7 @@ export function keyboardEventNatives(s: Scripting): avm2.Natives {
     }
 
     updateAfterEvent(): void {
-      // Drawn at the next frame, as a host draws every change.
+      s.updates++;
     }
   }
 

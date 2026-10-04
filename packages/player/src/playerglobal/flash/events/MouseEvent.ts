@@ -37,6 +37,10 @@ export function mouseEventNatives(s: Scripting): avm2.Natives {
     declare $delta: number;
     declare $relatedObjectInaccessible: boolean;
 
+    updateAfterEvent(): void {
+      s.updates++;
+    }
+
     get localX(): number {
       return this.$mouseX ?? Number.NaN;
     }
