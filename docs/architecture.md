@@ -530,10 +530,10 @@ repeated batcher destruction. Masks and their targets must belong to the
 same group; references to partners outside a subtree prevent grouping,
 and a mask moved outside an existing group removes that group. Timeline
 masks stay with their siblings. A fresh view for BitmapData.draw does not
-group. An off-list branch releases nested groups child-first, including
-their batch buffers. A branch that leaves repeatedly skips regrouping
-until its next change after five seconds, avoiding a rebuild on every
-return. A colour batcher whose buffers stay mostly empty for 120 rebuilds shrinks them.
+group. An off-list branch keeps its group hierarchy while releasing batches on
+its first removal. A branch that returns keeps its batches for five seconds
+after a later removal, avoiding repeated rebuilds. A colour batcher whose
+buffers stay mostly empty for 120 rebuilds shrinks them.
 The colour batcher's shader ignores Pixi's group colour, since
 its vertex colour transform already includes every ancestor. The
 `render-groups` case checks colours, masks moved between branches, scrolls,

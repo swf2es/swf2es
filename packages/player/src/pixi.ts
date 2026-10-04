@@ -89,6 +89,7 @@ function containment(paths: Path[]): Region[] {
     for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
       area += points[j] * points[i + 1] - points[i] * points[j + 1];
     }
+
     return { path, points, parent: null, children: [], area: Math.abs(area) / 2 };
   });
   for (const inner of regions) {
