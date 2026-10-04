@@ -1074,3 +1074,30 @@ test("a drawing kept off the list is drawn again for a change of its content or 
   assert.equal(art()[0].destroyed, false);
   assert.notEqual(art()[0], fill);
 });
+
+test("a child moved into a parent off the list gives its lines back", async () => {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const x = new Container();
+  const away = new Container();
+  const shape = new ShapeObject(await outlinedSquare());
+  x.placeAtDepth(shape, 1);
+  root.placeAtDepth(x, 1);
+  type Drawn = { context: { destroyed: boolean } };
+  view.prepare(root);
+  const lines = (
+    view.stage.children[0].children[1].children[1].children[0].children[1] as unknown as Drawn
+  ).context;
+
+  await withClock((clock) => {
+    away.addChildAt(shape, 0);
+    view.prepare(root);
+    for (let k = 0; k < 2; k++) {
+      clock.at += 6000;
+      view.prepare(root);
+    }
+
+    assert.equal(lines.destroyed, true);
+  });
+});

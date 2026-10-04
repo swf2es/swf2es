@@ -811,6 +811,8 @@ export class PixiView {
   screenScale: number | null = null;
   /** The thinnest line it last drew the stage's lines with; a change draws them all again. */
   private strokedAt = 0;
+  /** The root the last prepare synced, to know whether an object is on the list. */
+  private root: DisplayObject | null = null;
   /** Whether this prepare draws every line again, the screen's scale having changed. */
   private rescaled = false;
 
@@ -1214,8 +1216,8 @@ export class PixiView {
     }
 
     // Those it last drew, which may since have left it too, and any it has
-    // now; not one it last drew that has moved to another parent, which
-    // draws it.
+    // now; not one it last drew that has moved to another parent on the
+    // list, which draws it.
     const kids = new Set(node.kids);
     if (o instanceof Container) {
       for (const child of o.children) {
@@ -1224,10 +1226,18 @@ export class PixiView {
     }
 
     for (const kid of kids) {
-      if (kid.parent === null || kid.parent === o) {
+      if (kid.parent === o || this.left(kid, o)) {
         this.release(kid);
       }
     }
+  }
+
+  /**
+   * Whether `kid`, which `from` last drew, is off the list: taken out, or
+   * moved to a parent that is off it too, which no sync will release.
+   */
+  private left(kid: DisplayObject, from: DisplayObject): boolean {
+    return kid.parent === null || (kid.parent !== from && !this.root?.encloses(kid));
   }
 
   /** A released node's art emptied, its fills and lines given back: drawn again if it comes back. */
@@ -1508,10 +1518,10 @@ export class PixiView {
     content.removeChildren();
     content.addChild(node.art);
     // Those that left the list give their lines back, all the way down; one
-    // moved to another parent is drawn there, perhaps already this frame.
+    // moved to another parent on the list is drawn there, perhaps already this frame.
     if (!this.fresh) {
       for (const kid of node.kids) {
-        if (kid.parent === null) {
+        if (this.left(kid, o)) {
           this.release(kid);
         }
       }
@@ -1624,6 +1634,7 @@ export class PixiView {
   }
 
   prepare(root: DisplayObject): void {
+    this.root = root;
     this.lines.tick();
     this.blends.tick();
     const now = performance.now();
