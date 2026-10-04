@@ -3011,6 +3011,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "mouse-cursor",
+    swf: (abc) => bare(abc, 1, "MouseCursorNatives"),
+    script: "MouseCursorNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "font-registration",
     build: fontRegistration,
     frames: 3,

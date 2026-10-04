@@ -385,6 +385,10 @@ export class Scripting {
   private statusClass: AsObject | null = null;
   /** The system cursor is visible until flash.ui.Mouse hides it. */
   mouseVisible = true;
+  /** Mouse.cursor: "auto" for the player's choice, a flash.ui.MouseCursor name or a registered one. */
+  mouseCursor = "auto";
+  /** The cursors Mouse.registerCursor registered, by name, as CSS cursor values. */
+  readonly cursors = new Map<string, string>();
   pointer: PointerInput | null = null;
   /** Whether an HTML assignment drops its final line break, as some players do. */
   readonly trimTrailingHtmlBreak: boolean;
