@@ -735,6 +735,10 @@ export class PixiView {
       this.renderer.screen.width,
       this.renderer.screen.height,
     );
+    // A move is posted, handled when the player next advances or before the
+    // next press, release, leave or key; a frame callback of its own handles
+    // it where the host does not advance (a paused player, say).
+    let frame = 0;
     const send = (type: "move" | "down" | "up" | "leave") => (e: FederatedPointerEvent) => {
       const p: PointerState = {
         x: (e.global.x * player.width) / this.renderer.screen.width,
@@ -746,6 +750,15 @@ export class PixiView {
         shiftKey: e.shiftKey,
         time: e.timeStamp,
       };
+      if (type === "move" && player.pointer && typeof requestAnimationFrame === "function") {
+        player.pointer.post(p);
+        frame ||= requestAnimationFrame(() => {
+          frame = 0;
+          player.pointer?.flush();
+        });
+        return;
+      }
+
       player.pointer?.handle(type, p);
     };
     const move = send("move");
@@ -758,6 +771,12 @@ export class PixiView {
     this.stage.on("pointerupoutside", up);
     this.stage.on("pointerleave", leave);
     return () => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
+
+      player.pointer?.flush();
       this.stage.off("pointermove", move);
       this.stage.off("pointerdown", down);
       this.stage.off("pointerup", up);

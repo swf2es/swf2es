@@ -20,7 +20,7 @@ import {
   transformRect,
   union,
 } from "./geometry.js";
-import { flatten, inside, orientation, type ShapeLayer } from "./shapes.js";
+import { flatten, inside, orientation, type Path, type ShapeLayer } from "./shapes.js";
 import { hitsGlyph } from "./static-text.js";
 
 const TWIPS = 20;
@@ -277,10 +277,10 @@ function drawnAt(
       let crossings = 0;
       let sum = 0;
       for (const contour of contours) {
-        const points = flatten(contour);
-        if (inside(points, x, y)) {
+        const flat = flattened(contour);
+        if (near(flat, x, y, 0) && inside(flat.points, x, y)) {
           crossings++;
-          sum += orientation(points);
+          sum += flat.orientation;
         }
       }
 
@@ -296,7 +296,8 @@ function drawnAt(
     for (const { line, paths } of layer.strokes) {
       const half = Math.max(line.width / TWIPS, 1) / 2;
       for (const path of paths) {
-        if (nearPolyline(flatten(path), x, y, half)) {
+        const flat = flattened(path);
+        if (near(flat, x, y, half) && nearPolyline(flat.points, x, y, half)) {
           return true;
         }
       }
@@ -319,6 +320,65 @@ function drawnAt(
   }
 
   return false;
+}
+
+/** A path as hit tests read it: its polygon, the polygon's orientation, and the box around it. */
+interface Flat {
+  /** How long the path was: a drawing's paths grow as lineTo adds to them. */
+  length: number;
+  points: number[];
+  orientation: number;
+  xMin: number;
+  yMin: number;
+  xMax: number;
+  yMax: number;
+}
+
+/**
+ * Paths flattened once, not on every hit test: the pointer asks on every
+ * move, of every shape under the point's ancestors, and a curve's chords
+ * cost more than a box test that rules most of them out.
+ */
+const flats = new WeakMap<Path, Flat>();
+
+function flattened(path: Path): Flat {
+  const cached = flats.get(path);
+  if (cached && cached.length === path.length) {
+    return cached;
+  }
+
+  const points = flatten(path);
+  let [xMin, yMin, xMax, yMax] = [Infinity, Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < points.length; i += 2) {
+    xMin = Math.min(xMin, points[i]);
+    xMax = Math.max(xMax, points[i]);
+    yMin = Math.min(yMin, points[i + 1]);
+    yMax = Math.max(yMax, points[i + 1]);
+  }
+
+  const flat = {
+    length: path.length,
+    points,
+    orientation: orientation(points),
+    xMin,
+    yMin,
+    xMax,
+    yMax,
+  };
+  flats.set(path, flat);
+  return flat;
+}
+
+/** Whether (x, y) is within `half` of the path's box, as it must be to be in or on it. */
+function near(flat: Flat, x: number, y: number, half: number): boolean {
+  // Negated, so a box made NaN by a drawing's NaN point rules nothing out:
+  // the full test then skips only the NaN edges, as it did.
+  return !(
+    x < flat.xMin - half ||
+    x > flat.xMax + half ||
+    y < flat.yMin - half ||
+    y > flat.yMax + half
+  );
 }
 
 /** Whether (px, py) is within `half` of any segment of the open polyline. */

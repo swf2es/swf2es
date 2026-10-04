@@ -696,7 +696,7 @@ function charCodeOf(e: KeyboardEvent): number {
  * edit or caret, or Tab moving the SWF's focus. Its own shortcuts stay.
  */
 export function bindKeyboard(
-  player: { keyboard: KeyboardInput | null },
+  player: { keyboard: KeyboardInput | null; pointer?: { flush(): void } | null },
   target: EventTarget,
 ): () => void {
   const listener = (event: Event) => {
@@ -715,6 +715,9 @@ export function bindKeyboard(
     if (!keyboard) {
       return;
     }
+
+    // A key's listeners see the pointer where it last moved.
+    player.pointer?.flush();
 
     const used = keyboard.handle(e.type === "keydown" ? "down" : "up", {
       keyCode: KEY_CODES[e.keyCode] ?? e.keyCode,

@@ -133,6 +133,8 @@ export class Player {
    * many frames it played.
    */
   advance(dt: number): number {
+    // The pointer's last move, so the frame's scripts see where it is now.
+    this.pointer?.flush();
     this.owed += Math.max(0, dt);
     let n = 0;
     while (n < MAX_CATCH_UP && this.owed >= 1000 / this.frameRate) {

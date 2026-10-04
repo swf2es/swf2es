@@ -141,7 +141,7 @@ test("Pixi pointer delivery scales to SWF coordinates and stops on unbind", () =
   const player = {
     width: 100,
     height: 50,
-    pointer: { handle: (...args: unknown[]) => calls.push(args) },
+    pointer: { handle: (...args: unknown[]) => calls.push(args), flush: () => {} },
   } as unknown as Player;
   const unbind = view.bindPointer(player);
   const event = {
@@ -172,6 +172,48 @@ test("Pixi pointer delivery scales to SWF coordinates and stops on unbind", () =
   unbind();
   view.stage.emit("pointerdown", event as never);
   assert.equal(calls.length, 1);
+});
+
+test("Pixi pointer moves are posted, flushed by a frame of their own where nothing else did", () => {
+  const renderer = { screen: { width: 100, height: 100 } } as unknown as ConstructorParameters<
+    typeof PixiView
+  >[0];
+  const view = new PixiView(renderer);
+  const calls: string[] = [];
+  const player = {
+    width: 100,
+    height: 100,
+    pointer: {
+      post: (p: { x: number }) => calls.push(`post ${p.x}`),
+      flush: () => calls.push("flush"),
+      handle: (type: string, p: { x: number }) => calls.push(`${type} ${p.x}`),
+    },
+  } as unknown as Player;
+  const frames: (() => void)[] = [];
+  const g = globalThis as { requestAnimationFrame?: unknown; cancelAnimationFrame?: unknown };
+  g.requestAnimationFrame = (f: () => void) => frames.push(f);
+  g.cancelAnimationFrame = (id: number) => {
+    frames[id - 1] = () => {};
+  };
+  try {
+    const unbind = view.bindPointer(player);
+    const at = (x: number) => ({ global: { x, y: 0 }, button: 0, buttons: 0 }) as never;
+    view.stage.emit("pointermove", at(1));
+    view.stage.emit("pointermove", at(2));
+    view.stage.emit("pointerdown", at(3));
+    assert.deepEqual(calls, ["post 1", "post 2", "down 3"]);
+    assert.equal(frames.length, 1);
+    frames[0]();
+    assert.deepEqual(calls.slice(3), ["flush"]);
+
+    view.stage.emit("pointermove", at(4));
+    unbind();
+    frames[1]();
+    assert.deepEqual(calls.slice(4), ["post 4", "flush"]);
+  } finally {
+    delete g.requestAnimationFrame;
+    delete g.cancelAnimationFrame;
+  }
 });
 
 test("Flash's filters are left out under WebGPU, and a fresh view destroys those it made", async () => {

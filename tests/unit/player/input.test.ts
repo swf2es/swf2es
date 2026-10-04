@@ -94,6 +94,29 @@ test("a disabled field over a button lets the button take the hit, and its paren
   assert.equal(pointerTarget(stage, 10, 10, 100, 100), button);
 });
 
+test("a posted move waits for a flush or the next other input, and only the last counts", () => {
+  const stage = new Container();
+  const scripting = { stageWidth: 100, stageHeight: 100 } as unknown as Scripting;
+  const input = new PointerInput(stage, scripting);
+  input.post({ x: 1, y: 1 });
+  input.post({ x: 2, y: 2 });
+  assert.equal(input.handled, 0);
+  input.flush();
+  assert.equal(input.handled, 1);
+  assert.equal(scripting.mouseStageX, 2);
+  input.flush();
+  assert.equal(input.handled, 1);
+
+  input.post({ x: 3, y: 3 });
+  input.handle("down", { x: 4, y: 4 });
+  assert.equal(input.handled, 3);
+  input.post({ x: 5, y: 5 });
+  input.handle("move", { x: 6, y: 6 });
+  input.flush();
+  assert.equal(input.handled, 4);
+  assert.equal(scripting.mouseStageX, 6);
+});
+
 test("a pointer down dispatches capture, target and bubble with target-local coordinates", () => {
   const stage = new Container();
   stage.object = { $display: stage } as never;

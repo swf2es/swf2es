@@ -225,7 +225,7 @@ test("focus moves with focusOut then focusIn, each naming the other", () => {
 });
 
 test("tab moves by tabIndex where any has one, else by place, after a keyFocusChange a listener may cancel", () => {
-  const { stage, fields, scripting, keyboard, listen } = setUp("a", "b", "c");
+  const { fields, scripting, keyboard, listen } = setUp("a", "b", "c");
   const [a, b, c] = fields;
   const tab = (shiftKey = false) => keyboard.handle("down", { keyCode: 9, charCode: 9, shiftKey });
 

@@ -150,6 +150,7 @@ export class PointerInput {
   private pressed: DisplayObject | null = null;
   /** The last press, which the next continues as a double or triple click if near it in place and time. */
   private lastPress: { x: number; y: number; time: number; clicks: number } | null = null;
+  private moved: PointerState | null = null;
 
   constructor(
     private readonly stage: Container,
@@ -183,7 +184,31 @@ export class PointerInput {
     dispatchEvent(s, target.object, event);
   }
 
+  /**
+   * A move to handle at the next flush: at the start of the player's next
+   * frame, or before the next other input, whichever comes first. A host
+   * gets several a frame, of which only the last one shows.
+   */
+  post(p: PointerState): void {
+    this.moved = p;
+  }
+
+  /** Handle the move posted, if any. */
+  flush(): void {
+    const p = this.moved;
+    if (p) {
+      this.handle("move", p);
+    }
+  }
+
   handle(type: "move" | "down" | "up" | "leave", p: PointerState): void {
+    // A move posted before this input comes first; a move given now replaces it.
+    if (type === "move") {
+      this.moved = null;
+    } else {
+      this.flush();
+    }
+
     this.handled++;
     const s = this.scripting;
     s.mouseStageX = p.x;
