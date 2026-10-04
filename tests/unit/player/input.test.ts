@@ -87,6 +87,11 @@ test("a disabled field over a button lets the button take the hit, and its paren
   assert.equal(pointerTarget(stage, 50, 10, 100, 100), panel);
   panel.object.$mouseEnabled = false;
   assert.equal(pointerTarget(stage, 50, 10, 100, 100), stage);
+
+  // Artwork above an interactive sibling does not hide it: interactive children are tried first.
+  panel.object.$mouseEnabled = true;
+  panel.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 2);
+  assert.equal(pointerTarget(stage, 10, 10, 100, 100), button);
 });
 
 test("a pointer down dispatches capture, target and bubble with target-local coordinates", () => {

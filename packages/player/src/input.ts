@@ -27,8 +27,8 @@ export interface PointerState {
  * What a pick finds: an interactive object hit, a hit that goes up to the
  * first ancestor with mouseEnabled, or nothing.
  */
-type Pick = DisplayObject | typeof PROPAGATE | null;
 const PROPAGATE = "propagate";
+type Pick = DisplayObject | typeof PROPAGATE | null;
 
 /** An InteractiveObject's kind: what picks for itself, rather than through its parent. */
 const isInteractive = (d: DisplayObject): boolean =>
@@ -83,8 +83,9 @@ export function pointerTarget(
 
       const parent = area.parent;
       area.parent = d;
+      // A disabled button is missed, not passed up: what is under it gets the hit (Ruffle).
       try {
-        return drawn(area) ? own(d) : null;
+        return mouseEnabled(d) && drawn(area) ? d : null;
       } finally {
         area.parent = parent;
       }
@@ -94,21 +95,16 @@ export function pointerTarget(
       return hitsOwnPoint(d, x, y, stage) ? own(d) : null;
     }
 
-    const order = [...d.children].reverse();
+    // Two passes rather than a sorted copy: this runs on every pointer move.
+    const children = d.children;
     let propagated = false;
-    for (const child of [
-      ...order.filter(isInteractive),
-      ...order.filter((c) => !isInteractive(c)),
-    ]) {
-      if (!isInteractive(child)) {
-        if (drawn(child)) {
-          return own(d);
-        }
 
+    for (let i = children.length - 1; i >= 0; i--) {
+      if (!isInteractive(children[i])) {
         continue;
       }
 
-      const found = pick(child);
+      const found = pick(children[i]);
       if (found === PROPAGATE) {
         propagated = true;
       } else if (found) {
@@ -119,6 +115,12 @@ export function pointerTarget(
 
     if (propagated) {
       return own(d);
+    }
+
+    for (let i = children.length - 1; i >= 0; i--) {
+      if (!isInteractive(children[i]) && drawn(children[i])) {
+        return own(d);
+      }
     }
 
     return hitsOwnPoint(d, x, y, stage) ? own(d) : null;
