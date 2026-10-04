@@ -477,7 +477,7 @@
   "avm2/focusrect_property": {"matched":32,"lines":110,"traced":110,"error":null},
   "avm2/font_description_clone": {"matched":0,"lines":14,"traced":0,"error":"Error: swf2es: native flash.text.engine::FontDescription#set:fontName is not supported yet"},
   "avm2/font_embedded": {"matched":24,"lines":24,"traced":24,"error":null},
-  "avm2/font_enumeratefonts": {"matched":43,"lines":43,"traced":43,"error":"ArgumentError: Error #1508: The value specified for argument font is invalid."},
+  "avm2/font_enumeratefonts": {"matched":43,"lines":43,"traced":43,"error":null},
   "avm2/font_enumeratefonts_filter": {"matched":4,"lines":4,"traced":4,"error":null},
   "avm2/font_enumeratefonts_order": {"matched":9,"lines":9,"traced":9,"error":null},
   "avm2/font_hasglyphs": {"matched":40,"lines":40,"traced":40,"error":null},

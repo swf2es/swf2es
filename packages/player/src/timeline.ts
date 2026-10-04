@@ -7,6 +7,7 @@ import {
   type ButtonRecord,
   type EditText,
   type Font,
+  type Font4,
   type FontName,
   isBitmapTag,
   type MorphShape,
@@ -16,6 +17,7 @@ import {
   readButton,
   readEditText,
   readFont,
+  readFont4,
   readFrameLabel,
   readMorphShape,
   readPlace,
@@ -116,6 +118,14 @@ export interface FontCharacter extends FontName {
   font: Font;
 }
 
+/** DefineFont4: CFF fonts belong to the Flash Text Engine, not classic TextField layout. */
+export interface CffFontCharacter extends FontName {
+  type: "fontCff";
+  font: Font4;
+}
+
+export type AnyFontCharacter = FontCharacter | CffFontCharacter;
+
 /** A bitmap's pixels as every copy of it starts: premultiplied ARGB; 0 by 0 for what Flash cannot read. */
 export interface BitmapPixels {
   width: number;
@@ -159,10 +169,14 @@ export type Character =
   | StaticTextCharacter
   | BinaryCharacter
   | FontCharacter
+  | CffFontCharacter
   | SoundCharacter;
 
 /** What a timeline can place: every character but data and fonts. */
-export type DisplayCharacter = Exclude<Character, BinaryCharacter | FontCharacter | SoundCharacter>;
+export type DisplayCharacter = Exclude<
+  Character,
+  BinaryCharacter | FontCharacter | CffFontCharacter | SoundCharacter
+>;
 
 /** What Flash makes of a bitmap it cannot read. */
 export const INVALID_PIXELS: BitmapPixels = {
@@ -360,6 +374,18 @@ function timelineOf(
         const font = readFont(bytes, t);
         library.set(font.id, {
           type: "font",
+          id: font.id,
+          name: font.name,
+          bold: font.bold,
+          italic: font.italic,
+          font,
+        });
+        break;
+      }
+      case tags.DefineFont4: {
+        const font = readFont4(bytes, t);
+        library.set(font.id, {
+          type: "fontCff",
           id: font.id,
           name: font.name,
           bold: font.bold,

@@ -877,7 +877,13 @@ export function buttonStates(
       [];
     for (const record of character.records) {
       const c = record.states & flag ? library.characters.get(record.character) : undefined;
-      if (c && c.type !== "binary" && c.type !== "font" && c.type !== "sound") {
+      if (
+        c &&
+        c.type !== "binary" &&
+        c.type !== "font" &&
+        c.type !== "fontCff" &&
+        c.type !== "sound"
+      ) {
         const display = displayFor(c, library);
         display.applyPlace(recordPlace(record, flag !== BUTTON_HIT_TEST));
         parts.push({ display, character: c, record });
@@ -1091,6 +1097,7 @@ export class MovieClip extends Container {
         !character ||
         character.type === "binary" ||
         character.type === "font" ||
+        character.type === "fontCff" ||
         character.type === "sound"
       ) {
         existing?.applyPlace(place);
@@ -1256,6 +1263,7 @@ export class MovieClip extends Container {
         !character ||
         character.type === "binary" ||
         character.type === "font" ||
+        character.type === "fontCff" ||
         character.type === "sound"
       ) {
         existing?.applyPlace(jump.place);

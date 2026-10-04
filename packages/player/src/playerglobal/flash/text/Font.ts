@@ -1,11 +1,11 @@
 // flash.text.Font: embedded SWF font metadata and explicit font registration.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
-import type { FontCharacter } from "../../../timeline.js";
+import type { AnyFontCharacter, FontCharacter } from "../../../timeline.js";
 
 type AsObject = avm2.AsObject;
 
-function style(font: FontCharacter): string {
+function style(font: AnyFontCharacter): string {
   if (font.bold && font.italic) {
     return "boldItalic";
   }
@@ -21,7 +21,7 @@ export function fontNatives(s: Scripting): avm2.Natives {
   const glyphCodes = new WeakMap<FontCharacter, Set<number>>();
 
   class FontNatives {
-    declare $font: FontCharacter | null;
+    declare $font: AnyFontCharacter | null;
 
     get fontName(): string | null {
       return this.$font?.name ?? null;
@@ -32,13 +32,17 @@ export function fontNatives(s: Scripting): avm2.Natives {
     }
 
     get fontType(): string | null {
-      return this.$font ? "embedded" : null;
+      return this.$font ? (this.$font.type === "fontCff" ? "embeddedCFF" : "embedded") : null;
     }
 
     hasGlyphs(text: string): boolean {
       const font = this.$font;
       if (!font) {
         return false;
+      }
+
+      if (font.type === "fontCff") {
+        return text.length === 0;
       }
 
       let glyphs = glyphCodes.get(font);
@@ -58,7 +62,7 @@ export function fontNatives(s: Scripting): avm2.Natives {
 
     static enumerateFonts(_enumerateDeviceFonts: boolean): AsObject {
       const cls = s.rt.classNamed("flash.text::Font");
-      const fonts: FontCharacter[] = [];
+      const fonts: AnyFontCharacter[] = [];
       const library = s.codeLibrary();
       if (library) {
         for (const character of library.characters.values()) {

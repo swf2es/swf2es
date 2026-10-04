@@ -39,3 +39,4 @@ export const DefineMorphShape2 = 84;
 export const DefineSceneAndFrameLabelData = 86;
 export const DefineBinaryData = 87;
 export const DefineBitsJPEG4 = 90;
+export const DefineFont4 = 91;
