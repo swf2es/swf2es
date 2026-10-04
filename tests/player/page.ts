@@ -6,6 +6,12 @@
 // at medium and 4×4 at high and best, so the page draws at that many times
 // the resolution, without multisampling, and averages each block of
 // samples into a pixel.
+//
+// A case may also ask for a zoom, as a host showing the stage larger or
+// smaller than its size does: the renderer's resolution is then that many
+// times the grid's, often not a whole number, and the stage is drawn at the
+// zoom's inverse, so the same samples come out where Pixi's own arithmetic
+// at that resolution decides.
 import { createCodegen } from "@swf2es/codegen";
 import { isAs3, readSwf, tags } from "@swf2es/format";
 import { Container, type DisplayObject, PixiView, Player, Scripting } from "@swf2es/player";
@@ -117,6 +123,7 @@ async function runSwf(
   capture: number[],
   quality: number,
   url: string | null = null,
+  zoom = 1,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
@@ -140,7 +147,7 @@ async function runSwf(
       background: player.background,
       antialias: false,
       preserveDrawingBuffer: true,
-      resolution: n,
+      resolution: n * zoom,
       // Blend modes read what is below them from it (pixi-blend.ts).
       useBackBuffer: true,
     });
@@ -154,6 +161,7 @@ async function runSwf(
     const view = new PixiView(renderer);
     // Drawn n times finer to be averaged down: the screen is the output canvas.
     view.screenScale = 1;
+    view.stage.scale.set(1 / zoom);
     // BitmapData.draw of a display object renders with it, from the document class on.
     if (scripting) {
       scripting.drawer = view;
@@ -171,6 +179,13 @@ async function runSwf(
 
       if (capture.includes(frame)) {
         view.render(player.stage);
+        // A call GL refused drew nothing, which the picture may not show.
+        const gl = (renderer as unknown as { gl?: WebGLRenderingContext }).gl;
+        const glError = gl?.getError();
+        if (glError) {
+          throw new Error(`GL error 0x${glError.toString(16)} drawing frame ${frame}`);
+        }
+
         samples.getContext("2d")?.drawImage(renderer.canvas, 0, 0);
         downsample(samples, output, n);
         images[frame] = output.toDataURL("image/png");

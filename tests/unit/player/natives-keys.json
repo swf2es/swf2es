@@ -1,5 +1,8 @@
 {
   "natives": [
+    "flash.display::AVM1Movie#flash.display:AVM1Movie::_callAS2",
+    "flash.display::AVM1Movie#flash.display:AVM1Movie::_setCallAS3",
+    "flash.display::AVM1Movie#get:flash.display:AVM1Movie::_interopAvailable",
     "flash.display::Bitmap#flash.display:Bitmap::ctor",
     "flash.display::Bitmap#get:bitmapData",
     "flash.display::Bitmap#get:pixelSnapping",
@@ -733,6 +736,12 @@
     "flash.system::WorkerDomain#createWorker",
     "flash.system::WorkerDomain#listWorkers",
     "flash.system::WorkerDomain.get:isSupported",
+    "flash.text::Font#get:fontName",
+    "flash.text::Font#get:fontStyle",
+    "flash.text::Font#get:fontType",
+    "flash.text::Font#hasGlyphs",
+    "flash.text::Font.enumerateFonts",
+    "flash.text::Font.registerFont",
     "flash.text::StaticText#get:text",
     "flash.text::TextField#appendText",
     "flash.text::TextField#get:alwaysShowSelection",
@@ -870,6 +879,7 @@
     "flash.filters::BitmapFilter",
     "flash.media::Sound",
     "flash.system::Worker",
+    "flash.text::Font",
     "flash.utils::ByteArray"
   ]
 }

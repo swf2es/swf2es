@@ -1,0 +1,117 @@
+// loaderInfo.parameters of SWFs loaded from bytes: the LoaderContext's
+// parameters, told from the load's call on, and none without them; the
+// values that are not Strings Flash refuses, with Error #2196; a new copy
+// at each ask, and what the content's constructor sees; none again once
+// unloaded, and a reload's at its call. The inner SWF
+// (scripts/ParametersInner.as) is put in as base64 by tests/player/cases.ts.
+// The main SWF's flashvars and a URL's query, which Flash's harness cannot
+// give, are the node tests'.
+package {
+  import flash.display.Loader;
+  import flash.display.MovieClip;
+  import flash.events.Event;
+  import flash.events.ProgressEvent;
+  import flash.system.ApplicationDomain;
+  import flash.system.LoaderContext;
+  import flash.utils.ByteArray;
+  import flash.utils.getQualifiedClassName;
+
+  public class Main extends MovieClip {
+    private static const INNER:String = "@@INNER@@";
+    private var loaders:Array = [];
+
+    public function Main() {
+      var own:Object = loaderInfo.parameters;
+      own.added = "x";
+      trace("own", dump(loaderInfo.parameters), loaderInfo.parameters == loaderInfo.parameters);
+      addFrameScript(0, frame1, 2, frame3);
+    }
+
+    private function frame1():void {
+      load("given", {a: "1", b: "two", "c d": "e&f", "": "empty"});
+      load("none", null);
+      load("empty", {});
+      load("string", "str");
+      for each (var bad:* in [{n: 5}, {o: {}}, {u: undefined}, {l: null}, {s: "ok", t: true}]) {
+        try {
+          load("bad", bad);
+        } catch (e:Error) {
+          trace("refused", getQualifiedClassName(e), e.errorID, e.message);
+        }
+      }
+    }
+
+    private function frame3():void {
+      for each (var loaded:Loader in loaders) {
+        trace("loaded", Object(loaded.content).seen, dump(loaded.contentLoaderInfo.parameters));
+      }
+
+      var given:Loader = loaders[0];
+      given.unload();
+      trace("unloaded", dump(given.contentLoaderInfo.parameters));
+      given.loadBytes(decode(INNER), context({z: "1"}));
+      trace("reloaded", dump(given.contentLoaderInfo.parameters));
+      for each (var loader:Loader in loaders) {
+        loader.unloadAndStop();
+      }
+    }
+
+    private function load(name:String, parameters:*):void {
+      var loader:Loader = new Loader();
+      var info:* = loader.contentLoaderInfo;
+      trace(name, "before", dump(info.parameters));
+      info.addEventListener(ProgressEvent.PROGRESS, function(e:Event):void {
+        trace(name, e.type, dump(info.parameters));
+      });
+      addChild(loader);
+      loader.loadBytes(decode(INNER), context(parameters));
+      loaders.push(loader);
+      trace(name, "after", dump(info.parameters));
+    }
+
+    private static function context(parameters:*):LoaderContext {
+      // AIR, where Flash is run, refuses to load code from bytes unless asked to.
+      var context:LoaderContext = new LoaderContext(false, new ApplicationDomain());
+      context.allowCodeImport = true;
+      if (parameters !== null) {
+        context.parameters = parameters;
+      }
+
+      return context;
+    }
+
+    private static function dump(p:Object):String {
+      var pairs:Array = [];
+      for (var name:String in p) {
+        pairs.push(name + "=" + p[name] + ":" + typeof p[name]);
+      }
+
+      pairs.sort();
+      return "{" + pairs.join(",") + "}";
+    }
+
+    /** Base64, as the bytes are carried in this script. */
+    private static function decode(text:String):ByteArray {
+      const ALPHABET:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      var out:ByteArray = new ByteArray();
+      var bits:int = 0;
+      var have:int = 0;
+      for (var i:int = 0; i < text.length; i++) {
+        var c:String = text.charAt(i);
+        if (c == "=") {
+          break;
+        }
+
+        bits = ((bits << 6) | ALPHABET.indexOf(c)) & 0xffff;
+        have += 6;
+        if (have >= 8) {
+          have -= 8;
+          out.writeByte((bits >> have) & 0xff);
+        }
+      }
+
+      out.position = 0;
+      return out;
+    }
+  }
+}

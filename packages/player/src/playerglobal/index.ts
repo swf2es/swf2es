@@ -4,6 +4,7 @@
 // a private native as "Class#pkg:Class::name".
 import type { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
+import { avm1MovieNatives } from "./flash/display/AVM1Movie.js";
 import { bitmapNatives } from "./flash/display/Bitmap.js";
 import { bitmapDataHooks, bitmapDataNatives } from "./flash/display/BitmapData.js";
 import { displayObjectHooks, displayObjectNatives } from "./flash/display/DisplayObject.js";
@@ -42,6 +43,7 @@ import { capabilitiesNatives } from "./flash/system/Capabilities.js";
 import { securityNatives } from "./flash/system/Security.js";
 import { systemNatives } from "./flash/system/System.js";
 import { workerHooks, workerNatives } from "./flash/system/Worker.js";
+import { fontHooks, fontNatives } from "./flash/text/Font.js";
 import { staticTextNatives } from "./flash/text/StaticText.js";
 import { textFieldNatives } from "./flash/text/TextField.js";
 import { byteArrayHooks } from "./flash/utils/ByteArray.js";
@@ -57,6 +59,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...mouseEventNatives(s),
     ...eventDispatcherNatives(s),
     ...displayObjectNatives(s),
+    ...avm1MovieNatives(),
     ...bitmapNatives(s),
     ...bitmapDataNatives(s),
     ...containerNatives(s),
@@ -90,6 +93,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...simpleButtonNatives(s),
     ...timerNatives(s),
     ...staticTextNatives(),
+    ...fontNatives(s),
     ...textFieldNatives(s),
   };
 }
@@ -103,5 +107,6 @@ export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
     ...filterHooks,
     ...workerHooks(),
     ...soundHooks(s),
+    ...fontHooks(s),
   };
 }

@@ -15,6 +15,8 @@ export interface PlayerJob {
   quality?: "low" | "medium" | "high" | "best";
   /** The SWF's URL on the served page, for what it loads by relative URL; the player's default otherwise. */
   url?: string;
+  /** How much larger than its size a host shows the stage (page.ts); 1 by default. */
+  zoom?: number;
 }
 
 /** How to run jobs: a time each job's scripts may take, a listener for each result, and more directories to serve. */
@@ -200,7 +202,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
         const begun = performance.now();
         try {
           ({ value, exception } = await evaluate<NonNullable<typeof value>>(
-            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)})`,
+            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1})`,
           ));
         } catch (e) {
           // A job stopped at the timeout makes the protocol answer with an

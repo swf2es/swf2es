@@ -33,7 +33,7 @@ import {
   TRANSFORM,
 } from "./display.js";
 import { FontSet } from "./fonts.js";
-import { decodeImages, decodeInBrowser, type ImageDecode } from "./images.js";
+import { decodeImages, decodeInBrowser, hasUndecoded, type ImageDecode } from "./images.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import { finishSounds } from "./playerglobal/flash/media/Sound.js";
@@ -46,6 +46,7 @@ import {
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
 import { sha256 } from "./sha256.js";
 import {
+  type AnyFontCharacter,
   type BitmapCharacter,
   type ButtonCharacter,
   type Character,
@@ -171,6 +172,24 @@ interface Load {
   failed: string | null;
   /** The application domain its code loads into, as the Loader's context chose it when asked. */
   domain: avm2.Domain;
+  /** The LoaderContext's parameters, which take the place of the URL's query; null when it set none. */
+  parameters: ReadonlyMap<string, string> | null;
+  /** The SWF, where the call read it already: a load from bytes. */
+  swf: Swf | null;
+}
+
+/**
+ * An AVM1 movie a loadBytes made, for the end of a frame: Flash makes its
+ * AVM1Movie in the call and has it by the end of the frame, once its
+ * images are decoded here; `failed` if they could not be.
+ */
+interface Avm1Load {
+  load: Load;
+  swf: Swf;
+  library: Library;
+  movie: AsObject;
+  ready: boolean;
+  failed: boolean;
 }
 
 /** What SymbolClass bound a class to: a character of a SWF's library. */
@@ -243,8 +262,14 @@ export class Scripting {
    * nothing defined when it was bound.
    */
   readonly symbols = new Map<avm2.Abc | null, Map<string, Symbol>>();
+  /** Libraries whose embedded fonts have been made visible to this player. */
+  readonly fontLibraries = new Set<Library>();
+  /** Font classes explicitly registered by scripts, in registration order. */
+  readonly registeredFonts = new Map<AsObject, AnyFontCharacter>();
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
+  /** AVM1 movies from bytes, in the order asked, for the end of a frame. */
+  private readonly avm1Loads: Avm1Load[] = [];
   private preparing: Promise<void> = Promise.resolve();
   /** Host requests are independent of Loader's ordered preparation chain. */
   private readonly pendingRequests = new Set<Promise<void>>();
@@ -277,6 +302,8 @@ export class Scripting {
   drawer: Drawer | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
+  /** The main SWF's flashvars, as the host gave them. */
+  private readonly flashvars: Readonly<Record<string, string>>;
   /** Where local SharedObjects are kept (flash/net/SharedObject.ts). */
   readonly storage: SharedObjectStorage;
   /** What Capabilities reports of the system (flash/system/Capabilities.ts). */
@@ -351,6 +378,7 @@ export class Scripting {
   private modules = 0;
   /** The URL of the SWF each module's code came from, by its script name, for codeUrl. */
   private readonly moduleUrls = new Map<string, string>();
+  private readonly moduleLibraries = new Map<string, Library>();
   /** Display objects made with an AS3 object, which Flash numbers for their default names. */
   instances = 0;
   private statusClass: AsObject | null = null;
@@ -360,6 +388,12 @@ export class Scripting {
     options: avm2.RuntimeOptions & {
       fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
+      /**
+       * The main SWF's flashvars, as a page's FlashVars give them: its
+       * loaderInfo.parameters, after its URL's query, whose names they
+       * override, as Ruffle's do.
+       */
+      parameters?: Readonly<Record<string, string>>;
       /** Where local SharedObjects are kept: localStorage by default where the host has it, else memory. */
       storage?: SharedObjectStorage;
       /** What Capabilities reports of the system: by default the browser's, as Flash Player 32's plugin. */
@@ -409,6 +443,7 @@ export class Scripting {
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
+    this.flashvars = options.parameters ?? {};
     this.storage = options.storage ?? defaultStorage();
     this.platform = { ...platformCapabilities(), ...options.platform };
     this.rt = new avm2.Runtime(
@@ -430,10 +465,12 @@ export class Scripting {
   /** Load the SWF's DoABCs in tag order, each run unless its lazy flag defers it to first use, then its SymbolClass. */
   async loadSwf(swf: Swf, library: Library): Promise<void> {
     this.library = library;
+    this.addFontLibrary(library);
+
     library.domain = this.mainDomain;
     this.rt.swfVersion = swf.header.version;
     const decoded = decodeImages(library, this.decodeImage);
-    const run = await this.link(swf, this.mainDomain, this.url);
+    const run = await this.link(swf, this.mainDomain, this.url, library);
     await decoded;
     run();
     this.bind(swf, library);
@@ -444,7 +481,12 @@ export class Scripting {
    * each unless its lazy flag defers it to first use. Linking is
    * asynchronous, running is not, so a load can run its code in a frame.
    */
-  private async link(swf: Swf, domain: avm2.Domain, url: string): Promise<() => void> {
+  private async link(
+    swf: Swf,
+    domain: avm2.Domain,
+    url: string,
+    library: Library,
+  ): Promise<() => void> {
     // Every DoABC added before any compiles: avmplus has a frame's ABCs all
     // loaded before it verifies a method, so a class in the first tag may
     // extend or name one in the last (the corpus's property_priority).
@@ -458,7 +500,7 @@ export class Scripting {
 
     const runs: (() => void)[] = [];
     for (const { index, lazy } of added) {
-      const linked = await this.compileAt(index, domain, false, url);
+      const linked = await this.compileAt(index, domain, false, url, library);
       if (!lazy) {
         runs.push(() => this.rt.run(linked));
       }
@@ -568,11 +610,15 @@ export class Scripting {
     domain: avm2.Domain,
     builtin = false,
     url?: string,
+    library?: Library,
   ): Promise<Value> {
     const { module } = this.codegen.compile(this.hashes, index);
     const script = `swf2es-${++this.modules}.js`;
     if (url !== undefined) {
       this.moduleUrls.set(script, url);
+    }
+    if (library) {
+      this.moduleLibraries.set(script, library);
     }
 
     const named = `${module}//# sourceURL=${script}\n`;
@@ -696,6 +742,57 @@ export class Scripting {
     }
 
     return null;
+  }
+
+  /** A DefineFont a class or one of its bases was bound to. */
+  fontSymbol(traits: SymbolTraits): AnyFontCharacter | null {
+    for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
+      const symbol = this.symbolOf(t);
+      if (symbol) {
+        return symbol.character.type === "font" || symbol.character.type === "fontCff"
+          ? symbol.character
+          : null;
+      }
+    }
+
+    return null;
+  }
+
+  /** Keep a SWF's own fonts and fonts registered elsewhere available to its fields. */
+  private addFontLibrary(library: Library): void {
+    if (this.fontLibraries.has(library)) {
+      return;
+    }
+
+    this.fontLibraries.add(library);
+    for (const font of this.registeredFonts.values()) {
+      if (font.type === "font") {
+        library.fonts.add(font.font);
+      }
+    }
+  }
+
+  /** Make a registered font available to fields made by every loaded SWF. */
+  registerFont(cls: AsObject, font: AnyFontCharacter): void {
+    if (
+      this.registeredFonts.has(cls) ||
+      [...this.registeredFonts.values()].some(
+        (registered) =>
+          registered.name.toLowerCase() === font.name.toLowerCase() &&
+          registered.type === font.type &&
+          registered.bold === font.bold &&
+          registered.italic === font.italic,
+      )
+    ) {
+      return;
+    }
+
+    this.registeredFonts.set(cls, font);
+    for (const library of this.fontLibraries) {
+      if (font.type === "font") {
+        library.fonts.add(font.font);
+      }
+    }
   }
 
   /** Decode a sound on first play; live libraries can share an identical decode. */
@@ -965,6 +1062,7 @@ export class Scripting {
         symbol &&
         symbol.character.type !== "binary" &&
         symbol.character.type !== "font" &&
+        symbol.character.type !== "fontCff" &&
         symbol.character.type !== "sound"
       ) {
         if (symbol.character.type === "text") {
@@ -1004,6 +1102,11 @@ export class Scripting {
         throw this.rt.error("ArgumentError", 2012, "StaticText$");
       }
 
+      // Only a load of an AVM1 SWF makes one (requestLoad).
+      if (t.name === "flash.display::AVM1Movie") {
+        throw this.rt.error("ArgumentError", 2012, "AVM1Movie$");
+      }
+
       if (t.name === "flash.display::Bitmap") {
         return new BitmapObject(null);
       }
@@ -1029,10 +1132,22 @@ export class Scripting {
     info.$bytes = null;
     info.$swf = null;
     info.$url = null;
+    info.$params = NO_PARAMETERS;
     info.$loaderURL = loader ? this.ownerUrl(loader) : this.url;
     info.$loaded = 0;
     info.$total = 0;
     return info;
+  }
+
+  /** The main SWF's loaderInfo.parameters: its URL's query, then the flashvars. */
+  mainParameters(): ReadonlyMap<string, string> {
+    const parameters = queryParameters(this.url);
+    // A host in plain JavaScript may give other values: Flash's are strings.
+    for (const [name, value] of Object.entries(this.flashvars)) {
+      parameters.set(name, String(value));
+    }
+
+    return parameters;
   }
 
   /** What a LoaderInfo knows once its SWF is: the bytes, the header's version, frame rate and size. */
@@ -1089,6 +1204,18 @@ export class Scripting {
     return this.url;
   }
 
+  /** The SWF whose code called a playerglobal native. */
+  codeLibrary(): Library | null {
+    for (const at of avm2.frameScripts(new Error().stack)) {
+      const library = this.moduleLibraries.get(at);
+      if (library) {
+        return library;
+      }
+    }
+
+    return this.library;
+  }
+
   /**
    * The URL of the SWF a Loader belongs to, which its content's loaderURL
    * reports and its relative URLs resolve against: Flash's is the SWF whose
@@ -1104,8 +1231,13 @@ export class Scripting {
    * the call, the URL still null; the content comes in a later frame, under
    * a URL of the bytes' own.
    */
-  requestLoad(loader: AsObject, bytes: Uint8Array, domain = this.loadDomain(null)): void {
-    const begun = this.begin(loader, domain);
+  requestLoad(
+    loader: AsObject,
+    bytes: Uint8Array,
+    domain = this.loadDomain(null),
+    parameters: ReadonlyMap<string, string> | null = null,
+  ): void {
+    const begun = this.begin(loader, domain, parameters);
     if (!begun) {
       return;
     }
@@ -1125,25 +1257,136 @@ export class Scripting {
       return;
     }
 
+    let swf: Swf | null = null;
+    try {
+      swf = readSwf(bytes);
+    } catch {
+      // Not a SWF: refused when its turn comes, as Flash refuses it in a later frame.
+    }
+
+    if (swf && !isAs3(swf)) {
+      const load = this.newLoad(loader, generation, null, domain, parameters, swf);
+      load.bytes = bytes;
+      this.requestAvm1(load, swf);
+      return;
+    }
+
     this.enqueue(
       loader,
       generation,
       null,
       Promise.resolve({ bytes, status: 0, headers: [] }),
       domain,
+      parameters,
+      swf,
     );
+  }
+
+  /**
+   * An AVM1 SWF from bytes. Flash makes its AVM1Movie in the call, named
+   * then, and has it in the Loader at the end of the frame, after
+   * EXIT_FRAME, before the next frame begins: the last asked first, INIT
+   * and COMPLETE with each, as adl traces it (the `avm1-movie` case). A
+   * SWF with images has them decoded first, which may take frames; one
+   * whose images the decoder refuses ends in IOError #2124 there instead.
+   */
+  private requestAvm1(load: Load, swf: Swf): void {
+    const library = this.avm1Library(swf, load.domain);
+    const pending: Avm1Load = {
+      load,
+      swf,
+      library,
+      movie: this.avm1Movie(library),
+      ready: false,
+      failed: false,
+    };
+    this.avm1Loads.push(pending);
+    if (!hasUndecoded(library)) {
+      pending.ready = true;
+      return;
+    }
+
+    this.trackRequest(
+      decodeImages(library, this.decodeImage).then(
+        () => {
+          pending.ready = true;
+        },
+        () => {
+          pending.ready = true;
+          pending.failed = true;
+        },
+      ),
+    );
+  }
+
+  /** An AVM1 SWF's library: its timelines play by themselves, with no AS3 objects but the root's. */
+  private avm1Library(swf: Swf, domain: avm2.Domain): Library {
+    const library = readLibrary(swf);
+    library.domain = domain;
+    return library;
+  }
+
+  /**
+   * An AVM1 SWF's root, not yet on its first frame, as AS3 sees it: an
+   * AVM1Movie, which is no InteractiveObject, so the pointer's hits on the
+   * movie go to its Loader (input.ts).
+   */
+  private avm1Movie(library: Library): AsObject {
+    const root = new MovieClip(library.root, library);
+    root.avm1Root = true;
+    return this.constructAs(root, this.rt.classNamed("flash.display::AVM1Movie"));
+  }
+
+  /** The AVM1 movies from bytes ready by the end of this frame, the last asked first. */
+  private deliverAvm1Loads(): void {
+    for (let i = this.avm1Loads.length - 1; i >= 0; i--) {
+      const pending = this.avm1Loads[i];
+      if (!pending.ready) {
+        continue;
+      }
+
+      this.avm1Loads.splice(i, 1);
+      try {
+        this.deliverAvm1(pending);
+      } catch (error) {
+        this.reportUncaught(error);
+      }
+    }
+  }
+
+  /**
+   * An AVM1 movie from bytes as the Loader's content, then its INIT and
+   * COMPLETE. It keeps its first frame through the next frame's advance,
+   * as adl shows it, then plays at the stage's frame rate.
+   */
+  private deliverAvm1(pending: Avm1Load): void {
+    const { load, swf, library, movie } = pending;
+    if (load.generation !== load.loader.$generation) {
+      return;
+    }
+
+    if (pending.failed) {
+      dispatchEvent(this, this.loaderInfoOf(load.loader), this.ioError(this.errorText(2124)));
+      return;
+    }
+
+    const end = this.complete(load, swf, library, null, movie);
+    (movie.$display as MovieClip).fresh = true;
+    end();
   }
 
   /**
    * A load begins: the one before it is dropped, pending or complete, and
    * its LoaderInfo knows nothing again, as Flash's load() does at the call
-   * (Ruffle's `loader_reuse` trace). The old content's REMOVED listeners
+   * (Ruffle's `loader_reuse` trace), but the parameters its context gave,
+   * which Flash tells from the call on. The old content's REMOVED listeners
    * may load anew themselves, and that load is then the one that counts:
    * null tells the caller so.
    */
   private begin(
     loader: AsObject,
     domain: avm2.Domain,
+    parameters: ReadonlyMap<string, string> | null,
   ): { info: AsObject; generation: number } | null {
     this.closeLoad(loader);
     const generation: number = loader.$generation;
@@ -1155,6 +1398,7 @@ export class Scripting {
     const info = this.loaderInfoOf(loader);
     info.$loaderURL = this.ownerUrl(loader);
     info.$domain = domain;
+    info.$params = parameters ?? NO_PARAMETERS;
     return { info, generation };
   }
 
@@ -1186,8 +1430,9 @@ export class Scripting {
     loader: AsObject,
     request: AsObject | string,
     domain = this.loadDomain(null),
+    parameters: ReadonlyMap<string, string> | null = null,
   ): void {
-    const begun = this.begin(loader, domain);
+    const begun = this.begin(loader, domain, parameters);
     if (!begun) {
       return;
     }
@@ -1203,6 +1448,7 @@ export class Scripting {
       outgoing.url,
       fetch ? fetch(outgoing, abort.signal) : Promise.reject(),
       domain,
+      parameters,
     );
   }
 
@@ -1314,23 +1560,38 @@ export class Scripting {
     return Promise.all([this.preparing, ...this.pendingRequests]).then(() => {});
   }
 
+  private newLoad(
+    loader: AsObject,
+    generation: number,
+    url: string | null,
+    domain: avm2.Domain,
+    parameters: ReadonlyMap<string, string> | null,
+    swf: Swf | null,
+  ): Load {
+    return {
+      loader,
+      generation,
+      url,
+      domain,
+      parameters,
+      bytes: new Uint8Array(0),
+      status: 0,
+      ready: null,
+      failed: null,
+      swf,
+    };
+  }
+
   private enqueue(
     loader: AsObject,
     generation: number,
     url: string | null,
     bytes: Promise<FetchResult>,
     domain: avm2.Domain,
+    parameters: ReadonlyMap<string, string> | null,
+    swf: Swf | null = null,
   ): void {
-    const load: Load = {
-      loader,
-      generation,
-      url,
-      domain,
-      bytes: new Uint8Array(0),
-      status: 0,
-      ready: null,
-      failed: null,
-    };
+    const load = this.newLoad(loader, generation, url, domain, parameters, swf);
     this.loads.push(load);
     // Settled at once, not when its turn in the chain comes: a rejection must find its handler.
     const fetched = bytes.then(
@@ -1348,8 +1609,9 @@ export class Scripting {
       load.bytes = result.bytes;
       try {
         load.ready = await this.prepare(load);
-      } catch (e) {
-        load.failed = e instanceof LoadError ? e.message : this.errorText(2124);
+      } catch {
+        // Bytes that are no SWF, or code that does not link.
+        load.failed = this.errorText(2124);
       }
     });
   }
@@ -1361,16 +1623,19 @@ export class Scripting {
 
   /** The SWF read and its code linked, off the frame; what the frame then does with it. */
   private async prepare(load: Load): Promise<() => () => void> {
-    const swf = readSwf(load.bytes);
+    const swf = load.swf ?? readSwf(load.bytes);
     if (!isAs3(swf)) {
-      throw new LoadError(this.errorText(2124));
+      // An AVM1 SWF from a URL: its content comes as an AS3 SWF's does.
+      const library = this.avm1Library(swf, load.domain);
+      await decodeImages(library, this.decodeImage);
+      return () => this.complete(load, swf, library, null);
     }
 
     const library = readLibrary(swf);
     library.domain = load.domain;
     const decoded = decodeImages(library, this.decodeImage);
     // One from bytes is its Loader's SWF's, as far as its own URL goes.
-    const run = await this.link(swf, load.domain, load.url ?? this.ownerUrl(load.loader));
+    const run = await this.link(swf, load.domain, load.url ?? this.ownerUrl(load.loader), library);
     await decoded;
     return () => this.complete(load, swf, library, run);
   }
@@ -1400,6 +1665,7 @@ export class Scripting {
       info.$bytes = null;
       info.$swf = null;
       info.$url = null;
+      info.$params = NO_PARAMETERS;
       info.$loaded = 0;
       info.$total = 0;
     }
@@ -1479,14 +1745,18 @@ export class Scripting {
       }
     }
 
-    const error = this.rt.construct(
+    dispatchEvent(this, info, this.ioError(load.failed ?? ""));
+  }
+
+  /** An IOErrorEvent of `text`, as a failed load ends. */
+  private ioError(text: string): AsObject {
+    return this.rt.construct(
       this.rt.classNamed("flash.events::IOErrorEvent"),
       "ioError",
       false,
       false,
-      load.failed,
+      text,
     );
-    dispatchEvent(this, info, error);
   }
 
   private loaderInfoOf(loader: AsObject): AsObject {
@@ -1504,7 +1774,13 @@ export class Scripting {
    * if the loader is on the stage. Its first frame's script runs with
    * the frame's, and INIT and COMPLETE follow EXIT_FRAME.
    */
-  private complete(load: Load, swf: Swf, library: Library, run: () => void): () => void {
+  private complete(
+    load: Load,
+    swf: Swf,
+    library: Library,
+    run: (() => void) | null,
+    made: AsObject | null = null,
+  ): () => void {
     const info = this.loaderInfoOf(load.loader);
     load.loader.$abort = null;
     // A listener of any of these may close the Loader or load anew, and this load then ends here.
@@ -1523,6 +1799,12 @@ export class Scripting {
         return () => {};
       }
 
+      // Its URL's query comes with the SWF, as Flash tells it from the
+      // second PROGRESS on, unless the context gave parameters.
+      if (!load.parameters) {
+        info.$params = queryParameters(load.url);
+      }
+
       this.describe(info, load.bytes, swf);
       this.progress(info, load.bytes.length);
       if (!live()) {
@@ -1532,20 +1814,31 @@ export class Scripting {
       this.describe(info, load.bytes, swf);
     }
 
-    run();
-    this.bind(swf, library);
-    const root = new MovieClip(library.root, library);
-    root.loaderInfo = info;
-    root.placeFirstFrame();
-    const object = this.constructAs(
-      root,
-      this.rt.classNamed(library.classes.get(0) ?? "flash.display::MovieClip", load.domain),
-    );
-    dispatchEvent(this, object, this.event("added", true));
-    // The SWF's own code has run by now, its document class's constructor
-    // among it, which reaches the Loader through loaderInfo.loader.
-    if (!live()) {
-      return () => {};
+    let object: AsObject;
+    let root: MovieClip;
+    if (run) {
+      run();
+      this.addFontLibrary(library);
+      this.bind(swf, library);
+      root = new MovieClip(library.root, library);
+      root.loaderInfo = info;
+      root.placeFirstFrame();
+      object = this.constructAs(
+        root,
+        this.rt.classNamed(library.classes.get(0) ?? "flash.display::MovieClip", load.domain),
+      );
+      dispatchEvent(this, object, this.event("added", true));
+      // The SWF's own code has run by now, its document class's constructor
+      // among it, which reaches the Loader through loaderInfo.loader.
+      if (!live()) {
+        return () => {};
+      }
+    } else {
+      // An AVM1 SWF: no code of its own runs, and its root is an AVM1Movie.
+      object = made ?? this.avm1Movie(library);
+      root = object.$display;
+      root.loaderInfo = info;
+      root.enterFirstFrame();
     }
 
     info.$url = load.url ?? info.$dynamic ?? info.$loaderURL;
@@ -1746,6 +2039,7 @@ export class Scripting {
           if (o.queuedGoto !== null) {
             const frame = o.queuedGoto;
             o.queuedGoto = null;
+            o.playing = o.queuedPlay;
             o.gotoFrame(frame);
             try {
               this.gotoCycle(o);
@@ -1908,6 +2202,8 @@ export class Scripting {
       }
     }
 
+    this.deliverAvm1Loads();
+
     if (this.invalidated) {
       this.invalidated = false;
       this.broadcast("render");
@@ -1973,9 +2269,6 @@ function soundHash(sound: Sound): number {
 function defaultClock(): (() => number) | null {
   return typeof performance !== "undefined" ? () => performance.now() : null;
 }
-
-/** A load's failure, worded as its IOErrorEvent's text. */
-class LoadError extends Error {}
 
 /** A class's traits as the symbol lookups read them: its name, its module, its base's. */
 interface SymbolTraits {
@@ -2093,6 +2386,30 @@ class TimerHeap {
 
 function before(a: TimerRecord, b: TimerRecord): boolean {
   return a.due < b.due || (a.due === b.due && a.seq < b.seq);
+}
+
+const NO_PARAMETERS: ReadonlyMap<string, string> = new Map();
+
+/**
+ * The names and values of a URL's query, as Flash reads them into
+ * loaderInfo.parameters: decoded, `+` as a space, a name without `=` an
+ * empty value, an empty name left out, and the last of a name kept.
+ */
+function queryParameters(url: string): Map<string, string> {
+  const parameters = new Map<string, string>();
+  const path = url.split("#", 1)[0];
+  const at = path.indexOf("?");
+  if (at < 0) {
+    return parameters;
+  }
+
+  for (const [name, value] of new URLSearchParams(path.slice(at + 1))) {
+    if (name !== "") {
+      parameters.set(name, value);
+    }
+  }
+
+  return parameters;
 }
 
 function appendQuery(url: string, query: string): string {

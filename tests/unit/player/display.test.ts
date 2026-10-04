@@ -189,6 +189,33 @@ test("a place without the move flag at a taken depth is let be; with it, changes
   assert.equal(kept?.matrix.tx, 10);
 });
 
+test("a child a script transformed takes no transform, colour or visibility from the timeline, moves or a rewind", () => {
+  // As Flash has it (the player's scripted-moves case): one touch stops them all.
+  const player = movie(
+    [w.place({ depth: 1, character: 1 }), w.place({ depth: 2, character: 1 })],
+    [1, 2].map((depth) =>
+      w.place({
+        depth,
+        move: true,
+        matrix: { tx: 200 },
+        colorTransform: { mult: [0.5, 1, 1, 1] },
+        visible: false,
+      }),
+    ),
+  );
+  const [plain, touched] = [1, 2].map((d) => player.root.depths.get(d) as DisplayObject);
+  touched.touch();
+  touched.matrix = { ...touched.matrix, tx: 5 };
+  player.tick();
+  assert.deepEqual([plain.matrix.tx, plain.colorTransform?.rMul, plain.visible], [10, 0.5, false]);
+  assert.deepEqual([touched.matrix.tx, touched.colorTransform, touched.visible], [5, null, true]);
+
+  player.tick();
+  assert.equal(player.root.currentFrame, 1);
+  assert.equal(plain.matrix.tx, 0);
+  assert.equal(touched.matrix.tx, 5);
+});
+
 test("another character placed with the move flag keeps the child, and swaps only an untouched shape's graphic, as Flash does", () => {
   const swapped = movie(
     [w.place({ depth: 1, character: 1 }), w.place({ depth: 2, character: 1 })],

@@ -22,6 +22,8 @@ export interface PlayerCase {
   maxOutliers: number;
   /** Drawn in Flash in an adl of its own (FlashJob.alone). */
   alone?: boolean;
+  /** Played as a host showing the stage this many times its size draws it (page.ts); Flash draws it at its size. */
+  zoom?: number;
 }
 
 const square = (id: number, color: number, size = 1000) =>
@@ -628,6 +630,125 @@ function gotoCycleNested(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Clips of six empty frames bound to scripts/GotoStops.as's S, P, Q and R,
+// and two of another without a class, named for the root's script to send
+// them, in a SWF of version 10.
+function gotoStops(abc: Uint8Array): Uint8Array {
+  const six = (id: number) =>
+    w.sprite(id, 6, [...Array.from({ length: 6 }, () => w.showFrame()), w.end()]);
+  const names: [string, number][] = [
+    ["a", 2],
+    ["b", 2],
+    ["c", 3],
+    ["p", 3],
+    ["q", 4],
+    ["r", 5],
+    ["e", 6],
+    ["f", 6],
+    ["t", 7],
+  ];
+  return w.swf({
+    version: 10,
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 6,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      six(2),
+      six(3),
+      six(4),
+      six(5),
+      six(6),
+      six(7),
+      w.doAbc(abc, "GotoStops"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "S"],
+        [3, "P"],
+        [4, "Q"],
+        [5, "R"],
+        [7, "T"],
+      ]),
+      ...names.map(([name, character], i) => w.place({ depth: i + 1, character, name })),
+      ...Array.from({ length: 6 }, () => w.showFrame()),
+      w.end(),
+    ],
+  });
+}
+
+// Clips of a square, two MorphShapes growing a square and three empty
+// text fields, side by side, which frames 2 to 4 move with every property a place sets, for
+// scripts/ScriptedMoves.as to touch, then a loop back to frame 1's places.
+function scriptedMoves(abc: Uint8Array): Uint8Array {
+  const grow = w.morphShape({
+    id: 3,
+    startBounds: [0, 400, 0, 400],
+    endBounds: [0, 800, 0, 800],
+    fills: [{ start: 0xff0000cc, end: 0xff00cc00 }],
+    lines: [],
+    start: [{ fill0: 1, commands: rectPath(0, 0, 20, 20) }],
+    end: [rectPath(0, 0, 40, 40)],
+  });
+  const count = 29;
+  const morph = (i: number) => i === 23 || i === 24;
+  const field = (i: number) => i >= 25 && i <= 27;
+  const at = (i: number, dx: number) => ({ tx: (i * 38 + dx) * 20, ty: 400 });
+  const each = (f: (i: number) => Uint8Array) => Array.from({ length: count }, (_, i) => f(i));
+  return w.swf({
+    version: 10,
+    width: 1120,
+    height: 100,
+    frameRate: 24,
+    frameCount: 5,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0x806040, 400),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      grow,
+      w.editText(4, "", 400, 400),
+      w.doAbc(abc, "ScriptedMoves"),
+      w.symbolClass([[0, "Main"]]),
+      ...each((i) =>
+        w.place({ depth: i + 1, character: morph(i) ? 3 : field(i) ? 4 : 2, matrix: at(i, 0) }),
+      ),
+      w.showFrame(),
+      ...each((i) =>
+        w.place({
+          depth: i + 1,
+          move: true,
+          matrix: at(i, 10),
+          colorTransform: { mult: [0.5, 1, 1, 0.75] },
+          ratio: morph(i) ? 32768 : undefined,
+          blurs: [2],
+          blendMode: 3,
+          visible: false,
+        }),
+      ),
+      w.showFrame(),
+      ...each((i) =>
+        w.place({
+          depth: i + 1,
+          move: true,
+          matrix: { ...at(i, 20), a: 1.5, d: 1.5 },
+          colorTransform: { mult: [1, 1, 1, 1], add: [100, 0, 0, 0] },
+          ratio: morph(i) ? 65535 : undefined,
+          blurs: [],
+          blendMode: 6,
+          visible: true,
+        }),
+      ),
+      w.showFrame(),
+      ...each((i) => w.place({ depth: i + 1, move: true, matrix: at(i, 30) })),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Frames whose first command at a depth does nothing, then a rewind past
 // them, a place without the move flag at a taken depth 3 on frame 2, and
 // at depth 4 a place, a removal and a place again before the rewind's
@@ -1176,6 +1297,21 @@ function definitions(compile: Compile): Uint8Array {
   });
 }
 
+// loaderInfo.parameters of SWFs loaded from bytes with a LoaderContext's
+// (scripts/LoaderParameters.as.template, scripts/ParametersInner.as).
+function loaderParameters(compile: Compile): Uint8Array {
+  const inner = bare(compile("ParametersInner"), 1, "ParametersInner");
+  const template = readFileSync(
+    new URL("scripts/LoaderParameters.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "LoaderParameters",
+    template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
+  );
+  return bare(abc, 3);
+}
+
 function loadsInit(compile: Compile): Uint8Array {
   return loading(compile, "LoadsInit", 1);
 }
@@ -1196,6 +1332,74 @@ function loading(compile: Compile, script: string, innerFrames: number): Uint8Ar
       w.fileAttributes(true),
       w.backgroundColor(0xffffff),
       w.doAbc(abc, script),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// AVM1 SWFs an AS3 one loads (scripts/Avm1Movie.as.template): one of
+// version 8 whose FileAttributes leaves out ActionScript 3, three frames
+// that move a square and add another, and one of version 6 without
+// FileAttributes, a green square. The first's frame 1 has a DoAction,
+// `x = "1"`, which shows nothing: the player runs no AVM1 actions.
+function avm1Movie(compile: Compile): Uint8Array {
+  const inner = w.swf({
+    version: 8,
+    width: 100,
+    height: 50,
+    frameRate: 12,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      square(2, 0x0000ff, 400),
+      w.place({ depth: 1, character: 1, matrix: { tx: 100, ty: 100 } }),
+      // Push "x", push "1", SetVariable, End.
+      w.tag(12, Uint8Array.from([0x96, 3, 0, 0, 0x78, 0, 0x96, 3, 0, 0, 0x31, 0, 0x1d, 0])),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, matrix: { tx: 500, ty: 100 } }),
+      w.place({ depth: 2, character: 2, matrix: { tx: 1400, ty: 400 } }),
+      w.showFrame(),
+      w.remove(2),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const bare = w.swf({
+    version: 6,
+    width: 60,
+    height: 40,
+    frameRate: 30,
+    frameCount: 1,
+    tags: [
+      w.backgroundColor(0xffffff),
+      square(1, 0x00aa00, 600),
+      w.place({ depth: 1, character: 1, matrix: { tx: 200, ty: 200 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const template = readFileSync(new URL("scripts/Avm1Movie.as.template", import.meta.url), "utf8");
+  const abc = compile(
+    "Avm1Movie",
+    template
+      .replaceAll("@@INNER@@", Buffer.from(inner).toString("base64"))
+      .replaceAll("@@BARE@@", Buffer.from(bare).toString("base64")),
+  );
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "Avm1Movie"),
       w.symbolClass([[0, "Main"]]),
       w.showFrame(),
       w.showFrame(),
@@ -1437,6 +1641,65 @@ function bitmapSymbols(compile: Compile): Uint8Array {
       w.end(),
     ],
   });
+}
+
+function fontNatives(compile: Compile): Uint8Array {
+  return w.swf({
+    width: 20,
+    height: 20,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      probeFont(1),
+      w.doAbc(
+        compile(
+          "EmbeddedProbe",
+          "package { import flash.text.Font; public class EmbeddedProbe extends Font {} }",
+        ),
+        "EmbeddedProbe",
+      ),
+      w.doAbc(compile("FontNatives")),
+      w.symbolClass([
+        [0, "FontNatives"],
+        [1, "EmbeddedProbe"],
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+function fontRegistration(compile: Compile): Uint8Array {
+  const inner = w.swf({
+    width: 20,
+    height: 20,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      probeFont(1),
+      w.doAbc(
+        compile(
+          "EmbeddedProbe",
+          "package { import flash.text.Font; public class EmbeddedProbe extends Font {} }",
+        ),
+        "EmbeddedProbe",
+      ),
+      w.symbolClass([[1, "EmbeddedProbe"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const template = readFileSync(
+    new URL("scripts/FontRegistration.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "FontRegistration",
+    template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
+  );
+  return bare(abc, 3, "FontRegistration");
 }
 
 function soundSymbols(compile: Compile): Uint8Array {
@@ -2122,6 +2385,132 @@ function textDraw(abc: Uint8Array): Uint8Array {
   });
 }
 
+/**
+ * "Pixel", a pixel font: glyphs on a grid of an eighth of an em, as a
+ * bitmap font's outlines are. Its "a" is two contours, a top bar whose
+ * bottom edge runs along the corners of the outline below it, as an
+ * authoring tool joins the pixels; "b" and "o" have holes the other way
+ * round, cut as a font's are.
+ */
+const pixelFont = (id: number): Uint8Array => {
+  const p = (points: [number, number][]): [number, number][] =>
+    points.map(([x, y]) => [x * 128, y * 128]);
+  const boxes = (...list: [number, number, number, number][]) =>
+    list.map((b) => b.map((v) => v * 128) as [number, number, number, number]);
+  return w.font3({
+    id,
+    name: "Pixel",
+    ascent: 896,
+    descent: 256,
+    glyphs: [
+      {
+        char: "a",
+        advance: 768,
+        boxes: [],
+        contours: [
+          p([
+            [1, -5],
+            [1, -3],
+            [4, -3],
+            [4, -5],
+            [5, -5],
+            [5, 0],
+            [4, 0],
+            [4, -2],
+            [1, -2],
+            [1, 0],
+            [0, 0],
+            [0, -5],
+          ]),
+          p([
+            [4, -5],
+            [1, -5],
+            [1, -6],
+            [4, -6],
+          ]),
+        ],
+      },
+      {
+        char: "b",
+        advance: 640,
+        boxes: boxes([0, -6, 4, 0]),
+        contours: [
+          p([
+            [1, -5],
+            [1, -4],
+            [3, -4],
+            [3, -5],
+          ]),
+          p([
+            [1, -3],
+            [1, -1],
+            [3, -1],
+            [3, -3],
+          ]),
+        ],
+      },
+      { char: "i", advance: 256, boxes: boxes([0, -6, 1, -5], [0, -4, 1, 0]) },
+      {
+        char: "k",
+        advance: 640,
+        boxes: boxes([0, -6, 1, 0], [1, -3, 3, -2], [3, -5, 4, -3], [3, -2, 4, 0]),
+      },
+      {
+        char: "o",
+        advance: 640,
+        boxes: boxes([0, -5, 4, 0]),
+        contours: [
+          p([
+            [1, -4],
+            [1, -1],
+            [3, -1],
+            [3, -4],
+          ]),
+        ],
+      },
+      { char: "[", advance: 384, boxes: boxes([0, -6, 1, 1], [1, -6, 2, -5], [1, 0, 2, 1]) },
+      { char: "]", advance: 384, boxes: boxes([1, -6, 2, 1], [0, -6, 1, -5], [0, 0, 1, 1]) },
+      { char: ".", advance: 256, boxes: boxes([0, -1, 1, 0]) },
+      { char: " ", advance: 384, boxes: [] },
+    ],
+  });
+};
+
+// Chat lines in fields with a hanging indent (scripts/TextIndent.as):
+// three of one DefineEditText, HTML, multiline and wrapped in Pixel, with
+// a left margin of 10 and an indent of -10 pixels.
+function textIndent(abc: Uint8Array): Uint8Array {
+  const chat = w.editText(2, "", 4000, 400, 0, {
+    html: true,
+    multiline: true,
+    wordWrap: true,
+    useOutlines: true,
+    color: 0xffffff,
+    font: 1,
+    fontHeight: 320,
+    layout: { leftMargin: 200, rightMargin: 0, indent: -200, leading: 0 },
+  });
+  return w.swf({
+    width: 420,
+    height: 200,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      pixelFont(1),
+      chat,
+      w.doAbc(abc, "TextIndent"),
+      w.symbolClass([[0, "TextIndent"]]),
+      w.place({ depth: 1, character: 2, matrix: { tx: 100, ty: 100 } }),
+      w.place({ depth: 2, character: 2, matrix: { tx: 100, ty: 1400 } }),
+      w.place({ depth: 3, character: 2, matrix: { tx: 100, ty: 2000 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Three morph shapes: one whose straight edges pair with curves as its
 // fill, line width and colour change; one of two paths with a turning
 // gradient, in a DefineMorphShape2; and two regions of two colours whose
@@ -2246,6 +2635,84 @@ function morphs(): Uint8Array {
   });
 }
 
+// A pale band in overlay drifting a quarter pixel each way a frame over a
+// checkerboard, once on the root and once inside a clip drawn as a layer,
+// whose blend reads the layer's pixels: what shows through the band must
+// stay where it is, at a zoom whose resolution is no whole number.
+function blendDrift(): Uint8Array {
+  const frames = 8;
+  const rect = (x: number, y: number, width: number, height: number): w.PathCommand[] => [
+    { move: [x, y] },
+    { line: [x + width, y] },
+    { line: [x + width, y + height] },
+    { line: [x, y + height] },
+    { line: [x, y] },
+  ];
+  const cells: w.PathCommand[][] = [];
+  for (let row = 0; row < 8; row++) {
+    for (let col = row % 2; col < 10; col += 2) {
+      cells.push(rect(col * 80, row * 80, 80, 80));
+    }
+  }
+
+  const dark = w.shape({
+    id: 1,
+    bounds: [0, 800, 0, 640],
+    fills: [0x101820],
+    paths: [{ fill1: 1, commands: rect(0, 0, 800, 640) }],
+  });
+  const checker = w.shape({
+    id: 2,
+    bounds: [0, 800, 0, 640],
+    fills: [0xf0e8d0],
+    paths: cells.map((commands) => ({ fill1: 1, commands })),
+  });
+  const band = w.shape({
+    id: 3,
+    version: 3,
+    bounds: [0, 300, 0, 500],
+    fills: [0xc0ffffff],
+    paths: [{ fill1: 1, commands: rect(0, 0, 300, 500) }],
+  });
+  const ground = (x: number, y: number) => [
+    w.place({ depth: 1, character: 1, matrix: { tx: x, ty: y } }),
+    w.place({ depth: 2, character: 2, matrix: { tx: x, ty: y } }),
+  ];
+  const drift = (f: number, x: number, y: number) =>
+    w.place({
+      depth: 3,
+      character: f === 0 ? 4 : undefined,
+      move: f > 0,
+      matrix: { tx: x + 5 * f, ty: y + 5 * f },
+      blendMode: f === 0 ? 13 : undefined,
+    });
+  const layered: Uint8Array[] = [...ground(0, 0)];
+  const root: Uint8Array[] = [
+    ...ground(1000, 100),
+    w.place({ depth: 4, character: 5, matrix: { tx: 100, ty: 100 }, blendMode: 2 }),
+  ];
+  for (let f = 0; f < frames; f++) {
+    layered.push(drift(f, 160, 40), w.showFrame());
+    root.push(drift(f, 1160, 140), w.showFrame());
+  }
+
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameCount: frames,
+    tags: [
+      w.backgroundColor(0xeeeeee),
+      dark,
+      checker,
+      band,
+      w.sprite(4, 1, [w.place({ depth: 1, character: 3 }), w.showFrame(), w.end()]),
+      w.sprite(5, frames, [...layered, w.end()]),
+      ...root,
+      w.end(),
+    ],
+  });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
@@ -2312,6 +2779,15 @@ export const cases: PlayerCase[] = [
     capture: [1, 2, 3],
     tolerance: 32,
     maxOutliers: 60,
+  },
+  {
+    name: "render-groups",
+    swf: (abc) => bare(abc, 5, "RenderGroups", 240, 96),
+    script: "RenderGroups",
+    frames: 5,
+    capture: [1, 2, 3, 4, 5],
+    tolerance: 3,
+    maxOutliers: 0,
   },
   {
     name: "field-position",
@@ -2419,6 +2895,24 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "goto-stops",
+    swf: gotoStops,
+    script: "GotoStops",
+    frames: 24,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "scripted-moves",
+    swf: scriptedMoves,
+    script: "ScriptedMoves",
+    frames: 9,
+    capture: [3, 4],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "rewind-first",
     swf: rewindFirst,
     script: "RewindFirst",
@@ -2497,6 +2991,22 @@ export const cases: PlayerCase[] = [
     frames: 1,
     capture: [1],
     tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
+    name: "font-natives",
+    build: fontNatives,
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "font-registration",
+    build: fontRegistration,
+    frames: 3,
+    capture: [],
+    tolerance: 0,
     maxOutliers: 0,
   },
   {
@@ -2619,6 +3129,40 @@ export const cases: PlayerCase[] = [
     maxOutliers: 40,
   },
   {
+    name: "text-indent",
+    swf: textIndent,
+    script: "TextIndent",
+    frames: 1,
+    capture: [1],
+    // Exact but for each border's bottom right corner, part grey in Flash: 6 channels.
+    tolerance: 0,
+    maxOutliers: 6,
+  },
+  {
+    name: "glyph-contours",
+    swf: (abc) =>
+      w.swf({
+        width: 200,
+        height: 100,
+        frameRate: 24,
+        frameCount: 1,
+        tags: [
+          w.fileAttributes(true),
+          w.backgroundColor(0xffffff),
+          pixelFont(1),
+          w.doAbc(abc, "GlyphContours"),
+          w.symbolClass([[0, "GlyphContours"]]),
+          w.showFrame(),
+          w.end(),
+        ],
+      }),
+    script: "GlyphContours",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "blend-modes",
     swf: (abc) => bare(abc, 1, "BlendModes", 700, 200),
     script: "BlendModes",
@@ -2630,6 +3174,39 @@ export const cases: PlayerCase[] = [
     // 180 channels in all.
     tolerance: 3,
     maxOutliers: 200,
+  },
+  {
+    name: "blend-drift",
+    swf: blendDrift(),
+    frames: 8,
+    capture: [1, 2, 3, 4, 5, 6, 7, 8],
+    // A resolution of 6, where Pixi's arithmetic lands a hair off whole pixels.
+    zoom: 1.5,
+    // Within 3 a channel, the layer's 8-bit round trip, as for `blend-modes`.
+    tolerance: 3,
+    maxOutliers: 0,
+  },
+  {
+    name: "blend-edges",
+    swf: (abc) => bare(abc, 1, "BlendEdges", 200, 150),
+    script: "BlendEdges",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "blend-nested",
+    swf: (abc) => bare(abc, 1, "BlendNested", 240, 120),
+    script: "BlendNested",
+    frames: 1,
+    capture: [1],
+    // Within 8 a channel: adl's 8-bit rounding of the blurred edges, their
+    // offset colour and the sums, the ground under a layer one darker where
+    // the glow's tail is all but clear. A glow cut at its shapes' edges, as
+    // the layer's region was, parted by up to 111.
+    tolerance: 8,
+    maxOutliers: 0,
   },
   {
     name: "filter-objects",
@@ -2854,6 +3431,14 @@ export const cases: PlayerCase[] = [
   // The unload at INIT follows frame 2's capture (see the harness): frame 3 shows it.
   { name: "loads-init", build: loadsInit, frames: 3, capture: [3], tolerance: 0, maxOutliers: 0 },
   {
+    name: "loader-parameters",
+    build: loaderParameters,
+    frames: 3,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "vector-definitions",
     swf: bare,
     script: "VectorDefinitions",
@@ -2892,6 +3477,16 @@ export const cases: PlayerCase[] = [
   // Last: the content it unloads plays on in Flash until collected, and its
   // traces would reach the case recorded after it.
   { name: "loads", build: loads, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
+  // Frame 1 is drawn at the outer SWF's INIT, before the AVM1 movies come at
+  // that frame's end; the player draws the frame whole, with them.
+  {
+    name: "avm1-movie",
+    build: avm1Movie,
+    frames: 6,
+    capture: [2, 3, 4, 5, 6],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "crossbridge-runtime",
     build: crossbridgeRuntime,

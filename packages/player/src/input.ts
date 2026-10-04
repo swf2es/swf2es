@@ -34,11 +34,22 @@ export interface PointerState {
 const PROPAGATE = "propagate";
 type Pick = DisplayObject | typeof PROPAGATE | null;
 
-/** An InteractiveObject's kind: what picks for itself, rather than through its parent. */
+/**
+ * An InteractiveObject's kind: what picks for itself, rather than through
+ * its parent. An AVM1 movie's root is an AVM1Movie, no InteractiveObject:
+ * a hit on it goes to its Loader, as Flash has it (the corpus's
+ * `mouse_pick_loader_avm1`).
+ */
 const isInteractive = (d: DisplayObject): boolean =>
-  !(d instanceof ShapeObject || d instanceof BitmapObject || d instanceof StaticTextObject);
+  !(
+    d instanceof ShapeObject ||
+    d instanceof BitmapObject ||
+    d instanceof StaticTextObject ||
+    d.avm1Root
+  );
 
-const mouseEnabled = (d: DisplayObject): boolean => !!d.object && d.object.$mouseEnabled !== false;
+const mouseEnabled = (d: DisplayObject): boolean =>
+  !!d.object && !d.avm1Root && d.object.$mouseEnabled !== false;
 
 /** `d` itself where it takes the pointer, else the hit goes on to its parent. */
 const own = (d: DisplayObject): Pick => (mouseEnabled(d) ? d : PROPAGATE);

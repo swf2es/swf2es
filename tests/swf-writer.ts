@@ -420,6 +420,8 @@ export interface PlaceSpec {
   character?: number;
   move?: boolean;
   matrix?: { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
+  /** A CXFORMWITHALPHA: multipliers as numbers, offsets as -255 to 255, red, green, blue, alpha. */
+  colorTransform?: { mult?: number[]; add?: number[] };
   /** A morph shape's ratio, 0 to 65535. */
   ratio?: number;
   name?: string;
@@ -428,9 +430,29 @@ export interface PlaceSpec {
   /** PlaceObject3's fields; any of them makes the tag one. */
   className?: string;
   hasImage?: boolean;
+  /** Blur filters, each blurring as much both ways, in one pass; [] clears. */
+  blurs?: number[];
+  /** A blend mode by its number, 1 normal to 14 hard light. */
+  blendMode?: number;
   visible?: boolean;
   /** 0xAARRGGBB. */
   opaqueBackground?: number;
+}
+
+/** A CXFORMWITHALPHA, its multipliers in 8.8 fixed. */
+function colorTransform(w: BitWriter, cx: { mult?: number[]; add?: number[] }): void {
+  const mult = cx.mult?.map((v) => Math.round(v * 256));
+  const add = cx.add;
+  const n = sbits(...(mult ?? []), ...(add ?? []));
+  w.align()
+    .ub(1, add ? 1 : 0)
+    .ub(1, mult ? 1 : 0)
+    .ub(4, n);
+  for (const v of [...(mult ?? []), ...(add ?? [])]) {
+    w.sb(n, v);
+  }
+
+  w.align();
 }
 
 /** A PlaceObject2 tag, or a PlaceObject3 when the spec has fields only it holds. */
@@ -448,6 +470,10 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.matrix) {
     flags |= 0x04;
+  }
+
+  if (spec.colorTransform) {
+    flags |= 0x08;
   }
 
   if (spec.ratio !== undefined) {
@@ -471,6 +497,14 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.hasImage) {
     flags2 |= 0x10;
+  }
+
+  if (spec.blurs !== undefined) {
+    flags2 |= 0x01;
+  }
+
+  if (spec.blendMode !== undefined) {
+    flags2 |= 0x02;
   }
 
   if (spec.visible !== undefined) {
@@ -500,6 +534,10 @@ export function place(spec: PlaceSpec): Uint8Array {
     matrix(w, spec.matrix);
   }
 
+  if (spec.colorTransform) {
+    colorTransform(w, spec.colorTransform);
+  }
+
   if (spec.ratio !== undefined) {
     w.u16(spec.ratio);
   }
@@ -510,6 +548,21 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.clipDepth !== undefined) {
     w.u16(spec.clipDepth);
+  }
+
+  if (spec.blurs !== undefined) {
+    w.u8(spec.blurs.length);
+    for (const blur of spec.blurs) {
+      // BLURFILTER: its id, blurX and blurY in 16.16, then passes in five bits.
+      w.u8(1)
+        .u32(blur * 65536)
+        .u32(blur * 65536)
+        .u8(1 << 3);
+    }
+  }
+
+  if (spec.blendMode !== undefined) {
+    w.u8(spec.blendMode);
   }
 
   if (spec.visible !== undefined) {
@@ -616,7 +669,8 @@ export function sprite(id: number, frameCount: number, tags: Uint8Array[]): Uint
 /**
  * A DefineEditText: its initial text, its size in twips and alignment (0
  * left, 1 right, 2 center), and optionally HTML text, multiline, a colour
- * (0xRRGGBB) and a font by id with its height in twips.
+ * (0xRRGGBB), a font by id with its height in twips, wrapping, the
+ * font's outlines, and margins, indent and leading in twips.
  */
 export function editText(
   id: number,
@@ -632,6 +686,10 @@ export function editText(
     fontHeight?: number;
     /** The bounds' corner, in twips; (0, 0) by default. */
     at?: [number, number];
+    wordWrap?: boolean;
+    useOutlines?: boolean;
+    /** In twips; the indent may be negative, as the tag's 16 bits hold it. */
+    layout?: { leftMargin: number; rightMargin: number; indent: number; leading: number };
   } = {},
 ): Uint8Array {
   const w = new BitWriter().u16(id);
@@ -640,11 +698,13 @@ export function editText(
   const font = options.font !== undefined;
   w.u8(
     0x80 |
+      (options.wordWrap ? 0x40 : 0) |
       (options.multiline ? 0x20 : 0) |
       (options.color !== undefined ? 0x04 : 0) |
       (font ? 0x01 : 0),
   );
-  w.u8((align ? 0x20 : 0) | (options.html ? 0x02 : 0));
+  const layout = options.layout;
+  w.u8((align || layout ? 0x20 : 0) | (options.html ? 0x02 : 0) | (options.useOutlines ? 0x01 : 0));
   if (font) {
     w.u16(options.font ?? 0).u16(options.fontHeight ?? 240);
   }
@@ -656,8 +716,12 @@ export function editText(
       .u8(0xff);
   }
 
-  if (align) {
-    w.u8(align).u16(0).u16(0).u16(0).u16(0);
+  if (align || layout) {
+    w.u8(align)
+      .u16(layout?.leftMargin ?? 0)
+      .u16(layout?.rightMargin ?? 0)
+      .u16((layout?.indent ?? 0) & 0xffff)
+      .u16((layout?.leading ?? 0) & 0xffff);
   }
 
   w.string("").string(text);
@@ -678,11 +742,13 @@ export function fontName(id: number, name: string, bold = false, italic = false)
   return tag(48, w.done());
 }
 
-/** A glyph of a test font: a character, its advance and its outline's rectangles, in em units of 1024, y down from the baseline. */
+/** A glyph of a test font: a character, its advance and its outline's rectangles and contours, in em units of 1024, y down from the baseline. */
 export interface GlyphSpec {
   char: string;
   advance: number;
   boxes: [number, number, number, number][];
+  /** Further contours, each its corners in order, closed back to its first. */
+  contours?: [number, number][][];
 }
 
 export interface FontSpec {
@@ -799,8 +865,18 @@ export function font3(spec: FontSpec): Uint8Array {
         .sb(n, dx)
         .sb(n, dy);
     };
-    for (const [k, [x0, y0, x1, y1]] of g.boxes.entries()) {
-      const [l, t, r, b] = [x0, y0, x1, y1].map((v) => v * scale);
+    // A box is a contour clockwise from its top left corner.
+    const contours = [
+      ...g.boxes.map(([l, t, r, b]): [number, number][] => [
+        [l, t],
+        [r, t],
+        [r, b],
+        [l, b],
+      ]),
+      ...(g.contours ?? []),
+    ];
+    for (const [k, points] of contours.entries()) {
+      const [l, t] = points[0].map((v) => v * scale);
       // Move, with the fill at the path's start.
       w.ub(1, 0).ub(5, k === 0 ? 1 | 4 : 1);
       const n = sbits(l, t);
@@ -811,12 +887,10 @@ export function font3(spec: FontSpec): Uint8Array {
 
       x = l;
       y = t;
-      for (const [px, py] of [
-        [r, t],
-        [r, b],
-        [l, b],
-        [l, t],
-      ]) {
+      for (const [px, py] of [...points.slice(1), points[0]].map(([a, b]) => [
+        a * scale,
+        b * scale,
+      ])) {
         edge(px - x, py - y);
         x = px;
         y = py;
@@ -860,8 +934,9 @@ export function font3(spec: FontSpec): Uint8Array {
   }
 
   for (const g of sorted) {
-    const xs = g.boxes.flatMap((b) => [b[0], b[2]]);
-    const ys = g.boxes.flatMap((b) => [b[1], b[3]]);
+    const points = (g.contours ?? []).flat();
+    const xs = [...g.boxes.flatMap((b) => [b[0], b[2]]), ...points.map((p) => p[0])];
+    const ys = [...g.boxes.flatMap((b) => [b[1], b[3]]), ...points.map((p) => p[1])];
     const [x0, x1, y0, y1] = xs.length
       ? [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)].map((v) => v * scale)
       : [0, 0, 0, 0];

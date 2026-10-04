@@ -519,14 +519,33 @@ The player keeps Flash's display list and timeline
 (`packages/player/src`: `timeline.ts` reads a SWF's definitions and
 frames, `display.ts` is the display list), and PixiJS only mirrors it
 (`pixi.ts`): a container per display object, kept from frame to frame
-and updated where the display object marks itself changed. A shape's
-fills are immutable `GraphicsContext`s shared by its instances, built
+and updated where the display object marks itself changed.
+
+A branch with at least 64 immediate art objects across its subtree owns
+a Pixi render group. Children already grouped do not count again, so
+wrappers do not all gain a group. Each group keeps its own instructions
+and batches: changing an animated branch's children no longer repacks
+unrelated scenery. Promotion persists when the branch shrinks, avoiding
+repeated batcher destruction. Masks and their targets must belong to the
+same group; references to partners outside a subtree prevent grouping,
+and a mask moved outside an existing group removes that group. Timeline
+masks stay with their siblings. A fresh view for BitmapData.draw does not
+group. The colour batcher's shader ignores Pixi's group colour, since
+its vertex colour transform already includes every ancestor. The
+`render-groups` case checks colours, masks moved between branches, scrolls,
+filters, and a branch shrinking and growing against Flash. The
+`bench.ts --branches N --gpu` workload changes a quarter of N independent
+coloured branches while the rest stay still.
+
+A shape's fills are immutable `GraphicsContext`s shared by its instances, built
 from Flash's edges (`shapes.ts`: each edge goes to its right fill
 forward and its left fill reversed, joined into contours) and filled
 even-odd through a containment tree of the contours, holes cut: all of a
 region's at once, before the islands in them, since Pixi's `cut()` also
 lands a hole in the fill before the last once the last has one
-(`fill-holes`). Its lines are drawn in the stage's axes, because Flash
+(`fill-holes`). A contour is in another by a point of it off the other's
+outline, since a pixel font's contours touch at their corners
+(`glyph-contours`). Its lines are drawn in the stage's axes, because Flash
 strokes a transformed line with one width all along, not the local width
 stretched by the transform: so a line's context depends on the linear
 part of its transform on the stage, and is kept by layer and that
@@ -600,6 +619,10 @@ medium, 4×4 at high and best. The test page draws the same way, at that
 many times the resolution without multisampling, averaged down, and its
 frames then match Flash's to the pixel for straight edges, and within a
 quarter pixel's anti-aliasing for curved lines and lines under a skew.
+A case may give a zoom, as a host showing the stage larger does: the
+page's resolution is then the zoom times the grid, and the stage is drawn
+at the zoom's inverse, so the samples are the same and only Pixi's
+arithmetic at that resolution, no whole number, differs.
 
 ### Scripts and the display list
 
@@ -765,6 +788,17 @@ callback's own error goes back to the page that called it. A child its
 parent's first frame places is made in the parent's `super()`, and its
 error still reaches the parent's constructor.
 
+A goto plays or stops its clip as it happens, before the frame it lands
+on has its script run, so a `stop()` or `play()` there has the last word:
+a clip whose every frame stops stays where `gotoAndPlay` from another
+clip's script or a listener sends it. A goto a frame script asks for of
+its own clip plays or stops it only once the script has returned, over a
+`play()` or `stop()` the script calls after it; `nextFrame` and
+`prevFrame` past either end stop the clip where it is (`goto-stops`).
+`isPlaying` is Flash's own flag apart from the playhead, false for a clip
+no script has played, and true still after a deferred `gotoAndStop` or
+a `nextFrame` past the end, as adl shows; the player reads the playhead.
+
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,
 is one scene named "" whose labels are its FrameLabel tags (`scenes`,
@@ -838,6 +872,26 @@ ENTER_FRAME, as playing on to a frame does; what it takes off is gone by
 ENTER_FRAME (`loop-ratio`). Flash's matrix is
 exact at the quarter turns, 0 and not the doubles' cosine of 90°, so the
 player's is.
+
+A child a script has transformed takes nothing more from the timeline's
+places that a script could set: no matrix, colour transform, ratio,
+visibility, blend mode or filters, from a move or from the place a
+rewind or the loop takes it back to, which leaves what the script set
+(`scripted-moves`). Flash keeps this per object, not per property:
+setting `x`, even to what it was, keeps the colour transform the moves
+give from it too. What touches is the transform properties, `alpha`,
+`filters`, `blendMode`, `scrollRect`, `opaqueBackground`, `scale9Grid`
+and the `transform` setters, each set to what it was or not, a text
+field's `width` and `height` too, which size its field rather than scale
+it; a `filters` list refused with #2005 is none; `visible`,
+`mask` and `cacheAsBitmap` are no touch here even changed, where
+`cacheAsBitmap` set true is one to the replacement above, so the player
+keeps a `transformed` flag beside `scripted`. A MorphShape a script moved
+stays at its ratio. Ruffle's `transformed_by_script` does the same, set
+by fewer setters: not by `blendMode`, `filters`, `scrollRect`,
+`opaqueBackground` or `scale9Grid`. In adl the 3D setters touch as well,
+`z`, `rotationX`, `rotationY`, `rotationZ`, `scaleZ` and
+`transform.matrix3D`, so they must call `touch()` once implemented.
 
 A clip a script takes off the display list plays on in Flash, an
 orphan, and so does one a script makes with `new` and never adds: its
@@ -925,6 +979,22 @@ dispatches `init` and then `complete` at the end of its first frame,
 after `exitFrame` and before the second (Ruffle's `loaderinfo_events` and
 `delayed_symbolclass` traces), as a loaded SWF's does.
 
+`parameters` is a new object at each ask, so a script's changes to one
+stay in it. The main SWF's, which the stage's and every root's under it
+report too, are the query of the URL the host gave `Scripting` as `url`
+and then the flashvars it gave as `parameters`, which override a name
+the query has, as Ruffle's do (Flash's order was not checked: its
+harness can give neither). A SWF loaded by URL has its URL's query from
+its second `PROGRESS` on, decoded, `+` as a space, a name without `=`
+empty, an empty name left out and the last of a name kept; one from
+bytes has none here, which adl could not tell from the loader's own
+query (Ruffle passes that on). A `LoaderContext`'s `parameters` take the place of the
+query from the call on, and a value in them that is not a String, null
+included, is refused at the call with `IllegalOperationError` #2196. An
+unload leaves none (the `loader-parameters` case and the node tests).
+The player runs no AVM1, so an AVM1 root's `_root` variables get no
+flashvars.
+
 The order is Flash's, traced by adl (the `loads` case; the Flash Player
 traces in Ruffle's corpus agree where they overlap). `loadBytes` tells
 the whole of the progress in the call, `PROGRESS` with nothing loaded and
@@ -953,7 +1023,7 @@ the tests do, to see Flash's frame. `SymbolClass` bindings are the
 library's, since character ids collide across SWFs. The player package
 has no I/O: `load` of a URL asks the host for the bytes through a
 function the `Scripting` is given, with a resolved URL, method, headers,
-copied body and `AbortSignal`. A fetch that fails, or bytes that are not an AS3 SWF,
+copied body and `AbortSignal`. A fetch that fails, or bytes that are no SWF,
 end in `IO_ERROR` on the `LoaderInfo` in the frame. `close` drops a
 pending load and aborts its fetch; `unload`, and a new load on the same
 `Loader`, do that and take the content out at the call, the `LoaderInfo`
@@ -973,6 +1043,33 @@ the one whose code made it, even before the first load; the runtime does not
 track callers, so it is the SWF the `Loader` is on the display list of when
 it loads, else the main one (Ruffle's `loader_loaderurl` adds the loader first, as SWFs
 usually do).
+
+An AVM1 SWF (no FileAttributes, or one without the ActionScript 3 flag)
+loads as Flash loads one into AS3: the content is an `AVM1Movie`, a
+`DisplayObject` whose other face is the AVM1 root's clip, so AS3 sees
+none of its children; `actionScriptVersion` is 2, and the header's
+version, frame rate and size are the SWF's, `parameters` the context's
+or the URL's as for an AS3 SWF. `new AVM1Movie()` is refused, #2012.
+Flash makes a `loadBytes`' `AVM1Movie` in the call, which names it then,
+and has it in the `Loader` at the end of that frame, after `EXIT_FRAME`,
+with its `INIT` and `COMPLETE`, the last asked first; the movie keeps its
+first frame through the next frame's advance (the `avm1-movie` case, as
+adl traces and draws it). One with images comes at the end of the frame
+after they are decoded, or ends in #2124 if the decoder refuses them.
+One from a URL comes as an AS3 SWF's content does, `OPEN`, the progress
+and the child in the frame's construct phase, `INIT` and `COMPLETE` at
+its end, and plays on from the next frame: that follows Ruffle, which
+loads both kinds alike, not adl, whose harness loads only from bytes.
+The `AVM1Movie` is no `InteractiveObject`: the pointer's hits on the
+movie go to its `Loader`, as Flash has them (the corpus's
+`mouse_pick_loader_avm1`). The movie's timeline plays at the stage's
+frame rate as an AVM1 main SWF's does without scripts. The player has no
+AVM1 interpreter, so what needs one is missing: no AVM1 action runs, its
+DoAction, DoInitAction, clip and button actions read past; its buttons
+show their up state and are inert, with no other state and no hand
+cursor; its timeline sounds do not play, as no timeline's do yet; and
+`AVM1Movie`'s `call` and `addCallback` throw #2014, as Flash's do
+while interop is unavailable.
 
 `URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
 status and headers. A `URLRequest`'s GET string or URLVariables data is appended to the query;
@@ -1575,10 +1672,12 @@ characters, `\r` between lines as Flash keeps them (`\n` is made one),
 each with its own format, and a default format, Flash's Times New Roman
 12 for a new field and the tag's for a timeline's (its font's name from
 the DefineFont2 or 3 it names, its height, colour, alignment, margins,
-indent and leading). `text` and `htmlText` set the text in the default
-format; `appendText` and `replaceText` put theirs in the format of the
-character before; `getTextFormat` of a range gives null for what its
-characters differ in, and `setTextFormat` sets what a TextFormat sets.
+indent and leading; the indent is signed, as Flash reads it, though the
+specification has it unsigned). `text` and `htmlText` set the text in
+the default format; `appendText` and `replaceText` put theirs in the
+format of the character before; `getTextFormat` of a range gives null
+for what its characters differ in, and `setTextFormat` sets what a
+TextFormat sets.
 `htmlText` is written as adl writes it: a `P` for each paragraph (an
 `LI` alone for a bullet's), in a `TEXTFORMAT` for its margins, indent,
 leading or tab stops, with a `FONT` of all five font attributes and,
@@ -1622,15 +1721,18 @@ newline, and with `wordWrap` before a word that does not fit without
 its trailing space (one ending at the room's edge fits), or between
 characters for a word longer than the line. A line starts 2 pixels in,
 the gutter, then the margin, block indent and, on a paragraph's first
-line, its indent, and a bullet's 36 pixels; centred, it is placed in
-the room left, right-aligned one twip further left, and justified, a
-wrapped line but the paragraph's last has its inner spaces share the
-room. `textHeight` is the lines' heights, leading and all, less the
-last one's leading where there are two lines or more; a last line left
-empty by a newline does not count. adl's `numLines` can lag a
-relayout until the next one, which swf2es's does not; tab stops, and
-the boundaries adl leaves out for lines beyond the field's height, are
-still to come.
+line, its indent, and a bullet's 36 pixels; a negative indent, a hanging
+one, takes the first line left as far as the gutter but gives it no
+more room (`text-indent`); centred, it is placed in the room left,
+right-aligned one twip further left, and justified, a wrapped line but
+the paragraph's last has its inner spaces share the room. `textHeight`
+is the lines' heights, leading and all, less the last one's leading
+where there are two lines or more; a last line left empty by a newline
+counts only in a field a timeline placed, not in a script's. adl's
+`numLines` can lag a relayout until the next one, which swf2es's does
+not; tab stops, the boundaries adl leaves out for lines beyond the
+field's height, and those of a timeline's field, which adl gives 2
+pixels further right and down than its lines, are still to come.
 `autoSize` makes the field the text's size and 4 pixels, keeping its
 left, centre or right edge. A device font's metrics are the browser's
 font's, measured by the host, which Flash's own system fonts differ
@@ -1738,7 +1840,40 @@ reads the back buffer only from a renderer made with `useBackBuffer:
 true`, which a host passes (the README's embedding example does);
 without it the modes draw as normal, and the view warns once. The back
 buffer is a full-screen copy a frame: on the bench (`--back-buffer`, an
-RTX 4060) it adds some 0.05 ms to the draw.
+RTX 4060) it adds some 0.05 ms to the draw. What is behind an object is
+copied from the pixels its bounds cover, which Pixi puts on whole pixels
+of the target but keeps in stage units, as k · (1/r): at a resolution
+that is no whole number, as a host fitting the stage to its page gives,
+k · (1/r) · r can fall a hair short of k, and Pixi's floor took the pixel
+before. The blend read what was behind it a pixel off at those positions
+alone, so a moving blend shook what showed through it, which Flash leaves
+still. The copy's corner and size are rounded instead. Pixi also pads a
+filter's region by whole pixels after putting it on the texels, which at
+such a resolution left it between them: a blend nested in a layer, its
+region starting left of or above the layer's, read along its top and
+left edge texels of the pooled back texture the copy never reached, and
+drew lines of what it last held, which Flash does not draw. The region
+is put on the texels again after the padding. The `blend-drift` case
+moves a blend a quarter pixel a frame, at a zoom of 1.5 that gives the
+test page a resolution of 6; unit tests hold the region's snap.
+
+What is behind a blended object is copied into a texture the filter
+reads, and Pixi's copy is held to both that texture and what it copies
+from: an object past the edge of what it is drawn over, the stage's or a
+layer's cut by a scrollRect, which bounds an object's filter but not its
+children's, asked for a width or height below zero, which GL refuses
+(GL_INVALID_VALUE) and WebGPU fails the frame for. The part the copy does
+not reach is left as the pooled texture had it: it maps past what the
+target has, where the filter's output is cut off. The `blend-edges` case draws such
+objects against adl, and the player's test page fails a case whose
+drawing GL refused.
+
+A layer, a blend's or a filter's, holds what its filtered children draw
+past their shapes, as adl's layer holds a child's glow whole: Pixi
+measures a filtered object by its descendants' shapes alone, which cut a
+blurred child of a blend off at its shapes' edges, so each filter below
+grows the region by its padding (`blend-nested` draws such children
+against adl).
 
 ### Filters
 
@@ -1894,9 +2029,7 @@ where it was as well as where it is, and a mask from outside the object
 that moves leaves it clipped as it was. swf2es draws the child once,
 where it is now, and also keeps the output for such a mask, unless the
 object's bounds change with it. Each pass lets go of the pool's textures
-it drew with, which the pool destroys as the screen's size changes, and
-a blend's copy of what is behind is held to its texture's size, which
-Pixi rounds a pixel short of the copy at some resolutions.
+it drew with, which the pool destroys as the screen's size changes.
 
 ### Masks and scroll rectangles
 

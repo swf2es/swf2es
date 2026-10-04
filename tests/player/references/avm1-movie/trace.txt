@@ -1,0 +1,35 @@
+new AVM1Movie ArgumentError: Error #2012: AVM1Movie$ class cannot be instantiated.
+super flash.display::DisplayObject
+after loadBytes instance+0 0 null
+after loadBytes instance+2 0 null
+outer exitFrame 1
+event init bare 1 flash.display::AVM1Movie true true
+  info 2 6 30 60 40 application/x-shockwave-flash 75 false true
+  applicationDomain [object ApplicationDomain]
+  content instance+3 true true true true false false true
+  size 30 30 0 0 (x=110, y=10, w=30, h=30) true
+  stage 24
+  call Error: Error #2014: Feature is not available at this time.
+  addCallback Error: Error #2014: Feature is not available at this time.
+event complete bare 1 flash.display::AVM1Movie true true
+event init inner 1 flash.display::AVM1Movie true true
+  info 2 8 12 100 50 application/x-shockwave-flash 158 false true
+  applicationDomain [object ApplicationDomain]
+  content instance+1 true true true true false false true
+  size 50 50 0 0 (x=5, y=5, w=50, h=50) true
+  stage 24
+  call Error: Error #2014: Feature is not available at this time.
+  addCallback Error: Error #2014: Feature is not available at this time.
+event complete inner 1 flash.display::AVM1Movie true true
+outer enterFrame 2
+outer frame 2 1 flash.display::AVM1Movie
+outer exitFrame 2
+outer enterFrame 3
+outer frame 3 65 50 (x=25, y=5, w=65, h=50)
+outer exitFrame 3
+outer enterFrame 3
+outer exitFrame 3
+outer enterFrame 3
+outer exitFrame 3
+outer enterFrame 3
+outer exitFrame 3

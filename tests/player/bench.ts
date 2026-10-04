@@ -26,8 +26,11 @@
 // shapes, the timeline's: what leaving costs, with glyphs that share a
 // font's fills.
 //
-//   node tests/player/bench.ts [--shapes N | --rig N | --toggle N | --toggle-static N]
-//     [--frames N] [--idle K] [--gpu] [--back-buffer] [--json]
+// --branches N places N coloured branches of 128 shapes. A quarter replace
+// one child each frame; the rest stay still, as scenery beside animated art.
+//
+//   node tests/player/bench.ts [--shapes N | --rig N | --branches N | --toggle N
+//     | --toggle-static N] [--frames N] [--idle K] [--gpu] [--back-buffer] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 
@@ -38,6 +41,7 @@ const option = (name: string, fallback: number) => {
 };
 const shapes = option("shapes", 2000);
 const rig = option("rig", 0);
+const branches = option("branches", 0);
 const idleRenders = option("idle", 0);
 const toggle = option("toggle", 0);
 const toggleStatic = option("toggle-static", 0);
@@ -321,14 +325,62 @@ const quantile = (values: number[], q: number) => {
   return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0;
 };
 
+/** Detailed, coloured branches whose independent timelines should not repack each other's art. */
+function branchSwf(count: number): Uint8Array {
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
+  for (let id = 1; id <= 8; id++) {
+    tags.push(character(id));
+  }
+
+  for (let branch = 0; branch < count; branch++) {
+    const contents: Uint8Array[] = [];
+    for (let i = 0; i < 128; i++) {
+      contents.push(
+        w.place({
+          depth: i + 1,
+          character: 1 + (i % 8),
+          matrix: { tx: (i % 16) * 800, ty: Math.floor(i / 16) * 800 },
+        }),
+      );
+    }
+
+    contents.push(w.showFrame());
+    const length = branch % 4 === 0 ? 24 : 1;
+    for (let frame = 1; frame < length; frame++) {
+      contents.push(w.place({ depth: 1, move: true, character: 1 + (frame % 8) }), w.showFrame());
+    }
+
+    contents.push(w.end());
+    tags.push(
+      w.sprite(20 + branch, length, contents),
+      w.place({
+        depth: branch + 1,
+        character: 20 + branch,
+        matrix: {
+          a: 0.25,
+          d: 0.25,
+          tx: (branch % 4) * 4000 + 200,
+          ty: Math.floor(branch / 4) * 2000 + 200,
+        },
+        colorTransform: { add: [24, -16, 32, 0] },
+      }),
+    );
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
 const swf =
   toggle > 0
     ? toggleSwf(toggle)
     : toggleStatic > 0
       ? toggleStaticSwf(toggleStatic)
-      : rig > 0
-        ? rigSwf(rig)
-        : synthetic();
+      : branches > 0
+        ? branchSwf(branches)
+        : rig > 0
+          ? rigSwf(rig)
+          : synthetic();
 const result = await benchPlayer(
   swf,
   frames,
@@ -354,9 +406,11 @@ const summary = {
       ? `toggle of ${toggle}`
       : toggleStatic > 0
         ? `static toggle of ${toggleStatic}`
-        : rig > 0
-          ? `rig of ${rig}`
-          : shapes,
+        : branches > 0
+          ? `${branches} branches`
+          : rig > 0
+            ? `rig of ${rig}`
+            : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   frames,

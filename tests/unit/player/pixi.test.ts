@@ -347,6 +347,60 @@ test("Flash's filters are left out under WebGPU, and a fresh view destroys those
   assert.ok(destroyed >= 2);
 });
 
+test("blurred filter inputs release pooled textures without sharing idle listeners", async () => {
+  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const { displayFilters } = await import("../../../packages/player/dist/pixi-filters.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = await import(entry);
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  const filters: ReturnType<typeof displayFilters> = [];
+  const input = pixi.RenderTexture.create({ width: 16, height: 16 });
+  const whiteListeners = pixi.Texture.WHITE.source.listenerCount("change");
+  try {
+    for (const kind of ["glow", "dropShadow", "bevel", "gradientGlow", "gradientBevel"] as const) {
+      filters.push(...displayFilters([filterDefaults(kind), filterDefaults(kind)]));
+    }
+
+    assert.equal(pixi.Texture.WHITE.source.listenerCount("change"), whiteListeners);
+    const idle = filters.map((filter) => filter.resources.uBlurred);
+    assert.equal(new Set(idle).size, filters.length);
+    for (const [i, filter] of filters.entries()) {
+      let applied = 0;
+      const system = {
+        applyFilter(pass: typeof filter) {
+          if (pass === filter) {
+            assert.notEqual(filter.resources.uBlurred, idle[i]);
+            assert.equal(filter.resources.uBlurred.destroyed, false);
+            applied++;
+          }
+        },
+      } as unknown as Parameters<typeof filter.apply>[0];
+      filter.apply(system, input, input, true);
+      filter.apply(system, input, input, true);
+      assert.equal(applied, 2);
+      assert.equal(filter.resources.uBlurred, idle[i]);
+      assert.equal(idle[i].listenerCount("change"), 1);
+    }
+
+    for (const filter of filters) {
+      filter.destroy();
+    }
+    filters.length = 0;
+    for (const source of idle) {
+      assert.equal(source.destroyed, true);
+      assert.equal(source.listenerCount("change"), 0);
+    }
+  } finally {
+    for (const filter of filters) {
+      filter.destroy();
+    }
+    input.destroy(true);
+    pixi.DOMAdapter.set(adapter);
+  }
+});
+
 test("a convolution pads its reach and the pixel adl adds, and knows the padding after it", async () => {
   const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
   const { displayFilters } = await import("../../../packages/player/dist/pixi-filters.js");
@@ -1178,4 +1232,244 @@ test("of many objects off the list at once, only the latest 1024 are kept whole"
   assert.equal(fills.filter((g) => g.destroyed).length, 1100 - 1024);
   assert.equal(fills[0].destroyed, true);
   assert.equal(fills[1099].destroyed, false);
+});
+
+test("a blend's copy of what is behind it is held to the target and the texture, and clears nothing", async () => {
+  // Loaded with the view, it patches the copy for every renderer.
+  await import("../../../packages/player/dist/pixi-blend.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const { RenderTargetSystem } = (await import(entry)) as {
+    RenderTargetSystem: {
+      prototype: { copyToTexture(this: unknown, ...args: unknown[]): unknown };
+    };
+  };
+  type Copy = [number, number, number, number, number, number];
+  // A target of 893×150 pixels and a back texture of 256×128.
+  const copy = (from: [number, number], size: [number, number], to: [number, number] = [0, 0]) => {
+    const copies: Copy[] = [];
+    const clears: unknown[] = [];
+    const system = {
+      getRenderTarget: () => ({ pixelWidth: 893, pixelHeight: 150 }),
+      adaptor: {
+        copyToTexture: (
+          _source: unknown,
+          _destination: unknown,
+          o: { x: number; y: number },
+          s: { width: number; height: number },
+          d: { x: number; y: number },
+        ) => copies.push([o.x, o.y, s.width, s.height, d.x, d.y]),
+      },
+      push: (options: { clearColor: unknown }) => clears.push(options.clearColor),
+      pop: () => {},
+    };
+    const destination = { source: { pixelWidth: 256, pixelHeight: 128 } };
+    RenderTargetSystem.prototype.copyToTexture.call(
+      system,
+      {},
+      destination,
+      { x: from[0], y: from[1] },
+      { width: size[0], height: size[1] },
+      { x: to[0], y: to[1] },
+    );
+    return { copies, clears };
+  };
+
+  // Inside: copied as asked, nothing cleared.
+  assert.deepEqual(copy([10, 20], [100, 50]), { copies: [[10, 20, 100, 50, 0, 0]], clears: [] });
+  // A hair wider and taller than the texture: held to it, and nothing missed.
+  assert.deepEqual(copy([10, 20], [257, 129]), { copies: [[10, 20, 256, 128, 0, 0]], clears: [] });
+  // Past the top-left: what the target has goes where it belongs, the rest left as it is.
+  assert.deepEqual(copy([-4, -6], [100, 50]), {
+    copies: [[0, 0, 96, 44, 4, 6]],
+    clears: [],
+  });
+  // Past the bottom-right: the copy stops at the target's edge.
+  assert.deepEqual(copy([850, 120], [100, 50]), {
+    copies: [[850, 120, 43, 30, 0, 0]],
+    clears: [],
+  });
+  // Wholly beyond, which Pixi's own clamp left as a width of -1 or a height
+  // of -3 that GL refused: no copy at all.
+  assert.deepEqual(copy([894, 150], [10, 75]), { copies: [], clears: [] });
+  assert.deepEqual(copy([205, -4], [174, 1]), { copies: [], clears: [] });
+});
+
+/** Pixi's bounds, as far as these tests use them. */
+interface PixiBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  clear(): void;
+  addFrame(x0: number, y0: number, x1: number, y1: number): void;
+}
+
+/** Pixi's own module, as the player loads it, with the player's patches to it. */
+async function patchedPixi(): Promise<{
+  Bounds: new (minX?: number, minY?: number, maxX?: number, maxY?: number) => PixiBounds;
+  FilterEffect: new () => { filters: unknown };
+  FilterSystem: { prototype: unknown };
+}> {
+  await import("../../../packages/player/dist/pixi-blend.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  return import(entry);
+}
+
+test("a filter's region lies on its texture's texels at a resolution that is no whole number", async () => {
+  const { Bounds, FilterSystem } = await patchedPixi();
+  const system = FilterSystem.prototype as unknown as {
+    _calculateFilterBounds(this: unknown, data: unknown, ...rest: unknown[]): void;
+  };
+  const r = 1.5;
+  const data = {
+    bounds: new Bounds(10.3, 20.7, 50.2, 60.1),
+    filters: [
+      {
+        enabled: true,
+        resolution: "inherit",
+        padding: 3,
+        antialias: "off",
+        clipToViewport: false,
+        compatibleRenderers: 1,
+        blendRequired: false,
+      },
+    ],
+    skip: false,
+    resolution: 0,
+  };
+  const stub = { renderer: { type: 1, backBuffer: { useBackBuffer: true } } };
+  system._calculateFilterBounds.call(stub, data, { width: 1000, height: 1000 }, false, r, 1);
+
+  // Pixi put it on the texels, then padded it by 3 pixels, 4.5 texels:
+  // half a texel off them. It is put on them again, grown by the half.
+  const { minX, minY, maxX, maxY } = data.bounds;
+  assert.deepEqual(
+    [minX, minY, maxX, maxY].map((v) => Math.round(v * r * 1e6) / 1e6),
+    [10, 26, 81, 96],
+  );
+});
+
+test("a blend's copy of what is behind it starts at the texel its region does", async () => {
+  const { Bounds, FilterSystem } = await patchedPixi();
+  const system = FilterSystem.prototype as unknown as {
+    getBackTexture(this: unknown, surface: unknown, bounds: unknown, previous?: unknown): unknown;
+  };
+  const r = 1.6228571428571428;
+  const copies: number[][] = [];
+  const stub = {
+    renderer: {
+      renderTarget: {
+        copyToTexture: (
+          _source: unknown,
+          _destination: unknown,
+          o: { x: number; y: number },
+          s: { width: number; height: number },
+        ) => copies.push([o.x, o.y, s.width, s.height]),
+      },
+    },
+  };
+  const surface = { colorTexture: { source: { resolution: r } } };
+
+  // A blend in a layer, its region 18 texels left of and 3 above the
+  // layer's, a hair short of whole: Pixi's floor took 19 and 4, and the
+  // blend read, along its region's top and left, texels never copied.
+  const layer = new Bounds(531 / r, 140 / r, 600 / r, 200 / r);
+  const blend = new Bounds(513 / r - 1e-12, 137 / r - 1e-12, 560 / r, 170 / r);
+  system.getBackTexture.call(stub, surface, blend, layer);
+  assert.deepEqual(copies, [[-18, -3, 47, 33]]);
+});
+
+test("a layer's region holds its filtered children's padding, but not its own", async () => {
+  const { Bounds, FilterEffect, FilterSystem } = await patchedPixi();
+  const system = FilterSystem.prototype as unknown as {
+    _calculateFilterArea(this: unknown, instruction: unknown, bounds: unknown): void;
+  };
+  type Padded = { filters: unknown; addBounds(b: unknown, skip: boolean): void };
+  const effect = (...paddings: number[]) => {
+    const e = new FilterEffect();
+    // The second filter disabled.
+    e.filters = paddings.map((padding, i) => ({ enabled: i !== 1, padding }));
+    return e as Padded;
+  };
+  const own = effect(7);
+  const child = effect(4, 10, 2.5);
+  // Measured as Pixi measures: the shapes, then the effects, the child's and the object's own.
+  const container = {
+    parentRenderGroup: {},
+    getFastGlobalBounds(_layers: boolean, bounds: PixiBounds) {
+      bounds.clear();
+      bounds.addFrame(10, 20, 30, 40);
+      child.addBounds(bounds, true);
+      own.addBounds(bounds, true);
+      return bounds;
+    },
+  };
+  const bounds = new Bounds();
+  system._calculateFilterArea.call({}, { container, filterEffect: own }, bounds);
+  assert.deepEqual([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], [4, 14, 36, 46]);
+
+  // Measured for anything else, its own is padded too.
+  container.getFastGlobalBounds(true, bounds);
+  assert.deepEqual([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], [-3, 7, 43, 53]);
+});
+
+test("large branches keep their own instructions as they shrink, without grouping their wrappers", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const branch = new Container();
+  const store = new BitmapStore(1, 1, false, 0xffffff);
+  root.placeAtDepth(branch, 1);
+  for (let i = 0; i < 64; i++) {
+    branch.placeAtDepth(new BitmapObject(store), i + 1);
+  }
+
+  view.prepare(root);
+  const top = view.stage.children[0];
+  const grouped = top.children[1];
+  assert.equal(grouped.isRenderGroup, true);
+  assert.equal(top.isRenderGroup, false);
+  const instructions = grouped.renderGroup;
+  for (const child of [...branch.children].slice(1)) {
+    branch.removeChild(child);
+  }
+
+  view.prepare(root);
+  assert.equal(grouped.renderGroup, instructions);
+  store.dispose();
+});
+
+test("mask partners share a group, including when an existing group's mask moves outside it", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const panel = new Container();
+  const art = new Container();
+  const mask = new Container();
+  const store = new BitmapStore(1, 1, false, 0xffffff);
+  root.placeAtDepth(panel, 1);
+  panel.placeAtDepth(art, 1);
+  panel.placeAtDepth(mask, 2);
+  for (let i = 0; i < 64; i++) {
+    art.placeAtDepth(new BitmapObject(store), i + 1);
+  }
+
+  view.prepare(root);
+  const p = view.stage.children[0].children[1];
+  const a = p.children[1];
+  assert.equal(a.isRenderGroup, true);
+  art.setMask(mask);
+  view.prepare(root);
+  assert.equal(a.isRenderGroup, false);
+  assert.equal(p.isRenderGroup, true);
+
+  // Reparenting a partner invalidates the old and new ancestors, even though the mask is unchanged.
+  root.placeAtDepth(mask, 2);
+  view.prepare(root);
+  assert.equal(p.isRenderGroup, false);
+  assert.equal(a.isRenderGroup, false);
+  art.setMask(null);
+  view.prepare(root);
+  assert.equal(a.isRenderGroup, true);
+  store.dispose();
 });
