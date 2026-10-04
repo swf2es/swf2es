@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { glyphOf, readEditText, readFont, tags } from "../../../packages/format/dist/index.js";
+import {
+  glyphOf,
+  readEditText,
+  readFont,
+  readFont4,
+  tags,
+} from "../../../packages/format/dist/index.js";
 import { BitWriter, font3, rect } from "../../swf-writer.ts";
 
 test("DefineEditText reads conditional fields before the variable and initial text", () => {
@@ -98,4 +104,40 @@ test("DefineFont3 reads its glyphs in code order, their outlines, and the layout
   assert.equal(font.glyphs[0].records.length, 0);
   assert.equal(glyphOf(font, 98)?.advance, 14000);
   assert.equal(glyphOf(font, 99), null);
+});
+
+test("DefineFont4 reads its style and optional CFF bytes", () => {
+  const embedded = new BitWriter()
+    .u16(7)
+    .u8(7)
+    .string("CFF")
+    .raw(new Uint8Array([1, 2, 3]))
+    .done();
+  const named = new BitWriter().u16(8).u8(3).string("Named CFF").done();
+
+  assert.deepEqual(
+    readFont4(embedded, {
+      code: tags.DefineFont4,
+      offset: 0,
+      length: embedded.length,
+      long: false,
+    }),
+    {
+      id: 7,
+      name: "CFF",
+      bold: true,
+      italic: true,
+      data: new Uint8Array([1, 2, 3]),
+    },
+  );
+  assert.deepEqual(
+    readFont4(named, { code: tags.DefineFont4, offset: 0, length: named.length, long: false }),
+    {
+      id: 8,
+      name: "Named CFF",
+      bold: true,
+      italic: true,
+      data: null,
+    },
+  );
 });

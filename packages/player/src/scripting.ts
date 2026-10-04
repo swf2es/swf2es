@@ -46,11 +46,11 @@ import {
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
 import { sha256 } from "./sha256.js";
 import {
+  type AnyFontCharacter,
   type BitmapCharacter,
   type ButtonCharacter,
   type Character,
   type DisplayCharacter,
-  type FontCharacter,
   INVALID_PIXELS,
   type Library,
   readLibrary,
@@ -265,7 +265,7 @@ export class Scripting {
   /** Libraries whose embedded fonts have been made visible to this player. */
   readonly fontLibraries = new Set<Library>();
   /** Font classes explicitly registered by scripts, in registration order. */
-  readonly registeredFonts = new Map<AsObject, FontCharacter>();
+  readonly registeredFonts = new Map<AsObject, AnyFontCharacter>();
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
   /** AVM1 movies from bytes, in the order asked, for the end of a frame. */
@@ -745,11 +745,13 @@ export class Scripting {
   }
 
   /** A DefineFont a class or one of its bases was bound to. */
-  fontSymbol(traits: SymbolTraits): FontCharacter | null {
+  fontSymbol(traits: SymbolTraits): AnyFontCharacter | null {
     for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
       const symbol = this.symbolOf(t);
       if (symbol) {
-        return symbol.character.type === "font" ? symbol.character : null;
+        return symbol.character.type === "font" || symbol.character.type === "fontCff"
+          ? symbol.character
+          : null;
       }
     }
 
@@ -764,17 +766,20 @@ export class Scripting {
 
     this.fontLibraries.add(library);
     for (const font of this.registeredFonts.values()) {
-      library.fonts.add(font.font);
+      if (font.type === "font") {
+        library.fonts.add(font.font);
+      }
     }
   }
 
   /** Make a registered font available to fields made by every loaded SWF. */
-  registerFont(cls: AsObject, font: FontCharacter): void {
+  registerFont(cls: AsObject, font: AnyFontCharacter): void {
     if (
       this.registeredFonts.has(cls) ||
       [...this.registeredFonts.values()].some(
         (registered) =>
           registered.name.toLowerCase() === font.name.toLowerCase() &&
+          registered.type === font.type &&
           registered.bold === font.bold &&
           registered.italic === font.italic,
       )
@@ -784,7 +789,9 @@ export class Scripting {
 
     this.registeredFonts.set(cls, font);
     for (const library of this.fontLibraries) {
-      library.fonts.add(font.font);
+      if (font.type === "font") {
+        library.fonts.add(font.font);
+      }
     }
   }
 
@@ -1055,6 +1062,7 @@ export class Scripting {
         symbol &&
         symbol.character.type !== "binary" &&
         symbol.character.type !== "font" &&
+        symbol.character.type !== "fontCff" &&
         symbol.character.type !== "sound"
       ) {
         if (symbol.character.type === "text") {

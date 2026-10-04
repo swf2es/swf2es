@@ -1,6 +1,7 @@
 // DefineFont2 and DefineFont3: a font's glyphs, the outlines a field that
 // embeds it draws, and its layout, the advances, kerning, ascent and
 // descent a field's text is laid out by.
+import { readString } from "./display.js";
 import { readRecords, type ShapeRecord } from "./shape.js";
 import { type Rect, SwfReader, type Tag } from "./swf.js";
 import { DefineFont3 } from "./tags.js";
@@ -32,6 +33,31 @@ export interface Font {
   leading: number;
   /** Kerning adjustments by pair, `first << 16 | second`, in the font's units. */
   kerning: Map<number, number>;
+}
+
+/** DefineFont4's CFF data, when embedded; a tag without it still has a name and style. */
+export interface Font4 {
+  id: number;
+  name: string;
+  bold: boolean;
+  italic: boolean;
+  data: Uint8Array | null;
+}
+
+/** DefineFont4 (91): a name, style, and optional OpenType CFF bytes. */
+export function readFont4(bytes: Uint8Array, tag: Tag): Font4 {
+  const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+  const id = r.u16();
+  const flags = r.u8();
+  const name = readString(r);
+
+  return {
+    id,
+    name,
+    bold: (flags & 1) !== 0,
+    italic: (flags & 2) !== 0,
+    data: flags & 4 ? bytes.subarray(r.pos, r.end) : null,
+  };
 }
 
 /** DefineFont2 (48) or DefineFont3 (75), as far as the tag goes: a short one gives the glyphs it has. */
