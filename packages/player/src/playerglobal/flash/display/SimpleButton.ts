@@ -4,6 +4,7 @@
 import { avm2 } from "@swf2es/runtime";
 import type { ButtonObject, ButtonState } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
+import { mixerTransform, setMixerTransform } from "../media/Sound.js";
 import { displayOf } from "./DisplayObject.js";
 
 type AsObject = avm2.AsObject;
@@ -43,8 +44,6 @@ export function simpleButtonNatives(s: Scripting): avm2.Natives {
   };
 
   class SimpleButtonNatives {
-    declare $soundTransform: AsObject | undefined;
-
     "flash.display:SimpleButton::_updateButton"(): void {
       buttonOf(this).show();
     }
@@ -105,14 +104,13 @@ export function simpleButtonNatives(s: Scripting): avm2.Natives {
       buttonOf(this).trackAsMenu = !!v;
     }
 
-    // Kept, not applied: the player plays no button sounds.
+    // SoundMixer's, as Flash has it, not the button's own (the sound-mixer case).
     get soundTransform(): Value {
-      this.$soundTransform ??= s.rt.construct(s.rt.classNamed("flash.media::SoundTransform"));
-      return this.$soundTransform;
+      return mixerTransform(s);
     }
 
     set soundTransform(v: Value) {
-      this.$soundTransform = v;
+      setMixerTransform(s, v);
     }
   }
 

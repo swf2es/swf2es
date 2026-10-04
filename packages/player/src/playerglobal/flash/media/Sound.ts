@@ -30,9 +30,14 @@ interface ChannelState {
   mix: SoundMix;
   playing: PlayingSound | null;
   stopped: boolean;
+  /** Where a stopped channel's position stays. */
+  stoppedAt: number;
 }
 
 const channels = new WeakMap<Scripting, Set<AsObject>>();
+
+/** SoundMixer's transform, applied over every channel's own. */
+const mixerMixes = new WeakMap<Scripting, SoundMix>();
 
 function stateOf(o: AsObject): SoundState {
   if (o.$sound) {
@@ -65,7 +70,11 @@ const mixOf = (o: AsObject | null): SoundMix => ({
 
 /** The mixer stores channel coefficients in hundredths when a transform is assigned. */
 function channelMix(mix: SoundMix): SoundMix {
-  const hundredths = (value: number) => Math.trunc(value * 100) / 100;
+  // Whole percents, as Ruffle's i32: NaN is 0 and the range saturates.
+  const hundredths = (value: number) =>
+    Number.isNaN(value)
+      ? 0
+      : Math.max(-(2 ** 31), Math.min(2 ** 31 - 1, Math.trunc(value * 100))) / 100;
   return {
     volume: hundredths(mix.volume),
     leftToLeft: hundredths(mix.leftToLeft),
@@ -73,6 +82,64 @@ function channelMix(mix: SoundMix): SoundMix {
     rightToLeft: hundredths(mix.rightToLeft),
     rightToRight: hundredths(mix.rightToRight),
   };
+}
+
+/**
+ * What a channel sends to the device: its own transform and the mixer's,
+ * combined as Ruffle's SoundTransform::concat computes them. Only
+ * transforms that both cross channels depend on the order, which no trace
+ * can show; Ruffle's is kept.
+ */
+export function outputMix(local: SoundMix, global: SoundMix): SoundMix {
+  return {
+    volume: Math.abs(local.volume * global.volume),
+    leftToLeft: local.leftToLeft * global.leftToLeft + local.rightToLeft * global.leftToRight,
+    leftToRight: local.leftToRight * global.leftToLeft + local.rightToRight * global.leftToRight,
+    rightToLeft: local.leftToLeft * global.rightToLeft + local.rightToLeft * global.rightToRight,
+    rightToRight: local.leftToRight * global.rightToLeft + local.rightToRight * global.rightToRight,
+  };
+}
+
+const mixerMix = (s: Scripting): SoundMix => mixerMixes.get(s) ?? mixOf(null);
+
+const positionOf = (s: Scripting, state: ChannelState): number =>
+  state.stopped
+    ? state.stoppedAt
+    : Math.min(state.sound.length, state.start + Math.max(0, s.now - state.started));
+
+function stopChannel(s: Scripting, state: ChannelState): void {
+  state.stoppedAt = positionOf(s, state);
+  state.stopped = true;
+  state.playing?.stop();
+}
+
+/** SoundMixer.soundTransform: a copy, as Flash returns. */
+export function mixerTransform(s: Scripting): AsObject {
+  return transformOf(s, mixerMix(s));
+}
+
+/** Set SoundMixer's transform, for the channels playing and those to come. */
+export function setMixerTransform(s: Scripting, transform: Value): void {
+  if (transform === null || transform === undefined) {
+    throw s.rt.error("TypeError", 2007, "sndTransform");
+  }
+
+  const global = channelMix(mixOf(transform as AsObject));
+  mixerMixes.set(s, global);
+  for (const channel of channels.get(s) ?? []) {
+    const state = channel.$channel as ChannelState;
+    state.playing?.setMix(outputMix(state.mix, global));
+  }
+}
+
+/** SoundMixer.stopAll: every channel stays where it was, and none completes. */
+export function stopAllSounds(s: Scripting): void {
+  const active = channels.get(s);
+  for (const channel of active ?? []) {
+    stopChannel(s, channel.$channel as ChannelState);
+  }
+
+  active?.clear();
 }
 
 function transformOf(s: Scripting, mix: SoundMix): AsObject {
@@ -103,8 +170,7 @@ export function finishSounds(s: Scripting): void {
       continue;
     }
 
-    state.stopped = true;
-    state.playing?.stop();
+    stopChannel(s, state);
     active.delete(channel);
     dispatchEvent(s, channel, s.event("soundComplete"));
   }
@@ -117,13 +183,13 @@ export function soundNatives(s: Scripting): avm2.Natives {
     for (const channel of active ?? []) {
       const state = channel.$channel as ChannelState;
       if (state.sound === sound && !state.playing) {
-        state.stopped = true;
+        stopChannel(s, state);
         active?.delete(channel);
       }
     }
   };
   const discardChannel = (state: ChannelState): void => {
-    state.stopped = true;
+    stopChannel(s, state);
     const active = channels.get(s);
     for (const channel of active ?? []) {
       if ((channel.$channel as ChannelState) === state) {
@@ -139,7 +205,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
       ?.then(
         (clip) => {
           if (!state.stopped) {
-            state.playing = clip.play(state.start, state.loops, state.mix);
+            state.playing = clip.play(state.start, state.loops, outputMix(state.mix, mixerMix(s)));
           }
         },
         () => {
@@ -322,6 +388,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
         mix: channelMix(mixOf(transform as AsObject | null)),
         playing: null,
         stopped: false,
+        stoppedAt: 0,
       };
       channel.$channel = state;
       let active = channels.get(s);
@@ -342,9 +409,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
 
     get position(): number {
       const state = this.$channel;
-      return state
-        ? Math.min(state.sound.length, state.start + Math.max(0, s.now - state.started))
-        : 0;
+      return state ? positionOf(s, state) : 0;
     }
 
     get soundTransform(): AsObject {
@@ -355,7 +420,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
       const state = this.$channel;
       if (state) {
         state.mix = channelMix(mixOf(value as AsObject | null));
-        state.playing?.setMix(state.mix);
+        state.playing?.setMix(outputMix(state.mix, mixerMix(s)));
       }
     }
 
@@ -370,8 +435,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
     stop(): void {
       const state = this.$channel;
       if (state && !state.stopped) {
-        state.stopped = true;
-        state.playing?.stop();
+        stopChannel(s, state);
         channels.get(s)?.delete(this as AsObject);
       }
     }

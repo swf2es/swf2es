@@ -628,6 +628,125 @@ function gotoCycleNested(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Clips of six empty frames bound to scripts/GotoStops.as's S, P, Q and R,
+// and two of another without a class, named for the root's script to send
+// them, in a SWF of version 10.
+function gotoStops(abc: Uint8Array): Uint8Array {
+  const six = (id: number) =>
+    w.sprite(id, 6, [...Array.from({ length: 6 }, () => w.showFrame()), w.end()]);
+  const names: [string, number][] = [
+    ["a", 2],
+    ["b", 2],
+    ["c", 3],
+    ["p", 3],
+    ["q", 4],
+    ["r", 5],
+    ["e", 6],
+    ["f", 6],
+    ["t", 7],
+  ];
+  return w.swf({
+    version: 10,
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 6,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      six(2),
+      six(3),
+      six(4),
+      six(5),
+      six(6),
+      six(7),
+      w.doAbc(abc, "GotoStops"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "S"],
+        [3, "P"],
+        [4, "Q"],
+        [5, "R"],
+        [7, "T"],
+      ]),
+      ...names.map(([name, character], i) => w.place({ depth: i + 1, character, name })),
+      ...Array.from({ length: 6 }, () => w.showFrame()),
+      w.end(),
+    ],
+  });
+}
+
+// Clips of a square, two MorphShapes growing a square and three empty
+// text fields, side by side, which frames 2 to 4 move with every property a place sets, for
+// scripts/ScriptedMoves.as to touch, then a loop back to frame 1's places.
+function scriptedMoves(abc: Uint8Array): Uint8Array {
+  const grow = w.morphShape({
+    id: 3,
+    startBounds: [0, 400, 0, 400],
+    endBounds: [0, 800, 0, 800],
+    fills: [{ start: 0xff0000cc, end: 0xff00cc00 }],
+    lines: [],
+    start: [{ fill0: 1, commands: rectPath(0, 0, 20, 20) }],
+    end: [rectPath(0, 0, 40, 40)],
+  });
+  const count = 29;
+  const morph = (i: number) => i === 23 || i === 24;
+  const field = (i: number) => i >= 25 && i <= 27;
+  const at = (i: number, dx: number) => ({ tx: (i * 38 + dx) * 20, ty: 400 });
+  const each = (f: (i: number) => Uint8Array) => Array.from({ length: count }, (_, i) => f(i));
+  return w.swf({
+    version: 10,
+    width: 1120,
+    height: 100,
+    frameRate: 24,
+    frameCount: 5,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0x806040, 400),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      grow,
+      w.editText(4, "", 400, 400),
+      w.doAbc(abc, "ScriptedMoves"),
+      w.symbolClass([[0, "Main"]]),
+      ...each((i) =>
+        w.place({ depth: i + 1, character: morph(i) ? 3 : field(i) ? 4 : 2, matrix: at(i, 0) }),
+      ),
+      w.showFrame(),
+      ...each((i) =>
+        w.place({
+          depth: i + 1,
+          move: true,
+          matrix: at(i, 10),
+          colorTransform: { mult: [0.5, 1, 1, 0.75] },
+          ratio: morph(i) ? 32768 : undefined,
+          blurs: [2],
+          blendMode: 3,
+          visible: false,
+        }),
+      ),
+      w.showFrame(),
+      ...each((i) =>
+        w.place({
+          depth: i + 1,
+          move: true,
+          matrix: { ...at(i, 20), a: 1.5, d: 1.5 },
+          colorTransform: { mult: [1, 1, 1, 1], add: [100, 0, 0, 0] },
+          ratio: morph(i) ? 65535 : undefined,
+          blurs: [],
+          blendMode: 6,
+          visible: true,
+        }),
+      ),
+      w.showFrame(),
+      ...each((i) => w.place({ depth: i + 1, move: true, matrix: at(i, 30) })),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Frames whose first command at a depth does nothing, then a rewind past
 // them, a place without the move flag at a taken depth 3 on frame 2, and
 // at depth 4 a place, a removal and a place again before the rewind's
@@ -1176,6 +1295,21 @@ function definitions(compile: Compile): Uint8Array {
   });
 }
 
+// loaderInfo.parameters of SWFs loaded from bytes with a LoaderContext's
+// (scripts/LoaderParameters.as.template, scripts/ParametersInner.as).
+function loaderParameters(compile: Compile): Uint8Array {
+  const inner = bare(compile("ParametersInner"), 1, "ParametersInner");
+  const template = readFileSync(
+    new URL("scripts/LoaderParameters.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "LoaderParameters",
+    template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
+  );
+  return bare(abc, 3);
+}
+
 function loadsInit(compile: Compile): Uint8Array {
   return loading(compile, "LoadsInit", 1);
 }
@@ -1538,36 +1672,42 @@ function soundSymbols(compile: Compile): Uint8Array {
   });
 }
 
-function soundLoops(compile: Compile): Uint8Array {
-  const pcm = new Uint8Array(5512).fill(128);
-  const sound = new w.BitWriter()
-    .u16(1)
-    .u8(1 << 2)
-    .u32(pcm.length)
-    .raw(pcm)
-    .done();
-  return w.swf({
-    width: 20,
-    height: 20,
-    frameRate: 24,
-    frameCount: 1,
-    tags: [
-      w.fileAttributes(true),
-      w.tag(tags.DefineSound, sound),
-      w.doAbc(
-        compile("Tone", "package { import flash.media.Sound; public class Tone extends Sound {} }"),
-        "Tone",
-      ),
-      w.doAbc(compile("SoundLoops")),
-      w.symbolClass([
-        [0, "SoundLoops"],
-        [1, "Tone"],
-      ]),
-      w.showFrame(),
-      w.end(),
-    ],
-  });
-}
+/** A document class `script` beside Tone, one second of silence at 5.5 kHz. */
+export const toneScript =
+  (script: string) =>
+  (compile: Compile): Uint8Array => {
+    const pcm = new Uint8Array(5512).fill(128);
+    const sound = new w.BitWriter()
+      .u16(1)
+      .u8(1 << 2)
+      .u32(pcm.length)
+      .raw(pcm)
+      .done();
+    return w.swf({
+      width: 20,
+      height: 20,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [
+        w.fileAttributes(true),
+        w.tag(tags.DefineSound, sound),
+        w.doAbc(
+          compile(
+            "Tone",
+            "package { import flash.media.Sound; public class Tone extends Sound {} }",
+          ),
+          "Tone",
+        ),
+        w.doAbc(compile(script)),
+        w.symbolClass([
+          [0, script],
+          [1, "Tone"],
+        ]),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+  };
 
 // Bitmap fills (scripts/BitmapFills.as): a 4 x 4 bitmap, every pixel its
 // own colour and one translucent, filling a rect larger than it at five
@@ -2481,6 +2621,24 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "goto-stops",
+    swf: gotoStops,
+    script: "GotoStops",
+    frames: 24,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "scripted-moves",
+    swf: scriptedMoves,
+    script: "ScriptedMoves",
+    frames: 9,
+    capture: [3, 4],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "rewind-first",
     swf: rewindFirst,
     script: "RewindFirst",
@@ -2571,7 +2729,15 @@ export const cases: PlayerCase[] = [
   },
   {
     name: "sound-loops",
-    build: soundLoops,
+    build: toneScript("SoundLoops"),
+    frames: 50,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "sound-mixer",
+    build: toneScript("MixerState"),
     frames: 50,
     capture: [],
     tolerance: 0,
@@ -2684,6 +2850,15 @@ export const cases: PlayerCase[] = [
     // 180 channels in all.
     tolerance: 3,
     maxOutliers: 200,
+  },
+  {
+    name: "blend-edges",
+    swf: (abc) => bare(abc, 1, "BlendEdges", 200, 150),
+    script: "BlendEdges",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
   },
   {
     name: "filter-objects",
@@ -2907,6 +3082,14 @@ export const cases: PlayerCase[] = [
   },
   // The unload at INIT follows frame 2's capture (see the harness): frame 3 shows it.
   { name: "loads-init", build: loadsInit, frames: 3, capture: [3], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "loader-parameters",
+    build: loaderParameters,
+    frames: 3,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "vector-definitions",
     swf: bare,
