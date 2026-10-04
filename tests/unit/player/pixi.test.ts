@@ -347,6 +347,60 @@ test("Flash's filters are left out under WebGPU, and a fresh view destroys those
   assert.ok(destroyed >= 2);
 });
 
+test("blurred filter inputs release pooled textures without sharing idle listeners", async () => {
+  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const { displayFilters } = await import("../../../packages/player/dist/pixi-filters.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = await import(entry);
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  const filters: ReturnType<typeof displayFilters> = [];
+  const input = pixi.RenderTexture.create({ width: 16, height: 16 });
+  const whiteListeners = pixi.Texture.WHITE.source.listenerCount("change");
+  try {
+    for (const kind of ["glow", "dropShadow", "bevel", "gradientGlow", "gradientBevel"] as const) {
+      filters.push(...displayFilters([filterDefaults(kind), filterDefaults(kind)]));
+    }
+
+    assert.equal(pixi.Texture.WHITE.source.listenerCount("change"), whiteListeners);
+    const idle = filters.map((filter) => filter.resources.uBlurred);
+    assert.equal(new Set(idle).size, filters.length);
+    for (const [i, filter] of filters.entries()) {
+      let applied = 0;
+      const system = {
+        applyFilter(pass: typeof filter) {
+          if (pass === filter) {
+            assert.notEqual(filter.resources.uBlurred, idle[i]);
+            assert.equal(filter.resources.uBlurred.destroyed, false);
+            applied++;
+          }
+        },
+      } as unknown as Parameters<typeof filter.apply>[0];
+      filter.apply(system, input, input, true);
+      filter.apply(system, input, input, true);
+      assert.equal(applied, 2);
+      assert.equal(filter.resources.uBlurred, idle[i]);
+      assert.equal(idle[i].listenerCount("change"), 1);
+    }
+
+    for (const filter of filters) {
+      filter.destroy();
+    }
+    filters.length = 0;
+    for (const source of idle) {
+      assert.equal(source.destroyed, true);
+      assert.equal(source.listenerCount("change"), 0);
+    }
+  } finally {
+    for (const filter of filters) {
+      filter.destroy();
+    }
+    input.destroy(true);
+    pixi.DOMAdapter.set(adapter);
+  }
+});
+
 test("a convolution pads its reach and the pixel adl adds, and knows the padding after it", async () => {
   const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
   const { displayFilters } = await import("../../../packages/player/dist/pixi-filters.js");
@@ -938,4 +992,63 @@ test("a layer's region holds its filtered children's padding, but not its own", 
   // Measured for anything else, its own is padded too.
   container.getFastGlobalBounds(true, bounds);
   assert.deepEqual([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], [-3, 7, 43, 53]);
+});
+
+test("large branches keep their own instructions as they shrink, without grouping their wrappers", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const branch = new Container();
+  const store = new BitmapStore(1, 1, false, 0xffffff);
+  root.placeAtDepth(branch, 1);
+  for (let i = 0; i < 64; i++) {
+    branch.placeAtDepth(new BitmapObject(store), i + 1);
+  }
+
+  view.prepare(root);
+  const top = view.stage.children[0];
+  const grouped = top.children[1];
+  assert.equal(grouped.isRenderGroup, true);
+  assert.equal(top.isRenderGroup, false);
+  const instructions = grouped.renderGroup;
+  for (const child of [...branch.children].slice(1)) {
+    branch.removeChild(child);
+  }
+
+  view.prepare(root);
+  assert.equal(grouped.renderGroup, instructions);
+  store.dispose();
+});
+
+test("mask partners share a group, including when an existing group's mask moves outside it", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const panel = new Container();
+  const art = new Container();
+  const mask = new Container();
+  const store = new BitmapStore(1, 1, false, 0xffffff);
+  root.placeAtDepth(panel, 1);
+  panel.placeAtDepth(art, 1);
+  panel.placeAtDepth(mask, 2);
+  for (let i = 0; i < 64; i++) {
+    art.placeAtDepth(new BitmapObject(store), i + 1);
+  }
+
+  view.prepare(root);
+  const p = view.stage.children[0].children[1];
+  const a = p.children[1];
+  assert.equal(a.isRenderGroup, true);
+  art.setMask(mask);
+  view.prepare(root);
+  assert.equal(a.isRenderGroup, false);
+  assert.equal(p.isRenderGroup, true);
+
+  // Reparenting a partner invalidates the old and new ancestors, even though the mask is unchanged.
+  root.placeAtDepth(mask, 2);
+  view.prepare(root);
+  assert.equal(p.isRenderGroup, false);
+  assert.equal(a.isRenderGroup, false);
+  art.setMask(null);
+  view.prepare(root);
+  assert.equal(a.isRenderGroup, true);
+  store.dispose();
 });

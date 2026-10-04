@@ -85,6 +85,7 @@ test("a long unbroken word wraps between its characters in time that grows with 
     wordWrap: true,
     embedFonts: false,
     fonts: null,
+    authored: false,
   });
   // Node's stand-in device font: 6 pixels a character at 12, 9 to the 56 pixels inside the gutters.
   assert.equal(layout.lines.length, Math.ceil(n / 9));

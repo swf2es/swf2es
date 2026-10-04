@@ -519,14 +519,33 @@ The player keeps Flash's display list and timeline
 (`packages/player/src`: `timeline.ts` reads a SWF's definitions and
 frames, `display.ts` is the display list), and PixiJS only mirrors it
 (`pixi.ts`): a container per display object, kept from frame to frame
-and updated where the display object marks itself changed. A shape's
-fills are immutable `GraphicsContext`s shared by its instances, built
+and updated where the display object marks itself changed.
+
+A branch with at least 64 immediate art objects across its subtree owns
+a Pixi render group. Children already grouped do not count again, so
+wrappers do not all gain a group. Each group keeps its own instructions
+and batches: changing an animated branch's children no longer repacks
+unrelated scenery. Promotion persists when the branch shrinks, avoiding
+repeated batcher destruction. Masks and their targets must belong to the
+same group; references to partners outside a subtree prevent grouping,
+and a mask moved outside an existing group removes that group. Timeline
+masks stay with their siblings. A fresh view for BitmapData.draw does not
+group. The colour batcher's shader ignores Pixi's group colour, since
+its vertex colour transform already includes every ancestor. The
+`render-groups` case checks colours, masks moved between branches, scrolls,
+filters, and a branch shrinking and growing against Flash. The
+`bench.ts --branches N --gpu` workload changes a quarter of N independent
+coloured branches while the rest stay still.
+
+A shape's fills are immutable `GraphicsContext`s shared by its instances, built
 from Flash's edges (`shapes.ts`: each edge goes to its right fill
 forward and its left fill reversed, joined into contours) and filled
 even-odd through a containment tree of the contours, holes cut: all of a
 region's at once, before the islands in them, since Pixi's `cut()` also
 lands a hole in the fill before the last once the last has one
-(`fill-holes`). Its lines are drawn in the stage's axes, because Flash
+(`fill-holes`). A contour is in another by a point of it off the other's
+outline, since a pixel font's contours touch at their corners
+(`glyph-contours`). Its lines are drawn in the stage's axes, because Flash
 strokes a transformed line with one width all along, not the local width
 stretched by the transform: so a line's context depends on the linear
 part of its transform on the stage, and is kept by layer and that
@@ -1637,10 +1656,12 @@ characters, `\r` between lines as Flash keeps them (`\n` is made one),
 each with its own format, and a default format, Flash's Times New Roman
 12 for a new field and the tag's for a timeline's (its font's name from
 the DefineFont2 or 3 it names, its height, colour, alignment, margins,
-indent and leading). `text` and `htmlText` set the text in the default
-format; `appendText` and `replaceText` put theirs in the format of the
-character before; `getTextFormat` of a range gives null for what its
-characters differ in, and `setTextFormat` sets what a TextFormat sets.
+indent and leading; the indent is signed, as Flash reads it, though the
+specification has it unsigned). `text` and `htmlText` set the text in
+the default format; `appendText` and `replaceText` put theirs in the
+format of the character before; `getTextFormat` of a range gives null
+for what its characters differ in, and `setTextFormat` sets what a
+TextFormat sets.
 `htmlText` is written as adl writes it: a `P` for each paragraph (an
 `LI` alone for a bullet's), in a `TEXTFORMAT` for its margins, indent,
 leading or tab stops, with a `FONT` of all five font attributes and,
@@ -1684,15 +1705,18 @@ newline, and with `wordWrap` before a word that does not fit without
 its trailing space (one ending at the room's edge fits), or between
 characters for a word longer than the line. A line starts 2 pixels in,
 the gutter, then the margin, block indent and, on a paragraph's first
-line, its indent, and a bullet's 36 pixels; centred, it is placed in
-the room left, right-aligned one twip further left, and justified, a
-wrapped line but the paragraph's last has its inner spaces share the
-room. `textHeight` is the lines' heights, leading and all, less the
-last one's leading where there are two lines or more; a last line left
-empty by a newline does not count. adl's `numLines` can lag a
-relayout until the next one, which swf2es's does not; tab stops, and
-the boundaries adl leaves out for lines beyond the field's height, are
-still to come.
+line, its indent, and a bullet's 36 pixels; a negative indent, a hanging
+one, takes the first line left as far as the gutter but gives it no
+more room (`text-indent`); centred, it is placed in the room left,
+right-aligned one twip further left, and justified, a wrapped line but
+the paragraph's last has its inner spaces share the room. `textHeight`
+is the lines' heights, leading and all, less the last one's leading
+where there are two lines or more; a last line left empty by a newline
+counts only in a field a timeline placed, not in a script's. adl's
+`numLines` can lag a relayout until the next one, which swf2es's does
+not; tab stops, the boundaries adl leaves out for lines beyond the
+field's height, and those of a timeline's field, which adl gives 2
+pixels further right and down than its lines, are still to come.
 `autoSize` makes the field the text's size and 4 pixels, keeping its
 left, centre or right edge. A device font's metrics are the browser's
 font's, measured by the host, which Flash's own system fonts differ
