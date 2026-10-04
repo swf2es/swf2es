@@ -1643,6 +1643,33 @@ function bitmapSymbols(compile: Compile): Uint8Array {
   });
 }
 
+function fontNatives(compile: Compile): Uint8Array {
+  return w.swf({
+    width: 20,
+    height: 20,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      probeFont(1),
+      w.doAbc(
+        compile(
+          "EmbeddedProbe",
+          "package { import flash.text.Font; public class EmbeddedProbe extends Font {} }",
+        ),
+        "EmbeddedProbe",
+      ),
+      w.doAbc(compile("FontNatives")),
+      w.symbolClass([
+        [0, "FontNatives"],
+        [1, "EmbeddedProbe"],
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 function soundSymbols(compile: Compile): Uint8Array {
   const pcm = new Uint8Array(11025).fill(128);
   const sound = new w.BitWriter()
@@ -2932,6 +2959,14 @@ export const cases: PlayerCase[] = [
     frames: 1,
     capture: [1],
     tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
+    name: "font-natives",
+    build: fontNatives,
+    frames: 1,
+    capture: [],
+    tolerance: 0,
     maxOutliers: 0,
   },
   {

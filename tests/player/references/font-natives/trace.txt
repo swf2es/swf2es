@@ -1,0 +1,8 @@
+instance Probe regular embedded
+glyphs true false true
+before Probe:regular:embedded
+after Probe:regular:embedded,Probe:regular:embedded
+twice Probe:regular:embedded,Probe:regular:embedded
+device flag Probe:regular:embedded,Probe:regular:embedded
+plain null null null false false
+invalid ArgumentError: Error #1508: The value specified for argument font is invalid.

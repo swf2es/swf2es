@@ -50,6 +50,7 @@ import {
   type ButtonCharacter,
   type Character,
   type DisplayCharacter,
+  type FontCharacter,
   INVALID_PIXELS,
   type Library,
   readLibrary,
@@ -261,6 +262,10 @@ export class Scripting {
    * nothing defined when it was bound.
    */
   readonly symbols = new Map<avm2.Abc | null, Map<string, Symbol>>();
+  /** Libraries whose embedded fonts have been made visible to this player. */
+  readonly fontLibraries = new Set<Library>();
+  /** Font classes explicitly registered by scripts, in registration order. */
+  readonly registeredFonts = new Map<AsObject, FontCharacter>();
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
   /** AVM1 movies from bytes, in the order asked, for the end of a frame. */
@@ -459,6 +464,7 @@ export class Scripting {
   /** Load the SWF's DoABCs in tag order, each run unless its lazy flag defers it to first use, then its SymbolClass. */
   async loadSwf(swf: Swf, library: Library): Promise<void> {
     this.library = library;
+    this.fontLibraries.add(library);
     library.domain = this.mainDomain;
     this.rt.swfVersion = swf.header.version;
     const decoded = decodeImages(library, this.decodeImage);
@@ -721,6 +727,18 @@ export class Scripting {
       const symbol = this.symbolOf(t);
       if (symbol) {
         return symbol.character.type === "sound" ? symbol.character : null;
+      }
+    }
+
+    return null;
+  }
+
+  /** A DefineFont a class or one of its bases was bound to. */
+  fontSymbol(traits: SymbolTraits): FontCharacter | null {
+    for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
+      const symbol = this.symbolOf(t);
+      if (symbol) {
+        return symbol.character.type === "font" ? symbol.character : null;
       }
     }
 
