@@ -53,6 +53,10 @@ const source = `package {
       t("nav blank", function():void { navigateToURL(new URLRequest("b"), "Blank"); });
       t("nav blanket", function():void { navigateToURL(new URLRequest("c"), "_blanket"); });
       t("nav empty", function():void { navigateToURL(new URLRequest("")); });
+      var put:URLRequest = new URLRequest("put.html");
+      put.method = "PUT";
+      put.data = vars;
+      t("nav put", function():void { navigateToURL(put); });
     }
   }
 }`;
@@ -96,6 +100,7 @@ test("navigateToURL hands the host the resolved request and window, sendToURL th
     "nav blank ok",
     "nav blanket ok",
     "nav empty ok",
+    "nav put ok",
   ]);
   assert.deepEqual(opened, [
     {
@@ -108,6 +113,8 @@ test("navigateToURL hands the host the resolved request and window, sendToURL th
     { url: "http://other.test/form", method: "POST", body: "q=a%20b", window: "named" },
     { url: "http://example.test/games/b", method: "GET", body: null, window: "_blank" },
     { url: "http://example.test/games/c", method: "GET", body: null, window: "_blanket" },
+    // A browser navigates by GET or POST only: Flash sends any other method as a GET.
+    { url: "http://example.test/games/put.html?q=a%20b", method: "GET", body: null, window: null },
   ]);
   assert.deepEqual(
     sent.map(({ url, method }) => [url, method]),
@@ -123,7 +130,13 @@ test("where there is no window to open, as in node, the player opens no pages", 
 /** A window and document that record what the browser's default would open and submit. */
 function stubBrowser(t: { after: (fn: () => void) => void }) {
   const opened: [string, string][] = [];
-  const submitted: { action: string; target: string; fields: [string, string][] }[] = [];
+  const submitted: {
+    method: string;
+    rel: string;
+    action: string;
+    target: string;
+    fields: [string, string][];
+  }[] = [];
   const saved = ["open", "document", "location"].map(
     (name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const,
   );
@@ -138,6 +151,8 @@ function stubBrowser(t: { after: (fn: () => void) => void }) {
   });
 
   interface Form {
+    method: string;
+    rel: string;
     action: string;
     target: string;
     children: { name: string; value: string }[];
@@ -145,6 +160,8 @@ function stubBrowser(t: { after: (fn: () => void) => void }) {
   const body = {
     append(form: Form) {
       submitted.push({
+        method: form.method,
+        rel: form.rel,
         action: form.action,
         target: form.target,
         fields: form.children.map(({ name, value }) => [name, value]),
@@ -180,7 +197,7 @@ const request = (url: string, method = "GET", body: string | null = null): Fetch
 });
 
 test("the browser's default opens only http and https, and never in the page's own frames", (t) => {
-  const { opened } = stubBrowser(t);
+  const { opened, submitted } = stubBrowser(t);
   const navigate = browserNavigate();
   assert.ok(navigate);
 
@@ -202,16 +219,31 @@ test("the browser's default opens only http and https, and never in the page's o
     navigate(request("https://other.test/"), target);
   }
 
+  navigate(request("https://other.test/form", "POST", "a=1"), "_top");
   assert.deepEqual(opened, []);
+  assert.deepEqual(submitted, []);
 
   navigate(request("https://other.test/a"), null);
-  navigate(request("http://other.test/b"), "named");
-  navigate(request("c.html"), "_blank");
+  navigate(request("c.html"), "_BLANK");
   assert.deepEqual(opened, [
     ["https://other.test/a", "_blank"],
-    ["http://other.test/b", "named"],
     ["https://page.test/player/c.html", "_blank"],
   ]);
+});
+
+// A name would reach the window or frame of that name, the page's own among them, noopener or not.
+test("the browser's default opens a named target as a new window", (t) => {
+  const { opened, submitted } = stubBrowser(t);
+  const navigate = browserNavigate();
+  assert.ok(navigate);
+
+  navigate(request("https://other.test/a"), "main");
+  navigate(request("https://other.test/form", "POST", "a=1"), "f");
+  assert.deepEqual(opened, [["https://other.test/a", "_blank"]]);
+  assert.deepEqual(
+    submitted.map(({ action, target }) => [action, target]),
+    [["https://other.test/form", "_blank"]],
+  );
 });
 
 test("the browser's default posts any body as form data, and nothing before the page has a body", (t) => {
@@ -220,9 +252,11 @@ test("the browser's default posts any body as form data, and nothing before the 
   assert.ok(navigate);
 
   navigate(request("https://other.test/form", "POST", "a=1&b=x%20y"), "_blank");
-  navigate(request("https://other.test/json", "POST", '{"a":1}'), "named");
+  navigate(request("https://other.test/json", "POST", '{"a":1}'), null);
   assert.deepEqual(submitted, [
     {
+      method: "POST",
+      rel: "noopener",
       action: "https://other.test/form",
       target: "_blank",
       fields: [
@@ -230,7 +264,13 @@ test("the browser's default posts any body as form data, and nothing before the 
         ["b", "x y"],
       ],
     },
-    { action: "https://other.test/json", target: "named", fields: [['{"a":1}', ""]] },
+    {
+      method: "POST",
+      rel: "noopener",
+      action: "https://other.test/json",
+      target: "_blank",
+      fields: [['{"a":1}', ""]],
+    },
   ]);
 
   document.body = null;

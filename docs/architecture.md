@@ -932,16 +932,23 @@ Ruffle's navigators ignore it. `sendToURL` sends its request through the
 host fetch and drops the response, as Flash ignores it. Both throw
 TypeError #2007 for a null request, then for a null `url`, as adl does.
 
-The browser's default `navigate` is deliberately conservative, as Ruffle's
-web navigator is without script access, since a SWF's URL is not to be
-trusted by the page that embeds it: only `http:` and `https:` URLs open,
-so a `javascript:` URL cannot run script in the page, and the targets that
-would replace the page or a frame around it, `_self`, `_parent`, `_top` and
-an empty name, are dropped. Anything else opens with `window.open` and
-`noopener`, a new window for null. A POST goes as a hidden form, the only
-way a browser posts into a window, its body read as form data whatever it
-is, as Ruffle sends a string's; a JSON or ByteArray body is therefore sent
-form-encoded. A host that trusts its SWFs further, or models
+A browser navigates only by GET or POST, so a request with any other
+method goes as a GET, its data appended to the query, as Flash's does from
+a browser.
+
+The browser's default `navigate` is deliberately conservative, since a SWF
+is not to be trusted by the page that embeds it. Only `http:` and `https:`
+URLs open, so a `javascript:` URL cannot run script in the page. The
+targets that would replace the page or a frame around it, `_self`,
+`_parent`, `_top` and an empty name, are dropped, as Ruffle's web navigator
+drops them without script access. Every other target, a name included,
+opens a new window (`_blank`): a name reaches an existing window or frame
+of that name, the page's own among them, even with `noopener`, so naming a
+window to reuse it does not work. A GET opens with `window.open` and
+`noopener`; a POST goes as a hidden form with `rel="noopener"` into a new
+window, the only way a browser posts into one, its body read as form data
+whatever it is, as Ruffle sends a string's, so a JSON or ByteArray body is
+sent form-encoded. A host that trusts its SWFs further, or models
 `allowScriptAccess` and `allowNetworking`, gives a `navigate` of its own.
 Without a window, as in node, nothing opens; the test page gives none.
 

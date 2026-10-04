@@ -52,15 +52,17 @@ function target(name: string): string {
 const IN_PLACE = new Set(["_self", "_parent", "_top", ""]);
 
 /**
- * The browser's navigation, deliberately conservative, as Ruffle's web
- * navigator is without script access: only an http: or https: URL opens,
- * so a javascript: one cannot run in the embedding page, and a target that
- * would replace the page or a frame around it is refused. A GET opens in
- * window.open without an opener, so the page opened cannot reach back into
- * the player's; a POST is a form submitted to the window, the only way a
- * browser posts into one, its body read as form data. A host that trusts
- * its SWFs further gives a navigate of its own. Null where there is no
- * window to open, as in node.
+ * The browser's navigation, deliberately conservative, as a SWF is not to
+ * be trusted by the page that embeds it: only an http: or https: URL opens,
+ * so a javascript: one cannot run in the embedding page; a target that
+ * would replace the page or a frame around it is refused, as Ruffle's web
+ * navigator refuses it without script access; and every other target opens
+ * a new window, since a name reaches the window or frame of that name,
+ * noopener or not, so a SWF cannot reuse a window it named. A GET opens in
+ * window.open without an opener; a POST is a form submitted to a new
+ * window, the only way a browser posts into one, its body read as form
+ * data. A host that trusts its SWFs further gives a navigate of its own.
+ * Null where there is no window to open, as in node.
  */
 export function browserNavigate(): Navigate | null {
   if (typeof globalThis.open !== "function" || typeof document === "undefined") {
@@ -68,8 +70,7 @@ export function browserNavigate(): Navigate | null {
   }
 
   return (request, window) => {
-    const target = window ?? "_blank";
-    if (IN_PLACE.has(target.toLowerCase())) {
+    if (window !== null && IN_PLACE.has(window.toLowerCase())) {
       return;
     }
 
@@ -85,7 +86,7 @@ export function browserNavigate(): Navigate | null {
     }
 
     if (request.method.toUpperCase() !== "POST" || !request.body) {
-      globalThis.open(url.href, target, "noopener");
+      globalThis.open(url.href, "_blank", "noopener");
       return;
     }
 
@@ -96,7 +97,7 @@ export function browserNavigate(): Navigate | null {
     const form = document.createElement("form");
     form.method = "POST";
     form.action = url.href;
-    form.target = target;
+    form.target = "_blank";
     form.rel = "noopener";
     form.style.display = "none";
     for (const [name, value] of new URLSearchParams(new TextDecoder().decode(request.body))) {
