@@ -347,6 +347,60 @@ test("Flash's filters are left out under WebGPU, and a fresh view destroys those
   assert.ok(destroyed >= 2);
 });
 
+test("blurred filter inputs release pooled textures without sharing idle listeners", async () => {
+  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const { displayFilters } = await import("../../../packages/player/dist/pixi-filters.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = await import(entry);
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  const filters: ReturnType<typeof displayFilters> = [];
+  const input = pixi.RenderTexture.create({ width: 16, height: 16 });
+  const whiteListeners = pixi.Texture.WHITE.source.listenerCount("change");
+  try {
+    for (const kind of ["glow", "dropShadow", "bevel", "gradientGlow", "gradientBevel"] as const) {
+      filters.push(...displayFilters([filterDefaults(kind), filterDefaults(kind)]));
+    }
+
+    assert.equal(pixi.Texture.WHITE.source.listenerCount("change"), whiteListeners);
+    const idle = filters.map((filter) => filter.resources.uBlurred);
+    assert.equal(new Set(idle).size, filters.length);
+    for (const [i, filter] of filters.entries()) {
+      let applied = 0;
+      const system = {
+        applyFilter(pass: typeof filter) {
+          if (pass === filter) {
+            assert.notEqual(filter.resources.uBlurred, idle[i]);
+            assert.equal(filter.resources.uBlurred.destroyed, false);
+            applied++;
+          }
+        },
+      } as unknown as Parameters<typeof filter.apply>[0];
+      filter.apply(system, input, input, true);
+      filter.apply(system, input, input, true);
+      assert.equal(applied, 2);
+      assert.equal(filter.resources.uBlurred, idle[i]);
+      assert.equal(idle[i].listenerCount("change"), 1);
+    }
+
+    for (const filter of filters) {
+      filter.destroy();
+    }
+    filters.length = 0;
+    for (const source of idle) {
+      assert.equal(source.destroyed, true);
+      assert.equal(source.listenerCount("change"), 0);
+    }
+  } finally {
+    for (const filter of filters) {
+      filter.destroy();
+    }
+    input.destroy(true);
+    pixi.DOMAdapter.set(adapter);
+  }
+});
+
 test("a convolution pads its reach and the pixel adl adds, and knows the padding after it", async () => {
   const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
   const { displayFilters } = await import("../../../packages/player/dist/pixi-filters.js");
