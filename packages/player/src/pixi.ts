@@ -766,6 +766,10 @@ interface Node {
   filters: Filter[];
   /** Draws in this branch, excluding those already isolated in a child render group. */
   draws: number;
+  /** Zero draws, one safe draw, or more than one draw/one requiring isolation. */
+  singleDraw: 0 | 1 | 2;
+  /** The fixed-function blend currently applied without an offscreen filter. */
+  directBlend: string | null;
   /** Outside partners must share the group; a hidden node must not keep an old partner alive. */
   maskLinks: WeakRef<DisplayObject>[];
 }
@@ -1114,6 +1118,8 @@ export class PixiView {
         filterRecords: NO_RECORDS,
         filters: [],
         draws: 0,
+        singleDraw: 0,
+        directBlend: null,
         maskLinks: [],
       };
       node.container.addChild(art);
@@ -1588,6 +1594,36 @@ export class PixiView {
 
     if (!this.fresh) {
       this.group(o, node);
+      // Fixed-function multiply needs an opaque backdrop; screen's equation
+      // also holds over transparent pixels. Add does not preserve layer alpha.
+      let direct: "multiply" | "screen" | null = null;
+      if (node.singleDraw === 1) {
+        if (node.blend === "screen") {
+          direct = "screen";
+        } else if (node.blend === "multiply" && this.renderer.background.alpha === 1) {
+          direct = "multiply";
+        }
+      }
+      if (direct) {
+        for (let ancestor = o.parent; ancestor; ancestor = ancestor.parent) {
+          const parent = this.nodes.get(ancestor);
+          if (
+            parent &&
+            (parent.blend !== "normal" || parent.filters.length > 0 || parent.clipped)
+          ) {
+            direct = null;
+            break;
+          }
+        }
+      }
+
+      if (direct !== node.directBlend || (direct && container.filters)) {
+        container.blendMode = direct ?? "normal";
+        const blending = direct ? null : blendFilters(node.blend);
+        container.filters =
+          node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;
+        node.directBlend = direct;
+      }
       o.dirty = CLEAN;
     }
 
@@ -1597,6 +1633,19 @@ export class PixiView {
   /** Keep an animated branch from rebuilding all the stage's batches when its children change. */
   private group(o: DisplayObject, node: Node): void {
     let draws = node.art.children.length;
+    let singleDraw: 0 | 1 | 2 = 0;
+    if (node.art.children.length === 1) {
+      const art = node.art.children[0];
+      singleDraw =
+        art instanceof SharedGraphics &&
+        art.context.instructions.length === 1 &&
+        art.context.instructions[0].action === "fill"
+          ? 1
+          : 2;
+    } else if (node.art.children.length > 1) {
+      singleDraw = 2;
+    }
+
     const links = node.maskLinks;
     links.length = 0;
     maskLink(o, o.mask, links);
@@ -1610,11 +1659,24 @@ export class PixiView {
           }
 
           draws += part.container.isRenderGroup ? 0 : part.draws;
+          if (part.singleDraw !== 0) {
+            singleDraw =
+              singleDraw === 0 &&
+              part.singleDraw === 1 &&
+              part.blend === "normal" &&
+              !part.container.isRenderGroup
+                ? 1
+                : 2;
+          }
         }
       }
     }
 
     node.draws = draws;
+    node.singleDraw =
+      links.length === 0 && !node.masking && !node.clipped && node.filters.length === 0
+        ? singleDraw
+        : 2;
     // A stencil mask's geometry is collected into the masked object's instructions. Until both
     // belong to this branch, it must share its parent's group. A timeline mask itself also stays
     // with its siblings, though their common parent may form a group.
