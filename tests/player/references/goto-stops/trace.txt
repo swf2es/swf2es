@@ -1,0 +1,34 @@
+frame 1 a=1 b=1 c=1 p=1 q=1 r=1 e=1 f=1 t=1
+a script 1, stop
+b script 1, stop
+c script 1, stop
+p script 1, stop
+listener: b.gotoAndPlay(4)
+a.gotoAndPlay(4)
+a script 4, stop
+b script 4, stop
+c.gotoAndStop(4)
+c script 4, play
+p.gotoAndStop(3), p.nextFrame()
+p script 3, stop
+p script 4, play
+q.gotoAndStop(2)
+q script 2, gotoAndPlay 4, stop
+q script 4
+r.gotoAndStop(2)
+r script 2, gotoAndStop 4, play
+r script 4
+t.gotoAndPlay(2)
+t script 2, gotoAndStop 4
+t script 4
+frame 2 a=4 b=4 c=4 p=4 q=4 r=4 e=6 f=1 t=4
+listener a=4 b=4 c=4 p=4 q=4 r=4 e=6 f=1 t=4
+frame 3 a=4 b=4 c=5 p=5 q=5 r=4 e=6 f=1 t=4
+a.gotoAndPlay(4) again
+c script 5, stop
+p script 5, stop
+r.play()
+frame 3 after a=4 b=4 c=5 p=5 q=5 r=4 e=6 f=1 t=4
+frame 4 a=5 b=4 c=5 p=5 q=6 r=5 e=6 f=1 t=4
+a script 5, stop
+frame 5 a=5 b=4 c=5 p=5 q=1 r=6 e=6 f=1 t=4

@@ -171,6 +171,8 @@ interface Load {
   failed: string | null;
   /** The application domain its code loads into, as the Loader's context chose it when asked. */
   domain: avm2.Domain;
+  /** The LoaderContext's parameters, which take the place of the URL's query; null when it set none. */
+  parameters: ReadonlyMap<string, string> | null;
 }
 
 /** What SymbolClass bound a class to: a character of a SWF's library. */
@@ -277,6 +279,8 @@ export class Scripting {
   drawer: Drawer | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
+  /** The main SWF's flashvars, as the host gave them. */
+  private readonly flashvars: Readonly<Record<string, string>>;
   /** Where local SharedObjects are kept (flash/net/SharedObject.ts). */
   readonly storage: SharedObjectStorage;
   /** What Capabilities reports of the system (flash/system/Capabilities.ts). */
@@ -360,6 +364,12 @@ export class Scripting {
     options: avm2.RuntimeOptions & {
       fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
+      /**
+       * The main SWF's flashvars, as a page's FlashVars give them: its
+       * loaderInfo.parameters, after its URL's query, whose names they
+       * override, as Ruffle's do.
+       */
+      parameters?: Readonly<Record<string, string>>;
       /** Where local SharedObjects are kept: localStorage by default where the host has it, else memory. */
       storage?: SharedObjectStorage;
       /** What Capabilities reports of the system: by default the browser's, as Flash Player 32's plugin. */
@@ -409,6 +419,7 @@ export class Scripting {
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
+    this.flashvars = options.parameters ?? {};
     this.storage = options.storage ?? defaultStorage();
     this.platform = { ...platformCapabilities(), ...options.platform };
     this.rt = new avm2.Runtime(
@@ -1029,10 +1040,22 @@ export class Scripting {
     info.$bytes = null;
     info.$swf = null;
     info.$url = null;
+    info.$params = NO_PARAMETERS;
     info.$loaderURL = loader ? this.ownerUrl(loader) : this.url;
     info.$loaded = 0;
     info.$total = 0;
     return info;
+  }
+
+  /** The main SWF's loaderInfo.parameters: its URL's query, then the flashvars. */
+  mainParameters(): ReadonlyMap<string, string> {
+    const parameters = queryParameters(this.url);
+    // A host in plain JavaScript may give other values: Flash's are strings.
+    for (const [name, value] of Object.entries(this.flashvars)) {
+      parameters.set(name, String(value));
+    }
+
+    return parameters;
   }
 
   /** What a LoaderInfo knows once its SWF is: the bytes, the header's version, frame rate and size. */
@@ -1104,8 +1127,13 @@ export class Scripting {
    * the call, the URL still null; the content comes in a later frame, under
    * a URL of the bytes' own.
    */
-  requestLoad(loader: AsObject, bytes: Uint8Array, domain = this.loadDomain(null)): void {
-    const begun = this.begin(loader, domain);
+  requestLoad(
+    loader: AsObject,
+    bytes: Uint8Array,
+    domain = this.loadDomain(null),
+    parameters: ReadonlyMap<string, string> | null = null,
+  ): void {
+    const begun = this.begin(loader, domain, parameters);
     if (!begun) {
       return;
     }
@@ -1131,19 +1159,22 @@ export class Scripting {
       null,
       Promise.resolve({ bytes, status: 0, headers: [] }),
       domain,
+      parameters,
     );
   }
 
   /**
    * A load begins: the one before it is dropped, pending or complete, and
    * its LoaderInfo knows nothing again, as Flash's load() does at the call
-   * (Ruffle's `loader_reuse` trace). The old content's REMOVED listeners
+   * (Ruffle's `loader_reuse` trace), but the parameters its context gave,
+   * which Flash tells from the call on. The old content's REMOVED listeners
    * may load anew themselves, and that load is then the one that counts:
    * null tells the caller so.
    */
   private begin(
     loader: AsObject,
     domain: avm2.Domain,
+    parameters: ReadonlyMap<string, string> | null,
   ): { info: AsObject; generation: number } | null {
     this.closeLoad(loader);
     const generation: number = loader.$generation;
@@ -1155,6 +1186,7 @@ export class Scripting {
     const info = this.loaderInfoOf(loader);
     info.$loaderURL = this.ownerUrl(loader);
     info.$domain = domain;
+    info.$params = parameters ?? NO_PARAMETERS;
     return { info, generation };
   }
 
@@ -1186,8 +1218,9 @@ export class Scripting {
     loader: AsObject,
     request: AsObject | string,
     domain = this.loadDomain(null),
+    parameters: ReadonlyMap<string, string> | null = null,
   ): void {
-    const begun = this.begin(loader, domain);
+    const begun = this.begin(loader, domain, parameters);
     if (!begun) {
       return;
     }
@@ -1203,6 +1236,7 @@ export class Scripting {
       outgoing.url,
       fetch ? fetch(outgoing, abort.signal) : Promise.reject(),
       domain,
+      parameters,
     );
   }
 
@@ -1320,12 +1354,14 @@ export class Scripting {
     url: string | null,
     bytes: Promise<FetchResult>,
     domain: avm2.Domain,
+    parameters: ReadonlyMap<string, string> | null,
   ): void {
     const load: Load = {
       loader,
       generation,
       url,
       domain,
+      parameters,
       bytes: new Uint8Array(0),
       status: 0,
       ready: null,
@@ -1400,6 +1436,7 @@ export class Scripting {
       info.$bytes = null;
       info.$swf = null;
       info.$url = null;
+      info.$params = NO_PARAMETERS;
       info.$loaded = 0;
       info.$total = 0;
     }
@@ -1521,6 +1558,12 @@ export class Scripting {
       this.progress(info, 0);
       if (!live()) {
         return () => {};
+      }
+
+      // Its URL's query comes with the SWF, as Flash tells it from the
+      // second PROGRESS on, unless the context gave parameters.
+      if (!load.parameters) {
+        info.$params = queryParameters(load.url);
       }
 
       this.describe(info, load.bytes, swf);
@@ -1746,6 +1789,7 @@ export class Scripting {
           if (o.queuedGoto !== null) {
             const frame = o.queuedGoto;
             o.queuedGoto = null;
+            o.playing = o.queuedPlay;
             o.gotoFrame(frame);
             try {
               this.gotoCycle(o);
@@ -2093,6 +2137,30 @@ class TimerHeap {
 
 function before(a: TimerRecord, b: TimerRecord): boolean {
   return a.due < b.due || (a.due === b.due && a.seq < b.seq);
+}
+
+const NO_PARAMETERS: ReadonlyMap<string, string> = new Map();
+
+/**
+ * The names and values of a URL's query, as Flash reads them into
+ * loaderInfo.parameters: decoded, `+` as a space, a name without `=` an
+ * empty value, an empty name left out, and the last of a name kept.
+ */
+function queryParameters(url: string): Map<string, string> {
+  const parameters = new Map<string, string>();
+  const path = url.split("#", 1)[0];
+  const at = path.indexOf("?");
+  if (at < 0) {
+    return parameters;
+  }
+
+  for (const [name, value] of new URLSearchParams(path.slice(at + 1))) {
+    if (name !== "") {
+      parameters.set(name, value);
+    }
+  }
+
+  return parameters;
 }
 
 function appendQuery(url: string, query: string): string {

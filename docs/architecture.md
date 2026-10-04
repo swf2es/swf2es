@@ -753,6 +753,17 @@ callback's own error goes back to the page that called it. A child its
 parent's first frame places is made in the parent's `super()`, and its
 error still reaches the parent's constructor.
 
+A goto plays or stops its clip as it happens, before the frame it lands
+on has its script run, so a `stop()` or `play()` there has the last word:
+a clip whose every frame stops stays where `gotoAndPlay` from another
+clip's script or a listener sends it. A goto a frame script asks for of
+its own clip plays or stops it only once the script has returned, over a
+`play()` or `stop()` the script calls after it; `nextFrame` and
+`prevFrame` past either end stop the clip where it is (`goto-stops`).
+`isPlaying` is Flash's own flag apart from the playhead, false for a clip
+no script has played, and true still after a deferred `gotoAndStop` or
+a `nextFrame` past the end, as adl shows; the player reads the playhead.
+
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,
 is one scene named "" whose labels are its FrameLabel tags (`scenes`,
@@ -826,6 +837,26 @@ ENTER_FRAME, as playing on to a frame does; what it takes off is gone by
 ENTER_FRAME (`loop-ratio`). Flash's matrix is
 exact at the quarter turns, 0 and not the doubles' cosine of 90°, so the
 player's is.
+
+A child a script has transformed takes nothing more from the timeline's
+places that a script could set: no matrix, colour transform, ratio,
+visibility, blend mode or filters, from a move or from the place a
+rewind or the loop takes it back to, which leaves what the script set
+(`scripted-moves`). Flash keeps this per object, not per property:
+setting `x`, even to what it was, keeps the colour transform the moves
+give from it too. What touches is the transform properties, `alpha`,
+`filters`, `blendMode`, `scrollRect`, `opaqueBackground`, `scale9Grid`
+and the `transform` setters, each set to what it was or not, a text
+field's `width` and `height` too, which size its field rather than scale
+it; a `filters` list refused with #2005 is none; `visible`,
+`mask` and `cacheAsBitmap` are no touch here even changed, where
+`cacheAsBitmap` set true is one to the replacement above, so the player
+keeps a `transformed` flag beside `scripted`. A MorphShape a script moved
+stays at its ratio. Ruffle's `transformed_by_script` does the same, set
+by fewer setters: not by `blendMode`, `filters`, `scrollRect`,
+`opaqueBackground` or `scale9Grid`. In adl the 3D setters touch as well,
+`z`, `rotationX`, `rotationY`, `rotationZ`, `scaleZ` and
+`transform.matrix3D`, so they must call `touch()` once implemented.
 
 A clip a script takes off the display list plays on in Flash, an
 orphan, and so does one a script makes with `new` and never adds: its
@@ -912,6 +943,22 @@ and height, `loader`, `applicationDomain`, `bytes`. The main SWF's
 dispatches `init` and then `complete` at the end of its first frame,
 after `exitFrame` and before the second (Ruffle's `loaderinfo_events` and
 `delayed_symbolclass` traces), as a loaded SWF's does.
+
+`parameters` is a new object at each ask, so a script's changes to one
+stay in it. The main SWF's, which the stage's and every root's under it
+report too, are the query of the URL the host gave `Scripting` as `url`
+and then the flashvars it gave as `parameters`, which override a name
+the query has, as Ruffle's do (Flash's order was not checked: its
+harness can give neither). A SWF loaded by URL has its URL's query from
+its second `PROGRESS` on, decoded, `+` as a space, a name without `=`
+empty, an empty name left out and the last of a name kept; one from
+bytes has none here, which adl could not tell from the loader's own
+query (Ruffle passes that on). A `LoaderContext`'s `parameters` take the place of the
+query from the call on, and a value in them that is not a String, null
+included, is refused at the call with `IllegalOperationError` #2196. An
+unload leaves none (the `loader-parameters` case and the node tests).
+The player runs no AVM1, so an AVM1 root's `_root` variables get no
+flashvars.
 
 The order is Flash's, traced by adl (the `loads` case; the Flash Player
 traces in Ruffle's corpus agree where they overlap). `loadBytes` tells
@@ -1728,14 +1775,24 @@ without it the modes draw as normal, and the view warns once. The back
 buffer is a full-screen copy a frame: on the bench (`--back-buffer`, an
 RTX 4060) it adds some 0.05 ms to the draw. What is behind an object is
 copied from the pixels its bounds cover, which Pixi puts on whole pixels
-of the target but keeps in stage units: at a resolution that is no whole
-number, as a host fitting the stage to its page gives, k / r · r can fall
-a hair short of k, and Pixi's floor took the pixel before. The blend read
-what was behind it a pixel off at those positions alone, so a moving
-blend shook what showed through it, which Flash leaves still. The copy's
-corner and size are rounded instead, the size so within the texture
-Pixi sizes for it. The `blend-drift` case moves a blend a quarter pixel
+of the target but keeps in stage units, as k · (1/r): at a resolution
+that is no whole number, as a host fitting the stage to its page gives,
+k · (1/r) · r can fall a hair short of k, and Pixi's floor took the pixel
+before. The blend read what was behind it a pixel off at those positions
+alone, so a moving blend shook what showed through it, which Flash leaves
+still. The copy's corner and size are rounded instead. The `blend-drift` case moves a blend a quarter pixel
 a frame, at a zoom of 1.5 that gives the test page a resolution of 6.
+
+What is behind a blended object is copied into a texture the filter
+reads, and Pixi's copy is held to both that texture and what it copies
+from: an object past the edge of what it is drawn over, the stage's or a
+layer's cut by a scrollRect, which bounds an object's filter but not its
+children's, asked for a width or height below zero, which GL refuses
+(GL_INVALID_VALUE) and WebGPU fails the frame for. The part the copy does
+not reach is left as the pooled texture had it: it maps past what the
+target has, where the filter's output is cut off. The `blend-edges` case draws such
+objects against adl, and the player's test page fails a case whose
+drawing GL refused.
 
 ### Filters
 

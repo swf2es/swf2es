@@ -81,15 +81,23 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
 
     return first + s.rt.toInt(frame) - 1;
   };
-  /** Jump to `frame`: at once, or when the frame script asking returns, as Flash defers a goto from one. */
-  const goto = (clip: MovieClip, frame: number) => {
+  /**
+   * Jump to `frame`, playing or stopped: at once, or when the frame script
+   * asking returns, as Flash defers a goto from one. The clip plays or stops
+   * as the goto happens, before the landing frame's script runs, so a
+   * stop() or play() there has the last word, and one the asking script
+   * calls after a deferred goto has none (`goto-stops`).
+   */
+  const goto = (clip: MovieClip, frame: number, play: boolean) => {
     if ((clip.library.version ?? 10) <= 9) {
       clip.skipsAfter = s.frames;
     }
 
     if (s.inFrameScript === clip) {
       clip.queuedGoto = frame;
+      clip.queuedPlay = play;
     } else {
+      clip.playing = play;
       clip.gotoFrame(frame);
       s.gotoCycle(clip);
     }
@@ -158,16 +166,14 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
     /** The scene before's first frame, playing; in the first scene, its own. */
     prevScene(): void {
       const clip = this.$display;
-      goto(clip, sceneFrames(clip, Math.max(0, sceneIndex(clip) - 1))[0]);
-      clip.playing = true;
+      goto(clip, sceneFrames(clip, Math.max(0, sceneIndex(clip) - 1))[0], true);
     }
 
     /** The next scene's first frame, playing; in the last scene, its own. */
     nextScene(): void {
       const clip = this.$display;
       const i = sceneIndex(clip);
-      goto(clip, sceneFrames(clip, Math.min(clip.timeline.scenes.length - 1, i + 1))[0]);
-      clip.playing = true;
+      goto(clip, sceneFrames(clip, Math.min(clip.timeline.scenes.length - 1, i + 1))[0], true);
     }
 
     get isPlaying(): boolean {
@@ -184,26 +190,22 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
 
     nextFrame(): void {
       const clip = this.$display;
-      goto(clip, clip.currentFrame + 1);
-      clip.playing = false;
+      goto(clip, clip.currentFrame + 1, false);
     }
 
     prevFrame(): void {
       const clip = this.$display;
-      goto(clip, clip.currentFrame - 1);
-      clip.playing = false;
+      goto(clip, clip.currentFrame - 1, false);
     }
 
     gotoAndPlay(frame: Value, scene: Value = null): void {
       const clip = this.$display;
-      goto(clip, frameOf(clip, frame, scene));
-      clip.playing = true;
+      goto(clip, frameOf(clip, frame, scene), true);
     }
 
     gotoAndStop(frame: Value, scene: Value = null): void {
       const clip = this.$display;
-      goto(clip, frameOf(clip, frame, scene));
-      clip.playing = false;
+      goto(clip, frameOf(clip, frame, scene), false);
     }
 
     get enabled(): boolean {

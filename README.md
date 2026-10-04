@@ -56,7 +56,17 @@ if (player.changes !== drawn) {
 
 `Scripting` runs the SWF's ActionScript 3 and needs `builtin.abc` and
 `playerglobal.abc`, which the host loads (`scripting.loadLibraries`);
-Adobe's `playerglobal.abc` is not part of this repository.
+Adobe's `playerglobal.abc` is not part of this repository. A page passes
+the SWF's URL, which its relative loads resolve against, and its
+flashvars, which `loaderInfo.parameters` holds after the URL's query, as
+options:
+
+```ts
+const scripting = new Scripting(codegen, {
+  url: new URL("movie.swf?lang=en", location.href).href,
+  parameters: { server: "wss://example.test", debug: "0" }, // FlashVars
+});
+```
 
 An error the SWF's code throws and nothing catches is reported, as Flash
 reports one, and the SWF plays on. A host that wants them passes a hook:

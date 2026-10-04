@@ -17,6 +17,31 @@ function copyOf(s: Scripting, v: Value): Uint8Array {
   return new Uint8Array(b.buffer.subarray(0, b.length));
 }
 
+/**
+ * A LoaderContext's parameters, which take the place of the content's URL
+ * query in its loaderInfo.parameters: null when none were set. Flash
+ * refuses any value that is not a String, null and undefined among them,
+ * with Error #2196 at the call; an object that is not one, such as a
+ * String, has no names and gives none.
+ */
+function contextParameters(s: Scripting, v: Value): Map<string, string> | null {
+  if (v === null || v === undefined) {
+    return null;
+  }
+
+  const parameters = new Map<string, string>();
+  for (let i = s.rt.hasNext(v, 0); i !== 0; i = s.rt.hasNext(v, i)) {
+    const value = s.rt.nextValue(v, i);
+    if (typeof value !== "string") {
+      throw s.rt.error("flash.errors::IllegalOperationError", 2196, "LoaderContext.parameters");
+    }
+
+    parameters.set(String(s.rt.nextName(v, i)), value);
+  }
+
+  return parameters;
+}
+
 export function loaderNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
@@ -42,21 +67,31 @@ export function loaderNatives(s: Scripting): avm2.Natives {
     // Both take the LoaderContext's fields after the source: checkPolicyFile,
     // applicationDomain, securityDomain, requestedContentParent, parameters,
     // the JPEG deblocking, allowCodeImport and imageDecodingPolicy. Only
-    // applicationDomain is read, for where the content's code loads.
+    // applicationDomain, for where the content's code loads, and parameters
+    // are read.
     "flash.display:Loader::_loadBytes"(
       bytes: Value,
       _checkPolicyFile: Value,
       applicationDomain: Value,
+      _securityDomain: Value,
+      _requestedContentParent: Value,
+      parameters: Value,
     ): void {
-      s.requestLoad(this, copyOf(s, bytes), s.loadDomain(applicationDomain));
+      const copy = copyOf(s, bytes);
+      const given = contextParameters(s, parameters);
+      s.requestLoad(this, copy, s.loadDomain(applicationDomain), given);
     }
 
     "flash.display:Loader::_load"(
       request: Value,
       _checkPolicyFile: Value,
       applicationDomain: Value,
+      _securityDomain: Value,
+      _requestedContentParent: Value,
+      parameters: Value,
     ): void {
-      s.requestLoadUrl(this, request as AsObject, s.loadDomain(applicationDomain));
+      const given = contextParameters(s, parameters);
+      s.requestLoadUrl(this, request as AsObject, s.loadDomain(applicationDomain), given);
     }
 
     "flash.display:Loader::_unload"(stopAllMovieClips: Value, _gc: Value): void {

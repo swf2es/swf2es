@@ -179,6 +179,13 @@ async function runSwf(
 
       if (capture.includes(frame)) {
         view.render(player.stage);
+        // A call GL refused drew nothing, which the picture may not show.
+        const gl = (renderer as unknown as { gl?: WebGLRenderingContext }).gl;
+        const glError = gl?.getError();
+        if (glError) {
+          throw new Error(`GL error 0x${glError.toString(16)} drawing frame ${frame}`);
+        }
+
         samples.getContext("2d")?.drawImage(renderer.canvas, 0, 0);
         downsample(samples, output, n);
         images[frame] = output.toDataURL("image/png");

@@ -2,16 +2,64 @@
 // modes"): the object drawn as a layer, its children together, then that
 // layer blended with what is below by the mode's formula, which a filter
 // that reads the back buffer computes. Colours are premultiplied.
-import { AlphaFilter, BlendModeFilter, type Filter, FilterSystem, TexturePool } from "pixi.js";
+import {
+  AlphaFilter,
+  BlendModeFilter,
+  type Filter,
+  FilterSystem,
+  RenderTargetSystem,
+  TexturePool,
+} from "pixi.js";
+
+// The copy of what is behind a blend into its back texture, held to both:
+// - The texture is sized with a hair of tolerance for rounding, and the
+//   copy without, so at some resolutions the copy is a pixel taller or
+//   wider than the texture, which GL refuses (copyTexSubImage2D's offset
+//   overflow), and the blend reads nothing.
+// - An object at or past the target's edge asks for pixels the target does
+//   not have; Pixi's own clamp then leaves a width or height below zero,
+//   which GL refuses (GL_INVALID_VALUE) and WebGPU fails its frame for.
+// What the copy does not reach is not cleared: it lies past what the
+// target has, where what the filter draws is cut off anyway (the
+// `blend-edges` case matches adl without it). Patched for every renderer
+// on the page.
+const copyToTexture = RenderTargetSystem.prototype.copyToTexture;
+RenderTargetSystem.prototype.copyToTexture = function (source, destination, from, size, to) {
+  const target = this.getRenderTarget(source);
+  const { pixelWidth, pixelHeight } = destination.source;
+  // What the texture can take of what was asked, and of that what the target has.
+  const reachX = Math.min(to.x + size.width, pixelWidth);
+  const reachY = Math.min(to.y + size.height, pixelHeight);
+  const skipX = Math.max(0, -from.x, -to.x);
+  const skipY = Math.max(0, -from.y, -to.y);
+  const x = from.x + skipX;
+  const y = from.y + skipY;
+  const toX = to.x + skipX;
+  const toY = to.y + skipY;
+  const width = Math.min(reachX - toX, target.pixelWidth - x);
+  const height = Math.min(reachY - toY, target.pixelHeight - y);
+  if (width <= 0 || height <= 0) {
+    return destination;
+  }
+
+  return copyToTexture.call(
+    this,
+    source,
+    destination,
+    { x, y },
+    { width, height },
+    { x: toX, y: toY },
+  );
+};
 
 // What is behind a blend is copied from the pixels its bounds cover, which
-// Pixi has put on whole pixels of the target but keeps in stage units: at a
-// resolution such as 1.62, as a host fitting the stage to its page gives,
-// k / r · r can fall a hair short of k, and Pixi's floor took the pixel
-// before it. The blend then read what was behind it a pixel off at those
-// positions alone, so a moving blend shook what showed through it. The
-// corner and the size are rounded instead, and the size held to the
-// texture, which Pixi's ceil overran by a pixel at some resolutions.
+// Pixi has put on whole pixels of the target but keeps in stage units, as
+// k · (1/r): at a resolution such as 1.62, as a host fitting the stage to
+// its page gives, k · (1/r) · r can fall a hair short of k, and Pixi's floor
+// took the pixel before it. The blend then read what was behind it a pixel
+// off at those positions alone, so a moving blend shook what showed through
+// it. The corner and the size are rounded instead; the patch above holds
+// the copy to the target and the texture.
 FilterSystem.prototype.getBackTexture = function (target, bounds, previous) {
   const resolution = target.colorTexture.source.resolution;
   const back = TexturePool.getOptimalTexture({
@@ -26,8 +74,8 @@ FilterSystem.prototype.getBackTexture = function (target, bounds, previous) {
     back,
     { x: Math.round(x * resolution), y: Math.round(y * resolution) },
     {
-      width: Math.min(Math.round(bounds.width * resolution), back.source.pixelWidth),
-      height: Math.min(Math.round(bounds.height * resolution), back.source.pixelHeight),
+      width: Math.round(bounds.width * resolution),
+      height: Math.round(bounds.height * resolution),
     },
     { x: 0, y: 0 },
   );
