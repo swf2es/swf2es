@@ -22,6 +22,7 @@ import { eventDispatcherNatives } from "./flash/events/EventDispatcher.js";
 import { httpStatusHooks } from "./flash/events/HTTPStatusEvent.js";
 import { keyboardEventNatives } from "./flash/events/KeyboardEvent.js";
 import { mouseEventNatives } from "./flash/events/MouseEvent.js";
+import { timerEventNatives } from "./flash/events/TimerEvent.js";
 import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js";
 import { filterHooks, filterNatives } from "./flash/filters/filters.js";
 import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
@@ -51,6 +52,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...toplevelNatives(s),
     ...eventNatives(),
     ...keyboardEventNatives(s),
+    ...timerEventNatives(s),
     ...mouseEventNatives(s),
     ...eventDispatcherNatives(s),
     ...displayObjectNatives(s),

@@ -108,17 +108,21 @@ export class Player {
 
   /**
    * A count that moves whenever what the player shows may have changed: a
-   * frame played, a pointer event, or a call from the page into one of the
-   * SWF's ExternalInterface callbacks. Nothing else runs its scripts
-   * between frames: loads and socket data arrive in a frame. A host that
-   * draws only when this moved draws every frame Flash would, and none in
-   * between, once it has drawn after start; what the host itself changes,
-   * a resize, it draws for itself.
+   * frame played, a key, a pointer event that changes a button, focus or a
+   * selection, a script's updateAfterEvent, or a call from the page into
+   * one of the SWF's ExternalInterface callbacks. A plain pointer move
+   * does not: what its listeners change shows at the next frame, as Flash
+   * and Ruffle draw it, so a fast mouse does not draw faster than the SWF.
+   * Loads and socket data arrive in a frame. A host that draws only when
+   * this moved draws every frame Flash would, and none in between, once it
+   * has drawn after start; what the host itself changes, a resize, it
+   * draws for itself.
    */
   get changes(): number {
     return (
       this.played +
-      (this.pointer?.handled ?? 0) +
+      (this.pointer?.redraws ?? 0) +
+      (this.scripting?.updates ?? 0) +
       (this.keyboard?.handled ?? 0) +
       (this.scripting?.hostCalls ?? 0)
     );
