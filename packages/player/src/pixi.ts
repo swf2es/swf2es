@@ -777,7 +777,7 @@ export class PixiView {
   }
 
   /** What a fresh view built itself, which it destroys; what it borrowed from `source` stays. */
-  private readonly built: GraphicsContext[] = [];
+  private readonly built = new Set<GraphicsContext>();
   /** What a fresh view borrowed from its source's caches, which it neither gives back nor destroys. */
   private readonly borrowed = new WeakSet<GraphicsContext>();
   /**
@@ -1111,7 +1111,7 @@ export class PixiView {
     const build = (layer: ShapeLayer) => {
       const context = fillContext(layer, this.painter);
       if (this.fresh) {
-        this.built.push(context);
+        this.built.add(context);
       }
 
       return context;
@@ -1268,11 +1268,11 @@ export class PixiView {
         strokes.swap(linesContext(layer, m, least));
         this.counts.strokeContexts++;
         if (this.fresh) {
-          this.built.push(strokes.shared);
+          this.built.add(strokes.shared);
         }
       }
 
-      if (!this.borrowed.has(previous) && !(this.fresh && this.built.includes(previous))) {
+      if (!this.borrowed.has(previous) && !this.built.has(previous)) {
         this.lines.give(previous);
       }
       if (inverse) {
