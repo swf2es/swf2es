@@ -797,6 +797,36 @@ export function domainTraitsCount(): i32 {
   return domain.traits.kind.length;
 }
 
+/** Fresh parse and optional decode each round, for cross-implementation comparisons.
+ * Negative results are verifier errors, never partial instruction counts.
+ */
+export function benchCompare(bytes: Uint8Array, rounds: i32, decode: bool): i32 {
+  const base = padded(bytes);
+  let count = 0;
+  for (let round = 0; round < rounds; round++) {
+    const abc = readAbc(base, bytes.length);
+    if (abc.error) {
+      return -abc.error;
+    }
+
+    count = abc.methodCount;
+    if (decode) {
+      count = 0;
+      const decoder = new BodyDecoder(abc, base);
+      for (let body: u32 = 0; body < abc.bodyCount; body++) {
+        const code = decoder.decode(body);
+        if (code.error) {
+          return -code.error;
+        }
+
+        count += code.count;
+      }
+    }
+  }
+
+  return count;
+}
+
 /** The opcode table, one "opcode name layout flags" line per opcode. */
 export function opcodeTable(): string {
   const lines: string[] = [];
