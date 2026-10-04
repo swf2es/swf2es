@@ -195,6 +195,71 @@ test("Mouse.hide and show set the host's cursor as a script calls them", { skip 
   ]);
 });
 
+test("Mouse.cursor and registered cursors set the host's cursor as a script sets them", {
+  skip,
+}, async () => {
+  const lines: string[] = [];
+  const compile = compiler(out);
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(
+    bare(compile("MouseCursorNatives"), 1, "MouseCursorNatives"),
+    scripting,
+  );
+  assert.ok(player.pointer);
+  player.pointer.onCursor = (cursor) => lines.push(`cursor ${describeCursor(cursor)}`);
+  await player.start();
+
+  // The refusals and MouseCursorData's own lines are the Flash case's; these show the host's
+  // cursor changing at once, only when it changes, and Mouse.hide winning over a forced one.
+  const shown = lines.filter((line) => !/threw|^(supports|data|hotSpot|frameRate)/.test(line));
+  assert.deepEqual(shown, [
+    "cursor auto",
+    "cursor = arrow: arrow",
+    "cursor pointer",
+    "cursor = button: button",
+    "cursor grab",
+    "cursor = hand: hand",
+    "cursor text",
+    "cursor = ibeam: ibeam",
+    "cursor default",
+    "cursor = auto: auto",
+    "cursor text",
+    "cursor ibeam",
+    "cursor none",
+    "hidden, cursor button",
+    "cursor pointer",
+    "cursor default",
+    "register mine: auto",
+    // The first frame alone, with its hot spot.
+    "cursor image 32x32 at 31,10",
+    "cursor = mine: mine",
+    "cursor default",
+    "cursor image 32x32 at 31,10",
+    "register mine again with no data: mine",
+    "unregister other: mine",
+    "cursor default",
+    "unregister mine: auto",
+    "cursor image 16x16 at 0,0",
+    "cursor default",
+    "register arrow: auto",
+    "cursor pointer",
+    "unregister button, never registered: button",
+    "cursor default",
+  ]);
+});
+
+/** A CSS cursor, its image as its PNG's size and its hot spot, as the host is given it. */
+function describeCursor(cursor: string): string {
+  const image = /^url\("data:image\/png;base64,([^"]+)"\) (\d+) (\d+), default$/.exec(cursor);
+  if (!image) {
+    return cursor;
+  }
+
+  const png = Buffer.from(image[1], "base64");
+  return `image ${png.readUInt32BE(16)}x${png.readUInt32BE(20)} at ${image[2]},${image[3]}`;
+}
+
 test("loaderInfo.parameters: the main SWF's query and flashvars, a loaded SWF's query or context's", {
   skip,
 }, async () => {
