@@ -694,6 +694,8 @@ interface Node {
   released: boolean;
   /** Whether its art was emptied while off the list: drawn again if it comes back. */
   emptied: boolean;
+  /** The thinnest line its lines were last drawn with, to draw them again for another. */
+  strokedAt: number;
   /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
   bitmap: Sprite | null;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
@@ -1011,6 +1013,7 @@ export class PixiView {
         kids: [],
         released: false,
         emptied: false,
+        strokedAt: 0,
         bitmap: null,
         lines: [],
         masking: false,
@@ -1242,6 +1245,7 @@ export class PixiView {
     const m = node.world;
     const det = m[0] * m[3] - m[1] * m[2];
     const least = this.leastWidth;
+    node.strokedAt = least;
     // One key and one inverse for all its layers.
     const key = linesKey(m, least);
     const inverse =
@@ -1408,7 +1412,7 @@ export class PixiView {
 
     if (dirty & CONTENT) {
       this.redraw(o, node);
-    } else if ((moved || this.rescaled) && node.strokes.some((g) => g)) {
+    } else if ((moved || node.strokedAt !== this.leastWidth) && node.strokes.some((g) => g)) {
       this.restroke(node);
     }
 

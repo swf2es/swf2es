@@ -1018,3 +1018,59 @@ test("a shared fill gathers no listener per instance, so instances go in linear 
   assert.equal(fill.context.listenerCount("update"), 0);
   assert.equal(fill.context.listenerCount("unload"), 0);
 });
+
+test("a drawing kept off the list is drawn again for a change of its content or of the screen's scale", async () => {
+  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
+  const { CONTENT } = await import("../../../packages/player/dist/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  view.screenScale = 1;
+  const root = new Container();
+  const sprite = new Container();
+  const drawing = new Drawing();
+  drawing.lineStyle({
+    width: 0,
+    color: 0xff000000,
+    startCap: 0,
+    endCap: 0,
+    join: 0,
+    miterLimit: 3,
+    noHScale: false,
+    noVScale: false,
+    pixelHinting: false,
+    noClose: false,
+    fill: null,
+  } as unknown as Parameters<InstanceType<typeof Drawing>["lineStyle"]>[0]);
+  drawing.beginFill({ type: "solid", color: 0xff336699 });
+  drawing.drawRect(0, 0, 30, 20);
+  drawing.endFill();
+  sprite.drawing = drawing;
+  root.placeAtDepth(sprite, 1);
+  type Drawn = { destroyed: boolean; context: { destroyed: boolean } };
+  const art = () => view.stage.children[0].children[1].children[0].children as unknown as Drawn[];
+  view.prepare(root);
+  const [fill, lines] = art();
+  const lineContext = lines.context;
+
+  // Off the list while the screen's scale changes: its hairlines are drawn again for it on return.
+  root.removeChild(sprite);
+  view.prepare(root);
+  view.screenScale = 2;
+  view.prepare(root);
+  view.prepare(root);
+  root.placeAtDepth(sprite, 1);
+  view.prepare(root);
+  assert.equal(art()[0], fill);
+  assert.notEqual(art()[1].context, lineContext);
+  assert.equal(art()[1].context.destroyed, false);
+
+  // Off the list while its drawing changes: drawn again on return.
+  root.removeChild(sprite);
+  view.prepare(root);
+  drawing.drawRect(40, 0, 10, 10);
+  sprite.invalidate(CONTENT);
+  root.placeAtDepth(sprite, 1);
+  view.prepare(root);
+  assert.equal(fill.destroyed, true);
+  assert.equal(art()[0].destroyed, false);
+  assert.notEqual(art()[0], fill);
+});
