@@ -202,6 +202,12 @@ export class Scripting {
   private cycles = 0;
   /** Whether they nested too deep this frame, which stops them all till the next. */
   private overflowed = false;
+  /**
+   * What the scripts and listeners a goto's cycle ran threw: Flash reports
+   * it apart, and the goto's caller goes on. The host gets the first when
+   * the frame ends.
+   */
+  private uncaught: unknown[] = [];
   /** Children frames played on placed, to be made alive in the frame's construct phase. */
   private readonly toConstruct: {
     display: DisplayObject;
@@ -1760,16 +1766,25 @@ export class Scripting {
       throw this.rt.error("Error", 1023);
     }
 
+    // A phase's error is its own, not the goto's: Flash reports it apart,
+    // and the rest of the cycle and the goto's caller go on (the unit test
+    // "a goto's caller goes on when a script its cycle runs throws"). An
+    // overflow still reaches the goto that went too deep, which threw it.
+    const phase = (run: () => void) => {
+      try {
+        run();
+      } catch (error) {
+        this.uncaught.push(error);
+      }
+    };
+    const stage = this.stage;
     this.cycles++;
-    try {
-      // What frames placed and has yet to be made alive is made first.
-      this.constructPending();
-      this.broadcast("frameConstructed");
-      this.runFrameScripts(this.stage);
-      this.broadcast("exitFrame");
-    } finally {
-      this.cycles--;
-    }
+    // What frames placed and has yet to be made alive is made first.
+    phase(() => this.constructPending());
+    phase(() => this.broadcast("frameConstructed"));
+    phase(() => this.runFrameScripts(stage));
+    phase(() => this.broadcast("exitFrame"));
+    this.cycles--;
   }
 
   /**
@@ -1831,6 +1846,12 @@ export class Scripting {
     }
 
     this.scrolled.clear();
+    // A goto's errors from this frame, or from between frames, as a pointer
+    // event's goto, reach the host now that the frame has run to its end.
+    if (this.uncaught.length > 0) {
+      const [error] = this.uncaught.splice(0);
+      throw error;
+    }
   }
 }
 
