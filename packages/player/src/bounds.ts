@@ -371,8 +371,13 @@ function flattened(path: Path): Flat {
 
 /** Whether (x, y) is within `half` of the path's box, as it must be to be in or on it. */
 function near(flat: Flat, x: number, y: number, half: number): boolean {
-  return (
-    x >= flat.xMin - half && x <= flat.xMax + half && y >= flat.yMin - half && y <= flat.yMax + half
+  // Negated, so a box made NaN by a drawing's NaN point rules nothing out:
+  // the full test then skips only the NaN edges, as it did.
+  return !(
+    x < flat.xMin - half ||
+    x > flat.xMax + half ||
+    y < flat.yMin - half ||
+    y > flat.yMax + half
   );
 }
 

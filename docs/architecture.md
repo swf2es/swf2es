@@ -650,6 +650,15 @@ scripts see; Pixi's render tree does not choose a Flash target. The first
 input slice sends `mouseOver`, `mouseOut`, `mouseMove`, `mouseDown`,
 `mouseUp` and `click` through EventDispatcher's capture and bubble phases.
 `DisplayObject.mouseX` and `mouseY` follow the last pointer position.
+The pick follows Flash's order, as Ruffle's `mouse_pick_avm2` has it:
+interactive children before artwork, and a hit on what takes no pointer
+goes up only once nothing else under the point has taken it. A move is
+posted rather than handled at once, and the player handles the last one
+posted when it next advances, or before the next press, release, leave
+or key, whichever comes first: a browser sends about one a frame, a
+headless one or a fast mouse more, and each picks from the whole list.
+A pointer that crosses a small object between two frames so sends it no
+`mouseOver`. A path's polygon, flattened for hit tests, is kept with it.
 Roll events, wheel, right and middle buttons, and Flash's drag and focus
 rules still need their own cases.
 
