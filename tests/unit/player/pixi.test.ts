@@ -761,3 +761,76 @@ test("a tween's lines go once its morph drops their blend, not idle for a ratio 
   assert.equal(first.destroyed, true);
   assert.equal(lines().destroyed, false);
 });
+
+test("instances of a morph at one ratio share its blend's fills, which go once the morph drops the blend", async () => {
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
+  const { readMorphShape, readSwf } = await import("../../../packages/format/dist/index.js");
+  const w = await import("../../swf-writer.ts");
+  const square: import("../../swf-writer.ts").PathCommand[] = [
+    { move: [0, 0] },
+    { line: [400, 0] },
+    { line: [400, 400] },
+    { line: [0, 400] },
+    { line: [0, 0] },
+  ];
+  const swf = readSwf(
+    w.swf({
+      width: 50,
+      height: 50,
+      frameRate: 12,
+      frameCount: 1,
+      tags: [
+        w.morphShape({
+          id: 1,
+          startBounds: [0, 400, 0, 400],
+          endBounds: [0, 400, 0, 400],
+          fills: [{ start: 0xffff0000, end: 0xff0000ff }],
+          start: [{ fill1: 1, commands: square }],
+          end: [square],
+        }),
+      ],
+    }),
+  );
+  const t = swf.tags[0];
+  const character = {
+    type: "morph" as const,
+    id: 1,
+    morph: readMorphShape(swf.bytes, t.code, t.offset, t.length),
+    blends: new Map(),
+    bitmap: () => null,
+  };
+  const shapes = [ShapeObject.ofMorph(character), ShapeObject.ofMorph(character)];
+  const root = new Container();
+  root.placeAtDepth(shapes[0], 1);
+  root.placeAtDepth(shapes[1], 2);
+  const view = new PixiView(standIn([]).renderer);
+  type Fill = { context: { destroyed: boolean } };
+  const fill = (k: number) =>
+    (view.stage.children[0].children[1 + k].children[0].children[0] as unknown as Fill).context;
+  const draw = (ratio: number) => {
+    for (const shape of shapes) {
+      shape.ratio = ratio;
+      shape.invalidate(CONTENT);
+    }
+
+    view.prepare(root);
+  };
+
+  view.prepare(root);
+  const first = fill(0);
+  assert.equal(fill(1), first);
+
+  // Kept while the morph keeps its blend, though no one draws it.
+  draw(1000);
+  assert.equal(fill(0), fill(1));
+  assert.notEqual(fill(0), first);
+  assert.equal(first.destroyed, false);
+
+  // Sixteen ratios later its blend is dropped, and the next frame its fills.
+  for (let ratio = 2000; ratio <= 17000; ratio += 1000) {
+    draw(ratio);
+  }
+
+  assert.equal(first.destroyed, true);
+  assert.equal(fill(0).destroyed, false);
+});

@@ -540,6 +540,70 @@ class StrokeContexts {
   }
 }
 
+/**
+ * A morph's blends' fills, shared as a shape's are by every instance drawn
+ * at that blend: a crowd in step, and a timeline that places the morph
+ * again at a ratio it has drawn, tessellate each blend once. Counted as
+ * nodes take and give them back; one no one holds goes as its morph drops
+ * the blend, which is then never drawn from again, or after IDLE_MS.
+ */
+class BlendFills {
+  private readonly held = new Map<ShapeCharacter, { fills: GraphicsContext[]; uses: number }>();
+  /** The blends no one holds, oldest first, with the time each went idle. */
+  private readonly idle = new Map<ShapeCharacter, number>();
+
+  /** The blend's fills, taken: found, or built by `build`. */
+  take(blend: ShapeCharacter, build: () => GraphicsContext[]): GraphicsContext[] {
+    let entry = this.held.get(blend);
+    if (!entry) {
+      entry = { fills: build(), uses: 0 };
+      this.held.set(blend, entry);
+    }
+
+    entry.uses++;
+    this.idle.delete(blend);
+    return entry.fills;
+  }
+
+  give(blend: ShapeCharacter): void {
+    const entry = this.held.get(blend);
+    if (!entry) {
+      return;
+    }
+
+    entry.uses--;
+    if (entry.uses > 0) {
+      return;
+    }
+
+    if (blend.layers.some((layer) => droppedLayers.has(layer))) {
+      this.drop(blend);
+      return;
+    }
+
+    this.idle.set(blend, performance.now());
+  }
+
+  /** A frame prepared: the idle blends their morph dropped go, and those idle too long. */
+  tick(): void {
+    const now = performance.now();
+    for (const [blend, since] of this.idle) {
+      if (now - since >= IDLE_MS || blend.layers.some((layer) => droppedLayers.has(layer))) {
+        this.drop(blend);
+      }
+    }
+  }
+
+  private drop(blend: ShapeCharacter): void {
+    this.idle.delete(blend);
+    for (const context of this.held.get(blend)?.fills ?? []) {
+      destroyContext(context);
+    }
+
+    this.held.delete(blend);
+  }
+}
+
 /** The key a layer's lines seen through `m`, at least `least` wide, are kept by. */
 function linesKey(m: Linear, least: number): string {
   return `${m[0]},${m[1]},${m[2]},${m[3]},${least}`;
@@ -598,10 +662,12 @@ interface Node {
   /** Their fills, one context a layer. */
   fills: GraphicsContext[];
   /**
-   * Whether the fills are this node's own, a drawing's or a blend's, not its character's, which
+   * Whether the fills are this node's own, a drawing's, not its character's or blend's, which
    * instances share.
    */
   ownFills: boolean;
+  /** The morph's blend whose shared fills it holds, given back as it draws another or leaves. */
+  blended: ShapeCharacter | null;
   /** The lines, a Graphics for each layer that has any; null where one has none. */
   strokes: (LinesGraphics | null)[];
   /** Whether the layers are a character's or a blend's, whose lines' contexts instances share. */
@@ -639,6 +705,7 @@ export class PixiView {
   private readonly lines = new StrokeContexts(this.counts);
   private readonly nodes = new WeakMap<DisplayObject, Node>();
   private readonly fills = new Map<ShapeCharacter, GraphicsContext[]>();
+  private readonly blends = new BlendFills();
   /**
    * A fill painted: a bitmap's from its store's texture sampled as the fill
    * samples, in global texture space so that its matrix maps the bitmap's
@@ -912,6 +979,7 @@ export class PixiView {
         layers: [],
         fills: [],
         ownFills: false,
+        blended: null,
         strokes: [],
         sharedLines: false,
         kids: [],
@@ -942,7 +1010,8 @@ export class PixiView {
    */
   private redraw(o: DisplayObject, node: Node): void {
     const done = this.clear(node);
-    // Destroyed after the new ones are made, so that a texture they share is kept, not made again.
+    // Given back after the new ones are made, so that a texture or a blend they share is kept, not
+    // made again.
     try {
       this.draw(o, node);
     } finally {
@@ -952,7 +1021,7 @@ export class PixiView {
 
   /**
    * Empty the node of what it drew, and return what gives back its fills
-   * and lines: a drawing's or blend's fills, and every node's lines; a
+   * and lines: a drawing's fills, a blend's, and every node's lines; a
    * Graphics frees only a context it made.
    */
   private clear(node: Node): () => void {
@@ -961,6 +1030,7 @@ export class PixiView {
     node.bitmap = null;
     const old = node.ownFills && !this.fresh ? node.fills : [];
     const oldLines = this.fresh ? [] : node.strokes.map((g) => g?.shared);
+    const blend = node.blended;
     // A text's characters are in a container of their own; their shared glyph fills stay, not being theirs.
     for (const child of node.art.removeChildren()) {
       if (!child.destroyed) {
@@ -971,6 +1041,7 @@ export class PixiView {
     node.layers = [];
     node.fills = [];
     node.ownFills = false;
+    node.blended = null;
     node.strokes = [];
     node.lines = [];
     return () => {
@@ -982,6 +1053,10 @@ export class PixiView {
         if (context) {
           this.lines.give(context);
         }
+      }
+
+      if (blend) {
+        this.blends.give(blend);
       }
     };
   }
@@ -1021,9 +1096,11 @@ export class PixiView {
     } else if (shape && !o.drawing && !(o instanceof ShapeObject && o.morph)) {
       fills = this.fills.get(shape) ?? node.layers.map(build);
       this.fills.set(shape, fills);
+    } else if (shape && !o.drawing && !this.fresh) {
+      // A morph's blend, one of as many as its ratios: not with the shapes', which the view keeps.
+      fills = this.blends.take(shape, () => node.layers.map(build));
+      node.blended = shape;
     } else {
-      // A drawing's, or a morph's blend, one of as many as its ratios: kept
-      // with the shapes', they would outlive it.
       fills = node.layers.map(build);
       node.ownFills = true;
     }
@@ -1480,6 +1557,7 @@ export class PixiView {
 
   prepare(root: DisplayObject): void {
     this.lines.tick();
+    this.blends.tick();
     this.rescaled = this.leastWidth !== this.strokedAt;
     this.strokedAt = this.leastWidth;
     const node = this.sync(root, UNIT, false);
