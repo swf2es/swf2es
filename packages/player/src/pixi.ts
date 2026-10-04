@@ -1286,6 +1286,12 @@ export class PixiView {
     }
 
     node.released = true;
+    // A parked node may return quickly, but its render group's batches can hold a room's peak
+    // vertex buffers until the renderer dies. The pooled group also keeps its InstructionSet.
+    if (node.container.isRenderGroup) {
+      this.disableRenderGroup(node.container);
+    }
+
     const chain = node.filters[0];
     if (chain instanceof FilterChain) {
       chain.forget();
@@ -1619,7 +1625,7 @@ export class PixiView {
     // belong to this branch, it must share its parent's group. A timeline mask itself also stays
     // with its siblings, though their common parent may form a group.
     if ((links.length > 0 || node.masking) && node.container.isRenderGroup) {
-      node.container.disableRenderGroup();
+      this.disableRenderGroup(node.container);
     } else if (
       links.length === 0 &&
       !node.masking &&
@@ -1630,6 +1636,12 @@ export class PixiView {
       // Keep the group when its animation gets smaller, avoiding repeated batcher destruction.
       node.container.enableRenderGroup();
     }
+  }
+
+  /** Retire Pixi's per-group batches before it returns the group to its pool. */
+  private disableRenderGroup(container: PixiContainer): void {
+    container.renderGroup?.instructionSet.destroy();
+    container.disableRenderGroup();
   }
 
   /**

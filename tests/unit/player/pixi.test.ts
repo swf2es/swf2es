@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { BitmapStore } from "../../../packages/player/dist/bitmap.js";
 import { BitmapObject, Container } from "../../../packages/player/dist/display.js";
 import { PixiView } from "../../../packages/player/dist/pixi.js";
+import { ColorBatcher } from "../../../packages/player/dist/pixi-color.js";
 import type { Player } from "../../../packages/player/dist/player.js";
 
 /** A renderer that draws nothing and reads back `pixels`, counting its reads. */
@@ -140,6 +141,59 @@ test("a batchable keeps the batcher name it is given, and one under a colour tra
   assert.equal(sprite.batcherName, "flash-color");
   sprite.renderable = { flashColor: null };
   assert.equal(sprite.batcherName, "host-custom");
+});
+
+test("a display node leaving the stage releases its render group's batches", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const branch = new Container();
+  root.placeAtDepth(branch, 1);
+  view.prepare(root);
+
+  const pixi = view.stage.children[0].children[1];
+  assert.ok(pixi);
+  pixi.enableRenderGroup();
+  const instructions = pixi.renderGroup?.instructionSet;
+  assert.ok(instructions);
+  let released = 0;
+  instructions.renderPipes = { batch: { destroyInstructionSet: () => released++ } };
+
+  root.removeChild(branch);
+  view.prepare(root);
+  assert.equal(released, 1);
+  assert.equal(pixi.isRenderGroup, false);
+  assert.equal(instructions.renderPipes, null);
+
+  root.placeAtDepth(branch, 1);
+  view.prepare(root);
+  assert.equal(view.stage.children[0].children[1], pixi);
+});
+
+test("a colour batcher gives back a past geometry peak after many smaller builds", () => {
+  // Shader construction needs a browser; the batcher lifecycle itself does not.
+  const batcher = Object.create(ColorBatcher.prototype) as ColorBatcher;
+  let destroyed = 0;
+  const largeGeometry = { destroy: () => destroyed++ };
+  Object.assign(batcher, {
+    attributeBuffer: { size: 8 << 20, destroy: () => {} },
+    indexBuffer: new Uint32Array(1 << 20),
+    geometry: largeGeometry,
+    batches: [],
+    batchIndex: 0,
+    _elements: [],
+    underusedBuilds: 0,
+  });
+
+  for (let frame = 0; frame < 120; frame++) {
+    batcher.attributeSize = 1000;
+    batcher.indexSize = 1000;
+    batcher.begin();
+  }
+
+  assert.ok(batcher.attributeBuffer.size < 8 << 20);
+  assert.ok(batcher.indexBuffer.byteLength < 4 << 20);
+  assert.notEqual(batcher.geometry, largeGeometry);
+  assert.equal(destroyed, 1);
 });
 
 test("Pixi pointer delivery scales to SWF coordinates and stops on unbind", () => {
