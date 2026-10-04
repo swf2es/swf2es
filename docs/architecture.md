@@ -771,8 +771,9 @@ replayed give for another object, whenever it was placed. A later clip of
 another ratio, and a clip, shape, morph or text field the first frame
 placed that a move after the target gave another ratio, are made anew;
 a later child of the same ratio stays (`rewind-ratio`, `rewind-kinds`;
-Ruffle's `survives_rewind` compares the ratio too, but remakes only clips
-and morphs placed before the target). A clip's own loop makes the
+Ruffle's `survives_rewind` compares the ratio only for children placed
+after the target, and for morphs, and takes a place with no ratio for a
+match where Flash takes it for 0). A clip's own loop makes the
 children it places anew alive in the frame's construct phase, after
 ENTER_FRAME, as playing on to a frame does; what it takes off is gone by
 ENTER_FRAME (`loop-ratio`). Flash's matrix is

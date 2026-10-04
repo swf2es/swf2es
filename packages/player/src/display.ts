@@ -1178,8 +1178,9 @@ export class MovieClip extends Container {
     // ratio is not the one the frames replayed give goes too, to be made
     // anew: authoring tools give each placement a ratio of its own, and
     // Flash takes another ratio for another object, of every kind
-    // (`rewind-ratio`, `rewind-kinds`), where Ruffle remakes only clips and
-    // morphs placed before the target. In render order, as Ruffle removes.
+    // (`rewind-ratio`, `rewind-kinds`), where Ruffle compares it only for
+    // children placed after the target, and for morphs. In render order, as
+    // Ruffle removes.
     const kept = new Set<number>();
     if (rewind) {
       for (const child of [...this.children]) {
