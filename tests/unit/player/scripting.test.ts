@@ -564,6 +564,78 @@ test("LoaderInfo reports HTTP status between init and complete, and before an I/
   assert.deepEqual(events, ["httpStatus:404", "ioError"]);
 });
 
+test("an AVM1 SWF from a URL is an AVM1Movie at the frame's end, and plays from the frame after next", {
+  skip,
+}, async () => {
+  const compile = compiler(out);
+  const square = w.shape({
+    id: 1,
+    bounds: [0, 200, 0, 200],
+    fills: [0xff0000],
+    paths: [
+      {
+        fill1: 1,
+        commands: [{ move: [0, 0] }, { line: [200, 0] }, { line: [200, 200] }, { line: [0, 0] }],
+      },
+    ],
+  });
+  const avm1 = w.swf({
+    version: 8,
+    width: 30,
+    height: 20,
+    frameRate: 12,
+    frameCount: 2,
+    tags: [square, w.place({ depth: 1, character: 1 }), w.showFrame(), w.showFrame(), w.end()],
+  });
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: () => {},
+    url: "http://example.test/outer.swf",
+    fetch: async () => ({ bytes: avm1, status: 200, headers: [] }),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const root = compile(
+    "Avm1UrlRoot",
+    "package { import flash.display.Sprite; public class Avm1UrlRoot extends Sprite {} }",
+  );
+  const player = new Player(bare(root, 1, "Avm1UrlRoot"), scripting);
+  await player.start();
+
+  const rt = scripting.rt;
+  const loader = rt.construct(rt.classNamed("flash.display::Loader")) as avm2.AsObject;
+  rt.callProperty(player.root.object, rt.publicName("addChild"), loader);
+  scripting.requestLoadUrl(loader, "avm1.swf");
+  const events: string[] = [];
+  const info = loader.$loaderInfo as avm2.AsObject;
+  info.$listeners = new Map(
+    ["open", "progress", "init", "httpStatus", "complete", "ioError"].map((type) => [
+      type,
+      [{ fn: { $f: () => events.push(type) }, capture: false, priority: 0 }],
+    ]),
+  );
+
+  await scripting.settled();
+  player.tick();
+  assert.deepEqual(events, ["open", "progress", "progress", "init", "httpStatus", "complete"]);
+  const content = rt.getProperty(loader, rt.publicName("content")) as avm2.AsObject;
+  assert.equal(rt.traitsOf(content).name, "flash.display::AVM1Movie");
+  const get = (name: string) => rt.getProperty(info, rt.publicName(name));
+  assert.deepEqual(
+    ["actionScriptVersion", "swfVersion", "frameRate", "width", "height"].map(get),
+    [2, 8, 12, 30, 20],
+  );
+
+  // Its first frame stays through the next frame's advance, as Flash has one from bytes.
+  const clip = content.$display as MovieClip;
+  assert.equal(clip.children.length, 1);
+  const frames = [clip.currentFrame];
+  for (let i = 0; i < 3; i++) {
+    player.tick();
+    frames.push(clip.currentFrame);
+  }
+
+  assert.deepEqual(frames, [1, 1, 2, 1]);
+});
+
 test("timers fire in the order of their times, each at its own time", { skip }, async () => {
   const lines: string[] = [];
   const scripting = new Scripting(await createCodegen(wasm), {

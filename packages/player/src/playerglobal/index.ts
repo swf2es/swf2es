@@ -4,6 +4,7 @@
 // a private native as "Class#pkg:Class::name".
 import type { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
+import { avm1MovieNatives } from "./flash/display/AVM1Movie.js";
 import { bitmapNatives } from "./flash/display/Bitmap.js";
 import { bitmapDataHooks, bitmapDataNatives } from "./flash/display/BitmapData.js";
 import { displayObjectHooks, displayObjectNatives } from "./flash/display/DisplayObject.js";
@@ -56,6 +57,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...mouseEventNatives(s),
     ...eventDispatcherNatives(s),
     ...displayObjectNatives(s),
+    ...avm1MovieNatives(),
     ...bitmapNatives(s),
     ...bitmapDataNatives(s),
     ...containerNatives(s),

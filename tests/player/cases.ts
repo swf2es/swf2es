@@ -1205,6 +1205,74 @@ function loading(compile: Compile, script: string, innerFrames: number): Uint8Ar
   });
 }
 
+// AVM1 SWFs an AS3 one loads (scripts/Avm1Movie.as.template): one of
+// version 8 whose FileAttributes leaves out ActionScript 3, three frames
+// that move a square and add another, and one of version 6 without
+// FileAttributes, a green square. The first's frame 1 has a DoAction,
+// `x = "1"`, which shows nothing: the player runs no AVM1 actions.
+function avm1Movie(compile: Compile): Uint8Array {
+  const inner = w.swf({
+    version: 8,
+    width: 100,
+    height: 50,
+    frameRate: 12,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      square(2, 0x0000ff, 400),
+      w.place({ depth: 1, character: 1, matrix: { tx: 100, ty: 100 } }),
+      // Push "x", push "1", SetVariable, End.
+      w.tag(12, Uint8Array.from([0x96, 3, 0, 0, 0x78, 0, 0x96, 3, 0, 0, 0x31, 0, 0x1d, 0])),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, matrix: { tx: 500, ty: 100 } }),
+      w.place({ depth: 2, character: 2, matrix: { tx: 1400, ty: 400 } }),
+      w.showFrame(),
+      w.remove(2),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const bare = w.swf({
+    version: 6,
+    width: 60,
+    height: 40,
+    frameRate: 30,
+    frameCount: 1,
+    tags: [
+      w.backgroundColor(0xffffff),
+      square(1, 0x00aa00, 600),
+      w.place({ depth: 1, character: 1, matrix: { tx: 200, ty: 200 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const template = readFileSync(new URL("scripts/Avm1Movie.as.template", import.meta.url), "utf8");
+  const abc = compile(
+    "Avm1Movie",
+    template
+      .replaceAll("@@INNER@@", Buffer.from(inner).toString("base64"))
+      .replaceAll("@@BARE@@", Buffer.from(bare).toString("base64")),
+  );
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "Avm1Movie"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // What Crossbridge's runtime asks of the player as it starts
 // (scripts/CrossbridgeRuntime.as): a ByteArray subclass bound to
 // DefineBinaryData, as Crossbridge keeps a C program's data, among the rest.
@@ -2878,6 +2946,16 @@ export const cases: PlayerCase[] = [
   // Last: the content it unloads plays on in Flash until collected, and its
   // traces would reach the case recorded after it.
   { name: "loads", build: loads, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
+  // Frame 1 is drawn at the outer SWF's INIT, before the AVM1 movies come at
+  // that frame's end; the player draws the frame whole, with them.
+  {
+    name: "avm1-movie",
+    build: avm1Movie,
+    frames: 6,
+    capture: [2, 3, 4, 5, 6],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "crossbridge-runtime",
     build: crossbridgeRuntime,
