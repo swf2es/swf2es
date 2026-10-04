@@ -8,7 +8,7 @@
 // samples into a pixel.
 import { createCodegen } from "@swf2es/codegen";
 import { isAs3, readSwf, tags } from "@swf2es/format";
-import { PixiView, Player, Scripting } from "@swf2es/player";
+import { Container, type DisplayObject, PixiView, Player, Scripting } from "@swf2es/player";
 import { autoDetectRenderer } from "pixi.js";
 
 interface Run {
@@ -205,12 +205,18 @@ interface Bench {
  * frame's tick, the display list's sync to Pixi and Pixi's draw apart. The
  * GPU is waited for, so that what it does counts; Chrome's software GL
  * does it on the CPU anyway, and the result says which drew.
+ *
+ * `toggle` adds as many sprites drawn by Graphics beside the root's
+ * children, and takes all of them off the list on odd frames and puts them
+ * back on even ones, as a pool's objects and a panel shown and hidden
+ * come and go; the toggle counts in the tick.
  */
 async function benchSwf(
   base64: string,
   frames: number,
   backBuffer = false,
   idleRenders = 0,
+  toggle = 0,
 ): Promise<Bench> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
@@ -264,12 +270,21 @@ async function benchSwf(
     const heapNow = () =>
       (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ??
       0;
+    const toggled = toggle > 0 ? await toggling(player.root, toggle) : [];
     view.render(player.stage);
     await finish();
     const first = performance.now() - start;
     const heapBefore = heapNow();
     for (let frame = 2; frame <= frames; frame++) {
       const before = performance.now();
+      for (const [depth, child] of toggled.entries()) {
+        if (frame % 2) {
+          player.root.removeChild(child);
+        } else {
+          player.root.placeAtDepth(child, depth + 1);
+        }
+      }
+
       player.tick();
       const ticked = performance.now();
       view.prepare(player.stage);
@@ -319,6 +334,41 @@ async function benchSwf(
       error: describe(e, null),
     };
   }
+}
+
+/**
+ * The root's children and `count` sprites more, each drawn with 40 round
+ * rectangles of its own, at the depths after them: what `toggle` takes off
+ * and puts back.
+ */
+async function toggling(root: Player["root"], count: number): Promise<DisplayObject[]> {
+  const { Drawing } = (await import("/player/drawing.js" as string)) as {
+    Drawing: new () => {
+      beginFill(fill: { type: "solid"; color: number }): void;
+      drawRoundRect(x: number, y: number, w: number, h: number, ew: number, eh: number): void;
+      endFill(): void;
+    };
+  };
+  const children = [...root.children];
+  for (let i = 0; i < count; i++) {
+    const sprite = new Container();
+    const drawing = new Drawing();
+    for (let k = 0; k < 40; k++) {
+      drawing.beginFill({ type: "solid", color: 0xff000000 | ((i * 7919 + k * 997) & 0xffffff) });
+      drawing.drawRoundRect(k * 3, k * 2, 30, 20, 6, 6);
+      drawing.endFill();
+    }
+
+    sprite.drawing = drawing as unknown as Container["drawing"];
+    sprite.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: (i * 37) % 700, ty: (i * 53) % 500 });
+    children.push(sprite);
+  }
+
+  for (const [depth, child] of children.entries()) {
+    root.placeAtDepth(child, depth + 1);
+  }
+
+  return children;
 }
 
 const page = globalThis as unknown as { runSwf: typeof runSwf; benchSwf: typeof benchSwf };

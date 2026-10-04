@@ -19,8 +19,12 @@
 // --idle K renders K times more after each frame with no tick between, as
 // a host that draws on every animation frame does, and times those apart.
 //
-//   node tests/player/bench.ts [--shapes N | --rig N] [--frames N] [--idle K] [--gpu]
-//     [--back-buffer] [--json]
+// --toggle N plays instead N text fields and N sprites drawn by Graphics,
+// all taken off the list on one frame and put back on the next, as a
+// pool's objects or a panel shown and hidden: what coming back costs.
+//
+//   node tests/player/bench.ts [--shapes N | --rig N | --toggle N] [--frames N] [--idle K]
+//     [--gpu] [--back-buffer] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 
@@ -32,6 +36,7 @@ const option = (name: string, fallback: number) => {
 const shapes = option("shapes", 2000);
 const rig = option("rig", 0);
 const idleRenders = option("idle", 0);
+const toggle = option("toggle", 0);
 const frames = option("frames", 120);
 const WARMUP = 10;
 const WIDTH = 800;
@@ -235,18 +240,37 @@ function rigSwf(count: number): Uint8Array {
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
 }
 
+/** `count` text fields in the device font, placed on the one frame, for the page to toggle (--toggle). */
+function toggleSwf(count: number): Uint8Array {
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
+  for (let i = 0; i < count; i++) {
+    tags.push(
+      w.editText(i + 1, `Damage ${i * 37}`, 2400, 400, 0, { color: 0xc02020 }),
+      w.place({
+        depth: i + 1,
+        character: i + 1,
+        matrix: { tx: ((i * 61) % 700) * TWIPS, ty: ((i * 29) % 560) * TWIPS },
+      }),
+    );
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
 const quantile = (values: number[], q: number) => {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0;
 };
 
-const swf = rig > 0 ? rigSwf(rig) : synthetic();
+const swf = toggle > 0 ? toggleSwf(toggle) : rig > 0 ? rigSwf(rig) : synthetic();
 const result = await benchPlayer(
   swf,
   frames,
   args.includes("--gpu"),
   args.includes("--back-buffer"),
   idleRenders,
+  toggle,
 );
 if (result.error) {
   console.error(result.error);
@@ -260,7 +284,7 @@ const gl = result.gl.slice(WARMUP);
 const total = tick.map((t, i) => t + sync[i] + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
-  shapes: rig > 0 ? `rig of ${rig}` : shapes,
+  shapes: toggle > 0 ? `toggle of ${toggle}` : rig > 0 ? `rig of ${rig}` : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   frames,
@@ -279,7 +303,7 @@ if (args.includes("--json")) {
 } else {
   const ms = (v: number) => `${v.toFixed(2)} ms`;
   console.log(
-    `${summary.shapes}${rig > 0 ? "" : " shapes"}, ${frames} frames, SWF of ${swf.length} bytes; first frame ${ms(result.first)}; drawn by ${result.renderer}`,
+    `${summary.shapes}${rig > 0 || toggle > 0 ? "" : " shapes"}, ${frames} frames, SWF of ${swf.length} bytes; first frame ${ms(result.first)}; drawn by ${result.renderer}`,
   );
   console.log(
     `  counts  ${JSON.stringify(result.counts)}; JS heap ${summary.heapMb[0]} to ${summary.heapMb[1]} MB`,

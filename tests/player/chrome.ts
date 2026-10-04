@@ -257,12 +257,13 @@ export function benchPlayer(
   gpu = false,
   backBuffer = false,
   idleRenders = 0,
+  toggle = 0,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
     async (evaluate) => {
       const { value, exception } = await evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle})`,
       );
       return (
         value ?? {
