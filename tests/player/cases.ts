@@ -22,6 +22,8 @@ export interface PlayerCase {
   maxOutliers: number;
   /** Drawn in Flash in an adl of its own (FlashJob.alone). */
   alone?: boolean;
+  /** Played as a host showing the stage this many times its size draws it (page.ts); Flash draws it at its size. */
+  zoom?: number;
 }
 
 const square = (id: number, color: number, size = 1000) =>
@@ -2246,6 +2248,84 @@ function morphs(): Uint8Array {
   });
 }
 
+// A pale band in overlay drifting a quarter pixel each way a frame over a
+// checkerboard, once on the root and once inside a clip drawn as a layer,
+// whose blend reads the layer's pixels: what shows through the band must
+// stay where it is, at a zoom whose resolution is no whole number.
+function blendDrift(): Uint8Array {
+  const frames = 8;
+  const rect = (x: number, y: number, width: number, height: number): w.PathCommand[] => [
+    { move: [x, y] },
+    { line: [x + width, y] },
+    { line: [x + width, y + height] },
+    { line: [x, y + height] },
+    { line: [x, y] },
+  ];
+  const cells: w.PathCommand[][] = [];
+  for (let row = 0; row < 8; row++) {
+    for (let col = row % 2; col < 10; col += 2) {
+      cells.push(rect(col * 80, row * 80, 80, 80));
+    }
+  }
+
+  const dark = w.shape({
+    id: 1,
+    bounds: [0, 800, 0, 640],
+    fills: [0x101820],
+    paths: [{ fill1: 1, commands: rect(0, 0, 800, 640) }],
+  });
+  const checker = w.shape({
+    id: 2,
+    bounds: [0, 800, 0, 640],
+    fills: [0xf0e8d0],
+    paths: cells.map((commands) => ({ fill1: 1, commands })),
+  });
+  const band = w.shape({
+    id: 3,
+    version: 3,
+    bounds: [0, 300, 0, 500],
+    fills: [0xc0ffffff],
+    paths: [{ fill1: 1, commands: rect(0, 0, 300, 500) }],
+  });
+  const ground = (x: number, y: number) => [
+    w.place({ depth: 1, character: 1, matrix: { tx: x, ty: y } }),
+    w.place({ depth: 2, character: 2, matrix: { tx: x, ty: y } }),
+  ];
+  const drift = (f: number, x: number, y: number) =>
+    w.place({
+      depth: 3,
+      character: f === 0 ? 4 : undefined,
+      move: f > 0,
+      matrix: { tx: x + 5 * f, ty: y + 5 * f },
+      blendMode: f === 0 ? 13 : undefined,
+    });
+  const layered: Uint8Array[] = [...ground(0, 0)];
+  const root: Uint8Array[] = [
+    ...ground(1000, 100),
+    w.place({ depth: 4, character: 5, matrix: { tx: 100, ty: 100 }, blendMode: 2 }),
+  ];
+  for (let f = 0; f < frames; f++) {
+    layered.push(drift(f, 160, 40), w.showFrame());
+    root.push(drift(f, 1160, 140), w.showFrame());
+  }
+
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameCount: frames,
+    tags: [
+      w.backgroundColor(0xeeeeee),
+      dark,
+      checker,
+      band,
+      w.sprite(4, 1, [w.place({ depth: 1, character: 3 }), w.showFrame(), w.end()]),
+      w.sprite(5, frames, [...layered, w.end()]),
+      ...root,
+      w.end(),
+    ],
+  });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
@@ -2630,6 +2710,17 @@ export const cases: PlayerCase[] = [
     // 180 channels in all.
     tolerance: 3,
     maxOutliers: 200,
+  },
+  {
+    name: "blend-drift",
+    swf: blendDrift(),
+    frames: 8,
+    capture: [1, 2, 3, 4, 5, 6, 7, 8],
+    // A resolution of 6, where Pixi's arithmetic lands a hair off whole pixels.
+    zoom: 1.5,
+    // Within 3 a channel, the layer's 8-bit round trip, as for `blend-modes`.
+    tolerance: 3,
+    maxOutliers: 0,
   },
   {
     name: "filter-objects",

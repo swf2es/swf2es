@@ -584,6 +584,10 @@ medium, 4×4 at high and best. The test page draws the same way, at that
 many times the resolution without multisampling, averaged down, and its
 frames then match Flash's to the pixel for straight edges, and within a
 quarter pixel's anti-aliasing for curved lines and lines under a skew.
+A case may give a zoom, as a host showing the stage larger does: the
+page's resolution is then the zoom times the grid, and the stage is drawn
+at the zoom's inverse, so the samples are the same and only Pixi's
+arithmetic at that resolution, no whole number, differs.
 
 ### Scripts and the display list
 
@@ -1722,7 +1726,16 @@ reads the back buffer only from a renderer made with `useBackBuffer:
 true`, which a host passes (the README's embedding example does);
 without it the modes draw as normal, and the view warns once. The back
 buffer is a full-screen copy a frame: on the bench (`--back-buffer`, an
-RTX 4060) it adds some 0.05 ms to the draw.
+RTX 4060) it adds some 0.05 ms to the draw. What is behind an object is
+copied from the pixels its bounds cover, which Pixi puts on whole pixels
+of the target but keeps in stage units: at a resolution that is no whole
+number, as a host fitting the stage to its page gives, k / r · r can fall
+a hair short of k, and Pixi's floor took the pixel before. The blend read
+what was behind it a pixel off at those positions alone, so a moving
+blend shook what showed through it, which Flash leaves still. The copy's
+corner and size are rounded instead, the size so within the texture
+Pixi sizes for it. The `blend-drift` case moves a blend a quarter pixel
+a frame, at a zoom of 1.5 that gives the test page a resolution of 6.
 
 ### Filters
 
@@ -1878,9 +1891,7 @@ where it was as well as where it is, and a mask from outside the object
 that moves leaves it clipped as it was. swf2es draws the child once,
 where it is now, and also keeps the output for such a mask, unless the
 object's bounds change with it. Each pass lets go of the pool's textures
-it drew with, which the pool destroys as the screen's size changes, and
-a blend's copy of what is behind is held to its texture's size, which
-Pixi rounds a pixel short of the copy at some resolutions.
+it drew with, which the pool destroys as the screen's size changes.
 
 ### Masks and scroll rectangles
 

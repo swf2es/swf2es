@@ -2,18 +2,37 @@
 // modes"): the object drawn as a layer, its children together, then that
 // layer blended with what is below by the mode's formula, which a filter
 // that reads the back buffer computes. Colours are premultiplied.
-import { AlphaFilter, BlendModeFilter, type Filter, RenderTargetSystem } from "pixi.js";
+import { AlphaFilter, BlendModeFilter, type Filter, FilterSystem, TexturePool } from "pixi.js";
 
-// A blend's back texture is sized with a hair of tolerance for rounding,
-// and the copy of what is behind into it without: at some resolutions the
-// copy is a pixel taller or wider than the texture, which GL refuses
-// (copyTexSubImage2D's offset overflow), and the blend reads nothing. The
-// copy is held to the texture, for every renderer on the page.
-const copyToTexture = RenderTargetSystem.prototype.copyToTexture;
-RenderTargetSystem.prototype.copyToTexture = function (source, destination, from, size, to) {
-  size.width = Math.min(size.width, destination.source.pixelWidth - to.x);
-  size.height = Math.min(size.height, destination.source.pixelHeight - to.y);
-  return copyToTexture.call(this, source, destination, from, size, to);
+// What is behind a blend is copied from the pixels its bounds cover, which
+// Pixi has put on whole pixels of the target but keeps in stage units: at a
+// resolution such as 1.62, as a host fitting the stage to its page gives,
+// k / r · r can fall a hair short of k, and Pixi's floor took the pixel
+// before it. The blend then read what was behind it a pixel off at those
+// positions alone, so a moving blend shook what showed through it. The
+// corner and the size are rounded instead, and the size held to the
+// texture, which Pixi's ceil overran by a pixel at some resolutions.
+FilterSystem.prototype.getBackTexture = function (target, bounds, previous) {
+  const resolution = target.colorTexture.source.resolution;
+  const back = TexturePool.getOptimalTexture({
+    width: bounds.width,
+    height: bounds.height,
+    resolution,
+  });
+  const x = previous ? bounds.minX - previous.minX : bounds.minX;
+  const y = previous ? bounds.minY - previous.minY : bounds.minY;
+  this.renderer.renderTarget.copyToTexture(
+    target,
+    back,
+    { x: Math.round(x * resolution), y: Math.round(y * resolution) },
+    {
+      width: Math.min(Math.round(bounds.width * resolution), back.source.pixelWidth),
+      height: Math.min(Math.round(bounds.height * resolution), back.source.pixelHeight),
+    },
+    { x: 0, y: 0 },
+  );
+
+  return back;
 };
 
 /** Each separable mode's B(back, front) of straight colours, GLSL and WGSL. */
