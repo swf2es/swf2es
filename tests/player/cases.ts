@@ -3216,6 +3216,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "blend-direct",
+    swf: (abc) => bare(abc, 1, "BlendDirect", 240, 80),
+    script: "BlendDirect",
+    frames: 4,
+    capture: [1, 2, 3, 4],
+    tolerance: 1,
+    maxOutliers: 0,
+  },
+  {
     name: "blend-edges",
     swf: (abc) => bare(abc, 1, "BlendEdges", 200, 150),
     script: "BlendEdges",
