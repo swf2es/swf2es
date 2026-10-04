@@ -1470,36 +1470,42 @@ function soundSymbols(compile: Compile): Uint8Array {
   });
 }
 
-function soundLoops(compile: Compile): Uint8Array {
-  const pcm = new Uint8Array(5512).fill(128);
-  const sound = new w.BitWriter()
-    .u16(1)
-    .u8(1 << 2)
-    .u32(pcm.length)
-    .raw(pcm)
-    .done();
-  return w.swf({
-    width: 20,
-    height: 20,
-    frameRate: 24,
-    frameCount: 1,
-    tags: [
-      w.fileAttributes(true),
-      w.tag(tags.DefineSound, sound),
-      w.doAbc(
-        compile("Tone", "package { import flash.media.Sound; public class Tone extends Sound {} }"),
-        "Tone",
-      ),
-      w.doAbc(compile("SoundLoops")),
-      w.symbolClass([
-        [0, "SoundLoops"],
-        [1, "Tone"],
-      ]),
-      w.showFrame(),
-      w.end(),
-    ],
-  });
-}
+/** A document class `script` beside Tone, one second of silence at 5.5 kHz. */
+export const toneScript =
+  (script: string) =>
+  (compile: Compile): Uint8Array => {
+    const pcm = new Uint8Array(5512).fill(128);
+    const sound = new w.BitWriter()
+      .u16(1)
+      .u8(1 << 2)
+      .u32(pcm.length)
+      .raw(pcm)
+      .done();
+    return w.swf({
+      width: 20,
+      height: 20,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [
+        w.fileAttributes(true),
+        w.tag(tags.DefineSound, sound),
+        w.doAbc(
+          compile(
+            "Tone",
+            "package { import flash.media.Sound; public class Tone extends Sound {} }",
+          ),
+          "Tone",
+        ),
+        w.doAbc(compile(script)),
+        w.symbolClass([
+          [0, script],
+          [1, "Tone"],
+        ]),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+  };
 
 // Bitmap fills (scripts/BitmapFills.as): a 4 x 4 bitmap, every pixel its
 // own colour and one translucent, filling a rect larger than it at five
@@ -2503,7 +2509,15 @@ export const cases: PlayerCase[] = [
   },
   {
     name: "sound-loops",
-    build: soundLoops,
+    build: toneScript("SoundLoops"),
+    frames: 50,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "sound-mixer",
+    build: toneScript("MixerState"),
     frames: 50,
     capture: [],
     tolerance: 0,
