@@ -642,8 +642,16 @@ corpus). AIR's `playerglobal.abc` adds `commandKey`, `controlKey` and
 `mouseevent_valueof_tostring` has none of them, so that one output still
 differs though its native values match.
 
-`PixiView.bindPointer(player)` takes Pixi's normalized pointer positions,
-scaled to the SWF's stage, and passes them to the player's own hit test.
+`PixiView.bindPointer(player)` takes the pointer's position on the canvas,
+scaled to the SWF's stage, within the box CSS `object-fit` shows the
+canvas's pixels in (`contain`, `scale-down`, `cover` or `none`, centred as
+the default `object-position` has it, inside borders and padding), and
+passes it to the
+player's own hit test. It shows the cursor the player chooses, as Ruffle
+does: a hand over a button that uses one, disabled or not, or under the
+nearest sprite in `buttonMode` whose `useHandCursor` and `enabled` are
+true, and an I-beam over selectable text; a link in text shows no hand
+yet, and `Mouse.cursor` is not read.
 The display list decides the target, so masks, scroll rectangles, depth,
 visibility, `mouseEnabled` and `mouseChildren` use the same objects that
 scripts see; Pixi's render tree does not choose a Flash target. The first
