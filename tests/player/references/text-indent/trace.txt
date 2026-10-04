@@ -1,0 +1,26 @@
+authored 0 10 -10
+a format 10 -10 10 -10
+a text [ab] kab ab ba bak ab ba kab ab bak|
+a lines 3 0:2:[ab] kab ab ba bak |19:12:ab ba kab ab bak|36:2:
+a size 172 54 200 58 0 0
+b format 10 -10 10 -10
+b text kab bak ab.|
+b lines 2 0:2:kab bak ab.|12:2:
+b size 102 36 200 40 0 0
+c format 10 -10 10 -10
+c text [ab] kab ab ba bak ab ba kab ab bak|
+c html <TEXTFORMAT LEFTMARGIN="10" INDENT="-10"><P ALIGN="LEFT"><FONT FACE="Pixel" SIZE="16" COLOR="#CC6600" LETTERSPACING="0" KERNING="0">[ab] kab ab ba bak ab ba kab ab bak</FONT></P></TEXTFORMAT>
+c lines 3 0:2:[ab] kab ab ba bak |19:12:ab ba kab ab bak|36:2:
+c size 172 54 200 58 0 0
+d format 0 -10 0 -10
+d text ab ka ba bak ab ba ka ab ab
+d html <TEXTFORMAT INDENT="-10"><P ALIGN="LEFT"><FONT FACE="Pixel" SIZE="16" COLOR="#8040C0" LETTERSPACING="0" KERNING="0">ab ka ba bak ab ba ka ab ab</FONT></P></TEXTFORMAT>
+d lines 2 0:2:ab ka ba bak ab ba |19:2:ka ab ab
+d first 2 2 12 18 14 2 10 18
+d size 178 36 200 60 0 0
+e format 20 -14 0 0
+e text ab ka ba bak ab ba kab ab
+e html <TEXTFORMAT LEFTMARGIN="20" INDENT="-14"><P ALIGN="LEFT"><FONT FACE="Pixel" SIZE="16" COLOR="#2060A0" LETTERSPACING="0" KERNING="0">ab ka ba bak ab ba kab ab</FONT></P></TEXTFORMAT>
+e lines 2 0:8:ab ka ba bak ab ba |19:22:kab ab
+e first 8 2 12 18 20 2 10 18
+e size 178 36 200 60 0 0

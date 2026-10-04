@@ -55,7 +55,8 @@ export function readEditText(bytes: Uint8Array, tag: Tag): EditText {
     align = r.u8();
     leftMargin = r.u16();
     rightMargin = r.u16();
-    indent = r.u16();
+    // Signed, as Flash reads it, though the specification says UI16: a hanging indent is negative.
+    indent = r.s16();
     leading = r.s16();
   }
 
