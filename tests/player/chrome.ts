@@ -17,6 +17,8 @@ export interface PlayerJob {
   url?: string;
   /** How much larger than its size a host shows the stage (page.ts); 1 by default. */
   zoom?: number;
+  /** Drawn multisampled, as a host's renderer made with `antialias: true` draws (page.ts). */
+  antialias?: boolean;
 }
 
 /** How to run jobs: a time each job's scripts may take, a listener for each result, and more directories to serve. */
@@ -202,7 +204,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
         const begun = performance.now();
         try {
           ({ value, exception } = await evaluate<NonNullable<typeof value>>(
-            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1})`,
+            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false})`,
           ));
         } catch (e) {
           // A job stopped at the timeout makes the protocol answer with an
@@ -260,12 +262,13 @@ export function benchPlayer(
   backBuffer = false,
   idleRenders = 0,
   toggle = -1,
+  antialias = false,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
     async (evaluate) => {
       const { value, exception } = await evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias})`,
       );
       return (
         value ?? {

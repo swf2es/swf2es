@@ -9,7 +9,9 @@
 // machine's GPU, for what a user would see, and the output names which drew.
 //
 // --back-buffer makes the renderer as a host that draws blend modes must,
-// with Pixi's back buffer.
+// with Pixi's back buffer. --antialias makes it multisampled, as a host
+// made with `antialias: true`; with --back-buffer, what blends and
+// filters resolve of it (pixi-resolve.ts) counts in the draw and gl.
 //
 // --rig N plays instead N instances of one animated character, a sprite of
 // 12 outlined parts that turn and swell on a loop of 24 frames, all in
@@ -30,7 +32,7 @@
 // one child each frame; the rest stay still, as scenery beside animated art.
 //
 //   node tests/player/bench.ts [--shapes N | --rig N | --branches N | --toggle N
-//     | --toggle-static N] [--frames N] [--idle K] [--gpu] [--back-buffer] [--json]
+//     | --toggle-static N] [--frames N] [--idle K] [--gpu] [--back-buffer] [--antialias] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 
@@ -388,6 +390,7 @@ const result = await benchPlayer(
   args.includes("--back-buffer"),
   idleRenders,
   toggle > 0 ? toggle : toggleStatic > 0 ? 0 : -1,
+  args.includes("--antialias"),
 );
 if (result.error) {
   console.error(result.error);
