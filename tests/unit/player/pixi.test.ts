@@ -834,3 +834,66 @@ test("instances of a morph at one ratio share its blend's fills, which go once t
   assert.equal(first.destroyed, true);
   assert.equal(fill(0).destroyed, false);
 });
+
+/** A shape character of one layer: a square filled and outlined. */
+async function outlinedSquare() {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { MOVE, LINE } = await import("../../../packages/player/dist/shapes.js");
+  const square = [MOVE, 0, 0, LINE, 10, 0, LINE, 10, 10, LINE, 0, 10, LINE, 0, 0];
+  const line = {
+    width: 40,
+    color: 0xff000000,
+    startCap: 0,
+    endCap: 0,
+    join: 0,
+    miterLimit: 3,
+    noHScale: false,
+    noVScale: false,
+    pixelHinting: false,
+    noClose: false,
+    fill: null,
+  };
+  return {
+    type: "shape" as const,
+    id: 1,
+    shape: {} as never,
+    layers: [
+      {
+        fills: [
+          { fill: { type: "solid", color: 0xff000000 }, contours: [square], winding: "evenOdd" },
+        ],
+        strokes: [{ line, paths: [square] }],
+      },
+    ],
+  } as unknown as ConstructorParameters<typeof ShapeObject>[0];
+}
+
+test("a child moved out of a parent that leaves the list keeps what it draws", async () => {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  const character = await outlinedSquare();
+  type Drawn = { destroyed: boolean; context: { destroyed: boolean } };
+  const root = new Container();
+  const q = new Container();
+  const x = new Container();
+  const p = new Container();
+  const s = new ShapeObject(character);
+  p.placeAtDepth(s, 1);
+  x.placeAtDepth(p, 1);
+  root.placeAtDepth(q, 1);
+  root.placeAtDepth(x, 2);
+  view.prepare(root);
+  // The root's art, Q's and X's containers; X's art, P's; P's art, S's; S's art and its fill and lines.
+  const art = view.stage.children[0].children[2].children[1].children[1].children[0];
+  const [fill, lines] = art.children as unknown as Drawn[];
+
+  // In one frame, S into Q, and P, which last drew it, off the list.
+  q.addChildAt(s, 0);
+  x.removeChild(p);
+  view.prepare(root);
+  const inQ = view.stage.children[0].children[1].children[1].children[0];
+  assert.equal(inQ, art);
+  assert.equal(fill.destroyed, false);
+  assert.equal(lines.destroyed, false);
+  assert.equal(lines.context.destroyed, false);
+});

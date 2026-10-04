@@ -1173,7 +1173,9 @@ export class PixiView {
     // makes its children anew on every frame turns into gigabytes.
     this.clear(node)();
 
-    // Those it last drew, which may since have left it too, and any it has now.
+    // Those it last drew, which may since have left it too, and any it has
+    // now; not one it last drew that has moved to another parent, which
+    // draws it.
     const kids = new Set(node.kids);
     if (o instanceof Container) {
       for (const child of o.children) {
@@ -1182,7 +1184,9 @@ export class PixiView {
     }
 
     for (const kid of kids) {
-      this.release(kid);
+      if (kid.parent === null || kid.parent === o) {
+        this.release(kid);
+      }
     }
   }
 
