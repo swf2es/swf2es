@@ -198,6 +198,8 @@ export class Scripting {
   readonly externalInterface: ExternalInterfaceHost | null;
   /** How many calls the page has made into the SWF's ExternalInterface callbacks, which run outside a frame. */
   hostCalls = 0;
+  /** Calls to an event's updateAfterEvent: a redraw asked for before the next frame. */
+  updates = 0;
   /** How many goto cycles run inside one another now. */
   private cycles = 0;
   /** Whether they nested too deep this frame, which stops them all till the next. */
