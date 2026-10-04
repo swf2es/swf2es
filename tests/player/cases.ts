@@ -2256,6 +2256,97 @@ function textDraw(abc: Uint8Array): Uint8Array {
   });
 }
 
+/**
+ * "Pixel", a pixel font: glyphs on a grid of an eighth of an em, as a
+ * bitmap font's outlines are. Its "a" is two contours, a top bar whose
+ * bottom edge runs along the corners of the outline below it, as an
+ * authoring tool joins the pixels; "b" and "o" have holes the other way
+ * round, cut as a font's are.
+ */
+const pixelFont = (id: number): Uint8Array => {
+  const p = (points: [number, number][]): [number, number][] =>
+    points.map(([x, y]) => [x * 128, y * 128]);
+  const boxes = (...list: [number, number, number, number][]) =>
+    list.map((b) => b.map((v) => v * 128) as [number, number, number, number]);
+  return w.font3({
+    id,
+    name: "Pixel",
+    ascent: 896,
+    descent: 256,
+    glyphs: [
+      {
+        char: "a",
+        advance: 768,
+        boxes: [],
+        contours: [
+          p([
+            [1, -5],
+            [1, -3],
+            [4, -3],
+            [4, -5],
+            [5, -5],
+            [5, 0],
+            [4, 0],
+            [4, -2],
+            [1, -2],
+            [1, 0],
+            [0, 0],
+            [0, -5],
+          ]),
+          p([
+            [4, -5],
+            [1, -5],
+            [1, -6],
+            [4, -6],
+          ]),
+        ],
+      },
+      {
+        char: "b",
+        advance: 640,
+        boxes: boxes([0, -6, 4, 0]),
+        contours: [
+          p([
+            [1, -5],
+            [1, -4],
+            [3, -4],
+            [3, -5],
+          ]),
+          p([
+            [1, -3],
+            [1, -1],
+            [3, -1],
+            [3, -3],
+          ]),
+        ],
+      },
+      { char: "i", advance: 256, boxes: boxes([0, -6, 1, -5], [0, -4, 1, 0]) },
+      {
+        char: "k",
+        advance: 640,
+        boxes: boxes([0, -6, 1, 0], [1, -3, 3, -2], [3, -5, 4, -3], [3, -2, 4, 0]),
+      },
+      {
+        char: "o",
+        advance: 640,
+        boxes: boxes([0, -5, 4, 0]),
+        contours: [
+          p([
+            [1, -4],
+            [1, -1],
+            [3, -1],
+            [3, -4],
+          ]),
+        ],
+      },
+      { char: "[", advance: 384, boxes: boxes([0, -6, 1, 1], [1, -6, 2, -5], [1, 0, 2, 1]) },
+      { char: "]", advance: 384, boxes: boxes([1, -6, 2, 1], [0, -6, 1, -5], [0, 0, 1, 1]) },
+      { char: ".", advance: 256, boxes: boxes([0, -1, 1, 0]) },
+      { char: " ", advance: 384, boxes: [] },
+    ],
+  });
+};
+
 // Three morph shapes: one whose straight edges pair with curves as its
 // fill, line width and colour change; one of two paths with a turning
 // gradient, in a DefineMorphShape2; and two regions of two colours whose
@@ -2769,6 +2860,30 @@ export const cases: PlayerCase[] = [
     // corner, part grey in Flash: 27 channels.
     tolerance: 64,
     maxOutliers: 40,
+  },
+  {
+    name: "glyph-contours",
+    swf: (abc) =>
+      w.swf({
+        width: 200,
+        height: 100,
+        frameRate: 24,
+        frameCount: 1,
+        tags: [
+          w.fileAttributes(true),
+          w.backgroundColor(0xffffff),
+          pixelFont(1),
+          w.doAbc(abc, "GlyphContours"),
+          w.symbolClass([[0, "GlyphContours"]]),
+          w.showFrame(),
+          w.end(),
+        ],
+      }),
+    script: "GlyphContours",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
   },
   {
     name: "blend-modes",

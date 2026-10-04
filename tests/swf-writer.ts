@@ -731,11 +731,13 @@ export function fontName(id: number, name: string, bold = false, italic = false)
   return tag(48, w.done());
 }
 
-/** A glyph of a test font: a character, its advance and its outline's rectangles, in em units of 1024, y down from the baseline. */
+/** A glyph of a test font: a character, its advance and its outline's rectangles and contours, in em units of 1024, y down from the baseline. */
 export interface GlyphSpec {
   char: string;
   advance: number;
   boxes: [number, number, number, number][];
+  /** Further contours, each its corners in order, closed back to its first. */
+  contours?: [number, number][][];
 }
 
 export interface FontSpec {
@@ -852,8 +854,18 @@ export function font3(spec: FontSpec): Uint8Array {
         .sb(n, dx)
         .sb(n, dy);
     };
-    for (const [k, [x0, y0, x1, y1]] of g.boxes.entries()) {
-      const [l, t, r, b] = [x0, y0, x1, y1].map((v) => v * scale);
+    // A box is a contour clockwise from its top left corner.
+    const contours = [
+      ...g.boxes.map(([l, t, r, b]): [number, number][] => [
+        [l, t],
+        [r, t],
+        [r, b],
+        [l, b],
+      ]),
+      ...(g.contours ?? []),
+    ];
+    for (const [k, points] of contours.entries()) {
+      const [l, t] = points[0].map((v) => v * scale);
       // Move, with the fill at the path's start.
       w.ub(1, 0).ub(5, k === 0 ? 1 | 4 : 1);
       const n = sbits(l, t);
@@ -864,12 +876,10 @@ export function font3(spec: FontSpec): Uint8Array {
 
       x = l;
       y = t;
-      for (const [px, py] of [
-        [r, t],
-        [r, b],
-        [l, b],
-        [l, t],
-      ]) {
+      for (const [px, py] of [...points.slice(1), points[0]].map(([a, b]) => [
+        a * scale,
+        b * scale,
+      ])) {
         edge(px - x, py - y);
         x = px;
         y = py;
@@ -913,8 +923,9 @@ export function font3(spec: FontSpec): Uint8Array {
   }
 
   for (const g of sorted) {
-    const xs = g.boxes.flatMap((b) => [b[0], b[2]]);
-    const ys = g.boxes.flatMap((b) => [b[1], b[3]]);
+    const points = (g.contours ?? []).flat();
+    const xs = [...g.boxes.flatMap((b) => [b[0], b[2]]), ...points.map((p) => p[0])];
+    const ys = [...g.boxes.flatMap((b) => [b[1], b[3]]), ...points.map((p) => p[1])];
     const [x0, x1, y0, y1] = xs.length
       ? [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)].map((v) => v * scale)
       : [0, 0, 0, 0];

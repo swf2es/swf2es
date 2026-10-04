@@ -95,7 +95,7 @@ function containment(paths: Path[]): Region[] {
       if (
         outer !== inner &&
         outer.area > inner.area &&
-        inside(outer.points, inner.points[0], inner.points[1]) &&
+        encloses(outer.points, inner.points) &&
         (!inner.parent || outer.area < inner.parent.area)
       ) {
         inner.parent = outer;
@@ -108,6 +108,47 @@ function containment(paths: Path[]): Region[] {
   }
 
   return regions.filter((r) => !r.parent);
+}
+
+/**
+ * Whether the polygon `outer` holds `inner`, two contours that do not
+ * cross, by a point of `inner` off `outer`'s outline: a pixel font's
+ * contours touch, and a corner they share is inside one and out of the
+ * other as the parity rule rounds it. Its corners, else its edges'
+ * middles; a contour lying wholly along the other's outline goes by its first.
+ */
+function encloses(outer: number[], inner: number[]): boolean {
+  for (const middles of [false, true]) {
+    for (let i = 0, j = inner.length - 2; i < inner.length; j = i, i += 2) {
+      const x = middles ? (inner[i] + inner[j]) / 2 : inner[i];
+      const y = middles ? (inner[i + 1] + inner[j + 1]) / 2 : inner[i + 1];
+      if (!onOutline(outer, x, y)) {
+        return inside(outer, x, y);
+      }
+    }
+  }
+
+  return inside(outer, inner[0], inner[1]);
+}
+
+/** Whether (px, py) lies on one of the polygon's edges, to within a millionth of a pixel. */
+function onOutline(points: number[], px: number, py: number): boolean {
+  const near = 1e-6;
+  for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
+    const [x0, y0, x1, y1] = [points[j], points[j + 1], points[i], points[i + 1]];
+    if (
+      px >= Math.min(x0, x1) - near &&
+      px <= Math.max(x0, x1) + near &&
+      py >= Math.min(y0, y1) - near &&
+      py <= Math.max(y0, y1) + near &&
+      Math.abs((x1 - x0) * (py - y0) - (y1 - y0) * (px - x0)) <=
+        near * Math.max(1, Math.hypot(x1 - x0, y1 - y0))
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
