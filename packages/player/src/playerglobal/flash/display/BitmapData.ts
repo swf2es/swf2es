@@ -146,6 +146,16 @@ function drawInto(
       ? { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }
       : matrixOf(s, matrix as AsObject);
   const c = ct === null || ct === undefined ? null : colorOf(s, ct as AsObject);
+  const plainColor =
+    !c ||
+    (c.rMul === 1 &&
+      c.gMul === 1 &&
+      c.bMul === 1 &&
+      c.aMul === 1 &&
+      c.rAdd === 0 &&
+      c.gAdd === 0 &&
+      c.bAdd === 0 &&
+      c.aAdd === 0);
   const blend = mode === null || mode === undefined ? "normal" : s.rt.toString(mode);
   const r = clip === null || clip === undefined ? null : rectOf(s, clip);
   if (data === null) {
@@ -174,7 +184,7 @@ function drawInto(
     const placed = { ...m, tx: m.tx - x0, ty: m.ty - y0 };
     // Plain source over goes on the GPU, the store left there until a script reads it.
     if (
-      !c &&
+      plainColor &&
       blend === "normal" &&
       s.drawer.drawInto(store, o.$display, placed, x0, y0, x1 - x0, y1 - y0, samples)
     ) {
