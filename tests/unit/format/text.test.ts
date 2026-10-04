@@ -113,12 +113,13 @@ test("DefineFont4 reads its style and optional CFF bytes", () => {
     .string("CFF")
     .raw(new Uint8Array([1, 2, 3]))
     .done();
+  const surrounded = new Uint8Array([0xff, ...embedded, 0xff]);
   const named = new BitWriter().u16(8).u8(3).string("Named CFF").done();
 
   assert.deepEqual(
-    readFont4(embedded, {
+    readFont4(surrounded, {
       code: tags.DefineFont4,
-      offset: 0,
+      offset: 1,
       length: embedded.length,
       long: false,
     }),
