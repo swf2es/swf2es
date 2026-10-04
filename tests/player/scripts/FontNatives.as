@@ -20,6 +20,10 @@ package {
         plain.hasGlyphs("a"), plain.hasGlyphs(""));
       try { Font.registerFont(Sprite); trace("invalid", "accepted"); }
       catch (e:Error) { trace("invalid", e.toString()); }
+      try { Font.registerFont(Font); trace("base", "accepted"); }
+      catch (e:Error) { trace("base", e.toString()); }
+      try { Font.registerFont(BareFont); trace("unbound", "accepted"); }
+      catch (e:Error) { trace("unbound", e.toString()); }
     }
 
     private function listed():String {
@@ -42,4 +46,6 @@ package {
       return result.join(",");
     }
   }
+
+  class BareFont extends Font {}
 }

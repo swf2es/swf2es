@@ -378,6 +378,7 @@ export class Scripting {
   private modules = 0;
   /** The URL of the SWF each module's code came from, by its script name, for codeUrl. */
   private readonly moduleUrls = new Map<string, string>();
+  private readonly moduleLibraries = new Map<string, Library>();
   /** Display objects made with an AS3 object, which Flash numbers for their default names. */
   instances = 0;
   private statusClass: AsObject | null = null;
@@ -464,11 +465,12 @@ export class Scripting {
   /** Load the SWF's DoABCs in tag order, each run unless its lazy flag defers it to first use, then its SymbolClass. */
   async loadSwf(swf: Swf, library: Library): Promise<void> {
     this.library = library;
-    this.fontLibraries.add(library);
+    this.addFontLibrary(library);
+
     library.domain = this.mainDomain;
     this.rt.swfVersion = swf.header.version;
     const decoded = decodeImages(library, this.decodeImage);
-    const run = await this.link(swf, this.mainDomain, this.url);
+    const run = await this.link(swf, this.mainDomain, this.url, library);
     await decoded;
     run();
     this.bind(swf, library);
@@ -479,7 +481,12 @@ export class Scripting {
    * each unless its lazy flag defers it to first use. Linking is
    * asynchronous, running is not, so a load can run its code in a frame.
    */
-  private async link(swf: Swf, domain: avm2.Domain, url: string): Promise<() => void> {
+  private async link(
+    swf: Swf,
+    domain: avm2.Domain,
+    url: string,
+    library: Library,
+  ): Promise<() => void> {
     // Every DoABC added before any compiles: avmplus has a frame's ABCs all
     // loaded before it verifies a method, so a class in the first tag may
     // extend or name one in the last (the corpus's property_priority).
@@ -493,7 +500,7 @@ export class Scripting {
 
     const runs: (() => void)[] = [];
     for (const { index, lazy } of added) {
-      const linked = await this.compileAt(index, domain, false, url);
+      const linked = await this.compileAt(index, domain, false, url, library);
       if (!lazy) {
         runs.push(() => this.rt.run(linked));
       }
@@ -603,11 +610,15 @@ export class Scripting {
     domain: avm2.Domain,
     builtin = false,
     url?: string,
+    library?: Library,
   ): Promise<Value> {
     const { module } = this.codegen.compile(this.hashes, index);
     const script = `swf2es-${++this.modules}.js`;
     if (url !== undefined) {
       this.moduleUrls.set(script, url);
+    }
+    if (library) {
+      this.moduleLibraries.set(script, library);
     }
 
     const named = `${module}//# sourceURL=${script}\n`;
@@ -743,6 +754,38 @@ export class Scripting {
     }
 
     return null;
+  }
+
+  /** Keep a SWF's own fonts and fonts registered elsewhere available to its fields. */
+  private addFontLibrary(library: Library): void {
+    if (this.fontLibraries.has(library)) {
+      return;
+    }
+
+    this.fontLibraries.add(library);
+    for (const font of this.registeredFonts.values()) {
+      library.fonts.add(font.font);
+    }
+  }
+
+  /** Make a registered font available to fields made by every loaded SWF. */
+  registerFont(cls: AsObject, font: FontCharacter): void {
+    if (
+      this.registeredFonts.has(cls) ||
+      [...this.registeredFonts.values()].some(
+        (registered) =>
+          registered.name.toLowerCase() === font.name.toLowerCase() &&
+          registered.bold === font.bold &&
+          registered.italic === font.italic,
+      )
+    ) {
+      return;
+    }
+
+    this.registeredFonts.set(cls, font);
+    for (const library of this.fontLibraries) {
+      library.fonts.add(font.font);
+    }
   }
 
   /** Decode a sound on first play; live libraries can share an identical decode. */
@@ -1151,6 +1194,18 @@ export class Scripting {
     }
 
     return this.url;
+  }
+
+  /** The SWF whose code called a playerglobal native. */
+  codeLibrary(): Library | null {
+    for (const at of avm2.frameScripts(new Error().stack)) {
+      const library = this.moduleLibraries.get(at);
+      if (library) {
+        return library;
+      }
+    }
+
+    return this.library;
   }
 
   /**
@@ -1572,7 +1627,7 @@ export class Scripting {
     library.domain = load.domain;
     const decoded = decodeImages(library, this.decodeImage);
     // One from bytes is its Loader's SWF's, as far as its own URL goes.
-    const run = await this.link(swf, load.domain, load.url ?? this.ownerUrl(load.loader));
+    const run = await this.link(swf, load.domain, load.url ?? this.ownerUrl(load.loader), library);
     await decoded;
     return () => this.complete(load, swf, library, run);
   }
@@ -1755,6 +1810,7 @@ export class Scripting {
     let root: MovieClip;
     if (run) {
       run();
+      this.addFontLibrary(library);
       this.bind(swf, library);
       root = new MovieClip(library.root, library);
       root.loaderInfo = info;

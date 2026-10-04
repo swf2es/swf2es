@@ -59,14 +59,23 @@ export function fontNatives(s: Scripting): avm2.Natives {
     static enumerateFonts(_enumerateDeviceFonts: boolean): AsObject {
       const cls = s.rt.classNamed("flash.text::Font");
       const fonts: FontCharacter[] = [];
-      for (const library of s.fontLibraries) {
+      const library = s.codeLibrary();
+      if (library) {
         for (const character of library.characters.values()) {
-          if (character.type === "font") {
+          if (
+            character.type === "font" &&
+            (character.font.layout || character.font.glyphs.length === 0)
+          ) {
             fonts.push(character);
           }
         }
       }
       fonts.push(...s.registeredFonts.values());
+      fonts.sort((a, b) => {
+        const first = a.name.toLowerCase();
+        const second = b.name.toLowerCase();
+        return first < second ? -1 : first > second ? 1 : 0;
+      });
 
       return s.rt.array(
         fonts.map((font) => {
@@ -83,7 +92,7 @@ export function fontNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("ArgumentError", 1508, "font");
       }
 
-      s.registeredFonts.set(cls, font);
+      s.registerFont(cls, font);
     }
   }
 

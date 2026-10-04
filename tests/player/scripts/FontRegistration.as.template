@@ -1,0 +1,68 @@
+package {
+  import flash.display.Loader;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.system.ApplicationDomain;
+  import flash.system.LoaderContext;
+  import flash.text.Font;
+  import flash.text.TextField;
+  import flash.text.TextFormat;
+  import flash.utils.ByteArray;
+
+  public class FontRegistration extends Sprite {
+    private static const INNER:String = "@@INNER@@";
+    private var field:TextField;
+
+    public function FontRegistration() {
+      field = makeField();
+      addChild(field);
+      trace("before", field.textWidth, widthOf());
+      var loader:Loader = new Loader();
+      addChild(loader);
+      loader.contentLoaderInfo.addEventListener(Event.INIT, function(e:Event):void {
+        trace("loaded", field.textWidth, widthOf());
+        var cls:Class = loader.contentLoaderInfo.applicationDomain.getDefinition("EmbeddedProbe") as Class;
+        Font.registerFont(cls);
+        trace("registered", field.textWidth, widthOf());
+      });
+      var context:LoaderContext = new LoaderContext(false, new ApplicationDomain());
+      context.allowCodeImport = true;
+      loader.loadBytes(decode(INNER), context);
+    }
+
+    private static function widthOf():Number {
+      return makeField().textWidth;
+    }
+
+    private static function makeField():TextField {
+      var field:TextField = new TextField();
+      field.embedFonts = true;
+      field.defaultTextFormat = new TextFormat("Probe", 20);
+      field.text = "ab";
+      return field;
+    }
+
+    private static function decode(text:String):ByteArray {
+      const ALPHABET:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      var out:ByteArray = new ByteArray();
+      var bits:int = 0;
+      var have:int = 0;
+      for (var i:int = 0; i < text.length; i++) {
+        var c:String = text.charAt(i);
+        if (c == "=") {
+          break;
+        }
+
+        bits = ((bits << 6) | ALPHABET.indexOf(c)) & 0xffff;
+        have += 6;
+        if (have >= 8) {
+          have -= 8;
+          out.writeByte((bits >> have) & 0xff);
+        }
+      }
+
+      out.position = 0;
+      return out;
+    }
+  }
+}
