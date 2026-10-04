@@ -401,6 +401,62 @@ test("blurred filter inputs release pooled textures without sharing idle listene
   }
 });
 
+test("filter back textures avoid shared empty listeners and release their private source", async () => {
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = await import(entry);
+  const systems = [new pixi.FilterSystem({}), new pixi.FilterSystem({})];
+  const input = pixi.RenderTexture.create({ width: 16, height: 16 });
+  const back = pixi.RenderTexture.create({ width: 16, height: 16 });
+  const listeners = pixi.Texture.EMPTY.source.listenerCount("change");
+  const emptySources = [];
+  try {
+    for (const system of systems) {
+      const group = system._globalFilterBindGroup;
+      const data = {
+        inputTexture: input,
+        backTexture: pixi.Texture.EMPTY,
+        firstEnabledIndex: 0,
+        lastEnabledIndex: 0,
+        filters: [{ apply() {} }],
+      };
+      system._applyFiltersToTexture(data, false);
+      const empty = group.getResource(3);
+      emptySources.push(empty);
+      assert.notEqual(empty, pixi.Texture.EMPTY.source);
+      assert.equal(data.backTexture, pixi.Texture.EMPTY);
+      assert.equal(pixi.Texture.EMPTY.source.listenerCount("change"), listeners);
+
+      data.backTexture = back;
+      system._applyFiltersToTexture(data, false);
+      assert.equal(group.getResource(3), back.source);
+      assert.equal(data.backTexture, back);
+
+      data.backTexture = pixi.Texture.EMPTY;
+      data.filters[0].apply = () => {
+        throw new Error("filter failed");
+      };
+      assert.throws(() => system._applyFiltersToTexture(data, false), /filter failed/);
+      assert.equal(data.backTexture, pixi.Texture.EMPTY);
+      assert.equal(group.getResource(3), empty);
+    }
+
+    assert.notEqual(emptySources[0], emptySources[1]);
+  } finally {
+    for (const system of systems) {
+      system.destroy();
+    }
+    input.destroy(true);
+    back.destroy(true);
+  }
+
+  for (const source of emptySources) {
+    assert.equal(source.destroyed, true);
+    assert.equal(source.listenerCount("change"), 0);
+  }
+  assert.equal(pixi.Texture.EMPTY.source.listenerCount("change"), listeners);
+});
+
 test("a convolution pads its reach and the pixel adl adds, and knows the padding after it", async () => {
   const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
   const { displayFilters } = await import("../../../packages/player/dist/pixi-filters.js");
