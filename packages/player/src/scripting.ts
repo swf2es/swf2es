@@ -37,6 +37,7 @@ import { decodeImages, decodeInBrowser, type ImageDecode } from "./images.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import { finishSounds } from "./playerglobal/flash/media/Sound.js";
+import { browserNavigate, type Navigate } from "./playerglobal/flash/net/navigateToURL.js";
 import { defaultStorage, type SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
 import {
   type PlatformCapabilities,
@@ -209,6 +210,8 @@ export class Scripting {
   }[] = [];
   readonly socket: SocketHost | null;
   readonly audio: AudioHost | null;
+  /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
+  readonly navigate: Navigate | null;
   private readonly audioEntries = new WeakMap<SoundCharacter, SharedAudio>();
   private readonly sharedAudio = new Map<number, SharedAudio[]>();
   private readonly sharedAudioGone = new FinalizationRegistry<{
@@ -352,6 +355,7 @@ export class Scripting {
       externalInterface?: ExternalInterfaceHost;
       socket?: SocketHost;
       audio?: AudioHost | null;
+      navigate?: Navigate | null;
       decodeImage?: ImageDecode | null;
       screenCapabilities?: Partial<ScreenCapabilities>;
       /**
@@ -380,6 +384,7 @@ export class Scripting {
     this.externalInterface = options.externalInterface ?? null;
     this.socket = options.socket ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
+    this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
     this.storage = options.storage ?? defaultStorage();
@@ -1196,14 +1201,40 @@ export class Scripting {
     this.trackRequest(completed);
   }
 
+  /**
+   * navigateToURL's page, resolved as a load's URL is; nothing where the
+   * host opens none, or for an empty URL, which Ruffle's navigators ignore
+   * rather than open the SWF's own directory. A browser navigates only by
+   * GET or POST, so any other method goes as a GET, its data in the query,
+   * as Flash's does from a browser.
+   */
+  navigateTo(request: AsObject, window: string | null): void {
+    if (String(request.$url) === "") {
+      return;
+    }
+
+    const post = String(request.$method ?? "GET").toUpperCase() === "POST";
+    this.navigate?.(this.fetchRequest(request, this.url, post ? "POST" : "GET"), window);
+  }
+
+  /** sendToURL's request, sent by the host's fetch and its response dropped, as Flash ignores it. */
+  sendTo(request: AsObject): void {
+    const fetch = this.fetch;
+    if (!fetch) {
+      return;
+    }
+
+    fetch(this.fetchRequest(request, this.url), new AbortController().signal).catch(() => {});
+  }
+
   /** Snapshot a URLRequest at load time, before scripts can change its data or headers. */
-  private fetchRequest(request: AsObject | string, base: string): FetchRequest {
+  private fetchRequest(request: AsObject | string, base: string, as?: string): FetchRequest {
     if (typeof request === "string") {
       return { url: resolve(base, request), method: "GET", headers: [], body: null };
     }
 
     let url = String(request?.$url ?? "");
-    const method = String(request?.$method ?? "GET");
+    const method = as ?? String(request?.$method ?? "GET");
     const get = method.toUpperCase() === "GET";
     const post = method.toUpperCase() === "POST";
     const data = request?.$data as Value;
