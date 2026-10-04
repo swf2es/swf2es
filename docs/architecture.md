@@ -690,7 +690,10 @@ player's own hit test. It shows the cursor the player chooses, as Ruffle
 does: a hand over a button that uses one, disabled or not, or under the
 nearest sprite in `buttonMode` whose `useHandCursor` and `enabled` are
 true, and an I-beam over selectable text; a link in text shows no hand
-yet, and `Mouse.cursor` is not read.
+yet, and `Mouse.cursor` is not read. `Mouse.hide()` makes it none over
+the stage, at once, wherever a script calls it, and `Mouse.show()` brings
+back the one the pointer is over; the pointer still picks its targets
+while it is hidden, as in Flash and Ruffle.
 The display list decides the target, so masks, scroll rectangles, depth,
 visibility, `mouseEnabled` and `mouseChildren` use the same objects that
 scripts see; Pixi's render tree does not choose a Flash target. The first

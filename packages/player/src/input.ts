@@ -340,6 +340,11 @@ export class PointerInput {
       this.pressed = null;
     }
 
+    this.updateCursor();
+  }
+
+  /** Show a changed cursor immediately, including when a script hides or shows it. */
+  updateCursor(): void {
     const cursor = this.cursor();
     if (cursor !== this.shown) {
       this.shown = cursor;
@@ -354,6 +359,10 @@ export class PointerInput {
    * text, whose links do not show a hand yet.
    */
   cursor(): Cursor {
+    if (this.scripting.mouseVisible === false) {
+      return "none";
+    }
+
     const d = this.hover;
     // A disabled button keeps its hand, as Ruffle's AVM2 button does.
     if (d instanceof ButtonObject) {
@@ -378,7 +387,7 @@ export class PointerInput {
 }
 
 /** A CSS cursor the host shows over the player. */
-export type Cursor = "default" | "pointer" | "text";
+export type Cursor = "default" | "pointer" | "text" | "none";
 
 /** Whether `d` is a button, or a sprite in buttonMode, whose hover Ruffle redraws for. */
 function buttonLike(d: DisplayObject | null): boolean {

@@ -174,6 +174,27 @@ test("an unloaded LoaderInfo reports its owner's URL before any load", { skip },
   assert.equal(rt.getProperty(info, rt.publicName("loaderURL")), "http://example.test/outer.swf");
 });
 
+test("Mouse.hide and show set the host's cursor as a script calls them", { skip }, async () => {
+  const lines: string[] = [];
+  const compile = compiler(out);
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compile("MouseVisibility"), 1, "MouseVisibility"), scripting);
+  assert.ok(player.pointer);
+  player.pointer.onCursor = (cursor) => lines.push(`cursor ${cursor}`);
+  await player.start();
+
+  // At once, between the script's own lines, and only when it changes.
+  assert.deepEqual(lines, [
+    "cursor none",
+    "hidden",
+    "hidden twice",
+    "cursor default",
+    "shown",
+    "shown twice",
+  ]);
+});
+
 test("loaderInfo.parameters: the main SWF's query and flashvars, a loaded SWF's query or context's", {
   skip,
 }, async () => {

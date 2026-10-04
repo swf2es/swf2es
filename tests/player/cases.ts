@@ -3002,6 +3002,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "mouse-visibility",
+    swf: (abc) => bare(abc, 1, "MouseVisibility"),
+    script: "MouseVisibility",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "sprite-sound",
     swf: (abc) => bare(abc, 1, "SpriteSound"),
     script: "SpriteSound",

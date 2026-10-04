@@ -50,6 +50,9 @@ export class Player {
     this.background = backgroundColor(this.swf);
     this.keyboard = scripting ? new KeyboardInput(this.stage, scripting) : null;
     this.pointer = scripting ? new PointerInput(this.stage, scripting, this.keyboard) : null;
+    if (scripting) {
+      scripting.pointer = this.pointer;
+    }
     this.root = new MovieClip(this.library.root, this.library);
     this.stage.addChildAt(this.root, 0);
     if (!scripting) {

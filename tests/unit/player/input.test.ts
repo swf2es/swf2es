@@ -184,6 +184,41 @@ test("the cursor is a hand under a sprite in buttonMode, as useHandCursor says, 
   assert.equal(input.cursor(), "default");
 });
 
+test("Mouse.hide and show change the host cursor without changing pointer targets", async () => {
+  const { mouseNatives } = await import(
+    "../../../packages/player/dist/playerglobal/flash/ui/Mouse.js"
+  );
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
+  const button = new ButtonObject();
+  button.object = { $display: button } as never;
+  const area = new Container();
+  area.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+  button.hitTestState = area;
+  stage.addChildAt(button, 0);
+  const scripting = {
+    stageWidth: 100,
+    stageHeight: 100,
+    mouseVisible: true,
+    rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
+  } as unknown as Scripting;
+  const input = new PointerInput(stage, scripting);
+  scripting.pointer = input;
+  const shown: string[] = [];
+  input.onCursor = (cursor) => shown.push(cursor);
+  const natives = mouseNatives(scripting);
+  const hide = natives["flash.ui::Mouse.hide"](scripting.rt) as () => void;
+  const show = natives["flash.ui::Mouse.show"](scripting.rt) as () => void;
+
+  input.handle("move", { x: 10, y: 10 });
+  hide();
+  input.handle("move", { x: 11, y: 10 });
+  show();
+  assert.equal(pointerTarget(stage, 11, 10, 100, 100), button);
+  assert.deepEqual(shown, ["pointer", "none", "pointer"]);
+});
+
 test("a pointer event asks for a redraw only where it changes a button, focus or a selection", () => {
   const stage = new Container();
   stage.object = { $display: stage } as never;
