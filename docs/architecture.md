@@ -891,7 +891,8 @@ the query has, as Ruffle's do (Flash's order was not checked: its
 harness can give neither). A SWF loaded by URL has its URL's query from
 its second `PROGRESS` on, decoded, `+` as a space, a name without `=`
 empty, an empty name left out and the last of a name kept; one from
-bytes has none. A `LoaderContext`'s `parameters` take the place of the
+bytes has none here, which adl could not tell from the loader's own
+query (Ruffle passes that on). A `LoaderContext`'s `parameters` take the place of the
 query from the call on, and a value in them that is not a String, null
 included, is refused at the call with `IllegalOperationError` #2196. An
 unload leaves none (the `loader-parameters` case and the node tests).

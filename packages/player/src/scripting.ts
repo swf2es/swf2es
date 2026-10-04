@@ -1030,8 +1030,9 @@ export class Scripting {
   /** The main SWF's loaderInfo.parameters: its URL's query, then the flashvars. */
   mainParameters(): ReadonlyMap<string, string> {
     const parameters = queryParameters(this.url);
+    // A host in plain JavaScript may give other values: Flash's are strings.
     for (const [name, value] of Object.entries(this.flashvars)) {
-      parameters.set(name, value);
+      parameters.set(name, String(value));
     }
 
     return parameters;
