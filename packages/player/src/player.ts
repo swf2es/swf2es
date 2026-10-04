@@ -85,6 +85,7 @@ export class Player {
     s.describe(info, this.bytes, this.swf);
     info.$loaded = this.bytes.length;
     info.$url = s.url;
+    info.$params = s.mainParameters();
     this.root.loaderInfo = info;
     // The main SWF's root is root1, as Flash names the root at depth 0.
     this.root.name = "root1";

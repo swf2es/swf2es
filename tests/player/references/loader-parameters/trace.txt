@@ -1,0 +1,35 @@
+own {} false
+given before {}
+given progress {=empty:string,a=1:string,b=two:string,c d=e&f:string}
+given progress {=empty:string,a=1:string,b=two:string,c d=e&f:string}
+given after {=empty:string,a=1:string,b=two:string,c d=e&f:string}
+none before {}
+none progress {}
+none progress {}
+none after {}
+empty before {}
+empty progress {}
+empty progress {}
+empty after {}
+string before {}
+string progress {}
+string progress {}
+string after {}
+bad before {}
+refused flash.errors::IllegalOperationError 2196 Error #2196: Parameter LoaderContext.parameters must be an Object with only String values.
+bad before {}
+refused flash.errors::IllegalOperationError 2196 Error #2196: Parameter LoaderContext.parameters must be an Object with only String values.
+bad before {}
+refused flash.errors::IllegalOperationError 2196 Error #2196: Parameter LoaderContext.parameters must be an Object with only String values.
+bad before {}
+refused flash.errors::IllegalOperationError 2196 Error #2196: Parameter LoaderContext.parameters must be an Object with only String values.
+bad before {}
+refused flash.errors::IllegalOperationError 2196 Error #2196: Parameter LoaderContext.parameters must be an Object with only String values.
+loaded =empty,a=1,b=two,c d=e&f {=empty:string,a=1:string,b=two:string,c d=e&f:string}
+loaded  {}
+loaded  {}
+loaded  {}
+unloaded {}
+given progress {z=1:string}
+given progress {z=1:string}
+reloaded {z=1:string}

@@ -1176,6 +1176,21 @@ function definitions(compile: Compile): Uint8Array {
   });
 }
 
+// loaderInfo.parameters of SWFs loaded from bytes with a LoaderContext's
+// (scripts/LoaderParameters.as.template, scripts/ParametersInner.as).
+function loaderParameters(compile: Compile): Uint8Array {
+  const inner = bare(compile("ParametersInner"), 1, "ParametersInner");
+  const template = readFileSync(
+    new URL("scripts/LoaderParameters.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "LoaderParameters",
+    template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
+  );
+  return bare(abc, 3);
+}
+
 function loadsInit(compile: Compile): Uint8Array {
   return loading(compile, "LoadsInit", 1);
 }
@@ -2839,6 +2854,14 @@ export const cases: PlayerCase[] = [
   },
   // The unload at INIT follows frame 2's capture (see the harness): frame 3 shows it.
   { name: "loads-init", build: loadsInit, frames: 3, capture: [3], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "loader-parameters",
+    build: loaderParameters,
+    frames: 3,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "vector-definitions",
     swf: bare,

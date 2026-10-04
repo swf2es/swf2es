@@ -173,6 +173,61 @@ test("an unloaded LoaderInfo reports its owner's URL before any load", { skip },
   assert.equal(rt.getProperty(info, rt.publicName("loaderURL")), "http://example.test/outer.swf");
 });
 
+test("loaderInfo.parameters: the main SWF's query and flashvars, a loaded SWF's query or context's", {
+  skip,
+}, async () => {
+  const lines: string[] = [];
+  const compile = compiler(out);
+  const inner = bare(compile("ParametersInner"), 1, "ParametersInner");
+  const fetches: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    url: "http://example.test/main.swf?q=1&shared=query&x=a+b#shared=fragment",
+    parameters: { shared: "flashvars", f: "v w" },
+    fetch: async ({ url }) => {
+      fetches.push(url);
+      return { bytes: inner, status: 200, headers: [] };
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compile("FlashVars"), 2, "FlashVars"), scripting);
+  await player.start();
+
+  // The flashvars override the query's names, as Ruffle's; the stage's and
+  // the root's are the main SWF's. A context's parameters are told from
+  // the call on.
+  const main = "{f=v w,q=1,shared=flashvars,x=a b}";
+  assert.deepEqual(lines.splice(0), [
+    `main ${main} ${main} ${main}`,
+    "query after {}",
+    "given after {g=ctx}",
+  ]);
+  assert.deepEqual(fetches, [
+    "http://example.test/inner.swf?k=1&k=2&t&=v&w=x=y+z&s=%E2%82%AC#k=3",
+    "http://example.test/inner.swf?k=1",
+  ]);
+
+  // A URL's query comes with the SWF, at the second PROGRESS, as Flash's
+  // (decoded, the last of a name kept, an empty name left out); the
+  // context's parameters take its place. The contents' constructors see
+  // the same, before the frame's script.
+  await scripting.settled();
+  player.tick();
+  const query = "{k=2,s=€,t=,w=x=y z}";
+  assert.deepEqual(lines.splice(0), [
+    "query open {}",
+    "query progress {}",
+    `query progress ${query}`,
+    "given open {g=ctx}",
+    "given progress {g=ctx}",
+    "given progress {g=ctx}",
+    `loaded ${query.slice(1, -1)} ${query}`,
+    "loaded g=ctx {g=ctx}",
+    `query init ${query}`,
+    "given init {g=ctx}",
+  ]);
+});
+
 test("a Loader's load of a URL fetches through the host, and fails as one, in frames", {
   skip,
 }, async () => {
