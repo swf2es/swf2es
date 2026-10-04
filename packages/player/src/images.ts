@@ -103,6 +103,17 @@ async function decodeFrame(data: Uint8Array, type: string): Promise<DecodedImage
   }
 }
 
+/** Whether `library` has an image decodeImages has still to decode. */
+export function hasUndecoded(library: Library): boolean {
+  for (const character of library.characters.values()) {
+    if (character.type === "bitmap" && !character.pixels) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /** Decode every image of `library` not yet decoded, all at once. */
 export async function decodeImages(library: Library, decode: ImageDecode | null): Promise<void> {
   const pending: Promise<void>[] = [];

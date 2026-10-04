@@ -22,6 +22,8 @@ export interface PlayerCase {
   maxOutliers: number;
   /** Drawn in Flash in an adl of its own (FlashJob.alone). */
   alone?: boolean;
+  /** Played as a host showing the stage this many times its size draws it (page.ts); Flash draws it at its size. */
+  zoom?: number;
 }
 
 const square = (id: number, color: number, size = 1000) =>
@@ -1339,6 +1341,74 @@ function loading(compile: Compile, script: string, innerFrames: number): Uint8Ar
   });
 }
 
+// AVM1 SWFs an AS3 one loads (scripts/Avm1Movie.as.template): one of
+// version 8 whose FileAttributes leaves out ActionScript 3, three frames
+// that move a square and add another, and one of version 6 without
+// FileAttributes, a green square. The first's frame 1 has a DoAction,
+// `x = "1"`, which shows nothing: the player runs no AVM1 actions.
+function avm1Movie(compile: Compile): Uint8Array {
+  const inner = w.swf({
+    version: 8,
+    width: 100,
+    height: 50,
+    frameRate: 12,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      square(2, 0x0000ff, 400),
+      w.place({ depth: 1, character: 1, matrix: { tx: 100, ty: 100 } }),
+      // Push "x", push "1", SetVariable, End.
+      w.tag(12, Uint8Array.from([0x96, 3, 0, 0, 0x78, 0, 0x96, 3, 0, 0, 0x31, 0, 0x1d, 0])),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, matrix: { tx: 500, ty: 100 } }),
+      w.place({ depth: 2, character: 2, matrix: { tx: 1400, ty: 400 } }),
+      w.showFrame(),
+      w.remove(2),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const bare = w.swf({
+    version: 6,
+    width: 60,
+    height: 40,
+    frameRate: 30,
+    frameCount: 1,
+    tags: [
+      w.backgroundColor(0xffffff),
+      square(1, 0x00aa00, 600),
+      w.place({ depth: 1, character: 1, matrix: { tx: 200, ty: 200 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const template = readFileSync(new URL("scripts/Avm1Movie.as.template", import.meta.url), "utf8");
+  const abc = compile(
+    "Avm1Movie",
+    template
+      .replaceAll("@@INNER@@", Buffer.from(inner).toString("base64"))
+      .replaceAll("@@BARE@@", Buffer.from(bare).toString("base64")),
+  );
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "Avm1Movie"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // What Crossbridge's runtime asks of the player as it starts
 // (scripts/CrossbridgeRuntime.as): a ByteArray subclass bound to
 // DefineBinaryData, as Crossbridge keeps a C program's data, among the rest.
@@ -2380,6 +2450,84 @@ function morphs(): Uint8Array {
   });
 }
 
+// A pale band in overlay drifting a quarter pixel each way a frame over a
+// checkerboard, once on the root and once inside a clip drawn as a layer,
+// whose blend reads the layer's pixels: what shows through the band must
+// stay where it is, at a zoom whose resolution is no whole number.
+function blendDrift(): Uint8Array {
+  const frames = 8;
+  const rect = (x: number, y: number, width: number, height: number): w.PathCommand[] => [
+    { move: [x, y] },
+    { line: [x + width, y] },
+    { line: [x + width, y + height] },
+    { line: [x, y + height] },
+    { line: [x, y] },
+  ];
+  const cells: w.PathCommand[][] = [];
+  for (let row = 0; row < 8; row++) {
+    for (let col = row % 2; col < 10; col += 2) {
+      cells.push(rect(col * 80, row * 80, 80, 80));
+    }
+  }
+
+  const dark = w.shape({
+    id: 1,
+    bounds: [0, 800, 0, 640],
+    fills: [0x101820],
+    paths: [{ fill1: 1, commands: rect(0, 0, 800, 640) }],
+  });
+  const checker = w.shape({
+    id: 2,
+    bounds: [0, 800, 0, 640],
+    fills: [0xf0e8d0],
+    paths: cells.map((commands) => ({ fill1: 1, commands })),
+  });
+  const band = w.shape({
+    id: 3,
+    version: 3,
+    bounds: [0, 300, 0, 500],
+    fills: [0xc0ffffff],
+    paths: [{ fill1: 1, commands: rect(0, 0, 300, 500) }],
+  });
+  const ground = (x: number, y: number) => [
+    w.place({ depth: 1, character: 1, matrix: { tx: x, ty: y } }),
+    w.place({ depth: 2, character: 2, matrix: { tx: x, ty: y } }),
+  ];
+  const drift = (f: number, x: number, y: number) =>
+    w.place({
+      depth: 3,
+      character: f === 0 ? 4 : undefined,
+      move: f > 0,
+      matrix: { tx: x + 5 * f, ty: y + 5 * f },
+      blendMode: f === 0 ? 13 : undefined,
+    });
+  const layered: Uint8Array[] = [...ground(0, 0)];
+  const root: Uint8Array[] = [
+    ...ground(1000, 100),
+    w.place({ depth: 4, character: 5, matrix: { tx: 100, ty: 100 }, blendMode: 2 }),
+  ];
+  for (let f = 0; f < frames; f++) {
+    layered.push(drift(f, 160, 40), w.showFrame());
+    root.push(drift(f, 1160, 140), w.showFrame());
+  }
+
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameCount: frames,
+    tags: [
+      w.backgroundColor(0xeeeeee),
+      dark,
+      checker,
+      band,
+      w.sprite(4, 1, [w.place({ depth: 1, character: 3 }), w.showFrame(), w.end()]),
+      w.sprite(5, frames, [...layered, w.end()]),
+      ...root,
+      w.end(),
+    ],
+  });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
@@ -2784,6 +2932,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 200,
   },
   {
+    name: "blend-drift",
+    swf: blendDrift(),
+    frames: 8,
+    capture: [1, 2, 3, 4, 5, 6, 7, 8],
+    // A resolution of 6, where Pixi's arithmetic lands a hair off whole pixels.
+    zoom: 1.5,
+    // Within 3 a channel, the layer's 8-bit round trip, as for `blend-modes`.
+    tolerance: 3,
+    maxOutliers: 0,
+  },
+  {
     name: "blend-edges",
     swf: (abc) => bare(abc, 1, "BlendEdges", 200, 150),
     script: "BlendEdges",
@@ -3074,6 +3233,16 @@ export const cases: PlayerCase[] = [
   // Last: the content it unloads plays on in Flash until collected, and its
   // traces would reach the case recorded after it.
   { name: "loads", build: loads, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
+  // Frame 1 is drawn at the outer SWF's INIT, before the AVM1 movies come at
+  // that frame's end; the player draws the frame whole, with them.
+  {
+    name: "avm1-movie",
+    build: avm1Movie,
+    frames: 6,
+    capture: [2, 3, 4, 5, 6],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "crossbridge-runtime",
     build: crossbridgeRuntime,

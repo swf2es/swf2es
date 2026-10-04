@@ -157,6 +157,8 @@ export class DisplayObject {
   transformed = false;
   /** Its other face, the AS3 object a script sees; null in an AVM1 movie. */
   object: avm2.AsObject | null = null;
+  /** The root of an AVM1 movie an AS3 Loader loaded: its other face, an AVM1Movie, is no InteractiveObject. */
+  avm1Root = false;
   /** The LoaderInfo of the SWF this is the root of: set on the main root and on each loaded SWF's; null below. */
   loaderInfo: avm2.AsObject | null = null;
   /** What its Graphics drew, for a Shape or Sprite a script draws in; null until one does. */

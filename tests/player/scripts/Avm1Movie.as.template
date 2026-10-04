@@ -1,0 +1,138 @@
+// An AS3 SWF loading AVM1 SWFs with loadBytes: the content is an AVM1Movie,
+// a DisplayObject AS3 cannot script into, whose LoaderInfo tells the AVM1
+// SWF's header. The inner SWFs' bytes are put in as base64 by
+// tests/player/cases.ts: @@INNER@@ has a FileAttributes tag without the
+// ActionScript 3 flag and three frames, @@BARE@@ no FileAttributes at all.
+package {
+  import flash.display.AVM1Movie;
+  import flash.display.DisplayObject;
+  import flash.display.DisplayObjectContainer;
+  import flash.display.Loader;
+  import flash.display.MovieClip;
+  import flash.events.Event;
+  import flash.events.IOErrorEvent;
+  import flash.system.ApplicationDomain;
+  import flash.system.LoaderContext;
+  import flash.utils.ByteArray;
+  import flash.utils.getQualifiedClassName;
+  import flash.utils.getQualifiedSuperclassName;
+
+  public class Main extends MovieClip {
+    private static const INNER:String = "@@INNER@@";
+    private static const BARE:String = "@@BARE@@";
+    private var loader:Loader;
+    private var bare:Loader;
+    private var base:int = -1;
+
+    /** instanceN as instance+K from the first Loader's N: the count is the harness's too. */
+    private function rel(name:String):String {
+      var n:int = int(name.replace("instance", ""));
+      if (base < 0) {
+        base = n;
+      }
+
+      return "instance+" + (n - base);
+    }
+
+    public function Main() {
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void { trace("outer enterFrame", currentFrame); });
+      addEventListener(Event.EXIT_FRAME, function(e:Event):void { trace("outer exitFrame", currentFrame); });
+      addFrameScript(0, frame1, 1, frame2, 2, frame3);
+    }
+
+    private function frame1():void {
+      try {
+        new AVM1Movie();
+      } catch (e:Error) {
+        trace("new AVM1Movie", e);
+      }
+
+      trace("super", getQualifiedSuperclassName(AVM1Movie));
+      loader = load(INNER, 0);
+      bare = load(BARE, 100);
+    }
+
+    private function load(bytes:String, x:Number):Loader {
+      var loader:Loader = new Loader();
+      loader.x = x;
+      var info:* = loader.contentLoaderInfo;
+      info.addEventListener(Event.OPEN, report);
+      info.addEventListener(IOErrorEvent.IO_ERROR, report);
+      info.addEventListener(Event.INIT, report);
+      info.addEventListener(Event.COMPLETE, report);
+      addChild(loader);
+      // AIR, where Flash is run, refuses to load code from bytes unless asked to.
+      var context:LoaderContext = new LoaderContext(false, ApplicationDomain.currentDomain);
+      context.allowCodeImport = true;
+      loader.loadBytes(decode(bytes), context);
+      trace("after loadBytes", rel(loader.name), loader.numChildren, loader.content);
+      return loader;
+    }
+
+    private function report(e:Event):void {
+      var info:* = e.target;
+      var loader:Loader = info.loader;
+      var content:DisplayObject = loader.content;
+      trace("event " + e.type, loader == this.loader ? "inner" : "bare", loader.numChildren, getQualifiedClassName(content), info.content == content, loader.numChildren ? loader.getChildAt(0) == content : "-");
+      if (e.type != Event.INIT) {
+        return;
+      }
+
+      trace("  info", info.actionScriptVersion, info.swfVersion, info.frameRate, info.width, info.height, info.contentType, info.bytesTotal, info.url == null, info.loader == loader);
+      try {
+        trace("  applicationDomain", info.applicationDomain);
+      } catch (error:Error) {
+        trace("  applicationDomain", error);
+      }
+
+      trace("  content", rel(content.name), content.parent == loader, content.root == content, content.stage == stage, content.loaderInfo == info, content is DisplayObjectContainer, content is MovieClip, content is AVM1Movie);
+      trace("  size", content.width, content.height, content.x, content.y, content.getBounds(this), content.hitTestPoint(loader.x + 10, 10, false));
+      trace("  stage", stage.frameRate);
+      var movie:AVM1Movie = content as AVM1Movie;
+      try {
+        movie.call("f", 1);
+      } catch (error:Error) {
+        trace("  call", error);
+      }
+
+      try {
+        movie.addCallback("f", function():void {});
+      } catch (error:Error) {
+        trace("  addCallback", error);
+      }
+    }
+
+    private function frame2():void {
+      trace("outer frame 2", loader.numChildren, getQualifiedClassName(loader.content));
+    }
+
+    private function frame3():void {
+      stop();
+      trace("outer frame 3", loader.content.width, loader.content.height, loader.content.getBounds(loader));
+    }
+
+    /** Base64, as the bytes are carried in this script. */
+    private static function decode(text:String):ByteArray {
+      const ALPHABET:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      var out:ByteArray = new ByteArray();
+      var bits:int = 0;
+      var have:int = 0;
+      for (var i:int = 0; i < text.length; i++) {
+        var c:String = text.charAt(i);
+        if (c == "=") {
+          break;
+        }
+
+        bits = ((bits << 6) | ALPHABET.indexOf(c)) & 0xffff;
+        have += 6;
+        if (have >= 8) {
+          have -= 8;
+          out.writeByte((bits >> have) & 0xff);
+        }
+      }
+
+      out.position = 0;
+      return out;
+    }
+  }
+}

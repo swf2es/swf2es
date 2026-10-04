@@ -895,7 +895,7 @@ test("a blend's copy of what is behind it starts at the texel its region does", 
       },
     },
   };
-  const surface = { colorTexture: { source: { _resolution: r } } };
+  const surface = { colorTexture: { source: { resolution: r } } };
 
   // A blend in a layer, its region 18 texels left of and 3 above the
   // layer's, a hair short of whole: Pixi's floor took 19 and 4, and the

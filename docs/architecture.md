@@ -584,6 +584,10 @@ medium, 4×4 at high and best. The test page draws the same way, at that
 many times the resolution without multisampling, averaged down, and its
 frames then match Flash's to the pixel for straight edges, and within a
 quarter pixel's anti-aliasing for curved lines and lines under a skew.
+A case may give a zoom, as a host showing the stage larger does: the
+page's resolution is then the zoom times the grid, and the stage is drawn
+at the zoom's inverse, so the samples are the same and only Pixi's
+arithmetic at that resolution, no whole number, differs.
 
 ### Scripts and the display list
 
@@ -984,7 +988,7 @@ the tests do, to see Flash's frame. `SymbolClass` bindings are the
 library's, since character ids collide across SWFs. The player package
 has no I/O: `load` of a URL asks the host for the bytes through a
 function the `Scripting` is given, with a resolved URL, method, headers,
-copied body and `AbortSignal`. A fetch that fails, or bytes that are not an AS3 SWF,
+copied body and `AbortSignal`. A fetch that fails, or bytes that are no SWF,
 end in `IO_ERROR` on the `LoaderInfo` in the frame. `close` drops a
 pending load and aborts its fetch; `unload`, and a new load on the same
 `Loader`, do that and take the content out at the call, the `LoaderInfo`
@@ -1004,6 +1008,33 @@ the one whose code made it, even before the first load; the runtime does not
 track callers, so it is the SWF the `Loader` is on the display list of when
 it loads, else the main one (Ruffle's `loader_loaderurl` adds the loader first, as SWFs
 usually do).
+
+An AVM1 SWF (no FileAttributes, or one without the ActionScript 3 flag)
+loads as Flash loads one into AS3: the content is an `AVM1Movie`, a
+`DisplayObject` whose other face is the AVM1 root's clip, so AS3 sees
+none of its children; `actionScriptVersion` is 2, and the header's
+version, frame rate and size are the SWF's, `parameters` the context's
+or the URL's as for an AS3 SWF. `new AVM1Movie()` is refused, #2012.
+Flash makes a `loadBytes`' `AVM1Movie` in the call, which names it then,
+and has it in the `Loader` at the end of that frame, after `EXIT_FRAME`,
+with its `INIT` and `COMPLETE`, the last asked first; the movie keeps its
+first frame through the next frame's advance (the `avm1-movie` case, as
+adl traces and draws it). One with images comes at the end of the frame
+after they are decoded, or ends in #2124 if the decoder refuses them.
+One from a URL comes as an AS3 SWF's content does, `OPEN`, the progress
+and the child in the frame's construct phase, `INIT` and `COMPLETE` at
+its end, and plays on from the next frame: that follows Ruffle, which
+loads both kinds alike, not adl, whose harness loads only from bytes.
+The `AVM1Movie` is no `InteractiveObject`: the pointer's hits on the
+movie go to its `Loader`, as Flash has them (the corpus's
+`mouse_pick_loader_avm1`). The movie's timeline plays at the stage's
+frame rate as an AVM1 main SWF's does without scripts. The player has no
+AVM1 interpreter, so what needs one is missing: no AVM1 action runs, its
+DoAction, DoInitAction, clip and button actions read past; its buttons
+show their up state and are inert, with no other state and no hand
+cursor; its timeline sounds do not play, as no timeline's do yet; and
+`AVM1Movie`'s `call` and `addCallback` throw #2014, as Flash's do
+while interop is unavailable.
 
 `URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
 status and headers. A `URLRequest`'s GET string or URLVariables data is appended to the query;
@@ -1769,7 +1800,22 @@ reads the back buffer only from a renderer made with `useBackBuffer:
 true`, which a host passes (the README's embedding example does);
 without it the modes draw as normal, and the view warns once. The back
 buffer is a full-screen copy a frame: on the bench (`--back-buffer`, an
-RTX 4060) it adds some 0.05 ms to the draw.
+RTX 4060) it adds some 0.05 ms to the draw. What is behind an object is
+copied from the pixels its bounds cover, which Pixi puts on whole pixels
+of the target but keeps in stage units, as k · (1/r): at a resolution
+that is no whole number, as a host fitting the stage to its page gives,
+k · (1/r) · r can fall a hair short of k, and Pixi's floor took the pixel
+before. The blend read what was behind it a pixel off at those positions
+alone, so a moving blend shook what showed through it, which Flash leaves
+still. The copy's corner and size are rounded instead. Pixi also pads a
+filter's region by whole pixels after putting it on the texels, which at
+such a resolution left it between them: a blend nested in a layer, its
+region starting left of or above the layer's, read along its top and
+left edge texels of the pooled back texture the copy never reached, and
+drew lines of what it last held, which Flash does not draw. The region
+is put on the texels again after the padding. The `blend-drift` case
+moves a blend a quarter pixel a frame, at a zoom of 1.5 that gives the
+test page a resolution of 6; unit tests hold the region's snap.
 
 What is behind a blended object is copied into a texture the filter
 reads, and Pixi's copy is held to both that texture and what it copies
@@ -1787,15 +1833,7 @@ past their shapes, as adl's layer holds a child's glow whole: Pixi
 measures a filtered object by its descendants' shapes alone, which cut a
 blurred child of a blend off at its shapes' edges, so each filter below
 grows the region by its padding (`blend-nested` draws such children
-against adl). A filter's region lies on its texture's texels: Pixi puts
-it there and then pads it by whole pixels, which at a resolution that is
-no whole number, a stage fitted to its window, left it between texels,
-read between them, with the copy of what is behind a texel off. A blend
-nested in a layer then read, along its region's top and left edge, what
-the pooled back texture last held, and drew it as lines Flash does not
-draw. The region is put on the texels again after the padding, and the
-copy's corner rounded to them. The test page draws at whole resolutions,
-where neither happens, so unit tests hold both.
+against adl).
 
 ### Filters
 
@@ -1951,9 +1989,7 @@ where it was as well as where it is, and a mask from outside the object
 that moves leaves it clipped as it was. swf2es draws the child once,
 where it is now, and also keeps the output for such a mask, unless the
 object's bounds change with it. Each pass lets go of the pool's textures
-it drew with, which the pool destroys as the screen's size changes, and
-a blend's copy of what is behind is held to its texture's size, which
-Pixi rounds a pixel short of the copy at some resolutions.
+it drew with, which the pool destroys as the screen's size changes.
 
 ### Masks and scroll rectangles
 

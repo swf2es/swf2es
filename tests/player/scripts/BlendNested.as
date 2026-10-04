@@ -7,9 +7,9 @@ package {
   // the inner blend's region, grown by its blur, begins left of and above
   // the layer's, so what is behind it there is nothing of the layer's. Each
   // inner object is coloured by a transform's offsets alone, and the outer
-  // ones are mirrored, as a character's flame is drawn facing left. Opaque
-  // grounds whose sums are exact, axis-aligned shapes on whole pixels and
-  // a blur of whole pixels, so the stage is drawn as Flash draws it.
+  // ones are mirrored. Opaque grounds whose sums are exact, axis-aligned
+  // shapes on whole pixels and a blur of whole pixels, so the stage is
+  // drawn as Flash draws it.
   public class BlendNested extends Sprite {
     private function rect(g:Graphics, color:uint, x:Number, y:Number, w:Number, h:Number):void {
       g.beginFill(color);
