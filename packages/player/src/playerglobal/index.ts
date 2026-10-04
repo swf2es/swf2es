@@ -27,6 +27,7 @@ import { filterHooks, filterNatives } from "./flash/filters/filters.js";
 import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
 import { transformNatives } from "./flash/geom/Transform.js";
 import { soundHooks, soundNatives } from "./flash/media/Sound.js";
+import { soundMixerNatives } from "./flash/media/SoundMixer.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
 import { fileFilterNatives } from "./flash/net/FileFilter.js";
 import { navigateNatives } from "./flash/net/navigateToURL.js";
@@ -81,6 +82,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...filterNatives(s),
     ...soundTransformNatives(s),
     ...soundNatives(s),
+    ...soundMixerNatives(s),
     ...graphicsNatives(s),
     ...shapeNatives(s),
     ...simpleButtonNatives(s),
