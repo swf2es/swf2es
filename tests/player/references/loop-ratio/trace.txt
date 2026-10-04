@@ -1,0 +1,36 @@
+made C 1
+made D
+constructed, C 1@10
+L script 1, C 1@10
+exit, C 1@10
+enter 2, C 1@20
+constructed, C 1@20
+L script 2, C 1@20
+exit, C 1@20
+enter 3, C 1@30
+constructed, C 1@30
+L script 3, C 1@30
+exit, C 1@30
+enter 4, C none
+made C 2
+constructed, C 2@10
+L script 1, C 2@10
+exit, C 2@10
+enter 5, C 2@20
+constructed, C 2@20
+L script 2, C 2@20
+exit, C 2@20
+enter 6, C 2@30
+constructed, C 2@30
+L script 3, C 2@30
+exit, C 2@30
+enter 7, C none
+made C 3
+constructed, C 3@10
+L script 1, C 3@10
+exit, C 3@10
+enter 8, C 3@20
+constructed, C 3@20
+L script 2, C 3@20
+exit, C 3@20
+L script 3, C 3@30

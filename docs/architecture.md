@@ -650,6 +650,15 @@ scripts see; Pixi's render tree does not choose a Flash target. The first
 input slice sends `mouseOver`, `mouseOut`, `mouseMove`, `mouseDown`,
 `mouseUp` and `click` through EventDispatcher's capture and bubble phases.
 `DisplayObject.mouseX` and `mouseY` follow the last pointer position.
+The pick follows Flash's order, as Ruffle's `mouse_pick_avm2` has it:
+interactive children before artwork, and a hit on what takes no pointer
+goes up only once nothing else under the point has taken it. A move is
+posted rather than handled at once, and the player handles the last one
+posted when it next advances, or before the next press, release, leave
+or key, whichever comes first: a browser sends about one a frame, a
+headless one or a fast mouse more, and each picks from the whole list.
+A pointer that crosses a small object between two frames so sends it no
+`mouseOver`. A path's polygon, flattened for hit tests, is kept with it.
 Roll events, wheel, right and middle buttons, and Flash's drag and focus
 rules still need their own cases.
 
@@ -748,23 +757,35 @@ takes a change of those as a touch), `metaData`,
 timeline-placed object with error #2078. The player keeps a `scripted`
 flag on the display object for that. A goto
 forward does the same, whatever the frames between named at the depth;
-a rewind keeps the child only if the character the frames finally name
-is its own, and makes a new one for another (Ruffle's
-`place_object_replace_2`: the same object through two forward jumps, a
-new one on the rewind that ends on the other shape). A `PlaceObject`
+a rewind keeps a child placed before the target only if the character
+the frames finally name is its own, and makes a new one for another
+(Ruffle's `place_object_replace_2`: the same object through two forward
+jumps, a new one on the rewind that ends on the other shape). A `PlaceObject`
 without the move flag at a depth already taken is let be, whatever it
 names, playing or in a goto's replay (`same-depth`, the corpus's
 `place_object_same_depth_frame`), and one with the move flag that names a
 character where nothing is places nothing (`rewind-first`). A rewind, the loop to the first frame
 among them, takes off what the timeline placed after the target, but for
 a child at a depth the frames replayed end on a place without the move
-flag at: that child stays, a clip its character too, and takes the
-place, its transform given anew as for a first placing, and the moves
-after it; an untouched `Shape` or `MorphShape` takes the place's shape or
-morph there, as a move's would (`morph-shapes`, where the loop puts a
-morph back over a shape placed later)
+flag at, with the child's ratio: that child stays, a clip its character
+too, and takes the place, its transform given anew as for a first
+placing, and the moves after it; an untouched `Shape` or `MorphShape`
+takes the place's shape or morph there, as a move's would (`morph-shapes`,
+where the loop puts a morph back over a shape placed later)
 (`same-depth`, `rewind-first`); what comes before that place at the
-depth, a removal among it, does not matter. Flash's matrix is
+depth, a removal among it, does not matter. The ratio decides, not the
+character: authoring tools give each placement a ratio of its own, and
+adl shows a rewind take a child whose ratio is not the one the frames
+replayed give for another object, whenever it was placed. A later clip of
+another ratio, and a clip, shape, morph or text field the first frame
+placed that a move after the target gave another ratio, are made anew;
+a later child of the same ratio stays (`rewind-ratio`, `rewind-kinds`;
+Ruffle's `survives_rewind` compares the ratio only for children placed
+after the target, and for morphs, and takes a place with no ratio for a
+match where Flash takes it for 0). A clip's own loop makes the
+children it places anew alive in the frame's construct phase, after
+ENTER_FRAME, as playing on to a frame does; what it takes off is gone by
+ENTER_FRAME (`loop-ratio`). Flash's matrix is
 exact at the quarter turns, 0 and not the doubles' cosine of 90°, so the
 player's is.
 

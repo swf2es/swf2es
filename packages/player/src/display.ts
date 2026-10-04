@@ -116,6 +116,11 @@ export class DisplayObject {
   depth: number | null = null;
   /** The frame of its parent's timeline that placed it, 1 the first; 0 for one a script added. */
   placeFrame = 0;
+  /**
+   * The ratio its placements gave, 0 for none: a rewind keeps the child
+   * only where the frames replayed give it the same (gotoFrame).
+   */
+  ratio = 0;
   name = "";
   /** Whether its name is one the timeline gave it, which its parent has a property of; not a default instanceN. */
   timelineNamed = false;
@@ -309,6 +314,10 @@ export class DisplayObject {
       this.invalidate(TRANSFORM);
     }
 
+    if (place.ratio !== null) {
+      this.ratio = place.ratio;
+    }
+
     if (place.name !== null) {
       this.name = place.name;
       this.timelineNamed = true;
@@ -361,12 +370,6 @@ export class ShapeObject extends DisplayObject {
   /** A MorphShape's morph, which `shape` is a blend of. */
   morph: MorphCharacter | null = null;
   /**
-   * The ratio its placements gave. A MorphShape takes it on when it is next
-   * drawn (drawn): until then its bounds and hit tests are the last drawn
-   * blend's, as Flash's are (the corpus's hittest_morph).
-   */
-  ratio = 0;
-  /**
    * The blend drawn() last made, and its morph and ratio: it stands while
    * `shape` is still it, which a swap to a shape is not.
    */
@@ -388,14 +391,16 @@ export class ShapeObject extends DisplayObject {
     return object;
   }
 
+  /**
+   * A MorphShape takes on a new ratio when it is next drawn (drawn): until
+   * then its bounds and hit tests are the last drawn blend's, as Flash's
+   * are (the corpus's hittest_morph).
+   */
   override applyPlace(place: Place): void {
+    const ratio = this.ratio;
     super.applyPlace(place);
-    if (place.ratio === null || place.ratio === this.ratio) {
-      return;
-    }
 
-    this.ratio = place.ratio;
-    if (this.morph) {
+    if (this.morph && this.ratio !== ratio) {
       this.invalidate(CONTENT);
     }
   }
@@ -976,7 +981,8 @@ interface Jump {
   /**
    * Whether a place without the move flag put the character: on a rewind,
    * a child the timeline placed after the target at the depth stays then,
-   * whatever character it is, and takes this place (`rewind-first`).
+   * whatever character it is, if the place gives its ratio, and takes this
+   * place (`rewind-first`, `rewind-ratio`).
    */
   placed: boolean;
 }
@@ -1091,18 +1097,22 @@ export class MovieClip extends Container {
 
   /**
    * Jump to frame `frame`, as Flash does rather than by running the frames
-   * between: the children the timeline placed after it go (but one at a
-   * depth the frames up to it end on a place without the move flag at,
-   * which stays and takes the place), the frames up to
-   * it (from the first, for a rewind) are replayed into one jump per depth,
-   * and each jump changes the child still at its depth, or makes one where
-   * the frames placed one anew, or where a rewind ends on another
-   * character. The result is what playing the frames would
-   * leave, except that a child placed before the frame and untouched since
-   * keeps playing, and its identity; on a rewind a place puts back what it
-   * leaves unsaid too, so it looks as it did when first placed.
+   * between: the frames up to it (from the first, for a rewind) are
+   * replayed into one jump per depth. On a rewind the children the timeline
+   * placed after it go, but one at a depth the frames up to it end on a
+   * place without the move flag at, which stays and takes the place; and
+   * any child whose ratio is not the one the replayed frames give goes,
+   * whenever it was placed. Each jump then changes the child still at its
+   * depth, or makes one where the frames placed one anew, or where a
+   * rewind ends on another character or ratio. The result is what playing
+   * the frames would leave, except that a child placed before the frame and
+   * untouched since keeps playing, and its identity; on a rewind a place
+   * puts back what it leaves unsaid too, so it looks as it did when first
+   * placed. A clip's own loop (`looping`) makes the children it places
+   * alive in the frame's construct phase, as playing on does (`loop-ratio`);
+   * a script's goto, at once.
    */
-  gotoFrame(frame: number): void {
+  gotoFrame(frame: number, looping = false): void {
     const target = Math.max(1, Math.min(frame, this.totalFrames));
     const rewind = target < this.currentFrame;
     const jumps = new Map<number, Jump>();
@@ -1164,19 +1174,27 @@ export class MovieClip extends Container {
     // stays and takes the place, as Flash keeps it (`same-depth` at the
     // loop, `rewind-first`), a clip its character and a shape the place's
     // (swap, `morph-shapes`). Replayed from the first frame, a depth the
-    // frames left empty is empty.
+    // frames left empty is empty. Whenever it was placed, a child whose
+    // ratio is not the one the frames replayed give goes too, to be made
+    // anew: authoring tools give each placement a ratio of its own, and
+    // Flash takes another ratio for another object, of every kind
+    // (`rewind-ratio`, `rewind-kinds`), where Ruffle compares it only for
+    // children placed after the target, and for morphs. In render order, as
+    // Ruffle removes.
     const kept = new Set<number>();
     if (rewind) {
-      for (const child of [...this.depths.values()]) {
+      for (const child of [...this.children]) {
         const depth = child.depth;
         if (depth === null || child.placeFrame <= 0) {
           continue;
         }
 
         const jump = jumps.get(depth);
-        if (child.placeFrame > target && jump?.placed) {
+        if (!jump || (jump.place && jump.place.ratio !== child.ratio)) {
+          this.removeAtDepth(depth);
+        } else if (child.placeFrame > target && jump.placed) {
           kept.add(depth);
-        } else if (child.placeFrame > target || !jump) {
+        } else if (child.placeFrame > target) {
           this.removeAtDepth(depth);
         }
       }
@@ -1233,7 +1251,11 @@ export class MovieClip extends Container {
       child.applyPlace(jump.place);
       child.placeFrame = jump.frame;
       this.placeAtDepth(child, depth);
-      construct(child, character, this.library);
+      if (looping && this.library.constructLater) {
+        this.library.constructLater(child, character);
+      } else {
+        construct(child, character, this.library);
+      }
     }
   }
 
@@ -1273,7 +1295,7 @@ export class MovieClip extends Container {
     }
 
     if (this.currentFrame >= this.totalFrames) {
-      this.gotoFrame(1);
+      this.gotoFrame(1, true);
       return;
     }
 

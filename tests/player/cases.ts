@@ -687,6 +687,154 @@ function rewindFirst(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Another clip placed in a clip's stead with a ratio other than its, and
+// one with its ratio, then a rewind past them, for scripts/RewindRatio.as.
+function rewindRatio(abc: Uint8Array): Uint8Array {
+  const clip = (id: number) =>
+    w.sprite(id, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]);
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      clip(2),
+      clip(3),
+      w.doAbc(abc, "RewindRatio"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "A"],
+        [3, "B"],
+      ]),
+      w.place({ depth: 1, character: 2, matrix: { tx: 200 } }),
+      w.place({ depth: 2, character: 2, ratio: 5, matrix: { tx: 400 } }),
+      w.place({ depth: 3, character: 2, matrix: { tx: 600 } }),
+      w.showFrame(),
+      w.remove(1),
+      w.place({ depth: 1, character: 3, ratio: 1, matrix: { tx: 800 } }),
+      w.remove(2),
+      w.place({ depth: 2, character: 3, ratio: 5, matrix: { tx: 1000 } }),
+      w.place({ depth: 3, move: true, ratio: 9, matrix: { tx: 1200 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// First-frame children of each kind moved to another ratio, and shapes
+// placed again with another ratio and with the same, then a rewind past
+// them, for scripts/RewindKinds.as.
+function rewindKinds(abc: Uint8Array): Uint8Array {
+  const grow = w.morphShape({
+    id: 2,
+    startBounds: [0, 400, 0, 400],
+    endBounds: [0, 800, 0, 800],
+    fills: [{ start: 0xff0000ff, end: 0xff00ff00 }],
+    start: [
+      {
+        fill0: 1,
+        commands: [
+          { move: [0, 0] },
+          { line: [400, 0] },
+          { line: [400, 400] },
+          { line: [0, 400] },
+          { line: [0, 0] },
+        ],
+      },
+    ],
+    end: [
+      [
+        { move: [0, 0] },
+        { line: [800, 0] },
+        { line: [800, 800] },
+        { line: [0, 800] },
+        { line: [0, 0] },
+      ],
+    ],
+  });
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000, 400),
+      grow,
+      w.editText(3, "t", 400, 400),
+      w.sprite(4, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "RewindKinds"),
+      w.symbolClass([
+        [0, "Main"],
+        [4, "A"],
+      ]),
+      w.place({ depth: 1, character: 1, matrix: { tx: 200 } }),
+      w.place({ depth: 2, character: 2, ratio: 0, matrix: { tx: 400 } }),
+      w.place({ depth: 3, character: 3, matrix: { tx: 600 } }),
+      w.place({ depth: 4, character: 1, matrix: { tx: 800 } }),
+      w.place({ depth: 5, character: 1, matrix: { tx: 1000 } }),
+      w.place({ depth: 6, character: 4, matrix: { tx: 1200 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, ratio: 9 }),
+      w.place({ depth: 2, move: true, ratio: 30000 }),
+      w.place({ depth: 3, move: true, ratio: 9 }),
+      w.remove(4),
+      w.place({ depth: 4, character: 1, ratio: 3, matrix: { tx: 800 } }),
+      w.remove(5),
+      w.place({ depth: 5, character: 1, matrix: { tx: 1000 } }),
+      w.place({ depth: 6, move: true, ratio: 9 }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A clip of three frames, bound to scripts/LoopRatio.as's L, that tweens
+// its C by ratios and loops on its own, beside a D it leaves.
+function loopRatio(abc: Uint8Array): Uint8Array {
+  const clip = (id: number) =>
+    w.sprite(id, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]);
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      clip(2),
+      clip(3),
+      w.sprite(4, 3, [
+        w.place({ depth: 1, character: 2, matrix: { tx: 200 } }),
+        w.place({ depth: 2, character: 3, matrix: { tx: 1000 } }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, ratio: 1, matrix: { tx: 400 } }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, ratio: 2, matrix: { tx: 600 } }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc, "LoopRatio"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "C"],
+        [3, "D"],
+        [4, "L"],
+      ]),
+      w.place({ depth: 1, character: 4 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A root with nothing placed and a bound Box symbol, with scripts/AddChild.as adding Boxes.
 function added(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -2269,6 +2417,33 @@ export const cases: PlayerCase[] = [
     swf: rewindFirst,
     script: "RewindFirst",
     frames: 7,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "rewind-ratio",
+    swf: rewindRatio,
+    script: "RewindRatio",
+    frames: 5,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "rewind-kinds",
+    swf: rewindKinds,
+    script: "RewindKinds",
+    frames: 5,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "loop-ratio",
+    swf: loopRatio,
+    script: "LoopRatio",
+    frames: 9,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

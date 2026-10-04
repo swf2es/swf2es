@@ -1,0 +1,6 @@
+made A
+frame 1 flash.display::Shape@10 new, flash.display::MorphShape@20 new, flash.text::TextField@30 new, flash.display::Shape@40 new, flash.display::Shape@50 new, A@60 new
+frame 2 flash.display::Shape@10 kept, flash.display::MorphShape@20 kept, flash.text::TextField@30 kept, flash.display::Shape@40 new, flash.display::Shape@50 new, A@60 kept
+made A
+frame 1 flash.display::Shape@10 new, flash.display::MorphShape@20 new, flash.text::TextField@30 new, flash.display::Shape@40 new, flash.display::Shape@50 kept, A@60 new
+frame 1 flash.display::Shape@10 kept, flash.display::MorphShape@20 kept, flash.text::TextField@30 kept, flash.display::Shape@40 kept, flash.display::Shape@50 kept, A@60 kept
