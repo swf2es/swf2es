@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { containerEngine } from "../../../oracle/oracle.ts";
 import { Player } from "../../../packages/player/dist/player.js";
+import { browserNavigate } from "../../../packages/player/dist/playerglobal/flash/net/navigateToURL.js";
 import { type FetchRequest, Scripting } from "../../../packages/player/dist/scripting.js";
 import { bare } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
@@ -51,6 +52,7 @@ const source = `package {
       t("send", function():void { sendToURL(new URLRequest("ping")); });
       t("nav blank", function():void { navigateToURL(new URLRequest("b"), "Blank"); });
       t("nav blanket", function():void { navigateToURL(new URLRequest("c"), "_blanket"); });
+      t("nav empty", function():void { navigateToURL(new URLRequest("")); });
     }
   }
 }`;
@@ -93,6 +95,7 @@ test("navigateToURL hands the host the resolved request and window, sendToURL th
     "send ok",
     "nav blank ok",
     "nav blanket ok",
+    "nav empty ok",
   ]);
   assert.deepEqual(opened, [
     {
@@ -115,4 +118,122 @@ test("navigateToURL hands the host the resolved request and window, sendToURL th
 test("where there is no window to open, as in node, the player opens no pages", async () => {
   const scripting = new Scripting(await createCodegen(wasm));
   assert.equal(scripting.navigate, null);
+});
+
+/** A window and document that record what the browser's default would open and submit. */
+function stubBrowser(t: { after: (fn: () => void) => void }) {
+  const opened: [string, string][] = [];
+  const submitted: { action: string; target: string; fields: [string, string][] }[] = [];
+  const saved = ["open", "document", "location"].map(
+    (name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const,
+  );
+  t.after(() => {
+    for (const [name, descriptor] of saved) {
+      if (descriptor) {
+        Object.defineProperty(globalThis, name, descriptor);
+      } else {
+        delete (globalThis as Record<string, unknown>)[name];
+      }
+    }
+  });
+
+  interface Form {
+    action: string;
+    target: string;
+    children: { name: string; value: string }[];
+  }
+  const body = {
+    append(form: Form) {
+      submitted.push({
+        action: form.action,
+        target: form.target,
+        fields: form.children.map(({ name, value }) => [name, value]),
+      });
+    },
+  };
+  const document = {
+    body: body as typeof body | null,
+    createElement: () => {
+      const children: unknown[] = [];
+      return {
+        style: {},
+        children,
+        append: (child: unknown) => children.push(child),
+        submit: () => {},
+        remove: () => {},
+      };
+    },
+  };
+  const define = (name: string, value: unknown) =>
+    Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+  define("open", (url: string, target: string) => opened.push([url, target]));
+  define("document", document);
+  define("location", { href: "https://page.test/player/index.html" });
+  return { opened, submitted, document };
+}
+
+const request = (url: string, method = "GET", body: string | null = null): FetchRequest => ({
+  url,
+  method,
+  headers: [],
+  body: body === null ? null : new TextEncoder().encode(body),
+});
+
+test("the browser's default opens only http and https, and never in the page's own frames", (t) => {
+  const { opened } = stubBrowser(t);
+  const navigate = browserNavigate();
+  assert.ok(navigate);
+
+  for (const url of [
+    "javascript:alert(1)",
+    "JavaScript:alert(1)",
+    " \tjavascript:alert(1)",
+    "java\tscript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "vbscript:msgbox(1)",
+    "blob:https://page.test/x",
+    "file:///etc/passwd",
+  ]) {
+    navigate(request(url), "_blank");
+    navigate(request(url, "POST", "a=1"), "_blank");
+  }
+
+  for (const target of ["_self", "_SELF", "_parent", "_top", ""]) {
+    navigate(request("https://other.test/"), target);
+  }
+
+  assert.deepEqual(opened, []);
+
+  navigate(request("https://other.test/a"), null);
+  navigate(request("http://other.test/b"), "named");
+  navigate(request("c.html"), "_blank");
+  assert.deepEqual(opened, [
+    ["https://other.test/a", "_blank"],
+    ["http://other.test/b", "named"],
+    ["https://page.test/player/c.html", "_blank"],
+  ]);
+});
+
+test("the browser's default posts any body as form data, and nothing before the page has a body", (t) => {
+  const { submitted, document } = stubBrowser(t);
+  const navigate = browserNavigate();
+  assert.ok(navigate);
+
+  navigate(request("https://other.test/form", "POST", "a=1&b=x%20y"), "_blank");
+  navigate(request("https://other.test/json", "POST", '{"a":1}'), "named");
+  assert.deepEqual(submitted, [
+    {
+      action: "https://other.test/form",
+      target: "_blank",
+      fields: [
+        ["a", "1"],
+        ["b", "x y"],
+      ],
+    },
+    { action: "https://other.test/json", target: "named", fields: [['{"a":1}', ""]] },
+  ]);
+
+  document.body = null;
+  assert.doesNotThrow(() => navigate(request("https://other.test/form", "POST", "a=1"), "_blank"));
+  assert.equal(submitted.length, 2);
 });

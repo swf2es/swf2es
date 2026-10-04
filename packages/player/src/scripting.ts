@@ -1201,8 +1201,16 @@ export class Scripting {
     this.trackRequest(completed);
   }
 
-  /** navigateToURL's page, resolved as a load's URL is; nothing where the host opens none. */
+  /**
+   * navigateToURL's page, resolved as a load's URL is; nothing where the
+   * host opens none, or for an empty URL, which Ruffle's navigators ignore
+   * rather than open the SWF's own directory.
+   */
   navigateTo(request: AsObject, window: string | null): void {
+    if (String(request.$url) === "") {
+      return;
+    }
+
     this.navigate?.(this.fetchRequest(request, this.url), window);
   }
 

@@ -48,11 +48,19 @@ function target(name: string): string {
   return /^_?blank$/i.test(name) ? "_blank" : name;
 }
 
+/** Targets that would replace the player's own page or a frame around it. */
+const IN_PLACE = new Set(["_self", "_parent", "_top", ""]);
+
 /**
- * The browser's navigation: a GET in window.open, without an opener, so the
- * page opened cannot reach back into the player's; a POST of form data as a
- * form submitted to the window, which is the only way a browser posts into
- * one. Null where there is no window to open, as in node.
+ * The browser's navigation, deliberately conservative, as Ruffle's web
+ * navigator is without script access: only an http: or https: URL opens,
+ * so a javascript: one cannot run in the embedding page, and a target that
+ * would replace the page or a frame around it is refused. A GET opens in
+ * window.open without an opener, so the page opened cannot reach back into
+ * the player's; a POST is a form submitted to the window, the only way a
+ * browser posts into one, its body read as form data. A host that trusts
+ * its SWFs further gives a navigate of its own. Null where there is no
+ * window to open, as in node.
  */
 export function browserNavigate(): Navigate | null {
   if (typeof globalThis.open !== "function" || typeof document === "undefined") {
@@ -61,15 +69,33 @@ export function browserNavigate(): Navigate | null {
 
   return (request, window) => {
     const target = window ?? "_blank";
-    const type = request.headers.find(([name]) => name.toLowerCase() === "content-type")?.[1];
-    if (request.method.toUpperCase() !== "POST" || !request.body || !isForm(type)) {
-      globalThis.open(request.url, target, "noopener");
+    if (IN_PLACE.has(target.toLowerCase())) {
+      return;
+    }
+
+    let url: URL;
+    try {
+      url = new URL(request.url, globalThis.location?.href);
+    } catch {
+      return;
+    }
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return;
+    }
+
+    if (request.method.toUpperCase() !== "POST" || !request.body) {
+      globalThis.open(url.href, target, "noopener");
+      return;
+    }
+
+    if (!document.body) {
       return;
     }
 
     const form = document.createElement("form");
     form.method = "POST";
-    form.action = request.url;
+    form.action = url.href;
     form.target = target;
     form.rel = "noopener";
     form.style.display = "none";
@@ -85,8 +111,4 @@ export function browserNavigate(): Navigate | null {
     form.submit();
     form.remove();
   };
-}
-
-function isForm(type: string | undefined): boolean {
-  return type?.split(";")[0].trim().toLowerCase() === "application/x-www-form-urlencoded";
 }

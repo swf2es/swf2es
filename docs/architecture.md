@@ -927,15 +927,23 @@ each stream.
 `navigateToURL` hands the request, taken and resolved as `URLStream`'s is,
 and the window name (null when none is given, "blank" in any case and
 with or without its underscore as `_blank`, as Ruffle's corpus records
-Flash doing) to `Scripting`'s `navigate` host; the test page gives none,
-as a `_self` would take the page away. The browser's default opens a GET with `window.open` and `noopener`,
-a new window for null, and submits a form-encoded POST as a hidden form,
-the only way a browser posts into a window; any other POST body is left
-out. Without a window, as in node, nothing opens. `sendToURL` sends its
-request through the host fetch and drops the response, as Flash ignores
-it. Both throw TypeError #2007 for a null request, then for a null `url`,
-as adl does. Flash's `allowScriptAccess` and `allowNetworking` checks are
-not modelled: the host decides what it lets a SWF open.
+Flash doing) to `Scripting`'s `navigate` host; an empty URL is ignored, as
+Ruffle's navigators ignore it. `sendToURL` sends its request through the
+host fetch and drops the response, as Flash ignores it. Both throw
+TypeError #2007 for a null request, then for a null `url`, as adl does.
+
+The browser's default `navigate` is deliberately conservative, as Ruffle's
+web navigator is without script access, since a SWF's URL is not to be
+trusted by the page that embeds it: only `http:` and `https:` URLs open,
+so a `javascript:` URL cannot run script in the page, and the targets that
+would replace the page or a frame around it, `_self`, `_parent`, `_top` and
+an empty name, are dropped. Anything else opens with `window.open` and
+`noopener`, a new window for null. A POST goes as a hidden form, the only
+way a browser posts into a window, its body read as form data whatever it
+is, as Ruffle sends a string's; a JSON or ByteArray body is therefore sent
+form-encoded. A host that trusts its SWFs further, or models
+`allowScriptAccess` and `allowNetworking`, gives a `navigate` of its own.
+Without a window, as in node, nothing opens; the test page gives none.
 
 `Socket` uses an optional host transport supplied to `Scripting`. The host
 opens the TCP connection and reports open, bytes, close and failure; the
