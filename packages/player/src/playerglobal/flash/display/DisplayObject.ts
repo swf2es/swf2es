@@ -83,6 +83,30 @@ function rectangle(s: Scripting, r: Rect): Value {
   );
 }
 
+/**
+ * A text field's x and y are its box's corner, not its origin: its
+ * DefineEditText bounds' corner, scaled, added to where it is placed, as
+ * Flash and Ruffle read and set them. A box authored inset from its origin
+ * so moves to where a script puts it. The offset is whole twips, cut
+ * toward zero as Ruffle's is, and none for a NaN scale.
+ */
+function fieldOffset(d: DisplayObject): [number, number] {
+  if (!(d instanceof TextObject)) {
+    return [0, 0];
+  }
+
+  const twips = (v: number) => Math.trunc(v) || 0;
+  return [twips(d.scaleX * d.left * 20), twips(d.scaleY * d.top * 20)];
+}
+
+/**
+ * `at` in pixels moved by `offset` in twips, summed in twips: Flash's
+ * positions are whole twips, without a pixel sum's noise.
+ */
+function withOffset(at: number, offset: number): number {
+  return offset === 0 ? at : (at * 20 + offset) / 20;
+}
+
 /** The display object `o` is the face of. */
 export function displayOf(o: avm2.AsObject): DisplayObject {
   return o.$display;
@@ -192,23 +216,25 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     get x(): number {
-      return this.$display.matrix.tx;
+      return withOffset(this.$display.matrix.tx, fieldOffset(this.$display)[0]);
     }
 
     // A NaN position is 0, as Flash has it (the corpus's `displayobject_invalid_floats`).
     set x(v: Value) {
+      const offset = fieldOffset(this.$display)[0];
       transform(this.$display, (m) => {
-        m.tx = Number(v) || 0;
+        m.tx = withOffset(Number(v) || 0, -offset);
       });
     }
 
     get y(): number {
-      return this.$display.matrix.ty;
+      return withOffset(this.$display.matrix.ty, fieldOffset(this.$display)[1]);
     }
 
     set y(v: Value) {
+      const offset = fieldOffset(this.$display)[1];
       transform(this.$display, (m) => {
-        m.ty = Number(v) || 0;
+        m.ty = withOffset(Number(v) || 0, -offset);
       });
     }
 

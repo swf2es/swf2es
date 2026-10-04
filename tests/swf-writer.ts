@@ -630,10 +630,13 @@ export function editText(
     color?: number;
     font?: number;
     fontHeight?: number;
+    /** The bounds' corner, in twips; (0, 0) by default. */
+    at?: [number, number];
   } = {},
 ): Uint8Array {
   const w = new BitWriter().u16(id);
-  rect(w, 0, width, 0, height);
+  const [left, top] = options.at ?? [0, 0];
+  rect(w, left, left + width, top, top + height);
   const font = options.font !== undefined;
   w.u8(
     0x80 |
