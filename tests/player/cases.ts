@@ -687,6 +687,44 @@ function rewindFirst(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Another clip placed in a clip's stead with a ratio other than its, and
+// one with its ratio, then a rewind past them, for scripts/RewindRatio.as.
+function rewindRatio(abc: Uint8Array): Uint8Array {
+  const clip = (id: number) =>
+    w.sprite(id, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]);
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      clip(2),
+      clip(3),
+      w.doAbc(abc, "RewindRatio"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "A"],
+        [3, "B"],
+      ]),
+      w.place({ depth: 1, character: 2, matrix: { tx: 200 } }),
+      w.place({ depth: 2, character: 2, ratio: 5, matrix: { tx: 400 } }),
+      w.place({ depth: 3, character: 2, matrix: { tx: 600 } }),
+      w.showFrame(),
+      w.remove(1),
+      w.place({ depth: 1, character: 3, ratio: 1, matrix: { tx: 800 } }),
+      w.remove(2),
+      w.place({ depth: 2, character: 3, ratio: 5, matrix: { tx: 1000 } }),
+      w.place({ depth: 3, move: true, ratio: 9, matrix: { tx: 1200 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A root with nothing placed and a bound Box symbol, with scripts/AddChild.as adding Boxes.
 function added(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -2269,6 +2307,15 @@ export const cases: PlayerCase[] = [
     swf: rewindFirst,
     script: "RewindFirst",
     frames: 7,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "rewind-ratio",
+    swf: rewindRatio,
+    script: "RewindRatio",
+    frames: 5,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

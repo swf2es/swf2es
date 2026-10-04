@@ -116,6 +116,11 @@ export class DisplayObject {
   depth: number | null = null;
   /** The frame of its parent's timeline that placed it, 1 the first; 0 for one a script added. */
   placeFrame = 0;
+  /**
+   * The ratio its placements gave, 0 for none: a rewind keeps the child
+   * only where the frames replayed give it the same (gotoFrame).
+   */
+  ratio = 0;
   name = "";
   /** Whether its name is one the timeline gave it, which its parent has a property of; not a default instanceN. */
   timelineNamed = false;
@@ -304,6 +309,10 @@ export class DisplayObject {
       this.invalidate(TRANSFORM);
     }
 
+    if (place.ratio !== null) {
+      this.ratio = place.ratio;
+    }
+
     if (place.name !== null) {
       this.name = place.name;
       this.timelineNamed = true;
@@ -353,12 +362,6 @@ export class ShapeObject extends DisplayObject {
   /** A MorphShape's morph, which `shape` is a blend of. */
   morph: MorphCharacter | null = null;
   /**
-   * The ratio its placements gave. A MorphShape takes it on when it is next
-   * drawn (drawn): until then its bounds and hit tests are the last drawn
-   * blend's, as Flash's are (the corpus's hittest_morph).
-   */
-  ratio = 0;
-  /**
    * The blend drawn() last made, and its morph and ratio: it stands while
    * `shape` is still it, which a swap to a shape is not.
    */
@@ -380,14 +383,15 @@ export class ShapeObject extends DisplayObject {
     return object;
   }
 
+  /**
+   * A MorphShape takes on a new ratio when it is next drawn (drawn): until
+   * then its bounds and hit tests are the last drawn blend's, as Flash's
+   * are (the corpus's hittest_morph).
+   */
   override applyPlace(place: Place): void {
+    const ratio = this.ratio;
     super.applyPlace(place);
-    if (place.ratio === null || place.ratio === this.ratio) {
-      return;
-    }
-
-    this.ratio = place.ratio;
-    if (this.morph) {
+    if (this.morph && this.ratio !== ratio) {
       this.invalidate(CONTENT);
     }
   }
@@ -1120,7 +1124,10 @@ export class MovieClip extends Container {
     // stays and takes the place, as Flash keeps it (`same-depth` at the
     // loop, `rewind-first`), a clip its character and a shape the place's
     // (swap, `morph-shapes`). Replayed from the first frame, a depth the
-    // frames left empty is empty.
+    // frames left empty is empty. Whenever it was placed, a child whose
+    // ratio is not the one the frames replayed give goes too, to be made
+    // anew: authoring tools give each placement a ratio of its own, and
+    // Flash takes another ratio for another object (`rewind-ratio`).
     const kept = new Set<number>();
     if (rewind) {
       for (const child of [...this.depths.values()]) {
@@ -1130,9 +1137,11 @@ export class MovieClip extends Container {
         }
 
         const jump = jumps.get(depth);
-        if (child.placeFrame > target && jump?.placed) {
+        if (!jump || (jump.place && jump.place.ratio !== child.ratio)) {
+          this.removeAtDepth(depth);
+        } else if (child.placeFrame > target && jump.placed) {
           kept.add(depth);
-        } else if (child.placeFrame > target || !jump) {
+        } else if (child.placeFrame > target) {
           this.removeAtDepth(depth);
         }
       }
