@@ -8,8 +8,10 @@ import {
   type DisplayObject,
   ShapeObject,
   StaticTextObject,
+  TextObject,
 } from "./display.js";
 import { apply, invert } from "./geometry.js";
+import type { KeyboardInput } from "./keyboard.js";
 import { dispatchEvent } from "./playerglobal/flash/events/EventDispatcher.js";
 import type { Scripting } from "./scripting.js";
 
@@ -21,9 +23,34 @@ export interface PointerState {
   altKey?: boolean;
   ctrlKey?: boolean;
   shiftKey?: boolean;
+  /** When, in milliseconds, which tells a double click from two clicks. */
+  time?: number;
 }
 
-/** The topmost interactive object under a point, in stage coordinates. */
+/**
+ * What a pick finds: an interactive object hit, a hit that goes up to the
+ * first ancestor with mouseEnabled, or nothing.
+ */
+const PROPAGATE = "propagate";
+type Pick = DisplayObject | typeof PROPAGATE | null;
+
+/** An InteractiveObject's kind: what picks for itself, rather than through its parent. */
+const isInteractive = (d: DisplayObject): boolean =>
+  !(d instanceof ShapeObject || d instanceof BitmapObject || d instanceof StaticTextObject);
+
+const mouseEnabled = (d: DisplayObject): boolean => !!d.object && d.object.$mouseEnabled !== false;
+
+/** `d` itself where it takes the pointer, else the hit goes on to its parent. */
+const own = (d: DisplayObject): Pick => (mouseEnabled(d) ? d : PROPAGATE);
+
+/**
+ * The object under a point, in stage coordinates, as Flash picks it
+ * (Ruffle's `mouse_pick_avm2`): within a container, its interactive
+ * children first, topmost first, then the rest. A hit on artwork, or on
+ * a child whose mouseEnabled is false, goes to the nearest ancestor that
+ * takes the pointer; one that goes up is kept while the search goes on,
+ * so a disabled field over a button leaves the button its clicks.
+ */
 export function pointerTarget(
   stage: Container,
   x: number,
@@ -31,23 +58,22 @@ export function pointerTarget(
   width: number,
   height: number,
 ): DisplayObject | null {
-  const interactive = (d: DisplayObject): boolean =>
-    !(d instanceof ShapeObject || d instanceof BitmapObject || d instanceof StaticTextObject) &&
-    !!d.object &&
-    d.object.$mouseEnabled !== false;
-  const pick = (d: DisplayObject): { hit: boolean; target: DisplayObject | null } => {
+  // Whether `d`'s artwork is under the point, its children's included.
+  const drawn = (d: DisplayObject): boolean => {
     if (!d.visible || d.clipDepth > 0 || d.maskOf) {
-      return { hit: false, target: null };
+      return false;
     }
 
-    // A disabled container with disabled children is transparent to mouse input.
-    // Shapes and bitmaps still count as hits and pass the event to their parent.
-    if (
-      d instanceof Container &&
-      d.object?.$mouseEnabled === false &&
-      d.object.$mouseChildren === false
-    ) {
-      return { hit: false, target: null };
+    if (d instanceof Container && d.children.some(drawn)) {
+      return true;
+    }
+
+    return hitsOwnPoint(d, x, y, stage);
+  };
+
+  const pick = (d: DisplayObject): Pick => {
+    if (!d.visible || d.clipDepth > 0 || d.maskOf) {
+      return null;
     }
 
     // A button is hit where its hit test state is, whatever state it shows,
@@ -56,42 +82,61 @@ export function pointerTarget(
     if (d instanceof ButtonObject) {
       const area = d.hitTestState;
       if (!area) {
-        return { hit: false, target: null };
+        return null;
       }
 
       const parent = area.parent;
       area.parent = d;
+      // A disabled button is missed, not passed up: what is under it gets the hit (Ruffle).
       try {
-        const hit = pick(area).hit;
-        return { hit, target: hit && interactive(d) ? d : null };
+        return mouseEnabled(d) && drawn(area) ? d : null;
       } finally {
         area.parent = parent;
       }
     }
 
-    if (d instanceof Container) {
-      for (let i = d.children.length - 1; i >= 0; i--) {
-        const child = pick(d.children[i]);
-        if (child.hit) {
-          const target = d.object?.$mouseChildren === false ? null : child.target;
-          return { hit: true, target: target ?? (interactive(d) ? d : null) };
-        }
+    if (!(d instanceof Container)) {
+      return hitsOwnPoint(d, x, y, stage) ? own(d) : null;
+    }
+
+    // Two passes rather than a sorted copy: this runs on every pointer move.
+    const children = d.children;
+    let propagated = false;
+
+    for (let i = children.length - 1; i >= 0; i--) {
+      if (!isInteractive(children[i])) {
+        continue;
+      }
+
+      const found = pick(children[i]);
+      if (found === PROPAGATE) {
+        propagated = true;
+      } else if (found) {
+        // A container whose mouseChildren is false takes its children's hits itself.
+        return d.object?.$mouseChildren === false ? own(d) : found;
       }
     }
 
-    const hit = hitsOwnPoint(d, x, y, stage);
-    return { hit, target: hit && interactive(d) ? d : null };
+    if (propagated) {
+      return own(d);
+    }
+
+    for (let i = children.length - 1; i >= 0; i--) {
+      if (!isInteractive(children[i]) && drawn(children[i])) {
+        return own(d);
+      }
+    }
+
+    return hitsOwnPoint(d, x, y, stage) ? own(d) : null;
   };
 
   if (x < 0 || y < 0 || x >= width || y >= height) {
     return null;
   }
 
-  for (let i = stage.children.length - 1; i >= 0; i--) {
-    const child = pick(stage.children[i]);
-    if (child.hit) {
-      return child.target ?? stage;
-    }
+  const found = pick(stage);
+  if (found && found !== PROPAGATE) {
+    return found;
   }
 
   return stage.object ? stage : null;
@@ -103,10 +148,14 @@ export class PointerInput {
   handled = 0;
   private hover: DisplayObject | null = null;
   private pressed: DisplayObject | null = null;
+  /** The last press, which the next continues as a double or triple click if near it in place and time. */
+  private lastPress: { x: number; y: number; time: number; clicks: number } | null = null;
 
   constructor(
     private readonly stage: Container,
     private readonly scripting: Scripting,
+    /** What a press tells the keyboard: which field it focuses, and where its caret goes. */
+    private readonly keyboard: KeyboardInput | null = null,
   ) {}
 
   private send(type: string, target: DisplayObject, p: PointerState, buttonDown: boolean): void {
@@ -161,8 +210,32 @@ export class PointerInput {
       if (target) {
         this.send("mouseMove", target, p, down);
       }
+
+      // A drag from a field selects in it, wherever the pointer goes.
+      const pressed = this.pressed;
+      if (down && pressed instanceof TextObject && this.keyboard) {
+        const m = invert(toStage(pressed, this.stage));
+        if (m) {
+          this.keyboard.dragged(pressed, ...apply(m, p.x, p.y));
+        }
+      }
     } else if (type === "down" && (p.button ?? 0) === 0) {
       this.pressed = target;
+      // Ruffle's rule: within half a second and two pixels of the last press.
+      const last = this.lastPress;
+      const time = p.time ?? Number.NaN;
+      const again =
+        last !== null &&
+        Math.abs(time - last.time) < 500 &&
+        (p.x - last.x) ** 2 + (p.y - last.y) ** 2 < 4;
+      const clicks = again ? last.clicks + 1 : 1;
+      this.lastPress = { x: p.x, y: p.y, time, clicks };
+      if (this.keyboard) {
+        const m = target && invert(toStage(target, this.stage));
+        const [x, y] = m ? apply(m, p.x, p.y) : [0, 0];
+        this.keyboard.pressed(target, x, y, clicks);
+      }
+
       if (target) {
         buttonState(target, "down");
         this.send("mouseDown", target, p, true);

@@ -138,6 +138,11 @@ export class DisplayObject {
   skew = 0;
   colorTransform: ColorTransform | null = null;
   visible = true;
+  /**
+   * Where it has the keyboard's focus, how to drop it: Flash takes focus
+   * from an object taken off its parent or hidden (keyboard.ts).
+   */
+  focusDrop: ((d: DisplayObject) => void) | null = null;
   /** The character it was made from, or null. */
   character: Character | null = null;
   /** Whether a script set a property of it; from then on the timeline swaps no shape under it, as Flash's does not. */
@@ -321,6 +326,9 @@ export class DisplayObject {
     if (place.visible !== null) {
       this.visible = place.visible;
       this.invalidate(TRANSFORM);
+      if (!place.visible) {
+        this.focusDrop?.(this);
+      }
     }
 
     // Apart, and once tested: applyPlace runs for each move of each frame, and grown it is no longer inlined.
@@ -475,6 +483,11 @@ export class TextObject extends DisplayObject {
   useRichTextClipboard = false;
   scrollH = 0;
   scrollV = 1;
+  /** The selection, from the end it was started at to the caret, as text indices; empty, a caret alone. */
+  private anchorAt = 0;
+  private caretAt = 0;
+  /** Whether it has the keyboard's focus, an input field then showing its caret. */
+  focused = false;
 
   constructor(
     readonly definition: TextCharacter | null,
@@ -592,6 +605,36 @@ export class TextObject extends DisplayObject {
   get align(): string {
     return (this.model.formats[0] ?? this.model.defaultFormat).align;
   }
+
+  /** The end the selection was started at, within the text as it is now, which a script may have shortened. */
+  get anchor(): number {
+    return Math.min(this.anchorAt, this.model.text.length);
+  }
+
+  /** The caret, within the text as it is now. */
+  get caret(): number {
+    return Math.min(this.caretAt, this.model.text.length);
+  }
+
+  /** The selection's first and last index, in order. */
+  get selection(): [number, number] {
+    const [anchor, caret] = [this.anchor, this.caret];
+    return anchor <= caret ? [anchor, caret] : [caret, anchor];
+  }
+
+  /** Select from `anchor` to `caret`, each kept within the text; a focused field shows its caret there. */
+  select(anchor: number, caret: number): void {
+    const length = this.model.text.length;
+    const [a, c] = [Math.max(0, Math.min(length, anchor)), Math.max(0, Math.min(length, caret))];
+    // A drag selects on every move, mostly what it had: redraw only for a change.
+    if (a === this.anchor && c === this.caret) {
+      return;
+    }
+
+    this.anchorAt = a;
+    this.caretAt = c;
+    this.invalidate(CONTENT);
+  }
 }
 
 /**
@@ -698,6 +741,7 @@ export class Container extends DisplayObject {
 
     this.children.splice(this.children.indexOf(child), 1);
     child.parent = null;
+    child.focusDrop?.(child);
     this.invalidate(CHILDREN);
   }
 

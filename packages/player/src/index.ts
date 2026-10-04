@@ -11,6 +11,7 @@ export {
   MovieClip,
   ShapeObject,
 } from "./display.js";
+export { bindKeyboard, type KeyState } from "./keyboard.js";
 export { PixiView } from "./pixi.js";
 export { Player } from "./player.js";
 export type { Navigate } from "./playerglobal/flash/net/navigateToURL.js";

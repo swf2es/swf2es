@@ -26,12 +26,15 @@ export function spriteNatives(s: Scripting): avm2.Natives {
       }
     }
 
+    declare $buttonMode: boolean | undefined;
+
+    /** Kept for Tab, which visits a sprite in button mode; no hand cursor is drawn. */
     get buttonMode(): boolean {
-      return false;
+      return this.$buttonMode ?? false;
     }
 
-    set buttonMode(_v: Value) {
-      // Not yet: there is no mouse.
+    set buttonMode(v: Value) {
+      this.$buttonMode = !!v;
     }
 
     get useHandCursor(): boolean {

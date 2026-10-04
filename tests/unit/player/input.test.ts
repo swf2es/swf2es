@@ -67,6 +67,33 @@ test("a disabled overlay lets pointer input reach an interactive object below it
   assert.equal(pointerTarget(stage, 10, 10, 100, 100), overlay);
 });
 
+test("a disabled field over a button lets the button take the hit, and its parent takes it where nothing does", () => {
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  const panel = new Container();
+  panel.object = { $display: panel } as never;
+  panel.loaderInfo = {} as never;
+  stage.addChildAt(panel, 0);
+  const button = new Container();
+  button.object = { $display: button } as never;
+  button.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+  panel.addChildAt(button, 0);
+  // A label wider than the button, above it, which takes no pointer itself.
+  const label = new TextObject(null);
+  label.object = { $display: label, $mouseEnabled: false } as never;
+  panel.addChildAt(label, 1);
+
+  assert.equal(pointerTarget(stage, 10, 10, 100, 100), button);
+  assert.equal(pointerTarget(stage, 50, 10, 100, 100), panel);
+  panel.object.$mouseEnabled = false;
+  assert.equal(pointerTarget(stage, 50, 10, 100, 100), stage);
+
+  // Artwork above an interactive sibling does not hide it: interactive children are tried first.
+  panel.object.$mouseEnabled = true;
+  panel.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 2);
+  assert.equal(pointerTarget(stage, 10, 10, 100, 100), button);
+});
+
 test("a pointer down dispatches capture, target and bubble with target-local coordinates", () => {
   const stage = new Container();
   stage.object = { $display: stage } as never;

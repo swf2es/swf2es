@@ -40,6 +40,7 @@ const renderer = await autoDetectRenderer({
 });
 const view = new PixiView(renderer);
 const unbind = view.bindPointer(player); // mouse input, until unbind()
+const unbindKeys = bindKeyboard(player, window); // keys, and typing into the SWF's fields
 await player.start();
 let drawn = -1;
 // Each animation frame: play what the time is worth, and draw only when a
