@@ -671,6 +671,21 @@ interface Node {
   /** Its filters' records as of the last sync, and the Pixi filters made of them, its own. */
   filterRecords: readonly FilterRecord[];
   filters: Filter[];
+  /** Draws in this branch, excluding those already isolated in a child render group. */
+  draws: number;
+  /** Outside partners must share the group; a hidden node must not keep an old partner alive. */
+  maskLinks: WeakRef<DisplayObject>[];
+}
+
+/** Only a partner outside the branch prevents it owning a separate instruction set. */
+function maskLink(
+  o: DisplayObject,
+  partner: DisplayObject | null,
+  links: WeakRef<DisplayObject>[],
+): void {
+  if (partner && !o.encloses(partner)) {
+    links.push(partner.ref);
+  }
 }
 
 export class PixiView {
@@ -968,6 +983,8 @@ export class PixiView {
         blend: "normal",
         filterRecords: NO_RECORDS,
         filters: [],
+        draws: 0,
+        maskLinks: [],
       };
       node.container.addChild(art);
       this.nodes.set(o, node);
@@ -1370,10 +1387,49 @@ export class PixiView {
     }
 
     if (!this.fresh) {
+      this.group(o, node);
       o.dirty = CLEAN;
     }
 
     return container;
+  }
+
+  /** Keep an animated branch from rebuilding all the stage's batches when its children change. */
+  private group(o: DisplayObject, node: Node): void {
+    let draws = node.art.children.length;
+    const links = node.maskLinks;
+    links.length = 0;
+    maskLink(o, o.mask, links);
+    maskLink(o, o.maskOf, links);
+    if (o instanceof Container) {
+      for (const child of o.children) {
+        const part = this.nodes.get(child);
+        if (part) {
+          for (const partner of part.maskLinks) {
+            maskLink(o, partner.deref() ?? null, links);
+          }
+
+          draws += part.container.isRenderGroup ? 0 : part.draws;
+        }
+      }
+    }
+
+    node.draws = draws;
+    // A stencil mask's geometry is collected into the masked object's instructions. Until both
+    // belong to this branch, it must share its parent's group. A timeline mask itself also stays
+    // with its siblings, though their common parent may form a group.
+    if ((links.length > 0 || node.masking) && node.container.isRenderGroup) {
+      node.container.disableRenderGroup();
+    } else if (
+      links.length === 0 &&
+      !node.masking &&
+      o.parent &&
+      draws >= 64 &&
+      !node.container.isRenderGroup
+    ) {
+      // Keep the group when its animation gets smaller, avoiding repeated batcher destruction.
+      node.container.enableRenderGroup();
+    }
   }
 
   /**

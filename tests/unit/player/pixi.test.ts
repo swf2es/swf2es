@@ -819,3 +819,62 @@ test("a blend's copy of what is behind it is held to the target and the texture,
   assert.deepEqual(copy([894, 150], [10, 75]), { copies: [], clears: [] });
   assert.deepEqual(copy([205, -4], [174, 1]), { copies: [], clears: [] });
 });
+
+test("large branches keep their own instructions as they shrink, without grouping their wrappers", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const branch = new Container();
+  const store = new BitmapStore(1, 1, false, 0xffffff);
+  root.placeAtDepth(branch, 1);
+  for (let i = 0; i < 64; i++) {
+    branch.placeAtDepth(new BitmapObject(store), i + 1);
+  }
+
+  view.prepare(root);
+  const top = view.stage.children[0];
+  const grouped = top.children[1];
+  assert.equal(grouped.isRenderGroup, true);
+  assert.equal(top.isRenderGroup, false);
+  const instructions = grouped.renderGroup;
+  for (const child of [...branch.children].slice(1)) {
+    branch.removeChild(child);
+  }
+
+  view.prepare(root);
+  assert.equal(grouped.renderGroup, instructions);
+  store.dispose();
+});
+
+test("mask partners share a group, including when an existing group's mask moves outside it", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const panel = new Container();
+  const art = new Container();
+  const mask = new Container();
+  const store = new BitmapStore(1, 1, false, 0xffffff);
+  root.placeAtDepth(panel, 1);
+  panel.placeAtDepth(art, 1);
+  panel.placeAtDepth(mask, 2);
+  for (let i = 0; i < 64; i++) {
+    art.placeAtDepth(new BitmapObject(store), i + 1);
+  }
+
+  view.prepare(root);
+  const p = view.stage.children[0].children[1];
+  const a = p.children[1];
+  assert.equal(a.isRenderGroup, true);
+  art.setMask(mask);
+  view.prepare(root);
+  assert.equal(a.isRenderGroup, false);
+  assert.equal(p.isRenderGroup, true);
+
+  // Reparenting a partner invalidates the old and new ancestors, even though the mask is unchanged.
+  root.placeAtDepth(mask, 2);
+  view.prepare(root);
+  assert.equal(p.isRenderGroup, false);
+  assert.equal(a.isRenderGroup, false);
+  art.setMask(null);
+  view.prepare(root);
+  assert.equal(a.isRenderGroup, true);
+  store.dispose();
+});

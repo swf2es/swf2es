@@ -57,10 +57,11 @@ const colorBitGl = {
       out vec4 vAdd;
     `,
     main: `
-      vColor *= aColor;
       vMul = aMul;
       vAdd = aAdd;
     `,
+    // flashColor already includes the group's ancestors; Pixi's global colour would apply them twice.
+    end: `vColor = aColor;`,
   },
   fragment: {
     header: `
@@ -90,10 +91,10 @@ const colorBit = {
       @out vAdd: vec4<f32>;
     `,
     main: `
-      vColor *= aColor;
       vMul = aMul;
       vAdd = aAdd;
     `,
+    end: `vColor = aColor;`,
   },
   fragment: {
     header: `
