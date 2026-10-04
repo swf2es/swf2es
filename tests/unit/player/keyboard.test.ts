@@ -250,7 +250,6 @@ test("tab moves by tabIndex where any has one, else by place, after a keyFocusCh
   });
   tab();
   assert.equal(scripting.focus, a);
-  void stage;
 });
 
 test("a click focuses a field after a mouseFocusChange, and the stage's click takes it away", () => {

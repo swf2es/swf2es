@@ -10,7 +10,7 @@ import { bounds, toStage } from "./bounds.js";
 import {
   ButtonObject,
   CONTENT,
-  type Container,
+  Container,
   type DisplayObject,
   MovieClip,
   TextObject,
@@ -345,6 +345,7 @@ export class KeyboardInput {
 
     setFocus(s, pressed && focusableByMouse(pressed) ? pressed : null);
   }
+
   /**
    * The pointer moved with its button held, the point in the pressed
    * field's own pixels: the selection spans from where the press was to
@@ -383,7 +384,12 @@ export class KeyboardInput {
           found.push(child);
         }
 
-        if ("children" in child && fieldsOf(child).$tabChildren !== false) {
+        // A SimpleButton's states are not its children to AS3.
+        if (
+          child instanceof Container &&
+          !(child instanceof ButtonObject) &&
+          fieldsOf(child).$tabChildren !== false
+        ) {
           walk(child);
         }
       }
@@ -495,6 +501,7 @@ export class KeyboardInput {
     }
 
     const filtered = restrictText(field.restrict, text);
+    const [begin, end] = field.selection;
     const s = this.scripting;
     if (field.object) {
       const event = s.rt.construct(
@@ -510,9 +517,10 @@ export class KeyboardInput {
       }
     }
 
-    // The selection as the listeners left it, the text perhaps changed.
-    const [begin, end] = field.selection;
-    this.replace(field, begin, end, filtered.slice(0, Math.max(0, room())));
+    // The selection from before the event, within the text a listener may have shortened.
+    const length = field.model.text.length;
+    const from = Math.min(begin, length);
+    this.replace(field, from, Math.min(end, length), filtered.slice(0, Math.max(0, room())));
     return true;
   }
 
@@ -688,7 +696,7 @@ function charCodeOf(e: KeyboardEvent): number {
  * edit or caret, or Tab moving the SWF's focus. Its own shortcuts stay.
  */
 export function bindKeyboard(
-  player: { keyboard: KeyboardInput | null; scripting: Scripting | null },
+  player: { keyboard: KeyboardInput | null },
   target: EventTarget,
 ): () => void {
   const listener = (event: Event) => {

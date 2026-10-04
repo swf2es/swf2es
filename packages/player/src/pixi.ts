@@ -1663,7 +1663,7 @@ function drawCaret(o: TextObject, art: PixiContainer): void {
     const c = line.chars[i - line.start];
     const shown = line.chars.filter((ch) => ch.shown);
     const last = shown[shown.length - 1];
-    const x = c?.shown ? c.x : last ? last.x + last.advance : line.x;
+    const x = c ? c.x : last ? last.x + last.advance : line.x;
     return { line, x: (dx + x) / 20 };
   };
   const g = new Graphics();
@@ -1680,9 +1680,12 @@ function drawCaret(o: TextObject, art: PixiContainer): void {
       const shown = line.chars.filter((ch) => ch.shown);
       const end = shown.length > 0 ? shown[shown.length - 1] : null;
       const right = i === b ? to.x : (dx + (end ? end.x + end.advance : line.x)) / 20;
+      // Within the gutter, as the text is: a line wider than the field is clipped there.
+      const l = Math.max(left, inner.left);
+      const r = Math.min(right, inner.right);
       const top = (dy + line.y) / 20;
       const height = (line.ascent + line.descent) / 20;
-      g.rect(left, top, Math.max(0, right - left), height).fill({ color: 0x3399ff, alpha: 0.4 });
+      g.rect(l, top, Math.max(0, r - l), height).fill({ color: 0x3399ff, alpha: 0.4 });
     }
   }
 

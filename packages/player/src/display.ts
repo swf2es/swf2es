@@ -620,8 +620,14 @@ export class TextObject extends DisplayObject {
   /** Select from `anchor` to `caret`, each kept within the text; a focused field shows its caret there. */
   select(anchor: number, caret: number): void {
     const length = this.model.text.length;
-    this.anchorAt = Math.max(0, Math.min(length, anchor));
-    this.caretAt = Math.max(0, Math.min(length, caret));
+    const [a, c] = [Math.max(0, Math.min(length, anchor)), Math.max(0, Math.min(length, caret))];
+    // A drag selects on every move, mostly what it had: redraw only for a change.
+    if (a === this.anchor && c === this.caret) {
+      return;
+    }
+
+    this.anchorAt = a;
+    this.caretAt = c;
     this.invalidate(CONTENT);
   }
 }
