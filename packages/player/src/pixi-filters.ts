@@ -14,11 +14,13 @@ import {
   type Container,
   Filter,
   type FilterSystem,
+  type FilterWithShader,
   GlProgram,
   Texture as PixiTexture,
   type RenderSurface,
   type Texture,
   TexturePool,
+  TextureSource,
 } from "pixi.js";
 import { filterRect, gradientTable, integerKernel } from "./bitmap-filters.js";
 import type { Filter as FilterRecord } from "./filters.js";
@@ -65,14 +67,6 @@ void main(void) {
   vec4 c = sum / uWidth;
   finalColor = ${TRUNCATE};
 }`;
-
-/**
- * A pool's texture let go of once drawn with: the pool destroys idle ones
- * as the screen's size changes, which Pixi warns of while a shader holds them.
- */
-function unbind(filter: Filter, name: string): void {
-  filter.resources[name] = PixiTexture.WHITE.source;
-}
 
 class BoxPass extends Filter {
   constructor() {
@@ -147,6 +141,27 @@ abstract class FlashFilter extends Filter {
   }
 }
 
+/** A private idle binding avoids scanning every other filter's listener on WHITE. */
+abstract class BlurredFilter extends FlashFilter {
+  private readonly unbound: TextureSource;
+
+  constructor(options: FilterWithShader) {
+    const unbound = new TextureSource();
+    super({ ...options, resources: { ...options.resources, uBlurred: unbound } });
+    this.unbound = unbound;
+  }
+
+  /** Release pooled textures before the pool can destroy them. */
+  protected unbind(): void {
+    this.resources.uBlurred = this.unbound;
+  }
+
+  destroy(): void {
+    super.destroy();
+    this.unbound.destroy();
+  }
+}
+
 class BlurFilter extends FlashFilter {
   private readonly pass = new BoxPass();
 
@@ -213,7 +228,7 @@ void main(void) {
   finalColor = ${TRUNCATE};
 }`;
 
-class GlowFilter extends FlashFilter {
+class GlowFilter extends BlurredFilter {
   private readonly pass = new BoxPass();
 
   /** Its box's pass too, a filter of its own. */
@@ -248,7 +263,6 @@ class GlowFilter extends FlashFilter {
           uKnockout: { value: f.knockout ? 1 : 0, type: "f32" },
           uHide: { value: shadow && f.hideObject ? 1 : 0, type: "f32" },
         },
-        uBlurred: PixiTexture.WHITE.source,
       },
     });
     this.padding = Math.ceil((f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance));
@@ -277,7 +291,7 @@ class GlowFilter extends FlashFilter {
     );
     this.resources.uBlurred = blurred.source;
     system.applyFilter(this, input, output, clear);
-    unbind(this, "uBlurred");
+    this.unbind();
     TexturePool.returnTexture(blurred);
   }
 }
@@ -328,7 +342,7 @@ void main(void) {
   finalColor = ${TRUNCATE};
 }`;
 
-class BevelFilter extends FlashFilter {
+class BevelFilter extends BlurredFilter {
   private readonly pass = new BoxPass();
 
   /** Its box's pass too, a filter of its own. */
@@ -358,7 +372,6 @@ class BevelFilter extends FlashFilter {
           uType: { value: f.type === "inner" ? 0 : f.type === "outer" ? 1 : 2, type: "f32" },
           uKnockout: { value: f.knockout ? 1 : 0, type: "f32" },
         },
-        uBlurred: PixiTexture.WHITE.source,
       },
     });
     this.padding = Math.ceil((f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance));
@@ -380,7 +393,7 @@ class BevelFilter extends FlashFilter {
     );
     this.resources.uBlurred = blurred.source;
     system.applyFilter(this, input, output, clear);
-    unbind(this, "uBlurred");
+    this.unbind();
     TexturePool.returnTexture(blurred);
   }
 }
@@ -463,7 +476,7 @@ void main(void) {
   finalColor = ${TRUNCATE};
 }`;
 
-class GradientFilter extends FlashFilter {
+class GradientFilter extends BlurredFilter {
   private readonly pass = new BoxPass();
   private readonly gradient: PixiTexture;
 
@@ -505,7 +518,6 @@ class GradientFilter extends FlashFilter {
           uBevel: { value: f.kind === "gradientBevel" ? 1 : 0, type: "f32" },
           uRegion: { value: new Float32Array(4), type: "vec4<f32>" },
         },
-        uBlurred: PixiTexture.WHITE.source,
         uGradient: gradient.source,
       },
     });
@@ -545,7 +557,7 @@ class GradientFilter extends FlashFilter {
     region[2] = input.frame.width - this.inset + 1 + right;
     region[3] = input.frame.height - this.inset + 1 + bottom;
     system.applyFilter(this, input, output, clear);
-    unbind(this, "uBlurred");
+    this.unbind();
     TexturePool.returnTexture(blurred);
   }
 }
