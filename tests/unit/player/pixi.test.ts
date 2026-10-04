@@ -143,8 +143,8 @@ test("a batchable keeps the batcher name it is given, and one under a colour tra
   assert.equal(sprite.batcherName, "host-custom");
 });
 
-test("nested render groups release child-first on removal", async () => {
-  await withClock(() => {
+test("nested render groups keep their hierarchy while parked and release idle batches", async () => {
+  await withClock((clock) => {
     const view = new PixiView(standIn([]).renderer);
     const root = new Container();
     const branch = new Container();
@@ -171,9 +171,29 @@ test("nested render groups release child-first on removal", async () => {
 
     root.removeChild(branch);
     view.prepare(root);
-    assert.deepEqual(released, ["inner", "outer"]);
-    assert.equal(outer.isRenderGroup, false);
-    assert.equal(inner.isRenderGroup, false);
+    assert.deepEqual(released, ["outer", "inner"]);
+    assert.equal(outer.renderGroup, outerGroup);
+    assert.equal(inner.renderGroup, innerGroup);
+
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+    assert.equal(view.stage.children[0].children[1], outer);
+    released.length = 0;
+    outerGroup.instructionSet.renderPipes = {
+      batch: { destroyInstructionSet: () => released.push("outer") },
+    };
+    innerGroup.instructionSet.renderPipes = {
+      batch: { destroyInstructionSet: () => released.push("inner") },
+    };
+
+    root.removeChild(branch);
+    view.prepare(root);
+    assert.deepEqual(released, []);
+    clock.at += 5001;
+    view.prepare(root);
+    assert.deepEqual(released, ["outer", "inner"]);
+    assert.equal(outer.renderGroup, outerGroup);
+    assert.equal(inner.renderGroup, innerGroup);
 
     root.placeAtDepth(branch, 1);
     view.prepare(root);
@@ -181,7 +201,7 @@ test("nested render groups release child-first on removal", async () => {
   });
 });
 
-test("rapidly toggled branches postpone regrouping", async () => {
+test("rapidly toggled branches keep their render group", async () => {
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   const { Container: PixiContainer } = await import(entry);
@@ -204,7 +224,7 @@ test("rapidly toggled branches postpone regrouping", async () => {
 
     root.removeChild(branch);
     view.prepare(root);
-    assert.equal(outer.isRenderGroup, false);
+    assert.equal(outer.isRenderGroup, true);
     root.placeAtDepth(branch, 1);
     view.prepare(root);
     assert.equal(outer.isRenderGroup, true);
@@ -213,7 +233,7 @@ test("rapidly toggled branches postpone regrouping", async () => {
     view.prepare(root);
     root.placeAtDepth(branch, 1);
     view.prepare(root);
-    assert.equal(outer.isRenderGroup, false);
+    assert.equal(outer.isRenderGroup, true);
 
     clock.at += 5001;
     branch.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 1, ty: 0 });

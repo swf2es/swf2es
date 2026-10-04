@@ -263,12 +263,14 @@ export function benchPlayer(
   idleRenders = 0,
   toggle = -1,
   antialias = false,
+  toggleEvery = 1,
+  nestedGroups = false,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
     async (evaluate) => {
       const { value, exception } = await evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups})`,
       );
       return (
         value ?? {

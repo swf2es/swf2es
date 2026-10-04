@@ -46,6 +46,8 @@ const shapes = option("shapes", 2000);
 const rig = option("rig", 0);
 const branches = option("branches", 0);
 const toggleBranches = option("toggle-branches", 0);
+const toggleEvery = option("toggle-every", 1);
+const nestedGroups = args.includes("--nested-groups");
 const idleRenders = option("idle", 0);
 const toggle = option("toggle", 0);
 const toggleStatic = option("toggle-static", 0);
@@ -395,6 +397,8 @@ const result = await benchPlayer(
   idleRenders,
   toggleBranches > 0 ? 0 : toggle > 0 ? toggle : toggleStatic > 0 ? 0 : -1,
   args.includes("--antialias"),
+  toggleEvery,
+  nestedGroups,
 );
 if (result.error) {
   console.error(result.error);

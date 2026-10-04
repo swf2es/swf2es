@@ -89,7 +89,6 @@ function containment(paths: Path[]): Region[] {
     for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
       area += points[j] * points[i + 1] - points[i] * points[j + 1];
     }
-
     return { path, points, parent: null, children: [], area: Math.abs(area) / 2 };
   });
   for (const inner of regions) {
@@ -740,9 +739,8 @@ interface Node {
    * (`PixiView.parked`), then emptied (`emptied`), its lines given back.
    */
   released: boolean;
-  /** Recent removals suppress groups on branches that repeatedly leave and return. */
-  lastRelease: number | null;
-  ungroupUntil: number;
+  /** Whether this branch has returned after leaving the display list. */
+  reused: boolean;
   /** Whether its art was emptied while off the list: drawn again if it comes back. */
   emptied: boolean;
   /** The thinnest line its lines were last drawn with, to draw them again for another. */
@@ -854,6 +852,8 @@ export class PixiView {
    * as a pool's objects or a panel shown and hidden come back, then emptied.
    */
   private readonly parked = new Map<Node, number>();
+  /** Released groups keep their batches until idle even when their art exceeds the pool limit. */
+  private readonly parkedGroups = new Map<Node, number>();
   /** The filters a fresh view made, which it destroys with the rest. */
   private readonly builtFilters: Filter[] = [];
   /** The objects `mask` was found set on, for the masks to be placed that are not under the root. */
@@ -1103,8 +1103,7 @@ export class PixiView {
         sharedLines: false,
         kids: [],
         released: false,
-        lastRelease: null,
-        ungroupUntil: 0,
+        reused: false,
         emptied: false,
         strokedAt: 0,
         bitmap: null,
@@ -1291,12 +1290,12 @@ export class PixiView {
     }
 
     node.released = true;
-    if (node.container.isRenderGroup || node.draws >= 64 || node.ungroupUntil > 0) {
-      const now = performance.now();
-      const rapid = node.lastRelease !== null && now - node.lastRelease < IDLE_MS;
-      node.lastRelease = now;
-      if (rapid) {
-        node.ungroupUntil = now + IDLE_MS;
+    if (node.container.isRenderGroup) {
+      if (node.reused) {
+        this.parkedGroups.delete(node);
+        this.parkedGroups.set(node, performance.now());
+      } else {
+        this.emptyGroup(node);
       }
     }
     const chain = node.filters[0];
@@ -1333,11 +1332,6 @@ export class PixiView {
         this.release(kid);
       }
     }
-
-    // A group returned to Pixi's pool must have no nested group still pointing at it.
-    if (node.container.isRenderGroup) {
-      this.disableRenderGroup(node.container);
-    }
   }
 
   /**
@@ -1353,6 +1347,16 @@ export class PixiView {
     this.parked.delete(node);
     node.emptied = true;
     this.clear(node)();
+  }
+
+  /** Return a parked group's batches without changing its nested group hierarchy. */
+  private emptyGroup(node: Node): void {
+    this.parkedGroups.delete(node);
+    const group = node.container.renderGroup;
+    if (group) {
+      group.instructionSet.destroy();
+      group.structureDidChange = true;
+    }
   }
 
   /**
@@ -1426,7 +1430,9 @@ export class PixiView {
       // if it has or had any, are arranged again, as those that were emptied with it are drawn
       // again.
       node.released = false;
+      node.reused = true;
       this.parked.delete(node);
+      this.parkedGroups.delete(node);
       const kids = o instanceof Container && (o.children.length > 0 || node.kids.length > 0);
       dirty |= TRANSFORM | (kids ? CHILDREN : 0);
       if (node.emptied) {
@@ -1643,8 +1649,7 @@ export class PixiView {
       !node.masking &&
       o.parent &&
       draws >= 64 &&
-      !node.container.isRenderGroup &&
-      performance.now() >= node.ungroupUntil
+      !node.container.isRenderGroup
     ) {
       // Keep the group when its animation gets smaller, avoiding repeated batcher destruction.
       node.container.enableRenderGroup();
@@ -1800,6 +1805,13 @@ export class PixiView {
       }
 
       this.empty(node);
+    }
+    for (const [node, since] of this.parkedGroups) {
+      if (now - since < IDLE_MS) {
+        break;
+      }
+
+      this.emptyGroup(node);
     }
 
     this.rescaled = this.leastWidth !== this.strokedAt;

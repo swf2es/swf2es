@@ -254,6 +254,8 @@ async function benchSwf(
   idleRenders = 0,
   toggle = -1,
   antialias = false,
+  toggleEvery = 1,
+  nestedGroups = false,
 ): Promise<Bench> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
@@ -314,13 +316,24 @@ async function benchSwf(
       0;
     const toggled = toggle >= 0 ? await toggling(player.root, toggle) : [];
     view.render(player.stage);
+    if (nestedGroups) {
+      const outer = view.stage.children[0]?.children[1];
+      const inner = outer?.children[1];
+      if (!outer || !inner) {
+        throw new Error("missing nested benchmark containers");
+      }
+
+      outer.enableRenderGroup();
+      inner.enableRenderGroup();
+      view.render(player.stage);
+    }
     await finish();
     const first = performance.now() - start;
     const heapBefore = heapNow();
     for (let frame = 2; frame <= frames; frame++) {
       const before = performance.now();
       for (const [depth, child] of toggled.entries()) {
-        if (frame % 2) {
+        if (Math.floor((frame - 2) / toggleEvery) % 2) {
           player.root.removeChild(child);
         } else {
           player.root.placeAtDepth(child, depth + 1);
