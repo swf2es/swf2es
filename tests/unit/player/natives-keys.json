@@ -710,6 +710,8 @@
     "flash.system::Security.set:disableAVM1Loading",
     "flash.system::Security.set:exactSettings",
     "flash.system::Security.showSettings",
+    "flash.system::SecurityDomain#flash.system:SecurityDomain::ctor_impl",
+    "flash.system::SecurityDomain.get:currentDomain",
     "flash.system::System.disposeXML",
     "flash.system::System.exit",
     "flash.system::System.gc",

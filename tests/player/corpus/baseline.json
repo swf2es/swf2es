@@ -882,7 +882,7 @@
   "avm2/scope_optimizations": {"matched":4,"lines":4,"traced":4,"error":null},
   "avm2/scopes_dont_cache/order-1": {"matched":1,"lines":1,"traced":1,"error":null},
   "avm2/scopes_dont_cache/order-2": {"matched":1,"lines":1,"traced":1,"error":null},
-  "avm2/security_domain_current": {"matched":0,"lines":2,"traced":0,"error":"Error: swf2es: native flash.system::SecurityDomain.get:currentDomain is not supported yet"},
+  "avm2/security_domain_current": {"matched":2,"lines":2,"traced":2,"error":null},
   "avm2/selection": {"matched":30,"lines":240,"traced":30,"error":"Error: swf2es: native flash.text::TextField#replaceSelectedText is not supported yet"},
   "avm2/set_local_0": {"matched":32,"lines":32,"traced":32,"error":null},
   "avm2/set_property_is_enumerable": {"matched":85,"lines":85,"traced":85,"error":null},

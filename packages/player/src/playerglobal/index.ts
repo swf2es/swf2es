@@ -41,6 +41,7 @@ import { telemetryNatives } from "./flash/profiler/Telemetry.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { capabilitiesNatives } from "./flash/system/Capabilities.js";
 import { securityNatives } from "./flash/system/Security.js";
+import { securityDomainNatives } from "./flash/system/SecurityDomain.js";
 import { systemNatives } from "./flash/system/System.js";
 import { workerHooks, workerNatives } from "./flash/system/Worker.js";
 import { fontHooks, fontNatives } from "./flash/text/Font.js";
@@ -77,6 +78,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...applicationDomainNatives(s),
     ...capabilitiesNatives(s),
     ...securityNatives(s),
+    ...securityDomainNatives(s),
     ...systemNatives(s),
     ...workerNatives(s),
     ...telemetryNatives(),
