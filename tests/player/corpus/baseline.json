@@ -727,7 +727,7 @@
   "avm2/movieclip_queued_noop_goto_swf10": {"matched":9,"lines":9,"traced":9,"error":null},
   "avm2/movieclip_queued_noop_goto_swf9": {"matched":7,"lines":7,"traced":7,"error":null},
   "avm2/movieclip_scenes": {"matched":11,"lines":11,"traced":11,"error":null},
-  "avm2/movieclip_soundtransform": {"matched":1,"lines":831,"traced":1,"error":"Error: swf2es: native flash.display::Sprite#get:soundTransform is not supported yet"},
+  "avm2/movieclip_soundtransform": {"matched":831,"lines":831,"traced":831,"error":null},
   "avm2/movieclip_stop": {"matched":1,"lines":1,"traced":1,"error":null},
   "avm2/movieclip_super_is_symbol": {"matched":22,"lines":22,"traced":22,"error":null},
   "avm2/movieclip_symbol_constr": {"matched":8,"lines":8,"traced":8,"error":null},

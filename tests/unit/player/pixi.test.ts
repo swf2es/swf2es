@@ -289,8 +289,9 @@ test("Pixi pointer positions are taken within the box CSS object-fit shows the c
     const pointer = player.pointer as unknown as { onCursor: (c: string) => void };
     pointer.onCursor("pointer");
     assert.equal(canvas.style.cursor, "pointer");
+    // Unbound, the canvas is left to the page's cursor, as before the bind.
     unbind();
-    assert.equal(canvas.style.cursor, "default");
+    assert.equal(canvas.style.cursor, "");
     assert.equal(pointer.onCursor, null);
   } finally {
     delete g.getComputedStyle;

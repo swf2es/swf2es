@@ -3020,6 +3020,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "sprite-sound",
+    swf: (abc) => bare(abc, 1, "SpriteSound"),
+    script: "SpriteSound",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "font-registration",
     build: fontRegistration,
     frames: 3,

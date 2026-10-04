@@ -1,0 +1,6 @@
+default 1 0 1 1
+copy 1 false
+set 0.95 -0.3224999999999998 1.15 0.81
+null TypeError: Error #2007: Parameter soundTransform must be non-null.
+kept 0.95
+root 1
