@@ -144,8 +144,14 @@ export function pointerTarget(
 
 /** Mouse events on the player's display list, independent of a renderer. */
 export class PointerInput {
-  /** How many pointer events it has handled: each may run scripts and change a button's state. */
+  /** How many pointer events it has handled. */
   handled = 0;
+  /**
+   * How many of them may show before the next frame: a button's state,
+   * focus or a selection changed. What a mouse listener changes otherwise
+   * shows at the next frame, as in Flash, unless it asks updateAfterEvent.
+   */
+  redraws = 0;
   private hover: DisplayObject | null = null;
   private pressed: DisplayObject | null = null;
   /** The last press, which the next continues as a double or triple click if near it in place and time. */
@@ -220,6 +226,16 @@ export class PointerInput {
       type === "leave" ? null : pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
     const down = (p.buttons ?? 0) & 1 ? true : type === "down" && (p.button ?? 0) === 0;
 
+    // What may show at once, rather than at the next frame, as Ruffle
+    // redraws: a press, a release or a leave, a hover that moves on or off
+    // a button or a sprite in buttonMode, a drag selecting text.
+    if (
+      type !== "move" ||
+      (target !== this.hover && (buttonLike(target) || buttonLike(this.hover)))
+    ) {
+      this.redraws++;
+    }
+
     if (target !== this.hover) {
       if (this.hover) {
         buttonState(this.hover, "up");
@@ -245,6 +261,7 @@ export class PointerInput {
         const m = invert(toStage(pressed, this.stage));
         if (m) {
           this.keyboard.dragged(pressed, ...apply(m, p.x, p.y));
+          this.redraws++;
         }
       }
     } else if (type === "down" && (p.button ?? 0) === 0) {
@@ -320,6 +337,13 @@ export class PointerInput {
 
 /** A CSS cursor the host shows over the player. */
 export type Cursor = "default" | "pointer" | "text";
+
+/** Whether `d` is a button, or a sprite in buttonMode, whose hover Ruffle redraws for. */
+function buttonLike(d: DisplayObject | null): boolean {
+  return (
+    d instanceof ButtonObject || !!(d?.object as { $buttonMode?: boolean } | null)?.$buttonMode
+  );
+}
 
 /** Show state `state` of `d`, if it is an enabled button: the pointer moves a disabled one through none. */
 function buttonState(d: DisplayObject, state: "up" | "over" | "down"): void {

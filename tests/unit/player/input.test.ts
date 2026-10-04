@@ -184,6 +184,42 @@ test("the cursor is a hand under a sprite in buttonMode, as useHandCursor says, 
   assert.equal(input.cursor(), "default");
 });
 
+test("a pointer event asks for a redraw only where it changes a button, focus or a selection", () => {
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
+  const plain = new Container();
+  plain.object = { $display: plain } as never;
+  plain.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+  stage.addChildAt(plain, 0);
+  const sprite = new Container();
+  sprite.object = { $display: sprite, $buttonMode: true } as never;
+  sprite.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+  sprite.matrix.tx = 40;
+  stage.addChildAt(sprite, 1);
+  const scripting = {
+    stageWidth: 100,
+    stageHeight: 100,
+    rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
+  } as unknown as Scripting;
+  const input = new PointerInput(stage, scripting);
+
+  // Moves over artwork, on and off a plain sprite, show at the next frame.
+  for (const x of [5, 10, 30, 10]) {
+    input.handle("move", { x, y: 5 });
+  }
+
+  assert.equal(input.redraws, 0);
+  input.handle("move", { x: 45, y: 5 });
+  input.handle("move", { x: 50, y: 5 });
+  input.handle("move", { x: 70, y: 5 });
+  assert.equal(input.redraws, 2);
+  input.handle("down", { x: 70, y: 5 });
+  input.handle("up", { x: 70, y: 5 });
+  assert.equal(input.redraws, 4);
+  assert.equal(input.handled, 9);
+});
+
 test("a pointer down dispatches capture, target and bubble with target-local coordinates", () => {
   const stage = new Container();
   stage.object = { $display: stage } as never;

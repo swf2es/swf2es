@@ -1161,9 +1161,14 @@ frames gets the same clock every time; a host playing in real time calls
 as many frames as it is worth, five at most after a long pause and the
 rest let go, as Ruffle paces, so a stall does not become a spiral of
 catch-up. It returns how many it ran, and `Player.changes` counts what
-may change the picture: each frame, each pointer event, each call from
-the page into an ExternalInterface callback, the only scripts that run
-between frames, as loads and socket data are delivered in one. A host
+may change the picture: each frame, each key, each call from the page
+into an ExternalInterface callback, each `updateAfterEvent`, and the
+pointer events that change what shows at once, as Ruffle redraws for
+them: a press, a release, a leave, a hover that moves on or off a button
+or a sprite in `buttonMode`, a drag selecting text. A plain move does
+not: what its listeners change shows at the next frame, as in Flash, so
+a fast mouse draws a 24 fps SWF 24 times a second, not at the screen's
+rate. Loads and socket data are delivered in a frame. A host
 draws when it moved, not on every animation frame: at 60 Hz a 24 fps SWF
 drew each picture two or three times over, and drawing it once took a
 quarter to a third of Chrome's CPU off 32 animated characters, the
