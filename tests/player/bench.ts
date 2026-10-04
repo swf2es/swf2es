@@ -22,9 +22,12 @@
 // --toggle N plays instead N text fields and N sprites drawn by Graphics,
 // all taken off the list on one frame and put back on the next, as a
 // pool's objects or a panel shown and hidden: what coming back costs.
+// --toggle-static N does the same with N static texts of 24 glyphs and N
+// shapes, the timeline's: what leaving costs, with glyphs that share a
+// font's fills.
 //
-//   node tests/player/bench.ts [--shapes N | --rig N | --toggle N] [--frames N] [--idle K]
-//     [--gpu] [--back-buffer] [--json]
+//   node tests/player/bench.ts [--shapes N | --rig N | --toggle N | --toggle-static N]
+//     [--frames N] [--idle K] [--gpu] [--back-buffer] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 
@@ -37,6 +40,7 @@ const shapes = option("shapes", 2000);
 const rig = option("rig", 0);
 const idleRenders = option("idle", 0);
 const toggle = option("toggle", 0);
+const toggleStatic = option("toggle-static", 0);
 const frames = option("frames", 120);
 const WARMUP = 10;
 const WIDTH = 800;
@@ -258,19 +262,80 @@ function toggleSwf(count: number): Uint8Array {
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
 }
 
+/**
+ * `count` static texts of 24 glyphs in a font of boxes, and as many shapes
+ * of the synthetic timeline's characters, placed on the one frame, for the
+ * page to toggle (--toggle-static).
+ */
+function toggleStaticSwf(count: number): Uint8Array {
+  const letters = "abcdefgh";
+  const tags: Uint8Array[] = [
+    w.fileAttributes(true),
+    w.backgroundColor(0xffffff),
+    w.font3({
+      id: 50,
+      name: "Boxes",
+      ascent: 800,
+      descent: 200,
+      glyphs: [...letters].map((char, k) => ({
+        char,
+        advance: 600,
+        boxes: [
+          [40, -100 - 60 * k, 560, 0],
+          [100, -700, 300 + 30 * k, -150 - 60 * k],
+        ],
+      })),
+    }),
+  ];
+  for (let id = 1; id <= 8; id++) {
+    tags.push(character(id));
+  }
+
+  for (let i = 0; i < count; i++) {
+    const glyphs: [number, number][] = Array.from({ length: 24 }, (_, k) => [(i + k) % 8, 180]);
+    tags.push(
+      w.staticText({
+        id: 100 + i,
+        bounds: [0, 4400, -400, 100],
+        records: [{ font: 50, height: 300, color: 0x204060, x: 0, y: 0, glyphs }],
+      }),
+      w.place({
+        depth: 2 * i + 1,
+        character: 100 + i,
+        matrix: { tx: ((i * 61) % 700) * TWIPS, ty: ((i * 29) % 560) * TWIPS },
+      }),
+      w.place({
+        depth: 2 * i + 2,
+        character: 1 + (i % 8),
+        matrix: { a: 0.1, d: 0.1, tx: ((i * 37) % 780) * TWIPS, ty: ((i * 53) % 580) * TWIPS },
+      }),
+    );
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
 const quantile = (values: number[], q: number) => {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0;
 };
 
-const swf = toggle > 0 ? toggleSwf(toggle) : rig > 0 ? rigSwf(rig) : synthetic();
+const swf =
+  toggle > 0
+    ? toggleSwf(toggle)
+    : toggleStatic > 0
+      ? toggleStaticSwf(toggleStatic)
+      : rig > 0
+        ? rigSwf(rig)
+        : synthetic();
 const result = await benchPlayer(
   swf,
   frames,
   args.includes("--gpu"),
   args.includes("--back-buffer"),
   idleRenders,
-  toggle,
+  toggle > 0 ? toggle : toggleStatic > 0 ? 0 : -1,
 );
 if (result.error) {
   console.error(result.error);
@@ -284,7 +349,14 @@ const gl = result.gl.slice(WARMUP);
 const total = tick.map((t, i) => t + sync[i] + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
-  shapes: toggle > 0 ? `toggle of ${toggle}` : rig > 0 ? `rig of ${rig}` : shapes,
+  shapes:
+    toggle > 0
+      ? `toggle of ${toggle}`
+      : toggleStatic > 0
+        ? `static toggle of ${toggleStatic}`
+        : rig > 0
+          ? `rig of ${rig}`
+          : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   frames,
@@ -303,7 +375,7 @@ if (args.includes("--json")) {
 } else {
   const ms = (v: number) => `${v.toFixed(2)} ms`;
   console.log(
-    `${summary.shapes}${rig > 0 || toggle > 0 ? "" : " shapes"}, ${frames} frames, SWF of ${swf.length} bytes; first frame ${ms(result.first)}; drawn by ${result.renderer}`,
+    `${summary.shapes}${typeof summary.shapes === "string" ? "" : " shapes"}, ${frames} frames, SWF of ${swf.length} bytes; first frame ${ms(result.first)}; drawn by ${result.renderer}`,
   );
   console.log(
     `  counts  ${JSON.stringify(result.counts)}; JS heap ${summary.heapMb[0]} to ${summary.heapMb[1]} MB`,
@@ -317,5 +389,14 @@ if (args.includes("--json")) {
       `  idle    median ${ms(summary.idle.median)}  p90 ${ms(summary.idle.p90)} a render`,
     );
   }
+  if (toggle > 0 || toggleStatic > 0) {
+    // Frame k (from 2) takes the objects off on odd k; the warm-up's 10 are left out.
+    const off = sync.filter((_, i) => (i + WARMUP + 2) % 2 === 1);
+    const on = sync.filter((_, i) => (i + WARMUP + 2) % 2 === 0);
+    console.log(
+      `  sync    off median ${ms(quantile(off, 0.5))}  back median ${ms(quantile(on, 0.5))}`,
+    );
+  }
+
   console.log(`  frame   median ${ms(summary.frame.median)}  p90 ${ms(summary.frame.p90)}`);
 }

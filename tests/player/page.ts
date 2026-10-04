@@ -221,17 +221,17 @@ interface Bench {
  * GPU is waited for, so that what it does counts; Chrome's software GL
  * does it on the CPU anyway, and the result says which drew.
  *
- * `toggle` adds as many sprites drawn by Graphics beside the root's
- * children, and takes all of them off the list on odd frames and puts them
- * back on even ones, as a pool's objects and a panel shown and hidden
- * come and go; the toggle counts in the tick.
+ * `toggle`, from 0, adds as many sprites drawn by Graphics beside the
+ * root's children, and takes all of them off the list on odd frames and
+ * puts them back on even ones, as a pool's objects and a panel shown and
+ * hidden come and go; the toggle counts in the tick. -1 toggles nothing.
  */
 async function benchSwf(
   base64: string,
   frames: number,
   backBuffer = false,
   idleRenders = 0,
-  toggle = 0,
+  toggle = -1,
 ): Promise<Bench> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
@@ -290,7 +290,7 @@ async function benchSwf(
     const heapNow = () =>
       (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ??
       0;
-    const toggled = toggle > 0 ? await toggling(player.root, toggle) : [];
+    const toggled = toggle >= 0 ? await toggling(player.root, toggle) : [];
     view.render(player.stage);
     await finish();
     const first = performance.now() - start;

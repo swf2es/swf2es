@@ -599,19 +599,26 @@ test("an object off the list gives its lines back, and has them again when it co
       .context;
 
   await withClock(async (clock) => {
+    // Kept 5 s off the list, then emptied, its lines idle 5 s more.
+    const idle = () => {
+      for (let k = 0; k < 2; k++) {
+        clock.at += 6000;
+        view.prepare(root);
+      }
+    };
     view.prepare(root);
     const held = linesOf();
     assert.deepEqual(view.counts, { strokeContexts: 1, strokeReuses: 0 });
 
-    // Off the list: given back, then gone once idle long enough. Its Graphics go at once: Pixi
-    // would keep each, with its geometry, for a minute.
+    // Off the list: kept a while, then given back, and gone once idle long enough. Its Graphics
+    // go too, which Pixi would keep, with their geometry, for a minute.
     const graphics = view.stage.children[0].children[1].children[1].children[0].children[1];
     root.removeChild(branch);
     view.prepare(root);
-    assert.equal(graphics.destroyed, true);
+    assert.equal(graphics.destroyed, false);
     assert.equal(held.destroyed, false);
-    clock.at += 6000;
-    view.prepare(root);
+    idle();
+    assert.equal(graphics.destroyed, true);
     assert.equal(held.destroyed, true);
 
     // Back on: drawn again, not with the context destroyed.
@@ -638,8 +645,7 @@ test("an object off the list gives its lines back, and has them again when it co
     root.removeChild(branch);
     branch.removeChild(shape);
     view.prepare(root);
-    clock.at += 6000;
-    view.prepare(root);
+    idle();
     assert.equal(again.destroyed, true);
     branch.placeAtDepth(shape, 1);
     root.placeAtDepth(branch, 1);
@@ -660,8 +666,7 @@ test("an object off the list gives its lines back, and has them again when it co
       view.prepare(root);
     }
 
-    clock.at += 6000;
-    view.prepare(root);
+    idle();
     assert.ok(made.every((context) => context.destroyed));
     assert.equal(linesOf().destroyed, false);
   });
@@ -852,8 +857,12 @@ test("instances of a morph at one ratio share its blend's fills, which go once t
     root.removeChild(shapes[1]);
     view.prepare(root);
     assert.equal(last.destroyed, false);
-    clock.at += 6000;
-    view.prepare(root);
+    // Kept 5 s with them, then idle 5 s.
+    for (let k = 0; k < 2; k++) {
+      clock.at += 6000;
+      view.prepare(root);
+    }
+
     assert.equal(last.destroyed, true);
   });
 });
@@ -1003,22 +1012,6 @@ test("a drawing off the list keeps what it drew a while, for it to come back to"
   });
 });
 
-test("a shared fill gathers no listener per instance, so instances go in linear time", async () => {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
-  const view = new PixiView(standIn([]).renderer);
-  const root = new Container();
-  const character = await outlinedSquare();
-  for (let k = 1; k <= 3; k++) {
-    root.placeAtDepth(new ShapeObject(character), k);
-  }
-
-  view.prepare(root);
-  type Drawn = { context: { listenerCount(event: string): number } };
-  const fill = view.stage.children[0].children[1].children[0].children[0] as unknown as Drawn;
-  assert.equal(fill.context.listenerCount("update"), 0);
-  assert.equal(fill.context.listenerCount("unload"), 0);
-});
-
 test("a drawing kept off the list is drawn again for a change of its content or of the screen's scale", async () => {
   const { Drawing } = await import("../../../packages/player/dist/drawing.js");
   const { CONTENT } = await import("../../../packages/player/dist/display.js");
@@ -1075,6 +1068,49 @@ test("a drawing kept off the list is drawn again for a change of its content or 
   assert.notEqual(art()[0], fill);
 });
 
+test("a child emptied off the list is drawn again under a parent kept off it", async () => {
+  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const sprite = new Container();
+  const drawing = new Drawing();
+  drawing.beginFill({ type: "solid", color: 0xff336699 });
+  drawing.drawRect(0, 0, 30, 20);
+  drawing.endFill();
+  sprite.drawing = drawing;
+  // A container that draws nothing itself is emptied at once; the shape in it is kept.
+  const middle = new Container();
+  const shape = new ShapeObject(await outlinedSquare());
+  middle.placeAtDepth(shape, 1);
+  sprite.placeAtDepth(middle, 1);
+  root.placeAtDepth(sprite, 1);
+  type Drawn = { destroyed: boolean; context: { destroyed: boolean } };
+  // The sprite's container: its art, then the middle's container: its art, then the shape's.
+  const shapeArt = () =>
+    view.stage.children[0].children[1].children[1].children[1].children[0]
+      .children as unknown as Drawn[];
+  view.prepare(root);
+  const [fill] = shapeArt();
+
+  root.removeChild(sprite);
+  view.prepare(root);
+  root.placeAtDepth(sprite, 1);
+  view.prepare(root);
+  assert.equal(shapeArt()[0], fill);
+  assert.ok(shapeArt().every((g) => !g.destroyed && !g.context.destroyed));
+
+  // The middle moved out and back, its shape with it: drawn again under the kept sprite.
+  sprite.removeChild(middle);
+  root.removeChild(sprite);
+  view.prepare(root);
+  sprite.placeAtDepth(middle, 1);
+  root.placeAtDepth(sprite, 1);
+  view.prepare(root);
+  assert.equal(shapeArt().length, 2);
+  assert.ok(shapeArt().every((g) => !g.destroyed && !g.context.destroyed));
+});
+
 test("a child moved into a parent off the list gives its lines back", async () => {
   const { ShapeObject } = await import("../../../packages/player/dist/display.js");
   const view = new PixiView(standIn([]).renderer);
@@ -1100,4 +1136,46 @@ test("a child moved into a parent off the list gives its lines back", async () =
 
     assert.equal(lines.destroyed, true);
   });
+});
+
+test("a shared fill gathers no listener per instance, so instances go in linear time", async () => {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const character = await outlinedSquare();
+  for (let k = 1; k <= 3; k++) {
+    root.placeAtDepth(new ShapeObject(character), k);
+  }
+
+  view.prepare(root);
+  type Drawn = { context: { listenerCount(event: string): number } };
+  const fill = view.stage.children[0].children[1].children[0].children[0] as unknown as Drawn;
+  assert.equal(fill.context.listenerCount("update"), 0);
+  assert.equal(fill.context.listenerCount("unload"), 0);
+});
+
+test("of many objects off the list at once, only the latest 1024 are kept whole", async () => {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const character = await outlinedSquare();
+  const shapes = Array.from({ length: 1100 }, (_, k) => {
+    const shape = new ShapeObject(character);
+    root.placeAtDepth(shape, k + 1);
+    return shape;
+  });
+  view.prepare(root);
+  type Drawn = { destroyed: boolean };
+  const fills = view.stage.children[0].children
+    .slice(1)
+    .map((c) => c.children[0].children[0] as unknown as Drawn);
+
+  for (const shape of shapes) {
+    root.removeChild(shape);
+  }
+
+  view.prepare(root);
+  assert.equal(fills.filter((g) => g.destroyed).length, 1100 - 1024);
+  assert.equal(fills[0].destroyed, true);
+  assert.equal(fills[1099].destroyed, false);
 });

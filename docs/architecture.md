@@ -533,16 +533,21 @@ part of its transform on the stage, and is kept by layer and that
 transform, exactly, shared by every instance that sees the layer alike
 (a crowd of one creature in step) and found again when one comes back to
 it (a loop's next turn). Contexts are counted as instances take and give
-them back, and an object that leaves the list gives back its own and
-those of its descendants that left with it (not one moved to another
-parent, which draws it), and destroys its Graphics, drawn again if it
-returns: Pixi keeps a Graphics it has drawn, with its geometry, for a
-minute after it was last drawn, and a timeline that makes its children
-anew on every frame, as a goto back does, so held gigabytes. A drawing's
-own fills and a text's characters, dear to build again, are kept 5 s
-off the list for a pool's object or a panel hidden and shown to come
-back to (`bench.ts --toggle N`). A BitmapData's draw of an object off
-the list borrows the stage's fills and lines where they are still kept.
+them back. An object that leaves the list, and those of its
+descendants that leave with it (not one moved to a parent on the list,
+which draws it), keep what they drew 5 s, at most 1024 of them, for a
+pool's object or a panel hidden and shown to come back to as it was
+(`bench.ts --toggle N`, `--toggle-static N`); then they give their
+contexts back and destroy their Graphics, drawn again if they return,
+their lines for the screen's scale of then. Pixi keeps a Graphics it has
+drawn, with its geometry, for a minute after it was last drawn, and a
+timeline that makes its children anew on every frame, as a goto back
+does, so held gigabytes. A BitmapData's draw of an object off the list
+borrows the stage's fills and lines where they are still kept. A
+Graphics of a shared context (a shape's, a blend's or a glyph's fills,
+or lines) does not listen on it, as no such context changes once built:
+a listener a Graphics made each destroy search them all, so a text of n
+glyphs of one font took O(n²) to go.
 A line context no one holds stays idle 5
 s, by the clock, not renders, which a host may make many of between
 frames, at most 4096 of them, before it is destroyed. A drawing's lines

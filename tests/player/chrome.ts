@@ -257,7 +257,7 @@ export function benchPlayer(
   gpu = false,
   backBuffer = false,
   idleRenders = 0,
-  toggle = 0,
+  toggle = -1,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",

@@ -436,6 +436,12 @@ function strokeContext(layer: ShapeLayer, m: Linear, least: number): GraphicsCon
  */
 const IDLE_MS = 5000;
 const IDLE_MOST = 4096;
+/**
+ * The most objects off the list kept whole: enough for a pool or a panel,
+ * while a timeline that makes its children anew on every frame lets its
+ * last frames' go, whose Graphics in thousands made long collector pauses.
+ */
+const PARKED_MOST = 1024;
 
 /**
  * Lines' contexts by shape layer and the linear transform they are seen
@@ -687,9 +693,8 @@ interface Node {
   /** The children as of the last arrangement, to know those that left. */
   kids: readonly DisplayObject[];
   /**
-   * Whether it is off the list, released: its lines given back and its
-   * art emptied (`emptied`), or, for a drawing or a text, which are dear
-   * to build again, kept a while (`PixiView.parked`).
+   * Whether it is off the list, released: kept whole a while
+   * (`PixiView.parked`), then emptied (`emptied`), its lines given back.
    */
   released: boolean;
   /** Whether its art was emptied while off the list: drawn again if it comes back. */
@@ -783,9 +788,9 @@ export class PixiView {
   /** What a fresh view borrowed from its source's caches, which it neither gives back nor destroys. */
   private readonly borrowed = new WeakSet<GraphicsContext>();
   /**
-   * The released nodes of drawings and texts, with the time each left the
-   * list: kept whole for IDLE_MS, as a pool's objects or a panel shown and
-   * hidden come back, then emptied.
+   * The released nodes that drew something, oldest first, with the time
+   * each left the list: kept whole for IDLE_MS, at most PARKED_MOST of them,
+   * as a pool's objects or a panel shown and hidden come back, then emptied.
    */
   private readonly parked = new Map<Node, number>();
   /** The filters a fresh view made, which it destroys with the rest. */
@@ -1203,14 +1208,16 @@ export class PixiView {
       chain.forget();
     }
 
-    // What it drew goes too: Pixi keeps a Graphics it has drawn, with its
+    // What it drew is kept a while for it to come back to, as a pool's
+    // objects do, then goes: Pixi keeps a Graphics it has drawn, with its
     // geometry, for a minute after it was last drawn, which a timeline that
-    // makes its children anew on every frame turns into gigabytes. A
-    // drawing's own fills and a text's characters are dear to build again,
-    // and wait a while for it to come back.
-    if ((node.ownFills && node.fills.length > 0) || o instanceof TextObject) {
+    // makes its children anew on every frame turned into gigabytes.
+    if (node.art.children.length > 0) {
       this.parked.delete(node);
       this.parked.set(node, performance.now());
+      if (this.parked.size > PARKED_MOST) {
+        this.empty(this.parked.keys().next().value as Node);
+      }
     } else {
       this.empty(node);
     }
