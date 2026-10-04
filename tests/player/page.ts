@@ -42,6 +42,8 @@ async function scriptingFor(
       ? { screenResolutionX: 1536, screenResolutionY: 864, pixelAspectRatio: 1, screenDPI: 72 }
       : undefined,
     url: url ? new URL(url, location.href).href : undefined,
+    // A navigateToURL to "_self" would take the page itself away.
+    navigate: null,
     fetch: async (request, signal) => {
       const response = await fetch(request.url, {
         signal,

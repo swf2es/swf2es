@@ -29,6 +29,7 @@ import { transformNatives } from "./flash/geom/Transform.js";
 import { soundHooks, soundNatives } from "./flash/media/Sound.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
 import { fileFilterNatives } from "./flash/net/FileFilter.js";
+import { navigateNatives } from "./flash/net/navigateToURL.js";
 import { sharedObjectNatives } from "./flash/net/SharedObject.js";
 import { socketNatives } from "./flash/net/Socket.js";
 import { urlRequestNatives } from "./flash/net/URLRequest.js";
@@ -64,6 +65,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...externalInterfaceNatives(s),
     ...urlRequestNatives(s),
     ...urlStreamNatives(s),
+    ...navigateNatives(s),
     ...applicationDomainNatives(s),
     ...capabilitiesNatives(s),
     ...securityNatives(s),
