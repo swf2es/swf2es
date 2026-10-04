@@ -248,7 +248,11 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "value");
       }
 
-      this.$display.model.setHtml(s.rt.toString(v), this.$display.multiline);
+      this.$display.model.setHtml(
+        s.rt.toString(v),
+        this.$display.multiline,
+        s.trimTrailingHtmlBreak,
+      );
       changed(this);
     }
     get length(): number {

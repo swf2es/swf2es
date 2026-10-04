@@ -72,6 +72,19 @@ test("a long append keeps a format for every character", async () => {
   assert.deepEqual([model.text.length, model.formats.length], [1_004, 1_004]);
 });
 
+test("compact HTML removes only the final line break", async () => {
+  const { TextModel } = await import("../../../packages/player/dist/text.js");
+  const model = new TextModel();
+  const html = "first<br>second<br>";
+
+  model.setHtml(html, true);
+  assert.equal(model.text, "first\rsecond\r");
+
+  model.setHtml(html, true, true);
+  assert.equal(model.text, "first\rsecond");
+  assert.equal(model.formats.length, "first\rsecond".length);
+});
+
 test("a long unbroken word wraps between its characters in time that grows with it, not its square", async () => {
   const { layoutText } = await import("../../../packages/player/dist/text-layout.js");
   const { DEFAULT_FORMAT } = await import("../../../packages/player/dist/text.js");
