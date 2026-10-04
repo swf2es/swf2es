@@ -1533,6 +1533,46 @@ test("large branches keep their own instructions as they shrink, without groupin
   store.dispose();
 });
 
+test("an opt-in display copy of a draw keeps logical bitmap dimensions and expires on pixel edits", () => {
+  const renderer = { ...standIn([]).renderer, resolution: 2 } as unknown as ConstructorParameters<
+    typeof PixiView
+  >[0];
+  const view = new PixiView(renderer);
+  view.highResolutionBitmapDraws = true;
+  const store = new BitmapStore(300, 10, true, 0);
+  assert.equal(
+    view.drawInto(
+      store,
+      new Container(),
+      { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+      0,
+      0,
+      300,
+      10,
+      1,
+    ),
+    true,
+  );
+  assert.equal(store.width, 300);
+  assert.equal(store.height, 10);
+
+  const root = new Container();
+  root.placeAtDepth(new BitmapObject(store), 1);
+  view.prepare(root);
+  const sprite = view.stage.children[0].children[1].children[0].children[0] as unknown as {
+    texture: { source: { width: number } };
+    width: number;
+  };
+  assert.equal(sprite.texture.source.width, 600);
+  assert.equal(sprite.width, 300);
+
+  store.setPixel32(0, 0, 0xffffffff);
+  view.prepare(root);
+  assert.equal(sprite.texture.source.width, 300);
+  assert.equal(sprite.width, 300);
+  store.dispose();
+});
+
 test("mask partners share a group, including when an existing group's mask moves outside it", () => {
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();

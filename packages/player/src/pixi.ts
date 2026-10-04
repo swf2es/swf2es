@@ -783,6 +783,8 @@ function maskLink(
 
 export class PixiView {
   readonly stage = new PixiContainer();
+  /** Retain larger GPU-only copies of new BitmapData.draw results for high-density displays. */
+  highResolutionBitmapDraws = false;
   /** What the view has built since it was made, for measuring: lines' contexts made and reused. */
   readonly counts = { strokeContexts: 0, strokeReuses: 0 };
   private readonly lines = new StrokeContexts(this.counts);
@@ -1266,12 +1268,13 @@ export class PixiView {
    * that Flash could not read, or one too large for a texture.
    */
   private drawBitmap(o: BitmapObject, node: Node): void {
-    const texture = o.store && gpuBitmaps(this.renderer).texture(o.store, o.smoothing);
-    if (!texture) {
+    const display = o.store && gpuBitmaps(this.renderer).displayTexture(o.store, o.smoothing);
+    if (!display) {
       return;
     }
 
-    node.bitmap = new Sprite(texture);
+    node.bitmap = new Sprite(display.texture);
+    node.bitmap.scale.set(1 / display.scale);
     node.art.addChild(node.bitmap);
   }
 
@@ -1534,7 +1537,11 @@ export class PixiView {
       // Pixels set since: the textures brought up to date, uploaded where the CPU changed them.
       const bitmaps = gpuBitmaps(this.renderer);
       if (node.bitmap && o instanceof BitmapObject && o.store) {
-        bitmaps.texture(o.store, o.smoothing);
+        const display = bitmaps.displayTexture(o.store, o.smoothing);
+        if (display) {
+          node.bitmap.texture = display.texture;
+          node.bitmap.scale.set(1 / display.scale);
+        }
       }
 
       for (const layer of node.layers) {
@@ -1866,6 +1873,12 @@ export class PixiView {
       return false;
     }
 
+    // A GPU-only display copy leaves BitmapData's logical pixels and readbacks unchanged.
+    const scale = Math.min(3, Math.ceil(this.renderer.resolution ?? 1));
+    const enhanced =
+      this.highResolutionBitmapDraws && store.version === 0 && store.width >= 256 && scale > 1
+        ? bitmaps.beginEnhancedDraw(store, scale)
+        : null;
     // Into a texture of its own first: the object may show the store itself.
     const drawn = this.sampled(o, m, width, height, samples);
     const sprite = new Sprite(drawn);
@@ -1874,6 +1887,29 @@ export class PixiView {
     sprite.destroy();
     drawn.destroy(true);
     bitmaps.drawn(store);
+    if (enhanced) {
+      const high = this.sampled(
+        o,
+        {
+          a: m.a * scale,
+          b: m.b * scale,
+          c: m.c * scale,
+          d: m.d * scale,
+          tx: m.tx * scale,
+          ty: m.ty * scale,
+        },
+        width * scale,
+        height * scale,
+        Math.max(width, height) * scale * 2 <= bitmaps.limit ? 2 : 1,
+      );
+      const sprite = new Sprite(high);
+      sprite.position.set(x * scale, y * scale);
+      this.renderer.render({ container: sprite, target: enhanced, clear: false });
+      sprite.destroy();
+      high.destroy(true);
+      bitmaps.enhancedDrawn(store, enhanced, scale);
+    }
+
     return true;
   }
 
@@ -2174,6 +2210,16 @@ class StoreTexture implements GpuCopy {
    * either way, for bitmap fills; by "linear repeat".
    */
   private readonly variants = new Map<string, { texture: RenderTexture; version: number }>();
+  enhanced: { texture: RenderTexture; scale: number; version: number; pixels: number } | null =
+    null;
+
+  clearEnhanced(): void {
+    if (this.enhanced) {
+      this.enhanced.texture.destroy(true);
+      this.bitmaps.enhancedPixels -= this.enhanced.pixels;
+      this.enhanced = null;
+    }
+  }
 
   constructor(
     private readonly renderer: Renderer,
@@ -2266,6 +2312,7 @@ class StoreTexture implements GpuCopy {
 
   destroy(): void {
     this.bitmaps.forget(this);
+    this.clearEnhanced();
     this.texture.destroy(true);
     for (const { texture } of this.variants.values()) {
       texture.destroy(true);
@@ -2280,7 +2327,8 @@ class StoreTexture implements GpuCopy {
  * through the renderer that drew it before another uploads it.
  */
 class GpuBitmaps {
-  private readonly limit: number;
+  readonly limit: number;
+  enhancedPixels = 0;
   private readonly copies = new WeakMap<BitmapStore, StoreTexture>();
   private readonly collected = new FinalizationRegistry<StoreTexture>((copy) => copy.destroy());
 
@@ -2315,11 +2363,70 @@ class GpuBitmaps {
 
     // Behind the store: its pixels, read back first if another renderer's draw wrote them.
     if (copy.version !== store.version) {
+      copy.clearEnhanced();
       copy.upload(store.pixels);
       copy.version = store.version;
     }
 
     return smoothing ? copy.sampled(true, false) : copy.texture;
+  }
+
+  /** Prefer a sharp GPU display copy where one exists; other BitmapData uses keep logical pixels. */
+  displayTexture(
+    store: BitmapStore,
+    smoothing: boolean,
+  ): { texture: Texture; scale: number } | null {
+    const texture = this.texture(store, smoothing);
+    if (!texture) {
+      return null;
+    }
+
+    const enhanced = this.copies.get(store)?.enhanced;
+    return enhanced && enhanced.version === store.version
+      ? { texture: enhanced.texture, scale: enhanced.scale }
+      : { texture, scale: 1 };
+  }
+
+  /** Start with the current logical pixels, so a partial draw keeps what lies outside it. */
+  beginEnhancedDraw(store: BitmapStore, scale: number): RenderTexture | null {
+    const copy = this.copies.get(store);
+    const width = store.width * scale;
+    const height = store.height * scale;
+    const pixels = width * height;
+    if (
+      !copy ||
+      width > this.limit ||
+      height > this.limit ||
+      pixels > 16 * 1024 * 1024 ||
+      pixels > 32 * 1024 * 1024 - this.enhancedPixels
+    ) {
+      return null;
+    }
+
+    const target = RenderTexture.create({
+      width,
+      height,
+      scaleMode: "linear",
+      autoGarbageCollect: false,
+    });
+    const sprite = new Sprite(copy.texture);
+    sprite.scale.set(scale);
+    this.renderer.render({ container: sprite, target, clear: true });
+    sprite.destroy();
+    return target;
+  }
+
+  enhancedDrawn(store: BitmapStore, texture: RenderTexture, scale: number): void {
+    const copy = this.copies.get(store);
+    if (!copy) {
+      texture.destroy(true);
+      return;
+    }
+
+    copy.clearEnhanced();
+    const pixels = texture.source.width * texture.source.height;
+    copy.enhanced = { texture, scale, version: store.version, pixels };
+    this.enhancedPixels += pixels;
   }
 
   /** The store's texture for a bitmap fill: repeating or clamped, smoothed or not, up to date. */
