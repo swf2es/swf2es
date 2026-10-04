@@ -5,11 +5,75 @@
 import {
   AlphaFilter,
   BlendModeFilter,
+  type Bounds,
   type Filter,
+  FilterEffect,
   FilterSystem,
   RenderTargetSystem,
   TexturePool,
 } from "pixi.js";
+
+type FilterData = { skip: boolean; resolution: number; bounds: Bounds };
+const filterSystem = FilterSystem.prototype as unknown as {
+  _calculateFilterArea(instruction: { filterEffect: FilterEffect }, bounds: Bounds): void;
+  _calculateFilterBounds(data: FilterData, ...rest: unknown[]): void;
+};
+
+// A layer's region holds what its filtered children draw past their shapes,
+// as Flash's layer holds a child's glow whole: Pixi measures a filtered
+// object by its descendants' shapes alone, and cut a blurred child of a
+// blend off at its shapes' edges. Each filter of a descendant grows the
+// region by its padding, in the stage's pixels as Pixi pads; the object's
+// own filters are padded by Pixi after.
+let measuring: FilterEffect | null = null;
+(FilterEffect.prototype as FilterEffect & { addBounds(bounds: Bounds): void }).addBounds =
+  function (this: FilterEffect, bounds: Bounds) {
+    if (this === measuring || !this.filters) {
+      return;
+    }
+
+    let padding = 0;
+    for (const f of this.filters) {
+      if (f.enabled) {
+        padding += f.padding;
+      }
+    }
+
+    bounds.pad(padding | 0);
+  };
+const calculateFilterArea = filterSystem._calculateFilterArea;
+filterSystem._calculateFilterArea = function (instruction, bounds) {
+  measuring = instruction.filterEffect;
+  try {
+    calculateFilterArea.call(this, instruction, bounds);
+  } finally {
+    measuring = null;
+  }
+};
+
+// A filter's region on its texture's texels. Pixi puts the region on them
+// and then pads it by whole pixels, which at a resolution that is no whole
+// number (a stage fitted to its window) leaves it between them: the filter
+// read its input between texels, and a blend nested in a layer, its region
+// starting left of or above the layer's, read along its top and left edge
+// texels of the pooled back texture the copy of what is behind never
+// reached, drawing lines Flash does not. The region is put on the texels
+// again after the padding. Patched for every renderer on the page.
+const SNAP = 1e-6;
+const calculateFilterBounds = filterSystem._calculateFilterBounds;
+filterSystem._calculateFilterBounds = function (data, ...rest) {
+  calculateFilterBounds.call(this, data, ...rest);
+  if (data.skip) {
+    return;
+  }
+
+  const r = data.resolution;
+  const b = data.bounds;
+  b.minX = Math.floor(b.minX * r + SNAP) / r;
+  b.minY = Math.floor(b.minY * r + SNAP) / r;
+  b.maxX = Math.ceil(b.maxX * r - SNAP) / r;
+  b.maxY = Math.ceil(b.maxY * r - SNAP) / r;
+};
 
 // The copy of what is behind a blend into its back texture, held to both:
 // - The texture is sized with a hair of tolerance for rounding, and the

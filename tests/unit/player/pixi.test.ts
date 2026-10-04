@@ -874,6 +874,126 @@ test("a blend's copy of what is behind it is held to the target and the texture,
   assert.deepEqual(copy([205, -4], [174, 1]), { copies: [], clears: [] });
 });
 
+/** Pixi's bounds, as far as these tests use them. */
+interface PixiBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  clear(): void;
+  addFrame(x0: number, y0: number, x1: number, y1: number): void;
+}
+
+/** Pixi's own module, as the player loads it, with the player's patches to it. */
+async function patchedPixi(): Promise<{
+  Bounds: new (minX?: number, minY?: number, maxX?: number, maxY?: number) => PixiBounds;
+  FilterEffect: new () => { filters: unknown };
+  FilterSystem: { prototype: unknown };
+}> {
+  await import("../../../packages/player/dist/pixi-blend.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  return import(entry);
+}
+
+test("a filter's region lies on its texture's texels at a resolution that is no whole number", async () => {
+  const { Bounds, FilterSystem } = await patchedPixi();
+  const system = FilterSystem.prototype as unknown as {
+    _calculateFilterBounds(this: unknown, data: unknown, ...rest: unknown[]): void;
+  };
+  const r = 1.5;
+  const data = {
+    bounds: new Bounds(10.3, 20.7, 50.2, 60.1),
+    filters: [
+      {
+        enabled: true,
+        resolution: "inherit",
+        padding: 3,
+        antialias: "off",
+        clipToViewport: false,
+        compatibleRenderers: 1,
+        blendRequired: false,
+      },
+    ],
+    skip: false,
+    resolution: 0,
+  };
+  const stub = { renderer: { type: 1, backBuffer: { useBackBuffer: true } } };
+  system._calculateFilterBounds.call(stub, data, { width: 1000, height: 1000 }, false, r, 1);
+
+  // Pixi put it on the texels, then padded it by 3 pixels, 4.5 texels:
+  // half a texel off them. It is put on them again, grown by the half.
+  const { minX, minY, maxX, maxY } = data.bounds;
+  assert.deepEqual(
+    [minX, minY, maxX, maxY].map((v) => Math.round(v * r * 1e6) / 1e6),
+    [10, 26, 81, 96],
+  );
+});
+
+test("a blend's copy of what is behind it starts at the texel its region does", async () => {
+  const { Bounds, FilterSystem } = await patchedPixi();
+  const system = FilterSystem.prototype as unknown as {
+    getBackTexture(this: unknown, surface: unknown, bounds: unknown, previous?: unknown): unknown;
+  };
+  const r = 1.6228571428571428;
+  const copies: number[][] = [];
+  const stub = {
+    renderer: {
+      renderTarget: {
+        copyToTexture: (
+          _source: unknown,
+          _destination: unknown,
+          o: { x: number; y: number },
+          s: { width: number; height: number },
+        ) => copies.push([o.x, o.y, s.width, s.height]),
+      },
+    },
+  };
+  const surface = { colorTexture: { source: { resolution: r } } };
+
+  // A blend in a layer, its region 18 texels left of and 3 above the
+  // layer's, a hair short of whole: Pixi's floor took 19 and 4, and the
+  // blend read, along its region's top and left, texels never copied.
+  const layer = new Bounds(531 / r, 140 / r, 600 / r, 200 / r);
+  const blend = new Bounds(513 / r - 1e-12, 137 / r - 1e-12, 560 / r, 170 / r);
+  system.getBackTexture.call(stub, surface, blend, layer);
+  assert.deepEqual(copies, [[-18, -3, 47, 33]]);
+});
+
+test("a layer's region holds its filtered children's padding, but not its own", async () => {
+  const { Bounds, FilterEffect, FilterSystem } = await patchedPixi();
+  const system = FilterSystem.prototype as unknown as {
+    _calculateFilterArea(this: unknown, instruction: unknown, bounds: unknown): void;
+  };
+  type Padded = { filters: unknown; addBounds(b: unknown, skip: boolean): void };
+  const effect = (...paddings: number[]) => {
+    const e = new FilterEffect();
+    // The second filter disabled.
+    e.filters = paddings.map((padding, i) => ({ enabled: i !== 1, padding }));
+    return e as Padded;
+  };
+  const own = effect(7);
+  const child = effect(4, 10, 2.5);
+  // Measured as Pixi measures: the shapes, then the effects, the child's and the object's own.
+  const container = {
+    parentRenderGroup: {},
+    getFastGlobalBounds(_layers: boolean, bounds: PixiBounds) {
+      bounds.clear();
+      bounds.addFrame(10, 20, 30, 40);
+      child.addBounds(bounds, true);
+      own.addBounds(bounds, true);
+      return bounds;
+    },
+  };
+  const bounds = new Bounds();
+  system._calculateFilterArea.call({}, { container, filterEffect: own }, bounds);
+  assert.deepEqual([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], [4, 14, 36, 46]);
+
+  // Measured for anything else, its own is padded too.
+  container.getFastGlobalBounds(true, bounds);
+  assert.deepEqual([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], [-3, 7, 43, 53]);
+});
+
 test("large branches keep their own instructions as they shrink, without grouping their wrappers", () => {
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();

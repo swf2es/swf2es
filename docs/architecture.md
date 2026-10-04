@@ -1831,8 +1831,15 @@ that is no whole number, as a host fitting the stage to its page gives,
 k · (1/r) · r can fall a hair short of k, and Pixi's floor took the pixel
 before. The blend read what was behind it a pixel off at those positions
 alone, so a moving blend shook what showed through it, which Flash leaves
-still. The copy's corner and size are rounded instead. The `blend-drift` case moves a blend a quarter pixel
-a frame, at a zoom of 1.5 that gives the test page a resolution of 6.
+still. The copy's corner and size are rounded instead. Pixi also pads a
+filter's region by whole pixels after putting it on the texels, which at
+such a resolution left it between them: a blend nested in a layer, its
+region starting left of or above the layer's, read along its top and
+left edge texels of the pooled back texture the copy never reached, and
+drew lines of what it last held, which Flash does not draw. The region
+is put on the texels again after the padding. The `blend-drift` case
+moves a blend a quarter pixel a frame, at a zoom of 1.5 that gives the
+test page a resolution of 6; unit tests hold the region's snap.
 
 What is behind a blended object is copied into a texture the filter
 reads, and Pixi's copy is held to both that texture and what it copies
@@ -1844,6 +1851,13 @@ not reach is left as the pooled texture had it: it maps past what the
 target has, where the filter's output is cut off. The `blend-edges` case draws such
 objects against adl, and the player's test page fails a case whose
 drawing GL refused.
+
+A layer, a blend's or a filter's, holds what its filtered children draw
+past their shapes, as adl's layer holds a child's glow whole: Pixi
+measures a filtered object by its descendants' shapes alone, which cut a
+blurred child of a blend off at its shapes' edges, so each filter below
+grows the region by its padding (`blend-nested` draws such children
+against adl).
 
 ### Filters
 
