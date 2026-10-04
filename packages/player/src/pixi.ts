@@ -740,6 +740,9 @@ interface Node {
    * (`PixiView.parked`), then emptied (`emptied`), its lines given back.
    */
   released: boolean;
+  /** Recent removals suppress groups on branches that repeatedly leave and return. */
+  lastRelease: number | null;
+  ungroupUntil: number;
   /** Whether its art was emptied while off the list: drawn again if it comes back. */
   emptied: boolean;
   /** The thinnest line its lines were last drawn with, to draw them again for another. */
@@ -1100,6 +1103,8 @@ export class PixiView {
         sharedLines: false,
         kids: [],
         released: false,
+        lastRelease: null,
+        ungroupUntil: 0,
         emptied: false,
         strokedAt: 0,
         bitmap: null,
@@ -1286,12 +1291,14 @@ export class PixiView {
     }
 
     node.released = true;
-    // A parked node may return quickly, but its render group's batches can hold a room's peak
-    // vertex buffers until the renderer dies. The pooled group also keeps its InstructionSet.
-    if (node.container.isRenderGroup) {
-      this.disableRenderGroup(node.container);
+    if (node.container.isRenderGroup || node.draws >= 64 || node.ungroupUntil > 0) {
+      const now = performance.now();
+      const rapid = node.lastRelease !== null && now - node.lastRelease < IDLE_MS;
+      node.lastRelease = now;
+      if (rapid) {
+        node.ungroupUntil = now + IDLE_MS;
+      }
     }
-
     const chain = node.filters[0];
     if (chain instanceof FilterChain) {
       chain.forget();
@@ -1325,6 +1332,11 @@ export class PixiView {
       if (kid.parent === o || this.left(kid, o)) {
         this.release(kid);
       }
+    }
+
+    // A group returned to Pixi's pool must have no nested group still pointing at it.
+    if (node.container.isRenderGroup) {
+      this.disableRenderGroup(node.container);
     }
   }
 
@@ -1631,7 +1643,8 @@ export class PixiView {
       !node.masking &&
       o.parent &&
       draws >= 64 &&
-      !node.container.isRenderGroup
+      !node.container.isRenderGroup &&
+      performance.now() >= node.ungroupUntil
     ) {
       // Keep the group when its animation gets smaller, avoiding repeated batcher destruction.
       node.container.enableRenderGroup();

@@ -30,8 +30,9 @@
 //
 // --branches N places N coloured branches of 128 shapes. A quarter replace
 // one child each frame; the rest stay still, as scenery beside animated art.
+// --toggle-branches N removes and reattaches those N branches every frame.
 //
-//   node tests/player/bench.ts [--shapes N | --rig N | --branches N | --toggle N
+//   node tests/player/bench.ts [--shapes N | --rig N | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N] [--frames N] [--idle K] [--gpu] [--back-buffer] [--antialias] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
@@ -44,6 +45,7 @@ const option = (name: string, fallback: number) => {
 const shapes = option("shapes", 2000);
 const rig = option("rig", 0);
 const branches = option("branches", 0);
+const toggleBranches = option("toggle-branches", 0);
 const idleRenders = option("idle", 0);
 const toggle = option("toggle", 0);
 const toggleStatic = option("toggle-static", 0);
@@ -374,22 +376,24 @@ function branchSwf(count: number): Uint8Array {
 }
 
 const swf =
-  toggle > 0
-    ? toggleSwf(toggle)
-    : toggleStatic > 0
-      ? toggleStaticSwf(toggleStatic)
-      : branches > 0
-        ? branchSwf(branches)
-        : rig > 0
-          ? rigSwf(rig)
-          : synthetic();
+  toggleBranches > 0
+    ? branchSwf(toggleBranches)
+    : toggle > 0
+      ? toggleSwf(toggle)
+      : toggleStatic > 0
+        ? toggleStaticSwf(toggleStatic)
+        : branches > 0
+          ? branchSwf(branches)
+          : rig > 0
+            ? rigSwf(rig)
+            : synthetic();
 const result = await benchPlayer(
   swf,
   frames,
   args.includes("--gpu"),
   args.includes("--back-buffer"),
   idleRenders,
-  toggle > 0 ? toggle : toggleStatic > 0 ? 0 : -1,
+  toggleBranches > 0 ? 0 : toggle > 0 ? toggle : toggleStatic > 0 ? 0 : -1,
   args.includes("--antialias"),
 );
 if (result.error) {
@@ -405,15 +409,17 @@ const total = tick.map((t, i) => t + sync[i] + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
   shapes:
-    toggle > 0
-      ? `toggle of ${toggle}`
-      : toggleStatic > 0
-        ? `static toggle of ${toggleStatic}`
-        : branches > 0
-          ? `${branches} branches`
-          : rig > 0
-            ? `rig of ${rig}`
-            : shapes,
+    toggleBranches > 0
+      ? `toggle of ${toggleBranches} branches`
+      : toggle > 0
+        ? `toggle of ${toggle}`
+        : toggleStatic > 0
+          ? `static toggle of ${toggleStatic}`
+          : branches > 0
+            ? `${branches} branches`
+            : rig > 0
+              ? `rig of ${rig}`
+              : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   frames,
@@ -426,6 +432,15 @@ const summary = {
   gl: stats(gl),
   frame: stats(total),
   idle: stats(result.idle.slice(WARMUP * idleRenders)),
+  ...(toggleBranches > 0
+    ? {
+        attached: stats(total.filter((_, i) => (i + WARMUP + 2) % 2 === 0)),
+        detached: stats(total.filter((_, i) => (i + WARMUP + 2) % 2 === 1)),
+        attachedSync: stats(sync.filter((_, i) => (i + WARMUP + 2) % 2 === 0)),
+        attachedDraw: stats(draw.filter((_, i) => (i + WARMUP + 2) % 2 === 0)),
+        attachedGl: stats(gl.filter((_, i) => (i + WARMUP + 2) % 2 === 0)),
+      }
+    : {}),
 };
 if (args.includes("--json")) {
   console.log(JSON.stringify(summary));
@@ -446,7 +461,7 @@ if (args.includes("--json")) {
       `  idle    median ${ms(summary.idle.median)}  p90 ${ms(summary.idle.p90)} a render`,
     );
   }
-  if (toggle > 0 || toggleStatic > 0) {
+  if (toggleBranches > 0 || toggle > 0 || toggleStatic > 0) {
     // Frame k (from 2) takes the objects off on odd k; the warm-up's 10 are left out.
     const off = sync.filter((_, i) => (i + WARMUP + 2) % 2 === 1);
     const on = sync.filter((_, i) => (i + WARMUP + 2) % 2 === 0);

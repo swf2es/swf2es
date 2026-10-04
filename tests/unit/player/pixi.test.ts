@@ -143,30 +143,83 @@ test("a batchable keeps the batcher name it is given, and one under a colour tra
   assert.equal(sprite.batcherName, "host-custom");
 });
 
-test("a display node leaving the stage releases its render group's batches", () => {
-  const view = new PixiView(standIn([]).renderer);
-  const root = new Container();
-  const branch = new Container();
-  root.placeAtDepth(branch, 1);
-  view.prepare(root);
+test("nested render groups release child-first on removal", async () => {
+  await withClock(() => {
+    const view = new PixiView(standIn([]).renderer);
+    const root = new Container();
+    const branch = new Container();
+    const child = new Container();
+    branch.placeAtDepth(child, 1);
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
 
-  const pixi = view.stage.children[0].children[1];
-  assert.ok(pixi);
-  pixi.enableRenderGroup();
-  const instructions = pixi.renderGroup?.instructionSet;
-  assert.ok(instructions);
-  let released = 0;
-  instructions.renderPipes = { batch: { destroyInstructionSet: () => released++ } };
+    const outer = view.stage.children[0].children[1];
+    const inner = outer.children[1];
+    assert.ok(outer && inner);
+    outer.enableRenderGroup();
+    inner.enableRenderGroup();
+    const outerGroup = outer.renderGroup;
+    const innerGroup = inner.renderGroup;
+    assert.ok(outerGroup && innerGroup);
+    const released: string[] = [];
+    outerGroup.instructionSet.renderPipes = {
+      batch: { destroyInstructionSet: () => released.push("outer") },
+    };
+    innerGroup.instructionSet.renderPipes = {
+      batch: { destroyInstructionSet: () => released.push("inner") },
+    };
 
-  root.removeChild(branch);
-  view.prepare(root);
-  assert.equal(released, 1);
-  assert.equal(pixi.isRenderGroup, false);
-  assert.equal(instructions.renderPipes, null);
+    root.removeChild(branch);
+    view.prepare(root);
+    assert.deepEqual(released, ["inner", "outer"]);
+    assert.equal(outer.isRenderGroup, false);
+    assert.equal(inner.isRenderGroup, false);
 
-  root.placeAtDepth(branch, 1);
-  view.prepare(root);
-  assert.equal(view.stage.children[0].children[1], pixi);
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+    assert.equal(view.stage.children[0].children[1], outer);
+  });
+});
+
+test("rapidly toggled branches postpone regrouping", async () => {
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const { Container: PixiContainer } = await import(entry);
+
+  await withClock((clock) => {
+    const view = new PixiView(standIn([]).renderer);
+    const root = new Container();
+    const branch = new Container();
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+
+    const outer = view.stage.children[0].children[1];
+    assert.ok(outer);
+    const art = outer.children[0];
+    assert.ok(art);
+    for (let i = 0; i < 64; i++) {
+      art.addChild(new PixiContainer());
+    }
+    outer.enableRenderGroup();
+
+    root.removeChild(branch);
+    view.prepare(root);
+    assert.equal(outer.isRenderGroup, false);
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+    assert.equal(outer.isRenderGroup, true);
+
+    root.removeChild(branch);
+    view.prepare(root);
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+    assert.equal(outer.isRenderGroup, false);
+
+    clock.at += 5001;
+    branch.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 1, ty: 0 });
+    view.prepare(root);
+    assert.equal(outer.isRenderGroup, true);
+  });
 });
 
 test("a colour batcher gives back a past geometry peak after many smaller builds", () => {
