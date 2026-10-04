@@ -1,8 +1,11 @@
 // flash.display.Stage: the stage's size and frame rate, invalidate, which
-// asks for a RENDER event before the frame is drawn, and the two container
-// methods Stage declares native again, which do as a container's do.
+// asks for a RENDER event before the frame is drawn, focus, which keys go
+// to (keyboard.ts), and the two container methods Stage declares native
+// again, which do as a container's do.
 import { avm2 } from "@swf2es/runtime";
+import { setFocus } from "../../../keyboard.js";
 import type { Scripting } from "../../../scripting.js";
+import { displayOf } from "./DisplayObject.js";
 import { containerNatives } from "./DisplayObjectContainer.js";
 
 type Value = avm2.Value;
@@ -68,11 +71,12 @@ export function stageNatives(s: Scripting): avm2.Natives {
     }
 
     get focus(): Value {
-      return null;
+      return s.focus?.object ?? null;
     }
 
-    set focus(_v: Value) {
-      // No keyboard focus yet.
+    // A field given focus keeps its selection (the corpus's edittext_focus_selection).
+    set focus(v: Value) {
+      setFocus(s, v ? (displayOf(v as avm2.AsObject) ?? null) : null);
     }
 
     get showDefaultContextMenu(): boolean {

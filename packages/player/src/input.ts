@@ -8,8 +8,10 @@ import {
   type DisplayObject,
   ShapeObject,
   StaticTextObject,
+  TextObject,
 } from "./display.js";
 import { apply, invert } from "./geometry.js";
+import type { KeyboardInput } from "./keyboard.js";
 import { dispatchEvent } from "./playerglobal/flash/events/EventDispatcher.js";
 import type { Scripting } from "./scripting.js";
 
@@ -21,6 +23,8 @@ export interface PointerState {
   altKey?: boolean;
   ctrlKey?: boolean;
   shiftKey?: boolean;
+  /** When, in milliseconds, which tells a double click from two clicks. */
+  time?: number;
 }
 
 /** The topmost interactive object under a point, in stage coordinates. */
@@ -103,10 +107,14 @@ export class PointerInput {
   handled = 0;
   private hover: DisplayObject | null = null;
   private pressed: DisplayObject | null = null;
+  /** The last press, which the next continues as a double or triple click if near it in place and time. */
+  private lastPress: { x: number; y: number; time: number; clicks: number } | null = null;
 
   constructor(
     private readonly stage: Container,
     private readonly scripting: Scripting,
+    /** What a press tells the keyboard: which field it focuses, and where its caret goes. */
+    private readonly keyboard: KeyboardInput | null = null,
   ) {}
 
   private send(type: string, target: DisplayObject, p: PointerState, buttonDown: boolean): void {
@@ -161,8 +169,32 @@ export class PointerInput {
       if (target) {
         this.send("mouseMove", target, p, down);
       }
+
+      // A drag from a field selects in it, wherever the pointer goes.
+      const pressed = this.pressed;
+      if (down && pressed instanceof TextObject && this.keyboard) {
+        const m = invert(toStage(pressed, this.stage));
+        if (m) {
+          this.keyboard.dragged(pressed, ...apply(m, p.x, p.y));
+        }
+      }
     } else if (type === "down" && (p.button ?? 0) === 0) {
       this.pressed = target;
+      // Ruffle's rule: within half a second and two pixels of the last press.
+      const last = this.lastPress;
+      const time = p.time ?? Number.NaN;
+      const again =
+        last !== null &&
+        Math.abs(time - last.time) < 500 &&
+        (p.x - last.x) ** 2 + (p.y - last.y) ** 2 < 4;
+      const clicks = again ? last.clicks + 1 : 1;
+      this.lastPress = { x: p.x, y: p.y, time, clicks };
+      if (this.keyboard) {
+        const m = target && invert(toStage(target, this.stage));
+        const [x, y] = m ? apply(m, p.x, p.y) : [0, 0];
+        this.keyboard.pressed(target, x, y, clicks);
+      }
+
       if (target) {
         buttonState(target, "down");
         this.send("mouseDown", target, p, true);

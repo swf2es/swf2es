@@ -20,6 +20,7 @@ import { stageNatives } from "./flash/display/Stage.js";
 import { eventNatives } from "./flash/events/Event.js";
 import { eventDispatcherNatives } from "./flash/events/EventDispatcher.js";
 import { httpStatusHooks } from "./flash/events/HTTPStatusEvent.js";
+import { keyboardEventNatives } from "./flash/events/KeyboardEvent.js";
 import { mouseEventNatives } from "./flash/events/MouseEvent.js";
 import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js";
 import { filterHooks, filterNatives } from "./flash/filters/filters.js";
@@ -48,6 +49,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
   return {
     ...toplevelNatives(s),
     ...eventNatives(),
+    ...keyboardEventNatives(s),
     ...mouseEventNatives(s),
     ...eventDispatcherNatives(s),
     ...displayObjectNatives(s),

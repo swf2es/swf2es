@@ -174,12 +174,18 @@ export function containerNatives(s: Scripting): avm2.Natives {
       this.$mouseChildren = !!v;
     }
 
+    declare $tabChildren: boolean | undefined;
+
+    // The stage's is always true: setting it sets the root's, removed or not, as Ruffle has it.
     get tabChildren(): boolean {
-      return true;
+      return this === s.stage?.object ? true : (this.$tabChildren ?? true);
     }
 
-    set tabChildren(_v: Value) {
-      // Not yet: there is no keyboard.
+    set tabChildren(v: Value) {
+      const target = this === s.stage?.object ? s.root?.object : this;
+      if (target) {
+        (target as unknown as { $tabChildren: boolean }).$tabChildren = !!v;
+      }
     }
   }
 
