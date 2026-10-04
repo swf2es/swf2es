@@ -24,6 +24,8 @@ export interface PlayerCase {
   alone?: boolean;
   /** Played as a host showing the stage this many times its size draws it (page.ts); Flash draws it at its size. */
   zoom?: number;
+  /** Played as a host whose renderer is made with `antialias: true` draws it, multisampled; Flash draws it as ever. */
+  antialias?: boolean;
 }
 
 const square = (id: number, color: number, size = 1000) =>
@@ -3220,6 +3222,20 @@ export const cases: PlayerCase[] = [
     frames: 1,
     capture: [1],
     tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "blend-antialias",
+    swf: (abc) => bare(abc, 1, "BlendAntialias", 240, 160),
+    script: "BlendAntialias",
+    frames: 1,
+    capture: [1],
+    // Multisampled, as most hosts draw: blends and filters then read their
+    // backdrops through the bounded resolves of pixi-resolve.ts, which no
+    // other case runs. Within 3 a channel, as drawn without multisampling:
+    // the blends' 8-bit round trips and adl's rounding of the blurs.
+    antialias: true,
+    tolerance: 3,
     maxOutliers: 0,
   },
   {

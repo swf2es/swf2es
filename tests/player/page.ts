@@ -12,6 +12,11 @@
 // times the grid's, often not a whole number, and the stage is drawn at the
 // zoom's inverse, so the same samples come out where Pixi's own arithmetic
 // at that resolution decides.
+//
+// And it may ask for multisampling, as a host made with `antialias: true`
+// draws: the samples are then each resolved from the multisampled targets,
+// blends' backdrops and the back buffer alike (pixi-resolve.ts), before
+// the page averages them.
 import { createCodegen } from "@swf2es/codegen";
 import { isAs3, readSwf, tags } from "@swf2es/format";
 import { Container, type DisplayObject, PixiView, Player, Scripting } from "@swf2es/player";
@@ -124,6 +129,7 @@ async function runSwf(
   quality: number,
   url: string | null = null,
   zoom = 1,
+  antialias = false,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
@@ -145,7 +151,7 @@ async function runSwf(
       width: player.width,
       height: player.height,
       background: player.background,
-      antialias: false,
+      antialias,
       preserveDrawingBuffer: true,
       resolution: n * zoom,
       // Blend modes read what is below them from it (pixi-blend.ts).
@@ -247,6 +253,7 @@ async function benchSwf(
   backBuffer = false,
   idleRenders = 0,
   toggle = -1,
+  antialias = false,
 ): Promise<Bench> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
@@ -266,7 +273,7 @@ async function benchSwf(
       width: player.width,
       height: player.height,
       background: player.background,
-      antialias: false,
+      antialias,
       resolution: 1,
       // As a host that draws blend modes makes it: a full-screen copy a frame.
       useBackBuffer: backBuffer,

@@ -1881,6 +1881,26 @@ target has, where the filter's output is cut off. The `blend-edges` case draws s
 objects against adl, and the player's test page fails a case whose
 drawing GL refused.
 
+A renderer made with `antialias: true` draws into multisampled targets,
+which must be resolved before they are read, and Pixi resolves the whole
+target at each step: before a blend copies its backdrop, again in the
+copy, and after each filter pass drawn on the back buffer, a full-screen
+resolve for each small blend. `pixi-resolve.ts` resolves only the copy's
+clipped source rectangle when a backdrop is copied, skips the resolve
+before the copy, and leaves the back buffer unresolved after filter
+passes until it is presented; a filter's intermediate textures still
+resolve before they are sampled. On a scene of 100 nested blends and
+glows (RX 7900 XTX) the GPU's frame fell from some 4.1 ms to 3.3 ms, the
+frames unchanged. It wraps Pixi 8.21's `FilterSystem`
+(`_setupFilterTextures`, `_setupBindGroupsAndRender`) and its WebGL
+render target adaptor's `copyToTexture` and `finishRenderPass`, and
+relies on the order Pixi calls them in and the framebuffers it leaves
+bound: a Pixi upgrade must check those again. The `blend-antialias` case
+draws nested blends, a blurred child of a blend and blends past the
+stage's edges multisampled against adl, the only case that runs these
+paths; a resolve skipped or of the wrong rectangle fails it, and
+`bench.ts --back-buffer --antialias` times them.
+
 A layer, a blend's or a filter's, holds what its filtered children draw
 past their shapes, as adl's layer holds a child's glow whole: Pixi
 measures a filtered object by its descendants' shapes alone, which cut a
