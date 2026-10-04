@@ -1636,8 +1636,14 @@ function drawCaret(o: TextObject, art: PixiContainer): void {
   }
 
   const first = Math.min(Math.max(0, o.scrollV - 1), lines.length - 1);
+  const last = first + shownLines(o, first) - 1;
   const dx = o.left * 20 - o.scrollH * 20;
   const dy = o.top * 20 - (lines[first].y - GUTTER);
+  // Inside the gutter, as the text is clipped: a caret scrolled out of view is not drawn.
+  const inner = {
+    left: o.left + GUTTER / 20,
+    right: o.left + o.width - GUTTER / 20,
+  };
   // Where index i is drawn: its line, and its x, the line's end past its last character.
   const place = (i: number) => {
     const line = lines.find((l) => i < l.end) ?? lines[lines.length - 1];
@@ -1652,7 +1658,8 @@ function drawCaret(o: TextObject, art: PixiContainer): void {
   if (begin < end) {
     const from = place(begin);
     const to = place(end);
-    if (from.line === to.line) {
+    const shown = lines.indexOf(from.line);
+    if (from.line === to.line && shown >= first && shown <= last) {
       const top = (dy + from.line.y) / 20;
       const height = (from.line.ascent + from.line.descent) / 20;
       g.rect(from.x, top, to.x - from.x, height).fill({ color: 0x3399ff, alpha: 0.4 });
@@ -1660,10 +1667,14 @@ function drawCaret(o: TextObject, art: PixiContainer): void {
   }
 
   const at = place(o.caret);
-  const format = o.model.formats[Math.max(0, o.caret - 1)] ?? o.model.defaultFormat;
-  const top = (dy + at.line.y) / 20;
-  const height = Math.max(1, (at.line.ascent + at.line.descent) / 20);
-  g.rect(at.x, top, 1, height).fill({ color: format.color & 0xffffff });
+  const index = lines.indexOf(at.line);
+  if (index >= first && index <= last && at.x >= inner.left && at.x <= inner.right) {
+    const format = o.model.formats[Math.max(0, o.caret - 1)] ?? o.model.defaultFormat;
+    const top = (dy + at.line.y) / 20;
+    const height = Math.max(1, (at.line.ascent + at.line.descent) / 20);
+    g.rect(at.x, top, 1, height).fill({ color: format.color & 0xffffff });
+  }
+
   art.addChild(g);
 }
 

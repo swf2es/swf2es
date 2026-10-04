@@ -3,7 +3,6 @@
 // to (keyboard.ts), and the two container methods Stage declares native
 // again, which do as a container's do.
 import { avm2 } from "@swf2es/runtime";
-import { TextObject } from "../../../display.js";
 import { setFocus } from "../../../keyboard.js";
 import type { Scripting } from "../../../scripting.js";
 import { displayOf } from "./DisplayObject.js";
@@ -75,13 +74,9 @@ export function stageNatives(s: Scripting): avm2.Natives {
       return s.focus?.object ?? null;
     }
 
+    // A field given focus keeps its selection (the corpus's edittext_focus_selection).
     set focus(v: Value) {
-      const d = v ? displayOf(v as avm2.AsObject) : null;
-      setFocus(s, d ?? null);
-      // A field given focus selects nothing, its caret where it was.
-      if (d instanceof TextObject) {
-        d.select(d.caret, d.caret);
-      }
+      setFocus(s, v ? (displayOf(v as avm2.AsObject) ?? null) : null);
     }
 
     get showDefaultContextMenu(): boolean {

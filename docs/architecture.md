@@ -1540,23 +1540,30 @@ player does not, which only shows for a glyph past them.
 A host gives the player its keys (`bindKeyboard`, `keyboard.ts`): each
 goes to `stage.focus`, or the stage where nothing has focus, as a
 `KeyboardEvent` that bubbles, the browser's legacy key code standing for
-Flash's, which it matches. A focused input field then edits with it: a
-character typed goes in at the caret, over the selection, as Flash's
-order has it, a `TextEvent.TEXT_INPUT` a listener may cancel first, then
-`Event.CHANGE`; `restrict` and `maxChars` keep out what they do not
-allow. Backspace, Delete, the arrows, Home and End move and delete, Shift
-extends the selection, Ctrl+A selects all, and Enter adds a line only
-to a multiline field. A click on an input field gives it focus, its
-caret at the nearer side of the character clicked; a click elsewhere
-takes focus from a field. Tab moves among the stage's input fields, by
-`tabIndex` where any has one, else in reading order, selecting the
-field's text; `stage.focus` set by a script moves focus too, and every
-move is a `focusOut` and a `focusIn`, each naming the other. A focused
+Flash's, which it matches. A focused input field then edits with it, in
+Ruffle's order: a `TextEvent.TEXT_INPUT` with the character as typed,
+which a listener may cancel, then `restrict` and `maxChars` filter it,
+it goes in at the caret, over the selection, and `Event.CHANGE` follows.
+Backspace, Delete, the arrows, Home and End move and delete, Up and Down
+by a line, Shift extends the selection, Ctrl+A selects all (Ctrl with Alt
+is AltGr, and types), and Enter adds a line only to a multiline field.
+A click puts the caret of an input field at the nearer side of the
+character clicked; it gives focus to any text field and to whatever Tab
+may focus, and a click on anything else takes focus from what Tab may
+focus, after a cancelable `mouseFocusChange` on what had it. Tab may
+focus input fields, buttons and sprites in `buttonMode` unless
+`tabEnabled` says otherwise, not a timeline on the stage itself, and
+nothing inside a container whose `tabChildren` is false; it moves by
+`tabIndex` where any has one, else by where each starts on the stage,
+after a cancelable `keyFocusChange`. `stage.focus` set by a script moves
+focus too, and every move is a `focusOut` and a `focusIn`, each naming
+the other. An object taken off the list or hidden loses focus. A focused
 field draws its caret, unblinking, a pixel wide in the colour of the text
-before it, and a selection on one line shaded. While a field of the SWF
-has focus, the host keeps the browser from acting on keys too. adl
-cannot be typed into, so none of this is recorded against Flash; there
-is no IME, no clipboard, and no scrolling to keep the caret in view.
+before it, and its selection shaded, both clipped to the lines shown.
+While a field of the SWF has focus, the host keeps the browser from
+acting on keys too. adl cannot be typed into, so none of this is
+recorded against Flash; there is no IME, no clipboard, and no scrolling
+to keep the caret in view.
 
 ### Colour transforms
 

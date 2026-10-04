@@ -6,7 +6,7 @@ import {
   type DisplayObject,
   TextObject,
 } from "../../../packages/player/dist/display.js";
-import { KeyboardInput, restricted, setFocus } from "../../../packages/player/dist/keyboard.js";
+import { KeyboardInput, restrictText, setFocus } from "../../../packages/player/dist/keyboard.js";
 import type { Scripting } from "../../../packages/player/dist/scripting.js";
 
 type Event = {
@@ -74,17 +74,64 @@ function setUp(...names: string[]) {
   return { stage, fields, scripting, keyboard, heard, listen, type };
 }
 
-test("restrict reads characters, ranges, ^ excluding what follows, and \\ escaping", () => {
-  assert.equal(restricted(null, "x"), true);
-  assert.equal(restricted("", "x"), false);
-  assert.equal(restricted("A-Z", "Q"), true);
-  assert.equal(restricted("A-Z", "q"), false);
-  assert.equal(restricted("^0-9", "5"), false);
-  assert.equal(restricted("^0-9", "a"), true);
-  assert.equal(restricted("a-z^q", "q"), false);
-  assert.equal(restricted("a-z^q", "r"), true);
-  assert.equal(restricted("0-9\\-", "-"), true);
-  assert.equal(restricted("0-9\\-", "+"), false);
+// What Flash keeps of TYPED under each restrict, from Ruffle's corpus
+// (avm2/edittext_restrict, recorded in Flash), which the corpus runner
+// cannot type into.
+const TYPED = "abcABC012^\\-* &ąδłĄΔŁß";
+const RESTRICTED: [string | null, string][] = [
+  [null, "abcABC012^\\-* &ąδłĄΔŁß"],
+  [null, "abcABC012^\\-* &ąδłĄΔŁß"],
+  ["", ""],
+  ["false", "aa"],
+  ["1", "1"],
+  ["true", ""],
+  ["0.1", "01"],
+  ["NaN", "aa"],
+  ["[object Object]", "bcbc "],
+  ["aB*Δ", "aBaB*Δ"],
+  ["aa", "aa"],
+  ["a-z", "abcabc"],
+  ["A-Z", "ABCABC"],
+  ["a-bA", "abAb"],
+  ["a-", "aa"],
+  ["-b", "abCABC012^\\-* &"],
+  ["b-a", "bb"],
+  ["A-z", "abcABC^\\"],
+  ["-", ""],
+  ["--", ""],
+  ["---", ""],
+  ["----", ""],
+  ["-----", ""],
+  ["-----b", "abCABC012^\\-* &"],
+  ["b-----", "bb"],
+  ["a-b-c", "abcABC012^\\-* &"],
+  ["a-b-A", "abAb012-* &"],
+  ["a-a-b", "abCABC012^\\-* &"],
+  ["\\\\-\\^", "^\\"],
+  ["\\^-\\\\", "^"],
+  ["^", "abcABC012^\\-* &ąδłĄΔŁß"],
+  ["^^", "abcABC012^\\-* &ąδłĄΔŁß"],
+  ["\\^a", "aa^"],
+  ["^\\^", "abcABC012\\-* &ąδłĄΔŁß"],
+  ["^aą", "AbcABC012^\\-* &δłĄΔŁß"],
+  ["a^b^c", "acac"],
+  ["a^b^c^A^B", "aBcaBc"],
+  ["a-zA-Z^bC", "aBcABc"],
+  ["a-zA-Z^", "abcABC"],
+  ["\\-", "-"],
+  ["a\\-z", "aa-"],
+  ["\\\\", "\\"],
+  ["\\^", "^"],
+  ["\\ab", "abab"],
+  ["a\\", "aa"],
+  [" -~", "abcABC012^\\-* &"],
+  ["α-ω", "δ"],
+];
+
+test("restrict keeps what Flash keeps: ranges, ^ switching, escapes, a letter in its other case", () => {
+  for (const [restrict, kept] of RESTRICTED) {
+    assert.equal(restrictText(restrict, TYPED), kept, `restrict ${JSON.stringify(restrict)}`);
+  }
 });
 
 test("a key goes to the focused field and bubbles to the stage; with no focus, to the stage", () => {
@@ -116,6 +163,13 @@ test("typing edits the focused field: a TextEvent a listener may cancel, then Ev
   assert.equal(field.model.text, "ab");
   assert.deepEqual(heard, ["text a", "change", "text x", "text b", "change"]);
   assert.equal(field.caret, 2);
+
+  // A character restrict refuses still goes to listeners, and the field still changes (none put in).
+  heard.length = 0;
+  field.restrict = "a-z";
+  type("Y1");
+  assert.equal(field.model.text, "aby");
+  assert.deepEqual(heard, ["text Y", "change", "text 1", "change"]);
 });
 
 test("backspace, delete, the arrows and shift's selection edit as a field's keys do", () => {
@@ -137,14 +191,25 @@ test("backspace, delete, the arrows and shift's selection edit as a field's keys
   assert.equal(field.model.text, "zb");
 });
 
-test("maxChars and restrict keep out what they do not allow", () => {
-  const { fields, scripting, type } = setUp("name");
+test("maxChars cuts what is typed to the room left, and a full field hears nothing", () => {
+  const { fields, scripting, heard, listen, type } = setUp("name");
   const [field] = fields;
   setFocus(scripting, field);
   field.maxChars = 3;
-  field.restrict = "a-z";
-  type("aB1bcd");
+  listen(field, "textInput", () => heard.push("text"));
+  type("abcd");
   assert.equal(field.model.text, "abc");
+  assert.deepEqual(heard, ["text", "text", "text"]);
+});
+
+test("Ctrl with Alt, as AltGr types, is typing, not a shortcut", () => {
+  const { fields, scripting, keyboard } = setUp("name");
+  const [field] = fields;
+  setFocus(scripting, field);
+  keyboard.handle("down", { keyCode: 50, charCode: 64, ctrlKey: true, altKey: true });
+  keyboard.handle("down", { keyCode: 65, charCode: 97, ctrlKey: true });
+  assert.equal(field.model.text, "@");
+  assert.deepEqual(field.selection, [0, 1]);
 });
 
 test("focus moves with focusOut then focusIn, each naming the other", () => {
@@ -159,8 +224,8 @@ test("focus moves with focusOut then focusIn, each naming the other", () => {
   assert.equal(pass.focused, true);
 });
 
-test("tab moves among input fields by tabIndex where they have one, else in reading order", () => {
-  const { fields, scripting, keyboard } = setUp("a", "b", "c");
+test("tab moves by tabIndex where any has one, else by place, after a keyFocusChange a listener may cancel", () => {
+  const { stage, fields, scripting, keyboard, listen } = setUp("a", "b", "c");
   const [a, b, c] = fields;
   const tab = (shiftKey = false) => keyboard.handle("down", { keyCode: 9, charCode: 9, shiftKey });
 
@@ -178,4 +243,44 @@ test("tab moves among input fields by tabIndex where they have one, else in read
   assert.equal(scripting.focus, c);
   tab();
   assert.equal(scripting.focus, a);
+
+  // Cancelled where focus is, Tab moves nothing.
+  listen(a, "keyFocusChange", (e) => {
+    e.$prevented = true;
+  });
+  tab();
+  assert.equal(scripting.focus, a);
+  void stage;
+});
+
+test("a click focuses a field after a mouseFocusChange, and the stage's click takes it away", () => {
+  const { stage, fields, scripting, keyboard, heard, listen } = setUp("a");
+  const [a] = fields;
+  listen(stage, "mouseFocusChange", (e) => heard.push(`change ${e.args[0] === a.object}`));
+  keyboard.pressed(a, 0, 0);
+  assert.equal(scripting.focus, a);
+  // The stage's: a change on the field, bubbling to the stage, naming nothing.
+  keyboard.pressed(stage, 0, 0);
+  assert.equal(scripting.focus, null);
+  assert.deepEqual(heard, ["change true", "change false"]);
+});
+
+test("an object taken off its parent, or hidden, loses focus", () => {
+  const { stage, fields, scripting } = setUp("a", "b");
+  const [a, b] = fields;
+  setFocus(scripting, a);
+  stage.removeChild(a);
+  assert.equal(scripting.focus, null);
+
+  setFocus(scripting, b);
+  b.applyPlace({
+    matrix: null,
+    colorTransform: null,
+    name: null,
+    visible: false,
+    clipDepth: null,
+    blendMode: null,
+    filters: null,
+  } as never);
+  assert.equal(scripting.focus, null);
 });

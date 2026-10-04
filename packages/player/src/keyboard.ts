@@ -1,10 +1,21 @@
-// Keyboard input as Flash takes it: a key goes to the focused object, or
-// the stage where nothing has focus, as a KeyboardEvent that bubbles; a
-// focused input TextField then edits its text, a TextEvent first, which a
-// listener may cancel, then Event.CHANGE. Focus moves with a click on an
-// input field, with Tab among them, and with stage.focus, each move a
-// focusOut and a focusIn.
-import { CONTENT, type Container, type DisplayObject, TextObject } from "./display.js";
+// Keyboard input as Flash takes it, after Ruffle's (focus_tracker.rs,
+// edit_text.rs): a key goes to the focused object, or the stage where
+// nothing has focus, as a KeyboardEvent that bubbles; a focused input
+// TextField then edits its text, a TextEvent first, which a listener may
+// cancel, then Event.CHANGE. Focus moves with a click, with Tab, and with
+// stage.focus, each move a focusOut and a focusIn; a click's and a Tab's
+// first a cancelable mouseFocusChange or keyFocusChange.
+
+import { bounds, toStage } from "./bounds.js";
+import {
+  ButtonObject,
+  CONTENT,
+  type Container,
+  type DisplayObject,
+  MovieClip,
+  TextObject,
+} from "./display.js";
+import { apply } from "./geometry.js";
 import { dispatchEvent } from "./playerglobal/flash/events/EventDispatcher.js";
 import type { Scripting } from "./scripting.js";
 import { GUTTER } from "./text-layout.js";
@@ -27,16 +38,64 @@ const ENTER = 13;
 const END = 35;
 const HOME = 36;
 const LEFT = 37;
+const UP = 38;
 const RIGHT = 39;
+const DOWN = 40;
 const DELETE = 46;
 
-/** Whether `field` takes typing: an input field, as only it shows a caret. */
+/** Whether `d` takes typing: an input field. */
 const editable = (d: DisplayObject | null): d is TextObject =>
   d instanceof TextObject && d.type === "input";
 
+/** A display object's AS3 fields that focus reads. */
+type Fields = {
+  $tabEnabled?: boolean;
+  $tabIndex?: number;
+  $tabChildren?: boolean;
+  $buttonMode?: boolean;
+};
+
+const fieldsOf = (d: DisplayObject): Fields => (d.object ?? {}) as Fields;
+
+/**
+ * Whether Tab may focus `d` where no script said: an input field, a
+ * button, and a sprite in button mode, as Flash has it.
+ */
+export function tabEnabledDefault(d: DisplayObject): boolean {
+  if (d instanceof TextObject) {
+    return d.type === "input";
+  }
+
+  return d instanceof ButtonObject || !!fieldsOf(d).$buttonMode;
+}
+
+const tabEnabled = (d: DisplayObject): boolean => fieldsOf(d).$tabEnabled ?? tabEnabledDefault(d);
+
+/** Whether `d` is an InteractiveObject's face: a container, a button or a field. */
+const isInteractive = (d: DisplayObject): boolean =>
+  d instanceof ButtonObject || d instanceof TextObject || "children" in d;
+
+/** Whether Tab visits `d`: a field only where it takes typing, a root clip never. */
+function tabbable(d: DisplayObject, stage: Container): boolean {
+  if (!d.object || !isInteractive(d)) {
+    return false;
+  }
+
+  if (d instanceof TextObject) {
+    return d.type === "input" && tabEnabled(d);
+  }
+
+  return !(d instanceof MovieClip && d.parent === stage) && tabEnabled(d);
+}
+
+/** Whether a click focuses `d`: any text field, any object Tab may focus. */
+const focusableByMouse = (d: DisplayObject): boolean => d instanceof TextObject || tabEnabled(d);
+
 /**
  * Move focus to `next`: focusOut on the one that had it, then focusIn on
- * it, each naming the other; a field gains or loses its caret.
+ * it, each naming the other, unless a focusOut listener moved it on; a
+ * field gains or loses its caret, and the object a hook to give it up by
+ * when it is taken off the list or hidden.
  */
 export function setFocus(s: Scripting, next: DisplayObject | null): void {
   const previous = s.focus;
@@ -45,6 +104,18 @@ export function setFocus(s: Scripting, next: DisplayObject | null): void {
   }
 
   s.focus = next;
+  if (previous) {
+    previous.focusDrop = null;
+  }
+
+  if (next) {
+    next.focusDrop = (d) => {
+      if (s.focus === d) {
+        setFocus(s, null);
+      }
+    };
+  }
+
   for (const d of [previous, next]) {
     if (d instanceof TextObject) {
       d.focused = d === next;
@@ -52,65 +123,144 @@ export function setFocus(s: Scripting, next: DisplayObject | null): void {
     }
   }
 
-  const focusEvent = (type: string, target: DisplayObject, related: DisplayObject | null) => {
-    if (!target.object) {
-      return;
-    }
-
-    const event = s.rt.construct(
-      s.rt.classNamed("flash.events::FocusEvent"),
-      type,
-      true,
-      false,
-      related?.object ?? null,
-    );
-    dispatchEvent(s, target.object, event);
-  };
   if (previous) {
-    focusEvent("focusOut", previous, next);
+    focusEvent(s, "focusOut", previous, next, false);
   }
 
-  if (next) {
-    focusEvent("focusIn", next, previous);
+  if (next && s.focus === next) {
+    focusEvent(s, "focusIn", next, previous, false);
   }
 }
 
-/**
- * Whether `restrict` lets `c` be typed, as TextField.restrict reads: null
- * any, a list of characters and ranges (`A-Z`), `^` excluding those after
- * it (all others allowed where it leads), `\` escaping the next.
- */
-export function restricted(restrict: string | null, c: string): boolean {
-  if (restrict === null) {
-    return true;
+/** A FocusEvent on `target`, naming `related`: whether a listener cancelled it. */
+function focusEvent(
+  s: Scripting,
+  type: string,
+  target: DisplayObject,
+  related: DisplayObject | null,
+  cancelable: boolean,
+  keyCode = 0,
+): boolean {
+  if (!target.object) {
+    return false;
   }
 
-  let allowed = restrict.startsWith("^");
-  let include = true;
-  for (let i = 0; i < restrict.length; i++) {
-    let ch = restrict[i];
-    if (ch === "^") {
-      include = !include;
+  const event = s.rt.construct(
+    s.rt.classNamed("flash.events::FocusEvent"),
+    type,
+    true,
+    cancelable,
+    related?.object ?? null,
+    false,
+    keyCode,
+  );
+  dispatchEvent(s, target.object, event);
+  return !!event.$prevented;
+}
+
+/**
+ * The characters `text` is typed as under `restrict`, as Ruffle parses it
+ * (EditTextRestrict): null any; empty none; characters and ranges allowed,
+ * each `^` switching to those disallowed and back, a leading one first
+ * allowing all; `-` a range, from U+0000 where nothing is before it, its
+ * first character alone where nothing follows or it runs backwards; `\`
+ * the next character as itself. A letter it refuses is tried in the other
+ * case, ASCII only.
+ */
+export function restrictText(restrict: string | null, text: string): string {
+  if (restrict === null) {
+    return text;
+  }
+
+  const { allowed, disallowed } = parseRestrict(restrict);
+  const ok = (c: string) =>
+    allowed.some(([a, b]) => c >= a && c <= b) && !disallowed.some(([a, b]) => c >= a && c <= b);
+  let out = "";
+  for (const c of text) {
+    const candidates = [
+      c,
+      /[a-z]/.test(c) ? c.toUpperCase() : c,
+      /[A-Z]/.test(c) ? c.toLowerCase() : c,
+    ];
+    const chosen = candidates.find(ok);
+    if (chosen !== undefined) {
+      out += chosen;
+    }
+  }
+
+  return out;
+}
+
+type Interval = [string, string];
+
+function parseRestrict(restrict: string): { allowed: Interval[]; disallowed: Interval[] } {
+  const allowed: Interval[] = [];
+  const disallowed: Interval[] = [];
+  if (restrict === "") {
+    return { allowed, disallowed };
+  }
+
+  // Tokens: a character, or "-" and "^" unescaped; a trailing "\" is dropped.
+  const tokens: (string | { op: "-" | "^" })[] = [];
+  const chars = [...restrict];
+  for (let i = 0; i < chars.length; i++) {
+    const c = chars[i];
+    if (c === "\\") {
+      if (i + 1 < chars.length) {
+        tokens.push(chars[++i]);
+      }
+    } else if (c === "-" || c === "^") {
+      tokens.push({ op: c });
+    } else {
+      tokens.push(c);
+    }
+  }
+
+  let current: Interval[] = [];
+  let last: string | null = null;
+  let allowing = true;
+  while (tokens.length > 0) {
+    const t = tokens.shift() as string | { op: "-" | "^" };
+    if (typeof t === "string") {
+      current.push([t, t]);
+      last = t;
       continue;
     }
 
-    if (ch === "\\" && i + 1 < restrict.length) {
-      ch = restrict[++i];
+    if (t.op === "^") {
+      if (allowing) {
+        if (current.length === 0 && allowed.length === 0) {
+          allowed.push(["\0", "\u{10FFFF}"]);
+        } else {
+          allowed.push(...current);
+        }
+      } else {
+        disallowed.push(...current);
+      }
+
+      current = [];
+      allowing = !allowing;
+      last = null;
+      continue;
     }
 
-    let last = ch;
-    if (restrict[i + 1] === "-" && i + 2 < restrict.length) {
-      last =
-        restrict[i + 2] === "\\" && i + 3 < restrict.length ? restrict[i + 3] : restrict[i + 2];
-      i += restrict[i + 2] === "\\" ? 3 : 2;
+    let start = "\0";
+    if (last !== null) {
+      current.pop();
+      start = last;
     }
 
-    if (c >= ch && c <= last) {
-      allowed = include;
+    let end = start;
+    if (typeof tokens[0] === "string") {
+      end = tokens.shift() as string;
     }
+
+    current.push([start, end > start ? end : start]);
+    last = null;
   }
 
-  return allowed;
+  (allowing ? allowed : disallowed).push(...current);
+  return { allowed, disallowed };
 }
 
 /** The keyboard on the player's display list, independent of a renderer. */
@@ -123,7 +273,11 @@ export class KeyboardInput {
     private readonly scripting: Scripting,
   ) {}
 
-  handle(type: "down" | "up", k: KeyState): void {
+  /**
+   * A key pressed or let go: whether the SWF used it, a field's edit or
+   * caret, or Tab moving focus, which a host then keeps from the browser.
+   */
+  handle(type: "down" | "up", k: KeyState): boolean {
     this.handled++;
     const s = this.scripting;
     const target = s.focus && onStage(s.focus, this.stage) ? s.focus : this.stage;
@@ -144,96 +298,136 @@ export class KeyboardInput {
     }
 
     if (type !== "down") {
-      return;
+      return false;
     }
 
     if (k.keyCode === TAB) {
-      this.tab(!!k.shiftKey);
-    } else if (editable(s.focus) && onStage(s.focus, this.stage)) {
-      this.edit(s.focus, k);
-    }
-  }
-
-  /** A click: an input field takes focus, its caret where the click is; anything else takes it from a field. */
-  pressed(target: DisplayObject | null, localX: number, localY: number): void {
-    const s = this.scripting;
-    if (editable(target)) {
-      setFocus(s, target);
-      const caret = caretAt(target, localX * 20, localY * 20);
-      target.select(caret, caret);
-      return;
+      return this.tab(!!k.shiftKey);
     }
 
-    if (s.focus instanceof TextObject) {
-      setFocus(s, null);
+    if (editable(s.focus) && onStage(s.focus, this.stage)) {
+      return this.edit(s.focus, k);
     }
+
+    return false;
   }
 
   /**
-   * Tab: the next input field on the stage, or with Shift the one before:
-   * by tabIndex where a field has one, as Flash orders only those then,
-   * else in reading order.
+   * A press on `target`, with the point in its own pixels: as Flash, a
+   * cancelable mouseFocusChange on what has focus, or the stage, then
+   * focus to the target where a click focuses it, else to nothing; a
+   * field's caret where it was clicked.
    */
-  private tab(back: boolean): void {
-    const fields: { field: TextObject; x: number; y: number }[] = [];
-    const walk = (d: DisplayObject, x: number, y: number) => {
-      if (!d.visible) {
-        return;
-      }
-
-      const m = d.matrix;
-      const [ox, oy] = [x + m.tx, y + m.ty];
-      if (editable(d)) {
-        fields.push({ field: d, x: ox + d.left, y: oy + d.top });
-      }
-
-      for (const child of (d as Container).children ?? []) {
-        walk(child, ox, oy);
-      }
-    };
-    walk(this.stage, 0, 0);
-    if (fields.length === 0) {
+  pressed(target: DisplayObject | null, localX: number, localY: number): void {
+    const s = this.scripting;
+    const pressed = target === this.stage ? null : target;
+    if (pressed === null && !(s.focus && focusableByMouse(s.focus))) {
       return;
     }
 
-    const tabIndex = (f: { field: TextObject }): number => f.field.object?.$tabIndex ?? -1;
-    const indexed = fields.filter((f) => tabIndex(f) >= 0);
-    const order = indexed.length > 0 ? indexed : fields;
-    order.sort((a, b) => (indexed.length > 0 ? tabIndex(a) - tabIndex(b) : a.y - b.y || a.x - b.x));
+    if (pressed instanceof TextObject && editable(pressed)) {
+      const caret = caretAt(pressed, localX * 20, localY * 20);
+      pressed.select(caret, caret);
+    }
 
+    if (pressed === s.focus) {
+      return;
+    }
+
+    if (focusEvent(s, "mouseFocusChange", s.focus ?? this.stage, pressed, true)) {
+      return;
+    }
+
+    setFocus(s, pressed && focusableByMouse(pressed) ? pressed : null);
+  }
+
+  /**
+   * Tab: the next object Tab visits, or with Shift the one before, after a
+   * cancelable keyFocusChange: by tabIndex where any has one, only those
+   * then, else by where their bounds start on the stage, 6y + x in twips,
+   * one of each place, as Flash orders them.
+   */
+  private tab(back: boolean): boolean {
+    const found: DisplayObject[] = [];
+    const walk = (d: DisplayObject) => {
+      for (const child of (d as Container).children ?? []) {
+        if (!child.visible) {
+          continue;
+        }
+
+        if (tabbable(child, this.stage)) {
+          found.push(child);
+        }
+
+        if ("children" in child && fieldsOf(child).$tabChildren !== false) {
+          walk(child);
+        }
+      }
+    };
+    walk(this.stage);
+
+    const indexed = found.filter((d) => (fieldsOf(d).$tabIndex ?? -1) >= 0);
+    let order: DisplayObject[];
+    if (indexed.length > 0) {
+      order = indexed
+        .map((d, i) => ({ d, i, key: fieldsOf(d).$tabIndex ?? 0 }))
+        .sort((a, b) => a.key - b.key || a.i - b.i)
+        .map((e) => e.d);
+    } else {
+      const keyed = found.map((d, i) => ({ d, i, key: placeKey(d, this.stage) }));
+      keyed.sort((a, b) => a.key - b.key || a.i - b.i);
+      order = keyed.filter((e, j) => j === 0 || e.key !== keyed[j - 1].key).map((e) => e.d);
+    }
+
+    if (order.length === 0) {
+      return false;
+    }
+
+    const s = this.scripting;
+    const at = s.focus ? order.indexOf(s.focus) : -1;
     const n = order.length;
-    const at = order.findIndex((f) => f.field === this.scripting.focus);
-    const next = at < 0 ? (back ? n - 1 : 0) : (at + (back ? -1 : 1) + n) % n;
-    const field = order[next].field;
-    setFocus(this.scripting, field);
-    field.select(0, field.model.text.length);
+    const next = order[at < 0 ? (back ? n - 1 : 0) : (at + (back ? -1 : 1) + n) % n];
+    if (!focusEvent(s, "keyFocusChange", s.focus ?? this.stage, next, true, TAB)) {
+      setFocus(s, next);
+    }
+
+    return true;
   }
 
   /** A key's edit of the focused field: a character typed, a deletion, or the caret moved. */
-  private edit(field: TextObject, k: KeyState): void {
+  private edit(field: TextObject, k: KeyState): boolean {
     const length = field.model.text.length;
     const [begin, end] = field.selection;
     const caret = field.caret;
-    if (k.ctrlKey && (k.keyCode === 65 || k.charCode === 97)) {
+    // Ctrl with Alt is AltGr on some layouts, which types characters.
+    const shortcut = !!k.ctrlKey && !k.altKey;
+    if (shortcut && (k.keyCode === 65 || k.charCode === 97 || k.charCode === 65)) {
       field.select(0, length);
-      return;
+      return true;
+    }
+
+    if (k.keyCode === UP || k.keyCode === DOWN) {
+      const to = lineMove(field, caret, k.keyCode === UP ? -1 : 1);
+      field.select(k.shiftKey ? field.anchor : to, to);
+      return true;
     }
 
     if (k.keyCode === LEFT || k.keyCode === RIGHT || k.keyCode === HOME || k.keyCode === END) {
+      const collapse = begin !== end && !k.shiftKey;
       const to =
         k.keyCode === HOME
           ? 0
           : k.keyCode === END
             ? length
             : k.keyCode === LEFT
-              ? begin !== end && !k.shiftKey
+              ? collapse
                 ? begin
                 : Math.max(0, caret - 1)
-              : begin !== end && !k.shiftKey
+              : collapse
                 ? end
                 : Math.min(length, caret + 1);
       field.select(k.shiftKey ? field.anchor : to, to);
-      return;
+      return true;
     }
 
     if (k.keyCode === BACKSPACE || k.keyCode === DELETE) {
@@ -243,7 +437,11 @@ export class KeyboardInput {
         this.replace(field, from, to, "");
       }
 
-      return;
+      return true;
+    }
+
+    if (shortcut) {
+      return false;
     }
 
     const text =
@@ -251,18 +449,28 @@ export class KeyboardInput {
         ? field.multiline
           ? "\r"
           : ""
-        : k.ctrlKey || k.charCode < 32
-          ? ""
-          : String.fromCharCode(k.charCode);
-    if (!text || (text !== "\r" && !restricted(field.restrict, text))) {
-      return;
+        : k.charCode >= 32
+          ? String.fromCharCode(k.charCode)
+          : "";
+    return text !== "" && this.type(field, text);
+  }
+
+  /**
+   * Typed text, as Ruffle takes it: nothing where maxChars leaves no room;
+   * else the TextEvent with the text as typed, a line break as "\n",
+   * which a listener may cancel, then what restrict lets through, cut to
+   * the room left, over the selection, and Event.CHANGE.
+   */
+  private type(field: TextObject, text: string): boolean {
+    const room = () => {
+      const [b, e] = field.selection;
+      return field.maxChars > 0 ? field.maxChars - (field.model.text.length - (e - b)) : Infinity;
+    };
+    if (room() <= 0) {
+      return true;
     }
 
-    if (field.maxChars > 0 && length - (end - begin) + text.length > field.maxChars) {
-      return;
-    }
-
-    // The TextEvent goes before the character, which a listener may prevent.
+    const filtered = restrictText(field.restrict, text);
     const s = this.scripting;
     if (field.object) {
       const event = s.rt.construct(
@@ -270,15 +478,18 @@ export class KeyboardInput {
         "textInput",
         true,
         true,
-        text,
+        text.replace(/\r/g, "\n"),
       );
       dispatchEvent(s, field.object, event);
       if (event.$prevented) {
-        return;
+        return true;
       }
     }
 
-    this.replace(field, begin, end, text);
+    // The selection as the listeners left it, the text perhaps changed.
+    const [begin, end] = field.selection;
+    this.replace(field, begin, end, filtered.slice(0, Math.max(0, room())));
+    return true;
   }
 
   /** [from, to) of the field's text as `text`, the caret after it, and Event.CHANGE. */
@@ -295,6 +506,43 @@ export class KeyboardInput {
       );
     }
   }
+}
+
+/** Where `d`'s bounds start on the stage, as Flash orders Tab: 6y + x, in twips. */
+function placeKey(d: DisplayObject, stage: Container): number {
+  const r = bounds(d, true);
+  const [x, y] = r ? apply(toStage(d, stage), r.xMin, r.yMin) : [0, 0];
+  return Math.round(y * 20) * 6 + Math.round(x * 20);
+}
+
+/** The caret one line up (-1) or down (1) from `caret`, at the same x, or the text's start or end past the first or last. */
+function lineMove(field: TextObject, caret: number, by: -1 | 1): number {
+  const lines = field.layout.lines;
+  const at = lines.findIndex((l) => caret < l.end);
+  const i = at < 0 ? lines.length - 1 : at;
+  const target = i + by;
+  if (target < 0) {
+    return 0;
+  }
+
+  if (target >= lines.length) {
+    return field.model.text.length;
+  }
+
+  const line = lines[i];
+  const c = line.chars[caret - line.start];
+  const x = c ? c.x : line.x + line.width;
+  const to = lines[target];
+  for (const ch of to.chars) {
+    if (ch.shown && x < ch.x + ch.advance / 2) {
+      return ch.index;
+    }
+  }
+
+  const text = field.model.text;
+  return to.end > to.start && (text[to.end - 1] === "\r" || text[to.end - 1] === "\n")
+    ? to.end - 1
+    : to.end;
 }
 
 /** Whether `d` is on the display list under `stage`. */
@@ -339,7 +587,10 @@ export function caretAt(field: TextObject, x: number, y: number): number {
     : line.end;
 }
 
-/** The character a browser's key gives, as Flash's charCode: its text, or Enter's, Backspace's, Tab's, Escape's and Delete's. */
+/** Flash's key codes where a browser's legacy ones differ: Firefox's for ";", "=" and "-". */
+const KEY_CODES: Record<number, number> = { 59: 186, 61: 187, 173: 189 };
+
+/** The character a browser's key types, as Flash's charCode: its UTF-16 unit, or Enter's, Backspace's, Tab's, Escape's and Delete's. */
 function charCodeOf(e: KeyboardEvent): number {
   if (e.key.length === 1) {
     return e.key.charCodeAt(0);
@@ -350,9 +601,10 @@ function charCodeOf(e: KeyboardEvent): number {
 
 /**
  * Send the browser's keys on `target` (the window, say) to the player. A
- * key goes to the game unless it is typed into the page's own input; while
- * a field of the game has focus, the browser does nothing more with it,
- * nor with Tab, which moves the game's focus.
+ * key goes to the SWF unless it is typed into the page's own input or
+ * button, or comes from an IME, which the player cannot compose; the
+ * browser is kept from acting on one only where the SWF used it: a field's
+ * edit or caret, or Tab moving the SWF's focus. Its own shortcuts stay.
  */
 export function bindKeyboard(
   player: { keyboard: KeyboardInput | null; scripting: Scripting | null },
@@ -361,7 +613,12 @@ export function bindKeyboard(
   const listener = (event: Event) => {
     const e = event as KeyboardEvent;
     const into = e.target as HTMLElement | null;
-    if (into?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(into?.tagName ?? "")) {
+    if (
+      into?.isContentEditable ||
+      /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(into?.tagName ?? "") ||
+      e.isComposing ||
+      e.keyCode === 229
+    ) {
       return;
     }
 
@@ -370,15 +627,15 @@ export function bindKeyboard(
       return;
     }
 
-    keyboard.handle(e.type === "keydown" ? "down" : "up", {
-      keyCode: e.keyCode,
+    const used = keyboard.handle(e.type === "keydown" ? "down" : "up", {
+      keyCode: KEY_CODES[e.keyCode] ?? e.keyCode,
       charCode: charCodeOf(e),
       location: e.location,
       ctrlKey: e.ctrlKey || e.metaKey,
       altKey: e.altKey,
       shiftKey: e.shiftKey,
     });
-    if (e.key === "Tab" || editable(player.scripting?.focus ?? null)) {
+    if (used) {
       e.preventDefault();
     }
   };
