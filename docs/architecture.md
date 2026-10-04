@@ -1142,8 +1142,9 @@ the script-visible sound state but emits no audio.
 
 `SoundMixer.soundTransform` is one transform per player, stored in
 hundredths as a channel's is, and its getter returns a copy. What a channel
-sends to the device is its own transform followed by the mixer's, multiplied
-as Ruffle's `SoundTransform::concat` does, so setting the mixer's updates
+sends to the device is its own transform and the mixer's, combined as
+Ruffle's `SoundTransform::concat` computes them (only two transforms that
+both cross channels depend on the order, which no trace shows), so setting the mixer's updates
 every playing channel through `PlayingSound.setMix` and applies to every
 later one. `SimpleButton.soundTransform` reads and writes the mixer's, as
 in Flash (the `sound-mixer` case and the corpus's

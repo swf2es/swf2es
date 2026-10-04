@@ -25,11 +25,7 @@ export function soundMixerNatives(s: Scripting): avm2.Natives {
     }
 
     static set soundTransform(value: Value) {
-      if (value === null || value === undefined) {
-        throw s.rt.error("TypeError", 2007, "sndTransform");
-      }
-
-      setMixerTransform(s, value as AsObject);
+      setMixerTransform(s, value);
     }
 
     static get bufferTime(): number {

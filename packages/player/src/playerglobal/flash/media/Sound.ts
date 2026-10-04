@@ -85,8 +85,10 @@ function channelMix(mix: SoundMix): SoundMix {
 }
 
 /**
- * What a channel sends to the device: its own transform, then the mixer's,
- * multiplied as Ruffle's SoundTransform::concat multiplies them.
+ * What a channel sends to the device: its own transform and the mixer's,
+ * combined as Ruffle's SoundTransform::concat computes them. Only
+ * transforms that both cross channels depend on the order, which no trace
+ * can show; Ruffle's is kept.
  */
 export function outputMix(local: SoundMix, global: SoundMix): SoundMix {
   return {
@@ -117,8 +119,12 @@ export function mixerTransform(s: Scripting): AsObject {
 }
 
 /** Set SoundMixer's transform, for the channels playing and those to come. */
-export function setMixerTransform(s: Scripting, transform: AsObject): void {
-  const global = channelMix(mixOf(transform));
+export function setMixerTransform(s: Scripting, transform: Value): void {
+  if (transform === null || transform === undefined) {
+    throw s.rt.error("TypeError", 2007, "sndTransform");
+  }
+
+  const global = channelMix(mixOf(transform as AsObject));
   mixerMixes.set(s, global);
   for (const channel of channels.get(s) ?? []) {
     const state = channel.$channel as ChannelState;

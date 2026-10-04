@@ -110,11 +110,7 @@ export function simpleButtonNatives(s: Scripting): avm2.Natives {
     }
 
     set soundTransform(v: Value) {
-      if (v === null || v === undefined) {
-        throw s.rt.error("TypeError", 2007, "sndTransform");
-      }
-
-      setMixerTransform(s, v as AsObject);
+      setMixerTransform(s, v);
     }
   }
 
