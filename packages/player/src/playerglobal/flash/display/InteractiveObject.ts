@@ -1,7 +1,9 @@
 // flash.display.InteractiveObject: what it keeps about input, kept as
 // fields with Flash's defaults until input reaches the player.
 import { avm2 } from "@swf2es/runtime";
+import { tabEnabledDefault } from "../../../keyboard.js";
 import type { Scripting } from "../../../scripting.js";
+import { displayOf } from "./DisplayObject.js";
 
 type Value = avm2.Value;
 
@@ -19,7 +21,7 @@ export function interactiveObjectNatives(_s: Scripting): avm2.Natives {
     declare $needsSoftKeyboard: boolean | undefined;
 
     get tabEnabled(): boolean {
-      return this.$tabEnabled ?? false;
+      return this.$tabEnabled ?? tabEnabledDefault(displayOf(this as unknown as avm2.AsObject));
     }
 
     set tabEnabled(v: Value) {

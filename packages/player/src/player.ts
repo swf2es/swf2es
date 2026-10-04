@@ -7,6 +7,7 @@ import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
 import { Container, type DisplayObject, frameChildren, MovieClip } from "./display.js";
 import { decodeImages, decodeInBrowser } from "./images.js";
 import { PointerInput } from "./input.js";
+import { KeyboardInput } from "./keyboard.js";
 import type { Scripting } from "./scripting.js";
 import { type Library, readLibrary } from "./timeline.js";
 
@@ -29,6 +30,8 @@ export class Player {
   readonly background: number;
   /** Renderer-independent mouse routing, once scripts have been loaded. */
   readonly pointer: PointerInput | null;
+  /** The keyboard's, likewise: keys to the focused object, and typing into a focused field. */
+  readonly keyboard: KeyboardInput | null;
 
   /**
    * Without scripts the player is ready at once, but for the images of
@@ -45,7 +48,8 @@ export class Player {
     this.height = Math.round((this.swf.frameSize.yMax - this.swf.frameSize.yMin) / 20);
     this.frameRate = this.swf.frameRate || 24;
     this.background = backgroundColor(this.swf);
-    this.pointer = scripting ? new PointerInput(this.stage, scripting) : null;
+    this.keyboard = scripting ? new KeyboardInput(this.stage, scripting) : null;
+    this.pointer = scripting ? new PointerInput(this.stage, scripting, this.keyboard) : null;
     this.root = new MovieClip(this.library.root, this.library);
     this.stage.addChildAt(this.root, 0);
     if (!scripting) {
@@ -112,7 +116,12 @@ export class Player {
    * a resize, it draws for itself.
    */
   get changes(): number {
-    return this.played + (this.pointer?.handled ?? 0) + (this.scripting?.hostCalls ?? 0);
+    return (
+      this.played +
+      (this.pointer?.handled ?? 0) +
+      (this.keyboard?.handled ?? 0) +
+      (this.scripting?.hostCalls ?? 0)
+    );
   }
 
   /**

@@ -283,6 +283,8 @@ export class Scripting {
   pending: DisplayObject | null = null;
   /** The stage, once the player has made it, and the root it holds. */
   stage: Container | null = null;
+  /** stage.focus: the object keys go to, a TextField that edits with them; null for the stage. */
+  focus: DisplayObject | null = null;
   root: MovieClip | null = null;
   library: Library | null = null;
   /** Whether a script asked the stage to render (Stage.invalidate). */

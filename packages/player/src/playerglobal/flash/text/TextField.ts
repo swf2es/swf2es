@@ -562,15 +562,17 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       return 0;
     }
     get selectionBeginIndex(): number {
-      return 0;
+      return this.$display.selection[0];
     }
     get selectionEndIndex(): number {
-      return 0;
+      return this.$display.selection[1];
     }
     get caretIndex(): number {
-      return 0;
+      return this.$display.caret;
     }
-    setSelection(_begin: Value, _end: Value): void {}
+    setSelection(begin: Value, end: Value): void {
+      this.$display.select(s.rt.toInt(begin), s.rt.toInt(end));
+    }
     get styleSheet(): Value {
       return null;
     }
