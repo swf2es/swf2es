@@ -727,18 +727,24 @@ uncaught, and the cycle and its caller go on, as in Flash and Ruffle.
 The goto itself still throws to its caller its own errors: the stack
 overflow, #1023, and an unknown scene or label, #2108 and #2109.
 
-An error nothing caught, from a frame script, a frame event's or a
-timer's listener, or a constructor the timeline or a goto runs, is
-reported, and the frame goes on: the listeners, timers, scripts and
-children after it still run,
-as adl shows. A host that passes `onUncaught` to Scripting gets each
-error as it happens, one from a goto between frames, in a pointer,
-keyboard or ExternalInterface handler, included. Without it, the frame
-throws them once it has run to its end: one alone, or several as an
-AggregateError, the one that stopped the frame early, if any, first; a
-goto's between frames come with the next frame's. A child its parent's
-first frame places is made in the parent's `super()`, and its error
-still reaches the parent's constructor.
+An error nothing caught is reported, and what was running goes on, as
+adl shows. A listener's error never reaches the dispatcher: the
+listeners after it still run, and a script's `dispatchEvent` returns as
+if none had thrown, whoever dispatched, the player (frame events, a
+Timer's, a Loader's, a Socket's, the pointer's and the keyboard's) or a
+script. So does the error of a frame script, of a Timer's own tick, of
+a load's delivery, as a loaded SWF's document class's constructor, and
+of a constructor the timeline or a goto runs: the scripts, loads and
+children after it still come. A host that passes `onUncaught` to
+Scripting gets each error as it happens, those between frames, in a
+pointer, keyboard or ExternalInterface handler, included, and
+`Player.advance` then throws none. Without it, the frame throws them
+once it has run to its end: one alone, or several as an
+AggregateError, the one that stopped the frame early, if any, first;
+those between frames come with the next frame's. An ExternalInterface
+callback's own error goes back to the page that called it. A child its
+parent's first frame places is made in the parent's `super()`, and its
+error still reaches the parent's constructor.
 
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,

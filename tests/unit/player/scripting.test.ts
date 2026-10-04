@@ -983,6 +983,87 @@ test("without onUncaught, a frame throws all its errors once it has ended", { sk
   player.tick();
 });
 
+test("a listener's error never reaches the dispatcher, and the listeners after it run, as in Flash", {
+  skip,
+}, async () => {
+  // Two listeners each to a script's dispatchEvent, a Loader's INIT and a
+  // Timer's TIMER, the first of each throwing: dispatchEvent still returns
+  // true, COMPLETE still comes, and the timer still stops after two.
+  const source = `package {
+    import flash.display.Loader;
+    import flash.display.MovieClip;
+    import flash.events.Event;
+    import flash.events.EventDispatcher;
+    import flash.events.TimerEvent;
+    import flash.system.LoaderContext;
+    import flash.utils.ByteArray;
+    import flash.utils.Timer;
+    public class Main extends MovieClip {
+      private var timer:Timer;
+      public function Main() {
+        var d:EventDispatcher = new EventDispatcher();
+        d.addEventListener("x", function(e:Event):void { trace("x1 throws"); throw new Error("from x1"); });
+        d.addEventListener("x", function(e:Event):void { trace("x2 ran"); });
+        trace("dispatch returned", d.dispatchEvent(new Event("x")));
+        // An empty SWF of version 10: header, a zero rectangle, 12 fps, one frame, FileAttributes, ShowFrame, End.
+        var swf:ByteArray = new ByteArray();
+        for each (var b:int in [0x46, 0x57, 0x53, 10, 23, 0, 0, 0, 0, 0, 12, 1, 0, 0x44, 0x11, 8, 0, 0, 0, 0x40, 0, 0, 0]) {
+          swf.writeByte(b);
+        }
+        var loader:Loader = new Loader();
+        loader.contentLoaderInfo.addEventListener(Event.INIT, function(e:Event):void { trace("init1 throws"); throw new Error("from init1"); });
+        loader.contentLoaderInfo.addEventListener(Event.INIT, function(e:Event):void { trace("init2"); });
+        loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function(e:Event):void {
+          trace("complete");
+          timer = new Timer(20, 2);
+          timer.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void { trace("timer1 throws", timer.currentCount); throw new Error("from timer1"); });
+          timer.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void { trace("timer2", timer.currentCount); });
+          timer.addEventListener(TimerEvent.TIMER_COMPLETE, function(e:TimerEvent):void { trace("timer complete", timer.running); });
+          timer.start();
+        });
+        var context:LoaderContext = new LoaderContext();
+        context.allowCodeImport = true;
+        loader.loadBytes(swf, context);
+      }
+    }
+  }`;
+  const lines: string[] = [];
+  const errors: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: null,
+    onUncaught: (error) => errors.push(scripting.rt.toString(error as avm2.Value)),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compiler(out)("UncaughtListeners", source), 1), scripting);
+  await player.start();
+  for (let frame = 2; frame <= 20; frame++) {
+    await scripting.settled();
+    player.tick();
+  }
+
+  // adl's output and the errors it reported, in order.
+  assert.deepEqual(lines, [
+    "x1 throws",
+    "x2 ran",
+    "dispatch returned true",
+    "init1 throws",
+    "init2",
+    "complete",
+    "timer1 throws 1",
+    "timer2 1",
+    "timer1 throws 2",
+    "timer2 2",
+    "timer complete false",
+  ]);
+  assert.deepEqual(errors, [
+    "Error: from x1",
+    "Error: from init1",
+    "Error: from timer1",
+    "Error: from timer1",
+  ]);
+});
+
 test("scripts that catch the stack overflow of their goto cycles stop soon, not after millions of runs", {
   skip,
 }, async () => {

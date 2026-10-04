@@ -28,13 +28,10 @@ function listeners(o: AsObject): Map<string, Listener[]> {
 /** The display object `o` is the face of, if it is one. */
 const displayOf = (o: AsObject) => o.$display ?? null;
 
-function invoke(
-  s: Scripting,
-  o: AsObject,
-  event: AsObject,
-  phase: number,
-  uncaught?: (error: unknown) => void,
-): void {
+// A listener's error is reported as uncaught, and the listeners after it
+// still run: it never reaches the dispatcher, a script's dispatchEvent
+// included, which returns as if none had thrown (as in Flash and Ruffle).
+function invoke(s: Scripting, o: AsObject, event: AsObject, phase: number): void {
   const list = o.$listeners?.get(event.$type) as Listener[] | undefined;
   if (!list) {
     return;
@@ -48,14 +45,10 @@ function invoke(
       continue;
     }
 
-    if (uncaught) {
-      try {
-        s.rt.call(l.fn, null, event);
-      } catch (error) {
-        uncaught(error);
-      }
-    } else {
+    try {
       s.rt.call(l.fn, null, event);
+    } catch (error) {
+      s.reportUncaught(error);
     }
 
     if (event.$stopped === 2) {
@@ -64,20 +57,10 @@ function invoke(
   }
 }
 
-/**
- * Dispatch `event` to `target`'s own listeners only, as a broadcast reaches
- * each object: no capture, no bubble. With `uncaught`, a listener's error
- * goes there and the listeners after it still run, as when the player
- * itself dispatches in Flash.
- */
-export function dispatchTo(
-  s: Scripting,
-  target: AsObject,
-  event: AsObject,
-  uncaught?: (error: unknown) => void,
-): void {
+/** Dispatch `event` to `target`'s own listeners only, as a broadcast reaches each object: no capture, no bubble. */
+export function dispatchTo(s: Scripting, target: AsObject, event: AsObject): void {
   event.$target = target.$target ?? target;
-  invoke(s, target, event, AT_TARGET, uncaught);
+  invoke(s, target, event, AT_TARGET);
 }
 
 /** Dispatch `event` from `target`, as EventDispatcher.dispatchEvent does; whether no listener prevented its default. */

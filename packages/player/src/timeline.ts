@@ -187,7 +187,7 @@ export interface Library {
    * Where the error of a constructor a goto ran goes, as Flash reports it
    * apart from the goto; without it, the error reaches the goto's caller.
    */
-  uncaught?: (error: unknown) => void;
+  uncaught: ((error: unknown) => void) | null;
   /** Has the AS3 object of a child a frame played on placed made in the frame's construct phase; null where there are no scripts. */
   constructLater: ((display: DisplayObject, character: DisplayCharacter) => void) | null;
   /** Told before a timeline child goes, for the events a script sees; null in an AVM1 movie. */
@@ -458,6 +458,7 @@ export function readLibrary(swf: Swf): Library {
     classes: new Map(),
     construct: null,
     constructLater: null,
+    uncaught: null,
     removing: null,
     fonts,
     version: swf.header.version,

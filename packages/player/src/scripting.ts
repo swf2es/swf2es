@@ -376,10 +376,11 @@ export class Scripting {
        */
       realTime?: (() => number) | null;
       /**
-       * Each error that no script caught, from a frame script, a frame
-       * event's or a timer's listener, a constructor or a goto's cycle, as
-       * it happens, a goto's between frames too; without it, the frame
-       * throws them to its caller once it has ended.
+       * Each error that no script caught, as it happens: any listener's,
+       * whoever dispatched, a frame script's, a constructor's, a load's,
+       * those between frames, in a pointer, keyboard or ExternalInterface
+       * handler, too. Without it, the frame throws them to its caller once
+       * it has ended, those between frames with the next frame's.
        */
       onUncaught?: (error: unknown) => void;
     } = {},
@@ -950,6 +951,7 @@ export class Scripting {
       classes: new Map(),
       construct: null,
       constructLater: null,
+      uncaught: null,
       removing: null,
       fonts: new FontSet(),
     };
@@ -1428,45 +1430,60 @@ export class Scripting {
   /**
    * Give the loads whose code is linked their content, oldest first, and
    * stop at one still linking: they complete in the order asked. What
-   * each does at the frame's end is returned.
+   * each does at the frame's end is returned. Each delivery and each load
+   * is on its own: one whose code throws, as a loaded SWF's document
+   * class's constructor, is reported, and those after it still come.
    */
   private completeLoads(): (() => void)[] {
     const ends: (() => void)[] = [];
     if (this.readyBytes.length !== 0) {
       for (const deliver of this.readyBytes.splice(0)) {
-        deliver();
+        try {
+          deliver();
+        } catch (error) {
+          this.reportUncaught(error);
+        }
       }
     }
 
     while (this.loads.length && (this.loads[0].ready || this.loads[0].failed)) {
       const load = this.loads.shift() as Load;
-      if (load.generation !== load.loader.$generation) {
-        continue;
-      }
-
-      if (load.ready) {
-        ends.push(load.ready());
-      } else {
-        const info = this.loaderInfoOf(load.loader);
-        if (load.url !== null) {
-          dispatchEvent(this, info, this.httpStatus(load.status));
-          if (load.generation !== load.loader.$generation) {
-            continue;
-          }
-        }
-
-        const error = this.rt.construct(
-          this.rt.classNamed("flash.events::IOErrorEvent"),
-          "ioError",
-          false,
-          false,
-          load.failed,
-        );
-        dispatchEvent(this, info, error);
+      try {
+        this.completeLoad(load, ends);
+      } catch (error) {
+        this.reportUncaught(error);
       }
     }
 
     return ends;
+  }
+
+  private completeLoad(load: Load, ends: (() => void)[]): void {
+    if (load.generation !== load.loader.$generation) {
+      return;
+    }
+
+    if (load.ready) {
+      ends.push(load.ready());
+      return;
+    }
+
+    const info = this.loaderInfoOf(load.loader);
+    if (load.url !== null) {
+      dispatchEvent(this, info, this.httpStatus(load.status));
+      if (load.generation !== load.loader.$generation) {
+        return;
+      }
+    }
+
+    const error = this.rt.construct(
+      this.rt.classNamed("flash.events::IOErrorEvent"),
+      "ioError",
+      false,
+      false,
+      load.failed,
+    );
+    dispatchEvent(this, info, error);
   }
 
   private loaderInfoOf(loader: AsObject): AsObject {
@@ -1658,7 +1675,7 @@ export class Scripting {
     }
 
     for (const target of [...targets]) {
-      dispatchTo(this, target, this.event(type), this.reportUncaught);
+      dispatchTo(this, target, this.event(type));
     }
   }
 
