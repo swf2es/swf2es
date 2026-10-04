@@ -541,7 +541,8 @@ minute after it was last drawn, and a timeline that makes its children
 anew on every frame, as a goto back does, so held gigabytes. A drawing's
 own fills and a text's characters, dear to build again, are kept 5 s
 off the list for a pool's object or a panel hidden and shown to come
-back to (`bench.ts --toggle N`).
+back to (`bench.ts --toggle N`). A BitmapData's draw of an object off
+the list borrows the stage's fills and lines where they are still kept.
 A line context no one holds stays idle 5
 s, by the clock, not renders, which a host may make many of between
 frames, at most 4096 of them, before it is destroyed. A drawing's lines

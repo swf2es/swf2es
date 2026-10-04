@@ -458,6 +458,11 @@ class StrokeContexts {
 
   constructor(private readonly counts: { strokeContexts: number; strokeReuses: number }) {}
 
+  /** The layer's lines under `key` if they are kept, not taken: for a view drawn once to borrow. */
+  peek(layer: ShapeLayer, key: string): GraphicsContext | null {
+    return this.byLayer.get(layer)?.get(key) ?? null;
+  }
+
   /** The layer's lines seen through `m`, taken: made or found. */
   take(layer: ShapeLayer, m: Linear, least: number, key = linesKey(m, least)): GraphicsContext {
     let contexts = this.byLayer.get(layer);
@@ -551,6 +556,11 @@ class BlendFills {
   private readonly held = new Map<ShapeCharacter, { fills: GraphicsContext[]; uses: number }>();
   /** The blends no one holds, in the order they went idle, with the time each did. */
   private readonly idle = new Map<ShapeCharacter, number>();
+
+  /** The blend's fills if they are kept, not taken: for a view drawn once to borrow. */
+  peek(blend: ShapeCharacter): GraphicsContext[] | null {
+    return this.held.get(blend)?.fills ?? null;
+  }
 
   /** The blend's fills, taken: found, or built by `build`. */
   take(blend: ShapeCharacter, build: () => GraphicsContext[]): GraphicsContext[] {
@@ -766,6 +776,8 @@ export class PixiView {
 
   /** What a fresh view built itself, which it destroys; what it borrowed from `source` stays. */
   private readonly built: GraphicsContext[] = [];
+  /** What a fresh view borrowed from its source's caches, which it neither gives back nor destroys. */
+  private readonly borrowed = new WeakSet<GraphicsContext>();
   /**
    * The released nodes of drawings and texts, with the time each left the
    * list: kept whole for IDLE_MS, as a pool's objects or a panel shown and
@@ -1107,12 +1119,15 @@ export class PixiView {
     if (current && current.layers === node.layers && current.fills.length === node.layers.length) {
       fills = current.fills;
     } else if (shape && !o.drawing && !(o instanceof ShapeObject && o.morph)) {
-      fills = this.fills.get(shape) ?? node.layers.map(build);
+      // A fresh view borrows the stage's, which its object, off the list, may no longer hold.
+      fills = this.fills.get(shape) ?? this.source?.fills.get(shape) ?? node.layers.map(build);
       this.fills.set(shape, fills);
     } else if (shape && !o.drawing && !this.fresh) {
       // A morph's blend, one of as many as its ratios: not with the shapes', which the view keeps.
       fills = this.blends.take(shape, () => node.layers.map(build));
       node.blended = shape;
+    } else if (shape && !o.drawing && this.source?.blends.peek(shape)) {
+      fills = this.source.blends.peek(shape) as GraphicsContext[];
     } else {
       fills = node.layers.map(build);
       node.ownFills = true;
@@ -1121,7 +1136,7 @@ export class PixiView {
     node.fills = fills;
     // A blend's layers never change, so its lines are shared as a shape's: instances in step stroke
     // once.
-    node.sharedLines = !this.fresh && !o.drawing && shape !== null;
+    node.sharedLines = !o.drawing && shape !== null;
     const lines =
       current &&
       sameLinear(current.world, node.world) &&
@@ -1237,7 +1252,15 @@ export class PixiView {
 
       // The new context goes in before the old one goes back, as it may be the same.
       const previous = strokes.shared;
-      if (node.sharedLines) {
+      // A fresh view borrows the stage's lines where it draws them alike.
+      const kept =
+        this.fresh && node.sharedLines && this.source?.leastWidth === least
+          ? this.source.lines.peek(layer, key)
+          : null;
+      if (kept) {
+        strokes.swap(kept);
+        this.borrowed.add(kept);
+      } else if (node.sharedLines && !this.fresh) {
         strokes.swap(this.lines.take(layer, m, least, key));
       } else {
         strokes.swap(linesContext(layer, m, least));
@@ -1247,7 +1270,9 @@ export class PixiView {
         }
       }
 
-      this.lines.give(previous);
+      if (!this.borrowed.has(previous) && !(this.fresh && this.built.includes(previous))) {
+        this.lines.give(previous);
+      }
       if (inverse) {
         strokes.setFromMatrix(inverse);
       }

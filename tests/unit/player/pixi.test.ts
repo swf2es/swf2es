@@ -891,6 +891,43 @@ async function outlinedSquare() {
   } as unknown as ConstructorParameters<typeof ShapeObject>[0];
 }
 
+test("a draw of a shape off the list borrows the stage's fills and lines", async () => {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  type Drawn = { context: { destroyed: boolean } };
+  const seen: Drawn["context"][][] = [];
+  const renderer = {
+    render: ({ container }: { container: { children: { children: unknown[] }[] } }) => {
+      // The draw's container: the object's, then its art, with its fill and lines.
+      const art = container.children[0].children[0] as { children: Drawn[] };
+      seen.push(art.children.map((g) => g.context));
+    },
+    extract: { pixels: () => ({ pixels: new Uint8ClampedArray(4) }) },
+  } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const root = new Container();
+  const shape = new ShapeObject(await outlinedSquare());
+  root.placeAtDepth(shape, 1);
+  view.prepare(root);
+  const [fill, lines] = view.stage.children[0].children[1].children[0]
+    .children as unknown as Drawn[];
+  const contexts = [fill.context, lines.context];
+
+  // Off the list, its art goes; a BitmapData's draw of it on each frame still builds nothing.
+  root.removeChild(shape);
+  view.prepare(root);
+  for (let k = 0; k < 2; k++) {
+    view.snapshot(shape, { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }, 1, 1, 1);
+  }
+
+  assert.equal(seen.length, 2);
+  for (const drawn of seen) {
+    assert.equal(drawn.length, 2);
+    assert.ok(drawn.every((context, i) => context === contexts[i]));
+  }
+
+  assert.ok(contexts.every((context) => !context.destroyed));
+});
+
 test("a child moved out of a parent that leaves the list keeps what it draws", async () => {
   const { ShapeObject } = await import("../../../packages/player/dist/display.js");
   const view = new PixiView(standIn([]).renderer);
