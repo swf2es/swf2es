@@ -1547,8 +1547,10 @@ it goes in at the caret, over the selection, and `Event.CHANGE` follows.
 Backspace, Delete, the arrows, Home and End move and delete, Up and Down
 by a line, Shift extends the selection, Ctrl+A selects all (Ctrl with Alt
 is AltGr, and types), and Enter adds a line only to a multiline field.
-A click puts the caret of an input field at the nearer side of the
-character clicked; it gives focus to any text field and to whatever Tab
+A press in a selectable field puts its caret at the nearer side of the
+character pressed, and a drag from there selects, by words after a double
+click and by lines after a triple click, as Ruffle's does (two presses
+within half a second and two pixels make a double). A click gives focus to any text field and to whatever Tab
 may focus, and a click on anything else takes focus from what Tab may
 focus, after a cancelable `mouseFocusChange` on what had it. Tab may
 focus input fields, buttons and sprites in `buttonMode` unless
@@ -1559,7 +1561,8 @@ after a cancelable `keyFocusChange`. `stage.focus` set by a script moves
 focus too, and every move is a `focusOut` and a `focusIn`, each naming
 the other. An object taken off the list or hidden loses focus. A focused
 field draws its caret, unblinking, a pixel wide in the colour of the text
-before it, and its selection shaded, both clipped to the lines shown.
+before it, and its selection shaded, line by line, both clipped to the
+lines shown; a focused selectable dynamic field shows its selection too.
 While a field of the SWF has focus, the host keeps the browser from
 acting on keys too. adl cannot be typed into, so none of this is
 recorded against Flash; there is no IME, no clipboard, and no scrolling

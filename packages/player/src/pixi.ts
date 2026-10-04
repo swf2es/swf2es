@@ -744,6 +744,7 @@ export class PixiView {
         altKey: e.altKey,
         ctrlKey: e.ctrlKey,
         shiftKey: e.shiftKey,
+        time: e.timeStamp,
       };
       player.pointer?.handle(type, p);
     };
@@ -1637,7 +1638,7 @@ function drawStaticText(o: StaticTextObject, art: PixiContainer): void {
  * the colour of the text before it, and its selection shaded under it.
  */
 function drawCaret(o: TextObject, art: PixiContainer): void {
-  if (!o.focused || o.type !== "input") {
+  if (!o.focused || !(o.type === "input" || o.selectable)) {
     return;
   }
 
@@ -1670,17 +1671,30 @@ function drawCaret(o: TextObject, art: PixiContainer): void {
   if (begin < end) {
     const from = place(begin);
     const to = place(end);
-    const shown = lines.indexOf(from.line);
-    if (from.line === to.line && shown >= first && shown <= last) {
-      const top = (dy + from.line.y) / 20;
-      const height = (from.line.ascent + from.line.descent) / 20;
-      g.rect(from.x, top, to.x - from.x, height).fill({ color: 0x3399ff, alpha: 0.4 });
+    const a = lines.indexOf(from.line);
+    const b = lines.indexOf(to.line);
+    // Each shown line the selection covers, from its start or to its end where it goes on.
+    for (let i = Math.max(a, first); i <= Math.min(b, last); i++) {
+      const line = lines[i];
+      const left = i === a ? from.x : (dx + line.x) / 20;
+      const shown = line.chars.filter((ch) => ch.shown);
+      const end = shown.length > 0 ? shown[shown.length - 1] : null;
+      const right = i === b ? to.x : (dx + (end ? end.x + end.advance : line.x)) / 20;
+      const top = (dy + line.y) / 20;
+      const height = (line.ascent + line.descent) / 20;
+      g.rect(left, top, Math.max(0, right - left), height).fill({ color: 0x3399ff, alpha: 0.4 });
     }
   }
 
   const at = place(o.caret);
   const index = lines.indexOf(at.line);
-  if (index >= first && index <= last && at.x >= inner.left && at.x <= inner.right) {
+  if (
+    o.type === "input" &&
+    index >= first &&
+    index <= last &&
+    at.x >= inner.left &&
+    at.x <= inner.right
+  ) {
     const format = o.model.formats[Math.max(0, o.caret - 1)] ?? o.model.defaultFormat;
     const top = (dy + at.line.y) / 20;
     const height = Math.max(1, (at.line.ascent + at.line.descent) / 20);

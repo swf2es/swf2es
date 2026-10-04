@@ -151,12 +151,22 @@ test("Pixi pointer delivery scales to SWF coordinates and stops on unbind", () =
     altKey: true,
     ctrlKey: false,
     shiftKey: false,
+    timeStamp: 1234,
   };
   view.stage.emit("pointerdown", event as never);
   assert.deepEqual(calls, [
     [
       "down",
-      { x: 15, y: 10, button: 0, buttons: 1, altKey: true, ctrlKey: false, shiftKey: false },
+      {
+        x: 15,
+        y: 10,
+        button: 0,
+        buttons: 1,
+        altKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        time: 1234,
+      },
     ],
   ]);
   unbind();

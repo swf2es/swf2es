@@ -267,6 +267,8 @@ function parseRestrict(restrict: string): { allowed: Interval[]; disallowed: Int
 export class KeyboardInput {
   /** How many key events it has handled: each may run scripts and change a field. */
   handled = 0;
+  /** The field the pointer was pressed on, where, and by which click, whose selection a drag extends. */
+  private press: { field: TextObject; position: number; clicks: number } | null = null;
 
   constructor(
     private readonly stage: Container,
@@ -318,16 +320,19 @@ export class KeyboardInput {
    * focus to the target where a click focuses it, else to nothing; a
    * field's caret where it was clicked.
    */
-  pressed(target: DisplayObject | null, localX: number, localY: number): void {
+  pressed(target: DisplayObject | null, localX: number, localY: number, clicks = 1): void {
     const s = this.scripting;
     const pressed = target === this.stage ? null : target;
-    if (pressed === null && !(s.focus && focusableByMouse(s.focus))) {
-      return;
+    this.press = null;
+    if (pressed instanceof TextObject && pressed.selectable) {
+      const position = caretAt(pressed, localX * 20, localY * 20);
+      this.press = { field: pressed, position, clicks };
+      const [from, to] = selectionAt(pressed, position, clicks);
+      pressed.select(from, to);
     }
 
-    if (pressed instanceof TextObject && editable(pressed)) {
-      const caret = caretAt(pressed, localX * 20, localY * 20);
-      pressed.select(caret, caret);
+    if (pressed === null && !(s.focus && focusableByMouse(s.focus))) {
+      return;
     }
 
     if (pressed === s.focus) {
@@ -339,6 +344,25 @@ export class KeyboardInput {
     }
 
     setFocus(s, pressed && focusableByMouse(pressed) ? pressed : null);
+  }
+  /**
+   * The pointer moved with its button held, the point in the pressed
+   * field's own pixels: the selection spans from where the press was to
+   * here, by characters, or by words or lines after a double or triple click.
+   */
+  dragged(field: TextObject, localX: number, localY: number): void {
+    const press = this.press;
+    if (!press || press.field !== field || !field.selectable) {
+      return;
+    }
+
+    const [startFrom, startTo] = selectionAt(field, press.position, press.clicks);
+    const [from, to] = selectionAt(field, caretAt(field, localX * 20, localY * 20), press.clicks);
+    if (from < startFrom) {
+      field.select(startTo, from);
+    } else {
+      field.select(startFrom, Math.max(to, startTo));
+    }
   }
 
   /**
@@ -585,6 +609,63 @@ export function caretAt(field: TextObject, x: number, y: number): number {
   return line.end > line.start && (text[line.end - 1] === "\r" || text[line.end - 1] === "\n")
     ? line.end - 1
     : line.end;
+}
+
+const words = new Intl.Segmenter(undefined, { granularity: "word" });
+const blank = (t: string): boolean => t.trim() === "";
+
+/**
+ * What a click at `position` selects, as Ruffle's: the point itself, a
+ * double click's word, a triple click's line, from newline to newline.
+ * A word stops at whitespace on either side of the point.
+ */
+function selectionAt(field: TextObject, position: number, clicks: number): [number, number] {
+  const text = field.model.text;
+  if (clicks <= 1) {
+    return [position, position];
+  }
+
+  if (clicks === 2) {
+    const head = text.slice(0, position);
+    let from = 0;
+    if (head !== "" && blank(head[head.length - 1])) {
+      from = position;
+    } else {
+      for (const w of words.segment(head)) {
+        if (!blank(w.segment)) {
+          from = w.index;
+        }
+      }
+    }
+
+    let to = text.length;
+    const tail = text.slice(position);
+    if (tail !== "" && blank(tail[0])) {
+      to = position;
+    } else {
+      for (const w of words.segment(tail)) {
+        if (!blank(w.segment)) {
+          to = position + w.index + w.segment.length;
+          break;
+        }
+      }
+    }
+
+    return [from, to];
+  }
+
+  const newline = (c: string) => c === "\r" || c === "\n";
+  let from = position;
+  while (from > 0 && !newline(text[from - 1])) {
+    from--;
+  }
+
+  let to = position;
+  while (to < text.length && !newline(text[to])) {
+    to++;
+  }
+
+  return [from, to];
 }
 
 /** Flash's key codes where a browser's legacy ones differ: Firefox's for ";", "=" and "-". */

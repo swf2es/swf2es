@@ -284,3 +284,35 @@ test("an object taken off its parent, or hidden, loses focus", () => {
   } as never);
   assert.equal(scripting.focus, null);
 });
+
+test("a drag selects from the press, by characters, or by words and lines after a double or triple click", () => {
+  const { fields, keyboard } = setUp("name");
+  const [field] = fields;
+  field.multiline = true;
+  field.model.setText("one two\rthree");
+  // Just inside index i's character, on its line: the point a press there makes.
+  const at = (i: number): [number, number] => {
+    const line = field.layout.lines.find((l) => i < l.end) ?? field.layout.lines[0];
+    const c = line.chars[i - line.start];
+    return [(c.x + 1) / 20, (line.y + line.ascent) / 20];
+  };
+
+  keyboard.pressed(field, ...at(1));
+  keyboard.dragged(field, ...at(6));
+  assert.deepEqual([field.anchor, field.caret], [1, 6]);
+  keyboard.dragged(field, ...at(0));
+  assert.deepEqual([field.anchor, field.caret], [1, 0]);
+
+  keyboard.pressed(field, ...at(5), 2);
+  assert.deepEqual(field.selection, [4, 7]);
+  keyboard.dragged(field, ...at(1));
+  assert.deepEqual(field.selection, [0, 7]);
+
+  keyboard.pressed(field, ...at(9), 3);
+  assert.deepEqual(field.selection, [8, 13]);
+
+  field.selectable = false;
+  keyboard.pressed(field, ...at(1));
+  keyboard.dragged(field, ...at(6));
+  assert.deepEqual(field.selection, [8, 13]);
+});
