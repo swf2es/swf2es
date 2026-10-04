@@ -41,6 +41,8 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
     declare $bytes: Uint8Array | null;
     declare $swf: SwfFacts | null;
     declare $url: string | null;
+    /** What `parameters` tells (Scripting.loaderInfo): its LoaderContext's, its URL's query, or the main SWF's flashvars. */
+    declare $params: ReadonlyMap<string, string>;
     /** The application domain its content loads into, as its load chose it; unset for the main SWF's. */
     declare $domain: avm2.Domain | undefined;
     /** The URL the content gets when it is placed, for a load from bytes. */
@@ -159,8 +161,14 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
       return array;
     }
 
+    // A new object at each ask, as Flash's: a script that changes one changes no other.
     "flash.display:LoaderInfo::_getArgs"(): Value {
-      return s.rt.objectTraits.instance();
+      const args = s.rt.objectTraits.instance();
+      for (const [name, value] of this.$params) {
+        s.rt.setProperty(args, s.rt.publicName(name), value);
+      }
+
+      return args;
     }
 
     /** The Loader's and its LoaderInfo's uncaughtErrorEvents are one dispatcher. */

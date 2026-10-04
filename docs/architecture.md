@@ -909,6 +909,22 @@ dispatches `init` and then `complete` at the end of its first frame,
 after `exitFrame` and before the second (Ruffle's `loaderinfo_events` and
 `delayed_symbolclass` traces), as a loaded SWF's does.
 
+`parameters` is a new object at each ask, so a script's changes to one
+stay in it. The main SWF's, which the stage's and every root's under it
+report too, are the query of the URL the host gave `Scripting` as `url`
+and then the flashvars it gave as `parameters`, which override a name
+the query has, as Ruffle's do (Flash's order was not checked: its
+harness can give neither). A SWF loaded by URL has its URL's query from
+its second `PROGRESS` on, decoded, `+` as a space, a name without `=`
+empty, an empty name left out and the last of a name kept; one from
+bytes has none here, which adl could not tell from the loader's own
+query (Ruffle passes that on). A `LoaderContext`'s `parameters` take the place of the
+query from the call on, and a value in them that is not a String, null
+included, is refused at the call with `IllegalOperationError` #2196. An
+unload leaves none (the `loader-parameters` case and the node tests).
+The player runs no AVM1, so an AVM1 root's `_root` variables get no
+flashvars.
+
 The order is Flash's, traced by adl (the `loads` case; the Flash Player
 traces in Ruffle's corpus agree where they overlap). `loadBytes` tells
 the whole of the progress in the call, `PROGRESS` with nothing loaded and
