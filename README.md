@@ -33,9 +33,9 @@ const renderer = await autoDetectRenderer({
   width: player.width,
   height: player.height,
   background: player.background,
-  // Required for blend modes: they read what is below from the back buffer,
-  // and without it draw as normal (the view warns once). It costs one
-  // full-screen copy a frame on the GPU.
+  // Required for filter-backed blend modes: they read what is below from
+  // the back buffer, and without it draw as normal (the view warns once).
+  // It costs one full-screen copy a frame on the GPU.
   useBackBuffer: true,
 });
 const view = new PixiView(renderer);

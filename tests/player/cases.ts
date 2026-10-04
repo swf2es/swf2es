@@ -3217,10 +3217,10 @@ export const cases: PlayerCase[] = [
   },
   {
     name: "blend-direct",
-    swf: (abc) => bare(abc, 1, "BlendDirect", 160, 80),
+    swf: (abc) => bare(abc, 1, "BlendDirect", 240, 80),
     script: "BlendDirect",
-    frames: 1,
-    capture: [1],
+    frames: 4,
+    capture: [1, 2, 3, 4],
     tolerance: 1,
     maxOutliers: 0,
   },
