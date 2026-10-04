@@ -603,9 +603,12 @@ test("an object off the list gives its lines back, and has them again when it co
     const held = linesOf();
     assert.deepEqual(view.counts, { strokeContexts: 1, strokeReuses: 0 });
 
-    // Off the list: given back, then gone once idle long enough.
+    // Off the list: given back, then gone once idle long enough. Its Graphics go at once: Pixi
+    // would keep each, with its geometry, for a minute.
+    const graphics = view.stage.children[0].children[1].children[1].children[0].children[1];
     root.removeChild(branch);
     view.prepare(root);
+    assert.equal(graphics.destroyed, true);
     assert.equal(held.destroyed, false);
     clock.at += 6000;
     view.prepare(root);

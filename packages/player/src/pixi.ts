@@ -941,10 +941,24 @@ export class PixiView {
    * its own and change.
    */
   private redraw(o: DisplayObject, node: Node): void {
+    const done = this.clear(node);
+    // Destroyed after the new ones are made, so that a texture they share is kept, not made again.
+    try {
+      this.draw(o, node);
+    } finally {
+      done();
+    }
+  }
+
+  /**
+   * Empty the node of what it drew, and return what gives back its fills
+   * and lines: a drawing's or blend's fills, and every node's lines; a
+   * Graphics frees only a context it made.
+   */
+  private clear(node: Node): () => void {
     // A Bitmap's texture is its store's: only the sprite goes.
     node.bitmap?.destroy();
-    // A drawing's or blend's fills, and every node's lines; a Graphics frees only a context it
-    // made.
+    node.bitmap = null;
     const old = node.ownFills && !this.fresh ? node.fills : [];
     const oldLines = this.fresh ? [] : node.strokes.map((g) => g?.shared);
     // A text's characters are in a container of their own; their shared glyph fills stay, not being theirs.
@@ -954,10 +968,12 @@ export class PixiView {
       }
     }
 
-    // Destroyed after the new ones are made, so that a texture they share is kept, not made again.
-    try {
-      this.draw(o, node);
-    } finally {
+    node.layers = [];
+    node.fills = [];
+    node.ownFills = false;
+    node.strokes = [];
+    node.lines = [];
+    return () => {
       for (const context of old) {
         destroyContext(context);
       }
@@ -967,14 +983,11 @@ export class PixiView {
           this.lines.give(context);
         }
       }
-    }
+    };
   }
 
   /** What `o` itself draws, into its node emptied of what it drew before. */
   private draw(o: DisplayObject, node: Node): void {
-    node.strokes = [];
-    node.lines = [];
-    node.bitmap = null;
     const current = this.current(o);
     if (o instanceof BitmapObject) {
       this.drawBitmap(o, node);
@@ -1078,13 +1091,10 @@ export class PixiView {
       chain.forget();
     }
 
-    for (const strokes of node.strokes) {
-      if (strokes) {
-        const previous = strokes.shared;
-        strokes.swap(new GraphicsContext());
-        this.lines.give(previous);
-      }
-    }
+    // What it drew goes too: Pixi keeps a Graphics it has drawn, with its
+    // geometry, for a minute after it was last drawn, which a timeline that
+    // makes its children anew on every frame turns into gigabytes.
+    this.clear(node)();
 
     // Those it last drew, which may since have left it too, and any it has now.
     const kids = new Set(node.kids);
@@ -1154,10 +1164,11 @@ export class PixiView {
     const { container } = node;
     let dirty = this.fresh ? TRANSFORM | CHILDREN | CONTENT : o.dirty;
     if (node.released) {
-      // Back from off the list: its transform as if unknown, so that it and all below draw their lines again.
+      // Back from off the list: drawn again, its transform as if unknown, so that it and all below
+      // draw their lines again.
       node.released = false;
       node.world = [Number.NaN, Number.NaN, Number.NaN, Number.NaN];
-      dirty |= TRANSFORM;
+      dirty |= TRANSFORM | CONTENT;
     }
 
     // A mask is drawn, whatever its visibility, alpha and colour, by its fills alone.
