@@ -617,6 +617,8 @@
     "flash.net::URLStream#set:objectEncoding",
     "flash.net::URLStream#set:position",
     "flash.net::URLStream#stop",
+    "flash.net::navigateToURL",
+    "flash.net::sendToURL",
     "flash.profiler::Telemetry.get:connected",
     "flash.profiler::Telemetry.get:spanMarker",
     "flash.profiler::Telemetry.registerCommandHandler",

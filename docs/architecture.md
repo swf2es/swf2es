@@ -924,6 +924,19 @@ runtime's ByteArray DataInput implementation. Relative
 URLs resolve against the main SWF until the runtime tracks the creator of
 each stream.
 
+`navigateToURL` hands the request, taken and resolved as `URLStream`'s is,
+and the window name (null when none is given, "blank" in any case and
+with or without its underscore as `_blank`, as Ruffle's corpus records
+Flash doing) to `Scripting`'s `navigate` host; the test page gives none,
+as a `_self` would take the page away. The browser's default opens a GET with `window.open` and `noopener`,
+a new window for null, and submits a form-encoded POST as a hidden form,
+the only way a browser posts into a window; any other POST body is left
+out. Without a window, as in node, nothing opens. `sendToURL` sends its
+request through the host fetch and drops the response, as Flash ignores
+it. Both throw TypeError #2007 for a null request, then for a null `url`,
+as adl does. Flash's `allowScriptAccess` and `allowNetworking` checks are
+not modelled: the host decides what it lets a SWF open.
+
 `Socket` uses an optional host transport supplied to `Scripting`. The host
 opens the TCP connection and reports open, bytes, close and failure; the
 player delivers those reports on its next frame. ActionScript's reads and

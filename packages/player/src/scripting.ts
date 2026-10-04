@@ -37,6 +37,7 @@ import { decodeImages, decodeInBrowser, type ImageDecode } from "./images.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import { finishSounds } from "./playerglobal/flash/media/Sound.js";
+import { browserNavigate, type Navigate } from "./playerglobal/flash/net/navigateToURL.js";
 import { defaultStorage, type SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
 import {
   type PlatformCapabilities,
@@ -209,6 +210,8 @@ export class Scripting {
   }[] = [];
   readonly socket: SocketHost | null;
   readonly audio: AudioHost | null;
+  /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
+  readonly navigate: Navigate | null;
   private readonly audioEntries = new WeakMap<SoundCharacter, SharedAudio>();
   private readonly sharedAudio = new Map<number, SharedAudio[]>();
   private readonly sharedAudioGone = new FinalizationRegistry<{
@@ -352,6 +355,7 @@ export class Scripting {
       externalInterface?: ExternalInterfaceHost;
       socket?: SocketHost;
       audio?: AudioHost | null;
+      navigate?: Navigate | null;
       decodeImage?: ImageDecode | null;
       screenCapabilities?: Partial<ScreenCapabilities>;
       /**
@@ -380,6 +384,7 @@ export class Scripting {
     this.externalInterface = options.externalInterface ?? null;
     this.socket = options.socket ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
+    this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
     this.storage = options.storage ?? defaultStorage();
@@ -1194,6 +1199,21 @@ export class Scripting {
       this.readyBytes.push(() => deliver(result, outgoing.url));
     });
     this.trackRequest(completed);
+  }
+
+  /** navigateToURL's page, resolved as a load's URL is; nothing where the host opens none. */
+  navigateTo(request: AsObject, window: string | null): void {
+    this.navigate?.(this.fetchRequest(request, this.url), window);
+  }
+
+  /** sendToURL's request, sent by the host's fetch and its response dropped, as Flash ignores it. */
+  sendTo(request: AsObject): void {
+    const fetch = this.fetch;
+    if (!fetch) {
+      return;
+    }
+
+    fetch(this.fetchRequest(request, this.url), new AbortController().signal).catch(() => {});
   }
 
   /** Snapshot a URLRequest at load time, before scripts can change its data or headers. */
