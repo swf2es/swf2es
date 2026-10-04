@@ -353,14 +353,25 @@ export class PointerInput {
   }
 
   /**
-   * The cursor over what the pointer is on, as Ruffle chooses it: a hand
-   * over a button that uses one, or under the nearest sprite in buttonMode
-   * whose useHandCursor and enabled are true; an I-beam over selectable
-   * text, whose links do not show a hand yet.
+   * The cursor to show: none while Mouse.hide holds, the one Mouse.cursor
+   * names unless it is "auto", a registered one before Flash's own of the
+   * same name, and otherwise the one over what the pointer is on, as Ruffle
+   * chooses it: a hand over a button that uses one, or under the nearest
+   * sprite in buttonMode whose useHandCursor and enabled are true; an
+   * I-beam over selectable text, whose links do not show a hand yet.
    */
   cursor(): Cursor {
-    if (this.scripting.mouseVisible === false) {
+    const s = this.scripting;
+    if (s.mouseVisible === false) {
       return "none";
+    }
+
+    const named = s.mouseCursor;
+    if (named !== "auto") {
+      const forced = s.cursors?.get(named) ?? FORCED.get(named);
+      if (forced) {
+        return forced;
+      }
     }
 
     const d = this.hover;
@@ -386,8 +397,16 @@ export class PointerInput {
   }
 }
 
-/** A CSS cursor the host shows over the player. */
-export type Cursor = "default" | "pointer" | "text" | "none";
+/** A CSS cursor the host shows over the player; a registered one is its image's `url(...)`. */
+export type Cursor = "default" | "pointer" | "text" | "grab" | "none" | `url(${string}`;
+
+/** flash.ui.MouseCursor's names as CSS: "hand" is Flash's dragging hand, as Ruffle shows it. */
+const FORCED: ReadonlyMap<string, Cursor> = new Map<string, Cursor>([
+  ["arrow", "default"],
+  ["button", "pointer"],
+  ["hand", "grab"],
+  ["ibeam", "text"],
+]);
 
 /** Whether `d` is a button, or a sprite in buttonMode, whose hover Ruffle redraws for. */
 function buttonLike(d: DisplayObject | null): boolean {

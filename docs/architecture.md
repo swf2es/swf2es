@@ -690,10 +690,20 @@ player's own hit test. It shows the cursor the player chooses, as Ruffle
 does: a hand over a button that uses one, disabled or not, or under the
 nearest sprite in `buttonMode` whose `useHandCursor` and `enabled` are
 true, and an I-beam over selectable text; a link in text shows no hand
-yet, and `Mouse.cursor` is not read. `Mouse.hide()` makes it none over
-the stage, at once, wherever a script calls it, and `Mouse.show()` brings
-back the one the pointer is over; the pointer still picks its targets
-while it is hidden, as in Flash and Ruffle.
+yet. That is `Mouse.cursor`'s `"auto"`; `"arrow"`, `"button"`, `"ibeam"`
+and `"hand"` force CSS `default`, `pointer`, `text` and `grab` over
+the whole stage (`"hand"` is Flash's dragging hand, as Ruffle shows it),
+and any other name is ArgumentError 2008, as in Flash. `Mouse.hide()`
+makes it none over the stage, at once, wherever a script calls it, even
+over a forced one, and `Mouse.show()` brings back the one it hid; the
+pointer still picks its targets while it is hidden, as in Flash and
+Ruffle. `Mouse.registerCursor`
+checks its `MouseCursorData` as Flash does (frames of at most 32 by 32,
+a hot spot within 0 to 31) and makes the first frame a PNG `data:` URL,
+with no DOM, that `Mouse.cursor` can then name before Flash's own names;
+CSS cursors do not animate, so a cursor of several frames shows its
+first. `supportsCursor` and `supportsNativeCursor` are true, as in
+desktop Flash.
 The display list decides the target, so masks, scroll rectangles, depth,
 visibility, `mouseEnabled` and `mouseChildren` use the same objects that
 scripts see; Pixi's render tree does not choose a Flash target. The first

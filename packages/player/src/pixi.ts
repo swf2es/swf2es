@@ -999,7 +999,18 @@ export class PixiView {
     // Pixi sets the canvas's cursor on every move, from its target's, which
     // is this stage: the player's cursor goes there, and through Pixi's own
     // setter now, which keeps Pixi's record of it right.
-    const events = (this.renderer as { events?: { setCursor(mode: string | null): void } }).events;
+    const events = (
+      this.renderer as {
+        events?: { setCursor(mode: string | null): void; cursorStyles: Record<string, unknown> };
+      }
+    ).events;
+    // Pixi's "default" is "inherit", which shows the page's cursor where the
+    // page sets one; Flash's arrow, auto's or a forced one, is the arrow.
+    const pixiDefault = events?.cursorStyles.default;
+    if (events) {
+      events.cursorStyles.default = "default";
+    }
+
     const show = (cursor: string) => {
       this.stage.cursor = cursor;
       if (events) {
@@ -1015,9 +1026,17 @@ export class PixiView {
     }
 
     return () => {
+      // Pixi's own default back first, then the canvas left to it, as before the bind.
+      if (events) {
+        events.cursorStyles.default = pixiDefault;
+      }
+
       if (pointer) {
         pointer.onCursor = null;
-        show("default");
+        this.stage.cursor = "default";
+        if (canvas?.style) {
+          canvas.style.cursor = "";
+        }
       }
 
       if (frame) {

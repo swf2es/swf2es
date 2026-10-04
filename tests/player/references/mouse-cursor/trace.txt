@@ -1,0 +1,51 @@
+supportsCursor true
+supportsNativeCursor true
+cursor auto
+cursor = arrow: arrow
+cursor = button: button
+cursor = hand: hand
+cursor = ibeam: ibeam
+cursor = auto: auto
+cursor = ARROW threw ArgumentError: Error #2008: Parameter cursor must be one of the accepted values.
+cursor =  threw ArgumentError: Error #2008: Parameter cursor must be one of the accepted values.
+cursor = none threw ArgumentError: Error #2008: Parameter cursor must be one of the accepted values.
+cursor = null threw TypeError: Error #2007: Parameter cursor must be non-null.
+cursor = undefined threw TypeError: Error #2007: Parameter cursor must be non-null.
+cursor = 5 threw ArgumentError: Error #2008: Parameter cursor must be one of the accepted values.
+cursor = bogus threw ArgumentError: Error #2008: Parameter cursor must be one of the accepted values.
+cursor ibeam
+hidden, cursor button
+data null, hotSpot (x=0, y=0), frameRate 0
+hotSpot (x=3, y=4), same false
+hotSpot (x=1.5, y=-2)
+hotSpot = null threw TypeError: Error #2007: Parameter hotSpot must be non-null.
+frameRate = 10: 10
+frameRate = 0.5: 0.5
+frameRate = -1: 0
+frameRate = -Infinity: 0
+frameRate = NaN: NaN
+frameRate = Infinity: Infinity
+data same true, length 1
+data length after push 2
+data null
+register null, null threw TypeError: Error #2007: Parameter cursorData must be non-null.
+register null name threw TypeError: Error #2007: Parameter name must be non-null.
+register no data threw ArgumentError: Error #2008: Parameter cursor must be one of the accepted values.
+register empty data threw ArgumentError: Error #2008: Parameter cursorData must be one of the accepted values.
+register hot spot -0.5 threw ArgumentError: Error #2008: Parameter hotSpot must be one of the accepted values.
+register hot spot 31.01 threw ArgumentError: Error #2008: Parameter hotSpot must be one of the accepted values.
+register hot spot past a 40 bitmap threw ArgumentError: Error #2008: Parameter hotSpot must be one of the accepted values.
+register a null frame threw ArgumentError: Error #2004: One of the parameters is invalid.
+register 33 wide threw ArgumentError: Error #2004: One of the parameters is invalid.
+register 33 high second threw ArgumentError: Error #2004: One of the parameters is invalid.
+register a disposed frame threw ArgumentError: Error #2015: Invalid BitmapData.
+cursor = x threw ArgumentError: Error #2008: Parameter cursor must be one of the accepted values.
+register mine: auto
+cursor = mine: mine
+register mine again with no data: mine
+unregister other: mine
+unregister null threw TypeError: Error #2007: Parameter name must be non-null.
+unregister mine: auto
+cursor = mine threw ArgumentError: Error #2008: Parameter cursor must be one of the accepted values.
+register arrow: auto
+unregister button, never registered: button

@@ -289,12 +289,39 @@ test("Pixi pointer positions are taken within the box CSS object-fit shows the c
     const pointer = player.pointer as unknown as { onCursor: (c: string) => void };
     pointer.onCursor("pointer");
     assert.equal(canvas.style.cursor, "pointer");
+    // Unbound, the canvas is left to the page's cursor, as before the bind.
     unbind();
-    assert.equal(canvas.style.cursor, "default");
+    assert.equal(canvas.style.cursor, "");
     assert.equal(pointer.onCursor, null);
   } finally {
     delete g.getComputedStyle;
   }
+});
+
+test("the arrow is the arrow over the player, not the page's cursor Pixi's default inherits", () => {
+  const events = {
+    cursorStyles: { default: "inherit", pointer: "pointer" } as Record<string, unknown>,
+    shown: [] as string[],
+    setCursor(mode: string | null) {
+      const style = this.cursorStyles[mode ?? "default"];
+      this.shown.push(typeof style === "string" ? style : String(mode));
+    },
+  };
+  const renderer = {
+    screen: { width: 100, height: 100 },
+    events,
+  } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const player = {
+    width: 100,
+    height: 100,
+    pointer: { handle: () => {}, flush: () => {}, cursor: () => "default", onCursor: null },
+  } as unknown as Player;
+
+  const unbind = view.bindPointer(player);
+  assert.deepEqual(events.shown, ["default"]);
+  unbind();
+  assert.equal(events.cursorStyles.default, "inherit");
 });
 
 test("Flash's filters are left out under WebGPU, and a fresh view destroys those it made", async () => {
