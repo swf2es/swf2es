@@ -275,7 +275,7 @@ export class TextModel {
    * its tags give over the default; a paragraph's end and a BR end a line
    * only in a multiline field.
    */
-  setHtml(html: string, multiline: boolean): void {
+  setHtml(html: string, multiline: boolean, trimTrailingBreak = false): void {
     this.revision++;
     let text = "";
     const formats: CharFormat[] = [];
@@ -397,6 +397,11 @@ export class TextModel {
     const rest = html.slice(at);
     if (rest) {
       add(normalize(unescapeHtml(rest)), top());
+    }
+
+    if (trimTrailingBreak && text.endsWith("\r")) {
+      text = text.slice(0, -1);
+      formats.pop();
     }
 
     this.text = text;

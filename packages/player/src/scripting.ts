@@ -382,6 +382,8 @@ export class Scripting {
   /** Display objects made with an AS3 object, which Flash numbers for their default names. */
   instances = 0;
   private statusClass: AsObject | null = null;
+  /** Whether an HTML assignment drops its final line break, as some players do. */
+  readonly trimTrailingHtmlBreak: boolean;
 
   constructor(
     readonly codegen: Codegen,
@@ -404,6 +406,8 @@ export class Scripting {
       navigate?: Navigate | null;
       decodeImage?: ImageDecode | null;
       screenCapabilities?: Partial<ScreenCapabilities>;
+      /** Drop the final newline produced by an HTML paragraph or BR. */
+      trimTrailingHtmlBreak?: boolean;
       /**
        * The clock getTimer reads, a monotonic one in milliseconds: by default
        * `performance.now`, as Flash's runs on in real time, while a script
@@ -432,6 +436,7 @@ export class Scripting {
       pixelAspectRatio: options.screenCapabilities?.pixelAspectRatio ?? 1,
       screenDPI: options.screenCapabilities?.screenDPI ?? 72,
     };
+    this.trimTrailingHtmlBreak = options.trimTrailingHtmlBreak ?? false;
     this.realTime = options.realTime === undefined ? defaultClock() : options.realTime;
     // getTimer's zero: when the player is made, as Flash's is when it starts.
     this.realStart = this.realTime ? this.realTime() : 0;
