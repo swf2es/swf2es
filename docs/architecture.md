@@ -731,8 +731,34 @@ frame nest cycles without end; Flash gives up some 1400 deep, and the
 player throws AS3's stack overflow, #1023, at 256, after which no goto
 cycle runs for the rest of the frame, so scripts that catch it cannot
 start it over. A frame script that asks for a goto and then throws still
-has its goto, and the scripts after it still run, as adl has it; the
-error reaches the host when the frame's scripts are done.
+has its goto, and the scripts after it still run, as adl has it. What a
+goto's cycle runs throws no error into the goto's caller: an error a
+script, listener or constructor in the cycle throws is reported as
+uncaught, and the cycle and its caller go on, as in Flash and Ruffle.
+The goto itself still throws to its caller its own errors: the stack
+overflow, #1023, and an unknown scene or label, #2108 and #2109.
+
+An error nothing caught is reported, and what was running goes on, as
+adl shows. A listener's error never reaches the dispatcher: the
+listeners after it still run, and a script's `dispatchEvent` returns as
+if none had thrown, whoever dispatched, the player (frame events, a
+Timer's, a Loader's, a Socket's, the pointer's and the keyboard's) or a
+script. So does the error of a frame script, of a Timer's own tick, of
+a load's delivery, of a constructor the timeline or a goto runs, and of
+a document class's constructor: the scripts, loads and children after
+it still come. The main SWF's root plays on as far as its constructor
+got, its first frame's script and its listeners kept, as adl shows; a
+load whose document class throws has no INIT or COMPLETE. A host that
+passes `onUncaught` to Scripting gets each error as it happens, those
+between frames, in a pointer, keyboard or ExternalInterface handler,
+included, and `Player.start` and `Player.advance` then throw none; an
+error the hook itself throws is kept and thrown as the frame ends. Without it, the frame throws them
+once it has run to its end: one alone, or several as an
+AggregateError, the one that stopped the frame early, if any, first;
+those between frames come with the next frame's. An ExternalInterface
+callback's own error goes back to the page that called it. A child its
+parent's first frame places is made in the parent's `super()`, and its
+error still reaches the parent's constructor.
 
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,
@@ -1155,10 +1181,28 @@ An external `Sound.load` uses the same host fetch as `URLStream`; its
 open, progress and complete or error reach ActionScript on a frame, after
 the host has decoded it. `Sound.play` gets a channel immediately, with
 start time, repeats, stop and sound transform. Sound-complete is delivered
-on a frame. A page may provide an `AudioHost` to `Scripting`; without one,
-the player keeps the script-visible sound state but emits no audio.
+on a frame. A stopped channel's `position` stays where it stopped. A page
+may provide an `AudioHost` to `Scripting`; without one, the player keeps
+the script-visible sound state but emits no audio.
+
+`SoundMixer.soundTransform` is one transform per player, stored in
+hundredths as a channel's is, and its getter returns a copy. What a channel
+sends to the device is its own transform and the mixer's, combined as
+Ruffle's `SoundTransform::concat` computes them (only two transforms that
+both cross channels depend on the order, which no trace shows), so setting the mixer's updates
+every playing channel through `PlayingSound.setMix` and applies to every
+later one. `SimpleButton.soundTransform` reads and writes the mixer's, as
+in Flash (the `sound-mixer` case and the corpus's
+`simplebutton_soundtransform`). `stopAll` stops every channel without a
+sound-complete. `bufferTime` is kept, 5 seconds at first, and rejects a
+negative one with RangeError #2027; `areSoundsInaccessible` is false.
+`computeSpectrum` writes 512 zero floats and rewinds the ByteArray, which
+is what Ruffle writes with no sample history and what Flash writes while
+nothing plays: the player reads no output back from the device. AIR's
+`audioPlaybackMode` and `useSpeakerphoneForVoice` are kept and checked as
+AIR checks them; their API version hides them from a SWF.
 DefineSound's ADPCM, Nellymoser and Speex formats, timeline StartSound and
-stream tags, ByteArray sound loading, ID3 and SoundMixer are later slices.
+stream tags, ByteArray sound loading and ID3 are later slices.
 MP3 seek samples are parsed but not yet applied to decoded browser audio.
 
 ### Time

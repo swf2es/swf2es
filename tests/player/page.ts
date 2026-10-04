@@ -18,11 +18,16 @@ interface Run {
   error: string | null;
 }
 
-/** The scripting for `bytes`, through the served codegen and libraries; null for a SWF with no scripts. `url` is the SWF's, for what it loads. */
+/**
+ * The scripting for `bytes`, through the served codegen and libraries; null
+ * for a SWF with no scripts. `url` is the SWF's, for what it loads. The
+ * errors nothing caught go to `uncaught` as they happen.
+ */
 async function scriptingFor(
   bytes: Uint8Array,
   trace: string[],
   url: string | null,
+  uncaught: unknown[],
 ): Promise<Scripting | null> {
   const swf = readSwf(bytes);
   if (!isAs3(swf) || !swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2)) {
@@ -44,6 +49,7 @@ async function scriptingFor(
     url: url ? new URL(url, location.href).href : undefined,
     // A navigateToURL to "_self" would take the page itself away.
     navigate: null,
+    onUncaught: (error) => uncaught.push(error),
     fetch: async (request, signal) => {
       const response = await fetch(request.url, {
         signal,
@@ -116,8 +122,15 @@ async function runSwf(
   const images: Record<number, string> = {};
   const trace: string[] = [];
   let scripting: Scripting | null = null;
+  const uncaught: unknown[] = [];
+  // A run ends at the first error nothing caught, after the frame it came in.
+  const stopOnUncaught = () => {
+    if (uncaught.length > 0) {
+      throw uncaught[0];
+    }
+  };
   try {
-    scripting = await scriptingFor(bytes, trace, url);
+    scripting = await scriptingFor(bytes, trace, url, uncaught);
     const player = new Player(bytes, scripting);
     const n = GRID[quality] ?? 4;
     const renderer = await autoDetectRenderer({
@@ -147,11 +160,13 @@ async function runSwf(
     }
 
     await player.start();
+    stopOnUncaught();
     for (let frame = 1; frame <= frames; frame++) {
       if (frame > 1) {
         // What a frame asked to load is linked between frames, as in a browser's.
         await scripting?.settled();
         player.tick();
+        stopOnUncaught();
       }
 
       if (capture.includes(frame)) {
@@ -228,7 +243,8 @@ async function benchSwf(
   try {
     const start = performance.now();
     // A scripted SWF's scripts run in the tick, which their time is part of.
-    const scripting = await scriptingFor(bytes, [], null);
+    const uncaught: unknown[] = [];
+    const scripting = await scriptingFor(bytes, [], null, uncaught);
     const player = new Player(bytes, scripting);
     const renderer = await autoDetectRenderer({
       preference: "webgl",
@@ -247,6 +263,10 @@ async function benchSwf(
     }
 
     await player.start();
+    if (uncaught.length > 0) {
+      throw uncaught[0];
+    }
+
     // Which renderer Pixi chose and what it draws with; WebGPU when WebGL
     // could not be had, which the output must say.
     const { gl, gpu } = renderer as unknown as {
@@ -287,6 +307,10 @@ async function benchSwf(
 
       player.tick();
       const ticked = performance.now();
+      if (uncaught.length > 0) {
+        throw uncaught[0];
+      }
+
       view.prepare(player.stage);
       const synced = performance.now();
       renderer.render(view.stage);

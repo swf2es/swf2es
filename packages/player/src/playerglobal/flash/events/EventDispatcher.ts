@@ -28,6 +28,9 @@ function listeners(o: AsObject): Map<string, Listener[]> {
 /** The display object `o` is the face of, if it is one. */
 const displayOf = (o: AsObject) => o.$display ?? null;
 
+// A listener's error is reported as uncaught, and the listeners after it
+// still run: it never reaches the dispatcher, a script's dispatchEvent
+// included, which returns as if none had thrown (as in Flash and Ruffle).
 function invoke(s: Scripting, o: AsObject, event: AsObject, phase: number): void {
   const list = o.$listeners?.get(event.$type) as Listener[] | undefined;
   if (!list) {
@@ -42,7 +45,12 @@ function invoke(s: Scripting, o: AsObject, event: AsObject, phase: number): void
       continue;
     }
 
-    s.rt.call(l.fn, null, event);
+    try {
+      s.rt.call(l.fn, null, event);
+    } catch (error) {
+      s.reportUncaught(error);
+    }
+
     if (event.$stopped === 2) {
       return;
     }
