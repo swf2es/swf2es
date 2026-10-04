@@ -1787,7 +1787,15 @@ past their shapes, as adl's layer holds a child's glow whole: Pixi
 measures a filtered object by its descendants' shapes alone, which cut a
 blurred child of a blend off at its shapes' edges, so each filter below
 grows the region by its padding (`blend-nested` draws such children
-against adl).
+against adl). A filter's region lies on its texture's texels: Pixi puts
+it there and then pads it by whole pixels, which at a resolution that is
+no whole number, a stage fitted to its window, left it between texels,
+read between them, with the copy of what is behind a texel off. A blend
+nested in a layer then read, along its region's top and left edge, what
+the pooled back texture last held, and drew it as lines Flash does not
+draw. The region is put on the texels again after the padding, and the
+copy's corner rounded to them. The test page draws at whole resolutions,
+where neither happens, so unit tests hold both.
 
 ### Filters
 

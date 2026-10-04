@@ -9,11 +9,18 @@ import {
   type Filter,
   FilterEffect,
   FilterSystem,
+  type RenderTarget,
   RenderTargetSystem,
+  type Texture,
+  TexturePool,
 } from "pixi.js";
 
+type FilterData = { skip: boolean; resolution: number; bounds: Bounds };
 const filterSystem = FilterSystem.prototype as unknown as {
   _calculateFilterArea(instruction: { filterEffect: FilterEffect }, bounds: Bounds): void;
+  _calculateFilterBounds(data: FilterData, ...rest: unknown[]): void;
+  getBackTexture(surface: RenderTarget, bounds: Bounds, previous?: Bounds): Texture;
+  renderer: { renderTarget: { copyToTexture: RenderTargetSystem<never>["copyToTexture"] } };
 };
 
 // A layer's region holds what its filtered children draw past their shapes,
@@ -46,6 +53,56 @@ filterSystem._calculateFilterArea = function (instruction, bounds) {
   } finally {
     measuring = null;
   }
+};
+
+// A filter's region on its texture's texels. Pixi puts the region on them
+// and then pads it by whole pixels, which at a resolution that is no whole
+// number (a stage fitted to its window) leaves it between texels: the
+// filter's input, and the copy of what is behind a blend, are then read
+// between texels, and the copy, whose corner Pixi rounds down, sits up to a
+// texel off what it is drawn over. A blend in a layer whose region began
+// left of or above the layer's read, along its region's top and left edge,
+// texels of the pooled back texture the copy never reached, and drew lines
+// of what the texture last held there; Flash draws none. The region is put
+// on the texels again after the padding, and the copy's corner rounded to
+// them. Patched for every renderer on the page.
+const SNAP = 1e-6;
+const calculateFilterBounds = filterSystem._calculateFilterBounds;
+filterSystem._calculateFilterBounds = function (data, ...rest) {
+  calculateFilterBounds.call(this, data, ...rest);
+  if (data.skip) {
+    return;
+  }
+
+  const r = data.resolution;
+  const b = data.bounds;
+  b.minX = Math.floor(b.minX * r + SNAP) / r;
+  b.minY = Math.floor(b.minY * r + SNAP) / r;
+  b.maxX = Math.ceil(b.maxX * r - SNAP) / r;
+  b.maxY = Math.ceil(b.maxY * r - SNAP) / r;
+};
+
+filterSystem.getBackTexture = function (surface, bounds, previous) {
+  const resolution = surface.colorTexture.source._resolution;
+  const texture = TexturePool.getOptimalTexture({
+    width: bounds.width,
+    height: bounds.height,
+    resolution,
+  });
+  const x = bounds.minX - (previous?.minX ?? 0);
+  const y = bounds.minY - (previous?.minY ?? 0);
+  this.renderer.renderTarget.copyToTexture(
+    surface,
+    texture,
+    { x: Math.round(x * resolution), y: Math.round(y * resolution) },
+    {
+      width: Math.ceil(bounds.width * resolution - SNAP),
+      height: Math.ceil(bounds.height * resolution - SNAP),
+    },
+    { x: 0, y: 0 },
+  );
+
+  return texture;
 };
 
 // The copy of what is behind a blend into its back texture, held to both:
