@@ -77,7 +77,7 @@ export function mouseNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("ArgumentError", 2008, "cursorData");
       }
 
-      // Within the largest cursor's pixels, whatever its frames' sizes; NaN passes.
+      // Within the largest cursor's pixels, whatever its frames' sizes.
       const x: number = d.$cursorHotX ?? 0;
       const y: number = d.$cursorHotY ?? 0;
       if (x < 0 || x > MAX_SIZE - 1 || y < 0 || y > MAX_SIZE - 1) {

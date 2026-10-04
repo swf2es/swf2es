@@ -1026,13 +1026,17 @@ export class PixiView {
     }
 
     return () => {
-      if (pointer) {
-        pointer.onCursor = null;
-        show("default");
-      }
-
+      // Pixi's own default back first, then the canvas left to it, as before the bind.
       if (events) {
         events.cursorStyles.default = pixiDefault;
+      }
+
+      if (pointer) {
+        pointer.onCursor = null;
+        this.stage.cursor = "default";
+        if (canvas?.style) {
+          canvas.style.cursor = "";
+        }
       }
 
       if (frame) {
