@@ -163,13 +163,17 @@ export function layoutText(field: LayoutField): TextLayout {
       2 * GUTTER -
       bullet -
       Math.trunc((format.leftMargin + format.rightMargin + format.blockIndent) * TWIPS);
+    // A negative indent, a hanging one, moves the first line left, as far
+    // as the gutter, and gives it no more room, as adl lays it out.
     const indent = Math.trunc(format.indent * TWIPS);
+    const firstRoom = room - Math.max(0, indent);
+    const margin = Math.trunc((format.leftMargin + format.blockIndent) * TWIPS);
     const breaks: [number, number][] = [];
     let from = 0;
     while (from < measures.length || breaks.length === 0) {
       let to = measures.length;
       if (field.wordWrap) {
-        to = wrap(text, start, measures, from, room - (breaks.length === 0 ? indent : 0));
+        to = wrap(text, start, measures, from, breaks.length === 0 ? firstRoom : room);
       }
 
       breaks.push([from, to]);
@@ -220,16 +224,13 @@ export function layoutText(field: LayoutField): TextLayout {
         });
       }
 
-      const left =
-        GUTTER +
-        bullet +
-        Math.trunc((format.leftMargin + format.blockIndent) * TWIPS) +
-        (k === 0 ? indent : 0);
-      const space = room - (k === 0 ? indent : 0) - x;
+      const left = GUTTER + bullet + (k === 0 ? Math.max(0, margin + indent) : margin);
+      const lineRoom = k === 0 ? firstRoom : room;
+      const space = lineRoom - x;
       // Justified, a wrapped line but the paragraph's last has its inner
       // spaces share the room left, its trailing spaces out.
       if (format.align === "justify" && !last) {
-        x = justify(text, chars, room - (k === 0 ? indent : 0));
+        x = justify(text, chars, lineRoom);
       }
 
       // Centred in the room left; right-aligned, one twip further left, as adl places it.
@@ -271,7 +272,12 @@ export function layoutText(field: LayoutField): TextLayout {
       lines.push({
         start,
         end: start,
-        x: GUTTER + Math.trunc((f.leftMargin + f.blockIndent + f.indent) * TWIPS),
+        x:
+          GUTTER +
+          Math.max(
+            0,
+            Math.trunc((f.leftMargin + f.blockIndent) * TWIPS) + Math.trunc(f.indent * TWIPS),
+          ),
         y,
         width: 0,
         ascent,

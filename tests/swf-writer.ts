@@ -669,7 +669,8 @@ export function sprite(id: number, frameCount: number, tags: Uint8Array[]): Uint
 /**
  * A DefineEditText: its initial text, its size in twips and alignment (0
  * left, 1 right, 2 center), and optionally HTML text, multiline, a colour
- * (0xRRGGBB) and a font by id with its height in twips.
+ * (0xRRGGBB), a font by id with its height in twips, wrapping, the
+ * font's outlines, and margins, indent and leading in twips.
  */
 export function editText(
   id: number,
@@ -685,6 +686,10 @@ export function editText(
     fontHeight?: number;
     /** The bounds' corner, in twips; (0, 0) by default. */
     at?: [number, number];
+    wordWrap?: boolean;
+    useOutlines?: boolean;
+    /** In twips; the indent may be negative, as the tag's 16 bits hold it. */
+    layout?: { leftMargin: number; rightMargin: number; indent: number; leading: number };
   } = {},
 ): Uint8Array {
   const w = new BitWriter().u16(id);
@@ -693,11 +698,13 @@ export function editText(
   const font = options.font !== undefined;
   w.u8(
     0x80 |
+      (options.wordWrap ? 0x40 : 0) |
       (options.multiline ? 0x20 : 0) |
       (options.color !== undefined ? 0x04 : 0) |
       (font ? 0x01 : 0),
   );
-  w.u8((align ? 0x20 : 0) | (options.html ? 0x02 : 0));
+  const layout = options.layout;
+  w.u8((align || layout ? 0x20 : 0) | (options.html ? 0x02 : 0) | (options.useOutlines ? 0x01 : 0));
   if (font) {
     w.u16(options.font ?? 0).u16(options.fontHeight ?? 240);
   }
@@ -709,8 +716,12 @@ export function editText(
       .u8(0xff);
   }
 
-  if (align) {
-    w.u8(align).u16(0).u16(0).u16(0).u16(0);
+  if (align || layout) {
+    w.u8(align)
+      .u16(layout?.leftMargin ?? 0)
+      .u16(layout?.rightMargin ?? 0)
+      .u16((layout?.indent ?? 0) & 0xffff)
+      .u16((layout?.leading ?? 0) & 0xffff);
   }
 
   w.string("").string(text);

@@ -2347,6 +2347,41 @@ const pixelFont = (id: number): Uint8Array => {
   });
 };
 
+// Chat lines in fields with a hanging indent (scripts/TextIndent.as):
+// three of one DefineEditText, HTML, multiline and wrapped in Pixel, with
+// a left margin of 10 and an indent of -10 pixels.
+function textIndent(abc: Uint8Array): Uint8Array {
+  const chat = w.editText(2, "", 4000, 400, 0, {
+    html: true,
+    multiline: true,
+    wordWrap: true,
+    useOutlines: true,
+    color: 0xffffff,
+    font: 1,
+    fontHeight: 320,
+    layout: { leftMargin: 200, rightMargin: 0, indent: -200, leading: 0 },
+  });
+  return w.swf({
+    width: 420,
+    height: 200,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      pixelFont(1),
+      chat,
+      w.doAbc(abc, "TextIndent"),
+      w.symbolClass([[0, "TextIndent"]]),
+      w.place({ depth: 1, character: 2, matrix: { tx: 100, ty: 100 } }),
+      w.place({ depth: 2, character: 2, matrix: { tx: 100, ty: 1400 } }),
+      w.place({ depth: 3, character: 2, matrix: { tx: 100, ty: 2000 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Three morph shapes: one whose straight edges pair with curves as its
 // fill, line width and colour change; one of two paths with a turning
 // gradient, in a DefineMorphShape2; and two regions of two colours whose
@@ -2860,6 +2895,16 @@ export const cases: PlayerCase[] = [
     // corner, part grey in Flash: 27 channels.
     tolerance: 64,
     maxOutliers: 40,
+  },
+  {
+    name: "text-indent",
+    swf: textIndent,
+    script: "TextIndent",
+    frames: 1,
+    capture: [1],
+    // Exact but for each border's bottom right corner, part grey in Flash: 6 channels.
+    tolerance: 0,
+    maxOutliers: 6,
   },
   {
     name: "glyph-contours",
