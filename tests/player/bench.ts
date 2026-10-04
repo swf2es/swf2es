@@ -19,7 +19,10 @@
 // --idle K renders K times more after each frame with no tick between, as
 // a host that draws on every animation frame does, and times those apart.
 //
-//   node tests/player/bench.ts [--shapes N | --rig N] [--frames N] [--idle K] [--gpu]
+// --branches N places N coloured branches of 128 shapes. A quarter replace
+// one child each frame; the rest stay still, as scenery beside animated art.
+//
+//   node tests/player/bench.ts [--shapes N | --rig N | --branches N] [--frames N] [--idle K] [--gpu]
 //     [--back-buffer] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
@@ -31,6 +34,7 @@ const option = (name: string, fallback: number) => {
 };
 const shapes = option("shapes", 2000);
 const rig = option("rig", 0);
+const branches = option("branches", 0);
 const idleRenders = option("idle", 0);
 const frames = option("frames", 120);
 const WARMUP = 10;
@@ -240,7 +244,53 @@ const quantile = (values: number[], q: number) => {
   return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0;
 };
 
-const swf = rig > 0 ? rigSwf(rig) : synthetic();
+/** Detailed, coloured branches whose independent timelines should not repack each other's art. */
+function branchSwf(count: number): Uint8Array {
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
+  for (let id = 1; id <= 8; id++) {
+    tags.push(character(id));
+  }
+
+  for (let branch = 0; branch < count; branch++) {
+    const contents: Uint8Array[] = [];
+    for (let i = 0; i < 128; i++) {
+      contents.push(
+        w.place({
+          depth: i + 1,
+          character: 1 + (i % 8),
+          matrix: { tx: (i % 16) * 800, ty: Math.floor(i / 16) * 800 },
+        }),
+      );
+    }
+
+    contents.push(w.showFrame());
+    const length = branch % 4 === 0 ? 24 : 1;
+    for (let frame = 1; frame < length; frame++) {
+      contents.push(w.place({ depth: 1, move: true, character: 1 + (frame % 8) }), w.showFrame());
+    }
+
+    contents.push(w.end());
+    tags.push(
+      w.sprite(20 + branch, length, contents),
+      w.place({
+        depth: branch + 1,
+        character: 20 + branch,
+        matrix: {
+          a: 0.25,
+          d: 0.25,
+          tx: (branch % 4) * 4000 + 200,
+          ty: Math.floor(branch / 4) * 2000 + 200,
+        },
+        colorTransform: { add: [24, -16, 32, 0] },
+      }),
+    );
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
+const swf = branches > 0 ? branchSwf(branches) : rig > 0 ? rigSwf(rig) : synthetic();
 const result = await benchPlayer(
   swf,
   frames,
@@ -260,7 +310,7 @@ const gl = result.gl.slice(WARMUP);
 const total = tick.map((t, i) => t + sync[i] + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
-  shapes: rig > 0 ? `rig of ${rig}` : shapes,
+  shapes: branches > 0 ? `${branches} branches` : rig > 0 ? `rig of ${rig}` : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   frames,
@@ -279,7 +329,7 @@ if (args.includes("--json")) {
 } else {
   const ms = (v: number) => `${v.toFixed(2)} ms`;
   console.log(
-    `${summary.shapes}${rig > 0 ? "" : " shapes"}, ${frames} frames, SWF of ${swf.length} bytes; first frame ${ms(result.first)}; drawn by ${result.renderer}`,
+    `${summary.shapes}${rig > 0 || branches > 0 ? "" : " shapes"}, ${frames} frames, SWF of ${swf.length} bytes; first frame ${ms(result.first)}; drawn by ${result.renderer}`,
   );
   console.log(
     `  counts  ${JSON.stringify(result.counts)}; JS heap ${summary.heapMb[0]} to ${summary.heapMb[1]} MB`,

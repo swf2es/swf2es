@@ -519,8 +519,25 @@ The player keeps Flash's display list and timeline
 (`packages/player/src`: `timeline.ts` reads a SWF's definitions and
 frames, `display.ts` is the display list), and PixiJS only mirrors it
 (`pixi.ts`): a container per display object, kept from frame to frame
-and updated where the display object marks itself changed. A shape's
-fills are immutable `GraphicsContext`s shared by its instances, built
+and updated where the display object marks itself changed.
+
+A branch with at least 64 immediate art objects across its subtree owns
+a Pixi render group. Children already grouped do not count again, so
+wrappers do not all gain a group. Each group keeps its own instructions
+and batches: changing an animated branch's children no longer repacks
+unrelated scenery. Promotion persists when the branch shrinks, avoiding
+repeated batcher destruction. Masks and their targets must belong to the
+same group; references to partners outside a subtree prevent grouping,
+and a mask moved outside an existing group removes that group. Timeline
+masks stay with their siblings. A fresh view for BitmapData.draw does not
+group. The colour batcher's shader ignores Pixi's group colour, since
+its vertex colour transform already includes every ancestor. The
+`render-groups` case checks colours, masks moved between branches, scrolls,
+filters, and a branch shrinking and growing against Flash. The
+`bench.ts --branches N --gpu` workload changes a quarter of N independent
+coloured branches while the rest stay still.
+
+A shape's fills are immutable `GraphicsContext`s shared by its instances, built
 from Flash's edges (`shapes.ts`: each edge goes to its right fill
 forward and its left fill reversed, joined into contours) and filled
 even-odd through a containment tree of the contours, holes cut: all of a

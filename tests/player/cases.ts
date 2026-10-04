@@ -2596,6 +2596,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 60,
   },
   {
+    name: "render-groups",
+    swf: (abc) => bare(abc, 5, "RenderGroups", 240, 96),
+    script: "RenderGroups",
+    frames: 5,
+    capture: [1, 2, 3, 4, 5],
+    tolerance: 3,
+    maxOutliers: 0,
+  },
+  {
     name: "field-position",
     swf: fieldPosition,
     script: "FieldPosition",
