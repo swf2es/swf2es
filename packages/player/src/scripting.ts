@@ -1789,6 +1789,7 @@ export class Scripting {
           if (o.queuedGoto !== null) {
             const frame = o.queuedGoto;
             o.queuedGoto = null;
+            o.playing = o.queuedPlay;
             o.gotoFrame(frame);
             try {
               this.gotoCycle(o);

@@ -749,6 +749,17 @@ callback's own error goes back to the page that called it. A child its
 parent's first frame places is made in the parent's `super()`, and its
 error still reaches the parent's constructor.
 
+A goto plays or stops its clip as it happens, before the frame it lands
+on has its script run, so a `stop()` or `play()` there has the last word:
+a clip whose every frame stops stays where `gotoAndPlay` from another
+clip's script or a listener sends it. A goto a frame script asks for of
+its own clip plays or stops it only once the script has returned, over a
+`play()` or `stop()` the script calls after it; `nextFrame` and
+`prevFrame` past either end stop the clip where it is (`goto-stops`).
+`isPlaying` is Flash's own flag apart from the playhead, false for a clip
+no script has played, and true still after a deferred `gotoAndStop` or
+a `nextFrame` past the end, as adl shows; the player reads the playhead.
+
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,
 is one scene named "" whose labels are its FrameLabel tags (`scenes`,
@@ -822,6 +833,26 @@ ENTER_FRAME, as playing on to a frame does; what it takes off is gone by
 ENTER_FRAME (`loop-ratio`). Flash's matrix is
 exact at the quarter turns, 0 and not the doubles' cosine of 90°, so the
 player's is.
+
+A child a script has transformed takes nothing more from the timeline's
+places that a script could set: no matrix, colour transform, ratio,
+visibility, blend mode or filters, from a move or from the place a
+rewind or the loop takes it back to, which leaves what the script set
+(`scripted-moves`). Flash keeps this per object, not per property:
+setting `x`, even to what it was, keeps the colour transform the moves
+give from it too. What touches is the transform properties, `alpha`,
+`filters`, `blendMode`, `scrollRect`, `opaqueBackground`, `scale9Grid`
+and the `transform` setters, each set to what it was or not, a text
+field's `width` and `height` too, which size its field rather than scale
+it; a `filters` list refused with #2005 is none; `visible`,
+`mask` and `cacheAsBitmap` are no touch here even changed, where
+`cacheAsBitmap` set true is one to the replacement above, so the player
+keeps a `transformed` flag beside `scripted`. A MorphShape a script moved
+stays at its ratio. Ruffle's `transformed_by_script` does the same, set
+by fewer setters: not by `blendMode`, `filters`, `scrollRect`,
+`opaqueBackground` or `scale9Grid`. In adl the 3D setters touch as well,
+`z`, `rotationX`, `rotationY`, `rotationZ`, `scaleZ` and
+`transform.matrix3D`, so they must call `touch()` once implemented.
 
 A clip a script takes off the display list plays on in Flash, an
 orphan, and so does one a script makes with `new` and never adds: its

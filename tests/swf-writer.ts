@@ -420,6 +420,8 @@ export interface PlaceSpec {
   character?: number;
   move?: boolean;
   matrix?: { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
+  /** A CXFORMWITHALPHA: multipliers as numbers, offsets as -255 to 255, red, green, blue, alpha. */
+  colorTransform?: { mult?: number[]; add?: number[] };
   /** A morph shape's ratio, 0 to 65535. */
   ratio?: number;
   name?: string;
@@ -428,9 +430,29 @@ export interface PlaceSpec {
   /** PlaceObject3's fields; any of them makes the tag one. */
   className?: string;
   hasImage?: boolean;
+  /** Blur filters, each blurring as much both ways, in one pass; [] clears. */
+  blurs?: number[];
+  /** A blend mode by its number, 1 normal to 14 hard light. */
+  blendMode?: number;
   visible?: boolean;
   /** 0xAARRGGBB. */
   opaqueBackground?: number;
+}
+
+/** A CXFORMWITHALPHA, its multipliers in 8.8 fixed. */
+function colorTransform(w: BitWriter, cx: { mult?: number[]; add?: number[] }): void {
+  const mult = cx.mult?.map((v) => Math.round(v * 256));
+  const add = cx.add;
+  const n = sbits(...(mult ?? []), ...(add ?? []));
+  w.align()
+    .ub(1, add ? 1 : 0)
+    .ub(1, mult ? 1 : 0)
+    .ub(4, n);
+  for (const v of [...(mult ?? []), ...(add ?? [])]) {
+    w.sb(n, v);
+  }
+
+  w.align();
 }
 
 /** A PlaceObject2 tag, or a PlaceObject3 when the spec has fields only it holds. */
@@ -448,6 +470,10 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.matrix) {
     flags |= 0x04;
+  }
+
+  if (spec.colorTransform) {
+    flags |= 0x08;
   }
 
   if (spec.ratio !== undefined) {
@@ -471,6 +497,14 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.hasImage) {
     flags2 |= 0x10;
+  }
+
+  if (spec.blurs !== undefined) {
+    flags2 |= 0x01;
+  }
+
+  if (spec.blendMode !== undefined) {
+    flags2 |= 0x02;
   }
 
   if (spec.visible !== undefined) {
@@ -500,6 +534,10 @@ export function place(spec: PlaceSpec): Uint8Array {
     matrix(w, spec.matrix);
   }
 
+  if (spec.colorTransform) {
+    colorTransform(w, spec.colorTransform);
+  }
+
   if (spec.ratio !== undefined) {
     w.u16(spec.ratio);
   }
@@ -510,6 +548,21 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.clipDepth !== undefined) {
     w.u16(spec.clipDepth);
+  }
+
+  if (spec.blurs !== undefined) {
+    w.u8(spec.blurs.length);
+    for (const blur of spec.blurs) {
+      // BLURFILTER: its id, blurX and blurY in 16.16, then passes in five bits.
+      w.u8(1)
+        .u32(blur * 65536)
+        .u32(blur * 65536)
+        .u8(1 << 3);
+    }
+  }
+
+  if (spec.blendMode !== undefined) {
+    w.u8(spec.blendMode);
   }
 
   if (spec.visible !== undefined) {
