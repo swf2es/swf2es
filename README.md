@@ -58,6 +58,22 @@ if (player.changes !== drawn) {
 `playerglobal.abc`, which the host loads (`scripting.loadLibraries`);
 Adobe's `playerglobal.abc` is not part of this repository.
 
+An error the SWF's code throws and nothing catches is reported, as Flash
+reports one, and the SWF plays on. A host that wants them passes a hook:
+
+```ts
+const scripting = new Scripting(codegen, {
+  // Each error nothing caught, as it happens: a listener's, a frame
+  // script's, a constructor's.
+  onUncaught: (error) => console.error(scripting.rt.toString(error as never)),
+});
+```
+
+Without `onUncaught`, `advance()` (and `start()`) throw them once the
+frame they came in has ended: one error alone, or an `AggregateError`
+when there were several. The frame has run to its end either way. A
+hook should not throw; if it does, its error is thrown so too.
+
 ## Development
 
 ```sh

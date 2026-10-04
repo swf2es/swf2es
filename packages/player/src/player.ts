@@ -90,11 +90,19 @@ export class Player {
     this.root.name = "root1";
     // Its first frame's children are there before the document class's constructor runs.
     this.root.placeFirstFrame();
-    const object = s.constructAs(
-      this.root,
-      s.rt.classNamed(this.library.classes.get(0) ?? "flash.display::MovieClip", s.mainDomain),
-    );
-    info.$content = object;
+    // A document class's constructor that throws is reported, and the SWF
+    // plays on as far as it got, as in Flash and Ruffle: the object is the
+    // root's from its super() on, its listeners and frame scripts kept.
+    try {
+      s.constructAs(
+        this.root,
+        s.rt.classNamed(this.library.classes.get(0) ?? "flash.display::MovieClip", s.mainDomain),
+      );
+    } catch (error) {
+      s.reportUncaught(error);
+    }
+
+    info.$content = this.root.object ?? null;
     s.mainLoaded(info);
     this.root.enterFirstFrame();
     s.frame(this.stage, false);
