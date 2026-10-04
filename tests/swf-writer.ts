@@ -431,6 +431,8 @@ export interface PlaceSpec {
   visible?: boolean;
   /** 0xAARRGGBB. */
   opaqueBackground?: number;
+  /** PlaceObject3's blend mode: 1 normal, 2 layer, 3 multiply, ... 14 hardlight. */
+  blendMode?: number;
 }
 
 /** A PlaceObject2 tag, or a PlaceObject3 when the spec has fields only it holds. */
@@ -481,6 +483,10 @@ export function place(spec: PlaceSpec): Uint8Array {
     flags2 |= 0x40;
   }
 
+  if (spec.blendMode !== undefined) {
+    flags2 |= 0x02;
+  }
+
   const v3 = flags2 !== 0;
   w.u8(flags);
   if (v3) {
@@ -510,6 +516,10 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.clipDepth !== undefined) {
     w.u16(spec.clipDepth);
+  }
+
+  if (spec.blendMode !== undefined) {
+    w.u8(spec.blendMode);
   }
 
   if (spec.visible !== undefined) {
