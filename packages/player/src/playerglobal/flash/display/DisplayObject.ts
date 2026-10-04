@@ -84,6 +84,23 @@ function rectangle(s: Scripting, r: Rect): Value {
 }
 
 /** The display object `o` is the face of. */
+/**
+ * A text field's x and y are its box's corner, not its origin: its
+ * DefineEditText bounds' corner, scaled, in twips, added to where it is placed, as
+ * Flash and Ruffle read and set them. A box authored inset from its origin
+ * so moves to where a script puts it.
+ */
+function fieldOffset(d: DisplayObject): [number, number] {
+  return d instanceof TextObject
+    ? [d.scaleX * Math.round(d.left * 20), d.scaleY * Math.round(d.top * 20)]
+    : [0, 0];
+}
+
+/** `at` in pixels moved by `offset` in twips, summed in twips: Flash's positions are whole twips, without a pixel sum's noise. */
+function withOffset(at: number, offset: number): number {
+  return offset === 0 ? at : (at * 20 + offset) / 20;
+}
+
 export function displayOf(o: avm2.AsObject): DisplayObject {
   return o.$display;
 }
@@ -192,23 +209,25 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     get x(): number {
-      return this.$display.matrix.tx;
+      return withOffset(this.$display.matrix.tx, fieldOffset(this.$display)[0]);
     }
 
     // A NaN position is 0, as Flash has it (the corpus's `displayobject_invalid_floats`).
     set x(v: Value) {
+      const offset = fieldOffset(this.$display)[0];
       transform(this.$display, (m) => {
-        m.tx = Number(v) || 0;
+        m.tx = withOffset(Number(v) || 0, -offset);
       });
     }
 
     get y(): number {
-      return this.$display.matrix.ty;
+      return withOffset(this.$display.matrix.ty, fieldOffset(this.$display)[1]);
     }
 
     set y(v: Value) {
+      const offset = fieldOffset(this.$display)[1];
       transform(this.$display, (m) => {
-        m.ty = Number(v) || 0;
+        m.ty = withOffset(Number(v) || 0, -offset);
       });
     }
 
