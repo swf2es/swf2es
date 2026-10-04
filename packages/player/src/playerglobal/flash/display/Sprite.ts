@@ -2,9 +2,13 @@
 // makes a symbol's first frame alive, placed before the constructor for a
 // timeline's child and here for a script's, so that the subclass's
 // constructor finds the children by name; a Sprite a script makes has none.
+// Its soundTransform is kept, in whole percents as a channel's, and read
+// back as a copy; no timeline sound plays yet for it to act on.
 import { avm2 } from "@swf2es/runtime";
+import type { SoundMix } from "../../../audio.js";
 import { type DisplayObject, MovieClip } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
+import { channelMix, mixOf, transformOf } from "../media/Sound.js";
 import { graphicsOf } from "./Graphics.js";
 
 type Value = avm2.Value;
@@ -24,6 +28,21 @@ export function spriteNatives(s: Scripting): avm2.Natives {
       if (d instanceof MovieClip) {
         d.enterFirstFrame();
       }
+    }
+
+    declare $soundMix: SoundMix | undefined;
+
+    get soundTransform(): Value {
+      return transformOf(s, this.$soundMix ?? mixOf(null));
+    }
+
+    set soundTransform(v: Value) {
+      // Named so in Sprite's error, where SimpleButton's and SoundMixer's say sndTransform.
+      if (v === null || v === undefined) {
+        throw s.rt.error("TypeError", 2007, "soundTransform");
+      }
+
+      this.$soundMix = channelMix(mixOf(v as avm2.AsObject));
     }
 
     declare $buttonMode: boolean | undefined;

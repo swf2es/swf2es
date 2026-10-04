@@ -60,7 +60,7 @@ function stateOf(o: AsObject): SoundState {
   return state;
 }
 
-const mixOf = (o: AsObject | null): SoundMix => ({
+export const mixOf = (o: AsObject | null): SoundMix => ({
   volume: o?.$soundVolume ?? 1,
   leftToLeft: o?.$soundLeftToLeft ?? 1,
   leftToRight: o?.$soundLeftToRight ?? 0,
@@ -69,7 +69,7 @@ const mixOf = (o: AsObject | null): SoundMix => ({
 });
 
 /** The mixer stores channel coefficients in hundredths when a transform is assigned. */
-function channelMix(mix: SoundMix): SoundMix {
+export function channelMix(mix: SoundMix): SoundMix {
   // Whole percents, as Ruffle's i32: NaN is 0 and the range saturates.
   const hundredths = (value: number) =>
     Number.isNaN(value)
@@ -142,7 +142,7 @@ export function stopAllSounds(s: Scripting): void {
   active?.clear();
 }
 
-function transformOf(s: Scripting, mix: SoundMix): AsObject {
+export function transformOf(s: Scripting, mix: SoundMix): AsObject {
   const o = s.rt.construct(s.rt.classNamed("flash.media::SoundTransform")) as AsObject;
   o.$soundVolume = mix.volume;
   o.$soundLeftToLeft = mix.leftToLeft;
