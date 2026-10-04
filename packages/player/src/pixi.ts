@@ -1379,11 +1379,13 @@ export class PixiView {
     let dirty = this.fresh ? TRANSFORM | CHILDREN | CONTENT : o.dirty;
     if (node.released) {
       // Back from off the list: drawn again if its art was emptied, its transform as if unknown, so
-      // that it and all below draw their lines again; a parked one has kept its own. Its children
-      // are arranged again, as those that were emptied with it are drawn again.
+      // that it and all below draw their lines again; a parked one has kept its own. Its children,
+      // if it has or had any, are arranged again, as those that were emptied with it are drawn
+      // again.
       node.released = false;
       this.parked.delete(node);
-      dirty |= TRANSFORM | (o instanceof Container ? CHILDREN : 0);
+      const kids = o instanceof Container && (o.children.length > 0 || node.kids.length > 0);
+      dirty |= TRANSFORM | (kids ? CHILDREN : 0);
       if (node.emptied) {
         node.emptied = false;
         node.world = [Number.NaN, Number.NaN, Number.NaN, Number.NaN];
