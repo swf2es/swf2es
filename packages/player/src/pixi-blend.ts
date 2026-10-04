@@ -4,19 +4,60 @@
 // that reads the back buffer computes. Colours are premultiplied.
 import {
   AlphaFilter,
+  type BindGroup,
   BlendModeFilter,
   type Bounds,
   type Filter,
   FilterEffect,
   FilterSystem,
   RenderTargetSystem,
+  Texture,
   TexturePool,
+  TextureSource,
 } from "pixi.js";
 
 type FilterData = { skip: boolean; resolution: number; bounds: Bounds };
 const filterSystem = FilterSystem.prototype as unknown as {
   _calculateFilterArea(instruction: { filterEffect: FilterEffect }, bounds: Bounds): void;
   _calculateFilterBounds(data: FilterData, ...rest: unknown[]): void;
+  _applyFiltersToTexture(data: { backTexture: Texture }, clear: boolean): void;
+};
+
+// Graphics batch bindings fill their unused slots with EMPTY. Removing a
+// listener from it scans all those slots, every time a blend follows a
+// regular filter. Keep the filter system's empty back texture private.
+const emptyBackTextures = new WeakMap<FilterSystem, Texture>();
+const applyFiltersToTexture = filterSystem._applyFiltersToTexture;
+filterSystem._applyFiltersToTexture = function (this: FilterSystem, data, clear) {
+  const back = data.backTexture;
+  if (back === Texture.EMPTY) {
+    let empty = emptyBackTextures.get(this);
+    if (!empty) {
+      empty = new Texture({ source: new TextureSource() });
+      emptyBackTextures.set(this, empty);
+    }
+
+    data.backTexture = empty;
+  }
+
+  try {
+    applyFiltersToTexture.call(this, data, clear);
+  } finally {
+    data.backTexture = back;
+  }
+};
+
+const destroyFilterSystem = FilterSystem.prototype.destroy;
+FilterSystem.prototype.destroy = function () {
+  const empty = emptyBackTextures.get(this);
+  if (empty) {
+    const group = (this as unknown as { _globalFilterBindGroup: BindGroup })._globalFilterBindGroup;
+    group.destroy();
+    emptyBackTextures.delete(this);
+    empty.destroy(true);
+  }
+
+  destroyFilterSystem.call(this);
 };
 
 // A layer's region holds what its filtered children draw past their shapes,
