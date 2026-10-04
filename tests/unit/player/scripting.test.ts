@@ -667,6 +667,42 @@ function boundClip(abc: Uint8Array, version: number, frames: number): Uint8Array
   });
 }
 
+test("a goto plays or stops as it happens, so the landing frame's script has the last word", {
+  skip,
+}, async () => {
+  // adl (`goto-stops`): a deferred gotoAndStop from the clip's own script
+  // stops it after the play() that follows, and gotoAndPlay from another
+  // clip's script runs the landing frame's stop() inside the goto, so the
+  // clip stays.
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Bound extends MovieClip {
+      public function Bound() {
+        addFrameScript(0, function():void { gotoAndStop(2); play(); },
+          2, function():void { stop(); });
+      }
+    }
+    public class Main extends MovieClip {
+      public var bound:Bound;
+      public function Main() {
+        addFrameScript(1, function():void { bound.gotoAndPlay(3); });
+      }
+    }
+  }`;
+  const scripting = new Scripting(await createCodegen(wasm), { print: () => {} });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(boundClip(compiler(out)("GotoStops", source), 10, 4), scripting);
+  await player.start();
+  const bound = (player.root as unknown as Container).children[0] as MovieClip;
+  assert.deepEqual([bound.currentFrame, bound.playing], [2, false]);
+
+  player.tick();
+  assert.deepEqual([bound.currentFrame, bound.playing], [3, false]);
+
+  player.tick();
+  assert.deepEqual([bound.currentFrame, bound.playing], [3, false]);
+});
+
 test("a frame script's goto happens though the script throws after it, as in Flash", {
   skip,
 }, async () => {

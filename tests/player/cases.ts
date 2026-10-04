@@ -628,6 +628,54 @@ function gotoCycleNested(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Clips of six empty frames bound to scripts/GotoStops.as's S, P, Q and R,
+// and two of another without a class, named for the root's script to send
+// them, in a SWF of version 10.
+function gotoStops(abc: Uint8Array): Uint8Array {
+  const six = (id: number) =>
+    w.sprite(id, 6, [...Array.from({ length: 6 }, () => w.showFrame()), w.end()]);
+  const names: [string, number][] = [
+    ["a", 2],
+    ["b", 2],
+    ["c", 3],
+    ["p", 3],
+    ["q", 4],
+    ["r", 5],
+    ["e", 6],
+    ["f", 6],
+    ["t", 7],
+  ];
+  return w.swf({
+    version: 10,
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 6,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      six(2),
+      six(3),
+      six(4),
+      six(5),
+      six(6),
+      six(7),
+      w.doAbc(abc, "GotoStops"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "S"],
+        [3, "P"],
+        [4, "Q"],
+        [5, "R"],
+        [7, "T"],
+      ]),
+      ...names.map(([name, character], i) => w.place({ depth: i + 1, character, name })),
+      ...Array.from({ length: 6 }, () => w.showFrame()),
+      w.end(),
+    ],
+  });
+}
+
 // Frames whose first command at a depth does nothing, then a rewind past
 // them, a place without the move flag at a taken depth 3 on frame 2, and
 // at depth 4 a place, a removal and a place again before the rewind's
@@ -2408,6 +2456,15 @@ export const cases: PlayerCase[] = [
     swf: gotoCycleNested,
     script: "GotoCycleNested",
     frames: 4,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "goto-stops",
+    swf: gotoStops,
+    script: "GotoStops",
+    frames: 24,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

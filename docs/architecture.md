@@ -749,6 +749,17 @@ callback's own error goes back to the page that called it. A child its
 parent's first frame places is made in the parent's `super()`, and its
 error still reaches the parent's constructor.
 
+A goto plays or stops its clip as it happens, before the frame it lands
+on has its script run, so a `stop()` or `play()` there has the last word:
+a clip whose every frame stops stays where `gotoAndPlay` from another
+clip's script or a listener sends it. A goto a frame script asks for of
+its own clip plays or stops it only once the script has returned, over a
+`play()` or `stop()` the script calls after it; `nextFrame` and
+`prevFrame` past either end stop the clip where it is (`goto-stops`).
+`isPlaying` is Flash's own flag apart from the playhead, false for a clip
+no script has played, and true still after a deferred `gotoAndStop` or
+a `nextFrame` past the end, as adl shows; the player reads the playhead.
+
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,
 is one scene named "" whose labels are its FrameLabel tags (`scenes`,

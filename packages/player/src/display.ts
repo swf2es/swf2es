@@ -1001,6 +1001,8 @@ export class MovieClip extends Container {
   scriptedFrame = 0;
   /** A goto a frame script asked for, taken when the script returns, as Flash defers it; null for none. */
   queuedGoto: number | null = null;
+  /** Whether that goto plays or stops the clip, as it happens, not as it is asked for. */
+  queuedPlay = false;
   /**
    * The frame count (Scripting.frames) at a script's goto in a SWF of
    * version 9 or earlier, a goto to the frame it is on among them: the next
