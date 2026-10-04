@@ -1712,8 +1712,8 @@ from: an object past the edge of what it is drawn over, the stage's or a
 layer's cut by a scrollRect, which bounds an object's filter but not its
 children's, asked for a width or height below zero, which GL refuses
 (GL_INVALID_VALUE) and WebGPU fails the frame for. The part the copy does
-not reach is cleared, so the blend finds nothing behind it there rather
-than what the pooled texture last held. The `blend-edges` case draws such
+not reach is left as the pooled texture had it: it maps past what the
+target has, where the filter's output is cut off. The `blend-edges` case draws such
 objects against adl, and the player's test page fails a case whose
 drawing GL refused.
 

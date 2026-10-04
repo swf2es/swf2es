@@ -759,7 +759,7 @@ test("a tween's lines go once its morph drops their blend, not idle for a ratio 
   assert.equal(lines().destroyed, false);
 });
 
-test("a blend's copy of what is behind it is held to the target and the texture, and clears what it misses", async () => {
+test("a blend's copy of what is behind it is held to the target and the texture, and clears nothing", async () => {
   // Loaded with the view, it patches the copy for every renderer.
   await import("../../../packages/player/dist/pixi-blend.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
@@ -804,18 +804,18 @@ test("a blend's copy of what is behind it is held to the target and the texture,
   assert.deepEqual(copy([10, 20], [100, 50]), { copies: [[10, 20, 100, 50, 0, 0]], clears: [] });
   // A hair wider and taller than the texture: held to it, and nothing missed.
   assert.deepEqual(copy([10, 20], [257, 129]), { copies: [[10, 20, 256, 128, 0, 0]], clears: [] });
-  // Past the top-left: what the target has goes where it belongs, the rest is cleared.
+  // Past the top-left: what the target has goes where it belongs, the rest left as it is.
   assert.deepEqual(copy([-4, -6], [100, 50]), {
     copies: [[0, 0, 96, 44, 4, 6]],
-    clears: [[0, 0, 0, 0]],
+    clears: [],
   });
   // Past the bottom-right: the copy stops at the target's edge.
   assert.deepEqual(copy([850, 120], [100, 50]), {
     copies: [[850, 120, 43, 30, 0, 0]],
-    clears: [[0, 0, 0, 0]],
+    clears: [],
   });
   // Wholly beyond, which Pixi's own clamp left as a width of -1 or a height
-  // of -3 that GL refused: no copy, only a clear.
-  assert.deepEqual(copy([894, 150], [10, 75]), { copies: [], clears: [[0, 0, 0, 0]] });
-  assert.deepEqual(copy([205, -4], [174, 1]), { copies: [], clears: [[0, 0, 0, 0]] });
+  // of -3 that GL refused: no copy at all.
+  assert.deepEqual(copy([894, 150], [10, 75]), { copies: [], clears: [] });
+  assert.deepEqual(copy([205, -4], [174, 1]), { copies: [], clears: [] });
 });

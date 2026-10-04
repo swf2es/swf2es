@@ -2,7 +2,7 @@
 // modes"): the object drawn as a layer, its children together, then that
 // layer blended with what is below by the mode's formula, which a filter
 // that reads the back buffer computes. Colours are premultiplied.
-import { AlphaFilter, BlendModeFilter, CLEAR, type Filter, RenderTargetSystem } from "pixi.js";
+import { AlphaFilter, BlendModeFilter, type Filter, RenderTargetSystem } from "pixi.js";
 
 // The copy of what is behind a blend into its back texture, held to both:
 // - The texture is sized with a hair of tolerance for rounding, and the
@@ -12,11 +12,11 @@ import { AlphaFilter, BlendModeFilter, CLEAR, type Filter, RenderTargetSystem } 
 // - An object at or past the target's edge asks for pixels the target does
 //   not have; Pixi's own clamp then leaves a width or height below zero,
 //   which GL refuses (GL_INVALID_VALUE) and WebGPU fails its frame for.
-// What the target does not have is behind nothing, so the texture, taken
-// from a pool with what it last held, is cleared first wherever the copy
-// does not reach. Patched for every renderer on the page.
+// What the copy does not reach is not cleared: it lies past what the
+// target has, where what the filter draws is cut off anyway (the
+// `blend-edges` case matches adl without it). Patched for every renderer
+// on the page.
 const copyToTexture = RenderTargetSystem.prototype.copyToTexture;
-const TRANSPARENT: [number, number, number, number] = [0, 0, 0, 0];
 RenderTargetSystem.prototype.copyToTexture = function (source, destination, from, size, to) {
   const target = this.getRenderTarget(source);
   const { pixelWidth, pixelHeight } = destination.source;
@@ -31,12 +31,6 @@ RenderTargetSystem.prototype.copyToTexture = function (source, destination, from
   const toY = to.y + skipY;
   const width = Math.min(reachX - toX, target.pixelWidth - x);
   const height = Math.min(reachY - toY, target.pixelHeight - y);
-  if (width < reachX - Math.max(to.x, 0) || height < reachY - Math.max(to.y, 0)) {
-    // The caller binds its own target next, as FilterSystem.push does.
-    this.push({ target: destination, clear: CLEAR.COLOR, clearColor: TRANSPARENT });
-    this.pop();
-  }
-
   if (width <= 0 || height <= 0) {
     return destination;
   }
