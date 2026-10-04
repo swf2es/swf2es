@@ -174,6 +174,50 @@ test("Pixi pointer delivery scales to SWF coordinates and stops on unbind", () =
   assert.equal(calls.length, 1);
 });
 
+test("Pixi pointer moves are handled once a frame, the last of them, and before a press", () => {
+  const renderer = { screen: { width: 100, height: 100 } } as unknown as ConstructorParameters<
+    typeof PixiView
+  >[0];
+  const view = new PixiView(renderer);
+  const calls: [string, number][] = [];
+  const player = {
+    width: 100,
+    height: 100,
+    pointer: { handle: (type: string, p: { x: number }) => calls.push([type, p.x]) },
+  } as unknown as Player;
+  const frames: (() => void)[] = [];
+  const g = globalThis as { requestAnimationFrame?: unknown; cancelAnimationFrame?: unknown };
+  g.requestAnimationFrame = (f: () => void) => frames.push(f);
+  g.cancelAnimationFrame = (id: number) => {
+    frames[id - 1] = () => {};
+  };
+  try {
+    const unbind = view.bindPointer(player);
+    const at = (x: number) => ({ global: { x, y: 0 }, button: 0, buttons: 0 }) as never;
+    for (const x of [1, 2, 3]) {
+      view.stage.emit("pointermove", at(x));
+    }
+
+    assert.deepEqual(calls, []);
+    assert.equal(frames.length, 1);
+    frames[0]();
+    assert.deepEqual(calls, [["move", 3]]);
+
+    view.stage.emit("pointermove", at(4));
+    view.stage.emit("pointerdown", at(5));
+    assert.deepEqual(calls.slice(1), [
+      ["move", 4],
+      ["down", 5],
+    ]);
+    frames[1]();
+    assert.equal(calls.length, 3);
+    unbind();
+  } finally {
+    delete g.requestAnimationFrame;
+    delete g.cancelAnimationFrame;
+  }
+});
+
 test("Flash's filters are left out under WebGPU, and a fresh view destroys those it made", async () => {
   const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));

@@ -735,6 +735,23 @@ export class PixiView {
       this.renderer.screen.width,
       this.renderer.screen.height,
     );
+    // Moves come faster than frames are drawn, and each picks a target from
+    // the whole display list: only the last of a frame's is handled, before
+    // the frame, or before a press, release or leave, which keep their order.
+    let moved: PointerState | null = null;
+    let frame = 0;
+    const flush = () => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
+
+      const p = moved;
+      moved = null;
+      if (p) {
+        player.pointer?.handle("move", p);
+      }
+    };
     const send = (type: "move" | "down" | "up" | "leave") => (e: FederatedPointerEvent) => {
       const p: PointerState = {
         x: (e.global.x * player.width) / this.renderer.screen.width,
@@ -746,6 +763,16 @@ export class PixiView {
         shiftKey: e.shiftKey,
         time: e.timeStamp,
       };
+      if (type === "move" && typeof requestAnimationFrame === "function") {
+        moved = p;
+        frame ||= requestAnimationFrame(() => {
+          frame = 0;
+          flush();
+        });
+        return;
+      }
+
+      flush();
       player.pointer?.handle(type, p);
     };
     const move = send("move");
@@ -758,6 +785,8 @@ export class PixiView {
     this.stage.on("pointerupoutside", up);
     this.stage.on("pointerleave", leave);
     return () => {
+      moved = null;
+      flush();
       this.stage.off("pointermove", move);
       this.stage.off("pointerdown", down);
       this.stage.off("pointerup", up);
