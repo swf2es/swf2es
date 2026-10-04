@@ -1064,6 +1064,144 @@ test("a listener's error never reaches the dispatcher, and the listeners after i
   ]);
 });
 
+test("a document class's constructor that throws is reported, and its SWF plays on, as in Flash", {
+  skip,
+}, async () => {
+  // The main SWF's document class registers a frame script and a listener,
+  // which tries a goto to a scene that does not exist, loads a SWF whose
+  // document class throws and then an empty one, and throws itself.
+  const compile = compiler(out);
+  const inner = innerSwf(
+    compile(
+      "CtorThrowsInner",
+      `package {
+        import flash.display.MovieClip;
+        public class Inner extends MovieClip {
+          public function Inner() { trace("Inner throws"); throw new Error("from Inner"); }
+        }
+      }`,
+    ),
+    1,
+  );
+  const empty = [
+    0x46, 0x57, 0x53, 10, 23, 0, 0, 0, 0, 0, 12, 1, 0, 0x44, 0x11, 8, 0, 0, 0, 0x40, 0, 0, 0,
+  ];
+  const source = `package {
+    import flash.display.Loader;
+    import flash.display.MovieClip;
+    import flash.events.Event;
+    import flash.system.LoaderContext;
+    import flash.utils.ByteArray;
+    public class Main extends MovieClip {
+      public function Main() {
+        addFrameScript(0, function():void { trace("script 1"); });
+        var n:int = 0;
+        addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+          n++;
+          if (n <= 2) trace("enter", n);
+          if (n == 1) {
+            try { gotoAndStop(1, "noscene"); } catch (e:Error) { trace("caught", e.errorID); }
+          }
+        });
+        load("A", [${Array.from(inner).join(",")}]);
+        load("B", [${empty.join(",")}]);
+        trace("Main throws");
+        throw new Error("from Main");
+      }
+      private function load(name:String, bytes:Array):void {
+        var swf:ByteArray = new ByteArray();
+        for each (var b:int in bytes) {
+          swf.writeByte(b);
+        }
+        var loader:Loader = new Loader();
+        loader.contentLoaderInfo.addEventListener(Event.INIT, function(e:Event):void { trace("init", name, loader.content != null); });
+        loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function(e:Event):void { trace("complete", name); });
+        var context:LoaderContext = new LoaderContext();
+        context.allowCodeImport = true;
+        loader.loadBytes(swf, context);
+      }
+    }
+  }`;
+  const run = async (hook: boolean) => {
+    const lines: string[] = [];
+    const errors: string[] = [];
+    const scripting: Scripting = new Scripting(await createCodegen(wasm), {
+      print: (line) => lines.push(line),
+      onUncaught: hook
+        ? (error) => errors.push(scripting.rt.toString(error as avm2.Value))
+        : undefined,
+    });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const player = new Player(bare(compile("CtorThrows", source), 1), scripting);
+    const thrown = (run: () => void) => {
+      try {
+        run();
+      } catch (error) {
+        errors.push(scripting.rt.toString(error as avm2.Value));
+      }
+    };
+    await player.start().catch((error: unknown) => {
+      errors.push(scripting.rt.toString(error as avm2.Value));
+    });
+    for (let frame = 2; frame <= 4; frame++) {
+      await scripting.settled();
+      thrown(() => player.tick());
+    }
+
+    return { lines, errors };
+  };
+
+  // adl's output: the first frame's script still runs, before the first
+  // ENTER_FRAME; a goto's own error, #2108, still reaches its caller; the
+  // load whose document class throws has no INIT or COMPLETE, and the next
+  // still comes.
+  const lines = [
+    "Main throws",
+    "script 1",
+    "enter 1",
+    "caught 2108",
+    "Inner throws",
+    "init B true",
+    "complete B",
+    "enter 2",
+  ];
+  // adl reports Main's error, and prints Inner's as its debugger does.
+  const errors = ["Error: from Main", "Error: from Inner"];
+  assert.deepEqual(await run(true), { lines, errors });
+  // Without the hook, start() throws Main's once the first frame has ended.
+  assert.deepEqual(await run(false), { lines, errors });
+});
+
+test("an onUncaught that throws stops no listener, and its error comes when the frame ends", {
+  skip,
+}, async () => {
+  const source = `package {
+    import flash.display.MovieClip;
+    import flash.events.Event;
+    public class Main extends MovieClip {
+      public function Main() {
+        addEventListener(Event.EXIT_FRAME, function(e:Event):void { trace("first throws"); throw new Error("from first"); });
+        addEventListener(Event.EXIT_FRAME, function(e:Event):void { trace("second"); });
+      }
+    }
+  }`;
+  const lines: string[] = [];
+  const reported: unknown[] = [];
+  const hookError = new Error("from the hook");
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    onUncaught: (error) => {
+      reported.push(error);
+      throw hookError;
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compiler(out)("HookThrows", source), 1), scripting);
+  await assert.rejects(player.start(), (error) => error === hookError);
+  assert.deepEqual(lines, ["first throws", "second"]);
+  assert.equal(reported.length, 1);
+});
+
 test("scripts that catch the stack overflow of their goto cycles stop soon, not after millions of runs", {
   skip,
 }, async () => {

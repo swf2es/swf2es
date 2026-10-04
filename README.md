@@ -71,7 +71,8 @@ const scripting = new Scripting(codegen, {
 
 Without `onUncaught`, `advance()` (and `start()`) throw them once the
 frame they came in has ended: one error alone, or an `AggregateError`
-when there were several. The frame has run to its end either way.
+when there were several. The frame has run to its end either way. A
+hook should not throw; if it does, its error is thrown so too.
 
 ## Development
 

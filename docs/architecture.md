@@ -733,12 +733,15 @@ listeners after it still run, and a script's `dispatchEvent` returns as
 if none had thrown, whoever dispatched, the player (frame events, a
 Timer's, a Loader's, a Socket's, the pointer's and the keyboard's) or a
 script. So does the error of a frame script, of a Timer's own tick, of
-a load's delivery, as a loaded SWF's document class's constructor, and
-of a constructor the timeline or a goto runs: the scripts, loads and
-children after it still come. A host that passes `onUncaught` to
-Scripting gets each error as it happens, those between frames, in a
-pointer, keyboard or ExternalInterface handler, included, and
-`Player.advance` then throws none. Without it, the frame throws them
+a load's delivery, of a constructor the timeline or a goto runs, and of
+a document class's constructor: the scripts, loads and children after
+it still come. The main SWF's root plays on as far as its constructor
+got, its first frame's script and its listeners kept, as adl shows; a
+load whose document class throws has no INIT or COMPLETE. A host that
+passes `onUncaught` to Scripting gets each error as it happens, those
+between frames, in a pointer, keyboard or ExternalInterface handler,
+included, and `Player.start` and `Player.advance` then throw none; an
+error the hook itself throws is kept and thrown as the frame ends. Without it, the frame throws them
 once it has run to its end: one alone, or several as an
 AggregateError, the one that stopped the frame early, if any, first;
 those between frames come with the next frame's. An ExternalInterface

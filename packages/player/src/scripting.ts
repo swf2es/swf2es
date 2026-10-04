@@ -210,7 +210,7 @@ export class Scripting {
    * it ends.
    */
   readonly onUncaught: ((error: unknown) => void) | null;
-  /** The errors nothing caught since the last frame ended, where there is no onUncaught. */
+  /** Errors kept for the frame's end: all, without onUncaught, else those it threw. */
   private uncaught: unknown[] = [];
   /** Children frames played on placed, to be made alive in the frame's construct phase. */
   private readonly toConstruct: {
@@ -382,7 +382,8 @@ export class Scripting {
        * whoever dispatched, a frame script's, a constructor's, a load's,
        * those between frames, in a pointer, keyboard or ExternalInterface
        * handler, too. Without it, the frame throws them to its caller once
-       * it has ended, those between frames with the next frame's.
+       * it has ended, those between frames with the next frame's. An error
+       * the hook throws is thrown so too.
        */
       onUncaught?: (error: unknown) => void;
     } = {},
@@ -1683,10 +1684,17 @@ export class Scripting {
 
   /** An error that no script caught: to the host's hook now, or kept for the frame's end. */
   readonly reportUncaught = (error: unknown): void => {
-    if (this.onUncaught) {
-      this.onUncaught(error);
-    } else {
+    if (!this.onUncaught) {
       this.uncaught.push(error);
+      return;
+    }
+
+    // A hook that throws stops nothing here either: its error is thrown
+    // when the frame ends, after the listeners and scripts that follow.
+    try {
+      this.onUncaught(error);
+    } catch (hookError) {
+      this.uncaught.push(hookError);
     }
   };
 
