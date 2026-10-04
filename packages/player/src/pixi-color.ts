@@ -178,9 +178,7 @@ function straight(element: Extra): number {
   const channel = (shift: number) =>
     Math.round((((fill >> shift) & 0xff) * ((tint >> shift) & 0xff)) / 255);
   const alpha = (element.alpha ?? 1) * (own?.alpha ?? 1);
-  return (
-    ((Math.round(alpha * 255) << 24) | (channel(0) << 16) | (channel(8) << 8) | channel(16)) >>> 0
-  );
+  return (((alpha * 255) << 24) | (channel(0) << 16) | (channel(8) << 8) | channel(16)) >>> 0;
 }
 
 const NONE: ColorTransform = {
@@ -304,17 +302,20 @@ for (const proto of [BatchableGraphics.prototype, BatchableSprite.prototype]) {
   });
 }
 
-/**
- * Draw `leaf` and what is in it under `ct`, or under Pixi's tint again for
- * null. Moving between batchers rebuilds the render group's instructions;
- * another transform in the same batcher packs the vertices again.
- */
 /** Each unbatched context's batched copy, made when a Graphics drawing it is first colour-transformed. */
 const batchedCopies = new WeakMap<GraphicsContext, GraphicsContext>();
 
-/** `context`, or its batched copy where it is unbatched. */
+/**
+ * `context`, batched: a shared one, which shapes, glyphs and lines make
+ * "no-batch" (pixi.ts), as a copy; a Graphics' own, as itself.
+ */
 function batched(context: GraphicsContext): GraphicsContext {
   if (context.batchMode === "batch") {
+    return context;
+  }
+
+  if (context.batchMode !== "no-batch") {
+    context.batchMode = "batch";
     return context;
   }
 
@@ -369,6 +370,11 @@ export function showFor(g: SharingGraphics, ct: ColorTransform | null): void {
   g.shared = shared;
 }
 
+/**
+ * Draw `leaf` and what is in it under `ct`, or under Pixi's tint again for
+ * null. Moving between batchers rebuilds the render group's instructions;
+ * another transform in the same batcher packs the vertices again.
+ */
 export function setFlashColor(leaf: Container, ct: ColorTransform | null): void {
   const colored = leaf as Colored;
   const was = colored.flashColor ?? null;

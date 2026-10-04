@@ -570,7 +570,7 @@ class LinesGraphics extends Graphics {
     showFor(this, this.flashColor ?? null);
   }
 
-  /** Draw `context`, not listening on it, as a shared context gathers no listener an instance. */
+  /** Draw `context` without listening on it: a shared context would gather a listener for every instance. */
   show(context: GraphicsContext): void {
     if (context !== this.context) {
       (this as unknown as { _context: GraphicsContext })._context = context;

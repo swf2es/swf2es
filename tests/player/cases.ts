@@ -1854,7 +1854,7 @@ function staticTextProbe(abc: Uint8Array): Uint8Array {
   });
 }
 
-// Two clips of one shape and one static text in Probe, for
+// Two clips of one outlined shape and one static text in Probe, for
 // scripts/SharedColors.as, which colour-transforms the first and then
 // takes the transform off: the second shares the first's fills and glyphs.
 function sharedColors(abc: Uint8Array): Uint8Array {
@@ -1866,7 +1866,13 @@ function sharedColors(abc: Uint8Array): Uint8Array {
     tags: [
       w.fileAttributes(true),
       w.backgroundColor(0xffffff),
-      square(1, 0xcc3300, 800),
+      w.shape({
+        id: 1,
+        bounds: [-40, 840, -40, 840],
+        fills: [0xcc3300],
+        lines: [{ width: 80, color: 0x004400 }],
+        paths: [{ fill1: 1, line: 1, commands: rectPath(0, 0, 40, 40) }],
+      }),
       probeFont(5),
       w.staticText({
         id: 2,
