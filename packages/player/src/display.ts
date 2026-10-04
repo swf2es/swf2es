@@ -579,6 +579,7 @@ export class TextObject extends DisplayObject {
           wordWrap: this.wordWrap,
           embedFonts: this.embedFonts,
           fonts: this.fonts,
+          authored: this.definition !== null,
         }),
       };
     }

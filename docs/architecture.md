@@ -1660,7 +1660,8 @@ the room left, right-aligned one twip further left, and justified, a
 wrapped line but the paragraph's last has its inner spaces share the
 room. `textHeight` is the lines' heights, leading and all, less the
 last one's leading where there are two lines or more; a last line left
-empty by a newline does not count. adl's `numLines` can lag a
+empty by a newline counts only in a field a timeline placed, not in a
+script's. adl's `numLines` can lag a
 relayout until the next one, which swf2es's does not; tab stops, and
 the boundaries adl leaves out for lines beyond the field's height, are
 still to come.
