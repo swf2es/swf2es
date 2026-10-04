@@ -1,0 +1,4 @@
+hidden
+hidden twice
+shown
+shown twice

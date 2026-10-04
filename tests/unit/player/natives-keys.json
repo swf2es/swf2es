@@ -861,6 +861,8 @@
     "flash.text::TextFormat#set:target",
     "flash.text::TextFormat#set:underline",
     "flash.text::TextFormat#set:url",
+    "flash.ui::Mouse.hide",
+    "flash.ui::Mouse.show",
     "flash.utils::Timer#flash.utils:Timer::_start",
     "flash.utils::Timer#flash.utils:Timer::_timerDispatch",
     "flash.utils::Timer#get:running",

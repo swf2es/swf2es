@@ -46,6 +46,7 @@ import { workerHooks, workerNatives } from "./flash/system/Worker.js";
 import { fontHooks, fontNatives } from "./flash/text/Font.js";
 import { staticTextNatives } from "./flash/text/StaticText.js";
 import { textFieldNatives } from "./flash/text/TextField.js";
+import { mouseNatives } from "./flash/ui/Mouse.js";
 import { byteArrayHooks } from "./flash/utils/ByteArray.js";
 import { timerNatives } from "./flash/utils/Timer.js";
 import { toplevelNatives } from "./toplevel.js";
@@ -57,6 +58,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...keyboardEventNatives(s),
     ...timerEventNatives(s),
     ...mouseEventNatives(s),
+    ...mouseNatives(s),
     ...eventDispatcherNatives(s),
     ...displayObjectNatives(s),
     ...avm1MovieNatives(),
