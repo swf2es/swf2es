@@ -25,6 +25,7 @@ import {
   Sprite,
   Text,
   Texture,
+  type WebGLRenderer,
 } from "pixi.js";
 import { BitmapStore, type GpuCopy } from "./bitmap.js";
 import { toStage } from "./bounds.js";
@@ -52,6 +53,7 @@ import { blendLayers, droppedLayers } from "./morph.js";
 import { blendFilters } from "./pixi-blend.js";
 import { dropBatchedCopy, setFlashColor, showFor } from "./pixi-color.js";
 import { displayFilters, FilterChain, rgbaOf } from "./pixi-filters.js";
+import { boundedResolves } from "./pixi-resolve.js";
 import type { Player } from "./player.js";
 import {
   CUBIC,
@@ -882,7 +884,11 @@ export class PixiView {
     private readonly fresh = false,
     /** The stage's view, whose geometry and textures a fresh view borrows where they are current. */
     private readonly source: PixiView | null = null,
-  ) {}
+  ) {
+    if (renderer.type === RendererType.WEBGL) {
+      boundedResolves(renderer as WebGLRenderer);
+    }
+  }
 
   /**
    * Where a pointer event is on the SWF's stage. CSS `object-fit` shows the
