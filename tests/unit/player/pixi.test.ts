@@ -15,6 +15,16 @@ function standIn(pixels: number[]) {
   const reads: unknown[] = [];
   const renderer = {
     render: () => {},
+    filter: {
+      _setupFilterTextures: () => {},
+      _setupBindGroupsAndRender: () => {},
+    },
+    renderTarget: {
+      adaptor: {
+        copyToTexture: () => {},
+        finishRenderPass: () => {},
+      },
+    },
     extract: {
       pixels: (target: unknown) => {
         reads.push(target);
