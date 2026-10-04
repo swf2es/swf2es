@@ -318,9 +318,9 @@ uniform vec2 uOffset;
 uniform float uType;
 uniform float uKnockout;
 void main(void) {
-  // The pixel's centre, which all its texels read alike, as adl's one pixel.
+  // Keep source samples sharp; the bevel reads alpha at a stage pixel's centre.
   vec2 at = (floor(vTextureCoord * uInputSize.xy) + 0.5) * uInputSize.zw;
-  vec4 src = texture(uTexture, at);
+  vec4 src = texture(uTexture, vTextureCoord);
   vec2 step_ = uOffset * uInputSize.zw;
   // In 255ths, each read truncated, as adl's are.
   float on = floor(texture(uBlurred, at + step_).a * 255.0 + 0.001);
