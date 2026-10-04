@@ -810,6 +810,179 @@ test("a goto's caller goes on when a script its cycle runs throws, as in Flash",
   ]);
 });
 
+test("every error nothing caught is reported, and the listeners and constructors after it run, as in Flash", {
+  skip,
+}, async () => {
+  // Main's first FRAME_CONSTRUCTED and EXIT_FRAME listeners throw, before
+  // a second on Main and one on a Sprite off the display list; a listener
+  // sends a clip to two frames whose scripts throw; the root's goto to its
+  // second frame makes a Bad, whose constructor throws, then a Good.
+  const source = `package {
+    import flash.display.MovieClip;
+    import flash.display.Sprite;
+    import flash.events.Event;
+    public class Bound extends MovieClip {
+      public function Bound() {
+        stop();
+        addFrameScript(1, function():void { trace("Bound script 2 throws"); throw new Error("from script 2"); },
+          2, function():void { trace("Bound script 3 throws"); throw new Error("from script 3"); });
+      }
+    }
+    public class Bad extends MovieClip {
+      public function Bad() { trace("making Bad"); throw new Error("from Bad"); }
+    }
+    public class Good extends MovieClip {
+      public function Good() { trace("made Good"); }
+    }
+    public class Main extends MovieClip {
+      public var bound:Bound;
+      private var n:int = 0;
+      private var other:Sprite = new Sprite();
+      public function Main() {
+        stop();
+        addEventListener(Event.FRAME_CONSTRUCTED, function(_:Event):void {
+          if (n == 1) { trace("frameConstructed 1 throws"); throw new Error("from frameConstructed"); }
+        });
+        addEventListener(Event.FRAME_CONSTRUCTED, function(_:Event):void {
+          if (n == 1) trace("frameConstructed 2");
+        });
+        addEventListener(Event.EXIT_FRAME, function(_:Event):void {
+          if (n == 1) { trace("exitFrame 1 throws"); throw new Error("from exitFrame"); }
+        });
+        addEventListener(Event.EXIT_FRAME, function(_:Event):void {
+          if (n == 1) trace("exitFrame 2");
+        });
+        other.addEventListener(Event.EXIT_FRAME, function(_:Event):void {
+          if (n == 1) trace("exitFrame other");
+        });
+        addEventListener(Event.ENTER_FRAME, enter);
+      }
+      private function enter(e:Event):void {
+        n++;
+        if (n == 2) {
+          trace("goto 2 and 3");
+          bound.gotoAndStop(2);
+          bound.gotoAndStop(3);
+          trace("after both gotos", bound.currentFrame);
+        } else if (n == 3) {
+          trace("next frame");
+          gotoAndStop(2);
+          trace("after root goto", numChildren);
+        }
+      }
+    }
+  }`;
+  const swf = w.swf({
+    version: 10,
+    width: 20,
+    height: 20,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(2, 3, [...Array.from({ length: 3 }, () => w.showFrame()), w.end()]),
+      w.sprite(3, 1, [w.showFrame(), w.end()]),
+      w.sprite(4, 1, [w.showFrame(), w.end()]),
+      w.doAbc(compiler(out)("UncaughtErrors", source)),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Bound"],
+        [3, "Bad"],
+        [4, "Good"],
+      ]),
+      w.place({ depth: 1, character: 2, name: "bound" }),
+      w.showFrame(),
+      w.place({ depth: 2, character: 3 }),
+      w.place({ depth: 3, character: 4 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const lines: string[] = [];
+  const errors: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    onUncaught: (error) => errors.push(scripting.rt.toString(error as avm2.Value)),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(swf, scripting);
+  await player.start();
+  for (let frame = 2; frame <= 4; frame++) {
+    player.tick();
+  }
+
+  // adl's output and the errors it reported, in order.
+  assert.deepEqual(lines, [
+    "frameConstructed 1 throws",
+    "frameConstructed 2",
+    "exitFrame 1 throws",
+    "exitFrame 2",
+    "exitFrame other",
+    "goto 2 and 3",
+    "Bound script 2 throws",
+    "Bound script 3 throws",
+    "after both gotos 3",
+    "next frame",
+    "making Bad",
+    "made Good",
+    "after root goto 3",
+  ]);
+  assert.deepEqual(errors, [
+    "Error: from frameConstructed",
+    "Error: from exitFrame",
+    "Error: from script 2",
+    "Error: from script 3",
+    "Error: from Bad",
+  ]);
+});
+
+test("without onUncaught, a frame throws all its errors once it has ended", { skip }, async () => {
+  // Two gotos from one listener, each landing on a script that throws.
+  const source = `package {
+    import flash.display.MovieClip;
+    import flash.events.Event;
+    public class Bound extends MovieClip {
+      public function Bound() {
+        stop();
+        addFrameScript(1, function():void { throw new Error("from script 2"); },
+          2, function():void { throw new Error("from script 3"); });
+      }
+    }
+    public class Main extends MovieClip {
+      public var bound:Bound;
+      public function Main() {
+        addEventListener(Event.ENTER_FRAME, function(_:Event):void {
+          if (bound.currentFrame == 1) {
+            bound.gotoAndStop(2);
+            bound.gotoAndStop(3);
+          }
+        });
+        addEventListener(Event.EXIT_FRAME, function(_:Event):void { trace("exitFrame", bound.currentFrame); });
+      }
+    }
+  }`;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(boundClip(compiler(out)("UncaughtThrown", source), 10, 3), scripting);
+  await player.start();
+  let thrown: unknown = null;
+  try {
+    player.tick();
+  } catch (error) {
+    thrown = error;
+  }
+
+  assert.ok(thrown instanceof AggregateError);
+  assert.deepEqual(
+    thrown.errors.map((e) => scripting.rt.toString(e as avm2.Value)),
+    ["Error: from script 2", "Error: from script 3"],
+  );
+  // The frame ran to its end, each goto's cycle with its EXIT_FRAME, before
+  // it threw; the next has nothing to throw.
+  assert.deepEqual(lines, ["exitFrame 1", "exitFrame 2", "exitFrame 3", "exitFrame 3"]);
+  player.tick();
+});
+
 test("scripts that catch the stack overflow of their goto cycles stop soon, not after millions of runs", {
   skip,
 }, async () => {

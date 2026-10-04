@@ -1253,6 +1253,15 @@ export class MovieClip extends Container {
       this.placeAtDepth(child, depth);
       if (looping && this.library.constructLater) {
         this.library.constructLater(child, character);
+      } else if (this.library.uncaught) {
+        // A constructor that throws is reported, and the children after it
+        // are still made; a first frame's, made in its parent's super(),
+        // still throw into the parent's constructor, as in Flash.
+        try {
+          construct(child, character, this.library);
+        } catch (error) {
+          this.library.uncaught(error);
+        }
       } else {
         construct(child, character, this.library);
       }

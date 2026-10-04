@@ -712,8 +712,25 @@ frame nest cycles without end; Flash gives up some 1400 deep, and the
 player throws AS3's stack overflow, #1023, at 256, after which no goto
 cycle runs for the rest of the frame, so scripts that catch it cannot
 start it over. A frame script that asks for a goto and then throws still
-has its goto, and the scripts after it still run, as adl has it; the
-error reaches the host when the frame's scripts are done.
+has its goto, and the scripts after it still run, as adl has it. What a
+goto's cycle runs throws no error into the goto's caller: an error a
+script, listener or constructor in the cycle throws is reported as
+uncaught, and the cycle and its caller go on, as in Flash and Ruffle.
+The goto itself still throws to its caller its own errors: the stack
+overflow, #1023, and an unknown scene or label, #2108 and #2109.
+
+An error nothing caught, from a frame script, a frame event's or a
+timer's listener, or a constructor the timeline or a goto runs, is
+reported, and the frame goes on: the listeners, timers, scripts and
+children after it still run,
+as adl shows. A host that passes `onUncaught` to Scripting gets each
+error as it happens, one from a goto between frames, in a pointer,
+keyboard or ExternalInterface handler, included. Without it, the frame
+throws them once it has run to its end: one alone, or several as an
+AggregateError, the one that stopped the frame early, if any, first; a
+goto's between frames come with the next frame's. A child its parent's
+first frame places is made in the parent's `super()`, and its error
+still reaches the parent's constructor.
 
 A root's scenes and labels come from its DefineSceneAndFrameLabelData;
 a timeline without one, or whose data names no scene, a sprite's always,

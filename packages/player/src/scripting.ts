@@ -203,10 +203,12 @@ export class Scripting {
   /** Whether they nested too deep this frame, which stops them all till the next. */
   private overflowed = false;
   /**
-   * What the scripts and listeners a goto's cycle ran threw: Flash reports
-   * it apart, and the goto's caller goes on. The host gets the first when
-   * the frame ends.
+   * Where an error nothing caught goes as it happens, so that the frame
+   * goes on, as in Flash and Ruffle; null to have the frame throw them when
+   * it ends.
    */
+  readonly onUncaught: ((error: unknown) => void) | null;
+  /** The errors nothing caught since the last frame ended, where there is no onUncaught. */
   private uncaught: unknown[] = [];
   /** Children frames played on placed, to be made alive in the frame's construct phase. */
   private readonly toConstruct: {
@@ -373,6 +375,13 @@ export class Scripting {
        * else, the same on every run, as tests that compare traces want.
        */
       realTime?: (() => number) | null;
+      /**
+       * Each error that no script caught, from a frame script, a frame
+       * event's or a timer's listener, a constructor or a goto's cycle, as
+       * it happens, a goto's between frames too; without it, the frame
+       * throws them to its caller once it has ended.
+       */
+      onUncaught?: (error: unknown) => void;
     } = {},
   ) {
     this.screenCapabilities = {
@@ -391,6 +400,7 @@ export class Scripting {
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
     this.externalInterface = options.externalInterface ?? null;
     this.socket = options.socket ?? null;
+    this.onUncaught = options.onUncaught ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
     this.fetch = options.fetch ?? null;
@@ -487,6 +497,7 @@ export class Scripting {
     }
 
     library.construct = (display, character) => this.construct(display, character, library);
+    library.uncaught = this.reportUncaught;
     library.constructLater = (display, character) => {
       // Its class is ready as the frame plays, its script run, as the frame's
       // tags have it in Flash; only the instance waits (`delayed_symbolclass`).
@@ -1563,6 +1574,9 @@ export class Scripting {
         next.due += next.delay;
         try {
           this.rt.call(next.closure, next.object);
+        } catch (error) {
+          // Reported, and the timers after it and the frame still run.
+          this.reportUncaught(error);
         } finally {
           // Pushed back whatever the call did, unless it stopped the timer or
           // started it anew: one whose closure throws still has its next time.
@@ -1644,9 +1658,18 @@ export class Scripting {
     }
 
     for (const target of [...targets]) {
-      dispatchTo(this, target, this.event(type));
+      dispatchTo(this, target, this.event(type), this.reportUncaught);
     }
   }
+
+  /** An error that no script caught: to the host's hook now, or kept for the frame's end. */
+  readonly reportUncaught = (error: unknown): void => {
+    if (this.onUncaught) {
+      this.onUncaught(error);
+    } else {
+      this.uncaught.push(error);
+    }
+  };
 
   /**
    * Run the frame scripts of the clips that entered a frame with one since
@@ -1658,10 +1681,9 @@ export class Scripting {
    * left, bounded, as a script that jumps on every run would never settle.
    */
   runFrameScripts(root: DisplayObject): void {
-    // A script's error waits for the phase to end: its goto still happens,
-    // and the scripts after it still run, as in Flash (the unit test "a
-    // frame script's goto happens though the script throws after it").
-    const errors: unknown[] = [];
+    // A script's error is reported apart: its goto still happens, and the
+    // scripts after it still run, as in Flash (the unit test "a frame
+    // script's goto happens though the script throws after it").
     // Overflowed, cycles stop their script loops; the frame's own pass goes on.
     const stopped = () => this.overflowed && this.cycles > 0;
     for (let round = 0; round < 64 && !stopped(); round++) {
@@ -1686,7 +1708,7 @@ export class Scripting {
           try {
             this.rt.call(script, o.object);
           } catch (error) {
-            errors.push(error);
+            this.reportUncaught(error);
           } finally {
             this.inFrameScript = outer;
           }
@@ -1701,7 +1723,7 @@ export class Scripting {
             try {
               this.gotoCycle(o);
             } catch (error) {
-              errors.push(error);
+              this.reportUncaught(error);
             }
           }
         }
@@ -1733,10 +1755,6 @@ export class Scripting {
         break;
       }
     }
-
-    if (errors.length > 0) {
-      throw errors[0];
-    }
   }
 
   /**
@@ -1766,25 +1784,24 @@ export class Scripting {
       throw this.rt.error("Error", 1023);
     }
 
-    // A phase's error is its own, not the goto's: Flash reports it apart,
-    // and the rest of the cycle and the goto's caller go on (the unit test
-    // "a goto's caller goes on when a script its cycle runs throws"). An
-    // overflow still reaches the goto that went too deep, which threw it.
-    const phase = (run: () => void) => {
-      try {
-        run();
-      } catch (error) {
-        this.uncaught.push(error);
-      }
-    };
-    const stage = this.stage;
+    // The cycle's errors are not the goto's: its scripts', listeners' and
+    // constructors' are reported apart, as Flash reports them, and the rest
+    // of the cycle and the goto's caller go on (the unit test "a goto's
+    // caller goes on when a script its cycle runs throws"). An overflow
+    // still reaches the goto that went too deep, which threw it above. A
+    // goto between frames, from a pointer, keyboard or ExternalInterface
+    // handler, has its cycle's errors reported by onUncaught at once, or
+    // else thrown when the next frame ends.
     this.cycles++;
-    // What frames placed and has yet to be made alive is made first.
-    phase(() => this.constructPending());
-    phase(() => this.broadcast("frameConstructed"));
-    phase(() => this.runFrameScripts(stage));
-    phase(() => this.broadcast("exitFrame"));
-    this.cycles--;
+    try {
+      // What frames placed and has yet to be made alive is made first.
+      this.constructPending();
+      this.broadcast("frameConstructed");
+      this.runFrameScripts(this.stage);
+      this.broadcast("exitFrame");
+    } finally {
+      this.cycles--;
+    }
   }
 
   /**
@@ -1792,13 +1809,17 @@ export class Scripting {
    * ENTER_FRAME, before frameConstructed, or as a goto's cycle begins;
    * until then a script finds it in numChildren but getChildAt gives null
    * (`instantiation_on_enter_frame`). One taken off since is never made,
-   * and one at a time, so a constructor that throws leaves the rest for
-   * later rather than losing them.
+   * and one at a time: a constructor that throws is reported, and the rest
+   * are still made.
    */
   private constructPending(): void {
     for (let next = this.toConstruct.shift(); next; next = this.toConstruct.shift()) {
       if (!next.display.object && next.display.parent) {
-        this.construct(next.display, next.character, next.library);
+        try {
+          this.construct(next.display, next.character, next.library);
+        } catch (error) {
+          this.reportUncaught(error);
+        }
       }
     }
   }
@@ -1807,8 +1828,30 @@ export class Scripting {
    * What follows the timelines' advance in a frame: the frame events and
    * scripts, in Flash's order. The first frame, after construction, has no
    * ENTER_FRAME: Flash goes to FRAME_CONSTRUCTED, the scripts and EXIT_FRAME.
+   * Without onUncaught, the errors no script caught are thrown once the
+   * frame has ended: one alone, or several as an AggregateError, after any
+   * that stopped the frame early.
    */
   frame(root: DisplayObject, entered = true): void {
+    const errors: unknown[] = [];
+    try {
+      this.playFrame(root, entered);
+    } catch (error) {
+      errors.push(error);
+    }
+
+    // Those of a goto between frames, as a pointer handler's, come with this frame's.
+    errors.push(...this.uncaught.splice(0));
+    if (errors.length === 1) {
+      throw errors[0];
+    }
+
+    if (errors.length > 1) {
+      throw new AggregateError(errors, `${errors.length} errors that nothing caught`);
+    }
+  }
+
+  private playFrame(root: DisplayObject, entered: boolean): void {
     this.overflowed = false;
     finishSounds(this);
     if (entered) {
@@ -1831,7 +1874,11 @@ export class Scripting {
     }
     this.broadcast("exitFrame");
     for (const end of ends) {
-      end();
+      try {
+        end();
+      } catch (error) {
+        this.reportUncaught(error);
+      }
     }
 
     if (this.invalidated) {
@@ -1846,12 +1893,6 @@ export class Scripting {
     }
 
     this.scrolled.clear();
-    // A goto's errors from this frame, or from between frames, as a pointer
-    // event's goto, reach the host now that the frame has run to its end.
-    if (this.uncaught.length > 0) {
-      const [error] = this.uncaught.splice(0);
-      throw error;
-    }
   }
 }
 

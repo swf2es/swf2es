@@ -183,6 +183,11 @@ export interface Library {
    * first frame is entered on the way, by Sprite's constructChildren.
    */
   construct: ((display: DisplayObject, character: DisplayCharacter) => void) | null;
+  /**
+   * Where the error of a constructor a goto ran goes, as Flash reports it
+   * apart from the goto; without it, the error reaches the goto's caller.
+   */
+  uncaught?: (error: unknown) => void;
   /** Has the AS3 object of a child a frame played on placed made in the frame's construct phase; null where there are no scripts. */
   constructLater: ((display: DisplayObject, character: DisplayCharacter) => void) | null;
   /** Told before a timeline child goes, for the events a script sees; null in an AVM1 movie. */
