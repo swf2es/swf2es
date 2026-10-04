@@ -353,7 +353,7 @@
   "avm2/edittext_autosize_lazy_bounds_visual": {"matched":0,"lines":0,"traced":0,"error":null},
   "avm2/edittext_autosize_lazy_bounds_vs_relayout": {"matched":3,"lines":106,"traced":106,"error":null},
   "avm2/edittext_bottom_scroll_v_basic": {"matched":210,"lines":210,"traced":210,"error":null},
-  "avm2/edittext_bounds_scale": {"matched":1,"lines":24,"traced":24,"error":null},
+  "avm2/edittext_bounds_scale": {"matched":24,"lines":24,"traced":24,"error":null},
   "avm2/edittext_bullet": {"matched":4,"lines":30,"traced":30,"error":null},
   "avm2/edittext_default_format": {"matched":18,"lines":222,"traced":222,"error":null},
   "avm2/edittext_default_format_empty": {"matched":21,"lines":136,"traced":182,"error":null},

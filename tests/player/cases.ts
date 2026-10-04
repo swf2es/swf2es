@@ -1910,6 +1910,26 @@ function sharedColors(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A field inset from its origin, as authored, for scripts/FieldPosition.as.
+function fieldPosition(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 300,
+    height: 120,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.editText(1, "Back", 2492, 598, 2, { at: [886, -40], color: 0xff000000 }),
+      w.doAbc(abc, "FieldPosition"),
+      w.symbolClass([[0, "FieldPosition"]]),
+      w.place({ depth: 1, character: 1, matrix: { tx: 400, ty: 400 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Text laid out in Probe (scripts/TextLayout.as).
 function textLayout(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -2138,6 +2158,16 @@ export const cases: PlayerCase[] = [
     capture: [1, 2, 3],
     tolerance: 32,
     maxOutliers: 60,
+  },
+  {
+    name: "field-position",
+    swf: fieldPosition,
+    script: "FieldPosition",
+    frames: 1,
+    // Its trace alone: the field's device font draws as the browser's does.
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
   },
   { name: "depths", swf: depths, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
   { name: "loops", swf: loops(true), ...looped },
