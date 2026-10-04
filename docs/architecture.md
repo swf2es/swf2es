@@ -1782,6 +1782,13 @@ target has, where the filter's output is cut off. The `blend-edges` case draws s
 objects against adl, and the player's test page fails a case whose
 drawing GL refused.
 
+A layer, a blend's or a filter's, holds what its filtered children draw
+past their shapes, as adl's layer holds a child's glow whole: Pixi
+measures a filtered object by its descendants' shapes alone, which cut a
+blurred child of a blend off at its shapes' edges, so each filter below
+grows the region by its padding (`blend-nested` draws such children
+against adl).
+
 ### Filters
 
 A filter object keeps its values as adl converts them, in a record of its

@@ -819,3 +819,59 @@ test("a blend's copy of what is behind it is held to the target and the texture,
   assert.deepEqual(copy([894, 150], [10, 75]), { copies: [], clears: [] });
   assert.deepEqual(copy([205, -4], [174, 1]), { copies: [], clears: [] });
 });
+
+/** Pixi's bounds, as far as these tests use them. */
+interface PixiBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  clear(): void;
+  addFrame(x0: number, y0: number, x1: number, y1: number): void;
+}
+
+/** Pixi's own module, as the player loads it, with the player's patches to it. */
+async function patchedPixi(): Promise<{
+  Bounds: new (minX?: number, minY?: number, maxX?: number, maxY?: number) => PixiBounds;
+  FilterEffect: new () => { filters: unknown };
+  FilterSystem: { prototype: unknown };
+}> {
+  await import("../../../packages/player/dist/pixi-blend.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  return import(entry);
+}
+
+test("a layer's region holds its filtered children's padding, but not its own", async () => {
+  const { Bounds, FilterEffect, FilterSystem } = await patchedPixi();
+  const system = FilterSystem.prototype as unknown as {
+    _calculateFilterArea(this: unknown, instruction: unknown, bounds: unknown): void;
+  };
+  type Padded = { filters: unknown; addBounds(b: unknown, skip: boolean): void };
+  const effect = (...paddings: number[]) => {
+    const e = new FilterEffect();
+    // The second filter disabled.
+    e.filters = paddings.map((padding, i) => ({ enabled: i !== 1, padding }));
+    return e as Padded;
+  };
+  const own = effect(7);
+  const child = effect(4, 10, 2.5);
+  // Measured as Pixi measures: the shapes, then the effects, the child's and the object's own.
+  const container = {
+    parentRenderGroup: {},
+    getFastGlobalBounds(_layers: boolean, bounds: PixiBounds) {
+      bounds.clear();
+      bounds.addFrame(10, 20, 30, 40);
+      child.addBounds(bounds, true);
+      own.addBounds(bounds, true);
+      return bounds;
+    },
+  };
+  const bounds = new Bounds();
+  system._calculateFilterArea.call({}, { container, filterEffect: own }, bounds);
+  assert.deepEqual([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], [4, 14, 36, 46]);
+
+  // Measured for anything else, its own is padded too.
+  container.getFastGlobalBounds(true, bounds);
+  assert.deepEqual([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], [-3, 7, 43, 53]);
+});

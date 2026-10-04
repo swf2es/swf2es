@@ -2793,6 +2793,19 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "blend-nested",
+    swf: (abc) => bare(abc, 1, "BlendNested", 240, 120),
+    script: "BlendNested",
+    frames: 1,
+    capture: [1],
+    // Within 8 a channel: adl's 8-bit rounding of the blurred edges, their
+    // offset colour and the sums, the ground under a layer one darker where
+    // the glow's tail is all but clear. A glow cut at its shapes' edges, as
+    // the layer's region was, parted by up to 111.
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
     name: "filter-objects",
     swf: (abc) => bare(abc, 1, "FilterObjects"),
     script: "FilterObjects",
