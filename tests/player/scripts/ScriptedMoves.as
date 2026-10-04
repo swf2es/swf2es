@@ -3,10 +3,11 @@
 // transform, filters, a blend mode and visibility, and the root then loops
 // to frame 1, whose places the children take again. Flash says which of
 // the moves' properties a touched child still takes, and whether the loop
-// gives it its first place's transform back. Child 0 is the control, and
-// the last two are MorphShapes, whose ratio the moves change, the first of
-// them touched, which the frames drawn show; widths are left out, as in
-// adl a morph's stays its first blend's even once another is drawn.
+// gives it its first place's transform back. Child 0 is the control;
+// 23 and 24 are MorphShapes, whose ratio the moves change, 23 touched,
+// which the frames drawn show (widths are left out, as in adl a morph's
+// stays its first blend's even once another is drawn); 25 to 27 are text
+// fields, 27 untouched; and 28 is given filters it refuses.
 package {
   import flash.display.DisplayObject;
   import flash.display.MovieClip;
@@ -52,6 +53,14 @@ package {
       c = getChildAt(21); c.alpha = 0.5;
       c = getChildAt(22); c.cacheAsBitmap = false;
       c = getChildAt(23); c.x = c.x;
+      c = getChildAt(25); c.width = c.width;
+      c = getChildAt(26); c.height = c.height;
+      c = getChildAt(28);
+      try {
+        c.filters = [1];
+      } catch (e:Error) {
+        trace("filters refused", e.errorID);
+      }
     }
 
     private function report():void {

@@ -337,6 +337,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       }
 
       const d = this.$display;
+      d.touch();
       // A TextField's is its field's, resized at its scale, the text as it was.
       if (d instanceof TextObject) {
         d.width = value / (Math.abs(d.scaleX) || 1);
@@ -345,7 +346,6 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      d.touch();
       const r = bounds(d, true);
       const base = r ? twips(r.xMax - r.xMin) : 0;
       if (d.rotation === 0 && d.skew === 0) {
@@ -371,6 +371,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       }
 
       const d = this.$display;
+      d.touch();
       // A TextField's is its field's, resized at its scale, the text as it was.
       if (d instanceof TextObject) {
         d.height = value / (Math.abs(d.scaleY) || 1);
@@ -379,7 +380,6 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      d.touch();
       const r = bounds(d, true);
       const base = r ? twips(r.yMax - r.yMin) : 0;
       if (d.rotation === 0 && d.skew === 0) {
@@ -469,8 +469,8 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       );
     }
 
+    // A list refused, #2005, leaves the object untouched (`scripted-moves`).
     set filters(v: Value) {
-      this.$display.touch();
       const list = v ? (((v as AsObject).$a as Value[] | undefined) ?? []) : [];
       const filters = list.map((item) => {
         const kind = item && typeof item === "object" ? filterKindOf(s.rt, item as AsObject) : null;
@@ -488,6 +488,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
         return f;
       });
+      this.$display.touch();
       this.$display.filters = filters;
       this.$display.invalidate(TRANSFORM);
     }

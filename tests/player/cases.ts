@@ -676,8 +676,8 @@ function gotoStops(abc: Uint8Array): Uint8Array {
   });
 }
 
-// Clips of a square and two MorphShapes growing a square, side by
-// side, which frames 2 to 4 move with every property a place sets, for
+// Clips of a square, two MorphShapes growing a square and three empty
+// text fields, side by side, which frames 2 to 4 move with every property a place sets, for
 // scripts/ScriptedMoves.as to touch, then a loop back to frame 1's places.
 function scriptedMoves(abc: Uint8Array): Uint8Array {
   const grow = w.morphShape({
@@ -689,13 +689,14 @@ function scriptedMoves(abc: Uint8Array): Uint8Array {
     start: [{ fill0: 1, commands: rectPath(0, 0, 20, 20) }],
     end: [rectPath(0, 0, 40, 40)],
   });
-  const count = 25;
-  const morph = (i: number) => i >= 23;
+  const count = 29;
+  const morph = (i: number) => i === 23 || i === 24;
+  const field = (i: number) => i >= 25 && i <= 27;
   const at = (i: number, dx: number) => ({ tx: (i * 38 + dx) * 20, ty: 400 });
   const each = (f: (i: number) => Uint8Array) => Array.from({ length: count }, (_, i) => f(i));
   return w.swf({
     version: 10,
-    width: 1000,
+    width: 1120,
     height: 100,
     frameRate: 24,
     frameCount: 5,
@@ -705,9 +706,12 @@ function scriptedMoves(abc: Uint8Array): Uint8Array {
       square(1, 0x806040, 400),
       w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
       grow,
+      w.editText(4, "", 400, 400),
       w.doAbc(abc, "ScriptedMoves"),
       w.symbolClass([[0, "Main"]]),
-      ...each((i) => w.place({ depth: i + 1, character: morph(i) ? 3 : 2, matrix: at(i, 0) })),
+      ...each((i) =>
+        w.place({ depth: i + 1, character: morph(i) ? 3 : field(i) ? 4 : 2, matrix: at(i, 0) }),
+      ),
       w.showFrame(),
       ...each((i) =>
         w.place({

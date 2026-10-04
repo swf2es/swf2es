@@ -842,13 +842,17 @@ rewind or the loop takes it back to, which leaves what the script set
 setting `x`, even to what it was, keeps the colour transform the moves
 give from it too. What touches is the transform properties, `alpha`,
 `filters`, `blendMode`, `scrollRect`, `opaqueBackground`, `scale9Grid`
-and the `transform` setters, each set to what it was or not; `visible`,
+and the `transform` setters, each set to what it was or not, a text
+field's `width` and `height` too, which size its field rather than scale
+it; a `filters` list refused with #2005 is none; `visible`,
 `mask` and `cacheAsBitmap` are no touch here even changed, where
 `cacheAsBitmap` set true is one to the replacement above, so the player
 keeps a `transformed` flag beside `scripted`. A MorphShape a script moved
 stays at its ratio. Ruffle's `transformed_by_script` does the same, set
 by fewer setters: not by `blendMode`, `filters`, `scrollRect`,
-`opaqueBackground` or `scale9Grid`.
+`opaqueBackground` or `scale9Grid`. In adl the 3D setters touch as well,
+`z`, `rotationX`, `rotationY`, `rotationZ`, `scaleZ` and
+`transform.matrix3D`, so they must call `touch()` once implemented.
 
 A clip a script takes off the display list plays on in Flash, an
 orphan, and so does one a script makes with `new` and never adds: its
