@@ -727,39 +727,64 @@ export class PixiView {
   ) {}
 
   /**
-   * Where a pointer event is on the SWF's stage. A canvas the page letterboxes
-   * with CSS `object-fit: contain` (or `scale-down`) shows the stage in a box
-   * centred within it, which Pixi's mapping, over the whole element, does not
-   * know of: the point is taken within that box instead.
+   * Where a pointer event is on the SWF's stage. CSS `object-fit` shows the
+   * canvas's pixels in a box of their own within its content box, letterboxed
+   * by `contain`, cropped by `cover`: Pixi maps a point over the whole element
+   * as `fill` would, so the point is taken within that box instead, centred
+   * as the default `object-position` puts it, and then from the canvas's
+   * pixels to Pixi's screen and the stage. `style` is the canvas's live
+   * computed style, null where there is no DOM.
    */
-  private stagePoint(player: Player, e: FederatedPointerEvent): [number, number] {
+  private stagePoint(
+    player: Player,
+    e: FederatedPointerEvent,
+    style: CSSStyleDeclaration | null,
+  ): [number, number] {
+    const screen = this.renderer.screen;
+    const toStage = (x: number, y: number): [number, number] => [
+      (x * player.width) / screen.width,
+      (y * player.height) / screen.height,
+    ];
     const canvas = this.renderer.canvas as HTMLCanvasElement | undefined;
-    if (!canvas?.getBoundingClientRect || typeof getComputedStyle !== "function") {
-      return [
-        (e.global.x * player.width) / this.renderer.screen.width,
-        (e.global.y * player.height) / this.renderer.screen.height,
-      ];
+    if (!canvas?.getBoundingClientRect || !style) {
+      return toStage(e.global.x, e.global.y);
     }
 
-    let { left, top, width, height } = canvas.getBoundingClientRect();
-    const fit = getComputedStyle(canvas).objectFit;
-    if (fit === "contain" || fit === "scale-down") {
-      let scale = Math.min(width / player.width, height / player.height);
-      // scale-down never shows the canvas larger than its own pixels.
+    // The content box: the element's rectangle within its borders and padding.
+    const px = (v: string | undefined) => Number.parseFloat(v ?? "") || 0;
+    const rect = canvas.getBoundingClientRect();
+    let left = rect.left + px(style.borderLeftWidth) + px(style.paddingLeft);
+    let top = rect.top + px(style.borderTopWidth) + px(style.paddingTop);
+    const width =
+      rect.width -
+      px(style.borderLeftWidth) -
+      px(style.paddingLeft) -
+      px(style.borderRightWidth) -
+      px(style.paddingRight);
+    const height =
+      rect.height -
+      px(style.borderTopWidth) -
+      px(style.paddingTop) -
+      px(style.borderBottomWidth) -
+      px(style.paddingBottom);
+
+    let sx = width / canvas.width;
+    let sy = height / canvas.height;
+    const fit = style.objectFit;
+    if (fit === "contain" || fit === "scale-down" || fit === "cover" || fit === "none") {
+      let scale = fit === "cover" ? Math.max(sx, sy) : fit === "none" ? 1 : Math.min(sx, sy);
       if (fit === "scale-down") {
-        scale = Math.min(scale, canvas.width / player.width);
+        scale = Math.min(scale, 1);
       }
 
-      left += (width - player.width * scale) / 2;
-      top += (height - player.height * scale) / 2;
-      width = player.width * scale;
-      height = player.height * scale;
+      left += (width - canvas.width * scale) / 2;
+      top += (height - canvas.height * scale) / 2;
+      sx = scale;
+      sy = scale;
     }
 
-    return [
-      ((e.clientX - left) * player.width) / width,
-      ((e.clientY - top) * player.height) / height,
-    ];
+    const resolution = this.renderer.resolution || 1;
+    return toStage((e.clientX - left) / sx / resolution, (e.clientY - top) / sy / resolution);
   }
 
   /** Let Pixi normalize browser coordinates; Flash's display list chooses the target. */
@@ -776,8 +801,13 @@ export class PixiView {
     // it where the host does not advance (a paused player, say).
     let frame = 0;
     const canvas = this.renderer.canvas as HTMLCanvasElement | undefined;
+    // Live: read once, it follows the element's style as the page changes it.
+    const style =
+      canvas?.getBoundingClientRect && typeof getComputedStyle === "function"
+        ? getComputedStyle(canvas)
+        : null;
     const send = (type: "move" | "down" | "up" | "leave") => (e: FederatedPointerEvent) => {
-      const [x, y] = this.stagePoint(player, e);
+      const [x, y] = this.stagePoint(player, e, style);
       const p: PointerState = {
         x,
         y,
@@ -809,23 +839,27 @@ export class PixiView {
     this.stage.on("pointerupoutside", up);
     this.stage.on("pointerleave", leave);
     // Pixi sets the canvas's cursor on every move, from its target's, which
-    // is this stage: the player's cursor goes there, and to the canvas now.
-    if (player.pointer) {
-      player.pointer.onCursor = (cursor) => {
-        this.stage.cursor = cursor;
-        if (canvas?.style) {
-          canvas.style.cursor = cursor;
-        }
-      };
+    // is this stage: the player's cursor goes there, and through Pixi's own
+    // setter now, which keeps Pixi's record of it right.
+    const events = (this.renderer as { events?: { setCursor(mode: string | null): void } }).events;
+    const show = (cursor: string) => {
+      this.stage.cursor = cursor;
+      if (events) {
+        events.setCursor(cursor);
+      } else if (canvas?.style) {
+        canvas.style.cursor = cursor;
+      }
+    };
+    const pointer = player.pointer;
+    if (pointer) {
+      pointer.onCursor = show;
+      show(pointer.cursor());
     }
 
     return () => {
-      if (player.pointer) {
-        player.pointer.onCursor = null;
-        this.stage.cursor = "default";
-        if (canvas?.style) {
-          canvas.style.cursor = "";
-        }
+      if (pointer) {
+        pointer.onCursor = null;
+        show("default");
       }
 
       if (frame) {

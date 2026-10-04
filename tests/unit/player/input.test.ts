@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BitmapStore } from "../../../packages/player/dist/bitmap.js";
-import { BitmapObject, Container, TextObject } from "../../../packages/player/dist/display.js";
+import {
+  BitmapObject,
+  ButtonObject,
+  Container,
+  TextObject,
+} from "../../../packages/player/dist/display.js";
 import { PointerInput, pointerTarget } from "../../../packages/player/dist/input.js";
 import type { Scripting } from "../../../packages/player/dist/scripting.js";
 
@@ -149,6 +154,34 @@ test("the cursor is a hand under a sprite in buttonMode, as useHandCursor says, 
   sprite.object.$useHandCursor = false;
   input.handle("move", { x: 10, y: 10 });
   assert.deepEqual(shown, ["pointer", "text", "default"]);
+
+  // The nearest sprite in buttonMode decides, and a disabled one shows none.
+  sprite.object.$useHandCursor = true;
+  art.object = { $display: art, $buttonMode: true, $useHandCursor: false } as never;
+  input.handle("move", { x: 11, y: 10 });
+  assert.equal(input.cursor(), "default");
+  art.object = { $display: art } as never;
+  sprite.object.$enabled = false;
+  input.handle("move", { x: 12, y: 10 });
+  assert.equal(input.cursor(), "default");
+  sprite.object.$enabled = true;
+  input.handle("move", { x: 13, y: 10 });
+  assert.equal(input.cursor(), "pointer");
+
+  // A button: a hand where it uses one, enabled or not.
+  const button = new ButtonObject();
+  button.object = { $display: button } as never;
+  const area = new Container();
+  area.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+  button.hitTestState = area;
+  button.matrix.ty = 50;
+  stage.addChildAt(button, 2);
+  button.enabled = false;
+  input.handle("move", { x: 10, y: 60 });
+  assert.equal(input.cursor(), "pointer");
+  button.useHandCursor = false;
+  input.handle("move", { x: 11, y: 60 });
+  assert.equal(input.cursor(), "default");
 });
 
 test("a pointer down dispatches capture, target and bubble with target-local coordinates", () => {

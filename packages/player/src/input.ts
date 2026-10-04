@@ -290,13 +290,15 @@ export class PointerInput {
 
   /**
    * The cursor over what the pointer is on, as Ruffle chooses it: a hand
-   * over an enabled button, or under the nearest sprite in buttonMode,
-   * where each uses a hand cursor; an I-beam over selectable text.
+   * over a button that uses one, or under the nearest sprite in buttonMode
+   * whose useHandCursor and enabled are true; an I-beam over selectable
+   * text, whose links do not show a hand yet.
    */
   cursor(): Cursor {
     const d = this.hover;
+    // A disabled button keeps its hand, as Ruffle's AVM2 button does.
     if (d instanceof ButtonObject) {
-      return d.enabled && d.useHandCursor ? "pointer" : "default";
+      return d.useHandCursor ? "pointer" : "default";
     }
 
     if (d instanceof TextObject) {

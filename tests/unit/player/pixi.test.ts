@@ -141,7 +141,11 @@ test("Pixi pointer delivery scales to SWF coordinates and stops on unbind", () =
   const player = {
     width: 100,
     height: 50,
-    pointer: { handle: (...args: unknown[]) => calls.push(args), flush: () => {} },
+    pointer: {
+      handle: (...args: unknown[]) => calls.push(args),
+      flush: () => {},
+      cursor: () => "default",
+    },
   } as unknown as Player;
   const unbind = view.bindPointer(player);
   const event = {
@@ -187,6 +191,7 @@ test("Pixi pointer moves are posted, flushed by a frame of their own where nothi
       post: (p: { x: number }) => calls.push(`post ${p.x}`),
       flush: () => calls.push("flush"),
       handle: (type: string, p: { x: number }) => calls.push(`${type} ${p.x}`),
+      cursor: () => "default",
     },
   } as unknown as Player;
   const frames: (() => void)[] = [];
@@ -216,50 +221,77 @@ test("Pixi pointer moves are posted, flushed by a frame of their own where nothi
   }
 });
 
-test("Pixi pointer positions are taken within the box a contained canvas shows the stage in", () => {
-  // A 400 by 100 element showing a 100 by 50 stage, contained: 200 by 100, from x 100.
+test("Pixi pointer positions are taken within the box CSS object-fit shows the canvas in", () => {
+  // A 100 by 50 stage drawn at resolution 2, a 200 by 100 canvas, in a 400 by
+  // 100 element with a 5 pixel border: a 390 by 90 content box from (15, 25).
   const canvas = {
-    width: 100,
-    height: 50,
+    width: 200,
+    height: 100,
     style: { cursor: "" },
     getBoundingClientRect: () => ({ left: 10, top: 20, width: 400, height: 100 }),
   };
   const renderer = {
     screen: { width: 100, height: 50 },
+    resolution: 2,
     canvas,
   } as unknown as ConstructorParameters<typeof PixiView>[0];
   const view = new PixiView(renderer);
-  const calls: [string, number, number][] = [];
+  const calls: [number, number][] = [];
   const player = {
     width: 100,
     height: 50,
     pointer: {
-      handle: (type: string, p: { x: number; y: number }) => calls.push([type, p.x, p.y]),
+      handle: (_type: string, p: { x: number; y: number }) => calls.push([p.x, p.y]),
       flush: () => {},
+      cursor: () => "default",
       onCursor: null,
     },
   } as unknown as Player;
   const g = globalThis as { getComputedStyle?: unknown };
   let fit = "contain";
-  g.getComputedStyle = () => ({ objectFit: fit });
+  const border = "5px";
+  g.getComputedStyle = () => ({
+    get objectFit() {
+      return fit;
+    },
+    borderLeftWidth: border,
+    borderRightWidth: border,
+    borderTopWidth: border,
+    borderBottomWidth: border,
+  });
   try {
     const unbind = view.bindPointer(player);
-    const at = (clientX: number, clientY: number) =>
-      ({ global: { x: 0, y: 0 }, clientX, clientY, button: 0, buttons: 1 }) as never;
-    view.stage.emit("pointerdown", at(10 + 100 + 50, 20 + 50));
-    fit = "fill";
-    view.stage.emit("pointerdown", at(10 + 200, 20 + 50));
-    assert.deepEqual(calls, [
-      ["down", 25, 25],
-      ["down", 50, 25],
-    ]);
+    const press = (clientX: number, clientY: number) => {
+      view.stage.emit("pointerdown", {
+        global: { x: 0, y: 0 },
+        clientX,
+        clientY,
+        button: 0,
+        buttons: 1,
+      } as never);
+      return calls[calls.length - 1];
+    };
 
-    // The cursor the pointer asks for is the canvas's, until unbind.
+    // contain and scale-down: 180 by 90, from x 120; cover: 390 by 195, from y -27.5;
+    // none: 200 by 100, from (110, 20); fill: the content box itself.
+    assert.deepEqual(press(120 + 45, 25), [25, 0]);
+    fit = "scale-down";
+    assert.deepEqual(press(120 + 45, 25), [25, 0]);
+    fit = "cover";
+    assert.deepEqual(press(15 + 195, -27.5 + 97.5), [50, 25]);
+    fit = "none";
+    assert.deepEqual(press(110 + 20, 20 + 10), [10, 5]);
+    fit = "fill";
+    assert.deepEqual(press(15 + 39, 25 + 9), [10, 5]);
+
+    // The player's cursor shows from the bind, as it changes, and goes with unbind.
+    assert.equal(canvas.style.cursor, "default");
     const pointer = player.pointer as unknown as { onCursor: (c: string) => void };
     pointer.onCursor("pointer");
     assert.equal(canvas.style.cursor, "pointer");
     unbind();
-    assert.equal(canvas.style.cursor, "");
+    assert.equal(canvas.style.cursor, "default");
+    assert.equal(pointer.onCursor, null);
   } finally {
     delete g.getComputedStyle;
   }
