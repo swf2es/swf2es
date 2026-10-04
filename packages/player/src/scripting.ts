@@ -34,7 +34,7 @@ import {
 } from "./display.js";
 import { FontSet } from "./fonts.js";
 import { decodeImages, decodeInBrowser, hasUndecoded, type ImageDecode } from "./images.js";
-import type { PointerInput } from "./input.js";
+import type { Cursor, PointerInput } from "./input.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import { finishSounds } from "./playerglobal/flash/media/Sound.js";
@@ -388,7 +388,7 @@ export class Scripting {
   /** Mouse.cursor: "auto" for the player's choice, a flash.ui.MouseCursor name or a registered one. */
   mouseCursor = "auto";
   /** The cursors Mouse.registerCursor registered, by name, as CSS cursor values. */
-  readonly cursors = new Map<string, string>();
+  readonly cursors = new Map<string, Cursor>();
   pointer: PointerInput | null = null;
   /** Whether an HTML assignment drops its final line break, as some players do. */
   readonly trimTrailingHtmlBreak: boolean;

@@ -297,6 +297,32 @@ test("Pixi pointer positions are taken within the box CSS object-fit shows the c
   }
 });
 
+test("the arrow is the arrow over the player, not the page's cursor Pixi's default inherits", () => {
+  const events = {
+    cursorStyles: { default: "inherit", pointer: "pointer" } as Record<string, unknown>,
+    shown: [] as string[],
+    setCursor(mode: string | null) {
+      const style = this.cursorStyles[mode ?? "default"];
+      this.shown.push(typeof style === "string" ? style : String(mode));
+    },
+  };
+  const renderer = {
+    screen: { width: 100, height: 100 },
+    events,
+  } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const player = {
+    width: 100,
+    height: 100,
+    pointer: { handle: () => {}, flush: () => {}, cursor: () => "default", onCursor: null },
+  } as unknown as Player;
+
+  const unbind = view.bindPointer(player);
+  assert.deepEqual(events.shown, ["default"]);
+  unbind();
+  assert.equal(events.cursorStyles.default, "inherit");
+});
+
 test("Flash's filters are left out under WebGPU, and a fresh view destroys those it made", async () => {
   const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));

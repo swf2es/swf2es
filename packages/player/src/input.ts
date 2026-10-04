@@ -368,7 +368,7 @@ export class PointerInput {
 
     const named = s.mouseCursor;
     if (named !== "auto") {
-      const forced = (s.cursors?.get(named) as Cursor | undefined) ?? FORCED[named];
+      const forced = s.cursors?.get(named) ?? FORCED.get(named);
       if (forced) {
         return forced;
       }
@@ -401,12 +401,12 @@ export class PointerInput {
 export type Cursor = "default" | "pointer" | "text" | "grab" | "none" | `url(${string}`;
 
 /** flash.ui.MouseCursor's names as CSS: "hand" is Flash's dragging hand, as Ruffle shows it. */
-const FORCED: Readonly<Record<string, Cursor | undefined>> = {
-  arrow: "default",
-  button: "pointer",
-  hand: "grab",
-  ibeam: "text",
-};
+const FORCED: ReadonlyMap<string, Cursor> = new Map<string, Cursor>([
+  ["arrow", "default"],
+  ["button", "pointer"],
+  ["hand", "grab"],
+  ["ibeam", "text"],
+]);
 
 /** Whether `d` is a button, or a sprite in buttonMode, whose hover Ruffle redraws for. */
 function buttonLike(d: DisplayObject | null): boolean {
