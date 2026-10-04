@@ -147,6 +147,14 @@ export class DisplayObject {
   character: Character | null = null;
   /** Whether a script set a property of it; from then on the timeline swaps no shape under it, as Flash's does not. */
   scripted = false;
+  /**
+   * Whether a script set its transform or another property a place gives:
+   * from then on the timeline's places, moves and a rewind's alike, leave
+   * its matrix, colour, ratio, visibility, blend mode and filters as they
+   * are, all of them whichever was set, as Flash's do (`scripted-moves`).
+   * Setting visible, mask or cacheAsBitmap is no such touch.
+   */
+  transformed = false;
   /** Its other face, the AS3 object a script sees; null in an AVM1 movie. */
   object: avm2.AsObject | null = null;
   /** The LoaderInfo of the SWF this is the root of: set on the main root and on each loaded SWF's; null below. */
@@ -235,6 +243,12 @@ export class DisplayObject {
     this.invalidate(TRANSFORM);
   }
 
+  /** A script set a property a place gives (`transformed`), which is also a touch (`scripted`). */
+  touch(): void {
+    this.scripted = true;
+    this.transformed = true;
+  }
+
   /**
    * The matrix set whole, and taken apart: the scales are its columns'
    * lengths, the rotation the first column's angle, the skew the second's
@@ -302,8 +316,21 @@ export class DisplayObject {
     this.invalidate(TRANSFORM);
   }
 
-  /** Apply a place's transform, colour, name and visibility. */
+  /** Apply a place's transform, colour, name and visibility; to one a script transformed, its name and clip depth only. */
   applyPlace(place: Place): void {
+    if (place.name !== null) {
+      this.name = place.name;
+      this.timelineNamed = true;
+    }
+
+    if (this.transformed) {
+      if (place.clipDepth !== null) {
+        this.applyRare({ ...place, blendMode: null, filters: null });
+      }
+
+      return;
+    }
+
     if (place.matrix) {
       const m = place.matrix;
       this.setMatrix({ a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 });
@@ -316,11 +343,6 @@ export class DisplayObject {
 
     if (place.ratio !== null) {
       this.ratio = place.ratio;
-    }
-
-    if (place.name !== null) {
-      this.name = place.name;
-      this.timelineNamed = true;
     }
 
     if (place.visible !== null) {

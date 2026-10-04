@@ -834,6 +834,22 @@ ENTER_FRAME (`loop-ratio`). Flash's matrix is
 exact at the quarter turns, 0 and not the doubles' cosine of 90°, so the
 player's is.
 
+A child a script has transformed takes nothing more from the timeline's
+places that a script could set: no matrix, colour transform, ratio,
+visibility, blend mode or filters, from a move or from the place a
+rewind or the loop takes it back to, which leaves what the script set
+(`scripted-moves`). Flash keeps this per object, not per property:
+setting `x`, even to what it was, keeps the colour transform the moves
+give from it too. What touches is the transform properties, `alpha`,
+`filters`, `blendMode`, `scrollRect`, `opaqueBackground`, `scale9Grid`
+and the `transform` setters, each set to what it was or not; `visible`,
+`mask` and `cacheAsBitmap` are no touch here even changed, where
+`cacheAsBitmap` set true is one to the replacement above, so the player
+keeps a `transformed` flag beside `scripted`. A MorphShape a script moved
+stays at its ratio. Ruffle's `transformed_by_script` does the same, set
+by fewer setters: not by `blendMode`, `filters`, `scrollRect`,
+`opaqueBackground` or `scale9Grid`.
+
 A clip a script takes off the display list plays on in Flash, an
 orphan, and so does one a script makes with `new` and never adds: its
 timeline advances and its frame scripts run each frame, with `parent`

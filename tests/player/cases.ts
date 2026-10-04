@@ -676,6 +676,73 @@ function gotoStops(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Clips of a square and two MorphShapes growing a square, side by
+// side, which frames 2 to 4 move with every property a place sets, for
+// scripts/ScriptedMoves.as to touch, then a loop back to frame 1's places.
+function scriptedMoves(abc: Uint8Array): Uint8Array {
+  const grow = w.morphShape({
+    id: 3,
+    startBounds: [0, 400, 0, 400],
+    endBounds: [0, 800, 0, 800],
+    fills: [{ start: 0xff0000cc, end: 0xff00cc00 }],
+    lines: [],
+    start: [{ fill0: 1, commands: rectPath(0, 0, 20, 20) }],
+    end: [rectPath(0, 0, 40, 40)],
+  });
+  const count = 25;
+  const morph = (i: number) => i >= 23;
+  const at = (i: number, dx: number) => ({ tx: (i * 38 + dx) * 20, ty: 400 });
+  const each = (f: (i: number) => Uint8Array) => Array.from({ length: count }, (_, i) => f(i));
+  return w.swf({
+    version: 10,
+    width: 1000,
+    height: 100,
+    frameRate: 24,
+    frameCount: 5,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0x806040, 400),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      grow,
+      w.doAbc(abc, "ScriptedMoves"),
+      w.symbolClass([[0, "Main"]]),
+      ...each((i) => w.place({ depth: i + 1, character: morph(i) ? 3 : 2, matrix: at(i, 0) })),
+      w.showFrame(),
+      ...each((i) =>
+        w.place({
+          depth: i + 1,
+          move: true,
+          matrix: at(i, 10),
+          colorTransform: { mult: [0.5, 1, 1, 0.75] },
+          ratio: morph(i) ? 32768 : undefined,
+          blurs: [2],
+          blendMode: 3,
+          visible: false,
+        }),
+      ),
+      w.showFrame(),
+      ...each((i) =>
+        w.place({
+          depth: i + 1,
+          move: true,
+          matrix: { ...at(i, 20), a: 1.5, d: 1.5 },
+          colorTransform: { mult: [1, 1, 1, 1], add: [100, 0, 0, 0] },
+          ratio: morph(i) ? 65535 : undefined,
+          blurs: [],
+          blendMode: 6,
+          visible: true,
+        }),
+      ),
+      w.showFrame(),
+      ...each((i) => w.place({ depth: i + 1, move: true, matrix: at(i, 30) })),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Frames whose first command at a depth does nothing, then a rewind past
 // them, a place without the move flag at a taken depth 3 on frame 2, and
 // at depth 4 a place, a removal and a place again before the rewind's
@@ -2466,6 +2533,15 @@ export const cases: PlayerCase[] = [
     script: "GotoStops",
     frames: 24,
     capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "scripted-moves",
+    swf: scriptedMoves,
+    script: "ScriptedMoves",
+    frames: 9,
+    capture: [3, 4],
     tolerance: 0,
     maxOutliers: 0,
   },

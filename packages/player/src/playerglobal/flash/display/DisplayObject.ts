@@ -145,7 +145,7 @@ function transform(d: DisplayObject, change: (m: Matrix) => void): void {
   const m = { ...d.matrix };
   change(m);
   d.matrix = m;
-  d.scripted = true;
+  d.touch();
   d.invalidate(TRANSFORM);
 }
 
@@ -205,7 +205,8 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       return this.$display.visible;
     }
 
-    // Set to what it was, visible, mask and cacheAsBitmap are no touch in Flash (the `replaces` case).
+    // Set to what it was, visible, mask and cacheAsBitmap are no touch in Flash (the `replaces` case);
+    // changed, the player takes them for one there, but never for a move (`scripted-moves`).
     set visible(v: Value) {
       if (this.$display.visible !== !!v) {
         this.$display.scripted = true;
@@ -247,7 +248,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set scaleX(v: Value) {
-      this.$display.scripted = true;
+      this.$display.touch();
       this.$display.setScaleX(Number(v));
     }
 
@@ -256,7 +257,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set scaleY(v: Value) {
-      this.$display.scripted = true;
+      this.$display.touch();
       this.$display.setScaleY(Number(v));
     }
 
@@ -265,7 +266,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set rotation(v: Value) {
-      this.$display.scripted = true;
+      this.$display.touch();
       this.$display.setRotation(Number(v));
     }
 
@@ -275,7 +276,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     set alpha(v: Value) {
       const d = this.$display;
-      d.scripted = true;
+      d.touch();
       d.colorTransform = { ...(d.colorTransform ?? IDENTITY_COLOR), aMul: Number(v) };
       d.invalidate(TRANSFORM);
     }
@@ -344,7 +345,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      d.scripted = true;
+      d.touch();
       const r = bounds(d, true);
       const base = r ? twips(r.xMax - r.xMin) : 0;
       if (d.rotation === 0 && d.skew === 0) {
@@ -378,7 +379,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      d.scripted = true;
+      d.touch();
       const r = bounds(d, true);
       const base = r ? twips(r.yMax - r.yMin) : 0;
       if (d.rotation === 0 && d.skew === 0) {
@@ -433,7 +434,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("ArgumentError", 2008, "blendMode");
       }
 
-      this.$display.scripted = true;
+      this.$display.touch();
       this.$display.setBlendMode(mode);
     }
 
@@ -469,7 +470,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set filters(v: Value) {
-      this.$display.scripted = true;
+      this.$display.touch();
       const list = v ? (((v as AsObject).$a as Value[] | undefined) ?? []) : [];
       const filters = list.map((item) => {
         const kind = item && typeof item === "object" ? filterKindOf(s.rt, item as AsObject) : null;
@@ -517,7 +518,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set opaqueBackground(v: Value) {
-      this.$display.scripted = true;
+      this.$display.touch();
       this.$opaqueBackground = v === null || v === undefined ? null : s.rt.toUint(v);
     }
 
@@ -526,7 +527,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     set scale9Grid(v: Value) {
-      this.$display.scripted = true;
+      this.$display.touch();
       this.$scale9Grid = v ? (rectangleCopy(s, v as AsObject) as AsObject) : null;
     }
 
@@ -537,7 +538,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     /** Each edge to a whole pixel, a half to even, as Flash keeps them; drawn from the next render. */
     set scrollRect(v: Value) {
-      this.$display.scripted = true;
+      this.$display.touch();
       let r: Rect | null = null;
       if (v) {
         const [x, y, w, h] = ["x", "y", "width", "height"].map((k) =>
@@ -593,7 +594,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         const t = v as AsObject;
         this.$display.setMatrix(matrixOf(s, s.rt.getProperty(t, MATRIX_NAME) as AsObject));
         this.$display.colorTransform = colorOf(s, s.rt.getProperty(t, COLOR_NAME) as AsObject);
-        this.$display.scripted = true;
+        this.$display.touch();
         this.$display.invalidate(TRANSFORM);
       }
     }
