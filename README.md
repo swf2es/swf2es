@@ -54,6 +54,12 @@ if (player.changes !== drawn) {
 }
 ```
 
+Hosts that favor sharper large `BitmapData.draw` results on high-density screens
+can set `view.highResolutionBitmapDraws = true` before playback. The view keeps
+an additional GPU display copy when a new bitmap is drawn; ActionScript still
+sees the bitmap's original pixel size and data. This uses extra GPU memory and
+does not change bitmaps embedded in the SWF.
+
 `Scripting` runs the SWF's ActionScript 3 and needs `builtin.abc` and
 `playerglobal.abc`, which the host loads (`scripting.loadLibraries`);
 Adobe's `playerglobal.abc` is not part of this repository. A page passes
