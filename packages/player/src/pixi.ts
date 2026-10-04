@@ -16,6 +16,7 @@ import {
   fontStringFromTextStyle,
   Graphics,
   GraphicsContext,
+  type InstructionSet,
   Matrix,
   Container as PixiContainer,
   Rectangle,
@@ -485,6 +486,8 @@ const IDLE_MOST = 4096;
  * last frames' go, whose Graphics in thousands made long collector pauses.
  */
 const PARKED_MOST = 1024;
+/** First-time detached groups get one chance to return without letting churn fill the batch cache. */
+const PARKED_FIRST_GROUPS_MOST = 64;
 
 /**
  * Lines' contexts by shape layer and the linear transform they are seen
@@ -858,8 +861,12 @@ export class PixiView {
    * as a pool's objects or a panel shown and hidden come back, then emptied.
    */
   private readonly parked = new Map<Node, number>();
-  /** Released groups keep their batches until idle even when their art exceeds the pool limit. */
-  private readonly parkedGroups = new Map<Node, number>();
+  /** Retain only batches, not detached display trees, while a group waits for reuse. */
+  private readonly parkedGroups = new Map<
+    number,
+    { since: number; group: WeakRef<NonNullable<PixiContainer["renderGroup"]>> }
+  >();
+  private readonly parkedFirstGroups = new Set<number>();
   /** The filters a fresh view made, which it destroys with the rest. */
   private readonly builtFilters: Filter[] = [];
   /** The objects `mask` was found set on, for the masks to be placed that are not under the root. */
@@ -1299,12 +1306,19 @@ export class PixiView {
     }
 
     node.released = true;
-    if (node.container.isRenderGroup) {
-      if (node.reused) {
-        this.parkedGroups.delete(node);
-        this.parkedGroups.set(node, performance.now());
-      } else {
-        this.emptyGroup(node);
+    const group = node.container.isRenderGroup ? node.container.renderGroup : null;
+    if (group) {
+      const uid = group.instructionSet.uid;
+      this.parkedGroups.delete(uid);
+      this.parkedGroups.set(uid, { since: performance.now(), group: new WeakRef(group) });
+      if (!node.reused) {
+        this.parkedFirstGroups.add(uid);
+        if (this.parkedFirstGroups.size > PARKED_FIRST_GROUPS_MOST) {
+          const oldest = this.parkedFirstGroups.values().next().value;
+          if (oldest !== undefined) {
+            this.emptyGroup(oldest, this.parkedGroups.get(oldest)?.group.deref());
+          }
+        }
       }
     }
     const chain = node.filters[0];
@@ -1359,12 +1373,18 @@ export class PixiView {
   }
 
   /** Return a parked group's batches without changing its nested group hierarchy. */
-  private emptyGroup(node: Node): void {
-    this.parkedGroups.delete(node);
-    const group = node.container.renderGroup;
+  private emptyGroup(
+    uid: number,
+    group: NonNullable<PixiContainer["renderGroup"]> | undefined,
+  ): void {
+    this.parkedGroups.delete(uid);
+    this.parkedFirstGroups.delete(uid);
     if (group) {
       group.instructionSet.destroy();
       group.structureDidChange = true;
+    } else {
+      // Pixi's batch pipe caches by instruction-set ID even after the group itself is collected.
+      this.renderer.renderPipes.batch.destroyInstructionSet({ uid } as InstructionSet);
     }
   }
 
@@ -1442,7 +1462,11 @@ export class PixiView {
       node.released = false;
       node.reused = true;
       this.parked.delete(node);
-      this.parkedGroups.delete(node);
+      const group = node.container.renderGroup;
+      if (group) {
+        this.parkedGroups.delete(group.instructionSet.uid);
+        this.parkedFirstGroups.delete(group.instructionSet.uid);
+      }
       const kids = o instanceof Container && (o.children.length > 0 || node.kids.length > 0);
       dirty |= TRANSFORM | (kids ? CHILDREN : 0);
       if (node.emptied) {
@@ -1891,12 +1915,12 @@ export class PixiView {
 
       this.empty(node);
     }
-    for (const [node, since] of this.parkedGroups) {
-      if (now - since < IDLE_MS) {
+    for (const [uid, entry] of this.parkedGroups) {
+      if (now - entry.since < IDLE_MS) {
         break;
       }
 
-      this.emptyGroup(node);
+      this.emptyGroup(uid, entry.group.deref());
     }
 
     this.rescaled = this.leastWidth !== this.strokedAt;

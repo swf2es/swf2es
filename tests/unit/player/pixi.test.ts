@@ -171,7 +171,7 @@ test("nested render groups keep their hierarchy while parked and release idle ba
 
     root.removeChild(branch);
     view.prepare(root);
-    assert.deepEqual(released, ["outer", "inner"]);
+    assert.equal(released.length, 0);
     assert.equal(outer.renderGroup, outerGroup);
     assert.equal(inner.renderGroup, innerGroup);
 
@@ -240,6 +240,38 @@ test("rapidly toggled branches keep their render group", async () => {
     view.prepare(root);
     assert.equal(outer.isRenderGroup, true);
   });
+});
+
+test("one-off groups give back the oldest batches past the parked limit", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const branches = Array.from({ length: 65 }, () => new Container());
+  for (const [index, branch] of branches.entries()) {
+    root.placeAtDepth(branch, index + 1);
+  }
+
+  view.prepare(root);
+  const containers = view.stage.children[0].children.slice(1);
+  const released: number[] = [];
+  for (const [index, container] of containers.entries()) {
+    container.enableRenderGroup();
+    const group = container.renderGroup;
+    assert.ok(group);
+    group.instructionSet.renderPipes = {
+      batch: { destroyInstructionSet: () => released.push(index) },
+    };
+  }
+
+  for (const branch of branches) {
+    root.removeChild(branch);
+  }
+
+  view.prepare(root);
+  assert.deepEqual(released, [0]);
+  assert.equal(
+    containers.every((container) => container.isRenderGroup),
+    true,
+  );
 });
 
 test("a colour batcher gives back a past geometry peak after many smaller builds", () => {
