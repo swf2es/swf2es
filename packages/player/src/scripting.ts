@@ -33,7 +33,7 @@ import {
   TRANSFORM,
 } from "./display.js";
 import { FontSet } from "./fonts.js";
-import { decodeImages, decodeInBrowser, type ImageDecode } from "./images.js";
+import { decodeImages, decodeInBrowser, hasUndecoded, type ImageDecode } from "./images.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import { finishSounds } from "./playerglobal/flash/media/Sound.js";
@@ -173,6 +173,22 @@ interface Load {
   domain: avm2.Domain;
   /** The LoaderContext's parameters, which take the place of the URL's query; null when it set none. */
   parameters: ReadonlyMap<string, string> | null;
+  /** The SWF, where the call read it already: a load from bytes. */
+  swf: Swf | null;
+}
+
+/**
+ * An AVM1 movie a loadBytes made, for the end of a frame: Flash makes its
+ * AVM1Movie in the call and has it by the end of the frame, once its
+ * images are decoded here; `failed` if they could not be.
+ */
+interface Avm1Load {
+  load: Load;
+  swf: Swf;
+  library: Library;
+  movie: AsObject;
+  ready: boolean;
+  failed: boolean;
 }
 
 /** What SymbolClass bound a class to: a character of a SWF's library. */
@@ -247,6 +263,8 @@ export class Scripting {
   readonly symbols = new Map<avm2.Abc | null, Map<string, Symbol>>();
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
+  /** AVM1 movies from bytes, in the order asked, for the end of a frame. */
+  private readonly avm1Loads: Avm1Load[] = [];
   private preparing: Promise<void> = Promise.resolve();
   /** Host requests are independent of Loader's ordered preparation chain. */
   private readonly pendingRequests = new Set<Promise<void>>();
@@ -1015,6 +1033,11 @@ export class Scripting {
         throw this.rt.error("ArgumentError", 2012, "StaticText$");
       }
 
+      // Only a load of an AVM1 SWF makes one (requestLoad).
+      if (t.name === "flash.display::AVM1Movie") {
+        throw this.rt.error("ArgumentError", 2012, "AVM1Movie$");
+      }
+
       if (t.name === "flash.display::Bitmap") {
         return new BitmapObject(null);
       }
@@ -1153,6 +1176,20 @@ export class Scripting {
       return;
     }
 
+    let swf: Swf | null = null;
+    try {
+      swf = readSwf(bytes);
+    } catch {
+      // Not a SWF: refused when its turn comes, as Flash refuses it in a later frame.
+    }
+
+    if (swf && !isAs3(swf)) {
+      const load = this.newLoad(loader, generation, null, domain, parameters, swf);
+      load.bytes = bytes;
+      this.requestAvm1(load, swf);
+      return;
+    }
+
     this.enqueue(
       loader,
       generation,
@@ -1160,7 +1197,101 @@ export class Scripting {
       Promise.resolve({ bytes, status: 0, headers: [] }),
       domain,
       parameters,
+      swf,
     );
+  }
+
+  /**
+   * An AVM1 SWF from bytes. Flash makes its AVM1Movie in the call, named
+   * then, and has it in the Loader at the end of the frame, after
+   * EXIT_FRAME, before the next frame begins: the last asked first, INIT
+   * and COMPLETE with each, as adl traces it (the `avm1-movie` case). A
+   * SWF with images has them decoded first, which may take frames; one
+   * whose images the decoder refuses ends in IOError #2124 there instead.
+   */
+  private requestAvm1(load: Load, swf: Swf): void {
+    const library = this.avm1Library(swf, load.domain);
+    const pending: Avm1Load = {
+      load,
+      swf,
+      library,
+      movie: this.avm1Movie(library),
+      ready: false,
+      failed: false,
+    };
+    this.avm1Loads.push(pending);
+    if (!hasUndecoded(library)) {
+      pending.ready = true;
+      return;
+    }
+
+    this.trackRequest(
+      decodeImages(library, this.decodeImage).then(
+        () => {
+          pending.ready = true;
+        },
+        () => {
+          pending.ready = true;
+          pending.failed = true;
+        },
+      ),
+    );
+  }
+
+  /** An AVM1 SWF's library: its timelines play by themselves, with no AS3 objects but the root's. */
+  private avm1Library(swf: Swf, domain: avm2.Domain): Library {
+    const library = readLibrary(swf);
+    library.domain = domain;
+    return library;
+  }
+
+  /**
+   * An AVM1 SWF's root, not yet on its first frame, as AS3 sees it: an
+   * AVM1Movie, which is no InteractiveObject, so the pointer's hits on the
+   * movie go to its Loader (input.ts).
+   */
+  private avm1Movie(library: Library): AsObject {
+    const root = new MovieClip(library.root, library);
+    root.avm1Root = true;
+    return this.constructAs(root, this.rt.classNamed("flash.display::AVM1Movie"));
+  }
+
+  /** The AVM1 movies from bytes ready by the end of this frame, the last asked first. */
+  private deliverAvm1Loads(): void {
+    for (let i = this.avm1Loads.length - 1; i >= 0; i--) {
+      const pending = this.avm1Loads[i];
+      if (!pending.ready) {
+        continue;
+      }
+
+      this.avm1Loads.splice(i, 1);
+      try {
+        this.deliverAvm1(pending);
+      } catch (error) {
+        this.reportUncaught(error);
+      }
+    }
+  }
+
+  /**
+   * An AVM1 movie from bytes as the Loader's content, then its INIT and
+   * COMPLETE. It keeps its first frame through the next frame's advance,
+   * as adl shows it, then plays at the stage's frame rate.
+   */
+  private deliverAvm1(pending: Avm1Load): void {
+    const { load, swf, library, movie } = pending;
+    if (load.generation !== load.loader.$generation) {
+      return;
+    }
+
+    if (pending.failed) {
+      dispatchEvent(this, this.loaderInfoOf(load.loader), this.ioError(this.errorText(2124)));
+      return;
+    }
+
+    const end = this.complete(load, swf, library, null, movie);
+    (movie.$display as MovieClip).fresh = true;
+    end();
   }
 
   /**
@@ -1348,15 +1479,15 @@ export class Scripting {
     return Promise.all([this.preparing, ...this.pendingRequests]).then(() => {});
   }
 
-  private enqueue(
+  private newLoad(
     loader: AsObject,
     generation: number,
     url: string | null,
-    bytes: Promise<FetchResult>,
     domain: avm2.Domain,
     parameters: ReadonlyMap<string, string> | null,
-  ): void {
-    const load: Load = {
+    swf: Swf | null,
+  ): Load {
+    return {
       loader,
       generation,
       url,
@@ -1366,7 +1497,20 @@ export class Scripting {
       status: 0,
       ready: null,
       failed: null,
+      swf,
     };
+  }
+
+  private enqueue(
+    loader: AsObject,
+    generation: number,
+    url: string | null,
+    bytes: Promise<FetchResult>,
+    domain: avm2.Domain,
+    parameters: ReadonlyMap<string, string> | null,
+    swf: Swf | null = null,
+  ): void {
+    const load = this.newLoad(loader, generation, url, domain, parameters, swf);
     this.loads.push(load);
     // Settled at once, not when its turn in the chain comes: a rejection must find its handler.
     const fetched = bytes.then(
@@ -1384,8 +1528,9 @@ export class Scripting {
       load.bytes = result.bytes;
       try {
         load.ready = await this.prepare(load);
-      } catch (e) {
-        load.failed = e instanceof LoadError ? e.message : this.errorText(2124);
+      } catch {
+        // Bytes that are no SWF, or code that does not link.
+        load.failed = this.errorText(2124);
       }
     });
   }
@@ -1397,9 +1542,12 @@ export class Scripting {
 
   /** The SWF read and its code linked, off the frame; what the frame then does with it. */
   private async prepare(load: Load): Promise<() => () => void> {
-    const swf = readSwf(load.bytes);
+    const swf = load.swf ?? readSwf(load.bytes);
     if (!isAs3(swf)) {
-      throw new LoadError(this.errorText(2124));
+      // An AVM1 SWF from a URL: its content comes as an AS3 SWF's does.
+      const library = this.avm1Library(swf, load.domain);
+      await decodeImages(library, this.decodeImage);
+      return () => this.complete(load, swf, library, null);
     }
 
     const library = readLibrary(swf);
@@ -1516,14 +1664,18 @@ export class Scripting {
       }
     }
 
-    const error = this.rt.construct(
+    dispatchEvent(this, info, this.ioError(load.failed ?? ""));
+  }
+
+  /** An IOErrorEvent of `text`, as a failed load ends. */
+  private ioError(text: string): AsObject {
+    return this.rt.construct(
       this.rt.classNamed("flash.events::IOErrorEvent"),
       "ioError",
       false,
       false,
-      load.failed,
+      text,
     );
-    dispatchEvent(this, info, error);
   }
 
   private loaderInfoOf(loader: AsObject): AsObject {
@@ -1541,7 +1693,13 @@ export class Scripting {
    * if the loader is on the stage. Its first frame's script runs with
    * the frame's, and INIT and COMPLETE follow EXIT_FRAME.
    */
-  private complete(load: Load, swf: Swf, library: Library, run: () => void): () => void {
+  private complete(
+    load: Load,
+    swf: Swf,
+    library: Library,
+    run: (() => void) | null,
+    made: AsObject | null = null,
+  ): () => void {
     const info = this.loaderInfoOf(load.loader);
     load.loader.$abort = null;
     // A listener of any of these may close the Loader or load anew, and this load then ends here.
@@ -1575,20 +1733,30 @@ export class Scripting {
       this.describe(info, load.bytes, swf);
     }
 
-    run();
-    this.bind(swf, library);
-    const root = new MovieClip(library.root, library);
-    root.loaderInfo = info;
-    root.placeFirstFrame();
-    const object = this.constructAs(
-      root,
-      this.rt.classNamed(library.classes.get(0) ?? "flash.display::MovieClip", load.domain),
-    );
-    dispatchEvent(this, object, this.event("added", true));
-    // The SWF's own code has run by now, its document class's constructor
-    // among it, which reaches the Loader through loaderInfo.loader.
-    if (!live()) {
-      return () => {};
+    let object: AsObject;
+    let root: MovieClip;
+    if (run) {
+      run();
+      this.bind(swf, library);
+      root = new MovieClip(library.root, library);
+      root.loaderInfo = info;
+      root.placeFirstFrame();
+      object = this.constructAs(
+        root,
+        this.rt.classNamed(library.classes.get(0) ?? "flash.display::MovieClip", load.domain),
+      );
+      dispatchEvent(this, object, this.event("added", true));
+      // The SWF's own code has run by now, its document class's constructor
+      // among it, which reaches the Loader through loaderInfo.loader.
+      if (!live()) {
+        return () => {};
+      }
+    } else {
+      // An AVM1 SWF: no code of its own runs, and its root is an AVM1Movie.
+      object = made ?? this.avm1Movie(library);
+      root = object.$display;
+      root.loaderInfo = info;
+      root.enterFirstFrame();
     }
 
     info.$url = load.url ?? info.$dynamic ?? info.$loaderURL;
@@ -1952,6 +2120,8 @@ export class Scripting {
       }
     }
 
+    this.deliverAvm1Loads();
+
     if (this.invalidated) {
       this.invalidated = false;
       this.broadcast("render");
@@ -2017,9 +2187,6 @@ function soundHash(sound: Sound): number {
 function defaultClock(): (() => number) | null {
   return typeof performance !== "undefined" ? () => performance.now() : null;
 }
-
-/** A load's failure, worded as its IOErrorEvent's text. */
-class LoadError extends Error {}
 
 /** A class's traits as the symbol lookups read them: its name, its module, its base's. */
 interface SymbolTraits {
