@@ -243,9 +243,9 @@ interface Bench {
  * does it on the CPU anyway, and the result says which drew.
  *
  * `toggle`, from 0, adds as many sprites drawn by Graphics beside the
- * root's children, and takes all of them off the list on odd frames and
- * puts them back on even ones, as a pool's objects and a panel shown and
- * hidden come and go; the toggle counts in the tick. -1 toggles nothing.
+ * root's children, taking them off and putting them back every `toggleEvery`
+ * frames, as a pool's objects and a panel shown and hidden come and go;
+ * the toggle counts in the tick. -1 toggles nothing.
  */
 async function benchSwf(
   base64: string,

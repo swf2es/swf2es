@@ -30,10 +30,12 @@
 //
 // --branches N places N coloured branches of 128 shapes. A quarter replace
 // one child each frame; the rest stay still, as scenery beside animated art.
-// --toggle-branches N removes and reattaches those N branches every frame.
+// --toggle-branches N removes and reattaches those N branches every --toggle-every K frames.
+// --nested-groups also renders nested Pixi groups while they leave and return.
 //
 //   node tests/player/bench.ts [--shapes N | --rig N | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N] [--frames N] [--idle K] [--gpu] [--back-buffer] [--antialias] [--json]
+//     | --toggle-static N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
+//     [--gpu] [--back-buffer] [--antialias] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 
@@ -46,7 +48,7 @@ const shapes = option("shapes", 2000);
 const rig = option("rig", 0);
 const branches = option("branches", 0);
 const toggleBranches = option("toggle-branches", 0);
-const toggleEvery = option("toggle-every", 1);
+const toggleEvery = Math.max(1, option("toggle-every", 1));
 const nestedGroups = args.includes("--nested-groups");
 const idleRenders = option("idle", 0);
 const toggle = option("toggle", 0);
