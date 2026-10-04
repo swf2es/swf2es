@@ -295,3 +295,79 @@ test("a pointer down dispatches capture, target and bubble with target-local coo
   // Each event counts as a change a host draws for.
   assert.equal(input.handled, 3);
 });
+
+test("roll events reach only the objects entered or left when the pointer changes branches", () => {
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  const root = new Container();
+  root.object = { $display: root } as never;
+  root.loaderInfo = {} as never;
+  stage.addChildAt(root, 0);
+  const left = new Container();
+  const right = new Container();
+  for (const child of [left, right]) {
+    child.object = { $display: child } as never;
+    child.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+    root.addChildAt(child, root.children.length);
+  }
+
+  right.matrix.tx = 40;
+  const heard: string[] = [];
+  const listen = (d: Container, label: string) => {
+    const object = d.object;
+    assert.ok(object);
+    object.$listeners = new Map(
+      ["rollOver", "rollOut"].map((type) => [
+        type,
+        [
+          {
+            fn: {
+              $f: (_self: unknown, event: { $bubbles: boolean; $related: unknown }) => {
+                assert.equal(event.$bubbles, false);
+                const related =
+                  event.$related === left.object
+                    ? "left"
+                    : event.$related === right.object
+                      ? "right"
+                      : "none";
+                heard.push(`${label}:${type}:${related}`);
+              },
+            },
+            capture: false,
+            priority: 0,
+          },
+        ],
+      ]),
+    );
+  };
+  listen(root, "root");
+  listen(left, "left");
+  listen(right, "right");
+  const scripting = {
+    stageWidth: 100,
+    stageHeight: 100,
+    rt: {
+      classNamed: () => ({}),
+      construct: (
+        _cls: unknown,
+        type: string,
+        bubbles: boolean,
+        _cancelable: boolean,
+        _x: number,
+        _y: number,
+        related: unknown,
+      ) => ({ $type: type, $bubbles: bubbles, $related: related, $stopped: 0 }),
+      call: (fn: { $f: (self: unknown, event: unknown) => void }, self: unknown, event: unknown) =>
+        fn.$f(self, event),
+    },
+  } as unknown as Scripting;
+  const input = new PointerInput(stage, scripting);
+
+  assert.equal(pointerTarget(stage, 10, 10, 100, 100), left);
+  input.handle("move", { x: 10, y: 10 });
+  assert.deepEqual(heard.splice(0), ["left:rollOver:none", "root:rollOver:none"]);
+  input.handle("move", { x: 45, y: 10 });
+  assert.deepEqual(heard.splice(0), ["left:rollOut:right", "right:rollOver:left"]);
+  input.handle("leave", { x: 120, y: 10 });
+  assert.deepEqual(heard, ["right:rollOut:none", "root:rollOut:none"]);
+});
