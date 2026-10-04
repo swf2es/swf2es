@@ -11,6 +11,7 @@ import { zlibCompress } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../oracle/oracle.ts";
 import type { Container, MovieClip } from "../../../packages/player/dist/display.js";
+import { pointerTarget } from "../../../packages/player/dist/input.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import { type FetchRequest, Scripting } from "../../../packages/player/dist/scripting.js";
 import { bare, innerSwf, scripted } from "../../player/cases.ts";
@@ -619,10 +620,8 @@ test("LoaderInfo reports HTTP status between init and complete, and before an I/
   assert.deepEqual(events, ["httpStatus:404", "ioError"]);
 });
 
-test("an AVM1 SWF from a URL is an AVM1Movie at the frame's end, and plays from the frame after next", {
-  skip,
-}, async () => {
-  const compile = compiler(out);
+// An AVM1 SWF of version 8: a 10 by 10 square, two frames, and `extra` tags before them.
+function avm1Swf(extra: Uint8Array[] = []): Uint8Array {
   const square = w.shape({
     id: 1,
     bounds: [0, 200, 0, 200],
@@ -630,57 +629,101 @@ test("an AVM1 SWF from a URL is an AVM1Movie at the frame's end, and plays from 
     paths: [
       {
         fill1: 1,
-        commands: [{ move: [0, 0] }, { line: [200, 0] }, { line: [200, 200] }, { line: [0, 0] }],
+        commands: [
+          { move: [0, 0] },
+          { line: [200, 0] },
+          { line: [200, 200] },
+          { line: [0, 200] },
+          { line: [0, 0] },
+        ],
       },
     ],
   });
-  const avm1 = w.swf({
+  return w.swf({
     version: 8,
     width: 30,
     height: 20,
     frameRate: 12,
     frameCount: 2,
-    tags: [square, w.place({ depth: 1, character: 1 }), w.showFrame(), w.showFrame(), w.end()],
+    tags: [
+      ...extra,
+      square,
+      w.place({ depth: 1, character: 1 }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
   });
+}
+
+/** A player of a bare AS3 root and a Loader on it, whose LoaderInfo's events are logged. */
+async function avm1Loading(options: ConstructorParameters<typeof Scripting>[1] = {}) {
+  const compile = compiler(out);
   const scripting = new Scripting(await createCodegen(wasm), {
     print: () => {},
     url: "http://example.test/outer.swf",
-    fetch: async () => ({ bytes: avm1, status: 200, headers: [] }),
+    ...options,
   });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
   const root = compile(
-    "Avm1UrlRoot",
-    "package { import flash.display.Sprite; public class Avm1UrlRoot extends Sprite {} }",
+    "Avm1Root",
+    "package { import flash.display.Sprite; public class Avm1Root extends Sprite {} }",
   );
-  const player = new Player(bare(root, 1, "Avm1UrlRoot"), scripting);
+  const player = new Player(bare(root, 1, "Avm1Root"), scripting);
   await player.start();
 
   const rt = scripting.rt;
   const loader = rt.construct(rt.classNamed("flash.display::Loader")) as avm2.AsObject;
   rt.callProperty(player.root.object, rt.publicName("addChild"), loader);
-  scripting.requestLoadUrl(loader, "avm1.swf");
+  const info = rt.getProperty(loader, rt.publicName("contentLoaderInfo")) as avm2.AsObject;
   const events: string[] = [];
-  const info = loader.$loaderInfo as avm2.AsObject;
   info.$listeners = new Map(
     ["open", "progress", "init", "httpStatus", "complete", "ioError"].map((type) => [
       type,
-      [{ fn: { $f: () => events.push(type) }, capture: false, priority: 0 }],
+      [
+        {
+          fn: {
+            $f: (event: avm2.AsObject) => {
+              const text = type === "ioError" ? rt.getProperty(event, rt.publicName("text")) : "";
+              events.push(text ? `${type} ${text}` : type);
+            },
+          },
+          capture: false,
+          priority: 0,
+        },
+      ],
     ]),
   );
+  const content = () => rt.getProperty(loader, rt.publicName("content")) as avm2.AsObject | null;
+  const get = (name: string) => rt.getProperty(info, rt.publicName(name));
+  const parameter = (name: string) =>
+    rt.getProperty(get("parameters") as avm2.AsObject, rt.publicName(name));
+  return { scripting, player, rt, loader, info, events, content, get, parameter };
+}
+
+test("an AVM1 SWF from a URL comes as an AS3 one's content does, its INIT and COMPLETE at the frame's end", {
+  skip,
+}, async () => {
+  const avm1 = avm1Swf();
+  const { scripting, player, rt, loader, events, content, get, parameter } = await avm1Loading({
+    fetch: async () => ({ bytes: avm1, status: 200, headers: [] }),
+  });
+  scripting.requestLoadUrl(loader, "avm1.swf?a=1");
 
   await scripting.settled();
   player.tick();
   assert.deepEqual(events, ["open", "progress", "progress", "init", "httpStatus", "complete"]);
-  const content = rt.getProperty(loader, rt.publicName("content")) as avm2.AsObject;
-  assert.equal(rt.traitsOf(content).name, "flash.display::AVM1Movie");
-  const get = (name: string) => rt.getProperty(info, rt.publicName(name));
+  const movie = content() as avm2.AsObject;
+  assert.equal(rt.traitsOf(movie).name, "flash.display::AVM1Movie");
   assert.deepEqual(
     ["actionScriptVersion", "swfVersion", "frameRate", "width", "height"].map(get),
     [2, 8, 12, 30, 20],
   );
+  assert.equal(parameter("a"), "1");
 
-  // Its first frame stays through the next frame's advance, as Flash has one from bytes.
-  const clip = content.$display as MovieClip;
+  // Added in the frame's construct phase, as an AS3 SWF's root is (Ruffle),
+  // it plays on from the next frame.
+  const clip = movie.$display as MovieClip;
   assert.equal(clip.children.length, 1);
   const frames = [clip.currentFrame];
   for (let i = 0; i < 3; i++) {
@@ -688,7 +731,88 @@ test("an AVM1 SWF from a URL is an AVM1Movie at the frame's end, and plays from 
     frames.push(clip.currentFrame);
   }
 
+  assert.deepEqual(frames, [1, 2, 1, 2]);
+});
+
+test("an AVM1 SWF from bytes comes at the end of the frame, its context's parameters on it", {
+  skip,
+}, async () => {
+  const { scripting, player, rt, loader, events, content, parameter } = await avm1Loading();
+  scripting.requestLoad(loader, avm1Swf(), undefined, new Map([["b", "2"]]));
+  assert.deepEqual(events.splice(0), ["progress", "progress"]);
+  assert.equal(content(), null);
+
+  // Made in the call, a frame's end away: no settling needed.
+  player.tick();
+  assert.deepEqual(events, ["init", "complete"]);
+  const movie = content() as avm2.AsObject;
+  assert.equal(rt.traitsOf(movie).name, "flash.display::AVM1Movie");
+  assert.equal(parameter("b"), "2");
+  const clip = movie.$display as MovieClip;
+  const frames = [clip.currentFrame];
+  for (let i = 0; i < 3; i++) {
+    player.tick();
+    frames.push(clip.currentFrame);
+  }
+
   assert.deepEqual(frames, [1, 1, 2, 1]);
+});
+
+test("an AVM1 SWF from bytes with an image comes once it is decoded, or ends in #2124", {
+  skip,
+}, async () => {
+  // DefineBitsJPEG2 holding a PNG's signature, which the decoders below take as an image.
+  const png = w.tag(
+    21,
+    Uint8Array.from([2, 0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    true,
+  );
+  const decoded = await avm1Loading({
+    decodeImage: async () => ({ width: 1, height: 1, rgba: Uint8Array.from([0, 0, 255, 255]) }),
+  });
+  decoded.scripting.requestLoad(decoded.loader, avm1Swf([png]));
+  decoded.events.splice(0);
+  decoded.player.tick();
+  assert.deepEqual(decoded.events, []);
+  await decoded.scripting.settled();
+  decoded.player.tick();
+  assert.deepEqual(decoded.events, ["init", "complete"]);
+  assert.ok(decoded.content());
+
+  const refused = await avm1Loading({ decodeImage: () => Promise.reject(new Error("no")) });
+  refused.scripting.requestLoad(refused.loader, avm1Swf([png]));
+  refused.events.splice(0);
+  await refused.scripting.settled();
+  refused.player.tick();
+  assert.deepEqual(refused.events, ["ioError Error #2124: Loaded file is an unknown type."]);
+  assert.equal(refused.content(), null);
+});
+
+test("an AVM1 SWF from bytes closed or unloaded before the frame's end never comes", {
+  skip,
+}, async () => {
+  const { scripting, player, rt, loader, events, content } = await avm1Loading();
+  scripting.requestLoad(loader, avm1Swf());
+  rt.callProperty(loader, rt.publicName("close"));
+  scripting.requestLoad(loader, avm1Swf());
+  rt.callProperty(loader, rt.publicName("unload"));
+  events.splice(0);
+  player.tick();
+  assert.deepEqual(events, []);
+  assert.equal(content(), null);
+  assert.equal((loader.$display as Container).children.length, 0);
+});
+
+test("the pointer over an AVM1 movie hits its Loader, the AVM1Movie being no InteractiveObject", {
+  skip,
+}, async () => {
+  const { scripting, player, loader } = await avm1Loading();
+  scripting.requestLoad(loader, avm1Swf());
+  player.tick();
+
+  assert.equal(pointerTarget(player.stage, 5, 5, player.width, player.height), loader.$display);
+  // Off the movie's artwork, the stage.
+  assert.equal(pointerTarget(player.stage, 15, 15, player.width, player.height), player.stage);
 });
 
 test("timers fire in the order of their times, each at its own time", { skip }, async () => {

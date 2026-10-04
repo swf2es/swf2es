@@ -1009,19 +1009,28 @@ An AVM1 SWF (no FileAttributes, or one without the ActionScript 3 flag)
 loads as Flash loads one into AS3: the content is an `AVM1Movie`, a
 `DisplayObject` whose other face is the AVM1 root's clip, so AS3 sees
 none of its children; `actionScriptVersion` is 2, and the header's
-version, frame rate and size are the SWF's. `new AVM1Movie()` is refused,
-#2012. Flash makes a `loadBytes`' `AVM1Movie` in the call, which names it
-then, and has it in the `Loader` at the end of that frame, after
-`EXIT_FRAME`, with its `INIT` and `COMPLETE`, the last asked first (the
-`avm1-movie` case); one with images comes at the end of the frame after
-they are decoded. One from a URL comes at the end of the frame its bytes
-reach, `OPEN` and the progress first. The movie keeps its first frame
-through the next frame's advance, as adl shows it, then plays at the
-stage's frame rate. Its timeline plays as an AVM1 main SWF's does without
-scripts: the player has no AVM1 interpreter, so no AVM1 action runs, its
-DoAction, DoInitAction, clip and button actions read past, and
-`AVM1Movie`'s `call` and `addCallback` throw #2014 as Flash's do while
-interop is unavailable.
+version, frame rate and size are the SWF's, `parameters` the context's
+or the URL's as for an AS3 SWF. `new AVM1Movie()` is refused, #2012.
+Flash makes a `loadBytes`' `AVM1Movie` in the call, which names it then,
+and has it in the `Loader` at the end of that frame, after `EXIT_FRAME`,
+with its `INIT` and `COMPLETE`, the last asked first; the movie keeps its
+first frame through the next frame's advance (the `avm1-movie` case, as
+adl traces and draws it). One with images comes at the end of the frame
+after they are decoded, or ends in #2124 if the decoder refuses them.
+One from a URL comes as an AS3 SWF's content does, `OPEN`, the progress
+and the child in the frame's construct phase, `INIT` and `COMPLETE` at
+its end, and plays on from the next frame: that follows Ruffle, which
+loads both kinds alike, not adl, whose harness loads only from bytes.
+The `AVM1Movie` is no `InteractiveObject`: the pointer's hits on the
+movie go to its `Loader`, as Flash has them (the corpus's
+`mouse_pick_loader_avm1`). The movie's timeline plays at the stage's
+frame rate as an AVM1 main SWF's does without scripts. The player has no
+AVM1 interpreter, so what needs one is missing: no AVM1 action runs, its
+DoAction, DoInitAction, clip and button actions read past; its buttons
+show their up state and are inert, with no other state and no hand
+cursor; its timeline sounds do not play, as no timeline's do yet; and
+`AVM1Movie`'s `call` and `addCallback` throw #2014, as Flash's do
+while interop is unavailable.
 
 `URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
 status and headers. A `URLRequest`'s GET string or URLVariables data is appended to the query;
