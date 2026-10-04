@@ -341,7 +341,7 @@ export function dropBatchedCopy(context: GraphicsContext): void {
 /**
  * A Graphics that may show another context than the one it stands for: the
  * shared one it was given (`shared`), and `show` to draw another, as a
- * shape's lines swap theirs (pixi.ts, LinesGraphics).
+ * shape's lines swap theirs (pixi.ts, SharedGraphics).
  */
 export type SharingGraphics = Graphics & {
   shared?: GraphicsContext;

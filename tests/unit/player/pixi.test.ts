@@ -1002,3 +1002,19 @@ test("a drawing off the list keeps what it drew a while, for it to come back to"
     assert.equal(fillOf().context.destroyed, false);
   });
 });
+
+test("a shared fill gathers no listener per instance, so instances go in linear time", async () => {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const character = await outlinedSquare();
+  for (let k = 1; k <= 3; k++) {
+    root.placeAtDepth(new ShapeObject(character), k);
+  }
+
+  view.prepare(root);
+  type Drawn = { context: { listenerCount(event: string): number } };
+  const fill = view.stage.children[0].children[1].children[0].children[0] as unknown as Drawn;
+  assert.equal(fill.context.listenerCount("update"), 0);
+  assert.equal(fill.context.listenerCount("unload"), 0);
+});

@@ -620,13 +620,15 @@ function linesKey(m: Linear, least: number): string {
 }
 
 /**
- * A Graphics of an object's lines, whose context is swapped for the
- * transform's as the object turns: without Pixi's listening on it, as a
- * line context never changes once built and is destroyed only once no one
- * holds it, and a shared one's listeners, one an instance, made each swap
- * search them all.
+ * A Graphics of a context it does not own and that never changes once
+ * built: a shape's or a drawing's fills, a glyph's, or lines, whose context
+ * is swapped for the transform's as the object turns. It does not listen on
+ * the context, which is destroyed only once no one holds it: a shared
+ * one's listeners, one an instance or a glyph, made each swap and each
+ * destroy search them all, so that a text of n glyphs of one font took
+ * O(n²) to go.
  */
-class LinesGraphics extends Graphics {
+class SharedGraphics extends Graphics {
   /** The context it stands for, which the cache counts: what it draws, or that drawn as a batched copy (showFor). */
   shared: GraphicsContext;
   declare flashColor?: ColorTransform | null;
@@ -679,7 +681,7 @@ interface Node {
   /** The morph's blend whose shared fills it holds, given back as it draws another or leaves. */
   blended: ShapeCharacter | null;
   /** The lines, a Graphics for each layer that has any; null where one has none. */
-  strokes: (LinesGraphics | null)[];
+  strokes: (SharedGraphics | null)[];
   /** Whether the layers are a character's or a blend's, whose lines' contexts instances share. */
   sharedLines: boolean;
   /** The children as of the last arrangement, to know those that left. */
@@ -695,7 +697,7 @@ interface Node {
   /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
   bitmap: Sprite | null;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
-  lines: LinesGraphics[];
+  lines: SharedGraphics[];
   /** Whether the object is a mask or in one, as of the last sync. */
   masking: boolean;
   /** The containers of the children a timeline's mask clips, each masked by it. */
@@ -1144,12 +1146,12 @@ export class PixiView {
         ? current.strokes
         : null;
     node.layers.forEach((layer, i) => {
-      node.art.addChild(new Graphics(fills[i]));
+      node.art.addChild(new SharedGraphics(fills[i]));
       const borrowed = lines?.[i];
       const strokes = layer.strokes.length
         ? borrowed
-          ? new LinesGraphics(borrowed.shared)
-          : new LinesGraphics()
+          ? new SharedGraphics(borrowed.shared)
+          : new SharedGraphics()
         : null;
       if (strokes) {
         if (borrowed) {
@@ -1838,7 +1840,7 @@ function drawText(o: TextObject, art: PixiContainer): void {
         flush();
         const fill = c.glyph && glyphFill(c.glyph);
         if (fill) {
-          const g = new Graphics(fill);
+          const g = new SharedGraphics(fill);
           const scale = (Math.max(0, c.format.size) * 20) / c.font.em;
           g.scale.set(scale);
           g.position.set((dx + c.x + c.kern) / 20, baseline);
@@ -1892,7 +1894,7 @@ function drawStaticText(o: StaticTextObject, art: PixiContainer): void {
     }
 
     // The fill is in the font's units over 20: a height in twips over the em puts it in pixels.
-    const g = new Graphics(fill);
+    const g = new SharedGraphics(fill);
     g.scale.set(placed.height / placed.font.em);
     g.position.set(placed.x / 20, placed.y / 20);
     g.tint = placed.color & 0xffffff;
