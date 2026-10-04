@@ -736,6 +736,12 @@
     "flash.system::WorkerDomain#createWorker",
     "flash.system::WorkerDomain#listWorkers",
     "flash.system::WorkerDomain.get:isSupported",
+    "flash.text::Font#get:fontName",
+    "flash.text::Font#get:fontStyle",
+    "flash.text::Font#get:fontType",
+    "flash.text::Font#hasGlyphs",
+    "flash.text::Font.enumerateFonts",
+    "flash.text::Font.registerFont",
     "flash.text::StaticText#get:text",
     "flash.text::TextField#appendText",
     "flash.text::TextField#get:alwaysShowSelection",
@@ -873,6 +879,7 @@
     "flash.filters::BitmapFilter",
     "flash.media::Sound",
     "flash.system::Worker",
+    "flash.text::Font",
     "flash.utils::ByteArray"
   ]
 }
