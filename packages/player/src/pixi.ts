@@ -549,7 +549,7 @@ class StrokeContexts {
  */
 class BlendFills {
   private readonly held = new Map<ShapeCharacter, { fills: GraphicsContext[]; uses: number }>();
-  /** The blends no one holds, oldest first, with the time each went idle. */
+  /** The blends no one holds, in the order they went idle, with the time each did. */
   private readonly idle = new Map<ShapeCharacter, number>();
 
   /** The blend's fills, taken: found, or built by `build`. */
@@ -674,8 +674,14 @@ interface Node {
   sharedLines: boolean;
   /** The children as of the last arrangement, to know those that left. */
   kids: readonly DisplayObject[];
-  /** Whether its lines were given back as it left the list: drawn again for its transform if it comes back. */
+  /**
+   * Whether it is off the list, released: its lines given back and its
+   * art emptied (`emptied`), or, for a drawing or a text, which are dear
+   * to build again, kept a while (`PixiView.parked`).
+   */
   released: boolean;
+  /** Whether its art was emptied while off the list: drawn again if it comes back. */
+  emptied: boolean;
   /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
   bitmap: Sprite | null;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
@@ -760,6 +766,12 @@ export class PixiView {
 
   /** What a fresh view built itself, which it destroys; what it borrowed from `source` stays. */
   private readonly built: GraphicsContext[] = [];
+  /**
+   * The released nodes of drawings and texts, with the time each left the
+   * list: kept whole for IDLE_MS, as a pool's objects or a panel shown and
+   * hidden come back, then emptied.
+   */
+  private readonly parked = new Map<Node, number>();
   /** The filters a fresh view made, which it destroys with the rest. */
   private readonly builtFilters: Filter[] = [];
   /** The objects `mask` was found set on, for the masks to be placed that are not under the root. */
@@ -984,6 +996,7 @@ export class PixiView {
         sharedLines: false,
         kids: [],
         released: false,
+        emptied: false,
         bitmap: null,
         lines: [],
         masking: false,
@@ -1170,8 +1183,15 @@ export class PixiView {
 
     // What it drew goes too: Pixi keeps a Graphics it has drawn, with its
     // geometry, for a minute after it was last drawn, which a timeline that
-    // makes its children anew on every frame turns into gigabytes.
-    this.clear(node)();
+    // makes its children anew on every frame turns into gigabytes. A
+    // drawing's own fills and a text's characters are dear to build again,
+    // and wait a while for it to come back.
+    if ((node.ownFills && node.fills.length > 0) || o instanceof TextObject) {
+      this.parked.delete(node);
+      this.parked.set(node, performance.now());
+    } else {
+      this.empty(node);
+    }
 
     // Those it last drew, which may since have left it too, and any it has
     // now; not one it last drew that has moved to another parent, which
@@ -1188,6 +1208,13 @@ export class PixiView {
         this.release(kid);
       }
     }
+  }
+
+  /** A released node's art emptied, its fills and lines given back: drawn again if it comes back. */
+  private empty(node: Node): void {
+    this.parked.delete(node);
+    node.emptied = true;
+    this.clear(node)();
   }
 
   /**
@@ -1245,11 +1272,17 @@ export class PixiView {
     const { container } = node;
     let dirty = this.fresh ? TRANSFORM | CHILDREN | CONTENT : o.dirty;
     if (node.released) {
-      // Back from off the list: drawn again, its transform as if unknown, so that it and all below
-      // draw their lines again.
+      // Back from off the list: drawn again if its art was emptied, its transform as if unknown, so
+      // that it and all below draw their lines again; a parked one has kept its own. Its children
+      // are arranged again, as those that were emptied with it are drawn again.
       node.released = false;
-      node.world = [Number.NaN, Number.NaN, Number.NaN, Number.NaN];
-      dirty |= TRANSFORM | CONTENT;
+      this.parked.delete(node);
+      dirty |= TRANSFORM | (o instanceof Container ? CHILDREN : 0);
+      if (node.emptied) {
+        node.emptied = false;
+        node.world = [Number.NaN, Number.NaN, Number.NaN, Number.NaN];
+        dirty |= CONTENT;
+      }
     }
 
     // A mask is drawn, whatever its visibility, alpha and colour, by its fills alone.
@@ -1562,6 +1595,15 @@ export class PixiView {
   prepare(root: DisplayObject): void {
     this.lines.tick();
     this.blends.tick();
+    const now = performance.now();
+    for (const [node, since] of this.parked) {
+      if (now - since < IDLE_MS) {
+        break;
+      }
+
+      this.empty(node);
+    }
+
     this.rescaled = this.leastWidth !== this.strokedAt;
     this.strokedAt = this.leastWidth;
     const node = this.sync(root, UNIT, false);

@@ -620,6 +620,17 @@ test("an object off the list gives its lines back, and has them again when it co
     assert.equal(linesOf().destroyed, false);
     assert.notEqual(linesOf(), held);
     assert.deepEqual(view.counts, { strokeContexts: 2, strokeReuses: 0 });
+    const back = view.stage.children[0].children[1].children[1].children[0].children[1];
+    assert.notEqual(back, graphics);
+    assert.equal(back.destroyed, false);
+
+    // Off and on again before a render: nothing is given back or drawn again.
+    root.removeChild(branch);
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+    assert.equal(view.stage.children[0].children[1].children[1].children[0].children[1], back);
+    assert.equal(back.destroyed, false);
+    assert.deepEqual(view.counts, { strokeContexts: 2, strokeReuses: 0 });
 
     // The branch off the list, then the shape off the branch, before a render:
     // the shape still gives its lines back, as the branch last drew it.
@@ -833,6 +844,18 @@ test("instances of a morph at one ratio share its blend's fills, which go once t
 
   assert.equal(first.destroyed, true);
   assert.equal(fill(0).destroyed, false);
+
+  // Off the list, they give the blend back, which goes once idle long enough.
+  const last = fill(0);
+  await withClock((clock) => {
+    root.removeChild(shapes[0]);
+    root.removeChild(shapes[1]);
+    view.prepare(root);
+    assert.equal(last.destroyed, false);
+    clock.at += 6000;
+    view.prepare(root);
+    assert.equal(last.destroyed, true);
+  });
 });
 
 /** A shape character of one layer: a square filled and outlined. */
@@ -896,4 +919,49 @@ test("a child moved out of a parent that leaves the list keeps what it draws", a
   assert.equal(fill.destroyed, false);
   assert.equal(lines.destroyed, false);
   assert.equal(lines.context.destroyed, false);
+});
+
+test("a drawing off the list keeps what it drew a while, for it to come back to", async () => {
+  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const sprite = new Container();
+  const drawing = new Drawing();
+  drawing.beginFill({ type: "solid", color: 0xff336699 });
+  drawing.drawRoundRect(0, 0, 30, 20, 6, 6);
+  drawing.endFill();
+  sprite.drawing = drawing;
+  root.placeAtDepth(sprite, 1);
+  type Drawn = { destroyed: boolean; context: { destroyed: boolean } };
+  const fillOf = () =>
+    view.stage.children[0].children[1].children[0].children[0] as unknown as Drawn;
+
+  await withClock((clock) => {
+    view.prepare(root);
+    const fill = fillOf();
+    const context = fill.context;
+
+    // Back within the idle time: as it was, not built again.
+    root.removeChild(sprite);
+    view.prepare(root);
+    clock.at += 4000;
+    view.prepare(root);
+    root.placeAtDepth(sprite, 1);
+    view.prepare(root);
+    assert.equal(fillOf(), fill);
+    assert.equal(fill.context.destroyed, false);
+
+    // Off longer: let go, and drawn again when it comes back.
+    root.removeChild(sprite);
+    view.prepare(root);
+    clock.at += 6000;
+    view.prepare(root);
+    assert.equal(fill.destroyed, true);
+    assert.equal(context.destroyed, true);
+    root.placeAtDepth(sprite, 1);
+    view.prepare(root);
+    assert.notEqual(fillOf(), fill);
+    assert.equal(fillOf().destroyed, false);
+    assert.equal(fillOf().context.destroyed, false);
+  });
 });

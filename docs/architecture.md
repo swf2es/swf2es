@@ -533,11 +533,16 @@ part of its transform on the stage, and is kept by layer and that
 transform, exactly, shared by every instance that sees the layer alike
 (a crowd of one creature in step) and found again when one comes back to
 it (a loop's next turn). Contexts are counted as instances take and give
-them back, and an object that leaves the list gives back its own and its
-descendants' and destroys its Graphics, drawn again if it returns (Pixi
-keeps a Graphics it has drawn, with its geometry, for a minute after it
-was last drawn: a timeline that makes its children anew on every frame,
-as a goto back does, so held gigabytes); one no one holds stays idle 5
+them back, and an object that leaves the list gives back its own and
+those of its descendants that left with it (not one moved to another
+parent, which draws it), and destroys its Graphics, drawn again if it
+returns: Pixi keeps a Graphics it has drawn, with its geometry, for a
+minute after it was last drawn, and a timeline that makes its children
+anew on every frame, as a goto back does, so held gigabytes. A drawing's
+own fills and a text's characters, dear to build again, are kept 5 s
+off the list for a pool's object or a panel hidden and shown to come
+back to (`bench.ts --toggle N`).
+A line context no one holds stays idle 5
 s, by the clock, not renders, which a host may make many of between
 frames, at most 4096 of them, before it is destroyed. A drawing's lines
 are its own, as it changes. No line is thinner than a pixel of the
