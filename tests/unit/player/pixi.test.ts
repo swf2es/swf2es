@@ -216,6 +216,55 @@ test("Pixi pointer moves are posted, flushed by a frame of their own where nothi
   }
 });
 
+test("Pixi pointer positions are taken within the box a contained canvas shows the stage in", () => {
+  // A 400 by 100 element showing a 100 by 50 stage, contained: 200 by 100, from x 100.
+  const canvas = {
+    width: 100,
+    height: 50,
+    style: { cursor: "" },
+    getBoundingClientRect: () => ({ left: 10, top: 20, width: 400, height: 100 }),
+  };
+  const renderer = {
+    screen: { width: 100, height: 50 },
+    canvas,
+  } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const calls: [string, number, number][] = [];
+  const player = {
+    width: 100,
+    height: 50,
+    pointer: {
+      handle: (type: string, p: { x: number; y: number }) => calls.push([type, p.x, p.y]),
+      flush: () => {},
+      onCursor: null,
+    },
+  } as unknown as Player;
+  const g = globalThis as { getComputedStyle?: unknown };
+  let fit = "contain";
+  g.getComputedStyle = () => ({ objectFit: fit });
+  try {
+    const unbind = view.bindPointer(player);
+    const at = (clientX: number, clientY: number) =>
+      ({ global: { x: 0, y: 0 }, clientX, clientY, button: 0, buttons: 1 }) as never;
+    view.stage.emit("pointerdown", at(10 + 100 + 50, 20 + 50));
+    fit = "fill";
+    view.stage.emit("pointerdown", at(10 + 200, 20 + 50));
+    assert.deepEqual(calls, [
+      ["down", 25, 25],
+      ["down", 50, 25],
+    ]);
+
+    // The cursor the pointer asks for is the canvas's, until unbind.
+    const pointer = player.pointer as unknown as { onCursor: (c: string) => void };
+    pointer.onCursor("pointer");
+    assert.equal(canvas.style.cursor, "pointer");
+    unbind();
+    assert.equal(canvas.style.cursor, "");
+  } finally {
+    delete g.getComputedStyle;
+  }
+});
+
 test("Flash's filters are left out under WebGPU, and a fresh view destroys those it made", async () => {
   const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));

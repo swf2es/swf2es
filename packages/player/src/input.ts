@@ -151,6 +151,9 @@ export class PointerInput {
   /** The last press, which the next continues as a double or triple click if near it in place and time. */
   private lastPress: { x: number; y: number; time: number; clicks: number } | null = null;
   private moved: PointerState | null = null;
+  private shown: Cursor = "default";
+  /** Told the cursor to show whenever it changes. */
+  onCursor: ((cursor: Cursor) => void) | null = null;
 
   constructor(
     private readonly stage: Container,
@@ -277,8 +280,44 @@ export class PointerInput {
 
       this.pressed = null;
     }
+
+    const cursor = this.cursor();
+    if (cursor !== this.shown) {
+      this.shown = cursor;
+      this.onCursor?.(cursor);
+    }
+  }
+
+  /**
+   * The cursor over what the pointer is on, as Ruffle chooses it: a hand
+   * over an enabled button, or under the nearest sprite in buttonMode,
+   * where each uses a hand cursor; an I-beam over selectable text.
+   */
+  cursor(): Cursor {
+    const d = this.hover;
+    if (d instanceof ButtonObject) {
+      return d.enabled && d.useHandCursor ? "pointer" : "default";
+    }
+
+    if (d instanceof TextObject) {
+      return d.selectable ? "text" : "default";
+    }
+
+    for (let o = d; o; o = o.parent) {
+      const fields = o.object as Partial<
+        Record<"$buttonMode" | "$useHandCursor" | "$enabled", boolean>
+      >;
+      if (fields?.$buttonMode) {
+        return fields.$useHandCursor !== false && fields.$enabled !== false ? "pointer" : "default";
+      }
+    }
+
+    return "default";
   }
 }
+
+/** A CSS cursor the host shows over the player. */
+export type Cursor = "default" | "pointer" | "text";
 
 /** Show state `state` of `d`, if it is an enabled button: the pointer moves a disabled one through none. */
 function buttonState(d: DisplayObject, state: "up" | "over" | "down"): void {

@@ -726,6 +726,42 @@ export class PixiView {
     private readonly source: PixiView | null = null,
   ) {}
 
+  /**
+   * Where a pointer event is on the SWF's stage. A canvas the page letterboxes
+   * with CSS `object-fit: contain` (or `scale-down`) shows the stage in a box
+   * centred within it, which Pixi's mapping, over the whole element, does not
+   * know of: the point is taken within that box instead.
+   */
+  private stagePoint(player: Player, e: FederatedPointerEvent): [number, number] {
+    const canvas = this.renderer.canvas as HTMLCanvasElement | undefined;
+    if (!canvas?.getBoundingClientRect || typeof getComputedStyle !== "function") {
+      return [
+        (e.global.x * player.width) / this.renderer.screen.width,
+        (e.global.y * player.height) / this.renderer.screen.height,
+      ];
+    }
+
+    let { left, top, width, height } = canvas.getBoundingClientRect();
+    const fit = getComputedStyle(canvas).objectFit;
+    if (fit === "contain" || fit === "scale-down") {
+      let scale = Math.min(width / player.width, height / player.height);
+      // scale-down never shows the canvas larger than its own pixels.
+      if (fit === "scale-down") {
+        scale = Math.min(scale, canvas.width / player.width);
+      }
+
+      left += (width - player.width * scale) / 2;
+      top += (height - player.height * scale) / 2;
+      width = player.width * scale;
+      height = player.height * scale;
+    }
+
+    return [
+      ((e.clientX - left) * player.width) / width,
+      ((e.clientY - top) * player.height) / height,
+    ];
+  }
+
   /** Let Pixi normalize browser coordinates; Flash's display list chooses the target. */
   bindPointer(player: Player): () => void {
     this.stage.eventMode = "static";
@@ -739,10 +775,12 @@ export class PixiView {
     // next press, release, leave or key; a frame callback of its own handles
     // it where the host does not advance (a paused player, say).
     let frame = 0;
+    const canvas = this.renderer.canvas as HTMLCanvasElement | undefined;
     const send = (type: "move" | "down" | "up" | "leave") => (e: FederatedPointerEvent) => {
+      const [x, y] = this.stagePoint(player, e);
       const p: PointerState = {
-        x: (e.global.x * player.width) / this.renderer.screen.width,
-        y: (e.global.y * player.height) / this.renderer.screen.height,
+        x,
+        y,
         button: e.button,
         buttons: e.buttons,
         altKey: e.altKey,
@@ -770,7 +808,26 @@ export class PixiView {
     this.stage.on("pointerup", up);
     this.stage.on("pointerupoutside", up);
     this.stage.on("pointerleave", leave);
+    // Pixi sets the canvas's cursor on every move, from its target's, which
+    // is this stage: the player's cursor goes there, and to the canvas now.
+    if (player.pointer) {
+      player.pointer.onCursor = (cursor) => {
+        this.stage.cursor = cursor;
+        if (canvas?.style) {
+          canvas.style.cursor = cursor;
+        }
+      };
+    }
+
     return () => {
+      if (player.pointer) {
+        player.pointer.onCursor = null;
+        this.stage.cursor = "default";
+        if (canvas?.style) {
+          canvas.style.cursor = "";
+        }
+      }
+
       if (frame) {
         cancelAnimationFrame(frame);
         frame = 0;

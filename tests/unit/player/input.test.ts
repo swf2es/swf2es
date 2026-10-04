@@ -117,6 +117,40 @@ test("a posted move waits for a flush or the next other input, and only the last
   assert.equal(scripting.mouseStageX, 6);
 });
 
+test("the cursor is a hand under a sprite in buttonMode, as useHandCursor says, and an I-beam over selectable text", () => {
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
+  const sprite = new Container();
+  sprite.object = { $display: sprite, $buttonMode: true } as never;
+  const art = new Container();
+  art.object = { $display: art } as never;
+  art.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+  sprite.addChildAt(art, 0);
+  stage.addChildAt(sprite, 0);
+  const field = new TextObject(null);
+  field.object = { $display: field } as never;
+  field.matrix.tx = 40;
+  stage.addChildAt(field, 1);
+  const scripting = {
+    stageWidth: 100,
+    stageHeight: 100,
+    rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
+  } as unknown as Scripting;
+  const input = new PointerInput(stage, scripting);
+  const shown: string[] = [];
+  input.onCursor = (cursor) => shown.push(cursor);
+
+  input.handle("move", { x: 10, y: 10 });
+  input.handle("move", { x: 50, y: 10 });
+  field.selectable = false;
+  input.handle("move", { x: 51, y: 10 });
+  assert.ok(sprite.object);
+  sprite.object.$useHandCursor = false;
+  input.handle("move", { x: 10, y: 10 });
+  assert.deepEqual(shown, ["pointer", "text", "default"]);
+});
+
 test("a pointer down dispatches capture, target and bubble with target-local coordinates", () => {
   const stage = new Container();
   stage.object = { $display: stage } as never;
