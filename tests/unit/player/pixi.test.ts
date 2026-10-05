@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { BitmapStore } from "../../../packages/player/dist/bitmap.js";
 import { BitmapObject, Container } from "../../../packages/player/dist/display.js";
 import { PixiView } from "../../../packages/player/dist/pixi.js";
+import { ColorBatcher } from "../../../packages/player/dist/pixi-color.js";
 import type { Player } from "../../../packages/player/dist/player.js";
 
 /** A renderer that draws nothing and reads back `pixels`, counting its reads. */
@@ -140,6 +141,233 @@ test("a batchable keeps the batcher name it is given, and one under a colour tra
   assert.equal(sprite.batcherName, "flash-color");
   sprite.renderable = { flashColor: null };
   assert.equal(sprite.batcherName, "host-custom");
+});
+
+test("nested render groups keep their hierarchy while parked and release idle batches", async () => {
+  await withClock((clock) => {
+    const view = new PixiView(standIn([]).renderer);
+    const root = new Container();
+    const branch = new Container();
+    const child = new Container();
+    branch.placeAtDepth(child, 1);
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+
+    const outer = view.stage.children[0].children[1];
+    const inner = outer.children[1];
+    assert.ok(outer && inner);
+    outer.enableRenderGroup();
+    inner.enableRenderGroup();
+    const outerGroup = outer.renderGroup;
+    const innerGroup = inner.renderGroup;
+    assert.ok(outerGroup && innerGroup);
+    const released: string[] = [];
+    outerGroup.instructionSet.renderPipes = {
+      batch: { destroyInstructionSet: () => released.push("outer") },
+    };
+    innerGroup.instructionSet.renderPipes = {
+      batch: { destroyInstructionSet: () => released.push("inner") },
+    };
+
+    root.removeChild(branch);
+    view.prepare(root);
+    assert.equal(released.length, 0);
+    assert.equal(outer.renderGroup, outerGroup);
+    assert.equal(inner.renderGroup, innerGroup);
+
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+    assert.equal(view.stage.children[0].children[1], outer);
+    released.length = 0;
+    outerGroup.instructionSet.renderPipes = {
+      batch: { destroyInstructionSet: () => released.push("outer") },
+    };
+    innerGroup.instructionSet.renderPipes = {
+      batch: { destroyInstructionSet: () => released.push("inner") },
+    };
+
+    root.removeChild(branch);
+    view.prepare(root);
+    assert.deepEqual(released, []);
+    clock.at += 5001;
+    view.prepare(root);
+    assert.deepEqual(released, ["outer", "inner"]);
+    assert.equal(outer.renderGroup, outerGroup);
+    assert.equal(inner.renderGroup, innerGroup);
+
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+    assert.equal(view.stage.children[0].children[1], outer);
+  });
+});
+
+test("rapidly toggled branches keep their render group", async () => {
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const { Container: PixiContainer } = await import(entry);
+
+  await withClock((clock) => {
+    const view = new PixiView(standIn([]).renderer);
+    const root = new Container();
+    const branch = new Container();
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+
+    const outer = view.stage.children[0].children[1];
+    assert.ok(outer);
+    const art = outer.children[0];
+    assert.ok(art);
+    for (let i = 0; i < 64; i++) {
+      art.addChild(new PixiContainer());
+    }
+    outer.enableRenderGroup();
+
+    root.removeChild(branch);
+    view.prepare(root);
+    assert.equal(outer.isRenderGroup, true);
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+    assert.equal(outer.isRenderGroup, true);
+
+    root.removeChild(branch);
+    view.prepare(root);
+    root.placeAtDepth(branch, 1);
+    view.prepare(root);
+    assert.equal(outer.isRenderGroup, true);
+
+    clock.at += 5001;
+    branch.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 1, ty: 0 });
+    view.prepare(root);
+    assert.equal(outer.isRenderGroup, true);
+  });
+});
+
+test("one-off groups give back the oldest batches past the parked limit", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const branches = Array.from({ length: 65 }, () => new Container());
+  for (const [index, branch] of branches.entries()) {
+    root.placeAtDepth(branch, index + 1);
+  }
+
+  view.prepare(root);
+  const containers = view.stage.children[0].children.slice(1);
+  const released: number[] = [];
+  for (const [index, container] of containers.entries()) {
+    container.enableRenderGroup();
+    const group = container.renderGroup;
+    assert.ok(group);
+    group.instructionSet.renderPipes = {
+      batch: { destroyInstructionSet: () => released.push(index) },
+    };
+  }
+
+  for (const branch of branches) {
+    root.removeChild(branch);
+  }
+
+  view.prepare(root);
+  assert.deepEqual(released, [0]);
+  assert.equal(
+    containers.every((container) => container.isRenderGroup),
+    true,
+  );
+});
+
+test("a new group builds with the batchers of one given back, not new ones", () => {
+  type Batchers = Record<string, { destroy(): void }>;
+  let destroyed = 0;
+  const pipe = {
+    _batchersByInstructionSet: {} as Record<number, Batchers | undefined>,
+    buildStart(set: { uid: number }) {
+      this._batchersByInstructionSet[set.uid] ??= { default: { destroy: () => destroyed++ } };
+    },
+  };
+  const renderer = {
+    ...standIn([]).renderer,
+    renderPipes: { batch: pipe },
+  } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const root = new Container();
+  const branches = Array.from({ length: 65 }, () => new Container());
+  for (const [index, branch] of branches.entries()) {
+    root.placeAtDepth(branch, index + 1);
+  }
+
+  view.prepare(root);
+  const containers = view.stage.children[0].children.slice(1);
+  for (const container of containers) {
+    container.enableRenderGroup();
+    const set = container.renderGroup?.instructionSet;
+    assert.ok(set);
+    pipe.buildStart(set);
+  }
+
+  const first = containers[0].renderGroup?.instructionSet.uid ?? -1;
+  const given = pipe._batchersByInstructionSet[first];
+  for (const branch of branches) {
+    root.removeChild(branch);
+  }
+
+  view.prepare(root);
+  assert.equal(pipe._batchersByInstructionSet[first], undefined);
+  assert.equal(destroyed, 0);
+
+  const fresh = { uid: -2 };
+  pipe.buildStart(fresh);
+  assert.equal(pipe._batchersByInstructionSet[fresh.uid], given);
+});
+
+test("a nested group regroups under its parent's group after the branch comes back", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const branch = new Container();
+  branch.placeAtDepth(new Container(), 1);
+  root.placeAtDepth(branch, 1);
+  view.prepare(root);
+
+  const outer = view.stage.children[0].children[1];
+  const inner = outer.children[1];
+  outer.enableRenderGroup();
+  inner.enableRenderGroup();
+  root.removeChild(branch);
+  view.prepare(root);
+  root.placeAtDepth(branch, 1);
+  view.prepare(root);
+
+  inner.disableRenderGroup();
+  inner.enableRenderGroup();
+  assert.equal(inner.renderGroup?.renderGroupParent, outer.renderGroup);
+  view.prepare(root);
+  assert.equal(view.stage.children[0].children[1], outer);
+  assert.equal(outer.children[1], inner);
+});
+
+test("a colour batcher gives back a past geometry peak after many smaller builds", () => {
+  // Shader construction needs a browser; the batcher lifecycle itself does not.
+  const batcher = Object.create(ColorBatcher.prototype) as ColorBatcher;
+  let destroyed = 0;
+  const largeGeometry = { destroy: () => destroyed++ };
+  Object.assign(batcher, {
+    attributeBuffer: { size: 8 << 20, destroy: () => {} },
+    indexBuffer: new Uint32Array(1 << 20),
+    geometry: largeGeometry,
+    batches: [],
+    batchIndex: 0,
+    _elements: [],
+    underusedBuilds: 0,
+  });
+
+  for (let frame = 0; frame < 120; frame++) {
+    batcher.attributeSize = 1000;
+    batcher.indexSize = 1000;
+    batcher.begin();
+  }
+
+  assert.ok(batcher.attributeBuffer.size < 8 << 20);
+  assert.ok(batcher.indexBuffer.byteLength < 4 << 20);
+  assert.notEqual(batcher.geometry, largeGeometry);
+  assert.equal(destroyed, 1);
 });
 
 test("Pixi pointer delivery scales to SWF coordinates and stops on unbind", () => {

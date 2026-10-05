@@ -8,6 +8,7 @@
 // tree, holes cut, as Pixi's own grouping of holes misses nested islands.
 import type { ColorTransform, Fill, Glyph, Line } from "@swf2es/format";
 import {
+  type Batcher,
   BufferImageSource,
   CanvasTextMetrics,
   type FederatedPointerEvent,
@@ -16,6 +17,7 @@ import {
   fontStringFromTextStyle,
   Graphics,
   GraphicsContext,
+  type InstructionSet,
   Matrix,
   Container as PixiContainer,
   Rectangle,
@@ -485,6 +487,8 @@ const IDLE_MOST = 4096;
  * last frames' go, whose Graphics in thousands made long collector pauses.
  */
 const PARKED_MOST = 1024;
+/** First-time detached groups get one chance to return without letting churn fill the batch cache. */
+const PARKED_FIRST_GROUPS_MOST = 64;
 
 /**
  * Lines' contexts by shape layer and the linear transform they are seen
@@ -740,6 +744,8 @@ interface Node {
    * (`PixiView.parked`), then emptied (`emptied`), its lines given back.
    */
   released: boolean;
+  /** Whether this branch has returned after leaving the display list. */
+  reused: boolean;
   /** Whether its art was emptied while off the list: drawn again if it comes back. */
   emptied: boolean;
   /** The thinnest line its lines were last drawn with, to draw them again for another. */
@@ -856,6 +862,12 @@ export class PixiView {
    * as a pool's objects or a panel shown and hidden come back, then emptied.
    */
   private readonly parked = new Map<Node, number>();
+  /** Retain only batches, not detached display trees, while a group waits for reuse. */
+  private readonly parkedGroups = new Map<
+    number,
+    { since: number; group: WeakRef<NonNullable<PixiContainer["renderGroup"]>> }
+  >();
+  private readonly parkedFirstGroups = new Set<number>();
   /** The filters a fresh view made, which it destroys with the rest. */
   private readonly builtFilters: Filter[] = [];
   /** The objects `mask` was found set on, for the masks to be placed that are not under the root. */
@@ -1105,6 +1117,7 @@ export class PixiView {
         sharedLines: false,
         kids: [],
         released: false,
+        reused: false,
         emptied: false,
         strokedAt: 0,
         bitmap: null,
@@ -1294,6 +1307,22 @@ export class PixiView {
     }
 
     node.released = true;
+    const group = node.container.isRenderGroup ? node.container.renderGroup : null;
+    if (group) {
+      const uid = group.instructionSet.uid;
+      this.parkedGroups.delete(uid);
+      this.parkedGroups.set(uid, { since: performance.now(), group: new WeakRef(group) });
+      if (!node.reused) {
+        this.parkedFirstGroups.add(uid);
+        if (this.parkedFirstGroups.size > PARKED_FIRST_GROUPS_MOST) {
+          const oldest = this.parkedFirstGroups.values().next().value;
+          if (oldest !== undefined) {
+            this.emptyGroup(oldest, this.parkedGroups.get(oldest)?.group.deref());
+          }
+        }
+      }
+    }
+
     const chain = node.filters[0];
     if (chain instanceof FilterChain) {
       chain.forget();
@@ -1343,6 +1372,20 @@ export class PixiView {
     this.parked.delete(node);
     node.emptied = true;
     this.clear(node)();
+  }
+
+  /** Return a parked group's batches without changing its nested group hierarchy. */
+  private emptyGroup(
+    uid: number,
+    group: NonNullable<PixiContainer["renderGroup"]> | undefined,
+  ): void {
+    this.parkedGroups.delete(uid);
+    this.parkedFirstGroups.delete(uid);
+    retireBatchers(this.renderer, uid);
+    if (group) {
+      group.instructionSet.destroy();
+      group.structureDidChange = true;
+    }
   }
 
   /**
@@ -1417,7 +1460,14 @@ export class PixiView {
       // if it has or had any, are arranged again, as those that were emptied with it are drawn
       // again.
       node.released = false;
+      node.reused = true;
       this.parked.delete(node);
+      const group = node.container.renderGroup;
+      if (group) {
+        this.parkedGroups.delete(group.instructionSet.uid);
+        this.parkedFirstGroups.delete(group.instructionSet.uid);
+      }
+
       const kids = o instanceof Container && (o.children.length > 0 || node.kids.length > 0);
       dirty |= TRANSFORM | (kids ? CHILDREN : 0);
       if (node.emptied) {
@@ -1689,7 +1739,7 @@ export class PixiView {
     // belong to this branch, it must share its parent's group. A timeline mask itself also stays
     // with its siblings, though their common parent may form a group.
     if ((links.length > 0 || node.masking) && node.container.isRenderGroup) {
-      node.container.disableRenderGroup();
+      this.disableRenderGroup(node.container);
     } else if (
       links.length === 0 &&
       !node.masking &&
@@ -1700,6 +1750,17 @@ export class PixiView {
       // Keep the group when its animation gets smaller, avoiding repeated batcher destruction.
       node.container.enableRenderGroup();
     }
+  }
+
+  /** Retire Pixi's per-group batches before it returns the group to its pool. */
+  private disableRenderGroup(container: PixiContainer): void {
+    const set = container.renderGroup?.instructionSet;
+    if (set) {
+      retireBatchers(this.renderer, set.uid);
+      set.destroy();
+    }
+
+    container.disableRenderGroup();
   }
 
   /**
@@ -1859,6 +1920,13 @@ export class PixiView {
       }
 
       this.empty(node);
+    }
+    for (const [uid, entry] of this.parkedGroups) {
+      if (now - entry.since < IDLE_MS) {
+        break;
+      }
+
+      this.emptyGroup(uid, entry.group.deref());
     }
 
     this.rescaled = this.leastWidth !== this.strokedAt;
@@ -2515,6 +2583,54 @@ interface GradientTexture {
   matrix: Matrix;
   uses: number;
   release: () => void;
+}
+
+/** Pixi's batch pipe, which keeps batchers by instruction-set ID until told to destroy them. */
+interface BatchPipe {
+  _batchersByInstructionSet: Record<number, Record<string, Batcher> | undefined>;
+  buildStart(set: InstructionSet): void;
+}
+
+/** Retired groups' batchers kept, at most this many groups', for new groups to build with. */
+const SPARE_BATCHERS_MOST = 16;
+const spareBatchersOf = new WeakMap<Renderer, Record<string, Batcher>[]>();
+
+/**
+ * Take a retired instruction set's batchers from Pixi, which keeps them by ID even after its group
+ * is gone. A branch made anew each frame would otherwise allocate a group's buffers as an older
+ * one's are freed, which costs more than keeping them all; a new group takes them over instead.
+ */
+function retireBatchers(renderer: Renderer, uid: number): void {
+  const pipe = renderer.renderPipes?.batch as unknown as BatchPipe | undefined;
+  const batchers = pipe?._batchersByInstructionSet?.[uid];
+  if (!pipe || !batchers) {
+    return;
+  }
+
+  delete pipe._batchersByInstructionSet[uid];
+  let spare = spareBatchersOf.get(renderer);
+  if (!spare) {
+    const list: Record<string, Batcher>[] = [];
+    const buildStart = pipe.buildStart;
+    pipe.buildStart = function (this: BatchPipe, set: InstructionSet) {
+      if (!this._batchersByInstructionSet[set.uid] && list.length > 0) {
+        this._batchersByInstructionSet[set.uid] = list.pop();
+      }
+
+      buildStart.call(this, set);
+    };
+    spare = list;
+    spareBatchersOf.set(renderer, spare);
+  }
+
+  if (spare.length < SPARE_BATCHERS_MOST) {
+    spare.push(batchers);
+    return;
+  }
+
+  for (const batcher of Object.values(batchers)) {
+    batcher.destroy();
+  }
 }
 
 const gpuBitmapsOf = new WeakMap<Renderer, GpuBitmaps>();

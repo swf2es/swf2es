@@ -29,12 +29,14 @@ import {
   roundPixelsBit,
   roundPixelsBitGl,
   Shader,
+  ViewableBuffer,
 } from "pixi.js";
 
 const NAME = "flash-color";
 
 /** Position 2, UV 2, colour 1, texture and rounding 1, multipliers 4, offsets 4. */
 const VERTEX_SIZE = 14;
+const SHRINK_AFTER = 120;
 
 /** A renderable with the transform it draws under, where Pixi's tint cannot draw it. */
 type Colored = Container & { flashColor?: ColorTransform | null };
@@ -193,13 +195,14 @@ const NONE: ColorTransform = {
   aAdd: 0,
 };
 
-class ColorBatcher extends Batcher {
+export class ColorBatcher extends Batcher {
   static extension = { type: [ExtensionType.Batcher], name: NAME };
 
   name = NAME;
   vertexSize = VERTEX_SIZE;
   geometry = new ColorGeometry();
   shader: ColorShader;
+  private underusedBuilds = 0;
 
   constructor(options: BatcherOptions) {
     super(options);
@@ -211,6 +214,42 @@ class ColorBatcher extends Batcher {
     }
 
     this.shader = shader;
+  }
+
+  override begin(): void {
+    // A batcher belongs to a render group. A scene can briefly fill it with geometry, then leave
+    // it using a tiny fraction of buffers that Pixi only grows. Rebuilds, not wall time, count
+    // here so a quiet group is never disrupted just to reclaim its buffers.
+    const attributes = this.attributeSize || 0;
+    const indices = this.indexSize || 0;
+    const oldAttributes = this.attributeBuffer.size;
+    const oldIndices = this.indexBuffer.byteLength;
+    const largeAttributes = oldAttributes >= 1 << 20 && attributes * 16 <= oldAttributes;
+    const largeIndices = oldIndices >= 1 << 20 && indices * 16 <= oldIndices;
+    this.underusedBuilds = largeAttributes || largeIndices ? this.underusedBuilds + 1 : 0;
+    super.begin();
+
+    if (this.underusedBuilds >= SHRINK_AFTER) {
+      const attributeBytes = Math.max(1 << 16, attributes * 8);
+      const indexCount = Math.max(1024, indices * 2);
+      const smallerAttributes = largeAttributes && attributeBytes < oldAttributes;
+      const smallerIndices = largeIndices && indexCount * 4 < oldIndices;
+      if (smallerAttributes || smallerIndices) {
+        if (smallerAttributes) {
+          this.attributeBuffer.destroy();
+          this.attributeBuffer = new ViewableBuffer(attributeBytes);
+        }
+
+        if (smallerIndices) {
+          this.indexBuffer = new Uint32Array(indexCount);
+        }
+
+        this.geometry.destroy(true);
+        this.geometry = new ColorGeometry();
+      }
+
+      this.underusedBuilds = 0;
+    }
   }
 
   /** The vertex's colour, texture and transform after its position and UV, which `at` holds. */
