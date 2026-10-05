@@ -223,7 +223,7 @@ export class Scripting {
   readonly externalInterface: ExternalInterfaceHost | null;
   /** How many calls the page has made into the SWF's ExternalInterface callbacks, which run outside a frame. */
   hostCalls = 0;
-  /** Calls to an event's updateAfterEvent: a redraw asked for before the next frame. */
+  /** Calls to an event's updateAfterEvent, and Stage.color set: a redraw asked for before the next frame. */
   updates = 0;
   /** How many goto cycles run inside one another now. */
   private cycles = 0;
@@ -425,7 +425,11 @@ export class Scripting {
       socket?: SocketHost;
       audio?: AudioHost | null;
       navigate?: Navigate | null;
-      /** What fscommand sends: a plug-in's page gets it as its DoFSCommand call; none by default. */
+      /**
+       * What fscommand sends: a plug-in's page gets it as its DoFSCommand
+       * call; none by default. The SWF chooses both strings: never evaluate
+       * them, or use them as a URL or as HTML.
+       */
       fsCommand?: ((command: string, args: string) => void) | null;
       decodeImage?: ImageDecode | null;
       screenCapabilities?: Partial<ScreenCapabilities>;

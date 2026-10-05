@@ -103,6 +103,8 @@ export function stageNatives(s: Scripting): avm2.Natives {
 
     set color(v: Value) {
       s.stageColor = s.rt.toUint(v) & 0xffffff;
+      // A redraw asked for: a host that reads Player.background as it draws shows it.
+      s.updates++;
     }
 
     get allowsFullScreen(): boolean {

@@ -50,6 +50,8 @@ let drawn = -1;
 player.advance(elapsedMs);
 if (player.changes !== drawn) {
   drawn = player.changes;
+  // A script may set Stage.color, which moves `changes`: read it as you draw.
+  renderer.background.color = player.background;
   view.render(player.stage);
 }
 ```
