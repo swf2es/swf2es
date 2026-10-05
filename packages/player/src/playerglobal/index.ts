@@ -31,6 +31,7 @@ import { filterHooks, filterNatives } from "./flash/filters/filters.js";
 import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
 import { transformNatives } from "./flash/geom/Transform.js";
 import { currencyParseResultNatives } from "./flash/globalization/CurrencyParseResult.js";
+import { numberParseResultNatives } from "./flash/globalization/NumberParseResult.js";
 import { soundHooks, soundNatives } from "./flash/media/Sound.js";
 import { soundMixerNatives } from "./flash/media/SoundMixer.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
@@ -78,6 +79,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...loaderInfoNatives(s),
     ...externalInterfaceNatives(s),
     ...currencyParseResultNatives(s),
+    ...numberParseResultNatives(),
     ...urlRequestNatives(s),
     ...urlStreamNatives(s),
     ...navigateNatives(s),
