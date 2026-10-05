@@ -465,7 +465,7 @@
   "avm2/flash_media_video_constructor": {"matched":2,"lines":157,"traced":2,"error":"Error: swf2es: native flash.media::Video#flash.media:Video::ctor is not supported yet"},
   "avm2/flash_media_video_rotation_probe": {"matched":2,"lines":28,"traced":2,"error":"Error: swf2es: native flash.media::Video#flash.media:Video::ctor is not supported yet"},
   "avm2/flash_media_video_setter": {"matched":2,"lines":41,"traced":2,"error":"Error: swf2es: native flash.media::Video#flash.media:Video::ctor is not supported yet"},
-  "avm2/flash_trace": {"matched":7,"lines":17,"traced":11,"error":"Error: swf2es: native flash.trace::Trace.getLevel is not supported yet"},
+  "avm2/flash_trace": {"matched":17,"lines":17,"traced":17,"error":null},
   "avm2/flash_xml": {"matched":0,"lines":29,"traced":0,"error":"Error: swf2es: native flash.xml::XMLParser#startParse is not supported yet"},
   "avm2/flash_xml_cloneNode": {"matched":0,"lines":22,"traced":0,"error":"Error: swf2es: native flash.xml::XMLParser#startParse is not supported yet"},
   "avm2/flash_xml_namespace": {"matched":0,"lines":110,"traced":0,"error":"Error: swf2es: native flash.xml::XMLParser#startParse is not supported yet"},
