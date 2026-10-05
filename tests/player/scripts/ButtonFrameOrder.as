@@ -32,15 +32,37 @@ package {
   }
 
   public class Container extends MovieClip {
+    private static var count:int = 0;
+    private var id:int;
+
     public function Container() {
-      trace("container constructor");
+      id = ++count;
+      trace("container", id, "constructor");
       super();
-      trace("container addFrameScript");
+      trace("container", id, "addFrameScript");
       addFrameScript(0, frame1);
     }
 
     private function frame1():void {
-      trace("container frame 1");
+      trace("container", id, "frame 1");
+    }
+  }
+
+  // Its frame script is there before super() makes its button.
+  public class Early extends MovieClip {
+    private static var count:int = 0;
+    private var id:int;
+
+    public function Early() {
+      id = ++count;
+      trace("early", id, "addFrameScript");
+      addFrameScript(0, frame1);
+      super();
+      trace("early", id, "constructed");
+    }
+
+    private function frame1():void {
+      trace("early", id, "frame 1");
     }
   }
 
@@ -80,7 +102,7 @@ package {
     private var kept:Array = [];
 
     public function Main() {
-      addFrameScript(0, frame1, 1, frame2, 3, frame4, 5, frame6);
+      addFrameScript(0, frame1, 1, frame2, 3, frame4, 5, frame6, 7, frame8);
       addEventListener(Event.ENTER_FRAME, onFrame);
       addEventListener(Event.FRAME_CONSTRUCTED, onConstructed);
     }
@@ -102,9 +124,15 @@ package {
       kept.push(new Other());
     }
 
+    // Frame 8 places a container, made in this goto's cycle.
     private function frame6():void {
-      trace("main frame 6");
-      stop();
+      trace("main frame 6, goto 8");
+      gotoAndStop(8);
+      trace("main frame 6 after goto");
+    }
+
+    private function frame8():void {
+      trace("main frame 8");
     }
 
     // Made after the frame's construct phase, before its frame scripts.
@@ -127,6 +155,7 @@ package {
       trace("enter frame 3");
       kept.push(new Other());
       addChild(new Menu());
+      addChild(new Early());
       trace("enter frame 3 attached");
     }
   }

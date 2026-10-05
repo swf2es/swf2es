@@ -791,10 +791,12 @@ A button made in a SWF after version 9 whose up state has a clip runs
 such a frame too, once its states are made and its parent has its named
 property, before its own constructor: the frame scripts due on the
 display list, the orphans' and those of what scripts made, its states'
-among them. A clip whose `super()` is making that button has registered
-no frame script yet, and keeps its first frame's for the frame's own
-phase; one a frame script made, in that phase already, loses it, as adl
-shows (`button-frame-order`, Ruffle's `frame_script_button_order`).
+among them. A clip whose `super()` is making that button has its first
+frame's script run there if it registered it before `super()`; else it
+keeps it for later when a timeline placed it, by a frame or a frame
+script's goto, or a script made it with `new` outside the frame's own
+frame scripts, and one a frame script made loses it, as adl shows
+(`button-frame-order`, Ruffle's `frame_script_button_order`).
 
 An error nothing caught is reported, and what was running goes on, as
 adl shows. A listener's error never reaches the dispatcher: the

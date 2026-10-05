@@ -229,8 +229,8 @@ export class Scripting {
   private cycles = 0;
   /**
    * Whether the frame's own frame scripts are running: a clip a script
-   * makes then, around a button whose early scripts run, loses its first
-   * frame's script to them, as in Flash; one made before keeps it.
+   * makes with `new` then, around a button whose early scripts run, loses
+   * its first frame's script to them, as in Flash; one made before keeps it.
    */
   private scriptPhase = false;
   /** Whether they nested too deep this frame, which stops them all till the next. */
@@ -673,6 +673,7 @@ export class Scripting {
   construct(display: DisplayObject, character: DisplayCharacter, library: Library): void {
     // Its first frame's children are there before its constructor runs, made alive in its super().
     if (display instanceof MovieClip) {
+      display.timelineChild = true;
       display.placeFirstFrame();
     }
 
@@ -702,21 +703,36 @@ export class Scripting {
       if ((library.version ?? 10) > 9 && hasClip(display.upState)) {
         const cls = this.rt.classNamed(name, domain);
         this.pending = display;
-        let object: avm2.AsObject;
+        let object: avm2.AsObject | null;
         try {
-          object = cls.$it.instance();
+          object = this.rt.allocate(cls);
         } finally {
           this.pending = null;
         }
 
-        named(object);
+        // A name the parent refuses is thrown once the button is constructed, as another child's is.
+        let refused: { error: unknown } | null = null;
+        if (object) {
+          try {
+            named(object);
+          } catch (error) {
+            refused = { error };
+          }
+        }
+
         display.firstScripts = true;
         this.broadcast("frameConstructed");
         this.runFrameScripts(this.stage ?? display, display);
         this.broadcast("exitFrame");
-        this.rt.constructSuper(cls, object);
-        this.added(display);
-        return;
+        if (object) {
+          this.rt.constructSuper(cls, object);
+          if (refused) {
+            throw refused.error;
+          }
+
+          this.added(display);
+          return;
+        }
       }
     }
 
@@ -2059,7 +2075,8 @@ export class Scripting {
    * landing script before a child the jump made. A clip a script removes
    * still runs its own, as Flash queues them first. Rounds until none is
    * left, bounded, as a script that jumps on every run would never settle.
-   * `also`, a button being made, is visited last where none of those has it.
+   * `also`, a button being made, is visited after them all, for one none
+   * of them has; a clip visited twice still runs a frame's script once.
    */
   runFrameScripts(root: DisplayObject, also: DisplayObject | null = null): void {
     // A script's error is reported apart: its goto still happens, and the
@@ -2070,10 +2087,16 @@ export class Scripting {
     for (let round = 0; round < 64 && !stopped(); round++) {
       let ran = false;
       const own = (o: MovieClip) => {
-        // A clip whose super() is making the children that run this has no
-        // frame scripts yet: its first frame's still runs when the frame's
-        // scripts do, unless they are running now (`button-frame-order`).
-        if (o.makingChildren && !this.scriptPhase) {
+        // A clip whose super() is making the children that run this has
+        // registered no script for its frame yet, unless it did so before
+        // super(), and keeps the frame's for later: always, placed by a
+        // timeline, made with `new`, only outside the frame's own scripts;
+        // one a frame script makes loses it (`button-frame-order`).
+        if (
+          o.makingChildren &&
+          !o.frameScripts.has(o.currentFrame) &&
+          (o.timelineChild || !this.scriptPhase)
+        ) {
           return;
         }
 

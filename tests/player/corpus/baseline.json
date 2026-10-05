@@ -525,7 +525,7 @@
   "avm2/goto_in_scene_last_frame": {"matched":2,"lines":2,"traced":2,"error":null},
   "avm2/goto_methods": {"matched":9,"lines":56,"traced":56,"error":null},
   "avm2/goto_methods_swfver10": {"matched":3,"lines":8,"traced":8,"error":null},
-  "avm2/goto_nested_construct_sibling": {"matched":5,"lines":18,"traced":18,"error":null},
+  "avm2/goto_nested_construct_sibling": {"matched":18,"lines":18,"traced":18,"error":null},
   "avm2/goto_nested_framescript": {"matched":0,"lines":9,"traced":6,"error":null},
   "avm2/goto_on_orphan": {"matched":8,"lines":15,"traced":15,"error":null},
   "avm2/gradient_bevel_filter": {"matched":207,"lines":207,"traced":207,"error":null},

@@ -1203,8 +1203,10 @@ export class MovieClip extends Container {
   readonly frameScripts = new Map<number, avm2.Value>();
   /** The frame whose script last ran, so that entering a frame runs its script once. */
   scriptedFrame = 0;
-  /** Whether its constructor's super() is making its first frame's children, before it can have registered a frame script. */
+  /** Whether its constructor's super() is making its first frame's children. */
   makingChildren = false;
+  /** Placed by a timeline, not made by a script with `new`. */
+  timelineChild = false;
   /** A goto a frame script asked for, taken when the script returns, as Flash defers it; null for none. */
   queuedGoto: number | null = null;
   /** Whether that goto plays or stops the clip, as it happens, not as it is asked for. */

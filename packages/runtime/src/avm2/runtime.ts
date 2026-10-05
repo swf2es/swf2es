@@ -2194,6 +2194,22 @@ export class Runtime {
       return hook(this, cls, args);
     }
 
+    const o = this.allocate(cls) as AsObject;
+    cls.$it.proto.$init.apply(o, args);
+    return o;
+  }
+
+  /**
+   * The first half of `new`: an instance of `cls` whose constructor has
+   * yet to run, which constructSuper runs; null for a class a hook
+   * constructs whole. A host that has to name an object before its
+   * constructor runs, as Flash does a timeline's button, makes it so.
+   */
+  allocate(cls: AsObject): AsObject | null {
+    if (this.hookOf(cls, "construct")) {
+      return null;
+    }
+
     // An interface's constructor is a method nothing implements, as avmplus words it.
     if (cls.$desc?.interface) {
       throw this.error("VerifyError", 1001, `${cls.$it.name}()`);
@@ -2203,9 +2219,7 @@ export class Runtime {
       throw this.error("ArgumentError", 2012, cls.$it.name);
     }
 
-    const o = cls.$it.instance();
-    cls.$it.proto.$init.apply(o, args);
-    return o;
+    return cls.$it.instance();
   }
 
   /** A class called as a function: a conversion for the builtins, else a coercion. */
