@@ -989,6 +989,11 @@ export class PixiView {
       this.renderer.screen.width,
       this.renderer.screen.height,
     );
+    // The stage is Pixi's only target: its hit test would otherwise search
+    // every child on each move, which on a crowded display list made each
+    // frame a third longer while the mouse moved.
+    const interactiveChildren = this.stage.interactiveChildren;
+    this.stage.interactiveChildren = false;
     // A move is posted, handled when the player next advances or before the
     // next press, release, leave or key; a frame callback of its own handles
     // it where the host does not advance (a paused player, say).
@@ -1087,6 +1092,7 @@ export class PixiView {
       this.stage.off("pointerleave", leave);
       this.stage.eventMode = "passive";
       this.stage.hitArea = null;
+      this.stage.interactiveChildren = interactiveChildren;
     };
   }
 
