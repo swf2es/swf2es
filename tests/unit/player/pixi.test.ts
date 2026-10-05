@@ -1748,7 +1748,7 @@ test("a shared fill gathers no listener per instance, so instances go in linear 
   assert.equal(fill.context.listenerCount("unload"), 0);
 });
 
-test("Pixi's pools of what destroyed contexts gave back are emptied past their most, and what is in use stays", async () => {
+test("Pixi's pool of render data destroyed contexts gave back is emptied past its most, and what is in use stays", async () => {
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   type Pool<T> = {
