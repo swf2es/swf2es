@@ -611,37 +611,42 @@ class StrokeContexts {
 }
 
 /**
- * A morph's blends' fills, shared as a shape's are by every instance drawn
- * at that blend: a crowd in step, and a timeline that places the morph
- * again at a ratio it has drawn, tessellate each blend once. Counted as
- * nodes take and give them back; one no one holds goes as its morph drops
- * the blend, which is then never drawn from again, or after IDLE_MS.
+ * A shape's fills, or a morph's blend's, shared by every instance drawn
+ * alike: a crowd in step, a pool's objects, and a timeline that places a
+ * shape or a morph at a ratio again tessellate each once. Counted as nodes
+ * take and give them back; one no one holds goes after IDLE_MS, or a
+ * blend as its morph drops it, which is then never drawn from again. Kept
+ * for as long as a shape lived, every shape a long session had shown held
+ * its fills, their geometry and their coloured copies: hundreds of MB.
  */
-class BlendFills {
+class SharedFills {
   private readonly held = new Map<ShapeCharacter, { fills: GraphicsContext[]; uses: number }>();
-  /** The blends no one holds, in the order they went idle, with the time each did. */
+  /** The shapes no one holds, in the order they went idle, with the time each did. */
   private readonly idle = new Map<ShapeCharacter, number>();
+  /** The idle ones that are blends, which go as soon as their morph drops them. */
+  private readonly idleBlends = new Set<ShapeCharacter>();
 
-  /** The blend's fills if they are kept, not taken: for a view drawn once to borrow. */
-  peek(blend: ShapeCharacter): GraphicsContext[] | null {
-    return this.held.get(blend)?.fills ?? null;
+  /** The shape's fills if they are kept, not taken: for a view drawn once to borrow. */
+  peek(shape: ShapeCharacter): GraphicsContext[] | null {
+    return this.held.get(shape)?.fills ?? null;
   }
 
-  /** The blend's fills, taken: found, or built by `build`. */
-  take(blend: ShapeCharacter, build: () => GraphicsContext[]): GraphicsContext[] {
-    let entry = this.held.get(blend);
+  /** The shape's fills, taken: found, or built by `build`. */
+  take(shape: ShapeCharacter, build: () => GraphicsContext[]): GraphicsContext[] {
+    let entry = this.held.get(shape);
     if (!entry) {
       entry = { fills: build(), uses: 0 };
-      this.held.set(blend, entry);
+      this.held.set(shape, entry);
     }
 
     entry.uses++;
-    this.idle.delete(blend);
+    this.idle.delete(shape);
+    this.idleBlends.delete(shape);
     return entry.fills;
   }
 
-  give(blend: ShapeCharacter): void {
-    const entry = this.held.get(blend);
+  give(shape: ShapeCharacter): void {
+    const entry = this.held.get(shape);
     if (!entry) {
       return;
     }
@@ -651,31 +656,43 @@ class BlendFills {
       return;
     }
 
-    if (blend.layers.some((layer) => droppedLayers.has(layer))) {
-      this.drop(blend);
+    if (shape.layers.some((layer) => droppedLayers.has(layer))) {
+      this.drop(shape);
       return;
     }
 
-    this.idle.set(blend, performance.now());
-  }
-
-  /** A frame prepared: the idle blends their morph dropped go, and those idle too long. */
-  tick(): void {
-    const now = performance.now();
-    for (const [blend, since] of this.idle) {
-      if (now - since >= IDLE_MS || blend.layers.some((layer) => droppedLayers.has(layer))) {
-        this.drop(blend);
-      }
+    this.idle.set(shape, performance.now());
+    if (shape.layers.some((layer) => blendLayers.has(layer))) {
+      this.idleBlends.add(shape);
     }
   }
 
-  private drop(blend: ShapeCharacter): void {
-    this.idle.delete(blend);
-    for (const context of this.held.get(blend)?.fills ?? []) {
+  /** A frame prepared: the idle blends their morph dropped go, and those idle too long, oldest first. */
+  tick(): void {
+    for (const shape of this.idleBlends) {
+      if (shape.layers.some((layer) => droppedLayers.has(layer))) {
+        this.drop(shape);
+      }
+    }
+
+    const now = performance.now();
+    for (const [shape, since] of this.idle) {
+      if (now - since < IDLE_MS) {
+        break;
+      }
+
+      this.drop(shape);
+    }
+  }
+
+  private drop(shape: ShapeCharacter): void {
+    this.idle.delete(shape);
+    this.idleBlends.delete(shape);
+    for (const context of this.held.get(shape)?.fills ?? []) {
       destroyContext(context);
     }
 
-    this.held.delete(blend);
+    this.held.delete(shape);
   }
 }
 
@@ -743,8 +760,8 @@ interface Node {
    * instances share.
    */
   ownFills: boolean;
-  /** The morph's blend whose shared fills it holds, given back as it draws another or leaves. */
-  blended: ShapeCharacter | null;
+  /** The shape, or morph's blend, whose shared fills it holds, given back as it draws another or leaves. */
+  sharedFills: ShapeCharacter | null;
   /** The lines, a Graphics for each layer that has any; null where one has none. */
   strokes: (SharedGraphics | null)[];
   /** Whether the layers are a character's or a blend's, whose lines' contexts instances share. */
@@ -811,8 +828,9 @@ export class PixiView {
   readonly counts = { strokeContexts: 0, strokeReuses: 0 };
   private readonly lines = new StrokeContexts(this.counts);
   private readonly nodes = new WeakMap<DisplayObject, Node>();
+  /** A fresh view's fills of the shapes it built them for, shared by their instances; it destroys them with itself. */
   private readonly fills = new Map<ShapeCharacter, GraphicsContext[]>();
-  private readonly blends = new BlendFills();
+  private readonly shared = new SharedFills();
   /**
    * A fill painted: a bitmap's from its store's texture sampled as the fill
    * samples, in global texture space so that its matrix maps the bitmap's
@@ -1130,7 +1148,7 @@ export class PixiView {
         layers: [],
         fills: [],
         ownFills: false,
-        blended: null,
+        sharedFills: null,
         strokes: [],
         sharedLines: false,
         kids: [],
@@ -1189,7 +1207,7 @@ export class PixiView {
     node.bitmap = null;
     const old = node.ownFills && !this.fresh ? node.fills : [];
     const oldLines = this.fresh ? [] : node.strokes.map((g) => g?.shared);
-    const blend = node.blended;
+    const shared = node.sharedFills;
     // A text's characters are in a container of their own; their shared glyph fills stay, not being theirs.
     for (const child of node.art.removeChildren()) {
       if (!child.destroyed) {
@@ -1200,7 +1218,7 @@ export class PixiView {
     node.layers = [];
     node.fills = [];
     node.ownFills = false;
-    node.blended = null;
+    node.sharedFills = null;
     node.strokes = [];
     node.lines = [];
     return () => {
@@ -1214,8 +1232,8 @@ export class PixiView {
         }
       }
 
-      if (blend) {
-        this.blends.give(blend);
+      if (shared) {
+        this.shared.give(shared);
       }
     };
   }
@@ -1252,16 +1270,15 @@ export class PixiView {
     node.ownFills = false;
     if (current && current.layers === node.layers && current.fills.length === node.layers.length) {
       fills = current.fills;
-    } else if (shape && !o.drawing && !(o instanceof ShapeObject && o.morph)) {
-      // A fresh view borrows the stage's, which its object, off the list, may no longer hold.
-      fills = this.fills.get(shape) ?? this.source?.fills.get(shape) ?? node.layers.map(build);
-      this.fills.set(shape, fills);
     } else if (shape && !o.drawing && !this.fresh) {
-      // A morph's blend, one of as many as its ratios: not with the shapes', which the view keeps.
-      fills = this.blends.take(shape, () => node.layers.map(build));
-      node.blended = shape;
-    } else if (shape && !o.drawing && this.source?.blends.peek(shape)) {
-      fills = this.source.blends.peek(shape) as GraphicsContext[];
+      // A shape's, or a morph's blend's, shared and counted: they go once nothing draws them.
+      fills = this.shared.take(shape, () => node.layers.map(build));
+      node.sharedFills = shape;
+    } else if (shape && !o.drawing) {
+      // A fresh view borrows the stage's, which its object, off the list, may no longer hold;
+      // else builds its own, shared by its instances, which it destroys with the rest.
+      fills = this.source?.shared.peek(shape) ?? this.fills.get(shape) ?? node.layers.map(build);
+      this.fills.set(shape, fills);
     } else {
       fills = node.layers.map(build);
       node.ownFills = true;
@@ -1936,7 +1953,7 @@ export class PixiView {
   prepare(root: DisplayObject): void {
     this.root = root;
     this.lines.tick();
-    this.blends.tick();
+    this.shared.tick();
     const now = performance.now();
     for (const [node, since] of this.parked) {
       if (now - since < IDLE_MS) {

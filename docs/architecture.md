@@ -614,7 +614,11 @@ filters, and a branch shrinking and growing against Flash. The
 `bench.ts --branches N --gpu` workload changes a quarter of N independent
 coloured branches while the rest stay still.
 
-A shape's fills are immutable `GraphicsContext`s shared by its instances, built
+A shape's fills are immutable `GraphicsContext`s shared by its instances,
+counted as they take and give them back, and destroyed once none has held
+them for 5 s: kept for as long as their shape lived, every shape a long
+session had shown kept its fills, their geometry and their coloured
+copies, hundreds of MB. They are built
 from Flash's edges (`shapes.ts`: each edge goes to its right fill
 forward and its left fill reversed, joined into contours) and filled
 even-odd through a containment tree of the contours, holes cut: all of a
@@ -669,10 +673,9 @@ keeps them to whole twips, so a closed path stays closed for `shapes.ts`
 to join. A morph keeps only its 16 latest blends, which instances in step
 share. A blend's fills are shared by the instances drawn at it, counted
 as they take and give them back, and go once the morph drops the blend,
-or idle 5 s: a tween asks for a new ratio on each frame, which the
-shapes' shared fills, kept for as long as the view, would hoard, while a
-crowd in step, or a timeline that places the morph anew on each frame,
-would otherwise tessellate the same blend for every instance. Its lines
+or idle 5 s, as a shape's do: a tween asks for a new ratio on each
+frame, while a crowd in step, or a timeline that places the morph anew on
+each frame, would otherwise tessellate the same blend for every instance. Its lines
 are shared as a shape's, a blend's layers never changing. Flash takes a
 new ratio on only as it draws: a script that moves the timeline and
 asks for bounds before the next render gets the last drawn blend's

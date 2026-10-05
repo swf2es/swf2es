@@ -1437,6 +1437,49 @@ async function outlinedSquare() {
   } as unknown as ConstructorParameters<typeof ShapeObject>[0];
 }
 
+test("instances of a shape share its fills, which go once none has drawn them for a while", async () => {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const shapes = [new ShapeObject(character), new ShapeObject(character)];
+  root.placeAtDepth(shapes[0], 1);
+  root.placeAtDepth(shapes[1], 2);
+  type Fill = { context: { destroyed: boolean } };
+  const fill = (k: number) =>
+    (view.stage.children[0].children[1 + k].children[0].children[0] as unknown as Fill).context;
+
+  await withClock((clock) => {
+    view.prepare(root);
+    const first = fill(0);
+    assert.equal(fill(1), first);
+
+    // One instance gone for good: the other still draws them.
+    root.removeChild(shapes[0]);
+    view.prepare(root);
+    clock.at += 20000;
+    view.prepare(root);
+    assert.equal(first.destroyed, false);
+    assert.equal(fill(0), first);
+
+    // Both gone: kept while parked and a while idle, then destroyed.
+    root.removeChild(shapes[1]);
+    view.prepare(root);
+    clock.at += 6000;
+    view.prepare(root);
+    assert.equal(first.destroyed, false);
+    clock.at += 6000;
+    view.prepare(root);
+    assert.equal(first.destroyed, true);
+
+    // Placed again, it is drawn anew.
+    root.placeAtDepth(shapes[0], 1);
+    view.prepare(root);
+    assert.notEqual(fill(0), first);
+    assert.equal(fill(0).destroyed, false);
+  });
+});
+
 test("a draw of a shape off the list borrows the stage's fills and lines", async () => {
   const { ShapeObject } = await import("../../../packages/player/dist/display.js");
   type Drawn = { context: { destroyed: boolean } };
