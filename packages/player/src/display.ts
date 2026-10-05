@@ -1443,6 +1443,12 @@ export class MovieClip extends Container {
 
     // On the frame before its children are made: one constructed now sees it there, as in Flash.
     this.currentFrame = target;
+    // Every child the jump places is placed before any is made alive, as
+    // Flash places a goto's: a constructor finds the others placed, and a
+    // button's early frame makes those after it alive before its
+    // FRAME_CONSTRUCTED, which a parent's listener reads them in
+    // (`goto-place-first`).
+    const placed: { display: DisplayObject; character: DisplayCharacter }[] = [];
     for (const [depth, jump] of jumps) {
       const existing = this.depths.get(depth);
       if (existing && kept.has(depth) && jump.place) {
@@ -1495,17 +1501,16 @@ export class MovieClip extends Container {
       this.placeAtDepth(child, depth);
       if (looping && this.library.constructLater) {
         this.library.constructLater(child, character);
-      } else if (this.library.uncaught) {
-        // A constructor that throws is reported, and the children after it
-        // are still made; a first frame's, made in its parent's super(),
-        // still throw into the parent's constructor, as in Flash.
-        try {
-          construct(child, character, this.library);
-        } catch (error) {
-          this.library.uncaught(error);
-        }
       } else {
-        construct(child, character, this.library);
+        placed.push({ display: child, character });
+      }
+    }
+
+    if (this.library.constructPlaced) {
+      this.library.constructPlaced(placed);
+    } else {
+      for (const { display, character } of placed) {
+        construct(display, character, this.library);
       }
     }
 
