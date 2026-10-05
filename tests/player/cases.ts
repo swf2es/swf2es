@@ -3646,6 +3646,15 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  {
+    name: "system-natives",
+    swf: (abc) => bare(abc, 2, "SystemNatives"),
+    script: "SystemNatives",
+    frames: 2,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
 ];
 
 /** The SWF with its header's version set to `version`. */

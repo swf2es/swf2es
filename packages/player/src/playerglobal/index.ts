@@ -20,6 +20,7 @@ import { shapeNatives } from "./flash/display/Shape.js";
 import { simpleButtonNatives } from "./flash/display/SimpleButton.js";
 import { spriteNatives } from "./flash/display/Sprite.js";
 import { stageNatives } from "./flash/display/Stage.js";
+import { stage3DNatives } from "./flash/display/Stage3D.js";
 import { eventNatives } from "./flash/events/Event.js";
 import { eventDispatcherNatives } from "./flash/events/EventDispatcher.js";
 import { httpStatusHooks } from "./flash/events/HTTPStatusEvent.js";
@@ -38,6 +39,8 @@ import { soundHooks, soundNatives } from "./flash/media/Sound.js";
 import { soundMixerNatives } from "./flash/media/SoundMixer.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
 import { fileFilterNatives } from "./flash/net/FileFilter.js";
+import { fileReferenceNatives } from "./flash/net/FileReference.js";
+import { netConnectionNatives } from "./flash/net/NetConnection.js";
 import { navigateNatives } from "./flash/net/navigateToURL.js";
 import { sharedObjectNatives } from "./flash/net/SharedObject.js";
 import { socketNatives } from "./flash/net/Socket.js";
@@ -46,6 +49,7 @@ import { urlStreamNatives } from "./flash/net/URLStream.js";
 import { telemetryNatives } from "./flash/profiler/Telemetry.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { capabilitiesNatives } from "./flash/system/Capabilities.js";
+import { fsCommandNatives } from "./flash/system/FSCommand.js";
 import { securityNatives } from "./flash/system/Security.js";
 import { securityDomainNatives } from "./flash/system/SecurityDomain.js";
 import { systemNatives } from "./flash/system/System.js";
@@ -115,6 +119,10 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...utils3DNatives(s),
     ...perspectiveProjectionNatives(s),
     ...styleSheetNatives(s),
+    ...fileReferenceNatives(s),
+    ...fsCommandNatives(s),
+    ...netConnectionNatives(s),
+    ...stage3DNatives(s),
   };
 }
 

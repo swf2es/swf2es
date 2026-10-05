@@ -1,6 +1,7 @@
 // flash.display.DisplayObjectContainer: children by index, as AS3 sees
 // them, over the player's render-ordered list.
 import { avm2 } from "@swf2es/runtime";
+import { hitsOwnPoint } from "../../../bounds.js";
 import { Container, type DisplayObject, MovieClip } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
 
@@ -122,6 +123,54 @@ export function containerNatives(s: Scripting): avm2.Natives {
       for (const d of c.children.slice(from, to)) {
         remove(c, d);
       }
+    }
+
+    /**
+     * What draws under a point of the stage, of this container's
+     * descendants: each visible one whose own drawing is there, within
+     * its masks, parents before their children, as the corpus's
+     * `displayobjectcontainer_getobjectsunderpoint` has Flash's; masks and
+     * objects without a face to a script are left out.
+     */
+    getObjectsUnderPoint(point: Value): Value {
+      if (point === null || point === undefined) {
+        throw s.rt.error("TypeError", 2007, "point");
+      }
+
+      const x = s.rt.toNumber(s.rt.getProperty(point as avm2.AsObject, s.rt.publicName("x")));
+      const y = s.rt.toNumber(s.rt.getProperty(point as avm2.AsObject, s.rt.publicName("y")));
+      const found: Value[] = [];
+      const stage = s.stage;
+      if (!stage) {
+        return s.rt.array(found);
+      }
+
+      const visit = (c: Container): void => {
+        for (const d of c.children) {
+          if (!d.visible) {
+            continue;
+          }
+
+          if (d.object && hitsOwnPoint(d, x, y, stage)) {
+            found.push(d.object);
+          }
+
+          if (d instanceof Container) {
+            visit(d);
+          }
+        }
+      };
+      visit(this.$display);
+      return s.rt.array(found);
+    }
+
+    /** Whether a security sandbox hides any of them: the player has none. */
+    areInaccessibleObjectsUnderPoint(point: Value): boolean {
+      if (point === null || point === undefined) {
+        throw s.rt.error("TypeError", 2007, "point");
+      }
+
+      return false;
     }
 
     getChildAt(index: Value): Value {

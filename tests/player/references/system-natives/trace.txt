@@ -1,0 +1,31 @@
+before false null true 3 none 8
+protocol ArgumentError: Error #2126: NetConnection object must be connected.
+status NetConnection.Connect.Success status
+connected true null rtmp false true 0
+status NetConnection.Connect.Closed status
+status NetConnection.Connect.Success status
+status NetConnection.Connect.Closed status
+closed false null
+responder [object Responder]
+file null
+name 2037
+size 2037
+type 2037
+creationDate 2037
+modificationDate 2037
+upload 2007
+list null
+under 3,3 a,masked
+under 8,8 a,b,inner,masked
+under 12,3 
+under 50,50 
+inaccessible false
+stage color ffffffff
+set ff345678
+colorCorrection default unsupported
+null colorCorrection TypeError: Error #2007: Parameter colorCorrection must be non-null.
+scale 1 1
+mouseLock false softKeyboardRect (x=0, y=0, w=0, h=0)
+stage3Ds 4 true
+y = 9000 ArgumentError: Error #2006: The supplied index is out of bounds.
+stage3D 12.5 0 true null

@@ -985,6 +985,30 @@ screen. By default, resolution comes from the browser's `screen` (zero in a
 non-browser host), pixel aspect ratio is 1 and DPI is 72. The corpus harness
 supplies the screen on which its Flash traces were recorded.
 
+### What a browser player lacks
+
+Some of playerglobal stands for what the player does not have, and acts
+as Flash does without it (the `system-natives` case). A FileReference
+never has a file: its dialogs are not shown, `browse`, `download` and
+`save` act as if the user cancelled, Event.CANCEL in the next frame, and
+what reads a file throws #2037; a FileReferenceList's `fileList` is empty
+after a browse. `Stage.stage3Ds` are Flash's four Stage3Ds, whose
+positions are kept within -8192 to 8191, ArgumentError 2006 beyond, and
+each request for a Context3D gets ErrorEvent #3702 in the next frame, as
+Flash without a GPU gives, so content can fall back to the display list.
+`stageVideos` is empty. NetConnection has its local mode, `connect(null)`,
+with Flash's status events and its properties, ArgumentError 2126 for
+those of a connection it does not have; an HTTP URI is kept, and a `call`
+over it, Flash Remoting, is not supported yet. `fscommand` goes to the
+host's `fsCommand` if it gives one. `Stage.color` is the SWF's background
+until set, opaque, and `Player.background` follows it for a host that
+reads it each frame; the rest of the stage's properties are a desktop
+browser player's (`colorCorrectionSupport` "unsupported", scale factors 1,
+no soft keyboard, orientation unknown). `getObjectsUnderPoint` gives the
+descendants that draw under a point of the stage, parents first, as Flash
+does, and `areInaccessibleObjectsUnderPoint` is false, there being no
+sandbox to hide them.
+
 ### Loading SWFs
 
 A `Loader` is a container whose one child is the root of the SWF it

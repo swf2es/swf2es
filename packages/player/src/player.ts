@@ -27,7 +27,12 @@ export class Player {
   readonly width: number;
   readonly height: number;
   frameRate: number;
-  readonly background: number;
+  private readonly swfBackground: number;
+  /** The stage's colour, 0xRRGGBB: the SWF's SetBackgroundColor until a script sets Stage.color; a host that reads it each frame follows that. */
+  get background(): number {
+    return this.scripting?.stageColor ?? this.swfBackground;
+  }
+
   /** Renderer-independent mouse routing, once scripts have been loaded. */
   readonly pointer: PointerInput | null;
   /** The keyboard's, likewise: keys to the focused object, and typing into a focused field. */
@@ -47,7 +52,7 @@ export class Player {
     this.width = Math.round((this.swf.frameSize.xMax - this.swf.frameSize.xMin) / 20);
     this.height = Math.round((this.swf.frameSize.yMax - this.swf.frameSize.yMin) / 20);
     this.frameRate = this.swf.frameRate || 24;
-    this.background = backgroundColor(this.swf);
+    this.swfBackground = backgroundColor(this.swf);
     this.keyboard = scripting ? new KeyboardInput(this.stage, scripting) : null;
     this.pointer = scripting ? new PointerInput(this.stage, scripting, this.keyboard) : null;
     if (scripting) {
@@ -79,6 +84,7 @@ export class Player {
     s.root = this.root;
     s.stageWidth = this.width;
     s.stageHeight = this.height;
+    s.stageColor = this.swfBackground;
     s.frameRate = this.frameRate;
     s.constructAs(this.stage, s.rt.classNamed("flash.display::Stage"));
     // The first frame has its time too: the clock is a frame's duration on as it runs, as in Flash.

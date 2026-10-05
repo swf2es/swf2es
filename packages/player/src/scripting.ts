@@ -242,6 +242,8 @@ export class Scripting {
   readonly audio: AudioHost | null;
   /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
   readonly navigate: Navigate | null;
+  /** Takes what fscommand sends, or nothing does. */
+  readonly fsCommand: ((command: string, args: string) => void) | null;
   private readonly audioEntries = new WeakMap<SoundCharacter, SharedAudio>();
   private readonly sharedAudio = new Map<number, SharedAudio[]>();
   private readonly sharedAudioGone = new FinalizationRegistry<{
@@ -336,6 +338,8 @@ export class Scripting {
   /** What flash.display.Stage reports and sets; the player copies the frame rate back each frame. */
   stageWidth = 0;
   stageHeight = 0;
+  /** Stage.color's 0xRRGGBB, the SWF's background until a script sets it; null before the stage is made. */
+  stageColor: number | null = null;
   /** The latest pointer position in stage coordinates. */
   mouseStageX = 0;
   mouseStageY = 0;
@@ -412,6 +416,8 @@ export class Scripting {
       socket?: SocketHost;
       audio?: AudioHost | null;
       navigate?: Navigate | null;
+      /** What fscommand sends: a plug-in's page gets it as its DoFSCommand call; none by default. */
+      fsCommand?: ((command: string, args: string) => void) | null;
       decodeImage?: ImageDecode | null;
       screenCapabilities?: Partial<ScreenCapabilities>;
       /** Drop the final newline produced by an HTML paragraph or BR. */
@@ -454,6 +460,7 @@ export class Scripting {
     this.onUncaught = options.onUncaught ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
+    this.fsCommand = options.fsCommand ?? null;
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
     this.flashvars = options.parameters ?? {};
