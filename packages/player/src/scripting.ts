@@ -668,15 +668,15 @@ export class Scripting {
       this.makeButtonStates(display, character, library);
       if ((library.version ?? 10) > 9 && hasClip(display.upState)) {
         display.firstScripts = true;
+        this.broadcast("frameConstructed");
         const outer = this.buttonScriptRoot;
         this.buttonScriptRoot = display;
         try {
-          this.broadcast("frameConstructed");
           this.runFrameScripts(display, false);
-          this.broadcast("exitFrame");
         } finally {
           this.buttonScriptRoot = outer;
         }
+        this.broadcast("exitFrame");
       }
     }
 
