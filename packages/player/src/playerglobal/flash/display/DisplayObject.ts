@@ -7,6 +7,7 @@ import {
   ButtonObject,
   CONTENT,
   type DisplayObject,
+  structureChanged,
   TextObject,
   TRANSFORM,
 } from "../../../display.js";
@@ -130,6 +131,7 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
 
         o.$display = display;
         display.object = o;
+        structureChanged();
         if (made) {
           s.made(display);
         }

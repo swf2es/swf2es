@@ -2,7 +2,7 @@
 // player's ButtonObject. The state it shows is the up one until the pointer
 // moves it (input.ts); a state set while shown takes its place at once.
 import { avm2 } from "@swf2es/runtime";
-import type { ButtonObject, ButtonState } from "../../../display.js";
+import { type ButtonObject, type ButtonState, structureChanged } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
 import { mixerTransform, setMixerTransform } from "../media/Sound.js";
 import { displayOf } from "./DisplayObject.js";
@@ -40,6 +40,7 @@ export function simpleButtonNatives(s: Scripting): avm2.Natives {
       b.hitTestState = d;
     }
 
+    structureChanged();
     b.show();
   };
 

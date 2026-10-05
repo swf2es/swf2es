@@ -29,6 +29,8 @@ import {
   MovieClip,
   ShapeObject,
   scriptChildren,
+  structureChanged,
+  structureVersion,
   TextObject,
   TRANSFORM,
   VideoObject,
@@ -335,6 +337,8 @@ export class Scripting {
    * does once collected. One the timeline took is kept for its frame only.
    */
   private readonly orphans = new Map<number, { ref: WeakRef<DisplayObject>; keep: boolean }>();
+  /** The orphans' entries newest first, as orphanRoots gives them, until the orphans change. */
+  private orphanOrder: { serial: number; ref: WeakRef<DisplayObject> }[] | null = null;
   /** Display objects scripts made with `new` this frame: their first frame's script runs after everything else's, and they are orphans after. */
   private fresh: DisplayObject[] = [];
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
@@ -735,6 +739,7 @@ export class Scripting {
         }
 
         display.firstScripts = true;
+        structureChanged();
         // What is placed and not yet alive is made first, as a frame's
         // construct phase makes it: the frame's other children, and those
         // of the gotos under way, which their parents' listeners look for.
@@ -993,7 +998,7 @@ export class Scripting {
    * order, as Flash dispatches them.
    */
   added(display: DisplayObject): void {
-    this.orphans.delete(display.serial);
+    this.dropOrphan(display.serial);
     if (display.object) {
       dispatchEvent(this, display.object, this.event("added", true));
     }
@@ -1036,7 +1041,20 @@ export class Scripting {
   orphan(display: DisplayObject, keep = true): void {
     if (display.object && !this.orphans.has(display.serial)) {
       this.orphans.set(display.serial, { ref: new WeakRef(display), keep });
+      this.orphansChanged();
     }
+  }
+
+  private dropOrphan(serial: number): void {
+    if (this.orphans.delete(serial)) {
+      this.orphansChanged();
+    }
+  }
+
+  /** The orphans changed: their order is sorted again, and the walks for frame scripts walk again. */
+  private orphansChanged(): void {
+    this.orphanOrder = null;
+    structureChanged();
   }
 
   /**
@@ -1047,6 +1065,7 @@ export class Scripting {
    */
   made(display: DisplayObject): void {
     this.fresh.push(display);
+    structureChanged();
     if (display instanceof MovieClip) {
       display.fresh = true;
     }
@@ -1054,18 +1073,31 @@ export class Scripting {
 
   /** The orphans still there, newest first, as Flash runs their frames. */
   orphanRoots(): DisplayObject[] {
+    // Sorted once for as long as they stay: the player asks for them several times a frame.
+    if (!this.orphanOrder) {
+      this.orphanOrder = [...this.orphans]
+        .map(([serial, orphan]) => ({ serial, ref: orphan.ref }))
+        .sort((a, b) => b.serial - a.serial);
+    }
+
     const roots: DisplayObject[] = [];
-    for (const [serial, orphan] of this.orphans) {
-      const display = orphan.ref.deref();
+    let gone = false;
+    for (const { serial, ref } of this.orphanOrder) {
+      const display = ref.deref();
       if (!display) {
         this.orphans.delete(serial);
+        gone = true;
         continue;
       }
 
       roots.push(display);
     }
 
-    return roots.sort((a, b) => b.serial - a.serial);
+    if (gone) {
+      this.orphansChanged();
+    }
+
+    return roots;
   }
 
   /**
@@ -1073,7 +1105,7 @@ export class Scripting {
    * does: timelines stopped, frame broadcasts no longer heard, no orphan.
    */
   stopAll(display: DisplayObject): void {
-    this.orphans.delete(display.serial);
+    this.dropOrphan(display.serial);
     stopTimelineSoundsUnder(this, display);
     const stop = (o: DisplayObject) => {
       if (o instanceof MovieClip) {
@@ -2115,6 +2147,12 @@ export class Scripting {
     // script's goto happens though the script throws after it").
     // Overflowed, cycles stop their script loops; the frame's own pass goes on.
     const stopped = () => this.overflowed && this.cycles > 0;
+    // The clips a walk found, kept for the next round while nothing a walk
+    // finds has changed: a round after scripts that only stopped or played
+    // walks no tree. The count is read before the walk, as a walk that
+    // turns a button's first states to its usual ones moves it.
+    let queue: MovieClip[] = [];
+    let walked = -1;
     for (let round = 0; round < 64 && !stopped(); round++) {
       let ran = false;
       const own = (o: MovieClip) => {
@@ -2171,27 +2209,32 @@ export class Scripting {
           }
         }
       };
-      const queue: MovieClip[] = [];
-      const visit = (o: DisplayObject) => {
-        if (o instanceof MovieClip && o.object) {
-          queue.push(o);
+      if (walked !== structureVersion()) {
+        walked = structureVersion();
+        const found: MovieClip[] = [];
+        const visit = (o: DisplayObject) => {
+          if (o instanceof MovieClip && o.object) {
+            found.push(o);
+          }
+
+          for (const child of scriptChildren(o)) {
+            visit(child);
+          }
+        };
+        for (const orphan of this.orphanRoots()) {
+          visit(orphan);
         }
 
-        for (const child of scriptChildren(o)) {
-          visit(child);
+        visit(root);
+        for (const display of this.fresh) {
+          visit(display);
         }
-      };
-      for (const orphan of this.orphanRoots()) {
-        visit(orphan);
-      }
 
-      visit(root);
-      for (const display of this.fresh) {
-        visit(display);
-      }
+        if (also) {
+          visit(also);
+        }
 
-      if (also) {
-        visit(also);
+        queue = found;
       }
 
       for (const o of queue) {
@@ -2340,7 +2383,7 @@ export class Scripting {
     // What the timeline took off this frame has had its frame; it stops here.
     for (const [serial, orphan] of this.orphans) {
       if (!orphan.keep) {
-        this.orphans.delete(serial);
+        this.dropOrphan(serial);
       }
     }
     // What scripts made this frame and left off the display list plays on as an orphan.

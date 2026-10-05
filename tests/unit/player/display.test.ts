@@ -5,12 +5,17 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { bounds, toStage } from "../../../packages/player/dist/bounds.js";
 import {
+  ButtonObject,
   Clips,
+  CONTENT,
   Container,
   type DisplayObject,
   type MovieClip,
   ShapeObject,
+  scriptChildren,
+  structureVersion,
   type TextObject,
+  TRANSFORM,
 } from "../../../packages/player/dist/display.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import * as w from "../../swf-writer.ts";
@@ -639,4 +644,54 @@ test("a scrolled object's bounds are its scroll's size at its origin, and its po
   assert.deepEqual(bounds(child, true), { xMin: 0, yMin: 0, xMax: 50, yMax: 40 });
   assert.deepEqual(toStage(child, null), { a: 2, b: 0, c: 0, d: 2, tx: 80, ty: 10 });
   assert.deepEqual(bounds(parent, true), { xMin: 80, yMin: 10, xMax: 180, yMax: 90 });
+});
+
+test("the structure count moves with what a walk for frame scripts finds, and with nothing else", () => {
+  const parent = new Container();
+  const a = new ShapeObject(null);
+  const b = new ShapeObject(null);
+  const moves = (change: () => void) => {
+    const before = structureVersion();
+    change();
+    return structureVersion() !== before;
+  };
+
+  assert.equal(
+    moves(() => parent.placeAtDepth(a, 1)),
+    true,
+  );
+  assert.equal(
+    moves(() => parent.addChildAt(b, 0)),
+    true,
+  );
+  assert.equal(
+    moves(() => parent.swapChildren(a, b)),
+    true,
+  );
+  assert.equal(
+    moves(() => parent.removeChild(b)),
+    true,
+  );
+  assert.equal(
+    moves(() => a.invalidate(TRANSFORM | CONTENT)),
+    false,
+  );
+  assert.equal(
+    moves(() => scriptChildren(parent)),
+    false,
+  );
+
+  // A button's first walk gives its states in another order than the walks after it.
+  const button = new ButtonObject();
+  button.upState = a;
+  button.hitTestState = b;
+  button.firstScripts = true;
+  assert.equal(
+    moves(() => scriptChildren(button)),
+    true,
+  );
+  assert.equal(
+    moves(() => scriptChildren(button)),
+    false,
+  );
 });

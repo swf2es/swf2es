@@ -49,6 +49,23 @@ export const CONTENT = 4;
 /** A Bitmap's pixels changed in place: the texture uploads again, nothing is rebuilt. */
 export const PIXELS = 8;
 
+/**
+ * A count that moves whenever what a walk for frame scripts finds may
+ * have: a child list, a button's states, a display object's AS3 object.
+ * A walk that finds it unmoved since the last can reuse what that found.
+ */
+let structure = 0;
+
+/** What a walk for frame scripts finds may have changed. */
+export function structureChanged(): void {
+  structure++;
+}
+
+/** The count structureChanged moves, to compare with an earlier one. */
+export function structureVersion(): number {
+  return structure;
+}
+
 const NO_FILTERS: readonly Filter[] = Object.freeze([]);
 const NO_FILTER_BYTES = new Uint8Array([0]);
 
@@ -233,6 +250,10 @@ export class DisplayObject {
   /** Mark a change, and that its ancestors have a changed descendant. */
   invalidate(what: number): void {
     this.dirty |= what;
+    if (what & CHILDREN) {
+      structure++;
+    }
+
     for (let p = this.parent; p && !p.descendantsDirty; p = p.parent) {
       p.descendantsDirty = true;
     }
@@ -1110,6 +1131,7 @@ export function buttonStates(
   button.overState = state(BUTTON_OVER);
   button.downState = state(BUTTON_DOWN);
   button.hitTestState = state(BUTTON_HIT_TEST);
+  structure++;
   for (const holder of holders) {
     holderMade(holder);
   }
@@ -1146,7 +1168,9 @@ function recordPlace(record: ButtonRecord, look: boolean): Place {
  */
 export function scriptChildren(d: DisplayObject): readonly DisplayObject[] {
   if (d instanceof ButtonObject && d.firstScripts) {
+    // The walk after this one finds the states in their usual order.
     d.firstScripts = false;
+    structure++;
     return [d.upState, d.overState, d.downState, d.hitTestState].filter(
       (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
     );
