@@ -1748,6 +1748,54 @@ test("a shared fill gathers no listener per instance, so instances go in linear 
   assert.equal(fill.context.listenerCount("unload"), 0);
 });
 
+test("Pixi's pool of render data destroyed contexts gave back is emptied past its most, and what is in use stays", async () => {
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  type Pool<T> = {
+    get(data?: unknown): T;
+    return(item: T): void;
+    clear(): void;
+    totalFree: number;
+  };
+  type Data = { batcher: unknown };
+  const { BigPool, GraphicsContextRenderData } = (await import(entry)) as {
+    BigPool: { getPool<T>(type: new () => T): Pool<T> };
+    GraphicsContextRenderData: new () => Data;
+  };
+  const pool = BigPool.getPool(GraphicsContextRenderData);
+  pool.clear();
+  // Render data as a renderer pools it, with a batcher that counts its destruction: Pixi's own needs a canvas.
+  let destroyed = 0;
+  const made = (n: number) =>
+    Array.from({ length: n }, () => {
+      const data = new GraphicsContextRenderData();
+      data.batcher = { destroy: () => destroyed++, _updateMaxTextures: () => {} };
+      return data;
+    });
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+
+  // A few pooled stay, for contexts to come.
+  for (const data of made(100)) {
+    pool.return(data);
+  }
+
+  view.prepare(root);
+  assert.equal(pool.totalFree, 100);
+  assert.equal(destroyed, 0);
+
+  // Past the most, the pool is emptied: what was free is destroyed, what was taken is not.
+  for (const data of made(100)) {
+    pool.return(data);
+  }
+
+  const inUse = pool.get({ maxTextures: 16 });
+  view.prepare(root);
+  assert.equal(pool.totalFree, 0);
+  assert.equal(destroyed, 199);
+  assert.notEqual(inUse.batcher, null);
+});
+
 test("of many objects off the list at once, only the latest 1024 are kept whole", async () => {
   const { ShapeObject } = await import("../../../packages/player/dist/display.js");
   const view = new PixiView(standIn([]).renderer);
