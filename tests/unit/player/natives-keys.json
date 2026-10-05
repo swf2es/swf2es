@@ -241,6 +241,8 @@
     "flash.display::Sprite#set:buttonMode",
     "flash.display::Sprite#set:soundTransform",
     "flash.display::Sprite#set:useHandCursor",
+    "flash.display::Sprite#startDrag",
+    "flash.display::Sprite#stopDrag",
     "flash.display::Stage#flash.display:Stage::requireOwnerPermissions",
     "flash.display::Stage#get:align",
     "flash.display::Stage#get:displayState",
