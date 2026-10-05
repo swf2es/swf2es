@@ -3013,6 +3013,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "security-domain",
+    swf: (abc) => bare(abc, 1, "SecurityDomainNatives"),
+    script: "SecurityDomainNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "mouse-visibility",
     swf: (abc) => bare(abc, 1, "MouseVisibility"),
     script: "MouseVisibility",
