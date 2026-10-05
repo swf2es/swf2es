@@ -274,6 +274,75 @@ test("one-off groups give back the oldest batches past the parked limit", () => 
   );
 });
 
+test("a new group builds with the batchers of one given back, not new ones", () => {
+  type Batchers = Record<string, { destroy(): void }>;
+  let destroyed = 0;
+  const pipe = {
+    _batchersByInstructionSet: {} as Record<number, Batchers | undefined>,
+    buildStart(set: { uid: number }) {
+      this._batchersByInstructionSet[set.uid] ??= { default: { destroy: () => destroyed++ } };
+    },
+  };
+  const renderer = {
+    ...standIn([]).renderer,
+    renderPipes: { batch: pipe },
+  } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const root = new Container();
+  const branches = Array.from({ length: 65 }, () => new Container());
+  for (const [index, branch] of branches.entries()) {
+    root.placeAtDepth(branch, index + 1);
+  }
+
+  view.prepare(root);
+  const containers = view.stage.children[0].children.slice(1);
+  for (const container of containers) {
+    container.enableRenderGroup();
+    const set = container.renderGroup?.instructionSet;
+    assert.ok(set);
+    pipe.buildStart(set);
+  }
+
+  const first = containers[0].renderGroup?.instructionSet.uid ?? -1;
+  const given = pipe._batchersByInstructionSet[first];
+  for (const branch of branches) {
+    root.removeChild(branch);
+  }
+
+  view.prepare(root);
+  assert.equal(pipe._batchersByInstructionSet[first], undefined);
+  assert.equal(destroyed, 0);
+
+  const fresh = { uid: -2 };
+  pipe.buildStart(fresh);
+  assert.equal(pipe._batchersByInstructionSet[fresh.uid], given);
+});
+
+test("a nested group regroups under its parent's group after the branch comes back", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const branch = new Container();
+  branch.placeAtDepth(new Container(), 1);
+  root.placeAtDepth(branch, 1);
+  view.prepare(root);
+
+  const outer = view.stage.children[0].children[1];
+  const inner = outer.children[1];
+  outer.enableRenderGroup();
+  inner.enableRenderGroup();
+  root.removeChild(branch);
+  view.prepare(root);
+  root.placeAtDepth(branch, 1);
+  view.prepare(root);
+
+  inner.disableRenderGroup();
+  inner.enableRenderGroup();
+  assert.equal(inner.renderGroup?.renderGroupParent, outer.renderGroup);
+  view.prepare(root);
+  assert.equal(view.stage.children[0].children[1], outer);
+  assert.equal(outer.children[1], inner);
+});
+
 test("a colour batcher gives back a past geometry peak after many smaller builds", () => {
   // Shader construction needs a browser; the batcher lifecycle itself does not.
   const batcher = Object.create(ColorBatcher.prototype) as ColorBatcher;

@@ -8,6 +8,7 @@
 // tree, holes cut, as Pixi's own grouping of holes misses nested islands.
 import type { ColorTransform, Fill, Glyph, Line } from "@swf2es/format";
 import {
+  type Batcher,
   BufferImageSource,
   CanvasTextMetrics,
   type FederatedPointerEvent,
@@ -1380,12 +1381,10 @@ export class PixiView {
   ): void {
     this.parkedGroups.delete(uid);
     this.parkedFirstGroups.delete(uid);
+    retireBatchers(this.renderer, uid);
     if (group) {
       group.instructionSet.destroy();
       group.structureDidChange = true;
-    } else {
-      // Pixi's batch pipe caches by instruction-set ID even after the group itself is collected.
-      this.renderer.renderPipes.batch.destroyInstructionSet({ uid } as InstructionSet);
     }
   }
 
@@ -1755,7 +1754,12 @@ export class PixiView {
 
   /** Retire Pixi's per-group batches before it returns the group to its pool. */
   private disableRenderGroup(container: PixiContainer): void {
-    container.renderGroup?.instructionSet.destroy();
+    const set = container.renderGroup?.instructionSet;
+    if (set) {
+      retireBatchers(this.renderer, set.uid);
+      set.destroy();
+    }
+
     container.disableRenderGroup();
   }
 
@@ -2579,6 +2583,54 @@ interface GradientTexture {
   matrix: Matrix;
   uses: number;
   release: () => void;
+}
+
+/** Pixi's batch pipe, which keeps batchers by instruction-set ID until told to destroy them. */
+interface BatchPipe {
+  _batchersByInstructionSet: Record<number, Record<string, Batcher> | undefined>;
+  buildStart(set: InstructionSet): void;
+}
+
+/** Retired groups' batchers kept, at most this many groups', for new groups to build with. */
+const SPARE_BATCHERS_MOST = 16;
+const spareBatchersOf = new WeakMap<Renderer, Record<string, Batcher>[]>();
+
+/**
+ * Take a retired instruction set's batchers from Pixi, which keeps them by ID even after its group
+ * is gone. A branch made anew each frame would otherwise allocate a group's buffers as an older
+ * one's are freed, which costs more than keeping them all; a new group takes them over instead.
+ */
+function retireBatchers(renderer: Renderer, uid: number): void {
+  const pipe = renderer.renderPipes?.batch as unknown as BatchPipe | undefined;
+  const batchers = pipe?._batchersByInstructionSet?.[uid];
+  if (!pipe || !batchers) {
+    return;
+  }
+
+  delete pipe._batchersByInstructionSet[uid];
+  let spare = spareBatchersOf.get(renderer);
+  if (!spare) {
+    const list: Record<string, Batcher>[] = [];
+    const buildStart = pipe.buildStart;
+    pipe.buildStart = function (this: BatchPipe, set: InstructionSet) {
+      if (!this._batchersByInstructionSet[set.uid] && list.length > 0) {
+        this._batchersByInstructionSet[set.uid] = list.pop();
+      }
+
+      buildStart.call(this, set);
+    };
+    spare = list;
+    spareBatchersOf.set(renderer, spare);
+  }
+
+  if (spare.length < SPARE_BATCHERS_MOST) {
+    spare.push(batchers);
+    return;
+  }
+
+  for (const batcher of Object.values(batchers)) {
+    batcher.destroy();
+  }
 }
 
 const gpuBitmapsOf = new WeakMap<Renderer, GpuBitmaps>();
