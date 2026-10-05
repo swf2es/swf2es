@@ -536,6 +536,48 @@ test("Pixi pointer delivery scales to SWF coordinates and stops on unbind", () =
   assert.equal(calls.length, 1);
 });
 
+test("Pixi hit-tests the bound stage alone, not its children", async () => {
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const { Container: PixiContainer, EventBoundary } = (await import(entry)) as {
+    Container: new () => {
+      eventMode: string;
+      hitArea: unknown;
+      interactiveChildren: boolean;
+    };
+    EventBoundary: new (root: unknown) => { hitTest(x: number, y: number): unknown };
+  };
+  // Containers' event members, as the browser's Pixi loads them.
+  await import(new URL("events/init.mjs", entry).href);
+  const renderer = { screen: { width: 200, height: 100 } } as unknown as ConstructorParameters<
+    typeof PixiView
+  >[0];
+  const view = new PixiView(renderer);
+  const player = {
+    width: 100,
+    height: 50,
+    pointer: { handle: () => {}, flush: () => {}, cursor: () => "default" },
+  } as unknown as Player;
+  // A child Pixi would pick, and count each test of.
+  let tested = 0;
+  const child = new PixiContainer();
+  child.eventMode = "static";
+  child.hitArea = {
+    contains: () => {
+      tested++;
+      return true;
+    },
+  };
+  view.stage.addChild(child as never);
+  const unbind = view.bindPointer(player);
+  const boundary = new EventBoundary(view.stage);
+  assert.equal(boundary.hitTest(10, 10), view.stage);
+  assert.equal(tested, 0);
+
+  unbind();
+  assert.equal(view.stage.interactiveChildren, true);
+});
+
 test("Pixi pointer moves are posted, flushed by a frame of their own where nothing else did", () => {
   const renderer = { screen: { width: 100, height: 100 } } as unknown as ConstructorParameters<
     typeof PixiView
