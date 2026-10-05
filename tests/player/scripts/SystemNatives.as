@@ -4,6 +4,7 @@ package {
   import flash.events.Event;
   import flash.events.NetStatusEvent;
   import flash.geom.Point;
+  import flash.media.Video;
   import flash.net.FileReference;
   import flash.net.FileReferenceList;
   import flash.net.NetConnection;
@@ -15,6 +16,7 @@ package {
     public function SystemNatives() {
       connection();
       files();
+      video();
       // adl's harness adds the root after its constructor; the player has it on the stage before.
       if (stage) {
         added(null);
@@ -61,6 +63,24 @@ package {
         trace("upload", e.errorID);
       }
       trace("list", new FileReferenceList().fileList);
+    }
+
+    private function video():void {
+      for each (var size:Array in [[], [100], [100, 50], [0, 50], [1.9, 2.5]]) {
+        var v:Video = size.length == 0 ? new Video() : size.length == 1 ? new Video(size[0]) :
+          new Video(size[0], size[1]);
+        trace("video", size, v.width, v.height, v.videoWidth, v.videoHeight, v.smoothing, v.deblocking);
+      }
+      try {
+        new Video(-1, 10);
+      } catch (e:Error) {
+        trace("video -1", e.errorID);
+      }
+      var scaled:Video = new Video(100, 100);
+      scaled.width = 50;
+      scaled.attachNetStream(null);
+      scaled.clear();
+      trace("scaled", scaled.width, scaled.scaleX);
     }
 
     private function added(e:Event):void {

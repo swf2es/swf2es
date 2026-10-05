@@ -1052,7 +1052,17 @@
     "flash.xml::XMLTag#set:attrs",
     "flash.xml::XMLTag#set:empty",
     "flash.xml::XMLTag#set:type",
-    "flash.xml::XMLTag#set:value"
+    "flash.xml::XMLTag#set:value",
+    "flash.media::Video#attachCamera",
+    "flash.media::Video#attachNetStream",
+    "flash.media::Video#clear",
+    "flash.media::Video#flash.media:Video::ctor",
+    "flash.media::Video#get:deblocking",
+    "flash.media::Video#get:smoothing",
+    "flash.media::Video#get:videoHeight",
+    "flash.media::Video#get:videoWidth",
+    "flash.media::Video#set:deblocking",
+    "flash.media::Video#set:smoothing"
   ],
   "hooks": [
     "flash.display::BitmapData",

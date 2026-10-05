@@ -31,6 +31,7 @@ import {
   scriptChildren,
   TextObject,
   TRANSFORM,
+  VideoObject,
 } from "./display.js";
 import { FontSet } from "./fonts.js";
 import { decodeImages, decodeInBrowser, hasUndecoded, type ImageDecode } from "./images.js";
@@ -1129,6 +1130,10 @@ export class Scripting {
 
       if (t.name === "flash.display::Bitmap") {
         return new BitmapObject(null);
+      }
+
+      if (t.name === "flash.media::Video") {
+        return new VideoObject();
       }
 
       if (t.name === "flash.text::TextField") {

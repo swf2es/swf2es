@@ -996,7 +996,11 @@ after a browse. `Stage.stage3Ds` are Flash's four Stage3Ds, whose
 positions are kept within -8192 to 8191, ArgumentError 2006 beyond, and
 each request for a Context3D gets ErrorEvent #3702 in the next frame, as
 Flash without a GPU gives, so content can fall back to the display list.
-`stageVideos` is empty. NetConnection has its local mode, `connect(null)`,
+`stageVideos` is empty, and a `Video` is a box of the size it was made
+at, 320 by 240 where either is 0, RangeError 2006 for a negative one,
+which bounds, scales and hits as Flash's and shows nothing: no stream or
+camera plays in it, and a timeline's DefineVideoStream is not read yet.
+NetConnection has its local mode, `connect(null)`,
 with Flash's status events and its properties, ArgumentError 2126 for
 those of a connection it does not have; an HTTP URI is kept, and a `call`
 over it, Flash Remoting, is not supported yet. `fscommand` goes to the

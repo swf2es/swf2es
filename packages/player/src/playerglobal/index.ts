@@ -38,6 +38,7 @@ import { numberParseResultNatives } from "./flash/globalization/NumberParseResul
 import { soundHooks, soundNatives } from "./flash/media/Sound.js";
 import { soundMixerNatives } from "./flash/media/SoundMixer.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
+import { videoNatives } from "./flash/media/Video.js";
 import { fileFilterNatives } from "./flash/net/FileFilter.js";
 import { fileReferenceNatives } from "./flash/net/FileReference.js";
 import { netConnectionNatives } from "./flash/net/NetConnection.js";
@@ -125,6 +126,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...netConnectionNatives(s),
     ...stage3DNatives(s),
     ...xmlDocumentNatives(s),
+    ...videoNatives(s),
   };
 }
 

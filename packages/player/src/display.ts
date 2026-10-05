@@ -824,6 +824,12 @@ function swap(existing: DisplayObject, character: Character): void {
   existing.invalidate(CONTENT);
 }
 
+/** A Video: a box of the size it was made at, its bounds; the player plays no video in it, so it draws nothing. */
+export class VideoObject extends DisplayObject {
+  boxWidth = 320;
+  boxHeight = 240;
+}
+
 /** A Bitmap: a display object that shows a BitmapData's pixels, its bounds the data's size. */
 export class BitmapObject extends DisplayObject {
   private shown: BitmapStore | null = null;
