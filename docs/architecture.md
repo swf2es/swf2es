@@ -443,7 +443,12 @@ family of classes (`object`, `array`, `string`, `regexp`, `number`,
 `vector`, `bytearray`, `date`, `json`, `dictionary`...), registered in
 `natives/index.ts`, with what makes some builtin classes differ from others:
 Arrays' and Vectors' element storage, and what calling or constructing
-`int`, `String`, `Object`, `Array` or a Vector does. avmshell's own classes,
+`int`, `String`, `Object`, `Array` or a Vector does. A Dictionary keyed
+weakly (`new Dictionary(true)`, `weak-keys.ts`) keeps no key alive, as
+Flash's does not: its values in a `WeakMap`, its keys' order as `WeakRef`s,
+and a for-in's names of its keys held weakly too, so that a for-in left off
+keeps none. Kept strongly, an application's registry of display objects in
+one held every room's clips, which played on as orphans. avmshell's own classes,
 which a player has not, are in `natives/shell.ts`. playerglobal is the
 player's (`packages/player/src/playerglobal/flash/display/...`, a path per
 package, so a class's file follows from its qualified name). The debugger player's error messages are avmplus'
