@@ -2,7 +2,7 @@
 // TextModel (text.ts), its properties as adl reports them; a TextFormat's
 // values stored as Flash converts them, null for one it does not set.
 import { avm2 } from "@swf2es/runtime";
-import { CONTENT, type TextObject } from "../../../display.js";
+import { CONTENT, type TextObject, TRANSFORM } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
 import { applied, emptyFormat, type PartialFormat } from "../../../text.js";
 import { GUTTER, lineOf, shownLines } from "../../../text-layout.js";
@@ -335,6 +335,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       const value = s.rt.toString(v);
       if (value === "normal" || value === "advanced") {
         this.$display.antiAliasType = value;
+        this.$display.invalidate(CONTENT | TRANSFORM);
       }
     }
     get gridFitType(): string {
@@ -344,6 +345,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     set gridFitType(v: Value) {
       const value = s.rt.toString(v);
       this.$display.gridFitType = value === "pixel" || value === "subpixel" ? value : "none";
+      this.$display.invalidate(CONTENT | TRANSFORM);
     }
 
     get border(): boolean {
@@ -394,6 +396,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     set embedFonts(v: Value) {
       this.$display.embedFonts = !!v;
       changed(this);
+      this.$display.invalidate(TRANSFORM);
     }
     get selectable(): boolean {
       return this.$display.selectable;

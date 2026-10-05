@@ -763,6 +763,7 @@ interface Node {
   blend: string;
   /** Its filters' records as of the last sync, and the Pixi filters made of them, its own. */
   filterRecords: readonly FilterRecord[];
+  filterTextShadow: boolean;
   filters: Filter[];
   /** Draws in this branch, excluding those already isolated in a child render group. */
   draws: number;
@@ -1117,6 +1118,7 @@ export class PixiView {
         inherited: null,
         blend: "normal",
         filterRecords: NO_RECORDS,
+        filterTextShadow: false,
         filters: [],
         draws: 0,
         singleDraw: 0,
@@ -1443,9 +1445,19 @@ export class PixiView {
       // Its filters, then its blend: adl filters the object, then blends what they make.
       const blend = masking ? "normal" : o.blendMode;
       const records = masking ? NO_RECORDS : o.filters;
-      if (blend !== node.blend || records !== node.filterRecords) {
+      const filterTextShadow =
+        o instanceof TextObject &&
+        o.embedFonts &&
+        o.antiAliasType === "advanced" &&
+        o.gridFitType === "pixel";
+      if (
+        blend !== node.blend ||
+        records !== node.filterRecords ||
+        filterTextShadow !== node.filterTextShadow
+      ) {
         node.blend = blend;
         node.filterRecords = records;
+        node.filterTextShadow = filterTextShadow;
         for (const f of node.filters) {
           f.destroy();
         }
@@ -1455,13 +1467,17 @@ export class PixiView {
         const chain =
           this.renderer.type === RendererType.WEBGPU
             ? []
-            : displayFilters(records, (map) => {
-                // A displacement map's map: its store's texture, brought up to date as it is read.
-                const store = (map as { $store?: BitmapStore }).$store;
-                return store && !store.disposed
-                  ? gpuBitmaps(this.renderer).texture(store, false)
-                  : null;
-              });
+            : displayFilters(
+                records,
+                (map) => {
+                  // A displacement map's map: its store's texture, brought up to date as it is read.
+                  const store = (map as { $store?: BitmapStore }).$store;
+                  return store && !store.disposed
+                    ? gpuBitmaps(this.renderer).texture(store, false)
+                    : null;
+                },
+                filterTextShadow,
+              );
         // A view drawn once keeps no output.
         node.filters = chain.length > 0 ? [new FilterChain(chain, container, !this.fresh)] : [];
         if (this.fresh) {
@@ -2073,7 +2089,9 @@ function drawText(o: TextObject, art: PixiContainer): void {
           const g = new SharedGraphics(fill);
           const scale = (Math.max(0, c.format.size) * 20) / c.font.em;
           g.scale.set(scale);
-          g.position.set((dx + c.x + c.kern) / 20, baseline);
+          // Flash's pixel grid fit places small embedded glyphs on the next sample centre.
+          const gridOffset = o.antiAliasType === "advanced" && o.gridFitType === "pixel" ? 0.5 : 0;
+          g.position.set((dx + c.x + c.kern) / 20 + gridOffset, baseline + gridOffset);
           g.tint = c.format.color & 0xffffff;
           text.addChild(g);
         }
