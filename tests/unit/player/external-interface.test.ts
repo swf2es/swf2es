@@ -84,3 +84,18 @@ test("ExternalInterface reports an unavailable host and keeps callbacks per play
   assert.equal(callbacks.current, null);
   assert.deepEqual(calls.slice(2), ["callback ready", "callback ready"]);
 });
+
+test("ExternalInterface quotes JavaScript string and error arguments", () => {
+  const s = scripting(null);
+  const natives = externalInterfaceNatives(s);
+  const quote = natives[`${PRIVATE}_quotedStringFromString`](s.rt);
+  const quoteError = natives[`${PRIVATE}_quotedStringFromError`](s.rt);
+  const value = 'quote " slash \\ newline \n tab \t null \0';
+
+  assert.equal(JSON.parse(quote.call(null, value) as string), value);
+  assert.equal(quote.call(null, value), JSON.stringify(value));
+  assert.equal(
+    JSON.parse(quoteError.call(null, new Error("bad input")) as string),
+    "Error: bad input",
+  );
+});
