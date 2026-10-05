@@ -37,6 +37,15 @@ function random(seed: number): number {
   return result;
 }
 
+/**
+ * A double to int as x86's conversion makes it: out of range, or NaN, is
+ * -2^31. Where many octaves take a point's lattice past it, Flash's noise
+ * goes wild, and so does this (the `perlin-noise` case).
+ */
+function int32(v: number): number {
+  return v > -2147483649 && v < 2147483648 ? Math.trunc(v) : -2147483648;
+}
+
 const sCurve = (t: number) => t * t * (3 - 2 * t);
 const lerp = (t: number, a: number, b: number) => a + t * (b - a);
 
@@ -49,6 +58,8 @@ interface Stitch {
 
 export class Turbulence {
   private readonly lattice = new Int32Array(B_SIZE + B_SIZE + 2);
+  /** The stitching state, made again for each point, kept to not allocate per pixel. */
+  private readonly stitch: Stitch = { width: 0, height: 0, wrapX: 0, wrapY: 0 };
   /** Each channel's gradients, x and y interleaved. */
   private readonly gradient = [0, 1, 2, 3].map(() => new Float64Array((B_SIZE + B_SIZE + 2) * 2));
 
@@ -87,14 +98,14 @@ export class Turbulence {
 
   private noise2(channel: number, x: number, y: number, stitch: Stitch | null): number {
     const tx = x + PERLIN_N;
-    let bx0 = Math.trunc(tx);
+    let bx0 = int32(tx);
     let bx1 = bx0 + 1;
-    const rx0 = tx - Math.trunc(tx);
+    const rx0 = tx - int32(tx);
     const rx1 = rx0 - 1;
     const ty = y + PERLIN_N;
-    let by0 = Math.trunc(ty);
+    let by0 = int32(ty);
     let by1 = by0 + 1;
-    const ry0 = ty - Math.trunc(ty);
+    const ry0 = ty - int32(ty);
     const ry1 = ry0 - 1;
     if (stitch) {
       bx0 -= bx0 >= stitch.wrapX ? stitch.width : 0;
@@ -163,7 +174,11 @@ export class Turbulence {
 
       const w = Math.trunc(width * fx + 0.5);
       const h = Math.trunc(height * fy + 0.5);
-      stitch = { width: w, height: h, wrapX: PERLIN_N + w, wrapY: PERLIN_N + h };
+      stitch = this.stitch;
+      stitch.width = w;
+      stitch.height = h;
+      stitch.wrapX = PERLIN_N + w;
+      stitch.wrapY = PERLIN_N + h;
     }
 
     let sum = 0;

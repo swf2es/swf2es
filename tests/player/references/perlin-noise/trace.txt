@@ -6,3 +6,13 @@ blue and alpha 8957860c 7f0000ff 7f0000eb 770000ff
 offsets 31ea1f0f ff8a7f84 ff9192a1 ff8e428a
 opaque 9a3b845a ff000000 ff1f3329 ff184519
 negative seed 98a08d91 ff000000 ffa5a13e ff48801f
+octaves 34 19ec062d ff7f7f7f ff000000 ff000000
+turbulent octaves 34 eb29e134 0 0 0
+octaves 36 2f4050a1 ff7f7f7f ff000000 ff000000
+turbulent octaves 36 0 0 0 0
+octaves 40 2f4050a1 ff7f7f7f ff000000 ff000000
+turbulent octaves 40 0 0 0 0
+octaves 2000 2f4050a1 ff7f7f7f ff000000 ff000000
+turbulent octaves 2000 0 0 0 0
+octaves -1 2f4050a1 ff7f7f7f ff000000 ff000000
+turbulent octaves -1 0 0 0 0

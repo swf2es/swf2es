@@ -16,10 +16,15 @@ package {
         [new Point(3, 4), new Point(-10, 2.5)]);
       run("opaque", 24, 1, 15, 15, 1, 15, false, false, false, null, false);
       run("negative seed", 12, -77, 6, 8, 4, 7, false, false, false, null);
+      // So many octaves take the lattice past an int, where Flash's noise goes wild.
+      for each (var octaves:Number in [34, 36, 40, 2000, -1]) {
+        run("octaves " + octaves, 8, 1, 10, 10, octaves, 7, false, true, false, null);
+        run("turbulent octaves " + octaves, 8, 1, 10, 10, octaves, 15, true, false, true, null);
+      }
     }
 
     private function run(label:String, size:int, seed:int, baseX:Number, baseY:Number,
-        octaves:uint, channels:uint, gray:Boolean, fractal:Boolean, stitch:Boolean,
+        octaves:Number, channels:uint, gray:Boolean, fractal:Boolean, stitch:Boolean,
         offsets:Array, transparent:Boolean = true):void {
       var data:BitmapData = new BitmapData(size, size / 2, transparent, 0);
       data.perlinNoise(baseX, baseY, octaves, seed, stitch, fractal, channels, gray, offsets);

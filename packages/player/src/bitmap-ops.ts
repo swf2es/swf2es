@@ -324,10 +324,11 @@ export function perlinNoise(
   ];
   const at = (channel: number, x: number, y: number) =>
     turbulence.turbulence(channel, x, y, frequency, offsets, fractal, stitch, width, height);
-  // A byte as Flash makes it of a noise, saturating, the half added before the halving.
+  // A byte as Flash makes it of a noise, saturating, the half added before the halving; past an
+  // int, as wild noise goes, x86's conversion gives -2^31 and the byte 0.
   const byte = (n: number) => {
     const v = fractal ? (n * 255 + 255 + 0.5) / 2 : n * 255 + 0.5;
-    return v >= 255 ? 255 : v > 0 ? Math.trunc(v) : 0;
+    return !(v < 2147483648) ? 0 : v >= 255 ? 255 : v > 0 ? Math.trunc(v) : 0;
   };
   const noise = [0, 0, 0, 0];
   for (let y = 0; y < height; y++) {
