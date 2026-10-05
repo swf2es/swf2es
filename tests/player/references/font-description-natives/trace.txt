@@ -1,0 +1,31 @@
+start
+defaults _serif normal normal device cff horizontalStem false
+fontName null TypeError: Error #2007: Parameter fontName must be non-null.
+fontName invalid accepted invalid
+fontWeight null TypeError: Error #2007: Parameter fontWeight must be non-null.
+fontWeight invalid ArgumentError: Error #2008: Parameter fontWeight must be one of the accepted values.
+fontPosture null TypeError: Error #2007: Parameter fontPosture must be non-null.
+fontPosture invalid ArgumentError: Error #2008: Parameter fontPosture must be one of the accepted values.
+fontLookup null TypeError: Error #2007: Parameter fontLookup must be non-null.
+fontLookup invalid ArgumentError: Error #2008: Parameter fontLookup must be one of the accepted values.
+renderingMode null TypeError: Error #2007: Parameter renderingMode must be non-null.
+renderingMode invalid ArgumentError: Error #2008: Parameter renderingMode must be one of the accepted values.
+cffHinting null TypeError: Error #2007: Parameter cffHinting must be non-null.
+cffHinting invalid ArgumentError: Error #2008: Parameter cffHinting must be one of the accepted values.
+changed Example bold italic embeddedCFF normal none
+locked name Error: Error #2185: The FontDescription object is locked and cannot be modified.
+locked weight Error: Error #2185: The FontDescription object is locked and cannot be modified.
+locked null Error: Error #2185: The FontDescription object is locked and cannot be modified.
+locked invalid Error: Error #2185: The FontDescription object is locked and cannot be modified.
+unlock Error: Error #2185: The FontDescription object is locked and cannot be modified.
+clone Example bold false
+compatible false false
+device compatible false false
+known fonts false false false
+bad static false
+bad device ArgumentError: Error #2008: Parameter fontWeight must be one of the accepted values.
+bad compatible weight ArgumentError: Error #2008: Parameter fontWeight must be one of the accepted values.
+bad compatible posture ArgumentError: Error #2008: Parameter fontPosture must be one of the accepted values.
+null device TypeError: Error #2007: Parameter fontName must be non-null.
+null weight TypeError: Error #2007: Parameter fontWeight must be non-null.
+null name bad weight false
