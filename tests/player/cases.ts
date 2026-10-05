@@ -972,6 +972,39 @@ function rewindRatio(abc: Uint8Array): Uint8Array {
 // First-frame children of each kind moved to another ratio, and shapes
 // placed again with another ratio and with the same, then a rewind past
 // them, for scripts/RewindKinds.as.
+// scripts/RewindShapeClip.as: frame 1 places a clip and a shape, frame 2
+// another kind at each depth, without the move flag and at the same ratio,
+// and frame 3's script rewinds to frame 1.
+function rewindShapeClip(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000, 400),
+      w.sprite(4, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "RewindShapeClip"),
+      w.symbolClass([
+        [0, "Main"],
+        [4, "A"],
+      ]),
+      w.place({ depth: 1, character: 4 }),
+      w.place({ depth: 2, character: 1, matrix: { tx: 1000 } }),
+      w.showFrame(),
+      w.remove(1),
+      w.remove(2),
+      w.place({ depth: 1, character: 1 }),
+      w.place({ depth: 2, character: 4, matrix: { tx: 1000 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 function rewindKinds(abc: Uint8Array): Uint8Array {
   const grow = w.morphShape({
     id: 2,
@@ -3126,6 +3159,15 @@ export const cases: PlayerCase[] = [
     name: "rewind-ratio",
     swf: rewindRatio,
     script: "RewindRatio",
+    frames: 5,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "rewind-shape-clip",
+    swf: rewindShapeClip,
+    script: "RewindShapeClip",
     frames: 5,
     capture: [],
     tolerance: 0,

@@ -799,6 +799,32 @@ export class TextObject extends DisplayObject {
 }
 
 /**
+ * Whether `display` is the kind of object `character` makes, so that a
+ * rewind's place may keep it in that place's stead: a shape for a shape or
+ * a morph, a clip for a clip, and so on. Not for a character that makes
+ * none (data, a font, a sound), which the place leaves as it is.
+ */
+function madeAs(display: DisplayObject, character: Character | undefined): boolean {
+  switch (character?.type) {
+    case "shape":
+    case "morph":
+      return display instanceof ShapeObject;
+    case "sprite":
+      return display instanceof MovieClip;
+    case "button":
+      return display instanceof ButtonObject;
+    case "bitmap":
+      return display instanceof BitmapObject;
+    case "text":
+      return display instanceof TextObject;
+    case "static":
+      return display instanceof StaticTextObject;
+    default:
+      return true;
+  }
+}
+
+/**
  * Another character placed in a child's stead, with the move flag or where
  * a rewind keeps the child: Flash makes no new object, and only a Shape or
  * MorphShape no script has touched takes the new shape's or morph's
@@ -1431,9 +1457,16 @@ export class MovieClip extends Container {
         }
 
         const jump = jumps.get(depth);
+        const id = jump?.place?.character ?? null;
         if (!jump || (jump.place && jump.place.ratio !== child.ratio)) {
           this.removeAtDepth(depth);
-        } else if (child.placeFrame > target && jump.placed) {
+        } else if (
+          child.placeFrame > target &&
+          jump.placed &&
+          // Only of the kind the place makes: a shape where it makes a clip
+          // goes, and Flash makes the clip anew (`rewind-shape-clip`).
+          madeAs(child, id === null ? undefined : this.library.characters.get(id))
+        ) {
           kept.add(depth);
         } else if (child.placeFrame > target) {
           this.removeAtDepth(depth);
