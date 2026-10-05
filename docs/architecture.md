@@ -1557,7 +1557,13 @@ missing table its channel itself; `compare` is 0 for the same pixels,
 -3 and -4 for another width and height, or a new transparent BitmapData
 of each differing pixel's colour difference, opaque, or where only alpha
 differs of the alpha difference in every premultiplied channel (the
-`palette-compare` case).
+`palette-compare` case). `perlinNoise` is the reference implementation of
+SVG's feTurbulence, which Flash's matches to the byte (`turbulence.ts`,
+after Ruffle's port): Park-Miller seeds four channels' gradients, each
+octave moved by its offset, a channel's noise drawn from the next of
+the four only for the channels asked for, a byte made of it as Flash
+makes it, and the pixel written as it comes, not premultiplied (the
+`perlin-noise` case).
 Slice three is `draw` and `drawWithQuality`, in two paths. A
 BitmapData or a Bitmap drawn is composited on the CPU, in `bitmap.ts`'s
 arithmetic: through the matrix by the inverse of each destination

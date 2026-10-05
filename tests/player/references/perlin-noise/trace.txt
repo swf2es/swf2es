@@ -1,0 +1,8 @@
+turbulence ad3d13a6 ff000000 ff562d3c ff2f7937
+fractal 5c994ca9 ff7f7f7f ff63968d ff934983
+gray alpha 4289ced1 7fffffff 79e3e3e3 75ffffff
+stitched f220000 ff7f0000 ff6b0000 ff9c0000
+blue and alpha 8957860c 7f0000ff 7f0000eb 770000ff
+offsets 31ea1f0f ff8a7f84 ff9192a1 ff8e428a
+opaque 9a3b845a ff000000 ff1f3329 ff184519
+negative seed 98a08d91 ff000000 ffa5a13e ff48801f

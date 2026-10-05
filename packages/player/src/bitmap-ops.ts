@@ -3,6 +3,7 @@
 // the store premultiplying again as it writes. The rules are the ones
 // Flash traces under adl and records in Ruffle's corpus.
 import { type BitmapStore, type PixelRect, unmultiply } from "./bitmap.js";
+import { Turbulence } from "./turbulence.js";
 
 const M = 2147483647;
 
@@ -296,6 +297,61 @@ export function comparePixels(left: BitmapStore, right: BitmapStore): Uint32Arra
   }
 
   return different ? out : null;
+}
+
+/**
+ * perlinNoise: each pixel's channels from turbulence.ts, a channel left
+ * out its least, alpha left out opaque, written as they come, not
+ * premultiplied, as Flash writes them (Ruffle's operations.rs, whose
+ * conversion to a byte is Flash's). A channel's noise is drawn from the
+ * next of the generator's four only for the channels asked for.
+ */
+export function perlinNoise(
+  store: BitmapStore,
+  base: [number, number],
+  offsets: readonly [number, number][],
+  seed: number,
+  stitch: boolean,
+  fractal: boolean,
+  channels: number,
+  gray: boolean,
+): void {
+  const turbulence = new Turbulence(seed);
+  const { width, height } = store;
+  const frequency: [number, number] = [
+    base[0] === 0 ? 0 : 1 / base[0],
+    base[1] === 0 ? 0 : 1 / base[1],
+  ];
+  const at = (channel: number, x: number, y: number) =>
+    turbulence.turbulence(channel, x, y, frequency, offsets, fractal, stitch, width, height);
+  // A byte as Flash makes it of a noise, saturating, the half added before the halving.
+  const byte = (n: number) => {
+    const v = fractal ? (n * 255 + 255 + 0.5) / 2 : n * 255 + 0.5;
+    return v >= 255 ? 255 : v > 0 ? Math.trunc(v) : 0;
+  };
+  const noise = [0, 0, 0, 0];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (gray) {
+        noise[0] = noise[1] = noise[2] = at(0, x, y);
+        noise[3] = channels & 8 ? at(1, x, y) : 1;
+      } else {
+        let channel = 0;
+        for (let c = 0; c < 4; c++) {
+          noise[c] = c === 3 ? 1 : -1;
+          if (channels & (1 << c)) {
+            noise[c] = at(channel++, x, y);
+          }
+        }
+      }
+
+      const a = store.transparent ? byte(noise[3]) : 255;
+      store.pixels[y * width + x] =
+        ((a << 24) | (byte(noise[0]) << 16) | (byte(noise[1]) << 8) | byte(noise[2])) >>> 0;
+    }
+  }
+
+  store.changed();
 }
 
 /** scroll: the pixels moved by (x, y); what nothing moved onto keeps its old pixels. */

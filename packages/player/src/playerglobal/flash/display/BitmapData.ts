@@ -18,6 +18,7 @@ import {
   merge,
   noise,
   paletteMap,
+  perlinNoise,
   pixelDissolve,
   scroll,
   threshold,
@@ -526,6 +527,41 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const r = rectOf(s, rect);
       const [dx, dy] = pointOf(s, dest, "destPoint");
       copyChannel(store, src, r, dx, dy, s.rt.toUint(from), s.rt.toUint(to));
+    }
+
+    /** Offsets past those given, or not Points, are (0, 0). */
+    perlinNoise(
+      baseX: Value,
+      baseY: Value,
+      octaves: Value,
+      seed: Value,
+      stitch: Value,
+      fractal: Value,
+      channels: Value = 7,
+      gray: Value = false,
+      offsets: Value = null,
+    ): void {
+      const store = storeOf(s, this);
+      const given = (offsets as AsObject | null)?.$a as Value[] | undefined;
+      const point = s.rt.classNamed("flash.geom::Point");
+      const read = (p: AsObject, k: string) =>
+        s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k)));
+      const shifts = Array.from({ length: s.rt.toUint(octaves) }, (_, i): [number, number] => {
+        const p = given?.[i];
+        return p && s.rt.isInstanceOf(p, point.$it)
+          ? [read(p as AsObject, "x"), read(p as AsObject, "y")]
+          : [0, 0];
+      });
+      perlinNoise(
+        store,
+        [s.rt.toNumber(baseX), s.rt.toNumber(baseY)],
+        shifts,
+        s.rt.toInt(seed),
+        !!stitch,
+        !!fractal,
+        s.rt.toUint(channels),
+        !!gray,
+      );
     }
 
     paletteMap(
