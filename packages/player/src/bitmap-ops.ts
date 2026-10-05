@@ -3,6 +3,7 @@
 // the store premultiplying again as it writes. The rules are the ones
 // Flash traces under adl and records in Ruffle's corpus.
 import { type BitmapStore, type PixelRect, unmultiply } from "./bitmap.js";
+import { Turbulence } from "./turbulence.js";
 
 const M = 2147483647;
 
@@ -239,6 +240,115 @@ function forEachCopied(
       const to = (d.y + row) * store.width + d.x + i;
       const p = unmultiply(pixels[(sy - oy + row) * pw + sx - ox + i]);
       store.pixels[to] = store.premultiplied(f(p, unmultiply(store.pixels[to])));
+    }
+  }
+
+  store.changed();
+}
+
+/**
+ * paletteMap: each copied pixel the sum of its channels' entries in the
+ * four tables, red, green, blue and alpha, wrapping at 32 bits, as Flash
+ * makes it (Ruffle's operations.rs); a table not given maps its channel
+ * to itself.
+ */
+export function paletteMap(
+  store: BitmapStore,
+  source: BitmapStore,
+  rect: PixelRect,
+  dx: number,
+  dy: number,
+  tables: readonly [Uint32Array, Uint32Array, Uint32Array, Uint32Array],
+): void {
+  const [r, g, b, a] = tables;
+  forEachCopied(
+    store,
+    source,
+    rect,
+    dx,
+    dy,
+    (p) => (r[(p >>> 16) & 0xff] + g[(p >>> 8) & 0xff] + b[p & 0xff] + a[p >>> 24]) >>> 0,
+  );
+}
+
+/**
+ * compare's differing pixels, null where none differ: 0 for a pixel the
+ * same in both, the colours' differences, opaque, where they differ, else
+ * the alphas' difference in every channel (Ruffle's operations.rs).
+ */
+export function comparePixels(left: BitmapStore, right: BitmapStore): Uint32Array | null {
+  const out = new Uint32Array(left.width * left.height);
+  let different = false;
+  for (let i = 0; i < out.length; i++) {
+    const p = unmultiply(left.pixels[i]);
+    const q = unmultiply(right.pixels[i]);
+    if (p === q) {
+      continue;
+    }
+
+    different = true;
+    if ((p & 0xffffff) !== (q & 0xffffff)) {
+      const channel = (shift: number) => (((p >>> shift) - (q >>> shift)) & 0xff) << shift;
+      out[i] = (0xff000000 | channel(16) | channel(8) | channel(0)) >>> 0;
+    } else {
+      const alpha = ((p >>> 24) - (q >>> 24)) & 0xff;
+      out[i] = ((alpha << 24) | (alpha << 16) | (alpha << 8) | alpha) >>> 0;
+    }
+  }
+
+  return different ? out : null;
+}
+
+/**
+ * perlinNoise: each pixel's channels from turbulence.ts, a channel left
+ * out its least, alpha left out opaque, written as they come, not
+ * premultiplied, as Flash writes them (Ruffle's operations.rs, whose
+ * conversion to a byte is Flash's). A channel's noise is drawn from the
+ * next of the generator's four only for the channels asked for.
+ */
+export function perlinNoise(
+  store: BitmapStore,
+  base: [number, number],
+  offsets: readonly [number, number][],
+  seed: number,
+  stitch: boolean,
+  fractal: boolean,
+  channels: number,
+  gray: boolean,
+): void {
+  const turbulence = new Turbulence(seed);
+  const { width, height } = store;
+  const frequency: [number, number] = [
+    base[0] === 0 ? 0 : 1 / base[0],
+    base[1] === 0 ? 0 : 1 / base[1],
+  ];
+  const at = (channel: number, x: number, y: number) =>
+    turbulence.turbulence(channel, x, y, frequency, offsets, fractal, stitch, width, height);
+  // A byte as Flash makes it of a noise, saturating, the half added before the halving; past an
+  // int, as wild noise goes, x86's conversion gives -2^31 and the byte 0.
+  const byte = (n: number) => {
+    const v = fractal ? (n * 255 + 255 + 0.5) / 2 : n * 255 + 0.5;
+    return !(v < 2147483648) ? 0 : v >= 255 ? 255 : v > 0 ? Math.trunc(v) : 0;
+  };
+  const noise = [0, 0, 0, 0];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (gray) {
+        noise[0] = noise[1] = noise[2] = at(0, x, y);
+        noise[3] = channels & 8 ? at(1, x, y) : 1;
+      } else {
+        let channel = 0;
+        for (let c = 0; c < 4; c++) {
+          noise[c] = c === 3 ? 1 : -1;
+          if (channels & (1 << c)) {
+            noise[c] = at(channel++, x, y);
+          }
+        }
+      }
+
+      const a = store.transparent ? byte(noise[3]) : 255;
+      store.pixels[y * width + x] =
+        ((a << 24) | (byte(noise[0]) << 16) | (byte(noise[1]) << 8) | byte(noise[2])) >>> 0;
     }
   }
 

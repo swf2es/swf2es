@@ -1,0 +1,15 @@
+xmlDecl <?xml version="1.0"?> docTypeDecl <!DOCTYPE note>
+root root 1 3
+  child 1 item null
+  child 1 empty null
+  child 3 null <raw>
+by id one & two
+string <?xml version="1.0"?><!DOCTYPE note><root a="1"><item id="x">one &amp; two</item><empty />&lt;raw&gt;</root>
+escaped a &lt; b &amp; &quot;c&quot; &apos;d&apos; &gt; e
+whitespace kept 3
+rejected <a> 1096
+rejected <a></b> 1096
+rejected </a> 2070
+rejected <a b=c/> 1090
+rejected <!-- open 1094
+rejected <![CDATA[ open 1091

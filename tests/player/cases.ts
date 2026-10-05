@@ -3723,6 +3723,78 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "three-d",
+    swf: (abc) => bare(abc, 1, "ThreeD"),
+    script: "ThreeD",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "matrix3d-swf12",
+    swf: (abc) => withVersion(bare(abc, 1, "Matrix3DVersions"), 12),
+    script: "Matrix3DVersions",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "matrix3d-swf13",
+    swf: (abc) => withVersion(bare(abc, 1, "Matrix3DVersions"), 13),
+    script: "Matrix3DVersions",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "text-natives",
+    swf: (abc) => bare(abc, 1, "TextNatives"),
+    script: "TextNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "legacy-xml",
+    swf: (abc) => bare(abc, 1, "LegacyXml"),
+    script: "LegacyXml",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "palette-compare",
+    swf: (abc) => bare(abc, 1, "PaletteCompare"),
+    script: "PaletteCompare",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "perlin-noise",
+    swf: (abc) => bare(abc, 1, "PerlinNoise"),
+    script: "PerlinNoise",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "system-natives",
+    swf: (abc) => bare(abc, 2, "SystemNatives"),
+    script: "SystemNatives",
+    frames: 2,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "timeline-sounds",
     build: timelineSounds,
     frames: 33,
@@ -3731,6 +3803,12 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
 ];
+
+/** The SWF with its header's version set to `version`. */
+function withVersion(swf: Uint8Array, version: number): Uint8Array {
+  swf[3] = version;
+  return swf;
+}
 
 /**
  * Timeline sounds (scripts/TimelineSounds.as): Tone, a second of silence

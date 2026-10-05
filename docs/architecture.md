@@ -912,7 +912,7 @@ stays at its ratio. Ruffle's `transformed_by_script` does the same, set
 by fewer setters: not by `blendMode`, `filters`, `scrollRect`,
 `opaqueBackground` or `scale9Grid`. In adl the 3D setters touch as well,
 `z`, `rotationX`, `rotationY`, `rotationZ`, `scaleZ` and
-`transform.matrix3D`, so they must call `touch()` once implemented.
+`transform.matrix3D`, and so they do in the player.
 
 A clip a script takes off the display list plays on in Flash, an
 orphan, and so does one a script makes with `new` and never adds: its
@@ -984,6 +984,46 @@ copied when the player is made, so another player can report a different
 screen. By default, resolution comes from the browser's `screen` (zero in a
 non-browser host), pixel aspect ratio is 1 and DPI is 72. The corpus harness
 supplies the screen on which its Flash traces were recorded.
+
+### What a browser player lacks
+
+Some of playerglobal stands for what the player does not have, and acts
+as Flash does without it (the `system-natives` case). A FileReference
+never has a file: its dialogs are not shown, `browse`, `download` and
+`save` act as if the user cancelled, Event.CANCEL in the next frame, and
+what reads a file throws #2037; a FileReferenceList's `fileList` is empty
+after a browse. `Stage.stage3Ds` are Flash's four Stage3Ds, whose
+positions are kept within -8192 to 8191, ArgumentError 2006 beyond, and
+each request for a Context3D gets ErrorEvent #3702 in the next frame, as
+Flash without a GPU gives, so content can fall back to the display list.
+`stageVideos` is empty, and a `Video` is a box of the size it was made
+at, 320 by 240 where either is 0, RangeError 2006 for a negative one,
+which bounds, scales and hits as Flash's and shows nothing: no stream or
+camera plays in it, and a timeline's DefineVideoStream is not read yet.
+NetConnection has its local mode, `connect(null)`, with Flash's status
+events and its properties, ArgumentError 2126 for those of a connection
+it does not have; an HTTP URI is kept, and a `call` over it, Flash
+Remoting, is not supported yet. `fscommand` goes to the host's
+`fsCommand` if it gives one; the SWF chooses both strings, so a host must
+never evaluate them or use them as a URL or as HTML. `Stage.color` is the
+SWF's background until set, opaque; `Player.background` follows it, and
+setting it moves `changes`, so a host that reads `background` as it draws
+(the README's loop) shows it, while one that reads it only when it makes
+its renderer does not. The rest of the stage's properties are a desktop
+browser player's (`colorCorrectionSupport` "unsupported", scale factors
+1, no soft keyboard, orientation unknown). `getObjectsUnderPoint` gives
+the descendants that draw under a point of the stage, parents first, as
+Flash does, leaving out masks, a timeline's or a script's, and all an
+invisible container holds, as the pointer's pick does;
+`areInaccessibleObjectsUnderPoint` is false, there being no sandbox to
+hide them.
+
+The legacy `flash.xml.XMLDocument` is playerglobal's own code over the
+runtime's XML tokenizer, avmplus' that E4X reads with too, exported for
+it: `XMLParser.getNext` fills an `XMLTag` with each tag, an element's
+attributes as an object, and playerglobal builds the tree and throws its
+errors from the status (the `legacy-xml` case). `XMLNode`'s escaping
+replaces the five XML characters.
 
 ### Loading SWFs
 
@@ -1509,9 +1549,44 @@ doubles there too, so those two tests cannot be matched to the end.
 `Vector.<Number>` each time, and the setter and copy methods round writes to
 float32. `copyRawDataTo` pads a growable vector with zeros out to its index,
 as adl does however far, but refuses an index from 2^28 on, a negative one
-too, with ArgumentError 2004 before writing anything. This data model and the copy operations stand apart from the display
-list's 2D matrices; assigning `Transform.matrix3D` and drawing in 3D still
-need their own implementation.
+too, with ArgumentError 2004 before writing anything. Its arithmetic
+(`matrix3d.ts`) is Flash's float32, to the last bit where adl was asked:
+products and sums each rounded, `recompose`'s Euler angles through float32
+sines and cosines, `appendRotation` with the axis made a unit one in
+float32 and the pivot multiplied on, `invert` by Gauss-Jordan elimination
+with partial pivoting in float32, and `decompose` making the columns
+orthonormal one after another, so a skew goes and a mirror is the z
+scale's sign. `interpolate` lerps the translations and scales and slerps
+the rotations, and applies the scale after the rotation, as adl does;
+Ruffle's corpus drops the scale. Before SWF 13 Flash had the determinant
+of the other sign and turned about an axis as given, not a unit one, and
+the player does so for such SWFs (`matrix3d-swf12`, `matrix3d-swf13`).
+`Utils3D.projectVector` and `projectVectors` divide as adl does, which
+the Flash Player of Ruffle's corpus rounds further. A field of view a
+focal length gives goes through `atan`, whose last bit Flash's C library
+decides, so `perspective_projection`'s ramp matches only in part.
+
+A display object goes into 3D once a script sets `z`, `rotationX`,
+`rotationY`, `rotationZ` or `scaleZ`, even to what it was, sets
+`transform.matrix3D`, or sets `transform.matrix` to null; setting
+`matrix3D` to null takes it back to 2D at the identity, and setting a
+matrix takes it back with that matrix (the `three-d` case, the corpus's
+`displayobject_z` and `geom_transform`). In 3D `transform.matrix` is null,
+`matrix3D` a copy of the 3D transform, and the properties are kept as
+set: a rotation is not brought within ±180, a NaN position or rotation
+is 0. A matrix3D set whole is kept as given and taken apart as
+`decompose` takes it; a position set moves it alone, and a scale or
+rotation set makes it again from all the properties, translation ×
+rotation about x, then y, then z × scale. Each of these setters is a
+touch. A `PerspectiveProjection` of its own measures 500 pixels wide;
+one a transform gives reads and writes its object's, as Flash's does,
+which keeps the field of view in radians, the stage's 500 wide and the
+others' as wide as the stage; the stage and each SWF's root always have
+one, back to their defaults when set to null. The player keeps all this
+but does not draw in perspective: a 3D object draws, bounds and hits as
+its matrix3D's x and y rows, and `local3DToGlobal` and `globalToLocal3D`
+are not implemented. `transform.pixelBounds` is the bounds on the stage
+out to whole pixels.
 
 ### Bitmaps
 
@@ -1573,7 +1648,22 @@ next state; every call writes the origin too, a seed past the states is
 taken modulo 2^bits − 1 and 0 starts at the tap, and a count past the
 w · h − 1 states a round visits is one round and the remainder, which
 gives Flash's seed without its loop (Flash itself takes seconds over
-2^31 − 1).
+2^31 − 1). `paletteMap` makes each copied pixel the sum, wrapping at 32
+bits, of its unpremultiplied channels' entries in the four tables, a
+missing table its channel itself; `compare` is 0 for the same pixels,
+-3 and -4 for another width and height, or a new transparent BitmapData
+of each differing pixel's colour difference, opaque, or where only alpha
+differs of the alpha difference in every premultiplied channel (the
+`palette-compare` case). `perlinNoise` is the reference implementation of
+SVG's feTurbulence, which Flash's matches to the byte (`turbulence.ts`,
+after Ruffle's port): Park-Miller seeds four channels' gradients, each
+octave moved by its offset, a channel's noise drawn from the next of
+the four only for the channels asked for, a byte made of it as Flash
+makes it, and the pixel written as it comes, not premultiplied (the
+`perlin-noise` case). A double past an int converts as on x86, to -2^31,
+so that octaves enough to take the lattice that far give Flash's wild
+noise and bytes of 0; more than 1024 octaves give what 1024 do, as
+Flash's sum settles long before, a negative count among them.
 Slice three is `draw` and `drawWithQuality`, in two paths. A
 BitmapData or a Bitmap drawn is composited on the CPU, in `bitmap.ts`'s
 arithmetic: through the matrix by the inverse of each destination
@@ -1798,9 +1888,29 @@ for each later run, a `FONT` inside it of what changed; `A`, `B`, `I`
 and `U` about a run's text, in that order out to in. It is read as adl
 reads it, a paragraph's end and a `BR` a line only in a multiline field.
 A TextFormat keeps each value as Flash converts it, null for one it does
-not set: whole numbers rounded, a half away from zero, `align` one of
-Flash's or ArgumentError 2008, an unknown `display` null. The `text-fields`
-case traces all of this, defaults, HTML and refusals, against adl.
+not set: whole numbers rounded, a half away from zero, NaN and the
+infinities -2147483648 as x86 converts them, `align` one of Flash's or
+ArgumentError 2008, an unknown `display` null. The `text-fields` case
+traces all of this, defaults, HTML and refusals, against adl.
+`getTextRuns` cuts a range where the format changes; a paragraph's line
+end takes the paragraph's format; `getFirstCharInParagraph` and
+`getParagraphLength` count the text's length as in the last paragraph,
+one past its end.
+
+A StyleSheet is playerglobal's own code over a few natives: its CSS is
+read as Flash reads it (`css.ts`, Ruffle's CssStream: selectors
+lower-cased, property names camel-cased, and on any of the few errors
+Flash finds the whole sheet ignored), a colour is `#` and at most six hex
+digits or 0, and the generic font families are Flash's device fonts. A
+field with a sheet reads `text` as HTML too, refuses `replaceText` and
+`replaceSelectedText` with #2009, gives `htmlText` back as it
+was set, and does not read the same HTML again; each tag takes its tag's
+style, a link `a:link`'s, then its class's. A tag of the sheet's own is a
+block, ending its line when closed by its name, unless its style makes it
+inline, and one displayed as none hides what it holds; the display is no
+character's format. A change to the sheet styles the HTML again only in
+a field that had HTML when the sheet was set on it, as adl does
+(`text-natives`, the corpus's `stylesheet` and `edittext_stylesheet`).
 
 Setting a TextField's `width` or `height` resizes its field, as Flash
 does, not its scale. The renderer draws the background, the border over

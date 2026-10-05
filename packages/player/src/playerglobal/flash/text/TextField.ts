@@ -6,6 +6,7 @@ import { CONTENT, type TextObject } from "../../../display.js";
 import type { Scripting } from "../../../scripting.js";
 import { applied, emptyFormat, type PartialFormat } from "../../../text.js";
 import { GUTTER, lineOf, shownLines } from "../../../text-layout.js";
+import { useSheet } from "./StyleSheet.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -14,6 +15,11 @@ const ALIGNS = ["left", "center", "right", "justify", "start", "end"];
 
 /** A number Flash keeps as an int: rounded, a half to even (12.7 is 13, -3.5 is -4, 10.5 is 10, 11.5 is 12). */
 function rounded(v: number): number {
+  // What is no number is the int nearest none, as x86's conversion gives (the corpus's `stylesheet_transform`).
+  if (!Number.isFinite(v)) {
+    return -2147483648;
+  }
+
   const r = Math.round(v);
   return r - v === 0.5 && r % 2 !== 0 ? r - 1 : r;
 }
@@ -52,6 +58,29 @@ function maxScrollV(field: TextObject): number {
   }
 
   return Math.max(1, first + 1);
+}
+
+/** The start and length of the paragraph `i` is in, as Flash gives them (Ruffle's edit_text.rs); [-1, -1] outside the text. */
+function paragraphAt(text: string, i: number): [number, number] {
+  if (i < 0 || i > text.length) {
+    return [-1, -1];
+  }
+
+  let start = i;
+  while (start > 0 && text[start - 1] !== "\r" && text[start - 1] !== "\n") {
+    start--;
+  }
+
+  if (i === text.length) {
+    return [start, text.length - start + 1];
+  }
+
+  let end = i;
+  while (end < text.length && text[end] !== "\r" && text[end] !== "\n") {
+    end++;
+  }
+
+  return [start, Math.min(end + 1, text.length) - start];
 }
 
 export function textFieldNatives(s: Scripting): avm2.Natives {
@@ -237,15 +266,35 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "value");
       }
 
-      this.$display.model.setText(s.rt.toString(v));
+      // Under a sheet, text is read as HTML too, as adl reads it.
+      if (this.$display.styleSheet) {
+        setStyledHtml(this.$display, s.rt.toString(v));
+      } else {
+        this.$display.model.setText(s.rt.toString(v));
+      }
+
       changed(this);
     }
     get htmlText(): string {
-      return this.$display.model.toHtml();
+      const field = this.$display;
+      return field.styleSheet && field.htmlSource !== null
+        ? field.htmlSource
+        : field.model.toHtml();
     }
     set htmlText(v: Value) {
       if (v === null || v === undefined) {
         throw s.rt.error("TypeError", 2007, "value");
+      }
+
+      // Under a sheet, the HTML it has set again is not read again.
+      if (this.$display.styleSheet) {
+        const html = s.rt.toString(v);
+        if (html !== this.$display.htmlSource) {
+          setStyledHtml(this.$display, html);
+          changed(this);
+        }
+
+        return;
       }
 
       this.$display.model.setHtml(
@@ -267,6 +316,10 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       changed(this);
     }
     replaceText(begin: Value, end: Value, v: Value): void {
+      if (this.$display.styleSheet) {
+        throw s.rt.error("Error", 2009);
+      }
+
       const model = this.$display.model;
       const b = Math.max(0, Math.min(model.text.length, s.rt.toInt(begin)));
       const e = Math.max(b, Math.min(model.text.length, s.rt.toInt(end)));
@@ -577,11 +630,95 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     setSelection(begin: Value, end: Value): void {
       this.$display.select(s.rt.toInt(begin), s.rt.toInt(end));
     }
-    get styleSheet(): Value {
-      return null;
+    /** The selection replaced, as typing would, and the caret after what came in. */
+    replaceSelectedText(v: Value): void {
+      if (this.$display.styleSheet) {
+        throw s.rt.error("Error", 2009);
+      }
+
+      const field = this.$display;
+      const [begin, end] = field.selection;
+      const text = s.rt.toString(v);
+      field.model.replace(begin, end, text);
+      field.select(begin + text.length, begin + text.length);
+      changed(this);
     }
-    set styleSheet(_v: Value) {}
+    /** The runs of [begin, end) in one format each, as TextRuns. */
+    getTextRuns(begin: Value = 0, end: Value = 0x7fffffff): Value {
+      const model = this.$display.model;
+      const b = Math.max(0, s.rt.toInt(begin));
+      const e = Math.min(model.text.length, s.rt.toInt(end));
+      const runs: Value[] = [];
+      for (const [from, to] of model.runs(b, e)) {
+        runs.push(
+          s.rt.construct(
+            s.rt.classNamed("flash.text::TextRun"),
+            from,
+            to,
+            textFormat(model.formatOf(from, to)),
+          ),
+        );
+      }
+
+      return s.rt.array(runs);
+    }
+    /** The first index of the paragraph `charIndex` is in; the text's length counts as in its last. */
+    getFirstCharInParagraph(charIndex: Value): number {
+      return paragraphAt(this.$display.model.text, s.rt.toInt(charIndex))[0];
+    }
+    /** That paragraph's length, its line end in it; at the text's length, one past the last's. */
+    getParagraphLength(charIndex: Value): number {
+      return paragraphAt(this.$display.model.text, s.rt.toInt(charIndex))[1];
+    }
+    /** A desktop player's: no touch selection. */
+    get textInteractionMode(): string {
+      return "normal";
+    }
+    get styleSheet(): Value {
+      return this.$display.styleSheet;
+    }
+    /**
+     * A sheet styles the HTML set from then on, and a change to the sheet
+     * styles it again; the HTML set keeps its source for htmlText. Taken
+     * off, the text keeps the styles it had (the corpus's `edittext_stylesheet`).
+     */
+    set styleSheet(v: Value) {
+      const field = this.$display;
+      const sheet = (v as AsObject | null | undefined) ?? null;
+      field.styleSheet = sheet;
+      if (!sheet) {
+        field.htmlSource = null;
+        field.restyle = null;
+        return;
+      }
+
+      // adl styles the HTML again on a change to the sheet only for a field
+      // that had HTML from a sheet when given this one (`edittext_stylesheet`).
+      if (field.htmlSource === null) {
+        field.restyle = null;
+        return;
+      }
+
+      useSheet(sheet, field);
+      field.restyle = () => {
+        if (field.htmlSource !== null) {
+          setStyledHtml(field, field.htmlSource);
+          changed({ $display: field });
+        }
+      };
+    }
   }
+
+  /** `html` as the field's text, styled by its sheet's TextFormats by selector. */
+  const setStyledHtml = (field: TextObject, html: string): void => {
+    // Its private _styles, which StyleSheet's natives keep.
+    const styles = ((field.styleSheet as AsObject).$styles as AsObject | null | undefined) ?? null;
+    field.htmlSource = html;
+    field.model.setHtml(html, field.multiline, s.trimTrailingHtmlBreak, (selector) => {
+      const style = styles ? s.rt.getProperty(styles, s.rt.publicName(selector)) : null;
+      return style && typeof style === "object" ? formatOf(style as AsObject) : null;
+    });
+  };
 
   avm2.registerNativeClass(natives, "flash.text::TextFormat", TextFormatNatives);
   avm2.registerNativeClass(natives, "flash.text::TextField", TextFieldNatives);

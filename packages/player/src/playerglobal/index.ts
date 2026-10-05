@@ -20,6 +20,7 @@ import { shapeNatives } from "./flash/display/Shape.js";
 import { simpleButtonNatives } from "./flash/display/SimpleButton.js";
 import { spriteNatives } from "./flash/display/Sprite.js";
 import { stageNatives } from "./flash/display/Stage.js";
+import { stage3DNatives } from "./flash/display/Stage3D.js";
 import { eventNatives } from "./flash/events/Event.js";
 import { eventDispatcherNatives } from "./flash/events/EventDispatcher.js";
 import { httpStatusHooks } from "./flash/events/HTTPStatusEvent.js";
@@ -29,13 +30,18 @@ import { timerEventNatives } from "./flash/events/TimerEvent.js";
 import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js";
 import { filterHooks, filterNatives } from "./flash/filters/filters.js";
 import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
+import { perspectiveProjectionNatives } from "./flash/geom/PerspectiveProjection.js";
 import { transformNatives } from "./flash/geom/Transform.js";
+import { utils3DNatives } from "./flash/geom/Utils3D.js";
 import { currencyParseResultNatives } from "./flash/globalization/CurrencyParseResult.js";
 import { numberParseResultNatives } from "./flash/globalization/NumberParseResult.js";
 import { soundHooks, soundNatives } from "./flash/media/Sound.js";
 import { soundMixerNatives } from "./flash/media/SoundMixer.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
+import { videoNatives } from "./flash/media/Video.js";
 import { fileFilterNatives } from "./flash/net/FileFilter.js";
+import { fileReferenceNatives } from "./flash/net/FileReference.js";
+import { netConnectionNatives } from "./flash/net/NetConnection.js";
 import { navigateNatives } from "./flash/net/navigateToURL.js";
 import { sharedObjectNatives } from "./flash/net/SharedObject.js";
 import { socketNatives } from "./flash/net/Socket.js";
@@ -44,6 +50,7 @@ import { urlStreamNatives } from "./flash/net/URLStream.js";
 import { telemetryNatives } from "./flash/profiler/Telemetry.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { capabilitiesNatives } from "./flash/system/Capabilities.js";
+import { fsCommandNatives } from "./flash/system/FSCommand.js";
 import { securityNatives } from "./flash/system/Security.js";
 import { securityDomainNatives } from "./flash/system/SecurityDomain.js";
 import { systemNatives } from "./flash/system/System.js";
@@ -52,11 +59,15 @@ import { fontDescriptionNatives } from "./flash/text/engine/FontDescription.js";
 import { tabStopNatives } from "./flash/text/engine/TabStop.js";
 import { fontHooks, fontNatives } from "./flash/text/Font.js";
 import { staticTextNatives } from "./flash/text/StaticText.js";
+import { styleSheetNatives } from "./flash/text/StyleSheet.js";
 import { textFieldNatives } from "./flash/text/TextField.js";
 import { traceNatives } from "./flash/trace/Trace.js";
+import { gameInputNatives } from "./flash/ui/GameInput.js";
+import { keyboardNatives } from "./flash/ui/Keyboard.js";
 import { mouseNatives } from "./flash/ui/Mouse.js";
 import { byteArrayHooks } from "./flash/utils/ByteArray.js";
 import { timerNatives } from "./flash/utils/Timer.js";
+import { xmlDocumentNatives } from "./flash/xml/XMLDocument.js";
 import { toplevelNatives } from "./toplevel.js";
 
 export function playerNatives(s: Scripting): avm2.Natives {
@@ -113,6 +124,17 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...tabStopNatives(s),
     ...textFieldNatives(s),
     ...traceNatives(),
+    ...utils3DNatives(s),
+    ...perspectiveProjectionNatives(s),
+    ...styleSheetNatives(s),
+    ...fileReferenceNatives(s),
+    ...fsCommandNatives(s),
+    ...netConnectionNatives(s),
+    ...stage3DNatives(s),
+    ...xmlDocumentNatives(s),
+    ...videoNatives(s),
+    ...keyboardNatives(),
+    ...gameInputNatives(s),
   };
 }
 

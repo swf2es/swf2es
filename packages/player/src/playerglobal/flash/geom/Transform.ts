@@ -1,12 +1,15 @@
 // flash.geom.Transform: a display object's matrix and color transform as
 // flash.geom's Matrix and ColorTransform, copies each time, as Flash gives
-// them, and set from either. The 3D side waits with the rest of 3D.
+// them, and set from either; and its 3D transform and perspective
+// projection, kept and reported as Flash's, though not drawn in perspective.
 import type { Matrix as Linear } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { toStage } from "../../../bounds.js";
+import { boundsIn, toStage } from "../../../bounds.js";
 import { type DisplayObject, TRANSFORM } from "../../../display.js";
 import { concat } from "../../../geometry.js";
+import { identity3D, invert3D, multiply3D, type Raw } from "../../../matrix3d.js";
 import type { Scripting } from "../../../scripting.js";
+import { alwaysProjects, projectionFrom, projectionObject } from "./PerspectiveProjection.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -85,15 +88,18 @@ export function transformNatives(s: Scripting): avm2.Natives {
       this.$display = (display as AsObject).$display;
     }
 
+    /** Null in 3D. */
     get matrix(): Value {
-      return matrixObject(s, this.$display.matrix);
+      return this.$display.space ? null : matrixObject(s, this.$display.matrix);
     }
 
+    /** Null puts the object in 3D, its matrix3D made from the 2D one; a matrix takes it back to 2D. */
     set matrix(v: Value) {
-      // null puts Flash's object into 3D, which waits.
+      this.$display.touch();
       if (v) {
         this.$display.setMatrix(matrixOf(s, v as AsObject));
-        this.$display.touch();
+      } else {
+        this.$display.enter3D();
       }
     }
 
@@ -139,14 +145,97 @@ export function transformNatives(s: Scripting): avm2.Natives {
       return colorObject(s, c);
     }
 
+    /** A copy of the 3D transform, null in 2D. */
     get matrix3D(): Value {
-      return null;
+      const space = this.$display.space;
+      if (!space) {
+        return null;
+      }
+
+      const m = s.rt.construct(s.rt.classNamed("flash.geom::Matrix3D")) as AsObject;
+      (m.$matrix3D as Float32Array).set(space.raw);
+      return m;
     }
 
+    /** Taken as given, and apart into the 3D properties; null back to 2D, at the identity. */
+    set matrix3D(v: Value) {
+      this.$display.touch();
+      this.$display.setMatrix3D(v ? ((v as AsObject).$matrix3D as Float32Array) : null);
+    }
+
+    /**
+     * The matrix3D from this object's space to `relativeTo`'s, through
+     * their concatenated transforms, each 2D one taken as 3D; null for an
+     * object in 2D, as Flash gives.
+     */
+    getRelativeMatrix3D(relativeTo: Value): Value {
+      if (relativeTo === null || relativeTo === undefined) {
+        throw s.rt.error("TypeError", 2007, "relativeTo");
+      }
+
+      const d = this.$display;
+      if (!d.space) {
+        return null;
+      }
+
+      const target: DisplayObject = (relativeTo as AsObject).$display;
+      const toTarget = invert3D(concatenated3D(target)) ?? identity3D();
+      const m = s.rt.construct(s.rt.classNamed("flash.geom::Matrix3D")) as AsObject;
+      (m.$matrix3D as Float32Array).set(multiply3D(toTarget, concatenated3D(d)));
+      return m;
+    }
+
+    /** A new one of this object's, which reads and writes this object's; null for an object with none. */
     get perspectiveProjection(): Value {
-      return null;
+      const d = this.$display;
+      return d.projection || alwaysProjects(s, d) ? projectionObject(s, d) : null;
+    }
+
+    set perspectiveProjection(v: Value) {
+      this.$display.projection = v ? projectionFrom(s, v as AsObject) : null;
+    }
+
+    /** The bounds on the stage, out to whole pixels. */
+    get pixelBounds(): Value {
+      const r = boundsIn(this.$display, s.stage, s.stage, true);
+      // Math.ceil gives -0 for an edge just left of 0, which Flash reports as 0.
+      const x = Math.ceil(r.xMin) || 0;
+      const y = Math.ceil(r.yMin) || 0;
+      const right = Math.ceil(r.xMax);
+      const bottom = Math.ceil(r.yMax);
+      return s.rt.construct(s.rt.classNamed("flash.geom::Rectangle"), x, y, right - x, bottom - y);
     }
   }
+
+  /** `d`'s transform to the top of its list, each 2D matrix taken as 3D. */
+  const concatenated3D = (d: DisplayObject): Raw => {
+    let m = identity3D();
+    for (let o: DisplayObject | null = d; o && o !== s.stage; o = o.parent) {
+      const local = o.space
+        ? o.space.raw
+        : Float32Array.of(
+            o.matrix.a,
+            o.matrix.b,
+            0,
+            0,
+            o.matrix.c,
+            o.matrix.d,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            o.matrix.tx,
+            o.matrix.ty,
+            0,
+            1,
+          );
+      m = multiply3D(local, m);
+    }
+
+    return m;
+  };
 
   avm2.registerNativeClass(natives, "flash.geom::Transform", TransformNatives);
   return natives;

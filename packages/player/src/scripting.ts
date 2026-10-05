@@ -31,6 +31,7 @@ import {
   scriptChildren,
   TextObject,
   TRANSFORM,
+  VideoObject,
 } from "./display.js";
 import { FontSet } from "./fonts.js";
 import { decodeImages, decodeInBrowser, hasUndecoded, type ImageDecode } from "./images.js";
@@ -222,7 +223,7 @@ export class Scripting {
   readonly externalInterface: ExternalInterfaceHost | null;
   /** How many calls the page has made into the SWF's ExternalInterface callbacks, which run outside a frame. */
   hostCalls = 0;
-  /** Calls to an event's updateAfterEvent: a redraw asked for before the next frame. */
+  /** Calls to an event's updateAfterEvent, and Stage.color set: a redraw asked for before the next frame. */
   updates = 0;
   /** How many goto cycles run inside one another now. */
   private cycles = 0;
@@ -248,6 +249,8 @@ export class Scripting {
   readonly audio: AudioHost | null;
   /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
   readonly navigate: Navigate | null;
+  /** Takes what fscommand sends, or nothing does. */
+  readonly fsCommand: ((command: string, args: string) => void) | null;
   private readonly audioEntries = new WeakMap<SoundCharacter, SharedAudio>();
   /** What plays every library's timeline and button sounds. */
   private readonly timelineSounds = timelineSoundsOf(this);
@@ -344,6 +347,8 @@ export class Scripting {
   /** What flash.display.Stage reports and sets; the player copies the frame rate back each frame. */
   stageWidth = 0;
   stageHeight = 0;
+  /** Stage.color's 0xRRGGBB, the SWF's background until a script sets it; null before the stage is made. */
+  stageColor: number | null = null;
   /** The latest pointer position in stage coordinates. */
   mouseStageX = 0;
   mouseStageY = 0;
@@ -420,6 +425,12 @@ export class Scripting {
       socket?: SocketHost;
       audio?: AudioHost | null;
       navigate?: Navigate | null;
+      /**
+       * What fscommand sends: a plug-in's page gets it as its DoFSCommand
+       * call; none by default. The SWF chooses both strings: never evaluate
+       * them, or use them as a URL or as HTML.
+       */
+      fsCommand?: ((command: string, args: string) => void) | null;
       decodeImage?: ImageDecode | null;
       screenCapabilities?: Partial<ScreenCapabilities>;
       /** Drop the final newline produced by an HTML paragraph or BR. */
@@ -462,6 +473,7 @@ export class Scripting {
     this.onUncaught = options.onUncaught ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
+    this.fsCommand = options.fsCommand ?? null;
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
     this.flashvars = options.parameters ?? {};
@@ -1138,6 +1150,10 @@ export class Scripting {
 
       if (t.name === "flash.display::Bitmap") {
         return new BitmapObject(null);
+      }
+
+      if (t.name === "flash.media::Video") {
+        return new VideoObject();
       }
 
       if (t.name === "flash.text::TextField") {
