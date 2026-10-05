@@ -314,12 +314,13 @@ function buttonFirstFrame(abc: Uint8Array): Uint8Array {
     frameCount: 3,
     tags: [
       w.fileAttributes(true),
-      w.sprite(1, 1, [w.showFrame(), w.end()]),
+      w.sprite(1, 2, [w.showFrame(), w.showFrame(), w.end()]),
       w.tag(7, Uint8Array.of(2, 0, 0x0f, 1, 0, 1, 0, 0, 0, 0)),
       w.sprite(3, 1, [w.place({ depth: 1, character: 2 }), w.showFrame(), w.end()]),
       w.doAbc(abc, "ButtonFirstFrame"),
       w.symbolClass([
         [0, "Main"],
+        [1, "State"],
         [3, "Menu"],
       ]),
       w.showFrame(),

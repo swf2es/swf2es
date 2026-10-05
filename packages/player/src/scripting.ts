@@ -222,6 +222,8 @@ export class Scripting {
   updates = 0;
   /** How many goto cycles run inside one another now. */
   private cycles = 0;
+  /** A button's early state scripts and their goto cycles cannot consume other clips' first frames. */
+  private buttonScriptRoot: DisplayObject | null = null;
   /** Whether they nested too deep this frame, which stops them all till the next. */
   private overflowed = false;
   /**
@@ -666,11 +668,15 @@ export class Scripting {
       this.makeButtonStates(display, character, library);
       if ((library.version ?? 10) > 9 && hasClip(display.upState)) {
         display.firstScripts = true;
-        this.broadcast("frameConstructed");
-        // The new button's state scripts run now, but another fresh clip may
-        // still be inside its constructor and have no frame scripts yet.
-        this.runFrameScripts(display, false);
-        this.broadcast("exitFrame");
+        const outer = this.buttonScriptRoot;
+        this.buttonScriptRoot = display;
+        try {
+          this.broadcast("frameConstructed");
+          this.runFrameScripts(display, false);
+          this.broadcast("exitFrame");
+        } finally {
+          this.buttonScriptRoot = outer;
+        }
       }
     }
 
@@ -2137,7 +2143,7 @@ export class Scripting {
       // What frames placed and has yet to be made alive is made first.
       this.constructPending();
       this.broadcast("frameConstructed");
-      this.runFrameScripts(this.stage);
+      this.runFrameScripts(this.buttonScriptRoot ?? this.stage, this.buttonScriptRoot === null);
       this.broadcast("exitFrame");
     } finally {
       this.cycles--;
