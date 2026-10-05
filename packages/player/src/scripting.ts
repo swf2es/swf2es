@@ -2251,13 +2251,23 @@ export class Scripting {
    * and one at a time: a constructor that throws is reported, and the rest
    * are still made.
    */
+  private constructPending(): void {
+    for (let next = this.toConstruct.shift(); next; next = this.toConstruct.shift()) {
+      if (!next.display.object && next.display.parent) {
+        try {
+          this.construct(next.display, next.character, next.library);
+        } catch (error) {
+          this.reportUncaught(error);
+        }
+      }
+    }
+  }
+
   /**
    * The children a goto placed made alive, in order, each once: taken off
    * the list as it is made, so that a button's early frame among them that
    * makes the rest first leaves none to make again. A constructor that
-   * throws is reported, and the rest are still made; a first frame's,
-   * made in its parent's super(), still throws into the parent's
-   * constructor, as in Flash.
+   * throws is reported, and the rest are still made, as in Flash.
    */
   private constructGoto(goto: (typeof this.placing)[number]): void {
     for (let next = goto.placed.shift(); next; next = goto.placed.shift()) {
@@ -2269,18 +2279,6 @@ export class Scripting {
         this.construct(next.display, next.character, goto.library);
       } catch (error) {
         this.reportUncaught(error);
-      }
-    }
-  }
-
-  private constructPending(): void {
-    for (let next = this.toConstruct.shift(); next; next = this.toConstruct.shift()) {
-      if (!next.display.object && next.display.parent) {
-        try {
-          this.construct(next.display, next.character, next.library);
-        } catch (error) {
-          this.reportUncaught(error);
-        }
       }
     }
   }
