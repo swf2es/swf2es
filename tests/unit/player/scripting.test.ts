@@ -521,6 +521,75 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
   ]);
 });
 
+test("a loaded SWF's class is bound to its symbol as soon as a script can find it", {
+  skip,
+}, async () => {
+  const lines: string[] = [];
+  const compile = compiler(out);
+  // A class bound to a sprite of three frames, in a SWF loaded into its
+  // loader's own domain, as an application loads its parts into one
+  // domain; and its loader.
+  const shared = compile(
+    "BoundFrames",
+    `package {
+  import flash.display.MovieClip;
+  public class BoundFrames extends MovieClip {
+    public function BoundFrames() { trace("loaded"); }
+  }
+  public class Frames extends MovieClip {}
+}`,
+  );
+  const loads = compile(
+    "LoadsShared",
+    `package {
+  import flash.display.Loader;
+  import flash.display.MovieClip;
+  import flash.net.URLRequest;
+  import flash.system.ApplicationDomain;
+  import flash.system.LoaderContext;
+  public class LoadsShared extends MovieClip {
+    public function LoadsShared() {
+      new Loader().load(new URLRequest("frames.swf"), new LoaderContext(false, ApplicationDomain.currentDomain));
+    }
+  }
+}`,
+  );
+  const frames = w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(1, 3, [w.showFrame(), w.showFrame(), w.showFrame(), w.end()]),
+      w.doAbc(shared, "BoundFrames"),
+      w.symbolClass([
+        [0, "BoundFrames"],
+        [1, "Frames"],
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    url: "http://example.test/outer.swf",
+    fetch: async () => ({ bytes: frames, status: 200, headers: [] }),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(loads, 2, "LoadsShared"), scripting);
+  await player.start();
+
+  // Linked, its frame not yet come, as its document class has not traced:
+  // the class found then, as another SWF's load completing would find it,
+  // makes the symbol's clip, all its frames, not an empty one.
+  await scripting.settled();
+  const cls = scripting.rt.classNamed("Frames", scripting.mainDomain);
+  const made = scripting.rt.constructClass(cls, []) as avm2.AsObject;
+  assert.equal((made.$display as MovieClip).totalFrames, 3);
+  assert.deepEqual(lines, []);
+});
+
 test("a stalled URLStream does not hold up a later Loader load", { skip }, async () => {
   const compile = compiler(out);
   const inner = innerSwf(compile("Inner"));

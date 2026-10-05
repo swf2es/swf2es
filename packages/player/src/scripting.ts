@@ -1732,10 +1732,19 @@ export class Scripting {
 
     const library = readLibrary(swf);
     library.domain = load.domain;
-    const decoded = decodeImages(library, this.decodeImage);
+    // Its images first: once its code is linked, a script in the domain can
+    // make its symbols, whose bitmaps take the pixels there are then.
+    await decodeImages(library, this.decodeImage);
     // One from bytes is its Loader's SWF's, as far as its own URL goes.
     const run = await this.link(swf, load.domain, load.url ?? this.ownerUrl(load.loader), library);
-    await decoded;
+    // Bound as soon as linked, as its classes are found in the domain from
+    // here: one made before the load completes, as another SWF loaded into
+    // the domain completes, is its symbol's. Not a load closed or replaced
+    // meanwhile, which never completes.
+    if (load.generation === load.loader.$generation) {
+      this.bind(swf, library);
+    }
+
     return () => this.complete(load, swf, library, run);
   }
 
@@ -1918,7 +1927,6 @@ export class Scripting {
     if (run) {
       run();
       this.addFontLibrary(library);
-      this.bind(swf, library);
       root = new MovieClip(library.root, library);
       root.loaderInfo = info;
       root.placeFirstFrame();
