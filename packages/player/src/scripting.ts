@@ -650,7 +650,7 @@ export class Scripting {
     url?: string,
     library?: Library,
   ): Promise<Value> {
-    const { module } = this.codegen.compile(this.hashes, index);
+    const module = this.codegen.compileModule(this.hashes, index);
     const script = `swf2es-${++this.modules}.js`;
     if (url !== undefined) {
       this.moduleUrls.set(script, url);
