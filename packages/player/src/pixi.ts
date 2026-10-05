@@ -8,7 +8,9 @@
 // tree, holes cut, as Pixi's own grouping of holes misses nested islands.
 import type { ColorTransform, Fill, Glyph, Line } from "@swf2es/format";
 import {
+  BatchableGraphics,
   type Batcher,
+  BigPool,
   BufferImageSource,
   CanvasTextMetrics,
   type FederatedPointerEvent,
@@ -17,6 +19,7 @@ import {
   fontStringFromTextStyle,
   Graphics,
   GraphicsContext,
+  GraphicsContextRenderData,
   type InstructionSet,
   Matrix,
   Container as PixiContainer,
@@ -501,6 +504,28 @@ const IDLE_MOST = 4096;
 const PARKED_MOST = 1024;
 /** First-time detached groups get one chance to return without letting churn fill the batch cache. */
 const PARKED_FIRST_GROUPS_MOST = 64;
+/**
+ * The most render data and batch elements Pixi may keep pooled from the
+ * contexts that went. Pixi pools each unbatched context's render data, a
+ * batcher with its buffers at their largest, and never shrinks the pool:
+ * lines drawn again for a window resized, hundreds a frame, left 100 MB of
+ * buffers behind. Past these, a pool is emptied; its items in use stay.
+ */
+const POOLED_RENDER_DATA_MOST = 128;
+const POOLED_BATCHABLES_MOST = 4096;
+
+/** Pixi's pools of what destroyed contexts gave back, emptied once past their most. */
+function trimPools(): void {
+  const data = BigPool.getPool(GraphicsContextRenderData);
+  if (data.totalFree > POOLED_RENDER_DATA_MOST) {
+    data.clear();
+  }
+
+  const batchables = BigPool.getPool(BatchableGraphics);
+  if (batchables.totalFree > POOLED_BATCHABLES_MOST) {
+    batchables.clear();
+  }
+}
 
 /**
  * Lines' contexts by shape layer and the linear transform they are seen
@@ -1953,6 +1978,7 @@ export class PixiView {
       this.emptyGroup(uid, entry.group.deref());
     }
 
+    trimPools();
     this.rescaled = this.leastWidth !== this.strokedAt;
     this.strokedAt = this.leastWidth;
     const node = this.sync(root, UNIT, false);
