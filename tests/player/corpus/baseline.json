@@ -174,7 +174,7 @@
   "avm2/button_bounds": {"matched":0,"lines":1,"traced":1,"error":null},
   "avm2/button_hittest": {"matched":2,"lines":2,"traced":2,"error":null},
   "avm2/button_nested_frame": {"matched":48,"lines":48,"traced":48,"error":null},
-  "avm2/button_nested_frame_simple": {"matched":22,"lines":27,"traced":39,"error":null},
+  "avm2/button_nested_frame_simple": {"matched":27,"lines":27,"traced":39,"error":null},
   "avm2/bytearray": {"matched":15,"lines":48,"traced":15,"error":"Error: Error #2030: End of file was encountered."},
   "avm2/bytearray_bad_symbol_class": {"matched":1,"lines":3,"traced":2,"error":null},
   "avm2/bytearray_bad_symbol_class_other_movie": {"matched":4,"lines":6,"traced":5,"error":null},
