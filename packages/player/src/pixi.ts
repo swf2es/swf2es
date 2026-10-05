@@ -1321,6 +1321,7 @@ export class PixiView {
         }
       }
     }
+
     const chain = node.filters[0];
     if (chain instanceof FilterChain) {
       chain.forget();
@@ -1467,6 +1468,7 @@ export class PixiView {
         this.parkedGroups.delete(group.instructionSet.uid);
         this.parkedFirstGroups.delete(group.instructionSet.uid);
       }
+
       const kids = o instanceof Container && (o.children.length > 0 || node.kids.length > 0);
       dirty |= TRANSFORM | (kids ? CHILDREN : 0);
       if (node.emptied) {

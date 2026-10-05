@@ -217,7 +217,7 @@ export class ColorBatcher extends Batcher {
   }
 
   override begin(): void {
-    // A batcher belongs to a render group. A room can briefly fill it with geometry, then leave
+    // A batcher belongs to a render group. A scene can briefly fill it with geometry, then leave
     // it using a tiny fraction of buffers that Pixi only grows. Rebuilds, not wall time, count
     // here so a quiet group is never disrupted just to reclaim its buffers.
     const attributes = this.attributeSize || 0;
