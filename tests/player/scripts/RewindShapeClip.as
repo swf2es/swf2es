@@ -35,8 +35,11 @@ package {
     private function frame3():void {
       kinds("frame 3");
       gotoAndStop(1);
-      var after:Array = kinds("after rewind");
-      trace("kept", after[0] == before[0], after[1] == before[1]);
+      // The goto waits for this script to return, as Flash defers it: the
+      // children are still frame 2's here, and frame 1's script shows the
+      // rewind's.
+      var after:Array = kinds("goto asked");
+      trace("still frame 2's", after[0] == before[0], after[1] == before[1]);
     }
   }
 

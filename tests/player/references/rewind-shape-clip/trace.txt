@@ -3,7 +3,7 @@ frame 1 A flash.display::Shape
 A constructor
 frame 2 flash.display::Shape A
 frame 3 flash.display::Shape A
-after rewind flash.display::Shape A
-kept true true
+goto asked flash.display::Shape A
+still frame 2's true true
 A constructor
 frame 1 A flash.display::Shape

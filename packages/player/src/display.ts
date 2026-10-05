@@ -1440,7 +1440,10 @@ export class MovieClip extends Container {
     // the frames replayed end on a place without the move flag: that child
     // stays and takes the place, as Flash keeps it (`same-depth` at the
     // loop, `rewind-first`), a clip its character and a shape the place's
-    // (swap, `morph-shapes`). Replayed from the first frame, a depth the
+    // (swap, `morph-shapes`), if it is the kind of object the place makes:
+    // a shape where the place makes a clip, or a clip where it makes a
+    // shape, goes, and the place makes it anew (`rewind-shape-clip`).
+    // Replayed from the first frame, a depth the
     // frames left empty is empty. Whenever it was placed, a child whose
     // ratio is not the one the frames replayed give goes too, to be made
     // anew: authoring tools give each placement a ratio of its own, and
@@ -1463,8 +1466,6 @@ export class MovieClip extends Container {
         } else if (
           child.placeFrame > target &&
           jump.placed &&
-          // Only of the kind the place makes: a shape where it makes a clip
-          // goes, and Flash makes the clip anew (`rewind-shape-clip`).
           madeAs(child, id === null ? undefined : this.library.characters.get(id))
         ) {
           kept.add(depth);
