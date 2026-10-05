@@ -16,14 +16,19 @@ export class FontSet {
     }
   }
 
-  /** The font of that name and style, else of that name in any, as adl takes a regular font for bold text; null for none. */
+  /** Prefer a font with layout metrics when a domain has more than one of the same name. */
   find(name: string, bold: boolean, italic: boolean): Font | null {
     const fonts = this.byName.get(name);
     if (!fonts) {
       return null;
     }
 
-    return fonts.find((f) => f.bold === bold && f.italic === italic) ?? fonts[0];
+    return (
+      fonts.find((f) => f.bold === bold && f.italic === italic && f.layout) ??
+      fonts.find((f) => f.layout) ??
+      fonts.find((f) => f.bold === bold && f.italic === italic) ??
+      fonts[0]
+    );
   }
 }
 
