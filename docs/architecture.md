@@ -663,7 +663,13 @@ SWF defined alike gives that SWF's shape, held weakly, so a crowd whose
 members each load the same SWF draws with one set of fills and lines, not
 one per load, whose lines alone overran the idle limit and were
 tessellated again on every turn of their loop. A shape filled with a
-bitmap keeps to its own SWF, whose bitmap it is.
+bitmap keeps to its own SWF, whose bitmap it is. A shape is drawn into its
+layers when first asked for, not as its SWF is read: of the 17,000 shapes
+a large application had loaded after ten minutes, 14,000 had no instance,
+and their layers, 191 MB of the 222 MB all held, were never used. The tag
+is read once as the SWF is, for the bounds and the bitmaps its fills take
+as the SWF has them then, and again when it is first drawn; the SWF's
+bytes, which its sounds and placements keep, are there to read it from.
 A morph shape (DefineMorphShape, DefineMorphShape2) is two shapes whose
 edges pair in order; a `MorphShape` shows their blend at the ratio its
 placements give (`morph.ts`), a shape like any other, so it draws,

@@ -314,13 +314,41 @@ function shapeOf(
   }
 
   const shape = readShape(bytes, t.code, t.offset, t.length);
-  let filled = false;
-  const layers = shapeLayers(shape, (id) => {
-    filled = true;
-    return bitmap(id);
-  });
-  const character: ShapeCharacter = { type: "shape", id: shape.id, shape: boundsOf(shape), layers };
-  if (!filled) {
+  // Its bitmap fills' bitmaps as the SWF has them now, which defines them before the shapes that
+  // use them; a shape with any is the SWF's own, not shared.
+  // The parse is not kept: no function made here refers to it, so its records go.
+  const bitmaps = new Map<number, BitmapCharacter | null>();
+  const styles = [shape.fills];
+  for (const r of shape.records) {
+    if (r.type === "style" && r.styles) {
+      styles.push(r.styles.fills);
+    }
+  }
+
+  for (const fills of styles) {
+    for (const fill of fills) {
+      if (fill.type === "bitmap" && !bitmaps.has(fill.bitmap)) {
+        bitmaps.set(fill.bitmap, bitmap(fill.bitmap));
+      }
+    }
+  }
+
+  let layers: ShapeLayer[] | null = null;
+  const character: ShapeCharacter = {
+    type: "shape",
+    id: shape.id,
+    shape: boundsOf(shape),
+    // Drawn into layers when first asked for, from the tag: most of the shapes a large
+    // application's SWFs define are never shown, and their layers were most of its memory.
+    get layers() {
+      layers ??= shapeLayers(
+        readShape(bytes, t.code, t.offset, t.length),
+        (id) => bitmaps.get(id) ?? null,
+      );
+      return layers;
+    },
+  };
+  if (bitmaps.size === 0) {
     const own = tag.slice();
     const list = sharedShapes.get(hash) ?? [];
     list.push({ tag: own, shape: new WeakRef(character) });
