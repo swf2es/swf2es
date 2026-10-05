@@ -243,6 +243,14 @@ export interface Library {
   uncaught: ((error: unknown) => void) | null;
   /** Has the AS3 object of a child a frame played on placed made in the frame's construct phase; null where there are no scripts. */
   constructLater: ((display: DisplayObject, character: DisplayCharacter) => void) | null;
+  /**
+   * Makes alive, in order, the children a goto placed, all placed first;
+   * what a button's early frame made meanwhile is not made again. Null
+   * where there are no scripts.
+   */
+  constructPlaced:
+    | ((placed: { display: DisplayObject; character: DisplayCharacter }[]) => void)
+    | null;
   /** Told before a timeline child goes, for the events a script sees; null in an AVM1 movie. */
   /** Tells of a display object about to lose its parent, and whether the timeline takes it (a script's removal otherwise). */
   removing: ((display: DisplayObject, byTimeline: boolean) => void) | null;
@@ -586,6 +594,7 @@ export function readLibrary(swf: Swf): Library {
     classes: new Map(),
     construct: null,
     constructLater: null,
+    constructPlaced: null,
     uncaught: null,
     removing: null,
     fonts,

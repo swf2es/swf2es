@@ -249,6 +249,11 @@ export class Scripting {
     character: DisplayCharacter;
     library: Library;
   }[] = [];
+  /** The children of the gotos under way placed and not yet made alive, each goto's in order. */
+  private readonly placing: {
+    placed: { display: DisplayObject; character: DisplayCharacter }[];
+    library: Library;
+  }[] = [];
   readonly socket: SocketHost | null;
   readonly audio: AudioHost | null;
   /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
@@ -591,6 +596,15 @@ export class Scripting {
 
       this.toConstruct.push({ display, character, library });
     };
+    library.constructPlaced = (placed) => {
+      const goto = { placed, library };
+      this.placing.push(goto);
+      try {
+        this.constructGoto(goto);
+      } finally {
+        this.placing.splice(this.placing.indexOf(goto), 1);
+      }
+    };
     library.removing = (display, byTimeline) => this.removing(display, byTimeline);
     library.sounds = this.timelineSounds;
   }
@@ -721,6 +735,14 @@ export class Scripting {
         }
 
         display.firstScripts = true;
+        // What is placed and not yet alive is made first, as a frame's
+        // construct phase makes it: the frame's other children, and those
+        // of the gotos under way, which their parents' listeners look for.
+        this.constructPending();
+        for (const goto of [...this.placing]) {
+          this.constructGoto(goto);
+        }
+
         this.broadcast("frameConstructed");
         this.runFrameScripts(this.stage ?? display, display);
         this.broadcast("exitFrame");
@@ -1123,6 +1145,7 @@ export class Scripting {
       classes: new Map(),
       construct: null,
       constructLater: null,
+      constructPlaced: null,
       uncaught: null,
       removing: null,
       fonts: new FontSet(),
@@ -2228,6 +2251,28 @@ export class Scripting {
    * and one at a time: a constructor that throws is reported, and the rest
    * are still made.
    */
+  /**
+   * The children a goto placed made alive, in order, each once: taken off
+   * the list as it is made, so that a button's early frame among them that
+   * makes the rest first leaves none to make again. A constructor that
+   * throws is reported, and the rest are still made; a first frame's,
+   * made in its parent's super(), still throws into the parent's
+   * constructor, as in Flash.
+   */
+  private constructGoto(goto: (typeof this.placing)[number]): void {
+    for (let next = goto.placed.shift(); next; next = goto.placed.shift()) {
+      if (next.display.object || !next.display.parent) {
+        continue;
+      }
+
+      try {
+        this.construct(next.display, next.character, goto.library);
+      } catch (error) {
+        this.reportUncaught(error);
+      }
+    }
+  }
+
   private constructPending(): void {
     for (let next = this.toConstruct.shift(); next; next = this.toConstruct.shift()) {
       if (!next.display.object && next.display.parent) {

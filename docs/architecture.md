@@ -879,7 +879,15 @@ frame's script run there if it registered it before `super()`; else it
 keeps it for later when a timeline placed it, by a frame or a frame
 script's goto, or a script made it with `new` outside the frame's own
 frame scripts, and one a frame script made loses it, as adl shows
-(`button-frame-order`, Ruffle's `frame_script_button_order`).
+(`button-frame-order`, Ruffle's `frame_script_button_order`). Before its
+`FRAME_CONSTRUCTED`, that frame makes alive what is placed and not yet
+alive, as a frame's construct phase does: so a goto places every child
+of the frame it lands on before it makes any alive, and a button among
+them makes the rest alive in its early frame, ahead of the clip whose
+constructor is making it, as adl shows (`goto-place-first`). A parent's
+`FRAME_CONSTRUCTED` listener then finds them all: Flash's own component
+parameters are set from one, once for each frame, and a clip made after
+it kept none.
 
 An error nothing caught is reported, and what was running goes on, as
 adl shows. A listener's error never reaches the dispatcher: the

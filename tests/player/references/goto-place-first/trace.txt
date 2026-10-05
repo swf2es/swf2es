@@ -1,0 +1,13 @@
+frameConstructed 1 holder false setup false
+frame 1 goto 3
+after goto holder false setup false
+state constructor
+setup constructor
+frameConstructed 3 holder false setup true
+frame 3 holder false setup true
+state frame 1
+holder constructor
+frameConstructed 3 holder true setup true
+frameConstructed 3 holder true setup true
+frameConstructed 3 holder true setup true
+frameConstructed 3 holder true setup true
