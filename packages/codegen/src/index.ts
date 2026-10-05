@@ -101,6 +101,13 @@ export interface Codegen {
    */
   compile(hashes?: string[], index?: number): Compiled;
   /** Method bodies of ABC `index` (the last added by default) compiled alone, as the JIT compiles each on its first call; a native, unverified or unknown one is left out. */
+  /**
+   * ABC `index`'s module alone, as `compile` writes it, for a host that
+   * loads it and needs neither its source map nor its entries: writing
+   * those too would add a large ABC's worth to codegen's memory, which
+   * never shrinks.
+   */
+  compileModule(hashes?: string[], index?: number): string;
   compileMethods(bodies: number[], index?: number): Map<number, string>;
 }
 
@@ -176,11 +183,16 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     },
     compile(hashes = [], index = -1) {
       last("compile");
-      const module = wasm.domainModule(hashes.join("\n"), indexOf(index));
-      const sourceMap = wasm.domainSourceMap();
-      const entries = parseEntries(wasm.domainModuleEntries());
-      collected(undefined);
+      // Each part a call of its own, collected after it: the module's garbage
+      // is gone before its entries are written.
+      const module = collected(wasm.domainModule(hashes.join("\n"), indexOf(index)));
+      const sourceMap = collected(wasm.domainSourceMap());
+      const entries = parseEntries(collected(wasm.domainModuleEntries()));
       return { module, sourceMap, entries };
+    },
+    compileModule(hashes = [], index = -1) {
+      last("compileModule");
+      return collected(wasm.domainModule(hashes.join("\n"), indexOf(index), false));
     },
     compileMethods(bodies, index = -1) {
       last("compileMethods");

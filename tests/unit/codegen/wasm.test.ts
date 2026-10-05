@@ -109,12 +109,37 @@ test("the release build compiles what the test build compiles, byte for byte", {
   assert.equal(codegen.compile(["b", "a"], 0).module, testing.domainModule("b\na", 0));
   assert.deepEqual(codegen.compileMethods([...compiled.entries.keys()], 1), compiled.entries);
   assert.throws(() => codegen.compile(["b", "a"], 2), /only 2 have been added/);
+
+  // The module alone is compile's, by default and by index.
+  assert.equal(codegen.compileModule(["b", "a"]), compiled.module);
+  assert.equal(codegen.compileModule(["b", "a"], 0), testing.domainModule("b\na", 0));
+  assert.throws(() => codegen.compileModule(["b", "a"], 2), /only 2 have been added/);
+});
+
+test("a module's source map and entries are written when asked for, from it alone", () => {
+  testing.domainReset(50);
+  testing.domainAdd(script([0x24, 7, 0x24, 5, 0xa0, 0x48]), false);
+  const module = testing.domainModule("a");
+  const sourceMap = testing.domainSourceMap();
+  const entries = testing.domainModuleEntries();
+  assert.ok(entries.length > 0);
+
+  // Asked again, after a method compiled alone between: the same.
+  testing.domainEmitEach("0", true);
+  assert.equal(testing.domainSourceMap(), sourceMap);
+  assert.equal(testing.domainModuleEntries(), entries);
+
+  // A module not kept: the same module, and nothing left to ask for.
+  assert.equal(testing.domainModule("a", -1, false), module);
+  assert.equal(testing.domainSourceMap(), "");
+  assert.equal(testing.domainModuleEntries(), "");
 });
 
 test("compiling before an ABC is added is an error, not a trap", async () => {
   const codegen = await createCodegen(module);
   codegen.reset();
   assert.throws(() => codegen.compile(), /no ABC has been added/);
+  assert.throws(() => codegen.compileModule(), /no ABC has been added/);
   assert.throws(() => codegen.compileMethods([0]), /no ABC has been added/);
   // An ABC the domain rejects does not count as added.
   assert.notEqual(codegen.add(new Uint8Array([16, 0, 46, 0, 1, 2, 3])), 0);

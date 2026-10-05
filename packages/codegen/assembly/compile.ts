@@ -16,11 +16,20 @@ export let domain = new Domain();
 // one at a time; another ABC added, or a new domain, starts over.
 let verified: StaticArray<i32> | null = null;
 
+/**
+ * The emitter of the module domainModule wrote last, if it was kept: its
+ * source map and entries are written when asked for, not with the module,
+ * whose memory they would add to that call's. A large ABC's entries alone,
+ * decoded, doubled codegen's memory, which never shrinks.
+ */
+let written: ModuleEmitter | null = null;
+
 /** Start a new domain whose user ABCs have API version `apiVersion`. */
 export function domainReset(apiVersion: i32): void {
   domain = new Domain();
   domain.apiVersion = <u8>apiVersion;
   verified = null;
+  written = null;
 }
 
 /**
@@ -89,48 +98,34 @@ function abcIndex(index: i32): i32 {
  * frame loaded before it verifies a method. `hashes` are the ABCs' hashes
  * in load order, one per line, as the cache key names them.
  */
-export function domainModule(hashes: string = "", index: i32 = -1): string {
+export function domainModule(hashes: string = "", index: i32 = -1, keep: bool = true): string {
+  written = null;
   // No ABC, no module: the caller asked before adding one.
   const at = abcIndex(index);
   if (at < 0) {
-    lastSourceMap = "";
-    lastEntries = "";
     return "";
   }
 
   const emitter = new ModuleEmitter(domain, <u32>at);
   emitter.module(hashes.length ? hashes.split("\n") : []);
-  const out = emitter.out;
-  const map = new Output();
-  emitter.sourceMap(map);
-  lastSourceMap = String.UTF8.decodeUnsafe(changetype<usize>(map.bytes), map.length);
-  // The entries' bytes copied into one buffer, decoded once.
-  const entries = new Output();
-  for (let k = 0; k < emitter.entryBody.length; k++) {
-    const start = emitter.entryStart[k];
-    const length = emitter.entryEnd[k] - start;
-    entries.uint(emitter.entryBody[k]);
-    entries.byte(1);
-    entries.reserve(length);
-    memory.copy(
-      changetype<usize>(entries.bytes) + entries.length,
-      changetype<usize>(out.bytes) + start,
-      length,
-    );
-    entries.length += length;
-    entries.byte(2);
+  if (keep) {
+    written = emitter;
   }
 
-  lastEntries = String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
+  const out = emitter.out;
   return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
 }
 
-let lastSourceMap = "";
-let lastEntries = "";
-
 /** The source map of the module domainModule wrote last, as JSON: its code's AS3 lines, from debugline. */
 export function domainSourceMap(): string {
-  return lastSourceMap;
+  const emitter = written;
+  if (emitter === null) {
+    return "";
+  }
+
+  const map = new Output();
+  emitter.sourceMap(map);
+  return String.UTF8.decodeUnsafe(changetype<usize>(map.bytes), map.length);
 }
 
 /**
@@ -200,5 +195,28 @@ export function domainEmitEach(bodies: string, reuse: bool, which: i32 = -1): st
  * for each, its body's index, U+0001, its entry, U+0002.
  */
 export function domainModuleEntries(): string {
-  return lastEntries;
+  const emitter = written;
+  if (emitter === null) {
+    return "";
+  }
+
+  // The entries' bytes copied into one buffer, decoded once.
+  const out = emitter.out;
+  const entries = new Output();
+  for (let k = 0; k < emitter.entryBody.length; k++) {
+    const start = emitter.entryStart[k];
+    const length = emitter.entryEnd[k] - start;
+    entries.uint(emitter.entryBody[k]);
+    entries.byte(1);
+    entries.reserve(length);
+    memory.copy(
+      changetype<usize>(entries.bytes) + entries.length,
+      changetype<usize>(out.bytes) + start,
+      length,
+    );
+    entries.length += length;
+    entries.byte(2);
+  }
+
+  return String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
 }

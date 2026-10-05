@@ -20,9 +20,13 @@ compiler's whole API: `reset` starts a domain, `add` links an ABC into it
 after those before, into one of its application domains (`childDomain`
 makes one, `found` records what one has found, see Linking), and the last
 one added compiles with `compile`, whole,
-to its module, source map and the entry of each method, or with
-`compileMethods`, a method at a time as the JIT compiles each on its first
-call. Both go through `assembly/compile.ts`, which the test build
+to its module, source map and the entry of each method, with
+`compileModule` to its module alone, or with `compileMethods`, a method at
+a time as the JIT compiles each on its first call. The source map and the
+entries are written each in a call of its own, after the module's garbage
+is collected, and only when asked for: written with the module, a large
+ABC's entries alone took codegen's memory from 128 to 256 MiB, which wasm
+never gives back. All go through `assembly/compile.ts`, which the test build
 (`assembly/testing.ts`, with the reader, verifier and emitter exposed for
 the node tests) exports too, so the tests exercise the code that ships, and
 the determinism check compiles every chain through both builds.
@@ -370,10 +374,11 @@ display list). For a large application that loads many SWFs, that is the
 most memory the compiler takes and most of the code it writes for nothing:
 
 - **codegen's memory.** Compiling a 963 KB ABC to one module of 10.4
-  million characters, 5,314 methods, grows codegen.wasm's memory from 64
-  MiB to 256 MiB in one call: the minimal runtime collects nothing during
-  a call, and wasm memory never shrinks. The same methods compiled with
-  `compileMethods` in batches of 500 peak at 128 MiB.
+  million characters, 5,314 methods, grows codegen.wasm's memory from 32
+  MiB to 128 MiB in one call, the module alone (`compileModule`): the
+  minimal runtime collects nothing during a call, and wasm memory never
+  shrinks. The same methods compiled with `compileMethods` in batches of
+  500 peak at 128 MiB too.
 - **Code that never runs.** Of 23,873 methods such an application had
   loaded after some minutes of use, 9,333 (39%) had run.
 
