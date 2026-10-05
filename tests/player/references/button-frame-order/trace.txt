@@ -1,0 +1,50 @@
+main frame 1
+child 1 constructor
+container 1 constructor
+child 2 constructor
+main frame 2
+child 1 frame 1
+child 2 frame 1
+state 1 frame 1
+child 3 constructor
+container 1 addFrameScript
+container 1 frame 1
+child 3 frame 1
+enter frame 3
+other 1 constructor
+menu 1 constructor
+other 1 frame 1
+state 2 frame 1
+menu 1 addFrameScript
+early 1 addFrameScript
+menu 1 frame 1
+early 1 frame 1
+state 3 frame 1
+early 1 constructed
+enter frame 3 attached
+main frame 4
+other 2 constructor
+menu 2 constructor
+other 2 frame 1
+state 4 frame 1
+menu 2 addFrameScript
+main frame 4 attached
+other 3 constructor
+other 3 frame 1
+frame 5 constructed
+menu 3 constructor
+state 5 frame 1
+menu 3 addFrameScript
+frame 5 attached
+menu 3 frame 1
+main frame 6, goto 8
+main frame 6 after goto
+container 2 constructor
+child 4 constructor
+main frame 8
+child 4 frame 1
+state 6 frame 1
+child 5 constructor
+container 2 addFrameScript
+container 2 frame 1
+child 5 frame 1

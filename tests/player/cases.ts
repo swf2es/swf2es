@@ -331,6 +331,63 @@ function buttonFirstFrame(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A button whose up state is a scripted clip, in a clip the timeline places
+// beside another, by a frame or by a frame script's goto, and in clips
+// scripts make with `new`, from a listener and from a frame script, as
+// Ruffle's frame_script_button_order makes one, and in one that registers
+// its frame script before super(): which pending frame scripts the button's
+// early frame runs, and whether the clip being constructed around it still
+// runs its first frame's script.
+function buttonFrameOrder(abc: Uint8Array): Uint8Array {
+  // Up state the clip, the others a square, at depth 1 and with no matrix.
+  const button = w.tag(7, Uint8Array.of(2, 0, 0x01, 1, 0, 1, 0, 0, 0x0e, 7, 0, 1, 0, 0, 0, 0));
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 8,
+    tags: [
+      w.fileAttributes(true),
+      square(7, 0x3366cc),
+      w.sprite(1, 1, [w.showFrame(), w.end()]),
+      button,
+      w.sprite(3, 1, [w.showFrame(), w.end()]),
+      w.sprite(4, 1, [
+        w.place({ depth: 1, character: 3 }),
+        w.place({ depth: 2, character: 2 }),
+        w.place({ depth: 3, character: 3 }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.sprite(5, 1, [w.place({ depth: 1, character: 2 }), w.showFrame(), w.end()]),
+      w.sprite(6, 1, [w.showFrame(), w.end()]),
+      w.sprite(8, 1, [w.place({ depth: 1, character: 2 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "ButtonFrameOrder"),
+      w.symbolClass([
+        [0, "Main"],
+        [1, "State"],
+        [3, "Child"],
+        [4, "Container"],
+        [5, "Menu"],
+        [6, "Other"],
+        [8, "Early"],
+      ]),
+      w.showFrame(),
+      w.place({ depth: 1, character: 3 }),
+      w.place({ depth: 2, character: 4 }),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.place({ depth: 3, character: 4 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A four-frame root whose square moves each frame, with scripts/Goto.as:
 // frame 2's script jumps to frame 4.
 function gotos(abc: Uint8Array): Uint8Array {
@@ -2915,6 +2972,16 @@ export const cases: PlayerCase[] = [
     swf: buttonFirstFrame,
     script: "ButtonFirstFrame",
     frames: 6,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "button-frame-order",
+    swf: buttonFrameOrder,
+    script: "ButtonFrameOrder",
+    // Flash's harness counts the buttons' early EXIT_FRAMEs as frames.
+    frames: 20,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

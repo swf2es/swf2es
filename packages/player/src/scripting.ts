@@ -227,8 +227,12 @@ export class Scripting {
   updates = 0;
   /** How many goto cycles run inside one another now. */
   private cycles = 0;
-  /** A button's early state scripts and their goto cycles cannot consume other clips' first frames. */
-  private buttonScriptRoot: DisplayObject | null = null;
+  /**
+   * Whether the frame's own frame scripts are running: a clip a script
+   * makes with `new` then, around a button whose early scripts run, loses
+   * its first frame's script to them, as in Flash; one made before keeps it.
+   */
+  private scriptPhase = false;
   /** Whether they nested too deep this frame, which stops them all till the next. */
   private overflowed = false;
   /**
@@ -669,15 +673,26 @@ export class Scripting {
   construct(display: DisplayObject, character: DisplayCharacter, library: Library): void {
     // Its first frame's children are there before its constructor runs, made alive in its super().
     if (display instanceof MovieClip) {
+      display.timelineChild = true;
       display.placeFirstFrame();
     }
 
     const name = library.classes.get(character.id) ?? DEFAULT_CLASS[character.type];
     const domain = library.domain ?? null;
+    // Flash gives the parent a property of the child's instance name, which
+    // a sealed class without it refuses: ReferenceError #1056, as Flash.
+    const named = (object: avm2.AsObject) => {
+      const parent = display.parent?.object;
+      if (parent && display.timelineNamed) {
+        this.rt.setProperty(parent, avm2.qname(avm2.publicNs, display.name), object);
+      }
+    };
     // A button's states are made before its constructor runs, as Flash has
     // them; in a SWF after 9, one whose up state has a clip has a frame run
-    // then too, its states' scripts up, over, down, hit. The scripts are
-    // the button's own: a parent being made has registered none yet.
+    // then too: the frame scripts due on the display list, the orphans and
+    // what scripts made, the button's states up, over, down, hit among them
+    // (`button-frame-order`, Ruffle's frame_script_button_order). Its parent
+    // has its property by then, as scripts there find it (`simplebutton_symbolclass`).
     if (display instanceof ButtonObject && character.type === "button") {
       // Named before its states, as Flash names an object when it is made.
       if (display.name === "") {
@@ -686,16 +701,38 @@ export class Scripting {
 
       this.makeButtonStates(display, character, library);
       if ((library.version ?? 10) > 9 && hasClip(display.upState)) {
+        const cls = this.rt.classNamed(name, domain);
+        this.pending = display;
+        let object: avm2.AsObject | null;
+        try {
+          object = this.rt.allocate(cls);
+        } finally {
+          this.pending = null;
+        }
+
+        // A name the parent refuses is thrown once the button is constructed, as another child's is.
+        let refused: { error: unknown } | null = null;
+        if (object) {
+          try {
+            named(object);
+          } catch (error) {
+            refused = { error };
+          }
+        }
+
         display.firstScripts = true;
         this.broadcast("frameConstructed");
-        const outer = this.buttonScriptRoot;
-        this.buttonScriptRoot = display;
-        try {
-          this.runFrameScripts(display, false);
-        } finally {
-          this.buttonScriptRoot = outer;
-        }
+        this.runFrameScripts(this.stage ?? display, display);
         this.broadcast("exitFrame");
+        if (object) {
+          this.rt.constructSuper(cls, object);
+          if (refused) {
+            throw refused.error;
+          }
+
+          this.added(display);
+          return;
+        }
       }
     }
 
@@ -703,13 +740,7 @@ export class Scripting {
       character.type === "bitmap" && display instanceof BitmapObject
         ? this.constructBitmap(display, name, domain)
         : this.constructAs(display, this.rt.classNamed(name, domain));
-    // Flash gives the parent a property of the child's instance name, which
-    // a sealed class without it refuses: ReferenceError #1056, as Flash.
-    const parent = display.parent?.object;
-    if (parent && display.timelineNamed) {
-      this.rt.setProperty(parent, avm2.qname(avm2.publicNs, display.name), object);
-    }
-
+    named(object);
     this.added(display);
   }
 
@@ -2044,8 +2075,10 @@ export class Scripting {
    * landing script before a child the jump made. A clip a script removes
    * still runs its own, as Flash queues them first. Rounds until none is
    * left, bounded, as a script that jumps on every run would never settle.
+   * `also`, a button being made, is visited after them all, for one none
+   * of them has; a clip visited twice still runs a frame's script once.
    */
-  runFrameScripts(root: DisplayObject, includeOtherRoots = true): void {
+  runFrameScripts(root: DisplayObject, also: DisplayObject | null = null): void {
     // A script's error is reported apart: its goto still happens, and the
     // scripts after it still run, as in Flash (the unit test "a frame
     // script's goto happens though the script throws after it").
@@ -2054,6 +2087,19 @@ export class Scripting {
     for (let round = 0; round < 64 && !stopped(); round++) {
       let ran = false;
       const own = (o: MovieClip) => {
+        // A clip whose super() is making the children that run this has
+        // registered no script for its frame yet, unless it did so before
+        // super(), and keeps the frame's for later: always, placed by a
+        // timeline, made with `new`, only outside the frame's own scripts;
+        // one a frame script makes loses it (`button-frame-order`).
+        if (
+          o.makingChildren &&
+          !o.frameScripts.has(o.currentFrame) &&
+          (o.timelineChild || !this.scriptPhase)
+        ) {
+          return;
+        }
+
         for (
           let jumps = 0;
           jumps < 64 && o.scriptedFrame !== o.currentFrame && !stopped();
@@ -2104,17 +2150,17 @@ export class Scripting {
           visit(child);
         }
       };
-      if (includeOtherRoots) {
-        for (const orphan of this.orphanRoots()) {
-          visit(orphan);
-        }
+      for (const orphan of this.orphanRoots()) {
+        visit(orphan);
       }
 
       visit(root);
-      if (includeOtherRoots) {
-        for (const display of this.fresh) {
-          visit(display);
-        }
+      for (const display of this.fresh) {
+        visit(display);
+      }
+
+      if (also) {
+        visit(also);
       }
 
       for (const o of queue) {
@@ -2167,7 +2213,7 @@ export class Scripting {
       // What frames placed and has yet to be made alive is made first.
       this.constructPending();
       this.broadcast("frameConstructed");
-      this.runFrameScripts(this.buttonScriptRoot ?? this.stage, this.buttonScriptRoot === null);
+      this.runFrameScripts(this.stage);
       this.broadcast("exitFrame");
     } finally {
       this.cycles--;
@@ -2233,7 +2279,13 @@ export class Scripting {
 
     const ends = [...this.frameEnds.splice(0), ...this.completeLoads()];
     this.broadcast("frameConstructed");
-    this.runFrameScripts(root);
+    const outer = this.scriptPhase;
+    this.scriptPhase = true;
+    try {
+      this.runFrameScripts(root);
+    } finally {
+      this.scriptPhase = outer;
+    }
     // What the timeline took off this frame has had its frame; it stops here.
     for (const [serial, orphan] of this.orphans) {
       if (!orphan.keep) {
