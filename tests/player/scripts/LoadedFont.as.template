@@ -1,0 +1,42 @@
+package {
+  import flash.display.Loader;
+  import flash.display.MovieClip;
+  import flash.system.ApplicationDomain;
+  import flash.system.LoaderContext;
+  import flash.utils.ByteArray;
+
+  public class Main extends MovieClip {
+    private static const INNER:String = "@@INNER@@";
+
+    public function Main() {
+      var loader:Loader = new Loader();
+      addChild(loader);
+      var context:LoaderContext = new LoaderContext(false, ApplicationDomain.currentDomain);
+      context.allowCodeImport = true;
+      loader.loadBytes(decode(INNER), context);
+    }
+
+    private static function decode(text:String):ByteArray {
+      const alphabet:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      var out:ByteArray = new ByteArray();
+      var bits:int = 0;
+      var have:int = 0;
+      for (var i:int = 0; i < text.length; i++) {
+        var c:String = text.charAt(i);
+        if (c == "=") {
+          break;
+        }
+
+        bits = ((bits << 6) | alphabet.indexOf(c)) & 0xffff;
+        have += 6;
+        if (have >= 8) {
+          have -= 8;
+          out.writeByte((bits >> have) & 0xff);
+        }
+      }
+
+      out.position = 0;
+      return out;
+    }
+  }
+}

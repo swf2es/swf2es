@@ -142,6 +142,36 @@ test("a password field is laid out, and so drawn, as asterisks, in an embedded f
   assert.equal(field.layout.width, 2 * 117);
 });
 
+test("an embedded field uses a same-name font with metrics when one was loaded earlier without them", async () => {
+  const { TextObject } = await import("../../../packages/player/dist/display.js");
+  const { FontSet } = await import("../../../packages/player/dist/fonts.js");
+  const { readFont, tags } = await import("../../../packages/format/dist/index.js");
+  const bytes = w.font3({
+    id: 1,
+    name: "Menu",
+    ascent: 800,
+    descent: 200,
+    glyphs: [{ char: "A", advance: 500, boxes: [[0, -500, 400, 0]] }],
+  });
+  const font = readFont(bytes, {
+    code: tags.DefineFont3,
+    offset: 6,
+    length: bytes.length - 6,
+    long: true,
+  });
+  const fonts = new FontSet();
+  fonts.add({ ...font, layout: false });
+  fonts.add(font);
+  const field = new TextObject(null);
+  field.fonts = fonts;
+  field.embedFonts = true;
+  field.model.defaultFormat = { ...field.model.defaultFormat, font: "Menu", size: 20 };
+  field.model.setText("A");
+
+  assert.equal(field.layout.width, 195);
+  assert.equal(field.layout.lines[0].chars[0].glyph?.code, 65);
+});
+
 test("text a horizontal scroll moves past the gutter is clipped", async () => {
   const { TextObject } = await import("../../../packages/player/dist/display.js");
   const field = new TextObject(null);

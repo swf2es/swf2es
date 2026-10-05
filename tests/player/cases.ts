@@ -304,6 +304,33 @@ function bound(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A linked clip has a button whose up state is a clip. Constructing that
+// button runs its state scripts before the linked clip finishes constructing.
+function buttonFirstFrame(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(1, 2, [w.showFrame(), w.showFrame(), w.end()]),
+      w.tag(7, Uint8Array.of(2, 0, 0x0f, 1, 0, 1, 0, 0, 0, 0)),
+      w.sprite(3, 1, [w.place({ depth: 1, character: 2 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "ButtonFirstFrame"),
+      w.symbolClass([
+        [0, "Main"],
+        [1, "State"],
+        [3, "Menu"],
+      ]),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A four-frame root whose square moves each frame, with scripts/Goto.as:
 // frame 2's script jumps to frame 4.
 function gotos(abc: Uint8Array): Uint8Array {
@@ -1272,6 +1299,56 @@ export function innerSwf(abc: Uint8Array, frames = 2): Uint8Array {
 
 function loads(compile: Compile): Uint8Array {
   return loading(compile, "Loads", 2);
+}
+
+function loadedFont(compile: Compile): Uint8Array {
+  const inner = w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.font3({
+        id: 1,
+        name: "Probe",
+        ascent: 800,
+        descent: 200,
+        glyphs: [{ char: "A", advance: 500, boxes: [[0, -500, 400, 0]] }],
+      }),
+      w.doAbc(compile("LoadedFontInner"), "LoadedFontInner"),
+      w.symbolClass([[0, "LoadedFontInner"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const template = readFileSync(new URL("scripts/LoadedFont.as.template", import.meta.url), "utf8");
+  const abc = compile(
+    "LoadedFont",
+    template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
+  );
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.font3({
+        id: 1,
+        name: "Probe",
+        ascent: 800,
+        descent: 200,
+        glyphs: [{ char: "A", advance: 100, boxes: [[0, -500, 80, 0]] }],
+      }),
+      w.doAbc(abc, "LoadedFont"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
 }
 
 // The same, unloading from INIT (scripts/LoadsInit.as.template). The inner
@@ -2834,6 +2911,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "button-first-frame",
+    swf: buttonFirstFrame,
+    script: "ButtonFirstFrame",
+    frames: 6,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "scenes",
     swf: scenes,
     script: "Scenes",
@@ -3601,6 +3687,14 @@ export const cases: PlayerCase[] = [
   // Last: the content it unloads plays on in Flash until collected, and its
   // traces would reach the case recorded after it.
   { name: "loads", build: loads, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "loaded-font",
+    build: loadedFont,
+    frames: 3,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   // Frame 1 is drawn at the outer SWF's INIT, before the AVM1 movies come at
   // that frame's end; the player draws the frame whole, with them.
   {
