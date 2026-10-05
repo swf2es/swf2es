@@ -1,5 +1,8 @@
 {
   "natives": [
+    "flash.accessibility::Accessibility.get:active",
+    "flash.accessibility::Accessibility.sendEvent",
+    "flash.accessibility::Accessibility.updateProperties",
     "flash.crypto::generateRandomBytes",
     "flash.display::AVM1Movie#flash.display:AVM1Movie::_callAS2",
     "flash.display::AVM1Movie#flash.display:AVM1Movie::_setCallAS3",
