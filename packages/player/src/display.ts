@@ -753,6 +753,7 @@ export class Container extends DisplayObject {
 
     // The timeline's removal: a script's goes through the natives, which tell of it themselves.
     this.library?.removing?.(child, true);
+    this.library?.sounds?.removed(child);
     this.removeChild(child);
     return child;
   }
@@ -796,6 +797,18 @@ export class Container extends DisplayObject {
 export type ButtonState = "up" | "over" | "down";
 
 /**
+ * Which of DefineButtonSound's sounds a change of state plays, by the
+ * state before and after, as Ruffle's button events pick them: a release
+ * outside, down to up here, plays over to up's; a drag back over, up to
+ * down, none (-1).
+ */
+const BUTTON_SOUNDS: Record<ButtonState, Record<ButtonState, number>> = {
+  up: { up: -1, over: 1, down: -1 },
+  over: { up: 0, over: -1, down: 2 },
+  down: { up: 0, over: 3, down: -1 },
+};
+
+/**
  * A button (SimpleButton): four states, each a display object, of which it
  * shows the up, over or down one, as the pointer has it, and hit tests with
  * the fourth. The state it shows is its one child, which it is drawn and
@@ -819,8 +832,15 @@ export class ButtonObject extends Container {
     return state === "up" ? this.upState : state === "over" ? this.overState : this.downState;
   }
 
-  /** Show state `state`. */
+  /** Show state `state`, with the sound DefineButtonSound gives the change. */
   setState(state: ButtonState): void {
+    const sounds = this.character?.type === "button" ? this.character.sounds : null;
+    const sound = sounds?.[BUTTON_SOUNDS[this.state][state]];
+    const library = this.library;
+    if (sound && library) {
+      library.sounds?.start(this, library, sound.id, sound.info);
+    }
+
     this.state = state;
     this.show();
   }
@@ -1023,7 +1043,9 @@ export class MovieClip extends Container {
   declare library: Library;
   /** The frame it shows, 1 the first; 0 before its first frame is entered. */
   currentFrame = 0;
-  playing = true;
+  private running = true;
+  /** Its timeline's stream as it plays, for what plays it (TimelineSounds); null while none does. */
+  stream: object | null = null;
   /** Made by a script with `new`: Flash has such a clip sit out the next frame's advance. */
   fresh = false;
   /** The scripts addFrameScript registered, by frame, 1 the first. */
@@ -1052,8 +1074,28 @@ export class MovieClip extends Container {
     this.library = library;
   }
 
+  /** Whether its playhead moves on; stopped, its stream stops, as in Flash and Ruffle. */
+  get playing(): boolean {
+    return this.running;
+  }
+
+  set playing(play: boolean) {
+    this.running = play;
+    if (!play && this.stream) {
+      this.library.sounds?.stopStream(this);
+    }
+  }
+
   get totalFrames(): number {
     return this.timeline.frames.length;
+  }
+
+  /** The frame's sounds, where it has any and something plays them. */
+  private frameSounds(frame: number): void {
+    const timeline = this.timeline;
+    if ((timeline.stream || timeline.sounds.size > 0) && this.library.sounds) {
+      this.library.sounds.frame(this, frame);
+    }
   }
 
   /**
@@ -1127,6 +1169,8 @@ export class MovieClip extends Container {
         construct(child, character, this.library);
       }
     }
+
+    this.frameSounds(frame);
   }
 
   /**
@@ -1148,7 +1192,14 @@ export class MovieClip extends Container {
    */
   gotoFrame(frame: number, looping = false): void {
     const target = Math.max(1, Math.min(frame, this.totalFrames));
-    const rewind = target < this.currentFrame;
+    const from = this.currentFrame;
+    const rewind = target < from;
+    // A goto stops the stream, and the frame it lands on starts it again
+    // if the clip plays, as Ruffle's run_goto has it.
+    if (this.stream) {
+      this.library.sounds?.stopStream(this);
+    }
+
     const jumps = new Map<number, Jump>();
     for (let f = (rewind ? 0 : this.currentFrame) + 1; f <= target; f++) {
       for (const command of this.timeline.frames[f - 1] ?? []) {
@@ -1301,6 +1352,11 @@ export class MovieClip extends Container {
         construct(child, character, this.library);
       }
     }
+
+    // The frame it lands on plays its sounds, unless it is the one it was on.
+    if (target !== from) {
+      this.frameSounds(target);
+    }
   }
 
   /** The first frame, as a clip runs it when it is made, its children placed and made alive; once. */
@@ -1335,6 +1391,11 @@ export class MovieClip extends Container {
     }
 
     if (!this.playing || this.totalFrames <= 1) {
+      // A clip of one frame plays its stream for that frame only, as Ruffle stops it.
+      if (this.stream) {
+        this.library.sounds?.stopStream(this);
+      }
+
       return;
     }
 
@@ -1437,6 +1498,7 @@ export function displayFor(
   if (character.type === "button") {
     const button = new ButtonObject();
     button.character = character;
+    button.library = library;
     button.trackAsMenu = character.trackAsMenu;
     return button;
   }
@@ -1482,4 +1544,6 @@ export const EMPTY_TIMELINE: Timeline = {
   gotoLabels: [],
   frameLabels: new Map(),
   scenes: [{ name: "", frame: 1 }],
+  sounds: new Map(),
+  stream: null,
 };

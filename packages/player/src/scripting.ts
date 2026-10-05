@@ -37,7 +37,11 @@ import { decodeImages, decodeInBrowser, hasUndecoded, type ImageDecode } from ".
 import type { Cursor, PointerInput } from "./input.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
-import { finishSounds } from "./playerglobal/flash/media/Sound.js";
+import {
+  finishSounds,
+  stopTimelineSoundsUnder,
+  timelineSoundsOf,
+} from "./playerglobal/flash/media/Sound.js";
 import { browserNavigate, type Navigate } from "./playerglobal/flash/net/navigateToURL.js";
 import { defaultStorage, type SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
 import {
@@ -243,6 +247,8 @@ export class Scripting {
   /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
   readonly navigate: Navigate | null;
   private readonly audioEntries = new WeakMap<SoundCharacter, SharedAudio>();
+  /** What plays every library's timeline and button sounds. */
+  private readonly timelineSounds = timelineSoundsOf(this);
   private readonly sharedAudio = new Map<number, SharedAudio[]>();
   private readonly sharedAudioGone = new FinalizationRegistry<{
     hash: number;
@@ -568,6 +574,7 @@ export class Scripting {
       this.toConstruct.push({ display, character, library });
     };
     library.removing = (display, byTimeline) => this.removing(display, byTimeline);
+    library.sounds = this.timelineSounds;
   }
 
   /**
@@ -994,6 +1001,7 @@ export class Scripting {
    */
   stopAll(display: DisplayObject): void {
     this.orphans.delete(display.serial);
+    stopTimelineSoundsUnder(this, display);
     const stop = (o: DisplayObject) => {
       if (o instanceof MovieClip) {
         o.playing = false;
@@ -1336,6 +1344,7 @@ export class Scripting {
   private avm1Library(swf: Swf, domain: avm2.Domain): Library {
     const library = readLibrary(swf);
     library.domain = domain;
+    library.sounds = this.timelineSounds;
     return library;
   }
 
