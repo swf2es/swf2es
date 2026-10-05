@@ -35,6 +35,7 @@ import {
 } from "./names.js";
 import { convertDoubleToString } from "./numbers.js";
 import { errorMessages } from "./player-messages.js";
+import { WeakKeys, WeakName } from "./weak-keys.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: AS3 values are untyped
 export type Value = any;
@@ -632,7 +633,11 @@ interface Enumeration {
   slot: Map<EnumeratedName, number>;
 }
 
-/** A name a for-in goes through: a string, or an object a Dictionary is keyed by. */
+/**
+ * A name a for-in goes through: a string, or an object a Dictionary is
+ * keyed by, held weakly (a WeakName) where the Dictionary's keys are weak,
+ * so that a for-in left off keeps no key alive.
+ */
 type EnumeratedName = string | object;
 
 /** The names below this come back from a for-in as numbers: avmplus' int atoms, of 29 bits. */
@@ -3101,7 +3106,11 @@ export class Runtime {
       }
     }
 
-    if (o.$keys !== undefined) {
+    if (o.$keys instanceof WeakKeys) {
+      for (const k of o.$keys.keys()) {
+        names.push(o.$keys.nameOf(k) as WeakName);
+      }
+    } else if (o.$keys !== undefined) {
       for (const k of o.$keys.keys()) {
         names.push(k);
       }
@@ -3146,9 +3155,10 @@ export class Runtime {
     return e.names;
   }
 
-  /** The name of `o` at a for-in's index. */
+  /** The name of `o` at a for-in's index: a weak key itself, "" once it is gone. */
   private enumerated(o: AsObject, index: number): EnumeratedName {
-    return this.enumerating.get(o)?.names[index - 1] ?? "";
+    const name = this.enumerating.get(o)?.names[index - 1] ?? "";
+    return name instanceof WeakName ? (name.ref.deref() ?? "") : name;
   }
 
   /** The index after `index` of an enumerable name of `o`, or 0. */
@@ -3171,6 +3181,11 @@ export class Runtime {
   }
 
   private stillThere(o: AsObject, name: EnumeratedName): boolean {
+    if (name instanceof WeakName) {
+      const key = name.ref.deref();
+      return key !== undefined && (o.$keys?.has(key) ?? false);
+    }
+
     if (typeof name !== "string") {
       return o.$keys?.has(name) ?? false;
     }

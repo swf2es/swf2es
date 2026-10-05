@@ -21,6 +21,23 @@ probe("object keys", function():* { return ok.sort().join(" "); });
 var weak:Dictionary = new Dictionary(true);
 weak[a] = 1;
 probe("weak", function():* { return weak[a]; });
+// Weak keys behave as strong ones while the keys live: set again, in, delete, both for-ins,
+// a key deleted during a for-in nested in another, and a string key beside object keys.
+var wa:Object = {}; var wb:Array = [3]; var wc:Object = {n: 4};
+weak[wa] = "wa"; weak[wb] = "wb"; weak[wc] = "wc"; weak["s"] = "ws"; weak[wa] = "wa2";
+probe("weak get", function():* { return [weak[wa], weak[wb], weak[wc], weak["s"], weak[{}]].join(","); });
+probe("weak in", function():* { return [wa in weak, {} in weak, "s" in weak].join(","); });
+var wk:Array = []; for (var wkey:* in weak) wk.push(wkey === a ? "a" : wkey === wa ? "wa" : wkey === wb ? "wb" : wkey === wc ? "wc" : String(wkey));
+probe("weak keys", function():* { return wk.sort().join(" "); });
+var wv:Array = []; for each (var wval:* in weak) wv.push(String(wval));
+probe("weak values", function():* { return wv.sort().join(" "); });
+var nested:Array = [];
+for (var outer:* in weak) {
+  for (var inner:* in weak) { if (inner === wb) delete weak[wb]; }
+  nested.push(outer === wb ? "wb" : "other");
+}
+probe("weak nested delete", function():* { return nested.length + " " + (wb in weak); });
+probe("weak delete", function():* { var r:* = delete weak[wc]; return r + " " + (wc in weak) + " " + weak[wc]; });
 var dd:Dictionary = new Dictionary();
 dd[1] = "a"; dd[2] = "b";
 var nk:Array = []; for (var n:* in dd) nk.push(typeof n);
