@@ -98,9 +98,12 @@ package {
       var b:Sprite = square("b", 5, 5);
       var hidden:Sprite = square("hidden", 0, 0);
       hidden.visible = false;
+      // What an invisible container or a mask holds is no more under the point.
+      hidden.addChild(square("hiddenChild", 0, 0));
       var inner:Sprite = square("inner", 2, 2);
       b.addChild(inner);
       var mask:Sprite = square("mask", 0, 0);
+      mask.addChild(square("maskChild", 0, 0));
       var masked:Sprite = square("masked", 0, 0);
       masked.mask = mask;
       var empty:Sprite = new Sprite();

@@ -147,7 +147,7 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
       const visit = (c: Container): void => {
         for (const d of c.children) {
-          if (!d.visible) {
+          if (!d.visible || d.clipDepth > 0 || d.maskOf) {
             continue;
           }
 
