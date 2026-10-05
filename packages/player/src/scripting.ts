@@ -274,8 +274,12 @@ export class Scripting {
    * nothing defined when it was bound.
    */
   readonly symbols = new Map<avm2.Abc | null, Map<string, Symbol>>();
-  /** Libraries whose embedded fonts have been made visible to this player. */
-  readonly fontLibraries = new Set<Library>();
+  /** A field can keep its fonts after the library that made it is unloaded. */
+  private readonly fontSets = new WeakSet<FontSet>();
+  private readonly fontSetRefs = new Set<WeakRef<FontSet>>();
+  private readonly fontSetGone = new FinalizationRegistry<WeakRef<FontSet>>((ref) => {
+    this.fontSetRefs.delete(ref);
+  });
   /** Font classes explicitly registered by scripts, in registration order. */
   readonly registeredFonts = new Map<AsObject, AnyFontCharacter>();
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
@@ -800,14 +804,18 @@ export class Scripting {
 
   /** Keep a SWF's own fonts and fonts registered elsewhere available to its fields. */
   private addFontLibrary(library: Library): void {
-    if (this.fontLibraries.has(library)) {
+    const fonts = library.fonts;
+    if (this.fontSets.has(fonts)) {
       return;
     }
 
-    this.fontLibraries.add(library);
+    this.fontSets.add(fonts);
+    const ref = new WeakRef(fonts);
+    this.fontSetRefs.add(ref);
+    this.fontSetGone.register(fonts, ref);
     for (const font of this.registeredFonts.values()) {
       if (font.type === "font") {
-        library.fonts.add(font.font);
+        fonts.add(font.font);
       }
     }
   }
@@ -828,9 +836,15 @@ export class Scripting {
     }
 
     this.registeredFonts.set(cls, font);
-    for (const library of this.fontLibraries) {
-      if (font.type === "font") {
-        library.fonts.add(font.font);
+    if (font.type === "font") {
+      for (const ref of this.fontSetRefs) {
+        const fonts = ref.deref();
+        if (!fonts) {
+          this.fontSetRefs.delete(ref);
+          continue;
+        }
+
+        fonts.add(font.font);
       }
     }
   }

@@ -6,14 +6,21 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { createCodegen } from "@swf2es/codegen";
-import { zlibCompress } from "@swf2es/format";
+import { readSwf, zlibCompress } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../oracle/oracle.ts";
-import type { Container, MovieClip } from "../../../packages/player/dist/display.js";
+import {
+  type Container,
+  type MovieClip,
+  TextObject,
+} from "../../../packages/player/dist/display.js";
 import { pointerTarget } from "../../../packages/player/dist/input.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import { type FetchRequest, Scripting } from "../../../packages/player/dist/scripting.js";
+import { readLibrary } from "../../../packages/player/dist/timeline.js";
 import { bare, innerSwf, scripted } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compiler, compileScripts } from "../../player/scripts.ts";
@@ -21,6 +28,8 @@ import * as w from "../../swf-writer.ts";
 
 // This package's own out directory: the player's tests run at the same time and use theirs.
 const out = fileURLToPath(new URL("../out/player/", import.meta.url));
+setFlagsFromString("--expose-gc");
+const gc = runInNewContext("gc") as () => void;
 
 let skip: string | false = false;
 try {
@@ -172,6 +181,69 @@ test("an unloaded LoaderInfo reports its owner's URL before any load", { skip },
 
   assert.equal(rt.getProperty(info, rt.publicName("url")), null);
   assert.equal(rt.getProperty(info, rt.publicName("loaderURL")), "http://example.test/outer.swf");
+});
+
+test("unloading code-free SWFs releases their font libraries", { skip }, async () => {
+  const scripting = new Scripting(await createCodegen(wasm), { print: () => {} });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const bytes = w.swf({
+    width: 10,
+    height: 10,
+    frameCount: 1,
+    tags: [w.fileAttributes(true), w.showFrame(), w.end()],
+  });
+  const player = new Player(bytes, scripting);
+  await player.start();
+  const loader = scripting.rt.construct(scripting.rt.classNamed("flash.display::Loader"));
+  const heldField = new TextObject(null);
+  const unloaded = async (keepField: boolean): Promise<WeakRef<object>> => {
+    scripting.requestLoad(loader, bytes, scripting.mainDomain);
+    await scripting.settled();
+    player.tick();
+    const library = loader.$content.$display.library;
+    if (keepField) {
+      heldField.fonts = library.fonts;
+    }
+
+    const ref = new WeakRef(library);
+    scripting.unload(loader, true);
+    player.tick();
+    return ref;
+  };
+  const refs: WeakRef<object>[] = [];
+  for (let i = 0; i < 12; i++) {
+    refs.push(await unloaded(i === 0));
+  }
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  for (let i = 0; i < 5; i++) {
+    gc();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  assert.ok(refs.every((ref) => ref.deref() === undefined));
+
+  const fontSwf = w.swf({
+    width: 10,
+    height: 10,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.font3({
+        id: 1,
+        name: "Probe",
+        ascent: 800,
+        descent: 200,
+        glyphs: [{ char: "A", advance: 500, boxes: [[0, -500, 400, 0]] }],
+      }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const font = readLibrary(readSwf(fontSwf)).characters.get(1);
+  assert.ok(font?.type === "font");
+  scripting.registerFont({} as avm2.AsObject, font);
+  assert.ok(heldField.fonts?.find("Probe", false, false));
 });
 
 test("Mouse.hide and show set the host's cursor as a script calls them", { skip }, async () => {
