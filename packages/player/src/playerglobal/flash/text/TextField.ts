@@ -316,6 +316,10 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       changed(this);
     }
     replaceText(begin: Value, end: Value, v: Value): void {
+      if (this.$display.styleSheet) {
+        throw s.rt.error("Error", 2009);
+      }
+
       const model = this.$display.model;
       const b = Math.max(0, Math.min(model.text.length, s.rt.toInt(begin)));
       const e = Math.max(b, Math.min(model.text.length, s.rt.toInt(end)));
@@ -628,6 +632,10 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     }
     /** The selection replaced, as typing would, and the caret after what came in. */
     replaceSelectedText(v: Value): void {
+      if (this.$display.styleSheet) {
+        throw s.rt.error("Error", 2009);
+      }
+
       const field = this.$display;
       const [begin, end] = field.selection;
       const text = s.rt.toString(v);

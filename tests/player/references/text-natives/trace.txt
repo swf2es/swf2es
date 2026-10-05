@@ -20,6 +20,8 @@ text one two|three|xy
   run 14 16 12 0 false
 text as html as text 16711680
 restyled 16711680
+replaceSelectedText with a sheet 2009
+replaceText with a sheet 2009
 no sheet null <P ALIGN="LEFT"><FONT FACE="Times New Roman" SIZE="12" COLOR="#FF0000" LETTERSPACING="0" KERNING="0"><B>as text</B></FONT></P>
 run 0 2 false
 run 2 4 true

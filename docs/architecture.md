@@ -1000,18 +1000,23 @@ Flash without a GPU gives, so content can fall back to the display list.
 at, 320 by 240 where either is 0, RangeError 2006 for a negative one,
 which bounds, scales and hits as Flash's and shows nothing: no stream or
 camera plays in it, and a timeline's DefineVideoStream is not read yet.
-NetConnection has its local mode, `connect(null)`,
-with Flash's status events and its properties, ArgumentError 2126 for
-those of a connection it does not have; an HTTP URI is kept, and a `call`
-over it, Flash Remoting, is not supported yet. `fscommand` goes to the
-host's `fsCommand` if it gives one. `Stage.color` is the SWF's background
-until set, opaque, and `Player.background` follows it for a host that
-reads it each frame; the rest of the stage's properties are a desktop
-browser player's (`colorCorrectionSupport` "unsupported", scale factors 1,
-no soft keyboard, orientation unknown). `getObjectsUnderPoint` gives the
-descendants that draw under a point of the stage, parents first, as Flash
-does, and `areInaccessibleObjectsUnderPoint` is false, there being no
-sandbox to hide them.
+NetConnection has its local mode, `connect(null)`, with Flash's status
+events and its properties, ArgumentError 2126 for those of a connection
+it does not have; an HTTP URI is kept, and a `call` over it, Flash
+Remoting, is not supported yet. `fscommand` goes to the host's
+`fsCommand` if it gives one; the SWF chooses both strings, so a host must
+never evaluate them or use them as a URL or as HTML. `Stage.color` is the
+SWF's background until set, opaque; `Player.background` follows it, and
+setting it moves `changes`, so a host that reads `background` as it draws
+(the README's loop) shows it, while one that reads it only when it makes
+its renderer does not. The rest of the stage's properties are a desktop
+browser player's (`colorCorrectionSupport` "unsupported", scale factors
+1, no soft keyboard, orientation unknown). `getObjectsUnderPoint` gives
+the descendants that draw under a point of the stage, parents first, as
+Flash does, leaving out masks, a timeline's or a script's, and all an
+invisible container holds, as the pointer's pick does;
+`areInaccessibleObjectsUnderPoint` is false, there being no sandbox to
+hide them.
 
 The legacy `flash.xml.XMLDocument` is playerglobal's own code over the
 runtime's XML tokenizer, avmplus' that E4X reads with too, exported for
@@ -1655,7 +1660,10 @@ after Ruffle's port): Park-Miller seeds four channels' gradients, each
 octave moved by its offset, a channel's noise drawn from the next of
 the four only for the channels asked for, a byte made of it as Flash
 makes it, and the pixel written as it comes, not premultiplied (the
-`perlin-noise` case).
+`perlin-noise` case). A double past an int converts as on x86, to -2^31,
+so that octaves enough to take the lattice that far give Flash's wild
+noise and bytes of 0; more than 1024 octaves give what 1024 do, as
+Flash's sum settles long before, a negative count among them.
 Slice three is `draw` and `drawWithQuality`, in two paths. A
 BitmapData or a Bitmap drawn is composited on the CPU, in `bitmap.ts`'s
 arithmetic: through the matrix by the inverse of each destination
@@ -1894,7 +1902,8 @@ read as Flash reads it (`css.ts`, Ruffle's CssStream: selectors
 lower-cased, property names camel-cased, and on any of the few errors
 Flash finds the whole sheet ignored), a colour is `#` and at most six hex
 digits or 0, and the generic font families are Flash's device fonts. A
-field with a sheet reads `text` as HTML too, gives `htmlText` back as it
+field with a sheet reads `text` as HTML too, refuses `replaceText` and
+`replaceSelectedText` with #2009, gives `htmlText` back as it
 was set, and does not read the same HTML again; each tag takes its tag's
 style, a link `a:link`'s, then its class's. A tag of the sheet's own is a
 block, ending its line when closed by its name, unless its style makes it

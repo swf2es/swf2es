@@ -85,6 +85,16 @@ package {
       trace("text as html", field.text, field.getTextFormat(0, 1).color);
       sheet.setStyle(".red", {color: "#00FF00"});
       trace("restyled", field.getTextFormat(0, 1).color);
+      try {
+        field.replaceSelectedText("x");
+      } catch (e:Error) {
+        trace("replaceSelectedText with a sheet", e.errorID);
+      }
+      try {
+        field.replaceText(0, 1, "x");
+      } catch (e:Error) {
+        trace("replaceText with a sheet", e.errorID);
+      }
       field.styleSheet = null;
       trace("no sheet", field.styleSheet, field.htmlText);
     }
