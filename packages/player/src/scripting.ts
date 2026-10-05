@@ -38,7 +38,11 @@ import { decodeImages, decodeInBrowser, hasUndecoded, type ImageDecode } from ".
 import type { Cursor, PointerInput } from "./input.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
-import { finishSounds } from "./playerglobal/flash/media/Sound.js";
+import {
+  finishSounds,
+  stopTimelineSoundsUnder,
+  timelineSoundsOf,
+} from "./playerglobal/flash/media/Sound.js";
 import { browserNavigate, type Navigate } from "./playerglobal/flash/net/navigateToURL.js";
 import { defaultStorage, type SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
 import {
@@ -223,6 +227,8 @@ export class Scripting {
   updates = 0;
   /** How many goto cycles run inside one another now. */
   private cycles = 0;
+  /** A button's early state scripts and their goto cycles cannot consume other clips' first frames. */
+  private buttonScriptRoot: DisplayObject | null = null;
   /** Whether they nested too deep this frame, which stops them all till the next. */
   private overflowed = false;
   /**
@@ -246,6 +252,8 @@ export class Scripting {
   /** Takes what fscommand sends, or nothing does. */
   readonly fsCommand: ((command: string, args: string) => void) | null;
   private readonly audioEntries = new WeakMap<SoundCharacter, SharedAudio>();
+  /** What plays every library's timeline and button sounds. */
+  private readonly timelineSounds = timelineSoundsOf(this);
   private readonly sharedAudio = new Map<number, SharedAudio[]>();
   private readonly sharedAudioGone = new FinalizationRegistry<{
     hash: number;
@@ -576,6 +584,7 @@ export class Scripting {
       this.toConstruct.push({ display, character, library });
     };
     library.removing = (display, byTimeline) => this.removing(display, byTimeline);
+    library.sounds = this.timelineSounds;
   }
 
   /**
@@ -675,7 +684,13 @@ export class Scripting {
       if ((library.version ?? 10) > 9 && hasClip(display.upState)) {
         display.firstScripts = true;
         this.broadcast("frameConstructed");
-        this.runFrameScripts(display);
+        const outer = this.buttonScriptRoot;
+        this.buttonScriptRoot = display;
+        try {
+          this.runFrameScripts(display, false);
+        } finally {
+          this.buttonScriptRoot = outer;
+        }
         this.broadcast("exitFrame");
       }
     }
@@ -1002,6 +1017,7 @@ export class Scripting {
    */
   stopAll(display: DisplayObject): void {
     this.orphans.delete(display.serial);
+    stopTimelineSoundsUnder(this, display);
     const stop = (o: DisplayObject) => {
       if (o instanceof MovieClip) {
         o.playing = false;
@@ -1138,7 +1154,7 @@ export class Scripting {
 
       if (t.name === "flash.text::TextField") {
         const text = new TextObject(null);
-        text.fonts = library.fonts;
+        text.fonts = (this.codeLibrary() ?? library).fonts;
         return text;
       }
     }
@@ -2025,7 +2041,7 @@ export class Scripting {
    * still runs its own, as Flash queues them first. Rounds until none is
    * left, bounded, as a script that jumps on every run would never settle.
    */
-  runFrameScripts(root: DisplayObject): void {
+  runFrameScripts(root: DisplayObject, includeOtherRoots = true): void {
     // A script's error is reported apart: its goto still happens, and the
     // scripts after it still run, as in Flash (the unit test "a frame
     // script's goto happens though the script throws after it").
@@ -2084,13 +2100,17 @@ export class Scripting {
           visit(child);
         }
       };
-      for (const orphan of this.orphanRoots()) {
-        visit(orphan);
+      if (includeOtherRoots) {
+        for (const orphan of this.orphanRoots()) {
+          visit(orphan);
+        }
       }
 
       visit(root);
-      for (const display of this.fresh) {
-        visit(display);
+      if (includeOtherRoots) {
+        for (const display of this.fresh) {
+          visit(display);
+        }
       }
 
       for (const o of queue) {
@@ -2143,7 +2163,7 @@ export class Scripting {
       // What frames placed and has yet to be made alive is made first.
       this.constructPending();
       this.broadcast("frameConstructed");
-      this.runFrameScripts(this.stage);
+      this.runFrameScripts(this.buttonScriptRoot ?? this.stage, this.buttonScriptRoot === null);
       this.broadcast("exitFrame");
     } finally {
       this.cycles--;

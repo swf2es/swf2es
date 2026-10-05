@@ -388,6 +388,11 @@ export class PointerInput {
         this.send("mouseDown", target, p, true);
       }
     } else if (type === "up" && (p.button ?? 0) === 0) {
+      const pressed = this.pressed;
+      if (pressed instanceof ButtonObject && pressed !== target && pressed.enabled) {
+        pressed.releasedOutside();
+      }
+
       if (target) {
         buttonState(target, "over");
         this.send("mouseUp", target, p, false);

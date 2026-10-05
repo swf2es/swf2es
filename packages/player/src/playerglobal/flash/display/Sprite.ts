@@ -3,13 +3,13 @@
 // timeline's child and here for a script's, so that the subclass's
 // constructor finds the children by name; a Sprite a script makes has none.
 // Its soundTransform is kept, in whole percents as a channel's, and read
-// back as a copy; no timeline sound plays yet for it to act on.
+// back as a copy; it mixes the timeline sounds of the sprite and all in it.
 import { avm2 } from "@swf2es/runtime";
 import type { SoundMix } from "../../../audio.js";
 import { type DisplayObject, MovieClip } from "../../../display.js";
 import type { Rect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
-import { channelMix, mixOf, transformOf } from "../media/Sound.js";
+import { channelMix, mixOf, transformOf, updateTimelineMixes } from "../media/Sound.js";
 import { graphicsOf } from "./Graphics.js";
 
 type Value = avm2.Value;
@@ -44,6 +44,7 @@ export function spriteNatives(s: Scripting): avm2.Natives {
       }
 
       this.$soundMix = channelMix(mixOf(v as avm2.AsObject));
+      updateTimelineMixes(s);
     }
 
     declare $buttonMode: boolean | undefined;

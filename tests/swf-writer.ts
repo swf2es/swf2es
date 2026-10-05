@@ -973,3 +973,123 @@ export function swf(options: {
   out.set(body, 8);
   return out;
 }
+
+/** SOUNDINFO: levels in an envelope point are 0 to 32768; points and in and out at 44.1 kHz. */
+export interface SoundInfoSpec {
+  stop?: boolean;
+  noMultiple?: boolean;
+  inPoint?: number;
+  outPoint?: number;
+  loops?: number;
+  envelope?: { sample: number; left: number; right: number }[];
+}
+
+function soundInfo(w: BitWriter, spec: SoundInfoSpec): BitWriter {
+  w.u8(
+    (spec.stop ? 0x20 : 0) |
+      (spec.noMultiple ? 0x10 : 0) |
+      (spec.envelope ? 0x08 : 0) |
+      (spec.loops !== undefined ? 0x04 : 0) |
+      (spec.outPoint !== undefined ? 0x02 : 0) |
+      (spec.inPoint !== undefined ? 0x01 : 0),
+  );
+  if (spec.inPoint !== undefined) {
+    w.u32(spec.inPoint);
+  }
+
+  if (spec.outPoint !== undefined) {
+    w.u32(spec.outPoint);
+  }
+
+  if (spec.loops !== undefined) {
+    w.u16(spec.loops);
+  }
+
+  if (spec.envelope) {
+    w.u8(spec.envelope.length);
+    for (const point of spec.envelope) {
+      w.u32(point.sample).u16(point.left).u16(point.right);
+    }
+  }
+
+  return w;
+}
+
+/** The format byte DefineSound and SoundStreamHead share: format, rate index 0 to 3 (5.5 to 44 kHz), size, channels. */
+function soundFormat(format: number, rate: number, sixteen: boolean, stereo: boolean): number {
+  return (format << 4) | (rate << 2) | (sixteen ? 2 : 0) | (stereo ? 1 : 0);
+}
+
+/** DefineSound of uncompressed (format 3) or other samples, as given. */
+export function defineSound(
+  id: number,
+  spec: { format?: number; rate: number; sixteen?: boolean; stereo?: boolean; samples: number },
+  data: Uint8Array,
+): Uint8Array {
+  const w = new BitWriter()
+    .u16(id)
+    .u8(soundFormat(spec.format ?? 3, spec.rate, !!spec.sixteen, !!spec.stereo))
+    .u32(spec.samples);
+  return tag(14, w.raw(data).done(), true);
+}
+
+/** StartSound of the sound `id`. */
+export function startSound(id: number, spec: SoundInfoSpec = {}): Uint8Array {
+  return tag(15, soundInfo(new BitWriter().u16(id), spec).done());
+}
+
+/** StartSound2 of the sound bound to `className`. */
+export function startSound2(className: string, spec: SoundInfoSpec = {}): Uint8Array {
+  return tag(89, soundInfo(new BitWriter().string(className), spec).done());
+}
+
+/** SoundStreamHead2: the stream's format, as for DefineSound, and its samples a frame. */
+export function soundStreamHead(spec: {
+  format?: number;
+  rate: number;
+  sixteen?: boolean;
+  stereo?: boolean;
+  samplesPerBlock: number;
+}): Uint8Array {
+  const format = soundFormat(spec.format ?? 3, spec.rate, !!spec.sixteen, !!spec.stereo);
+  return tag(
+    45,
+    new BitWriter()
+      .u8(format & 0x0f)
+      .u8(format)
+      .u16(spec.samplesPerBlock)
+      .done(),
+  );
+}
+
+/** A SoundStreamBlock's bytes, as its format has them. */
+export function soundStreamBlock(data: Uint8Array): Uint8Array {
+  return tag(19, data, true);
+}
+
+/** DefineButtonSound: over to up, up to over, over to down, down to over; null for none. */
+export function buttonSound(
+  button: number,
+  sounds: ({ id: number; info?: SoundInfoSpec } | null)[],
+): Uint8Array {
+  const w = new BitWriter().u16(button);
+  for (let i = 0; i < 4; i++) {
+    const sound = sounds[i] ?? null;
+    w.u16(sound?.id ?? 0);
+    if (sound) {
+      soundInfo(w, sound.info ?? {});
+    }
+  }
+
+  return tag(17, w.done());
+}
+
+/** DefineButton2 of one character in every state, at depth 1, untransformed. */
+export function button2(id: number, character: number): Uint8Array {
+  const w = new BitWriter().u16(id).u8(0).u16(0);
+  w.u8(0x0f).u16(character).u16(1);
+  // An identity MATRIX, then a CXFORMWITHALPHA of no terms.
+  w.ub(1, 0).ub(1, 0).ub(5, 0).align();
+  w.ub(1, 0).ub(1, 0).ub(4, 0).align();
+  return tag(34, w.u8(0).done());
+}
