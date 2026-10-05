@@ -246,6 +246,49 @@ test("unloading code-free SWFs releases their font libraries", { skip }, async (
   assert.ok(heldField.fonts?.find("Probe", false, false));
 });
 
+test("unload does not retain content through its frame listener", { skip }, async () => {
+  const scripting = new Scripting(await createCodegen(wasm), { print: () => {} });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const bytes = w.swf({
+    width: 10,
+    height: 10,
+    frameCount: 1,
+    tags: [w.fileAttributes(true), w.showFrame(), w.end()],
+  });
+  const player = new Player(bytes, scripting);
+  await player.start();
+  const rt = scripting.rt;
+  const loader = rt.construct(rt.classNamed("flash.display::Loader"));
+  scripting.requestLoad(loader, bytes, scripting.mainDomain);
+  await scripting.settled();
+  player.tick();
+
+  const ref = (() => {
+    const content = loader.$content as avm2.AsObject;
+    const listener = rt.getProperty(content, rt.publicName("stop"));
+    rt.callProperty(
+      content,
+      rt.publicName("addEventListener"),
+      "enterFrame",
+      listener,
+      false,
+      0,
+      false,
+    );
+    const weak = new WeakRef(content);
+    scripting.unload(loader);
+    return weak;
+  })();
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  for (let i = 0; i < 5; i++) {
+    gc();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  assert.equal(ref.deref(), undefined);
+});
+
 test("Mouse.hide and show set the host's cursor as a script calls them", { skip }, async () => {
   const lines: string[] = [];
   const compile = compiler(out);

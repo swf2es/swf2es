@@ -211,6 +211,51 @@ interface SharedAudio {
   serial: number;
 }
 
+/** Frame listeners reach a live off-stage object without keeping a dead one alive. */
+class BroadcastTargets {
+  private readonly refs = new Set<WeakRef<AsObject>>();
+  private readonly byObject = new WeakMap<AsObject, WeakRef<AsObject>>();
+  private readonly gone = new FinalizationRegistry<WeakRef<AsObject>>((ref) => {
+    this.refs.delete(ref);
+  });
+
+  add(object: AsObject): void {
+    if (this.byObject.has(object)) {
+      return;
+    }
+
+    const ref = new WeakRef(object);
+    this.byObject.set(object, ref);
+    this.refs.add(ref);
+    this.gone.register(object, ref, ref);
+  }
+
+  delete(object: AsObject): void {
+    const ref = this.byObject.get(object);
+    if (!ref) {
+      return;
+    }
+
+    this.refs.delete(ref);
+    this.byObject.delete(object);
+    this.gone.unregister(ref);
+  }
+
+  snapshot(): AsObject[] {
+    const live: AsObject[] = [];
+    for (const ref of this.refs) {
+      const object = ref.deref();
+      if (object) {
+        live.push(object);
+      } else {
+        this.refs.delete(ref);
+      }
+    }
+
+    return live;
+  }
+}
+
 export class Scripting {
   readonly rt: avm2.Runtime;
   /**
@@ -347,7 +392,7 @@ export class Scripting {
   /** The clip whose frame script is running, while one is: a goto it asks for waits for it to return. */
   inFrameScript: MovieClip | null = null;
   /** The display objects listening for each frame event, in the order they first listened; a broadcast reaches these. */
-  private readonly broadcasts = new Map<string, Set<AsObject>>();
+  private readonly broadcasts = new Map<string, BroadcastTargets>();
   /** What flash.display.Stage reports and sets; the player copies the frame rate back each frame. */
   stageWidth = 0;
   stageHeight = 0;
@@ -2007,10 +2052,10 @@ export class Scripting {
   }
 
   /** The display objects a broadcast of `type` reaches, for EventDispatcher to keep. */
-  broadcastTargets(type: string): Set<AsObject> {
+  broadcastTargets(type: string): BroadcastTargets {
     let targets = this.broadcasts.get(type);
     if (!targets) {
-      targets = new Set();
+      targets = new BroadcastTargets();
       this.broadcasts.set(type, targets);
     }
 
@@ -2029,7 +2074,7 @@ export class Scripting {
       return;
     }
 
-    for (const target of [...targets]) {
+    for (const target of targets.snapshot()) {
       dispatchTo(this, target, this.event(type));
     }
   }
