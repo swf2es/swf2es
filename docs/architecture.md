@@ -363,6 +363,69 @@ with the dispatcher where it does not hold: one `try`/`catch` around the
 loop, whose `catch` tries the handlers covering `t`'s region in the
 table's order and goes on at the first match's block.
 
+### Lazy compilation (planned)
+
+The player compiles each ABC whole when it loads (see Scripts and the
+display list). For a large application that loads many SWFs, that is the
+most memory the compiler takes and most of the code it writes for nothing:
+
+- **codegen's memory.** Compiling a 963 KB ABC to one module of 10.4
+  million characters, 5,314 methods, grows codegen.wasm's memory from 64
+  MiB to 256 MiB in one call: the minimal runtime collects nothing during
+  a call, and wasm memory never shrinks. The same methods compiled with
+  `compileMethods` in batches of 500 peak at 128 MiB.
+- **Code that never runs.** Of 23,873 methods such an application had
+  loaded after some minutes of use, 9,333 (39%) had run.
+
+So the player is to compile a method on its factory's first call, as the
+JIT/AOT invariant already allows (a method compiled alone is its entry in
+the module, byte for byte). AOT is unchanged: it writes whole modules.
+
+**The module.** codegen writes a module without its method bodies: names,
+traits and scripts as now, and in F, for each method, a factory that
+compiles its entry on first use. A factory is called as a class is made,
+a script initialised or a `newfunction` run, never per call, so a lazy
+one costs one check there; the function it returns is the entry's own.
+
+**Building an entry.** The entry's source, from `compileMethods`, is
+evaluated by a strict `Function` given the module's tables as parameters:
+`new Function("rt", "N", "S", "M", "V", "F", "A", '"use strict"; return ' +
+entry)`. Both halves of that matter:
+
+- A direct `eval` in the module's scope makes the functions it builds
+  reach N, M, A and the rest by dynamic scope lookups: as3pb's and LZ4's
+  timed loops ran 1–9% slower. Given as parameters, the tables are a
+  closure's variables, as in an eager module, and the loops ran as fast.
+- A `Function`'s body is sloppy unless it says otherwise; a module is
+  strict. Sloppy, as3pb's checksum came out 0.
+
+**Two requirements from application domains.** A lazily built entry runs
+outside its module's load, which two things in the runtime assume it does
+not:
+
+- `Runtime.codeDomain` finds the domain of the code running by the script
+  names in the stack. Each built entry gets a sourceURL of its own under
+  its module's, `swf2es-26/$f63.js` for `swf2es-26.js`, which codeDomain
+  maps back to the module; debuggers then show one file per method, by
+  name, beside its module.
+- `rt.cls` binds a class reference to the domain loading now. An entry's
+  table of classes and Vectors (`((...T) => ...)(rt.cls(...))`) is made as
+  the entry is built, so it must be made against its module's domain, not
+  whichever SWF is loading at that moment: otherwise a class of the
+  module's own is not found (ReferenceError #1065).
+
+**Where it compiles.** First on the main thread, on the factory's first
+call: about 0.04 ms in codegen and 0.026 ms to build a method, so the
+application above spent some 650 ms over minutes of use, a menu shown for
+the first time a few milliseconds. Workers compiling ahead, the player
+taking an entry built already or compiling it at once, can follow without
+changing the module.
+
+**Measured.** A prototype (each entry of the whole module made lazy, so
+codegen's memory is unchanged) against eager modules, nine runs each,
+interleaved: as3pb's loops within −0.8% and +1.9%, LZ4's within noise, the
+output the same; in the application above, no errors.
+
 ### The runtime and the standard library
 
 Generated code calls `@swf2es/runtime` for the object model, multiname
@@ -959,8 +1022,9 @@ since avmplus has a frame's ABCs loaded before it verifies a method, so a
 class in the first tag may extend or name one in the last (the corpus's
 `property_priority`, five tags by mxmlc); each is then compiled whole for
 now (the JIT's per-method path is `compileMethods`, both by the ABC's
-index in the domain), loaded as a module, and run unless the tag's
-lazy flag defers it to its first use, as Flash defers it. `SymbolClass`
+index in the domain; see Lazy compilation), loaded as a module, and run
+unless the tag's lazy flag defers it to its first use, as Flash defers it.
+`SymbolClass`
 then binds character ids to classes by qualified name through the
 runtime's name resolution; id 0 is the document class, constructed on the
 root clip before the first frame.
