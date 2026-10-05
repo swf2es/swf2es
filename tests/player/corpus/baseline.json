@@ -1,6 +1,6 @@
 {
   "avm2/abstract_classes": {"matched":1,"lines":132,"traced":2,"error":"Error: swf2es: native flash.display::AVM1Movie#flash.display:AVM1Movie::_setCallAS3 is not supported yet"},
-  "avm2/accessibility": {"matched":0,"lines":1,"traced":0,"error":"Error: swf2es: native flash.accessibility::Accessibility.get:active is not supported yet"},
+  "avm2/accessibility": {"matched":1,"lines":1,"traced":1,"error":null},
   "avm2/accessibilityimplementation": {"matched":10,"lines":18,"traced":12,"error":null},
   "avm2/activation_class": {"matched":6,"lines":6,"traced":6,"error":null},
   "avm2/add": {"matched":1058,"lines":1058,"traced":1058,"error":null},
