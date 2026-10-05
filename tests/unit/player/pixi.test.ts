@@ -1507,6 +1507,63 @@ test("a drawing off the list keeps what it drew a while, for it to come back to"
   });
 });
 
+test("a gradient a drawing off the list let go of leaves no warning in Pixi's bind groups", async () => {
+  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const { getTextureBatchBindGroup } = (await import(entry)) as {
+    getTextureBatchBindGroup: (textures: unknown[], size: number, most: number) => unknown;
+  };
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const sprite = new Container();
+  const drawing = new Drawing();
+  drawing.beginFill({
+    type: "gradient",
+    radial: false,
+    focal: 0,
+    stops: [
+      { ratio: 0, color: 0xff000000 },
+      { ratio: 255, color: 0xffffffff },
+    ],
+    spread: 0,
+    linearRgb: false,
+    matrix: { a: 0.05, b: 0, c: 0, d: 0.05, tx: 0, ty: 0 },
+  });
+  drawing.drawRect(0, 0, 80, 80);
+  drawing.endFill();
+  sprite.drawing = drawing;
+  root.placeAtDepth(sprite, 1);
+  type Drawn = {
+    context: {
+      instructions: { data: { style: { texture: { source: { destroyed: boolean } } } } }[];
+    };
+  };
+
+  await withClock((clock) => {
+    view.prepare(root);
+    const fill = view.stage.children[0].children[1].children[0].children[0] as unknown as Drawn;
+    const texture = fill.context.instructions[0].data.style.texture;
+    const { source } = texture;
+    // As Pixi's renderer caches the textures of a Graphics it draws unbatched.
+    getTextureBatchBindGroup([texture], 1, 16);
+    const warned: unknown[] = [];
+    const warn = console.warn;
+    console.warn = (...args: unknown[]) => warned.push(args);
+    try {
+      root.removeChild(sprite);
+      view.prepare(root);
+      clock.at += 6000;
+      view.prepare(root);
+    } finally {
+      console.warn = warn;
+    }
+
+    assert.equal(source.destroyed, true);
+    assert.deepEqual(warned, []);
+  });
+});
+
 test("a drawing kept off the list is drawn again for a change of its content or of the screen's scale", async () => {
   const { Drawing } = await import("../../../packages/player/dist/drawing.js");
   const { CONTENT } = await import("../../../packages/player/dist/display.js");

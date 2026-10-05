@@ -251,6 +251,18 @@ function keepClamped(source: { style: object }): void {
   Object.defineProperty(source.style, "addressMode", { get: () => "clamp", set: () => {} });
 }
 
+/**
+ * Destroy a texture a fill may have drawn with. Pixi keeps the bind group
+ * of each unbatched Graphics' textures in a cache it never clears, and each
+ * group that holds a texture warns as it is destroyed; nothing else listens
+ * for the change.
+ */
+function destroyTexture(texture: Texture): void {
+  texture.source.removeAllListeners("change");
+  texture.source.style.removeAllListeners("change");
+  texture.destroy(true);
+}
+
 /** How a view paints a fill over a region of the shape: a resolved bitmap's or gradient's through its renderer's textures. */
 type Painter = (fill: Paint, region: () => Area, hold: (release: () => void) => void) => FillInput;
 
@@ -2424,9 +2436,9 @@ class StoreTexture implements GpuCopy {
 
   destroy(): void {
     this.bitmaps.forget(this);
-    this.texture.destroy(true);
+    destroyTexture(this.texture);
     for (const { texture } of this.variants.values()) {
-      texture.destroy(true);
+      destroyTexture(texture);
     }
   }
 }
@@ -2508,7 +2520,7 @@ class GpuBitmaps {
    * several of, each held by the contexts that draw with it.
    */
   private readonly gradients = new WeakMap<GradientFill, Map<string, GradientTexture>>();
-  private readonly gradientsCollected = new FinalizationRegistry<Texture>((t) => t.destroy(true));
+  private readonly gradientsCollected = new FinalizationRegistry<Texture>(destroyTexture);
 
   /**
    * A gradient's texture and the matrix from its texels to the shape, made
@@ -2573,7 +2585,7 @@ class GpuBitmaps {
         if (--entry.uses === 0) {
           byRegion.delete(key);
           this.gradientsCollected.unregister(entry);
-          texture.destroy(true);
+          destroyTexture(texture);
         }
       },
     };
