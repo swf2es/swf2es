@@ -62,6 +62,7 @@ import { traceNatives } from "./flash/trace/Trace.js";
 import { mouseNatives } from "./flash/ui/Mouse.js";
 import { byteArrayHooks } from "./flash/utils/ByteArray.js";
 import { timerNatives } from "./flash/utils/Timer.js";
+import { xmlDocumentNatives } from "./flash/xml/XMLDocument.js";
 import { toplevelNatives } from "./toplevel.js";
 
 export function playerNatives(s: Scripting): avm2.Natives {
@@ -123,6 +124,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...fsCommandNatives(s),
     ...netConnectionNatives(s),
     ...stage3DNatives(s),
+    ...xmlDocumentNatives(s),
   };
 }
 

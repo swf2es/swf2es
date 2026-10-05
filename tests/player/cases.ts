@@ -3647,6 +3647,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "legacy-xml",
+    swf: (abc) => bare(abc, 1, "LegacyXml"),
+    script: "LegacyXml",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "system-natives",
     swf: (abc) => bare(abc, 2, "SystemNatives"),
     script: "SystemNatives",

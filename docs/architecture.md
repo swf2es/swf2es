@@ -1009,6 +1009,13 @@ descendants that draw under a point of the stage, parents first, as Flash
 does, and `areInaccessibleObjectsUnderPoint` is false, there being no
 sandbox to hide them.
 
+The legacy `flash.xml.XMLDocument` is playerglobal's own code over the
+runtime's XML tokenizer, avmplus' that E4X reads with too, exported for
+it: `XMLParser.getNext` fills an `XMLTag` with each tag, an element's
+attributes as an object, and playerglobal builds the tree and throws its
+errors from the status (the `legacy-xml` case). `XMLNode`'s escaping
+replaces the five XML characters.
+
 ### Loading SWFs
 
 A `Loader` is a container whose one child is the root of the SWF it
