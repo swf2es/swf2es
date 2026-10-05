@@ -1,0 +1,13 @@
+defaults start 0 []
+changed center 12.5 .
+null alignment TypeError: Error #2007: Parameter alignment must be non-null.
+bad alignment ArgumentError: Error #2008: Parameter alignment must be one of the accepted values.
+alignment after errors center
+negative ArgumentError: Error #2004: One of the parameters is invalid.
+nan NaN
+infinity Infinity
+negative infinity ArgumentError: Error #2004: One of the parameters is invalid.
+position after error Infinity
+null token TypeError: Error #2007: Parameter decimalAlignmentToken must be non-null.
+token abc
+bad constructor ArgumentError: Error #2008: Parameter alignment must be one of the accepted values.
