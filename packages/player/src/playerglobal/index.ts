@@ -4,6 +4,8 @@
 // a private native as "Class#pkg:Class::name".
 import type { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
+import { accessibilityNatives } from "./flash/accessibility/Accessibility.js";
+import { cryptoNatives } from "./flash/crypto/generateRandomBytes.js";
 import { avm1MovieNatives } from "./flash/display/AVM1Movie.js";
 import { bitmapNatives } from "./flash/display/Bitmap.js";
 import { bitmapDataHooks, bitmapDataNatives } from "./flash/display/BitmapData.js";
@@ -41,6 +43,7 @@ import { telemetryNatives } from "./flash/profiler/Telemetry.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { capabilitiesNatives } from "./flash/system/Capabilities.js";
 import { securityNatives } from "./flash/system/Security.js";
+import { securityDomainNatives } from "./flash/system/SecurityDomain.js";
 import { systemNatives } from "./flash/system/System.js";
 import { workerHooks, workerNatives } from "./flash/system/Worker.js";
 import { fontHooks, fontNatives } from "./flash/text/Font.js";
@@ -53,7 +56,9 @@ import { toplevelNatives } from "./toplevel.js";
 
 export function playerNatives(s: Scripting): avm2.Natives {
   return {
+    ...accessibilityNatives(s),
     ...toplevelNatives(s),
+    ...cryptoNatives(),
     ...eventNatives(),
     ...keyboardEventNatives(s),
     ...timerEventNatives(s),
@@ -77,6 +82,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...applicationDomainNatives(s),
     ...capabilitiesNatives(s),
     ...securityNatives(s),
+    ...securityDomainNatives(s),
     ...systemNatives(s),
     ...workerNatives(s),
     ...telemetryNatives(),

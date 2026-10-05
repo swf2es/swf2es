@@ -10,7 +10,7 @@ import {
   StaticTextObject,
   TextObject,
 } from "./display.js";
-import { apply, invert } from "./geometry.js";
+import { apply, invert, type Rect } from "./geometry.js";
 import type { KeyboardInput } from "./keyboard.js";
 import { dispatchEvent } from "./playerglobal/flash/events/EventDispatcher.js";
 import type { Scripting } from "./scripting.js";
@@ -169,6 +169,13 @@ export class PointerInput {
   private lastPress: { x: number; y: number; time: number; clicks: number } | null = null;
   private moved: PointerState | null = null;
   private shown: Cursor = "default";
+  private drag: {
+    target: DisplayObject;
+    lockCenter: boolean;
+    bounds: Rect | null;
+    lastX: number;
+    lastY: number;
+  } | null = null;
   /** Told the cursor to show whenever it changes. */
   onCursor: ((cursor: Cursor) => void) | null = null;
 
@@ -178,6 +185,58 @@ export class PointerInput {
     /** What a press tells the keyboard: which field it focuses, and where its caret goes. */
     private readonly keyboard: KeyboardInput | null = null,
   ) {}
+
+  /** Flash has one active drag for the whole stage, independent of mouse button state. */
+  startDrag(target: DisplayObject, lockCenter: boolean, bounds: Rect | null): void {
+    this.drag = {
+      target,
+      lockCenter,
+      bounds,
+      lastX: this.scripting.mouseStageX,
+      lastY: this.scripting.mouseStageY,
+    };
+    this.updateDrag();
+  }
+
+  stopDrag(): void {
+    this.updateDrag();
+    this.drag = null;
+  }
+
+  private updateDrag(): void {
+    const drag = this.drag;
+    if (!drag) {
+      return;
+    }
+
+    const d = drag.target;
+    const parent = d.parent;
+    const inverse = parent ? invert(toStage(parent, this.stage)) : null;
+    const x = this.scripting.mouseStageX;
+    const y = this.scripting.mouseStageY;
+    const [atX, atY] = inverse ? apply(inverse, x, y) : [x, y];
+    const [lastX, lastY] = inverse
+      ? apply(inverse, drag.lastX, drag.lastY)
+      : [drag.lastX, drag.lastY];
+    let nextX = drag.lockCenter ? atX : d.matrix.tx + atX - lastX;
+    let nextY = drag.lockCenter ? atY : d.matrix.ty + atY - lastY;
+    if (drag.bounds) {
+      nextX = Math.max(drag.bounds.xMin, Math.min(nextX, drag.bounds.xMax));
+      nextY = Math.max(drag.bounds.yMin, Math.min(nextY, drag.bounds.yMax));
+    }
+
+    // Flash stores translations in twips, including positions reached by dragging.
+    nextX = Math.round(nextX * 20) / 20;
+    nextY = Math.round(nextY * 20) / 20;
+    if (nextX !== d.matrix.tx || nextY !== d.matrix.ty) {
+      d.setMatrix({ ...d.matrix, tx: nextX, ty: nextY });
+      d.touch();
+      this.redraws++;
+    }
+
+    drag.lastX = x;
+    drag.lastY = y;
+  }
 
   private send(
     type: string,
@@ -240,6 +299,7 @@ export class PointerInput {
     const s = this.scripting;
     s.mouseStageX = p.x;
     s.mouseStageY = p.y;
+    this.updateDrag();
     const target =
       type === "leave" ? null : pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
     const down = (p.buttons ?? 0) & 1 ? true : type === "down" && (p.button ?? 0) === 0;

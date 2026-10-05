@@ -1,0 +1,3 @@
+current true true true
+context true
+new ArgumentError: Error #2012: SecurityDomain class cannot be instantiated.

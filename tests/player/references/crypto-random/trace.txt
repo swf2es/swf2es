@@ -1,0 +1,7 @@
+size 1 1 0 1
+size 16 16 0 16
+size 1024 1024 0 1024
+distinct true
+invalid 0 null
+invalid 1025 Error: Error #2004: One of the parameters is invalid.
+invalid 4294967295 Error: Error #2004: One of the parameters is invalid.

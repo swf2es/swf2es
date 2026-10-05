@@ -74,6 +74,14 @@ export function externalInterfaceNatives(s: Scripting): avm2.Natives {
 
       return host.callOut(s.rt.toString(request));
     }
+
+    static "flash.external:ExternalInterface::_quotedStringFromString"(value: Value): string {
+      return JSON.stringify(s.rt.toString(value));
+    }
+
+    static "flash.external:ExternalInterface::_quotedStringFromError"(error: Value): string {
+      return JSON.stringify(s.rt.toString(error));
+    }
   }
 
   avm2.registerNativeClass(natives, "flash.external::ExternalInterface", ExternalInterfaceNatives);
