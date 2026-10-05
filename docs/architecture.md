@@ -787,6 +787,15 @@ uncaught, and the cycle and its caller go on, as in Flash and Ruffle.
 The goto itself still throws to its caller its own errors: the stack
 overflow, #1023, and an unknown scene or label, #2108 and #2109.
 
+A button made in a SWF after version 9 whose up state has a clip runs
+such a frame too, once its states are made and its parent has its named
+property, before its own constructor: the frame scripts due on the
+display list, the orphans' and those of what scripts made, its states'
+among them. A clip whose `super()` is making that button has registered
+no frame script yet, and keeps its first frame's for the frame's own
+phase; one a frame script made, in that phase already, loses it, as adl
+shows (`button-frame-order`, Ruffle's `frame_script_button_order`).
+
 An error nothing caught is reported, and what was running goes on, as
 adl shows. A listener's error never reaches the dispatcher: the
 listeners after it still run, and a script's `dispatchEvent` returns as

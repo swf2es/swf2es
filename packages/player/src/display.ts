@@ -1203,6 +1203,8 @@ export class MovieClip extends Container {
   readonly frameScripts = new Map<number, avm2.Value>();
   /** The frame whose script last ran, so that entering a frame runs its script once. */
   scriptedFrame = 0;
+  /** Whether its constructor's super() is making its first frame's children, before it can have registered a frame script. */
+  makingChildren = false;
   /** A goto a frame script asked for, taken when the script returns, as Flash defers it; null for none. */
   queuedGoto: number | null = null;
   /** Whether that goto plays or stops the clip, as it happens, not as it is asked for. */
@@ -1515,10 +1517,16 @@ export class MovieClip extends Container {
   enterFirstFrame(): void {
     this.placeFirstFrame();
     // One at a time: a constructor that throws stops here, as its error stops the frame.
-    for (let next = this.held.shift(); next; next = this.held.shift()) {
-      if (!next.display.object && next.display.parent === this) {
-        construct(next.display, next.character, this.library);
+    const outer = this.makingChildren;
+    this.makingChildren = true;
+    try {
+      for (let next = this.held.shift(); next; next = this.held.shift()) {
+        if (!next.display.object && next.display.parent === this) {
+          construct(next.display, next.character, this.library);
+        }
       }
+    } finally {
+      this.makingChildren = outer;
     }
   }
 
