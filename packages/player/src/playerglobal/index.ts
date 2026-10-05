@@ -29,7 +29,9 @@ import { timerEventNatives } from "./flash/events/TimerEvent.js";
 import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js";
 import { filterHooks, filterNatives } from "./flash/filters/filters.js";
 import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
+import { perspectiveProjectionNatives } from "./flash/geom/PerspectiveProjection.js";
 import { transformNatives } from "./flash/geom/Transform.js";
+import { utils3DNatives } from "./flash/geom/Utils3D.js";
 import { currencyParseResultNatives } from "./flash/globalization/CurrencyParseResult.js";
 import { numberParseResultNatives } from "./flash/globalization/NumberParseResult.js";
 import { soundHooks, soundNatives } from "./flash/media/Sound.js";
@@ -109,6 +111,8 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...fontNatives(s),
     ...textFieldNatives(s),
     ...traceNatives(),
+    ...utils3DNatives(s),
+    ...perspectiveProjectionNatives(s),
   };
 }
 

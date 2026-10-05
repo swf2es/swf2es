@@ -912,7 +912,7 @@ stays at its ratio. Ruffle's `transformed_by_script` does the same, set
 by fewer setters: not by `blendMode`, `filters`, `scrollRect`,
 `opaqueBackground` or `scale9Grid`. In adl the 3D setters touch as well,
 `z`, `rotationX`, `rotationY`, `rotationZ`, `scaleZ` and
-`transform.matrix3D`, so they must call `touch()` once implemented.
+`transform.matrix3D`, and so they do in the player.
 
 A clip a script takes off the display list plays on in Flash, an
 orphan, and so does one a script makes with `new` and never adds: its
@@ -1417,9 +1417,44 @@ doubles there too, so those two tests cannot be matched to the end.
 `Vector.<Number>` each time, and the setter and copy methods round writes to
 float32. `copyRawDataTo` pads a growable vector with zeros out to its index,
 as adl does however far, but refuses an index from 2^28 on, a negative one
-too, with ArgumentError 2004 before writing anything. This data model and the copy operations stand apart from the display
-list's 2D matrices; assigning `Transform.matrix3D` and drawing in 3D still
-need their own implementation.
+too, with ArgumentError 2004 before writing anything. Its arithmetic
+(`matrix3d.ts`) is Flash's float32, to the last bit where adl was asked:
+products and sums each rounded, `recompose`'s Euler angles through float32
+sines and cosines, `appendRotation` with the axis made a unit one in
+float32 and the pivot multiplied on, `invert` by Gauss-Jordan elimination
+with partial pivoting in float32, and `decompose` making the columns
+orthonormal one after another, so a skew goes and a mirror is the z
+scale's sign. `interpolate` lerps the translations and scales and slerps
+the rotations, and applies the scale after the rotation, as adl does;
+Ruffle's corpus drops the scale. Before SWF 13 Flash had the determinant
+of the other sign and turned about an axis as given, not a unit one, and
+the player does so for such SWFs (`matrix3d-swf12`, `matrix3d-swf13`).
+`Utils3D.projectVector` and `projectVectors` divide as adl does, which
+the Flash Player of Ruffle's corpus rounds further. A field of view a
+focal length gives goes through `atan`, whose last bit Flash's C library
+decides, so `perspective_projection`'s ramp matches only in part.
+
+A display object goes into 3D once a script sets `z`, `rotationX`,
+`rotationY`, `rotationZ` or `scaleZ`, even to what it was, sets
+`transform.matrix3D`, or sets `transform.matrix` to null; setting
+`matrix3D` to null takes it back to 2D at the identity, and setting a
+matrix takes it back with that matrix (the `three-d` case, the corpus's
+`displayobject_z` and `geom_transform`). In 3D `transform.matrix` is null,
+`matrix3D` a copy of the 3D transform, and the properties are kept as
+set: a rotation is not brought within ±180, a NaN position or rotation
+is 0. A matrix3D set whole is kept as given and taken apart as
+`decompose` takes it; a position set moves it alone, and a scale or
+rotation set makes it again from all the properties, translation ×
+rotation about x, then y, then z × scale. Each of these setters is a
+touch. A `PerspectiveProjection` of its own measures 500 pixels wide;
+one a transform gives reads and writes its object's, as Flash's does,
+which keeps the field of view in radians, the stage's 500 wide and the
+others' as wide as the stage; the stage and each SWF's root always have
+one, back to their defaults when set to null. The player keeps all this
+but does not draw in perspective: a 3D object draws, bounds and hits as
+its matrix3D's x and y rows, and `local3DToGlobal` and `globalToLocal3D`
+are not implemented. `transform.pixelBounds` is the bounds on the stage
+out to whole pixels.
 
 ### Bitmaps
 

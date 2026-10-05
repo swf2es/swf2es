@@ -226,6 +226,12 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     // A NaN position is 0, as Flash has it (the corpus's `displayobject_invalid_floats`).
     set x(v: Value) {
       const offset = fieldOffset(this.$display)[0];
+      if (this.$display.space) {
+        this.$display.touch();
+        this.$display.set3D("x", withOffset(Number(v) || 0, -offset));
+        return;
+      }
+
       transform(this.$display, (m) => {
         m.tx = withOffset(Number(v) || 0, -offset);
       });
@@ -237,6 +243,12 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     set y(v: Value) {
       const offset = fieldOffset(this.$display)[1];
+      if (this.$display.space) {
+        this.$display.touch();
+        this.$display.set3D("y", withOffset(Number(v) || 0, -offset));
+        return;
+      }
+
       transform(this.$display, (m) => {
         m.ty = withOffset(Number(v) || 0, -offset);
       });
@@ -268,6 +280,52 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     set rotation(v: Value) {
       this.$display.touch();
       this.$display.setRotation(Number(v));
+    }
+
+    // Any of these set puts the object in 3D, even to what it was (the corpus's `displayobject_z`).
+    get z(): number {
+      return this.$display.space?.z ?? 0;
+    }
+
+    set z(v: Value) {
+      this.$display.touch();
+      this.$display.set3D("z", Number(v));
+    }
+
+    get rotationX(): number {
+      return this.$display.space?.rotationX ?? 0;
+    }
+
+    set rotationX(v: Value) {
+      this.$display.touch();
+      this.$display.set3D("rotationX", Number(v));
+    }
+
+    get rotationY(): number {
+      return this.$display.space?.rotationY ?? 0;
+    }
+
+    set rotationY(v: Value) {
+      this.$display.touch();
+      this.$display.set3D("rotationY", Number(v));
+    }
+
+    get rotationZ(): number {
+      return this.$display.rotation;
+    }
+
+    set rotationZ(v: Value) {
+      this.$display.touch();
+      this.$display.set3D("rotationZ", Number(v));
+    }
+
+    get scaleZ(): number {
+      return this.$display.space?.scaleZ ?? 1;
+    }
+
+    set scaleZ(v: Value) {
+      this.$display.touch();
+      this.$display.set3D("scaleZ", Number(v));
     }
 
     get alpha(): number {
@@ -589,11 +647,17 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       return this.$transform;
     }
 
-    /** Takes the given Transform's matrix and color transform, not the object. */
+    /** Takes the given Transform's matrix, 2D or 3D, and color transform, not the object. */
     set transform(v: Value) {
       if (v) {
         const t = v as AsObject;
-        this.$display.setMatrix(matrixOf(s, s.rt.getProperty(t, MATRIX_NAME) as AsObject));
+        const from: DisplayObject = t.$display;
+        if (from.space) {
+          this.$display.setMatrix3D(from.space.raw);
+        } else {
+          this.$display.setMatrix(matrixOf(s, s.rt.getProperty(t, MATRIX_NAME) as AsObject));
+        }
+
         this.$display.colorTransform = colorOf(s, s.rt.getProperty(t, COLOR_NAME) as AsObject);
         this.$display.touch();
         this.$display.invalidate(TRANSFORM);

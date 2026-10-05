@@ -3610,4 +3610,37 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  {
+    name: "three-d",
+    swf: (abc) => bare(abc, 1, "ThreeD"),
+    script: "ThreeD",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "matrix3d-swf12",
+    swf: (abc) => withVersion(bare(abc, 1, "Matrix3DVersions"), 12),
+    script: "Matrix3DVersions",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "matrix3d-swf13",
+    swf: (abc) => withVersion(bare(abc, 1, "Matrix3DVersions"), 13),
+    script: "Matrix3DVersions",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
 ];
+
+/** The SWF with its header's version set to `version`. */
+function withVersion(swf: Uint8Array, version: number): Uint8Array {
+  swf[3] = version;
+  return swf;
+}

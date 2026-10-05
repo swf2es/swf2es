@@ -22,6 +22,7 @@ import type { Drawing } from "./drawing.js";
 import { type Filter, filterOfSwf } from "./filters.js";
 import type { FontSet } from "./fonts.js";
 import { type Rect, shifted } from "./geometry.js";
+import { compose3D, decompose3D } from "./matrix3d.js";
 import { morphAt } from "./morph.js";
 import { type PlacedGlyph, placeGlyphs } from "./static-text.js";
 import { TextModel } from "./text.js";
@@ -109,6 +110,33 @@ export function normalizeDegrees(degrees: number): number {
   return d;
 }
 
+/**
+ * A display object's 3D transform: the properties a script sets, the
+ * rotations in degrees as set, and the matrix3D they make, or that a
+ * script set whole, column-major float32.
+ */
+export interface Space {
+  x: number;
+  y: number;
+  z: number;
+  scaleX: number;
+  scaleY: number;
+  scaleZ: number;
+  rotationX: number;
+  rotationY: number;
+  rotationZ: number;
+  raw: Float32Array;
+}
+
+export type SpaceProperty = Exclude<keyof Space, "raw">;
+
+/** A perspective projection a script gave a display object: the field of view in radians, as Flash keeps it, and the centre. */
+export interface Projection {
+  fieldOfView: number;
+  centerX: number;
+  centerY: number;
+}
+
 export class DisplayObject {
   readonly serial = made++;
   parent: Container | null = null;
@@ -187,6 +215,15 @@ export class DisplayObject {
   blendMode = "normal";
   /** Its filters' values, which its `filters` reads copies of. */
   filters: readonly Filter[] = NO_FILTERS;
+  /**
+   * Its 3D transform, from when a script first sets a 3D property, its
+   * matrix3D, or its 2D matrix to null, until it sets matrix3D to null: in
+   * place of the 2D matrix to a script, and drawn as the matrix3D's x and
+   * y rows, without perspective, which the player does not draw.
+   */
+  space: Space | null = null;
+  /** The perspective projection a script set on its transform, or null. */
+  projection: Projection | null = null;
 
   /** A store it shows or fills with changed its pixels, or was disposed. */
   pixelsChanged(disposed: boolean): void {
@@ -255,9 +292,10 @@ export class DisplayObject {
    * The matrix set whole, and taken apart: the scales are its columns'
    * lengths, the rotation the first column's angle, the skew the second's
    * beyond that. A negative scale set as such is not recovered: a half
-   * turn is what the matrix says.
+   * turn is what the matrix says. It leaves 3D.
    */
   setMatrix(m: Matrix): void {
+    this.space = null;
     this.matrix = { ...m };
     this.scaleX = Math.hypot(m.a, m.b);
     this.scaleY = Math.hypot(m.c, m.d);
@@ -276,6 +314,11 @@ export class DisplayObject {
    * from then on.
    */
   setScaleX(v: number): void {
+    if (this.space) {
+      this.set3D("scaleX", v);
+      return;
+    }
+
     const column = scaled(v, this.scaleX, this.matrix.a, this.matrix.b);
     this.scaleX = v;
     if (column) {
@@ -287,6 +330,11 @@ export class DisplayObject {
   }
 
   setScaleY(v: number): void {
+    if (this.space) {
+      this.set3D("scaleY", v);
+      return;
+    }
+
     const column = scaled(v, this.scaleY, this.matrix.c, this.matrix.d);
     this.scaleY = v;
     if (column) {
@@ -298,6 +346,11 @@ export class DisplayObject {
   }
 
   setRotation(degrees: number): void {
+    if (this.space) {
+      this.set3D("rotationZ", degrees);
+      return;
+    }
+
     this.rotation = normalizeDegrees(degrees);
     if (!Number.isNaN(degrees)) {
       this.remake();
@@ -315,6 +368,83 @@ export class DisplayObject {
       tx: this.matrix.tx,
       ty: this.matrix.ty,
     };
+    this.invalidate(TRANSFORM);
+  }
+
+  /** Its 3D transform, made from the 2D matrix the first time. */
+  enter3D(): Space {
+    if (!this.space) {
+      const m = this.matrix;
+      this.setMatrix3D(
+        Float32Array.of(m.a, m.b, 0, 0, m.c, m.d, 0, 0, 0, 0, 1, 0, m.tx, m.ty, 0, 1),
+      );
+    }
+
+    return this.space as Space;
+  }
+
+  /**
+   * One 3D property set, as Flash's: a position moves the matrix3D, as set
+   * whole or not; a scale or rotation makes it again from all of them, a
+   * rotation as set, not brought within ±180. A NaN position or rotation
+   * is 0.
+   */
+  set3D(key: SpaceProperty, v: number): void {
+    const space = this.enter3D();
+    space[key] = Number.isNaN(v) && !key.startsWith("scale") ? 0 : v;
+    const at = ["x", "y", "z"].indexOf(key);
+    if (at >= 0) {
+      space.raw[12 + at] = space[key];
+      this.flatten();
+      return;
+    }
+
+    const radians = [space.rotationX, space.rotationY, space.rotationZ].map(
+      (r) => (r * Math.PI) / 180,
+    );
+    space.raw = compose3D(
+      [space.x, space.y, space.z],
+      radians,
+      [space.scaleX, space.scaleY, space.scaleZ],
+      "eulerAngles",
+    );
+    this.flatten();
+  }
+
+  /** The matrix3D set whole, and taken apart into the properties as Matrix3D.decompose would; null back to 2D, at the identity. */
+  setMatrix3D(raw: Float32Array | null): void {
+    if (!raw) {
+      this.space = null;
+      this.setMatrix(IDENTITY);
+      return;
+    }
+
+    const [[x, y, z], rotation, [scaleX, scaleY, scaleZ]] = decompose3D(raw, "eulerAngles");
+    const [rotationX, rotationY, rotationZ] = rotation.map((r) => r * DEGREES);
+    this.space = {
+      x,
+      y,
+      z,
+      scaleX,
+      scaleY,
+      scaleZ,
+      rotationX,
+      rotationY,
+      rotationZ,
+      raw: Float32Array.from(raw),
+    };
+    this.flatten();
+  }
+
+  /** The 2D fields from the 3D transform: the matrix its x and y rows, which is how it draws and hits. */
+  private flatten(): void {
+    const space = this.space as Space;
+    const m = space.raw;
+    this.matrix = { a: m[0], b: m[1], c: m[4], d: m[5], tx: m[12], ty: m[13] };
+    this.scaleX = space.scaleX;
+    this.scaleY = space.scaleY;
+    this.rotation = space.rotationZ;
+    this.skew = 0;
     this.invalidate(TRANSFORM);
   }
 
