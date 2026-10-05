@@ -536,7 +536,8 @@ returned are parked; new one-off branches evict the oldest batches. Evicted
 batchers, up to 16 groups' worth, go to the next group a view makes rather
 than being freed while a new group allocates its own; a root rendered once,
 as BitmapData.draw's, allocates its own, since Pixi destroys it after. A colour
-batcher whose buffers stay mostly empty for 120 rebuilds shrinks them.
+batcher whose buffers stay mostly empty for 120 rebuilds shrinks them; a
+default batcher keeps its largest buffers when it moves to a smaller group.
 The colour batcher's shader ignores Pixi's group colour, since
 its vertex colour transform already includes every ancestor. The
 `render-groups` case checks colours, masks moved between branches, scrolls,
