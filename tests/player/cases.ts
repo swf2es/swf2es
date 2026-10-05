@@ -3013,6 +3013,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "tab-stop-natives",
+    swf: (abc) => bare(abc, 1, "TabStopNatives"),
+    script: "TabStopNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "accessibility-natives",
     swf: (abc) => bare(abc, 1, "AccessibilityNatives"),
     script: "AccessibilityNatives",

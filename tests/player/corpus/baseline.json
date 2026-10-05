@@ -1025,7 +1025,7 @@
   "avm2/system_setclipboard_null": {"matched":0,"lines":1,"traced":1,"error":null},
   "avm2/tab_ordering_properties": {"matched":108,"lines":732,"traced":175,"error":"TypeError: Cannot convert object to primitive value"},
   "avm2/tab_ordering_stage_tab_children_remove_root": {"matched":5,"lines":5,"traced":5,"error":null},
-  "avm2/tabstop_properties": {"matched":0,"lines":105,"traced":0,"error":"Error: swf2es: native flash.text.engine::TabStop#set:alignment is not supported yet"},
+  "avm2/tabstop_properties": {"matched":13,"lines":105,"traced":58,"error":null},
   "avm2/text_element_basic": {"matched":0,"lines":34,"traced":0,"error":"Error: swf2es: native flash.text.engine::ContentElement#set:elementFormat is not supported yet"},
   "avm2/text_engine_fontdescription": {"matched":27,"lines":27,"traced":27,"error":null},
   "avm2/text_engine_groupelement": {"matched":1,"lines":64,"traced":1,"error":"Error: swf2es: native flash.text.engine::ContentElement#set:elementFormat is not supported yet"},
