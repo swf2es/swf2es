@@ -1741,9 +1741,28 @@ for each later run, a `FONT` inside it of what changed; `A`, `B`, `I`
 and `U` about a run's text, in that order out to in. It is read as adl
 reads it, a paragraph's end and a `BR` a line only in a multiline field.
 A TextFormat keeps each value as Flash converts it, null for one it does
-not set: whole numbers rounded, a half away from zero, `align` one of
-Flash's or ArgumentError 2008, an unknown `display` null. The `text-fields`
-case traces all of this, defaults, HTML and refusals, against adl.
+not set: whole numbers rounded, a half away from zero, NaN and the
+infinities -2147483648 as x86 converts them, `align` one of Flash's or
+ArgumentError 2008, an unknown `display` null. The `text-fields` case
+traces all of this, defaults, HTML and refusals, against adl.
+`getTextRuns` cuts a range where the format changes; a paragraph's line
+end takes the paragraph's format; `getFirstCharInParagraph` and
+`getParagraphLength` count the text's length as in the last paragraph,
+one past its end.
+
+A StyleSheet is playerglobal's own code over a few natives: its CSS is
+read as Flash reads it (`css.ts`, Ruffle's CssStream: selectors
+lower-cased, property names camel-cased, and on any of the few errors
+Flash finds the whole sheet ignored), a colour is `#` and at most six hex
+digits or 0, and the generic font families are Flash's device fonts. A
+field with a sheet reads `text` as HTML too, gives `htmlText` back as it
+was set, and does not read the same HTML again; each tag takes its tag's
+style, a link `a:link`'s, then its class's. A tag of the sheet's own is a
+block, ending its line when closed by its name, unless its style makes it
+inline, and one displayed as none hides what it holds; the display is no
+character's format. A change to the sheet styles the HTML again only in
+a field that had HTML when the sheet was set on it, as adl does
+(`text-natives`, the corpus's `stylesheet` and `edittext_stylesheet`).
 
 Setting a TextField's `width` or `height` resizes its field, as Flash
 does, not its scale. The renderer draws the background, the border over

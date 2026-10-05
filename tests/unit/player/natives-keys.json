@@ -949,7 +949,18 @@
     "flash.geom::Transform#set:matrix3D",
     "flash.geom::Transform#set:perspectiveProjection",
     "flash.geom::Utils3D.projectVector",
-    "flash.geom::Utils3D.projectVectors"
+    "flash.geom::Utils3D.projectVectors",
+    "flash.text::StyleSheet#flash.text:StyleSheet::_parseCSSFontFamily",
+    "flash.text::StyleSheet#flash.text:StyleSheet::_parseCSSInternal",
+    "flash.text::StyleSheet#flash.text:StyleSheet::_parseColor",
+    "flash.text::StyleSheet#flash.text:StyleSheet::_update",
+    "flash.text::StyleSheet#get:flash.text:StyleSheet::_styles",
+    "flash.text::StyleSheet#set:flash.text:StyleSheet::_styles",
+    "flash.text::TextField#getFirstCharInParagraph",
+    "flash.text::TextField#getParagraphLength",
+    "flash.text::TextField#getTextRuns",
+    "flash.text::TextField#replaceSelectedText",
+    "flash.text::TextField#get:textInteractionMode"
   ],
   "hooks": [
     "flash.display::BitmapData",

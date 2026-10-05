@@ -1,0 +1,37 @@
+names .big,a:link,h1,key
+h1 {color=#FF0000, fontFamily=sans-serif, Arial , fontSize=24px}
+.big {color=#FF0000, fontFamily=sans-serif, Arial , fontSize=24px}
+key {marginLeft=7 }
+missing {}
+transform h1 _sans,Arial  24 16711680        false block
+transform odd   0 true    3 -2147483648  true inline
+transform null null
+after a broken sheet {}
+set {color=#00FF00}
+cleared 0
+int NaN -2147483648 -2147483648
+sheet true
+html <p>one <span class='red'>two</span></p><custom>three</custom>x<span class='gone'>hidden</span>y
+text one two|three|xy
+  run 0 4 20 0 false
+  run 4 7 20 16711680 true
+  run 7 8 20 0 false
+  run 8 14 12 255 false
+  run 14 16 12 0 false
+text as html as text 16711680
+restyled 16711680
+no sheet null <P ALIGN="LEFT"><FONT FACE="Times New Roman" SIZE="12" COLOR="#FF0000" LETTERSPACING="0" KERNING="0"><B>as text</B></FONT></P>
+run 0 2 false
+run 2 4 true
+run 4 6 false
+part 3 4 true
+part 4 5 false
+empty 0 0
+paragraph -1 -1 -1
+paragraph 0 0 4
+paragraph 2 0 4
+paragraph 3 0 4
+paragraph 4 4 4
+paragraph 7 4 4
+paragraph 8 8 1
+paragraph 9 -1 -1

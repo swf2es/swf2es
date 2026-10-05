@@ -154,6 +154,21 @@ export class TextModel {
     return out;
   }
 
+  /** [begin, end) cut where the format changes: each run's [from, to). */
+  runs(begin: number, end: number): [number, number][] {
+    const out: [number, number][] = [];
+    for (let i = begin; i < end; i++) {
+      const last = out[out.length - 1];
+      if (last && same(this.formats[i - 1], this.formats[i])) {
+        last[1] = i + 1;
+      } else {
+        out.push([i, i + 1]);
+      }
+    }
+
+    return out;
+  }
+
   /** [begin, end) given what `change` sets, as setTextFormat does. */
   setFormat(change: PartialFormat, begin: number, end: number): void {
     this.revision++;
@@ -273,9 +288,15 @@ export class TextModel {
   /**
    * htmlText set: tags read as Flash reads them, each run in the format
    * its tags give over the default; a paragraph's end and a BR end a line
-   * only in a multiline field.
+   * only in a multiline field. With `styles`, a style sheet's, each tag
+   * takes its tag's and class's styles.
    */
-  setHtml(html: string, multiline: boolean, trimTrailingBreak = false): void {
+  setHtml(
+    html: string,
+    multiline: boolean,
+    trimTrailingBreak = false,
+    styles: ((selector: string) => PartialFormat | null) | null = null,
+  ): void {
     this.revision++;
     let text = "";
     const formats: CharFormat[] = [];
@@ -292,12 +313,18 @@ export class TextModel {
         add("\r", top());
       }
     };
+    // Under a sheet, the elements a style displays: a tag of the sheet's
+    // own is a block unless inline, ending its line when closed by name, as
+    // adl has it (the corpus's `edittext_stylesheet_display`); one displayed
+    // as none hides what it holds until then.
+    const open: { name: string; block: boolean; hides: boolean }[] = [];
+    let hidden = 0;
 
     const tag = /<(\/?)([a-zA-Z]+)([^>]*)>/g;
     let at = 0;
     for (let m = tag.exec(html); m; m = tag.exec(html)) {
       const plain = html.slice(at, m.index);
-      if (plain) {
+      if (plain && hidden === 0) {
         add(normalize(unescapeHtml(plain)), top());
       }
 
@@ -309,25 +336,57 @@ export class TextModel {
         continue;
       }
 
+      // Under a style sheet any tag may carry a style.
       const known = ["p", "font", "b", "i", "u", "a", "textformat", "li", "span"];
-      if (!known.includes(name)) {
+      if (!known.includes(name) && !styles) {
         continue;
       }
 
-      if (closing) {
-        if (stack.length > 1) {
-          stack.pop();
+      if (closing && open[open.length - 1]?.name === name) {
+        const element = open.pop() as (typeof open)[number];
+        hidden -= element.hides ? 1 : 0;
+        if (element.block && !text.endsWith("\r")) {
+          add("\r", top());
         }
+      }
 
+      if (closing) {
+        // A paragraph's line end is in the paragraph's format, as adl has it.
         if (name === "p" || name === "li") {
           line();
+        }
+
+        if (stack.length > 1) {
+          stack.pop();
         }
 
         continue;
       }
 
       const attributes = attributesOf(m[3]);
-      const f = { ...top() };
+      let f = { ...top() };
+      if (styles) {
+        // The tag's style, a link's, then its class's, each over the last;
+        // the display decides the element, not its characters' format.
+        const selectors = [name, ...(name === "a" ? ["a:link"] : [])];
+        if (attributes.class) {
+          selectors.push(`.${attributes.class.toLowerCase()}`);
+        }
+
+        let display = "block";
+        for (const selector of selectors) {
+          const style = styles(selector);
+          if (style) {
+            f = applied(f, { ...style, display: null });
+            display = style.display ?? display;
+          }
+        }
+
+        const hides = display === "none";
+        open.push({ name, block: !known.includes(name) && display !== "inline", hides });
+        hidden += hides ? 1 : 0;
+      }
+
       switch (name) {
         case "p":
           if (attributes.align) {
@@ -395,7 +454,7 @@ export class TextModel {
     }
 
     const rest = html.slice(at);
-    if (rest) {
+    if (rest && hidden === 0) {
       add(normalize(unescapeHtml(rest)), top());
     }
 

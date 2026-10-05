@@ -52,6 +52,7 @@ import { systemNatives } from "./flash/system/System.js";
 import { workerHooks, workerNatives } from "./flash/system/Worker.js";
 import { fontHooks, fontNatives } from "./flash/text/Font.js";
 import { staticTextNatives } from "./flash/text/StaticText.js";
+import { styleSheetNatives } from "./flash/text/StyleSheet.js";
 import { textFieldNatives } from "./flash/text/TextField.js";
 import { traceNatives } from "./flash/trace/Trace.js";
 import { mouseNatives } from "./flash/ui/Mouse.js";
@@ -113,6 +114,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...traceNatives(),
     ...utils3DNatives(s),
     ...perspectiveProjectionNatives(s),
+    ...styleSheetNatives(s),
   };
 }
 

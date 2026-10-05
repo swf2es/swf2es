@@ -642,6 +642,12 @@ export class TextObject extends DisplayObject {
   private caretAt = 0;
   /** Whether it has the keyboard's focus, an input field then showing its caret. */
   focused = false;
+  /** The StyleSheet its HTML is styled by, or null. */
+  styleSheet: avm2.AsObject | null = null;
+  /** Under a sheet, the HTML a script last set, which htmlText gives back as it was set. */
+  htmlSource: string | null = null;
+  /** Under a sheet, its HTML styled again, as a change to the sheet asks. */
+  restyle: (() => void) | null = null;
 
   constructor(
     readonly definition: TextCharacter | null,
