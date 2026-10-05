@@ -1749,6 +1749,10 @@ export class PixiView {
     ) {
       // Keep the group when its animation gets smaller, avoiding repeated batcher destruction.
       node.container.enableRenderGroup();
+      const set = node.container.renderGroup?.instructionSet;
+      if (set) {
+        viewGroups.add(set);
+      }
     }
   }
 
@@ -1756,6 +1760,8 @@ export class PixiView {
   private disableRenderGroup(container: PixiContainer): void {
     const set = container.renderGroup?.instructionSet;
     if (set) {
+      // Pixi pools the group, set included, for any root it renders next.
+      viewGroups.delete(set);
       retireBatchers(this.renderer, set.uid);
       set.destroy();
     }
@@ -2594,6 +2600,11 @@ interface BatchPipe {
 /** Retired groups' batchers kept, at most this many groups', for new groups to build with. */
 const SPARE_BATCHERS_MOST = 16;
 const spareBatchersOf = new WeakMap<Renderer, Record<string, Batcher>[]>();
+/**
+ * The instruction sets of groups a view made, the only ones given spare batchers: a root rendered
+ * once, as BitmapData.draw's, is destroyed with whatever it was given.
+ */
+const viewGroups = new WeakSet<InstructionSet>();
 
 /**
  * Take a retired instruction set's batchers from Pixi, which keeps them by ID even after its group
@@ -2613,7 +2624,7 @@ function retireBatchers(renderer: Renderer, uid: number): void {
     const list: Record<string, Batcher>[] = [];
     const buildStart = pipe.buildStart;
     pipe.buildStart = function (this: BatchPipe, set: InstructionSet) {
-      if (!this._batchersByInstructionSet[set.uid] && list.length > 0) {
+      if (!this._batchersByInstructionSet[set.uid] && list.length > 0 && viewGroups.has(set)) {
         this._batchersByInstructionSet[set.uid] = list.pop();
       }
 

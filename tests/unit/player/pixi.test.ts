@@ -274,19 +274,37 @@ test("one-off groups give back the oldest batches past the parked limit", () => 
   );
 });
 
-test("a new group builds with the batchers of one given back, not new ones", () => {
-  type Batchers = Record<string, { destroy(): void }>;
-  let destroyed = 0;
+/** A batch pipe that gives each instruction set it builds a default and a colour batcher. */
+function batchPipe() {
+  type Batchers = Record<string, { name: string; destroy(): void }>;
+  const destroyed: string[] = [];
   const pipe = {
     _batchersByInstructionSet: {} as Record<number, Batchers | undefined>,
     buildStart(set: { uid: number }) {
-      this._batchersByInstructionSet[set.uid] ??= { default: { destroy: () => destroyed++ } };
+      this._batchersByInstructionSet[set.uid] ??= Object.fromEntries(
+        ["default", "flash-color"].map((name) => [
+          name,
+          { name, destroy: () => destroyed.push(name) },
+        ]),
+      );
     },
   };
   const renderer = {
     ...standIn([]).renderer,
     renderPipes: { batch: pipe },
   } as unknown as ConstructorParameters<typeof PixiView>[0];
+  return { pipe, renderer, destroyed };
+}
+
+/** `count` bitmaps of `store` placed in `parent`, enough to group it. */
+function fill(parent: Container, store: BitmapStore, count = 64): void {
+  for (let i = 0; i < count; i++) {
+    parent.placeAtDepth(new BitmapObject(store), i + 1);
+  }
+}
+
+test("a new group builds with the batchers of one given back, not new ones", () => {
+  const { pipe, renderer, destroyed } = batchPipe();
   const view = new PixiView(renderer);
   const root = new Container();
   const branches = Array.from({ length: 65 }, () => new Container());
@@ -311,11 +329,113 @@ test("a new group builds with the batchers of one given back, not new ones", () 
 
   view.prepare(root);
   assert.equal(pipe._batchersByInstructionSet[first], undefined);
-  assert.equal(destroyed, 0);
+  assert.deepEqual(destroyed, []);
 
-  const fresh = { uid: -2 };
-  pipe.buildStart(fresh);
-  assert.equal(pipe._batchersByInstructionSet[fresh.uid], given);
+  // A group a view makes takes them.
+  const store = new BitmapStore(1, 1, false, 0xffffff);
+  const grown = new Container();
+  fill(grown, store);
+  root.placeAtDepth(grown, 1);
+  view.prepare(root);
+  const set = view.stage.children[0].children[1].renderGroup?.instructionSet;
+  assert.ok(set);
+  pipe.buildStart(set);
+  assert.equal(pipe._batchersByInstructionSet[set.uid], given);
+  store.dispose();
+});
+
+test("given-back batchers go to groups a view makes, up to 16 groups' worth, each under its name", () => {
+  const { pipe, renderer, destroyed } = batchPipe();
+  const view = new PixiView(renderer);
+  const store = new BitmapStore(1, 1, false, 0xffffff);
+  const root = new Container();
+  const arts: Container[] = [];
+  const masks: Container[] = [];
+  for (let i = 0; i < 17; i++) {
+    const panel = new Container();
+    const art = new Container();
+    const mask = new Container();
+    fill(art, store);
+    panel.placeAtDepth(art, 1);
+    panel.placeAtDepth(mask, 2);
+    root.placeAtDepth(panel, i + 1);
+    arts.push(art);
+    masks.push(mask);
+  }
+
+  view.prepare(root);
+  const panels = view.stage.children[0].children.slice(1);
+  const retired = new Set<unknown>();
+  for (const panel of panels) {
+    const set = panel.children[1].renderGroup?.instructionSet;
+    assert.ok(set);
+    pipe.buildStart(set);
+    retired.add(pipe._batchersByInstructionSet[set.uid]);
+  }
+
+  // Masked, each art gives up its group: 16 keep their batchers, the 17th's are destroyed.
+  const unwrapped = pipe.buildStart;
+  for (const [index, art] of arts.entries()) {
+    art.setMask(masks[index]);
+  }
+
+  view.prepare(root);
+  assert.equal(
+    panels.some((panel) => panel.children[1].isRenderGroup),
+    false,
+  );
+  assert.deepEqual(destroyed.sort(), ["default", "flash-color"]);
+  const wrapped = pipe.buildStart;
+  assert.notEqual(wrapped, unwrapped);
+
+  // The panels, grouped now, take the 16 records whole, and the 17th builds anew.
+  const taken = new Set<unknown>();
+  for (const panel of panels) {
+    const set = panel.renderGroup?.instructionSet;
+    assert.ok(set);
+    pipe.buildStart(set);
+    const batchers = pipe._batchersByInstructionSet[set.uid];
+    assert.ok(batchers);
+    assert.equal(batchers.default.name, "default");
+    assert.equal(batchers["flash-color"].name, "flash-color");
+    if (retired.has(batchers)) {
+      taken.add(batchers);
+    }
+  }
+
+  assert.equal(taken.size, 16);
+
+  // Given back again, the pipe keeps the one wrapper.
+  for (const art of arts) {
+    art.setMask(null);
+  }
+
+  view.prepare(root);
+  const artSets = new Set<unknown>();
+  for (const panel of panels) {
+    const set = panel.children[1].renderGroup?.instructionSet;
+    assert.ok(set);
+    pipe.buildStart(set);
+    artSets.add(set);
+    retired.add(pipe._batchersByInstructionSet[set.uid]);
+  }
+
+  for (const [index, art] of arts.entries()) {
+    art.setMask(masks[index]);
+  }
+
+  view.prepare(root);
+  assert.equal(pipe.buildStart, wrapped);
+  assert.equal(destroyed.length, 4);
+
+  // A root rendered once, though in a group Pixi pooled from one a view made, builds anew.
+  const once = new (view.stage.constructor as new () => typeof view.stage)();
+  once.enableRenderGroup();
+  const onceSet = once.renderGroup?.instructionSet;
+  assert.ok(onceSet && artSets.has(onceSet));
+  pipe.buildStart(onceSet);
+  assert.equal(retired.has(pipe._batchersByInstructionSet[onceSet.uid]), false);
+  store.dispose();
 });
 
 test("a nested group regroups under its parent's group after the branch comes back", () => {
