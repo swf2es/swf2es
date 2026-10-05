@@ -265,8 +265,6 @@ export class Scripting {
   readonly symbols = new Map<avm2.Abc | null, Map<string, Symbol>>();
   /** Libraries whose embedded fonts have been made visible to this player. */
   readonly fontLibraries = new Set<Library>();
-  /** Embedded fonts available to code running in each application domain. */
-  private readonly fontsByDomain = new Map<avm2.Domain, FontSet>();
   /** Font classes explicitly registered by scripts, in registration order. */
   readonly registeredFonts = new Map<AsObject, AnyFontCharacter>();
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
@@ -480,9 +478,9 @@ export class Scripting {
   /** Load the SWF's DoABCs in tag order, each run unless its lazy flag defers it to first use, then its SymbolClass. */
   async loadSwf(swf: Swf, library: Library): Promise<void> {
     this.library = library;
-    library.domain = this.mainDomain;
     this.addFontLibrary(library);
 
+    library.domain = this.mainDomain;
     this.rt.swfVersion = swf.header.version;
     const decoded = decodeImages(library, this.decodeImage);
     const run = await this.link(swf, this.mainDomain, this.url, library);
@@ -782,27 +780,9 @@ export class Scripting {
     }
 
     this.fontLibraries.add(library);
-    const domain = library.domain;
-    if (domain) {
-      let fonts = this.fontsByDomain.get(domain);
-      if (!fonts) {
-        fonts = new FontSet();
-        this.fontsByDomain.set(domain, fonts);
-      }
-
-      for (const character of library.characters.values()) {
-        if (character.type === "font") {
-          fonts.add(character.font);
-        }
-      }
-    }
-
     for (const font of this.registeredFonts.values()) {
       if (font.type === "font") {
         library.fonts.add(font.font);
-        if (domain) {
-          this.fontsByDomain.get(domain)?.add(font.font);
-        }
       }
     }
   }
@@ -826,12 +806,6 @@ export class Scripting {
     for (const library of this.fontLibraries) {
       if (font.type === "font") {
         library.fonts.add(font.font);
-      }
-    }
-
-    if (font.type === "font") {
-      for (const fonts of this.fontsByDomain.values()) {
-        fonts.add(font.font);
       }
     }
   }
@@ -1154,7 +1128,7 @@ export class Scripting {
 
       if (t.name === "flash.text::TextField") {
         const text = new TextObject(null);
-        text.fonts = this.fontsByDomain.get(this.rt.codeDomain()) ?? library.fonts;
+        text.fonts = (this.codeLibrary() ?? library).fonts;
         return text;
       }
     }

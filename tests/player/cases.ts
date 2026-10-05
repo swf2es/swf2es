@@ -1326,7 +1326,28 @@ function loadedFont(compile: Compile): Uint8Array {
     "LoadedFont",
     template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
   );
-  return bare(abc, 3);
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.font3({
+        id: 1,
+        name: "Probe",
+        ascent: 800,
+        descent: 200,
+        glyphs: [{ char: "A", advance: 100, boxes: [[0, -500, 80, 0]] }],
+      }),
+      w.doAbc(abc, "LoadedFont"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
 }
 
 // The same, unloading from INIT (scripts/LoadsInit.as.template). The inner

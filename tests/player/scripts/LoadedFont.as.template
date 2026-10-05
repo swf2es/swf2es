@@ -11,7 +11,7 @@ package {
     public function Main() {
       var loader:Loader = new Loader();
       addChild(loader);
-      var context:LoaderContext = new LoaderContext(false, new ApplicationDomain());
+      var context:LoaderContext = new LoaderContext(false, ApplicationDomain.currentDomain);
       context.allowCodeImport = true;
       loader.loadBytes(decode(INNER), context);
     }

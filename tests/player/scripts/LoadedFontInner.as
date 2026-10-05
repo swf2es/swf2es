@@ -9,7 +9,7 @@ package {
       field.embedFonts = true;
       field.defaultTextFormat = new TextFormat("Probe", 20, 0x000000);
       field.text = "A";
-      trace("loaded font width", field.textWidth > 0);
+      trace("loaded font width", field.textWidth >= 8);
       addChild(field);
     }
   }

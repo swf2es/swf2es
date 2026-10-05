@@ -16,7 +16,7 @@ export class FontSet {
     }
   }
 
-  /** Prefer a font with layout metrics when a domain has more than one of the same name. */
+  /** Prefer a font with layout metrics when a library has more than one of the same name. */
   find(name: string, bold: boolean, italic: boolean): Font | null {
     const fonts = this.byName.get(name);
     if (!fonts) {
