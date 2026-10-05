@@ -172,9 +172,37 @@ interface TimelineSound {
   duration: number;
   playing: PlayingSound | null;
   stopped: boolean;
+  /**
+   * When the player's clock ran its length, or null while it plays: over,
+   * it no longer counts for SyncNoMultiple, its clip's stream or the cap,
+   * but the device may still be playing its last moments, which a stop
+   * still stops until TAIL has passed and it is stopped for good.
+   */
+  endedAt: number | null;
 }
 
 const timelineSounds = new WeakMap<Scripting, Set<TimelineSound>>();
+
+/** How long a sound over by the clock may still sound on the device before it is stopped. */
+const TAIL = 100;
+
+/**
+ * The sounds that may play at once, timeline and script alike: Flash's 32
+ * channels, Ruffle's AudioManager::MAX_SOUNDS. A timeline sound past them
+ * does not start, nor queue on a device that is not yet running.
+ */
+const MAX_SOUNDS = 32;
+
+function liveSounds(s: Scripting): number {
+  let n = channels.get(s)?.size ?? 0;
+  for (const sound of timelineSounds.get(s) ?? []) {
+    if (sound.endedAt === null) {
+      n++;
+    }
+  }
+
+  return n;
+}
 
 /** SOUNDINFO's points and envelope are in samples at 44.1 kHz, whatever the sound's rate. */
 const ENVELOPE_RATE = 44.1;
@@ -224,7 +252,7 @@ function playTimelineSound(
   duration: number,
 ): TimelineSound | null {
   const task = s.soundClip(character);
-  if (!task) {
+  if (!task || liveSounds(s) >= MAX_SOUNDS) {
     return null;
   }
 
@@ -236,6 +264,7 @@ function playTimelineSound(
     duration,
     playing: null,
     stopped: false,
+    endedAt: null,
   };
   let active = timelineSounds.get(s);
   if (!active) {
@@ -246,8 +275,16 @@ function playTimelineSound(
   active.add(sound);
   void task.then(
     (decoded) => {
-      if (!sound.stopped) {
-        sound.playing = decoded.play(start, loops, timelineMix(s, owner), shape);
+      // A decode that took frames starts as far in as the clock has run, so
+      // that a stream keeps with its timeline from its first play on.
+      const late = s.now - sound.started;
+      if (!sound.stopped && late < sound.duration) {
+        sound.playing = decoded.play(
+          start,
+          loops,
+          timelineMix(s, owner),
+          late > 0 ? { ...shape, atMs: late } : shape,
+        );
       }
     },
     () => {},
@@ -279,7 +316,11 @@ function startEventSound(
     return;
   }
 
-  if (info.noMultiple && active && [...active].some((sound) => sound.character === character)) {
+  if (
+    info.noMultiple &&
+    active &&
+    [...active].some((sound) => sound.character === character && sound.endedAt === null)
+  ) {
     return;
   }
 
@@ -368,6 +409,13 @@ function startStream(s: Scripting, clip: MovieClip, stream: SoundStream, frame: 
     return;
   }
 
+  // The last moments of its stream before, over by the clock, give way to this one.
+  for (const sound of [...(timelineSounds.get(s) ?? [])]) {
+    if (sound.clip === clip) {
+      stopTimelineSound(s, sound);
+    }
+  }
+
   const { character, starts } = streamOf(stream);
   let last = block + 1;
   if (stream.head.format === 2) {
@@ -428,10 +476,11 @@ export function timelineSoundsOf(s: Scripting): TimelineSounds {
       }
     },
     stopStream(clip) {
-      const sound = clip.stream as TimelineSound | null;
       clip.stream = null;
-      if (sound) {
-        stopTimelineSound(s, sound);
+      for (const sound of [...(timelineSounds.get(s) ?? [])]) {
+        if (sound.clip === clip) {
+          stopTimelineSound(s, sound);
+        }
       }
     },
     start(owner, library, id, info) {
@@ -469,12 +518,14 @@ export function transformOf(s: Scripting, mix: SoundMix): AsObject {
 export function finishSounds(s: Scripting): void {
   // A timeline sound that has played its time is over: a NoMultiple may start
   // it again, and its clip's stream at the next block.
-  for (const sound of timelineSounds.get(s) ?? []) {
-    if (s.now - sound.started >= sound.duration) {
-      timelineSounds.get(s)?.delete(sound);
+  for (const sound of [...(timelineSounds.get(s) ?? [])]) {
+    if (sound.endedAt === null && s.now - sound.started >= sound.duration) {
+      sound.endedAt = s.now;
       if (sound.clip?.stream === sound) {
         sound.clip.stream = null;
       }
+    } else if (sound.endedAt !== null && s.now - sound.endedAt >= TAIL) {
+      stopTimelineSound(s, sound);
     }
   }
 

@@ -30,6 +30,8 @@ export interface PlayShape {
   endMs?: number;
   /** The levels of the sound's left and right channels as it plays, linear between points, over all its loops. */
   envelope?: EnvelopePoint[];
+  /** How far into its playing, all loops, to begin, in ms: a start the decode made late catches up. */
+  atMs?: number;
 }
 
 export interface DecodedSound {
@@ -96,7 +98,9 @@ export function browserAudioHost(): AudioHost | null {
         play(startMs, loops, mix, shape) {
           const offset = Math.max(0, startMs / 1000);
           const end = Math.min(buffer.duration, (shape?.endMs ?? Infinity) / 1000);
-          if (offset >= end) {
+          const at = Math.max(0, (shape?.atMs ?? 0) / 1000);
+          const length = end - offset;
+          if (length <= 0 || at >= length * Math.max(1, loops)) {
             return null;
           }
 
@@ -126,7 +130,7 @@ export function browserAudioHost(): AudioHost | null {
           // An envelope scales each source channel, a mono one as both, before the mix crosses them.
           const levels = shape?.envelope ? [ctx.createGain(), ctx.createGain()] : [];
           if (shape?.envelope) {
-            envelopeLevels(levels[0].gain, levels[1].gain, shape.envelope, ctx.currentTime);
+            envelopeLevels(levels[0].gain, levels[1].gain, shape.envelope, ctx.currentTime, at);
             splitter.connect(levels[0], 0);
             splitter.connect(levels[1], right);
             levels[0].connect(gains[0]);
@@ -156,12 +160,12 @@ export function browserAudioHost(): AudioHost | null {
           sourceNode.loopStart = offset;
           sourceNode.loopEnd = end;
           if (loops > 1) {
-            sourceNode.start(0, offset);
-            sourceNode.stop(ctx.currentTime + (end - offset) * loops);
+            sourceNode.start(0, offset + (at % length));
+            sourceNode.stop(ctx.currentTime + length * loops - at);
           } else if (end < buffer.duration) {
-            sourceNode.start(0, offset, end - offset);
+            sourceNode.start(0, offset + at, length - at);
           } else {
-            sourceNode.start(0, offset);
+            sourceNode.start(0, offset + at);
           }
 
           void ctx.resume().catch(() => {});
@@ -180,19 +184,41 @@ export function browserAudioHost(): AudioHost | null {
   };
 }
 
-/** An envelope as gain automation: the first point's level from the start, as Ruffle holds it, then lines between points. */
+/**
+ * An envelope as gain automation, `at` seconds into it at `now`: the first
+ * point's level held before it, as Ruffle holds it, then lines between
+ * points; a late start begins at the level the lines reach by then.
+ */
 function envelopeLevels(
   left: AudioParam,
   right: AudioParam,
   envelope: EnvelopePoint[],
-  start: number,
+  now: number,
+  at: number,
 ): void {
-  const first = envelope[0] ?? { ms: 0, left: 1, right: 1 };
-  left.setValueAtTime(first.left, start);
-  right.setValueAtTime(first.right, start);
+  const ms = at * 1000;
+  let level = envelope[0] ?? { ms: 0, left: 1, right: 1 };
+  for (let i = 0; i < envelope.length && envelope[i].ms <= ms; i++) {
+    const next = envelope[i + 1];
+    level = envelope[i];
+    if (next && next.ms > ms && next.ms > level.ms) {
+      const t = (ms - level.ms) / (next.ms - level.ms);
+      level = {
+        ms,
+        left: level.left + (next.left - level.left) * t,
+        right: level.right + (next.right - level.right) * t,
+      };
+      break;
+    }
+  }
+
+  left.setValueAtTime(level.left, now);
+  right.setValueAtTime(level.right, now);
   for (const point of envelope) {
-    left.linearRampToValueAtTime(point.left, start + point.ms / 1000);
-    right.linearRampToValueAtTime(point.right, start + point.ms / 1000);
+    if (point.ms >= ms) {
+      left.linearRampToValueAtTime(point.left, now + (point.ms - ms) / 1000);
+      right.linearRampToValueAtTime(point.right, now + (point.ms - ms) / 1000);
+    }
   }
 }
 

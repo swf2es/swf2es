@@ -1344,7 +1344,6 @@ export class Scripting {
   private avm1Library(swf: Swf, domain: avm2.Domain): Library {
     const library = readLibrary(swf);
     library.domain = domain;
-    library.sounds = this.timelineSounds;
     return library;
   }
 

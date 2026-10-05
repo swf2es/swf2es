@@ -798,14 +798,14 @@ export type ButtonState = "up" | "over" | "down";
 
 /**
  * Which of DefineButtonSound's sounds a change of state plays, by the
- * state before and after, as Ruffle's button events pick them: a release
- * outside, down to up here, plays over to up's; a drag back over, up to
- * down, none (-1).
+ * state before and after, as Ruffle's button events pick them: a drag off
+ * while pressed, down to up here, and back over, up to down, none (-1); a
+ * release outside plays over to up's (ButtonObject.releasedOutside).
  */
 const BUTTON_SOUNDS: Record<ButtonState, Record<ButtonState, number>> = {
   up: { up: -1, over: 1, down: -1 },
   over: { up: 0, over: -1, down: 2 },
-  down: { up: 0, over: 3, down: -1 },
+  down: { up: -1, over: 3, down: -1 },
 };
 
 /**
@@ -834,15 +834,24 @@ export class ButtonObject extends Container {
 
   /** Show state `state`, with the sound DefineButtonSound gives the change. */
   setState(state: ButtonState): void {
+    this.playSound(BUTTON_SOUNDS[this.state][state]);
+    this.state = state;
+    this.show();
+  }
+
+  /** A press on it released elsewhere: over to up's sound, as Ruffle's ReleaseOutside plays. */
+  releasedOutside(): void {
+    this.playSound(0);
+  }
+
+  /** DefineButtonSound's sound `index`, if it has one. */
+  private playSound(index: number): void {
     const sounds = this.character?.type === "button" ? this.character.sounds : null;
-    const sound = sounds?.[BUTTON_SOUNDS[this.state][state]];
+    const sound = sounds?.[index];
     const library = this.library;
     if (sound && library) {
       library.sounds?.start(this, library, sound.id, sound.info);
     }
-
-    this.state = state;
-    this.show();
   }
 
   /**
@@ -1195,8 +1204,9 @@ export class MovieClip extends Container {
     const from = this.currentFrame;
     const rewind = target < from;
     // A goto stops the stream, and the frame it lands on starts it again
-    // if the clip plays, as Ruffle's run_goto has it.
-    if (this.stream) {
+    // if the clip plays, as Ruffle's run_goto has it; one to the frame it is
+    // on is nothing to it, as Ruffle's goto_frame_now has it.
+    if (this.stream && target !== from) {
       this.library.sounds?.stopStream(this);
     }
 
