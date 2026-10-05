@@ -172,11 +172,15 @@ interface TimelineSound {
   duration: number;
   playing: PlayingSound | null;
   stopped: boolean;
+  /** Whether its decode is still to come. */
+  decoding: boolean;
   /**
    * When the player's clock ran its length, or null while it plays: over,
-   * it no longer counts for SyncNoMultiple, its clip's stream or the cap,
-   * but the device may still be playing its last moments, which a stop
-   * still stops until TAIL has passed and it is stopped for good.
+   * it no longer counts for SyncNoMultiple or its clip's stream, but the
+   * device may still play it, later than the clock has it where the page
+   * held the device, and a stop still reaches it until the device is done
+   * with it (`PlayingSound.ended`), or, for a host that cannot tell, until
+   * TAIL has passed and it is stopped for good.
    */
   endedAt: number | null;
 }
@@ -193,10 +197,28 @@ const TAIL = 100;
  */
 const MAX_SOUNDS = 32;
 
+/** Whether the device has, or will have, a timeline sound playing. */
+function onDevice(sound: TimelineSound): boolean {
+  return (
+    sound.endedAt === null || sound.decoding || (!!sound.playing && sound.playing.ended !== true)
+  );
+}
+
+/**
+ * The sounds that hold a channel: a script's whose sound is there to play
+ * (one still loading holds none until it can start), and the timeline's
+ * the device has or will have.
+ */
 function liveSounds(s: Scripting): number {
-  let n = channels.get(s)?.size ?? 0;
+  let n = 0;
+  for (const channel of channels.get(s) ?? []) {
+    if ((channel.$channel as ChannelState).sound.length > 0) {
+      n++;
+    }
+  }
+
   for (const sound of timelineSounds.get(s) ?? []) {
-    if (sound.endedAt === null) {
+    if (onDevice(sound)) {
       n++;
     }
   }
@@ -264,6 +286,7 @@ function playTimelineSound(
     duration,
     playing: null,
     stopped: false,
+    decoding: true,
     endedAt: null,
   };
   let active = timelineSounds.get(s);
@@ -275,19 +298,22 @@ function playTimelineSound(
   active.add(sound);
   void task.then(
     (decoded) => {
-      // A decode that took frames starts as far in as the clock has run, so
-      // that a stream keeps with its timeline from its first play on.
-      const late = s.now - sound.started;
-      if (!sound.stopped && late < sound.duration) {
+      sound.decoding = false;
+      // A stream whose decode took frames starts as far in as the clock has
+      // run, to keep with its timeline; an event sound plays whole, late.
+      const late = Math.max(0, s.now - sound.started);
+      if (!sound.stopped && (!clip || late < sound.duration)) {
         sound.playing = decoded.play(
           start,
           loops,
           timelineMix(s, owner),
-          late > 0 ? { ...shape, atMs: late } : shape,
+          clip ? { ...shape, atMs: late } : shape,
         );
       }
     },
-    () => {},
+    () => {
+      sound.decoding = false;
+    },
   );
   return sound;
 }
@@ -524,7 +550,13 @@ export function finishSounds(s: Scripting): void {
       if (sound.clip?.stream === sound) {
         sound.clip.stream = null;
       }
-    } else if (sound.endedAt !== null && s.now - sound.endedAt >= TAIL) {
+    } else if (sound.endedAt !== null && !onDevice(sound)) {
+      stopTimelineSound(s, sound);
+    } else if (
+      sound.endedAt !== null &&
+      sound.playing?.ended === undefined &&
+      s.now - sound.endedAt >= TAIL
+    ) {
       stopTimelineSound(s, sound);
     }
   }
@@ -751,6 +783,11 @@ export function soundNatives(s: Scripting): avm2.Natives {
 
       const start = Math.max(0, s.rt.toNumber(startTime) || 0);
       if (sound.length > 0 && start >= sound.length) {
+        return null;
+      }
+
+      // Past Flash's 32 channels play gives none, as Ruffle's start_sound does.
+      if (liveSounds(s) >= MAX_SOUNDS) {
         return null;
       }
 

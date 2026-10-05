@@ -10,6 +10,7 @@ import {
   browserAudioHost,
   decodeAdpcm,
   type PlayShape,
+  type SoundMix,
   streamSound,
 } from "../../../packages/player/dist/audio.js";
 import { ButtonObject } from "../../../packages/player/dist/display.js";
@@ -127,7 +128,13 @@ type Entry = (string | number | object | undefined)[];
 async function played(
   body: string,
   frames: number,
-  options: { between?: (player: Player) => void; extra?: Uint8Array[]; decodedAt?: number } = {},
+  options: {
+    between?: (player: Player) => void;
+    extra?: Uint8Array[];
+    decodedAt?: number;
+    /** The device says when it is done with a sound: never, here, but by a stop. */
+    tells?: boolean;
+  } = {},
 ) {
   const source = `package {
   import flash.display.*;
@@ -185,10 +192,17 @@ async function played(
         play(start, loops, mix, shape?: PlayShape) {
           const id = plays++;
           log.push([frame, "play", id, label, Math.round(start), loops, mix.volume, shape]);
-          return {
-            stop: () => log.push([frame, "stop", id]),
-            setMix: (next) => log.push([frame, "mix", id, next.volume]),
+          let ended = false;
+          const playing = {
+            stop: () => {
+              ended = true;
+              log.push([frame, "stop", id]);
+            },
+            setMix: (next: SoundMix) => log.push([frame, "mix", id, next.volume]),
           };
+          return options.tells
+            ? Object.defineProperty(playing, "ended", { get: () => ended })
+            : playing;
         },
       };
     },
@@ -239,7 +253,7 @@ test("StartSound plays its in to out point, loops and envelope; NoMultiple and S
   assert.deepEqual(log, [
     // Tone from 100 ms to 500 ms twice, then the stream, all four blocks, from its first.
     [1, "play", 0, "tone", 100, 2, 1, { endMs: 500, envelope }],
-    [1, "play", 1, "stream 920", 0, 1, 1, { endMs: (920 * 1000) / 5512.5 }],
+    [1, "play", 1, "stream 920", 0, 1, 1, { endMs: (920 * 1000) / 5512.5, atMs: 0 }],
     // One Beep of the two: the second finds it playing.
     [2, "play", 2, "beep", 0, 1, 1, {}],
     // SyncStop stops it; StartSound2 finds Tone by its class.
@@ -261,7 +275,7 @@ test("a stream stops with its clip and starts again at the block it plays on to"
     8,
   );
   const ms = (samples: number) => Math.round((samples * 1000) / 5512.5);
-  const shape = { endMs: (920 * 1000) / 5512.5 };
+  const shape = { endMs: (920 * 1000) / 5512.5, atMs: 0 };
   assert.deepEqual(streamOnly(log), [
     [1, "play", 1, "stream 920", 0, 1, 1, shape],
     [2, "stop", 1],
@@ -285,7 +299,7 @@ test("a sprite's transform and the mixer's mix its timeline sounds; stopAll stop
       else if (n == 3) SoundMixer.stopAll();`,
     5,
   );
-  const shape = { endMs: (920 * 1000) / 5512.5 };
+  const shape = { endMs: (920 * 1000) / 5512.5, atMs: 0 };
   assert.deepEqual(log, [
     [1, "play", 0, "tone", 100, 2, 1, { endMs: 500, envelope }],
     [1, "play", 1, "stream 920", 0, 1, 1, shape],
@@ -340,7 +354,7 @@ test("a clip a script takes off plays its stream on; one the timeline takes off 
     "if (n == 1) { this.kept = streamer; removeChild(streamer); } else if (n == 2) { addChild(this.kept); }",
     4,
   );
-  const shape = { endMs: (920 * 1000) / 5512.5 };
+  const shape = { endMs: (920 * 1000) / 5512.5, atMs: 0 };
   assert.deepEqual(streamOnly(log), [[1, "play", 1, "stream 920", 0, 1, 1, shape]]);
 
   // Each loop of its four frames starts it again, from its first block, and frame 10 takes it off.
@@ -559,7 +573,7 @@ test("browser audio plays to an out point and scales each channel by the envelop
 
 test("a goto to the frame a clip is on leaves its stream playing", { skip }, async () => {
   const log = await played("if (n == 2) streamer.gotoAndPlay(streamer.currentFrame);", 5);
-  const shape = { endMs: (920 * 1000) / 5512.5 };
+  const shape = { endMs: (920 * 1000) / 5512.5, atMs: 0 };
   assert.deepEqual(streamOnly(log), [
     [1, "play", 1, "stream 920", 0, 1, 1, shape],
     // The loop to its first frame stops it and starts it again.
@@ -588,22 +602,22 @@ test("a goto plays the sounds of the frame it lands on, not of those it passes",
   );
 });
 
-test("a decode that takes frames starts its sounds as far in as the clock has run", {
+test("a stream whose decode takes frames starts as far in as the clock has run", {
   skip,
 }, async () => {
   const log = await played("", 3, { decodedAt: 3 });
   const frameMs = 1000 / 24;
-  const near = (entry: Entry) => [
-    entry[0],
-    entry[3],
-    Math.round(((entry[7] as PlayShape).atMs ?? 0) * 100) / 100,
-  ];
-  // Tone and the stream were due at frame 1, and start two frames in; frame
+  const near = (entry: Entry) => {
+    const at = (entry[7] as PlayShape).atMs;
+    return [entry[0], entry[3], at === undefined ? "whole" : Math.round(at * 100) / 100];
+  };
+  // The stream was due at frame 1 and starts two frames in, to keep with its
+  // timeline; Tone, an event sound due then too, plays whole, late; frame
   // 2's Beep, still decoding, is stopped by frame 3's SyncStop before it
   // starts; frame 3's Tone, by its class, is on time.
   assert.deepEqual(log.filter((e) => e[1] === "play").map(near), [
-    [3, "tone", Math.round(2 * frameMs * 100) / 100],
-    [3, "tone", 0],
+    [3, "tone", "whole"],
+    [3, "tone", "whole"],
     [3, "stream 920", Math.round(2 * frameMs * 100) / 100],
   ]);
 });
@@ -628,6 +642,14 @@ test("a sound over by the clock still stops, and stops for good soon after", {
     left.filter((e) => e[2] === 0 && e[1] === "stop"),
     [[24, "stop", 0]],
   );
+
+  // A device that says it still plays it, as one the page held does, keeps it
+  // stoppable past the tail, and it still counts among the 32.
+  const held = await played("if (n == 25) SoundMixer.stopAll();", 26, { tells: true });
+  assert.deepEqual(
+    held.filter((e) => e[2] === 0 && e[1] === "stop"),
+    [[26, "stop", 0]],
+  );
 });
 
 test("no more than 32 sounds play at once", { skip }, async () => {
@@ -636,6 +658,117 @@ test("no more than 32 sounds play at once", { skip }, async () => {
   // Frame 1's 40 Beeps come before Tone; the stream, the streamer's, after them all.
   assert.equal(log.filter((e) => e[1] === "play").length, 32);
   assert.equal(log.filter((e) => e[3] === "stream 920").length, 0);
+});
+
+test("a script's Sound.play gives no channel past the 32 the timeline shares", {
+  skip,
+}, async () => {
+  // At frame 2 Tone, the stream and a Beep play: 29 channels are left of 32.
+  const log = await played(
+    "if (n == 1) { var given:int = 0; for (var i:int = 0; i < 40; i++) { if (new Tone().play()) given++; } this.given = given; }",
+    2,
+  );
+  assert.equal(log.filter((e) => e[0] === 2 && e[1] === "play" && e[3] === "tone").length, 29);
+});
+
+test("a stream on a device not yet running starts when it runs, as far in as it waited", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
+  const started: number[][] = [];
+  const listeners: (() => void)[] = [];
+  const node = () => ({ connect: () => {}, disconnect: () => {}, gain: { value: 1 } });
+  class FakeAudioContext {
+    static made: FakeAudioContext | null = null;
+    currentTime = 0;
+    state = "suspended";
+    constructor() {
+      FakeAudioContext.made = this;
+    }
+    destination = {};
+    createBuffer(_count: number, samples: number, rate: number) {
+      return {
+        duration: samples / rate,
+        numberOfChannels: 1,
+        getChannelData: () => new Float32Array(samples),
+      };
+    }
+    createBufferSource() {
+      return { ...node(), start: (...args: number[]) => started.push(args), stop: () => {} };
+    }
+    createChannelSplitter() {
+      return node();
+    }
+    createChannelMerger() {
+      return node();
+    }
+    createGain() {
+      return node();
+    }
+    addEventListener(_type: string, listener: () => void) {
+      listeners.push(listener);
+    }
+    removeEventListener(_type: string, listener: () => void) {
+      listeners.splice(listeners.indexOf(listener), 1);
+    }
+    async resume() {}
+  }
+
+  Object.defineProperty(globalThis, "AudioContext", {
+    configurable: true,
+    value: FakeAudioContext,
+  });
+  try {
+    const host = browserAudioHost();
+    assert.ok(host);
+    const clip = await host.decode({
+      id: 1,
+      format: 3,
+      sampleRate: 11025,
+      sampleSize: 8,
+      channels: 1,
+      sampleCount: 11025,
+      seekSamples: 0,
+      data: new Uint8Array(11025).fill(128),
+    });
+    const mix = { volume: 1, leftToLeft: 1, leftToRight: 0, rightToLeft: 0, rightToRight: 1 };
+    // An event sound plays whole once the device runs: Web Audio holds its start.
+    clip.play(0, 1, mix);
+    assert.deepEqual(started, [[0, 0]]);
+
+    // A stream waits for the device, and then starts as far in as it waited.
+    const stream = clip.play(0, 1, mix, { atMs: 100 });
+    assert.ok(stream);
+    assert.equal(started.length, 1);
+    assert.equal(stream.ended, false);
+    const asked = performance.now();
+    while (performance.now() - asked < 20) {
+      // Time passes while the page has not yet let the device run.
+    }
+
+    const context = FakeAudioContext.made as FakeAudioContext;
+    for (const listener of [...listeners]) {
+      listener();
+    }
+
+    assert.equal(started.length, 1, "still suspended");
+    context.state = "running";
+    for (const listener of [...listeners]) {
+      listener();
+    }
+
+    assert.equal(started.length, 2);
+    assert.equal(started[1][0], 0);
+    assert.ok(started[1][1] >= 0.12 && started[1][1] < 0.5, String(started[1][1]));
+    assert.equal(listeners.length, 0);
+    assert.equal(stream.ended, false);
+    stream.stop();
+    assert.equal(stream.ended, true);
+  } finally {
+    if (previous) {
+      Object.defineProperty(globalThis, "AudioContext", previous);
+    } else {
+      Reflect.deleteProperty(globalThis, "AudioContext");
+    }
+  }
 });
 
 test("an MP3 stream joins its blocks' frames, counted by the blocks' sample counts", () => {

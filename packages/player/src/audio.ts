@@ -15,6 +15,8 @@ export interface SoundMix {
 export interface PlayingSound {
   stop(): void;
   setMix(mix: SoundMix): void;
+  /** Whether the device is done with it, stopped or played out; a host that cannot tell leaves it out. */
+  readonly ended?: boolean;
 }
 
 /** A point of a sound's envelope: its time from the start of playing, in ms, and each channel's level. */
@@ -30,7 +32,12 @@ export interface PlayShape {
   endMs?: number;
   /** The levels of the sound's left and right channels as it plays, linear between points, over all its loops. */
   envelope?: EnvelopePoint[];
-  /** How far into its playing, all loops, to begin, in ms: a start the decode made late catches up. */
+  /**
+   * Given for a stream, which keeps with its timeline: how far into its
+   * playing, all loops, it is due now, in ms, as a decode that took frames
+   * leaves it; a device not yet running adds the time it waits to run. A
+   * sound without it plays whole, however late.
+   */
   atMs?: number;
 }
 
@@ -98,20 +105,24 @@ export function browserAudioHost(): AudioHost | null {
         play(startMs, loops, mix, shape) {
           const offset = Math.max(0, startMs / 1000);
           const end = Math.min(buffer.duration, (shape?.endMs ?? Infinity) / 1000);
+          const keepsTime = shape?.atMs !== undefined;
           const at = Math.max(0, (shape?.atMs ?? 0) / 1000);
           const length = end - offset;
-          if (length <= 0 || at >= length * Math.max(1, loops)) {
+          const total = length * Math.max(1, loops);
+          if (length <= 0 || at >= total) {
             return null;
           }
 
           const sourceNode = ctx.createBufferSource();
           let ended = false;
+          let started = false;
           const finish = () => {
             if (ended) {
               return;
             }
 
             ended = true;
+            ctx.removeEventListener?.("statechange", running);
             sourceNode.disconnect();
             splitter.disconnect();
             for (const gain of [...gains, ...levels]) {
@@ -130,7 +141,6 @@ export function browserAudioHost(): AudioHost | null {
           // An envelope scales each source channel, a mono one as both, before the mix crosses them.
           const levels = shape?.envelope ? [ctx.createGain(), ctx.createGain()] : [];
           if (shape?.envelope) {
-            envelopeLevels(levels[0].gain, levels[1].gain, shape.envelope, ctx.currentTime, at);
             splitter.connect(levels[0], 0);
             splitter.connect(levels[1], right);
             levels[0].connect(gains[0]);
@@ -159,24 +169,60 @@ export function browserAudioHost(): AudioHost | null {
           sourceNode.loop = loops > 1;
           sourceNode.loopStart = offset;
           sourceNode.loopEnd = end;
-          if (loops > 1) {
-            sourceNode.start(0, offset + (at % length));
-            sourceNode.stop(ctx.currentTime + length * loops - at);
-          } else if (end < buffer.duration) {
-            sourceNode.start(0, offset + at, length - at);
+          const asked = performance.now();
+          // `late` seconds after it was asked for, as a stream waits for the device to run.
+          const begin = (late: number) => {
+            const from = at + late;
+            if (from >= total) {
+              finish();
+              return;
+            }
+
+            started = true;
+            if (shape?.envelope) {
+              envelopeLevels(levels[0].gain, levels[1].gain, shape.envelope, ctx.currentTime, from);
+            }
+
+            if (loops > 1) {
+              sourceNode.start(0, offset + (from % length));
+              sourceNode.stop(ctx.currentTime + total - from);
+            } else if (end < buffer.duration) {
+              sourceNode.start(0, offset + from, length - from);
+            } else {
+              sourceNode.start(0, offset + from);
+            }
+          };
+          // A suspended context's time stands still, before the page's first
+          // gesture or a slow resume: a stream starts when it runs, as far in
+          // as the wait; any other sound plays whole once it does.
+          function running(): void {
+            if (ctx.state === "running" && !started && !ended) {
+              ctx.removeEventListener?.("statechange", running);
+              begin((performance.now() - asked) / 1000);
+            }
+          }
+
+          if (keepsTime && ctx.state === "suspended") {
+            ctx.addEventListener?.("statechange", running);
           } else {
-            sourceNode.start(0, offset + at);
+            begin(0);
           }
 
           void ctx.resume().catch(() => {});
           return {
             stop: () => {
               if (!ended) {
-                sourceNode.stop();
+                if (started) {
+                  sourceNode.stop();
+                }
+
                 finish();
               }
             },
             setMix,
+            get ended() {
+              return ended;
+            },
           };
         },
       };

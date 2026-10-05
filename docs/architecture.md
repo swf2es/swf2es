@@ -1394,17 +1394,26 @@ Ruffle's DragOut and DragOver do.
 A timeline sound's mix is the transforms of its clip or button and each
 ancestor, a sprite's `soundTransform`, concatenated from it up, then the
 mixer's, as Ruffle's `transform_for_sound` does; setting a sprite's or the
-mixer's updates every timeline sound playing. A sound starts on the
+mixer's updates every timeline sound playing. A stream starts on the
 device once its decode is done, as far into it as the player's clock has
-run since it was due, so that a stream whose first decode took frames
-keeps with its timeline. It is over, for SyncNoMultiple and for its clip's
-stream, once the clock has run its length, in and out points and loops
-counted; the device may still play its last moments, which a stop still
-reaches, and 100 ms later it is stopped for good, as is the last of a
-clip's stream when its next one starts. At most 32 sounds play at once,
-the timeline's and a script's channels together, Flash's 32 channels and
-Ruffle's `AudioManager::MAX_SOUNDS`: a timeline sound past them does not
-start, nor queue on a device the page has not yet let run. adl cannot
+run since it was due, so that one whose first decode took frames keeps
+with its timeline; on a device the page has not yet let run (a suspended
+`AudioContext`, whose time stands still before the first gesture or
+through a slow resume), the browser host starts it when it runs, as far
+in again as it waited. An event sound plays whole, late if its decode or
+the device kept it waiting: a click's start is not lost. A sound is over,
+for SyncNoMultiple and for its clip's stream, once the clock has run its
+length, in and out points and loops counted; the device may still play
+it, and a stop still reaches it until the device is done with it
+(`PlayingSound.ended`), or, for a host that cannot tell, until 100 ms
+later, when it is stopped for good; the last of a clip's stream is
+stopped when its next one starts. At most 32 sounds play at once, Flash's
+32 channels and Ruffle's `AudioManager::MAX_SOUNDS`: a script's channels
+whose sound is there to play, and the timeline's sounds the device has,
+or will have once decoded, together. Past them a timeline sound does not
+start, nor queue on a device that is not running, and `Sound.play` gives
+null, as Flash's and Ruffle's do; a channel of a sound still loading
+holds no channel until it can start. adl cannot
 show what a timeline plays (its `computeSpectrum` reads nothing of an
 event sound or a stream), so the node tests (`timeline-sounds.test.ts`)
 check, through a device that logs, what starts and stops, when, how far
