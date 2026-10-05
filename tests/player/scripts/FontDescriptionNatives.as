@@ -38,6 +38,8 @@ package {
       catch (e:Error) { trace("locked invalid", e.toString()); }
       try { font.locked = false; trace("unlocked", font.locked); }
       catch (e:Error) { trace("unlock", e.toString()); }
+      try { font.locked = true; trace("relocked", font.locked); }
+      catch (e:Error) { trace("relock", e.toString()); }
       var clone:FontDescription = font.clone();
       trace("clone", clone.fontName, clone.fontWeight, clone.locked);
 
@@ -49,6 +51,9 @@ package {
       trace("known fonts", FontDescription.isFontCompatible("Arial", "normal", "normal"),
         FontDescription.isDeviceFontCompatible("Arial", "normal", "normal"),
         FontDescription.isFontCompatible("_sans", "normal", "normal"));
+      trace("generic devices", FontDescription.isDeviceFontCompatible("_sans", "normal", "normal"),
+        FontDescription.isDeviceFontCompatible("_serif", "normal", "normal"),
+        FontDescription.isDeviceFontCompatible("_typewriter", "normal", "normal"));
       try { trace("bad static", FontDescription.isFontCompatible(null, "normal", "normal")); }
       catch (e:Error) { trace("bad static", e.toString()); }
       try { trace("bad device", FontDescription.isDeviceFontCompatible("Arial", "bad", "normal")); }

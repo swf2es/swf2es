@@ -18,10 +18,12 @@ locked weight Error: Error #2185: The FontDescription object is locked and canno
 locked null Error: Error #2185: The FontDescription object is locked and cannot be modified.
 locked invalid Error: Error #2185: The FontDescription object is locked and cannot be modified.
 unlock Error: Error #2185: The FontDescription object is locked and cannot be modified.
+relock Error: Error #2185: The FontDescription object is locked and cannot be modified.
 clone Example bold false
 compatible false false
 device compatible false false
 known fonts false false false
+generic devices false false false
 bad static false
 bad device ArgumentError: Error #2008: Parameter fontWeight must be one of the accepted values.
 bad compatible weight ArgumentError: Error #2008: Parameter fontWeight must be one of the accepted values.

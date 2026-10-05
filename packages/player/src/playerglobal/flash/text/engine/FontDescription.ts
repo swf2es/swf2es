@@ -96,23 +96,30 @@ export function fontDescriptionNatives(s: Scripting): avm2.Natives {
       );
     }
 
-    if (fontName.startsWith("_")) {
-      return false;
-    }
-
-    // Fontconfig substitutes these Windows names on Linux, but Flash's query
-    // asks whether the named face itself exists.
-    if (
-      s.platform.os === "Linux" &&
-      ["arial", "times new roman", "courier new"].includes(fontName.toLowerCase())
-    ) {
+    if (["_sans", "_serif", "_typewriter"].includes(fontName.toLowerCase())) {
       return false;
     }
 
     // A missing face resolves to the same fallback metrics on every sample.
     const font = deviceMetrics(fontName, 48, bold, italic);
+    const sample = ["M", "W", "i", "1", "@"];
+    if (s.platform.os === "Linux") {
+      const substitutes: Record<string, string> = {
+        arial: "Liberation Sans",
+        "times new roman": "Liberation Serif",
+        "courier new": "Liberation Mono",
+      };
+      const substitute = substitutes[fontName.toLowerCase()];
+      if (substitute) {
+        const mapped = deviceMetrics(substitute, 48, bold, italic);
+        if (sample.every((char) => font.advance(char) === mapped.advance(char))) {
+          return false;
+        }
+      }
+    }
+
     const fallback = deviceMetrics("__swf2es_missing_font__", 48, bold, italic);
-    return ["M", "W", "i", "1", "@"].some((char) => font.advance(char) !== fallback.advance(char));
+    return sample.some((char) => font.advance(char) !== fallback.advance(char));
   };
 
   class FontDescriptionNatives {
