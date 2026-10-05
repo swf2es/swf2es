@@ -1,0 +1,3 @@
+ordinary 12.5 2 6
+unusual true -1 -5
+negative zero -Infinity 0 0

@@ -244,7 +244,7 @@
   "avm2/cross_api_version_call_newer": {"matched":0,"lines":12,"traced":12,"error":null},
   "avm2/cross_api_version_call_older": {"matched":12,"lines":12,"traced":12,"error":null},
   "avm2/cryptscore": {"matched":1,"lines":11,"traced":9981,"error":null},
-  "avm2/currency_parse_result": {"matched":0,"lines":8,"traced":0,"error":"Error: swf2es: native flash.globalization::CurrencyParseResult#flash.globalization:CurrencyParseResult::ctor is not supported yet"},
+  "avm2/currency_parse_result": {"matched":8,"lines":8,"traced":8,"error":null},
   "avm2/date": {"matched":30,"lines":30,"traced":30,"error":null},
   "avm2/date_parse": {"matched":36,"lines":36,"traced":36,"error":null},
   "avm2/declocal": {"matched":46,"lines":46,"traced":46,"error":null},

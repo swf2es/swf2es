@@ -1,0 +1,3 @@
+ordinary 12.5 EUR
+null symbol TypeError: Error #2007: Parameter symbol must be non-null.
+negative zero -Infinity 0
