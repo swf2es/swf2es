@@ -1062,7 +1062,17 @@
     "flash.media::Video#get:videoHeight",
     "flash.media::Video#get:videoWidth",
     "flash.media::Video#set:deblocking",
-    "flash.media::Video#set:smoothing"
+    "flash.media::Video#set:smoothing",
+    "flash.display::BitmapData#compare",
+    "flash.display::BitmapData#paletteMap",
+    "flash.ui::GameInput.get:isSupported",
+    "flash.ui::GameInput.get:numDevices",
+    "flash.ui::GameInput.getDeviceAt",
+    "flash.ui::Keyboard.get:capsLock",
+    "flash.ui::Keyboard.get:hasVirtualKeyboard",
+    "flash.ui::Keyboard.get:numLock",
+    "flash.ui::Keyboard.get:physicalKeyboardType",
+    "flash.ui::Keyboard.isAccessible"
   ],
   "hooks": [
     "flash.display::BitmapData",

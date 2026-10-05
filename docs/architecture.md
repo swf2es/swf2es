@@ -1551,7 +1551,13 @@ next state; every call writes the origin too, a seed past the states is
 taken modulo 2^bits − 1 and 0 starts at the tap, and a count past the
 w · h − 1 states a round visits is one round and the remainder, which
 gives Flash's seed without its loop (Flash itself takes seconds over
-2^31 − 1).
+2^31 − 1). `paletteMap` makes each copied pixel the sum, wrapping at 32
+bits, of its unpremultiplied channels' entries in the four tables, a
+missing table its channel itself; `compare` is 0 for the same pixels,
+-3 and -4 for another width and height, or a new transparent BitmapData
+of each differing pixel's colour difference, opaque, or where only alpha
+differs of the alpha difference in every premultiplied channel (the
+`palette-compare` case).
 Slice three is `draw` and `drawWithQuality`, in two paths. A
 BitmapData or a Bitmap drawn is composited on the CPU, in `bitmap.ts`'s
 arithmetic: through the matrix by the inverse of each destination

@@ -245,6 +245,59 @@ function forEachCopied(
   store.changed();
 }
 
+/**
+ * paletteMap: each copied pixel the sum of its channels' entries in the
+ * four tables, red, green, blue and alpha, wrapping at 32 bits, as Flash
+ * makes it (Ruffle's operations.rs); a table not given maps its channel
+ * to itself.
+ */
+export function paletteMap(
+  store: BitmapStore,
+  source: BitmapStore,
+  rect: PixelRect,
+  dx: number,
+  dy: number,
+  tables: readonly [Uint32Array, Uint32Array, Uint32Array, Uint32Array],
+): void {
+  const [r, g, b, a] = tables;
+  forEachCopied(
+    store,
+    source,
+    rect,
+    dx,
+    dy,
+    (p) => (r[(p >>> 16) & 0xff] + g[(p >>> 8) & 0xff] + b[p & 0xff] + a[p >>> 24]) >>> 0,
+  );
+}
+
+/**
+ * compare's differing pixels, null where none differ: 0 for a pixel the
+ * same in both, the colours' differences, opaque, where they differ, else
+ * the alphas' difference in every channel (Ruffle's operations.rs).
+ */
+export function comparePixels(left: BitmapStore, right: BitmapStore): Uint32Array | null {
+  const out = new Uint32Array(left.width * left.height);
+  let different = false;
+  for (let i = 0; i < out.length; i++) {
+    const p = unmultiply(left.pixels[i]);
+    const q = unmultiply(right.pixels[i]);
+    if (p === q) {
+      continue;
+    }
+
+    different = true;
+    if ((p & 0xffffff) !== (q & 0xffffff)) {
+      const channel = (shift: number) => (((p >>> shift) - (q >>> shift)) & 0xff) << shift;
+      out[i] = (0xff000000 | channel(16) | channel(8) | channel(0)) >>> 0;
+    } else {
+      const alpha = ((p >>> 24) - (q >>> 24)) & 0xff;
+      out[i] = ((alpha << 24) | (alpha << 16) | (alpha << 8) | alpha) >>> 0;
+    }
+  }
+
+  return different ? out : null;
+}
+
 /** scroll: the pixels moved by (x, y); what nothing moved onto keeps its old pixels. */
 export function scroll(store: BitmapStore, x: number, y: number): void {
   const { width, height } = store;

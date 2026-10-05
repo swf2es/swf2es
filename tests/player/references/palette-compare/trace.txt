@@ -1,0 +1,8 @@
+red inverted ffef2030 80bf5060 ff00ffff 0
+green doubled, shifted ffef2030 80bf5060 80409f60 0
+into opaque ff102030 ff405060 ffffffff ff000000
+null source 2007
+same 0
+differences ff010203 ffff00ff 0
+widths -3 heights -4
+null other 2007

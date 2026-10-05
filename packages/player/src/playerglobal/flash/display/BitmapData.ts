@@ -9,6 +9,7 @@ import {
   alphaAt,
   colorBounds,
   colorTransform,
+  comparePixels,
   copyChannel,
   drawBitmap,
   floodFill,
@@ -16,6 +17,7 @@ import {
   isThresholdOperation,
   merge,
   noise,
+  paletteMap,
   pixelDissolve,
   scroll,
   threshold,
@@ -524,6 +526,78 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const r = rectOf(s, rect);
       const [dx, dy] = pointOf(s, dest, "destPoint");
       copyChannel(store, src, r, dx, dy, s.rt.toUint(from), s.rt.toUint(to));
+    }
+
+    paletteMap(
+      source: Value,
+      rect: Value,
+      dest: Value,
+      red: Value = null,
+      green: Value = null,
+      blue: Value = null,
+      alpha: Value = null,
+    ): void {
+      const store = storeOf(s, this);
+      const src = sourceOf(s, source);
+      if (rect === null || rect === undefined) {
+        throw s.rt.error("TypeError", 2007, "sourceRect");
+      }
+
+      const r = rectOf(s, rect);
+      const [dx, dy] = pointOf(s, dest, "destPoint");
+      // A channel's table, or itself where none is given.
+      const table = (v: Value, shift: number): Uint32Array =>
+        Uint32Array.from({ length: 256 }, (_, i) =>
+          v === null || v === undefined
+            ? i << shift
+            : s.rt.toUint(s.rt.getProperty(v as AsObject, s.rt.publicName(i))),
+        );
+      paletteMap(store, src, r, dx, dy, [
+        table(red, 16),
+        table(green, 8),
+        table(blue, 0),
+        table(alpha, 24),
+      ]);
+    }
+
+    /**
+     * 0 for the same pixels, a BitmapData of their differences, or -3 and
+     * -4 for another width and height, as Flash's; -1 for this one disposed.
+     */
+    compare(other: Value): Value {
+      if (other === null || other === undefined) {
+        throw s.rt.error("TypeError", 2007, "otherBitmapData");
+      }
+
+      const own: BitmapStore | null = this.$store;
+      if (!own || own.disposed) {
+        return -1;
+      }
+
+      const theirs = storeOf(s, other as AsObject);
+      if (theirs.width !== own.width) {
+        return -3;
+      }
+
+      if (theirs.height !== own.height) {
+        return -4;
+      }
+
+      const pixels = comparePixels(own, theirs);
+      if (!pixels) {
+        return 0;
+      }
+
+      const o = s.rt.construct(
+        s.rt.classNamed("flash.display::BitmapData"),
+        own.width,
+        own.height,
+        true,
+        0,
+      ) as AsObject;
+      (o.$store as BitmapStore).pixels.set(pixels);
+      (o.$store as BitmapStore).changed();
+      return o;
     }
 
     colorTransform(rect: Value, ct: Value): void {

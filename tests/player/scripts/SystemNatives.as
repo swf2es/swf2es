@@ -9,6 +9,8 @@ package {
   import flash.net.FileReferenceList;
   import flash.net.NetConnection;
   import flash.net.Responder;
+  import flash.ui.GameInput;
+  import flash.ui.Keyboard;
 
   // getObjectsUnderPoint, a local NetConnection, Responder, a FileReference
   // with no file, and the stage's properties a browser player reports.
@@ -17,6 +19,14 @@ package {
       connection();
       files();
       video();
+      trace("keyboard", Keyboard.capsLock, Keyboard.numLock, Keyboard.hasVirtualKeyboard,
+        Keyboard.physicalKeyboardType, Keyboard.isAccessible());
+      trace("game input", GameInput.numDevices);
+      try {
+        GameInput.getDeviceAt(0);
+      } catch (e:Error) {
+        trace("no device", e.errorID);
+      }
       // adl's harness adds the root after its constructor; the player has it on the stage before.
       if (stage) {
         added(null);

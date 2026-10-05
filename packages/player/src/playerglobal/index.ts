@@ -60,6 +60,8 @@ import { staticTextNatives } from "./flash/text/StaticText.js";
 import { styleSheetNatives } from "./flash/text/StyleSheet.js";
 import { textFieldNatives } from "./flash/text/TextField.js";
 import { traceNatives } from "./flash/trace/Trace.js";
+import { gameInputNatives } from "./flash/ui/GameInput.js";
+import { keyboardNatives } from "./flash/ui/Keyboard.js";
 import { mouseNatives } from "./flash/ui/Mouse.js";
 import { byteArrayHooks } from "./flash/utils/ByteArray.js";
 import { timerNatives } from "./flash/utils/Timer.js";
@@ -127,6 +129,8 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...stage3DNatives(s),
     ...xmlDocumentNatives(s),
     ...videoNatives(s),
+    ...keyboardNatives(),
+    ...gameInputNatives(s),
   };
 }
 
