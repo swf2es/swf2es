@@ -32,7 +32,6 @@ import {
   readStartSound,
   readStaticText,
   type SceneData,
-  type Shape,
   type Sound,
   type SoundInfo,
   type SoundStreamBlock,
@@ -47,7 +46,7 @@ import type { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "./bitmap.js";
 import type { DisplayObject, MovieClip } from "./display.js";
 import { FontSet } from "./fonts.js";
-import { type ShapeLayer, shapeLayers } from "./shapes.js";
+import { boundsOf, type ShapeBounds, type ShapeLayer, shapeLayers } from "./shapes.js";
 
 export type FrameCommand = { type: "place"; place: Place } | { type: "remove"; depth: number };
 
@@ -106,7 +105,8 @@ export interface TimelineSounds {
 export interface ShapeCharacter {
   type: "shape";
   id: number;
-  shape: Shape;
+  /** The DefineShape's bounds: its records, read once into `layers`, are not kept. */
+  shape: ShapeBounds;
   layers: ShapeLayer[];
 }
 
@@ -319,7 +319,7 @@ function shapeOf(
     filled = true;
     return bitmap(id);
   });
-  const character: ShapeCharacter = { type: "shape", id: shape.id, shape, layers };
+  const character: ShapeCharacter = { type: "shape", id: shape.id, shape: boundsOf(shape), layers };
   if (!filled) {
     const own = tag.slice();
     const list = sharedShapes.get(hash) ?? [];

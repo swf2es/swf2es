@@ -451,3 +451,14 @@ export function shapeLayers(
   flush();
   return layers;
 }
+
+/** What a shape keeps of its DefineShape once drawn into layers. */
+export type ShapeBounds = Pick<Shape, "bounds" | "edgeBounds">;
+
+/**
+ * A shape's bounds alone: its records and styles, hundreds of thousands
+ * of objects across a large application's SWFs, go once drawn into layers.
+ */
+export function boundsOf(shape: Shape): ShapeBounds {
+  return { bounds: shape.bounds, edgeBounds: shape.edgeBounds };
+}

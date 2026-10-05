@@ -660,7 +660,7 @@ export class Scripting {
     }
 
     const named = `${module}//# sourceURL=${script}\n`;
-    const factory = (await import(`data:text/javascript,${encodeURIComponent(named)}`)).default;
+    const factory = (await importSource(named)).default;
     return this.rt.loadInto(domain, () => factory(this.rt), builtin);
   }
 
@@ -2570,4 +2570,23 @@ function hasClip(state: DisplayObject | null): boolean {
     state instanceof MovieClip ||
     (state instanceof Container && state.children.some((c) => c instanceof MovieClip))
   );
+}
+
+/**
+ * A module imported from its source: in a browser from a blob, as V8 keeps
+ * a module's URL as its script's name, and a data URL is the whole source
+ * again, tens of megabytes for a large SWF's; node, which imports no blob,
+ * from a data URL.
+ */
+async function importSource(source: string): Promise<{ default: (rt: avm2.Runtime) => Value }> {
+  if (typeof window !== "undefined" && typeof URL.createObjectURL === "function") {
+    const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+    try {
+      return await import(url);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  return import(`data:text/javascript,${encodeURIComponent(source)}`);
 }
