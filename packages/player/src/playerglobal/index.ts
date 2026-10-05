@@ -48,6 +48,7 @@ import { securityNatives } from "./flash/system/Security.js";
 import { securityDomainNatives } from "./flash/system/SecurityDomain.js";
 import { systemNatives } from "./flash/system/System.js";
 import { workerHooks, workerNatives } from "./flash/system/Worker.js";
+import { fontDescriptionNatives } from "./flash/text/engine/FontDescription.js";
 import { fontHooks, fontNatives } from "./flash/text/Font.js";
 import { staticTextNatives } from "./flash/text/StaticText.js";
 import { textFieldNatives } from "./flash/text/TextField.js";
@@ -107,6 +108,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...timerNatives(s),
     ...staticTextNatives(),
     ...fontNatives(s),
+    ...fontDescriptionNatives(s),
     ...textFieldNatives(s),
     ...traceNatives(),
   };
