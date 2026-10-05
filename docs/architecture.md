@@ -1087,10 +1087,12 @@ movie go to its `Loader`, as Flash has them (the corpus's
 frame rate as an AVM1 main SWF's does without scripts. The player has no
 AVM1 interpreter, so what needs one is missing: no AVM1 action runs, its
 DoAction, DoInitAction, clip and button actions read past; its buttons
-show their up state and are inert, with no other state and no hand
-cursor; its timeline sounds do not play, as no timeline's do yet; and
-`AVM1Movie`'s `call` and `addCallback` throw #2014, as Flash's do
-while interop is unavailable.
+show their up state and are inert, with no other state, sound or hand
+cursor; and `AVM1Movie`'s `call` and `addCallback` throw #2014, as Flash's do
+while interop is unavailable. Its timeline sounds do not play either:
+with no action to `stop()` it, its timeline loops where the content would
+have stopped, and its StartSounds would start again on every loop; they
+wait for AVM1 actions (see Timeline sounds).
 
 `URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
 status and headers. A `URLRequest`'s GET string or URLVariables data is appended to the query;
@@ -1293,7 +1295,9 @@ transform it receives, with the channel coefficients truncated to hundredths
 as Flash's sound-transform corpus trace shows, and the four gains reach the
 browser's left and right outputs through Web Audio. `Sound` classes bound by
 SymbolClass to a DefineSound tag find its encoded samples in the library.
-The player decodes MP3 or uncompressed 8/16-bit sound on first play, sharing
+The player decodes MP3, uncompressed 8/16-bit or ADPCM sound on first play
+(ADPCM as Ruffle's decoder does, to 16-bit samples the browser host plays as
+uncompressed ones; `adpcmSound` in `audio.ts` does it for another host), sharing
 a decode when separate loads contain the same sound. The shared cache holds
 decoded audio while a sound uses it; entries leave when no SWF holds their
 sound definition, so unused audio can be collected. The parser leaves the
@@ -1317,16 +1321,104 @@ every playing channel through `PlayingSound.setMix` and applies to every
 later one. `SimpleButton.soundTransform` reads and writes the mixer's, as
 in Flash (the `sound-mixer` case and the corpus's
 `simplebutton_soundtransform`). `stopAll` stops every channel without a
-sound-complete. `bufferTime` is kept, 5 seconds at first, and rejects a
+sound-complete, and every timeline sound. `bufferTime` is kept, 5 seconds at first, and rejects a
 negative one with RangeError #2027; `areSoundsInaccessible` is false.
 `computeSpectrum` writes 512 zero floats and rewinds the ByteArray, which
 is what Ruffle writes with no sample history and what Flash writes while
 nothing plays: the player reads no output back from the device. AIR's
 `audioPlaybackMode` and `useSpeakerphoneForVoice` are kept and checked as
 AIR checks them; their API version hides them from a SWF.
-DefineSound's ADPCM, Nellymoser and Speex formats, timeline StartSound and
-stream tags, ByteArray sound loading and ID3 are later slices.
-MP3 seek samples are parsed but not yet applied to decoded browser audio.
+DefineSound's Nellymoser and Speex formats, ByteArray sound loading and ID3
+are later slices. MP3 seek samples are parsed but not yet applied to decoded
+browser audio.
+
+### Timeline sounds
+
+A timeline plays sounds of its own, which no script sees: StartSound and
+StartSound2 on its frames, its stream (SoundStreamHead or SoundStreamHead2,
+and a SoundStreamBlock a frame), and a button's DefineButtonSound. The
+library's `sounds` hook (`TimelineSounds`, made by playerglobal's
+`Sound.ts` for every AS3 library a `Scripting` loads) plays them through
+the page's `AudioHost`; a player without one plays none, and a SWF without
+them pays nothing. An AVM1 movie's library has none: its actions do not
+run, so its timeline loops where a `stop()` would have held it, and its
+StartSounds would start again on every loop; its sounds wait for AVM1
+actions.
+
+A frame's StartSound tags play as the playhead enters it, played on to,
+looped to, or landed on by a goto, but a goto to the frame the clip is on,
+as Ruffle's `run_goto` has it; the frames a goto passes over play none.
+StartSound2 names its sound by the class SymbolClass bound to it. A
+SOUNDINFO's in and out points (samples at 44.1 kHz) bound each loop, its
+loop count repeats it, and its envelope scales its left and right channels
+from the start, linear between points, the first point's level held before
+it, as Ruffle's `EnvelopeSignal` does, through gain automation on the
+browser host (`PlayShape`). SyncNoMultiple starts none while the timeline
+plays the sound anywhere, and SyncStop stops every instance the timeline
+started, as Ruffle's `perform_sound_event` does for the timeline's. Both
+leave a script's channels of the sound out: a channel plays on through a
+SyncStop, as adl shows (the `timeline-sounds` case's channel completes),
+where Ruffle stops it; and SyncNoMultiple does not see one, where Ruffle
+does, which adl cannot show.
+
+A clip's stream is its blocks back to back (`streamSound` in `audio.ts`:
+MP3 blocks give their sample counts, PCM's are whole frames of their
+bytes, and each ADPCM block decodes on its own, headers and all), made one
+sound when it first plays and shared by every clip of the timeline; the
+joined sound, and its decode while a clip plays it, live as long as the
+library does. The block of a frame a playing clip enters, with no stream
+of its playing, starts it there, as Ruffle's `sound_stream_block` does,
+and it runs to the end of that run of frames with blocks, or, for MP3,
+which plays over gaps, to its last block. It stops as the clip stops (the
+`playing` setter of `MovieClip`), at a goto to another frame, before the
+frame it lands on starts it again if the clip plays (a goto to the frame
+it is on leaves it be, as Ruffle's `goto_frame_now` does), and on the
+single frame of a clip of one. When the timeline takes the clip off it
+stops too, and the clip plays its removal frame but starts no stream
+there: the player's choice, as the clip plays no more; Ruffle's AS3 clip
+keeps its stream, and adl cannot show Flash's. A clip a script takes off
+plays on as an orphan and keeps its stream, as in Ruffle. `unloadAndStop`
+stops the timeline sounds of all under the content, event sounds too, and
+`stopAll` every one, a stream starting again at the next block its clip
+plays on to. Flash drops frames to keep a timeline with its stream when
+the stream runs ahead; the player keeps the frame rate and lets the stream
+drift.
+
+A button's change of state plays DefineButtonSound's sound for it, as
+Ruffle's button events pick them: up to over, over to down, down to over,
+and over to up, and a release outside plays over to up's (the pointer's
+up, with a button pressed and something else under it). Dragging off a
+pressed button, down to up here, and back on, up to down, play none, as
+Ruffle's DragOut and DragOver do.
+
+A timeline sound's mix is the transforms of its clip or button and each
+ancestor, a sprite's `soundTransform`, concatenated from it up, then the
+mixer's, as Ruffle's `transform_for_sound` does; setting a sprite's or the
+mixer's updates every timeline sound playing. A stream starts on the
+device once its decode is done, as far into it as the player's clock has
+run since it was due, so that one whose first decode took frames keeps
+with its timeline; on a device the page has not yet let run (a suspended
+`AudioContext`, whose time stands still before the first gesture or
+through a slow resume), the browser host starts it when it runs, as far
+in again as it waited. An event sound plays whole, late if its decode or
+the device kept it waiting: a click's start is not lost. A sound is over,
+for SyncNoMultiple and for its clip's stream, once the clock has run its
+length, in and out points and loops counted; the device may still play
+it, and a stop still reaches it until the device is done with it
+(`PlayingSound.ended`), or, for a host that cannot tell, until 100 ms
+later, when it is stopped for good; the last of a clip's stream is
+stopped when its next one starts. At most 32 sounds play at once, Flash's
+32 channels and Ruffle's `AudioManager::MAX_SOUNDS`: a script's channels
+whose sound is there to play, and the timeline's sounds the device has,
+or will have once decoded, together. Past them a timeline sound does not
+start, nor queue on a device that is not running, and `Sound.play` gives
+null, as Flash's and Ruffle's do; a channel of a sound still loading
+holds no channel until it can start. adl cannot
+show what a timeline plays (its `computeSpectrum` reads nothing of an
+event sound or a stream), so the node tests (`timeline-sounds.test.ts`)
+check, through a device that logs, what starts and stops, when, how far
+in, and with which mix; the `timeline-sounds` case checks that the frames
+go on as in Flash.
 
 ### Time
 

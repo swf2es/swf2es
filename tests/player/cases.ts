@@ -3628,4 +3628,54 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  {
+    name: "timeline-sounds",
+    build: timelineSounds,
+    frames: 33,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
 ];
+
+/**
+ * Timeline sounds (scripts/TimelineSounds.as): Tone, a second of silence
+ * at 5.5 kHz bound to a class, started from the root's frames 2 to 5 with
+ * each sync; the child "streamer", eight frames of a stream of silence, a
+ * block on each.
+ */
+function timelineSounds(compile: Compile): Uint8Array {
+  const block = 230;
+  const streamer: Uint8Array[] = [w.soundStreamHead({ rate: 0, samplesPerBlock: block })];
+  for (let f = 0; f < 8; f++) {
+    streamer.push(w.soundStreamBlock(new Uint8Array(block).fill(128)), w.showFrame());
+  }
+
+  const root: Uint8Array[][] = Array.from({ length: 40 }, () => []);
+  root[0].push(w.place({ depth: 1, character: 10, name: "streamer" }));
+  root[1].push(w.startSound(1, { noMultiple: true }));
+  root[2].push(w.startSound(1, { stop: true }));
+  root[4].push(w.startSound(1, { loops: 2, inPoint: 4410, outPoint: 22050 }));
+  return w.swf({
+    width: 20,
+    height: 20,
+    frameRate: 24,
+    frameCount: root.length,
+    tags: [
+      w.fileAttributes(true),
+      w.defineSound(1, { rate: 0, samples: 5512 }, new Uint8Array(5512).fill(128)),
+      w.sprite(10, 8, [...streamer, w.end()]),
+      w.doAbc(
+        compile("Tone", "package { import flash.media.Sound; public class Tone extends Sound {} }"),
+        "Tone",
+      ),
+      w.doAbc(compile("TimelineSounds"), "TimelineSounds"),
+      w.symbolClass([
+        [0, "TimelineSounds"],
+        [1, "Tone"],
+      ]),
+      ...root.flatMap((frame) => [...frame, w.showFrame()]),
+      w.end(),
+    ],
+  });
+}

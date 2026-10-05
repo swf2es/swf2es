@@ -15,6 +15,7 @@ import {
   readBinaryData,
   readBitmap,
   readButton,
+  readButtonSound,
   readEditText,
   readFont,
   readFont4,
@@ -25,11 +26,18 @@ import {
   readSceneData,
   readShape,
   readSound,
+  readSoundStreamBlock,
+  readSoundStreamHead,
   readSprite,
+  readStartSound,
   readStaticText,
   type SceneData,
   type Shape,
   type Sound,
+  type SoundInfo,
+  type SoundStreamBlock,
+  type SoundStreamHead,
+  type StartSound,
   type StaticText,
   type Swf,
   type Tag,
@@ -37,7 +45,7 @@ import {
 } from "@swf2es/format";
 import type { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "./bitmap.js";
-import type { DisplayObject } from "./display.js";
+import type { DisplayObject, MovieClip } from "./display.js";
 import { FontSet } from "./fonts.js";
 import { type ShapeLayer, shapeLayers } from "./shapes.js";
 
@@ -64,6 +72,35 @@ export interface Timeline {
   frameLabels: Map<number, string>;
   /** Scenes by their first frame, in order; one unnamed scene of every frame without scene data. */
   scenes: FrameName[];
+  /** StartSound and StartSound2 tags by frame, 1 the first. */
+  sounds: Map<number, StartSound[]>;
+  /** Its SoundStreamHead's stream, if it has one with blocks. */
+  stream: SoundStream | null;
+}
+
+/** A timeline's stream: the head, and each block with the frame it is on. */
+export interface SoundStream {
+  head: SoundStreamHead;
+  blocks: SoundStreamBlock[];
+  /** The block on each frame that has one, by frame. */
+  byFrame: Map<number, number>;
+  /** The blocks as one sound and the sample each starts at, made when the stream first plays. */
+  sound?: { character: SoundCharacter; starts: number[] };
+}
+
+/**
+ * What plays a library's timeline sounds (the playerglobal's Sound.ts),
+ * with a page's audio device; null where nothing plays them.
+ */
+export interface TimelineSounds {
+  /** `clip` entered `frame`: its StartSound tags, and its stream's block there if it plays. */
+  frame(clip: MovieClip, frame: number): void;
+  /** `clip` stopped or jumped: its stream stops, to start again at a block it plays on to. */
+  stopStream(clip: MovieClip): void;
+  /** A sound of `library` that `owner` starts as SOUNDINFO says, as a button's state change does. */
+  start(owner: DisplayObject, library: Library, id: number, info: SoundInfo): void;
+  /** The timeline took `display` off: the streams of the clips in it stop, as they no longer play. */
+  removed(display: DisplayObject): void;
 }
 
 export interface ShapeCharacter {
@@ -110,6 +147,8 @@ export interface ButtonCharacter {
   id: number;
   records: ButtonRecord[];
   trackAsMenu: boolean;
+  /** DefineButtonSound's: over to up, up to over, over to down, down to over; null without. */
+  sounds: ({ id: number; info: SoundInfo } | null)[] | null;
 }
 
 /** DefineFont2 or 3: its name and style, for the fields that name it, and its glyphs and layout. */
@@ -213,6 +252,8 @@ export interface Library {
   domain?: avm2.Domain;
   /** The SWF's version, which some behaviour of what it places follows. */
   version?: number;
+  /** Plays its timelines' and buttons' sounds; null where nothing does. */
+  sounds?: TimelineSounds | null;
 }
 
 /**
@@ -299,6 +340,10 @@ function timelineOf(
 ): Timeline {
   const frames: FrameCommand[][] = [[]];
   const frameLabels = new Map<number, string>();
+  const sounds = new Map<number, StartSound[]>();
+  let head: SoundStreamHead | null = null;
+  const blocks: SoundStreamBlock[] = [];
+  const byFrame = new Map<number, number>();
   let scenes: SceneData | null = null;
   for (const t of list) {
     const frame = frames[frames.length - 1];
@@ -317,6 +362,24 @@ function timelineOf(
         break;
       case tags.FrameLabel:
         frameLabels.set(frames.length, readFrameLabel(bytes, t));
+        break;
+      case tags.StartSound:
+      case tags.StartSound2: {
+        const list = sounds.get(frames.length) ?? [];
+        list.push(readStartSound(bytes, t));
+        sounds.set(frames.length, list);
+        break;
+      }
+      case tags.SoundStreamHead:
+      case tags.SoundStreamHead2:
+        head ??= readSoundStreamHead(bytes, t);
+        break;
+      case tags.SoundStreamBlock:
+        // A block before the head, or a second on a frame, has no place in the stream.
+        if (head && !byFrame.has(frames.length)) {
+          byFrame.set(frames.length, blocks.length);
+          blocks.push(readSoundStreamBlock(bytes, t, head.format));
+        }
         break;
       case tags.DefineSceneAndFrameLabelData:
         scenes = readSceneData(bytes, t);
@@ -366,7 +429,16 @@ function timelineOf(
           id: button.id,
           records: button.records,
           trackAsMenu: button.trackAsMenu,
+          sounds: null,
         });
+        break;
+      }
+      case tags.DefineButtonSound: {
+        const given = readButtonSound(bytes, t);
+        const button = library.get(given.id);
+        if (button?.type === "button") {
+          button.sounds = given.sounds;
+        }
         break;
       }
       case tags.DefineFont2:
@@ -464,6 +536,8 @@ function timelineOf(
     gotoLabels: labels.length > 0 ? labels : tagged,
     frameLabels,
     scenes: sceneList,
+    sounds,
+    stream: head && blocks.length > 0 ? { head, blocks, byFrame } : null,
   };
 }
 
@@ -488,5 +562,6 @@ export function readLibrary(swf: Swf): Library {
     removing: null,
     fonts,
     version: swf.header.version,
+    sounds: null,
   };
 }
