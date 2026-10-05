@@ -504,7 +504,7 @@
   "avm2/function_unbound_this": {"matched":25,"lines":52,"traced":52,"error":null},
   "avm2/function_value_of": {"matched":4,"lines":4,"traced":4,"error":null},
   "avm2/game_input": {"matched":1,"lines":4,"traced":1,"error":"Error: swf2es: native flash.ui::GameInput.get:numDevices is not supported yet"},
-  "avm2/generate_random_bytes": {"matched":0,"lines":3,"traced":0,"error":"Error: swf2es: native flash.crypto::generateRandomBytes is not supported yet"},
+  "avm2/generate_random_bytes": {"matched":3,"lines":3,"traced":3,"error":null},
   "avm2/geom_transform": {"matched":2,"lines":75,"traced":2,"error":"Error: swf2es: native flash.geom::Transform#set:matrix3D is not supported yet"},
   "avm2/get_definition_by_name": {"matched":11,"lines":11,"traced":11,"error":null},
   "avm2/get_qualified_class_name": {"matched":20,"lines":20,"traced":20,"error":null},

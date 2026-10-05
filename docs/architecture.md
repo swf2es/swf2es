@@ -1839,7 +1839,9 @@ its stops, so the two part only where a transformed stop is clamped.
 adl composites an object with a blend mode as a layer, its children
 together in the normal way, and blends that with what is below, the
 stage's colour included, where Pixi would blend each child on its own.
-The renderer gives such an object a filter (`pixi-blend.ts`): `layer`
+A single fill with `screen`, or with `multiply` over an opaque stage,
+can use Pixi's direct blend when it has no filters, masks or isolated
+ancestor. Other blends use a filter (`pixi-blend.ts`): `layer`
 one that only makes it a layer, any other one that reads the back buffer
 and computes the mode in premultiplied colour, its result replacing what
 is there. Multiply, screen, lighten, darken, difference, overlay and
@@ -1851,8 +1853,9 @@ object's alpha, or by what it leaves, only where the object has any.
 The `blend-modes` case draws each over two grounds against adl. Pixi
 reads the back buffer only from a renderer made with `useBackBuffer:
 true`, which a host passes (the README's embedding example does);
-without it the modes draw as normal, and the view warns once. The back
-buffer is a full-screen copy a frame: on the bench (`--back-buffer`, an
+without it filter-backed modes draw as normal, and the view warns once.
+Direct blends still draw as blends. The back buffer is a full-screen
+copy a frame: on the bench (`--back-buffer`, an
 RTX 4060) it adds some 0.05 ms to the draw. What is behind an object is
 copied from the pixels its bounds cover, which Pixi puts on whole pixels
 of the target but keeps in stage units, as k · (1/r): at a resolution

@@ -314,7 +314,7 @@ export class Scripting {
    * weakly, as Ruffle holds them, so one nothing refers to stops as Flash's
    * does once collected. One the timeline took is kept for its frame only.
    */
-  private orphans: { ref: WeakRef<DisplayObject>; serial: number; keep: boolean }[] = [];
+  private readonly orphans = new Map<number, { ref: WeakRef<DisplayObject>; keep: boolean }>();
   /** Display objects scripts made with `new` this frame: their first frame's script runs after everything else's, and they are orphans after. */
   private fresh: DisplayObject[] = [];
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
@@ -913,7 +913,7 @@ export class Scripting {
    * order, as Flash dispatches them.
    */
   added(display: DisplayObject): void {
-    this.orphans = this.orphans.filter((o) => o.ref.deref() !== display);
+    this.orphans.delete(display.serial);
     if (display.object) {
       dispatchEvent(this, display.object, this.event("added", true));
     }
@@ -954,8 +954,8 @@ export class Scripting {
    * frame only, not `keep`.
    */
   orphan(display: DisplayObject, keep = true): void {
-    if (display.object && !this.orphans.some((o) => o.ref.deref() === display)) {
-      this.orphans.push({ ref: new WeakRef(display), serial: display.serial, keep });
+    if (display.object && !this.orphans.has(display.serial)) {
+      this.orphans.set(display.serial, { ref: new WeakRef(display), keep });
     }
   }
 
@@ -975,15 +975,15 @@ export class Scripting {
   /** The orphans still there, newest first, as Flash runs their frames. */
   orphanRoots(): DisplayObject[] {
     const roots: DisplayObject[] = [];
-    this.orphans = this.orphans.filter((o) => {
-      const display = o.ref.deref();
+    for (const [serial, orphan] of this.orphans) {
+      const display = orphan.ref.deref();
       if (!display) {
-        return false;
+        this.orphans.delete(serial);
+        continue;
       }
 
       roots.push(display);
-      return true;
-    });
+    }
 
     return roots.sort((a, b) => b.serial - a.serial);
   }
@@ -993,7 +993,7 @@ export class Scripting {
    * does: timelines stopped, frame broadcasts no longer heard, no orphan.
    */
   stopAll(display: DisplayObject): void {
-    this.orphans = this.orphans.filter((o) => o.ref.deref() !== display);
+    this.orphans.delete(display.serial);
     const stop = (o: DisplayObject) => {
       if (o instanceof MovieClip) {
         o.playing = false;
@@ -2199,7 +2199,11 @@ export class Scripting {
     this.broadcast("frameConstructed");
     this.runFrameScripts(root);
     // What the timeline took off this frame has had its frame; it stops here.
-    this.orphans = this.orphans.filter((o) => o.keep);
+    for (const [serial, orphan] of this.orphans) {
+      if (!orphan.keep) {
+        this.orphans.delete(serial);
+      }
+    }
     // What scripts made this frame and left off the display list plays on as an orphan.
     for (const display of this.fresh.splice(0)) {
       if (!display.parent) {

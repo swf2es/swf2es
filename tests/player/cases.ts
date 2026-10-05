@@ -3004,6 +3004,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "crypto-random",
+    swf: (abc) => bare(abc, 1, "CryptoRandom"),
+    script: "CryptoRandom",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "security-domain",
     swf: (abc) => bare(abc, 1, "SecurityDomainNatives"),
     script: "SecurityDomainNatives",
@@ -3222,6 +3231,15 @@ export const cases: PlayerCase[] = [
     zoom: 1.5,
     // Within 3 a channel, the layer's 8-bit round trip, as for `blend-modes`.
     tolerance: 3,
+    maxOutliers: 0,
+  },
+  {
+    name: "blend-direct",
+    swf: (abc) => bare(abc, 1, "BlendDirect", 240, 80),
+    script: "BlendDirect",
+    frames: 4,
+    capture: [1, 2, 3, 4],
+    tolerance: 1,
     maxOutliers: 0,
   },
   {

@@ -766,6 +766,12 @@ interface Node {
   filters: Filter[];
   /** Draws in this branch, excluding those already isolated in a child render group. */
   draws: number;
+  /** Zero draws, one safe draw, or more than one draw/one requiring isolation. */
+  singleDraw: 0 | 1 | 2;
+  /** The fixed-function blend currently applied without an offscreen filter. */
+  directBlend: string | null;
+  /** Whether this branch's children draw into an isolated target. */
+  childIsolation: boolean;
   /** Outside partners must share the group; a hidden node must not keep an old partner alive. */
   maskLinks: WeakRef<DisplayObject>[];
 }
@@ -819,13 +825,12 @@ export class PixiView {
     const m = fill.matrix;
     return { texture, matrix: new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty), textureSpace: "global" };
   };
-  /** Whether the renderer was found to lack the back buffer that blend modes read, and the host told. */
+  /** Whether the renderer was found to lack the back buffer that filter-backed blends read. */
   private backBufferChecked = false;
 
   /**
-   * A blend mode reads what is below from Pixi's back buffer, which a WebGL
-   * renderer has only when made with `useBackBuffer: true`; without it the
-   * modes draw as normal, so the host is told, once.
+   * A filter-backed blend reads Pixi's back buffer, which WebGL has only
+   * with `useBackBuffer: true`; without it that blend draws as normal.
    */
   private checkBackBuffer(): void {
     if (this.backBufferChecked) {
@@ -1114,6 +1119,9 @@ export class PixiView {
         filterRecords: NO_RECORDS,
         filters: [],
         draws: 0,
+        singleDraw: 0,
+        directBlend: null,
+        childIsolation: false,
         maskLinks: [],
       };
       node.container.addChild(art);
@@ -1398,6 +1406,7 @@ export class PixiView {
     own: DisplayObject["matrix"] = o.placed,
     inMask = false,
     tint: ColorTransform | null = null,
+    isolated = false,
   ): PixiContainer {
     const node = this.node(o);
     const { container } = node;
@@ -1462,9 +1471,6 @@ export class PixiView {
         const blending = blendFilters(blend);
         container.filters =
           node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;
-        if (blend !== "normal" && blend !== "layer") {
-          this.checkBackBuffer();
-        }
       }
 
       // Most objects have neither: they pay one test.
@@ -1563,20 +1569,33 @@ export class PixiView {
       chain.changed();
     }
 
+    const childIsolation =
+      isolated || node.blend !== "normal" || node.filters.length > 0 || node.clipped;
+    const isolationChanged = childIsolation !== node.childIsolation;
+    node.childIsolation = childIsolation;
+
     if (o instanceof Container) {
       if (dirty & CHILDREN) {
-        this.arrange(o, node, moved, masking);
-      } else if (moved || remask || recolor || this.rescaled || o.descendantsDirty) {
+        this.arrange(o, node, moved, masking, childIsolation);
+      } else if (
+        moved ||
+        remask ||
+        recolor ||
+        this.rescaled ||
+        isolationChanged ||
+        o.descendantsDirty
+      ) {
         for (const child of o.children) {
           if (
             moved ||
             remask ||
             this.rescaled ||
             recolor ||
+            isolationChanged ||
             child.dirty !== CLEAN ||
             (child instanceof Container && child.descendantsDirty)
           ) {
-            this.sync(child, node.world, moved, child.placed, masking, node.color);
+            this.sync(child, node.world, moved, child.placed, masking, node.color, childIsolation);
           }
         }
       }
@@ -1588,7 +1607,32 @@ export class PixiView {
 
     if (!this.fresh) {
       this.group(o, node);
+      // Fixed-function multiply needs an opaque backdrop; screen's equation
+      // also holds over transparent pixels. Add does not preserve layer alpha.
+      let direct: "multiply" | "screen" | null = null;
+      if (node.singleDraw === 1) {
+        if (node.blend === "screen") {
+          direct = "screen";
+        } else if (node.blend === "multiply" && this.renderer.background.alpha === 1) {
+          direct = "multiply";
+        }
+      }
+      if (isolated) {
+        direct = null;
+      }
+
+      if (direct !== node.directBlend || (direct && container.filters)) {
+        container.blendMode = direct ?? "inherit";
+        const blending = direct ? null : blendFilters(node.blend);
+        container.filters =
+          node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;
+        node.directBlend = direct;
+      }
       o.dirty = CLEAN;
+    }
+
+    if (node.blend !== "normal" && node.blend !== "layer" && !node.directBlend) {
+      this.checkBackBuffer();
     }
 
     return container;
@@ -1597,6 +1641,19 @@ export class PixiView {
   /** Keep an animated branch from rebuilding all the stage's batches when its children change. */
   private group(o: DisplayObject, node: Node): void {
     let draws = node.art.children.length;
+    let singleDraw: 0 | 1 | 2 = 0;
+    if (node.art.children.length === 1) {
+      const art = node.art.children[0];
+      singleDraw =
+        art instanceof SharedGraphics &&
+        art.context.instructions.length === 1 &&
+        art.context.instructions[0].action === "fill"
+          ? 1
+          : 2;
+    } else if (node.art.children.length > 1) {
+      singleDraw = 2;
+    }
+
     const links = node.maskLinks;
     links.length = 0;
     maskLink(o, o.mask, links);
@@ -1610,11 +1667,24 @@ export class PixiView {
           }
 
           draws += part.container.isRenderGroup ? 0 : part.draws;
+          if (part.singleDraw !== 0) {
+            singleDraw =
+              singleDraw === 0 &&
+              part.singleDraw === 1 &&
+              part.blend === "normal" &&
+              !part.container.isRenderGroup
+                ? 1
+                : 2;
+          }
         }
       }
     }
 
     node.draws = draws;
+    node.singleDraw =
+      links.length === 0 && !node.masking && !node.clipped && node.filters.length === 0
+        ? singleDraw
+        : 2;
     // A stencil mask's geometry is collected into the masked object's instructions. Until both
     // belong to this branch, it must share its parent's group. A timeline mask itself also stays
     // with its siblings, though their common parent may form a group.
@@ -1638,7 +1708,13 @@ export class PixiView {
    * the masks are; the masks themselves among them, where their place in
    * the tree puts them, though not drawn.
    */
-  private arrange(o: Container, node: Node, moved: boolean, masking: boolean): void {
+  private arrange(
+    o: Container,
+    node: Node,
+    moved: boolean,
+    masking: boolean,
+    isolated: boolean,
+  ): void {
     const content = node.scroll?.content ?? node.container;
     for (const group of node.groups) {
       group.mask = null;
@@ -1665,7 +1741,15 @@ export class PixiView {
     for (const child of o.children) {
       open.length = clips.enter(child);
       const into = open.length > 0 ? open[open.length - 1] : content;
-      const container = this.sync(child, node.world, moved, child.placed, masking, node.color);
+      const container = this.sync(
+        child,
+        node.world,
+        moved,
+        child.placed,
+        masking,
+        node.color,
+        isolated,
+      );
       into.addChild(container);
       if (child.clipDepth > 0) {
         const group = new PixiContainer();
