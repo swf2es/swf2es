@@ -415,11 +415,12 @@ not:
   module's own is not found (ReferenceError #1065).
 
 **Where it compiles.** First on the main thread, on the factory's first
-call: about 0.04 ms in codegen and 0.026 ms to build a method, so the
-application above spent some 650 ms over minutes of use, a menu shown for
-the first time a few milliseconds. Workers compiling ahead, the player
-taking an entry built already or compiling it at once, can follow without
-changing the module.
+call: about 0.04 ms a method in codegen (measured in batches of 500; one
+at a time is yet to be) and 0.026 ms to build it, so some 650 ms over the
+application's minutes of use above, and some 7 ms for a hundred methods
+first run in one frame. Workers compiling ahead, the player taking an
+entry built already or compiling it at once, can follow without changing
+the module.
 
 **Measured.** A prototype (each entry of the whole module made lazy, so
 codegen's memory is unchanged) against eager modules, nine runs each,
