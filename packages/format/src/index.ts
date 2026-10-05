@@ -56,7 +56,21 @@ export {
   type Shape,
   type ShapeRecord,
 } from "./shape.js";
-export { readSound, type Sound } from "./sound.js";
+export {
+  type ButtonSounds,
+  readButtonSound,
+  readSound,
+  readSoundInfo,
+  readSoundStreamBlock,
+  readSoundStreamHead,
+  readStartSound,
+  type Sound,
+  type SoundEnvelopePoint,
+  type SoundInfo,
+  type SoundStreamBlock,
+  type SoundStreamHead,
+  type StartSound,
+} from "./sound.js";
 export {
   backgroundColor,
   isAs3,
