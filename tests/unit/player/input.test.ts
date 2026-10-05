@@ -122,6 +122,39 @@ test("a posted move waits for a flush or the next other input, and only the last
   assert.equal(scripting.mouseStageX, 6);
 });
 
+test("sprite dragging follows the pointer in parent coordinates, clamps, and stops globally", () => {
+  const stage = new Container();
+  const parent = new Container();
+  parent.setMatrix({ a: 2, b: 0, c: 0, d: 2, tx: 0, ty: 0 });
+  stage.addChildAt(parent, 0);
+  const first = new Container();
+  first.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 5, ty: 6 });
+  parent.addChildAt(first, 0);
+  const second = new Container();
+  parent.addChildAt(second, 1);
+  const scripting = {
+    stageWidth: 100,
+    stageHeight: 100,
+    mouseStageX: 10,
+    mouseStageY: 20,
+  } as unknown as Scripting;
+  const input = new PointerInput(stage, scripting);
+
+  input.startDrag(first, false, { xMin: 0, yMin: 0, xMax: 12, yMax: 14 });
+  input.handle("move", { x: 30, y: 40 });
+  assert.deepEqual([first.matrix.tx, first.matrix.ty], [12, 14]);
+
+  input.startDrag(second, true, null);
+  assert.deepEqual([second.matrix.tx, second.matrix.ty], [15, 20]);
+  input.handle("move", { x: 40, y: 50 });
+  assert.deepEqual([first.matrix.tx, first.matrix.ty], [12, 14]);
+  assert.deepEqual([second.matrix.tx, second.matrix.ty], [20, 25]);
+
+  input.stopDrag();
+  input.handle("move", { x: 50, y: 60 });
+  assert.deepEqual([second.matrix.tx, second.matrix.ty], [20, 25]);
+});
+
 test("the cursor is a hand under a sprite in buttonMode, as useHandCursor says, and an I-beam over selectable text", () => {
   const stage = new Container();
   stage.object = { $display: stage } as never;

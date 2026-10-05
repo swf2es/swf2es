@@ -7,6 +7,7 @@
 import { avm2 } from "@swf2es/runtime";
 import type { SoundMix } from "../../../audio.js";
 import { type DisplayObject, MovieClip } from "../../../display.js";
+import type { Rect } from "../../../geometry.js";
 import type { Scripting } from "../../../scripting.js";
 import { channelMix, mixOf, transformOf } from "../media/Sound.js";
 import { graphicsOf } from "./Graphics.js";
@@ -64,6 +65,31 @@ export function spriteNatives(s: Scripting): avm2.Natives {
 
     set useHandCursor(v: Value) {
       this.$useHandCursor = !!v;
+    }
+
+    startDrag(lockCenter: Value, bounds: Value): void {
+      let rect: Rect | null = null;
+      if (bounds !== null && bounds !== undefined) {
+        const o = bounds as avm2.AsObject;
+        const get = (key: string) =>
+          s.rt.toNumber(s.rt.getProperty(o, avm2.qname(avm2.publicNs, key)));
+        const x = get("x");
+        const y = get("y");
+        const right = x + get("width");
+        const bottom = y + get("height");
+        rect = {
+          xMin: Math.min(x, right),
+          yMin: Math.min(y, bottom),
+          xMax: Math.max(x, right),
+          yMax: Math.max(y, bottom),
+        };
+      }
+
+      s.pointer?.startDrag(this.$display, !!lockCenter, rect);
+    }
+
+    stopDrag(): void {
+      s.pointer?.stopDrag();
     }
   }
 
