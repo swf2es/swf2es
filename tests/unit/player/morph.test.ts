@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { ShapeRecord } from "../../../packages/format/dist/index.js";
 import { readMorphShape, readPlace, readSwf } from "../../../packages/format/dist/index.js";
 import { ShapeObject } from "../../../packages/player/dist/display.js";
-import { morphAt } from "../../../packages/player/dist/morph.js";
+import { blend, morphAt } from "../../../packages/player/dist/morph.js";
 import type { MorphCharacter } from "../../../packages/player/dist/timeline.js";
 import * as w from "../../swf-writer.ts";
 
@@ -73,7 +73,7 @@ function pens(records: ShapeRecord[]): [number, number][] {
 
 test("a morph blends to its start and its end, a straight edge paired with a curve as a curve", () => {
   const c = character();
-  const start = morphAt(c, 0).shape;
+  const start = blend(c.morph, 0);
   assert.deepEqual(pens(start.records), [
     [0, 0],
     [1200, 0],
@@ -84,7 +84,7 @@ test("a morph blends to its start and its end, a straight edge paired with a cur
   assert.deepEqual(start.records[1], { type: "curve", cx: 600, cy: 0, ax: 600, ay: 0 });
   assert.deepEqual(start.fills[0], { type: "solid", color: 0xffff0000 });
 
-  const end = morphAt(c, 65535).shape;
+  const end = blend(c.morph, 1);
   assert.deepEqual(end.records.slice(1), c.morph.end.slice(1));
   assert.deepEqual(end.fills[0], { type: "solid", color: 0xff0000ff });
   assert.deepEqual(end.bounds, { xMin: -200, xMax: 1400, yMin: -200, yMax: 1400 });
@@ -92,7 +92,7 @@ test("a morph blends to its start and its end, a straight edge paired with a cur
 
 test("a blend's points are whole twips, its paths stay closed and keep both their fills", () => {
   const c = character();
-  const half = morphAt(c, 21845).shape;
+  const half = blend(c.morph, 21845 / 65535);
   const at = pens(half.records);
   assert.deepEqual(at[0], at[at.length - 1]);
   for (const [x, y] of at) {
@@ -102,7 +102,14 @@ test("a blend's points are whole twips, its paths stay closed and keep both thei
   const style = half.records[0];
   assert.equal(style.type === "style" && style.fill0, 1);
   assert.equal(style.type === "style" && style.fill1, 2);
-  assert.equal(morphAt(c, 21845).shape, half);
+});
+
+test("a blend's shape keeps its bounds alone, drawn into layers once, and is kept for its ratio", () => {
+  const c = character();
+  const half = morphAt(c, 21845);
+  assert.deepEqual(Object.keys(half.shape).sort(), ["bounds", "edgeBounds"]);
+  assert.ok(half.layers.length > 0);
+  assert.equal(morphAt(c, 21845), half);
 });
 
 test("a morph keeps its 16 latest blends, the one asked for again among them", () => {

@@ -12,7 +12,7 @@ import type {
   ShapeRecord,
 } from "@swf2es/format";
 import type { ShapeLayer } from "./shapes.js";
-import { shapeLayers } from "./shapes.js";
+import { boundsOf, shapeLayers } from "./shapes.js";
 import type { MorphCharacter, ShapeCharacter } from "./timeline.js";
 
 /**
@@ -44,7 +44,7 @@ export function morphAt(character: MorphCharacter, ratio: number): ShapeCharacte
     shape = {
       type: "shape",
       id: character.id,
-      shape: blended,
+      shape: boundsOf(blended),
       layers: shapeLayers(blended, character.bitmap),
     };
     for (const layer of shape.layers) {
@@ -179,7 +179,7 @@ const mixPoint = (a: Point, b: Point, t: number): Point => ({
  * the end's where the end has one there, else with the end's pen; a move
  * only the end has moves the pen from the start's.
  */
-function blend(morph: MorphShape, t: number): Shape {
+export function blend(morph: MorphShape, t: number): Shape {
   const records: ShapeRecord[] = [];
   const start = morph.start;
   const end = morph.end;
