@@ -323,6 +323,8 @@
     "flash.external::ExternalInterface.flash.external:ExternalInterface::_evalJS",
     "flash.external::ExternalInterface.flash.external:ExternalInterface::_getPropNames",
     "flash.external::ExternalInterface.flash.external:ExternalInterface::_initJS",
+    "flash.external::ExternalInterface.flash.external:ExternalInterface::_quotedStringFromError",
+    "flash.external::ExternalInterface.flash.external:ExternalInterface::_quotedStringFromString",
     "flash.external::ExternalInterface.get:available",
     "flash.external::ExternalInterface.get:flash.external:ExternalInterface::activeX",
     "flash.external::ExternalInterface.get:objectID",
