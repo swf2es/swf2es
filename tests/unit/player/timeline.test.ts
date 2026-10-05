@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readSwf } from "@swf2es/format";
+import { readShape, readSwf } from "@swf2es/format";
+import { shapeLayers } from "../../../packages/player/dist/shapes.js";
 import { readLibrary } from "../../../packages/player/dist/timeline.js";
 import * as w from "../../swf-writer.ts";
 
@@ -54,4 +55,24 @@ test("a SWF read again shares its shapes with the first, and only the shapes ali
 test("a shape filled with a bitmap keeps to its SWF", () => {
   const filled = movie({ bitmap: 7, type: 0x41, matrix: { a: 20, d: 20 } });
   assert.notEqual(shapeIn(filled), shapeIn(filled.slice()));
+});
+
+test("a shape is drawn into layers when first asked for, as it was at once", () => {
+  const bytes = movie(0x0000ff);
+  const swf = readSwf(bytes);
+  const shape = readLibrary(swf).characters.get(1);
+  assert.equal(shape?.type, "shape");
+  if (shape?.type !== "shape") {
+    return;
+  }
+
+  // An accessor, not layers made as the SWF was read.
+  assert.equal(typeof Object.getOwnPropertyDescriptor(shape, "layers")?.get, "function");
+  assert.deepEqual(Object.keys(shape.shape).sort(), ["bounds", "edgeBounds"]);
+
+  const tag = swf.tags.find((t) => t.code === 2 || t.code === 22 || t.code === 32 || t.code === 83);
+  assert.ok(tag);
+  const eager = shapeLayers(readShape(swf.bytes, tag.code, tag.offset, tag.length));
+  assert.deepEqual(shape.layers, eager);
+  assert.equal(shape.layers, shape.layers);
 });
