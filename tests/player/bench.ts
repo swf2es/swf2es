@@ -25,7 +25,11 @@
 // --blurred has each place write a blur on the part too, as a tween of a
 // filtered part writes its filters on every frame: each part filtered on
 // its own, run again as it turns. --glide has the parts slide instead of
-// turning, a move alone, whose filters' output is kept.
+// turning, a move alone, whose filters' output is kept. --filtered K
+// blurs only every K-th part, as --blurred does all: each filter ends the
+// transform table's run (pixi-table.ts), which then draws only the parts
+// between two, as in a game's creatures with a glow on every few parts.
+// The rig has 12 parts, so any K of 12 or more blurs the first alone.
 //
 // --idle K renders K times more after each frame with no tick between, as
 // a host that draws on every animation frame does, and times those apart.
@@ -49,10 +53,12 @@
 // Each run also gives per-frame means of what the renderer did: GL draw
 // calls, Pixi's unbatched Graphics and batches, render group rebuilds and
 // their time, contexts tessellated with their vertices and time, buffer
-// uploads and bytes, and program switches. --allocs samples the heap and
-// gives the KB the frames allocated, the player's start left out.
+// uploads and bytes, texture uploads, program switches, and the table's
+// runs and draws. --allocs samples the heap and gives the KB the frames
+// allocated, the player's start left out.
 //
-//   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred] [--glide] | --branches N | --toggle-branches N | --toggle N
+//   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--glide]
+//     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs] [--no-table] [--json]
 import * as w from "../swf-writer.ts";
@@ -65,6 +71,7 @@ const option = (name: string, fallback: number) => {
 };
 const shapes = option("shapes", 2000);
 const rig = option("rig", 0);
+const filtered = option("filtered", 0);
 const branches = option("branches", 0);
 const toggleBranches = option("toggle-branches", 0);
 const toggleEvery = Math.max(1, option("toggle-every", 1));
@@ -230,8 +237,9 @@ function part(id: number, sides: number): Uint8Array {
  * another put in its place, as a frame-by-frame animation's timeline does:
  * each frame changes the sprite's children, not only their transforms. With
  * `fresh`, the loop is as long as the run and the parts swell to a size no
- * other frame has. With `blurred`, each place writes a blur on its part;
- * with `glide`, the parts slide to and fro instead of turning and swelling.
+ * other frame has. With `blurred`, each place writes a blur on its part,
+ * or on every `filtered`-th part alone if that is given; with `glide`, the
+ * parts slide to and fro instead of turning and swelling.
  */
 function rigSwf(
   count: number,
@@ -261,7 +269,7 @@ function rigSwf(
         tx: Math.round(400 * Math.cos(i)) + slide,
         ty: Math.round(400 * Math.sin(i * 1.7)),
       };
-      const blurs = blurred ? [3] : undefined;
+      const blurs = blurred && (filtered === 0 || i % filtered === 0) ? [3] : undefined;
       if (f === 0) {
         sprite.push(w.place({ depth: i + 1, character: 11 + (i % 4), matrix, blurs }));
       } else if (swap) {
@@ -368,6 +376,13 @@ function toggleStaticSwf(count: number): Uint8Array {
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
 }
 
+/** 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st... */
+const ordinal = (n: number) => {
+  const tens = Math.floor(n / 10) % 10;
+  const suffix = tens === 1 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th");
+  return `${n}${suffix}`;
+};
+
 const quantile = (values: number[], q: number) => {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0;
@@ -433,7 +448,7 @@ const swf =
                 rig,
                 args.includes("--swap"),
                 args.includes("--fresh"),
-                args.includes("--blurred"),
+                args.includes("--blurred") || filtered > 0,
                 args.includes("--glide"),
               )
             : synthetic();
@@ -486,7 +501,7 @@ const summary = {
           : branches > 0
             ? `${branches} branches`
             : rig > 0
-              ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}`
+              ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
               : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),

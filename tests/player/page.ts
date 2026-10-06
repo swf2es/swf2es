@@ -317,6 +317,7 @@ function meter(renderer: object): { read(): Record<string, number> } {
   wrap(gl, "drawElements", () => add("glDraws"));
   wrap(gl, "drawArrays", () => add("glDraws"));
   wrap(gl, "useProgram", () => add("programs"));
+  wrap(gl, "texSubImage2D", () => add("texUploads"));
   for (const method of ["bufferData", "bufferSubData"]) {
     wrap(gl, method, (args) => {
       add("uploads");
@@ -337,6 +338,7 @@ function meter(renderer: object): { read(): Record<string, number> } {
 
   wrap(gl?.getExtension("WEBGL_multi_draw") ?? undefined, "multiDrawElementsWEBGL", (args) => {
     add("glDraws");
+    add("tableRuns");
     add("tableDraws", args[6] as number);
   });
   wrap(r.renderPipes.graphics, "execute", () => add("aloneGraphics"));
