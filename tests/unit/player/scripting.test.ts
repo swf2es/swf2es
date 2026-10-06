@@ -1109,6 +1109,67 @@ test("a goto plays or stops as it happens, so the landing frame's script has the
   assert.deepEqual([bound.currentFrame, bound.playing], [3, false]);
 });
 
+test("an orphan plays for a while, then stops where it is until put back", { skip }, async () => {
+  // Flash frees an orphan nothing holds almost at once; the browser may keep
+  // one for minutes, so an orphan plays 120 frames at most. One a script
+  // holds carries on from there when put back.
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Bound extends MovieClip {
+      public var runs:int = 0;
+      public function Bound() {
+        addFrameScript(0, function():void { runs++; }, 1, function():void { runs++; });
+      }
+    }
+    public class Main extends MovieClip {
+      public var bound:Bound;
+      public var kept:Bound;
+      public function Main() {
+        kept = bound;
+        removeChild(bound);
+      }
+    }
+  }`;
+  const scripting = new Scripting(await createCodegen(wasm), { print: () => {} });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(boundClip(compiler(out)("OrphanAge", source), 10, 2), scripting);
+  await player.start();
+  const kept = scripting.rt.getProperty(
+    player.root.object as avm2.AsObject,
+    avm2.qname(avm2.publicNs, "kept"),
+  ) as avm2.AsObject;
+  const clip = kept.$display as MovieClip;
+  // Its own count: the root's loop places a new Bound each time round.
+  const runs = () => scripting.rt.getProperty(kept, avm2.qname(avm2.publicNs, "runs"));
+  for (let i = 0; i < 100; i++) {
+    player.tick();
+  }
+
+  const playing = runs() as number;
+  assert.ok(playing > 90, `an orphan held plays on: ${playing} runs`);
+  for (let i = 0; i < 100; i++) {
+    player.tick();
+  }
+
+  const stopped = runs() as number;
+  assert.ok(stopped < 130, `it stops after 120 frames: ${stopped} runs`);
+  const frame = clip.currentFrame;
+  for (let i = 0; i < 10; i++) {
+    player.tick();
+  }
+
+  assert.deepEqual([runs(), clip.currentFrame], [stopped, frame]);
+
+  // Put back, it plays on from the frame it stopped on.
+  (player.root as unknown as Container).addChildAt(clip, 0);
+  scripting.added(clip);
+  for (let i = 0; i < 4; i++) {
+    player.tick();
+  }
+
+  assert.ok((runs() as number) >= stopped + 3, `put back, it plays: ${runs()} runs`);
+});
+
 test("a frame script's goto happens though the script throws after it, as in Flash", {
   skip,
 }, async () => {

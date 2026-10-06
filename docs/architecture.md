@@ -1023,7 +1023,11 @@ and `stage` null, until it is put back, where it carries on from the
 frame it reached, or until it is collected (the `orphans` case; Ruffle
 keeps them by weak reference, and so does the player, with `WeakRef`, so
 an orphan nothing refers to stops as Flash's does, and a test that wants
-one to play on holds it). What refers to it includes the frame events it
+one to play on holds it). Flash frees an orphan nothing refers to almost
+at once, by reference counting, where the browser's collector may wait
+minutes; a game's removed characters would play on by the thousand, so an
+orphan plays for 120 frames at most, then stops where it is, and carries
+on from there if a script puts it back. What refers to it includes the frame events it
 listens for: an `ENTER_FRAME` listener keeps a clip alive in Flash, the
 well-known leak, and the player's broadcast sets hold their listeners as
 strongly. A clip a script makes with `new`, added or not, runs its first
