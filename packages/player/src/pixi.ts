@@ -590,6 +590,7 @@ function trimPools(): void {
   if (extra > 0) {
     batchables._index = POOLED_BATCHABLES_MOST;
     batchables._count -= extra;
+    batchables._pool.length = POOLED_BATCHABLES_MOST;
   }
 
   // Past the free ones are those taken, which Pixi leaves listed: their users hold them, if anyone.
