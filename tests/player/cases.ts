@@ -2115,6 +2115,89 @@ function gradients(abc: Uint8Array): Uint8Array {
 }
 
 /**
+ * A floor of boards, as Flash Pro exports one: a rectangle's outline with
+ * the fill on its inside, and the seams between the boards, lines with the
+ * same fill on both sides. Flash fills the whole rectangle and strokes the
+ * seams over it. Its edges come in an order, some reversed, in which the
+ * player once joined the fill's edges both ways along the seams into
+ * contours that crossed, and cut part of the floor away as a hole.
+ */
+function sharedFillEdges(): Uint8Array {
+  const [left, right, top, bottom] = [10, 390, 10, 130];
+  const rows = [top, 40, 70, 100, bottom];
+  // Each row's joints between boards, where a seam crosses the row aslant.
+  const joints = [[120, 300], [60, 220, 340], [170], [90, 260]];
+  const at = (x: number, y: number): [number, number] => [x * 20, y * 20];
+  // A row's edge, split where joints meet it from above or below.
+  const splits = (r: number) =>
+    [
+      ...(r > 0 ? joints[r - 1].map((x) => x + 12) : []),
+      ...(r < joints.length ? joints[r] : []),
+    ].sort((a, b) => a - b);
+  // The seams, then the outline's four sides clockwise, so that its inside is on their right.
+  const seams: [number, number][][] = [];
+  for (let r = 1; r < rows.length - 1; r++) {
+    seams.push([left, ...splits(r), right].map((x) => at(x, rows[r])));
+  }
+
+  for (const [r, xs] of joints.entries()) {
+    for (const x of xs) {
+      seams.push([at(x, rows[r]), at(x + 12, rows[r + 1])]);
+    }
+  }
+
+  const sides = [
+    [left, ...splits(0), right].map((x) => at(x, top)),
+    rows.map((y) => at(right, y)),
+    [left, ...splits(rows.length - 1), right].reverse().map((x) => at(x, bottom)),
+    rows
+      .slice()
+      .reverse()
+      .map((y) => at(left, y)),
+  ];
+  const edges = [
+    ...seams.map((points) => ({ points, fill0: 1, fill1: 1 })),
+    ...sides.map((points) => ({ points, fill0: 0, fill1: 1 })),
+  ];
+  const order = [12, 6, 3, 5, 2, 11, 13, 10, 4, 1, 0, 8, 7, 9, 14];
+  const reverse = new Set([0, 2, 3, 5, 6, 8, 10, 11, 13, 14]);
+  const paths = order.map((i) => {
+    const { points, fill0, fill1 } = edges[i];
+    const flip = reverse.has(i);
+    const ordered = flip ? points.slice().reverse() : points;
+    return {
+      fill0: flip ? fill1 : fill0,
+      fill1: flip ? fill0 : fill1,
+      line: fill0 === fill1 ? 1 : 0,
+      commands: [
+        { move: ordered[0] },
+        ...ordered.slice(1).map((line) => ({ line })),
+      ] as w.PathCommand[],
+    };
+  });
+  return w.swf({
+    width: 400,
+    height: 140,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.shape({
+        id: 1,
+        bounds: [0, 8000, 0, 2800],
+        fills: [0x806655],
+        lines: [{ width: 40, color: 0x3a2a20 }],
+        paths,
+      }),
+      w.place({ depth: 1, character: 1 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/**
  * One fill's regions and holes, as Pixi cuts them: a square, then one with
  * two holes, then one with a hole holding an island and a second hole.
  * Each hole is its own region's, not the region drawn before it.
@@ -2938,6 +3021,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 1300,
   },
   { name: "fill-holes", swf: fillHoles(), frames: 1, capture: [1], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "shared-fill-edges",
+    swf: sharedFillEdges(),
+    frames: 1,
+    capture: [1],
+    // The aslant seams' ends anti-alias within a pixel of Flash's: some 30 pixels.
+    tolerance: 32,
+    maxOutliers: 60,
+  },
   {
     name: "static-text",
     swf: staticTexts(),

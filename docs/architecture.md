@@ -625,7 +625,11 @@ them for 5 s: kept for as long as their shape lived, every shape a long
 session had shown kept its fills, their geometry and their coloured
 copies, hundreds of MB. They are built
 from Flash's edges (`shapes.ts`: each edge goes to its right fill
-forward and its left fill reversed, joined into contours) and filled
+forward and its left fill reversed, joined into contours; one with the
+same fill on both sides, a seam Flash Pro leaves inside a fill, goes to
+neither, since the containment tree below takes contours that do not
+cross, and joined both ways along such seams the walk made crossing
+ones that cut part of the fill away, `shared-fill-edges`) and filled
 even-odd through a containment tree of the contours, holes cut: all of a
 region's at once, before the islands in them, since Pixi's `cut()` also
 lands a hole in the fill before the last once the last has one
