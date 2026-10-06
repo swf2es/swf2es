@@ -2479,7 +2479,11 @@ no further than on one at its size, and on a stage a host shows at three
 times its size a glow reaches as many screen pixels as at its size, a
 third as far across the stage. Each chain keeps the units to a screen
 pixel it was made for and is scaled again when they change, though its
-object was off the list then; its padding is the reach in those units. A
+object was off the list then; its padding is the reach in those units.
+A blur's box steps a texel of its input, blur × texels to a screen pixel
+wide: stepping a screen pixel's texels instead, on a stage shown at three
+times its size, it reached as far across the stage as unscaled, past its
+padding, and cut a soft shadow off square (the `blurred-shadow` case). A
 BitmapData's pixel is a screen pixel to a draw into it, rendered at its
 samples a side. The passes are Pixi filters at the target's resolution,
 for WebGL: under WebGPU, where Pixi would skip an object's whole chain
