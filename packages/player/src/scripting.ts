@@ -2195,8 +2195,10 @@ export class Scripting {
           queue.push(o);
         }
 
-        for (const child of scriptChildren(o)) {
-          visit(child);
+        // An index, not for-of: this visits every object on the list.
+        const children = scriptChildren(o);
+        for (let i = 0; i < children.length; i++) {
+          visit(children[i]);
         }
       };
       for (const orphan of this.orphanRoots()) {

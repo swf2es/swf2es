@@ -50,6 +50,8 @@ export const CONTENT = 4;
 export const PIXELS = 8;
 
 const NO_FILTERS: readonly Filter[] = Object.freeze([]);
+/** What a leaf has to walk: one for all, as the frame's walks visit every object twice a frame. */
+const NO_CHILDREN: readonly DisplayObject[] = Object.freeze([]);
 const NO_FILTER_BYTES = new Uint8Array([0]);
 
 /** The blend modes by the number PlaceObject3 gives them: 0 and 1 are normal. */
@@ -1167,7 +1169,7 @@ export function frameChildren(d: DisplayObject): readonly DisplayObject[] {
     );
   }
 
-  return d instanceof Container ? d.children : [];
+  return d instanceof Container ? d.children : NO_CHILDREN;
 }
 
 /**
