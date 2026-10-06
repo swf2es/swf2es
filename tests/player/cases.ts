@@ -26,6 +26,11 @@ export interface PlayerCase {
   zoom?: number;
   /** Played as a host whose renderer is made with `antialias: true` draws it, multisampled; Flash draws it as ever. */
   antialias?: boolean;
+  /**
+   * The transform table (pixi-table.ts) must draw some of it, and played
+   * again without the table it must draw the same pixels.
+   */
+  table?: boolean;
 }
 
 const square = (id: number, color: number, size = 1000) =>
@@ -3041,6 +3046,117 @@ function blendDrift(): Uint8Array {
   });
 }
 
+/**
+ * Shapes the transform table draws in runs (pixi-table.ts), and what ends
+ * a run or draws in the middle of one: added and multiplied shapes, drawn
+ * as layers; a layer, a run, then a layer whose first content is a layer of
+ * a shape, as a host's render passes may leave another texture unit active
+ * as the table uploads; squares filled alone under multiply and screen, which split a run
+ * by its blend mode; a gradient, a blurred shape, a mask over two shapes, a
+ * shape whose lines are stroked anew each frame as it turns stretched, and
+ * a depth whose character is replaced each frame.
+ */
+function tableRuns(): Uint8Array {
+  const outlined = (id: number, color: number, sides: number) => {
+    const point = (k: number): [number, number] => [
+      Math.round(400 * Math.cos((2 * Math.PI * k) / sides)),
+      Math.round(300 * Math.sin((2 * Math.PI * k) / sides)),
+    ];
+    const commands: w.PathCommand[] = [{ move: point(0) }];
+    for (let k = 1; k <= sides; k++) {
+      commands.push({ line: point(k) });
+    }
+
+    return w.shape({
+      id,
+      bounds: [-440, 440, -340, 340],
+      fills: [color],
+      lines: [{ width: 40, color: 0x101010 }],
+      paths: [{ fill1: 1, line: 1, commands }],
+    });
+  };
+  const gradient = w.shape({
+    id: 3,
+    bounds: [0, 800, 0, 600],
+    fills: [
+      {
+        type: 0x10,
+        matrix: { a: 800 / 32768, d: 600 / 32768, tx: 400, ty: 300 },
+        stops: [
+          [0, 0xffffcc00],
+          [255, 0xff0060c0],
+        ],
+      },
+    ],
+    paths: [
+      {
+        fill1: 1,
+        commands: [
+          { move: [0, 0] },
+          { line: [800, 0] },
+          { line: [800, 600] },
+          { line: [0, 600] },
+          { line: [0, 0] },
+        ],
+      },
+    ],
+    version: 3,
+  });
+  const at = (x: number, y: number) => ({ tx: x * 20, ty: y * 20 });
+  const turned = (frame: number) => {
+    const a = 0.5 * frame;
+    return {
+      a: 1.6 * Math.cos(a),
+      b: 1.6 * Math.sin(a),
+      c: -0.6 * Math.sin(a),
+      d: 0.6 * Math.cos(a),
+      ...at(200, 90),
+    };
+  };
+  const swapped = (frame: number) => [1, 2, 4][frame % 3];
+  const tags: Uint8Array[] = [
+    w.fileAttributes(true),
+    w.backgroundColor(0xffffff),
+    outlined(1, 0xe04030, 4),
+    outlined(2, 0x30b050, 6),
+    gradient,
+    square(4, 0x3050e0, 700),
+    square(5, 0xe0a020, 500),
+    w.sprite(6, 1, [w.place({ depth: 1, character: 2, blendMode: 8 }), w.showFrame(), w.end()]),
+    w.place({ depth: 1, character: 1, matrix: at(25, 25) }),
+    w.place({ depth: 2, character: 2, matrix: at(45, 35), blendMode: 8 }),
+    w.place({ depth: 3, character: 4, matrix: at(55, 15) }),
+    w.place({ depth: 4, character: 1, matrix: at(68, 42), blendMode: 8 }),
+    w.place({ depth: 5, character: 3, matrix: at(80, 15) }),
+    w.place({ depth: 6, character: 1, matrix: at(110, 35), blurs: [4] }),
+    w.place({ depth: 7, character: 2, matrix: at(135, 25) }),
+    w.place({ depth: 8, character: 4, matrix: { a: 1.5, d: 1.5, ...at(150, 10) }, clipDepth: 10 }),
+    w.place({ depth: 9, character: 1, matrix: at(160, 25) }),
+    w.place({ depth: 10, character: 2, matrix: at(185, 40) }),
+    w.place({ depth: 11, character: 1, matrix: turned(1) }),
+    w.place({ depth: 12, character: 2, matrix: at(25, 95), blendMode: 3 }),
+    w.place({ depth: 13, character: 4, matrix: at(35, 90) }),
+    w.place({ depth: 14, character: 6, matrix: at(55, 100), blendMode: 8 }),
+    w.place({ depth: 15, character: 5, matrix: at(75, 95), blendMode: 3 }),
+    w.place({ depth: 16, character: 5, matrix: at(85, 102), blendMode: 4 }),
+    w.place({ depth: 17, character: 4, matrix: at(100, 105) }),
+    w.place({ depth: 18, character: swapped(1), matrix: at(130, 95) }),
+    w.showFrame(),
+  ];
+  for (let frame = 2; frame <= 3; frame++) {
+    tags.push(
+      w.place({ depth: 1, move: true, matrix: at(25 + 6 * frame, 25) }),
+      w.place({ depth: 11, move: true, matrix: turned(frame) }),
+      w.remove(18),
+      w.place({ depth: 18, character: swapped(frame), matrix: at(130, 95) }),
+      w.showFrame(),
+    );
+  }
+
+  tags.push(w.end());
+  return w.swf({ width: 240, height: 130, frameRate: 24, frameCount: 3, tags });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
@@ -3116,6 +3232,16 @@ export const cases: PlayerCase[] = [
     capture: [1, 2, 3],
     tolerance: 32,
     maxOutliers: 60,
+  },
+  {
+    name: "table-runs",
+    swf: tableRuns(),
+    frames: 3,
+    capture: [1, 2, 3],
+    // The outlines' anti-aliased edges, each rasteriser's own, along the diagonals.
+    tolerance: 32,
+    maxOutliers: 700,
+    table: true,
   },
   {
     name: "render-groups",
@@ -3872,6 +3998,7 @@ export const cases: PlayerCase[] = [
     script: "DrawObjects",
     frames: 1,
     capture: [1],
+    table: true,
     // Edges are each rasteriser's own: anti-aliased at high quality, a dozen drawn pixels
     // within 64 a channel; at low quality, aliased, where a curve passes near a pixel's
     // centre the two decide differently, some 30 more. Each drawn pixel is 16 here.

@@ -19,6 +19,8 @@ export interface PlayerJob {
   zoom?: number;
   /** Drawn multisampled, as a host's renderer made with `antialias: true` draws (page.ts). */
   antialias?: boolean;
+  /** Drawn without the transform table (pixi-table.ts) where false; with it by default. */
+  table?: boolean;
 }
 
 /** How to run jobs: a time each job's scripts may take, a listener for each result, and more directories to serve. */
@@ -36,6 +38,8 @@ export interface PlayerResult {
   images: Map<number, Uint8Array>;
   /** What the SWF's scripts traced, a line each. */
   trace: string[];
+  /** The draws the transform table made. */
+  tableDraws: number;
   /** What stopped the player, if anything. */
   error: string | null;
 }
@@ -204,13 +208,18 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
       const results: PlayerResult[] = [];
       for (const [index, job] of jobs.entries()) {
         let value:
-          | { images: Record<string, string>; trace: string[]; error: string | null }
+          | {
+              images: Record<string, string>;
+              trace: string[];
+              tableDraws: number;
+              error: string | null;
+            }
           | undefined;
         let exception: string | null = null;
         const begun = performance.now();
         try {
           ({ value, exception } = await evaluate<NonNullable<typeof value>>(
-            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false})`,
+            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true})`,
           ));
         } catch (e) {
           // A job stopped at the timeout makes the protocol answer with an
@@ -230,7 +239,12 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
 
         const error =
           value?.error ?? (exception?.includes("timed out") ? "timeout" : exception) ?? null;
-        const result = { images, trace: value?.trace ?? [], error };
+        const result = {
+          images,
+          trace: value?.trace ?? [],
+          tableDraws: value?.tableDraws ?? 0,
+          error,
+        };
         results.push(result);
         options.onResult?.(index, result);
       }
@@ -304,6 +318,7 @@ export function benchPlayer(
   toggleEvery = 1,
   nestedGroups = false,
   allocs = false,
+  table = true,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
@@ -318,7 +333,7 @@ export function benchPlayer(
       }
 
       const { value, exception } = await evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table})`,
       );
       if (value && allocs) {
         const { profile } = await send<{ profile: { head: SampledNode } }>(

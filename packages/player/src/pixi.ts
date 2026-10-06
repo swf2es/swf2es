@@ -61,6 +61,9 @@ import { blendFilters } from "./pixi-blend.js";
 import { dropBatchedCopy, type SharingGraphics, setFlashColor, showFor } from "./pixi-color.js";
 import { displayFilters, FilterChain, rgbaOf } from "./pixi-filters.js";
 import { boundedResolves } from "./pixi-resolve.js";
+// Registers the table's pipe with Pixi, which the override below looks up by name.
+import "./pixi-table.js";
+import type { TablePipe } from "./pixi-table.js";
 import type { Player } from "./player.js";
 import {
   CUBIC,
@@ -927,17 +930,35 @@ function scalesEvenly(layer: ShapeLayer): boolean {
  * drawn alone by the last build and still to be, its instruction draws the
  * context it has when it runs, and nothing needs rebuilding. One the last
  * build batched, even into no batches at all as an empty context is, gets
- * an instruction only from a rebuild.
+ * an instruction only from a rebuild. Where the renderer draws the
+ * transform table (pixi-table.ts), one drawn alone joins a run of it
+ * rather than having an instruction to itself.
  */
 type PipeGraphics = { _gpuData: Record<number, { batched?: boolean } | undefined> };
 const pipe = GraphicsPipe.prototype as unknown as {
   renderer: Renderer;
   addRenderable(graphics: Graphics, instructionSet: InstructionSet): void;
   validateRenderable(graphics: Graphics): boolean;
+  _rebuild(graphics: Graphics): void;
 };
 const addGraphics = pipe.addRenderable;
 pipe.addRenderable = function (graphics, instructionSet) {
-  addGraphics.call(this, graphics, instructionSet);
+  const table = (this.renderer.renderPipes as unknown as { flashTable?: TablePipe }).flashTable;
+  const batchable = this.renderer.graphicsContext.updateGpuContext(graphics.context).isBatchable;
+  if (!batchable && table?.active) {
+    if (
+      graphics.didViewUpdate ||
+      !(graphics as unknown as PipeGraphics)._gpuData[this.renderer.uid]
+    ) {
+      this._rebuild(graphics);
+    }
+
+    this.renderer.renderPipes.batch.break(instructionSet);
+    table.add(graphics, instructionSet);
+  } else {
+    addGraphics.call(this, graphics, instructionSet);
+  }
+
   const data = (graphics as unknown as PipeGraphics)._gpuData[this.renderer.uid];
   if (data) {
     data.batched = this.renderer.graphicsContext.getGpuContext(graphics.context).isBatchable;

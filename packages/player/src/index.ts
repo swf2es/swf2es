@@ -13,6 +13,7 @@ export {
 } from "./display.js";
 export { bindKeyboard, type KeyState } from "./keyboard.js";
 export { PixiView } from "./pixi.js";
+export { setTransformTable } from "./pixi-table.js";
 export { Player } from "./player.js";
 export type { Navigate } from "./playerglobal/flash/net/navigateToURL.js";
 export type { SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
