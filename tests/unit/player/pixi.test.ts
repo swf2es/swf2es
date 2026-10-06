@@ -2289,3 +2289,22 @@ test("a line scaled one way alone keeps its lines for each angle", async () => {
   // Its width reads one row of the transform, which the turn changes.
   assert.equal(view.counts.strokeContexts, 2);
 });
+
+test("Pixi's pool of Graphics' batch elements is cut back as a view prepares", async () => {
+  // Pixi pools one for each batch each context makes and never shrinks the
+  // pool: a crowded room left 165,000 behind it.
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const { BigPool, BatchableGraphics } = (await import(entry)) as {
+    BigPool: { getPool(type: unknown): { totalFree: number; return(item: unknown): void } };
+    BatchableGraphics: new () => unknown;
+  };
+  const pool = BigPool.getPool(BatchableGraphics);
+  for (let i = 0; i < 10000; i++) {
+    pool.return(new BatchableGraphics());
+  }
+
+  const view = new PixiView(standIn([]).renderer);
+  view.prepare(new Container());
+  assert.equal(pool.totalFree, 4096);
+});
