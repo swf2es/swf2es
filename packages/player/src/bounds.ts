@@ -4,6 +4,7 @@
 import type { Matrix } from "@swf2es/format";
 import {
   BitmapObject,
+  Clips,
   Container,
   type DisplayObject,
   ShapeObject,
@@ -160,8 +161,19 @@ export function hitsPoint(
   return drawnAt(d, lx, ly, probe, false) && !clippedAbove(d, probe);
 }
 
-/** What this object itself draws under a pointer, without asking its children. */
-export function hitsOwnPoint(d: DisplayObject, x: number, y: number, root: DisplayObject): boolean {
+/**
+ * What this object itself draws under a pointer, without asking its
+ * children. For the pointer's own pick (`clips`), the timeline's masks
+ * above it clip it too, as Flash picks (the corpus's `mouse_pick_masking`):
+ * a list scrolled under a mask layer takes no click where it is hidden.
+ */
+export function hitsOwnPoint(
+  d: DisplayObject,
+  x: number,
+  y: number,
+  root: DisplayObject,
+  clips = false,
+): boolean {
   if (!underRoot(d) || d.maskOf) {
     return false;
   }
@@ -172,7 +184,7 @@ export function hitsOwnPoint(d: DisplayObject, x: number, y: number, root: Displ
   }
 
   const probe = { x: x - 0.5, y, root };
-  if (clippedAbove(d, probe)) {
+  if (clippedAbove(d, probe) || (clips && clippedByLayers(d, probe))) {
     return false;
   }
 
@@ -204,6 +216,25 @@ function clippedAbove(d: DisplayObject, probe: Probe): boolean {
       const [x, y] = apply(toLocal, probe.x, probe.y);
       if (!(x >= scroll.xMin && x < scroll.xMax && y >= scroll.yMin && y < scroll.yMax)) {
         return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/** Whether a timeline's mask over `d` or over a container above it leaves the probe out. */
+function clippedByLayers(d: DisplayObject, probe: Probe): boolean {
+  for (let o = d; o.parent; o = o.parent) {
+    const clips = new Clips();
+    for (const child of o.parent.children) {
+      const n = clips.enter(child);
+      if (child === o) {
+        if (clips.masks.slice(0, n).some((mask) => !inMask(mask, probe))) {
+          return true;
+        }
+
+        break;
       }
     }
   }

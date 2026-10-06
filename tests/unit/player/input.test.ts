@@ -439,3 +439,32 @@ test("roll events reach only the objects entered or left when the pointer change
   input.handle("leave", { x: 120, y: 10 });
   assert.deepEqual(heard, ["right:rollOut:none", "root:rollOut:none"]);
 });
+
+test("a list under a timeline's mask layer takes no click where the mask hides it", () => {
+  // Flash picks through mask layers as it draws them (the corpus's
+  // `mouse_pick_masking`): a scrolled list's rows below the mask are hidden
+  // and take no clicks, so what is under the pointer there is the stage.
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
+  const list = new Container();
+  list.object = { $display: list } as never;
+  stage.addChildAt(list, 0);
+  const mask = new BitmapObject(new BitmapStore(100, 50, true, 0xffffffff));
+  mask.clipDepth = 5;
+  list.placeAtDepth(mask, 1);
+  const row = new Container();
+  row.object = { $display: row } as never;
+  row.addChildAt(new BitmapObject(new BitmapStore(100, 100, true, 0xffffffff)), 0);
+  list.placeAtDepth(row, 2);
+
+  assert.equal(pointerTarget(stage, 10, 10, 200, 200), row);
+  assert.equal(pointerTarget(stage, 10, 70, 200, 200), stage);
+
+  // One placed past the mask's depth is not under it.
+  const below = new Container();
+  below.object = { $display: below } as never;
+  below.addChildAt(new BitmapObject(new BitmapStore(100, 100, true, 0xffffffff)), 0);
+  list.placeAtDepth(below, 6);
+  assert.equal(pointerTarget(stage, 10, 70, 200, 200), below);
+});
