@@ -806,8 +806,10 @@ interactive children before artwork, and a hit on what takes no pointer
 goes up only once nothing else under the point has taken it. What a
 mask, a scroll rect or a timeline's mask layer hides takes no pointer
 (`mouse_pick_masking`): a list scrolled under a mask layer is clicked
-only where it shows; `hitTestPoint` and `getObjectsUnderPoint` still
-leave mask layers out, as nothing yet shows Flash's do. A move is
+only where it shows. `hitTestPoint` asks no mask layer above the object
+it tests, as Flash's does not (the corpus's `from_shumway/hittesting`:
+a point a layer hides still hits), and `getObjectsUnderPoint` none
+either. A move is
 posted rather than handled at once, and the player handles the last one
 posted when it next advances, or before the next press, release, leave
 or key, whichever comes first: a browser sends about one a frame, a

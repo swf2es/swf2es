@@ -184,23 +184,23 @@ export function hitsOwnPoint(
   }
 
   const probe = { x: x - 0.5, y, root };
-  if (clippedAbove(d, probe) || (clips && clippedByLayers(d, probe))) {
-    return false;
-  }
-
   const [lx, ly] = apply(toLocal, probe.x, probe.y);
+  let hit: boolean;
   if (d instanceof TextObject) {
     const r = ownBounds(d, true);
     const scroll = d.scroll;
-    return (
+    hit =
       !!r &&
       contains(r, lx, ly) &&
       (!scroll || contains(scroll, lx, ly)) &&
-      (!d.mask || inMask(d.mask, probe))
-    );
+      (!d.mask || inMask(d.mask, probe));
+  } else {
+    hit = drawnAt(d, lx, ly, probe, false, false);
   }
 
-  return drawnAt(d, lx, ly, probe, false, false);
+  // What clips it is asked only of a hit: a pick tests every object under its
+  // containers, and finding the mask layers over one walks its siblings.
+  return hit && !clippedAbove(d, probe) && !(clips && clippedByLayers(d, probe));
 }
 
 /** Whether a mask or a scroll above `d` leaves the probe out. */
@@ -229,13 +229,17 @@ function clippedByLayers(d: DisplayObject, probe: Probe): boolean {
     const clips = new Clips();
     for (const child of o.parent.children) {
       const n = clips.enter(child);
-      if (child === o) {
-        if (clips.masks.slice(0, n).some((mask) => !inMask(mask, probe))) {
+      if (child !== o) {
+        continue;
+      }
+
+      for (let i = 0; i < n; i++) {
+        if (!inMask(clips.masks[i], probe)) {
           return true;
         }
-
-        break;
       }
+
+      break;
     }
   }
 
