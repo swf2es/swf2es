@@ -2453,14 +2453,21 @@ As Flash caches a filtered object as a bitmap, an object's filters run
 as one chain (`FilterChain`) whose output is kept and drawn again until
 what it was run on changes: the object or anything below it, its
 transform other than a move, the colour and alpha it is drawn in, or how
-much of it the screen shows. A wide blur's passes read blur × texels to
-a screen pixel a pixel, over an area grown by its reach, so their cost
+much of it the screen shows. Filters set again with the values they had,
+as a tween writes them on each frame or a script sets them from their
+own, keep the chain and its output; a displacement's map is the same only
+as the same object, which setting it again takes anew. A wide blur's
+passes read blur × texels to a screen pixel a pixel, over an area grown
+by its reach, so their cost
 rises with the square of the resolution, and with the cube of the
 samples a host draws finer to average down; kept, a still object costs
 one copy a frame. A kept output moved is drawn at the new place to the
 whole texel, its content where it fell within a texel when it was
-filtered. One that changes frame after frame is filtered straight to the
-target, with no copy kept, and a view drawn once keeps none. adl leaves
+filtered. adl moves its bitmap by whole pixels where swf2es moves by
+whole texels, which differ only where a pixel is drawn as several samples,
+as the test page draws Flash's grid: the `filter-retween` case moves by
+whole pixels. One that changes frame after frame is filtered straight to
+the target, with no copy kept, and a view drawn once keeps none. adl leaves
 some changes undrawn: a child moved within its parent's bounds shows in
 its capture where it was as well as where it is, and a mask from outside
 the object that moves leaves it clipped as it was. swf2es draws the

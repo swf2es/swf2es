@@ -22,6 +22,10 @@
 // --fresh has the parts swell to a new size on every frame, never coming
 // round again, so each frame strokes their lines anew: new contexts for the
 // renderer to take on, as objects that turn and stretch in a game give it.
+// --blurred has each place write a blur on the part too, as a tween of a
+// filtered part writes its filters on every frame: each part filtered on
+// its own, run again as it turns. --glide has the parts slide instead of
+// turning, a move alone, whose filters' output is kept.
 //
 // --idle K renders K times more after each frame with no tick between, as
 // a host that draws on every animation frame does, and times those apart.
@@ -48,7 +52,7 @@
 // uploads and bytes, and program switches. --allocs samples the heap and
 // gives the KB the frames allocated, the player's start left out.
 //
-//   node tests/player/bench.ts [--shapes N | --rig N [--fresh] | --branches N | --toggle-branches N | --toggle N
+//   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred] [--glide] | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs] [--no-table] [--json]
 import * as w from "../swf-writer.ts";
@@ -226,9 +230,16 @@ function part(id: number, sides: number): Uint8Array {
  * another put in its place, as a frame-by-frame animation's timeline does:
  * each frame changes the sprite's children, not only their transforms. With
  * `fresh`, the loop is as long as the run and the parts swell to a size no
- * other frame has.
+ * other frame has. With `blurred`, each place writes a blur on its part;
+ * with `glide`, the parts slide to and fro instead of turning and swelling.
  */
-function rigSwf(count: number, swap = false, fresh = false): Uint8Array {
+function rigSwf(
+  count: number,
+  swap = false,
+  fresh = false,
+  blurred = false,
+  glide = false,
+): Uint8Array {
   const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
   for (let i = 0; i < 4; i++) {
     tags.push(part(11 + i, 12 + 6 * i));
@@ -241,23 +252,25 @@ function rigSwf(count: number, swap = false, fresh = false): Uint8Array {
       const t = (2 * Math.PI * f) / loop;
       const a = 0.4 * Math.sin(t + i) * (i % 2 ? 1 : -1);
       const s = fresh ? 0.75 + (0.5 * ((f * 12 + i) % 997)) / 997 : 1 + 0.25 * Math.sin(t * 2 + i);
+      const slide = glide ? Math.round(200 * Math.sin(t + i)) : 0;
       const matrix = {
-        a: s * Math.cos(a),
-        b: s * Math.sin(a),
-        c: -s * Math.sin(a),
-        d: s * Math.cos(a),
-        tx: Math.round(400 * Math.cos(i)),
+        a: glide ? 1 : s * Math.cos(a),
+        b: glide ? 0 : s * Math.sin(a),
+        c: glide ? 0 : -s * Math.sin(a),
+        d: glide ? 1 : s * Math.cos(a),
+        tx: Math.round(400 * Math.cos(i)) + slide,
         ty: Math.round(400 * Math.sin(i * 1.7)),
       };
+      const blurs = blurred ? [3] : undefined;
       if (f === 0) {
-        sprite.push(w.place({ depth: i + 1, character: 11 + (i % 4), matrix }));
+        sprite.push(w.place({ depth: i + 1, character: 11 + (i % 4), matrix, blurs }));
       } else if (swap) {
         sprite.push(
           w.remove(i + 1),
-          w.place({ depth: i + 1, character: 11 + ((i + f) % 4), matrix }),
+          w.place({ depth: i + 1, character: 11 + ((i + f) % 4), matrix, blurs }),
         );
       } else {
-        sprite.push(w.place({ depth: i + 1, move: true, matrix }));
+        sprite.push(w.place({ depth: i + 1, move: true, matrix, blurs }));
       }
     }
 
@@ -416,7 +429,13 @@ const swf =
         : branches > 0
           ? branchSwf(branches)
           : rig > 0
-            ? rigSwf(rig, args.includes("--swap"), args.includes("--fresh"))
+            ? rigSwf(
+                rig,
+                args.includes("--swap"),
+                args.includes("--fresh"),
+                args.includes("--blurred"),
+                args.includes("--glide"),
+              )
             : synthetic();
 const result = await benchPlayer(
   swf,
@@ -467,7 +486,7 @@ const summary = {
           : branches > 0
             ? `${branches} branches`
             : rig > 0
-              ? `rig of ${rig}${args.includes("--swap") ? ", swapping" : ""}${args.includes("--fresh") ? ", fresh" : ""}`
+              ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}`
               : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),

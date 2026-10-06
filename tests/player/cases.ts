@@ -806,6 +806,38 @@ function gotoStops(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Squares on a timeline of 4 frames, blurred, which move a pixel a frame
+// with their blur written again and without, and stay with it written
+// again, for scripts/FilterRetween.as to add its own to.
+function filterRetween(abc: Uint8Array): Uint8Array {
+  const at = (x: number, y = 4) => ({ tx: x * 20, ty: y * 20 });
+  const frames = [0, 1, 2, 3].map((f) => [
+    w.place({ depth: 1, move: true, matrix: at(10 + f), blurs: [2] }),
+    w.place({ depth: 2, move: true, matrix: at(60 + f) }),
+    w.place({ depth: 3, move: true, matrix: at(110), blurs: [2] }),
+    w.showFrame(),
+  ]);
+  return w.swf({
+    width: 150,
+    height: 56,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0x0033cc, 400),
+      w.doAbc(abc, "FilterRetween"),
+      w.symbolClass([[0, "FilterRetween"]]),
+      ...[1, 2, 3].map((depth) =>
+        w.place({ depth, character: 1, matrix: at(10 + 50 * (depth - 1)), blurs: [2] }),
+      ),
+      ...frames[0].slice(3),
+      ...frames.slice(1).flat(),
+      w.end(),
+    ],
+  });
+}
+
 // Clips of a square, two MorphShapes growing a square and three empty
 // text fields, side by side, which frames 2 to 4 move with every property a place sets, for
 // scripts/ScriptedMoves.as to touch, then a loop back to frame 1's places.
@@ -3961,6 +3993,16 @@ export const cases: PlayerCase[] = [
     // edges, up to 11, 12 channels beyond 8.
     tolerance: 8,
     maxOutliers: 20,
+  },
+  {
+    name: "filter-retween",
+    swf: filterRetween,
+    script: "FilterRetween",
+    frames: 4,
+    capture: [1, 2, 3, 4],
+    // The blurs' corners, one apart from adl's on the last frame.
+    tolerance: 1,
+    maxOutliers: 0,
   },
   {
     name: "filter-cache",
