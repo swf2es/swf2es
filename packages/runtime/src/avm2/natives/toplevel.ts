@@ -130,25 +130,32 @@ const errorClass: ClassHook = {
   ...constructs,
   create: (traits) => {
     const o = Object.create(traits.proto);
+    // V8 keeps 10 frames, and the runtime's own take most of those before the first AS3 one.
+    const engine = Error as ErrorConstructor & { stackTraceLimit?: number };
+    const limit = engine.stackTraceLimit;
+    engine.stackTraceLimit = 48;
     Object.defineProperty(o, "$jsError", { value: new Error() });
+    engine.stackTraceLimit = limit;
     return o;
   },
 };
 
-export const errorHooks: Record<string, ClassHook> = Object.fromEntries(
-  [
-    "DefinitionError",
-    "EvalError",
-    "RangeError",
-    "ReferenceError",
-    "SecurityError",
-    "SyntaxError",
-    "TypeError",
-    "URIError",
-    "VerifyError",
-    "UninitializedError",
-    "ArgumentError",
-  ]
-    .map((name): [string, ClassHook] => [name, constructs])
-    .concat([["Error", errorClass]]),
-);
+export const errorHooks: Record<string, ClassHook> = {
+  ...Object.fromEntries(
+    [
+      "DefinitionError",
+      "EvalError",
+      "RangeError",
+      "ReferenceError",
+      "SecurityError",
+      "SyntaxError",
+      "TypeError",
+      "URIError",
+      "VerifyError",
+      "UninitializedError",
+      "ArgumentError",
+    ].map((name) => [name, constructs]),
+  ),
+  // Its subclasses inherit its create: one of their own would replace it.
+  Error: errorClass,
+};

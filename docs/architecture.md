@@ -907,12 +907,14 @@ error the hook itself throws is kept and thrown as the frame ends. Without it, t
 once it has run to its end: one alone, or several as an
 AggregateError, the one that stopped the frame early, if any, first;
 those between frames come with the next frame's. An ExternalInterface
-callback's own error goes back to the page that called it. An AS3 error
-keeps the JavaScript stack it was made on, out of AS3's sight (the release
-player's `getStackTrace` gives null): `Runtime.stackOf` gives a host its
-lines, the compiled methods' names in them, to say where it came from. A child its
+callback's own error goes back to the page that called it. A child its
 parent's first frame places is made in the parent's `super()`, and its
 error still reaches the parent's constructor.
+
+An AS3 error keeps the JavaScript stack it was made on, out of AS3's
+sight (the release player's `getStackTrace` gives null), for a host to
+say where an error nothing caught came from: `Runtime.stackOf` gives its
+lines from the first compiled method's, whose names begin with `$`.
 
 A goto plays or stops its clip as it happens, before the frame it lands
 on has its script run, so a `stop()` or `play()` there has the last word:

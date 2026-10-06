@@ -1017,8 +1017,13 @@ test("an AS3 error tells a host the methods it was thrown in", { skip }, async (
         addFrameScript(0, frame1);
       }
       private function frame1():void {
-        reachNothing();
+        a();
       }
+      private function a():void { b(); }
+      private function b():void { c(); }
+      private function c():void { d(); }
+      private function d():void { e(); }
+      private function e():void { reachNothing(); }
       private function reachNothing():void {
         trace(nothing.field);
       }
@@ -1036,7 +1041,7 @@ test("an AS3 error tells a host the methods it was thrown in", { skip }, async (
   assert.equal(errors.length, 1);
   assert.match(scripting.rt.toString(errors[0] as avm2.Value), /1009/);
   const stack = scripting.rt.stackOf(errors[0] as avm2.Value) ?? "";
-  // The method that reached null first, the one that called it next.
+  // The method that reached null first, and the frame script six calls out, past V8's usual ten frames.
   assert.match(stack.split("\n")[0], /reachNothing/);
   assert.match(stack, /frame1/);
   assert.equal(scripting.rt.stackOf("not an error"), null);
