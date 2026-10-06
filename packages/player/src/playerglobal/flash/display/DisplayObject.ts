@@ -14,7 +14,8 @@ import {
 import { copyFilter } from "../../../display/filters.js";
 import { apply, invert, type Rect, transformRect } from "../../../display/geometry.js";
 import type { Scripting } from "../../../scripting.js";
-import { copyMap, filterClassName, filterKindOf, recordOf } from "../filters/filters.js";
+import { filterClassName, filterKindOf, recordOf } from "../filters/BitmapFilter.js";
+import { copyMap } from "../filters/DisplacementMapFilter.js";
 import { colorOf, matrixOf } from "../geom/Transform.js";
 
 type AsObject = avm2.AsObject;

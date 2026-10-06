@@ -29,7 +29,7 @@ import type { Filter } from "../../../display/filters.js";
 import { transformRect } from "../../../display/geometry.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../display/timeline.js";
 import type { Scripting } from "../../../scripting.js";
-import { filterKindOf, recordOf } from "../filters/filters.js";
+import { filterKindOf, recordOf } from "../filters/BitmapFilter.js";
 
 /** The filters with a glow, a shadow or a bevel, which an opaque destination refuses. */
 const GLOWS: ReadonlySet<string> = new Set([
