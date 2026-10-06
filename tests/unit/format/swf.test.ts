@@ -7,6 +7,7 @@ import {
   readMorphShape,
   readPlace,
   readRemove,
+  readScalingGrid,
   readSceneData,
   readShape,
   readSprite,
@@ -51,6 +52,7 @@ const movie = w.swf({
     w.place({ depth: 1, move: true, matrix: { tx: 300, ty: 0, b: 0.25, c: -0.25 } }),
     w.remove(2),
     w.sprite(5, 1, [w.showFrame(), w.end()]),
+    w.scalingGrid(5, -410, 1600, 400, 1580),
     w.symbolClass([
       [0, "Main"],
       [5, "pkg.Thing"],
@@ -78,6 +80,7 @@ test("a SWF's header and tags read as written", () => {
       tags.PlaceObject2,
       tags.RemoveObject2,
       tags.DefineSprite,
+      tags.DefineScalingGrid,
       tags.SymbolClass,
       tags.ShowFrame,
       tags.End,
@@ -106,7 +109,7 @@ test("a shape's styles and edges read as written", () => {
   ]);
 });
 
-test("places, removes, sprites and symbols read as written", () => {
+test("places, removes, sprites, scaling grids and symbols read as written", () => {
   const swf = readSwf(movie);
   const first = readPlace(swf.bytes, swf.tags[3]);
   assert.equal(first.depth, 1);
@@ -130,8 +133,14 @@ test("places, removes, sprites and symbols read as written", () => {
     [tags.ShowFrame, tags.End],
   );
 
+  assert.equal(swf.tags[8].code, tags.DefineScalingGrid);
+  assert.deepEqual(readScalingGrid(swf.bytes, swf.tags[8]), {
+    id: 5,
+    grid: { xMin: -410, xMax: 1600, yMin: 400, yMax: 1580 },
+  });
+
   assert.deepEqual(
-    [...readSymbolClass(swf.bytes, swf.tags[8])],
+    [...readSymbolClass(swf.bytes, swf.tags[9])],
     [
       [0, "Main"],
       [5, "pkg.Thing"],

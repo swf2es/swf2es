@@ -37,6 +37,7 @@ export const PlaceObject3 = 70;
 export const DoABC = 72;
 export const DefineFont3 = 75;
 export const SymbolClass = 76;
+export const DefineScalingGrid = 78;
 export const DoABC2 = 82;
 export const DefineShape4 = 83;
 export const DefineMorphShape2 = 84;
