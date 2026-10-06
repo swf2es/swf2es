@@ -4,7 +4,10 @@
 //
 // A case marked `table`, or every case with --table-ab, is played again
 // without the transform table (pixi-table.ts), and must draw the same
-// pixels; a marked one must have the table draw some of it.
+// pixels; a marked one, played with the table drawing even its shortest
+// runs, must have the table draw some of it. An unmarked one keeps the
+// table's threshold of 16 draws a run, so with --table-ab most of its runs
+// are Pixi's pipe on both sides: the marked cases are the real guard.
 //
 //   node tests/player/run.ts [--table-ab] [case...]   check
 //   node tests/player/run.ts --update [case...]       draw the references again in Flash
@@ -42,7 +45,7 @@ const swfOf = (c: PlayerCase): Uint8Array => {
     : (c.swf as Uint8Array);
 };
 const traced = (c: PlayerCase) => Boolean(c.script || c.build);
-const jobs = chosen.map((c) => ({ ...c, swf: swfOf(c) }));
+const jobs = chosen.map((c) => ({ ...c, swf: swfOf(c), tableMinRun: c.table ? 1 : undefined }));
 
 if (update) {
   // The oracle needs adl, which only this mode does.

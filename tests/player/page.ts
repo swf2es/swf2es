@@ -140,6 +140,7 @@ async function runSwf(
   zoom = 1,
   antialias = false,
   table = true,
+  tableMinRun?: number,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
@@ -157,7 +158,7 @@ async function runSwf(
     scripting = await scriptingFor(bytes, trace, url, uncaught);
     const player = new Player(bytes, scripting);
     const n = GRID[quality] ?? 4;
-    setTransformTable(table);
+    setTransformTable(table, tableMinRun);
     const renderer = await autoDetectRenderer({
       preference: "webgl",
       width: player.width,
@@ -387,8 +388,9 @@ async function benchSwf(
   toggleEvery = 1,
   nestedGroups = false,
   table = true,
+  tableMinRun?: number,
 ): Promise<Bench> {
-  setTransformTable(table);
+  setTransformTable(table, tableMinRun);
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
   const sync: number[] = [];

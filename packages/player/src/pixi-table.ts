@@ -6,11 +6,13 @@
 // atlas, and a run of such Graphics is one multi-draw of their index
 // ranges, each draw reading its transform and tint from a row of a float
 // texture by gl_DrawID: a frame writes the rows and uploads them, and no
-// vertex moves. What the table cannot draw, a context with a texture or a
-// Graphics that rounds to pixels, is drawn by Pixi's own pipe in its place
-// in the run. A Flash colour transform's batched copies stay with the
-// colour batcher (pixi-color.ts): drawn here, a few batched draws became
-// thousands of the table's, which cost the GPU more than the CPU saved.
+// vertex moves. A run too short to repay its multi-draw, as filters leave,
+// is drawn by Pixi's pipe. What the table cannot draw, a context with a
+// texture or a Graphics that rounds to pixels, is drawn by Pixi's own pipe
+// in its place in the run. A Flash colour transform's batched copies stay
+// with the colour batcher (pixi-color.ts): drawn here, a few batched draws
+// became thousands of the table's, which cost the GPU more than the CPU
+// saved.
 import {
   Buffer,
   BufferImageSource,
@@ -40,21 +42,34 @@ const NAME = "flashTable";
 const ROW_TEXELS = 4;
 const TABLE_WIDTH = 1024;
 const ROWS_A_LINE = TABLE_WIDTH / ROW_TEXELS;
+/**
+ * The fewest draws a run makes through the table; Pixi's pipe draws a
+ * shorter one. A multi-draw call costs Chrome's GPU process some 5 to 15
+ * µs more than its draws would alone, and saves the page well under 1 µs
+ * a draw: in a crowd of filtered creatures, each filter ending a run, runs
+ * of 2 to 10 draws took a frame 1 to 5 ms longer than Pixi's draws on a
+ * GPU, and runs of 22 broke even (`bench.ts --rig 128 --filtered K --gpu`).
+ */
+const MIN_RUN = 16;
 /** Floats a vertex of a context's packed geometry: position, UV, colour, texture and rounding. */
 const VERTEX_FLOATS = 6;
 /** Atlas vertices dropped contexts may leave as holes before it is packed again. */
 const ATLAS_SLACK = 1 << 16;
 
 let enabled = true;
+let minRun = MIN_RUN;
 
 /**
  * Draw Graphics alone through the table, or not, from the next frame: a
  * switch to time the two apart. Runs already built draw through Pixi's
  * pipe while it is off; a group built while it was off draws alone until
- * it is built again.
+ * it is built again. `shortest` is the fewest draws a run makes through
+ * the table, MIN_RUN by default: the tests have the table draw every run
+ * with 1, and the bench times others.
  */
-export function setTransformTable(on: boolean): void {
+export function setTransformTable(on: boolean, shortest = MIN_RUN): void {
   enabled = on;
+  minRun = shortest;
 }
 
 const vertex = `#version 300 es
@@ -371,6 +386,8 @@ export class TablePipe {
   private draws = 0;
   private runBase = 0;
   private runBlend = "";
+  /** The Graphics the run gathered, for Pixi's pipe to draw if it is too short for the table. */
+  private segment: Graphics[] = [];
 
   constructor(renderer: WebGLRenderer) {
     this.renderer = renderer;
@@ -432,8 +449,10 @@ export class TablePipe {
     const graphicsPipe = renderer.renderPipes.graphics as unknown as GraphicsPipe;
     const contexts = renderer.graphicsContext as unknown as ContextSystem;
     const roundAll = (renderer as unknown as { _roundPixels: number })._roundPixels;
-    // Switched off, or a context restored without the extension: Pixi's pipe draws the runs.
-    if (!this.active) {
+    // Switched off, a context restored without the extension, or a run
+    // that cannot reach minRun draws, as most between filters, before a row
+    // is written: Pixi's pipe draws it.
+    if (!this.active || this.mostDraws(instruction, contexts) < minRun) {
       for (const item of instruction.items) {
         graphicsPipe.execute(item);
       }
@@ -471,6 +490,7 @@ export class TablePipe {
         this.runBlend = graphics.groupBlendMode;
       }
 
+      this.segment.push(graphics);
       for (let i = 0; i < place.counts.length; i++) {
         this.row(graphics);
         this.counts[this.draws] = place.counts[i];
@@ -480,6 +500,19 @@ export class TablePipe {
     }
 
     this.flush();
+  }
+
+  /** The draws `instruction` makes at most: one for each batch of each Graphics' context. */
+  private mostDraws(instruction: TableInstruction, contexts: ContextSystem): number {
+    let draws = 0;
+    for (const item of instruction.items) {
+      draws += contexts.getGpuContext(item.context).batches.length;
+      if (draws >= minRun) {
+        break;
+      }
+    }
+
+    return draws;
   }
 
   /** Write `graphics`' transform and tint into the next row, the table and run grown to hold it. */
@@ -522,16 +555,34 @@ export class TablePipe {
     }
   }
 
-  /** Draw the run gathered: its rows uploaded, then its draws as one call. */
+  /**
+   * Draw the run gathered: its rows uploaded, then its draws as one call;
+   * or its Graphics through Pixi's pipe if it is too short.
+   */
   private flush(): void {
     const draws = this.draws;
     if (draws === 0 || !this.multi) {
+      this.segment.length = 0;
       this.draws = 0;
       this.runBase = this.cursor;
       return;
     }
 
     const renderer = this.renderer;
+    if (draws < minRun) {
+      const graphicsPipe = renderer.renderPipes.graphics as unknown as GraphicsPipe;
+      for (const graphics of this.segment) {
+        graphicsPipe.execute(graphics);
+      }
+
+      this.segment.length = 0;
+      this.draws = 0;
+      // Their rows are free again for the next run's.
+      this.cursor = this.runBase;
+      return;
+    }
+
+    this.segment.length = 0;
     this.upload(this.runBase, this.cursor);
 
     this.send();

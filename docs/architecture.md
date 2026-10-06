@@ -751,20 +751,30 @@ a new size on every frame, uploads 0.5 MB a frame where uploading the
 atlas whole sent 7. A context rebuilt or destroyed leaves a hole, and
 between frames the atlas starts again from scratch once the holes pass
 65,536 vertices and the live ones; neither the atlas nor the table
-shrinks from its peak. On a desktop GPU the render's
-main-thread time fell from 9–10 to 2 ms on `--rig 400` and `--rig 400
---fresh`, 0.7 to 0.1 on `--rig 32`, 1.2 to 0.5 on `--rig 32 --swap`,
-18 to 8 on `--rig 400 --swap` and 2.5 to 0.2 on the 2,000 shapes, with
-GL's own time halved as well; under software GL the same. The rows are
-uploaded between draws that read the table, which a driver may make wait
-for the earlier draws (ANGLE on D3D11 or Metal, unmeasured). A Flash
-colour transform's batched copies stay with the colour batcher: drawn by
-the table, `--branches 64`'s few batches became 12,000 draws, which
-saved the main thread a millisecond and cost GL two on a GPU, fifteen
-under software GL. `bench.ts --no-table` draws without the table, and
-the `table-runs` case, with `draw-objects`, is played with and without
-it and must draw the same pixels (`run.ts --table-ab` asks it of every
-case).
+shrinks from its peak. On a desktop GPU the render's main-thread time
+fell from 9–10 to 2 ms on `--rig 400` and `--rig 400 --fresh`, 0.7 to
+0.1 on `--rig 32`, 1.2 to 0.5 on `--rig 32 --swap`, 18 to 8 on `--rig
+400 --swap` and 2.5 to 0.2 on the 2,000 shapes, with GL's own time
+halved as well; under software GL the same. A filter ends a run, and
+where creatures carry a dozen filters each, runs are a few Graphics
+long: there a multi-draw cost Chrome's GPU process some 5 to 15 µs more
+than its draws one by one, and saved the main thread under a microsecond
+a draw. On `bench.ts --rig 128 --filtered K --gpu`, runs of 2 to 10
+draws took a frame 1 to 5 ms longer than Pixi's own draws, and runs of
+22 broke even, so a run of fewer than 16 draws is drawn by Pixi's pipe:
+before any row is written if its contexts' batches are fewer, and
+otherwise once a blend mode or a Graphics the table cannot draw has cut
+it short (`--min-run` times other thresholds). Under software GL the
+table won at every length, by 5 ms on runs of 6, but a player's GPU is
+what counts. The rows are uploaded between draws that read the table,
+which a driver may make wait for the earlier draws (ANGLE on D3D11 or
+Metal, unmeasured). A Flash colour transform's batched copies stay with
+the colour batcher: drawn by the table, `--branches 64`'s few batches
+became 12,000 draws, which saved the main thread a millisecond and cost
+GL two on a GPU, fifteen under software GL. `bench.ts --no-table` draws
+without the table, and the `table-runs` case, with `draw-objects`, is
+played with the table drawing even its shortest runs and without it, and
+must draw the same pixels (`run.ts --table-ab` asks it of every case).
 
 Flash anti-aliases by supersampling on a grid: none at low quality, 2×2 at
 medium, 4×4 at high and best. The test page draws the same way, at that

@@ -43,7 +43,8 @@
 //
 // --no-table draws the Graphics drawn alone each with a call of its own,
 // as Pixi does, not through the transform table (pixi-table.ts): the two
-// timed apart.
+// timed apart. --min-run N has the table draw only runs of N draws or
+// more, and Pixi the shorter, to time where the table starts to gain.
 //
 // --branches N places N coloured branches of 128 shapes. A quarter replace
 // one child each frame; the rest stay still, as scenery beside animated art.
@@ -60,7 +61,8 @@
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--glide]
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
-//     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs] [--no-table] [--json]
+//     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs] [--no-table] [--min-run N]
+//     [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 
@@ -464,6 +466,7 @@ const result = await benchPlayer(
   nestedGroups,
   args.includes("--allocs"),
   !args.includes("--no-table"),
+  args.includes("--min-run") ? option("min-run", 1) : undefined,
 );
 if (result.error) {
   console.error(result.error);
