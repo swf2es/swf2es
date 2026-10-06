@@ -13,6 +13,9 @@ import { PixiView } from "../../../packages/player/dist/pixi.js";
 import { ColorBatcher } from "../../../packages/player/dist/pixi-color.js";
 import type { Player } from "../../../packages/player/dist/player.js";
 
+setFlagsFromString("--expose-gc");
+const gc = runInNewContext("gc") as () => void;
+
 /** A renderer that draws nothing and reads back `pixels`, counting its reads. */
 function standIn(pixels: number[]) {
   const reads: unknown[] = [];
@@ -2111,8 +2114,6 @@ test("a gradient a drawing redrew is freed once, though its fill was collected f
   // A colour picker redraws its gradient on each move of the pointer: the
   // old fill may be collected before the view lets go of its texture.
   const { Drawing } = await import("../../../packages/player/dist/drawing.js");
-  setFlagsFromString("--expose-gc");
-  const gc = runInNewContext("gc") as () => void;
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
   const sprite = new Container();
@@ -2138,8 +2139,15 @@ test("a gradient a drawing redrew is freed once, though its fill was collected f
   sprite.drawing = drawing;
   root.placeAtDepth(sprite, 1);
 
+  type Drawn = {
+    context: { instructions: { data: { style: { texture: { destroyed: boolean } } } }[] };
+  };
+  const shown = () =>
+    (view.stage.children[0].children[1].children[0].children[0] as unknown as Drawn).context
+      .instructions[0].data.style.texture;
   draw(0xff000000);
   view.prepare(root);
+  const textures = [shown()];
   for (let i = 1; i < 4; i++) {
     // Drawn again, its old fill gone from the drawing, and collected before the view syncs.
     draw(0xff000000 | (i * 0x404040));
@@ -2149,5 +2157,12 @@ test("a gradient a drawing redrew is freed once, though its fill was collected f
     }
 
     view.prepare(root);
+    textures.push(shown());
   }
+
+  // Each freed as the next took its place, and the one shown kept.
+  assert.deepEqual(
+    textures.map((t) => t.destroyed),
+    [true, true, true, false],
+  );
 });

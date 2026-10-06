@@ -514,48 +514,55 @@ const PARKED_FIRST_GROUPS_MOST = 64;
  */
 const POOLED_RENDER_DATA_MOST = 128;
 
-/** Pixi's pool of render data destroyed contexts gave back, emptied once past its most; what is in use stays. */
 /**
- * The render textures draws render through, by size, kept for the next
- * draw of that size: a bitmap drawn again on every move of the pointer, as
- * a colour picker's is, then makes and frees no texture each time.
+ * The render textures draws render through, oldest first, kept for the
+ * next draw of the same size: a bitmap drawn again on every move of the
+ * pointer, as a colour picker's is, then makes and frees no texture each
+ * time. At most DRAW_TARGETS_MOST and DRAW_TARGET_TEXELS, the oldest going
+ * first, and none kept idle past IDLE_MS: a draw of the whole stage at four
+ * samples a pixel is tens of megabytes no other draw may want.
  */
 const DRAW_TARGETS_MOST = 8;
-const drawTargets = new Map<string, RenderTexture[]>();
-let drawTargetsKept = 0;
+const DRAW_TARGET_TEXELS = 4 * 1024 * 1024;
+const drawTargets: { texture: RenderTexture; since: number }[] = [];
 
 function drawTarget(width: number, height: number): RenderTexture {
-  const texture = drawTargets.get(`${width}x${height}`)?.pop();
-  if (!texture) {
-    return RenderTexture.create({ width, height });
+  for (let i = drawTargets.length - 1; i >= 0; i--) {
+    const { texture } = drawTargets[i];
+    if (texture.width === width && texture.height === height) {
+      drawTargets.splice(i, 1);
+      return texture;
+    }
   }
 
-  drawTargetsKept--;
-  return texture;
+  return RenderTexture.create({ width, height });
 }
 
-/** A draw's target done with: kept for the next draw of its size, or destroyed past the most kept. */
+/** A draw's target done with: kept for the next draw of its size, the oldest kept going past the most. */
 function releaseDrawTarget(texture: RenderTexture): void {
-  if (drawTargetsKept >= DRAW_TARGETS_MOST) {
-    texture.destroy(true);
-    return;
+  drawTargets.push({ texture, since: performance.now() });
+  let texels = 0;
+  for (const kept of drawTargets) {
+    texels += kept.texture.width * kept.texture.height;
   }
 
-  const key = `${texture.width}x${texture.height}`;
-  let free = drawTargets.get(key);
-  if (!free) {
-    free = [];
-    drawTargets.set(key, free);
+  while (drawTargets.length > DRAW_TARGETS_MOST || texels > DRAW_TARGET_TEXELS) {
+    const oldest = drawTargets.shift() as (typeof drawTargets)[number];
+    texels -= oldest.texture.width * oldest.texture.height;
+    oldest.texture.destroy(true);
   }
-
-  free.push(texture);
-  drawTargetsKept++;
 }
 
+/** Pixi's pool of render data destroyed contexts gave back, emptied once past its most; what is in use stays. And the draws' targets kept idle too long. */
 function trimPools(): void {
   const data = BigPool.getPool(GraphicsContextRenderData);
   if (data.totalFree > POOLED_RENDER_DATA_MOST) {
     data.clear();
+  }
+
+  const now = performance.now();
+  while (drawTargets.length > 0 && now - drawTargets[0].since > IDLE_MS) {
+    drawTargets.shift()?.texture.destroy(true);
   }
 }
 
@@ -2058,24 +2065,39 @@ export class PixiView {
     // Built at the draw's own scale, lines included, as the stage's are,
     // then rendered n times larger: the curves are no finer than on the
     // stage, and widths and hairlines scale with the samples.
-    const node = view.sync(o, [1, 0, 0, 1], true, o.scroll ? shifted(m, o.scroll) : m);
+    // What the view built is destroyed, and the targets given back, though a render throws.
     const scaled = new PixiContainer();
-    const masks = new PixiContainer();
-    scaled.addChild(node, masks);
-    view.placeMasks(o, masks);
-    scaled.scale.set(n);
     let target = drawTarget(width * n, height * n);
-    this.renderer.render({ container: scaled, target, clear: true });
-    view.dispose(scaled);
+    try {
+      const node = view.sync(o, [1, 0, 0, 1], true, o.scroll ? shifted(m, o.scroll) : m);
+      const masks = new PixiContainer();
+      scaled.addChild(node, masks);
+      view.placeMasks(o, masks);
+      scaled.scale.set(n);
+      this.renderer.render({ container: scaled, target, clear: true });
+    } catch (error) {
+      releaseDrawTarget(target);
+      throw error;
+    } finally {
+      view.dispose(scaled);
+    }
+
     // Halved until a sample a pixel: a linear sample at the corner four texels share is their mean.
     for (let k = n; k > 1; k /= 2) {
       const half = drawTarget((width * k) / 2, (height * k) / 2);
       target.source.scaleMode = "linear";
       const sprite = new Sprite(target);
       sprite.scale.set(0.5);
-      this.renderer.render({ container: sprite, target: half, clear: true });
-      sprite.destroy();
-      releaseDrawTarget(target);
+      try {
+        this.renderer.render({ container: sprite, target: half, clear: true });
+      } catch (error) {
+        releaseDrawTarget(half);
+        throw error;
+      } finally {
+        sprite.destroy();
+        releaseDrawTarget(target);
+      }
+
       target = half;
     }
 
