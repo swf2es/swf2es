@@ -2134,7 +2134,7 @@ function sharedFillEdges(): Uint8Array {
       ...(r > 0 ? joints[r - 1].map((x) => x + 12) : []),
       ...(r < joints.length ? joints[r] : []),
     ].sort((a, b) => a - b);
-  // The seams, then the outline's four sides clockwise, so that its inside is on their right.
+  // The seams: the rows' lines, then the joints between their boards.
   const seams: [number, number][][] = [];
   for (let r = 1; r < rows.length - 1; r++) {
     seams.push([left, ...splits(r), right].map((x) => at(x, rows[r])));
@@ -2146,6 +2146,7 @@ function sharedFillEdges(): Uint8Array {
     }
   }
 
+  // The outline's four sides clockwise, so that its inside is on their right.
   const sides = [
     [left, ...splits(0), right].map((x) => at(x, top)),
     rows.map((y) => at(right, y)),

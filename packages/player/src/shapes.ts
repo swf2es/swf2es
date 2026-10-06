@@ -3,8 +3,8 @@
 // pixels. Flash fills a region on both sides of an edge: the edge belongs to
 // its fill1 as it goes and to its fill0 reversed, so that each fill's edges
 // join end to start into closed contours, filled even-odd. An edge with
-// one fill on both sides bounds none. Lines stroke the
-// edges they are set on, joined where one edge starts where the last ended.
+// one fill on both sides bounds none. Lines stroke the edges they are set
+// on, joined where one edge starts where the last ended.
 import type { Fill, GradientStop, Line, Matrix, Shape } from "@swf2es/format";
 import type { BitmapStore } from "./bitmap.js";
 import type { BitmapCharacter } from "./timeline.js";
