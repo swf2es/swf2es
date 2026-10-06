@@ -696,8 +696,10 @@ placements give (`morph.ts`), a shape like any other, so it draws,
 bounds and hit-tests as one. The blend mixes where the ends' points lie,
 not their deltas, a straight edge paired with a curve as a curve, and
 keeps them to whole twips, so a closed path stays closed for `shapes.ts`
-to join. A morph keeps only its 16 latest blends, which instances in step
-share. A blend's fills are shared by the instances drawn at it, counted
+to join. A morph keeps only its 64 latest blends, which instances in step
+share, and which a looping tween finds again on its next turn: with 16, a
+tween of 37 frames made each anew on every turn, its fills tessellated
+again, some 400 shapes a second in a crowded room. A blend's fills are shared by the instances drawn at it, counted
 as they take and give them back, and go once the morph drops the blend,
 or idle 5 s, as a shape's do: a tween asks for a new ratio on each
 frame, while a crowd in step, or a timeline that places the morph anew on

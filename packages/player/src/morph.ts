@@ -25,8 +25,14 @@ export const droppedLayers = new WeakSet<ShapeLayer>();
 /** The layers of every blend made, whose lines the renderer watches for their dropping. */
 export const blendLayers = new WeakSet<ShapeLayer>();
 
-/** How many blends a morph keeps: its latest ratios, enough for instances in step to share them. */
-const KEPT_BLENDS = 16;
+/**
+ * How many blends a morph keeps: its latest ratios, enough for instances in
+ * step to share them, and for a looping tween to find each of its frames'
+ * again on its next turn. Kept 16, a tween of 37 frames, as a game's pulsing
+ * effects are, made every one anew each turn, its fills tessellated again:
+ * nearly 2,000 shapes in 5 s in a crowded room.
+ */
+const KEPT_BLENDS = 64;
 
 /**
  * The shape `character` is at `ratio`, 0 its start to 65535 its end: made
