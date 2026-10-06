@@ -88,7 +88,7 @@ export interface SoundStream {
 }
 
 /**
- * What plays a library's timeline sounds (the playerglobal's Sound.ts),
+ * What plays a library's timeline sounds (media/sounds.ts),
  * with a page's audio device; null where nothing plays them.
  */
 export interface TimelineSounds {
