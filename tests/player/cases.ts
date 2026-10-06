@@ -2281,11 +2281,11 @@ function rectPath(x: number, y: number, width: number, height: number): w.PathCo
   return [{ move: [l, t] }, { line: [r, t] }, { line: [r, b] }, { line: [l, b] }, { line: [l, t] }];
 }
 
-/** A circle's path, in pixels: eight quadratics, as Flash's drawCircle. */
-function circlePath(cx: number, cy: number, r: number): w.PathCommand[] {
+/** A circle's path, in pixels: eight quadratics, as Flash's drawCircle; an ellipse `r` by `ry`. */
+function circlePath(cx: number, cy: number, r: number, ry = r): w.PathCommand[] {
   const at = (radius: number, angle: number): [number, number] => [
     Math.round((cx + radius * Math.cos(angle)) * 20),
-    Math.round((cy + radius * Math.sin(angle)) * 20),
+    Math.round((cy + ((radius * ry) / r) * Math.sin(angle)) * 20),
   ];
   const path: w.PathCommand[] = [{ move: at(r, 0) }];
   for (let i = 1; i <= 8; i++) {
@@ -2298,6 +2298,49 @@ function circlePath(cx: number, cy: number, r: number): w.PathCommand[] {
   }
 
   return path;
+}
+
+// A soft shadow under a figure, as a game draws one: a black ellipse in a
+// clip blurred 14 pixels at three quarters' alpha, in a clip stretched wide
+// and flattened, placed twice the second time at twice the size.
+function blurredShadow(): Uint8Array {
+  const stretched = (x: number, scale: number) => ({
+    a: 1.39 * scale,
+    d: 0.81 * scale,
+    tx: x * 20,
+    ty: 50 * 20,
+  });
+  return w.swf({
+    width: 240,
+    height: 100,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.backgroundColor(0xd0d0e0),
+      w.shape({
+        id: 1,
+        bounds: [-470, 470, -150, 150],
+        fills: [0x000000],
+        paths: [{ fill1: 1, commands: circlePath(0, 0, 23.5, 7.5) }],
+      }),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.sprite(3, 1, [
+        w.place({
+          depth: 1,
+          character: 2,
+          matrix: { tx: 3, ty: 29 },
+          colorTransform: { mult: [1, 1, 1, 0.75] },
+          blurs: [14],
+        }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.place({ depth: 1, character: 3, matrix: stretched(60, 1) }),
+      w.place({ depth: 2, character: 3, matrix: stretched(170, 2) }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
 }
 
 // Timeline masks (scripts/ClipDepths.as): five cells of a yellow ground, a
@@ -4025,6 +4068,18 @@ export const cases: PlayerCase[] = [
     capture: [1, 2, 3, 4],
     // The blurs' corners, one apart from adl's on the last frame.
     tolerance: 1,
+    maxOutliers: 0,
+  },
+  {
+    name: "blurred-shadow",
+    swf: blurredShadow(),
+    frames: 1,
+    capture: [1],
+    // A host showing the stage nearly three times its size, where the
+    // blur's padding shrank but not its reach across the stage.
+    zoom: 2.8,
+    // The page's samples against adl's whole pixels, within 5 a channel.
+    tolerance: 5,
     maxOutliers: 0,
   },
   {

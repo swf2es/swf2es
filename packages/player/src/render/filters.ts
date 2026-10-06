@@ -89,7 +89,11 @@ class BoxPass extends Filter {
   }
 }
 
-/** The box's runs over `input` into `output`, through a texture of the pool between them. */
+/**
+ * The box's runs over `input` into `output`, through a texture of the pool
+ * between them: `texels` to a pixel of the screen wide, which the blur is
+ * in, each step a texel of the input.
+ */
 function blur(
   system: FilterSystem,
   pass: BoxPass,
@@ -98,17 +102,20 @@ function blur(
   blurX: number,
   blurY: number,
   quality: number,
-  resolution: number,
+  texels: number,
   clear: boolean,
 ): void {
+  // Not a screen pixel's texels: on a stage shown larger than its size those strode over texels,
+  // blurring as far across the stage as unscaled, past the padding, which cut the blur off.
+  const step = 1 / input.source.resolution;
   const runs: [number, number, number][] = [];
   for (let i = 0; i < quality; i++) {
     if (blurX > 1) {
-      runs.push([1 / resolution, 0, blurX * resolution]);
+      runs.push([step, 0, blurX * texels]);
     }
 
     if (blurY > 1) {
-      runs.push([0, 1 / resolution, blurY * resolution]);
+      runs.push([0, step, blurY * texels]);
     }
   }
 

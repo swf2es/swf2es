@@ -1349,6 +1349,9 @@ test("filters blur, move and pad in pixels of the screen however far the stage i
             const box = pass.resources.boxUniforms?.uniforms;
             if (box) {
               widths.push(box.uWidth as number);
+              // Each step a texel of the input, however many make a screen pixel.
+              const [dx, dy] = box.uDirection as Float32Array;
+              assert.equal(round(dx + dy), round(1 / settable.resolution));
             }
           },
         };
