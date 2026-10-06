@@ -16,7 +16,9 @@
 // --rig N plays instead N instances of one animated character, a sprite of
 // 12 outlined parts that turn and swell on a loop of 24 frames, all in
 // step, as a game's crowd of the same creature does: what the lines cost
-// when only their transforms change.
+// when only their transforms change. --swap has each part taken off and
+// another put in its place on every frame instead, as a frame-by-frame
+// timeline does: what changing children costs, render group rebuilds and all.
 //
 // --idle K renders K times more after each frame with no tick between, as
 // a host that draws on every animation frame does, and times those apart.
@@ -41,7 +43,7 @@
 //
 //   node tests/player/bench.ts [--shapes N | --rig N | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
-//     [--gpu] [--back-buffer] [--antialias] [--allocs] [--json]
+//     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 
@@ -211,8 +213,13 @@ function part(id: number, sides: number): Uint8Array {
   });
 }
 
-/** The rig: `count` instances of a sprite whose 12 parts turn and swell on a loop of 24 frames. */
-function rigSwf(count: number): Uint8Array {
+/**
+ * The rig: `count` instances of a sprite whose 12 parts turn and swell on a
+ * loop of 24 frames. With `swap`, each part is taken off on every frame and
+ * another put in its place, as a frame-by-frame animation's timeline does:
+ * each frame changes the sprite's children, not only their transforms.
+ */
+function rigSwf(count: number, swap = false): Uint8Array {
   const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
   for (let i = 0; i < 4; i++) {
     tags.push(part(11 + i, 12 + 6 * i));
@@ -233,11 +240,16 @@ function rigSwf(count: number): Uint8Array {
         tx: Math.round(400 * Math.cos(i)),
         ty: Math.round(400 * Math.sin(i * 1.7)),
       };
-      sprite.push(
-        f === 0
-          ? w.place({ depth: i + 1, character: 11 + (i % 4), matrix })
-          : w.place({ depth: i + 1, move: true, matrix }),
-      );
+      if (f === 0) {
+        sprite.push(w.place({ depth: i + 1, character: 11 + (i % 4), matrix }));
+      } else if (swap) {
+        sprite.push(
+          w.remove(i + 1),
+          w.place({ depth: i + 1, character: 11 + ((i + f) % 4), matrix }),
+        );
+      } else {
+        sprite.push(w.place({ depth: i + 1, move: true, matrix }));
+      }
     }
 
     sprite.push(w.showFrame());
@@ -395,7 +407,7 @@ const swf =
         : branches > 0
           ? branchSwf(branches)
           : rig > 0
-            ? rigSwf(rig)
+            ? rigSwf(rig, args.includes("--swap"))
             : synthetic();
 const result = await benchPlayer(
   swf,
@@ -445,7 +457,7 @@ const summary = {
           : branches > 0
             ? `${branches} branches`
             : rig > 0
-              ? `rig of ${rig}`
+              ? `rig of ${rig}${args.includes("--swap") ? ", swapping" : ""}`
               : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
