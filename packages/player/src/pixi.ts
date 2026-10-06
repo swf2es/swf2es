@@ -141,7 +141,11 @@ function encloses(outer: number[], inner: number[]): boolean {
 function onOutline(points: number[], px: number, py: number): boolean {
   const near = 1e-6;
   for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
-    const [x0, y0, x1, y1] = [points[j], points[j + 1], points[i], points[i + 1]];
+    // Four reads, not an array destructured: this runs for every edge of every fill built.
+    const x0 = points[j];
+    const y0 = points[j + 1];
+    const x1 = points[i];
+    const y1 = points[i + 1];
     if (
       px >= Math.min(x0, x1) - near &&
       px <= Math.max(x0, x1) + near &&
