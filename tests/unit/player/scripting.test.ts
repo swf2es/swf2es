@@ -1008,6 +1008,45 @@ test("timers due at once fire in the order started, after others around them wer
   assert.deepEqual(lines, ["B 300", "C 300"]);
 });
 
+test("an AS3 error tells a host the methods it was thrown in", { skip }, async () => {
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Main extends MovieClip {
+      public var nothing:Object = null;
+      public function Main() {
+        addFrameScript(0, frame1);
+      }
+      private function frame1():void {
+        a();
+      }
+      private function a():void { b(); }
+      private function b():void { c(); }
+      private function c():void { d(); }
+      private function d():void { e(); }
+      private function e():void { reachNothing(); }
+      private function reachNothing():void {
+        trace(nothing.field);
+      }
+    }
+  }`;
+  const errors: unknown[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: () => {},
+    onUncaught: (error) => errors.push(error),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compiler(out)("ErrorStack", source)), scripting);
+  await player.start();
+
+  assert.equal(errors.length, 1);
+  assert.match(scripting.rt.toString(errors[0] as avm2.Value), /1009/);
+  const stack = scripting.rt.stackOf(errors[0] as avm2.Value) ?? "";
+  // The method that reached null first, and the frame script six calls out, past V8's usual ten frames.
+  assert.match(stack.split("\n")[0], /reachNothing/);
+  assert.match(stack, /frame1/);
+  assert.equal(scripting.rt.stackOf("not an error"), null);
+});
+
 test("frame scripts that send their clip to each other's frame end in a stack overflow, not the page's", {
   skip,
 }, async () => {

@@ -18,60 +18,64 @@ export function ramp(stops: readonly GradientStop[], linearRgb: boolean): Uint32
     return out;
   }
 
-  const set = (i: number, argb: number) => {
-    const a = argb >>> 24;
-    const m = (c: number) => (c * (a + 1)) >> 8;
-    out[i] =
-      ((a << 24) |
-        (m((argb >>> 16) & 0xff) << 16) |
-        (m((argb >>> 8) & 0xff) << 8) |
-        m(argb & 0xff)) >>>
-      0;
-  };
   // The first colour up to the first stop, each stop's span after it in
   // order (none for a stop before where the ramp has got to), the last
-  // colour on to the end.
+  // colour on to the end. In linear RGB the ends go through linear light
+  // too, which takes 255 to 254 as Flash does.
   let at = 0;
-  // In linear RGB the ends go through linear light too, which takes 255 to 254 as Flash does.
-  const end = (argb: number) => (linearRgb ? mix(argb, argb, 0, true) : argb);
+  const first = premultiplied(mix(stops[0].color, stops[0].color, 0, linearRgb));
   for (; at <= stops[0].ratio && at < 256; at++) {
-    set(at, end(stops[0].color));
+    out[at] = first;
   }
 
   for (let k = 1; k < stops.length; k++) {
     const from = stops[k - 1];
     const to = stops[k];
     for (; at <= to.ratio && at < 256; at++) {
-      set(at, mix(from.color, to.color, (at - from.ratio) / (to.ratio - from.ratio), linearRgb));
+      const f = (at - from.ratio) / (to.ratio - from.ratio);
+      out[at] = premultiplied(mix(from.color, to.color, f, linearRgb));
     }
   }
 
+  const lastStop = stops[stops.length - 1].color;
+  const last = premultiplied(mix(lastStop, lastStop, 0, linearRgb));
   for (; at < 256; at++) {
-    set(at, end(stops[stops.length - 1].color));
+    out[at] = last;
   }
 
   return out;
 }
 
+/** Straight ARGB premultiplied, each channel times alpha + 1 over 256. */
+function premultiplied(argb: number): number {
+  const a = argb >>> 24;
+  const r = (((argb >>> 16) & 0xff) * (a + 1)) >> 8;
+  const g = (((argb >>> 8) & 0xff) * (a + 1)) >> 8;
+  const b = ((argb & 0xff) * (a + 1)) >> 8;
+  return ((a << 24) | (r << 16) | (g << 8) | b) >>> 0;
+}
+
 /** a to b by f, each channel truncated; colours in linear light for linear RGB, alpha straight. */
 function mix(a: number, b: number, f: number, linearRgb: boolean): number {
-  const channel = (shift: number, light: boolean) => {
-    const x = (a >>> shift) & 0xff;
-    const y = (b >>> shift) & 0xff;
-    if (!light) {
-      return Math.floor(x + (y - x) * f);
-    }
-
-    const l = (1 - f) * toLinear(x / 255) + f * toLinear(y / 255);
-    return Math.floor(255 * toSrgb(l));
-  };
   return (
-    ((channel(24, false) << 24) |
-      (channel(16, linearRgb) << 16) |
-      (channel(8, linearRgb) << 8) |
-      channel(0, linearRgb)) >>>
+    ((channel(a, b, f, 24, false) << 24) |
+      (channel(a, b, f, 16, linearRgb) << 16) |
+      (channel(a, b, f, 8, linearRgb) << 8) |
+      channel(a, b, f, 0, linearRgb)) >>>
     0
   );
+}
+
+/** The channel at `shift` of a to b by f, truncated, through linear light if `light`. */
+function channel(a: number, b: number, f: number, shift: number, light: boolean): number {
+  const x = (a >>> shift) & 0xff;
+  const y = (b >>> shift) & 0xff;
+  if (!light) {
+    return Math.floor(x + (y - x) * f);
+  }
+
+  const l = (1 - f) * toLinear(x / 255) + f * toLinear(y / 255);
+  return Math.floor(255 * toSrgb(l));
 }
 
 function toLinear(c: number): number {

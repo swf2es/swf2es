@@ -911,6 +911,11 @@ callback's own error goes back to the page that called it. A child its
 parent's first frame places is made in the parent's `super()`, and its
 error still reaches the parent's constructor.
 
+An AS3 error keeps the JavaScript stack it was made on, out of AS3's
+sight (the release player's `getStackTrace` gives null), for a host to
+say where an error nothing caught came from: `Runtime.stackOf` gives its
+lines from the first compiled method's, whose names begin with `$`.
+
 A goto plays or stops its clip as it happens, before the frame it lands
 on has its script run, so a `stop()` or `play()` there has the last word:
 a clip whose every frame stops stays where `gotoAndPlay` from another
