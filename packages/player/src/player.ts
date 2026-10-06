@@ -193,9 +193,11 @@ export class Player {
         clips.push(o);
       }
 
-      // A button's states all play, whichever it shows.
-      for (const child of frameChildren(o)) {
-        collect(child);
+      // A button's states all play, whichever it shows. An index, not for-of:
+      // this visits every object on the list each frame.
+      const children = frameChildren(o);
+      for (let i = 0; i < children.length; i++) {
+        collect(children[i]);
       }
     };
     collect(this.stage);
