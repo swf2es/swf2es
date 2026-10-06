@@ -123,8 +123,6 @@ export class Player {
   private owed = 0;
   /** Frames played. */
   private played = 0;
-  /** The clips a frame advances, kept for the next: thousands in a crowded room, grown anew each frame else. */
-  private readonly advancing: MovieClip[] = [];
 
   /**
    * A count that moves whenever what the player shows may have changed: a
@@ -184,7 +182,7 @@ export class Player {
   tick(): void {
     this.played++;
     this.scripting?.beginFrame(1000 / this.frameRate);
-    const clips = this.advancing;
+    const clips: MovieClip[] = [];
     const collect = (o: DisplayObject) => {
       if (o instanceof MovieClip) {
         // One a goto made sit this frame out takes all in it along.
@@ -210,9 +208,6 @@ export class Player {
     for (const clip of clips) {
       clip.advance();
     }
-
-    // Emptied, so that a clip taken off since is not held till the next frame.
-    clips.length = 0;
 
     if (this.scripting) {
       this.scripting.frame(this.stage);
