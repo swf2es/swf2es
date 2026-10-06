@@ -905,6 +905,59 @@ function emptyKernel(f: FilterRecord): FilterRecord {
 /** The texture of a displacement map's map, as its renderer holds it; null for none. */
 export type MapTexture = (map: object) => Texture | null;
 
+/**
+ * Whether two lists of filter records hold the same values, which draw the
+ * same: a timeline's tween writes its filters again on each frame, and a
+ * script may set them from their own. A map is the same only as the same
+ * object, so that a displacement's map taken anew is drawn anew.
+ */
+export function sameFilterRecords(a: readonly FilterRecord[], b: readonly FilterRecord[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  // Compared each frame for every object a tween filters, so without allocating.
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i] as unknown as Record<string, unknown>;
+    const y = b[i] as unknown as Record<string, unknown>;
+    let keys = 0;
+    for (const key in x) {
+      keys++;
+      if (!(key in y) || !sameValue(x[key], y[key])) {
+        return false;
+      }
+    }
+
+    for (const _ in y) {
+      keys--;
+    }
+
+    if (keys !== 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function sameValue(u: unknown, v: unknown): boolean {
+  if (!Array.isArray(u) || !Array.isArray(v)) {
+    return Object.is(u, v);
+  }
+
+  if (u.length !== v.length) {
+    return false;
+  }
+
+  for (let k = 0; k < u.length; k++) {
+    if (!Object.is(u[k], v[k])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 /** The Pixi filters a display object's filter records draw as: those swf2es draws yet, in their order. */
 export function displayFilters(
   records: readonly FilterRecord[],

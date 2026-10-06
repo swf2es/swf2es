@@ -59,7 +59,7 @@ import type { PointerState } from "./input.js";
 import { blendLayers, droppedLayers } from "./morph.js";
 import { blendFilters } from "./pixi-blend.js";
 import { dropBatchedCopy, type SharingGraphics, setFlashColor, showFor } from "./pixi-color.js";
-import { displayFilters, FilterChain, rgbaOf } from "./pixi-filters.js";
+import { displayFilters, FilterChain, rgbaOf, sameFilterRecords } from "./pixi-filters.js";
 import { boundedResolves } from "./pixi-resolve.js";
 // Registers the table's pipe with Pixi, which the override below looks up by name.
 import "./pixi-table.js";
@@ -1957,9 +1957,13 @@ export class PixiView {
       // Its filters, then its blend: adl filters the object, then blends what they make.
       const blend = masking ? "normal" : o.blendMode;
       const records = masking ? NO_RECORDS : o.filters;
-      if (blend !== node.blend || records !== node.filterRecords) {
+      // Filters set again with the same values, as a tween writes them on each frame, keep their
+      // chain and the output it kept.
+      const refiltered =
+        records !== node.filterRecords && !sameFilterRecords(records, node.filterRecords);
+      node.filterRecords = records;
+      if (blend !== node.blend || refiltered) {
         node.blend = blend;
-        node.filterRecords = records;
         for (const f of node.filters) {
           f.destroy();
         }

@@ -8,7 +8,12 @@ import { pathToFileURL } from "node:url";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { BitmapStore } from "../../../packages/player/dist/bitmap.js";
-import { BitmapObject, CONTENT, Container } from "../../../packages/player/dist/display.js";
+import {
+  BitmapObject,
+  CONTENT,
+  Container,
+  TRANSFORM,
+} from "../../../packages/player/dist/display.js";
 import { PixiView } from "../../../packages/player/dist/pixi.js";
 import { ColorBatcher } from "../../../packages/player/dist/pixi-color.js";
 import type { Player } from "../../../packages/player/dist/player.js";
@@ -777,6 +782,41 @@ test("Flash's filters are left out under WebGPU, and a fresh view destroys those
   }
 
   assert.ok(destroyed >= 2);
+});
+
+test("filters set again with the same values keep their chain, and its output, as a tween writes them", async () => {
+  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    DOMAdapter: { get(): object; set(adapter: object): void };
+  };
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  try {
+    const { renderer } = standIn([]);
+    (renderer as unknown as { type: number }).type = 1;
+    const view = new PixiView(renderer);
+    const o = new Container();
+    const glow = (blur: number) => [{ ...filterDefaults("glow"), blurX: blur, blurY: blur }];
+    const chainOf = () =>
+      (view.stage.children[0] as unknown as { filters: unknown[] | null }).filters?.[0];
+    const set = (filters: ReturnType<typeof glow>) => {
+      o.filters = filters;
+      o.invalidate(TRANSFORM);
+      view.prepare(o);
+    };
+
+    set(glow(4));
+    const first = chainOf();
+    assert.ok(first);
+    set(glow(4));
+    assert.equal(chainOf(), first);
+    set(glow(5));
+    assert.notEqual(chainOf(), first);
+  } finally {
+    pixi.DOMAdapter.set(adapter);
+  }
 });
 
 test("blurred filter inputs release pooled textures without sharing idle listeners", async () => {
