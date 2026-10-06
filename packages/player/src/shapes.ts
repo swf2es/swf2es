@@ -2,8 +2,9 @@
 // starts one), each fill's closed contours and each line's strokes, in
 // pixels. Flash fills a region on both sides of an edge: the edge belongs to
 // its fill1 as it goes and to its fill0 reversed, so that each fill's edges
-// join end to start into closed contours, filled even-odd. Lines stroke the
-// edges they are set on, joined where one edge starts where the last ended.
+// join end to start into closed contours, filled even-odd. An edge with
+// one fill on both sides bounds none. Lines stroke the edges they are set
+// on, joined where one edge starts where the last ended.
 import type { Fill, GradientStop, Line, Matrix, Shape } from "@swf2es/format";
 import type { BitmapStore } from "./bitmap.js";
 import type { BitmapCharacter } from "./timeline.js";
@@ -375,11 +376,14 @@ export function shapeLayers(
   };
 
   const edge = (e: Edge) => {
-    if (fill1 > 0 && fill1 <= fills.length) {
+    // An edge with one fill on both sides is inside it and bounds nothing.
+    // Given to it both ways, it would join its fill's contours across that
+    // fill, into contours that cross and that the containment tree misfills.
+    if (fill0 !== fill1 && fill1 > 0 && fill1 <= fills.length) {
       fillEdges[fill1 - 1].push(e);
     }
 
-    if (fill0 > 0 && fill0 <= fills.length) {
+    if (fill0 !== fill1 && fill0 > 0 && fill0 <= fills.length) {
       fillEdges[fill0 - 1].push(reversed(e));
     }
 
