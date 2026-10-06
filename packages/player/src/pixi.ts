@@ -792,7 +792,7 @@ function strokeFrame(m: Linear, least: number): { m: Linear; key: string; invers
  * particle squashed one way, every mirror and every instance alike then
  * share the lines of one context, where each angle was tessellated anew.
  * Rounded, so that one stretch has one key however its turn rounded it;
- * null where m flattens everything.
+ * null where m flattens everything, or nearly, where rounding would.
  */
 function stretchOf(m: Linear): Linear | null {
   const a = m[0];
@@ -811,7 +811,10 @@ function stretchOf(m: Linear): Linear | null {
 
   const round = (x: number) => Math.round((x / t) * 65536) / 65536;
   const off = round(r);
-  return [round(p + det), off, off, round(q + det)];
+  const stretch: Linear = [round(p + det), off, off, round(q + det)];
+  // Near collapse, a scale of a few 65536ths rounds away, and the lines with it.
+  const rounded = Math.abs(stretch[0] * stretch[3] - off * off);
+  return Math.abs(rounded - det) <= 1e-3 * det ? stretch : null;
 }
 
 /** Whether every line of the layer scales both ways, whose width no rotation changes; one scaled one way alone turns with it. */
@@ -1543,24 +1546,37 @@ export class PixiView {
 
   /**
    * Draw the lines again for the object's transform on the stage: in the
-   * stage's axes, under the inverse of that transform's linear part.
+   * stage's axes, under the inverse of that transform's linear part, or
+   * for a layer whose lines scale both ways, through its stretch alone,
+   * under the stretch's inverse (stretchOf).
    */
   private restroke(node: Node): void {
     const m = node.world;
     const least = this.leastWidth;
     node.strokedAt = least;
-    // One key and one inverse for all its layers, and for those whose lines
-    // scale both ways, one of its stretch alone.
-    const exact = strokeFrame(m, least);
-    const stretch = stretchOf(m);
-    const scaled = stretch ? strokeFrame(stretch, least) : exact;
+    // One key and one inverse for all its layers of each kind, made as one first needs them.
+    let exact: ReturnType<typeof strokeFrame> | null = null;
+    let scaled: ReturnType<typeof strokeFrame> | null | undefined;
+    const frameFor = (layer: ShapeLayer) => {
+      if (scaled === undefined && scalesEvenly(layer)) {
+        const stretch = stretchOf(m);
+        scaled = stretch && strokeFrame(stretch, least);
+      }
+
+      if (scaled && scalesEvenly(layer)) {
+        return scaled;
+      }
+
+      exact ??= strokeFrame(m, least);
+      return exact;
+    };
     node.layers.forEach((layer, i) => {
       const strokes = node.strokes[i];
       if (!strokes) {
         return;
       }
 
-      const { m: seen, key, inverse } = stretch && scalesEvenly(layer) ? scaled : exact;
+      const { m: seen, key, inverse } = frameFor(layer);
       // The new context goes in before the old one goes back, as it may be the same.
       const previous = strokes.shared;
       // A fresh view borrows the stage's lines where it draws them alike.

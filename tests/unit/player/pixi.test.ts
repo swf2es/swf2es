@@ -2208,9 +2208,25 @@ test("a shape's lines share a context through every turn and mirror of one stret
     root.placeAtDepth(shape, i + 1);
   });
 
-  type Lines = { context: unknown };
-  const lines = (i: number) =>
-    (view.stage.children[0].children[1 + i].children[0].children[1] as unknown as Lines).context;
+  // A squash on the stage turned: its stretch is no longer diagonal.
+  const squashed = turned(0.6, 1, 1);
+  const { a, b, c, d } = squashed.matrix;
+  squashed.setMatrix({ a, b: b * 0.25, c, d: d * 0.25, tx: 0, ty: 0 });
+  shapes.push(squashed);
+  // Near collapse: drawn through its transform exactly, its line still there.
+  shapes.push(turned(0, 1, 1e-6));
+  shapes.forEach((shape, i) => {
+    root.placeAtDepth(shape, i + 1);
+  });
+
+  type Lines = {
+    context: { instructions: unknown[] };
+    localTransform: { a: number; b: number; c: number; d: number };
+    updateLocalTransform(): void;
+  };
+  const strokes = (i: number) =>
+    view.stage.children[0].children[1 + i].children[0].children[1] as unknown as Lines;
+  const lines = (i: number) => strokes(i).context;
   view.prepare(root);
 
   assert.equal(lines(1), lines(0));
@@ -2218,6 +2234,58 @@ test("a shape's lines share a context through every turn and mirror of one stret
   assert.notEqual(lines(3), lines(0));
   assert.equal(lines(5), lines(4));
   assert.notEqual(lines(4), lines(0));
-  // Scale 2 at any turn or mirror, scale 3, and the squash at any turn.
-  assert.equal(view.counts.strokeContexts, 3);
+  // Scale 2 at any turn or mirror, scale 3, the squash at any turn, the squash turned on the stage,
+  // and the one near collapse.
+  assert.equal(view.counts.strokeContexts, 5);
+  assert.ok(lines(7).instructions.length > 0);
+
+  // Each one's lines reach the stage through a turn or a mirror alone: the stroke is not stretched.
+  shapes.forEach((shape, i) => {
+    const m = shape.matrix;
+    // Pixi works its local transform out of its scale, turn and skew as it renders.
+    strokes(i).updateLocalTransform();
+    const l = strokes(i).localTransform;
+    const w = [
+      m.a * l.a + m.c * l.b,
+      m.b * l.a + m.d * l.b,
+      m.a * l.c + m.c * l.d,
+      m.b * l.c + m.d * l.d,
+    ];
+    if (i === 7) {
+      return;
+    }
+
+    assert.ok(
+      Math.abs(Math.hypot(w[0], w[1]) - 1) < 1e-3,
+      `shape ${i}: column 1 is ${w[0]},${w[1]}`,
+    );
+    assert.ok(
+      Math.abs(Math.hypot(w[2], w[3]) - 1) < 1e-3,
+      `shape ${i}: column 2 is ${w[2]},${w[3]}`,
+    );
+    assert.ok(
+      Math.abs(w[0] * w[2] + w[1] * w[3]) < 1e-3,
+      `shape ${i}: columns not at right angles`,
+    );
+  });
+});
+
+test("a line scaled one way alone keeps its lines for each angle", async () => {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const character = await outlinedSquare();
+  const layer = (character as unknown as { layers: { strokes: { line: object }[] }[] }).layers[0];
+  layer.strokes[0].line = { ...layer.strokes[0].line, noHScale: true };
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  for (const [i, angle] of [0.3, 1.1].entries()) {
+    const shape = new ShapeObject(character);
+    const cos = Math.cos(angle) * 2;
+    const sin = Math.sin(angle) * 2;
+    shape.setMatrix({ a: cos, b: sin, c: -sin, d: cos, tx: 0, ty: 0 });
+    root.placeAtDepth(shape, i + 1);
+  }
+
+  view.prepare(root);
+  // Its width reads one row of the transform, which the turn changes.
+  assert.equal(view.counts.strokeContexts, 2);
 });
