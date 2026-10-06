@@ -811,6 +811,12 @@ and the player's paths in this document are relative to it:
   colour transforms, blend modes, filters and resolves on the GPU.
 - `playerglobal/`: the `flash.*` classes, a path per package and class.
 
+The unit tests mirror this tree: `tests/unit/player/<path>.test.ts` tests
+`<path>.ts`, a playerglobal class's under
+`playerglobal/flash/<package>/<Class>.test.ts`. `tests/unit/mirror.test.ts`
+rejects a test that mirrors no source, but for the few that cut across
+modules, which it lists with their reasons.
+
 ### Scripts and the display list
 
 An AS3 SWF's display objects are AS3 objects: a timeline child whose
@@ -1672,7 +1678,7 @@ start, nor queue on a device that is not running, and `Sound.play` gives
 null, as Flash's and Ruffle's do; a channel of a sound still loading
 holds no channel until it can start. adl cannot
 show what a timeline plays (its `computeSpectrum` reads nothing of an
-event sound or a stream), so the node tests (`timeline-sounds.test.ts`)
+event sound or a stream), so the node tests (`media/timeline-sounds.test.ts`)
 check, through a device that logs, what starts and stops, when, how far
 in, and with which mix; the `timeline-sounds` case checks that the frames
 go on as in Flash.
