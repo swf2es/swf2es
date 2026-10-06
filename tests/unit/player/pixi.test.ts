@@ -2172,26 +2172,38 @@ test("a gradient a drawing redrew is freed once, though its fill was collected f
   );
 });
 
-test("a shape's lines turned at one scale share a context, but for lines scaled one way", async () => {
+test("a shape's lines share a context through every turn and mirror of one stretch", async () => {
   // A limb that turns on every frame of a loop tessellated its lines anew
-  // at each angle; a line scaled both ways is as wide at any angle, so its
-  // lines are stroked at the scale alone and turned.
+  // at each angle; a line scaled both ways is as wide through any turn of
+  // a stretch, so its lines are stroked through the stretch alone.
   const { ShapeObject } = await import("../../../packages/player/dist/display.js");
   const character = await outlinedSquare();
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
-  const turned = (angle: number, s: number) => {
+  // A stretch of sx by sy, turned by `angle`, mirrored if `mirror`.
+  const turned = (angle: number, sx: number, sy: number, mirror = false) => {
     const shape = new ShapeObject(character);
-    const cos = Math.cos(angle) * s;
-    const sin = Math.sin(angle) * s;
-    shape.setMatrix({ a: cos, b: sin, c: -sin, d: cos, tx: 0, ty: 0 });
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const flip = mirror ? -1 : 1;
+    shape.setMatrix({
+      a: cos * sx,
+      b: sin * sx,
+      c: -sin * sy * flip,
+      d: cos * sy * flip,
+      tx: 0,
+      ty: 0,
+    });
     return shape;
   };
-  const shapes = [turned(0.3, 2), turned(1.1, 2), turned(2.5, 2)];
-  // Mirrored as well as turned: the same width, the same lines.
-  const mirrored = turned(0.7, 2);
-  mirrored.setMatrix({ ...mirrored.matrix, c: -mirrored.matrix.c, d: -mirrored.matrix.d });
-  shapes.push(mirrored, turned(0.3, 3));
+  const shapes = [
+    turned(0.3, 2, 2),
+    turned(1.1, 2, 2),
+    turned(2.5, 2, 2, true),
+    turned(0.3, 3, 3),
+    turned(0.4, 1, 0.25),
+    turned(2.9, 1, 0.25, true),
+  ];
   shapes.forEach((shape, i) => {
     root.placeAtDepth(shape, i + 1);
   });
@@ -2204,7 +2216,8 @@ test("a shape's lines turned at one scale share a context, but for lines scaled 
   assert.equal(lines(1), lines(0));
   assert.equal(lines(2), lines(0));
   assert.notEqual(lines(3), lines(0));
+  assert.equal(lines(5), lines(4));
   assert.notEqual(lines(4), lines(0));
-  // Turned and at scale 2, mirrored at scale 2, and at scale 3.
+  // Scale 2 at any turn or mirror, scale 3, and the squash at any turn.
   assert.equal(view.counts.strokeContexts, 3);
 });

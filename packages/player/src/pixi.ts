@@ -784,37 +784,34 @@ function strokeFrame(m: Linear, least: number): { m: Linear; key: string; invers
 }
 
 /**
- * `m` without its rotation, where it is one, a scale even on both axes and
- * perhaps a mirror: its lines are the same stroked at the scale alone and
- * turned, as screenWidth gives a line scaled both ways the scale's width
- * at any angle. A limb that turns on every frame of a loop, and every
- * instance at that scale, then share the lines of one context, where each
- * angle was tessellated anew. Null for a skew or an uneven scale.
+ * `m`'s stretch, without its turn or mirror: m is a rotation or a mirror
+ * times this symmetric stretch, and a line scaled both ways is as wide
+ * through either (screenWidth reads |m's columns' sum|, which no rotation
+ * changes), so its lines are the same stroked through the stretch alone
+ * and then turned. A limb that turns on every frame of a loop, a spinning
+ * particle squashed one way, every mirror and every instance alike then
+ * share the lines of one context, where each angle was tessellated anew.
+ * Rounded, so that one stretch has one key however its turn rounded it;
+ * null where m flattens everything.
  */
-function rotationFree(m: Linear): Linear | null {
+function stretchOf(m: Linear): Linear | null {
   const a = m[0];
   const b = m[1];
   const c = m[2];
   const d = m[3];
-  const s = Math.sqrt(Math.abs(a * d - b * c));
-  if (s === 0) {
+  // S = sqrt(mᵀm), in closed form for 2 by 2.
+  const p = a * a + b * b;
+  const q = c * c + d * d;
+  const r = a * c + b * d;
+  const det = Math.abs(a * d - b * c);
+  const t = Math.sqrt(p + q + 2 * det);
+  if (det === 0 || t === 0) {
     return null;
   }
 
-  // A SWF's matrices are 16.16 fixed point: a turn's two cosines may part in the last bit.
-  const near = 1e-4 * s;
-  // And the scale to the same, so that one turned any way has one key, not one for each rounding.
-  const even = Math.round(s * 65536) / 65536;
-
-  if (Math.abs(a - d) <= near && Math.abs(b + c) <= near) {
-    return [even, 0, 0, even];
-  }
-
-  if (Math.abs(a + d) <= near && Math.abs(b - c) <= near) {
-    return [even, 0, 0, -even];
-  }
-
-  return null;
+  const round = (x: number) => Math.round((x / t) * 65536) / 65536;
+  const off = round(r);
+  return [round(p + det), off, off, round(q + det)];
 }
 
 /** Whether every line of the layer scales both ways, whose width no rotation changes; one scaled one way alone turns with it. */
@@ -1553,17 +1550,17 @@ export class PixiView {
     const least = this.leastWidth;
     node.strokedAt = least;
     // One key and one inverse for all its layers, and for those whose lines
-    // keep no rotation, one of its scale alone.
+    // scale both ways, one of its stretch alone.
     const exact = strokeFrame(m, least);
-    const turned = rotationFree(m);
-    const scaled = turned ? strokeFrame(turned, least) : exact;
+    const stretch = stretchOf(m);
+    const scaled = stretch ? strokeFrame(stretch, least) : exact;
     node.layers.forEach((layer, i) => {
       const strokes = node.strokes[i];
       if (!strokes) {
         return;
       }
 
-      const { m: seen, key, inverse } = turned && scalesEvenly(layer) ? scaled : exact;
+      const { m: seen, key, inverse } = stretch && scalesEvenly(layer) ? scaled : exact;
       // The new context goes in before the old one goes back, as it may be the same.
       const previous = strokes.shared;
       // A fresh view borrows the stage's lines where it draws them alike.
