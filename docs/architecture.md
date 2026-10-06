@@ -816,6 +816,15 @@ and the player's paths in this document are relative to it:
   colour transforms, blend modes, filters and resolves on the GPU.
 - `playerglobal/`: the `flash.*` classes, a path per package and class.
 
+`playerglobal/` holds AS3's bindings only, and depends one way: its
+natives and hooks import the rest of the player, and the rest imports
+playerglobal once, where `scripting.ts` registers `playerNatives` and
+`playerHooks` from `playerglobal/index.ts` with the runtime. What the
+player needs for itself, though a `flash.*` class shows it to scripts,
+lives outside it: event dispatch, the host interfaces, the timeline's
+sounds and the channels' state, a display object's root.
+`tests/unit/boundaries.test.ts` rejects any other import of it.
+
 The unit tests mirror this tree: `tests/unit/player/<path>.test.ts` tests
 `<path>.ts`, a playerglobal class's under
 `playerglobal/flash/<package>/<Class>.test.ts`. `tests/unit/mirror.test.ts`
