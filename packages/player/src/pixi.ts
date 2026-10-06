@@ -514,11 +514,55 @@ const PARKED_FIRST_GROUPS_MOST = 64;
  */
 const POOLED_RENDER_DATA_MOST = 128;
 
-/** Pixi's pool of render data destroyed contexts gave back, emptied once past its most; what is in use stays. */
+/**
+ * The render textures draws render through, oldest first, kept for the
+ * next draw of the same size: a bitmap drawn again on every move of the
+ * pointer, as a colour picker's is, then makes and frees no texture each
+ * time. At most DRAW_TARGETS_MOST and DRAW_TARGET_TEXELS, the oldest going
+ * first, and none kept idle past IDLE_MS: a draw of the whole stage at four
+ * samples a pixel is tens of megabytes no other draw may want.
+ */
+const DRAW_TARGETS_MOST = 8;
+const DRAW_TARGET_TEXELS = 4 * 1024 * 1024;
+const drawTargets: { texture: RenderTexture; since: number }[] = [];
+
+function drawTarget(width: number, height: number): RenderTexture {
+  for (let i = drawTargets.length - 1; i >= 0; i--) {
+    const { texture } = drawTargets[i];
+    if (texture.width === width && texture.height === height) {
+      drawTargets.splice(i, 1);
+      return texture;
+    }
+  }
+
+  return RenderTexture.create({ width, height });
+}
+
+/** A draw's target done with: kept for the next draw of its size, the oldest kept going past the most. */
+function releaseDrawTarget(texture: RenderTexture): void {
+  drawTargets.push({ texture, since: performance.now() });
+  let texels = 0;
+  for (const kept of drawTargets) {
+    texels += kept.texture.width * kept.texture.height;
+  }
+
+  while (drawTargets.length > DRAW_TARGETS_MOST || texels > DRAW_TARGET_TEXELS) {
+    const oldest = drawTargets.shift() as (typeof drawTargets)[number];
+    texels -= oldest.texture.width * oldest.texture.height;
+    oldest.texture.destroy(true);
+  }
+}
+
+/** Pixi's pool of render data destroyed contexts gave back, emptied once past its most; what is in use stays. And the draws' targets kept idle too long. */
 function trimPools(): void {
   const data = BigPool.getPool(GraphicsContextRenderData);
   if (data.totalFree > POOLED_RENDER_DATA_MOST) {
     data.clear();
+  }
+
+  const now = performance.now();
+  while (drawTargets.length > 0 && now - drawTargets[0].since > IDLE_MS) {
+    drawTargets.shift()?.texture.destroy(true);
   }
 }
 
@@ -2021,24 +2065,39 @@ export class PixiView {
     // Built at the draw's own scale, lines included, as the stage's are,
     // then rendered n times larger: the curves are no finer than on the
     // stage, and widths and hairlines scale with the samples.
-    const node = view.sync(o, [1, 0, 0, 1], true, o.scroll ? shifted(m, o.scroll) : m);
+    // What the view built is destroyed, and the targets given back, though a render throws.
     const scaled = new PixiContainer();
-    const masks = new PixiContainer();
-    scaled.addChild(node, masks);
-    view.placeMasks(o, masks);
-    scaled.scale.set(n);
-    let target = RenderTexture.create({ width: width * n, height: height * n });
-    this.renderer.render({ container: scaled, target, clear: true });
-    view.dispose(scaled);
+    let target = drawTarget(width * n, height * n);
+    try {
+      const node = view.sync(o, [1, 0, 0, 1], true, o.scroll ? shifted(m, o.scroll) : m);
+      const masks = new PixiContainer();
+      scaled.addChild(node, masks);
+      view.placeMasks(o, masks);
+      scaled.scale.set(n);
+      this.renderer.render({ container: scaled, target, clear: true });
+    } catch (error) {
+      releaseDrawTarget(target);
+      throw error;
+    } finally {
+      view.dispose(scaled);
+    }
+
     // Halved until a sample a pixel: a linear sample at the corner four texels share is their mean.
     for (let k = n; k > 1; k /= 2) {
-      const half = RenderTexture.create({ width: (width * k) / 2, height: (height * k) / 2 });
+      const half = drawTarget((width * k) / 2, (height * k) / 2);
       target.source.scaleMode = "linear";
       const sprite = new Sprite(target);
       sprite.scale.set(0.5);
-      this.renderer.render({ container: sprite, target: half, clear: true });
-      sprite.destroy();
-      target.destroy(true);
+      try {
+        this.renderer.render({ container: sprite, target: half, clear: true });
+      } catch (error) {
+        releaseDrawTarget(half);
+        throw error;
+      } finally {
+        sprite.destroy();
+        releaseDrawTarget(target);
+      }
+
       target = half;
     }
 
@@ -2055,7 +2114,7 @@ export class PixiView {
   ): Uint32Array {
     const target = this.sampled(o, m, width, height, samples);
     const pixels = argbOf(this.renderer.extract.pixels(target).pixels);
-    target.destroy(true);
+    releaseDrawTarget(target);
     return pixels;
   }
 
@@ -2086,7 +2145,7 @@ export class PixiView {
     sprite.position.set(x, y);
     this.renderer.render({ container: sprite, target: texture, clear: false });
     sprite.destroy();
-    drawn.destroy(true);
+    releaseDrawTarget(drawn);
     bitmaps.drawn(store);
     return true;
   }
@@ -2564,13 +2623,14 @@ class GpuBitmaps {
    * several of, each held by the contexts that draw with it.
    */
   private readonly gradients = new WeakMap<GradientFill, Map<string, GradientTexture>>();
-  private readonly gradientsCollected = new FinalizationRegistry<Texture>(destroyTexture);
 
   /**
    * A gradient's texture and the matrix from its texels to the shape, made
    * once for each region and held: given back with `release` by each
-   * context that took it, and freed when the last does, or when the fill is
-   * collected. A linear one is its ramp of 256 colours, sampled nearest and
+   * context that took it, and freed when the last does: not when the fill
+   * is collected, as a drawing cleared may drop it while a view still draws
+   * the texture (`graphics.clear()` empties the layers the view holds too).
+   * A linear one is its ramp of 256 colours, sampled nearest and
    * spread as the texture wraps, moved half a pixel so that a pixel's
    * centre reads what Flash reads at its corner. A radial one is computed
    * over the region it fills, a texel a pixel (up to RADIAL_MAX a side),
@@ -2628,13 +2688,11 @@ class GpuBitmaps {
       release: () => {
         if (--entry.uses === 0) {
           byRegion.delete(key);
-          this.gradientsCollected.unregister(entry);
           destroyTexture(texture);
         }
       },
     };
     made.set(key, entry);
-    this.gradientsCollected.register(fill, texture, entry);
     return entry;
   }
 }
