@@ -1651,6 +1651,11 @@ test("a gradient a drawing off the list let go of leaves no warning in Pixi's bi
 
     assert.equal(source.destroyed, true);
     assert.deepEqual(warned, []);
+    // The bind group cache keeps the source: not the bytes it was made from.
+    assert.equal(
+      (source as unknown as { options: { resource?: unknown } }).options.resource,
+      undefined,
+    );
   });
 });
 
