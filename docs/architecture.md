@@ -796,8 +796,11 @@ arithmetic at that resolution, no whole number, differs.
 and the player's paths in this document are relative to it:
 
 - `index.ts` is the package's one entry point; `player.ts` runs a SWF,
-  `scripting.ts` connects it to the runtime and the compiler, and
-  `sha256.ts` names the ABCs it compiles.
+  `scripting.ts` connects it to the runtime and the compiler,
+  `scripting/events.ts` dispatches events to AS3 listeners, `hosts.ts`
+  holds what a host may supply in place of the browser (navigation,
+  shared objects' storage, the platform Capabilities reports) with the
+  browser's defaults, and `sha256.ts` names the ABCs it compiles.
 - `display/`: the display list and the timeline, and what they are made
   of: shapes, morphs, drawings, bounds and hit tests, geometry, 3D
   matrices, colour transforms, gradients' ramps, and filters as records
@@ -805,11 +808,22 @@ and the player's paths in this document are relative to it:
 - `text/`: text fields' model and layout, static text, fonts and CSS.
 - `bitmap/`: the pixel store and its operations on the CPU, bitmap
   filters, decoded images and PNG encoding.
-- `media/`: sound.
+- `media/`: sound: decoding and the host's device (`audio.ts`), and
+  the sounds the player plays, the timeline's and scripts' channels
+  (`sounds.ts`).
 - `input/`: the pointer and the keyboard.
 - `render/`: the PixiJS view and what only it uses: the transform table,
   colour transforms, blend modes, filters and resolves on the GPU.
 - `playerglobal/`: the `flash.*` classes, a path per package and class.
+
+`playerglobal/` holds AS3's bindings only, and depends one way: its
+natives and hooks import the rest of the player, and the rest imports
+playerglobal once, where `scripting.ts` registers `playerNatives` and
+`playerHooks` from `playerglobal/index.ts` with the runtime. What the
+player needs for itself, though a `flash.*` class shows it to scripts,
+lives outside it: event dispatch, the host interfaces, the timeline's
+sounds and the channels' state, a display object's root.
+`tests/unit/boundaries.test.ts` rejects any other import of it.
 
 The unit tests mirror this tree: `tests/unit/player/<path>.test.ts` tests
 `<path>.ts`, a playerglobal class's under
@@ -861,8 +875,8 @@ before the phase is never made (`delayed_symbolclass`). A goto makes what
 it places at once. `EventDispatcher()` calls its private native
 `ctor`, and `InteractiveObject()` calls `addEventListener`, so event
 dispatch is part of the first slice: listeners by type and phase on the
-player object, `dispatchEvent` through the player's parent chain, and the
-frame events the player broadcasts.
+player object, `dispatchEvent` through the player's parent chain
+(`scripting/events.ts`), and the frame events the player broadcasts.
 
 `MouseEvent` keeps its local coordinates and flags on the event. Its stage
 coordinates are read through the target's current display matrix, so moving
@@ -1600,8 +1614,8 @@ browser audio.
 A timeline plays sounds of its own, which no script sees: StartSound and
 StartSound2 on its frames, its stream (SoundStreamHead or SoundStreamHead2,
 and a SoundStreamBlock a frame), and a button's DefineButtonSound. The
-library's `sounds` hook (`TimelineSounds`, made by playerglobal's
-`Sound.ts` for every AS3 library a `Scripting` loads) plays them through
+library's `sounds` hook (`TimelineSounds`, made by `media/sounds.ts`
+for every AS3 library a `Scripting` loads) plays them through
 the page's `AudioHost`; a player without one plays none, and a SWF without
 them pays nothing. An AVM1 movie's library has none: its actions do not
 run, so its timeline loops where a `stop()` would have held it, and its

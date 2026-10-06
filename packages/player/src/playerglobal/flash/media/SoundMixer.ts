@@ -1,8 +1,9 @@
 // flash.media.SoundMixer: the global sound transform over every channel,
 // stopAll, and the settings Flash keeps without the player using them.
 import { avm2 } from "@swf2es/runtime";
+import { stopAllSounds } from "../../../media/sounds.js";
 import type { Scripting } from "../../../scripting.js";
-import { mixerTransform, setMixerTransform, stopAllSounds } from "./Sound.js";
+import { mixerTransform, setMixerTransform } from "./Sound.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;

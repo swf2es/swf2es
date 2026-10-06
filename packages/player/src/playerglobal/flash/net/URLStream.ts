@@ -1,8 +1,8 @@
 // flash.net.URLStream: bytes fetched by the host, read through ByteArray's
 // DataInput implementation and delivered to scripts on a later frame.
 import { avm2 } from "@swf2es/runtime";
+import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
-import { dispatchEvent } from "../events/EventDispatcher.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;

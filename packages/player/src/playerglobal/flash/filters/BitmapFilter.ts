@@ -1,13 +1,15 @@
-// flash.filters' objects: each keeps its values as adl converts them, in a
-// record (`$filter`) that DisplayObject.filters copies to and from the display
-// object's (display/filters.ts in the player), so a filter read back is a copy.
+// flash.filters.BitmapFilter, and what its subclasses share: each keeps its
+// values as adl converts them, in a record (`$filter`) that
+// DisplayObject.filters copies to and from the display object's
+// (display/filters.ts in the player), so a filter read back is a copy.
 import { avm2 } from "@swf2es/runtime";
-import type { BitmapStore } from "../../../bitmap/bitmap.js";
 import { type Filter, type FilterKind, filterDefaults } from "../../../display/filters.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
+
+export type Prop = [get: (f: Filter) => Value, set: (f: Filter, v: Value) => void];
 
 const CLASSES: [string, FilterKind][] = [
   ["BlurFilter", "blur"],
@@ -38,37 +40,14 @@ export function filterKindOf(rt: avm2.Runtime, o: AsObject): FilterKind | null {
   return null;
 }
 
-/**
- * A copy of a displacement map's BitmapData, made as Flash makes it: a
- * plain BitmapData of the same pixels, not through the object's own
- * clone, which a script may override. Null for none, or one disposed.
- */
-export function copyMap(s: Scripting, map: object | null): AsObject | null {
-  const store = (map as { $store?: BitmapStore } | null)?.$store;
-  if (!store || store.disposed) {
-    return null;
-  }
-
-  const o = s.rt.construct(
-    s.rt.classNamed("flash.display::BitmapData"),
-    store.width,
-    store.height,
-    store.transparent,
-    0,
-  ) as AsObject;
-  o.$store = store.clone();
-  return o;
-}
-
 /** The record of a filter object, made with the kind's defaults when first touched. */
 export function recordOf(o: AsObject, kind: FilterKind): Filter {
   o.$filter ??= filterDefaults(kind);
   return o.$filter;
 }
 
-/** A Number property's value as adl keeps it: alpha in 255ths, strength in 256ths, clamped. */
-export function filterNatives(s: Scripting): avm2.Natives {
-  const natives: avm2.Natives = {};
+/** The conversions of filters' values as adl keeps them: alpha in 255ths, strength in 256ths, clamped. */
+export function filterValues(s: Scripting) {
   const num = (v: Value) => s.rt.toNumber(v);
   const blur = (v: Value) => {
     const n = num(v);
@@ -141,7 +120,6 @@ export function filterNatives(s: Scripting): avm2.Natives {
     scaleX: (v) => scale(v),
     scaleY: (v) => scale(v),
   };
-  type Prop = [get: (f: Filter) => Value, set: (f: Filter, v: Value) => void];
   const props: Record<string, Prop> = Object.fromEntries(
     Object.entries(converts).map(([key, convert]) => [
       key,
@@ -157,83 +135,6 @@ export function filterNatives(s: Scripting): avm2.Natives {
     const n = num(v);
     return Number.isNaN(n) ? n : Math.fround(Math.max(-65535, Math.min(65535, n)));
   }
-
-  /** The properties each class has, beyond those of `props` its kind's record has. */
-  const own: Record<FilterKind, Record<string, Prop>> = {
-    blur: {},
-    glow: {},
-    dropShadow: {},
-    bevel: {},
-    gradientGlow: gradientProps(),
-    gradientBevel: gradientProps(),
-    colorMatrix: {
-      matrix: [
-        (f) => s.rt.array([...f.matrix]),
-        (f, v) => {
-          f.matrix = floats(elements(v, "matrix"), 20);
-        },
-      ],
-    },
-    convolution: {
-      matrix: [
-        (f) => s.rt.array([...f.matrix]),
-        (f, v) => {
-          f.matrix = floats(elements(v, "matrix"), f.matrixX * f.matrixY);
-        },
-      ],
-      // Resized, the flat values stay in order, as many as fit, the rest 0.
-      matrixX: [
-        (f) => f.matrixX,
-        (f, v) => {
-          f.matrixX = matrixSize(v);
-          f.matrix = floats(f.matrix, f.matrixX * f.matrixY);
-        },
-      ],
-      matrixY: [
-        (f) => f.matrixY,
-        (f, v) => {
-          f.matrixY = matrixSize(v);
-          f.matrix = floats(f.matrix, f.matrixX * f.matrixY);
-        },
-      ],
-    },
-    displacementMap: {
-      // A copy each way, as adl gives one: the map's pixels, the point in whole pixels.
-      mapBitmap: [
-        (f) => copyMap(s, f.mapBitmap),
-        (f, v) => {
-          f.mapBitmap = (v as AsObject | null) ?? null;
-        },
-      ],
-      mapPoint: [
-        (f) => s.rt.construct(s.rt.classNamed("flash.geom::Point"), f.mapPoint[0], f.mapPoint[1]),
-        (f, v) => {
-          const p = v as AsObject | null;
-          f.mapPoint = p
-            ? [
-                Math.trunc(num(s.rt.getProperty(p, s.rt.publicName("x")))) || 0,
-                Math.trunc(num(s.rt.getProperty(p, s.rt.publicName("y")))) || 0,
-              ]
-            : [0, 0];
-        },
-      ],
-      mode: [
-        (f) => f.mode,
-        (f, v) => {
-          if (v === null || v === undefined) {
-            throw s.rt.error("TypeError", 2007, "mode");
-          }
-
-          const mode = s.rt.toString(v);
-          if (!["wrap", "clamp", "ignore", "color"].includes(mode)) {
-            throw s.rt.error("ArgumentError", 2008, "mode");
-          }
-
-          f.mode = mode;
-        },
-      ],
-    },
-  };
 
   /**
    * A gradient's stops, at most 16, as adl keeps them: colours set their
@@ -278,33 +179,43 @@ export function filterNatives(s: Scripting): avm2.Natives {
     };
   }
 
-  for (const [name, kind] of CLASSES) {
-    const defaults = filterDefaults(kind);
-    const members: Record<string, PropertyDescriptor> = {};
-    const all = {
-      ...Object.fromEntries(
-        Object.keys(props)
-          .filter((k) => k in defaults)
-          .map((k) => [k, props[k]]),
-      ),
-      ...own[kind],
-    };
-    for (const [key, [get, set]] of Object.entries(all)) {
-      members[key] = {
-        get(this: AsObject) {
-          return get(recordOf(this, kind));
-        },
-        set(this: AsObject, v: Value) {
-          set(recordOf(this, kind), v);
-        },
-      };
-    }
+  return { num, alpha, color, matrixSize, elements, floats, props, gradientProps };
+}
 
-    const cls = class {};
-    Object.defineProperties(cls.prototype, members);
-    avm2.registerNativeClass(natives, `flash.filters::${name}`, cls);
+/** A filter class's natives: its kind's record's properties of `props`, and its `own`. */
+export function filterNatives(
+  s: Scripting,
+  kind: FilterKind,
+  own: (values: ReturnType<typeof filterValues>) => Record<string, Prop> = () => ({}),
+): avm2.Natives {
+  const natives: avm2.Natives = {};
+  const values = filterValues(s);
+  const { props } = values;
+  const name = filterClassName(kind).slice("flash.filters::".length);
+  const defaults = filterDefaults(kind);
+  const members: Record<string, PropertyDescriptor> = {};
+  const all = {
+    ...Object.fromEntries(
+      Object.keys(props)
+        .filter((k) => k in defaults)
+        .map((k) => [k, props[k]]),
+    ),
+    ...own(values),
+  };
+  for (const [key, [get, set]] of Object.entries(all)) {
+    members[key] = {
+      get(this: AsObject) {
+        return get(recordOf(this, kind));
+      },
+      set(this: AsObject, v: Value) {
+        set(recordOf(this, kind), v);
+      },
+    };
   }
 
+  const cls = class {};
+  Object.defineProperties(cls.prototype, members);
+  avm2.registerNativeClass(natives, `flash.filters::${name}`, cls);
   return natives;
 }
 
@@ -313,7 +224,7 @@ export function filterNatives(s: Scripting): avm2.Natives {
  * playerglobal's own filters, and what extends them, are made; a script's
  * class extending it is refused as it is.
  */
-export const filterHooks: Record<string, avm2.ClassHook> = {
+export const bitmapFilterHooks: Record<string, avm2.ClassHook> = {
   "flash.filters::BitmapFilter": {
     construct: (rt) => {
       throw rt.error("ArgumentError", 2012, "BitmapFilter$");

@@ -3,8 +3,8 @@
 // as a frame begins (Scripting.beginFrame), each firing dispatching the
 // timer event here.
 import { avm2 } from "@swf2es/runtime";
+import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
-import { dispatchEvent } from "../events/EventDispatcher.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;

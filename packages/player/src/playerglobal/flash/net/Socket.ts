@@ -1,7 +1,7 @@
 // flash.net.Socket: DataInput/DataOutput over a host-provided TCP transport.
 import { avm2 } from "@swf2es/runtime";
+import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting, SocketTransport } from "../../../scripting.js";
-import { dispatchEvent } from "../events/EventDispatcher.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;

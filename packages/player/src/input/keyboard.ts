@@ -16,7 +16,7 @@ import {
   TextObject,
 } from "../display/display.js";
 import { apply } from "../display/geometry.js";
-import { dispatchEvent } from "../playerglobal/flash/events/EventDispatcher.js";
+import { dispatchEvent } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import { GUTTER } from "../text/layout.js";
 

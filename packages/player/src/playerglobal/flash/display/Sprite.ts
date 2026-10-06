@@ -8,8 +8,9 @@ import { avm2 } from "@swf2es/runtime";
 import { type DisplayObject, MovieClip } from "../../../display/display.js";
 import type { Rect } from "../../../display/geometry.js";
 import type { SoundMix } from "../../../media/audio.js";
+import { mixOf, updateTimelineMixes } from "../../../media/sounds.js";
 import type { Scripting } from "../../../scripting.js";
-import { channelMix, mixOf, transformOf, updateTimelineMixes } from "../media/Sound.js";
+import { channelMix, transformOf } from "../media/Sound.js";
 import { graphicsOf } from "./Graphics.js";
 
 type Value = avm2.Value;

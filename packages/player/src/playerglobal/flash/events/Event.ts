@@ -1,12 +1,9 @@
 // flash.events.Event: its constructor's private native ctor keeps the type
 // and flags; dispatch sets the target, current target and phase.
 import { avm2 } from "@swf2es/runtime";
+import { AT_TARGET } from "../../../scripting/events.js";
 
 type Value = avm2.Value;
-
-export const CAPTURING_PHASE = 1;
-export const AT_TARGET = 2;
-export const BUBBLING_PHASE = 3;
 
 export function eventNatives(): avm2.Natives {
   const natives: avm2.Natives = {};

@@ -13,7 +13,8 @@ const sources = fileURLToPath(new URL("../../packages/player/src/", import.meta.
 const crossCutting: Record<string, string> = {
   "time.test.ts": "the player's clock and pacing, apart from player.test.ts's frame counts",
   "display/transform.test.ts": "a display object's scales and rotation, apart from display.test.ts",
-  "media/timeline-sounds.test.ts": "timeline sounds through the timeline, audio.ts and the player",
+  "media/timeline-sounds.test.ts":
+    "timeline sounds through the timeline, audio.ts, sounds.ts and the player",
 };
 
 test("each test under tests/unit/player mirrors a source of the player", () => {

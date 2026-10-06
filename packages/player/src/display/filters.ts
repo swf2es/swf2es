@@ -1,7 +1,7 @@
 // A display object's filters as records of their values, as adl keeps
 // them: what flash.filters' objects read and set (playerglobal's
-// filters.ts), what a PlaceObject3's list becomes, and what the renderer
-// will draw. A record holds the keys of its kind alone.
+// flash/filters/, a file per class), what a PlaceObject3's list becomes,
+// and what the renderer will draw. A record holds the keys of its kind alone.
 import type { SwfFilter } from "@swf2es/format";
 
 export type FilterKind =

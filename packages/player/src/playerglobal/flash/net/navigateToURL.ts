@@ -3,16 +3,9 @@
 // arguments as Flash does, request then its url (TypeError #2007, as adl
 // throws them), and take the request as URLStream's load does.
 import type { avm2 } from "@swf2es/runtime";
-import type { FetchRequest, Scripting } from "../../../scripting.js";
+import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
-
-/**
- * Opens the page a request asks for in the browser window or frame named,
- * "_self", "_blank", "_parent", "_top" or a name of the page's; null asks
- * for a new window, as Flash's does when no window is given.
- */
-export type Navigate = (request: FetchRequest, window: string | null) => void;
 
 export function navigateNatives(s: Scripting): avm2.Natives {
   const checked = (rt: avm2.Runtime, request: Value): avm2.AsObject => {
@@ -46,70 +39,4 @@ export function navigateNatives(s: Scripting): avm2.Natives {
  */
 function target(name: string): string {
   return /^_?blank$/i.test(name) ? "_blank" : name;
-}
-
-/** Targets that would replace the player's own page or a frame around it. */
-const IN_PLACE = new Set(["_self", "_parent", "_top", ""]);
-
-/**
- * The browser's navigation, deliberately conservative, as a SWF is not to
- * be trusted by the page that embeds it: only an http: or https: URL opens,
- * so a javascript: one cannot run in the embedding page; a target that
- * would replace the page or a frame around it is refused, as Ruffle's web
- * navigator refuses it without script access; and every other target opens
- * a new window, since a name reaches the window or frame of that name,
- * noopener or not, so a SWF cannot reuse a window it named. A GET opens in
- * window.open without an opener; a POST is a form submitted to a new
- * window, the only way a browser posts into one, its body read as form
- * data. A host that trusts its SWFs further gives a navigate of its own.
- * Null where there is no window to open, as in node.
- */
-export function browserNavigate(): Navigate | null {
-  if (typeof globalThis.open !== "function" || typeof document === "undefined") {
-    return null;
-  }
-
-  return (request, window) => {
-    if (window !== null && IN_PLACE.has(window.toLowerCase())) {
-      return;
-    }
-
-    let url: URL;
-    try {
-      url = new URL(request.url, globalThis.location?.href);
-    } catch {
-      return;
-    }
-
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return;
-    }
-
-    if (request.method.toUpperCase() !== "POST" || !request.body) {
-      globalThis.open(url.href, "_blank", "noopener");
-      return;
-    }
-
-    if (!document.body) {
-      return;
-    }
-
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = url.href;
-    form.target = "_blank";
-    form.rel = "noopener";
-    form.style.display = "none";
-    for (const [name, value] of new URLSearchParams(new TextDecoder().decode(request.body))) {
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = name;
-      input.value = value;
-      form.append(input);
-    }
-
-    document.body.append(form);
-    form.submit();
-    form.remove();
-  };
 }
