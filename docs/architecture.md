@@ -639,9 +639,16 @@ outline, since a pixel font's contours touch at their corners
 strokes a transformed line with one width all along, not the local width
 stretched by the transform: so a line's context depends on the linear
 part of its transform on the stage, and is kept by layer and that
-transform, exactly, shared by every instance that sees the layer alike
-(a crowd of one creature in step) and found again when one comes back to
-it (a loop's next turn). Contexts are counted as instances take and give
+transform, shared by every instance that sees the layer alike (a crowd
+of one creature in step) and found again when one comes back to it (a
+loop's next turn). A transform is a turn or a mirror times a symmetric
+stretch, and a line scaled both ways is as wide through any turn of it:
+such a layer's lines are stroked through the stretch alone and turned by
+their Graphics' matrix, so a limb that turns on every frame, or a
+squashed particle that spins, shares one context through every angle;
+one with a line scaled one way alone, which turns with it, or a
+transform near collapse, which rounding would distort, keeps the
+transform exactly. Contexts are counted as instances take and give
 them back. An object that leaves the list, and those of its
 descendants that leave with it (not one moved to a parent on the list,
 which draws it), keep what they drew 5 s, at most 1024 of them, for a

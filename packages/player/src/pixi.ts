@@ -773,6 +773,55 @@ function linesKey(m: Linear, least: number): string {
   return `${m[0]},${m[1]},${m[2]},${m[3]},${least}`;
 }
 
+/** Lines stroked through `m`: the key they are kept by, and the inverse that takes them back to the object's axes. */
+function strokeFrame(m: Linear, least: number): { m: Linear; key: string; inverse: Matrix | null } {
+  const det = m[0] * m[3] - m[1] * m[2];
+  return {
+    m,
+    key: linesKey(m, least),
+    inverse: det === 0 ? null : new Matrix(m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, 0, 0),
+  };
+}
+
+/**
+ * `m`'s stretch, without its turn or mirror: m is a rotation or a mirror
+ * times this symmetric stretch, and a line scaled both ways is as wide
+ * through either (screenWidth reads |m's columns' sum|, which no rotation
+ * changes), so its lines are the same stroked through the stretch alone
+ * and then turned. A limb that turns on every frame of a loop, a spinning
+ * particle squashed one way, every mirror and every instance alike then
+ * share the lines of one context, where each angle was tessellated anew.
+ * Rounded, so that one stretch has one key however its turn rounded it;
+ * null where m flattens everything, or nearly, where rounding would.
+ */
+function stretchOf(m: Linear): Linear | null {
+  const a = m[0];
+  const b = m[1];
+  const c = m[2];
+  const d = m[3];
+  // S = sqrt(mᵀm), in closed form for 2 by 2.
+  const p = a * a + b * b;
+  const q = c * c + d * d;
+  const r = a * c + b * d;
+  const det = Math.abs(a * d - b * c);
+  const t = Math.sqrt(p + q + 2 * det);
+  if (det === 0 || t === 0) {
+    return null;
+  }
+
+  const round = (x: number) => Math.round((x / t) * 65536) / 65536;
+  const off = round(r);
+  const stretch: Linear = [round(p + det), off, off, round(q + det)];
+  // Near collapse, a scale of a few 65536ths rounds away, and the lines with it.
+  const rounded = Math.abs(stretch[0] * stretch[3] - off * off);
+  return Math.abs(rounded - det) <= 1e-3 * det ? stretch : null;
+}
+
+/** Whether every line of the layer scales both ways, whose width no rotation changes; one scaled one way alone turns with it. */
+function scalesEvenly(layer: ShapeLayer): boolean {
+  return layer.strokes.every(({ line }) => !line.noHScale && !line.noVScale);
+}
+
 /**
  * A Graphics of a context it does not own and that never changes once
  * built: a shape's or a drawing's fills, a glyph's, or lines, whose context
@@ -1497,23 +1546,37 @@ export class PixiView {
 
   /**
    * Draw the lines again for the object's transform on the stage: in the
-   * stage's axes, under the inverse of that transform's linear part.
+   * stage's axes, under the inverse of that transform's linear part, or
+   * for a layer whose lines scale both ways, through its stretch alone,
+   * under the stretch's inverse (stretchOf).
    */
   private restroke(node: Node): void {
     const m = node.world;
-    const det = m[0] * m[3] - m[1] * m[2];
     const least = this.leastWidth;
     node.strokedAt = least;
-    // One key and one inverse for all its layers.
-    const key = linesKey(m, least);
-    const inverse =
-      det === 0 ? null : new Matrix(m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, 0, 0);
+    // One key and one inverse for all its layers of each kind, made as one first needs them.
+    let exact: ReturnType<typeof strokeFrame> | null = null;
+    let scaled: ReturnType<typeof strokeFrame> | null | undefined;
+    const frameFor = (layer: ShapeLayer) => {
+      if (scaled === undefined && scalesEvenly(layer)) {
+        const stretch = stretchOf(m);
+        scaled = stretch && strokeFrame(stretch, least);
+      }
+
+      if (scaled && scalesEvenly(layer)) {
+        return scaled;
+      }
+
+      exact ??= strokeFrame(m, least);
+      return exact;
+    };
     node.layers.forEach((layer, i) => {
       const strokes = node.strokes[i];
       if (!strokes) {
         return;
       }
 
+      const { m: seen, key, inverse } = frameFor(layer);
       // The new context goes in before the old one goes back, as it may be the same.
       const previous = strokes.shared;
       // A fresh view borrows the stage's lines where it draws them alike.
@@ -1525,9 +1588,9 @@ export class PixiView {
         strokes.swap(kept);
         this.borrowed.add(kept);
       } else if (node.sharedLines && !this.fresh) {
-        strokes.swap(this.lines.take(layer, m, least, key));
+        strokes.swap(this.lines.take(layer, seen, least, key));
       } else {
-        strokes.swap(linesContext(layer, m, least));
+        strokes.swap(linesContext(layer, seen, least));
         this.counts.strokeContexts++;
         if (this.fresh) {
           this.built.add(strokes.shared);
