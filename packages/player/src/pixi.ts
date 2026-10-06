@@ -773,6 +773,55 @@ function linesKey(m: Linear, least: number): string {
   return `${m[0]},${m[1]},${m[2]},${m[3]},${least}`;
 }
 
+/** Lines stroked through `m`: the key they are kept by, and the inverse that takes them back to the object's axes. */
+function strokeFrame(m: Linear, least: number): { m: Linear; key: string; inverse: Matrix | null } {
+  const det = m[0] * m[3] - m[1] * m[2];
+  return {
+    m,
+    key: linesKey(m, least),
+    inverse: det === 0 ? null : new Matrix(m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, 0, 0),
+  };
+}
+
+/**
+ * `m` without its rotation, where it is one, a scale even on both axes and
+ * perhaps a mirror: its lines are the same stroked at the scale alone and
+ * turned, as screenWidth gives a line scaled both ways the scale's width
+ * at any angle. A limb that turns on every frame of a loop, and every
+ * instance at that scale, then share the lines of one context, where each
+ * angle was tessellated anew. Null for a skew or an uneven scale.
+ */
+function rotationFree(m: Linear): Linear | null {
+  const a = m[0];
+  const b = m[1];
+  const c = m[2];
+  const d = m[3];
+  const s = Math.sqrt(Math.abs(a * d - b * c));
+  if (s === 0) {
+    return null;
+  }
+
+  // A SWF's matrices are 16.16 fixed point: a turn's two cosines may part in the last bit.
+  const near = 1e-4 * s;
+  // And the scale to the same, so that one turned any way has one key, not one for each rounding.
+  const even = Math.round(s * 65536) / 65536;
+
+  if (Math.abs(a - d) <= near && Math.abs(b + c) <= near) {
+    return [even, 0, 0, even];
+  }
+
+  if (Math.abs(a + d) <= near && Math.abs(b - c) <= near) {
+    return [even, 0, 0, -even];
+  }
+
+  return null;
+}
+
+/** Whether every line of the layer scales both ways, whose width no rotation changes; one scaled one way alone turns with it. */
+function scalesEvenly(layer: ShapeLayer): boolean {
+  return layer.strokes.every(({ line }) => !line.noHScale && !line.noVScale);
+}
+
 /**
  * A Graphics of a context it does not own and that never changes once
  * built: a shape's or a drawing's fills, a glyph's, or lines, whose context
@@ -1501,19 +1550,20 @@ export class PixiView {
    */
   private restroke(node: Node): void {
     const m = node.world;
-    const det = m[0] * m[3] - m[1] * m[2];
     const least = this.leastWidth;
     node.strokedAt = least;
-    // One key and one inverse for all its layers.
-    const key = linesKey(m, least);
-    const inverse =
-      det === 0 ? null : new Matrix(m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, 0, 0);
+    // One key and one inverse for all its layers, and for those whose lines
+    // keep no rotation, one of its scale alone.
+    const exact = strokeFrame(m, least);
+    const turned = rotationFree(m);
+    const scaled = turned ? strokeFrame(turned, least) : exact;
     node.layers.forEach((layer, i) => {
       const strokes = node.strokes[i];
       if (!strokes) {
         return;
       }
 
+      const { m: seen, key, inverse } = turned && scalesEvenly(layer) ? scaled : exact;
       // The new context goes in before the old one goes back, as it may be the same.
       const previous = strokes.shared;
       // A fresh view borrows the stage's lines where it draws them alike.
@@ -1525,9 +1575,9 @@ export class PixiView {
         strokes.swap(kept);
         this.borrowed.add(kept);
       } else if (node.sharedLines && !this.fresh) {
-        strokes.swap(this.lines.take(layer, m, least, key));
+        strokes.swap(this.lines.take(layer, seen, least, key));
       } else {
-        strokes.swap(linesContext(layer, m, least));
+        strokes.swap(linesContext(layer, seen, least));
         this.counts.strokeContexts++;
         if (this.fresh) {
           this.built.add(strokes.shared);

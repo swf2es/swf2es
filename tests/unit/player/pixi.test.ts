@@ -2171,3 +2171,40 @@ test("a gradient a drawing redrew is freed once, though its fill was collected f
     [true, true, true, false],
   );
 });
+
+test("a shape's lines turned at one scale share a context, but for lines scaled one way", async () => {
+  // A limb that turns on every frame of a loop tessellated its lines anew
+  // at each angle; a line scaled both ways is as wide at any angle, so its
+  // lines are stroked at the scale alone and turned.
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const turned = (angle: number, s: number) => {
+    const shape = new ShapeObject(character);
+    const cos = Math.cos(angle) * s;
+    const sin = Math.sin(angle) * s;
+    shape.setMatrix({ a: cos, b: sin, c: -sin, d: cos, tx: 0, ty: 0 });
+    return shape;
+  };
+  const shapes = [turned(0.3, 2), turned(1.1, 2), turned(2.5, 2)];
+  // Mirrored as well as turned: the same width, the same lines.
+  const mirrored = turned(0.7, 2);
+  mirrored.setMatrix({ ...mirrored.matrix, c: -mirrored.matrix.c, d: -mirrored.matrix.d });
+  shapes.push(mirrored, turned(0.3, 3));
+  shapes.forEach((shape, i) => {
+    root.placeAtDepth(shape, i + 1);
+  });
+
+  type Lines = { context: unknown };
+  const lines = (i: number) =>
+    (view.stage.children[0].children[1 + i].children[0].children[1] as unknown as Lines).context;
+  view.prepare(root);
+
+  assert.equal(lines(1), lines(0));
+  assert.equal(lines(2), lines(0));
+  assert.notEqual(lines(3), lines(0));
+  assert.notEqual(lines(4), lines(0));
+  // Turned and at scale 2, mirrored at scale 2, and at scale 3.
+  assert.equal(view.counts.strokeContexts, 3);
+});
