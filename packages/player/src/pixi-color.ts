@@ -386,6 +386,8 @@ export function dropBatchedCopy(context: GraphicsContext): void {
 export type SharingGraphics = Graphics & {
   shared?: GraphicsContext;
   show?: (context: GraphicsContext) => void;
+  /** Whether it is in a render group settled long enough to batch it (pixi.ts, settle). */
+  settled?: boolean;
 };
 
 /**
@@ -398,7 +400,7 @@ export type SharingGraphics = Graphics & {
  */
 export function showFor(g: SharingGraphics, ct: ColorTransform | null): void {
   const shared = g.shared ?? g.context;
-  const want = ct ? batched(shared) : shared;
+  const want = ct || g.settled ? batched(shared) : shared;
   if (g.context !== want) {
     if (g.show) {
       g.show(want);

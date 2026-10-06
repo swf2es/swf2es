@@ -27,6 +27,7 @@ import {
   Rectangle,
   type Renderer,
   RendererType,
+  RenderGroupSystem,
   RenderTexture,
   Sprite,
   Text,
@@ -57,7 +58,7 @@ import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients
 import type { PointerState } from "./input.js";
 import { blendLayers, droppedLayers } from "./morph.js";
 import { blendFilters } from "./pixi-blend.js";
-import { dropBatchedCopy, setFlashColor, showFor } from "./pixi-color.js";
+import { dropBatchedCopy, type SharingGraphics, setFlashColor, showFor } from "./pixi-color.js";
 import { displayFilters, FilterChain, rgbaOf } from "./pixi-filters.js";
 import { boundedResolves } from "./pixi-resolve.js";
 import type { Player } from "./player.js";
@@ -388,12 +389,13 @@ function transformPath(path: Path, m: Linear): Path {
 }
 
 /**
- * A context for a shape's fills or lines, drawn on its own, never batched.
+ * A context for a shape's fills or lines, drawn on its own, not batched.
  * A batch holds its vertices on the stage, so Pixi repacks and uploads
  * them all again whenever anything in the render group changes structure,
  * as a timeline does on most frames; and between batches and the large
  * shapes Pixi draws alone anyway it switches programs. Alone, a shape's
- * geometry is uploaded once and only its transform changes.
+ * geometry is uploaded once and only its transform changes. A render
+ * group that settles draws batched copies instead (settle).
  */
 function shapeContext(): GraphicsContext {
   const context = new GraphicsContext();
@@ -800,6 +802,47 @@ class SharedFills {
   }
 }
 
+/**
+ * Batch the Graphics of a render group, its own and not those of a group
+ * nested in it, or draw them alone again: showFor picks the batched copy
+ * of each one's shared context. A mask's are left alone: drawn into the
+ * group of what it masks, they would be packed there and kept, though its
+ * own group's rebuilds draw them alone again.
+ */
+function settle(group: Settling, settled: boolean): void {
+  const root = group.root;
+  // Already changing, its next rebuild is one of its own, not its batching's.
+  const changing = group.structureDidChange;
+  group.$settled = settled;
+  let switched = false;
+  const visit = (container: PixiContainer) => {
+    if (container.includeInBuild === false) {
+      return;
+    }
+
+    const graphics = container as SharingGraphics & { flashColor?: ColorTransform | null };
+    if (container instanceof Graphics && !!graphics.settled !== settled && graphics.shared) {
+      graphics.settled = settled;
+      showFor(graphics, graphics.flashColor ?? null);
+      switched = true;
+    }
+
+    for (const child of container.children) {
+      if (!child.isRenderGroup) {
+        visit(child);
+      }
+    }
+  };
+  if (root) {
+    visit(root);
+  }
+
+  if (switched) {
+    group.structureDidChange = true;
+    group.$settling = !changing;
+  }
+}
+
 /** Take off and destroy the Graphics a redraw kept for its new content that it did not take. */
 function dropSpare(node: Node): void {
   for (const graphic of node.spare?.graphics ?? []) {
@@ -897,6 +940,48 @@ pipe.validateRenderable = function (graphics) {
   const gpuContext = this.renderer.graphicsContext.updateGpuContext(graphics.context);
   const data = (graphics as unknown as PipeGraphics)._gpuData[this.renderer.uid];
   return gpuContext.isBatchable || data?.batched !== false;
+};
+
+/**
+ * How long a render group goes without its instructions being rebuilt
+ * before its Graphics are batched. Each Graphics drawn alone is a draw
+ * call of its own, thousands in a crowded room, most of them scenery that
+ * never changes; batched, they are a few. But a batch packs its vertices
+ * again whenever its group is rebuilt, as an animated character's is on
+ * most frames: only a group that has settled is batched, and it is drawn
+ * alone again as soon as it is rebuilt, by anything but its batching.
+ */
+const SETTLE_MS = 2000;
+
+/** A render group as the player marks it: when it was last rebuilt, and whether its Graphics are batched. */
+type Settling = {
+  root: PixiContainer | null;
+  renderGroupChildren: Settling[];
+  structureDidChange: boolean;
+  $builtAt?: number;
+  $settled?: boolean;
+  $settling?: boolean;
+  /** The rebuild settleGroups last looked at. */
+  $seen?: number;
+};
+const buildInstructions = (
+  RenderGroupSystem.prototype as unknown as {
+    _buildInstructions(group: Settling, renderer: unknown): void;
+  }
+)._buildInstructions;
+(
+  RenderGroupSystem.prototype as unknown as {
+    _buildInstructions(group: Settling, renderer: unknown): void;
+  }
+)._buildInstructions = function (group, renderer) {
+  // Its own batching's rebuild is not a change of its own.
+  if (group.$settling) {
+    group.$settling = false;
+  } else {
+    group.$builtAt = performance.now();
+  }
+
+  buildInstructions.call(this, group, renderer);
 };
 
 /**
@@ -2056,6 +2141,17 @@ export class PixiView {
 
   /** Retire Pixi's per-group batches before it returns the group to its pool. */
   private disableRenderGroup(container: PixiContainer): void {
+    // Its Graphics join the group above, which may not have settled; and Pixi
+    // pools the group, which the next to take it must find unmarked.
+    const group = container.renderGroup as unknown as Settling | null;
+    if (group) {
+      settle(group, false);
+      group.$builtAt = undefined;
+      group.$settled = undefined;
+      group.$settling = undefined;
+      group.$seen = undefined;
+    }
+
     const set = container.renderGroup?.instructionSet;
     if (set) {
       // Pixi pools the group, set included, for any root it renders next.
@@ -2244,6 +2340,38 @@ export class PixiView {
     }
 
     this.placeMasks(root, this.offList);
+    if (!this.fresh) {
+      this.settleGroups();
+    }
+  }
+
+  /**
+   * Batch the Graphics of each render group drawn that has not been rebuilt
+   * for SETTLE_MS, and draw those of one rebuilt since alone again: walking
+   * Pixi's tree of groups from the stage's, which holds those drawn and no
+   * other. A group rebuilt and not settled is looked through for Graphics
+   * still batched, which a branch brings along as it moves under it or
+   * becomes a group of its own.
+   */
+  private settleGroups(): void {
+    const stage = this.stage.renderGroup as unknown as Settling | null;
+    if (!stage) {
+      return;
+    }
+
+    const now = performance.now();
+    const visit = (group: Settling) => {
+      const quiet = group.$builtAt !== undefined && now - group.$builtAt >= SETTLE_MS;
+      if (quiet !== !!group.$settled || (!quiet && group.$seen !== group.$builtAt)) {
+        settle(group, quiet);
+      }
+
+      group.$seen = group.$builtAt;
+      for (const child of group.renderGroupChildren) {
+        visit(child);
+      }
+    };
+    visit(stage);
   }
 
   /**
