@@ -872,19 +872,31 @@ function scalesEvenly(layer: ShapeLayer): boolean {
  * has GPU data at all, which every Graphics drawn once has, so one that
  * is drawn alone, as a shape's fills and lines are, had its whole group
  * rebuilt each time its context was swapped: an animated character's on
- * every frame. Drawn alone before and after, its instruction draws the
- * context it has when it runs, and nothing needs rebuilding.
+ * every frame. Each build now records whether it batched the Graphics or
+ * gave it an instruction of its own (GraphicsGpuData's unused `batched`):
+ * drawn alone by the last build and still to be, its instruction draws the
+ * context it has when it runs, and nothing needs rebuilding. One the last
+ * build batched, even into no batches at all as an empty context is, gets
+ * an instruction only from a rebuild.
  */
-(
-  GraphicsPipe.prototype as unknown as {
-    validateRenderable(graphics: Graphics): boolean;
+type PipeGraphics = { _gpuData: Record<number, { batched?: boolean } | undefined> };
+const pipe = GraphicsPipe.prototype as unknown as {
+  renderer: Renderer;
+  addRenderable(graphics: Graphics, instructionSet: InstructionSet): void;
+  validateRenderable(graphics: Graphics): boolean;
+};
+const addGraphics = pipe.addRenderable;
+pipe.addRenderable = function (graphics, instructionSet) {
+  addGraphics.call(this, graphics, instructionSet);
+  const data = (graphics as unknown as PipeGraphics)._gpuData[this.renderer.uid];
+  if (data) {
+    data.batched = this.renderer.graphicsContext.getGpuContext(graphics.context).isBatchable;
   }
-).validateRenderable = function (this: { renderer: Renderer }, graphics: Graphics): boolean {
+};
+pipe.validateRenderable = function (graphics) {
   const gpuContext = this.renderer.graphicsContext.updateGpuContext(graphics.context);
-  const data = (graphics as unknown as { _gpuData: Record<number, { batches: unknown[] }> })
-    ._gpuData[this.renderer.uid];
-  const wasBatched = (data?.batches.length ?? 0) > 0;
-  return gpuContext.isBatchable || wasBatched;
+  const data = (graphics as unknown as PipeGraphics)._gpuData[this.renderer.uid];
+  return gpuContext.isBatchable || data?.batched !== false;
 };
 
 /**
@@ -925,7 +937,9 @@ class SharedGraphics extends Graphics {
 
 /** A layer's lines seen through `m`, nothing where `m` flattens them. */
 function linesContext(layer: ShapeLayer, m: Linear, least: number): GraphicsContext {
-  return m[0] * m[3] - m[1] * m[2] === 0 ? new GraphicsContext() : strokeContext(layer, m, least);
+  // Empty, drawn alone as every shape's are: one batched would get no
+  // instruction till its group rebuilt.
+  return m[0] * m[3] - m[1] * m[2] === 0 ? shapeContext() : strokeContext(layer, m, least);
 }
 
 const NO_RECORDS: readonly FilterRecord[] = [];
@@ -969,7 +983,10 @@ interface Node {
   bitmap: Sprite | null;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
   lines: SharedGraphics[];
-  /** Between a redraw's clear and its draw, the Graphics the content left, which lines, for the next to take in place. */
+  /**
+   * Between a redraw's clear and its draw, the Graphics the content left,
+   * and which are lines, for the next to take in place.
+   */
   spare: { graphics: SharedGraphics[]; lines: boolean[] } | null;
   /** Whether the object is a mask or in one, as of the last sync. */
   masking: boolean;
@@ -1382,7 +1399,7 @@ export class PixiView {
       this.draw(o, node);
     } finally {
       done();
-      // What the new content did not take in its place goes.
+      // Drawn, the new content has taken or dropped them all; one that threw has not.
       dropSpare(node);
     }
   }
@@ -1410,7 +1427,8 @@ export class PixiView {
         lines: art.map((g) => lines.has(g)),
       };
     } else {
-      // A text's characters are in a container of their own; their shared glyph fills stay, not being theirs.
+      // A text's characters are in a container of their own; their shared
+      // glyph fills stay, not being theirs.
       for (const child of node.art.removeChildren()) {
         if (!child.destroyed) {
           child.destroy({ children: true });
@@ -1502,31 +1520,34 @@ export class PixiView {
       this.source?.leastWidth === this.leastWidth
         ? current.strokes
         : null;
-    // The Graphics the last content left, taken in place where it laid out its fills and lines alike.
-    const spare = node.spare;
+    // The Graphics the last content left, taken in place where it laid out
+    // its fills and lines alike.
     const roles = node.layers.flatMap((layer) => (layer.strokes.length ? [false, true] : [false]));
-    const reuse =
-      spare !== null &&
-      spare.lines.length === roles.length &&
-      spare.lines.every((isLines, k) => isLines === roles[k]);
+    const spare =
+      node.spare &&
+      node.spare.lines.length === roles.length &&
+      node.spare.lines.every((isLines, k) => isLines === roles[k])
+        ? node.spare.graphics
+        : null;
+    if (!spare) {
+      dropSpare(node);
+    }
+
+    node.spare = null;
     let next = 0;
     const graphic = (context?: GraphicsContext): SharedGraphics => {
-      if (!reuse || !spare) {
+      if (!spare) {
         const made = new SharedGraphics(context);
         node.art.addChild(made);
         return made;
       }
 
-      const kept = spare.graphics[next++];
+      const kept = spare[next++];
       // A line's own context is made for it as a new one's would be: restroke gives back the old.
       kept.swap(context ?? new GraphicsContext());
       return kept;
     };
-    if (!reuse) {
-      dropSpare(node);
-    }
 
-    node.spare = null;
     node.layers.forEach((layer, i) => {
       graphic(fills[i]);
       const borrowed = lines?.[i];
