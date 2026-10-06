@@ -5,8 +5,10 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { BitmapStore } from "../../../packages/player/dist/bitmap.js";
-import { BitmapObject, Container } from "../../../packages/player/dist/display.js";
+import { BitmapObject, CONTENT, Container } from "../../../packages/player/dist/display.js";
 import { PixiView } from "../../../packages/player/dist/pixi.js";
 import { ColorBatcher } from "../../../packages/player/dist/pixi-color.js";
 import type { Player } from "../../../packages/player/dist/player.js";
@@ -2103,4 +2105,49 @@ test("mask partners share a group, including when an existing group's mask moves
   view.prepare(root);
   assert.equal(a.isRenderGroup, true);
   store.dispose();
+});
+
+test("a gradient a drawing redrew is freed once, though its fill was collected first", async () => {
+  // A colour picker redraws its gradient on each move of the pointer: the
+  // old fill may be collected before the view lets go of its texture.
+  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const sprite = new Container();
+  const drawing = new Drawing();
+  const draw = (color: number) => {
+    drawing.clear();
+    drawing.beginFill({
+      type: "gradient",
+      radial: false,
+      focal: 0,
+      stops: [
+        { ratio: 0, color: 0xff000000 },
+        { ratio: 255, color },
+      ],
+      spread: 0,
+      linearRgb: false,
+      matrix: { a: 0.05, b: 0, c: 0, d: 0.05, tx: 0, ty: 0 },
+    });
+    drawing.drawRect(0, 0, 80, 80);
+    drawing.endFill();
+    sprite.invalidate(CONTENT);
+  };
+  sprite.drawing = drawing;
+  root.placeAtDepth(sprite, 1);
+
+  draw(0xff000000);
+  view.prepare(root);
+  for (let i = 1; i < 4; i++) {
+    // Drawn again, its old fill gone from the drawing, and collected before the view syncs.
+    draw(0xff000000 | (i * 0x404040));
+    for (let j = 0; j < 3; j++) {
+      gc();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    view.prepare(root);
+  }
 });

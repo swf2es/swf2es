@@ -2601,13 +2601,14 @@ class GpuBitmaps {
    * several of, each held by the contexts that draw with it.
    */
   private readonly gradients = new WeakMap<GradientFill, Map<string, GradientTexture>>();
-  private readonly gradientsCollected = new FinalizationRegistry<Texture>(destroyTexture);
 
   /**
    * A gradient's texture and the matrix from its texels to the shape, made
    * once for each region and held: given back with `release` by each
-   * context that took it, and freed when the last does, or when the fill is
-   * collected. A linear one is its ramp of 256 colours, sampled nearest and
+   * context that took it, and freed when the last does: not when the fill
+   * is collected, as a drawing cleared may drop it while a view still draws
+   * the texture (`graphics.clear()` empties the layers the view holds too).
+   * A linear one is its ramp of 256 colours, sampled nearest and
    * spread as the texture wraps, moved half a pixel so that a pixel's
    * centre reads what Flash reads at its corner. A radial one is computed
    * over the region it fills, a texel a pixel (up to RADIAL_MAX a side),
@@ -2665,13 +2666,11 @@ class GpuBitmaps {
       release: () => {
         if (--entry.uses === 0) {
           byRegion.delete(key);
-          this.gradientsCollected.unregister(entry);
           destroyTexture(texture);
         }
       },
     };
     made.set(key, entry);
-    this.gradientsCollected.register(fill, texture, entry);
     return entry;
   }
 }
