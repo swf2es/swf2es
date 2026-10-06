@@ -112,16 +112,16 @@ test("a blend's shape keeps its bounds alone, drawn into layers once, and is kep
   assert.equal(morphAt(c, 21845), half);
 });
 
-test("a morph keeps its 16 latest blends, the one asked for again among them", () => {
+test("a morph keeps its 64 latest blends, the one asked for again among them", () => {
   const c = character();
   const first = morphAt(c, 0);
-  for (let ratio = 1; ratio < 16; ratio++) {
+  for (let ratio = 1; ratio < 64; ratio++) {
     morphAt(c, ratio);
   }
 
   assert.equal(morphAt(c, 0), first);
   morphAt(c, 100);
-  assert.equal(c.blends.size, 16);
+  assert.equal(c.blends.size, 64);
   assert.equal(c.blends.has(1), false);
   assert.equal(morphAt(c, 0), first);
 });

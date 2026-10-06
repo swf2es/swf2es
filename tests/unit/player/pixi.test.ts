@@ -1313,8 +1313,8 @@ test("a tween's lines go once its morph drops their blend, not idle for a ratio 
   draw(1000);
   assert.equal(first.destroyed, false);
 
-  // Sixteen ratios later its blend is dropped, and the next frame its lines.
-  for (let ratio = 2000; ratio <= 17000; ratio += 1000) {
+  // 64 ratios later its blend is dropped, and the next frame its lines.
+  for (let ratio = 2000; ratio <= 65000; ratio += 1000) {
     draw(ratio);
   }
 
@@ -1386,8 +1386,8 @@ test("instances of a morph at one ratio share its blend's fills, which go once t
   assert.notEqual(fill(0), first);
   assert.equal(first.destroyed, false);
 
-  // Sixteen ratios later its blend is dropped, and the next frame its fills.
-  for (let ratio = 2000; ratio <= 17000; ratio += 1000) {
+  // 64 ratios later its blend is dropped, and the next frame its fills.
+  for (let ratio = 2000; ratio <= 65000; ratio += 1000) {
     draw(ratio);
   }
 
