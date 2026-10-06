@@ -81,7 +81,10 @@ interface Evaluated<T> {
  */
 async function withPage<T>(
   ready: string,
-  run: (evaluate: <R>(expression: string) => Promise<Evaluated<R>>) => Promise<T>,
+  run: (
+    evaluate: <R>(expression: string) => Promise<Evaluated<R>>,
+    send: <R>(method: string, params?: object) => Promise<R>,
+  ) => Promise<T>,
   gpu = false,
   options: RunOptions = {},
 ): Promise<T> {
@@ -168,13 +171,16 @@ async function withPage<T>(
     }
 
     try {
-      return await run(async <R>(expression: string) => {
-        const { result, exceptionDetails } = await devtools.send<{
-          result: { value?: R };
-          exceptionDetails?: { text: string };
-        }>("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, timeout });
-        return { value: result.value, exception: exceptionDetails?.text ?? null };
-      });
+      return await run(
+        async <R>(expression: string) => {
+          const { result, exceptionDetails } = await devtools.send<{
+            result: { value?: R };
+            exceptionDetails?: { text: string };
+          }>("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, timeout });
+          return { value: result.value, exception: exceptionDetails?.text ?? null };
+        },
+        (method, params) => devtools.send(method, params),
+      );
     } finally {
       socket.close();
     }
@@ -243,6 +249,10 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
  */
 export interface BenchResult {
   counts: Record<string, number>;
+  /** Each frame's draw calls, rebuilds, tessellation, uploads and program switches (page.ts, meter). */
+  meters: Record<string, number>[];
+  /** Bytes allocated in the frames' tick, sync and render, sampled, with `allocs`. */
+  allocated: number;
   heap: [number, number];
   tick: number[];
   sync: number[];
@@ -252,6 +262,34 @@ export interface BenchResult {
   first: number;
   renderer: string;
   error: string | null;
+}
+
+/** A node of a sampled heap profile: what was allocated under a call, and the calls under it. */
+interface SampledNode {
+  callFrame: { functionName: string };
+  selfSize: number;
+  children: SampledNode[];
+}
+
+/**
+ * What a bench's frames allocated: the samples under the frame loop's
+ * tick, prepare and render, not the player's start, which compiles.
+ */
+function framesAllocated(head: SampledNode): number {
+  const frameCalls = new Set(["tick", "prepare", "render"]);
+  const sum = (node: SampledNode, inBench: boolean, inFrame: boolean): number => {
+    const name = node.callFrame.functionName;
+    const bench = inBench || name === "benchSwf";
+    const frame = inFrame || (bench && frameCalls.has(name));
+    let bytes = frame ? node.selfSize : 0;
+    for (const child of node.children) {
+      bytes += sum(child, bench, frame);
+    }
+
+    return bytes;
+  };
+
+  return sum(head, false, false);
 }
 
 /** Play `swf` for `frames` frames in the player, timing each; see page.ts's benchSwf. `gpu` lets Chrome use one. */
@@ -265,16 +303,35 @@ export function benchPlayer(
   antialias = false,
   toggleEvery = 1,
   nestedGroups = false,
+  allocs = false,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
-    async (evaluate) => {
+    async (evaluate, send) => {
+      if (allocs) {
+        await send("HeapProfiler.enable");
+        await send("HeapProfiler.startSampling", {
+          samplingInterval: 4096,
+          includeObjectsCollectedByMajorGC: true,
+          includeObjectsCollectedByMinorGC: true,
+        });
+      }
+
       const { value, exception } = await evaluate<BenchResult>(
         `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups})`,
       );
+      if (value && allocs) {
+        const { profile } = await send<{ profile: { head: SampledNode } }>(
+          "HeapProfiler.stopSampling",
+        );
+        value.allocated = framesAllocated(profile.head);
+      }
+
       return (
         value ?? {
           counts: {},
+          meters: [],
+          allocated: 0,
           heap: [0, 0],
           tick: [],
           sync: [],
