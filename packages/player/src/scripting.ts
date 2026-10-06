@@ -26,6 +26,7 @@ import {
   type DisplayObject,
   displayFor,
   EMPTY_TIMELINE,
+  frameChildren,
   MovieClip,
   ShapeObject,
   scriptChildren,
@@ -1061,7 +1062,7 @@ export class Scripting {
     const roots: DisplayObject[] = [];
     for (const [serial, orphan] of this.orphans) {
       const display = orphan.ref.deref();
-      if (!display || this.frames - orphan.since > ORPHAN_FRAMES) {
+      if (!display) {
         this.orphans.delete(serial);
         continue;
       }
@@ -1070,6 +1071,19 @@ export class Scripting {
     }
 
     return roots.sort((a, b) => b.serial - a.serial);
+  }
+
+  /** Whether `display` or anything under it listens for a frame's broadcast events. */
+  private hearsFrames(display: DisplayObject): boolean {
+    if (display.object) {
+      for (const targets of this.broadcasts.values()) {
+        if (targets.has(display.object)) {
+          return true;
+        }
+      }
+    }
+
+    return frameChildren(display).some((child) => this.hearsFrames(child));
   }
 
   /**
@@ -2341,10 +2355,28 @@ export class Scripting {
     } finally {
       this.scriptPhase = outer;
     }
-    // What the timeline took off this frame has had its frame; it stops here.
+    // What the timeline took off this frame has had its frame; it stops here. So
+    // does one that has played ORPHAN_FRAMES off the list, but for one that
+    // listens for a frame's events, which hold it in Flash too.
     for (const [serial, orphan] of this.orphans) {
       if (!orphan.keep) {
         this.orphans.delete(serial);
+        continue;
+      }
+
+      if (this.frames - orphan.since < ORPHAN_FRAMES) {
+        continue;
+      }
+
+      const display = orphan.ref.deref();
+      if (display && this.hearsFrames(display)) {
+        orphan.since = this.frames;
+        continue;
+      }
+
+      this.orphans.delete(serial);
+      if (display) {
+        stopTimelineSoundsUnder(this, display);
       }
     }
     // What scripts made this frame and left off the display list plays on as an orphan.
@@ -2383,8 +2415,10 @@ export class Scripting {
  * How many frames an orphan plays before it stops. Flash frees one nothing
  * refers to almost at once, by reference counting; the browser's collector
  * may take minutes, through which a game's removed characters would play
- * on by the thousand, their scripts throwing for a stage they lack. One a
- * script still holds is still there, as it was, if put back.
+ * on by the thousand, their scripts throwing for a stage they lack. The
+ * player cannot see what a script holds, so one held stops too, unlike
+ * Flash's, and plays on from there if put back; one that listens for a
+ * frame's events, which hold it in Flash as well, plays on.
  */
 const ORPHAN_FRAMES = 120;
 
