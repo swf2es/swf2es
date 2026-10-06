@@ -257,12 +257,16 @@ function keepClamped(source: { style: object }): void {
  * Destroy a texture a fill may have drawn with. Pixi keeps the bind group
  * of each unbatched Graphics' textures in a cache it never clears, and each
  * group that holds a texture warns as it is destroyed; nothing else listens
- * for the change.
+ * for the change. That cache keeps the source too, and a destroyed source
+ * still keeps the options it was made with, the bytes it was uploaded from
+ * among them: they go, so the cache holds a source's shell, not its pixels.
  */
 function destroyTexture(texture: Texture): void {
-  texture.source.removeAllListeners("change");
-  texture.source.style.removeAllListeners("change");
+  const source = texture.source;
+  source.removeAllListeners("change");
+  source.style.removeAllListeners("change");
   texture.destroy(true);
+  (source as unknown as { options: { resource?: unknown } }).options.resource = undefined;
 }
 
 /** How a view paints a fill over a region of the shape: a resolved bitmap's or gradient's through its renderer's textures. */
