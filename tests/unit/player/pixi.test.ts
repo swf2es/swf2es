@@ -1153,14 +1153,17 @@ test("an object off the list gives its lines back, and has them again when it co
     assert.deepEqual(view.counts, { strokeContexts: 1, strokeReuses: 0 });
 
     // Off the list: kept a while, then given back, and gone once idle long enough. Its Graphics
-    // go too, which Pixi would keep, with their geometry, for a minute.
-    const graphics = view.stage.children[0].children[1].children[1].children[0].children[1];
+    // let go of it too, which Pixi would keep, with its geometry, for a minute: taken off and
+    // kept, showing nothing, for the next content to take.
+    const graphics = view.stage.children[0].children[1].children[1].children[0]
+      .children[1] as unknown as { parent: unknown; destroyed: boolean; context: unknown };
     root.removeChild(branch);
     view.prepare(root);
     assert.equal(graphics.destroyed, false);
     assert.equal(held.destroyed, false);
     idle();
-    assert.equal(graphics.destroyed, true);
+    assert.equal(graphics.parent, null);
+    assert.notEqual(graphics.context, held);
     assert.equal(held.destroyed, true);
 
     // Back on: drawn again, not with the context destroyed.
@@ -1170,7 +1173,6 @@ test("an object off the list gives its lines back, and has them again when it co
     assert.notEqual(linesOf(), held);
     assert.deepEqual(view.counts, { strokeContexts: 2, strokeReuses: 0 });
     const back = view.stage.children[0].children[1].children[1].children[0].children[1];
-    assert.notEqual(back, graphics);
     assert.equal(back.destroyed, false);
 
     // Off and on again before a render: nothing is given back or drawn again.
@@ -1587,12 +1589,12 @@ test("a drawing off the list keeps what it drew a while, for it to come back to"
     view.prepare(root);
     clock.at += 6000;
     view.prepare(root);
-    assert.equal(fill.destroyed, true);
+    assert.equal((fill as unknown as { parent: unknown }).parent, null);
     assert.equal(context.destroyed, true);
     root.placeAtDepth(sprite, 1);
     view.prepare(root);
-    assert.notEqual(fillOf(), fill);
     assert.equal(fillOf().destroyed, false);
+    assert.notEqual(fillOf().context, context);
     assert.equal(fillOf().context.destroyed, false);
   });
 });
@@ -1863,7 +1865,8 @@ test("of many objects off the list at once, only the latest 1024 are kept whole"
     return shape;
   });
   view.prepare(root);
-  type Drawn = { destroyed: boolean };
+  // Emptied, a node's Graphics are taken off and kept for the next content to take.
+  type Drawn = { parent: unknown };
   const fills = view.stage.children[0].children
     .slice(1)
     .map((c) => c.children[0].children[0] as unknown as Drawn);
@@ -1873,9 +1876,9 @@ test("of many objects off the list at once, only the latest 1024 are kept whole"
   }
 
   view.prepare(root);
-  assert.equal(fills.filter((g) => g.destroyed).length, 1100 - 1024);
-  assert.equal(fills[0].destroyed, true);
-  assert.equal(fills[1099].destroyed, false);
+  assert.equal(fills.filter((g) => g.parent === null).length, 1100 - 1024);
+  assert.equal(fills[0].parent, null);
+  assert.notEqual(fills[1099].parent, null);
 });
 
 test("a blend's copy of what is behind it is held to the target and the texture, and clears nothing", async () => {
@@ -2567,5 +2570,42 @@ test("a mask's Graphics are never batched, as they draw in another group", async
     const maskContainer = containers.find((c) => c.includeInBuild === false);
     assert.ok(maskContainer);
     assert.ok(maskContainer.children[0].children.every((g) => !g.settled));
+  });
+});
+
+test("a child taken off gives its Graphics, emptied, to the next shape placed", async () => {
+  // A frame-by-frame timeline takes its children off and puts new ones on
+  // every frame; each made and destroyed its Graphics, most of the cost of
+  // a swap.
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const first = new ShapeObject(character);
+  root.placeAtDepth(first, 1);
+  type Drawn = { parent: unknown; context: unknown; destroyed: boolean };
+  const art = (k: number) =>
+    [...view.stage.children[0].children[1 + k].children[0].children] as unknown as Drawn[];
+
+  await withClock((clock) => {
+    view.prepare(root);
+    const [fill, lines] = art(0);
+    const oldLines = lines.context;
+
+    // Off the list, kept 5 s whole, then emptied: its Graphics kept, showing nothing.
+    root.removeChild(first);
+    view.prepare(root);
+    clock.at += 6000;
+    view.prepare(root);
+    assert.equal(fill.parent, null);
+    assert.equal(lines.parent, null);
+    assert.notEqual(lines.context, oldLines);
+
+    // Another shape placed takes them, drawing its own fills and lines.
+    root.placeAtDepth(new ShapeObject(character), 1);
+    view.prepare(root);
+    const taken = art(0);
+    assert.ok(taken.includes(fill) && taken.includes(lines));
+    assert.ok(taken.every((g) => !g.destroyed && g.parent !== null));
   });
 });

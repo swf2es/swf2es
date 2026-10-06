@@ -404,6 +404,21 @@ function shapeContext(): GraphicsContext {
 }
 
 /**
+ * The context a line's Graphics shows until restroke gives it its own: one
+ * for all, never given back nor destroyed, where each made one of its own
+ * to throw away.
+ */
+const NO_LINES = shapeContext();
+/** No transform, for a Graphics kept to be taken again (recycle). */
+const IDENTITY = new Matrix();
+/**
+ * The most Graphics a view keeps for the next content to take, of children
+ * taken off: a frame-by-frame timeline takes its children off and puts new
+ * ones on every frame, each made and destroyed with its Graphics.
+ */
+const SPARE_GRAPHICS_MOST = 4096;
+
+/**
  * A layer's fills, which are the same for every instance of the shape.
  * Each contour's region is inside or not by the fill's rule, by its depth
  * in the containment for even-odd, by the sum of orientations around it
@@ -660,6 +675,10 @@ class StrokeContexts {
 
   /** Give a context back: one of these goes idle when no one holds it; any other is destroyed. */
   give(context: GraphicsContext): void {
+    if (context === NO_LINES) {
+      return;
+    }
+
     const uses = this.uses.get(context);
     if (uses === undefined) {
       destroyContext(context);
@@ -997,6 +1016,8 @@ class SharedGraphics extends Graphics {
   /** The context it stands for, which the cache counts: what it draws, or that drawn as a batched copy (showFor). */
   shared: GraphicsContext;
   declare flashColor?: ColorTransform | null;
+  /** Whether its render group has settled, which batches it (settle). */
+  declare settled?: boolean;
 
   constructor(context?: GraphicsContext) {
     super(context);
@@ -1116,6 +1137,8 @@ export class PixiView {
   readonly stage = new PixiContainer();
   /** What the view has built since it was made, for measuring: lines' contexts made and reused. */
   readonly counts = { strokeContexts: 0, strokeReuses: 0 };
+  /** Graphics of children taken off, kept for the next content to take (SPARE_GRAPHICS_MOST). */
+  private readonly spareGraphics: SharedGraphics[] = [];
   private readonly lines = new StrokeContexts(this.counts);
   private readonly nodes = new WeakMap<DisplayObject, Node>();
   /** A fresh view's fills of the shapes it built them for, shared by their instances; it destroys them with itself. */
@@ -1513,9 +1536,12 @@ export class PixiView {
       };
     } else {
       // A text's characters are in a container of their own; their shared
-      // glyph fills stay, not being theirs.
+      // glyph fills stay, not being theirs. A shape's Graphics are kept for
+      // the next content to take.
       for (const child of node.art.removeChildren()) {
-        if (!child.destroyed) {
+        if (child instanceof SharedGraphics && !this.fresh) {
+          this.recycle(child);
+        } else if (!child.destroyed) {
           child.destroy({ children: true });
         }
       }
@@ -1622,14 +1648,15 @@ export class PixiView {
     let next = 0;
     const graphic = (context?: GraphicsContext): SharedGraphics => {
       if (!spare) {
-        const made = new SharedGraphics(context);
+        const made = this.spareGraphics.pop() ?? new SharedGraphics(NO_LINES);
+        made.swap(context ?? NO_LINES);
         node.art.addChild(made);
         return made;
       }
 
       const kept = spare[next++];
-      // A line's own context is made for it as a new one's would be: restroke gives back the old.
-      kept.swap(context ?? new GraphicsContext());
+      // A line's shows none till restroke gives it its own, and gives back the old.
+      kept.swap(context ?? NO_LINES);
       return kept;
     };
 
@@ -1734,6 +1761,25 @@ export class PixiView {
    */
   private left(kid: DisplayObject, from: DisplayObject): boolean {
     return kid.parent === null || (kid.parent !== from && !this.root?.encloses(kid));
+  }
+
+  /**
+   * Keep a Graphics of a child taken off for the next content to take, as
+   * a new one would be: showing nothing, untransformed, uncoloured, shown
+   * and drawn alone; or destroy it past the most kept.
+   */
+  private recycle(graphic: SharedGraphics): void {
+    if (this.spareGraphics.length >= SPARE_GRAPHICS_MOST) {
+      graphic.destroy();
+      return;
+    }
+
+    graphic.settled = false;
+    graphic.flashColor = null;
+    graphic.swap(NO_LINES);
+    graphic.setFromMatrix(IDENTITY);
+    graphic.visible = true;
+    this.spareGraphics.push(graphic);
   }
 
   /** A released node's art emptied, its fills and lines given back: drawn again if it comes back. */
