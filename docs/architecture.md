@@ -2096,9 +2096,10 @@ right-aligned one twip further left, and justified, a wrapped line but
 the paragraph's last has its inner spaces share the room. `textHeight`
 is the lines' heights, leading and all, less the last one's leading
 where there are two lines or more; a last line left empty by a newline
-counts only in a field a timeline placed, not in a script's. adl's
-`numLines` can lag a relayout until the next one, which swf2es's does
-not; tab stops, the boundaries adl leaves out for lines beyond the
+counts only while the field's type is input, whether a timeline placed
+it or a script made it, and a change of type lays it out again
+(`text-final-newline`). adl's `numLines` can lag a relayout until the
+next one, which swf2es's does not; tab stops, the boundaries adl leaves out for lines beyond the
 field's height, and those of a timeline's field, which adl gives 2
 pixels further right and down than its lines, are still to come.
 `autoSize` makes the field the text's size and 4 pixels, keeping its

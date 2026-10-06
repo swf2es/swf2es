@@ -705,7 +705,7 @@ export class TextObject extends DisplayObject {
 
   /** Its text laid out, as of now: made again only when the text, its formats or the field changed. */
   get layout(): TextLayout {
-    const key = `${this.model.revision}|${this.width}|${this.wordWrap}|${this.embedFonts}|${this.displayAsPassword}`;
+    const key = `${this.model.revision}|${this.width}|${this.wordWrap}|${this.embedFonts}|${this.displayAsPassword}|${this.type}`;
     if (this.laid?.key !== key) {
       const text = this.model.text;
       this.laid = {
@@ -719,7 +719,7 @@ export class TextObject extends DisplayObject {
           wordWrap: this.wordWrap,
           embedFonts: this.embedFonts,
           fonts: this.fonts,
-          authored: this.definition !== null,
+          input: this.type === "input",
         }),
       };
     }

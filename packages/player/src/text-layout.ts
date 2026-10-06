@@ -58,8 +58,8 @@ export interface LayoutField {
   wordWrap: boolean;
   embedFonts: boolean;
   fonts: FontSet | null;
-  /** Whether a timeline placed it, from a DefineEditText, rather than a script made it. */
-  authored: boolean;
+  /** Whether its type is "input": the empty line a final newline leaves then counts in its height. */
+  input: boolean;
 }
 
 /** A character's measure in its format: its font and glyph, its advance and the line height it asks, in twips. */
@@ -289,7 +289,7 @@ export function layoutText(field: LayoutField): TextLayout {
     }
   } while (start <= text.length);
 
-  return { lines, width: textWidth(lines), height: textHeight(text, lines, field.authored) };
+  return { lines, width: textWidth(lines), height: textHeight(text, lines, field.input) };
 }
 
 /** A justified line's characters placed: its inner spaces widened alike to fill `room`; its width. */
@@ -375,14 +375,14 @@ function textWidth(lines: Line[]): number {
  * The lines' heights, leading and all, but for the last one's leading
  * where there are two lines or more, as adl counts them; an empty field
  * counts nothing, and the empty line a final newline leaves counts only
- * in an authored field.
+ * in an input field, where the caret can stand on it.
  */
-function textHeight(text: string, lines: Line[], authored: boolean): number {
+function textHeight(text: string, lines: Line[], input: boolean): number {
   if (text.length === 0) {
     return 0;
   }
 
-  const counted = text.endsWith("\r") && !authored ? lines.slice(0, -1) : lines;
+  const counted = text.endsWith("\r") && !input ? lines.slice(0, -1) : lines;
   let height = 0;
   for (const line of counted) {
     height += line.ascent + line.descent + line.leading;

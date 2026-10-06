@@ -670,7 +670,8 @@ export function sprite(id: number, frameCount: number, tags: Uint8Array[]): Uint
  * A DefineEditText: its initial text, its size in twips and alignment (0
  * left, 1 right, 2 center), and optionally HTML text, multiline, a colour
  * (0xRRGGBB), a font by id with its height in twips, wrapping, the
- * font's outlines, and margins, indent and leading in twips.
+ * font's outlines, margins, indent and leading in twips, and read-only,
+ * which makes it a dynamic field rather than an input one.
  */
 export function editText(
   id: number,
@@ -688,6 +689,7 @@ export function editText(
     at?: [number, number];
     wordWrap?: boolean;
     useOutlines?: boolean;
+    readOnly?: boolean;
     /** In twips; the indent may be negative, as the tag's 16 bits hold it. */
     layout?: { leftMargin: number; rightMargin: number; indent: number; leading: number };
   } = {},
@@ -700,6 +702,7 @@ export function editText(
     0x80 |
       (options.wordWrap ? 0x40 : 0) |
       (options.multiline ? 0x20 : 0) |
+      (options.readOnly ? 0x08 : 0) |
       (options.color !== undefined ? 0x04 : 0) |
       (font ? 0x01 : 0),
   );

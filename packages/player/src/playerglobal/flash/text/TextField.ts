@@ -372,6 +372,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     }
     set type(v: Value) {
       this.$display.type = choice(v, ["dynamic", "input"], "type");
+      changed(this);
     }
     get autoSize(): string {
       return this.$display.autoSize;
