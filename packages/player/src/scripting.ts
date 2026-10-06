@@ -26,6 +26,7 @@ import {
   type DisplayObject,
   displayFor,
   EMPTY_TIMELINE,
+  frameChildren,
   MovieClip,
   ShapeObject,
   scriptChildren,
@@ -332,9 +333,13 @@ export class Scripting {
   /**
    * Clips taken off the display list, which play on as Flash's do: held
    * weakly, as Ruffle holds them, so one nothing refers to stops as Flash's
-   * does once collected. One the timeline took is kept for its frame only.
+   * does once collected, and for ORPHAN_FRAMES at most. One the timeline
+   * took is kept for its frame only.
    */
-  private readonly orphans = new Map<number, { ref: WeakRef<DisplayObject>; keep: boolean }>();
+  private readonly orphans = new Map<
+    number,
+    { ref: WeakRef<DisplayObject>; keep: boolean; since: number }
+  >();
   /** Display objects scripts made with `new` this frame: their first frame's script runs after everything else's, and they are orphans after. */
   private fresh: DisplayObject[] = [];
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
@@ -1035,7 +1040,7 @@ export class Scripting {
    */
   orphan(display: DisplayObject, keep = true): void {
     if (display.object && !this.orphans.has(display.serial)) {
-      this.orphans.set(display.serial, { ref: new WeakRef(display), keep });
+      this.orphans.set(display.serial, { ref: new WeakRef(display), keep, since: this.frames });
     }
   }
 
@@ -1066,6 +1071,19 @@ export class Scripting {
     }
 
     return roots.sort((a, b) => b.serial - a.serial);
+  }
+
+  /** Whether `display` or anything under it listens for a frame's broadcast events. */
+  private hearsFrames(display: DisplayObject): boolean {
+    if (display.object) {
+      for (const targets of this.broadcasts.values()) {
+        if (targets.has(display.object)) {
+          return true;
+        }
+      }
+    }
+
+    return frameChildren(display).some((child) => this.hearsFrames(child));
   }
 
   /**
@@ -2337,10 +2355,28 @@ export class Scripting {
     } finally {
       this.scriptPhase = outer;
     }
-    // What the timeline took off this frame has had its frame; it stops here.
+    // What the timeline took off this frame has had its frame; it stops here. So
+    // does one that has played ORPHAN_FRAMES off the list, but for one that
+    // listens for a frame's events, which hold it in Flash too.
     for (const [serial, orphan] of this.orphans) {
       if (!orphan.keep) {
         this.orphans.delete(serial);
+        continue;
+      }
+
+      if (this.frames - orphan.since < ORPHAN_FRAMES) {
+        continue;
+      }
+
+      const display = orphan.ref.deref();
+      if (display && this.hearsFrames(display)) {
+        orphan.since = this.frames;
+        continue;
+      }
+
+      this.orphans.delete(serial);
+      if (display) {
+        stopTimelineSoundsUnder(this, display);
       }
     }
     // What scripts made this frame and left off the display list plays on as an orphan.
@@ -2374,6 +2410,17 @@ export class Scripting {
     this.scrolled.clear();
   }
 }
+
+/**
+ * How many frames an orphan plays before it stops. Flash frees one nothing
+ * refers to almost at once, by reference counting; the browser's collector
+ * may take minutes, through which a game's removed characters would play
+ * on by the thousand, their scripts throwing for a stage they lack. The
+ * player cannot see what a script holds, so one held stops too, unlike
+ * Flash's, and plays on from there if put back; one that listens for a
+ * frame's events, which hold it in Flash as well, plays on.
+ */
+const ORPHAN_FRAMES = 120;
 
 /** How deep goto cycles may nest before a goto throws a stack overflow, Error #1023. */
 const MAX_GOTO_CYCLES = 256;

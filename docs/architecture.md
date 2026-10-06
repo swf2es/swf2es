@@ -1031,7 +1031,14 @@ an orphan nothing refers to stops as Flash's does, and a test that wants
 one to play on holds it). What refers to it includes the frame events it
 listens for: an `ENTER_FRAME` listener keeps a clip alive in Flash, the
 well-known leak, and the player's broadcast sets hold their listeners as
-strongly. A clip a script makes with `new`, added or not, runs its first
+strongly. Flash frees an orphan nothing refers to almost at once, by
+reference counting, where the browser's collector may wait minutes, and
+a game's removed characters would play on by the thousand; so an orphan
+plays for 120 frames at most, then stops on a frame whose script has
+run, its timeline sounds stopped, and carries on from there if a script
+puts it back. The player cannot see what a script holds, so one held
+stops too, where Flash's plays on; one whose subtree listens for a
+frame's events plays on, as those hold it in Flash as well. A clip a script makes with `new`, added or not, runs its first
 frame's script at the end of that frame's script phase, after the
 display list's, in the order made, and sits out the next frame's
 advance: made in frame 1, it is on its frame 1 through frame 2 and on
