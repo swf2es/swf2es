@@ -2801,6 +2801,44 @@ function textIndent(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Fields for scripts/TextFinalNewline.as: a DefineEditText read-only, so
+// dynamic, and one not, so input, both HTML, multiline and wrapped in
+// Pixel. Four hidden probes, then a chat's column of each kind.
+function textFinalNewline(abc: Uint8Array): Uint8Array {
+  const field = (id: number, readOnly: boolean) =>
+    w.editText(id, "", 4000, 400, 0, {
+      html: true,
+      multiline: true,
+      wordWrap: true,
+      useOutlines: true,
+      readOnly,
+      color: 0,
+      font: 1,
+      fontHeight: 320,
+    });
+  const kinds = [2, 3, 3, 2, 2, 2, 2, 2, 3, 3, 3, 3];
+  return w.swf({
+    width: 420,
+    height: 200,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      pixelFont(1),
+      field(2, true),
+      field(3, false),
+      w.doAbc(abc, "TextFinalNewline"),
+      w.symbolClass([[0, "TextFinalNewline"]]),
+      ...kinds.map((character, i) =>
+        w.place({ depth: i + 1, character, matrix: { tx: i < 8 ? 100 : 4300, ty: 0 } }),
+      ),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Three morph shapes: one whose straight edges pair with curves as its
 // fill, line width and colour change; one of two paths with a turning
 // gradient, in a DefineMorphShape2; and two regions of two colours whose
@@ -3572,6 +3610,15 @@ export const cases: PlayerCase[] = [
     // Exact but for each border's bottom right corner, part grey in Flash: 6 channels.
     tolerance: 0,
     maxOutliers: 6,
+  },
+  {
+    name: "text-final-newline",
+    swf: textFinalNewline,
+    script: "TextFinalNewline",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
   },
   {
     name: "glyph-contours",
