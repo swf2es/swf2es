@@ -8,6 +8,7 @@
 // tree, holes cut, as Pixi's own grouping of holes misses nested islands.
 import type { ColorTransform, Fill, Glyph, Line } from "@swf2es/format";
 import {
+  BatchableGraphics,
   type Batcher,
   BigPool,
   BufferImageSource,
@@ -521,6 +522,13 @@ const PARKED_FIRST_GROUPS_MOST = 64;
  * emptied as they are pooled, and a batch may still list them.
  */
 const POOLED_RENDER_DATA_MOST = 128;
+/**
+ * The most batch elements of Graphics Pixi may keep pooled. Pixi pools one
+ * for each batch each context makes and never shrinks the pool: a crowded
+ * room left 165,000 behind it. They are let go of rather than destroyed,
+ * as a batch may still list one: that one lives on while it does.
+ */
+const POOLED_BATCHABLES_MOST = 4096;
 
 /**
  * The render textures draws render through, oldest first, kept for the
@@ -561,12 +569,31 @@ function releaseDrawTarget(texture: RenderTexture): void {
   }
 }
 
-/** Pixi's pool of render data destroyed contexts gave back, emptied once past its most; what is in use stays. And the draws' targets kept idle too long. */
+/**
+ * Pixi's pool of render data destroyed contexts gave back, emptied once
+ * past its most, and its batch elements of Graphics cut back to theirs;
+ * what is in use stays. And the draws' targets kept idle too long.
+ */
 function trimPools(): void {
   const data = BigPool.getPool(GraphicsContextRenderData);
   if (data.totalFree > POOLED_RENDER_DATA_MOST) {
     data.clear();
   }
+
+  // Pool's fields: its items, how many are free (the first of them), and how many it made.
+  const batchables = BigPool.getPool(BatchableGraphics) as unknown as {
+    _pool: unknown[];
+    _index: number;
+    _count: number;
+  };
+  const extra = batchables._index - POOLED_BATCHABLES_MOST;
+  if (extra > 0) {
+    batchables._index = POOLED_BATCHABLES_MOST;
+    batchables._count -= extra;
+  }
+
+  // Past the free ones are those taken, which Pixi leaves listed: their users hold them, if anyone.
+  batchables._pool.length = batchables._index;
 
   const now = performance.now();
   while (drawTargets.length > 0 && now - drawTargets[0].since > IDLE_MS) {
