@@ -515,6 +515,43 @@ const PARKED_FIRST_GROUPS_MOST = 64;
 const POOLED_RENDER_DATA_MOST = 128;
 
 /** Pixi's pool of render data destroyed contexts gave back, emptied once past its most; what is in use stays. */
+/**
+ * The render textures draws render through, by size, kept for the next
+ * draw of that size: a bitmap drawn again on every move of the pointer, as
+ * a colour picker's is, then makes and frees no texture each time.
+ */
+const DRAW_TARGETS_MOST = 8;
+const drawTargets = new Map<string, RenderTexture[]>();
+let drawTargetsKept = 0;
+
+function drawTarget(width: number, height: number): RenderTexture {
+  const texture = drawTargets.get(`${width}x${height}`)?.pop();
+  if (!texture) {
+    return RenderTexture.create({ width, height });
+  }
+
+  drawTargetsKept--;
+  return texture;
+}
+
+/** A draw's target done with: kept for the next draw of its size, or destroyed past the most kept. */
+function releaseDrawTarget(texture: RenderTexture): void {
+  if (drawTargetsKept >= DRAW_TARGETS_MOST) {
+    texture.destroy(true);
+    return;
+  }
+
+  const key = `${texture.width}x${texture.height}`;
+  let free = drawTargets.get(key);
+  if (!free) {
+    free = [];
+    drawTargets.set(key, free);
+  }
+
+  free.push(texture);
+  drawTargetsKept++;
+}
+
 function trimPools(): void {
   const data = BigPool.getPool(GraphicsContextRenderData);
   if (data.totalFree > POOLED_RENDER_DATA_MOST) {
@@ -2027,18 +2064,18 @@ export class PixiView {
     scaled.addChild(node, masks);
     view.placeMasks(o, masks);
     scaled.scale.set(n);
-    let target = RenderTexture.create({ width: width * n, height: height * n });
+    let target = drawTarget(width * n, height * n);
     this.renderer.render({ container: scaled, target, clear: true });
     view.dispose(scaled);
     // Halved until a sample a pixel: a linear sample at the corner four texels share is their mean.
     for (let k = n; k > 1; k /= 2) {
-      const half = RenderTexture.create({ width: (width * k) / 2, height: (height * k) / 2 });
+      const half = drawTarget((width * k) / 2, (height * k) / 2);
       target.source.scaleMode = "linear";
       const sprite = new Sprite(target);
       sprite.scale.set(0.5);
       this.renderer.render({ container: sprite, target: half, clear: true });
       sprite.destroy();
-      target.destroy(true);
+      releaseDrawTarget(target);
       target = half;
     }
 
@@ -2055,7 +2092,7 @@ export class PixiView {
   ): Uint32Array {
     const target = this.sampled(o, m, width, height, samples);
     const pixels = argbOf(this.renderer.extract.pixels(target).pixels);
-    target.destroy(true);
+    releaseDrawTarget(target);
     return pixels;
   }
 
@@ -2086,7 +2123,7 @@ export class PixiView {
     sprite.position.set(x, y);
     this.renderer.render({ container: sprite, target: texture, clear: false });
     sprite.destroy();
-    drawn.destroy(true);
+    releaseDrawTarget(drawn);
     bitmaps.drawn(store);
     return true;
   }
