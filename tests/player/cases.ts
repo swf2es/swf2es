@@ -3256,6 +3256,196 @@ function tableRuns(): Uint8Array {
 
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
+// A rounded panel 100 by 60 with a line, for the `scale9` case: its corners
+// are curves, which 9-slice scaling keeps as they are.
+const roundedPanel = (id: number) =>
+  w.shape({
+    id,
+    bounds: [-20, 2020, -20, 1220],
+    fills: [0xb0b8c8, 0xe0a020],
+    lines: [{ width: 40, color: 0x202020 }],
+    paths: [
+      {
+        fill1: 1,
+        line: 1,
+        commands: [
+          { move: [320, 0] },
+          { line: [1680, 0] },
+          { curve: [2000, 0, 2000, 320] },
+          { line: [2000, 880] },
+          { curve: [2000, 1200, 1680, 1200] },
+          { line: [320, 1200] },
+          { curve: [0, 1200, 0, 880] },
+          { line: [0, 320] },
+          { curve: [0, 0, 320, 0] },
+        ],
+      },
+      {
+        fill1: 2,
+        commands: [
+          { move: [100, 440] },
+          { line: [260, 440] },
+          { line: [260, 760] },
+          { line: [100, 760] },
+          { line: [100, 440] },
+        ],
+      },
+      {
+        fill1: 2,
+        commands: [
+          { move: [900, 440] },
+          { line: [1100, 440] },
+          { line: [1100, 760] },
+          { line: [900, 760] },
+          { line: [900, 440] },
+        ],
+      },
+    ],
+  });
+
+// Panels with DefineScalingGrid stretched, shrunk past their corners,
+// turned and flipped, which Flash does not slice, a button with a grid, a
+// grid on a fill's edge, and a sprite in a panel, which scales as ever;
+// scripts/Scale9.as sets grids on what it draws, and on frame 2 rescales a
+// panel of each kind.
+function scale9(abc: Uint8Array): Uint8Array {
+  const turn = (15 * Math.PI) / 180;
+  return w.swf({
+    width: 560,
+    height: 420,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      roundedPanel(1),
+      square(2, 0x30a030, 200),
+      w.sprite(12, 1, [w.place({ depth: 1, character: 2 }), w.showFrame(), w.end()]),
+      w.sprite(10, 1, [
+        w.place({ depth: 1, character: 1 }),
+        w.place({ depth: 2, character: 12, matrix: { tx: 1700, ty: 900 } }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      // A half pixel in: the getter cuts it to 20, the slice keeps it.
+      w.scalingGrid(10, 410, 1600, 400, 800),
+      w.button2(13, 1),
+      w.scalingGrid(13, 400, 1600, 400, 800),
+      // On the fill's left edge, inside the line's recorded bounds: sliced.
+      w.sprite(14, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.scalingGrid(14, 0, 1600, 400, 800),
+      w.doAbc(abc, "Scale9"),
+      w.symbolClass([[0, "Scale9"]]),
+      w.place({ depth: 1, character: 10, name: "wide", matrix: { a: 3, d: 2, tx: 200, ty: 200 } }),
+      w.place({
+        depth: 2,
+        character: 10,
+        name: "small",
+        matrix: { a: 0.3, d: 0.5, tx: 6600, ty: 200 },
+      }),
+      w.place({
+        depth: 3,
+        character: 10,
+        name: "turned",
+        matrix: {
+          a: 0.8 * Math.cos(turn),
+          b: 0.8 * Math.sin(turn),
+          c: -Math.sin(turn),
+          d: Math.cos(turn),
+          tx: 7600,
+          ty: 800,
+        },
+      }),
+      w.place({
+        depth: 4,
+        character: 13,
+        name: "button",
+        matrix: { a: 2, d: 1.5, tx: 200, ty: 3010 },
+      }),
+      w.place({
+        depth: 5,
+        character: 10,
+        name: "flipped",
+        matrix: { a: 1.5, d: -1.2, tx: 4600, ty: 4440 },
+      }),
+      w.place({
+        depth: 6,
+        character: 14,
+        name: "edge",
+        matrix: { a: 0.5, d: 1.5, tx: 9250, ty: 3010 },
+      }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// scripts/Scale9Changes.as's root, 640 by 640, with one timeline symbol:
+// a panel with a grid whose bars are a mask layer (clipDepth) over a green
+// rectangle, which Flash draws unsliced.
+function scale9Changes(abc: Uint8Array): Uint8Array {
+  const rect = (id: number, color: number, x: number, y: number, width: number, height: number) =>
+    w.shape({
+      id,
+      bounds: [x, x + width, y, y + height],
+      fills: [color],
+      paths: [
+        {
+          fill1: 1,
+          commands: [
+            { move: [x, y] },
+            { line: [x + width, y] },
+            { line: [x + width, y + height] },
+            { line: [x, y + height] },
+            { line: [x, y] },
+          ],
+        },
+      ],
+    });
+  return w.swf({
+    width: 640,
+    height: 640,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      rect(30, 0xcccccc, 0, 0, 2000, 1200),
+      w.shape({
+        id: 31,
+        bounds: [80, 1920, 440, 760],
+        fills: [0],
+        paths: [80, 1760].map((x) => ({
+          fill1: 1,
+          commands: [
+            { move: [x, 440] },
+            { line: [x + 160, 440] },
+            { line: [x + 160, 760] },
+            { line: [x, 760] },
+            { line: [x, 440] },
+          ],
+        })),
+      }),
+      rect(32, 0x33aa33, 0, 0, 2000, 1200),
+      w.sprite(33, 1, [
+        w.place({ depth: 1, character: 30 }),
+        w.place({ depth: 2, character: 31, clipDepth: 3 }),
+        w.place({ depth: 3, character: 32 }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.scalingGrid(33, 400, 1600, 400, 800),
+      w.doAbc(abc, "Scale9Changes"),
+      w.symbolClass([[0, "Scale9Changes"]]),
+      w.place({ depth: 1, character: 33, name: "clipped", matrix: { a: 1.5, tx: 8400, ty: 8200 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
 const rewound = { frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 };
 
@@ -3340,6 +3530,30 @@ export const cases: PlayerCase[] = [
     tolerance: 32,
     maxOutliers: 1000,
     table: true,
+  },
+  {
+    name: "scale9",
+    swf: scale9,
+    script: "Scale9",
+    frames: 2,
+    capture: [1, 2],
+    // The rounded outlines anti-alias within a pixel of Flash's, which snaps
+    // their straight runs to whole pixels, on the panels Flash does not
+    // slice as on those it does: some 1,080 channels. A bar a pixel off
+    // would add about 96.
+    tolerance: 32,
+    maxOutliers: 1150,
+  },
+  {
+    name: "scale9-changes",
+    swf: scale9Changes,
+    script: "Scale9Changes",
+    frames: 2,
+    capture: [1, 2],
+    // The curves' edges anti-alias within a pixel of Flash's: some 160
+    // channels, most along the quadratic. A bar a pixel off would add about 96.
+    tolerance: 32,
+    maxOutliers: 200,
   },
   {
     name: "render-groups",
