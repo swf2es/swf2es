@@ -340,6 +340,9 @@ export class Scripting {
     number,
     { ref: WeakRef<DisplayObject>; keep: boolean; since: number }
   >();
+  /** The frame scripts' walks' lists by how deep in goto cycles each walk is, kept from frame to frame. */
+  private readonly queues: MovieClip[][] = [];
+  private queueDepth = 0;
   /** Display objects scripts made with `new` this frame: their first frame's script runs after everything else's, and they are orphans after. */
   private fresh: DisplayObject[] = [];
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
@@ -2133,6 +2136,30 @@ export class Scripting {
     // script's goto happens though the script throws after it").
     // Overflowed, cycles stop their script loops; the frame's own pass goes on.
     const stopped = () => this.overflowed && this.cycles > 0;
+    // The list of the walk's depth, kept from frame to frame: a goto's cycle walks inside it.
+    let queue = this.queues[this.queueDepth];
+    if (!queue) {
+      queue = [];
+      this.queues.push(queue);
+    }
+
+    this.queueDepth++;
+    try {
+      this.frameScriptRounds(root, also, queue, stopped);
+    } finally {
+      this.queueDepth--;
+      // Emptied, so that a clip taken off since is not held till the next walk.
+      queue.length = 0;
+    }
+  }
+
+  /** runFrameScripts' rounds, each walking into `queue`. */
+  private frameScriptRounds(
+    root: DisplayObject,
+    also: DisplayObject | null,
+    queue: MovieClip[],
+    stopped: () => boolean,
+  ): void {
     for (let round = 0; round < 64 && !stopped(); round++) {
       let ran = false;
       const own = (o: MovieClip) => {
@@ -2189,7 +2216,7 @@ export class Scripting {
           }
         }
       };
-      const queue: MovieClip[] = [];
+      queue.length = 0;
       const visit = (o: DisplayObject) => {
         if (o instanceof MovieClip && o.object) {
           queue.push(o);
