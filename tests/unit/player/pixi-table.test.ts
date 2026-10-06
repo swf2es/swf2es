@@ -198,3 +198,35 @@ test("rows go up to texture unit 0, even where a render pass left another active
   upload(1, 2);
   assert.deepEqual(uploads, [0, 0]);
 });
+
+test("a run's rows go up in one call: the part of their line, or the whole lines they span", () => {
+  const calls: number[][] = [];
+  const texture = { _premultiplyAlpha: false, _activateLocation() {}, bind() {} };
+  const gl = {
+    TEXTURE_2D: 1,
+    RGBA: 2,
+    FLOAT: 3,
+    texSubImage2D(...args: number[]) {
+      // x, y, width, height, and the first float.
+      calls.push([args[2], args[3], args[4], args[5], args[9]]);
+    },
+  };
+  const renderer = {
+    type: 1,
+    gl,
+    texture,
+    runners: { contextChange: { add() {} }, prerender: { add() {} } },
+  };
+  const pipe = new TablePipe(renderer as unknown as ConstructorParameters<typeof TablePipe>[0]);
+  const upload = (pipe as unknown as { upload(from: number, to: number): void }).upload.bind(pipe);
+
+  // A line holds 256 rows of 4 texels, 16 floats a row.
+  upload(10, 20);
+  upload(250, 300);
+  upload(256, 512);
+  assert.deepEqual(calls, [
+    [40, 0, 40, 1, 160],
+    [0, 0, 1024, 2, 0],
+    [0, 1, 1024, 1, 256 * 16],
+  ]);
+});

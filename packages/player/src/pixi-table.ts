@@ -713,7 +713,12 @@ export class TablePipe {
     atlas.sentIndices = atlas.indexCount;
   }
 
-  /** Upload rows `from` up to `to`: the part of a line each lies in, at most three calls. */
+  /**
+   * Upload rows `from` up to `to` in one call: the part of the line they
+   * lie in, or the whole lines they span. A line's other rows go up again
+   * as the CPU holds them: rows a draw already read are as they were, and
+   * no draw yet to come reads the rest before writing and uploading them.
+   */
   private upload(from: number, to: number): void {
     const renderer = this.renderer;
     const gl = renderer.gl;
@@ -732,35 +737,20 @@ export class TablePipe {
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     }
 
-    const firstLine = Math.floor(from / ROWS_A_LINE);
-    const lastLine = Math.floor((to - 1) / ROWS_A_LINE);
-    if (firstLine === lastLine) {
-      this.span(firstLine, from % ROWS_A_LINE, to - firstLine * ROWS_A_LINE, 1);
-      return;
-    }
-
-    this.span(firstLine, from % ROWS_A_LINE, ROWS_A_LINE, 1);
-    if (lastLine > firstLine + 1) {
-      this.span(firstLine + 1, 0, ROWS_A_LINE, lastLine - firstLine - 1);
-    }
-
-    this.span(lastLine, 0, to - lastLine * ROWS_A_LINE, 1);
-  }
-
-  /** Upload `lines` lines from `line`, rows `first` up to `end` of it if one, whole if more. */
-  private span(line: number, first: number, end: number, lines: number): void {
-    const gl = this.renderer.gl;
+    const first = Math.floor(from / ROWS_A_LINE);
+    const lines = Math.floor((to - 1) / ROWS_A_LINE) - first + 1;
+    const start = lines > 1 ? first * ROWS_A_LINE : from;
     gl.texSubImage2D(
       gl.TEXTURE_2D,
       0,
-      first * ROW_TEXELS,
-      line,
-      lines > 1 ? TABLE_WIDTH : (end - first) * ROW_TEXELS,
+      (start - first * ROWS_A_LINE) * ROW_TEXELS,
+      first,
+      lines > 1 ? TABLE_WIDTH : (to - from) * ROW_TEXELS,
       lines,
       gl.RGBA,
       gl.FLOAT,
       this.table.resource as Float32Array,
-      (line * ROWS_A_LINE + first) * ROW_TEXELS * 4,
+      start * ROW_TEXELS * 4,
     );
   }
 

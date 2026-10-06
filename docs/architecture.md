@@ -768,16 +768,17 @@ it short (`--min-run` times other thresholds). Under software GL the
 table won at every length, by 5 ms on runs of 6, but a player's GPU is
 what counts. A run of up to 48 draws takes its rows in a uniform array,
 not the table texture, as an upload between draws cost a few µs more a
-run (0.5 ms a frame on 128 runs of 22). The rows are uploaded between
-draws that read the table, which a driver may make wait for the earlier
-draws (ANGLE on D3D11 or Metal, unmeasured). A Flash colour transform's
-batched copies stay with the colour batcher: drawn by the table,
-`--branches 64`'s few batches became 12,000 draws, which saved the main
-thread a millisecond and cost GL two on a GPU, fifteen under software
-GL. `bench.ts --no-table` draws without the table, and the `table-runs`
-case, with `draw-objects`, is played with the table drawing even its
-shortest runs and without it, and must draw the same pixels (`run.ts
---table-ab` asks it of every case).
+run (0.5 ms a frame on 128 runs of 22); a longer one uploads its rows in
+one call, the whole lines they span if more than one. The rows are
+uploaded between draws that read the table, which a driver may make wait
+for the earlier draws (ANGLE on D3D11 or Metal, unmeasured). A Flash
+colour transform's batched copies stay with the colour batcher: drawn by
+the table, `--branches 64`'s few batches became 12,000 draws, which
+saved the main thread a millisecond and cost GL two on a GPU, fifteen
+under software GL. `bench.ts --no-table` draws without the table, and
+the `table-runs` case, with `draw-objects`, is played with the table
+drawing even its shortest runs and without it, and must draw the same
+pixels (`run.ts --table-ab` asks it of every case).
 
 Flash anti-aliases by supersampling on a grid: none at low quality, 2×2 at
 medium, 4×4 at high and best. The test page draws the same way, at that
