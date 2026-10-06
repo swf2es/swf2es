@@ -1709,10 +1709,13 @@ test("a drawing kept off the list is drawn again for a change of its content or 
   drawing.drawRect(40, 0, 10, 10);
   sprite.invalidate(CONTENT);
   root.placeAtDepth(sprite, 1);
+  const fillContext = fill.context;
   view.prepare(root);
-  assert.equal(fill.destroyed, true);
-  assert.equal(art()[0].destroyed, false);
-  assert.notEqual(art()[0], fill);
+  // Its Graphics stay, in place, and show the new fills; the old fills, its own, go.
+  assert.equal(art()[0], fill);
+  assert.equal(fill.destroyed, false);
+  assert.notEqual(art()[0].context, fillContext);
+  assert.equal(fillContext.destroyed, true);
 });
 
 test("a child emptied off the list is drawn again under a parent kept off it", async () => {
@@ -2307,4 +2310,64 @@ test("Pixi's pool of Graphics' batch elements is cut back as a view prepares", a
   const view = new PixiView(standIn([]).renderer);
   view.prepare(new Container());
   assert.equal(pool.totalFree, 4096);
+});
+
+test("a shape drawn anew with its fills laid out alike keeps its Graphics, in place", async () => {
+  // Taken off and put on, they changed the structure of the render group
+  // above, which Pixi rebuilt whole: an animated character's on every frame
+  // its timeline swapped a shape or moved a morph on.
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
+  const { readMorphShape, readSwf } = await import("../../../packages/format/dist/index.js");
+  const w = await import("../../swf-writer.ts");
+  const square: import("../../swf-writer.ts").PathCommand[] = [
+    { move: [0, 0] },
+    { line: [400, 0] },
+    { line: [400, 400] },
+    { line: [0, 400] },
+    { line: [0, 0] },
+  ];
+  const swf = readSwf(
+    w.swf({
+      width: 50,
+      height: 50,
+      frameRate: 12,
+      frameCount: 1,
+      tags: [
+        w.morphShape({
+          id: 1,
+          startBounds: [0, 400, 0, 400],
+          endBounds: [0, 400, 0, 400],
+          fills: [{ start: 0xffff0000, end: 0xff0000ff }],
+          start: [{ fill1: 1, commands: square }],
+          end: [square],
+        }),
+      ],
+    }),
+  );
+  const t = swf.tags[0];
+  const character = {
+    type: "morph" as const,
+    id: 1,
+    morph: readMorphShape(swf.bytes, t.code, t.offset, t.length),
+    blends: new Map(),
+    bitmap: () => null,
+  };
+  const shape = ShapeObject.ofMorph(character);
+  const root = new Container();
+  root.placeAtDepth(shape, 1);
+  const view = new PixiView(standIn([]).renderer);
+  type Drawn = { context: unknown; destroyed: boolean };
+  const art = () =>
+    [...view.stage.children[0].children[1].children[0].children] as unknown as Drawn[];
+  view.prepare(root);
+  const before = art();
+  const fills = before[0].context;
+
+  shape.ratio = 30000;
+  shape.invalidate(CONTENT);
+  view.prepare(root);
+
+  assert.deepEqual(art(), before);
+  assert.notEqual(art()[0].context, fills);
+  assert.equal(before[0].destroyed, false);
 });

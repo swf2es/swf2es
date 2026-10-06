@@ -799,6 +799,18 @@ class SharedFills {
   }
 }
 
+/** Take off and destroy the Graphics a redraw kept for its new content that it did not take. */
+function dropSpare(node: Node): void {
+  for (const graphic of node.spare?.graphics ?? []) {
+    graphic.parent?.removeChild(graphic);
+    if (!graphic.destroyed) {
+      graphic.destroy();
+    }
+  }
+
+  node.spare = null;
+}
+
 /** The key a layer's lines seen through `m`, at least `least` wide, are kept by. */
 function linesKey(m: Linear, least: number): string {
   return `${m[0]},${m[1]},${m[2]},${m[3]},${least}`;
@@ -935,6 +947,8 @@ interface Node {
   bitmap: Sprite | null;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
   lines: SharedGraphics[];
+  /** Between a redraw's clear and its draw, the Graphics the content left, which lines, for the next to take in place. */
+  spare: { graphics: SharedGraphics[]; lines: boolean[] } | null;
   /** Whether the object is a mask or in one, as of the last sync. */
   masking: boolean;
   /** The containers of the children a timeline's mask clips, each masked by it. */
@@ -1310,6 +1324,7 @@ export class PixiView {
         strokedAt: 0,
         bitmap: null,
         lines: [],
+        spare: null,
         masking: false,
         groups: [],
         scroll: null,
@@ -1338,13 +1353,15 @@ export class PixiView {
    * its own and change.
    */
   private redraw(o: DisplayObject, node: Node): void {
-    const done = this.clear(node);
+    const done = this.clear(node, true);
     // Given back after the new ones are made, so that a texture or a blend they share is kept, not
     // made again.
     try {
       this.draw(o, node);
     } finally {
       done();
+      // What the new content did not take in its place goes.
+      dropSpare(node);
     }
   }
 
@@ -1353,17 +1370,29 @@ export class PixiView {
    * and lines: a drawing's fills, a blend's, and every node's lines; a
    * Graphics frees only a context it made.
    */
-  private clear(node: Node): () => void {
+  private clear(node: Node, keep = false): () => void {
     // A Bitmap's texture is its store's: only the sprite goes.
     node.bitmap?.destroy();
     node.bitmap = null;
     const old = node.ownFills && !this.fresh ? node.fills : [];
     const oldLines = this.fresh ? [] : node.strokes.map((g) => g?.shared);
     const shared = node.sharedFills;
-    // A text's characters are in a container of their own; their shared glyph fills stay, not being theirs.
-    for (const child of node.art.removeChildren()) {
-      if (!child.destroyed) {
-        child.destroy({ children: true });
+    // A shape's Graphics stay where they are, for the content drawn next to take in place: taken
+    // off and put on, they changed the structure of its render group, which Pixi then rebuilt
+    // whole, an animated character's every frame its timeline swapped a shape.
+    const art = node.art.children;
+    if (keep && art.length > 0 && art.every((child) => child instanceof SharedGraphics)) {
+      const lines = new Set<PixiContainer>(node.lines);
+      node.spare = {
+        graphics: art.slice() as SharedGraphics[],
+        lines: art.map((g) => lines.has(g)),
+      };
+    } else {
+      // A text's characters are in a container of their own; their shared glyph fills stay, not being theirs.
+      for (const child of node.art.removeChildren()) {
+        if (!child.destroyed) {
+          child.destroy({ children: true });
+        }
       }
     }
 
@@ -1393,6 +1422,11 @@ export class PixiView {
   /** What `o` itself draws, into its node emptied of what it drew before. */
   private draw(o: DisplayObject, node: Node): void {
     const current = this.current(o);
+    // A bitmap or a text draws no Graphics the last content's could stand for.
+    if (o instanceof BitmapObject || o instanceof TextObject || o instanceof StaticTextObject) {
+      dropSpare(node);
+    }
+
     if (o instanceof BitmapObject) {
       this.drawBitmap(o, node);
       return;
@@ -1446,20 +1480,40 @@ export class PixiView {
       this.source?.leastWidth === this.leastWidth
         ? current.strokes
         : null;
+    // The Graphics the last content left, taken in place where it laid out its fills and lines alike.
+    const spare = node.spare;
+    const roles = node.layers.flatMap((layer) => (layer.strokes.length ? [false, true] : [false]));
+    const reuse =
+      spare !== null &&
+      spare.lines.length === roles.length &&
+      spare.lines.every((isLines, k) => isLines === roles[k]);
+    let next = 0;
+    const graphic = (context?: GraphicsContext): SharedGraphics => {
+      if (!reuse || !spare) {
+        const made = new SharedGraphics(context);
+        node.art.addChild(made);
+        return made;
+      }
+
+      const kept = spare.graphics[next++];
+      // A line's own context is made for it as a new one's would be: restroke gives back the old.
+      kept.swap(context ?? new GraphicsContext());
+      return kept;
+    };
+    if (!reuse) {
+      dropSpare(node);
+    }
+
+    node.spare = null;
     node.layers.forEach((layer, i) => {
-      node.art.addChild(new SharedGraphics(fills[i]));
+      graphic(fills[i]);
       const borrowed = lines?.[i];
-      const strokes = layer.strokes.length
-        ? borrowed
-          ? new SharedGraphics(borrowed.shared)
-          : new SharedGraphics()
-        : null;
+      const strokes = layer.strokes.length ? graphic(borrowed?.shared) : null;
       if (strokes) {
         if (borrowed) {
           strokes.setFromMatrix(borrowed.localTransform);
         }
 
-        node.art.addChild(strokes);
         node.lines.push(strokes);
       }
 
