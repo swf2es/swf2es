@@ -2,8 +2,12 @@
 // their frames against Flash's in references/. Where a frame differs, its
 // image, Flash's and their difference go to out/<case>/.
 //
-//   node tests/player/run.ts [case...]            check
-//   node tests/player/run.ts --update [case...]   draw the references again in Flash
+// A case marked `table`, or every case with --table-ab, is played again
+// without the transform table (pixi-table.ts), and must draw the same
+// pixels; a marked one must have the table draw some of it.
+//
+//   node tests/player/run.ts [--table-ab] [case...]   check
+//   node tests/player/run.ts --update [case...]       draw the references again in Flash
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { cases, type PlayerCase } from "./cases.ts";
@@ -15,7 +19,8 @@ import { compiler, compileScripts } from "./scripts.ts";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const args = process.argv.slice(2);
 const update = args.includes("--update");
-const names = args.filter((a) => a !== "--update");
+const tableAb = args.includes("--table-ab");
+const names = args.filter((a) => a !== "--update" && a !== "--table-ab");
 const chosen = cases.filter((c) => !names.length || names.includes(c.name));
 const reference = (name: string, frame: number) => `${here}references/${name}/frame-${frame}.png`;
 const traceReference = (name: string) => `${here}references/${name}/trace.txt`;
@@ -66,7 +71,10 @@ if (update) {
     );
   }
 } else {
-  const results = await runPlayer(jobs);
+  // The cases to play again without the table, after the rest.
+  const again = chosen.flatMap((c, i) => (c.table || tableAb ? [i] : []));
+  const results = await runPlayer([...jobs, ...again.map((i) => ({ ...jobs[i], table: false }))]);
+  const without = new Map(again.map((i, k) => [i, results[chosen.length + k]]));
   let failed = 0;
   for (const [i, c] of chosen.entries()) {
     const r = results[i];
@@ -114,6 +122,30 @@ if (update) {
       writeFileSync(`${out}/frame-${frame}.flash.png`, expected);
       if (!d.sizeDiffers) {
         writeFileSync(`${out}/frame-${frame}.difference.png`, encodePng(differenceImage(a, e)));
+      }
+    }
+
+    if (c.table && r.tableDraws === 0) {
+      problems.push("the transform table drew none of it");
+    }
+
+    const plain = without.get(i);
+    for (const frame of plain ? c.capture : []) {
+      const a = r.images.get(frame);
+      const b = plain?.images.get(frame);
+      if (!a || !b) {
+        problems.push(`frame ${frame}: not drawn ${a ? "without" : "with"} the table`);
+        continue;
+      }
+
+      const d = compareImages(decodePng(a), decodePng(b), 0);
+      if (d.outliers > 0) {
+        problems.push(
+          `frame ${frame}: ${d.outliers} pixels differ without the table, by up to ${d.maxDifference}`,
+        );
+        const out = `${here}out/${c.name}`;
+        mkdirSync(out, { recursive: true });
+        writeFileSync(`${out}/frame-${frame}.no-table.png`, b);
       }
     }
 

@@ -19,13 +19,22 @@
 // the page averages them.
 import { createCodegen } from "@swf2es/codegen";
 import { isAs3, readSwf, tags } from "@swf2es/format";
-import { Container, type DisplayObject, PixiView, Player, Scripting } from "@swf2es/player";
+import {
+  Container,
+  type DisplayObject,
+  PixiView,
+  Player,
+  Scripting,
+  setTransformTable,
+} from "@swf2es/player";
 import { autoDetectRenderer } from "pixi.js";
 
 interface Run {
   images: Record<number, string>;
   /** What the SWF's scripts traced, a line each. */
   trace: string[];
+  /** The draws the transform table made (pixi-table.ts), in its multi-draw calls. */
+  tableDraws: number;
   error: string | null;
 }
 
@@ -130,10 +139,12 @@ async function runSwf(
   url: string | null = null,
   zoom = 1,
   antialias = false,
+  table = true,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
   const trace: string[] = [];
+  let tableDraws = 0;
   let scripting: Scripting | null = null;
   const uncaught: unknown[] = [];
   // A run ends at the first error nothing caught, after the frame it came in.
@@ -146,6 +157,7 @@ async function runSwf(
     scripting = await scriptingFor(bytes, trace, url, uncaught);
     const player = new Player(bytes, scripting);
     const n = GRID[quality] ?? 4;
+    setTransformTable(table);
     const renderer = await autoDetectRenderer({
       preference: "webgl",
       width: player.width,
@@ -157,6 +169,17 @@ async function runSwf(
       // Blend modes read what is below them from it (pixi-blend.ts).
       useBackBuffer: true,
     });
+    const multi = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl?.getExtension(
+      "WEBGL_multi_draw",
+    );
+    if (multi) {
+      const draw = multi.multiDrawElementsWEBGL.bind(multi);
+      multi.multiDrawElementsWEBGL = (...args: Parameters<typeof draw>) => {
+        tableDraws += args[6];
+        draw(...args);
+      };
+    }
+
     const samples = document.createElement("canvas");
     samples.width = renderer.canvas.width;
     samples.height = renderer.canvas.height;
@@ -199,9 +222,9 @@ async function runSwf(
     }
 
     renderer.destroy();
-    return { images, trace, error: null };
+    return { images, trace, tableDraws, error: null };
   } catch (e) {
-    return { images, trace, error: describe(e, scripting) };
+    return { images, trace, tableDraws, error: describe(e, scripting) };
   }
 }
 
@@ -298,10 +321,24 @@ function meter(renderer: object): { read(): Record<string, number> } {
     wrap(gl, method, (args) => {
       add("uploads");
       const data = args[method === "bufferData" ? 1 : 2];
-      add("uploadBytes", typeof data === "number" ? data : (data as ArrayBufferView).byteLength);
+      // A WebGL 2 bufferSubData may take only `length` elements of its data.
+      const length = method === "bufferSubData" ? (args[4] as number | undefined) : undefined;
+      const view = data as ArrayBufferView & { BYTES_PER_ELEMENT?: number };
+      add(
+        "uploadBytes",
+        typeof data === "number"
+          ? data
+          : length
+            ? length * (view.BYTES_PER_ELEMENT ?? 1)
+            : view.byteLength,
+      );
     });
   }
 
+  wrap(gl?.getExtension("WEBGL_multi_draw") ?? undefined, "multiDrawElementsWEBGL", (args) => {
+    add("glDraws");
+    add("tableDraws", args[6] as number);
+  });
   wrap(r.renderPipes.graphics, "execute", () => add("aloneGraphics"));
   wrap(r.renderPipes.batch, "execute", () => add("batches"));
   wrap(r.renderGroup, "_buildInstructions", (_, took) => {
@@ -347,7 +384,9 @@ async function benchSwf(
   antialias = false,
   toggleEvery = 1,
   nestedGroups = false,
+  table = true,
 ): Promise<Bench> {
+  setTransformTable(table);
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
   const sync: number[] = [];

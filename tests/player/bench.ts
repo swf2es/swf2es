@@ -19,6 +19,9 @@
 // when only their transforms change. --swap has each part taken off and
 // another put in its place on every frame instead, as a frame-by-frame
 // timeline does: what changing children costs, render group rebuilds and all.
+// --fresh has the parts swell to a new size on every frame, never coming
+// round again, so each frame strokes their lines anew: new contexts for the
+// renderer to take on, as objects that turn and stretch in a game give it.
 //
 // --idle K renders K times more after each frame with no tick between, as
 // a host that draws on every animation frame does, and times those apart.
@@ -29,6 +32,10 @@
 // --toggle-static N does the same with N static texts of 24 glyphs and N
 // shapes, the timeline's: what leaving costs, with glyphs that share a
 // font's fills.
+//
+// --no-table draws the Graphics drawn alone each with a call of its own,
+// as Pixi does, not through the transform table (pixi-table.ts): the two
+// timed apart.
 //
 // --branches N places N coloured branches of 128 shapes. A quarter replace
 // one child each frame; the rest stay still, as scenery beside animated art.
@@ -41,9 +48,9 @@
 // uploads and bytes, and program switches. --allocs samples the heap and
 // gives the KB the frames allocated, the player's start left out.
 //
-//   node tests/player/bench.ts [--shapes N | --rig N | --branches N | --toggle-branches N | --toggle N
+//   node tests/player/bench.ts [--shapes N | --rig N [--fresh] | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
-//     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs] [--json]
+//     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs] [--no-table] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 
@@ -217,21 +224,23 @@ function part(id: number, sides: number): Uint8Array {
  * The rig: `count` instances of a sprite whose 12 parts turn and swell on a
  * loop of 24 frames. With `swap`, each part is taken off on every frame and
  * another put in its place, as a frame-by-frame animation's timeline does:
- * each frame changes the sprite's children, not only their transforms.
+ * each frame changes the sprite's children, not only their transforms. With
+ * `fresh`, the loop is as long as the run and the parts swell to a size no
+ * other frame has.
  */
-function rigSwf(count: number, swap = false): Uint8Array {
+function rigSwf(count: number, swap = false, fresh = false): Uint8Array {
   const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
   for (let i = 0; i < 4; i++) {
     tags.push(part(11 + i, 12 + 6 * i));
   }
 
-  const loop = 24;
+  const loop = fresh ? frames : 24;
   const sprite: Uint8Array[] = [];
   for (let f = 0; f < loop; f++) {
     for (let i = 0; i < 12; i++) {
       const t = (2 * Math.PI * f) / loop;
       const a = 0.4 * Math.sin(t + i) * (i % 2 ? 1 : -1);
-      const s = 1 + 0.25 * Math.sin(t * 2 + i);
+      const s = fresh ? 0.75 + (0.5 * ((f * 12 + i) % 997)) / 997 : 1 + 0.25 * Math.sin(t * 2 + i);
       const matrix = {
         a: s * Math.cos(a),
         b: s * Math.sin(a),
@@ -407,7 +416,7 @@ const swf =
         : branches > 0
           ? branchSwf(branches)
           : rig > 0
-            ? rigSwf(rig, args.includes("--swap"))
+            ? rigSwf(rig, args.includes("--swap"), args.includes("--fresh"))
             : synthetic();
 const result = await benchPlayer(
   swf,
@@ -420,6 +429,7 @@ const result = await benchPlayer(
   toggleEvery,
   nestedGroups,
   args.includes("--allocs"),
+  !args.includes("--no-table"),
 );
 if (result.error) {
   console.error(result.error);
@@ -457,7 +467,7 @@ const summary = {
           : branches > 0
             ? `${branches} branches`
             : rig > 0
-              ? `rig of ${rig}${args.includes("--swap") ? ", swapping" : ""}`
+              ? `rig of ${rig}${args.includes("--swap") ? ", swapping" : ""}${args.includes("--fresh") ? ", fresh" : ""}`
               : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
