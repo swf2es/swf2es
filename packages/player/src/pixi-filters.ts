@@ -133,11 +133,38 @@ function blur(
   }
 }
 
-/** A filter run at the target's resolution, which the blur's width is in texels of. */
+/** A filter's offset, `distance` screen pixels at its angle, in the input's units. */
+function placeOffset(offset: Float32Array, f: FilterRecord, distance: number, units: number): void {
+  const radians = ((f.angle || 0) * Math.PI) / 180;
+  offset[0] = distance * Math.cos(radians) * units;
+  offset[1] = distance * Math.sin(radians) * units;
+}
+
+/**
+ * A filter run at the target's resolution, its blurs and distances in
+ * pixels of the screen: Flash filters what the screen shows, so a stage
+ * zoomed three times has its glows reach as far on the screen as at its
+ * size, not three times as far, as an object scaled up does in adl.
+ */
 abstract class FlashFilter extends Filter {
-  /** The texels to a pixel this run: the input's, made at the target's resolution. */
+  /** The target's units to a pixel of the screen. */
+  protected units = 1;
+  /** How far it draws past the object, in pixels of the screen, which its padding covers. */
+  protected reach: number | null = null;
+
+  /** The target's units to a pixel of the screen, now: the padding is the reach in those units. */
+  setUnits(units: number): void {
+    this.units = units;
+    if (this.reach !== null) {
+      // Whole units, a reach under one a unit: the filters that read the object's own pixels
+      // find them that many in.
+      this.padding = Math.ceil(this.reach * units);
+    }
+  }
+
+  /** The texels to a screen pixel this run: the input's to a unit, at the target's resolution. */
   protected texels(input: Texture): number {
-    return input.source.resolution;
+    return input.source.resolution * this.units;
   }
 }
 
@@ -176,7 +203,8 @@ class BlurFilter extends FlashFilter {
       glProgram: GlProgram.from({ vertex: VERTEX, fragment: BOX, name: "flash-blur" }),
       resources: {},
     });
-    this.padding = Math.ceil((f.quality * Math.max(f.blurX, f.blurY)) / 2);
+    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2;
+    this.padding = Math.ceil(this.reach);
   }
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
@@ -239,7 +267,6 @@ class GlowFilter extends BlurredFilter {
 
   constructor(private readonly f: FilterRecord) {
     const shadow = f.kind === "dropShadow";
-    const radians = ((f.angle || 0) * Math.PI) / 180;
     const distance = shadow ? f.distance || 0 : 0;
     super({
       glProgram: GlProgram.from({ vertex: VERTEX, fragment: GLOW, name: "flash-glow" }),
@@ -255,28 +282,25 @@ class GlowFilter extends BlurredFilter {
           },
           uAlpha: { value: f.alpha, type: "f32" },
           uStrength: { value: f.strength, type: "f32" },
-          uOffset: {
-            value: new Float32Array([distance * Math.cos(radians), distance * Math.sin(radians)]),
-            type: "vec2<f32>",
-          },
+          uOffset: { value: new Float32Array(2), type: "vec2<f32>" },
           uInner: { value: f.inner ? 1 : 0, type: "f32" },
           uKnockout: { value: f.knockout ? 1 : 0, type: "f32" },
           uHide: { value: shadow && f.hideObject ? 1 : 0, type: "f32" },
         },
       },
     });
-    this.padding = Math.ceil((f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance));
+    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance);
+    this.padding = Math.ceil(this.reach);
+    this.distance = distance;
   }
+
+  /** A drop shadow's distance; a glow's is none. */
+  private readonly distance: number;
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const f = this.f;
-    const resolution = this.texels(input);
     const offset = this.resources.glowUniforms.uniforms.uOffset as Float32Array;
-    const radians = ((f.angle || 0) * Math.PI) / 180;
-    const distance = f.kind === "dropShadow" ? f.distance || 0 : 0;
-    // In the input's pixels, as its coordinates are.
-    offset[0] = distance * Math.cos(radians);
-    offset[1] = distance * Math.sin(radians);
+    placeOffset(offset, f, this.distance, this.units);
     const blurred = TexturePool.getSameSizeTexture(input);
     blur(
       system,
@@ -286,7 +310,7 @@ class GlowFilter extends BlurredFilter {
       f.blurX || 0,
       f.blurY || 0,
       f.quality,
-      resolution,
+      this.texels(input),
       true,
     );
     this.resources.uBlurred = blurred.source;
@@ -354,7 +378,6 @@ class BevelFilter extends BlurredFilter {
   constructor(private readonly f: FilterRecord) {
     const rgb = (c: number) =>
       new Float32Array([((c >> 16) & 0xff) / 255, ((c >> 8) & 0xff) / 255, (c & 0xff) / 255]);
-    const radians = ((f.angle || 0) * Math.PI) / 180;
     const distance = f.distance || 0;
     super({
       glProgram: GlProgram.from({ vertex: VERTEX, fragment: BEVEL, name: "flash-bevel" }),
@@ -365,16 +388,14 @@ class BevelFilter extends BlurredFilter {
           uHighlightAlpha: { value: f.highlightAlpha, type: "f32" },
           uShadowAlpha: { value: f.shadowAlpha, type: "f32" },
           uStrength: { value: f.strength, type: "f32" },
-          uOffset: {
-            value: new Float32Array([distance * Math.cos(radians), distance * Math.sin(radians)]),
-            type: "vec2<f32>",
-          },
+          uOffset: { value: new Float32Array(2), type: "vec2<f32>" },
           uType: { value: f.type === "inner" ? 0 : f.type === "outer" ? 1 : 2, type: "f32" },
           uKnockout: { value: f.knockout ? 1 : 0, type: "f32" },
         },
       },
     });
-    this.padding = Math.ceil((f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance));
+    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance);
+    this.padding = Math.ceil(this.reach);
   }
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
@@ -392,6 +413,8 @@ class BevelFilter extends BlurredFilter {
       true,
     );
     this.resources.uBlurred = blurred.source;
+    const offset = this.resources.bevelUniforms.uniforms.uOffset as Float32Array;
+    placeOffset(offset, f, f.distance || 0, this.units);
     system.applyFilter(this, input, output, clear);
     this.unbind();
     TexturePool.returnTexture(blurred);
@@ -488,8 +511,6 @@ class GradientFilter extends BlurredFilter {
   }
 
   constructor(private readonly f: FilterRecord) {
-    const radians = ((f.angle || 0) * Math.PI) / 180;
-    const distance = f.distance || 0;
     const gradient = new PixiTexture({
       source: new BufferImageSource({
         resource: rgbaOf(gradientTable(f)),
@@ -509,10 +530,7 @@ class GradientFilter extends BlurredFilter {
       resources: {
         gradientUniforms: {
           uStrength: { value: f.strength, type: "f32" },
-          uOffset: {
-            value: new Float32Array([distance * Math.cos(radians), distance * Math.sin(radians)]),
-            type: "vec2<f32>",
-          },
+          uOffset: { value: new Float32Array(2), type: "vec2<f32>" },
           uType: { value: f.type === "inner" ? 0 : f.type === "outer" ? 1 : 2, type: "f32" },
           uKnockout: { value: f.knockout ? 1 : 0, type: "f32" },
           uBevel: { value: f.kind === "gradientBevel" ? 1 : 0, type: "f32" },
@@ -525,10 +543,11 @@ class GradientFilter extends BlurredFilter {
     // The rect's growth each way, as applyFilter's: left, top, right, bottom.
     const rect = filterRect({ x: 0, y: 0, width: 1, height: 1 }, f);
     this.grows = [-rect.x, -rect.y, rect.x + rect.width - 1, rect.y + rect.height - 1];
-    this.padding = Math.max(...this.grows) + 1;
+    this.reach = Math.max(...this.grows) + 1;
+    this.padding = this.reach;
   }
 
-  /** How far the filter's rect grows past the object, each way: left, top, right, bottom. */
+  /** How far the filter's rect grows past the object in screen pixels: left, top, right, bottom. */
   private readonly grows: number[];
 
   /** How far in from the input's frame the object's pixels start: this and the later filters' padding. */
@@ -549,13 +568,16 @@ class GradientFilter extends BlurredFilter {
       true,
     );
     this.resources.uBlurred = blurred.source;
+    const offset = this.resources.gradientUniforms.uniforms.uOffset as Float32Array;
+    placeOffset(offset, f, f.distance || 0, this.units);
     // The object's pixels and one more right and down, as adl's bitmap of it, grown by the rect.
     const region = this.resources.gradientUniforms.uniforms.uRegion as Float32Array;
-    const [left, top, right, bottom] = this.grows;
-    region[0] = this.inset - left;
-    region[1] = this.inset - top;
-    region[2] = input.frame.width - this.inset + 1 + right;
-    region[3] = input.frame.height - this.inset + 1 + bottom;
+    const grows = this.grows;
+    const units = this.units;
+    region[0] = this.inset - grows[0] * units;
+    region[1] = this.inset - grows[1] * units;
+    region[2] = input.frame.width - this.inset + units + grows[2] * units;
+    region[3] = input.frame.height - this.inset + units + grows[3] * units;
     system.applyFilter(this, input, output, clear);
     this.unbind();
     TexturePool.returnTexture(blurred);
@@ -917,10 +939,24 @@ export function displayFilters(
     }
   }
 
+  scaleFilters(out, 1);
+  return out;
+}
+
+/**
+ * Filters drawn at `units` of the target to a pixel of the screen, each
+ * filter that reads the object's own pixels told how far in they start:
+ * the padding of it and the filters after it.
+ */
+function scaleFilters(filters: readonly Filter[], units: number): void {
   let inset = 0;
-  for (let i = out.length - 1; i >= 0; i--) {
-    inset += out[i].padding;
-    const filter = out[i];
+  for (let i = filters.length - 1; i >= 0; i--) {
+    const filter = filters[i];
+    if (filter instanceof FlashFilter) {
+      filter.setUnits(units);
+    }
+
+    inset += filter.padding;
     if (
       filter instanceof ConvolutionFilter ||
       filter instanceof GradientFilter ||
@@ -929,8 +965,6 @@ export function displayFilters(
       filter.inset = inset;
     }
   }
-
-  return out;
 }
 
 const COPY = `in vec2 vTextureCoord;
@@ -982,17 +1016,19 @@ export class FilterChain extends Filter {
   private stale = true;
   /** Runs in a row its object changed for. */
   private changing = 0;
+  private drawnAt = 1;
 
   constructor(
     readonly filters: Filter[],
     private readonly owner: Container,
     private readonly keeps = true,
+    units = 1,
   ) {
     super({
       glProgram: GlProgram.from({ vertex: VERTEX, fragment: COPY, name: "flash-filter-copy" }),
       resources: {},
     });
-    this.padding = filters.reduce((sum, f) => sum + f.padding, 0);
+    this.rescale(units);
     this.resolution = "inherit";
     // The object is drawn into the chain's input as the target draws, with
     // its multisampling: Pixi's filters default to none, which left a
@@ -1003,6 +1039,19 @@ export class FilterChain extends Filter {
 
   /** What it was run on changed: run it again. */
   changed(): void {
+    this.stale = true;
+  }
+
+  /** The target's units to a pixel of the screen its filters are drawn at. */
+  get units(): number {
+    return this.drawnAt;
+  }
+
+  /** Its filters drawn at `units` of the target to a pixel of the screen from now on. */
+  rescale(units: number): void {
+    this.drawnAt = units;
+    scaleFilters(this.filters, units);
+    this.padding = this.filters.reduce((sum, f) => sum + f.padding, 0);
     this.stale = true;
   }
 

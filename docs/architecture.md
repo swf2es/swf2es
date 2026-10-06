@@ -2394,34 +2394,43 @@ more right and down, its edge pixels clamped or coloured past that, and
 draws the rect so grown; each pixel's texels read its centre alike. One
 with no taps moves the object up and left by half the other size, a
 single tap there. (adl's copy then reads a row past its bitmap and draws
-what memory lies there; swf2es leaves that row transparent.) The
-passes
-are Pixi filters at the target's resolution, for WebGL: under WebGPU,
-where Pixi would skip an object's whole chain for one it cannot run,
-they are left out and a blend mode is kept. A view made for one draw
-destroys the filters it made with it. The object goes into its chain, or
-a blend mode's filter, multisampled as the target is (Pixi's filters
-default to "off"): a filtered caption's edges were stepped beside its
-unfiltered neighbours' smooth ones, for some 0.1 ms of GPU time a frame
-on a screen of filters and blends.
+what memory lies there; swf2es leaves that row transparent.) Blurs and
+distances are in pixels of the screen, as the thinnest line is: Flash
+filters the pixels it draws, so a glow on an object scaled twice reaches
+no further than on one at its size, and on a stage a host shows at three
+times its size a glow reaches as many screen pixels as at its size, a
+third as far across the stage. Each chain keeps the units to a screen
+pixel it was made for and is scaled again when they change, though its
+object was off the list then; its padding is the reach in those units. A
+BitmapData's pixel is a screen pixel to a draw into it, rendered at its
+samples a side. The passes are Pixi filters at the target's resolution,
+for WebGL: under WebGPU, where Pixi would skip an object's whole chain
+for one it cannot run, they are left out and a blend mode is kept. A
+view made for one draw destroys the filters it made with it. The object
+goes into its chain, or a blend mode's filter, multisampled as the
+target is (Pixi's filters default to "off"): a filtered caption's edges
+were stepped beside its unfiltered neighbours' smooth ones, for some
+0.1 ms of GPU time a frame on a screen of filters and blends.
 
 As Flash caches a filtered object as a bitmap, an object's filters run
 as one chain (`FilterChain`) whose output is kept and drawn again until
 what it was run on changes: the object or anything below it, its
 transform other than a move, the colour and alpha it is drawn in, or how
-much of it the screen shows. A wide blur's passes read blur × resolution
-texels a pixel over an area grown by its reach, so their cost rises with
-the cube of the resolution; kept, a still object costs one copy a frame.
-A kept output moved is drawn at the new place to the whole texel, its
-content where it fell within a texel when it was filtered. One that
-changes frame after frame is filtered straight to the target, with no
-copy kept, and a view drawn once keeps none. adl leaves some changes
-undrawn: a child moved within its parent's bounds shows in its capture
-where it was as well as where it is, and a mask from outside the object
-that moves leaves it clipped as it was. swf2es draws the child once,
-where it is now, and also keeps the output for such a mask, unless the
-object's bounds change with it. Each pass lets go of the pool's textures
-it drew with, which the pool destroys as the screen's size changes.
+much of it the screen shows. A wide blur's passes read blur × texels to
+a screen pixel a pixel, over an area grown by its reach, so their cost
+rises with the square of the resolution, and with the cube of the
+samples a host draws finer to average down; kept, a still object costs
+one copy a frame. A kept output moved is drawn at the new place to the
+whole texel, its content where it fell within a texel when it was
+filtered. One that changes frame after frame is filtered straight to the
+target, with no copy kept, and a view drawn once keeps none. adl leaves
+some changes undrawn: a child moved within its parent's bounds shows in
+its capture where it was as well as where it is, and a mask from outside
+the object that moves leaves it clipped as it was. swf2es draws the
+child once, where it is now, and also keeps the output for such a mask,
+unless the object's bounds change with it. Each pass lets go of the
+pool's textures it drew with, which the pool destroys as the screen's
+size changes.
 
 ### Masks and scroll rectangles
 

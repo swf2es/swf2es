@@ -1222,10 +1222,14 @@ export class PixiView {
   screenScale: number | null = null;
   /** The thinnest line it last drew the stage's lines with; a change draws them all again. */
   private strokedAt = 0;
+  /** The filter units it last drew the stage's filters with; the stage's own scale changes them too. */
+  private filteredAt = 0;
   /** The root the last prepare synced, to know whether an object is on the list. */
   private root: DisplayObject | null = null;
-  /** Whether this prepare draws every line again, the screen's scale having changed. */
+  /** Whether this prepare visits every node, to stroke and filter again for a new screen scale. */
   private rescaled = false;
+  /** A fresh view's units to a pixel of the BitmapData it draws, rendered that many times larger. */
+  private samples = 1;
 
   constructor(
     readonly renderer: Renderer,
@@ -1952,7 +1956,10 @@ export class PixiView {
                   : null;
               });
         // A view drawn once keeps no output.
-        node.filters = chain.length > 0 ? [new FilterChain(chain, container, !this.fresh)] : [];
+        node.filters =
+          chain.length > 0
+            ? [new FilterChain(chain, container, !this.fresh, this.filterUnits)]
+            : [];
         if (this.fresh) {
           this.builtFilters.push(...node.filters);
         }
@@ -2044,6 +2051,12 @@ export class PixiView {
     // What its filters' kept output was drawn from changed, but for a move.
     // (A mask from outside it does not count: adl keeps the output, clipped as it was.)
     const chain = node.filters[0];
+    // Kept on the chain, as lines' strokedAt: one off the list while the screen's scale changed
+    // comes back at the old units.
+    if (chain instanceof FilterChain && chain.units !== this.filterUnits) {
+      chain.rescale(this.filterUnits);
+    }
+
     if (
       chain instanceof FilterChain &&
       (dirty & ~TRANSFORM ||
@@ -2365,6 +2378,13 @@ export class PixiView {
     return this.fresh ? 1 : 1 / (this.screenScale ?? this.renderer.resolution ?? 1);
   }
 
+  /** The renderer's units to a pixel of the screen, which Flash's filters reach in. */
+  private get filterUnits(): number {
+    const units = this.fresh ? this.samples : this.stage.scale.x * this.leastWidth;
+    // A stage scaled to nothing filters at a unit a pixel rather than not at all.
+    return Number.isFinite(units) && units > 0 ? units : 1;
+  }
+
   prepare(root: DisplayObject): void {
     this.root = root;
     this.lines.tick();
@@ -2386,8 +2406,10 @@ export class PixiView {
     }
 
     trimPools();
-    this.rescaled = this.leastWidth !== this.strokedAt;
+    const units = this.filterUnits;
+    this.rescaled = this.leastWidth !== this.strokedAt || units !== this.filteredAt;
     this.strokedAt = this.leastWidth;
+    this.filteredAt = units;
     const node = this.sync(root, UNIT, false);
     this.rescaled = false;
     if (node.parent !== this.stage) {
@@ -2445,6 +2467,7 @@ export class PixiView {
   ): RenderTexture {
     const n = samples;
     const view = new PixiView(this.renderer, true, this);
+    view.samples = n;
     // Built at the draw's own scale, lines included, as the stage's are,
     // then rendered n times larger: the curves are no finer than on the
     // stage, and widths and hairlines scale with the samples.

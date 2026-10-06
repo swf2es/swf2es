@@ -1255,6 +1255,149 @@ test("a filtered or blended object is drawn into its filters multisampled as its
   }
 });
 
+test("filters blur, move and pad in pixels of the screen however far the stage is zoomed, as Flash's", async () => {
+  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = await import(entry);
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  const inputs: { destroy(all: boolean): void }[] = [];
+  try {
+    const filtered = new Container();
+    const at = { angle: 0, blurX: 4, blurY: 4, quality: 1 };
+    filtered.filters = [
+      { ...filterDefaults("glow"), ...at },
+      { ...filterDefaults("dropShadow"), ...at, distance: 4 },
+      { ...filterDefaults("bevel"), ...at, distance: 2 },
+      { ...filterDefaults("gradientGlow"), ...at, distance: 4 },
+    ];
+    const { renderer } = standIn([0, 0, 0, 0]);
+    const settable = renderer as unknown as {
+      resolution: number;
+      type: number;
+      render(options: { container: unknown }): void;
+    };
+    settable.resolution = 3;
+    settable.type = 1;
+    const view = new PixiView(renderer);
+    type Pass = { resources: Record<string, { uniforms?: Record<string, unknown> } | undefined> };
+    type Flash = Pass & {
+      padding: number;
+      apply(system: unknown, input: unknown, output: unknown, clear: boolean): void;
+    };
+    type Chain = { units: number; filters: Flash[] };
+    const chainOf = (container: unknown) =>
+      (container as { filters?: Chain[] | null } | undefined)?.filters?.[0];
+    const chain = () => chainOf(view.stage.children[0]) as Chain;
+    const round = (v: number) => Math.round(v * 1000) / 1000;
+    // Each filter's box widths in texels, its padding and offset in the renderer's units, and
+    // the gradient's region, where it draws, in them too.
+    const run = () => {
+      const input = pixi.RenderTexture.create({
+        width: 64,
+        height: 64,
+        resolution: settable.resolution,
+      });
+      inputs.push(input);
+      return chain().filters.map((filter) => {
+        const widths: number[] = [];
+        const system = {
+          applyFilter(pass: Pass) {
+            const box = pass.resources.boxUniforms?.uniforms;
+            if (box) {
+              widths.push(box.uWidth as number);
+            }
+          },
+        };
+        filter.apply(system, input, input, true);
+        const { glowUniforms, bevelUniforms, gradientUniforms } = filter.resources;
+        const uniforms = (glowUniforms ?? bevelUniforms ?? gradientUniforms)?.uniforms as Record<
+          string,
+          Float32Array
+        >;
+        const out = {
+          widths,
+          padding: filter.padding,
+          offset: [...uniforms.uOffset].map(round),
+        };
+        return uniforms.uRegion ? { ...out, region: [...uniforms.uRegion].map(round) } : out;
+      });
+    };
+
+    // Shown three screen pixels to a stage pixel: boxes 4 texels wide, 4 screen pixels, and
+    // reaches of 2, 6, 4 and 7 screen pixels (the gradient's rect 6 right, 2 up and down).
+    view.prepare(filtered);
+    assert.deepEqual(run(), [
+      { widths: [4, 4], padding: 1, offset: [0, 0] },
+      { widths: [4, 4], padding: 2, offset: [1.333, 0] },
+      { widths: [4, 4], padding: 2, offset: [0.667, 0] },
+      { widths: [4, 4], padding: 3, offset: [1.333, 0], region: [3, 2.333, 63.333, 62] },
+    ]);
+
+    // Averaged down to the screen, as the test page draws: 4 screen pixels, 12 texels.
+    view.screenScale = 1;
+    view.prepare(filtered);
+    assert.deepEqual(run(), [
+      { widths: [12, 12], padding: 2, offset: [0, 0] },
+      { widths: [12, 12], padding: 6, offset: [4, 0] },
+      { widths: [12, 12], padding: 4, offset: [2, 0] },
+      { widths: [12, 12], padding: 7, offset: [4, 0], region: [7, 5, 64, 60] },
+    ]);
+
+    // Off the list while the stage is shown at half its size, then back: scaled all the same,
+    // 4 screen pixels 8 stage pixels, which the padding reaches round.
+    view.screenScale = null;
+    settable.resolution = 0.5;
+    view.prepare(new Container());
+    view.prepare(filtered);
+    assert.equal(chain().units, 2);
+    assert.deepEqual(run(), [
+      { widths: [4, 4], padding: 4, offset: [0, 0] },
+      { widths: [4, 4], padding: 12, offset: [8, 0] },
+      { widths: [4, 4], padding: 8, offset: [4, 0] },
+      { widths: [4, 4], padding: 14, offset: [8, 0], region: [14, 10, 64, 56] },
+    ]);
+
+    // The stage's own scale counts too; one of nothing filters at a unit a pixel.
+    view.stage.scale.set(0.5);
+    view.prepare(filtered);
+    assert.equal(chain().units, 1);
+    view.stage.scale.set(0);
+    view.prepare(filtered);
+    assert.equal(chain().units, 1);
+
+    // A filtered child, clean below its root, follows the stage's scale as well.
+    type Tree = { filters?: readonly unknown[] | null; children?: readonly unknown[] };
+    const chainBelow = (t: unknown): Chain | undefined =>
+      chainOf(t) ?? (t as Tree).children?.map(chainBelow).find((c) => c);
+    const holder = new Container();
+    holder.addChildAt(filtered, 0);
+    view.stage.scale.set(1);
+    view.prepare(holder);
+    assert.equal(chainBelow(view.stage.children[0])?.units, 2);
+    view.stage.scale.set(2);
+    view.prepare(holder);
+    assert.equal(chainBelow(view.stage.children[0])?.units, 4);
+
+    // Drawn into a BitmapData at 4 samples a side: a bitmap pixel 4 units of the target.
+    let drawnAt = 0;
+    settable.render = ({ container }) => {
+      const drawn = chainOf((container as { children: unknown[] }).children[0]);
+      drawnAt ||= drawn?.units ?? 0;
+    };
+    const glowing = new Container();
+    glowing.filters = [{ ...filterDefaults("glow"), ...at }];
+    view.snapshot(glowing, { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }, 1, 1, 4);
+    assert.equal(drawnAt, 4);
+  } finally {
+    for (const input of inputs) {
+      input.destroy(true);
+    }
+    pixi.DOMAdapter.set(adapter);
+  }
+});
+
 test("a tween's lines go once its morph drops their blend, not idle for a ratio never drawn again", async () => {
   const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
   const { readMorphShape, readSwf } = await import("../../../packages/format/dist/index.js");
