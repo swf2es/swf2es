@@ -3306,6 +3306,24 @@ export class Runtime {
   }
 
   /**
+   * Where an AS3 error was made, as JavaScript stack lines, the compiled
+   * methods' names among them, the runtime's own frames before the first
+   * of those left out; null for anything else.
+   */
+  stackOf(error: Value): string | null {
+    const made = (error as { $jsError?: Error } | null)?.$jsError;
+    if (!(made instanceof Error) || !made.stack) {
+      return null;
+    }
+
+    const frames = made.stack.split("\n").slice(1);
+    const first = frames.findIndex(
+      (line) => !/[/\\]runtime[/\\](?:(?:dist|src)[/\\])?avm2[/\\]/.test(line),
+    );
+    return frames.slice(Math.max(0, first)).join("\n");
+  }
+
+  /**
    * Error `id`'s message as AS3 sees it: its number, as the release player
    * and avmshell give it, or with its text and arguments in debugger mode.
    */

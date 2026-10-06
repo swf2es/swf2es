@@ -120,9 +120,23 @@ export const toplevelNatives: Natives = {
  */
 const constructs: ClassHook = { call: (rt, cls, args) => rt.constructClass(cls, args) };
 
+/**
+ * An AS3 error's JavaScript error, made with it: where it was made, the
+ * compiled method's name in it, for a host to show (Runtime.stackOf). The
+ * release player has no stack trace for AS3 to read, and getStackTrace
+ * still gives null.
+ */
+const errorClass: ClassHook = {
+  ...constructs,
+  create: (traits) => {
+    const o = Object.create(traits.proto);
+    Object.defineProperty(o, "$jsError", { value: new Error() });
+    return o;
+  },
+};
+
 export const errorHooks: Record<string, ClassHook> = Object.fromEntries(
   [
-    "Error",
     "DefinitionError",
     "EvalError",
     "RangeError",
@@ -134,5 +148,7 @@ export const errorHooks: Record<string, ClassHook> = Object.fromEntries(
     "VerifyError",
     "UninitializedError",
     "ArgumentError",
-  ].map((name) => [name, constructs]),
+  ]
+    .map((name): [string, ClassHook] => [name, constructs])
+    .concat([["Error", errorClass]]),
 );
