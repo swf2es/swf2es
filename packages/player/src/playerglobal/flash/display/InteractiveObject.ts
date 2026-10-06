@@ -1,7 +1,7 @@
 // flash.display.InteractiveObject: what it keeps about input, kept as
 // fields with Flash's defaults until input reaches the player.
 import { avm2 } from "@swf2es/runtime";
-import { tabEnabledDefault } from "../../../keyboard.js";
+import { tabEnabledDefault } from "../../../input/keyboard.js";
 import type { Scripting } from "../../../scripting.js";
 import { displayOf } from "./DisplayObject.js";
 

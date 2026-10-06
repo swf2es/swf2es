@@ -1,7 +1,7 @@
 // flash.display.Bitmap: a display object showing a BitmapData, its node a
-// BitmapObject (display.ts) that the renderer draws as a textured sprite.
+// BitmapObject (display/display.ts) that the renderer draws as a textured sprite.
 import { avm2 } from "@swf2es/runtime";
-import { type BitmapObject, CONTENT } from "../../../display.js";
+import { type BitmapObject, CONTENT } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;

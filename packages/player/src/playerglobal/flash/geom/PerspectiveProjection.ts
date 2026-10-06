@@ -4,7 +4,7 @@
 // their defaults when set to null. The player stores it; it draws without
 // perspective.
 import { avm2 } from "@swf2es/runtime";
-import type { DisplayObject, Projection } from "../../../display.js";
+import type { DisplayObject, Projection } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;

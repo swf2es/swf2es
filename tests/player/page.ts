@@ -15,7 +15,7 @@
 //
 // And it may ask for multisampling, as a host made with `antialias: true`
 // draws: the samples are then each resolved from the multisampled targets,
-// blends' backdrops and the back buffer alike (pixi-resolve.ts), before
+// blends' backdrops and the back buffer alike (render/resolve.ts), before
 // the page averages them.
 import { createCodegen } from "@swf2es/codegen";
 import { isAs3, readSwf, tags } from "@swf2es/format";
@@ -33,7 +33,7 @@ interface Run {
   images: Record<number, string>;
   /** What the SWF's scripts traced, a line each. */
   trace: string[];
-  /** The draws the transform table made (pixi-table.ts), in its multi-draw calls. */
+  /** The draws the transform table made (render/table.ts), in its multi-draw calls. */
   tableDraws: number;
   error: string | null;
 }
@@ -167,7 +167,7 @@ async function runSwf(
       antialias,
       preserveDrawingBuffer: true,
       resolution: n * zoom,
-      // Blend modes read what is below them from it (pixi-blend.ts).
+      // Blend modes read what is below them from it (render/blend.ts).
       useBackBuffer: true,
     });
     const multi = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl?.getExtension(
@@ -542,7 +542,7 @@ async function benchSwf(
  * and puts back.
  */
 async function toggling(root: Player["root"], count: number): Promise<DisplayObject[]> {
-  const { Drawing } = (await import("/player/drawing.js" as string)) as {
+  const { Drawing } = (await import("/player/display/drawing.js" as string)) as {
     Drawing: new () => {
       beginFill(fill: { type: "solid"; color: number }): void;
       drawRoundRect(x: number, y: number, w: number, h: number, ew: number, eh: number): void;

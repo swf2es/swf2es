@@ -1,6 +1,6 @@
 // flash.geom.Utils3D: points through a projection matrix, to the plane w = 1.
 import { avm2 } from "@swf2es/runtime";
-import { transform3D } from "../../../matrix3d.js";
+import { transform3D } from "../../../display/matrix3d.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;

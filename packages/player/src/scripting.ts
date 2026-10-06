@@ -16,8 +16,8 @@ import {
   tags,
 } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { type AudioHost, browserAudioHost, type DecodedSound } from "./audio.js";
-import { BitmapStore } from "./bitmap.js";
+import { BitmapStore } from "./bitmap/bitmap.js";
+import { decodeImages, decodeInBrowser, hasUndecoded, type ImageDecode } from "./bitmap/images.js";
 import {
   BitmapObject,
   ButtonObject,
@@ -33,10 +33,20 @@ import {
   TextObject,
   TRANSFORM,
   VideoObject,
-} from "./display.js";
-import { FontSet } from "./fonts.js";
-import { decodeImages, decodeInBrowser, hasUndecoded, type ImageDecode } from "./images.js";
-import type { Cursor, PointerInput } from "./input.js";
+} from "./display/display.js";
+import {
+  type AnyFontCharacter,
+  type BitmapCharacter,
+  type ButtonCharacter,
+  type Character,
+  type DisplayCharacter,
+  INVALID_PIXELS,
+  type Library,
+  readLibrary,
+  type SoundCharacter,
+} from "./display/timeline.js";
+import type { Cursor, PointerInput } from "./input/pointer.js";
+import { type AudioHost, browserAudioHost, type DecodedSound } from "./media/audio.js";
 import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
 import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import {
@@ -52,17 +62,7 @@ import {
 } from "./playerglobal/flash/system/Capabilities.js";
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
 import { sha256 } from "./sha256.js";
-import {
-  type AnyFontCharacter,
-  type BitmapCharacter,
-  type ButtonCharacter,
-  type Character,
-  type DisplayCharacter,
-  INVALID_PIXELS,
-  type Library,
-  readLibrary,
-  type SoundCharacter,
-} from "./timeline.js";
+import { FontSet } from "./text/fonts.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -1446,7 +1446,7 @@ export class Scripting {
   /**
    * An AVM1 SWF's root, not yet on its first frame, as AS3 sees it: an
    * AVM1Movie, which is no InteractiveObject, so the pointer's hits on the
-   * movie go to its Loader (input.ts).
+   * movie go to its Loader (input/pointer.ts).
    */
   private avm1Movie(library: Library): AsObject {
     const root = new MovieClip(library.root, library);

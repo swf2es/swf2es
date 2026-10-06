@@ -4,16 +4,21 @@
 // and a button's.
 import type { SoundInfo, StartSound } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import type { DisplayObject, MovieClip } from "../../../display/display.js";
+import type {
+  Library,
+  SoundCharacter,
+  SoundStream,
+  TimelineSounds,
+} from "../../../display/timeline.js";
 import {
   type DecodedSound,
   type PlayingSound,
   type PlayShape,
   type SoundMix,
   streamSound,
-} from "../../../audio.js";
-import type { DisplayObject, MovieClip } from "../../../display.js";
+} from "../../../media/audio.js";
 import type { Scripting } from "../../../scripting.js";
-import type { Library, SoundCharacter, SoundStream, TimelineSounds } from "../../../timeline.js";
 import { dispatchEvent } from "../events/EventDispatcher.js";
 
 type AsObject = avm2.AsObject;

@@ -1,12 +1,12 @@
 // flash.display.Graphics: the natives record into the display object's
-// drawing (drawing.ts). drawCircle and drawEllipse are playerglobal's own,
+// drawing (display/drawing.ts). drawCircle and drawEllipse are playerglobal's own,
 // over curveTo.
 import type { Line } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { BitmapStore } from "../../../bitmap.js";
-import type { DisplayObject } from "../../../display.js";
-import { CONTENT } from "../../../display.js";
-import { Drawing } from "../../../drawing.js";
+import { BitmapStore } from "../../../bitmap/bitmap.js";
+import type { DisplayObject } from "../../../display/display.js";
+import { CONTENT } from "../../../display/display.js";
+import { Drawing } from "../../../display/drawing.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;

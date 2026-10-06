@@ -1,9 +1,9 @@
-// flash.display.BitmapData: a pixel store (bitmap.ts) behind the AS3
+// flash.display.BitmapData: a pixel store (bitmap/bitmap.ts) behind the AS3
 // object, as $store; the natives read and write it. Flash's limits and its
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
-import { BitmapStore, type PixelRect } from "../../../bitmap.js";
-import { applyFilter, filterRect, filtersDrawn } from "../../../bitmap-filters.js";
+import { BitmapStore, type PixelRect } from "../../../bitmap/bitmap.js";
+import { applyFilter, filterRect, filtersDrawn } from "../../../bitmap/filters.js";
 import {
   type Affine,
   alphaAt,
@@ -22,13 +22,13 @@ import {
   pixelDissolve,
   scroll,
   threshold,
-} from "../../../bitmap-ops.js";
-import { bounds } from "../../../bounds.js";
-import type { Filter } from "../../../filters.js";
-import { transformRect } from "../../../geometry.js";
-import { encodePng } from "../../../png.js";
+} from "../../../bitmap/ops.js";
+import { encodePng } from "../../../bitmap/png.js";
+import { bounds } from "../../../display/bounds.js";
+import type { Filter } from "../../../display/filters.js";
+import { transformRect } from "../../../display/geometry.js";
+import { type BitmapCharacter, INVALID_PIXELS } from "../../../display/timeline.js";
 import type { Scripting } from "../../../scripting.js";
-import { type BitmapCharacter, INVALID_PIXELS } from "../../../timeline.js";
 import { filterKindOf, recordOf } from "../filters/filters.js";
 
 /** The filters with a glow, a shadow or a bevel, which an opaque destination refuses. */
@@ -117,7 +117,7 @@ function sourceOf(s: Scripting, v: Value): BitmapStore {
 
 /**
  * draw: a BitmapData, or a Bitmap as its data, its own transform ignored,
- * composited on the CPU (bitmap-ops.ts drawBitmap); any other display
+ * composited on the CPU (bitmap/ops.ts drawBitmap); any other display
  * object rendered by the Scripting's drawer at `samples` a side, over its
  * own bounds alone, then composited the same way. A null source is
  * ArgumentError 2005, as Flash words it.
@@ -356,7 +356,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       store.copyPixels(from, r, dx, dy, !!mergeAlpha, alpha, ax, ay);
     }
 
-    /** `sourceRect` of the source filtered into this at `destPoint`, its filter's rect written whole (bitmap-filters.ts). */
+    /** `sourceRect` of the source filtered into this at `destPoint`, its filter's rect written whole (bitmap/filters.ts). */
     applyFilter(source: Value, sourceRect: Value, destPoint: Value, filter: Value): void {
       const store = storeOf(s, this);
       const from = sourceOf(s, source);

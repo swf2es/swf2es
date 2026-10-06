@@ -1,9 +1,9 @@
 // flash.display.Stage: the stage's size and frame rate, invalidate, which
 // asks for a RENDER event before the frame is drawn, focus, which keys go
-// to (keyboard.ts), and the two container methods Stage declares native
+// to (input/keyboard.ts), and the two container methods Stage declares native
 // again, which do as a container's do.
 import { avm2 } from "@swf2es/runtime";
-import { setFocus } from "../../../keyboard.js";
+import { setFocus } from "../../../input/keyboard.js";
 import type { Scripting } from "../../../scripting.js";
 import { displayOf } from "./DisplayObject.js";
 import { containerNatives } from "./DisplayObjectContainer.js";

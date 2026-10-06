@@ -11,7 +11,7 @@
 // --back-buffer makes the renderer as a host that draws blend modes must,
 // with Pixi's back buffer. --antialias makes it multisampled, as a host
 // made with `antialias: true`; with --back-buffer, what blends and
-// filters resolve of it (pixi-resolve.ts) counts in the draw and gl.
+// filters resolve of it (render/resolve.ts) counts in the draw and gl.
 //
 // --rig N plays instead N instances of one animated character, a sprite of
 // 12 outlined parts that turn and swell on a loop of 24 frames, all in
@@ -27,7 +27,7 @@
 // its own, run again as it turns. --glide has the parts slide instead of
 // turning, a move alone, whose filters' output is kept. --filtered K
 // blurs only every K-th part, as --blurred does all: each filter ends the
-// transform table's run (pixi-table.ts), which then draws only the parts
+// transform table's run (render/table.ts), which then draws only the parts
 // between two, as in a game's creatures with a glow on every few parts.
 // The rig has 12 parts, so any K of 12 or more blurs the first alone.
 //
@@ -42,7 +42,7 @@
 // font's fills.
 //
 // --no-table draws the Graphics drawn alone each with a call of its own,
-// as Pixi does, not through the transform table (pixi-table.ts): the two
+// as Pixi does, not through the transform table (render/table.ts): the two
 // timed apart. --min-run N has the table draw only runs of N draws or
 // more, and Pixi the shorter, to time where the table starts to gain.
 //

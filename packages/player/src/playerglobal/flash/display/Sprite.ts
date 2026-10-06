@@ -5,9 +5,9 @@
 // Its soundTransform is kept, in whole percents as a channel's, and read
 // back as a copy; it mixes the timeline sounds of the sprite and all in it.
 import { avm2 } from "@swf2es/runtime";
-import type { SoundMix } from "../../../audio.js";
-import { type DisplayObject, MovieClip } from "../../../display.js";
-import type { Rect } from "../../../geometry.js";
+import { type DisplayObject, MovieClip } from "../../../display/display.js";
+import type { Rect } from "../../../display/geometry.js";
+import type { SoundMix } from "../../../media/audio.js";
 import type { Scripting } from "../../../scripting.js";
 import { channelMix, mixOf, transformOf, updateTimelineMixes } from "../media/Sound.js";
 import { graphicsOf } from "./Graphics.js";

@@ -19,7 +19,7 @@ export interface PlayerJob {
   zoom?: number;
   /** Drawn multisampled, as a host's renderer made with `antialias: true` draws (page.ts). */
   antialias?: boolean;
-  /** Drawn without the transform table (pixi-table.ts) where false; with it by default. */
+  /** Drawn without the transform table (render/table.ts) where false; with it by default. */
   table?: boolean;
   /** The fewest draws a run makes through the table; its default where not given. */
   tableMinRun?: number;

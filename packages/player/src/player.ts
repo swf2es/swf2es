@@ -4,12 +4,12 @@
 // advance until the next); with scripts, the frame's events and scripts
 // follow; then the frame is drawn.
 import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
-import { Container, type DisplayObject, frameChildren, MovieClip } from "./display.js";
-import { decodeImages, decodeInBrowser } from "./images.js";
-import { PointerInput } from "./input.js";
-import { KeyboardInput } from "./keyboard.js";
+import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
+import { Container, type DisplayObject, frameChildren, MovieClip } from "./display/display.js";
+import { type Library, readLibrary } from "./display/timeline.js";
+import { KeyboardInput } from "./input/keyboard.js";
+import { PointerInput } from "./input/pointer.js";
 import type { Scripting } from "./scripting.js";
-import { type Library, readLibrary } from "./timeline.js";
 
 /** Frames one advance() may run to catch up with time passed. */
 const MAX_CATCH_UP = 5;

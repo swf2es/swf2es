@@ -3,9 +3,9 @@
 // font lists, to hold the TextFormats by selector, and to tell the fields
 // that use the sheet that it changed.
 import { avm2 } from "@swf2es/runtime";
-import { camelCase, cssColor, fontList, parseCss } from "../../../css.js";
-import type { TextObject } from "../../../display.js";
+import type { TextObject } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
+import { camelCase, cssColor, fontList, parseCss } from "../../../text/css.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;

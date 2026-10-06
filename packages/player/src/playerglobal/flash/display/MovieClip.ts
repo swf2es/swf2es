@@ -3,9 +3,9 @@
 // their frame is entered, in the frame's script phase; a goto takes the
 // next phase there.
 import { avm2 } from "@swf2es/runtime";
-import type { MovieClip } from "../../../display.js";
+import type { MovieClip } from "../../../display/display.js";
+import type { FrameName } from "../../../display/timeline.js";
 import type { Scripting } from "../../../scripting.js";
-import type { FrameName } from "../../../timeline.js";
 
 type Value = avm2.Value;
 
