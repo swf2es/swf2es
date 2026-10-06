@@ -862,18 +862,6 @@ function settle(group: Settling, settled: boolean): void {
   }
 }
 
-/** Take off and destroy the Graphics a redraw kept for its new content that it did not take. */
-function dropSpare(node: Node): void {
-  for (const graphic of node.spare?.graphics ?? []) {
-    graphic.parent?.removeChild(graphic);
-    if (!graphic.destroyed) {
-      graphic.destroy();
-    }
-  }
-
-  node.spare = null;
-}
-
 /** The key a layer's lines seen through `m`, at least `least` wide, are kept by. */
 function linesKey(m: Linear, least: number): string {
   return `${m[0]},${m[1]},${m[2]},${m[3]},${least}`;
@@ -1508,7 +1496,7 @@ export class PixiView {
     } finally {
       done();
       // Drawn, the new content has taken or dropped them all; one that threw has not.
-      dropSpare(node);
+      this.dropSpare(node);
     }
   }
 
@@ -1575,7 +1563,7 @@ export class PixiView {
     const current = this.current(o);
     // A bitmap or a text draws no Graphics the last content's could stand for.
     if (o instanceof BitmapObject || o instanceof TextObject || o instanceof StaticTextObject) {
-      dropSpare(node);
+      this.dropSpare(node);
     }
 
     if (o instanceof BitmapObject) {
@@ -1641,7 +1629,7 @@ export class PixiView {
         ? node.spare.graphics
         : null;
     if (!spare) {
-      dropSpare(node);
+      this.dropSpare(node);
     }
 
     node.spare = null;
@@ -1725,9 +1713,11 @@ export class PixiView {
     }
 
     // What it drew is kept a while for it to come back to, as a pool's
-    // objects do, then goes: Pixi keeps a Graphics it has drawn, with its
-    // geometry, for a minute after it was last drawn, which a timeline that
-    // makes its children anew on every frame turned into gigabytes.
+    // objects do, then goes, its Graphics let go of their geometry and
+    // kept for the next content to take: Pixi keeps a Graphics it has
+    // drawn, with its geometry, for a minute after it was last drawn, which
+    // a timeline that makes its children anew on every frame turned into
+    // gigabytes.
     if (node.art.children.length > 0) {
       this.parked.delete(node);
       this.parked.set(node, performance.now());
@@ -1763,17 +1753,37 @@ export class PixiView {
     return kid.parent === null || (kid.parent !== from && !this.root?.encloses(kid));
   }
 
+  /** Keep the Graphics a redraw kept for its new content that it did not take, or destroy them in a fresh view. */
+  private dropSpare(node: Node): void {
+    for (const graphic of node.spare?.graphics ?? []) {
+      graphic.parent?.removeChild(graphic);
+      if (this.fresh) {
+        graphic.destroy();
+      } else {
+        this.recycle(graphic);
+      }
+    }
+
+    node.spare = null;
+  }
+
   /**
    * Keep a Graphics of a child taken off for the next content to take, as
    * a new one would be: showing nothing, untransformed, uncoloured, shown
-   * and drawn alone; or destroy it past the most kept.
+   * and drawn alone, its GPU data let go of as destroying it did; or
+   * destroy it past the most kept.
    */
   private recycle(graphic: SharedGraphics): void {
+    if (graphic.destroyed) {
+      return;
+    }
+
     if (this.spareGraphics.length >= SPARE_GRAPHICS_MOST) {
       graphic.destroy();
       return;
     }
 
+    graphic.unload();
     graphic.settled = false;
     graphic.flashColor = null;
     graphic.swap(NO_LINES);

@@ -654,8 +654,12 @@ descendants that leave with it (not one moved to a parent on the list,
 which draws it), keep what they drew 5 s, at most 1024 of them, for a
 pool's object or a panel hidden and shown to come back to as it was
 (`bench.ts --toggle N`, `--toggle-static N`); then they give their
-contexts back and destroy their Graphics, drawn again if they return,
-their lines for the screen's scale of then. Pixi keeps a Graphics it has
+contexts back, drawn again if they return, their lines for the screen's
+scale of then. Their Graphics, emptied of their geometry, are kept, up
+to 4096, for the next shape drawn to take: a frame-by-frame timeline
+takes its children off and puts new ones on every frame, and making and
+destroying their Graphics was most of a swap's cost (`bench.ts --rig N
+--swap`). Pixi keeps a Graphics it has
 drawn, with its geometry, for a minute after it was last drawn, and a
 timeline that makes its children anew on every frame, as a goto back
 does, so held gigabytes. A BitmapData's draw of an object off the list

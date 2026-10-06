@@ -2581,9 +2581,31 @@ test("a child taken off gives its Graphics, emptied, to the next shape placed", 
   const character = await outlinedSquare();
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
+  // Turned, scaled and colour-transformed, so that what it leaves on its Graphics shows.
   const first = new ShapeObject(character);
+  first.setMatrix({ a: 1.5, b: 0.8, c: -0.8, d: 1.5, tx: 30, ty: 20 });
+  first.colorTransform = {
+    rMul: 1,
+    gMul: 1,
+    bMul: 1,
+    aMul: 1,
+    rAdd: 40,
+    gAdd: 0,
+    bAdd: 0,
+    aAdd: 0,
+  };
   root.placeAtDepth(first, 1);
-  type Drawn = { parent: unknown; context: unknown; destroyed: boolean };
+  type Drawn = {
+    parent: unknown;
+    context: unknown;
+    shared: unknown;
+    destroyed: boolean;
+    visible: boolean;
+    flashColor?: unknown;
+    settled?: boolean;
+    localTransform: { a: number; b: number; c: number; d: number; tx: number; ty: number };
+    updateLocalTransform(): void;
+  };
   const art = (k: number) =>
     [...view.stage.children[0].children[1 + k].children[0].children] as unknown as Drawn[];
 
@@ -2591,6 +2613,7 @@ test("a child taken off gives its Graphics, emptied, to the next shape placed", 
     view.prepare(root);
     const [fill, lines] = art(0);
     const oldLines = lines.context;
+    assert.notEqual(fill.flashColor ?? null, null);
 
     // Off the list, kept 5 s whole, then emptied: its Graphics kept, showing nothing.
     root.removeChild(first);
@@ -2601,11 +2624,24 @@ test("a child taken off gives its Graphics, emptied, to the next shape placed", 
     assert.equal(lines.parent, null);
     assert.notEqual(lines.context, oldLines);
 
-    // Another shape placed takes them, drawing its own fills and lines.
+    // Kept as a new one would be: uncoloured, shown, drawing its shared context alone.
+    for (const g of [fill, lines]) {
+      assert.equal(g.flashColor ?? null, null);
+      assert.equal(g.settled, false);
+      assert.equal(g.visible, true);
+      assert.equal(g.context, g.shared);
+      g.updateLocalTransform();
+      const { a, b, c, d, tx, ty } = g.localTransform;
+      assert.deepEqual([a, b, c, d, tx, ty], [1, 0, 0, 1, 0, 0]);
+    }
+
+    // Another shape placed takes them, drawing its own fills and lines, uncoloured.
     root.placeAtDepth(new ShapeObject(character), 1);
     view.prepare(root);
     const taken = art(0);
     assert.ok(taken.includes(fill) && taken.includes(lines));
-    assert.ok(taken.every((g) => !g.destroyed && g.parent !== null));
+    assert.ok(
+      taken.every((g) => !g.destroyed && g.parent !== null && (g.flashColor ?? null) === null),
+    );
   });
 });
