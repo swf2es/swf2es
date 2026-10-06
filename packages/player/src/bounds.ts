@@ -4,6 +4,7 @@
 import type { Matrix } from "@swf2es/format";
 import {
   BitmapObject,
+  Clips,
   Container,
   type DisplayObject,
   ShapeObject,
@@ -160,8 +161,19 @@ export function hitsPoint(
   return drawnAt(d, lx, ly, probe, false) && !clippedAbove(d, probe);
 }
 
-/** What this object itself draws under a pointer, without asking its children. */
-export function hitsOwnPoint(d: DisplayObject, x: number, y: number, root: DisplayObject): boolean {
+/**
+ * What this object itself draws under a pointer, without asking its
+ * children. For the pointer's own pick (`clips`), the timeline's masks
+ * above it clip it too, as Flash picks (the corpus's `mouse_pick_masking`):
+ * a list scrolled under a mask layer takes no click where it is hidden.
+ */
+export function hitsOwnPoint(
+  d: DisplayObject,
+  x: number,
+  y: number,
+  root: DisplayObject,
+  clips = false,
+): boolean {
   if (!underRoot(d) || d.maskOf) {
     return false;
   }
@@ -172,23 +184,23 @@ export function hitsOwnPoint(d: DisplayObject, x: number, y: number, root: Displ
   }
 
   const probe = { x: x - 0.5, y, root };
-  if (clippedAbove(d, probe)) {
-    return false;
-  }
-
   const [lx, ly] = apply(toLocal, probe.x, probe.y);
+  let hit: boolean;
   if (d instanceof TextObject) {
     const r = ownBounds(d, true);
     const scroll = d.scroll;
-    return (
+    hit =
       !!r &&
       contains(r, lx, ly) &&
       (!scroll || contains(scroll, lx, ly)) &&
-      (!d.mask || inMask(d.mask, probe))
-    );
+      (!d.mask || inMask(d.mask, probe));
+  } else {
+    hit = drawnAt(d, lx, ly, probe, false, false);
   }
 
-  return drawnAt(d, lx, ly, probe, false, false);
+  // What clips it is asked only of a hit: a pick tests every object under its
+  // containers, and finding the mask layers over one walks its siblings.
+  return hit && !clippedAbove(d, probe) && !(clips && clippedByLayers(d, probe));
 }
 
 /** Whether a mask or a scroll above `d` leaves the probe out. */
@@ -205,6 +217,29 @@ function clippedAbove(d: DisplayObject, probe: Probe): boolean {
       if (!(x >= scroll.xMin && x < scroll.xMax && y >= scroll.yMin && y < scroll.yMax)) {
         return true;
       }
+    }
+  }
+
+  return false;
+}
+
+/** Whether a timeline's mask over `d` or over a container above it leaves the probe out. */
+function clippedByLayers(d: DisplayObject, probe: Probe): boolean {
+  for (let o = d; o.parent; o = o.parent) {
+    const clips = new Clips();
+    for (const child of o.parent.children) {
+      const n = clips.enter(child);
+      if (child !== o) {
+        continue;
+      }
+
+      for (let i = 0; i < n; i++) {
+        if (!inMask(clips.masks[i], probe)) {
+          return true;
+        }
+      }
+
+      break;
     }
   }
 

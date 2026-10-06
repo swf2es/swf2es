@@ -79,7 +79,7 @@ export function pointerTarget(
       return true;
     }
 
-    return hitsOwnPoint(d, x, y, stage);
+    return hitsOwnPoint(d, x, y, stage, true);
   };
 
   const pick = (d: DisplayObject): Pick => {
@@ -107,7 +107,7 @@ export function pointerTarget(
     }
 
     if (!(d instanceof Container)) {
-      return hitsOwnPoint(d, x, y, stage) ? own(d) : null;
+      return hitsOwnPoint(d, x, y, stage, true) ? own(d) : null;
     }
 
     // Two passes rather than a sorted copy: this runs on every pointer move.
@@ -138,7 +138,7 @@ export function pointerTarget(
       }
     }
 
-    return hitsOwnPoint(d, x, y, stage) ? own(d) : null;
+    return hitsOwnPoint(d, x, y, stage, true) ? own(d) : null;
   };
 
   if (x < 0 || y < 0 || x >= width || y >= height) {
