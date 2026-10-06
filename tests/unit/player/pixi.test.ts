@@ -1709,10 +1709,13 @@ test("a drawing kept off the list is drawn again for a change of its content or 
   drawing.drawRect(40, 0, 10, 10);
   sprite.invalidate(CONTENT);
   root.placeAtDepth(sprite, 1);
+  const fillContext = fill.context;
   view.prepare(root);
-  assert.equal(fill.destroyed, true);
-  assert.equal(art()[0].destroyed, false);
-  assert.notEqual(art()[0], fill);
+  // Its Graphics stay, in place, and show the new fills; the old fills, its own, go.
+  assert.equal(art()[0], fill);
+  assert.equal(fill.destroyed, false);
+  assert.notEqual(art()[0].context, fillContext);
+  assert.equal(fillContext.destroyed, true);
 });
 
 test("a child emptied off the list is drawn again under a parent kept off it", async () => {
@@ -2307,4 +2310,154 @@ test("Pixi's pool of Graphics' batch elements is cut back as a view prepares", a
   const view = new PixiView(standIn([]).renderer);
   view.prepare(new Container());
   assert.equal(pool.totalFree, 4096);
+});
+
+test("a shape drawn anew with its fills laid out alike keeps its Graphics, in place", async () => {
+  // Taken off and put on, they changed the structure of the render group
+  // above, which Pixi rebuilt whole: an animated character's on every frame
+  // its timeline swapped a shape or moved a morph on.
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
+  const { readMorphShape, readSwf } = await import("../../../packages/format/dist/index.js");
+  const w = await import("../../swf-writer.ts");
+  const square: import("../../swf-writer.ts").PathCommand[] = [
+    { move: [0, 0] },
+    { line: [400, 0] },
+    { line: [400, 400] },
+    { line: [0, 400] },
+    { line: [0, 0] },
+  ];
+  const swf = readSwf(
+    w.swf({
+      width: 50,
+      height: 50,
+      frameRate: 12,
+      frameCount: 1,
+      tags: [
+        w.morphShape({
+          id: 1,
+          startBounds: [0, 400, 0, 400],
+          endBounds: [0, 400, 0, 400],
+          fills: [{ start: 0xffff0000, end: 0xff0000ff }],
+          start: [{ fill1: 1, commands: square }],
+          end: [square],
+        }),
+      ],
+    }),
+  );
+  const t = swf.tags[0];
+  const character = {
+    type: "morph" as const,
+    id: 1,
+    morph: readMorphShape(swf.bytes, t.code, t.offset, t.length),
+    blends: new Map(),
+    bitmap: () => null,
+  };
+  const shape = ShapeObject.ofMorph(character);
+  const root = new Container();
+  root.placeAtDepth(shape, 1);
+  const view = new PixiView(standIn([]).renderer);
+  type Drawn = { context: unknown; destroyed: boolean };
+  const art = () =>
+    [...view.stage.children[0].children[1].children[0].children] as unknown as Drawn[];
+  view.prepare(root);
+  const before = art();
+  const fills = before[0].context;
+
+  shape.ratio = 30000;
+  shape.invalidate(CONTENT);
+  view.prepare(root);
+
+  assert.equal(art().length, before.length);
+  art().forEach((graphic, k) => {
+    assert.equal(graphic, before[k]);
+  });
+  assert.notEqual(art()[0].context, fills);
+  assert.equal(before[0].destroyed, false);
+});
+
+test("a Graphics whose context is swapped gets its group rebuilt unless drawn alone before and after", async () => {
+  // Pixi rebuilt a group for every swap of a context drawn alone, as each
+  // shape's are; the player asks for a rebuild only where the last build
+  // batched the Graphics, or where its new context is batched. One the
+  // last build batched into no batches, an empty context, has no
+  // instruction of its own until a rebuild gives it one.
+  const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  type Context = { batchMode: string; rect(...a: number[]): { fill(color: number): Context } };
+  type Graphic = { context: Context };
+  type Pipe = {
+    addRenderable(graphics: Graphic, instructions: never): void;
+    validateRenderable(graphics: Graphic): boolean;
+  };
+  const pixi = (await import(entry)) as {
+    GraphicsContextSystem: { prototype: object };
+    GraphicsPipe: { prototype: object };
+    GraphicsContext: new () => Context;
+    Graphics: new (context: Context) => Graphic;
+  };
+  type Mutable = Record<string, unknown>;
+  const renderer: Mutable = {
+    uid: 7,
+    gc: { addCollection() {}, addResource() {}, removeResource() {} },
+    runners: { contextChange: { add() {} } },
+  };
+  const contexts = Object.create(pixi.GraphicsContextSystem.prototype) as Mutable;
+  contexts._renderer = renderer;
+  contexts._managedContexts = { add() {} };
+  renderer.graphicsContext = contexts;
+  const added: unknown[] = [];
+  renderer.renderPipes = { batch: { break() {}, addToBatch: (b: unknown) => added.push(b) } };
+  const pipe = Object.create(pixi.GraphicsPipe.prototype) as Pipe;
+  Object.assign(pipe, { renderer, _managedGraphics: { add() {} } });
+  const instructions = { add: (x: unknown) => added.push(x) } as never;
+  const alone = () => {
+    const context = new pixi.GraphicsContext();
+    context.batchMode = "no-batch";
+    return context.rect(0, 0, 10, 10).fill(0xff0000);
+  };
+
+  // Drawn alone, then swapped for another drawn alone: no rebuild.
+  const graphics = new pixi.Graphics(alone());
+  pipe.addRenderable(graphics, instructions);
+  graphics.context = alone();
+  assert.equal(pipe.validateRenderable(graphics), false);
+
+  // Batched into nothing, empty: the next swap rebuilds, else it would have no instruction.
+  const empty = new pixi.Graphics(new pixi.GraphicsContext());
+  added.length = 0;
+  pipe.addRenderable(empty, instructions);
+  assert.equal(added.length, 0);
+  empty.context = alone();
+  assert.equal(pipe.validateRenderable(empty), true);
+});
+
+test("a shape swapped for one with fills and lines laid out alike keeps its Graphics, and its lines", async () => {
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
+  const [first, second] = [await outlinedSquare(), await outlinedSquare()];
+  const shape = new ShapeObject(first);
+  shape.setMatrix({ a: 2, b: 0, c: 0, d: 2, tx: 0, ty: 0 });
+  const root = new Container();
+  root.placeAtDepth(shape, 1);
+  const view = new PixiView(standIn([]).renderer);
+  type Drawn = { context: { instructions: unknown[]; destroyed: boolean }; destroyed: boolean };
+  const art = () =>
+    [...view.stage.children[0].children[1].children[0].children] as unknown as Drawn[];
+  view.prepare(root);
+  const [fill, lines] = art();
+  const oldLines = lines.context;
+
+  // As a timeline swaps a character's shape at a depth.
+  shape.shape = second;
+  shape.character = second;
+  shape.invalidate(CONTENT);
+  view.prepare(root);
+
+  const [nextFill, nextLines] = art();
+  assert.equal(nextFill, fill);
+  assert.equal(nextLines, lines);
+  assert.notEqual(nextLines.context, oldLines);
+  assert.ok(nextLines.context.instructions.length > 0);
+  // The old lines given back once, kept idle for a loop to come back to, not destroyed twice over.
+  assert.equal(oldLines.destroyed, false);
+  assert.equal(view.counts.strokeContexts, 2);
 });
