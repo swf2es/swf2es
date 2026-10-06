@@ -20,6 +20,7 @@ import {
   Graphics,
   GraphicsContext,
   GraphicsContextRenderData,
+  GraphicsPipe,
   type InstructionSet,
   Matrix,
   Container as PixiContainer,
@@ -864,6 +865,27 @@ function stretchOf(m: Linear): Linear | null {
 function scalesEvenly(layer: ShapeLayer): boolean {
   return layer.strokes.every(({ line }) => !line.noHScale && !line.noVScale);
 }
+
+/**
+ * Whether a Graphics whose view changed needs its render group's
+ * instructions built again. Pixi asks whether it was batched by whether it
+ * has GPU data at all, which every Graphics drawn once has, so one that
+ * is drawn alone, as a shape's fills and lines are, had its whole group
+ * rebuilt each time its context was swapped: an animated character's on
+ * every frame. Drawn alone before and after, its instruction draws the
+ * context it has when it runs, and nothing needs rebuilding.
+ */
+(
+  GraphicsPipe.prototype as unknown as {
+    validateRenderable(graphics: Graphics): boolean;
+  }
+).validateRenderable = function (this: { renderer: Renderer }, graphics: Graphics): boolean {
+  const gpuContext = this.renderer.graphicsContext.updateGpuContext(graphics.context);
+  const data = (graphics as unknown as { _gpuData: Record<number, { batches: unknown[] }> })
+    ._gpuData[this.renderer.uid];
+  const wasBatched = (data?.batches.length ?? 0) > 0;
+  return gpuContext.isBatchable || wasBatched;
+};
 
 /**
  * A Graphics of a context it does not own and that never changes once
