@@ -2,8 +2,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFont, readStaticText, readSwf } from "../../../packages/format/dist/index.js";
-import { placeGlyphs } from "../../../packages/player/dist/static-text.js";
-import type { Character, StaticTextCharacter } from "../../../packages/player/dist/timeline.js";
+import type {
+  Character,
+  StaticTextCharacter,
+} from "../../../packages/player/dist/display/timeline.js";
+import { placeGlyphs } from "../../../packages/player/dist/text/static.js";
 import { probeFont } from "../../player/cases.ts";
 import * as w from "../../swf-writer.ts";
 

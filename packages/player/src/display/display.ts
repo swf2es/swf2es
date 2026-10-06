@@ -1,5 +1,5 @@
 // The display list the player owns: display objects, containers and
-// movie clips, as Flash has them. A renderer mirrors it (see pixi.ts) and
+// movie clips, as Flash has them. A renderer mirrors it (see render/view.ts) and
 // never decides its order. A container keeps its children in render order,
 // which is their index in AS3, and apart from it the children the timeline
 // placed, by depth, which is how SWF tags address them; a child the
@@ -17,16 +17,16 @@ import {
   readFilters,
 } from "@swf2es/format";
 import type { avm2 } from "@swf2es/runtime";
-import { BitmapStore } from "./bitmap.js";
+import { BitmapStore } from "../bitmap/bitmap.js";
+import type { FontSet } from "../text/fonts.js";
+import { GUTTER, layoutText, type TextLayout } from "../text/layout.js";
+import { type PlacedGlyph, placeGlyphs } from "../text/static.js";
+import { TextModel } from "../text/text.js";
 import type { Drawing } from "./drawing.js";
 import { type Filter, filterOfSwf } from "./filters.js";
-import type { FontSet } from "./fonts.js";
 import { type Rect, shifted } from "./geometry.js";
 import { compose3D, decompose3D } from "./matrix3d.js";
 import { morphAt } from "./morph.js";
-import { type PlacedGlyph, placeGlyphs } from "./static-text.js";
-import { TextModel } from "./text.js";
-import { GUTTER, layoutText, type TextLayout } from "./text-layout.js";
 import {
   type BitmapCharacter,
   type ButtonCharacter,
@@ -170,7 +170,7 @@ export class DisplayObject {
   visible = true;
   /**
    * Where it has the keyboard's focus, how to drop it: Flash takes focus
-   * from an object taken off its parent or hidden (keyboard.ts).
+   * from an object taken off its parent or hidden (input/keyboard.ts).
    */
   focusDrop: ((d: DisplayObject) => void) | null = null;
   /** The character it was made from, or null. */

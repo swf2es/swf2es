@@ -2,7 +2,7 @@
 // edges Flash has around them.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Drawing } from "../../../packages/player/dist/drawing.js";
+import { Drawing } from "../../../packages/player/dist/display/drawing.js";
 
 const red = { type: "solid" as const, color: 0xffff0000 };
 

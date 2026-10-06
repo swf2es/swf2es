@@ -6,7 +6,7 @@
 // one fill on both sides bounds none. Lines stroke the edges they are set
 // on, joined where one edge starts where the last ended.
 import type { Fill, GradientStop, Line, Matrix, Shape } from "@swf2es/format";
-import type { BitmapStore } from "./bitmap.js";
+import type { BitmapStore } from "../bitmap/bitmap.js";
 import type { BitmapCharacter } from "./timeline.js";
 
 /**

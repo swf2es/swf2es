@@ -4,9 +4,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
-import { BitmapStore, premultiply, unmultiply } from "../../../packages/player/dist/bitmap.js";
-import { drawBitmap } from "../../../packages/player/dist/bitmap-ops.js";
-import { BitmapObject } from "../../../packages/player/dist/display.js";
+import {
+  BitmapStore,
+  premultiply,
+  unmultiply,
+} from "../../../packages/player/dist/bitmap/bitmap.js";
+import { drawBitmap } from "../../../packages/player/dist/bitmap/ops.js";
+import { BitmapObject } from "../../../packages/player/dist/display/display.js";
 
 setFlagsFromString("--expose-gc");
 const gc = runInNewContext("gc") as () => void;
@@ -41,7 +45,7 @@ test("a store tells the Bitmaps showing it of a change, and lets go of one dropp
 });
 
 test("pixelDissolve visits pixels in Flash's order and returns its seeds", async () => {
-  const { pixelDissolve } = await import("../../../packages/player/dist/bitmap-ops.js");
+  const { pixelDissolve } = await import("../../../packages/player/dist/bitmap/ops.js");
   // What Flash writes and returns call by call under adl, numPixels 1 from seed 0.
   const runs: [number, number, string][] = [
     [
@@ -105,7 +109,7 @@ test("pixelDissolve visits pixels in Flash's order and returns its seeds", async
 });
 
 test("threshold takes its six operations and no name Object's prototype has", async () => {
-  const { isThresholdOperation } = await import("../../../packages/player/dist/bitmap-ops.js");
+  const { isThresholdOperation } = await import("../../../packages/player/dist/bitmap/ops.js");
   for (const op of ["<", "<=", ">", ">=", "==", "!="]) {
     assert.ok(isThresholdOperation(op), op);
   }
@@ -116,7 +120,7 @@ test("threshold takes its six operations and no name Object's prototype has", as
 });
 
 test("pixelDissolve takes a count past every pixel as Flash does, in a bounded number of steps", async () => {
-  const { pixelDissolve } = await import("../../../packages/player/dist/bitmap-ops.js");
+  const { pixelDissolve } = await import("../../../packages/player/dist/bitmap/ops.js");
   // The seed Flash returns and the pixels it fills under adl, by count, from seeds 0 and 5.
   const runs: [number, number, number, number, number, number][] = [
     [4, 4, 0, 14, 1, 15],

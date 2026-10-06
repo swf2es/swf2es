@@ -3,13 +3,13 @@
 // whole rect's would; a convolution's two ways, as adl takes them.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BitmapStore } from "../../../packages/player/dist/bitmap.js";
+import { BitmapStore } from "../../../packages/player/dist/bitmap/bitmap.js";
 import {
   applyFilter,
   filterRect,
   integerKernel,
-} from "../../../packages/player/dist/bitmap-filters.js";
-import { filterDefaults } from "../../../packages/player/dist/filters.js";
+} from "../../../packages/player/dist/bitmap/filters.js";
+import { filterDefaults } from "../../../packages/player/dist/display/filters.js";
 
 /** A 40 by 40 source: a half-alpha red square and an opaque green one. */
 function source(): BitmapStore {

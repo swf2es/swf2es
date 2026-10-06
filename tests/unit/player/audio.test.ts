@@ -6,9 +6,12 @@ import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { createCodegen } from "@swf2es/codegen";
 import { readSwf, type Sound, tags } from "../../../packages/format/dist/index.js";
-import { browserAudioHost, type DecodedSound } from "../../../packages/player/dist/audio.js";
+import {
+  readLibrary,
+  type SoundCharacter,
+} from "../../../packages/player/dist/display/timeline.js";
+import { browserAudioHost, type DecodedSound } from "../../../packages/player/dist/media/audio.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
-import { readLibrary, type SoundCharacter } from "../../../packages/player/dist/timeline.js";
 import { BitWriter, end, showFrame, swf, tag } from "../../swf-writer.ts";
 
 setFlagsFromString("--expose-gc");

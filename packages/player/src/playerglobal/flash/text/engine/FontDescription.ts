@@ -1,6 +1,6 @@
 import { avm2 } from "@swf2es/runtime";
-import { deviceMetrics } from "../../../../fonts.js";
 import type { Scripting } from "../../../../scripting.js";
+import { deviceMetrics } from "../../../../text/fonts.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;

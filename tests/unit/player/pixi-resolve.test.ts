@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boundedResolves } from "../../../packages/player/dist/pixi-resolve.js";
+import { boundedResolves } from "../../../packages/player/dist/render/resolve.js";
 
 function scene() {
   const calls: unknown[][] = [];

@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BitmapStore } from "../../../packages/player/dist/bitmap.js";
+import { BitmapStore } from "../../../packages/player/dist/bitmap/bitmap.js";
 import {
   BitmapObject,
   ButtonObject,
   Container,
   TextObject,
-} from "../../../packages/player/dist/display.js";
-import { PointerInput, pointerTarget } from "../../../packages/player/dist/input.js";
+} from "../../../packages/player/dist/display/display.js";
+import { PointerInput, pointerTarget } from "../../../packages/player/dist/input/pointer.js";
 import type { Scripting } from "../../../packages/player/dist/scripting.js";
 
 test("the topmost artwork targets its interactive parent, with mouseChildren and visibility respected", () => {

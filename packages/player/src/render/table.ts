@@ -11,7 +11,7 @@
 // table cannot draw, a context with a texture or a Graphics that rounds to
 // pixels, is drawn by Pixi's own pipe in its place in the run. A Flash
 // colour transform's batched copies stay with the colour batcher
-// (pixi-color.ts): drawn here, a few batched draws became thousands of the
+// (render/color.ts): drawn here, a few batched draws became thousands of the
 // table's, which cost the GPU more than the CPU saved.
 import {
   Buffer,

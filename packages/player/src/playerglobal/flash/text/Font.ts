@@ -1,7 +1,7 @@
 // flash.text.Font: embedded SWF font metadata and explicit font registration.
 import { avm2 } from "@swf2es/runtime";
+import type { AnyFontCharacter, FontCharacter } from "../../../display/timeline.js";
 import type { Scripting } from "../../../scripting.js";
-import type { AnyFontCharacter, FontCharacter } from "../../../timeline.js";
 
 type AsObject = avm2.AsObject;
 

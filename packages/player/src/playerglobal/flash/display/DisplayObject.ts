@@ -2,16 +2,16 @@
 // other face, and its properties read and written through it.
 import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { bounds, boundsIn, hitsObject, hitsPoint, toStage } from "../../../bounds.js";
+import { bounds, boundsIn, hitsObject, hitsPoint, toStage } from "../../../display/bounds.js";
 import {
   ButtonObject,
   CONTENT,
   type DisplayObject,
   TextObject,
   TRANSFORM,
-} from "../../../display.js";
-import { copyFilter } from "../../../filters.js";
-import { apply, invert, type Rect, transformRect } from "../../../geometry.js";
+} from "../../../display/display.js";
+import { copyFilter } from "../../../display/filters.js";
+import { apply, invert, type Rect, transformRect } from "../../../display/geometry.js";
 import type { Scripting } from "../../../scripting.js";
 import { copyMap, filterClassName, filterKindOf, recordOf } from "../filters/filters.js";
 import { colorOf, matrixOf } from "../geom/Transform.js";

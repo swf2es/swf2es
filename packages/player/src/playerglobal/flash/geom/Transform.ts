@@ -4,10 +4,10 @@
 // projection, kept and reported as Flash's, though not drawn in perspective.
 import type { Matrix as Linear } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { boundsIn, toStage } from "../../../bounds.js";
-import { type DisplayObject, TRANSFORM } from "../../../display.js";
-import { concat } from "../../../geometry.js";
-import { identity3D, invert3D, multiply3D, type Raw } from "../../../matrix3d.js";
+import { boundsIn, toStage } from "../../../display/bounds.js";
+import { type DisplayObject, TRANSFORM } from "../../../display/display.js";
+import { concat } from "../../../display/geometry.js";
+import { identity3D, invert3D, multiply3D, type Raw } from "../../../display/matrix3d.js";
 import type { Scripting } from "../../../scripting.js";
 import { alwaysProjects, projectionFrom, projectionObject } from "./PerspectiveProjection.js";
 

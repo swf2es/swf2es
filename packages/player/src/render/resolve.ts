@@ -61,7 +61,7 @@ export function boundedResolves(renderer: WebGLRenderer): void {
       return finish.call(this, target);
     }
 
-    // The copy has already been clipped by pixi-blend. Keep the resolve at
+    // The copy has already been clipped by render/blend.ts. Keep the resolve at
     // the source coordinates: copyTexSubImage2D reads that same rectangle.
     if (copying?.source === target) {
       const { x, y } = copying.origin;

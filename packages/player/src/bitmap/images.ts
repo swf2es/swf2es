@@ -7,7 +7,7 @@ import {
   type BitmapPixels,
   INVALID_PIXELS,
   type Library,
-} from "./timeline.js";
+} from "../display/timeline.js";
 
 /** A decoded image: straight (not premultiplied) RGBA, row by row. */
 export interface DecodedImage {

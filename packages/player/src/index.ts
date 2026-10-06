@@ -10,14 +10,16 @@ export {
   instantiate,
   MovieClip,
   ShapeObject,
-} from "./display.js";
-export { bindKeyboard, type KeyState } from "./keyboard.js";
-export { PixiView } from "./pixi.js";
-export { setTransformTable } from "./pixi-table.js";
+} from "./display/display.js";
+export { type Path, type ShapeLayer, shapeLayers } from "./display/shapes.js";
+export { type Character, type Library, readLibrary, type Timeline } from "./display/timeline.js";
+export { bindKeyboard, type KeyState } from "./input/keyboard.js";
 export { Player } from "./player.js";
 export type { Navigate } from "./playerglobal/flash/net/navigateToURL.js";
 export type { SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
 export type { PlatformCapabilities } from "./playerglobal/flash/system/Capabilities.js";
+export { setTransformTable } from "./render/table.js";
+export { PixiView } from "./render/view.js";
 export {
   type Drawer,
   type FetchRequest,
@@ -28,5 +30,3 @@ export {
   type SocketHost,
   type SocketTransport,
 } from "./scripting.js";
-export { type Path, type ShapeLayer, shapeLayers } from "./shapes.js";
-export { type Character, type Library, readLibrary, type Timeline } from "./timeline.js";

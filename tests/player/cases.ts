@@ -27,7 +27,7 @@ export interface PlayerCase {
   /** Played as a host whose renderer is made with `antialias: true` draws it, multisampled; Flash draws it as ever. */
   antialias?: boolean;
   /**
-   * The transform table (pixi-table.ts) must draw some of it, and played
+   * The transform table (render/table.ts) must draw some of it, and played
    * again without the table it must draw the same pixels.
    */
   table?: boolean;
@@ -3079,7 +3079,7 @@ function blendDrift(): Uint8Array {
 }
 
 /**
- * Shapes the transform table draws in runs (pixi-table.ts), and what ends
+ * Shapes the transform table draws in runs (render/table.ts), and what ends
  * a run or draws in the middle of one: added and multiplied shapes, drawn
  * as layers; a layer, a run, then a layer whose first content is a layer of
  * a shape, as a host's render passes may leave another texture unit active
@@ -3874,7 +3874,7 @@ export const cases: PlayerCase[] = [
     frames: 1,
     capture: [1],
     // Multisampled, as most hosts draw: blends and filters then read their
-    // backdrops through the bounded resolves of pixi-resolve.ts, which no
+    // backdrops through the bounded resolves of render/resolve.ts, which no
     // other case runs. Within 3 a channel, as drawn without multisampling:
     // the blends' 8-bit round trips and adl's rounding of the blurs.
     antialias: true,

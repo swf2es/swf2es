@@ -10,7 +10,7 @@ import {
   type Packed,
   type TableInstruction,
   TablePipe,
-} from "../../../packages/player/dist/pixi-table.js";
+} from "../../../packages/player/dist/render/table.js";
 
 // Pixi as the player loads it, its ES module.
 const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));

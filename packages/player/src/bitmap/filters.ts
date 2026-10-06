@@ -5,9 +5,10 @@
 // the blur so truncated times strength, a bevel's from the difference of two
 // reads of it, a colour matrix of straight colour, rounded, a convolution of
 // straight colour, truncated.
+
+import type { Filter } from "../display/filters.js";
+import { ramp } from "../display/gradients.js";
 import { type BitmapStore, over, type PixelRect, premultiply, unmultiply } from "./bitmap.js";
-import type { Filter } from "./filters.js";
-import { ramp } from "./gradients.js";
 
 /** The filters this filters: the others' rects and pixels are still to come. */
 export const filtersDrawn: ReadonlySet<string> = new Set([

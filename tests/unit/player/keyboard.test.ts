@@ -5,8 +5,12 @@ import {
   Container,
   type DisplayObject,
   TextObject,
-} from "../../../packages/player/dist/display.js";
-import { KeyboardInput, restrictText, setFocus } from "../../../packages/player/dist/keyboard.js";
+} from "../../../packages/player/dist/display/display.js";
+import {
+  KeyboardInput,
+  restrictText,
+  setFocus,
+} from "../../../packages/player/dist/input/keyboard.js";
 import type { Scripting } from "../../../packages/player/dist/scripting.js";
 
 type Event = {

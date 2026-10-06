@@ -2,8 +2,8 @@
 // getPixel32, for the ramp, the spreads and the radial gradient's centre.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { unmultiply } from "../../../packages/player/dist/bitmap.js";
-import { index, radialPixels, ramp } from "../../../packages/player/dist/gradients.js";
+import { unmultiply } from "../../../packages/player/dist/bitmap/bitmap.js";
+import { index, radialPixels, ramp } from "../../../packages/player/dist/display/gradients.js";
 
 const at = [0, 1, 2, 9, 40, 41, 70, 100, 101, 160, 220, 221, 254, 255];
 const read = (colors: Uint32Array) =>
@@ -98,9 +98,9 @@ test("a radial gradient's centre is the first stop, a focal point off it the las
 });
 
 test("a radial gradient's texture is made again when what it fills grows", async () => {
-  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
-  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
-  const { PixiView } = await import("../../../packages/player/dist/pixi.js");
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display/display.js");
+  const { Drawing } = await import("../../../packages/player/dist/display/drawing.js");
+  const { PixiView } = await import("../../../packages/player/dist/render/view.js");
   const renderer = { render: () => {} } as unknown as ConstructorParameters<typeof PixiView>[0];
   const view = new PixiView(renderer);
   const shape = new ShapeObject(null);
@@ -141,9 +141,9 @@ test("a radial gradient's texture is made again when what it fills grows", async
 });
 
 test("a radial fill's textures live while any context draws with them", async () => {
-  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
-  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
-  const { PixiView } = await import("../../../packages/player/dist/pixi.js");
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display/display.js");
+  const { Drawing } = await import("../../../packages/player/dist/display/drawing.js");
+  const { PixiView } = await import("../../../packages/player/dist/render/view.js");
   const renderer = { render: () => {} } as unknown as ConstructorParameters<typeof PixiView>[0];
   const view = new PixiView(renderer);
   const fill = {
@@ -190,7 +190,7 @@ test("a radial fill's textures live while any context draws with them", async ()
   const second = new Drawing();
   second.copyFrom(first);
   copy.drawing = second;
-  const both = new (await import("../../../packages/player/dist/display.js")).Container();
+  const both = new (await import("../../../packages/player/dist/display/display.js")).Container();
   both.addChildAt(original, 0);
   both.addChildAt(copy, 1);
   view.prepare(both);

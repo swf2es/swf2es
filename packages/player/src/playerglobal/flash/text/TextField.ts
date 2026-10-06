@@ -1,11 +1,11 @@
 // flash.text.TextField and TextFormat: a field's text and formats as a
-// TextModel (text.ts), its properties as adl reports them; a TextFormat's
+// TextModel (text/text.ts), its properties as adl reports them; a TextFormat's
 // values stored as Flash converts them, null for one it does not set.
 import { avm2 } from "@swf2es/runtime";
-import { CONTENT, type TextObject } from "../../../display.js";
+import { CONTENT, type TextObject } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
-import { applied, emptyFormat, type PartialFormat } from "../../../text.js";
-import { GUTTER, lineOf, shownLines } from "../../../text-layout.js";
+import { GUTTER, lineOf, shownLines } from "../../../text/layout.js";
+import { applied, emptyFormat, type PartialFormat } from "../../../text/text.js";
 import { useSheet } from "./StyleSheet.js";
 
 type AsObject = avm2.AsObject;

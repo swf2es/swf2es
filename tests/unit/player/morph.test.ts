@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ShapeRecord } from "../../../packages/format/dist/index.js";
 import { readMorphShape, readPlace, readSwf } from "../../../packages/format/dist/index.js";
-import { ShapeObject } from "../../../packages/player/dist/display.js";
-import { blend, morphAt } from "../../../packages/player/dist/morph.js";
-import type { MorphCharacter } from "../../../packages/player/dist/timeline.js";
+import { ShapeObject } from "../../../packages/player/dist/display/display.js";
+import { blend, morphAt } from "../../../packages/player/dist/display/morph.js";
+import type { MorphCharacter } from "../../../packages/player/dist/display/timeline.js";
 import * as w from "../../swf-writer.ts";
 
 // A square whose top and left sides bend into curves, red to blue, its

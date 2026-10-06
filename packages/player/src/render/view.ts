@@ -34,9 +34,9 @@ import {
   Texture,
   type WebGLRenderer,
 } from "pixi.js";
-import { BitmapStore, type GpuCopy } from "./bitmap.js";
-import { toStage } from "./bounds.js";
-import { concatColor, multipliesOnly, sameColor } from "./color.js";
+import { BitmapStore, type GpuCopy } from "../bitmap/bitmap.js";
+import { toStage } from "../display/bounds.js";
+import { concatColor, multipliesOnly, sameColor } from "../display/color.js";
 import {
   BitmapObject,
   CHILDREN,
@@ -50,21 +50,19 @@ import {
   StaticTextObject,
   TextObject,
   TRANSFORM,
-} from "./display.js";
-import type { Filter as FilterRecord } from "./filters.js";
-import { deviceMetrics, fontFamily } from "./fonts.js";
-import { shifted } from "./geometry.js";
-import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "./gradients.js";
-import type { PointerState } from "./input.js";
-import { blendLayers, droppedLayers } from "./morph.js";
-import { blendFilters } from "./pixi-blend.js";
-import { dropBatchedCopy, type SharingGraphics, setFlashColor, showFor } from "./pixi-color.js";
-import { displayFilters, FilterChain, rgbaOf, sameFilterRecords } from "./pixi-filters.js";
-import { boundedResolves } from "./pixi-resolve.js";
+} from "../display/display.js";
+import type { Filter as FilterRecord } from "../display/filters.js";
+import { shifted } from "../display/geometry.js";
+import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "../display/gradients.js";
+import { blendLayers, droppedLayers } from "../display/morph.js";
+import type { PointerState } from "../input/pointer.js";
+import { deviceMetrics, fontFamily } from "../text/fonts.js";
+import { blendFilters } from "./blend.js";
+import { dropBatchedCopy, type SharingGraphics, setFlashColor, showFor } from "./color.js";
+import { displayFilters, FilterChain, rgbaOf, sameFilterRecords } from "./filters.js";
+import { boundedResolves } from "./resolve.js";
 // Registers the table's pipe with Pixi, which the override below looks up by name.
-import "./pixi-table.js";
-import type { TablePipe } from "./pixi-table.js";
-import type { Player } from "./player.js";
+import "./table.js";
 import {
   CUBIC,
   flatten,
@@ -78,9 +76,11 @@ import {
   pointsOf,
   type ShapeLayer,
   shapeLayers,
-} from "./shapes.js";
-import { GUTTER, type LaidChar, shownLines } from "./text-layout.js";
-import type { BitmapCharacter, ShapeCharacter } from "./timeline.js";
+} from "../display/shapes.js";
+import type { BitmapCharacter, ShapeCharacter } from "../display/timeline.js";
+import type { Player } from "../player.js";
+import { GUTTER, type LaidChar, shownLines } from "../text/layout.js";
+import type { TablePipe } from "./table.js";
 
 /** A contour flattened to a polygon, for telling which contours hold which. */
 interface Region {
@@ -931,7 +931,7 @@ function scalesEvenly(layer: ShapeLayer): boolean {
  * context it has when it runs, and nothing needs rebuilding. One the last
  * build batched, even into no batches at all as an empty context is, gets
  * an instruction only from a rebuild. Where the renderer draws the
- * transform table (pixi-table.ts), one drawn alone joins a run of it
+ * transform table (render/table.ts), one drawn alone joins a run of it
  * rather than having an instruction to itself.
  */
 type PipeGraphics = { _gpuData: Record<number, { batched?: boolean } | undefined> };
@@ -1953,7 +1953,7 @@ export class PixiView {
       const m = own;
       container.setFromMatrix(new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty));
       container.visible = o.visible || masking;
-      // A blend mode composites the object as a layer (pixi-blend.ts); a mask is its fills alone.
+      // A blend mode composites the object as a layer (render/blend.ts); a mask is its fills alone.
       // Its filters, then its blend: adl filters the object, then blends what they make.
       const blend = masking ? "normal" : o.blendMode;
       const records = masking ? NO_RECORDS : o.filters;
@@ -2004,7 +2004,7 @@ export class PixiView {
 
     // The colour transform from the stage down. One that only multiplies is
     // Pixi's tint and alpha, which Pixi composes down the tree itself; any
-    // other is what is drawn's own (pixi-color.ts), and the tint stays white.
+    // other is what is drawn's own (render/color.ts), and the tint stays white.
     let recolor = false;
     if (dirty & TRANSFORM || tint !== node.inherited) {
       node.inherited = tint;
@@ -2633,7 +2633,7 @@ function glyphFill(glyph: Glyph): GraphicsContext | null {
 }
 
 /**
- * A TextField drawn from its layout (text-layout.ts): its background and
+ * A TextField drawn from its layout (text/layout.ts): its background and
  * border, then each line from the first scrolled to, a character of an
  * embedded font as its glyph's shape, a run of a device font as one Pixi
  * Text on the line's baseline, each in its own colour, clipped to the

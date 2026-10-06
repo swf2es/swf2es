@@ -7,16 +7,16 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
-import { BitmapStore } from "../../../packages/player/dist/bitmap.js";
+import { BitmapStore } from "../../../packages/player/dist/bitmap/bitmap.js";
 import {
   BitmapObject,
   CONTENT,
   Container,
   TRANSFORM,
-} from "../../../packages/player/dist/display.js";
-import { PixiView } from "../../../packages/player/dist/pixi.js";
-import { ColorBatcher } from "../../../packages/player/dist/pixi-color.js";
+} from "../../../packages/player/dist/display/display.js";
 import type { Player } from "../../../packages/player/dist/player.js";
+import { ColorBatcher } from "../../../packages/player/dist/render/color.js";
+import { PixiView } from "../../../packages/player/dist/render/view.js";
 
 setFlagsFromString("--expose-gc");
 const gc = runInNewContext("gc") as () => void;
@@ -135,7 +135,7 @@ test("a timeline mask's range goes in a container it masks, a scroll clips the r
 });
 
 test("a batchable keeps the batcher name it is given, and one under a colour transform goes to swf2es's", async () => {
-  // Pixi as the player loads it, its ES module, which pixi-color.ts patched.
+  // Pixi as the player loads it, its ES module, which render/color.ts patched.
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   const { BatchableSprite } = (await import(entry)) as {
@@ -735,7 +735,7 @@ test("the arrow is the arrow over the player, not the page's cursor Pixi's defau
 });
 
 test("Flash's filters are left out under WebGPU, and a fresh view destroys those it made", async () => {
-  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const { filterDefaults } = await import("../../../packages/player/dist/display/filters.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   const pixi = (await import(entry)) as {
@@ -785,7 +785,7 @@ test("Flash's filters are left out under WebGPU, and a fresh view destroys those
 });
 
 test("filters set again with the same values keep their chain, and its output, as a tween writes them", async () => {
-  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const { filterDefaults } = await import("../../../packages/player/dist/display/filters.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   const pixi = (await import(entry)) as {
@@ -820,8 +820,8 @@ test("filters set again with the same values keep their chain, and its output, a
 });
 
 test("blurred filter inputs release pooled textures without sharing idle listeners", async () => {
-  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
-  const { displayFilters } = await import("../../../packages/player/dist/pixi-filters.js");
+  const { filterDefaults } = await import("../../../packages/player/dist/display/filters.js");
+  const { displayFilters } = await import("../../../packages/player/dist/render/filters.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   const pixi = await import(entry);
@@ -930,8 +930,8 @@ test("filter back textures avoid shared empty listeners and release their privat
 });
 
 test("a convolution pads its reach and the pixel adl adds, and knows the padding after it", async () => {
-  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
-  const { displayFilters } = await import("../../../packages/player/dist/pixi-filters.js");
+  const { filterDefaults } = await import("../../../packages/player/dist/display/filters.js");
+  const { displayFilters } = await import("../../../packages/player/dist/render/filters.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   const pixi = (await import(entry)) as {
@@ -953,9 +953,9 @@ test("a convolution pads its reach and the pixel adl adds, and knows the padding
 });
 
 test("instances that see a character alike share its lines, which live while one holds them", async () => {
-  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
-  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
-  const { MOVE, LINE } = await import("../../../packages/player/dist/shapes.js");
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display/display.js");
+  const { Drawing } = await import("../../../packages/player/dist/display/drawing.js");
+  const { MOVE, LINE } = await import("../../../packages/player/dist/display/shapes.js");
   const view = new PixiView(standIn([]).renderer);
   const line = {
     width: 40,
@@ -1065,8 +1065,8 @@ async function withClock(run: (clock: { at: number }) => Promise<void> | void): 
 }
 
 test("a shape's fills and lines are drawn unbatched", async () => {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
-  const { MOVE, LINE } = await import("../../../packages/player/dist/shapes.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
+  const { MOVE, LINE } = await import("../../../packages/player/dist/display/shapes.js");
   const view = new PixiView(standIn([]).renderer);
   const line = {
     width: 40,
@@ -1100,8 +1100,8 @@ test("a shape's fills and lines are drawn unbatched", async () => {
 });
 
 test("the thinnest line is a pixel of the screen, however many the renderer draws a stage pixel with", async () => {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
-  const { MOVE, LINE } = await import("../../../packages/player/dist/shapes.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
+  const { MOVE, LINE } = await import("../../../packages/player/dist/display/shapes.js");
   const renderer = { ...standIn([]).renderer, resolution: 3 } as unknown as ConstructorParameters<
     typeof PixiView
   >[0];
@@ -1146,8 +1146,8 @@ test("the thinnest line is a pixel of the screen, however many the renderer draw
 });
 
 test("an object off the list gives its lines back, and has them again when it comes back", async () => {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
-  const { MOVE, LINE } = await import("../../../packages/player/dist/shapes.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
+  const { MOVE, LINE } = await import("../../../packages/player/dist/display/shapes.js");
   const view = new PixiView(standIn([]).renderer);
   const line = {
     width: 40,
@@ -1257,7 +1257,7 @@ test("an object off the list gives its lines back, and has them again when it co
 });
 
 test("a filtered or blended object is drawn into its filters multisampled as its target is", async () => {
-  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const { filterDefaults } = await import("../../../packages/player/dist/display/filters.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   const pixi = (await import(entry)) as {
@@ -1296,7 +1296,7 @@ test("a filtered or blended object is drawn into its filters multisampled as its
 });
 
 test("filters blur, move and pad in pixels of the screen however far the stage is zoomed, as Flash's", async () => {
-  const { filterDefaults } = await import("../../../packages/player/dist/filters.js");
+  const { filterDefaults } = await import("../../../packages/player/dist/display/filters.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   const pixi = await import(entry);
@@ -1439,7 +1439,7 @@ test("filters blur, move and pad in pixels of the screen however far the stage i
 });
 
 test("a tween's lines go once its morph drops their blend, not idle for a ratio never drawn again", async () => {
-  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display/display.js");
   const { readMorphShape, readSwf } = await import("../../../packages/format/dist/index.js");
   const w = await import("../../swf-writer.ts");
   const square: import("../../swf-writer.ts").PathCommand[] = [
@@ -1506,7 +1506,7 @@ test("a tween's lines go once its morph drops their blend, not idle for a ratio 
 });
 
 test("instances of a morph at one ratio share its blend's fills, which go once the morph drops the blend", async () => {
-  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display/display.js");
   const { readMorphShape, readSwf } = await import("../../../packages/format/dist/index.js");
   const w = await import("../../swf-writer.ts");
   const square: import("../../swf-writer.ts").PathCommand[] = [
@@ -1596,8 +1596,8 @@ test("instances of a morph at one ratio share its blend's fills, which go once t
 
 /** A shape character of one layer: a square filled and outlined. */
 async function outlinedSquare() {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
-  const { MOVE, LINE } = await import("../../../packages/player/dist/shapes.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
+  const { MOVE, LINE } = await import("../../../packages/player/dist/display/shapes.js");
   const square = [MOVE, 0, 0, LINE, 10, 0, LINE, 10, 10, LINE, 0, 10, LINE, 0, 0];
   const line = {
     width: 40,
@@ -1628,7 +1628,7 @@ async function outlinedSquare() {
 }
 
 test("instances of a shape share its fills, which go once none has drawn them for a while", async () => {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   const character = await outlinedSquare();
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
@@ -1671,7 +1671,7 @@ test("instances of a shape share its fills, which go once none has drawn them fo
 });
 
 test("a draw of a shape off the list borrows the stage's fills and lines", async () => {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   type Drawn = { context: { destroyed: boolean } };
   const seen: Drawn["context"][][] = [];
   const renderer = {
@@ -1708,7 +1708,7 @@ test("a draw of a shape off the list borrows the stage's fills and lines", async
 });
 
 test("a child moved out of a parent that leaves the list keeps what it draws", async () => {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   const view = new PixiView(standIn([]).renderer);
   const character = await outlinedSquare();
   type Drawn = { destroyed: boolean; context: { destroyed: boolean } };
@@ -1738,7 +1738,7 @@ test("a child moved out of a parent that leaves the list keeps what it draws", a
 });
 
 test("a drawing off the list keeps what it drew a while, for it to come back to", async () => {
-  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
+  const { Drawing } = await import("../../../packages/player/dist/display/drawing.js");
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
   const sprite = new Container();
@@ -1783,7 +1783,7 @@ test("a drawing off the list keeps what it drew a while, for it to come back to"
 });
 
 test("a gradient a drawing off the list let go of leaves no warning in Pixi's bind groups", async () => {
-  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
+  const { Drawing } = await import("../../../packages/player/dist/display/drawing.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   const { getTextureBatchBindGroup } = (await import(entry)) as {
@@ -1845,8 +1845,8 @@ test("a gradient a drawing off the list let go of leaves no warning in Pixi's bi
 });
 
 test("a drawing kept off the list is drawn again for a change of its content or of the screen's scale", async () => {
-  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
-  const { CONTENT } = await import("../../../packages/player/dist/display.js");
+  const { Drawing } = await import("../../../packages/player/dist/display/drawing.js");
+  const { CONTENT } = await import("../../../packages/player/dist/display/display.js");
   const view = new PixiView(standIn([]).renderer);
   view.screenScale = 1;
   const root = new Container();
@@ -1904,8 +1904,8 @@ test("a drawing kept off the list is drawn again for a change of its content or 
 });
 
 test("a child emptied off the list is drawn again under a parent kept off it", async () => {
-  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { Drawing } = await import("../../../packages/player/dist/display/drawing.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
   const sprite = new Container();
@@ -1947,7 +1947,7 @@ test("a child emptied off the list is drawn again under a parent kept off it", a
 });
 
 test("a child moved into a parent off the list gives its lines back", async () => {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
   const x = new Container();
@@ -1974,7 +1974,7 @@ test("a child moved into a parent off the list gives its lines back", async () =
 });
 
 test("a shared fill gathers no listener per instance, so instances go in linear time", async () => {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
   const character = await outlinedSquare();
@@ -2038,7 +2038,7 @@ test("Pixi's pool of render data destroyed contexts gave back is emptied past it
 });
 
 test("of many objects off the list at once, only the latest 1024 are kept whole", async () => {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
   const character = await outlinedSquare();
@@ -2066,7 +2066,7 @@ test("of many objects off the list at once, only the latest 1024 are kept whole"
 
 test("a blend's copy of what is behind it is held to the target and the texture, and clears nothing", async () => {
   // Loaded with the view, it patches the copy for every renderer.
-  await import("../../../packages/player/dist/pixi-blend.js");
+  await import("../../../packages/player/dist/render/blend.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   const { RenderTargetSystem } = (await import(entry)) as {
@@ -2141,7 +2141,7 @@ async function patchedPixi(): Promise<{
   FilterEffect: new () => { filters: unknown };
   FilterSystem: { prototype: unknown };
 }> {
-  await import("../../../packages/player/dist/pixi-blend.js");
+  await import("../../../packages/player/dist/render/blend.js");
   const cjs = createRequire(new URL("../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   return import(entry);
@@ -2307,7 +2307,7 @@ test("mask partners share a group, including when an existing group's mask moves
 test("a gradient a drawing redrew is freed once, though its fill was collected first", async () => {
   // A colour picker redraws its gradient on each move of the pointer: the
   // old fill may be collected before the view lets go of its texture.
-  const { Drawing } = await import("../../../packages/player/dist/drawing.js");
+  const { Drawing } = await import("../../../packages/player/dist/display/drawing.js");
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
   const sprite = new Container();
@@ -2365,7 +2365,7 @@ test("a shape's lines share a context through every turn and mirror of one stret
   // A limb that turns on every frame of a loop tessellated its lines anew
   // at each angle; a line scaled both ways is as wide through any turn of
   // a stretch, so its lines are stroked through the stretch alone.
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   const character = await outlinedSquare();
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
@@ -2460,7 +2460,7 @@ test("a shape's lines share a context through every turn and mirror of one stret
 });
 
 test("a line scaled one way alone keeps its lines for each angle", async () => {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   const character = await outlinedSquare();
   const layer = (character as unknown as { layers: { strokes: { line: object }[] }[] }).layers[0];
   layer.strokes[0].line = { ...layer.strokes[0].line, noHScale: true };
@@ -2502,7 +2502,7 @@ test("a shape drawn anew with its fills laid out alike keeps its Graphics, in pl
   // Taken off and put on, they changed the structure of the render group
   // above, which Pixi rebuilt whole: an animated character's on every frame
   // its timeline swapped a shape or moved a morph on.
-  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display/display.js");
   const { readMorphShape, readSwf } = await import("../../../packages/format/dist/index.js");
   const w = await import("../../swf-writer.ts");
   const square: import("../../swf-writer.ts").PathCommand[] = [
@@ -2618,7 +2618,7 @@ test("a Graphics whose context is swapped gets its group rebuilt unless drawn al
 });
 
 test("a shape swapped for one with fills and lines laid out alike keeps its Graphics, and its lines", async () => {
-  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject, CONTENT } = await import("../../../packages/player/dist/display/display.js");
   const [first, second] = [await outlinedSquare(), await outlinedSquare()];
   const shape = new ShapeObject(first);
   shape.setMatrix({ a: 2, b: 0, c: 0, d: 2, tx: 0, ty: 0 });
@@ -2653,7 +2653,7 @@ test("a render group not rebuilt for a while has its Graphics batched, and drawn
   // room and most of them scenery; batched, a settled group's are a few,
   // and a group rebuilt again goes back to drawing them alone, as a batch
   // packs its vertices again at each rebuild.
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   const character = await outlinedSquare();
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
@@ -2695,7 +2695,7 @@ test("Graphics a settled group batched draw alone again in a group that has not 
   // A branch moved under an animated group, or made a group of its own,
   // brings its batched Graphics along: they would be packed again at each
   // of that group's rebuilds.
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   const character = await outlinedSquare();
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
@@ -2729,7 +2729,7 @@ test("Graphics a settled group batched draw alone again in a group that has not 
 });
 
 test("a mask's Graphics are never batched, as they draw in another group", async () => {
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   const character = await outlinedSquare();
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
@@ -2760,7 +2760,7 @@ test("a child taken off gives its Graphics, emptied, to the next shape placed", 
   // A frame-by-frame timeline takes its children off and puts new ones on
   // every frame; each made and destroyed its Graphics, most of the cost of
   // a swap.
-  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const { ShapeObject } = await import("../../../packages/player/dist/display/display.js");
   const character = await outlinedSquare();
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();

@@ -2,7 +2,7 @@
 // keeps them: set, they make the matrix; a matrix set whole is taken apart.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DisplayObject, normalizeDegrees } from "../../../packages/player/dist/display.js";
+import { DisplayObject, normalizeDegrees } from "../../../packages/player/dist/display/display.js";
 
 const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-9, `${a} is not ${b}`);
 

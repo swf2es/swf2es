@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readShape, readSwf } from "@swf2es/format";
-import { shapeLayers } from "../../../packages/player/dist/shapes.js";
-import { readLibrary } from "../../../packages/player/dist/timeline.js";
+import { shapeLayers } from "../../../packages/player/dist/display/shapes.js";
+import { readLibrary } from "../../../packages/player/dist/display/timeline.js";
 import * as w from "../../swf-writer.ts";
 
 function movie(fill: number | w.BitmapFill): Uint8Array {

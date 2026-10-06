@@ -590,9 +590,9 @@ only, so the player implements all of it.
 ## The player
 
 The player keeps Flash's display list and timeline
-(`packages/player/src`: `timeline.ts` reads a SWF's definitions and
-frames, `display.ts` is the display list), and PixiJS only mirrors it
-(`pixi.ts`): a container per display object, kept from frame to frame
+(`packages/player/src`: `display/timeline.ts` reads a SWF's definitions and
+frames, `display/display.ts` is the display list), and PixiJS only mirrors it
+(`render/view.ts`): a container per display object, kept from frame to frame
 and updated where the display object marks itself changed.
 
 A branch with at least 64 immediate art objects across its subtree owns
@@ -624,7 +624,7 @@ counted as they take and give them back, and destroyed once none has held
 them for 5 s: kept for as long as their shape lived, every shape a long
 session had shown kept its fills, their geometry and their coloured
 copies, hundreds of MB. They are built
-from Flash's edges (`shapes.ts`: each edge goes to its right fill
+from Flash's edges (`display/shapes.ts`: each edge goes to its right fill
 forward and its left fill reversed, joined into contours; one with the
 same fill on both sides, a seam Flash Pro leaves inside a fill, goes to
 neither, since the containment tree below takes contours that do not
@@ -692,10 +692,10 @@ as the SWF has them then, and again when it is first drawn; the SWF's
 bytes, which its sounds and placements keep, are there to read it from.
 A morph shape (DefineMorphShape, DefineMorphShape2) is two shapes whose
 edges pair in order; a `MorphShape` shows their blend at the ratio its
-placements give (`morph.ts`), a shape like any other, so it draws,
+placements give (`display/morph.ts`), a shape like any other, so it draws,
 bounds and hit-tests as one. The blend mixes where the ends' points lie,
 not their deltas, a straight edge paired with a curve as a curve, and
-keeps them to whole twips, so a closed path stays closed for `shapes.ts`
+keeps them to whole twips, so a closed path stays closed for `display/shapes.ts`
 to join. A morph keeps only its 64 latest blends, which instances in step
 share, and which a looping tween finds again on its next turn: with 16, a
 tween of 37 frames made each anew on every turn, its fills tessellated
@@ -733,7 +733,7 @@ Drawn alone, each Graphics was still a draw call of its own, binding its
 context's buffers and setting its uniforms: of `bench.ts --rig 400`'s
 main-thread render, 9,600 draws a frame, that was most. Where the
 renderer is WebGL 2 with `WEBGL_multi_draw`, a transform table draws
-them instead (`pixi-table.ts`): each context's local vertices are copied
+them instead (`render/table.ts`): each context's local vertices are copied
 once into one atlas buffer, as Pixi packed them for it, and Graphics
 drawn alone one after another in a group's instructions make a run,
 drawn as one multi-draw of their index ranges. Each draw reads its
@@ -790,6 +790,27 @@ page's resolution is then the zoom times the grid, and the stage is drawn
 at the zoom's inverse, so the samples are the same and only Pixi's
 arithmetic at that resolution, no whole number, differs.
 
+### Source layout
+
+`packages/player/src` is grouped by what each part of the player does,
+and the player's paths in this document are relative to it:
+
+- `index.ts` is the package's one entry point; `player.ts` runs a SWF,
+  `scripting.ts` connects it to the runtime and the compiler, and
+  `sha256.ts` names the ABCs it compiles.
+- `display/`: the display list and the timeline, and what they are made
+  of: shapes, morphs, drawings, bounds and hit tests, geometry, 3D
+  matrices, colour transforms, gradients' ramps, and filters as records
+  of their values.
+- `text/`: text fields' model and layout, static text, fonts and CSS.
+- `bitmap/`: the pixel store and its operations on the CPU, bitmap
+  filters, decoded images and PNG encoding.
+- `media/`: sound.
+- `input/`: the pointer and the keyboard.
+- `render/`: the PixiJS view and what only it uses: the transform table,
+  colour transforms, blend modes, filters and resolves on the GPU.
+- `playerglobal/`: the `flash.*` classes, a path per package and class.
+
 ### Scripts and the display list
 
 An AS3 SWF's display objects are AS3 objects: a timeline child whose
@@ -810,7 +831,7 @@ so it runs with the AS3 object as `this`; the class is only how they are
 written, and a private native is registered by name beside it. The class
 lives in the factory that makes the natives, so it closes over its
 `Scripting`; an AVM1 movie's children, and a timeline child without a
-class, have `object === null`, and nothing in `display.ts` or `pixi.ts`
+class, have `object === null`, and nothing in `display/display.ts` or `render/view.ts`
 depends on which VM drives them.
 
 Construction follows Flash's order, which playerglobal's own constructors
@@ -1433,7 +1454,7 @@ once the case loads its SWF.
 
 A `Shape` or `Sprite` draws with its `Graphics`, which records into a
 drawing the display object keeps: the same layers of fills and strokes,
-with their paths in pixels, that `shapes.ts` makes of a SWF shape, so
+with their paths in pixels, that `display/shapes.ts` makes of a SWF shape, so
 the renderer draws both alike. A fill begins at `beginFill` (or a
 gradient or bitmap fill) and ends at `endFill`, at the next begin, or at
 `lineStyle`'s change; what is drawn between is the fill's contours, each
@@ -1533,7 +1554,7 @@ browser's left and right outputs through Web Audio. `Sound` classes bound by
 SymbolClass to a DefineSound tag find its encoded samples in the library.
 The player decodes MP3, uncompressed 8/16-bit or ADPCM sound on first play
 (ADPCM as Ruffle's decoder does, to 16-bit samples the browser host plays as
-uncompressed ones; `adpcmSound` in `audio.ts` does it for another host), sharing
+uncompressed ones; `adpcmSound` in `media/audio.ts` does it for another host), sharing
 a decode when separate loads contain the same sound. The shared cache holds
 decoded audio while a sound uses it; entries leave when no SWF holds their
 sound definition, so unused audio can be collected. The parser leaves the
@@ -1597,7 +1618,7 @@ SyncStop, as adl shows (the `timeline-sounds` case's channel completes),
 where Ruffle stops it; and SyncNoMultiple does not see one, where Ruffle
 does, which adl cannot show.
 
-A clip's stream is its blocks back to back (`streamSound` in `audio.ts`:
+A clip's stream is its blocks back to back (`streamSound` in `media/audio.ts`:
 MP3 blocks give their sample counts, PCM's are whole frames of their
 bytes, and each ADPCM block decodes on its own, headers and all), made one
 sound when it first plays and shared by every clip of the timeline; the
@@ -1746,7 +1767,7 @@ doubles there too, so those two tests cannot be matched to the end.
 float32. `copyRawDataTo` pads a growable vector with zeros out to its index,
 as adl does however far, but refuses an index from 2^28 on, a negative one
 too, with ArgumentError 2004 before writing anything. Its arithmetic
-(`matrix3d.ts`) is Flash's float32, to the last bit where adl was asked:
+(`display/matrix3d.ts`) is Flash's float32, to the last bit where adl was asked:
 products and sums each rounded, `recompose`'s Euler angles through float32
 sines and cosines, `appendRotation` with the axis made a unit one in
 float32 and the pivot multiplied on, `invert` by Gauss-Jordan elimination
@@ -1818,7 +1839,7 @@ are its data's size, and the renderer draws it as a sprite whose texture
 is uploaded from the pixels and again when they change, which the store
 counts in a version the node compares. Slice one is the store and the
 `Bitmap` on the display list. Slice two is the pixel operations that read
-and write the store alone, in `bitmap.ts` beside the rest: `noise` and
+and write the store alone, in `bitmap/bitmap.ts` beside the rest: `noise` and
 `pixelDissolve`, whose pseudo-random sequences are Flash's own and fitted
 to the values Ruffle's corpus recorded of it; `copyChannel`,
 `colorTransform`, `merge`, `scroll`; `threshold`, `hitTest`,
@@ -1851,7 +1872,7 @@ missing table its channel itself; `compare` is 0 for the same pixels,
 of each differing pixel's colour difference, opaque, or where only alpha
 differs of the alpha difference in every premultiplied channel (the
 `palette-compare` case). `perlinNoise` is the reference implementation of
-SVG's feTurbulence, which Flash's matches to the byte (`turbulence.ts`,
+SVG's feTurbulence, which Flash's matches to the byte (`bitmap/turbulence.ts`,
 after Ruffle's port): Park-Miller seeds four channels' gradients, each
 octave moved by its offset, a channel's noise drawn from the next of
 the four only for the channels asked for, a byte made of it as Flash
@@ -1861,7 +1882,7 @@ so that octaves enough to take the lattice that far give Flash's wild
 noise and bytes of 0; more than 1024 octaves give what 1024 do, as
 Flash's sum settles long before, a negative count among them.
 Slice three is `draw` and `drawWithQuality`, in two paths. A
-BitmapData or a Bitmap drawn is composited on the CPU, in `bitmap.ts`'s
+BitmapData or a Bitmap drawn is composited on the CPU, in `bitmap/bitmap.ts`'s
 arithmetic: through the matrix by the inverse of each destination
 pixel's centre, nearest or bilinear as `smoothing` asks, the colour
 transform as `colorTransform` applies it, then the blend mode (normal,
@@ -1965,7 +1986,7 @@ colour.
 
 Gradient fills, a shape's linear, radial and focal ones and
 `beginGradientFill`'s, are drawn from Flash's own ramp, which adl gives
-pixel for pixel (the `gradients` case and `gradients.ts`'s tests): 256
+pixel for pixel (the `gradients` case and `display/gradients.ts`'s tests): 256
 colours, each channel interpolated straight between the stops and
 truncated, alpha too, then premultiplied as c · (a + 1) >> 8; in linear
 RGB, interpolated in sRGB's linear light, the ends through it too, which
@@ -2066,7 +2087,7 @@ the filters follow, each by what Flash traces and draws under adl.
 
 A `TextField` is a display object of its own kind (`TextObject`), placed
 by a timeline's DefineEditText or made by a script, 100 by 100 pixels and
-empty, as adl makes one. Its text is a `TextModel` (`text.ts`): the
+empty, as adl makes one. Its text is a `TextModel` (`text/text.ts`): the
 characters, `\r` between lines as Flash keeps them (`\n` is made one),
 each with its own format, and a default format, Flash's Times New Roman
 12 for a new field and the tag's for a timeline's (its font's name from
@@ -2094,7 +2115,7 @@ end takes the paragraph's format; `getFirstCharInParagraph` and
 one past its end.
 
 A StyleSheet is playerglobal's own code over a few natives: its CSS is
-read as Flash reads it (`css.ts`, Ruffle's CssStream: selectors
+read as Flash reads it (`text/css.ts`, Ruffle's CssStream: selectors
 lower-cased, property names camel-cased, and on any of the few errors
 Flash finds the whole sheet ignored), a colour is `#` and at most six hex
 digits or 0, and the generic font families are Flash's device fonts. A
@@ -2160,7 +2181,7 @@ from.
 
 Static text (DefineText, DefineText2) is a `StaticText`: its records'
 glyphs where the authoring tool put them, each record keeping the font,
-height, colour and pen of the one before (`static-text.ts`), drawn with
+height, colour and pen of the one before (`text/static.ts`), drawn with
 the glyph fills a field's embedded text shares, under the tag's matrix.
 A text that sets no colour draws nothing, as adl draws it. A font is
 found as the text is shown, as Flash finds it, so one the SWF defines
@@ -2182,7 +2203,7 @@ player does not, which only shows for a glyph past them.
 
 ### Keyboard and focus
 
-A host gives the player its keys (`bindKeyboard`, `keyboard.ts`): each
+A host gives the player its keys (`bindKeyboard`, `input/keyboard.ts`): each
 goes to `stage.focus`, or the stage where nothing has focus, as a
 `KeyboardEvent` that bubbles, the browser's legacy key code standing for
 Flash's, which it matches. A focused input field then edits with it, in
@@ -2248,7 +2269,7 @@ together in the normal way, and blends that with what is below, the
 stage's colour included, where Pixi would blend each child on its own.
 A single fill with `screen`, or with `multiply` over an opaque stage,
 can use Pixi's direct blend when it has no filters, masks or isolated
-ancestor. Other blends use a filter (`pixi-blend.ts`): `layer`
+ancestor. Other blends use a filter (`render/blend.ts`): `layer`
 one that only makes it a layer, any other one that reads the back buffer
 and computes the mode in premultiplied colour, its result replacing what
 is there. Multiply, screen, lighten, darken, difference, overlay and
@@ -2295,7 +2316,7 @@ A renderer made with `antialias: true` draws into multisampled targets,
 which must be resolved before they are read, and Pixi resolves the whole
 target at each step: before a blend copies its backdrop, again in the
 copy, and after each filter pass drawn on the back buffer, a full-screen
-resolve for each small blend. `pixi-resolve.ts` resolves only the copy's
+resolve for each small blend. `render/resolve.ts` resolves only the copy's
 clipped source rectangle when a backdrop is copied, skips the resolve
 before the copy, and leaves the back buffer unresolved after filter
 passes until it is presented; a filter's intermediate textures still
@@ -2321,7 +2342,7 @@ against adl).
 ### Filters
 
 A filter object keeps its values as adl converts them, in a record of its
-kind's (`filters.ts`): blurs clamped to 0–255, NaN kept; quality and a
+kind's (`display/filters.ts`): blurs clamped to 0–255, NaN kept; quality and a
 convolution's size whole and clamped, to 15; alphas in 255ths; colours 24
 bits; strength in 256ths, to 255; an angle within a turn either way,
 through radians and back; a convolution's divisor, bias and matrix, a
@@ -2337,7 +2358,7 @@ class extending it is refused, while one extending a filter of
 playerglobal's is made.
 
 BitmapData's `applyFilter` filters on the CPU, as adl computes
-(`bitmap-filters.ts`): the source's premultiplied channels, past the
+(`bitmap/filters.ts`): the source's premultiplied channels, past the
 source rect too as far as the bitmap goes, filtered, and the filter's
 rect of them written whole into the destination, moved to its point and
 clipped; an opaque destination keeps its alpha, and refuses a glow, a
@@ -2411,7 +2432,7 @@ divisor, truncated, plus one, wrapped to a short, shifted down 16 bits,
 the colour premultiplied truncating. The wrap makes a divisor of 1.1 to
 2 turn and shrink the weights (by 2 they negate), and that way's last
 tap reads the centre pixel, not the one right and down of it. Both ways
-are in `bitmap-filters.ts`, and the `convolution` case matches adl's
+are in `bitmap/filters.ts`, and the `convolution` case matches adl's
 numbers for each, to the bit. A matrix with no taps (0 by anything, the
 default filter's) copies instead: as much of the source as the grown rect
 is big, from the source rect's corner, to the grown rect's corner, over
@@ -2419,7 +2440,7 @@ an opaque destination's pixels; what lies past the source stays as it
 was.
 
 The renderer draws a display object's blur, glow, drop shadow, colour
-matrix, bevel and convolution as adl does (`pixi-filters.ts`), before its blend mode: a blur is
+matrix, bevel and convolution as adl does (`render/filters.ts`), before its blend mode: a blur is
 a box blurX by blurY pixels wide, the pixels at its ends weighted by how
 much of them it covers, run `quality` times each way and truncated to 8
 bits each time, so that blur 2.5 weighs 0.3, 0.4 and 0.3, and the filter

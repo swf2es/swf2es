@@ -1,5 +1,5 @@
 // flash.geom.Matrix3D's 16 float32 values, in column-major rawData order,
-// and its arithmetic, matrix3d.ts's float32 as Flash's.
+// and its arithmetic, display/matrix3d.ts's float32 as Flash's.
 import { avm2 } from "@swf2es/runtime";
 import {
   compose3D,
@@ -13,7 +13,7 @@ import {
   scale3D,
   transform3D,
   translation3D,
-} from "../../../matrix3d.js";
+} from "../../../display/matrix3d.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;

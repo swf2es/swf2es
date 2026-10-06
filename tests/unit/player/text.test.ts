@@ -1,9 +1,9 @@
 // TextFields placed by a timeline, and how the renderer lays their text out.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { TextObject } from "../../../packages/player/dist/display.js";
-import { PixiView } from "../../../packages/player/dist/pixi.js";
+import type { TextObject } from "../../../packages/player/dist/display/display.js";
 import { Player } from "../../../packages/player/dist/player.js";
+import { PixiView } from "../../../packages/player/dist/render/view.js";
 import * as w from "../../swf-writer.ts";
 
 function placed(...definitions: Uint8Array[]): TextObject {
@@ -53,7 +53,7 @@ test("a centred field's text is drawn where its layout centres it, past the 2 pi
 });
 
 test("text a margin moves past its field's edge is clipped, though it is narrower than the field", async () => {
-  const { overruns } = await import("../../../packages/player/dist/pixi.js");
+  const { overruns } = await import("../../../packages/player/dist/render/view.js");
   const field = { left: 0, top: 0, width: 100, height: 20 };
   // 30 pixels of text from an 80 pixel margin, past the 2 pixel gutter: out to 112.
   assert.equal(overruns(field, 82, 2, 30, 14), true);
@@ -62,7 +62,7 @@ test("text a margin moves past its field's edge is clipped, though it is narrowe
 });
 
 test("a long append keeps a format for every character", async () => {
-  const { TextModel } = await import("../../../packages/player/dist/text.js");
+  const { TextModel } = await import("../../../packages/player/dist/text/text.js");
   const model = new TextModel();
   model.setText("ab");
   model.replace(2, 2, "x".repeat(200_000));
@@ -73,7 +73,7 @@ test("a long append keeps a format for every character", async () => {
 });
 
 test("compact HTML removes only the final line break", async () => {
-  const { TextModel } = await import("../../../packages/player/dist/text.js");
+  const { TextModel } = await import("../../../packages/player/dist/text/text.js");
   const model = new TextModel();
   const html = "first<br>second<br>";
 
@@ -86,8 +86,8 @@ test("compact HTML removes only the final line break", async () => {
 });
 
 test("a long unbroken word wraps between its characters in time that grows with it, not its square", async () => {
-  const { layoutText } = await import("../../../packages/player/dist/text-layout.js");
-  const { DEFAULT_FORMAT } = await import("../../../packages/player/dist/text.js");
+  const { layoutText } = await import("../../../packages/player/dist/text/layout.js");
+  const { DEFAULT_FORMAT } = await import("../../../packages/player/dist/text/text.js");
   const n = 64_000;
   const started = performance.now();
   const layout = layoutText({
@@ -108,8 +108,8 @@ test("a long unbroken word wraps between its characters in time that grows with 
 });
 
 test("a password field is laid out, and so drawn, as asterisks, in an embedded font too", async () => {
-  const { TextObject } = await import("../../../packages/player/dist/display.js");
-  const { FontSet } = await import("../../../packages/player/dist/fonts.js");
+  const { TextObject } = await import("../../../packages/player/dist/display/display.js");
+  const { FontSet } = await import("../../../packages/player/dist/text/fonts.js");
   const { readFont, tags } = await import("../../../packages/format/dist/index.js");
   const bytes = w.font3({
     id: 1,
@@ -143,8 +143,8 @@ test("a password field is laid out, and so drawn, as asterisks, in an embedded f
 });
 
 test("an embedded field uses a same-name font with metrics when one was loaded earlier without them", async () => {
-  const { TextObject } = await import("../../../packages/player/dist/display.js");
-  const { FontSet } = await import("../../../packages/player/dist/fonts.js");
+  const { TextObject } = await import("../../../packages/player/dist/display/display.js");
+  const { FontSet } = await import("../../../packages/player/dist/text/fonts.js");
   const { readFont, tags } = await import("../../../packages/format/dist/index.js");
   const bytes = w.font3({
     id: 1,
@@ -173,7 +173,7 @@ test("an embedded field uses a same-name font with metrics when one was loaded e
 });
 
 test("text a horizontal scroll moves past the gutter is clipped", async () => {
-  const { TextObject } = await import("../../../packages/player/dist/display.js");
+  const { TextObject } = await import("../../../packages/player/dist/display/display.js");
   const field = new TextObject(null);
   field.model.setText("abc");
   const view = new PixiView({} as ConstructorParameters<typeof PixiView>[0]);

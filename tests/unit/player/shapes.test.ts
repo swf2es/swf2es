@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readShape, readSwf } from "../../../packages/format/dist/index.js";
-import { shapeLayers } from "../../../packages/player/dist/shapes.js";
-import type { BitmapCharacter } from "../../../packages/player/dist/timeline.js";
+import { shapeLayers } from "../../../packages/player/dist/display/shapes.js";
+import type { BitmapCharacter } from "../../../packages/player/dist/display/timeline.js";
 import * as w from "../../swf-writer.ts";
 
 test("a bitmap fill takes its bitmap, its matrix from twips to pixels; one the SWF lacks stays its own", () => {

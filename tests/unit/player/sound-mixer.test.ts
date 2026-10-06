@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { containerEngine } from "../../../oracle/oracle.ts";
-import type { AudioHost, SoundMix } from "../../../packages/player/dist/audio.js";
+import type { AudioHost, SoundMix } from "../../../packages/player/dist/media/audio.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import { outputMix } from "../../../packages/player/dist/playerglobal/flash/media/Sound.js";
 import { playerNatives } from "../../../packages/player/dist/playerglobal/index.js";

@@ -1,6 +1,6 @@
 // Browser pointer input enters here; Flash chooses targets from its display
 // list, while Pixi only supplies the pointer's position and buttons.
-import { hitsOwnPoint, toStage } from "./bounds.js";
+import { hitsOwnPoint, toStage } from "../display/bounds.js";
 import {
   BitmapObject,
   ButtonObject,
@@ -9,11 +9,11 @@ import {
   ShapeObject,
   StaticTextObject,
   TextObject,
-} from "./display.js";
-import { apply, invert, type Rect } from "./geometry.js";
+} from "../display/display.js";
+import { apply, invert, type Rect } from "../display/geometry.js";
+import { dispatchEvent } from "../playerglobal/flash/events/EventDispatcher.js";
+import type { Scripting } from "../scripting.js";
 import type { KeyboardInput } from "./keyboard.js";
-import { dispatchEvent } from "./playerglobal/flash/events/EventDispatcher.js";
-import type { Scripting } from "./scripting.js";
 
 export interface PointerState {
   x: number;

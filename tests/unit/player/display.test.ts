@@ -3,7 +3,7 @@
 // display.js and player.js leave pixi.js out.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bounds, toStage } from "../../../packages/player/dist/bounds.js";
+import { bounds, toStage } from "../../../packages/player/dist/display/bounds.js";
 import {
   Clips,
   Container,
@@ -11,7 +11,7 @@ import {
   type MovieClip,
   ShapeObject,
   type TextObject,
-} from "../../../packages/player/dist/display.js";
+} from "../../../packages/player/dist/display/display.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import * as w from "../../swf-writer.ts";
 

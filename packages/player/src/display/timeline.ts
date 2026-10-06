@@ -43,9 +43,9 @@ import {
   tags,
 } from "@swf2es/format";
 import type { avm2 } from "@swf2es/runtime";
-import type { BitmapStore } from "./bitmap.js";
+import type { BitmapStore } from "../bitmap/bitmap.js";
+import { FontSet } from "../text/fonts.js";
 import type { DisplayObject, MovieClip } from "./display.js";
-import { FontSet } from "./fonts.js";
 import { boundsOf, type ShapeBounds, type ShapeLayer, shapeLayers } from "./shapes.js";
 
 export type FrameCommand = { type: "place"; place: Place } | { type: "remove"; depth: number };
@@ -134,7 +134,7 @@ export interface TextCharacter {
   font: FontName | null;
 }
 
-/** DefineText or DefineText2: glyphs of its SWF's fonts, which it finds as it is shown (static-text.ts). */
+/** DefineText or DefineText2: glyphs of its SWF's fonts, which it finds as it is shown (text/static.ts). */
 export interface StaticTextCharacter {
   type: "static";
   id: number;

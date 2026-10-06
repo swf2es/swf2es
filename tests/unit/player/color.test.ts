@@ -1,7 +1,7 @@
 // Colour transforms composed as Flash composes them: the child's first, then the parent's.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { concatColor, multipliesOnly } from "../../../packages/player/dist/color.js";
+import { concatColor, multipliesOnly } from "../../../packages/player/dist/display/color.js";
 
 const ct = (mul: number[], add: number[]) => ({
   rMul: mul[0],

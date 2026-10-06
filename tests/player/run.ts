@@ -3,7 +3,7 @@
 // image, Flash's and their difference go to out/<case>/.
 //
 // A case marked `table`, or every case with --table-ab, is played again
-// without the transform table (pixi-table.ts), and must draw the same
+// without the transform table (render/table.ts), and must draw the same
 // pixels; a marked one, played with the table drawing even its shortest
 // runs, must have the table draw some of it. An unmarked one keeps the
 // table's threshold of 16 draws a run, so with --table-ab most of its runs

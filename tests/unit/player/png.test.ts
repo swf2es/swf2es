@@ -4,8 +4,8 @@
 // every alpha and value.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BitmapStore, premultiply } from "../../../packages/player/dist/bitmap.js";
-import { encodePng } from "../../../packages/player/dist/png.js";
+import { BitmapStore, premultiply } from "../../../packages/player/dist/bitmap/bitmap.js";
+import { encodePng } from "../../../packages/player/dist/bitmap/png.js";
 import { decodePng } from "../../player/image.ts";
 
 test("a transparent store encodes as RGBA, its colours divided out as Flash's encoder does", () => {

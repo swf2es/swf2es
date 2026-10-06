@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { containerEngine } from "../../../oracle/oracle.ts";
 import { readSwf, type Sound, tags } from "../../../packages/format/dist/index.js";
+import { ButtonObject } from "../../../packages/player/dist/display/display.js";
+import { readLibrary } from "../../../packages/player/dist/display/timeline.js";
 import {
   type AudioHost,
   browserAudioHost,
@@ -12,11 +14,9 @@ import {
   type PlayShape,
   type SoundMix,
   streamSound,
-} from "../../../packages/player/dist/audio.js";
-import { ButtonObject } from "../../../packages/player/dist/display.js";
+} from "../../../packages/player/dist/media/audio.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
-import { readLibrary } from "../../../packages/player/dist/timeline.js";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compileScripts } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";

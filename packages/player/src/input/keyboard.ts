@@ -6,7 +6,7 @@
 // stage.focus, each move a focusOut and a focusIn; a click's and a Tab's
 // first a cancelable mouseFocusChange or keyFocusChange.
 
-import { bounds, toStage } from "./bounds.js";
+import { bounds, toStage } from "../display/bounds.js";
 import {
   ButtonObject,
   CONTENT,
@@ -14,11 +14,11 @@ import {
   type DisplayObject,
   MovieClip,
   TextObject,
-} from "./display.js";
-import { apply } from "./geometry.js";
-import { dispatchEvent } from "./playerglobal/flash/events/EventDispatcher.js";
-import type { Scripting } from "./scripting.js";
-import { GUTTER } from "./text-layout.js";
+} from "../display/display.js";
+import { apply } from "../display/geometry.js";
+import { dispatchEvent } from "../playerglobal/flash/events/EventDispatcher.js";
+import type { Scripting } from "../scripting.js";
+import { GUTTER } from "../text/layout.js";
 
 /** A key as the host gives it, in Flash's terms. */
 export interface KeyState {

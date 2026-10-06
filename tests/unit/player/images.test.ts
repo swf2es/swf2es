@@ -7,8 +7,8 @@ import {
   type DecodedImage,
   decodeImages,
   decodeInBrowser,
-} from "../../../packages/player/dist/images.js";
-import type { BitmapCharacter, Library } from "../../../packages/player/dist/timeline.js";
+} from "../../../packages/player/dist/bitmap/images.js";
+import type { BitmapCharacter, Library } from "../../../packages/player/dist/display/timeline.js";
 
 function library(definitions: Bitmap[]): { library: Library; characters: BitmapCharacter[] } {
   const characters = definitions.map(

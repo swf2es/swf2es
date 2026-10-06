@@ -3,8 +3,8 @@
 // when the text is shown, as Flash finds it: a SWF may define it after the
 // text that uses it (the corpus's statictext_text).
 import type { Font, Glyph } from "@swf2es/format";
-import { flatten, inside, type Path, shapeLayers } from "./shapes.js";
-import type { Character, StaticTextCharacter } from "./timeline.js";
+import { flatten, inside, type Path, shapeLayers } from "../display/shapes.js";
+import type { Character, StaticTextCharacter } from "../display/timeline.js";
 
 /** A glyph of static text: its font and glyph, its baseline origin and height in twips, its colour 0xAARRGGBB. */
 export interface PlacedGlyph {

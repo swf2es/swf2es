@@ -1,9 +1,9 @@
 // flash.filters' objects: each keeps its values as adl converts them, in a
 // record (`$filter`) that DisplayObject.filters copies to and from the display
-// object's (filters.ts in the player), so a filter read back is a copy.
+// object's (display/filters.ts in the player), so a filter read back is a copy.
 import { avm2 } from "@swf2es/runtime";
-import type { BitmapStore } from "../../../bitmap.js";
-import { type Filter, type FilterKind, filterDefaults } from "../../../filters.js";
+import type { BitmapStore } from "../../../bitmap/bitmap.js";
+import { type Filter, type FilterKind, filterDefaults } from "../../../display/filters.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;

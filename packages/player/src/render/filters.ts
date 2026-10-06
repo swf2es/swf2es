@@ -22,8 +22,8 @@ import {
   TexturePool,
   TextureSource,
 } from "pixi.js";
-import { filterRect, gradientTable, integerKernel } from "./bitmap-filters.js";
-import type { Filter as FilterRecord } from "./filters.js";
+import { filterRect, gradientTable, integerKernel } from "../bitmap/filters.js";
+import type { Filter as FilterRecord } from "../display/filters.js";
 
 const VERTEX = `in vec2 aPosition;
 out vec2 vTextureCoord;
@@ -438,7 +438,7 @@ export function rgbaOf(pixels: Uint32Array): Uint8Array {
 
 /**
  * How a bevel or a gradient filter places its layer (premultiplied) on the
- * object's pixel, as bitmap-filters' placer does: masked to where the
+ * object's pixel, as bitmap/filters' placer does: masked to where the
  * object is (uType 0, inner) or, knocked out, is not (1, outer); inner
  * atop it, outer behind it, full (2) over it, knocked out alone.
  */
@@ -768,7 +768,7 @@ class ColorMatrixFilter extends FlashFilter {
  * A convolution, in 255ths: the taps' straight colour over uBox, the
  * object's pixels as adl filters them, in the input's pixels from its
  * frame's corner; past it the nearest edge's or uEdge; summed, divided,
- * biased, clamped and premultiplied as bitmap-filters' convolve does, the
+ * biased, clamped and premultiplied as bitmap/filters' convolve does, the
  * fixed-point way too (uReciprocal not 0) where every tap lies in the box.
  */
 const CONVOLUTION = `in vec2 vTextureCoord;

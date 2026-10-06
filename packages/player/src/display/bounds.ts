@@ -2,6 +2,7 @@
 // and hit tests"): a SWF shape's recorded rectangles, a drawing's true
 // extent, a container's children's through their matrices.
 import type { Matrix } from "@swf2es/format";
+import { hitsGlyph } from "../text/static.js";
 import {
   BitmapObject,
   Clips,
@@ -23,7 +24,6 @@ import {
   union,
 } from "./geometry.js";
 import { flatten, inside, orientation, type Path, type ShapeLayer } from "./shapes.js";
-import { hitsGlyph } from "./static-text.js";
 
 const TWIPS = 20;
 const IDENTITY: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };

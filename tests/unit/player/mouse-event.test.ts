@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import type { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../oracle/oracle.ts";
-import { Container, ShapeObject } from "../../../packages/player/dist/display.js";
+import { Container, ShapeObject } from "../../../packages/player/dist/display/display.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
 import { libraryAbcs } from "../../player/libraries.ts";
 
