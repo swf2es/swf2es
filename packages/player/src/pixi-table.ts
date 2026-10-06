@@ -5,14 +5,14 @@
 // uniforms. Here the contexts' local vertices go once into one buffer, the
 // atlas, and a run of such Graphics is one multi-draw of their index
 // ranges, each draw reading its transform and tint from a row of a float
-// texture by gl_DrawID: a frame writes the rows and uploads them, and no
-// vertex moves. A run too short to repay its multi-draw, as filters leave,
-// is drawn by Pixi's pipe. What the table cannot draw, a context with a
-// texture or a Graphics that rounds to pixels, is drawn by Pixi's own pipe
-// in its place in the run. A Flash colour transform's batched copies stay
-// with the colour batcher (pixi-color.ts): drawn here, a few batched draws
-// became thousands of the table's, which cost the GPU more than the CPU
-// saved.
+// texture by gl_DrawID, or of a uniform array for a short run: a frame
+// writes the rows and uploads them, and no vertex moves. A run too short to
+// repay its multi-draw, as filters leave, is drawn by Pixi's pipe. What the
+// table cannot draw, a context with a texture or a Graphics that rounds to
+// pixels, is drawn by Pixi's own pipe in its place in the run. A Flash
+// colour transform's batched copies stay with the colour batcher
+// (pixi-color.ts): drawn here, a few batched draws became thousands of the
+// table's, which cost the GPU more than the CPU saved.
 import {
   Buffer,
   BufferImageSource,
@@ -51,6 +51,13 @@ const ROWS_A_LINE = TABLE_WIDTH / ROW_TEXELS;
  * GPU, and runs of 22 broke even (`bench.ts --rig 128 --filtered K --gpu`).
  */
 const MIN_RUN = 16;
+/**
+ * The most draws a run passes in uniforms rather than through the table
+ * texture, whose upload costs Chrome a few µs more a run: 48 rows of 4
+ * vectors leave room for Pixi's under the 256 every WebGL 2 allows a
+ * vertex shader.
+ */
+const SHORT_RUN = 48;
 /** Floats a vertex of a context's packed geometry: position, UV, colour, texture and rounding. */
 const VERTEX_FLOATS = 6;
 /** Atlas vertices dropped contexts may leave as holes before it is packed again. */
@@ -72,7 +79,11 @@ export function setTransformTable(on: boolean, shortest = MIN_RUN): void {
   minRun = shortest;
 }
 
-const vertex = `#version 300 es
+/**
+ * The vertex shader, reading a draw's row from the table texture or, for a
+ * short run (SHORT_RUN), from a uniform array laid out as the table's rows.
+ */
+const vertex = (short: boolean) => `#version 300 es
 #extension GL_ANGLE_multi_draw : require
 in vec2 aPosition;
 in vec4 aColor;
@@ -80,16 +91,27 @@ uniform mat3 uProjectionMatrix;
 uniform mat3 uWorldTransformMatrix;
 uniform vec4 uWorldColorAlpha;
 uniform vec2 uResolution;
-uniform highp sampler2D uTable;
-uniform float uBase;
+${
+  short
+    ? `uniform vec4 uRows[${SHORT_RUN * ROW_TEXELS}];`
+    : `uniform highp sampler2D uTable;
+uniform float uBase;`
+}
 out vec4 vColor;
 
 void main(void) {
-  int row = int(uBase) + gl_DrawID;
+${
+  short
+    ? `  int at = gl_DrawID * ${ROW_TEXELS};
+  vec4 m = uRows[at];
+  vec4 t = uRows[at + 1];
+  vec4 tint = uRows[at + 2];`
+    : `  int row = int(uBase) + gl_DrawID;
   ivec2 at = ivec2((row & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, row >> ${Math.log2(ROWS_A_LINE)});
   vec4 m = texelFetch(uTable, at, 0);
   vec4 t = texelFetch(uTable, at + ivec2(1, 0), 0);
-  vec4 tint = texelFetch(uTable, at + ivec2(2, 0), 0);
+  vec4 tint = texelFetch(uTable, at + ivec2(2, 0), 0);`
+}
   mat3 modelMatrix = mat3(m.x, m.y, 0.0, m.z, m.w, 0.0, t.x, t.y, 1.0);
   mat3 modelViewProjectionMatrix = uProjectionMatrix * uWorldTransformMatrix * modelMatrix;
   gl_Position = vec4((modelViewProjectionMatrix * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
@@ -111,8 +133,12 @@ void main(void) {
 `;
 
 /** Pixi puts its precision and name first, where an extension may no longer be asked for. */
-function tableProgram(): GlProgram {
-  const program = new GlProgram({ name: NAME, vertex, fragment });
+function tableProgram(short: boolean): GlProgram {
+  const program = new GlProgram({
+    name: short ? `${NAME}-short` : NAME,
+    vertex: vertex(short),
+    fragment,
+  });
   const directive = "#extension GL_ANGLE_multi_draw : require\n";
   const source = (program.vertex ?? "").replace(directive, "");
   const version = "#version 300 es\n";
@@ -368,6 +394,9 @@ export class TablePipe {
   /** The most rows the table may hold: as many lines as a texture may be tall. */
   private maxRows = 0;
   private shader: Shader | null = null;
+  private shortShader: Shader | null = null;
+  /** Where the short shader's program, as last linked, takes its rows. */
+  private rows: { program: WebGLProgram; location: WebGLUniformLocation | null } | null = null;
   private readonly uniforms = new UniformGroup({ uBase: { value: 0, type: "f32" } });
   private readonly state = State.for2d();
   /** The next row free this frame. */
@@ -556,8 +585,8 @@ export class TablePipe {
   }
 
   /**
-   * Draw the run gathered: its rows uploaded, then its draws as one call;
-   * or its Graphics through Pixi's pipe if it is too short.
+   * Draw the run gathered as one call, its rows passed in uniforms if few,
+   * uploaded if not; or its Graphics through Pixi's pipe if it is too short.
    */
   private flush(): void {
     const draws = this.draws;
@@ -583,20 +612,23 @@ export class TablePipe {
     }
 
     this.segment.length = 0;
-    this.upload(this.runBase, this.cursor);
+    const short = draws <= SHORT_RUN;
+    if (!short) {
+      this.upload(this.runBase, this.cursor);
+    }
 
     this.send();
 
-    this.shader ??= new Shader({
-      glProgram: tableProgram(),
-      resources: { tableUniforms: this.uniforms, uTable: this.table },
-    });
-    this.shader.groups[0] = renderer.globalUniforms.bindGroup;
-    this.uniforms.uniforms.uBase = this.runBase;
+    const shader = short ? this.shortRunShader() : this.tableShader();
+    shader.groups[0] = renderer.globalUniforms.bindGroup;
     this.state.blendMode = this.runBlend as State["blendMode"];
     renderer.state.set(this.state);
-    renderer.shader.bind(this.shader);
-    renderer.geometry.bind(this.geometry, this.shader.glProgram);
+    renderer.shader.bind(shader);
+    if (short) {
+      this.passRows(shader);
+    }
+
+    renderer.geometry.bind(this.geometry, shader.glProgram);
     const gl = renderer.gl;
     this.multi.multiDrawElementsWEBGL(
       gl.TRIANGLES,
@@ -609,7 +641,46 @@ export class TablePipe {
     );
 
     this.draws = 0;
+    // Rows passed in uniforms are free again for the next run's.
+    if (short) {
+      this.cursor = this.runBase;
+    }
+
     this.runBase = this.cursor;
+  }
+
+  private tableShader(): Shader {
+    this.shader ??= new Shader({
+      glProgram: tableProgram(false),
+      resources: { tableUniforms: this.uniforms, uTable: this.table },
+    });
+    this.uniforms.uniforms.uBase = this.runBase;
+    return this.shader;
+  }
+
+  private shortRunShader(): Shader {
+    this.shortShader ??= new Shader({ glProgram: tableProgram(true), resources: {} });
+    return this.shortShader;
+  }
+
+  /** Pass the run's rows to the short shader, bound: Pixi knows nothing of its uRows. */
+  private passRows(shader: Shader): void {
+    const gl = this.renderer.gl;
+    const shaders = this.renderer.shader as unknown as {
+      _getProgramData(program: GlProgram): { program: WebGLProgram };
+    };
+    const program = shaders._getProgramData(shader.glProgram).program;
+    if (this.rows?.program !== program) {
+      this.rows = { program, location: gl.getUniformLocation(program, "uRows") };
+    }
+
+    const floats = ROW_TEXELS * 4;
+    gl.uniform4fv(
+      this.rows.location,
+      this.table.resource as Float32Array,
+      this.runBase * floats,
+      this.draws * floats,
+    );
   }
 
   /**
@@ -699,6 +770,7 @@ export class TablePipe {
     }
 
     this.shader?.destroy(true);
+    this.shortShader?.destroy(true);
     this.geometry.destroy(true);
     this.table.destroy();
     this.atlas.destroy();
