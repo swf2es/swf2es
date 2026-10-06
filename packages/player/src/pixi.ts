@@ -593,7 +593,10 @@ function trimPools(): void {
   }
 
   // Past the free ones are those taken, which Pixi leaves listed: their users hold them, if anyone.
-  batchables._pool.length = batchables._index;
+  // Cut once they are many, not on every frame, which would shrink and regrow the list each time.
+  if (batchables._pool.length > batchables._index + POOLED_BATCHABLES_MOST) {
+    batchables._pool.length = batchables._index;
+  }
 
   const now = performance.now();
   while (drawTargets.length > 0 && now - drawTargets[0].since > IDLE_MS) {
