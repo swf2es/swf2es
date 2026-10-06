@@ -221,6 +221,10 @@ function describe(e: unknown, scripting: Scripting | null): string {
 interface Bench {
   /** The view's counts at the end, and the JS heap in use before and after, where Chrome tells. */
   counts: Record<string, number>;
+  /** Each frame's meter readings after the first: see meter. */
+  meters: Record<string, number>[];
+  /** Filled in by chrome.ts from a sampled heap profile, where asked for. */
+  allocated: number;
   heap: [number, number];
   tick: number[];
   sync: number[];
@@ -247,6 +251,93 @@ interface Bench {
  * frames, as a pool's objects and a panel shown and hidden come and go;
  * the toggle counts in the tick. -1 toggles nothing.
  */
+/**
+ * What a renderer does in a frame, counted by wrapping it: GL's draw calls,
+ * Pixi's unbatched Graphics and batches, its render groups' instruction
+ * rebuilds and their time, contexts tessellated with their vertices and
+ * time, buffer uploads and their bytes, and program switches. `read` gives
+ * the counts since the last read.
+ */
+function meter(renderer: object): { read(): Record<string, number> } {
+  let counts: Record<string, number> = {};
+  const add = (key: string, by = 1) => {
+    counts[key] = (counts[key] ?? 0) + by;
+  };
+  const wrap = <T extends object>(
+    target: T | undefined,
+    method: string,
+    count: (args: unknown[], took: number, self: T) => void,
+  ) => {
+    const object = target as Record<string, unknown> | undefined;
+    const original = object?.[method] as ((...args: unknown[]) => unknown) | undefined;
+    if (!object || typeof original !== "function") {
+      return;
+    }
+
+    object[method] = function (this: T, ...args: unknown[]) {
+      const begun = performance.now();
+      const out = original.apply(this, args);
+      count(args, performance.now() - begun, this);
+      return out;
+    };
+  };
+  const r = renderer as {
+    uid: number;
+    gl?: WebGL2RenderingContext;
+    renderPipes: Record<string, object>;
+    renderGroup: object;
+    graphicsContext: {
+      getGpuContext(context: object): { geometryData: { vertices: ArrayLike<number> } };
+    };
+  };
+  const gl = r.gl;
+  wrap(gl, "drawElements", () => add("glDraws"));
+  wrap(gl, "drawArrays", () => add("glDraws"));
+  wrap(gl, "useProgram", () => add("programs"));
+  for (const method of ["bufferData", "bufferSubData"]) {
+    wrap(gl, method, (args) => {
+      add("uploads");
+      const data = args[method === "bufferData" ? 1 : 2];
+      add("uploadBytes", typeof data === "number" ? data : (data as ArrayBufferView).byteLength);
+    });
+  }
+
+  wrap(r.renderPipes.graphics, "execute", () => add("aloneGraphics"));
+  wrap(r.renderPipes.batch, "execute", () => add("batches"));
+  wrap(r.renderGroup, "_buildInstructions", (_, took) => {
+    add("rebuilds");
+    add("rebuildMs", took);
+  });
+  // Tessellation: a context Pixi has no GPU data for yet, or one marked dirty, built now.
+  const contexts = r.graphicsContext as unknown as Record<string, unknown>;
+  const update = contexts.updateGpuContext as (context: object) => unknown;
+  contexts.updateGpuContext = function (
+    this: unknown,
+    context: { dirty: boolean; _gpuData: object },
+  ) {
+    const fresh = context.dirty || !(context._gpuData as Record<number, unknown>)[r.uid];
+    const begun = performance.now();
+    const out = update.call(this, context);
+    if (fresh) {
+      add("tessellated");
+      add("tessMs", performance.now() - begun);
+      add(
+        "tessVertices",
+        r.graphicsContext.getGpuContext(context).geometryData.vertices.length / 2,
+      );
+    }
+
+    return out;
+  };
+  return {
+    read() {
+      const out = counts;
+      counts = {};
+      return out;
+    },
+  };
+}
+
 async function benchSwf(
   base64: string,
   frames: number,
@@ -330,6 +421,8 @@ async function benchSwf(
     await finish();
     const first = performance.now() - start;
     const heapBefore = heapNow();
+    const meters: Record<string, number>[] = [];
+    const counter = meter(renderer);
     for (let frame = 2; frame <= frames; frame++) {
       const before = performance.now();
       for (const [depth, child] of toggled.entries()) {
@@ -355,6 +448,7 @@ async function benchSwf(
       sync.push(synced - ticked);
       draw.push(drawn - synced);
       finished.push(performance.now() - drawn);
+      meters.push(counter.read());
       // Renders no tick came before, as a host that draws on every animation frame does.
       for (let k = 0; k < idleRenders; k++) {
         const begun = performance.now();
@@ -369,6 +463,8 @@ async function benchSwf(
     renderer.destroy();
     return {
       counts,
+      meters,
+      allocated: 0,
       heap,
       tick,
       sync,
@@ -382,6 +478,8 @@ async function benchSwf(
   } catch (e) {
     return {
       counts: {},
+      meters: [],
+      allocated: 0,
       heap: [0, 0],
       tick,
       sync,

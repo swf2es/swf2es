@@ -33,9 +33,15 @@
 // --toggle-branches N removes and reattaches those N branches every --toggle-every K frames.
 // --nested-groups also renders nested Pixi groups while they leave and return.
 //
+// Each run also gives per-frame means of what the renderer did: GL draw
+// calls, Pixi's unbatched Graphics and batches, render group rebuilds and
+// their time, contexts tessellated with their vertices and time, buffer
+// uploads and bytes, and program switches. --allocs samples the heap and
+// gives the KB the frames allocated, the player's start left out.
+//
 //   node tests/player/bench.ts [--shapes N | --rig N | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
-//     [--gpu] [--back-buffer] [--antialias] [--json]
+//     [--gpu] [--back-buffer] [--antialias] [--allocs] [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 
@@ -401,10 +407,25 @@ const result = await benchPlayer(
   args.includes("--antialias"),
   toggleEvery,
   nestedGroups,
+  args.includes("--allocs"),
 );
 if (result.error) {
   console.error(result.error);
   process.exit(1);
+}
+
+/** Each meter's mean over `frames`, rounded to two places. */
+function perFrame(frames: Record<string, number>[]): Record<string, number> {
+  const sums: Record<string, number> = {};
+  for (const frame of frames) {
+    for (const [key, value] of Object.entries(frame)) {
+      sums[key] = (sums[key] ?? 0) + value;
+    }
+  }
+
+  return Object.fromEntries(
+    Object.entries(sums).map(([key, sum]) => [key, Math.round((sum / frames.length) * 100) / 100]),
+  );
 }
 
 const tick = result.tick.slice(WARMUP);
@@ -438,6 +459,11 @@ const summary = {
   gl: stats(gl),
   frame: stats(total),
   idle: stats(result.idle.slice(WARMUP * idleRenders)),
+  // Each counter's mean over the measured frames: draws, rebuilds, tessellation, uploads.
+  perFrame: perFrame(result.meters.slice(WARMUP)),
+  ...(args.includes("--allocs")
+    ? { allocatedKbPerFrame: Math.round(result.allocated / 1024 / (frames - 1)) }
+    : {}),
   ...(toggleBranches > 0
     ? {
         attached: stats(total.filter((_, i) => (i + WARMUP + 2) % 2 === 0)),
