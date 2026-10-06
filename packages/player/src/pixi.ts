@@ -803,23 +803,28 @@ class SharedFills {
 }
 
 /**
- * Batch the Graphics of `root`'s render group, its own and not those of a
- * group nested in it, or draw them alone again: showFor picks the batched
- * copy of each one's shared context.
+ * Batch the Graphics of a render group, its own and not those of a group
+ * nested in it, or draw them alone again: showFor picks the batched copy
+ * of each one's shared context. A mask's are left alone: drawn into the
+ * group of what it masks, they would be packed there and kept, though its
+ * own group's rebuilds draw them alone again.
  */
-function settle(root: PixiContainer, settled: boolean): void {
-  const group = root.renderGroup as unknown as Settling | null;
-  if (!group) {
-    return;
-  }
-
+function settle(group: Settling, settled: boolean): void {
+  const root = group.root;
+  // Already changing, its next rebuild is one of its own, not its batching's.
+  const changing = group.structureDidChange;
   group.$settled = settled;
+  let switched = false;
   const visit = (container: PixiContainer) => {
+    if (container.includeInBuild === false) {
+      return;
+    }
+
     const graphics = container as SharingGraphics & { flashColor?: ColorTransform | null };
-    if (container instanceof Graphics && graphics.settled !== settled && graphics.shared) {
+    if (container instanceof Graphics && !!graphics.settled !== settled && graphics.shared) {
       graphics.settled = settled;
       showFor(graphics, graphics.flashColor ?? null);
-      group.$settling = true;
+      switched = true;
     }
 
     for (const child of container.children) {
@@ -828,9 +833,13 @@ function settle(root: PixiContainer, settled: boolean): void {
       }
     }
   };
-  visit(root);
-  if (group.$settling) {
-    (group as unknown as { structureDidChange: boolean }).structureDidChange = true;
+  if (root) {
+    visit(root);
+  }
+
+  if (switched) {
+    group.structureDidChange = true;
+    group.$settling = !changing;
   }
 }
 
@@ -945,7 +954,16 @@ pipe.validateRenderable = function (graphics) {
 const SETTLE_MS = 2000;
 
 /** A render group as the player marks it: when it was last rebuilt, and whether its Graphics are batched. */
-type Settling = { $builtAt?: number; $settled?: boolean; $settling?: boolean };
+type Settling = {
+  root: PixiContainer | null;
+  renderGroupChildren: Settling[];
+  structureDidChange: boolean;
+  $builtAt?: number;
+  $settled?: boolean;
+  $settling?: boolean;
+  /** The rebuild settleGroups last looked at. */
+  $seen?: number;
+};
 const buildInstructions = (
   RenderGroupSystem.prototype as unknown as {
     _buildInstructions(group: Settling, renderer: unknown): void;
@@ -1098,8 +1116,6 @@ export class PixiView {
   readonly stage = new PixiContainer();
   /** What the view has built since it was made, for measuring: lines' contexts made and reused. */
   readonly counts = { strokeContexts: 0, strokeReuses: 0 };
-  /** The containers it made render groups of, to batch those that settle (settle). */
-  private readonly groupRoots = new Set<PixiContainer>();
   private readonly lines = new StrokeContexts(this.counts);
   private readonly nodes = new WeakMap<DisplayObject, Node>();
   /** A fresh view's fills of the shapes it built them for, shared by their instances; it destroys them with itself. */
@@ -2116,7 +2132,6 @@ export class PixiView {
     ) {
       // Keep the group when its animation gets smaller, avoiding repeated batcher destruction.
       node.container.enableRenderGroup();
-      this.groupRoots.add(node.container);
       const set = node.container.renderGroup?.instructionSet;
       if (set) {
         viewGroups.add(set);
@@ -2126,9 +2141,17 @@ export class PixiView {
 
   /** Retire Pixi's per-group batches before it returns the group to its pool. */
   private disableRenderGroup(container: PixiContainer): void {
-    // Its Graphics join the group above, which may not have settled.
-    settle(container, false);
-    this.groupRoots.delete(container);
+    // Its Graphics join the group above, which may not have settled; and Pixi
+    // pools the group, which the next to take it must find unmarked.
+    const group = container.renderGroup as unknown as Settling | null;
+    if (group) {
+      settle(group, false);
+      group.$builtAt = undefined;
+      group.$settled = undefined;
+      group.$settling = undefined;
+      group.$seen = undefined;
+    }
+
     const set = container.renderGroup?.instructionSet;
     if (set) {
       // Pixi pools the group, set included, for any root it renders next.
@@ -2323,27 +2346,32 @@ export class PixiView {
   }
 
   /**
-   * Batch the Graphics of each render group not rebuilt for SETTLE_MS, and
-   * draw those of one rebuilt since alone again (SETTLE_MS).
+   * Batch the Graphics of each render group drawn that has not been rebuilt
+   * for SETTLE_MS, and draw those of one rebuilt since alone again: walking
+   * Pixi's tree of groups from the stage's, which holds those drawn and no
+   * other. A group rebuilt and not settled is looked through for Graphics
+   * still batched, which a branch brings along as it moves under it or
+   * becomes a group of its own.
    */
   private settleGroups(): void {
-    const now = performance.now();
-    for (const root of [this.stage, ...this.groupRoots]) {
-      const group = root.renderGroup as unknown as Settling | null;
-      if (root.destroyed) {
-        this.groupRoots.delete(root);
-        continue;
-      }
-
-      if (!group) {
-        continue;
-      }
-
-      const quiet = now - (group.$builtAt ?? now) >= SETTLE_MS;
-      if (group.$settled ? !quiet : quiet) {
-        settle(root, quiet);
-      }
+    const stage = this.stage.renderGroup as unknown as Settling | null;
+    if (!stage) {
+      return;
     }
+
+    const now = performance.now();
+    const visit = (group: Settling) => {
+      const quiet = group.$builtAt !== undefined && now - group.$builtAt >= SETTLE_MS;
+      if (quiet !== !!group.$settled || (!quiet && group.$seen !== group.$builtAt)) {
+        settle(group, quiet);
+      }
+
+      group.$seen = group.$builtAt;
+      for (const child of group.renderGroupChildren) {
+        visit(child);
+      }
+    };
+    visit(stage);
   }
 
   /**

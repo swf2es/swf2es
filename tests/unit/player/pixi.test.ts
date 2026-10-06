@@ -2504,3 +2504,68 @@ test("a render group not rebuilt for a while has its Graphics batched, and drawn
     assert.ok(art().every((g) => !g.settled && g.context === (g.shared as unknown)));
   });
 });
+
+test("Graphics a settled group batched draw alone again in a group that has not settled", async () => {
+  // A branch moved under an animated group, or made a group of its own,
+  // brings its batched Graphics along: they would be packed again at each
+  // of that group's rebuilds.
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  root.placeAtDepth(new ShapeObject(character), 1);
+  type Drawn = { settled?: boolean; context: unknown; shared: unknown };
+  type Group = { $builtAt?: number; $settled?: boolean; $settling?: boolean };
+
+  await withClock((clock) => {
+    view.prepare(root);
+    view.stage.enableRenderGroup();
+    const stageGroup = view.stage.renderGroup as unknown as Group;
+    stageGroup.$builtAt = clock.at;
+    clock.at += 2500;
+    view.prepare(root);
+    const branch = view.stage.children[0].children[1] as unknown as {
+      enableRenderGroup(): void;
+      disableRenderGroup(): void;
+      renderGroup: Group;
+      children: { children: Drawn[] }[];
+    };
+    const art = () => branch.children[0].children;
+    assert.ok(art().every((g) => g.settled));
+
+    // The branch becomes a group of its own, just rebuilt.
+    branch.enableRenderGroup();
+    branch.renderGroup.$builtAt = clock.at;
+    view.prepare(root);
+    assert.ok(art().every((g) => !g.settled && g.context === g.shared));
+    assert.equal(branch.renderGroup.$settled, false);
+  });
+});
+
+test("a mask's Graphics are never batched, as they draw in another group", async () => {
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const masked = new ShapeObject(character);
+  const mask = new ShapeObject(character);
+  root.placeAtDepth(masked, 1);
+  root.placeAtDepth(mask, 2);
+  masked.setMask(mask);
+  type Drawn = { settled?: boolean };
+
+  await withClock((clock) => {
+    view.prepare(root);
+    view.stage.enableRenderGroup();
+    (view.stage.renderGroup as unknown as { $builtAt: number }).$builtAt = clock.at;
+    clock.at += 2500;
+    view.prepare(root);
+    const containers = view.stage.children[0].children as unknown as {
+      includeInBuild: boolean;
+      children: { children: Drawn[] }[];
+    }[];
+    const maskContainer = containers.find((c) => c.includeInBuild === false);
+    assert.ok(maskContainer);
+    assert.ok(maskContainer.children[0].children.every((g) => !g.settled));
+  });
+});
