@@ -714,7 +714,14 @@ ones it draws alone anyway, so batches and those alternate, switching
 programs at each. Unbatched, a shape's geometry is uploaded once: more
 draw calls, but far fewer program switches and uploads, and `bench.ts
 --rig 32` draws in half the time on a GPU and a quarter of it under
-software GL.
+software GL. But a crowded scene is mostly still: of some 4,400 draws a
+frame in a room of a dozen characters, half were in render groups no
+timeline had rebuilt for seconds. A render group not rebuilt for 2 s has
+its Graphics batched, each drawing a batched copy of its shared context,
+as a colour transform does: packed once, as nothing rebuilds the group,
+and drawn in a few calls, which took a frame's render from 17–18 ms to
+15. Rebuilt again by anything but its batching, the group draws them
+alone again.
 
 Flash anti-aliases by supersampling on a grid: none at low quality, 2×2 at
 medium, 4×4 at high and best. The test page draws the same way, at that

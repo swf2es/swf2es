@@ -2461,3 +2461,46 @@ test("a shape swapped for one with fills and lines laid out alike keeps its Grap
   assert.equal(oldLines.destroyed, false);
   assert.equal(view.counts.strokeContexts, 2);
 });
+
+test("a render group not rebuilt for a while has its Graphics batched, and drawn alone again once rebuilt", async () => {
+  // Drawn alone, each Graphics was a draw call, thousands in a crowded
+  // room and most of them scenery; batched, a settled group's are a few,
+  // and a group rebuilt again goes back to drawing them alone, as a batch
+  // packs its vertices again at each rebuild.
+  const { ShapeObject } = await import("../../../packages/player/dist/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  root.placeAtDepth(new ShapeObject(character), 1);
+  type Drawn = { context: { batchMode: string }; shared: { batchMode: string }; settled?: boolean };
+  type Group = { $builtAt?: number; $settled?: boolean; structureDidChange: boolean };
+  const art = () =>
+    [...view.stage.children[0].children[1].children[0].children] as unknown as Drawn[];
+
+  await withClock((clock) => {
+    view.prepare(root);
+    // As Pixi gives the stage a group of its own when it renders it, rebuilt now.
+    view.stage.enableRenderGroup();
+    const group = view.stage.renderGroup as unknown as Group;
+    group.$builtAt = clock.at;
+    view.prepare(root);
+    assert.ok(art().every((g) => !g.settled && g.context === (g.shared as unknown)));
+
+    // Not rebuilt for 2 s: batched copies drawn, the shared contexts kept.
+    clock.at += 2500;
+    view.prepare(root);
+    assert.equal(group.$settled, true);
+    assert.equal(group.structureDidChange, true);
+    for (const g of art()) {
+      assert.equal(g.settled, true);
+      assert.equal(g.context.batchMode, "batch");
+      assert.notEqual(g.context, g.shared as unknown);
+    }
+
+    // Rebuilt for a change of its own: drawn alone again.
+    group.$builtAt = clock.at;
+    view.prepare(root);
+    assert.equal(group.$settled, false);
+    assert.ok(art().every((g) => !g.settled && g.context === (g.shared as unknown)));
+  });
+});
