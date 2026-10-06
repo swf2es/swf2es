@@ -3085,8 +3085,10 @@ function blendDrift(): Uint8Array {
  * a shape, as a host's render passes may leave another texture unit active
  * as the table uploads; squares filled alone under multiply and screen, which split a run
  * by its blend mode; a gradient, a blurred shape, a mask over two shapes, a
- * shape whose lines are stroked anew each frame as it turns stretched, and
- * a depth whose character is replaced each frame.
+ * shape whose lines are stroked anew each frame as it turns stretched, a
+ * depth whose character is replaced each frame, a row of small shapes,
+ * moving down, whose run is too long to pass its rows in uniforms, and
+ * after a layer a short run whose rows follow the long one's.
  */
 function tableRuns(): Uint8Array {
   const outlined = (id: number, color: number, sides: number) => {
@@ -3173,20 +3175,40 @@ function tableRuns(): Uint8Array {
     w.place({ depth: 16, character: 5, matrix: at(85, 102), blendMode: 4 }),
     w.place({ depth: 17, character: 4, matrix: at(100, 105) }),
     w.place({ depth: 18, character: swapped(1), matrix: at(130, 95) }),
-    w.showFrame(),
   ];
+  const small = (k: number, frame: number) => ({
+    a: 0.2,
+    d: 0.2,
+    ...at(5 + 8.8 * k, 132 + 4 * frame),
+  });
+  for (let k = 0; k < 27; k++) {
+    tags.push(w.place({ depth: 19 + k, character: 1 + (k % 2), matrix: small(k, 1) }));
+  }
+
+  // After the long run, a layer, then a short run whose rows lie past the long run's.
+  const third = (x: number) => ({ a: 0.4, d: 0.4, ...at(x, 118) });
+  tags.push(
+    w.place({ depth: 46, character: 2, matrix: third(145), blendMode: 8 }),
+    w.place({ depth: 47, character: 1, matrix: third(163) }),
+    w.place({ depth: 48, character: 2, matrix: third(181) }),
+    w.showFrame(),
+  );
   for (let frame = 2; frame <= 3; frame++) {
     tags.push(
       w.place({ depth: 1, move: true, matrix: at(25 + 6 * frame, 25) }),
       w.place({ depth: 11, move: true, matrix: turned(frame) }),
       w.remove(18),
       w.place({ depth: 18, character: swapped(frame), matrix: at(130, 95) }),
-      w.showFrame(),
     );
+    for (let k = 0; k < 27; k++) {
+      tags.push(w.place({ depth: 19 + k, move: true, matrix: small(k, frame) }));
+    }
+
+    tags.push(w.showFrame());
   }
 
   tags.push(w.end());
-  return w.swf({ width: 240, height: 130, frameRate: 24, frameCount: 3, tags });
+  return w.swf({ width: 240, height: 160, frameRate: 24, frameCount: 3, tags });
 }
 
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
@@ -3270,9 +3292,10 @@ export const cases: PlayerCase[] = [
     swf: tableRuns(),
     frames: 3,
     capture: [1, 2, 3],
-    // The outlines' anti-aliased edges, each rasteriser's own, along the diagonals.
+    // The outlines' anti-aliased edges, each rasteriser's own, along the diagonals
+    // and around the small shapes.
     tolerance: 32,
-    maxOutliers: 700,
+    maxOutliers: 1000,
     table: true,
   },
   {

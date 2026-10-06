@@ -140,6 +140,7 @@ async function runSwf(
   zoom = 1,
   antialias = false,
   table = true,
+  tableMinRun?: number,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
@@ -157,7 +158,7 @@ async function runSwf(
     scripting = await scriptingFor(bytes, trace, url, uncaught);
     const player = new Player(bytes, scripting);
     const n = GRID[quality] ?? 4;
-    setTransformTable(table);
+    setTransformTable(table, tableMinRun);
     const renderer = await autoDetectRenderer({
       preference: "webgl",
       width: player.width,
@@ -317,6 +318,7 @@ function meter(renderer: object): { read(): Record<string, number> } {
   wrap(gl, "drawElements", () => add("glDraws"));
   wrap(gl, "drawArrays", () => add("glDraws"));
   wrap(gl, "useProgram", () => add("programs"));
+  wrap(gl, "texSubImage2D", () => add("texUploads"));
   for (const method of ["bufferData", "bufferSubData"]) {
     wrap(gl, method, (args) => {
       add("uploads");
@@ -337,6 +339,7 @@ function meter(renderer: object): { read(): Record<string, number> } {
 
   wrap(gl?.getExtension("WEBGL_multi_draw") ?? undefined, "multiDrawElementsWEBGL", (args) => {
     add("glDraws");
+    add("tableRuns");
     add("tableDraws", args[6] as number);
   });
   wrap(r.renderPipes.graphics, "execute", () => add("aloneGraphics"));
@@ -385,8 +388,9 @@ async function benchSwf(
   toggleEvery = 1,
   nestedGroups = false,
   table = true,
+  tableMinRun?: number,
 ): Promise<Bench> {
-  setTransformTable(table);
+  setTransformTable(table, tableMinRun);
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
   const sync: number[] = [];

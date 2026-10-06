@@ -21,6 +21,8 @@ export interface PlayerJob {
   antialias?: boolean;
   /** Drawn without the transform table (pixi-table.ts) where false; with it by default. */
   table?: boolean;
+  /** The fewest draws a run makes through the table; its default where not given. */
+  tableMinRun?: number;
 }
 
 /** How to run jobs: a time each job's scripts may take, a listener for each result, and more directories to serve. */
@@ -219,7 +221,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
         const begun = performance.now();
         try {
           ({ value, exception } = await evaluate<NonNullable<typeof value>>(
-            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true})`,
+            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun})`,
           ));
         } catch (e) {
           // A job stopped at the timeout makes the protocol answer with an
@@ -319,6 +321,7 @@ export function benchPlayer(
   nestedGroups = false,
   allocs = false,
   table = true,
+  tableMinRun?: number,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
@@ -333,7 +336,7 @@ export function benchPlayer(
       }
 
       const { value, exception } = await evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun})`,
       );
       if (value && allocs) {
         const { profile } = await send<{ profile: { head: SampledNode } }>(
