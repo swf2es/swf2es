@@ -1172,6 +1172,17 @@ export function frameChildren(d: DisplayObject): readonly DisplayObject[] {
   return d instanceof Container ? d.children : NO_CHILDREN;
 }
 
+/** The root `d` is under, or is: the nearest display object up from it that carries a LoaderInfo; null under none, as for one a script made and did not add. */
+export function rootOf(d: DisplayObject): DisplayObject | null {
+  for (let o: DisplayObject | null = d; o; o = o.parent) {
+    if (o.loaderInfo) {
+      return o;
+    }
+  }
+
+  return null;
+}
+
 /**
  * A walk of a container's children in render order, for the timeline
  * masks that clip each: a mask clips the children after it until one

@@ -11,7 +11,7 @@ import {
   TextObject,
 } from "../display/display.js";
 import { apply, invert, type Rect } from "../display/geometry.js";
-import { dispatchEvent } from "../playerglobal/flash/events/EventDispatcher.js";
+import { dispatchEvent } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import type { KeyboardInput } from "./keyboard.js";
 

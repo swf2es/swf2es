@@ -28,6 +28,7 @@ import {
   EMPTY_TIMELINE,
   frameChildren,
   MovieClip,
+  rootOf,
   ShapeObject,
   scriptChildren,
   TextObject,
@@ -45,22 +46,19 @@ import {
   readLibrary,
   type SoundCharacter,
 } from "./display/timeline.js";
-import type { Cursor, PointerInput } from "./input/pointer.js";
-import { type AudioHost, browserAudioHost, type DecodedSound } from "./media/audio.js";
-import { rootOf } from "./playerglobal/flash/display/DisplayObject.js";
-import { dispatchEvent, dispatchTo } from "./playerglobal/flash/events/EventDispatcher.js";
 import {
-  finishSounds,
-  stopTimelineSoundsUnder,
-  timelineSoundsOf,
-} from "./playerglobal/flash/media/Sound.js";
-import { browserNavigate, type Navigate } from "./playerglobal/flash/net/navigateToURL.js";
-import { defaultStorage, type SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
-import {
+  browserNavigate,
+  defaultStorage,
+  type Navigate,
   type PlatformCapabilities,
   platformCapabilities,
-} from "./playerglobal/flash/system/Capabilities.js";
+  type SharedObjectStorage,
+} from "./hosts.js";
+import type { Cursor, PointerInput } from "./input/pointer.js";
+import { type AudioHost, browserAudioHost, type DecodedSound } from "./media/audio.js";
+import { finishSounds, stopTimelineSoundsUnder, timelineSoundsOf } from "./media/sounds.js";
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
+import { dispatchEvent, dispatchTo } from "./scripting/events.js";
 import { sha256 } from "./sha256.js";
 import { FontSet } from "./text/fonts.js";
 

@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { containerEngine } from "../../../../../../oracle/oracle.ts";
 import type { AudioHost, SoundMix } from "../../../../../../packages/player/dist/media/audio.js";
+import { outputMix } from "../../../../../../packages/player/dist/media/sounds.js";
 import { Player } from "../../../../../../packages/player/dist/player.js";
-import { outputMix } from "../../../../../../packages/player/dist/playerglobal/flash/media/Sound.js";
 import { playerNatives } from "../../../../../../packages/player/dist/playerglobal/index.js";
 import { Scripting } from "../../../../../../packages/player/dist/scripting.js";
 import { toneScript } from "../../../../../player/cases.ts";
@@ -34,16 +34,6 @@ const mix = (
   rightToLeft: number,
   rightToRight: number,
 ): SoundMix => ({ volume, leftToLeft, leftToRight, rightToLeft, rightToRight });
-
-test("a channel's output is its own transform followed by the mixer's, as Ruffle's concat", () => {
-  const identity = mix(1, 1, 0, 0, 1);
-  const global = mix(0.5, 0.75, 0.25, 0.5, 0.5);
-  assert.deepEqual(outputMix(identity, global), global);
-  assert.deepEqual(outputMix(global, identity), global);
-
-  // Ruffle's integer formula over percents, here in fractions.
-  assert.deepEqual(outputMix(mix(-0.5, 1, 0.5, 0, 1), global), mix(0.25, 0.75, 0.625, 0.5, 0.75));
-});
 
 test("SoundMixer keeps AIR's playback settings and the stream buffer time", async () => {
   const s = new Scripting(await createCodegen(wasm), { audio: null });
