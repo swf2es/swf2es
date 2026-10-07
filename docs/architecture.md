@@ -1743,8 +1743,15 @@ coloured bars measured to the pixel:
   one moved the other way, or between two grids, takes its new parent's.
 - A button slices the state that is one shape; a state of several
   characters is a sprite of them, and scales as ever.
-- Hit tests find what the slice draws (`display/bounds.ts`): the point
-  against the sliced layers, kept by the slice's key.
+- Hit tests find what the slice draws (`display/bounds.ts`), the point
+  against the sliced layers, kept by the slice's key, but only within the
+  bounds the shape has unsliced, its own, lines included, in its own
+  space: in a panel 100 wide scaled 2, a bitmap child 130 wide stretches
+  the panel's fill to 230 and it is hit to 200; a bar of its own at 88
+  drawn at 218 is not hit; a Shape child's fill from 10, drawn from 10,
+  is hit from 20; a line to 110 hits the fill to 220. Between a change
+  and the next draw, adl's hit tests still find the slice last drawn, or
+  an owner's redrawn shape unsliced; the player's find the new slice.
 - `scale9Grid` reads x, y, width and height each cut toward 0, a tag's
   grid of 20.5 to 80 as (20, 59 wide). The setter keeps them so cut, and
   then, for a grid not strictly inside the bounds it divides as given, or
@@ -1773,10 +1780,12 @@ grids, refused ones too, and rescales some on its second frame;
 `scale9-changes` changes what the grid divides, moves, redraws, adds and
 removes children, turns a parent, gives a Shape a grid of its own, draws
 through `BitmapData.draw`, masks, scrolls and hit-tests a curve across
-the grid. Flash snaps straight runs of lines to whole pixels, which the
-player does not, so a grid's lines at half pixels part from it there as
-unsliced ones do. Flash's hit tests on a curve land about half a pixel
-lower than the player's, sliced or not.
+the grid; `scale9-hits` hit-tests panels whose children widen what the
+grid divides, from the start and as they change. Flash snaps straight
+runs of lines to whole pixels, which the player does not, so a grid's
+lines at half pixels part from it there as unsliced ones do. Flash's hit
+tests on a curve land about half a pixel lower than the player's, sliced
+or not.
 
 ### Sound state
 

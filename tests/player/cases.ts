@@ -3787,6 +3787,16 @@ export const cases: PlayerCase[] = [
     maxOutliers: 200,
   },
   {
+    name: "scale9-hits",
+    swf: (abc) => bare(abc, 3, "Scale9Hits", 560, 360),
+    script: "Scale9Hits",
+    frames: 3,
+    capture: [2, 3],
+    // The edge of a Shape sliced to a third of a pixel rounds a channel apart from Flash's.
+    tolerance: 1,
+    maxOutliers: 0,
+  },
+  {
     name: "render-groups",
     swf: (abc) => bare(abc, 5, "RenderGroups", 240, 96),
     script: "RenderGroups",
