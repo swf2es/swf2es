@@ -4,14 +4,14 @@
 import type { Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
 import { convertDoubleToString, convertDoubleToStringRadix, DTOSTR_PRECISION } from "../numbers.js";
-import type { Runtime } from "../runtime.js";
+import { numberToString, type Runtime } from "../runtime.js";
 import { conversion, type Natives, plain } from "./define.js";
 
 export const numberNatives: Natives = {
   // As NumberClass::_numberToString: another radix writes the integer part only.
   "Number.Number::_numberToString": (rt) => (n: number, radix: number) => {
     if (radix === 10 || !Number.isFinite(n)) {
-      return convertDoubleToString(n);
+      return numberToString(n);
     }
 
     if (radix < 2 || radix > 36) {
