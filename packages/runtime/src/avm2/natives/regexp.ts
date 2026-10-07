@@ -108,7 +108,10 @@ function newRegExp(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
  * not compile throws nothing, as in avmplus: it matches nothing.
  */
 export function compile(source: string, flags: string, extended = false): RegExp {
-  if (source.length > 200 && nestedTooDeep(source)) {
+  if (
+    (source.length > 200 && nestedTooDeep(source)) ||
+    (!extended && source.includes("(?<") && variableLookbehind(source))
+  ) {
     return new RegExp("(?!)", flags);
   }
 
@@ -121,6 +124,183 @@ export function compile(source: string, flags: string, extended = false): RegExp
   } catch {
     return new RegExp("(?!)", flags);
   }
+}
+
+/**
+ * Whether a lookbehind in `source` may match strings of more than one
+ * length, which PCRE 7.3 does not compile: each alternative of the
+ * lookbehind must have a fixed length, and each group within it one
+ * length whichever of its alternatives matches. A quantifier other than
+ * {n}, and a back reference, have no fixed length. JavaScript compiles
+ * them all.
+ */
+function variableLookbehind(source: string): boolean {
+  let i = 0;
+  let refused = false;
+
+  /** The lengths of the alternatives from i to the group's ")", which it steps past; NaN for one with none. */
+  const alternatives = (): number[] => {
+    const lengths: number[] = [];
+    let length = 0;
+    while (i < source.length && source[i] !== ")") {
+      if (source[i] === "|") {
+        lengths.push(length);
+        length = 0;
+        i++;
+        continue;
+      }
+
+      length += quantified(item());
+    }
+
+    lengths.push(length);
+    i++;
+
+    return lengths;
+  };
+
+  /** A group's length, from after its "(": one length, or NaN; a lookaround's is 0. */
+  const group = (): number => {
+    const rest = source.slice(i, i + 3);
+    if (rest.startsWith("?#")) {
+      const end = source.indexOf(")", i);
+      i = end < 0 ? source.length : end + 1;
+      return 0;
+    }
+
+    if (rest.startsWith("?<=") || rest.startsWith("?<!")) {
+      i += 3;
+      if (alternatives().some(Number.isNaN)) {
+        refused = true;
+      }
+
+      return 0;
+    }
+
+    if (rest.startsWith("?=") || rest.startsWith("?!")) {
+      i += 2;
+      alternatives();
+      return 0;
+    }
+
+    if (rest.startsWith("?P=") || /^\?(R|\d)/.test(rest)) {
+      i = source.indexOf(")", i) + 1 || source.length;
+      return Number.NaN;
+    }
+
+    if (source[i] === "?") {
+      // ?: ?P<name> or flags, and flags alone, as (?i), are no group.
+      const kind = /^\?(?:P<\w*>|[imsxX-]*)/.exec(source.slice(i))?.[0] ?? "?";
+      i += kind.length;
+      if (source[i] === ")") {
+        i++;
+        return 0;
+      }
+
+      if (source[i] === ":") {
+        i++;
+      }
+    }
+
+    const lengths = alternatives();
+    return lengths.every((n) => n === lengths[0]) ? lengths[0] : Number.NaN;
+  };
+
+  /** The length of the item at i, which it steps past. */
+  const item = (): number => {
+    const c = source[i++];
+    if (c === "(") {
+      return group();
+    }
+
+    if (c === "^" || c === "$") {
+      return 0;
+    }
+
+    if (c === "[") {
+      if (source[i] === "^") {
+        i++;
+      }
+
+      // A ] first is a literal.
+      if (source[i] === "]") {
+        i++;
+      }
+
+      while (i < source.length && source[i] !== "]") {
+        i += source[i] === "\\" ? 2 : 1;
+      }
+
+      i++;
+      return 1;
+    }
+
+    if (c !== "\\") {
+      // A character beyond the BMP is one in PCRE's UTF-8 too.
+      if ((source.codePointAt(i - 1) ?? 0) > 0xffff) {
+        i++;
+      }
+
+      return 1;
+    }
+
+    const e = source[i++];
+    if (e >= "1" && e <= "9") {
+      return Number.NaN;
+    }
+
+    if ("bBAZzG".includes(e)) {
+      return 0;
+    }
+
+    if (e === "Q") {
+      const end = source.indexOf("\\E", i);
+      const literal = source.slice(i, end < 0 ? source.length : end);
+      i = end < 0 ? source.length : end + 2;
+      return [...literal].length;
+    }
+
+    if ((e === "x" || e === "p" || e === "P") && source[i] === "{") {
+      i = source.indexOf("}", i) + 1 || source.length;
+    } else if (e === "c" || e === "p" || e === "P") {
+      i++;
+    }
+
+    return 1;
+  };
+
+  /** An item's length repeated by the quantifier at i, if any, which it steps past. */
+  const quantified = (length: number): number => {
+    const c = source[i];
+    let times = 1;
+    if (c === "*" || c === "+" || c === "?") {
+      i++;
+      times = Number.NaN;
+    } else if (c === "{") {
+      const q = /^\{(\d+)(,(\d*))?\}/.exec(source.slice(i));
+      if (!q) {
+        return length;
+      }
+
+      i += q[0].length;
+      times = q[2] === undefined || q[3] === q[1] ? Number(q[1]) : Number.NaN;
+    } else {
+      return length;
+    }
+
+    // Lazy or possessive.
+    if (source[i] === "?" || source[i] === "+") {
+      i++;
+    }
+
+    return length * times;
+  };
+
+  while (i < source.length && !refused) {
+    alternatives();
+  }
+
+  return refused;
 }
 
 /** What avmplus' PCRE 7.3 has room for in its pre-compile workspace, less its safety margin. */

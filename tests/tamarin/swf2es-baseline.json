@@ -1989,7 +1989,7 @@
   "mops/si8": {"passed":0,"failed":1,"exitCode":1,"error":null},
   "recursion/pcre_could_be_empty_branch": {"passed":1,"failed":0,"exitCode":0,"error":null},
   "recursion/pcre_find_firstassertedchar": {"passed":2,"failed":0,"exitCode":0,"error":null},
-  "recursion/pcre_find_fixedlength": {"passed":13,"failed":7,"exitCode":0,"error":null},
+  "recursion/pcre_find_fixedlength": {"passed":20,"failed":0,"exitCode":0,"error":null},
   "recursion/pcre_is_anchored": {"passed":2,"failed":0,"exitCode":0,"error":null},
   "recursion/pcre_is_startline": {"passed":2,"failed":0,"exitCode":0,"error":null},
   "recursion/xml_functions": {"passed":3,"failed":0,"exitCode":0,"error":null},

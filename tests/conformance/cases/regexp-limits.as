@@ -36,3 +36,49 @@ for (var i:int = 0; i < 1000; i++) {
 }
 
 trace("a".search(new RegExp(flat + "|a")));
+
+// A lookbehind must match strings of one length: each of its alternatives
+// fixed, each group within of one length, no quantifier but {n}, no back
+// reference. PCRE does not compile one that may not.
+function lookbehind(p:String, s:String):void {
+  trace(p, s, s.search(new RegExp(p)));
+}
+
+lookbehind("(?<=a{3,})bla", "aaabla");
+lookbehind("(?<=a?)bla", "bla");
+lookbehind("(?<=a{2})bla", "aabla");
+lookbehind("(?<=a{2,2})bla", "aabla");
+lookbehind("(?<=a{1,2})bla", "aabla");
+lookbehind("(?<=a{3}|b{2})bla", "bbbla");
+lookbehind("(?<=(a{3}|b{2}))bla", "bbbla");
+lookbehind("(?<=(?:a{3}|b{2}))bla", "bbbla");
+lookbehind("(?<=(a|b)c)bla", "acbla");
+lookbehind("(?<=(ab){2})x", "ababx");
+lookbehind("(?<=[abc]\\d.)x", "a1zx");
+lookbehind("(?<=\\bab)x", "abx");
+lookbehind("(?<=^ab)x", "abx");
+lookbehind("(?<=ab$)x", "abx");
+lookbehind("(?<=(a)\\1)x", "aax");
+lookbehind("(?<=a(?=b)b)x", "abx");
+lookbehind("(?<=a(?!c)b)x", "abx");
+lookbehind("(?<=a(?<=a)b)x", "abx");
+lookbehind("(?<=a(?<=a+)b)x", "abx");
+lookbehind("(?<!a?)x", "bx");
+lookbehind("(?<!a|bc)x", "bx");
+lookbehind("(?<!(a|bc))x", "bx");
+lookbehind("(?<=\\x41)x", "Ax");
+lookbehind("(?<=a{0})x", "x");
+lookbehind("(?<=a{2}?)x", "aax");
+lookbehind("(?<=a{,2})x", "a{,2}x");
+lookbehind("(?<=a{x)x", "a{xx");
+lookbehind("(?<=(?i)ab)x", "ABx");
+lookbehind("(?<=(?i:ab)|c)x", "ABx");
+lookbehind("(?<=a|(b|c))x", "cx");
+lookbehind("(?<=a|(b|cd))x", "cdx");
+lookbehind("(?<=.)x", "ax");
+lookbehind("(?<=[^]]a)x", "zax");
+lookbehind("(?<=(?#c)ab)x", "abx");
+lookbehind("(?<=a\\Z)x", "ax");
+lookbehind("(?<=\\na)x", "\nax");
+lookbehind("(?<=(?P<n>a)b)x", "abx");
+lookbehind("(?<=(?P=n))x", "ax");
