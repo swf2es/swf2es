@@ -1068,6 +1068,19 @@ or key, whichever comes first: a browser sends about one a frame, a
 headless one or a fast mouse more, and each picks from the whole list.
 A pointer that crosses a small object between two frames so sends it no
 `mouseOver`. A path's polygon, flattened for hit tests, is kept with it.
+A sprite with a `hitArea` is hit where the area draws, wherever the area
+is on the display list and shown or not, and not by its own drawing; its
+interactive children still pick unless its `mouseChildren` is false, and
+an area off the list hits nothing. Ruffle stores AVM2's `hitArea` and
+picks without it. adl leaves the area's own `mouseEnabled` as it was
+(`sprite-hit-area`), so a shown, enabled area on top takes the pointer
+itself, as Flash's documentation warns; `hitTestPoint` and
+`getObjectsUnderPoint` ignore it. A drag keeps, as it moves and when it
+ends, the topmost object drawn under the pointer outside the dragged
+sprite, which `dropTarget` reads: the shape, not the sprite that takes
+the pointer, as Flash's trace of the corpus's `sprite_dropTarget` names
+the shapes in its sprites, and null over nothing. Neither can be played
+in adl, which the harness gives no pointer, so the unit tests carry them.
 Roll events, wheel, right and middle buttons, and Flash's drag and focus
 rules still need their own cases.
 

@@ -4225,6 +4225,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "sprite-hit-area",
+    swf: (abc) => bare(abc, 1, "SpriteHitArea"),
+    script: "SpriteHitArea",
+    frames: 2,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "crypto-random",
     swf: (abc) => bare(abc, 1, "CryptoRandom"),
     script: "CryptoRandom",
