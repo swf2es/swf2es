@@ -947,7 +947,9 @@ and the player's paths in this document are relative to it:
   (`bitmaps.ts`), batchers kept for new groups (`batchers.ts`), the
   transform table, colour transforms, blend modes, filters and resolves
   on the GPU.
-- `playerglobal/`: the `flash.*` classes, a path per package and class.
+- `playerglobal/`: the `flash.*` classes, a path per package and class,
+  and the AIR classes the player declares itself (`air/`, see
+  [AIR's WebSocket](#airs-websocket)).
 
 `playerglobal/` holds AS3's bindings only, and depends one way: its
 natives and hooks import the rest of the player, and the rest imports
@@ -1432,6 +1434,27 @@ XML invocation and decides what to execute; the player does not evaluate
 script text. Without a host, `available` is false, `objectID` is null,
 and calls and callback registration throw Error #2067 as Flash does in a
 container without a bridge.
+
+### AIR's WebSocket
+
+AIR 51's `air.net.WebSocket` and `flash.events.WebSocketEvent` are
+newer than the oracle's playerglobal, and Adobe's airglobal that has
+them may not be committed. The player declares them itself, in AS3 of its
+own beside their natives (`playerglobal/air/net/WebSocket.as`,
+`playerglobal/flash/events/WebSocketEvent.as`), with AIR's API as adl
+shows it. `tests/player/air-library.ts` compiles them with ASC in the
+oracle's container against builtin and playerglobal into one ABC,
+committed as `playerglobal/air-library.ts`, and a unit test compiles them
+again and compares. ASC keeps no default values for a native method's
+parameters, so `connect` and `close` are AS3 calling private natives.
+Loaded as a builtin, which native methods need, an unmarked URI that
+playerglobal marks, the empty one or `flash.events`, would be VM-internal
+and hidden from the SWF's code (see
+[Parsing, linking and verifying](#parsing-linking-and-verifying)), so the script marks each
+package namespace's URI with API version 0, every version's, through a
+marked copy of its string. A host that plays AIR content passes
+`airLibrary` to `loadLibraries` after playerglobal; Flash Player has no
+such classes, so it is not loaded by default.
 
 ### Screen capabilities
 

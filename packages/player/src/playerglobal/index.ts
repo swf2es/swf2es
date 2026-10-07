@@ -79,6 +79,8 @@ import { timerNatives } from "./flash/utils/Timer.js";
 import { xmlDocumentNatives } from "./flash/xml/XMLDocument.js";
 import { toplevelNatives } from "./toplevel.js";
 
+export { airLibrary } from "./air-library.js";
+
 export function playerNatives(s: Scripting): avm2.Natives {
   return {
     ...accessibilityNatives(s),
