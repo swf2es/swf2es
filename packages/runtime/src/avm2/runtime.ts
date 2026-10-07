@@ -11,6 +11,7 @@
 // Layouts come from the module, computed by the compiler: the runtime never
 // derives one (docs/architecture.md, "Modules and the bootstrap").
 
+import { newClass, withId } from "./classes.js";
 import type {
   Abc,
   AbcDesc,
@@ -65,7 +66,6 @@ import {
   prefixOf,
   publicNs,
   qname,
-  qualifiedName,
   TypeName,
 } from "./names.js";
 import { convertDoubleToString } from "./numbers.js";
@@ -148,7 +148,8 @@ export class Runtime {
   });
   private readonly unlocated: [Error, Domain][] = [];
   private loadingBuiltin = false;
-  private children = false;
+  /** Whether a domain other than the root exists. */
+  children = false;
   /** Vector.<T>'s references, by T's. */
   private readonly vectorRefs = new Map<TypeRef, VectorRef>();
   /**
@@ -490,7 +491,7 @@ export class Runtime {
       const g = traits.instance();
       const scope = Object.assign([g], { w: 0 });
       for (const [d, factory, id] of script.desc.traits.methods) {
-        traits.proto[methodKey(d)] = this.withId(factory(scope, null), id);
+        traits.proto[methodKey(d)] = withId(factory(scope, null), id);
       }
 
       // Caches keep the methods.
@@ -1811,12 +1812,6 @@ export class Runtime {
     return o;
   }
 
-  /** `f`, a method, with its method id, which a closure of it keeps. */
-  private withId(f: Method, id: number): Method {
-    (f as Method & { $id?: number }).$id = id;
-    return f;
-  }
-
   /** A function's prototype, made when first asked for; undefined once a script has cleared it. */
   functionPrototype(f: AsObject): AsObject | undefined {
     if (!f.$prototype && !f.$noPrototype) {
@@ -1862,167 +1857,14 @@ export class Runtime {
 
   /**
    * As OP_newclass: a class from its module's descriptor, extending `base`,
-   * its methods bound to the scope chain here. Object, Class and Function
-   * use the traits the runtime made for them before they existed.
+   * its methods bound to the scope chain here (see newClass in classes.ts).
    */
   newClass(desc: ClassDesc, base: AsObject | null, scope: Scope): AsObject {
-    const error = desc.instance.error ?? desc.static.error;
-    if (error) {
-      throw this.error("VerifyError", error);
-    }
-
-    const abc = desc.abc as Abc;
-    const name = abc.names[desc.name] as Multiname;
-    const qualified = qualifiedName(name);
-    // As MethodEnv::newclass: a class with a base needs one (#1009), and
-    // one whose traits are the base's it linked to, which avmplus finds as
-    // a type (#1108). Compared by definition, as avmplus compares traits: a
-    // class made twice is one class. Where the base is the class its name
-    // finds by name, but not the one it finds as a type, as for a child's
-    // class it found by name after its parent defined the name too,
-    // avmshell rejects the class sooner, as corrupt (#1107). Only a class
-    // that exists is compared: the check runs no script.
-    if (desc.base && (base === null || base === undefined)) {
-      throw this.error("TypeError", 1009);
-    }
-
-    if (this.children && base) {
-      const baseName = abc.names[desc.base] as Multiname;
-      const script = this.findScript(baseName, true);
-      const expected = script?.global ? this.getProperty(script.global, baseName) : undefined;
-      if (expected?.$it && expected.$desc !== base.$desc) {
-        const byName = this.findScript(baseName);
-        const named = byName?.global ? this.getProperty(byName.global, baseName) : undefined;
-        throw this.error("VerifyError", named === base ? 1107 : 1108);
-      }
-    }
-
-    const baseTraits: Traits | null = base ? base.$it : null;
-    let itraits: Traits;
-    if (qualified === "Object") {
-      itraits = this.objectTraits;
-    } else if (qualified === "Class") {
-      itraits = this.classTraits;
-    } else if (qualified === "Function") {
-      itraits = this.functionTraits;
-    } else {
-      itraits = new Traits(qualified, baseTraits);
-    }
-
-    itraits.describe(desc.instance);
-    const hooks = this.classHooks[qualified];
-    itraits.dynamic = !desc.sealed;
-    itraits.final = desc.final;
-    itraits.isInterface = desc.interface;
-    itraits.ctor = desc.ctor ?? null;
-    itraits.metadata = desc.meta ?? null;
-    itraits.refusesNames = !!hooks?.refusesNames;
-    // As ClassClosure::checkForRestrictedInheritance.
-    itraits.restricted = !!hooks?.restricted;
-    itraits.uninstantiable =
-      !!baseTraits &&
-      (baseTraits.uninstantiable || (baseTraits.restricted && baseTraits.abc !== abc));
-    itraits.abc = abc;
-
-    // A class's allocation, bound to the runtime; its subclasses inherit it.
-    const create = hooks?.create;
-    if (create) {
-      itraits.create = (traits) => create(traits, this);
-    }
-
-    if (hooks?.properties) {
-      itraits.properties = hooks.properties;
-    }
-
-    if (hooks?.getIndex) {
-      itraits.getIndex = hooks.getIndex;
-      itraits.setIndex = hooks.setIndex;
-      itraits.hasIndex = hooks.hasIndex;
-      itraits.index = hooks.index;
-    }
-
-    for (const i of desc.interfaces) {
-      const mn = abc.names[i] as Multiname;
-      const iface = this.resolveName(mn);
-      if (iface) {
-        itraits.interfaces.add(iface.$it);
-        for (const t of iface.$it.interfaces) {
-          itraits.interfaces.add(t);
-        }
-      } else {
-        // Its script is the one running, and has not made it yet.
-        if (!itraits.pendingInterfaces) {
-          itraits.pendingInterfaces = [];
-        }
-
-        itraits.pendingInterfaces.push(() => this.resolveName(mn)?.$it ?? null);
-      }
-    }
-
-    // The class object: Class's instance, with its own statics.
-    // Class is dynamic, so its instances are: String.fromCharCode = ... is legal.
-    const straits = new Traits(`${qualified}$`, this.classTraits);
-    straits.dynamic = true;
-    straits.final = true;
-    straits.describe(desc.static);
-    const cls = straits.instance();
-    cls.$it = itraits;
-    cls.$desc = desc;
-    cls.$base = base;
-    itraits.cls = cls;
-    straits.cls = cls;
-
-    // Its prototype object: an Object whose prototype is the base class's.
-    // A class object's own $p comes from Class's instance prototype, which
-    // it inherits: class objects made before Class see it once Class exists.
-    // Date's, RegExp's and Array's are instances of their own class, as avmplus has them.
-    const prototype = hooks?.prototype ? hooks.prototype(this, cls) : this.objectTraits.instance();
-    prototype.$p = base ? base.$prototype : null;
-    cls.$prototype = prototype;
-    itraits.proto.$p = prototype;
-    prototype.$d.set("constructor", cls);
-    prototype.$dontEnum = new Set(["constructor"]);
-
-    const iscope = this.scope(scope, [cls], 0);
-    for (const [d, factory, id] of desc.static.methods) {
-      straits.proto[methodKey(d)] = this.withId(factory(scope, base), id);
-    }
-
-    for (const [d, factory, id] of desc.instance.methods) {
-      itraits.proto[methodKey(d)] = this.withId(factory(iscope, base), id);
-    }
-
-    // Playerglobal can declare an accessor whose setter has no ABC body.
-    // Install it here so both direct bound calls and dynamic property writes reach it.
-    if (hooks?.setOnlySlots) {
-      for (const [name, slot] of Object.entries(hooks.setOnlySlots)) {
-        const binding = itraits.find(this.publicName(name));
-        if ((binding & 7) === BIND_Set) {
-          itraits.proto[methodKey((binding >> 3) + 1)] ??= function (this: AsObject, value: Value) {
-            this[slot] = value;
-          };
-        }
-      }
-    }
-
-    // Caches keep the methods and what the hooks decide.
-    invalidate();
-    itraits.proto.$init = desc.init(iscope, base);
-    // Its static initializer may name the class as a type, as avmplus
-    // resolves from traits, before initproperty has stored it anywhere.
-    this.defining.set(qualified, cls);
-    try {
-      desc.cinit(scope, base).call(cls);
-    } finally {
-      this.defining.delete(qualified);
-    }
-
-    hooks?.created?.(this, cls);
-    return cls;
+    return newClass(this, desc, base, scope);
   }
 
   /** The classes whose static initializers are running, by qualified name. */
-  private readonly defining = new Map<string, AsObject>();
+  readonly defining = new Map<string, AsObject>();
 
   applyType(factory: AsObject, params: Value[]): AsObject {
     const hook = this.classHooks[factory.$it.name]?.apply;
