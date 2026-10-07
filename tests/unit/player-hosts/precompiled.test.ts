@@ -311,3 +311,19 @@ ${decoder}
   assert.equal(imported.compiled, 1);
   assert.deepEqual(imported.lines, expected.lines);
 });
+
+test("precompiled modules are read by URLs of their keys", { skip }, async () => {
+  const { dir, manifest } = compiled();
+  const entry = JSON.parse(readFileSync(`${dir}manifest.json`, "utf8")).abcs[0];
+  const asked: string[] = [];
+  const cache = precompiledModules(manifest, {
+    read: (url) => {
+      asked.push(url.href);
+      return readText(url);
+    },
+    importModules: true,
+  });
+  const got = await cache.get(entry.key);
+  assert.equal(got?.url, `${pathToFileURL(dir + entry.module).href}?${entry.key}`);
+  assert.ok(asked.includes(`${pathToFileURL(dir + entry.log).href}?${entry.key}`));
+});

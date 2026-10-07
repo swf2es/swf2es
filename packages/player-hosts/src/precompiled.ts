@@ -84,7 +84,15 @@ export function precompiledModules(
         return undefined;
       }
 
-      const { module, log, lengths } = found;
+      // Each file by a URL of its key: a module or log of another build,
+      // which an HTTP cache may hold under the same name, is never this
+      // key's, and an imported module's length is not checked.
+      const { lengths } = found;
+      const [module, log] = [found.module, found.log].map((url) => {
+        const keyed = new URL(url);
+        keyed.search = key;
+        return keyed;
+      });
       if (options.importModules) {
         return { module: "", log: await read(log), lengths, url: module.href };
       }

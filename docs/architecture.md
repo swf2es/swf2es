@@ -1945,7 +1945,11 @@ another compiler's (keys name its identity), a SWF in another context
 or after other libraries, a manifest of another version or none, is a
 miss, and the player compiles; and what the player does with a bad entry
 of any cache holds for these, a missing or truncated file a miss, a
-module that fails to load compiled in its place. `chainCaches(aot,
+module that fails to load compiled in its place. Each file is read by a
+URL of its key (`abc-0.js?<key>`), so that an HTTP cache never pairs a
+manifest with another build's module or log of the same name, which
+matters most for an imported module, whose length is not checked.
+`chainCaches(aot,
 indexedDb)` asks its caches in order, the first that holds a module
 answering, gives a compiled module and a deletion to each, and passes
 over one that fails: the modules compiled ahead of time first, then those
