@@ -35,6 +35,23 @@ export const GLOBAL_MEMORY_MIN_SIZE = 1024;
 const kAMF0 = 0;
 const kAMF3 = 3;
 
+/** A count of bytes, which a ByteArray and its runtime share. */
+interface Count {
+  bytes: number;
+}
+
+/** The capacity of each runtime's ByteArrays, live or not yet collected. */
+const runtimeCapacity = new WeakMap<Runtime, Count>();
+/** A ByteArray collected: its capacity no longer counted, by its runtime's count and its own. */
+const collected = new FinalizationRegistry<{ runtime: Count; own: Count }>(({ runtime, own }) => {
+  runtime.bytes -= own.bytes;
+});
+
+/** The capacity of `rt`'s ByteArrays, which avmshell's System counts in its memory. */
+export function byteArrayCapacity(rt: Runtime): number {
+  return runtimeCapacity.get(rt)?.bytes ?? 0;
+}
+
 /**
  * A ByteArray's state: its buffer, as long as its capacity, and its length
  * and position. A read or write takes its offset first: growing replaces
@@ -50,12 +67,31 @@ export class Bytes {
   objectEncoding: number;
   /** Whether it is the domain memory, which it then tells when its buffer or length changes. */
   subscribed = false;
+  /** Its runtime's capacity count, and its own part of it. */
+  private readonly capacity: { runtime: Count; own: Count };
 
   constructor(
     readonly rt: Runtime,
     readonly owner: AsObject,
   ) {
     this.objectEncoding = rt.defaultObjectEncoding;
+    let runtime = runtimeCapacity.get(rt);
+    if (!runtime) {
+      runtime = { bytes: 0 };
+      runtimeCapacity.set(rt, runtime);
+    }
+
+    this.capacity = { runtime, own: { bytes: 0 } };
+    collected.register(this, this.capacity);
+  }
+
+  /** Its buffer replaced by `next`, its runtime's capacity count with it. */
+  setBuffer(next: Uint8Array<ArrayBuffer>): void {
+    const { runtime, own } = this.capacity;
+    runtime.bytes += next.length - own.bytes;
+    own.bytes = next.length;
+    this.buffer = next;
+    this.view = new DataView(next.buffer);
   }
 
   get available(): number {
@@ -91,8 +127,7 @@ export class Bytes {
     }
 
     next.set(this.buffer.subarray(0, Math.min(capacity, this.length)));
-    this.buffer = next;
-    this.view = new DataView(next.buffer);
+    this.setBuffer(next);
   }
 
   /** As Grower::EnsureWritableCapacity: double, at least `minimum`, and 4096 unless the setter sizes an empty one. */
@@ -149,8 +184,7 @@ export class Bytes {
       throw this.rt.error("RangeError", 1506);
     }
 
-    this.buffer = new Uint8Array(0);
-    this.view = new DataView(this.buffer.buffer);
+    this.setBuffer(new Uint8Array(0));
     this.length = 0;
     this.position = 0;
   }
@@ -481,8 +515,7 @@ function algorithmOf(rt: Runtime, algorithm: Value): "zlib" | "deflate" | "lzma"
 
 /** A ByteArray's bytes, all of them, replaced by a copy of `bytes`, its position `position`; the domain memory told, if it is. */
 function replaceBytes(b: Bytes, bytes: Uint8Array, position: number): void {
-  b.buffer = new Uint8Array(bytes);
-  b.view = new DataView(b.buffer.buffer);
+  b.setBuffer(new Uint8Array(bytes));
   b.length = bytes.length;
   b.position = position;
   b.notify();

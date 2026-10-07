@@ -9,7 +9,14 @@ import {
   setStaticVar,
   type Value,
 } from "../runtime.js";
-import { bytesOf, fromUtf8, GLOBAL_MEMORY_MIN_SIZE, setDomainMemory, utf8 } from "./bytearray.js";
+import {
+  byteArrayCapacity,
+  bytesOf,
+  fromUtf8,
+  GLOBAL_MEMORY_MIN_SIZE,
+  setDomainMemory,
+  utf8,
+} from "./bytearray.js";
 import { elements, type Natives, registerNativeClass } from "./define.js";
 
 const started = Date.now();
@@ -69,6 +76,11 @@ function decodeText(bytes: Uint8Array): string {
 
   return fromUtf8(bytes);
 }
+
+/** System.totalMemory, freeMemory and privateMemory as the oracle's avmshell starts with them. */
+const START_TOTAL_MEMORY = 1347584;
+const START_FREE_MEMORY = 753664;
+const START_PRIVATE_MEMORY = 6557696;
 
 /** avmshell's System, File and Domain natives, for `rt`, and its Worker's. */
 export function shellNatives(rt: Runtime): Natives {
@@ -140,6 +152,15 @@ export function shellNatives(rt: Runtime): Natives {
 
     static exit(): void {}
 
+    // There is no shell to run a command in: system()'s -1, of no process made.
+    static exec(command: Value): number {
+      if (command === null || command === undefined) {
+        throw rt.error("ArgumentError", 1507, "command");
+      }
+
+      return -1;
+    }
+
     // A number's one representation: avmplus' makes a double that is an int one.
     static canonicalizeNumber(a: Value): Value {
       return a;
@@ -161,6 +182,20 @@ export function shellNatives(rt: Runtime): Natives {
     static queueCollection(): void {}
 
     static pauseForGCIfCollectionImminent(_imminence: Value): void {}
+
+    // The oracle's avmshell's memory when it starts, which JavaScript does
+    // not tell, and as in avmshell, the ByteArrays' capacity.
+    static get totalMemory(): number {
+      return START_TOTAL_MEMORY + byteArrayCapacity(rt);
+    }
+
+    static get freeMemory(): number {
+      return START_FREE_MEMORY;
+    }
+
+    static get privateMemory(): number {
+      return START_PRIVATE_MEMORY + byteArrayCapacity(rt);
+    }
   }
 
   // The files are the runtime's (RuntimeOptions.files), in avmshell's
