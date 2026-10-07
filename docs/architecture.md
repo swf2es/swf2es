@@ -1613,6 +1613,12 @@ an embedding page must provide one through its own permitted bridge.
 relay whose URL the embedder chooses. They live outside `player` so its
 browser entrypoint has no Node I/O dependency. WebSocket message boundaries
 are only transport chunks; ActionScript reads the resulting byte stream.
+AIR's `localAddress`, `localPort`, `remoteAddress` and `remotePort` read as
+adl's do: null and 0 before a connection and after `close()`, "" and 0
+while one opens and after it fails, and once open the ends the host gives
+with its open report, kept after the peer closes. The Node host gives its
+socket's; a WebSocket relay's are not the script's, so they stay "" and 0,
+what Flash reads while it does not know them.
 
 The Flash cases use `loadBytes`, the inner SWF carried in the outer's
 script as base64; the oracle runs under AIR, which refuses code from
