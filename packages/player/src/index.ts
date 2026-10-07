@@ -14,9 +14,11 @@ export {
 export { type Path, type ShapeLayer, shapeLayers } from "./display/shapes.js";
 export { type Character, type Library, readLibrary, type Timeline } from "./display/timeline.js";
 export type {
+  CachedModule,
   Drawer,
   FetchRequest,
   FetchResult,
+  ModuleCache,
   Navigate,
   PlatformCapabilities,
   ScreenCapabilities,

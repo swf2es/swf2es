@@ -34,7 +34,7 @@ export const mn = (name: string) => STRINGS.indexOf(name);
 // 3 the namespace of interface I's members. Multinames 1..: public::Object
 // and on for STRINGS; then {public, A}::A; A::A; I::m. String k of STRINGS
 // is pool string k + 1. Ints 1: 3, 2: -1; doubles 1: 1.5.
-const pool = {
+export const pool = {
   strings: STRINGS,
   ints: [3, -1],
   doubles: [1.5],

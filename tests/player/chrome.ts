@@ -483,10 +483,39 @@ export function benchPlayer(
   );
 }
 
+/** What page.ts's moduleCacheSwf found of the IndexedDB module cache. */
+export interface CacheCheck {
+  loads: { trace: string[]; compiled: number; error: string | null }[];
+  kept: string[];
+  oversized: boolean;
+  reopened: boolean;
+  deleted: boolean;
+  afterVersionChange: boolean;
+  retried: boolean;
+}
+
+/** Check the IndexedDB module cache in Chrome with `swf` (see page.ts's moduleCacheSwf). */
+export function checkModuleCache(swf: Uint8Array): Promise<CacheCheck> {
+  return withPage("moduleCacheSwf", async (evaluate) => {
+    const { value, exception } = await evaluate<CacheCheck>(
+      `moduleCacheSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))})`,
+    );
+    if (!value) {
+      throw new Error(exception ?? "no answer");
+    }
+
+    return value;
+  });
+}
+
 /** A page for leak.ts: a SWF opened and played in steps, a job run whole, and the heap measured between. */
 export interface SteppedPage {
-  /** Start a SWF at `url` on the page, letting go of any opened before; what stopped it, if anything. */
-  open(swf: Uint8Array, url: string): Promise<string | null>;
+  /**
+   * Start a SWF at `url` on the page, letting go of any opened before;
+   * what stopped it, if anything. `cached` gives its player the page's
+   * IndexedDB module cache, which every such player shares.
+   */
+  open(swf: Uint8Array, url: string, cached?: boolean): Promise<string | null>;
   /** Play the opened SWF until it has traced `lines` lines or played `frames` frames. */
   step(
     lines: number,
@@ -521,7 +550,8 @@ export function withSteppedPage<T>(
       };
       const base64 = (swf: Uint8Array) => JSON.stringify(Buffer.from(swf).toString("base64"));
       return run({
-        open: (swf, url) => answer(`openSwf(${base64(swf)}, ${JSON.stringify(url)})`),
+        open: (swf, url, cached = false) =>
+          answer(`openSwf(${base64(swf)}, ${JSON.stringify(url)}, ${cached})`),
         step: (lines, frames) => answer(`stepSwf(${lines}, ${frames})`),
         trace: () => answer("traceSwf()"),
         close: async () => {

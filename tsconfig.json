@@ -14,6 +14,11 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["tests/**/*.ts", "oracle/*.ts", "packages/codegen/src/webassembly.d.ts"],
+  "include": [
+    "tests/**/*.ts",
+    "oracle/*.ts",
+    "packages/codegen/src/webassembly.d.ts",
+    "packages/codegen/stamp.ts"
+  ],
   "exclude": ["tests/programs/as3pb", "tests/player/page.ts"]
 }
