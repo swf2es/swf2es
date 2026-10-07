@@ -2902,35 +2902,63 @@ const BUILTIN_REFS = new Set(["int", "uint", "Number", "String", "Boolean", "Obj
 /** Not a property: distinct from undefined, which a property can hold. */
 export const NOT_FOUND = Symbol("not found");
 
-/** As avmplus' String to Number: JavaScript's, without its binary and octal prefixes. */
+/**
+ * As avmplus' String to Number: JavaScript's, without its binary and octal
+ * prefixes. JavaScript skips the whitespace trim() does, so a number it
+ * reads is avmplus' unless it came from such a prefix; only that, or one it
+ * cannot read, needs avmplus' own rules.
+ */
 export function stringToNumber(s: string): number {
-  const t = s.trim();
-  if (/^[-+]?0[bBoO]/.test(t)) {
-    return Number.NaN;
+  const n = Number(s);
+  if (!Number.isNaN(n)) {
+    return binaryOrOctal(s) ? Number.NaN : n;
   }
 
+  return unreadNumber(s);
+}
+
+/** Whether `s`, which JavaScript read as a number, starts with a binary or octal prefix. */
+function binaryOrOctal(s: string): boolean {
+  let i = 0;
+  while (i < s.length) {
+    const c = s.charCodeAt(i);
+    if (c !== 0x20 && (c < 0x09 || c > 0x0d)) {
+      break;
+    }
+
+    i++;
+  }
+
+  // Whitespace past ASCII is rare: trimStart knows all of it.
+  if (s.charCodeAt(i) > 0x7f) {
+    return /^0[bBoO]/.test(s.trimStart());
+  }
+
+  const next = s.charCodeAt(i + 1) | 0x20;
+  return s.charCodeAt(i) === 0x30 && (next === 0x62 || next === 0x6f);
+}
+
+/**
+ * A string JavaScript reads as NaN, as avmplus reads it: a sign before a hex
+ * number, a NUL that ends the number, an exponent with no digits; anything
+ * else, a binary or octal prefix among it, is NaN.
+ */
+function unreadNumber(s: string): number {
+  const t = s.trim();
   if (/^[-+]0[xX]/.test(t)) {
     const n = Number(t.slice(1));
     return t[0] === "-" ? -n : n;
   }
 
-  const n = Number(t);
-  // As avmplus, a NUL ends the number, and one before any is none: a NUL
-  // makes JavaScript's NaN, so it is looked for only then.
-  if (Number.isNaN(n)) {
-    const nul = s.indexOf("\0");
-    if (nul > 0 && s.slice(0, nul).trim() !== "") {
-      return stringToNumber(s.slice(0, nul));
-    }
-
-    // An exponent with no digits, as "4e" or "4e+", is left off.
-    const bare = /^([-+]?(?:\d+\.?\d*|\.\d+))[eE]\+?$/.exec(t);
-    if (bare) {
-      return Number(bare[1]);
-    }
+  // As avmplus, a NUL ends the number, and one before any is none.
+  const nul = s.indexOf("\0");
+  if (nul > 0 && s.slice(0, nul).trim() !== "") {
+    return stringToNumber(s.slice(0, nul));
   }
 
-  return n;
+  // "4e" or "4e+": the exponent is left off.
+  const bare = /^([-+]?(?:\d+\.?\d*|\.\d+))[eE]\+?$/.exec(t);
+  return bare ? Number(bare[1]) : Number.NaN;
 }
 
 /**

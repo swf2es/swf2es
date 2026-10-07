@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { convertDoubleToString } from "../../../packages/runtime/dist/avm2/numbers.js";
-import { numberToString } from "../../../packages/runtime/dist/avm2/runtime.js";
+import { numberToString, stringToNumber } from "../../../packages/runtime/dist/avm2/runtime.js";
 
 let seed = 1;
 const random = () => {
@@ -58,6 +58,96 @@ test("numberToString writes every number as avmplus' D2A does", () => {
     const full = convertDoubleToString(n);
     if (fast !== full) {
       assert.fail(`${n}: ${fast} where avmplus writes ${full}`);
+    }
+  }
+});
+
+/** stringToNumber as it was, its rules applied to every string: the reference for the faster one. */
+function readAsBefore(s: string): number {
+  const t = s.trim();
+  if (/^[-+]?0[bBoO]/.test(t)) {
+    return Number.NaN;
+  }
+
+  if (/^[-+]0[xX]/.test(t)) {
+    const n = Number(t.slice(1));
+    return t[0] === "-" ? -n : n;
+  }
+
+  const n = Number(t);
+  if (Number.isNaN(n)) {
+    const nul = s.indexOf("\0");
+    if (nul > 0 && s.slice(0, nul).trim() !== "") {
+      return readAsBefore(s.slice(0, nul));
+    }
+
+    const bare = /^([-+]?(?:\d+\.?\d*|\.\d+))[eE]\+?$/.exec(t);
+    if (bare) {
+      return Number(bare[1]);
+    }
+  }
+
+  return n;
+}
+
+test("stringToNumber reads every string as avmplus' rules do", () => {
+  const spaces = ["", " ", "\t", "\n", "\r\n", "\v", "\f", " ", "﻿", " ", "　", "​"];
+  const bodies = [
+    "0",
+    "42",
+    "-7",
+    "+3.5",
+    ".5",
+    "5.",
+    "1e3",
+    "1E-3",
+    "4e",
+    "4e+",
+    "-4e",
+    "1e",
+    "e5",
+    "0x1F",
+    "0X1f",
+    "-0x1F",
+    "+0x10",
+    "0b101",
+    "0B1",
+    "-0b1",
+    "0o17",
+    "0O7",
+    "+0o7",
+    "00b1",
+    "0xg",
+    "Infinity",
+    "-Infinity",
+    "infinity",
+    "NaN",
+    "1,000",
+    "12abc",
+    "abc",
+    "",
+    "-",
+    "+",
+    ".",
+    "0.0.1",
+    "1_000",
+    "١",
+    "١٢",
+    "9007199254740993",
+    "1e400",
+    "-0",
+  ];
+  const nuls = ["", "\0", "\0x", "x\0"];
+  const pick = <T>(a: T[]) => a[Math.floor(random() * a.length)];
+  for (let i = 0; i < 200_000; i++) {
+    const body = pick(bodies);
+    const at = Math.floor(random() * (body.length + 1));
+    const nul = i % 7 === 0 ? pick(nuls) : "";
+    const s = pick(spaces) + body.slice(0, at) + nul + body.slice(at) + pick(spaces);
+    const fast = stringToNumber(s);
+    const before = readAsBefore(s);
+    if (!Object.is(fast, before)) {
+      assert.fail(`${JSON.stringify(s)}: ${fast} where the rules give ${before}`);
     }
   }
 });
