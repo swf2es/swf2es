@@ -2,6 +2,7 @@
 // domain its SWF loads into, compiled into a module once all of its SWF's
 // are added, evaluated and linked into the runtime; and, by the module a
 // stack frame is of, the domain, URL and SWF of the code that runs.
+import { libraryLog, moduleKey } from "@swf2es/codegen";
 import { readDoAbc, type Swf, tags } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { decodeImages } from "../bitmap/images.js";
@@ -12,9 +13,6 @@ import { sha256 } from "./sha256.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
-
-/** The API version of the SWFs' ABCs, Flash Player's, that the compiler's domain starts with. */
-export const API_VERSION = 50;
 
 export class Code {
   /** Each ABC's hash, by its index in the compiler; "" once its domain is dropped. */
@@ -461,38 +459,26 @@ export class Code {
       return;
     }
 
-    const context = this.s.codegen.context(index, 0, count);
-    const digest = await sha256Text(context?.log ?? "");
+    const digest = await sha256Text(libraryLog(this.s.codegen, index, count));
     this.libraryLog = { epoch, digest };
   }
 
   /**
-   * What ABC `index`'s module depends on, as the cache keys it: the
-   * compiler's identity, the API version, every ABC its domain sees, by
-   * hash and whether it is a library, those added after it included, its
-   * own place among them, and the compiler's log about them, the lazy
-   * answers fixed so far and the findings recorded, in order (see
-   * Codegen.context), the libraries' part by its digest once taken. Null
-   * where there is none.
+   * ABC `index`'s key, as codegen's moduleKey writes it (the swf2es command
+   * keys its modules alike), the libraries' part by its digest once this
+   * compiler's epoch has one. Null where there is none.
    */
   private moduleKey(index: number): string | null {
     const libraries =
       this.libraryCount !== null && this.libraryLog?.epoch === this.s.codegen.epoch
         ? { count: this.libraryCount, digest: this.libraryLog.digest }
         : null;
-    const context = this.s.codegen.context(index, libraries?.count ?? 0);
-    if (!context) {
-      return null;
-    }
-
-    return JSON.stringify({
-      compiler: this.s.codegen.identity,
-      api: API_VERSION,
-      abcs: context.abcs.map((i) => `${this.builtins[i] ? "builtin " : ""}${this.hashes[i]}`),
-      own: context.own,
+    return moduleKey(
+      this.s.codegen,
+      index,
+      { hashes: this.hashes, builtins: this.builtins },
       libraries,
-      log: context.log,
-    });
+    );
   }
 
   /** An ApplicationDomain object for the runtime's `domain`: a new one at each ask, as Flash's, without running its constructor. */
