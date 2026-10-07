@@ -188,9 +188,16 @@ export interface Codegen {
    * What ABC `index`'s module depends on beyond the ABCs' bytes, for a
    * cache key: besides the ABCs its domain sees, what the domain has
    * fixed of what resolves lazily, which a later ABC in an ancestor would
-   * change were it first asked now. Null for an ABC never added.
+   * change were it first asked now. Its log only of the entries made with
+   * more than `after` ABCs added, and `upTo` at most unless negative. Null
+   * for an ABC never added.
    */
-  context(index?: number): ModuleContext | null;
+  context(index?: number, after?: number, upTo?: number): ModuleContext | null;
+  /**
+   * A string that changes whenever a context might: a host that took one
+   * and finds this the same since need not take it again.
+   */
+  revision(): string;
   /** compileModule, with what the compile fixed in the domain (see replay). */
   compileModuleLogged(hashes?: string[], index?: number): LoggedModule;
   /**
@@ -383,22 +390,27 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       last("compileModule");
       return moduleOf(hashes, index, false);
     },
-    context(index = -1) {
+    context(index = -1, after = 0, upTo = -1) {
       if (added === 0) {
         return null;
       }
 
-      const text = collected(wasm.domainContext(indexOf(index)));
+      const text = collected(wasm.domainContext(indexOf(index), after, upTo));
       if (text === "") {
         return null;
       }
 
-      const [abcs, own, ...log] = text.split("\n");
+      const first = text.indexOf("\n");
+      const second = text.indexOf("\n", first + 1);
+      const abcs = text.slice(0, first);
       return {
         abcs: abcs ? abcs.split(",").map(Number) : [],
-        own: Number(own),
-        log: log.join("\n"),
+        own: Number(text.slice(first + 1, second < 0 ? text.length : second)),
+        log: second < 0 ? "" : text.slice(second + 1),
       };
+    },
+    revision() {
+      return `${epoch} ${wasm.domainRevision()}`;
     },
     compileModuleLogged(hashes = [], index = -1) {
       last("compileModuleLogged");

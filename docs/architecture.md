@@ -24,7 +24,7 @@ took, see Linking), and the last
 one added compiles with `compile`, whole,
 to its module, source map and the entry of each method, with
 `compileModule` to its module alone, or with `compileMethods`, a method at
-a time as the JIT compiles each on its first call; `context`,
+a time as the JIT compiles each on its first call; `context`, `revision`,
 `compileModuleLogged` and `replay` serve a cache of modules (see Caching
 modules). The source map and the
 entries are written each in a call of its own, after the module's garbage

@@ -40,6 +40,7 @@ export {
   domainReplay,
   domainReset,
   domainRestore,
+  domainRevision,
   domainRevive,
   domainSourceMap,
   domainState,

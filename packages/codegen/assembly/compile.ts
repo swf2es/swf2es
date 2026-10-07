@@ -418,9 +418,12 @@ export function domainModuleEntries(): string {
  * answers of what resolves lazily, which see the ABCs there are when they
  * are first asked for, and what the domain and its ancestors were told
  * they found. ABCs are named by their place in the first line, so that
- * the same ABCs loaded at other indices give the same context.
+ * the same ABCs loaded at other indices give the same context. Only the
+ * entries made with more than `after` ABCs added, and with `upTo` at most
+ * where it is not negative: the entries made while the first ABCs were
+ * all there were, the libraries', a host keys once for every module.
  */
-export function domainContext(index: i32 = -1): string {
+export function domainContext(index: i32 = -1, after: i32 = 0, upTo: i32 = -1): string {
   const at = abcIndex(index);
   if (at < 0) {
     return "";
@@ -447,6 +450,11 @@ export function domainContext(index: i32 = -1): string {
     // Visible ABCs added before the entry happened.
     while (count < <u32>seen.length && seen[count] < domain.logAt[e]) {
       count++;
+    }
+
+    const made = <i64>domain.logAt[e];
+    if (made <= <i64>after || (upTo >= 0 && made > <i64>upTo)) {
+      continue;
     }
 
     const kind = domain.logKind[e];
@@ -505,6 +513,14 @@ function named(out: Output, s: string): void {
       out.unit(c);
     }
   }
+}
+
+/**
+ * What changes whenever domainContext might: how many ABCs there are, how
+ * long the log is, and how many rebuilds the domain is from its reset.
+ */
+export function domainRevision(): string {
+  return `${domain.abcs.length} ${domain.logKind.length} ${domain.generation}`;
 }
 
 /** How long the domain's log is, to tell what a compile adds to it (domainLogSince). */
