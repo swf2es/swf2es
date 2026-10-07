@@ -4224,6 +4224,30 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "line-close",
+    swf: (abc) => bare(abc, 1, "LineClose", 800, 500),
+    script: "LineClose",
+    frames: 1,
+    capture: [1],
+    // The diagonals anti-alias within a pixel of Flash's, as one closed by
+    // its own lineTo does, and where a half-transparent path meets itself
+    // the page darkens it: some 5,700 channels. No closing lines would make
+    // it 26,000.
+    tolerance: 32,
+    maxOutliers: 5800,
+  },
+  {
+    name: "line-close-probes",
+    swf: (abc) => bare(abc, 1, "LineCloseProbes", 800, 300),
+    script: "LineCloseProbes",
+    frames: 1,
+    // Its trace alone: adl fills drawPath's unclosed contours in bands to the
+    // shape's edge, which the page does not draw.
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "line-order",
     swf: (abc) => bare(abc, 1, "LineOrder", 400, 300),
     script: "LineOrder",
