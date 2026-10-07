@@ -149,8 +149,9 @@ export function hitsPoint(
     return r !== null && contains(r, lx, ly);
   }
 
-  // A mask is not drawn, and adl hits nothing of it.
-  if (!underRoot(d) || d.maskOf) {
+  // A mask is not drawn, and adl hits nothing of it. Nor the stage's shape test, though the
+  // stage is a root for what a script puts on it: the one root with no parent.
+  if (!underRoot(d) || d.maskOf || (d.parent === null && d.loaderInfo !== null)) {
     return false;
   }
 

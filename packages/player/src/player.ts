@@ -96,6 +96,9 @@ export class Player {
     info.$url = s.url;
     info.$params = s.mainParameters();
     this.root.loaderInfo = info;
+    // The stage's too: what a script puts on the stage itself has the stage
+    // for its root and this for its LoaderInfo, and takes hits, as in Flash.
+    this.stage.loaderInfo = info;
     // The main SWF's root is root1, as Flash names the root at depth 0.
     this.root.name = "root1";
     // Its first frame's children are there before the document class's constructor runs.
