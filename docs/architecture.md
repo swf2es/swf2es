@@ -504,7 +504,11 @@ child that found its own class keeps it when its parent defines the name
 later. A type, a coercion's or a base class's, is found the same way
 through caches of its own, as avmplus finds traits, so a class a child
 found by name is not the type it finds once its parent defines the name,
-and a class extending it is rejected, as avmplus rejects it. Every name a module makes is looked up in the domain the module was
+and a class extending it is rejected, as avmplus rejects it. What a
+name finds being kept, `Runtime.classNamed`, the player's lookup of a
+class by its qualified name, keeps the class in the domain
+(`Domain.named`) once its script has made it: the player names a class
+for each object and event it makes. Every name a module makes is looked up in the domain the module was
 loaded into (`Runtime.loadInto`); everything else loads into the root. The
 Domain's `loadBytes` compiles its ABC through `RuntimeOptions.compileAbc`,
 which the host gives, as the runtime does not include the compiler, into
