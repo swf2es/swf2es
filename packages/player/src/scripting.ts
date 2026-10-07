@@ -6,17 +6,8 @@
 // hook that takes the display object the player has pending, when the
 // player constructs a timeline child's class, or makes one for a `new`.
 import type { Codegen } from "@swf2es/codegen";
-import {
-  isAs3,
-  readDoAbc,
-  readSwf,
-  readSymbolClass,
-  type Sound,
-  type Swf,
-  tags,
-} from "@swf2es/format";
+import { isAs3, readDoAbc, readSwf, type Swf, tags } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { BitmapStore } from "./bitmap/bitmap.js";
 import { decodeImages, decodeInBrowser, hasUndecoded, type ImageDecode } from "./bitmap/images.js";
 import {
   BitmapObject,
@@ -24,26 +15,16 @@ import {
   buttonStates,
   Container,
   type DisplayObject,
-  displayFor,
-  EMPTY_TIMELINE,
   MovieClip,
   rootOf,
-  ShapeObject,
   scriptChildren,
-  TextObject,
   TRANSFORM,
-  VideoObject,
 } from "./display/display.js";
 import {
-  type AnyFontCharacter,
-  type BitmapCharacter,
   type ButtonCharacter,
-  type Character,
   type DisplayCharacter,
-  INVALID_PIXELS,
   type Library,
   readLibrary,
-  type SoundCharacter,
 } from "./display/timeline.js";
 import {
   browserNavigate,
@@ -60,14 +41,14 @@ import {
   type SocketHost,
 } from "./hosts.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
-import { type AudioHost, browserAudioHost, type DecodedSound } from "./media/audio.js";
+import { type AudioHost, browserAudioHost } from "./media/audio.js";
 import { finishSounds, timelineSoundsOf } from "./media/sounds.js";
 import { playerHooks, playerNatives } from "./playerglobal/index.js";
 import { dispatchEvent, dispatchTo } from "./scripting/events.js";
 import { Lifecycle } from "./scripting/lifecycle.js";
+import { Symbols } from "./scripting/symbols.js";
 import { Timers } from "./scripting/timers.js";
 import { sha256 } from "./sha256.js";
-import { FontSet } from "./text/fonts.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -122,19 +103,6 @@ interface Avm1Load {
   failed: boolean;
 }
 
-/** What SymbolClass bound a class to: a character of a SWF's library. */
-interface Symbol {
-  character: Character;
-  library: Library;
-}
-
-interface SharedAudio {
-  definition: WeakRef<Sound>;
-  decoded: DecodedSound | null;
-  pending: Promise<DecodedSound> | null;
-  serial: number;
-}
-
 export class Scripting {
   readonly rt: avm2.Runtime;
   /**
@@ -184,33 +152,10 @@ export class Scripting {
   readonly navigate: Navigate | null;
   /** Takes what fscommand sends, or nothing does. */
   readonly fsCommand: ((command: string, args: string) => void) | null;
-  private readonly audioEntries = new WeakMap<SoundCharacter, SharedAudio>();
   /** What plays every library's timeline and button sounds. */
   private readonly timelineSounds = timelineSoundsOf(this);
-  private readonly sharedAudio = new Map<number, SharedAudio[]>();
-  private readonly sharedAudioGone = new FinalizationRegistry<{
-    hash: number;
-    entry: SharedAudio;
-    serial: number;
-  }>(({ hash, entry, serial }) => {
-    if (entry.serial !== serial || entry.definition.deref()) {
-      return;
-    }
-
-    this.removeSharedAudio(hash, entry);
-  });
-  /**
-   * The character, and its SWF's library, each class SymbolClass bound
-   * makes, for a `new` of the class from a script: by the module that
-   * defines the class, as the SWF's domain found it, then its name, so a
-   * class of the same name in another domain has its own; null for a name
-   * nothing defined when it was bound.
-   */
-  readonly symbols = new Map<avm2.Abc | null, Map<string, Symbol>>();
-  /** Libraries whose embedded fonts have been made visible to this player. */
-  readonly fontLibraries = new Set<Library>();
-  /** Font classes explicitly registered by scripts, in registration order. */
-  readonly registeredFonts = new Map<AsObject, AnyFontCharacter>();
+  /** What SymbolClass bound classes to, the fonts registered, and the sounds' decodes the libraries share. */
+  readonly symbols = new Symbols(this);
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
   /** AVM1 movies from bytes, in the order asked, for the end of a frame. */
@@ -402,7 +347,7 @@ export class Scripting {
   /** Load the SWF's DoABCs in tag order, each run unless its lazy flag defers it to first use, then its SymbolClass. */
   async loadSwf(swf: Swf, library: Library): Promise<void> {
     this.library = library;
-    this.addFontLibrary(library);
+    this.symbols.addFontLibrary(library);
 
     library.domain = this.mainDomain;
     this.rt.swfVersion = swf.header.version;
@@ -452,32 +397,7 @@ export class Scripting {
 
   /** SymbolClass: bind the SWF's characters to their classes, in its library, and the library to this. */
   private bind(swf: Swf, library: Library): void {
-    const domain = library.domain ?? this.mainDomain;
-    for (const t of swf.tags) {
-      if (t.code === tags.SymbolClass) {
-        for (const [id, name] of readSymbolClass(swf.bytes, t)) {
-          const qualified = qualify(name);
-          library.classes.set(id, qualified);
-          const character = library.characters.get(id);
-          if (character) {
-            const abc = this.rt.definingAbc(qualified, domain);
-            let byName = this.symbols.get(abc);
-            if (!byName) {
-              byName = new Map();
-              this.symbols.set(abc, byName);
-            }
-
-            // A class keeps the symbol first bound to it: another SWF that
-            // binds it, one that finds it in a parent's domain, makes its own
-            // timeline's instances of it but not a script's (the corpus's
-            // loader_duplicate_class).
-            if (!byName.has(qualified)) {
-              byName.set(qualified, { character, library });
-            }
-          }
-        }
-      }
-    }
+    this.symbols.bind(swf, library);
 
     library.construct = (display, character) => this.construct(display, character, library);
     library.uncaught = this.reportUncaught;
@@ -686,191 +606,6 @@ export class Scripting {
     return this.constructAs(display, this.rt.classNamed("flash.display::Bitmap"), data);
   }
 
-  /** The bitmap a class SymbolClass bound is of, if `traits` or a base is one's. */
-  bitmapSymbol(traits: SymbolTraits): BitmapCharacter | null {
-    for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
-      const symbol = this.symbolOf(t);
-      if (symbol) {
-        return symbol.character.type === "bitmap" ? symbol.character : null;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * The bytes of the DefineBinaryData a class SymbolClass bound, if
-   * `traits` or a base is one's: one buffer for all its instances, which
-   * see each other's writes, as Flash's.
-   */
-  binarySymbol(traits: SymbolTraits): Uint8Array<ArrayBuffer> | null {
-    for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
-      const symbol = this.symbolOf(t);
-      if (symbol) {
-        const character = symbol.character;
-        if (character.type !== "binary") {
-          return null;
-        }
-
-        character.shared ??= new Uint8Array(character.data);
-        return character.shared;
-      }
-    }
-
-    return null;
-  }
-
-  /** A DefineSound a class or one of its bases was bound to. */
-  soundSymbol(traits: SymbolTraits): SoundCharacter | null {
-    for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
-      const symbol = this.symbolOf(t);
-      if (symbol) {
-        return symbol.character.type === "sound" ? symbol.character : null;
-      }
-    }
-
-    return null;
-  }
-
-  /** A DefineFont a class or one of its bases was bound to. */
-  fontSymbol(traits: SymbolTraits): AnyFontCharacter | null {
-    for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
-      const symbol = this.symbolOf(t);
-      if (symbol) {
-        return symbol.character.type === "font" || symbol.character.type === "fontCff"
-          ? symbol.character
-          : null;
-      }
-    }
-
-    return null;
-  }
-
-  /** Keep a SWF's own fonts and fonts registered elsewhere available to its fields. */
-  private addFontLibrary(library: Library): void {
-    if (this.fontLibraries.has(library)) {
-      return;
-    }
-
-    this.fontLibraries.add(library);
-    for (const font of this.registeredFonts.values()) {
-      if (font.type === "font") {
-        library.fonts.add(font.font);
-      }
-    }
-  }
-
-  /** Make a registered font available to fields made by every loaded SWF. */
-  registerFont(cls: AsObject, font: AnyFontCharacter): void {
-    if (
-      this.registeredFonts.has(cls) ||
-      [...this.registeredFonts.values()].some(
-        (registered) =>
-          registered.name.toLowerCase() === font.name.toLowerCase() &&
-          registered.type === font.type &&
-          registered.bold === font.bold &&
-          registered.italic === font.italic,
-      )
-    ) {
-      return;
-    }
-
-    this.registeredFonts.set(cls, font);
-    for (const library of this.fontLibraries) {
-      if (font.type === "font") {
-        library.fonts.add(font.font);
-      }
-    }
-  }
-
-  /** Decode a sound on first play; live libraries can share an identical decode. */
-  soundClip(character: SoundCharacter): Promise<DecodedSound> | null {
-    if (!this.audio) {
-      return null;
-    }
-
-    const own = this.audioEntries.get(character);
-    if (own?.pending) {
-      return own.pending;
-    }
-
-    const ownDecoded = own?.decoded;
-    if (ownDecoded) {
-      return Promise.resolve(ownDecoded);
-    }
-
-    const definition = character.definition;
-    const hash = soundHash(definition);
-    for (const entry of this.sharedAudio.get(hash) ?? []) {
-      const prior = entry.definition.deref();
-      if (!prior || !sameSound(prior, definition)) {
-        continue;
-      }
-
-      const decoded = entry.decoded;
-      const clip = entry.pending ?? (decoded ? Promise.resolve(decoded) : null);
-      if (clip) {
-        entry.definition = new WeakRef(definition);
-        this.sharedAudioGone.register(definition, {
-          hash,
-          entry,
-          serial: ++entry.serial,
-        });
-        this.audioEntries.set(character, entry);
-        return clip;
-      }
-    }
-
-    const entry: SharedAudio = {
-      definition: new WeakRef(definition),
-      decoded: null,
-      pending: null,
-      serial: 1,
-    };
-    const audio = this.audio;
-    const clip = Promise.resolve().then(() => audio.decode(definition));
-    entry.pending = clip;
-    const matches = this.sharedAudio.get(hash) ?? [];
-    matches.push(entry);
-    this.sharedAudio.set(hash, matches);
-    this.sharedAudioGone.register(definition, { hash, entry, serial: 1 });
-    void clip.then(
-      (decoded) => {
-        entry.decoded = decoded;
-        entry.pending = null;
-      },
-      () => this.removeSharedAudio(hash, entry),
-    );
-    this.audioEntries.set(character, entry);
-    return clip;
-  }
-
-  private removeSharedAudio(hash: number, entry: SharedAudio): void {
-    const matches = this.sharedAudio.get(hash)?.filter((candidate) => candidate !== entry) ?? [];
-    if (matches.length > 0) {
-      this.sharedAudio.set(hash, matches);
-    } else {
-      this.sharedAudio.delete(hash);
-    }
-  }
-
-  /** What SymbolClass bound the class of `traits` to, if anything: by its defining module, then its name. */
-  private symbolOf(traits: SymbolTraits): Symbol | undefined {
-    const abc = (traits.abc as avm2.Abc | null | undefined) ?? null;
-    return this.symbols.get(abc)?.get(traits.name) ?? this.symbols.get(null)?.get(traits.name);
-  }
-
-  /** A new plain BitmapData of a bitmap's pixels, as a Bitmap of the bitmap gets. */
-  bitmapDataOf(character: BitmapCharacter): AsObject {
-    const data = this.rt.construct(
-      this.rt.classNamed("flash.display::BitmapData"),
-      1,
-      1,
-    ) as AsObject;
-    data.$store = BitmapStore.of(character.pixels ?? INVALID_PIXELS);
-    return data;
-  }
-
   /** Construct `cls` for `display`: the allocation hook takes it as the instance's other face. */
   constructAs(display: DisplayObject, cls: AsObject, ...args: Value[]): AsObject {
     this.pending = display;
@@ -881,17 +616,8 @@ export class Scripting {
     }
   }
 
-  /**
-   * The display object for an instance a script makes with `new`: the
-   * character of a class SymbolClass bound, if the class or a base of it
-   * is one, else an empty clip, shape or container by the nearest base.
-   */
   /** A button's states from its records, each a Sprite of its characters where it has other than one, all constructed. */
-  private makeButtonStates(
-    button: ButtonObject,
-    character: ButtonCharacter,
-    library: Library,
-  ): void {
+  makeButtonStates(button: ButtonObject, character: ButtonCharacter, library: Library): void {
     const sprite = this.rt.classNamed("flash.display::Sprite");
     buttonStates(
       button,
@@ -900,88 +626,6 @@ export class Scripting {
       (display, c) => this.construct(display, c, library),
       (holder) => this.constructAs(holder, sprite),
     );
-  }
-
-  displayFor(traits: SymbolTraits): DisplayObject {
-    const library: Library = this.library ?? {
-      characters: new Map(),
-      root: EMPTY_TIMELINE,
-      classes: new Map(),
-      construct: null,
-      constructLater: null,
-      constructPlaced: null,
-      uncaught: null,
-      removing: null,
-      fonts: new FontSet(),
-    };
-    for (let t: SymbolTraits | null = traits; t; t = t.base as SymbolTraits | null) {
-      // A display object's class bound to data has no display of it.
-      const symbol = this.symbolOf(t);
-      if (
-        symbol &&
-        symbol.character.type !== "binary" &&
-        symbol.character.type !== "font" &&
-        symbol.character.type !== "fontCff" &&
-        symbol.character.type !== "sound"
-      ) {
-        if (symbol.character.type === "text") {
-          // A new linked TextField has its symbol's bounds, but not its timeline's initial text.
-          const text = new TextObject(symbol.character, false);
-          text.fonts = symbol.library.fonts;
-          return text;
-        }
-
-        const display = displayFor(symbol.character, symbol.library);
-        // A bound button a script makes has its states, as a timeline's does.
-        if (display instanceof ButtonObject && symbol.character.type === "button") {
-          this.makeButtonStates(display, symbol.character, symbol.library);
-        }
-
-        return display;
-      }
-
-      if (t.name === "flash.display::SimpleButton") {
-        return new ButtonObject();
-      }
-
-      if (t.name === "flash.display::MovieClip") {
-        return new MovieClip(EMPTY_TIMELINE, library);
-      }
-
-      if (t.name === "flash.display::Shape") {
-        return new ShapeObject(null);
-      }
-
-      // Only a timeline makes a MorphShape or a StaticText.
-      if (t.name === "flash.display::MorphShape") {
-        throw this.rt.error("ArgumentError", 2012, "MorphShape$");
-      }
-
-      if (t.name === "flash.text::StaticText") {
-        throw this.rt.error("ArgumentError", 2012, "StaticText$");
-      }
-
-      // Only a load of an AVM1 SWF makes one (requestLoad).
-      if (t.name === "flash.display::AVM1Movie") {
-        throw this.rt.error("ArgumentError", 2012, "AVM1Movie$");
-      }
-
-      if (t.name === "flash.display::Bitmap") {
-        return new BitmapObject(null);
-      }
-
-      if (t.name === "flash.media::Video") {
-        return new VideoObject();
-      }
-
-      if (t.name === "flash.text::TextField") {
-        const text = new TextObject(null);
-        text.fonts = (this.codeLibrary() ?? library).fonts;
-        return text;
-      }
-    }
-
-    return new Container();
   }
 
   /**
@@ -1690,7 +1334,7 @@ export class Scripting {
     let root: MovieClip;
     if (run) {
       run();
-      this.addFontLibrary(library);
+      this.symbols.addFontLibrary(library);
       root = new MovieClip(library.root, library);
       root.loaderInfo = info;
       root.placeFirstFrame();
@@ -2070,56 +1714,6 @@ export class Scripting {
 /** How deep goto cycles may nest before a goto throws a stack overflow, Error #1023. */
 const MAX_GOTO_CYCLES = 256;
 
-/** Compare the bytes too: a 32-bit hash only narrows a bucket, never decides identity. */
-function sameSound(a: Sound, b: Sound): boolean {
-  if (
-    a.format !== b.format ||
-    a.sampleRate !== b.sampleRate ||
-    a.sampleSize !== b.sampleSize ||
-    a.channels !== b.channels ||
-    a.sampleCount !== b.sampleCount ||
-    a.seekSamples !== b.seekSamples ||
-    a.data.length !== b.data.length
-  ) {
-    return false;
-  }
-
-  for (let i = 0; i < a.data.length; i++) {
-    if (a.data[i] !== b.data[i]) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function soundHash(sound: Sound): number {
-  let hash = 0x811c9dc5;
-  for (const value of [
-    sound.format,
-    sound.sampleRate,
-    sound.sampleSize,
-    sound.channels,
-    sound.sampleCount,
-    sound.seekSamples,
-  ]) {
-    hash = Math.imul(hash ^ value, 0x01000193);
-  }
-
-  for (const byte of sound.data) {
-    hash = Math.imul(hash ^ byte, 0x01000193);
-  }
-
-  return hash >>> 0;
-}
-
-/** A class's traits as the symbol lookups read them: its name, its module, its base's. */
-interface SymbolTraits {
-  name: string;
-  abc?: unknown;
-  base: unknown;
-}
-
 const NO_PARAMETERS: ReadonlyMap<string, string> = new Map();
 
 /**
@@ -2172,12 +1766,6 @@ function resolve(base: string, url: string): string {
   }
 
   return base.slice(0, base.lastIndexOf("/") + 1) + url;
-}
-
-/** "pkg.Name", as SymbolClass writes a class, as "pkg::Name". */
-function qualify(name: string): string {
-  const i = name.lastIndexOf(".");
-  return i < 0 ? name : `${name.slice(0, i)}::${name.slice(i + 1)}`;
 }
 
 /** Whether `cls` is the class named `name` or extends it. */

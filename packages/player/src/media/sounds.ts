@@ -215,7 +215,7 @@ function playTimelineSound(
   shape: PlayShape,
   duration: number,
 ): TimelineSound | null {
-  const task = s.soundClip(character);
+  const task = s.symbols.soundClip(character);
   if (!task || liveSounds(s) >= MAX_SOUNDS) {
     return null;
   }

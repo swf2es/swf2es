@@ -116,7 +116,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
   };
   const startAudio = (state: ChannelState): void => {
     const sound = state.sound;
-    const task = sound.character ? s.soundClip(sound.character) : sound.clip;
+    const task = sound.character ? s.symbols.soundClip(sound.character) : sound.clip;
     void task
       ?.then(
         (clip) => {
@@ -372,7 +372,7 @@ export function soundHooks(s: Scripting): Record<string, avm2.ClassHook> {
     "flash.media::Sound": {
       create: (traits) => {
         const o = Object.create(traits.proto);
-        const character = s.soundSymbol(traits);
+        const character = s.symbols.soundSymbol(traits);
         const data = character?.definition;
         o.$sound = {
           character,

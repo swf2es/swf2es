@@ -12,7 +12,7 @@ export function byteArrayHooks(s: Scripting): Record<string, avm2.ClassHook> {
       ...avm2.byteArrayHook,
       create: (traits, rt) => {
         const o = avm2.byteArrayHook.create(traits, rt);
-        const data = s.binarySymbol(traits);
+        const data = s.symbols.binarySymbol(traits);
         if (data) {
           const b = avm2.bytesOf(rt, o);
           b.buffer = data;

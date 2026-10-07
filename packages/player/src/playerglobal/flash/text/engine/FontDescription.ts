@@ -85,7 +85,7 @@ export function fontDescriptionNatives(s: Scripting): avm2.Natives {
     if (!device) {
       const fonts = [
         ...(s.codeLibrary()?.characters.values() ?? []),
-        ...s.registeredFonts.values(),
+        ...s.symbols.registeredFonts.values(),
       ];
       return fonts.some(
         (font) =>
