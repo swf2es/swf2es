@@ -5,8 +5,8 @@ JavaScript. It has one compiler, which runs at two different times:
 
 - **JIT**: the browser player runs `@swf2es/codegen` when a SWF loads. Each
   method is compiled on its first call, in a worker pool, off the main thread.
-- **AOT**: node (or a server) runs the same compiler ahead of time and caches
-  the result.
+- **AOT**: node (or a server) runs the same compiler ahead of time, with the
+  `swf2es` command (`packages/cli`), and keeps the result.
 
 The compiler is written in AssemblyScript and ships as `codegen.wasm`, with
 a thin TypeScript wrapper. The one wasm binary runs in browser workers, in
@@ -86,7 +86,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3/AS2 language semantics called by generated code             | format                    |
 | `player`  | display list, timeline, playerglobal, AVM1 globals, renderers   | format, codegen, runtime  |
-| `cli`     | ahead-of-time compiler command                                  | format, codegen           |
+| `cli`     | ahead-of-time compiler command: a SWF's modules and a manifest  | format, codegen           |
 | `player-hosts` | optional host transports for the player: Node TCP, a WebSocket relay | player          |
 
 `runtime` contains only the language, with no display list, so it runs in node
@@ -521,6 +521,49 @@ the module.
 codegen's memory is unchanged) against eager modules, nine runs each,
 interleaved: as3pb's loops within −0.8% and +1.9%, LZ4's within noise, the
 output the same; in the application above, no errors.
+
+### Ahead-of-time compilation
+
+`swf2es <file.swf|file.abc> --lib builtin.abc --lib playerglobal.abc [-o
+dir]` (`packages/cli`) compiles a SWF's DoABCs, or a bare ABC, as the
+player compiles them for a SWF it loads as its main movie, so that each
+module is byte for byte the player's (`compileAhead` in `aot.ts`, which
+follows `Code` in `packages/player/src/scripting/code.ts` step by step):
+the compiler reset with Flash Player's API version; each library added
+to the root application domain and compiled before the next is added,
+kept or not, since the first answers a compile fixes in the domain are
+what later ABCs compile against; then the SWF's ABCs, in tag order, all
+added to a child of the root before the first compiles. A change to how
+the player adds or compiles a SWF's code is made in both, and
+`tests/unit/cli/aot.test.ts` holds them to it: for some of the player's
+cases, a SWF of two DoABCs, one lazy, and as3pb's ABC against avmshell's
+libraries, the command's modules, the libraries' included, are the
+player's, which its own `Code.link` compiles in node.
+
+Adobe's libraries cannot ship, so `--lib` names them, in load order; with
+none given, the command takes builtin.abc and playerglobal.abc from
+`tests/player/out/libraries/`, where the player's tests copy them, and
+says what to pass when they are not there. A library of the player's
+own, such as AIR's declarations, is one more `--lib`.
+
+It writes a module per ABC, `abc-<n>.js` (`lib-<n>.js` for the libraries
+with `--emit-libraries`), and `manifest.json`: the compiler, by
+`COMPILER_VERSION` and the SHA-256 of `codegen.wasm`; the API version;
+the input's kind, SWF version and SHA-256; and for each library and ABC
+its name, SHA-256 and module, and for an ABC its lazy flag. Each module
+names its ABC's hash and those it was linked against, which the runtime
+checks as it loads it.
+
+The player does not take these modules yet. Skipping a compile is not
+enough: what a compile resolves in codegen's domain, the first answers
+to a traits' types or a method's signature, is what later ABCs, such as
+a child SWF's loaded into the same domain, compile against, so a host
+that hands the player a module must have it replay what that compile
+fixed. That is the IndexedDB module cache's design (its compile log and
+its compiler identity stamped into `codegen.wasm`), and AOT output is to
+reach the player as another source for that cache: the command writing
+each module's log and key beside it, and the manifest naming the
+compiler by the stamp.
 
 ### The runtime and the standard library
 
