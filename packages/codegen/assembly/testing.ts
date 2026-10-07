@@ -828,9 +828,13 @@ export {
   domainCompact,
   domainDrop,
   domainEmitEach,
+  domainEvict,
   domainFound,
   domainModule,
   domainModuleEntries,
   domainReset,
+  domainRestore,
+  domainRevive,
   domainSourceMap,
+  domainState,
 } from "./compile";

@@ -8,7 +8,7 @@ import * as C from "./avm2/abc/constants";
 import { PADDING } from "./avm2/abc/reader";
 import { ModuleEmitter } from "./avm2/emit/module";
 import { Output } from "./avm2/emit/output";
-import { Domain } from "./avm2/link/domain";
+import { DOMAIN_Evicted, DOMAIN_Live, Domain } from "./avm2/link/domain";
 
 export let domain = new Domain();
 
@@ -57,7 +57,7 @@ function isLive(appDomain: i32): bool {
   return (
     appDomain >= 0 &&
     appDomain < domain.domainParent.length &&
-    !domain.domainDropped[<u32>appDomain]
+    domain.domainState[<u32>appDomain] === DOMAIN_Live
   );
 }
 
@@ -74,17 +74,76 @@ export function domainDrop(appDomain: i32): void {
 }
 
 /**
- * Rebuild the domain without the dropped domains' ABCs, once enough are
- * dropped for that to be worth it: whether it was, and a collection would
- * free them now. A host calls it before it next adds or compiles, so that a
- * batch of drops costs one rebuild. Later modules come out the same either
- * way.
+ * Evict application domain `appDomain` and its descendants while the host
+ * has no use for them, as when it has compiled all their ABCs: as dropped,
+ * until domainRevive. A domain long evicted takes only its findings and
+ * its ABCs' places; the host keeps their bytes to give again.
  */
-export function domainCompact(): bool {
-  if (!domain.wantsRebuild()) {
-    return false;
+export function domainEvict(appDomain: i32): void {
+  if (appDomain >= 0) {
+    domain.evict(<u32>appDomain);
+  }
+}
+
+/** Application domain `appDomain`'s state: 0 live, 1 evicted, 2 dropped, -1 never made. */
+export function domainState(appDomain: i32): i32 {
+  return appDomain >= 0 && appDomain < domain.domainState.length
+    ? domain.domainState[<u32>appDomain]
+    : -1;
+}
+
+/**
+ * Give ABC `index`, of an evicted application domain, its bytes again, if
+ * a rebuild has let go of them, before domainRevive: 0, the VerifyError
+ * they were rejected with, or -1 if the ABC is not of an evicted domain.
+ */
+export function domainRestore(index: i32, bytes: Uint8Array): i32 {
+  if (index < 0) {
+    return -1;
   }
 
+  const buffer = new StaticArray<u8>(bytes.length + PADDING);
+  memory.copy(changetype<usize>(buffer), bytes.dataStart, bytes.length);
+  return domain.restore(<u32>index, buffer, bytes.length);
+}
+
+/**
+ * Make evicted application domain `appDomain` live again, its parent live
+ * and its ABCs restored where domainState asked: its ABCs link again as
+ * they did, by a rebuild if they were let go of. 0, 1 after a rebuild, which
+ * a collection would free, or -1, leaving it evicted, if it cannot be.
+ */
+export function domainRevive(appDomain: i32): i32 {
+  if (appDomain < 0) {
+    return -1;
+  }
+
+  const revived = domain.revive(<u32>appDomain);
+  if (revived <= 0) {
+    return revived;
+  }
+
+  if (!rebuild()) {
+    domain.domainState[<u32>appDomain] = DOMAIN_Evicted;
+    return -1;
+  }
+
+  return 1;
+}
+
+/**
+ * Rebuild the domain without the ABCs of domains not live, once enough
+ * are let go of for that to be worth it: whether it was, and a collection
+ * would free them now. A host calls it before it next adds or compiles, so
+ * that a batch of drops costs one rebuild. Later modules come out the same
+ * either way.
+ */
+export function domainCompact(): bool {
+  return domain.wantsRebuild() && rebuild();
+}
+
+/** The domain built again from its live ABCs (see Domain.rebuilt); false, leaving it, if one did not link. */
+function rebuild(): bool {
   const fresh = domain.rebuilt();
   if (fresh === null) {
     return false;
@@ -133,7 +192,7 @@ let verifiedIndex: u32 = 0;
 
 /**
  * ABC `index` of the domain, or the last added for -1; -1 again where
- * there is none, or it is of a dropped application domain.
+ * there is none, or its application domain is not live.
  */
 function abcIndex(index: i32): i32 {
   if (domain.abcs.length === 0 || index >= domain.abcs.length) {
@@ -141,7 +200,7 @@ function abcIndex(index: i32): i32 {
   }
 
   const at = index < 0 ? domain.abcs.length - 1 : index;
-  return domain.isDropped(<u32>at) ? -1 : at;
+  return domain.isLive(<u32>at) ? at : -1;
 }
 
 /**

@@ -99,6 +99,21 @@ export interface Codegen {
    * them do not change, and neither does what those compile to.
    */
   dropDomain(appDomain: number): void;
+  /**
+   * Evict application domain `appDomain` and its descendants while the host
+   * has no use for them, as once their ABCs are compiled: as dropped, but
+   * reviveDomain makes one live again. What they took is reused meanwhile,
+   * all but their findings and their ABCs' places.
+   */
+  evictDomain(appDomain: number): void;
+  /** Whether application domain `appDomain` is live: made, and neither evicted nor dropped. */
+  isLive(appDomain: number): boolean;
+  /**
+   * Make evicted application domain `appDomain` live again, its parent
+   * live: given its ABCs again by their indices, as they were added, its
+   * ABCs link as they did, and what they found holds. Throws if it cannot be.
+   */
+  reviveDomain(appDomain: number, abcs: Map<number, Uint8Array>): void;
   /** Record a definition an application domain has found; it holds for the ABCs added after. */
   found(definition: FoundDefinition): void;
   /**
@@ -226,6 +241,39 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     dropDomain(appDomain) {
       collected(wasm.domainDrop(appDomain));
       compactDue = true;
+    },
+    evictDomain(appDomain) {
+      collected(wasm.domainEvict(appDomain));
+      compactDue = true;
+    },
+    isLive(appDomain) {
+      return collected(wasm.domainState(appDomain)) === 0;
+    },
+    reviveDomain(appDomain, abcs) {
+      // Its ABCs' bytes are copied into the compiler only if a rebuild let go of them.
+      let revived = collected(wasm.domainRevive(appDomain));
+      if (revived < 0) {
+        for (const [index, bytes] of abcs) {
+          const error = collected(wasm.domainRestore(index, bytes));
+          if (error !== 0) {
+            throw new Error(`ABC ${index}: not of an evicted domain, or rejected (${error})`);
+          }
+        }
+
+        revived = collected(wasm.domainRevive(appDomain));
+      }
+
+      if (revived < 0) {
+        throw new Error(
+          `application domain ${appDomain}: not evicted, its parent not live, or an ABC of it not given`,
+        );
+      }
+
+      if (revived > 0) {
+        wasm.__collect();
+        size = wasm.memory.buffer.byteLength;
+        calls = 0;
+      }
     },
     found(d) {
       compact();

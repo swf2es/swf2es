@@ -92,6 +92,26 @@ test("the wrapper drops an application domain, whose ABCs then compile no more",
   assert.match(codegen.compileModule(["a", "", "c", "d"]), /hash: "d",\s+linked: \["a"\]/);
 });
 
+test("the wrapper evicts an application domain and revives it given its ABCs", async () => {
+  const codegen = await createCodegen(module);
+  codegen.reset();
+  assert.equal(codegen.add(script([0x47])), 0);
+  const child = codegen.childDomain(0);
+  const abc = script([0x24, 1, 0x48]);
+  assert.equal(codegen.add(abc, false, child), 0);
+  const compiled = codegen.compileModule(["a", "b"], 1);
+
+  codegen.evictDomain(child);
+  assert.equal(codegen.isLive(child), false);
+  assert.throws(() => codegen.compileModule(["a", "b"], 1), /dropped/);
+  // The next add rebuilds without it: reviving it then takes its ABC again.
+  assert.equal(codegen.add(script([0x47])), 0);
+  assert.throws(() => codegen.reviveDomain(child, new Map()), /not evicted/);
+  codegen.reviveDomain(child, new Map([[1, abc]]));
+  assert.equal(codegen.isLive(child), true);
+  assert.equal(codegen.compileModule(["a", "b"], 1), compiled);
+});
+
 const generated = new URL("../../../oracle/avmplus/generated/", import.meta.url);
 const skip = !existsSync(generated) && "oracle/avmplus missing";
 

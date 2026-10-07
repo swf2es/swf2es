@@ -19,7 +19,7 @@ The wrapper's `Codegen` (`createCodegen` in `packages/codegen/src`) is the
 compiler's whole API: `reset` starts a domain, `add` links an ABC into it
 after those before, into one of its application domains (`childDomain`
 makes one, `found` records what one has found, `dropDomain` lets one go,
-see Linking), and the last
+`evictDomain` and `reviveDomain` for a while, see Linking), and the last
 one added compiles with `compile`, whole,
 to its module, source map and the entry of each method, with
 `compileModule` to its module alone, or with `compileMethods`, a method at
@@ -130,7 +130,11 @@ three, with the same VerifyError numbers:
    frees all the dropped took, the names only they spelled included.
    wasm memory never shrinks, but what was freed is used again. A live
    ABC links as it did, since no dropped one was ever seen by it, and
-   compiles alike.
+   compiles alike. A domain the host has no use for now, as once its ABCs
+   are compiled, is evicted with its descendants (`evictDomain`), as if
+   dropped but for its findings, and revived (`reviveDomain`), its parent
+   live, given its ABCs again if a rebuild let go of them: they link in
+   their places again, by a rebuild, with what it found, as they did.
    Each class's, script's and activation's traits then lay out their
    members, binding names to slot and dispatch ids after their base's
    (`link/traits.ts`). Types resolve later, when a class is first used:

@@ -184,6 +184,64 @@ test("what a live domain found holds after a rebuild, and a dropped one's is gon
   assert.equal(at(0, "p", "b"), "abc 3 script 0 trait 0");
 });
 
+test("an evicted domain is revived as it was, given its ABCs again once a rebuild let them go", () => {
+  testing.domainReset(SWF_31);
+  const at = (d: number, uri: string, name: string) =>
+    testing.domainFind(NS_PUBLIC, uri, name, SWF_31, d) as string;
+  assert.equal(testing.domainAdd(definitions([["p", "a"]]), false), 0);
+  const child = testing.domainChild(0) as number;
+  const grandchild = testing.domainChild(child) as number;
+  const many = ["b", "c", "d", "e", "f"].map((name): [string, string] => ["p", name]);
+  const childAbc = definitions(many);
+  const grandchildAbc = definitions([["p", "g"]]);
+  assert.equal(testing.domainAdd(childAbc, false, child), 0);
+  assert.equal(testing.domainAdd(grandchildAbc, false, grandchild), 0);
+  // The root defines b after the child did; the child found its own.
+  assert.equal(testing.domainAdd(definitions([["p", "b"]]), false), 0);
+  testing.domainFound(child, NS_PUBLIC, "p", "b", 1, false);
+  const hashes = "h0\nh1\nh2\nh3";
+  const module = testing.domainModule(hashes, 2) as string;
+
+  // Evicted with its descendants, as dropped; revived before a rebuild,
+  // it is as it was, and its descendants stay evicted until revived too.
+  testing.domainEvict(child);
+  assert.deepEqual([testing.domainState(child), testing.domainState(grandchild)], [1, 1]);
+  assert.equal(testing.domainChild(child), -1);
+  assert.equal(at(child, "p", "c"), "none");
+  assert.equal(testing.domainRevive(grandchild), -1);
+  assert.equal(testing.domainRevive(child), 0);
+  assert.deepEqual([testing.domainState(child), testing.domainState(grandchild)], [0, 1]);
+  assert.equal(at(child, "p", "c"), "abc 1 script 0 trait 1");
+  assert.equal(at(child, "p", "b"), "abc 1 script 0 trait 0");
+  assert.equal(testing.domainRevive(grandchild), 0);
+
+  // Let go of by a rebuild, they are revived only given their ABCs again,
+  // and link as they did, what they found with them.
+  testing.domainEvict(child);
+  assert.equal(testing.domainCompact(), true);
+  assert.match(testing.domainSummary() as string, / found 0 /);
+  assert.equal(testing.domainRevive(child), -1);
+  assert.equal(testing.domainRestore(0, childAbc), -1);
+  assert.equal(testing.domainRestore(1, new Uint8Array([16, 0, 46, 0])), 1107);
+  assert.equal(testing.domainRestore(1, childAbc), 0);
+  assert.equal(testing.domainRevive(child), 1);
+  assert.equal(at(child, "p", "c"), "abc 1 script 0 trait 1");
+  assert.equal(at(child, "p", "b"), "abc 1 script 0 trait 0");
+  assert.match(testing.domainSummary() as string, / found 1 /);
+  assert.equal(testing.domainRevive(grandchild), -1);
+  assert.equal(testing.domainRestore(2, grandchildAbc), 0);
+  assert.equal(testing.domainRevive(grandchild), 1);
+  assert.equal(testing.domainModule(hashes, 2), module);
+
+  // Dropped while evicted, it is gone for good.
+  testing.domainEvict(child);
+  testing.domainDrop(child);
+  assert.deepEqual([testing.domainState(child), testing.domainState(grandchild)], [2, 2]);
+  assert.equal(testing.domainRestore(1, childAbc), -1);
+  assert.equal(testing.domainRevive(child), -1);
+  assert.equal(testing.domainState(99), -1);
+});
+
 test("an ABC that does not parse is not added", () => {
   testing.domainReset(SWF_31);
   assert.equal(testing.domainAdd(abc({}, tables({ methods: [{ flags: 0x20 }] })), false), 1079);
