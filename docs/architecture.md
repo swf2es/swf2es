@@ -1736,9 +1736,12 @@ coloured bars measured to the pixel:
   `scrollRect` from -20 moves the sliced bars 20 of its units over.
 - A mask is not sliced, in drawing or in hit tests: neither an owner that
   is a mask nor a `Shape` child that masks a sibling, by a script's `mask`
-  or a timeline's clip layer, common in a 9-slice symbol. Neither is what
-  `BitmapData.draw` draws through its matrix, whatever the source's own
-  scale; a sliced object inside what is drawn is.
+  or a timeline's clip layer, common in a 9-slice symbol, nor an owner
+  inside a mask, which a shape test hits nothing of, as of any mask and
+  what is in it: what the mask clips is hit where its unsliced drawing
+  is. Neither is what `BitmapData.draw` draws through its matrix,
+  whatever the source's own scale; a sliced object inside what is drawn
+  is.
 - A `Shape` moved from a sliced sprite to a plain one draws unsliced, and
   one moved the other way, or between two grids, takes its new parent's.
 - A button slices the state that is one shape; a state of several
@@ -1781,11 +1784,11 @@ grids, refused ones too, and rescales some on its second frame;
 removes children, turns a parent, gives a Shape a grid of its own, draws
 through `BitmapData.draw`, masks, scrolls and hit-tests a curve across
 the grid; `scale9-hits` hit-tests panels whose children widen what the
-grid divides, from the start and as they change. Flash snaps straight
-runs of lines to whole pixels, which the player does not, so a grid's
-lines at half pixels part from it there as unsliced ones do. Flash's hit
-tests on a curve land about half a pixel lower than the player's, sliced
-or not.
+grid divides, from the start and as they change, and a panel inside a
+mask. Flash snaps straight runs of lines to whole pixels, which the
+player does not, so a grid's lines at half pixels part from it there as
+unsliced ones do. Flash's hit tests on a curve land about half a pixel
+lower than the player's, sliced or not.
 
 ### Sound state
 
@@ -2794,8 +2797,10 @@ clips through its own place there. Off the list it clips through its own
 matrix, taken in the stage's space. One mask clips one object, so
 setting it on a second takes it off the first, whose `mask` is then
 null. Neither kind changes bounds or `width`, and a shape hit test
-follows `mask` but not a timeline's masks; a mask itself is never hit,
-and a Bitmap, masking or not, is hit over its whole rectangle. The renderer gives each
+follows `mask` but not a timeline's masks; a mask, a script's or a
+timeline's, is never hit by a shape test, nor is what is in it (the
+`scale9-hits` case), and a Bitmap, masking or not, is hit over its whole
+rectangle. The renderer gives each
 mask to Pixi as a stencil: a timeline's range goes in a container whose
 mask is the clip-depth child, and a mask's lines are hidden while it
 masks. When both objects are cached as bitmaps Flash clips by the

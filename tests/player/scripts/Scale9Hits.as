@@ -3,12 +3,14 @@ package {
   import flash.events.Event;
   import flash.geom.*;
 
-  // 9-slice hit tests where children widen what the grid divides
-  // (cases.ts, `scale9-hits`): panels scaled 2 whose fills a wider child
-  // stretches, drawn so but hit only within their own bounds; a Shape
-  // child's likewise; and on frame 2 a bitmap child's data replaced
-  // wider, a grandchild Shape reparented into its panel and a Shape
-  // child's drawing grown, hit-tested on frame 3, once they are drawn.
+  // 9-slice hit tests where children widen what the grid divides, and
+  // masks (cases.ts, `scale9-hits`): panels scaled 2 whose fills a wider
+  // child stretches, drawn so but hit only within their own bounds; a
+  // Shape child's likewise; a sliced panel inside a mask, drawn unsliced
+  // and hit by nothing; and on frame 2 a bitmap child's data replaced
+  // wider, a grandchild Shape reparented into its panel and a Shape child's
+  // drawing grown, hit-tested on frame 3, once they are drawn. The
+  // timeline adds a clip layer holding a sprite.
   public dynamic class Scale9Hits extends MovieClip {
     private var frame:int = 1;
     private var panels:Array = [];
@@ -17,6 +19,9 @@ package {
     private var sh:Shape;
     private var holder:Sprite;
     private var grown:Shape;
+    private var masked:Sprite;
+    private var maskHolder:Sprite;
+    private var nested:Sprite;
 
     public function Scale9Hits() {
       // 1: a fill a bitmap child stretches to 230, hit to 200.
@@ -69,6 +74,30 @@ package {
       bars(grown.graphics, 0xcc3333);
       p.addChild(grown);
 
+      // A sliced panel in a mask, a sprite in a sprite: the mask draws it unsliced, and none of
+      // the three is hit; what it masks is hit where the mask is drawn.
+      masked = new Sprite();
+      masked.graphics.beginFill(0x3333aa);
+      masked.graphics.drawRect(0, 0, 260, 60);
+      masked.x = 290;
+      masked.y = 290;
+      addChild(masked);
+      maskHolder = new Sprite();
+      var inner:Sprite = new Sprite();
+      nested = new Sprite();
+      nested.graphics.beginFill(0);
+      nested.graphics.drawRect(0, 0, 1, 1);
+      nested.graphics.drawRect(99, 59, 1, 1);
+      nested.graphics.drawRect(4, 22, 8, 16);
+      nested.graphics.drawRect(70, 22, 26, 16);
+      nested.scale9Grid = new Rectangle(20, 20, 60, 20);
+      nested.scaleX = 2;
+      inner.addChild(nested);
+      maskHolder.addChild(inner);
+      maskHolder.x = 290;
+      maskHolder.y = 290;
+      addChild(maskHolder);
+      masked.mask = maskHolder;
       addEventListener(Event.ENTER_FRAME, step);
     }
 
@@ -127,6 +156,12 @@ package {
         for (var i:int = 0; i < 6; i++) {
           trace(labels[i], row(panels[i], panels[i], 30));
         }
+        trace("mask", row(maskHolder, maskHolder, 30), "in it", row(nested, maskHolder, 30));
+        trace("masked", row(masked, masked, 30));
+        var clip:DisplayObjectContainer = DisplayObjectContainer(getChildByName("clips"));
+        var layer:DisplayObjectContainer = DisplayObjectContainer(clip.getChildByName("layer"));
+        trace("clip layer", row(layer, clip, 30), "in it", row(layer.getChildByName("inner"), clip, 30));
+        trace("under it", row(clip.getChildByName("under"), clip, 30));
 
         bm.bitmapData = new BitmapData(130, 8, false, 0x000000);
         holder.addChild(sh);

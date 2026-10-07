@@ -154,7 +154,7 @@ export function onAxis(axis: Axis, v: number): number {
  * for a shape, its parent's. Null for none.
  */
 export function sliceFor(d: DisplayObject): { slice: Slice; m: Matrix | null } | null {
-  if (masks(d)) {
+  if (withinMask(d)) {
     return null;
   }
 
@@ -166,7 +166,7 @@ export function sliceFor(d: DisplayObject): { slice: Slice; m: Matrix | null } |
   }
 
   const parent = d.parent;
-  if (d instanceof ShapeObject && parent?.scale9Grid && !masks(parent)) {
+  if (d instanceof ShapeObject && parent?.scale9Grid) {
     const slice = sliceOf(parent);
     if (slice) {
       return { slice, m: d.placed };
@@ -176,9 +176,18 @@ export function sliceFor(d: DisplayObject): { slice: Slice; m: Matrix | null } |
   return null;
 }
 
-/** Whether `d` is a mask, a script's or a timeline's, which adl draws and hits unsliced. */
-function masks(d: DisplayObject): boolean {
-  return d.maskOf !== null || d.clipDepth > 0;
+/**
+ * Whether `d` is a mask, a script's or a timeline's, or is in one: adl
+ * draws it unsliced, and its shape test hits nothing of it.
+ */
+export function withinMask(d: DisplayObject): boolean {
+  for (let o: DisplayObject | null = d; o; o = o.parent) {
+    if (o.maskOf !== null || o.clipDepth > 0) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**

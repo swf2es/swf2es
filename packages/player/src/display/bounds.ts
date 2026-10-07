@@ -23,7 +23,7 @@ import {
   transformRect,
   union,
 } from "./geometry.js";
-import { sliceFor, sliceLayers } from "./scale9.js";
+import { sliceFor, sliceLayers, withinMask } from "./scale9.js";
 import { flatten, inside, orientation, type Path, type ShapeLayer } from "./shapes.js";
 
 const TWIPS = 20;
@@ -149,9 +149,10 @@ export function hitsPoint(
     return r !== null && contains(r, lx, ly);
   }
 
-  // A mask is not drawn, and adl hits nothing of it. Nor the stage's shape test, though the
-  // stage is a root for what a script puts on it: the one root with no parent.
-  if (!underRoot(d) || d.maskOf || (d.parent === null && d.loaderInfo !== null)) {
+  // A mask is not drawn, and adl hits nothing of it, a script's or a timeline's, nor of what
+  // is in it. Nor the stage's shape test, though the stage is a root for what a script puts
+  // on it: the one root with no parent.
+  if (!underRoot(d) || withinMask(d) || (d.parent === null && d.loaderInfo !== null)) {
     return false;
   }
 

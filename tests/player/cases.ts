@@ -3677,6 +3677,50 @@ function scale9Changes(abc: Uint8Array): Uint8Array {
   });
 }
 
+// scripts/Scale9Hits.as's root, 560 by 440, with a timeline symbol: a
+// clip layer holding a sprite over a rectangle, which a script's shape
+// test hits nothing of.
+function scale9Hits(abc: Uint8Array): Uint8Array {
+  const rect = (id: number, color: number, x: number, y: number, width: number, height: number) =>
+    w.shape({
+      id,
+      bounds: [x * 20, (x + width) * 20, y * 20, (y + height) * 20],
+      fills: [color],
+      paths: [{ fill1: 1, commands: rectPath(x, y, width, height) }],
+    });
+  return w.swf({
+    width: 560,
+    height: 440,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      rect(43, 0x3333aa, 0, 0, 260, 60),
+      rect(44, 0x000000, 10, 22, 50, 16),
+      w.sprite(45, 1, [w.place({ depth: 1, character: 44 }), w.showFrame(), w.end()]),
+      w.sprite(46, 1, [
+        w.place({ depth: 1, character: 45, name: "inner" }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.sprite(47, 1, [
+        w.place({ depth: 1, character: 46, name: "layer", clipDepth: 2 }),
+        w.place({ depth: 2, character: 43, name: "under" }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc, "Scale9Hits"),
+      w.symbolClass([[0, "Scale9Hits"]]),
+      w.place({ depth: 2, character: 47, name: "clips", matrix: { tx: 5800, ty: 7400 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
 const rewound = { frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 };
 
@@ -3788,7 +3832,7 @@ export const cases: PlayerCase[] = [
   },
   {
     name: "scale9-hits",
-    swf: (abc) => bare(abc, 3, "Scale9Hits", 560, 360),
+    swf: scale9Hits,
     script: "Scale9Hits",
     frames: 3,
     capture: [2, 3],
