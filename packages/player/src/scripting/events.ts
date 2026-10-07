@@ -33,8 +33,13 @@ function invoke(s: Scripting, o: AsObject, event: AsObject, phase: number): void
 
   event.$currentTarget = o;
   event.$phase = phase;
-  // A copy: a listener may add or remove listeners.
-  for (const l of [...list]) {
+  // A copy: a listener may add or remove listeners. Not of one alone, read before it is called,
+  // which nothing it does could add to or take from what this dispatch calls: each frame's
+  // events reach thousands of objects so.
+  const listeners = list.length === 1 ? list : [...list];
+  const count = listeners.length;
+  for (let i = 0; i < count; i++) {
+    const l = listeners[i];
     if (l.capture !== (phase === CAPTURING_PHASE)) {
       continue;
     }
