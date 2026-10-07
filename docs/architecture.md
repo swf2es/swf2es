@@ -2759,6 +2759,15 @@ its chain, unless given a `filterArea`; that measuring is some 1% of the
 main thread on a page of 32 animated creatures running 450 chains a
 frame, and 0.13 ms of a 3.3 ms draw on `bench.ts --rig 32 --blurred`
 (the `filterAreaMs` meter), less than the runs vary, so no area is set.
+Each filter pass clears the texture it draws into: Pixi clears a chain's
+input as it binds it, and the box blur's runs and a chain's steps clear
+their pool textures, some 1,230 clears a frame on that page and 769 on
+the rig. None is skipped. Their textures carry no stencil, so the
+stencil bit of Pixi's `CLEAR.ALL` costs nothing, and dropping every
+clear but the screen's, which draws wrongly, moves neither a frame there
+nor `bench.ts --rig 32 --blurred --gpu` by more than the runs vary, on
+the discrete GPU or the integrated one: the textures are small, some
+0.4 megapixels of inputs a frame.
 
 ### Masks and scroll rectangles
 
