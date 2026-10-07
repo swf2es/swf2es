@@ -5,11 +5,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { bounds, toStage } from "../../../../packages/player/dist/display/bounds.js";
 import {
+  ButtonObject,
   Clips,
   Container,
   type DisplayObject,
   type MovieClip,
   ShapeObject,
+  scriptChildren,
   type TextObject,
 } from "../../../../packages/player/dist/display/display.js";
 import { Player } from "../../../../packages/player/dist/player.js";
@@ -639,4 +641,59 @@ test("a scrolled object's bounds are its scroll's size at its origin, and its po
   assert.deepEqual(bounds(child, true), { xMin: 0, yMin: 0, xMax: 50, yMax: 40 });
   assert.deepEqual(toStage(child, null), { a: 2, b: 0, c: 0, d: 2, tx: 80, ty: 10 });
   assert.deepEqual(bounds(parent, true), { xMin: 80, yMin: 10, xMax: 180, yMax: 90 });
+});
+
+test("a container's frame children are its own children, a leaf's one empty list for all", () => {
+  const sprite = new Container();
+  const shape = new ShapeObject(null);
+  sprite.addChildAt(shape, 0);
+  assert.equal(sprite.frameChildren, sprite.children);
+  assert.deepEqual(sprite.frameChildren, [shape]);
+  assert.equal(shape.frameChildren.length, 0);
+  assert.equal(shape.frameChildren, new ShapeObject(null).frameChildren);
+});
+
+test("a button's frame children follow its states, the hit test state first, each once", () => {
+  const button = new ButtonObject();
+  assert.equal(button.frameChildren.length, 0);
+
+  const [up, over, down, hit] = [0, 1, 2, 3].map(() => new Container());
+  button.upState = up;
+  button.overState = over;
+  button.downState = down;
+  button.hitTestState = hit;
+  assert.deepEqual(button.frameChildren, [hit, up, down, over]);
+
+  // A state in two places is walked once, where it is first.
+  button.overState = up;
+  assert.deepEqual(button.frameChildren, [hit, up, down]);
+
+  // A list made again, not changed: one a walk holds keeps what it had, and
+  // a state replaced is held by none of the button's.
+  const before = button.frameChildren;
+  const other = new Container();
+  button.downState = other;
+  assert.deepEqual(before, [hit, up, down]);
+  assert.deepEqual(button.frameChildren, [hit, up, other]);
+  assert.equal(button.frameChildren.indexOf(down), -1);
+
+  button.upState = null;
+  button.overState = null;
+  button.downState = null;
+  button.hitTestState = null;
+  assert.deepEqual(button.frameChildren, []);
+});
+
+test("a button's first scripts run up, over, down, hit once, then in its frames' order", () => {
+  const button = new ButtonObject();
+  const [up, over, down, hit] = [0, 1, 2, 3].map(() => new Container());
+  button.upState = up;
+  button.overState = over;
+  button.downState = down;
+  button.hitTestState = hit;
+  button.firstScripts = true;
+  assert.deepEqual(scriptChildren(button), [up, over, down, hit]);
+  assert.equal(button.firstScripts, false);
+  assert.equal(scriptChildren(button), button.frameChildren);
+  assert.deepEqual(scriptChildren(button), [hit, up, down, over]);
 });

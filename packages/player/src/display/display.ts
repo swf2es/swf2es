@@ -49,8 +49,13 @@ export const CONTENT = 4;
 /** A Bitmap's pixels changed in place: the texture uploads again, nothing is rebuilt. */
 export const PIXELS = 8;
 
+/** DisplayObject.kind's. */
+export const OTHER = 0;
+export const CLIP = 1;
+export const BUTTON = 2;
+
 const NO_FILTERS: readonly Filter[] = Object.freeze([]);
-/** What a leaf has to walk: one for all, as the frame's walks visit every object twice a frame. */
+/** What a leaf has to walk: one for all, as the frame's walks visit every object thrice a frame. */
 const NO_CHILDREN: readonly DisplayObject[] = Object.freeze([]);
 const NO_FILTER_BYTES = new Uint8Array([0]);
 
@@ -195,6 +200,15 @@ export class DisplayObject {
   drawing: Drawing | null = null;
   /** What changed since the renderer last synced it: TRANSFORM, CHILDREN, CONTENT. */
   dirty = TRANSFORM | CONTENT;
+  /**
+   * The display objects whose frames its frames run: a container's own
+   * children array, a button's states (ButtonObject), none for the rest.
+   * A field every object has, so that the walks each frame, which visit
+   * every object, read it without asking its class.
+   */
+  frameChildren: readonly DisplayObject[] = NO_CHILDREN;
+  /** Whether it is a MovieClip (CLIP) or a ButtonObject (BUTTON), for those walks likewise: OTHER for the rest. */
+  kind = OTHER;
 
   private weakRef: WeakRef<this> | null = null;
 
@@ -915,6 +929,11 @@ export class Container extends DisplayObject {
   /** Whether a descendant changed since the renderer last synced. */
   descendantsDirty = true;
 
+  constructor() {
+    super();
+    this.frameChildren = this.children;
+  }
+
   /** Place `child` at timeline depth `depth`: before the first child of a greater depth. */
   placeAtDepth(child: DisplayObject, depth: number): void {
     this.removeAtDepth(depth);
@@ -1005,16 +1024,70 @@ const BUTTON_SOUNDS: Record<ButtonState, Record<ButtonState, number>> = {
  * its frames as Flash's do (`frameChildren`). Not a container to a script.
  */
 export class ButtonObject extends Container {
-  upState: DisplayObject | null = null;
-  overState: DisplayObject | null = null;
-  downState: DisplayObject | null = null;
-  hitTestState: DisplayObject | null = null;
+  private up: DisplayObject | null = null;
+  private over: DisplayObject | null = null;
+  private down: DisplayObject | null = null;
+  private hitTest: DisplayObject | null = null;
   state: ButtonState = "up";
   /** Its states' next frame scripts run up, over, down, hit: the first, in a SWF after 9 (Scripting.construct). */
   firstScripts = false;
   enabled = true;
   useHandCursor = true;
   trackAsMenu = false;
+
+  constructor() {
+    super();
+    this.kind = BUTTON;
+    this.frameChildren = NO_CHILDREN;
+  }
+
+  get upState(): DisplayObject | null {
+    return this.up;
+  }
+
+  set upState(d: DisplayObject | null) {
+    this.up = d;
+    this.statesChanged();
+  }
+
+  get overState(): DisplayObject | null {
+    return this.over;
+  }
+
+  set overState(d: DisplayObject | null) {
+    this.over = d;
+    this.statesChanged();
+  }
+
+  get downState(): DisplayObject | null {
+    return this.down;
+  }
+
+  set downState(d: DisplayObject | null) {
+    this.down = d;
+    this.statesChanged();
+  }
+
+  get hitTestState(): DisplayObject | null {
+    return this.hitTest;
+  }
+
+  set hitTestState(d: DisplayObject | null) {
+    this.hitTest = d;
+    this.statesChanged();
+  }
+
+  /**
+   * Its frame children made again from the states it has now, each once,
+   * as Ruffle orders them, the hit test state first, whichever it shows: a
+   * new list, so that none it let go of stays held.
+   */
+  private statesChanged(): void {
+    const states = [this.hitTest, this.up, this.down, this.over].filter(
+      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
+    );
+    this.frameChildren = states.length > 0 ? states : NO_CHILDREN;
+  }
 
   /** The display object of state `state`. */
   stateObject(state: ButtonState): DisplayObject | null {
@@ -1166,29 +1239,15 @@ function recordPlace(record: ButtonRecord, look: boolean): Place {
  * over, down, then hit test, as Flash runs them while the button is made.
  */
 export function scriptChildren(d: DisplayObject): readonly DisplayObject[] {
-  if (d instanceof ButtonObject && d.firstScripts) {
-    d.firstScripts = false;
-    return [d.upState, d.overState, d.downState, d.hitTestState].filter(
+  if (d.kind === BUTTON && (d as ButtonObject).firstScripts) {
+    const b = d as ButtonObject;
+    b.firstScripts = false;
+    return [b.upState, b.overState, b.downState, b.hitTestState].filter(
       (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
     );
   }
 
-  return frameChildren(d);
-}
-
-/**
- * The display objects whose frames a display object's frames run: a
- * container's children, and all a button's states, as Ruffle orders them,
- * the hit test state first, whichever it shows.
- */
-export function frameChildren(d: DisplayObject): readonly DisplayObject[] {
-  if (d instanceof ButtonObject) {
-    return [d.hitTestState, d.upState, d.downState, d.overState].filter(
-      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
-    );
-  }
-
-  return d instanceof Container ? d.children : NO_CHILDREN;
+  return d.frameChildren;
 }
 
 /** The root `d` is under, or is: the nearest display object up from it that carries a LoaderInfo; null under none, as for one a script made and did not add. */
@@ -1288,6 +1347,7 @@ export class MovieClip extends Container {
     library: Library,
   ) {
     super();
+    this.kind = CLIP;
     this.library = library;
   }
 

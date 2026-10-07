@@ -16,9 +16,11 @@ import {
   BitmapObject,
   ButtonObject,
   buttonStates,
+  CLIP,
   Container,
   type DisplayObject,
   MovieClip,
+  OTHER,
   scriptChildren,
   TRANSFORM,
 } from "./display/display.js";
@@ -591,14 +593,18 @@ export class Scripting {
     };
     let count = 0;
     const visit = (o: DisplayObject) => {
-      if (o instanceof MovieClip && o.object) {
-        queue[count++] = o;
+      if (o.kind === CLIP && o.object) {
+        queue[count++] = o as MovieClip;
       }
 
-      // An index, not for-of: this visits every object on the list.
+      // An index, not for-of, and no call for a leaf: this visits every
+      // object on the list. A button is visited for its states' first order.
       const children = scriptChildren(o);
       for (let i = 0; i < children.length; i++) {
-        visit(children[i]);
+        const child = children[i];
+        if (child.kind !== OTHER || child.frameChildren.length !== 0) {
+          visit(child);
+        }
       }
     };
     for (const orphan of this.lifecycle.orphanRoots()) {

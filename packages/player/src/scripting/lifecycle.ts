@@ -4,7 +4,7 @@
 // orphan, which plays on as Flash's does, for a while (docs/architecture.md,
 // "Scripts and the display list").
 import { avm2 } from "@swf2es/runtime";
-import { Container, type DisplayObject, frameChildren, MovieClip } from "../display/display.js";
+import { Container, type DisplayObject, MovieClip } from "../display/display.js";
 import { stopTimelineSoundsUnder } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent, heard } from "./events.js";
@@ -123,7 +123,14 @@ export class Lifecycle {
       }
     }
 
-    return frameChildren(display).some((child) => this.hearsFrames(child));
+    const children = display.frameChildren;
+    for (let i = 0; i < children.length; i++) {
+      if (this.hearsFrames(children[i])) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**

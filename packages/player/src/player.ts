@@ -5,7 +5,7 @@
 // follow; then the frame is drawn.
 import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
 import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
-import { Container, type DisplayObject, frameChildren, MovieClip } from "./display/display.js";
+import { CLIP, Container, type DisplayObject, MovieClip, OTHER } from "./display/display.js";
 import { type Library, readLibrary } from "./display/timeline.js";
 import { KeyboardInput } from "./input/keyboard.js";
 import { PointerInput } from "./input/pointer.js";
@@ -191,20 +191,24 @@ export class Player {
     this.ticking = null;
     let count = 0;
     const collect = (o: DisplayObject) => {
-      if (o instanceof MovieClip) {
+      if (o.kind === CLIP) {
         // One a goto made sit this frame out takes all in it along.
-        if (o.skipsAfter >= 0 && o.skipsAfter === this.scripting?.frames) {
+        const clip = o as MovieClip;
+        if (clip.skipsAfter >= 0 && clip.skipsAfter === this.scripting?.frames) {
           return;
         }
 
-        clips[count++] = o;
+        clips[count++] = clip;
       }
 
-      // A button's states all play, whichever it shows. An index, not for-of:
-      // this visits every object on the list each frame.
-      const children = frameChildren(o);
+      // A button's states all play, whichever it shows. An index, not for-of,
+      // and no call for a leaf: this visits every object on the list each frame.
+      const children = o.frameChildren;
       for (let i = 0; i < children.length; i++) {
-        collect(children[i]);
+        const child = children[i];
+        if (child.kind !== OTHER || child.frameChildren.length !== 0) {
+          collect(child);
+        }
       }
     };
     collect(this.stage);
