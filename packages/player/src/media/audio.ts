@@ -330,8 +330,8 @@ const ADPCM_STEPS = [
 /**
  * SWF's ADPCM as 16-bit samples, channels interleaved: a code size, then
  * packets of a header per channel (a 16-bit sample and a 6-bit step index)
- * and 4095 codes, as Ruffle decodes them, which gives no sample for the
- * header's own. It ends where the bits do.
+ * and 4095 codes, the header's sample the packet's first, as adl gives it
+ * (Ruffle's decoder leaves it out). It ends where the bits do.
  */
 export function decodeAdpcm(data: Uint8Array, channels: 1 | 2): Int16Array {
   const total = data.length * 8;
@@ -356,8 +356,8 @@ export function decodeAdpcm(data: Uint8Array, channels: 1 | 2): Int16Array {
   const sample = [0, 0];
   const step = [0, 0];
   let n = 0;
-  for (let code = 0; ; code = (code + 1) % 4095) {
-    if (code === 0) {
+  for (let k = 0; ; k = (k + 1) % 4096) {
+    if (k === 0) {
       if (bit + 22 * channels > total) {
         break;
       }
@@ -365,7 +365,10 @@ export function decodeAdpcm(data: Uint8Array, channels: 1 | 2): Int16Array {
       for (let c = 0; c < channels; c++) {
         sample[c] = (read(16) << 16) >> 16;
         step[c] = read(6);
+        out[n++] = sample[c];
       }
+
+      continue;
     }
 
     if (bit + bits * channels > total) {

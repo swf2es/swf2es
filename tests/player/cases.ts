@@ -2231,11 +2231,92 @@ function pcm16(samples: number[]): Uint8Array {
   return out;
 }
 
+const ADPCM_INDEX = [-1, -1, -1, -1, 2, 4, 6, 8];
+const ADPCM_STEPS = [
+  7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73,
+  80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494,
+  544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499,
+  2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487,
+  12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767,
+];
+
+/**
+ * SWF's 4-bit ADPCM of 16-bit samples, a list a channel: the code size,
+ * then packets of each channel's sample and step index and 4095 codes, as
+ * a decoder steps through them.
+ */
+function adpcm(channels: number[][]): Uint8Array {
+  const bytes: number[] = [];
+  let acc = 0;
+  let count = 0;
+  const put = (value: number, n: number) => {
+    for (let i = n - 1; i >= 0; i--) {
+      acc = (acc << 1) | ((value >> i) & 1);
+      if (++count === 8) {
+        bytes.push(acc);
+        acc = 0;
+        count = 0;
+      }
+    }
+  };
+
+  put(2, 2);
+  const frames = channels[0].length;
+  const sample = channels.map(() => 0);
+  const index = channels.map(() => 0);
+  for (let i = 0; i < frames; i++) {
+    if (i % 4096 === 0) {
+      for (const [c, channel] of channels.entries()) {
+        sample[c] = channel[i];
+        index[c] = Math.min(index[c], 63);
+        put(sample[c] & 0xffff, 16);
+        put(index[c], 6);
+      }
+
+      continue;
+    }
+
+    for (const [c, channel] of channels.entries()) {
+      const step = ADPCM_STEPS[index[c]];
+      let diff = channel[i] - sample[c];
+      const sign = diff < 0 ? 8 : 0;
+      diff = Math.abs(diff);
+      let code = 0;
+      let delta = step >> 3;
+      for (const [bit, part] of [
+        [4, step],
+        [2, step >> 1],
+        [1, step >> 2],
+      ]) {
+        if (diff >= part) {
+          code |= bit;
+          diff -= part;
+          delta += part;
+        }
+      }
+
+      sample[c] = Math.max(-32768, Math.min(32767, sign ? sample[c] - delta : sample[c] + delta));
+      index[c] = Math.max(0, Math.min(ADPCM_STEPS.length - 1, index[c] + ADPCM_INDEX[code]));
+      put(code | sign, 4);
+    }
+  }
+
+  if (count) {
+    bytes.push(acc << (8 - count));
+  }
+
+  return new Uint8Array(bytes);
+}
+
+/** `n` samples of a sine of `period` samples, `amplitude` high. */
+const sine = (n: number, period: number, amplitude: number) =>
+  Array.from({ length: n }, (_, i) => Math.round(amplitude * Math.sin((2 * Math.PI * i) / period)));
+
 /**
  * Sounds to extract (scripts/<script>.as): uncompressed ramps at three
- * rates and both sizes, the MP3s of sounds/ as DefineSounds, one with
- * seekSamples, and the 44.1 kHz one's bytes, plain and with a LAME header,
- * as ByteArrays, bound to classes by name.
+ * rates and both sizes, ADPCM sines mono and stereo, the MP3s of sounds/
+ * as DefineSounds, one with seekSamples, and the 44.1 kHz one's bytes,
+ * plain and with a LAME header, as ByteArrays, bound to classes by name.
  */
 export const extractSounds =
   (script: string) =>
@@ -2286,6 +2367,24 @@ export const extractSounds =
         w.defineSound(7, { format: 2, rate: 2, sixteen: true, samples: 5513 }, mp3(tone22, 0)),
       ],
     ];
+    sounds.push(
+      [
+        "Adpcm22",
+        w.defineSound(
+          8,
+          { format: 1, rate: 2, sixteen: true, samples: 9000 },
+          adpcm([sine(9000, 50, 12000)]),
+        ),
+      ],
+      [
+        "Adpcm11Stereo",
+        w.defineSound(
+          9,
+          { format: 1, rate: 1, sixteen: true, stereo: true, samples: 3000 },
+          adpcm([sine(3000, 40, 9000), sine(3000, 25, -5000)]),
+        ),
+      ],
+    );
     const tags = sounds.map(([, tag]) => tag);
     const classes = sounds.map(([name]) =>
       compile(name, `package { import flash.media.Sound; public class ${name} extends Sound {} }`),
@@ -2298,8 +2397,8 @@ export const extractSounds =
       tags: [
         w.fileAttributes(true),
         ...tags,
-        w.binaryData(8, tone),
-        w.binaryData(9, soundFile("tone-tagged.mp3")),
+        w.binaryData(20, tone),
+        w.binaryData(21, soundFile("tone-tagged.mp3")),
         w.doAbc(
           compile(
             "Mp3Tagged",
@@ -2318,9 +2417,10 @@ export const extractSounds =
         w.doAbc(compile(script)),
         w.symbolClass([
           [0, script],
-          ...sounds.map(([name], i): [number, string] => [i + 1, name]),
-          [8, "Mp3Bytes"],
-          [9, "Mp3Tagged"],
+          // Each DefineSound's id, after its long tag header.
+          ...sounds.map(([name, tag]): [number, string] => [tag[6] | (tag[7] << 8), name]),
+          [20, "Mp3Bytes"],
+          [21, "Mp3Tagged"],
         ]),
         w.showFrame(),
         w.showFrame(),

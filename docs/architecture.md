@@ -1946,8 +1946,11 @@ not the decoder's duration, give the embedded sound's `length`.
 does (`media/extract.ts`, the `sound-extract` case): each sample held for
 as many as its rate falls short, and positions counting the sound's own
 samples. An uncompressed or ADPCM sound is decoded for it at once, whole
-samples only. An MP3 is decoded for it apart from the decode it plays,
-the first time a script extracts it, and kept: at the MP3's own rate, of
+samples only; ADPCM as adl has it, each packet's header its first sample,
+in blocks of 2048 samples the last of which runs on past the data, and
+with adl's seeks, whose packets' offsets wrap in 32 bits. An MP3 is
+decoded for it apart from the decode it plays, the first time a script
+extracts it, and kept: at the MP3's own rate, of
 whole frames, with a Xing or Info header frame as a frame of silence, as
 Flash decodes it rather than trimmed by it as a browser would, and a
 DefineSound's seekSamples skipped. Playback keeps the browser's decode of

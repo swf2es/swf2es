@@ -58,6 +58,41 @@ package {
       trace("own samples", s.extract(b, 20), b.length, s.extract(b, 300, 250), b.length,
         s.extract(b, 300, 31), b.length);
 
+      // ADPCM: each packet's header sample, blocks of 2048 samples run on
+      // past the data, and adl's wrapped seeks.
+      for each (name in ["Adpcm22", "Adpcm11Stereo"]) {
+        s = make(name);
+        b = new ByteArray();
+        b.endian = Endian.LITTLE_ENDIAN;
+        n = s.extract(b, 10000000);
+        var count:int = name == "Adpcm22" ? 9000 : 3000;
+        var ratio:int = name == "Adpcm22" ? 2 : 4;
+        var sum:Number = 0;
+        var head:Array = [];
+        for (var i:int = 0; i < count; i++) {
+          b.position = i * ratio * 8;
+          var left:int = Math.round(b.readFloat() * 32768);
+          var right:int = Math.round(b.readFloat() * 32768);
+          sum += left * (i % 7 + 1) - right * (i % 5 + 1);
+          if (i < 6 || (i > 4093 && i < 4099)) {
+            head.push(left + "/" + right);
+          }
+        }
+
+        trace(name, s.length, n, b.length, sum, head);
+        var seeks:Array = [];
+        for each (var start:Number in [0, 1000, 2999, 3000, 4095, 4096, 8999, 9000, 268435456,
+          536870912 + 100, 536870912 - 100, 1e9, 1e9 + 2048, 2147483647, 2147483648, 1e12]) {
+          b = new ByteArray();
+          b.endian = Endian.LITTLE_ENDIAN;
+          n = s.extract(b, 10, start);
+          b.position = 0;
+          seeks.push(start + ":" + n + (b.length ? "=" + Math.round(b.readFloat() * 32768) : ""));
+        }
+
+        trace(name, "starts", seeks.join(" "));
+      }
+
       for each (name in ["Mp3", "Mp3Whole", "Mp3Mono22"]) {
         s = make(name);
         trace(name, s.length, s.bytesTotal);

@@ -10,8 +10,8 @@ import type { ExtractedSamples, SoundMix } from "../../../media/audio.js";
 import {
   EXTRACT_RATE,
   type ExtractSource,
+  embeddedSource,
   extractSamples,
-  soundSamples,
   toExtractRate,
 } from "../../../media/extract.js";
 import { mp3Frames } from "../../../media/mp3.js";
@@ -36,7 +36,7 @@ type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
 /** An uncompressed or ADPCM DefineSound's samples, decoded once for extract; null for another format. */
-const embeddedSamples = new WeakMap<SoundCharacter, Float32Array[] | null>();
+const embeddedSources = new WeakMap<SoundCharacter, ExtractSource | null>();
 
 /**
  * An MP3's samples as Flash decodes them, by its DefineSound or by the
@@ -199,13 +199,13 @@ export function soundNatives(s: Scripting): avm2.Natives {
     const character = sound.character;
     const definition = character?.definition;
     if (character && definition && definition.format !== 2) {
-      let channels = embeddedSamples.get(character);
-      if (channels === undefined) {
-        channels = soundSamples(definition);
-        embeddedSamples.set(character, channels);
+      let source = embeddedSources.get(character);
+      if (source === undefined) {
+        source = embeddedSource(definition);
+        embeddedSources.set(character, source);
       }
 
-      return channels ? { rate: definition.sampleRate, channels, skip: 0, whole: true } : null;
+      return source;
     }
 
     const key = character ?? sound;
@@ -253,12 +253,18 @@ export function soundNatives(s: Scripting): avm2.Natives {
         return 0;
       }
 
+      const source = extractSource(sound);
       const start = s.rt.toNumber(startPosition);
       if (start >= 0) {
-        sound.extracted = Math.floor(start);
+        // Past 32 bits a start is from the beginning, as in adl.
+        const at = start >= 2 ** 31 ? 0 : Math.floor(start);
+        sound.extracted = source?.seek ? source.seek(at) : at;
+        if (source && sound.extracted >= (source.starts ?? Number.POSITIVE_INFINITY)) {
+          sound.extracted = source.channels[0].length;
+          return 0;
+        }
       }
 
-      const source = extractSource(sound);
       if (!source) {
         return 0;
       }
@@ -641,7 +647,8 @@ export function soundHooks(s: Scripting): Record<string, avm2.ClassHook> {
           url: null,
           loaded: data?.data.length ?? 0,
           total: data?.data.length ?? 0,
-          length: data ? (data.sampleCount * 1000) / data.sampleRate : 0,
+          // In samples a millisecond, to adl's last bit.
+          length: data ? data.sampleCount / (data.sampleRate / 1000) : 0,
           used: !!data,
           generation: 0,
           abort: null,

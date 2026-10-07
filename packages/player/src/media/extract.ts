@@ -22,14 +22,18 @@ export interface ExtractSource {
    * none.
    */
   whole: boolean;
+  /** Where a script may start it, short of its end: an ADPCM sound's samples, not the silence after them. */
+  starts?: number;
+  /** Where a start lands, for a sound whose seeking adl gets wrong. */
+  seek?: (start: number) => number;
 }
 
-/** An uncompressed or ADPCM DefineSound's samples, or null for another format. */
-export function soundSamples(sound: Sound): Float32Array[] | null {
+/** An uncompressed or ADPCM DefineSound's samples to extract, or null for another format. */
+export function embeddedSource(sound: Sound): ExtractSource | null {
   const n = sound.channels;
+  const source = { rate: sound.sampleRate, skip: 0, whole: true };
   if (sound.format === 1) {
-    const samples = decodeAdpcm(sound.data, n);
-    return deinterleave(samples.length / n, n, (i) => samples[i] / 32768);
+    return { ...source, ...adpcmSource(sound.data, n) };
   }
 
   if (sound.format !== 0 && sound.format !== 3) {
@@ -39,9 +43,45 @@ export function soundSamples(sound: Sound): Float32Array[] | null {
   const view = new DataView(sound.data.buffer, sound.data.byteOffset, sound.data.byteLength);
   const size = sound.sampleSize / 8;
   const frames = Math.min(sound.sampleCount, Math.floor(sound.data.byteLength / (size * n)));
-  return deinterleave(frames, n, (i) =>
-    size === 1 ? (view.getUint8(i) - 128) / 128 : view.getInt16(i * 2, true) / 32768,
-  );
+  return {
+    ...source,
+    channels: deinterleave(frames, n, (i) =>
+      size === 1 ? (view.getUint8(i) - 128) / 128 : view.getInt16(i * 2, true) / 32768,
+    ),
+  };
+}
+
+/** Samples adl decodes in blocks of 2048, the last run on past the data as if its bits went on as zeros. */
+const ADPCM_BLOCK = 2048;
+
+/** Samples a packet: its header's and 4095 codes'. */
+const ADPCM_PACKET = 4096;
+
+/**
+ * An ADPCM sound's samples as adl extracts them: blocks of samples, the
+ * last running on as if the data's bits went on as zeros (where adl reads
+ * on into whatever follows the data), though a script may start only
+ * within the data. A start's packet's offset in bits is reckoned in 32
+ * bits: where that wraps negative, adl starts from the first packet, as
+ * far into it as the start is into its own.
+ */
+function adpcmSource(
+  data: Uint8Array,
+  n: 1 | 2,
+): Pick<ExtractSource, "channels" | "starts" | "seek"> {
+  const frames = decodeAdpcm(data, n).length / n;
+  const padded = (Math.floor(frames / ADPCM_BLOCK) + 1) * ADPCM_BLOCK;
+  const bits = data.length ? (data[0] >> 6) + 2 : 4;
+  const more = new Uint8Array(data.length + Math.ceil(((padded - frames) * bits * n) / 8) + 8 * n);
+  more.set(data);
+  const samples = decodeAdpcm(more, n);
+  const packetBits = 22 * n + (ADPCM_PACKET - 1) * bits * n;
+  return {
+    channels: deinterleave(padded, n, (i) => samples[i] / 32768),
+    starts: frames,
+    seek: (start) =>
+      Math.imul(Math.floor(start / ADPCM_PACKET), packetBits) < 0 ? start % ADPCM_PACKET : start,
+  };
 }
 
 function deinterleave(frames: number, n: number, at: (i: number) => number): Float32Array[] {

@@ -368,7 +368,7 @@ test("a clip a script takes off plays its stream on; one the timeline takes off 
   ]);
 });
 
-test("ADPCM decodes as Ruffle's decoder, and a stream's blocks join into one sound", () => {
+test("ADPCM decodes as adl does, the header's sample first, and a stream's blocks join into one sound", () => {
   // 2-bit codes; a mono packet: sample 0, step index 0, then codes 01, 11, 00 and 10, sign first.
   const bits = "00" + "0000000000000000" + "000000" + "01" + "11" + "00" + "10";
   const bytes = new Uint8Array(Math.ceil(bits.length / 8));
@@ -376,8 +376,8 @@ test("ADPCM decodes as Ruffle's decoder, and a stream's blocks join into one sou
     bytes[i >> 3] |= Number(bits[i]) << (7 - (i & 7));
   }
 
-  // Step 7: +(3 + 7), index +2; step 9: -(4 + 9), +2; step 11: +5, -1; step 10: -5.
-  assert.deepEqual([...decodeAdpcm(bytes, 1)], [10, -3, 2, -3]);
+  // The header's 0; step 7: +(3 + 7), index +2; step 9: -(4 + 9), +2; step 11: +5, -1; step 10: -5.
+  assert.deepEqual([...decodeAdpcm(bytes, 1)], [0, 10, -3, 2, -3]);
 
   const { sound, starts } = streamSound(
     { format: 3, sampleRate: 11025, sampleSize: 16, channels: 2, samplesPerBlock: 2 },
@@ -497,7 +497,8 @@ test("browser audio plays to an out point and scales each channel by the envelop
     automation.length = 0;
     const host = browserAudioHost();
     assert.ok(host);
-    // An ADPCM sound decodes to its samples: two of 2-bit codes, as the decoder's own test.
+    // An ADPCM sound decodes to its samples: its header's and four of 2-bit
+    // codes, as the decoder's own test.
     const clip = await host.decode({
       id: 1,
       format: 1,
@@ -510,7 +511,7 @@ test("browser audio plays to an out point and scales each channel by the envelop
     });
     assert.deepEqual(
       decoded.map((v) => Math.round(v * 32768)),
-      [10, -3, 2, -3],
+      [0, 10, -3, 2, -3],
     );
 
     automation.length = 0;
