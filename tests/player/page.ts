@@ -95,9 +95,15 @@ async function scriptingFor(
     },
   });
   const libraries = await Promise.all(
-    ["builtin", "playerglobal"].map(
-      async (n) => new Uint8Array(await (await fetch(`/libraries/${n}.abc`)).arrayBuffer()),
-    ),
+    ["builtin", "playerglobal"].map(async (n) => {
+      // A missing library would reach codegen as an empty ABC, rejected as #1107 as if the SWF's.
+      const response = await fetch(`/libraries/${n}.abc`);
+      if (!response.ok) {
+        throw new Error(`no /libraries/${n}.abc: fetch them with libraries.ts's libraryAbcs()`);
+      }
+
+      return new Uint8Array(await response.arrayBuffer());
+    }),
   );
   await scripting.loadLibraries(libraries);
   return scripting;
