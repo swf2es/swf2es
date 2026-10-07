@@ -133,6 +133,7 @@ const web = await import("@swf2es/web");
 web.configure({
   libraries: { builtin: "/libraries/builtin.abc", playerglobal: "/libraries/playerglobal.abc" },
   socketProxy: [{ host: "example.test", port: 1234, proxyUrl: "ws://relay.invalid/" }],
+  cache: true,
 });
 const replaced = web.replaceFlash();
 
@@ -279,7 +280,13 @@ function survivors() {
   };
 }
 
+/** The IndexedDB databases the page has: the module cache's, once a player stored a module. */
+async function databases() {
+  return (await indexedDB.databases()).map((d) => d.name);
+}
+
 Object.assign(globalThis, {
+  databases,
   booted,
   replacement,
   externalInterface,

@@ -1683,9 +1683,11 @@ with #2031; and `cache`. The page fetches and compiles codegen.wasm once
 and the libraries once, and each player instantiates the compiled module
 and reads the same bytes. A player has a Codegen of its own: Scripting
 resets the compiler it is given, and its domains' numbers are its own,
-so two players on one instance would take each other's over. `cache` is
-a hook for the player's IndexedDB module cache, not yet on dev: until it
-is, it compiles as without.
+so two players on one instance would take each other's over. `cache:
+true` gives every player one IndexedDB module cache
+(`player-hosts/indexeddb`, see [Caching modules](#caching-modules)); it
+is off by default, as the player's is, a first visit being slower for
+the writes.
 
 ExternalInterface (`external.ts`) speaks Flash's protocol. A SWF's
 `call` is the JavaScript playerglobal writes, `name(args)` inside

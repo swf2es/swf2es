@@ -39,6 +39,7 @@ the WebSocket relays that reach its servers:
     libraries: { builtin: "/flash/builtin.abc", playerglobal: "/flash/playerglobal.abc" },
     // codegen: "/swf2es/codegen.wasm",  // by default the import map's @swf2es/codegen/codegen.wasm
     socketProxy: [{ host: "game.example", port: 5588, proxyUrl: "wss://relay.example/5588" }],
+    cache: true, // keep compiled modules in IndexedDB for the next visit
   });
   // The page's Flash <object> and <embed> tags, swapped for the element.
   replaceFlash();

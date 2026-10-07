@@ -3,7 +3,8 @@
 // swaps, one of them nested <object> and <embed>. It checks that each
 // boots and draws, that the tags' parameters carry over, ExternalInterface
 // both ways and its allowScriptAccess="never", that two players share one
-// compile of codegen.wasm and one copy of the libraries, that the element
+// compile of codegen.wasm and one copy of the libraries and keep their
+// modules in the configured IndexedDB cache, that the element
 // follows its size and the device's pixels, and that destroy lets go of
 // everything: 20 elements made and destroyed leave no player, codegen,
 // socket or audio context alive, and the heap no larger than a bound.
@@ -197,6 +198,10 @@ check(
     assert.equal(counts.libraryFetches, 2);
   },
 );
+
+check("with cache, the players keep their modules in IndexedDB", async (evaluate) => {
+  assert.ok((await call<string[]>(evaluate, "databases()")).includes("swf2es-modules"));
+});
 
 check("the element follows its size and the device's pixels", async (evaluate) => {
   const r = await call<{ dpr: number; canvas: number[]; css: string[] }>(evaluate, "resize()");

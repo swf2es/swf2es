@@ -2,7 +2,8 @@
 // the libraries come from, how sockets reach their servers, whether
 // compiled code is cached. Each is fetched once a page, on first use.
 import { type Codegen, createCodegen } from "@swf2es/codegen";
-import type { SocketHost } from "@swf2es/player";
+import type { ModuleCache, SocketHost } from "@swf2es/player";
+import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { webSocketSocketHost } from "@swf2es/player-hosts/websocket";
 
 /** A flash.net.Socket's host and port, and the WebSocket relay that reaches it, as Ruffle's socketProxy lists them. */
@@ -28,9 +29,9 @@ export interface Configuration {
    */
   socketProxy?: ((host: string, port: number) => string | null) | SocketProxy[];
   /**
-   * Whether compiled code is kept between visits. Not yet: the player's
-   * module cache (IndexedDB) is not on this branch, and `true` compiles
-   * as `false` does until it is.
+   * Whether the modules the compiler writes are kept in IndexedDB for the
+   * page's next visit, which then links them without compiling: off by
+   * default, as a first visit is some 9% slower for the writes.
    */
   cache?: boolean;
 }
@@ -38,6 +39,7 @@ export interface Configuration {
 let config: Configuration = {};
 let codegenModule: Promise<WebAssembly.Module> | null = null;
 let libraryBytes: Promise<Uint8Array[]> | null = null;
+let moduleCache: ModuleCache | null = null;
 
 /**
  * Set the page's configuration, once, before the first player loads: what
@@ -131,11 +133,12 @@ export function socketHost(): SocketHost | undefined {
   };
 }
 
-/**
- * What Scripting is given for `cache`. TODO: the player's IndexedDB module
- * cache (player-hosts' indexeddb, Scripting's `moduleCache`) is not on dev
- * yet; once it is, `cache: true` passes it here and every player shares it.
- */
-export function moduleCacheOptions(): Record<string, never> {
-  return {};
+/** What Scripting is given for `cache`: one IndexedDB module cache, shared by every player on the page. */
+export function moduleCacheOptions(): { moduleCache?: ModuleCache } {
+  if (!config.cache || typeof indexedDB === "undefined") {
+    return {};
+  }
+
+  moduleCache ??= indexedDbModuleCache();
+  return { moduleCache };
 }
