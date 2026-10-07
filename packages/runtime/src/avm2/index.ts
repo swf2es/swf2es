@@ -1,6 +1,7 @@
 // The AVM2 runtime: what generated modules call as `rt`.
 import { builtinHooks, builtinNatives } from "./natives/index.js";
-import { Runtime, type RuntimeOptions } from "./runtime.js";
+import type { RuntimeOptions } from "./options.js";
+import { Runtime } from "./runtime.js";
 
 export type { Abc, AsObject, CompileUnit, FoundDefinition, Method, Value } from "./descriptors.js";
 export { messages } from "./messages.js";
@@ -18,6 +19,7 @@ export { type NativeClass, plain, registerNativeClass } from "./natives/define.j
 export { builtinHooks, builtinNatives } from "./natives/index.js";
 // avmplus' XML tokenizer, which playerglobal's flash.xml.XMLDocument parses with too.
 export { XMLParser, XMLTag } from "./natives/xml/parser.js";
+export type { RuntimeOptions, ShellFiles } from "./options.js";
 export { errorMessages } from "./player-messages.js";
 export {
   type ClassHook,
@@ -25,8 +27,6 @@ export {
   frameScripts,
   type NativesProvider,
   Runtime,
-  type RuntimeOptions,
-  type ShellFiles,
   setStaticVar,
 } from "./runtime.js";
 

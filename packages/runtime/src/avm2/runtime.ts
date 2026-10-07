@@ -51,6 +51,7 @@ import {
   TypeName,
 } from "./names.js";
 import { convertDoubleToString } from "./numbers.js";
+import { defaultPrint, memoryFiles, type RuntimeOptions, type ShellFiles } from "./options.js";
 import { errorMessages } from "./player-messages.js";
 import {
   ENTRIES,
@@ -75,61 +76,12 @@ import { WeakKeys, WeakName } from "./weak-keys.js";
 /** A native with argument counts to check, when it has any, and its declared parameter count (see Runtime.native). */
 type CountedMethod = Method & { $min?: number; $max?: number; $length?: number };
 
-export interface RuntimeOptions {
-  /** Where trace and print write a line. */
-  print?: (line: string) => void;
-  /**
-   * Behave as the debugger player: error messages carry avmplus' text
-   * ("Error #1009: Cannot access ..."), and System.isDebugger is true. By
-   * default they are the release player's and avmshell's, "Error #1009".
-   */
-  debugger?: boolean;
-  /**
-   * An ABC compiled for avmshell's Domain.loadBytes, which runs it at once:
-   * its module, or the VerifyError it was rejected with. The host compiles
-   * it, as the runtime does not include the compiler, into the domain
-   * `unit` names, with its findings; without it loadBytes is unsupported.
-   * Each module it evaluates needs a script of its own in stacks, a
-   * sourceURL comment, for Domain.currentDomain to find its code (see
-   * Runtime.codeDomain).
-   */
-  compileAbc?: (abc: Uint8Array, unit: CompileUnit) => ((rt: Runtime) => Abc) | number;
-  /** Where avmshell's File reads and writes: by default in memory, empty at the start. */
-  files?: ShellFiles;
-  /**
-   * The SWF version whose behaviour avmplus keeps where it changed (its
-   * BugCompatibility): avmshell's, 31, by default. A player sets its main
-   * SWF's.
-   */
-  swfVersion?: number;
-}
-
 /**
  * A sealed Array subclass's elements from SWF 13, as avmplus' ArrayObject
  * keeps none for one: never any. Shared and frozen; what writes elements
  * checks for it, and fails as a sealed object does.
  */
 export const SEALED_ELEMENTS: Value[] = Object.freeze([]) as unknown as Value[];
-
-/** avmshell's file system, as its File sees it. */
-export interface ShellFiles {
-  /** A file's bytes, or null if it cannot be opened. */
-  read(name: string): Uint8Array | null;
-  /** Whether the file could be written. */
-  write(name: string, bytes: Uint8Array): boolean;
-}
-
-/** Files that live as long as the runtime. */
-function memoryFiles(): ShellFiles {
-  const files = new Map<string, Uint8Array>();
-  return {
-    read: (name) => files.get(name) ?? null,
-    write: (name, bytes) => {
-      files.set(name, bytes.slice());
-      return true;
-    },
-  };
-}
 
 /** How a class that holds its own elements indexes them. */
 export interface IndexHook {
@@ -3938,11 +3890,6 @@ function entryFor(head: PropertyCache, t: Traits): PropertyCache | null {
   const victim = head.victim as PropertyCache;
   head.victim = victim.next ?? head;
   return victim;
-}
-
-/** Where output goes by default: the host's console. */
-function defaultPrint(line: string): void {
-  (globalThis as { console?: { log(line: string): void } }).console?.log(line);
 }
 
 const BUILTIN_REFS = new Set(["int", "uint", "Number", "String", "Boolean", "Object"]);
