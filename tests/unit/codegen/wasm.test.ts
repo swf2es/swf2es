@@ -4,7 +4,9 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { COMPILER_VERSION, cacheKey, createCodegen } from "@swf2es/codegen";
+import { abc, tables, u30 } from "./abc-builder.ts";
 import { script } from "./ir-cases.ts";
+import { classes, METHOD, mn, pool, SLOT } from "./link-cases.ts";
 import { testing } from "./testing-module.ts";
 
 const wasmPath = fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"));
@@ -210,4 +212,89 @@ test("compiling before an ABC is added is an error, not a trap", async () => {
 test("codegen.wasm carries the hash of its bytes as its identity", async () => {
   const codegen = await createCodegen(module);
   assert.match(codegen.identity ?? "", /^[0-9a-f]{64}$/);
+});
+
+/**
+ * What a module cache relies on: B's slot x is of type A, found in B's
+ * domain; the main domain above then gains another A, whose m has another
+ * dispatch id, and C calls new B().x.m(). What C compiles to depends on
+ * whether B's slot was resolved before that A came, as compiling B does.
+ * B's module from a cache, its compile's log replayed, leaves the domain as
+ * compiling it did, so C compiles alike; skipped, C compiles otherwise,
+ * and its context says so.
+ */
+test("a module's log replayed in place of its compile leaves the domain alike", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, async () => {
+  const builtin = new Uint8Array(await readFile(new URL("builtin.abc", generated)));
+  const a = classes([
+    { name: mn("A"), base: mn("Object"), traits: [{ name: mn("m"), kind: METHOD }] },
+  ]);
+  const b = classes([
+    { name: mn("B"), base: mn("Object"), traits: [{ name: mn("x"), kind: SLOT, index: mn("A") }] },
+  ]);
+  const other = classes([
+    {
+      name: mn("A"),
+      base: mn("Object"),
+      traits: [
+        { name: mn("n"), kind: METHOD },
+        { name: mn("m"), kind: METHOD },
+      ],
+    },
+  ]);
+  // getlocal0, pushscope, new B().x.m(), returnvoid.
+  const code = [0xd0, 0x30, 0x5d, ...u30(mn("B")), 0x4a, ...u30(mn("B")), 0];
+  code.push(0x66, ...u30(mn("x")), 0x4f, ...u30(mn("m")), 0, 0x47);
+  const c = abc(
+    pool,
+    tables({
+      methods: [{}],
+      scripts: [{ init: 0 }],
+      bodies: [{ method: 0, code, maxStack: 2, localCount: 1, maxScopeDepth: 1 }],
+    }),
+  );
+
+  const codegen = await createCodegen(module);
+  // B compiled, replayed or neither: C's context and module.
+  const play = (b2: "compiled" | "replayed" | "skipped", log = "") => {
+    codegen.reset(50);
+    codegen.add(builtin, true);
+    const main = codegen.childDomain(0);
+    const child = codegen.childDomain(main);
+    codegen.add(a, false, child);
+    codegen.add(b, false, child);
+    const contextB = codegen.context(2);
+    let logB: string | null = null;
+    if (b2 === "compiled") {
+      logB = codegen.compileModuleLogged([], 2).log;
+    } else if (b2 === "replayed") {
+      assert.equal(codegen.replay(log, 2), true);
+    }
+
+    codegen.add(other, false, main);
+    codegen.add(c, false, child);
+    return { contextB, logB, contextC: codegen.context(4), moduleC: codegen.compileModule([], 4) };
+  };
+
+  const compiled = play("compiled");
+  assert.ok(compiled.logB);
+  const replayed = play("replayed", compiled.logB);
+  const skipped = play("skipped");
+  assert.deepEqual(replayed.contextB, compiled.contextB);
+  assert.deepEqual(replayed.contextC, compiled.contextC);
+  assert.equal(replayed.moduleC, compiled.moduleC);
+  assert.notEqual(skipped.moduleC, compiled.moduleC);
+  assert.notDeepEqual(skipped.contextC, compiled.contextC);
+});
+
+test("a malformed log is refused, not a trap", async () => {
+  const codegen = await createCodegen(module);
+  codegen.reset(50);
+  codegen.add(script([0x47]), false);
+  for (const log of ["x", "2 0 9 0", "3 0 0 99", "2 7 1 0", "2 0 1", "-1 0 0 0"]) {
+    assert.equal(codegen.replay(log), false, log);
+  }
+
+  assert.equal(codegen.replay(""), true);
 });

@@ -78,6 +78,28 @@ export interface Compiled {
  * (the builtins first), and the last one added compiles, whole or a method
  * at a time, to code that is byte for byte the same either way.
  */
+/**
+ * What ABC `index`'s module depends on in the domain beyond the ABCs'
+ * bytes (see Codegen.context).
+ */
+export interface ModuleContext {
+  /** The ABCs its application domain sees, by their positions among those added, in load order. */
+  abcs: number[];
+  /** Its own place in `abcs`. */
+  own: number;
+  /**
+   * The domain's log about those ABCs, in order: the lazy answers fixed so
+   * far and the findings recorded, each with how many of `abcs` there were.
+   */
+  log: string;
+}
+
+/** A module compiled, and what compiling it fixed in the domain, to replay in its place (Codegen.replay); null where it cannot be. */
+export interface LoggedModule {
+  module: string;
+  log: string | null;
+}
+
 export interface Codegen {
   /**
    * The identity of this codegen.wasm, a hash of its bytes that its build
@@ -162,6 +184,23 @@ export interface Codegen {
    */
   compileModule(hashes?: string[], index?: number): string;
   compileMethods(bodies: number[], index?: number): Map<number, string>;
+  /**
+   * What ABC `index`'s module depends on beyond the ABCs' bytes, for a
+   * cache key: besides the ABCs its domain sees, what the domain has
+   * fixed of what resolves lazily, which a later ABC in an ancestor would
+   * change were it first asked now. Null for an ABC never added.
+   */
+  context(index?: number): ModuleContext | null;
+  /** compileModule, with what the compile fixed in the domain (see replay). */
+  compileModuleLogged(hashes?: string[], index?: number): LoggedModule;
+  /**
+   * Fix in the domain what compiling ABC `index` did, from the log
+   * compileModuleLogged gave with its module, in place of compiling it:
+   * the domain is then as the compile would have left it, if its context
+   * is the one that compile had. False if the log is malformed or an
+   * entry fails, after doing those before it.
+   */
+  replay(log: string, index?: number): boolean;
 }
 
 /**
@@ -343,6 +382,34 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     compileModule(hashes = [], index = -1) {
       last("compileModule");
       return moduleOf(hashes, index, false);
+    },
+    context(index = -1) {
+      if (added === 0) {
+        return null;
+      }
+
+      const text = collected(wasm.domainContext(indexOf(index)));
+      if (text === "") {
+        return null;
+      }
+
+      const [abcs, own, ...log] = text.split("\n");
+      return {
+        abcs: abcs ? abcs.split(",").map(Number) : [],
+        own: Number(own),
+        log: log.join("\n"),
+      };
+    },
+    compileModuleLogged(hashes = [], index = -1) {
+      last("compileModuleLogged");
+      const mark = wasm.domainLogMark();
+      const module = moduleOf(hashes, index, false);
+      const log = collected(wasm.domainLogSince(mark, indexOf(index)));
+      return { module, log: log === "!" ? null : log };
+    },
+    replay(log, index = -1) {
+      last("replay");
+      return collected(wasm.domainReplay(log, indexOf(index)));
     },
     compileMethods(bodies, index = -1) {
       last("compileMethods");

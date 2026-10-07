@@ -8,7 +8,16 @@ import * as C from "./avm2/abc/constants";
 import { PADDING } from "./avm2/abc/reader";
 import { ModuleEmitter } from "./avm2/emit/module";
 import { Output } from "./avm2/emit/output";
-import { DOMAIN_Live, Domain } from "./avm2/link/domain";
+import {
+  DOMAIN_Live,
+  Domain,
+  LOG_Found,
+  LOG_None,
+  LOG_Resolve,
+  LOG_Sign,
+  LOG_Verify,
+} from "./avm2/link/domain";
+import { TRAITS_Activation, TRAITS_Instance, TRAITS_Script } from "./avm2/link/traits";
 
 export let domain = new Domain();
 
@@ -397,4 +406,258 @@ export function domainModuleEntries(): string {
   }
 
   return String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
+}
+
+/**
+ * What ABC `index`'s module depends on in the domain beyond the ABCs'
+ * bytes, for a host's cache key; "" if there is no such ABC. Its first
+ * line is the ABCs its application domain sees, by index in load order,
+ * those added after it included; the second its place among them; then,
+ * in the order they happened, the log's entries about them (see
+ * Domain.logKind), each with how many of them there were then: the first
+ * answers of what resolves lazily, which see the ABCs there are when they
+ * are first asked for, and what the domain and its ancestors were told
+ * they found. ABCs are named by their place in the first line, so that
+ * the same ABCs loaded at other indices give the same context.
+ */
+export function domainContext(index: i32 = -1): string {
+  const at = abcIndex(index);
+  if (at < 0) {
+    return "";
+  }
+
+  // Written into a buffer kept from call to call: a large application's
+  // log took codegen's memory from 32 to 64 MiB as strings joined.
+  const own = domain.abcDomain[at];
+  const seen = seenBy(own);
+  const out = context;
+  out.reset();
+  for (let i = 0; i < seen.length; i++) {
+    if (i > 0) {
+      out.byte(0x2c);
+    }
+
+    out.uint(seen[i]);
+  }
+
+  out.byte(0x0a);
+  out.uint(placeOf(seen, <u32>at));
+  let count: u32 = 0;
+  for (let e = 0; e < domain.logKind.length; e++) {
+    // Visible ABCs added before the entry happened.
+    while (count < <u32>seen.length && seen[count] < domain.logAt[e]) {
+      count++;
+    }
+
+    const kind = domain.logKind[e];
+    const place = placeOf(seen, domain.logAbc[e]);
+    if (kind === LOG_None || place < 0) {
+      continue;
+    }
+
+    const f = domain.logA[e];
+    const depth = kind === LOG_Found ? depthOf(own, domain.foundDomain[f]) : 0;
+    if (depth < 0) {
+      continue;
+    }
+
+    out.byte(0x0a);
+    out.uint(kind);
+    out.byte(0x20);
+    out.uint(place);
+    out.byte(0x20);
+    out.uint(count);
+    out.byte(0x20);
+    if (kind !== LOG_Found) {
+      out.uint(f);
+      out.byte(0x20);
+      out.uint(domain.logB[e]);
+      continue;
+    }
+
+    const uri = domain.foundUri[f];
+    const name = domain.foundName[f];
+    out.uint(depth);
+    out.byte(0x20);
+    out.uint(domain.foundKind[f]);
+    out.byte(0x20);
+    out.uint(domain.foundAsType[f]);
+    out.byte(0x20);
+    named(out, uri);
+    named(out, name);
+  }
+
+  return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
+}
+
+/** domainContext's buffer, kept from call to call. */
+const context = new Output();
+
+/** `s` as domainContext writes a name: its length, ":", and its code units, a backslash or one past ASCII escaped. */
+function named(out: Output, s: string): void {
+  out.uint(s.length);
+  out.byte(0x3a);
+  for (let i = 0; i < s.length; i++) {
+    const c = <u32>s.charCodeAt(i);
+    if (c < 0x80 && c !== 0x5c) {
+      out.byte(<u8>c);
+    } else {
+      out.unit(c);
+    }
+  }
+}
+
+/** How long the domain's log is, to tell what a compile adds to it (domainLogSince). */
+export function domainLogMark(): i32 {
+  return domain.logKind.length;
+}
+
+/**
+ * The log's entries since `mark`, as a compile of ABC `index` added them,
+ * a line each, its ABCs named by their place among those the ABC's
+ * application domain sees: what domainReplay does again to leave the
+ * domain as that compile did, when a host has the module from its cache.
+ * "!" if an entry is of another kind, or of an ABC the domain does not see.
+ */
+export function domainLogSince(mark: i32, index: i32 = -1): string {
+  const at = abcIndex(index);
+  if (at < 0 || mark < 0) {
+    return "!";
+  }
+
+  const seen = seenBy(domain.abcDomain[at]);
+  const out: string[] = [];
+  for (let e = mark; e < domain.logKind.length; e++) {
+    const kind = domain.logKind[e];
+    if (kind === LOG_None) {
+      continue;
+    }
+
+    const place = placeOf(seen, domain.logAbc[e]);
+    if (kind === LOG_Found || place < 0) {
+      return "!";
+    }
+
+    out.push(`${kind} ${place} ${domain.logA[e]} ${domain.logB[e]}`);
+  }
+
+  return out.join("\n");
+}
+
+/**
+ * Do again for ABC `index` what a compile of it added to the log, as
+ * domainLogSince wrote it, without compiling: the lazy answers it fixed,
+ * asked for again with the ABCs there now, which a host checks are those
+ * of that compile (domainContext). False if an entry is malformed or comes
+ * out an error; the entries before it are done.
+ */
+export function domainReplay(log: string, index: i32 = -1): bool {
+  const at = abcIndex(index);
+  if (at < 0) {
+    return false;
+  }
+
+  verified = null;
+  written = null;
+  const rows = domain.rows();
+  const seen = seenBy(domain.abcDomain[at]);
+  const lines = log.length ? log.split("\n") : [];
+  let ok = true;
+  for (let l = 0; l < lines.length && ok; l++) {
+    const parts = lines[l].split(" ");
+    if (parts.length !== 4) {
+      ok = false;
+      break;
+    }
+
+    const kind = I32.parseInt(parts[0]);
+    const place = I32.parseInt(parts[1]);
+    const a = I32.parseInt(parts[2]);
+    const b = I32.parseInt(parts[3]);
+    if (place < 0 || place >= seen.length || a < 0 || b < 0) {
+      ok = false;
+      break;
+    }
+
+    const abc = seen[place];
+    ok = replayed(<u8>kind, abc, <u32>a, <u32>b);
+  }
+
+  domain.weigh(<u32>at, rows);
+  return ok;
+}
+
+/** Entry `kind` of ABC `abc` done again, as Domain.replay does one, its numbers checked against the ABC first. */
+function replayed(kind: u8, abc: u32, a: u32, b: u32): bool {
+  const info = domain.abcs[abc];
+  if (kind === LOG_Verify) {
+    verifyMethods(domain, abc);
+    return true;
+  }
+
+  if (kind === LOG_Sign) {
+    return b < info.methodCount && domain.traits.sign(domain, domain.methodStart[abc] + b) === 0;
+  }
+
+  if (kind !== LOG_Resolve || a < TRAITS_Instance || a > TRAITS_Activation) {
+    return false;
+  }
+
+  const owners =
+    a === TRAITS_Script
+      ? info.scriptCount
+      : a === TRAITS_Activation
+        ? <u32>domain.bodyTraits[abc].length
+        : info.classCount;
+  const t = b < owners ? domain.traitsOf(abc, a, b) : -1;
+  return t >= 0 && domain.traits.resolve(domain, <u32>t) === 0;
+}
+
+/** The live ABCs application domain `own` sees, by index, in load order, in a list kept from call to call. */
+function seenBy(own: u32): u32[] {
+  const seen = seenList;
+  seen.length = 0;
+  for (let i = 0; i < domain.abcs.length; i++) {
+    if (domain.sees(own, domain.abcDomain[i])) {
+      seen.push(<u32>i);
+    }
+  }
+
+  return seen;
+}
+
+const seenList: u32[] = [];
+
+/** ABC `abc`'s place in `seen`, or -1. */
+function placeOf(seen: u32[], abc: u32): i32 {
+  let low = 0;
+  let high = seen.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    if (seen[mid] === abc) {
+      return mid;
+    }
+
+    if (seen[mid] < abc) {
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return -1;
+}
+
+/** How many parents up from application domain `own` `other` is, or -1 if it is not `own` or an ancestor. */
+function depthOf(own: u32, other: u32): i32 {
+  let depth = 0;
+  for (let d = <i32>own; d >= 0; d = domain.domainParent[d]) {
+    if (<u32>d === other) {
+      return depth;
+    }
+
+    depth++;
+  }
+
+  return -1;
 }

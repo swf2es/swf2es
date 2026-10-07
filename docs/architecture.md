@@ -24,7 +24,9 @@ took, see Linking), and the last
 one added compiles with `compile`, whole,
 to its module, source map and the entry of each method, with
 `compileModule` to its module alone, or with `compileMethods`, a method at
-a time as the JIT compiles each on its first call. The source map and the
+a time as the JIT compiles each on its first call; `context`,
+`compileModuleLogged` and `replay` serve a cache of modules (see Caching
+modules). The source map and the
 entries are written each in a call of its own, after the module's garbage
 is collected, and only when asked for: written with the module, a large
 ABC's entries alone took codegen's memory from 128 to 256 MiB, which wasm
