@@ -31,6 +31,13 @@
 // between two, as in a game's creatures with a glow on every few parts.
 // The rig has 12 parts, so any K of 12 or more blurs the first alone.
 //
+// --masks N plays instead N panels of a scrolling list, each a sprite of
+// 20 rows clipped by a rectangle on the timeline (clipDepth), the rows
+// sliding up a little each frame, as a game's inventory, chat or shop
+// does: what the stencil masks cost. --unmasked places the rectangle as a
+// plain shape instead, the same art with no mask, which bounds what any
+// cheaper clip (a scissor) could gain.
+//
 // --idle K renders K times more after each frame with no tick between, as
 // a host that draws on every animation frame does, and times those apart.
 //
@@ -60,7 +67,7 @@
 //
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--glide]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
+//     | --toggle-static N | --masks N [--unmasked]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs] [--no-table] [--min-run N]
 //     [--json]
 import * as w from "../swf-writer.ts";
@@ -80,6 +87,7 @@ const toggleEvery = Math.max(1, option("toggle-every", 1));
 const nestedGroups = args.includes("--nested-groups");
 const idleRenders = option("idle", 0);
 const toggle = option("toggle", 0);
+const masks = option("masks", 0);
 const toggleStatic = option("toggle-static", 0);
 const frames = option("frames", 120);
 const WARMUP = 10;
@@ -378,6 +386,83 @@ function toggleStaticSwf(count: number): Uint8Array {
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
 }
 
+/**
+ * `count` panels of a list of 20 rows that scrolls on a loop of 24 frames,
+ * each clipped to its panel by a rectangle on depth 1, or with the
+ * rectangle drawn under the rows instead where `unmasked` (--masks).
+ */
+function masksSwf(count: number, unmasked: boolean): Uint8Array {
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
+  for (let id = 1; id <= 8; id++) {
+    tags.push(character(id));
+  }
+
+  const panelW = 100 * TWIPS;
+  const panelH = 160 * TWIPS;
+  tags.push(
+    w.shape({
+      id: 30,
+      bounds: [0, panelW, 0, panelH],
+      fills: [0xffe8e8f0],
+      paths: [
+        {
+          fill1: 1,
+          commands: [
+            { move: [0, 0] },
+            { line: [panelW, 0] },
+            { line: [panelW, panelH] },
+            { line: [0, panelH] },
+            { line: [0, 0] },
+          ],
+        },
+      ],
+    }),
+  );
+  const rows = 20;
+  const rowH = 20 * TWIPS;
+  const loop = 24;
+  const panel: Uint8Array[] = [];
+  for (let f = 0; f < loop; f++) {
+    if (f === 0) {
+      panel.push(w.place({ depth: 1, character: 30, clipDepth: unmasked ? undefined : rows + 1 }));
+    }
+
+    for (let i = 0; i < rows; i++) {
+      const matrix = {
+        a: 0.4,
+        d: 0.4,
+        tx: (10 + (i % 4) * 25) * TWIPS,
+        ty: 10 * TWIPS + i * rowH - Math.round((f / loop) * rows * rowH * 0.5),
+      };
+      panel.push(
+        f === 0
+          ? w.place({ depth: i + 2, character: 1 + (i % 8), matrix })
+          : w.place({ depth: i + 2, move: true, matrix }),
+      );
+    }
+
+    panel.push(w.showFrame());
+  }
+
+  tags.push(w.sprite(40, loop, panel));
+  const columns = Math.ceil(Math.sqrt(count * 1.5));
+  for (let i = 0; i < count; i++) {
+    tags.push(
+      w.place({
+        depth: i + 1,
+        character: 40,
+        matrix: {
+          tx: (i % columns) * Math.round(WIDTH / columns) * TWIPS,
+          ty: Math.floor(i / columns) * Math.round(HEIGHT / Math.ceil(count / columns)) * TWIPS,
+        },
+      }),
+    );
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
 /** 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st... */
 const ordinal = (n: number) => {
   const tens = Math.floor(n / 10) % 10;
@@ -443,17 +528,19 @@ const swf =
       ? toggleSwf(toggle)
       : toggleStatic > 0
         ? toggleStaticSwf(toggleStatic)
-        : branches > 0
-          ? branchSwf(branches)
-          : rig > 0
-            ? rigSwf(
-                rig,
-                args.includes("--swap"),
-                args.includes("--fresh"),
-                args.includes("--blurred") || filtered > 0,
-                args.includes("--glide"),
-              )
-            : synthetic();
+        : masks > 0
+          ? masksSwf(masks, args.includes("--unmasked"))
+          : branches > 0
+            ? branchSwf(branches)
+            : rig > 0
+              ? rigSwf(
+                  rig,
+                  args.includes("--swap"),
+                  args.includes("--fresh"),
+                  args.includes("--blurred") || filtered > 0,
+                  args.includes("--glide"),
+                )
+              : synthetic();
 const result = await benchPlayer(
   swf,
   frames,
@@ -501,11 +588,13 @@ const summary = {
         ? `toggle of ${toggle}`
         : toggleStatic > 0
           ? `static toggle of ${toggleStatic}`
-          : branches > 0
-            ? `${branches} branches`
-            : rig > 0
-              ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
-              : shapes,
+          : masks > 0
+            ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+            : branches > 0
+              ? `${branches} branches`
+              : rig > 0
+                ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
+                : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   frames,
