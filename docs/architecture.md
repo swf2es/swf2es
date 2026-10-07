@@ -174,7 +174,15 @@ Each method goes through the same steps, in `codegen`:
    (the locals, scope stack and operand stack, each value with its type,
    whether it is known not null, and whether it is a with scope), merges it
    where control flow joins, and walks a block again when its entry state
-   changes, until none does. A second pass walks the blocks in code order
+   changes, until none does. avmplus knows a value not null after a null
+   check of it, but not the local it copies, so a frame state also keeps
+   which locals are neither null nor undefined at run time: checked since
+   they were last set, as a copy of them on the stack was, or compared with
+   a `pushnull` or `pushundefined` (`==`, not `===`; a value only typed
+   void, as a native's result, may be anything) or tested true where a
+   branch goes on, on every path in; a handler gets the locals as they were where its range threw.
+   That takes away only checks that cannot fail, and changes no type the
+   verifier sees. A second pass walks the blocks in code order
    with their final states; there `newclass` and `newfunction` capture the
    scope chains the methods they create run in, and the same pass will
    write the IR, so what is compiled is exactly what was verified. An ABC's
@@ -252,6 +260,19 @@ leaves its stack register a copy, read as the local itself, until the local
 changes or a branch needs the stack as it is. A value the next instruction
 only moves to a local (a `setlocal`) goes to the local straight, and a
 conversion that changes nothing writes no code.
+
+A null check is `r ?? nn(r)`, where `nn`, the module's, throws the
+runtime's TypeError for the value, 1009 for null and 1010 for undefined.
+It is made where the instruction it checks for reads the register, when
+that instruction reads it before doing anything that can throw or be
+seen, as a property's get, set or call does: `s0 = (s1 ?? nn(s1)).$2`,
+`rt.getProperty(l1 ?? nn(l1), M[3])`. Otherwise, as when a conversion
+of an argument comes between, it is a statement of its own, `s1 ??
+nn(s1);`. A method's count of arguments is checked first, as avmplus'
+`argcOk` does, and its ArgumentError 1063 thrown by the module's `ac`:
+`if (arguments.length - 1 >>> 0 > 2) ac(1, arguments.length);` for one
+to three. Neither `nn`'s frame nor `ac`'s is named with a `$`, so the
+stack a host is shown starts at the method, as before.
 
 Each module has a source map (version 3) from the ABC's `debugfile` and
 `debugline`, where an ABC compiled with them has them (asc's `-d`): the
@@ -423,9 +444,9 @@ a script initialised or a `newfunction` run, never per call, so a lazy
 one costs one check there; the function it returns is the entry's own.
 
 **Building an entry.** The entry's source, from `compileMethods`, is
-evaluated by a strict `Function` given the module's tables as parameters:
-`new Function("rt", "N", "S", "M", "V", "F", "A", '"use strict"; return ' +
-entry)`. Both halves of that matter:
+evaluated by a strict `Function` given the module's tables and helpers as
+parameters: `new Function("rt", "nn", "ac", "N", "S", "M", "V", "F", "A",
+'"use strict"; return ' + entry)`. Both halves of that matter:
 
 - A direct `eval` in the module's scope makes the functions it builds
   reach N, M, A and the rest by dynamic scope lookups: as3pb's and LZ4's

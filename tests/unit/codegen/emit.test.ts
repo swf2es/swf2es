@@ -552,3 +552,16 @@ test("a module's source map has each statement's line, from debugfile and debugl
   assert.equal(lineOf(js.findIndex((l) => l.trim() === "l1 = 5;")), 6);
   assert.equal(lineOf(js.findIndex((l) => l.trim() === "return l1;")), 8);
 });
+
+test("a null check is made where the instruction it checks for reads the value first", {
+  skip,
+}, () => {
+  const GETPROPERTY = 0x66;
+  const CONVERT_O = 0x77;
+  assert.match(
+    emit(script([GETLOCAL1, GETPROPERTY, 1, RETURNVALUE])),
+    /= rt\.getProperty\(l1 \?\? nn\(l1\), M\[1\]\);/,
+  );
+  // A conversion to Object reads it after a check of its own.
+  assert.match(emit(script([GETLOCAL1, CONVERT_O, RETURNVALUE])), /\n {4}l1 \?\? nn\(l1\);\n/);
+});

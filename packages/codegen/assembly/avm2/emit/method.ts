@@ -104,6 +104,16 @@ export class MethodEmitter {
   staticInit: bool = false;
   /** Where the block being written ends: the instruction after its last. */
   blockLast: u32 = 0;
+  /**
+   * The register whose null check the next instruction makes where it
+   * first reads it, -1 if none; and where the check's statement goes
+   * should it not read it.
+   */
+  pendingNull: i32 = -1;
+  pendingRead: i32 = -1;
+  pendingUntil: u32 = 0;
+  pendingAt: u32 = 0;
+  pendingMarks: i32 = 0;
   /** By register: whether it holds an int or uint made a Number by the coercion before it, in this block. */
   promoted: StaticArray<u8> = new StaticArray<u8>(0);
   /**
@@ -247,7 +257,8 @@ export class MethodEmitter {
 
   /**
    * The checks on entry, written first in the method once its code shows
-   * which it needs. Its arguments' count, as MethodEnv's argcOk. And a
+   * which it needs. Its arguments' count, as MethodEnv's argcOk, whose
+   * error the module's ac throws (see ModuleEmitter.module). And a
    * method that can see the default XML namespace runs with the one of the
    * scope it was made in ($dx, see ModuleEmitter.factory), not its
    * caller's: else it runs again with it, and the caller's is back after.
@@ -263,7 +274,7 @@ export class MethodEmitter {
     } else if (this.seesDxns) {
       check = `  if (${dxns}) return rt.callInDxns($dx, ${this.entryName}, this, arguments);\n`;
     } else if (args.length) {
-      check = `  if (${args}) throw rt.argumentCountError(${this.argsRequired}, arguments.length);\n`;
+      check = `  if (${args}) ac(${this.argsRequired}, arguments.length);\n`;
     } else {
       return;
     }
@@ -497,7 +508,8 @@ export class MethodEmitter {
     const optional = abc.methodOptionalStart[method + 1] - abc.methodOptionalStart[method];
 
     // As MethodEnv's argcOk, before any coercion: fewer arguments than it
-    // requires, or more than it declares unless it takes the rest.
+    // requires, or more than it declares unless it takes the rest; both, as
+    // one unsigned comparison.
     const required = count - traits.optionalCount[global];
     const extra = this.domain.allowsExtraArgs(global);
     this.argsRequired = required;
@@ -506,7 +518,7 @@ export class MethodEmitter {
       this.argsTest =
         required === count
           ? `arguments.length !== ${count}`
-          : `arguments.length < ${required} || arguments.length > ${count}`;
+          : `arguments.length - ${required} >>> 0 > ${count - required}`;
     } else if (required > 0) {
       this.argsTest = `arguments.length < ${required}`;
     } else if (!extra) {
@@ -602,6 +614,7 @@ export class MethodEmitter {
     }
 
     this.inPlace = false;
+    this.pendingNull = -1;
     this.file = this.blockFile[k];
     this.line = this.blockLine[k];
     this.mark();
@@ -672,6 +685,10 @@ export class MethodEmitter {
       this.kept = false;
       this.sunk = false;
       this.instruction(i);
+      if (this.pendingNull >= 0 && i >= this.pendingUntil) {
+        this.unpend();
+      }
+
       this.unchecks(i);
       this.target = -1;
       if (op === ops.OP_swap) {
@@ -793,6 +810,11 @@ export class MethodEmitter {
     }
   }
 
+  /**
+   * A copy written may be the register of a pending null check: the
+   * instruction then reads the copy, as unpend would read what pendingRead
+   * names, both the value when it was checked.
+   */
   private writeCopy(r: i32): void {
     const out = this.out;
     const from = this.copyOf[r];
@@ -922,8 +944,70 @@ export class MethodEmitter {
     return this.domain.builtin(this.regType[r]);
   }
 
-  /** Register r as read: what it copies, if it is a copy. */
+  /** Register r as read: what it copies, if it is a copy; null checked, if the check is pending. */
   reg(r: i32): void {
+    if (r === this.pendingNull) {
+      this.pendingNull = -1;
+      this.checkedRead(r);
+      return;
+    }
+
+    this.read(r);
+  }
+
+  /** Register r as read before a `.`. */
+  member(r: i32): void {
+    if (r === this.pendingNull) {
+      this.out.byte(0x28); // (
+      this.reg(r);
+      this.out.byte(0x29); // )
+      return;
+    }
+
+    this.read(r);
+  }
+
+  /**
+   * Register r read, null checked: `r ?? nn(r)`, nn throwing the error for
+   * null or undefined (see ModuleEmitter.module); only a null or undefined
+   * r reads it twice.
+   */
+  checkedRead(r: i32): void {
+    this.read(r);
+    this.out.text(" ?? nn(");
+    this.read(r);
+    this.out.text(")");
+  }
+
+  /**
+   * The null check pending for an instruction that did not read the
+   * register, as a statement before it.
+   */
+  unpend(): void {
+    const name = this.nameOf(this.pendingRead);
+    this.pendingNull = -1;
+    const check = `    ${name} ?? nn(${name});\n`;
+    this.out.insert(this.pendingAt, check);
+    this.map.shift(this.pendingMarks, <u32>check.length);
+  }
+
+  /** Register `at`'s name, as text. */
+  nameOf(at: i32): string {
+    const ir = this.ir;
+    const local = <i32>ir.localCount;
+    if (at < local) {
+      return `l${at}`;
+    }
+
+    if (at < local + <i32>ir.maxScope) {
+      return `sc${at - local}`;
+    }
+
+    return `s${at - local - <i32>ir.maxScope}`;
+  }
+
+  /** Register r as read: what it copies, if it is a copy. */
+  read(r: i32): void {
     const copy = this.copyOf[r];
     if (copy === -1) {
       this.regName(r);
@@ -1149,8 +1233,9 @@ export class MethodEmitter {
         break;
       case IR_CheckNull: {
         // A register checked since it was last written is not null.
-        const copy = this.copyOf[ir.src[i]];
-        const r = copy === -1 ? ir.src[i] : copy;
+        const src = ir.src[i];
+        const copy = this.copyOf[src];
+        const r = copy === -1 ? src : copy;
         if (r >= 0) {
           if (this.checked[r]) {
             return;
@@ -1159,11 +1244,39 @@ export class MethodEmitter {
           this.checked[r] = 1;
         }
 
-        out.text("    if (");
-        this.reg(ir.src[i]);
-        out.text(" == null) throw rt.nullError(");
-        this.reg(ir.src[i]);
-        out.text(")");
+        // The instruction checked for reads it before it does anything,
+        // and the check is there, as it reads it: `(r ?? nn(r)).$1`. Its
+        // operands' conversions that change nothing may come between: each
+        // of a register of its own, as the verifier coerces each operand
+        // once, so the types they are kept by are the registers' now.
+        let next = i + 1;
+        while (
+          next < this.blockLast &&
+          ir.pc[next] === ir.pc[i] &&
+          ir.op[next] === IR_Coerce &&
+          ir.dst[next] === ir.src[next] &&
+          keeps(this, ir.c[next], this.regType[ir.src[next]])
+        ) {
+          next++;
+        }
+
+        // Not a copy of a constant (copyOf below -1), which has no name for unpend.
+        if (
+          copy >= -1 &&
+          next < this.blockLast &&
+          ir.pc[next] === ir.pc[i] &&
+          readsFirst(ir.op[next])
+        ) {
+          this.pendingNull = src;
+          this.pendingRead = copy === -1 ? src : copy;
+          this.pendingUntil = next;
+          this.pendingAt = out.length;
+          this.pendingMarks = this.map.count;
+          return;
+        }
+
+        out.text("    ");
+        this.checkedRead(src);
         break;
       }
       case ops.OP_add:
@@ -1475,13 +1588,13 @@ export class MethodEmitter {
         return true;
       case ops.OP_getslot:
         this.assign(i);
-        this.reg(src);
+        this.member(src);
         out.text(".$");
         out.uint(a);
         return true;
       case ops.OP_setslot:
         out.text("    ");
-        this.reg(src);
+        this.member(src);
         out.text(".$");
         out.uint(a);
         out.text(" = ");
@@ -2076,7 +2189,7 @@ export class MethodEmitter {
     // class prototype's; any other object has its own.
     if (bt === BUILTIN_Object) {
       out.text("(");
-      this.reg(src);
+      this.member(src);
       out.text(".$m");
       out.uint(disp);
       out.text(" ?? rt.prototypeOf(");
@@ -2090,11 +2203,48 @@ export class MethodEmitter {
       return;
     }
 
-    this.reg(src);
+    this.member(src);
     out.text(".$m");
     out.uint(disp);
     out.text("(");
     this.list(src + 1, argc);
     out.text(")");
+  }
+}
+
+/**
+ * Whether instruction op reads the register it null checks before anything
+ * it does that can throw or be seen: before it, only the runtime's
+ * methods, the module's tables and other registers. The check can then be
+ * made where it reads it.
+ */
+function readsFirst(op: u16): bool {
+  switch (op) {
+    case ops.OP_getslot:
+    case ops.OP_setslot:
+    case IR_CallGetter:
+    case IR_CallSetter:
+    case ops.OP_callmethod:
+    case IR_CallInterface:
+    case ops.OP_getproperty:
+    case ops.OP_setproperty:
+    case ops.OP_initproperty:
+    case ops.OP_deleteproperty:
+    case ops.OP_callproperty:
+    case ops.OP_callproplex:
+    case ops.OP_callpropvoid:
+    case ops.OP_constructprop:
+    case ops.OP_callsuper:
+    case ops.OP_callsupervoid:
+    case ops.OP_getsuper:
+    case ops.OP_setsuper:
+    case ops.OP_callstatic:
+    case ops.OP_constructsuper:
+    case ops.OP_getdescendants:
+    case ops.OP_in:
+    case ops.OP_checkfilter:
+      return true;
+    default:
+      return false;
   }
 }
