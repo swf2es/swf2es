@@ -67,7 +67,10 @@
 // place, turning and swelling; each new part's script calls a method on
 // the root that looks its colour up and sets its colorTransform, as a
 // game's animated characters colour their parts: what constructing
-// objects, their events and frame scripts, and their lines cost.
+// objects, their events and frame scripts, and their lines cost. --still
+// keeps the parts, moving them instead, on a root of two frames each with a
+// script, so that every frame's scripts take two rounds: what walking a
+// deep tree of scripted clips for frame scripts that rarely run costs.
 //
 // --branches N places N coloured branches of 128 shapes. A quarter replace
 // one child each frame; the rest stay still, as scenery beside animated art.
@@ -85,7 +88,7 @@
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--glide]
 //     | --pulse N [--loop K] [--line W]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N | --masks N [--unmasked] | --scripted N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
+//     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
 //     [--min-run N] [--pace MS]
 //     [--json]
@@ -579,6 +582,16 @@ const SCRIPTED_SOURCE = `package {
   import flash.geom.ColorTransform;
 
   public class Main extends MovieClip {
+    public var frames:int = 0;
+
+    public function Main() {
+      addFrameScript(0, frame, 1, frame);
+    }
+
+    private function frame():void {
+      frames++;
+    }
+
     public var colors:Object = { skin: 0xe0b090, hair: 0x603010, cloth: 0x3050a0, trim: 0xc0c040 };
 
     public function setColor(mc:MovieClip):void {
@@ -611,9 +624,10 @@ const SCRIPTED_SOURCE = `package {
 /**
  * `count` rigs as --rig --swap makes them, each part a clip of the class
  * Part holding the part's shape, so that each frame constructs 12 Parts a
- * rig, whose first frames' scripts colour them (--scripted).
+ * rig, whose first frames' scripts colour them (--scripted). With `still`,
+ * the parts stay and move, as --rig's, on a root of two frames.
  */
-function scriptedSwf(count: number): Uint8Array {
+function scriptedSwf(count: number, still: boolean): Uint8Array {
   const abc = compiler()("BenchScripted", SCRIPTED_SOURCE);
   // The page links it against these, which a fresh checkout has yet to copy out.
   libraryAbcs();
@@ -640,6 +654,11 @@ function scriptedSwf(count: number): Uint8Array {
         tx: Math.round(400 * Math.cos(i)),
         ty: Math.round(400 * Math.sin(i * 1.7)),
       };
+      if (still && f > 0) {
+        sprite.push(w.place({ depth: i + 1, move: true, matrix }));
+        continue;
+      }
+
       if (f > 0) {
         sprite.push(w.remove(i + 1));
       }
@@ -674,8 +693,8 @@ function scriptedSwf(count: number): Uint8Array {
     );
   }
 
-  tags.push(w.showFrame(), w.end());
-  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+  tags.push(w.showFrame(), ...(still ? [w.showFrame()] : []), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: still ? 2 : 1, tags });
 }
 
 /** 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st... */
@@ -744,7 +763,7 @@ const swf =
       : toggleStatic > 0
         ? toggleStaticSwf(toggleStatic)
         : scripted > 0
-          ? scriptedSwf(scripted)
+          ? scriptedSwf(scripted, args.includes("--still"))
           : pulse > 0
             ? pulseSwf(pulse, option("loop", 96), option("line", 1))
             : masks > 0
@@ -810,7 +829,7 @@ const summary = {
         : toggleStatic > 0
           ? `static toggle of ${toggleStatic}`
           : scripted > 0
-            ? `scripted rig of ${scripted}`
+            ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
             : pulse > 0
               ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
               : masks > 0
