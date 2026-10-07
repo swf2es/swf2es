@@ -789,6 +789,9 @@ A case may give a zoom, as a host showing the stage larger does: the
 page's resolution is then the zoom times the grid, and the stage is drawn
 at the zoom's inverse, so the samples are the same and only Pixi's
 arithmetic at that resolution, no whole number, differs.
+Or it may have the stage shown at the zoom, as a game's page does, its
+frames the zoom's size; Flash, which cannot, then draws a SWF the case
+builds at that size.
 
 ### Source layout
 
@@ -2601,17 +2604,22 @@ draws the rect so grown; each pixel's texels read its centre alike. One
 with no taps moves the object up and left by half the other size, a
 single tap there. (adl's copy then reads a row past its bitmap and draws
 what memory lies there; swf2es leaves that row transparent.) Blurs and
-distances are in pixels of the screen, as the thinnest line is: Flash
-filters the pixels it draws, so a glow on an object scaled twice reaches
-no further than on one at its size, and on a stage a host shows at three
-times its size a glow reaches as many screen pixels as at its size, a
-third as far across the stage. Each chain keeps the units to a screen
-pixel it was made for and is scaled again when they change, though its
-object was off the list then; its padding is the reach in those units.
-A blur's box steps a texel of its input, blur × texels to a screen pixel
-wide: stepping a screen pixel's texels instead, on a stage shown at three
-times its size, it reached as far across the stage as unscaled, past its
-padding, and cut a soft shadow off square (the `blurred-shadow` case). A
+distances are in pixels of the stage: a glow on an object scaled twice
+reaches no further than on one at its size, as adl draws it, but on a
+stage a host shows at three times its size it reaches three times as
+many screen pixels, as Flash Player draws a stage zoomed in its window,
+measured for a blur, a glow and a drop shadow at zooms of 2, 2.8 and 3
+(under exactFit each axis by its own zoom, where swf2es takes the
+stage's x scale). adl cannot show a stage zoomed, so the
+`zoomed-filters` case is drawn at the zoom and compared with adl's frame
+of the SWF built that many times larger, filters and all, which matched
+Flash Player's zoomed frame. Each chain keeps the units to a stage pixel
+it was made for and is scaled again when they change, though its object
+was off the list then; its padding is the reach in those units. A blur's
+box steps a texel of its input, blur × texels to a stage pixel wide:
+stepping a stage pixel's texels instead, on a stage shown at three times
+its size, it strode over texels past its padding and cut a soft shadow
+off square (the `blurred-shadow` case). A
 BitmapData's pixel is a screen pixel to a draw into it, rendered at its
 samples a side. The passes are Pixi filters at the target's resolution,
 for WebGL: under WebGPU, where Pixi would skip an object's whole chain

@@ -2564,9 +2564,12 @@ export class PixiView {
     return this.fresh ? 1 : 1 / (this.screenScale ?? this.renderer.resolution ?? 1);
   }
 
-  /** The renderer's units to a pixel of the screen, which Flash's filters reach in. */
+  /**
+   * The renderer's units to a pixel of the stage, which Flash's filters reach in: a host showing
+   * the stage larger has them reach as much further on the screen, as Flash Player's do.
+   */
   private get filterUnits(): number {
-    const units = this.fresh ? this.samples : this.stage.scale.x * this.leastWidth;
+    const units = this.fresh ? this.samples : this.stage.scale.x;
     // A stage scaled to nothing filters at a unit a pixel rather than not at all.
     return Number.isFinite(units) && units > 0 ? units : 1;
   }

@@ -24,6 +24,13 @@ export interface PlayerCase {
   alone?: boolean;
   /** Played as a host showing the stage this many times its size draws it (page.ts); Flash draws it at its size. */
   zoom?: number;
+  /**
+   * With a zoom, the stage shown at it, the frames that size (page.ts); Flash
+   * draws `flash` for them, the SWF built at that size.
+   */
+  shown?: boolean;
+  /** What Flash draws for the references in place of the case's SWF. */
+  flash?: Uint8Array;
   /** Played as a host whose renderer is made with `antialias: true` draws it, multisampled; Flash draws it as ever. */
   antialias?: boolean;
   /**
@@ -2385,6 +2392,70 @@ function blurredShadow(): Uint8Array {
   });
 }
 
+// Filters on a stage a host shows `zoom` times its size: the soft shadow,
+// a glow as a chat's outline, and a drop shadow, each at its size and in a
+// clip scaled twice, which leaves them as they are. Flash Player draws a
+// stage so shown as its size `zoom` times over with every filter `zoom`
+// times as wide and as far, as measured in its window; adl cannot show a
+// stage zoomed, so the references are adl's frames of this SWF built so.
+function zoomedFilters(zoom: number): Uint8Array {
+  const at = (x: number, y: number, a = 1, d = a) => ({
+    a: a * zoom,
+    d: d * zoom,
+    tx: x * 20 * zoom,
+    ty: y * 20 * zoom,
+  });
+  const rect = (id: number, color: number, width: number, height: number) =>
+    w.shape({
+      id,
+      bounds: [0, width * 20, 0, height * 20],
+      fills: [color],
+      paths: [{ fill1: 1, commands: rectPath(0, 0, width, height) }],
+    });
+  const glows = [{ color: 0x333333, blur: 4 * zoom, strength: 3 }];
+  const shadows = [{ blur: 2 * zoom, distance: 4 * zoom, angle: 45 }];
+  return w.swf({
+    width: 260 * zoom,
+    height: 100 * zoom,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.backgroundColor(0xd0d0e0),
+      w.shape({
+        id: 1,
+        bounds: [-470, 470, -150, 150],
+        fills: [0x000000],
+        paths: [{ fill1: 1, commands: circlePath(0, 0, 23.5, 7.5) }],
+      }),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.sprite(3, 1, [
+        w.place({
+          depth: 1,
+          character: 2,
+          colorTransform: { mult: [1, 1, 1, 0.75] },
+          blurs: [14 * zoom],
+        }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      rect(4, 0xffffff, 40, 8),
+      rect(5, 0xffffff, 20, 4),
+      rect(6, 0xcc0000, 12, 12),
+      rect(7, 0xcc0000, 6, 6),
+      w.sprite(8, 1, [w.place({ depth: 1, character: 5, glows }), w.showFrame(), w.end()]),
+      w.sprite(9, 1, [w.place({ depth: 1, character: 7, shadows }), w.showFrame(), w.end()]),
+      w.place({ depth: 1, character: 3, matrix: at(48, 25, 1.39, 0.81) }),
+      w.place({ depth: 2, character: 3, matrix: at(175, 32, 2.78, 1.62) }),
+      w.place({ depth: 3, character: 4, matrix: at(20, 72), glows }),
+      w.place({ depth: 4, character: 8, matrix: at(80, 72, 2) }),
+      w.place({ depth: 5, character: 6, matrix: at(150, 70), shadows }),
+      w.place({ depth: 6, character: 9, matrix: at(190, 70, 2) }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Timeline masks (scripts/ClipDepths.as): five cells of a yellow ground, a
 // mask at the next depth clipping red and blue, then green above the
 // range. The first mask's lines must clip nothing; into the second the
@@ -4371,6 +4442,18 @@ export const cases: PlayerCase[] = [
     zoom: 2.8,
     // The page's samples against adl's whole pixels, within 5 a channel.
     tolerance: 5,
+    maxOutliers: 0,
+  },
+  {
+    name: "zoomed-filters",
+    swf: zoomedFilters(1),
+    frames: 1,
+    capture: [1],
+    zoom: 2.8,
+    shown: true,
+    flash: zoomedFilters(2.8),
+    // The glows' outer edges, a few levels lighter in Flash.
+    tolerance: 8,
     maxOutliers: 0,
   },
   {

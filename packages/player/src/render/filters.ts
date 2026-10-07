@@ -91,7 +91,7 @@ class BoxPass extends Filter {
 
 /**
  * The box's runs over `input` into `output`, through a texture of the pool
- * between them: `texels` to a pixel of the screen wide, which the blur is
+ * between them: `texels` to a pixel of the stage wide, which the blur is
  * in, each step a texel of the input.
  */
 function blur(
@@ -105,8 +105,8 @@ function blur(
   texels: number,
   clear: boolean,
 ): void {
-  // Not a screen pixel's texels: on a stage shown larger than its size those strode over texels,
-  // blurring as far across the stage as unscaled, past the padding, which cut the blur off.
+  // Not a stage pixel's texels: on a stage shown larger than its size those strode over texels,
+  // blurring past the padding, which cut the blur off.
   const step = 1 / input.source.resolution;
   const runs: [number, number, number][] = [];
   for (let i = 0; i < quality; i++) {
@@ -140,7 +140,7 @@ function blur(
   }
 }
 
-/** A filter's offset, `distance` screen pixels at its angle, in the input's units. */
+/** A filter's offset, `distance` stage pixels at its angle, in the input's units. */
 function placeOffset(offset: Float32Array, f: FilterRecord, distance: number, units: number): void {
   const radians = ((f.angle || 0) * Math.PI) / 180;
   offset[0] = distance * Math.cos(radians) * units;
@@ -149,17 +149,17 @@ function placeOffset(offset: Float32Array, f: FilterRecord, distance: number, un
 
 /**
  * A filter run at the target's resolution, its blurs and distances in
- * pixels of the screen: Flash filters what the screen shows, so a stage
- * zoomed three times has its glows reach as far on the screen as at its
- * size, not three times as far, as an object scaled up does in adl.
+ * pixels of the stage: an object scaled up has its glow reach no further,
+ * and a stage a host shows three times its size has it reach three times
+ * as far on the screen, as Flash Player draws it.
  */
 abstract class FlashFilter extends Filter {
-  /** The target's units to a pixel of the screen. */
+  /** The target's units to a pixel of the stage. */
   protected units = 1;
-  /** How far it draws past the object, in pixels of the screen, which its padding covers. */
+  /** How far it draws past the object, in pixels of the stage, which its padding covers. */
   protected reach: number | null = null;
 
-  /** The target's units to a pixel of the screen, now: the padding is the reach in those units. */
+  /** The target's units to a pixel of the stage, now: the padding is the reach in those units. */
   setUnits(units: number): void {
     this.units = units;
     if (this.reach !== null) {
@@ -169,7 +169,7 @@ abstract class FlashFilter extends Filter {
     }
   }
 
-  /** The texels to a screen pixel this run: the input's to a unit, at the target's resolution. */
+  /** The texels to a stage pixel this run: the input's to a unit, at the target's resolution. */
   protected texels(input: Texture): number {
     return input.source.resolution * this.units;
   }
@@ -554,7 +554,7 @@ class GradientFilter extends BlurredFilter {
     this.padding = this.reach;
   }
 
-  /** How far the filter's rect grows past the object in screen pixels: left, top, right, bottom. */
+  /** How far the filter's rect grows past the object in stage pixels: left, top, right, bottom. */
   private readonly grows: number[];
 
   /** How far in from the input's frame the object's pixels start: this and the later filters' padding. */
@@ -1004,7 +1004,7 @@ export function displayFilters(
 }
 
 /**
- * Filters drawn at `units` of the target to a pixel of the screen, each
+ * Filters drawn at `units` of the target to a pixel of the stage, each
  * filter that reads the object's own pixels told how far in they start:
  * the padding of it and the filters after it.
  */
@@ -1102,12 +1102,12 @@ export class FilterChain extends Filter {
     this.stale = true;
   }
 
-  /** The target's units to a pixel of the screen its filters are drawn at. */
+  /** The target's units to a pixel of the stage its filters are drawn at. */
   get units(): number {
     return this.drawnAt;
   }
 
-  /** Its filters drawn at `units` of the target to a pixel of the screen from now on. */
+  /** Its filters drawn at `units` of the target to a pixel of the stage from now on. */
   rescale(units: number): void {
     this.drawnAt = units;
     scaleFilters(this.filters, units);

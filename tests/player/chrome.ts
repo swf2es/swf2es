@@ -23,6 +23,8 @@ export interface PlayerJob {
   table?: boolean;
   /** The fewest draws a run makes through the table; its default where not given. */
   tableMinRun?: number;
+  /** The stage shown at the zoom, its frames that size, rather than drawn back to its size (page.ts). */
+  shown?: boolean;
 }
 
 /** How to run jobs: a time each job's scripts may take, a listener for each result, and more directories to serve. */
@@ -221,7 +223,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
         const begun = performance.now();
         try {
           ({ value, exception } = await evaluate<NonNullable<typeof value>>(
-            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun})`,
+            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun}, ${job.shown ?? false})`,
           ));
         } catch (e) {
           // A job stopped at the timeout makes the protocol answer with an

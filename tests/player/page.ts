@@ -12,6 +12,8 @@
 // times the grid's, often not a whole number, and the stage is drawn at the
 // zoom's inverse, so the same samples come out where Pixi's own arithmetic
 // at that resolution decides.
+// Or it may have the stage shown at that zoom, as a game's page does: the
+// stage drawn at its size at that resolution, the frames the zoom's size.
 //
 // And it may ask for multisampling, as a host made with `antialias: true`
 // draws: the samples are then each resolved from the multisampled targets,
@@ -141,6 +143,7 @@ async function runSwf(
   antialias = false,
   table = true,
   tableMinRun?: number,
+  shown = false,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
@@ -185,13 +188,14 @@ async function runSwf(
     samples.width = renderer.canvas.width;
     samples.height = renderer.canvas.height;
     const output = document.createElement("canvas");
-    output.width = player.width;
-    output.height = player.height;
+    const shownAt = shown ? zoom : 1;
+    output.width = Math.round(player.width * shownAt);
+    output.height = Math.round(player.height * shownAt);
     document.body.replaceChildren(output);
     const view = new PixiView(renderer);
     // Drawn n times finer to be averaged down: the screen is the output canvas.
-    view.screenScale = 1;
-    view.stage.scale.set(1 / zoom);
+    view.screenScale = shownAt;
+    view.stage.scale.set(shownAt / zoom);
     // BitmapData.draw of a display object renders with it, from the document class on.
     if (scripting) {
       scripting.drawer = view;
