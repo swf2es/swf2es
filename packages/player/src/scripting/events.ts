@@ -33,8 +33,13 @@ function invoke(s: Scripting, o: AsObject, event: AsObject, phase: number): void
 
   event.$currentTarget = o;
   event.$phase = phase;
-  // A copy: a listener may add or remove listeners.
-  for (const l of [...list]) {
+  // A copy: a listener may add or remove listeners. Not of one alone, read before it is called,
+  // which nothing it does could add to or take from what this dispatch calls: each frame's
+  // events reach thousands of objects so.
+  const listeners = list.length === 1 ? list : [...list];
+  const count = listeners.length;
+  for (let i = 0; i < count; i++) {
+    const l = listeners[i];
     if (l.capture !== (phase === CAPTURING_PHASE)) {
       continue;
     }
@@ -49,6 +54,26 @@ function invoke(s: Scripting, o: AsObject, event: AsObject, phase: number): void
       return;
     }
   }
+}
+
+/**
+ * Whether `target` or an object above it listens for `type`, in any phase.
+ * Where none does, dispatching an event of the type runs no script, so
+ * none could tell whether it was made: the player's own events, one for
+ * each object put on the list or taken off, are made only where heard.
+ */
+export function heard(target: AsObject, type: string): boolean {
+  if ((target.$listeners?.get(type) as Listener[] | undefined)?.length) {
+    return true;
+  }
+
+  for (let d = displayOf(target)?.parent; d; d = d.parent) {
+    if ((d.object?.$listeners?.get(type) as Listener[] | undefined)?.length) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /** Dispatch `event` to `target`'s own listeners only, as a broadcast reaches each object: no capture, no bubble. */

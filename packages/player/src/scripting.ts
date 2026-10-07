@@ -97,6 +97,13 @@ export class Scripting {
   /** Whether they nested too deep this frame, which stops them all till the next. */
   private overflowed = false;
   /**
+   * The clips runFrameScripts visits, a list for each depth it runs inside
+   * itself at, kept: the whole display list's every frame, often more than
+   * once.
+   */
+  private readonly scriptQueues: (MovieClip | null)[][] = [];
+  private scriptDepth = 0;
+  /**
    * Where an error nothing caught goes as it happens, so that the frame
    * goes on, as in Flash and Ruffle; null to have the frame throw them when
    * it ends.
@@ -510,95 +517,111 @@ export class Scripting {
     // script's goto happens though the script throws after it").
     // Overflowed, cycles stop their script loops; the frame's own pass goes on.
     const stopped = () => this.overflowed && this.cycles > 0;
-    for (let round = 0; round < 64 && !stopped(); round++) {
-      let ran = false;
-      const own = (o: MovieClip) => {
-        // A clip whose super() is making the children that run this has
-        // registered no script for its frame yet, unless it did so before
-        // super(), and keeps the frame's for later: always, placed by a
-        // timeline, made with `new`, only outside the frame's own scripts;
-        // one a frame script makes loses it (`button-frame-order`).
-        if (
-          o.makingChildren &&
-          !o.frameScripts.has(o.currentFrame) &&
-          (o.timelineChild || !this.scriptPhase)
-        ) {
+    const depth = this.scriptDepth++;
+    const queue = this.scriptQueues[depth] ?? [];
+    this.scriptQueues[depth] = queue;
+    try {
+      for (let round = 0; round < 64 && !stopped(); round++) {
+        if (!this.frameScriptRound(queue, root, also, stopped)) {
+          break;
+        }
+      }
+    } finally {
+      this.scriptDepth--;
+    }
+  }
+
+  /** A round of runFrameScripts, its clips listed in `queue`: whether any script ran. */
+  private frameScriptRound(
+    queue: (MovieClip | null)[],
+    root: DisplayObject,
+    also: DisplayObject | null,
+    stopped: () => boolean,
+  ): boolean {
+    let ran = false;
+    const own = (o: MovieClip) => {
+      // A clip whose super() is making the children that run this has
+      // registered no script for its frame yet, unless it did so before
+      // super(), and keeps the frame's for later: always, placed by a
+      // timeline, made with `new`, only outside the frame's own scripts;
+      // one a frame script makes loses it (`button-frame-order`).
+      if (
+        o.makingChildren &&
+        !o.frameScripts.has(o.currentFrame) &&
+        (o.timelineChild || !this.scriptPhase)
+      ) {
+        return;
+      }
+
+      for (let jumps = 0; jumps < 64 && o.scriptedFrame !== o.currentFrame && !stopped(); jumps++) {
+        o.scriptedFrame = o.currentFrame;
+        const script = o.frameScripts.get(o.currentFrame);
+        if (!script) {
           return;
         }
 
-        for (
-          let jumps = 0;
-          jumps < 64 && o.scriptedFrame !== o.currentFrame && !stopped();
-          jumps++
-        ) {
-          o.scriptedFrame = o.currentFrame;
-          const script = o.frameScripts.get(o.currentFrame);
-          if (!script) {
-            return;
-          }
+        ran = true;
+        // The clip whose script runs, the one before it again after: a
+        // goto's cycle runs scripts inside another's (`goto-cycle-nested`).
+        const outer = this.inFrameScript;
+        this.inFrameScript = o;
+        try {
+          this.rt.call(script, o.object);
+        } catch (error) {
+          this.reportUncaught(error);
+        } finally {
+          this.inFrameScript = outer;
+        }
 
-          ran = true;
-          // The clip whose script runs, the one before it again after: a
-          // goto's cycle runs scripts inside another's (`goto-cycle-nested`).
-          const outer = this.inFrameScript;
-          this.inFrameScript = o;
+        // The goto the script asked for, now that it has returned, or
+        // thrown; the frame it lands on has its script run next, in this
+        // same phase, or, from version 10, in the goto's own cycle.
+        if (o.queuedGoto !== null) {
+          const frame = o.queuedGoto;
+          o.queuedGoto = null;
+          o.playing = o.queuedPlay;
+          o.gotoFrame(frame);
           try {
-            this.rt.call(script, o.object);
+            this.gotoCycle(o);
           } catch (error) {
             this.reportUncaught(error);
-          } finally {
-            this.inFrameScript = outer;
-          }
-
-          // The goto the script asked for, now that it has returned, or
-          // thrown; the frame it lands on has its script run next, in this
-          // same phase, or, from version 10, in the goto's own cycle.
-          if (o.queuedGoto !== null) {
-            const frame = o.queuedGoto;
-            o.queuedGoto = null;
-            o.playing = o.queuedPlay;
-            o.gotoFrame(frame);
-            try {
-              this.gotoCycle(o);
-            } catch (error) {
-              this.reportUncaught(error);
-            }
           }
         }
-      };
-      const queue: MovieClip[] = [];
-      const visit = (o: DisplayObject) => {
-        if (o instanceof MovieClip && o.object) {
-          queue.push(o);
-        }
-
-        // An index, not for-of: this visits every object on the list.
-        const children = scriptChildren(o);
-        for (let i = 0; i < children.length; i++) {
-          visit(children[i]);
-        }
-      };
-      for (const orphan of this.lifecycle.orphanRoots()) {
-        visit(orphan);
+      }
+    };
+    let count = 0;
+    const visit = (o: DisplayObject) => {
+      if (o instanceof MovieClip && o.object) {
+        queue[count++] = o;
       }
 
-      visit(root);
-      for (const display of this.lifecycle.fresh) {
-        visit(display);
+      // An index, not for-of: this visits every object on the list.
+      const children = scriptChildren(o);
+      for (let i = 0; i < children.length; i++) {
+        visit(children[i]);
       }
-
-      if (also) {
-        visit(also);
-      }
-
-      for (const o of queue) {
-        own(o);
-      }
-
-      if (!ran) {
-        break;
-      }
+    };
+    for (const orphan of this.lifecycle.orphanRoots()) {
+      visit(orphan);
     }
+
+    visit(root);
+    for (const display of this.lifecycle.fresh) {
+      visit(display);
+    }
+
+    if (also) {
+      visit(also);
+    }
+
+    // Each let go of as it runs, so that the kept list holds none past the round.
+    for (let i = 0; i < count; i++) {
+      const o = queue[i] as MovieClip;
+      queue[i] = null;
+      own(o);
+    }
+
+    return ran;
   }
 
   /**

@@ -178,10 +178,19 @@ function straight(element: Extra): number {
     | undefined;
   const fill = element.baseColor ?? 0xffffff;
   const tint = own?.tint ?? 0xffffff;
-  const channel = (shift: number) =>
-    Math.round((((fill >> shift) & 0xff) * ((tint >> shift) & 0xff)) / 255);
   const alpha = (element.alpha ?? 1) * (own?.alpha ?? 1);
-  return (((alpha * 255) << 24) | (channel(0) << 16) | (channel(8) << 8) | channel(16)) >>> 0;
+  return (
+    (((alpha * 255) << 24) |
+      (channel(fill, tint, 0) << 16) |
+      (channel(fill, tint, 8) << 8) |
+      channel(fill, tint, 16)) >>>
+    0
+  );
+}
+
+/** A channel of a fill's colour times the tint's; apart, not a closure made for each element packed. */
+function channel(fill: number, tint: number, shift: number): number {
+  return Math.round((((fill >> shift) & 0xff) * ((tint >> shift) & 0xff)) / 255);
 }
 
 const NONE: ColorTransform = {

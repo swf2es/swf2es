@@ -504,7 +504,11 @@ child that found its own class keeps it when its parent defines the name
 later. A type, a coercion's or a base class's, is found the same way
 through caches of its own, as avmplus finds traits, so a class a child
 found by name is not the type it finds once its parent defines the name,
-and a class extending it is rejected, as avmplus rejects it. Every name a module makes is looked up in the domain the module was
+and a class extending it is rejected, as avmplus rejects it. What a
+name finds being kept, `Runtime.classNamed`, the player's lookup of a
+class by its qualified name, keeps the class in the domain
+(`Domain.named`) once its script has made it: the player names a class
+for each object and event it makes. Every name a module makes is looked up in the domain the module was
 loaded into (`Runtime.loadInto`); everything else loads into the root. The
 Domain's `loadBytes` compiles its ABC through `RuntimeOptions.compileAbc`,
 which the host gives, as the runtime does not include the compiler, into
@@ -676,7 +680,8 @@ loop's next turn). A transform is a turn or a mirror times a symmetric
 stretch, and a line scaled both ways is as wide through any turn of it:
 such a layer's lines are stroked through the stretch alone and turned by
 their Graphics' matrix, so a limb that turns on every frame, or a
-squashed particle that spins, shares one context through every angle;
+squashed particle that spins, shares one context through every angle,
+and a turn that keeps the stretch leaves its lines as they are;
 one with a line scaled one way alone, which turns with it, or a
 transform near collapse, which rounding would distort, keeps the
 transform exactly. Contexts are counted as instances take and give
@@ -939,6 +944,9 @@ it places at once. `EventDispatcher()` calls its private native
 dispatch is part of the first slice: listeners by type and phase on the
 player object, `dispatchEvent` through the player's parent chain
 (`scripting/events.ts`), and the frame events the player broadcasts.
+The player makes its events of an object put on the list or taken off
+only where a listener on the object or above it would hear them: where
+none does, no script runs, and none could tell.
 
 `MouseEvent` keeps its local coordinates and flags on the event. Its stage
 coordinates are read through the target's current display matrix, so moving

@@ -126,6 +126,8 @@ export class Player {
   private owed = 0;
   /** Frames played. */
   private played = 0;
+  /** The clips a tick advances, kept: the whole display list's, every frame. Null while in use. */
+  private ticking: (MovieClip | null)[] | null = [];
 
   /**
    * A count that moves whenever what the player shows may have changed: a
@@ -185,7 +187,9 @@ export class Player {
   tick(): void {
     this.played++;
     this.scripting?.timers.beginFrame(1000 / this.frameRate);
-    const clips: MovieClip[] = [];
+    const clips = this.ticking ?? [];
+    this.ticking = null;
+    let count = 0;
     const collect = (o: DisplayObject) => {
       if (o instanceof MovieClip) {
         // One a goto made sit this frame out takes all in it along.
@@ -193,7 +197,7 @@ export class Player {
           return;
         }
 
-        clips.push(o);
+        clips[count++] = o;
       }
 
       // A button's states all play, whichever it shows. An index, not for-of:
@@ -208,8 +212,14 @@ export class Player {
       collect(orphan);
     }
 
-    for (const clip of clips) {
-      clip.advance();
+    // Let go of once advanced, so that the kept list holds none past the tick.
+    try {
+      for (let i = 0; i < count; i++) {
+        (clips[i] as MovieClip).advance();
+      }
+    } finally {
+      clips.fill(null, 0, count);
+      this.ticking = clips;
     }
 
     if (this.scripting) {

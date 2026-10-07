@@ -403,7 +403,11 @@ function framesAllocated(head: SampledNode): number {
   return sum(head, false, false);
 }
 
-/** Play `swf` for `frames` frames in the player, timing each; see page.ts's benchSwf. `gpu` lets Chrome use one. */
+/**
+ * Play `swf` for `frames` frames in the player, timing each; see page.ts's
+ * benchSwf. `gpu` lets Chrome use one. With `allocs`, `profilePath` keeps
+ * the sampled heap profile, as a .heapprofile DevTools opens.
+ */
 export function benchPlayer(
   swf: Uint8Array,
   frames: number,
@@ -417,6 +421,7 @@ export function benchPlayer(
   allocs = false,
   table = true,
   tableMinRun?: number,
+  profilePath?: string,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
@@ -438,6 +443,9 @@ export function benchPlayer(
           "HeapProfiler.stopSampling",
         );
         value.allocated = framesAllocated(profile.head);
+        if (profilePath) {
+          writeFileSync(profilePath, JSON.stringify(profile));
+        }
       }
 
       return (

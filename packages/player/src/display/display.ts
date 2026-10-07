@@ -196,8 +196,17 @@ export class DisplayObject {
   /** What changed since the renderer last synced it: TRANSFORM, CHILDREN, CONTENT. */
   dirty = TRANSFORM | CONTENT;
 
-  /** This object, weakly, as a store it shows or fills with holds it. */
-  readonly ref = new WeakRef(this);
+  private weakRef: WeakRef<this> | null = null;
+
+  /**
+   * This object, weakly, as a store it shows or fills with holds it: the
+   * same each time, made as it is first asked for, which most never are,
+   * though timelines make thousands of objects a second.
+   */
+  get ref(): WeakRef<this> {
+    this.weakRef ??= new WeakRef(this);
+    return this.weakRef;
+  }
   /**
    * The last depth this clips, as a timeline's mask, or 0: a mask is not
    * drawn, and clips the children after it until one placed deeper.
@@ -302,8 +311,13 @@ export class DisplayObject {
    * turn is what the matrix says. It leaves 3D.
    */
   setMatrix(m: Matrix): void {
+    this.adoptMatrix({ ...m });
+  }
+
+  /** As setMatrix, with a matrix made for it, which it keeps: a place's, on each move of each frame. */
+  private adoptMatrix(m: Matrix): void {
     this.space = null;
-    this.matrix = { ...m };
+    this.matrix = m;
     this.scaleX = Math.hypot(m.a, m.b);
     this.scaleY = Math.hypot(m.c, m.d);
     this.rotation = Math.atan2(m.b, m.a) * DEGREES;
@@ -472,7 +486,7 @@ export class DisplayObject {
 
     if (place.matrix) {
       const m = place.matrix;
-      this.setMatrix({ a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 });
+      this.adoptMatrix({ a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 });
     }
 
     if (place.colorTransform) {

@@ -241,7 +241,7 @@ export function strokeFrame(
  * Rounded, so that one stretch has one key however its turn rounded it;
  * null where m flattens everything, or nearly, where rounding would.
  */
-export function stretchOf(m: Linear): Linear | null {
+export function stretchOf(m: Linear, out?: Linear): Linear | null {
   const a = m[0];
   const b = m[1];
   const c = m[2];
@@ -256,13 +256,25 @@ export function stretchOf(m: Linear): Linear | null {
     return null;
   }
 
-  const round = (x: number) => Math.round((x / t) * 65536) / 65536;
-  const off = round(r);
-  const stretch: Linear = [round(p + det), off, off, round(q + det)];
+  const off = roundStretch(r, t);
+  const a2 = roundStretch(p + det, t);
+  const d2 = roundStretch(q + det, t);
   // Near collapse, a scale of a few 65536ths rounds away, and the lines with it.
-  const rounded = Math.abs(stretch[0] * stretch[3] - off * off);
-  return Math.abs(rounded - det) <= 1e-3 * det ? stretch : null;
+  const rounded = Math.abs(a2 * d2 - off * off);
+  if (Math.abs(rounded - det) > 1e-3 * det) {
+    return null;
+  }
+
+  // Into `out` where given: a turn each frame then makes no array to compare.
+  const stretch = out ?? [0, 0, 0, 0];
+  stretch[0] = a2;
+  stretch[1] = off;
+  stretch[2] = off;
+  stretch[3] = d2;
+  return stretch;
 }
+
+const roundStretch = (x: number, t: number) => Math.round((x / t) * 65536) / 65536;
 
 /** Whether every line of the layer scales both ways, whose width no rotation changes; one scaled one way alone turns with it. */
 export function scalesEvenly(layer: ShapeLayer): boolean {

@@ -76,6 +76,63 @@ import { drawStaticText, drawText } from "./text.js";
 const IDENTITY = new Matrix();
 
 const NO_RECORDS: readonly FilterRecord[] = [];
+/** What an emptied node has drawn, shared by all: replaced as it draws, never added to. */
+const NO_LAYERS: ShapeLayer[] = [];
+const NO_FILLS: GraphicsContext[] = [];
+const NO_LINES_GIVEN: readonly (GraphicsContext | undefined)[] = [];
+
+/** Whether every one of `art` is a SharedGraphics, which a redraw keeps for its new content. */
+function allShared(art: readonly PixiContainer[]): boolean {
+  for (let i = 0; i < art.length; i++) {
+    if (!(art[i] instanceof SharedGraphics)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Whether Graphics that were lines where `lines` says lay out `layers`
+ * alike: a fill's for each layer, then its lines' if it has any.
+ */
+function laidOutAs(lines: readonly boolean[], layers: readonly ShapeLayer[]): boolean {
+  let k = 0;
+  for (let i = 0; i < layers.length; i++) {
+    if (lines[k++] !== false || (layers[i].strokes.length > 0 && lines[k++] !== true)) {
+      return false;
+    }
+  }
+
+  return k === lines.length;
+}
+
+/** Whether any of `children` is a timeline's mask, which clips those after it. */
+function anyClips(children: readonly DisplayObject[]): boolean {
+  for (let i = 0; i < children.length; i++) {
+    if (children[i].clipDepth > 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** Whether any layer has lines of the node's own to stroke. */
+function hasLines(strokes: readonly (SharedGraphics | null)[]): boolean {
+  for (let i = 0; i < strokes.length; i++) {
+    if (strokes[i]) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** sync's scratch, which a container's matrix is set from and which it does not keep. */
+const PLACED = new Matrix();
+/** restroke's scratch, which a stretch is compared in and never kept. */
+const STRETCH: Linear = [0, 0, 0, 0];
 /** A Shape child's slice key once its owner's slice changed: it is sliced again on its next sync. */
 const STALE = "stale";
 
@@ -114,6 +171,12 @@ interface Node {
   emptied: boolean;
   /** The thinnest line its lines were last drawn with, to draw them again for another. */
   strokedAt: number;
+  /**
+   * The stretch its lines were last stroked through, where all were
+   * stroked through its stretch alone (stretchOf): a turn that keeps it
+   * leaves them as they are. Null otherwise.
+   */
+  stretched: Linear | null;
   /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
   bitmap: Sprite | null;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
@@ -517,6 +580,7 @@ export class PixiView {
         reused: false,
         emptied: false,
         strokedAt: 0,
+        stretched: null,
         bitmap: null,
         lines: [],
         spare: null,
@@ -574,18 +638,21 @@ export class PixiView {
     // A Bitmap's texture is its store's: only the sprite goes.
     node.bitmap?.destroy();
     node.bitmap = null;
-    const old = node.ownFills && !this.fresh ? node.fills : [];
-    const oldLines = this.fresh ? [] : node.strokes.map((g) => g?.shared);
+    // Of the content's arrays, none is made where it has nothing: an object is emptied and drawn
+    // anew each time its content changes.
+    const old = node.ownFills && !this.fresh ? node.fills : NO_FILLS;
+    const oldLines =
+      this.fresh || node.strokes.length === 0 ? NO_LINES_GIVEN : node.strokes.map((g) => g?.shared);
     const shared = node.sharedFills;
     // A shape's Graphics stay where they are, for the content drawn next to take in place: taken
     // off and put on, they changed the structure of its render group, which Pixi then rebuilt
     // whole, an animated character's every frame its timeline swapped a shape.
     const art = node.art.children;
-    if (keep && art.length > 0 && art.every((child) => child instanceof SharedGraphics)) {
-      const lines = new Set<PixiContainer>(node.lines);
+    if (keep && art.length > 0 && allShared(art)) {
+      const lines = node.lines;
       node.spare = {
         graphics: art.slice() as SharedGraphics[],
-        lines: art.map((g) => lines.has(g)),
+        lines: art.map((g) => lines.includes(g as SharedGraphics)),
       };
     } else {
       // A text's characters are in a container of their own; their shared
@@ -600,18 +667,19 @@ export class PixiView {
       }
     }
 
-    node.layers = [];
-    node.fills = [];
+    node.layers = NO_LAYERS;
+    node.fills = NO_FILLS;
     node.ownFills = false;
     node.sharedFills = null;
     node.strokes = [];
     node.lines = [];
     return () => {
-      for (const context of old) {
-        destroyContext(context);
+      for (let i = 0; i < old.length; i++) {
+        destroyContext(old[i]);
       }
 
-      for (const context of oldLines) {
+      for (let i = 0; i < oldLines.length; i++) {
+        const context = oldLines[i];
         if (context) {
           this.lines.give(context);
         }
@@ -771,13 +839,8 @@ export class PixiView {
         : null;
     // The Graphics the last content left, taken in place where it laid out
     // its fills and lines alike.
-    const roles = node.layers.flatMap((layer) => (layer.strokes.length ? [false, true] : [false]));
     const spare =
-      node.spare &&
-      node.spare.lines.length === roles.length &&
-      node.spare.lines.every((isLines, k) => isLines === roles[k])
-        ? node.spare.graphics
-        : null;
+      node.spare && laidOutAs(node.spare.lines, node.layers) ? node.spare.graphics : null;
     if (!spare) {
       this.dropSpare(node);
     }
@@ -881,16 +944,18 @@ export class PixiView {
     // Those it last drew, which may since have left it too, and any it has
     // now; not one it last drew that has moved to another parent on the
     // list, which draws it.
-    const kids = new Set(node.kids);
-    if (o instanceof Container) {
-      for (const child of o.children) {
-        kids.add(child);
+    // Those last drawn first, then any new: one in both is released once, as a second does nothing.
+    const kids = node.kids;
+    for (let i = 0; i < kids.length; i++) {
+      if (kids[i].parent === o || this.left(kids[i], o)) {
+        this.release(kids[i]);
       }
     }
 
-    for (const kid of kids) {
-      if (kid.parent === o || this.left(kid, o)) {
-        this.release(kid);
+    if (o instanceof Container) {
+      const children = o.children;
+      for (let i = 0; i < children.length; i++) {
+        this.release(children[i]);
       }
     }
   }
@@ -969,9 +1034,18 @@ export class PixiView {
    * for a layer whose lines scale both ways, through its stretch alone,
    * under the stretch's inverse (stretchOf).
    */
-  private restroke(node: Node): void {
+  private restroke(node: Node, moved = false): void {
     const m = node.world;
     const least = this.leastWidth;
+    // Turned or mirrored, not stretched: the lines and the inverse they are under stay, as a limb's
+    // that only turns on every frame.
+    if (moved && node.stretched && node.strokedAt === least) {
+      const stretch = stretchOf(m, STRETCH);
+      if (stretch && sameLinear(stretch, node.stretched)) {
+        return;
+      }
+    }
+
     node.strokedAt = least;
     const by = node.lineSpace;
     // One key and one inverse for all its layers of each kind, made as one first needs them.
@@ -1024,6 +1098,7 @@ export class PixiView {
         strokes.setFromMatrix(inverse);
       }
     });
+    node.stretched = scaled && !exact ? scaled.m : null;
   }
 
   /**
@@ -1077,7 +1152,7 @@ export class PixiView {
 
     if (dirty & TRANSFORM) {
       const m = own;
-      container.setFromMatrix(new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty));
+      container.setFromMatrix(PLACED.set(m.a, m.b, m.c, m.d, m.tx, m.ty));
       container.visible = o.visible || masking;
       // A blend mode composites the object as a layer (render/blend.ts); a mask is its fills alone.
       // Its filters, then its blend: adl filters the object, then blends what they make.
@@ -1146,23 +1221,30 @@ export class PixiView {
     if (dirty & TRANSFORM || recolor) {
       const ct = flash || masking ? null : o.colorTransform;
       container.alpha = ct ? Math.max(0, Math.min(1, ct.aMul)) : 1;
-      container.tint = ct
+      const tint = ct
         ? (Math.round(Math.max(0, Math.min(1, ct.rMul)) * 255) << 16) |
           (Math.round(Math.max(0, Math.min(1, ct.gMul)) * 255) << 8) |
           Math.round(Math.max(0, Math.min(1, ct.bMul)) * 255)
         : 0xffffff;
+      // Set only as it changes: Pixi parses a tint set through its Color, which allocates, though
+      // most objects keep theirs white.
+      if (container.tint !== tint) {
+        container.tint = tint;
+      }
     }
 
     if (moved || dirty & TRANSFORM) {
       const m = own;
-      const world: Linear = [
-        parent[0] * m.a + parent[2] * m.b,
-        parent[1] * m.a + parent[3] * m.b,
-        parent[0] * m.c + parent[2] * m.d,
-        parent[1] * m.c + parent[3] * m.d,
-      ];
-      moved = !sameLinear(world, node.world);
-      node.world = world;
+      const a = parent[0] * m.a + parent[2] * m.b;
+      const b = parent[1] * m.a + parent[3] * m.b;
+      const c = parent[0] * m.c + parent[2] * m.d;
+      const d = parent[1] * m.c + parent[3] * m.d;
+      const was = node.world;
+      // A new one only where it changed: others may hold the one before, which stays as it was.
+      moved = a !== was[0] || b !== was[1] || c !== was[2] || d !== was[3];
+      if (moved) {
+        node.world = [a, b, c, d];
+      }
     }
 
     // A 9-slice reshapes the shapes as the owner's scale, bounds or grid change, or a Shape child's
@@ -1207,8 +1289,8 @@ export class PixiView {
 
     if (dirty & CONTENT) {
       this.redraw(o, node);
-    } else if ((moved || node.strokedAt !== this.leastWidth) && node.strokes.some((g) => g)) {
-      this.restroke(node);
+    } else if ((moved || node.strokedAt !== this.leastWidth) && hasLines(node.strokes)) {
+      this.restroke(node, true);
     }
 
     if (dirty & CONTENT || remask) {
@@ -1354,11 +1436,13 @@ export class PixiView {
     maskLink(o, o.mask, links);
     maskLink(o, o.maskOf, links);
     if (o instanceof Container) {
-      for (const child of o.children) {
-        const part = this.nodes.get(child);
+      // Indexes, not for-of: this runs for every object synced.
+      const children = o.children;
+      for (let i = 0; i < children.length; i++) {
+        const part = this.nodes.get(children[i]);
         if (part) {
-          for (const partner of part.maskLinks) {
-            maskLink(o, partner.deref() ?? null, links);
+          for (let k = 0; k < part.maskLinks.length; k++) {
+            maskLink(o, part.maskLinks[k].deref() ?? null, links);
           }
 
           draws += part.container.isRenderGroup ? 0 : part.draws;
@@ -1439,14 +1523,22 @@ export class PixiView {
     isolated: boolean,
   ): void {
     const content = node.scroll?.content ?? node.container;
-    for (const group of node.groups) {
-      group.mask = null;
-      group.destroy();
+    // Where no mask clips them, the children's containers are put in order where they are, those
+    // that kept their places left alone: taken off and put back, each was an event of Pixi's, and
+    // the render group's structure changed though its order had not.
+    const inPlace =
+      node.groups.length === 0 && content.children[0] === node.art && !anyClips(o.children);
+    if (!inPlace) {
+      for (const group of node.groups) {
+        group.mask = null;
+        group.destroy();
+      }
+
+      node.groups = [];
+      content.removeChildren();
+      content.addChild(node.art);
     }
 
-    node.groups = [];
-    content.removeChildren();
-    content.addChild(node.art);
     // Those that left the list give their lines back, all the way down; one
     // moved to another parent on the list is drawn there, perhaps already this frame.
     if (!this.fresh) {
@@ -1457,6 +1549,35 @@ export class PixiView {
       }
 
       node.kids = [...o.children];
+    }
+
+    if (inPlace) {
+      const children = o.children;
+      let at = 1;
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        const container = this.sync(
+          child,
+          node.world,
+          moved,
+          child.placed,
+          masking,
+          node.color,
+          isolated,
+        );
+        if (content.children[at] !== container) {
+          content.addChildAt(container, at);
+        }
+
+        at++;
+      }
+
+      // What is left after them, those that left.
+      if (content.children.length > at) {
+        content.removeChildren(at);
+      }
+
+      return;
     }
 
     const clips = new Clips();

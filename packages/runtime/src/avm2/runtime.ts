@@ -501,9 +501,11 @@ export class Traits {
         continue;
       }
 
+      // Indexes, not for-of: compiled code looks its names up here.
       for (let i = 0; i < namespaces.length; i++) {
         const ns = namespaces[i];
-        for (const b of list) {
+        for (let k = 0; k < list.length; k++) {
+          const b = list[k];
           if (b.ns === ns && b.version <= mn.versions[i]) {
             return b.value;
           }
@@ -522,8 +524,9 @@ export class Traits {
       this.allDefaults = this.base ? [...this.base.defaultsOf(), ...this.own] : this.own.slice();
     }
 
-    for (const [field, value] of this.allDefaults) {
-      o[field] = value;
+    const defaults = this.allDefaults;
+    for (let i = 0; i < defaults.length; i++) {
+      o[defaults[i][0]] = defaults[i][1];
     }
 
     return o;
@@ -671,6 +674,12 @@ export class Domain {
   /** As avmplus' m_cachedTraits, which a name's lookup never fills, nor a type's m_cachedScripts. */
   readonly types = new Map<string, GlobalName[]>();
   readonly classRefs = new Map<Namespace, Map<string, ClassRef>>();
+  /**
+   * The classes classNamed found here, by qualified name: what a name
+   * finds in a domain is kept once found, so a player's lookups by name,
+   * one for each object it makes, need not name it anew each time.
+   */
+  readonly named = new Map<string, AsObject>();
   readonly own: string[] = [];
   /** Each of its ABCs' place among all the runtime loads. */
   readonly ownOrder: number[] = [];
@@ -2629,11 +2638,23 @@ export class Runtime {
    * and a player's lookups by name go through.
    */
   classNamed(qualified: string, domain: Domain | null = null): AsObject {
+    const named = (domain ?? this.root).named;
+    const known = named.get(qualified);
+    if (known) {
+      return known;
+    }
+
     const i = qualified.lastIndexOf("::");
     const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));
     const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
     mn.domain = domain === this.root ? null : domain;
-    return this.resolveName(mn);
+    const cls = this.resolveName(mn);
+    // A script still running its initializer may not have made the class yet.
+    if (cls) {
+      named.set(qualified, cls);
+    }
+
+    return cls;
   }
 
   /**

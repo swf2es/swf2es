@@ -26,6 +26,9 @@ const COLOR = [
   ["aAdd", "alphaOffset"],
 ] as const;
 type Color = Record<(typeof COLOR)[number][0], number>;
+// Made once: a script reads and writes a transform on every frame.
+const MATRIX_NAMES = MATRIX.map((k) => avm2.qname(avm2.publicNs, k));
+const COLOR_NAMES = COLOR.map(([, name]) => avm2.qname(avm2.publicNs, name));
 const IDENTITY_COLOR: Color = {
   rMul: 1,
   gMul: 1,
@@ -52,30 +55,38 @@ export function matrixObject(s: Scripting, m: Linear): AsObject {
 
 /** The matrix a flash.geom.Matrix holds. */
 export function matrixOf(s: Scripting, o: AsObject): Linear {
-  const m = {} as Linear;
-  for (const k of MATRIX) {
-    m[k] = Number(s.rt.getProperty(o, avm2.qname(avm2.publicNs, k)));
-  }
-
-  return m;
+  const value = (i: number) => Number(s.rt.getProperty(o, MATRIX_NAMES[i]));
+  return { a: value(0), b: value(1), c: value(2), d: value(3), tx: value(4), ty: value(5) };
 }
 
 /** A new flash.geom.ColorTransform of `c`. */
 export function colorObject(s: Scripting, c: Color): AsObject {
   return s.rt.construct(
     s.rt.classNamed("flash.geom::ColorTransform"),
-    ...COLOR.map(([field]) => c[field]),
+    c.rMul,
+    c.gMul,
+    c.bMul,
+    c.aMul,
+    c.rAdd,
+    c.gAdd,
+    c.bAdd,
+    c.aAdd,
   ) as AsObject;
 }
 
 /** The color transform a flash.geom.ColorTransform holds. */
 export function colorOf(s: Scripting, o: AsObject): Color {
-  const c = {} as Color;
-  for (const [field, name] of COLOR) {
-    c[field] = Number(s.rt.getProperty(o, avm2.qname(avm2.publicNs, name)));
-  }
-
-  return c;
+  const value = (i: number) => Number(s.rt.getProperty(o, COLOR_NAMES[i]));
+  return {
+    rMul: value(0),
+    gMul: value(1),
+    bMul: value(2),
+    aMul: value(3),
+    rAdd: value(4),
+    gAdd: value(5),
+    bAdd: value(6),
+    aAdd: value(7),
+  };
 }
 
 export function transformNatives(s: Scripting): avm2.Natives {

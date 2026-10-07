@@ -63,66 +63,87 @@ export interface Filter {
 
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
 
-/** A kind's values as a new filter object of it has them in adl. */
+/**
+ * A kind's values as a new filter object of it has them in adl: made for
+ * the kind alone, as a timeline that writes a filter on each frame asks
+ * for one each time.
+ */
 export function filterDefaults(kind: FilterKind): Filter {
-  const shadow = { angle: 45, blurX: 4, blurY: 4, distance: 4, knockout: false, quality: 1 };
-  const gradient = { ...shadow, strength: 1, type: "inner", colors: [], alphas: [], ratios: [] };
-  const values: Record<FilterKind, object> = {
-    blur: { blurX: 4, blurY: 4, quality: 1 },
-    glow: {
-      alpha: 1,
-      blurX: 6,
-      blurY: 6,
-      color: 0xff0000,
-      inner: false,
-      knockout: false,
-      quality: 1,
-      strength: 2,
-    },
-    dropShadow: {
-      ...shadow,
-      alpha: 1,
-      color: 0,
-      hideObject: false,
-      inner: false,
-      strength: 1,
-    },
-    bevel: {
-      ...shadow,
-      highlightAlpha: 1,
-      highlightColor: 0xffffff,
-      shadowAlpha: 1,
-      shadowColor: 0,
-      strength: 1,
-      type: "inner",
-    },
-    gradientGlow: gradient,
-    gradientBevel: gradient,
-    colorMatrix: { matrix: [...IDENTITY_MATRIX] },
-    convolution: {
-      alpha: 0,
-      bias: 0,
-      clamp: true,
-      color: 0,
-      divisor: 1,
-      matrix: [],
-      matrixX: 0,
-      matrixY: 0,
-      preserveAlpha: true,
-    },
-    displacementMap: {
-      alpha: 0,
-      color: 0,
-      componentX: 0,
-      componentY: 0,
-      mapBitmap: null,
-      mapPoint: [0, 0],
-      mode: "wrap",
-      scaleX: 0,
-      scaleY: 0,
-    },
-  };
-  return { kind, ...structuredClone(values[kind]) } as Filter;
+  return { kind, ...kindDefaults(kind) } as Filter;
+}
+
+function kindDefaults(kind: FilterKind): object {
+  const shadow = () => ({
+    angle: 45,
+    blurX: 4,
+    blurY: 4,
+    distance: 4,
+    knockout: false,
+    quality: 1,
+  });
+  switch (kind) {
+    case "blur":
+      return { blurX: 4, blurY: 4, quality: 1 };
+    case "glow":
+      return {
+        alpha: 1,
+        blurX: 6,
+        blurY: 6,
+        color: 0xff0000,
+        inner: false,
+        knockout: false,
+        quality: 1,
+        strength: 2,
+      };
+    case "dropShadow":
+      return {
+        ...shadow(),
+        alpha: 1,
+        color: 0,
+        hideObject: false,
+        inner: false,
+        strength: 1,
+      };
+    case "bevel":
+      return {
+        ...shadow(),
+        highlightAlpha: 1,
+        highlightColor: 0xffffff,
+        shadowAlpha: 1,
+        shadowColor: 0,
+        strength: 1,
+        type: "inner",
+      };
+    case "gradientGlow":
+    case "gradientBevel":
+      return { ...shadow(), strength: 1, type: "inner", colors: [], alphas: [], ratios: [] };
+    case "colorMatrix":
+      return { matrix: [...IDENTITY_MATRIX] };
+    case "convolution":
+      return {
+        alpha: 0,
+        bias: 0,
+        clamp: true,
+        color: 0,
+        divisor: 1,
+        matrix: [],
+        matrixX: 0,
+        matrixY: 0,
+        preserveAlpha: true,
+      };
+    case "displacementMap":
+      return {
+        alpha: 0,
+        color: 0,
+        componentX: 0,
+        componentY: 0,
+        mapBitmap: null,
+        mapPoint: [0, 0],
+        mode: "wrap",
+        scaleX: 0,
+        scaleY: 0,
+      };
+  }
 }
 
 /** A copy of a record, its lists its own. */

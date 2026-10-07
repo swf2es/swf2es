@@ -53,6 +53,13 @@
 // timed apart. --min-run N has the table draw only runs of N draws or
 // more, and Pixi the shorter, to time where the table starts to gain.
 //
+// --scripted N plays instead N rigs whose 12 parts are clips of a class
+// with a frame script, each frame taken off and new ones put in their
+// place, turning and swelling; each new part's script calls a method on
+// the root that looks its colour up and sets its colorTransform, as a
+// game's animated characters colour their parts: what constructing
+// objects, their events and frame scripts, and their lines cost.
+//
 // --branches N places N coloured branches of 128 shapes. A quarter replace
 // one child each frame; the rest stay still, as scenery beside animated art.
 // --toggle-branches N removes and reattaches those N branches every --toggle-every K frames.
@@ -63,15 +70,19 @@
 // their time, contexts tessellated with their vertices and time, buffer
 // uploads and bytes, texture uploads, program switches, and the table's
 // runs and draws. --allocs samples the heap and gives the KB the frames
-// allocated, the player's start left out.
+// allocated, the player's start left out; --profile FILE also writes the
+// sampled profile there, for DevTools' Memory panel to open.
 //
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--glide]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N | --masks N [--unmasked]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
-//     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs] [--no-table] [--min-run N]
+//     | --toggle-static N | --masks N [--unmasked] | --scripted N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
+//     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
+//     [--min-run N]
 //     [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
+import { libraryAbcs } from "./libraries.ts";
+import { compiler } from "./scripts.ts";
 
 const args = process.argv.slice(2);
 const option = (name: string, fallback: number) => {
@@ -88,6 +99,8 @@ const nestedGroups = args.includes("--nested-groups");
 const idleRenders = option("idle", 0);
 const toggle = option("toggle", 0);
 const masks = option("masks", 0);
+const scripted = option("scripted", 0);
+const profile = args.includes("--profile") ? args[args.indexOf("--profile") + 1] : undefined;
 const toggleStatic = option("toggle-static", 0);
 const frames = option("frames", 120);
 const WARMUP = 10;
@@ -463,6 +476,111 @@ function masksSwf(count: number, unmasked: boolean): Uint8Array {
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
 }
 
+/** The scripted rig's classes: the root, whose setColor each part's first frame calls. */
+const SCRIPTED_SOURCE = `package {
+  import flash.display.MovieClip;
+  import flash.geom.ColorTransform;
+
+  public class Main extends MovieClip {
+    public var colors:Object = { skin: 0xe0b090, hair: 0x603010, cloth: 0x3050a0, trim: 0xc0c040 };
+
+    public function setColor(mc:MovieClip):void {
+      var c:uint = colors[mc.kind];
+      var ct:ColorTransform = mc.transform.colorTransform;
+      ct.redMultiplier = ((c >> 16) & 255) / 255;
+      ct.greenMultiplier = ((c >> 8) & 255) / 255;
+      ct.blueMultiplier = (c & 255) / 255;
+      mc.transform.colorTransform = ct;
+    }
+  }
+
+  public class Part extends MovieClip {
+    private static const KINDS:Array = ["skin", "hair", "cloth", "trim"];
+    private static var made:int = 0;
+    public var kind:String;
+
+    public function Part() {
+      kind = KINDS[made++ & 3];
+      addFrameScript(0, frame1);
+    }
+
+    private function frame1():void {
+      MovieClip(root).setColor(this);
+    }
+  }
+}
+`;
+
+/**
+ * `count` rigs as --rig --swap makes them, each part a clip of the class
+ * Part holding the part's shape, so that each frame constructs 12 Parts a
+ * rig, whose first frames' scripts colour them (--scripted).
+ */
+function scriptedSwf(count: number): Uint8Array {
+  const abc = compiler()("BenchScripted", SCRIPTED_SOURCE);
+  // The page links it against these, which a fresh checkout has yet to copy out.
+  libraryAbcs();
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
+  for (let i = 0; i < 4; i++) {
+    tags.push(
+      part(11 + i, 12 + 6 * i),
+      w.sprite(31 + i, 1, [w.place({ depth: 1, character: 11 + i }), w.showFrame(), w.end()]),
+    );
+  }
+
+  const loop = 24;
+  const sprite: Uint8Array[] = [];
+  for (let f = 0; f < loop; f++) {
+    for (let i = 0; i < 12; i++) {
+      const t = (2 * Math.PI * f) / loop;
+      const a = 0.4 * Math.sin(t + i) * (i % 2 ? 1 : -1);
+      const s = 1 + 0.25 * Math.sin(t * 2 + i);
+      const matrix = {
+        a: s * Math.cos(a),
+        b: s * Math.sin(a),
+        c: -s * Math.sin(a),
+        d: s * Math.cos(a),
+        tx: Math.round(400 * Math.cos(i)),
+        ty: Math.round(400 * Math.sin(i * 1.7)),
+      };
+      if (f > 0) {
+        sprite.push(w.remove(i + 1));
+      }
+
+      sprite.push(w.place({ depth: i + 1, character: 31 + ((i + f) % 4), matrix }));
+    }
+
+    sprite.push(w.showFrame());
+  }
+
+  tags.push(w.sprite(20, loop, [...sprite, w.end()]), w.doAbc(abc, "BenchScripted"));
+  tags.push(
+    w.symbolClass([
+      [0, "Main"],
+      [31, "Part"],
+      [32, "Part"],
+      [33, "Part"],
+      [34, "Part"],
+    ]),
+  );
+  const columns = Math.ceil(Math.sqrt(count));
+  for (let i = 0; i < count; i++) {
+    tags.push(
+      w.place({
+        depth: i + 1,
+        character: 20,
+        matrix: {
+          tx: Math.round(((i % columns) + 0.5) * (WIDTH / columns) * TWIPS),
+          ty: Math.round((Math.floor(i / columns) + 0.5) * (HEIGHT / columns) * TWIPS),
+        },
+      }),
+    );
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
 /** 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st... */
 const ordinal = (n: number) => {
   const tens = Math.floor(n / 10) % 10;
@@ -528,19 +646,21 @@ const swf =
       ? toggleSwf(toggle)
       : toggleStatic > 0
         ? toggleStaticSwf(toggleStatic)
-        : masks > 0
-          ? masksSwf(masks, args.includes("--unmasked"))
-          : branches > 0
-            ? branchSwf(branches)
-            : rig > 0
-              ? rigSwf(
-                  rig,
-                  args.includes("--swap"),
-                  args.includes("--fresh"),
-                  args.includes("--blurred") || filtered > 0,
-                  args.includes("--glide"),
-                )
-              : synthetic();
+        : scripted > 0
+          ? scriptedSwf(scripted)
+          : masks > 0
+            ? masksSwf(masks, args.includes("--unmasked"))
+            : branches > 0
+              ? branchSwf(branches)
+              : rig > 0
+                ? rigSwf(
+                    rig,
+                    args.includes("--swap"),
+                    args.includes("--fresh"),
+                    args.includes("--blurred") || filtered > 0,
+                    args.includes("--glide"),
+                  )
+                : synthetic();
 const result = await benchPlayer(
   swf,
   frames,
@@ -554,6 +674,7 @@ const result = await benchPlayer(
   args.includes("--allocs"),
   !args.includes("--no-table"),
   args.includes("--min-run") ? option("min-run", 1) : undefined,
+  profile,
 );
 if (result.error) {
   console.error(result.error);
@@ -588,13 +709,15 @@ const summary = {
         ? `toggle of ${toggle}`
         : toggleStatic > 0
           ? `static toggle of ${toggleStatic}`
-          : masks > 0
-            ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-            : branches > 0
-              ? `${branches} branches`
-              : rig > 0
-                ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
-                : shapes,
+          : scripted > 0
+            ? `scripted rig of ${scripted}`
+            : masks > 0
+              ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+              : branches > 0
+                ? `${branches} branches`
+                : rig > 0
+                  ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
+                  : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   frames,
