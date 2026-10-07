@@ -19,7 +19,8 @@ import {
 } from "@swf2es/format";
 import type { ExternalStream, Reader, Writer } from "../amf.js";
 import type { AsObject, Method, Value } from "../descriptors.js";
-import type { IndexHook, Runtime, Traits } from "../runtime.js";
+import type { IndexHook } from "../hooks.js";
+import type { Runtime, Traits } from "../runtime.js";
 import { type Natives, registerNativeClass } from "./define.js";
 
 const kGrowthIncr = 4096;

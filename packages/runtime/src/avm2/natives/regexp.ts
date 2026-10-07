@@ -2,7 +2,8 @@
 // arrays String's methods give too.
 
 import type { AsObject, Value } from "../descriptors.js";
-import type { ClassHook, Runtime } from "../runtime.js";
+import type { ClassHook } from "../hooks.js";
+import type { Runtime } from "../runtime.js";
 import { AS3, type Natives, registerNativeClass } from "./define.js";
 
 /** RegExp's natives, for `rt`: written as a class, each running with the RegExp object as `this`. */

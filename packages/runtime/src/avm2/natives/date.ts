@@ -17,7 +17,8 @@
 // to the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Value } from "../descriptors.js";
-import type { ClassHook, Runtime } from "../runtime.js";
+import type { ClassHook } from "../hooks.js";
+import type { Runtime } from "../runtime.js";
 import type { Natives } from "./define.js";
 
 const AS3 = "http://adobe.com/AS3/2006/builtin";

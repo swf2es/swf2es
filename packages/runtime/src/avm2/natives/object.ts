@@ -2,8 +2,9 @@
 // calling or constructing Object, Namespace, QName or Function does.
 
 import type { AsObject, Value } from "../descriptors.js";
+import type { ClassHook } from "../hooks.js";
 import { formatClassName, Namespace, prefixOf, publicNs, qname } from "../names.js";
-import { type ClassHook, NOT_FOUND, type Runtime } from "../runtime.js";
+import { NOT_FOUND, type Runtime } from "../runtime.js";
 import { AS3, elements, type Natives, plain } from "./define.js";
 import { constructNamespace, newNamespace } from "./xml/xml.js";
 

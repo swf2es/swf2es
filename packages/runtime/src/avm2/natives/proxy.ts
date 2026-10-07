@@ -6,8 +6,9 @@
 // nextNameIndex, nextName and nextValue.
 
 import type { AsObject, Value } from "../descriptors.js";
+import type { ClassHook, PropertyHook } from "../hooks.js";
 import { type Multiname, NS_Public, namespace, publicNs, qname } from "../names.js";
-import type { ClassHook, PropertyHook, Runtime } from "../runtime.js";
+import type { Runtime } from "../runtime.js";
 import type { Natives } from "./define.js";
 
 const FLASH_PROXY = namespace(NS_Public, "http://www.adobe.com/2006/actionscript/flash/proxy");

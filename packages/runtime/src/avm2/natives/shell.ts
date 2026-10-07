@@ -3,7 +3,8 @@
 // others to start.
 
 import type { AsObject, Value } from "../descriptors.js";
-import { type ClassHook, type Domain, type Runtime, setStaticVar } from "../runtime.js";
+import type { ClassHook } from "../hooks.js";
+import { type Domain, type Runtime, setStaticVar } from "../runtime.js";
 import {
   byteArrayCapacity,
   bytesOf,
