@@ -4287,6 +4287,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "read-graphics-data",
+    swf: (abc) => bare(abc, 1, "ReadGraphicsData"),
+    script: "ReadGraphicsData",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "sound-symbols",
     build: soundSymbols,
     frames: 1,

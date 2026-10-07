@@ -928,9 +928,9 @@ and the player's paths in this document are relative to it:
   browser's defaults, and the interfaces of what only a host supplies
   (ExternalInterface's page, a renderer's draws, fetches, sockets).
 - `display/`: the display list and the timeline, and what they are made
-  of: shapes, morphs, drawings, bounds and hit tests, 9-slice scaling,
-  geometry, 3D matrices, colour transforms, gradients' ramps, and filters
-  as records of their values.
+  of: shapes, morphs, drawings and what they read back as, bounds and hit
+  tests, 9-slice scaling, geometry, 3D matrices, colour transforms,
+  gradients' ramps, and filters as records of their values.
 - `text/`: text fields' model and layout, static text, fonts and CSS.
 - `bitmap/`: the pixel store and its operations on the CPU, bitmap
   filters, decoded images and PNG encoding.
@@ -1750,10 +1750,19 @@ re-stroking as a shape's for their width under a transform. The drawing's
 points, and its lines' half widths, give the object its bounds, for
 `width`, `height`, `getBounds` and the hit tests to come. Gradient and
 bitmap fills are recorded as a shape's are, and drawn as far as a shape's
-are (the first stop); shader fills, `drawTriangles`, `readGraphicsData`
-and `drawGraphicsData` wait. An adl case draws in a `Shape` and in a
+are (the first stop); shader fills, `drawTriangles` and
+`drawGraphicsData` wait. An adl case draws in a `Shape` and in a
 `Sprite` with a child, compared by pixels; the corpus's `graphics_*`
 tests, which trace nothing, check that nothing throws.
+
+`readGraphicsData` reads a drawing back as Flash does, from the shape in
+twips rather than the commands (`display/graphicsdata.ts`): each fill as
+its fill, one path and an end; each line as the outline Flash strokes it
+into, a nonZero fill of its colour, with its caps and joins; cubics as
+quadratics; colours through Flash's premultiplied store; and with
+`recurse`, its children's through their matrices. The `read-graphics-data`
+case holds adl's output. Lines a few pixels wide and the outlines of
+curves still stray from adl's by a twip.
 
 ### Bounds and hit tests
 

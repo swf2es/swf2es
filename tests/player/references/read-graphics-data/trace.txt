@@ -1,0 +1,238 @@
+== empty 0 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+== rect 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ff0000 0.4980392156862745
+  GraphicsPath evenOdd [1,2,2,2,2] [10,20,40,20,40,60,10,60,10,20] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== rect no end 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ff00 1
+  GraphicsPath evenOdd [1,2,2,2,2] [1.35,2.65,4.35,2.65,4.35,7.15,1.35,7.15,1.35,2.65] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== circle 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ff 1
+  GraphicsPath evenOdd [1,3,3,2,3,3,2,3,3,2,3,3,2] [70,50,70,58.3,64.15,64.15,58.3,70,50,70,50,70,41.7,70,35.85,64.15,30,58.3,30,50,30,50,30,41.7,35.85,35.85,41.7,30,50,30,50,30,58.3,30,64.15,35.85,70,41.7,70,50,70,50] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== ellipse 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ff 1
+  GraphicsPath evenOdd [1,3,3,2,3,3,2,3,3,2,3,3,2] [50,20,50,24.15,44.15,27.05,38.3,30,30,30,30,30,21.7,30,15.85,27.05,10,24.15,10,20,10,20,10,15.85,15.85,12.95,21.7,10,30,10,30,10,38.3,10,44.15,12.95,50,15.85,50,20,50,20] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== round rect 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 103555 0.24705882352941178
+  GraphicsPath evenOdd [1,3,3,2,3,3,2,3,3,2,3,3,2] [100,45,100,47.05,97.05,48.55,94.15,50,90,50,10,50,5.85,50,2.95,48.55,0,47.05,0,45,0,5,0,2.95,2.95,1.45,5.85,0,10,0,90,0,94.15,0,97.05,1.45,100,2.95,100,5,100,45] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== round rect complex 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 123456 1
+  GraphicsPath evenOdd [1,3,3,2,2,3,3,2,3,3,2] [100,30,100,38.3,94.15,44.15,88.3,50,80,50,0,50,0,5,0,2.95,1.45,1.45,2.95,0,5,0,90,0,94.15,0,97.05,2.95,100,5.85,100,10,100,30] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== line curve 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill fe00 0.7490196078431373
+  GraphicsPath nonZero [1,3,3,3,3,3,3,2,2,3,3,3,3,2,3] [30.7,9.3,20,-1.4,9.3,9.3,9,9.6,9,10,9,10.4,9.3,10.7,9.6,11,10,11,10.4,11,10.7,10.7,20,1.4,29.3,10.7,29.05,10.3,39.05,40.3,39.15,40.7,39.5,40.9,39.9,41.1,40.3,40.95,40.7,40.85,40.9,40.45,41.1,40.1,40.95,39.7,30.95,9.7,30.9,9.45,30.7,9.3] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== line styles 9 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill abcdef 1
+  GraphicsPath nonZero [1,2,2,2,2,2,2,2,2] [6.8,8.1,2.8,0.1,1.9,-1.7,-1.7,0.1,-0.8,1.9,3.2,9.9,4.1,11.7,7.7,9.9,6.8,8.1] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill a0a0a 0.09803921568627451
+  GraphicsPath nonZero [1,2,2,2,2] [9,1,5,9,5.05,9,9.05,1,9,1] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill 222222 1
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [30,-107.5,20,-107.5,-32.8,-107.5,-70.15,-70.15,-107.5,-32.8,-107.5,20,-107.5,72.8,-70.15,110.15,-32.8,147.5,20,147.5,30,147.5,82.8,147.5,120.15,110.15,157.5,72.8,157.5,20,157.5,-32.8,120.15,-70.15,82.8,-107.5,30,-107.5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== fill and line 6 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ffff00 1
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,50,0,50,50,0,50,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill ff00ff 1
+  GraphicsPath nonZero [1,2,3,3,2,3,3,2,3,3,2,3,3,1,2,2,2,2,2,2,2,2] [50,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,50,-5,52.05,-3.55,53.5,-2.05,55,0,55,50,55,52.05,55,53.5,53.5,55,52.05,55,50,55,0,55,-2.05,53.5,-3.55,52.05,-5,50,-5,0,5,50,5,45,0,45,50,50,45,0,45,5,50,5,0,0,5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== open contour 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ff0000 1
+  GraphicsPath evenOdd [1,2,2,2] [0,0,10,0,10,10,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== lines only 0 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+== cubic 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ffff 1
+  GraphicsPath evenOdd [1,3,3,3,3,2,3,3,3,2] [0,0,1.9,7.4,4.2,10.65,6.45,13.9,9.05,14.05,11.65,14.2,14.4,12.3,17.2,10.4,20,7.5,25.6,1.75,28.35,-1.1,30.95,-2.8,33.55,-4.55,35.8,-4.1,38.1,-3.65,40,0,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== draw path 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 808080 1
+  GraphicsPath nonZero [1,2,2,2,2] [0,0,10,0,10,10,0,10,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== linear gradient 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsGradientFill linear [4294901760,2130706687] [1,0.4980392156862745] [0,255] (a=0.04315837472677231, b=0.021579187363386154, c=-0.04315837472677231, d=0.021579187363386154, tx=60, ty=30) reflect linearRGB 0
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,100,0,100,50,0,50,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== radial gradient 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsGradientFill radial [4294901760,4278255360,4278190335] [1,1,1] [0,100,255] (a=0.1220703125, b=0, c=0, d=0.1220703125, tx=0, ty=0) repeat rgb -0.7490196078431373
+  GraphicsPath evenOdd [1,3,3,2,3,3,2,3,3,2,3,3,2] [10,0,10,4.15,7.05,7.05,4.15,10,0,10,0,10,-4.15,10,-7.05,7.05,-10,4.15,-10,0,-10,0,-10,-4.15,-7.05,-7.05,-4.15,-10,0,-10,0,-10,4.15,-10,7.05,-7.05,10,-4.15,10,0,10,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== bitmap fill 6 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsBitmapFill 4x3 (a=1.99951171875, b=0, c=0, d=1.99951171875, tx=5, ty=5) true false
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,8,0,8,6,0,6,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsBitmapFill 4x3 (a=0.999755859375, b=0, c=0, d=0.999755859375, tx=0, ty=0) true false
+  GraphicsPath evenOdd [1,2,2,2,2] [10,0,18,0,18,6,10,6,10,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== cleared 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 0 1
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [34,37,4,-3,2.75,-4.65,0.7,-4.95,-1.35,-5.25,-3,-4,-4.65,-2.75,-4.95,-0.7,-5.25,1.35,-4,3,26,43,27.25,44.65,29.3,44.95,31.35,45.25,33,44,34.65,42.75,34.95,40.7,35.25,38.65,34,37] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== layers 18 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ff0000 1
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [100,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,2.05,-3.55,3.5,-2.05,5,0,5,100,5,102.05,5,103.5,3.5,105,2.05,105,0,105,-2.05,103.5,-3.55,102.05,-5,100,-5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill ff00 1
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,50,0,50,50,0,50,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill ff0000 1
+  GraphicsPath nonZero [1,2,3,3,2,3,3,2,3,3,2,3,3,1,2,2,2,2,2,2,2,2] [50,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,50,-5,52.05,-3.55,53.5,-2.05,55,0,55,50,55,52.05,55,53.5,53.5,55,52.05,55,50,55,0,55,-2.05,53.5,-3.55,52.05,-5,50,-5,0,5,50,5,45,0,45,50,50,45,0,45,5,50,5,0,0,5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill ff 1
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [100,95,0,95,-2.05,95,-3.55,96.45,-5,97.95,-5,100,-5,102.05,-3.55,103.5,-2.05,105,0,105,100,105,102.05,105,103.5,103.5,105,102.05,105,100,105,97.95,103.5,96.45,102.05,95,100,95] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill ffff 1
+  GraphicsPath evenOdd [1,2,2,2,2] [0,200,50,200,50,250,0,250,0,200] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill ff 1
+  GraphicsPath nonZero [1,2,3,3,2,3,3,2,3,3,2,3,3,1,2,2,2,2,2,2,2,2] [50,195,0,195,-2.05,195,-3.55,196.45,-5,197.95,-5,200,-5,250,-5,252.05,-3.55,253.5,-2.05,255,0,255,50,255,52.05,255,53.5,253.5,55,252.05,55,250,55,200,55,197.95,53.5,196.45,52.05,195,50,195,0,205,50,205,45,200,45,250,50,245,0,245,5,250,5,200,0,205] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== two contours 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ff0000 1
+  GraphicsPath evenOdd [1,2,2,2,2,2,2,1,2,2,2,2,1,2,2,2,2] [0,0,50,0,50,50,0,50,0,0,10,0,0,0,100,0,150,0,150,50,100,50,100,0,200,0,250,0,250,50,200,50,200,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== collinear curve 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ff0000 1
+  GraphicsPath evenOdd [1,2,2,2,3] [0,0,20,0,20,20,0,20,0,20,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== small cubic 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ff0000 1
+  GraphicsPath evenOdd [1,3,3,2] [0,0,0.8,2.45,2,0.75,3.2,-0.95,4,0,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== big cubic 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ff0000 1
+  GraphicsPath evenOdd [1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2] [0,0,46.9,187.35,96.6,346.25,146.35,505.15,198.75,637.2,251.1,769.25,305.95,876.15,360.8,983.05,417.95,1066.4,475.1,1149.75,534.35,1211.25,593.6,1272.7,654.8,1313.95,715.95,1355.2,778.85,1377.85,841.8,1400.55,906.25,1406.25,970.7,1411.95,1036.55,1402.4,1102.4,1392.85,1169.45,1369.65,1236.45,1346.4,1304.5,1311.2,1372.55,1276,1441.4,1230.45,1510.25,1184.9,1579.75,1130.7,1649.3,1076.45,1719.25,1015.15,1789.2,953.85,1859.45,887.15,1929.65,820.45,2000,750,2070.35,679.55,2140.55,607,2210.8,534.45,2280.75,461.45,2350.7,388.4,2420.25,316.6,2489.75,244.75,2558.6,175.8,2627.45,106.8,2695.5,42.3,2763.55,-22.2,2830.55,-80.55,2897.6,-138.95,2963.45,-189.5,3029.3,-240.1,3093.75,-281.25,3158.2,-322.4,3221.15,-352.5,3284.05,-382.55,3345.2,-399.9,3406.4,-417.25,3465.65,-420.25,3524.9,-423.2,3582.05,-410.15,3639.2,-397.1,3694.05,-366.4,3748.9,-335.7,3801.25,-285.65,3853.65,-235.6,3903.4,-164.6,3953.1,-93.6,4000,0,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+cubic 0.5 1323232
+cubic 1 13323232
+cubic 2 1332332332
+cubic 4 1332332332
+cubic 6 133332332332
+cubic 12 13333233332332
+cubic 16 1333323333233332
+cubic 50 13333333323333233332
+cubic 100 133333333233333333233332
+cubic 150 1333333332333333332333333332
+cubic 400 133333333333333332333333332333333332
+cubic 1000 1333333333333333323333333333333333233333333333333332
+== colors 30 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill a3352 0.09803921568627451
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,1,0,1,1,0,1,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill 89abcc 0.2980392156862745
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,1,0,1,1,0,1,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill fddbba 0.6980392156862745
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,1,0,1,1,0,1,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill 0 0
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,1,0,1,1,0,1,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsGradientFill radial [420623446,2995366861] [0.09803921568627451,0.6980392156862745] [0,255] (a=0.1220703125, b=0, c=0, d=0.1220703125, tx=0, ty=0) pad rgb 0.5019607843137255
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,1,0,1,1,0,1,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsGradientFill radial [1291771066,9022413] [0.2980392156862745,0] [10,20] (a=0.1220703125, b=0, c=0, d=0.1220703125, tx=0, ty=0) pad rgb -0.2980392156862745
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,1,0,1,1,0,1,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsGradientFill radial [4294892730] [1] [10] (a=1, b=2, c=3, d=4, tx=5, ty=6) pad rgb 1
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,1,0,1,1,0,1,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsGradientFill linear [4278190080] [1] [0] (a=0.12345670163631439, b=0.000009999999747378752, c=33.29999923706055, d=1, tx=-1, ty=2) pad rgb 0
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,1,0,1,1,0,1,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsBitmapFill 4x3 (a=0.4998779296875, b=0.24993896484375, c=-0.124969482421875, d=2.999267578125, tx=1, ty=3) true false
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,1,0,1,1,0,1,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsBitmapFill 4x3 (a=1.4996337890625, b=0.24993896484375, c=0.74981689453125, d=0.999755859375, tx=-1, ty=1) true false
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,1,0,1,1,0,1,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== line round 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 7f7f7f 0.2980392156862745
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [100,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,2.05,-3.55,3.5,-2.05,5,0,5,100,5,102.05,5,103.5,3.5,105,2.05,105,0,105,-2.05,103.5,-3.55,102.05,-5,100,-5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== line diagonal 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 808080 1
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [74,97,14,17,12.75,15.35,10.7,15.05,8.65,14.75,7,16,5.35,17.25,5.05,19.3,4.75,21.35,6,23,66,103,67.25,104.65,69.3,104.95,71.35,105.25,73,104,74.65,102.75,74.95,100.7,75.25,98.65,74,97] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== polyline round 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 808080 1
+  GraphicsPath nonZero [1,2,3,3,3,3,2,2,2,2,2,3,3,3,3,2,3,2,3,3] [100,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,2.05,-3.55,3.5,-2.05,5,0,5,100,5,95,0,95,100,96.45,96.45,-3.55,196.45,-5,197.95,-5,200,-5,202.05,-3.55,203.5,-2.05,205,0,205,2.05,205,3.55,203.55,103.55,103.55,105,102.05,105,100,105,0,105,-2.05,103.5,-3.55,102.05,-5,100,-5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== polyline miter 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 808080 1
+  GraphicsPath nonZero [1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2] [100,-5,0,-5,0,5,100,5,95,0,95,100,99,95.1,-1,115.1,-15.3,117.95,-14.6,125,0,125,200,125,200,115,0,115,1,124.9,101,104.9,105,104.1,105,100,105,0,105,-5,100,-5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== polyline bevel 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 808080 1
+  GraphicsPath nonZero [1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2] [100,-5,0,-5,-5,-5,-5,5,0,5,100,5,95,0,95,100,96.45,96.45,-3.55,196.45,-7.1,200,0,207.1,3.55,203.55,103.55,103.55,105,100,105,0,100,-5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== closed stroke 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 808080 1
+  GraphicsPath nonZero [1,2,3,3,2,3,3,2,3,3,2,3,3,1,2,2,2,2,2,2,2,2] [100,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,100,-5,102.05,-3.55,103.5,-2.05,105,0,105,100,105,102.05,105,103.5,103.5,105,102.05,105,100,105,0,105,-2.05,103.5,-3.55,102.05,-5,100,-5,0,5,100,5,95,0,95,100,100,95,0,95,5,100,5,0,0,5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== two strokes 6 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 808080 1
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [100,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,2.05,-3.55,3.5,-2.05,5,0,5,100,5,102.05,5,103.5,3.5,105,2.05,105,0,105,-2.05,103.5,-3.55,102.05,-5,100,-5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill 808080 1
+  GraphicsPath nonZero [1,2,3,3,3,3,2,2,2,3,3,3,3,2,3,3] [100,95,0,95,-2.05,95,-3.55,96.45,-5,97.95,-5,100,-5,102.05,-3.55,103.5,-2.05,105,0,105,100,105,95,100,95,200,95,202.05,96.45,203.5,97.95,205,100,205,102.05,205,103.5,203.5,105,202.05,105,200,105,100,105,97.95,103.5,96.45,102.05,95,100,95] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== stroke reverse turn 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 808080 1
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,2,3,3,3,3,2,2] [100,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,2.05,-3.55,3.5,-2.05,5,0,5,100,5,102.05,5,103.5,3.5,105,2.05,105,0,105,-100,105,-102.05,103.5,-103.55,102.05,-105,100,-105,97.95,-105,96.45,-103.55,95,-102.05,95,-100,95,0,100,-5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== hairline 6 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 808080 1
+  GraphicsPath nonZero [1,2,2,2,2,2,2,2,2] [100,0,0,0,0,0.05,100,0.05,100,0,100,100,100.05,100,100.05,0,100,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill 808080 1
+  GraphicsPath nonZero [1,2,2,2,2] [13.05,50,10.05,10,10,10,13,50,13.05,50] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== open fill with line 6 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill ff0000 1
+  GraphicsPath evenOdd [1,2,2,2] [0,0,100,0,100,100,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill 808080 1
+  GraphicsPath nonZero [1,2,3,3,3,2,3,3,3,2,3,3,1,2,2,2,2,2,2] [100,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,2.05,-3.55,3.55,96.45,103.55,97.95,105,100,105,102.05,105,103.5,103.5,105,102.05,105,100,105,0,105,-2.05,103.5,-3.55,102.05,-5,100,-5,0,5,100,5,95,0,95,100,103.55,96.45,3.55,-3.55,0,5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+widths normal 0.04:0.05/0 0.5:0.05/0 0.75:0.5/-0.5 1.25:0.5/-0.5 1.5:1/-1 2.5:1/-1 3.3:1.5/-1.5 3.5:2/-2 4.5:2/-2 5.5:3/-3 7.25:3.5/-3.5 10.5:5/-5 254.9:127.5/-127.5
+widths none 0.04:0.05/0 0.5:0.05/0 0.75:0.1/-0.1 1.25:0.1/-0.1 1.5:0.2/-0.2 2.5:0.2/-0.2 3.3:0.3/-0.3 3.5:0.4/-0.4 4.5:0.4/-0.4 5.5:0.6/-0.6 7.25:0.7/-0.7 10.5:1/-1 254.9:25.5/-25.5
+widths vertical 0.04:0.05/0 0.5:0.05/0 0.75:0.5/-0.5 1.25:0.5/-0.5 1.5:1/-1 2.5:1/-1 3.3:1.5/-1.5 3.5:2/-2 4.5:2/-2 5.5:3/-3 7.25:3.5/-3.5 10.5:5/-5 254.9:127.5/-127.5
+== recurse 9 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 111111 1
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,5,0,5,5,0,5,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill 222222 1
+  GraphicsPath evenOdd [1,2,2,2,2] [102,1,106,1,106,3,102,3,102,1] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill 333333 1
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [5,7,5,0,5,-2.05,3.5,-3.55,2.05,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,7,-5,9.05,-3.55,10.5,-2.05,12,0,12,2.05,12,3.5,10.5,5,9.05,5,7] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== no recurse 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 111111 1
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,5,0,5,5,0,5,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== child 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 222222 1
+  GraphicsPath evenOdd [1,2,2,2,2] [1,1,3,1,3,3,1,3,1,1] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== round trip 9 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsSolidFill 111111 1
+  GraphicsPath evenOdd [1,2,2,2,2] [0,0,5,0,5,5,0,5,0,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill 222222 1
+  GraphicsPath evenOdd [1,2,2,2,2] [102,1,106,1,106,3,102,3,102,1] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsSolidFill 333333 1
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [5,7,5,0,5,-2.05,3.5,-3.55,2.05,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,7,-5,9.05,-3.55,10.5,-2.05,12,0,12,2.05,12,3.5,10.5,5,9.05,5,7] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+same objects false
+bitmap is same false

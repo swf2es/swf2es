@@ -1106,7 +1106,8 @@
     "flash.ui::Keyboard.get:numLock",
     "flash.ui::Keyboard.get:physicalKeyboardType",
     "flash.ui::Keyboard.isAccessible",
-    "flash.display::BitmapData#perlinNoise"
+    "flash.display::BitmapData#perlinNoise",
+    "flash.display::Graphics#flash.display:Graphics::nativeGetGraphicsData"
   ],
   "hooks": [
     "flash.display::BitmapData",
