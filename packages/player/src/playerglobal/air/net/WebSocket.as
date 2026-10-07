@@ -2,6 +2,9 @@
 // airglobal, which the player's playerglobal predates, with its methods
 // native (WebSocket.ts). Compiled into air-library.ts with
 // flash/events/WebSocketEvent.as by tests/player/air-library.ts.
+// tests/player/air-library.ts marks this library's package namespaces with
+// API version 0, so its code sees only the names playerglobal gives every
+// version: a member playerglobal marks for a later one would not resolve.
 package air.net {
   import flash.events.EventDispatcher;
   import flash.net.Socket;

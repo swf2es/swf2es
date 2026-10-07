@@ -1,6 +1,9 @@
 // AIR 51's flash.events.WebSocketEvent, as the player declares it (see
 // air/net/WebSocket.as). Every read of data starts it over, and stringData
 // is the whole of a text message's bytes, as adl gives them.
+// tests/player/air-library.ts marks this library's package namespaces with
+// API version 0, so its code sees only the names playerglobal gives every
+// version: a member playerglobal marks for a later one would not resolve.
 package flash.events {
   import flash.utils.ByteArray;
 
