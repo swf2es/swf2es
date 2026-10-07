@@ -24,6 +24,13 @@ export interface PlayerCase {
   alone?: boolean;
   /** Played as a host showing the stage this many times its size draws it (page.ts); Flash draws it at its size. */
   zoom?: number;
+  /**
+   * With a zoom, the stage shown at it, the frames that size (page.ts); Flash
+   * draws `flash` for them, the SWF built at that size.
+   */
+  shown?: boolean;
+  /** What Flash draws for the references in place of the case's SWF. */
+  flash?: Uint8Array;
   /** Played as a host whose renderer is made with `antialias: true` draws it, multisampled; Flash draws it as ever. */
   antialias?: boolean;
   /**

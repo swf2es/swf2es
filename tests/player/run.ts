@@ -50,7 +50,9 @@ const jobs = chosen.map((c) => ({ ...c, swf: swfOf(c), tableMinRun: c.table ? 1 
 if (update) {
   // The oracle needs adl, which only this mode does.
   const { runFlash } = await import("../../oracle/flash.ts");
-  const results = await runFlash(jobs);
+  const results = await runFlash(
+    jobs.map((job, i) => ({ ...job, swf: chosen[i].flash ?? job.swf })),
+  );
   for (const [i, c] of chosen.entries()) {
     const r = results[i];
     if (r.incomplete) {

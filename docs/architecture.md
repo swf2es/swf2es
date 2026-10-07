@@ -789,6 +789,9 @@ A case may give a zoom, as a host showing the stage larger does: the
 page's resolution is then the zoom times the grid, and the stage is drawn
 at the zoom's inverse, so the samples are the same and only Pixi's
 arithmetic at that resolution, no whole number, differs.
+Or it may have the stage shown at the zoom, as a game's page does, its
+frames the zoom's size; Flash, which cannot, then draws a SWF the case
+builds at that size.
 
 ### Source layout
 
