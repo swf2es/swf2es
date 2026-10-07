@@ -165,6 +165,11 @@ export class Drawing {
    * down to the bottom (0, 1), and each next one on clockwise.
    */
   private arc(cx: number, cy: number, rx: number, ry: number, quarter: number): void {
+    // A square corner is no curve, as Flash records none.
+    if (rx === 0 && ry === 0) {
+      return;
+    }
+
     const [sx, sy, ex, ey] = [
       [1, 0, 0, 1],
       [0, 1, -1, 0],

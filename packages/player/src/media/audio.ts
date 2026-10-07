@@ -3,6 +3,7 @@
 // ADPCM and the blocks of a timeline's stream become a sound the host
 // decodes as it decodes any other: PCM, or MP3 frames back to back.
 import type { Sound, SoundStreamBlock, SoundStreamHead } from "@swf2es/format";
+import { mp3Bytes, mp3Frames } from "./mp3.js";
 
 export interface SoundMix {
   volume: number;
@@ -47,8 +48,16 @@ export interface DecodedSound {
   play(startMs: number, loops: number, mix: SoundMix, shape?: PlayShape): PlayingSound | null;
 }
 
+/** A sound's samples at its own rate, a channel each. */
+export interface ExtractedSamples {
+  rate: number;
+  channels: Float32Array[];
+}
+
 export interface AudioHost {
   decode(source: Sound | Uint8Array): Promise<DecodedSound>;
+  /** MP3 bytes' samples as Flash's decoder gives them, for Sound.extract; a host that cannot leaves it out. */
+  extractSamples?(bytes: Uint8Array): Promise<ExtractedSamples>;
 }
 
 /** The browser's decoder handles MP3; SWF's two uncompressed forms need no codec. */
@@ -61,6 +70,7 @@ export function browserAudioHost(): AudioHost | null {
   let context: AudioContext | null = null;
   const getContext = () => (context ??= new Context());
   return {
+    extractSamples: decodeForExtract,
     async decode(given) {
       const ctx = getContext();
       const source = given instanceof Uint8Array || given.format !== 1 ? given : adpcmSound(given);
@@ -231,6 +241,40 @@ export function browserAudioHost(): AudioHost | null {
 }
 
 /**
+ * MP3 bytes decoded as Flash decodes them, for Sound.extract alone: at
+ * their own rate, their whole frames only, and a Xing, Info or VBRI header
+ * a frame of silence, kept out of the browser's sight so that it trims
+ * nothing by it. Playback keeps the browser's decode of the whole file at
+ * the device's rate, which resamples better than a buffer played at
+ * another rate. Bytes it cannot make out as MP3, or whose frames it cannot
+ * decode alone, are decoded whole.
+ */
+async function decodeForExtract(given: Uint8Array): Promise<ExtractedSamples> {
+  // A copy: the bytes may grow under it while it waits.
+  const data = given.slice();
+  const mp3 = mp3Frames(data);
+  let buffer: AudioBuffer | null = null;
+  let silence = 0;
+  if (mp3) {
+    const offline = new OfflineAudioContext(mp3.channels, 1, mp3.rate);
+    try {
+      buffer = await offline.decodeAudioData(mp3Bytes(data, mp3).buffer);
+      silence = mp3.header ? mp3.samplesPerFrame : 0;
+    } catch {
+      buffer = null;
+    }
+  }
+
+  buffer ??= await new OfflineAudioContext(2, 1, 44100).decodeAudioData(data.buffer);
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, i) => {
+    const channel = new Float32Array(buffer.length + silence);
+    channel.set(buffer.getChannelData(i), silence);
+    return channel;
+  });
+  return { rate: buffer.sampleRate, channels };
+}
+
+/**
  * An envelope as gain automation, `at` seconds into it at `now`: the first
  * point's level held before it, as Ruffle holds it, then lines between
  * points; a late start begins at the level the lines reach by then.
@@ -286,8 +330,8 @@ const ADPCM_STEPS = [
 /**
  * SWF's ADPCM as 16-bit samples, channels interleaved: a code size, then
  * packets of a header per channel (a 16-bit sample and a 6-bit step index)
- * and 4095 codes, as Ruffle decodes them, which gives no sample for the
- * header's own. It ends where the bits do.
+ * and 4095 codes, the header's sample the packet's first, as adl gives it
+ * (Ruffle's decoder leaves it out). It ends where the bits do.
  */
 export function decodeAdpcm(data: Uint8Array, channels: 1 | 2): Int16Array {
   const total = data.length * 8;
@@ -312,8 +356,8 @@ export function decodeAdpcm(data: Uint8Array, channels: 1 | 2): Int16Array {
   const sample = [0, 0];
   const step = [0, 0];
   let n = 0;
-  for (let code = 0; ; code = (code + 1) % 4095) {
-    if (code === 0) {
+  for (let k = 0; ; k = (k + 1) % 4096) {
+    if (k === 0) {
       if (bit + 22 * channels > total) {
         break;
       }
@@ -321,7 +365,10 @@ export function decodeAdpcm(data: Uint8Array, channels: 1 | 2): Int16Array {
       for (let c = 0; c < channels; c++) {
         sample[c] = (read(16) << 16) >> 16;
         step[c] = read(6);
+        out[n++] = sample[c];
       }
+
+      continue;
     }
 
     if (bit + bits * channels > total) {

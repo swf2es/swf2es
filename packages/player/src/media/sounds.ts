@@ -16,6 +16,7 @@ import {
   type SoundMix,
   streamSound,
 } from "./audio.js";
+import type { Mp3Frames } from "./mp3.js";
 
 type AsObject = avm2.AsObject;
 
@@ -30,6 +31,14 @@ export interface SoundState {
   generation: number;
   abort: AbortController | null;
   clip: Promise<DecodedSound> | null;
+  /** The MP3 frames of loadCompressedDataFromByteArray's bytes, read so far. */
+  frames: Mp3Frames | null;
+  /** Whether `bytes` came from loadCompressedDataFromByteArray, which adds to them. */
+  compressed: boolean;
+  /** loadPCMFromByteArray's samples, at 44.1 kHz. */
+  pcm: Float32Array[] | null;
+  /** Where extract goes on from, in the sound's own samples. */
+  extracted: number;
 }
 
 export interface ChannelState {

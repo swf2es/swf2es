@@ -1,9 +1,20 @@
-// flash.media.Sound and SoundChannel: a SWF's embedded sound or a host-fetched
-// MP3, with playback through the host's audio device and frame-delivered
-// events; the channels themselves, and the timeline's sounds, are the
-// player's (media/sounds.ts).
+// flash.media.Sound and SoundChannel: a SWF's embedded sound, a host-fetched
+// MP3, or MP3 or PCM bytes a script hands it, with playback through the
+// host's audio device and frame-delivered events; the channels themselves,
+// and the timeline's sounds, are the player's (media/sounds.ts), and what
+// extract reads is media/extract.ts'.
+import type { Sound } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import type { SoundMix } from "../../../media/audio.js";
+import type { SoundCharacter } from "../../../display/timeline.js";
+import type { ExtractedSamples, SoundMix } from "../../../media/audio.js";
+import {
+  EXTRACT_RATE,
+  type ExtractSource,
+  embeddedSource,
+  extractSamples,
+  toExtractRate,
+} from "../../../media/extract.js";
+import { mp3Frames } from "../../../media/mp3.js";
 import {
   type ChannelState,
   channels,
@@ -24,6 +35,40 @@ import type { Scripting } from "../../../scripting.js";
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
+/** An uncompressed or ADPCM DefineSound's samples, decoded once for extract; null for another format. */
+const embeddedSources = new WeakMap<SoundCharacter, ExtractSource | null>();
+
+/**
+ * An MP3's samples as Flash decodes them, by its DefineSound or by the
+ * Sound it was loaded into: decoded the first time a script extracts
+ * them, apart from the decode it plays, and kept for the extracts after.
+ */
+const mp3Decodes = new WeakMap<object, { samples: ExtractedSamples | null }>();
+
+/** 44.1 kHz samples as an uncompressed 16-bit DefineSound, for the host to play. */
+function pcmSound(channels: Float32Array[]): Sound {
+  const frames = channels[0].length;
+  const data = new Uint8Array(frames * channels.length * 2);
+  const view = new DataView(data.buffer);
+  for (let i = 0; i < frames; i++) {
+    for (const [c, channel] of channels.entries()) {
+      const v = Math.max(-1, Math.min(1, channel[i]));
+      view.setInt16((i * channels.length + c) * 2, Math.round(v * 32767), true);
+    }
+  }
+
+  return {
+    id: 0,
+    format: 3,
+    sampleRate: EXTRACT_RATE,
+    sampleSize: 16,
+    channels: channels.length === 1 ? 1 : 2,
+    sampleCount: frames,
+    seekSamples: 0,
+    data,
+  };
+}
+
 function stateOf(o: AsObject): SoundState {
   if (o.$sound) {
     return o.$sound;
@@ -40,6 +85,10 @@ function stateOf(o: AsObject): SoundState {
     generation: 0,
     abort: null,
     clip: null,
+    frames: null,
+    compressed: false,
+    pcm: null,
+    extracted: 0,
   };
   o.$sound = state;
   return state;
@@ -116,6 +165,10 @@ export function soundNatives(s: Scripting): avm2.Natives {
   };
   const startAudio = (state: ChannelState): void => {
     const sound = state.sound;
+    if (!sound.character && !sound.clip) {
+      sound.clip = loadedClip(sound);
+    }
+
     const task = sound.character ? s.symbols.soundClip(sound.character) : sound.clip;
     void task
       ?.then(
@@ -137,8 +190,254 @@ export function soundNatives(s: Scripting): avm2.Natives {
       });
   };
 
+  /** The decode a sound loaded from a ByteArray plays, made when it first plays. */
+  const loadedClip = (sound: SoundState) => {
+    if (!s.audio) {
+      return null;
+    }
+
+    if (sound.pcm) {
+      return s.audio.decode(pcmSound(sound.pcm));
+    }
+
+    return sound.compressed && sound.bytes ? s.audio.decode(sound.bytes) : null;
+  };
+
+  /**
+   * What extract reads of a sound now: an MP3's decode only once it is
+   * done, which the browser's decoder gives late where Flash's gives at
+   * once, so that an MP3's first extract starts its decode and gives
+   * nothing.
+   */
+  const extractSource = (sound: SoundState): ExtractSource | null => {
+    if (sound.pcm) {
+      return { rate: EXTRACT_RATE, channels: sound.pcm, skip: 0, whole: false };
+    }
+
+    const character = sound.character;
+    const definition = character?.definition;
+    if (character && definition && definition.format !== 2) {
+      let source = embeddedSources.get(character);
+      if (source === undefined) {
+        source = embeddedSource(definition);
+        embeddedSources.set(character, source);
+      }
+
+      return source;
+    }
+
+    const key = character ?? sound;
+    const bytes = definition ? definition.data : sound.bytes;
+    let decode = mp3Decodes.get(key);
+    if (!decode && bytes?.length) {
+      const entry: { samples: ExtractedSamples | null } = { samples: null };
+      decode = entry;
+      mp3Decodes.set(key, entry);
+      const task = s.audio?.extractSamples?.(bytes);
+      if (task) {
+        s.loads.trackRequest(
+          task.then(
+            (samples) => {
+              entry.samples = samples;
+            },
+            () => {},
+          ),
+        );
+      }
+    }
+
+    const samples = decode?.samples;
+    return samples
+      ? {
+          rate: samples.rate,
+          channels: samples.channels,
+          skip: definition ? Math.max(0, definition.seekSamples) : 0,
+          whole: false,
+        }
+      : null;
+  };
+
   class SoundNatives {
     declare $sound: SoundState | undefined;
+
+    /**
+     * Up to `length` samples at 44.1 kHz into `target` at its position, a
+     * float each for left and right in its byte order, from `startPosition`
+     * or, for -1, from where the last extract stopped.
+     */
+    extract(target: Value, length: Value, startPosition: Value = -1): number {
+      const sound = stateOf(this as AsObject);
+      if (target === null || target === undefined) {
+        return 0;
+      }
+
+      const source = extractSource(sound);
+      const start = s.rt.toNumber(startPosition);
+      if (start >= 0) {
+        // Past 32 bits a start is from the beginning, as in adl.
+        const at = start >= 2 ** 31 ? 0 : Math.floor(start);
+        sound.extracted = source?.seek ? source.seek(at) : at;
+        if (source && sound.extracted >= (source.starts ?? Number.POSITIVE_INFINITY)) {
+          sound.extracted = source.channels[0].length;
+          return 0;
+        }
+      }
+
+      if (!source) {
+        return 0;
+      }
+
+      const { samples, position, count } = extractSamples(
+        source,
+        sound.extracted,
+        s.rt.toNumber(length),
+      );
+      sound.extracted = position;
+      const b = avm2.bytesOf(s.rt, target as AsObject);
+      const bytes = new Uint8Array(samples.length * 4);
+      const view = new DataView(bytes.buffer);
+      for (let i = 0; i < samples.length; i++) {
+        view.setFloat32(i * 4, samples[i], b.littleEndian);
+      }
+
+      if (bytes.length) {
+        b.write(bytes);
+      }
+
+      return count;
+    }
+
+    /**
+     * MP3 frames from `bytes`, added to any it was given before, as adl
+     * has it: its length counts a frame cut short, its decode does not,
+     * and a sound of the SWF's keeps its own samples.
+     */
+    loadCompressedDataFromByteArray(bytes: Value, bytesLength: Value): void {
+      if (bytes === null || bytes === undefined) {
+        throw s.rt.error("TypeError", 2007, "bytes");
+      }
+
+      const sound = stateOf(this as AsObject);
+      const b = avm2.bytesOf(s.rt, bytes as AsObject);
+      const n = s.rt.toUint(bytesLength);
+      if (n === 0 || n > b.length - b.position) {
+        throw s.rt.error("ArgumentError", 2084);
+      }
+
+      const data = b.readView(n);
+      if (sound.character) {
+        return;
+      }
+
+      // Into room kept past the bytes before, which doubles as they grow,
+      // their frames read on from where they stopped: chunk by chunk, it
+      // all takes time in step with its bytes. Its decodes wait till it
+      // plays or a script extracts it.
+      const had = sound.compressed ? sound.bytes : null;
+      const size = (had?.length ?? 0) + n;
+      let buffer =
+        had && had.byteOffset === 0 && had.buffer.byteLength >= size
+          ? new Uint8Array(had.buffer)
+          : null;
+      if (!buffer) {
+        buffer = new Uint8Array(Math.max(size, (had?.length ?? 0) * 2));
+        buffer.set(had ?? []);
+      }
+
+      buffer.set(data, had?.length ?? 0);
+      const all = buffer.subarray(0, size);
+      const mp3 = mp3Frames(all, had ? sound.frames : null);
+      sound.bytes = all;
+      sound.frames = mp3;
+      sound.compressed = true;
+      sound.pcm = null;
+      sound.used = true;
+      sound.loaded = n;
+      sound.total = n;
+      sound.length = mp3 ? (mp3.frames * mp3.samplesPerFrame * 1000) / mp3.rate : 0;
+      sound.clip = null;
+      mp3Decodes.delete(sound);
+      dispatchEvent(
+        s,
+        this as AsObject,
+        s.rt.construct(
+          s.rt.classNamed("flash.events::ProgressEvent"),
+          "progress",
+          false,
+          false,
+          n,
+          n,
+        ) as AsObject,
+      );
+    }
+
+    /**
+     * `samples` samples of 32-bit floats or 16-bit integers from `bytes`,
+     * in its byte order, brought to 44.1 kHz: they take the place of
+     * whatever the sound had, a SWF's sound too.
+     */
+    loadPCMFromByteArray(
+      bytes: Value,
+      samples: Value,
+      format: Value = "float",
+      stereo: Value = true,
+      sampleRate: Value = EXTRACT_RATE,
+    ): void {
+      if (bytes === null || bytes === undefined) {
+        throw s.rt.error("TypeError", 2007, "bytes");
+      }
+
+      if (format === null || format === undefined) {
+        throw s.rt.error("TypeError", 2007, "format");
+      }
+
+      const kind = s.rt.toString(format);
+      if (kind !== "float" && kind !== "short") {
+        throw s.rt.error("ArgumentError", 2005);
+      }
+
+      const b = avm2.bytesOf(s.rt, bytes as AsObject);
+      const n = s.rt.toUint(samples);
+      const rate = s.rt.toNumber(sampleRate);
+      const channels = stereo ? 2 : 1;
+      const size = kind === "float" ? 4 : 2;
+      const available = b.length - b.position;
+      // adl weighs the samples against the bytes, not the bytes they take,
+      // and then reads what there is before it finds them short.
+      if (n === 0 || !(rate > 0) || n > available) {
+        throw s.rt.error("ArgumentError", 2084);
+      }
+
+      // Faster than 44.1 kHz, it reads only as many as it gives out.
+      const outputs = Math.floor((n * EXTRACT_RATE) / rate);
+      const count = Math.min(n, outputs);
+      if (count * channels * size > available) {
+        b.position += Math.floor(available / size) * size;
+        throw s.rt.error("flash.errors::EOFError", 2030);
+      }
+
+      const little = b.littleEndian;
+      const view = new DataView(b.read(count * channels * size).buffer);
+      const raw = Array.from({ length: channels }, () => new Float32Array(count));
+      for (let i = 0; i < count * channels; i++) {
+        raw[i % channels][Math.floor(i / channels)] =
+          size === 4 ? view.getFloat32(i * 4, little) : view.getInt16(i * 2, little) / 32768;
+      }
+
+      const sound = stateOf(this as AsObject);
+      const pcm = toExtractRate(raw, count < n ? EXTRACT_RATE : rate);
+      sound.character = null;
+      sound.pcm = pcm;
+      sound.bytes = new Uint8Array(0);
+      sound.compressed = false;
+      sound.used = true;
+      sound.loaded = n * size;
+      sound.total = n * size;
+      // In samples a millisecond, to adl's last bit.
+      sound.length = pcm[0].length / (EXTRACT_RATE / 1000);
+      sound.extracted = 0;
+      sound.clip = null;
+    }
 
     "flash.media:Sound::_load"(request: Value, _checkPolicyFile: Value, _bufferTime: Value): void {
       // Sound's AS3 constructor always calls load, with null when it was given no request.
@@ -380,11 +679,16 @@ export function soundHooks(s: Scripting): Record<string, avm2.ClassHook> {
           url: null,
           loaded: data?.data.length ?? 0,
           total: data?.data.length ?? 0,
-          length: data ? (data.sampleCount * 1000) / data.sampleRate : 0,
+          // In samples a millisecond, to adl's last bit.
+          length: data ? data.sampleCount / (data.sampleRate / 1000) : 0,
           used: !!data,
           generation: 0,
           abort: null,
           clip: null,
+          frames: null,
+          compressed: false,
+          pcm: null,
+          extracted: 0,
         } satisfies SoundState;
         return o;
       },

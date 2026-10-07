@@ -928,14 +928,15 @@ and the player's paths in this document are relative to it:
   browser's defaults, and the interfaces of what only a host supplies
   (ExternalInterface's page, a renderer's draws, fetches, sockets).
 - `display/`: the display list and the timeline, and what they are made
-  of: shapes, morphs, drawings, bounds and hit tests, 9-slice scaling,
-  geometry, 3D matrices, colour transforms, gradients' ramps, and filters
-  as records of their values.
+  of: shapes, morphs, drawings and what they read back as, bounds and hit
+  tests, 9-slice scaling, geometry, 3D matrices, colour transforms,
+  gradients' ramps, and filters as records of their values.
 - `text/`: text fields' model and layout, static text, fonts and CSS.
 - `bitmap/`: the pixel store and its operations on the CPU, bitmap
   filters, decoded images and PNG encoding.
-- `media/`: sound: decoding and the host's device (`audio.ts`), and
-  the sounds the player plays, the timeline's and scripts' channels
+- `media/`: sound: decoding and the host's device (`audio.ts`), MP3
+  frames' headers (`mp3.ts`), what `Sound.extract` reads (`extract.ts`),
+  and the sounds the player plays, the timeline's and scripts' channels
   (`sounds.ts`).
 - `input/`: the pointer and the keyboard.
 - `render/`: the PixiJS view (`view.ts`) and what only it uses: shapes'
@@ -1750,10 +1751,19 @@ re-stroking as a shape's for their width under a transform. The drawing's
 points, and its lines' half widths, give the object its bounds, for
 `width`, `height`, `getBounds` and the hit tests to come. Gradient and
 bitmap fills are recorded as a shape's are, and drawn as far as a shape's
-are (the first stop); shader fills, `drawTriangles`, `readGraphicsData`
-and `drawGraphicsData` wait. An adl case draws in a `Shape` and in a
+are (the first stop); shader fills, `drawTriangles` and
+`drawGraphicsData` wait. An adl case draws in a `Shape` and in a
 `Sprite` with a child, compared by pixels; the corpus's `graphics_*`
 tests, which trace nothing, check that nothing throws.
+
+`readGraphicsData` reads a drawing back as Flash does, from the shape in
+twips rather than the commands (`display/graphicsdata.ts`): each fill as
+its fill, one path and an end; each line as the outline Flash strokes it
+into, a nonZero fill of its colour, with its caps and joins; cubics as
+quadratics; colours through Flash's premultiplied store; and with
+`recurse`, its children's through their matrices. The `read-graphics-data`
+case holds adl's output. Lines a few pixels wide and the outlines of
+curves still stray from adl's by a twip.
 
 ### Bounds and hit tests
 
@@ -1931,6 +1941,36 @@ decoded audio while a sound uses it; entries leave when no SWF holds their
 sound definition, so unused audio can be collected. The parser leaves the
 MP3 seek word out of the encoded bytes; the tag's sample count and rate,
 not the decoder's duration, give the embedded sound's `length`.
+
+`Sound.extract` gives a sound's samples at 44.1 kHz in stereo as adl
+does (`media/extract.ts`, the `sound-extract` case): each sample held for
+as many as its rate falls short, and positions counting the sound's own
+samples. An uncompressed or ADPCM sound is decoded for it at once, whole
+samples only; ADPCM as adl has it, each packet's header its first sample,
+in blocks of 2048 samples the last of which runs on past the data, and
+with adl's seeks, whose packets' offsets wrap in 32 bits. An MP3 is
+decoded for it apart from the decode it plays, the first time a script
+extracts it, and kept: at the MP3's own rate, of
+whole frames, with a Xing or Info header frame as a frame of silence, as
+Flash decodes it rather than trimmed by it as a browser would, and a
+DefineSound's seekSamples skipped. Playback keeps the browser's decode of
+the whole file at the device's rate, gapless trimming and all, which
+resamples better than a buffer played at another rate. Flash's decode is
+at once and the browser's is not: an MP3's first extract starts its
+decode and gives nothing, and the frames after give what Flash gives.
+`media/mp3.ts` finds an MP3's frames: a run of three headers where they
+say the next frames are starts it, and it runs on past ID3v2 tags and
+other bytes between frames.
+
+`loadPCMFromByteArray` reads 32-bit floats or 16-bit integers in the
+ByteArray's byte order and brings them to 44.1 kHz at once; adl's reads
+back samples that have nothing to do with those it was given, so the
+case checks only its counts, lengths and errors.
+`loadCompressedDataFromByteArray` adds MP3 bytes to those the sound has
+(a SWF's sound keeps its own): its length counts their frames by their
+headers at once, a frame cut short too, as Flash's, reading on from
+where the bytes before stopped; the sound is decoded only when it plays
+or a script extracts it.
 
 An external `Sound.load` uses the same host fetch as `URLStream`; its
 open, progress and complete or error reach ActionScript on a frame, after

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { Sound } from "../../../../packages/format/dist/index.js";
 import { browserAudioHost } from "../../../../packages/player/dist/media/audio.js";
@@ -147,6 +148,85 @@ test("format-0 PCM is little-endian and a short tag pads missing samples with si
       Object.defineProperty(globalThis, "AudioContext", previous);
     } else {
       Reflect.deleteProperty(globalThis, "AudioContext");
+    }
+  }
+});
+
+test("an MP3 plays from the browser's decode of the whole file; extract's is its own, Flash's way", async () => {
+  const tagged = new Uint8Array(
+    readFileSync(new URL("../../../player/sounds/tone-tagged.mp3", import.meta.url)),
+  );
+  const saved = ["AudioContext", "OfflineAudioContext"].map(
+    (name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const,
+  );
+  const played: number[] = [];
+  const decoded: { rate: number; bytes: number }[] = [];
+  let failTrimmed = false;
+  const buffer = (rate: number) => ({
+    duration: 1,
+    length: 2,
+    sampleRate: rate,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array([0.5, -0.5]),
+  });
+  class FakeAudioContext {
+    async decodeAudioData(data: ArrayBuffer) {
+      played.push(data.byteLength);
+      return buffer(48000);
+    }
+  }
+  class FakeOfflineAudioContext {
+    readonly rate: number;
+    constructor(_channels: number, _length: number, rate: number) {
+      this.rate = rate;
+    }
+
+    async decodeAudioData(data: ArrayBuffer) {
+      decoded.push({ rate: this.rate, bytes: data.byteLength });
+      if (failTrimmed && data.byteLength !== tagged.length) {
+        throw new Error("EncodingError");
+      }
+
+      return buffer(this.rate);
+    }
+  }
+
+  for (const [name, value] of [
+    ["AudioContext", FakeAudioContext],
+    ["OfflineAudioContext", FakeOfflineAudioContext],
+  ] as const) {
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+
+  try {
+    const host = browserAudioHost();
+    assert.ok(host?.extractSamples);
+    await host.decode(tagged);
+    assert.deepEqual(played, [tagged.length]);
+    assert.deepEqual(decoded, []);
+
+    // Its own rate, the LAME header frame (313 bytes) out of sight and silence in its place.
+    const samples = await host.extractSamples(tagged);
+    assert.deepEqual(decoded, [{ rate: 44100, bytes: tagged.length - 313 }]);
+    assert.equal(samples.rate, 44100);
+    assert.equal(samples.channels[0].length, 1152 + 2);
+
+    // Frames the browser cannot decode alone: the whole file, as it is.
+    failTrimmed = true;
+    decoded.length = 0;
+    const whole = await host.extractSamples(tagged);
+    assert.deepEqual(decoded, [
+      { rate: 44100, bytes: tagged.length - 313 },
+      { rate: 44100, bytes: tagged.length },
+    ]);
+    assert.equal(whole.channels[0].length, 2);
+  } finally {
+    for (const [name, previous] of saved) {
+      if (previous) {
+        Object.defineProperty(globalThis, name, previous);
+      } else {
+        Reflect.deleteProperty(globalThis, name);
+      }
     }
   }
 });
