@@ -48,8 +48,13 @@ export interface PlayerResult {
   error: string | null;
 }
 
+/** What a call to the page answers when the page's renderer died before answering. */
+const CRASHED = "the page crashed";
+
 class DevTools {
   private id = 0;
+  /** Why no call will be answered any more, once the socket has closed. */
+  private closed: string | null = null;
   private readonly pending = new Map<
     number,
     (message: { result?: unknown; error?: { message: string } }) => void
@@ -61,17 +66,39 @@ class DevTools {
     this.socket = socket;
     socket.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data));
+      // A dead renderer answers nothing it was asked; a fresh document may be asked again.
+      if (message.method === "Inspector.targetCrashed") {
+        this.failAll(CRASHED);
+        return;
+      }
+
       this.pending.get(message.id)?.(message);
       this.pending.delete(message.id);
+    });
+    socket.addEventListener("close", () => {
+      this.closed = "the DevTools connection closed";
+      this.failAll(this.closed);
     });
   }
 
   send<T>(method: string, params: object = {}): Promise<T> {
+    if (this.closed) {
+      return Promise.reject(new Error(this.closed));
+    }
+
     const id = ++this.id;
     this.socket.send(JSON.stringify({ id, method, params }));
     return new Promise((ok, fail) =>
       this.pending.set(id, (m) => (m.error ? fail(new Error(m.error.message)) : ok(m.result as T))),
     );
+  }
+
+  private failAll(message: string): void {
+    for (const answer of this.pending.values()) {
+      answer({ error: { message } });
+    }
+
+    this.pending.clear();
   }
 }
 
@@ -85,13 +112,15 @@ interface Evaluated<T> {
 
 /**
  * One headless Chrome on the served page, for `run` to evaluate expressions
- * in once `ready` names a function the page has defined.
+ * in once `ready` names a function the page has defined; `fresh` loads the
+ * page again, as a new document, and waits for it the same way.
  */
 async function withPage<T>(
   ready: string,
   run: (
     evaluate: <R>(expression: string) => Promise<Evaluated<R>>,
     send: <R>(method: string, params?: object) => Promise<R>,
+    fresh: () => Promise<void>,
   ) => Promise<T>,
   gpu = false,
   options: RunOptions = {},
@@ -165,18 +194,23 @@ async function withPage<T>(
     const devtools = new DevTools(socket);
     await devtools.send("Page.enable");
     await devtools.send("Runtime.enable");
-    await devtools.send("Page.navigate", { url });
-    for (let i = 0; i < 100; i++) {
-      const { result } = await devtools.send<{ result: { value: boolean } }>("Runtime.evaluate", {
-        expression: `typeof ${ready} === 'function'`,
-        returnByValue: true,
-      });
-      if (result.value) {
-        break;
-      }
+    // Navigating answers once the new document has replaced the old, and
+    // brings a crashed page back in a new renderer.
+    const fresh = async () => {
+      await devtools.send("Page.navigate", { url });
+      for (let i = 0; i < 100; i++) {
+        const { result } = await devtools.send<{ result: { value: boolean } }>("Runtime.evaluate", {
+          expression: `typeof ${ready} === 'function'`,
+          returnByValue: true,
+        });
+        if (result.value) {
+          break;
+        }
 
-      await sleep(100);
-    }
+        await sleep(100);
+      }
+    };
+    await fresh();
 
     try {
       return await run(
@@ -188,6 +222,7 @@ async function withPage<T>(
           return { value: result.value, exception: exceptionDetails?.text ?? null };
         },
         (method, params) => devtools.send(method, params),
+        fresh,
       );
     } finally {
       socket.close();
@@ -201,16 +236,51 @@ async function withPage<T>(
 }
 
 /**
+ * Jobs one document runs before the next gets a fresh one. The player
+ * imports each job's compiled code as modules, and a document keeps every
+ * module it imported for as long as it lives: some 5 MB a corpus test,
+ * whose renderer ran out of heap after about 400 of them.
+ */
+const JOBS_PER_DOCUMENT = 100;
+
+/** How long past its timeout a job may go unanswered before its page is given up on. */
+const GRACE = 10_000;
+
+/** What a job's evaluation rejects with when it is still unanswered past its timeout and GRACE. */
+const UNANSWERED = "no answer";
+
+/** `answer`, or a rejection with `late` once `ms` pass without one. */
+function within<T>(answer: Promise<T>, ms: number, late: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, fail) => {
+    timer = setTimeout(() => fail(new Error(late)), ms);
+  });
+  return Promise.race([answer, expired]).finally(() => clearTimeout(timer));
+}
+
+/**
  * Run each job in the player, in one browser. With a timeout, in ms, a
  * job's script that runs longer is stopped, its error "timeout", and the
- * jobs after it run on; `onResult` hears each as it comes.
+ * jobs after it run on, as they do after a job whose page crashed (its
+ * error the crash's), each in a fresh document; `onResult` hears each as
+ * it comes.
  */
 export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<PlayerResult[]> {
   return withPage(
     "runSwf",
-    async (evaluate) => {
+    async (evaluate, _send, fresh) => {
       const results: PlayerResult[] = [];
+      let run = 0;
+      // A document a job crashed or left running is of no use to the next.
+      let stale = false;
       for (const [index, job] of jobs.entries()) {
+        if (stale || run === JOBS_PER_DOCUMENT) {
+          await fresh();
+          run = 0;
+          stale = false;
+        }
+
+        run++;
         let value:
           | {
               images: Record<string, string>;
@@ -222,18 +292,31 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
         let exception: string | null = null;
         const begun = performance.now();
         try {
-          ({ value, exception } = await evaluate<NonNullable<typeof value>>(
+          const answer = evaluate<NonNullable<typeof value>>(
             `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun}, ${job.shown ?? false})`,
-          ));
+          );
+          // The timeout stops a script that runs on, not one awaiting what never comes.
+          ({ value, exception } = await (options.timeout
+            ? within(answer, options.timeout + GRACE, UNANSWERED)
+            : answer));
         } catch (e) {
           // A job stopped at the timeout makes the protocol answer with an
-          // error ("Internal error"), not a result; one that fails sooner is
-          // the browser's or the protocol's, and stops the run.
-          if (!options.timeout || performance.now() - begun < options.timeout) {
+          // error ("Internal error"), not a result; so does one whose page
+          // crashed or that went unanswered, and the next gets a fresh
+          // document. Any other error is the browser's or the protocol's,
+          // and stops the run.
+          const message = e instanceof Error ? e.message : String(e);
+          if (message === CRASHED) {
+            exception = CRASHED;
+            stale = true;
+          } else if (message === UNANSWERED) {
+            exception = "timed out";
+            stale = true;
+          } else if (!options.timeout || performance.now() - begun < options.timeout) {
             throw e;
+          } else {
+            exception = "timed out";
           }
-
-          exception = "timed out";
         }
 
         const images = new Map<number, Uint8Array>();
