@@ -1297,7 +1297,7 @@ test("a filtered or blended object is drawn into its filters multisampled as its
   }
 });
 
-test("filters blur, move and pad in pixels of the screen however far the stage is zoomed, as Flash's", async () => {
+test("filters blur, move and pad in pixels of the stage however far a host zooms it, as Flash Player's", async () => {
   const { filterDefaults } = await import("../../../../packages/player/dist/display/filters.js");
   const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
@@ -1349,7 +1349,7 @@ test("filters blur, move and pad in pixels of the screen however far the stage i
             const box = pass.resources.boxUniforms?.uniforms;
             if (box) {
               widths.push(box.uWidth as number);
-              // Each step a texel of the input, however many make a screen pixel.
+              // Each step a texel of the input, however many make a stage pixel.
               const [dx, dy] = box.uDirection as Float32Array;
               assert.equal(round(dx + dy), round(1 / settable.resolution));
             }
@@ -1370,44 +1370,53 @@ test("filters blur, move and pad in pixels of the screen however far the stage i
       });
     };
 
-    // Shown three screen pixels to a stage pixel: boxes 4 texels wide, 4 screen pixels, and
-    // reaches of 2, 6, 4 and 7 screen pixels (the gradient's rect 6 right, 2 up and down).
-    view.prepare(filtered);
-    assert.deepEqual(run(), [
-      { widths: [4, 4], padding: 1, offset: [0, 0] },
-      { widths: [4, 4], padding: 2, offset: [1.333, 0] },
-      { widths: [4, 4], padding: 2, offset: [0.667, 0] },
-      { widths: [4, 4], padding: 3, offset: [1.333, 0], region: [3, 2.333, 63.333, 62] },
-    ]);
-
-    // Averaged down to the screen, as the test page draws: 4 screen pixels, 12 texels.
-    view.screenScale = 1;
-    view.prepare(filtered);
-    assert.deepEqual(run(), [
+    // Shown three screen pixels to a stage pixel, as a host zooming by the renderer's resolution
+    // does: boxes 4 stage pixels, 12 texels wide, and reaches of 2, 6, 4 and 7 stage pixels (the
+    // gradient's rect 6 right, 2 up and down), three times as far on the screen.
+    const zoomed = [
       { widths: [12, 12], padding: 2, offset: [0, 0] },
       { widths: [12, 12], padding: 6, offset: [4, 0] },
       { widths: [12, 12], padding: 4, offset: [2, 0] },
       { widths: [12, 12], padding: 7, offset: [4, 0], region: [7, 5, 64, 60] },
-    ]);
-
-    // Off the list while the stage is shown at half its size, then back: scaled all the same,
-    // 4 screen pixels 8 stage pixels, which the padding reaches round.
-    view.screenScale = null;
-    settable.resolution = 0.5;
-    view.prepare(new Container());
-    view.prepare(filtered);
-    assert.equal(chain().units, 2);
-    assert.deepEqual(run(), [
-      { widths: [4, 4], padding: 4, offset: [0, 0] },
-      { widths: [4, 4], padding: 12, offset: [8, 0] },
-      { widths: [4, 4], padding: 8, offset: [4, 0] },
-      { widths: [4, 4], padding: 14, offset: [8, 0], region: [14, 10, 64, 56] },
-    ]);
-
-    // The stage's own scale counts too; one of nothing filters at a unit a pixel.
-    view.stage.scale.set(0.5);
+    ];
     view.prepare(filtered);
     assert.equal(chain().units, 1);
+    assert.deepEqual(run(), zoomed);
+
+    // Averaged down to the screen, as the test page draws, alike: the screen does not count.
+    view.screenScale = 1;
+    view.prepare(filtered);
+    assert.deepEqual(run(), zoomed);
+
+    // Shown at half its size: the boxes 2 texels wide, the reaches as many stage pixels.
+    view.screenScale = null;
+    settable.resolution = 0.5;
+    view.prepare(filtered);
+    assert.deepEqual(
+      run().map((r) => r.widths),
+      [
+        [2, 2],
+        [2, 2],
+        [2, 2],
+        [2, 2],
+      ],
+    );
+
+    // Off the list while the stage is scaled to half, then back: scaled all the same, a stage
+    // pixel half a unit, which the padding reaches round.
+    settable.resolution = 3;
+    view.stage.scale.set(0.5);
+    view.prepare(new Container());
+    view.prepare(filtered);
+    assert.equal(chain().units, 0.5);
+    assert.deepEqual(run(), [
+      { widths: [6, 6], padding: 1, offset: [0, 0] },
+      { widths: [6, 6], padding: 3, offset: [2, 0] },
+      { widths: [6, 6], padding: 2, offset: [1, 0] },
+      { widths: [6, 6], padding: 4, offset: [2, 0], region: [4, 3, 63.5, 61.5] },
+    ]);
+
+    // A stage scaled to nothing filters at a unit a pixel.
     view.stage.scale.set(0);
     view.prepare(filtered);
     assert.equal(chain().units, 1);
@@ -1420,10 +1429,10 @@ test("filters blur, move and pad in pixels of the screen however far the stage i
     holder.addChildAt(filtered, 0);
     view.stage.scale.set(1);
     view.prepare(holder);
-    assert.equal(chainBelow(view.stage.children[0])?.units, 2);
+    assert.equal(chainBelow(view.stage.children[0])?.units, 1);
     view.stage.scale.set(2);
     view.prepare(holder);
-    assert.equal(chainBelow(view.stage.children[0])?.units, 4);
+    assert.equal(chainBelow(view.stage.children[0])?.units, 2);
 
     // Drawn into a BitmapData at 4 samples a side: a bitmap pixel 4 units of the target.
     let drawnAt = 0;
