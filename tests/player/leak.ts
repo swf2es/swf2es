@@ -19,7 +19,8 @@
 // its compiled code is tens of kilobytes, and run, not just loaded. The
 // heap is measured after WARM loads and again after LOADS, and each mode
 // fails if it grew by more than BOUND bytes a load in between; where one
-// player loads them all, also if codegen's memory grew, which wasm never
+// player loads them all, also if codegen's memory grew past what it took
+// after WARM loads, or 32 MiB if that was less, which wasm never
 // gives back: the compiler must reuse what each load's ABC took.
 //
 // --snapshots DIR writes a heap snapshot at each measure,
@@ -54,6 +55,17 @@ const WARM = 10;
  * and objects took when its code was kept, some 300 KB.
  */
 const BOUND = 64 * 1024;
+/**
+ * What codegen's memory may grow to over the loads without failing, if it
+ * was smaller after the warm ones. Wasm memory is a high-water mark, and
+ * compiling the libraries takes it to 32 MiB, within which the compiler's
+ * compactions then keep it. Read from a module cache, the libraries are
+ * not compiled, and it starts at 8 MiB: dead domains building up before a
+ * compaction, and a compaction making new tables beside the old, then take
+ * it to 16 MiB after some 20 loads, and to 32 after some hundreds or not
+ * at all, never further in 4,000. A leak would.
+ */
+const CODEGEN_CEILING = 32 * 1024 * 1024;
 
 function child(name: string): string {
   const methods = Array.from(
@@ -305,7 +317,7 @@ await withSteppedPage(
       const perLoad = (heaps[1] - heaps[0]) / loads;
       const ms = (performance.now() - warmed) / loads;
       const ok = perLoad <= BOUND;
-      const codegenOk = codegen.length < 2 || codegen[1] <= codegen[0];
+      const codegenOk = codegen.length < 2 || codegen[1] <= Math.max(codegen[0], CODEGEN_CEILING);
       failed ||= !ok || !codegenOk;
       console.log(
         `${mode}: heap ${mb(heaps[0])} after ${WARM} loads, ${mb(heaps[1])} after ${LOADS}, ` +
