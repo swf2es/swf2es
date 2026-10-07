@@ -501,9 +501,11 @@ export class Traits {
         continue;
       }
 
+      // Indexes, not for-of: compiled code looks its names up here.
       for (let i = 0; i < namespaces.length; i++) {
         const ns = namespaces[i];
-        for (const b of list) {
+        for (let k = 0; k < list.length; k++) {
+          const b = list[k];
           if (b.ns === ns && b.version <= mn.versions[i]) {
             return b.value;
           }
@@ -522,8 +524,9 @@ export class Traits {
       this.allDefaults = this.base ? [...this.base.defaultsOf(), ...this.own] : this.own.slice();
     }
 
-    for (const [field, value] of this.allDefaults) {
-      o[field] = value;
+    const defaults = this.allDefaults;
+    for (let i = 0; i < defaults.length; i++) {
+      o[defaults[i][0]] = defaults[i][1];
     }
 
     return o;
