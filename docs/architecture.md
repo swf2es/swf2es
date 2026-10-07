@@ -2754,7 +2754,11 @@ the object that moves leaves it clipped as it was. swf2es draws the
 child once, where it is now, and also keeps the output for such a mask,
 unless the object's bounds change with it. Each pass lets go of the
 pool's textures it drew with, which the pool destroys as the screen's
-size changes.
+size changes. Pixi measures a filtered object's bounds each time it runs
+its chain, unless given a `filterArea`; that measuring is some 1% of the
+main thread on a page of 32 animated creatures running 450 chains a
+frame, and 0.13 ms of a 3.3 ms draw on `bench.ts --rig 32 --blurred`
+(the `filterAreaMs` meter), less than the runs vary, so no area is set.
 
 ### Masks and scroll rectangles
 
@@ -2778,6 +2782,14 @@ mask to Pixi as a stencil: a timeline's range goes in a container whose
 mask is the clip-depth child, and a mask's lines are hidden while it
 masks. When both objects are cached as bitmaps Flash clips by the
 mask's alpha; that, and a text field as a mask, are still to come.
+Pixi 8.21 draws every mask through the stencil: its `ScissorMask` has no
+pipe and is never chosen. A scissor for a rectangle upright on the screen
+was weighed and left out: `bench.ts --masks 40 --gpu`, 40 scrolling lists
+each clipped by a timeline's rectangle, takes some 0.7 ms a frame more
+than the same art unclipped (`--unmasked`), about 10 µs of CPU a mask,
+which bounds what a scissor could gain, while a multisampled target, as
+the hosts draw, gives a stencil's edges the coverage a scissor's
+whole-pixel box would lose.
 
 `scrollRect` is kept as set, its edges rounded to whole pixels half to
 even, so its width and height are the rounded right and bottom less the
