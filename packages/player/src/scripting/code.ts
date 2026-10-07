@@ -1,6 +1,6 @@
 // The SWFs' code: each DoABC added to the compiler in the application
 // domain its SWF loads into, compiled into a module once all of its SWF's
-// are added, imported and linked into the runtime; and, by the module a
+// are added, evaluated and linked into the runtime; and, by the module a
 // stack frame is of, the domain, URL and SWF of the code that runs.
 import { readDoAbc, type Swf, tags } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
@@ -22,18 +22,28 @@ export class Code {
   private readonly codegenDomains = new Map<number, number>([[0, 0]]);
   private readonly codegenAbcs = new Map<number, number[]>([[0, []]]);
   private readonly reported = new Map<number, Set<string>>();
-  /** Modules imported, each under a script name of its own for Runtime.codeDomain. */
+  /** Modules loaded, each under a script name of its own for Runtime.codeDomain. */
   private modules = 0;
-  /** The URL of the SWF each module's code came from, by its script name, for codeUrl. */
-  private readonly moduleUrls = new Map<string, string>();
-  private readonly moduleLibraries = new Map<string, Library>();
+  /**
+   * The SWF each module's code came from, its URL and library, for codeUrl
+   * and codeLibrary: by its script name, the module's Abc, and that.
+   * Weakly: a module's code keeps its Abc for as long as it can run, and
+   * once the SWF is let go, the Abc goes, its origin and entry with it.
+   */
+  private readonly moduleAbcs = new Map<string, WeakRef<object>>();
+  private readonly origins = new WeakMap<object, { url: string; library: Library }>();
+  private readonly moduleGone = new FinalizationRegistry<string>((script) => {
+    if (!this.moduleAbcs.get(script)?.deref()) {
+      this.moduleAbcs.delete(script);
+    }
+  });
 
   constructor(private readonly s: Scripting) {}
 
   /** Load the libraries the SWF's code links against (builtin, playerglobal), whose scripts run on first use. */
   async loadLibraries(abcs: Uint8Array[]): Promise<void> {
     for (const abc of abcs) {
-      await this.compileAt(await this.add(abc, true, this.s.rt.root), this.s.rt.root, true);
+      this.compileAt(await this.add(abc, true, this.s.rt.root), this.s.rt.root, true);
     }
   }
 
@@ -70,7 +80,7 @@ export class Code {
 
     const runs: (() => void)[] = [];
     for (const { index, lazy } of added) {
-      const linked = await this.compileAt(index, domain, false, url, library);
+      const linked = this.compileAt(index, domain, false, { url, library });
       if (!lazy) {
         runs.push(() => this.s.rt.run(linked));
       }
@@ -128,28 +138,28 @@ export class Code {
   /**
    * ABC `index`'s module, compiled against every ABC added so far that its
    * domain sees, loaded into the runtime's `domain`; `builtin` for the
-   * player's own libraries. Each is imported under a script name of its
-   * own, by which Runtime.codeDomain finds the domain of the code running.
+   * player's own libraries, a SWF's with its `origin`. Each is evaluated
+   * under a script name of its own, by which Runtime.codeDomain finds the
+   * domain of the code running.
    */
-  private async compileAt(
+  private compileAt(
     index: number,
     domain: avm2.Domain,
     builtin = false,
-    url?: string,
-    library?: Library,
-  ): Promise<Value> {
+    origin?: { url: string; library: Library },
+  ): Value {
     const module = this.s.codegen.compileModule(this.hashes, index);
     const script = `swf2es-${++this.modules}.js`;
-    if (url !== undefined) {
-      this.moduleUrls.set(script, url);
-    }
-    if (library) {
-      this.moduleLibraries.set(script, library);
+    const factory = evaluateModule(module, script);
+    const linked = this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
+    if (origin) {
+      const abc = linked as object;
+      this.moduleAbcs.set(script, new WeakRef(abc));
+      this.origins.set(abc, origin);
+      this.moduleGone.register(abc, script);
     }
 
-    const named = `${module}//# sourceURL=${script}\n`;
-    const factory = (await importSource(named)).default;
-    return this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
+    return linked;
   }
 
   /** An ApplicationDomain object for the runtime's `domain`: a new one at each ask, as Flash's, without running its constructor. */
@@ -173,44 +183,49 @@ export class Code {
    * Flash's code context has it; the main SWF's when only the player's is.
    */
   codeUrl(): string {
-    for (const at of avm2.frameScripts(new Error().stack)) {
-      const url = this.moduleUrls.get(at);
-      if (url !== undefined) {
-        return url;
-      }
-    }
-
-    return this.s.url;
+    return this.codeOrigin(new Error().stack)?.url ?? this.s.url;
   }
 
   /** The SWF whose code called a playerglobal native. */
   codeLibrary(): Library | null {
-    for (const at of avm2.frameScripts(new Error().stack)) {
-      const library = this.moduleLibraries.get(at);
-      if (library) {
-        return library;
+    return this.codeOrigin(new Error().stack)?.library ?? this.s.library;
+  }
+
+  /**
+   * Where the innermost SWF's code on `stack` came from, if any SWF's is.
+   * The stack is the caller's: a frame more of the player's would push the
+   * SWF's out of the engine's stackTraceLimit frames sooner.
+   */
+  private codeOrigin(stack: string | undefined): { url: string; library: Library } | undefined {
+    for (const at of avm2.frameScripts(stack)) {
+      const abc = this.moduleAbcs.get(at)?.deref();
+      const origin = abc && this.origins.get(abc);
+      if (origin) {
+        return origin;
       }
     }
 
-    return this.s.library;
+    return undefined;
   }
 }
 
+const EXPORT = "export default ";
+
 /**
- * A module imported from its source: in a browser from a blob, as V8 keeps
- * a module's URL as its script's name, and a data URL is the whole source
- * again, tens of megabytes for a large SWF's; node, which imports no blob,
- * from a data URL.
+ * A module's factory, its source evaluated as a script named `script`.
+ * Not imported: a document keeps every module it imports for as long as
+ * it lives, so the code of a SWF long let go would never be collected; a
+ * script's goes once nothing refers to its functions. A module is one
+ * exported function and nothing else, so it runs the same returned from a
+ * strict Function, the names its code uses its own function's variables
+ * (see Lazy compilation in docs/architecture.md); its lines in a stack
+ * are its file's two further on, after Function's header.
  */
-async function importSource(source: string): Promise<{ default: (rt: avm2.Runtime) => Value }> {
-  if (typeof window !== "undefined" && typeof URL.createObjectURL === "function") {
-    const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
-    try {
-      return await import(url);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
+function evaluateModule(module: string, script: string): (rt: avm2.Runtime) => Value {
+  if (!module.startsWith(EXPORT)) {
+    throw new Error("swf2es: a module that is not one exported function");
   }
 
-  return import(`data:text/javascript,${encodeURIComponent(source)}`);
+  const body = `"use strict"; return ${module.slice(EXPORT.length)}//# sourceURL=${script}\n`;
+  return new Function(body)();
 }

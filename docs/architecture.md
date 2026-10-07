@@ -1217,8 +1217,30 @@ since avmplus has a frame's ABCs loaded before it verifies a method, so a
 class in the first tag may extend or name one in the last (the corpus's
 `property_priority`, five tags by mxmlc); each is then compiled whole for
 now (the JIT's per-method path is `compileMethods`, both by the ABC's
-index in the domain; see Lazy compilation), loaded as a module, and run
+index in the domain; see Lazy compilation), loaded, and run
 unless the tag's lazy flag defers it to its first use, as Flash defers it.
+A module is loaded as the factory a strict `Function` returns, not
+imported: a document keeps every module it imports while it lives, so the
+code of SWFs long unloaded stayed (some 4.5 MB a player made again, its
+libraries' code and all), where a function's code goes once nothing
+refers to it. What the player keeps of a loaded SWF beside the SWF
+itself, the domain and origin of each module's script for the stack,
+its symbols and its fonts for those registered later, it keeps
+weakly, so that the SWF, its code included, goes with its last object
+(some 300 KB a load of a small SWF stayed otherwise).
+That a module's code keeps its Abc has a limit: emitted code reaches `A`
+only for `newclass` and `newactivation`, so a module with neither keeps
+it only through its domain's globals, its scripts' entries, and not even
+those if every name it defines was defined in the chain before; code of
+such a module may then still run after its Abc went, and codeUrl and
+codeLibrary fall back to the main SWF's. Lazy compilation, whose
+entries are built apart from their module, will need this again. The
+symbols bound to names nothing defined (`Symbols.unbound`) are still
+kept for good, their libraries with them.
+`tests/player/leak.ts` loads SWFs over and over, by Loaders and in
+players made again, and checks that the heap stays bounded, and that a
+text field kept from a SWF let go still takes a font registered after a
+collection.
 `SymbolClass`
 then binds character ids to classes by qualified name through the
 runtime's name resolution; id 0 is the document class, constructed on the
@@ -1346,7 +1368,7 @@ with `/[[DYNAMIC]]/n` appended, and `ApplicationDomain.currentDomain` is
 a new object at each ask, as in Flash, so two are never `==`.
 
 The loaded SWF's code goes through `Codegen` and the runtime as the main
-SWF's does (`scripting/loads.ts`). Linking is asynchronous (the module is imported), so a load
+SWF's does (`scripting/loads.ts`). Linking is asynchronous (its ABCs are hashed by `crypto.subtle`), so a load
 asked for is compiled and linked between frames, in the order asked, and
 each takes its place in the first frame after its code is linked; a host
 that steps frames by hand awaits `Scripting.settled()` between them, as
@@ -1485,7 +1507,7 @@ a class it defines again is ignored for the one its domain's chain has,
 and `LoaderInfo.applicationDomain.getDefinition` finds its own
 (`loader_duplicate_class`). The domain of the code that asks, for
 `ApplicationDomain.currentDomain`, `getDefinitionByName` and a load's
-default, is `Runtime.codeDomain`'s, so each module is imported under a
+default, is `Runtime.codeDomain`'s, so each module is evaluated under a
 `sourceURL` of its own (`scripting/code.ts`), and the player's own modules load as builtin,
 whose frames do not count, as avmplus skips builtin code. SymbolClass
 binds a character to the class its name finds in the SWF's domain, by

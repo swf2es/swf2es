@@ -3,7 +3,7 @@
 // WebGL (SwiftShader) draws them, so the result does not depend on the
 // machine's GPU. CHROME names the browser; by default google-chrome.
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "./serve.ts";
@@ -61,6 +61,8 @@ class DevTools {
   >();
 
   private readonly socket: WebSocket;
+  /** What listens for each event, by its method. */
+  readonly listeners = new Map<string, (params: Record<string, unknown>) => void>();
 
   constructor(socket: WebSocket) {
     this.socket = socket;
@@ -69,6 +71,11 @@ class DevTools {
       // A dead renderer answers nothing it was asked; a fresh document may be asked again.
       if (message.method === "Inspector.targetCrashed") {
         this.failAll(CRASHED);
+        return;
+      }
+
+      if (message.method) {
+        this.listeners.get(message.method)?.(message.params);
         return;
       }
 
@@ -121,6 +128,7 @@ async function withPage<T>(
     evaluate: <R>(expression: string) => Promise<Evaluated<R>>,
     send: <R>(method: string, params?: object) => Promise<R>,
     fresh: () => Promise<void>,
+    listen: (method: string, listener: (params: Record<string, unknown>) => void) => void,
   ) => Promise<T>,
   gpu = false,
   options: RunOptions = {},
@@ -223,6 +231,7 @@ async function withPage<T>(
         },
         (method, params) => devtools.send(method, params),
         fresh,
+        (method, listener) => devtools.listeners.set(method, listener),
       );
     } finally {
       socket.close();
@@ -236,10 +245,11 @@ async function withPage<T>(
 }
 
 /**
- * Jobs one document runs before the next gets a fresh one. The player
- * imports each job's compiled code as modules, and a document keeps every
- * module it imported for as long as it lives: some 5 MB a corpus test,
- * whose renderer ran out of heap after about 400 of them.
+ * Jobs one document runs before the next gets a fresh one, so that what
+ * jobs leave behind in a document cannot add up over a whole run: when
+ * the player imported each job's code as modules, which a document keeps
+ * while it lives, some 5 MB a corpus test ran the renderer out of heap
+ * after about 400 of them. leak.ts checks that a job leaves little now.
  */
 const JOBS_PER_DOCUMENT = 100;
 
@@ -448,5 +458,76 @@ export function benchPlayer(
       );
     },
     gpu,
+  );
+}
+
+/** A page for leak.ts: a SWF opened and played in steps, a job run whole, and the heap measured between. */
+export interface SteppedPage {
+  /** Start a SWF at `url` on the page, letting go of any opened before; what stopped it, if anything. */
+  open(swf: Uint8Array, url: string): Promise<string | null>;
+  /** Play the opened SWF until it has traced `lines` lines or played `frames` frames. */
+  step(
+    lines: number,
+    frames: number,
+  ): Promise<{ lines: number; codegen: number; error: string | null }>;
+  /** Play a SWF for a frame, as runPlayer does a job; what stopped it, if anything. */
+  run(swf: Uint8Array, url: string): Promise<string | null>;
+  /** What the opened SWF has traced, a line each. */
+  trace(): Promise<string[]>;
+  /** Let go of the SWF opened. */
+  close(): Promise<void>;
+  /** The JS heap in use after a full collection, in bytes. */
+  heap(): Promise<number>;
+  /** A heap snapshot written to `path`, for DevTools' Memory panel to open. */
+  snapshot(path: string): Promise<void>;
+}
+
+export function withSteppedPage<T>(
+  run: (page: SteppedPage) => Promise<T>,
+  options: RunOptions = {},
+): Promise<T> {
+  return withPage(
+    "stepSwf",
+    async (evaluate, send, _fresh, listen) => {
+      const answer = async <R>(expression: string): Promise<R> => {
+        const { value, exception } = await evaluate<R>(expression);
+        if (exception !== null || value === undefined) {
+          throw new Error(exception ?? "no answer");
+        }
+
+        return value;
+      };
+      const base64 = (swf: Uint8Array) => JSON.stringify(Buffer.from(swf).toString("base64"));
+      return run({
+        open: (swf, url) => answer(`openSwf(${base64(swf)}, ${JSON.stringify(url)})`),
+        step: (lines, frames) => answer(`stepSwf(${lines}, ${frames})`),
+        trace: () => answer("traceSwf()"),
+        close: async () => {
+          await answer("closeSwf()");
+        },
+        run: async (swf, url) =>
+          (
+            await answer<{ error: string | null }>(
+              `runSwf(${base64(swf)}, 1, [], 2, ${JSON.stringify(url)})`,
+            )
+          ).error,
+        heap: async () => {
+          // Twice: what the first collection's finalizers let go goes in the second.
+          await send("HeapProfiler.collectGarbage");
+          await send("HeapProfiler.collectGarbage");
+          return (await send<{ usedSize: number }>("Runtime.getHeapUsage")).usedSize;
+        },
+        snapshot: async (path) => {
+          const chunks: string[] = [];
+          listen("HeapProfiler.addHeapSnapshotChunk", (params) =>
+            chunks.push(String(params.chunk)),
+          );
+          await send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
+          writeFileSync(path, chunks.join(""));
+        },
+      });
+    },
+    false,
+    options,
   );
 }

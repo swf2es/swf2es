@@ -62,12 +62,21 @@ export class Symbols {
    * The character, and its SWF's library, each class SymbolClass bound
    * makes, for a `new` of the class from a script: by the module that
    * defines the class, as the SWF's domain found it, then its name, so a
-   * class of the same name in another domain has its own; null for a name
-   * nothing defined when it was bound.
+   * class of the same name in another domain has its own; `unbound` for a
+   * name nothing defined when it was bound. Weakly, by the module: a SWF
+   * let go takes its symbols with it.
    */
-  readonly symbols = new Map<avm2.Abc | null, Map<string, Symbol>>();
-  /** Libraries whose embedded fonts have been made visible to this player. */
-  readonly fontLibraries = new Set<Library>();
+  private readonly symbols = new WeakMap<avm2.Abc, Map<string, Symbol>>();
+  private readonly unbound = new Map<string, Symbol>();
+  /**
+   * The font sets of the libraries whose embedded fonts have been made
+   * visible to this player, for the fonts registered later. Weakly, so
+   * that a SWF let go is not kept for them; but by the set, not the
+   * library, as a text field keeps only its library's set, and a field
+   * kept from a SWF otherwise let go still takes the fonts registered.
+   */
+  private readonly fontSets = new Set<WeakRef<FontSet>>();
+  private readonly fontSetsSeen = new WeakSet<FontSet>();
   /** Font classes explicitly registered by scripts, in registration order. */
   readonly registeredFonts = new Map<AsObject, AnyFontCharacter>();
 
@@ -84,10 +93,10 @@ export class Symbols {
           const character = library.characters.get(id);
           if (character) {
             const abc = this.s.rt.definingAbc(qualified, domain);
-            let byName = this.symbols.get(abc);
+            let byName = abc ? this.symbols.get(abc) : this.unbound;
             if (!byName) {
               byName = new Map();
-              this.symbols.set(abc, byName);
+              this.symbols.set(abc as avm2.Abc, byName);
             }
 
             // A class keeps the symbol first bound to it: another SWF that
@@ -165,11 +174,18 @@ export class Symbols {
 
   /** Keep a SWF's own fonts and fonts registered elsewhere available to its fields. */
   addFontLibrary(library: Library): void {
-    if (this.fontLibraries.has(library)) {
+    if (this.fontSetsSeen.has(library.fonts)) {
       return;
     }
 
-    this.fontLibraries.add(library);
+    for (const ref of this.fontSets) {
+      if (!ref.deref()) {
+        this.fontSets.delete(ref);
+      }
+    }
+
+    this.fontSetsSeen.add(library.fonts);
+    this.fontSets.add(new WeakRef(library.fonts));
     for (const font of this.registeredFonts.values()) {
       if (font.type === "font") {
         library.fonts.add(font.font);
@@ -193,9 +209,12 @@ export class Symbols {
     }
 
     this.registeredFonts.set(cls, font);
-    for (const library of this.fontLibraries) {
-      if (font.type === "font") {
-        library.fonts.add(font.font);
+    for (const ref of this.fontSets) {
+      const fonts = ref.deref();
+      if (!fonts) {
+        this.fontSets.delete(ref);
+      } else if (font.type === "font") {
+        fonts.add(font.font);
       }
     }
   }
@@ -273,8 +292,8 @@ export class Symbols {
 
   /** What SymbolClass bound the class of `traits` to, if anything: by its defining module, then its name. */
   private symbolOf(traits: SymbolTraits): Symbol | undefined {
-    const abc = (traits.abc as avm2.Abc | null | undefined) ?? null;
-    return this.symbols.get(abc)?.get(traits.name) ?? this.symbols.get(null)?.get(traits.name);
+    const abc = traits.abc as avm2.Abc | null | undefined;
+    return (abc && this.symbols.get(abc)?.get(traits.name)) ?? this.unbound.get(traits.name);
   }
 
   /** A new plain BitmapData of a bitmap's pixels, as a Bitmap of the bitmap gets. */

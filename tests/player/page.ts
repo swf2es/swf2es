@@ -575,6 +575,93 @@ async function toggling(root: Player["root"], count: number): Promise<DisplayObj
   return children;
 }
 
-const page = globalThis as unknown as { runSwf: typeof runSwf; benchSwf: typeof benchSwf };
+/** The memory of the codegen instance made last, the opened SWF's, for stepSwf to tell its size. */
+let codegenMemory: WebAssembly.Memory | null = null;
+const instantiate = WebAssembly.instantiate.bind(WebAssembly);
+WebAssembly.instantiate = (async (module: WebAssembly.Module, imports?: WebAssembly.Imports) => {
+  const instance = await instantiate(module, imports);
+  const memory = instance.exports.memory;
+  codegenMemory = memory instanceof WebAssembly.Memory ? memory : codegenMemory;
+  return instance;
+}) as typeof WebAssembly.instantiate;
+
+/** The SWF openSwf started, which stepSwf plays on: for leak.ts, which measures the heap between steps. */
+let opened: {
+  player: Player;
+  scripting: Scripting | null;
+  trace: string[];
+  uncaught: unknown[];
+} | null = null;
+
+/** Start a SWF, with no renderer, for stepSwf to play; any SWF opened before is let go. */
+async function openSwf(base64: string, url: string | null): Promise<string | null> {
+  opened = null;
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const trace: string[] = [];
+  const uncaught: unknown[] = [];
+  let scripting: Scripting | null = null;
+  try {
+    scripting = await scriptingFor(bytes, trace, url, uncaught);
+    const player = new Player(bytes, scripting);
+    await player.start();
+    opened = { player, scripting, trace, uncaught };
+    return null;
+  } catch (e) {
+    return describe(e, scripting);
+  }
+}
+
+/**
+ * Play the opened SWF's frames until it has traced `lines` lines, or for
+ * `frames` frames at most: the lines it has traced, the size of its
+ * codegen's memory, and what stopped it.
+ */
+async function stepSwf(
+  lines: number,
+  frames: number,
+): Promise<{ lines: number; codegen: number; error: string | null }> {
+  if (!opened) {
+    return { lines: 0, codegen: 0, error: "no SWF is open" };
+  }
+
+  const { player, scripting, trace, uncaught } = opened;
+  try {
+    for (let frame = 0; frame < frames && trace.length < lines; frame++) {
+      await scripting?.settled();
+      player.tick();
+      if (uncaught.length > 0) {
+        throw uncaught[0];
+      }
+    }
+
+    return { lines: trace.length, codegen: codegenMemory?.buffer.byteLength ?? 0, error: null };
+  } catch (e) {
+    return { lines: trace.length, codegen: 0, error: describe(e, scripting) };
+  }
+}
+
+/** What the SWF openSwf started has traced. */
+async function traceSwf(): Promise<string[]> {
+  return opened?.trace ?? [];
+}
+
+/** Let go of the SWF openSwf started. */
+async function closeSwf(): Promise<boolean> {
+  opened = null;
+  return true;
+}
+
+const page = globalThis as unknown as {
+  runSwf: typeof runSwf;
+  benchSwf: typeof benchSwf;
+  openSwf: typeof openSwf;
+  stepSwf: typeof stepSwf;
+  closeSwf: typeof closeSwf;
+  traceSwf: typeof traceSwf;
+};
 page.runSwf = runSwf;
 page.benchSwf = benchSwf;
+page.openSwf = openSwf;
+page.stepSwf = stepSwf;
+page.closeSwf = closeSwf;
+page.traceSwf = traceSwf;
