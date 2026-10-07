@@ -67,7 +67,7 @@ export const CLIP = 1;
 export const BUTTON = 2;
 
 const NO_FILTERS: readonly Filter[] = Object.freeze([]);
-/** What a leaf has to walk: one for all, as the frame's walks visit every object thrice a frame. */
+/** What a leaf has to walk: one for all, as the frame's walks visit every object once or more a frame. */
 const NO_CHILDREN: readonly DisplayObject[] = Object.freeze([]);
 const NO_FILTER_BYTES = new Uint8Array([0]);
 
