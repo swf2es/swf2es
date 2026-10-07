@@ -173,6 +173,8 @@ export class Scripting {
   readonly base: string | null;
   /** Where local SharedObjects are kept (flash/net/SharedObject.ts). */
   readonly storage: SharedObjectStorage;
+  /** Writes every SharedObject a script opened, set by their natives; destroy calls it. */
+  flushSharedObjects: (() => void) | null = null;
   /** What Capabilities reports of the system (flash/system/Capabilities.ts). */
   readonly platform: PlatformCapabilities;
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
@@ -334,7 +336,8 @@ export class Scripting {
   }
 
   /**
-   * Stop for good, as a page that takes its player away needs: the sounds
+   * Stop for good, as a page that takes its player away needs: the open
+   * SharedObjects are written, as Flash wrote them as a SWF went, the sounds
    * stop and the audio host closes, the open Sockets and WebSockets close,
    * and the fetches under way are aborted. Left open, a connection kept
    * receiving and queueing for a player no one plays, and its listeners
@@ -347,6 +350,7 @@ export class Scripting {
     }
 
     this.destroyed = true;
+    this.flushSharedObjects?.();
     stopAllSounds(this);
     this.audio?.close?.();
     for (const connection of [...this.connections]) {
@@ -362,7 +366,7 @@ export class Scripting {
    * forgets it, and the transport it returns is wrapped likewise.
    */
   private track<
-    E extends { close(...args: never[]): void },
+    E extends { close(...args: never[]): void; error(...args: never[]): void },
     T extends { send(data: never): void; close(code?: number): void },
   >(events: E, connect: (events: E) => T): T {
     let open = true;
@@ -376,6 +380,11 @@ export class Scripting {
       close: (...args: never[]) => {
         forget();
         events.close(...args);
+      },
+      // Refused or failed: a host need not close it after, nor destroy.
+      error: (...args: never[]) => {
+        forget();
+        events.error(...args);
       },
     });
     entry.close = () => {

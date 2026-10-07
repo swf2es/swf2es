@@ -1220,12 +1220,16 @@ test("destroy closes the open connections, aborts the fetches and closes the aud
   const closed: string[] = [];
   let aborted: AbortSignal | null = null;
   let audioClosed = 0;
-  const remote: { close?: () => void } = {};
+  const remote: { close?: () => void; error?: (message: string) => void } = {};
   const scripting = new Scripting(await createCodegen(wasm), {
     socket: {
       connect(host, _port, events) {
         if (host === "peer-closes") {
           remote.close = events.close;
+        }
+
+        if (host === "refused") {
+          remote.error = events.error;
         }
 
         return { send: () => {}, close: () => closed.push(`socket ${host}`) };
@@ -1247,6 +1251,9 @@ test("destroy closes the open connections, aborts the fetches and closes the aud
   scripting.socket.connect("closed-here", 1, events).close();
   scripting.socket.connect("peer-closes", 1, events);
   remote.close?.();
+  // Refused, with no close after it: nothing left for destroy to close.
+  scripting.socket.connect("refused", 1, events);
+  remote.error?.("Error #2031: Socket Error.");
   scripting.webSocket.connect("ws://open.test/", [], wsEvents);
   void scripting.fetch(
     { url: "http://a.test/", method: "GET", headers: [], body: null },

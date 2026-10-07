@@ -291,3 +291,25 @@ test("a loaded SWF's SharedObject is its own, by its URL, not the main SWF's", {
     "example.test/outer.swf/prefs",
   ]);
 });
+
+test("a destroyed player writes the SharedObjects its scripts left unflushed, as Flash did on unload", {
+  skip,
+}, async () => {
+  const abc = compileScripts(
+    [script("SharedUnflushed", `SharedObject.getLocal("later").data.n = 3;`, "SharedUnflushed")],
+    out,
+  ).get("SharedUnflushed") as Uint8Array;
+  const { stored, storage } = mapStorage();
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: () => {},
+    storage,
+    url: "http://example.test/main.swf",
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(abc, 1, "SharedUnflushed"), scripting);
+  await player.start();
+  assert.equal(stored.size, 0);
+
+  player.destroy();
+  assert.ok(stored.has("example.test/main.swf/later"));
+});
