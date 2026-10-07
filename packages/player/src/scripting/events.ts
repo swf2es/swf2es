@@ -51,6 +51,26 @@ function invoke(s: Scripting, o: AsObject, event: AsObject, phase: number): void
   }
 }
 
+/**
+ * Whether `target` or an object above it listens for `type`, in any phase.
+ * Where none does, dispatching an event of the type runs no script, so
+ * none could tell whether it was made: the player's own events, one for
+ * each object put on the list or taken off, are made only where heard.
+ */
+export function heard(target: AsObject, type: string): boolean {
+  if ((target.$listeners?.get(type) as Listener[] | undefined)?.length) {
+    return true;
+  }
+
+  for (let d = displayOf(target)?.parent; d; d = d.parent) {
+    if ((d.object?.$listeners?.get(type) as Listener[] | undefined)?.length) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /** Dispatch `event` to `target`'s own listeners only, as a broadcast reaches each object: no capture, no bubble. */
 export function dispatchTo(s: Scripting, target: AsObject, event: AsObject): void {
   event.$target = target.$target ?? target;

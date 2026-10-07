@@ -7,7 +7,7 @@ import { avm2 } from "@swf2es/runtime";
 import { Container, type DisplayObject, frameChildren, MovieClip } from "../display/display.js";
 import { stopTimelineSoundsUnder } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
-import { dispatchEvent } from "./events.js";
+import { dispatchEvent, heard } from "./events.js";
 
 type AsObject = avm2.AsObject;
 
@@ -45,12 +45,9 @@ export class Lifecycle {
    */
   added(display: DisplayObject): void {
     this.orphans.delete(display.serial);
-    if (display.object) {
-      dispatchEvent(this.s, display.object, this.s.event("added", true));
-    }
-
+    this.dispatch(display.object, "added", true);
     if (this.onStage(display)) {
-      this.eachObject(display, (o) => dispatchEvent(this.s, o, this.s.event("addedToStage")));
+      this.eachObject(display, (o) => this.dispatch(o, "addedToStage", false));
     }
   }
 
@@ -61,12 +58,9 @@ export class Lifecycle {
    * removal frame only, and takes the parent's property of its name away.
    */
   removing(display: DisplayObject, byTimeline = false): void {
-    if (display.object) {
-      dispatchEvent(this.s, display.object, this.s.event("removed", true));
-    }
-
+    this.dispatch(display.object, "removed", true);
     if (this.onStage(display)) {
-      this.eachObject(display, (o) => dispatchEvent(this.s, o, this.s.event("removedFromStage")));
+      this.eachObject(display, (o) => this.dispatch(o, "removedFromStage", false));
     }
 
     this.orphan(display, !byTimeline);
@@ -157,6 +151,13 @@ export class Lifecycle {
       }
     };
     stop(display);
+  }
+
+  /** An event of `type` from `target`, if it has one and anything hears it there. */
+  private dispatch(target: AsObject | null, type: string, bubbles: boolean): void {
+    if (target && heard(target, type)) {
+      dispatchEvent(this.s, target, this.s.event(type, bubbles));
+    }
   }
 
   private eachObject(display: DisplayObject, f: (o: AsObject) => void): void {

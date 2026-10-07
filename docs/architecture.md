@@ -943,6 +943,9 @@ it places at once. `EventDispatcher()` calls its private native
 dispatch is part of the first slice: listeners by type and phase on the
 player object, `dispatchEvent` through the player's parent chain
 (`scripting/events.ts`), and the frame events the player broadcasts.
+The player makes its events of an object put on the list or taken off
+only where a listener on the object or above it would hear them: where
+none does, no script runs, and none could tell.
 
 `MouseEvent` keeps its local coordinates and flags on the event. Its stage
 coordinates are read through the target's current display matrix, so moving
