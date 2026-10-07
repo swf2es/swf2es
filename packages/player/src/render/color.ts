@@ -347,7 +347,7 @@ const batchedCopies = new WeakMap<GraphicsContext, GraphicsContext>();
 
 /**
  * `context`, batched: a shared one, which shapes, glyphs and lines make
- * "no-batch" (render/view.ts), as a copy; a Graphics' own, as itself.
+ * "no-batch" (render/tessellate.ts, shapeContext), as a copy; a Graphics' own, as itself.
  */
 function batched(context: GraphicsContext): GraphicsContext {
   if (context.batchMode === "batch") {
@@ -381,18 +381,18 @@ export function dropBatchedCopy(context: GraphicsContext): void {
 /**
  * A Graphics that may show another context than the one it stands for: the
  * shared one it was given (`shared`), and `show` to draw another, as a
- * shape's lines swap theirs (render/view.ts, SharedGraphics).
+ * shape's lines swap theirs (render/patches.ts, SharedGraphics).
  */
 export type SharingGraphics = Graphics & {
   shared?: GraphicsContext;
   show?: (context: GraphicsContext) => void;
-  /** Whether it is in a render group settled long enough to batch it (render/view.ts, settle). */
+  /** Whether it is in a render group settled long enough to batch it (render/patches.ts, settle). */
   settled?: boolean;
 };
 
 /**
  * The context a Graphics should draw under `ct`: an unbatched one, as a
- * shape's are (render/view.ts), Pixi draws with its own shader, which has no
+ * shape's are (render/tessellate.ts), Pixi draws with its own shader, which has no
  * colour transform, so under one it draws a batched copy. The context it
  * stands for is shared by every instance of a character, and every text in
  * a font, and is never changed: switched to batched, the Graphics of the

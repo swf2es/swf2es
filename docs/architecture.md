@@ -607,7 +607,7 @@ masks stay with their siblings. A fresh view for BitmapData.draw does not
 group. An off-list branch keeps its group hierarchy and batches for five
 seconds so it can return without rebuilding. At most 64 groups that have never
 returned are parked; new one-off branches evict the oldest batches. Evicted
-batchers, up to 16 groups' worth, go to the next group a view makes rather
+batchers, up to 16 groups' worth (`render/batchers.ts`), go to the next group a view makes rather
 than being freed while a new group allocates its own; a root rendered once,
 as BitmapData.draw's, allocates its own, since Pixi destroys it after. A colour
 batcher whose buffers stay mostly empty for 120 rebuilds shrinks them; a
@@ -619,7 +619,8 @@ filters, and a branch shrinking and growing against Flash. The
 `bench.ts --branches N --gpu` workload changes a quarter of N independent
 coloured branches while the rest stay still.
 
-A shape's fills are immutable `GraphicsContext`s shared by its instances,
+A shape's fills are immutable `GraphicsContext`s shared by its instances
+(`render/tessellate.ts`),
 counted as they take and give them back, and destroyed once none has held
 them for 5 s: kept for as long as their shape lived, every shape a long
 session had shown kept its fills, their geometry and their coloured
@@ -635,7 +636,7 @@ region's at once, before the islands in them, since Pixi's `cut()` also
 lands a hole in the fill before the last once the last has one
 (`fill-holes`). A contour is in another by a point of it off the other's
 outline, since a pixel font's contours touch at their corners
-(`glyph-contours`). Its lines are drawn in the stage's axes, because Flash
+(`glyph-contours`). Its lines (`render/strokes.ts`) are drawn in the stage's axes, because Flash
 strokes a transformed line with one width all along, not the local width
 stretched by the transform: so a line's context depends on the linear
 part of its transform on the stage, and is kept by layer and that
@@ -723,7 +724,7 @@ draw calls, but far fewer program switches and uploads, and `bench.ts
 software GL. But a crowded scene is mostly still: of some 4,400 draws a
 frame in a room of a dozen characters, half were in render groups no
 timeline had rebuilt for seconds. A render group not rebuilt for 2 s has
-its Graphics batched, each drawing a batched copy of its shared context,
+its Graphics batched (`render/patches.ts`), each drawing a batched copy of its shared context,
 as a colour transform does: packed once, as nothing rebuilds the group,
 and drawn in a few calls, which took a frame's render from 17–18 ms to
 15. Rebuilt again by anything but its batching, the group draws them
@@ -815,8 +816,14 @@ and the player's paths in this document are relative to it:
   the sounds the player plays, the timeline's and scripts' channels
   (`sounds.ts`).
 - `input/`: the pointer and the keyboard.
-- `render/`: the PixiJS view and what only it uses: the transform table,
-  colour transforms, blend modes, filters and resolves on the GPU.
+- `render/`: the PixiJS view (`view.ts`) and what only it uses: shapes'
+  fills tessellated (`tessellate.ts`) and lines stroked (`strokes.ts`)
+  into shared contexts, Pixi's pipe and render-group builds patched
+  (`patches.ts`), what the view and Pixi pool and how much (`pools.ts`),
+  text drawn (`text.ts`), bitmaps' and gradients' textures
+  (`bitmaps.ts`), batchers kept for new groups (`batchers.ts`), the
+  transform table, colour transforms, blend modes, filters and resolves
+  on the GPU.
 - `playerglobal/`: the `flash.*` classes, a path per package and class.
 
 `playerglobal/` holds AS3's bindings only, and depends one way: its
