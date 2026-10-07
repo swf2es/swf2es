@@ -415,6 +415,7 @@ async function benchSwf(
   nestedGroups = false,
   table = true,
   tableMinRun?: number,
+  pace = 0,
 ): Promise<Bench> {
   setTransformTable(table, tableMinRun);
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -492,6 +493,7 @@ async function benchSwf(
     const heapBefore = heapNow();
     const meters: Record<string, number>[] = [];
     const counter = meter(renderer);
+    let stroked = view.counts.strokeContexts;
     for (let frame = 2; frame <= frames; frame++) {
       const before = performance.now();
       for (const [depth, child] of toggled.entries()) {
@@ -517,13 +519,22 @@ async function benchSwf(
       sync.push(synced - ticked);
       draw.push(drawn - synced);
       finished.push(performance.now() - drawn);
-      meters.push(counter.read());
+      // Lines' contexts made, tessellated or not yet.
+      const reading = counter.read();
+      reading.strokeContexts = view.counts.strokeContexts - stroked;
+      stroked = view.counts.strokeContexts;
+      meters.push(reading);
       // Renders no tick came before, as a host that draws on every animation frame does.
       for (let k = 0; k < idleRenders; k++) {
         const begun = performance.now();
         view.render(player.stage);
         await finish();
         idle.push(performance.now() - begun);
+      }
+
+      // Frames apart in time, for what is kept by age to age between them.
+      if (pace > 0) {
+        await new Promise((resolve) => setTimeout(resolve, pace));
       }
     }
 

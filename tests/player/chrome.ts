@@ -406,7 +406,8 @@ function framesAllocated(head: SampledNode): number {
 /**
  * Play `swf` for `frames` frames in the player, timing each; see page.ts's
  * benchSwf. `gpu` lets Chrome use one. With `allocs`, `profilePath` keeps
- * the sampled heap profile, as a .heapprofile DevTools opens.
+ * the sampled heap profile, as a .heapprofile DevTools opens. `pace` waits
+ * that many milliseconds after each frame.
  */
 export function benchPlayer(
   swf: Uint8Array,
@@ -422,6 +423,7 @@ export function benchPlayer(
   table = true,
   tableMinRun?: number,
   profilePath?: string,
+  pace = 0,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
@@ -436,7 +438,7 @@ export function benchPlayer(
       }
 
       const { value, exception } = await evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace})`,
       );
       if (value && allocs) {
         const { profile } = await send<{ profile: { head: SampledNode } }>(
