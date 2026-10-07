@@ -4519,6 +4519,16 @@ export const cases: PlayerCase[] = [
     alone: true,
   },
   {
+    name: "stage-hits",
+    swf: (abc) => bare(abc, 2, "StageHits", 100, 50),
+    script: "StageHits",
+    frames: 2,
+    capture: [2],
+    tolerance: 0,
+    maxOutliers: 0,
+    alone: true,
+  },
+  {
     name: "definitions",
     build: definitions,
     frames: 1,

@@ -1579,7 +1579,12 @@ The shape test samples half a pixel to the left of the point, on its
 row, which is how Flash's answers on a shape's edges come out: a point
 on its right edge hits, one on its left, top or bottom edge does not
 (`displayobject_hittestpoint_boundary`, both ways round). The shape test
-asks for a SWF's root above the object, the bounds test does not. `hitTestObject`
+asks for a SWF's root above the object, the bounds test does not; the
+stage counts as one, with the main SWF's `LoaderInfo`, so that what a
+script puts on the stage itself has the stage for its `root` and takes
+the pointer's hits, as a window over the whole movie does in Flash (the
+`stage-hits` case). The stage's own shape test still hits nothing, as
+adl's does, though its bounds test hits its children. `hitTestObject`
 asks whether two objects' bounds in the stage's space overlap. The
 corpus's `displayobject_getrect`, `_hittestpoint`, `_hittestpoint_root`
 and `_hittestobject` are the reference, with the `draws` case.
