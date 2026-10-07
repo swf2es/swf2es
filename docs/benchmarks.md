@@ -244,6 +244,45 @@ In a worklist that reaches a fixed point, each block's last visit follows
 the last change to its entry state, so the IR could be kept from that visit
 instead, once whatever only the second pass does is done in the first.
 
+### Untyped property access
+
+`tests/bench/untyped/Untyped.as` reads, writes and calls names on values
+typed `*`, as a large Flash application does through untyped fields:
+display objects deep in a class hierarchy (getters, setters, slots and
+methods of sealed classes), data decoded from JSON (dynamic properties),
+an Object and an Array, eight classes sharing the same names, and a
+String's methods. None binds early, so each goes through the runtime's
+`getProperty`, `setProperty` or `callProperty`. Its sections trace their
+times and the rest must match avmshell's output:
+
+    node tests/bench/untyped/run.ts [runs]
+    node tests/bench/untyped/run.ts <dir A> <dir B> [runs]
+
+the second with two snapshots of `tests/programs/ab.ts`, interleaved as
+it interleaves them. Before any inline cache, medians of 3, in ms:
+
+| | display | data | object | poly | string |
+|---|---|---|---|---|---|
+| swf2es | 268 | 88 | 411 | 159 | 79 |
+| avmshell | 40 | 23 | 135 | 71 | 39 |
+
+Then with each name's inline cache (`property-cache.ts`), each against
+the build before it, medians of 7 interleaved pairs, in ms:
+
+| Change | display | data | object | poly | string |
+|---|---|---|---|---|---|
+| One entry per name, objects only | 269 → 102 | 87 → 49 | 413 → 395 | 157 → 195 | 80 → 89 |
+| One entry, primitives too (a name shared by strings and objects, as `length`, then thrashes) | 103 → 94 | 49 → 58 | 397 → 400 | 199 → 227 | 94 → 76 |
+| Four entries per name | 94 → 83 | 60 → 46 | 392 → 410 | 233 → 190 | 82 → 77 |
+| No more replacing after 16, nor working out an entry it will not keep | 85 → 85 | 47 → 46 | 417 → 412 | 193 → 109 | 76 → 74 |
+| Eight entries per name | 85 → 85 | 46 → 46 | 410 → 411 | 110 → 56 | 76 → 73 |
+| **All, against the build before (9 pairs)** | **259 → 84** | **84 → 47** | **416 → 417** | **155 → 58** | **78 → 73** |
+
+poly's 8 classes fit in eight entries. With 8 more classes in its array,
+16 per name, four entries took 327 → 310 ms and eight 345 → 265 against
+the build before; without the stop, four took 347 → 445, a miss on every
+lookup paying for its replacement.
+
 ### The AssemblyScript runtime
 
 codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator

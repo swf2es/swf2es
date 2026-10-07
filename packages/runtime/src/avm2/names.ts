@@ -4,8 +4,10 @@
 // interns them, so two modules' `public` are one object and names compare by
 // identity. A private namespace is only ever equal to itself.
 
-/** Namespace kinds, numbered as the compiler's NS_* constants. */
+import { NO_CACHE, type PropertyCache } from "./property-cache.js";
 import type { Domain } from "./runtime.js";
+
+/** Namespace kinds, numbered as the compiler's NS_* constants. */
 export const NS_Public = 0;
 export const NS_PackageInternal = 1;
 export const NS_Protected = 2;
@@ -104,6 +106,8 @@ export class Multiname {
    * module's, or the one of the name it was made from; null for the root.
    */
   domain: Domain | null = null;
+  /** What its lookups found, for a module's name (property-cache.ts); a name made at run time keeps none. */
+  cache: PropertyCache = NO_CACHE;
 
   constructor(
     readonly kind: number,

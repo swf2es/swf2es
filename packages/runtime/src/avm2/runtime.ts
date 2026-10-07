@@ -35,6 +35,24 @@ import {
 } from "./names.js";
 import { convertDoubleToString } from "./numbers.js";
 import { errorMessages } from "./player-messages.js";
+import {
+  ENTRIES,
+  epoch,
+  filling,
+  IC_Call,
+  IC_Const,
+  IC_Dynamic,
+  IC_Get,
+  IC_GetSet,
+  IC_Method,
+  IC_Set,
+  IC_Slot,
+  invalidate,
+  NO_CACHE,
+  PropertyCache,
+  REPLACEMENTS,
+  UNFILLED,
+} from "./property-cache.js";
 import { WeakKeys, WeakName } from "./weak-keys.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: AS3 values are untyped
@@ -387,6 +405,7 @@ export class Traits {
 
   /** Add a traits' own bindings and slots from its descriptor. */
   describe(desc: TraitsDesc): void {
+    invalidate();
     for (const [ns, version, name, value] of desc.bindings) {
       let list = this.bindings.get(name);
       if (!list) {
@@ -826,9 +845,18 @@ export class Runtime {
   readonly objectTraits: Traits;
   readonly classTraits: Traits;
   readonly functionTraits: Traits;
+  /** Empty the inline caches, so that they keep no traits or code of what is being let go of. */
+  forgetCaches(): void {
+    invalidate();
+  }
+
   /** Method closures, by receiver, so that o.f === o.f. */
   private readonly closures = new WeakMap<object, Map<number, AsObject>>();
   private readonly builtinTraitsByName = new Map<string, Traits>();
+  /** The primitives' traits, once a lookup has needed them, for the caches (receiverTraits). */
+  private stringTraits: Traits | undefined = undefined;
+  private numberTraits: Traits | undefined = undefined;
+  private booleanTraits: Traits | undefined = undefined;
   /** The names for-ins go through, per object (see Enumeration). */
   private readonly enumerating = new WeakMap<object, Enumeration>();
   /** Special traits: an activation's or a catch scope's, by descriptor. */
@@ -887,6 +915,7 @@ export class Runtime {
       attribute,
     );
     mn.domain = this.loading === this.root ? null : this.loading;
+    mn.cache = UNFILLED;
     return mn;
   }
 
@@ -1132,6 +1161,9 @@ export class Runtime {
       for (const [d, factory, id] of script.desc.traits.methods) {
         traits.proto[methodKey(d)] = this.withId(factory(scope, null), id);
       }
+
+      // Caches keep the methods.
+      invalidate();
 
       script.global = g;
     }
@@ -1420,12 +1452,40 @@ export class Runtime {
     }
   }
 
+  /**
+   * The traits a cache knows `v` by, as traitsOf's, without a lookup:
+   * undefined for null, undefined, a Namespace (whose traits are not its
+   * own) and a primitive before its class's traits are known.
+   */
+  private receiverTraits(v: Value): Traits | undefined {
+    switch (typeof v) {
+      case "object":
+      case "function":
+        return v === null ? undefined : v.$traits;
+      case "string":
+        return this.stringTraits;
+      case "number":
+        return this.numberTraits;
+      case "boolean":
+        return this.booleanTraits;
+      default:
+        return undefined;
+    }
+  }
+
   /** A builtin class's instance traits, by name, resolved once. */
   private builtinTraits(name: string): Traits {
     let traits = this.builtinTraitsByName.get(name);
     if (!traits) {
       traits = this.builtinClass(name).$it as Traits;
       this.builtinTraitsByName.set(name, traits);
+      if (name === "String") {
+        this.stringTraits = traits;
+      } else if (name === "Number") {
+        this.numberTraits = traits;
+      } else if (name === "Boolean") {
+        this.booleanTraits = traits;
+      }
     }
 
     return traits;
@@ -1449,6 +1509,29 @@ export class Runtime {
   }
 
   getProperty(o: Value, mn: Multiname): Value {
+    const e = cached(this.receiverTraits(o), mn);
+    if (e !== null) {
+      switch (e.kind) {
+        case IC_Slot:
+        case IC_Const:
+          return o[e.key];
+        case IC_Get:
+        case IC_GetSet:
+          return (e.get as Method).call(o);
+        case IC_Method:
+          return this.methodClosure(o, e.traits as Traits, e.id);
+        case IC_Dynamic: {
+          const d: Map<string, Value> | null = o.$d;
+          if (d) {
+            const v = d.get(e.key);
+            if (v !== undefined || d.has(e.key)) {
+              return v;
+            }
+          }
+        }
+      }
+    }
+
     // A Dictionary's object key, before its traits, as DictionaryObject's.
     if (mn.key !== undefined && o?.$keys !== undefined) {
       return o.$keys.get(mn.key);
@@ -1456,6 +1539,7 @@ export class Runtime {
 
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
+    this.fill(o, traits, b, mn);
     if (traits.properties !== null && hookedBinding(b, mn, traits.properties)) {
       return traits.properties.get(this, o, mn);
     }
@@ -1731,6 +1815,102 @@ export class Runtime {
     }
   }
 
+  /**
+   * Keep what `mn` found on `traits`, `o`'s, for the next lookup on an
+   * object with them: a binding, as getProperty, setProperty and
+   * callProperty use it, or a dynamic property's name. Not where the name
+   * resolves otherwise: through a property hook (a Proxy's, XML's), an
+   * index (a Vector's, an Array's element), or a Dictionary's key; nor on
+   * a primitive's dynamic property, which its prototypes have.
+   */
+  private fill(o: Value, traits: Traits, b: number, mn: Multiname): void {
+    let head = mn.cache;
+    if (
+      head === NO_CACHE ||
+      (head.replaced === REPLACEMENTS && head.epoch === epoch()) ||
+      this.receiverTraits(o) !== traits
+    ) {
+      return;
+    }
+
+    const hook = traits.properties;
+    const id = b >> 3;
+    let kind: number;
+    let key = "";
+    let get: Method | null = null;
+    let set: Method | null = null;
+    let type: TypeRef = null;
+    if (b === 0) {
+      const name = mn.dynamicName();
+      if (
+        name === null ||
+        (typeof o !== "object" && typeof o !== "function") ||
+        hook !== null ||
+        !traits.dynamic ||
+        traits.refusesNames ||
+        traits.getIndex !== undefined ||
+        traits.index !== undefined ||
+        arrayIndex(name) >= 0
+      ) {
+        return;
+      }
+
+      kind = IC_Dynamic;
+      key = name;
+    } else {
+      const hooked = hook !== null && hookedBinding(b, mn, hook);
+      switch (b & 7) {
+        case BIND_Method:
+          kind = hooked ? IC_Call : IC_Method;
+          get = traits.proto[methodKey(id)];
+          break;
+        case BIND_Var:
+        case BIND_Const:
+          kind = (b & 7) === BIND_Var ? IC_Slot : IC_Const;
+          key = slotKey(id);
+          type = traits.slotType(id);
+          break;
+        case BIND_Get:
+          kind = IC_Get;
+          get = traits.proto[methodKey(id)];
+          break;
+        case BIND_Set:
+          kind = IC_Set;
+          set = traits.proto[methodKey(id + 1)];
+          break;
+        case BIND_GetSet:
+          kind = IC_GetSet;
+          get = traits.proto[methodKey(id)];
+          set = traits.proto[methodKey(id + 1)];
+          break;
+        default:
+          return;
+      }
+
+      if (hooked && kind !== IC_Call) {
+        return;
+      }
+    }
+
+    if (head === UNFILLED) {
+      head = new PropertyCache();
+      mn.cache = head;
+    }
+
+    const e = entryFor(head, traits);
+    if (e === null) {
+      return;
+    }
+
+    e.traits = traits;
+    e.kind = kind;
+    e.key = key;
+    e.get = get;
+    e.set = set;
+    e.type = type;
+    e.id = id;
+  }
+
   /** Method `id` of `o` bound to it, the same function each time. */
   methodClosure(o: Value, traits: Traits, id: number): AsObject {
     const key = typeof o === "object" ? o : traits.proto;
@@ -1763,6 +1943,26 @@ export class Runtime {
   }
 
   setProperty(o: Value, mn: Multiname, v: Value, init = false): void {
+    const e = cached(this.receiverTraits(o), mn);
+    if (e !== null) {
+      switch (e.kind) {
+        case IC_Slot:
+          o[e.key] = e.type === null ? v : this.coerce(v, e.type);
+          return;
+        case IC_Set:
+        case IC_GetSet:
+          (e.set as Method).call(o, v);
+          return;
+        case IC_Dynamic: {
+          const d: Map<string, Value> | null = o.$d;
+          if (d) {
+            d.set(e.key, v);
+            return;
+          }
+        }
+      }
+    }
+
     if (mn.key !== undefined && o?.$keys !== undefined) {
       o.$keys.set(mn.key, v);
       return;
@@ -1770,6 +1970,7 @@ export class Runtime {
 
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
+    this.fill(o, traits, b, mn);
     if (traits.properties !== null && hookedBinding(b, mn, traits.properties)) {
       traits.properties.set(this, o, mn, v);
       return;
@@ -2001,8 +2202,33 @@ export class Runtime {
   // Calls.
 
   callProperty(o: Value, mn: Multiname, ...args: Value[]): Value {
+    const e = cached(this.receiverTraits(o), mn);
+    if (e !== null) {
+      switch (e.kind) {
+        case IC_Method:
+        case IC_Call:
+          return this.callBound(e.get as CountedMethod, o, args);
+        case IC_Slot:
+        case IC_Const:
+          return this.callValue(o[e.key], o, args, mn);
+        case IC_Get:
+        case IC_GetSet:
+          return this.callValue((e.get as Method).call(o), o, args, mn);
+        case IC_Dynamic: {
+          const d: Map<string, Value> | null = o.$d;
+          if (d) {
+            const v = d.get(e.key);
+            if (v !== undefined || d.has(e.key)) {
+              return this.callValue(v, o, args, mn);
+            }
+          }
+        }
+      }
+    }
+
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
+    this.fill(o, traits, b, mn);
     if ((b & 7) === BIND_Method) {
       return this.callBound(traits.proto[methodKey(b >> 3)], o, args);
     }
@@ -2563,6 +2789,8 @@ export class Runtime {
       }
     }
 
+    // Caches keep the methods and what the hooks decide.
+    invalidate();
     itraits.proto.$init = desc.init(iscope, base);
     // Its static initializer may name the class as a type, as avmplus
     // resolves from traits, before initproperty has stored it anywhere.
@@ -3741,6 +3969,69 @@ function hookedBinding(b: number, mn: Multiname, hook: PropertyHook): boolean {
     (b & 7) === BIND_Method &&
     mn.namespaces.some((ns) => ns?.kind === NS_Public && ns.uri === "")
   );
+}
+
+/** The entry of `mn`'s cache for objects with traits `t`, or null. */
+function cached(t: Traits | undefined, mn: Multiname): PropertyCache | null {
+  let e: PropertyCache | null = mn.cache;
+  if (t === undefined || e.epoch !== epoch()) {
+    return null;
+  }
+
+  do {
+    if (e.traits === t) {
+      return e;
+    }
+
+    e = e.next;
+  } while (e !== null);
+
+  return null;
+}
+
+/**
+ * The entry of a cache to fill for traits `t`: its own, a free one, a new
+ * one while the list is shorter than ENTRIES, else the oldest, until it has
+ * replaced REPLACEMENTS; then none. A cache of an earlier epoch is emptied
+ * first.
+ */
+function entryFor(head: PropertyCache, t: Traits): PropertyCache | null {
+  if (head.epoch !== epoch()) {
+    for (let e: PropertyCache | null = head; e !== null; e = e.next) {
+      e.traits = null;
+    }
+
+    head.epoch = epoch();
+    filling(head);
+    head.victim = head;
+    head.replaced = 0;
+  }
+
+  let last = head;
+  let count = 0;
+  for (let e: PropertyCache | null = head; e !== null; e = e.next) {
+    if (e.traits === t || e.traits === null) {
+      return e;
+    }
+
+    last = e;
+    count++;
+  }
+
+  if (count < ENTRIES) {
+    const added = new PropertyCache();
+    last.next = added;
+    return added;
+  }
+
+  if (head.replaced === REPLACEMENTS) {
+    return null;
+  }
+
+  head.replaced++;
+  const victim = head.victim as PropertyCache;
+  head.victim = victim.next ?? head;
+  return victim;
 }
 
 /** Where output goes by default: the host's console. */
