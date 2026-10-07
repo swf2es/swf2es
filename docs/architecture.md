@@ -2103,8 +2103,18 @@ the rotations, and applies the scale after the rotation, as adl does;
 Ruffle's corpus drops the scale. Before SWF 13 Flash had the determinant
 of the other sign and turned about an axis as given, not a unit one, and
 the player does so for such SWFs (`matrix3d-swf12`, `matrix3d-swf13`).
-`Utils3D.projectVector` and `projectVectors` divide as adl does, which
-the Flash Player of Ruffle's corpus rounds further. A field of view a
+`pointAt`, a stub in Ruffle and Shumway, is adl's to a float32 rounding
+or two (`point-at`): `at` turns to face the point from the matrix's
+position and `up` to the world's (0, -1, 0), each made square to the
+other; left out they are (0, 1, 0) and (0, 0, 1), not the documented
+(0, 0, -1) and (0, -1, 0). The scales `decompose` finds go with the
+facing frame's axes, x across, y up, z along `at`, and the skew it drops
+stays, so a skewed matrix stays skewed; a direction of no length in
+float32 leaves the matrix as it was, and a NaN makes it all NaN.
+`Utils3D.pointTowards` interpolates a copy toward the matrix's
+translation alone turned so, the percent held to 0 to 1, so its scale
+goes to 1. `Utils3D.projectVector` and `projectVectors` divide as adl
+does, which the Flash Player of Ruffle's corpus rounds further. A field of view a
 focal length gives goes through `atan`, whose last bit Flash's C library
 decides, so `perspective_projection`'s ramp matches only in part.
 

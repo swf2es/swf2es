@@ -4875,6 +4875,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "point-at",
+    swf: (abc) => bare(abc, 1, "PointAt"),
+    script: "PointAt",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "matrix3d-swf12",
     swf: (abc) => withVersion(bare(abc, 1, "Matrix3DVersions"), 12),
     script: "Matrix3DVersions",
