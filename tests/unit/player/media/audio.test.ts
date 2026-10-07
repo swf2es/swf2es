@@ -230,3 +230,55 @@ test("an MP3 plays from the browser's decode of the whole file; extract's is its
     }
   }
 });
+
+test("a closed browser audio host closes its context and decodes nothing more", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
+  let made = 0;
+  let closed = 0;
+  class FakeAudioContext {
+    constructor() {
+      made++;
+    }
+    createBuffer(count: number, samples: number, rate: number) {
+      return {
+        duration: samples / rate,
+        numberOfChannels: count,
+        getChannelData: () => new Float32Array(samples),
+      };
+    }
+    async close() {
+      closed++;
+    }
+  }
+
+  Object.defineProperty(globalThis, "AudioContext", {
+    configurable: true,
+    value: FakeAudioContext,
+  });
+  try {
+    const host = browserAudioHost();
+    assert.ok(host?.close);
+    const sound: Sound = {
+      id: 1,
+      format: 3,
+      sampleRate: 11025,
+      sampleSize: 8,
+      channels: 1,
+      sampleCount: 1,
+      seekSamples: 0,
+      data: new Uint8Array([128]),
+    };
+    await host.decode(sound);
+    host.close();
+    assert.equal(closed, 1);
+    await assert.rejects(host.decode(sound), /closed/);
+    // No second context to outlive the player.
+    assert.equal(made, 1);
+  } finally {
+    if (previous) {
+      Object.defineProperty(globalThis, "AudioContext", previous);
+    } else {
+      Reflect.deleteProperty(globalThis, "AudioContext");
+    }
+  }
+});

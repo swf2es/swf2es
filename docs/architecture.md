@@ -1603,12 +1603,25 @@ when a send goes out while it closes, where the player never does.
 WebSocketEvent has no `clone` of its own, in AIR as here, so a
 redispatched one is a plain Event.
 
-Not done yet: an open WebSocket, like a flash.net.Socket, is not closed
-when its SWF is unloaded, and the player has no shutdown hook to close
-it. With the global WebSocket the default host, a player abandoned with
-one open keeps receiving and queueing its messages until it is collected. Where adl is at fault the
+`Player.destroy` (`Scripting.destroy`) closes every WebSocket and
+flash.net.Socket still open, as [Shutting down](#shutting-down) tells.
+Not done yet: one is not closed when its SWF alone is unloaded. Where adl is at fault the
 player is not: adl stops reading at an empty message, which the player
 dispatches, and a close frame without a code throws #2030 in it.
+
+### Shutting down
+
+A page that takes its player away calls `Player.destroy`. No frame plays
+after it: `advance` and `tick` do nothing. With scripts, `Scripting.destroy`
+then stops every sound and closes the audio host (`AudioHost.close`, which
+closes the browser's AudioContext, whose thread a page otherwise keeps),
+closes the Sockets' and WebSockets' connections still open, and aborts
+the fetches under way of the host's `fetch`. Scripting wraps the hosts
+it is given to keep each connection from its connect until either end
+closes it, so the natives keep no list of their own. Left open, a
+connection went on receiving and queueing for a player no one played,
+its listeners holding the player. What the host made for the player, its
+renderer, input bindings and loop, the host lets go itself.
 
 ### Screen capabilities
 

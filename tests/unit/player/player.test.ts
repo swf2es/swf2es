@@ -22,3 +22,23 @@ test("advance plays what the time is worth and says how many frames; changes cou
   assert.equal(player.advance(150), 2);
   assert.equal(player.changes, before + 2);
 });
+
+test("a destroyed player plays no more frames", () => {
+  const swf = w.swf({
+    width: 10,
+    height: 10,
+    frameRate: 10,
+    frameCount: 3,
+    tags: [w.showFrame(), w.showFrame(), w.showFrame(), w.end()],
+  });
+  const player = new Player(swf);
+  player.tick();
+  const changes = player.changes;
+
+  player.destroy();
+  assert.ok(player.destroyed);
+  assert.equal(player.advance(1000), 0);
+  player.tick();
+  assert.equal(player.changes, changes);
+  assert.equal(player.root.currentFrame, 2);
+});

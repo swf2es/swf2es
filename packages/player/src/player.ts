@@ -122,6 +122,24 @@ export class Player {
     this.frameRate = s.frameRate;
   }
 
+  /** Whether destroy has been called. */
+  get destroyed(): boolean {
+    return this.stopped;
+  }
+
+  private stopped = false;
+
+  /**
+   * Stop for good: no frame plays after, and with scripts their sounds,
+   * connections and fetches end (Scripting.destroy). What the host made
+   * for the player, its renderer, its input bindings and its loop, is the
+   * host's to let go.
+   */
+  destroy(): void {
+    this.stopped = true;
+    this.scripting?.destroy();
+  }
+
   /** Time a host has let pass, in ms, still to be played as frames. */
   private owed = 0;
   /** Frames played. */
@@ -160,6 +178,10 @@ export class Player {
    * many frames it played.
    */
   advance(dt: number): number {
+    if (this.stopped) {
+      return 0;
+    }
+
     // The pointer's last move, so the frame's scripts see where it is now.
     this.pointer?.flush();
     this.owed += Math.max(0, dt);
@@ -185,6 +207,10 @@ export class Player {
    * takes off still has its frame, as in Flash. Then the frame's scripts.
    */
   tick(): void {
+    if (this.stopped) {
+      return;
+    }
+
     this.played++;
     this.scripting?.timers.beginFrame(1000 / this.frameRate);
     const clips = this.ticking ?? [];

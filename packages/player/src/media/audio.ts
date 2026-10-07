@@ -58,6 +58,8 @@ export interface AudioHost {
   decode(source: Sound | Uint8Array): Promise<DecodedSound>;
   /** MP3 bytes' samples as Flash's decoder gives them, for Sound.extract; a host that cannot leaves it out. */
   extractSamples?(bytes: Uint8Array): Promise<ExtractedSamples>;
+  /** Let the device go, as the player is destroyed: nothing plays on it after. */
+  close?(): void;
 }
 
 /** The browser's decoder handles MP3; SWF's two uncompressed forms need no codec. */
@@ -68,9 +70,24 @@ export function browserAudioHost(): AudioHost | null {
   }
 
   let context: AudioContext | null = null;
-  const getContext = () => (context ??= new Context());
+  let closed = false;
+  // Closed, it decodes nothing more: a new context would outlive the player.
+  const getContext = () => {
+    if (closed) {
+      throw new Error("the audio host is closed");
+    }
+
+    context ??= new Context();
+    return context;
+  };
   return {
     extractSamples: decodeForExtract,
+    close() {
+      // A browser keeps a context, and its thread, until it is closed.
+      closed = true;
+      void context?.close().catch(() => {});
+      context = null;
+    },
     async decode(given) {
       const ctx = getContext();
       const source = given instanceof Uint8Array || given.format !== 1 ? given : adpcmSound(given);
