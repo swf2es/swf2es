@@ -11,7 +11,8 @@ export function fsCommandNatives(s: Scripting): avm2.Natives {
 
   class FSCommandNatives {
     static _fscommand(command: Value, args: Value): void {
-      s.fsCommand?.(s.rt.toString(command), s.rt.toString(args));
+      // With the calling SWF's URL, for a host that lets some SWFs command it and not others.
+      s.fsCommand?.(s.rt.toString(command), s.rt.toString(args), s.code.codeUrl());
     }
   }
 

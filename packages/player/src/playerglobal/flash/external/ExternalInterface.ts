@@ -7,14 +7,20 @@ type Value = avm2.Value;
 
 export function externalInterfaceNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
+  // The host, if it lets the calling SWF use it. Called from the natives
+  // themselves: the caller's frames must stay within the stack's limit.
+  const bridge = () => {
+    const host = s.externalInterface;
+    return host && (!host.allows || host.allows(s.code.codeUrl())) ? host : null;
+  };
 
   class ExternalInterfaceNatives {
     static get available(): boolean {
-      return s.externalInterface !== null;
+      return bridge() !== null;
     }
 
     static get objectID(): Value {
-      return s.externalInterface?.objectID ?? null;
+      return bridge()?.objectID ?? null;
     }
 
     static "flash.external:ExternalInterface::_initJS"(): void {
@@ -41,7 +47,7 @@ export function externalInterfaceNatives(s: Scripting): avm2.Natives {
       closure: Value,
       remove: Value,
     ): void {
-      const host = s.externalInterface;
+      const host = bridge();
       if (!host) {
         throw s.rt.error("Error", 2067);
       }
@@ -63,7 +69,7 @@ export function externalInterfaceNatives(s: Scripting): avm2.Natives {
     }
 
     static "flash.external:ExternalInterface::_evalJS"(source: Value): Value {
-      const host = s.externalInterface;
+      const host = bridge();
       if (!host) {
         throw s.rt.error("Error", 2067);
       }
@@ -72,7 +78,7 @@ export function externalInterfaceNatives(s: Scripting): avm2.Natives {
     }
 
     static "flash.external:ExternalInterface::_callOut"(request: Value): Value {
-      const host = s.externalInterface;
+      const host = bridge();
       if (!host) {
         throw s.rt.error("Error", 2067);
       }

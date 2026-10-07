@@ -220,6 +220,13 @@ export interface ExternalInterfaceHost {
     callback: ((request: string, args: Value[] | null) => Value) | null,
   ): void;
   objectID?: string | null;
+  /**
+   * Whether the SWF at `url`, whose code is calling, may use the bridge, as
+   * Flash checked allowScriptAccess against the calling SWF's domain, not
+   * the main one's; one it refuses finds ExternalInterface unavailable.
+   * Every SWF may where this is left out.
+   */
+  allows?(url: string): boolean;
 }
 
 /** Screen values reported by flash.system.Capabilities, captured when the player starts. */
