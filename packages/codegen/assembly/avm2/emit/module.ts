@@ -16,7 +16,8 @@
 //
 // A factory makes a method's function once its scope chain is known: `scope`
 // is the chain it captured, and `sup` the base class of the class it is a
-// method of, for the super instructions. Methods reach the module's own
+// method of, for the super instructions; it names only those, and $dx,
+// that the method uses. Methods reach the module's own
 // descriptors, such as the class a newclass creates, through A. A method
 // that refers to classes or Vectors has them in a table of its own, T,
 // made as the module loads:
@@ -284,12 +285,21 @@ export class ModuleEmitter {
     methods.typeIndex.clear();
     const at = out.length;
     const marks = methods.map.count;
-    // $dx: the default XML namespace when the factory runs, as avmplus'
-    // scope chain captures it when the method's closure or class is made.
-    out.text("(scope, sup, $dx = rt.defaultXmlNamespace) => ");
     methods.functionName = this.functionName(global);
     methods.method(m, global, decoder.ir);
     methods.functionName = "";
+    // Its parameters, up to the last the method uses. $dx: the default XML
+    // namespace when the factory runs, as avmplus' scope chain captures it
+    // when the method's closure or class is made.
+    const params = methods.seesDxns
+      ? "(scope, sup, $dx = rt.defaultXmlNamespace) => "
+      : methods.usesSup
+        ? "(scope, sup) => "
+        : methods.usesScope
+          ? "(scope) => "
+          : "() => ";
+    out.insert(at, params);
+    methods.map.shift(marks, <u32>params.length);
     const types = methods.types;
     if (types.length === 0) {
       return;

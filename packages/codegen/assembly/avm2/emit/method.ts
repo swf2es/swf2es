@@ -91,6 +91,9 @@ export class MethodEmitter {
    * it runs with its scope's (see checkEntry).
    */
   seesDxns: bool = false;
+  /** Whether the method reads its factory's scope chain, and its base class. */
+  usesScope: bool = false;
+  usesSup: bool = false;
   dxnsAt: u32 = 0;
   dxnsMarks: i32 = 0;
   /** The method's name in its own code, for running it again (see checkEntry). */
@@ -193,6 +196,8 @@ export class MethodEmitter {
     this.dxnsMarks = this.map.count;
     this.entryName = name;
     this.seesDxns = false;
+    this.usesScope = false;
+    this.usesSup = false;
     this.prologue(method, global, flags);
     // A method that sets the default XML namespace gives its caller's
     // back when it returns or throws.
@@ -1581,6 +1586,7 @@ export class MethodEmitter {
       case ops.OP_getouterscope:
         this.assign(i);
         out.text("scope[");
+        this.usesScope = true;
         out.uint(a);
         out.text("]");
         return true;
@@ -1611,6 +1617,7 @@ export class MethodEmitter {
         out.text(op === ops.OP_findpropstrict ? "rt.findPropertyStrict(" : "rt.findProperty(");
         this.name(a, src);
         out.text(", scope, ");
+        this.usesScope = true;
         this.localScopes();
         out.text(")");
         return true;
@@ -1803,6 +1810,7 @@ export class MethodEmitter {
               ? "rt.setSuper(sup, "
               : "rt.callSuper(sup, ",
         );
+        this.usesSup = true;
         this.reg(src);
         out.text(", ");
         this.name(a, src + 1);
@@ -1812,6 +1820,7 @@ export class MethodEmitter {
       }
       case ops.OP_constructsuper:
         out.text("    rt.constructSuper(sup, ");
+        this.usesSup = true;
         this.reg(src);
         this.args(src + 1, a);
         out.text(")");
@@ -2063,6 +2072,7 @@ export class MethodEmitter {
   globalScope(): void {
     if (this.ir.outerSize > 0) {
       this.out.text("scope[0]");
+      this.usesScope = true;
     } else {
       this.reg(<i32>this.ir.localCount);
     }
@@ -2089,6 +2099,7 @@ export class MethodEmitter {
   /** The scope chain a function or class created here runs in. */
   scopeHere(): void {
     this.out.text("rt.scope(scope, ");
+    this.usesScope = true;
     this.localScopes();
     this.out.text(")");
   }

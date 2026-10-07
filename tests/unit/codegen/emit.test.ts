@@ -467,9 +467,7 @@ function factoryAt(factories: string, index: number): string {
   let at = -1;
   for (let i = 1; i < lines.length; i++) {
     if (
-      /^ {4}(\(scope, sup, \$dx[^)]*\) =>|\(\(\.\.\.T\) => \(scope, sup, \$dx[^)]*\) =>|rt\.)/.test(
-        lines[i],
-      ) &&
+      /^ {4}(\(\(\.\.\.T\) => |\((scope(, sup(, \$dx[^)]*)?)?)?\) =>|rt\.)/.test(lines[i]) &&
       /[[,]$/.test(lines[i - 1]) &&
       ++at === index
     ) {
@@ -582,4 +580,18 @@ test("registers reset one after another are reset in one statement", { skip }, (
   const js = emit(script([...code, KILL, 1, KILL, 2, KILL, 3, PUSHBYTE, 3, RETURNVALUE]));
   assert.match(js, /\n {4}l1 = l2 = l3 = void 0;\n/);
   assert.equal(run(script([...code, KILL, 1, GETLOCAL1, KILL, 2, RETURNVALUE])), undefined);
+});
+
+test("a factory names only the parameters its method uses", { skip }, () => {
+  testing.domainReset(50);
+  const js = module("builtin.abc", true);
+  const factories = js.match(/\(([^()]*)\) => function \$\w*\([^)]*\) \{\n(.*\n){2}/g) ?? [];
+  const named = (params: string) => factories.filter((f) => f.startsWith(`(${params}) =>`));
+  assert.ok(named("").length > 0, "() =>");
+  assert.ok(named("scope, sup").length > 0, "(scope, sup) =>");
+  // $dx where the method checks it on entry, and only there.
+  const dx = named("scope, sup, $dx = rt.defaultXmlNamespace");
+  assert.ok(dx.length > 0);
+  assert.ok(dx.every((f) => f.includes("rt.defaultXmlNamespace !== $dx")));
+  assert.equal(js.match(/!== \$dx\)/g)?.length, dx.length);
 });

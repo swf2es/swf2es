@@ -358,7 +358,8 @@ runtime, `rt`, that returns:
 - **methods**: a factory per method, `(scope, sup) => function (...) { ... }`,
   so that each `newclass` or `newfunction` binds the scope chain it
   captured, and a class's methods the base class their super instructions
-  use;
+  use; a factory names only the parameters its method uses, `() =>` for
+  one that uses neither;
 - **traits**: for each class, its base class and interfaces by name,
   resolved when the class is created as avmplus resolves them, its own
   bindings by namespace and name, its slots' defaults, and its methods,
