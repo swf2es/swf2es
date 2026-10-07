@@ -313,6 +313,7 @@ function meter(renderer: object): { read(): Record<string, number> } {
     uid: number;
     gl?: WebGL2RenderingContext;
     renderPipes: Record<string, object>;
+    filter: object;
     renderGroup: object;
     graphicsContext: {
       getGpuContext(context: object): { geometryData: { vertices: ArrayLike<number> } };
@@ -322,6 +323,16 @@ function meter(renderer: object): { read(): Record<string, number> } {
   wrap(gl, "drawElements", () => add("glDraws"));
   wrap(gl, "drawArrays", () => add("glDraws"));
   wrap(gl, "useProgram", () => add("programs"));
+  // Stencil masks: state set for each mask drawn and taken off, and the clears.
+  for (const method of ["stencilFunc", "stencilOp", "colorMask"]) {
+    wrap(gl, method, () => add("stencilState"));
+  }
+  wrap(gl, "clear", (args) => {
+    add("clears");
+    if (gl && (args[0] as number) & gl.STENCIL_BUFFER_BIT) {
+      add("stencilClears");
+    }
+  });
   wrap(gl, "texSubImage2D", () => add("texUploads"));
   for (const method of ["bufferData", "bufferSubData"]) {
     wrap(gl, method, (args) => {
@@ -348,6 +359,11 @@ function meter(renderer: object): { read(): Record<string, number> } {
   });
   wrap(r.renderPipes.graphics, "execute", () => add("aloneGraphics"));
   wrap(r.renderPipes.batch, "execute", () => add("batches"));
+  // A filter's region: the bounds Pixi measures for it each time it draws.
+  wrap(r.filter, "_calculateFilterArea", (_, took) => {
+    add("filterAreas");
+    add("filterAreaMs", took);
+  });
   wrap(r.renderGroup, "_buildInstructions", (_, took) => {
     add("rebuilds");
     add("rebuildMs", took);
