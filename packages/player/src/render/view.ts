@@ -944,16 +944,18 @@ export class PixiView {
     // Those it last drew, which may since have left it too, and any it has
     // now; not one it last drew that has moved to another parent on the
     // list, which draws it.
-    const kids = new Set(node.kids);
-    if (o instanceof Container) {
-      for (const child of o.children) {
-        kids.add(child);
+    // Those last drawn first, then any new: one in both is released once, as a second does nothing.
+    const kids = node.kids;
+    for (let i = 0; i < kids.length; i++) {
+      if (kids[i].parent === o || this.left(kids[i], o)) {
+        this.release(kids[i]);
       }
     }
 
-    for (const kid of kids) {
-      if (kid.parent === o || this.left(kid, o)) {
-        this.release(kid);
+    if (o instanceof Container) {
+      const children = o.children;
+      for (let i = 0; i < children.length; i++) {
+        this.release(children[i]);
       }
     }
   }
