@@ -1,8 +1,11 @@
 // What a Graphics draws, recorded as the layers of fills and strokes a SWF
 // shape is read into (shapes.ts), so that the renderer draws both alike.
-// A fill or a stroke is a layer of its own, in the order begun, as Flash
-// draws them: commands go to the fill and the stroke open at the time, each
-// moveTo starting a contour of the fill and a path of the stroke.
+// Commands go to the fill and the stroke open at the time, each moveTo
+// starting a contour of the fill and a path of the stroke. As Flash draws
+// them, each fill begins a layer, and the lines drawn from then until the
+// next fill begins go in it, over that fill and under the next: a line
+// open at beginFill goes on in the new layer, and one drawn after endFill
+// stays above the fill before it.
 import type { Line } from "@swf2es/format";
 import { type Rect, union } from "./geometry.js";
 import {
@@ -40,10 +43,17 @@ export class Drawing {
 
   beginFill(fill: Paint): void {
     this.endFill();
+    const line = this.stroke?.line;
+    this.dropStroke();
     this.fill = { fill, contours: [], winding: "evenOdd" };
     this.fillLayer = { fills: [this.fill], strokes: [] };
     this.layers.push(this.fillLayer);
     this.begin(this.fill.contours);
+    if (line) {
+      this.stroke = { line, paths: [] };
+      this.fillLayer.strokes.push(this.stroke);
+      this.begin(this.stroke.paths);
+    }
   }
 
   endFill(): void {
@@ -53,11 +63,20 @@ export class Drawing {
 
   /** A stroke from here on with `line`, or none for null; the one before it ends either way. */
   lineStyle(line: Line | null): void {
+    this.dropStroke();
     this.stroke = line ? { line, paths: [] } : null;
-    if (this.stroke) {
-      this.layers.push({ fills: [], strokes: [this.stroke] });
-      this.begin(this.stroke.paths);
+    if (!this.stroke) {
+      return;
     }
+
+    let layer = this.layers[this.layers.length - 1];
+    if (!layer) {
+      layer = { fills: [], strokes: [] };
+      this.layers.push(layer);
+    }
+
+    layer.strokes.push(this.stroke);
+    this.begin(this.stroke.paths);
   }
 
   moveTo(x: number, y: number): void {
@@ -265,6 +284,22 @@ export class Drawing {
 
     this.kept[lines ? 1 : 0] = { version: this.version, r };
     return r;
+  }
+
+  /** The open stroke ends; taken away if it drew nothing, with its layer if that is left empty. */
+  private dropStroke(): void {
+    const stroke = this.stroke;
+    const layer = this.layers[this.layers.length - 1];
+    this.stroke = null;
+    if (!stroke || !layer || stroke.paths.some((p) => p.length > 3)) {
+      return;
+    }
+
+    this.version++;
+    layer.strokes.splice(layer.strokes.indexOf(stroke), 1);
+    if (!layer.fills.length && !layer.strokes.length) {
+      this.layers.pop();
+    }
   }
 
   /** A contour or stroke path begins at the pen. */

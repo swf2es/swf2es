@@ -4224,6 +4224,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "line-order",
+    swf: (abc) => bare(abc, 1, "LineOrder", 400, 300),
+    script: "LineOrder",
+    frames: 1,
+    capture: [1],
+    // The squares' corners and the lines' ends anti-alias within a pixel of
+    // Flash's: some 250 channels. Lines under their fills would add 3,800.
+    tolerance: 32,
+    maxOutliers: 300,
+  },
+  {
     name: "gradient-draw",
     swf: (abc) => bare(abc, 1, "GradientDraw", 396, 198),
     script: "GradientDraw",
