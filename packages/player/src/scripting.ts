@@ -365,7 +365,6 @@ export class Scripting {
         }
 
         display.firstScripts = true;
-        scriptWork.changes++;
         // What is placed and not yet alive is made first, as a frame's
         // construct phase makes it: the frame's other children, and those
         // of the gotos under way, which their parents' listeners look for.

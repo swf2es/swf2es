@@ -1045,8 +1045,7 @@ export class ButtonObject extends Container {
   private down: DisplayObject | null = null;
   private hitTest: DisplayObject | null = null;
   state: ButtonState = "up";
-  /** Its states' next frame scripts run up, over, down, hit: the first, in a SWF after 9 (Scripting.construct). */
-  firstScripts = false;
+  private firstOrder = false;
   enabled = true;
   useHandCursor = true;
   trackAsMenu = false;
@@ -1104,6 +1103,18 @@ export class ButtonObject extends Container {
     );
     this.frameChildren = states.length > 0 ? states : NO_CHILDREN;
     scriptWork.changes++;
+  }
+
+  /** Its states' next frame scripts run up, over, down, hit: the first, in a SWF after 9 (Scripting.construct). */
+  get firstScripts(): boolean {
+    return this.firstOrder;
+  }
+
+  set firstScripts(first: boolean) {
+    if (first !== this.firstOrder) {
+      this.firstOrder = first;
+      scriptWork.changes++;
+    }
   }
 
   /** The display object of state `state`. */

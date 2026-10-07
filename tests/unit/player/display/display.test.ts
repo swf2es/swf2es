@@ -763,6 +763,14 @@ test("every change a round of frame scripts reads moves scriptWork, and a script
     moves(() => button.show()),
     "a button's state shown",
   );
+  assert.ok(
+    moves(() => (button.firstScripts = true)),
+    "a button's first scripts due",
+  );
+  assert.ok(
+    moves(() => scriptChildren(button)),
+    "a button's first scripts walked",
+  );
 
   // What a round does to each clip it runs: the frame it is on marked run.
   assert.ok(!moves(() => (clip.scriptedFrame = clip.currentFrame)), "a frame's script run");
@@ -771,4 +779,5 @@ test("every change a round of frame scripts reads moves scriptWork, and a script
   assert.ok(!moves(() => (clip.playing = false)), "a stop");
   assert.ok(!moves(() => (clip.makingChildren = false)), "still made");
   assert.ok(!moves(() => (clip.timelineChild = true)), "still a timeline child");
+  assert.ok(!moves(() => (button.firstScripts = false)), "first scripts still walked");
 });

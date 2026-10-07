@@ -22,10 +22,14 @@ export class Lifecycle {
     number,
     { ref: WeakRef<DisplayObject>; keep: boolean; since: number }
   >();
-  /** Display objects scripts made with `new` this frame: their first frame's script runs after everything else's, and they are orphans after. */
-  readonly fresh: DisplayObject[] = [];
+  private readonly madeThisFrame: DisplayObject[] = [];
 
   constructor(private readonly s: Scripting) {}
+
+  /** Display objects scripts made with `new` this frame: their first frame's script runs after everything else's, and they are orphans after. */
+  get fresh(): readonly DisplayObject[] {
+    return this.madeThisFrame;
+  }
 
   /** Whether `d` is on the display list: under the stage. */
   onStage(d: DisplayObject): boolean {
@@ -92,7 +96,7 @@ export class Lifecycle {
    * list or as an orphan.
    */
   made(display: DisplayObject): void {
-    this.fresh.push(display);
+    this.madeThisFrame.push(display);
     scriptWork.changes++;
     if (display instanceof MovieClip) {
       display.fresh = true;
@@ -211,7 +215,12 @@ export class Lifecycle {
       }
     }
     // What scripts made this frame and left off the display list plays on as an orphan.
-    for (const display of this.fresh.splice(0)) {
+    const made = this.madeThisFrame.splice(0);
+    if (made.length > 0) {
+      scriptWork.changes++;
+    }
+
+    for (const display of made) {
       if (!display.parent) {
         this.orphan(display);
       }
