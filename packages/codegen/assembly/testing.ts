@@ -832,6 +832,7 @@ export {
   domainFound,
   domainModule,
   domainModuleEntries,
+  domainRebuild,
   domainReset,
   domainRestore,
   domainRevive,

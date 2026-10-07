@@ -123,7 +123,7 @@ export function domainRevive(appDomain: i32): i32 {
     return revived;
   }
 
-  if (!rebuild()) {
+  if (!domainRebuild()) {
     domain.domainState[<u32>appDomain] = DOMAIN_Evicted;
     return -1;
   }
@@ -139,11 +139,14 @@ export function domainRevive(appDomain: i32): i32 {
  * either way.
  */
 export function domainCompact(): bool {
-  return domain.wantsRebuild() && rebuild();
+  return domain.wantsRebuild() && domainRebuild();
 }
 
-/** The domain built again from its live ABCs (see Domain.rebuilt); false, leaving it, if one did not link. */
-function rebuild(): bool {
+/**
+ * The domain built again from its live ABCs (see Domain.rebuilt), worth it
+ * or not, as the fuzzer asks; false, leaving it, if one did not link.
+ */
+export function domainRebuild(): bool {
   const fresh = domain.rebuilt();
   if (fresh === null) {
     return false;
