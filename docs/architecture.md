@@ -1714,8 +1714,10 @@ coloured bars measured to the pixel:
   then pass the corner at the corner's rate), a child sprite's drawing at
   110 to 120 moves the right edge to 120 wherever the child is placed or
   however it is scaled, a grandchild's moves nothing, a bitmap's or a
-  video's counts. A
-  SWF shape's are its recorded bounds, its lines with them.
+  video's counts. A SWF shape's are its recorded bounds, its lines with
+  them; a MorphShape's are its blend's at the ratio it is drawn at, from
+  the frame that sets the ratio: the panel slices by the new blend as it
+  draws it, though the morph takes the blend only in its own draw.
 - The map goes by the object's own matrix, not its place on the stage: a
   grid under a parent scaled 3 and itself unscaled changes nothing, and
   one scaled under a turned or mirrored parent is sliced, its corners
@@ -1736,15 +1738,25 @@ coloured bars measured to the pixel:
   `scrollRect` from -20 moves the sliced bars 20 of its units over.
 - A mask is not sliced, in drawing or in hit tests: neither an owner that
   is a mask nor a `Shape` child that masks a sibling, by a script's `mask`
-  or a timeline's clip layer, common in a 9-slice symbol. Neither is what
-  `BitmapData.draw` draws through its matrix, whatever the source's own
-  scale; a sliced object inside what is drawn is.
+  or a timeline's clip layer, common in a 9-slice symbol, nor an owner
+  inside a mask, which a shape test hits nothing of, as of any mask and
+  what is in it: what the mask clips is hit where its unsliced drawing
+  is. Neither is what `BitmapData.draw` draws through its matrix,
+  whatever the source's own scale; a sliced object inside what is drawn
+  is.
 - A `Shape` moved from a sliced sprite to a plain one draws unsliced, and
   one moved the other way, or between two grids, takes its new parent's.
 - A button slices the state that is one shape; a state of several
   characters is a sprite of them, and scales as ever.
-- Hit tests find what the slice draws (`display/bounds.ts`): the point
-  against the sliced layers, kept by the slice's key.
+- Hit tests find what the slice draws (`display/bounds.ts`), the point
+  against the sliced layers, kept by the slice's key, but only within the
+  bounds the shape has unsliced, its own, lines included, in its own
+  space: in a panel 100 wide scaled 2, a bitmap child 130 wide stretches
+  the panel's fill to 230 and it is hit to 200; a bar of its own at 88
+  drawn at 218 is not hit; a Shape child's fill from 10, drawn from 10,
+  is hit from 20; a line to 110 hits the fill to 220. Between a change
+  and the next draw, adl's hit tests still find the slice last drawn, or
+  an owner's redrawn shape unsliced; the player's find the new slice.
 - `scale9Grid` reads x, y, width and height each cut toward 0, a tag's
   grid of 20.5 to 80 as (20, 59 wide). The setter keeps them so cut, and
   then, for a grid not strictly inside the bounds it divides as given, or
@@ -1773,10 +1785,13 @@ grids, refused ones too, and rescales some on its second frame;
 `scale9-changes` changes what the grid divides, moves, redraws, adds and
 removes children, turns a parent, gives a Shape a grid of its own, draws
 through `BitmapData.draw`, masks, scrolls and hit-tests a curve across
-the grid. Flash snaps straight runs of lines to whole pixels, which the
-player does not, so a grid's lines at half pixels part from it there as
-unsliced ones do. Flash's hit tests on a curve land about half a pixel
-lower than the player's, sliced or not.
+the grid; `scale9-hits` hit-tests panels whose children widen what the
+grid divides, from the start and as they change, and a panel inside a
+mask, and draws one whose MorphShape child changes ratio. Flash snaps
+straight runs of lines to whole pixels, which the player does not, so a
+grid's lines at half pixels part from it there as unsliced ones do.
+Flash's hit tests on a curve land about half a pixel lower than the
+player's, sliced or not.
 
 ### Sound state
 
@@ -2785,8 +2800,10 @@ clips through its own place there. Off the list it clips through its own
 matrix, taken in the stage's space. One mask clips one object, so
 setting it on a second takes it off the first, whose `mask` is then
 null. Neither kind changes bounds or `width`, and a shape hit test
-follows `mask` but not a timeline's masks; a mask itself is never hit,
-and a Bitmap, masking or not, is hit over its whole rectangle. The renderer gives each
+follows `mask` but not a timeline's masks; a mask, a script's or a
+timeline's, is never hit by a shape test, nor is what is in it (the
+`scale9-hits` case), and a Bitmap, masking or not, is hit over its whole
+rectangle. The renderer gives each
 mask to Pixi as a stencil: a timeline's range goes in a container whose
 mask is the clip-depth child, and a mask's lines are hidden while it
 masks. When both objects are cached as bitmaps Flash clips by the

@@ -3677,6 +3677,78 @@ function scale9Changes(abc: Uint8Array): Uint8Array {
   });
 }
 
+// scripts/Scale9Hits.as's root, 560 by 440, with two timeline symbols: a
+// panel with a grid whose bars are a MorphShape that reaches 136 at ratio
+// 1, set on its second frame, and 116 at a half, on its third, which Flash
+// slices by on the frame each is set; and a clip layer holding a sprite
+// over a rectangle, which a script's shape test hits nothing of.
+function scale9Hits(abc: Uint8Array): Uint8Array {
+  const rect = (id: number, color: number, x: number, y: number, width: number, height: number) =>
+    w.shape({
+      id,
+      bounds: [x * 20, (x + width) * 20, y * 20, (y + height) * 20],
+      fills: [color],
+      paths: [{ fill1: 1, commands: rectPath(x, y, width, height) }],
+    });
+  return w.swf({
+    width: 560,
+    height: 440,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      rect(40, 0x6699cc, 0, 0, 100, 60),
+      w.morphShape({
+        id: 41,
+        startBounds: [80, 1920, 440, 760],
+        endBounds: [80, 2720, 440, 760],
+        fills: [{ start: 0xffcc3333, end: 0xffcc3333 }],
+        start: [
+          { fill0: 1, commands: rectPath(4, 22, 8, 16) },
+          { fill0: 1, commands: rectPath(88, 22, 8, 16) },
+        ],
+        end: [rectPath(4, 22, 8, 16), rectPath(128, 22, 8, 16)],
+      }),
+      w.sprite(42, 4, [
+        w.place({ depth: 1, character: 40 }),
+        w.place({ depth: 2, character: 41, ratio: 0 }),
+        w.showFrame(),
+        w.place({ depth: 2, move: true, ratio: 65535 }),
+        w.showFrame(),
+        w.place({ depth: 2, move: true, ratio: 32768 }),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.scalingGrid(42, 400, 1600, 400, 800),
+      rect(43, 0x3333aa, 0, 0, 260, 60),
+      rect(44, 0x000000, 10, 22, 50, 16),
+      w.sprite(45, 1, [w.place({ depth: 1, character: 44 }), w.showFrame(), w.end()]),
+      w.sprite(46, 1, [
+        w.place({ depth: 1, character: 45, name: "inner" }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.sprite(47, 1, [
+        w.place({ depth: 1, character: 46, name: "layer", clipDepth: 2 }),
+        w.place({ depth: 2, character: 43, name: "under" }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc, "Scale9Hits"),
+      w.symbolClass([[0, "Scale9Hits"]]),
+      w.place({ depth: 1, character: 42, name: "morph", matrix: { a: 2, tx: 200, ty: 7400 } }),
+      w.place({ depth: 2, character: 47, name: "clips", matrix: { tx: 5800, ty: 7400 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
 const rewound = { frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 };
 
@@ -3785,6 +3857,16 @@ export const cases: PlayerCase[] = [
     // channels, most along the quadratic. A bar a pixel off would add about 96.
     tolerance: 32,
     maxOutliers: 200,
+  },
+  {
+    name: "scale9-hits",
+    swf: scale9Hits,
+    script: "Scale9Hits",
+    frames: 4,
+    capture: [1, 2, 3, 4],
+    // The edge of a Shape sliced to a third of a pixel rounds a channel apart from Flash's.
+    tolerance: 1,
+    maxOutliers: 0,
   },
   {
     name: "render-groups",

@@ -132,6 +132,26 @@ export function sliceOf(o: DisplayObject, m: Matrix = o.matrix): Slice | null {
   return slice;
 }
 
+/**
+ * The slice `o` draws with as it is drawn: a MorphShape, it or a child,
+ * takes its ratio's blend first, as it does later in the same draw, so
+ * that a new ratio's bounds slice on its own frame, as adl's do, and not
+ * a frame late.
+ */
+export function sliceDrawn(o: DisplayObject): Slice | null {
+  if (o instanceof ShapeObject && o.morph) {
+    o.drawn();
+  } else if (o instanceof Container) {
+    for (const child of o.children) {
+      if (child instanceof ShapeObject && child.morph) {
+        child.drawn();
+      }
+    }
+  }
+
+  return sliceOf(o);
+}
+
 /** Each object's last slice and what it was made of: a hit test asks for it on every pointer move. */
 const slices = new WeakMap<
   DisplayObject,
@@ -154,7 +174,7 @@ export function onAxis(axis: Axis, v: number): number {
  * for a shape, its parent's. Null for none.
  */
 export function sliceFor(d: DisplayObject): { slice: Slice; m: Matrix | null } | null {
-  if (masks(d)) {
+  if (withinMask(d)) {
     return null;
   }
 
@@ -166,7 +186,7 @@ export function sliceFor(d: DisplayObject): { slice: Slice; m: Matrix | null } |
   }
 
   const parent = d.parent;
-  if (d instanceof ShapeObject && parent?.scale9Grid && !masks(parent)) {
+  if (d instanceof ShapeObject && parent?.scale9Grid) {
     const slice = sliceOf(parent);
     if (slice) {
       return { slice, m: d.placed };
@@ -176,9 +196,18 @@ export function sliceFor(d: DisplayObject): { slice: Slice; m: Matrix | null } |
   return null;
 }
 
-/** Whether `d` is a mask, a script's or a timeline's, which adl draws and hits unsliced. */
-function masks(d: DisplayObject): boolean {
-  return d.maskOf !== null || d.clipDepth > 0;
+/**
+ * Whether `d` is a mask, a script's or a timeline's, or is in one: adl
+ * draws it unsliced, and its shape test hits nothing of it.
+ */
+export function withinMask(d: DisplayObject): boolean {
+  for (let o: DisplayObject | null = d; o; o = o.parent) {
+    if (o.maskOf !== null || o.clipDepth > 0) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**

@@ -23,7 +23,7 @@ import {
   transformRect,
   union,
 } from "./geometry.js";
-import { sliceFor, sliceLayers } from "./scale9.js";
+import { sliceFor, sliceLayers, withinMask } from "./scale9.js";
 import { flatten, inside, orientation, type Path, type ShapeLayer } from "./shapes.js";
 
 const TWIPS = 20;
@@ -149,9 +149,10 @@ export function hitsPoint(
     return r !== null && contains(r, lx, ly);
   }
 
-  // A mask is not drawn, and adl hits nothing of it. Nor the stage's shape test, though the
-  // stage is a root for what a script puts on it: the one root with no parent.
-  if (!underRoot(d) || d.maskOf || (d.parent === null && d.loaderInfo !== null)) {
+  // A mask is not drawn, and adl hits nothing of it, a script's or a timeline's, nor of what
+  // is in it. Nor the stage's shape test, though the stage is a root for what a script puts
+  // on it: the one root with no parent.
+  if (!underRoot(d) || withinMask(d) || (d.parent === null && d.loaderInfo !== null)) {
     return false;
   }
 
@@ -312,11 +313,15 @@ function drawnAt(
 
   let layers: ShapeLayer[] =
     d.drawing?.layers ?? (d instanceof ShapeObject ? (d.shape?.layers ?? []) : []);
-  // A 9-slice is hit where it is drawn, its layers as the renderer moves them; a mask is not sliced.
+  // A 9-slice is hit where it is drawn, its layers as the renderer moves them, and only within
+  // its own bounds as drawn unsliced: adl misses an owner's fill that a wider child stretched
+  // past them. A mask is not sliced.
   const own =
     layers.length > 0 && !mask && (d.scale9Grid || d.parent?.scale9Grid) ? sliceFor(d) : null;
   if (own) {
-    layers = sliceLayers(layers, own.slice, own.m, d.drawing?.version);
+    const r = ownBounds(d, true);
+    layers =
+      r && contains(r, x, y) ? sliceLayers(layers, own.slice, own.m, d.drawing?.version) : [];
   }
 
   for (const layer of layers) {
