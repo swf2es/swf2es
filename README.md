@@ -16,11 +16,56 @@ packages/
   codegen/   bytecode → ES modules, AssemblyScript → wasm (same output for JIT and AOT)
   runtime/   AS3/AS2 language runtime (avm2/, avm1/)
   player/    browser player: display list, playerglobal, renderers
+  player-hosts/  optional transports: Node TCP, a WebSocket relay for sockets
+  web/       <swf2es-player>, replaceFlash and ExternalInterface for any web page
   cli/       ahead-of-time compiler
 oracle/      avmshell and Flash Player references
 tests/       unit and conformance tests
 docs/        design, references, benchmarks and roadmap
 ```
+
+## Playing SWFs on a web page
+
+`@swf2es/web` defines a `<swf2es-player>` element as it loads. The page
+gives, once, the URLs of the libraries a SWF's ActionScript 3 links
+against (Adobe's, which swf2es cannot ship) and, for flash.net.Socket,
+the WebSocket relays that reach its servers:
+
+```html
+<script type="module">
+  import { configure, replaceFlash } from "@swf2es/web";
+
+  configure({
+    libraries: { builtin: "/flash/builtin.abc", playerglobal: "/flash/playerglobal.abc" },
+    // codegen: "/swf2es/codegen.wasm",  // by default the import map's @swf2es/codegen/codegen.wasm
+    socketProxy: [{ host: "game.example", port: 5588, proxyUrl: "wss://relay.example/5588" }],
+  });
+  // The page's Flash <object> and <embed> tags, swapped for the element.
+  replaceFlash();
+</script>
+
+<swf2es-player id="movie" src="movie.swf" width="800" height="600"
+  flashvars="lang=en" scale="showAll" wmode="opaque" allowscriptaccess="sameDomain">
+</swf2es-player>
+```
+
+The element takes an `<embed>`'s attributes (`src`, `width`, `height`,
+`flashvars`, `scale`, `salign`, `wmode`, `bgcolor`, `base`,
+`allowscriptaccess`, `quality`), follows its size and the device's
+pixels, and has `load(url | bytes)`, `ready`, `destroy()` and `load`,
+`error` and `fscommand` events. A SWF's ExternalInterface callbacks are
+methods of the element, and its `call`s run in the page, where
+`allowscriptaccess` lets them:
+
+```ts
+const movie = document.getElementById("movie");
+await movie.ready;
+movie.sendScore(120); // ExternalInterface.addCallback("sendScore", ...) in the SWF
+movie.destroy(); // stops it and lets go of its GL context, audio and sockets
+```
+
+`watchFlash()` replaces Flash tags the page adds later too. See
+[docs/architecture.md](docs/architecture.md#the-web-embedding).
 
 ## Embedding the player
 

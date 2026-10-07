@@ -93,6 +93,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `player`  | display list, timeline, playerglobal, AVM1 globals, renderers   | format, codegen, runtime  |
 | `cli`     | ahead-of-time compiler command: a SWF's modules and a manifest  | format, codegen           |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time | player |
+| `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
 
 `runtime` contains only the language, with no display list, so it runs in node
 next to avmshell. It uses `format` for what both need, such as compression
@@ -1541,6 +1542,15 @@ script text. Without a host, `available` is false, `objectID` is null,
 and calls and callback registration throw Error #2067 as Flash does in a
 container without a bridge.
 
+A callback the page calls goes through playerglobal's `_callIn` either
+way it can: with an array of AVM2 values, applied as they are and
+answered with JavaScript source (`_toJS`), which the host would have to
+evaluate; or, given null for the array, read from an XML invocation, as
+Flash's plug-in sent one, whose arrays and objects playerglobal makes
+AS3 ones, and answered in XML for `returntype="xml"`. The browser host
+(`@swf2es/web`, see [The web embedding](#the-web-embedding)) takes the
+second, so a page's calls into a SWF need no eval.
+
 ### AIR's WebSocket
 
 AIR 51's `air.net.WebSocket` and `flash.events.WebSocketEvent` are
@@ -1621,7 +1631,121 @@ it is given to keep each connection from its connect until either end
 closes it, so the natives keep no list of their own. Left open, a
 connection went on receiving and queueing for a player no one played,
 its listeners holding the player. What the host made for the player, its
-renderer, input bindings and loop, the host lets go itself.
+renderer, input bindings and loop, the host lets go itself, as
+`@swf2es/web`'s element does.
+
+### The web embedding
+
+`@swf2es/web` (`packages/web`) plays SWFs on any page, as Flash's plug-in
+did and a browser extension will: a custom element, `<swf2es-player>`,
+defined as the module loads, a function that swaps a page's Flash tags
+for it, and a configuration the page sets once. It depends on the player
+and on player-hosts, whose WebSocket relay carries flash.net.Socket.
+
+The element (`element.ts`) takes an `<embed>`'s attributes: `src`,
+`width` and `height` (a number is pixels, as an `<embed>`'s, anything
+else a CSS length), `flashvars`, `scale`, `salign`, `wmode`, `bgcolor`,
+`base`, `allowscriptaccess` and `quality`. Its JavaScript side is
+`load(url | ArrayBuffer | Uint8Array)`, which plays a SWF in place of the
+one playing; `ready`, which resolves once the SWF loading plays and
+rejects with what kept it from playing; `destroy()`; and the events
+`load`, `error` (the error in `detail`) and `fscommand`, which also goes
+to the page's `<id>_DoFSCommand` as the plug-in's did. Its size is its
+attributes', or its SWF's stage, in `:host` rules the page's own styles
+override. A SWF with no ActionScript 3 plays with no Scripting.
+
+`playback.ts` shows a player in the element: a Pixi renderer whose
+screen is the stage, at the stage's size, and whose resolution is the
+device's pixels to a stage pixel, so the canvas is placed and sized by
+CSS and the view's pointer mapping, which reads the canvas's box, holds
+for every placement. `layout.ts` places it as Flash's plug-in did:
+showAll fits the stage whole, noBorder fills the element and crops,
+exactFit stretches it, noScale leaves it its size, and `salign`'s T, B,
+L and R hold the edges they name, the stage centred along an axis that
+names neither. A stretched stage is drawn as fine as its finer axis
+needs; no side passes 4096 device pixels. A ResizeObserver places it
+again as the element changes, and each animation frame checks
+`devicePixelRatio`, which a move to another display or a zoom changes.
+`wmode="transparent"` draws no background, so the page shows through;
+otherwise the stage's colour, `bgcolor`'s if given, fills the element
+around the stage too. Each animation frame advances the player by the
+time passed and draws when `changes` moved or the element did. The keys
+go to the element, focusable and focused as it is pressed, as a plug-in
+had them only while focused.
+
+`configure` (`config.ts`) sets what every player on the page shares:
+`libraries`, the URLs of builtin.abc and playerglobal.abc, which are
+Adobe's and cannot ship with swf2es; `codegen`, codegen.wasm's URL, by
+default what the import map gives `@swf2es/codegen/codegen.wasm`;
+`socketProxy`, a function from a socket's host and port to a WebSocket
+relay's URL or a list of them as Ruffle's, a socket without one refused
+with #2031; and `cache`. The page fetches and compiles codegen.wasm once
+and the libraries once, and each player instantiates the compiled module
+and reads the same bytes. A player has a Codegen of its own: Scripting
+resets the compiler it is given, and its domains' numbers are its own,
+so two players on one instance would take each other's over. `cache` is
+a hook for the player's IndexedDB module cache, not yet on dev: until it
+is, it compiles as without.
+
+ExternalInterface (`external.ts`) speaks Flash's protocol. A SWF's
+`call` is the JavaScript playerglobal writes, `name(args)` inside
+`__flash__toXML`, evaluated in the page with that function in scope, so
+a name may be a path or an inline function's source, as pages wrote
+them. Where the page's policy forbids eval, the host declines it and
+playerglobal sends the call as XML, which reaches a function named by a
+path, called on what holds it. A callback the SWF adds becomes a method
+of the element, called with an XML invocation and answered in XML, so
+the page gets plain arrays and objects back, synchronously, as from
+Flash; one that throws is reported and throws "Error calling method on
+NPObject" into the page, and an `<exception>`, which marshallExceptions
+sends, throws its message. A value met again inside itself crosses as
+null, where Flash recursed until its stack ran out. `allowscriptaccess`
+is `always`, `never`, or by default `sameDomain`, the SWF's origin the
+page's; a SWF it denies has no ExternalInterface host and no fscommand,
+so `available` is false and a call throws #2067, as Ruffle has it, where
+Flash's plug-in threw a SecurityError. `objectID` is the element's id,
+else its name, as the plug-in's was the `<object>`'s id or the
+`<embed>`'s name.
+
+`replaceFlash(root)` (`replace.ts`) finds the Flash tags under `root`:
+an `<object>` or `<embed>` of Flash's type, an `<object>` of its ActiveX
+class, or one whose movie is a .swf. Each outermost one is replaced by
+an element carrying what it and the Flash tags nested in it as
+fallbacks say, the outer first: an IE `<object>`'s `<param>`s, then an
+inner `<embed>`'s attributes for what those left out; and its id, name,
+class, style, width and height, so the page's scripts and styles find
+it. `watchFlash(root)` does it again for each tag the page adds later,
+until it is stopped.
+
+`destroy()` (or the element's removal from the page, a microtask later,
+so that a move is not one) releases everything a load holds: the
+animation frame, the ResizeObserver, the pointer and keyboard bindings,
+the renderer, which loses its GL context as it goes, the callbacks on
+the element, and the player through `Player.destroy` (see
+[Shutting down](#shutting-down)): its sounds and AudioContext, its
+sockets and fetches. A load that is still under way when the next load
+or a destroy comes stops at its next step, and what it made is let go.
+
+`tests/web/run.ts` plays a page in headless Chrome with two elements,
+for two of the player tests' SWFs, and two Flash tags for
+replaceFlash, a nested `<object>` and `<embed>` and an ActiveX
+`<object>` with `allowScriptAccess` never, at two device pixels a CSS
+pixel. It checks that each boots and draws (from a screenshot), the
+tags' parameters, ExternalInterface both ways and none where it is
+denied, one fetch and compile of codegen.wasm and one fetch of each
+library, the canvas's size as the element widens, and that destroy and
+removal let go: 20 elements made and destroyed leave no player and no
+codegen instance after a collection, no WebSocket or AudioContext
+open, and the heap within 256 KB of each.
+
+Not done yet: the SWF's scripts see Flash Player's showAll, the stage
+the SWF's size, whatever the element's `scale`, and noScale does not
+resize the stage or dispatch Event.RESIZE; the letterbox around a
+showAll stage shows the background, not what lies outside the stage;
+`menu` is carried over but there is no context menu; a
+`javascript:` URL from navigateToURL never runs, allowed or not; and
+`document[name]`, which found an `<embed>` by its name, does not find
+the element.
 
 ### Screen capabilities
 
