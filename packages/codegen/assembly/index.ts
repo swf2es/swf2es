@@ -39,5 +39,6 @@ export {
   domainRevive,
   domainSourceMap,
   domainState,
-  domainWeights,
+  domainUsage,
+  domainWantsCompact,
 } from "./compile";

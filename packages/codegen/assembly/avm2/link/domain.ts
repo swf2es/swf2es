@@ -106,8 +106,16 @@ export const LOG_Sign: u8 = 3;
 /** An ABC verified for the first time, or finding scopes for the first time. */
 export const LOG_Verify: u8 = 4;
 
+/** What a log entry kept for an evicted domain weighs. */
+const KEPT_Weight: u64 = 36;
+
 /** The weight of dead ABCs below which a rebuild is not worth it. */
 const DEAD_Floor: u64 = 4 << 20;
+
+/** Whether tables of `weight`, with what its estimate misses, come within `reserve` of `size`. */
+function full(weight: u64, reserve: u64, size: u64): bool {
+  return weight + (weight >> 2) + (weight >> 3) + reserve >= size;
+}
 
 /** What takes the place of an ABC let go of in a rebuilt Domain (see vacate). */
 const NO_ABC = new Abc();
@@ -590,14 +598,47 @@ export class Domain {
   }
 
   /**
-   * Whether the ABCs of domains not live, still in the tables, hold enough
-   * of its memory to be worth a rebuild, which links every live ABC again
-   * and does again what resolved lazily: DEAD_Floor of their weight, and as
-   * much as the live ABCs', or a third of the memory with them, past which
-   * a compile's garbage would grow it. wasm memory never shrinks, so what
-   * it has grown to is there to use.
+   * Whether a rebuild, which links every live ABC again and does again
+   * what resolved lazily, would keep memory from growing: the tables, by
+   * the ABCs' weight with three eighths more for what the estimate misses, have
+   * come within a reserve of wasm memory's size, and the ABCs of domains
+   * not live weigh DEAD_Floor and enough that the live ones alone are not.
+   * The reserve is what a compile's garbage may take between collections,
+   * which grows with the ABCs compiled: 16 times the weight of the last 16
+   * added, a sixteenth to a half of memory; and what the rebuild itself
+   * takes, twice the live tables. wasm memory never shrinks, so
+   * a rebuild before that reclaims nothing it would grow for, and one that
+   * could not get below is no use.
    */
   wantsRebuild(): bool {
+    this.addWeights();
+    const size = (<u64>memory.size()) << 16;
+    let recent: u64 = 0;
+    const count = this.abcWeight.length;
+    for (let i = max(0, count - 16); i < count; i++) {
+      recent += this.abcWeight[i];
+    }
+
+    const reserve = min(size >> 1, max(size >> 4, recent << 4));
+    // A rebuild makes the live tables anew, and as much again in garbage
+    // as they grow, while the old are there still.
+    const live = this.liveWeight + this.keptWeight;
+    const rebuilding = 2 * (live + (live >> 2) + (live >> 3));
+    return (
+      full(live + this.deadWeight, reserve + rebuilding, size) &&
+      this.deadWeight >= DEAD_Floor &&
+      !full(live, reserve, size)
+    );
+  }
+
+  /** The live ABCs' weight and the others' still in the tables, as addWeights last added them up. */
+  liveWeight: u64 = 0;
+  deadWeight: u64 = 0;
+  /** The weight of the log entries kept for evicted domains, which no rebuild frees. */
+  keptWeight: u64 = 0;
+
+  /** Add up liveWeight and deadWeight. */
+  addWeights(): void {
     let dead: u64 = 0;
     let live: u64 = 0;
     for (let i = 0; i < this.abcs.length; i++) {
@@ -612,25 +653,8 @@ export class Domain {
       }
     }
 
-    const size = (<u64>memory.size()) << 16;
-    return dead >= DEAD_Floor && (dead >= live || (live + dead) * 3 >= size);
-  }
-
-  /** The weight of the live ABCs and of the others still in the tables, "live dead". */
-  weights(): string {
-    let dead: u64 = 0;
-    let live: u64 = 0;
-    for (let i = 0; i < this.abcs.length; i++) {
-      if (this.abcs[i] !== NO_ABC) {
-        if (this.isLive(<u32>i)) {
-          live += this.abcWeight[i];
-        } else {
-          dead += this.abcWeight[i];
-        }
-      }
-    }
-
-    return `${live} ${dead}`;
+    this.liveWeight = live;
+    this.deadWeight = dead;
   }
 
   /** Append entry `kind` of ABC `abc` to the log. */
@@ -793,6 +817,7 @@ export class Domain {
       this.foundAsType.push(from.foundAsType[from.logA[e]]);
     }
 
+    this.keptWeight += KEPT_Weight;
     this.logKind.push(from.logKind[e]);
     this.logAt.push(from.logAt[e]);
     this.logAbc.push(from.logAbc[e]);

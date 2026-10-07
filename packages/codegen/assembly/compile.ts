@@ -137,8 +137,9 @@ export function domainRevive(appDomain: i32): i32 {
 }
 
 /**
- * Rebuild the domain without the ABCs of domains not live, once they hold
- * enough of its memory for that to be worth it (see Domain.wantsRebuild):
+ * Rebuild the domain without the ABCs of domains not live, once memory
+ * would otherwise grow and they hold enough to keep it from growing (see
+ * Domain.wantsRebuild):
  * whether it was, and a collection would free them now. A host calls it
  * when it has time, as when idle, so a batch of drops and evictions costs
  * one rebuild. Later modules come out the same either way.
@@ -343,9 +344,28 @@ export function domainEmitEach(bodies: string, reuse: bool, which: i32 = -1): st
   return String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
 }
 
-/** The weight of the live ABCs and of those of domains not live still linked, "live dead", in bytes, roughly. */
-export function domainWeights(): string {
-  return domain.weights();
+/**
+ * Whether domainCompact would rebuild now: memory would grow before long
+ * and the ABCs of dropped and evicted domains hold enough to keep it from
+ * growing (see Domain.wantsRebuild). A pure query, so that a host collects
+ * garbage before a rebuild only when one is due.
+ */
+export function domainWantsCompact(): bool {
+  return domain.wantsRebuild();
+}
+
+/**
+ * What the domain's ABCs hold of codegen's memory, roughly, and its size,
+ * in bytes, "live dead memory": the live ABCs' weight, with the log kept
+ * for evicted domains, that of the ABCs of
+ * dropped and evicted domains still in the tables, which domainCompact
+ * frees, and wasm memory's size. A pure query, for a host deciding when
+ * to give domainCompact time.
+ */
+export function domainUsage(): string {
+  domain.addWeights();
+  const live = domain.liveWeight + domain.keptWeight;
+  return `${live} ${domain.deadWeight} ${(<u64>memory.size()) << 16}`;
 }
 
 /**

@@ -109,11 +109,18 @@ export interface Codegen {
   readonly epoch: number;
   /**
    * Rebuild the domain without the ABCs of dropped and evicted domains, if
-   * they hold enough of its memory for that to be worth it: whether it did.
-   * A rebuild links every live ABC again, so a host calls this when it has
+   * memory would otherwise grow and they hold enough to keep it from
+   * growing: whether it did. A rebuild links every live ABC again, tens of
+   * milliseconds for a large application, so a host calls this when it has
    * time, as when idle; nothing else does.
    */
   compact(): boolean;
+  /**
+   * What the ABCs hold of codegen's memory, roughly, in bytes: the live
+   * ones', and the dropped and evicted domains' that compact would free;
+   * and the size of codegen's memory, which never shrinks.
+   */
+  usage(): { live: number; dead: number; memory: number };
   /**
    * Evict application domain `appDomain` and its descendants while the host
    * has no use for them, as once their ABCs are compiled: as dropped, but
@@ -261,9 +268,20 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     evictDomain(appDomain) {
       collected(wasm.domainEvict(appDomain));
     },
+    usage() {
+      const [live, dead, memory] = collected(wasm.domainUsage()).split(" ").map(Number);
+      return { live, dead, memory };
+    },
     compact() {
-      // The old domain's tables are garbage once it is rebuilt: collected at
-      // once, before the next call's allocations would grow memory past them.
+      // A rebuild makes new tables while the old are live: what earlier
+      // calls left is collected first, and the old tables once it is done,
+      // before the next call's allocations would grow memory past them.
+      if (!collected(wasm.domainWantsCompact())) {
+        return false;
+      }
+
+      wasm.__collect();
+      calls = 0;
       if (!wasm.domainCompact()) {
         return false;
       }

@@ -132,10 +132,14 @@ three, with the same VerifyError numbers:
    descendants (`dropDomain`), and one the host has no use for now, as
    once its ABCs are compiled, is evicted with them (`evictDomain`): no
    other sees their ABCs, which compile no more and keep their indices.
-   `compact` rebuilds the domain once those ABCs hold enough of its
-   memory, by an estimate from the rows of its tables: 4 MB, and as much
-   as the live ABCs or a third of codegen's memory with them; a host
-   calls it when it has time, as the player does when idle. A rebuild
+   `compact` rebuilds the domain only when that keeps codegen's memory
+   from growing: when the tables, by an estimate from their rows, with
+   what a compile's garbage and the rebuild itself take, come near
+   memory's size, and those ABCs weigh 4 MB and enough to bring them
+   back below. Before that a rebuild would reclaim nothing that matters,
+   as wasm memory never shrinks. `usage` tells the estimate, and
+   `compact` asks the same before it collects and rebuilds; a host calls
+   it when it has time, as the player does when idle. A rebuild
    links the live ABCs again, in their places, and does again, where it
    happened, what the domain has logged: each finding recorded, and the
    first answer to what resolves lazily, a traits' types, a method's
@@ -1265,12 +1269,14 @@ a domain revived stays, as one loaded into again, and the root's and the
 main SWF's are never evicted. After a drop or an eviction it asks the
 compiler to compact when the page is next idle (`requestIdleCallback`,
 else a timer), not in a load's frame. The compiler's memory then holds
-the live domains' ABCs, not every ABC loaded since the last collection:
-over 2000 loads of a large application's small SWFs, it rebuilt four
-times, some 64 ms each in node, and its memory stayed where compiling
-the main SWF had grown it. Each module is given only the hashes of the
-ABCs it names as linked (`domainLinked`): joining every ABC's for each
-compile grew codegen's memory to 256 MB by 7500 loads on its own.
+the live domains' ABCs, not every ABC loaded since the last collection.
+Over 8000 loads of a large application's small SWFs, none collected,
+its memory stayed at the 128 MB compiling the main SWF had grown it to,
+with no rebuild for the first 1600 loads and eleven in all, some 75 ms
+each in node; without them it grew to 256 MB some 3000 loads on, and
+to 512 MB by 8000. Each module is given only the hashes of the ABCs it
+names as linked (`domainLinked`): joining every ABC's for each compile
+had grown it to 256 MB by 7500 loads on its own.
 That a module's code keeps its Abc has a limit: emitted code reaches `A`
 only for `newclass` and `newactivation`, so a module with neither keeps
 it only through its domain's globals, its scripts' entries, and not even

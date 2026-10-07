@@ -41,7 +41,7 @@ const option = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const snapshots = option("snapshots");
-const LOADS = Number(option("loads") ?? 120);
+const LOADS = Number(option("loads") ?? 300);
 const modes = args.filter((a, i) => !a.startsWith("--") && !args[i - 1]?.startsWith("--"));
 const KINDS = 20;
 const METHODS = 150;

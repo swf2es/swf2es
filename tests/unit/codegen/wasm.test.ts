@@ -105,7 +105,13 @@ test("the wrapper evicts an application domain and revives it given its ABCs", a
   assert.equal(codegen.isLive(child), false);
   assert.throws(() => codegen.compileModule(["a", "b"], 1), /dropped/);
   assert.throws(() => codegen.childDomain(child), /dropped/);
-  // Too little to be worth a rebuild: its ABC is linked still.
+  // Too little to be worth a rebuild, with memory nowhere near growing:
+  // its ABC is linked still.
+  const usage = codegen.usage();
+  assert.ok(
+    usage.live > 0 && usage.dead > 0 && usage.memory > usage.live + usage.dead,
+    JSON.stringify(usage),
+  );
   assert.equal(codegen.compact(), false);
   codegen.reviveDomain(child, new Map());
   assert.equal(codegen.isLive(child), true);
