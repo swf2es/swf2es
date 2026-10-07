@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { avm2 } from "@swf2es/runtime";
+import type { FetchResult } from "../../../../../../packages/player/dist/hosts.js";
 import { urlStreamNatives } from "../../../../../../packages/player/dist/playerglobal/flash/net/URLStream.js";
-import type { FetchResult, Scripting } from "../../../../../../packages/player/dist/scripting.js";
+import type { Scripting } from "../../../../../../packages/player/dist/scripting.js";
 
 test("URLStream delivers fetched bytes on a frame and discards a closed request", () => {
   const events: string[] = [];

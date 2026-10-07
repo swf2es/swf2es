@@ -48,11 +48,17 @@ import {
 } from "./display/timeline.js";
 import {
   browserNavigate,
+  type Drawer,
   defaultStorage,
+  type ExternalInterfaceHost,
+  type FetchRequest,
+  type FetchResult,
   type Navigate,
   type PlatformCapabilities,
   platformCapabilities,
+  type ScreenCapabilities,
   type SharedObjectStorage,
+  type SocketHost,
 } from "./hosts.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
 import { type AudioHost, browserAudioHost, type DecodedSound } from "./media/audio.js";
@@ -64,88 +70,6 @@ import { FontSet } from "./text/fonts.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
-
-/** The host side of playerglobal's synchronous ExternalInterface protocol. */
-export interface ExternalInterfaceHost {
-  /** JavaScript source from playerglobal; the host decides whether to evaluate it. */
-  evalJS(source: string): string | null;
-  /** An XML invocation when evalJS declined the call. */
-  callOut(request: string): string | null;
-  /** A wrapper produced by playerglobal. Its arguments and result use AVM2 values. */
-  addCallback(name: string, callback: ((request: string, args: Value[]) => Value) | null): void;
-  objectID?: string | null;
-}
-
-/** Screen values reported by flash.system.Capabilities, captured when the player starts. */
-export interface ScreenCapabilities {
-  screenResolutionX: number;
-  screenResolutionY: number;
-  pixelAspectRatio: number;
-  screenDPI: number;
-}
-
-type Affine = { a: number; b: number; c: number; d: number; tx: number; ty: number };
-
-/** A renderer's part in BitmapData.draw of a display object. */
-export interface Drawer {
-  /** `o` through `m` into a w x h texture at `samples` a side, read back as premultiplied ARGB. */
-  snapshot(
-    o: DisplayObject,
-    m: Affine,
-    width: number,
-    height: number,
-    samples: number,
-  ): Uint32Array;
-  /**
-   * `o` the same, composited source over into `store` at (x, y) on the GPU,
-   * left there until read; false, having done nothing, where it cannot.
-   */
-  drawInto(
-    store: BitmapStore,
-    o: DisplayObject,
-    m: Affine,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    samples: number,
-  ): boolean;
-}
-
-/** A host request's bytes and transport result; a local file reports status 0. */
-export interface FetchResult {
-  bytes: Uint8Array | null;
-  status: number;
-  headers: readonly (readonly [name: string, value: string])[];
-  /** Set for `file:` URLs: Flash reports status 0 and leaves the URL out of #2032. */
-  local?: boolean;
-}
-
-/** The request the player asks its host to send. */
-export interface FetchRequest {
-  url: string;
-  method: string;
-  headers: readonly (readonly [name: string, value: string])[];
-  body: Uint8Array | null;
-}
-
-/** A TCP connection supplied by the embedding host. */
-export interface SocketTransport {
-  send(bytes: Uint8Array): void;
-  close(): void;
-}
-
-/** Transport notifications; the player delivers them to ActionScript on a frame. */
-export interface SocketEvents {
-  open(): void;
-  data(bytes: Uint8Array): void;
-  close(): void;
-  error(message: string): void;
-}
-
-export interface SocketHost {
-  connect(host: string, port: number, events: SocketEvents): SocketTransport;
-}
 
 /** AS3 classes placed children are instances of when SymbolClass binds none. */
 const DEFAULT_CLASS = {

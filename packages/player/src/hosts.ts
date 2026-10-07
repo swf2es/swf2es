@@ -1,7 +1,13 @@
 // What a host may give the player in place of the browser's: where a SWF's
 // navigateToURL goes, where its SharedObjects are kept, and the system
-// Capabilities reports; with the browser's defaults for each.
-import type { FetchRequest } from "./scripting.js";
+// Capabilities reports; with the browser's defaults for each. Then what
+// only a host can give, with no default here: ExternalInterface's page, a
+// renderer's draws, fetches and sockets.
+import type { avm2 } from "@swf2es/runtime";
+import type { BitmapStore } from "./bitmap/bitmap.js";
+import type { DisplayObject } from "./display/display.js";
+
+type Value = avm2.Value;
 
 /**
  * Opens the page a request asks for in the browser window or frame named,
@@ -193,4 +199,86 @@ export function platformCapabilities(): PlatformCapabilities {
   const [lang, country] = tag.split("-");
   const language = (lang === "zh" || lang === "pt") && country ? `${lang}-${country}` : lang;
   return { os, manufacturer, version: `${platform} 32,0,0,465`, language, playerType: "PlugIn" };
+}
+
+/** The host side of playerglobal's synchronous ExternalInterface protocol. */
+export interface ExternalInterfaceHost {
+  /** JavaScript source from playerglobal; the host decides whether to evaluate it. */
+  evalJS(source: string): string | null;
+  /** An XML invocation when evalJS declined the call. */
+  callOut(request: string): string | null;
+  /** A wrapper produced by playerglobal. Its arguments and result use AVM2 values. */
+  addCallback(name: string, callback: ((request: string, args: Value[]) => Value) | null): void;
+  objectID?: string | null;
+}
+
+/** Screen values reported by flash.system.Capabilities, captured when the player starts. */
+export interface ScreenCapabilities {
+  screenResolutionX: number;
+  screenResolutionY: number;
+  pixelAspectRatio: number;
+  screenDPI: number;
+}
+
+type Affine = { a: number; b: number; c: number; d: number; tx: number; ty: number };
+
+/** A renderer's part in BitmapData.draw of a display object. */
+export interface Drawer {
+  /** `o` through `m` into a w x h texture at `samples` a side, read back as premultiplied ARGB. */
+  snapshot(
+    o: DisplayObject,
+    m: Affine,
+    width: number,
+    height: number,
+    samples: number,
+  ): Uint32Array;
+  /**
+   * `o` the same, composited source over into `store` at (x, y) on the GPU,
+   * left there until read; false, having done nothing, where it cannot.
+   */
+  drawInto(
+    store: BitmapStore,
+    o: DisplayObject,
+    m: Affine,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    samples: number,
+  ): boolean;
+}
+
+/** A host request's bytes and transport result; a local file reports status 0. */
+export interface FetchResult {
+  bytes: Uint8Array | null;
+  status: number;
+  headers: readonly (readonly [name: string, value: string])[];
+  /** Set for `file:` URLs: Flash reports status 0 and leaves the URL out of #2032. */
+  local?: boolean;
+}
+
+/** The request the player asks its host to send. */
+export interface FetchRequest {
+  url: string;
+  method: string;
+  headers: readonly (readonly [name: string, value: string])[];
+  body: Uint8Array | null;
+}
+
+/** A TCP connection supplied by the embedding host. */
+export interface SocketTransport {
+  send(bytes: Uint8Array): void;
+  close(): void;
+}
+
+/** Transport notifications; the player delivers them to ActionScript on a frame. */
+export interface SocketEvents {
+  open(): void;
+  data(bytes: Uint8Array): void;
+  close(): void;
+  error(message: string): void;
+}
+
+export interface SocketHost {
+  connect(host: string, port: number, events: SocketEvents): SocketTransport;
 }

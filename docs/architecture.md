@@ -804,7 +804,9 @@ and the player's paths in this document are relative to it:
   `scripting/events.ts` dispatches events to AS3 listeners, `hosts.ts`
   holds what a host may supply in place of the browser (navigation,
   shared objects' storage, the platform Capabilities reports) with the
-  browser's defaults, and `sha256.ts` names the ABCs it compiles.
+  browser's defaults, and the interfaces of what only a host supplies
+  (ExternalInterface's page, a renderer's draws, fetches, sockets), and
+  `sha256.ts` names the ABCs it compiles.
 - `display/`: the display list and the timeline, and what they are made
   of: shapes, morphs, drawings, bounds and hit tests, 9-slice scaling,
   geometry, 3D matrices, colour transforms, gradients' ramps, and filters
