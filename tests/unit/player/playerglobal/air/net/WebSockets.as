@@ -5,6 +5,7 @@ package {
   import air.net.WebSocket;
   import flash.display.Sprite;
   import flash.events.Event;
+  import flash.events.EventDispatcher;
   import flash.events.WebSocketEvent;
   import flash.net.Socket;
   import flash.utils.ByteArray;
@@ -70,8 +71,25 @@ package {
       });
     }
 
+    // AIR's WebSocketEvent has no clone of its own: Event's makes a plain
+    // Event, so a redispatched one is no WebSocketEvent, in adl as here.
+    private function redispatch():void {
+      var b:ByteArray = new ByteArray();
+      b.writeUTFBytes("hi");
+      var e:WebSocketEvent = new WebSocketEvent(WebSocketEvent.DATA, WebSocket.fmtTEXT, b);
+      var c:Event = e.clone();
+      trace("clone " + getQualifiedClassName(c) + " " + (c is WebSocketEvent) + " " + c);
+      var d:EventDispatcher = new EventDispatcher();
+      d.addEventListener(WebSocketEvent.DATA, function(x:Event):void {
+        trace("heard " + getQualifiedClassName(x) + " " + (x === e));
+      });
+      d.dispatchEvent(e);
+      d.dispatchEvent(e);
+    }
+
     private function calls():void {
       trace([WebSocket.fmtTEXT, WebSocket.fmtBINARY, WebSocket.fmtCLOSE, WebSocket.fmtPING, WebSocket.fmtPONG], WebSocketEvent.DATA);
+      redispatch();
       var w:WebSocket = fresh("a");
       trace("closeReason " + w.closeReason + " protocol " + w.protocol);
       // Both crash adl, as AIR has no socket for them yet.
@@ -106,6 +124,9 @@ package {
       t("text", function():* { w.sendMessage(WebSocket.fmtTEXT, "héllo"); });
       t("binary", function():* { w.sendMessage(WebSocket.fmtBINARY, b); return b.position; });
       t("text of bytes", function():* { w.sendMessage(WebSocket.fmtTEXT, b); });
+      var bom:ByteArray = new ByteArray();
+      bom.writeUTFBytes("\ufeffbom");
+      t("text of bytes with a BOM", function():* { w.sendMessage(WebSocket.fmtTEXT, bom); });
       t("binary of a string", function():* { w.sendMessage(WebSocket.fmtBINARY, "str"); });
       t("number", function():* { w.sendMessage(WebSocket.fmtTEXT, 42); });
       t("null", function():* { w.sendMessage(WebSocket.fmtBINARY, null); });

@@ -90,6 +90,9 @@ test("air.net.WebSocket connects, sends, receives and closes as adl does", { ski
     // cannot do as AIR does, and AIR's faults, which the player leaves out.
     assert.deepEqual(lines, [
       "1,2,8,9,10 websocketData",
+      'clone flash.events::Event false [Event type="websocketData" bubbles=false cancelable=false eventPhase=2]',
+      "heard flash.events::WebSocketEvent true",
+      "heard flash.events::Event false",
       "closeReason -1 protocol null",
       // adl crashes.
       "send before connect: flash.errors::IOError 2002 Error #2002: Operation attempted on invalid socket.",
@@ -111,6 +114,7 @@ test("air.net.WebSocket connects, sends, receives and closes as adl does", { ski
       "text: ok",
       "binary: ok 2",
       "text of bytes: ok",
+      "text of bytes with a BOM: ok",
       "binary of a string: ok",
       "number: ArgumentError 1508 Error #1508: The value specified for argument data is invalid.",
       "null: ArgumentError 1508 Error #1508: The value specified for argument data is invalid.",
@@ -124,6 +128,8 @@ test("air.net.WebSocket connects, sends, receives and closes as adl does", { ski
         "format=1 length=6 string=h\u00e9llo",
         "format=2 length=5 string=null",
         "format=1 length=5 string=bin\u00e9",
+        // adl's has the BOM's three bytes, which a browser's WebSocket drops as it decodes.
+        "format=1 length=3 string=bom",
         "format=2 length=3 string=null",
         "format=1 length=4 string=high",
         "format=1 length=5 string=split",
@@ -189,6 +195,7 @@ test("air.net.WebSocket connects, sends, receives and closes as adl does", { ski
       text("h\u00e9llo"),
       [2, new TextEncoder().encode("bin\u00e9")],
       text("bin\u00e9"),
+      text("\ufeffbom"),
       [2, new TextEncoder().encode("str")],
       text("high"),
       text("split"),
