@@ -12,6 +12,11 @@
 // tree whose root is domain 0. An ABC sees what its own domain and its
 // ancestors define: what one of them has found before, as the runtime
 // reports it (see addFound), else the first definition from the root down.
+// A domain the runtime let go of is dropped with its descendants, and one
+// the host has no more use for now evicted, until it gives its ABCs again:
+// nothing sees what their ABCs define, and once enough of them are let go
+// of, the live ABCs are linked again into a new Domain, which leaves the
+// others' tables, names included, to the collector (see rebuilt).
 //
 // Namespaces follow avmplus' AbcParser: two are the same if their kind and
 // URI are; a private namespace is only ever equal to itself. A URI may end
@@ -24,6 +29,7 @@
 // later version. User ABCs' public namespaces get the domain's version, so
 // they cannot see VM-internal names.
 import { Abc } from "../abc/abc";
+import { verifyMethods } from "../abc/code";
 import * as C from "../abc/constants";
 import { readAbc } from "../abc/parse";
 import { hashBytes, hashPair, IdTable } from "./table";
@@ -81,6 +87,43 @@ const API_MinMark: u32 = 0xe294;
 /** The URI of a namespace written with string index 0. */
 export const URI_None: u32 = 0xffffffff;
 
+/**
+ * An application domain's state: live; evicted, let go of until the host
+ * gives its ABCs again (see Domain.evict); or dropped for good.
+ */
+export const DOMAIN_Live: u8 = 0;
+export const DOMAIN_Evicted: u8 = 1;
+export const DOMAIN_Dropped: u8 = 2;
+
+/** The kinds of the log's entries (see Domain.logKind). */
+export const LOG_None: u8 = 0;
+/** A finding, by its index in the found tables. */
+export const LOG_Found: u8 = 1;
+/** Traits resolved, by their kind and owner in their ABC. */
+export const LOG_Resolve: u8 = 2;
+/** A method signed, by its index in its ABC. */
+export const LOG_Sign: u8 = 3;
+/** An ABC verified for the first time, or finding scopes for the first time. */
+export const LOG_Verify: u8 = 4;
+
+/** What a log entry kept for an evicted domain weighs. */
+const KEPT_Weight: u64 = 36;
+
+/** The weight of dead ABCs below which a rebuild is not worth it. */
+const DEAD_Floor: u64 = 4 << 20;
+
+/** Whether tables of `weight`, with what its estimate misses, come within `reserve` of `size`. */
+function full(weight: u64, reserve: u64, size: u64): bool {
+  return weight + (weight >> 2) + (weight >> 3) + reserve >= size;
+}
+
+/** What takes the place of an ABC let go of in a rebuilt Domain (see vacate). */
+const NO_ABC = new Abc();
+const NO_BYTES = new StaticArray<u8>(0);
+const NO_IDS = new StaticArray<u32>(0);
+const NO_VERSIONS = new StaticArray<u8>(0);
+const NO_TRAITS = new StaticArray<i32>(0);
+
 @final
 export class Domain {
   /** The version of user ABCs' public namespaces. */
@@ -96,6 +139,8 @@ export class Domain {
    * rejected while linking: interned strings may point into any of them.
    */
   buffers: StaticArray<u8>[] = [];
+  /** Each ABC's bytes, by index, to link it again (see rebuilt). */
+  abcBuffer: StaticArray<u8>[] = [];
   /** Per ABC, the interned id of each pool string, and of each namespace and its version. */
   abcString: StaticArray<u32>[] = [];
   abcNs: StaticArray<u32>[] = [];
@@ -178,6 +223,8 @@ export class Domain {
   /** Each domain's parent, -1 for the root, and its depth. */
   domainParent: i32[] = [-1];
   domainDepth: u32[] = [0];
+  /** Each domain's DOMAIN_ state: nothing sees what the ABCs of one not live define. */
+  domainState: u8[] = [DOMAIN_Live];
   /** The domain of each ABC, and of each class name. */
   abcDomain: u32[] = [];
   typeDomain: u32[] = [];
@@ -193,6 +240,39 @@ export class Domain {
   cachedBinding: i32[] = [];
   cachedClass: i32[] = [];
   cached: IdTable = new IdTable();
+  /** Each finding addFound recorded, as the runtime reported it (see LOG_Found). */
+  foundDomain: u32[] = [];
+  foundKind: u8[] = [];
+  foundUri: string[] = [];
+  foundName: string[] = [];
+  foundAbc: u32[] = [];
+  foundAsType: u8[] = [];
+  /**
+   * What the domain's tables hold that depends on when it happened, in the
+   * order it happened, and how many ABCs there were then, for a rebuild to
+   * do again at that point: a finding recorded, and the first answers
+   * cached of what resolves lazily, a traits' types, a method's signature
+   * and an ABC's verified scopes, which see the ABCs there are when they
+   * are first asked for. A LOG_ kind, the ABC it is of, and two numbers
+   * by kind (see logged).
+   */
+  logKind: u8[] = [];
+  logAt: u32[] = [];
+  logAbc: u32[] = [];
+  logA: u32[] = [];
+  logB: u32[] = [];
+  /** Scopes, function scopes and catch scopes found first, for verifyMethods to tell whether it found any. */
+  captures: u32 = 0;
+  /** Each ABC verified at least once, by index. */
+  abcVerified: u8[] = [];
+  /**
+   * How much each ABC holds of the domain's memory, roughly, by index: its
+   * bytes, and the rows of the tables it added (see weigh).
+   */
+  abcWeight: u32[] = [];
+  /** How many rebuilds the domain is from the one reset made; each domain's when it was evicted. */
+  generation: u32 = 0;
+  domainEvicted: u32[] = [0];
   /** Strings interned from text rather than an ABC, kept for their bytes. */
   texts: ArrayBuffer[] = [];
 
@@ -245,17 +325,29 @@ export class Domain {
    * and the rest PADDING. Returns the ABC; check its `error`.
    */
   add(buffer: StaticArray<u8>, length: u32, builtin: bool, domain: u32 = 0): Abc {
-    const base = changetype<usize>(buffer);
-    const abc = readAbc(base, length, builtin);
+    const abc = readAbc(changetype<usize>(buffer), length, builtin);
     if (abc.error) {
       return abc;
     }
 
+    this.buffers.push(buffer);
+    this.attach(abc, buffer, domain);
+    return abc;
+  }
+
+  /**
+   * Link `abc`, parsed from `buffer`, into application domain `domain`, as
+   * the next ABC; false after recording the error, and then it is not added.
+   */
+  attach(abc: Abc, buffer: StaticArray<u8>, domain: u32): bool {
+    const base = changetype<usize>(buffer);
     const index = <u32>this.abcs.length;
+    const rows = this.rows();
     this.abcs.push(abc);
     this.abcDomain.push(domain);
     this.abcBase.push(base);
-    this.buffers.push(buffer);
+    this.abcBuffer.push(buffer);
+    this.abcVerified.push(0);
     this.loads++;
     this.abcOwner.push(this.loads);
     const methodCount = <u32>this.traits.methodTraits.length;
@@ -278,6 +370,8 @@ export class Domain {
     if (!this.link(index)) {
       this.abcs.pop();
       this.abcBase.pop();
+      this.abcBuffer.pop();
+      this.abcVerified.pop();
       this.abcString.pop();
       this.abcNs.pop();
       this.abcNsVersion.pop();
@@ -291,12 +385,444 @@ export class Domain {
       this.traits.truncate(traitsCount);
       this.traits.truncateMethods(methodCount);
       this.clearBindingMemo();
-      return abc;
+      return false;
     }
 
     this.addClassNames(index);
     this.addBindings(index);
-    return abc;
+    // The bytes three times: a copy, and the tables parsing made of them.
+    this.abcWeight.push(<u32>min<u64>(3 * <u64>abc.length + this.rows() - rows, 0xffffffff));
+    return true;
+  }
+
+  /**
+   * Roughly the bytes the domain's tables hold, by their rows, for
+   * weighing ABCs: what an ABC's link or compile adds is its own. Within a
+   * fifth or so of what a walk of the heap found, for the libraries, a
+   * large application and the small SWFs it loads.
+   */
+  rows(): u64 {
+    const t = this.traits;
+    return (
+      <u64>t.kind.length * 144 +
+      <u64>t.methodTraits.length * 72 +
+      <u64>t.memberTraits.length * 60 +
+      <u64>(t.slotType.length + t.dispatch.length + t.paramType.length + t.interfaceList.length) *
+        9 +
+      <u64>this.memoType.length * 60 +
+      <u64>this.stringPtr.length * 36 +
+      <u64>this.nsType.length * 24 +
+      <u64>(this.bindingNs.length + this.typeNs.length + this.classAbc.length) * 48 +
+      <u64>this.logKind.length * 36
+    );
+  }
+
+  /** Count what the domain's tables gained since they held `rows` as ABC `index`'s. */
+  weigh(index: u32, rows: u64): void {
+    const now = this.rows();
+    if (now > rows && index < <u32>this.abcWeight.length) {
+      this.abcWeight[index] = <u32>min<u64>(<u64>this.abcWeight[index] + now - rows, 0xffffffff);
+    }
+  }
+
+  /**
+   * Take the place of an ABC of an application domain not live, with
+   * nothing in it, so that the ABCs after it keep their indices.
+   */
+  vacate(domain: u32): void {
+    this.abcs.push(NO_ABC);
+    this.abcDomain.push(domain);
+    this.abcBase.push(0);
+    this.abcBuffer.push(NO_BYTES);
+    this.abcVerified.push(0);
+    this.abcWeight.push(0);
+    this.loads++;
+    this.abcOwner.push(this.loads);
+    this.methodStart.push(<u32>this.traits.methodTraits.length);
+    this.abcString.push(NO_IDS);
+    this.abcNs.push(NO_IDS);
+    this.abcNsVersion.push(NO_VERSIONS);
+    this.classStart.push(<u32>this.classAbc.length);
+    this.scriptTraits.push(NO_IDS);
+    this.bodyTraits.push(NO_TRAITS);
+  }
+
+  /** Whether ABC `index` is of a live application domain, one neither evicted nor dropped. */
+  isLive(index: u32): bool {
+    return this.domainState[this.abcDomain[index]] === DOMAIN_Live;
+  }
+
+  /**
+   * Drop application domain `domain` and its descendants, as the runtime
+   * lets go of them: what their ABCs define is seen by no domain from now
+   * on, and they take no more ABCs. The root is never dropped.
+   */
+  drop(domain: u32): void {
+    this.leave(domain, DOMAIN_Dropped);
+  }
+
+  /**
+   * Evict application domain `domain` and its live descendants: as
+   * dropped, until revive, given their ABCs again, links them back.
+   */
+  evict(domain: u32): void {
+    if (domain < <u32>this.domainState.length && this.domainState[domain] === DOMAIN_Live) {
+      this.leave(domain, DOMAIN_Evicted);
+    }
+  }
+
+  /** Put `domain` and its descendants in `state`, unless dropped already; never the root. */
+  leave(domain: u32, state: u8): void {
+    const count = <u32>this.domainParent.length;
+    if (domain === 0 || domain >= count || this.domainState[domain] === DOMAIN_Dropped) {
+      return;
+    }
+
+    // A child is made after its parent, so its number is higher.
+    this.domainState[domain] = state;
+    this.domainEvicted[domain] = this.generation;
+    for (let d = domain + 1; d < count; d++) {
+      const parent = this.domainState[<u32>this.domainParent[d]];
+      if (parent !== DOMAIN_Live && this.domainState[d] < parent) {
+        if (this.domainState[d] === DOMAIN_Live) {
+          this.domainEvicted[d] = this.generation;
+        }
+
+        this.domainState[d] = parent;
+      }
+    }
+  }
+
+  /**
+   * Give ABC `index`, of an evicted application domain, its bytes again,
+   * if a rebuild has let go of them, for revive to link it: 0, the
+   * VerifyError they were rejected with, or -1 if they are not the ABC's.
+   */
+  restore(index: u32, buffer: StaticArray<u8>, length: u32): i32 {
+    if (
+      index >= <u32>this.abcs.length ||
+      this.domainState[this.abcDomain[index]] !== DOMAIN_Evicted
+    ) {
+      return -1;
+    }
+
+    if (this.abcs[index] !== NO_ABC) {
+      return 0;
+    }
+
+    const abc = readAbc(changetype<usize>(buffer), length, false);
+    if (abc.error) {
+      return abc.error;
+    }
+
+    this.abcs[index] = abc;
+    this.abcBase[index] = changetype<usize>(buffer);
+    this.abcBuffer[index] = buffer;
+    this.abcWeight[index] = <u32>min<u64>(3 * <u64>length, 0xffffffff);
+    return 0;
+  }
+
+  /**
+   * Make evicted application domain `domain` live again, with its evicted
+   * ancestors, the first of them a child of a live one: 0 if their ABCs
+   * and findings are in the tables still, as no rebuild has been since
+   * any was evicted, 1 if a rebuild must link them again, and -1, leaving
+   * them evicted, if they cannot be: `domain` is not evicted, the first
+   * evicted ancestor's parent is not live, or an ABC of theirs that a
+   * rebuild let go of was not restored.
+   */
+  revive(domain: u32): i32 {
+    if (
+      domain === 0 ||
+      domain >= <u32>this.domainState.length ||
+      this.domainState[domain] !== DOMAIN_Evicted
+    ) {
+      return -1;
+    }
+
+    let top = domain;
+    while (this.domainState[<u32>this.domainParent[top]] === DOMAIN_Evicted) {
+      top = <u32>this.domainParent[top];
+    }
+
+    if (this.domainState[<u32>this.domainParent[top]] !== DOMAIN_Live) {
+      return -1;
+    }
+
+    for (let i = 0; i < this.abcs.length; i++) {
+      if (this.abcs[i] === NO_ABC && this.inChain(this.abcDomain[i], top, domain)) {
+        return -1;
+      }
+    }
+
+    let stale = false;
+    for (let d = domain; ; d = <u32>this.domainParent[d]) {
+      stale = stale || this.domainEvicted[d] !== this.generation;
+      this.domainState[d] = DOMAIN_Live;
+      if (d === top) {
+        break;
+      }
+    }
+
+    return stale ? 1 : 0;
+  }
+
+  /** Make `domain` and its ancestors up to `top` evicted again, as revive found them. */
+  unrevive(domain: u32, top: u32): void {
+    for (let d = domain; ; d = <u32>this.domainParent[d]) {
+      this.domainState[d] = DOMAIN_Evicted;
+      if (d === top) {
+        break;
+      }
+    }
+  }
+
+  /** The first evicted ancestor of `domain` from the root down, or `domain` itself. */
+  evictedTop(domain: u32): u32 {
+    let top = domain;
+    while (this.domainState[<u32>this.domainParent[top]] === DOMAIN_Evicted) {
+      top = <u32>this.domainParent[top];
+    }
+
+    return top;
+  }
+
+  /** Whether `d` is `bottom` or one of its ancestors up to `top`. */
+  inChain(d: u32, top: u32, bottom: u32): bool {
+    let x = bottom;
+    while (x !== d && x !== top) {
+      x = <u32>this.domainParent[x];
+    }
+
+    return x === d;
+  }
+
+  /**
+   * Whether a rebuild, which links every live ABC again and does again
+   * what resolved lazily, would keep memory from growing: the tables, by
+   * the ABCs' weight with three eighths more for what the estimate misses, have
+   * come within a reserve of wasm memory's size, and the ABCs of domains
+   * not live weigh DEAD_Floor and enough that the live ones alone are not.
+   * The reserve is what a compile's garbage may take between collections,
+   * which grows with the ABCs compiled: 16 times the weight of the last 16
+   * added, a sixteenth to a half of memory; and what the rebuild itself
+   * takes, twice the live tables. wasm memory never shrinks, so
+   * a rebuild before that reclaims nothing it would grow for, and one that
+   * could not get below is no use.
+   */
+  wantsRebuild(): bool {
+    this.addWeights();
+    const size = (<u64>memory.size()) << 16;
+    let recent: u64 = 0;
+    const count = this.abcWeight.length;
+    for (let i = max(0, count - 16); i < count; i++) {
+      recent += this.abcWeight[i];
+    }
+
+    const reserve = min(size >> 1, max(size >> 4, recent << 4));
+    // A rebuild makes the live tables anew, and as much again in garbage
+    // as they grow, while the old are there still.
+    const live = this.liveWeight + this.keptWeight;
+    const rebuilding = 2 * (live + (live >> 2) + (live >> 3));
+    return (
+      full(live + this.deadWeight, reserve + rebuilding, size) &&
+      this.deadWeight >= DEAD_Floor &&
+      !full(live, reserve, size)
+    );
+  }
+
+  /** The live ABCs' weight and the others' still in the tables, as addWeights last added them up. */
+  liveWeight: u64 = 0;
+  deadWeight: u64 = 0;
+  /** The weight of the log entries kept for evicted domains, which no rebuild frees. */
+  keptWeight: u64 = 0;
+
+  /** Add up liveWeight and deadWeight. */
+  addWeights(): void {
+    let dead: u64 = 0;
+    let live: u64 = 0;
+    for (let i = 0; i < this.abcs.length; i++) {
+      if (this.abcs[i] === NO_ABC) {
+        continue;
+      }
+
+      if (this.isLive(<u32>i)) {
+        live += this.abcWeight[i];
+      } else {
+        dead += this.abcWeight[i];
+      }
+    }
+
+    this.liveWeight = live;
+    this.deadWeight = dead;
+  }
+
+  /** Append entry `kind` of ABC `abc` to the log. */
+  logged(kind: u8, abc: u32, a: u32, b: u32): void {
+    this.logKind.push(kind);
+    this.logAt.push(<u32>this.abcs.length);
+    this.logAbc.push(abc);
+    this.logA.push(a);
+    this.logB.push(b);
+  }
+
+  /** Log that traits t resolved, unless they are made on demand, which no lookup decides. */
+  loggedResolve(t: u32): void {
+    const traits = this.traits;
+    const kind = traits.kind[t];
+    if (kind >= TRAITS_Instance && kind <= TRAITS_Activation && traits.param[t] === TYPE_Any) {
+      this.logged(LOG_Resolve, traits.abc[t], kind, traits.owner[t]);
+    }
+  }
+
+  /** The traits of ABC `abc` of `kind` and `owner`, as loggedResolve logged them, or -1. */
+  traitsOf(abc: u32, kind: u32, owner: u32): i32 {
+    if (kind === TRAITS_Instance) {
+      return this.classTraits[this.classStart[abc] + owner];
+    }
+
+    if (kind === TRAITS_Class) {
+      return this.classStatic[this.classStart[abc] + owner];
+    }
+
+    if (kind === TRAITS_Script) {
+      return <i32>this.scriptTraits[abc][owner];
+    }
+
+    return this.bodyTraits[abc][owner];
+  }
+
+  /**
+   * A new Domain with the live ABCs linked again, in the same order and
+   * at the same indices, and the log done again where it happened: each
+   * finding of a live domain recorded, and each lazy answer about a live
+   * ABC asked for again, with the same ABCs there as when it was first
+   * asked, so it is the same; an evicted domain's entries are kept for its
+   * revival. Nothing of the other ABCs is left in it, not even a name only
+   * they spelled. Each live ABC links as it did, since no ABC let go of was
+   * seen by a live one, and what a method compiles to depends only on the
+   * ABCs its domain sees and on those answers, so it compiles alike. Null,
+   * leaving this one as it was, if an ABC does not link again or an answer
+   * comes out an error, which would be a bug.
+   */
+  rebuilt(): Domain | null {
+    const fresh = new Domain();
+    fresh.apiVersion = this.apiVersion;
+    fresh.air = this.air;
+    fresh.domainParent = this.domainParent;
+    fresh.domainDepth = this.domainDepth;
+    fresh.domainState = this.domainState;
+    fresh.domainEvicted = this.domainEvicted;
+    fresh.generation = this.generation + 1;
+    const count = <u32>this.abcs.length;
+    let next: u32 = 0;
+    for (let e = 0; e <= this.logKind.length; e++) {
+      const at = e < this.logKind.length ? this.logAt[e] : count;
+      for (; next < at; next++) {
+        if (!this.reattach(fresh, next)) {
+          return null;
+        }
+      }
+
+      if (e === this.logKind.length) {
+        break;
+      }
+
+      const kind = this.logKind[e];
+      const abc = this.logAbc[e];
+      const state =
+        kind === LOG_Found
+          ? max(
+              this.domainState[this.foundDomain[this.logA[e]]],
+              this.domainState[this.abcDomain[abc]],
+            )
+          : this.domainState[this.abcDomain[abc]];
+      if (kind === LOG_None || state === DOMAIN_Dropped) {
+        continue;
+      }
+
+      if (state === DOMAIN_Evicted || this.abcs[abc] === NO_ABC) {
+        fresh.keepEntry(this, e);
+        continue;
+      }
+
+      if (!fresh.replay(this, e)) {
+        return null;
+      }
+    }
+
+    return fresh;
+  }
+
+  /** Link ABC `index` of `this` again as `fresh`'s next, or keep its place if it is not live: false if it does not link. */
+  reattach(fresh: Domain, index: u32): bool {
+    const abc = this.abcs[index];
+    if (abc === NO_ABC || !this.isLive(index)) {
+      fresh.vacate(this.abcDomain[index]);
+      return true;
+    }
+
+    const buffer = this.abcBuffer[index];
+    fresh.buffers.push(buffer);
+    if (!fresh.attach(abc, buffer, this.abcDomain[index])) {
+      abc.error = 0;
+      return false;
+    }
+
+    // Its weight counts what compiling it added too.
+    fresh.abcWeight[index] = max(fresh.abcWeight[index], this.abcWeight[index]);
+    return true;
+  }
+
+  /** Do entry `e` of `from`'s log again, its ABC linked: false if it comes out an error. */
+  replay(from: Domain, e: i32): bool {
+    const kind = from.logKind[e];
+    const abc = from.logAbc[e];
+    if (kind === LOG_Found) {
+      const f = from.logA[e];
+      this.addFound(
+        from.foundDomain[f],
+        from.foundKind[f],
+        from.foundUri[f],
+        from.foundName[f],
+        from.foundAbc[f],
+        from.foundAsType[f] !== 0,
+      );
+      return true;
+    }
+
+    if (kind === LOG_Resolve) {
+      const t = this.traitsOf(abc, from.logA[e], from.logB[e]);
+      return t >= 0 && this.traits.resolve(this, <u32>t) === 0;
+    }
+
+    if (kind === LOG_Sign) {
+      return this.traits.sign(this, this.methodStart[abc] + from.logB[e]) === 0;
+    }
+
+    verifyMethods(this, abc);
+    return true;
+  }
+
+  /** Keep entry `e` of `from`'s log, not done, for when its domain is revived. */
+  keepEntry(from: Domain, e: i32): void {
+    let a = from.logA[e];
+    if (from.logKind[e] === LOG_Found) {
+      a = <u32>this.foundDomain.length;
+      this.foundDomain.push(from.foundDomain[from.logA[e]]);
+      this.foundKind.push(from.foundKind[from.logA[e]]);
+      this.foundUri.push(from.foundUri[from.logA[e]]);
+      this.foundName.push(from.foundName[from.logA[e]]);
+      this.foundAbc.push(from.foundAbc[from.logA[e]]);
+      this.foundAsType.push(from.foundAsType[from.logA[e]]);
+    }
+
+    this.keptWeight += KEPT_Weight;
+    this.logKind.push(from.logKind[e]);
+    this.logAt.push(from.logAt[e]);
+    this.logAbc.push(from.logAbc[e]);
+    this.logA.push(a);
+    this.logB.push(from.logB[e]);
   }
 
   /** Link ABC `index`'s classes to their bases and interfaces; false after recording the error. */
@@ -877,6 +1403,7 @@ export class Domain {
     traits.dispatchStart[t] = traits.dispatch.length;
     traits.resolved[t] = 1;
     this.catchScopes.set(key, <i32>t);
+    this.captures++;
     return <i32>t;
   }
 
@@ -1560,11 +2087,17 @@ export class Domain {
     const id = <u32>this.domainParent.length;
     this.domainParent.push(<i32>parent);
     this.domainDepth.push(this.domainDepth[parent] + 1);
+    this.domainState.push(DOMAIN_Live);
+    this.domainEvicted.push(0);
     return id;
   }
 
-  /** Whether `domain` sees what `other` defines: `other` is it or an ancestor. */
+  /** Whether `domain` sees what `other` defines: `other` is it or an ancestor, and live. */
   sees(domain: u32, other: u32): bool {
+    if (this.domainState[other] !== DOMAIN_Live) {
+      return false;
+    }
+
     let d = <i32>domain;
     while (d >= 0) {
       if (<u32>d === other) {
@@ -1677,6 +2210,15 @@ export class Domain {
    * binding, or as a type, its class. A name no ABC spells is not recorded.
    */
   addFound(domain: u32, type: u8, uri: string, name: string, abc: u32, asType: bool): void {
+    if (
+      domain >= <u32>this.domainParent.length ||
+      this.domainState[domain] !== DOMAIN_Live ||
+      abc >= <u32>this.abcs.length ||
+      !this.isLive(abc)
+    ) {
+      return;
+    }
+
     const uriId = this.findText(uri);
     const nameId = this.findText(name);
     const ns = uriId < 0 ? -1 : this.findNamespace(type, <u32>uriId);
@@ -1747,6 +2289,13 @@ export class Domain {
     this.cachedClass.push(cls);
     this.cached.insert(hashPair(<u32>ns, <u32>nameId), id);
     this.clearBindingMemo();
+    this.logged(LOG_Found, abc, <u32>this.foundDomain.length, 0);
+    this.foundDomain.push(domain);
+    this.foundKind.push(type);
+    this.foundUri.push(uri);
+    this.foundName.push(name);
+    this.foundAbc.push(abc);
+    this.foundAsType.push(asType ? 1 : 0);
   }
 
   bind(ns: u32, name: u32, version: u8, abc: u32, script: u32, trait: u32): void {

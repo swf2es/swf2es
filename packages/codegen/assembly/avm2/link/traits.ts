@@ -10,7 +10,7 @@
 //
 // A type is a traits id, or TYPE_Any for *.
 import * as C from "../abc/constants";
-import { API_Internal, Domain } from "./domain";
+import { API_Internal, Domain, LOG_Sign } from "./domain";
 import { hashPair, IdTable } from "./table";
 
 export const TRAITS_Instance: u8 = 1;
@@ -736,6 +736,7 @@ export class TraitsTable {
     }
 
     this.resolved[t] = 1;
+    domain.loggedResolve(t);
     return 0;
   }
 
@@ -953,6 +954,7 @@ export class TraitsTable {
     this.paramCount[m] = count;
     this.optionalCount[m] = optionalCount;
     this.signed[m] = 1;
+    domain.logged(LOG_Sign, index, 0, local);
     return 0;
   }
 

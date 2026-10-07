@@ -17,7 +17,7 @@
 // A BodyDecoder is made once per ABC and reused for every body: its scratch
 // buffers and its output only grow, so decoding allocates nothing per body.
 import { IR_CheckNull, IR_Coerce, Ir } from "../ir/ir";
-import { Domain } from "../link/domain";
+import { Domain, LOG_None, LOG_Verify } from "../link/domain";
 import { Scope, TYPE_Any } from "../link/traits";
 import { BIND_Ambiguous, canAssign, commonBase, isNumeric } from "../link/types";
 import { Abc } from "./abc";
@@ -1984,6 +1984,7 @@ export class BodyDecoder {
     }
 
     traits.functionScope[global] = scope;
+    domain.captures++;
     this.captured.push(global);
     return true;
   }
@@ -2024,6 +2025,7 @@ export class BodyDecoder {
     } else {
       traits.scope[ctraits] = cscope;
       traits.scope[itraits] = iscope;
+      domain.captures++;
     }
 
     domain.methodsOf(<u32>ctraits, this.captured);
@@ -2147,6 +2149,31 @@ export function nameParts(pool: ConstantPool, index: u32): u8 {
  * VerifyError, 0 if it verified, or -1 if nothing could run it.
  */
 export function verifyMethods(domain: Domain, index: u32): StaticArray<i32> {
+  // Logged before what it resolves, as what it captures is a function's
+  // scope before its signature (see Domain.logKind); kept if it is the
+  // ABC's first, or finds a scope the first did not.
+  const first = domain.abcVerified[index] === 0;
+  domain.abcVerified[index] = 1;
+  const entry = domain.logKind.length;
+  const captures = domain.captures;
+  domain.logged(LOG_Verify, index, 0, 0);
+  const results = verifyAll(domain, index);
+  if (!first && domain.captures === captures) {
+    if (domain.logKind.length === entry + 1) {
+      domain.logKind.length = entry;
+      domain.logAt.length = entry;
+      domain.logAbc.length = entry;
+      domain.logA.length = entry;
+      domain.logB.length = entry;
+    } else {
+      domain.logKind[entry] = LOG_None;
+    }
+  }
+
+  return results;
+}
+
+function verifyAll(domain: Domain, index: u32): StaticArray<i32> {
   const abc = domain.abcs[index];
   const traits = domain.traits;
   const results = new StaticArray<i32>(abc.bodyCount);

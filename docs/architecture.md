@@ -18,7 +18,9 @@ calls (see [benchmarks.md](benchmarks.md#the-assemblyscript-runtime)).
 The wrapper's `Codegen` (`createCodegen` in `packages/codegen/src`) is the
 compiler's whole API: `reset` starts a domain, `add` links an ABC into it
 after those before, into one of its application domains (`childDomain`
-makes one, `found` records what one has found, see Linking), and the last
+makes one, `found` records what one has found, `dropDomain` lets one go,
+`evictDomain` and `reviveDomain` for a while, `compact` reuses what they
+took, see Linking), and the last
 one added compiles with `compile`, whole,
 to its module, source map and the entry of each method, with
 `compileModule` to its module alone, or with `compileMethods`, a method at
@@ -126,6 +128,34 @@ three, with the same VerifyError numbers:
    slot types, method signatures, and the override and interface checks
    that compare them. A type is the id of a traits, including void and
    null, or `*`.
+   An application domain the runtime has let go of is dropped with its
+   descendants (`dropDomain`), and one the host has no use for now, as
+   once its ABCs are compiled, is evicted with them (`evictDomain`): no
+   other sees their ABCs, which compile no more and keep their indices.
+   `compact` rebuilds the domain only when that keeps codegen's memory
+   from growing: when the tables, by an estimate from their rows, with
+   what a compile's garbage and the rebuild itself take, come near
+   memory's size, and those ABCs weigh 4 MB and enough to bring them
+   back below. Before that a rebuild would reclaim nothing that matters,
+   as wasm memory never shrinks. `usage` tells the estimate, and
+   `compact` asks the same before it collects and rebuilds; a host calls
+   it when it has time, as the player does when idle. A rebuild
+   links the live ABCs again, in their places, and does again, where it
+   happened, what the domain has logged: each finding recorded, and the
+   first answer to what resolves lazily, a traits' types, a method's
+   signature, an ABC's first verification and the scopes it finds. Those
+   see the ABCs there were when first asked; an ancestor may define the
+   same name since, which a lookup would find now. So a live ABC links,
+   resolves and compiles as it did, since no ABC let go of was ever seen
+   by it, and the collector frees all the others took, the names only
+   they spelled included: wasm memory never shrinks, but what was freed
+   is used again. A rebuild of a large application's domain takes tens of
+   milliseconds, its first verifications most. An evicted domain is
+   revived (`reviveDomain`) with its evicted ancestors, the first a child
+   of a live domain, given their ABCs again if a rebuild let go of them:
+   one rebuild links them in their places, their log done again with
+   them. `reset` counts an epoch, which `dropDomain` checks, so that a
+   drop meant for a domain of before a reset does nothing.
 3. **Verifying a method**, when it is first compiled: its signature's types
    and its bytecode.
 
@@ -1227,7 +1257,26 @@ refers to it. What the player keeps of a loaded SWF beside the SWF
 itself, the domain and origin of each module's script for the stack,
 its symbols and its fonts for those registered later, it keeps
 weakly, so that the SWF, its code included, goes with its last object
-(some 300 KB a load of a small SWF stayed otherwise).
+(some 300 KB a load of a small SWF stayed otherwise). Once a runtime
+domain is collected, which its descendants' keep from happening while
+they live, the compiler drops its application domain (see Linking), and
+`Code` its ABCs' hashes and the findings it told the compiler. A
+collection may come hundreds of loads later, so `Code` evicts a loaded
+SWF's domain from the compiler as soon as its ABCs are compiled, unless
+a link is in progress in it or under it, and keeps their bytes to revive
+it, with its evicted ancestors, when a SWF is loaded into it or under it;
+a domain revived stays, as one loaded into again, and the root's and the
+main SWF's are never evicted. After a drop or an eviction it asks the
+compiler to compact when the page is next idle (`requestIdleCallback`,
+else a timer), not in a load's frame. The compiler's memory then holds
+the live domains' ABCs, not every ABC loaded since the last collection.
+Over 8000 loads of a large application's small SWFs, none collected,
+its memory stayed at the 128 MB compiling the main SWF had grown it to,
+with no rebuild for the first 1600 loads and eleven in all, some 75 ms
+each in node; without them it grew to 256 MB some 3000 loads on, and
+to 512 MB by 8000. Each module is given only the hashes of the ABCs it
+names as linked (`domainLinked`): joining every ABC's for each compile
+had grown it to 256 MB by 7500 loads on its own.
 That a module's code keeps its Abc has a limit: emitted code reaches `A`
 only for `newclass` and `newactivation`, so a module with neither keeps
 it only through its domain's globals, its scripts' entries, and not even
@@ -1238,9 +1287,10 @@ entries are built apart from their module, will need this again. The
 symbols bound to names nothing defined (`Symbols.unbound`) are still
 kept for good, their libraries with them.
 `tests/player/leak.ts` loads SWFs over and over, by Loaders and in
-players made again, and checks that the heap stays bounded, and that a
-text field kept from a SWF let go still takes a font registered after a
-collection.
+players made again, and checks that the heap stays bounded, that
+codegen's memory does not grow where one player loads them all, and that
+a text field kept from a SWF let go still takes a font registered after
+a collection.
 `SymbolClass`
 then binds character ids to classes by qualified name through the
 runtime's name resolution; id 0 is the document class, constructed on the
@@ -2822,6 +2872,14 @@ entry in the module. A seeded generator makes a run repeat; a failing case
 is written to `tests/fuzz/out/failures/`. `pnpm test` runs a short round,
 `pnpm test:checked` the same in the build that checks every array access,
 which catches a read past a table's end the release build lets through.
+
+`tests/fuzz/domains.ts` gives two instances the same ABCs, child domains
+and findings in a seeded random order, and lets one of them also drop,
+evict, revive and rebuild domains; every module, entry, method compiled
+alone and resolved slot type of a live ABC must come out of both the same.
+Besides the conformance cases, it loads classes made to collide, and
+again and again has a domain resolve a type its ancestor then defines
+anew, the order a rebuild must not change.
 
 ## Milestone 1
 
