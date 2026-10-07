@@ -23,10 +23,10 @@ import {
   publicNs,
 } from "../../names.js";
 import type { Runtime } from "../../runtime.js";
-import { escapeAttributeValue, escapeElementValue } from "../../runtime.js";
 import type { Traits } from "../../traits.js";
 import { AS3, type Natives } from "../define.js";
 import { isSpace, isXMLName } from "./chars.js";
+import { escapeAttributeValue, escapeElementValue } from "./escape.js";
 import {
   ATTRIBUTE,
   CDATA,
