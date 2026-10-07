@@ -76,6 +76,37 @@ import { drawStaticText, drawText } from "./text.js";
 const IDENTITY = new Matrix();
 
 const NO_RECORDS: readonly FilterRecord[] = [];
+/** What an emptied node has drawn, shared by all: replaced as it draws, never added to. */
+const NO_LAYERS: ShapeLayer[] = [];
+const NO_FILLS: GraphicsContext[] = [];
+const NO_LINES_GIVEN: readonly (GraphicsContext | undefined)[] = [];
+
+/** Whether every one of `art` is a SharedGraphics, which a redraw keeps for its new content. */
+function allShared(art: readonly PixiContainer[]): boolean {
+  for (let i = 0; i < art.length; i++) {
+    if (!(art[i] instanceof SharedGraphics)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Whether Graphics that were lines where `lines` says lay out `layers`
+ * alike: a fill's for each layer, then its lines' if it has any.
+ */
+function laidOutAs(lines: readonly boolean[], layers: readonly ShapeLayer[]): boolean {
+  let k = 0;
+  for (let i = 0; i < layers.length; i++) {
+    if (lines[k++] !== false || (layers[i].strokes.length > 0 && lines[k++] !== true)) {
+      return false;
+    }
+  }
+
+  return k === lines.length;
+}
+
 /** sync's scratch, which a container's matrix is set from and which it does not keep. */
 const PLACED = new Matrix();
 /** restroke's scratch, which a stretch is compared in and never kept. */
@@ -585,18 +616,21 @@ export class PixiView {
     // A Bitmap's texture is its store's: only the sprite goes.
     node.bitmap?.destroy();
     node.bitmap = null;
-    const old = node.ownFills && !this.fresh ? node.fills : [];
-    const oldLines = this.fresh ? [] : node.strokes.map((g) => g?.shared);
+    // Of the content's arrays, none is made where it has nothing: an object is emptied and drawn
+    // anew each time its content changes.
+    const old = node.ownFills && !this.fresh ? node.fills : NO_FILLS;
+    const oldLines =
+      this.fresh || node.strokes.length === 0 ? NO_LINES_GIVEN : node.strokes.map((g) => g?.shared);
     const shared = node.sharedFills;
     // A shape's Graphics stay where they are, for the content drawn next to take in place: taken
     // off and put on, they changed the structure of its render group, which Pixi then rebuilt
     // whole, an animated character's every frame its timeline swapped a shape.
     const art = node.art.children;
-    if (keep && art.length > 0 && art.every((child) => child instanceof SharedGraphics)) {
-      const lines = new Set<PixiContainer>(node.lines);
+    if (keep && art.length > 0 && allShared(art)) {
+      const lines = node.lines;
       node.spare = {
         graphics: art.slice() as SharedGraphics[],
-        lines: art.map((g) => lines.has(g)),
+        lines: art.map((g) => lines.includes(g as SharedGraphics)),
       };
     } else {
       // A text's characters are in a container of their own; their shared
@@ -611,18 +645,19 @@ export class PixiView {
       }
     }
 
-    node.layers = [];
-    node.fills = [];
+    node.layers = NO_LAYERS;
+    node.fills = NO_FILLS;
     node.ownFills = false;
     node.sharedFills = null;
     node.strokes = [];
     node.lines = [];
     return () => {
-      for (const context of old) {
-        destroyContext(context);
+      for (let i = 0; i < old.length; i++) {
+        destroyContext(old[i]);
       }
 
-      for (const context of oldLines) {
+      for (let i = 0; i < oldLines.length; i++) {
+        const context = oldLines[i];
         if (context) {
           this.lines.give(context);
         }
@@ -782,13 +817,8 @@ export class PixiView {
         : null;
     // The Graphics the last content left, taken in place where it laid out
     // its fills and lines alike.
-    const roles = node.layers.flatMap((layer) => (layer.strokes.length ? [false, true] : [false]));
     const spare =
-      node.spare &&
-      node.spare.lines.length === roles.length &&
-      node.spare.lines.every((isLines, k) => isLines === roles[k])
-        ? node.spare.graphics
-        : null;
+      node.spare && laidOutAs(node.spare.lines, node.layers) ? node.spare.graphics : null;
     if (!spare) {
       this.dropSpare(node);
     }
