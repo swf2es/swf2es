@@ -203,7 +203,7 @@ export class MethodEmitter {
     // back when it returns or throws.
     const dxns = (flags & C.METHOD_SetsDxns) !== 0;
     if (dxns) {
-      out.text("  const $dxns = rt.enterDxns();\n  try {\n");
+      out.text("const $dxns = rt.enterDxns();\ntry {\n");
     }
 
     const handled = ir.handlerCount > 0;
@@ -219,7 +219,7 @@ export class MethodEmitter {
     if (analyze(this)) {
       const start = out.length;
       if (handled) {
-        out.text("  let t = 0;\n");
+        out.text("let t = 0;\n");
       }
 
       this.structured = true;
@@ -239,9 +239,9 @@ export class MethodEmitter {
     }
 
     if (handled) {
-      out.text("  let b = 0, t = 0;\n  for (;;) try { switch (b) {\n");
+      out.text("let b = 0, t = 0;\nfor (;;) try { switch (b) {\n");
     } else {
-      out.text("  let b = 0;\n  for (;;) switch (b) {\n");
+      out.text("let b = 0;\nfor (;;) switch (b) {\n");
     }
 
     for (let k: u32 = 0; k < ir.blockCount; k++) {
@@ -249,11 +249,11 @@ export class MethodEmitter {
     }
 
     // The verifier proved every block ends; a dispatcher still needs an end.
-    out.text("  default: throw rt.unreachable();\n  }");
+    out.text("default: throw rt.unreachable();\n}");
     if (handled) {
       out.text(" } catch (e) {\n");
       this.handlers();
-      out.text("  }");
+      out.text("}");
     }
 
     out.text("\n");
@@ -277,11 +277,11 @@ export class MethodEmitter {
     const dxns = "rt.defaultXmlNamespace !== $dx";
     let check = "";
     if (this.seesDxns && args.length) {
-      check = `  if (${args} || ${dxns}) return rt.enter($dx, ${this.entryName}, this, arguments, ${this.argsRequired}, ${this.argsMax});\n`;
+      check = `if (${args} || ${dxns}) return rt.enter($dx, ${this.entryName}, this, arguments, ${this.argsRequired}, ${this.argsMax});\n`;
     } else if (this.seesDxns) {
-      check = `  if (${dxns}) return rt.callInDxns($dx, ${this.entryName}, this, arguments);\n`;
+      check = `if (${dxns}) return rt.callInDxns($dx, ${this.entryName}, this, arguments);\n`;
     } else if (args.length) {
-      check = `  if (${args}) ac(${this.argsRequired}, arguments.length);\n`;
+      check = `if (${args}) ac(${this.argsRequired}, arguments.length);\n`;
     } else {
       return;
     }
@@ -351,7 +351,7 @@ export class MethodEmitter {
   /** The end of a method that sets the default XML namespace: its caller's back. */
   leaveDxns(dxns: bool): void {
     if (dxns) {
-      this.out.text("  } finally {\n    rt.defaultXmlNamespace = $dxns;\n  }\n");
+      this.out.text("} finally {\nrt.defaultXmlNamespace = $dxns;\n}\n");
     }
   }
 
@@ -460,7 +460,7 @@ export class MethodEmitter {
     const ir = this.ir;
     const bounds = this.bounds;
     const exception = <i32>(ir.localCount + ir.maxScope);
-    out.text("    const x = rt.caught(e);\n    switch (t) {\n");
+    out.text("const x = rt.caught(e);\nswitch (t) {\n");
     for (let r: u32 = 1; r < this.boundCount; r++) {
       if (!this.covered[r - 1]) {
         continue;
@@ -474,14 +474,13 @@ export class MethodEmitter {
         }
 
         if (first) {
-          out.text("    case ");
+          out.text("case ");
           out.uint(r);
           out.text(":\n");
           first = false;
         }
 
         const type = ir.handlerType[h];
-        out.text("      ");
         if (type >= 0) {
           out.text("if (rt.catches(x, ");
           typeRef(this, type);
@@ -496,11 +495,11 @@ export class MethodEmitter {
       }
 
       if (!first) {
-        out.text("      break;\n");
+        out.text("break;\n");
       }
     }
 
-    out.text("    }\n    throw e;\n");
+    out.text("}\nthrow e;\n");
   }
 
   /** Declare the registers: `this`, the parameters, coerced, with defaults, then the rest. */
@@ -536,7 +535,7 @@ export class MethodEmitter {
 
     // var, not let: V8 starts a frame's registers undefined, where each
     // let is initialized with bytecode of its own, which counts against inlining.
-    out.text("  var l0 = this");
+    out.text("var l0 = this");
     for (let p: u32 = 1; p <= count; p++) {
       out.text(", l");
       out.uint(p);
@@ -581,7 +580,7 @@ export class MethodEmitter {
   /** Write block k: its case label, then its instructions, following register types. */
   block(k: u32): void {
     const out = this.out;
-    out.text("  case ");
+    out.text("case ");
     out.uint(k);
     out.text(":\n");
     this.blockBody(k);
@@ -677,7 +676,7 @@ export class MethodEmitter {
       if (handled) {
         const region = this.regionOf(ir.pc[i]);
         if (region !== this.region) {
-          out.text("    t = ");
+          out.text("t = ");
           out.int(region);
           out.text(";\n");
           this.region = region;
@@ -828,7 +827,6 @@ export class MethodEmitter {
     const from = this.copyOf[r];
     this.copyOf[r] = -1;
     this.checked[r] = 0;
-    out.text("    ");
     this.reg(r);
     out.text(" = ");
     this.copied(from);
@@ -994,7 +992,7 @@ export class MethodEmitter {
   unpend(): void {
     const name = this.nameOf(this.pendingRead);
     this.pendingNull = -1;
-    const check = `    ${name} ?? nn(${name});\n`;
+    const check = `${name} ?? nn(${name});\n`;
     this.out.insert(this.pendingAt, check);
     this.map.shift(this.pendingMarks, <u32>check.length);
   }
@@ -1043,7 +1041,6 @@ export class MethodEmitter {
 
   /** `dst = ` for instruction i. */
   assign(i: u32): void {
-    this.out.text("    ");
     if (this.target >= 0) {
       this.regName(this.target);
       this.sunk = true;
@@ -1212,7 +1209,7 @@ export class MethodEmitter {
         // Through a temporary, not [a, b] = [b, a]: destructuring is an
         // array and the iterator protocol, which V8 counts against inlining.
         const x = ir.src[i];
-        out.text("    { const w = ");
+        out.text("{ const w = ");
         this.reg(x + 1);
         out.text("; ");
         this.regName(x + 1);
@@ -1286,7 +1283,6 @@ export class MethodEmitter {
           return;
         }
 
-        out.text("    ");
         this.checkedRead(src);
         break;
       }
@@ -1446,12 +1442,11 @@ export class MethodEmitter {
         conversion(this, i, <u8>op);
         break;
       case ops.OP_jump:
-        out.text("    ");
         this.goto(a);
         break;
       case ops.OP_iftrue:
       case ops.OP_iffalse:
-        out.text(op === ops.OP_iftrue ? "    if (" : "    if (!");
+        out.text(op === ops.OP_iftrue ? "if (" : "if (!");
         this.reg(ir.src[i]);
         out.text(") { ");
         this.goto(a);
@@ -1473,7 +1468,7 @@ export class MethodEmitter {
         break;
       case ops.OP_lookupswitch: {
         // An index out of range, or not an int, takes the default.
-        out.text("    switch (");
+        out.text("switch (");
         this.reg(ir.src[i]);
         out.text(") {");
         const first = ir.b[i];
@@ -1490,14 +1485,14 @@ export class MethodEmitter {
         break;
       }
       case ops.OP_returnvoid:
-        out.text("    return");
+        out.text("return");
         break;
       case ops.OP_returnvalue:
-        out.text("    return ");
+        out.text("return ");
         this.reg(ir.src[i]);
         break;
       case ops.OP_throw:
-        out.text("    throw ");
+        out.text("throw ");
         this.reg(ir.src[i]);
         break;
       default:
@@ -1522,7 +1517,7 @@ export class MethodEmitter {
         }
 
         // An instruction not lowered yet fails where it runs.
-        out.text('    throw rt.unsupported("');
+        out.text('throw rt.unsupported("');
         out.text(op < 256 ? opcodeNames[op] : "ir");
         out.text('")');
         break;
@@ -1546,8 +1541,6 @@ export class MethodEmitter {
     if (<i32>out.length === this.resetEnd && this.map.count === this.resetMarks) {
       out.length -= RESET_END;
       out.text(" = ");
-    } else {
-      out.text("    ");
     }
 
     this.regName(r);
@@ -1628,7 +1621,6 @@ export class MethodEmitter {
         out.uint(a);
         return true;
       case ops.OP_setslot:
-        out.text("    ");
         this.member(src);
         out.text(".$");
         out.uint(a);
@@ -1642,7 +1634,6 @@ export class MethodEmitter {
         out.uint(a);
         return true;
       case ops.OP_setglobalslot:
-        out.text("    ");
         this.globalScope();
         out.text(".$");
         out.uint(a);
@@ -1654,14 +1645,11 @@ export class MethodEmitter {
         this.virtual(a, src, 0);
         return true;
       case IR_CallSetter:
-        out.text("    ");
         this.virtual(a, src, 1);
         return true;
       case ops.OP_callmethod:
         if (ir.dst[i] >= 0) {
           this.assign(i);
-        } else {
-          out.text("    ");
         }
 
         this.virtual(a, src, ir.b[i]);
@@ -1669,8 +1657,6 @@ export class MethodEmitter {
       case IR_CallInterface:
         if (ir.dst[i] >= 0) {
           this.assign(i);
-        } else {
-          out.text("    ");
         }
 
         // By the interface's dispatch id, which its layout maps to a name.
@@ -1717,7 +1703,7 @@ export class MethodEmitter {
       case ops.OP_setproperty:
         if (this.indexed(a, src + 1)) {
           const kind = this.vectorKind(this.regType[src]);
-          out.text(kind.length ? "    rt.vectorSet" : "    rt.setIndexed(");
+          out.text(kind.length ? "rt.vectorSet" : "rt.setIndexed(");
           if (kind.length) {
             out.text(kind);
             out.text("(");
@@ -1734,7 +1720,7 @@ export class MethodEmitter {
           return true;
         }
 
-        out.text("    rt.setProperty(");
+        out.text("rt.setProperty(");
         this.reg(src);
         out.text(", ");
         this.name(a, src + 1);
@@ -1743,7 +1729,7 @@ export class MethodEmitter {
         out.text(")");
         return true;
       case ops.OP_initproperty: {
-        out.text(op === ops.OP_initproperty ? "    rt.initProperty(" : "    rt.setProperty(");
+        out.text(op === ops.OP_initproperty ? "rt.initProperty(" : "rt.setProperty(");
         this.reg(src);
         out.text(", ");
         this.name(a, src + 1);
@@ -1773,8 +1759,6 @@ export class MethodEmitter {
         const parts = ir.srcCount[i] - 1 - argc;
         if (ir.dst[i] >= 0) {
           this.assign(i);
-        } else {
-          out.text("    ");
         }
 
         out.text(
@@ -1799,8 +1783,6 @@ export class MethodEmitter {
         const parts = ir.srcCount[i] - 1 - argc;
         if (ir.dst[i] >= 0) {
           this.assign(i);
-        } else {
-          out.text("    ");
         }
 
         out.text(
@@ -1819,7 +1801,7 @@ export class MethodEmitter {
         return true;
       }
       case ops.OP_constructsuper:
-        out.text("    rt.constructSuper(sup, ");
+        out.text("rt.constructSuper(sup, ");
         this.usesSup = true;
         this.reg(src);
         this.args(src + 1, a);
@@ -1844,8 +1826,6 @@ export class MethodEmitter {
       case ops.OP_callstatic:
         if (ir.dst[i] >= 0) {
           this.assign(i);
-        } else {
-          out.text("    ");
         }
 
         out.text("rt.callStatic(A, ");
@@ -1918,7 +1898,7 @@ export class MethodEmitter {
       case ops.OP_hasnext2: {
         // hasnext2 updates its two locals: the object and the index.
         const b = ir.b[i];
-        out.text("    [");
+        out.text("[");
         this.regName(ir.dst[i]);
         out.text(", ");
         this.regName(<i32>a);
@@ -1998,7 +1978,6 @@ export class MethodEmitter {
       case ops.OP_sf32:
       case ops.OP_sf64:
         // The value's conversion is DataView's own for a number or Boolean.
-        out.text("    ");
         if (isAddress(this, src + 1) && isNumeric(this, src)) {
           out.text("if (");
           inRange(this, src + 1, op);
@@ -2042,17 +2021,17 @@ export class MethodEmitter {
         out.text(")");
         return true;
       case ops.OP_dxns:
-        out.text("    rt.setDefaultXmlNamespace(");
+        out.text("rt.setDefaultXmlNamespace(");
         poolString(this, a);
         out.text(")");
         return true;
       case ops.OP_dxnslate:
-        out.text("    rt.setDefaultXmlNamespace(");
+        out.text("rt.setDefaultXmlNamespace(");
         this.reg(src);
         out.text(")");
         return true;
       case ops.OP_checkfilter:
-        out.text("    rt.checkFilter(");
+        out.text("rt.checkFilter(");
         this.reg(src);
         out.text(")");
         return true;

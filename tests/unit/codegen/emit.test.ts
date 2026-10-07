@@ -127,7 +127,7 @@ test("a loop is a labelled for (;;), its back edge a continue, and no dispatcher
   assert.match(js, /continue L1;/);
   assert.doesNotMatch(js, /switch \(b\)/);
   // The locals are read and written straight, with no stack registers between.
-  assert.match(js, /l1 = l1 \+ l2 \| 0;\n {4}l2 = l2 - 1 \| 0;/);
+  assert.match(js, /l1 = l1 \+ l2 \| 0;\nl2 = l2 - 1 \| 0;/);
 });
 
 test("if and else meet again after a labelled block", { skip }, () => {
@@ -242,7 +242,7 @@ test("a throw in a handler's range runs the handler, with the exception on the s
   assert.equal(run(abc), 7);
   // A structured try, the handler's code after its labelled block.
   const js = emit(abc);
-  assert.match(js, /L\d+: \{\n {2}try \{/);
+  assert.match(js, /L\d+: \{\ntry \{/);
   assert.doesNotMatch(js, /switch \(b\)/);
 });
 
@@ -572,7 +572,7 @@ test("a null check is made where the instruction it checks for reads the value f
     /= rt\.getProperty\(l1 \?\? nn\(l1\), M\[1\]\);/,
   );
   // A conversion to Object reads it after a check of its own.
-  assert.match(emit(script([GETLOCAL1, CONVERT_O, RETURNVALUE])), /\n {4}l1 \?\? nn\(l1\);\n/);
+  assert.match(emit(script([GETLOCAL1, CONVERT_O, RETURNVALUE])), /\nl1 \?\? nn\(l1\);\n/);
 });
 
 test("undefined is written void 0, and a return of it a bare return", { skip }, () => {
@@ -580,8 +580,8 @@ test("undefined is written void 0, and a return of it a bare return", { skip }, 
   const KILL = 0x08;
   const RETURNVOID = 0x47;
   const js = emit(script([PUSHUNDEFINED, SETLOCAL1, GETLOCAL1, POP, KILL, 1, RETURNVOID]));
-  assert.match(js, /\n {4}l1 = void 0;\n/);
-  assert.match(js, /\n {4}return;\n/);
+  assert.match(js, /\nl1 = void 0;\n/);
+  assert.match(js, /\nreturn;\n/);
   assert.doesNotMatch(js, /\bundefined\b/);
 });
 
@@ -589,7 +589,7 @@ test("registers reset one after another are reset in one statement", { skip }, (
   const KILL = 0x08;
   const code = [PUSHBYTE, 1, SETLOCAL1, PUSHBYTE, 2, SETLOCAL2, GETLOCAL1, GETLOCAL2, ADD, POP];
   const js = emit(script([...code, KILL, 1, KILL, 2, KILL, 3, PUSHBYTE, 3, RETURNVALUE]));
-  assert.match(js, /\n {4}l1 = l2 = l3 = void 0;\n/);
+  assert.match(js, /\nl1 = l2 = l3 = void 0;\n/);
   assert.equal(run(script([...code, KILL, 1, GETLOCAL1, KILL, 2, RETURNVALUE])), undefined);
 });
 

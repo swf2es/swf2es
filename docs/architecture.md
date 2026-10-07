@@ -265,7 +265,10 @@ The code is written short where that costs nothing at run time:
 `undefined` is `void 0`, and a return of it a bare `return;`, each of
 which V8 compiles to the same bytecode as `undefined`; and registers a
 run of `kill`s or `popscope`s leaves undefined are one statement,
-`sc2 = sc1 = l3 = void 0;`.
+`sc2 = sc1 = l3 = void 0;`. A method's code is not indented: it was
+not nested by its blocks either, only shifted, a tenth of a module's
+bytes; each statement keeps a line of its own, for stacks, the source
+map and a debugger's steps.
 
 A null check is `r ?? nn(r)`, where `nn`, the module's, throws the
 runtime's TypeError for the value, 1009 for null and 1010 for undefined.
