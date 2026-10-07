@@ -2865,6 +2865,14 @@ is written to `tests/fuzz/out/failures/`. `pnpm test` runs a short round,
 `pnpm test:checked` the same in the build that checks every array access,
 which catches a read past a table's end the release build lets through.
 
+`tests/fuzz/domains.ts` gives two instances the same ABCs, child domains
+and findings in a seeded random order, and lets one of them also drop,
+evict, revive and rebuild domains; every module, entry, method compiled
+alone and resolved slot type of a live ABC must come out of both the same.
+Besides the conformance cases, it loads classes made to collide, and
+again and again has a domain resolve a type its ancestor then defines
+anew, the order a rebuild must not change.
+
 ## Milestone 1
 
 The as3pb protobuf benchmark (`tests/programs`), compiled by swf2es and run in node:

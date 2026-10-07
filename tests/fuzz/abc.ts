@@ -7,10 +7,7 @@
 //   - the compiler did not trap;
 //   - a module it accepted imports as an ES module;
 //   - each method compiled alone, as the JIT compiles it, is byte for byte
-//     its entry in the module (docs/architecture.md's JIT/AOT invariant);
-//   - linked again by a rebuild, as when the compiler lets go of another
-//     domain, its module is the same, as is that of a copy of it in a
-//     domain evicted and revived given its bytes again.
+//     its entry in the module (docs/architecture.md's JIT/AOT invariant).
 //
 // The seeds are the unit tests' hand-built ABCs and the conformance cases,
 // compiled into this package's own out/. A case that fails is written to
@@ -200,30 +197,6 @@ for (let k = 0; k < caseCount; k++) {
         fail(abc, `method body ${body} compiled alone differs from its entry`);
         break;
       }
-    }
-
-    const child = testing.domainChild(0);
-    if (testing.domainAdd(abc, false, child) !== 0) {
-      continue;
-    }
-
-    const index = builtins.length;
-    const hashes = [...builtinHashes, sha(abc), sha(abc)].join("\n");
-    const copy: string = testing.domainModule(hashes, index + 1, false);
-    testing.domainEvict(child);
-    if (!testing.domainRebuild()) {
-      fail(abc, "a rebuild did not link it again");
-      continue;
-    }
-
-    if (testing.domainModule(hashes, index, false) !== module) {
-      fail(abc, "its module changed after a rebuild");
-    } else if (
-      testing.domainRestore(index + 1, abc) !== 0 ||
-      testing.domainRevive(child) !== 1 ||
-      testing.domainModule(hashes, index + 1, false) !== copy
-    ) {
-      fail(abc, "a copy in a revived domain did not compile as it did");
     }
   } catch (e) {
     // A trap leaves the instance unusable: start a new one.
