@@ -56,3 +56,61 @@ test("a fill's contours close, a drawPath's winding is the fill's, and copying f
   assert.deepEqual(e.bounds(false), { xMin: 50, yMin: 50, xMax: 60, yMax: 50 });
   assert.deepEqual(e.bounds(true), { xMin: 49, yMin: 49, xMax: 61, yMax: 51 });
 });
+
+test("each fill begins a layer, and the lines drawn till the next fill go over it, as Flash draws them", () => {
+  const line = (color: number) => ({
+    width: 80,
+    color,
+    startCap: 0,
+    endCap: 0,
+    join: 0,
+    miterLimit: 3,
+    noHScale: false,
+    noVScale: false,
+    pixelHinting: false,
+    noClose: false,
+    fill: null,
+  });
+  const blue = { type: "solid" as const, color: 0xff0000ff };
+  const colors = (d: Drawing) =>
+    d.layers.map((l) => [
+      l.fills.map((f) => (f.fill.type === "solid" ? f.fill.color : 0)),
+      l.strokes.map((s) => s.line.color),
+    ]);
+
+  // A line open as a fill begins goes on over it; one that drew nothing is
+  // taken away when the next begins.
+  const d = new Drawing();
+  d.lineStyle(line(0xff000000));
+  d.beginFill(red);
+  d.drawRect(10, 10, 40, 40);
+  d.beginFill(blue);
+  d.lineStyle(line(0xff00ff00));
+  d.drawRect(30, 30, 40, 40);
+  d.endFill();
+  assert.deepEqual(colors(d), [
+    [[0xffff0000], [0xff000000]],
+    [[0xff0000ff], [0xff00ff00]],
+  ]);
+
+  // A line drawn before any fill stays under it, its own layer; one after
+  // endFill over the fill before, the next fill's line not yet begun.
+  const e = new Drawing();
+  e.lineStyle(line(0xff000000));
+  e.moveTo(0, 40);
+  e.lineTo(90, 40);
+  e.beginFill(blue);
+  e.drawRect(30, 30, 40, 40);
+  e.endFill();
+  e.lineStyle(line(0xff00ff00));
+  e.moveTo(40, 0);
+  e.lineTo(40, 90);
+  e.lineStyle(null);
+  e.beginFill(red);
+  e.drawRect(35, 60, 20, 20);
+  assert.deepEqual(colors(e), [
+    [[], [0xff000000]],
+    [[0xff0000ff], [0xff000000, 0xff00ff00]],
+    [[0xffff0000], []],
+  ]);
+});

@@ -1476,8 +1476,8 @@ A `Shape` or `Sprite` draws with its `Graphics`, which records into a
 drawing the display object keeps: the same layers of fills and strokes,
 with their paths in pixels, that `display/shapes.ts` makes of a SWF shape, so
 the renderer draws both alike. A fill begins at `beginFill` (or a
-gradient or bitmap fill) and ends at `endFill`, at the next begin, or at
-`lineStyle`'s change; what is drawn between is the fill's contours, each
+gradient or bitmap fill) and ends at `endFill` or at the next begin, not
+at a change of `lineStyle`; what is drawn between is the fill's contours, each
 `moveTo` starting one and each closed back to its start, filled even-odd
 across them, as Flash fills. A stroke begins at `lineStyle` with a
 thickness and ends at one without, keeping the line's width, color,
@@ -1496,9 +1496,13 @@ overlap without nesting fill as their union, where Flash's even-odd
 would leave their overlap out: a limit of the triangulation, noted.
 `clear` takes everything and the styles away; `copyFrom` clears first
 and then copies, so a drawing copied from itself ends empty, as Flash's
-does (the `draws` case). The drawn order is the calls' order,
-fills under strokes within a layer as in a SWF shape, and a sprite's
-drawing under its children.
+does (the `draws` case). The drawn order is the calls' order but for
+lines, which draw over the fill they are drawn with: each fill begins a
+layer, as a SWF shape's new styles do, and the lines drawn from then
+until the next fill begins go in it, over the fill and under the next,
+whenever their `lineStyle` was set; a line open as a fill begins goes on
+in the new layer, and lines drawn before any fill are a layer of their
+own (the `line-order` case). A sprite's drawing is under its children.
 
 The renderer keeps a drawing's fills and strokes as it keeps a shape's,
 per display object rather than per character, since a drawing changes,
