@@ -1953,6 +1953,15 @@ as a browser would; a DefineSound's seekSamples are skipped. Flash's
 decode is at once and the browser's is not: an MP3's first extract starts
 its decode and gives nothing, and the frames after give what Flash gives.
 
+`loadPCMFromByteArray` reads 32-bit floats or 16-bit integers in the
+ByteArray's byte order and brings them to 44.1 kHz at once; adl's reads
+back samples that have nothing to do with those it was given, so the
+case checks only its counts, lengths and errors.
+`loadCompressedDataFromByteArray` adds MP3 bytes to those the sound has
+(a SWF's sound keeps its own): its length counts their frames by their
+headers at once, a frame cut short too, as Flash's (`media/mp3.ts`), and
+it plays and extracts their whole frames once the host has decoded them.
+
 An external `Sound.load` uses the same host fetch as `URLStream`; its
 open, progress and complete or error reach ActionScript on a frame, after
 the host has decoded it. `Sound.play` gets a channel immediately, with

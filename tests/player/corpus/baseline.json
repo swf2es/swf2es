@@ -919,7 +919,7 @@
   "avm2/socket_write_big": {"matched":0,"lines":15,"traced":0,"error":null},
   "avm2/socket_write_little": {"matched":0,"lines":14,"traced":0,"error":null},
   "avm2/sound_embeddedprops": {"matched":26,"lines":26,"traced":26,"error":null},
-  "avm2/sound_load_multiple": {"matched":5,"lines":19,"traced":5,"error":"Error: swf2es: native flash.media::Sound#loadCompressedDataFromByteArray is not supported yet"},
+  "avm2/sound_load_multiple": {"matched":19,"lines":19,"traced":19,"error":null},
   "avm2/sound_play": {"matched":19,"lines":19,"traced":19,"error":null},
   "avm2/sound_valueof": {"matched":33,"lines":33,"traced":33,"error":null},
   "avm2/soundchannel_position": {"matched":0,"lines":140,"traced":138,"error":null},

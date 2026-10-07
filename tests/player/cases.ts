@@ -2233,8 +2233,9 @@ function pcm16(samples: number[]): Uint8Array {
 
 /**
  * Sounds to extract (scripts/<script>.as): uncompressed ramps at three
- * rates and both sizes, and the MP3s of sounds/, one with seekSamples,
- * bound to classes by name.
+ * rates and both sizes, the MP3s of sounds/ as DefineSounds, one with
+ * seekSamples, and the 44.1 kHz one's bytes, plain and with a LAME header,
+ * as ByteArrays, bound to classes by name.
  */
 export const extractSounds =
   (script: string) =>
@@ -2297,9 +2298,30 @@ export const extractSounds =
       tags: [
         w.fileAttributes(true),
         ...tags,
+        w.binaryData(8, tone),
+        w.binaryData(9, soundFile("tone-tagged.mp3")),
+        w.doAbc(
+          compile(
+            "Mp3Tagged",
+            "package { import flash.utils.ByteArray; public class Mp3Tagged extends ByteArray {} }",
+          ),
+          "Mp3Tagged",
+        ),
         ...classes.map((abc, i) => w.doAbc(abc, sounds[i][0])),
+        w.doAbc(
+          compile(
+            "Mp3Bytes",
+            "package { import flash.utils.ByteArray; public class Mp3Bytes extends ByteArray {} }",
+          ),
+          "Mp3Bytes",
+        ),
         w.doAbc(compile(script)),
-        w.symbolClass([[0, script], ...sounds.map(([name], i): [number, string] => [i + 1, name])]),
+        w.symbolClass([
+          [0, script],
+          ...sounds.map(([name], i): [number, string] => [i + 1, name]),
+          [8, "Mp3Bytes"],
+          [9, "Mp3Tagged"],
+        ]),
         w.showFrame(),
         w.showFrame(),
         w.showFrame(),

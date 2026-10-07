@@ -1,11 +1,20 @@
-// flash.media.Sound and SoundChannel: a SWF's embedded sound or a host-fetched
-// MP3, with playback through the host's audio device and frame-delivered
-// events; the channels themselves, and the timeline's sounds, are the
-// player's (media/sounds.ts), and what extract reads is media/extract.ts'.
+// flash.media.Sound and SoundChannel: a SWF's embedded sound, a host-fetched
+// MP3, or MP3 or PCM bytes a script hands it, with playback through the
+// host's audio device and frame-delivered events; the channels themselves,
+// and the timeline's sounds, are the player's (media/sounds.ts), and what
+// extract reads is media/extract.ts'.
+import type { Sound } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import type { SoundCharacter } from "../../../display/timeline.js";
 import type { DecodedSound, SoundMix } from "../../../media/audio.js";
-import { type ExtractSource, extractSamples, soundSamples } from "../../../media/extract.js";
+import {
+  EXTRACT_RATE,
+  type ExtractSource,
+  extractSamples,
+  soundSamples,
+  toExtractRate,
+} from "../../../media/extract.js";
+import { mp3Frames } from "../../../media/mp3.js";
 import {
   type ChannelState,
   channels,
@@ -29,6 +38,30 @@ type Value = avm2.Value;
 /** An uncompressed or ADPCM DefineSound's samples, decoded once for extract; null for another format. */
 const embeddedSamples = new WeakMap<SoundCharacter, Float32Array[] | null>();
 
+/** 44.1 kHz samples as an uncompressed 16-bit DefineSound, for the host to play. */
+function pcmSound(channels: Float32Array[]): Sound {
+  const frames = channels[0].length;
+  const data = new Uint8Array(frames * channels.length * 2);
+  const view = new DataView(data.buffer);
+  for (let i = 0; i < frames; i++) {
+    for (const [c, channel] of channels.entries()) {
+      const v = Math.max(-1, Math.min(1, channel[i]));
+      view.setInt16((i * channels.length + c) * 2, Math.round(v * 32767), true);
+    }
+  }
+
+  return {
+    id: 0,
+    format: 3,
+    sampleRate: EXTRACT_RATE,
+    sampleSize: 16,
+    channels: channels.length === 1 ? 1 : 2,
+    sampleCount: frames,
+    seekSamples: 0,
+    data,
+  };
+}
+
 function stateOf(o: AsObject): SoundState {
   if (o.$sound) {
     return o.$sound;
@@ -46,6 +79,8 @@ function stateOf(o: AsObject): SoundState {
     abort: null,
     clip: null,
     decoded: null,
+    compressed: false,
+    pcm: null,
     extracted: 0,
   };
   o.$sound = state;
@@ -151,6 +186,10 @@ export function soundNatives(s: Scripting): avm2.Natives {
    * nothing.
    */
   const extractSource = (sound: SoundState): ExtractSource | null => {
+    if (sound.pcm) {
+      return { rate: EXTRACT_RATE, channels: sound.pcm, skip: 0, whole: false };
+    }
+
     const character = sound.character;
     let decoded: DecodedSound | null = sound.decoded;
     let skip = 0;
@@ -184,6 +223,24 @@ export function soundNatives(s: Scripting): avm2.Natives {
     const samples = decoded?.samples;
     return samples ? { rate: samples.rate, channels: samples.channels, skip, whole: false } : null;
   };
+  const decodeLoaded = (sound: SoundState, source: Sound | Uint8Array): void => {
+    sound.decoded = null;
+    sound.clip = s.audio ? s.audio.decode(source) : null;
+    const clip = sound.clip;
+    if (clip) {
+      s.loads.trackRequest(
+        clip.then(
+          (decoded) => {
+            if (sound.clip === clip) {
+              sound.decoded = decoded;
+            }
+          },
+          () => {},
+        ),
+      );
+    }
+  };
+
   class SoundNatives {
     declare $sound: SoundState | undefined;
 
@@ -226,6 +283,123 @@ export function soundNatives(s: Scripting): avm2.Natives {
       }
 
       return count;
+    }
+
+    /**
+     * MP3 frames from `bytes`, added to any it was given before, as adl
+     * has it: its length counts a frame cut short, its decode does not,
+     * and a sound of the SWF's keeps its own samples.
+     */
+    loadCompressedDataFromByteArray(bytes: Value, bytesLength: Value): void {
+      if (bytes === null || bytes === undefined) {
+        throw s.rt.error("TypeError", 2007, "bytes");
+      }
+
+      const sound = stateOf(this as AsObject);
+      const b = avm2.bytesOf(s.rt, bytes as AsObject);
+      const n = s.rt.toUint(bytesLength);
+      if (n === 0 || n > b.length - b.position) {
+        throw s.rt.error("ArgumentError", 2084);
+      }
+
+      const data = b.read(n);
+      if (sound.character) {
+        return;
+      }
+
+      const before = sound.compressed && sound.bytes ? sound.bytes : new Uint8Array(0);
+      const all = new Uint8Array(before.length + data.length);
+      all.set(before);
+      all.set(data, before.length);
+      const mp3 = mp3Frames(all);
+      sound.bytes = all;
+      sound.compressed = true;
+      sound.pcm = null;
+      sound.used = true;
+      sound.loaded = n;
+      sound.total = n;
+      sound.length = mp3 ? (mp3.frames * mp3.samplesPerFrame * 1000) / mp3.rate : 0;
+      decodeLoaded(sound, all);
+      dispatchEvent(
+        s,
+        this as AsObject,
+        s.rt.construct(
+          s.rt.classNamed("flash.events::ProgressEvent"),
+          "progress",
+          false,
+          false,
+          n,
+          n,
+        ) as AsObject,
+      );
+    }
+
+    /**
+     * `samples` samples of 32-bit floats or 16-bit integers from `bytes`,
+     * in its byte order, brought to 44.1 kHz: they take the place of
+     * whatever the sound had, a SWF's sound too.
+     */
+    loadPCMFromByteArray(
+      bytes: Value,
+      samples: Value,
+      format: Value = "float",
+      stereo: Value = true,
+      sampleRate: Value = EXTRACT_RATE,
+    ): void {
+      if (bytes === null || bytes === undefined) {
+        throw s.rt.error("TypeError", 2007, "bytes");
+      }
+
+      if (format === null || format === undefined) {
+        throw s.rt.error("TypeError", 2007, "format");
+      }
+
+      const kind = s.rt.toString(format);
+      if (kind !== "float" && kind !== "short") {
+        throw s.rt.error("ArgumentError", 2005);
+      }
+
+      const b = avm2.bytesOf(s.rt, bytes as AsObject);
+      const n = s.rt.toUint(samples);
+      const rate = s.rt.toNumber(sampleRate);
+      const channels = stereo ? 2 : 1;
+      const size = kind === "float" ? 4 : 2;
+      const available = b.length - b.position;
+      // adl weighs the samples against the bytes, not the bytes they take,
+      // and then reads what there is before it finds them short.
+      if (n === 0 || !(rate > 0) || n > available) {
+        throw s.rt.error("ArgumentError", 2084);
+      }
+
+      // Faster than 44.1 kHz, it reads only as many as it gives out.
+      const outputs = Math.floor((n * EXTRACT_RATE) / rate);
+      const count = Math.min(n, outputs);
+      if (count * channels * size > available) {
+        b.position += Math.floor(available / size) * size;
+        throw s.rt.error("flash.errors::EOFError", 2030);
+      }
+
+      const little = b.littleEndian;
+      const view = new DataView(b.read(count * channels * size).buffer);
+      const raw = Array.from({ length: channels }, () => new Float32Array(count));
+      for (let i = 0; i < count * channels; i++) {
+        raw[i % channels][Math.floor(i / channels)] =
+          size === 4 ? view.getFloat32(i * 4, little) : view.getInt16(i * 2, little) / 32768;
+      }
+
+      const sound = stateOf(this as AsObject);
+      const pcm = toExtractRate(raw, count < n ? EXTRACT_RATE : rate);
+      sound.character = null;
+      sound.pcm = pcm;
+      sound.bytes = new Uint8Array(0);
+      sound.compressed = false;
+      sound.used = true;
+      sound.loaded = n * size;
+      sound.total = n * size;
+      // In samples a millisecond, to adl's last bit.
+      sound.length = pcm[0].length / (EXTRACT_RATE / 1000);
+      sound.extracted = 0;
+      decodeLoaded(sound, pcmSound(pcm));
     }
 
     "flash.media:Sound::_load"(request: Value, _checkPolicyFile: Value, _bufferTime: Value): void {
@@ -478,6 +652,8 @@ export function soundHooks(s: Scripting): Record<string, avm2.ClassHook> {
           abort: null,
           clip: null,
           decoded: null,
+          compressed: false,
+          pcm: null,
           extracted: 0,
         } satisfies SoundState;
         return o;

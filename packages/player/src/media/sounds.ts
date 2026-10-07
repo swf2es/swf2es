@@ -32,6 +32,10 @@ export interface SoundState {
   clip: Promise<DecodedSound> | null;
   /** The clip once decoded, for what extract reads at once. */
   decoded: DecodedSound | null;
+  /** Whether `bytes` came from loadCompressedDataFromByteArray, which adds to them. */
+  compressed: boolean;
+  /** loadPCMFromByteArray's samples, at 44.1 kHz. */
+  pcm: Float32Array[] | null;
   /** Where extract goes on from, in the sound's own samples. */
   extracted: number;
 }
