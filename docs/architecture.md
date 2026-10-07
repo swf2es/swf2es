@@ -1456,6 +1456,41 @@ marked copy of its string. A host that plays AIR content passes
 `airLibrary` to `loadLibraries` after playerglobal; Flash Player has no
 such classes, so it is not loaded by default.
 
+The natives (`playerglobal/air/net/WebSocket.ts`) run over a
+`WebSocketHost` (`hosts.ts`), by default the global WebSocket, a
+browser's or node's; `webSocket: null` has every connect fail. What they
+throw and dispatch is what adl does: TypeError 2007 for a null URL, then
+IllegalOperationError 2082 for a second connect, a WebSocket connecting
+only once, then ArgumentError 2147 for a scheme other than `ws://` or
+`wss://`; ArgumentError 1508 for data that is not a String or a
+ByteArray, whose bytes go from the start whatever the opcode; Event.CONNECT,
+WebSocketEvent.DATA with a ByteArray each read of `data` rewinds, and
+Event.CLOSE when the server closes, with `closeReason` its code, none
+after `close()`; IOError 2002 for a send or close once closed;
+ArgumentError 2014 for setting `protocol` once open, which becomes the
+subprotocol the server chose, `connect`'s vector offered, not
+`protocol`. A send or close while connecting ends the connection, an
+IOErrorEvent with the URL and a close, as adl's handshake breaks on the
+frame. A failed connection is an IOErrorEvent with its host, as adl's
+refused one; a browser does not tell a refused connection from a
+refused handshake, which adl reports with the URL and a close. A host
+that throws a `SecurityError`, as a browser does for a blocked port,
+gives a SecurityErrorEvent. Before connect, where adl crashes, a send or
+close throws IOError 2002. `startServer` throws AIR's IllegalOperationError
+for a method its profile lacks, as `Updater.update` in adl.
+
+A browser sends no frame but text, binary and close, and close codes
+1000 and 3000 to 4999 alone. AIR sends any opcode's low four bits as
+they are: text and binary go, `fmtCLOSE` closes with the payload's
+first two bytes as the code (AIR sends no reason either, and then
+dispatches the close), and pings, pongs and reserved opcodes are
+dropped, since the browser answers the server's pings itself and AIR
+dispatches nothing for a pong. `close` with a code a browser refuses
+closes without one. There is no `certificateError`: a browser rejects a
+bad certificate as any failed connection. Where adl is at fault the
+player is not: adl stops reading at an empty message, which the player
+dispatches, and a close frame without a code throws #2030 in it.
+
 ### Screen capabilities
 
 `flash.system.Capabilities` reads screen resolution, pixel aspect ratio and

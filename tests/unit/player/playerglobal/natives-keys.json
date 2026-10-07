@@ -1110,7 +1110,14 @@
     "flash.display::Graphics#flash.display:Graphics::nativeGetGraphicsData",
     "flash.media::Sound#extract",
     "flash.media::Sound#loadCompressedDataFromByteArray",
-    "flash.media::Sound#loadPCMFromByteArray"
+    "flash.media::Sound#loadPCMFromByteArray",
+    "air.net::WebSocket#air.net:WebSocket::internalClose",
+    "air.net::WebSocket#air.net:WebSocket::internalConnect",
+    "air.net::WebSocket#get:closeReason",
+    "air.net::WebSocket#get:protocol",
+    "air.net::WebSocket#sendMessage",
+    "air.net::WebSocket#set:protocol",
+    "air.net::WebSocket#startServer"
   ],
   "hooks": [
     "flash.display::BitmapData",
