@@ -244,6 +244,28 @@ In a worklist that reaches a fixed point, each block's last visit follows
 the last change to its entry state, so the IR could be kept from that visit
 instead, once whatever only the second pass does is done in the first.
 
+### Untyped property access
+
+`tests/bench/untyped/Untyped.as` reads, writes and calls names on values
+typed `*`, as a large Flash application does through untyped fields:
+display objects deep in a class hierarchy (getters, setters, slots and
+methods of sealed classes), data decoded from JSON (dynamic properties),
+an Object and an Array, eight classes sharing the same names, and a
+String's methods. None binds early, so each goes through the runtime's
+`getProperty`, `setProperty` or `callProperty`. Its sections trace their
+times and the rest must match avmshell's output:
+
+    node tests/bench/untyped/run.ts [runs]
+    node tests/bench/untyped/run.ts <dir A> <dir B> [runs]
+
+the second with two snapshots of `tests/programs/ab.ts`, interleaved as
+it interleaves them. Before any inline cache, medians of 3, in ms:
+
+| | display | data | object | poly | string |
+|---|---|---|---|---|---|
+| swf2es | 268 | 88 | 411 | 159 | 79 |
+| avmshell | 40 | 23 | 135 | 71 | 39 |
+
 ### The AssemblyScript runtime
 
 codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator

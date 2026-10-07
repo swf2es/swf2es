@@ -46,6 +46,8 @@ node tests/player/leak.ts [--loads N] [--snapshots DIR]   # load SWFs over and o
                               # memory must not grow (part of pnpm test)
 node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
                               # timeline in Chrome; keep a change only for a gain that repeats
+node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the
+                              # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
