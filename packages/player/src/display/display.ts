@@ -302,8 +302,13 @@ export class DisplayObject {
    * turn is what the matrix says. It leaves 3D.
    */
   setMatrix(m: Matrix): void {
+    this.adoptMatrix({ ...m });
+  }
+
+  /** As setMatrix, with a matrix made for it, which it keeps: a place's, on each move of each frame. */
+  private adoptMatrix(m: Matrix): void {
     this.space = null;
-    this.matrix = { ...m };
+    this.matrix = m;
     this.scaleX = Math.hypot(m.a, m.b);
     this.scaleY = Math.hypot(m.c, m.d);
     this.rotation = Math.atan2(m.b, m.a) * DEGREES;
@@ -472,7 +477,7 @@ export class DisplayObject {
 
     if (place.matrix) {
       const m = place.matrix;
-      this.setMatrix({ a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 });
+      this.adoptMatrix({ a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 });
     }
 
     if (place.colorTransform) {
