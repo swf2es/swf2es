@@ -49,6 +49,7 @@ import {
   invalidate,
   NO_CACHE,
   PropertyCache,
+  REPLACEMENTS,
   UNFILLED,
 } from "./property-cache.js";
 import { WeakKeys, WeakName } from "./weak-keys.js";
@@ -1818,7 +1819,11 @@ export class Runtime {
    */
   private fill(o: Value, traits: Traits, b: number, mn: Multiname): void {
     let head = mn.cache;
-    if (head === NO_CACHE || this.receiverTraits(o) !== traits) {
+    if (
+      head === NO_CACHE ||
+      (head.replaced === REPLACEMENTS && head.epoch === epoch()) ||
+      this.receiverTraits(o) !== traits
+    ) {
       return;
     }
 
@@ -1887,6 +1892,10 @@ export class Runtime {
     }
 
     const e = entryFor(head, traits);
+    if (e === null) {
+      return;
+    }
+
     e.traits = traits;
     e.kind = kind;
     e.key = key;
@@ -3976,10 +3985,11 @@ function cached(t: Traits | undefined, mn: Multiname): PropertyCache | null {
 
 /**
  * The entry of a cache to fill for traits `t`: its own, a free one, a new
- * one while the list is shorter than ENTRIES, else the oldest. A cache of
- * an earlier epoch is emptied first.
+ * one while the list is shorter than ENTRIES, else the oldest, until it has
+ * replaced REPLACEMENTS; then none. A cache of an earlier epoch is emptied
+ * first.
  */
-function entryFor(head: PropertyCache, t: Traits): PropertyCache {
+function entryFor(head: PropertyCache, t: Traits): PropertyCache | null {
   if (head.epoch !== epoch()) {
     for (let e: PropertyCache | null = head; e !== null; e = e.next) {
       e.traits = null;
@@ -3987,6 +3997,7 @@ function entryFor(head: PropertyCache, t: Traits): PropertyCache {
 
     head.epoch = epoch();
     head.victim = head;
+    head.replaced = 0;
   }
 
   let last = head;
@@ -4006,6 +4017,11 @@ function entryFor(head: PropertyCache, t: Traits): PropertyCache {
     return added;
   }
 
+  if (head.replaced === REPLACEMENTS) {
+    return null;
+  }
+
+  head.replaced++;
   const victim = head.victim as PropertyCache;
   head.victim = victim.next ?? head;
   return victim;

@@ -25,7 +25,13 @@ export const IC_Call = 7;
 export const IC_Dynamic = 8;
 
 /** Entries a name keeps, for as many traits, before it replaces the oldest. */
-export const ENTRIES = 1;
+export const ENTRIES = 8;
+/**
+ * Entries a name replaces before it stops: one seen on more traits than it
+ * keeps would replace one on every miss, and still miss as often. It keeps
+ * those it has until the epoch changes.
+ */
+export const REPLACEMENTS = 16;
 
 /**
  * One traits' entry for a name. A name's first entry heads its list and
@@ -46,8 +52,9 @@ export class PropertyCache {
   id = 0;
   next: PropertyCache | null = null;
   epoch = -1;
-  /** The entry the next traits replace once the list is full. */
+  /** The entry the next traits replace once the list is full, and how many it has replaced. */
   victim: PropertyCache | null = null;
+  replaced = 0;
 }
 
 let current = 0;

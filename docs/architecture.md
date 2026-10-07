@@ -334,8 +334,8 @@ which `newclass` builds from the module's layout:
   bind early) searches as avmplus does: bindings, then dynamic properties,
   then the AS3 prototype chain, which each object reaches through `$p`.
 - **Inline caches**: each multiname a module makes keeps what its lookups
-  found on the traits of the objects they were made on
-  (`property-cache.ts`): the binding, as the slot's field and type, the
+  found on the traits of the objects they were made on, for up to eight
+  traits (`property-cache.ts`): the binding, as the slot's field and type, the
   getter, setter or method, or that it is a dynamic property's. The next
   get, set or call of the name on an object with those traits does that
   directly, which is what the lookup would decide, since that depends only
@@ -343,7 +343,9 @@ which `newclass` builds from the module's layout:
   dynamic property's entry still looks for it on the object, and leaves
   the prototypes to the full lookup. Describing traits, and setting up a
   class's or script's methods and hooks, bumps an epoch that empties every
-  cache. Not cached: a name made at run time, a name a hook resolves (a
+  cache. A name that has replaced 16 entries keeps the ones it has until
+  then, as a name seen on more traits than it keeps would otherwise
+  replace one on every miss. Not cached: a name made at run time, a name a hook resolves (a
   Proxy's, XML's), an element's index, a Dictionary's key, and primitives.
 - **A class object** is an instance of its static traits, whose base is
   Class's instance traits; it holds its instances' traits (`$it`) and its
