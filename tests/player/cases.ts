@@ -1293,6 +1293,99 @@ function orphans(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Four-frame clips whose square moves each frame: a Kid; a Box with a Kid
+// on its first frame; a Box3 with a Kid on its first and another on its
+// third; an Outer with a Box; a one-frame SBox with a Kid; a Maker, empty.
+// A five-frame root places a Box, an Outer and a Box3 and makes the rest,
+// and loads a SWF of a four-frame root with a four-frame clip
+// (scripts/FreshClips.as.template).
+function freshClips(compile: Compile): Uint8Array {
+  const moving = (square: number, ty = 0) => [
+    w.place({ depth: 2, character: square, matrix: { tx: 0, ty } }),
+    w.showFrame(),
+    ...[100, 200, 300].flatMap((tx) => [
+      w.place({ depth: 2, move: true, matrix: { tx, ty } }),
+      w.showFrame(),
+    ]),
+  ];
+  const kid = w.sprite(10, 4, [...moving(2, 200), w.end()]);
+  const inner = w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(2, 0x0000ff, 200),
+      kid,
+      w.place({ depth: 1, character: 10, matrix: { tx: 3600, ty: 1600 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const template = readFileSync(new URL("scripts/FreshClips.as.template", import.meta.url), "utf8");
+  const abc = compile(
+    "FreshClips",
+    template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
+  );
+  const [first, ...rest] = moving(1);
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 5,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000, 200),
+      square(2, 0x0000ff, 200),
+      kid,
+      w.sprite(11, 4, [w.place({ depth: 1, character: 10, name: "kid" }), first, ...rest, w.end()]),
+      w.sprite(12, 4, [
+        w.place({ depth: 1, character: 11, name: "box" }),
+        w.showFrame(),
+        w.showFrame(),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.sprite(13, 1, [w.place({ depth: 1, character: 10, name: "kid" }), w.showFrame(), w.end()]),
+      w.sprite(14, 1, [w.showFrame(), w.end()]),
+      w.sprite(15, 4, [
+        w.place({ depth: 1, character: 10, name: "kid" }),
+        first,
+        ...rest.slice(0, 3),
+        w.place({ depth: 3, character: 10, name: "late", matrix: { tx: 0, ty: -200 } }),
+        ...rest.slice(3),
+        w.end(),
+      ]),
+      w.doAbc(abc, "FreshClips"),
+      w.symbolClass([
+        [0, "Main"],
+        [10, "Kid"],
+        [11, "Box"],
+        [12, "Outer"],
+        [13, "SBox"],
+        [14, "Maker"],
+        [15, "Box3"],
+      ]),
+      w.place({ depth: 1, character: 11, name: "placed", matrix: { tx: 0, ty: 1600 } }),
+      w.place({ depth: 2, character: 12, name: "placedOuter", matrix: { tx: 800, ty: 1600 } }),
+      w.place({ depth: 3, character: 15, name: "q", matrix: { tx: 1600, ty: 1600 } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A one-frame root of 220 by 140 with `abc` as its code and nothing placed: room to draw in (scripts/Draws.as).
 function drawn(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -4560,6 +4653,14 @@ export const cases: PlayerCase[] = [
     script: "Orphans",
     frames: 4,
     capture: [1, 2, 3, 4],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "fresh-clips",
+    build: freshClips,
+    frames: 5,
+    capture: [2, 3],
     tolerance: 0,
     maxOutliers: 0,
   },
