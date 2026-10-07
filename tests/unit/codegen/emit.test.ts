@@ -12,6 +12,7 @@ const skip = !existsSync(generated) && "oracle/avmplus missing";
 const rt = {
   greaterThan: (a: number, b: number) => a > b,
   caught: (e: unknown) => e,
+  toInt: (v: number) => v | 0,
   unreachable: () => new Error("unreachable"),
   defaultXmlNamespace: null,
 };
@@ -54,6 +55,8 @@ const GETLOCAL3 = 0xd3;
 const SETLOCAL1 = 0xd5;
 const SETLOCAL2 = 0xd6;
 const SETLOCAL3 = 0xd7;
+const INCLOCAL_I = 0xc2;
+const IFLT = 0x15;
 
 test("locals and arithmetic run as plain JavaScript", { skip }, () => {
   const code = [PUSHBYTE, 7, SETLOCAL1, PUSHBYTE, 5, SETLOCAL2, GETLOCAL1, GETLOCAL2, ADD];
@@ -281,6 +284,108 @@ test("an exception in a handler's code goes to the handler covering that", { ski
   });
   assert.equal(run(abc), 8);
   assert.doesNotMatch(emit(abc), /switch \(b\)/);
+});
+
+test("a stack copy of a local stays the local past a branch that leaves it as it is", {
+  skip,
+}, () => {
+  // l1 = 5; push l1; if (true) { l2 }; return what was pushed.
+  // 0 pushbyte 5; 2 setlocal1; 3 getlocal1; 4 pushtrue; 5 iffalse +2 to 11;
+  // 9 getlocal2; 10 pop; 11 returnvalue.
+  const code = [PUSHBYTE, 5, SETLOCAL1, GETLOCAL1, PUSHTRUE, IFFALSE, ...s24(2), GETLOCAL2, POP];
+  const js = emit(script([...code, RETURNVALUE]));
+  assert.match(js, /return l1;/);
+  assert.doesNotMatch(js, /s0 = /);
+  assert.equal(run(script([...code, RETURNVALUE])), 5);
+});
+
+test("a stack copy of a local is written where a branch sets the local before a merge", {
+  skip,
+}, () => {
+  // l1 = 5; push l1; if (c) l1 = 9; return what was pushed, 5 either way.
+  // 0 pushbyte 5; 2 setlocal1; 3 getlocal1; 4 pushtrue or pushfalse;
+  // 5 iffalse +3 to 12; 9 pushbyte 9; 11 setlocal1; 12 returnvalue.
+  for (const c of [PUSHTRUE, PUSHFALSE]) {
+    const code = [PUSHBYTE, 5, SETLOCAL1, GETLOCAL1, c, IFFALSE, ...s24(3), PUSHBYTE, 9, SETLOCAL1];
+    assert.equal(run(script([...code, RETURNVALUE])), 5);
+  }
+});
+
+test("a stack copy of a local the loop it is live through sets is written before the loop", {
+  skip,
+}, () => {
+  // l2 = 0; l1 = 7; push l1; do { l1++; l2++ } while (l2 < 3); return what was pushed.
+  // 0 pushbyte 0; 2 setlocal2; 3 pushbyte 7; 5 setlocal1; 6 getlocal1; 7 label;
+  // 8 inclocal_i 1; 10 inclocal_i 2; 12 getlocal2; 13 pushbyte 3; 15 iflt -12 to 7;
+  // 19 returnvalue.
+  const code = [
+    PUSHBYTE,
+    0,
+    SETLOCAL2,
+    PUSHBYTE,
+    7,
+    SETLOCAL1,
+    GETLOCAL1,
+    LABEL,
+    INCLOCAL_I,
+    1,
+    INCLOCAL_I,
+    2,
+    GETLOCAL2,
+    PUSHBYTE,
+    3,
+    IFLT,
+    ...s24(-12),
+    RETURNVALUE,
+  ];
+  assert.match(emit(script(code)), /s0 = l1;\nL\d+: for/);
+  assert.equal(run(script(code)), 7);
+});
+
+test("a stack copy of a local an irreducible loop sets is written, in the dispatcher", {
+  skip,
+}, () => {
+  // As the irreducible loop above, with l1 pushed before it and returned after.
+  // 0 pushbyte 3; 2 setlocal1; 3 getlocal1; 4 pushtrue; 5 iftrue +10 to 19;
+  // 9 label; 10 getlocal1; 11 pushbyte 1; 13 subtract_i; 14 setlocal1; 15 jump +0 to 19;
+  // 19 getlocal1; 20 pushbyte 0; 22 ifgt -17 to 9; 26 returnvalue.
+  const code = [
+    PUSHBYTE,
+    3,
+    SETLOCAL1,
+    GETLOCAL1,
+    PUSHTRUE,
+    IFTRUE,
+    ...s24(10),
+    LABEL,
+    GETLOCAL1,
+    PUSHBYTE,
+    1,
+    SUBTRACT_I,
+    SETLOCAL1,
+    JUMP,
+    ...s24(0),
+    GETLOCAL1,
+    PUSHBYTE,
+    0,
+    IFGT,
+    ...s24(-17),
+    RETURNVALUE,
+  ];
+  assert.match(emit(script(code)), /switch \(b\)/);
+  assert.equal(run(script(code)), 3);
+});
+
+test("a stack copy of a local set inside a try is written before, and the handler sees the local", {
+  skip,
+}, () => {
+  // l1 = 1; push l1; l1 = 2; throw what was pushed; the handler of 0 up to 8
+  // returns the exception + l1, 1 + 2.
+  // 0 pushbyte 1; 2 setlocal1; 3 getlocal1; 4 pushbyte 2; 6 setlocal1; 7 throw;
+  // 8 getlocal1; 9 add_i; 10 returnvalue.
+  const code = [PUSHBYTE, 1, SETLOCAL1, GETLOCAL1, PUSHBYTE, 2, SETLOCAL1, THROW];
+  const abc = script([...code, GETLOCAL1, ADD_I, RETURNVALUE], { exceptions: [[0, 8, 8, 0, 0]] });
+  assert.equal(run(abc), 3);
 });
 
 test("a handler that goes back into its range first keeps the dispatcher, and runs the same", {

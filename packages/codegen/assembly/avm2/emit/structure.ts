@@ -496,7 +496,7 @@ export function branchTo(em: MethodEmitter, t: u32): void {
   }
 }
 
-/** Push what writing a block follows: its registers' types, scopes and region. */
+/** Push what writing a block follows: its registers' types and copies, scopes and region. */
 export function save(em: MethodEmitter): void {
   const ir = em.ir;
   const saved = em.saved;
@@ -513,6 +513,10 @@ export function save(em: MethodEmitter): void {
     saved.push(em.promoted[r]);
   }
 
+  for (let r = ir.localCount; r < ir.frameSize; r++) {
+    saved.push(em.copyOf[r]);
+  }
+
   saved.push(<i32>em.scopeDepth);
   saved.push(em.region);
   saved.push(em.file);
@@ -527,6 +531,10 @@ export function restore(em: MethodEmitter): void {
   em.file = saved.pop();
   em.region = saved.pop();
   em.scopeDepth = <u32>saved.pop();
+  for (let r = <i32>ir.frameSize - 1; r >= <i32>ir.localCount; r--) {
+    em.copyOf[r] = saved.pop();
+  }
+
   for (let r = <i32>ir.frameSize - 1; r >= 0; r--) {
     em.promoted[r] = <u8>saved.pop();
     em.checked[r] = <u8>saved.pop();
