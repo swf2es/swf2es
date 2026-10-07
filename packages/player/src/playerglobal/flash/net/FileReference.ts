@@ -14,7 +14,7 @@ export function fileReferenceNatives(s: Scripting): avm2.Natives {
 
   /** The dialog cancelled, as Flash reports it: CANCEL from the player, in a later frame. */
   const cancelled = (target: AsObject): void => {
-    s.deferHostEvent(() => dispatchEvent(s, target, s.event("cancel")));
+    s.loads.deferHostEvent(() => dispatchEvent(s, target, s.event("cancel")));
   };
 
   const noFile = (): never => {

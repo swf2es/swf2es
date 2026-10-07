@@ -39,7 +39,7 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
       const abort = new AbortController();
       this.$abort = abort;
       const source = request as AsObject;
-      s.requestBytes(source, abort.signal, ({ bytes, status, local }, url) => {
+      s.loads.requestBytes(source, abort.signal, ({ bytes, status, local }, url) => {
         if (this.$generation !== generation) {
           return;
         }
@@ -60,7 +60,7 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
               "ioError",
               false,
               false,
-              s.streamError(url, local),
+              s.loads.streamError(url, local),
             ) as AsObject,
           );
           return;

@@ -155,7 +155,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
       const generation = ++sound.generation;
       const abort = new AbortController();
       sound.abort = abort;
-      s.requestBytes(request as AsObject, abort.signal, ({ bytes, local }, url) => {
+      s.loads.requestBytes(request as AsObject, abort.signal, ({ bytes, local }, url) => {
         if (sound.generation !== generation) {
           return;
         }
@@ -172,7 +172,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
               "ioError",
               false,
               false,
-              s.streamError(url, local),
+              s.loads.streamError(url, local),
             ) as AsObject,
           );
           return;
@@ -219,7 +219,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
         const completed = sound.clip.then(
           (clip) => {
             sound.length = clip.durationMs;
-            s.deferHostEvent(() => {
+            s.loads.deferHostEvent(() => {
               if (sound.generation === generation) {
                 dispatchEvent(s, this as AsObject, s.event("complete"));
               }
@@ -227,7 +227,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
           },
           () => {
             discardPending(sound);
-            s.deferHostEvent(() => {
+            s.loads.deferHostEvent(() => {
               if (sound.generation === generation) {
                 dispatchEvent(
                   s,
@@ -237,14 +237,14 @@ export function soundNatives(s: Scripting): avm2.Natives {
                     "ioError",
                     false,
                     false,
-                    s.streamError(url, local),
+                    s.loads.streamError(url, local),
                   ) as AsObject,
                 );
               }
             });
           },
         );
-        s.trackRequest(completed);
+        s.loads.trackRequest(completed);
       });
     }
 

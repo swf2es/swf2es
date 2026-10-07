@@ -90,11 +90,11 @@ export class Player {
     // The first frame has its time too: the clock is a frame's duration on as it runs, as in Flash.
     s.timers.beginFrame(1000 / this.frameRate);
     // The main SWF's LoaderInfo: on the root, which every display object under it reports.
-    const info = s.loaderInfo(null);
-    s.describe(info, this.bytes, this.swf);
+    const info = s.loads.loaderInfo(null);
+    s.loads.describe(info, this.bytes, this.swf);
     info.$loaded = this.bytes.length;
     info.$url = s.url;
-    info.$params = s.mainParameters();
+    info.$params = s.loads.mainParameters();
     this.root.loaderInfo = info;
     // The stage's too: what a script puts on the stage itself has the stage
     // for its root and this for its LoaderInfo, and takes hits, as in Flash.
@@ -116,7 +116,7 @@ export class Player {
     }
 
     info.$content = this.root.object ?? null;
-    s.mainLoaded(info);
+    s.loads.mainLoaded(info);
     this.root.enterFirstFrame();
     s.frame(this.stage, false);
     this.frameRate = s.frameRate;

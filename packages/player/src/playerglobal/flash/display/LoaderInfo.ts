@@ -1,5 +1,5 @@
 // flash.display.LoaderInfo: what is known of a SWF, the main one's or a
-// Loader's; Scripting.loaderInfo makes one and keeps its facts on it.
+// Loader's; Loads.loaderInfo makes one and keeps its facts on it.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 
@@ -41,7 +41,7 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
     declare $bytes: Uint8Array | null;
     declare $swf: SwfFacts | null;
     declare $url: string | null;
-    /** What `parameters` tells (Scripting.loaderInfo): its LoaderContext's, its URL's query, or the main SWF's flashvars. */
+    /** What `parameters` tells (Loads.loaderInfo): its LoaderContext's, its URL's query, or the main SWF's flashvars. */
     declare $params: ReadonlyMap<string, string>;
     /** The application domain its content loads into, as its load chose it; unset for the main SWF's. */
     declare $domain: avm2.Domain | undefined;

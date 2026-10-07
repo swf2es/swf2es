@@ -1,5 +1,5 @@
 // flash.display.AVM1Movie: an AVM1 SWF's root as an AS3 Loader's content
-// (Scripting.requestLoad), a display object AS3 cannot script into. Its
+// (Loads.requestLoad), a display object AS3 cannot script into. Its
 // `call` and `addCallback` are playerglobal's own code, which throws Error
 // #2014 while interop is unavailable; with no AVM1 interpreter it always
 // is, so nothing ever crosses to the AVM1 side.

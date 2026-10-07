@@ -805,7 +805,9 @@ and the player's paths in this document are relative to it:
   into their application domains and tells whose code runs, `sha256.ts`
   names the ABCs it compiles, `events.ts` dispatches events to AS3
   listeners, `lifecycle.ts` tells display objects they were added or
-  removed and keeps the orphans, `symbols.ts` keeps what SymbolClass
+  removed and keeps the orphans, `loads.ts` takes what Loaders and
+  URLStreams ask for through the host and gives it to a frame,
+  `symbols.ts` keeps what SymbolClass
   bound classes to, the fonts registered and the sounds' shared decodes,
   `timers.ts` keeps the clock and the timers that fire by it. `hosts.ts`
   holds what a host may supply in place of the browser (navigation,
@@ -1335,7 +1337,7 @@ with `/[[DYNAMIC]]/n` appended, and `ApplicationDomain.currentDomain` is
 a new object at each ask, as in Flash, so two are never `==`.
 
 The loaded SWF's code goes through `Codegen` and the runtime as the main
-SWF's does. Linking is asynchronous (the module is imported), so a load
+SWF's does (`scripting/loads.ts`). Linking is asynchronous (the module is imported), so a load
 asked for is compiled and linked between frames, in the order asked, and
 each takes its place in the first frame after its code is linked; a host
 that steps frames by hand awaits `Scripting.settled()` between them, as

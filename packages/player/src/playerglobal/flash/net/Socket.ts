@@ -99,7 +99,7 @@ export function socketNatives(s: Scripting): avm2.Natives {
         );
       };
       if (!s.socket) {
-        s.deferHostEvent(() => fail("Error #2031: Socket Error."));
+        s.loads.deferHostEvent(() => fail("Error #2031: Socket Error."));
         return;
       }
 
@@ -109,7 +109,7 @@ export function socketNatives(s: Scripting): avm2.Natives {
           s.rt.toInt(port),
           {
             open: () =>
-              s.deferHostEvent(() => {
+              s.loads.deferHostEvent(() => {
                 if (!current()) {
                   return;
                 }
@@ -120,7 +120,7 @@ export function socketNatives(s: Scripting): avm2.Natives {
               }),
             data: (bytes) => {
               const copy = bytes.slice();
-              s.deferHostEvent(() => {
+              s.loads.deferHostEvent(() => {
                 if (!current() || !c.connected) {
                   return;
                 }
@@ -152,7 +152,7 @@ export function socketNatives(s: Scripting): avm2.Natives {
               });
             },
             close: () =>
-              s.deferHostEvent(() => {
+              s.loads.deferHostEvent(() => {
                 if (!current()) {
                   return;
                 }
@@ -167,11 +167,11 @@ export function socketNatives(s: Scripting): avm2.Natives {
                 c.transport = null;
                 event(this, "close");
               }),
-            error: (message) => s.deferHostEvent(() => fail(message)),
+            error: (message) => s.loads.deferHostEvent(() => fail(message)),
           },
         );
       } catch (e) {
-        s.deferHostEvent(() => fail(String(e)));
+        s.loads.deferHostEvent(() => fail(String(e)));
       }
     }
 

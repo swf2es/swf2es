@@ -34,18 +34,20 @@ test("URLStream delivers fetched bytes on a frame and discards a closed request"
     rt,
     event: (type: string) => ({ $type: type, $stopped: 0 }),
     httpStatus: (status: number) => ({ $type: "httpStatus", $status: status, $stopped: 0 }),
-    requestBytes: (
-      request: { url: string },
-      signal: AbortSignal,
-      deliver: (result: FetchResult, url: string) => void,
-    ) =>
-      requests.push({
-        url: request.url,
-        signal,
-        deliver: (result) => deliver(result, new URL(request.url, "http://example.test/").href),
-      }),
-    streamError: (url: string, local = false) =>
-      local ? "Error #2032: Stream Error" : `Error #2032: Stream Error. URL: ${url}`,
+    loads: {
+      requestBytes: (
+        request: { url: string },
+        signal: AbortSignal,
+        deliver: (result: FetchResult, url: string) => void,
+      ) =>
+        requests.push({
+          url: request.url,
+          signal,
+          deliver: (result) => deliver(result, new URL(request.url, "http://example.test/").href),
+        }),
+      streamError: (url: string, local = false) =>
+        local ? "Error #2032: Stream Error" : `Error #2032: Stream Error. URL: ${url}`,
+    },
   } as unknown as Scripting;
   const natives = urlStreamNatives(scripting);
   const key = (name: string) => natives[`flash.net::URLStream#${name}`](scripting.rt);
