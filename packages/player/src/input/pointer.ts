@@ -1,6 +1,6 @@
 // Browser pointer input enters here; Flash chooses targets from its display
 // list, while Pixi only supplies the pointer's position and buttons.
-import { hitsOwnPoint, toStage } from "../display/bounds.js";
+import { hitsOwnPoint, hitsPoint, toStage } from "../display/bounds.js";
 import {
   BitmapObject,
   ButtonObject,
@@ -54,6 +54,22 @@ const mouseEnabled = (d: DisplayObject): boolean =>
 /** `d` itself where it takes the pointer, else the hit goes on to its parent. */
 const own = (d: DisplayObject): Pick => (mouseEnabled(d) ? d : PROPAGATE);
 
+/** Each sprite's hitArea. */
+const hitAreas = new WeakMap<DisplayObject, DisplayObject>();
+
+/** Sprite.hitArea: `area` picks for `sprite` in place of its own drawing. */
+export function setHitArea(sprite: DisplayObject, area: DisplayObject | null): void {
+  if (area) {
+    hitAreas.set(sprite, area);
+  } else {
+    hitAreas.delete(sprite);
+  }
+}
+
+export function hitAreaOf(sprite: DisplayObject): DisplayObject | null {
+  return hitAreas.get(sprite) ?? null;
+}
+
 /**
  * The object under a point, in stage coordinates, as Flash picks it
  * (Ruffle's `mouse_pick_avm2`): within a container, its interactive
@@ -61,6 +77,14 @@ const own = (d: DisplayObject): Pick => (mouseEnabled(d) ? d : PROPAGATE);
  * a child whose mouseEnabled is false, goes to the nearest ancestor that
  * takes the pointer; one that goes up is kept while the search goes on,
  * so a disabled field over a button leaves the button its clicks.
+ *
+ * A sprite with a hitArea is hit where the area draws, wherever the area
+ * is on the display list and whether or not it is visible, and its own
+ * drawing counts for nothing; its interactive children still pick, unless
+ * its mouseChildren is false. An area off the display list hits nothing.
+ * The area itself is left as it was, mouseEnabled and all, as adl leaves
+ * it: shown and enabled, it takes the pointer itself where it is on top,
+ * as Flash's documentation warns. Ruffle reads AVM2's hitArea for nothing.
  */
 export function pointerTarget(
   stage: Container,
@@ -110,6 +134,12 @@ export function pointerTarget(
       return hitsOwnPoint(d, x, y, stage, true) ? own(d) : null;
     }
 
+    const area = hitAreas.get(d);
+    const areaHit = area && area !== d ? () => hitsPoint(area, x, y, true, stage) : null;
+    if (areaHit && d.object?.$mouseChildren === false) {
+      return areaHit() ? own(d) : null;
+    }
+
     // Two passes rather than a sorted copy: this runs on every pointer move.
     const children = d.children;
     let propagated = false;
@@ -126,6 +156,10 @@ export function pointerTarget(
         // A container whose mouseChildren is false takes its children's hits itself.
         return d.object?.$mouseChildren === false ? own(d) : found;
       }
+    }
+
+    if (areaHit) {
+      return areaHit() ? own(d) : null;
     }
 
     if (propagated) {
@@ -151,6 +185,46 @@ export function pointerTarget(
   }
 
   return stage.object ? stage : null;
+}
+
+/** What each sprite dragged was last over, which Sprite.dropTarget reads. */
+const dropTargets = new WeakMap<DisplayObject, DisplayObject | null>();
+
+export function dropTargetOf(d: DisplayObject): DisplayObject | null {
+  return dropTargets.get(d) ?? null;
+}
+
+/**
+ * The topmost object drawing under a point, outside `dragged`, as Flash's
+ * dropTarget names it: the shape itself, not the sprite that would take
+ * the pointer, whatever its mouseEnabled (Flash's trace of the corpus's
+ * `sprite_dropTarget` names the unnamed shapes in its sprites, where
+ * Ruffle's names the sprites), and null over nothing, not the stage.
+ */
+export function objectUnder(
+  stage: Container,
+  x: number,
+  y: number,
+  dragged: DisplayObject,
+): DisplayObject | null {
+  const visit = (d: DisplayObject): DisplayObject | null => {
+    if (d === dragged || !d.visible || d.clipDepth > 0 || d.maskOf) {
+      return null;
+    }
+
+    if (d instanceof Container) {
+      for (let i = d.children.length - 1; i >= 0; i--) {
+        const found = visit(d.children[i]);
+        if (found) {
+          return found;
+        }
+      }
+    }
+
+    return d !== stage && hitsOwnPoint(d, x, y, stage, true) ? d : null;
+  };
+
+  return visit(stage);
 }
 
 /** Mouse events on the player's display list, independent of a renderer. */
@@ -236,6 +310,12 @@ export class PointerInput {
 
     drag.lastX = x;
     drag.lastY = y;
+    let under = objectUnder(this.stage, x, y, d);
+    while (under && !under.object) {
+      under = under.parent;
+    }
+
+    dropTargets.set(d, under === this.stage ? null : under);
   }
 
   private send(

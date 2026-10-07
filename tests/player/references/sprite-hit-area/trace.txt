@@ -1,0 +1,8 @@
+unset null null
+set true null true true
+hidden true
+itself true
+cleared null
+shared true true
+hitTestPoint false false true
+under 1 1

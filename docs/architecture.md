@@ -1080,6 +1080,19 @@ or key, whichever comes first: a browser sends about one a frame, a
 headless one or a fast mouse more, and each picks from the whole list.
 A pointer that crosses a small object between two frames so sends it no
 `mouseOver`. A path's polygon, flattened for hit tests, is kept with it.
+A sprite with a `hitArea` is hit where the area draws, wherever the area
+is on the display list and shown or not, and not by its own drawing; its
+interactive children still pick unless its `mouseChildren` is false, and
+an area off the list hits nothing. Ruffle stores AVM2's `hitArea` and
+picks without it. adl leaves the area's own `mouseEnabled` as it was
+(`sprite-hit-area`), so a shown, enabled area on top takes the pointer
+itself, as Flash's documentation warns; `hitTestPoint` and
+`getObjectsUnderPoint` ignore it. A drag keeps, as it moves and when it
+ends, the topmost object drawn under the pointer outside the dragged
+sprite, which `dropTarget` reads: the shape, not the sprite that takes
+the pointer, as Flash's trace of the corpus's `sprite_dropTarget` names
+the shapes in its sprites, and null over nothing. Neither can be played
+in adl, which the harness gives no pointer, so the unit tests carry them.
 Roll events, wheel, right and middle buttons, and Flash's drag and focus
 rules still need their own cases.
 
@@ -1641,6 +1654,12 @@ an embedding page must provide one through its own permitted bridge.
 relay whose URL the embedder chooses. They live outside `player` so its
 browser entrypoint has no Node I/O dependency. WebSocket message boundaries
 are only transport chunks; ActionScript reads the resulting byte stream.
+AIR's `localAddress`, `localPort`, `remoteAddress` and `remotePort` read as
+adl's do: null and 0 before a connection and after `close()`, "" and 0
+while one opens and after it fails, and once open the ends the host gives
+with its open report, kept after the peer closes. The Node host gives its
+socket's; a WebSocket relay's are not the script's, so they stay "" and 0,
+what Flash reads while it does not know them.
 
 The Flash cases use `loadBytes`, the inner SWF carried in the outer's
 script as base64; the oracle runs under AIR, which refuses code from
@@ -2131,8 +2150,18 @@ the rotations, and applies the scale after the rotation, as adl does;
 Ruffle's corpus drops the scale. Before SWF 13 Flash had the determinant
 of the other sign and turned about an axis as given, not a unit one, and
 the player does so for such SWFs (`matrix3d-swf12`, `matrix3d-swf13`).
-`Utils3D.projectVector` and `projectVectors` divide as adl does, which
-the Flash Player of Ruffle's corpus rounds further. A field of view a
+`pointAt`, a stub in Ruffle and Shumway, is adl's to a float32 rounding
+or two (`point-at`): `at` turns to face the point from the matrix's
+position and `up` to the world's (0, -1, 0), each made square to the
+other; left out they are (0, 1, 0) and (0, 0, 1), not the documented
+(0, 0, -1) and (0, -1, 0). The scales `decompose` finds go with the
+facing frame's axes, x across, y up, z along `at`, and the skew it drops
+stays, so a skewed matrix stays skewed; a direction of no length in
+float32 leaves the matrix as it was, and a NaN makes it all NaN.
+`Utils3D.pointTowards` interpolates a copy toward the matrix's
+translation alone turned so, the percent held to 0 to 1, so its scale
+goes to 1. `Utils3D.projectVector` and `projectVectors` divide as adl
+does, which the Flash Player of Ruffle's corpus rounds further. A field of view a
 focal length gives goes through `atan`, whose last bit Flash's C library
 decides, so `perspective_projection`'s ramp matches only in part.
 
@@ -2462,6 +2491,12 @@ not set: whole numbers rounded, a half away from zero, NaN and the
 infinities -2147483648 as x86 converts them, `align` one of Flash's or
 ArgumentError 2008, an unknown `display` null. The `text-fields` case
 traces all of this, defaults, HTML and refusals, against adl.
+An `IMG` is dropped, as adl drops it, by class name or URL, and
+`getImageReference` gives null for every id (`text-field-queries`).
+`TextField.isFontCompatible` asks the fonts `enumerateFonts` lists, the
+SWF's own before any is registered: the name in any case, no CFF font,
+and the style "bold", "italic" or "boldItalic" as written, any other
+regular.
 `getTextRuns` cuts a range where the format changes; a paragraph's line
 end takes the paragraph's format; `getFirstCharInParagraph` and
 `getParagraphLength` count the text's length as in the last paragraph,

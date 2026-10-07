@@ -21,6 +21,7 @@ export type {
   PlatformCapabilities,
   ScreenCapabilities,
   SharedObjectStorage,
+  SocketEndpoints,
   SocketEvents,
   SocketHost,
   SocketTransport,

@@ -333,3 +333,126 @@ export function transform3D(m: Raw, x0: number, y0: number, z0: number, w = 1): 
 
   return out;
 }
+
+/**
+ * Both taken apart as decompose takes them, the translations and scales
+ * lerped and the rotations slerped, and put together with the scale
+ * applied after the rotation, as adl does: a scale that is not uniform
+ * then stretches the turned axes (the `three-d` case). Ruffle's corpus
+ * has the scale dropped, which adl does not.
+ */
+export function interpolate3D(from: Raw, to: Raw, percent: number): Raw {
+  const [t0, q0, s0] = decompose3D(from, "quaternion");
+  const [t1, q1, s1] = decompose3D(to, "quaternion");
+  const lerp = (a: number[], b: number[]) => [0, 1, 2].map((i) => a[i] + (b[i] - a[i]) * percent);
+  let dot = q0[0] * q1[0] + q0[1] * q1[1] + q0[2] * q1[2] + q0[3] * q1[3];
+  let end = q1;
+  if (dot < 0) {
+    dot = -dot;
+    end = q1.map((c) => -c);
+  }
+
+  let k0 = 1 - percent;
+  let k1 = percent;
+  if (dot <= 0.9995) {
+    const theta = Math.acos(dot);
+    const sinTheta = Math.sin(theta);
+    k0 = Math.sin((1 - percent) * theta) / sinTheta;
+    k1 = Math.sin(percent * theta) / sinTheta;
+  }
+
+  let r = q0.map((c, i) => c * k0 + end[i] * k1);
+  const length = Math.hypot(...r);
+  r = length === 0 ? [0, 0, 0, 1] : r.map((c) => c / length);
+  const [sx, sy, sz] = lerp(s0, s1);
+  const turned = compose3D(lerp(t0, t1), r, [1, 1, 1], "quaternion");
+  return multiply3D(
+    translation3D(turned[12], turned[13], turned[14]),
+    multiply3D(
+      scale3D(sx, sy, sz),
+      turned.map((v, i) => (i >= 12 && i < 15 ? 0 : v)),
+    ),
+  );
+}
+
+/**
+ * `v` made a unit one, times the float32 reciprocal of its length, as adl
+ * makes even a denormal one; null for one of no length in float32.
+ */
+function unit3(v: readonly number[]): number[] | null {
+  const squared = dot3(v, v);
+  const k = f(1 / Math.sqrt(squared));
+  return squared === 0 ? null : v.map((x) => f(x * k));
+}
+
+/** In doubles: adl's side of an `at` and `up` nearly parallel comes out so, where float32's is none. */
+function cross3(a: readonly number[], b: readonly number[]): number[] {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+
+/** A rotation whose columns are `x`, `y` and `z`. */
+function columns3D(x: readonly number[], y: readonly number[], z: readonly number[]): Raw {
+  return Float32Array.of(...x, 0, ...y, 0, ...z, 0, 0, 0, 0, 1);
+}
+
+/**
+ * Matrix3D.pointAt as adl has it, to a float32 rounding or two; Ruffle and
+ * Shumway leave it a stub. The object-relative `at` turns to face `pos`
+ * from the matrix's position, and `up` to the world's (0, -1, 0), each
+ * made square to the other; left out they are (0, 1, 0) and (0, 0, 1), not
+ * the documented (0, 0, -1) and (0, -1, 0), which turn it otherwise. With
+ * M's linear part K · R · S, R and S as decompose finds them and K the
+ * skew it drops, it becomes K · L · S · Q: L the facing frame, x across,
+ * y up and z toward `pos`, and Q taking `at` and `up` to its z and y. The
+ * translation stays and the projection row goes. Null, the matrix left as
+ * it was, where a direction has no length in float32: `pos` at the
+ * position or along the world's up, `at` zero, or `up` zero or parallel
+ * to it. A NaN anywhere makes every element NaN, as in adl.
+ */
+export function pointAt3D(
+  m: Raw,
+  pos: readonly number[],
+  at: readonly number[],
+  up: readonly number[],
+): Raw | null {
+  const toward = unit3(pos.map((v, i) => f(f(v) - m[12 + i])));
+  const across = toward && unit3(cross3(toward, [0, -1, 0]));
+  const facing = unit3(at.map(f));
+  const side = facing && unit3(cross3(up.map(f), facing));
+  if (!toward || !across || !facing || !side) {
+    return null;
+  }
+
+  const above = cross3(across, toward);
+  const top = cross3(facing, side);
+  const frame = columns3D(
+    across.map((v) => -v),
+    above,
+    toward,
+  );
+  // Rows, not columns: the inverse of the rotation taking z and y to `at` and `up`.
+  const object = columns3D(
+    [side[0], top[0], facing[0]],
+    [side[1], top[1], facing[1]],
+    [side[2], top[2], facing[2]],
+  );
+  const [, rotation, scale] = decompose3D(m, "eulerAngles");
+  const linear = Float32Array.from(m);
+  linear.fill(0, 12, 15);
+  linear[3] = linear[7] = linear[11] = 0;
+  linear[15] = 1;
+  const unskewed = invert3D(compose3D([0, 0, 0], rotation, scale, "eulerAngles"));
+  const skew = unskewed ? multiply3D(linear, unskewed) : identity3D();
+  const out = multiply3D(
+    skew,
+    multiply3D(frame, multiply3D(scale3D(scale[0], scale[1], scale[2]), object)),
+  );
+  if (out.some(Number.isNaN)) {
+    return out.fill(Number.NaN);
+  }
+
+  out[12] = m[12];
+  out[13] = m[13];
+  out[14] = m[14];
+  return out;
+}

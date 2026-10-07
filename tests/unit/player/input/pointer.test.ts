@@ -7,7 +7,12 @@ import {
   Container,
   TextObject,
 } from "../../../../packages/player/dist/display/display.js";
-import { PointerInput, pointerTarget } from "../../../../packages/player/dist/input/pointer.js";
+import {
+  dropTargetOf,
+  PointerInput,
+  pointerTarget,
+  setHitArea,
+} from "../../../../packages/player/dist/input/pointer.js";
 import type { Scripting } from "../../../../packages/player/dist/scripting.js";
 
 test("the topmost artwork targets its interactive parent, with mouseChildren and visibility respected", () => {
@@ -153,6 +158,131 @@ test("sprite dragging follows the pointer in parent coordinates, clamps, and sto
   input.stopDrag();
   input.handle("move", { x: 50, y: 60 });
   assert.deepEqual([second.matrix.tx, second.matrix.ty], [20, 25]);
+});
+
+/** A white square of `size` at (x, y), which takes no pointer itself. */
+function square(x: number, y: number, size = 20): BitmapObject {
+  const b = new BitmapObject(new BitmapStore(size, size, true, 0xffffffff));
+  b.object = { $display: b } as never;
+  b.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: x, ty: y });
+  return b;
+}
+
+/** A stage with a root under it, as a SWF's, and a sprite on the root drawing a square at (0, 0). */
+function stageWithSprite(): { stage: Container; root: Container; sprite: Container } {
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  const root = new Container();
+  root.object = { $display: root } as never;
+  root.loaderInfo = {} as never;
+  stage.addChildAt(root, 0);
+  const sprite = new Container();
+  sprite.object = { $display: sprite } as never;
+  sprite.addChildAt(square(0, 0), 0);
+  root.addChildAt(sprite, 0);
+  return { stage, root, sprite };
+}
+
+test("a sprite with a hitArea is hit where the area draws, visible or not, and only there", () => {
+  const { stage, root, sprite } = stageWithSprite();
+  const area = new Container();
+  area.object = { $display: area } as never;
+  area.addChildAt(square(50, 50), 0);
+  area.visible = false;
+  root.addChildAt(area, 1);
+  assert.equal(pointerTarget(stage, 10, 10, 100, 100), sprite);
+
+  setHitArea(sprite, area);
+  assert.equal(pointerTarget(stage, 10, 10, 100, 100), stage);
+  assert.equal(pointerTarget(stage, 60, 60, 100, 100), sprite);
+
+  // Shown and enabled, the area on top takes the pointer itself, as Flash's documentation warns.
+  area.visible = true;
+  assert.equal(pointerTarget(stage, 60, 60, 100, 100), area);
+  assert.ok(area.object);
+  area.object.$mouseEnabled = false;
+  assert.equal(pointerTarget(stage, 60, 60, 100, 100), sprite);
+
+  // Its interactive children still pick for themselves, but not with mouseChildren false.
+  const child = new Container();
+  child.object = { $display: child } as never;
+  child.addChildAt(square(0, 80), 0);
+  sprite.addChildAt(child, 1);
+  assert.equal(pointerTarget(stage, 10, 90, 100, 100), child);
+  assert.ok(sprite.object);
+  sprite.object.$mouseChildren = false;
+  assert.equal(pointerTarget(stage, 10, 90, 100, 100), stage);
+  assert.equal(pointerTarget(stage, 60, 60, 100, 100), sprite);
+  sprite.object.$mouseChildren = true;
+
+  // An area inside the sprite moves with it; one off the display list hits nothing.
+  root.removeChild(area);
+  sprite.addChildAt(area, 0);
+  sprite.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 10, ty: 0 });
+  assert.equal(pointerTarget(stage, 65, 60, 100, 100), sprite);
+  sprite.removeChild(area);
+  assert.equal(pointerTarget(stage, 65, 60, 100, 100), stage);
+
+  // Without it, the sprite is hit by its own drawing again.
+  sprite.addChildAt(area, 0);
+  setHitArea(sprite, null);
+  assert.equal(pointerTarget(stage, 15, 10, 100, 100), sprite);
+  assert.equal(pointerTarget(stage, 75, 90, 100, 100), stage);
+});
+
+test("a sprite in buttonMode with a hitArea shows its hand over the area", () => {
+  const { stage, root, sprite } = stageWithSprite();
+  const area = new Container();
+  area.object = { $display: area, $mouseEnabled: false } as never;
+  area.addChildAt(square(50, 50), 0);
+  root.addChildAt(area, 1);
+  assert.ok(sprite.object);
+  sprite.object.$buttonMode = true;
+  setHitArea(sprite, area);
+  const scripting = {
+    stageWidth: 100,
+    stageHeight: 100,
+    mouseCursor: "auto",
+    rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
+  } as unknown as Scripting;
+  const input = new PointerInput(stage, scripting);
+  input.handle("move", { x: 10, y: 10 });
+  assert.equal(input.cursor(), "default");
+  input.handle("move", { x: 60, y: 60 });
+  assert.equal(input.cursor(), "pointer");
+});
+
+test("dropTarget is the topmost object drawn under the pointer as a drag moves and ends, outside the dragged sprite", () => {
+  const { stage, root, sprite } = stageWithSprite();
+  const target = new Container();
+  target.object = { $display: target } as never;
+  const shape = square(40, 0);
+  target.addChildAt(shape, 0);
+  root.addChildAt(target, 0);
+  const scripting = {
+    stageWidth: 100,
+    stageHeight: 100,
+    mouseStageX: 10,
+    mouseStageY: 10,
+    rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
+  } as unknown as Scripting;
+  const input = new PointerInput(stage, scripting);
+
+  assert.equal(dropTargetOf(sprite), null);
+  input.startDrag(sprite, false, null);
+  assert.equal(dropTargetOf(sprite), null);
+  input.handle("move", { x: 50, y: 10 });
+  assert.equal(dropTargetOf(sprite), shape);
+  input.handle("move", { x: 90, y: 90 });
+  input.stopDrag();
+  assert.equal(dropTargetOf(sprite), null);
+
+  input.startDrag(sprite, false, null);
+  input.handle("move", { x: 45, y: 5 });
+  input.stopDrag();
+  assert.equal(dropTargetOf(sprite), shape);
+  input.handle("move", { x: 90, y: 90 });
+  assert.equal(dropTargetOf(sprite), shape);
 });
 
 test("the cursor is a hand under a sprite in buttonMode, as useHandCursor says, and an I-beam over selectable text", () => {

@@ -271,9 +271,18 @@ export interface SocketTransport {
   close(): void;
 }
 
+/** A connection's ends, as Socket's localAddress, localPort, remoteAddress and remotePort read them. */
+export interface SocketEndpoints {
+  localAddress: string;
+  localPort: number;
+  remoteAddress: string;
+  remotePort: number;
+}
+
 /** Transport notifications; the player delivers them to ActionScript on a frame. */
 export interface SocketEvents {
-  open(): void;
+  /** Opened, with its ends where the host knows them: a relay's are not the script's to see. */
+  open(endpoints?: SocketEndpoints): void;
   data(bytes: Uint8Array): void;
   close(): void;
   error(message: string): void;

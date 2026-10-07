@@ -2080,6 +2080,42 @@ function fontNatives(compile: Compile): Uint8Array {
   });
 }
 
+// Probe, regular, and a bold font bound to a class, for TextField.isFontCompatible.
+function textFieldQueries(compile: Compile): Uint8Array {
+  return w.swf({
+    width: 20,
+    height: 20,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      probeFont(1),
+      w.font3({
+        id: 2,
+        name: "BoldProbe",
+        bold: true,
+        ascent: 800,
+        descent: 200,
+        glyphs: [{ char: "a", advance: 500, boxes: [[50, -500, 450, 0]] }],
+      }),
+      w.doAbc(
+        compile(
+          "EmbeddedBold",
+          "package { import flash.text.Font; public class EmbeddedBold extends Font {} }",
+        ),
+        "EmbeddedBold",
+      ),
+      w.doAbc(compile("TextFieldQueries")),
+      w.symbolClass([
+        [0, "TextFieldQueries"],
+        [2, "EmbeddedBold"],
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 function fontRegistration(compile: Compile): Uint8Array {
   const inner = w.swf({
     width: 20,
@@ -4127,6 +4163,14 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "text-field-queries",
+    build: textFieldQueries,
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "font-description-natives",
     swf: (abc) => bare(abc, 1, "FontDescriptionNatives"),
     script: "FontDescriptionNatives",
@@ -4176,6 +4220,15 @@ export const cases: PlayerCase[] = [
     swf: (abc) => bare(abc, 1, "SpriteDragNatives"),
     script: "SpriteDragNatives",
     frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "sprite-hit-area",
+    swf: (abc) => bare(abc, 1, "SpriteHitArea"),
+    script: "SpriteHitArea",
+    frames: 2,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,
@@ -4869,6 +4922,15 @@ export const cases: PlayerCase[] = [
     name: "three-d",
     swf: (abc) => bare(abc, 1, "ThreeD"),
     script: "ThreeD",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "point-at",
+    swf: (abc) => bare(abc, 1, "PointAt"),
+    script: "PointAt",
     frames: 1,
     capture: [],
     tolerance: 0,

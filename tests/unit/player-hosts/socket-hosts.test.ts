@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import { test } from "node:test";
 import { nodeSocketHost } from "@swf2es/player-hosts/node";
 import { webSocketSocketHost } from "@swf2es/player-hosts/websocket";
+import type { SocketEndpoints } from "../../../packages/player/dist/hosts.js";
 
 test("the Node host exchanges bytes with a TCP socket and reports its close", async () => {
   const server = createServer((peer) => {
@@ -21,10 +22,10 @@ test("the Node host exchanges bytes with a TCP socket and reports its close", as
   const address = server.address();
   assert.ok(address && typeof address !== "string");
 
-  let connected!: () => void;
+  let connected!: (endpoints?: SocketEndpoints) => void;
   let received!: () => void;
   let closed!: () => void;
-  const opened = new Promise<void>((resolve) => {
+  const opened = new Promise<SocketEndpoints | undefined>((resolve) => {
     connected = resolve;
   });
   const data = new Promise<void>((resolve) => {
@@ -36,7 +37,7 @@ test("the Node host exchanges bytes with a TCP socket and reports its close", as
   const messages: number[] = [];
   const errors: string[] = [];
   const transport = nodeSocketHost().connect("127.0.0.1", address.port, {
-    open: () => connected(),
+    open: (endpoints) => connected(endpoints),
     data: (bytes) => {
       messages.push(...bytes);
       if (messages.length >= 2) {
@@ -48,7 +49,11 @@ test("the Node host exchanges bytes with a TCP socket and reports its close", as
   });
 
   try {
-    await opened;
+    const endpoints = await opened;
+    assert.equal(endpoints?.localAddress, "127.0.0.1");
+    assert.ok(endpoints && endpoints.localPort > 0);
+    assert.equal(endpoints?.remoteAddress, "127.0.0.1");
+    assert.equal(endpoints?.remotePort, address.port);
     transport.send(Uint8Array.from([1, 2, 3]));
     await data;
     assert.deepEqual(messages, [4, 5]);

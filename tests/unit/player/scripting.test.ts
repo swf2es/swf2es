@@ -11,6 +11,7 @@ import { zlibCompress } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../oracle/oracle.ts";
 import type { Container, MovieClip } from "../../../packages/player/dist/display/display.js";
+import type { SocketEndpoints } from "../../../packages/player/dist/hosts.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
 import { bare, boundClip, innerSwf, scripted } from "../../player/cases.ts";
@@ -70,7 +71,7 @@ test("Socket uses a host connection and delivers data on player frames", { skip 
   );
   const sent: Uint8Array[] = [];
   const closeCalls: number[] = [];
-  let opened: (() => void) | undefined;
+  let opened: ((endpoints?: SocketEndpoints) => void) | undefined;
   let received: ((bytes: Uint8Array) => void) | undefined;
   let remoteClose: (() => void) | undefined;
   let failed: ((message: string) => void) | undefined;
@@ -106,14 +107,26 @@ test("Socket uses a host connection and delivers data on player frames", { skip 
     rt.callProperty(socket, rt.publicName(name), ...args);
   const get = (name: string) => rt.getProperty(socket, rt.publicName(name));
 
+  const ends = () =>
+    ["localAddress", "localPort", "remoteAddress", "remotePort"].map((name) => get(name));
+
   assert.equal(get("connected"), false);
+  assert.deepEqual(ends(), [null, 0, null, 0]);
   call("connect", "example.test", 1234);
   assert.equal(get("connected"), false);
-  opened?.();
+  assert.deepEqual(ends(), ["", 0, "", 0]);
+  opened?.({
+    localAddress: "192.0.2.1",
+    localPort: 50000,
+    remoteAddress: "198.51.100.7",
+    remotePort: 1234,
+  });
   assert.deepEqual(events, []);
+  assert.deepEqual(ends(), ["", 0, "", 0]);
   player.tick();
   assert.deepEqual(events, ["connect"]);
   assert.equal(get("connected"), true);
+  assert.deepEqual(ends(), ["192.0.2.1", 50000, "198.51.100.7", 1234]);
 
   call("writeByte", 0x12);
   call("writeShort", 0x3456);
@@ -135,18 +148,21 @@ test("Socket uses a host connection and delivers data on player frames", { skip 
 
   call("close");
   assert.equal(get("connected"), false);
+  assert.deepEqual(ends(), [null, 0, null, 0]);
   assert.equal(closeCalls.length, 1);
   remoteClose?.();
   player.tick();
   assert.deepEqual(events, ["connect", "socketData"]);
 
   call("connect", "example.test", 1234);
-  opened?.();
+  opened?.({ localAddress: "::1", localPort: 50001, remoteAddress: "::1", remotePort: 1234 });
   player.tick();
   remoteClose?.();
   player.tick();
   assert.deepEqual(events, ["connect", "socketData", "connect", "close"]);
   assert.equal(get("connected"), false);
+  // The peer's close keeps them, as adl's does.
+  assert.deepEqual(ends(), ["::1", 50001, "::1", 1234]);
   assert.equal(closeCalls.length, 1);
 
   call("connect", "example.test", 1234);
@@ -157,6 +173,14 @@ test("Socket uses a host connection and delivers data on player frames", { skip 
   remoteClose?.();
   player.tick();
   assert.equal(events.length, 5);
+  assert.deepEqual(ends(), ["", 0, "", 0]);
+
+  // A host that does not know the ends, as a WebSocket relay's, leaves them unknown.
+  call("connect", "example.test", 1234);
+  opened?.();
+  player.tick();
+  assert.equal(get("connected"), true);
+  assert.deepEqual(ends(), ["", 0, "", 0]);
 });
 
 test("Mouse.hide and show set the host's cursor as a script calls them", { skip }, async () => {
