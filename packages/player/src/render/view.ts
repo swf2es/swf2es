@@ -76,6 +76,8 @@ import { drawStaticText, drawText } from "./text.js";
 const IDENTITY = new Matrix();
 
 const NO_RECORDS: readonly FilterRecord[] = [];
+/** sync's scratch, which a container's matrix is set from and which it does not keep. */
+const PLACED = new Matrix();
 /** restroke's scratch, which a stretch is compared in and never kept. */
 const STRETCH: Linear = [0, 0, 0, 0];
 /** A Shape child's slice key once its owner's slice changed: it is sliced again on its next sync. */
@@ -1096,7 +1098,7 @@ export class PixiView {
 
     if (dirty & TRANSFORM) {
       const m = own;
-      container.setFromMatrix(new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty));
+      container.setFromMatrix(PLACED.set(m.a, m.b, m.c, m.d, m.tx, m.ty));
       container.visible = o.visible || masking;
       // A blend mode composites the object as a layer (render/blend.ts); a mask is its fills alone.
       // Its filters, then its blend: adl filters the object, then blends what they make.
@@ -1174,14 +1176,16 @@ export class PixiView {
 
     if (moved || dirty & TRANSFORM) {
       const m = own;
-      const world: Linear = [
-        parent[0] * m.a + parent[2] * m.b,
-        parent[1] * m.a + parent[3] * m.b,
-        parent[0] * m.c + parent[2] * m.d,
-        parent[1] * m.c + parent[3] * m.d,
-      ];
-      moved = !sameLinear(world, node.world);
-      node.world = world;
+      const a = parent[0] * m.a + parent[2] * m.b;
+      const b = parent[1] * m.a + parent[3] * m.b;
+      const c = parent[0] * m.c + parent[2] * m.d;
+      const d = parent[1] * m.c + parent[3] * m.d;
+      const was = node.world;
+      // A new one only where it changed: others may hold the one before, which stays as it was.
+      moved = a !== was[0] || b !== was[1] || c !== was[2] || d !== was[3];
+      if (moved) {
+        node.world = [a, b, c, d];
+      }
     }
 
     // A 9-slice reshapes the shapes as the owner's scale, bounds or grid change, or a Shape child's
