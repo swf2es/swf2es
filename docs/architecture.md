@@ -1714,8 +1714,10 @@ coloured bars measured to the pixel:
   then pass the corner at the corner's rate), a child sprite's drawing at
   110 to 120 moves the right edge to 120 wherever the child is placed or
   however it is scaled, a grandchild's moves nothing, a bitmap's or a
-  video's counts. A
-  SWF shape's are its recorded bounds, its lines with them.
+  video's counts. A SWF shape's are its recorded bounds, its lines with
+  them; a MorphShape's are its blend's at the ratio it is drawn at, from
+  the frame that sets the ratio: the panel slices by the new blend as it
+  draws it, though the morph takes the blend only in its own draw.
 - The map goes by the object's own matrix, not its place on the stage: a
   grid under a parent scaled 3 and itself unscaled changes nothing, and
   one scaled under a turned or mirrored parent is sliced, its corners
@@ -1785,10 +1787,11 @@ removes children, turns a parent, gives a Shape a grid of its own, draws
 through `BitmapData.draw`, masks, scrolls and hit-tests a curve across
 the grid; `scale9-hits` hit-tests panels whose children widen what the
 grid divides, from the start and as they change, and a panel inside a
-mask. Flash snaps straight runs of lines to whole pixels, which the
-player does not, so a grid's lines at half pixels part from it there as
-unsliced ones do. Flash's hit tests on a curve land about half a pixel
-lower than the player's, sliced or not.
+mask, and draws one whose MorphShape child changes ratio. Flash snaps
+straight runs of lines to whole pixels, which the player does not, so a
+grid's lines at half pixels part from it there as unsliced ones do.
+Flash's hit tests on a curve land about half a pixel lower than the
+player's, sliced or not.
 
 ### Sound state
 

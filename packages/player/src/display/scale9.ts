@@ -132,6 +132,26 @@ export function sliceOf(o: DisplayObject, m: Matrix = o.matrix): Slice | null {
   return slice;
 }
 
+/**
+ * The slice `o` draws with as it is drawn: a MorphShape, it or a child,
+ * takes its ratio's blend first, as it does later in the same draw, so
+ * that a new ratio's bounds slice on its own frame, as adl's do, and not
+ * a frame late.
+ */
+export function sliceDrawn(o: DisplayObject): Slice | null {
+  if (o instanceof ShapeObject && o.morph) {
+    o.drawn();
+  } else if (o instanceof Container) {
+    for (const child of o.children) {
+      if (child instanceof ShapeObject && child.morph) {
+        child.drawn();
+      }
+    }
+  }
+
+  return sliceOf(o);
+}
+
 /** Each object's last slice and what it was made of: a hit test asks for it on every pointer move. */
 const slices = new WeakMap<
   DisplayObject,

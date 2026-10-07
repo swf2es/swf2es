@@ -10,7 +10,8 @@ package {
   // and hit by nothing; and on frame 2 a bitmap child's data replaced
   // wider, a grandchild Shape reparented into its panel and a Shape child's
   // drawing grown, hit-tested on frame 3, once they are drawn. The
-  // timeline adds a clip layer holding a sprite.
+  // timeline adds a panel whose MorphShape child changes ratio, and a
+  // clip layer holding a sprite.
   public dynamic class Scale9Hits extends MovieClip {
     private var frame:int = 1;
     private var panels:Array = [];

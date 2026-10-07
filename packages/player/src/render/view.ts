@@ -37,7 +37,7 @@ import {
 } from "../display/display.js";
 import type { Filter as FilterRecord } from "../display/filters.js";
 import { shifted } from "../display/geometry.js";
-import { type Slice, sliceLayers, sliceOf } from "../display/scale9.js";
+import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
 import type { ShapeLayer } from "../display/shapes.js";
 import type { ShapeCharacter } from "../display/timeline.js";
 import type { PointerState } from "../input/pointer.js";
@@ -1173,7 +1173,7 @@ export class PixiView {
       (o.scale9Grid || node.sliceKey || (o instanceof ShapeObject && o.parent?.scale9Grid)) &&
       this.reslices(o, node, dirty, remask)
     ) {
-      node.slice = o.scale9Grid && !masking && o !== this.drawRoot ? sliceOf(o) : null;
+      node.slice = o.scale9Grid && !masking && o !== this.drawRoot ? sliceDrawn(o) : null;
       node.sliceOwner = o.parent;
       const m = o.matrix;
       node.sliceLinear = [m.a, m.b, m.c, m.d];
