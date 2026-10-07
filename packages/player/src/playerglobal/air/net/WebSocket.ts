@@ -97,7 +97,8 @@ export function webSocketNatives(s: Scripting): avm2.Natives {
     // AIR writes the opcode's low four bits, whatever they are.
     switch (opcode & 0x0f) {
       case TEXT:
-        transport.send(new TextDecoder().decode(bytes));
+        // A leading BOM is the SWF's bytes, as AIR sends them, not a mark to drop.
+        transport.send(new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes));
         break;
       case BINARY:
         transport.send(bytes);
