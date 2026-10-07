@@ -1403,8 +1403,10 @@ export class MovieClip extends Container {
   }
 
   set makingChildren(making: boolean) {
-    this.making = making;
-    scriptWork.changes++;
+    if (making !== this.making) {
+      this.making = making;
+      scriptWork.changes++;
+    }
   }
 
   /** Placed by a timeline, not made by a script with `new`. */
@@ -1413,8 +1415,10 @@ export class MovieClip extends Container {
   }
 
   set timelineChild(placed: boolean) {
-    this.placedByTimeline = placed;
-    scriptWork.changes++;
+    if (placed !== this.placedByTimeline) {
+      this.placedByTimeline = placed;
+      scriptWork.changes++;
+    }
   }
 
   /** Whether its playhead moves on; stopped, its stream stops, as in Flash and Ruffle. */

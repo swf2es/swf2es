@@ -769,4 +769,6 @@ test("every change a round of frame scripts reads moves scriptWork, and a script
   const frame = clip.currentFrame;
   assert.ok(!moves(() => (clip.currentFrame = frame)), "the same frame");
   assert.ok(!moves(() => (clip.playing = false)), "a stop");
+  assert.ok(!moves(() => (clip.makingChildren = false)), "still made");
+  assert.ok(!moves(() => (clip.timelineChild = true)), "still a timeline child");
 });
