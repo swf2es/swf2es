@@ -3,11 +3,9 @@
 // took 250 ms to compile and 10 ms to read back (see docs/architecture.md,
 // Caching modules). Anything that fails, a database that will not open, a
 // quota, a store that is gone, makes a miss, and the player compiles.
-import { type ModuleCache, sha256 } from "@swf2es/player";
+import type { CachedModule, ModuleCache } from "@swf2es/player";
 
 export interface IndexedDbModuleCacheOptions {
-  /** The compiler's identity, as compilerIdentity gives it for codegen.wasm's bytes. */
-  compiler: string;
   /** The database's name. */
   name?: string;
   /** About how many bytes the modules may take, as UTF-16; the least recently used go first. */
@@ -18,11 +16,14 @@ export interface IndexedDbModuleCacheOptions {
   openTimeout?: number;
 }
 
-/** The identity of the compiler whose codegen.wasm has these bytes, for IndexedDbModuleCacheOptions. */
-export function compilerIdentity(wasm: Uint8Array): Promise<string> {
-  return sha256(wasm);
+/** A ModuleCache that a host can close, letting go of its database. */
+export interface IndexedDbModuleCache extends ModuleCache {
+  /** Close the database; a later get or put opens it again. */
+  close(): void;
 }
 
+/** The database's version: 2 keeps each module with its compile's log. */
+const VERSION = 2;
 const MODULES = "modules";
 /** Each module's size and last use, apart from it, so that evicting reads no module. */
 const ENTRIES = "entries";
@@ -41,25 +42,27 @@ interface Entry {
  * idle: a large module's write that a load's next get waited behind took
  * that get from 4 to 45 ms.
  */
-export function indexedDbModuleCache(options: IndexedDbModuleCacheOptions): ModuleCache {
-  const {
-    compiler,
-    name = "swf2es-modules",
-    maxBytes = 256 * 1024 * 1024,
-    openTimeout = 2000,
-  } = options;
+export function indexedDbModuleCache(
+  options: IndexedDbModuleCacheOptions = {},
+): IndexedDbModuleCache {
+  const { name = "swf2es-modules", maxBytes = 256 * 1024 * 1024, openTimeout = 2000 } = options;
   let opened: Promise<IDBDatabase> | null = null;
+  // Let go of, as when another tab opens a later version: the next call opens it again.
+  const forget = (db: IDBDatabase) => {
+    db.close();
+    opened = null;
+  };
   const database = () => {
-    opened ??= open(options.indexedDB ?? globalThis.indexedDB, name, openTimeout);
+    opened ??= open(options.indexedDB ?? globalThis.indexedDB, name, openTimeout, forget);
     return opened;
   };
 
   return {
-    compiler,
     async get(key) {
       const db = await database();
-      const module = await request<unknown>(db.transaction(MODULES).objectStore(MODULES).get(key));
-      if (typeof module !== "string") {
+      const stored = await request<unknown>(db.transaction(MODULES).objectStore(MODULES).get(key));
+      const module = stored as CachedModule | undefined;
+      if (typeof module?.module !== "string" || typeof module.log !== "string") {
         return undefined;
       }
 
@@ -70,10 +73,10 @@ export function indexedDbModuleCache(options: IndexedDbModuleCacheOptions): Modu
         entries.put({ ...entry, used: Date.now() });
       }
 
-      return module;
+      return { module: module.module, log: module.log };
     },
     async put(key, module) {
-      const bytes = module.length * 2;
+      const bytes = (module.module.length + module.log.length) * 2;
       if (bytes > maxBytes) {
         return;
       }
@@ -83,7 +86,7 @@ export function indexedDbModuleCache(options: IndexedDbModuleCacheOptions): Modu
       const tx = db.transaction([MODULES, ENTRIES], "readwrite");
       const modules = tx.objectStore(MODULES);
       const entries = tx.objectStore(ENTRIES);
-      modules.put(module, key);
+      modules.put({ module: module.module, log: module.log }, key);
       entries.put({ key, bytes, used: Date.now() } as Entry);
       // Oldest first, the one just put among them.
       const all = await request<Entry[]>(entries.index(USED).getAll());
@@ -106,6 +109,11 @@ export function indexedDbModuleCache(options: IndexedDbModuleCacheOptions): Modu
 
       await done(tx);
     },
+    close() {
+      const was = opened;
+      opened = null;
+      was?.then((db) => db.close()).catch(() => {});
+    },
   };
 }
 
@@ -119,12 +127,22 @@ function idle(f: () => void): void {
 }
 
 /** The database, made if new; rejected if it does not open within `timeout` ms, as when another tab blocks an upgrade. */
-function open(factory: IDBFactory, name: string, timeout: number): Promise<IDBDatabase> {
+function open(
+  factory: IDBFactory,
+  name: string,
+  timeout: number,
+  forget: (db: IDBDatabase) => void,
+): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`IndexedDB ${name} did not open`)), timeout);
-    const opening = factory.open(name, 1);
+    const opening = factory.open(name, VERSION);
     opening.onupgradeneeded = () => {
+      // An older version's modules are another format's: dropped.
       const db = opening.result;
+      for (const store of [...db.objectStoreNames]) {
+        db.deleteObjectStore(store);
+      }
+
       db.createObjectStore(MODULES);
       db.createObjectStore(ENTRIES, { keyPath: "key" }).createIndex(USED, USED);
     };
@@ -132,7 +150,7 @@ function open(factory: IDBFactory, name: string, timeout: number): Promise<IDBDa
       clearTimeout(timer);
       const db = opening.result;
       // A later version elsewhere, as a newer player's in another tab, waits for none of ours.
-      db.onversionchange = () => db.close();
+      db.onversionchange = () => forget(db);
       resolve(db);
     };
     opening.onerror = () => {

@@ -6,7 +6,7 @@ import { readDoAbc, type Swf, tags } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { decodeImages } from "../bitmap/images.js";
 import type { Library } from "../display/timeline.js";
-import type { ModuleCache } from "../hosts.js";
+import type { CachedModule, ModuleCache } from "../hosts.js";
 import type { Scripting } from "../scripting.js";
 import { sha256 } from "./sha256.js";
 
@@ -120,8 +120,11 @@ export class Code {
 
   /** Load the libraries the SWF's code links against (builtin, playerglobal), whose scripts run on first use. */
   async loadLibraries(abcs: Uint8Array[]): Promise<void> {
+    const root = this.s.rt.root;
     for (const abc of abcs) {
-      await this.compileAt(await this.add(abc, true, this.s.rt.root), this.s.rt.root, true);
+      const index = await this.add(abc, true, root);
+      const ready = this.cache() ? await this.prepare([index]) : null;
+      this.compileAt(index, root, true, undefined, ready?.[0]);
     }
   }
 
@@ -159,8 +162,11 @@ export class Code {
         }
       }
 
-      for (const { index, lazy } of added) {
-        const linked = await this.compileAt(index, domain, false, { url, library });
+      // With a module cache, each module is read or compiled first, so
+      // that they all load into the runtime at once, as without one.
+      const ready = this.cache() ? await this.prepare(added.map((a) => a.index)) : null;
+      for (const [k, { index, lazy }] of added.entries()) {
+        const linked = this.compileAt(index, domain, false, { url, library }, ready?.[k]);
         if (!lazy) {
           runs.push(() => this.s.rt.run(linked));
         }
@@ -282,20 +288,44 @@ export class Code {
 
   /**
    * ABC `index`'s module, compiled against every ABC added so far that its
-   * domain sees, or as the host's module cache kept it, loaded into the
+   * domain sees, or `ready` from the host's module cache, loaded into the
    * runtime's `domain`; `builtin` for the player's own libraries, a SWF's
-   * with its `origin`. Each is evaluated under a script name of its own, by
-   * which Runtime.codeDomain finds the domain of the code running.
+   * with its `origin`. Each is evaluated under a script name of its own,
+   * by which Runtime.codeDomain finds the domain of the code running.
    */
-  private async compileAt(
+  private compileAt(
     index: number,
     domain: avm2.Domain,
     builtin = false,
     origin?: { url: string; library: Library },
-  ): Promise<Value> {
+    ready?: Ready,
+  ): Value {
     const script = `swf2es-${++this.modules}.js`;
-    const factory = await this.moduleOf(index, domain, script);
-    const linked = this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
+    const load = (module: string) => {
+      const factory = evaluateModule(module, script);
+      return this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
+    };
+    let linked: Value;
+    if (!ready?.cached) {
+      linked = load(ready?.module ?? this.s.codegen.compileModule(this.hashes, index));
+    } else {
+      // A cached module that does not evaluate, or that the runtime refuses
+      // before loading anything of it (its linked ABCs differ), is compiled
+      // now, the domain already as its compile left it, and stored again.
+      const loaded = domain.own.length;
+      try {
+        linked = load(ready.module);
+      } catch (e) {
+        if (domain.own.length !== loaded) {
+          throw e;
+        }
+
+        const module = this.s.codegen.compileModule(this.hashes, index);
+        this.store(ready.key, { module, log: ready.log });
+        linked = load(module);
+      }
+    }
+
     if (origin) {
       const abc = linked as object;
       this.moduleAbcs.set(script, new WeakRef(abc));
@@ -306,70 +336,93 @@ export class Code {
     return linked;
   }
 
+  /** The host's module cache, where it has one and the compiler has an identity to key it by. */
+  private cache(): ModuleCache | null {
+    return this.s.codegen.identity === null ? null : this.s.moduleCache;
+  }
+
   /**
-   * ABC `index`'s module evaluated as `script`: the cache's, if the host
-   * has one that holds it and it evaluates, else compiled, and given to
-   * the cache. Any error of the cache's is a miss.
+   * The modules of the ABCs at `indices`, in order, each from the cache if
+   * it holds one for the ABC's key, what its compile fixed in the
+   * compiler's domain replayed in its place, else compiled and given to
+   * the cache: the domain is as compiling each would have left it either
+   * way, which the next one's key names. Any error of the cache's is a
+   * miss.
    */
-  private async moduleOf(
-    index: number,
-    domain: avm2.Domain,
-    script: string,
-  ): Promise<(rt: avm2.Runtime) => Value> {
-    const cache = this.s.moduleCache;
-    if (!cache) {
-      return evaluateModule(this.s.codegen.compileModule(this.hashes, index), script);
-    }
-
-    try {
-      const cached = await cache.get(await sha256Text(this.moduleKey(index, domain, cache)));
-      if (typeof cached === "string") {
-        return evaluateModule(cached, script);
+  private async prepare(indices: number[]): Promise<Ready[]> {
+    const cache = this.cache();
+    const ready: Ready[] = [];
+    for (const index of indices) {
+      const asked = this.moduleKey(index);
+      let entry: CachedModule | undefined;
+      if (cache && asked !== null) {
+        try {
+          entry = await cache.get(await sha256Text(asked));
+        } catch {
+          entry = undefined;
+        }
       }
-    } catch {
-      // Unreadable, or not a module: compiled and stored again below.
+
+      // Taken again next to the replay or the compile, which the awaits
+      // let other loads come between.
+      const key = this.moduleKey(index);
+      let failed = false;
+      if (
+        key !== null &&
+        key === asked &&
+        typeof entry?.module === "string" &&
+        typeof entry.log === "string"
+      ) {
+        if (this.s.codegen.replay(entry.log, index)) {
+          ready.push({ module: entry.module, log: entry.log, key, cached: true });
+          continue;
+        }
+
+        // Done part way, the log left the domain as no compile would.
+        failed = true;
+      }
+
+      const { module, log } = this.s.codegen.compileModuleLogged(this.hashes, index);
+      if (log !== null && !failed) {
+        this.store(key, { module, log });
+      }
+
+      ready.push({ module, log: log ?? "", key, cached: false });
     }
 
-    // The key again, next to the compile: the awaits above let other loads
-    // add ABCs that this one's domain sees.
-    const key = this.moduleKey(index, domain, cache);
-    const module = this.s.codegen.compileModule(this.hashes, index);
-    sha256Text(key)
-      .then((k) => cache.put(k, module))
-      .catch(() => {});
-    return evaluateModule(module, script);
+    return ready;
+  }
+
+  /** Give the cache `entry` under `key`'s hash, not waiting for it. */
+  private store(key: string | null, entry: CachedModule): void {
+    const cache = this.cache();
+    if (cache && key !== null) {
+      sha256Text(key)
+        .then((k) => cache.put(k, entry))
+        .catch(() => {});
+    }
   }
 
   /**
    * What ABC `index`'s module depends on, as the cache keys it: the
-   * compiler, the API version, every ABC its domain sees when it compiles,
-   * in load order, those added after it included (a SWF's are all added
-   * before any compiles), with its own place among them, and what its
-   * domain and their ancestors have found (Codegen.found), each by the
-   * hash of the ABC that defines it. A superset of what codegen's cacheKey
-   * names, which leaves out those added after it.
+   * compiler's identity, the API version, every ABC its domain sees, by
+   * hash and whether it is a library, those added after it included, its
+   * own place among them, and the compiler's log about them, the lazy
+   * answers fixed so far and the findings recorded, in order (see
+   * Codegen.context). Null where there is none.
    */
-  private moduleKey(index: number, domain: avm2.Domain, cache: ModuleCache): string {
-    const seen: number[] = [];
-    const found: string[] = [];
-    for (let d: avm2.Domain | null = domain; d; d = d.parent) {
-      seen.push(...(this.codegenAbcs.get(d.id) ?? []));
-      for (const told of this.reported.get(d.id) ?? []) {
-        const [asType, nsKind, uri, name, at, i] = JSON.parse(told);
-        const by = this.codegenAbcs.get(at)?.[i];
-        found.push(
-          JSON.stringify([asType, nsKind, uri, name, by === undefined ? "" : this.hashes[by]]),
-        );
-      }
+  private moduleKey(index: number): string | null {
+    const context = this.s.codegen.context(index);
+    if (!context) {
+      return null;
     }
 
-    seen.sort((a, b) => a - b);
     return JSON.stringify({
-      compiler: cache.compiler,
+      compiler: this.s.codegen.identity,
       api: API_VERSION,
-      abcs: seen.map((i) => `${this.builtins[i] ? "builtin " : ""}${this.hashes[i]}`),
-      own: seen.indexOf(index),
-      found: found.sort(),
+      abcs: context.abcs.map((i) => `${this.builtins[i] ? "builtin " : ""}${this.hashes[i]}`),
+      own: context.own,
+      log: context.log,
     });
   }
 
@@ -418,6 +471,14 @@ export class Code {
 
     return undefined;
   }
+}
+
+/** A module made ready to load: from the cache, its log replayed, or compiled; its key, if it has one. */
+interface Ready {
+  module: string;
+  log: string;
+  key: string | null;
+  cached: boolean;
 }
 
 const EXPORT = "export default ";

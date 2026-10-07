@@ -14,6 +14,7 @@ export {
 export { type Path, type ShapeLayer, shapeLayers } from "./display/shapes.js";
 export { type Character, type Library, readLibrary, type Timeline } from "./display/timeline.js";
 export type {
+  CachedModule,
   Drawer,
   FetchRequest,
   FetchResult,
@@ -35,5 +36,4 @@ export { bindKeyboard, type KeyState } from "./input/keyboard.js";
 export { Player } from "./player.js";
 export { setTransformTable } from "./render/table.js";
 export { PixiView } from "./render/view.js";
-export { sha256 } from "./scripting/sha256.js";
 export { airLibrary, Scripting } from "./scripting.js";

@@ -344,18 +344,25 @@ export function globalWebSocketHost(): WebSocketHost | null {
 }
 
 /**
+ * A module as a ModuleCache keeps it: its source, and what compiling it
+ * fixed in the compiler's domain (Codegen.compileModuleLogged), which the
+ * player replays in place of compiling it.
+ */
+export interface CachedModule {
+  module: string;
+  log: string;
+}
+
+/**
  * Where a host keeps the modules the compiler wrote, across page loads, so
- * that a SWF loaded again is not compiled again (see Code). Each call may
- * fail or answer nothing; the player then compiles, as without one.
+ * that a SWF loaded again is not compiled again (see Code). Keys name the
+ * compiler by the identity its codegen.wasm was stamped with, and a
+ * compiler without one uses no cache. Each call may fail or answer
+ * nothing; the player then compiles, as without one.
  */
 export interface ModuleCache {
-  /**
-   * The compiler's identity, part of every key: a hash of codegen.wasm's
-   * bytes, so that a new compiler never reuses an old one's output.
-   */
-  readonly compiler: string;
   /** The module stored under `key`, if any. */
-  get(key: string): Promise<string | undefined>;
-  /** Store `module` under `key`; a store that is full may evict others, or refuse it. */
-  put(key: string, module: string): Promise<void>;
+  get(key: string): Promise<CachedModule | undefined>;
+  /** Store `entry` under `key`; a store that is full may evict others, or refuse it. */
+  put(key: string, entry: CachedModule): Promise<void>;
 }

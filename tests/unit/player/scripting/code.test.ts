@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { type Codegen, createCodegen } from "@swf2es/codegen";
 import { containerEngine } from "../../../../oracle/oracle.ts";
-import type { ModuleCache } from "../../../../packages/player/dist/hosts.js";
+import type { CachedModule, ModuleCache } from "../../../../packages/player/dist/hosts.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
 import { scripted } from "../../../player/cases.ts";
@@ -30,32 +30,36 @@ const wasm = await WebAssembly.compile(
   await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
 );
 
-/** A cache in memory, over `store`, that counts what it is asked. */
-function memoryCache(compiler: string, store = new Map<string, string>()) {
-  const asked = { gets: 0, puts: 0 };
+/** A cache in memory, over `store`. */
+function memoryCache(store = new Map<string, CachedModule>()) {
   const cache: ModuleCache = {
-    compiler,
     async get(key) {
-      asked.gets++;
       return store.get(key);
     },
-    async put(key, module) {
-      asked.puts++;
-      store.set(key, module);
+    async put(key, entry) {
+      store.set(key, entry);
     },
   };
-  return { cache, store, asked };
+  return { cache, store };
 }
 
-/** A compiler that keeps every module it writes. */
-async function counted(): Promise<{ codegen: Codegen; modules: string[] }> {
-  const codegen = await createCodegen(wasm);
+/** A compiler that keeps every module it writes, as `identity` if given. */
+async function counted(identity?: string | null): Promise<{ codegen: Codegen; modules: string[] }> {
+  const made = await createCodegen(wasm);
+  const codegen: Codegen =
+    identity === undefined ? made : Object.create(made, { identity: { value: identity } });
   const modules: string[] = [];
-  const compileModule = codegen.compileModule.bind(codegen);
+  const compileModule = made.compileModule.bind(made);
+  const compileModuleLogged = made.compileModuleLogged.bind(made);
   codegen.compileModule = (hashes, index) => {
     const module = compileModule(hashes, index);
     modules.push(module);
     return module;
+  };
+  codegen.compileModuleLogged = (hashes, index) => {
+    const logged = compileModuleLogged(hashes, index);
+    modules.push(logged.module);
+    return logged;
   };
   return { codegen, modules };
 }
@@ -69,9 +73,9 @@ async function until(done: () => boolean): Promise<void> {
   assert.ok(done(), "the cache was never given the modules");
 }
 
-/** Play `swf` for its first frame with `cache`: what it traced and the modules compiled. */
-async function play(swf: Uint8Array, cache: ModuleCache | null) {
-  const { codegen, modules } = await counted();
+/** Play `swf` for its first frame with `cache`: what it traced, the modules compiled, and its scripting. */
+async function play(swf: Uint8Array, cache: ModuleCache | null, identity?: string | null) {
+  const { codegen, modules } = await counted(identity);
   const lines: string[] = [];
   const scripting = new Scripting(codegen, {
     print: (line) => lines.push(line),
@@ -79,61 +83,96 @@ async function play(swf: Uint8Array, cache: ModuleCache | null) {
   });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
   await new Player(swf, scripting).start();
-  return { lines, modules };
+  return { lines, modules, scripting };
 }
+
+const modulesOf = (store: Map<string, CachedModule>) => [...store.values()].map((e) => e.module);
 
 test("modules are compiled once, then read from the cache as compiled", { skip }, async () => {
   const swf = scripted(compiler(out)("Main"));
-  const { cache, store } = memoryCache("compiler A");
+  const { cache, store } = memoryCache();
 
   const first = await play(swf, cache);
   // builtin, playerglobal and the SWF's.
   assert.equal(first.modules.length, 3);
   await until(() => store.size === 3);
-  assert.deepEqual([...store.values()].sort(), [...first.modules].sort());
+  assert.deepEqual(modulesOf(store).sort(), [...first.modules].sort());
 
   const second = await play(swf, cache);
   assert.equal(second.modules.length, 0);
   assert.deepEqual(second.lines, first.lines);
   assert.deepEqual(second.lines, (await play(swf, null)).lines);
+  // Their logs replayed, the compiler's domain is as compiling them left it.
+  assert.deepEqual(second.scripting.codegen.context(2), first.scripting.codegen.context(2));
 });
 
-test("another compiler's modules are not reused", { skip }, async () => {
+test("another compiler's modules are not reused, and one without an identity uses none", {
+  skip,
+}, async () => {
   const swf = scripted(compiler(out)("Main"));
-  const store = new Map<string, string>();
-  await play(swf, memoryCache("compiler A", store).cache);
+  const { cache, store } = memoryCache();
+  await play(swf, cache);
   await until(() => store.size === 3);
 
-  const other = await play(swf, memoryCache("compiler B", store).cache);
+  const other = await play(swf, cache, "another compiler");
   assert.equal(other.modules.length, 3);
   await until(() => store.size === 6);
+
+  const asked: string[] = [];
+  const watched: ModuleCache = {
+    get: (key) => {
+      asked.push(key);
+      return cache.get(key);
+    },
+    put: (key, entry) => cache.put(key, entry),
+  };
+  const none = await play(swf, watched, null);
+  assert.equal(none.modules.length, 3);
+  assert.deepEqual(asked, []);
 });
 
 test("a cache that fails, or gives what is not a module, is compiled past", { skip }, async () => {
   const swf = scripted(compiler(out)("Main"));
   const expected = (await play(swf, null)).lines;
-  const { cache, store } = memoryCache("compiler A");
+  const { cache, store } = memoryCache();
   await play(swf, cache);
   await until(() => store.size === 3);
 
   // Truncated: compiled again, and stored whole again.
-  for (const [key, module] of store) {
-    store.set(key, module.slice(0, module.length / 2));
+  for (const [key, entry] of store) {
+    store.set(key, { ...entry, module: entry.module.slice(0, entry.module.length / 2) });
   }
 
   const truncated = await play(swf, cache);
   assert.equal(truncated.modules.length, 3);
   assert.deepEqual(truncated.lines, expected);
-  await until(() => [...store.values()].every((m) => truncated.modules.includes(m)));
+  await until(() => modulesOf(store).every((m) => truncated.modules.includes(m)));
 
   const failing: ModuleCache = {
-    compiler: "compiler A",
     get: () => Promise.reject(new Error("unreadable")),
     put: () => Promise.reject(new Error("full")),
   };
   const failed = await play(swf, failing);
   assert.equal(failed.modules.length, 3);
   assert.deepEqual(failed.lines, expected);
+});
+
+test("a cached module the runtime refuses is compiled, and stored again", { skip }, async () => {
+  const swf = scripted(compiler(out)("Main"));
+  const { cache, store } = memoryCache();
+  const first = await play(swf, cache);
+  await until(() => store.size === 3);
+
+  // builtin's module everywhere: it evaluates, but loads after no other ABC.
+  const builtin = first.modules[0];
+  for (const [key, entry] of store) {
+    store.set(key, { ...entry, module: builtin });
+  }
+
+  const refused = await play(swf, cache);
+  assert.equal(refused.modules.length, 2);
+  assert.deepEqual(refused.lines, first.lines);
+  await until(() => modulesOf(store).sort().join() === [...first.modules].sort().join());
 });
 
 test("a module's key names the ABCs added after it in its domain", { skip }, async () => {
@@ -157,7 +196,7 @@ test("a module's key names the ABCs added after it in its domain", { skip }, asy
         w.end(),
       ],
     });
-  const { cache, store } = memoryCache("compiler A");
+  const { cache, store } = memoryCache();
   await play(withAbc("CacheExtraA"), cache);
   await until(() => store.size === 4);
 

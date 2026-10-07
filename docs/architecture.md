@@ -62,7 +62,8 @@ requires:
    ABCs loaded before it differ. In a child application domain, what the
    domain was recorded to find (`found`) binds names and types too, so the
    key names those findings, each by the hash of the ABC that defines it.
-   The player's module cache keys more widely (see Caching modules).
+   The player's module cache keys more widely, by what the domain has
+   fixed of what resolves lazily too (see Caching modules).
 
 CI checks both (`pnpm determinism`, `tests/conformance/determinism.ts`),
 over the builtins, then each conformance case (also compiled with asc's
@@ -1823,44 +1824,71 @@ once the case loads its SWF.
 
 A host may give `Scripting` a `ModuleCache` (`hosts.ts`), which keeps the
 modules the compiler writes across page loads; `player-hosts/indexeddb`
-is one in IndexedDB. `Code` asks it for each module before compiling, and
-gives it each module it compiles, not waiting for the write: a module read
-back is the string `compileModule` returned, so JIT and AOT output stay
-one. Anything the cache does wrong, an error, no answer of a string, a
-string that does not evaluate (a truncated write), is a miss, compiled
-past and stored again.
+is one in IndexedDB. A module read back is the string `compileModule`
+returned, so JIT and AOT output stay one.
+
+Compiling a module is not only its text: it fixes in the compiler's
+domain the first answers of what resolves lazily (a traits' types, a
+method's signature, an ABC's verified scopes), which see the ABCs there
+are when first asked, and which later modules compile against. Were a
+module from the cache to skip that, a slot of type A in a child domain,
+resolved only after the main domain had gained another A, would resolve
+to that one, and a later module calling a method on it would compile to
+another dispatch id under the same key. So the cache keeps with each
+module what its compile added to the domain's log (`compileModuleLogged`),
+the log a rebuild replays (see Linking), and the player replays it in
+place of compiling (`Codegen.replay`): the domain is then as the compile
+would have left it, but for the weights `compact` goes by.
 
 A module is keyed by a SHA-256 of all it depends on: the compiler's
-identity (`ModuleCache.compiler`, a hash of codegen.wasm's bytes, since
-`COMPILER_VERSION` does not move with every change to the output), the
-API version, every ABC its application domain sees as it compiles, by
-hash and whether it is a library, in load order, those added after it
-included, with its own place among them, and what its domain and their
-ancestors were told they found (`Codegen.found`), each by the hash of the
-ABC that defines it. That is more than `cacheKey` names: a SWF's DoABCs
-are all added before any compiles, so the first may extend a class of the
-last. The key is taken again next to the compile on a miss, as another
-load may add ABCs while the cache is asked. Compiling leaves state behind
-only in what the compiler weighs for `compact`, never in what it writes.
+identity, the API version, and its context (`Codegen.context`): every ABC
+its application domain sees, by hash and whether it is a library, in load
+order, those added after it included (a SWF's DoABCs are all added before
+any compiles, so the first may extend a class of the last), its own place
+among them, and the domain's log about them in order, each entry with how
+many of them there were when it happened: the lazy answers fixed so far
+and what the domain and its ancestors were told they found. ABCs are named
+by their place among those it sees, so the same ABCs loaded at other
+indices, beside other domains, key alike. The compiler's identity is a
+hash of codegen.wasm's bytes, which its build stamps into the binary as a
+custom section (`packages/codegen/stamp.ts`) and `createCodegen` reads as
+`Codegen.identity`, not the host's word nor `COMPILER_VERSION`, which
+moves only by hand; a compiler without the section uses no cache.
+
+`Code.link` adds a SWF's ABCs, then, with a cache, makes each module ready
+in order, reading it and replaying its log or compiling it, the key taken
+again next to the replay or the compile since the reads let other loads
+come between; then evaluates and loads them all into the runtime at once,
+as without a cache, whose path is unchanged and awaits nothing more.
+Anything the cache does wrong is a miss: an error, an answer that is not a
+module and a log, a module that does not evaluate (a truncated write) or
+that the runtime refuses before loading anything of it (its linked ABCs
+differ), which is compiled, the domain already replayed, and stored
+again. A log that fails part way, which would be a bug, leaves the domain
+as no compile would, so that module is compiled and not stored.
 
 The IndexedDB cache keeps each module's size and last use in a store of
 their own, so that eviction, of the least recently used once the modules
 pass `maxBytes` (256 MiB by default, counted as UTF-16), reads no module.
 It writes a module once the page is idle: a write that a load's next read
-waited behind took that read from 4 to 45 ms.
+waited behind took that read from 4 to 45 ms. A later version opened in
+another tab closes its connection, and the next call opens it again;
+`close` lets a host do the same.
 
 Measured in headless Chrome on a large real-world SWF (one ABC of 1.2 MB,
-a module of 8.17 million characters), medians of seven runs, to its first
-frame drawn: a cold load took 814 ms, of which codegen 255 ms for the
-SWF's module and 76 for the libraries', `new Function` 59 and the
-module's first run 120. Read back from IndexedDB, the 8 MB module took
-10–25 ms. With the cache, a load after a browser restart took 539 ms
-rather than 780, and a reload in the same renderer 210 rather than 497;
-the first load, which compiles and stores, took 857. V8 kept no code for
-the cached source across a restart, as it keeps none for `new Function`;
-a classic script from a cacheable URL, which it does keep code for, saved
-a further 130 ms there, but no URL is stable for a module from IndexedDB,
-and a Blob URL's script took longer than `new Function`.
+a module of 8.17 million characters), medians of five runs, to its first
+frame drawn: a cold load took 797 ms, of which codegen 251 ms for the
+SWF's module and 76 for the libraries', `new Function` 57 and the
+module's first run 116. Read back from IndexedDB, the 8 MB module took
+10–40 ms, and replaying its log 55 ms, most of it verifying the ABC again,
+which its log asks for since verifying finds closures' scopes. With the
+cache, a load after a browser restart took 620 ms rather than 779, and a
+reload in the same renderer 271 rather than 522; the first load, which
+compiles and stores, took 876. V8 kept no code for the cached source
+across a restart, as it keeps none for `new Function`; a classic script
+from a cacheable URL, which it does keep code for, saved a further 130 ms
+there, but no URL is stable for a module from IndexedDB, and a Blob URL's
+script took longer than `new Function`.
 
 ### Drawing with Graphics
 
