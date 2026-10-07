@@ -24,8 +24,9 @@
 //
 // --snapshots DIR writes a heap snapshot at each measure,
 // for DevTools' Memory panel to compare and find what keeps a load's objects.
+// --cache plays with an IndexedDB module cache, which the loads share.
 //
-//   node tests/player/leak.ts [--loads N] [--snapshots DIR] [mode...]
+//   node tests/player/leak.ts [--loads N] [--snapshots DIR] [--cache] [mode...]
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as w from "../swf-writer.ts";
@@ -41,8 +42,10 @@ const option = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const snapshots = option("snapshots");
+const cached = args.includes("--cache");
 const LOADS = Number(option("loads") ?? 300);
-const modes = args.filter((a, i) => !a.startsWith("--") && !args[i - 1]?.startsWith("--"));
+const valued = new Set(["--loads", "--snapshots"]);
+const modes = args.filter((a, i) => !a.startsWith("--") && !valued.has(args[i - 1]));
 const KINDS = 20;
 const METHODS = 150;
 const WARM = 10;
@@ -230,7 +233,7 @@ let failed = false;
 await withSteppedPage(
   async (page) => {
     if (!modes.length || modes.includes("kept")) {
-      let error = await page.open(keptSwf, "/leak/kept.swf");
+      let error = await page.open(keptSwf, "/leak/kept.swf", cached);
       if (!error) {
         error = (await page.step(1, 40)).error;
         await page.heap();
@@ -273,7 +276,11 @@ await withSteppedPage(
           }
         }
       } else {
-        error = await page.open(mainSwf, `/leak/main.swf?kinds=${mode === "same" ? 1 : KINDS}`);
+        error = await page.open(
+          mainSwf,
+          `/leak/main.swf?kinds=${mode === "same" ? 1 : KINDS}`,
+          cached,
+        );
         for (const n of [WARM, LOADS]) {
           if (error) {
             break;

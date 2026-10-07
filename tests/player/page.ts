@@ -651,14 +651,21 @@ let opened: {
 } | null = null;
 
 /** Start a SWF, with no renderer, for stepSwf to play; any SWF opened before is let go. */
-async function openSwf(base64: string, url: string | null): Promise<string | null> {
+/** The module cache openSwf's players share, made by the first that asks for one (leak.ts --cache). */
+let leakCache: ModuleCache | null = null;
+
+async function openSwf(base64: string, url: string | null, cached = false): Promise<string | null> {
   opened = null;
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const trace: string[] = [];
   const uncaught: unknown[] = [];
   let scripting: Scripting | null = null;
   try {
-    scripting = await scriptingFor(bytes, trace, url, uncaught);
+    if (cached) {
+      leakCache ??= indexedDbModuleCache({ name: `swf2es-leak-${Math.random()}` });
+    }
+
+    scripting = await scriptingFor(bytes, trace, url, uncaught, cached ? leakCache : null);
     const player = new Player(bytes, scripting);
     await player.start();
     opened = { player, scripting, trace, uncaught };
