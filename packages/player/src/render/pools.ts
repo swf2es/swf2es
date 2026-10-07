@@ -10,14 +10,24 @@ import { BatchableGraphics, BigPool, GraphicsContextRenderData, RenderTexture } 
 export const SPARE_GRAPHICS_MOST = 4096;
 
 /**
- * How long, in milliseconds, lines' contexts no instance uses are kept for
- * one to come back to, as a loop does, and how many at most. By age, not
- * count: a loop longer than a count would find each context gone just
- * before it came round to it; and by time, not renders, which a host may
- * make many of between a SWF's frames.
+ * How long, in milliseconds, what no instance uses is kept for one to come
+ * back to, as a loop does. By age, not count: a loop longer than a count
+ * would find each gone just before it came round to it; and by time, not
+ * renders, which a host may make many of between a SWF's frames.
  */
 export const IDLE_MS = 5000;
-export const IDLE_MOST = 4096;
+/**
+ * How long lines' contexts no instance uses are kept, how many at most,
+ * and how many of their vertices, some 110 bytes each on the heap and 30
+ * on the GPU. Longer than IDLE_MS: animations come back to a stretch after
+ * seconds, a crowd's rarer ones (an attack, a fall) after tens of them,
+ * and kept 5 s, a third of a crowded room's new lines were ones it had
+ * made before. Not past Pixi's minute, after which it lets an unused
+ * context's geometry go, to be tessellated again anyway.
+ */
+export const LINES_IDLE_MS = 30_000;
+export const LINES_IDLE_MOST = 4096;
+export const LINES_IDLE_VERTICES = 500_000;
 /**
  * The most objects off the list kept whole: enough for a pool or a panel,
  * while a timeline that makes its children anew on every frame lets its

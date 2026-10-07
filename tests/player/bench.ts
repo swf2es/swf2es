@@ -31,6 +31,15 @@
 // between two, as in a game's creatures with a glow on every few parts.
 // The rig has 12 parts, so any K of 12 or more blurs the first alone.
 //
+// --pulse plays instead N rigs whose 12 parts are curved outlines, half of
+// them swelling and shrinking a little as they turn, the others squashed
+// one way, flipping as they turn about, as a game's creatures breathe and
+// turn: each frame a new stretch for the lines, coming round again only
+// with the loop, of --loop K frames (96). Their lines are --line W twips
+// wide (1, a hairline's width on the screen, as most of a game's are).
+// --pace MS waits that many milliseconds after each frame, so that what is
+// kept by age (lines idle, render/strokes.ts) ages between the loop's turns.
+//
 // --masks N plays instead N panels of a scrolling list, each a sprite of
 // 20 rows clipped by a rectangle on the timeline (clipDepth), the rows
 // sliding up a little each frame, as a game's inventory, chat or shop
@@ -74,10 +83,11 @@
 // sampled profile there, for DevTools' Memory panel to open.
 //
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--glide]
+//     | --pulse N [--loop K] [--line W]
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
-//     [--min-run N]
+//     [--min-run N] [--pace MS]
 //     [--json]
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
@@ -100,6 +110,8 @@ const idleRenders = option("idle", 0);
 const toggle = option("toggle", 0);
 const masks = option("masks", 0);
 const scripted = option("scripted", 0);
+const pulse = option("pulse", 0);
+const pace = option("pace", 0);
 const profile = args.includes("--profile") ? args[args.indexOf("--profile") + 1] : undefined;
 const toggleStatic = option("toggle-static", 0);
 const frames = option("frames", 120);
@@ -316,6 +328,91 @@ function rigSwf(
         depth: i + 1,
         character: 20,
         matrix: {
+          tx: Math.round(((i % columns) + 0.5) * (WIDTH / columns) * TWIPS),
+          ty: Math.round((Math.floor(i / columns) + 0.5) * (HEIGHT / columns) * TWIPS),
+        },
+      }),
+    );
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
+/** A part of the pulsing rig: a lens of two curves and a curved tail, outlined `line` twips wide. */
+function curvedPart(id: number, line: number, bulge: number): Uint8Array {
+  const r = 300;
+  return w.shape({
+    id,
+    bounds: [-r - 60, r + 60, -r - 60, r + 60],
+    fills: [0xff000000 | ((id * 0x2a6f3d) & 0xffffff)],
+    lines: [{ width: line, color: 0xff101010 }],
+    paths: [
+      {
+        fill1: 1,
+        line: 1,
+        commands: [
+          { move: [-r, 0] },
+          { curve: [-r / 2, -bulge, 0, -bulge / 2] },
+          { curve: [r / 2, 0, r, -r / 3] },
+          { line: [r * 0.8, r / 4] },
+          { curve: [0, bulge, -r, 0] },
+        ],
+      },
+      { fill1: 0, line: 1, commands: [{ move: [r, 0] }, { curve: [r * 1.2, r / 2, r * 0.9, r] }] },
+    ],
+  });
+}
+
+/**
+ * The pulsing rig: `count` instances of a sprite whose 12 curved parts
+ * turn on a loop of `loop` frames, the even ones swelling and shrinking a
+ * little, the odd ones squashed across, flipping as they turn about.
+ */
+function pulseSwf(count: number, loop: number, line: number): Uint8Array {
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
+  for (let i = 0; i < 4; i++) {
+    tags.push(curvedPart(11 + i, line, 150 + 60 * i));
+  }
+
+  const sprite: Uint8Array[] = [];
+  for (let f = 0; f < loop; f++) {
+    for (let i = 0; i < 12; i++) {
+      const t = (2 * Math.PI * f) / loop + i;
+      const a = 0.4 * Math.sin(t);
+      const s = 1 + 0.15 * Math.sin(2 * t);
+      // Squashed across, flipping, never flat: a cosine kept a twentieth from none.
+      const across = Math.cos(t);
+      const sx = i % 2 ? Math.sign(across || 1) * Math.max(0.05, Math.abs(across)) : s;
+      const sy = i % 2 ? 1 : s;
+      const matrix = {
+        a: sx * Math.cos(a),
+        b: sx * Math.sin(a),
+        c: -sy * Math.sin(a),
+        d: sy * Math.cos(a),
+        tx: Math.round(400 * Math.cos(i)),
+        ty: Math.round(400 * Math.sin(i * 1.7)),
+      };
+      sprite.push(
+        f === 0
+          ? w.place({ depth: i + 1, character: 11 + (i % 4), matrix })
+          : w.place({ depth: i + 1, move: true, matrix }),
+      );
+    }
+
+    sprite.push(w.showFrame());
+  }
+
+  tags.push(w.sprite(20, loop, sprite));
+  const columns = Math.ceil(Math.sqrt(count));
+  for (let i = 0; i < count; i++) {
+    tags.push(
+      w.place({
+        depth: i + 1,
+        character: 20,
+        matrix: {
+          a: 2 / columns,
+          d: 2 / columns,
           tx: Math.round(((i % columns) + 0.5) * (WIDTH / columns) * TWIPS),
           ty: Math.round((Math.floor(i / columns) + 0.5) * (HEIGHT / columns) * TWIPS),
         },
@@ -648,19 +745,21 @@ const swf =
         ? toggleStaticSwf(toggleStatic)
         : scripted > 0
           ? scriptedSwf(scripted)
-          : masks > 0
-            ? masksSwf(masks, args.includes("--unmasked"))
-            : branches > 0
-              ? branchSwf(branches)
-              : rig > 0
-                ? rigSwf(
-                    rig,
-                    args.includes("--swap"),
-                    args.includes("--fresh"),
-                    args.includes("--blurred") || filtered > 0,
-                    args.includes("--glide"),
-                  )
-                : synthetic();
+          : pulse > 0
+            ? pulseSwf(pulse, option("loop", 96), option("line", 1))
+            : masks > 0
+              ? masksSwf(masks, args.includes("--unmasked"))
+              : branches > 0
+                ? branchSwf(branches)
+                : rig > 0
+                  ? rigSwf(
+                      rig,
+                      args.includes("--swap"),
+                      args.includes("--fresh"),
+                      args.includes("--blurred") || filtered > 0,
+                      args.includes("--glide"),
+                    )
+                  : synthetic();
 const result = await benchPlayer(
   swf,
   frames,
@@ -675,6 +774,7 @@ const result = await benchPlayer(
   !args.includes("--no-table"),
   args.includes("--min-run") ? option("min-run", 1) : undefined,
   profile,
+  pace,
 );
 if (result.error) {
   console.error(result.error);
@@ -711,13 +811,15 @@ const summary = {
           ? `static toggle of ${toggleStatic}`
           : scripted > 0
             ? `scripted rig of ${scripted}`
-            : masks > 0
-              ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-              : branches > 0
-                ? `${branches} branches`
-                : rig > 0
-                  ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
-                  : shapes,
+            : pulse > 0
+              ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+              : masks > 0
+                ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                : branches > 0
+                  ? `${branches} branches`
+                  : rig > 0
+                    ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
+                    : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   frames,
