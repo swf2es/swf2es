@@ -18,14 +18,22 @@ import type {
   ClassDesc,
   CompileUnit,
   Factory,
-  FoundDefinition,
   Method,
   Scope,
   TraitsDesc,
   TypeRef,
   Value,
 } from "./descriptors.js";
-import { add, Domain, frameScripts, match, type Script } from "./domain.js";
+import {
+  add,
+  compileUnit,
+  Domain,
+  definedInChain,
+  definitionNames,
+  findScript,
+  frameScripts,
+  type Script,
+} from "./domain.js";
 import type { ClassHook, NativesProvider, PropertyHook } from "./hooks.js";
 import {
   CONSTANT_Multiname,
@@ -470,7 +478,7 @@ export class Runtime {
     // already, cached or loaded, is unreachable, and not added.
     for (const script of abc.scriptStates) {
       for (const [ns, version, name] of script.desc.traits.bindings) {
-        if (!this.definedInChain(domain, name, ns)) {
+        if (!definedInChain(domain, name, ns)) {
           add(domain.globals, { ns, version, script }, name);
         }
       }
@@ -560,129 +568,14 @@ export class Runtime {
     return script;
   }
 
-  /**
-   * The script that defines `mn` in its domain, or null, as
-   * DomainMgr::findScriptInDomainByMultinameImpl finds it: a definition a
-   * domain of the chain has found before, from the name's own up; else the
-   * first loaded, from the root down. Either is kept by the name's domain,
-   * and one loaded by the domain that loaded it, so a child that found its
-   * own keeps it when its parent defines the name later. A type is found
-   * the same way through caches of its own (`asType`), as avmplus finds
-   * traits, so a class a child found by name is not the type it finds.
-   */
+  /** The script that defines `mn` in its domain, or null (see findScript in domain.ts). */
   findScript(mn: Multiname, asType = false): Script | null {
-    const name = mn.name;
-    if (name === null) {
-      return null;
-    }
-
-    const domain = mn.domain ?? this.root;
-    const cache = (d: Domain) => (asType ? d.types : d.cached);
-    for (let d: Domain | null = domain; d; d = d.parent) {
-      const found = match(cache(d), mn, name);
-      if (found) {
-        if (d !== domain) {
-          add(cache(domain), found, name);
-        }
-
-        return found.script;
-      }
-    }
-
-    const chain: Domain[] = [];
-    for (let d: Domain | null = domain; d; d = d.parent) {
-      chain.push(d);
-    }
-
-    for (let k = chain.length - 1; k >= 0; k--) {
-      const found = match(chain[k].globals, mn, name);
-      if (found) {
-        add(cache(chain[k]), found, name);
-        add(cache(domain), found, name);
-        return found.script;
-      }
-    }
-
-    return null;
+    return findScript(mn.domain ?? this.root, mn, asType);
   }
 
   /** What an ABC loaded into `domain` now compiles in. */
   compileUnit(domain: Domain): CompileUnit {
-    const domains: number[] = [];
-    for (let d: Domain | null = domain; d; d = d.parent) {
-      domains.push(d.id);
-    }
-
-    return { linked: domain.chain(), domains, found: this.foundIn(domain) };
-  }
-
-  /**
-   * What `domain` finds, by name and as a type, that is not the first
-   * definition from the root down: what a cache of its chain holds, from
-   * the domain up. The root's caches hold only its own first definitions.
-   */
-  private foundIn(domain: Domain): FoundDefinition[] {
-    const found: FoundDefinition[] = [];
-    for (const asType of [false, true]) {
-      const seen = new Set<string>();
-      for (let d: Domain | null = domain; d?.parent; d = d.parent) {
-        for (const [name, list] of asType ? d.types : d.cached) {
-          for (const g of list) {
-            const key = `${g.ns.kind}:${g.ns.uri}::${name}`;
-            if (seen.has(key) || g.ns.uri === null || g.ns.kind === NS_Private) {
-              continue;
-            }
-
-            seen.add(key);
-            if (this.firstLoaded(domain, name, g.ns) !== g.script) {
-              const abc = g.script.abc;
-              found.push({
-                nsKind: g.ns.kind,
-                uri: g.ns.uri,
-                name,
-                domain: abc.domain.id,
-                index: abc.index,
-                hash: abc.hash,
-                asType,
-              });
-            }
-          }
-        }
-      }
-    }
-
-    return found;
-  }
-
-  /** The script that first defines `name` in `ns` for `domain`, from the root down. */
-  private firstLoaded(domain: Domain, name: string, ns: Namespace): Script | null {
-    const chain: Domain[] = [];
-    for (let d: Domain | null = domain; d; d = d.parent) {
-      chain.push(d);
-    }
-
-    for (let k = chain.length - 1; k >= 0; k--) {
-      const g = chain[k].globals.get(name)?.find((other) => other.ns === ns);
-      if (g) {
-        return g.script;
-      }
-    }
-
-    return null;
-  }
-
-  /** Whether `domain`'s chain defines `name` in `ns`, cached or loaded, without keeping what it finds. */
-  private definedInChain(domain: Domain, name: string, ns: Namespace): boolean {
-    for (let d: Domain | null = domain; d; d = d.parent) {
-      if (
-        d.cached.get(name)?.some((g) => g.ns === ns) ||
-        d.globals.get(name)?.some((g) => g.ns === ns)
-      ) {
-        return true;
-      }
-    }
-
-    return false;
+    return compileUnit(domain);
   }
 
   // Scopes and name lookup.
@@ -2231,16 +2124,7 @@ export class Runtime {
    * "pkg::Name", or the name alone in the top-level package.
    */
   definitionNames(domain: Domain): string[] {
-    const names: string[] = [];
-    for (const [name, list] of domain.globals) {
-      for (const g of list) {
-        if (g.ns.kind !== NS_Private) {
-          names.push(g.ns.uri ? `${g.ns.uri}::${name}` : name);
-        }
-      }
-    }
-
-    return names;
+    return definitionNames(domain);
   }
 
   /**
