@@ -209,17 +209,22 @@ async function withPage<T>(
       await devtools.send("Page.navigate", {
         url: process.env.SWF2ES_CHECKED ? `${url}?checked` : url,
       });
-      for (let i = 0; i < 100; i++) {
+      // The page loads its modules unbundled: on a loaded machine that has
+      // taken more than 10 s, so wait up to a minute, and fail rather than
+      // run every job of the document against a page without the function.
+      for (let i = 0; i < 600; i++) {
         const { result } = await devtools.send<{ result: { value: boolean } }>("Runtime.evaluate", {
           expression: `typeof ${ready} === 'function'`,
           returnByValue: true,
         });
         if (result.value) {
-          break;
+          return;
         }
 
         await sleep(100);
       }
+
+      throw new Error(`the page did not define ${ready} within 60 s`);
     };
     await fresh();
 
@@ -228,9 +233,13 @@ async function withPage<T>(
         async <R>(expression: string) => {
           const { result, exceptionDetails } = await devtools.send<{
             result: { value?: R };
-            exceptionDetails?: { text: string };
+            exceptionDetails?: { text: string; exception?: { description?: string } };
           }>("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, timeout });
-          return { value: result.value, exception: exceptionDetails?.text ?? null };
+          // The text alone is only ever "Uncaught"; the error itself is in the exception.
+          const exception = exceptionDetails
+            ? (exceptionDetails.exception?.description ?? exceptionDetails.text)
+            : null;
+          return { value: result.value, exception };
         },
         (method, params) => devtools.send(method, params),
         fresh,
