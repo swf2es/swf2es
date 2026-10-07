@@ -13,6 +13,7 @@ type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
 export class Code {
+  /** Each ABC's hash, by its index in the compiler; "" once its domain is dropped. */
   private readonly hashes: string[] = [];
   /**
    * The compiler's application domain for each of the runtime's, by its
@@ -22,6 +23,28 @@ export class Code {
   private readonly codegenDomains = new Map<number, number>([[0, 0]]);
   private readonly codegenAbcs = new Map<number, number[]>([[0, []]]);
   private readonly reported = new Map<number, Set<string>>();
+  /**
+   * A runtime domain let go of, by its number: no code of its SWFs is left
+   * to run, nor of its descendants', which keep it while they live. The
+   * compiler drops its domain, the ABCs in it and what they took, and so
+   * does Code. Their hashes are no module's linked ABCs, since no live
+   * domain saw them.
+   */
+  private readonly domainGone = new FinalizationRegistry<number>((id) => {
+    const target = this.codegenDomains.get(id);
+    if (target === undefined) {
+      return;
+    }
+
+    this.s.codegen.dropDomain(target);
+    for (const index of this.codegenAbcs.get(id) ?? []) {
+      this.hashes[index] = "";
+    }
+
+    this.codegenDomains.delete(id);
+    this.codegenAbcs.delete(id);
+    this.reported.delete(id);
+  });
   /** Modules loaded, each under a script name of its own for Runtime.codeDomain. */
   private modules = 0;
   /**
@@ -130,6 +153,7 @@ export class Code {
       target = this.s.codegen.childDomain(this.codegenDomainOf(domain.parent ?? this.s.rt.root));
       this.codegenDomains.set(domain.id, target);
       this.codegenAbcs.set(domain.id, []);
+      this.domainGone.register(domain, domain.id);
     }
 
     return target;

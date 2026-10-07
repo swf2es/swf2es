@@ -1238,7 +1238,10 @@ refers to it. What the player keeps of a loaded SWF beside the SWF
 itself, the domain and origin of each module's script for the stack,
 its symbols and its fonts for those registered later, it keeps
 weakly, so that the SWF, its code included, goes with its last object
-(some 300 KB a load of a small SWF stayed otherwise).
+(some 300 KB a load of a small SWF stayed otherwise). Once a runtime
+domain is collected, which its descendants' keep from happening while
+they live, the compiler drops its application domain (see Linking), and
+`Code` its ABCs' hashes and the findings it told the compiler.
 That a module's code keeps its Abc has a limit: emitted code reaches `A`
 only for `newclass` and `newactivation`, so a module with neither keeps
 it only through its domain's globals, its scripts' entries, and not even
