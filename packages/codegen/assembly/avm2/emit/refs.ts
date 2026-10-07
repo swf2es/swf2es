@@ -238,7 +238,7 @@ export function defaultOf(e: MethodEmitter, type: i32): void {
   const out = e.out;
   switch (e.domain.builtin(type)) {
     case BUILTIN_Any:
-      out.text("undefined");
+      out.text("void 0");
       return;
     case BUILTIN_Int:
     case BUILTIN_Uint:

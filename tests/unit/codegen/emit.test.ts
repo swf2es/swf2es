@@ -565,3 +565,13 @@ test("a null check is made where the instruction it checks for reads the value f
   // A conversion to Object reads it after a check of its own.
   assert.match(emit(script([GETLOCAL1, CONVERT_O, RETURNVALUE])), /\n {4}l1 \?\? nn\(l1\);\n/);
 });
+
+test("undefined is written void 0, and a return of it a bare return", { skip }, () => {
+  const PUSHUNDEFINED = 0x21;
+  const KILL = 0x08;
+  const RETURNVOID = 0x47;
+  const js = emit(script([PUSHUNDEFINED, SETLOCAL1, GETLOCAL1, POP, KILL, 1, RETURNVOID]));
+  assert.match(js, /\n {4}l1 = void 0;\n/);
+  assert.match(js, /\n {4}return;\n/);
+  assert.doesNotMatch(js, /\bundefined\b/);
+});

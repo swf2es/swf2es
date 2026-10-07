@@ -261,6 +261,10 @@ changes or a branch needs the stack as it is. A value the next instruction
 only moves to a local (a `setlocal`) goes to the local straight, and a
 conversion that changes nothing writes no code.
 
+The code is written short where that costs nothing at run time:
+`undefined` is `void 0`, and a return of it a bare `return;`, each of
+which V8 compiles to the same bytecode as `undefined`.
+
 A null check is `r ?? nn(r)`, where `nn`, the module's, throws the
 runtime's TypeError for the value, 1009 for null and 1010 for undefined.
 It is made where the instruction it checks for reads the register, when

@@ -909,7 +909,7 @@ export class MethodEmitter {
         out.text("null");
         break;
       default:
-        out.text("undefined");
+        out.text("void 0");
     }
   }
 
@@ -955,9 +955,9 @@ export class MethodEmitter {
     this.read(r);
   }
 
-  /** Register r as read before a `.`. */
+  /** Register r as read before a `.`; a constant in parentheses, as `void 0.x` does not parse. */
   member(r: i32): void {
-    if (r === this.pendingNull) {
+    if (r === this.pendingNull || this.copyOf[r] <= CONSTANT) {
       this.out.byte(0x28); // (
       this.reg(r);
       this.out.byte(0x29); // )
@@ -1181,7 +1181,7 @@ export class MethodEmitter {
         break;
       case ops.OP_pushundefined:
         this.assign(i);
-        out.text("undefined");
+        out.text("void 0");
         break;
       case ops.OP_getlocal:
       case ops.OP_setlocal:
@@ -1195,7 +1195,7 @@ export class MethodEmitter {
         break;
       case ops.OP_kill:
         this.assign(i);
-        out.text("undefined");
+        out.text("void 0");
         break;
       case ops.OP_swap: {
         // Through a temporary, not [a, b] = [b, a]: destructuring is an
@@ -1479,7 +1479,7 @@ export class MethodEmitter {
         break;
       }
       case ops.OP_returnvoid:
-        out.text("    return undefined");
+        out.text("    return");
         break;
       case ops.OP_returnvalue:
         out.text("    return ");
@@ -1544,7 +1544,7 @@ export class MethodEmitter {
         this.scopeDepth--;
         out.text("    ");
         this.regName(src);
-        out.text(" = undefined");
+        out.text(" = void 0");
         return true;
       case ops.OP_getscopeobject:
         this.assign(i);
