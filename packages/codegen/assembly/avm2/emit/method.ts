@@ -60,6 +60,8 @@ import {
 export const MAX_NESTING: u32 = 500;
 /** copyOf of a stack register that holds a constant: CONSTANT - the instruction that pushed it. */
 const CONSTANT: i32 = -2;
+/** The length of the end of a reset, ` = void 0;\n`. */
+const RESET_END: u32 = 11;
 
 @final
 export class MethodEmitter {
@@ -585,6 +587,7 @@ export class MethodEmitter {
     const out = this.out;
     const ir = this.ir;
     const entry = k * ir.frameSize;
+    this.resetEnd = -1;
     for (let r: u32 = 0; r < ir.frameSize; r++) {
       this.regType[r] = ir.entryType[entry + r];
     }
@@ -1121,6 +1124,10 @@ export class MethodEmitter {
   reachable: u32 = 0;
   structured: bool = false;
   currentBlock: u32 = 0;
+  /** Where the last reset written ends, -1 if none can be joined, and the source map's marks then; whether one is being written. */
+  resetEnd: i32 = -1;
+  resetMarks: i32 = 0;
+  resets: bool = false;
 
   instruction(i: u32): void {
     const out = this.out;
@@ -1194,8 +1201,7 @@ export class MethodEmitter {
         this.reg(ir.src[i]);
         break;
       case ops.OP_kill:
-        this.assign(i);
-        out.text("void 0");
+        this.reset(ir.dst[i]);
         break;
       case ops.OP_swap: {
         // Through a temporary, not [a, b] = [b, a]: destructuring is an
@@ -1518,6 +1524,30 @@ export class MethodEmitter {
     }
 
     out.text(";\n");
+    if (this.resets) {
+      this.resets = false;
+      this.resetEnd = <i32>out.length;
+      this.resetMarks = this.map.count;
+    }
+  }
+
+  /**
+   * `r = void 0`, as a kill or popscope leaves a register; one right after
+   * another such, with nothing written or marked between, joins it as
+   * `a = r = void 0`, one statement.
+   */
+  reset(r: i32): void {
+    const out = this.out;
+    if (<i32>out.length === this.resetEnd && this.map.count === this.resetMarks) {
+      out.length -= RESET_END;
+      out.text(" = ");
+    } else {
+      out.text("    ");
+    }
+
+    this.regName(r);
+    out.text(" = void 0");
+    this.resets = true;
   }
 
   /**
@@ -1542,9 +1572,7 @@ export class MethodEmitter {
         return true;
       case ops.OP_popscope:
         this.scopeDepth--;
-        out.text("    ");
-        this.regName(src);
-        out.text(" = void 0");
+        this.reset(src);
         return true;
       case ops.OP_getscopeobject:
         this.assign(i);

@@ -575,3 +575,11 @@ test("undefined is written void 0, and a return of it a bare return", { skip }, 
   assert.match(js, /\n {4}return;\n/);
   assert.doesNotMatch(js, /\bundefined\b/);
 });
+
+test("registers reset one after another are reset in one statement", { skip }, () => {
+  const KILL = 0x08;
+  const code = [PUSHBYTE, 1, SETLOCAL1, PUSHBYTE, 2, SETLOCAL2, GETLOCAL1, GETLOCAL2, ADD, POP];
+  const js = emit(script([...code, KILL, 1, KILL, 2, KILL, 3, PUSHBYTE, 3, RETURNVALUE]));
+  assert.match(js, /\n {4}l1 = l2 = l3 = void 0;\n/);
+  assert.equal(run(script([...code, KILL, 1, GETLOCAL1, KILL, 2, RETURNVALUE])), undefined);
+});
