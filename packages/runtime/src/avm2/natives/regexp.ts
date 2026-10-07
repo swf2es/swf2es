@@ -108,6 +108,10 @@ function newRegExp(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
  * not compile throws nothing, as in avmplus: it matches nothing.
  */
 export function compile(source: string, flags: string, extended = false): RegExp {
+  if (source.length > 200 && nestedTooDeep(source)) {
+    return new RegExp("(?!)", flags);
+  }
+
   try {
     const re = new RegExp(fromPcre(source, extended, flags.includes("m")), flags);
     // V8 compiles on the first match, where a pattern too large throws: here, once.
@@ -117,6 +121,91 @@ export function compile(source: string, flags: string, extended = false): RegExp
   } catch {
     return new RegExp("(?!)", flags);
   }
+}
+
+/** What avmplus' PCRE 7.3 has room for in its pre-compile workspace, less its safety margin. */
+const WORKSPACE = 2138 - 100;
+
+/**
+ * Whether PCRE fails to compile `source` for nesting groups too deeply:
+ * its pre-compile phase keeps, for each open group, the group's opcode
+ * (5 bytes for a capture, 3 for any other group) and the item before it,
+ * and fails once they pass the workspace, at some 400 nested captures.
+ * The items' sizes are PCRE's for the common ones: a literal, a class.
+ */
+function nestedTooDeep(source: string): boolean {
+  // The bytes held by the groups open, and by the item before the next one.
+  let held = 5;
+  let previous = 0;
+  const outer: number[] = [];
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    let item = 2;
+    if (c === "(") {
+      const capture = source[i + 1] !== "?" || source.startsWith("(?P<", i);
+      outer.push(held);
+      held += previous + (capture ? 5 : 3);
+      previous = 0;
+      if (held > WORKSPACE) {
+        return true;
+      }
+
+      // Past the group's kind: ?: ?= ?! ?<= ?<! ?P<name> or flags.
+      if (source[i + 1] === "?") {
+        const end = source.slice(i + 2).search(/[:=!>)]/);
+        i = end < 0 ? source.length : i + 2 + end;
+      }
+
+      continue;
+    }
+
+    if (c === ")") {
+      held = outer.pop() ?? held;
+      // The group is the next one's previous item, but what it holds is gone.
+      previous = 0;
+      continue;
+    }
+
+    if (c === "|") {
+      previous = 0;
+      continue;
+    }
+
+    if (c === "\\") {
+      i++;
+    } else if (c === "[") {
+      // A class is its opcode and a 32-byte bitmap.
+      item = 33;
+      i++;
+      if (source[i] === "^") {
+        i++;
+      }
+
+      // A ] first is a literal.
+      if (source[i] === "]") {
+        i++;
+      }
+
+      while (i < source.length && source[i] !== "]") {
+        if (source[i] === "\\") {
+          i++;
+        }
+
+        i++;
+      }
+    } else if (c === "." || c === "^" || c === "$") {
+      item = 1;
+    } else if ("*+?{".includes(c)) {
+      continue;
+    }
+
+    previous = item;
+    if (held + previous > WORKSPACE) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
