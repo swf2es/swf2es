@@ -1261,10 +1261,15 @@ they live, the compiler drops its application domain (see Linking), and
 collection may come hundreds of loads later, so `Code` evicts a loaded
 SWF's domain from the compiler as soon as its ABCs are compiled, unless
 a link is in progress in it or under it, and keeps their bytes to revive
-it when a SWF is loaded into it or under it; a domain revived stays, as
-one loaded into again, and the root's and the main SWF's are never
-evicted. The compiler's memory then holds the live domains' ABCs, not
-every ABC loaded since the last collection.
+it, with its evicted ancestors, when a SWF is loaded into it or under it;
+a domain revived stays, as one loaded into again, and the root's and the
+main SWF's are never evicted. After a drop or an eviction it asks the
+compiler to compact when the page is next idle (`requestIdleCallback`,
+else a timer), not in a load's frame. The compiler's memory then holds
+the live domains' ABCs, not every ABC loaded since the last collection:
+over 2000 loads of a large application's small SWFs, it rebuilt four
+times, some 64 ms each in node, and its memory stayed where compiling
+the main SWF had grown it.
 That a module's code keeps its Abc has a limit: emitted code reaches `A`
 only for `newclass` and `newactivation`, so a module with neither keeps
 it only through its domain's globals, its scripts' entries, and not even

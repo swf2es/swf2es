@@ -28,15 +28,24 @@ export class Code {
    * to run, nor of its descendants', which keep it while they live. The
    * compiler drops its domain, the ABCs in it and what they took, and so
    * does Code. Their hashes are no module's linked ABCs, since no live
-   * domain saw them.
+   * domain saw them. Not if the compiler was reset since, as by another
+   * player given it: its numbers are another domain's then.
    */
-  private readonly domainGone = new FinalizationRegistry<number>((id) => {
+  private readonly domainGone = new FinalizationRegistry<{ id: number; epoch: number }>(
+    ({ id, epoch }) => {
+      this.forget(id, epoch);
+    },
+  );
+
+  /** Let go of runtime domain `id`, which the compiler of `epoch` knew. */
+  private forget(id: number, epoch: number): void {
     const target = this.codegenDomains.get(id);
     if (target === undefined) {
       return;
     }
 
-    this.s.codegen.dropDomain(target);
+    this.s.codegen.dropDomain(target, epoch);
+    this.compactSoon();
     for (const index of this.codegenAbcs.get(id) ?? []) {
       this.hashes[index] = "";
     }
@@ -46,7 +55,35 @@ export class Code {
     this.reported.delete(id);
     this.evictable.delete(id);
     this.revived.delete(id);
-  });
+  }
+
+  /** Whether a compaction is asked for and has not run yet. */
+  private compacting = false;
+
+  /**
+   * Have the compiler reuse what dropped and evicted domains took, if that
+   * is worth a rebuild, when the page is next idle (or soon, without
+   * requestIdleCallback): a rebuild links every live ABC again, too long to
+   * do in a load's frame.
+   */
+  private compactSoon(): void {
+    if (this.compacting) {
+      return;
+    }
+
+    this.compacting = true;
+    const compact = () => {
+      this.compacting = false;
+      this.s.codegen.compact();
+    };
+    const idle = (globalThis as { requestIdleCallback?: (f: () => void, o?: object) => void })
+      .requestIdleCallback;
+    if (idle) {
+      idle(compact, { timeout: 1000 });
+    } else {
+      setTimeout(compact, 0);
+    }
+  }
   /**
    * The ABCs of each domain but the root and the main SWF's, by their
    * indices in the compiler, to revive it with once its SWF has linked and
@@ -179,11 +216,24 @@ export class Code {
         this.evictable.set(domain.id, new Map());
       }
 
-      this.domainGone.register(domain, domain.id);
+      this.domainGone.register(domain, { id: domain.id, epoch: this.s.codegen.epoch });
     } else if (!this.s.codegen.isLive(target)) {
-      this.codegenDomainOf(domain.parent ?? this.s.rt.root);
-      this.s.codegen.reviveDomain(target, this.evictable.get(domain.id) ?? new Map());
-      this.revived.add(domain.id);
+      // With its evicted ancestors, all at once: one rebuild at most.
+      const abcs = new Map<number, Uint8Array>();
+      for (let d: avm2.Domain | null = domain; d; d = d.parent) {
+        const at = this.codegenDomains.get(d.id);
+        if (at === undefined || this.s.codegen.isLive(at)) {
+          break;
+        }
+
+        for (const [index, bytes] of this.evictable.get(d.id) ?? []) {
+          abcs.set(index, bytes);
+        }
+
+        this.revived.add(d.id);
+      }
+
+      this.s.codegen.reviveDomain(target, abcs);
     }
 
     return target;
@@ -219,6 +269,7 @@ export class Code {
       !this.linking.has(domain.id)
     ) {
       this.s.codegen.evictDomain(target);
+      this.compactSoon();
     }
   }
 

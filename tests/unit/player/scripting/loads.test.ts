@@ -758,104 +758,87 @@ test("the pointer over an AVM1 movie hits its Loader, the AVM1Movie being no Int
   assert.equal(pointerTarget(player.stage, 15, 15, player.width, player.height), player.stage);
 });
 
-test("a SWF loaded under a loaded SWF links against its classes after the compiler let them go", {
-  skip,
-}, async () => {
-  const lines: string[] = [];
-  const compile = compiler(out);
-  // The parent, loaded by the main SWF, loads the child into a child of
-  // its own domain once the main SWF has loaded enough others since for
-  // the compiler to have let go of the parent's ABC; the child's class
-  // extends the parent's and overrides a method of it.
-  const parent = compile(
-    "NestParent",
-    `package {
-  import flash.display.Loader;
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.net.URLRequest;
-  public class NestParent extends Sprite {
-    public function NestParent() { trace("parent"); }
-    public function greet():String { return "hello from the parent"; }
-    public function loadChild():void {
-      var loader:Loader = new Loader();
-      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function (e:Event):void { trace("child loaded"); });
-      loader.load(new URLRequest("child.swf"));
-    }
-  }
-}`,
-  );
-  // Compiled against the parent's ABC, which it does not define again.
-  mkdirSync(`${out}sources`, { recursive: true });
-  writeFileSync(
-    `${out}sources/NestChild.as`,
-    `package {
-  public class NestChild extends NestParent {
-    public function NestChild() { trace("child: " + greet()); }
-    override public function greet():String { return "the child of " + super.greet(); }
-  }
-}`,
-  );
+/**
+ * Sources compiled into `out` by ASC with `ascArgs`, by name; paths in the
+ * arguments are under `out`'s sources, which the container sees from the
+ * repository's root.
+ */
+function compileWith(sources: [string, string, string[]?][]): Map<string, Uint8Array> {
   const root = fileURLToPath(new URL("../../../../", import.meta.url));
-  const [result] = runOracle(
-    [
-      {
-        source: `${out}sources/NestChild.as`,
-        name: "scripts/NestChild",
-        ascArgs: ["-import", relative(root, `${out}scripts/NestParent.abc`)],
-      },
-    ],
-    out,
-    { imports: ["builtin", "playerglobal"], run: false },
-  );
-  assert.ok(result.compiled, result.compileLog);
-  const child = new Uint8Array(readFileSync(`${out}scripts/NestChild.abc`));
-  const filler = compile(
-    "NestFiller",
-    "package { import flash.display.Sprite; public class NestFiller extends Sprite {} }",
-  );
-  const main = compile(
-    "NestMain",
-    `package {
-  import flash.display.Loader;
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.net.URLRequest;
-  public class NestMain extends Sprite {
-    private var parentLoader:Loader = new Loader();
-    private var fillers:int = 0;
-    public function NestMain() {
-      parentLoader.contentLoaderInfo.addEventListener(Event.COMPLETE, fill);
-      parentLoader.load(new URLRequest("parent.swf"));
-    }
-    private function fill(e:Event):void {
-      if (fillers++ == 70) {
-        trace("filled");
-        Object(parentLoader.content).loadChild();
-        return;
-      }
-      var loader:Loader = new Loader();
-      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, fill);
-      loader.load(new URLRequest("filler.swf"));
-    }
+  const dir = `${out}sources/`;
+  const at = (file: string) => relative(root, `${dir}${file}`);
+  for (const [file, source] of sources) {
+    mkdirSync(`${dir}${file.slice(0, file.lastIndexOf("/") + 1)}`, { recursive: true });
+    writeFileSync(`${dir}${file}`, source);
   }
-}`,
+
+  const abcs = new Map<string, Uint8Array>();
+  for (const [file, , args] of sources) {
+    if (!args) {
+      continue;
+    }
+
+    const name = file.replace(/\.as$/, "");
+    const [result] = runOracle(
+      [
+        {
+          source: `${dir}${file}`,
+          name: `scripts/${name}`,
+          ascArgs: args.map((a) => (a.startsWith("-") ? a : at(a))),
+        },
+      ],
+      out,
+      { imports: ["builtin", "playerglobal"], run: false },
+    );
+    assert.ok(result.compiled, result.compileLog);
+    abcs.set(name, new Uint8Array(readFileSync(`${out}scripts/${name}.abc`)));
+  }
+
+  return abcs;
+}
+
+/**
+ * A filler SWF whose code is tens of kilobytes, so that enough of them
+ * let go of make the compiler's rebuild worth it.
+ */
+function heavyFiller(compile: ReturnType<typeof compiler>): Uint8Array {
+  const methods = Array.from(
+    { length: 150 },
+    (_, i) => `public function m${i}(x:Number):Number { return x > ${i} ? x - ${i} : x + ${i}; }`,
+  ).join("\n    ");
+  return bare(
+    compile(
+      "NestFiller",
+      `package { import flash.display.Sprite; public class NestFiller extends Sprite {
+    ${methods}
+  } }`,
+    ),
+    1,
+    "NestFiller",
   );
-  const swfs: Record<string, Uint8Array> = {
-    "parent.swf": bare(parent, 1, "NestParent"),
-    "child.swf": bare(child, 1, "NestChild"),
-    "filler.swf": bare(filler, 1, "NestFiller"),
-  };
+}
+
+/**
+ * Play `main` with `swfs` to fetch by name until it traces "child loaded",
+ * letting timers and idle callbacks run between frames, as a page's would:
+ * its trace, and how often the compiler rebuilt, before and after the
+ * first revival.
+ */
+async function playNested(
+  [main, name]: [Uint8Array, string],
+  swfs: Record<string, Uint8Array>,
+): Promise<{ lines: string[]; compacted: number; revived: number }> {
+  const lines: string[] = [];
   const codegen = await createCodegen(wasm);
-  const counts = { evicted: 0, revived: 0, evictedBeforeRevive: 0 };
-  const { evictDomain, reviveDomain } = codegen;
-  codegen.evictDomain = (domain) => {
-    counts.evicted++;
-    evictDomain(domain);
+  const counts = { compacted: 0, revived: 0 };
+  const { compact, reviveDomain } = codegen;
+  codegen.compact = () => {
+    const rebuilt = compact();
+    counts.compacted += rebuilt && counts.revived === 0 ? 1 : 0;
+    return rebuilt;
   };
   codegen.reviveDomain = (domain, abcs) => {
     counts.revived++;
-    counts.evictedBeforeRevive ||= counts.evicted;
     reviveDomain(domain, abcs);
   };
   const scripting = new Scripting(codegen, {
@@ -871,12 +854,109 @@ test("a SWF loaded under a loaded SWF links against its classes after the compil
     },
   });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const player = new Player(bare(main, 1, "NestMain"), scripting);
+  const player = new Player(bare(main, 1, name), scripting);
   await player.start();
-  for (let frame = 0; frame < 1000 && !lines.includes("child loaded"); frame++) {
+  for (let frame = 0; frame < 2000 && !lines.includes("child loaded"); frame++) {
     await scripting.settled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     player.tick();
   }
+
+  return { lines, compacted: counts.compacted, revived: counts.revived };
+}
+
+/** The main SWF: loads parent.swf, then `between` if any into its own domain, then FILLERS fillers, then has the parent load its child. */
+function nestMain(compile: ReturnType<typeof compiler>, between: boolean): [Uint8Array, string] {
+  const name = between ? "NestMainBetween" : "NestMain";
+  return [
+    compile(
+      name,
+      `package {
+  import flash.display.Loader;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.net.URLRequest;
+  import flash.system.ApplicationDomain;
+  import flash.system.LoaderContext;
+  public class ${between ? "NestMainBetween" : "NestMain"} extends Sprite {
+    private var parentLoader:Loader = new Loader();
+    private var fillers:int = 0;
+    public function ${between ? "NestMainBetween" : "NestMain"}() {
+      parentLoader.contentLoaderInfo.addEventListener(Event.COMPLETE, ${between ? "loadBetween" : "fill"});
+      parentLoader.load(new URLRequest("parent.swf"));
+    }
+    private function loadBetween(e:Event):void {
+      var loader:Loader = new Loader();
+      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, fill);
+      loader.load(new URLRequest("between.swf"), new LoaderContext(false, ApplicationDomain.currentDomain));
+    }
+    private function fill(e:Event):void {
+      if (fillers++ == ${FILLERS}) {
+        trace("filled");
+        Object(parentLoader.content).loadChild();
+        return;
+      }
+      var loader:Loader = new Loader();
+      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, fill);
+      loader.load(new URLRequest("filler.swf"));
+    }
+  }
+}`,
+    ),
+    name,
+  ];
+}
+
+/** Enough fillers for the compiler to let go of the parent's ABCs. */
+const FILLERS = 80;
+
+const LOAD_CHILD = `public function loadChild():void {
+      var loader:Loader = new Loader();
+      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function (e:Event):void { trace("child loaded"); });
+      loader.load(new URLRequest("child.swf"));
+    }`;
+
+test("a SWF loaded under a loaded SWF links against its classes after the compiler let them go", {
+  skip,
+}, async () => {
+  // The parent, loaded by the main SWF, loads the child into a child of
+  // its own domain once the main SWF has loaded enough others since for
+  // the compiler to have let go of the parent's ABC; the child's class
+  // extends the parent's and overrides a method of it, compiled against
+  // the parent's ABC, which it does not define again.
+  const compile = compiler(out);
+  const abcs = compileWith([
+    [
+      "NestParent.as",
+      `package {
+  import flash.display.Loader;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.net.URLRequest;
+  public class NestParent extends Sprite {
+    public function NestParent() { trace("parent"); }
+    public function greet():String { return "hello from the parent"; }
+    ${LOAD_CHILD}
+  }
+}`,
+      [],
+    ],
+    [
+      "NestChild.as",
+      `package {
+  public class NestChild extends NestParent {
+    public function NestChild() { trace("child: " + greet()); }
+    override public function greet():String { return "the child of " + super.greet(); }
+  }
+}`,
+      ["-import", "../scripts/NestParent.abc"],
+    ],
+  ]);
+  const { lines, compacted, revived } = await playNested(nestMain(compile, false), {
+    "parent.swf": bare(abcs.get("NestParent") as Uint8Array, 1, "NestParent"),
+    "child.swf": bare(abcs.get("NestChild") as Uint8Array, 1, "NestChild"),
+    "filler.swf": heavyFiller(compile),
+  });
 
   assert.deepEqual(lines, [
     "parent",
@@ -885,9 +965,73 @@ test("a SWF loaded under a loaded SWF links against its classes after the compil
     "child: the child of hello from the parent",
     "child loaded",
   ]);
-  // Each SWF's domain was evicted once it linked, enough for a rebuild to
-  // let go of the parent's, which was revived once for the child; the
-  // main SWF's was not.
-  assert.equal(counts.revived, 1);
-  assert.ok(counts.evictedBeforeRevive >= 71, `${counts.evictedBeforeRevive} evicted`);
+  // The fillers' domains were evicted and compacted away, the parent's
+  // with them, which was then revived once for the child.
+  assert.ok(compacted >= 1, `${compacted} compactions`);
+  assert.equal(revived, 1);
+});
+
+test("a revived SWF's classes keep the types they resolved, though its parent's domain defines one later", {
+  skip,
+}, async () => {
+  // The parent's Foo resolves its slot x to the parent's T as the parent
+  // runs; then the main SWF loads another SWF into its own domain, with a
+  // T of another layout, which a lookup from the parent's domain now finds
+  // first. After the compiler let go of the parent's ABC and linked it
+  // again for the child, Foo.x must still be the parent's T, as it is in
+  // avmplus, which resolves a class's types once.
+  const compile = compiler(out);
+  const parentT = "package { public class T { public function a():int { return 1; } } }";
+  const abcs = compileWith([
+    ["parent/T.as", parentT],
+    [
+      "nest/Foo.as",
+      "package { public class Foo { public static var last:Foo; public var x:T; public function Foo() { x = new T(); last = this; } } }",
+    ],
+    [
+      "main/T.as",
+      'package { public class T { public var pad:Number; public function z():int { return 9; } public function a():String { return "the main SWF\'s T"; } } }',
+    ],
+    [
+      "NestShadowParent.as",
+      `package {
+  import flash.display.Loader;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.net.URLRequest;
+  public class NestShadowParent extends Sprite {
+    public var foo:Foo = new Foo();
+    public function NestShadowParent() { trace("parent " + foo.x.a()); }
+    ${LOAD_CHILD}
+  }
+}`,
+      ["-in", "parent/T.as", "-in", "nest/Foo.as"],
+    ],
+    [
+      "NestShadowBetween.as",
+      'package { import flash.display.Sprite; public class NestShadowBetween extends Sprite { public function NestShadowBetween() { trace("between " + new T().a()); } } }',
+      ["-in", "main/T.as"],
+    ],
+    [
+      "NestShadowChild.as",
+      'package { import flash.display.Sprite; public class NestShadowChild extends Sprite { public function NestShadowChild() { trace("child " + Foo.last.x.a()); } } }',
+      ["-import", "../scripts/NestShadowParent.abc"],
+    ],
+  ]);
+  const { lines, compacted, revived } = await playNested(nestMain(compile, true), {
+    "parent.swf": bare(abcs.get("NestShadowParent") as Uint8Array, 1, "NestShadowParent"),
+    "between.swf": bare(abcs.get("NestShadowBetween") as Uint8Array, 1, "NestShadowBetween"),
+    "child.swf": bare(abcs.get("NestShadowChild") as Uint8Array, 1, "NestShadowChild"),
+    "filler.swf": heavyFiller(compile),
+  });
+
+  assert.deepEqual(lines, [
+    "parent 1",
+    "between the main SWF's T",
+    "filled",
+    "child 1",
+    "child loaded",
+  ]);
+  assert.ok(compacted >= 1, `${compacted} compactions`);
+  assert.equal(revived, 1);
 });
