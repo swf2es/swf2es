@@ -2,6 +2,7 @@
 import { builtinHooks, builtinNatives } from "./natives/index.js";
 import { Runtime, type RuntimeOptions } from "./runtime.js";
 
+export type { Abc, AsObject, CompileUnit, FoundDefinition, Method, Value } from "./descriptors.js";
 export { messages } from "./messages.js";
 export { publicNs, qname } from "./names.js";
 export {
@@ -19,20 +20,14 @@ export { builtinHooks, builtinNatives } from "./natives/index.js";
 export { XMLParser, XMLTag } from "./natives/xml/parser.js";
 export { errorMessages } from "./player-messages.js";
 export {
-  type Abc,
-  type AsObject,
   type ClassHook,
-  type CompileUnit,
   type Domain,
-  type FoundDefinition,
   frameScripts,
-  type Method,
   type NativesProvider,
   Runtime,
   type RuntimeOptions,
   type ShellFiles,
   setStaticVar,
-  type Value,
 } from "./runtime.js";
 
 /** A runtime with the builtins' natives, for modules compiled from builtin.abc and after. */

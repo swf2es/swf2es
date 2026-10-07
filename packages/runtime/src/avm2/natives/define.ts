@@ -1,6 +1,8 @@
 // What the natives share: how a native is made, and helpers several
 // families of builtins use.
-import type { AsObject, ClassHook, Method, Runtime, Traits, Value } from "../runtime.js";
+
+import type { AsObject, Method, Value } from "../descriptors.js";
+import type { ClassHook, Runtime, Traits } from "../runtime.js";
 
 /** Natives by the names the compiler gives them, each made for a runtime. */
 export type Natives = Record<string, (rt: Runtime) => Method>;

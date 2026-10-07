@@ -8,6 +8,8 @@
 // XMLClass.cpp, XMLListClass.cpp and E4X's parts of Toplevel.cpp and
 // AvmCore.cpp, this file is subject to the Mozilla Public License, v. 2.0:
 // http://mozilla.org/MPL/2.0/.
+
+import type { AsObject, Value } from "../../descriptors.js";
 import {
   CONSTANT_Qname,
   CONSTANT_QnameA,
@@ -19,7 +21,7 @@ import {
   prefixOf,
   publicNs,
 } from "../../names.js";
-import type { AsObject, ClassHook, PropertyHook, Runtime, Traits, Value } from "../../runtime.js";
+import type { ClassHook, PropertyHook, Runtime, Traits } from "../../runtime.js";
 import { escapeAttributeValue, escapeElementValue } from "../../runtime.js";
 import { AS3, type Natives } from "../define.js";
 import { isSpace, isXMLName } from "./chars.js";

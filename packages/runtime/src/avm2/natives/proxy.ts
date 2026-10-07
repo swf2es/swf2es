@@ -4,8 +4,10 @@
 // at run time, as proxy[name], as the value it was, a string or a QName.
 // callProperty gets the QName and the arguments; for-in asks
 // nextNameIndex, nextName and nextValue.
+
+import type { AsObject, Value } from "../descriptors.js";
 import { type Multiname, NS_Public, namespace, publicNs, qname } from "../names.js";
-import type { AsObject, ClassHook, PropertyHook, Runtime, Value } from "../runtime.js";
+import type { ClassHook, PropertyHook, Runtime } from "../runtime.js";
 import type { Natives } from "./define.js";
 
 const FLASH_PROXY = namespace(NS_Public, "http://www.adobe.com/2006/actionscript/flash/proxy");

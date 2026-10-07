@@ -1,11 +1,7 @@
 // Array: its natives, and its instances' element storage.
-import {
-  type AsObject,
-  type ClassHook,
-  type Runtime,
-  SEALED_ELEMENTS,
-  type Value,
-} from "../runtime.js";
+
+import type { AsObject, Value } from "../descriptors.js";
+import { type ClassHook, type Runtime, SEALED_ELEMENTS } from "../runtime.js";
 import { AS3, eachElement, elements, type Natives, plain, withStorage } from "./define.js";
 import { sort, sortOn } from "./sort.js";
 

@@ -1,8 +1,9 @@
 // The global functions, bugzilla, and Error.
 
+import type { Value } from "../descriptors.js";
 import { formatClassName } from "../names.js";
 import { errorMessages } from "../player-messages.js";
-import type { ClassHook, Runtime, Value } from "../runtime.js";
+import type { ClassHook, Runtime } from "../runtime.js";
 import { type Natives, plain } from "./define.js";
 import { qualifiedClassName } from "./object.js";
 

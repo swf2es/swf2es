@@ -6,8 +6,10 @@
 //
 // Translated from avmplus' core/JSONClass.cpp, this file is subject to the
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
+
+import type { AsObject, Value } from "../descriptors.js";
 import { NS_Public, publicNs, qname } from "../names.js";
-import type { AsObject, Runtime, Traits, Value } from "../runtime.js";
+import type { Runtime, Traits } from "../runtime.js";
 import type { Natives } from "./define.js";
 
 const TO_JSON = qname(publicNs, "toJSON");

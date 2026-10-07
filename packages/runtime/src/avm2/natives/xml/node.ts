@@ -6,8 +6,9 @@
 //
 // Translated from avmplus' core/E4XNode.cpp, this file is subject to the
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
+
+import type { AsObject, Value } from "../../descriptors.js";
 import { type Namespace, NS_Public, prefixedNamespace, prefixOf, publicNs } from "../../names.js";
-import type { AsObject, Value } from "../../runtime.js";
 
 // The node kinds, as E4XNode's NodeTypes: bits, so a set of them is a mask.
 export const ATTRIBUTE = 0x02;

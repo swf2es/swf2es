@@ -10,7 +10,9 @@
 // each bumps the epoch, which empties every cache. A dynamic property's
 // entry still looks for the property on the object, which may have lost it,
 // and leaves anything else, as its prototypes, to the full lookup.
-import type { Method, Traits, TypeRef } from "./runtime.js";
+
+import type { Method, TypeRef } from "./descriptors.js";
+import type { Traits } from "./runtime.js";
 
 /** What an entry does for its name on its traits; get, set and call take what each can. */
 export const IC_Slot = 1;

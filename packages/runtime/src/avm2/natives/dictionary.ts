@@ -1,5 +1,5 @@
 // flash.utils.Dictionary.
-import type { AsObject, Value } from "../runtime.js";
+import type { AsObject, Value } from "../descriptors.js";
 import { WeakKeys } from "../weak-keys.js";
 import { type Natives, plain } from "./define.js";
 

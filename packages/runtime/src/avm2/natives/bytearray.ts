@@ -18,7 +18,8 @@ import {
   zlibUncompress,
 } from "@swf2es/format";
 import type { ExternalStream, Reader, Writer } from "../amf.js";
-import type { AsObject, IndexHook, Method, Runtime, Traits, Value } from "../runtime.js";
+import type { AsObject, Method, Value } from "../descriptors.js";
+import type { IndexHook, Runtime, Traits } from "../runtime.js";
 import { type Natives, registerNativeClass } from "./define.js";
 
 const kGrowthIncr = 4096;
