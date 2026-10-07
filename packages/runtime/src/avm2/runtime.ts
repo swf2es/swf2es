@@ -2933,7 +2933,38 @@ export function stringToNumber(s: string): number {
   return n;
 }
 
-/** A number as AS3 writes it: avmplus' own formatting, not JavaScript's. */
+/**
+ * A number as AS3 writes it: avmplus' own formatting, not JavaScript's,
+ * though the two agree, and JavaScript's is some ten times faster, where
+ * JavaScript writes a number from 1e-6 up to 1e21 in plain decimals with 15
+ * significant digits or fewer. Both write the shortest digits that read
+ * back as the number; past 15 they can part on the last one, which avmplus
+ * rounds up (209.14077758789063 where JavaScript has ...062), and outside
+ * that range avmplus' exponent forms differ (tests/unit/runtime/numbers.test.ts).
+ */
 export function numberToString(n: number): string {
+  const magnitude = n < 0 ? -n : n;
+  if (magnitude >= 1e-6 && magnitude < 1e21) {
+    const text = String(n);
+    if (significantDigits(text) <= 15) {
+      return text;
+    }
+  }
+
   return convertDoubleToString(n);
+}
+
+/** The significant digits in a number JavaScript wrote in plain decimals: all but its leading zeros. */
+function significantDigits(text: string): number {
+  let digits = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c > 0x30 && c <= 0x39) {
+      digits++;
+    } else if (c === 0x30 && digits > 0) {
+      digits++;
+    }
+  }
+
+  return digits;
 }
