@@ -122,37 +122,36 @@ three, with the same VerifyError numbers:
    root down, unless the runtime has reported that the domain finds
    another (`found`: what its caches hold, by name or as a type), and its
    module names as `linked` the ABCs it sees, in load order.
-   An application domain the runtime has let go of is dropped with its
-   descendants (`dropDomain`): no other sees its ABCs, which compile no
-   more and keep their indices. `compact` rebuilds the domain once those
-   ABCs hold enough of its memory, by an estimate from the rows of its
-   tables: 4 MB, and as much as the live ABCs or a third of codegen's
-   memory with them; a host calls it when it has time, as the player
-   does when idle. A rebuild links the live ABCs again, in their places, and
-   what the domain has logged is done again where it happened: each
-   finding recorded, and the first answer to what resolves lazily, a
-   traits' types, a method's signature, an ABC's first verification and
-   the scopes it finds. Those see the ABCs there were when first asked;
-   an ancestor may define the same name since, which a lookup would find
-   now. So the collector frees all the dropped took, the names only they
-   spelled included; wasm memory never shrinks, but what was freed is used
-   again. A live ABC links, resolves and compiles as it did, since no
-   dropped one was ever seen by it. A rebuild of a large application's
-   domain takes tens of milliseconds, its first verifications most. A
-   domain the host has no use for now,
-   as once its ABCs are compiled, is evicted with its descendants
-   (`evictDomain`), as if dropped but for its log, and revived
-   (`reviveDomain`) with its evicted ancestors, the first a child of a
-   live domain, given their ABCs again if a rebuild let go of them: one
-   rebuild links them in their places, their log done again with them.
-   `reset` counts an epoch, which `dropDomain` checks, so that a drop
-   meant for a domain of before a reset does nothing.
    Each class's, script's and activation's traits then lay out their
    members, binding names to slot and dispatch ids after their base's
    (`link/traits.ts`). Types resolve later, when a class is first used:
    slot types, method signatures, and the override and interface checks
    that compare them. A type is the id of a traits, including void and
    null, or `*`.
+   An application domain the runtime has let go of is dropped with its
+   descendants (`dropDomain`), and one the host has no use for now, as
+   once its ABCs are compiled, is evicted with them (`evictDomain`): no
+   other sees their ABCs, which compile no more and keep their indices.
+   `compact` rebuilds the domain once those ABCs hold enough of its
+   memory, by an estimate from the rows of its tables: 4 MB, and as much
+   as the live ABCs or a third of codegen's memory with them; a host
+   calls it when it has time, as the player does when idle. A rebuild
+   links the live ABCs again, in their places, and does again, where it
+   happened, what the domain has logged: each finding recorded, and the
+   first answer to what resolves lazily, a traits' types, a method's
+   signature, an ABC's first verification and the scopes it finds. Those
+   see the ABCs there were when first asked; an ancestor may define the
+   same name since, which a lookup would find now. So a live ABC links,
+   resolves and compiles as it did, since no ABC let go of was ever seen
+   by it, and the collector frees all the others took, the names only
+   they spelled included: wasm memory never shrinks, but what was freed
+   is used again. A rebuild of a large application's domain takes tens of
+   milliseconds, its first verifications most. An evicted domain is
+   revived (`reviveDomain`) with its evicted ancestors, the first a child
+   of a live domain, given their ABCs again if a rebuild let go of them:
+   one rebuild links them in their places, their log done again with
+   them. `reset` counts an epoch, which `dropDomain` checks, so that a
+   drop meant for a domain of before a reset does nothing.
 3. **Verifying a method**, when it is first compiled: its signature's types
    and its bytecode.
 
