@@ -1891,9 +1891,11 @@ The IndexedDB cache keeps each module's size and last use in a store of
 their own, so that eviction, of the least recently used once the modules
 pass `maxBytes` (256 MiB by default, counted as UTF-16), reads no module.
 It writes a module once the page is idle: a write that a load's next read
-waited behind took that read from 4 to 45 ms. A later version opened in
-another tab closes its connection, and the next call opens it again;
-`close` lets a host do the same.
+waited behind took that read from 4 to 45 ms. A get that cannot mark its
+module used still returns it. A later version opened in another tab
+closes its connection, and the next call opens it again; `close` lets a
+host do the same. A database that did not open within `openTimeout`, or
+failed to, is done without for `retryAfter` (30 s), then tried again.
 
 Measured in headless Chrome on a large real-world SWF (one ABC of 1.2 MB,
 a module of 8.17 million characters), medians of seven runs, to its first

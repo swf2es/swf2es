@@ -1,8 +1,10 @@
 // The IndexedDB module cache (player-hosts) in Chrome: a SWF of a large
 // document class played with it compiles its modules once and then reads
 // them, and traces alike when its stored modules are cut short and
-// compiled again; the store reads again once closed, deletes, evicts the
-// least recently used and keeps nothing larger than itself. The cache's keys and fallbacks are tested in node
+// compiled again; the store reads again once closed, deletes, opens again
+// once its database is deleted under it, tries again a database that did
+// not open, evicts the least recently used and keeps nothing larger than
+// itself. The cache's keys and fallbacks are tested in node
 // (tests/unit/player/scripting/code.test.ts).
 import assert from "node:assert/strict";
 import { bare } from "./cases.ts";
@@ -39,4 +41,6 @@ assert.deepEqual(check.kept, ["a", "c"]);
 assert.equal(check.oversized, false);
 assert.equal(check.reopened, true);
 assert.equal(check.deleted, true);
+assert.equal(check.afterVersionChange, true);
+assert.equal(check.retried, true);
 console.log("module cache: ok");

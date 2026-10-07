@@ -490,6 +490,8 @@ export interface CacheCheck {
   oversized: boolean;
   reopened: boolean;
   deleted: boolean;
+  afterVersionChange: boolean;
+  retried: boolean;
 }
 
 /** Check the IndexedDB module cache in Chrome with `swf` (see page.ts's moduleCacheSwf). */

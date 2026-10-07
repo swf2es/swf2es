@@ -725,6 +725,10 @@ interface CacheCheck {
   /** Whether the cache, closed, read a module again; then deleted it. */
   reopened: boolean;
   deleted: boolean;
+  /** Whether it wrote and read again once its database was deleted under it. */
+  afterVersionChange: boolean;
+  /** Whether a database that failed to open was tried again after retryAfter, and only then. */
+  retried: boolean;
 }
 
 /**
@@ -815,15 +819,46 @@ async function moduleCacheSwf(base64: string): Promise<CacheCheck> {
   await small.put("d", ten("d", 30));
   const oversized = (await small.get("d")) !== undefined;
 
-  for (const c of [cache, small]) {
+  // Deleted under it, as another tab's upgrade would close it: opened again.
+  await new Promise((done) => {
+    indexedDB.deleteDatabase(`${name}-small`).onsuccess = done;
+  });
+  await small.put("e", ten("e"));
+  const afterVersionChange = (await small.get("e")) !== undefined;
+
+  // A database that did not open is tried again once `retryAfter` has passed, not before.
+  let opens = 0;
+  const flaky = {
+    open: (n: string, v?: number) => {
+      if (++opens === 1) {
+        throw new Error("not now");
+      }
+
+      return indexedDB.open(n, v);
+    },
+  } as IDBFactory;
+  const later = indexedDbModuleCache({ name: `${name}-later`, indexedDB: flaky, retryAfter: 200 });
+  const outcomes: boolean[] = [];
+  for (const wait of [0, 0, 300]) {
+    await new Promise((r) => setTimeout(r, wait));
+    outcomes.push(
+      await later.get("x").then(
+        () => true,
+        () => false,
+      ),
+    );
+  }
+  const retried = outcomes.join() === "false,false,true" && opens === 2;
+
+  for (const c of [cache, small, later]) {
     c.close();
   }
 
-  for (const db of [name, `${name}-small`]) {
+  for (const db of [name, `${name}-small`, `${name}-later`]) {
     indexedDB.deleteDatabase(db);
   }
 
-  return { loads, kept, oversized, reopened, deleted };
+  return { loads, kept, oversized, reopened, deleted, afterVersionChange, retried };
 }
 
 const page = globalThis as unknown as {

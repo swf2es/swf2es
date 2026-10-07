@@ -14,6 +14,8 @@ export interface IndexedDbModuleCacheOptions {
   indexedDB?: IDBFactory;
   /** How long to wait for the database to open, in ms, before doing without it. */
   openTimeout?: number;
+  /** How long, in ms, to do without a database that did not open before trying again. */
+  retryAfter?: number;
 }
 
 /** A ModuleCache that a host can close, letting go of its database. */
@@ -45,15 +47,39 @@ interface Entry {
 export function indexedDbModuleCache(
   options: IndexedDbModuleCacheOptions = {},
 ): IndexedDbModuleCache {
-  const { name = "swf2es-modules", maxBytes = 256 * 1024 * 1024, openTimeout = 2000 } = options;
+  const {
+    name = "swf2es-modules",
+    maxBytes = 256 * 1024 * 1024,
+    openTimeout = 2000,
+    retryAfter = 30_000,
+  } = options;
   let opened: Promise<IDBDatabase> | null = null;
-  // Let go of, as when another tab opens a later version: the next call opens it again.
-  const forget = (db: IDBDatabase) => {
-    db.close();
-    opened = null;
-  };
+  // When a database that did not open may be tried again.
+  let retryAt = 0;
   const database = () => {
-    opened ??= open(options.indexedDB ?? globalThis.indexedDB, name, openTimeout, forget);
+    if (opened === null || (retryAt !== 0 && Date.now() >= retryAt)) {
+      retryAt = 0;
+      const attempt = open(options.indexedDB ?? globalThis.indexedDB, name, openTimeout);
+      opened = attempt;
+      attempt.then(
+        (db) => {
+          // Another tab opening a later version: let go, and open again
+          // next time, unless this was let go of already for another.
+          db.onversionchange = () => {
+            db.close();
+            if (opened === attempt) {
+              opened = null;
+            }
+          };
+        },
+        () => {
+          if (opened === attempt) {
+            retryAt = Date.now() + retryAfter;
+          }
+        },
+      );
+    }
+
     return opened;
   };
 
@@ -70,11 +96,16 @@ export function indexedDbModuleCache(
         return undefined;
       }
 
-      // Marked used apart, in a store no get reads, so that gets need not wait.
-      const entries = db.transaction(ENTRIES, "readwrite").objectStore(ENTRIES);
-      const entry = await request<Entry | undefined>(entries.get(key));
-      if (entry) {
-        entries.put({ ...entry, used: Date.now() });
+      // Marked used apart, in a store no get reads, so that gets need not
+      // wait; a mark that fails leaves the module as read.
+      try {
+        const entries = db.transaction(ENTRIES, "readwrite").objectStore(ENTRIES);
+        const entry = await request<Entry | undefined>(entries.get(key));
+        if (entry) {
+          entries.put({ ...entry, used: Date.now() });
+        }
+      } catch {
+        // Its last use stays as it was.
       }
 
       return {
@@ -141,14 +172,13 @@ function idle(f: () => void): void {
 }
 
 /** The database, made if new; rejected if it does not open within `timeout` ms, as when another tab blocks an upgrade. */
-function open(
-  factory: IDBFactory,
-  name: string,
-  timeout: number,
-  forget: (db: IDBDatabase) => void,
-): Promise<IDBDatabase> {
+function open(factory: IDBFactory, name: string, timeout: number): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`IndexedDB ${name} did not open`)), timeout);
+    let late = false;
+    const timer = setTimeout(() => {
+      late = true;
+      reject(new Error(`IndexedDB ${name} did not open`));
+    }, timeout);
     const opening = factory.open(name, VERSION);
     opening.onupgradeneeded = () => {
       // An older version's modules are another format's: dropped.
@@ -162,10 +192,12 @@ function open(
     };
     opening.onsuccess = () => {
       clearTimeout(timer);
-      const db = opening.result;
-      // A later version elsewhere, as a newer player's in another tab, waits for none of ours.
-      db.onversionchange = () => forget(db);
-      resolve(db);
+      // Given up on already, it is closed.
+      if (late) {
+        opening.result.close();
+      } else {
+        resolve(opening.result);
+      }
     };
     opening.onerror = () => {
       clearTimeout(timer);
