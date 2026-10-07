@@ -989,6 +989,8 @@
     "flash.text::TextField#getTextRuns",
     "flash.text::TextField#replaceSelectedText",
     "flash.text::TextField#get:textInteractionMode",
+    "flash.text::TextField#getImageReference",
+    "flash.text::TextField.isFontCompatible",
     "flash.display::DisplayObjectContainer#areInaccessibleObjectsUnderPoint",
     "flash.display::DisplayObjectContainer#getObjectsUnderPoint",
     "flash.display::Stage#flash.display:Stage::setAutoOrients",

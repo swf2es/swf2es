@@ -2450,6 +2450,12 @@ not set: whole numbers rounded, a half away from zero, NaN and the
 infinities -2147483648 as x86 converts them, `align` one of Flash's or
 ArgumentError 2008, an unknown `display` null. The `text-fields` case
 traces all of this, defaults, HTML and refusals, against adl.
+An `IMG` is dropped, as adl drops it, by class name or URL, and
+`getImageReference` gives null for every id (`text-field-queries`).
+`TextField.isFontCompatible` asks the fonts `enumerateFonts` lists, the
+SWF's own before any is registered: the name in any case, no CFF font,
+and the style "bold", "italic" or "boldItalic" as written, any other
+regular.
 `getTextRuns` cuts a range where the format changes; a paragraph's line
 end takes the paragraph's format; `getFirstCharInParagraph` and
 `getParagraphLength` count the text's length as in the last paragraph,

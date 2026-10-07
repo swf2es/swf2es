@@ -16,6 +16,25 @@ function style(font: AnyFontCharacter): string {
   return font.italic ? "italic" : "regular";
 }
 
+/** The fonts enumerateFonts lists: the running code's SWF's, with layout or no glyphs, and those registered. */
+export function embeddedFonts(s: Scripting): AnyFontCharacter[] {
+  const fonts: AnyFontCharacter[] = [];
+  const library = s.code.codeLibrary();
+  if (library) {
+    for (const character of library.characters.values()) {
+      if (
+        character.type === "font" &&
+        (character.font.layout || character.font.glyphs.length === 0)
+      ) {
+        fonts.push(character);
+      }
+    }
+  }
+
+  fonts.push(...s.symbols.registeredFonts.values());
+  return fonts;
+}
+
 export function fontNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
   const glyphCodes = new WeakMap<FontCharacter, Set<number>>();
@@ -62,19 +81,7 @@ export function fontNatives(s: Scripting): avm2.Natives {
 
     static enumerateFonts(_enumerateDeviceFonts: boolean): AsObject {
       const cls = s.rt.classNamed("flash.text::Font");
-      const fonts: AnyFontCharacter[] = [];
-      const library = s.code.codeLibrary();
-      if (library) {
-        for (const character of library.characters.values()) {
-          if (
-            character.type === "font" &&
-            (character.font.layout || character.font.glyphs.length === 0)
-          ) {
-            fonts.push(character);
-          }
-        }
-      }
-      fonts.push(...s.symbols.registeredFonts.values());
+      const fonts = embeddedFonts(s);
       fonts.sort((a, b) => {
         const first = a.name.toLowerCase();
         const second = b.name.toLowerCase();
