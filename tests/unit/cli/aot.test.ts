@@ -3,7 +3,7 @@
 // own compile path (Code.link) run in node with the release codegen.wasm.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { relative } from "node:path";
 import { test } from "node:test";
@@ -110,6 +110,24 @@ test("the command's modules are the player's for its cases' SWFs", { skip }, asy
     writeFileSync(path, swf);
     assertSame(cliModules(path, libPaths, name), await playerModules(swf, libs));
   }
+
+  // Again into the same directory, without the libraries: theirs are gone,
+  // what else is there stays.
+  const dir = `${out}aot/two-abcs/`;
+  writeFileSync(`${dir}notes.txt`, "kept");
+  const again = swf2es(
+    `${out}swfs/two-abcs.swf`,
+    "-o",
+    dir,
+    "-q",
+    "--lib",
+    libPaths[0],
+    "--lib",
+    libPaths[1],
+  );
+  assert.equal(again.status, 0, again.stderr);
+  assert.ok(!existsSync(`${dir}lib-0.js`) && !existsSync(`${dir}lib-1.js`));
+  assert.ok(existsSync(`${dir}abc-1.js`) && existsSync(`${dir}notes.txt`));
 });
 
 test("the command's modules are the player's for as3pb's ABC", { skip }, async () => {
@@ -162,13 +180,42 @@ test("the command explains what it cannot do", () => {
   const unknown = swf2es("--frobnicate");
   assert.equal(unknown.status, 2);
 
+  const write = (name: string, bytes: Uint8Array) => {
+    writeFileSync(out + name, bytes);
+    return out + name;
+  };
+  const as3 = (...tags: Uint8Array[]) =>
+    w.swf({
+      width: 10,
+      height: 10,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [w.fileAttributes(true), ...tags, w.showFrame(), w.end()],
+    });
+  // An empty ABC: version 46.16, then twelve counts of nothing.
+  const abc = new Uint8Array([16, 0, 46, 0, ...new Array(12).fill(0)]);
+  const lib = write("lib.abc", abc);
+  const refused = (file: string, message: RegExp, ...args: string[]) => {
+    const r = swf2es(file, "--lib", lib, ...args);
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, message);
+  };
+
   // No DoABC: nothing to compile, said so rather than an empty manifest.
-  const empty = `${out}empty.swf`;
-  writeFileSync(
-    empty,
-    w.swf({ width: 10, height: 10, frameRate: 24, frameCount: 1, tags: [w.showFrame(), w.end()] }),
-  );
-  const noAbc = swf2es(empty, "--lib", empty);
-  assert.equal(noAbc.status, 1);
-  assert.match(noAbc.stderr, /no DoABC or DoABC2 tag/);
+  refused(write("empty.swf", as3()), /no DoABC or DoABC2 tag/);
+  const avm1 = w.swf({ width: 10, height: 10, frameRate: 24, frameCount: 1, tags: [w.end()] });
+  refused(write("avm1.swf", avm1), /an AVM1 SWF/);
+  const whole = as3(w.doAbc(abc, "A"));
+  refused(write("cut.swf", whole.subarray(0, whole.length - 8)), /truncated SWF/);
+  refused(write("short.abc", new Uint8Array([16, 0])), /neither a SWF nor an ABC/);
+  refused(write("nothing.abc", new Uint8Array()), /neither a SWF nor an ABC/);
+
+  // A library's rejection names the library, not the input.
+  const bad = write("bad.abc", new Uint8Array([16, 0, 46, 0, 255]));
+  const rejected = swf2es(write("ok.abc", abc), "--lib", bad);
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /^swf2es: library bad was rejected: VerifyError #\d+/);
+
+  // An output that cannot be written is an error, not a stack.
+  refused(write("ok2.abc", abc), /cannot write .*lib\.abc: (EEXIST|ENOTDIR)/, "-o", lib);
 });

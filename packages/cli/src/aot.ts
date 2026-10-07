@@ -7,7 +7,7 @@
 // any of them compiles.
 import { createHash } from "node:crypto";
 import type { Codegen } from "@swf2es/codegen";
-import { readDoAbc, readSwf, tags } from "@swf2es/format";
+import { isAs3, readDoAbc, readSwf, tags } from "@swf2es/format";
 
 /** The API version the player resets the compiler with: Flash Player's. */
 export const API_VERSION = 50;
@@ -38,14 +38,45 @@ export interface Module {
 
 const SIGNATURES = new Set(["FWS", "CWS", "ZWS"]);
 
-/** The ABCs of a SWF, in tag order as the player links them, or a bare ABC as one. */
+/** Input the command cannot compile, with why. */
+export class InputError extends Error {}
+
+/**
+ * The ABCs of a SWF, in tag order as the player links them, or a bare ABC
+ * as one. Only an AS3 SWF's: the player runs an AVM1 SWF's code as AVM1,
+ * and never compiles its DoABCs.
+ */
 export function readInput(bytes: Uint8Array): Input {
   const signature = String.fromCharCode(...bytes.subarray(0, 3));
   if (!SIGNATURES.has(signature)) {
+    // An ABC starts with its minor and major version, and avmplus reads only major 46.
+    if (bytes.length < 4 || bytes[2] !== 46 || bytes[3] !== 0) {
+      throw new InputError("neither a SWF nor an ABC");
+    }
+
     return { kind: "abc", version: 0, abcs: [{ name: "", lazy: false, abc: bytes }] };
   }
 
-  const swf = readSwf(bytes);
+  let swf: ReturnType<typeof readSwf>;
+  try {
+    swf = readSwf(bytes);
+  } catch (e) {
+    throw new InputError(`a truncated or corrupt SWF (${(e as Error).message})`);
+  }
+
+  // A DoABC cut short would reach codegen as a malformed ABC and read as
+  // the code's error; a SWF cut elsewhere the player plays, as far as it goes.
+  const last = swf.tags.at(-1);
+  if (swf.truncated && (last?.code === tags.DoABC || last?.code === tags.DoABC2)) {
+    throw new InputError("a truncated SWF: the file ends inside a DoABC tag");
+  }
+
+  if (!isAs3(swf)) {
+    throw new InputError(
+      "an AVM1 SWF (its FileAttributes has no ActionScript 3 flag): the player runs its code as AVM1",
+    );
+  }
+
   const abcs: AbcInput[] = [];
   for (const t of swf.tags) {
     if (t.code === tags.DoABC || t.code === tags.DoABC2) {
@@ -64,6 +95,8 @@ export class RejectedError extends Error {
   constructor(
     readonly what: string,
     readonly verifyError: number,
+    /** A library's, not the input's. */
+    readonly library: boolean,
   ) {
     super(`${what} was rejected: VerifyError #${verifyError}`);
   }
@@ -86,7 +119,7 @@ export function compileAhead(
   const add = (what: string, abc: Uint8Array, builtin: boolean, domain: number) => {
     const error = codegen.add(abc, builtin, domain);
     if (error) {
-      throw new RejectedError(what, error);
+      throw new RejectedError(what, error, builtin);
     }
 
     hashes.push(sha256(abc));

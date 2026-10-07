@@ -1,11 +1,19 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { COMPILER_VERSION, createCodegen } from "@swf2es/codegen";
-import { API_VERSION, compileAhead, type Module, RejectedError, readInput, sha256 } from "./aot.js";
+import {
+  API_VERSION,
+  compileAhead,
+  InputError,
+  type Module,
+  RejectedError,
+  readInput,
+  sha256,
+} from "./aot.js";
 
 const USAGE = `usage: swf2es <file.swf|file.abc> [options]
 
@@ -23,7 +31,11 @@ options:
   --emit-libraries     write the libraries' modules too
   -q, --quiet          print nothing but errors
   -h, --help           show this
-  -v, --version        print the compiler's version`;
+  -v, --version        print the compiler's version
+
+exit status: 0 on success, 2 for a mistake in the command line or missing
+default libraries, 1 for anything else (an unreadable, AVM1 or rejected
+input or library, or an output that cannot be written)`;
 
 /** Where the repository's tests keep Adobe's libraries, which cannot ship with the package. */
 const REPO_LIBRARIES = fileURLToPath(
@@ -61,6 +73,33 @@ async function read(path: string, what: string): Promise<Uint8Array> {
     return new Uint8Array(await readFile(path));
   } catch (e) {
     fail(`cannot read ${what} ${path}: ${(e as NodeJS.ErrnoException).code ?? e}`);
+  }
+}
+
+async function writing(path: string, write: () => Promise<unknown>): Promise<void> {
+  try {
+    await write();
+  } catch (e) {
+    fail(`cannot write ${path}: ${(e as NodeJS.ErrnoException).code ?? e}`);
+  }
+}
+
+/** What a previous run wrote to `out`, as its manifest names it, so that no stale module stays beside a new manifest. */
+async function removeModules(out: string): Promise<void> {
+  let old: { libraries?: unknown; abcs?: unknown } | null;
+  try {
+    old = JSON.parse(await readFile(join(out, "manifest.json"), "utf8"));
+  } catch {
+    return;
+  }
+
+  const entries = [old?.libraries, old?.abcs].flatMap((list) => (Array.isArray(list) ? list : []));
+  // Only names this command writes: a manifest edited by hand names nothing else to delete.
+  for (const entry of entries) {
+    const name = (entry as { module?: unknown } | null)?.module;
+    if (typeof name === "string" && /^(abc|lib)-\d+\.js$/.test(name)) {
+      await writing(join(out, name), () => rm(join(out, name), { force: true }));
+    }
   }
 }
 
@@ -109,7 +148,7 @@ async function main(argv: string[]): Promise<void> {
   try {
     input = readInput(bytes);
   } catch (e) {
-    fail(`${file}: not a readable SWF (${(e as Error).message})`);
+    fail(e instanceof InputError ? `${file}: ${e.message}` : String((e as Error).stack ?? e));
   }
 
   if (input.abcs.length === 0) {
@@ -123,15 +162,20 @@ async function main(argv: string[]): Promise<void> {
   try {
     compiled = compileAhead(codegen, libs, input.abcs, values["emit-libraries"]);
   } catch (e) {
-    fail(e instanceof RejectedError ? `${file}: ${e.message}` : String((e as Error).stack ?? e));
+    if (!(e instanceof RejectedError)) {
+      fail(String((e as Error).stack ?? e));
+    }
+
+    fail(e.library ? e.message : `${file}: ${e.message}`);
   }
 
   const ms = performance.now() - started;
   const out = values.out ?? `${basename(file, extname(file))}.swf2es`;
-  await mkdir(out, { recursive: true });
+  await writing(out, () => mkdir(out, { recursive: true }));
+  await removeModules(out);
   let size = 0;
   const write = async (path: string, m: Module) => {
-    await writeFile(join(out, path), m.module);
+    await writing(join(out, path), () => writeFile(join(out, path), m.module));
     size += Buffer.byteLength(m.module);
     return path;
   };
@@ -164,7 +208,10 @@ async function main(argv: string[]): Promise<void> {
       })),
     ),
   };
-  await writeFile(join(out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  const manifestPath = join(out, "manifest.json");
+  await writing(manifestPath, () =>
+    writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`),
+  );
   if (!values.quiet) {
     const count = compiled.abcs.length + compiled.libraries.length;
     console.log(
