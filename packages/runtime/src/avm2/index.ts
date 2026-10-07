@@ -4,6 +4,7 @@ import type { RuntimeOptions } from "./options.js";
 import { Runtime } from "./runtime.js";
 
 export type { Abc, AsObject, CompileUnit, FoundDefinition, Method, Value } from "./descriptors.js";
+export { type Domain, frameScripts } from "./domain.js";
 export type { ClassHook, NativesProvider } from "./hooks.js";
 export { messages } from "./messages.js";
 export { publicNs, qname } from "./names.js";
@@ -22,7 +23,7 @@ export { builtinHooks, builtinNatives } from "./natives/index.js";
 export { XMLParser, XMLTag } from "./natives/xml/parser.js";
 export type { RuntimeOptions, ShellFiles } from "./options.js";
 export { errorMessages } from "./player-messages.js";
-export { type Domain, frameScripts, Runtime } from "./runtime.js";
+export { Runtime } from "./runtime.js";
 export { setStaticVar } from "./traits.js";
 
 /** A runtime with the builtins' natives, for modules compiled from builtin.abc and after. */

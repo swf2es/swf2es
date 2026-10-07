@@ -11,10 +11,10 @@ import type {
   TypeRef,
   Value,
 } from "./descriptors.js";
+import type { Domain } from "./domain.js";
 import type { IndexHook, PropertyHook } from "./hooks.js";
 import type { Multiname, Namespace } from "./names.js";
 import { invalidate } from "./property-cache.js";
-import type { Domain } from "./runtime.js";
 
 // Binding kinds, as the compiler encodes them: kind | id << 3.
 export const BIND_Method = 1;

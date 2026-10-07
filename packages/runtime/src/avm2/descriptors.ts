@@ -2,8 +2,8 @@
 // descriptors of its traits, classes and scripts it gives the runtime
 // (docs/architecture.md, "Modules and the bootstrap").
 
+import type { Domain, Script } from "./domain.js";
 import type { Multiname, Namespace, TypeName } from "./names.js";
-import type { Domain, Script } from "./runtime.js";
 import type { ClassRef, VectorRef } from "./traits.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: AS3 values are untyped
