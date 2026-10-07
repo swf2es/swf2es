@@ -343,10 +343,16 @@ which `newclass` builds from the module's layout:
   dynamic property's entry still looks for it on the object, and leaves
   the prototypes to the full lookup. Describing traits, and setting up a
   class's or script's methods and hooks, bumps an epoch that empties every
-  cache. A name that has replaced 16 entries keeps the ones it has until
-  then, as a name seen on more traits than it keeps would otherwise
-  replace one on every miss. Not cached: a name made at run time, a name a hook resolves (a
-  Proxy's, XML's), an element's index, a Dictionary's key, and primitives.
+  cache, and so does a Loader's unload. An entry holds its traits and
+  their code, so emptying drops those references at once, not as the name
+  is next filled: otherwise a name the main SWF used on a loaded SWF's
+  objects would keep that SWF alive after its unload. A name that has
+  replaced 16 entries keeps the ones it has until the epoch moves, as a
+  name seen on more traits than it keeps would otherwise replace one on
+  every miss. A primitive's bindings are cached by its class's traits, not
+  its prototype's properties. Not cached: a name made at run time, a name
+  a hook resolves (a Proxy's, XML's), an element's index and a
+  Dictionary's key.
 - **A class object** is an instance of its static traits, whose base is
   Class's instance traits; it holds its instances' traits (`$it`) and its
   AS3 `prototype`. Class is dynamic, so class objects are, as the builtins

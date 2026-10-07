@@ -64,8 +64,26 @@ export function epoch(): number {
   return current;
 }
 
+/** The caches filled in this epoch, which invalidate empties so that they keep no traits or code. */
+const filled: PropertyCache[] = [];
+
+/** Note that `head`'s cache is being filled in this epoch. */
+export function filling(head: PropertyCache): void {
+  filled.push(head);
+}
+
 /** Empty every cache: a traits' bindings, methods or hooks are changing. */
 export function invalidate(): void {
+  for (let i = 0; i < filled.length; i++) {
+    for (let e: PropertyCache | null = filled[i]; e !== null; e = e.next) {
+      e.traits = null;
+      e.get = null;
+      e.set = null;
+      e.type = null;
+    }
+  }
+
+  filled.length = 0;
   current++;
 }
 

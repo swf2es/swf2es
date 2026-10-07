@@ -588,6 +588,7 @@ export class Loads {
     this.closeLoad(loader);
     const content: AsObject | null = loader.$content ?? null;
     this.dropContent(loader);
+    this.s.rt.forgetCaches();
     if (stop && content) {
       this.s.lifecycle.stopAll(content.$display);
     }

@@ -38,6 +38,7 @@ import { errorMessages } from "./player-messages.js";
 import {
   ENTRIES,
   epoch,
+  filling,
   IC_Call,
   IC_Const,
   IC_Dynamic,
@@ -844,6 +845,11 @@ export class Runtime {
   readonly objectTraits: Traits;
   readonly classTraits: Traits;
   readonly functionTraits: Traits;
+  /** Empty the inline caches, so that they keep no traits or code of what is being let go of. */
+  forgetCaches(): void {
+    invalidate();
+  }
+
   /** Method closures, by receiver, so that o.f === o.f. */
   private readonly closures = new WeakMap<object, Map<number, AsObject>>();
   private readonly builtinTraitsByName = new Map<string, Traits>();
@@ -3996,6 +4002,7 @@ function entryFor(head: PropertyCache, t: Traits): PropertyCache | null {
     }
 
     head.epoch = epoch();
+    filling(head);
     head.victim = head;
     head.replaced = 0;
   }
