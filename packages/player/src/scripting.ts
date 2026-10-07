@@ -22,6 +22,7 @@ import {
   MovieClip,
   OTHER,
   scriptChildren,
+  scriptWork,
   TRANSFORM,
 } from "./display/display.js";
 import type { ButtonCharacter, DisplayCharacter, Library } from "./display/timeline.js";
@@ -364,6 +365,7 @@ export class Scripting {
         }
 
         display.firstScripts = true;
+        scriptWork.changes++;
         // What is placed and not yet alive is made first, as a frame's
         // construct phase makes it: the frame's other children, and those
         // of the gotos under way, which their parents' listeners look for.
@@ -524,7 +526,11 @@ export class Scripting {
     this.scriptQueues[depth] = queue;
     try {
       for (let round = 0; round < 64 && !stopped(); round++) {
-        if (!this.frameScriptRound(queue, root, also, stopped)) {
+        // Another round only finds a script if something it reads changed
+        // since this one walked: every clip this one visited is left on a
+        // frame whose script ran, or one held back as it will be again.
+        const changes = scriptWork.changes;
+        if (!this.frameScriptRound(queue, root, also, stopped) || scriptWork.changes === changes) {
           break;
         }
       }
@@ -758,10 +764,12 @@ export class Scripting {
     this.broadcast("frameConstructed");
     const outer = this.scriptPhase;
     this.scriptPhase = true;
+    scriptWork.changes++;
     try {
       this.runFrameScripts(root);
     } finally {
       this.scriptPhase = outer;
+      scriptWork.changes++;
     }
     this.lifecycle.afterScripts();
     this.broadcast("exitFrame");

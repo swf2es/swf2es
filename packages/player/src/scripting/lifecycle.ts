@@ -4,7 +4,7 @@
 // orphan, which plays on as Flash's does, for a while (docs/architecture.md,
 // "Scripts and the display list").
 import { avm2 } from "@swf2es/runtime";
-import { Container, type DisplayObject, MovieClip } from "../display/display.js";
+import { Container, type DisplayObject, MovieClip, scriptWork } from "../display/display.js";
 import { stopTimelineSoundsUnder } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent, heard } from "./events.js";
@@ -81,6 +81,7 @@ export class Lifecycle {
   orphan(display: DisplayObject, keep = true): void {
     if (display.object && !this.orphans.has(display.serial)) {
       this.orphans.set(display.serial, { ref: display.ref, keep, since: this.s.frames });
+      scriptWork.changes++;
     }
   }
 
@@ -92,6 +93,7 @@ export class Lifecycle {
    */
   made(display: DisplayObject): void {
     this.fresh.push(display);
+    scriptWork.changes++;
     if (display instanceof MovieClip) {
       display.fresh = true;
     }

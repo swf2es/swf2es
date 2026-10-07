@@ -12,6 +12,7 @@ import {
   type MovieClip,
   ShapeObject,
   scriptChildren,
+  scriptWork,
   type TextObject,
 } from "../../../../packages/player/dist/display/display.js";
 import { Player } from "../../../../packages/player/dist/player.js";
@@ -696,4 +697,76 @@ test("a button's first scripts run up, over, down, hit once, then in its frames'
   assert.equal(button.firstScripts, false);
   assert.equal(scriptChildren(button), button.frameChildren);
   assert.deepEqual(scriptChildren(button), [hit, up, down, over]);
+});
+
+test("every change a round of frame scripts reads moves scriptWork, and a script's run does not", () => {
+  const player = movie([w.place({ depth: 1, character: 1 })], []);
+  const clip = player.root;
+  const sprite = new Container();
+  const [a, b] = [new Shape(), new Shape()];
+  const button = new ButtonObject();
+  const moves = (change: () => void) => {
+    const before = scriptWork.changes;
+    change();
+    return scriptWork.changes !== before;
+  };
+
+  assert.ok(
+    moves(() => player.tick()),
+    "a frame entered",
+  );
+  assert.ok(
+    moves(() => clip.gotoFrame(1)),
+    "a goto",
+  );
+  assert.ok(
+    moves(() => clip.setFrameScript(1, "script")),
+    "a script registered",
+  );
+  assert.ok(
+    moves(() => clip.setFrameScript(1, null)),
+    "a script taken away",
+  );
+  assert.ok(
+    moves(() => (clip.makingChildren = true)),
+    "making children",
+  );
+  assert.ok(
+    moves(() => (clip.makingChildren = false)),
+    "made",
+  );
+  assert.ok(
+    moves(() => (clip.timelineChild = true)),
+    "a timeline child",
+  );
+  assert.ok(
+    moves(() => sprite.addChildAt(a, 0)),
+    "a child added",
+  );
+  assert.ok(
+    moves(() => sprite.placeAtDepth(b, 1)),
+    "a child placed",
+  );
+  assert.ok(
+    moves(() => sprite.swapChildren(a, b)),
+    "children swapped",
+  );
+  assert.ok(
+    moves(() => sprite.removeChild(a)),
+    "a child removed",
+  );
+  assert.ok(
+    moves(() => (button.upState = sprite)),
+    "a button's state set",
+  );
+  assert.ok(
+    moves(() => button.show()),
+    "a button's state shown",
+  );
+
+  // What a round does to each clip it runs: the frame it is on marked run.
+  assert.ok(!moves(() => (clip.scriptedFrame = clip.currentFrame)), "a frame's script run");
+  const frame = clip.currentFrame;
+  assert.ok(!moves(() => (clip.currentFrame = frame)), "the same frame");
+  assert.ok(!moves(() => (clip.playing = false)), "a stop");
 });

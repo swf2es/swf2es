@@ -49,6 +49,18 @@ export const CONTENT = 4;
 /** A Bitmap's pixels changed in place: the texture uploads again, nothing is rebuilt. */
 export const PIXELS = 8;
 
+/**
+ * A count that moves whenever something changes that a round of frame
+ * scripts (Scripting.runFrameScripts) reads to find a script to run: a
+ * clip's frame, frame scripts, makingChildren or timelineChild, a children
+ * list, a button's states, and, as Scripting and Lifecycle move it, an
+ * object made alive, a button's first scripts, the scripts' phase, the
+ * orphans and what scripts made. While it stands still, a round finds
+ * nothing the one before it left. One for every player: another's moving
+ * it costs a round, never a script.
+ */
+export const scriptWork = { changes: 0 };
+
 /** DisplayObject.kind's. */
 export const OTHER = 0;
 export const CLIP = 1;
@@ -951,6 +963,7 @@ export class Container extends DisplayObject {
     this.children.splice(index, 0, child);
     this.depths.set(depth, child);
     this.invalidate(CHILDREN);
+    scriptWork.changes++;
   }
 
   removeAtDepth(depth: number): DisplayObject | null {
@@ -977,6 +990,7 @@ export class Container extends DisplayObject {
     child.parent = null;
     child.focusDrop?.(child);
     this.invalidate(CHILDREN);
+    scriptWork.changes++;
   }
 
   /**
@@ -990,6 +1004,7 @@ export class Container extends DisplayObject {
     child.parent = this;
     this.children.splice(same ? Math.min(index, this.children.length) : index, 0, child);
     this.invalidate(CHILDREN);
+    scriptWork.changes++;
   }
 
   swapChildren(a: DisplayObject, b: DisplayObject): void {
@@ -998,6 +1013,7 @@ export class Container extends DisplayObject {
     this.children[i] = b;
     this.children[j] = a;
     this.invalidate(CHILDREN);
+    scriptWork.changes++;
   }
 }
 
@@ -1087,6 +1103,7 @@ export class ButtonObject extends Container {
       (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
     );
     this.frameChildren = states.length > 0 ? states : NO_CHILDREN;
+    scriptWork.changes++;
   }
 
   /** The display object of state `state`. */
@@ -1142,6 +1159,7 @@ export class ButtonObject extends Container {
       this.children.splice(0, 0, current);
       current.parent = this;
       this.invalidate(CHILDREN);
+      scriptWork.changes++;
     }
   }
 }
@@ -1309,8 +1327,10 @@ interface Jump {
 export class MovieClip extends Container {
   /** A clip always has its library: the one its timeline came from. */
   declare library: Library;
-  /** The frame it shows, 1 the first; 0 before its first frame is entered. */
-  currentFrame = 0;
+  private frame = 0;
+  private scripts = new Map<number, avm2.Value>();
+  private making = false;
+  private placedByTimeline = false;
   private running = true;
   /** Its timeline's stream as it plays, for what plays it (TimelineSounds); null while none does. */
   stream: object | null = null;
@@ -1320,14 +1340,12 @@ export class MovieClip extends Container {
    * advance, wherever it is by then (`fresh-clips`).
    */
   fresh = false;
-  /** The scripts addFrameScript registered, by frame, 1 the first. */
-  readonly frameScripts = new Map<number, avm2.Value>();
-  /** The frame whose script last ran, so that entering a frame runs its script once. */
+  /**
+   * The frame whose script last ran, so that entering a frame runs its
+   * script once: set to currentFrame alone, as a round's skipping
+   * (scriptWork) has it.
+   */
   scriptedFrame = 0;
-  /** Whether its constructor's super() is making its first frame's children. */
-  makingChildren = false;
-  /** Placed by a timeline, not made by a script with `new`. */
-  timelineChild = false;
   /** A goto a frame script asked for, taken when the script returns, as Flash defers it; null for none. */
   queuedGoto: number | null = null;
   /** Whether that goto plays or stops the clip, as it happens, not as it is asked for. */
@@ -1349,6 +1367,54 @@ export class MovieClip extends Container {
     super();
     this.kind = CLIP;
     this.library = library;
+  }
+
+  /** The frame it shows, 1 the first; 0 before its first frame is entered. */
+  get currentFrame(): number {
+    return this.frame;
+  }
+
+  set currentFrame(frame: number) {
+    if (frame !== this.frame) {
+      this.frame = frame;
+      scriptWork.changes++;
+    }
+  }
+
+  /** The scripts addFrameScript registered, by frame, 1 the first. */
+  get frameScripts(): ReadonlyMap<number, avm2.Value> {
+    return this.scripts;
+  }
+
+  /** Register `script` for frame `frame`, or, null, take the frame's away. */
+  setFrameScript(frame: number, script: avm2.Value | null): void {
+    if (script === null || script === undefined) {
+      this.scripts.delete(frame);
+    } else {
+      this.scripts.set(frame, script);
+    }
+
+    scriptWork.changes++;
+  }
+
+  /** Whether its constructor's super() is making its first frame's children. */
+  get makingChildren(): boolean {
+    return this.making;
+  }
+
+  set makingChildren(making: boolean) {
+    this.making = making;
+    scriptWork.changes++;
+  }
+
+  /** Placed by a timeline, not made by a script with `new`. */
+  get timelineChild(): boolean {
+    return this.placedByTimeline;
+  }
+
+  set timelineChild(placed: boolean) {
+    this.placedByTimeline = placed;
+    scriptWork.changes++;
   }
 
   /** Whether its playhead moves on; stopped, its stream stops, as in Flash and Ruffle. */
