@@ -11,7 +11,12 @@
 // exception and its scope stack empty.
 //
 // The emitter keeps the same facts while it writes a block, and before a
-// branch writes each copy the target does not know (see copyFor).
+// branch writes each copy the target does not know (see copyFor), but only
+// of the registers live there. It may know more copies than this pass, as
+// through a conversion that writes nothing, which this pass takes for a
+// write: a register x the pass takes for written may still be a copy the
+// emitter never wrote. So a fact r -> x enters a block only if x is live
+// there too, where the emitter writes x if the block does not know it a copy.
 import * as ops from "../abc/opcodes";
 import { IR_GetGlobalScope, IR_Nip } from "../ir/ir";
 import { MethodEmitter } from "./method";
@@ -63,23 +68,33 @@ export function flowCopies(em: MethodEmitter): void {
   const ir = em.ir;
   const n = ir.blockCount;
   const slots = ir.frameSize - ir.localCount;
+  if (slots === 0 || n === 0) {
+    return;
+  }
+
   const size = n * slots;
   if (<u32>em.copyIn.length < size) {
     em.copyIn = new StaticArray<i32>(max(size, em.copyIn.length * 2));
   }
 
-  if (<u32>em.dirty.length < n) {
-    em.dirty = new StaticArray<u8>(max(n, 64));
-    em.flow = new StaticArray<i32>(max(slots, em.flow.length));
-  } else if (<u32>em.flow.length < slots) {
-    em.flow = new StaticArray<i32>(slots);
-  }
+  const copyIn = em.copyIn;
+  // One block is entered only at the start, with no copies, or from itself.
+  if (n === 1) {
+    for (let s: u32 = 0; s < slots; s++) {
+      copyIn[s] = NONE;
+    }
 
-  if (slots === 0 || n === 0) {
     return;
   }
 
-  const copyIn = em.copyIn;
+  if (<u32>em.dirty.length < n) {
+    em.dirty = new StaticArray<u8>(max(n, em.dirty.length * 2));
+  }
+
+  if (<u32>em.flow.length < slots) {
+    em.flow = new StaticArray<i32>(max(slots, em.flow.length * 2));
+  }
+
   for (let s: u32 = 0; s < size; s++) {
     copyIn[s] = UNSEEN;
   }
@@ -183,7 +198,7 @@ function walk(em: MethodEmitter, k: u32): bool {
       continue;
     }
 
-    const from = copyOf(em, i);
+    const from = sourceOf(em, i);
     if (from === dst) {
       // Its own value again, as a nip of a dup: nothing changes.
       continue;
@@ -213,7 +228,7 @@ function walk(em: MethodEmitter, k: u32): bool {
 }
 
 /** What instruction i's destination is a copy of, from what the facts are before it; NONE if a value of its own. */
-function copyOf(em: MethodEmitter, i: u32): i32 {
+function sourceOf(em: MethodEmitter, i: u32): i32 {
   const ir = em.ir;
   const op = ir.op[i];
   const dst = ir.dst[i];
@@ -287,7 +302,15 @@ function join(em: MethodEmitter, t: u32, k: u32): bool {
   for (let s: u32 = 0; s < slots; s++) {
     // What is not on the stacks there is no one's copy.
     const live = s < ir.maxScope ? s < scopes : s < stack;
-    const fact = live ? flow[s] : NONE;
+    let fact = live ? flow[s] : NONE;
+    // Nor a copy of what is not, which the emitter may not have written.
+    if (fact >= <i32>ir.localCount) {
+      const f = <u32>fact - ir.localCount;
+      if (!(f < ir.maxScope ? f < scopes : f < stack)) {
+        fact = NONE;
+      }
+    }
+
     const was = copyIn[at + s];
     const now = was === UNSEEN || was === fact ? fact : NONE;
     if (now !== was) {

@@ -178,7 +178,7 @@ export class MethodEmitter {
     }
 
     for (let r: u32 = 0; r < ir.frameSize; r++) {
-      this.copyOf[r] = -1;
+      this.copyOf[r] = NONE;
     }
 
     if (<u32>this.checked.length < ir.frameSize) {
@@ -625,6 +625,7 @@ export class MethodEmitter {
     for (let s = 0; s < slots; s++) {
       this.copyOf[base + s] = this.copyIn[row + s];
     }
+
     for (let r: u32 = 0; r < ir.frameSize; r++) {
       this.promoted[r] = 0;
     }
@@ -653,7 +654,9 @@ export class MethodEmitter {
       const frame = <i32>ir.frameSize;
       const pops = this.stackDiscipline(op) && ir.srcCount[i] > 0 && ir.src[i] >= stack;
       if (dst >= 0 && !this.keptAt(i, this.regType[dst])) {
-        this.copyAll(dst, pops ? ir.src[i] : frame);
+        // Above a push nothing is live to copy it.
+        const push = dst >= stack && this.stackDiscipline(op);
+        this.copyAll(dst, pops ? ir.src[i] : push ? dst : frame);
       }
 
       if (op === ops.OP_hasnext2) {
@@ -785,13 +788,13 @@ export class MethodEmitter {
         // What the branch took is gone.
         this.uncopy(ir.src[i]);
       } else if (op === ops.OP_swap) {
-        this.copyOf[ir.src[i]] = -1;
-        this.copyOf[ir.src[i] + 1] = -1;
+        this.copyOf[ir.src[i]] = NONE;
+        this.copyOf[ir.src[i] + 1] = NONE;
       } else if (op === ops.OP_popscope) {
-        this.copyOf[ir.src[i]] = -1;
+        this.copyOf[ir.src[i]] = NONE;
       } else {
         if (dst >= 0 && !this.kept) {
-          this.copyOf[dst] = -1;
+          this.copyOf[dst] = NONE;
         }
 
         // What is above the stack now is gone.
@@ -917,7 +920,7 @@ export class MethodEmitter {
   private writeCopy(r: i32): void {
     const out = this.out;
     const from = this.copyOf[r];
-    this.copyOf[r] = -1;
+    this.copyOf[r] = NONE;
     this.checked[r] = 0;
     this.reg(r);
     out.text(" = ");
@@ -1013,7 +1016,7 @@ export class MethodEmitter {
   /** Forget every copy from register `from` up: none is needed. */
   private uncopy(from: i32): void {
     for (let r = from; r < <i32>this.ir.frameSize; r++) {
-      this.copyOf[r] = -1;
+      this.copyOf[r] = NONE;
     }
   }
 
@@ -1140,7 +1143,7 @@ export class MethodEmitter {
   /** Register r as read: what it copies, if it is a copy. */
   read(r: i32): void {
     const copy = this.copyOf[r];
-    if (copy === -1) {
+    if (copy === NONE) {
       this.regName(r);
     } else {
       this.copied(copy);
@@ -1372,7 +1375,7 @@ export class MethodEmitter {
         // A register checked since it was last written is not null.
         const src = ir.src[i];
         const copy = this.copyOf[src];
-        const r = copy === -1 ? src : copy;
+        const r = copy === NONE ? src : copy;
         if (r >= 0) {
           if (this.checked[r]) {
             return;
@@ -1397,15 +1400,15 @@ export class MethodEmitter {
           next++;
         }
 
-        // Not a copy of a constant (copyOf below -1), which has no name for unpend.
+        // Not a copy of a constant (copyOf below NONE), which has no name for unpend.
         if (
-          copy >= -1 &&
+          copy >= NONE &&
           next < this.blockLast &&
           ir.pc[next] === ir.pc[i] &&
           readsFirst(ir.op[next])
         ) {
           this.pendingNull = src;
-          this.pendingRead = copy === -1 ? src : copy;
+          this.pendingRead = copy === NONE ? src : copy;
           this.pendingUntil = next;
           this.pendingAt = out.length;
           this.pendingMarks = this.map.count;
