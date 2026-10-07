@@ -89,7 +89,8 @@ export class MethodEmitter {
    */
   typeIndex: StaticArray<u32> = new StaticArray<u32>(0);
   typeStamp: StaticArray<u32> = new StaticArray<u32>(0);
-  typeGen: u32 = 0;
+  // From 1, as a fresh stamp is 0: an emitter that never called newTypes has seen no type.
+  typeGen: u32 = 1;
   /** The name the method being written is given, a JavaScript identifier; "" for none. */
   functionName: string = "";
   /**
