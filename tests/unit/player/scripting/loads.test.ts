@@ -2,12 +2,14 @@
 // Loader's SWF from a URL or from bytes, AS3 or AVM1, its LoaderInfo's
 // events and parameters, and a URLRequest as the host's fetch receives it.
 import assert from "node:assert/strict";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { avm2 } from "@swf2es/runtime";
-import { containerEngine } from "../../../../oracle/oracle.ts";
+import { containerEngine, runOracle } from "../../../../oracle/oracle.ts";
 import type { Container, MovieClip } from "../../../../packages/player/dist/display/display.js";
 import type { FetchRequest } from "../../../../packages/player/dist/hosts.js";
 import { pointerTarget } from "../../../../packages/player/dist/input/pointer.js";
@@ -754,4 +756,138 @@ test("the pointer over an AVM1 movie hits its Loader, the AVM1Movie being no Int
   assert.equal(pointerTarget(player.stage, 5, 5, player.width, player.height), loader.$display);
   // Off the movie's artwork, the stage.
   assert.equal(pointerTarget(player.stage, 15, 15, player.width, player.height), player.stage);
+});
+
+test("a SWF loaded under a loaded SWF links against its classes after the compiler let them go", {
+  skip,
+}, async () => {
+  const lines: string[] = [];
+  const compile = compiler(out);
+  // The parent, loaded by the main SWF, loads the child into a child of
+  // its own domain once the main SWF has loaded enough others since for
+  // the compiler to have let go of the parent's ABC; the child's class
+  // extends the parent's and overrides a method of it.
+  const parent = compile(
+    "NestParent",
+    `package {
+  import flash.display.Loader;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.net.URLRequest;
+  public class NestParent extends Sprite {
+    public function NestParent() { trace("parent"); }
+    public function greet():String { return "hello from the parent"; }
+    public function loadChild():void {
+      var loader:Loader = new Loader();
+      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function (e:Event):void { trace("child loaded"); });
+      loader.load(new URLRequest("child.swf"));
+    }
+  }
+}`,
+  );
+  // Compiled against the parent's ABC, which it does not define again.
+  mkdirSync(`${out}sources`, { recursive: true });
+  writeFileSync(
+    `${out}sources/NestChild.as`,
+    `package {
+  public class NestChild extends NestParent {
+    public function NestChild() { trace("child: " + greet()); }
+    override public function greet():String { return "the child of " + super.greet(); }
+  }
+}`,
+  );
+  const root = fileURLToPath(new URL("../../../../", import.meta.url));
+  const [result] = runOracle(
+    [
+      {
+        source: `${out}sources/NestChild.as`,
+        name: "scripts/NestChild",
+        ascArgs: ["-import", relative(root, `${out}scripts/NestParent.abc`)],
+      },
+    ],
+    out,
+    { imports: ["builtin", "playerglobal"], run: false },
+  );
+  assert.ok(result.compiled, result.compileLog);
+  const child = new Uint8Array(readFileSync(`${out}scripts/NestChild.abc`));
+  const filler = compile(
+    "NestFiller",
+    "package { import flash.display.Sprite; public class NestFiller extends Sprite {} }",
+  );
+  const main = compile(
+    "NestMain",
+    `package {
+  import flash.display.Loader;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.net.URLRequest;
+  public class NestMain extends Sprite {
+    private var parentLoader:Loader = new Loader();
+    private var fillers:int = 0;
+    public function NestMain() {
+      parentLoader.contentLoaderInfo.addEventListener(Event.COMPLETE, fill);
+      parentLoader.load(new URLRequest("parent.swf"));
+    }
+    private function fill(e:Event):void {
+      if (fillers++ == 70) {
+        trace("filled");
+        Object(parentLoader.content).loadChild();
+        return;
+      }
+      var loader:Loader = new Loader();
+      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, fill);
+      loader.load(new URLRequest("filler.swf"));
+    }
+  }
+}`,
+  );
+  const swfs: Record<string, Uint8Array> = {
+    "parent.swf": bare(parent, 1, "NestParent"),
+    "child.swf": bare(child, 1, "NestChild"),
+    "filler.swf": bare(filler, 1, "NestFiller"),
+  };
+  const codegen = await createCodegen(wasm);
+  const counts = { evicted: 0, revived: 0, evictedBeforeRevive: 0 };
+  const { evictDomain, reviveDomain } = codegen;
+  codegen.evictDomain = (domain) => {
+    counts.evicted++;
+    evictDomain(domain);
+  };
+  codegen.reviveDomain = (domain, abcs) => {
+    counts.revived++;
+    counts.evictedBeforeRevive ||= counts.evicted;
+    reviveDomain(domain, abcs);
+  };
+  const scripting = new Scripting(codegen, {
+    print: (line) => lines.push(line),
+    url: "http://example.test/main.swf",
+    fetch: async ({ url }) => {
+      const bytes = swfs[url.slice(url.lastIndexOf("/") + 1)];
+      if (!bytes) {
+        throw new Error("404");
+      }
+
+      return { bytes, status: 200, headers: [] };
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(main, 1, "NestMain"), scripting);
+  await player.start();
+  for (let frame = 0; frame < 1000 && !lines.includes("child loaded"); frame++) {
+    await scripting.settled();
+    player.tick();
+  }
+
+  assert.deepEqual(lines, [
+    "parent",
+    "filled",
+    "parent",
+    "child: the child of hello from the parent",
+    "child loaded",
+  ]);
+  // Each SWF's domain was evicted once it linked, enough for a rebuild to
+  // let go of the parent's, which was revived once for the child; the
+  // main SWF's was not.
+  assert.equal(counts.revived, 1);
+  assert.ok(counts.evictedBeforeRevive >= 71, `${counts.evictedBeforeRevive} evicted`);
 });

@@ -44,7 +44,19 @@ export class Code {
     this.codegenDomains.delete(id);
     this.codegenAbcs.delete(id);
     this.reported.delete(id);
+    this.evictable.delete(id);
+    this.revived.delete(id);
   });
+  /**
+   * The ABCs of each domain but the root and the main SWF's, by their
+   * indices in the compiler, to revive it with once its SWF has linked and
+   * it was evicted (see link); and the domains revived so, which stay live,
+   * as something adds to them, or under them, again.
+   */
+  private readonly evictable = new Map<number, Map<number, Uint8Array>>();
+  private readonly revived = new Set<number>();
+  /** How many links are in progress in each domain or under it, which keep it live. */
+  private readonly linking = new Map<number, number>();
   /** Modules loaded, each under a script name of its own for Runtime.codeDomain. */
   private modules = 0;
   /**
@@ -94,19 +106,25 @@ export class Code {
     // loaded before it verifies a method, so a class in the first tag may
     // extend or name one in the last (the corpus's property_priority).
     const added: { index: number; lazy: boolean }[] = [];
-    for (const t of swf.tags) {
-      if (t.code === tags.DoABC || t.code === tags.DoABC2) {
-        const { lazy, abc } = readDoAbc(swf.bytes, t);
-        added.push({ index: await this.add(abc, false, domain), lazy });
-      }
-    }
-
     const runs: (() => void)[] = [];
-    for (const { index, lazy } of added) {
-      const linked = this.compileAt(index, domain, false, { url, library });
-      if (!lazy) {
-        runs.push(() => this.s.rt.run(linked));
+    this.pin(domain, 1);
+    try {
+      for (const t of swf.tags) {
+        if (t.code === tags.DoABC || t.code === tags.DoABC2) {
+          const { lazy, abc } = readDoAbc(swf.bytes, t);
+          added.push({ index: await this.add(abc, false, domain), lazy });
+        }
       }
+
+      for (const { index, lazy } of added) {
+        const linked = this.compileAt(index, domain, false, { url, library });
+        if (!lazy) {
+          runs.push(() => this.s.rt.run(linked));
+        }
+      }
+    } finally {
+      this.pin(domain, -1);
+      this.evict(domain);
     }
 
     return () => {
@@ -142,21 +160,66 @@ export class Code {
     }
 
     this.codegenAbcs.get(domain.id)?.push(this.hashes.length);
+    this.evictable.get(domain.id)?.set(this.hashes.length, abc.slice());
     this.hashes.push(await sha256(abc));
     return this.hashes.length - 1;
   }
 
-  /** The compiler's application domain for the runtime's `domain`, made with its ancestors' as needed. */
+  /**
+   * The compiler's application domain for the runtime's `domain`, live:
+   * made with its ancestors' as needed, or revived with them if evicted.
+   */
   private codegenDomainOf(domain: avm2.Domain): number {
     let target = this.codegenDomains.get(domain.id);
     if (target === undefined) {
       target = this.s.codegen.childDomain(this.codegenDomainOf(domain.parent ?? this.s.rt.root));
       this.codegenDomains.set(domain.id, target);
       this.codegenAbcs.set(domain.id, []);
+      if (domain !== this.s.mainDomain) {
+        this.evictable.set(domain.id, new Map());
+      }
+
       this.domainGone.register(domain, domain.id);
+    } else if (!this.s.codegen.isLive(target)) {
+      this.codegenDomainOf(domain.parent ?? this.s.rt.root);
+      this.s.codegen.reviveDomain(target, this.evictable.get(domain.id) ?? new Map());
+      this.revived.add(domain.id);
     }
 
     return target;
+  }
+
+  /** Count a link in progress in `domain` (`by` 1) or one done (-1), for it and its ancestors. */
+  private pin(domain: avm2.Domain, by: number): void {
+    for (let d: avm2.Domain | null = domain; d; d = d.parent) {
+      const count = (this.linking.get(d.id) ?? 0) + by;
+      if (count > 0) {
+        this.linking.set(d.id, count);
+      } else {
+        this.linking.delete(d.id);
+      }
+    }
+  }
+
+  /**
+   * Evict the compiler's domain for `domain` once its SWF has linked, its
+   * ABCs compiled: what they took is reused at once, not when the runtime
+   * lets the domain go, which a garbage collection may put off for hundreds
+   * of loads. Not the root's or the main SWF's, nor one with a link in
+   * progress in it or under it, nor one revived before: an evicted domain
+   * is revived, which may link every live ABC again, when a SWF loads into
+   * it or under it, so a domain loaded into again stays.
+   */
+  private evict(domain: avm2.Domain): void {
+    const target = this.codegenDomains.get(domain.id);
+    if (
+      target !== undefined &&
+      this.evictable.has(domain.id) &&
+      !this.revived.has(domain.id) &&
+      !this.linking.has(domain.id)
+    ) {
+      this.s.codegen.evictDomain(target);
+    }
   }
 
   /**
