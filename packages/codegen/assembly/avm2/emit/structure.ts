@@ -456,7 +456,9 @@ export function structuredBlock(em: MethodEmitter, k: u32): void {
   if (!terminates(em, k) && k + 1 < em.ir.blockCount) {
     em.currentBlock = k;
     branchTo(em, k + 1);
-    em.out.text("\n");
+    if (em.out.bytes[em.out.length - 1] !== 0x0a) {
+      em.out.text("\n");
+    }
   }
 }
 
@@ -475,7 +477,15 @@ export function branchTo(em: MethodEmitter, t: u32): void {
   } else {
     // Its only way in: its code here, and then the block branching goes
     // on, a conditional branch's, with its own types, scopes and region.
-    out.text("\n");
+    // On a line of its own, with no space left at the end of this one.
+    if (out.bytes[out.length - 1] === 0x20) {
+      out.length--;
+    }
+
+    if (out.bytes[out.length - 1] !== 0x0a) {
+      out.text("\n");
+    }
+
     save(em);
     // A loop's header is also entered from its end, with other checks.
     em.inPlace = !em.loopHeader[t];

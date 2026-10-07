@@ -606,3 +606,10 @@ test("a factory names only the parameters its method uses", { skip }, () => {
   assert.ok(dx.every((f) => f.includes("rt.defaultXmlNamespace !== $dx")));
   assert.equal(js.match(/!== \$dx\)/g)?.length, dx.length);
 });
+
+test("a module's code has no empty statements or trailing spaces", { skip }, () => {
+  testing.domainReset(50);
+  const js = module("builtin.abc", true);
+  const methods = js.slice(js.indexOf("const F = ["));
+  assert.doesNotMatch(methods, /;;\n|\};\n|[ \t]\n|\n\n/);
+});

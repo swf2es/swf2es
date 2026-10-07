@@ -1004,6 +1004,13 @@ export class MethodEmitter {
     return this.typeIndex[t];
   }
 
+  /** A space, but at the start of a line, as after a block written in place. */
+  space(): void {
+    if (this.out.bytes[this.out.length - 1] !== 0x0a) {
+      this.out.byte(0x20);
+    }
+  }
+
   /** Register r as read: what it copies, if it is a copy; null checked, if the check is pending. */
   reg(r: i32): void {
     if (r === this.pendingNull) {
@@ -1504,7 +1511,8 @@ export class MethodEmitter {
         this.reg(ir.src[i]);
         out.text(") { ");
         this.goto(a);
-        out.text(" }");
+        this.space();
+        out.text("}");
         break;
       case ops.OP_ifeq:
       case ops.OP_ifne:
@@ -1527,15 +1535,18 @@ export class MethodEmitter {
         out.text(") {");
         const first = ir.b[i];
         for (let c: u32 = 0; c <= <u32>ir.c[i]; c++) {
-          out.text(" case ");
+          this.space();
+          out.text("case ");
           out.uint(c);
           out.text(": ");
           this.goto(ir.cases[first + c]);
         }
 
-        out.text(" default: ");
+        this.space();
+        out.text("default: ");
         this.goto(a);
-        out.text(" }");
+        this.space();
+        out.text("}");
         break;
       }
       case ops.OP_returnvoid:
@@ -1577,7 +1588,16 @@ export class MethodEmitter {
         break;
     }
 
-    out.text(";\n");
+    // A branch, switch or swap ends in its own `}` or `;`, or in the code
+    // of a block written in place: no empty statement after it.
+    const last = out.bytes[out.length - 1];
+    if (
+      !(conditional(op) || op === ops.OP_jump || op === ops.OP_lookupswitch || op === ops.OP_swap)
+    ) {
+      out.text(";\n");
+    } else if (last !== 0x0a) {
+      out.text(last === 0x7d || last === 0x3b ? "\n" : ";\n"); // } ;
+    }
     if (this.resets) {
       this.resets = false;
       this.resetEnd = <i32>out.length;

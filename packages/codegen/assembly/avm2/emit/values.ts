@@ -230,7 +230,8 @@ export function branch(em: MethodEmitter, i: u32, op: u8): void {
 
   out.text(") { ");
   em.goto(em.ir.a[i]);
-  out.text(" }");
+  em.space();
+  out.text("}");
 }
 
 /** The type a conversion instruction gives, or CONVERTS for one that always calls the runtime. */
