@@ -8,6 +8,7 @@
 //   export default function (rt) {
 //     const nn = (v) => { throw rt.nullError(v); };
 //     const ac = (n, given) => { throw rt.argumentCountError(n, given); };
+//     const ns = ..., cls = ..., mn = ...;   (rt.ns, rt.cls and rt.name, shorter)
 //     const N = [...namespaces], S = [...namespace sets], M = [...multinames];
 //     const F = [...method factories, (scope, sup, $dx) => function (...) {...}];
 //     const A = rt.abc({ hash, linked, names: M, classes, scripts, activations });
@@ -22,7 +23,7 @@
 // that refers to classes or Vectors has them in a table of its own, T,
 // made as the module loads:
 //
-//     ((...T) => (scope, sup) => function (...) {... T[0] ...})(rt.cls(...))
+//     ((...T) => (scope, sup) => function (...) {... T[0] ...})(cls(...))
 //
 // numbered as the method first refers to each, so that its code does not
 // depend on the module's other methods: compiled alone, as lazy JIT will
@@ -73,6 +74,11 @@ export class ModuleEmitter {
     // (Runtime.stackOf).
     out.text("  const nn = (v) => { throw rt.nullError(v); };\n");
     out.text("  const ac = (n, given) => { throw rt.argumentCountError(n, given); };\n");
+    // The tables name a namespace, class or multiname each, tens of
+    // thousands in a large ABC: as these, not rt.ns, rt.cls and rt.name.
+    out.text("  const ns = (kind, uri) => rt.ns(kind, uri);\n");
+    out.text("  const cls = (n, name) => rt.cls(n, name);\n");
+    out.text("  const mn = (kind, set, name) => rt.name(N, V, kind, set, name);\n");
     this.names();
     this.functions();
     out.text("  const A = rt.abc({\n    hash: ");
@@ -161,7 +167,7 @@ export class ModuleEmitter {
   }
 
   /**
-   * Multiname i as rt.name(kind, namespace indices, name): kinds as the ABC
+   * Multiname i as mn(kind, namespace indices, name): kinds as the ABC
    * numbers them, namespaces as indices into N (and their versions into V),
    * a null name for any name; TypeNames as rt.typeName(base, parameter).
    */
@@ -178,7 +184,7 @@ export class ModuleEmitter {
       return;
     }
 
-    out.text("rt.name(N, V, ");
+    out.text("mn(");
     out.uint(kind);
     out.text(", ");
     switch (kind) {

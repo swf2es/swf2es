@@ -76,7 +76,7 @@ over the builtins, then each conformance case (also compiled with asc's
   Everything a method's code refers to is indexed by its ABC (multinames,
   namespaces, functions, descriptors), but for the classes and Vectors it
   refers to, which it has in a table of its own, numbered as it first
-  refers to each (`((...T) => (scope, sup) => function ...)(rt.cls(...))`).
+  refers to each (`((...T) => (scope, sup) => function ...)(cls(...))`).
 
 ## Packages
 
@@ -452,8 +452,8 @@ one costs one check there; the function it returns is the entry's own.
 
 **Building an entry.** The entry's source, from `compileMethods`, is
 evaluated by a strict `Function` given the module's tables and helpers as
-parameters: `new Function("rt", "nn", "ac", "N", "S", "M", "V", "F", "A",
-'"use strict"; return ' + entry)`. Both halves of that matter:
+parameters: `new Function("rt", "nn", "ac", "ns", "cls", "N", "S", "M", "V",
+"F", "A", '"use strict"; return ' + entry)`. Both halves of that matter:
 
 - A direct `eval` in the module's scope makes the functions it builds
   reach N, M, A and the rest by dynamic scope lookups: as3pb's and LZ4's
@@ -472,7 +472,8 @@ not:
   maps back to the module; debuggers then show one file per method, by
   name, beside its module.
 - `rt.cls` binds a class reference to the domain loading now. An entry's
-  table of classes and Vectors (`((...T) => ...)(rt.cls(...))`) is made as
+  table of classes and Vectors (`((...T) => ...)(cls(...))`, the module's
+  `cls` calling `rt.cls`) is made as
   the entry is built, so it must be made against its module's domain, not
   whichever SWF is loading at that moment: otherwise a class of the
   module's own is not found (ReferenceError #1065).

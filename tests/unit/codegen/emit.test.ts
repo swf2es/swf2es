@@ -362,6 +362,17 @@ test("a module's functions are named after their methods, for stacks and profile
   assert.doesNotMatch(js, /=> function [A-Za-z_][A-Za-z0-9_]*\(/);
 });
 
+test("the tables name namespaces, classes and multinames by the module's shorthands", {
+  skip,
+}, () => {
+  testing.domainReset(50);
+  const js = module("builtin.abc", true);
+  assert.match(js, /\n {2}const mn = \(kind, set, name\) => rt\.name\(N, V, kind, set, name\);\n/);
+  assert.match(js, /\n {4}mn\(7, \[\d+\], "Object"\),\n/);
+  assert.match(js, /\bcls\(ns\(\d, "[\w.]*"\), "\w+"\)/);
+  assert.equal(js.match(/rt\.(ns|cls|name)\(/g)?.length, 3, "only in the shorthands");
+});
+
 test("a metadata item's key or value past the string pool is empty, as avmplus reads it", {
   skip,
 }, () => {
