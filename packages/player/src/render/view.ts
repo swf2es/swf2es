@@ -107,6 +107,17 @@ function laidOutAs(lines: readonly boolean[], layers: readonly ShapeLayer[]): bo
   return k === lines.length;
 }
 
+/** Whether any layer has lines of the node's own to stroke. */
+function hasLines(strokes: readonly (SharedGraphics | null)[]): boolean {
+  for (let i = 0; i < strokes.length; i++) {
+    if (strokes[i]) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /** sync's scratch, which a container's matrix is set from and which it does not keep. */
 const PLACED = new Matrix();
 /** restroke's scratch, which a stretch is compared in and never kept. */
@@ -1197,11 +1208,16 @@ export class PixiView {
     if (dirty & TRANSFORM || recolor) {
       const ct = flash || masking ? null : o.colorTransform;
       container.alpha = ct ? Math.max(0, Math.min(1, ct.aMul)) : 1;
-      container.tint = ct
+      const tint = ct
         ? (Math.round(Math.max(0, Math.min(1, ct.rMul)) * 255) << 16) |
           (Math.round(Math.max(0, Math.min(1, ct.gMul)) * 255) << 8) |
           Math.round(Math.max(0, Math.min(1, ct.bMul)) * 255)
         : 0xffffff;
+      // Set only as it changes: Pixi parses a tint set through its Color, which allocates, though
+      // most objects keep theirs white.
+      if (container.tint !== tint) {
+        container.tint = tint;
+      }
     }
 
     if (moved || dirty & TRANSFORM) {
@@ -1260,7 +1276,7 @@ export class PixiView {
 
     if (dirty & CONTENT) {
       this.redraw(o, node);
-    } else if ((moved || node.strokedAt !== this.leastWidth) && node.strokes.some((g) => g)) {
+    } else if ((moved || node.strokedAt !== this.leastWidth) && hasLines(node.strokes)) {
       this.restroke(node, true);
     }
 
