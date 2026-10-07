@@ -9,7 +9,8 @@
 
 import type { AsObject, Value } from "../descriptors.js";
 import { NS_Public, publicNs, qname } from "../names.js";
-import type { Runtime, Traits } from "../runtime.js";
+import type { Runtime } from "../runtime.js";
+import type { Traits } from "../traits.js";
 import type { Natives } from "./define.js";
 
 const TO_JSON = qname(publicNs, "toJSON");

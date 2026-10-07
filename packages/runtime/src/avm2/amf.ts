@@ -16,7 +16,8 @@ import type { AsObject, Value } from "./descriptors.js";
 import { NS_PackageInternal, NS_Public, namespace, publicNs, qname } from "./names.js";
 import { type Bytes, bytesOf, fromUtf8, utf8 } from "./natives/bytearray.js";
 import { xmlToXMLString } from "./natives/xml/xml.js";
-import type { Runtime, Traits } from "./runtime.js";
+import type { Runtime } from "./runtime.js";
+import type { Traits } from "./traits.js";
 
 const kUndefined = 0;
 const kNull = 1;

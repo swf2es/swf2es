@@ -22,7 +22,8 @@ export { builtinHooks, builtinNatives } from "./natives/index.js";
 export { XMLParser, XMLTag } from "./natives/xml/parser.js";
 export type { RuntimeOptions, ShellFiles } from "./options.js";
 export { errorMessages } from "./player-messages.js";
-export { type Domain, frameScripts, Runtime, setStaticVar } from "./runtime.js";
+export { type Domain, frameScripts, Runtime } from "./runtime.js";
+export { setStaticVar } from "./traits.js";
 
 /** A runtime with the builtins' natives, for modules compiled from builtin.abc and after. */
 export function createRuntime(options: RuntimeOptions = {}): Runtime {

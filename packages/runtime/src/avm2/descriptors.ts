@@ -3,7 +3,8 @@
 // (docs/architecture.md, "Modules and the bootstrap").
 
 import type { Multiname, Namespace, TypeName } from "./names.js";
-import type { ClassRef, Domain, Script, VectorRef } from "./runtime.js";
+import type { Domain, Script } from "./runtime.js";
+import type { ClassRef, VectorRef } from "./traits.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: AS3 values are untyped
 export type Value = any;

@@ -4,7 +4,8 @@
 
 import type { AsObject, Method, Value } from "./descriptors.js";
 import type { Multiname } from "./names.js";
-import type { Runtime, Traits } from "./runtime.js";
+import type { Runtime } from "./runtime.js";
+import type { Traits } from "./traits.js";
 
 /** How a class that holds its own elements indexes them. */
 export interface IndexHook {

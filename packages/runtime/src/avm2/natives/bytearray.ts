@@ -20,7 +20,8 @@ import {
 import type { ExternalStream, Reader, Writer } from "../amf.js";
 import type { AsObject, Method, Value } from "../descriptors.js";
 import type { IndexHook } from "../hooks.js";
-import type { Runtime, Traits } from "../runtime.js";
+import type { Runtime } from "../runtime.js";
+import type { Traits } from "../traits.js";
 import { type Natives, registerNativeClass } from "./define.js";
 
 const kGrowthIncr = 4096;

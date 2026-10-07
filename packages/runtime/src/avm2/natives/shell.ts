@@ -4,7 +4,8 @@
 
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
-import { type Domain, type Runtime, setStaticVar } from "../runtime.js";
+import type { Domain, Runtime } from "../runtime.js";
+import { setStaticVar } from "../traits.js";
 import {
   byteArrayCapacity,
   bytesOf,

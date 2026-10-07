@@ -7,6 +7,7 @@
 
 import type { AsObject, Metadata, Signature, TypeRef, Value } from "../descriptors.js";
 import { formatClassName, type Namespace, NS_Public } from "../names.js";
+import type { Runtime } from "../runtime.js";
 import {
   BIND_Const,
   BIND_Get,
@@ -15,10 +16,9 @@ import {
   BIND_Set,
   BIND_Var,
   ClassRef,
-  type Runtime,
   type Traits,
   VectorRef,
-} from "../runtime.js";
+} from "../traits.js";
 import type { Natives } from "./define.js";
 
 const HIDE_NSURI_METHODS = 0x0001;
