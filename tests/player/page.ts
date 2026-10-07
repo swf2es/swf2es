@@ -31,6 +31,7 @@ import {
   setTransformTable,
 } from "@swf2es/player";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
+import { precompiledModules } from "@swf2es/player-hosts/precompiled";
 import { autoDetectRenderer } from "pixi.js";
 
 // `pnpm test:checked`'s page (chrome.ts): the player checks its own shortcuts too.
@@ -861,7 +862,104 @@ async function moduleCacheSwf(base64: string): Promise<CacheCheck> {
   return { loads, kept, oversized, reopened, deleted, afterVersionChange, retried };
 }
 
+/** What precompiledSwf found. */
+interface PrecompiledRun {
+  trace: string[];
+  /** How many modules the player compiled. */
+  compiled: number;
+  /** Whether the page refused to evaluate code, as a Content-Security-Policy without 'unsafe-eval' has it. */
+  evalRefused: boolean;
+  /** The last frame drawn, as a PNG data URL, or null where nothing drew. */
+  image: string | null;
+  error: string | null;
+}
+
+/**
+ * Pixi's own polyfills for the code it would otherwise build with
+ * `new Function`, as pixi.js/unsafe-eval installs them. A bundling host
+ * imports that; this page has Pixi's bundle unbundled, so it installs
+ * them as Pixi's global build does, its script patching what the global
+ * PIXI names, the classes of the bundle the player draws with.
+ */
+async function pixiWithoutEval(): Promise<void> {
+  const global = globalThis as { PIXI?: object };
+  if (global.PIXI) {
+    return;
+  }
+
+  global.PIXI = { ...(await import("pixi.js")) };
+  await new Promise((done, fail) => {
+    const script = document.createElement("script");
+    script.src = "/pixi/packages/unsafe-eval.js";
+    script.onload = done;
+    script.onerror = () => fail(new Error("no /pixi/packages/unsafe-eval.js"));
+    document.head.append(script);
+  });
+}
+
+/**
+ * Play a SWF for `frames` frames from the modules the swf2es command wrote
+ * beside `manifest`, imported from their URLs or evaluated, and draw its
+ * last frame.
+ */
+async function precompiledSwf(
+  base64: string,
+  manifest: string,
+  importModules: boolean,
+  frames: number,
+): Promise<PrecompiledRun> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const trace: string[] = [];
+  const uncaught: unknown[] = [];
+  let compiled = 0;
+  let evalRefused = false;
+  // Out of DevTools' call, which lets code evaluate what the page's policy refuses.
+  await new Promise((r) => setTimeout(r, 0));
+  try {
+    new Function("return 1")();
+  } catch {
+    evalRefused = true;
+  }
+
+  let scripting: Scripting | null = null;
+  let image: string | null = null;
+  try {
+    const cache = precompiledModules(manifest, { importModules });
+    scripting = await scriptingFor(bytes, trace, null, uncaught, cache, () => compiled++);
+    const player = new Player(bytes, scripting);
+    await player.start();
+    for (let frame = 2; frame <= frames && uncaught.length === 0; frame++) {
+      await scripting?.settled();
+      player.tick();
+    }
+
+    if (uncaught.length > 0) {
+      throw uncaught[0];
+    }
+
+    if (evalRefused) {
+      await pixiWithoutEval();
+    }
+
+    const renderer = await autoDetectRenderer({
+      preference: "webgl",
+      width: player.width,
+      height: player.height,
+      background: player.background,
+      preserveDrawingBuffer: true,
+    });
+    const view = new PixiView(renderer);
+    view.render(player.stage);
+    image = renderer.canvas.toDataURL("image/png");
+    renderer.destroy();
+    return { trace, compiled, evalRefused, image, error: null };
+  } catch (e) {
+    return { trace, compiled, evalRefused, image, error: describe(e, scripting) };
+  }
+}
+
 const page = globalThis as unknown as {
+  precompiledSwf: typeof precompiledSwf;
   moduleCacheSwf: typeof moduleCacheSwf;
   runSwf: typeof runSwf;
   benchSwf: typeof benchSwf;
@@ -871,6 +969,7 @@ const page = globalThis as unknown as {
   traceSwf: typeof traceSwf;
 };
 page.runSwf = runSwf;
+page.precompiledSwf = precompiledSwf;
 page.moduleCacheSwf = moduleCacheSwf;
 page.benchSwf = benchSwf;
 page.openSwf = openSwf;

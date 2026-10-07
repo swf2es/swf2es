@@ -34,6 +34,8 @@ export interface RunOptions {
   mounts?: [string, string][];
   /** Let Chrome use the machine's GPU, as the bench's --gpu does; software GL otherwise. */
   gpu?: boolean;
+  /** The page's Content-Security-Policy, if it is to have one. */
+  csp?: string;
 }
 
 const QUALITIES = ["low", "medium", "high", "best"];
@@ -133,8 +135,8 @@ async function withPage<T>(
   gpu = false,
   options: RunOptions = {},
 ): Promise<T> {
-  const { timeout, mounts } = options;
-  const { server, url } = await serve(mounts);
+  const { timeout, mounts, csp } = options;
+  const { server, url } = await serve(mounts, csp);
   const profile = mkdtempSync(join(tmpdir(), "swf2es-chrome-"));
   let chrome: ChildProcess | null = null;
   try {
@@ -506,6 +508,46 @@ export function checkModuleCache(swf: Uint8Array): Promise<CacheCheck> {
 
     return value;
   });
+}
+
+/** What page.ts's precompiledSwf found: see there. */
+export interface PrecompiledRun {
+  trace: string[];
+  compiled: number;
+  evalRefused: boolean;
+  image: string | null;
+  error: string | null;
+}
+
+/**
+ * Play `swf` in Chrome from the modules the swf2es command wrote into
+ * `dir`, imported or evaluated, on a page with Content-Security-Policy
+ * `csp` if given (see page.ts's precompiledSwf).
+ */
+export function playPrecompiled(
+  swf: Uint8Array,
+  dir: string,
+  importModules: boolean,
+  frames: number,
+  csp?: string,
+): Promise<PrecompiledRun> {
+  const run = (evaluate: <R>(expression: string) => Promise<Evaluated<R>>) =>
+    evaluate<PrecompiledRun>(
+      `precompiledSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, "/aot/manifest.json", ${importModules}, ${frames})`,
+    );
+  return withPage(
+    "precompiledSwf",
+    async (evaluate) => {
+      const { value, exception } = await run(evaluate);
+      if (!value) {
+        throw new Error(exception ?? "no answer");
+      }
+
+      return value;
+    },
+    false,
+    { mounts: [["/aot/", dir]], csp },
+  );
 }
 
 /** A page for leak.ts: a SWF opened and played in steps, a job run whole, and the heap measured between. */
