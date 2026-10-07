@@ -79,6 +79,11 @@ export interface Compiled {
  * at a time, to code that is byte for byte the same either way.
  */
 export interface Codegen {
+  /**
+   * The identity of this codegen.wasm, a hash of its bytes that its build
+   * stamps it with; null for one built without it.
+   */
+  readonly identity: string | null;
   /** The version at the start of an ABC block, or null if it is too short. */
   abcVersion(abc: Uint8Array): AbcVersion | null;
   /** Start a domain whose user ABCs have API version `apiVersion`: Flash Player's, 50, by default. */
@@ -215,6 +220,8 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
     return module;
   };
+  const stamps = WebAssembly.Module.customSections(module, "swf2es.build");
+  const identity = stamps.length ? String.fromCharCode(...new Uint8Array(stamps[0])) : null;
   let epoch = 0;
   const collected = <T>(result: T): T => {
     const grown = wasm.memory.buffer.byteLength;
@@ -228,6 +235,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   };
 
   return {
+    identity,
     abcVersion(abc) {
       const packed = collected(wasm.abcVersion(abc));
       return packed < 0 ? null : { major: packed >>> 16, minor: packed & 0xffff };

@@ -12,6 +12,7 @@ declare namespace WebAssembly {
   }
   var Module: {
     imports(module: Module): ModuleImportDescriptor[];
+    customSections(module: Module, name: string): ArrayBuffer[];
   };
   function compile(bytes: ArrayBufferView | ArrayBuffer): Promise<Module>;
   interface Memory {

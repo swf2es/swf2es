@@ -206,3 +206,8 @@ test("compiling before an ABC is added is an error, not a trap", async () => {
   assert.notEqual(codegen.add(new Uint8Array([16, 0, 46, 0, 1, 2, 3])), 0);
   assert.throws(() => codegen.compile(), /no ABC has been added/);
 });
+
+test("codegen.wasm carries the hash of its bytes as its identity", async () => {
+  const codegen = await createCodegen(module);
+  assert.match(codegen.identity ?? "", /^[0-9a-f]{64}$/);
+});
