@@ -11,7 +11,42 @@
 // Layouts come from the module, computed by the compiler: the runtime never
 // derives one (docs/architecture.md, "Modules and the bootstrap").
 
+import { newClass, withId } from "./classes.js";
+import type {
+  Abc,
+  AbcDesc,
+  AsObject,
+  ClassDesc,
+  CompileUnit,
+  Factory,
+  Method,
+  Scope,
+  TraitsDesc,
+  TypeRef,
+  Value,
+} from "./descriptors.js";
 import {
+  add,
+  compileUnit,
+  Domain,
+  definedInChain,
+  definitionNames,
+  findScript,
+  frameScripts,
+  type Script,
+} from "./domain.js";
+import {
+  type Enumeration,
+  enumerated,
+  INT_ATOM_LIMIT,
+  nextIndex,
+  ownNames,
+  pairIndex,
+  pairOf,
+} from "./enumeration.js";
+import type { ClassHook, NativesProvider, PropertyHook } from "./hooks.js";
+import {
+  arrayIndex,
   CONSTANT_Multiname,
   CONSTANT_MultinameA,
   CONSTANT_MultinameL,
@@ -33,12 +68,14 @@ import {
   qname,
   TypeName,
 } from "./names.js";
+import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
 import { convertDoubleToString } from "./numbers.js";
+import { defaultPrint, memoryFiles, type RuntimeOptions, type ShellFiles } from "./options.js";
 import { errorMessages } from "./player-messages.js";
 import {
-  ENTRIES,
+  cached,
+  entryFor,
   epoch,
-  filling,
   IC_Call,
   IC_Const,
   IC_Dynamic,
@@ -53,150 +90,22 @@ import {
   REPLACEMENTS,
   UNFILLED,
 } from "./property-cache.js";
-import { WeakKeys, WeakName } from "./weak-keys.js";
-
-// biome-ignore lint/suspicious/noExplicitAny: AS3 values are untyped
-export type Value = any;
-// biome-ignore lint/suspicious/noExplicitAny: AS3 objects are untyped
-export type AsObject = any;
-// biome-ignore lint/complexity/noBannedTypes: methods take their receiver as this
-export type Method = Function;
+import {
+  BIND_Const,
+  BIND_Get,
+  BIND_GetSet,
+  BIND_Method,
+  BIND_Set,
+  BIND_Var,
+  ClassRef,
+  methodKey,
+  slotKey,
+  Traits,
+  VectorRef,
+} from "./traits.js";
 
 /** A native with argument counts to check, when it has any, and its declared parameter count (see Runtime.native). */
 type CountedMethod = Method & { $min?: number; $max?: number; $length?: number };
-
-/** A scope chain: its objects, outermost first, and a bit per with scope in w. */
-export type Scope = Value[] & { w: number };
-
-/** A method factory: the method's function, once its scope chain is known. */
-export type Factory = (scope: Scope, sup: AsObject | null) => Method;
-
-/** A reference to a type: null for *, a builtin's name, or a class by name. */
-export type TypeRef = null | string | ClassRef | VectorRef;
-
-/** A metadata entry as the ABC has it: its name, and its keys and values alternating, a key "" where it has none. */
-export type Metadata = [string, string[]];
-
-/** A method's signature: its return type, its parameter types, and how many of them are required. */
-export type Signature = [TypeRef, TypeRef[], number];
-
-export interface TraitsDesc {
-  /** The VerifyError resolving the traits gave, if they did not resolve. */
-  error?: number;
-  slots: number;
-  defaults: [number, Value, TypeRef][];
-  bindings: [Namespace, number, string, number][];
-  /** Each by dispatch id: its factory, its method id in its ABC, and its signature. */
-  methods: [number, Factory, number, TypeRef, TypeRef[], number][];
-  /**
-   * Its own traits' metadata: the trait's kind as the ABC has it, its slot
-   * id for a slot, its dispatch id for a method or an accessor pair (the
-   * setter's one past the getter's), and the entries.
-   */
-  meta?: [number, number, Metadata[]][];
-}
-
-export interface ClassDesc {
-  name: number;
-  base: number;
-  interfaces: number[];
-  final: boolean;
-  interface: boolean;
-  sealed: boolean;
-  protectedNs: number;
-  instance: TraitsDesc;
-  static: TraitsDesc;
-  init: Factory;
-  cinit: Factory;
-  /** The constructor's parameter types and how many are required, when it has any. */
-  ctor?: [TypeRef[], number];
-  /** The class's own metadata, from the trait that defines it. */
-  meta?: Metadata[];
-  /** The module, set when it loads. */
-  abc?: Abc;
-}
-
-export interface ScriptDesc {
-  traits: TraitsDesc;
-  init: Factory;
-}
-
-export interface AbcDesc {
-  /** The hash of the module's ABC, and of the ABCs loaded before it, in order, that it was compiled against. */
-  hash: string;
-  linked: string[];
-  names: (Multiname | TypeName | null)[];
-  classes: ClassDesc[];
-  scripts: ScriptDesc[];
-  activations: (TraitsDesc | null)[];
-}
-
-/** A loaded module: what `rt.abc` returns, and methods reach as A. */
-export interface Abc extends AbcDesc {
-  scriptStates: Script[];
-  /** The domain it was loaded into, and its position among the ABCs loaded there. */
-  domain: Domain;
-  index: number;
-}
-
-/**
- * What an ABC loaded into a domain compiles in: what the compiler needs to
- * bind its names as the runtime will find them (see RuntimeOptions.compileAbc).
- */
-export interface CompileUnit {
-  /** The hashes of the ABCs it is compiled after, its domain's chain, as its module names them. */
-  linked: string[];
-  /** Its domain and the domain's ancestors, by number, from the domain up to the root, 0. */
-  domains: number[];
-  /**
-   * What the domain finds, by name or as a type, that is not the first
-   * definition from the root down, as its caches hold it.
-   */
-  found: FoundDefinition[];
-}
-
-/** A definition a domain finds (see CompileUnit.found). */
-export interface FoundDefinition {
-  /** The name's namespace, by kind (NS_Public...) and URI, and the name. */
-  nsKind: number;
-  uri: string;
-  name: string;
-  /** The ABC that defines it: its domain's number, its position among the ABCs loaded there, and its hash. */
-  domain: number;
-  index: number;
-  hash: string;
-  /** Found as a type, as avmplus finds traits, else by name, as it finds scripts. */
-  asType: boolean;
-}
-
-export interface RuntimeOptions {
-  /** Where trace and print write a line. */
-  print?: (line: string) => void;
-  /**
-   * Behave as the debugger player: error messages carry avmplus' text
-   * ("Error #1009: Cannot access ..."), and System.isDebugger is true. By
-   * default they are the release player's and avmshell's, "Error #1009".
-   */
-  debugger?: boolean;
-  /**
-   * An ABC compiled for avmshell's Domain.loadBytes, which runs it at once:
-   * its module, or the VerifyError it was rejected with. The host compiles
-   * it, as the runtime does not include the compiler, into the domain
-   * `unit` names, with its findings; without it loadBytes is unsupported.
-   * Each module it evaluates needs a script of its own in stacks, a
-   * sourceURL comment, for Domain.currentDomain to find its code (see
-   * Runtime.codeDomain).
-   */
-  compileAbc?: (abc: Uint8Array, unit: CompileUnit) => ((rt: Runtime) => Abc) | number;
-  /** Where avmshell's File reads and writes: by default in memory, empty at the start. */
-  files?: ShellFiles;
-  /**
-   * The SWF version whose behaviour avmplus keeps where it changed (its
-   * BugCompatibility): avmshell's, 31, by default. A player sets its main
-   * SWF's.
-   */
-  swfVersion?: number;
-}
 
 /**
  * A sealed Array subclass's elements from SWF 13, as avmplus' ArrayObject
@@ -204,583 +113,6 @@ export interface RuntimeOptions {
  * checks for it, and fails as a sealed object does.
  */
 export const SEALED_ELEMENTS: Value[] = Object.freeze([]) as unknown as Value[];
-
-/** avmshell's file system, as its File sees it. */
-export interface ShellFiles {
-  /** A file's bytes, or null if it cannot be opened. */
-  read(name: string): Uint8Array | null;
-  /** Whether the file could be written. */
-  write(name: string, bytes: Uint8Array): boolean;
-}
-
-/** Files that live as long as the runtime. */
-function memoryFiles(): ShellFiles {
-  const files = new Map<string, Uint8Array>();
-  return {
-    read: (name) => files.get(name) ?? null,
-    write: (name, bytes) => {
-      files.set(name, bytes.slice());
-      return true;
-    },
-  };
-}
-
-/** How a class that holds its own elements indexes them. */
-export interface IndexHook {
-  getIndex: (o: AsObject, i: number, rt: Runtime) => Value;
-  setIndex: (o: AsObject, i: number, v: Value, rt: Runtime) => void;
-  hasIndex: (o: AsObject, i: number) => boolean;
-  /** A name's element index, -1 if it names none; the class's own rule, else an array index's. */
-  index?: (o: AsObject, name: string, rt: Runtime) => number;
-}
-
-/**
- * How a class's instances resolve the names their traits do not bind, in
- * place of dynamic properties, as XML and XMLList do (E4X's [[Get]] and so
- * on): each operation, their enumeration, and their equality and +.
- */
-export interface PropertyHook {
-  /**
-   * Whether a public method's name resolves through the hook too, as a
-   * child or attribute of XML hides the methods of its names, or is the
-   * method the traits bind, as a Proxy's is.
-   */
-  hidesMethods: boolean;
-  get(rt: Runtime, o: AsObject, mn: Multiname): Value;
-  set(rt: Runtime, o: AsObject, mn: Multiname, v: Value): void;
-  delete(rt: Runtime, o: AsObject, mn: Multiname): boolean;
-  has(rt: Runtime, o: AsObject, mn: Multiname): boolean;
-  /** callproperty: what a name calls, looked for as the class does. */
-  callee(rt: Runtime, o: AsObject, mn: Multiname): Value;
-  descendants(rt: Runtime, o: AsObject, mn: Multiname): Value;
-  /** The index after `index` for a for-in, or 0; and the name and value at one. */
-  nextIndex(rt: Runtime, o: AsObject, index: number): number;
-  nextName(rt: Runtime, o: AsObject, index: number): Value;
-  nextValue(rt: Runtime, o: AsObject, index: number): Value;
-  /** ==, when either side is an instance, or undefined to leave it to the rest. */
-  equals(rt: Runtime, a: Value, b: Value): boolean | undefined;
-  /** +, when both sides are an instance or another hooked class's, or undefined. */
-  add(rt: Runtime, a: Value, b: Value): Value;
-  /** An instance's string, as its primitive value. */
-  toString(rt: Runtime, o: AsObject): string;
-  /** An instance as XML text, as esc_xelem writes it. */
-  toXMLString(rt: Runtime, o: AsObject): string;
-}
-
-/** Natives by name, or a function that makes them for the runtime they will serve. */
-export type NativesProvider =
-  | Record<string, (rt: Runtime) => Method>
-  | ((rt: Runtime) => Record<string, (rt: Runtime) => Method>);
-
-/** How a builtin class differs from others: allocation, index access, calls and construction. */
-export interface ClassHook {
-  /** How its instances resolve names, as XML's (Traits.properties). */
-  properties?: PropertyHook;
-  /** A playerglobal set-only accessor whose bodyless setter stores in an instance slot. */
-  setOnlySlots?: Record<string, string>;
-  create?: (traits: Traits, rt: Runtime) => AsObject;
-  /** Its prototype object, when not an Object: an instance of the class, as Date's (its $it is ready). */
-  prototype?: (rt: Runtime, cls: AsObject) => AsObject;
-  /** Whether its instances refuse any name but their own and an index, as a Vector's (Traits.refusesNames). */
-  refusesNames?: boolean;
-  getIndex?: IndexHook["getIndex"];
-  setIndex?: IndexHook["setIndex"];
-  hasIndex?: IndexHook["hasIndex"];
-  index?: IndexHook["index"];
-  construct?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
-  call?: (rt: Runtime, cls: AsObject, args: Value[]) => Value;
-  apply?: (rt: Runtime, factory: AsObject, params: Value[]) => AsObject;
-  /** What the VM sets up on the class once its static initializer has run, as avmshell's Worker.current. */
-  created?: (rt: Runtime, cls: AsObject) => void;
-  /** As construct="restricted": a subclass from another ABC cannot be constructed, nor what extends it. */
-  restricted?: boolean;
-}
-
-// Binding kinds, as the compiler encodes them: kind | id << 3.
-export const BIND_Method = 1;
-export const BIND_Var = 2;
-export const BIND_Const = 3;
-export const BIND_Get = 5;
-export const BIND_Set = 6;
-export const BIND_GetSet = 7;
-
-/**
- * Set class `cls`'s own static variable `name`, in whatever namespace, to
- * `value`: for a class hook setting what the VM keeps there, as a private
- * static the class reads.
- */
-export function setStaticVar(cls: AsObject, name: string, value: Value): void {
-  for (const [, , n, b] of (cls.$desc as ClassDesc).static.bindings) {
-    if (n === name && (b & 7) === BIND_Var) {
-      cls[`$${b >> 3}`] = value;
-    }
-  }
-}
-
-/** Trait kinds as the ABC has them, which the descriptors' metadata is keyed by. */
-const TRAIT_Slot = 0;
-const TRAIT_Getter = 2;
-const TRAIT_Setter = 3;
-const TRAIT_Class = 4;
-const TRAIT_Const = 6;
-
-interface Binding {
-  ns: Namespace;
-  version: number;
-  value: number;
-}
-
-/**
- * The traits of an object: its own bindings by local name, and its own
- * slots' types and initial values; lookups continue in the base's, as
- * avmplus' do, so a base described after its subclass was made (Object,
- * Class and Function, during the bootstrap) is still seen.
- */
-export class Traits {
-  bindings = new Map<string, Binding[]>();
-  slotTypes: TypeRef[] = [];
-  own: [string, Value][] = [];
-  /** Every slot field and its initial value, the base's first, once an instance is made. */
-  private allDefaults: [string, Value][] | null = null;
-  /** The JavaScript prototype of objects with these traits. */
-  proto: AsObject;
-  /** The class whose instances these are the traits of, once it exists. */
-  cls: AsObject | null = null;
-  interfaces = new Set<Traits>();
-  dynamic = false;
-  /** Whether it is a script's global object's, as System.isGlobal asks. */
-  isGlobal = false;
-  /**
-   * Whether a dynamic class's instances refuse any name but their own and
-   * an index, getting it or setting it, as a Vector's do: they delete one,
-   * or have one in, as any dynamic object, which it never has.
-   */
-  refusesNames = false;
-  /** How to allocate an instance, for classes whose instances hold native state. */
-  create: ((traits: Traits) => AsObject) | null;
-  /** How its instances resolve the names it does not bind, if not as dynamic properties. */
-  properties: PropertyHook | null = null;
-  /** Its own slots with [Transient] metadata, if any. */
-  transientSlots: Set<number> | null = null;
-  /** Its own accessors with metadata, if any, by dispatch id: whether any of it is [Transient]. */
-  accessorMetadata: Map<number, boolean> | null = null;
-  /** Its own methods' signatures, by dispatch id, for describeType. */
-  signatures = new Map<number, Signature>();
-  /** Its own slots' and methods' metadata, by slot id and by dispatch id, for describeType. */
-  slotMetadata: Map<number, Metadata[]> | null = null;
-  methodMetadata: Map<number, Metadata[]> | null = null;
-  /** The class's: whether it is final or an interface, its constructor's parameters, its own metadata. */
-  final = false;
-  isInterface = false;
-  /** The ABC that defines the class, whether it is restricted, and whether that makes it one nothing constructs. */
-  abc: object | null = null;
-  restricted = false;
-  uninstantiable = false;
-  ctor: [TypeRef[], number] | null = null;
-  metadata: Metadata[] | null = null;
-  getIndex?: IndexHook["getIndex"];
-  setIndex?: IndexHook["setIndex"];
-  hasIndex?: IndexHook["hasIndex"];
-  index?: IndexHook["index"];
-
-  constructor(
-    readonly name: string,
-    readonly base: Traits | null,
-    proto?: AsObject,
-  ) {
-    this.proto = proto ?? Object.create(base ? base.proto : null);
-    this.proto.$traits = this;
-    this.create = base ? base.create : null;
-    this.properties = base ? base.properties : null;
-    this.getIndex = base?.getIndex;
-    this.setIndex = base?.setIndex;
-    this.hasIndex = base?.hasIndex;
-    this.index = base?.index;
-    if (base) {
-      for (const i of base.interfaces) {
-        this.interfaces.add(i);
-      }
-    }
-  }
-
-  /** Add a traits' own bindings and slots from its descriptor. */
-  describe(desc: TraitsDesc): void {
-    invalidate();
-    for (const [ns, version, name, value] of desc.bindings) {
-      let list = this.bindings.get(name);
-      if (!list) {
-        list = [];
-        this.bindings.set(name, list);
-      }
-
-      list.push({ ns, version, value });
-    }
-
-    for (const [slot, value, type] of desc.defaults) {
-      this.slotTypes[slot] = type;
-      this.own.push([slotKey(slot), value]);
-    }
-
-    for (const [d, , , returnType, params, required] of desc.methods) {
-      this.signatures.set(d, [returnType, params, required]);
-    }
-
-    if (desc.meta) {
-      this.annotate(desc.meta);
-    }
-
-    this.allDefaults = null;
-  }
-
-  /**
-   * Keep the traits' metadata, and what AMF and JSON ask of it: the slots
-   * with [Transient], and for each accessor with metadata whether any of
-   * it is [Transient], since an accessor's metadata hides its base's, as
-   * avmplus' getMethodMetadataPos finds it.
-   */
-  private annotate(meta: [number, number, Metadata[]][]): void {
-    const transient = (entries: Metadata[]) => entries.some(([name]) => name === "Transient");
-    for (const [kind, id, entries] of meta) {
-      if (kind === TRAIT_Slot || kind === TRAIT_Const || kind === TRAIT_Class) {
-        this.slotMetadata ??= new Map();
-        this.slotMetadata.set(id, entries);
-        if (transient(entries)) {
-          this.transientSlots ??= new Set();
-          this.transientSlots.add(id);
-        }
-      } else {
-        this.methodMetadata ??= new Map();
-        this.methodMetadata.set(id, entries);
-        if (kind === TRAIT_Getter || kind === TRAIT_Setter) {
-          this.accessorMetadata ??= new Map();
-          this.accessorMetadata.set(id, transient(entries));
-        }
-      }
-    }
-  }
-
-  /**
-   * Whether the member binding `b` names is [Transient], which AMF and
-   * JSON leave out: a slot, or either accessor of a pair, whose metadata,
-   * found as avmplus' TraitsMetadata finds it, has it.
-   */
-  isTransient(b: number): boolean {
-    const kind = b & 7;
-    const id = b >> 3;
-    if (kind === BIND_Var || kind === BIND_Const) {
-      for (let t: Traits | null = this; t; t = t.base) {
-        if (t.transientSlots?.has(id)) {
-          return true;
-        }
-      }
-
-      return false;
-    }
-
-    return (
-      ((kind === BIND_Get || kind === BIND_GetSet) && this.transientAccessor(id)) ||
-      ((kind === BIND_Set || kind === BIND_GetSet) && this.transientAccessor(id + 1))
-    );
-  }
-
-  /** Whether accessor `id`'s metadata, the nearest traits' that has any, is [Transient]. */
-  private transientAccessor(id: number): boolean {
-    for (let t: Traits | null = this; t; t = t.base) {
-      const transient = t.accessorMetadata?.get(id);
-      if (transient !== undefined) {
-        return transient;
-      }
-    }
-
-    return false;
-  }
-
-  /** The type of slot `id`, declared here or by a base. */
-  slotType(id: number): TypeRef {
-    for (let t: Traits | null = this; t; t = t.base) {
-      if (id in t.slotTypes) {
-        return t.slotTypes[id];
-      }
-    }
-
-    return null;
-  }
-
-  /** The binding `mn` names, or 0: the first of its namespaces that binds it at its version. */
-  find(mn: Multiname): number {
-    const name = mn.name;
-    if (name === null) {
-      return 0;
-    }
-
-    const namespaces = mn.namespaces;
-    for (let t: Traits | null = this; t; t = t.base) {
-      const list = t.bindings.get(name);
-      if (!list) {
-        continue;
-      }
-
-      // Indexes, not for-of: compiled code looks its names up here.
-      for (let i = 0; i < namespaces.length; i++) {
-        const ns = namespaces[i];
-        for (let k = 0; k < list.length; k++) {
-          const b = list[k];
-          if (b.ns === ns && b.version <= mn.versions[i]) {
-            return b.value;
-          }
-        }
-      }
-    }
-
-    return 0;
-  }
-
-  /** A new object with these traits, its slots at their initial values. */
-  instance(): AsObject {
-    const o = this.create ? this.create(this) : Object.create(this.proto);
-    o.$d = this.dynamic ? new Map() : null;
-    if (!this.allDefaults) {
-      this.allDefaults = this.base ? [...this.base.defaultsOf(), ...this.own] : this.own.slice();
-    }
-
-    const defaults = this.allDefaults;
-    for (let i = 0; i < defaults.length; i++) {
-      o[defaults[i][0]] = defaults[i][1];
-    }
-
-    return o;
-  }
-
-  defaultsOf(): [string, Value][] {
-    return this.allDefaults ?? (this.base ? [...this.base.defaultsOf(), ...this.own] : this.own);
-  }
-
-  /**
-   * Interfaces named by a class made before them, as a script may define a
-   * class before an interface it implements: each gives the interface's
-   * traits once its class exists, or null before. avmplus takes interfaces
-   * from traits, which exist from loading; these are settled when a type
-   * test first needs them.
-   */
-  pendingInterfaces: (() => Traits | null)[] | null = null;
-
-  /** Add the interfaces now made that were pending, here and in the bases. */
-  settleInterfaces(): void {
-    for (let c: Traits | null = this; c; c = c.base) {
-      const pending = c.pendingInterfaces;
-      if (!pending) {
-        continue;
-      }
-
-      c.pendingInterfaces = pending.filter((get) => {
-        const iface = get();
-        if (!iface) {
-          return true;
-        }
-
-        iface.settleInterfaces();
-        c.interfaces.add(iface);
-        for (const i of iface.interfaces) {
-          c.interfaces.add(i);
-        }
-
-        return false;
-      });
-      if (!c.pendingInterfaces.length) {
-        c.pendingInterfaces = null;
-      }
-    }
-  }
-
-  isSubtypeOf(t: Traits): boolean {
-    for (let c: Traits | null = this; c; c = c.base) {
-      if (c === t) {
-        return true;
-      }
-    }
-
-    if (this.interfaces.has(t)) {
-      return true;
-    }
-
-    // An interface a base settled after this class copied its interfaces.
-    this.settleInterfaces();
-    for (let c: Traits | null = this; c; c = c.base) {
-      if (c.interfaces.has(t)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-}
-
-/** A class named in a module, resolved the first time it is needed. */
-export class ClassRef {
-  cls: AsObject | null = null;
-  /** Its instances' traits, once coerceTo has found them. */
-  traits: Traits | null = null;
-
-  constructor(
-    readonly ns: Namespace,
-    readonly name: string,
-    /** The domain its module was loaded into, which it is resolved in. */
-    readonly domain: Domain,
-  ) {}
-}
-
-/** Vector.<T>, resolved the first time it is needed. */
-export class VectorRef {
-  cls: AsObject | null = null;
-  /** Its instances' traits, once coerceTo has found them. */
-  traits: Traits | null = null;
-
-  constructor(readonly param: TypeRef) {}
-}
-
-/**
- * The names for-ins go through over one object, each in a slot, as in
- * avmplus' hashtable. A name keeps its slot while it is there, so a for-in
- * started inside another never moves the outer one's names. One deleted
- * stays in its slot, which the outer one skips, until a for-in next starts:
- * then its slot is free, and it takes one again only if it is back, as a
- * new name, which takes a free slot; only with none free does the list grow. So it is at
- * most as long as the most names the object had at once, as avmplus'
- * table, and nothing a for-in goes through is ever moved or dropped.
- */
-interface Enumeration {
-  /** The name in each slot, null in one free: a string, or a Dictionary's object key. */
-  names: (EnumeratedName | null)[];
-  /** Each name's slot. */
-  slot: Map<EnumeratedName, number>;
-}
-
-/**
- * A name a for-in goes through: a string, or an object a Dictionary is
- * keyed by, held weakly (a WeakName) where the Dictionary's keys are weak,
- * so that a for-in left off keeps no key alive.
- */
-type EnumeratedName = string | object;
-
-/** The names below this come back from a for-in as numbers: avmplus' int atoms, of 29 bits. */
-const INT_ATOM_LIMIT = 0x10000000;
-
-/** A script: its descriptor, its global object once made, and whether it has run. */
-interface Script {
-  desc: ScriptDesc;
-  abc: Abc;
-  global: AsObject | null;
-  /** Not run, running, run, or failed: its initializer threw, which avmplus keeps as run. */
-  state: 0 | 1 | 2 | 3;
-}
-
-interface GlobalName {
-  ns: Namespace;
-  version: number;
-  script: Script;
-}
-
-/**
- * An application domain, as avmplus' Domain: the scripts its modules
- * define, by name, a name its chain defines already not again (see
- * Runtime.abc); the definitions it has found, by name, which it keeps
- * (see Runtime.findScript), as names and, apart, as types; and the ABCs
- * loaded into it, by hash.
- */
-export class Domain {
-  readonly globals = new Map<string, GlobalName[]>();
-  readonly cached = new Map<string, GlobalName[]>();
-  /** As avmplus' m_cachedTraits, which a name's lookup never fills, nor a type's m_cachedScripts. */
-  readonly types = new Map<string, GlobalName[]>();
-  readonly classRefs = new Map<Namespace, Map<string, ClassRef>>();
-  /**
-   * The classes classNamed found here, by qualified name: what a name
-   * finds in a domain is kept once found, so a player's lookups by name,
-   * one for each object it makes, need not name it anew each time.
-   */
-  readonly named = new Map<string, AsObject>();
-  readonly own: string[] = [];
-  /** Each of its ABCs' place among all the runtime loads. */
-  readonly ownOrder: number[] = [];
-
-  constructor(
-    readonly parent: Domain | null,
-    /** Its number in its runtime, which a host's compiler knows it by: the root's is 0. */
-    readonly id: number,
-  ) {}
-
-  /**
-   * The ABCs a module loaded into it now is compiled after: its own and
-   * its ancestors', including those loaded after it was made, in the order
-   * they loaded.
-   */
-  chain(): string[] {
-    if (!this.parent) {
-      return [...this.own];
-    }
-
-    const loads: [number, string][] = [];
-    for (let d: Domain | null = this; d; d = d.parent) {
-      const { own, ownOrder } = d;
-      for (let i = 0; i < own.length; i++) {
-        loads.push([ownOrder[i], own[i]]);
-      }
-    }
-
-    return loads.sort((a, b) => a[0] - b[0]).map(([, hash]) => hash);
-  }
-}
-
-/**
- * The scripts a stack's frames name, innermost first: V8's "at f (script:1:2)"
- * and "at script:1:2", and SpiderMonkey's and JavaScriptCore's "f@script:1:2".
- */
-export function frameScripts(stack: string | undefined): string[] {
-  const scripts: string[] = [];
-  for (const line of stack?.split("\n") ?? []) {
-    const m =
-      /^\s*at .*? \((.*):\d+:\d+\)$/.exec(line) ??
-      /^\s*at (.*):\d+:\d+$/.exec(line) ??
-      /@(.*):\d+:\d+$/.exec(line);
-    if (m) {
-      scripts.push(m[1]);
-    }
-  }
-
-  return scripts;
-}
-
-/** The definition of a table's that `mn` names: its namespaces in order, each at a version it sees. */
-function match(table: Map<string, GlobalName[]>, mn: Multiname, name: string): GlobalName | null {
-  const list = table.get(name);
-  if (!list) {
-    return null;
-  }
-
-  for (let i = 0; i < mn.namespaces.length; i++) {
-    const ns = mn.namespaces[i];
-    for (const g of list) {
-      if (g.ns === ns && g.version <= mn.versions[i]) {
-        return g;
-      }
-    }
-  }
-
-  return null;
-}
-
-/** Add a definition to a table, unless it has one of that name in that namespace. */
-function add(table: Map<string, GlobalName[]>, g: GlobalName, name: string): void {
-  let list = table.get(name);
-  if (!list) {
-    list = [];
-    table.set(name, list);
-  }
-
-  if (!list.some((other) => other.ns === g.ns)) {
-    list.push(g);
-  }
-}
 
 /** Thrown for an AS3 exception that is an Error the runtime made, before its class existed. */
 export class AsError extends Error {}
@@ -795,7 +127,6 @@ export class Runtime {
   /** See RuntimeOptions.swfVersion. */
   swfVersion: number;
   readonly natives: Record<string, (rt: Runtime) => Method>;
-  /** Names the scripts define, by local name: the first definition wins. */
   /** The root application domain, the builtins' and the main SWF's; and the one modules load into now. */
   readonly root = new Domain(null, 0);
   private domainCount = 1;
@@ -817,7 +148,8 @@ export class Runtime {
   });
   private readonly unlocated: [Error, Domain][] = [];
   private loadingBuiltin = false;
-  private children = false;
+  /** Whether a domain other than the root exists. */
+  children = false;
   /** Vector.<T>'s references, by T's. */
   private readonly vectorRefs = new Map<TypeRef, VectorRef>();
   /**
@@ -845,11 +177,6 @@ export class Runtime {
   readonly objectTraits: Traits;
   readonly classTraits: Traits;
   readonly functionTraits: Traits;
-  /** Empty the inline caches, so that they keep no traits or code of what is being let go of. */
-  forgetCaches(): void {
-    invalidate();
-  }
-
   /** Method closures, by receiver, so that o.f === o.f. */
   private readonly closures = new WeakMap<object, Map<number, AsObject>>();
   private readonly builtinTraitsByName = new Map<string, Traits>();
@@ -886,6 +213,11 @@ export class Runtime {
     this.functionTraits = new Traits("Function", this.objectTraits);
     this.functionTraits.dynamic = true;
     this.natives = typeof natives === "function" ? natives(this) : natives;
+  }
+
+  /** Empty the inline caches, so that they keep no traits or code of what is being let go of. */
+  forgetCaches(): void {
+    invalidate();
   }
 
   // Names.
@@ -1130,7 +462,7 @@ export class Runtime {
     // already, cached or loaded, is unreachable, and not added.
     for (const script of abc.scriptStates) {
       for (const [ns, version, name] of script.desc.traits.bindings) {
-        if (!this.definedInChain(domain, name, ns)) {
+        if (!definedInChain(domain, name, ns)) {
           add(domain.globals, { ns, version, script }, name);
         }
       }
@@ -1159,7 +491,7 @@ export class Runtime {
       const g = traits.instance();
       const scope = Object.assign([g], { w: 0 });
       for (const [d, factory, id] of script.desc.traits.methods) {
-        traits.proto[methodKey(d)] = this.withId(factory(scope, null), id);
+        traits.proto[methodKey(d)] = withId(factory(scope, null), id);
       }
 
       // Caches keep the methods.
@@ -1220,129 +552,14 @@ export class Runtime {
     return script;
   }
 
-  /**
-   * The script that defines `mn` in its domain, or null, as
-   * DomainMgr::findScriptInDomainByMultinameImpl finds it: a definition a
-   * domain of the chain has found before, from the name's own up; else the
-   * first loaded, from the root down. Either is kept by the name's domain,
-   * and one loaded by the domain that loaded it, so a child that found its
-   * own keeps it when its parent defines the name later. A type is found
-   * the same way through caches of its own (`asType`), as avmplus finds
-   * traits, so a class a child found by name is not the type it finds.
-   */
+  /** The script that defines `mn` in its domain, or null (see findScript in domain.ts). */
   findScript(mn: Multiname, asType = false): Script | null {
-    const name = mn.name;
-    if (name === null) {
-      return null;
-    }
-
-    const domain = mn.domain ?? this.root;
-    const cache = (d: Domain) => (asType ? d.types : d.cached);
-    for (let d: Domain | null = domain; d; d = d.parent) {
-      const found = match(cache(d), mn, name);
-      if (found) {
-        if (d !== domain) {
-          add(cache(domain), found, name);
-        }
-
-        return found.script;
-      }
-    }
-
-    const chain: Domain[] = [];
-    for (let d: Domain | null = domain; d; d = d.parent) {
-      chain.push(d);
-    }
-
-    for (let k = chain.length - 1; k >= 0; k--) {
-      const found = match(chain[k].globals, mn, name);
-      if (found) {
-        add(cache(chain[k]), found, name);
-        add(cache(domain), found, name);
-        return found.script;
-      }
-    }
-
-    return null;
+    return findScript(mn.domain ?? this.root, mn, asType);
   }
 
   /** What an ABC loaded into `domain` now compiles in. */
   compileUnit(domain: Domain): CompileUnit {
-    const domains: number[] = [];
-    for (let d: Domain | null = domain; d; d = d.parent) {
-      domains.push(d.id);
-    }
-
-    return { linked: domain.chain(), domains, found: this.foundIn(domain) };
-  }
-
-  /**
-   * What `domain` finds, by name and as a type, that is not the first
-   * definition from the root down: what a cache of its chain holds, from
-   * the domain up. The root's caches hold only its own first definitions.
-   */
-  private foundIn(domain: Domain): FoundDefinition[] {
-    const found: FoundDefinition[] = [];
-    for (const asType of [false, true]) {
-      const seen = new Set<string>();
-      for (let d: Domain | null = domain; d?.parent; d = d.parent) {
-        for (const [name, list] of asType ? d.types : d.cached) {
-          for (const g of list) {
-            const key = `${g.ns.kind}:${g.ns.uri}::${name}`;
-            if (seen.has(key) || g.ns.uri === null || g.ns.kind === NS_Private) {
-              continue;
-            }
-
-            seen.add(key);
-            if (this.firstLoaded(domain, name, g.ns) !== g.script) {
-              const abc = g.script.abc;
-              found.push({
-                nsKind: g.ns.kind,
-                uri: g.ns.uri,
-                name,
-                domain: abc.domain.id,
-                index: abc.index,
-                hash: abc.hash,
-                asType,
-              });
-            }
-          }
-        }
-      }
-    }
-
-    return found;
-  }
-
-  /** The script that first defines `name` in `ns` for `domain`, from the root down. */
-  private firstLoaded(domain: Domain, name: string, ns: Namespace): Script | null {
-    const chain: Domain[] = [];
-    for (let d: Domain | null = domain; d; d = d.parent) {
-      chain.push(d);
-    }
-
-    for (let k = chain.length - 1; k >= 0; k--) {
-      const g = chain[k].globals.get(name)?.find((other) => other.ns === ns);
-      if (g) {
-        return g.script;
-      }
-    }
-
-    return null;
-  }
-
-  /** Whether `domain`'s chain defines `name` in `ns`, cached or loaded, without keeping what it finds. */
-  private definedInChain(domain: Domain, name: string, ns: Namespace): boolean {
-    for (let d: Domain | null = domain; d; d = d.parent) {
-      if (
-        d.cached.get(name)?.some((g) => g.ns === ns) ||
-        d.globals.get(name)?.some((g) => g.ns === ns)
-      ) {
-        return true;
-      }
-    }
-
-    return false;
+    return compileUnit(domain);
   }
 
   // Scopes and name lookup.
@@ -2595,12 +1812,6 @@ export class Runtime {
     return o;
   }
 
-  /** `f`, a method, with its method id, which a closure of it keeps. */
-  private withId(f: Method, id: number): Method {
-    (f as Method & { $id?: number }).$id = id;
-    return f;
-  }
-
   /** A function's prototype, made when first asked for; undefined once a script has cleared it. */
   functionPrototype(f: AsObject): AsObject | undefined {
     if (!f.$prototype && !f.$noPrototype) {
@@ -2646,167 +1857,14 @@ export class Runtime {
 
   /**
    * As OP_newclass: a class from its module's descriptor, extending `base`,
-   * its methods bound to the scope chain here. Object, Class and Function
-   * use the traits the runtime made for them before they existed.
+   * its methods bound to the scope chain here (see newClass in classes.ts).
    */
   newClass(desc: ClassDesc, base: AsObject | null, scope: Scope): AsObject {
-    const error = desc.instance.error ?? desc.static.error;
-    if (error) {
-      throw this.error("VerifyError", error);
-    }
-
-    const abc = desc.abc as Abc;
-    const name = abc.names[desc.name] as Multiname;
-    const qualified = qualifiedName(name);
-    // As MethodEnv::newclass: a class with a base needs one (#1009), and
-    // one whose traits are the base's it linked to, which avmplus finds as
-    // a type (#1108). Compared by definition, as avmplus compares traits: a
-    // class made twice is one class. Where the base is the class its name
-    // finds by name, but not the one it finds as a type, as for a child's
-    // class it found by name after its parent defined the name too,
-    // avmshell rejects the class sooner, as corrupt (#1107). Only a class
-    // that exists is compared: the check runs no script.
-    if (desc.base && (base === null || base === undefined)) {
-      throw this.error("TypeError", 1009);
-    }
-
-    if (this.children && base) {
-      const baseName = abc.names[desc.base] as Multiname;
-      const script = this.findScript(baseName, true);
-      const expected = script?.global ? this.getProperty(script.global, baseName) : undefined;
-      if (expected?.$it && expected.$desc !== base.$desc) {
-        const byName = this.findScript(baseName);
-        const named = byName?.global ? this.getProperty(byName.global, baseName) : undefined;
-        throw this.error("VerifyError", named === base ? 1107 : 1108);
-      }
-    }
-
-    const baseTraits: Traits | null = base ? base.$it : null;
-    let itraits: Traits;
-    if (qualified === "Object") {
-      itraits = this.objectTraits;
-    } else if (qualified === "Class") {
-      itraits = this.classTraits;
-    } else if (qualified === "Function") {
-      itraits = this.functionTraits;
-    } else {
-      itraits = new Traits(qualified, baseTraits);
-    }
-
-    itraits.describe(desc.instance);
-    const hooks = this.classHooks[qualified];
-    itraits.dynamic = !desc.sealed;
-    itraits.final = desc.final;
-    itraits.isInterface = desc.interface;
-    itraits.ctor = desc.ctor ?? null;
-    itraits.metadata = desc.meta ?? null;
-    itraits.refusesNames = !!hooks?.refusesNames;
-    // As ClassClosure::checkForRestrictedInheritance.
-    itraits.restricted = !!hooks?.restricted;
-    itraits.uninstantiable =
-      !!baseTraits &&
-      (baseTraits.uninstantiable || (baseTraits.restricted && baseTraits.abc !== abc));
-    itraits.abc = abc;
-
-    // A class's allocation, bound to the runtime; its subclasses inherit it.
-    const create = hooks?.create;
-    if (create) {
-      itraits.create = (traits) => create(traits, this);
-    }
-
-    if (hooks?.properties) {
-      itraits.properties = hooks.properties;
-    }
-
-    if (hooks?.getIndex) {
-      itraits.getIndex = hooks.getIndex;
-      itraits.setIndex = hooks.setIndex;
-      itraits.hasIndex = hooks.hasIndex;
-      itraits.index = hooks.index;
-    }
-
-    for (const i of desc.interfaces) {
-      const mn = abc.names[i] as Multiname;
-      const iface = this.resolveName(mn);
-      if (iface) {
-        itraits.interfaces.add(iface.$it);
-        for (const t of iface.$it.interfaces) {
-          itraits.interfaces.add(t);
-        }
-      } else {
-        // Its script is the one running, and has not made it yet.
-        if (!itraits.pendingInterfaces) {
-          itraits.pendingInterfaces = [];
-        }
-
-        itraits.pendingInterfaces.push(() => this.resolveName(mn)?.$it ?? null);
-      }
-    }
-
-    // The class object: Class's instance, with its own statics.
-    // Class is dynamic, so its instances are: String.fromCharCode = ... is legal.
-    const straits = new Traits(`${qualified}$`, this.classTraits);
-    straits.dynamic = true;
-    straits.final = true;
-    straits.describe(desc.static);
-    const cls = straits.instance();
-    cls.$it = itraits;
-    cls.$desc = desc;
-    cls.$base = base;
-    itraits.cls = cls;
-    straits.cls = cls;
-
-    // Its prototype object: an Object whose prototype is the base class's.
-    // A class object's own $p comes from Class's instance prototype, which
-    // it inherits: class objects made before Class see it once Class exists.
-    // Date's, RegExp's and Array's are instances of their own class, as avmplus has them.
-    const prototype = hooks?.prototype ? hooks.prototype(this, cls) : this.objectTraits.instance();
-    prototype.$p = base ? base.$prototype : null;
-    cls.$prototype = prototype;
-    itraits.proto.$p = prototype;
-    prototype.$d.set("constructor", cls);
-    prototype.$dontEnum = new Set(["constructor"]);
-
-    const iscope = this.scope(scope, [cls], 0);
-    for (const [d, factory, id] of desc.static.methods) {
-      straits.proto[methodKey(d)] = this.withId(factory(scope, base), id);
-    }
-
-    for (const [d, factory, id] of desc.instance.methods) {
-      itraits.proto[methodKey(d)] = this.withId(factory(iscope, base), id);
-    }
-
-    // Playerglobal can declare an accessor whose setter has no ABC body.
-    // Install it here so both direct bound calls and dynamic property writes reach it.
-    if (hooks?.setOnlySlots) {
-      for (const [name, slot] of Object.entries(hooks.setOnlySlots)) {
-        const binding = itraits.find(this.publicName(name));
-        if ((binding & 7) === BIND_Set) {
-          itraits.proto[methodKey((binding >> 3) + 1)] ??= function (this: AsObject, value: Value) {
-            this[slot] = value;
-          };
-        }
-      }
-    }
-
-    // Caches keep the methods and what the hooks decide.
-    invalidate();
-    itraits.proto.$init = desc.init(iscope, base);
-    // Its static initializer may name the class as a type, as avmplus
-    // resolves from traits, before initproperty has stored it anywhere.
-    this.defining.set(qualified, cls);
-    try {
-      desc.cinit(scope, base).call(cls);
-    } finally {
-      this.defining.delete(qualified);
-    }
-
-    hooks?.created?.(this, cls);
-    return cls;
+    return newClass(this, desc, base, scope);
   }
 
   /** The classes whose static initializers are running, by qualified name. */
-  private readonly defining = new Map<string, AsObject>();
+  readonly defining = new Map<string, AsObject>();
 
   applyType(factory: AsObject, params: Value[]): AsObject {
     const hook = this.classHooks[factory.$it.name]?.apply;
@@ -2872,10 +1930,7 @@ export class Runtime {
       return known;
     }
 
-    const i = qualified.lastIndexOf("::");
-    const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));
-    const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
-    mn.domain = domain === this.root ? null : domain;
+    const mn = this.qualifiedNameIn(qualified, domain);
     const cls = this.resolveName(mn);
     // A script still running its initializer may not have made the class yet.
     if (cls) {
@@ -2891,16 +1946,7 @@ export class Runtime {
    * "pkg::Name", or the name alone in the top-level package.
    */
   definitionNames(domain: Domain): string[] {
-    const names: string[] = [];
-    for (const [name, list] of domain.globals) {
-      for (const g of list) {
-        if (g.ns.kind !== NS_Private) {
-          names.push(g.ns.uri ? `${g.ns.uri}::${name}` : name);
-        }
-      }
-    }
-
-    return names;
+    return definitionNames(domain);
   }
 
   /**
@@ -2911,13 +1957,10 @@ export class Runtime {
    * code keeps it as run, as avmplus does.
    */
   definitionNamed(qualified: string, domain: Domain): Value {
-    const i = qualified.lastIndexOf("::");
-    const local = i < 0 ? qualified : qualified.slice(i + 2);
-    const mn = qname(i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i)), local);
-    mn.domain = domain === this.root ? null : domain;
+    const mn = this.qualifiedNameIn(qualified, domain);
     const script = this.findScript(mn);
     if (!script) {
-      throw this.error("ReferenceError", 1065, local);
+      throw this.error("ReferenceError", 1065, mn.name);
     }
 
     return this.getProperty(this.initScript(script, true), mn);
@@ -2925,11 +1968,16 @@ export class Runtime {
 
   /** The module whose script defines `qualified` for `domain`, or null: by it a player keys what SymbolClass binds. */
   definingAbc(qualified: string, domain: Domain): Abc | null {
+    return this.findScript(this.qualifiedNameIn(qualified, domain))?.abc ?? null;
+  }
+
+  /** The public name "pkg::Name" or "Name" stands for, looked up in `domain`. */
+  private qualifiedNameIn(qualified: string, domain: Domain | null): Multiname {
     const i = qualified.lastIndexOf("::");
     const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));
     const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
     mn.domain = domain === this.root ? null : domain;
-    return this.findScript(mn)?.abc ?? null;
+    return mn;
   }
 
   /** The class a multiname or TypeName names. */
@@ -3362,114 +2410,6 @@ export class Runtime {
   // or not, so hiding one during a for-in (as _dontEnumPrototype does) does
   // not move the others.
 
-  private names(o: AsObject): EnumeratedName[] {
-    const names: EnumeratedName[] = [];
-    if (o.$a !== undefined) {
-      for (const i of Object.keys(o.$a)) {
-        names.push(i);
-      }
-    }
-
-    if (o.$d) {
-      for (const k of o.$d.keys()) {
-        names.push(k);
-      }
-    }
-
-    if (o.$keys instanceof WeakKeys) {
-      for (const k of o.$keys.keys()) {
-        names.push(o.$keys.nameOf(k) as WeakName);
-      }
-    } else if (o.$keys !== undefined) {
-      for (const k of o.$keys.keys()) {
-        names.push(k);
-      }
-    }
-
-    return names;
-  }
-
-  /**
-   * The names of `o` for a for-in starting over it: those it had before in
-   * their slots, and new ones in the slots of those gone, then after them.
-   */
-  private startEnumeration(o: AsObject): (EnumeratedName | null)[] {
-    const names = this.names(o);
-    let e = this.enumerating.get(o);
-    if (!e) {
-      e = { names, slot: new Map(names.map((name, i) => [name, i])) };
-      this.enumerating.set(o, e);
-      return names;
-    }
-
-    const free: number[] = [];
-    e.names.forEach((name, i) => {
-      if (name === null) {
-        free.push(i);
-      } else if (!this.stillThere(o, name)) {
-        e.slot.delete(name);
-        e.names[i] = null;
-        free.push(i);
-      }
-    });
-
-    let next = 0;
-    for (const name of names) {
-      if (!e.slot.has(name)) {
-        const i = next < free.length ? free[next++] : e.names.length;
-        e.names[i] = name;
-        e.slot.set(name, i);
-      }
-    }
-
-    return e.names;
-  }
-
-  /** The name of `o` at a for-in's index: a weak key itself, "" once it is gone. */
-  private enumerated(o: AsObject, index: number): EnumeratedName {
-    const name = this.enumerating.get(o)?.names[index - 1] ?? "";
-    return name instanceof WeakName ? (name.ref.deref() ?? "") : name;
-  }
-
-  /** The index after `index` of an enumerable name of `o`, or 0. */
-  private nextIndex(o: AsObject, index: number): number {
-    const names = index === 0 ? this.startEnumeration(o) : (this.enumerating.get(o)?.names ?? []);
-
-    // A name deleted since the for-in started is skipped.
-    for (let i = index; i < names.length; i++) {
-      const name = names[i];
-      if (
-        name !== null &&
-        !(typeof name === "string" && o.$dontEnum?.has(name)) &&
-        this.stillThere(o, name)
-      ) {
-        return i + 1;
-      }
-    }
-
-    return 0;
-  }
-
-  private stillThere(o: AsObject, name: EnumeratedName): boolean {
-    if (name instanceof WeakName) {
-      const key = name.ref.deref();
-      return key !== undefined && (o.$keys?.has(key) ?? false);
-    }
-
-    if (typeof name !== "string") {
-      return o.$keys?.has(name) ?? false;
-    }
-
-    if (o.$a !== undefined) {
-      const i = arrayIndex(name);
-      if (i >= 0) {
-        return i in o.$a;
-      }
-    }
-
-    return o.$d?.has(name) ?? false;
-  }
-
   hasNext2(o: Value, index: number): [boolean, Value, number] {
     let obj = o;
     let i = index;
@@ -3483,7 +2423,7 @@ export class Runtime {
             ? properties.nextIndex(this, obj, i)
             : pairOf(obj)
               ? pairIndex(i)
-              : this.nextIndex(obj, i);
+              : nextIndex(this.enumerating, obj, i);
       if (next) {
         return [true, obj, next];
       }
@@ -3505,7 +2445,7 @@ export class Runtime {
       return properties.nextIndex(this, o, index);
     }
 
-    return pairOf(o) ? pairIndex(index) : this.nextIndex(o, index);
+    return pairOf(o) ? pairIndex(index) : nextIndex(this.enumerating, o, index);
   }
 
   /** As avmplus gives a for-in's name: an index as a number while an int atom holds it, a Dictionary's object key as itself. */
@@ -3520,7 +2460,7 @@ export class Runtime {
       return index === 1 ? "uri" : index === 2 ? pair : null;
     }
 
-    const name = this.enumerated(o, index);
+    const name = enumerated(this.enumerating, o, index);
     if (typeof name !== "string") {
       return name;
     }
@@ -3547,7 +2487,7 @@ export class Runtime {
       return index === 1 ? local : index === 2 ? uri : null;
     }
 
-    const name = this.enumerated(o, index);
+    const name = enumerated(this.enumerating, o, index);
     if (typeof name !== "string") {
       return o.$keys.get(name);
     }
@@ -3651,9 +2591,6 @@ export class Runtime {
     return new Error(`swf2es: ${what} is not supported yet`);
   }
 
-  // Domain memory, as avmplus' MOPS: little-endian, an address outside the
-  // memory a RangeError.
-
   // Class aliases, for AMF.
 
   /** As Toplevel::registerClassAlias: a class by a name, replacing what the name had. */
@@ -3719,7 +2656,7 @@ export class Runtime {
 
   /** An object's own names a for-in visits, in its order: its string names, not a Dictionary's object keys. */
   enumerableNames(o: AsObject): string[] {
-    return this.names(o).filter((n): n is string => typeof n === "string" && !o.$dontEnum?.has(n));
+    return ownNames(o).filter((n): n is string => typeof n === "string" && !o.$dontEnum?.has(n));
   }
 
   /**
@@ -3733,7 +2670,9 @@ export class Runtime {
     return domain;
   }
 
-  /** `address` as an int, once checked that the domain memory holds `size` bytes there. */
+  // Domain memory, as avmplus' MOPS: little-endian, an address outside the
+  // memory a RangeError.
+
   /** The domain memory: where li8 and the other opcodes read and write, with its length. */
   get memory(): DataView {
     return this.view;
@@ -3744,6 +2683,7 @@ export class Runtime {
     this.memoryLength = view.byteLength;
   }
 
+  /** `address` as an int, once checked that the domain memory holds `size` bytes there. */
   private mops(address: Value, size: number): number {
     const a = this.toInt(address);
     if (a < 0 || a + size > this.memoryLength) {
@@ -3803,7 +2743,7 @@ export class Runtime {
     this.view.setFloat64(at, this.toNumber(value), true);
   }
 
-  // E4X, not implemented yet.
+  // E4X.
 
   /** getdescendants: x..name, on XML or XMLList; anything else, as avmplus, TypeError 1016. */
   getDescendants(o: Value, mn: Multiname): Value {
@@ -3940,20 +2880,6 @@ export class Runtime {
 }
 
 /**
- * A Namespace or QName, which enumerate "uri" and the name this gives
- * ("prefix" or "localName"), as avmplus' nextName does; else null.
- */
-function pairOf(o: Value): string | null {
-  if (o instanceof Namespace) {
-    return "prefix";
-  }
-
-  return typeof o === "object" && o !== null && o.$local !== undefined ? "localName" : null;
-}
-
-const pairIndex = (index: number) => (index < 2 ? index + 1 : 0);
-
-/**
  * Whether a hooked class's hook resolves `mn`, bound to `b`: a name its
  * traits do not bind, an attribute's, or a public name of a method, as a
  * child or attribute of XML hides the methods of its names (as avmplus'
@@ -3971,146 +2897,10 @@ function hookedBinding(b: number, mn: Multiname, hook: PropertyHook): boolean {
   );
 }
 
-/** The entry of `mn`'s cache for objects with traits `t`, or null. */
-function cached(t: Traits | undefined, mn: Multiname): PropertyCache | null {
-  let e: PropertyCache | null = mn.cache;
-  if (t === undefined || e.epoch !== epoch()) {
-    return null;
-  }
-
-  do {
-    if (e.traits === t) {
-      return e;
-    }
-
-    e = e.next;
-  } while (e !== null);
-
-  return null;
-}
-
-/**
- * The entry of a cache to fill for traits `t`: its own, a free one, a new
- * one while the list is shorter than ENTRIES, else the oldest, until it has
- * replaced REPLACEMENTS; then none. A cache of an earlier epoch is emptied
- * first.
- */
-function entryFor(head: PropertyCache, t: Traits): PropertyCache | null {
-  if (head.epoch !== epoch()) {
-    for (let e: PropertyCache | null = head; e !== null; e = e.next) {
-      e.traits = null;
-    }
-
-    head.epoch = epoch();
-    filling(head);
-    head.victim = head;
-    head.replaced = 0;
-  }
-
-  let last = head;
-  let count = 0;
-  for (let e: PropertyCache | null = head; e !== null; e = e.next) {
-    if (e.traits === t || e.traits === null) {
-      return e;
-    }
-
-    last = e;
-    count++;
-  }
-
-  if (count < ENTRIES) {
-    const added = new PropertyCache();
-    last.next = added;
-    return added;
-  }
-
-  if (head.replaced === REPLACEMENTS) {
-    return null;
-  }
-
-  head.replaced++;
-  const victim = head.victim as PropertyCache;
-  head.victim = victim.next ?? head;
-  return victim;
-}
-
-/** Where output goes by default: the host's console. */
-function defaultPrint(line: string): void {
-  (globalThis as { console?: { log(line: string): void } }).console?.log(line);
-}
-
 const BUILTIN_REFS = new Set(["int", "uint", "Number", "String", "Boolean", "Object"]);
-
-// The names of slot and method properties by id, made once each, for the
-// runtime's dynamic paths; generated code names them itself.
-const slotKeys: string[] = [];
-const methodKeys: string[] = [];
-const slotKey = (id: number): string => (slotKeys[id] ??= `$${id}`);
-const methodKey = (id: number): string => (methodKeys[id] ??= `$m${id}`);
 
 /** Not a property: distinct from undefined, which a property can hold. */
 export const NOT_FOUND = Symbol("not found");
-
-const XML_ELEMENT: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  "\0": "&#x0;",
-};
-
-const XML_ATTRIBUTE: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  '"': "&quot;",
-  "\n": "&#xA;",
-  "\r": "&#xD;",
-  "\t": "&#x9;",
-  "\0": "&#x0;",
-};
-
-/** As AvmCore::EscapeElementValue: & < > escaped, and without whitespace around it if `trim`. */
-export function escapeElementValue(s: string, trim: boolean): string {
-  let t = s;
-  if (trim) {
-    let start = 0;
-    let end = s.length;
-    while (end > 0 && isXMLSpace(s.charCodeAt(end - 1))) {
-      end--;
-    }
-
-    while (start < end && isXMLSpace(s.charCodeAt(start))) {
-      start++;
-    }
-
-    t = s.slice(start, end);
-  }
-
-  return t.replace(/[&<>\0]/g, (c) => XML_ELEMENT[c]);
-}
-
-/** As AvmCore::EscapeAttributeValue. */
-export function escapeAttributeValue(s: string): string {
-  return s.replace(/[&<"\n\r\t\0]/g, (c) => XML_ATTRIBUTE[c]);
-}
-
-const isXMLSpace = (c: number) => c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d;
-
-/** A name's index as an array element, or -1: a canonical uint below 2^32 - 1. */
-export function arrayIndex(name: string): number {
-  const c = name.charCodeAt(0);
-  if (!(c >= 0x30 && c <= 0x39)) {
-    return -1;
-  }
-
-  const i = Number(name);
-  return i >>> 0 === i && i !== 0xffffffff && String(i) === name ? i : -1;
-}
-
-/** The qualified name of a class's name, "uri::name", or the name in the unnamed package. */
-export function qualifiedName(mn: Multiname): string {
-  const ns = mn.namespaces[0];
-  return ns?.uri ? `${ns.uri}::${mn.name}` : (mn.name ?? "*");
-}
 
 /** As avmplus' String to Number: JavaScript's, without its binary and octal prefixes. */
 export function stringToNumber(s: string): number {

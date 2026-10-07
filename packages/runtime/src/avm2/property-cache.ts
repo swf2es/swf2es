@@ -10,7 +10,10 @@
 // each bumps the epoch, which empties every cache. A dynamic property's
 // entry still looks for the property on the object, which may have lost it,
 // and leaves anything else, as its prototypes, to the full lookup.
-import type { Method, Traits, TypeRef } from "./runtime.js";
+
+import type { Method, TypeRef } from "./descriptors.js";
+import type { Multiname } from "./names.js";
+import type { Traits } from "./traits.js";
 
 /** What an entry does for its name on its traits; get, set and call take what each can. */
 export const IC_Slot = 1;
@@ -91,3 +94,66 @@ export function invalidate(): void {
 export const NO_CACHE = new PropertyCache();
 /** The cache of a module's name before its first lookup: filled with an entry of its own. */
 export const UNFILLED = new PropertyCache();
+
+/** The entry of `mn`'s cache for objects with traits `t`, or null. */
+export function cached(t: Traits | undefined, mn: Multiname): PropertyCache | null {
+  let e: PropertyCache | null = mn.cache;
+  if (t === undefined || e.epoch !== epoch()) {
+    return null;
+  }
+
+  do {
+    if (e.traits === t) {
+      return e;
+    }
+
+    e = e.next;
+  } while (e !== null);
+
+  return null;
+}
+
+/**
+ * The entry of a cache to fill for traits `t`: its own, a free one, a new
+ * one while the list is shorter than ENTRIES, else the oldest, until it has
+ * replaced REPLACEMENTS; then none. A cache of an earlier epoch is emptied
+ * first.
+ */
+export function entryFor(head: PropertyCache, t: Traits): PropertyCache | null {
+  if (head.epoch !== epoch()) {
+    for (let e: PropertyCache | null = head; e !== null; e = e.next) {
+      e.traits = null;
+    }
+
+    head.epoch = epoch();
+    filling(head);
+    head.victim = head;
+    head.replaced = 0;
+  }
+
+  let last = head;
+  let count = 0;
+  for (let e: PropertyCache | null = head; e !== null; e = e.next) {
+    if (e.traits === t || e.traits === null) {
+      return e;
+    }
+
+    last = e;
+    count++;
+  }
+
+  if (count < ENTRIES) {
+    const added = new PropertyCache();
+    last.next = added;
+    return added;
+  }
+
+  if (head.replaced === REPLACEMENTS) {
+    return null;
+  }
+
+  head.replaced++;
+  const victim = head.victim as PropertyCache;
+  head.victim = victim.next ?? head;
+  return victim;
+}

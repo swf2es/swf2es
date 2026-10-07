@@ -526,9 +526,21 @@ output the same; in the application above, no errors.
 
 Generated code calls `@swf2es/runtime` for the object model, multiname
 lookup, coercions and exceptions (`packages/runtime/src/avm2`); it grows as
-far as each step needs. The engine is at the top: `runtime.ts`, `names.ts`,
-`numbers.ts`, `messages.ts`, and `amf.ts`, which ByteArray and later the
-player's networking use. The builtins' natives are in `natives/`, a file per
+far as each step needs. The engine is at the top. `runtime.ts` is the
+`Runtime` class, whose methods are what compiled code calls as `rt`:
+property access, calls and construction, coercions, for-in, exceptions and
+domain memory, with the inline caches' hookup. Around it, each a model of
+its own or a stage the hot paths do not run through: `descriptors.ts`, the
+values and descriptors a compiled module is built against; `options.ts`,
+what a host gives a runtime; `hooks.ts`, what a builtin or a player's class
+plugs in to allocate, index, resolve names or be called; `traits.ts`, the
+layout model (`Traits`, the binding kinds, the class and Vector references);
+`domain.ts`, application domains and the lookup of a name along a domain's
+chain; `classes.ts`, OP_newclass, which makes a class from its descriptor;
+`enumeration.ts`, the names a for-in goes through; `property-cache.ts`, the
+inline caches; `names.ts`, namespaces and multinames; `numbers.ts`,
+`messages.ts`, and `amf.ts`, which ByteArray and later the player's
+networking use. The builtins' natives are in `natives/`, a file per
 family of classes (`object`, `array`, `string`, `regexp`, `number`,
 `vector`, `bytearray`, `date`, `json`, `dictionary`...), registered in
 `natives/index.ts`, with what makes some builtin classes differ from others:
@@ -556,7 +568,7 @@ its capacity and UTF-8 (`bytearray.ts`), AMF3 (`amf.ts`) and JSON
 (`json.ts`) and describeType (`describe.ts`). These are MPL-2.0 as their sources are. Domain memory is
 avmshell's `avmplus.Domain`'s: 1024 bytes of scratch memory until a
 ByteArray is set as it. Each Domain is one of the runtime's application
-domains (`Domain` in `runtime.ts`), as avmplus' DomainMgr keeps them: a
+domains (`Domain` in `domain.ts`), as avmplus' DomainMgr keeps them: a
 name a domain's chain defines already is not added again, and a lookup
 takes what a domain of the chain has found before, from the name's own
 domain up, else the first loaded, from the root down, and keeps it, so a

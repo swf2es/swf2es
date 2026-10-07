@@ -1,5 +1,7 @@
 // String: `this` is the string.
-import type { ClassHook, Value } from "../runtime.js";
+
+import type { Value } from "../descriptors.js";
+import type { ClassHook } from "../hooks.js";
 import { lowerCase, upperCase } from "./case.js";
 import { AS3, conversion, type Natives, plain } from "./define.js";
 import { compile, matchArray, replacement as replacementOf } from "./regexp.js";

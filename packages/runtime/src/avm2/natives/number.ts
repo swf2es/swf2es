@@ -1,7 +1,10 @@
 // Number, int, uint and Boolean, and Math, whose functions Number has
 // copies of.
+
+import type { Value } from "../descriptors.js";
+import type { ClassHook } from "../hooks.js";
 import { convertDoubleToString, convertDoubleToStringRadix, DTOSTR_PRECISION } from "../numbers.js";
-import type { ClassHook, Runtime, Value } from "../runtime.js";
+import type { Runtime } from "../runtime.js";
 import { conversion, type Natives, plain } from "./define.js";
 
 export const numberNatives: Natives = {

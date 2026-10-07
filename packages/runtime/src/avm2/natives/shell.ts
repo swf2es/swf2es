@@ -1,14 +1,12 @@
 // avmshell's own classes, which a player has not: its System, File and
 // Domain, and its Worker as the one that runs, the primordial, with no
 // others to start.
-import {
-  type AsObject,
-  type ClassHook,
-  type Domain,
-  type Runtime,
-  setStaticVar,
-  type Value,
-} from "../runtime.js";
+
+import type { AsObject, Value } from "../descriptors.js";
+import type { Domain } from "../domain.js";
+import type { ClassHook } from "../hooks.js";
+import type { Runtime } from "../runtime.js";
+import { setStaticVar } from "../traits.js";
 import {
   byteArrayCapacity,
   bytesOf,
