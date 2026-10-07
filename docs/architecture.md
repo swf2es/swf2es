@@ -1217,8 +1217,13 @@ since avmplus has a frame's ABCs loaded before it verifies a method, so a
 class in the first tag may extend or name one in the last (the corpus's
 `property_priority`, five tags by mxmlc); each is then compiled whole for
 now (the JIT's per-method path is `compileMethods`, both by the ABC's
-index in the domain; see Lazy compilation), loaded as a module, and run
+index in the domain; see Lazy compilation), loaded, and run
 unless the tag's lazy flag defers it to its first use, as Flash defers it.
+A module is loaded as the factory a strict `Function` returns, not
+imported: a document keeps every module it imports while it lives, so the
+code of SWFs long unloaded stayed (some 4.5 MB a player made again, its
+libraries' code and all), where a function's code goes once nothing
+refers to it.
 `SymbolClass`
 then binds character ids to classes by qualified name through the
 runtime's name resolution; id 0 is the document class, constructed on the
@@ -1346,7 +1351,7 @@ with `/[[DYNAMIC]]/n` appended, and `ApplicationDomain.currentDomain` is
 a new object at each ask, as in Flash, so two are never `==`.
 
 The loaded SWF's code goes through `Codegen` and the runtime as the main
-SWF's does (`scripting/loads.ts`). Linking is asynchronous (the module is imported), so a load
+SWF's does (`scripting/loads.ts`). Linking is asynchronous (its ABCs are hashed by `crypto.subtle`), so a load
 asked for is compiled and linked between frames, in the order asked, and
 each takes its place in the first frame after its code is linked; a host
 that steps frames by hand awaits `Scripting.settled()` between them, as
@@ -1485,7 +1490,7 @@ a class it defines again is ignored for the one its domain's chain has,
 and `LoaderInfo.applicationDomain.getDefinition` finds its own
 (`loader_duplicate_class`). The domain of the code that asks, for
 `ApplicationDomain.currentDomain`, `getDefinitionByName` and a load's
-default, is `Runtime.codeDomain`'s, so each module is imported under a
+default, is `Runtime.codeDomain`'s, so each module is evaluated under a
 `sourceURL` of its own (`scripting/code.ts`), and the player's own modules load as builtin,
 whose frames do not count, as avmplus skips builtin code. SymbolClass
 binds a character to the class its name finds in the SWF's domain, by
