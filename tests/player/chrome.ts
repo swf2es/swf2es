@@ -85,13 +85,15 @@ interface Evaluated<T> {
 
 /**
  * One headless Chrome on the served page, for `run` to evaluate expressions
- * in once `ready` names a function the page has defined.
+ * in once `ready` names a function the page has defined; `fresh` loads the
+ * page again, as a new document, and waits for it the same way.
  */
 async function withPage<T>(
   ready: string,
   run: (
     evaluate: <R>(expression: string) => Promise<Evaluated<R>>,
     send: <R>(method: string, params?: object) => Promise<R>,
+    fresh: () => Promise<void>,
   ) => Promise<T>,
   gpu = false,
   options: RunOptions = {},
@@ -165,18 +167,22 @@ async function withPage<T>(
     const devtools = new DevTools(socket);
     await devtools.send("Page.enable");
     await devtools.send("Runtime.enable");
-    await devtools.send("Page.navigate", { url });
-    for (let i = 0; i < 100; i++) {
-      const { result } = await devtools.send<{ result: { value: boolean } }>("Runtime.evaluate", {
-        expression: `typeof ${ready} === 'function'`,
-        returnByValue: true,
-      });
-      if (result.value) {
-        break;
-      }
+    // Navigating answers once the new document has replaced the old.
+    const fresh = async () => {
+      await devtools.send("Page.navigate", { url });
+      for (let i = 0; i < 100; i++) {
+        const { result } = await devtools.send<{ result: { value: boolean } }>("Runtime.evaluate", {
+          expression: `typeof ${ready} === 'function'`,
+          returnByValue: true,
+        });
+        if (result.value) {
+          break;
+        }
 
-      await sleep(100);
-    }
+        await sleep(100);
+      }
+    };
+    await fresh();
 
     try {
       return await run(
@@ -188,6 +194,7 @@ async function withPage<T>(
           return { value: result.value, exception: exceptionDetails?.text ?? null };
         },
         (method, params) => devtools.send(method, params),
+        fresh,
       );
     } finally {
       socket.close();
@@ -201,6 +208,14 @@ async function withPage<T>(
 }
 
 /**
+ * Jobs one document runs before the next gets a fresh one. The player
+ * imports each job's compiled code as modules, and a document keeps every
+ * module it imported for as long as it lives: some 5 MB a corpus test,
+ * whose renderer ran out of heap after about 400 of them.
+ */
+const JOBS_PER_DOCUMENT = 100;
+
+/**
  * Run each job in the player, in one browser. With a timeout, in ms, a
  * job's script that runs longer is stopped, its error "timeout", and the
  * jobs after it run on; `onResult` hears each as it comes.
@@ -208,9 +223,13 @@ async function withPage<T>(
 export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<PlayerResult[]> {
   return withPage(
     "runSwf",
-    async (evaluate) => {
+    async (evaluate, _send, fresh) => {
       const results: PlayerResult[] = [];
       for (const [index, job] of jobs.entries()) {
+        if (index > 0 && index % JOBS_PER_DOCUMENT === 0) {
+          await fresh();
+        }
+
         let value:
           | {
               images: Record<string, string>;
