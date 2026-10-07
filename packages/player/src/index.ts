@@ -25,7 +25,11 @@ export type {
   SocketEvents,
   SocketHost,
   SocketTransport,
+  WebSocketEvents,
+  WebSocketHost,
+  WebSocketTransport,
 } from "./hosts.js";
+export { globalWebSocketHost } from "./hosts.js";
 export { bindKeyboard, type KeyState } from "./input/keyboard.js";
 export { Player } from "./player.js";
 export { setTransformTable } from "./render/table.js";

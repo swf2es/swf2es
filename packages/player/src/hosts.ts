@@ -291,3 +291,54 @@ export interface SocketEvents {
 export interface SocketHost {
   connect(host: string, port: number, events: SocketEvents): SocketTransport;
 }
+
+/** A WebSocket client connection opened by the host for air.net.WebSocket. */
+export interface WebSocketTransport {
+  /** A text message as a string, a binary one as bytes. */
+  send(data: string | Uint8Array): void;
+  /** A close frame with `code`, 1000 or 3000 to 4999, or with none. */
+  close(code?: number): void;
+}
+
+/** What befalls the connection; the player delivers each to ActionScript on a frame. */
+export interface WebSocketEvents {
+  /** The handshake is done; the subprotocol the server chose, or "". */
+  open(protocol: string): void;
+  message(data: string | Uint8Array): void;
+  /** The connection has closed: the close frame's code, 1005 for a frame without one, 1006 for none. */
+  close(code: number): void;
+  /** The connection or its handshake failed; after open, a close follows. */
+  error(): void;
+}
+
+export interface WebSocketHost {
+  /** Opens `url`, offering `protocols`; may throw as the WebSocket constructor does. */
+  connect(url: string, protocols: string[], events: WebSocketEvents): WebSocketTransport;
+}
+
+/** The global WebSocket's client, a browser's or node's; null where there is none. */
+export function globalWebSocketHost(): WebSocketHost | null {
+  const Client = (globalThis as { WebSocket?: typeof WebSocket }).WebSocket;
+  if (typeof Client !== "function") {
+    return null;
+  }
+
+  return {
+    connect(url, protocols, events) {
+      const socket = new Client(url, protocols);
+      socket.binaryType = "arraybuffer";
+      socket.addEventListener("open", () => events.open(socket.protocol));
+      socket.addEventListener("message", ({ data }) => {
+        events.message(typeof data === "string" ? data : new Uint8Array(data as ArrayBuffer));
+      });
+      socket.addEventListener("close", ({ code }) => events.close(code));
+      socket.addEventListener("error", () => events.error());
+
+      return {
+        // The natives send bytes of their own, never a view of a shared buffer.
+        send: (data) => socket.send(data as string | Uint8Array<ArrayBuffer>),
+        close: (code) => socket.close(code),
+      };
+    },
+  };
+}
