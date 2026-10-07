@@ -1949,12 +1949,18 @@ module that fails to load compiled in its place. Each file is read by a
 URL of its key (`abc-0.js?<key>`), so that an HTTP cache never pairs a
 manifest with another build's module or log of the same name, which
 matters most for an imported module, whose length is not checked.
-`chainCaches(aot,
-indexedDb)` asks its caches in order, the first that holds a module
-answering, gives a compiled module and a deletion to each, and passes
+`chainCaches(aot, indexedDb)` asks its caches in order, the first that
+holds a module answering, gives a compiled module to each, and passes
 over one that fails: the modules compiled ahead of time first, then those
-the page compiled before, then a compile. Its `minBytes` is its smallest
-member's, so every member is asked for the ABCs that one asks for.
+the page compiled before, then a compile. An entry the player cannot use,
+not whole or not importing, it deletes and asks for once more; the chain
+gives that deletion only to the member that answered, and asks the others
+for that key until a module is put under it, so that a bad precompiled
+module falls through to the one the IndexedDB cache kept after the first
+load compiled it, rather than compiling on every load. A replay or a
+load that fails is past asking again, the domain already changed. Its
+`minBytes` is its smallest member's, so every member is asked for the
+ABCs that one asks for.
 
 A cache's entry may give a `url` to import the module from in place of
 its text: with `importModules`, `precompiledModules` gives each module's

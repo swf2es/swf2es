@@ -589,24 +589,47 @@ interface Imported {
   url: string;
 }
 
-/** What `cache` holds under `key`, if it is whole, its module imported first if it has a URL, from `unique(url)`. */
+/**
+ * What `cache` holds under `key`, if it is whole, its module imported
+ * first if it has a URL, from `unique(url)`. An entry that is not whole,
+ * or does not import, is deleted and asked for again once: a chain of
+ * caches then answers from the next that holds it (see chainCaches).
+ */
 async function read(
   cache: ModuleCache,
   key: string,
   unique: (url: string) => string,
 ): Promise<(CachedModule & { imported?: Imported }) | undefined> {
-  const entry = await cache.get(key);
-  if (entry === undefined || !whole(entry)) {
-    return undefined;
+  for (let tries = 0; tries < 2; tries++) {
+    const entry = await cache.get(key);
+    if (entry === undefined) {
+      return undefined;
+    }
+
+    if (whole(entry)) {
+      if (entry.url === undefined) {
+        return entry;
+      }
+
+      try {
+        const url = unique(entry.url);
+        const factory = (await import(/* @vite-ignore */ /* webpackIgnore: true */ url)).default;
+        if (typeof factory === "function") {
+          return { ...entry, imported: { factory, url } };
+        }
+      } catch {
+        // Deleted, as an entry cut short is.
+      }
+    }
+
+    try {
+      await cache.delete(key);
+    } catch {
+      return undefined;
+    }
   }
 
-  if (entry.url === undefined) {
-    return entry;
-  }
-
-  const url = unique(entry.url);
-  const factory = (await import(/* @vite-ignore */ /* webpackIgnore: true */ url)).default;
-  return typeof factory === "function" ? { ...entry, imported: { factory, url } } : undefined;
+  return undefined;
 }
 
 type Read = NonNullable<Awaited<ReturnType<typeof read>>>;

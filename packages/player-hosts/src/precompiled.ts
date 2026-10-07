@@ -117,22 +117,34 @@ async function fetchText(url: URL): Promise<string> {
 /**
  * Caches asked in order, the first that holds a module answering, as the
  * modules compiled ahead of time and then an IndexedDB cache: a module
- * compiled goes to each, and one that failed leaves each. One that fails
- * is passed over. Asks for the ABCs the member that asks for the smallest
- * does, every member then asked for them.
+ * compiled goes to each. A deletion, as of an entry the player could not
+ * use, goes to the cache that answered for that key, which is not asked
+ * for it again until one is put, so that the next one's entry is read
+ * (the player asks again once); where none answered, to each. One that fails is passed
+ * over. Asks for the ABCs the member that asks for the smallest does,
+ * every member then asked for them.
  */
 export function chainCaches(...caches: ModuleCache[]): ModuleCache {
   const sizes = caches.flatMap((c) => (c.minBytes === undefined ? [] : [c.minBytes]));
-  const each = async (f: (cache: ModuleCache) => Promise<void>) => {
-    await Promise.allSettled(caches.map(f));
+  const answered = new Map<string, ModuleCache>();
+  const failed = new Map<string, Set<ModuleCache>>();
+  // A member that throws at the call skips none of the others.
+  const each = async (members: ModuleCache[], f: (cache: ModuleCache) => Promise<void>) => {
+    await Promise.allSettled(members.map((c) => Promise.resolve().then(() => f(c))));
   };
   return {
-    minBytes: sizes.length ? Math.min(...sizes) : undefined,
+    ...(sizes.length ? { minBytes: Math.min(...sizes) } : {}),
     async get(key) {
+      answered.delete(key);
       for (const cache of caches) {
+        if (failed.get(key)?.has(cache)) {
+          continue;
+        }
+
         try {
           const entry = await cache.get(key);
           if (entry !== undefined) {
+            answered.set(key, cache);
             return entry;
           }
         } catch {
@@ -142,7 +154,22 @@ export function chainCaches(...caches: ModuleCache[]): ModuleCache {
 
       return undefined;
     },
-    put: (key, entry) => each((c) => c.put(key, entry)),
-    delete: (key) => each((c) => c.delete(key)),
+    // Stored anew, an entry that failed may be read again.
+    put: (key, entry) => {
+      failed.delete(key);
+      return each(caches, (c) => c.put(key, entry));
+    },
+    delete: (key) => {
+      const from = answered.get(key);
+      if (from === undefined) {
+        return each(caches, (c) => c.delete(key));
+      }
+
+      answered.delete(key);
+      const skipped = failed.get(key) ?? new Set();
+      skipped.add(from);
+      failed.set(key, skipped);
+      return each([from], (c) => c.delete(key));
+    },
   };
 }

@@ -312,6 +312,49 @@ ${decoder}
   assert.deepEqual(imported.lines, expected.lines);
 });
 
+test("a chain reads the next cache's entry where the first's fails, and survives a throw", {
+  skip,
+}, async () => {
+  const { swf, dir } = compiled();
+  const expected = (await play(swf, null)).lines;
+  const edited = JSON.parse(readFileSync(`${dir}manifest.json`, "utf8"));
+  edited.abcs[0].lengths[0] += 1;
+  edited.abcs[1].module = "missing.js";
+  writeFileSync(`${dir}stale.json`, JSON.stringify(edited));
+  const store = new Map<string, CachedModule>();
+  // A cache whose put and delete throw at the call, before the one that keeps.
+  const throwing: ModuleCache = {
+    get: async () => undefined,
+    put: () => {
+      throw new Error("full");
+    },
+    delete: () => {
+      throw new Error("gone");
+    },
+  };
+  for (const importModules of [false, true]) {
+    store.clear();
+    const chain = () =>
+      chainCaches(
+        precompiledModules(pathToFileURL(`${dir}stale.json`), { read: readText, importModules }),
+        throwing,
+        memoryCache(store),
+      );
+
+    // The SWF's failing modules, both evaluated, the missing one imported
+    // (an import's length is not checked), are compiled and kept; then read
+    // from the next cache, which the failed entries' deletions leave alone.
+    const failing = importModules ? 1 : 2;
+    const first = await play(swf, chain());
+    assert.equal(first.compiled, failing, `importModules: ${importModules}`);
+    await until(() => store.size === failing);
+    const second = await play(swf, chain());
+    assert.equal(second.compiled, 0, `importModules: ${importModules}`);
+    assert.deepEqual(second.lines, expected);
+    assert.equal(store.size, failing);
+  }
+});
+
 test("precompiled modules are read by URLs of their keys", { skip }, async () => {
   const { dir, manifest } = compiled();
   const entry = JSON.parse(readFileSync(`${dir}manifest.json`, "utf8")).abcs[0];

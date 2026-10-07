@@ -209,10 +209,13 @@ test("a cache that fails, or gives what is not a whole module, is compiled past"
     const truncated = await play(swf, cache);
     assert.equal(truncated.modules.length, 3, cut);
     assert.deepEqual(truncated.lines, expected);
-    await until(() =>
-      [...store].every(
-        ([k, e]) => e.log === stored.get(k)?.log && first.modules.includes(e.module),
-      ),
+    // Deleted as it was read, each is stored again once compiled.
+    await until(
+      () =>
+        store.size === stored.size &&
+        [...store].every(
+          ([k, e]) => e.log === stored.get(k)?.log && first.modules.includes(e.module),
+        ),
     );
   }
 
