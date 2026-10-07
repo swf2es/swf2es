@@ -188,8 +188,27 @@ function standardOffset(year: number): number {
   return offset;
 }
 
-/** As VMPI_getLocalTimeOffset: the standard offset of now, whatever the time asked about. */
-const localTZA = () => standardOffset(new Date().getUTCFullYear());
+let tza = 0;
+let tzaUntil = Number.NEGATIVE_INFINITY;
+
+/**
+ * As VMPI_getLocalTimeOffset: the standard offset of now, whatever the time
+ * asked about. Read again once a minute, as WinPortUtils does, since every
+ * local field reads it.
+ */
+function localTZA(): number {
+  const now = Date.now();
+  if (now >= tzaUntil) {
+    tza = standardOffset(yearFromTime(now));
+    tzaUntil = now + MS_PER_MINUTE;
+  }
+
+  return tza;
+}
+
+// The last second daylightSavingTA was asked about: a Date's local getters ask about the same one.
+let lastDstSecond = Number.NaN;
+let lastDst = 0;
 
 /**
  * As VMPI_getDaylightSavingsTA: an hour where localtime_r says daylight
@@ -199,8 +218,13 @@ const localTZA = () => standardOffset(new Date().getUTCFullYear());
  */
 function daylightSavingTA(t: number): number {
   const ms = cInt(t / MS_PER_SECOND) * MS_PER_SECOND;
-  const year = new Date(ms).getUTCFullYear();
-  return hostOffset(ms) - standardOffset(year) >= 30 * MS_PER_MINUTE ? MS_PER_HOUR : 0;
+  if (ms !== lastDstSecond) {
+    lastDstSecond = ms;
+    lastDst =
+      hostOffset(ms) - standardOffset(yearFromTime(ms)) >= 30 * MS_PER_MINUTE ? MS_PER_HOUR : 0;
+  }
+
+  return lastDst;
 }
 
 const localTime = (t: number) => t + localTZA() + daylightSavingTA(t);
