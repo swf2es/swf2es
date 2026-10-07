@@ -198,23 +198,34 @@ export function readFilterBytes(r: SwfReader): Uint8Array {
 
   for (let i = 0; i < count && !r.overrun; i++) {
     const id = r.u8();
-    if (id === 0) {
-      r.pos += 23; // DropShadow
-    } else if (id === 1) {
-      r.pos += 9; // Blur
-    } else if (id === 2) {
-      r.pos += 15; // Glow
-    } else if (id === 3) {
-      r.pos += 27; // Bevel
-    } else if (id === 4 || id === 7) {
-      const stops = r.u8(); // GradientGlow, GradientBevel
-      r.pos += stops * 5 + 19;
-    } else if (id === 5) {
-      const x = r.u8(); // Convolution
-      const y = r.u8();
-      r.pos += 8 + x * y * 4 + 5;
-    } else if (id === 6) {
-      r.pos += 80; // ColorMatrix
+    switch (id) {
+      case 0:
+        r.pos += 23; // DropShadow
+        break;
+      case 1:
+        r.pos += 9; // Blur
+        break;
+      case 2:
+        r.pos += 15; // Glow
+        break;
+      case 3:
+        r.pos += 27; // Bevel
+        break;
+      case 4:
+      case 7: {
+        const stops = r.u8(); // GradientGlow, GradientBevel
+        r.pos += stops * 5 + 19;
+        break;
+      }
+      case 5: {
+        const x = r.u8(); // Convolution
+        const y = r.u8();
+        r.pos += 8 + x * y * 4 + 5;
+        break;
+      }
+      case 6:
+        r.pos += 80; // ColorMatrix
+        break;
     }
   }
 

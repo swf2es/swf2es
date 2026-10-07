@@ -973,24 +973,35 @@ export function displayFilters(
   const out: Filter[] = [];
   for (const f of records) {
     let filter: FlashFilter | null = null;
-    if (f.kind === "blur") {
-      filter = new BlurFilter(f);
-    } else if (f.kind === "glow" || f.kind === "dropShadow") {
-      filter = new GlowFilter(f);
-    } else if (f.kind === "colorMatrix") {
-      filter = new ColorMatrixFilter(f);
-    } else if (f.kind === "bevel") {
-      filter = new BevelFilter(f);
-    } else if (f.kind === "gradientGlow" || f.kind === "gradientBevel") {
-      filter = new GradientFilter(f);
-    } else if (f.kind === "displacementMap") {
-      // Its map, a copy the object took when its filters were set, as a
-      // texture now, never in a pass; with none it leaves the object be.
-      const map = f.mapSnapshot ?? f.mapBitmap;
-      const texture = map ? mapTexture(map) : null;
-      filter = texture ? new DisplacementFilter(f, texture) : null;
-    } else if (f.kind === "convolution") {
-      filter = new ConvolutionFilter(f.matrixX * f.matrixY > 0 ? f : emptyKernel(f));
+    switch (f.kind) {
+      case "blur":
+        filter = new BlurFilter(f);
+        break;
+      case "glow":
+      case "dropShadow":
+        filter = new GlowFilter(f);
+        break;
+      case "colorMatrix":
+        filter = new ColorMatrixFilter(f);
+        break;
+      case "bevel":
+        filter = new BevelFilter(f);
+        break;
+      case "gradientGlow":
+      case "gradientBevel":
+        filter = new GradientFilter(f);
+        break;
+      case "displacementMap": {
+        // Its map, a copy the object took when its filters were set, as a
+        // texture now, never in a pass; with none it leaves the object be.
+        const map = f.mapSnapshot ?? f.mapBitmap;
+        const texture = map ? mapTexture(map) : null;
+        filter = texture ? new DisplacementFilter(f, texture) : null;
+        break;
+      }
+      case "convolution":
+        filter = new ConvolutionFilter(f.matrixX * f.matrixY > 0 ? f : emptyKernel(f));
+        break;
     }
 
     if (filter) {

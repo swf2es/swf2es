@@ -89,6 +89,9 @@ calling a change done; CI runs the same steps.
   extensions on relative imports.
 - Biome formats and lints (2 spaces, double quotes, semicolons, 100
   columns). Braces are required on every `if`, `else` and loop.
+- A chain of `if`/`else if` that only compares one value with constants is
+  a `switch` (cases that share a body stack their labels); keep `if`s where
+  any branch tests something else.
 - Separate logical steps inside a function with a blank line (after guard
   clauses, around loops, before the final `return`). Biome cannot enforce
   this, so keep it by hand.
