@@ -44,6 +44,8 @@ node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revival
 node tests/player/leak.ts [--loads N] [--snapshots DIR]   # load SWFs over and over in Chrome; the
                               # heap after a full collection must stay bounded, and codegen's
                               # memory must not grow (part of pnpm test)
+node packages/cli/dist/main.js file.swf [-o dir] [--lib x.abc ...]   # AOT: the player's modules
+                              # for the SWF and a manifest (libraries from tests/player/out/libraries/)
 node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
                               # timeline in Chrome; keep a change only for a gain that repeats
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the

@@ -86,6 +86,23 @@ frame they came in has ended: one error alone, or an `AggregateError`
 when there were several. The frame has run to its end either way. A
 hook should not throw; if it does, its error is thrown so too.
 
+## Compiling ahead of time
+
+`swf2es` compiles a SWF's ActionScript 3 to the modules the player would
+compile for it, byte for byte, with a manifest of their hashes and the
+compiler's:
+
+```sh
+node packages/cli/dist/main.js movie.swf -o movie.swf2es \
+  --lib builtin.abc --lib playerglobal.abc
+```
+
+Without `--lib` it uses the copies the player's tests keep in
+`tests/player/out/libraries/`. `swf2es --help` lists the options. It
+exits with 2 for a mistake in the command line or missing default
+libraries, and 1 for any other failure: an unreadable, AVM1 or rejected
+input or library, or an output it cannot write.
+
 ## Development
 
 ```sh
