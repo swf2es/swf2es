@@ -380,6 +380,11 @@ export interface ModuleCache {
   get(key: string): Promise<CachedModule | undefined>;
   /** Store `entry` under `key`; a store that is full may evict others, or refuse it. */
   put(key: string, entry: CachedModule): Promise<void>;
-  /** Let go of what is stored under `key`, as a module that loaded part of itself and failed. */
-  delete(key: string): Promise<void>;
+  /**
+   * Let go of what is stored under `key`, as a module that loaded part of
+   * itself and failed; `entry`, where given, is the one this cache's get
+   * answered that the player could not use, as a chain of caches needs to
+   * tell which of its members gave it.
+   */
+  delete(key: string, entry?: CachedModule): Promise<void>;
 }

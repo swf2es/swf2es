@@ -355,7 +355,7 @@ export class Code {
           linked = load(ready.module);
         }
       } catch (e) {
-        this.discard(ready.key);
+        this.discard(ready.key, ready.entry);
         if (domain.own.length !== loaded) {
           throw e;
         }
@@ -427,15 +427,16 @@ export class Code {
 
       let failed = false;
       if (key !== null && entry !== undefined) {
-        if (this.s.codegen.replay(entry.log, index)) {
-          ready.push({ module: entry.module, key, cached: true, imported: entry.imported });
+        const { entry: cached, imported } = entry;
+        if (this.s.codegen.replay(cached.log, index)) {
+          ready.push({ module: cached.module, key, cached: true, entry: cached, imported });
           continue;
         }
 
         // Done part way, the log left the domain as no compile would: the
         // module compiled now is not that key's, and the entry goes.
         failed = true;
-        this.discard(key);
+        this.discard(key, cached);
       }
 
       const { module, log } = this.s.codegen.compileModuleLogged(this.hashes, index);
@@ -460,12 +461,12 @@ export class Code {
     }
   }
 
-  /** Have the cache let go of what it holds under `key`'s hash, not waiting for it. */
-  private discard(key: string | null): void {
+  /** Have the cache let go of `entry`, or what it holds, under `key`'s hash, not waiting for it. */
+  private discard(key: string | null, entry?: CachedModule): void {
     const cache = this.cache();
     if (cache && key !== null) {
       sha256Text(key)
-        .then((k) => cache.delete(k))
+        .then((k) => cache.delete(k, entry))
         .catch(() => {});
     }
   }
@@ -599,7 +600,7 @@ async function read(
   cache: ModuleCache,
   key: string,
   unique: (url: string) => string,
-): Promise<(CachedModule & { imported?: Imported }) | undefined> {
+): Promise<{ entry: CachedModule; imported?: Imported } | undefined> {
   for (let tries = 0; tries < 2; tries++) {
     const entry = await cache.get(key);
     if (entry === undefined) {
@@ -608,14 +609,14 @@ async function read(
 
     if (whole(entry)) {
       if (entry.url === undefined) {
-        return entry;
+        return { entry };
       }
 
       try {
         const url = unique(entry.url);
         const factory = (await import(/* @vite-ignore */ /* webpackIgnore: true */ url)).default;
         if (typeof factory === "function") {
-          return { ...entry, imported: { factory, url } };
+          return { entry, imported: { factory, url } };
         }
       } catch {
         // Deleted, as an entry cut short is.
@@ -623,7 +624,7 @@ async function read(
     }
 
     try {
-      await cache.delete(key);
+      await cache.delete(key, entry);
     } catch {
       return undefined;
     }
@@ -636,12 +637,14 @@ type Read = NonNullable<Awaited<ReturnType<typeof read>>>;
 
 /**
  * A module made ready to load: from the cache, its log replayed, or
- * compiled; its key, if it has one; and if imported, its factory.
+ * compiled; its key, if it has one; and if cached, the cache's entry, and
+ * if imported, its factory.
  */
 interface Ready {
   module: string;
   key: string | null;
   cached: boolean;
+  entry?: CachedModule;
   imported?: Imported;
 }
 

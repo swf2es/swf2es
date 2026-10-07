@@ -1938,7 +1938,8 @@ The swf2es command's modules reach the player as a cache too:
 `precompiledModules(manifestUrl)` (`player-hosts/precompiled`) reads the
 command's `manifest.json` at its first get and answers a key it names
 with the module and the log beside it, read by the host's `read` or
-fetched; `put` and `delete` do nothing, and its `minBytes` is 0, so that
+fetched; `put` does nothing, `delete` has it answer that key no more on
+this page, as it cannot delete its files, and its `minBytes` is 0, so that
 no module of a SWF compiled ahead of time compiles. The command keys each
 module with the player's own `moduleKey`, so a key the manifest lacks,
 another compiler's (keys name its identity), a SWF in another context
@@ -1948,16 +1949,20 @@ of any cache holds for these, a missing or truncated file a miss, a
 module that fails to load compiled in its place. Each file is read by a
 URL of its key (`abc-0.js?<key>`), so that an HTTP cache never pairs a
 manifest with another build's module or log of the same name, which
-matters most for an imported module, whose length is not checked.
+matters most for an imported module, whose length is not checked. The
+manifest is to be served `no-cache`: a stale one names the old keys, and
+`?<oldkey>` would fetch the new build's file under them. A CDN that drops
+the query from its cache key loses this protection.
 `chainCaches(aot, indexedDb)` asks its caches in order, the first that
 holds a module answering, gives a compiled module to each, and passes
 over one that fails: the modules compiled ahead of time first, then those
 the page compiled before, then a compile. An entry the player cannot use,
-not whole or not importing, it deletes and asks for once more; the chain
-gives that deletion only to the member that answered, and asks the others
-for that key until a module is put under it, so that a bad precompiled
-module falls through to the one the IndexedDB cache kept after the first
-load compiled it, rather than compiling on every load. A replay or a
+not whole or not importing, it deletes, naming the entry, and asks for
+once more; the chain gives that deletion only to the member that gave
+that entry, tracked by the entry, not the key, as two reads of one key
+may overlap, and that member answers the key no more, so that a bad
+precompiled module falls through to the one the IndexedDB cache kept
+after the first load compiled it, rather than compiling on every load. A replay or a
 load that fails is past asking again, the domain already changed. Its
 `minBytes` is its smallest member's, so every member is asked for the
 ABCs that one asks for.
@@ -1979,7 +1984,9 @@ and the runtime tells modules' domains apart by the URL their frames
 name, so a player that imports a URL again, as a SWF loaded twice into
 sibling domains, both keyed as the main movie, imports it with a
 fragment of its own (`#swf2es-<n>`), which the engine takes for another
-module and its frames name.
+module and its frames name. Each such import is a module the page keeps,
+so a SWF that loads the same precompiled child again and again into
+`new ApplicationDomain(null)` grows the page's memory with each load.
 
 Measured in headless Chrome on the SWF above, each run a new browser on
 one profile, so that IndexedDB and the HTTP cache persist and V8's code

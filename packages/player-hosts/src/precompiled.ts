@@ -41,6 +41,7 @@ export function precompiledModules(
   const base = new URL(manifest, globalThis.location?.href);
   const read = options.read ?? fetchText;
   let entries: Promise<Map<string, Entry>> | null = null;
+  const rejected = new Set<string>();
   const load = async () => {
     const parsed = JSON.parse(await read(base));
     const map = new Map<string, Entry>();
@@ -71,6 +72,10 @@ export function precompiledModules(
   return {
     minBytes: 0,
     async get(key: string): Promise<CachedModule | undefined> {
+      if (rejected.has(key)) {
+        return undefined;
+      }
+
       entries ??= load();
       let found: Entry | undefined;
       try {
@@ -101,7 +106,10 @@ export function precompiledModules(
       return { module: text, log: logText, lengths };
     },
     async put() {},
-    async delete() {},
+    // Its files cannot be deleted; the key is not answered again on this page.
+    async delete(key) {
+      rejected.add(key);
+    },
   };
 }
 
@@ -117,17 +125,17 @@ async function fetchText(url: URL): Promise<string> {
 /**
  * Caches asked in order, the first that holds a module answering, as the
  * modules compiled ahead of time and then an IndexedDB cache: a module
- * compiled goes to each. A deletion, as of an entry the player could not
- * use, goes to the cache that answered for that key, which is not asked
- * for it again until one is put, so that the next one's entry is read
- * (the player asks again once); where none answered, to each. One that fails is passed
+ * compiled goes to each. A deletion naming the entry the player could not
+ * use goes only to the member that gave that entry, which then answers
+ * the key no more, so that the player, which asks again once, reads the
+ * next one's; one naming none goes to each. One that fails is passed
  * over. Asks for the ABCs the member that asks for the smallest does,
  * every member then asked for them.
  */
 export function chainCaches(...caches: ModuleCache[]): ModuleCache {
   const sizes = caches.flatMap((c) => (c.minBytes === undefined ? [] : [c.minBytes]));
-  const answered = new Map<string, ModuleCache>();
-  const failed = new Map<string, Set<ModuleCache>>();
+  // By the entry, not the key: two reads of one key may have been answered by two members.
+  const answered = new WeakMap<CachedModule, ModuleCache>();
   // A member that throws at the call skips none of the others.
   const each = async (members: ModuleCache[], f: (cache: ModuleCache) => Promise<void>) => {
     await Promise.allSettled(members.map((c) => Promise.resolve().then(() => f(c))));
@@ -135,16 +143,11 @@ export function chainCaches(...caches: ModuleCache[]): ModuleCache {
   return {
     ...(sizes.length ? { minBytes: Math.min(...sizes) } : {}),
     async get(key) {
-      answered.delete(key);
       for (const cache of caches) {
-        if (failed.get(key)?.has(cache)) {
-          continue;
-        }
-
         try {
           const entry = await cache.get(key);
           if (entry !== undefined) {
-            answered.set(key, cache);
+            answered.set(entry, cache);
             return entry;
           }
         } catch {
@@ -154,22 +157,10 @@ export function chainCaches(...caches: ModuleCache[]): ModuleCache {
 
       return undefined;
     },
-    // Stored anew, an entry that failed may be read again.
-    put: (key, entry) => {
-      failed.delete(key);
-      return each(caches, (c) => c.put(key, entry));
-    },
-    delete: (key) => {
-      const from = answered.get(key);
-      if (from === undefined) {
-        return each(caches, (c) => c.delete(key));
-      }
-
-      answered.delete(key);
-      const skipped = failed.get(key) ?? new Set();
-      skipped.add(from);
-      failed.set(key, skipped);
-      return each([from], (c) => c.delete(key));
+    put: (key, entry) => each(caches, (c) => c.put(key, entry)),
+    delete: (key, entry) => {
+      const from = entry && answered.get(entry);
+      return each(from ? [from] : caches, (c) => c.delete(key, entry));
     },
   };
 }

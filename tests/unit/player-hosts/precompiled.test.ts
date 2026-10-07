@@ -370,3 +370,56 @@ test("precompiled modules are read by URLs of their keys", { skip }, async () =>
   assert.equal(got?.url, `${pathToFileURL(dir + entry.module).href}?${entry.key}`);
   assert.ok(asked.includes(`${pathToFileURL(dir + entry.log).href}?${entry.key}`));
 });
+
+test("a chain gives a deletion to the member whose entry was rejected, however reads overlap", async () => {
+  const member = (name: string) => {
+    const store = new Map<string, CachedModule>([
+      ["k", { module: name, log: "", lengths: [name.length, 0] }],
+    ]);
+    const deleted: string[] = [];
+    const cache: ModuleCache = {
+      get: async (key) => store.get(key),
+      put: async (key, entry) => {
+        store.set(key, entry);
+      },
+      delete: async (key) => {
+        deleted.push(key);
+        store.delete(key);
+      },
+    };
+    return { store, deleted, cache };
+  };
+
+  // Two reads answered by the first member, both rejected.
+  let a = member("a");
+  let b = member("b");
+  let chain = chainCaches(a.cache, b.cache);
+  const [first, second] = await Promise.all([chain.get("k"), chain.get("k")]);
+  await chain.delete("k", first);
+  await chain.delete("k", second);
+  assert.deepEqual(a.deleted, ["k", "k"]);
+  assert.deepEqual(b.deleted, []);
+
+  // Interleaved: the first read's retry reads the second member's entry
+  // before the second read rejects the first member's.
+  a = member("a");
+  b = member("b");
+  chain = chainCaches(a.cache, b.cache);
+  const one = await chain.get("k");
+  const two = await chain.get("k");
+  await chain.delete("k", one);
+  const retried = await chain.get("k");
+  await chain.delete("k", two);
+  assert.equal(retried?.module, "b");
+  assert.deepEqual(b.deleted, []);
+  assert.ok(b.store.has("k"));
+});
+
+test("a precompiled module deleted is not answered again", { skip }, async () => {
+  const { dir, manifest } = compiled();
+  const { key } = JSON.parse(readFileSync(`${dir}manifest.json`, "utf8")).abcs[0];
+  const cache = precompiledModules(manifest, { read: readText });
+  assert.ok(await cache.get(key));
+  await cache.delete(key);
+  assert.equal(await cache.get(key), undefined);
+});
