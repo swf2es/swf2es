@@ -81,7 +81,15 @@ export class MethodEmitter {
   scopeDepth: u32 = 0;
   /** The classes and Vectors the method being written refers to, in the order its T holds them. */
   types: i32[] = [];
-  typeIndex: Map<i32, u32> = new Map<i32, u32>();
+  /**
+   * By type: its index in types, where its stamp is typeGen, the method's.
+   * A new generation per method forgets them all: a Map's clear allocates
+   * new tables, garbage the minimal runtime keeps until the call returns,
+   * thousands of times in a module.
+   */
+  typeIndex: StaticArray<u32> = new StaticArray<u32>(0);
+  typeStamp: StaticArray<u32> = new StaticArray<u32>(0);
+  typeGen: u32 = 0;
   /** The name the method being written is given, a JavaScript identifier; "" for none. */
   functionName: string = "";
   /**
@@ -948,6 +956,52 @@ export class MethodEmitter {
   /** The builtin type of register r's value now. */
   builtinOf(r: i32): u8 {
     return this.domain.builtin(this.regType[r]);
+  }
+
+  /** A new method's types: none yet. */
+  newTypes(): void {
+    this.types.length = 0;
+    if (++this.typeGen === 0) {
+      // Every 2^32 methods, the stamps of the first generation would match again.
+      const stamp = this.typeStamp;
+      for (let k = 0; k < stamp.length; k++) {
+        stamp[k] = 0;
+      }
+
+      this.typeGen = 1;
+    }
+  }
+
+  /** Class or Vector type t's index in the method's T, given it the next if new. */
+  typeSlot(t: i32): u32 {
+    // t is a type of the domain's (isClassRef read its kind), which may
+    // have more since the tables were sized.
+    const count = this.domain.traits.kind.length;
+    if (this.typeStamp.length < count) {
+      const size = max(count, this.typeStamp.length * 2);
+      const index = new StaticArray<u32>(size);
+      const stamp = new StaticArray<u32>(size);
+      memory.copy(
+        changetype<usize>(index),
+        changetype<usize>(this.typeIndex),
+        this.typeIndex.length << 2,
+      );
+      memory.copy(
+        changetype<usize>(stamp),
+        changetype<usize>(this.typeStamp),
+        this.typeStamp.length << 2,
+      );
+      this.typeIndex = index;
+      this.typeStamp = stamp;
+    }
+
+    if (this.typeStamp[t] !== this.typeGen) {
+      this.typeStamp[t] = this.typeGen;
+      this.typeIndex[t] = <u32>this.types.length;
+      this.types.push(t);
+    }
+
+    return this.typeIndex[t];
   }
 
   /** Register r as read: what it copies, if it is a copy; null checked, if the check is pending. */

@@ -44,13 +44,8 @@ export function typeRef(e: MethodEmitter, t: i32): void {
     return;
   }
 
-  if (!e.typeIndex.has(t)) {
-    e.typeIndex.set(t, <u32>e.types.length);
-    e.types.push(t);
-  }
-
   out.text("T[");
-  out.uint(e.typeIndex.get(t));
+  out.uint(e.typeSlot(t));
   out.text("]");
 }
 

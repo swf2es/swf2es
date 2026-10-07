@@ -287,8 +287,7 @@ export class ModuleEmitter {
   factory(m: u32, global: u32, decoder: BodyDecoder): void {
     const out = this.out;
     const methods = this.methods;
-    methods.types.length = 0;
-    methods.typeIndex.clear();
+    methods.newTypes();
     const at = out.length;
     const marks = methods.map.count;
     methods.functionName = this.functionName(global);
