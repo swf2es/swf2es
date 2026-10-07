@@ -1,5 +1,5 @@
 // flash.display.Loader: a container whose one child is the root of the SWF
-// it loaded. Its loads complete in a later frame (Scripting.completeLoads),
+// it loaded. Its loads complete in a later frame (Loads.completeLoads),
 // but an AVM1 SWF's from bytes, at the end of the frame (Loads.requestLoad).
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";

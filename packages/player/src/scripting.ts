@@ -1,10 +1,13 @@
-// A SWF's scripts: its DoABCs compiled through @swf2es/codegen and loaded
-// into a runtime with playerglobal's natives, its SymbolClass binding
-// characters to classes, and the link between a display object and the
-// AS3 object that is its other face (docs/architecture.md, "Scripts and
-// the display list"). The runtime allocates every DisplayObject through a
-// hook that takes the display object the player has pending, when the
-// player constructs a timeline child's class, or makes one for a `new`.
+// A SWF's scripts: the runtime with playerglobal's natives, the link
+// between a display object and the AS3 object that is its other face
+// (docs/architecture.md, "Scripts and the display list"), and the frame
+// that runs them: its events, frame scripts, gotos' cycles and the
+// construction of what timelines placed. The runtime allocates every
+// DisplayObject through a hook that takes the display object the player
+// has pending, when the player constructs a timeline child's class, or
+// makes one for a `new`. The rest is in parts it holds, in scripting/:
+// the SWFs' code, what SymbolClass binds, display objects' comings and
+// goings, loads and timers.
 import type { Codegen } from "@swf2es/codegen";
 import type { Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
@@ -67,6 +70,16 @@ export class Scripting {
    * made without a parent is the main one's sibling, and sees none of it.
    */
   readonly mainDomain: avm2.Domain;
+  /** The SWFs' code, linked into their application domains, and whose code runs. */
+  readonly code = new Code(this);
+  /** What SymbolClass bound, the fonts registered and the sounds' shared decodes. */
+  readonly symbols = new Symbols(this);
+  /** What happens to display objects as they come and go: their events, and the orphans. */
+  readonly lifecycle = new Lifecycle(this);
+  /** What Loaders, URLStreams and host callbacks asked for, till the frame it comes in. */
+  readonly loads: Loads;
+  /** The frame clock, getTimer's, and the timers that fire by it. */
+  readonly timers: Timers;
   readonly screenCapabilities: Readonly<ScreenCapabilities>;
   readonly externalInterface: ExternalInterfaceHost | null;
   /** How many calls the page has made into the SWF's ExternalInterface callbacks, which run outside a frame. */
@@ -110,10 +123,6 @@ export class Scripting {
   readonly fsCommand: ((command: string, args: string) => void) | null;
   /** What plays every library's timeline and button sounds. */
   private readonly timelineSounds = timelineSoundsOf(this);
-  /** What SymbolClass bound classes to, the fonts registered, and the sounds' decodes the libraries share. */
-  readonly symbols = new Symbols(this);
-  /** What Loaders, URLStreams and the host's other requests asked for, till the frame each comes in. */
-  readonly loads: Loads;
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
   fetch: ((request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>) | null = null;
   /** Decodes the images of a SWF's JPEG tags as it is linked; the browser's by default, null for none. */
@@ -129,8 +138,6 @@ export class Scripting {
   readonly storage: SharedObjectStorage;
   /** What Capabilities reports of the system (flash/system/Capabilities.ts). */
   readonly platform: PlatformCapabilities;
-  /** What happens to display objects as they come and go: their events, and the orphans. */
-  readonly lifecycle = new Lifecycle(this);
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
   pending: DisplayObject | null = null;
   /** The stage, once the player has made it, and the root it holds. */
@@ -158,11 +165,7 @@ export class Scripting {
   frameRate = 24;
   /** Frames played since the start. */
   frames = 0;
-  /** The frame clock, getTimer's, and the timers that fire by it. */
-  readonly timers: Timers;
   quality = "HIGH";
-  /** The SWFs' code, compiled and linked into the application domains, and what tells whose code runs. */
-  readonly code = new Code(this);
   /** Display objects made with an AS3 object, which Flash numbers for their default names. */
   instances = 0;
   private statusClass: AsObject | null = null;
@@ -261,7 +264,7 @@ export class Scripting {
     return this.code.loadLibraries(abcs);
   }
 
-  /** Resolves once every load and host request asked for so far is ready for a frame or has failed (Loads.settled). */
+  /** Resolves once every load and host request so far is ready or failed (Loads.settled). */
   settled(): Promise<void> {
     return this.loads.settled();
   }

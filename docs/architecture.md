@@ -844,6 +844,15 @@ lives outside it: event dispatch, the host interfaces, the timeline's
 sounds and the channels' state, a display object's root.
 `tests/unit/boundaries.test.ts` rejects any other import of it.
 
+`Scripting` (`scripting.ts`) is the runtime with playerglobal registered,
+the display object its `create` hook takes, and the frame: its events,
+frame scripts, gotos' cycles and the construction of what timelines
+placed. What else scripts need that keeps state of its own is a part it
+holds, a class in `scripting/` given the `Scripting` for what they
+share: `code`, `symbols`, `lifecycle`, `loads` and `timers`. The natives
+and the player reach a part through it, as `s.loads.requestLoad`; the
+host's own calls, `loadLibraries` and `settled`, stay on `Scripting`.
+
 The unit tests mirror this tree: `tests/unit/player/<path>.test.ts` tests
 `<path>.ts`, a playerglobal class's under
 `playerglobal/flash/<package>/<Class>.test.ts`. `tests/unit/mirror.test.ts`
