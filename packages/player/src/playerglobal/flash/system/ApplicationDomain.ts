@@ -47,7 +47,7 @@ export function applicationDomainNatives(s: Scripting): avm2.Natives {
 
     // The domain of the code that asks, as Flash's.
     static get currentDomain(): Value {
-      return s.applicationDomainOf(s.codeDomain());
+      return s.code.applicationDomainOf(s.code.codeDomain());
     }
 
     static get MIN_DOMAIN_MEMORY_LENGTH(): number {
@@ -69,7 +69,7 @@ export function applicationDomainNatives(s: Scripting): avm2.Natives {
     // The system domain, the root, is no script's to see: the main SWF's has no parent.
     get parentDomain(): Value {
       const parent = domainOf(this).parent;
-      return parent && parent !== s.rt.root ? s.applicationDomainOf(parent) : null;
+      return parent && parent !== s.rt.root ? s.code.applicationDomainOf(parent) : null;
     }
 
     getQualifiedDefinitionNames(): Value {

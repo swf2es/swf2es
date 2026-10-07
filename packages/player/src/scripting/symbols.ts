@@ -367,7 +367,7 @@ export class Symbols {
 
       if (t.name === "flash.text::TextField") {
         const text = new TextObject(null);
-        text.fonts = (this.s.codeLibrary() ?? library).fonts;
+        text.fonts = (this.s.code.codeLibrary() ?? library).fonts;
         return text;
       }
     }

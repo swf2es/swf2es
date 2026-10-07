@@ -79,7 +79,7 @@ export class Player {
       return;
     }
 
-    await s.loadSwf(this.swf, this.library);
+    await s.code.loadSwf(this.swf, this.library);
     s.stage = this.stage;
     s.root = this.root;
     s.stageWidth = this.width;

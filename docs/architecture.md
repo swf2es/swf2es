@@ -801,16 +801,17 @@ and the player's paths in this document are relative to it:
 
 - `index.ts` is the package's one entry point; `player.ts` runs a SWF,
   `scripting.ts` connects it to the runtime and the compiler, with its
-  parts in `scripting/`: `events.ts` dispatches events to AS3 listeners,
-  `lifecycle.ts` tells display objects they were added or removed and
-  keeps the orphans, `symbols.ts` keeps what SymbolClass bound classes
-  to, the fonts registered and the sounds' shared decodes, `timers.ts`
-  keeps the clock and the timers that fire by it. `hosts.ts`
+  parts in `scripting/`: `code.ts` compiles and links the SWFs' code
+  into their application domains and tells whose code runs, `sha256.ts`
+  names the ABCs it compiles, `events.ts` dispatches events to AS3
+  listeners, `lifecycle.ts` tells display objects they were added or
+  removed and keeps the orphans, `symbols.ts` keeps what SymbolClass
+  bound classes to, the fonts registered and the sounds' shared decodes,
+  `timers.ts` keeps the clock and the timers that fire by it. `hosts.ts`
   holds what a host may supply in place of the browser (navigation,
   shared objects' storage, the platform Capabilities reports) with the
   browser's defaults, and the interfaces of what only a host supplies
-  (ExternalInterface's page, a renderer's draws, fetches, sockets);
-  `sha256.ts` names the ABCs the player compiles.
+  (ExternalInterface's page, a renderer's draws, fetches, sockets).
 - `display/`: the display list and the timeline, and what they are made
   of: shapes, morphs, drawings, bounds and hit tests, 9-slice scaling,
   geometry, 3D matrices, colour transforms, gradients' ramps, and filters
@@ -1474,7 +1475,7 @@ and `LoaderInfo.applicationDomain.getDefinition` finds its own
 (`loader_duplicate_class`). The domain of the code that asks, for
 `ApplicationDomain.currentDomain`, `getDefinitionByName` and a load's
 default, is `Runtime.codeDomain`'s, so each module is imported under a
-`sourceURL` of its own, and the player's own modules load as builtin,
+`sourceURL` of its own (`scripting/code.ts`), and the player's own modules load as builtin,
 whose frames do not count, as avmplus skips builtin code. SymbolClass
 binds a character to the class its name finds in the SWF's domain, by
 the module that defines it, so the same name in another domain is

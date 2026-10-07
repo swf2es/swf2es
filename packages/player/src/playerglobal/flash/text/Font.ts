@@ -63,7 +63,7 @@ export function fontNatives(s: Scripting): avm2.Natives {
     static enumerateFonts(_enumerateDeviceFonts: boolean): AsObject {
       const cls = s.rt.classNamed("flash.text::Font");
       const fonts: AnyFontCharacter[] = [];
-      const library = s.codeLibrary();
+      const library = s.code.codeLibrary();
       if (library) {
         for (const character of library.characters.values()) {
           if (

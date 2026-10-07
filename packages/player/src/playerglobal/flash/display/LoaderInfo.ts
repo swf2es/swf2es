@@ -85,7 +85,7 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
     // The domain its load chose (Scripting.loadDomain), or the main SWF's.
     get applicationDomain(): Value {
       factsOf(s, this);
-      return s.applicationDomainOf(this.$domain ?? s.mainDomain);
+      return s.code.applicationDomainOf(this.$domain ?? s.mainDomain);
     }
 
     get swfVersion(): number {

@@ -131,7 +131,7 @@ test("a SWF with an unused embedded sound starts without decoding it", async () 
     }),
   );
   const library = readLibrary(movie);
-  await scripting.loadSwf(movie, library);
+  await scripting.code.loadSwf(movie, library);
   assert.equal(decodes, 0);
 
   const character = library.characters.get(1);

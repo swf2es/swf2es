@@ -53,7 +53,7 @@ export function toplevelNatives(s: Scripting): avm2.Natives {
       },
     // Looked up in the domain of the code that asks, as Flash's.
     "flash.utils::getDefinitionByName": (rt) => (name: Value) =>
-      definitionNamed(rt, rt.toString(name), (q) => rt.definitionNamed(q, s.codeDomain())),
+      definitionNamed(rt, rt.toString(name), (q) => rt.definitionNamed(q, s.code.codeDomain())),
     // The alias registerClassAlias gave the value's class, which describeType writes; null for none.
     "flash.utils::getAliasName": (rt) => (v: Value) => {
       if (v === null || v === undefined) {
