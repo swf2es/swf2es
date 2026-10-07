@@ -1,10 +1,19 @@
 // Date, as avmplus' DateClass and Date: the time a Date holds, its fields
 // by the indices Date.as asks for, the setters, its strings in avmplus'
 // formats, which are not JavaScript's, and its own parser of them for
-// Date.parse and new Date(string). Local time is the host's, through
-// JavaScript's Date, as avmplus' is the OS's.
+// Date.parse and new Date(string).
 //
-// parseDate is translated from avmplus' core/DateClass.cpp, and so subject
+// The calendar is avmplus' own arithmetic, not JavaScript's Date: avmplus
+// clips only some results to the time domain, and casts years and seconds
+// to 32-bit ints, which wrap where JavaScript would give NaN. Local time is
+// avmshell's on a POSIX host: the standard offset of now, plus an hour
+// where the host's time zone says daylight saving is in effect, asked of the
+// host (here through JavaScript's Date) with the time in 32-bit seconds.
+// So no zone's history beyond its daylight saving applies, and none after
+// 2038.
+//
+// The calendar, local time and parseDate are translated from avmplus'
+// core/Date.cpp, core/DateClass.cpp and VMPI/PosixPortUtils.cpp, and so subject
 // to the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 import type { AsObject, ClassHook, Runtime, Value } from "../runtime.js";
 import type { Natives } from "./define.js";
@@ -12,6 +21,25 @@ import type { Natives } from "./define.js";
 const AS3 = "http://adobe.com/AS3/2006/builtin";
 const MONTHS = "JanFebMarAprMayJunJulAugSepOctNovDec";
 const DAYS = "SunMonTueWedThuFriSat";
+
+const MS_PER_DAY = 86400000;
+const MS_PER_HOUR = 3600000;
+const MS_PER_MINUTE = 60000;
+const MS_PER_SECOND = 1000;
+
+/** A double cast to a C int on x86: INT_MIN for NaN and anything out of range. */
+function cInt(x: number): number {
+  return x >= -2147483648 && x < 2147483648 ? Math.trunc(x) | 0 : -2147483648;
+}
+
+/** As MathUtils::toInt: ToInteger, but infinities kept. */
+function toInt(x: number): number {
+  if (Number.isNaN(x)) {
+    return 0;
+  }
+
+  return Number.isFinite(x) ? Math.trunc(x) : x;
+}
 
 /** As Date::TimeClip: NaN beyond 8.64e15 milliseconds, else an integer. */
 function timeClip(t: number): number {
@@ -22,46 +50,223 @@ function timeClip(t: number): number {
   return Math.trunc(t) + 0;
 }
 
-const pad2 = (n: number) => `${Math.floor(n / 10)}${n % 10}`;
+const MONTH_OFFSET = [
+  [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365],
+  [0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366],
+];
 
-/** As Date::toString, by its format index. */
+const day = (t: number) => Math.floor(t / MS_PER_DAY);
+
+const dayFromYear = (year: number) =>
+  365 * (year - 1970) +
+  Math.floor((year - 1969) / 4) -
+  Math.floor((year - 1901) / 100) +
+  Math.floor((year - 1601) / 400);
+
+const timeFromYear = (year: number) => MS_PER_DAY * dayFromYear(year);
+
+/** As IsLeapYear, of an int: 1 or 0, to index MONTH_OFFSET. */
+const leap = (year: number) =>
+  year % 4 !== 0 ? 0 : year % 100 !== 0 ? 1 : year % 400 !== 0 ? 0 : 1;
+
+function yearFromTime(t: number): number {
+  const d = day(t);
+  let lo = (cInt(Math.floor(t < 0 ? d / 365 : d / 366)) + 1970) | 0;
+  let hi = (cInt(Math.ceil(t < 0 ? d / 366 : d / 365)) + 1970) | 0;
+  while (lo < hi) {
+    const pivot = cInt((lo + hi) / 2);
+    const pivotTime = timeFromYear(pivot);
+    if (pivotTime <= t) {
+      if (timeFromYear((pivot + 1) | 0) > t) {
+        return pivot;
+      }
+
+      lo = (pivot + 1) | 0;
+    } else {
+      hi = (pivot - 1) | 0;
+    }
+  }
+
+  return lo;
+}
+
+const dayWithinYear = (t: number) => cInt(day(t) - dayFromYear(yearFromTime(t)));
+
+function monthFromTime(t: number): number {
+  const d = dayWithinYear(t);
+  const offsets = MONTH_OFFSET[leap(yearFromTime(t))];
+  let i = 0;
+  while (i < 11 && d >= offsets[i + 1]) {
+    i++;
+  }
+
+  return i;
+}
+
+const dateFromTime = (t: number) =>
+  dayWithinYear(t) - MONTH_OFFSET[leap(yearFromTime(t))][monthFromTime(t)] + 1;
+
+/** C's (int) of a remainder, made non-negative by adding the divisor. */
+function positive(r: number, n: number): number {
+  const i = cInt(r);
+  return i < 0 ? i + n : i;
+}
+
+const weekDay = (t: number) => positive((day(t) + 4) % 7, 7);
+const hourFromTime = (t: number) => positive(Math.floor((t + 0.5) / MS_PER_HOUR) % 24, 24);
+const minFromTime = (t: number) => positive(Math.floor(t / MS_PER_MINUTE) % 60, 60);
+const secFromTime = (t: number) => positive(Math.floor(t / MS_PER_SECOND) % 60, 60);
+const msecFromTime = (t: number) => positive(t % MS_PER_SECOND, MS_PER_SECOND);
+
+function timeWithinDay(t: number): number {
+  const r = t % MS_PER_DAY;
+  return r < 0 ? r + MS_PER_DAY : r;
+}
+
+function makeDay(year: number, month: number, date: number): number {
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(date)) {
+    return Number.NaN;
+  }
+
+  let y = toInt(year);
+  let m = toInt(month);
+  y += Math.floor(m / 12);
+  m %= 12;
+  if (m < 0) {
+    m += 12;
+  }
+
+  const iMonth = cInt(Math.floor(m));
+  if (iMonth < 0 || iMonth >= 12) {
+    return Number.NaN;
+  }
+
+  const iYear = cInt(y);
+  return dayFromYear(iYear) + MONTH_OFFSET[leap(iYear)][iMonth] + (toInt(date) - 1);
+}
+
+function makeTime(hour: number, min: number, sec: number, ms: number): number {
+  if (
+    !Number.isFinite(hour) ||
+    !Number.isFinite(min) ||
+    !Number.isFinite(sec) ||
+    !Number.isFinite(ms)
+  ) {
+    return Number.NaN;
+  }
+
+  return (
+    toInt(hour) * MS_PER_HOUR + toInt(min) * MS_PER_MINUTE + toInt(sec) * MS_PER_SECOND + toInt(ms)
+  );
+}
+
+function makeDate(d: number, time: number): number {
+  if (!Number.isFinite(d) || !Number.isFinite(time)) {
+    return Number.NaN;
+  }
+
+  return toInt(d) * MS_PER_DAY + toInt(time);
+}
+
+/** The host's offset east of UTC at a time, in milliseconds, its zone's history included. */
+const hostOffset = (ms: number) => -new Date(ms).getTimezoneOffset() * MS_PER_MINUTE;
+
+const standardOffsets = new Map<number, number>();
+
+/** The host's standard offset in a year: the lesser of January's and July's, whichever has daylight saving. */
+function standardOffset(year: number): number {
+  let offset = standardOffsets.get(year);
+  if (offset === undefined) {
+    const jan = new Date(0);
+    jan.setUTCFullYear(year, 0, 1);
+    const jul = new Date(0);
+    jul.setUTCFullYear(year, 6, 1);
+    offset = Math.min(hostOffset(jan.getTime()), hostOffset(jul.getTime()));
+    standardOffsets.set(year, offset);
+  }
+
+  return offset;
+}
+
+/** As VMPI_getLocalTimeOffset: the standard offset of now, whatever the time asked about. */
+const localTZA = () => standardOffset(new Date().getUTCFullYear());
+
+/**
+ * As VMPI_getDaylightSavingsTA: an hour where localtime_r says daylight
+ * saving is in effect, of the time in seconds in a 32-bit time_t. An offset
+ * at least half an hour past the year's standard one is daylight saving;
+ * a lesser change is the zone's own history, which avmshell does not see.
+ */
+function daylightSavingTA(t: number): number {
+  const ms = cInt(t / MS_PER_SECOND) * MS_PER_SECOND;
+  const year = new Date(ms).getUTCFullYear();
+  return hostOffset(ms) - standardOffset(year) >= 30 * MS_PER_MINUTE ? MS_PER_HOUR : 0;
+}
+
+const localTime = (t: number) => t + localTZA() + daylightSavingTA(t);
+
+/** As Date.cpp's UTC: local time to UTC, a time in the spring-forward gap an hour later. */
+function utc(t: number): number {
+  const adj = localTZA();
+  const dst = daylightSavingTA(t - adj);
+  if (dst !== 0 && daylightSavingTA(t - adj - MS_PER_HOUR) === 0) {
+    t += MS_PER_HOUR;
+  }
+
+  return t - adj - dst;
+}
+
+/** As Date::Date of fields: years below 100 are 1900's; the time is not clipped. */
+function fromFields(n: number[], local: boolean): number {
+  const year = n[0] < 100 ? n[0] + 1900 : n[0];
+  const t = makeDate(makeDay(year, n[1], n[2]), makeTime(n[3], n[4], n[5], n[6]));
+  return local ? utc(t) : t;
+}
+
+/** Format's %2: two digits, as characters from '0', whatever the value. */
+const pad2 = (n: number) => String.fromCharCode(48 + Math.trunc(n / 10), 48 + (n % 10));
+
+/** As Date::toString, by its format index; empty if the time's fields are out of range. */
 function format(t: number, index: number): string {
   if (Number.isNaN(t)) {
     return "Invalid Date";
   }
 
-  const d = new Date(t);
-  const utc = index === 6;
-  const year = utc ? d.getUTCFullYear() : d.getFullYear();
-  const month = utc ? d.getUTCMonth() : d.getMonth();
-  const date = utc ? d.getUTCDate() : d.getDate();
-  const day = utc ? d.getUTCDay() : d.getDay();
-  const hour24 = utc ? d.getUTCHours() : d.getHours();
-  const min = utc ? d.getUTCMinutes() : d.getMinutes();
-  const sec = utc ? d.getUTCSeconds() : d.getSeconds();
-  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
-  const ampm = hour24 >= 12 ? "P" : "A";
-  let delta = -d.getTimezoneOffset();
+  const time = index === 6 ? t : localTime(t);
+  const year = yearFromTime(time);
+  const month = monthFromTime(time);
+  const dow = weekDay(time);
+  if (month < 0 || month >= 12 || dow < 0 || dow >= 7) {
+    return "";
+  }
+
+  let delta = cInt((time - t) / MS_PER_MINUTE);
   const sign = delta < 0 ? "-" : "+";
   delta = Math.abs(delta);
-  const zone = `GMT${sign}${pad2(Math.floor(delta / 60))}${pad2(delta % 60)}`;
-  const dow = DAYS.substr(day * 3, 3);
+  const zone = `GMT${sign}${pad2(Math.trunc(delta / 60))}${pad2(delta % 60)}`;
+  const date = dateFromTime(time);
+  const hour24 = hourFromTime(time);
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  const ampm = hour24 >= 12 ? "P" : "A";
+  const min = minFromTime(time);
+  const sec = secFromTime(time);
+  const dayName = DAYS.substr(dow * 3, 3);
   const mon = MONTHS.substr(month * 3, 3);
-  const time = `${pad2(hour24)}:${pad2(min)}:${pad2(sec)}`;
+  const clock = `${pad2(hour24)}:${pad2(min)}:${pad2(sec)}`;
   switch (index) {
     case 0:
-      return `${dow} ${mon} ${date} ${time} ${zone} ${year}`;
+      return `${dayName} ${mon} ${date} ${clock} ${zone} ${year}`;
     case 1:
     case 4:
-      return `${dow} ${mon} ${date} ${year}`;
+      return `${dayName} ${mon} ${date} ${year}`;
     case 2:
-      return `${time} ${zone}`;
+      return `${clock} ${zone}`;
     case 3:
-      return `${dow} ${mon} ${date} ${year} ${pad2(hour12)}:${pad2(min)}:${pad2(sec)} ${ampm}M`;
+      return `${dayName} ${mon} ${date} ${year} ${pad2(hour12)}:${pad2(min)}:${pad2(sec)} ${ampm}M`;
     case 5:
       return `${pad2(hour12)}:${pad2(min)}:${pad2(sec)} ${ampm}M`;
     default:
-      return `${dow} ${mon} ${date} ${time} ${year} UTC`;
+      return `${dayName} ${mon} ${date} ${clock} ${year} UTC`;
   }
 }
 
@@ -71,45 +276,75 @@ function field(t: number, index: number): number {
     return Number.NaN;
   }
 
-  const d = new Date(t);
-  switch (index) {
-    case 0:
-      return d.getUTCFullYear();
-    case 1:
-      return d.getUTCMonth();
-    case 2:
-      return d.getUTCDate();
-    case 3:
-      return d.getUTCDay();
-    case 4:
-      return d.getUTCHours();
-    case 5:
-      return d.getUTCMinutes();
-    case 6:
-      return d.getUTCSeconds();
-    case 7:
-      return d.getUTCMilliseconds();
-    case 8:
-      return d.getFullYear();
-    case 9:
-      return d.getMonth();
-    case 10:
-      return d.getDate();
-    case 11:
-      return d.getDay();
-    case 12:
-      return d.getHours();
-    case 13:
-      return d.getMinutes();
-    case 14:
-      return d.getSeconds();
-    case 15:
-      return d.getMilliseconds();
-    case 16:
-      return d.getTimezoneOffset();
-    default:
-      return t;
+  if (index === 16) {
+    return (t - localTime(t)) / MS_PER_MINUTE;
   }
+
+  if (index >= 17) {
+    return t;
+  }
+
+  const time = index >= 8 ? localTime(t) : t;
+  switch (index & 7) {
+    case 0:
+      return yearFromTime(time);
+    case 1:
+      return monthFromTime(time);
+    case 2:
+      return dateFromTime(time);
+    case 3:
+      return weekDay(time);
+    case 4:
+      return hourFromTime(time);
+    case 5:
+      return minFromTime(time);
+    case 6:
+      return secFromTime(time);
+    default:
+      return msecFromTime(time);
+  }
+}
+
+/**
+ * As DateObject::_set: the fields from setter `index`'s on, NaN for those
+ * not given; a NaN given makes the time NaN. Indices 1 to 3 set the date,
+ * 4 to 7 the time, negative ones in UTC.
+ */
+function set(rt: Runtime, time: number, index: number, args: Value[]): number {
+  const n = [Number.NaN, Number.NaN, Number.NaN, Number.NaN, Number.NaN, Number.NaN, Number.NaN];
+  const local = index > 0;
+  const first = Math.abs(index) - 1;
+  for (let i = 0; i < args.length && first + i < 7; i++) {
+    n[first + i] = rt.toNumber(args[i]);
+    if (Number.isNaN(n[first + i])) {
+      return Number.NaN;
+    }
+  }
+
+  let t = local ? localTime(time) : time;
+  if (first < 3) {
+    // As Date::setDate: a NaN time stays NaN unless a year is set, from 0.
+    if (Number.isNaN(time)) {
+      if (Number.isNaN(n[0])) {
+        return time;
+      }
+
+      t = 0;
+    }
+
+    const year = Number.isNaN(n[0]) ? yearFromTime(t) : n[0];
+    const month = Number.isNaN(n[1]) ? monthFromTime(t) : n[1];
+    const date = Number.isNaN(n[2]) ? dateFromTime(t) : n[2];
+    t = makeDate(makeDay(year, month, date), timeWithinDay(t));
+  } else {
+    const hour = Number.isNaN(n[3]) ? hourFromTime(t) : n[3];
+    const min = Number.isNaN(n[4]) ? minFromTime(t) : n[4];
+    const sec = Number.isNaN(n[5]) ? secFromTime(t) : n[5];
+    const ms = Number.isNaN(n[6]) ? msecFromTime(t) : n[6];
+    t = makeDate(day(t), makeTime(hour, min, sec, ms));
+  }
+
+  return timeClip(local ? utc(t) : t);
 }
 
 const timeOf = (o: AsObject): number => o.$time ?? Number.NaN;
@@ -284,14 +519,15 @@ export function parseDate(s: string): number {
   const min = Math.max(f.min, 0);
   const hour = Math.max(f.hour, 0);
   // No zone: local time. Else UTC, and the offset east of it in minutes.
+  const fields = [f.year, f.month, f.day, hour, min, sec, 0];
   if (f.zone === -1) {
-    return timeClip(new Date(f.year, f.month, f.day, hour, min, sec, 0).getTime());
+    return fromFields(fields, true);
   }
 
-  return timeClip(Date.UTC(f.year, f.month, f.day, hour, min, sec, 0) + f.zone * 60000);
+  return fromFields(fields, false) + f.zone * 60000;
 }
 
-/** As DateClass::construct: now, a time, a string, a Date, or local fields; years 0 to 99 are 1900's. */
+/** As DateClass::construct: now, a time, a string, a Date, or local fields. */
 function construct(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
   const o = cls.$it.instance();
   if (args.length === 0) {
@@ -302,15 +538,17 @@ function construct(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
       o.$time = v.$time;
     } else {
       // A string is parsed; anything else is a number, as AvmCore::number
-      // makes it, an object's string from valueOf too.
-      o.$time = typeof v === "string" ? parseDate(v) : timeClip(rt.toNumber(v));
+      // makes it, an object's string from valueOf too. Either is clipped,
+      // though Date.parse leaves its result unclipped.
+      o.$time = timeClip(typeof v === "string" ? parseDate(v) : rt.toNumber(v));
     }
   } else {
-    const n = args.map((a) => rt.toNumber(a));
-    const year = n[0] >= 0 && n[0] <= 99 ? 1900 + Math.trunc(n[0]) : n[0];
-    o.$time = timeClip(
-      new Date(year, n[1], n[2] ?? 1, n[3] ?? 0, n[4] ?? 0, n[5] ?? 0, n[6] ?? 0).getTime(),
-    );
+    const n = [0, 0, 1, 0, 0, 0, 0];
+    for (let i = 0; i < args.length && i < 7; i++) {
+      n[i] = rt.toNumber(args[i]);
+    }
+
+    o.$time = fromFields(n, true);
   }
 
   return o;
@@ -335,8 +573,9 @@ export function dateNatives(): Natives {
       (rt) =>
       (...args: Value[]) => {
         const n = args.map((a) => rt.toNumber(a));
-        return timeClip(
-          Date.UTC(n[0], n[1], n[2] ?? 1, n[3] ?? 0, n[4] ?? 0, n[5] ?? 0, n[6] ?? 0),
+        return fromFields(
+          [n[0], n[1], n[2] ?? 1, n[3] ?? 0, n[4] ?? 0, n[5] ?? 0, n[6] ?? 0],
+          false,
         );
       },
     "Date#Date::_get": () =>
@@ -392,35 +631,19 @@ export function dateNatives(): Natives {
       };
   }
 
-  // The setters, as ECMA-262's: JavaScript's, on the time the Date holds.
-  for (const name of [
-    "FullYear",
-    "Month",
-    "Date",
-    "Hours",
-    "Minutes",
-    "Seconds",
-    "Milliseconds",
-    "UTCFullYear",
-    "UTCMonth",
-    "UTCDate",
-    "UTCHours",
-    "UTCMinutes",
-    "UTCSeconds",
-    "UTCMilliseconds",
-  ]) {
-    natives[`Date#Date::_set${name}`] = (rt) =>
-      function (this: AsObject, ...args: Value[]) {
-        const d = new Date(timeOf(this));
-        const set = (d as unknown as Record<string, (...n: number[]) => number>)[`set${name}`];
-        this.$time = timeClip(
-          set.apply(
-            d,
-            args.map((a) => rt.toNumber(a)),
-          ),
-        );
-        return this.$time;
-      };
+  // The setters, by DateObject's indices: 1 to 7 local, negated in UTC.
+  const setters = ["FullYear", "Month", "Date", "Hours", "Minutes", "Seconds", "Milliseconds"];
+  for (let i = 0; i < setters.length; i++) {
+    for (const [prefix, index] of [
+      ["", i + 1],
+      ["UTC", -(i + 1)],
+    ] as const) {
+      natives[`Date#Date::_set${prefix}${setters[i]}`] = (rt) =>
+        function (this: AsObject, ...args: Value[]) {
+          this.$time = set(rt, timeOf(this), index, args);
+          return this.$time;
+        };
+    }
   }
 
   return natives;

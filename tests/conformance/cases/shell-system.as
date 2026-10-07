@@ -16,3 +16,12 @@ try {
 } catch (e:Error) {
   trace(e, e.errorID);
 }
+// The memory System reports, which differs from run to run in avmshell.
+trace(System.totalMemory > 0, System.freeMemory >= 0, System.freeMemory <= System.totalMemory);
+trace(System.privateMemory > 0);
+// exec runs nothing without a command.
+try {
+  System.exec(null);
+} catch (e:Error) {
+  trace(e, e.errorID);
+}
