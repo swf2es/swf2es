@@ -777,8 +777,16 @@ export class Runtime {
    * The domain of each loaded module's code, by the script a stack's frame
    * names it with (see codeDomain); found from the stacks its loads took,
    * which wait in `unlocated` until a domain other than the root exists.
+   * Weakly: a module's code keeps its domain, through its Abc, for as long
+   * as it can run, and a domain no code is left of is let go, an entry
+   * dropped with it.
    */
-  private readonly moduleDomains = new Map<string, Domain>();
+  private readonly moduleDomains = new Map<string, WeakRef<Domain>>();
+  private readonly moduleDomainGone = new FinalizationRegistry<string>((at) => {
+    if (!this.moduleDomains.get(at)?.deref()) {
+      this.moduleDomains.delete(at);
+    }
+  });
   private readonly unlocated: [Error, Domain][] = [];
   private loadingBuiltin = false;
   private children = false;
@@ -890,23 +898,33 @@ export class Runtime {
       return this.root;
     }
 
-    for (const [error, domain] of this.unlocated) {
-      // Its first frame is abc's own, its second the module's factory.
-      const at = frameScripts(error.stack)[1];
-      if (at) {
-        this.moduleDomains.set(at, domain);
-      }
-    }
-
-    this.unlocated.length = 0;
+    this.locate();
     for (const at of frameScripts(new Error().stack)) {
-      const domain = this.moduleDomains.get(at);
+      const domain = this.moduleDomains.get(at)?.deref();
       if (domain) {
         return domain;
       }
     }
 
     return this.root;
+  }
+
+  /**
+   * The scripts of the modules loaded since last asked, by the stacks their
+   * loads took. Their stacks reach the modules' code, so they are not kept
+   * past the load once there are domains to tell apart.
+   */
+  private locate(): void {
+    for (const [error, domain] of this.unlocated) {
+      // Its first frame is abc's own, its second the module's factory.
+      const at = frameScripts(error.stack)[1];
+      if (at) {
+        this.moduleDomains.set(at, new WeakRef(domain));
+        this.moduleDomainGone.register(domain, at);
+      }
+    }
+
+    this.unlocated.length = 0;
   }
 
   /**
@@ -924,6 +942,9 @@ export class Runtime {
     } finally {
       this.loading = previous;
       this.loadingBuiltin = wasBuiltin;
+      if (this.children) {
+        this.locate();
+      }
     }
   }
 

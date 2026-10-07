@@ -1223,7 +1223,20 @@ A module is loaded as the factory a strict `Function` returns, not
 imported: a document keeps every module it imports while it lives, so the
 code of SWFs long unloaded stayed (some 4.5 MB a player made again, its
 libraries' code and all), where a function's code goes once nothing
-refers to it.
+refers to it. What the player keeps of a loaded SWF beside the SWF
+itself, the domain and origin of each module's script for the stack,
+its symbols and its fonts for those registered later, it keeps
+weakly, so that the SWF, its code included, goes with its last object
+(some 300 KB a load of a small SWF stayed otherwise).
+That a module's code keeps its Abc has a limit: emitted code reaches `A`
+only for `newclass` and `newactivation`, so a module with neither keeps
+it only through its domain's globals, its scripts' entries, and not even
+those if every name it defines was defined in the chain before; code of
+such a module may then still run after its Abc went, and codeUrl and
+codeLibrary fall back to the main SWF's. Lazy compilation, whose
+entries are built apart from their module, will need this again. The
+symbols bound to names nothing defined (`Symbols.unbound`) are still
+kept for good, their libraries with them.
 `SymbolClass`
 then binds character ids to classes by qualified name through the
 runtime's name resolution; id 0 is the document class, constructed on the
