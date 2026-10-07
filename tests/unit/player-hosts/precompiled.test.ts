@@ -16,6 +16,7 @@ import { containerEngine } from "../../../oracle/oracle.ts";
 import type { CachedModule, ModuleCache } from "../../../packages/player/dist/hosts.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
+import { bare } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compileScripts } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";
@@ -54,15 +55,18 @@ async function counted(identity?: string): Promise<{ codegen: Codegen; compiled:
 }
 
 /** Play `swf`'s first frames with `cache`: what it traced and how many modules compiled. */
-async function play(swf: Uint8Array, cache: ModuleCache | null, identity?: string) {
+async function play(swf: Uint8Array, cache: ModuleCache | null, identity?: string, frames = 2) {
   const { codegen, compiled } = await counted(identity);
   const lines: string[] = [];
   const s = new Scripting(codegen, { print: (line) => lines.push(line), moduleCache: cache });
   await s.loadLibraries(libraryAbcs(`${out}libraries/`));
   const player = new Player(swf, s);
   await player.start();
-  await s.settled();
-  player.tick();
+  for (let frame = 2; frame <= frames; frame++) {
+    await s.settled();
+    player.tick();
+  }
+
   return { lines, compiled: compiled() };
 }
 
@@ -139,19 +143,24 @@ function compiled() {
       w.end(),
     ],
   });
+  built = { swf, ...ahead("aot", swf) };
+  return built;
+}
+
+/** `swf` compiled ahead of time by the command, with the libraries' modules, into `out`/`name`/. */
+function ahead(name: string, swf: Uint8Array): { dir: string; manifest: URL } {
   libraryAbcs(`${out}libraries/`);
   mkdirSync(out, { recursive: true });
-  writeFileSync(`${out}aot.swf`, swf);
-  const dir = `${out}aot/`;
+  writeFileSync(`${out}${name}.swf`, swf);
+  const dir = `${out}${name}/`;
   const libs = ["builtin", "playerglobal"].flatMap((n) => ["--lib", `${out}libraries/${n}.abc`]);
   const r = spawnSync(
     process.execPath,
-    [cli, `${out}aot.swf`, "-o", dir, "--emit-libraries", "-q", ...libs],
+    [cli, `${out}${name}.swf`, "-o", dir, "--emit-libraries", "-q", ...libs],
     { encoding: "utf8" },
   );
   assert.equal(r.status, 0, r.stderr);
-  built = { swf, dir, manifest: pathToFileURL(`${dir}manifest.json`) };
-  return built;
+  return { dir, manifest: pathToFileURL(`${dir}manifest.json`) };
 }
 
 const readText = (url: URL) => readFile(fileURLToPath(url), "utf8");
@@ -239,4 +248,66 @@ test("chained, precompiled modules come first, and what they lack is cached", {
   assert.equal((await play(swf, chain())).compiled, 0);
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(store.size, 4);
+});
+
+test("a module imported into two sibling domains is two modules, each its domain's", {
+  skip,
+}, async () => {
+  // A child compiled as a main movie, loaded twice into new children of
+  // the root, as the main movie's domain is: each load's key is the main
+  // movie's, so both are imported, and each must find its own class.
+  const child = `package {
+    import flash.display.Sprite;
+    import flash.events.Event;
+    import flash.system.ApplicationDomain;
+    public class AotChild extends Sprite {
+      private var frames:int = 0;
+      public function AotChild() { addEventListener(Event.ENTER_FRAME, check); }
+      private function check(e:Event):void {
+        if (++frames == 3) {
+          trace("child", ApplicationDomain.currentDomain.getDefinition("AotChild") === AotChild);
+        }
+      }
+    }
+  }`;
+  const childAbc = compileScripts([{ name: "AotChild", source: child }], `${out}scripts`).get(
+    "AotChild",
+  ) as Uint8Array;
+  const childSwf = bare(childAbc, 1, "AotChild");
+  const { manifest } = ahead("child", childSwf);
+  const decode = readFileSync(
+    new URL("../../player/scripts/Loads.as.template", import.meta.url),
+    "utf8",
+  );
+  const decoder = decode.slice(decode.indexOf("    /** Base64"), decode.lastIndexOf("  }\n}"));
+  const parent = `package {
+    import flash.display.Loader;
+    import flash.display.Sprite;
+    import flash.system.ApplicationDomain;
+    import flash.system.LoaderContext;
+    import flash.utils.ByteArray;
+    public class AotParent extends Sprite {
+      public function AotParent() {
+        for (var i:int = 0; i < 2; i++) {
+          var loader:Loader = new Loader();
+          loader.loadBytes(decode("${Buffer.from(childSwf).toString("base64")}"),
+            new LoaderContext(false, new ApplicationDomain(null)));
+          addChild(loader);
+        }
+      }
+${decoder}
+    }
+  }`;
+  const parentAbc = compileScripts([{ name: "AotParent", source: parent }], `${out}scripts`).get(
+    "AotParent",
+  ) as Uint8Array;
+  const swf = bare(parentAbc, 1, "AotParent");
+
+  const expected = await play(swf, null, undefined, 8);
+  assert.deepEqual(expected.lines, ["child true", "child true"]);
+  const cache = precompiledModules(manifest, { read: readText, importModules: true });
+  const imported = await play(swf, cache, undefined, 8);
+  // The parent's module alone compiles.
+  assert.equal(imported.compiled, 1);
+  assert.deepEqual(imported.lines, expected.lines);
 });

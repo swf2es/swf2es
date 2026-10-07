@@ -581,9 +581,14 @@ what later ABCs, such as a child SWF's loaded into the same domain,
 compile against, so the player replays each module's log in place of its
 compile, as it does a cached module's, and the key, which names the
 domain's context, finds a module only where its compile would have had
-that context: the SWF loaded as the main movie, after the same libraries.
-A child SWF loaded later is keyed in its own position and compiles, as do
-the libraries without `--emit-libraries`.
+that context: the SWF loaded after the same libraries into a domain that
+sees nothing else, a new child of the root. That is the main movie's
+position, and also that of a SWF a `Loader` loads with a `LoaderContext`
+whose domain is `new ApplicationDomain(null)`, a sibling of the main
+movie's: the same SWF compiled ahead of time hits there too, each time
+it is loaded so. Loaded into the main movie's domain or under it, it is
+keyed in another context and compiles, as do the libraries without
+`--emit-libraries`.
 
 ### The runtime and the standard library
 
@@ -1936,7 +1941,7 @@ with the module and the log beside it, read by the host's `read` or
 fetched; `put` and `delete` do nothing, and its `minBytes` is 0, so that
 no module of a SWF compiled ahead of time compiles. The command keys each
 module with the player's own `moduleKey`, so a key the manifest lacks,
-another compiler's (keys name its identity), a SWF in another position
+another compiler's (keys name its identity), a SWF in another context
 or after other libraries, a manifest of another version or none, is a
 miss, and the player compiles; and what the player does with a bad entry
 of any cache holds for these, a missing or truncated file a miss, a
@@ -1959,9 +1964,12 @@ and a compile, and uses its URL, as the frames of its code name it, for
 `Runtime.codeDomain` and `codeUrl` in place of a sourceURL of its own.
 What a document imports it keeps for as long as it lives, unlike a
 `Function`'s code, which goes with the SWF, so this suits the main movie's
-modules, which the page keeps anyway; and the same module imported twice
-is one module, its function called with each runtime, and its code named
-by one URL in both.
+modules, which the page keeps anyway. A document has one module per URL,
+and the runtime tells modules' domains apart by the URL their frames
+name, so a player that imports a URL again, as a SWF loaded twice into
+sibling domains, both keyed as the main movie, imports it with a
+fragment of its own (`#swf2es-<n>`), which the engine takes for another
+module and its frames name.
 
 Measured in headless Chrome on the SWF above, each run a new browser on
 one profile, so that IndexedDB and the HTTP cache persist and V8's code
@@ -1981,16 +1989,17 @@ A page whose Content-Security-Policy has no `'unsafe-eval'` refuses
 `new Function`, so the player can run there only modules it imports:
 those compiled ahead of time, given by `precompiledModules` with
 `importModules`, the libraries' among them (`--emit-libraries`), from the
-page's origin or another its `script-src` allows. Codegen still runs:
+page's origin or another its `script-src` allows, which must also answer
+with CORS headers, as a module script from another origin is fetched
+with CORS. Codegen still runs:
 the player adds each ABC to it, keys each module by its context and
 replays each log there, so that the domain is as compiling would have
 left it, which no host can skip, and `codegen.wasm` needs
 `'wasm-unsafe-eval'` to be compiled. A policy for such a page is
 `script-src 'self' 'wasm-unsafe-eval'`, without `'unsafe-eval'`. Any
 module the cache lacks is compiled and its evaluation refused
-(`EvalError`), the load failing: a child SWF loaded later, which is keyed
-in a position the command did not compile for, or a module of another
-compiler's. Pixi too builds code with `new Function` unless its
+(`EvalError`), the load failing: a child SWF loaded into a context the
+command did not compile for, or a module of another compiler's. Pixi too builds code with `new Function` unless its
 `pixi.js/unsafe-eval` is imported, which a host drawing on such a page
 imports with Pixi (`tests/player/precompiled.ts`, whose page installs
 Pixi's global build of it into the bundle it draws with, plays a SWF so

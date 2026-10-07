@@ -111,6 +111,25 @@ export class Code {
   /** Modules loaded, each under a script name of its own for Runtime.codeDomain. */
   private modules = 0;
   /**
+   * The URLs modules were imported from. A document has one module per
+   * URL, so the same module loaded into another domain, as a SWF compiled
+   * ahead of time loaded again into a sibling of the main SWF's domain,
+   * whose context is the same, is imported from a URL of its own, by a
+   * fragment, lest its frames name the first's script and so its domain.
+   */
+  private readonly importedUrls = new Set<string>();
+
+  /** `url` absolute, as frames name it, and not yet imported by this player. */
+  private uniqueUrl(url: string): string {
+    const unique = new URL(url);
+    if (this.importedUrls.has(unique.href)) {
+      unique.hash = `swf2es-${this.importedUrls.size}`;
+    }
+
+    this.importedUrls.add(unique.href);
+    return unique.href;
+  }
+  /**
    * The SWF each module's code came from, its URL and library, for codeUrl
    * and codeLibrary: by its script name, the module's Abc, and that.
    * Weakly: a module's code keeps its Abc for as long as it can run, and
@@ -389,7 +408,7 @@ export class Code {
         const revision = this.s.codegen.revision();
         const asked: string = key;
         try {
-          entry = await read(cache, await sha256Text(asked));
+          entry = await read(cache, await sha256Text(asked), (url) => this.uniqueUrl(url));
         } catch {
           entry = undefined;
         }
@@ -570,10 +589,11 @@ interface Imported {
   url: string;
 }
 
-/** What `cache` holds under `key`, if it is whole, its module imported first if it has a URL. */
+/** What `cache` holds under `key`, if it is whole, its module imported first if it has a URL, from `unique(url)`. */
 async function read(
   cache: ModuleCache,
   key: string,
+  unique: (url: string) => string,
 ): Promise<(CachedModule & { imported?: Imported }) | undefined> {
   const entry = await cache.get(key);
   if (entry === undefined || !whole(entry)) {
@@ -584,9 +604,8 @@ async function read(
     return entry;
   }
 
-  // Absolute, as the frames name it: a relative one would be the player's module's.
-  const url = new URL(entry.url).href;
-  const factory = (await import(/* @vite-ignore */ url)).default;
+  const url = unique(entry.url);
+  const factory = (await import(/* @vite-ignore */ /* webpackIgnore: true */ url)).default;
   return typeof factory === "function" ? { ...entry, imported: { factory, url } } : undefined;
 }
 

@@ -105,8 +105,9 @@ input or library, or an output it cannot write.
 
 A page serves the output and gives it to the player as a module cache,
 so that what it holds is not compiled again; it is found only for the
-SWF loaded as the main movie after the same libraries, by the same
-`codegen.wasm`, and anything else compiles as usual. Chained before an
+SWF loaded after the same libraries, by the same `codegen.wasm`, into a
+domain that sees nothing else: as the main movie, or by a `Loader` into
+`new ApplicationDomain(null)`. Anything else compiles as usual. Chained before an
 IndexedDB cache, what the output lacks is kept across page loads:
 
 ```ts
@@ -125,8 +126,9 @@ With `--emit-libraries` and `precompiledModules(url, { importModules: true })`,
 every module is imported from its URL rather than evaluated, so the page
 needs no `'unsafe-eval'` in its Content-Security-Policy:
 `script-src 'self' 'wasm-unsafe-eval'` is enough, as the player still
-runs `codegen.wasm` to replay each module's log. Pixi then needs
-`import "pixi.js/unsafe-eval"` too.
+runs `codegen.wasm` to replay each module's log. Modules served from
+another origin need that origin in `script-src` and CORS headers. Pixi
+then needs `import "pixi.js/unsafe-eval"` too.
 
 ## Development
 
