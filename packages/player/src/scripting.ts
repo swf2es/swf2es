@@ -169,6 +169,8 @@ export class Scripting {
   drawer: Drawer | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
+  /** Where every relative URL the SWFs ask for resolves, where the host gives one; else against the SWF's. */
+  readonly base: string | null;
   /** Where local SharedObjects are kept (flash/net/SharedObject.ts). */
   readonly storage: SharedObjectStorage;
   /** What Capabilities reports of the system (flash/system/Capabilities.ts). */
@@ -219,6 +221,12 @@ export class Scripting {
     options: avm2.RuntimeOptions & {
       fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
+      /**
+       * Where the SWFs' relative URLs resolve, as a page's `base` parameter
+       * has Flash resolve them all; against the URL of the SWF that asks
+       * by default.
+       */
+      base?: string;
       /**
        * The main SWF's flashvars, as a page's FlashVars give them: its
        * loaderInfo.parameters, after its URL's query, whose names they
@@ -302,6 +310,7 @@ export class Scripting {
       ? (request, signal) => fetch(request, AbortSignal.any([signal, this.stopped.signal]))
       : null;
     this.url = options.url ?? this.url;
+    this.base = options.base ?? null;
     this.loads = new Loads(this, options);
     this.storage = options.storage ?? defaultStorage();
     this.platform = { ...platformCapabilities(), ...options.platform };

@@ -429,7 +429,7 @@ export class Loads {
   /** Snapshot a URLRequest at load time, before scripts can change its data or headers. */
   private fetchRequest(request: AsObject | string, base: string, as?: string): FetchRequest {
     if (typeof request === "string") {
-      return { url: resolve(base, request), method: "GET", headers: [], body: null };
+      return { url: resolve(this.s.base ?? base, request), method: "GET", headers: [], body: null };
     }
 
     let url = String(request?.$url ?? "");
@@ -471,13 +471,15 @@ export class Loads {
       ]);
     }
 
-    return { url: resolve(base, url), method, headers, body };
+    return { url: resolve(this.s.base ?? base, url), method, headers, body };
   }
 
   /** The text a failed stream reports, using Flash Player's message and the resolved URL. */
   streamError(url: string, local = false): string {
     const text = this.errorText(2032);
-    return local ? text.replace(/\.$/, "") : `${text} URL: ${resolve(this.s.url, url)}`;
+    return local
+      ? text.replace(/\.$/, "")
+      : `${text} URL: ${resolve(this.s.base ?? this.s.url, url)}`;
   }
 
   /**
