@@ -1,10 +1,9 @@
 // Browser audio behind a small host boundary. A player can run without an
 // audio device, as the trace tests do, and an embedding page may supply one.
 // ADPCM and the blocks of a timeline's stream become a sound the host
-// decodes as it decodes any other: PCM, or MP3 frames back to back, which
-// it decodes at their own rate, as Flash does, and plays resampled.
+// decodes as it decodes any other: PCM, or MP3 frames back to back.
 import type { Sound, SoundStreamBlock, SoundStreamHead } from "@swf2es/format";
-import { type Mp3Frames, mp3Frames } from "./mp3.js";
+import { mp3Bytes, mp3Frames } from "./mp3.js";
 
 export interface SoundMix {
   volume: number;
@@ -45,14 +44,20 @@ export interface PlayShape {
 
 export interface DecodedSound {
   durationMs: number;
-  /** Its samples at its own rate, a channel each, as Sound.extract reads an MP3's; a host that cannot give them leaves it out. */
-  readonly samples?: { rate: number; channels: Float32Array[] };
   /** Play from `startMs`, where every loop starts again, `loops` times (0 and 1 once). */
   play(startMs: number, loops: number, mix: SoundMix, shape?: PlayShape): PlayingSound | null;
 }
 
+/** A sound's samples at its own rate, a channel each. */
+export interface ExtractedSamples {
+  rate: number;
+  channels: Float32Array[];
+}
+
 export interface AudioHost {
   decode(source: Sound | Uint8Array): Promise<DecodedSound>;
+  /** MP3 bytes' samples as Flash's decoder gives them, for Sound.extract; a host that cannot leaves it out. */
+  extractSamples?(bytes: Uint8Array): Promise<ExtractedSamples>;
 }
 
 /** The browser's decoder handles MP3; SWF's two uncompressed forms need no codec. */
@@ -65,25 +70,14 @@ export function browserAudioHost(): AudioHost | null {
   let context: AudioContext | null = null;
   const getContext = () => (context ??= new Context());
   return {
+    extractSamples: decodeForExtract,
     async decode(given) {
       const ctx = getContext();
       const source = given instanceof Uint8Array || given.format !== 1 ? given : adpcmSound(given);
       let buffer: AudioBuffer;
-      let samples: DecodedSound["samples"];
       if (source instanceof Uint8Array || source.format === 2) {
         const data = source instanceof Uint8Array ? source : source.data;
-        const mp3 = mp3Frames(data);
-        if (mp3) {
-          buffer = await decodeMp3(data, mp3);
-          samples = {
-            rate: buffer.sampleRate,
-            channels: Array.from({ length: buffer.numberOfChannels }, (_, i) =>
-              buffer.getChannelData(i),
-            ),
-          };
-        } else {
-          buffer = await ctx.decodeAudioData(data.slice().buffer);
-        }
+        buffer = await ctx.decodeAudioData(data.slice().buffer);
       } else if (source.format === 0 || source.format === 3) {
         buffer = ctx.createBuffer(source.channels, source.sampleCount, source.sampleRate);
         const view = new DataView(
@@ -118,7 +112,6 @@ export function browserAudioHost(): AudioHost | null {
 
       return {
         durationMs: buffer.duration * 1000,
-        samples,
         play(startMs, loops, mix, shape) {
           const offset = Math.max(0, startMs / 1000);
           const end = Math.min(buffer.duration, (shape?.endMs ?? Infinity) / 1000);
@@ -248,32 +241,37 @@ export function browserAudioHost(): AudioHost | null {
 }
 
 /**
- * MP3 frames decoded as Flash decodes them: at their own rate, whole
- * frames only, and a Xing, Info or VBRI header a frame of silence, kept out
- * of the browser's sight so that it trims nothing by it.
+ * MP3 bytes decoded as Flash decodes them, for Sound.extract alone: at
+ * their own rate, their whole frames only, and a Xing, Info or VBRI header
+ * a frame of silence, kept out of the browser's sight so that it trims
+ * nothing by it. Playback keeps the browser's decode of the whole file at
+ * the device's rate, which resamples better than a buffer played at
+ * another rate. Bytes it cannot make out as MP3, or whose frames it cannot
+ * decode alone, are decoded whole.
  */
-async function decodeMp3(data: Uint8Array, mp3: Mp3Frames): Promise<AudioBuffer> {
-  const [from, to] = mp3.header ?? [mp3.start, mp3.start];
-  const frames = new Uint8Array(mp3.end - mp3.start - (to - from));
-  frames.set(data.subarray(mp3.start, from));
-  frames.set(data.subarray(to, mp3.end), from - mp3.start);
-  const offline = new OfflineAudioContext(mp3.channels, 1, mp3.rate);
-  const decoded = await offline.decodeAudioData(frames.buffer);
-  if (!mp3.header) {
-    return decoded;
+async function decodeForExtract(given: Uint8Array): Promise<ExtractedSamples> {
+  // A copy: the bytes may grow under it while it waits.
+  const data = given.slice();
+  const mp3 = mp3Frames(data);
+  let buffer: AudioBuffer | null = null;
+  let silence = 0;
+  if (mp3) {
+    const offline = new OfflineAudioContext(mp3.channels, 1, mp3.rate);
+    try {
+      buffer = await offline.decodeAudioData(mp3Bytes(data, mp3).buffer);
+      silence = mp3.header ? mp3.samplesPerFrame : 0;
+    } catch {
+      buffer = null;
+    }
   }
 
-  const silence = mp3.samplesPerFrame;
-  const buffer = offline.createBuffer(
-    decoded.numberOfChannels,
-    decoded.length + silence,
-    decoded.sampleRate,
-  );
-  for (let i = 0; i < decoded.numberOfChannels; i++) {
-    buffer.getChannelData(i).set(decoded.getChannelData(i), silence);
-  }
-
-  return buffer;
+  buffer ??= await new OfflineAudioContext(2, 1, 44100).decodeAudioData(data.buffer);
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, i) => {
+    const channel = new Float32Array(buffer.length + silence);
+    channel.set(buffer.getChannelData(i), silence);
+    return channel;
+  });
+  return { rate: buffer.sampleRate, channels };
 }
 
 /**

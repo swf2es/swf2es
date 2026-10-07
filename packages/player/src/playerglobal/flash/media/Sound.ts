@@ -6,7 +6,7 @@
 import type { Sound } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import type { SoundCharacter } from "../../../display/timeline.js";
-import type { DecodedSound, SoundMix } from "../../../media/audio.js";
+import type { ExtractedSamples, SoundMix } from "../../../media/audio.js";
 import {
   EXTRACT_RATE,
   type ExtractSource,
@@ -37,6 +37,13 @@ type Value = avm2.Value;
 
 /** An uncompressed or ADPCM DefineSound's samples, decoded once for extract; null for another format. */
 const embeddedSamples = new WeakMap<SoundCharacter, Float32Array[] | null>();
+
+/**
+ * An MP3's samples as Flash decodes them, by its DefineSound or by the
+ * Sound it was loaded into: decoded the first time a script extracts
+ * them, apart from the decode it plays, and kept for the extracts after.
+ */
+const mp3Decodes = new WeakMap<object, { samples: ExtractedSamples | null }>();
 
 /** 44.1 kHz samples as an uncompressed 16-bit DefineSound, for the host to play. */
 function pcmSound(channels: Float32Array[]): Sound {
@@ -78,7 +85,6 @@ function stateOf(o: AsObject): SoundState {
     generation: 0,
     abort: null,
     clip: null,
-    decoded: null,
     compressed: false,
     pcm: null,
     extracted: 0,
@@ -191,54 +197,46 @@ export function soundNatives(s: Scripting): avm2.Natives {
     }
 
     const character = sound.character;
-    let decoded: DecodedSound | null = sound.decoded;
-    let skip = 0;
-    if (character) {
-      const definition = character.definition;
-      if (definition.format !== 2) {
-        let channels = embeddedSamples.get(character);
-        if (channels === undefined) {
-          channels = soundSamples(definition);
-          embeddedSamples.set(character, channels);
-        }
-
-        return channels ? { rate: definition.sampleRate, channels, skip: 0, whole: true } : null;
+    const definition = character?.definition;
+    if (character && definition && definition.format !== 2) {
+      let channels = embeddedSamples.get(character);
+      if (channels === undefined) {
+        channels = soundSamples(definition);
+        embeddedSamples.set(character, channels);
       }
 
-      decoded = s.symbols.decodedSound(character);
-      skip = Math.max(0, definition.seekSamples);
-      if (!decoded) {
-        const task = s.symbols.soundClip(character);
-        if (task) {
-          s.loads.trackRequest(
-            task.then(
-              () => {},
-              () => {},
-            ),
-          );
-        }
+      return channels ? { rate: definition.sampleRate, channels, skip: 0, whole: true } : null;
+    }
+
+    const key = character ?? sound;
+    const bytes = definition ? definition.data : sound.bytes;
+    let decode = mp3Decodes.get(key);
+    if (!decode && bytes?.length) {
+      const entry: { samples: ExtractedSamples | null } = { samples: null };
+      decode = entry;
+      mp3Decodes.set(key, entry);
+      const task = s.audio?.extractSamples?.(bytes);
+      if (task) {
+        s.loads.trackRequest(
+          task.then(
+            (samples) => {
+              entry.samples = samples;
+            },
+            () => {},
+          ),
+        );
       }
     }
 
-    const samples = decoded?.samples;
-    return samples ? { rate: samples.rate, channels: samples.channels, skip, whole: false } : null;
-  };
-  const decodeLoaded = (sound: SoundState, source: Sound | Uint8Array): void => {
-    sound.decoded = null;
-    sound.clip = s.audio ? s.audio.decode(source) : null;
-    const clip = sound.clip;
-    if (clip) {
-      s.loads.trackRequest(
-        clip.then(
-          (decoded) => {
-            if (sound.clip === clip) {
-              sound.decoded = decoded;
-            }
-          },
-          () => {},
-        ),
-      );
-    }
+    const samples = decode?.samples;
+    return samples
+      ? {
+          rate: samples.rate,
+          channels: samples.channels,
+          skip: definition ? Math.max(0, definition.seekSamples) : 0,
+          whole: false,
+        }
+      : null;
   };
 
   class SoundNatives {
@@ -319,7 +317,8 @@ export function soundNatives(s: Scripting): avm2.Natives {
       sound.loaded = n;
       sound.total = n;
       sound.length = mp3 ? (mp3.frames * mp3.samplesPerFrame * 1000) / mp3.rate : 0;
-      decodeLoaded(sound, all);
+      sound.clip = s.audio ? s.audio.decode(all) : null;
+      mp3Decodes.delete(sound);
       dispatchEvent(
         s,
         this as AsObject,
@@ -399,7 +398,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
       // In samples a millisecond, to adl's last bit.
       sound.length = pcm[0].length / (EXTRACT_RATE / 1000);
       sound.extracted = 0;
-      decodeLoaded(sound, pcmSound(pcm));
+      sound.clip = s.audio ? s.audio.decode(pcmSound(pcm)) : null;
     }
 
     "flash.media:Sound::_load"(request: Value, _checkPolicyFile: Value, _bufferTime: Value): void {
@@ -481,10 +480,6 @@ export function soundNatives(s: Scripting): avm2.Natives {
         const completed = sound.clip.then(
           (clip) => {
             sound.length = clip.durationMs;
-            if (sound.generation === generation) {
-              sound.decoded = clip;
-            }
-
             s.loads.deferHostEvent(() => {
               if (sound.generation === generation) {
                 dispatchEvent(s, this as AsObject, s.event("complete"));
@@ -651,7 +646,6 @@ export function soundHooks(s: Scripting): Record<string, avm2.ClassHook> {
           generation: 0,
           abort: null,
           clip: null,
-          decoded: null,
           compressed: false,
           pcm: null,
           extracted: 0,

@@ -30,8 +30,6 @@ export interface SoundState {
   generation: number;
   abort: AbortController | null;
   clip: Promise<DecodedSound> | null;
-  /** The clip once decoded, for what extract reads at once. */
-  decoded: DecodedSound | null;
   /** Whether `bytes` came from loadCompressedDataFromByteArray, which adds to them. */
   compressed: boolean;
   /** loadPCMFromByteArray's samples, at 44.1 kHz. */

@@ -1946,12 +1946,18 @@ not the decoder's duration, give the embedded sound's `length`.
 does (`media/extract.ts`, the `sound-extract` case): each sample held for
 as many as its rate falls short, and positions counting the sound's own
 samples. An uncompressed or ADPCM sound is decoded for it at once, whole
-samples only. An MP3 comes from the host's decode, which the browser host
-does at the MP3's own rate, of whole frames, with a Xing or Info header
-frame as a frame of silence, as Flash decodes it rather than trimmed by it
-as a browser would; a DefineSound's seekSamples are skipped. Flash's
-decode is at once and the browser's is not: an MP3's first extract starts
-its decode and gives nothing, and the frames after give what Flash gives.
+samples only. An MP3 is decoded for it apart from the decode it plays,
+the first time a script extracts it, and kept: at the MP3's own rate, of
+whole frames, with a Xing or Info header frame as a frame of silence, as
+Flash decodes it rather than trimmed by it as a browser would, and a
+DefineSound's seekSamples skipped. Playback keeps the browser's decode of
+the whole file at the device's rate, gapless trimming and all, which
+resamples better than a buffer played at another rate. Flash's decode is
+at once and the browser's is not: an MP3's first extract starts its
+decode and gives nothing, and the frames after give what Flash gives.
+`media/mp3.ts` finds an MP3's frames: a run of three headers where they
+say the next frames are starts it, and it runs on past ID3v2 tags and
+other bytes between frames.
 
 `loadPCMFromByteArray` reads 32-bit floats or 16-bit integers in the
 ByteArray's byte order and brings them to 44.1 kHz at once; adl's reads

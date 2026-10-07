@@ -219,11 +219,6 @@ export class Symbols {
     }
   }
 
-  /** The sound's decode, if one has finished: what Sound.extract reads at once. */
-  decodedSound(character: SoundCharacter): DecodedSound | null {
-    return this.audioEntries.get(character)?.decoded ?? null;
-  }
-
   /** Decode a sound on first play; live libraries can share an identical decode. */
   soundClip(character: SoundCharacter): Promise<DecodedSound> | null {
     if (!this.s.audio) {
