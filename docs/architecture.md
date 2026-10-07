@@ -556,12 +556,21 @@ ActionScript 3 flag, is refused, as the player never compiles its
 DoABCs, and so is a file that ends inside a DoABC.
 
 It writes a module per ABC, `abc-<n>.js` (`lib-<n>.js` for the libraries
-with `--emit-libraries`), and `manifest.json`: the compiler, by
-`COMPILER_VERSION` and the SHA-256 of `codegen.wasm`; the API version;
+with `--emit-libraries`), beside it `abc-<n>.log`, what its compile fixed
+in codegen's domain (`compileModuleLogged`), and `manifest.json`, whose
+`manifestVersion` is 2: the compiler, by `COMPILER_VERSION` and the
+identity stamped into `codegen.wasm` (`Codegen.identity`; version 1 named
+it by its file's SHA-256, which is not what keys name); the API version;
 the input's kind, SWF version and SHA-256; and for each library and ABC
-its name, SHA-256 and module, and for an ABC its lazy flag. Each module
-names its ABC's hash and those it was linked against, which the runtime
-checks as it loads it.
+its name, SHA-256, module and log, the module's key and the module's and
+the log's lengths, and for an ABC its lazy flag. The key is the one the
+player's module cache looks the module up by when it loads the input as
+its main movie, with the same libraries (see Caching modules): codegen's
+`moduleKey`, which both take, so that they cannot drift apart, taken
+before the module compiles, as the player takes it before it asks its
+cache. A compiler without an identity writes no keys nor logs. Each
+module names its ABC's hash and those it was linked against, which the
+runtime checks as it loads it.
 
 The player does not take these modules yet. Skipping a compile is not
 enough: what a compile resolves in codegen's domain, the first answers
@@ -1840,7 +1849,8 @@ the log a rebuild replays (see Linking), and the player replays it in
 place of compiling (`Codegen.replay`): the domain is then as the compile
 would have left it, but for the weights `compact` goes by.
 
-A module is keyed by a SHA-256 of all it depends on: the compiler's
+A module is keyed by a SHA-256 of all it depends on (codegen's
+`moduleKey`, which the swf2es command keys by too): the compiler's
 identity, the API version, and its context (`Codegen.context`): every ABC
 its application domain sees, by hash and whether it is a library, in load
 order, those added after it included (a SWF's DoABCs are all added before
