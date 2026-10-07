@@ -24,11 +24,13 @@ import { isAs3, readSwf, tags } from "@swf2es/format";
 import {
   Container,
   type DisplayObject,
+  type ModuleCache,
   PixiView,
   Player,
   Scripting,
   setTransformTable,
 } from "@swf2es/player";
+import { compilerIdentity, indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { autoDetectRenderer } from "pixi.js";
 
 // `pnpm test:checked`'s page (chrome.ts): the player checks its own shortcuts too.
@@ -55,6 +57,8 @@ async function scriptingFor(
   trace: string[],
   url: string | null,
   uncaught: unknown[],
+  moduleCache: ModuleCache | null = null,
+  onCompile?: () => void,
 ): Promise<Scripting | null> {
   const swf = readSwf(bytes);
   if (!isAs3(swf) || !swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2)) {
@@ -62,7 +66,17 @@ async function scriptingFor(
   }
 
   const wasm = await WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm"));
-  const scripting = new Scripting(await createCodegen(wasm), {
+  const codegen = await createCodegen(wasm);
+  if (onCompile) {
+    const compileModule = codegen.compileModule.bind(codegen);
+    codegen.compileModule = (hashes, index) => {
+      onCompile();
+      return compileModule(hashes, index);
+    };
+  }
+
+  const scripting = new Scripting(codegen, {
+    moduleCache,
     // A trace of several lines is several lines of Flash's output.
     print: (line) => trace.push(...line.split("\n")),
     // The debugger player, as adl is and as Ruffle's traces were recorded: errors carry their text.
@@ -689,7 +703,99 @@ async function closeSwf(): Promise<boolean> {
   return true;
 }
 
+/** What moduleCacheSwf found: each load's trace and modules compiled, and what each eviction kept. */
+interface CacheCheck {
+  loads: { trace: string[]; compiled: number; error: string | null }[];
+  /** The keys left after putting a, b, getting a, then putting c, with room for two. */
+  kept: string[];
+  /** Whether a module larger than the whole cache was stored. */
+  oversized: boolean;
+}
+
+/**
+ * The IndexedDB module cache (player-hosts): a SWF played three times with
+ * it, the last after its modules were overwritten with half of themselves,
+ * which must trace alike, the second compiling nothing; and its eviction
+ * of the least recently used, in a small database of its own.
+ */
+async function moduleCacheSwf(base64: string): Promise<CacheCheck> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const wasm = new Uint8Array(await (await fetch("/codegen/codegen.wasm")).arrayBuffer());
+  const compiler = await compilerIdentity(wasm);
+  const name = `swf2es-test-${Math.random()}`;
+  const cache = indexedDbModuleCache({ compiler, name });
+  const written: string[] = [];
+  const keys: string[] = [];
+  const watched: ModuleCache = {
+    compiler,
+    get: (key) => cache.get(key),
+    put: async (key, module) => {
+      keys.push(key);
+      await cache.put(key, module);
+      written.push(key);
+    },
+  };
+  const loads: CacheCheck["loads"] = [];
+  const play = async () => {
+    const trace: string[] = [];
+    let compiled = 0;
+    const uncaught: unknown[] = [];
+    let scripting: Scripting | null = null;
+    try {
+      scripting = await scriptingFor(bytes, trace, null, uncaught, watched, () => compiled++);
+      const player = new Player(bytes, scripting);
+      await player.start();
+      loads.push({
+        trace,
+        compiled,
+        error: uncaught.length ? String(uncaught[0]) : null,
+      });
+    } catch (e) {
+      loads.push({ trace, compiled, error: describe(e, scripting) });
+    }
+  };
+  const stored = async (count: number) => {
+    for (let i = 0; i < 300 && written.length < count; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
+
+  await play();
+  await stored(keys.length);
+  await play();
+  for (const key of new Set(keys)) {
+    const module = await cache.get(key);
+    await cache.put(key, module?.slice(0, module.length / 2) ?? "");
+  }
+
+  await play();
+
+  // Room for two modules of 10 characters, 20 bytes each.
+  const small = indexedDbModuleCache({ compiler, name: `${name}-small`, maxBytes: 40 });
+  await small.put("a", "a".repeat(10));
+  await small.put("b", "b".repeat(10));
+  // Used later than "b" was put, by the clock's milliseconds.
+  await new Promise((r) => setTimeout(r, 20));
+  await small.get("a");
+  await small.put("c", "c".repeat(10));
+  const kept: string[] = [];
+  for (const key of ["a", "b", "c"]) {
+    if ((await small.get(key)) !== undefined) {
+      kept.push(key);
+    }
+  }
+
+  await small.put("d", "d".repeat(30));
+  const oversized = (await small.get("d")) !== undefined;
+  for (const db of [name, `${name}-small`]) {
+    indexedDB.deleteDatabase(db);
+  }
+
+  return { loads, kept, oversized };
+}
+
 const page = globalThis as unknown as {
+  moduleCacheSwf: typeof moduleCacheSwf;
   runSwf: typeof runSwf;
   benchSwf: typeof benchSwf;
   openSwf: typeof openSwf;
@@ -698,6 +804,7 @@ const page = globalThis as unknown as {
   traceSwf: typeof traceSwf;
 };
 page.runSwf = runSwf;
+page.moduleCacheSwf = moduleCacheSwf;
 page.benchSwf = benchSwf;
 page.openSwf = openSwf;
 page.stepSwf = stepSwf;

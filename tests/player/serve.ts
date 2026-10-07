@@ -17,6 +17,7 @@ const mounts: [string, string][] = [
   ["/codegen/", join(root, "packages/codegen/dist/")],
   ["/runtime/", join(root, "packages/runtime/dist/")],
   ["/player/", join(root, "packages/player/dist/")],
+  ["/player-hosts/", join(root, "packages/player-hosts/dist/")],
   // The ABCs a SWF's code links against, the player tests' own copies (libraries.ts).
   ["/libraries/", join(here, "out/libraries/")],
   ["/pixi/", join(root, "packages/player/node_modules/pixi.js/dist/")],
@@ -31,6 +32,7 @@ export const importMap = {
     "@swf2es/codegen": "/codegen/index.js",
     "@swf2es/runtime": "/runtime/index.js",
     "@swf2es/player": "/player/index.js",
+    "@swf2es/player-hosts/indexeddb": "/player-hosts/indexeddb.js",
     "pixi.js": "/pixi/pixi.mjs",
     pako: "/pako/pako.esm.mjs",
     lzma1: "/lzma1/index.js",

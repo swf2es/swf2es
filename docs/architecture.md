@@ -88,7 +88,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `runtime` | AS3/AS2 language semantics called by generated code             | format                    |
 | `player`  | display list, timeline, playerglobal, AVM1 globals, renderers   | format, codegen, runtime  |
 | `cli`     | ahead-of-time compiler command: a SWF's modules and a manifest  | format, codegen           |
-| `player-hosts` | optional host transports for the player: Node TCP, a WebSocket relay | player          |
+| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache | player |
 
 `runtime` contains only the language, with no display list, so it runs in node
 next to avmshell. It uses `format` for what both need, such as compression
@@ -1820,10 +1820,11 @@ once the case loads its SWF.
 ### Caching modules
 
 A host may give `Scripting` a `ModuleCache` (`hosts.ts`), which keeps the
-modules the compiler writes across page loads. `Code` asks it for each
-module before compiling, and gives it each module it compiles, not
-waiting for the write: a module read back is the string `compileModule`
-returned, so JIT and AOT output stay one. Anything the cache does wrong, an error, no answer of a string, a
+modules the compiler writes across page loads; `player-hosts/indexeddb`
+is one in IndexedDB. `Code` asks it for each module before compiling, and
+gives it each module it compiles, not waiting for the write: a module read
+back is the string `compileModule` returned, so JIT and AOT output stay
+one. Anything the cache does wrong, an error, no answer of a string, a
 string that does not evaluate (a truncated write), is a miss, compiled
 past and stored again.
 
@@ -1839,6 +1840,25 @@ are all added before any compiles, so the first may extend a class of the
 last. The key is taken again next to the compile on a miss, as another
 load may add ABCs while the cache is asked. Compiling leaves state behind
 only in what the compiler weighs for `compact`, never in what it writes.
+
+The IndexedDB cache keeps each module's size and last use in a store of
+their own, so that eviction, of the least recently used once the modules
+pass `maxBytes` (256 MiB by default, counted as UTF-16), reads no module.
+It writes a module once the page is idle: a write that a load's next read
+waited behind took that read from 4 to 45 ms.
+
+Measured in headless Chrome on a large real-world SWF (one ABC of 1.2 MB,
+a module of 8.17 million characters), medians of seven runs, to its first
+frame drawn: a cold load took 814 ms, of which codegen 255 ms for the
+SWF's module and 76 for the libraries', `new Function` 59 and the
+module's first run 120. Read back from IndexedDB, the 8 MB module took
+10–25 ms. With the cache, a load after a browser restart took 539 ms
+rather than 780, and a reload in the same renderer 210 rather than 497;
+the first load, which compiles and stores, took 857. V8 kept no code for
+the cached source across a restart, as it keeps none for `new Function`;
+a classic script from a cacheable URL, which it does keep code for, saved
+a further 130 ms there, but no URL is stable for a module from IndexedDB,
+and a Blob URL's script took longer than `new Function`.
 
 ### Drawing with Graphics
 

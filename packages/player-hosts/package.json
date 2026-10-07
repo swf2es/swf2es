@@ -1,10 +1,14 @@
 {
   "name": "@swf2es/player-hosts",
   "version": "0.0.0",
-  "description": "Optional Node and WebSocket transports for the swf2es player",
+  "description": "Optional Node and WebSocket transports and an IndexedDB module cache for the swf2es player",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
+    "./indexeddb": {
+      "types": "./dist/indexeddb.d.ts",
+      "default": "./dist/indexeddb.js"
+    },
     "./node": {
       "types": "./dist/node.d.ts",
       "default": "./dist/node.js"

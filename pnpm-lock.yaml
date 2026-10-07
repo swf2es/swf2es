@@ -96,6 +96,9 @@ importers:
       '@swf2es/player':
         specifier: workspace:*
         version: link:../../packages/player
+      '@swf2es/player-hosts':
+        specifier: workspace:*
+        version: link:../../packages/player-hosts
       '@swf2es/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
