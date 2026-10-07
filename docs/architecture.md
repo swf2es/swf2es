@@ -268,8 +268,11 @@ that instruction reads it before doing anything that can throw or be
 seen, as a property's get, set or call does: `s0 = (s1 ?? nn(s1)).$2`,
 `rt.getProperty(l1 ?? nn(l1), M[3])`. Otherwise, as when a conversion
 of an argument comes between, it is a statement of its own, `s1 ??
-nn(s1);`. `nn`'s frame is not named with a `$`, so the stack a host is
-shown starts at the method, as before.
+nn(s1);`. A method's count of arguments is checked first, as avmplus'
+`argcOk` does, and its ArgumentError 1063 thrown by the module's `ac`:
+`if (arguments.length - 1 >>> 0 > 2) ac(1, arguments.length);` for one
+to three. Neither `nn`'s frame nor `ac`'s is named with a `$`, so the
+stack a host is shown starts at the method, as before.
 
 Each module has a source map (version 3) from the ABC's `debugfile` and
 `debugline`, where an ABC compiled with them has them (asc's `-d`): the
@@ -441,9 +444,9 @@ a script initialised or a `newfunction` run, never per call, so a lazy
 one costs one check there; the function it returns is the entry's own.
 
 **Building an entry.** The entry's source, from `compileMethods`, is
-evaluated by a strict `Function` given the module's tables as parameters:
-`new Function("rt", "nn", "N", "S", "M", "V", "F", "A", '"use strict"; return ' +
-entry)`. Both halves of that matter:
+evaluated by a strict `Function` given the module's tables and helpers as
+parameters: `new Function("rt", "nn", "ac", "N", "S", "M", "V", "F", "A",
+'"use strict"; return ' + entry)`. Both halves of that matter:
 
 - A direct `eval` in the module's scope makes the functions it builds
   reach N, M, A and the rest by dynamic scope lookups: as3pb's and LZ4's

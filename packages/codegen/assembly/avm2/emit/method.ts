@@ -257,7 +257,8 @@ export class MethodEmitter {
 
   /**
    * The checks on entry, written first in the method once its code shows
-   * which it needs. Its arguments' count, as MethodEnv's argcOk. And a
+   * which it needs. Its arguments' count, as MethodEnv's argcOk, whose
+   * error the module's ac throws (see ModuleEmitter.module). And a
    * method that can see the default XML namespace runs with the one of the
    * scope it was made in ($dx, see ModuleEmitter.factory), not its
    * caller's: else it runs again with it, and the caller's is back after.
@@ -273,7 +274,7 @@ export class MethodEmitter {
     } else if (this.seesDxns) {
       check = `  if (${dxns}) return rt.callInDxns($dx, ${this.entryName}, this, arguments);\n`;
     } else if (args.length) {
-      check = `  if (${args}) throw rt.argumentCountError(${this.argsRequired}, arguments.length);\n`;
+      check = `  if (${args}) ac(${this.argsRequired}, arguments.length);\n`;
     } else {
       return;
     }
@@ -507,7 +508,8 @@ export class MethodEmitter {
     const optional = abc.methodOptionalStart[method + 1] - abc.methodOptionalStart[method];
 
     // As MethodEnv's argcOk, before any coercion: fewer arguments than it
-    // requires, or more than it declares unless it takes the rest.
+    // requires, or more than it declares unless it takes the rest; both, as
+    // one unsigned comparison.
     const required = count - traits.optionalCount[global];
     const extra = this.domain.allowsExtraArgs(global);
     this.argsRequired = required;
@@ -516,7 +518,7 @@ export class MethodEmitter {
       this.argsTest =
         required === count
           ? `arguments.length !== ${count}`
-          : `arguments.length < ${required} || arguments.length > ${count}`;
+          : `arguments.length - ${required} >>> 0 > ${count - required}`;
     } else if (required > 0) {
       this.argsTest = `arguments.length < ${required}`;
     } else if (!extra) {

@@ -7,6 +7,7 @@
 //
 //   export default function (rt) {
 //     const nn = (v) => { throw rt.nullError(v); };
+//     const ac = (n, given) => { throw rt.argumentCountError(n, given); };
 //     const N = [...namespaces], S = [...namespace sets], M = [...multinames];
 //     const F = [...method factories, (scope, sup, $dx) => function (...) {...}];
 //     const A = rt.abc({ hash, linked, names: M, classes, scripts, activations });
@@ -66,9 +67,11 @@ export class ModuleEmitter {
     this.methods.map.reset();
     out.text("export default function (rt) {\n");
     // A null check's throw, an expression where a check reads its register
-    // (MethodEmitter.checkedRead); not named with a $, so that a stack
-    // starts at the method that called it (Runtime.stackOf).
+    // (MethodEmitter.checkedRead), and an argument count's (checkEntry); not
+    // named with a $, so that a stack starts at the method that called them
+    // (Runtime.stackOf).
     out.text("  const nn = (v) => { throw rt.nullError(v); };\n");
+    out.text("  const ac = (n, given) => { throw rt.argumentCountError(n, given); };\n");
     this.names();
     this.functions();
     out.text("  const A = rt.abc({\n    hash: ");
