@@ -23,6 +23,7 @@ import {
   transformRect,
   union,
 } from "./geometry.js";
+import { sliceFor, sliceLayers } from "./scale9.js";
 import { flatten, inside, orientation, type Path, type ShapeLayer } from "./shapes.js";
 
 const TWIPS = 20;
@@ -39,7 +40,7 @@ export function toStage(d: DisplayObject, stage: DisplayObject | null): Matrix {
 }
 
 /** What `d` itself draws, in its own space: null for nothing. `lines` counts the lines' widths. */
-function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
+export function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
   if (d.drawing) {
     return d.drawing.bounds(lines);
   }
@@ -308,8 +309,15 @@ function drawnAt(
     return hitsGlyph(d.definition, d.glyphs.glyphs, x, y, mask);
   }
 
-  const layers: ShapeLayer[] =
+  let layers: ShapeLayer[] =
     d.drawing?.layers ?? (d instanceof ShapeObject ? (d.shape?.layers ?? []) : []);
+  // A 9-slice is hit where it is drawn, its layers as the renderer moves them; a mask is not sliced.
+  const own =
+    layers.length > 0 && !mask && (d.scale9Grid || d.parent?.scale9Grid) ? sliceFor(d) : null;
+  if (own) {
+    layers = sliceLayers(layers, own.slice, own.m, d.drawing?.version);
+  }
+
   for (const layer of layers) {
     for (const { contours, winding } of layer.fills) {
       // Inside by the fill's rule: an odd number of its contours around the

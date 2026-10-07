@@ -802,9 +802,9 @@ and the player's paths in this document are relative to it:
   shared objects' storage, the platform Capabilities reports) with the
   browser's defaults, and `sha256.ts` names the ABCs it compiles.
 - `display/`: the display list and the timeline, and what they are made
-  of: shapes, morphs, drawings, bounds and hit tests, geometry, 3D
-  matrices, colour transforms, gradients' ramps, and filters as records
-  of their values.
+  of: shapes, morphs, drawings, bounds and hit tests, 9-slice scaling,
+  geometry, 3D matrices, colour transforms, gradients' ramps, and filters
+  as records of their values.
 - `text/`: text fields' model and layout, static text, fonts and CSS.
 - `bitmap/`: the pixel store and its operations on the CPU, bitmap
   filters, decoded images and PNG encoding.
@@ -1562,6 +1562,94 @@ asks for a SWF's root above the object, the bounds test does not. `hitTestObject
 asks whether two objects' bounds in the stage's space overlap. The
 corpus's `displayobject_getrect`, `_hittestpoint`, `_hittestpoint_root`
 and `_hittestobject` are the reference, with the `draws` case.
+
+### Nine-slice scaling
+
+A sprite, movie clip, button or `Shape` with a grid, its symbol's
+`DefineScalingGrid` (a character id and a rectangle in twips, which
+`format` reads and the timeline keeps on the sprite or button character
+for its instances) or the `scale9Grid` a script sets, draws its shapes
+sliced (`display/scale9.ts`): its own drawing or shape, and its `Shape`
+children's, each vertex, taken through the child's matrix, moved by a map
+of each axis through the edges of the bounds the grid divides and the
+grid's, so that in its parent's space the corners keep their size, the
+edges stretch one way and the centre both. Scaled smaller than its
+corners, they share the size in proportion and the centre has none. Its
+sprites, texts and bitmaps, and the shapes in them, scale as ever, and so
+do its bounds, `width` and `height`. What adl showed, on panels of
+coloured bars measured to the pixel:
+
+- The bounds a grid divides are what the object draws, without lines,
+  and what each child draws itself, in the child's own space, its matrix
+  ignored, and nothing of a grandchild's, a text field's or a static
+  text's: a child's bars
+  moved 30 to the right leave the edges where the panel's are (its bars
+  then pass the corner at the corner's rate), a child sprite's drawing at
+  110 to 120 moves the right edge to 120 wherever the child is placed or
+  however it is scaled, a grandchild's moves nothing, a bitmap's or a
+  video's counts. A
+  SWF shape's are its recorded bounds, its lines with them.
+- The map goes by the object's own matrix, not its place on the stage: a
+  grid under a parent scaled 3 and itself unscaled changes nothing, and
+  one scaled under a turned or mirrored parent is sliced, its corners
+  their size in that parent's units.
+- It slices only under a scale alone: `a` and `d` positive, `b` and `c`
+  under a 4096th (adl slices b = 0.000244 and not 0.0002442, a 16.16
+  fraction under 16). Turned, skewed or mirrored, it scales as ever.
+- Only vertices move, curves' control points too: a triangle's long side
+  across the regions stays straight, a quadratic from 0 to 40 under a grid
+  at 20 bends to its moved end, and a fill's gradient or bitmap stretches
+  as ever. A line is as wide as the owner's parent's transform makes it,
+  for every scale mode, times a `Shape` child's own scale: a 2 pixel line
+  in a child scaled 2 is 4 wide whatever the owner's scale.
+- A grid not strictly inside those bounds both ways, as they are when it
+  draws, is ignored, so one on a fill's edge does nothing, but one on a
+  SWF shape's fill edge inside its lines' recorded bounds slices.
+- A scrolled object slices in its drawing's space and then scrolls: a
+  `scrollRect` from -20 moves the sliced bars 20 of its units over.
+- A mask is not sliced, in drawing or in hit tests: neither an owner that
+  is a mask nor a `Shape` child that masks a sibling, by a script's `mask`
+  or a timeline's clip layer, common in a 9-slice symbol. Neither is what
+  `BitmapData.draw` draws through its matrix, whatever the source's own
+  scale; a sliced object inside what is drawn is.
+- A `Shape` moved from a sliced sprite to a plain one draws unsliced, and
+  one moved the other way, or between two grids, takes its new parent's.
+- A button slices the state that is one shape; a state of several
+  characters is a sprite of them, and scales as ever.
+- Hit tests find what the slice draws (`display/bounds.ts`): the point
+  against the sliced layers, kept by the slice's key.
+- `scale9Grid` reads x, y, width and height each cut toward 0, a tag's
+  grid of 20.5 to 80 as (20, 59 wide). The setter keeps them so cut, and
+  then, for a grid not strictly inside the bounds it divides as given, or
+  for an object with none, throws ArgumentError #2004, keeping it; null
+  takes it away.
+
+The renderer reshapes the layers when a slice applies, keyed by its
+edges and, for a `Shape` child, its matrix, and a drawing's version, which
+Graphics counts as it changes the drawing in place, and draws them as a
+drawing's are, fills and lines its own, not the shape's shared ones: a
+panel rebuilds as it is resized, not on every frame it is drawn. The slice
+is computed again only on a sync where the owner's scale, grid, drawing,
+children or a direct child's drawing changed, a `Shape` child's matrix or
+parent, or a mask role, not as anything moves: a sliced panel dragged
+across the stage for 40 frames, under a moving parent and with an
+animated grandchild, made its slice and its sliced layers once, on the
+first frame, and slicing allocated nothing after. A drawing keeps its
+bounds per version, and an object its last slice, which a hit test finds
+again rather than making on each pointer move; a set of layers keeps its
+four latest slices, for instances of one symbol at a few sizes. The line
+of a sliced shape is stroked through its stage transform as ever and as
+wide as above. The `scale9` case draws panels with `DefineScalingGrid`,
+stretched, shrunk past their corners, turned, flipped, in a button, on a
+fill's edge, with a half-pixel grid, with a sprite in them, and a script's
+grids, refused ones too, and rescales some on its second frame;
+`scale9-changes` changes what the grid divides, moves, redraws, adds and
+removes children, turns a parent, gives a Shape a grid of its own, draws
+through `BitmapData.draw`, masks, scrolls and hit-tests a curve across
+the grid. Flash snaps straight runs of lines to whole pixels, which the
+player does not, so a grid's lines at half pixels part from it there as
+unsliced ones do. Flash's hit tests on a curve land about half a pixel
+lower than the player's, sliced or not.
 
 ### Sound state
 

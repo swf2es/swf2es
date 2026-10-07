@@ -32,6 +32,7 @@ export {
   readFrameLabel,
   readPlace,
   readRemove,
+  readScalingGrid,
   readSceneData,
   readSprite,
   readString,

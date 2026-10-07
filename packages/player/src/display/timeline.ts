@@ -23,6 +23,7 @@ import {
   readMorphShape,
   readPlace,
   readRemove,
+  readScalingGrid,
   readSceneData,
   readShape,
   readSound,
@@ -46,6 +47,7 @@ import type { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "../bitmap/bitmap.js";
 import { FontSet } from "../text/fonts.js";
 import type { DisplayObject, MovieClip } from "./display.js";
+import type { Rect } from "./geometry.js";
 import { boundsOf, type ShapeBounds, type ShapeLayer, shapeLayers } from "./shapes.js";
 
 export type FrameCommand = { type: "place"; place: Place } | { type: "remove"; depth: number };
@@ -124,6 +126,8 @@ export interface SpriteCharacter {
   type: "sprite";
   id: number;
   timeline: Timeline;
+  /** DefineScalingGrid's 9-slice grid, in pixels, which its instances start with; null without. */
+  grid: Rect | null;
 }
 
 export interface TextCharacter {
@@ -149,6 +153,8 @@ export interface ButtonCharacter {
   trackAsMenu: boolean;
   /** DefineButtonSound's: over to up, up to over, over to down, down to over; null without. */
   sounds: ({ id: number; info: SoundInfo } | null)[] | null;
+  /** DefineScalingGrid's 9-slice grid, in pixels; null without. */
+  grid: Rect | null;
 }
 
 /** DefineFont2 or 3: its name and style, for the fields that name it, and its glyphs and layout. */
@@ -454,6 +460,7 @@ function timelineOf(
           type: "sprite",
           id: sprite.id,
           timeline: timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg),
+          grid: null,
         });
         break;
       }
@@ -466,6 +473,7 @@ function timelineOf(
           records: button.records,
           trackAsMenu: button.trackAsMenu,
           sounds: null,
+          grid: null,
         });
         break;
       }
@@ -474,6 +482,19 @@ function timelineOf(
         const button = library.get(given.id);
         if (button?.type === "button") {
           button.sounds = given.sounds;
+        }
+        break;
+      }
+      case tags.DefineScalingGrid: {
+        const { id, grid } = readScalingGrid(bytes, t);
+        const symbol = library.get(id);
+        if (symbol?.type === "sprite" || symbol?.type === "button") {
+          symbol.grid = {
+            xMin: grid.xMin / 20,
+            yMin: grid.yMin / 20,
+            xMax: grid.xMax / 20,
+            yMax: grid.yMax / 20,
+          };
         }
         break;
       }

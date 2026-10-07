@@ -213,6 +213,11 @@ export class DisplayObject {
    */
   scrollRect: Rect | null = null;
   scroll: Rect | null = null;
+  /**
+   * Its 9-slice grid, in its own space, in pixels (display/scale9.ts): its
+   * symbol's DefineScalingGrid's, or what a script set; null for none.
+   */
+  scale9Grid: Rect | null = null;
   /** Its blend mode, as BlendMode names it. */
   blendMode = "normal";
   /** Its filters' values, which its `filters` reads copies of. */
@@ -1714,11 +1719,13 @@ export function displayFor(
     button.character = character;
     button.library = library;
     button.trackAsMenu = character.trackAsMenu;
+    button.scale9Grid = character.grid;
     return button;
   }
 
   const clip = new MovieClip(character.timeline, library);
   clip.character = character;
+  clip.scale9Grid = character.grid;
   return clip;
 }
 

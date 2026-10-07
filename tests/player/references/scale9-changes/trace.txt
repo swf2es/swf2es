@@ -1,0 +1,4 @@
+moved half refused 2004
+moved back kept (x=20, y=20, w=60, h=20)
+child alone kept (x=20, y=20, w=60, h=20)
+curve false true

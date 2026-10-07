@@ -666,6 +666,19 @@ export function sprite(id: number, frameCount: number, tags: Uint8Array[]): Uint
   return tag(39, concat([new BitWriter().u16(id).u16(frameCount).done(), ...tags]));
 }
 
+/** A DefineScalingGrid: the 9-slice grid of sprite or button `id`, in twips. */
+export function scalingGrid(
+  id: number,
+  xMin: number,
+  xMax: number,
+  yMin: number,
+  yMax: number,
+): Uint8Array {
+  const w = new BitWriter().u16(id);
+  rect(w, xMin, xMax, yMin, yMax);
+  return tag(78, w.done());
+}
+
 /**
  * A DefineEditText: its initial text, its size in twips and alignment (0
  * left, 1 right, 2 center), and optionally HTML text, multiline, a colour

@@ -55,6 +55,7 @@ import type { Filter as FilterRecord } from "../display/filters.js";
 import { shifted } from "../display/geometry.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "../display/gradients.js";
 import { blendLayers, droppedLayers } from "../display/morph.js";
+import { type Slice, sliceLayers, sliceOf } from "../display/scale9.js";
 import type { PointerState } from "../input/pointer.js";
 import { deviceMetrics, fontFamily } from "../text/fonts.js";
 import { blendFilters } from "./blend.js";
@@ -501,8 +502,11 @@ function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContext {
   return context;
 }
 
-/** A layer's lines as seen through `m`, drawn in its space so that their width is even. */
-function strokeContext(layer: ShapeLayer, m: Linear, least: number): GraphicsContext {
+/**
+ * A layer's lines as seen through `m`, drawn in its space so that their
+ * width is even; as wide as `by` makes them, which is `m` but for a 9-slice's.
+ */
+function strokeContext(layer: ShapeLayer, m: Linear, least: number, by = m): GraphicsContext {
   const context = shapeContext();
   for (const { line, paths } of layer.strokes) {
     context.beginPath();
@@ -510,7 +514,7 @@ function strokeContext(layer: ShapeLayer, m: Linear, least: number): GraphicsCon
       trace(context, transformPath(path, m));
     }
 
-    context.stroke(stroke(line, m, least));
+    context.stroke(stroke(line, by, least));
   }
 
   return context;
@@ -1051,13 +1055,15 @@ class SharedGraphics extends Graphics {
 }
 
 /** A layer's lines seen through `m`, nothing where `m` flattens them. */
-function linesContext(layer: ShapeLayer, m: Linear, least: number): GraphicsContext {
+function linesContext(layer: ShapeLayer, m: Linear, least: number, by = m): GraphicsContext {
   // Empty, drawn alone as every shape's are: one batched would get no
   // instruction till its group rebuilt.
-  return m[0] * m[3] - m[1] * m[2] === 0 ? shapeContext() : strokeContext(layer, m, least);
+  return m[0] * m[3] - m[1] * m[2] === 0 ? shapeContext() : strokeContext(layer, m, least, by);
 }
 
 const NO_RECORDS: readonly FilterRecord[] = [];
+/** A Shape child's slice key once its owner's slice changed: it is sliced again on its next sync. */
+const STALE = "stale";
 
 /** What the view keeps for a display object. */
 interface Node {
@@ -1129,6 +1135,19 @@ interface Node {
   childIsolation: boolean;
   /** Outside partners must share the group; a hidden node must not keep an old partner alive. */
   maskLinks: WeakRef<DisplayObject>[];
+  /** The 9-slice its grid gives its shapes and its Shape children's (display/scale9.ts), or null. */
+  slice: Slice | null;
+  /** What the slice its layers were drawn with is told by, "" for none. */
+  sliceKey: string;
+  /** The parent and the linear part of the matrix the slice was made under, to tell when to make it again. */
+  sliceOwner: DisplayObject | null;
+  sliceLinear: Linear | null;
+  /**
+   * The linear transform on the stage its lines' widths go by, where a
+   * 9-slice draws them: the grid's owner's parent's, as Flash keeps a sliced
+   * line as wide as in that space. Null for its own transform.
+   */
+  lineSpace: Linear | null;
 }
 
 /** Only a partner outside the branch prevents it owning a separate instruction set. */
@@ -1249,6 +1268,8 @@ export class PixiView {
   private root: DisplayObject | null = null;
   /** Whether this prepare visits every node, to stroke and filter again for a new screen scale. */
   private rescaled = false;
+  /** What a fresh view draws, under the draw's matrix: Flash slices it by no grid of its own. */
+  drawRoot: DisplayObject | null = null;
   /** A fresh view's units to a pixel of the BitmapData it draws, rendered that many times larger. */
   private samples = 1;
 
@@ -1499,6 +1520,11 @@ export class PixiView {
         directBlend: null,
         childIsolation: false,
         maskLinks: [],
+        slice: null,
+        sliceKey: "",
+        sliceOwner: null,
+        sliceLinear: null,
+        lineSpace: null,
       };
       node.container.addChild(art);
       this.nodes.set(o, node);
@@ -1583,6 +1609,85 @@ export class PixiView {
     };
   }
 
+  /**
+   * Whether `o`'s slice may have changed since its node's was made: its
+   * grid, drawing or children changed, a direct child's drawing, its scale
+   * (not its position, as a dragged panel's), a Shape child's matrix or
+   * parent, its mask role, or its owner's slice.
+   */
+  private reslices(o: DisplayObject, node: Node, dirty: number, remask: boolean): boolean {
+    if (
+      remask ||
+      node.sliceKey === STALE ||
+      o.parent !== node.sliceOwner ||
+      dirty & (CONTENT | CHILDREN)
+    ) {
+      return true;
+    }
+
+    const m = o.matrix;
+    const was = node.sliceLinear;
+    if (
+      dirty & TRANSFORM &&
+      ((o instanceof ShapeObject && o.parent?.scale9Grid) ||
+        !was ||
+        was[0] !== m.a ||
+        was[1] !== m.b ||
+        was[2] !== m.c ||
+        was[3] !== m.d)
+    ) {
+      return true;
+    }
+
+    return (
+      o instanceof Container && o.descendantsDirty && o.children.some((c) => c.dirty & CONTENT)
+    );
+  }
+
+  /**
+   * The slice that reshapes what `o` itself draws, and the matrix from its
+   * space to the owner's, null for the owner: as display/scale9.ts's
+   * sliceFor, from the slices this view keeps, which its syncs made.
+   */
+  private slicing(
+    o: DisplayObject,
+    node: Node,
+  ): { slice: Slice; m: DisplayObject["matrix"] | null } | null {
+    if (node.masking) {
+      return null;
+    }
+
+    if (node.slice) {
+      return { slice: node.slice, m: null };
+    }
+
+    const parent = o.parent;
+    const slice =
+      o instanceof ShapeObject && parent?.scale9Grid ? this.nodes.get(parent)?.slice : null;
+    return slice ? { slice, m: o.placed } : null;
+  }
+
+  /**
+   * The linear transform on the stage a sliced shape's lines are as wide
+   * through: the owner's parent's, as in adl a sliced line keeps the width
+   * it has in that space, times a Shape child's own, whose scale widens
+   * them; `parent` is `o`'s parent's.
+   */
+  private lineSpace(o: DisplayObject, node: Node, parent: Linear): Linear {
+    if (node.slice) {
+      return parent;
+    }
+
+    const owner = this.nodes.get(o.parent as Container)?.lineSpace ?? parent;
+    const m = o.matrix;
+    return [
+      owner[0] * m.a + owner[2] * m.b,
+      owner[1] * m.a + owner[3] * m.b,
+      owner[0] * m.c + owner[2] * m.d,
+      owner[1] * m.c + owner[3] * m.d,
+    ];
+  }
+
   /** What `o` itself draws, into its node emptied of what it drew before. */
   private draw(o: DisplayObject, node: Node): void {
     const current = this.current(o);
@@ -1608,6 +1713,11 @@ export class PixiView {
 
     const shape = o instanceof ShapeObject ? o.drawn() : null;
     node.layers = o.drawing?.layers ?? shape?.layers ?? [];
+    const slicing = this.slicing(o, node);
+    if (slicing) {
+      node.layers = sliceLayers(node.layers, slicing.slice, slicing.m, o.drawing?.version);
+    }
+
     const build = (layer: ShapeLayer) => {
       const context = fillContext(layer, this.painter);
       if (this.fresh) {
@@ -1620,11 +1730,11 @@ export class PixiView {
     node.ownFills = false;
     if (current && current.layers === node.layers && current.fills.length === node.layers.length) {
       fills = current.fills;
-    } else if (shape && !o.drawing && !this.fresh) {
+    } else if (shape && !o.drawing && !slicing && !this.fresh) {
       // A shape's, or a morph's blend's, shared and counted: they go once nothing draws them.
       fills = this.shared.take(shape, () => node.layers.map(build));
       node.sharedFills = shape;
-    } else if (shape && !o.drawing) {
+    } else if (shape && !o.drawing && !slicing) {
       // A fresh view borrows the stage's, which its object, off the list, may no longer hold;
       // else builds its own, shared by its instances, which it destroys with the rest.
       fills = this.source?.shared.peek(shape) ?? this.fills.get(shape) ?? node.layers.map(build);
@@ -1637,9 +1747,10 @@ export class PixiView {
     node.fills = fills;
     // A blend's layers never change, so its lines are shared as a shape's: instances in step stroke
     // once.
-    node.sharedLines = !o.drawing && shape !== null;
+    node.sharedLines = !o.drawing && shape !== null && !slicing;
     const lines =
       current &&
+      !slicing &&
       sameLinear(current.world, node.world) &&
       this.source?.leastWidth === this.leastWidth
         ? current.strokes
@@ -1848,11 +1959,12 @@ export class PixiView {
     const m = node.world;
     const least = this.leastWidth;
     node.strokedAt = least;
+    const by = node.lineSpace;
     // One key and one inverse for all its layers of each kind, made as one first needs them.
     let exact: ReturnType<typeof strokeFrame> | null = null;
     let scaled: ReturnType<typeof strokeFrame> | null | undefined;
     const frameFor = (layer: ShapeLayer) => {
-      if (scaled === undefined && scalesEvenly(layer)) {
+      if (scaled === undefined && !by && scalesEvenly(layer)) {
         const stretch = stretchOf(m);
         scaled = stretch && strokeFrame(stretch, least);
       }
@@ -1884,7 +1996,7 @@ export class PixiView {
       } else if (node.sharedLines && !this.fresh) {
         strokes.swap(this.lines.take(layer, seen, least, key));
       } else {
-        strokes.swap(linesContext(layer, seen, least));
+        strokes.swap(linesContext(layer, seen, least, by ?? seen));
         this.counts.strokeContexts++;
         if (this.fresh) {
           this.built.add(strokes.shared);
@@ -2039,6 +2151,46 @@ export class PixiView {
       node.world = world;
     }
 
+    // A 9-slice reshapes the shapes as the owner's scale, bounds or grid change, or a Shape child's
+    // matrix or parent, not as anything moves; a mask, and the root of a BitmapData's draw, are not
+    // sliced.
+    let resliced = false;
+    if (
+      (o.scale9Grid || node.sliceKey || (o instanceof ShapeObject && o.parent?.scale9Grid)) &&
+      this.reslices(o, node, dirty, remask)
+    ) {
+      node.slice = o.scale9Grid && !masking && o !== this.drawRoot ? sliceOf(o) : null;
+      node.sliceOwner = o.parent;
+      const m = o.matrix;
+      node.sliceLinear = [m.a, m.b, m.c, m.d];
+      const slicing = this.slicing(o, node);
+      const at = slicing?.m;
+      const key = !slicing
+        ? ""
+        : at
+          ? `${slicing.slice.key};${at.a},${at.b},${at.c},${at.d},${at.tx},${at.ty}`
+          : slicing.slice.key;
+      if (key !== node.sliceKey) {
+        node.sliceKey = key;
+        dirty |= CONTENT;
+        resliced = o instanceof Container;
+        node.lineSpace = null;
+      }
+    }
+
+    if (node.sliceKey && (moved || dirty & (TRANSFORM | CONTENT) || !node.lineSpace)) {
+      node.lineSpace = this.lineSpace(o, node, parent);
+    }
+
+    if (resliced) {
+      for (const child of (o as Container).children) {
+        const kid = child instanceof ShapeObject ? this.nodes.get(child) : undefined;
+        if (kid) {
+          kid.sliceKey = STALE;
+        }
+      }
+    }
+
     if (dirty & CONTENT) {
       this.redraw(o, node);
     } else if ((moved || node.strokedAt !== this.leastWidth) && node.strokes.some((g) => g)) {
@@ -2110,11 +2262,13 @@ export class PixiView {
         recolor ||
         this.rescaled ||
         isolationChanged ||
+        resliced ||
         o.descendantsDirty
       ) {
         for (const child of o.children) {
           if (
             moved ||
+            (resliced && child instanceof ShapeObject) ||
             remask ||
             this.rescaled ||
             recolor ||
@@ -2493,6 +2647,7 @@ export class PixiView {
     const n = samples;
     const view = new PixiView(this.renderer, true, this);
     view.samples = n;
+    view.drawRoot = o;
     // Built at the draw's own scale, lines included, as the stage's are,
     // then rendered n times larger: the curves are no finer than on the
     // stage, and widths and hairlines scale with the samples.

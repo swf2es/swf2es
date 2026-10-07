@@ -24,6 +24,13 @@ const COS_45 = Math.SQRT1_2;
 
 export class Drawing {
   readonly layers: ShapeLayer[] = [];
+  /** Counts the changes to `layers`, which change in place: what is kept of them goes by it. */
+  version = 0;
+  /** The bounds without lines and with them, as of a version: a 9-slice's owner asks on every change. */
+  private kept: [
+    { version: number; r: Rect | null } | null,
+    { version: number; r: Rect | null } | null,
+  ] = [null, null];
   private fill: { fill: Paint; contours: Path[]; winding: Winding } | null = null;
   /** The layer the open fill is in, for the entries a change of winding adds beside it. */
   private fillLayer: ShapeLayer | null = null;
@@ -150,6 +157,7 @@ export class Drawing {
    * own beside the fill's, with the same fill.
    */
   drawPath(commands: number[], data: number[], winding: Winding): void {
+    this.version++;
     if (this.fill && this.fillLayer && this.fill.winding !== winding) {
       if (this.fill.contours.some((c) => c.length > 3)) {
         this.fill = { fill: this.fill.fill, contours: [], winding };
@@ -201,6 +209,7 @@ export class Drawing {
   }
 
   clear(): void {
+    this.version++;
     this.layers.length = 0;
     this.fill = null;
     this.fillLayer = null;
@@ -222,10 +231,17 @@ export class Drawing {
         strokes: layer.strokes.map((s) => ({ line: s.line, paths: s.paths.map((c) => c.slice()) })),
       });
     }
+
+    this.version++;
   }
 
   /** The drawing's extent, in pixels, curves at their true extremes; the lines' paths count, and with `lines` their half widths too. */
   bounds(lines: boolean): Rect | null {
+    const kept = this.kept[lines ? 1 : 0];
+    if (kept?.version === this.version) {
+      return kept.r;
+    }
+
     let r: Rect | null = null;
     const take = (path: Path, pad: number) => {
       const e = extent(path);
@@ -247,15 +263,18 @@ export class Drawing {
       }
     }
 
+    this.kept[lines ? 1 : 0] = { version: this.version, r };
     return r;
   }
 
   /** A contour or stroke path begins at the pen. */
   private begin(paths: Path[]): void {
+    this.version++;
     paths.push([MOVE, this.x, this.y]);
   }
 
   private command(kind: number, points: number[]): void {
+    this.version++;
     for (const paths of [this.fill?.contours, this.stroke?.paths]) {
       if (paths) {
         paths[paths.length - 1].push(kind, ...points);

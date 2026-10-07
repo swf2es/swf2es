@@ -1,9 +1,9 @@
 // The display list's tags (SWF specification, chapter 3), and the ones that
 // tie a SWF's classes to its symbols: PlaceObject 1 to 3, RemoveObject 1
-// and 2, FrameLabel, DefineSprite, SymbolClass and DoABC. Filters and clip
-// actions are kept as their bytes for now.
+// and 2, FrameLabel, DefineSprite, DefineScalingGrid, SymbolClass and
+// DoABC. Filters and clip actions are kept as their bytes for now.
 import { type ColorTransform, type Matrix, readColorTransform, readMatrix } from "./shape.js";
-import { readTags, SwfReader, type Tag } from "./swf.js";
+import { type Rect, readTags, SwfReader, type Tag } from "./swf.js";
 import { DoABC, PlaceObject, PlaceObject3, RemoveObject, RemoveObject2 } from "./tags.js";
 
 /**
@@ -288,6 +288,13 @@ export function readSprite(
   const id = r.u16();
   const frameCount = r.u16();
   return { id, frameCount, tags: readTags(bytes, r.pos, tag.offset + tag.length).tags };
+}
+
+/** DefineScalingGrid: the sprite or button it is for, and its grid, in twips, in the character's space. */
+export function readScalingGrid(bytes: Uint8Array, tag: Tag): { id: number; grid: Rect } {
+  const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+  const id = r.u16();
+  return { id, grid: r.rect() };
 }
 
 /** DefineBinaryData: a character's bytes, after its id and 4 reserved bytes, which a ByteArray subclass SymbolClass binds to it holds. */
