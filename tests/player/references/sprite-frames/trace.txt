@@ -1,0 +1,15 @@
+frame 0 root 4 true true
+   placed - 20
+   placedClip 1 20
+   made - 20
+   made 1 20
+frame 1 root 4 true true
+   placed - 20
+   placedClip 2 30
+   made - 20
+   made 1 20
+frame 2 root 4 true true
+   placed - 20
+   placedClip 1 20
+   made - 20
+   made 2 30

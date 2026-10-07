@@ -866,7 +866,11 @@ setting it as the one pending, and calling `rt.construct(cls)`: the
 finds them in `numChildren` before `super()` and constructed after it, as
 the main and a loaded root do too (`instantiation_on_enter_frame`). A `new
 Sprite()` from a script finds nothing pending, gets a fresh player object,
-and places its first frame in `constructChildren`. A frame played on
+and places its first frame in `constructChildren`. Only a MovieClip plays
+its timeline: the `create` hook stops a symbol of more than one frame whose
+class extends Sprite but not MovieClip, the root's included, on its first
+frame, as Flash does, where fl.controls' components keep their skins on a
+second frame (the `sprite-frames` case). A frame played on
 places its new children at once, but makes their AS3 objects only after
 `ENTER_FRAME`, in a construct phase before `frameConstructed`: until then
 a script counts them in `numChildren` and `getChildAt` gives null. Their

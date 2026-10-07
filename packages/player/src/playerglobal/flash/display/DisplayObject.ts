@@ -7,6 +7,7 @@ import {
   ButtonObject,
   CONTENT,
   type DisplayObject,
+  MovieClip,
   rootOf,
   TextObject,
   TRANSFORM,
@@ -121,6 +122,14 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
 
         o.$display = display;
         display.object = o;
+        // Only a MovieClip plays its timeline: a sprite bound to a class that
+        // extends Sprite alone stays on its first frame, as fl.controls'
+        // components do, whose second frame holds their skins. An AVM1
+        // movie's root, an AVM1Movie, is no Sprite and plays.
+        if (display instanceof MovieClip && spriteOnly(traits)) {
+          display.playing = false;
+        }
+
         if (made) {
           s.made(display);
         }
@@ -129,6 +138,21 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
       },
     },
   };
+}
+
+/** Whether `traits` is Sprite's or a subclass's that does not extend MovieClip. */
+function spriteOnly(traits: { name: string; base: unknown }): boolean {
+  for (let t = traits as typeof traits | null; t; t = t.base as typeof traits | null) {
+    if (t.name === "flash.display::MovieClip") {
+      return false;
+    }
+
+    if (t.name === "flash.display::Sprite") {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /** Move a display object, by a copy of its matrix, and have it drawn again. */

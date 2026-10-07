@@ -1172,6 +1172,48 @@ function added(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Two-frame sprites, a red square then a blue one, bound to a Sprite and a
+// MovieClip class and placed on a two-frame root bound to a Sprite class,
+// whose second frame adds a green square (scripts/SpriteFrames.as).
+function spriteFrames(abc: Uint8Array): Uint8Array {
+  const twoFrames = (id: number) =>
+    w.sprite(id, 2, [
+      w.place({ depth: 1, character: 1 }),
+      w.showFrame(),
+      w.remove(1),
+      w.place({ depth: 2, character: 2 }),
+      w.showFrame(),
+      w.end(),
+    ]);
+  return w.swf({
+    width: 200,
+    height: 100,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000, 400),
+      square(2, 0x0000ff, 600),
+      square(3, 0x00aa00, 200),
+      twoFrames(10),
+      twoFrames(11),
+      w.doAbc(abc, "SpriteFrames"),
+      w.symbolClass([
+        [0, "SpriteFrames"],
+        [10, "SpriteFramesSprite"],
+        [11, "SpriteFramesClip"],
+      ]),
+      w.place({ depth: 1, character: 10, name: "placed", matrix: { tx: 400, ty: 200 } }),
+      w.place({ depth: 2, character: 11, name: "placedClip", matrix: { tx: 1600, ty: 200 } }),
+      w.showFrame(),
+      w.place({ depth: 3, character: 3, matrix: { tx: 3000, ty: 200 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A two-frame clip (its square moving on frame 2) on a two-frame root, both
 // classes with frame scripts (scripts/Nested.as).
 function nested(abc: Uint8Array): Uint8Array {
@@ -4398,6 +4440,15 @@ export const cases: PlayerCase[] = [
     script: "GotoChild",
     frames: 2,
     capture: [1, 2],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "sprite-frames",
+    swf: spriteFrames,
+    script: "SpriteFrames",
+    frames: 3,
+    capture: [3],
     tolerance: 0,
     maxOutliers: 0,
   },
