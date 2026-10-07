@@ -43,9 +43,11 @@ export function settle(group: Settling, settled: boolean): void {
       switched = true;
     }
 
-    for (const child of container.children) {
-      if (!child.isRenderGroup) {
-        visit(child);
+    // An index, not for-of: a rebuilt group is walked whole each frame.
+    const children = container.children;
+    for (let i = 0; i < children.length; i++) {
+      if (!children[i].isRenderGroup) {
+        visit(children[i]);
       }
     }
   };
