@@ -1407,11 +1407,13 @@ export class PixiView {
     maskLink(o, o.mask, links);
     maskLink(o, o.maskOf, links);
     if (o instanceof Container) {
-      for (const child of o.children) {
-        const part = this.nodes.get(child);
+      // Indexes, not for-of: this runs for every object synced.
+      const children = o.children;
+      for (let i = 0; i < children.length; i++) {
+        const part = this.nodes.get(children[i]);
         if (part) {
-          for (const partner of part.maskLinks) {
-            maskLink(o, partner.deref() ?? null, links);
+          for (let k = 0; k < part.maskLinks.length; k++) {
+            maskLink(o, part.maskLinks[k].deref() ?? null, links);
           }
 
           draws += part.container.isRenderGroup ? 0 : part.draws;
