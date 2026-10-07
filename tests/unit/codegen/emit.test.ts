@@ -127,7 +127,7 @@ test("a loop is a labelled for (;;), its back edge a continue, and no dispatcher
   assert.match(js, /continue L1;/);
   assert.doesNotMatch(js, /switch \(b\)/);
   // The locals are read and written straight, with no stack registers between.
-  assert.match(js, /l1 = l1 \+ l2 \| 0;\n {4}l2 = l2 - 1 \| 0;/);
+  assert.match(js, /l1 = l1 \+ l2 \| 0;\nl2 = l2 - 1 \| 0;/);
 });
 
 test("if and else meet again after a labelled block", { skip }, () => {
@@ -242,7 +242,7 @@ test("a throw in a handler's range runs the handler, with the exception on the s
   assert.equal(run(abc), 7);
   // A structured try, the handler's code after its labelled block.
   const js = emit(abc);
-  assert.match(js, /L\d+: \{\n {2}try \{/);
+  assert.match(js, /L\d+: \{\ntry \{/);
   assert.doesNotMatch(js, /switch \(b\)/);
 });
 
@@ -362,6 +362,17 @@ test("a module's functions are named after their methods, for stacks and profile
   assert.doesNotMatch(js, /=> function [A-Za-z_][A-Za-z0-9_]*\(/);
 });
 
+test("the tables name namespaces, classes and multinames by the module's shorthands", {
+  skip,
+}, () => {
+  testing.domainReset(50);
+  const js = module("builtin.abc", true);
+  assert.match(js, /\n {2}const mn = \(kind, set, name\) => rt\.name\(N, V, kind, set, name\);\n/);
+  assert.match(js, /\n {4}mn\(7, \[\d+\], "Object"\),\n/);
+  assert.match(js, /\bcls\(ns\(\d, "[\w.]*"\), "\w+"\)/);
+  assert.equal(js.match(/rt\.(ns|cls|name)\(/g)?.length, 3, "only in the shorthands");
+});
+
 test("a metadata item's key or value past the string pool is empty, as avmplus reads it", {
   skip,
 }, () => {
@@ -467,9 +478,7 @@ function factoryAt(factories: string, index: number): string {
   let at = -1;
   for (let i = 1; i < lines.length; i++) {
     if (
-      /^ {4}(\(scope, sup, \$dx[^)]*\) =>|\(\(\.\.\.T\) => \(scope, sup, \$dx[^)]*\) =>|rt\.)/.test(
-        lines[i],
-      ) &&
+      /^ {4}(\(\(\.\.\.T\) => |\((scope(, sup(, \$dx[^)]*)?)?)?\) =>|rt\.)/.test(lines[i]) &&
       /[[,]$/.test(lines[i - 1]) &&
       ++at === index
     ) {
@@ -563,5 +572,44 @@ test("a null check is made where the instruction it checks for reads the value f
     /= rt\.getProperty\(l1 \?\? nn\(l1\), M\[1\]\);/,
   );
   // A conversion to Object reads it after a check of its own.
-  assert.match(emit(script([GETLOCAL1, CONVERT_O, RETURNVALUE])), /\n {4}l1 \?\? nn\(l1\);\n/);
+  assert.match(emit(script([GETLOCAL1, CONVERT_O, RETURNVALUE])), /\nl1 \?\? nn\(l1\);\n/);
+});
+
+test("undefined is written void 0, and a return of it a bare return", { skip }, () => {
+  const PUSHUNDEFINED = 0x21;
+  const KILL = 0x08;
+  const RETURNVOID = 0x47;
+  const js = emit(script([PUSHUNDEFINED, SETLOCAL1, GETLOCAL1, POP, KILL, 1, RETURNVOID]));
+  assert.match(js, /\nl1 = void 0;\n/);
+  assert.match(js, /\nreturn;\n/);
+  assert.doesNotMatch(js, /\bundefined\b/);
+});
+
+test("registers reset one after another are reset in one statement", { skip }, () => {
+  const KILL = 0x08;
+  const code = [PUSHBYTE, 1, SETLOCAL1, PUSHBYTE, 2, SETLOCAL2, GETLOCAL1, GETLOCAL2, ADD, POP];
+  const js = emit(script([...code, KILL, 1, KILL, 2, KILL, 3, PUSHBYTE, 3, RETURNVALUE]));
+  assert.match(js, /\nl1 = l2 = l3 = void 0;\n/);
+  assert.equal(run(script([...code, KILL, 1, GETLOCAL1, KILL, 2, RETURNVALUE])), undefined);
+});
+
+test("a factory names only the parameters its method uses", { skip }, () => {
+  testing.domainReset(50);
+  const js = module("builtin.abc", true);
+  const factories = js.match(/\(([^()]*)\) => function \$\w*\([^)]*\) \{\n(.*\n){2}/g) ?? [];
+  const named = (params: string) => factories.filter((f) => f.startsWith(`(${params}) =>`));
+  assert.ok(named("").length > 0, "() =>");
+  assert.ok(named("scope, sup").length > 0, "(scope, sup) =>");
+  // $dx where the method checks it on entry, and only there.
+  const dx = named("scope, sup, $dx = rt.defaultXmlNamespace");
+  assert.ok(dx.length > 0);
+  assert.ok(dx.every((f) => f.includes("rt.defaultXmlNamespace !== $dx")));
+  assert.equal(js.match(/!== \$dx\)/g)?.length, dx.length);
+});
+
+test("a module's code has no empty statements or trailing spaces", { skip }, () => {
+  testing.domainReset(50);
+  const js = module("builtin.abc", true);
+  const methods = js.slice(js.indexOf("const F = ["));
+  assert.doesNotMatch(methods, /;;\n|\};\n|[ \t]\n|\n\n/);
 });

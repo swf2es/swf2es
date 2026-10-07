@@ -308,7 +308,7 @@ export function domainEmitEach(bodies: string, reuse: bool, which: i32 = -1): st
       continue;
     }
 
-    const body = <u32>I32.parseInt(list[k]);
+    const body = <u32>i32.parse(list[k]);
     if (body >= abc.bodyCount) {
       continue;
     }

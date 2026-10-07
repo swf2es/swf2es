@@ -44,20 +44,15 @@ export function typeRef(e: MethodEmitter, t: i32): void {
     return;
   }
 
-  if (!e.typeIndex.has(t)) {
-    e.typeIndex.set(t, <u32>e.types.length);
-    e.types.push(t);
-  }
-
   out.text("T[");
-  out.uint(e.typeIndex.get(t));
+  out.uint(e.typeSlot(t));
   out.text("]");
 }
 
 /**
  * A reference to type t for the runtime, by name, as types are known
  * across modules: null for *, a string for the builtin primitive types,
- * rt.cls(namespace, "Name") for a class, rt.vector(type) for Vector.<T>.
+ * cls(namespace, "Name") for a class, rt.vector(type) for Vector.<T>.
  */
 export function typeExpr(e: MethodEmitter, t: i32): void {
   const out = e.out;
@@ -114,7 +109,7 @@ export function typeExpr(e: MethodEmitter, t: i32): void {
     }
 
     const name = domain.abcString[index][pool.mnB[mn]];
-    out.text("rt.cls(");
+    out.text("cls(");
     const id = domain.abcNs[index][ns];
     if (domain.nsType[id] === NS_Private && index === e.index) {
       // A private namespace is its module's own object, N[k], which its
@@ -132,10 +127,10 @@ export function typeExpr(e: MethodEmitter, t: i32): void {
   }
 }
 
-/** A non-private namespace by its interned id, as rt.ns(type, uri). */
+/** A non-private namespace by its interned id, as ns(type, uri). */
 export function namespace(e: MethodEmitter, id: u32): void {
   const out = e.out;
-  out.text("rt.ns(");
+  out.text("ns(");
   out.uint(e.domain.nsType[id]);
   out.text(", ");
   uri(e, e.domain.nsUri[id]);
@@ -238,7 +233,7 @@ export function defaultOf(e: MethodEmitter, type: i32): void {
   const out = e.out;
   switch (e.domain.builtin(type)) {
     case BUILTIN_Any:
-      out.text("undefined");
+      out.text("void 0");
       return;
     case BUILTIN_Int:
     case BUILTIN_Uint:
