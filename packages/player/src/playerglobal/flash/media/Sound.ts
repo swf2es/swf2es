@@ -1,9 +1,11 @@
 // flash.media.Sound and SoundChannel: a SWF's embedded sound or a host-fetched
 // MP3, with playback through the host's audio device and frame-delivered
 // events; the channels themselves, and the timeline's sounds, are the
-// player's (media/sounds.ts).
+// player's (media/sounds.ts), and what extract reads is media/extract.ts'.
 import { avm2 } from "@swf2es/runtime";
-import type { SoundMix } from "../../../media/audio.js";
+import type { SoundCharacter } from "../../../display/timeline.js";
+import type { DecodedSound, SoundMix } from "../../../media/audio.js";
+import { type ExtractSource, extractSamples, soundSamples } from "../../../media/extract.js";
 import {
   type ChannelState,
   channels,
@@ -24,6 +26,9 @@ import type { Scripting } from "../../../scripting.js";
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
+/** An uncompressed or ADPCM DefineSound's samples, decoded once for extract; null for another format. */
+const embeddedSamples = new WeakMap<SoundCharacter, Float32Array[] | null>();
+
 function stateOf(o: AsObject): SoundState {
   if (o.$sound) {
     return o.$sound;
@@ -40,6 +45,8 @@ function stateOf(o: AsObject): SoundState {
     generation: 0,
     abort: null,
     clip: null,
+    decoded: null,
+    extracted: 0,
   };
   o.$sound = state;
   return state;
@@ -137,8 +144,89 @@ export function soundNatives(s: Scripting): avm2.Natives {
       });
   };
 
+  /**
+   * What extract reads of a sound now: an MP3's decode only once it is
+   * done, which the browser's decoder gives late where Flash's gives at
+   * once, so that an MP3's first extract starts its decode and gives
+   * nothing.
+   */
+  const extractSource = (sound: SoundState): ExtractSource | null => {
+    const character = sound.character;
+    let decoded: DecodedSound | null = sound.decoded;
+    let skip = 0;
+    if (character) {
+      const definition = character.definition;
+      if (definition.format !== 2) {
+        let channels = embeddedSamples.get(character);
+        if (channels === undefined) {
+          channels = soundSamples(definition);
+          embeddedSamples.set(character, channels);
+        }
+
+        return channels ? { rate: definition.sampleRate, channels, skip: 0, whole: true } : null;
+      }
+
+      decoded = s.symbols.decodedSound(character);
+      skip = Math.max(0, definition.seekSamples);
+      if (!decoded) {
+        const task = s.symbols.soundClip(character);
+        if (task) {
+          s.loads.trackRequest(
+            task.then(
+              () => {},
+              () => {},
+            ),
+          );
+        }
+      }
+    }
+
+    const samples = decoded?.samples;
+    return samples ? { rate: samples.rate, channels: samples.channels, skip, whole: false } : null;
+  };
   class SoundNatives {
     declare $sound: SoundState | undefined;
+
+    /**
+     * Up to `length` samples at 44.1 kHz into `target` at its position, a
+     * float each for left and right in its byte order, from `startPosition`
+     * or, for -1, from where the last extract stopped.
+     */
+    extract(target: Value, length: Value, startPosition: Value = -1): number {
+      const sound = stateOf(this as AsObject);
+      if (target === null || target === undefined) {
+        return 0;
+      }
+
+      const start = s.rt.toNumber(startPosition);
+      if (start >= 0) {
+        sound.extracted = Math.floor(start);
+      }
+
+      const source = extractSource(sound);
+      if (!source) {
+        return 0;
+      }
+
+      const { samples, position, count } = extractSamples(
+        source,
+        sound.extracted,
+        s.rt.toNumber(length),
+      );
+      sound.extracted = position;
+      const b = avm2.bytesOf(s.rt, target as AsObject);
+      const bytes = new Uint8Array(samples.length * 4);
+      const view = new DataView(bytes.buffer);
+      for (let i = 0; i < samples.length; i++) {
+        view.setFloat32(i * 4, samples[i], b.littleEndian);
+      }
+
+      if (bytes.length) {
+        b.write(bytes);
+      }
+
+      return count;
+    }
 
     "flash.media:Sound::_load"(request: Value, _checkPolicyFile: Value, _bufferTime: Value): void {
       // Sound's AS3 constructor always calls load, with null when it was given no request.
@@ -219,6 +307,10 @@ export function soundNatives(s: Scripting): avm2.Natives {
         const completed = sound.clip.then(
           (clip) => {
             sound.length = clip.durationMs;
+            if (sound.generation === generation) {
+              sound.decoded = clip;
+            }
+
             s.loads.deferHostEvent(() => {
               if (sound.generation === generation) {
                 dispatchEvent(s, this as AsObject, s.event("complete"));
@@ -385,6 +477,8 @@ export function soundHooks(s: Scripting): Record<string, avm2.ClassHook> {
           generation: 0,
           abort: null,
           clip: null,
+          decoded: null,
+          extracted: 0,
         } satisfies SoundState;
         return o;
       },

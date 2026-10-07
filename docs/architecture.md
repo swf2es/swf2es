@@ -934,8 +934,9 @@ and the player's paths in this document are relative to it:
 - `text/`: text fields' model and layout, static text, fonts and CSS.
 - `bitmap/`: the pixel store and its operations on the CPU, bitmap
   filters, decoded images and PNG encoding.
-- `media/`: sound: decoding and the host's device (`audio.ts`), and
-  the sounds the player plays, the timeline's and scripts' channels
+- `media/`: sound: decoding and the host's device (`audio.ts`), MP3
+  frames' headers (`mp3.ts`), what `Sound.extract` reads (`extract.ts`),
+  and the sounds the player plays, the timeline's and scripts' channels
   (`sounds.ts`).
 - `input/`: the pointer and the keyboard.
 - `render/`: the PixiJS view (`view.ts`) and what only it uses: shapes'
@@ -1940,6 +1941,17 @@ decoded audio while a sound uses it; entries leave when no SWF holds their
 sound definition, so unused audio can be collected. The parser leaves the
 MP3 seek word out of the encoded bytes; the tag's sample count and rate,
 not the decoder's duration, give the embedded sound's `length`.
+
+`Sound.extract` gives a sound's samples at 44.1 kHz in stereo as adl
+does (`media/extract.ts`, the `sound-extract` case): each sample held for
+as many as its rate falls short, and positions counting the sound's own
+samples. An uncompressed or ADPCM sound is decoded for it at once, whole
+samples only. An MP3 comes from the host's decode, which the browser host
+does at the MP3's own rate, of whole frames, with a Xing or Info header
+frame as a frame of silence, as Flash decodes it rather than trimmed by it
+as a browser would; a DefineSound's seekSamples are skipped. Flash's
+decode is at once and the browser's is not: an MP3's first extract starts
+its decode and gives nothing, and the frames after give what Flash gives.
 
 An external `Sound.load` uses the same host fetch as `URLStream`; its
 open, progress and complete or error reach ActionScript on a frame, after

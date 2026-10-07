@@ -30,6 +30,10 @@ export interface SoundState {
   generation: number;
   abort: AbortController | null;
   clip: Promise<DecodedSound> | null;
+  /** The clip once decoded, for what extract reads at once. */
+  decoded: DecodedSound | null;
+  /** Where extract goes on from, in the sound's own samples. */
+  extracted: number;
 }
 
 export interface ChannelState {

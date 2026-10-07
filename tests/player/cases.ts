@@ -2216,6 +2216,98 @@ export const toneScript =
     });
   };
 
+/** A sound the tests made (sounds/README.md). */
+const soundFile = (name: string): Uint8Array =>
+  new Uint8Array(readFileSync(new URL(`sounds/${name}`, import.meta.url)));
+
+/** 16-bit little-endian samples, as uncompressed DefineSound data. */
+function pcm16(samples: number[]): Uint8Array {
+  const out = new Uint8Array(samples.length * 2);
+  const view = new DataView(out.buffer);
+  for (const [i, v] of samples.entries()) {
+    view.setInt16(i * 2, v, true);
+  }
+
+  return out;
+}
+
+/**
+ * Sounds to extract (scripts/<script>.as): uncompressed ramps at three
+ * rates and both sizes, and the MP3s of sounds/, one with seekSamples,
+ * bound to classes by name.
+ */
+export const extractSounds =
+  (script: string) =>
+  (compile: Compile): Uint8Array => {
+    const ramp = (n: number, step: number, from = 0) =>
+      Array.from({ length: n }, (_, i) => from + i * step);
+    const stereo = ramp(100, 300, -15000).flatMap((v) => [v, -v / 2]);
+    const mp3 = (bytes: Uint8Array, seek: number) => {
+      const out = new Uint8Array(bytes.length + 2);
+      new DataView(out.buffer).setInt16(0, seek, true);
+      out.set(bytes, 2);
+      return out;
+    };
+    const tone = soundFile("tone.mp3");
+    const tone22 = soundFile("tone22.mp3");
+    const sounds: [string, Uint8Array][] = [
+      ["Pcm8", w.defineSound(1, { rate: 0, samples: 32 }, new Uint8Array(ramp(32, 8)))],
+      [
+        "Pcm16Stereo",
+        w.defineSound(2, { rate: 3, sixteen: true, stereo: true, samples: 100 }, pcm16(stereo)),
+      ],
+      [
+        "Pcm11",
+        w.defineSound(3, { rate: 1, sixteen: true, samples: 50 }, pcm16(ramp(50, 600, -15000))),
+      ],
+      [
+        "Pcm22",
+        w.defineSound(4, { rate: 2, sixteen: true, samples: 50 }, pcm16(ramp(50, 600, -15000))),
+      ],
+      [
+        "Mp3",
+        w.defineSound(
+          5,
+          { format: 2, rate: 3, sixteen: true, stereo: true, samples: 11025 },
+          mp3(tone, 1105),
+        ),
+      ],
+      [
+        "Mp3Whole",
+        w.defineSound(
+          6,
+          { format: 2, rate: 3, sixteen: true, stereo: true, samples: 12672 },
+          mp3(tone, 0),
+        ),
+      ],
+      [
+        "Mp3Mono22",
+        w.defineSound(7, { format: 2, rate: 2, sixteen: true, samples: 5513 }, mp3(tone22, 0)),
+      ],
+    ];
+    const tags = sounds.map(([, tag]) => tag);
+    const classes = sounds.map(([name]) =>
+      compile(name, `package { import flash.media.Sound; public class ${name} extends Sound {} }`),
+    );
+    return w.swf({
+      width: 20,
+      height: 20,
+      frameRate: 24,
+      frameCount: 3,
+      tags: [
+        w.fileAttributes(true),
+        ...tags,
+        ...classes.map((abc, i) => w.doAbc(abc, sounds[i][0])),
+        w.doAbc(compile(script)),
+        w.symbolClass([[0, script], ...sounds.map(([name], i): [number, string] => [i + 1, name])]),
+        w.showFrame(),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+  };
+
 // Bitmap fills (scripts/BitmapFills.as): a 4 x 4 bitmap, every pixel its
 // own colour and one translucent, filling a rect larger than it at five
 // times its size in each of the four fill types, the bitmap's origin 10
@@ -4291,6 +4383,14 @@ export const cases: PlayerCase[] = [
     swf: (abc) => bare(abc, 1, "ReadGraphicsData"),
     script: "ReadGraphicsData",
     frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "sound-extract",
+    build: extractSounds("SoundExtract"),
+    frames: 3,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,
