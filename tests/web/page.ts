@@ -231,6 +231,20 @@ async function resize() {
   };
 }
 
+/** watchFlash, then an <embed> the page adds: what it became once the observer ran. */
+async function watched() {
+  const stop = web.watchFlash();
+  const embed = document.createElement("embed");
+  embed.setAttribute("src", "/web-test/shapes.swf");
+  embed.id = "added";
+  document.body.append(embed);
+  await new Promise((done) => setTimeout(done, 0));
+  stop();
+  const added = element("added");
+  await added.ready;
+  return { tag: added.localName, playing: added.player !== null };
+}
+
 /** Kept weakly: the players of the elements made and destroyed, which a collection must take. */
 const gone: WeakRef<object>[] = [];
 
@@ -271,6 +285,7 @@ Object.assign(globalThis, {
   externalInterface,
   destroyMovie,
   resize,
+  watched,
   churn,
   survivors,
   webCounts: () => ({ ...counts }),

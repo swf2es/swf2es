@@ -204,6 +204,10 @@ check("the element follows its size and the device's pixels", async (evaluate) =
   assert.deepEqual(r, { dpr: 2, canvas: [640, 480], css: ["320px", "120px"] });
 });
 
+check("watchFlash replaces the Flash tags the page adds later", async (evaluate) => {
+  assert.deepEqual(await call(evaluate, "watched()"), { tag: "swf2es-player", playing: true });
+});
+
 check("destroy takes the callbacks off and closes the socket and the audio", async (evaluate) => {
   const before = await call<Record<string, number>>(evaluate, "webCounts()");
   const r = await call<{
