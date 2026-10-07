@@ -1,0 +1,140 @@
+// A ModuleCache of the modules the swf2es command compiled ahead of time,
+// read-only: each found by the key the command wrote beside it, which is
+// the one the player asks for when the SWF loads in the position the
+// command compiled it for, with its log, which the player replays as it
+// does a cached module's. A key the manifest lacks, as one taken by
+// another compiler, whose identity keys name, is a miss, and the player
+// compiles (see docs/architecture.md, Caching modules).
+import type { CachedModule, ModuleCache } from "@swf2es/player";
+
+export interface PrecompiledModulesOptions {
+  /** A file the manifest names, or the manifest, read by its URL: fetched by default. */
+  read?: (url: URL) => Promise<string>;
+  /**
+   * Have the player import each module from its URL, as an ES module, not
+   * evaluate its text: for a page whose Content-Security-Policy refuses
+   * 'unsafe-eval'. The document then keeps the modules for as long as it
+   * lives.
+   */
+  importModules?: boolean;
+}
+
+/** The manifest's format this reads, the command's MANIFEST_VERSION: any other names no module. */
+const MANIFEST_VERSION = 2;
+
+interface Entry {
+  module: URL;
+  log: URL;
+  lengths: [number, number];
+}
+
+/**
+ * The modules of the manifest.json at `manifest` (a URL, resolved against
+ * the page's), and the logs beside them. The manifest is read at the first
+ * get, and again at the next if that failed. Asks for every module however
+ * small, so that with each precompiled none compiles.
+ */
+export function precompiledModules(
+  manifest: string | URL,
+  options: PrecompiledModulesOptions = {},
+): ModuleCache {
+  const base = new URL(manifest, globalThis.location?.href);
+  const read = options.read ?? fetchText;
+  let entries: Promise<Map<string, Entry>> | null = null;
+  const load = async () => {
+    const parsed = JSON.parse(await read(base));
+    const map = new Map<string, Entry>();
+    if (parsed?.manifestVersion !== MANIFEST_VERSION) {
+      return map;
+    }
+
+    for (const e of [parsed.libraries, parsed.abcs].flat()) {
+      const { key, module, log, lengths } = e ?? {};
+      if (
+        typeof key === "string" &&
+        typeof module === "string" &&
+        typeof log === "string" &&
+        Array.isArray(lengths) &&
+        lengths.length === 2
+      ) {
+        map.set(key, {
+          module: new URL(module, base),
+          log: new URL(log, base),
+          lengths: [...lengths] as [number, number],
+        });
+      }
+    }
+
+    return map;
+  };
+
+  return {
+    minBytes: 0,
+    async get(key: string): Promise<CachedModule | undefined> {
+      entries ??= load();
+      let found: Entry | undefined;
+      try {
+        found = (await entries).get(key);
+      } catch (e) {
+        entries = null;
+        throw e;
+      }
+
+      if (!found) {
+        return undefined;
+      }
+
+      const { module, log, lengths } = found;
+      if (options.importModules) {
+        return { module: "", log: await read(log), lengths, url: module.href };
+      }
+
+      const [text, logText] = await Promise.all([read(module), read(log)]);
+      return { module: text, log: logText, lengths };
+    },
+    async put() {},
+    async delete() {},
+  };
+}
+
+async function fetchText(url: URL): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`${url}: HTTP ${response.status}`);
+  }
+
+  return response.text();
+}
+
+/**
+ * Caches asked in order, the first that holds a module answering, as the
+ * modules compiled ahead of time and then an IndexedDB cache: a module
+ * compiled goes to each, and one that failed leaves each. One that fails
+ * is passed over. Asks for the ABCs the member that asks for the smallest
+ * does, every member then asked for them.
+ */
+export function chainCaches(...caches: ModuleCache[]): ModuleCache {
+  const sizes = caches.flatMap((c) => (c.minBytes === undefined ? [] : [c.minBytes]));
+  const each = async (f: (cache: ModuleCache) => Promise<void>) => {
+    await Promise.allSettled(caches.map(f));
+  };
+  return {
+    minBytes: sizes.length ? Math.min(...sizes) : undefined,
+    async get(key) {
+      for (const cache of caches) {
+        try {
+          const entry = await cache.get(key);
+          if (entry !== undefined) {
+            return entry;
+          }
+        } catch {
+          // The next may hold it.
+        }
+      }
+
+      return undefined;
+    },
+    put: (key, entry) => each((c) => c.put(key, entry)),
+    delete: (key) => each((c) => c.delete(key)),
+  };
+}
