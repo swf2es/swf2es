@@ -174,7 +174,15 @@ Each method goes through the same steps, in `codegen`:
    (the locals, scope stack and operand stack, each value with its type,
    whether it is known not null, and whether it is a with scope), merges it
    where control flow joins, and walks a block again when its entry state
-   changes, until none does. A second pass walks the blocks in code order
+   changes, until none does. avmplus knows a value not null after a null
+   check of it, but not the local it copies, so a frame state also keeps
+   which locals are neither null nor undefined at run time: checked since
+   they were last set, as a copy of them on the stack was, or compared with
+   a `pushnull` or `pushundefined` (`==`, not `===`; a value only typed
+   void, as a native's result, may be anything) or tested true where a
+   branch goes on, on every path in; a handler gets the locals as they were where its range threw.
+   That takes away only checks that cannot fail, and changes no type the
+   verifier sees. A second pass walks the blocks in code order
    with their final states; there `newclass` and `newfunction` capture the
    scope chains the methods they create run in, and the same pass will
    write the IR, so what is compiled is exactly what was verified. An ABC's

@@ -81,3 +81,66 @@ test("a script's own global is found statically, and its slots bind early", { sk
     "  11: returnvoid",
   ]);
 });
+
+const PUSHNULL = 0x20;
+const PUSHUNDEFINED = 0x21;
+const IFFALSE = 0x12;
+const IFEQ = 0x13;
+const IFNE = 0x14;
+const IFSTRICTEQ = 0x19;
+const EQUALS = 0xab;
+const NOT = 0x96;
+const KILL = 0x08;
+const GETPROPERTY = 0x66;
+/** l1.x, popped: the local, untyped, needs a null check. */
+const GET_X = [GETLOCAL1, GETPROPERTY, 1, POP];
+
+/** How many null checks the IR of a script initializer with `code` has. */
+function checks(code: number[], frame = {}): number {
+  return ir(script(code, frame)).filter((line) => line.includes("checknull")).length;
+}
+
+test("a local checked on every path since it was set needs no check again", { skip }, () => {
+  assert.equal(checks([...GET_X, ...GET_X, RETURNVOID]), 1);
+  // 4: iftrue +4 to 9, past the first check, in both its branches.
+  const branches = [PUSHTRUE, IFTRUE, ...s24(4), ...GET_X, ...GET_X, ...GET_X, RETURNVOID];
+  assert.equal(checks([...GET_X, ...branches.slice(0, -1), RETURNVOID]), 1);
+});
+
+test("a local set, killed, or unchecked on some path in is checked again", { skip }, () => {
+  assert.equal(checks([...GET_X, PUSHNULL, SETLOCAL1, ...GET_X, RETURNVOID]), 2);
+  assert.equal(checks([...GET_X, KILL, 1, ...GET_X, RETURNVOID]), 2);
+  // 1: iftrue +4 to 9, around the first check.
+  assert.equal(checks([PUSHTRUE, IFTRUE, ...s24(4), ...GET_X, ...GET_X, RETURNVOID]), 2);
+});
+
+test("a local compared with null or tested true needs no check where that tells", { skip }, () => {
+  // 2: ifeq +4 to 10, the end: if (l1 != null) l1.x
+  assert.equal(checks([GETLOCAL1, PUSHNULL, IFEQ, ...s24(4), ...GET_X, RETURNVOID]), 0);
+  // if (l1 == null) l1.x: only where it is null
+  assert.equal(checks([GETLOCAL1, PUSHNULL, IFNE, ...s24(4), ...GET_X, RETURNVOID]), 1);
+  // 4: iffalse +4 to 12: if (!(l1 == null)) l1.x
+  const not = [GETLOCAL1, PUSHNULL, EQUALS, NOT, IFFALSE, ...s24(4), ...GET_X, RETURNVOID];
+  assert.equal(checks(not), 0);
+  // if (l1) l1.x
+  assert.equal(checks([GETLOCAL1, IFFALSE, ...s24(4), ...GET_X, RETURNVOID]), 0);
+  // if (!l1) l1.x; then l1.x where both ways in tell it is not null.
+  assert.equal(checks([GETLOCAL1, IFTRUE, ...s24(4), ...GET_X, ...GET_X, RETURNVOID]), 1);
+  // l1 !== null may still be undefined.
+  assert.equal(checks([GETLOCAL1, PUSHNULL, IFSTRICTEQ, ...s24(4), ...GET_X, RETURNVOID]), 1);
+  // l1 != undefined, pushed, tells as null does.
+  assert.equal(checks([GETLOCAL1, PUSHUNDEFINED, IFEQ, ...s24(4), ...GET_X, RETURNVOID]), 0);
+  // A value only typed void, as a native's :void result, may be anything:
+  // l2 = undefined; if (l1 != l2) l1.x
+  const typed = [PUSHUNDEFINED, SETLOCAL2, GETLOCAL1, GETLOCAL2, IFEQ, ...s24(4), ...GET_X];
+  assert.equal(checks([...typed, RETURNVOID]), 1);
+});
+
+test("a handler sees a local as it was where its range threw", { skip }, () => {
+  // 4: jump +5 to 13; 8: the handler, for the check in 0..4.
+  const handled = [...GET_X, JUMP, ...s24(5), POP, ...GET_X, RETURNVOID];
+  assert.equal(checks(handled, { exceptions: [[0, 4, 8, 0, 0]] }), 2);
+  // Checked before the range: 8: jump +5 to 17; 12: the handler, for 4..8.
+  const before = [...GET_X, ...GET_X, JUMP, ...s24(5), POP, ...GET_X, RETURNVOID];
+  assert.equal(checks(before, { exceptions: [[4, 8, 12, 0, 0]] }), 1);
+});

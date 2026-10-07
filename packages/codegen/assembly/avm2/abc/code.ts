@@ -129,6 +129,23 @@ const INSIDE: u8 = 2;
 // Frame value flags.
 export const NOT_NULL: u8 = 1;
 export const WITH: u8 = 2;
+/**
+ * Neither null nor undefined, as a null check of the same local found it
+ * since it was last set, on every path here: the verifier still does not
+ * know it not null, as avmplus' marks only the stack value it checked, but
+ * no check of it needs code.
+ */
+export const CHECKED: u8 = 4;
+const KNOWN: u8 = NOT_NULL | CHECKED;
+
+// What a stack value tells of a local: it is a copy of the local, or the local
+// is neither null nor undefined when the value is true, or when it is false.
+const ORIGIN_Copy: i32 = 0;
+const ORIGIN_IfTrue: i32 = 1;
+const ORIGIN_IfFalse: i32 = 2;
+// A stack value pushnull or pushundefined pushed: a value only typed null or
+// void may be anything a native returns.
+const ORIGIN_Nullish: i32 = -2;
 
 // Multiname parts, as avmplus' Multiname flags.
 export const MN_Attr: u8 = 1;
@@ -205,6 +222,17 @@ export class BodyDecoder {
   entryType: StaticArray<i32> = new StaticArray<i32>(0);
   entryFlags: StaticArray<u8> = new StaticArray<u8>(0);
   entryUsed: u32 = 0;
+  /**
+   * By stack value, what it tells of a local in the block being walked, as
+   * `local << 2 | ORIGIN_*`, or -1; with that local's count of writes
+   * then, which must still be its count for it to tell of the local's value.
+   */
+  origin: StaticArray<i32> = new StaticArray<i32>(0);
+  originWrite: StaticArray<u32> = new StaticArray<u32>(0);
+  /** The count of writes of the local nullTest's result tells of. */
+  testWrite: u32 = 0;
+  /** By local: how many times it was set. */
+  localWrites: StaticArray<u32> = new StaticArray<u32>(0);
   /** Each handler's exception type and catch scope type. */
   handlerType: i32[] = [];
   /**
@@ -631,6 +659,9 @@ export class BodyDecoder {
     if (<u32>this.valueType.length < this.frameSize) {
       this.valueType = new StaticArray<i32>(this.frameSize);
       this.valueFlags = new StaticArray<u8>(this.frameSize);
+      this.origin = new StaticArray<i32>(this.frameSize);
+      this.originWrite = new StaticArray<u32>(this.frameSize);
+      this.localWrites = new StaticArray<u32>(this.frameSize);
     }
 
     const m = this.global;
@@ -661,7 +692,96 @@ export class BodyDecoder {
     this.valueFlags[i] = flags;
     if (i < this.localCount) {
       this.localsVersion++;
+      this.localWrites[i]++;
+    } else {
+      this.origin[i] = -1;
     }
+  }
+
+  /** What stack value i tells of a local, if its local is unchanged since: an ORIGIN_* encoding or -1. */
+  originOf(i: u32): i32 {
+    const o = this.origin[i];
+    if (o < 0 || this.originWrite[i] !== this.localWrites[o >> 2]) {
+      return -1;
+    }
+
+    this.testWrite = this.originWrite[i];
+    return o;
+  }
+
+  /** As originOf, a copy as what its truth tells: no local is null or undefined and true. */
+  truthOf(i: u32): i32 {
+    const o = this.originOf(i);
+    return o >= 0 && (o & 3) === ORIGIN_Copy ? o | ORIGIN_IfTrue : o;
+  }
+
+  /** What `==` of the top two values tells, one of them a null or undefined pushed, the other a local's copy. */
+  equalsNull(): i32 {
+    const lhs = this.peek(2);
+    const rhs = this.peek(1);
+    let o = -1;
+    if (this.origin[rhs] === ORIGIN_Nullish) {
+      o = this.originOf(lhs);
+    } else if (this.origin[lhs] === ORIGIN_Nullish) {
+      o = this.originOf(rhs);
+    }
+
+    return o >= 0 && (o & 3) === ORIGIN_Copy ? o | ORIGIN_IfFalse : -1;
+  }
+
+  /**
+   * What instruction `opcode` tells of a local's being neither null nor
+   * undefined, from its operands: as an ORIGIN_* encoding, for a test
+   * its result's, for a conditional branch its condition's; -1 for nothing.
+   */
+  nullTest(opcode: u8): i32 {
+    // Too few values fail the instruction's verification after this.
+    const one = this.stack >= 1;
+    const two = this.stack >= 2;
+    let o = -1;
+    switch (opcode) {
+      case ops.OP_iftrue:
+        return one ? this.truthOf(this.peek(1)) : -1;
+      case ops.OP_iffalse:
+      case ops.OP_not:
+        o = one ? this.truthOf(this.peek(1)) : -1;
+        break;
+      case ops.OP_equals:
+      case ops.OP_ifeq:
+        return two ? this.equalsNull() : -1;
+      case ops.OP_ifne:
+        o = two ? this.equalsNull() : -1;
+        break;
+      default:
+        return -1;
+    }
+
+    return o < 0 ? o : o ^ (ORIGIN_IfTrue | ORIGIN_IfFalse);
+  }
+
+  /** Mark local `local` checked, returning its flags before. */
+  markChecked(local: u32): u8 {
+    const flags = this.valueFlags[local];
+    this.valueFlags[local] = flags | CHECKED;
+    this.localsVersion++;
+    return flags;
+  }
+
+  /** Push null or undefined, of `type`, as what equalsNull compares with. */
+  pushNullish(type: i32): bool {
+    const i = this.stackBase + this.stack;
+    this.setValue(i, type, 0);
+    this.origin[i] = ORIGIN_Nullish;
+    return true;
+  }
+
+  /** Push local `a`, as a copy of it. */
+  pushLocal(a: u32): bool {
+    const i = this.stackBase + this.stack;
+    this.setValue(i, this.typeOf(a), this.valueFlags[a] & KNOWN);
+    this.origin[i] = ((<i32>a) << 2) | ORIGIN_Copy;
+    this.originWrite[i] = this.localWrites[a];
+    return true;
   }
 
   @inline
@@ -965,6 +1085,7 @@ export class BodyDecoder {
         const base = this.stackBase;
         const firstType = this.valueType[base];
         const firstFlags = this.valueFlags[base];
+        const firstOrigin = this.origin[base];
         const type = this.handlerType[i];
         this.setValue(base, type, this.domain.typeNotNull(type) ? NOT_NULL : 0);
         this.stack = 1;
@@ -973,6 +1094,7 @@ export class BodyDecoder {
         this.stack = stack;
         this.scope = scope;
         this.setValue(base, firstType, firstFlags);
+        this.origin[base] = firstOrigin;
         if (!reached) {
           return false;
         }
@@ -990,6 +1112,10 @@ export class BodyDecoder {
     this.stack = stack;
     this.scope = scope;
     let pc = start;
+    // Every way in has its own copies.
+    if (this.typed) {
+      memory.fill(changetype<usize>(this.origin), 0xff, (<usize>this.frameSize) << 2);
+    }
 
     while (true) {
       if (pc >= this.length) {
@@ -1030,8 +1156,15 @@ export class BodyDecoder {
       this.walkOf[pc] = start;
       this.stackAt[pc] = this.stack;
       this.scopeAt[pc] = this.scope;
+      const test = this.typed ? this.nullTest(opcode) : -1;
       if (!this.verifyAt(pc, opcode)) {
         return false;
+      }
+
+      if (test >= 0 && (opcode === ops.OP_equals || opcode === ops.OP_not)) {
+        const i = this.peek(1);
+        this.origin[i] = test;
+        this.originWrite[i] = this.testWrite;
       }
 
       // Targets get the state after the instruction, as in the verifier.
@@ -1039,8 +1172,21 @@ export class BodyDecoder {
       const stack = this.stack;
       const scope = this.scope;
       if (operands === OPERANDS_Branch) {
+        // A test of a local goes on with it neither null nor undefined where it tells so.
+        const local = test >> 2;
+        const kind = test & 3;
+        const before = test >= 0 && kind === ORIGIN_IfTrue ? this.markChecked(local) : 0;
         if (!this.target(<i64>pc, <i64>next + this.slotA[pc], stack, scope)) {
           return false;
+        }
+
+        if (test >= 0) {
+          if (kind === ORIGIN_IfTrue) {
+            this.valueFlags[local] = before;
+            this.localsVersion++;
+          } else {
+            this.markChecked(local);
+          }
         }
       } else if (opcode === ops.OP_lookupswitch) {
         if (!this.target(<i64>pc, <i64>pc + this.slotA[pc], stack, scope)) {
@@ -1397,9 +1543,9 @@ export class BodyDecoder {
       case ops.OP_lookupswitch:
         return this.peekType(1, domain.intType);
       case ops.OP_pushnull:
-        return this.push(domain.nullType, 0);
+        return this.pushNullish(domain.nullType);
       case ops.OP_pushundefined:
-        return this.push(domain.voidType, 0);
+        return this.pushNullish(domain.voidType);
       case ops.OP_pushtrue:
       case ops.OP_pushfalse:
         return this.push(domain.booleanType, NOT_NULL);
@@ -1417,10 +1563,10 @@ export class BodyDecoder {
       case ops.OP_pushnamespace:
         return this.push(domain.namespaceType, NOT_NULL);
       case ops.OP_setlocal:
-        this.setValue(a, this.typeOf(top), this.valueFlags[top] & NOT_NULL);
+        this.setValue(a, this.typeOf(top), this.valueFlags[top] & KNOWN);
         return true;
       case ops.OP_getlocal:
-        return this.push(this.typeOf(a), this.valueFlags[a] & NOT_NULL);
+        return this.pushLocal(a);
       case ops.OP_newfunction:
         if (this.emitPass && !this.captureFunction(a)) {
           return false;
@@ -1736,13 +1882,18 @@ export class BodyDecoder {
         this.checkNull(this.peek(2));
         return true;
       }
-      case ops.OP_dup:
-        return this.push(this.typeOf(top), this.valueFlags[top] & NOT_NULL);
+      case ops.OP_dup: {
+        const i = this.stackBase + this.stack;
+        this.push(this.typeOf(top), this.valueFlags[top] & KNOWN);
+        this.origin[i] = this.origin[top];
+        this.originWrite[i] = this.originWrite[top];
+        return true;
+      }
       case ops.OP_swap: {
         const below = this.peek(2);
         const type = this.typeOf(top);
-        const flags = this.valueFlags[top] & NOT_NULL;
-        this.setValue(top, this.typeOf(below), this.valueFlags[below] & NOT_NULL);
+        const flags = this.valueFlags[top] & KNOWN;
+        this.setValue(top, this.typeOf(below), this.valueFlags[below] & KNOWN);
         this.setValue(below, type, flags);
         return true;
       }
@@ -1863,10 +2014,9 @@ export class BodyDecoder {
     }
 
     if (opcode >= ops.OP_setlocal0 && opcode < ops.OP_setlocal0 + 4) {
-      this.setValue(opcode - ops.OP_setlocal0, this.typeOf(top), this.valueFlags[top] & NOT_NULL);
+      this.setValue(opcode - ops.OP_setlocal0, this.typeOf(top), this.valueFlags[top] & KNOWN);
     } else if (opcode >= ops.OP_getlocal0 && opcode < ops.OP_getlocal0 + 4) {
-      const i = <u32>(opcode - ops.OP_getlocal0);
-      return this.push(this.typeOf(i), this.valueFlags[i] & NOT_NULL);
+      return this.pushLocal(<u32>(opcode - ops.OP_getlocal0));
     }
 
     return true;
@@ -1889,7 +2039,8 @@ export class BodyDecoder {
   /** As Verifier::emitCoerce: value i becomes `type`, still null or not. */
   coerce(i: u32, type: i32): void {
     const changes = this.valueType[i] !== type;
-    this.setValue(i, type, this.valueFlags[i] & NOT_NULL);
+    // A coercion of a value neither null nor undefined is not either.
+    this.setValue(i, type, this.valueFlags[i] & KNOWN);
     if (this.emitPass && changes && type !== TYPE_Any) {
       this.emit(IR_Coerce, <i32>i, <i32>i, 1, 0, 0, type, this.pc);
     }
@@ -1897,18 +2048,28 @@ export class BodyDecoder {
 
   /** As FrameState::setType from a conversion instruction: value i becomes `type`, without IR of its own. */
   retype(i: u32, type: i32): void {
-    this.setValue(i, type, this.valueFlags[i] & NOT_NULL);
+    this.setValue(i, type, this.valueFlags[i] & KNOWN);
   }
 
-  /** As Verifier::emitCheckNull: value i is known not null from here on. */
+  /**
+   * As Verifier::emitCheckNull: value i is known not null from here on. The
+   * local it copies, unchanged since, is checked too, for the verifier no
+   * more than avmplus' knows.
+   */
   checkNull(i: u32): void {
-    if (this.emitPass && !(this.valueFlags[i] & NOT_NULL)) {
+    if (this.emitPass && !(this.valueFlags[i] & KNOWN)) {
       this.emit(IR_CheckNull, -1, <i32>i, 1, 0, 0, 0, this.pc);
     }
 
     this.valueFlags[i] = this.valueFlags[i] | NOT_NULL;
     if (i < this.localCount) {
       this.localsVersion++;
+      return;
+    }
+
+    const o = this.originOf(i);
+    if (o >= 0 && (o & 3) === ORIGIN_Copy) {
+      this.markChecked(o >> 2);
     }
   }
 
