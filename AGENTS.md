@@ -40,7 +40,8 @@ node tests/player/corpus/check-references.ts [prefix...]   # the corpus's expect
 node tests/fuzz/abc.ts [cases, 2000] [seed, 1]   # malformed ABCs: codegen never traps, its modules
                               # parse, JIT equals AOT (SWF2ES_CHECKED=1 for the checked build)
 node tests/player/leak.ts [--loads N] [--snapshots DIR]   # load SWFs over and over in Chrome; the
-                              # heap after a full collection must stay bounded (part of pnpm test)
+                              # heap after a full collection must stay bounded, and codegen's
+                              # memory must not grow (part of pnpm test)
 node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
                               # timeline in Chrome; keep a change only for a gain that repeats
 ```

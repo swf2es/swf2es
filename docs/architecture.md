@@ -1263,9 +1263,10 @@ entries are built apart from their module, will need this again. The
 symbols bound to names nothing defined (`Symbols.unbound`) are still
 kept for good, their libraries with them.
 `tests/player/leak.ts` loads SWFs over and over, by Loaders and in
-players made again, and checks that the heap stays bounded, and that a
-text field kept from a SWF let go still takes a font registered after a
-collection.
+players made again, and checks that the heap stays bounded, that
+codegen's memory does not grow where one player loads them all, and that
+a text field kept from a SWF let go still takes a font registered after
+a collection.
 `SymbolClass`
 then binds character ids to classes by qualified name through the
 runtime's name resolution; id 0 is the document class, constructed on the

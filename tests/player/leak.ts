@@ -18,7 +18,9 @@
 // Each child is a class of METHODS methods its constructor calls, so that
 // its compiled code is tens of kilobytes, and run, not just loaded. The
 // heap is measured after WARM loads and again after LOADS, and each mode
-// fails if it grew by more than BOUND bytes a load in between.
+// fails if it grew by more than BOUND bytes a load in between; where one
+// player loads them all, also if codegen's memory grew, which wasm never
+// gives back: the compiler must reuse what each load's ABC took.
 //
 // --snapshots DIR writes a heap snapshot at each measure,
 // for DevTools' Memory panel to compare and find what keeps a load's objects.
@@ -39,7 +41,7 @@ const option = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const snapshots = option("snapshots");
-const LOADS = Number(option("loads") ?? 60);
+const LOADS = Number(option("loads") ?? 120);
 const modes = args.filter((a, i) => !a.startsWith("--") && !args[i - 1]?.startsWith("--"));
 const KINDS = 20;
 const METHODS = 150;
@@ -296,11 +298,14 @@ await withSteppedPage(
       const perLoad = (heaps[1] - heaps[0]) / loads;
       const ms = (performance.now() - warmed) / loads;
       const ok = perLoad <= BOUND;
-      failed ||= !ok;
+      const codegenOk = codegen.length < 2 || codegen[1] <= codegen[0];
+      failed ||= !ok || !codegenOk;
       console.log(
         `${mode}: heap ${mb(heaps[0])} after ${WARM} loads, ${mb(heaps[1])} after ${LOADS}, ` +
           `${(perLoad / 1024).toFixed(1)} KB a load${ok ? "" : ` (more than ${BOUND / 1024} KB)`}; ` +
-          (codegen.length ? `codegen ${mb(codegen[0])} to ${mb(codegen[1])}; ` : "") +
+          (codegen.length
+            ? `codegen ${mb(codegen[0])} to ${mb(codegen[1])}${codegenOk ? "" : " (grew)"}; `
+            : "") +
           `${ms.toFixed(1)} ms a load`,
       );
     }
