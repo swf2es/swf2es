@@ -344,13 +344,14 @@ export function globalWebSocketHost(): WebSocketHost | null {
 }
 
 /**
- * A module as a ModuleCache keeps it: its source, and what compiling it
- * fixed in the compiler's domain (Codegen.compileModuleLogged), which the
- * player replays in place of compiling it.
+ * A module as a ModuleCache keeps it: its source, what compiling it fixed
+ * in the compiler's domain (Codegen.compileModuleLogged), which the player
+ * replays in place of compiling it, and the two's lengths, which it checks.
  */
 export interface CachedModule {
   module: string;
   log: string;
+  lengths: [module: number, log: number];
 }
 
 /**
@@ -365,4 +366,6 @@ export interface ModuleCache {
   get(key: string): Promise<CachedModule | undefined>;
   /** Store `entry` under `key`; a store that is full may evict others, or refuse it. */
   put(key: string, entry: CachedModule): Promise<void>;
+  /** Let go of what is stored under `key`, as a module that loaded part of itself and failed. */
+  delete(key: string): Promise<void>;
 }

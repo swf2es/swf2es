@@ -19,8 +19,18 @@ export const API_VERSION = 50;
 export class Code {
   /** Each ABC's hash, by its index in the compiler; "" once its domain is dropped. */
   private readonly hashes: string[] = [];
-  /** Whether each ABC was added as one of the player's own libraries, by its index. */
+  /** Whether each ABC was added as one of the player's own libraries, and its size in bytes, by its index. */
   private readonly builtins: boolean[] = [];
+  private readonly sizes: number[] = [];
+  /**
+   * How many ABCs there were when the first went into a domain but the
+   * root's: the libraries. The log's entries made while there were no
+   * more are in every later module's context alike, so the cache's keys
+   * name them by a digest taken once (see moduleKey), with the compiler's
+   * epoch it was taken in.
+   */
+  private libraryCount: number | null = null;
+  private libraryLog: { epoch: number; digest: string } | null = null;
   /**
    * The compiler's application domain for each of the runtime's, by its
    * number; the compiler's index of each ABC added into one, in order; and
@@ -210,7 +220,12 @@ export class Code {
 
     this.codegenAbcs.get(domain.id)?.push(this.hashes.length);
     this.evictable.get(domain.id)?.set(this.hashes.length, abc.slice());
+    if (domain !== this.s.rt.root && this.libraryCount === null) {
+      this.libraryCount = this.hashes.length;
+    }
+
     this.builtins.push(builtin);
+    this.sizes.push(abc.length);
     this.hashes.push(await sha256(abc));
     return this.hashes.length - 1;
   }
@@ -311,18 +326,20 @@ export class Code {
     } else {
       // A cached module that does not evaluate, or that the runtime refuses
       // before loading anything of it (its linked ABCs differ), is compiled
-      // now, the domain already as its compile left it, and stored again.
+      // now, the domain already as its compile left it; one that loaded
+      // part of itself cannot be, and the load fails. Either way its entry
+      // goes, not stored again: the SWF's later modules were readied
+      // since, and the key the compile now would have is not this one.
       const loaded = domain.own.length;
       try {
         linked = load(ready.module);
       } catch (e) {
+        this.discard(ready.key);
         if (domain.own.length !== loaded) {
           throw e;
         }
 
-        const module = this.s.codegen.compileModule(this.hashes, index);
-        this.store(ready.key, { module, log: ready.log });
-        linked = load(module);
+        linked = load(this.s.codegen.compileModule(this.hashes, index));
       }
     }
 
@@ -346,61 +363,107 @@ export class Code {
    * it holds one for the ABC's key, what its compile fixed in the
    * compiler's domain replayed in its place, else compiled and given to
    * the cache: the domain is as compiling each would have left it either
-   * way, which the next one's key names. Any error of the cache's is a
-   * miss.
+   * way, which the next one's key names. An ABC smaller than
+   * MIN_CACHED_ABC is compiled, the cache not asked. Any error of the
+   * cache's is a miss.
    */
   private async prepare(indices: number[]): Promise<Ready[]> {
     const cache = this.cache();
     const ready: Ready[] = [];
+    await this.digestLibraries(indices[0]);
     for (const index of indices) {
-      const asked = this.moduleKey(index);
+      if (this.sizes[index] < MIN_CACHED_ABC) {
+        const module = this.s.codegen.compileModule(this.hashes, index);
+        ready.push({ module, key: null, cached: false });
+        continue;
+      }
+
+      // Read again by the key taken again if the read let another load
+      // change the compiler's domain, a few times at most.
+      let key = this.moduleKey(index);
       let entry: CachedModule | undefined;
-      if (cache && asked !== null) {
+      for (let tries = 0; cache && key !== null && tries < 3; tries++) {
+        const revision = this.s.codegen.revision();
+        const asked: string = key;
         try {
           entry = await cache.get(await sha256Text(asked));
         } catch {
           entry = undefined;
         }
+
+        if (this.s.codegen.revision() === revision) {
+          break;
+        }
+
+        key = this.moduleKey(index);
+        if (key === asked) {
+          break;
+        }
+
+        entry = undefined;
       }
 
-      // Taken again next to the replay or the compile, which the awaits
-      // let other loads come between.
-      const key = this.moduleKey(index);
       let failed = false;
-      if (
-        key !== null &&
-        key === asked &&
-        typeof entry?.module === "string" &&
-        typeof entry.log === "string"
-      ) {
+      if (key !== null && entry !== undefined && whole(entry)) {
         if (this.s.codegen.replay(entry.log, index)) {
-          ready.push({ module: entry.module, log: entry.log, key, cached: true });
+          ready.push({ module: entry.module, key, cached: true });
           continue;
         }
 
-        // Done part way, the log left the domain as no compile would.
+        // Done part way, the log left the domain as no compile would: the
+        // module compiled now is not that key's, and the entry goes.
         failed = true;
+        this.discard(key);
       }
 
       const { module, log } = this.s.codegen.compileModuleLogged(this.hashes, index);
       if (log !== null && !failed) {
-        this.store(key, { module, log });
+        this.store(key, module, log);
       }
 
-      ready.push({ module, log: log ?? "", key, cached: false });
+      ready.push({ module, key, cached: false });
     }
 
     return ready;
   }
 
-  /** Give the cache `entry` under `key`'s hash, not waiting for it. */
-  private store(key: string | null, entry: CachedModule): void {
+  /** Give the cache `module` and `log` under `key`'s hash, with their lengths, not waiting for it. */
+  private store(key: string | null, module: string, log: string): void {
     const cache = this.cache();
     if (cache && key !== null) {
+      const entry: CachedModule = { module, log, lengths: [module.length, log.length] };
       sha256Text(key)
         .then((k) => cache.put(k, entry))
         .catch(() => {});
     }
+  }
+
+  /** Have the cache let go of what it holds under `key`'s hash, not waiting for it. */
+  private discard(key: string | null): void {
+    const cache = this.cache();
+    if (cache && key !== null) {
+      sha256Text(key)
+        .then((k) => cache.delete(k))
+        .catch(() => {});
+    }
+  }
+
+  /**
+   * Take the digest of the log's entries made while only the libraries
+   * were added, once a compiler's epoch, with ABC `index`, any but theirs:
+   * some hundred thousand characters of the context, which keyed into each
+   * module's key took milliseconds a module.
+   */
+  private async digestLibraries(index: number | undefined): Promise<void> {
+    const count = this.libraryCount;
+    const epoch = this.s.codegen.epoch;
+    if (count === null || index === undefined || this.libraryLog?.epoch === epoch) {
+      return;
+    }
+
+    const context = this.s.codegen.context(index, 0, count);
+    const digest = await sha256Text(context?.log ?? "");
+    this.libraryLog = { epoch, digest };
   }
 
   /**
@@ -409,10 +472,15 @@ export class Code {
    * hash and whether it is a library, those added after it included, its
    * own place among them, and the compiler's log about them, the lazy
    * answers fixed so far and the findings recorded, in order (see
-   * Codegen.context). Null where there is none.
+   * Codegen.context), the libraries' part by its digest once taken. Null
+   * where there is none.
    */
   private moduleKey(index: number): string | null {
-    const context = this.s.codegen.context(index);
+    const libraries =
+      this.libraryCount !== null && this.libraryLog?.epoch === this.s.codegen.epoch
+        ? { count: this.libraryCount, digest: this.libraryLog.digest }
+        : null;
+    const context = this.s.codegen.context(index, libraries?.count ?? 0);
     if (!context) {
       return null;
     }
@@ -422,6 +490,7 @@ export class Code {
       api: API_VERSION,
       abcs: context.abcs.map((i) => `${this.builtins[i] ? "builtin " : ""}${this.hashes[i]}`),
       own: context.own,
+      libraries,
       log: context.log,
     });
   }
@@ -473,10 +542,32 @@ export class Code {
   }
 }
 
+/**
+ * The smallest ABC, in bytes, whose module is looked for in the cache.
+ * Measured in Chrome, medians of nine, a module's key, read and replay
+ * against its compile, the libraries' digest (1.7 ms, once a player) left
+ * out: 1 KB 0.5 ms against 0.3, 2.4 KB 0.5 against 0.6, 4.3 KB 0.6
+ * against 1.0, 6.8 KB 0.9 against 1.5, 12 KB 0.9 against 2.4, 31 KB 1.5
+ * against 6.0, 128 KB 4.3 against 27, 517 KB 33 against 133. Below 8 KB
+ * the cache would save half a millisecond at most, for a read of a
+ * database that may first have to open and a write.
+ */
+const MIN_CACHED_ABC = 8 * 1024;
+
+/** Whether `entry` is a module and a log of the lengths stored with them: a write cut short at a line's end is a shorter log. */
+function whole(entry: CachedModule): boolean {
+  return (
+    typeof entry.module === "string" &&
+    typeof entry.log === "string" &&
+    Array.isArray(entry.lengths) &&
+    entry.lengths[0] === entry.module.length &&
+    entry.lengths[1] === entry.log.length
+  );
+}
+
 /** A module made ready to load: from the cache, its log replayed, or compiled; its key, if it has one. */
 interface Ready {
   module: string;
-  log: string;
   key: string | null;
   cached: boolean;
 }

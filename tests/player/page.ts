@@ -722,8 +722,9 @@ interface CacheCheck {
   kept: string[];
   /** Whether a module larger than the whole cache was stored. */
   oversized: boolean;
-  /** Whether the cache, closed, read a module again. */
+  /** Whether the cache, closed, read a module again; then deleted it. */
   reopened: boolean;
+  deleted: boolean;
 }
 
 /**
@@ -746,6 +747,7 @@ async function moduleCacheSwf(base64: string): Promise<CacheCheck> {
       await cache.put(key, module);
       written.push(key);
     },
+    delete: (key) => cache.delete(key),
   };
   const loads: CacheCheck["loads"] = [];
   const play = async () => {
@@ -787,10 +789,16 @@ async function moduleCacheSwf(base64: string): Promise<CacheCheck> {
   // Closed, it opens again.
   cache.close();
   const reopened = (await cache.get(keys[0])) !== undefined;
+  await cache.delete(keys[0]);
+  const deleted = (await cache.get(keys[0])) === undefined;
 
   // Room for two modules of 10 characters, 20 bytes each.
   const small = indexedDbModuleCache({ name: `${name}-small`, maxBytes: 40 });
-  const ten = (c: string, n = 10) => ({ module: c.repeat(n), log: "" });
+  const ten = (c: string, n = 10) => ({
+    module: c.repeat(n),
+    log: "",
+    lengths: [n, 0] as [number, number],
+  });
   await small.put("a", ten("a"));
   await small.put("b", ten("b"));
   // Used later than "b" was put, by the clock's milliseconds.
@@ -806,13 +814,16 @@ async function moduleCacheSwf(base64: string): Promise<CacheCheck> {
 
   await small.put("d", ten("d", 30));
   const oversized = (await small.get("d")) !== undefined;
-  cache.close();
-  small.close();
+
+  for (const c of [cache, small]) {
+    c.close();
+  }
+
   for (const db of [name, `${name}-small`]) {
     indexedDB.deleteDatabase(db);
   }
 
-  return { loads, kept, oversized, reopened };
+  return { loads, kept, oversized, reopened, deleted };
 }
 
 const page = globalThis as unknown as {

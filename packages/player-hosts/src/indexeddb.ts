@@ -22,8 +22,8 @@ export interface IndexedDbModuleCache extends ModuleCache {
   close(): void;
 }
 
-/** The database's version: 2 keeps each module with its compile's log. */
-const VERSION = 2;
+/** The database's version: 2 kept each module with its compile's log, 3 with their lengths too. */
+const VERSION = 3;
 const MODULES = "modules";
 /** Each module's size and last use, apart from it, so that evicting reads no module. */
 const ENTRIES = "entries";
@@ -62,7 +62,11 @@ export function indexedDbModuleCache(
       const db = await database();
       const stored = await request<unknown>(db.transaction(MODULES).objectStore(MODULES).get(key));
       const module = stored as CachedModule | undefined;
-      if (typeof module?.module !== "string" || typeof module.log !== "string") {
+      if (
+        typeof module?.module !== "string" ||
+        typeof module.log !== "string" ||
+        !Array.isArray(module.lengths)
+      ) {
         return undefined;
       }
 
@@ -73,7 +77,11 @@ export function indexedDbModuleCache(
         entries.put({ ...entry, used: Date.now() });
       }
 
-      return { module: module.module, log: module.log };
+      return {
+        module: module.module,
+        log: module.log,
+        lengths: [...module.lengths] as [number, number],
+      };
     },
     async put(key, module) {
       const bytes = (module.module.length + module.log.length) * 2;
@@ -86,7 +94,7 @@ export function indexedDbModuleCache(
       const tx = db.transaction([MODULES, ENTRIES], "readwrite");
       const modules = tx.objectStore(MODULES);
       const entries = tx.objectStore(ENTRIES);
-      modules.put({ module: module.module, log: module.log }, key);
+      modules.put({ module: module.module, log: module.log, lengths: module.lengths }, key);
       entries.put({ key, bytes, used: Date.now() } as Entry);
       // Oldest first, the one just put among them.
       const all = await request<Entry[]>(entries.index(USED).getAll());
@@ -107,6 +115,12 @@ export function indexedDbModuleCache(
         }
       }
 
+      await done(tx);
+    },
+    async delete(key) {
+      const tx = (await database()).transaction([MODULES, ENTRIES], "readwrite");
+      tx.objectStore(MODULES).delete(key);
+      tx.objectStore(ENTRIES).delete(key);
       await done(tx);
     },
     close() {
