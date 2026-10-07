@@ -971,44 +971,6 @@ test("the pointer over an AVM1 movie hits its Loader, the AVM1Movie being no Int
   assert.equal(pointerTarget(player.stage, 15, 15, player.width, player.height), player.stage);
 });
 
-test("timers fire in the order of their times, each at its own time", { skip }, async () => {
-  const lines: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: (line) => lines.push(line),
-    // The frame clock: what the timers trace of getTimer is the same on every run.
-    realTime: null,
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  // A 10 fps root: the clock is at 100 as the constructor starts the timers, at 400 after three ticks.
-  const player = new Player(bare(compiler(out)("Timers"), 4), scripting);
-  player.frameRate = 10;
-  await player.start();
-  player.tick();
-  player.tick();
-  player.tick();
-  // Both due at 400: B was scheduled for it first, at 250, and goes first.
-  assert.deepEqual(lines, ["A 200", "B 250", "A 300", "B 400", "A 400"]);
-});
-
-test("timers due at once fire in the order started, after others around them were stopped", {
-  skip,
-}, async () => {
-  const lines: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: (line) => lines.push(line),
-    // The frame clock: what the timers trace of getTimer is the same on every run.
-    realTime: null,
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  // Five timers started A to E, three stopped at once: B and C, both due at 300, keep their order.
-  const player = new Player(bare(compiler(out)("TimerTies"), 3), scripting);
-  player.frameRate = 10;
-  await player.start();
-  player.tick();
-  player.tick();
-  assert.deepEqual(lines, ["B 300", "C 300"]);
-});
-
 test("an AS3 error tells a host the methods it was thrown in", { skip }, async () => {
   const source = `package {
     import flash.display.MovieClip;
@@ -1818,24 +1780,6 @@ test("scripts that catch the stack overflow of their goto cycles stop soon, not 
   assert.ok(runs > 256 && runs < 10000, `${runs} runs`);
 });
 
-test("a timer whose closure throws keeps running and fires again", { skip }, async () => {
-  const lines: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: (line) => lines.push(line),
-    // The frame clock: what the timers trace of getTimer is the same on every run.
-    realTime: null,
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const player = new Player(bare(compiler(out)("TimerThrows"), 3), scripting);
-  player.frameRate = 10;
-  await player.start();
-  // The first firing's error reaches the host; the timer is back in its place for the next.
-  assert.throws(() => player.tick());
-  assert.equal(scripting.now, scripting.clock);
-  player.tick();
-  assert.deepEqual(lines, ["firing 1 200 true", "firing 2 300 true"]);
-});
-
 test("a bitmap a timeline places is a Bitmap, its bound class its data's with HasImage alone", {
   skip,
 }, async () => {
@@ -1904,72 +1848,4 @@ test("a bitmap a timeline places is a Bitmap, its bound class its data's with Ha
     bare.error,
     "TypeError: Error #2022: Class PlacedData$ must inherit from DisplayObject to link to a symbol.",
   );
-});
-
-test("getTimer reads the real clock as it runs on within a frame, or the frame clock if asked", {
-  skip,
-}, async () => {
-  const compile = compiler(out);
-  const swf = bare(
-    compile(
-      "ClockReads",
-      `package {
-        import flash.display.Sprite;
-        import flash.utils.getTimer;
-        public class ClockReads extends Sprite {
-          public function ClockReads() { var a:int = getTimer(); var b:int = getTimer(); trace(a, b); }
-        }
-      }`,
-    ),
-    1,
-    "ClockReads",
-  );
-
-  // The frame clock: the first frame's time at 24 fps, the same at each read.
-  const framed: string[] = [];
-  const stepped = new Scripting(await createCodegen(wasm), {
-    print: (l) => framed.push(l),
-    realTime: null,
-  });
-  await stepped.loadLibraries(libraryAbcs(`${out}libraries/`));
-  await new Player(swf, stepped).start();
-  assert.deepEqual(framed, ["42 42"]);
-
-  // A host's clock, read once as the player starts, then at each getTimer:
-  // the time since, which runs on within the frame.
-  let clock = 1000;
-  const real: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: (l) => real.push(l),
-    realTime: () => (clock += 2),
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  await new Player(swf, scripting).start();
-  assert.deepEqual(real, ["2 4"]);
-});
-
-test("getTimer runs on in real time by default", { skip }, async () => {
-  const swf = bare(
-    compiler(out)(
-      "ClockRuns",
-      `package {
-        import flash.display.Sprite;
-        import flash.utils.getTimer;
-        public class ClockRuns extends Sprite {
-          public function ClockRuns() {
-            var start:int = getTimer();
-            for (var n:int = 0; getTimer() == start && n < 100000000; n++) {}
-            trace(getTimer() > start);
-          }
-        }
-      }`,
-    ),
-    1,
-    "ClockRuns",
-  );
-  const lines: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  await new Player(swf, scripting).start();
-  assert.deepEqual(lines, ["true"]);
 });

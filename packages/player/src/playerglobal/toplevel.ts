@@ -63,8 +63,8 @@ export function toplevelNatives(s: Scripting): avm2.Natives {
       const alias = rt.aliasOf(v.$it ? v.$it : rt.traitsOf(v));
       return alias === "" ? null : alias;
     },
-    // Milliseconds since the start, by the host's real clock or the frame clock (Scripting.timer).
-    "flash.utils::getTimer": () => () => s.timer(),
+    // Milliseconds since the start, by the host's real clock or the frame clock (Timers.timer).
+    "flash.utils::getTimer": () => () => s.timers.timer(),
     "flash.utils::escapeMultiByte": (rt) => (text: Value) => escapeMultiByte(rt.toString(text)),
     "flash.utils::unescapeMultiByte": (rt) => (text: Value) => unescapeMultiByte(rt.toString(text)),
   };

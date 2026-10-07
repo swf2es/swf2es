@@ -303,7 +303,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
       const channel = s.rt.construct(s.rt.classNamed("flash.media::SoundChannel")) as AsObject;
       const state: ChannelState = {
         sound,
-        started: s.now,
+        started: s.timers.now,
         start,
         loops: Math.max(0, s.rt.toInt(loops)),
         mix: channelMix(mixOf(transform as AsObject | null)),

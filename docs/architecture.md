@@ -800,13 +800,14 @@ builds at that size.
 and the player's paths in this document are relative to it:
 
 - `index.ts` is the package's one entry point; `player.ts` runs a SWF,
-  `scripting.ts` connects it to the runtime and the compiler,
-  `scripting/events.ts` dispatches events to AS3 listeners, `hosts.ts`
+  `scripting.ts` connects it to the runtime and the compiler, with its
+  parts in `scripting/`: `events.ts` dispatches events to AS3 listeners,
+  `timers.ts` keeps the clock and the timers that fire by it. `hosts.ts`
   holds what a host may supply in place of the browser (navigation,
   shared objects' storage, the platform Capabilities reports) with the
   browser's defaults, and the interfaces of what only a host supplies
-  (ExternalInterface's page, a renderer's draws, fetches, sockets), and
-  `sha256.ts` names the ABCs it compiles.
+  (ExternalInterface's page, a renderer's draws, fetches, sockets);
+  `sha256.ts` names the ABCs the player compiles.
 - `display/`: the display list and the timeline, and what they are made
   of: shapes, morphs, drawings, bounds and hit tests, 9-slice scaling,
   geometry, 3D matrices, colour transforms, gradients' ramps, and filters
@@ -1862,7 +1863,8 @@ and a timer's `getTimer() - start >= delay` still holds.
 
 `flash.utils.Timer` is playerglobal's own in all but three natives: the
 counting, `delay`'s range (RangeError #2066), `reset` and the events are
-AS3; the player keeps the timers started, each with its delay and the
+AS3; the player keeps the timers started (`scripting/timers.ts`, with
+the clock), each with its delay and the
 closure to call, fires the ones due as a frame begins, before its
 timeline advances, each firing the earliest due so that two timers
 interleave as their times do, two due at once in the order scheduled,

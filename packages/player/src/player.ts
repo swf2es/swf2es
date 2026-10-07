@@ -88,7 +88,7 @@ export class Player {
     s.frameRate = this.frameRate;
     s.constructAs(this.stage, s.rt.classNamed("flash.display::Stage"));
     // The first frame has its time too: the clock is a frame's duration on as it runs, as in Flash.
-    s.beginFrame(1000 / this.frameRate);
+    s.timers.beginFrame(1000 / this.frameRate);
     // The main SWF's LoaderInfo: on the root, which every display object under it reports.
     const info = s.loaderInfo(null);
     s.describe(info, this.bytes, this.swf);
@@ -184,7 +184,7 @@ export class Player {
    */
   tick(): void {
     this.played++;
-    this.scripting?.beginFrame(1000 / this.frameRate);
+    this.scripting?.timers.beginFrame(1000 / this.frameRate);
     const clips: MovieClip[] = [];
     const collect = (o: DisplayObject) => {
       if (o instanceof MovieClip) {
