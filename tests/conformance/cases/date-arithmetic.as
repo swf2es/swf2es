@@ -1,0 +1,77 @@
+// Date's arithmetic as avmplus' own: the constructor and Date.UTC do not
+// clip the time, years below 100 (negative ones too) are 1900's, a year
+// out of a 32-bit int's range wraps, and a setter changes only the fields
+// it is given, a NaN among them, used or not, making the time NaN.
+function show(d:Date):void {
+  trace(d.getTime(), isNaN(d.getTime()) ? "" : d.getUTCFullYear() + "-" + d.getUTCMonth() + "-" + d.getUTCDate());
+}
+show(new Date(-1, 0));
+show(new Date(99.5, 0));
+show(new Date(300000, 0));
+show(new Date(-300000, 0));
+trace(Date.UTC(300000, 0), Date.UTC(-1, 0), Date.UTC(1e10, 0));
+trace(new Date(2000, 0, 1, 0, 0, 0, 0.7).getTime(), new Date(2000, 0, 1, 0, 0, 0, -0.7).getTime());
+trace(new Date(1e300, 0).getTime(), new Date(2000, 1e300).getTime(), new Date(2000, 0, 1e20).getTime());
+trace(new Date(-271821, 3, 19).getTime(), new Date(-271821, 3, 20).getTime(), new Date(275760, 8, 14).getTime());
+trace(new Date(300000, 0).toString(), new Date(300000, 0).getFullYear(), new Date(300000, 0).getDay());
+var d:Date = new Date(0);
+d.setMonth(1, 31, 5);
+show(d);
+d = new Date(0);
+d.setMonth(1, 2, NaN);
+show(d);
+d = new Date(NaN);
+d.setMonth(1);
+show(d);
+d = new Date(NaN);
+d.setFullYear(2000);
+show(d);
+d = new Date(NaN);
+d.setUTCFullYear(2000, 1);
+show(d);
+d = new Date(NaN);
+d.setHours(1);
+show(d);
+d = new Date(0);
+d.setFullYear(1e10);
+show(d);
+d = new Date(0);
+d.setFullYear(275760, 8, 13);
+show(d);
+d = new Date(0);
+d.setFullYear(275760, 8, 14);
+show(d);
+d = new Date(0);
+d.setMonth(1.9, 2.9);
+show(d);
+d = new Date(0);
+d.setMonth(-13);
+show(d);
+d = new Date(0);
+d.setHours(1.5, -0.5);
+show(d);
+d = new Date(0);
+d.setMonth();
+show(d);
+d = new Date(0);
+d.setMonth(undefined);
+show(d);
+d = new Date(0);
+d.setMonth(3, undefined);
+show(d);
+d = new Date(0);
+d.setDate();
+show(d);
+d = new Date(0);
+d.setMilliseconds(Infinity);
+show(d);
+d = new Date(8.64e15);
+d.setMilliseconds(1);
+show(d);
+d = new Date(-8.64e15);
+d.setUTCHours(-1);
+show(d);
+d = new Date(0);
+d.setUTCSeconds(59, 999, 5);
+show(d);
+trace(d.getUTCSeconds(), d.getUTCMilliseconds(), d.getSeconds(), d.getTimezoneOffset());
