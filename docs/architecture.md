@@ -261,6 +261,16 @@ changes or a branch needs the stack as it is. A value the next instruction
 only moves to a local (a `setlocal`) goes to the local straight, and a
 conversion that changes nothing writes no code.
 
+A null check is `r ?? nn(r)`, where `nn`, the module's, throws the
+runtime's TypeError for the value, 1009 for null and 1010 for undefined.
+It is made where the instruction it checks for reads the register, when
+that instruction reads it before doing anything that can throw or be
+seen, as a property's get, set or call does: `s0 = (s1 ?? nn(s1)).$2`,
+`rt.getProperty(l1 ?? nn(l1), M[3])`. Otherwise, as when a conversion
+of an argument comes between, it is a statement of its own, `s1 ??
+nn(s1);`. `nn`'s frame is not named with a `$`, so the stack a host is
+shown starts at the method, as before.
+
 Each module has a source map (version 3) from the ABC's `debugfile` and
 `debugline`, where an ABC compiled with them has them (asc's `-d`): the
 method emitter marks where the code for each AS3 line starts as it writes
@@ -432,7 +442,7 @@ one costs one check there; the function it returns is the entry's own.
 
 **Building an entry.** The entry's source, from `compileMethods`, is
 evaluated by a strict `Function` given the module's tables as parameters:
-`new Function("rt", "N", "S", "M", "V", "F", "A", '"use strict"; return ' +
+`new Function("rt", "nn", "N", "S", "M", "V", "F", "A", '"use strict"; return ' +
 entry)`. Both halves of that matter:
 
 - A direct `eval` in the module's scope makes the functions it builds
