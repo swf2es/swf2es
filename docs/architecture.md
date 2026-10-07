@@ -543,8 +543,13 @@ player's, which its own `Code.link` compiles in node.
 Adobe's libraries cannot ship, so `--lib` names them, in load order; with
 none given, the command takes builtin.abc and playerglobal.abc from
 `tests/player/out/libraries/`, where the player's tests copy them, and
-says what to pass when they are not there. A library of the player's
-own, such as AIR's declarations, is one more `--lib`.
+says what to pass when they are not there. The player loads only the
+libraries its host gives `loadLibraries`, builtin and playerglobal by
+default: a host that also loads one of the player's own, as
+`airLibrary`, gets the same modules only from a command given the same
+libraries in the same order. An AVM1 SWF, whose FileAttributes lacks the
+ActionScript 3 flag, is refused, as the player never compiles its
+DoABCs, and so is a file that ends inside a DoABC.
 
 It writes a module per ABC, `abc-<n>.js` (`lib-<n>.js` for the libraries
 with `--emit-libraries`), and `manifest.json`: the compiler, by

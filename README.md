@@ -98,7 +98,10 @@ node packages/cli/dist/main.js movie.swf -o movie.swf2es \
 ```
 
 Without `--lib` it uses the copies the player's tests keep in
-`tests/player/out/libraries/`. `swf2es --help` lists the options.
+`tests/player/out/libraries/`. `swf2es --help` lists the options. It
+exits with 2 for a mistake in the command line or missing default
+libraries, and 1 for any other failure: an unreadable, AVM1 or rejected
+input or library, or an output it cannot write.
 
 ## Development
 
