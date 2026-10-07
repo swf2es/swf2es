@@ -85,6 +85,7 @@ function stateOf(o: AsObject): SoundState {
     generation: 0,
     abort: null,
     clip: null,
+    frames: null,
     compressed: false,
     pcm: null,
     extracted: 0,
@@ -164,6 +165,10 @@ export function soundNatives(s: Scripting): avm2.Natives {
   };
   const startAudio = (state: ChannelState): void => {
     const sound = state.sound;
+    if (!sound.character && !sound.clip) {
+      sound.clip = loadedClip(sound);
+    }
+
     const task = sound.character ? s.symbols.soundClip(sound.character) : sound.clip;
     void task
       ?.then(
@@ -183,6 +188,19 @@ export function soundNatives(s: Scripting): avm2.Natives {
           discardChannel(state);
         }
       });
+  };
+
+  /** The decode a sound loaded from a ByteArray plays, made when it first plays. */
+  const loadedClip = (sound: SoundState) => {
+    if (!s.audio) {
+      return null;
+    }
+
+    if (sound.pcm) {
+      return s.audio.decode(pcmSound(sound.pcm));
+    }
+
+    return sound.compressed && sound.bytes ? s.audio.decode(sound.bytes) : null;
   };
 
   /**
@@ -306,24 +324,38 @@ export function soundNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("ArgumentError", 2084);
       }
 
-      const data = b.read(n);
+      const data = b.readView(n);
       if (sound.character) {
         return;
       }
 
-      const before = sound.compressed && sound.bytes ? sound.bytes : new Uint8Array(0);
-      const all = new Uint8Array(before.length + data.length);
-      all.set(before);
-      all.set(data, before.length);
-      const mp3 = mp3Frames(all);
+      // Into room kept past the bytes before, which doubles as they grow,
+      // their frames read on from where they stopped: chunk by chunk, it
+      // all takes time in step with its bytes. Its decodes wait till it
+      // plays or a script extracts it.
+      const had = sound.compressed ? sound.bytes : null;
+      const size = (had?.length ?? 0) + n;
+      let buffer =
+        had && had.byteOffset === 0 && had.buffer.byteLength >= size
+          ? new Uint8Array(had.buffer)
+          : null;
+      if (!buffer) {
+        buffer = new Uint8Array(Math.max(size, (had?.length ?? 0) * 2));
+        buffer.set(had ?? []);
+      }
+
+      buffer.set(data, had?.length ?? 0);
+      const all = buffer.subarray(0, size);
+      const mp3 = mp3Frames(all, had ? sound.frames : null);
       sound.bytes = all;
+      sound.frames = mp3;
       sound.compressed = true;
       sound.pcm = null;
       sound.used = true;
       sound.loaded = n;
       sound.total = n;
       sound.length = mp3 ? (mp3.frames * mp3.samplesPerFrame * 1000) / mp3.rate : 0;
-      sound.clip = s.audio ? s.audio.decode(all) : null;
+      sound.clip = null;
       mp3Decodes.delete(sound);
       dispatchEvent(
         s,
@@ -404,7 +436,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
       // In samples a millisecond, to adl's last bit.
       sound.length = pcm[0].length / (EXTRACT_RATE / 1000);
       sound.extracted = 0;
-      sound.clip = s.audio ? s.audio.decode(pcmSound(pcm)) : null;
+      sound.clip = null;
     }
 
     "flash.media:Sound::_load"(request: Value, _checkPolicyFile: Value, _bufferTime: Value): void {
@@ -653,6 +685,7 @@ export function soundHooks(s: Scripting): Record<string, avm2.ClassHook> {
           generation: 0,
           abort: null,
           clip: null,
+          frames: null,
           compressed: false,
           pcm: null,
           extracted: 0,

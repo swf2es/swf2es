@@ -1968,8 +1968,9 @@ back samples that have nothing to do with those it was given, so the
 case checks only its counts, lengths and errors.
 `loadCompressedDataFromByteArray` adds MP3 bytes to those the sound has
 (a SWF's sound keeps its own): its length counts their frames by their
-headers at once, a frame cut short too, as Flash's (`media/mp3.ts`), and
-it plays and extracts their whole frames once the host has decoded them.
+headers at once, a frame cut short too, as Flash's, reading on from
+where the bytes before stopped; the sound is decoded only when it plays
+or a script extracts it.
 
 An external `Sound.load` uses the same host fetch as `URLStream`; its
 open, progress and complete or error reach ActionScript on a frame, after
