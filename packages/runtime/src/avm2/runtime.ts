@@ -34,6 +34,15 @@ import {
   frameScripts,
   type Script,
 } from "./domain.js";
+import {
+  type Enumeration,
+  enumerated,
+  INT_ATOM_LIMIT,
+  nextIndex,
+  ownNames,
+  pairIndex,
+  pairOf,
+} from "./enumeration.js";
 import type { ClassHook, NativesProvider, PropertyHook } from "./hooks.js";
 import {
   CONSTANT_Multiname,
@@ -91,7 +100,6 @@ import {
   Traits,
   VectorRef,
 } from "./traits.js";
-import { WeakKeys, WeakName } from "./weak-keys.js";
 
 /** A native with argument counts to check, when it has any, and its declared parameter count (see Runtime.native). */
 type CountedMethod = Method & { $min?: number; $max?: number; $length?: number };
@@ -102,33 +110,6 @@ type CountedMethod = Method & { $min?: number; $max?: number; $length?: number }
  * checks for it, and fails as a sealed object does.
  */
 export const SEALED_ELEMENTS: Value[] = Object.freeze([]) as unknown as Value[];
-
-/**
- * The names for-ins go through over one object, each in a slot, as in
- * avmplus' hashtable. A name keeps its slot while it is there, so a for-in
- * started inside another never moves the outer one's names. One deleted
- * stays in its slot, which the outer one skips, until a for-in next starts:
- * then its slot is free, and it takes one again only if it is back, as a
- * new name, which takes a free slot; only with none free does the list grow. So it is at
- * most as long as the most names the object had at once, as avmplus'
- * table, and nothing a for-in goes through is ever moved or dropped.
- */
-interface Enumeration {
-  /** The name in each slot, null in one free: a string, or a Dictionary's object key. */
-  names: (EnumeratedName | null)[];
-  /** Each name's slot. */
-  slot: Map<EnumeratedName, number>;
-}
-
-/**
- * A name a for-in goes through: a string, or an object a Dictionary is
- * keyed by, held weakly (a WeakName) where the Dictionary's keys are weak,
- * so that a for-in left off keeps no key alive.
- */
-type EnumeratedName = string | object;
-
-/** The names below this come back from a for-in as numbers: avmplus' int atoms, of 29 bits. */
-const INT_ATOM_LIMIT = 0x10000000;
 
 /** Thrown for an AS3 exception that is an Error the runtime made, before its class existed. */
 export class AsError extends Error {}
@@ -2586,114 +2567,6 @@ export class Runtime {
   // or not, so hiding one during a for-in (as _dontEnumPrototype does) does
   // not move the others.
 
-  private names(o: AsObject): EnumeratedName[] {
-    const names: EnumeratedName[] = [];
-    if (o.$a !== undefined) {
-      for (const i of Object.keys(o.$a)) {
-        names.push(i);
-      }
-    }
-
-    if (o.$d) {
-      for (const k of o.$d.keys()) {
-        names.push(k);
-      }
-    }
-
-    if (o.$keys instanceof WeakKeys) {
-      for (const k of o.$keys.keys()) {
-        names.push(o.$keys.nameOf(k) as WeakName);
-      }
-    } else if (o.$keys !== undefined) {
-      for (const k of o.$keys.keys()) {
-        names.push(k);
-      }
-    }
-
-    return names;
-  }
-
-  /**
-   * The names of `o` for a for-in starting over it: those it had before in
-   * their slots, and new ones in the slots of those gone, then after them.
-   */
-  private startEnumeration(o: AsObject): (EnumeratedName | null)[] {
-    const names = this.names(o);
-    let e = this.enumerating.get(o);
-    if (!e) {
-      e = { names, slot: new Map(names.map((name, i) => [name, i])) };
-      this.enumerating.set(o, e);
-      return names;
-    }
-
-    const free: number[] = [];
-    e.names.forEach((name, i) => {
-      if (name === null) {
-        free.push(i);
-      } else if (!this.stillThere(o, name)) {
-        e.slot.delete(name);
-        e.names[i] = null;
-        free.push(i);
-      }
-    });
-
-    let next = 0;
-    for (const name of names) {
-      if (!e.slot.has(name)) {
-        const i = next < free.length ? free[next++] : e.names.length;
-        e.names[i] = name;
-        e.slot.set(name, i);
-      }
-    }
-
-    return e.names;
-  }
-
-  /** The name of `o` at a for-in's index: a weak key itself, "" once it is gone. */
-  private enumerated(o: AsObject, index: number): EnumeratedName {
-    const name = this.enumerating.get(o)?.names[index - 1] ?? "";
-    return name instanceof WeakName ? (name.ref.deref() ?? "") : name;
-  }
-
-  /** The index after `index` of an enumerable name of `o`, or 0. */
-  private nextIndex(o: AsObject, index: number): number {
-    const names = index === 0 ? this.startEnumeration(o) : (this.enumerating.get(o)?.names ?? []);
-
-    // A name deleted since the for-in started is skipped.
-    for (let i = index; i < names.length; i++) {
-      const name = names[i];
-      if (
-        name !== null &&
-        !(typeof name === "string" && o.$dontEnum?.has(name)) &&
-        this.stillThere(o, name)
-      ) {
-        return i + 1;
-      }
-    }
-
-    return 0;
-  }
-
-  private stillThere(o: AsObject, name: EnumeratedName): boolean {
-    if (name instanceof WeakName) {
-      const key = name.ref.deref();
-      return key !== undefined && (o.$keys?.has(key) ?? false);
-    }
-
-    if (typeof name !== "string") {
-      return o.$keys?.has(name) ?? false;
-    }
-
-    if (o.$a !== undefined) {
-      const i = arrayIndex(name);
-      if (i >= 0) {
-        return i in o.$a;
-      }
-    }
-
-    return o.$d?.has(name) ?? false;
-  }
-
   hasNext2(o: Value, index: number): [boolean, Value, number] {
     let obj = o;
     let i = index;
@@ -2707,7 +2580,7 @@ export class Runtime {
             ? properties.nextIndex(this, obj, i)
             : pairOf(obj)
               ? pairIndex(i)
-              : this.nextIndex(obj, i);
+              : nextIndex(this.enumerating, obj, i);
       if (next) {
         return [true, obj, next];
       }
@@ -2729,7 +2602,7 @@ export class Runtime {
       return properties.nextIndex(this, o, index);
     }
 
-    return pairOf(o) ? pairIndex(index) : this.nextIndex(o, index);
+    return pairOf(o) ? pairIndex(index) : nextIndex(this.enumerating, o, index);
   }
 
   /** As avmplus gives a for-in's name: an index as a number while an int atom holds it, a Dictionary's object key as itself. */
@@ -2744,7 +2617,7 @@ export class Runtime {
       return index === 1 ? "uri" : index === 2 ? pair : null;
     }
 
-    const name = this.enumerated(o, index);
+    const name = enumerated(this.enumerating, o, index);
     if (typeof name !== "string") {
       return name;
     }
@@ -2771,7 +2644,7 @@ export class Runtime {
       return index === 1 ? local : index === 2 ? uri : null;
     }
 
-    const name = this.enumerated(o, index);
+    const name = enumerated(this.enumerating, o, index);
     if (typeof name !== "string") {
       return o.$keys.get(name);
     }
@@ -2943,7 +2816,7 @@ export class Runtime {
 
   /** An object's own names a for-in visits, in its order: its string names, not a Dictionary's object keys. */
   enumerableNames(o: AsObject): string[] {
-    return this.names(o).filter((n): n is string => typeof n === "string" && !o.$dontEnum?.has(n));
+    return ownNames(o).filter((n): n is string => typeof n === "string" && !o.$dontEnum?.has(n));
   }
 
   /**
@@ -3162,20 +3035,6 @@ export class Runtime {
     return v === null || (typeof v !== "object" && typeof v !== "function");
   }
 }
-
-/**
- * A Namespace or QName, which enumerate "uri" and the name this gives
- * ("prefix" or "localName"), as avmplus' nextName does; else null.
- */
-function pairOf(o: Value): string | null {
-  if (o instanceof Namespace) {
-    return "prefix";
-  }
-
-  return typeof o === "object" && o !== null && o.$local !== undefined ? "localName" : null;
-}
-
-const pairIndex = (index: number) => (index < 2 ? index + 1 : 0);
 
 /**
  * Whether a hooked class's hook resolves `mn`, bound to `b`: a name its
