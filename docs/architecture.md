@@ -704,9 +704,13 @@ Graphics of a shared context (a shape's, a blend's or a glyph's fills,
 or lines) does not listen on it, as no such context changes once built:
 a listener a Graphics made each destroy search them all, so a text of n
 glyphs of one font took O(n²) to go.
-A line context no one holds stays idle 5
+A line context no one holds stays idle 30
 s, by the clock, not renders, which a host may make many of between
-frames, at most 4096 of them, before it is destroyed. A drawing's lines
+frames, at most 4096 of them and half a million of their vertices (some
+70 MB), before it is destroyed: kept 5 s, a third of the lines a crowded
+room made were ones it had made before and dropped, an animation's
+rarer turns coming back after tens of seconds. Longer would gain
+nothing, as Pixi lets an unused context's geometry go after a minute. A drawing's lines
 are its own, as it changes. No line is thinner than a pixel of the
 screen, which is how wide Flash draws a hairline however far its stage
 is zoomed: `PixiView.screenScale` screen pixels to a stage pixel, the

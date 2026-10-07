@@ -1034,14 +1034,14 @@ test("instances that see a character alike share its lines, which live while one
   view.prepare(root);
   assert.notEqual(lines(2), lines(3));
 
-  // Idle a while: those no one holds go after 5 s, however many renders, the held stay.
+  // Idle a while: those no one holds go after 30 s, however many renders, the held stay.
   const first = lines(0);
   b.setMatrix({ ...b.matrix, a: 5, d: 5 });
   turn(a, 6);
   await withClock(async (clock) => {
     view.prepare(root);
     for (let k = 0; k < 500; k++) {
-      clock.at += 9;
+      clock.at += 59;
       view.prepare(root);
     }
 
@@ -1052,6 +1052,34 @@ test("instances that see a character alike share its lines, which live while one
   });
   assert.equal(lines(0).destroyed, false);
   assert.equal(lines(1).destroyed, false);
+});
+
+test("idle lines go, the oldest first, past half a million vertices however recent", async () => {
+  // Kept 30 s, a crowd's lines would otherwise hoard what the many stretches it shows tessellate.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const shape = new ShapeObject(character);
+  root.placeAtDepth(shape, 1);
+  type Lines = { context: { destroyed: boolean; _gpuData: Record<number, unknown> } };
+  const lines = () =>
+    (view.stage.children[0].children[1].children[0].children[1] as unknown as Lines).context;
+  // Each scale a context Pixi tessellated into 200,000 vertices, given back for the next.
+  const drawn: Lines["context"][] = [];
+  for (const s of [1, 2, 3, 4]) {
+    shape.setMatrix({ a: s, b: 0, c: 0, d: s, tx: 0, ty: 0 });
+    view.prepare(root);
+    const context = lines();
+    context._gpuData[1] = { geometryData: { vertices: new Array(400_000) }, destroy() {} };
+    drawn.push(context);
+  }
+
+  // Three idle, 600,000 vertices: the oldest went as the third did.
+  assert.deepEqual(
+    drawn.map((context) => context.destroyed),
+    [true, false, false, false],
+  );
 });
 
 /** `performance.now` as a clock the test moves, for what it runs. */
@@ -1183,10 +1211,10 @@ test("an object off the list gives its lines back, and has them again when it co
       .context;
 
   await withClock(async (clock) => {
-    // Kept 5 s off the list, then emptied, its lines idle 5 s more.
+    // Kept 5 s off the list, then emptied, its lines idle 30 s more.
     const idle = () => {
-      for (let k = 0; k < 2; k++) {
-        clock.at += 6000;
+      for (const step of [6000, 31_000]) {
+        clock.at += step;
         view.prepare(root);
       }
     };
@@ -1982,8 +2010,9 @@ test("a child moved into a parent off the list gives its lines back", async () =
   await withClock((clock) => {
     away.addChildAt(shape, 0);
     view.prepare(root);
-    for (let k = 0; k < 2; k++) {
-      clock.at += 6000;
+    // Parked 5 s, then given back, idle 30 s.
+    for (const step of [6000, 31_000]) {
+      clock.at += step;
       view.prepare(root);
     }
 

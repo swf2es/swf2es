@@ -5,7 +5,7 @@ import type { Line } from "@swf2es/format";
 import { type GraphicsContext, Matrix } from "pixi.js";
 import { blendLayers, droppedLayers } from "../display/morph.js";
 import { LINE, type Path, pointsOf, type ShapeLayer } from "../display/shapes.js";
-import { IDLE_MOST, IDLE_MS } from "./pools.js";
+import { LINES_IDLE_MOST, LINES_IDLE_MS, LINES_IDLE_VERTICES } from "./pools.js";
 import { destroyContext, shapeContext, trace } from "./tessellate.js";
 
 /** The linear part of a matrix, [a, b, c, d]: all a stroke's width depends on. */
@@ -106,7 +106,8 @@ function strokeContext(layer: ShapeLayer, m: Linear, least: number, by = m): Gra
  * instances of one creature in step, or one instance on its loop's next
  * turn. Contexts are counted as they are taken and given back, a removed
  * object's too; one no longer taken waits among the idle, destroyed after
- * IDLE_MS or, the oldest first, past IDLE_MOST. Only a character's layers
+ * LINES_IDLE_MS or, the oldest first, past LINES_IDLE_MOST of them or
+ * LINES_IDLE_VERTICES of their vertices. Only a character's layers
  * are shared, which never change, and a blend's while its morph keeps it:
  * one it has dropped is never drawn from again, so its lines go at once.
  */
@@ -116,6 +117,9 @@ export class StrokeContexts {
   private readonly keys = new Map<GraphicsContext, [ShapeLayer, string]>();
   /** Contexts no one holds, oldest first, with the time each went idle. */
   private readonly idle = new Map<GraphicsContext, number>();
+  /** The idle ones' vertices as they went idle, and their sum. */
+  private readonly idleSizes = new Map<GraphicsContext, number>();
+  private idleVertices = 0;
   /** The idle ones of blends, which go as soon as their morph drops the blend. */
   private readonly idleBlends = new Set<GraphicsContext>();
 
@@ -137,8 +141,7 @@ export class StrokeContexts {
     let context = contexts.get(key);
     if (context) {
       this.counts.strokeReuses++;
-      this.idle.delete(context);
-      this.idleBlends.delete(context);
+      this.wake(context);
     } else {
       context = linesContext(layer, m, least);
       this.counts.strokeContexts++;
@@ -174,12 +177,15 @@ export class StrokeContexts {
       return;
     }
 
+    const vertices = verticesOf(context);
     this.idle.set(context, performance.now());
+    this.idleSizes.set(context, vertices);
+    this.idleVertices += vertices;
     if (blendLayers.has(layer)) {
       this.idleBlends.add(context);
     }
 
-    if (this.idle.size > IDLE_MOST) {
+    while (this.idle.size > LINES_IDLE_MOST || this.idleVertices > LINES_IDLE_VERTICES) {
       this.drop(this.idle.keys().next().value as GraphicsContext);
     }
   }
@@ -194,7 +200,7 @@ export class StrokeContexts {
 
     const now = performance.now();
     for (const [context, since] of this.idle) {
-      if (now - since < IDLE_MS) {
+      if (now - since < LINES_IDLE_MS) {
         break;
       }
 
@@ -202,14 +208,39 @@ export class StrokeContexts {
     }
   }
 
-  private drop(context: GraphicsContext): void {
+  /** Take a context off the idle, if it is there. */
+  private wake(context: GraphicsContext): void {
+    this.idleVertices -= this.idleSizes.get(context) ?? 0;
+    this.idleSizes.delete(context);
     this.idle.delete(context);
     this.idleBlends.delete(context);
+  }
+
+  private drop(context: GraphicsContext): void {
+    this.wake(context);
     const [layer, key] = this.keys.get(context) as [ShapeLayer, string];
     this.keys.delete(context);
     this.byLayer.get(layer)?.delete(key);
     destroyContext(context);
   }
+}
+
+/**
+ * The vertices Pixi tessellated a context into, for each renderer that drew
+ * it: what keeping it costs.
+ */
+function verticesOf(context: GraphicsContext): number {
+  const data = (
+    context as unknown as {
+      _gpuData: Record<number, { geometryData?: { vertices: unknown[] } } | undefined>;
+    }
+  )._gpuData;
+  let vertices = 0;
+  for (const uid in data) {
+    vertices += (data[uid]?.geometryData?.vertices.length ?? 0) / 2;
+  }
+
+  return vertices;
 }
 
 /** The key a layer's lines seen through `m`, at least `least` wide, are kept by. */
