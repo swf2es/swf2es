@@ -304,7 +304,8 @@ export class Code {
    * domain sees, or `ready` from the host's module cache, loaded into the
    * runtime's `domain`; `builtin` for the player's own libraries, a SWF's
    * with its `origin`. Each is evaluated under a script name of its own,
-   * by which Runtime.codeDomain finds the domain of the code running.
+   * or imported from its URL, by which Runtime.codeDomain finds the domain
+   * of the code running.
    */
   private compileAt(
     index: number,
@@ -313,11 +314,9 @@ export class Code {
     origin?: { url: string; library: Library },
     ready?: Ready,
   ): Value {
-    const script = `swf2es-${++this.modules}.js`;
-    const load = (module: string) => {
-      const factory = evaluateModule(module, script);
-      return this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
-    };
+    let script = `swf2es-${++this.modules}.js`;
+    const run = (factory: Factory) => this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
+    const load = (module: string) => run(evaluateModule(module, script));
     let linked: Value;
     if (!ready?.cached) {
       linked = load(ready?.module ?? this.s.codegen.compileModule(this.hashes, index));
@@ -330,7 +329,12 @@ export class Code {
       // since, and the key the compile now would have is not this one.
       const loaded = domain.own.length;
       try {
-        linked = load(ready.module);
+        if (ready.imported) {
+          linked = run(ready.imported.factory);
+          script = ready.imported.url;
+        } else {
+          linked = load(ready.module);
+        }
       } catch (e) {
         this.discard(ready.key);
         if (domain.own.length !== loaded) {
@@ -369,8 +373,9 @@ export class Code {
     const cache = this.cache();
     const ready: Ready[] = [];
     await this.digestLibraries(indices[0]);
+    const smallest = cache?.minBytes ?? MIN_CACHED_ABC;
     for (const index of indices) {
-      if (this.sizes[index] < MIN_CACHED_ABC) {
+      if (this.sizes[index] < smallest) {
         const module = this.s.codegen.compileModule(this.hashes, index);
         ready.push({ module, key: null, cached: false });
         continue;
@@ -379,12 +384,12 @@ export class Code {
       // Read again by the key taken again if the read let another load
       // change the compiler's domain, a few times at most.
       let key = this.moduleKey(index);
-      let entry: CachedModule | undefined;
+      let entry: Read | undefined;
       for (let tries = 0; cache && key !== null && tries < 3; tries++) {
         const revision = this.s.codegen.revision();
         const asked: string = key;
         try {
-          entry = await cache.get(await sha256Text(asked));
+          entry = await read(cache, await sha256Text(asked));
         } catch {
           entry = undefined;
         }
@@ -402,9 +407,9 @@ export class Code {
       }
 
       let failed = false;
-      if (key !== null && entry !== undefined && whole(entry)) {
+      if (key !== null && entry !== undefined) {
         if (this.s.codegen.replay(entry.log, index)) {
-          ready.push({ module: entry.module, key, cached: true });
+          ready.push({ module: entry.module, key, cached: true, imported: entry.imported });
           continue;
         }
 
@@ -540,22 +545,62 @@ export class Code {
  */
 const MIN_CACHED_ABC = 8 * 1024;
 
-/** Whether `entry` is a module and a log of the lengths stored with them: a write cut short at a line's end is a shorter log. */
+/**
+ * Whether `entry` is a module and a log of the lengths stored with them: a
+ * write cut short at a line's end is a shorter log. A module to import is
+ * not read, and its import is what tells whether it is whole.
+ */
 function whole(entry: CachedModule): boolean {
   return (
-    typeof entry.module === "string" &&
     typeof entry.log === "string" &&
     Array.isArray(entry.lengths) &&
-    entry.lengths[0] === entry.module.length &&
-    entry.lengths[1] === entry.log.length
+    entry.lengths[1] === entry.log.length &&
+    (entry.url === undefined
+      ? typeof entry.module === "string" && entry.lengths[0] === entry.module.length
+      : typeof entry.url === "string")
   );
 }
 
-/** A module made ready to load: from the cache, its log replayed, or compiled; its key, if it has one. */
+/** A module's factory, as it exports it: given the runtime, it loads the module into it. */
+type Factory = (rt: avm2.Runtime) => Value;
+
+/** A module imported from its URL, which its code's stack frames name it by. */
+interface Imported {
+  factory: Factory;
+  url: string;
+}
+
+/** What `cache` holds under `key`, if it is whole, its module imported first if it has a URL. */
+async function read(
+  cache: ModuleCache,
+  key: string,
+): Promise<(CachedModule & { imported?: Imported }) | undefined> {
+  const entry = await cache.get(key);
+  if (entry === undefined || !whole(entry)) {
+    return undefined;
+  }
+
+  if (entry.url === undefined) {
+    return entry;
+  }
+
+  // Absolute, as the frames name it: a relative one would be the player's module's.
+  const url = new URL(entry.url).href;
+  const factory = (await import(/* @vite-ignore */ url)).default;
+  return typeof factory === "function" ? { ...entry, imported: { factory, url } } : undefined;
+}
+
+type Read = NonNullable<Awaited<ReturnType<typeof read>>>;
+
+/**
+ * A module made ready to load: from the cache, its log replayed, or
+ * compiled; its key, if it has one; and if imported, its factory.
+ */
 interface Ready {
   module: string;
   key: string | null;
   cached: boolean;
+  imported?: Imported;
 }
 
 const EXPORT = "export default ";
@@ -575,7 +620,7 @@ function sha256Text(text: string): Promise<string> {
  * (see Lazy compilation in docs/architecture.md); its lines in a stack
  * are its file's two further on, after Function's header.
  */
-function evaluateModule(module: string, script: string): (rt: avm2.Runtime) => Value {
+function evaluateModule(module: string, script: string): Factory {
   if (!module.startsWith(EXPORT)) {
     throw new Error("swf2es: a module that is not one exported function");
   }
