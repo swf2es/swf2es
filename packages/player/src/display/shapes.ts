@@ -225,7 +225,18 @@ export type Paint = Fill | ImageFill | GradientFill;
 
 export interface ShapeLayer {
   fills: { fill: Paint; contours: Path[]; winding: Winding }[];
-  strokes: { line: Line; paths: Path[] }[];
+  strokes: { line: Line; paths: Path[]; closes?: Close[] }[];
+}
+
+/**
+ * A line a drawing strokes on from the end of its path `at` to (`x`, `y`),
+ * closing a fill's open contour: drawn joined to the path, as Flash draws
+ * it, but no part of the drawing's bounds or hit tests, as in Flash.
+ */
+export interface Close {
+  at: number;
+  x: number;
+  y: number;
 }
 
 /** The polygon's orientation: 1 clockwise on a y-down screen, -1 the other way, 0 for no area. */

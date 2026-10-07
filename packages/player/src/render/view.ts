@@ -508,10 +508,17 @@ function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContext {
  */
 function strokeContext(layer: ShapeLayer, m: Linear, least: number, by = m): GraphicsContext {
   const context = shapeContext();
-  for (const { line, paths } of layer.strokes) {
+  for (const { line, paths, closes } of layer.strokes) {
     context.beginPath();
-    for (const path of paths) {
-      trace(context, transformPath(path, m));
+    let next = 0;
+    for (const [i, path] of paths.entries()) {
+      const close = closes?.[next]?.at === i ? closes[next++] : null;
+      // Back to the path's start, a closed path, joined there as Flash joins it.
+      const home = close?.x === path[1] && close.y === path[2];
+      trace(context, transformPath(close && !home ? [...path, LINE, close.x, close.y] : path, m));
+      if (home) {
+        context.closePath();
+      }
     }
 
     context.stroke(stroke(line, by, least));

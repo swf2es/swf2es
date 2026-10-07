@@ -1479,7 +1479,20 @@ the renderer draws both alike. A fill begins at `beginFill` (or a
 gradient or bitmap fill) and ends at `endFill` or at the next begin, not
 at a change of `lineStyle`; what is drawn between is the fill's contours, each
 `moveTo` starting one and each closed back to its start, filled even-odd
-across them, as Flash fills. A stroke begins at `lineStyle` with a
+across them, as Flash fills. A contour left open is closed with a line
+in the line style of the time, wherever it ends (`endFill`, the next
+fill, a `moveTo`, or no end at all), and with none if there is no line
+style then. The pen stays where it was, and a line or curve drawn on from
+it after `endFill` takes the closing line away again, where a move, a line
+style or a fill keeps it. A contour along one straight line has none, as
+it would only retrace it, nor does a contour `drawPath` drew, which also
+begins a contour of its own at the pen. The closing line is kept beside
+the stroke's paths, drawn joined to the path it ends, and left out of the
+bounds and hit tests, as in adl (the `line-close` and `line-close-probes`
+cases). Where a half-transparent path meets itself, at a closed path's
+start or a line back over itself, the page draws it darker and adl does
+not; and adl fills a `drawPath` contour left open without closing it, in
+bands to the shape's edge, where the page closes it: limits noted. A stroke begins at `lineStyle` with a
 thickness and ends at one without, keeping the line's width, color,
 caps, joints, miter and scale mode. `drawRect`, `drawRoundRect` and
 `drawRoundRectComplex` are moves and lines with quadratic quarter

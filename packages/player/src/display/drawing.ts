@@ -5,10 +5,14 @@
 // them, each fill begins a layer, and the lines drawn from then until the
 // next fill begins go in it, over that fill and under the next: a line
 // open at beginFill goes on in the new layer, and one drawn after endFill
-// stays above the fill before it.
+// stays above the fill before it. A fill's contour left open is closed with
+// a line in the line style of the time, as Flash closes it, kept apart from
+// the paths (shapes.ts' Close): a line drawn on after endFill takes it away
+// again, as in Flash, and bounds and hit tests leave it out.
 import type { Line } from "@swf2es/format";
 import { type Rect, union } from "./geometry.js";
 import {
+  type Close,
   CUBIC,
   CURVE,
   extent,
@@ -19,6 +23,8 @@ import {
   type ShapeLayer,
   type Winding,
 } from "./shapes.js";
+
+type Stroke = ShapeLayer["strokes"][number];
 
 const TWIPS = 20;
 /** The quadratic approximation of a quarter ellipse Flash's drawRoundRect uses: two curves, meeting at 45°. */
@@ -37,18 +43,28 @@ export class Drawing {
   private fill: { fill: Paint; contours: Path[]; winding: Winding } | null = null;
   /** The layer the open fill is in, for the entries a change of winding adds beside it. */
   private fillLayer: ShapeLayer | null = null;
-  private stroke: { line: Line; paths: Path[] } | null = null;
+  private stroke: Stroke | null = null;
+  /** The line closing the open contour, or the one endFill closed, while a line drawn on may take it away. */
+  private closing: { stroke: Stroke; close: Close } | null = null;
+  /** A point of the open contour off its start, for whether it leaves the line through them. */
+  private toward: [number, number] | null = null;
+  /** Whether the open contour has an area: one along a line has no closing line, which would retrace it. */
+  private bent = false;
+  /** Whether drawPath drew the open contour, which Flash never closes with a line. */
+  private pathed = false;
   private x = 0;
   private y = 0;
 
   beginFill(fill: Paint): void {
     this.endFill();
+    this.closing = null;
+    this.pathed = false;
     const line = this.stroke?.line;
     this.dropStroke();
     this.fill = { fill, contours: [], winding: "evenOdd" };
     this.fillLayer = { fills: [this.fill], strokes: [] };
     this.layers.push(this.fillLayer);
-    this.begin(this.fill.contours);
+    this.beginContour();
     if (line) {
       this.stroke = { line, paths: [] };
       this.fillLayer.strokes.push(this.stroke);
@@ -56,6 +72,7 @@ export class Drawing {
     }
   }
 
+  /** The closing line stays till what comes next: a line on from the pen takes it away. */
   endFill(): void {
     this.fill = null;
     this.fillLayer = null;
@@ -63,6 +80,12 @@ export class Drawing {
 
   /** A stroke from here on with `line`, or none for null; the one before it ends either way. */
   lineStyle(line: Line | null): void {
+    // The open contour's closing line goes to the new style; one endFill closed stays.
+    if (this.fill) {
+      this.unclose();
+    }
+
+    this.closing = null;
     this.dropStroke();
     this.stroke = line ? { line, paths: [] } : null;
     if (!this.stroke) {
@@ -77,18 +100,12 @@ export class Drawing {
 
     layer.strokes.push(this.stroke);
     this.begin(this.stroke.paths);
+    this.reclose();
   }
 
   moveTo(x: number, y: number): void {
-    this.x = x;
-    this.y = y;
-    if (this.fill) {
-      this.begin(this.fill.contours);
-    }
-
-    if (this.stroke) {
-      this.begin(this.stroke.paths);
-    }
+    this.pathed = false;
+    this.move(x, y);
   }
 
   lineTo(x: number, y: number): void {
@@ -173,7 +190,8 @@ export class Drawing {
    * wideLineTo, 6 cubicCurveTo, each taking its data. The winding is this
    * path's: a fill drawn with one rule and then another keeps each path's,
    * as Flash does, so the contours from here on go in an entry of their
-   * own beside the fill's, with the same fill.
+   * own beside the fill's, with the same fill. Its first contour begins at
+   * the pen, and none it draws is closed with a line, as in Flash.
    */
   drawPath(commands: number[], data: number[], winding: Winding): void {
     this.version++;
@@ -181,17 +199,20 @@ export class Drawing {
       if (this.fill.contours.some((c) => c.length > 3)) {
         this.fill = { fill: this.fill.fill, contours: [], winding };
         this.fillLayer.fills.push(this.fill);
-        this.begin(this.fill.contours);
       } else {
         this.fill.winding = winding;
       }
     }
 
+    // A contour of its own from the pen, as in Flash, which closes the one before it.
+    this.move(this.x, this.y);
+    this.pathed = true;
+
     let i = 0;
     for (const command of commands) {
       switch (command) {
         case 1:
-          this.moveTo(data[i], data[i + 1]);
+          this.move(data[i], data[i + 1]);
           i += 2;
           break;
         case 2:
@@ -203,7 +224,7 @@ export class Drawing {
           i += 4;
           break;
         case 4:
-          this.moveTo(data[i + 2], data[i + 3]);
+          this.move(data[i + 2], data[i + 3]);
           i += 4;
           break;
         case 5:
@@ -233,6 +254,8 @@ export class Drawing {
     this.fill = null;
     this.fillLayer = null;
     this.stroke = null;
+    this.closing = null;
+    this.pathed = false;
     this.x = 0;
     this.y = 0;
   }
@@ -247,7 +270,11 @@ export class Drawing {
     for (const layer of other.layers) {
       this.layers.push({
         fills: layer.fills.map((f) => ({ ...f, contours: f.contours.map((c) => c.slice()) })),
-        strokes: layer.strokes.map((s) => ({ line: s.line, paths: s.paths.map((c) => c.slice()) })),
+        strokes: layer.strokes.map((s) => ({
+          line: s.line,
+          paths: s.paths.map((c) => c.slice()),
+          closes: s.closes?.map((c) => ({ ...c })),
+        })),
       });
     }
 
@@ -291,15 +318,36 @@ export class Drawing {
     const stroke = this.stroke;
     const layer = this.layers[this.layers.length - 1];
     this.stroke = null;
-    if (!stroke || !layer || stroke.paths.some((p) => p.length > 3)) {
+    if (!stroke || !layer || stroke.closes?.length || stroke.paths.some((p) => p.length > 3)) {
       return;
     }
 
+    // Always the layer's last.
     this.version++;
-    layer.strokes.splice(layer.strokes.indexOf(stroke), 1);
+    layer.strokes.pop();
     if (!layer.fills.length && !layer.strokes.length) {
       this.layers.pop();
     }
+  }
+
+  /** A move, closing the open contour for good: a fill's contour and a stroke's path begin there. */
+  private move(x: number, y: number): void {
+    this.closing = null;
+    this.x = x;
+    this.y = y;
+    if (this.fill) {
+      this.beginContour();
+    }
+
+    if (this.stroke) {
+      this.begin(this.stroke.paths);
+    }
+  }
+
+  private beginContour(): void {
+    this.begin((this.fill as { contours: Path[] }).contours);
+    this.toward = null;
+    this.bent = false;
   }
 
   /** A contour or stroke path begins at the pen. */
@@ -310,6 +358,7 @@ export class Drawing {
 
   private command(kind: number, points: number[]): void {
     this.version++;
+    this.unclose();
     for (const paths of [this.fill?.contours, this.stroke?.paths]) {
       if (paths) {
         paths[paths.length - 1].push(kind, ...points);
@@ -318,5 +367,65 @@ export class Drawing {
 
     this.x = points[points.length - 2];
     this.y = points[points.length - 1];
+    if (this.fill) {
+      this.bend(points);
+      this.reclose();
+    }
+  }
+
+  /** Whether the contour's new points, control points too, leave the line it has run along. */
+  private bend(points: number[]): void {
+    const contour = this.fill?.contours[this.fill.contours.length - 1];
+    if (this.bent || !contour) {
+      return;
+    }
+
+    const [sx, sy] = [contour[1], contour[2]];
+    for (let i = 0; i < points.length; i += 2) {
+      const dx = points[i] - sx;
+      const dy = points[i + 1] - sy;
+      if (!this.toward) {
+        if (dx || dy) {
+          this.toward = [dx, dy];
+        }
+
+        continue;
+      }
+
+      const [tx, ty] = this.toward;
+      if (
+        Math.abs(tx * dy - ty * dx) >
+        1e-9 * (Math.abs(tx) + Math.abs(ty)) * (Math.abs(dx) + Math.abs(dy))
+      ) {
+        this.bent = true;
+        return;
+      }
+    }
+  }
+
+  /** The closing line taken off, for the contour or the line style to go on. */
+  private unclose(): void {
+    if (this.closing) {
+      this.version++;
+      this.closing.stroke.closes?.pop();
+      this.closing = null;
+    }
+  }
+
+  /** The open contour's closing line, from the pen back to its start, on the end of the stroke's path. */
+  private reclose(): void {
+    const contour = this.fill?.contours[this.fill.contours.length - 1];
+    const stroke = this.stroke;
+    if (!contour || !stroke || !this.bent || this.pathed) {
+      return;
+    }
+
+    if (contour[1] !== this.x || contour[2] !== this.y) {
+      const close = { at: stroke.paths.length - 1, x: contour[1], y: contour[2] };
+      stroke.closes = stroke.closes ?? [];
+      stroke.closes.push(close);
+      this.closing = { stroke, close };
+      this.version++;
+    }
   }
 }

@@ -13,7 +13,7 @@ import {
   TextObject,
 } from "./display.js";
 import { apply, invert, type Rect, union } from "./geometry.js";
-import { pointsOf, type ShapeLayer } from "./shapes.js";
+import { MOVE, pointsOf, type ShapeLayer } from "./shapes.js";
 
 /**
  * One axis of a slice, in the owner's space: the bounds' and the grid's
@@ -251,6 +251,13 @@ function moveLayers(layers: ShapeLayer[], slice: Slice, m: Matrix | null): Shape
 
   return layers.map((layer) => ({
     fills: layer.fills.map((f) => ({ ...f, contours: f.contours.map(move) })),
-    strokes: layer.strokes.map((s) => ({ ...s, paths: s.paths.map(move) })),
+    strokes: layer.strokes.map((s) => ({
+      ...s,
+      paths: s.paths.map(move),
+      closes: s.closes?.map((c) => {
+        const [, x, y] = move([MOVE, c.x, c.y]);
+        return { at: c.at, x, y };
+      }),
+    })),
   }));
 }
