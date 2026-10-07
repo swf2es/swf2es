@@ -16,6 +16,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { type PlayerResult, runPlayer } from "../chrome.ts";
+import { libraryAbcs } from "../libraries.ts";
 import { collectRuffle, corpus, type RuffleTest } from "./ruffle.ts";
 
 /** A pass: every line matched, no more traced, and no error. */
@@ -55,6 +56,8 @@ if (tests.length === 0) {
   process.exit(2);
 }
 
+// The libraries the page serves the tests' code with, fetched if missing.
+libraryAbcs();
 console.log(`${tests.length} tests`);
 const started = performance.now();
 let done = 0;
