@@ -89,8 +89,8 @@ hook should not throw; if it does, its error is thrown so too.
 ## Compiling ahead of time
 
 `swf2es` compiles a SWF's ActionScript 3 to the modules the player would
-compile for it, byte for byte, with a manifest of their hashes and the
-compiler's:
+compile for it, byte for byte, with what each compile fixed in the
+compiler and a manifest of their hashes, keys and the compiler:
 
 ```sh
 node packages/cli/dist/main.js movie.swf -o movie.swf2es \
@@ -102,6 +102,31 @@ Without `--lib` it uses the copies the player's tests keep in
 exits with 2 for a mistake in the command line or missing default
 libraries, and 1 for any other failure: an unreadable, AVM1 or rejected
 input or library, or an output it cannot write.
+
+A page serves the output and gives it to the player as a module cache,
+so that what it holds is not compiled again; it is found only for the
+SWF loaded as the main movie after the same libraries, by the same
+`codegen.wasm`, and anything else compiles as usual. Chained before an
+IndexedDB cache, what the output lacks is kept across page loads:
+
+```ts
+import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
+import { chainCaches, precompiledModules } from "@swf2es/player-hosts/precompiled";
+
+const scripting = new Scripting(codegen, {
+  moduleCache: chainCaches(
+    precompiledModules("/movie.swf2es/manifest.json"),
+    indexedDbModuleCache(),
+  ),
+});
+```
+
+With `--emit-libraries` and `precompiledModules(url, { importModules: true })`,
+every module is imported from its URL rather than evaluated, so the page
+needs no `'unsafe-eval'` in its Content-Security-Policy:
+`script-src 'self' 'wasm-unsafe-eval'` is enough, as the player still
+runs `codegen.wasm` to replay each module's log. Pixi then needs
+`import "pixi.js/unsafe-eval"` too.
 
 ## Development
 

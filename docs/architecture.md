@@ -62,8 +62,9 @@ requires:
    ABCs loaded before it differ. In a child application domain, what the
    domain was recorded to find (`found`) binds names and types too, so the
    key names those findings, each by the hash of the ABC that defines it.
-   The player's module cache keys more widely, by what the domain has
-   fixed of what resolves lazily too (see Caching modules).
+   The player's module cache, and the swf2es command for it, key more
+   widely, by what the domain has fixed of what resolves lazily too
+   (`moduleKey`, see Caching modules).
 
 CI checks both (`pnpm determinism`, `tests/conformance/determinism.ts`),
 over the builtins, then each conformance case (also compiled with asc's
@@ -91,7 +92,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `runtime` | AS3/AS2 language semantics called by generated code             | format                    |
 | `player`  | display list, timeline, playerglobal, AVM1 globals, renderers   | format, codegen, runtime  |
 | `cli`     | ahead-of-time compiler command: a SWF's modules and a manifest  | format, codegen           |
-| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache | player |
+| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time | player |
 
 `runtime` contains only the language, with no display list, so it runs in node
 next to avmshell. It uses `format` for what both need, such as compression
@@ -572,16 +573,17 @@ cache. A compiler without an identity writes no keys nor logs. Each
 module names its ABC's hash and those it was linked against, which the
 runtime checks as it loads it.
 
-The player does not take these modules yet. Skipping a compile is not
-enough: what a compile resolves in codegen's domain, the first answers
-to a traits' types or a method's signature, is what later ABCs, such as
-a child SWF's loaded into the same domain, compile against, so a host
-that hands the player a module must have it replay what that compile
-fixed. That is the IndexedDB module cache's design (its compile log and
-its compiler identity stamped into `codegen.wasm`), and AOT output is to
-reach the player as another source for that cache: the command writing
-each module's log and key beside it, and the manifest naming the
-compiler by the stamp.
+A host gives the player these modules as a module cache
+(`precompiledModules` in `player-hosts/precompiled`, see Caching modules).
+Skipping a compile is not enough: what a compile resolves in codegen's
+domain, the first answers to a traits' types or a method's signature, is
+what later ABCs, such as a child SWF's loaded into the same domain,
+compile against, so the player replays each module's log in place of its
+compile, as it does a cached module's, and the key, which names the
+domain's context, finds a module only where its compile would have had
+that context: the SWF loaded as the main movie, after the same libraries.
+A child SWF loaded later is keyed in its own position and compiles, as do
+the libraries without `--emit-libraries`.
 
 ### The runtime and the standard library
 
@@ -1883,7 +1885,9 @@ between that module's adding and its loading, the runtime refuses with or
 without a cache (its linked check), so this guards against what does not
 happen yet. An ABC smaller than `MIN_CACHED_ABC`, 8 KB, is compiled and
 the cache not asked: its key, read and replay would cost about what its
-compile does (see the constant).
+compile does (see the constant). A cache may ask for smaller ones with
+its `minBytes`, as one of modules compiled ahead of time does for every
+one.
 
 Anything the cache does wrong is a miss: an error; an answer that is not
 a module and a log of the lengths stored with them, as a write cut short
@@ -1924,6 +1928,73 @@ none for `new Function`; a classic script from a cacheable URL, which it
 does keep code for, saved a further 130 ms there, but no URL is stable
 for a module from IndexedDB, and a Blob URL's script took longer than
 `new Function`.
+
+The swf2es command's modules reach the player as a cache too:
+`precompiledModules(manifestUrl)` (`player-hosts/precompiled`) reads the
+command's `manifest.json` at its first get and answers a key it names
+with the module and the log beside it, read by the host's `read` or
+fetched; `put` and `delete` do nothing, and its `minBytes` is 0, so that
+no module of a SWF compiled ahead of time compiles. The command keys each
+module with the player's own `moduleKey`, so a key the manifest lacks,
+another compiler's (keys name its identity), a SWF in another position
+or after other libraries, a manifest of another version or none, is a
+miss, and the player compiles; and what the player does with a bad entry
+of any cache holds for these, a missing or truncated file a miss, a
+module that fails to load compiled in its place. `chainCaches(aot,
+indexedDb)` asks its caches in order, the first that holds a module
+answering, gives a compiled module and a deletion to each, and passes
+over one that fails: the modules compiled ahead of time first, then those
+the page compiled before, then a compile. Its `minBytes` is its smallest
+member's, so every member is asked for the ABCs that one asks for.
+
+A cache's entry may give a `url` to import the module from in place of
+its text: with `importModules`, `precompiledModules` gives each module's
+URL beside the manifest and reads only its log. A module is one exported
+function and nothing else (`export default function (rt) { ... }`), so
+the very file the command wrote, the one the byte-for-byte checks compare,
+is an ES module as it is: no wrapper is needed, and an ES module is
+strict, as the `Function` the player builds says it is. The player
+imports it before it replays the log, so an import that fails is a miss
+and a compile, and uses its URL, as the frames of its code name it, for
+`Runtime.codeDomain` and `codeUrl` in place of a sourceURL of its own.
+What a document imports it keeps for as long as it lives, unlike a
+`Function`'s code, which goes with the SWF, so this suits the main movie's
+modules, which the page keeps anyway; and the same module imported twice
+is one module, its function called with each runtime, and its code named
+by one URL in both.
+
+Measured in headless Chrome on the SWF above, each run a new browser on
+one profile, so that IndexedDB and the HTTP cache persist and V8's code
+cache with it, medians of nine, interleaved, to its first frame drawn,
+from fetching the SWF, with codegen.wasm and the libraries: compiled, 772
+ms (the libraries 129, the SWF 603); from IndexedDB, 613 (85, 483); from
+the command's modules evaluated, 553 (77, 435), and imported, 552 (76,
+434), the files served cacheable. What is left of the SWF's part no
+cache saves: its log's replay, its module's evaluation and first run,
+and its first frame. Imported, the modules gained
+nothing from V8's code cache, unlike the classic script above, and lost
+nothing to it: a page that may evaluate takes them either way.
+
+### Pages without 'unsafe-eval'
+
+A page whose Content-Security-Policy has no `'unsafe-eval'` refuses
+`new Function`, so the player can run there only modules it imports:
+those compiled ahead of time, given by `precompiledModules` with
+`importModules`, the libraries' among them (`--emit-libraries`), from the
+page's origin or another its `script-src` allows. Codegen still runs:
+the player adds each ABC to it, keys each module by its context and
+replays each log there, so that the domain is as compiling would have
+left it, which no host can skip, and `codegen.wasm` needs
+`'wasm-unsafe-eval'` to be compiled. A policy for such a page is
+`script-src 'self' 'wasm-unsafe-eval'`, without `'unsafe-eval'`. Any
+module the cache lacks is compiled and its evaluation refused
+(`EvalError`), the load failing: a child SWF loaded later, which is keyed
+in a position the command did not compile for, or a module of another
+compiler's. Pixi too builds code with `new Function` unless its
+`pixi.js/unsafe-eval` is imported, which a host drawing on such a page
+imports with Pixi (`tests/player/precompiled.ts`, whose page installs
+Pixi's global build of it into the bundle it draws with, plays a SWF so
+under that policy and draws it as without one).
 
 ### Drawing with Graphics
 
