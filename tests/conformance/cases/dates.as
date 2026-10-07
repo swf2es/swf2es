@@ -43,3 +43,5 @@ var d:Date = new Date(2004, 8, 12, 11, 11, 11, 500);
 trace(d.time, d.fullYear, d.month, d.date, d.day, d.hours, d.minutes, d.seconds, d.milliseconds);
 trace(d.toString(), "|", d.toUTCString(), "|", d.toLocaleTimeString());
 trace(new Date(99, 0).fullYear, new Date(100, 0).fullYear, Date.UTC(2004, 8, 12));
+// The constructor clips a parsed string's time; Date.parse does not.
+trace(new Date("Sep 13 275760 00:00:01 UTC").time, Date.parse("Sep 13 275760 00:00:01 UTC"));

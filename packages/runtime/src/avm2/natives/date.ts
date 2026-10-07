@@ -538,8 +538,9 @@ function construct(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
       o.$time = v.$time;
     } else {
       // A string is parsed; anything else is a number, as AvmCore::number
-      // makes it, an object's string from valueOf too.
-      o.$time = typeof v === "string" ? parseDate(v) : timeClip(rt.toNumber(v));
+      // makes it, an object's string from valueOf too. Either is clipped,
+      // though Date.parse leaves its result unclipped.
+      o.$time = timeClip(typeof v === "string" ? parseDate(v) : rt.toNumber(v));
     }
   } else {
     const n = [0, 0, 1, 0, 0, 0, 0];
