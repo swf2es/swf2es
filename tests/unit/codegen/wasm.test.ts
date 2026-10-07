@@ -104,12 +104,27 @@ test("the wrapper evicts an application domain and revives it given its ABCs", a
   codegen.evictDomain(child);
   assert.equal(codegen.isLive(child), false);
   assert.throws(() => codegen.compileModule(["a", "b"], 1), /dropped/);
-  // The next add rebuilds without it: reviving it then takes its ABC again.
-  assert.equal(codegen.add(script([0x47])), 0);
-  assert.throws(() => codegen.reviveDomain(child, new Map()), /not evicted/);
-  codegen.reviveDomain(child, new Map([[1, abc]]));
+  assert.throws(() => codegen.childDomain(child), /dropped/);
+  // Too little to be worth a rebuild: its ABC is linked still.
+  assert.equal(codegen.compact(), false);
+  codegen.reviveDomain(child, new Map());
   assert.equal(codegen.isLive(child), true);
   assert.equal(codegen.compileModule(["a", "b"], 1), compiled);
+  assert.throws(() => codegen.reviveDomain(child, new Map()), /not evicted/);
+});
+
+test("a drop of a domain reset since is ignored", async () => {
+  const codegen = await createCodegen(module);
+  codegen.reset();
+  const epoch = codegen.epoch;
+  const child = codegen.childDomain(0);
+  codegen.reset();
+  assert.equal(codegen.epoch, epoch + 1);
+  assert.equal(codegen.childDomain(0), child);
+  codegen.dropDomain(child, epoch);
+  assert.equal(codegen.isLive(child), true);
+  codegen.dropDomain(child, codegen.epoch);
+  assert.equal(codegen.isLive(child), false);
 });
 
 const generated = new URL("../../../oracle/avmplus/generated/", import.meta.url);

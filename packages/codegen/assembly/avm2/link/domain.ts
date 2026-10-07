@@ -106,6 +106,9 @@ export const LOG_Sign: u8 = 3;
 /** An ABC verified for the first time, or finding scopes for the first time. */
 export const LOG_Verify: u8 = 4;
 
+/** The weight of dead ABCs below which a rebuild is not worth it. */
+const DEAD_Floor: u64 = 4 << 20;
+
 /** What takes the place of an ABC let go of in a rebuilt Domain (see vacate). */
 const NO_ABC = new Abc();
 const NO_BYTES = new StaticArray<u8>(0);
@@ -254,6 +257,11 @@ export class Domain {
   captures: u32 = 0;
   /** Each ABC verified at least once, by index. */
   abcVerified: u8[] = [];
+  /**
+   * How much each ABC holds of the domain's memory, roughly, by index: its
+   * bytes, and the rows of the tables it added (see weigh).
+   */
+  abcWeight: u32[] = [];
   /** How many rebuilds the domain is from the one reset made; each domain's when it was evicted. */
   generation: u32 = 0;
   domainEvicted: u32[] = [0];
@@ -326,6 +334,7 @@ export class Domain {
   attach(abc: Abc, buffer: StaticArray<u8>, domain: u32): bool {
     const base = changetype<usize>(buffer);
     const index = <u32>this.abcs.length;
+    const rows = this.rows();
     this.abcs.push(abc);
     this.abcDomain.push(domain);
     this.abcBase.push(base);
@@ -373,7 +382,39 @@ export class Domain {
 
     this.addClassNames(index);
     this.addBindings(index);
+    // The bytes three times: a copy, and the tables parsing made of them.
+    this.abcWeight.push(<u32>min<u64>(3 * <u64>abc.length + this.rows() - rows, 0xffffffff));
     return true;
+  }
+
+  /**
+   * Roughly the bytes the domain's tables hold, by their rows, for
+   * weighing ABCs: what an ABC's link or compile adds is its own. Within a
+   * fifth or so of what a walk of the heap found, for the libraries, a
+   * large application and the small SWFs it loads.
+   */
+  rows(): u64 {
+    const t = this.traits;
+    return (
+      <u64>t.kind.length * 144 +
+      <u64>t.methodTraits.length * 72 +
+      <u64>t.memberTraits.length * 60 +
+      <u64>(t.slotType.length + t.dispatch.length + t.paramType.length + t.interfaceList.length) *
+        9 +
+      <u64>this.memoType.length * 60 +
+      <u64>this.stringPtr.length * 36 +
+      <u64>this.nsType.length * 24 +
+      <u64>(this.bindingNs.length + this.typeNs.length + this.classAbc.length) * 48 +
+      <u64>this.logKind.length * 36
+    );
+  }
+
+  /** Count what the domain's tables gained since they held `rows` as ABC `index`'s. */
+  weigh(index: u32, rows: u64): void {
+    const now = this.rows();
+    if (now > rows && index < <u32>this.abcWeight.length) {
+      this.abcWeight[index] = <u32>min<u64>(<u64>this.abcWeight[index] + now - rows, 0xffffffff);
+    }
   }
 
   /**
@@ -386,6 +427,7 @@ export class Domain {
     this.abcBase.push(0);
     this.abcBuffer.push(NO_BYTES);
     this.abcVerified.push(0);
+    this.abcWeight.push(0);
     this.loads++;
     this.abcOwner.push(this.loads);
     this.methodStart.push(<u32>this.traits.methodTraits.length);
@@ -468,6 +510,7 @@ export class Domain {
     this.abcs[index] = abc;
     this.abcBase[index] = changetype<usize>(buffer);
     this.abcBuffer[index] = buffer;
+    this.abcWeight[index] = <u32>min<u64>(3 * <u64>length, 0xffffffff);
     return 0;
   }
 
@@ -547,29 +590,47 @@ export class Domain {
   }
 
   /**
-   * Whether the ABCs of domains not live still linked are worth a rebuild:
-   * 64 of them, or half the bytes of the live ones, so that a rebuild,
-   * which links every live ABC again, costs little for each let go.
+   * Whether the ABCs of domains not live, still in the tables, hold enough
+   * of its memory to be worth a rebuild, which links every live ABC again
+   * and does again what resolved lazily: DEAD_Floor of their weight, and as
+   * much as the live ABCs', or a third of the memory with them, past which
+   * a compile's garbage would grow it. wasm memory never shrinks, so what
+   * it has grown to is there to use.
    */
   wantsRebuild(): bool {
-    let away: u32 = 0;
-    let awayBytes: u64 = 0;
-    let liveBytes: u64 = 0;
+    let dead: u64 = 0;
+    let live: u64 = 0;
     for (let i = 0; i < this.abcs.length; i++) {
-      const abc = this.abcs[i];
-      if (abc === NO_ABC) {
+      if (this.abcs[i] === NO_ABC) {
         continue;
       }
 
       if (this.isLive(<u32>i)) {
-        liveBytes += abc.length;
+        live += this.abcWeight[i];
       } else {
-        away++;
-        awayBytes += abc.length;
+        dead += this.abcWeight[i];
       }
     }
 
-    return away >= 64 || (away > 0 && awayBytes * 2 >= liveBytes);
+    const size = (<u64>memory.size()) << 16;
+    return dead >= DEAD_Floor && (dead >= live || (live + dead) * 3 >= size);
+  }
+
+  /** The weight of the live ABCs and of the others still in the tables, "live dead". */
+  weights(): string {
+    let dead: u64 = 0;
+    let live: u64 = 0;
+    for (let i = 0; i < this.abcs.length; i++) {
+      if (this.abcs[i] !== NO_ABC) {
+        if (this.isLive(<u32>i)) {
+          live += this.abcWeight[i];
+        } else {
+          dead += this.abcWeight[i];
+        }
+      }
+    }
+
+    return `${live} ${dead}`;
   }
 
   /** Append entry `kind` of ABC `abc` to the log. */
@@ -684,6 +745,8 @@ export class Domain {
       return false;
     }
 
+    // Its weight counts what compiling it added too.
+    fresh.abcWeight[index] = max(fresh.abcWeight[index], this.abcWeight[index]);
     return true;
   }
 

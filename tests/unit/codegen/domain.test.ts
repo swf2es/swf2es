@@ -134,8 +134,10 @@ test("a dropped application domain is seen no more, and later ABCs keep their in
   assert.equal(testing.domainModule(hashes, 2), "");
   assert.equal(at(sibling, "p", "b"), "abc 3 script 0 trait 0");
 
-  // Rebuilt without them: a name only they spelled is gone, one the
-  // sibling spells too stays, and the sibling's ABC compiles as it did.
+  // Not worth a rebuild yet: they hold too little. Rebuilt without them,
+  // a name only they spelled is gone, one the sibling spells too stays,
+  // and the sibling's ABC compiles as it did.
+  assert.equal(testing.domainCompact(), false);
   assert.equal(testing.domainRebuild(), true);
   assert.match(testing.domainSummary() as string, /^strings 3 namespaces 1 bindings 2 /);
   assert.equal(at(sibling, "p", "b"), "abc 3 script 0 trait 0");

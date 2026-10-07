@@ -19,7 +19,8 @@ The wrapper's `Codegen` (`createCodegen` in `packages/codegen/src`) is the
 compiler's whole API: `reset` starts a domain, `add` links an ABC into it
 after those before, into one of its application domains (`childDomain`
 makes one, `found` records what one has found, `dropDomain` lets one go,
-`evictDomain` and `reviveDomain` for a while, see Linking), and the last
+`evictDomain` and `reviveDomain` for a while, `compact` reuses what they
+took, see Linking), and the last
 one added compiles with `compile`, whole,
 to its module, source map and the entry of each method, with
 `compileModule` to its module alone, or with `compileMethods`, a method at
@@ -123,9 +124,11 @@ three, with the same VerifyError numbers:
    module names as `linked` the ABCs it sees, in load order.
    An application domain the runtime has let go of is dropped with its
    descendants (`dropDomain`): no other sees its ABCs, which compile no
-   more and keep their indices. Once the dropped ABCs are many enough, 64
-   or half the live ABCs' bytes, the next call that adds or compiles
-   rebuilds the domain: the live ABCs link again, in their places, and
+   more and keep their indices. `compact` rebuilds the domain once those
+   ABCs hold enough of its memory, by an estimate from the rows of its
+   tables: 4 MB, and as much as the live ABCs or a third of codegen's
+   memory with them; a host calls it when it has time, as the player
+   does when idle. A rebuild links the live ABCs again, in their places, and
    what the domain has logged is done again where it happened: each
    finding recorded, and the first answer to what resolves lazily, a
    traits' types, a method's signature, an ABC's first verification and
@@ -134,12 +137,16 @@ three, with the same VerifyError numbers:
    now. So the collector frees all the dropped took, the names only they
    spelled included; wasm memory never shrinks, but what was freed is used
    again. A live ABC links, resolves and compiles as it did, since no
-   dropped one was ever seen by it. A domain the host has no use for now,
+   dropped one was ever seen by it. A rebuild of a large application's
+   domain takes tens of milliseconds, its first verifications most. A
+   domain the host has no use for now,
    as once its ABCs are compiled, is evicted with its descendants
    (`evictDomain`), as if dropped but for its log, and revived
    (`reviveDomain`) with its evicted ancestors, the first a child of a
    live domain, given their ABCs again if a rebuild let go of them: one
    rebuild links them in their places, their log done again with them.
+   `reset` counts an epoch, which `dropDomain` checks, so that a drop
+   meant for a domain of before a reset does nothing.
    Each class's, script's and activation's traits then lay out their
    members, binding names to slot and dispatch ids after their base's
    (`link/traits.ts`). Types resolve later, when a class is first used:

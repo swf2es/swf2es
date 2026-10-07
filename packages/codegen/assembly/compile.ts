@@ -137,11 +137,11 @@ export function domainRevive(appDomain: i32): i32 {
 }
 
 /**
- * Rebuild the domain without the ABCs of domains not live, once enough
- * are let go of for that to be worth it: whether it was, and a collection
- * would free them now. A host calls it before it next adds or compiles, so
- * that a batch of drops costs one rebuild. Later modules come out the same
- * either way.
+ * Rebuild the domain without the ABCs of domains not live, once they hold
+ * enough of its memory for that to be worth it (see Domain.wantsRebuild):
+ * whether it was, and a collection would free them now. A host calls it
+ * when it has time, as when idle, so a batch of drops and evictions costs
+ * one rebuild. Later modules come out the same either way.
  */
 export function domainCompact(): bool {
   return domain.wantsRebuild() && domainRebuild();
@@ -226,8 +226,10 @@ export function domainModule(hashes: string = "", index: i32 = -1, keep: bool = 
     return "";
   }
 
+  const rows = domain.rows();
   const emitter = new ModuleEmitter(domain, <u32>at);
   emitter.module(hashes.length ? hashes.split("\n") : []);
+  domain.weigh(<u32>at, rows);
   if (keep) {
     written = emitter;
   }
@@ -264,6 +266,7 @@ export function domainEmitEach(bodies: string, reuse: bool, which: i32 = -1): st
 
   const index = <u32>at;
   const abc = domain.abcs[index];
+  const rows = domain.rows();
   const results = verifiedBodies(index);
   const decoder = new BodyDecoder(abc, domain.abcBase[index], domain, index);
   const entries = new Output();
@@ -307,7 +310,13 @@ export function domainEmitEach(bodies: string, reuse: bool, which: i32 = -1): st
     entries.byte(2);
   }
 
+  domain.weigh(index, rows);
   return String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
+}
+
+/** The weight of the live ABCs and of those of domains not live still linked, "live dead", in bytes, roughly. */
+export function domainWeights(): string {
+  return domain.weights();
 }
 
 /**

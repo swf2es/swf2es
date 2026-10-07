@@ -38,4 +38,5 @@ export {
   domainRevive,
   domainSourceMap,
   domainState,
+  domainWeights,
 } from "./compile";
