@@ -792,6 +792,36 @@ function typeText(t: i32, notNull: u8): string {
   return name + bang;
 }
 
+/**
+ * The slot types of the instances of class `cls` of ABC `index`, resolving
+ * them if they are not yet: each "abc A class C", or "*"; "none" if it has
+ * no such class.
+ */
+export function domainSlotTypes(index: i32, cls: i32): string {
+  if (index < 0 || index >= domain.abcs.length || cls < 0) {
+    return "none";
+  }
+
+  if (<u32>cls >= domain.abcs[index].classCount) {
+    return "none";
+  }
+
+  const traits = domain.traits;
+  const t = domain.classTraits[domain.classStart[index] + <u32>cls];
+  if (t < 0 || traits.resolve(domain, <u32>t) !== 0) {
+    return "unresolved";
+  }
+
+  const out: string[] = [];
+  const start = traits.slotStart[t];
+  for (let s: u32 = 0; s < traits.slotCount[t]; s++) {
+    const type = traits.slotType[start + s];
+    out.push(type < 0 ? "*" : `abc ${traits.abc[type]} class ${traits.owner[type]}`);
+  }
+
+  return out.join(", ");
+}
+
 /** How many traits the domain has. */
 export function domainTraitsCount(): i32 {
   return domain.traits.kind.length;

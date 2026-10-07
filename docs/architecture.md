@@ -126,15 +126,20 @@ three, with the same VerifyError numbers:
    more and keep their indices. Once the dropped ABCs are many enough, 64
    or half the live ABCs' bytes, the next call that adds or compiles
    rebuilds the domain: the live ABCs link again, in their places, and
-   their findings are recorded again where they were, so the collector
-   frees all the dropped took, the names only they spelled included.
-   wasm memory never shrinks, but what was freed is used again. A live
-   ABC links as it did, since no dropped one was ever seen by it, and
-   compiles alike. A domain the host has no use for now, as once its ABCs
-   are compiled, is evicted with its descendants (`evictDomain`), as if
-   dropped but for its findings, and revived (`reviveDomain`), its parent
-   live, given its ABCs again if a rebuild let go of them: they link in
-   their places again, by a rebuild, with what it found, as they did.
+   what the domain has logged is done again where it happened: each
+   finding recorded, and the first answer to what resolves lazily, a
+   traits' types, a method's signature, an ABC's first verification and
+   the scopes it finds. Those see the ABCs there were when first asked;
+   an ancestor may define the same name since, which a lookup would find
+   now. So the collector frees all the dropped took, the names only they
+   spelled included; wasm memory never shrinks, but what was freed is used
+   again. A live ABC links, resolves and compiles as it did, since no
+   dropped one was ever seen by it. A domain the host has no use for now,
+   as once its ABCs are compiled, is evicted with its descendants
+   (`evictDomain`), as if dropped but for its log, and revived
+   (`reviveDomain`) with its evicted ancestors, the first a child of a
+   live domain, given their ABCs again if a rebuild let go of them: one
+   rebuild links them in their places, their log done again with them.
    Each class's, script's and activation's traits then lay out their
    members, binding names to slot and dispatch ids after their base's
    (`link/traits.ts`). Types resolve later, when a class is first used:

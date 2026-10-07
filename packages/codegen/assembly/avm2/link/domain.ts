@@ -29,6 +29,7 @@
 // later version. User ABCs' public namespaces get the domain's version, so
 // they cannot see VM-internal names.
 import { Abc } from "../abc/abc";
+import { verifyMethods } from "../abc/code";
 import * as C from "../abc/constants";
 import { readAbc } from "../abc/parse";
 import { hashBytes, hashPair, IdTable } from "./table";
@@ -93,6 +94,17 @@ export const URI_None: u32 = 0xffffffff;
 export const DOMAIN_Live: u8 = 0;
 export const DOMAIN_Evicted: u8 = 1;
 export const DOMAIN_Dropped: u8 = 2;
+
+/** The kinds of the log's entries (see Domain.logKind). */
+export const LOG_None: u8 = 0;
+/** A finding, by its index in the found tables. */
+export const LOG_Found: u8 = 1;
+/** Traits resolved, by their kind and owner in their ABC. */
+export const LOG_Resolve: u8 = 2;
+/** A method signed, by its index in its ABC. */
+export const LOG_Sign: u8 = 3;
+/** An ABC verified for the first time, or finding scopes for the first time. */
+export const LOG_Verify: u8 = 4;
 
 /** What takes the place of an ABC let go of in a rebuilt Domain (see vacate). */
 const NO_ABC = new Abc();
@@ -217,17 +229,34 @@ export class Domain {
   cachedBinding: i32[] = [];
   cachedClass: i32[] = [];
   cached: IdTable = new IdTable();
-  /**
-   * Each finding addFound recorded, as the runtime reported it, and how
-   * many ABCs there were then: a rebuild records it again at that point.
-   */
-  foundAt: u32[] = [];
+  /** Each finding addFound recorded, as the runtime reported it (see LOG_Found). */
   foundDomain: u32[] = [];
   foundKind: u8[] = [];
   foundUri: string[] = [];
   foundName: string[] = [];
   foundAbc: u32[] = [];
   foundAsType: u8[] = [];
+  /**
+   * What the domain's tables hold that depends on when it happened, in the
+   * order it happened, and how many ABCs there were then, for a rebuild to
+   * do again at that point: a finding recorded, and the first answers
+   * cached of what resolves lazily, a traits' types, a method's signature
+   * and an ABC's verified scopes, which see the ABCs there are when they
+   * are first asked for. A LOG_ kind, the ABC it is of, and two numbers
+   * by kind (see logged).
+   */
+  logKind: u8[] = [];
+  logAt: u32[] = [];
+  logAbc: u32[] = [];
+  logA: u32[] = [];
+  logB: u32[] = [];
+  /** Scopes, function scopes and catch scopes found first, for verifyMethods to tell whether it found any. */
+  captures: u32 = 0;
+  /** Each ABC verified at least once, by index. */
+  abcVerified: u8[] = [];
+  /** How many rebuilds the domain is from the one reset made; each domain's when it was evicted. */
+  generation: u32 = 0;
+  domainEvicted: u32[] = [0];
   /** Strings interned from text rather than an ABC, kept for their bytes. */
   texts: ArrayBuffer[] = [];
 
@@ -301,6 +330,7 @@ export class Domain {
     this.abcDomain.push(domain);
     this.abcBase.push(base);
     this.abcBuffer.push(buffer);
+    this.abcVerified.push(0);
     this.loads++;
     this.abcOwner.push(this.loads);
     const methodCount = <u32>this.traits.methodTraits.length;
@@ -324,6 +354,7 @@ export class Domain {
       this.abcs.pop();
       this.abcBase.pop();
       this.abcBuffer.pop();
+      this.abcVerified.pop();
       this.abcString.pop();
       this.abcNs.pop();
       this.abcNsVersion.pop();
@@ -354,6 +385,7 @@ export class Domain {
     this.abcDomain.push(domain);
     this.abcBase.push(0);
     this.abcBuffer.push(NO_BYTES);
+    this.abcVerified.push(0);
     this.loads++;
     this.abcOwner.push(this.loads);
     this.methodStart.push(<u32>this.traits.methodTraits.length);
@@ -398,9 +430,14 @@ export class Domain {
 
     // A child is made after its parent, so its number is higher.
     this.domainState[domain] = state;
+    this.domainEvicted[domain] = this.generation;
     for (let d = domain + 1; d < count; d++) {
       const parent = this.domainState[<u32>this.domainParent[d]];
       if (parent !== DOMAIN_Live && this.domainState[d] < parent) {
+        if (this.domainState[d] === DOMAIN_Live) {
+          this.domainEvicted[d] = this.generation;
+        }
+
         this.domainState[d] = parent;
       }
     }
@@ -431,37 +468,82 @@ export class Domain {
     this.abcs[index] = abc;
     this.abcBase[index] = changetype<usize>(buffer);
     this.abcBuffer[index] = buffer;
-    this.restored = true;
     return 0;
   }
 
-  /** Whether an ABC was restored since the domain was built: then revive rebuilds it. */
-  restored: bool = false;
-
   /**
-   * Make evicted application domain `domain` live again, its parent live:
-   * 0 if its ABCs are linked still, 1 if an ABC was restored, which only a
-   * rebuild links, and -1, leaving it evicted, if it cannot be: it is not
-   * evicted, its parent is not live, or an ABC of it was not restored.
+   * Make evicted application domain `domain` live again, with its evicted
+   * ancestors, the first of them a child of a live one: 0 if their ABCs
+   * and findings are in the tables still, as no rebuild has been since
+   * any was evicted, 1 if a rebuild must link them again, and -1, leaving
+   * them evicted, if they cannot be: `domain` is not evicted, the first
+   * evicted ancestor's parent is not live, or an ABC of theirs that a
+   * rebuild let go of was not restored.
    */
   revive(domain: u32): i32 {
     if (
       domain === 0 ||
       domain >= <u32>this.domainState.length ||
-      this.domainState[domain] !== DOMAIN_Evicted ||
-      this.domainState[<u32>this.domainParent[domain]] !== DOMAIN_Live
+      this.domainState[domain] !== DOMAIN_Evicted
     ) {
       return -1;
     }
 
+    let top = domain;
+    while (this.domainState[<u32>this.domainParent[top]] === DOMAIN_Evicted) {
+      top = <u32>this.domainParent[top];
+    }
+
+    if (this.domainState[<u32>this.domainParent[top]] !== DOMAIN_Live) {
+      return -1;
+    }
+
     for (let i = 0; i < this.abcs.length; i++) {
-      if (this.abcDomain[i] === domain && this.abcs[i] === NO_ABC) {
+      if (this.abcs[i] === NO_ABC && this.inChain(this.abcDomain[i], top, domain)) {
         return -1;
       }
     }
 
-    this.domainState[domain] = DOMAIN_Live;
-    return this.restored ? 1 : 0;
+    let stale = false;
+    for (let d = domain; ; d = <u32>this.domainParent[d]) {
+      stale = stale || this.domainEvicted[d] !== this.generation;
+      this.domainState[d] = DOMAIN_Live;
+      if (d === top) {
+        break;
+      }
+    }
+
+    return stale ? 1 : 0;
+  }
+
+  /** Make `domain` and its ancestors up to `top` evicted again, as revive found them. */
+  unrevive(domain: u32, top: u32): void {
+    for (let d = domain; ; d = <u32>this.domainParent[d]) {
+      this.domainState[d] = DOMAIN_Evicted;
+      if (d === top) {
+        break;
+      }
+    }
+  }
+
+  /** The first evicted ancestor of `domain` from the root down, or `domain` itself. */
+  evictedTop(domain: u32): u32 {
+    let top = domain;
+    while (this.domainState[<u32>this.domainParent[top]] === DOMAIN_Evicted) {
+      top = <u32>this.domainParent[top];
+    }
+
+    return top;
+  }
+
+  /** Whether `d` is `bottom` or one of its ancestors up to `top`. */
+  inChain(d: u32, top: u32, bottom: u32): bool {
+    let x = bottom;
+    while (x !== d && x !== top) {
+      x = <u32>this.domainParent[x];
+    }
+
+    return x === d;
   }
 
   /**
@@ -490,15 +572,53 @@ export class Domain {
     return away >= 64 || (away > 0 && awayBytes * 2 >= liveBytes);
   }
 
+  /** Append entry `kind` of ABC `abc` to the log. */
+  logged(kind: u8, abc: u32, a: u32, b: u32): void {
+    this.logKind.push(kind);
+    this.logAt.push(<u32>this.abcs.length);
+    this.logAbc.push(abc);
+    this.logA.push(a);
+    this.logB.push(b);
+  }
+
+  /** Log that traits t resolved, unless they are made on demand, which no lookup decides. */
+  loggedResolve(t: u32): void {
+    const traits = this.traits;
+    const kind = traits.kind[t];
+    if (kind >= TRAITS_Instance && kind <= TRAITS_Activation && traits.param[t] === TYPE_Any) {
+      this.logged(LOG_Resolve, traits.abc[t], kind, traits.owner[t]);
+    }
+  }
+
+  /** The traits of ABC `abc` of `kind` and `owner`, as loggedResolve logged them, or -1. */
+  traitsOf(abc: u32, kind: u32, owner: u32): i32 {
+    if (kind === TRAITS_Instance) {
+      return this.classTraits[this.classStart[abc] + owner];
+    }
+
+    if (kind === TRAITS_Class) {
+      return this.classStatic[this.classStart[abc] + owner];
+    }
+
+    if (kind === TRAITS_Script) {
+      return <i32>this.scriptTraits[abc][owner];
+    }
+
+    return this.bodyTraits[abc][owner];
+  }
+
   /**
    * A new Domain with the live ABCs linked again, in the same order and
-   * at the same indices, and the findings of live domains recorded again
-   * where they were, an evicted domain's kept for its revival: nothing of
-   * the other ABCs is left in it, not even a name only they spelled. Each
-   * live ABC links as it did, since no ABC let go of was seen by a live
-   * one, and what a method compiles to depends only on the ABCs its domain
-   * sees, so it compiles alike. Null, leaving this one as it was, if an
-   * ABC does not link again, which would be a bug.
+   * at the same indices, and the log done again where it happened: each
+   * finding of a live domain recorded, and each lazy answer about a live
+   * ABC asked for again, with the same ABCs there as when it was first
+   * asked, so it is the same; an evicted domain's entries are kept for its
+   * revival. Nothing of the other ABCs is left in it, not even a name only
+   * they spelled. Each live ABC links as it did, since no ABC let go of was
+   * seen by a live one, and what a method compiles to depends only on the
+   * ABCs its domain sees and on those answers, so it compiles alike. Null,
+   * leaving this one as it was, if an ABC does not link again or an answer
+   * comes out an error, which would be a bug.
    */
   rebuilt(): Domain | null {
     const fresh = new Domain();
@@ -507,41 +627,41 @@ export class Domain {
     fresh.domainParent = this.domainParent;
     fresh.domainDepth = this.domainDepth;
     fresh.domainState = this.domainState;
-    let found = 0;
+    fresh.domainEvicted = this.domainEvicted;
+    fresh.generation = this.generation + 1;
     const count = <u32>this.abcs.length;
-    for (let i: u32 = 0; i <= count; i++) {
-      for (; found < this.foundAt.length && this.foundAt[found] <= i; found++) {
-        const domain = this.foundDomain[found];
-        const state = this.domainState[domain];
-        const abc = this.foundAbc[found];
-        if (state === DOMAIN_Live && this.isLive(abc)) {
-          fresh.addFound(
-            domain,
-            this.foundKind[found],
-            this.foundUri[found],
-            this.foundName[found],
-            abc,
-            this.foundAsType[found] !== 0,
-          );
-        } else if (state === DOMAIN_Evicted) {
-          fresh.keepFound(this, found);
+    let next: u32 = 0;
+    for (let e = 0; e <= this.logKind.length; e++) {
+      const at = e < this.logKind.length ? this.logAt[e] : count;
+      for (; next < at; next++) {
+        if (!this.reattach(fresh, next)) {
+          return null;
         }
       }
 
-      if (i === count) {
+      if (e === this.logKind.length) {
         break;
       }
 
-      const abc = this.abcs[i];
-      if (abc === NO_ABC || !this.isLive(i)) {
-        fresh.vacate(this.abcDomain[i]);
+      const kind = this.logKind[e];
+      const abc = this.logAbc[e];
+      const state =
+        kind === LOG_Found
+          ? max(
+              this.domainState[this.foundDomain[this.logA[e]]],
+              this.domainState[this.abcDomain[abc]],
+            )
+          : this.domainState[this.abcDomain[abc]];
+      if (kind === LOG_None || state === DOMAIN_Dropped) {
         continue;
       }
 
-      const buffer = this.abcBuffer[i];
-      fresh.buffers.push(buffer);
-      if (!fresh.attach(abc, buffer, this.abcDomain[i])) {
-        abc.error = 0;
+      if (state === DOMAIN_Evicted || this.abcs[abc] === NO_ABC) {
+        fresh.keepEntry(this, e);
+        continue;
+      }
+
+      if (!fresh.replay(this, e)) {
         return null;
       }
     }
@@ -549,15 +669,72 @@ export class Domain {
     return fresh;
   }
 
-  /** Keep finding `found` of `from`, unrecorded, for when its domain is revived. */
-  keepFound(from: Domain, found: i32): void {
-    this.foundAt.push(<u32>this.abcs.length);
-    this.foundDomain.push(from.foundDomain[found]);
-    this.foundKind.push(from.foundKind[found]);
-    this.foundUri.push(from.foundUri[found]);
-    this.foundName.push(from.foundName[found]);
-    this.foundAbc.push(from.foundAbc[found]);
-    this.foundAsType.push(from.foundAsType[found]);
+  /** Link ABC `index` of `this` again as `fresh`'s next, or keep its place if it is not live: false if it does not link. */
+  reattach(fresh: Domain, index: u32): bool {
+    const abc = this.abcs[index];
+    if (abc === NO_ABC || !this.isLive(index)) {
+      fresh.vacate(this.abcDomain[index]);
+      return true;
+    }
+
+    const buffer = this.abcBuffer[index];
+    fresh.buffers.push(buffer);
+    if (!fresh.attach(abc, buffer, this.abcDomain[index])) {
+      abc.error = 0;
+      return false;
+    }
+
+    return true;
+  }
+
+  /** Do entry `e` of `from`'s log again, its ABC linked: false if it comes out an error. */
+  replay(from: Domain, e: i32): bool {
+    const kind = from.logKind[e];
+    const abc = from.logAbc[e];
+    if (kind === LOG_Found) {
+      const f = from.logA[e];
+      this.addFound(
+        from.foundDomain[f],
+        from.foundKind[f],
+        from.foundUri[f],
+        from.foundName[f],
+        from.foundAbc[f],
+        from.foundAsType[f] !== 0,
+      );
+      return true;
+    }
+
+    if (kind === LOG_Resolve) {
+      const t = this.traitsOf(abc, from.logA[e], from.logB[e]);
+      return t >= 0 && this.traits.resolve(this, <u32>t) === 0;
+    }
+
+    if (kind === LOG_Sign) {
+      return this.traits.sign(this, this.methodStart[abc] + from.logB[e]) === 0;
+    }
+
+    verifyMethods(this, abc);
+    return true;
+  }
+
+  /** Keep entry `e` of `from`'s log, not done, for when its domain is revived. */
+  keepEntry(from: Domain, e: i32): void {
+    let a = from.logA[e];
+    if (from.logKind[e] === LOG_Found) {
+      a = <u32>this.foundDomain.length;
+      this.foundDomain.push(from.foundDomain[from.logA[e]]);
+      this.foundKind.push(from.foundKind[from.logA[e]]);
+      this.foundUri.push(from.foundUri[from.logA[e]]);
+      this.foundName.push(from.foundName[from.logA[e]]);
+      this.foundAbc.push(from.foundAbc[from.logA[e]]);
+      this.foundAsType.push(from.foundAsType[from.logA[e]]);
+    }
+
+    this.logKind.push(from.logKind[e]);
+    this.logAt.push(from.logAt[e]);
+    this.logAbc.push(from.logAbc[e]);
+    this.logA.push(a);
+    this.logB.push(from.logB[e]);
   }
 
   /** Link ABC `index`'s classes to their bases and interfaces; false after recording the error. */
@@ -1138,6 +1315,7 @@ export class Domain {
     traits.dispatchStart[t] = traits.dispatch.length;
     traits.resolved[t] = 1;
     this.catchScopes.set(key, <i32>t);
+    this.captures++;
     return <i32>t;
   }
 
@@ -1822,6 +2000,7 @@ export class Domain {
     this.domainParent.push(<i32>parent);
     this.domainDepth.push(this.domainDepth[parent] + 1);
     this.domainState.push(DOMAIN_Live);
+    this.domainEvicted.push(0);
     return id;
   }
 
@@ -2022,7 +2201,7 @@ export class Domain {
     this.cachedClass.push(cls);
     this.cached.insert(hashPair(<u32>ns, <u32>nameId), id);
     this.clearBindingMemo();
-    this.foundAt.push(<u32>this.abcs.length);
+    this.logged(LOG_Found, abc, <u32>this.foundDomain.length, 0);
     this.foundDomain.push(domain);
     this.foundKind.push(type);
     this.foundUri.push(uri);

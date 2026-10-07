@@ -136,7 +136,7 @@ test("a dropped application domain is seen no more, and later ABCs keep their in
 
   // Rebuilt without them: a name only they spelled is gone, one the
   // sibling spells too stays, and the sibling's ABC compiles as it did.
-  assert.equal(testing.domainCompact(), true);
+  assert.equal(testing.domainRebuild(), true);
   assert.match(testing.domainSummary() as string, /^strings 3 namespaces 1 bindings 2 /);
   assert.equal(at(sibling, "p", "b"), "abc 3 script 0 trait 0");
   assert.equal(at(sibling, "p", "a"), "abc 0 script 0 trait 0");
@@ -178,7 +178,7 @@ test("what a live domain found holds after a rebuild, and a dropped one's is gon
   // Found in a dropped domain, or of a dropped domain's ABC: not recorded.
   testing.domainFound(other, NS_PUBLIC, "p", "x", 2, false);
   testing.domainFound(child, NS_PUBLIC, "p", "x", 2, false);
-  assert.equal(testing.domainCompact(), true);
+  assert.equal(testing.domainRebuild(), true);
   assert.match(testing.domainSummary() as string, / found 1 /);
   assert.equal(at(child, "p", "b"), "abc 1 script 0 trait 0");
   assert.equal(at(0, "p", "b"), "abc 3 script 0 trait 0");
@@ -208,7 +208,6 @@ test("an evicted domain is revived as it was, given its ABCs again once a rebuil
   assert.deepEqual([testing.domainState(child), testing.domainState(grandchild)], [1, 1]);
   assert.equal(testing.domainChild(child), -1);
   assert.equal(at(child, "p", "c"), "none");
-  assert.equal(testing.domainRevive(grandchild), -1);
   assert.equal(testing.domainRevive(child), 0);
   assert.deepEqual([testing.domainState(child), testing.domainState(grandchild)], [0, 1]);
   assert.equal(at(child, "p", "c"), "abc 1 script 0 trait 1");
@@ -218,7 +217,7 @@ test("an evicted domain is revived as it was, given its ABCs again once a rebuil
   // Let go of by a rebuild, they are revived only given their ABCs again,
   // and link as they did, what they found with them.
   testing.domainEvict(child);
-  assert.equal(testing.domainCompact(), true);
+  assert.equal(testing.domainRebuild(), true);
   assert.match(testing.domainSummary() as string, / found 0 /);
   assert.equal(testing.domainRevive(child), -1);
   assert.equal(testing.domainRestore(0, childAbc), -1);
@@ -233,6 +232,16 @@ test("an evicted domain is revived as it was, given its ABCs again once a rebuil
   assert.equal(testing.domainRevive(grandchild), 1);
   assert.equal(testing.domainModule(hashes, 2), module);
 
+  // A grandchild revives its evicted ancestors with it, by one rebuild.
+  testing.domainEvict(child);
+  assert.equal(testing.domainRebuild(), true);
+  assert.equal(testing.domainRestore(2, grandchildAbc), 0);
+  assert.equal(testing.domainRevive(grandchild), -1);
+  assert.equal(testing.domainRestore(1, childAbc), 0);
+  assert.equal(testing.domainRevive(grandchild), 1);
+  assert.deepEqual([testing.domainState(child), testing.domainState(grandchild)], [0, 0]);
+  assert.equal(testing.domainModule(hashes, 2), module);
+
   // Dropped while evicted, it is gone for good.
   testing.domainEvict(child);
   testing.domainDrop(child);
@@ -240,6 +249,25 @@ test("an evicted domain is revived as it was, given its ABCs again once a rebuil
   assert.equal(testing.domainRestore(1, childAbc), -1);
   assert.equal(testing.domainRevive(child), -1);
   assert.equal(testing.domainState(99), -1);
+});
+
+test("a domain revived with findings and no ABCs keeps its findings through a rebuild", () => {
+  testing.domainReset(SWF_31);
+  assert.equal(testing.domainAdd(definitions([["p", "a"]]), false), 0);
+  const parent = testing.domainChild(0) as number;
+  assert.equal(testing.domainAdd(definitions([["p", "a"]]), false, parent), 0);
+  const empty = testing.domainChild(parent) as number;
+  const find = () => testing.domainFind(NS_PUBLIC, "p", "a", SWF_31, empty) as string;
+  assert.equal(find(), "abc 0 script 0 trait 0");
+  testing.domainFound(empty, NS_PUBLIC, "p", "a", 1, false);
+  assert.equal(find(), "abc 1 script 0 trait 0");
+
+  // Rebuilt while it was evicted, it has no ABC to restore, and is rebuilt
+  // again to record its finding.
+  testing.domainEvict(empty);
+  assert.equal(testing.domainRebuild(), true);
+  assert.equal(testing.domainRevive(empty), 1);
+  assert.equal(find(), "abc 1 script 0 trait 0");
 });
 
 test("an ABC that does not parse is not added", () => {
@@ -484,4 +512,63 @@ test("dropping other domains changes no module, and memory stops growing", {
   testing.domainAdd(builtin, true);
   testing.domainAdd(layered(0), false, testing.domainChild(0));
   assert.equal(testing.domainModule("b\nx", 1), module);
+});
+
+test("what resolved lazily resolves alike after a rebuild, though an ancestor defines its type later", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  // B's slot x is of type A, which its domain defines; once B resolved, the
+  // main domain above defines another A, which a lookup from the domain
+  // now finds first. B's slot keeps the A it resolved to, and a rebuild,
+  // which resolves B again, must resolve it to that A as well.
+  // Resolved as its script creates it, and by a lookup alone.
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  for (const created of [true, false]) {
+    testing.domainReset(SWF_31);
+    testing.domainAdd(builtin, true);
+    const main = testing.domainChild(0) as number;
+    const domain = testing.domainChild(main) as number;
+    const a = classes([
+      { name: mn("A"), base: mn("Object"), traits: [{ name: mn("m"), kind: METHOD }] },
+    ]);
+    const b = classes(
+      [
+        {
+          name: mn("B"),
+          base: mn("Object"),
+          traits: [{ name: mn("x"), kind: SLOT, index: mn("A") }],
+        },
+      ],
+      created,
+    );
+    assert.equal(testing.domainAdd(a, false, domain), 0);
+    assert.equal(testing.domainAdd(b, false, domain), 0);
+    if (created) {
+      assert.notEqual(testing.domainModule("", 2), "");
+    }
+
+    assert.equal(testing.domainSlotTypes(2, 0), "abc 1 class 0");
+    const other = classes([
+      {
+        name: mn("A"),
+        base: mn("Object"),
+        traits: [
+          { name: mn("n"), kind: METHOD },
+          { name: mn("m"), kind: METHOD },
+        ],
+      },
+    ]);
+    assert.equal(testing.domainAdd(other, false, main), 0);
+    assert.equal(testing.domainSlotTypes(2, 0), "abc 1 class 0");
+
+    assert.equal(testing.domainRebuild(), true);
+    assert.equal(testing.domainSlotTypes(2, 0), "abc 1 class 0");
+    // Evicted and revived by a rebuild, the same.
+    testing.domainEvict(domain);
+    assert.equal(testing.domainRebuild(), true);
+    assert.equal(testing.domainRestore(1, a), 0);
+    assert.equal(testing.domainRestore(2, b), 0);
+    assert.equal(testing.domainRevive(domain), 1);
+    assert.equal(testing.domainSlotTypes(2, 0), "abc 1 class 0");
+  }
 });

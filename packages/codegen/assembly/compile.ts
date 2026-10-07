@@ -8,7 +8,7 @@ import * as C from "./avm2/abc/constants";
 import { PADDING } from "./avm2/abc/reader";
 import { ModuleEmitter } from "./avm2/emit/module";
 import { Output } from "./avm2/emit/output";
-import { DOMAIN_Evicted, DOMAIN_Live, Domain } from "./avm2/link/domain";
+import { DOMAIN_Live, Domain } from "./avm2/link/domain";
 
 export let domain = new Domain();
 
@@ -76,8 +76,9 @@ export function domainDrop(appDomain: i32): void {
 /**
  * Evict application domain `appDomain` and its descendants while the host
  * has no use for them, as when it has compiled all their ABCs: as dropped,
- * until domainRevive. A domain long evicted takes only its findings and
- * its ABCs' places; the host keeps their bytes to give again.
+ * until domainRevive. Once compacted away, a domain evicted takes only its
+ * log (see Domain.logKind) and its ABCs' places; the host keeps their
+ * bytes to give again.
  */
 export function domainEvict(appDomain: i32): void {
   if (appDomain >= 0) {
@@ -108,23 +109,27 @@ export function domainRestore(index: i32, bytes: Uint8Array): i32 {
 }
 
 /**
- * Make evicted application domain `appDomain` live again, its parent live
- * and its ABCs restored where domainState asked: its ABCs link again as
- * they did, by a rebuild if they were let go of. 0, 1 after a rebuild, which
- * a collection would free, or -1, leaving it evicted, if it cannot be.
+ * Make evicted application domain `appDomain` live again, with its evicted
+ * ancestors, given again those of their ABCs domainRestore was asked for
+ * (after a -1 here): their ABCs link again as they did, and what they
+ * found holds, by one rebuild if one has been since any was evicted. 0, 1
+ * after a rebuild, which a collection would free, or -1, leaving them
+ * evicted, if they cannot be.
  */
 export function domainRevive(appDomain: i32): i32 {
   if (appDomain < 0) {
     return -1;
   }
 
-  const revived = domain.revive(<u32>appDomain);
+  const bottom = <u32>appDomain;
+  const top = bottom < <u32>domain.domainState.length ? domain.evictedTop(bottom) : bottom;
+  const revived = domain.revive(bottom);
   if (revived <= 0) {
     return revived;
   }
 
   if (!domainRebuild()) {
-    domain.domainState[<u32>appDomain] = DOMAIN_Evicted;
+    domain.unrevive(bottom, top);
     return -1;
   }
 
@@ -144,7 +149,7 @@ export function domainCompact(): bool {
 
 /**
  * The domain built again from its live ABCs (see Domain.rebuilt), worth it
- * or not, as the fuzzer asks; false, leaving it, if one did not link.
+ * or not, as the fuzzers ask; false, leaving it, if one did not link.
  */
 export function domainRebuild(): bool {
   const fresh = domain.rebuilt();
