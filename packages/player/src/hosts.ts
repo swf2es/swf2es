@@ -207,8 +207,18 @@ export interface ExternalInterfaceHost {
   evalJS(source: string): string | null;
   /** An XML invocation when evalJS declined the call. */
   callOut(request: string): string | null;
-  /** A wrapper produced by playerglobal. Its arguments and result use AVM2 values. */
-  addCallback(name: string, callback: ((request: string, args: Value[]) => Value) | null): void;
+  /**
+   * The SWF's callback `name`, playerglobal's wrapper of its closure, or
+   * null as it is removed. Called with `args`, AVM2 values, the closure
+   * gets them as they are and the result is JavaScript source (_toJS);
+   * with null, `request` is an XML invocation, as Flash's plug-in sends
+   * one, whose arguments playerglobal converts, and the result is XML
+   * (_toXML) for a `returntype="xml"` request: a host needs no eval.
+   */
+  addCallback(
+    name: string,
+    callback: ((request: string, args: Value[] | null) => Value) | null,
+  ): void;
   objectID?: string | null;
 }
 

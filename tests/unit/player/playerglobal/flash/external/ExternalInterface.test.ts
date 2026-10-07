@@ -34,7 +34,7 @@ test("ExternalInterface reports an unavailable host and keeps callbacks per play
   );
 
   const calls: string[] = [];
-  const callbacks: { current: ((request: string, args: unknown[]) => unknown) | null } = {
+  const callbacks: { current: ((request: string, args: unknown[] | null) => unknown) | null } = {
     current: null,
   };
   const first = scripting({
@@ -76,14 +76,19 @@ test("ExternalInterface reports an unavailable host and keeps callbacks per play
   assert.equal(a[`${PRIVATE}_callOut`](first.rt).call(null, "<invoke/>"), "<null/>");
   assert.deepEqual(calls, ["eval source", "call <invoke/>"]);
 
-  const closure = { $f: (request: string, args: { $a: unknown[] }) => `${request}:${args.$a}` };
+  const closure = {
+    $f: (request: string, args: { $a: unknown[] } | null) => `${request}:${args?.$a ?? "none"}`,
+  };
   a[`${PRIVATE}_addCallback`](first.rt).call(null, "ready", closure, false);
   assert.equal(callbacks.current?.("message", [1, 2]), "message:1,2");
   // A call from the page runs outside a frame: a change a host draws for.
   assert.equal(first.hostCalls, 1);
+  // An XML invocation alone: playerglobal's _callIn reads its arguments from it.
+  assert.equal(callbacks.current?.("<invoke/>", null), "<invoke/>:none");
   a[`${PRIVATE}_addCallback`](first.rt).call(null, "ready", closure, true);
   assert.equal(callbacks.current, null);
   assert.deepEqual(calls.slice(2), ["callback ready", "callback ready"]);
+  assert.equal(first.hostCalls, 2);
 });
 
 test("ExternalInterface quotes JavaScript string and error arguments", () => {

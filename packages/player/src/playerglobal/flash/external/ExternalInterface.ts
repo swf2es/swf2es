@@ -52,7 +52,12 @@ export function externalInterfaceNatives(s: Scripting): avm2.Natives {
           ? null
           : (request, args) => {
               s.hostCalls++;
-              return s.rt.callValue(closure, null, [request, s.rt.array(args)], null);
+              return s.rt.callValue(
+                closure,
+                null,
+                [request, args === null ? null : s.rt.array(args)],
+                null,
+              );
             },
       );
     }
