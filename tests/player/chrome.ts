@@ -205,7 +205,10 @@ async function withPage<T>(
     // Navigating answers once the new document has replaced the old, and
     // brings a crashed page back in a new renderer.
     const fresh = async () => {
-      await devtools.send("Page.navigate", { url });
+      // The checked build's tests have the player check its own shortcuts too (page.ts).
+      await devtools.send("Page.navigate", {
+        url: process.env.SWF2ES_CHECKED ? `${url}?checked` : url,
+      });
       for (let i = 0; i < 100; i++) {
         const { result } = await devtools.send<{ result: { value: boolean } }>("Runtime.evaluate", {
           expression: `typeof ${ready} === 'function'`,

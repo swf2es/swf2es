@@ -16,10 +16,13 @@ import {
   BitmapObject,
   ButtonObject,
   buttonStates,
+  CLIP,
   Container,
   type DisplayObject,
   MovieClip,
+  OTHER,
   scriptChildren,
+  scriptWork,
   TRANSFORM,
 } from "./display/display.js";
 import type { ButtonCharacter, DisplayCharacter, Library } from "./display/timeline.js";
@@ -94,6 +97,14 @@ export class Scripting {
    * its first frame's script to them, as in Flash; one made before keeps it.
    */
   private scriptPhase = false;
+  /** The frames whose scripts rounds marked run, for checkRoundLeftOut. */
+  private framesMarked = 0;
+  /**
+   * Whether a round of frame scripts left out as having nothing to do is
+   * run anyway and must find nothing: the checked build's tests set it
+   * (SWF2ES_CHECKED), to prove the rounds' count (scriptWork) complete.
+   */
+  static checkRounds = false;
   /** Whether they nested too deep this frame, which stops them all till the next. */
   private overflowed = false;
   /**
@@ -522,12 +533,46 @@ export class Scripting {
     this.scriptQueues[depth] = queue;
     try {
       for (let round = 0; round < 64 && !stopped(); round++) {
+        // Another round only finds a script if something it reads changed
+        // since this one walked: every clip this one visited is left on a
+        // frame whose script ran, or one held back as it will be again.
+        const changes = scriptWork.changes;
         if (!this.frameScriptRound(queue, root, also, stopped)) {
+          break;
+        }
+
+        if (scriptWork.changes === changes) {
+          if (Scripting.checkRounds) {
+            this.checkRoundLeftOut(queue, root, also, stopped);
+          }
+
           break;
         }
       }
     } finally {
       this.scriptDepth--;
+    }
+  }
+
+  /**
+   * The checked build's proof that a round left out had nothing to do: run
+   * it anyway, and throw if it ran a script, marked a frame's script run or
+   * changed anything else a round reads.
+   */
+  private checkRoundLeftOut(
+    queue: (MovieClip | null)[],
+    root: DisplayObject,
+    also: DisplayObject | null,
+    stopped: () => boolean,
+  ): void {
+    const changes = scriptWork.changes;
+    const marked = this.framesMarked;
+    if (
+      this.frameScriptRound(queue, root, also, stopped) ||
+      this.framesMarked !== marked ||
+      scriptWork.changes !== changes
+    ) {
+      throw new Error("a round of frame scripts left out had work to do");
     }
   }
 
@@ -555,6 +600,7 @@ export class Scripting {
 
       for (let jumps = 0; jumps < 64 && o.scriptedFrame !== o.currentFrame && !stopped(); jumps++) {
         o.scriptedFrame = o.currentFrame;
+        this.framesMarked++;
         const script = o.frameScripts.get(o.currentFrame);
         if (!script) {
           return;
@@ -591,14 +637,18 @@ export class Scripting {
     };
     let count = 0;
     const visit = (o: DisplayObject) => {
-      if (o instanceof MovieClip && o.object) {
-        queue[count++] = o;
+      if (o.kind === CLIP && o.object) {
+        queue[count++] = o as MovieClip;
       }
 
-      // An index, not for-of: this visits every object on the list.
+      // An index, not for-of, and no call for a leaf: this visits every
+      // object on the list. A button is visited for its states' first order.
       const children = scriptChildren(o);
       for (let i = 0; i < children.length; i++) {
-        visit(children[i]);
+        const child = children[i];
+        if (child.kind !== OTHER || child.frameChildren.length !== 0) {
+          visit(child);
+        }
       }
     };
     for (const orphan of this.lifecycle.orphanRoots()) {
@@ -752,10 +802,12 @@ export class Scripting {
     this.broadcast("frameConstructed");
     const outer = this.scriptPhase;
     this.scriptPhase = true;
+    scriptWork.changes++;
     try {
       this.runFrameScripts(root);
     } finally {
       this.scriptPhase = outer;
+      scriptWork.changes++;
     }
     this.lifecycle.afterScripts();
     this.broadcast("exitFrame");

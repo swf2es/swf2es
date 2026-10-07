@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { zlibCompress } from "@swf2es/format";
-import type { avm2 } from "@swf2es/runtime";
+import { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../oracle/oracle.ts";
 import type { Container, MovieClip } from "../../../packages/player/dist/display/display.js";
 import { Player } from "../../../packages/player/dist/player.js";
@@ -1025,4 +1025,169 @@ test("a bitmap a timeline places is a Bitmap, its bound class its data's with Ha
     bare.error,
     "TypeError: Error #2022: Class PlacedData$ must inherit from DisplayObject to link to a symbol.",
   );
+});
+
+// The rounds of a frame's scripts: another round runs when a script made
+// something else's due, and is left out when nothing a round reads changed
+// (display.ts's scriptWork). In version 9, where a goto runs no cycle of
+// its own, each way a script can make another clip's script due shows in
+// the rounds.
+// Clip, of 4 frames, the fourth placing a Kid, each frame's script traced;
+// on its second frame, the clip after a, named for what it does, sends a,
+// whose script ran, to a frame, or makes a Kid with `new`, and adds it or
+// not. Each makes a script due after the round has listed its clips,
+// which only another round runs.
+const SOURCE = `package {
+  import flash.display.MovieClip;
+
+  public dynamic class Clip extends MovieClip {
+    public function Clip() {
+      addFrameScript(0, function():void { trace(name, 1); },
+        1, function():void { trace(name, 2); stop(); if (name != "a") poke(); },
+        2, function():void { trace(name, 3); stop(); },
+        3, function():void { trace(name, 4); stop(); });
+    }
+
+    private function poke():void {
+      var a:MovieClip = MovieClip(parent.getChildByName("a"));
+      if (name == "goto") {
+        a.gotoAndStop(3);
+      } else if (name == "place") {
+        a.gotoAndStop(4);
+      } else {
+        var kid:Kid = new Kid();
+        kid.name = name;
+        if (name == "add") {
+          MovieClip(parent).addChild(kid);
+        }
+      }
+    }
+  }
+
+  public class Kid extends MovieClip {
+    public function Kid() {
+      addFrameScript(0, function():void { trace("kid", name); });
+    }
+  }
+
+  public dynamic class Main extends MovieClip {
+    public function Main() {
+      addFrameScript(1, function():void { trace("main", 2); stop(); });
+    }
+  }
+}`;
+
+/** A version 9 root of a Clip "a" and one named `second` after it. */
+function roundsSwf(abc: Uint8Array, second: string): Uint8Array {
+  return w.swf({
+    version: 9,
+    width: 20,
+    height: 20,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(3, 1, [w.showFrame(), w.end()]),
+      w.sprite(2, 4, [
+        w.showFrame(),
+        w.showFrame(),
+        w.showFrame(),
+        w.place({ depth: 1, character: 3, name: "kid" }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Clip"],
+        [3, "Kid"],
+      ]),
+      w.place({ depth: 1, character: 2, name: "a" }),
+      w.place({ depth: 2, character: 2, name: second }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+for (const [second, due] of [
+  // A clip's frame moved.
+  ["goto", ["a 3"]],
+  // That, and a child placed and made alive.
+  ["place", ["a 4", "kid kid"]],
+  // A clip made alive, with `new`, off the list, and on it.
+  ["make", ["kid make"]],
+  ["add", ["kid add"]],
+] as const) {
+  test(`a script that makes another's due has it run in the next round: ${second}`, {
+    skip,
+  }, async () => {
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const player = new Player(roundsSwf(compiler(out)("Rounds", SOURCE), second), scripting);
+    await player.start();
+    assert.deepEqual(lines.splice(0), ["a 1", `${second} 1`]);
+
+    player.tick();
+    assert.deepEqual(lines.splice(0), ["main 2", "a 2", `${second} 2`, ...due]);
+
+    player.tick();
+    assert.deepEqual(lines, []);
+  });
+}
+
+test("a frame whose scripts change nothing a round reads takes one round", {
+  skip,
+}, async () => {
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Quiet extends MovieClip {
+      public var n:int = 0;
+      public function Quiet() {
+        addFrameScript(0, function():void { n++; }, 1, function():void { n++; });
+      }
+    }
+  }`;
+  const scripting = new Scripting(await createCodegen(wasm), { print: () => {} });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const abc = compiler(out)("Quiet", source);
+  const player = new Player(
+    w.swf({
+      width: 20,
+      height: 20,
+      frameCount: 2,
+      tags: [
+        w.fileAttributes(true),
+        w.doAbc(abc),
+        w.symbolClass([[0, "Quiet"]]),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ],
+    }),
+    scripting,
+  );
+  await player.start();
+
+  // The root's script runs, and changes nothing a round reads: no second
+  // round walks the list. Each walk, the tick's and each round's, starts
+  // with the orphans. The checked build runs the round left out anyway, to
+  // see that it finds nothing.
+  let walks = 0;
+  const orphanRoots = scripting.lifecycle.orphanRoots.bind(scripting.lifecycle);
+  scripting.lifecycle.orphanRoots = () => {
+    walks++;
+    return orphanRoots();
+  };
+  for (let i = 0; i < 4; i++) {
+    player.tick();
+  }
+
+  assert.equal(walks, Scripting.checkRounds ? 12 : 8);
+  const n = scripting.rt.getProperty(
+    player.root.object as avm2.AsObject,
+    avm2.qname(avm2.publicNs, "n"),
+  );
+  assert.equal(n, 5);
 });

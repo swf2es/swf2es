@@ -4,7 +4,7 @@
 // orphan, which plays on as Flash's does, for a while (docs/architecture.md,
 // "Scripts and the display list").
 import { avm2 } from "@swf2es/runtime";
-import { Container, type DisplayObject, frameChildren, MovieClip } from "../display/display.js";
+import { Container, type DisplayObject, MovieClip, scriptWork } from "../display/display.js";
 import { stopTimelineSoundsUnder } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent, heard } from "./events.js";
@@ -22,10 +22,14 @@ export class Lifecycle {
     number,
     { ref: WeakRef<DisplayObject>; keep: boolean; since: number }
   >();
-  /** Display objects scripts made with `new` this frame: their first frame's script runs after everything else's, and they are orphans after. */
-  readonly fresh: DisplayObject[] = [];
+  private readonly madeThisFrame: DisplayObject[] = [];
 
   constructor(private readonly s: Scripting) {}
+
+  /** Display objects scripts made with `new` this frame: their first frame's script runs after everything else's, and they are orphans after. */
+  get fresh(): readonly DisplayObject[] {
+    return this.madeThisFrame;
+  }
 
   /** Whether `d` is on the display list: under the stage. */
   onStage(d: DisplayObject): boolean {
@@ -81,6 +85,7 @@ export class Lifecycle {
   orphan(display: DisplayObject, keep = true): void {
     if (display.object && !this.orphans.has(display.serial)) {
       this.orphans.set(display.serial, { ref: display.ref, keep, since: this.s.frames });
+      scriptWork.changes++;
     }
   }
 
@@ -91,7 +96,8 @@ export class Lifecycle {
    * list or as an orphan.
    */
   made(display: DisplayObject): void {
-    this.fresh.push(display);
+    this.madeThisFrame.push(display);
+    scriptWork.changes++;
     if (display instanceof MovieClip) {
       display.fresh = true;
     }
@@ -123,7 +129,14 @@ export class Lifecycle {
       }
     }
 
-    return frameChildren(display).some((child) => this.hearsFrames(child));
+    const children = display.frameChildren;
+    for (let i = 0; i < children.length; i++) {
+      if (this.hearsFrames(children[i])) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -202,7 +215,12 @@ export class Lifecycle {
       }
     }
     // What scripts made this frame and left off the display list plays on as an orphan.
-    for (const display of this.fresh.splice(0)) {
+    const made = this.madeThisFrame.splice(0);
+    if (made.length > 0) {
+      scriptWork.changes++;
+    }
+
+    for (const display of made) {
       if (!display.parent) {
         this.orphan(display);
       }

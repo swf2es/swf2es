@@ -9,6 +9,7 @@ import {
   type DisplayObject,
   MovieClip,
   rootOf,
+  scriptWork,
   TextObject,
   TRANSFORM,
 } from "../../../display/display.js";
@@ -122,6 +123,8 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
 
         o.$display = display;
         display.object = o;
+        // A clip alive now has its frame scripts to run (Scripting.runFrameScripts).
+        scriptWork.changes++;
         // Only a MovieClip plays its timeline: a sprite bound to a class that
         // extends Sprite alone stays on its first frame, as fl.controls'
         // components do, whose second frame holds their skins. An AVM1

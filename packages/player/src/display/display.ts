@@ -49,8 +49,25 @@ export const CONTENT = 4;
 /** A Bitmap's pixels changed in place: the texture uploads again, nothing is rebuilt. */
 export const PIXELS = 8;
 
+/**
+ * A count that moves whenever something changes that a round of frame
+ * scripts (Scripting.runFrameScripts) reads to find a script to run: a
+ * clip's frame, frame scripts, makingChildren or timelineChild, a children
+ * list, a button's states, and, as Scripting and Lifecycle move it, an
+ * object made alive, a button's first scripts, the scripts' phase, the
+ * orphans and what scripts made. While it stands still, a round finds
+ * nothing the one before it left. One for every player: another's moving
+ * it costs a round, never a script.
+ */
+export const scriptWork = { changes: 0 };
+
+/** DisplayObject.kind's. */
+export const OTHER = 0;
+export const CLIP = 1;
+export const BUTTON = 2;
+
 const NO_FILTERS: readonly Filter[] = Object.freeze([]);
-/** What a leaf has to walk: one for all, as the frame's walks visit every object twice a frame. */
+/** What a leaf has to walk: one for all, as the frame's walks visit every object once or more a frame. */
 const NO_CHILDREN: readonly DisplayObject[] = Object.freeze([]);
 const NO_FILTER_BYTES = new Uint8Array([0]);
 
@@ -195,6 +212,15 @@ export class DisplayObject {
   drawing: Drawing | null = null;
   /** What changed since the renderer last synced it: TRANSFORM, CHILDREN, CONTENT. */
   dirty = TRANSFORM | CONTENT;
+  /**
+   * The display objects whose frames its frames run: a container's own
+   * children array, a button's states (ButtonObject), none for the rest.
+   * A field every object has, so that the walks each frame, which visit
+   * every object, read it without asking its class.
+   */
+  frameChildren: readonly DisplayObject[] = NO_CHILDREN;
+  /** Whether it is a MovieClip (CLIP) or a ButtonObject (BUTTON), for those walks likewise: OTHER for the rest. */
+  kind = OTHER;
 
   private weakRef: WeakRef<this> | null = null;
 
@@ -915,6 +941,11 @@ export class Container extends DisplayObject {
   /** Whether a descendant changed since the renderer last synced. */
   descendantsDirty = true;
 
+  constructor() {
+    super();
+    this.frameChildren = this.children;
+  }
+
   /** Place `child` at timeline depth `depth`: before the first child of a greater depth. */
   placeAtDepth(child: DisplayObject, depth: number): void {
     this.removeAtDepth(depth);
@@ -932,6 +963,7 @@ export class Container extends DisplayObject {
     this.children.splice(index, 0, child);
     this.depths.set(depth, child);
     this.invalidate(CHILDREN);
+    scriptWork.changes++;
   }
 
   removeAtDepth(depth: number): DisplayObject | null {
@@ -958,6 +990,7 @@ export class Container extends DisplayObject {
     child.parent = null;
     child.focusDrop?.(child);
     this.invalidate(CHILDREN);
+    scriptWork.changes++;
   }
 
   /**
@@ -971,6 +1004,7 @@ export class Container extends DisplayObject {
     child.parent = this;
     this.children.splice(same ? Math.min(index, this.children.length) : index, 0, child);
     this.invalidate(CHILDREN);
+    scriptWork.changes++;
   }
 
   swapChildren(a: DisplayObject, b: DisplayObject): void {
@@ -979,6 +1013,7 @@ export class Container extends DisplayObject {
     this.children[i] = b;
     this.children[j] = a;
     this.invalidate(CHILDREN);
+    scriptWork.changes++;
   }
 }
 
@@ -1005,16 +1040,82 @@ const BUTTON_SOUNDS: Record<ButtonState, Record<ButtonState, number>> = {
  * its frames as Flash's do (`frameChildren`). Not a container to a script.
  */
 export class ButtonObject extends Container {
-  upState: DisplayObject | null = null;
-  overState: DisplayObject | null = null;
-  downState: DisplayObject | null = null;
-  hitTestState: DisplayObject | null = null;
+  private up: DisplayObject | null = null;
+  private over: DisplayObject | null = null;
+  private down: DisplayObject | null = null;
+  private hitTest: DisplayObject | null = null;
   state: ButtonState = "up";
-  /** Its states' next frame scripts run up, over, down, hit: the first, in a SWF after 9 (Scripting.construct). */
-  firstScripts = false;
+  private firstOrder = false;
   enabled = true;
   useHandCursor = true;
   trackAsMenu = false;
+
+  constructor() {
+    super();
+    this.kind = BUTTON;
+    this.frameChildren = NO_CHILDREN;
+  }
+
+  get upState(): DisplayObject | null {
+    return this.up;
+  }
+
+  set upState(d: DisplayObject | null) {
+    this.up = d;
+    this.statesChanged();
+  }
+
+  get overState(): DisplayObject | null {
+    return this.over;
+  }
+
+  set overState(d: DisplayObject | null) {
+    this.over = d;
+    this.statesChanged();
+  }
+
+  get downState(): DisplayObject | null {
+    return this.down;
+  }
+
+  set downState(d: DisplayObject | null) {
+    this.down = d;
+    this.statesChanged();
+  }
+
+  get hitTestState(): DisplayObject | null {
+    return this.hitTest;
+  }
+
+  set hitTestState(d: DisplayObject | null) {
+    this.hitTest = d;
+    this.statesChanged();
+  }
+
+  /**
+   * Its frame children made again from the states it has now, each once,
+   * as Ruffle orders them, the hit test state first, whichever it shows: a
+   * new list, so that none it let go of stays held.
+   */
+  private statesChanged(): void {
+    const states = [this.hitTest, this.up, this.down, this.over].filter(
+      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
+    );
+    this.frameChildren = states.length > 0 ? states : NO_CHILDREN;
+    scriptWork.changes++;
+  }
+
+  /** Its states' next frame scripts run up, over, down, hit: the first, in a SWF after 9 (Scripting.construct). */
+  get firstScripts(): boolean {
+    return this.firstOrder;
+  }
+
+  set firstScripts(first: boolean) {
+    if (first !== this.firstOrder) {
+      this.firstOrder = first;
+      scriptWork.changes++;
+    }
+  }
 
   /** The display object of state `state`. */
   stateObject(state: ButtonState): DisplayObject | null {
@@ -1069,6 +1170,7 @@ export class ButtonObject extends Container {
       this.children.splice(0, 0, current);
       current.parent = this;
       this.invalidate(CHILDREN);
+      scriptWork.changes++;
     }
   }
 }
@@ -1166,29 +1268,15 @@ function recordPlace(record: ButtonRecord, look: boolean): Place {
  * over, down, then hit test, as Flash runs them while the button is made.
  */
 export function scriptChildren(d: DisplayObject): readonly DisplayObject[] {
-  if (d instanceof ButtonObject && d.firstScripts) {
-    d.firstScripts = false;
-    return [d.upState, d.overState, d.downState, d.hitTestState].filter(
+  if (d.kind === BUTTON && (d as ButtonObject).firstScripts) {
+    const b = d as ButtonObject;
+    b.firstScripts = false;
+    return [b.upState, b.overState, b.downState, b.hitTestState].filter(
       (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
     );
   }
 
-  return frameChildren(d);
-}
-
-/**
- * The display objects whose frames a display object's frames run: a
- * container's children, and all a button's states, as Ruffle orders them,
- * the hit test state first, whichever it shows.
- */
-export function frameChildren(d: DisplayObject): readonly DisplayObject[] {
-  if (d instanceof ButtonObject) {
-    return [d.hitTestState, d.upState, d.downState, d.overState].filter(
-      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
-    );
-  }
-
-  return d instanceof Container ? d.children : NO_CHILDREN;
+  return d.frameChildren;
 }
 
 /** The root `d` is under, or is: the nearest display object up from it that carries a LoaderInfo; null under none, as for one a script made and did not add. */
@@ -1250,8 +1338,10 @@ interface Jump {
 export class MovieClip extends Container {
   /** A clip always has its library: the one its timeline came from. */
   declare library: Library;
-  /** The frame it shows, 1 the first; 0 before its first frame is entered. */
-  currentFrame = 0;
+  private frame = 0;
+  private scripts = new Map<number, avm2.Value>();
+  private making = false;
+  private placedByTimeline = false;
   private running = true;
   /** Its timeline's stream as it plays, for what plays it (TimelineSounds); null while none does. */
   stream: object | null = null;
@@ -1261,14 +1351,12 @@ export class MovieClip extends Container {
    * advance, wherever it is by then (`fresh-clips`).
    */
   fresh = false;
-  /** The scripts addFrameScript registered, by frame, 1 the first. */
-  readonly frameScripts = new Map<number, avm2.Value>();
-  /** The frame whose script last ran, so that entering a frame runs its script once. */
+  /**
+   * The frame whose script last ran, so that entering a frame runs its
+   * script once: set to currentFrame alone, as a round's skipping
+   * (scriptWork) has it.
+   */
   scriptedFrame = 0;
-  /** Whether its constructor's super() is making its first frame's children. */
-  makingChildren = false;
-  /** Placed by a timeline, not made by a script with `new`. */
-  timelineChild = false;
   /** A goto a frame script asked for, taken when the script returns, as Flash defers it; null for none. */
   queuedGoto: number | null = null;
   /** Whether that goto plays or stops the clip, as it happens, not as it is asked for. */
@@ -1288,7 +1376,60 @@ export class MovieClip extends Container {
     library: Library,
   ) {
     super();
+    this.kind = CLIP;
     this.library = library;
+  }
+
+  /** The frame it shows, 1 the first; 0 before its first frame is entered. */
+  get currentFrame(): number {
+    return this.frame;
+  }
+
+  set currentFrame(frame: number) {
+    if (frame !== this.frame) {
+      this.frame = frame;
+      scriptWork.changes++;
+    }
+  }
+
+  /** The scripts addFrameScript registered, by frame, 1 the first. */
+  get frameScripts(): ReadonlyMap<number, avm2.Value> {
+    return this.scripts;
+  }
+
+  /** Register `script` for frame `frame`, or, null, take the frame's away. */
+  setFrameScript(frame: number, script: avm2.Value | null): void {
+    if (script === null || script === undefined) {
+      this.scripts.delete(frame);
+    } else {
+      this.scripts.set(frame, script);
+    }
+
+    scriptWork.changes++;
+  }
+
+  /** Whether its constructor's super() is making its first frame's children. */
+  get makingChildren(): boolean {
+    return this.making;
+  }
+
+  set makingChildren(making: boolean) {
+    if (making !== this.making) {
+      this.making = making;
+      scriptWork.changes++;
+    }
+  }
+
+  /** Placed by a timeline, not made by a script with `new`. */
+  get timelineChild(): boolean {
+    return this.placedByTimeline;
+  }
+
+  set timelineChild(placed: boolean) {
+    if (placed !== this.placedByTimeline) {
+      this.placedByTimeline = placed;
+      scriptWork.changes++;
+    }
   }
 
   /** Whether its playhead moves on; stopped, its stream stops, as in Flash and Ruffle. */

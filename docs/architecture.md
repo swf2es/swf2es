@@ -1106,6 +1106,22 @@ runs, parents' scripts before their children's (`nested`); the clips
 whose scripts are to run are fixed as the phase begins, so one a script
 removes still runs its own (`loads`, `orphans`).
 
+A frame walks the whole display list once to find the clips that
+advance, and once for each round of frame scripts, which a busy scene of
+some 13,000 objects felt. A walk reads each object's `frameChildren`, a
+container's own children array, a button's states, one empty list for
+the rest, and its `kind`, not its class, and calls into no object with
+nothing under it. Another round runs only when the last ran a script and
+something a round reads changed since it walked, which `scriptWork`
+counts: a clip's frame, its frame scripts, `makingChildren` or
+`timelineChild`, a children list or a button's states, an object made
+alive, the orphans, what scripts made and the scripts' phase. A round
+leaves each clip it lists on a frame whose script ran, or held back as it
+would be again, so with none of those changed another finds nothing; a
+frame whose scripts only stop their clips or set properties takes one. The
+checked build's tests (`pnpm test:checked`) run each round left out
+anyway and fail if it finds anything to do.
+
 In a SWF of version 9 or earlier, a clip a script sends to a frame, by a
 goto from its frame script, its listener or another clip's, sits the next
 frame out with everything in it: none of them advances, and from the

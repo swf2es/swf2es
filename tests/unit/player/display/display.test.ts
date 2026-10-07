@@ -5,11 +5,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { bounds, toStage } from "../../../../packages/player/dist/display/bounds.js";
 import {
+  ButtonObject,
   Clips,
   Container,
   type DisplayObject,
   type MovieClip,
   ShapeObject,
+  scriptChildren,
+  scriptWork,
   type TextObject,
 } from "../../../../packages/player/dist/display/display.js";
 import { Player } from "../../../../packages/player/dist/player.js";
@@ -639,4 +642,142 @@ test("a scrolled object's bounds are its scroll's size at its origin, and its po
   assert.deepEqual(bounds(child, true), { xMin: 0, yMin: 0, xMax: 50, yMax: 40 });
   assert.deepEqual(toStage(child, null), { a: 2, b: 0, c: 0, d: 2, tx: 80, ty: 10 });
   assert.deepEqual(bounds(parent, true), { xMin: 80, yMin: 10, xMax: 180, yMax: 90 });
+});
+
+test("a container's frame children are its own children, a leaf's one empty list for all", () => {
+  const sprite = new Container();
+  const shape = new ShapeObject(null);
+  sprite.addChildAt(shape, 0);
+  assert.equal(sprite.frameChildren, sprite.children);
+  assert.deepEqual(sprite.frameChildren, [shape]);
+  assert.equal(shape.frameChildren.length, 0);
+  assert.equal(shape.frameChildren, new ShapeObject(null).frameChildren);
+});
+
+test("a button's frame children follow its states, the hit test state first, each once", () => {
+  const button = new ButtonObject();
+  assert.equal(button.frameChildren.length, 0);
+
+  const [up, over, down, hit] = [0, 1, 2, 3].map(() => new Container());
+  button.upState = up;
+  button.overState = over;
+  button.downState = down;
+  button.hitTestState = hit;
+  assert.deepEqual(button.frameChildren, [hit, up, down, over]);
+
+  // A state in two places is walked once, where it is first.
+  button.overState = up;
+  assert.deepEqual(button.frameChildren, [hit, up, down]);
+
+  // A list made again, not changed: one a walk holds keeps what it had, and
+  // a state replaced is held by none of the button's.
+  const before = button.frameChildren;
+  const other = new Container();
+  button.downState = other;
+  assert.deepEqual(before, [hit, up, down]);
+  assert.deepEqual(button.frameChildren, [hit, up, other]);
+  assert.equal(button.frameChildren.indexOf(down), -1);
+
+  button.upState = null;
+  button.overState = null;
+  button.downState = null;
+  button.hitTestState = null;
+  assert.deepEqual(button.frameChildren, []);
+});
+
+test("a button's first scripts run up, over, down, hit once, then in its frames' order", () => {
+  const button = new ButtonObject();
+  const [up, over, down, hit] = [0, 1, 2, 3].map(() => new Container());
+  button.upState = up;
+  button.overState = over;
+  button.downState = down;
+  button.hitTestState = hit;
+  button.firstScripts = true;
+  assert.deepEqual(scriptChildren(button), [up, over, down, hit]);
+  assert.equal(button.firstScripts, false);
+  assert.equal(scriptChildren(button), button.frameChildren);
+  assert.deepEqual(scriptChildren(button), [hit, up, down, over]);
+});
+
+test("every change a round of frame scripts reads moves scriptWork, and a script's run does not", () => {
+  const player = movie([w.place({ depth: 1, character: 1 })], []);
+  const clip = player.root;
+  const sprite = new Container();
+  const [a, b] = [new Shape(), new Shape()];
+  const button = new ButtonObject();
+  const moves = (change: () => void) => {
+    const before = scriptWork.changes;
+    change();
+    return scriptWork.changes !== before;
+  };
+
+  assert.ok(
+    moves(() => player.tick()),
+    "a frame entered",
+  );
+  assert.ok(
+    moves(() => clip.gotoFrame(1)),
+    "a goto",
+  );
+  assert.ok(
+    moves(() => clip.setFrameScript(1, "script")),
+    "a script registered",
+  );
+  assert.ok(
+    moves(() => clip.setFrameScript(1, null)),
+    "a script taken away",
+  );
+  assert.ok(
+    moves(() => (clip.makingChildren = true)),
+    "making children",
+  );
+  assert.ok(
+    moves(() => (clip.makingChildren = false)),
+    "made",
+  );
+  assert.ok(
+    moves(() => (clip.timelineChild = true)),
+    "a timeline child",
+  );
+  assert.ok(
+    moves(() => sprite.addChildAt(a, 0)),
+    "a child added",
+  );
+  assert.ok(
+    moves(() => sprite.placeAtDepth(b, 1)),
+    "a child placed",
+  );
+  assert.ok(
+    moves(() => sprite.swapChildren(a, b)),
+    "children swapped",
+  );
+  assert.ok(
+    moves(() => sprite.removeChild(a)),
+    "a child removed",
+  );
+  assert.ok(
+    moves(() => (button.upState = sprite)),
+    "a button's state set",
+  );
+  assert.ok(
+    moves(() => button.show()),
+    "a button's state shown",
+  );
+  assert.ok(
+    moves(() => (button.firstScripts = true)),
+    "a button's first scripts due",
+  );
+  assert.ok(
+    moves(() => scriptChildren(button)),
+    "a button's first scripts walked",
+  );
+
+  // What a round does to each clip it runs: the frame it is on marked run.
+  assert.ok(!moves(() => (clip.scriptedFrame = clip.currentFrame)), "a frame's script run");
+  const frame = clip.currentFrame;
+  assert.ok(!moves(() => (clip.currentFrame = frame)), "the same frame");
+  assert.ok(!moves(() => (clip.playing = false)), "a stop");
+  assert.ok(!moves(() => (clip.makingChildren = false)), "still made");
+  assert.ok(!moves(() => (clip.timelineChild = true)), "still a timeline child");
+  assert.ok(!moves(() => (button.firstScripts = false)), "first scripts still walked");
 });

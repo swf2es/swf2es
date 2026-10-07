@@ -110,12 +110,7 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
     addFrameScript(...args: Value[]): void {
       const clip = this.$display;
       for (let i = 0; i + 1 < args.length; i += 2) {
-        const frame = s.rt.toInt(args[i]) + 1;
-        if (args[i + 1] === null || args[i + 1] === undefined) {
-          clip.frameScripts.delete(frame);
-        } else {
-          clip.frameScripts.set(frame, args[i + 1]);
-        }
+        clip.setFrameScript(s.rt.toInt(args[i]) + 1, args[i + 1]);
       }
     }
 
