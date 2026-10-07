@@ -274,21 +274,28 @@ export function applyFilter(
   }
 
   const result = new Uint32Array(w * h);
-  if (f.kind === "blur") {
-    blur([a, r, g, b], w, h, f);
-    for (let i = 0; i < result.length; i++) {
-      result[i] = ((a[i] << 24) | (r[i] << 16) | (g[i] << 8) | b[i]) >>> 0;
-    }
-  } else if (f.kind === "colorMatrix") {
-    colorMatrix(dest, result, [a, r, g, b], work, contentOf(source, rect), f.matrix);
-  } else if (f.kind === "bevel") {
-    bevel(result, [a, r, g, b], w, h, f);
-  } else if (f.kind === "gradientGlow") {
-    gradientGlow(result, [a, r, g, b], w, h, f);
-  } else if (f.kind === "gradientBevel") {
-    gradientBevel(result, [a, r, g, b], w, h, f);
-  } else {
-    glow(result, [a, r, g, b], w, h, f);
+  switch (f.kind) {
+    case "blur":
+      blur([a, r, g, b], w, h, f);
+      for (let i = 0; i < result.length; i++) {
+        result[i] = ((a[i] << 24) | (r[i] << 16) | (g[i] << 8) | b[i]) >>> 0;
+      }
+
+      break;
+    case "colorMatrix":
+      colorMatrix(dest, result, [a, r, g, b], work, contentOf(source, rect), f.matrix);
+      break;
+    case "bevel":
+      bevel(result, [a, r, g, b], w, h, f);
+      break;
+    case "gradientGlow":
+      gradientGlow(result, [a, r, g, b], w, h, f);
+      break;
+    case "gradientBevel":
+      gradientBevel(result, [a, r, g, b], w, h, f);
+      break;
+    default:
+      glow(result, [a, r, g, b], w, h, f);
   }
 
   write(dest, result, work, shown, mx, my);

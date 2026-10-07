@@ -1220,30 +1220,38 @@ export class BodyDecoder {
     let b: u32 = 0;
     let c: u32 = 0;
     let wide: u32 = 0;
-    if (operands === OPERANDS_U30) {
-      wide = r.u32();
-      a = <i32>wide;
-    } else if (operands === OPERANDS_U30U30) {
-      a = <i32>r.u32();
-      b = r.u32();
-      wide = <u32>a | b;
-    } else if (operands === OPERANDS_Branch) {
-      a = r.s24();
-    } else if (operands === OPERANDS_Byte) {
-      a = <i32>(<i8>r.u8());
-    } else if (operands === OPERANDS_Short) {
-      // The one u30 operand not range-checked: its low 16 bits are sign-extended.
-      a = <i32>(<i16>r.u32());
-    } else if (operands === OPERANDS_Debug) {
-      a = <i32>r.u8();
-      b = r.u32();
-      c = r.u8();
-      r.u32();
-      wide = b;
-    } else if (operands === OPERANDS_Switch) {
-      a = r.s24();
-      b = r.u32();
-      wide = b;
+    switch (operands) {
+      case OPERANDS_U30:
+        wide = r.u32();
+        a = <i32>wide;
+        break;
+      case OPERANDS_U30U30:
+        a = <i32>r.u32();
+        b = r.u32();
+        wide = <u32>a | b;
+        break;
+      case OPERANDS_Branch:
+        a = r.s24();
+        break;
+      case OPERANDS_Byte:
+        a = <i32>(<i8>r.u8());
+        break;
+      case OPERANDS_Short:
+        // The one u30 operand not range-checked: its low 16 bits are sign-extended.
+        a = <i32>(<i16>r.u32());
+        break;
+      case OPERANDS_Debug:
+        a = <i32>r.u8();
+        b = r.u32();
+        c = r.u8();
+        r.u32();
+        wide = b;
+        break;
+      case OPERANDS_Switch:
+        a = r.s24();
+        b = r.u32();
+        wide = b;
+        break;
     }
 
     if (wide & 0xc0000000) {

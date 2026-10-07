@@ -89,96 +89,110 @@ export function readFilters(bytes: Uint8Array): SwfFilter[] {
   for (let i = 0; i < count && !r.overrun; i++) {
     const id = r.u8();
     let filter: SwfFilter | null = null;
-    if (id === 0) {
-      const c = color(r);
-      const [blurX, blurY, angle, distance] = [fixed(r), fixed(r), fixed(r), fixed(r)];
-      const strength = fixed8(r);
-      const flags = r.u8();
-      filter = {
-        type: "dropShadow",
-        color: c,
-        blurX,
-        blurY,
-        angle,
-        distance,
-        strength,
-        inner: (flags & 0x80) !== 0,
-        knockout: (flags & 0x40) !== 0,
-        composite: (flags & 0x20) !== 0,
-        passes: flags & 0x1f,
-      };
-    } else if (id === 1) {
-      const [blurX, blurY] = [fixed(r), fixed(r)];
-      filter = { type: "blur", blurX, blurY, passes: r.u8() >> 3 };
-    } else if (id === 2) {
-      const c = color(r);
-      const [blurX, blurY] = [fixed(r), fixed(r)];
-      const strength = fixed8(r);
-      const flags = r.u8();
-      filter = {
-        type: "glow",
-        color: c,
-        blurX,
-        blurY,
-        strength,
-        inner: (flags & 0x80) !== 0,
-        knockout: (flags & 0x40) !== 0,
-        composite: (flags & 0x20) !== 0,
-        passes: flags & 0x1f,
-      };
-    } else if (id === 3 || id === 4 || id === 7) {
-      let colors: FilterColor[];
-      let ratios: number[];
-      if (id === 3) {
-        // The highlight, then the shadow: the SWF spec has them the other way, adl this.
-        const highlight = color(r);
-        colors = [color(r), highlight];
-        ratios = [];
-      } else {
-        const n = r.u8();
-        colors = Array.from({ length: n }, () => color(r));
-        ratios = Array.from({ length: n }, () => r.u8());
+    switch (id) {
+      case 0: {
+        const c = color(r);
+        const [blurX, blurY, angle, distance] = [fixed(r), fixed(r), fixed(r), fixed(r)];
+        const strength = fixed8(r);
+        const flags = r.u8();
+        filter = {
+          type: "dropShadow",
+          color: c,
+          blurX,
+          blurY,
+          angle,
+          distance,
+          strength,
+          inner: (flags & 0x80) !== 0,
+          knockout: (flags & 0x40) !== 0,
+          composite: (flags & 0x20) !== 0,
+          passes: flags & 0x1f,
+        };
+        break;
       }
+      case 1: {
+        const [blurX, blurY] = [fixed(r), fixed(r)];
+        filter = { type: "blur", blurX, blurY, passes: r.u8() >> 3 };
+        break;
+      }
+      case 2: {
+        const c = color(r);
+        const [blurX, blurY] = [fixed(r), fixed(r)];
+        const strength = fixed8(r);
+        const flags = r.u8();
+        filter = {
+          type: "glow",
+          color: c,
+          blurX,
+          blurY,
+          strength,
+          inner: (flags & 0x80) !== 0,
+          knockout: (flags & 0x40) !== 0,
+          composite: (flags & 0x20) !== 0,
+          passes: flags & 0x1f,
+        };
+        break;
+      }
+      case 3:
+      case 4:
+      case 7: {
+        let colors: FilterColor[];
+        let ratios: number[];
+        if (id === 3) {
+          // The highlight, then the shadow: the SWF spec has them the other way, adl this.
+          const highlight = color(r);
+          colors = [color(r), highlight];
+          ratios = [];
+        } else {
+          const n = r.u8();
+          colors = Array.from({ length: n }, () => color(r));
+          ratios = Array.from({ length: n }, () => r.u8());
+        }
 
-      const [blurX, blurY, angle, distance] = [fixed(r), fixed(r), fixed(r), fixed(r)];
-      const strength = fixed8(r);
-      const flags = r.u8();
-      filter = {
-        type: id === 3 ? "bevel" : id === 4 ? "gradientGlow" : "gradientBevel",
-        colors,
-        ratios,
-        blurX,
-        blurY,
-        angle,
-        distance,
-        strength,
-        inner: (flags & 0x80) !== 0,
-        knockout: (flags & 0x40) !== 0,
-        composite: (flags & 0x20) !== 0,
-        onTop: (flags & 0x10) !== 0,
-        passes: flags & 0x0f,
-      };
-    } else if (id === 5) {
-      const matrixX = r.u8();
-      const matrixY = r.u8();
-      const divisor = float(r);
-      const bias = float(r);
-      const matrix = Array.from({ length: matrixX * matrixY }, () => float(r));
-      const c = color(r);
-      const flags = r.u8();
-      filter = {
-        type: "convolution",
-        matrixX,
-        matrixY,
-        divisor,
-        bias,
-        matrix,
-        color: c,
-        clamp: (flags & 0x02) !== 0,
-        preserveAlpha: (flags & 0x01) !== 0,
-      };
-    } else if (id === 6) {
-      filter = { type: "colorMatrix", matrix: Array.from({ length: 20 }, () => float(r)) };
+        const [blurX, blurY, angle, distance] = [fixed(r), fixed(r), fixed(r), fixed(r)];
+        const strength = fixed8(r);
+        const flags = r.u8();
+        filter = {
+          type: id === 3 ? "bevel" : id === 4 ? "gradientGlow" : "gradientBevel",
+          colors,
+          ratios,
+          blurX,
+          blurY,
+          angle,
+          distance,
+          strength,
+          inner: (flags & 0x80) !== 0,
+          knockout: (flags & 0x40) !== 0,
+          composite: (flags & 0x20) !== 0,
+          onTop: (flags & 0x10) !== 0,
+          passes: flags & 0x0f,
+        };
+        break;
+      }
+      case 5: {
+        const matrixX = r.u8();
+        const matrixY = r.u8();
+        const divisor = float(r);
+        const bias = float(r);
+        const matrix = Array.from({ length: matrixX * matrixY }, () => float(r));
+        const c = color(r);
+        const flags = r.u8();
+        filter = {
+          type: "convolution",
+          matrixX,
+          matrixY,
+          divisor,
+          bias,
+          matrix,
+          color: c,
+          clamp: (flags & 0x02) !== 0,
+          preserveAlpha: (flags & 0x01) !== 0,
+        };
+        break;
+      }
+      case 6:
+        filter = { type: "colorMatrix", matrix: Array.from({ length: 20 }, () => float(r)) };
+        break;
     }
 
     if (!filter || r.overrun) {
