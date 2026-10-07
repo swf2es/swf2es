@@ -18,6 +18,7 @@ const CARRIED = [
   "salign",
   "base",
   "allowscriptaccess",
+  "allownetworking",
   "quality",
   "bgcolor",
   "menu",
@@ -100,7 +101,11 @@ export function flashAttributes(outer: Element): Map<string, string> {
  * fallbacks going with it. Returns the elements made.
  */
 export function replaceFlash(root: ParentNode = document): Swf2esPlayerElement[] {
-  defineElement();
+  // Where it cannot be defined, a tag swapped for it would play nothing.
+  if (!defineElement()) {
+    return [];
+  }
+
   const made: Swf2esPlayerElement[] = [];
   const tags = [...root.querySelectorAll("object, embed")];
   if (root instanceof Element && (root.localName === "object" || root.localName === "embed")) {
@@ -139,13 +144,23 @@ export function watchFlash(root: ParentNode & Node = document): () => void {
   replaceFlash(root);
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        if (node instanceof Element && node.isConnected) {
-          replaceFlash(node);
+      // A tag added, or one made Flash after it was added, its src or type set by a script.
+      const added = mutation.type === "attributes" ? [mutation.target] : mutation.addedNodes;
+      for (const node of added) {
+        // A <param>'s tag is its <object>.
+        const tag =
+          node instanceof Element && node.localName === "param" ? node.parentElement : node;
+        if (tag instanceof Element && tag.isConnected) {
+          replaceFlash(tag);
         }
       }
     }
   });
-  observer.observe(root, { childList: true, subtree: true });
+  observer.observe(root, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["src", "type", "data", "classid", "value"],
+  });
   return () => observer.disconnect();
 }

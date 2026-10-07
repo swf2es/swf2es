@@ -52,7 +52,7 @@ the WebSocket relays that reach its servers:
 
 The element takes an `<embed>`'s attributes (`src`, `width`, `height`,
 `flashvars`, `scale`, `salign`, `wmode`, `bgcolor`, `base`,
-`allowscriptaccess`, `quality`), follows its size and the device's
+`allowscriptaccess`, `allownetworking`, `quality`), follows its size and the device's
 pixels, and has `load(url | bytes)`, `ready`, `destroy()` and `load`,
 `error` and `fscommand` events. A SWF's ExternalInterface callbacks are
 methods of the element, and its `call`s run in the page, where

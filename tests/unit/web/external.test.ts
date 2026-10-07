@@ -87,12 +87,14 @@ test("a SWF's call runs in the page: named functions, inline ones, and what thro
   try {
     const host = externalInterfaceHost({ objectID: "movie", callback() {} }, () => {});
     assert.equal(host.objectID, "movie");
-    assert.equal(host.evalJS(source("swf2esAdd(1,2)")), "<number>3</number>");
+    // A path is declined, for playerglobal to send it as XML; inline source is evaluated.
+    assert.equal(host.evalJS(source("swf2esAdd(1,2)")), null);
+    assert.equal(host.callOut(invocation("swf2esAdd", [1, 2])), "<number>3</number>");
     assert.equal(
       host.evalJS(source('function (a) { return a + "!"; }("x")')),
       "<string>x!</string>",
     );
-    assert.equal(host.evalJS(source("swf2esThrows()")), "<undefined/>");
+    assert.equal(host.evalJS(source("(function () { throw 1; })()")), "<undefined/>");
     assert.equal(host.evalJS(source("not a name(")), "<undefined/>");
 
     // The XML path, where eval is refused: a path's function, with what holds it as `this`.
@@ -107,6 +109,29 @@ test("a SWF's call runs in the page: named functions, inline ones, and what thro
     delete page.swf2esAdd;
     delete page.swf2esSpace;
     delete page.swf2esThrows;
+  }
+});
+
+test("an object's keys reach a named function as data, never as code", () => {
+  const page = globalThis as Record<string, unknown>;
+  const got: unknown[] = [];
+  page.swf2esCapture = (value: unknown) => got.push(value);
+  try {
+    const host = externalInterfaceHost({ objectID: null, callback() {} }, () => {});
+    // What playerglobal's _objectToJS writes for {"a:(globalThis.swf2esPwned=1),b": 1}.
+    const injected = source("swf2esCapture(({a:(globalThis.swf2esPwned=1),b:1}))");
+    assert.equal(host.evalJS(injected), null);
+    assert.equal(page.swf2esPwned, undefined);
+    host.callOut(
+      '<invoke name="swf2esCapture" returntype="xml"><arguments><object>' +
+        '<property id="a:(globalThis.swf2esPwned=1),b"><number>1</number></property>' +
+        "</object></arguments></invoke>",
+    );
+    assert.equal(page.swf2esPwned, undefined);
+    assert.deepEqual(got, [{ "a:(globalThis.swf2esPwned=1),b": 1 }]);
+  } finally {
+    delete page.swf2esCapture;
+    delete page.swf2esPwned;
   }
 });
 

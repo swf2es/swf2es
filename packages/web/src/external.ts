@@ -228,6 +228,12 @@ export function invocation(name: string, args: readonly PageValue[]): string {
   return `<invoke name="${escapeXml(name)}" returntype="xml">${argumentsToXml(args)}</invoke>`;
 }
 
+/** A function name that is a path of identifiers, `a.b.c`. */
+const PATH = /^[\p{L}_$][\p{L}\p{N}_$]*(\.[\p{L}_$][\p{L}\p{N}_$]*)*$/u;
+
+/** What playerglobal's `call` writes before the function's name (not ActiveX's, which this host is not). */
+const CALL = "try { __flash__toXML(";
+
 /** What the page's `window` runs: the global object of where this runs. */
 const page = globalThis as unknown as Record<string, unknown>;
 
@@ -237,7 +243,7 @@ const page = globalThis as unknown as Record<string, unknown>;
  * for a name that is not a path, an inline function's source, say.
  */
 function pagePath(name: string): { fn: unknown; self: unknown } | undefined {
-  if (!/^[\p{L}_$][\p{L}\p{N}_$]*(\.[\p{L}_$][\p{L}\p{N}_$]*)*$/u.test(name)) {
+  if (!PATH.test(name)) {
     return undefined;
   }
 
@@ -260,22 +266,34 @@ export interface PageBridge {
 }
 
 /**
- * The ExternalInterface host for a SWF its page lets script it. A call
- * from the SWF runs as Flash's plug-in ran it: playerglobal's JavaScript
- * evaluated in the page, `name(args)` with __flash__toXML around it,
- * which an inline function's source needs; where the page forbids eval
- * (a Content-Security-Policy), the host declines and playerglobal sends
- * the call as XML, which reaches functions named by a path alone. The
- * page's calls into the SWF go as XML both ways, needing no eval.
+ * The ExternalInterface host for a page that lets SWFs script it: those
+ * `allows` allows, by the calling SWF's URL. A call to a function named
+ * by a path is declined to evalJS, so playerglobal sends it as XML, read
+ * here as data: its JavaScript form writes an object's keys unquoted, as
+ * Flash's did, and a key could carry code into the eval. Only a name that
+ * is no path, an inline function's source, which is code already, is
+ * evaluated as Flash's plug-in did, `name(args)` inside __flash__toXML;
+ * where the page forbids eval (a Content-Security-Policy), that call is
+ * declined too, and comes to nothing. The page's calls into the SWF go
+ * as XML both ways, needing no eval.
  */
 export function externalInterfaceHost(
   bridge: PageBridge,
   report: (error: unknown) => void,
+  allows: (url: string) => boolean = () => true,
 ): ExternalInterfaceHost {
   let evaluate: ((source: string) => unknown) | null | undefined;
   return {
     objectID: bridge.objectID,
+    allows,
     evalJS(source) {
+      if (source.startsWith(CALL)) {
+        const name = source.slice(CALL.length, source.indexOf("(", CALL.length));
+        if (PATH.test(name)) {
+          return null;
+        }
+      }
+
       if (evaluate === undefined) {
         try {
           // Sloppy, so that the source's names are the page's globals, with

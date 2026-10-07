@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseColor, parseFlashVars, scriptAccess } from "../../../packages/web/dist/element.js";
+import {
+  defineElement,
+  parseColor,
+  parseFlashVars,
+  scriptAccess,
+} from "../../../packages/web/dist/element.js";
 
 test("bgcolor is #RRGGBB or RRGGBB, nothing else", () => {
   assert.equal(parseColor("#FF8000"), 0xff8000);
@@ -28,4 +33,17 @@ test("allowScriptAccess: always, never, and by default the page's own origin", (
   assert.equal(scriptAccess("sameDomain", "https://site.test/x/a.swf", page), true);
   assert.equal(scriptAccess("samedomain", "https://cdn.test/a.swf", page), false);
   assert.equal(scriptAccess(null, "http://site.test/a.swf", page), false);
+  // Opaque origins are "null" both, and are no one's domain.
+  assert.equal(scriptAccess(null, "blob:null/1", "blob:null/2"), false);
+});
+
+test("the element is not defined where there is no registry, as in an extension's isolated world", () => {
+  assert.equal(defineElement(), false);
+  const global = globalThis as { customElements?: unknown };
+  global.customElements = null;
+  try {
+    assert.equal(defineElement(), false);
+  } finally {
+    delete global.customElements;
+  }
 });

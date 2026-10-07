@@ -16,6 +16,32 @@ export type SwfSource = string | URL | ArrayBuffer | Uint8Array;
 /** In node, which has no DOM, the module still loads, for its other exports. */
 const ElementBase = (globalThis.HTMLElement ?? class {}) as typeof HTMLElement;
 
+/**
+ * The DOM's own methods, taken as the module loads and called on the
+ * element, never looked up on it: a SWF's callbacks live on the element,
+ * and must not reach what it does for itself.
+ */
+const dom = globalThis.HTMLElement
+  ? {
+      getAttribute: Element.prototype.getAttribute,
+      hasAttribute: Element.prototype.hasAttribute,
+      setAttribute: Element.prototype.setAttribute,
+      dispatchEvent: EventTarget.prototype.dispatchEvent,
+      focus: HTMLElement.prototype.focus,
+      isConnected: Object.getOwnPropertyDescriptor(Node.prototype, "isConnected")?.get,
+      id: Object.getOwnPropertyDescriptor(Element.prototype, "id")?.get,
+    }
+  : null;
+const attribute = (e: HTMLElement, name: string): string | null =>
+  dom?.getAttribute.call(e, name) ?? null;
+const hasAttribute = (e: HTMLElement, name: string) => dom?.hasAttribute.call(e, name) ?? false;
+const setAttribute = (e: HTMLElement, name: string, value: string) =>
+  dom?.setAttribute.call(e, name, value);
+const dispatch = (e: HTMLElement, event: Event) => dom?.dispatchEvent.call(e, event);
+const focus = (e: HTMLElement) => dom?.focus.call(e, { preventScroll: true });
+const connected = (e: HTMLElement): boolean => Boolean(dom?.isConnected?.call(e));
+const idOf = (e: HTMLElement): string => String(dom?.id?.call(e) ?? "");
+
 /** What one load holds, let go of all at once when the next load or destroy comes. */
 interface Session {
   scripting: Scripting | null;
@@ -23,6 +49,8 @@ interface Session {
   playback: Playback | null;
   /** The ExternalInterface callbacks the SWF put on the element. */
   callbacks: Set<string>;
+  /** Aborts the fetch of the SWF itself, as a destroy comes before it arrives. */
+  abort: AbortController;
 }
 
 interface Deferred {
@@ -94,7 +122,9 @@ export function scriptAccess(value: string | null, swfUrl: string, pageUrl: stri
       return false;
     default:
       try {
-        return new URL(swfUrl, pageUrl).origin === new URL(pageUrl).origin;
+        const origin = new URL(swfUrl, pageUrl).origin;
+        // An opaque origin ("null": data:, a sandboxed frame) is no one's domain, not even its own.
+        return origin !== "null" && origin === new URL(pageUrl).origin;
       } catch {
         return false;
       }
@@ -143,14 +173,14 @@ export class Swf2esPlayerElement extends ElementBase {
     "quality",
   ];
 
-  private session: Session | null = null;
-  private readiness = deferred();
+  #session: Session | null = null;
+  #readiness = deferred();
   /** The source the element last loaded, to tell a new src from the one playing. */
-  private loaded: string | null = null;
-  private readonly box: HTMLDivElement;
-  private readonly sizing: HTMLStyleElement;
+  #loaded: string | null = null;
+  readonly #box: HTMLDivElement;
+  readonly #sizing: HTMLStyleElement;
   /** The stage's size once a SWF is read, the element's own where the page gives it none. */
-  private stageSize: [number, number] | null = null;
+  #stageSize: [number, number] | null = null;
 
   constructor() {
     super();
@@ -160,49 +190,49 @@ export class Swf2esPlayerElement extends ElementBase {
     style.textContent =
       ":host { display: inline-block; position: relative; overflow: hidden; outline: none }" +
       " .box { position: absolute; inset: 0; overflow: hidden }";
-    this.sizing = document.createElement("style");
-    this.box = document.createElement("div");
-    this.box.className = "box";
-    shadow.append(style, this.sizing, this.box);
-    this.size();
-    this.addEventListener("pointerdown", () => this.focus({ preventScroll: true }));
+    this.#sizing = document.createElement("style");
+    this.#box = document.createElement("div");
+    this.#box.className = "box";
+    shadow.append(style, this.#sizing, this.#box);
+    this.#size();
+    this.addEventListener("pointerdown", () => focus(this));
   }
 
   /** Resolves once the SWF loading, or the next one asked for, plays; rejects if it fails. */
   get ready(): Promise<void> {
-    return this.readiness.promise;
+    return this.#readiness.promise;
   }
 
   /** The player playing, for a host that needs more than the element gives; null before a load and after destroy. */
   get player(): Player | null {
-    return this.session?.player ?? null;
+    return this.#session?.player ?? null;
   }
 
   get src(): string {
-    return this.getAttribute("src") ?? "";
+    return attribute(this, "src") ?? "";
   }
 
   set src(value: string) {
-    this.setAttribute("src", value);
+    setAttribute(this, "src", value);
   }
 
   connectedCallback(): void {
     // Focusable, for the keys, as a plug-in's object was.
-    if (!this.hasAttribute("tabindex")) {
-      this.tabIndex = 0;
+    if (!hasAttribute(this, "tabindex")) {
+      setAttribute(this, "tabindex", "0");
     }
 
-    const src = this.getAttribute("src");
-    if (src && !this.session) {
-      void this.load(src);
+    const src = attribute(this, "src");
+    if (src && !this.#session) {
+      void this.#load(src);
     }
   }
 
   disconnectedCallback(): void {
     // Moved within the page, it is back by the time this runs; taken away, it stops.
     queueMicrotask(() => {
-      if (!this.isConnected) {
-        this.destroy();
+      if (!connected(this)) {
+        this.#destroy();
       }
     });
   }
@@ -213,22 +243,22 @@ export class Swf2esPlayerElement extends ElementBase {
     }
 
     if (name === "src") {
-      if (value && this.isConnected && value !== this.loaded) {
-        void this.load(value);
+      if (value && connected(this) && value !== this.#loaded) {
+        void this.#load(value);
       }
 
       return;
     }
 
     if (name === "width" || name === "height") {
-      this.size();
+      this.#size();
     }
 
-    if (name === "quality" && this.session?.scripting) {
-      this.session.scripting.quality = quality(value);
+    if (name === "quality" && this.#session?.scripting) {
+      this.#session.scripting.quality = quality(value);
     }
 
-    this.session?.playback?.changed();
+    this.#session?.playback?.changed();
   }
 
   /**
@@ -238,34 +268,39 @@ export class Swf2esPlayerElement extends ElementBase {
    * settles it in its place.
    */
   load(source: SwfSource): Promise<void> {
-    this.release();
-    if (this.readiness.settled) {
-      this.readiness = deferred();
+    return this.#load(source);
+  }
+
+  #load(source: SwfSource): Promise<void> {
+    this.#release();
+    if (this.#readiness.settled) {
+      this.#readiness = deferred();
     }
 
-    const ready = this.readiness;
+    const ready = this.#readiness;
     const session: Session = {
       scripting: null,
       player: null,
       playback: null,
       callbacks: new Set(),
+      abort: new AbortController(),
     };
-    this.session = session;
-    this.loaded = typeof source === "string" || source instanceof URL ? String(source) : null;
-    void this.start(source, session, ready);
+    this.#session = session;
+    this.#loaded = typeof source === "string" || source instanceof URL ? String(source) : null;
+    void this.#start(source, session, ready);
     return ready.promise;
   }
 
-  private async start(source: SwfSource, session: Session, ready: Deferred): Promise<void> {
-    const current = () => this.session === session;
+  async #start(source: SwfSource, session: Session, ready: Deferred): Promise<void> {
+    const current = () => this.#session === session;
     try {
       const pageUrl = document.baseURI;
-      const base = this.getAttribute("base");
+      const base = attribute(this, "base");
       let bytes: Uint8Array;
       let url: string;
       if (typeof source === "string" || source instanceof URL) {
         url = new URL(source, pageUrl).href;
-        const response = await fetch(url);
+        const response = await fetch(url, { signal: session.abort.signal });
         if (!response.ok) {
           throw new Error(`swf2es: ${response.status} for ${url}`);
         }
@@ -283,11 +318,11 @@ export class Swf2esPlayerElement extends ElementBase {
       }
 
       const swf = readSwf(bytes);
-      this.stageSize = [
+      this.#stageSize = [
         Math.round((swf.frameSize.xMax - swf.frameSize.xMin) / 20),
         Math.round((swf.frameSize.yMax - swf.frameSize.yMin) / 20),
       ];
-      this.size();
+      this.#size();
       const scripted =
         isAs3(swf) && swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2);
       if (scripted) {
@@ -296,7 +331,7 @@ export class Swf2esPlayerElement extends ElementBase {
           return;
         }
 
-        session.scripting = this.scripting(session, codegen, url, pageUrl);
+        session.scripting = this.#scripting(session, codegen, url, pageUrl);
         await session.scripting.loadLibraries(abcs);
         if (!current()) {
           return;
@@ -305,12 +340,12 @@ export class Swf2esPlayerElement extends ElementBase {
 
       session.player = new Player(bytes, session.scripting);
       const playback = await Playback.create(
-        this.box,
+        this.#box,
         session.player,
         session.scripting,
-        quality(this.getAttribute("quality")) !== "LOW",
-        () => this.look(),
-        (error) => this.report(session, error),
+        quality(attribute(this, "quality")) !== "LOW",
+        () => this.#look(),
+        (error) => this.#report(session, error),
       );
       if (!current()) {
         playback.destroy();
@@ -325,60 +360,83 @@ export class Swf2esPlayerElement extends ElementBase {
 
       playback.run();
       ready.resolve();
-      this.dispatchEvent(new Event("load"));
+      dispatch(this, new Event("load"));
     } catch (error) {
       if (!current()) {
         return;
       }
 
-      this.release();
+      this.#release();
       ready.reject(error);
-      this.dispatchEvent(new CustomEvent("error", { detail: { error } }));
+      dispatch(this, new CustomEvent("error", { detail: { error } }));
     }
   }
 
-  /** The scripting of a load from `url`, its ExternalInterface and fscommand the page's only where it lets the SWF script it. */
-  private scripting(
+  /** The scripting of a load from `url`, its ExternalInterface and fscommand the page's only for the SWFs it lets script it. */
+  #scripting(
     session: Session,
     codegen: Awaited<ReturnType<typeof codegenForPlayer>>,
     url: string,
     pageUrl: string,
   ): Scripting {
-    const allowed = scriptAccess(this.getAttribute("allowscriptaccess"), url, pageUrl);
-    const base = this.getAttribute("base");
-    const objectID = this.id || this.getAttribute("name") || null;
+    const access = attribute(this, "allowscriptaccess");
+    // Flash's allowNetworking: "internal" takes the page's scripting and
+    // navigation away, "none" every network access besides.
+    const networking = (attribute(this, "allownetworking") ?? "all").toLowerCase();
+    const internal = networking === "internal" || networking === "none";
+    const offline = networking === "none";
+    // Asked of the calling SWF, as Flash asked: a child from another origin is not the main SWF.
+    const allows = (swfUrl: string) => !internal && scriptAccess(access, swfUrl, pageUrl);
+    const base = attribute(this, "base");
+    const objectID = idOf(this) || attribute(this, "name") || null;
     const bridge: PageBridge = {
       objectID,
-      callback: (name, call) => this.callback(session, name, call),
+      callback: (name, call) => this.#callback(session, name, call),
     };
     const scripting = new Scripting(codegen, {
       url,
       base: base ? new URL(base, pageUrl).href : undefined,
-      parameters: parseFlashVars(this.getAttribute("flashvars")),
-      fetch: browserFetch,
-      socket: socketHost(),
-      externalInterface: allowed
-        ? externalInterfaceHost(bridge, (error) => this.report(session, error))
-        : undefined,
-      fsCommand: allowed ? (command, args) => this.fsCommand(objectID, command, args) : null,
-      onUncaught: (error) => this.report(session, error),
+      parameters: parseFlashVars(attribute(this, "flashvars")),
+      fetch: offline ? () => Promise.reject(new Error("allowNetworking is none")) : browserFetch,
+      socket: offline ? undefined : socketHost(),
+      webSocket: offline ? null : undefined,
+      navigate: internal ? null : undefined,
+      externalInterface: externalInterfaceHost(
+        bridge,
+        (error) => this.#report(session, error),
+        allows,
+      ),
+      fsCommand: (command, args, caller) => {
+        if (allows(caller)) {
+          this.#fsCommand(objectID, command, args);
+        }
+      },
+      onUncaught: (error) => this.#report(session, error),
       ...moduleCacheOptions(),
     });
-    scripting.quality = quality(this.getAttribute("quality"));
+    scripting.quality = quality(attribute(this, "quality"));
     return scripting;
   }
 
   /** The SWF's callback `name` on the element, or taken off it, while its load is the one playing. */
-  private callback(
+  #callback(
     session: Session,
     name: string,
     call: ((...args: PageValue[]) => PageValue) | null,
   ): void {
-    if (this.session !== session) {
+    if (this.#session !== session) {
       return;
     }
 
     if (call) {
+      // Never over what the element is or does, its own methods or the DOM's.
+      if (name in this && !session.callbacks.has(name)) {
+        console.warn(
+          `swf2es: the SWF's ExternalInterface callback "${name}" is the element's own; left out`,
+        );
+        return;
+      }
+
       Object.defineProperty(this, name, {
         value: call,
         configurable: true,
@@ -392,8 +450,8 @@ export class Swf2esPlayerElement extends ElementBase {
   }
 
   /** fscommand as Flash's plug-in delivered it, to the page's `<id>_DoFSCommand`, and as an event. */
-  private fsCommand(objectID: string | null, command: string, args: string): void {
-    this.dispatchEvent(new CustomEvent("fscommand", { detail: { command, args } }));
+  #fsCommand(objectID: string | null, command: string, args: string): void {
+    dispatch(this, new CustomEvent("fscommand", { detail: { command, args } }));
     const handler = objectID
       ? (globalThis as Record<string, unknown>)[`${objectID}_DoFSCommand`]
       : undefined;
@@ -403,7 +461,7 @@ export class Swf2esPlayerElement extends ElementBase {
   }
 
   /** An error the SWF's code threw and nothing caught: told, as Flash's debugger told it, and played on. */
-  private report(session: Session, error: unknown): void {
+  #report(session: Session, error: unknown): void {
     let text: string;
     try {
       text = session.scripting ? session.scripting.rt.toString(error as never) : String(error);
@@ -414,21 +472,21 @@ export class Swf2esPlayerElement extends ElementBase {
     console.error(`swf2es: ${text}`);
   }
 
-  private look(): Look {
+  #look(): Look {
     return {
-      scale: scaleMode(this.getAttribute("scale")),
-      salign: this.getAttribute("salign"),
-      wmode: (this.getAttribute("wmode") ?? "window").toLowerCase(),
-      bgcolor: parseColor(this.getAttribute("bgcolor")),
+      scale: scaleMode(attribute(this, "scale")),
+      salign: attribute(this, "salign"),
+      wmode: (attribute(this, "wmode") ?? "window").toLowerCase(),
+      bgcolor: parseColor(attribute(this, "bgcolor")),
     };
   }
 
   /** The element's size: its width and height attributes, else its SWF's stage, else Flash's default stage. */
-  private size(): void {
-    const [w, h] = this.stageSize ?? [550, 400];
-    const width = cssLength(this.getAttribute("width")) ?? `${w}px`;
-    const height = cssLength(this.getAttribute("height")) ?? `${h}px`;
-    this.sizing.textContent = `:host { width: ${width}; height: ${height} }`;
+  #size(): void {
+    const [w, h] = this.#stageSize ?? [550, 400];
+    const width = cssLength(attribute(this, "width")) ?? `${w}px`;
+    const height = cssLength(attribute(this, "height")) ?? `${h}px`;
+    this.#sizing.textContent = `:host { width: ${width}; height: ${height} }`;
   }
 
   /**
@@ -438,37 +496,54 @@ export class Swf2esPlayerElement extends ElementBase {
    * element stays, and may load another.
    */
   destroy(): void {
-    const loading = this.session !== null && !this.readiness.settled;
-    this.release();
-    this.loaded = null;
+    this.#destroy();
+  }
+
+  #destroy(): void {
+    const loading = this.#session !== null && !this.#readiness.settled;
+    this.#release();
+    this.#loaded = null;
     if (loading) {
-      this.readiness.reject(new Error("swf2es: destroyed before it played"));
+      this.#readiness.reject(new Error("swf2es: destroyed before it played"));
     }
   }
 
-  private release(): void {
-    const session = this.session;
+  #release(): void {
+    const session = this.#session;
     if (!session) {
       return;
     }
 
-    this.session = null;
+    this.#session = null;
     for (const name of session.callbacks) {
       Reflect.deleteProperty(this, name);
     }
 
     session.callbacks.clear();
+    session.abort.abort();
     session.playback?.destroy();
     session.player?.destroy();
     session.scripting?.destroy();
-    this.box.style.background = "";
+    this.#box.style.background = "";
   }
 }
 
-/** Define the element as `name`, once; what a page or extension calls before using it, if index.js has not. */
-export function defineElement(name = TAG): void {
-  if (typeof customElements !== "undefined" && !customElements.get(name)) {
-    // A class of its own for each name: a registry takes a constructor once.
-    customElements.define(name, class extends Swf2esPlayerElement {});
+/**
+ * Define the element as `name`, once; what a page or extension calls
+ * before using it, if index.js has not. Whether it is defined: not where
+ * there is no registry, as in node or an extension's isolated world,
+ * whose `customElements` is null.
+ */
+export function defineElement(name = TAG): boolean {
+  const registry = (globalThis as { customElements?: CustomElementRegistry | null }).customElements;
+  if (typeof registry !== "object" || registry === null) {
+    return false;
   }
+
+  if (!registry.get(name)) {
+    // A class of its own for each name: a registry takes a constructor once.
+    registry.define(name, class extends Swf2esPlayerElement {});
+  }
+
+  return true;
 }
