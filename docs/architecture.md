@@ -255,11 +255,19 @@ the order avmplus looks for them. With handlers, the whole loop is in
 instruction, matches the exception's type, and continues at its block
 with the exception as the only stack value, or rethrows.
 
-Stack registers that only copy a local are not written: a `getlocal`
-leaves its stack register a copy, read as the local itself, until the local
-changes or a branch needs the stack as it is. A value the next instruction
-only moves to a local (a `setlocal`) goes to the local straight, and a
-conversion that changes nothing writes no code.
+Scope and stack registers that only copy another register or a constant
+are not written: a `getlocal`, `dup`, `getscopeobject`, `getglobalscope`,
+the IR's nip, or a `pushscope` of a local leaves its register a copy, read
+as what it copies, until that changes. A forward dataflow over the blocks
+(`emit/copies.ts`) finds the copies each block is entered with on every
+way in, a loop's back edges included, so a branch writes only the copies
+its target does not know; locals are always written, so a handler, which
+starts with none, finds them as they are wherever its range threw. A value
+the next instruction only moves to a local or a scope (a `setlocal` or
+`pushscope`, after conversions that change nothing) goes there straight;
+one it duplicates to set a local (`dup; setlocal`) goes to the local, and
+the stack register is its copy. A conversion that changes nothing writes
+no code.
 
 The code is written short where that costs nothing at run time:
 `undefined` is `void 0`, and a return of it a bare `return;`, each of
