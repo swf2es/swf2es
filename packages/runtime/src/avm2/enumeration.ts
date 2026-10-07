@@ -12,9 +12,10 @@ import { WeakKeys, WeakName } from "./weak-keys.js";
  * started inside another never moves the outer one's names. One deleted
  * stays in its slot, which the outer one skips, until a for-in next starts:
  * then its slot is free, and it takes one again only if it is back, as a
- * new name, which takes a free slot; only with none free does the list grow. So it is at
- * most as long as the most names the object had at once, as avmplus'
- * table, and nothing a for-in goes through is ever moved or dropped.
+ * new name, which takes a free slot; only with none free does the list
+ * grow. So it is at most as long as the most names the object had at once,
+ * as avmplus' table, and nothing a for-in goes through is ever moved or
+ * dropped.
  */
 export interface Enumeration {
   /** The name in each slot, null in one free: a string, or a Dictionary's object key. */

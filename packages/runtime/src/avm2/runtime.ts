@@ -127,7 +127,6 @@ export class Runtime {
   /** See RuntimeOptions.swfVersion. */
   swfVersion: number;
   readonly natives: Record<string, (rt: Runtime) => Method>;
-  /** Names the scripts define, by local name: the first definition wins. */
   /** The root application domain, the builtins' and the main SWF's; and the one modules load into now. */
   readonly root = new Domain(null, 0);
   private domainCount = 1;
@@ -178,11 +177,6 @@ export class Runtime {
   readonly objectTraits: Traits;
   readonly classTraits: Traits;
   readonly functionTraits: Traits;
-  /** Empty the inline caches, so that they keep no traits or code of what is being let go of. */
-  forgetCaches(): void {
-    invalidate();
-  }
-
   /** Method closures, by receiver, so that o.f === o.f. */
   private readonly closures = new WeakMap<object, Map<number, AsObject>>();
   private readonly builtinTraitsByName = new Map<string, Traits>();
@@ -219,6 +213,11 @@ export class Runtime {
     this.functionTraits = new Traits("Function", this.objectTraits);
     this.functionTraits.dynamic = true;
     this.natives = typeof natives === "function" ? natives(this) : natives;
+  }
+
+  /** Empty the inline caches, so that they keep no traits or code of what is being let go of. */
+  forgetCaches(): void {
+    invalidate();
   }
 
   // Names.
@@ -1931,10 +1930,7 @@ export class Runtime {
       return known;
     }
 
-    const i = qualified.lastIndexOf("::");
-    const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));
-    const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
-    mn.domain = domain === this.root ? null : domain;
+    const mn = this.qualifiedNameIn(qualified, domain);
     const cls = this.resolveName(mn);
     // A script still running its initializer may not have made the class yet.
     if (cls) {
@@ -1961,13 +1957,10 @@ export class Runtime {
    * code keeps it as run, as avmplus does.
    */
   definitionNamed(qualified: string, domain: Domain): Value {
-    const i = qualified.lastIndexOf("::");
-    const local = i < 0 ? qualified : qualified.slice(i + 2);
-    const mn = qname(i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i)), local);
-    mn.domain = domain === this.root ? null : domain;
+    const mn = this.qualifiedNameIn(qualified, domain);
     const script = this.findScript(mn);
     if (!script) {
-      throw this.error("ReferenceError", 1065, local);
+      throw this.error("ReferenceError", 1065, mn.name);
     }
 
     return this.getProperty(this.initScript(script, true), mn);
@@ -1975,11 +1968,16 @@ export class Runtime {
 
   /** The module whose script defines `qualified` for `domain`, or null: by it a player keys what SymbolClass binds. */
   definingAbc(qualified: string, domain: Domain): Abc | null {
+    return this.findScript(this.qualifiedNameIn(qualified, domain))?.abc ?? null;
+  }
+
+  /** The public name "pkg::Name" or "Name" stands for, looked up in `domain`. */
+  private qualifiedNameIn(qualified: string, domain: Domain | null): Multiname {
     const i = qualified.lastIndexOf("::");
     const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));
     const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
     mn.domain = domain === this.root ? null : domain;
-    return this.findScript(mn)?.abc ?? null;
+    return mn;
   }
 
   /** The class a multiname or TypeName names. */
@@ -2593,9 +2591,6 @@ export class Runtime {
     return new Error(`swf2es: ${what} is not supported yet`);
   }
 
-  // Domain memory, as avmplus' MOPS: little-endian, an address outside the
-  // memory a RangeError.
-
   // Class aliases, for AMF.
 
   /** As Toplevel::registerClassAlias: a class by a name, replacing what the name had. */
@@ -2675,7 +2670,9 @@ export class Runtime {
     return domain;
   }
 
-  /** `address` as an int, once checked that the domain memory holds `size` bytes there. */
+  // Domain memory, as avmplus' MOPS: little-endian, an address outside the
+  // memory a RangeError.
+
   /** The domain memory: where li8 and the other opcodes read and write, with its length. */
   get memory(): DataView {
     return this.view;
@@ -2686,6 +2683,7 @@ export class Runtime {
     this.memoryLength = view.byteLength;
   }
 
+  /** `address` as an int, once checked that the domain memory holds `size` bytes there. */
   private mops(address: Value, size: number): number {
     const a = this.toInt(address);
     if (a < 0 || a + size > this.memoryLength) {
@@ -2745,7 +2743,7 @@ export class Runtime {
     this.view.setFloat64(at, this.toNumber(value), true);
   }
 
-  // E4X, not implemented yet.
+  // E4X.
 
   /** getdescendants: x..name, on XML or XMLList; anything else, as avmplus, TypeError 1016. */
   getDescendants(o: Value, mn: Multiname): Value {
