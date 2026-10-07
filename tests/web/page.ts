@@ -1,3 +1,5 @@
+import type { Swf2esPlayerElement } from "@swf2es/web";
+
 // The web test's page (run.ts writes its HTML): <swf2es-player>s and Flash
 // tags for replaceFlash, the page's functions the SWF calls, and what
 // run.ts asks of them. What the players hold is counted where they reach
@@ -118,26 +120,38 @@ globalThis.AudioContext = class extends PageAudio {
 };
 
 /** What the SWFs asked of the page: pageHello's arguments, and each report. */
-const calls: { hello: unknown[][]; reports: unknown[] } = { hello: [], reports: [] };
+const calls: { hello: unknown[][]; reports: unknown[]; captured: unknown[] } = {
+  hello: [],
+  reports: [],
+  captured: [],
+};
 const page = globalThis as unknown as Record<string, unknown>;
 page.pageHello = (...args: unknown[]) => {
   calls.hello.push(args);
   return { got: args };
 };
+page.pageCapture = (value: unknown) => {
+  calls.captured.push(value);
+};
 page.report = (value: unknown) => {
   calls.reports.push(value);
 };
 
-// After the fakes: the element is defined, and the page's players start, as it loads.
-const web = await import("@swf2es/web");
-web.configure({
-  libraries: { builtin: "/libraries/builtin.abc", playerglobal: "/libraries/playerglobal.abc" },
-  socketProxy: [{ host: "example.test", port: 1234, proxyUrl: "ws://relay.invalid/" }],
-  cache: true,
+// After the fakes: the element is defined, and the page's players start,
+// as the package loads. The functions run.ts calls are there before it: a
+// cold start of its many modules on a loaded machine is waited for by the
+// checks, and a load that fails is their error, not a page that never ran.
+const loading = import("@swf2es/web").then((web) => {
+  web.configure({
+    libraries: { builtin: "/libraries/builtin.abc", playerglobal: "/libraries/playerglobal.abc" },
+    socketProxy: [{ host: "example.test", port: 1234, proxyUrl: "ws://relay.invalid/" }],
+    cache: true,
+  });
+  return { web, replaced: web.replaceFlash() };
 });
-const replaced = web.replaceFlash();
+loading.catch(() => {});
 
-type Player = InstanceType<typeof web.Swf2esPlayerElement>;
+type Player = Swf2esPlayerElement;
 const players = () => [...document.querySelectorAll<Player>("swf2es-player")];
 const frames = (n: number) =>
   new Promise<void>((done) => {
@@ -148,6 +162,7 @@ const frames = (n: number) =>
 
 /** Each player once all have played or failed, with what the test checks of it. */
 async function booted() {
+  await loading;
   const outcomes = await Promise.all(
     players().map((p) =>
       p.ready.then(
@@ -176,7 +191,8 @@ function element(id: string): Player & Record<string, (...args: unknown[]) => un
 }
 
 /** The page's view of replaceFlash: what is left of the Flash tags, and what it made. */
-function replacement() {
+async function replacement() {
+  const { replaced } = await loading;
   return {
     replaced: replaced.map((p) => p.id),
     objects: document.querySelectorAll("object, embed").length,
@@ -203,6 +219,13 @@ function externalInterface() {
     add: movie.add(2, 3),
     failed,
     lockedCallbacks: ["echo", "add", "fail"].filter((name) => name in locked),
+    // The SWF's callbacks of these names are refused: the element's own stay.
+    shadowed: ["destroy", "getAttribute", "dispatchEvent"].filter((name) =>
+      Object.hasOwn(movie, name),
+    ),
+    attribute: movie.getAttribute("id"),
+    // An object key written into JavaScript as code: never run.
+    pwned: "swf2esPwned" in globalThis,
   };
 }
 
@@ -232,18 +255,21 @@ async function resize() {
   };
 }
 
-/** watchFlash, then an <embed> the page adds: what it became once the observer ran. */
+/** watchFlash, then an <embed> the page adds and gives a src after: what it became. */
 async function watched() {
-  const stop = web.watchFlash();
+  const stop = (await loading).web.watchFlash();
   const embed = document.createElement("embed");
-  embed.setAttribute("src", "/web-test/shapes.swf");
   embed.id = "added";
   document.body.append(embed);
+  await new Promise((done) => setTimeout(done, 0));
+  // Not Flash until a script gives it its movie.
+  const before = document.getElementById("added")?.localName;
+  embed.setAttribute("src", "/web-test/shapes.swf");
   await new Promise((done) => setTimeout(done, 0));
   stop();
   const added = element("added");
   await added.ready;
-  return { tag: added.localName, playing: added.player !== null };
+  return { before, tag: added.localName, playing: added.player !== null };
 }
 
 /** Kept weakly: the players of the elements made and destroyed, which a collection must take. */

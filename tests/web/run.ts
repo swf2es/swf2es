@@ -162,10 +162,13 @@ check("replaceFlash swaps each Flash tag once, its parameters carried over", asy
 });
 
 check(
-  "ExternalInterface both ways, and none where allowScriptAccess is never",
+  "ExternalInterface both ways, safe from keys and names, none where allowScriptAccess is never",
   async (evaluate) => {
     const ei = await call<{
-      calls: { hello: unknown[][]; reports: Record<string, unknown>[] };
+      calls: { hello: unknown[][]; reports: Record<string, unknown>[]; captured: unknown[] };
+      shadowed: string[];
+      attribute: string;
+      pwned: boolean;
       echo: unknown;
       add: unknown;
       failed: string;
@@ -186,6 +189,10 @@ check(
     assert.equal(ei.add, 5);
     assert.match(ei.failed, /Error calling method on NPObject: fail/);
     assert.deepEqual(ei.lockedCallbacks, []);
+    assert.deepEqual(ei.shadowed, []);
+    assert.equal(ei.attribute, "movie");
+    assert.equal(ei.pwned, false);
+    assert.deepEqual(ei.calls.captured, [{ "a:(window.swf2esPwned=1),b": 1 }]);
   },
 );
 
@@ -209,8 +216,12 @@ check("the element follows its size and the device's pixels", async (evaluate) =
   assert.deepEqual(r, { dpr: 2, canvas: [640, 480], css: ["320px", "120px"] });
 });
 
-check("watchFlash replaces the Flash tags the page adds later", async (evaluate) => {
-  assert.deepEqual(await call(evaluate, "watched()"), { tag: "swf2es-player", playing: true });
+check("watchFlash replaces the Flash tags the page adds or makes Flash later", async (evaluate) => {
+  assert.deepEqual(await call(evaluate, "watched()"), {
+    before: "embed",
+    tag: "swf2es-player",
+    playing: true,
+  });
 });
 
 check("destroy takes the callbacks off and closes the socket and the audio", async (evaluate) => {
@@ -257,7 +268,16 @@ check(`${CHURN} elements made and destroyed leave nothing behind`, async (evalua
 
 const failures = await withPage(
   "survivors",
-  async (evaluate, send, fresh) => {
+  async (evaluate, send, fresh, listen) => {
+    // What the page threw, told with a failing check: an error of its own, not a time out.
+    const thrown: string[] = [];
+    listen("Runtime.exceptionThrown", (params) => {
+      const details = params.exceptionDetails as {
+        exception?: { description?: string };
+        text: string;
+      };
+      thrown.push(details.exception?.description ?? details.text);
+    });
     // Two device pixels a CSS pixel, as on a high-density display.
     await send("Emulation.setDeviceMetricsOverride", {
       width: 800,
@@ -274,6 +294,9 @@ const failures = await withPage(
       } catch (e) {
         failed++;
         console.log(`not ok ${name}\n  ${e instanceof Error ? e.message : String(e)}`);
+        for (const text of thrown.splice(0)) {
+          console.log(`  the page threw: ${text}`);
+        }
       }
     }
 
