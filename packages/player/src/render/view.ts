@@ -107,6 +107,17 @@ function laidOutAs(lines: readonly boolean[], layers: readonly ShapeLayer[]): bo
   return k === lines.length;
 }
 
+/** Whether any of `children` is a timeline's mask, which clips those after it. */
+function anyClips(children: readonly DisplayObject[]): boolean {
+  for (let i = 0; i < children.length; i++) {
+    if (children[i].clipDepth > 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /** Whether any layer has lines of the node's own to stroke. */
 function hasLines(strokes: readonly (SharedGraphics | null)[]): boolean {
   for (let i = 0; i < strokes.length; i++) {
@@ -1510,14 +1521,22 @@ export class PixiView {
     isolated: boolean,
   ): void {
     const content = node.scroll?.content ?? node.container;
-    for (const group of node.groups) {
-      group.mask = null;
-      group.destroy();
+    // Where no mask clips them, the children's containers are put in order where they are, those
+    // that kept their places left alone: taken off and put back, each was an event of Pixi's, and
+    // the render group's structure changed though its order had not.
+    const inPlace =
+      node.groups.length === 0 && content.children[0] === node.art && !anyClips(o.children);
+    if (!inPlace) {
+      for (const group of node.groups) {
+        group.mask = null;
+        group.destroy();
+      }
+
+      node.groups = [];
+      content.removeChildren();
+      content.addChild(node.art);
     }
 
-    node.groups = [];
-    content.removeChildren();
-    content.addChild(node.art);
     // Those that left the list give their lines back, all the way down; one
     // moved to another parent on the list is drawn there, perhaps already this frame.
     if (!this.fresh) {
@@ -1528,6 +1547,35 @@ export class PixiView {
       }
 
       node.kids = [...o.children];
+    }
+
+    if (inPlace) {
+      const children = o.children;
+      let at = 1;
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        const container = this.sync(
+          child,
+          node.world,
+          moved,
+          child.placed,
+          masking,
+          node.color,
+          isolated,
+        );
+        if (content.children[at] !== container) {
+          content.addChildAt(container, at);
+        }
+
+        at++;
+      }
+
+      // What is left after them, those that left.
+      if (content.children.length > at) {
+        content.removeChildren(at);
+      }
+
+      return;
     }
 
     const clips = new Clips();
