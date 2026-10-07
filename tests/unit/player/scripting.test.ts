@@ -1172,7 +1172,8 @@ test("a frame whose scripts change nothing a round reads takes one round", {
 
   // The root's script runs, and changes nothing a round reads: no second
   // round walks the list. Each walk, the tick's and each round's, starts
-  // with the orphans.
+  // with the orphans. The checked build runs the round left out anyway, to
+  // see that it finds nothing.
   let walks = 0;
   const orphanRoots = scripting.lifecycle.orphanRoots.bind(scripting.lifecycle);
   scripting.lifecycle.orphanRoots = () => {
@@ -1183,7 +1184,7 @@ test("a frame whose scripts change nothing a round reads takes one round", {
     player.tick();
   }
 
-  assert.equal(walks, 8);
+  assert.equal(walks, Scripting.checkRounds ? 12 : 8);
   const n = scripting.rt.getProperty(
     player.root.object as avm2.AsObject,
     avm2.qname(avm2.publicNs, "n"),

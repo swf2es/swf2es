@@ -1106,7 +1106,9 @@ counts: a clip's frame, its frame scripts, `makingChildren` or
 alive, the orphans, what scripts made and the scripts' phase. A round
 leaves each clip it lists on a frame whose script ran, or held back as it
 would be again, so with none of those changed another finds nothing; a
-frame whose scripts only stop their clips or set properties takes one.
+frame whose scripts only stop their clips or set properties takes one. The
+checked build's tests (`pnpm test:checked`) run each round left out
+anyway and fail if it finds anything to do.
 
 In a SWF of version 9 or earlier, a clip a script sends to a frame, by a
 goto from its frame script, its listener or another clip's, sits the next

@@ -97,6 +97,14 @@ export class Scripting {
    * its first frame's script to them, as in Flash; one made before keeps it.
    */
   private scriptPhase = false;
+  /** The frames whose scripts rounds marked run, for checkRoundLeftOut. */
+  private framesMarked = 0;
+  /**
+   * Whether a round of frame scripts left out as having nothing to do is
+   * run anyway and must find nothing: the checked build's tests set it
+   * (SWF2ES_CHECKED), to prove the rounds' count (scriptWork) complete.
+   */
+  static checkRounds = false;
   /** Whether they nested too deep this frame, which stops them all till the next. */
   private overflowed = false;
   /**
@@ -529,12 +537,42 @@ export class Scripting {
         // since this one walked: every clip this one visited is left on a
         // frame whose script ran, or one held back as it will be again.
         const changes = scriptWork.changes;
-        if (!this.frameScriptRound(queue, root, also, stopped) || scriptWork.changes === changes) {
+        if (!this.frameScriptRound(queue, root, also, stopped)) {
+          break;
+        }
+
+        if (scriptWork.changes === changes) {
+          if (Scripting.checkRounds) {
+            this.checkRoundLeftOut(queue, root, also, stopped);
+          }
+
           break;
         }
       }
     } finally {
       this.scriptDepth--;
+    }
+  }
+
+  /**
+   * The checked build's proof that a round left out had nothing to do: run
+   * it anyway, and throw if it ran a script, marked a frame's script run or
+   * changed anything else a round reads.
+   */
+  private checkRoundLeftOut(
+    queue: (MovieClip | null)[],
+    root: DisplayObject,
+    also: DisplayObject | null,
+    stopped: () => boolean,
+  ): void {
+    const changes = scriptWork.changes;
+    const marked = this.framesMarked;
+    if (
+      this.frameScriptRound(queue, root, also, stopped) ||
+      this.framesMarked !== marked ||
+      scriptWork.changes !== changes
+    ) {
+      throw new Error("a round of frame scripts left out had work to do");
     }
   }
 
@@ -562,6 +600,7 @@ export class Scripting {
 
       for (let jumps = 0; jumps < 64 && o.scriptedFrame !== o.currentFrame && !stopped(); jumps++) {
         o.scriptedFrame = o.currentFrame;
+        this.framesMarked++;
         const script = o.frameScripts.get(o.currentFrame);
         if (!script) {
           return;

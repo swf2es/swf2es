@@ -31,6 +31,11 @@ import {
 } from "@swf2es/player";
 import { autoDetectRenderer } from "pixi.js";
 
+// `pnpm test:checked`'s page (chrome.ts): the player checks its own shortcuts too.
+if (new URLSearchParams(location.search).has("checked")) {
+  Scripting.checkRounds = true;
+}
+
 interface Run {
   images: Record<number, string>;
   /** What the SWF's scripts traced, a line each. */
