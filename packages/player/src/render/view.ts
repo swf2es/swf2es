@@ -76,6 +76,8 @@ import { drawStaticText, drawText } from "./text.js";
 const IDENTITY = new Matrix();
 
 const NO_RECORDS: readonly FilterRecord[] = [];
+/** restroke's scratch, which a stretch is compared in and never kept. */
+const STRETCH: Linear = [0, 0, 0, 0];
 /** A Shape child's slice key once its owner's slice changed: it is sliced again on its next sync. */
 const STALE = "stale";
 
@@ -114,6 +116,12 @@ interface Node {
   emptied: boolean;
   /** The thinnest line its lines were last drawn with, to draw them again for another. */
   strokedAt: number;
+  /**
+   * The stretch its lines were last stroked through, where all were
+   * stroked through its stretch alone (stretchOf): a turn that keeps it
+   * leaves them as they are. Null otherwise.
+   */
+  stretched: Linear | null;
   /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
   bitmap: Sprite | null;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
@@ -517,6 +525,7 @@ export class PixiView {
         reused: false,
         emptied: false,
         strokedAt: 0,
+        stretched: null,
         bitmap: null,
         lines: [],
         spare: null,
@@ -969,9 +978,18 @@ export class PixiView {
    * for a layer whose lines scale both ways, through its stretch alone,
    * under the stretch's inverse (stretchOf).
    */
-  private restroke(node: Node): void {
+  private restroke(node: Node, moved = false): void {
     const m = node.world;
     const least = this.leastWidth;
+    // Turned or mirrored, not stretched: the lines and the inverse they are under stay, as a limb's
+    // that only turns on every frame.
+    if (moved && node.stretched && node.strokedAt === least) {
+      const stretch = stretchOf(m, STRETCH);
+      if (stretch && sameLinear(stretch, node.stretched)) {
+        return;
+      }
+    }
+
     node.strokedAt = least;
     const by = node.lineSpace;
     // One key and one inverse for all its layers of each kind, made as one first needs them.
@@ -1024,6 +1042,7 @@ export class PixiView {
         strokes.setFromMatrix(inverse);
       }
     });
+    node.stretched = scaled && !exact ? scaled.m : null;
   }
 
   /**
@@ -1208,7 +1227,7 @@ export class PixiView {
     if (dirty & CONTENT) {
       this.redraw(o, node);
     } else if ((moved || node.strokedAt !== this.leastWidth) && node.strokes.some((g) => g)) {
-      this.restroke(node);
+      this.restroke(node, true);
     }
 
     if (dirty & CONTENT || remask) {

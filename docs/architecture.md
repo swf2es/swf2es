@@ -680,7 +680,8 @@ loop's next turn). A transform is a turn or a mirror times a symmetric
 stretch, and a line scaled both ways is as wide through any turn of it:
 such a layer's lines are stroked through the stretch alone and turned by
 their Graphics' matrix, so a limb that turns on every frame, or a
-squashed particle that spins, shares one context through every angle;
+squashed particle that spins, shares one context through every angle,
+and a turn that keeps the stretch leaves its lines as they are;
 one with a line scaled one way alone, which turns with it, or a
 transform near collapse, which rounding would distort, keeps the
 transform exactly. Contexts are counted as instances take and give
