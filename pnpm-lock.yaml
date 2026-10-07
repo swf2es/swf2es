@@ -143,6 +143,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/runtime
 
+  tests/web:
+    dependencies:
+      '@swf2es/web':
+        specifier: workspace:*
+        version: link:../../packages/web
+
 packages:
 
   '@biomejs/biome@2.5.14':

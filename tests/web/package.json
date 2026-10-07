@@ -1,0 +1,11 @@
+{
+  "name": "@swf2es/tests-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node run.ts"
+  },
+  "dependencies": {
+    "@swf2es/web": "workspace:*"
+  }
+}
