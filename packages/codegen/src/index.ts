@@ -74,11 +74,6 @@ export interface Compiled {
 }
 
 /**
- * The compiler. ABCs are added to a domain in the order the SWF loads them
- * (the builtins first), and the last one added compiles, whole or a method
- * at a time, to code that is byte for byte the same either way.
- */
-/**
  * What ABC `index`'s module depends on in the domain beyond the ABCs'
  * bytes (see Codegen.context).
  */
@@ -100,6 +95,11 @@ export interface LoggedModule {
   log: string | null;
 }
 
+/**
+ * The compiler. ABCs are added to a domain in the order the SWF loads them
+ * (the builtins first), and the last one added compiles, whole or a method
+ * at a time, to code that is byte for byte the same either way.
+ */
 export interface Codegen {
   /**
    * The identity of this codegen.wasm, a hash of its bytes that its build

@@ -63,7 +63,9 @@ const BOUND = 64 * 1024;
  * not compiled, and it starts at 8 MiB: dead domains building up before a
  * compaction, and a compaction making new tables beside the old, then take
  * it to 16 MiB after some 20 loads, and to 32 after some hundreds or not
- * at all, never further in 4,000. A leak would.
+ * at all, never further in 4,000. A leak would pass it, but only a large
+ * one: from a start of 8 or 16 MiB, some 80 KB a load over 300 loads is
+ * hidden, which the run without the cache, starting at 32 MiB, does catch.
  */
 const CODEGEN_CEILING = 32 * 1024 * 1024;
 

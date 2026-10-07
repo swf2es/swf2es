@@ -96,16 +96,20 @@ export function indexedDbModuleCache(
         return undefined;
       }
 
-      // Marked used apart, in a store no get reads, so that gets need not
-      // wait; a mark that fails leaves the module as read.
+      // Marked used apart, in a store no get reads, and not waited for: a
+      // mark that fails leaves the module as read and its last use as it was.
       try {
         const entries = db.transaction(ENTRIES, "readwrite").objectStore(ENTRIES);
-        const entry = await request<Entry | undefined>(entries.get(key));
-        if (entry) {
-          entries.put({ ...entry, used: Date.now() });
-        }
+        request<Entry | undefined>(entries.get(key)).then(
+          (entry) => {
+            if (entry) {
+              entries.put({ ...entry, used: Date.now() });
+            }
+          },
+          () => {},
+        );
       } catch {
-        // Its last use stays as it was.
+        // No transaction: its last use stays as it was.
       }
 
       return {
