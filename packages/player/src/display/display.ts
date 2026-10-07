@@ -196,8 +196,17 @@ export class DisplayObject {
   /** What changed since the renderer last synced it: TRANSFORM, CHILDREN, CONTENT. */
   dirty = TRANSFORM | CONTENT;
 
-  /** This object, weakly, as a store it shows or fills with holds it. */
-  readonly ref = new WeakRef(this);
+  private weakRef: WeakRef<this> | null = null;
+
+  /**
+   * This object, weakly, as a store it shows or fills with holds it: the
+   * same each time, made as it is first asked for, which most never are,
+   * though timelines make thousands of objects a second.
+   */
+  get ref(): WeakRef<this> {
+    this.weakRef ??= new WeakRef(this);
+    return this.weakRef;
+  }
   /**
    * The last depth this clips, as a timeline's mask, or 0: a mask is not
    * drawn, and clips the children after it until one placed deeper.

@@ -80,7 +80,7 @@ export class Lifecycle {
    */
   orphan(display: DisplayObject, keep = true): void {
     if (display.object && !this.orphans.has(display.serial)) {
-      this.orphans.set(display.serial, { ref: new WeakRef(display), keep, since: this.s.frames });
+      this.orphans.set(display.serial, { ref: display.ref, keep, since: this.s.frames });
     }
   }
 
