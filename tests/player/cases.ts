@@ -292,6 +292,31 @@ export function bare(
   });
 }
 
+// A SWF of `version` whose root places Bound, a clip of `frames` frames
+// bound to the script's class, the root Main: for the node tests' gotos
+// and orphans.
+export function boundClip(abc: Uint8Array, version: number, frames: number): Uint8Array {
+  return w.swf({
+    version,
+    width: 20,
+    height: 20,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(2, frames, [...Array.from({ length: frames }, () => w.showFrame()), w.end()]),
+      w.doAbc(abc),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Bound"],
+      ]),
+      w.place({ depth: 1, character: 2, name: "bound" }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A sprite with one child, bound to a class the script constructs during
 // its initializer and again later (scripts/Init.as).
 function bound(abc: Uint8Array): Uint8Array {

@@ -204,7 +204,7 @@ export class Player {
       }
     };
     collect(this.stage);
-    for (const orphan of this.scripting?.orphanRoots() ?? []) {
+    for (const orphan of this.scripting?.lifecycle.orphanRoots() ?? []) {
       collect(orphan);
     }
 

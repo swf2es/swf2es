@@ -131,7 +131,7 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
         }
 
         if (made) {
-          s.made(display);
+          s.lifecycle.made(display);
         }
 
         return o;

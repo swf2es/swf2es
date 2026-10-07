@@ -802,7 +802,9 @@ and the player's paths in this document are relative to it:
 - `index.ts` is the package's one entry point; `player.ts` runs a SWF,
   `scripting.ts` connects it to the runtime and the compiler, with its
   parts in `scripting/`: `events.ts` dispatches events to AS3 listeners,
-  `timers.ts` keeps the clock and the timers that fire by it. `hosts.ts`
+  `lifecycle.ts` tells display objects they were added or removed and
+  keeps the orphans, `timers.ts` keeps the clock and the timers that fire
+  by it. `hosts.ts`
   holds what a host may supply in place of the browser (navigation,
   shared objects' storage, the platform Capabilities reports) with the
   browser's defaults, and the interfaces of what only a host supplies
@@ -1165,7 +1167,8 @@ orphan, and so does one a script makes with `new` and never adds: its
 timeline advances and its frame scripts run each frame, with `parent`
 and `stage` null, until it is put back, where it carries on from the
 frame it reached, or until it is collected (the `orphans` case; Ruffle
-keeps them by weak reference, and so does the player, with `WeakRef`, so
+keeps them by weak reference, and so does the player
+(`scripting/lifecycle.ts`), with `WeakRef`, so
 an orphan nothing refers to stops as Flash's does, and a test that wants
 one to play on holds it). What refers to it includes the frame events it
 listens for: an `ENTER_FRAME` listener keeps a clip alive in Flash, the

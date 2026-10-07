@@ -46,18 +46,18 @@ export function containerNatives(s: Scripting): avm2.Natives {
     // Out of another parent first, with its events; within the same one, a move only.
     const moved = d.parent === c;
     if (d.parent && !moved) {
-      s.removing(d);
+      s.lifecycle.removing(d);
     }
 
     c.addChildAt(d, index);
     if (!moved) {
-      s.added(d);
+      s.lifecycle.added(d);
     }
 
     return v;
   };
   const remove = (c: Container, d: DisplayObject): void => {
-    s.removing(d);
+    s.lifecycle.removing(d);
     c.removeChild(d);
   };
 
