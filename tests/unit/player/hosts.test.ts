@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { browserNavigate } from "../../../packages/player/dist/hosts.js";
-import type { FetchRequest } from "../../../packages/player/dist/scripting.js";
+import { browserNavigate, type FetchRequest } from "../../../packages/player/dist/hosts.js";
 
 /** A window and document that record what the browser's default would open and submit. */
 function stubBrowser(t: { after: (fn: () => void) => void }) {

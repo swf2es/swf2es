@@ -79,7 +79,7 @@ export class Player {
       return;
     }
 
-    await s.loadSwf(this.swf, this.library);
+    await s.code.loadSwf(this.swf, this.library);
     s.stage = this.stage;
     s.root = this.root;
     s.stageWidth = this.width;
@@ -88,13 +88,13 @@ export class Player {
     s.frameRate = this.frameRate;
     s.constructAs(this.stage, s.rt.classNamed("flash.display::Stage"));
     // The first frame has its time too: the clock is a frame's duration on as it runs, as in Flash.
-    s.beginFrame(1000 / this.frameRate);
+    s.timers.beginFrame(1000 / this.frameRate);
     // The main SWF's LoaderInfo: on the root, which every display object under it reports.
-    const info = s.loaderInfo(null);
-    s.describe(info, this.bytes, this.swf);
+    const info = s.loads.loaderInfo(null);
+    s.loads.describe(info, this.bytes, this.swf);
     info.$loaded = this.bytes.length;
     info.$url = s.url;
-    info.$params = s.mainParameters();
+    info.$params = s.loads.mainParameters();
     this.root.loaderInfo = info;
     // The stage's too: what a script puts on the stage itself has the stage
     // for its root and this for its LoaderInfo, and takes hits, as in Flash.
@@ -116,7 +116,7 @@ export class Player {
     }
 
     info.$content = this.root.object ?? null;
-    s.mainLoaded(info);
+    s.loads.mainLoaded(info);
     this.root.enterFirstFrame();
     s.frame(this.stage, false);
     this.frameRate = s.frameRate;
@@ -184,7 +184,7 @@ export class Player {
    */
   tick(): void {
     this.played++;
-    this.scripting?.beginFrame(1000 / this.frameRate);
+    this.scripting?.timers.beginFrame(1000 / this.frameRate);
     const clips: MovieClip[] = [];
     const collect = (o: DisplayObject) => {
       if (o instanceof MovieClip) {
@@ -204,7 +204,7 @@ export class Player {
       }
     };
     collect(this.stage);
-    for (const orphan of this.scripting?.orphanRoots() ?? []) {
+    for (const orphan of this.scripting?.lifecycle.orphanRoots() ?? []) {
       collect(orphan);
     }
 

@@ -146,7 +146,7 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       }
 
       // The SWF whose code asks, which a loaded one's is, not the main SWF.
-      const url = new URL(s.codeUrl(), "file:///");
+      const url = new URL(s.code.codeUrl(), "file:///");
       // A secure one only for a SWF that came over HTTPS; adl, whose SWFs
       // never do, refuses it so.
       if (secure && url.protocol !== "https:") {

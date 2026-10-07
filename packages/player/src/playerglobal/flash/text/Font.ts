@@ -63,7 +63,7 @@ export function fontNatives(s: Scripting): avm2.Natives {
     static enumerateFonts(_enumerateDeviceFonts: boolean): AsObject {
       const cls = s.rt.classNamed("flash.text::Font");
       const fonts: AnyFontCharacter[] = [];
-      const library = s.codeLibrary();
+      const library = s.code.codeLibrary();
       if (library) {
         for (const character of library.characters.values()) {
           if (
@@ -74,7 +74,7 @@ export function fontNatives(s: Scripting): avm2.Natives {
           }
         }
       }
-      fonts.push(...s.registeredFonts.values());
+      fonts.push(...s.symbols.registeredFonts.values());
       fonts.sort((a, b) => {
         const first = a.name.toLowerCase();
         const second = b.name.toLowerCase();
@@ -91,12 +91,12 @@ export function fontNatives(s: Scripting): avm2.Natives {
     }
 
     static registerFont(cls: AsObject): void {
-      const font = cls?.$it && s.fontSymbol(cls.$it);
+      const font = cls?.$it && s.symbols.fontSymbol(cls.$it);
       if (!font) {
         throw s.rt.error("ArgumentError", 1508, "font");
       }
 
-      s.registerFont(cls, font);
+      s.symbols.registerFont(cls, font);
     }
   }
 
@@ -109,7 +109,7 @@ export function fontHooks(s: Scripting): Record<string, avm2.ClassHook> {
     "flash.text::Font": {
       create: (traits) => {
         const object = Object.create(traits.proto);
-        object.$font = s.fontSymbol(traits);
+        object.$font = s.symbols.fontSymbol(traits);
         return object;
       },
     },

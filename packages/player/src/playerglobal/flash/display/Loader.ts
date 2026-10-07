@@ -1,6 +1,6 @@
 // flash.display.Loader: a container whose one child is the root of the SWF
-// it loaded. Its loads complete in a later frame (Scripting.completeLoads),
-// but an AVM1 SWF's from bytes, at the end of the frame (Scripting.requestLoad).
+// it loaded. Its loads complete in a later frame (Loads.completeLoads),
+// but an AVM1 SWF's from bytes, at the end of the frame (Loads.requestLoad).
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 import { uncaughtErrorEvents } from "./LoaderInfo.js";
@@ -59,7 +59,7 @@ export function loaderNatives(s: Scripting): avm2.Natives {
 
     get contentLoaderInfo(): Value {
       if (!this.$loaderInfo) {
-        this.$loaderInfo = s.loaderInfo(this);
+        this.$loaderInfo = s.loads.loaderInfo(this);
       }
 
       return this.$loaderInfo;
@@ -80,7 +80,7 @@ export function loaderNatives(s: Scripting): avm2.Natives {
     ): void {
       const copy = copyOf(s, bytes);
       const given = contextParameters(s, parameters);
-      s.requestLoad(this, copy, s.loadDomain(applicationDomain), given);
+      s.loads.requestLoad(this, copy, s.loads.loadDomain(applicationDomain), given);
     }
 
     "flash.display:Loader::_load"(
@@ -92,11 +92,16 @@ export function loaderNatives(s: Scripting): avm2.Natives {
       parameters: Value,
     ): void {
       const given = contextParameters(s, parameters);
-      s.requestLoadUrl(this, request as AsObject, s.loadDomain(applicationDomain), given);
+      s.loads.requestLoadUrl(
+        this,
+        request as AsObject,
+        s.loads.loadDomain(applicationDomain),
+        given,
+      );
     }
 
     "flash.display:Loader::_unload"(stopAllMovieClips: Value, _gc: Value): void {
-      s.unload(this, !!stopAllMovieClips);
+      s.loads.unload(this, !!stopAllMovieClips);
     }
 
     "flash.display:Loader::_getJPEGLoaderContextdeblockingfilter"(_context: Value): number {
@@ -104,7 +109,7 @@ export function loaderNatives(s: Scripting): avm2.Natives {
     }
 
     "flash.display:Loader::_close"(): void {
-      s.closeLoad(this);
+      s.loads.closeLoad(this);
     }
 
     "flash.display:Loader::_getUncaughtErrorEvents"(): Value {

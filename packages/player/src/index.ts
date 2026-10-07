@@ -13,18 +13,20 @@ export {
 } from "./display/display.js";
 export { type Path, type ShapeLayer, shapeLayers } from "./display/shapes.js";
 export { type Character, type Library, readLibrary, type Timeline } from "./display/timeline.js";
-export type { Navigate, PlatformCapabilities, SharedObjectStorage } from "./hosts.js";
+export type {
+  Drawer,
+  FetchRequest,
+  FetchResult,
+  Navigate,
+  PlatformCapabilities,
+  ScreenCapabilities,
+  SharedObjectStorage,
+  SocketEvents,
+  SocketHost,
+  SocketTransport,
+} from "./hosts.js";
 export { bindKeyboard, type KeyState } from "./input/keyboard.js";
 export { Player } from "./player.js";
 export { setTransformTable } from "./render/table.js";
 export { PixiView } from "./render/view.js";
-export {
-  type Drawer,
-  type FetchRequest,
-  type FetchResult,
-  type ScreenCapabilities,
-  Scripting,
-  type SocketEvents,
-  type SocketHost,
-  type SocketTransport,
-} from "./scripting.js";
+export { Scripting } from "./scripting.js";

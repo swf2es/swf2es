@@ -116,7 +116,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
   };
   const startAudio = (state: ChannelState): void => {
     const sound = state.sound;
-    const task = sound.character ? s.soundClip(sound.character) : sound.clip;
+    const task = sound.character ? s.symbols.soundClip(sound.character) : sound.clip;
     void task
       ?.then(
         (clip) => {
@@ -155,7 +155,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
       const generation = ++sound.generation;
       const abort = new AbortController();
       sound.abort = abort;
-      s.requestBytes(request as AsObject, abort.signal, ({ bytes, local }, url) => {
+      s.loads.requestBytes(request as AsObject, abort.signal, ({ bytes, local }, url) => {
         if (sound.generation !== generation) {
           return;
         }
@@ -172,7 +172,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
               "ioError",
               false,
               false,
-              s.streamError(url, local),
+              s.loads.streamError(url, local),
             ) as AsObject,
           );
           return;
@@ -219,7 +219,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
         const completed = sound.clip.then(
           (clip) => {
             sound.length = clip.durationMs;
-            s.deferHostEvent(() => {
+            s.loads.deferHostEvent(() => {
               if (sound.generation === generation) {
                 dispatchEvent(s, this as AsObject, s.event("complete"));
               }
@@ -227,7 +227,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
           },
           () => {
             discardPending(sound);
-            s.deferHostEvent(() => {
+            s.loads.deferHostEvent(() => {
               if (sound.generation === generation) {
                 dispatchEvent(
                   s,
@@ -237,14 +237,14 @@ export function soundNatives(s: Scripting): avm2.Natives {
                     "ioError",
                     false,
                     false,
-                    s.streamError(url, local),
+                    s.loads.streamError(url, local),
                   ) as AsObject,
                 );
               }
             });
           },
         );
-        s.trackRequest(completed);
+        s.loads.trackRequest(completed);
       });
     }
 
@@ -303,7 +303,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
       const channel = s.rt.construct(s.rt.classNamed("flash.media::SoundChannel")) as AsObject;
       const state: ChannelState = {
         sound,
-        started: s.now,
+        started: s.timers.now,
         start,
         loops: Math.max(0, s.rt.toInt(loops)),
         mix: channelMix(mixOf(transform as AsObject | null)),
@@ -372,7 +372,7 @@ export function soundHooks(s: Scripting): Record<string, avm2.ClassHook> {
     "flash.media::Sound": {
       create: (traits) => {
         const o = Object.create(traits.proto);
-        const character = s.soundSymbol(traits);
+        const character = s.symbols.soundSymbol(traits);
         const data = character?.definition;
         o.$sound = {
           character,

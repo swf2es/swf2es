@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
-import { sha256, sha256Here } from "../../../packages/player/dist/sha256.js";
+import { sha256, sha256Here } from "../../../../packages/player/dist/scripting/sha256.js";
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
 const nodes = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");

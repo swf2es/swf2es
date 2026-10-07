@@ -24,10 +24,10 @@ export function navigateNatives(s: Scripting): avm2.Natives {
     "flash.net::navigateToURL": (rt) => (request: Value, window: Value) => {
       const page = checked(rt, request);
       const name = window === null || window === undefined ? null : rt.toString(window);
-      s.navigateTo(page, name === null ? null : target(name));
+      s.loads.navigateTo(page, name === null ? null : target(name));
     },
     "flash.net::sendToURL": (rt) => (request: Value) => {
-      s.sendTo(checked(rt, request));
+      s.loads.sendTo(checked(rt, request));
     },
   };
 }

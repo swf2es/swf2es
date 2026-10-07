@@ -13,7 +13,7 @@ export function stage3DNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
   const unavailable = (target: AsObject): void => {
-    s.deferHostEvent(() =>
+    s.loads.deferHostEvent(() =>
       dispatchEvent(
         s,
         target,

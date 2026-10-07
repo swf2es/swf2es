@@ -78,7 +78,7 @@ export const mixerMix = (s: Scripting): SoundMix => mixerMixes.get(s) ?? mixOf(n
 export const positionOf = (s: Scripting, state: ChannelState): number =>
   state.stopped
     ? state.stoppedAt
-    : Math.min(state.sound.length, state.start + Math.max(0, s.now - state.started));
+    : Math.min(state.sound.length, state.start + Math.max(0, s.timers.now - state.started));
 
 export function stopChannel(s: Scripting, state: ChannelState): void {
   state.stoppedAt = positionOf(s, state);
@@ -215,7 +215,7 @@ function playTimelineSound(
   shape: PlayShape,
   duration: number,
 ): TimelineSound | null {
-  const task = s.soundClip(character);
+  const task = s.symbols.soundClip(character);
   if (!task || liveSounds(s) >= MAX_SOUNDS) {
     return null;
   }
@@ -224,7 +224,7 @@ function playTimelineSound(
     owner,
     character,
     clip,
-    started: s.now,
+    started: s.timers.now,
     duration,
     playing: null,
     stopped: false,
@@ -243,7 +243,7 @@ function playTimelineSound(
       sound.decoding = false;
       // A stream whose decode took frames starts as far in as the clock has
       // run, to keep with its timeline; an event sound plays whole, late.
-      const late = Math.max(0, s.now - sound.started);
+      const late = Math.max(0, s.timers.now - sound.started);
       if (!sound.stopped && (!clip || late < sound.duration)) {
         sound.playing = decoded.play(
           start,
@@ -477,8 +477,8 @@ export function finishSounds(s: Scripting): void {
   // A timeline sound that has played its time is over: a NoMultiple may start
   // it again, and its clip's stream at the next block.
   for (const sound of [...(timelineSounds.get(s) ?? [])]) {
-    if (sound.endedAt === null && s.now - sound.started >= sound.duration) {
-      sound.endedAt = s.now;
+    if (sound.endedAt === null && s.timers.now - sound.started >= sound.duration) {
+      sound.endedAt = s.timers.now;
       if (sound.clip?.stream === sound) {
         sound.clip.stream = null;
       }
@@ -487,7 +487,7 @@ export function finishSounds(s: Scripting): void {
     } else if (
       sound.endedAt !== null &&
       sound.playing?.ended === undefined &&
-      s.now - sound.endedAt >= TAIL
+      s.timers.now - sound.endedAt >= TAIL
     ) {
       stopTimelineSound(s, sound);
     }
@@ -505,7 +505,7 @@ export function finishSounds(s: Scripting): void {
     }
 
     const duration = (state.sound.length - state.start) * Math.max(1, state.loops);
-    if (s.now - state.started < duration) {
+    if (s.timers.now - state.started < duration) {
       continue;
     }
 

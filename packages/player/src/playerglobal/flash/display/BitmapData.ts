@@ -902,7 +902,7 @@ export function bitmapDataHooks(s: Scripting): Record<string, avm2.ClassHook> {
       create: (traits) => {
         const o = Object.create(traits.proto);
         o.$store = null;
-        o.$symbol = s.bitmapSymbol(traits);
+        o.$symbol = s.symbols.bitmapSymbol(traits);
         return o;
       },
     },

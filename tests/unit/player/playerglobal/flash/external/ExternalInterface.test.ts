@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { ExternalInterfaceHost } from "../../../../../../packages/player/dist/hosts.js";
 import { externalInterfaceNatives } from "../../../../../../packages/player/dist/playerglobal/flash/external/ExternalInterface.js";
-import type {
-  ExternalInterfaceHost,
-  Scripting,
-} from "../../../../../../packages/player/dist/scripting.js";
+import type { Scripting } from "../../../../../../packages/player/dist/scripting.js";
 
 const CLASS = "flash.external::ExternalInterface";
 const PRIVATE = `${CLASS}.flash.external:ExternalInterface::`;

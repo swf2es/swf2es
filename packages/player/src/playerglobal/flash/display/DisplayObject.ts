@@ -112,7 +112,7 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
       create: (traits) => {
         const o = Object.create(traits.proto);
         const made = s.pending === null;
-        const display = s.pending ?? s.displayFor(traits);
+        const display = s.pending ?? s.symbols.displayFor(traits);
         s.pending = null;
         // Flash names each display object without a name of its own as it
         // is made, instance1, instance2, ..., the stage aside.
@@ -131,7 +131,7 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
         }
 
         if (made) {
-          s.made(display);
+          s.lifecycle.made(display);
         }
 
         return o;

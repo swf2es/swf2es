@@ -800,11 +800,20 @@ builds at that size.
 and the player's paths in this document are relative to it:
 
 - `index.ts` is the package's one entry point; `player.ts` runs a SWF,
-  `scripting.ts` connects it to the runtime and the compiler,
-  `scripting/events.ts` dispatches events to AS3 listeners, `hosts.ts`
+  `scripting.ts` connects it to the runtime and the compiler, with its
+  parts in `scripting/`: `code.ts` compiles and links the SWFs' code
+  into their application domains and tells whose code runs, `sha256.ts`
+  names the ABCs it compiles, `events.ts` dispatches events to AS3
+  listeners, `lifecycle.ts` tells display objects they were added or
+  removed and keeps the orphans, `loads.ts` takes what Loaders and
+  URLStreams ask for through the host and gives it to a frame,
+  `symbols.ts` keeps what SymbolClass
+  bound classes to, the fonts registered and the sounds' shared decodes,
+  `timers.ts` keeps the clock and the timers that fire by it. `hosts.ts`
   holds what a host may supply in place of the browser (navigation,
   shared objects' storage, the platform Capabilities reports) with the
-  browser's defaults, and `sha256.ts` names the ABCs it compiles.
+  browser's defaults, and the interfaces of what only a host supplies
+  (ExternalInterface's page, a renderer's draws, fetches, sockets).
 - `display/`: the display list and the timeline, and what they are made
   of: shapes, morphs, drawings, bounds and hit tests, 9-slice scaling,
   geometry, 3D matrices, colour transforms, gradients' ramps, and filters
@@ -834,6 +843,15 @@ player needs for itself, though a `flash.*` class shows it to scripts,
 lives outside it: event dispatch, the host interfaces, the timeline's
 sounds and the channels' state, a display object's root.
 `tests/unit/boundaries.test.ts` rejects any other import of it.
+
+`Scripting` (`scripting.ts`) is the runtime with playerglobal registered,
+the display object its `create` hook takes, and the frame: its events,
+frame scripts, gotos' cycles and the construction of what timelines
+placed. What else scripts need that keeps state of its own is a part it
+holds, a class in `scripting/` given the `Scripting` for what they
+share: `code`, `symbols`, `lifecycle`, `loads` and `timers`. The natives
+and the player reach a part through it, as `s.loads.requestLoad`; the
+host's own calls, `loadLibraries` and `settled`, stay on `Scripting`.
 
 The unit tests mirror this tree: `tests/unit/player/<path>.test.ts` tests
 `<path>.ts`, a playerglobal class's under
@@ -1162,7 +1180,8 @@ orphan, and so does one a script makes with `new` and never adds: its
 timeline advances and its frame scripts run each frame, with `parent`
 and `stage` null, until it is put back, where it carries on from the
 frame it reached, or until it is collected (the `orphans` case; Ruffle
-keeps them by weak reference, and so does the player, with `WeakRef`, so
+keeps them by weak reference, and so does the player
+(`scripting/lifecycle.ts`), with `WeakRef`, so
 an orphan nothing refers to stops as Flash's does, and a test that wants
 one to play on holds it). What refers to it includes the frame events it
 listens for: an `ENTER_FRAME` listener keeps a clip alive in Flash, the
@@ -1327,7 +1346,7 @@ with `/[[DYNAMIC]]/n` appended, and `ApplicationDomain.currentDomain` is
 a new object at each ask, as in Flash, so two are never `==`.
 
 The loaded SWF's code goes through `Codegen` and the runtime as the main
-SWF's does. Linking is asynchronous (the module is imported), so a load
+SWF's does (`scripting/loads.ts`). Linking is asynchronous (the module is imported), so a load
 asked for is compiled and linked between frames, in the order asked, and
 each takes its place in the first frame after its code is linked; a host
 that steps frames by hand awaits `Scripting.settled()` between them, as
@@ -1467,7 +1486,7 @@ and `LoaderInfo.applicationDomain.getDefinition` finds its own
 (`loader_duplicate_class`). The domain of the code that asks, for
 `ApplicationDomain.currentDomain`, `getDefinitionByName` and a load's
 default, is `Runtime.codeDomain`'s, so each module is imported under a
-`sourceURL` of its own, and the player's own modules load as builtin,
+`sourceURL` of its own (`scripting/code.ts`), and the player's own modules load as builtin,
 whose frames do not count, as avmplus skips builtin code. SymbolClass
 binds a character to the class its name finds in the SWF's domain, by
 the module that defines it, so the same name in another domain is
@@ -1699,7 +1718,7 @@ SymbolClass to a DefineSound tag find its encoded samples in the library.
 The player decodes MP3, uncompressed 8/16-bit or ADPCM sound on first play
 (ADPCM as Ruffle's decoder does, to 16-bit samples the browser host plays as
 uncompressed ones; `adpcmSound` in `media/audio.ts` does it for another host), sharing
-a decode when separate loads contain the same sound. The shared cache holds
+a decode when separate loads contain the same sound (`scripting/symbols.ts`). The shared cache holds
 decoded audio while a sound uses it; entries leave when no SWF holds their
 sound definition, so unused audio can be collected. The parser leaves the
 MP3 seek word out of the encoded bytes; the tag's sample count and rate,
@@ -1860,7 +1879,8 @@ and a timer's `getTimer() - start >= delay` still holds.
 
 `flash.utils.Timer` is playerglobal's own in all but three natives: the
 counting, `delay`'s range (RangeError #2066), `reset` and the events are
-AS3; the player keeps the timers started, each with its delay and the
+AS3; the player keeps the timers started (`scripting/timers.ts`, with
+the clock), each with its delay and the
 closure to call, fires the ones due as a frame begins, before its
 timeline advances, each firing the earliest due so that two timers
 interleave as their times do, two due at once in the order scheduled,
