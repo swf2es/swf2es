@@ -1241,7 +1241,11 @@ export class MovieClip extends Container {
   private running = true;
   /** Its timeline's stream as it plays, for what plays it (TimelineSounds); null while none does. */
   stream: object | null = null;
-  /** Made by a script with `new`: Flash has such a clip sit out the next frame's advance. */
+  /**
+   * Made by a script with `new`, or placed on the first frame of one that
+   * was as it was made: Flash has such a clip sit out the next frame's
+   * advance, wherever it is by then (`fresh-clips`).
+   */
   fresh = false;
   /** The scripts addFrameScript registered, by frame, 1 the first. */
   readonly frameScripts = new Map<number, avm2.Value>();
@@ -1597,6 +1601,14 @@ export class MovieClip extends Container {
 
     this.currentFrame = 1;
     this.runFrame(1, "held");
+    // What a goto places later, or a script adds, plays on at once: only these sit out with it.
+    if (this.fresh) {
+      for (const { display } of this.held) {
+        if (display instanceof MovieClip) {
+          display.fresh = true;
+        }
+      }
+    }
   }
 
   /**
