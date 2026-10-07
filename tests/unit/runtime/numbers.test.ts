@@ -47,7 +47,8 @@ const below = (n: number) => {
 };
 
 test("numberToString writes every number as avmplus' D2A does", () => {
-  const edges = [0, -0, 1e-6, 1e-7, below(1e-6), 1e21, below(1e21), 1e15, 1e16];
+  const edges = [0, -0, 1e-6, 1e-7, below(1e-6), 1e21, below(1e21), 1e15, below(1e15), 1e16];
+  edges.push(-2147483648, 2147483647, 2147483648, 4294967295);
   for (const n of [...edges, ...edges.map((e) => -e), Number.MIN_VALUE, Number.MAX_VALUE]) {
     assert.equal(numberToString(n), convertDoubleToString(n), String(n));
   }

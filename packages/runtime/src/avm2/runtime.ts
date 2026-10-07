@@ -2963,16 +2963,21 @@ function unreadNumber(s: string): number {
 
 /**
  * A number as AS3 writes it: avmplus' own formatting, not JavaScript's,
- * though the two agree, and JavaScript's is some ten times faster, where
- * JavaScript writes a number from 1e-6 up to 1e21 in plain decimals with 15
+ * though the two agree, and JavaScript's is some ten times faster, for an
+ * int, and for a number from 1e-6 up to 1e15 that JavaScript writes with 15
  * significant digits or fewer. Both write the shortest digits that read
- * back as the number; past 15 they can part on the last one, which avmplus
- * rounds up (209.14077758789063 where JavaScript has ...062), and outside
- * that range avmplus' exponent forms differ (tests/unit/runtime/numbers.test.ts).
+ * back as the number, and no two decimals of 15 digits read back as one
+ * double; past 15 they can part on the last digit, which avmplus rounds up
+ * (209.14077758789063 where JavaScript has ...062), and from 1e15 up every
+ * number takes 16 or more (tests/unit/runtime/numbers.test.ts).
  */
 export function numberToString(n: number): string {
+  if ((n | 0) === n) {
+    return String(n);
+  }
+
   const magnitude = n < 0 ? -n : n;
-  if (magnitude >= 1e-6 && magnitude < 1e21) {
+  if (magnitude >= 1e-6 && magnitude < 1e15) {
     const text = String(n);
     if (significantDigits(text) <= 15) {
       return text;
