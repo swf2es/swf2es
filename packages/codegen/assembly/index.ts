@@ -31,6 +31,7 @@ export {
   domainEmitEach,
   domainEvict,
   domainFound,
+  domainLinked,
   domainModule,
   domainModuleEntries,
   domainReset,

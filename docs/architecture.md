@@ -1268,7 +1268,9 @@ else a timer), not in a load's frame. The compiler's memory then holds
 the live domains' ABCs, not every ABC loaded since the last collection:
 over 2000 loads of a large application's small SWFs, it rebuilt four
 times, some 64 ms each in node, and its memory stayed where compiling
-the main SWF had grown it.
+the main SWF had grown it. Each module is given only the hashes of the
+ABCs it names as linked (`domainLinked`): joining every ABC's for each
+compile grew codegen's memory to 256 MB by 7500 loads on its own.
 That a module's code keeps its Abc has a limit: emitted code reaches `A`
 only for `newclass` and `newactivation`, so a module with neither keeps
 it only through its domain's globals, its scripts' entries, and not even

@@ -55,9 +55,11 @@ export class ModuleEmitter {
    * Write the whole module; the result is in `out`. `hashes` are the
    * hashes of the domain's ABCs, in load order, up to and including this
    * one, as the host computes them for the cache key; it is compiled after
-   * those its application domain sees.
+   * those its application domain sees. With `linkedOnly`, `hashes` are
+   * this one's and then only those of the ABCs it names as linked, in
+   * order (see domainLinked), so a host need not pass every ABC's.
    */
-  module(hashes: string[]): void {
+  module(hashes: string[], linkedOnly: bool = false): void {
     const out = this.out;
     out.reset();
     this.methods.map.reset();
@@ -65,22 +67,24 @@ export class ModuleEmitter {
     this.names();
     this.functions();
     out.text("  const A = rt.abc({\n    hash: ");
-    this.text(this.index < <u32>hashes.length ? hashes[this.index] : "");
+    const self: u32 = linkedOnly ? 0 : this.index;
+    this.text(self < <u32>hashes.length ? hashes[self] : "");
     out.text(",\n    linked: [");
     const domain = this.domain;
     const own = domain.abcDomain[this.index];
-    let first = true;
+    let linked: u32 = 0;
     for (let i: u32 = 0; i < this.index; i++) {
       if (!domain.sees(own, domain.abcDomain[i])) {
         continue;
       }
 
-      if (!first) {
+      if (linked > 0) {
         out.text(", ");
       }
 
-      first = false;
-      this.text(i < <u32>hashes.length ? hashes[i] : "");
+      linked++;
+      const at = linkedOnly ? linked : i;
+      this.text(at < <u32>hashes.length ? hashes[at] : "");
     }
 
     out.text("],\n    names: M,\n    classes: [");

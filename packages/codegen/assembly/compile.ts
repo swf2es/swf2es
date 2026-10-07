@@ -216,9 +216,15 @@ function abcIndex(index: i32): i32 {
  * every ABC the domain holds, those added after it included: a SWF's
  * DoABCs are all added before any compiles, as avmplus has every ABC of a
  * frame loaded before it verifies a method. `hashes` are the ABCs' hashes
- * in load order, one per line, as the cache key names them.
+ * in load order, one per line, as the cache key names them; with
+ * `linkedOnly`, its own and then those domainLinked names.
  */
-export function domainModule(hashes: string = "", index: i32 = -1, keep: bool = true): string {
+export function domainModule(
+  hashes: string = "",
+  index: i32 = -1,
+  keep: bool = true,
+  linkedOnly: bool = false,
+): string {
   written = null;
   // No ABC, no module: the caller asked before adding one.
   const at = abcIndex(index);
@@ -228,7 +234,7 @@ export function domainModule(hashes: string = "", index: i32 = -1, keep: bool = 
 
   const rows = domain.rows();
   const emitter = new ModuleEmitter(domain, <u32>at);
-  emitter.module(hashes.length ? hashes.split("\n") : []);
+  emitter.module(hashes.length ? hashes.split("\n") : [], linkedOnly);
   domain.weigh(<u32>at, rows);
   if (keep) {
     written = emitter;
@@ -236,6 +242,29 @@ export function domainModule(hashes: string = "", index: i32 = -1, keep: bool = 
 
   const out = emitter.out;
   return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
+}
+
+/**
+ * The indices of the ABCs that ABC `index` (the last added for -1) names as
+ * linked, comma-separated in load order: those before it its domain sees,
+ * whose hashes domainModule takes after its own with `linkedOnly`, so that
+ * a host need not join every ABC's hash for each module it compiles.
+ */
+export function domainLinked(index: i32 = -1): string {
+  const at = abcIndex(index);
+  if (at < 0) {
+    return "";
+  }
+
+  const own = domain.abcDomain[at];
+  const out: string[] = [];
+  for (let i = 0; i < at; i++) {
+    if (domain.sees(own, domain.abcDomain[i])) {
+      out.push(i.toString());
+    }
+  }
+
+  return out.join(",");
 }
 
 /** The source map of the module domainModule wrote last, as JSON: its code's AS3 lines, from debugline. */

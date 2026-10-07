@@ -191,7 +191,17 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // ABC `index`'s module, its source map and entries kept for `keep`. A
   // module is never empty: the ABC was of a dropped application domain.
   const moduleOf = (hashes: string[], index: number, keep: boolean) => {
-    const module = collected(wasm.domainModule(hashes.join("\n"), indexOf(index), keep));
+    // Only the hashes the module names: joining every ABC's for each
+    // compile took megabytes of codegen's memory a few thousand loads on.
+    const at = indexOf(index);
+    const own = at < 0 ? added - 1 : at;
+    const linked = collected(wasm.domainLinked(at));
+    const named = [hashes[own] ?? ""];
+    for (const i of linked ? linked.split(",") : []) {
+      named.push(hashes[Number(i)] ?? "");
+    }
+
+    const module = collected(wasm.domainModule(named.join("\n"), at, keep, true));
     if (module === "") {
       throw new Error(`ABC ${index}: its application domain was dropped`);
     }
