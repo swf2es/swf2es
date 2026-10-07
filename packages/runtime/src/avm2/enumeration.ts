@@ -3,8 +3,7 @@
 // and go during a for-in without moving the others.
 
 import type { AsObject, Value } from "./descriptors.js";
-import { Namespace } from "./names.js";
-import { arrayIndex } from "./runtime.js";
+import { arrayIndex, Namespace } from "./names.js";
 import { WeakKeys, WeakName } from "./weak-keys.js";
 
 /**

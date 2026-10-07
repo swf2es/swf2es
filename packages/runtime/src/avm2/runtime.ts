@@ -45,6 +45,7 @@ import {
 } from "./enumeration.js";
 import type { ClassHook, NativesProvider, PropertyHook } from "./hooks.js";
 import {
+  arrayIndex,
   CONSTANT_Multiname,
   CONSTANT_MultinameA,
   CONSTANT_MultinameL,
@@ -64,6 +65,7 @@ import {
   prefixOf,
   publicNs,
   qname,
+  qualifiedName,
   TypeName,
 } from "./names.js";
 import { convertDoubleToString } from "./numbers.js";
@@ -3165,23 +3167,6 @@ export function escapeAttributeValue(s: string): string {
 }
 
 const isXMLSpace = (c: number) => c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d;
-
-/** A name's index as an array element, or -1: a canonical uint below 2^32 - 1. */
-export function arrayIndex(name: string): number {
-  const c = name.charCodeAt(0);
-  if (!(c >= 0x30 && c <= 0x39)) {
-    return -1;
-  }
-
-  const i = Number(name);
-  return i >>> 0 === i && i !== 0xffffffff && String(i) === name ? i : -1;
-}
-
-/** The qualified name of a class's name, "uri::name", or the name in the unnamed package. */
-export function qualifiedName(mn: Multiname): string {
-  const ns = mn.namespaces[0];
-  return ns?.uri ? `${ns.uri}::${mn.name}` : (mn.name ?? "*");
-}
 
 /** As avmplus' String to Number: JavaScript's, without its binary and octal prefixes. */
 export function stringToNumber(s: string): number {
