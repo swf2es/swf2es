@@ -87,10 +87,18 @@ export interface Codegen {
    * Add an ABC, loaded into application domain `appDomain` (0, the root, by
    * default), linking it against what that domain sees of those before it;
    * 0, or the VerifyError it was rejected with (then it is not added).
+   * Throws for an application domain never made, or dropped.
    */
   add(abc: Uint8Array, builtin?: boolean, appDomain?: number): number;
-  /** A new application domain, a child of `parent`: its number. */
+  /** A new application domain, a child of `parent`: its number. Throws for a `parent` never made, or dropped. */
   childDomain(parent: number): number;
+  /**
+   * Drop application domain `appDomain` and its descendants once nothing
+   * can run their code: no other sees their ABCs, which compile no more,
+   * and the memory they took is reused. The indices of the ABCs added after
+   * them do not change, and neither does what those compile to.
+   */
+  dropDomain(appDomain: number): void;
   /** Record a definition an application domain has found; it holds for the ABCs added after. */
   found(definition: FoundDefinition): void;
   /**
@@ -147,6 +155,31 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
     return index < 0 ? -1 : index;
   };
+  // ABC `index`'s module, its source map and entries kept for `keep`. A
+  // module is never empty: the ABC was of a dropped application domain.
+  const moduleOf = (hashes: string[], index: number, keep: boolean) => {
+    const module = collected(wasm.domainModule(hashes.join("\n"), indexOf(index), keep));
+    if (module === "") {
+      throw new Error(`ABC ${index}: its application domain was dropped`);
+    }
+
+    return module;
+  };
+  // Drops wait for the next call that adds or compiles, so that the drops
+  // of one garbage collection's finalizers cost the compiler one rebuild,
+  // whose old tables are then collected at once, before that call's
+  // allocations would grow memory past them.
+  let compactDue = false;
+  const compact = () => {
+    if (compactDue) {
+      compactDue = false;
+      if (wasm.domainCompact()) {
+        wasm.__collect();
+        size = wasm.memory.buffer.byteLength;
+        calls = 0;
+      }
+    }
+  };
   const collected = <T>(result: T): T => {
     const grown = wasm.memory.buffer.byteLength;
     if (grown > size || ++calls >= COLLECT_EVERY) {
@@ -165,10 +198,16 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     },
     reset(apiVersion = 50) {
       added = 0;
+      compactDue = false;
       collected(wasm.domainReset(apiVersion));
     },
     add(abc, builtin = false, appDomain = 0) {
+      compact();
       const error = collected(wasm.domainAdd(abc, builtin, appDomain));
+      if (error < 0) {
+        throw new Error(`application domain ${appDomain}: never made, or dropped`);
+      }
+
       if (error === 0) {
         added++;
       }
@@ -176,26 +215,40 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       return error;
     },
     childDomain(parent) {
-      return collected(wasm.domainChild(parent));
+      compact();
+      const domain = collected(wasm.domainChild(parent));
+      if (domain < 0) {
+        throw new Error(`application domain ${parent}: never made, or dropped`);
+      }
+
+      return domain;
+    },
+    dropDomain(appDomain) {
+      collected(wasm.domainDrop(appDomain));
+      compactDue = true;
     },
     found(d) {
+      compact();
       collected(wasm.domainFound(d.domain, d.nsKind, d.uri, d.name, d.abc, d.asType));
     },
     compile(hashes = [], index = -1) {
       last("compile");
+      compact();
       // Each part a call of its own, collected after it: the module's garbage
       // is gone before its entries are written.
-      const module = collected(wasm.domainModule(hashes.join("\n"), indexOf(index)));
+      const module = moduleOf(hashes, index, true);
       const sourceMap = collected(wasm.domainSourceMap());
       const entries = parseEntries(collected(wasm.domainModuleEntries()));
       return { module, sourceMap, entries };
     },
     compileModule(hashes = [], index = -1) {
       last("compileModule");
-      return collected(wasm.domainModule(hashes.join("\n"), indexOf(index), false));
+      compact();
+      return moduleOf(hashes, index, false);
     },
     compileMethods(bodies, index = -1) {
       last("compileMethods");
+      compact();
       const indices = bodies.filter((b) => Number.isInteger(b) && b >= 0);
       if (indices.length === 0) {
         return new Map();

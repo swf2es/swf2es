@@ -18,7 +18,8 @@ calls (see [benchmarks.md](benchmarks.md#the-assemblyscript-runtime)).
 The wrapper's `Codegen` (`createCodegen` in `packages/codegen/src`) is the
 compiler's whole API: `reset` starts a domain, `add` links an ABC into it
 after those before, into one of its application domains (`childDomain`
-makes one, `found` records what one has found, see Linking), and the last
+makes one, `found` records what one has found, `dropDomain` lets one go,
+see Linking), and the last
 one added compiles with `compile`, whole,
 to its module, source map and the entry of each method, with
 `compileModule` to its module alone, or with `compileMethods`, a method at
@@ -120,6 +121,16 @@ three, with the same VerifyError numbers:
    root down, unless the runtime has reported that the domain finds
    another (`found`: what its caches hold, by name or as a type), and its
    module names as `linked` the ABCs it sees, in load order.
+   An application domain the runtime has let go of is dropped with its
+   descendants (`dropDomain`): no other sees its ABCs, which compile no
+   more and keep their indices. Once the dropped ABCs are many enough, 64
+   or half the live ABCs' bytes, the next call that adds or compiles
+   rebuilds the domain: the live ABCs link again, in their places, and
+   their findings are recorded again where they were, so the collector
+   frees all the dropped took, the names only they spelled included.
+   wasm memory never shrinks, but what was freed is used again. A live
+   ABC links as it did, since no dropped one was ever seen by it, and
+   compiles alike.
    Each class's, script's and activation's traits then lay out their
    members, binding names to slot and dispatch ids after their base's
    (`link/traits.ts`). Types resolve later, when a class is first used:

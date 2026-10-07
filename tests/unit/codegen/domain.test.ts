@@ -98,6 +98,92 @@ test("application domains see their chain's names, from the root down, and what 
   );
 });
 
+test("a dropped application domain is seen no more, and later ABCs keep their indices", () => {
+  testing.domainReset(SWF_31);
+  const at = (d: number, uri: string, name: string) =>
+    testing.domainFind(NS_PUBLIC, uri, name, SWF_31, d) as string;
+  assert.equal(testing.domainAdd(definitions([["p", "a"]]), false), 0);
+  const child = testing.domainChild(0) as number;
+  const grandchild = testing.domainChild(child) as number;
+  const sibling = testing.domainChild(0) as number;
+  assert.equal(
+    testing.domainAdd(
+      definitions([
+        ["p", "b"],
+        ["p", "c"],
+      ]),
+      false,
+      child,
+    ),
+    0,
+  );
+  assert.equal(testing.domainAdd(definitions([["p", "d"]]), false, grandchild), 0);
+  assert.equal(testing.domainAdd(definitions([["p", "b"]]), false, sibling), 0);
+  const hashes = "h0\nh1\nh2\nh3";
+  const module = testing.domainModule(hashes, 3) as string;
+  assert.match(module, /linked: \["h0"\]/);
+  assert.match(testing.domainSummary() as string, /^strings 5 namespaces 1 bindings 5 /);
+
+  // The child and its descendants: they take no more ABCs or children,
+  // and their ABCs compile no more.
+  testing.domainDrop(child);
+  assert.equal(testing.domainChild(child), -1);
+  assert.equal(testing.domainChild(grandchild), -1);
+  assert.equal(testing.domainAdd(definitions([["p", "e"]]), false, grandchild), -1);
+  assert.equal(testing.domainModule(hashes, 1), "");
+  assert.equal(testing.domainModule(hashes, 2), "");
+  assert.equal(at(sibling, "p", "b"), "abc 3 script 0 trait 0");
+
+  // Rebuilt without them: a name only they spelled is gone, one the
+  // sibling spells too stays, and the sibling's ABC compiles as it did.
+  assert.equal(testing.domainCompact(), true);
+  assert.match(testing.domainSummary() as string, /^strings 3 namespaces 1 bindings 2 /);
+  assert.equal(at(sibling, "p", "b"), "abc 3 script 0 trait 0");
+  assert.equal(at(sibling, "p", "a"), "abc 0 script 0 trait 0");
+  assert.equal(testing.domainModule(hashes, 3), module);
+  assert.equal(testing.domainModule(hashes, 1), "");
+
+  // The next ABC is the fifth, in a domain numbered after the dropped.
+  const next = testing.domainChild(0) as number;
+  assert.equal(next, 4);
+  assert.equal(testing.domainAdd(definitions([["p", "c"]]), false, next), 0);
+  assert.equal(at(next, "p", "c"), "abc 4 script 0 trait 0");
+  assert.equal(testing.domainCompact(), false);
+
+  // The root is never dropped, nor a domain never made.
+  testing.domainDrop(0);
+  testing.domainDrop(99);
+  testing.domainDrop(-1);
+  assert.equal(at(0, "p", "a"), "abc 0 script 0 trait 0");
+});
+
+test("what a live domain found holds after a rebuild, and a dropped one's is gone", () => {
+  testing.domainReset(SWF_31);
+  const at = (d: number, uri: string, name: string) =>
+    testing.domainFind(NS_PUBLIC, uri, name, SWF_31, d) as string;
+  assert.equal(testing.domainAdd(definitions([["p", "a"]]), false), 0);
+  const child = testing.domainChild(0) as number;
+  const other = testing.domainChild(0) as number;
+  assert.equal(testing.domainAdd(definitions([["p", "b"]]), false, child), 0);
+  // Large enough, against the live ABCs, for a rebuild to be worth it.
+  const many = ["x", "y", "z", "w", "v"].map((name): [string, string] => ["p", name]);
+  assert.equal(testing.domainAdd(definitions(many), false, other), 0);
+  assert.equal(testing.domainAdd(definitions([["p", "b"]]), false), 0);
+  testing.domainFound(child, NS_PUBLIC, "p", "b", 1, false);
+  testing.domainFound(other, NS_PUBLIC, "p", "x", 2, false);
+  assert.equal(at(child, "p", "b"), "abc 1 script 0 trait 0");
+  assert.match(testing.domainSummary() as string, / found 2 /);
+
+  testing.domainDrop(other);
+  // Found in a dropped domain, or of a dropped domain's ABC: not recorded.
+  testing.domainFound(other, NS_PUBLIC, "p", "x", 2, false);
+  testing.domainFound(child, NS_PUBLIC, "p", "x", 2, false);
+  assert.equal(testing.domainCompact(), true);
+  assert.match(testing.domainSummary() as string, / found 1 /);
+  assert.equal(at(child, "p", "b"), "abc 1 script 0 trait 0");
+  assert.equal(at(0, "p", "b"), "abc 3 script 0 trait 0");
+});
+
 test("an ABC that does not parse is not added", () => {
   testing.domainReset(SWF_31);
   assert.equal(testing.domainAdd(abc({}, tables({ methods: [{ flags: 0x20 }] })), false), 1079);
@@ -282,4 +368,62 @@ test("collecting garbage between calls keeps the domain and frees what was dropp
   }
 
   assert.equal(testing.memory.buffer.byteLength, size);
+});
+
+test("dropping other domains changes no module, and memory stops growing", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  const layered = (n: number) =>
+    classes(
+      [
+        {
+          name: mn("A"),
+          base: mn("Object"),
+          traits: [
+            { name: mn("m"), kind: METHOD },
+            { name: mn("x"), kind: GETTER },
+          ],
+        },
+        {
+          name: mn("B"),
+          base: mn("A"),
+          traits: [
+            { name: mn("m"), kind: METHOD, attr: OVERRIDE },
+            ...(n % 2 ? [{ name: mn("F"), kind: METHOD }] : []),
+          ],
+        },
+      ],
+      true,
+    );
+  testing.domainReset(SWF_31);
+  testing.domainAdd(builtin, true);
+  const domain = testing.domainChild(0) as number;
+  assert.equal(testing.domainAdd(layered(0), false, domain), 0);
+  const module = testing.domainModule("b\nx", 1) as string;
+
+  // Each other domain loads the same names, compiles and is dropped.
+  let size = 0;
+  for (let n = 1; n <= 1000; n++) {
+    const other = testing.domainChild(0) as number;
+    assert.equal(testing.domainAdd(layered(n), false, other), 0);
+    assert.notEqual(testing.domainModule("", -1, false), "");
+    testing.domainDrop(other);
+    if (testing.domainCompact()) {
+      testing.__collect();
+    }
+
+    if (n === 250) {
+      size = testing.memory.buffer.byteLength;
+    }
+  }
+
+  assert.equal(testing.memory.buffer.byteLength, size);
+  assert.equal(testing.domainModule("b\nx", 1), module);
+
+  // As compiled in a domain that never had the others.
+  testing.domainReset(SWF_31);
+  testing.domainAdd(builtin, true);
+  testing.domainAdd(layered(0), false, testing.domainChild(0));
+  assert.equal(testing.domainModule("b\nx", 1), module);
 });

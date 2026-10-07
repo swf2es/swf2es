@@ -12,6 +12,10 @@
 // tree whose root is domain 0. An ABC sees what its own domain and its
 // ancestors define: what one of them has found before, as the runtime
 // reports it (see addFound), else the first definition from the root down.
+// A domain the runtime let go of is dropped with its descendants: nothing
+// sees what its ABCs define, and once enough of them are dropped, the live
+// ABCs are linked again into a new Domain, which leaves the dropped ones'
+// tables, names included, to the collector (see rebuilt).
 //
 // Namespaces follow avmplus' AbcParser: two are the same if their kind and
 // URI are; a private namespace is only ever equal to itself. A URI may end
@@ -81,6 +85,13 @@ const API_MinMark: u32 = 0xe294;
 /** The URI of a namespace written with string index 0. */
 export const URI_None: u32 = 0xffffffff;
 
+/** What takes the place of a dropped domain's ABC in a rebuilt Domain (see vacate). */
+const NO_ABC = new Abc();
+const NO_BYTES = new StaticArray<u8>(0);
+const NO_IDS = new StaticArray<u32>(0);
+const NO_VERSIONS = new StaticArray<u8>(0);
+const NO_TRAITS = new StaticArray<i32>(0);
+
 @final
 export class Domain {
   /** The version of user ABCs' public namespaces. */
@@ -96,6 +107,8 @@ export class Domain {
    * rejected while linking: interned strings may point into any of them.
    */
   buffers: StaticArray<u8>[] = [];
+  /** Each ABC's bytes, by index, to link it again (see rebuilt). */
+  abcBuffer: StaticArray<u8>[] = [];
   /** Per ABC, the interned id of each pool string, and of each namespace and its version. */
   abcString: StaticArray<u32>[] = [];
   abcNs: StaticArray<u32>[] = [];
@@ -178,6 +191,8 @@ export class Domain {
   /** Each domain's parent, -1 for the root, and its depth. */
   domainParent: i32[] = [-1];
   domainDepth: u32[] = [0];
+  /** Whether each domain was dropped: nothing sees what its ABCs define. */
+  domainDropped: u8[] = [0];
   /** The domain of each ABC, and of each class name. */
   abcDomain: u32[] = [];
   typeDomain: u32[] = [];
@@ -193,6 +208,17 @@ export class Domain {
   cachedBinding: i32[] = [];
   cachedClass: i32[] = [];
   cached: IdTable = new IdTable();
+  /**
+   * Each finding addFound recorded, as the runtime reported it, and how
+   * many ABCs there were then: a rebuild records it again at that point.
+   */
+  foundAt: u32[] = [];
+  foundDomain: u32[] = [];
+  foundKind: u8[] = [];
+  foundUri: string[] = [];
+  foundName: string[] = [];
+  foundAbc: u32[] = [];
+  foundAsType: u8[] = [];
   /** Strings interned from text rather than an ABC, kept for their bytes. */
   texts: ArrayBuffer[] = [];
 
@@ -245,17 +271,27 @@ export class Domain {
    * and the rest PADDING. Returns the ABC; check its `error`.
    */
   add(buffer: StaticArray<u8>, length: u32, builtin: bool, domain: u32 = 0): Abc {
-    const base = changetype<usize>(buffer);
-    const abc = readAbc(base, length, builtin);
+    const abc = readAbc(changetype<usize>(buffer), length, builtin);
     if (abc.error) {
       return abc;
     }
 
+    this.buffers.push(buffer);
+    this.attach(abc, buffer, domain);
+    return abc;
+  }
+
+  /**
+   * Link `abc`, parsed from `buffer`, into application domain `domain`, as
+   * the next ABC; false after recording the error, and then it is not added.
+   */
+  attach(abc: Abc, buffer: StaticArray<u8>, domain: u32): bool {
+    const base = changetype<usize>(buffer);
     const index = <u32>this.abcs.length;
     this.abcs.push(abc);
     this.abcDomain.push(domain);
     this.abcBase.push(base);
-    this.buffers.push(buffer);
+    this.abcBuffer.push(buffer);
     this.loads++;
     this.abcOwner.push(this.loads);
     const methodCount = <u32>this.traits.methodTraits.length;
@@ -278,6 +314,7 @@ export class Domain {
     if (!this.link(index)) {
       this.abcs.pop();
       this.abcBase.pop();
+      this.abcBuffer.pop();
       this.abcString.pop();
       this.abcNs.pop();
       this.abcNsVersion.pop();
@@ -291,12 +328,138 @@ export class Domain {
       this.traits.truncate(traitsCount);
       this.traits.truncateMethods(methodCount);
       this.clearBindingMemo();
-      return abc;
+      return false;
     }
 
     this.addClassNames(index);
     this.addBindings(index);
-    return abc;
+    return true;
+  }
+
+  /**
+   * Take the place of an ABC of dropped application domain `domain`, with
+   * nothing in it, so that the ABCs after it keep their indices.
+   */
+  vacate(domain: u32): void {
+    this.abcs.push(NO_ABC);
+    this.abcDomain.push(domain);
+    this.abcBase.push(0);
+    this.abcBuffer.push(NO_BYTES);
+    this.loads++;
+    this.abcOwner.push(this.loads);
+    this.methodStart.push(<u32>this.traits.methodTraits.length);
+    this.abcString.push(NO_IDS);
+    this.abcNs.push(NO_IDS);
+    this.abcNsVersion.push(NO_VERSIONS);
+    this.classStart.push(<u32>this.classAbc.length);
+    this.scriptTraits.push(NO_IDS);
+    this.bodyTraits.push(NO_TRAITS);
+  }
+
+  /** Whether ABC `index` is of a dropped application domain. */
+  isDropped(index: u32): bool {
+    return this.domainDropped[this.abcDomain[index]] !== 0;
+  }
+
+  /**
+   * Drop application domain `domain` and its descendants, as the runtime
+   * lets go of them: what their ABCs define is seen by no domain from now
+   * on, and they take no more ABCs. The root is never dropped.
+   */
+  drop(domain: u32): void {
+    const count = <u32>this.domainParent.length;
+    if (domain === 0 || domain >= count || this.domainDropped[domain]) {
+      return;
+    }
+
+    // A child is made after its parent, so its number is higher.
+    this.domainDropped[domain] = 1;
+    for (let d = domain + 1; d < count; d++) {
+      if (this.domainDropped[<u32>this.domainParent[d]]) {
+        this.domainDropped[d] = 1;
+      }
+    }
+  }
+
+  /**
+   * Whether the dropped domains' ABCs still linked are worth a rebuild:
+   * 64 of them, or half the bytes of the live ones, so that a rebuild,
+   * which links every live ABC again, costs little for each dropped.
+   */
+  wantsRebuild(): bool {
+    let dropped: u32 = 0;
+    let droppedBytes: u64 = 0;
+    let liveBytes: u64 = 0;
+    for (let i = 0; i < this.abcs.length; i++) {
+      const abc = this.abcs[i];
+      if (abc === NO_ABC) {
+        continue;
+      }
+
+      if (this.isDropped(<u32>i)) {
+        dropped++;
+        droppedBytes += abc.length;
+      } else {
+        liveBytes += abc.length;
+      }
+    }
+
+    return dropped >= 64 || (dropped > 0 && droppedBytes * 2 >= liveBytes);
+  }
+
+  /**
+   * A new Domain with the live ABCs linked again, in the same order and
+   * at the same indices, and the findings of live domains recorded again
+   * where they were: nothing of the dropped domains' ABCs is left in it,
+   * not even a name only they spelled. Each live ABC links as it did,
+   * since a dropped domain's ABCs were never seen by a live one, and what
+   * a method compiles to depends only on the ABCs its domain sees, so it
+   * compiles alike. Null, leaving this one as it was, if an ABC does not
+   * link again, which would be a bug.
+   */
+  rebuilt(): Domain | null {
+    const fresh = new Domain();
+    fresh.apiVersion = this.apiVersion;
+    fresh.air = this.air;
+    fresh.domainParent = this.domainParent;
+    fresh.domainDepth = this.domainDepth;
+    fresh.domainDropped = this.domainDropped;
+    let found = 0;
+    const count = <u32>this.abcs.length;
+    for (let i: u32 = 0; i <= count; i++) {
+      for (; found < this.foundAt.length && this.foundAt[found] <= i; found++) {
+        const abc = this.foundAbc[found];
+        if (!this.domainDropped[this.foundDomain[found]] && !this.isDropped(abc)) {
+          fresh.addFound(
+            this.foundDomain[found],
+            this.foundKind[found],
+            this.foundUri[found],
+            this.foundName[found],
+            abc,
+            this.foundAsType[found] !== 0,
+          );
+        }
+      }
+
+      if (i === count) {
+        break;
+      }
+
+      const abc = this.abcs[i];
+      if (abc === NO_ABC || this.isDropped(i)) {
+        fresh.vacate(this.abcDomain[i]);
+        continue;
+      }
+
+      const buffer = this.abcBuffer[i];
+      fresh.buffers.push(buffer);
+      if (!fresh.attach(abc, buffer, this.abcDomain[i])) {
+        abc.error = 0;
+        return null;
+      }
+    }
+
+    return fresh;
   }
 
   /** Link ABC `index`'s classes to their bases and interfaces; false after recording the error. */
@@ -1560,11 +1723,16 @@ export class Domain {
     const id = <u32>this.domainParent.length;
     this.domainParent.push(<i32>parent);
     this.domainDepth.push(this.domainDepth[parent] + 1);
+    this.domainDropped.push(0);
     return id;
   }
 
-  /** Whether `domain` sees what `other` defines: `other` is it or an ancestor. */
+  /** Whether `domain` sees what `other` defines: `other` is it or an ancestor, and not dropped. */
   sees(domain: u32, other: u32): bool {
+    if (this.domainDropped[other]) {
+      return false;
+    }
+
     let d = <i32>domain;
     while (d >= 0) {
       if (<u32>d === other) {
@@ -1677,6 +1845,15 @@ export class Domain {
    * binding, or as a type, its class. A name no ABC spells is not recorded.
    */
   addFound(domain: u32, type: u8, uri: string, name: string, abc: u32, asType: bool): void {
+    if (
+      domain >= <u32>this.domainParent.length ||
+      this.domainDropped[domain] ||
+      abc >= <u32>this.abcs.length ||
+      this.isDropped(abc)
+    ) {
+      return;
+    }
+
     const uriId = this.findText(uri);
     const nameId = this.findText(name);
     const ns = uriId < 0 ? -1 : this.findNamespace(type, <u32>uriId);
@@ -1747,6 +1924,13 @@ export class Domain {
     this.cachedClass.push(cls);
     this.cached.insert(hashPair(<u32>ns, <u32>nameId), id);
     this.clearBindingMemo();
+    this.foundAt.push(<u32>this.abcs.length);
+    this.foundDomain.push(domain);
+    this.foundKind.push(type);
+    this.foundUri.push(uri);
+    this.foundName.push(name);
+    this.foundAbc.push(abc);
+    this.foundAsType.push(asType ? 1 : 0);
   }
 
   bind(ns: u32, name: u32, version: u8, abc: u32, script: u32, trait: u32): void {

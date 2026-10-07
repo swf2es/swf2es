@@ -26,6 +26,8 @@ export function abcVersion(abc: Uint8Array): i32 {
 export {
   domainAdd,
   domainChild,
+  domainCompact,
+  domainDrop,
   domainEmitEach,
   domainFound,
   domainModule,

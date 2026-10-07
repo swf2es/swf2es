@@ -825,6 +825,8 @@ function hex(kind: u8): string {
 export {
   domainAdd,
   domainChild,
+  domainCompact,
+  domainDrop,
   domainEmitEach,
   domainFound,
   domainModule,

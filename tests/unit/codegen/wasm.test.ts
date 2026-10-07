@@ -72,6 +72,26 @@ test("the wrapper makes application domains, numbered from the root's 0", async 
   codegen.found({ domain: child, nsKind: 0, uri: "p", name: "a", abc: 0, asType: true });
 });
 
+test("the wrapper drops an application domain, whose ABCs then compile no more", async () => {
+  const codegen = await createCodegen(module);
+  codegen.reset();
+  assert.equal(codegen.add(script([0x47])), 0);
+  const child = codegen.childDomain(0);
+  assert.equal(codegen.add(script([0x24, 1, 0x48]), false, child), 0);
+  const sibling = codegen.childDomain(0);
+  assert.equal(codegen.add(script([0x24, 2, 0x48]), false, sibling), 0);
+  const compiled = codegen.compileModule(["a", "b", "c"], 2);
+
+  codegen.dropDomain(child);
+  assert.throws(() => codegen.childDomain(child), /dropped/);
+  assert.throws(() => codegen.add(script([0x47]), false, child), /dropped/);
+  assert.throws(() => codegen.compileModule(["a", "", "c"], 1), /dropped/);
+  // The others keep their indices and compile as they did; the next is the fourth.
+  assert.equal(codegen.compileModule(["a", "", "c"], 2), compiled);
+  assert.equal(codegen.add(script([0x24, 3, 0x48]), false, codegen.childDomain(0)), 0);
+  assert.match(codegen.compileModule(["a", "", "c", "d"]), /hash: "d",\s+linked: \["a"\]/);
+});
+
 const generated = new URL("../../../oracle/avmplus/generated/", import.meta.url);
 const skip = !existsSync(generated) && "oracle/avmplus missing";
 

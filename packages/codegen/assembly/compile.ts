@@ -35,18 +35,67 @@ export function domainReset(apiVersion: i32): void {
 /**
  * Add an ABC to the domain, loaded into application domain `appDomain`
  * (0, the root, or one domainChild made); 0, or the VerifyError it was
- * rejected with.
+ * rejected with; -1 for an application domain never made or dropped.
  */
 export function domainAdd(bytes: Uint8Array, builtin: bool, appDomain: i32 = 0): i32 {
+  if (!isLive(appDomain)) {
+    return -1;
+  }
+
   const buffer = new StaticArray<u8>(bytes.length + PADDING);
   memory.copy(changetype<usize>(buffer), bytes.dataStart, bytes.length);
   verified = null;
   return domain.add(buffer, bytes.length, builtin, <u32>appDomain).error;
 }
 
-/** A new application domain, a child of `parent`'s: its number. */
+/** A new application domain, a child of `parent`'s: its number, or -1 if `parent` was never made or was dropped. */
 export function domainChild(parent: i32): i32 {
-  return <i32>domain.childDomain(<u32>parent);
+  return isLive(parent) ? <i32>domain.childDomain(<u32>parent) : -1;
+}
+
+function isLive(appDomain: i32): bool {
+  return (
+    appDomain >= 0 &&
+    appDomain < domain.domainParent.length &&
+    !domain.domainDropped[<u32>appDomain]
+  );
+}
+
+/**
+ * Drop application domain `appDomain` and its descendants, as the runtime
+ * has let go of them: their ABCs are seen by no other and compile no more,
+ * and their indices are not given to others. What they took is let go of
+ * by domainCompact.
+ */
+export function domainDrop(appDomain: i32): void {
+  if (appDomain >= 0) {
+    domain.drop(<u32>appDomain);
+  }
+}
+
+/**
+ * Rebuild the domain without the dropped domains' ABCs, once enough are
+ * dropped for that to be worth it: whether it was, and a collection would
+ * free them now. A host calls it before it next adds or compiles, so that a
+ * batch of drops costs one rebuild. Later modules come out the same either
+ * way.
+ */
+export function domainCompact(): bool {
+  if (!domain.wantsRebuild()) {
+    return false;
+  }
+
+  const fresh = domain.rebuilt();
+  if (fresh === null) {
+    return false;
+  }
+
+  // A closure's scope is found by verifying its ABC, which the JIT does
+  // once for its first method: the new domain has none found yet.
+  domain = fresh;
+  verified = null;
+  written = null;
+  return true;
 }
 
 /**
@@ -82,13 +131,17 @@ function verifiedBodies(index: u32): StaticArray<i32> {
 
 let verifiedIndex: u32 = 0;
 
-/** ABC `index` of the domain, or the last added for -1; -1 again where there is none. */
+/**
+ * ABC `index` of the domain, or the last added for -1; -1 again where
+ * there is none, or it is of a dropped application domain.
+ */
 function abcIndex(index: i32): i32 {
   if (domain.abcs.length === 0 || index >= domain.abcs.length) {
     return -1;
   }
 
-  return index < 0 ? domain.abcs.length - 1 : index;
+  const at = index < 0 ? domain.abcs.length - 1 : index;
+  return domain.isDropped(<u32>at) ? -1 : at;
 }
 
 /**
