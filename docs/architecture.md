@@ -947,7 +947,9 @@ and the player's paths in this document are relative to it:
   (`bitmaps.ts`), batchers kept for new groups (`batchers.ts`), the
   transform table, colour transforms, blend modes, filters and resolves
   on the GPU.
-- `playerglobal/`: the `flash.*` classes, a path per package and class.
+- `playerglobal/`: the `flash.*` classes, a path per package and class,
+  and the AIR classes the player declares itself (`air/`, see
+  [AIR's WebSocket](#airs-websocket)).
 
 `playerglobal/` holds AS3's bindings only, and depends one way: its
 natives and hooks import the rest of the player, and the rest imports
@@ -1432,6 +1434,75 @@ XML invocation and decides what to execute; the player does not evaluate
 script text. Without a host, `available` is false, `objectID` is null,
 and calls and callback registration throw Error #2067 as Flash does in a
 container without a bridge.
+
+### AIR's WebSocket
+
+AIR 51's `air.net.WebSocket` and `flash.events.WebSocketEvent` are
+newer than the oracle's playerglobal, and Adobe's airglobal that has
+them may not be committed. The player declares them itself, in AS3 of its
+own beside their natives (`playerglobal/air/net/WebSocket.as`,
+`playerglobal/flash/events/WebSocketEvent.as`), with AIR's API as adl
+shows it. `tests/player/air-library.ts` compiles them with ASC in the
+oracle's container against builtin and playerglobal into one ABC,
+committed as `playerglobal/air-library.ts`, and a unit test compiles them
+again and compares. ASC keeps no default values for a native method's
+parameters, so `connect` and `close` are AS3 calling private natives.
+Loaded as a builtin, which native methods need, an unmarked URI that
+playerglobal marks, the empty one or `flash.events`, would be VM-internal
+and hidden from the SWF's code (see
+[Parsing, linking and verifying](#parsing-linking-and-verifying)), so the script marks each
+package namespace's URI with API version 0, every version's, through a
+marked copy of its string. A host that plays AIR content passes
+`airLibrary` to `loadLibraries` after playerglobal; Flash Player has no
+such classes, so it is not loaded by default.
+
+The natives (`playerglobal/air/net/WebSocket.ts`) run over a
+`WebSocketHost` (`hosts.ts`), by default the global WebSocket, a
+browser's or node's; `webSocket: null` has every connect fail. What they
+throw and dispatch is what adl does: TypeError 2007 for a null URL, then
+IllegalOperationError 2082 for a second connect, a WebSocket connecting
+only once, then ArgumentError 2147 for a scheme other than `ws://` or
+`wss://`; ArgumentError 1508 for data that is not a String or a
+ByteArray, whose bytes go from the start whatever the opcode; Event.CONNECT,
+WebSocketEvent.DATA with a ByteArray each read of `data` rewinds, and
+Event.CLOSE when the server closes, with `closeReason` its code, none
+after `close()`; IOError 2002 for a send or close once closed;
+ArgumentError 2014 for setting `protocol` once open, which becomes the
+subprotocol the server chose, `connect`'s vector offered, not
+`protocol`. A send or close while connecting ends the connection, an
+IOErrorEvent with the URL and a close, as adl's handshake breaks on the
+frame. A failed connection is an IOErrorEvent with its host, as adl's
+refused one; a browser does not tell a refused connection from a
+refused handshake, which adl reports with the URL and a close. A host
+that throws a `SecurityError`, as a browser does for a blocked port,
+gives a SecurityErrorEvent. Before connect, where adl crashes, a send or
+close throws IOError 2002. `startServer` throws AIR's IllegalOperationError
+for a method its profile lacks, as `Updater.update` in adl.
+
+A browser sends no frame but text, binary and close, and close codes
+1000 and 3000 to 4999 alone. AIR sends any opcode's low four bits as
+they are: text and binary go, `fmtCLOSE` closes with the payload's
+first two bytes as the code (AIR sends no reason either, and then
+dispatches the close), and pings, pongs and reserved opcodes are
+dropped, since the browser answers the server's pings itself and AIR
+dispatches nothing for a pong. `close` with a code a browser refuses
+closes without one. There is no `certificateError`: a browser rejects a
+bad certificate as any failed connection. A text message's leading BOM
+is sent, as AIR sends the bytes, but one received is gone, as a browser
+decodes it away, where adl's `data` keeps its three bytes. Two of adl's
+races the player does not run: a send in the close listener of a
+connection a send or close ended while connecting goes in adl, where it
+throws #2002 here, and adl at times dispatches a close after `close()`
+when a send goes out while it closes, where the player never does.
+WebSocketEvent has no `clone` of its own, in AIR as here, so a
+redispatched one is a plain Event.
+
+Not done yet: an open WebSocket, like a flash.net.Socket, is not closed
+when its SWF is unloaded, and the player has no shutdown hook to close
+it. With the global WebSocket the default host, a player abandoned with
+one open keeps receiving and queueing its messages until it is collected. Where adl is at fault the
+player is not: adl stops reading at an empty message, which the player
+dispatches, and a close frame without a code throws #2030 in it.
 
 ### Screen capabilities
 

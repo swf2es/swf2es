@@ -4,6 +4,7 @@
 // a private native as "Class#pkg:Class::name".
 import type { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
+import { webSocketNatives } from "./air/net/WebSocket.js";
 import { accessibilityNatives } from "./flash/accessibility/Accessibility.js";
 import { cryptoNatives } from "./flash/crypto/generateRandomBytes.js";
 import { avm1MovieNatives } from "./flash/display/AVM1Movie.js";
@@ -79,6 +80,8 @@ import { timerNatives } from "./flash/utils/Timer.js";
 import { xmlDocumentNatives } from "./flash/xml/XMLDocument.js";
 import { toplevelNatives } from "./toplevel.js";
 
+export { airLibrary } from "./air-library.js";
+
 export function playerNatives(s: Scripting): avm2.Natives {
   return {
     ...accessibilityNatives(s),
@@ -116,6 +119,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...interactiveObjectNatives(s),
     ...fileFilterNatives(s),
     ...socketNatives(s),
+    ...webSocketNatives(s),
     ...sharedObjectNatives(s),
     ...transformNatives(s),
     ...matrix3DNatives(s),

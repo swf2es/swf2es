@@ -33,23 +33,28 @@ import {
   type ExternalInterfaceHost,
   type FetchRequest,
   type FetchResult,
+  globalWebSocketHost,
   type Navigate,
   type PlatformCapabilities,
   platformCapabilities,
   type ScreenCapabilities,
   type SharedObjectStorage,
   type SocketHost,
+  type WebSocketHost,
 } from "./hosts.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
 import { finishSounds, timelineSoundsOf } from "./media/sounds.js";
-import { playerHooks, playerNatives } from "./playerglobal/index.js";
+import { airLibrary, playerHooks, playerNatives } from "./playerglobal/index.js";
 import { Code } from "./scripting/code.js";
 import { dispatchTo } from "./scripting/events.js";
 import { Lifecycle } from "./scripting/lifecycle.js";
 import { Loads } from "./scripting/loads.js";
 import { Symbols } from "./scripting/symbols.js";
 import { Timers } from "./scripting/timers.js";
+
+// For index.ts, which reaches playerglobal only through here.
+export { airLibrary };
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -134,6 +139,8 @@ export class Scripting {
     library: Library;
   }[] = [];
   readonly socket: SocketHost | null;
+  /** air.net.WebSocket's client: the global WebSocket's by default, null for none. */
+  readonly webSocket: WebSocketHost | null;
   readonly audio: AudioHost | null;
   /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
   readonly navigate: Navigate | null;
@@ -214,6 +221,7 @@ export class Scripting {
       platform?: Partial<PlatformCapabilities>;
       externalInterface?: ExternalInterfaceHost;
       socket?: SocketHost;
+      webSocket?: WebSocketHost | null;
       audio?: AudioHost | null;
       navigate?: Navigate | null;
       /**
@@ -259,6 +267,7 @@ export class Scripting {
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
     this.externalInterface = options.externalInterface ?? null;
     this.socket = options.socket ?? null;
+    this.webSocket = options.webSocket === undefined ? globalWebSocketHost() : options.webSocket;
     this.onUncaught = options.onUncaught ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
