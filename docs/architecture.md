@@ -1487,7 +1487,20 @@ dispatches the close), and pings, pongs and reserved opcodes are
 dropped, since the browser answers the server's pings itself and AIR
 dispatches nothing for a pong. `close` with a code a browser refuses
 closes without one. There is no `certificateError`: a browser rejects a
-bad certificate as any failed connection. Where adl is at fault the
+bad certificate as any failed connection. A text message's leading BOM
+is sent, as AIR sends the bytes, but one received is gone, as a browser
+decodes it away, where adl's `data` keeps its three bytes. Two of adl's
+races the player does not run: a send in the close listener of a
+connection a send or close ended while connecting goes in adl, where it
+throws #2002 here, and adl at times dispatches a close after `close()`
+when a send goes out while it closes, where the player never does.
+WebSocketEvent has no `clone` of its own, in AIR as here, so a
+redispatched one is a plain Event.
+
+Not done yet: an open WebSocket, like a flash.net.Socket, is not closed
+when its SWF is unloaded, and the player has no shutdown hook to close
+it. With the global WebSocket the default host, a player abandoned with
+one open keeps receiving and queueing its messages until it is collected. Where adl is at fault the
 player is not: adl stops reading at an empty message, which the player
 dispatches, and a close frame without a code throws #2030 in it.
 
