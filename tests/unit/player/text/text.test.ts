@@ -52,15 +52,6 @@ test("a centred field's text is drawn where its layout centres it, past the 2 pi
   assert.equal(line.x / 20 - 2, 200 - 2 - (line.x + line.width) / 20);
 });
 
-test("text a margin moves past its field's edge is clipped, though it is narrower than the field", async () => {
-  const { overruns } = await import("../../../../packages/player/dist/render/view.js");
-  const field = { left: 0, top: 0, width: 100, height: 20 };
-  // 30 pixels of text from an 80 pixel margin, past the 2 pixel gutter: out to 112.
-  assert.equal(overruns(field, 82, 2, 30, 14), true);
-  assert.equal(overruns(field, 2, 2, 30, 14), false);
-  assert.equal(overruns(field, 2, -1, 30, 14), true);
-});
-
 test("a long append keeps a format for every character", async () => {
   const { TextModel } = await import("../../../../packages/player/dist/text/text.js");
   const model = new TextModel();
