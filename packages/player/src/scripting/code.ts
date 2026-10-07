@@ -6,15 +6,21 @@ import { readDoAbc, type Swf, tags } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { decodeImages } from "../bitmap/images.js";
 import type { Library } from "../display/timeline.js";
+import type { ModuleCache } from "../hosts.js";
 import type { Scripting } from "../scripting.js";
 import { sha256 } from "./sha256.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
+/** The API version of the SWFs' ABCs, Flash Player's, that the compiler's domain starts with. */
+export const API_VERSION = 50;
+
 export class Code {
   /** Each ABC's hash, by its index in the compiler; "" once its domain is dropped. */
   private readonly hashes: string[] = [];
+  /** Whether each ABC was added as one of the player's own libraries, by its index. */
+  private readonly builtins: boolean[] = [];
   /**
    * The compiler's application domain for each of the runtime's, by its
    * number; the compiler's index of each ABC added into one, in order; and
@@ -115,7 +121,7 @@ export class Code {
   /** Load the libraries the SWF's code links against (builtin, playerglobal), whose scripts run on first use. */
   async loadLibraries(abcs: Uint8Array[]): Promise<void> {
     for (const abc of abcs) {
-      this.compileAt(await this.add(abc, true, this.s.rt.root), this.s.rt.root, true);
+      await this.compileAt(await this.add(abc, true, this.s.rt.root), this.s.rt.root, true);
     }
   }
 
@@ -154,7 +160,7 @@ export class Code {
       }
 
       for (const { index, lazy } of added) {
-        const linked = this.compileAt(index, domain, false, { url, library });
+        const linked = await this.compileAt(index, domain, false, { url, library });
         if (!lazy) {
           runs.push(() => this.s.rt.run(linked));
         }
@@ -198,6 +204,7 @@ export class Code {
 
     this.codegenAbcs.get(domain.id)?.push(this.hashes.length);
     this.evictable.get(domain.id)?.set(this.hashes.length, abc.slice());
+    this.builtins.push(builtin);
     this.hashes.push(await sha256(abc));
     return this.hashes.length - 1;
   }
@@ -275,20 +282,19 @@ export class Code {
 
   /**
    * ABC `index`'s module, compiled against every ABC added so far that its
-   * domain sees, loaded into the runtime's `domain`; `builtin` for the
-   * player's own libraries, a SWF's with its `origin`. Each is evaluated
-   * under a script name of its own, by which Runtime.codeDomain finds the
-   * domain of the code running.
+   * domain sees, or as the host's module cache kept it, loaded into the
+   * runtime's `domain`; `builtin` for the player's own libraries, a SWF's
+   * with its `origin`. Each is evaluated under a script name of its own, by
+   * which Runtime.codeDomain finds the domain of the code running.
    */
-  private compileAt(
+  private async compileAt(
     index: number,
     domain: avm2.Domain,
     builtin = false,
     origin?: { url: string; library: Library },
-  ): Value {
-    const module = this.s.codegen.compileModule(this.hashes, index);
+  ): Promise<Value> {
     const script = `swf2es-${++this.modules}.js`;
-    const factory = evaluateModule(module, script);
+    const factory = await this.moduleOf(index, domain, script);
     const linked = this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
     if (origin) {
       const abc = linked as object;
@@ -298,6 +304,73 @@ export class Code {
     }
 
     return linked;
+  }
+
+  /**
+   * ABC `index`'s module evaluated as `script`: the cache's, if the host
+   * has one that holds it and it evaluates, else compiled, and given to
+   * the cache. Any error of the cache's is a miss.
+   */
+  private async moduleOf(
+    index: number,
+    domain: avm2.Domain,
+    script: string,
+  ): Promise<(rt: avm2.Runtime) => Value> {
+    const cache = this.s.moduleCache;
+    if (!cache) {
+      return evaluateModule(this.s.codegen.compileModule(this.hashes, index), script);
+    }
+
+    try {
+      const cached = await cache.get(await sha256Text(this.moduleKey(index, domain, cache)));
+      if (typeof cached === "string") {
+        return evaluateModule(cached, script);
+      }
+    } catch {
+      // Unreadable, or not a module: compiled and stored again below.
+    }
+
+    // The key again, next to the compile: the awaits above let other loads
+    // add ABCs that this one's domain sees.
+    const key = this.moduleKey(index, domain, cache);
+    const module = this.s.codegen.compileModule(this.hashes, index);
+    sha256Text(key)
+      .then((k) => cache.put(k, module))
+      .catch(() => {});
+    return evaluateModule(module, script);
+  }
+
+  /**
+   * What ABC `index`'s module depends on, as the cache keys it: the
+   * compiler, the API version, every ABC its domain sees when it compiles,
+   * in load order, those added after it included (a SWF's are all added
+   * before any compiles), with its own place among them, and what its
+   * domain and their ancestors have found (Codegen.found), each by the
+   * hash of the ABC that defines it. A superset of what codegen's cacheKey
+   * names, which leaves out those added after it.
+   */
+  private moduleKey(index: number, domain: avm2.Domain, cache: ModuleCache): string {
+    const seen: number[] = [];
+    const found: string[] = [];
+    for (let d: avm2.Domain | null = domain; d; d = d.parent) {
+      seen.push(...(this.codegenAbcs.get(d.id) ?? []));
+      for (const told of this.reported.get(d.id) ?? []) {
+        const [asType, nsKind, uri, name, at, i] = JSON.parse(told);
+        const by = this.codegenAbcs.get(at)?.[i];
+        found.push(
+          JSON.stringify([asType, nsKind, uri, name, by === undefined ? "" : this.hashes[by]]),
+        );
+      }
+    }
+
+    seen.sort((a, b) => a - b);
+    return JSON.stringify({
+      compiler: cache.compiler,
+      api: API_VERSION,
+      abcs: seen.map((i) => `${this.builtins[i] ? "builtin " : ""}${this.hashes[i]}`),
+      own: seen.indexOf(index),
+      found: found.sort(),
+    });
   }
 
   /** An ApplicationDomain object for the runtime's `domain`: a new one at each ask, as Flash's, without running its constructor. */
@@ -348,6 +421,11 @@ export class Code {
 }
 
 const EXPORT = "export default ";
+
+/** The SHA-256 of `text`'s UTF-8, a cache key of fixed length however many ABCs it names. */
+function sha256Text(text: string): Promise<string> {
+  return sha256(new TextEncoder().encode(text));
+}
 
 /**
  * A module's factory, its source evaluated as a script named `script`.

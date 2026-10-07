@@ -17,6 +17,7 @@ export type {
   Drawer,
   FetchRequest,
   FetchResult,
+  ModuleCache,
   Navigate,
   PlatformCapabilities,
   ScreenCapabilities,

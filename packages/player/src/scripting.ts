@@ -34,6 +34,7 @@ import {
   type FetchRequest,
   type FetchResult,
   globalWebSocketHost,
+  type ModuleCache,
   type Navigate,
   type PlatformCapabilities,
   platformCapabilities,
@@ -46,7 +47,7 @@ import type { Cursor, PointerInput } from "./input/pointer.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
 import { finishSounds, timelineSoundsOf } from "./media/sounds.js";
 import { airLibrary, playerHooks, playerNatives } from "./playerglobal/index.js";
-import { Code } from "./scripting/code.js";
+import { API_VERSION, Code } from "./scripting/code.js";
 import { dispatchTo } from "./scripting/events.js";
 import { Lifecycle } from "./scripting/lifecycle.js";
 import { Loads } from "./scripting/loads.js";
@@ -144,6 +145,8 @@ export class Scripting {
   readonly audio: AudioHost | null;
   /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
   readonly navigate: Navigate | null;
+  /** Where the host keeps the compiler's modules across page loads, or nothing does. */
+  readonly moduleCache: ModuleCache | null;
   /** Takes what fscommand sends, or nothing does. */
   readonly fsCommand: ((command: string, args: string) => void) | null;
   /** What plays every library's timeline and button sounds. */
@@ -230,6 +233,8 @@ export class Scripting {
        * them, or use them as a URL or as HTML.
        */
       fsCommand?: ((command: string, args: string) => void) | null;
+      /** Where to keep compiled modules across page loads: none by default (see ModuleCache). */
+      moduleCache?: ModuleCache | null;
       decodeImage?: ImageDecode | null;
       screenCapabilities?: Partial<ScreenCapabilities>;
       /** Drop the final newline produced by an HTML paragraph or BR. */
@@ -272,6 +277,7 @@ export class Scripting {
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
     this.fsCommand = options.fsCommand ?? null;
+    this.moduleCache = options.moduleCache ?? null;
     this.fetch = options.fetch ?? null;
     this.url = options.url ?? this.url;
     this.loads = new Loads(this, options);
@@ -283,7 +289,7 @@ export class Scripting {
       options,
     );
     this.mainDomain = this.rt.childDomain(this.rt.root);
-    this.codegen.reset(50);
+    this.codegen.reset(API_VERSION);
   }
 
   /** Load the libraries the SWF's code links against (builtin, playerglobal), whose scripts run on first use. */

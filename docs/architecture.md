@@ -60,6 +60,7 @@ requires:
    ABCs loaded before it differ. In a child application domain, what the
    domain was recorded to find (`found`) binds names and types too, so the
    key names those findings, each by the hash of the ABC that defines it.
+   The player's module cache keys more widely (see Caching modules).
 
 CI checks both (`pnpm determinism`, `tests/conformance/determinism.ts`),
 over the builtins, then each conformance case (also compiled with asc's
@@ -1815,6 +1816,29 @@ A SWF the player loads is in the position the oracle's harness puts
 every SWF in, so what the harness could not judge for a main movie, the
 document class's `stage` in its constructor among it, compares exactly
 once the case loads its SWF.
+
+### Caching modules
+
+A host may give `Scripting` a `ModuleCache` (`hosts.ts`), which keeps the
+modules the compiler writes across page loads. `Code` asks it for each
+module before compiling, and gives it each module it compiles, not
+waiting for the write: a module read back is the string `compileModule`
+returned, so JIT and AOT output stay one. Anything the cache does wrong, an error, no answer of a string, a
+string that does not evaluate (a truncated write), is a miss, compiled
+past and stored again.
+
+A module is keyed by a SHA-256 of all it depends on: the compiler's
+identity (`ModuleCache.compiler`, a hash of codegen.wasm's bytes, since
+`COMPILER_VERSION` does not move with every change to the output), the
+API version, every ABC its application domain sees as it compiles, by
+hash and whether it is a library, in load order, those added after it
+included, with its own place among them, and what its domain and their
+ancestors were told they found (`Codegen.found`), each by the hash of the
+ABC that defines it. That is more than `cacheKey` names: a SWF's DoABCs
+are all added before any compiles, so the first may extend a class of the
+last. The key is taken again next to the compile on a miss, as another
+load may add ABCs while the cache is asked. Compiling leaves state behind
+only in what the compiler weighs for `compact`, never in what it writes.
 
 ### Drawing with Graphics
 
