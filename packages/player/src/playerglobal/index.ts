@@ -47,6 +47,7 @@ import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
 import { perspectiveProjectionNatives } from "./flash/geom/PerspectiveProjection.js";
 import { transformNatives } from "./flash/geom/Transform.js";
 import { utils3DNatives } from "./flash/geom/Utils3D.js";
+import { collatorNatives } from "./flash/globalization/Collator.js";
 import { currencyFormatterNatives } from "./flash/globalization/CurrencyFormatter.js";
 import { currencyParseResultNatives } from "./flash/globalization/CurrencyParseResult.js";
 import { dateTimeFormatterNatives } from "./flash/globalization/DateTimeFormatter.js";
@@ -119,6 +120,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...externalInterfaceNatives(s),
     ...currencyParseResultNatives(s),
     ...numberParseResultNatives(),
+    ...collatorNatives(s),
     ...currencyFormatterNatives(s),
     ...dateTimeFormatterNatives(s),
     ...numberFormatterNatives(s),

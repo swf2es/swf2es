@@ -1,0 +1,53 @@
+en-US sorting | en-US en-US noError false false false false false false
+   a/b=-1F a/A=-1F a/á=-1F ä/z=-1F ö/o=1F w/v=1F file10/file9=-1F a-b/ab=1F a b/ab=-1F /a=-1F /=0T co-op/coop=1F it's/its=1F résumé/resume=1F ll/l=1F z/å=1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=1F noError
+en-US matching | en-US en-US noError true true true true true false
+   a/b=-1F a/A=0T a/á=0T ä/z=-1F ö/o=0T w/v=1F file10/file9=-1F a-b/ab=0T a b/ab=0T /a=-1F /=0T co-op/coop=0T it's/its=0T résumé/resume=0T ll/l=1F z/å=1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=0T noError
+fi-FI sorting | fi-FI fi-FI noError false false false false false false
+   a/b=-1F a/A=-1F a/á=-1F ä/z=1F ö/o=1F w/v=1F file10/file9=-1F a-b/ab=1F a b/ab=-1F /a=-1F /=0T co-op/coop=1F it's/its=1F résumé/resume=1F ll/l=1F z/å=-1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=1F noError
+fi-FI matching | fi-FI fi-FI noError true true true true true false
+   a/b=-1F a/A=0T a/á=0T ä/z=1F ö/o=1F w/v=1F file10/file9=-1F a-b/ab=0T a b/ab=0T /a=-1F /=0T co-op/coop=0T it's/its=0T résumé/resume=0T ll/l=1F z/å=-1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=0T noError
+de-DE sorting | de-DE de-DE noError false false false false false false
+   a/b=-1F a/A=-1F a/á=-1F ä/z=-1F ö/o=1F w/v=1F file10/file9=-1F a-b/ab=1F a b/ab=-1F /a=-1F /=0T co-op/coop=1F it's/its=1F résumé/resume=1F ll/l=1F z/å=1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=1F noError
+de-DE matching | de-DE de-DE noError true true true true true false
+   a/b=-1F a/A=0T a/á=0T ä/z=-1F ö/o=0T w/v=1F file10/file9=-1F a-b/ab=0T a b/ab=0T /a=-1F /=0T co-op/coop=0T it's/its=0T résumé/resume=0T ll/l=1F z/å=1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=0T noError
+sv-SE sorting | sv-SE sv-SE noError false false false false false false
+   a/b=-1F a/A=-1F a/á=-1F ä/z=1F ö/o=1F w/v=1F file10/file9=-1F a-b/ab=1F a b/ab=-1F /a=-1F /=0T co-op/coop=1F it's/its=1F résumé/resume=1F ll/l=1F z/å=-1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=1F noError
+sv-SE matching | sv-SE sv-SE noError true true true true true false
+   a/b=-1F a/A=0T a/á=0T ä/z=1F ö/o=1F w/v=1F file10/file9=-1F a-b/ab=0T a b/ab=0T /a=-1F /=0T co-op/coop=0T it's/its=0T résumé/resume=0T ll/l=1F z/å=-1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=0T noError
+xx sorting | xx en-US usingDefaultWarning false false false false false false
+   a/b=-1F a/A=-1F a/á=-1F ä/z=-1F ö/o=1F w/v=1F file10/file9=-1F a-b/ab=1F a b/ab=-1F /a=-1F /=0T co-op/coop=1F it's/its=1F résumé/resume=1F ll/l=1F z/å=1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=1F noError
+xx matching | xx en-US usingDefaultWarning true true true true true false
+   a/b=-1F a/A=0T a/á=0T ä/z=-1F ö/o=0T w/v=1F file10/file9=-1F a-b/ab=0T a b/ab=0T /a=-1F /=0T co-op/coop=0T it's/its=0T résumé/resume=0T ll/l=1F z/å=1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=0T noError
+ sorting |  en-US noError false false false false false false
+   a/b=-1F a/A=-1F a/á=-1F ä/z=-1F ö/o=1F w/v=1F file10/file9=-1F a-b/ab=1F a b/ab=-1F /a=-1F /=0T co-op/coop=1F it's/its=1F résumé/resume=1F ll/l=1F z/å=1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=1F noError
+ matching |  en-US noError true true true true true false
+   a/b=-1F a/A=0T a/á=0T ä/z=-1F ö/o=0T w/v=1F file10/file9=-1F a-b/ab=0T a b/ab=0T /a=-1F /=0T co-op/coop=0T it's/its=0T résumé/resume=0T ll/l=1F z/å=1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=0T noError
+i-default sorting | i-default en-US noError false false false false false false
+   a/b=-1F a/A=-1F a/á=-1F ä/z=-1F ö/o=1F w/v=1F file10/file9=-1F a-b/ab=1F a b/ab=-1F /a=-1F /=0T co-op/coop=1F it's/its=1F résumé/resume=1F ll/l=1F z/å=1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=1F noError
+i-default matching | i-default en-US noError true true true true true false
+   a/b=-1F a/A=0T a/á=0T ä/z=-1F ö/o=0T w/v=1F file10/file9=-1F a-b/ab=0T a b/ab=0T /a=-1F /=0T co-op/coop=0T it's/its=0T résumé/resume=0T ll/l=1F z/å=1F a/a=0T B/a=1F 10/9=-1F !/a=-1F Ａ/A=0T noError
+sort  a,A,á,Á,b,B,coop,co-op,Co-op,file1,file10,file9,x,-x,X -1-1-1-1-1-1-1-1-1-1-1-1-1-1 noError
+set ignoreCase true noError
+sort ignoreCase a,A,Á,á,b,B,coop,co-op,Co-op,file1,file10,file9,x,X,-x 0-10-10-1-10-1-1-1-10-1 noError
+set ignoreDiacritics true noError
+sort ignoreDiacritics á,a,A,Á,b,B,coop,co-op,Co-op,file1,file10,file9,x,-x,X 0-10-1-1-1-1-1-1-1-1-1-1-1 noError
+set ignoreSymbols true noError
+sort ignoreSymbols a,A,á,Á,b,B,coop,co-op,Co-op,file1,file10,file9,-x,x,X -1-1-1-1-1-10-1-1-1-1-10-1 noError
+set ignoreCharacterWidth true noError
+sort ignoreCharacterWidth a,A,á,Á,b,B,coop,co-op,Co-op,file1,file10,file9,x,-x,X -1-1-1-1-1-1-1-1-1-1-1-1-1-1 noError
+set ignoreKanaType true noError
+sort ignoreKanaType a,A,á,Á,b,B,coop,co-op,Co-op,file1,file10,file9,x,-x,X -1-1-1-1-1-1-1-1-1-1-1-1-1-1 noError
+set numericComparison true unsupportedError
+sort numericComparison a,A,á,Á,b,B,coop,co-op,Co-op,file1,file10,file9,x,-x,X -1-1-1-1-1-1-1-1-1-1-1-1-1-1 noError
+width 0 0
+kana 0 0
+numeric unsupportedError true -1 noError
+numeric off unsupportedError false unsupportedError
+status usingDefaultWarning false usingDefaultWarning true noError
+mode ArgumentError: Error #1508: The value specified for argument initialMode is invalid.
+mode null TypeError: Error #2007: Parameter initialMode must be non-null.
+constructor null TypeError: Error #2007: Parameter requestedLocaleIDName must be non-null.
+compare null TypeError: Error #2007: Parameter string1 must be non-null.
+compare null second TypeError: Error #2007: Parameter string2 must be non-null.
+equals null TypeError: Error #2007: Parameter string1 must be non-null.
+available true

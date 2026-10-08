@@ -4805,6 +4805,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "collator-natives",
+    swf: (abc) => bare(abc, 1, "CollatorNatives"),
+    script: "CollatorNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "sprite-drag-natives",
     swf: (abc) => bare(abc, 1, "SpriteDragNatives"),
     script: "SpriteDragNatives",
