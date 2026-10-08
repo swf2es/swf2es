@@ -368,15 +368,6 @@ export class PointerInput {
   }
 
   handle(type: "move" | "down" | "up" | "leave", p: PointerState): void {
-    // A press or a release is a user's gesture, in whose handlers a script may write to the clipboard.
-    if (type === "down" || type === "up") {
-      this.scripting.clipboard.gesture(() => this.dispatch(type, p));
-    } else {
-      this.dispatch(type, p);
-    }
-  }
-
-  private dispatch(type: "move" | "down" | "up" | "leave", p: PointerState): void {
     // A move posted before this input comes first; a move given now replaces it.
     if (type === "move") {
       this.moved = null;
@@ -455,7 +446,18 @@ export class PointerInput {
           this.redraws++;
         }
       }
-    } else if (type === "down" && (p.button ?? 0) === 0) {
+    } else if ((type === "down" || type === "up") && (p.button ?? 0) === 0) {
+      // A press or a release is a user's gesture, in whose handlers alone a
+      // script may write to the clipboard: not the hover's events before it.
+      this.scripting.clipboard.gesture(() => this.button(type, target, p));
+    }
+
+    this.updateCursor();
+  }
+
+  /** The left button pressed or let go over `target`: focus, a button's state, and the mouse events. */
+  private button(type: "down" | "up", target: DisplayObject | null, p: PointerState): void {
+    if (type === "down") {
       this.pressed = target;
       // Ruffle's rule: within half a second and two pixels of the last press.
       const last = this.lastPress;
@@ -476,7 +478,7 @@ export class PointerInput {
         buttonState(target, "down");
         this.send("mouseDown", target, p, true);
       }
-    } else if (type === "up" && (p.button ?? 0) === 0) {
+    } else {
       const pressed = this.pressed;
       if (pressed instanceof ButtonObject && pressed !== target && pressed.enabled) {
         pressed.releasedOutside();
@@ -493,8 +495,6 @@ export class PointerInput {
 
       this.pressed = null;
     }
-
-    this.updateCursor();
   }
 
   /** Show a changed cursor immediately, including when a script hides or shows it. */

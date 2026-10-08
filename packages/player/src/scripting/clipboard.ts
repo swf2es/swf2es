@@ -112,7 +112,12 @@ export class Clipboard {
     } finally {
       this.gestures--;
       if (this.gestures === 0 && this.collecting === 0 && this.version !== start) {
-        this.host?.write(this.data);
+        // A host that throws must not take the key or press's handling with it.
+        try {
+          this.host?.write(this.data);
+        } catch {
+          // The system's clipboard keeps what it had.
+        }
       }
     }
   }

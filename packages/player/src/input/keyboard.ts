@@ -661,7 +661,7 @@ export class KeyboardInput {
  * as Flash's "\r", none at all in a single-line field, and no other
  * control characters.
  */
-export function pasteable(multiline: boolean, text: string): string {
+function pasteable(multiline: boolean, text: string): string {
   const lines = text.replace(/\r\n?|\n/g, multiline ? "\r" : "");
   // A control character other than "\r".
   return lines.replace(/[^\P{Cc}\r]/gu, "");

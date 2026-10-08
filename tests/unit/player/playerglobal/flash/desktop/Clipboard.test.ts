@@ -35,6 +35,7 @@ const SOURCE = `package {
   import flash.display.Sprite;
   import flash.events.Event;
   import flash.events.KeyboardEvent;
+  import flash.events.MouseEvent;
   import flash.system.System;
 
   public class ClipboardMain extends Sprite {
@@ -47,6 +48,14 @@ const SOURCE = `package {
       attempt("clear", function ():void { c.clear(); });
       attempt("setClipboard", function ():void { System.setClipboard("x"); });
       trace("formats", c.formats.length, c.hasFormat(ClipboardFormats.TEXT_FORMAT));
+
+      // A move, and the hover a press brings, are no user's gesture; the press is.
+      stage.addEventListener(MouseEvent.MOUSE_MOVE, function (e:MouseEvent):void {
+        attempt("move", function ():void { System.setClipboard("moved"); });
+      });
+      stage.addEventListener(MouseEvent.MOUSE_DOWN, function (e:MouseEvent):void {
+        attempt("down", function ():void { System.setClipboard("pressed"); });
+      });
 
       stage.focus = this;
       stage.addEventListener(KeyboardEvent.KEY_DOWN, function (e:KeyboardEvent):void {
@@ -119,6 +128,14 @@ test("generalClipboard and setClipboard keep Flash Player's rules, and reach the
   assert.deepEqual(written.splice(0), [{ text: "written", html: "<b>written</b>" }]);
   keyboard.handle("down", { keyCode: 83, charCode: 115 });
   assert.deepEqual(written.splice(0), [{ text: "from setClipboard" }]);
+
+  // A move posted before a press is handled before the press's gesture begins.
+  const pointer = player.pointer;
+  assert.ok(pointer);
+  pointer.post({ x: 10, y: 10 });
+  pointer.handle("down", { x: 10, y: 10, button: 0 });
+  assert.deepEqual(lines.splice(0), ["move [class Error] 2176 Error #2176", "down ok"]);
+  assert.deepEqual(written.splice(0), [{ text: "pressed" }]);
 
   // A copy the host's event carries: no write of its own.
   assert.deepEqual(keyboard.copy(), { text: "copied" });
