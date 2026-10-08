@@ -357,6 +357,7 @@ try {
 
     // Nine pages asked for, by three starts of a SWF with no network: none opened.
     const noNetwork = /not opening https:\/\/example\.invalid\/smoke\d: the SWF has no network/g;
+    await until("the pages refused", () => (stderr().match(noNetwork)?.length ?? 0) >= 9);
     assert.equal(stderr().match(noNetwork)?.length, 9);
 
     // Malformed %-escapes are a bad request, not a crash.
@@ -382,6 +383,8 @@ try {
     assert.equal(traced("smoke: beside refused"), 1);
     // The networked SWF may open pages, but not without a click or a key.
     const noGesture = /not opening https:\/\/example\.invalid\/smoke\d: no click or key/g;
+    // Its stderr may come after its stdout: wait for the three.
+    await until("the networked SWF's pages", () => (stderr().match(noGesture)?.length ?? 0) >= 3);
     assert.equal(stderr().match(noGesture)?.length, 3);
     assert.equal(traced("smoke: outside refused"), 4);
     // Its network load went out, where the local SWF's three were stopped.
