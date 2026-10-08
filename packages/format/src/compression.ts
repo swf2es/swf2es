@@ -150,6 +150,71 @@ export function lzmaByteArrayUncompress(data: Uint8Array): Uint8Array {
 }
 
 /**
+ * A ZWS SWF's body in the .lzma layout lzma1 reads: the properties, the
+ * length it holds, `length`, and the stream. The dictionary is no larger
+ * than that length, which no match reaches past, so that a header naming
+ * a dictionary of 4 GB does not make the decoder allocate one.
+ */
+function swfLzma(swf: Uint8Array, length: number): Uint8Array {
+  const lzma = new Uint8Array(LZMA_HEADER + swf.length - 17);
+  lzma.set(swf.subarray(12, 17), 0);
+  const view = new DataView(lzma.buffer);
+  view.setUint32(1, Math.min(view.getUint32(1, true), Math.max(length, 4096)), true);
+  view.setUint32(5, length, true);
+  lzma.set(swf.subarray(17), LZMA_HEADER);
+  return lzma;
+}
+
+/**
+ * The first `length` bytes of a SWF as an uncompressed one, or fewer if it
+ * has fewer, decompressing only as far as they need: the header and the
+ * first tags, without trusting the header's file length, which a SWF of
+ * 30 bytes may give as 4 GB. Whatever cannot be read ends it early.
+ */
+export function decompressSwfPrefix(swf: Uint8Array, length: number): Uint8Array {
+  const signature = String.fromCharCode(swf[0], swf[1], swf[2]);
+  if (swf.length < 8 || signature === "FWS") {
+    return swf.subarray(0, length);
+  }
+
+  const want = Math.max(0, length - 8);
+  let body: Uint8Array = new Uint8Array(0);
+  if (signature === "CWS") {
+    const chunks: Uint8Array[] = [];
+    let have = 0;
+    const inflator = new pako.Inflate({ chunkSize: 4096 });
+    inflator.onData = (chunk: Uint8Array) => {
+      chunks.push(chunk);
+      have += chunk.length;
+    };
+    // A little input at a time: a kilobyte of deflate inflates to a megabyte at most.
+    for (let at = 8; at < swf.length && have < want && !inflator.err; at += 1024) {
+      inflator.push(swf.subarray(at, at + 1024), false);
+    }
+
+    body = new Uint8Array(have);
+    let at = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, at);
+      at += chunk.length;
+    }
+  } else if (signature === "ZWS" && swf.length >= 17) {
+    const fileLength = new DataView(swf.buffer, swf.byteOffset, swf.byteLength).getUint32(4, true);
+    try {
+      body = lzmaDecompress(swfLzma(swf, Math.min(want, Math.max(0, fileLength - 8))));
+    } catch {
+      // Corrupt: no body to read.
+    }
+  }
+
+  const out = new Uint8Array(8 + Math.min(want, body.length));
+  out.set(swf.subarray(0, 8), 0);
+  out[0] = 0x46; // F
+  out.set(body.subarray(0, out.length - 8), 8);
+  return out;
+}
+
+/**
  * A SWF's bytes as an uncompressed one: the header as FWS, then the body,
  * inflated for CWS, and for ZWS decoded from LZMA, whose header SWF writes
  * differently (after the 8 bytes of the SWF header, a 4-byte compressed
@@ -170,12 +235,7 @@ export function decompressSwf(swf: Uint8Array): Uint8Array {
       throw new CompressedDataError("truncated");
     }
 
-    // The .lzma layout lzma1 reads: the properties, the length it holds, the stream.
-    const lzma = new Uint8Array(LZMA_HEADER + swf.length - 17);
-    lzma.set(swf.subarray(12, 17), 0);
-    new DataView(lzma.buffer).setUint32(5, fileLength - 8, true);
-    lzma.set(swf.subarray(17), LZMA_HEADER);
-    body = lzmaDecompress(lzma);
+    body = lzmaDecompress(swfLzma(swf, fileLength - 8));
   } else {
     throw new TypeError(`Not a SWF file (signature ${JSON.stringify(signature)})`);
   }
