@@ -1930,8 +1930,9 @@ which the player reads from the stack:
   sort, `.call`, `.apply`, `o.f()`, a timer), or a frame line it cannot
   read, leaves the caller untold.
 
-A frame line's location is read from where the line ends, inside its last
-parentheses or after its last `@` (`frameLocations`), so a name cannot
+A frame line's location is read inside its last parentheses in V8's
+frames, and after its first `@` in the others, whose URLs may hold one
+(`/npm/p@1.0/m.js`) (`avm2.frameSites`), so a name cannot
 stand for a location; and a SWF cannot set one anyway: codegen names
 functions, methods, getters and classes from `[A-Za-z0-9_$]`, a SWF has no
 eval or `new Function`, an AS3 function's JavaScript `name` is not its to

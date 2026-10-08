@@ -426,18 +426,25 @@ test("a frame line's location is where it ends, whatever its name holds", () => 
   ]);
 });
 
-test("SpiderMonkey's and JavaScriptCore's frames read the same way, an @ in a name or not", () => {
+test("SpiderMonkey's and JavaScriptCore's frames read from the first @, which a URL may hold", () => {
+  const url = "https://cdn.test/npm/p@1.0/m.js?key#swf2es-1";
   const stack = [
     "callerUrl@file:///player/scripting/code.js:1:2",
-    "a@b@swf2es-5.js:3:4",
-    "@swf2es-6.js:5:6",
+    // Firefox's, with a function name and without.
+    `f@${url}:3:4`,
+    `@${url}:5:6`,
+    // JavaScriptCore's: a classic script's, and userinfo in a URL.
+    `global code@${url}:7:8`,
+    "g@https://user@cdn.test/m.js:9:10",
     "sort@[native code]",
     "",
   ].join("\n");
   assert.deepEqual(frameLocations(stack), [
     "file:///player/scripting/code.js",
-    "swf2es-5.js",
-    "swf2es-6.js",
+    url,
+    url,
+    url,
+    "https://user@cdn.test/m.js",
     null,
   ]);
 });
@@ -528,6 +535,18 @@ test("on JavaScriptCore, whose tail calls drop the runtime's frames, no call is 
     ),
     null,
   );
+});
+
+test("a carriage return inside a line makes no stack V8's", () => {
+  // A direct call on JavaScriptCore, whose heading line holds "\r    at":
+  // read as V8's, it would be the SWF's.
+  const stack = [
+    "Error\r    at x",
+    "callerUrl@code.js:1:1",
+    "native@natives.js:2:2",
+    "f@swf2es-5.js:4:4",
+  ].join("\n");
+  assert.equal(callingScript(stack, 2, modules, byName), null);
 });
 
 test("on JavaScriptCore, a library frame that names no script is not taken for one", () => {
