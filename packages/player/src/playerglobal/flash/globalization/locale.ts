@@ -25,74 +25,90 @@ export interface Locale {
   status: string;
 }
 
-/** A locale name's parts, as Flash takes it apart: a language, a script, a region, variants. */
+/**
+ * A locale name's parts, as Flash takes it apart: a language, a script, a
+ * region, variants of letters; any run of hyphens, underscores or dots
+ * between them.
+ */
 export const NAME_PARTS =
-  /^([a-z]{2,8})(?:-+([a-z]{4}))?(?:-+([a-z]{2}|\d{3}))?((?:-+[a-z0-9]{5,8})*)-*$/i;
+  /^([a-z]{2,8})(?:[-_.]+([a-z]{4}))?(?:[-_.]+([a-z]{2}|\d{3}))?((?:[-_.]+[a-z]{2,8})*)[-_.]*$/i;
 
 /**
- * A locale name as Flash keeps what it was given: underscores as hyphens,
- * the language in lower case, a script capitalized and a region in upper
- * case, the rest as it came; a name it cannot take apart all in lower case.
+ * A locale name as Flash keeps what it was given: one it takes apart, its
+ * subtags parted by single hyphens or underscores, with hyphens, the
+ * language in lower case, a script capitalized, the region and variants in
+ * upper case; one parted otherwise as it came; one it cannot take apart all
+ * in lower case.
  */
 export function canonicalName(name: string): string {
-  const canonical = casedName(name);
-  return NAME_PARTS.test(canonical.split("@")[0]) ? canonical : canonical.toLowerCase();
+  const [base, ...keywords] = name.split("@");
+  const m = NAME_PARTS.exec(base);
+  if (!m) {
+    return name.toLowerCase();
+  }
+
+  if (!/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/i.test(base)) {
+    return name;
+  }
+
+  const [, language, script, region, variants] = m;
+  const named = [
+    language.toLowerCase(),
+    script && script[0].toUpperCase() + script.slice(1).toLowerCase(),
+    region?.toUpperCase(),
+    variants.slice(1).toUpperCase(),
+  ];
+  return [named.filter(Boolean).join("-").replaceAll("_", "-"), ...keywords].join("@");
 }
 
-function casedName(name: string): string {
-  const [base, ...keywords] = name.replaceAll("_", "-").split("@");
-  const tags = base.split("-");
-  let i = 0;
-  const named = tags.map((tag, n) => {
-    if (n === 0) {
-      return tag.toLowerCase();
-    }
+// What Flash resolves: a language of two or three letters with the parts above.
+const TAG =
+  /^([a-z]{2,3})(?:[-_.]+([a-z]{4}))?(?:[-_.]+([a-z]{2}|\d{3}))?(?:[-_.]+[a-z]{2,8})*[-_.]*$/i;
 
-    if (tag === "" || i > 1) {
-      return tag;
-    }
-
-    if (i === 0 && /^[a-z]{4}$/i.test(tag)) {
-      i = 1;
-      return tag[0].toUpperCase() + tag.slice(1).toLowerCase();
-    }
-
-    i = 2;
-    return /^([a-z]{2}|\d{3})$/i.test(tag) ? tag.toUpperCase() : tag;
-  });
-  return [named.join("-"), ...keywords].join("@");
-}
-
-// A language, a script, a region and variants of letters; any other tag is one Flash cannot use.
-const TAG = /^([a-z]{2,3})(?:-+([a-z]{4}))?(?:-+([a-z]{2}|\d{3}))?(?:-+[a-z]{5,8})*-*$/i;
+const resolved = new Map<string, Locale>();
 
 /** The locale Flash uses for a name: the name's own, its language's in its likely region, or the default. */
 export function resolveLocale(s: Scripting, name: string): Locale {
-  const requested = canonicalName(name);
-  const base = requested.split("@")[0];
-  if (base === "" || base === "i-default") {
-    return { requested, actual: defaultLocale(s), status: NO_ERROR };
+  const key = `${name}@@${s.platform.locale}`;
+  let locale = resolved.get(key);
+  if (!locale) {
+    const requested = canonicalName(name);
+    const base = requested.split("@")[0];
+    const named = base !== "" && base !== "i-default";
+    const found = named ? supported(base) : null;
+    locale = {
+      requested,
+      actual: found?.actual ?? defaultLocale(s),
+      status: found?.status ?? (named ? USING_DEFAULT_WARNING : NO_ERROR),
+    };
+    resolved.set(key, locale);
   }
 
-  const found = supported(base);
-  return found
-    ? { requested, ...found }
-    : { requested, actual: defaultLocale(s), status: USING_DEFAULT_WARNING };
+  return { ...locale };
 }
 
 function supported(base: string): { actual: string; status: string } | null {
   const m = TAG.exec(base);
-  if (!m || Intl.DateTimeFormat.supportedLocalesOf(m[1]).length === 0) {
+  // A language Intl does not know, or knows by another code (iw for he, tl for fil), is none.
+  if (
+    !m ||
+    m[1].toLowerCase() === "und" ||
+    Intl.DateTimeFormat.supportedLocalesOf(m[1]).length === 0 ||
+    Intl.getCanonicalLocales(m[1])[0] !== m[1].toLowerCase()
+  ) {
     return null;
   }
 
-  const [, language, script, region] = m;
+  const language = m[1].toLowerCase();
+  const [, , script, region] = m;
   const likely = new Intl.Locale(script ? `${language}-${script}` : language).maximize();
-  // ICU resolves a region it has no data for to the language alone.
+  // A region ICU has data for is one its own data resolves to; one it has none for resolves
+  // to the language's (en-ZZ to en, the US), while nb-NO's data is nb's, Norway's.
   const known =
     region !== undefined &&
-    new Intl.Locale(new Intl.NumberFormat(`${language}-${region}`).resolvedOptions().locale)
-      .region === region.toUpperCase();
+    new Intl.Locale(
+      new Intl.NumberFormat(`${language}-${region}`).resolvedOptions().locale,
+    ).maximize().region === region.toUpperCase();
   // Windows names Chinese by its region alone: zh-TW, not zh-Hant-TW.
   const named = script && language !== "zh" ? `${language}-${likely.script}` : language;
   const place = known ? region.toUpperCase() : likely.region;
@@ -123,8 +139,9 @@ export function stringVector(s: Scripting, strings: string[]): AsObject {
   return o;
 }
 
+/** A Vector.<String>'s strings, a null one as Flash's empty one. */
 export function vectorStrings(v: Value): string[] {
-  return ((v as AsObject).$a as string[]).map(String);
+  return ((v as AsObject).$a as (string | null)[]).map((x) => x ?? "");
 }
 
 // Each region's currency, which Intl does not give: most currencies' codes begin with their

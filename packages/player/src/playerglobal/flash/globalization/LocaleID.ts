@@ -14,6 +14,8 @@ import {
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
+const KEYWORDS = ["calendar", "collation", "currency", "numbers"];
+
 const RTL_SCRIPTS = /^(Adlm|Arab|Hebr|Mand|Nkoo|Rohg|Syrc|Thaa)$/;
 
 interface Parts {
@@ -36,24 +38,32 @@ function parseName(given: string): Parts {
     }
   }
 
-  const m = NAME_PARTS.exec(base);
+  // Keywords other than these leave the name one Flash cannot take apart.
+  const known = Object.keys(keywords).every((key) => KEYWORDS.includes(key));
+  const m = known ? NAME_PARTS.exec(base) : null;
   if (!m) {
-    // Flash keeps a name it cannot take apart whole as its language.
-    const second = canonical.split("-")[1] ?? "";
+    // Flash keeps a name it cannot take apart whole as its language, and a region after a
+    // language it could read.
+    const [first, second = ""] = canonical.split(/[-_.]+/);
     return {
       name: canonical,
       language: canonical,
       script: "",
-      region: /^[a-z]{2}$/.test(second) ? second : "",
+      region: /^[a-z]{2,8}$/.test(first) && /^[a-z]{2}$/.test(second) ? second : "",
       variant: "",
-      keywords,
+      keywords: {},
     };
   }
 
-  const [, language, script, region, variants] = m;
-  let likely: Intl.Locale | null = null;
+  const language = m[1].toLowerCase();
+  const script = m[2] && m[2][0].toUpperCase() + m[2].slice(1).toLowerCase();
+  const region = m[3]?.toUpperCase();
+  let likely: Intl.Locale | undefined;
   try {
-    likely = new Intl.Locale(script ? `${language}-${script}` : language).maximize();
+    // The language as named, with its script and region, as und has none.
+    if (language !== "und") {
+      likely = new Intl.Locale([language, script, region].filter(Boolean).join("-")).maximize();
+    }
   } catch {}
 
   return {
@@ -61,36 +71,70 @@ function parseName(given: string): Parts {
     language,
     script: script ?? likely?.script ?? "",
     region: region ?? likely?.region ?? "",
-    variant: variants.replace(/^-+/, "").replace(/-+/g, "-"),
+    variant: m[4]
+      .split(/[-_.]+/)
+      .filter(Boolean)
+      .map((v) => v.toUpperCase())
+      .join("-"),
     keywords,
   };
 }
 
+interface Preference {
+  name: string;
+  /** As Windows names it: its script only where its region does not imply it. */
+  named: string;
+  maximized: string;
+  language: string;
+  regional: boolean;
+}
+
+function preference(name: string): Preference {
+  const full = canonicalName(name).split("@")[0];
+  try {
+    const l = new Intl.Locale(full);
+    const max = l.maximize();
+    const implied = new Intl.Locale(l.region ? `${l.language}-${l.region}` : l.language).maximize();
+    const script = l.script !== implied.script ? l.script : undefined;
+    return {
+      name,
+      named: [l.language, script, l.region].filter(Boolean).join("-"),
+      maximized: max.baseName,
+      language: `${max.language}-${max.script}`,
+      regional: l.region !== undefined,
+    };
+  } catch {
+    return { name, named: full, maximized: full, language: full, regional: false };
+  }
+}
+
 /**
  * Flash's order of preference: for each locale wanted, those it has of the
- * same language and script, the same locale first, then the language's own,
- * then the language's in other regions.
+ * same language and script, the same locale first, then those its likely
+ * locale is, then another locale wanted, then the language's in other
+ * regions, then the language alone.
  */
 function preferred(want: string[], have: string[]): string[] {
-  const key = (name: string) => {
-    const full = canonicalName(name);
-    try {
-      const l = new Intl.Locale(full.split("@")[0]);
-      const likely = l.maximize();
-      return {
-        full,
-        language: `${likely.language}-${likely.script}`,
-        regional: l.region !== undefined,
-      };
-    } catch {
-      return { full, language: full, regional: false };
-    }
-  };
-  const haves = have.map((name) => ({ name, ...key(name) }));
+  const haves = have.map(preference);
+  const wants = want.map(preference);
   const out: string[] = [];
-  for (const w of want.map(key)) {
+  for (const w of wants) {
+    const rank = (h: Preference) => {
+      if (h.named === w.named) {
+        return 0;
+      }
+
+      if (h.maximized === w.maximized) {
+        return 1;
+      }
+
+      if (wants.some((other) => other.named === h.named)) {
+        return 2;
+      }
+
+      return h.regional ? 3 : 4;
+    };
     const same = haves.filter((h) => h.language === w.language);
-    const rank = (h: (typeof haves)[number]) => (h.full === w.full ? 0 : h.regional ? 2 : 1);
     for (const h of same.sort((a, b) => rank(a) - rank(b))) {
       if (!out.includes(h.name)) {
         out.push(h.name);

@@ -29,6 +29,25 @@ preferred xx / en-US,fr-FR =>  0
 preferred  / en-US =>  0
 preferred en-GB,en / en-US,en-GB,en => en-GB,en,en-US 3
 preferred zh-TW / zh-CN,zh-Hant,zh-TW => zh-TW,zh-Hant 2
+[zh-TW] zh-TW zh script=Hant region=TW variant= false
+[sgn-BE-FR] sgn-BE-FR sgn script= region=BE variant=FR false
+[abcdefghi-XX] abcdefghi-xx abcdefghi-xx script= region= variant= false
+[de@x=1] de@x=1 de@x=1 script= region= variant= false
+[und] und und script= region= variant= false
+[de-DE-1996] de-de-1996 de-de-1996 script= region=de variant= false
+[EN_us] en-US en script=Latn region=US variant= false
+[iw] iw iw script=Hebr region=IL variant= true
+[en-US@collation=phonebook;currency=EUR] en-US@collation=phonebook;currency=EUR en script=Latn region=US variant= false
+preferred en-GB,en / en-US,en-GB,en => en-GB,en,en-US
+preferred en,en-GB / en-US,en-GB,en => en,en-US,en-GB
+preferred en-AU / en-GB,en-US,en,en-AU => en-AU,en-GB,en-US,en
+preferred en / en-GB,en-AU,en-US,en => en,en-US,en-GB,en-AU
+preferred pt / pt-PT,pt-BR,pt => pt,pt-BR,pt-PT
+preferred de-AT / de,de-DE,de-CH => de-DE,de-CH,de
+preferred fr-CA / fr,fr-FR,fr-Latn-CA,fr-CA => fr-Latn-CA,fr-CA,fr-FR,fr
+preferred zh-HK / zh-Hant-HK,zh-HK,zh-CN => zh-Hant-HK,zh-HK
+preferred fr-CA,en,zh-TW,pt-PT,de / en-US,fr-FR,fr,zh-CN,zh-Hant-HK,pt-BR,de-DE,en-GB,en,fr-CA,EN-us,,x => fr-CA,fr-FR,fr,en,en-US,EN-us,en-GB,zh-Hant-HK,pt-BR,de-DE
+null elements ,en
 keyword fr-FR
 want null TypeError: Error #2007: Parameter want must be non-null.
 have null TypeError: Error #2007: Parameter have must be non-null.
