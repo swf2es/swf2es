@@ -29,8 +29,11 @@ export interface PlayerCase {
    * draws `flash` for them, the SWF built at that size.
    */
   shown?: boolean;
-  /** What Flash draws for the references in place of the case's SWF. */
-  flash?: Uint8Array;
+  /**
+   * What Flash draws for the references in place of the case's SWF, or how
+   * to build it around the compiled script.
+   */
+  flash?: Uint8Array | ((abc: Uint8Array) => Uint8Array);
   /** Played as a host whose renderer is made with `antialias: true` draws it, multisampled; Flash draws it as ever. */
   antialias?: boolean;
   /**
@@ -5275,6 +5278,24 @@ export const cases: PlayerCase[] = [
     // The glows' outer edges, a few levels lighter in Flash.
     tolerance: 8,
     maxOutliers: 0,
+  },
+  {
+    // A filtered submenu, batched as a group of its own, shown beside the
+    // filtered menu it is a child of (scripts/FilterMenu.as).
+    name: "filter-menu",
+    swf: (abc) => bare(abc, 4, "FilterMenu", 300, 330),
+    script: "FilterMenu",
+    frames: 4,
+    capture: [2, 3, 4],
+    // A host showing the stage twice its size, as a game's page shows it larger.
+    zoom: 2,
+    shown: true,
+    // Flash draws the SWF built at that size, the script scaling the menu to it.
+    flash: (abc) => bare(abc, 4, "FilterMenu", 600, 660),
+    tolerance: 32,
+    // The bevels' one-pixel edges around each menu, lit differently in adl,
+    // up to about 3,800; the submenu cut short leaves about 371,000.
+    maxOutliers: 7000,
   },
   {
     name: "filter-cache",

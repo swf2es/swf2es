@@ -1,15 +1,18 @@
 // Pixi's GraphicsPipe and render-group builds patched, as this module loads,
 // for Graphics drawn alone: a swapped context rebuilds nothing, and a group
-// left alone a while has its Graphics batched. Loaded by view.ts before any
-// renderer is made. Also SharedGraphics, the Graphics that draws a context
-// its instances share.
+// left alone a while has its Graphics batched; and a filtered render group's
+// fast bounds placed in its parent's. Loaded by view.ts before any renderer
+// is made. Also SharedGraphics, the Graphics that draws a context its
+// instances share.
 import type { ColorTransform } from "@swf2es/format";
 import {
+  type Bounds,
+  boundsPool,
   Graphics,
   type GraphicsContext,
   GraphicsPipe,
   type InstructionSet,
-  type Container as PixiContainer,
+  Container as PixiContainer,
   type Renderer,
   RenderGroupSystem,
 } from "pixi.js";
@@ -152,6 +155,44 @@ const buildInstructions = (
   }
 
   buildInstructions.call(this, group, renderer);
+};
+
+/**
+ * The fast bounds Pixi fits a filter's input to, with a render group that
+ * has effects of its own placed in its parent's group. Pixi gathers such a
+ * group's bounds in the group's own space and adds them to its parent's
+ * unmoved, where a group without effects is moved by its place in the
+ * parent: a filtered submenu batched as a group of its own, beside the
+ * filtered menu it is a child of, lost to the menu's filter as much of its
+ * right side as it stood to the right of the menu.
+ */
+type Measured = PixiContainer & {
+  _getGlobalBoundsRecursive(layers: boolean, bounds: Bounds, layer: unknown): void;
+};
+const measured = PixiContainer.prototype as unknown as Measured;
+const globalBounds = measured._getGlobalBoundsRecursive;
+// How deep the walk is: the object measured itself is in its own group's space, which
+// getFastGlobalBounds then takes to the stage; only a group below it needs placing. (Pixi
+// also places a measured group without effects by its relative transform, which the stage's
+// then moves again; no filter measures one, as a filter is an effect, so that is left.)
+let measuring = 0;
+measured._getGlobalBoundsRecursive = function (this: Measured, layers, bounds, layer) {
+  const placing = measuring > 0 && !!this.renderGroup && !!this.effects?.length;
+  const into = placing ? boundsPool.get().clear() : bounds;
+  measuring++;
+  try {
+    globalBounds.call(this, layers, into, layer);
+  } finally {
+    measuring--;
+  }
+
+  if (placing) {
+    if (into.isValid) {
+      bounds.addBounds(into, this.relativeGroupTransform);
+    }
+
+    boundsPool.return(into);
+  }
 };
 
 /**
