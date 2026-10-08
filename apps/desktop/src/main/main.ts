@@ -64,16 +64,42 @@ function trusted(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   );
 }
 
-/** An http(s) URL in the system's browser, never in the app; anything else goes nowhere. */
+/** How long after a click or a key a SWF may open a page: Chromium's transient activation. */
+const GESTURE_MS = 5000;
+/** The least time between two pages opened, whatever the gestures. */
+const OPEN_INTERVAL_MS = 1000;
+const GESTURES = new Set(["mouseDown", "rawKeyDown", "keyDown", "touchEnd", "gestureTap"]);
+/** When the user last clicked or pressed a key in the window, and when a page last opened. */
+let gestureAt = Number.NEGATIVE_INFINITY;
+let openedAt = Number.NEGATIVE_INFINITY;
+
+/**
+ * An http(s) URL in the system's browser, never in the app, and only as a
+ * click or a key asked: one page a gesture, a second apart at least, as a
+ * browser's popup blocker allows, so a SWF cannot launch the browser in a
+ * loop. Anything else goes nowhere.
+ */
 function openExternal(url: string): void {
+  let protocol: string;
   try {
-    const { protocol } = new URL(url);
-    if (protocol === "https:" || protocol === "http:") {
-      void shell.openExternal(url);
-    }
+    protocol = new URL(url).protocol;
   } catch {
-    // Not a URL: nothing to open.
+    return;
   }
+
+  const now = performance.now();
+  if (protocol !== "https:" && protocol !== "http:") {
+    return;
+  }
+
+  if (now - gestureAt > GESTURE_MS || now - openedAt < OPEN_INTERVAL_MS) {
+    process.stderr.write(`swf2es: not opening ${url}: no click or key asked for it\n`);
+    return;
+  }
+
+  gestureAt = Number.NEGATIVE_INFINITY;
+  openedAt = now;
+  void shell.openExternal(url);
 }
 
 async function readStart(path: string, length: number): Promise<Uint8Array | null> {
@@ -237,6 +263,11 @@ function guard(contents: WebContents): void {
   contents.on("will-navigate", (event) => {
     event.preventDefault();
     openExternal(event.url);
+  });
+  contents.on("input-event", (_event, input) => {
+    if (GESTURES.has(input.type)) {
+      gestureAt = performance.now();
+    }
   });
   contents.setWindowOpenHandler(({ url }) => {
     openExternal(url);

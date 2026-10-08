@@ -42,6 +42,10 @@ const source = `package {
       graphics.beginFill(0xff0000);
       graphics.drawRect(0, 0, 100, 50);
       trace("smoke: started");
+      // No click or key asked for these: the app opens none of them.
+      for (var i:int = 0; i < 3; i++) {
+        navigateToURL(new URLRequest("https://example.invalid/smoke" + i), "_blank");
+      }
       var loader:URLLoader = new URLLoader();
       loader.addEventListener(Event.COMPLETE, loaded);
       loader.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
@@ -215,7 +219,7 @@ const both = {
 };
 
 try {
-  await withApp(both, [swf], async ({ stdout, until, evaluate, devtools }) => {
+  await withApp(both, [swf], async ({ stdout, stderr, until, evaluate, devtools }) => {
     const traced = (line: string) => stdout.filter((l) => l === line).length;
     await until("the SWF's socket", () => traced("smoke: socket pong") > 0);
     assert.equal(traced("smoke: started"), 1);
@@ -249,6 +253,9 @@ try {
     }
 
     await until("the dropped SWF", () => traced("smoke: started") === 3);
+
+    // Nine pages asked for, by three starts, none after a gesture: none opened.
+    assert.equal(stderr().match(/not opening https:\/\/example\.invalid\/smoke\d/g)?.length, 9);
 
     // A file outside the SWF's directory is not the page's to read.
     const outside = `swf2es://file${pathToFileURL(fileURLToPath(new URL("smoke.ts", import.meta.url))).pathname}`;
