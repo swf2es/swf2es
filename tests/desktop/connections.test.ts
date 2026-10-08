@@ -86,3 +86,14 @@ test("fails a connection whose peer stops reading, past what it may buffer", {
   assert.ok(MAX_BUFFERED < 256 * chunk.length);
   server.close();
 });
+
+test("connects to the address its policy came from, not where the name resolves now", async () => {
+  const [server, port] = await listen((socket) => socket.end("here"));
+  const { connections, events, next } = recorded();
+  connections.connect(1, "no-such-host.invalid", port, "127.0.0.1");
+  await next("data");
+  const opened = events.find((e) => e.type === "open");
+  assert.equal(opened?.type === "open" && opened.remoteAddress, "127.0.0.1");
+  await next("close");
+  server.close();
+});

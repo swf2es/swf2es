@@ -446,6 +446,7 @@ test("URLRequest data reaches the host as a query or a copied body", { skip }, a
     method: "GET",
     headers: [],
     body: null,
+    purpose: "data",
   });
 
   const variables = rt.construct(rt.classNamed("flash.net::URLVariables"), "sku=Test");
@@ -468,6 +469,7 @@ test("URLRequest data reaches the host as a query or a copied body", { skip }, a
       ["Content-Type", "text/plain"],
     ],
     body: new TextEncoder().encode("hello"),
+    purpose: "data",
   });
 
   const binary = rt.construct(rt.classNamed("flash.utils::ByteArray")) as avm2.AsObject;

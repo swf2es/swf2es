@@ -11,7 +11,7 @@ import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { protocol, type Session } from "electron";
 import type { LibraryName, LibraryState } from "../shared/api.js";
-import { FILE_ORIGIN, type Sandbox } from "./sandbox.js";
+import { FILE_ORIGIN, type Sandbox } from "./sandbox.ts";
 
 export const SCHEME = "swf2es";
 export const APP_ORIGIN = `${SCHEME}://app`;
@@ -99,21 +99,25 @@ const typeOf = (path: string) => TYPES[extname(path).toLowerCase()] ?? "applicat
  * The page's Content-Security-Policy. 'unsafe-eval' is the player's: it
  * evaluates the modules it compiles with `new Function`; codegen is
  * WebAssembly; the import map is allowed by its hash and no other inline
- * script runs. A SWF's loads reach its own files and what a web page's
- * could; nothing is framed, embedded or posted to the page.
+ * script runs. The page reaches its own files and the SWF's, never the
+ * network: a SWF's http and https loads go through the main process
+ * (network.ts). Nothing is framed, embedded or posted to the page.
  */
 function contentSecurityPolicy(page: string): string {
-  const map = /<script type="importmap">([\s\S]*?)<\/script>/.exec(page)?.[1] ?? "";
-  const hash = createHash("sha256").update(map).digest("base64");
+  const map = /<script type="importmap">([\s\S]*?)<\/script>/.exec(page)?.[1];
+  const hash = map === undefined ? "" : createHash("sha256").update(map).digest("base64");
   return [
     "default-src 'none'",
-    `script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-${hash}'`,
+    // A page without the player's import map, the URL dialog, runs only its own scripts.
+    map === undefined
+      ? "script-src 'self'"
+      : `script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-${hash}'`,
     // The element's shadow root has <style>s of its own.
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' ${FILE_ORIGIN} data: blob:`,
     `media-src 'self' ${FILE_ORIGIN} data: blob:`,
     `font-src 'self' data:`,
-    `connect-src 'self' ${FILE_ORIGIN} https: wss: data: blob:`,
+    `connect-src 'self' ${FILE_ORIGIN} data: blob:`,
     "base-uri 'none'",
     "form-action https:",
     "frame-ancestors 'none'",
@@ -130,7 +134,6 @@ export function serve(session: Session, sandbox: Sandbox, libraries: () => Libra
   const mounts = moduleMounts();
   const staticDir = join(appRoot, "static");
   const rendererDir = join(appRoot, "dist", "renderer");
-  const pageFile = join(staticDir, "index.html");
 
   /** `path` under `dir`, or null if it would leave it. */
   const under = (dir: string, path: string): string | null => {
@@ -139,8 +142,16 @@ export function serve(session: Session, sandbox: Sandbox, libraries: () => Libra
   };
 
   const app = async (path: string): Promise<Response> => {
-    if (path === "/" || path === "/index.html") {
-      const page = await readFile(pageFile, "utf8");
+    // Each page with its policy: the player's and the URL dialog.
+    const pageName = path === "/" ? "index.html" : /^\/([a-z-]+\.html)$/.exec(path)?.[1];
+    if (pageName) {
+      let page: string;
+      try {
+        page = await readFile(join(staticDir, pageName), "utf8");
+      } catch {
+        return notFound();
+      }
+
       return new Response(page, {
         headers: {
           "content-type": TYPES[".html"],

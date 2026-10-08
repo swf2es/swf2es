@@ -3,6 +3,7 @@
 // It reaches the shell only through window.swf2esDesktop (shared/api.ts).
 import { configure, type Swf2esPlayerElement } from "@swf2es/web";
 import type { DesktopApi, LibraryState, OpenedMovie } from "../shared/api.js";
+import { shellFetch } from "./network.js";
 import { shellSocketHost } from "./sockets.js";
 
 declare global {
@@ -18,6 +19,8 @@ configure({
   libraries: { builtin: "/libraries/builtin.abc", playerglobal: "/libraries/playerglobal.abc" },
   cache: true,
   sockets: shellSocketHost(desktop.sockets),
+  fetch: shellFetch(desktop.network),
+  loadPolicyFile: (url) => desktop.network.loadPolicyFile(url),
 });
 
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -45,6 +48,7 @@ function showFailure(message: string | null): void {
 }
 
 function play(movie: OpenedMovie): void {
+  configure({ sandboxType: movie.sandbox });
   showFailure(null);
   welcome.hidden = true;
   player.hidden = false;
@@ -73,6 +77,7 @@ function close(): void {
 }
 
 byId("open").addEventListener("click", () => desktop.openDialog());
+byId("open-url").addEventListener("click", () => desktop.openUrlDialog());
 byId("choose-playerglobal").addEventListener("click", () => desktop.chooseLibrary("playerglobal"));
 byId("choose-builtin").addEventListener("click", () => desktop.chooseLibrary("builtin"));
 

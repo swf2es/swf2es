@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Open URL</title>
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/renderer/open-url.js"></script>
+</head>
+<body class="prompt">
+<form id="form">
+  <label for="url">Open a SWF by its URL (http or https):</label>
+  <input id="url" type="text" inputmode="url" spellcheck="false" autocomplete="off"
+    placeholder="https://example.com/movie.swf" required>
+  <p id="problem" role="alert" hidden>Only an http or https URL opens.</p>
+  <div class="buttons">
+    <button id="cancel" type="button">Cancel</button>
+    <button type="submit">Open</button>
+  </div>
+</form>
+</body>
+</html>

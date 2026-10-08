@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test connections.test.ts sandbox.test.ts && node smoke.ts"
+    "test": "node --test addresses.test.ts connections.test.ts network.test.ts policy.test.ts sandbox.test.ts && node smoke.ts"
   },
   "dependencies": {
     "@swf2es/desktop": "workspace:*"

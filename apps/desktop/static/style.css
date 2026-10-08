@@ -88,3 +88,31 @@ swf2es-player {
   overflow-wrap: anywhere;
   color: var(--muted);
 }
+
+/* The URL dialog. */
+body.prompt {
+  overflow: auto;
+}
+
+.prompt form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+}
+
+.prompt input {
+  font: inherit;
+  padding: 4px 6px;
+}
+
+.prompt #problem {
+  margin: 0;
+  color: var(--error);
+}
+
+.prompt .buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

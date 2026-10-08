@@ -3,7 +3,13 @@
 // SWF's ExternalInterface callbacks as methods on the element.
 import { isAs3, readSwf, tags } from "@swf2es/format";
 import { type FetchRequest, type FetchResult, Player, Scripting } from "@swf2es/player";
-import { codegenForPlayer, libraries, moduleCacheOptions, socketHost } from "./config.js";
+import {
+  codegenForPlayer,
+  configuration,
+  libraries,
+  moduleCacheOptions,
+  socketHost,
+} from "./config.js";
 import { externalInterfaceHost, type PageBridge, type PageValue } from "./external.js";
 import { scaleMode } from "./layout.js";
 import { type Look, Playback } from "./playback.js";
@@ -139,6 +145,32 @@ function quality(value: string | null): string {
   }
 
   return ["LOW", "MEDIUM", "HIGH", "BEST"].includes(named) ? named : "HIGH";
+}
+
+/** The SWF at `url`, by the embedder's fetch where it gave one, and the URL a redirect took it to. */
+async function fetchMovie(
+  url: string,
+  signal: AbortSignal,
+): Promise<{ bytes: Uint8Array; url: string }> {
+  const fetchOf = configuration().fetch;
+  if (fetchOf) {
+    const result = await fetchOf(
+      { url, method: "GET", headers: [], body: null, purpose: "movie" },
+      signal,
+    );
+    if (!result.bytes) {
+      throw new Error(`swf2es: ${result.status} for ${url}`);
+    }
+
+    return { bytes: result.bytes, url: result.url ?? url };
+  }
+
+  const response = await fetch(url, { signal });
+  if (!response.ok) {
+    throw new Error(`swf2es: ${response.status} for ${url}`);
+  }
+
+  return { bytes: new Uint8Array(await response.arrayBuffer()), url: response.url || url };
 }
 
 /** The host's fetch for what a SWF loads: the browser's, its status and headers as they come. */
@@ -310,14 +342,7 @@ export class Swf2esPlayerElement extends ElementBase {
       let bytes: Uint8Array;
       let url: string;
       if (typeof source === "string" || source instanceof URL) {
-        url = new URL(source, pageUrl).href;
-        const response = await fetch(url, { signal: session.abort.signal });
-        if (!response.ok) {
-          throw new Error(`swf2es: ${response.status} for ${url}`);
-        }
-
-        bytes = new Uint8Array(await response.arrayBuffer());
-        url = response.url || url;
+        ({ bytes, url } = await fetchMovie(new URL(source, pageUrl).href, session.abort.signal));
       } else {
         // A copy: the page may reuse its buffer.
         bytes = new Uint8Array(source instanceof Uint8Array ? source : new Uint8Array(source));
@@ -409,7 +434,11 @@ export class Swf2esPlayerElement extends ElementBase {
       url,
       base: base ? new URL(base, pageUrl).href : undefined,
       parameters: parseFlashVars(attribute(this, "flashvars")),
-      fetch: offline ? () => Promise.reject(new Error("allowNetworking is none")) : browserFetch,
+      fetch: offline
+        ? () => Promise.reject(new Error("allowNetworking is none"))
+        : (configuration().fetch ?? browserFetch),
+      loadPolicyFile: configuration().loadPolicyFile,
+      sandboxType: configuration().sandboxType,
       socket: offline ? undefined : socketHost(),
       webSocket: offline ? null : undefined,
       navigate: internal ? null : undefined,
