@@ -266,4 +266,40 @@ constructor bad style ArgumentError: Error #2008: Parameter DateTimeFormatterSty
 constructor custom style TypeError: Error #2007: Parameter Constructor Failed must be non-null.
 constructor null style TypeError: Error #2007: Parameter dateStyle must be non-null.
 constructor null TypeError: Error #2007: Parameter requestedLocaleIDName must be non-null.
+quotes [''''] 4 noError [''''] 4 ['']
+quotes ['''] 3 usingFallbackWarning [''''] 4 ['']
+quotes ['a''] 4 usingFallbackWarning ['a'''] 5 [a']
+quotes ['] 1 usingFallbackWarning [''] 2 [']
+quotes [a'b'c] 5 patternSyntaxError [''] 2 [']
+quotes [yyyy'] 5 usingFallbackWarning [yyyy''] 6 [2024']
+quotes [''yyyy''] 8 noError [''yyyy''] 8 ['2024']
+quotes ['''yyyy'''] 10 noError ['''yyyy'''] 10 ['yyyy']
+quotes [yyyy<nul>MM] 7 noError [yyyy] 4 [2024]
+quotes [------------] 255 noError [------------] 255 [------------]
+quotes [------------] 256 patternSyntaxError [------------] 255 [------------]
+quotes [yyyy -------] 255 noError [yyyy -------] 255 [2024 -------]
+year 1 [1901-09-13 Friday] noError [14:05 x PM] noError
+year 1600 [] illegalArgumentError [14:05 x PM] noError
+year 1601 [1601-09-13 Thursday] noError [14:05 x PM] noError
+year 30827 [30827-09-13 Monday] noError [14:05 x PM] noError
+year 30828 [30828-09-13 Wednesday] noError [14:05 x PM] noError
+year 65535 [] illegalArgumentError [14:05 x PM] noError
+year 65536 [] illegalArgumentError [14:05 x PM] noError
+year 70000 [4464-09-13 Saturday] noError [14:05 x PM] noError
+year 275760 [] illegalArgumentError [00:00 x AM] noError
+year -1 [1899-09-13 Wednesday] noError [14:05 x PM] noError
+es-ES [EEEE, d 'de' MMMM 'de' yyyy H:mm:ss]
+pt-BR [EEEE, d 'de' MMMM 'de' yyyy HH:mm:ss]
+fr-CA [EEEE d MMMM yyyy HH 'h' mm 'min' ss 's']
+th-TH [EEEEที่ d MMMM G yyyy HH:mm:ss]
+he-IL [EEEE, d בMMMM yyyy H:mm:ss]
+ko-KR [yyyy년 MMMM d일 EEEE a h:mm:ss]
+en-AU Su|Mo|Tu|We|Th|Fr|Sa
+zh-CN 周日|周一|周二|周三|周四|周五|周六
+ja-JP 日|月|火|水|木|金|土
+fr-FR di|lu|ma|me|je|ve|sa
+fi-FI su|ma|ti|ke|to|pe|la
+sv-SE sö|må|ti|on|to|fr|lö
+he-IL א׳|ב׳|ג׳|ד׳|ה׳|ו׳|ש׳
+hi-IN र|सो|मं|बु|गु|शु|श
 available true

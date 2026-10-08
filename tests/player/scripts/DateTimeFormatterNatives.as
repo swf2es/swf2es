@@ -92,6 +92,33 @@ package {
       call("constructor custom style", function():void { new DateTimeFormatter("en-US", "custom", "long"); });
       call("constructor null style", function():void { new DateTimeFormatter("en-US", null, "long"); });
       call("constructor null", function():void { new DateTimeFormatter(null); });
+      // Unclosed quotes closed, and the pattern so kept formatted; a NUL ends a pattern; 255 characters at most.
+      f = new DateTimeFormatter("en-US");
+      var long:String = "";
+      while (long.length < 256) {
+        long += "-";
+      }
+      for each (p in ["''''", "'''", "'a''", "'", "a'b'c", "yyyy'", "''yyyy''", "'''yyyy'''", "yyyy\u0000MM", long.substr(1), long, "yyyy " + long.substr(6)]) {
+        f.setDateTimePattern(p);
+        trace("quotes [" + p.substr(0, 12).split("\u0000").join("<nul>") + "]", p.length, f.lastOperationStatus, "[" + f.getDateTimePattern().substr(0, 12) + "]", f.getDateTimePattern().length,
+          "[" + f.formatUTC(d).substr(0, 12) + "]");
+      }
+      // Windows' dates: from 1601, a year past 65535 wrapping; a time alone formats any date.
+      for each (var year:Number in [1, 1600, 1601, 30827, 30828, 65535, 65536, 70000, 275760, -1]) {
+        var day:Date = new Date(Date.UTC(year, 8, 13, 14, 5));
+        f.setDateTimePattern("yyyy-MM-dd EEEE");
+        var dated:String = "[" + f.formatUTC(day) + "] " + f.lastOperationStatus;
+        f.setDateTimePattern("HH:mm 'x' a");
+        trace("year", year, dated, "[" + f.formatUTC(day) + "]", f.lastOperationStatus);
+      }
+      // Russian's spaces are no-break ones in ICU, narrow ones in Windows: left out.
+      for each (id in ["es-ES", "pt-BR", "fr-CA", "th-TH", "he-IL", "ko-KR"]) {
+        f = new DateTimeFormatter(id);
+        trace(id, "[" + f.getDateTimePattern() + "]");
+      }
+      for each (id in ["en-AU", "zh-CN", "ja-JP", "fr-FR", "fi-FI", "sv-SE", "he-IL", "hi-IN"]) {
+        trace(id, new DateTimeFormatter(id).getWeekdayNames(DateTimeNameStyle.SHORT_ABBREVIATION).join("|"));
+      }
       trace("available", DateTimeFormatter.getAvailableLocaleIDNames().length > 0);
     }
 

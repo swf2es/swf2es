@@ -71,6 +71,7 @@ function localeData(locale: string): DateData {
     return /^\d*$/.test(name) ? long[m] : name;
   });
   const shortWeekdays = names({ weekday: "short" }, weekdays);
+  const narrowWeekdays = names({ weekday: "narrow" }, weekdays);
   const periods = format({ hour: "numeric", hour12: true });
   const eras = format({ era: "short", year: "numeric" });
   const part = (f: Intl.DateTimeFormat, t: number, type: string) =>
@@ -85,12 +86,17 @@ function localeData(locale: string): DateData {
     shortMonths: names({ month: "short" }, months),
     weekdays: names({ weekday: "long" }, weekdays),
     shortWeekdays,
-    // Windows' shortest names are ICU's two-letter ones, which Intl does not give: in a Latin
-    // script the short ones cut to two letters, "Su", "Mo"; in others the short ones.
-    shortestWeekdays:
-      info.maximize().script === "Latn"
-        ? shortWeekdays.map((name) => [...name].slice(0, 2).join(""))
-        : shortWeekdays,
+    // Windows' shortest names are CLDR's short width ("Su", "DO", "周日"), which Intl does not
+    // give: in a cased script the short ones cut to two letters; in others the short ones of
+    // two characters at most, else the narrow ones.
+    shortestWeekdays: shortWeekdays.map((name, d) => {
+      const chars = [...name];
+      if (/^[\p{Lu}\p{Ll}]/u.test(name)) {
+        return chars.slice(0, 2).join("");
+      }
+
+      return chars.length <= 2 ? name : narrowWeekdays[d];
+    }),
     periods: [
       part(periods, SAMPLE, "dayPeriod"),
       part(periods, SAMPLE + 12 * 3600000, "dayPeriod"),
@@ -136,12 +142,15 @@ function patternOf(f: Intl.DateTimeFormat): string {
           return "ss";
         case "dayPeriod":
           return "a";
+        case "era":
+          return "G";
         case "literal":
-          // CLDR's narrow space before a day period, where Windows has a plain one.
-          value = value.replaceAll("\u202f", " ");
-          return /[A-Za-z]/.test(value)
-            ? `'${value.replaceAll("'", "''")}'`
-            : value.replaceAll("'", "''");
+          // CLDR's narrow space before a day period, where Windows has a plain one; Windows
+          // quotes the cased letters (" 'de' ", " 'г'."), not those of scripts without case.
+          return value
+            .replaceAll("\u202f", " ")
+            .replaceAll("'", "''")
+            .replace(/[\p{Lu}\p{Ll}\p{Lt}]+/gu, (letters) => `'${letters}'`);
         default:
           return "";
       }
@@ -176,13 +185,24 @@ const UNSUPPORTED = "DSzZvQwWF";
 
 const STATUS_RANK = [NO_ERROR, USING_FALLBACK_WARNING, UNSUPPORTED_ERROR];
 
+// The longest pattern Flash takes.
+const PATTERN_MAX = 255;
+
 /**
  * A pattern's fields, the pattern as Flash keeps it and its status: a run
  * too long is shortened and an unclosed quote closed, with a fallback
- * warning; an unknown letter makes it a syntax error, and Flash keeps none of it.
+ * warning, and the pattern so kept is what formats; an unknown letter or a
+ * pattern too long makes it a syntax error, and Flash keeps none of it. A
+ * NUL ends it, Flash's being a C string.
  */
-function parsePattern(pattern: string): { fields: Field[]; kept: string; status: string } {
+function parsePattern(given: string): { fields: Field[]; kept: string; status: string } {
+  const pattern = given.split("\0")[0];
+  if (pattern.length > PATTERN_MAX) {
+    return { fields: [], kept: "", status: PATTERN_SYNTAX_ERROR };
+  }
+
   const fields: Field[] = [];
+  let unclosed = false;
   let kept = "";
   let status = NO_ERROR;
   const raise = (to: string) => {
@@ -203,6 +223,7 @@ function parsePattern(pattern: string): { fields: Field[]; kept: string; status:
         for (;;) {
           if (j >= pattern.length) {
             raise(USING_FALLBACK_WARNING);
+            unclosed = true;
             break;
           }
 
@@ -260,10 +281,28 @@ function parsePattern(pattern: string): { fields: Field[]; kept: string; status:
     kept += c.repeat(count);
   }
 
-  return { fields, kept, status };
+  return { fields: unclosed ? parsePattern(kept).fields : fields, kept, status };
 }
 
 const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+
+// Windows' dates: from 1601, its first FILETIME, to 30828, its last year, a year past 65535
+// wrapping as a 16-bit SYSTEMTIME's does.
+const FIRST_YEAR = 1601;
+const LAST_YEAR = 30828;
+
+/** The date as Windows takes it, or null for one it refuses. */
+function windowsDate(t: Date): Date | null {
+  const year = t.getUTCFullYear();
+  const wrapped = year % 65536;
+  if (year < 0 || wrapped < FIRST_YEAR || wrapped > LAST_YEAR) {
+    return null;
+  }
+
+  const date = new Date(t.getTime());
+  date.setUTCFullYear(wrapped);
+  return date;
+}
 
 /** A date's fields formatted by a pattern's; `fields` hold the time's fields as UTC's. */
 function formatDate(fields: Field[], t: Date, data: DateData): string {
@@ -454,17 +493,23 @@ export function dateTimeFormatterNatives(s: Scripting): avm2.Natives {
     ): string {
       const f = settings(this);
       const time = (nonNull(s, date, "dateTime") as AsObject).$time as number;
-      if (Number.isNaN(time)) {
+      // Local time is the runtime's, as Date's own getters give it.
+      const offset =
+        utc || Number.isNaN(time)
+          ? 0
+          : (s.rt.getProperty(date, s.rt.publicName("timezoneOffset")) as number);
+      // A pattern of the time alone formats any date, an invalid one as midnight; one with
+      // the date only Windows' dates.
+      const local = new Date(Number.isNaN(time) ? 0 : time - offset * 60000);
+      const dated = f.fields.some(({ letter }) => letter !== "" && "yMdEG".includes(letter));
+      const day = dated ? (Number.isNaN(time) ? null : windowsDate(local)) : local;
+      if (!day) {
         f.status = ILLEGAL_ARGUMENT_ERROR;
         return "";
       }
 
-      // Local time is the runtime's, as Date's own getters give it.
-      const offset = utc
-        ? 0
-        : (s.rt.getProperty(date, s.rt.publicName("timezoneOffset")) as number);
       f.status = NO_ERROR;
-      return formatDate(f.fields, new Date(time - offset * 60000), f.data);
+      return formatDate(f.fields, day, f.data);
     }
 
     // ASC keeps no defaults for natives: these are Flash's.
