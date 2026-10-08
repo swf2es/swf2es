@@ -1894,9 +1894,31 @@ first. `supportsCursor` and `supportsNativeCursor` are true, as in
 desktop Flash.
 The display list decides the target, so masks, scroll rectangles, depth,
 visibility, `mouseEnabled` and `mouseChildren` use the same objects that
-scripts see; Pixi's render tree does not choose a Flash target. The first
-input slice sends `mouseOver`, `mouseOut`, `mouseMove`, `mouseDown`,
-`mouseUp` and `click` through EventDispatcher's capture and bubble phases.
+scripts see; Pixi's render tree does not choose a Flash target. The
+pointer sends `mouseOver`, `mouseOut`, `rollOver`, `rollOut`, `mouseMove`,
+`mouseDown`, `mouseUp` and `click` through EventDispatcher's capture and
+bubble phases, and the stage's `mouseLeave`, in the order Flash Player 32
+traced them (a probe logging every event with its target, run in
+Electron's PepperFlash and driven over the DevTools protocol, the
+`MouseOrder` test of `tests/unit/player/input/pointer.test.ts`): a
+pointer at a new point sends `mouseMove` to what is under it first, then
+moves the hover, `mouseOut` and the `rollOut`s from what it was over up to
+the common ancestor, the `rollOver`s from the new object up, then
+`mouseOver`. A press or a release at a new point is that move, with
+`buttonDown` as it was before, then the press or release; one where the
+pointer already was is its own events, then any hover that changed. A
+move to where the pointer is sends nothing. The empty stage takes
+`mouseMove`, `mouseDown`, `mouseUp` and `click`, but nothing is over it:
+leaving an object for it is a `mouseOut` whose `relatedObject` is null,
+and no `mouseOver`. The pointer leaving the player with its button up is
+`mouseOut` and `rollOut`s at the stage point (-1, -1), though `mouseX`
+and `mouseY` stay where they were, then `mouseLeave`. With the button
+down after a press on the player, the mouse stays its own, as Flash's
+plug-in kept it: no leave, the moves outside go to the stage, and so
+does the release, after which the leave comes (Flash sends it at the next
+move; the browser sends none then, so the player sends it with the
+release). `updateAfterEvent` changes none of this. Ruffle sends
+`mouseMove` first too, and no `mouseLeave`.
 `DisplayObject.mouseX` and `mouseY` follow the last pointer position.
 The pick follows Flash's order, as Ruffle's `mouse_pick_avm2` has it:
 interactive children before artwork, and a hit on what takes no pointer
@@ -1926,8 +1948,8 @@ sprite, which `dropTarget` reads: the shape, not the sprite that takes
 the pointer, as Flash's trace of the corpus's `sprite_dropTarget` names
 the shapes in its sprites, and null over nothing. Neither can be played
 in adl, which the harness gives no pointer, so the unit tests carry them.
-Roll events, wheel, right and middle buttons, and Flash's drag and focus
-rules still need their own cases.
+Wheel, right and middle buttons, and Flash's drag and focus rules still
+need their own cases.
 
 ### Touch
 
@@ -1954,11 +1976,12 @@ mouse was elsewhere, and a press, as Flash Player 32 handled a browser's
 emulated touch, then moves, then a release, which clicks as a mouse's
 does; the lifted finger leaves the mouse where it was, with no rollOut.
 In touchPoint mode every touch is TouchEvents too, picked as the pointer
-picks: `touchOut` and `touchRollOut` from what the point was over,
-`touchRollOver` and `touchOver` on what it is over, then its
-`touchBegin`, `touchMove` or `touchEnd`, a `touchTap` where it ends on
-the object it began on, and, once lifted, `touchOut` and `touchRollOut`,
-as a lifted finger is over nothing. `touchPointID` is the pointerId, the
+picks and in the mouse's order: a move's `touchMove`, then `touchOut` and
+`touchRollOut` from what the point was over and `touchRollOver` and
+`touchOver` on what it is over (none on the empty stage); for a begin
+the hover, then `touchBegin`; for an end `touchEnd`, a `touchTap` where
+it ends on the object it began on, and, once lifted, `touchOut` and
+`touchRollOut`, as a lifted finger is over nothing. `touchPointID` is the pointerId, the
 local point is the target's, `sizeX` and `sizeY` the contact's size in
 stage units and `pressure` the browser's. Each step's touch events come
 before the mouse events of the same step. A point's moves are posted as
@@ -1983,7 +2006,8 @@ events could be measured: adl under Wine and Flash Player 32 on Linux
 report no touch screen and dispatch no TouchEvent. The order is the
 reference's ("the first point of contact dispatches a mouse event and a
 touch event") and the W3C's, touch first; Ruffle dispatches no
-TouchEvent.
+TouchEvent. Nor could the TouchEvents' own order: a move before its hover
+is the mouse's, measured, taken over.
 
 ### Keyboard and focus
 

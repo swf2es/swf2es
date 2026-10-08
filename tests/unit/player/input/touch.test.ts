@@ -128,8 +128,8 @@ test("touches move the mouse and, in touchPoint mode, dispatch TouchEvents first
   touch.handle("begin", at(15, 15));
   touch.handle("end", at(15, 15));
   assert.deepEqual(lines.splice(0), [
-    "mouseOver b",
     "mouseMove b",
+    "mouseOver b",
     "mouseDown b",
     "mouseUp b",
     "click b",
@@ -196,9 +196,9 @@ test("touches move the mouse and, in touchPoint mode, dispatch TouchEvents first
     "touchOver c 1 true 10,5 2,3 0.5",
     "no clipboard in touchOver",
     "touchBegin c 1 true 10,5 2,3 0.5",
+    "mouseMove c",
     "mouseOut b",
     "mouseOver c",
-    "mouseMove c",
     "mouseDown c",
   ]);
   touch.handle("end", at(60, 5));

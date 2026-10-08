@@ -427,6 +427,8 @@ Object.assign(globalThis, {
   touchSeed: () => (document.getElementById("seed") as HTMLTextAreaElement).value,
   touchDestroy: () => {
     element("touch").destroy();
+    // Gone from the page too: the next check makes a player of its own by the same id.
+    element("touch").remove();
     document.getElementById("seed")?.remove();
     return true;
   },

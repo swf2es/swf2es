@@ -594,16 +594,14 @@ test("Pixi pointer moves are posted, flushed by a frame of their own where nothi
   >[0];
   const view = new PixiView(renderer);
   const calls: string[] = [];
-  const player = {
-    width: 100,
-    height: 100,
-    pointer: {
-      post: (p: { x: number }) => calls.push(`post ${p.x}`),
-      flush: () => calls.push("flush"),
-      handle: (type: string, p: { x: number }) => calls.push(`${type} ${p.x}`),
-      cursor: () => "default",
-    },
-  } as unknown as Player;
+  const pointer = {
+    captured: false,
+    post: (p: { x: number }) => calls.push(`post ${p.x}`),
+    flush: () => calls.push("flush"),
+    handle: (type: string, p: { x: number }) => calls.push(`${type} ${p.x}`),
+    cursor: () => "default",
+  };
+  const player = { width: 100, height: 100, pointer } as unknown as Player;
   const frames: (() => void)[] = [];
   const g = globalThis as { requestAnimationFrame?: unknown; cancelAnimationFrame?: unknown };
   g.requestAnimationFrame = (f: () => void) => frames.push(f);
@@ -613,18 +611,27 @@ test("Pixi pointer moves are posted, flushed by a frame of their own where nothi
   try {
     const unbind = view.bindPointer(player);
     const at = (x: number) => ({ global: { x, y: 0 }, button: 0, buttons: 0 }) as never;
-    view.stage.emit("pointermove", at(1));
-    view.stage.emit("pointermove", at(2));
+    view.stage.emit("globalpointermove", at(1));
+    view.stage.emit("globalpointermove", at(2));
     view.stage.emit("pointerdown", at(3));
     assert.deepEqual(calls, ["post 1", "post 2", "down 3"]);
     assert.equal(frames.length, 1);
     frames[0]();
     assert.deepEqual(calls.slice(3), ["flush"]);
 
-    view.stage.emit("pointermove", at(4));
-    unbind();
+    // A move off the canvas is the player's only while it holds the mouse,
+    // and a release off it is a release, then the leave the press held back.
+    view.stage.emit("globalpointermove", at(150));
+    pointer.captured = true;
+    view.stage.emit("globalpointermove", at(160));
+    view.stage.emit("pointerupoutside", at(170));
+    assert.deepEqual(calls.slice(4), ["post 160", "up 170", "leave 170"]);
     frames[1]();
-    assert.deepEqual(calls.slice(4), ["post 4", "flush"]);
+
+    view.stage.emit("globalpointermove", at(4));
+    unbind();
+    frames[2]();
+    assert.deepEqual(calls.slice(7), ["flush", "post 4", "flush"]);
   } finally {
     delete g.requestAnimationFrame;
     delete g.cancelAnimationFrame;
@@ -675,7 +682,7 @@ test("Pixi touch pointers go to the player's touches, the mouse's alone to its p
     }) as never;
   view.stage.emit("pointerdown", at(1, "touch"));
   view.stage.emit("pointerdown", at(2, "touch", 2, false));
-  view.stage.emit("pointermove", at(3, "touch"));
+  view.stage.emit("globalpointermove", at(3, "touch"));
   view.stage.emit("pointerup", at(4, "touch"));
   view.stage.emit("pointerupoutside", at(5, "touch", 2, false));
   // A finger lifted leaves the canvas; the mouse it moved stays where it was.

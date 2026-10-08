@@ -9,7 +9,9 @@
 // everything: 20 elements made and destroyed leave no player, codegen,
 // socket or audio context alive, and the heap no larger than a bound.
 // Last, Chrome's own Ctrl+C, X and V and a press reach a SWF's field and
-// its Clipboard through the element's copy, cut and paste events.
+// its Clipboard through the element's copy, cut and paste events, the
+// mouse's events come in Flash's order, and touches as TouchEvents and as
+// the mouse.
 //
 //   node tests/web/run.ts
 import assert from "node:assert/strict";
@@ -375,6 +377,57 @@ check(
 );
 
 check(
+  "the mouse's events come in Flash's order, and a drag off the player keeps the mouse",
+  async (evaluate, send) => {
+    const [left, top] = await call<[number, number]>(evaluate, "touchPlayer()");
+    const log = () => call<string[]>(evaluate, "touchLog()");
+    const mouse = async (type: string, x: number, y: number, buttons = 0) => {
+      await send("Input.dispatchMouseEvent", {
+        type,
+        x: left + x,
+        y: top + y,
+        button: type === "mouseMoved" && buttons === 0 ? "none" : "left",
+        buttons,
+        clickCount: type === "mouseMoved" ? 0 : 1,
+      });
+      return log();
+    };
+
+    // As Flash Player 32 traced it: a move first, then the hover; the empty
+    // stage takes the move, but no over.
+    assert.deepEqual(await mouse("mouseMoved", 150, 90), ["mouseMove stage 150,90 false null"]);
+    assert.deepEqual(await mouse("mouseMoved", 30, 30), [
+      "mouseMove b 10,10 false null",
+      "rollOver b 10,10 false null",
+      "rollOver a 30,30 false null",
+      "mouseOver b 10,10 false null",
+    ]);
+    // A press where the mouse was not is a move there first, its button still up.
+    assert.deepEqual(await mouse("mousePressed", 110, 30, 1), [
+      "mouseMove c 10,30 false null",
+      "mouseOut b 90,10 false c",
+      "rollOut b 90,10 false c",
+      "rollOut a 110,30 false c",
+      "rollOver c 10,30 false b",
+      "mouseOver c 10,30 false b",
+      "mouseDown c 10,30 true null",
+    ]);
+    // Dragged off the player, the mouse stays its own: moves to the stage,
+    // the release too, and the leave only after it.
+    assert.deepEqual(await mouse("mouseMoved", 300, 30, 1), [
+      "mouseMove stage 300,30 true null",
+      "mouseOut c 200,30 true null",
+      "rollOut c 200,30 true null",
+    ]);
+    assert.deepEqual(await mouse("mouseReleased", 300, 30), [
+      "mouseUp stage 300,30 false null",
+      "mouseLeave stage",
+    ]);
+    await call(evaluate, "touchDestroy()");
+  },
+);
+
+check(
   "touches reach a SWF as TouchEvents and as the mouse, and a tap may write the clipboard",
   async (evaluate, send) => {
     // A touch screen the page has from here on: the players made before it saw none.
@@ -403,10 +456,10 @@ check(
     await touch("touchStart", [[30, 30, 0]]);
     await touch("touchEnd", []);
     assert.deepEqual(await log(), [
+      "mouseMove b 10,10 false null",
       "rollOver b 10,10 false null",
       "rollOver a 30,30 false null",
       "mouseOver b 10,10 false null",
-      "mouseMove b 10,10 false null",
       "mouseDown b 10,10 true null",
       "mouseUp b 10,10 false null",
       "click b 10,10 false null",
@@ -443,25 +496,25 @@ check(
 
     assert.equal(seed, "tapped b");
 
-    // A drag from b to c: out and rolls as the point moves, a move that may not
-    // write the clipboard, and the mouse after it.
+    // A drag from b to c: a move that may not write the clipboard, then out
+    // and rolls as the point moves, in the mouse's order, and the mouse after it.
     await touch("touchStart", [[30, 30, 0]]);
     await log();
     await touch("touchMove", [[110, 30, 0]]);
     assert.deepEqual(await log(), [
+      "touchMove c primary 10,30 110,30 null",
+      "setClipboard in touchMove 2176",
       "touchOut b primary 90,10 110,30 c",
       "touchRollOut b primary 90,10 110,30 c",
       "touchRollOut a primary 110,30 110,30 c",
       "touchRollOver c primary 10,30 110,30 b",
       "touchOver c primary 10,30 110,30 b",
-      "touchMove c primary 10,30 110,30 null",
-      "setClipboard in touchMove 2176",
+      "mouseMove c 10,30 true null",
       "mouseOut b 90,10 true c",
       "rollOut b 90,10 true c",
       "rollOut a 110,30 true c",
       "rollOver c 10,30 true b",
       "mouseOver c 10,30 true b",
-      "mouseMove c 10,30 true null",
     ]);
 
     // A second finger is touch events alone; the first, lifted over c where
