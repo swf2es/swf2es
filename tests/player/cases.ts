@@ -4823,6 +4823,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "locale-id-natives",
+    swf: (abc) => bare(abc, 1, "LocaleIDNatives"),
+    script: "LocaleIDNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "sprite-drag-natives",
     swf: (abc) => bare(abc, 1, "SpriteDragNatives"),
     script: "SpriteDragNatives",

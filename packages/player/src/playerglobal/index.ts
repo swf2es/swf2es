@@ -51,6 +51,7 @@ import { collatorNatives } from "./flash/globalization/Collator.js";
 import { currencyFormatterNatives } from "./flash/globalization/CurrencyFormatter.js";
 import { currencyParseResultNatives } from "./flash/globalization/CurrencyParseResult.js";
 import { dateTimeFormatterNatives } from "./flash/globalization/DateTimeFormatter.js";
+import { localeIDNatives } from "./flash/globalization/LocaleID.js";
 import { numberFormatterNatives } from "./flash/globalization/NumberFormatter.js";
 import { numberParseResultNatives } from "./flash/globalization/NumberParseResult.js";
 import { stringToolsNatives } from "./flash/globalization/StringTools.js";
@@ -124,6 +125,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...collatorNatives(s),
     ...currencyFormatterNatives(s),
     ...dateTimeFormatterNatives(s),
+    ...localeIDNatives(s),
     ...numberFormatterNatives(s),
     ...stringToolsNatives(s),
     ...urlRequestNatives(s),
