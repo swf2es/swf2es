@@ -88,6 +88,25 @@ var corruptLzma:ByteArray = new ByteArray();
 for (i = 0; i < 20; i++) corruptLzma.writeByte(i == 0 ? 0x5d : i < 5 ? 0 : i == 5 ? 10 : i < 13 ? 0 : 0xee);
 probe("corrupt lzma", function():* { corruptLzma.uncompress("lzma"); });
 trace("after corrupt lzma", corruptLzma.length);
+// Properties: 200 (lc 2, lp 2, pb 4) as xz wrote it, then 225 and 255, which no encoder writes.
+function fromHex(h:String):ByteArray {
+  var b:ByteArray = new ByteArray();
+  for (var k:int = 0; k < h.length; k += 2) b.writeByte(parseInt(h.substr(k, 2), 16));
+  return b;
+}
+var xz:String = "c800008000490000000000000000399dc8c32333afd03022ad2a9d4ab23cb281e7173980d279aa96f6d60439387df25a361e6cad2824572838209183ffffe4050000";
+var props200:ByteArray = fromHex(xz);
+props200.uncompress("lzma");
+trace("lzma properties 200", props200.toString());
+for each (var props:int in [225, 255]) {
+  var badProps:ByteArray = fromHex(xz);
+  badProps[0] = props;
+  probe("lzma properties " + props, function():* { badProps.uncompress("lzma"); });
+}
+// Zeros decode to zeros for as long as they last: past them is past the stream.
+var zeros:ByteArray = new ByteArray();
+for (i = 0; i < 26; i++) zeros.writeByte(i == 0 ? 0x5d : i == 3 ? 1 : i == 5 ? 0xa0 : i == 6 ? 0x86 : i == 7 ? 1 : 0);
+probe("lzma past its stream", function():* { zeros.uncompress("lzma"); });
 // The domain memory's bytes cannot change under it.
 var memory:ByteArray = new ByteArray();
 memory.length = 1024;
