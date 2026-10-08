@@ -27,7 +27,9 @@ import { lookup } from "node:dns/promises";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { connect, isIP } from "node:net";
+import type { Transform } from "node:stream";
 import * as tls from "node:tls";
+import { createBrotliDecompress, createGunzip, createInflate, createInflateRaw } from "node:zlib";
 import { type AddressClass, addressClass, badPort, RANK } from "./addresses.ts";
 import {
   allowsAccess,
@@ -814,9 +816,15 @@ export class Network {
       let timer: NodeJS.Timeout;
       const overall = setTimeout(() => stop(new Refused("it took too long")), deadline);
       let finished = false;
+      /** What else a stop takes down: a decompressor. */
+      const stopping: (() => void)[] = [];
       const stop = (error: Refused) => {
         if (!finished) {
           finished = true;
+          for (const down of stopping) {
+            down();
+          }
+
           clearTimeout(timer);
           clearTimeout(overall);
           signal.removeEventListener("abort", abort);
@@ -865,11 +873,22 @@ export class Network {
           return;
         }
 
+        // A body a server compressed though no one asked: decompressed as it
+        // comes, the limits counting what comes out.
+        const encoding = String(response.headers["content-encoding"] ?? "")
+          .trim()
+          .toLowerCase();
+        const coded = DECODED.has(encoding);
+        let decoder: Transform | null = null;
+        if (coded) {
+          const named = (n: string) => /^content-(encoding|length)$/i.test(n);
+          received.splice(0, received.length, ...received.filter(([n]) => !named(n)));
+        }
+
         const chunks: Buffer[] = [];
         let length = 0;
         const budget = options.budget;
-        arm();
-        response.on("data", (chunk: Buffer) => {
+        const take = (chunk: Buffer) => {
           length += chunk.length;
           if (length > options.max) {
             stop(new Refused(`its response is larger than ${options.max} bytes`));
@@ -888,10 +907,10 @@ export class Network {
 
           chunks.push(chunk);
           arm();
-        });
+        };
         // One copy, into memory of its own: Buffer.concat may hand out a slice of
         // Node's shared pool, whose rest IPC would carry to the page with it.
-        response.on("end", () => {
+        const done = () => {
           const bytes = new Uint8Array(length);
           let at = 0;
           for (const chunk of chunks.splice(0)) {
@@ -900,12 +919,58 @@ export class Network {
           }
 
           end(bytes);
-        });
+        };
+        arm();
+        if (!coded) {
+          response.on("data", take);
+          response.on("end", done);
+        } else {
+          response.on("data", (chunk: Buffer) => {
+            arm();
+            if (!decoder) {
+              // Deflate may come with zlib's header or without: its first bytes tell.
+              decoder = decoderFor(encoding, chunk);
+              decoder.on("data", take);
+              decoder.on("end", done);
+              decoder.on("error", () => stop(new Refused("its response does not decompress")));
+              decoder.on("drain", () => response.resume());
+              stopping.push(() => decoder?.destroy());
+            }
+
+            if (!decoder.write(chunk)) {
+              response.pause();
+            }
+          });
+          response.on("end", () => (decoder ? decoder.end() : done()));
+        }
+
         response.on("error", (error) => stop(new Refused(error.message)));
         response.on("aborted", () => stop(new Refused("the response broke off")));
       });
       request.end(body ?? undefined);
     });
+  }
+}
+
+/** What a server may send compressed, unasked, that is decompressed; any other goes as it came. */
+const DECODED = new Set(["gzip", "x-gzip", "br", "deflate"]);
+
+/**
+ * What decompresses a body of `encoding`, one of DECODED. Deflate is
+ * zlib's stream, or a raw one where `first`, its first chunk, has no zlib
+ * header, as some servers send it.
+ */
+function decoderFor(encoding: string, first: Buffer): Transform {
+  switch (encoding) {
+    case "br":
+      return createBrotliDecompress();
+    case "deflate": {
+      const header =
+        first.length >= 2 && (first[0] & 0x0f) === 8 && first.readUInt16BE(0) % 31 === 0;
+      return header ? createInflate() : createInflateRaw();
+    }
+    default:
+      return createGunzip();
   }
 }
 

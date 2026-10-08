@@ -4113,7 +4113,10 @@ machine. Every redirect is judged as a request of its own, a POST
 redirected by a 301, 302 or 303 going on as a GET without its body, to
 http or https only and ten at most. HTTPS is verified against Node's
 roots and the system's. A response is read up to 128 MB, and a movie's
-responses under way hold 256 MB at most all told, past which the next is
+responses under way hold 256 MB at most all told (no compression is
+asked for, and a body a server compresses anyway, gzip, deflate or br, is
+decompressed as it comes, the limits counting what comes out, so a
+small bomb stops at them), past which the next is
 refused (each is copied once, into memory of its own, before IPC copies
 it to the page); a body is sent up to 32 MB, a URL up to 64 KB, 32 headers in 8 KB; a request that hears
 nothing for 30 seconds fails, and one that takes five minutes all told,

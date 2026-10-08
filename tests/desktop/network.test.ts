@@ -23,6 +23,7 @@ import { createServer as createTcpServer, type Server as TcpServer } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } from "node:zlib";
 import { addressClass } from "../../apps/desktop/src/main/addresses.ts";
 import {
   type Limits,
@@ -128,6 +129,29 @@ function serve(name: string): Handler {
 
         response.end();
         return;
+      case "/coded": {
+        // Compressed though no one asked, as some servers do.
+        const how = url.searchParams.get("how") ?? "gzip";
+        const size = Number(url.searchParams.get("size") ?? "11");
+        const plain = Buffer.from("x".repeat(size));
+        const body =
+          how === "br"
+            ? brotliCompressSync(plain)
+            : how === "deflate"
+              ? deflateSync(plain)
+              : how === "raw"
+                ? deflateRawSync(plain)
+                : how === "bad"
+                  ? Buffer.from("not gzip at all")
+                  : gzipSync(plain);
+        response
+          .writeHead(200, {
+            "content-encoding": how === "raw" ? "deflate" : how === "bad" ? "gzip" : how,
+            "content-length": body.length,
+          })
+          .end(body);
+        return;
+      }
       case "/hold":
         // 4000 bytes now, the rest a moment later.
         response.writeHead(200);
@@ -595,6 +619,33 @@ test("a movie's responses hold no more than their budget at once, given back as 
   // A response is bytes of its own, not a view of a larger buffer.
   const { bytes } = await ask(net, `${swf()}/data.txt`);
   assert.equal(bytes?.byteLength, bytes?.buffer.byteLength);
+});
+
+test("a body compressed unasked is decompressed, within the limits", async () => {
+  policies.clear();
+  const net = await playing(`${swf()}/movie.swf`, { limits: { response: 100_000 } });
+  for (const how of ["gzip", "deflate", "raw", "br"]) {
+    const response = await ask(net, `${swf()}/coded?how=${how}`);
+    assert.equal(text(response.bytes), "x".repeat(11), how);
+    assert.ok(
+      !response.headers.some(([n]) => /^content-(encoding|length)$/i.test(n)),
+      `${how} keeps its encoding's headers`,
+    );
+  }
+
+  // A bomb: 50 MB of x's in a few kilobytes, stopped at the limit.
+  for (const how of ["gzip", "br"]) {
+    assert.match(
+      await outcome(ask(net, `${swf()}/coded?how=${how}&size=50000000`)),
+      /larger than 100000 bytes/,
+      how,
+    );
+  }
+
+  assert.match(await outcome(ask(net, `${swf()}/coded?how=bad`)), /does not decompress/);
+  // No Accept-Encoding goes out.
+  const echo = JSON.parse((await outcome(ask(net, `${swf()}/echo`))) as string);
+  assert.equal(echo.headers["accept-encoding"], undefined);
 });
 
 test("HTTPS: verified, and its policies' secure flag kept", async (t) => {
