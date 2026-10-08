@@ -80,6 +80,14 @@ function serve(name: string): Handler {
   return (request, response, inside) => {
     const url = new URL(request.url ?? "/", "http://x");
     const key = `${name}${inside ? "-inside" : ""}${url.pathname}`;
+    if (url.pathname === "/drip" || policies.get(key) === "drip") {
+      // A byte every 50 ms, without end.
+      response.writeHead(200, { "content-type": "text/x-cross-domain-policy" });
+      const timer = setInterval(() => response.write("<"), 50);
+      response.on("close", () => clearInterval(timer));
+      return;
+    }
+
     if (url.pathname.endsWith(".xml")) {
       const body = policies.get(key);
       if (body === undefined || body === null) {
@@ -540,6 +548,20 @@ test("responses are bounded in size and in time, and requests in number", async 
   assert.match(await outcome(ask(net, `${swf()}/big`)), /larger than 1000 bytes/);
   assert.match(await outcome(ask(net, `${swf()}/chunked-big`)), /larger than 1000 bytes/);
   assert.match(await outcome(ask(net, `${swf()}/slow`)), /timed out/);
+
+  // A server that trickles forever holds a request no longer than its deadline.
+  const dripping = await playing(`${swf()}/movie.swf`, {
+    limits: { timeout: 1000, deadline: 400, policyTimeout: 300 },
+  });
+  let started = performance.now();
+  assert.match(await outcome(ask(dripping, `${swf()}/drip`)), /took too long/);
+  assert.ok(performance.now() - started < 1000);
+  // Nor its policy file, which counts as none.
+  policies.set("other/crossdomain.xml", "drip");
+  started = performance.now();
+  assert.match(await outcome(ask(dripping, `${other()}/data.txt`)), /no policy file/);
+  assert.ok(performance.now() - started < 1000);
+  policies.clear();
 
   // One at a time, one waiting, and a third refused.
   const first = outcome(ask(net, `${swf()}/slow`));

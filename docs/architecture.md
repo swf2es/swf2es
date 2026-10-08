@@ -4116,8 +4116,9 @@ roots and the system's. A response is read up to 128 MB, and a movie's
 responses under way hold 256 MB at most all told, past which the next is
 refused (each is copied once, into memory of its own, before IPC copies
 it to the page); a body is sent up to 32 MB, a URL up to 64 KB, 32 headers in 8 KB; a request that hears
-nothing for 30 seconds fails (a policy file in 10, port 843's socket
-policy in 3); 16 requests run at once, a thousand more wait, and the rest
+nothing for 30 seconds fails, and one that takes five minutes all told,
+however its bytes trickle in (a policy file's whole fetch ten seconds,
+port 843's socket policy three); 16 requests run at once, a thousand more wait, and the rest
 are refused. A sendToURL's response is not read. Requests the page aborts
 are aborted, and a movie's all are as the next opens, closes, or the page
 reloads. A refused request is a failed load to the SWF (IOErrorEvent, or

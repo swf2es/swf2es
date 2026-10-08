@@ -80,6 +80,12 @@ export interface Limits {
   redirects: number;
   /** From the request to its response's headers, and from one chunk of its body to the next. */
   timeout: number;
+  /**
+   * How long a request may take all told, however its bytes trickle in, so
+   * that a server sending a byte a second holds no turn for long; a policy
+   * file's whole fetch takes `policyTimeout` at most, as a movie keeps it.
+   */
+  deadline: number;
   /** How long a policy file may take, and port 843's socket policy, which most servers lack. */
   policyTimeout: number;
   masterSocketTimeout: number;
@@ -105,6 +111,7 @@ export const LIMITS: Limits = {
   policy: 1024 * 1024,
   redirects: 10,
   timeout: 30_000,
+  deadline: 300_000,
   policyTimeout: 10_000,
   masterSocketTimeout: 3_000,
   buffered: 256 * 1024 * 1024,
@@ -659,6 +666,7 @@ export class Network {
         max: this.limits.policy,
         referer: null,
         timeout: this.limits.policyTimeout,
+        deadline: this.limits.policyTimeout,
       });
     } catch {
       return null;
@@ -751,11 +759,13 @@ export class Network {
       max: number;
       referer: string | null;
       timeout?: number;
+      deadline?: number;
       /** Where the bytes read count against the movie's `buffered`; a policy file's do not. */
       budget?: Budget;
     },
   ): Promise<NetResponse> {
     const timeout = options.timeout ?? this.limits.timeout;
+    const deadline = options.deadline ?? this.limits.deadline;
     return new Promise((answer, fail) => {
       if (signal.aborted) {
         fail(new Refused("aborted"));
@@ -802,11 +812,13 @@ export class Network {
         ...(https ? { servername: isIP(host) ? undefined : host, ca: this.ca } : {}),
       });
       let timer: NodeJS.Timeout;
+      const overall = setTimeout(() => stop(new Refused("it took too long")), deadline);
       let finished = false;
       const stop = (error: Refused) => {
         if (!finished) {
           finished = true;
           clearTimeout(timer);
+          clearTimeout(overall);
           signal.removeEventListener("abort", abort);
           request.destroy();
           fail(error);
@@ -836,6 +848,7 @@ export class Network {
           if (!finished) {
             finished = true;
             clearTimeout(timer);
+            clearTimeout(overall);
             signal.removeEventListener("abort", abort);
             request.destroy();
             answer({ bytes, status, headers: received });
