@@ -29,7 +29,7 @@ import { request as httpsRequest } from "node:https";
 import { connect, isIP } from "node:net";
 import type { Transform } from "node:stream";
 import * as tls from "node:tls";
-import { createBrotliDecompress, createGunzip, createInflate, createInflateRaw } from "node:zlib";
+import { createBrotliDecompress, createInflate, createInflateRaw } from "node:zlib";
 import { type AddressClass, addressClass, badPort, RANK } from "./addresses.ts";
 import {
   allowsAccess,
@@ -881,12 +881,19 @@ export class Network {
         }
 
         // A body a server compressed though no one asked: decompressed as it
-        // comes, the limits counting what comes out.
-        const encoding = String(response.headers["content-encoding"] ?? "")
-          .trim()
-          .toLowerCase();
-        const coded = DECODED.has(encoding);
-        let decoder: Transform | null = null;
+        // comes, the limits counting what comes out. One coding is undone;
+        // more than one, which no server needs, is refused.
+        const codings = String(response.headers["content-encoding"] ?? "")
+          .split(",")
+          .map((c) => c.trim().toLowerCase())
+          .filter((c) => c !== "" && c !== "identity");
+        if (codings.length > 1) {
+          stop(new Refused(`its response is encoded ${codings.length} times`));
+          return;
+        }
+
+        const coding = codings[0] ?? "";
+        const coded = DECODED.has(coding);
         if (coded) {
           const named = (n: string) => /^content-(encoding|length)$/i.test(n);
           received.splice(0, received.length, ...received.filter(([n]) => !named(n)));
@@ -954,23 +961,18 @@ export class Network {
           response.on("data", take);
           response.on("end", done);
         } else {
+          const decompressor = new Decompressor(coding, take, done, () =>
+            stop(new Refused("its response does not decompress")),
+          );
+          stopping.push(() => decompressor.destroy());
+          decompressor.onDrain = () => response.resume();
           response.on("data", (chunk: Buffer) => {
             arm();
-            if (!decoder) {
-              // Deflate may come with zlib's header or without: its first bytes tell.
-              decoder = decoderFor(encoding, chunk);
-              decoder.on("data", take);
-              decoder.on("end", done);
-              decoder.on("error", () => stop(new Refused("its response does not decompress")));
-              decoder.on("drain", () => response.resume());
-              stopping.push(() => decoder?.destroy());
-            }
-
-            if (!decoder.write(chunk)) {
+            if (!decompressor.write(chunk)) {
               response.pause();
             }
           });
-          response.on("end", () => (decoder ? decoder.end() : done()));
+          response.on("end", () => decompressor.end());
         }
 
         response.on("error", (error) => stop(new Refused(error.message)));
@@ -984,22 +986,150 @@ export class Network {
 /** What a server may send compressed, unasked, that is decompressed; any other goes as it came. */
 const DECODED = new Set(["gzip", "x-gzip", "br", "deflate"]);
 
+/** The longest gzip header read, its name and comment included. */
+const GZIP_HEADER_MAX = 64 * 1024;
+
 /**
- * What decompresses a body of `encoding`, one of DECODED. Deflate is
- * zlib's stream, or a raw one where `first`, its first chunk, has no zlib
- * header, as some servers send it.
+ * The end of a gzip header at the start of `bytes`: its length, 0 while
+ * more is needed, -1 if it is no gzip header.
  */
-function decoderFor(encoding: string, first: Buffer): Transform {
-  switch (encoding) {
-    case "br":
-      return createBrotliDecompress();
-    case "deflate": {
-      const header =
-        first.length >= 2 && (first[0] & 0x0f) === 8 && first.readUInt16BE(0) % 31 === 0;
-      return header ? createInflate() : createInflateRaw();
+function gzipHeader(bytes: Uint8Array): number {
+  if (bytes.length < 10) {
+    return bytes.length >= 1 && bytes[0] !== 0x1f ? -1 : 0;
+  }
+
+  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b || bytes[2] !== 8) {
+    return -1;
+  }
+
+  const flags = bytes[3];
+  let at = 10;
+  if (flags & 4) {
+    if (bytes.length < at + 2) {
+      return 0;
     }
-    default:
-      return createGunzip();
+
+    at += 2 + (bytes[at] | (bytes[at + 1] << 8));
+  }
+
+  for (const flag of [8, 16]) {
+    if (flags & flag) {
+      const nul = bytes.indexOf(0, at);
+      if (nul < 0) {
+        return 0;
+      }
+
+      at = nul + 1;
+    }
+  }
+
+  if (flags & 2) {
+    at += 2;
+  }
+
+  return bytes.length >= at ? at : 0;
+}
+
+/**
+ * Decompresses one body of gzip, deflate or br, choosing its inflater
+ * once its first bytes are in: gzip's header is read here and its deflate
+ * stream inflated raw, so that what follows the stream (its footer, and
+ * whatever a server put after it) is ignored, as Chromium ignores it;
+ * deflate is zlib's stream or a raw one, as its first two bytes tell.
+ */
+class Decompressor {
+  private head = new Uint8Array(0);
+  private inflater: Transform | null = null;
+  /** Called once the inflater wants more after a write said to wait. */
+  onDrain: () => void = () => {};
+
+  private readonly coding: string;
+  private readonly data: (chunk: Buffer) => void;
+  private readonly done: () => void;
+  private readonly failed: () => void;
+
+  constructor(coding: string, data: (chunk: Buffer) => void, done: () => void, failed: () => void) {
+    this.coding = coding;
+    this.data = data;
+    this.done = done;
+    this.failed = failed;
+  }
+
+  /** Whether more may be written now. */
+  write(chunk: Buffer): boolean {
+    if (this.inflater) {
+      return this.inflater.write(chunk);
+    }
+
+    const head = new Uint8Array(this.head.length + chunk.length);
+    head.set(this.head);
+    head.set(chunk, this.head.length);
+    this.head = head;
+    return this.choose(false);
+  }
+
+  end(): void {
+    if (!this.inflater && !this.choose(true)) {
+      return;
+    }
+
+    if (this.inflater) {
+      this.inflater.end();
+    } else {
+      // Nothing came: nothing to undo.
+      this.done();
+    }
+  }
+
+  destroy(): void {
+    this.inflater?.destroy();
+  }
+
+  /** Make the inflater once the bytes so far tell which (`last`: no more come); false on failure. */
+  private choose(last: boolean): boolean {
+    const head = this.head;
+    if (head.length === 0) {
+      return true;
+    }
+
+    let inflater: Transform;
+    let skip = 0;
+    switch (this.coding) {
+      case "br":
+        inflater = createBrotliDecompress();
+        break;
+      case "deflate": {
+        if (head.length < 2 && !last) {
+          return true;
+        }
+
+        const zlib =
+          head.length >= 2 && (head[0] & 0x0f) === 8 && ((head[0] << 8) | head[1]) % 31 === 0;
+        inflater = zlib ? createInflate() : createInflateRaw();
+        break;
+      }
+      default: {
+        skip = gzipHeader(head);
+        if (skip === 0 && !last && head.length <= GZIP_HEADER_MAX) {
+          return true;
+        }
+
+        if (skip <= 0) {
+          this.failed();
+          return false;
+        }
+
+        inflater = createInflateRaw();
+      }
+    }
+
+    this.inflater = inflater;
+    this.head = new Uint8Array(0);
+    inflater.on("data", this.data);
+    inflater.on("end", this.done);
+    inflater.on("error", this.failed);
+    inflater.on("drain", () => this.onDrain());
+    return inflater.write(head.subarray(skip));
   }
 }
 

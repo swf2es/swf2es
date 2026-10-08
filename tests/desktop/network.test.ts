@@ -137,7 +137,7 @@ function serve(name: string): Handler {
         const how = url.searchParams.get("how") ?? "gzip";
         const size = Number(url.searchParams.get("size") ?? "11");
         const plain = Buffer.from("x".repeat(size));
-        const body =
+        let body =
           how === "br"
             ? brotliCompressSync(plain)
             : how === "deflate"
@@ -146,13 +146,47 @@ function serve(name: string): Handler {
                 ? deflateRawSync(plain)
                 : how === "bad"
                   ? Buffer.from("not gzip at all")
-                  : gzipSync(plain);
-        response
-          .writeHead(200, {
-            "content-encoding": how === "raw" ? "deflate" : how === "bad" ? "gzip" : how,
-            "content-length": body.length,
-          })
-          .end(body);
+                  : how === "twice"
+                    ? gzipSync(gzipSync(plain))
+                    : gzipSync(plain);
+        if (how === "named") {
+          // A gzip header with a file name and a comment, as zlib writes none.
+          const plainGzip = gzipSync(plain);
+          plainGzip[3] |= 8 | 16;
+          body = Buffer.concat([
+            plainGzip.subarray(0, 10),
+            Buffer.from("name.txt\0a comment\0"),
+            plainGzip.subarray(10),
+          ]);
+        }
+
+        if (url.searchParams.has("trail")) {
+          body = Buffer.concat([body, Buffer.from("garbage after the footer")]);
+        }
+
+        const encoding =
+          how === "raw" ? "deflate" : how === "bad" || how === "named" ? "gzip" : how;
+        response.writeHead(200, {
+          "content-encoding": how === "twice" ? "gzip, gzip" : encoding,
+          "content-length": body.length,
+        });
+        // A byte at a time, where asked: the first bytes alone tell the format.
+        if (url.searchParams.has("split")) {
+          let at = 0;
+          const next = () => {
+            if (at < body.length) {
+              response.write(body.subarray(at, at + 1));
+              at++;
+              setTimeout(next, 1);
+            } else {
+              response.end();
+            }
+          };
+          next();
+        } else {
+          response.end(body);
+        }
+
         return;
       }
       case "/hold":
@@ -711,6 +745,23 @@ test("a body compressed unasked is decompressed, within the limits", async () =>
   }
 
   assert.match(await outcome(ask(net, `${swf()}/coded?how=bad`)), /does not decompress/);
+  // Its first bytes one by one, its header's name and comment, and what a
+  // server put after its footer, which Chromium ignores too.
+  for (const query of [
+    "how=deflate&split",
+    "how=raw&split",
+    "how=gzip&split",
+    "how=br&split",
+    "how=named",
+    "how=named&split",
+    "how=gzip&trail",
+    "how=deflate&trail",
+  ]) {
+    assert.equal(text((await ask(net, `${swf()}/coded?${query}`)).bytes), "x".repeat(11), query);
+  }
+
+  // Two codings, which no server needs, refused rather than half undone.
+  assert.match(await outcome(ask(net, `${swf()}/coded?how=twice`)), /encoded 2 times/);
   // No Accept-Encoding goes out.
   const echo = JSON.parse((await outcome(ask(net, `${swf()}/echo`))) as string);
   assert.equal(echo.headers["accept-encoding"], undefined);
