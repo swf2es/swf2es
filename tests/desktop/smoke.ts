@@ -231,9 +231,11 @@ async function withApp(
 
       return port !== "";
     });
+    // The window's page, as DevTools lists it: a cold start on a CI runner
+    // has taken more than 10 s to open it.
     let target: { webSocketDebuggerUrl: string } | undefined;
-    for (let tries = 0; !target; tries++) {
-      let targets: { type: string; url: string; webSocketDebuggerUrl: string }[] = [];
+    let targets: { type: string; url: string; webSocketDebuggerUrl: string }[] = [];
+    for (let waited = 0; !target; waited += 250) {
       try {
         targets = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as typeof targets;
       } catch {
@@ -242,8 +244,14 @@ async function withApp(
 
       target = targets.find((t) => t.type === "page" && t.url.startsWith("swf2es://app/"));
       if (!target) {
-        assert.ok(tries < 100, JSON.stringify(targets));
-        await sleep(100);
+        if (exited || waited > TIMEOUT) {
+          throw new Error(
+            `the app's page on swf2es://app/: ${exited ?? "timed out"}, ` +
+              `DevTools listing ${JSON.stringify(targets)}\nstderr:\n${stderr}`,
+          );
+        }
+
+        await sleep(250);
       }
     }
 
