@@ -1564,10 +1564,12 @@ calls, an Array's forEach or sort, `.call`, `.apply`, `o.f()`, a
 timer), or a frame line it cannot read, leaves the caller untold: then the URL of every SWF
 whose code was ever loaded is asked, and all must pass, so single-origin
 content works from timers and callbacks, and mixed-origin content fails
-closed. Only V8's stacks are read so: JavaScriptCore elides tail calls,
-and the runtime's chain is `return f(...)` throughout, so a call through
-a function value there looks direct; its stacks, and SpiderMonkey's,
-which have the same form, leave every caller untold. If the page froze
+closed. Only V8's stacks are read so. JavaScriptCore elides tail calls,
+which the runtime keeps out of its call paths, and names a SWF's module
+by its Blob URL, but the libraries' modules, made by Function there,
+name no script, as a native's frame does: a frame that names none could
+be either, so its stacks, and SpiderMonkey's, which have the same form,
+leave every caller untold until the libraries name theirs too. If the page froze
 `Error.stackTraceLimit` (SES lockdown), the caller is untold too.
 
 That has a cost in mixed-origin content: ExternalInterface reached by a

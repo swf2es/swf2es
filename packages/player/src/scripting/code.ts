@@ -612,11 +612,12 @@ export class Code {
    * The frame accounting assumes every call keeps its frame: an engine
    * that elides tail calls (JavaScriptCore's proper tail calls) would drop
    * the runtime's frames, `return f(...)` all of them, and a call through
-   * a function value would look direct. callingScript therefore reads V8's
-   * stacks alone, and fails closed on any other engine's. Reading
-   * JavaScriptCore's once its runtime frames survive also needs the
-   * libraries' modules to name their scripts, as SWFs' do there: a frame
-   * that names none may be a native's as well as a library's.
+   * a function value would look direct. The runtime keeps its frames now,
+   * calling in no tail position, and a SWF's module names its script on
+   * JavaScriptCore too, but the libraries' modules do not there: a frame
+   * that names none may be a native's as well as a library's. So
+   * callingScript reads V8's stacks alone, and fails closed on any other
+   * engine's, until the libraries name their scripts as well.
    */
   callerUrl(own: number): string | null {
     const stack = wholeStack();
@@ -826,7 +827,6 @@ function sha256Text(text: string): Promise<string> {
   return sha256(new TextEncoder().encode(text));
 }
 
-
 /**
  * The whole stack here, the engine's frame limit lifted for this capture;
  * null where the limit cannot be lifted, as on a page that froze Error
@@ -848,9 +848,9 @@ function wholeStack(): string | null {
   }
 }
 
-/** Whether `stack` is V8's: an error's line, then "    at" frames. */
-function isV8(stack: string): boolean {
-  return /^\s+at /m.test(stack) && !/^\s+at /.test(stack.split("\n")[0] ?? "");
+/** Whether a stack's lines are V8's, "    at" frames, as avm2.stackFrames tells them. */
+function isV8(lines: readonly string[]): boolean {
+  return lines.some((line) => /^\s*at /.test(line));
 }
 
 /**
@@ -863,7 +863,8 @@ function isV8(stack: string): boolean {
  * there, the player's or the runtime's code calling a function value (a
  * dispatchEvent's listener, an Array's forEach or sort, `.call`,
  * `.apply`, `o.f()`), or a frame line it cannot read, is no one's: null.
- * So is any other engine's stack, whose frames a tail call may have taken.
+ * So is any other engine's stack: JavaScriptCore's, whose libraries'
+ * frames name no script, and SpiderMonkey's, which reads the same.
  */
 export function callingScript(
   stack: string,
@@ -871,7 +872,7 @@ export function callingScript(
   modules: { isModule(script: string): boolean; isLibrary(script: string): boolean },
   byName: readonly string[] | null,
 ): string | null {
-  if (!isV8(stack)) {
+  if (!isV8(stack.split("\n"))) {
     return null;
   }
 
@@ -917,17 +918,18 @@ function siteScript(site: string): string | null {
  * frame line it cannot read. See frameLocations.
  */
 export function frameSites(stack: string | undefined): (string | null)[] {
+  // The frame lines as avm2.stackFrames picks them; each one's site read from
+  // where it ends, where stackFrames reads the script up to the first "(".
   const lines = stack?.split("\n") ?? [];
-  // V8 starts with the error's own line, which SpiderMonkey and JavaScriptCore leave out.
-  const v8 = lines.length > 0 && !/@|^\s+at /.test(lines[0]);
+  const v8 = isV8(lines);
   const sites: (string | null)[] = [];
-  for (const line of v8 ? lines.slice(1) : lines) {
-    if (line.trim() === "") {
+  for (const line of lines) {
+    if (v8 ? !/^\s*at /.test(line) : !line.includes("@")) {
       continue;
     }
 
     let location: string | null = null;
-    const v8Frame = /^\s+at (.*)$/.exec(line);
+    const v8Frame = /^\s*at (.*)$/.exec(line);
     if (v8Frame) {
       const text = v8Frame[1];
       const open = text.lastIndexOf(" (");
