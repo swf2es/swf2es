@@ -178,7 +178,7 @@ async function withApp(
     for (let tries = 0; !target; tries++) {
       let targets: { type: string; url: string; webSocketDebuggerUrl: string }[] = [];
       try {
-        targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+        targets = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as typeof targets;
       } catch {
         // Not listening yet.
       }
