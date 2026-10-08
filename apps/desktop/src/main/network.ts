@@ -568,7 +568,8 @@ export class Network {
         // sendToURL's answer is no one's to read.
         read: request.purpose !== "send",
         max: this.limits.response,
-        referer: session.origin?.url.href ?? null,
+        // The SWF's URL to its own origin, only that origin elsewhere, as browsers now send it.
+        referer: !session.origin ? null : same ? session.origin.url.href : `${origin}/`,
       });
       const next = redirectOf(url, response);
       if (!next) {

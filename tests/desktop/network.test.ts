@@ -237,6 +237,9 @@ test("a remote SWF loads itself, then reads its own origin", async () => {
   assert.equal(await outcome(ask(net, `${swf()}/data.txt`)), "swf/data.txt");
   const echo = JSON.parse((await outcome(ask(net, `${swf()}/echo`))) as string);
   assert.equal(echo.headers.referer, `${swf()}/movie.swf`);
+  // Elsewhere, its origin alone.
+  const away = JSON.parse((await outcome(ask(net, `${other()}/echo`, "content"))) as string);
+  assert.equal(away.headers.referer, `${swf()}/`);
   assert.equal(echo.headers["x-flash-version"], "32,0,0,465");
   assert.equal(echo.headers.cookie, undefined);
   // No cookie for a jar there is none of; the other headers as they came.
