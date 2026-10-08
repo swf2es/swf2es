@@ -376,6 +376,26 @@ try {
       await evaluate<number>(`fetch(${JSON.stringify(url)}).then((r) => r.status)`),
       404,
     );
+
+    // A SWF whose header names 4 GB and whose LZMA stream would decode zeros
+    // all the way: the main process reads its start alone, and the page
+    // refuses it at once, saying so.
+    const bomb = `${site}bomb.swf`;
+    const bytes = new Uint8Array(30);
+    bytes.set([
+      0x5a, 0x57, 0x53, 10, 0xff, 0xff, 0xff, 0xff, 13, 0, 0, 0, 0x5d, 0xff, 0xff, 0xff, 0xff,
+    ]);
+    writeFileSync(bomb, bytes);
+    const started = performance.now();
+    assert.equal(await again([bomb]), 0);
+    let failure = "";
+    for (let tries = 0; !failure.includes("bomb.swf") && tries < 100; tries++) {
+      failure = await evaluate<string>(`document.getElementById("failure").textContent`);
+      await sleep(50);
+    }
+
+    assert.match(failure, /bomb\.swf did not play/);
+    assert.ok(performance.now() - started < 5000, `${performance.now() - started} ms`);
   });
 
   // Without playerglobal.abc, the page says what is missing and why it is not there.

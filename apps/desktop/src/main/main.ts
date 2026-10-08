@@ -4,10 +4,10 @@
 //
 //   electron apps/desktop [--trace] [file.swf]
 import { statSync } from "node:fs";
-import { open as openFile, readFile } from "node:fs/promises";
+import { open as openFile } from "node:fs/promises";
 import { basename, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readSwf, usesNetwork } from "@swf2es/format";
+import { fileAttributes } from "@swf2es/format";
 import {
   app,
   BrowserWindow,
@@ -120,13 +120,18 @@ function openExternal(url: string): void {
   void shell.openExternal(url);
 }
 
-async function readStart(path: string, length: number): Promise<Uint8Array | null> {
+/** How much of a SWF the main process reads to choose its sandbox: far more than FileAttributes takes compressed. */
+const START = 64 * 1024;
+const USE_NETWORK = 0x01;
+
+/** The first `length` bytes of the file at `path`, or as many as it has, at least `least`; null otherwise. */
+async function readStart(path: string, length: number, least = 8): Promise<Uint8Array | null> {
   try {
     const file = await openFile(path);
     try {
       const bytes = new Uint8Array(length);
       const { bytesRead } = await file.read(bytes, 0, length, 0);
-      return bytesRead === length ? bytes : null;
+      return bytesRead >= Math.min(least, length) ? bytes.subarray(0, bytesRead) : null;
     } finally {
       await file.close();
     }
@@ -144,21 +149,16 @@ function refuse(message: string, detail: string): void {
 /** Play the SWF at `path` in the window, in place of what plays, in its sandbox. */
 async function open(path: string): Promise<void> {
   const name = basename(path);
-  let bytes: Uint8Array;
-  try {
-    bytes = new Uint8Array(await readFile(path));
-  } catch (error) {
-    refuse(`${name} could not be opened.`, String(error));
-    return;
-  }
-
-  let network: boolean;
-  try {
-    network = usesNetwork(readSwf(bytes));
-  } catch {
+  // Its start alone: the main process never decompresses a SWF whole, whose
+  // header may name 4 GB. FileAttributes, the first tag, lies in it.
+  const head = await readStart(path, START);
+  const signature = head ? String.fromCharCode(...head.subarray(0, 3)) : "";
+  if (!head || (signature !== "FWS" && signature !== "CWS" && signature !== "ZWS")) {
     refuse(`${name} is not a SWF.`, path);
     return;
   }
+
+  const network = (fileAttributes(head) & USE_NETWORK) !== 0;
 
   let url: string;
   try {
