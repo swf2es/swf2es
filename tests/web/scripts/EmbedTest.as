@@ -27,7 +27,7 @@ package {
           throw new Error("thrown in the SWF");
         });
         // Names of the element's own, which it must refuse.
-        for each (var name:String in ["destroy", "getAttribute", "dispatchEvent"]) {
+        for each (var name:String in ["destroy", "getAttribute", "dispatchEvent", "then"]) {
           ExternalInterface.addCallback(name, function ():String {
             return "the SWF's";
           });
@@ -36,13 +36,19 @@ package {
         var key:Object = {};
         key["a:(window.swf2esPwned=1),b"] = 1;
         ExternalInterface.call("pageCapture", key);
+        // The same key into an inline function: data, never code, either way.
+        ExternalInterface.call("function (o) { pageCapture(o); }", key);
         var hello:* = ExternalInterface.call("pageHello", "hi", [1, 2], {k: "v", d: new Date(5)});
         var inline:* = ExternalInterface.call("function (a) { return a * 2; }", 21);
+        var href:* = ExternalInterface.call("function(){return window.location.href;}");
+        var sum:* = ExternalInterface.call("function(a,b){return a+b;}", 2, 3);
         var params:Object = loaderInfo.parameters;
         ExternalInterface.call("report", {
           objectID: ExternalInterface.objectID,
           hello: hello,
           inline: inline,
+          href: href,
+          sum: sum,
           greeting: params.greeting,
           n: params.n
         });

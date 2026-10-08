@@ -216,11 +216,27 @@ function value(node: Element): PageValue {
   }
 }
 
-/** An invocation's function name and arguments, as playerglobal's call sends one when evalJS declined. */
+/** How playerglobal's `call` begins and ends the name in the invocation it sends. */
+const INVOKE = '<invoke name="';
+const NAME_END = '" returntype="xml"><arguments>';
+
+/**
+ * An invocation's function name and arguments, as playerglobal's call
+ * sends one. It writes the name as it is, unescaped, quotes and all, as an
+ * inline function's source has them, so the name is what lies between the
+ * start and the first end that follows it: the arguments come after, so
+ * nothing in them can move where the name ends.
+ */
 export function readInvocation(xml: string): { name: string; args: PageValue[] } {
-  const invoke = parse(xml);
-  const args = invoke.children.find((c) => c.name === "arguments")?.children ?? [];
-  return { name: invoke.attributes.get("name") ?? "", args: args.map(value) };
+  const end = xml.indexOf(NAME_END, INVOKE.length);
+  if (!xml.startsWith(INVOKE) || end < 0) {
+    throw new Malformed("no invocation");
+  }
+
+  const args = parse(
+    xml.slice(end + NAME_END.length - "<arguments>".length, xml.lastIndexOf("</invoke>")),
+  );
+  return { name: xml.slice(INVOKE.length, end), args: args.children.map(value) };
 }
 
 /** What a page calls a SWF's callback with: Flash's invocation, answered in XML. */
@@ -228,33 +244,35 @@ export function invocation(name: string, args: readonly PageValue[]): string {
   return `<invoke name="${escapeXml(name)}" returntype="xml">${argumentsToXml(args)}</invoke>`;
 }
 
-/** A function name that is a path of identifiers, `a.b.c`. */
+/** A function name that is a path of identifiers, `a.b.c`, around which spaces do not count. */
 const PATH = /^[\p{L}_$][\p{L}\p{N}_$]*(\.[\p{L}_$][\p{L}\p{N}_$]*)*$/u;
-
-/** What playerglobal's `call` writes before the function's name (not ActiveX's, which this host is not). */
-const CALL = "try { __flash__toXML(";
 
 /** What the page's `window` runs: the global object of where this runs. */
 const page = globalThis as unknown as Record<string, unknown>;
 
 /**
- * A function name ExternalInterface.call gives, found from the page's
- * global object along its dots, with what holds it for `this`: undefined
- * for a name that is not a path, an inline function's source, say.
+ * The function an ExternalInterface.call names, with what to call it on.
+ * A path is looked up from the page's global object along its dots, on
+ * what holds it. Any other name, an inline function's source as pages
+ * wrote them, is evaluated alone, `(name)`, as the code the SWF gave it to
+ * be; the call's arguments never are: they are applied to what it gives.
+ * Under a policy that forbids eval, such a name comes to nothing.
  */
-function pagePath(name: string): { fn: unknown; self: unknown } | undefined {
-  if (!PATH.test(name)) {
-    return undefined;
+function pageFunction(name: string): { fn: unknown; self: unknown } {
+  const path = name.trim();
+  if (PATH.test(path)) {
+    let self: unknown = page;
+    let fn: unknown = page;
+    for (const part of path.split(".")) {
+      self = fn;
+      fn = fn === null || fn === undefined ? undefined : (fn as Record<string, unknown>)[part];
+    }
+
+    return { fn, self };
   }
 
-  let self: unknown = page;
-  let fn: unknown = page;
-  for (const part of name.split(".")) {
-    self = fn;
-    fn = fn === null || fn === undefined ? undefined : (fn as Record<string, unknown>)[part];
-  }
-
-  return { fn, self };
+  // On a line of its own, so that a name ending in a // comment still closes.
+  return { fn: new Function(`return (${name}\n);`)(), self: undefined };
 }
 
 /** How the host page answers ExternalInterface, and what it is told of callbacks. */
@@ -263,84 +281,35 @@ export interface PageBridge {
   objectID: string | null;
   /** The SWF added callback `name`, or removed it with null. */
   callback(name: string, call: ((...args: PageValue[]) => PageValue) | null): void;
+  /** Whether the SWF still plays: a callback the page kept does nothing once it does not. */
+  alive(): boolean;
 }
 
 /**
  * The ExternalInterface host for a page that lets SWFs script it: those
- * `allows` allows, by the calling SWF's URL. A call to a function named
- * by a path is declined to evalJS, so playerglobal sends it as XML, read
- * here as data: its JavaScript form writes an object's keys unquoted, as
- * Flash's did, and a key could carry code into the eval. Only a name that
- * is no path, an inline function's source, which is code already, is
- * evaluated as Flash's plug-in did, `name(args)` inside __flash__toXML;
- * where the page forbids eval (a Content-Security-Policy), that call is
- * declined too, and comes to nothing. The page's calls into the SWF go
- * as XML both ways, needing no eval.
+ * `allows` allows, by the calling SWF's URL (the player asks before it
+ * calls here). Every call from a SWF is declined to evalJS, so that
+ * playerglobal sends it as XML: its JavaScript form writes an object's
+ * keys unquoted, as Flash's did, so a key could carry code into an eval.
+ * The XML is read as data, and the name alone made a function
+ * (pageFunction). The page's calls into the SWF go as XML both ways.
  */
 export function externalInterfaceHost(
   bridge: PageBridge,
   report: (error: unknown) => void,
   allows: (url: string) => boolean = () => true,
 ): ExternalInterfaceHost {
-  let evaluate: ((source: string) => unknown) | null | undefined;
   return {
     objectID: bridge.objectID,
     allows,
-    evalJS(source) {
-      if (source.startsWith(CALL)) {
-        const name = source.slice(CALL.length, source.indexOf("(", CALL.length));
-        if (PATH.test(name)) {
-          return null;
-        }
-      }
-
-      if (evaluate === undefined) {
-        try {
-          // Sloppy, so that the source's names are the page's globals, with
-          // __flash__toXML in scope as Flash's plug-in put it on the page.
-          evaluate = new Function(
-            "__flash__toXML",
-            "return function (__swf2es_source) { return eval(__swf2es_source); };",
-          )((value: PageValue) => toXml(value)) as (source: string) => unknown;
-        } catch {
-          evaluate = null;
-        }
-      }
-
-      if (evaluate === null) {
-        return null;
-      }
-
-      try {
-        const result = evaluate(source);
-        return typeof result === "string" ? result : "<undefined/>";
-      } catch (error) {
-        // A policy that forbids eval may let Function be made yet refuse the eval in it.
-        if (error instanceof EvalError) {
-          evaluate = null;
-          return null;
-        }
-
-        // Source that does not parse: a name that is no expression.
-        return "<undefined/>";
-      }
-    },
+    evalJS: () => null,
     callOut(request) {
-      let call: { name: string; args: PageValue[] };
       try {
-        call = readInvocation(request);
+        const call = readInvocation(request);
+        const { fn, self } = pageFunction(call.name);
+        return typeof fn === "function" ? toXml(fn.apply(self, call.args)) : "<undefined/>";
       } catch {
-        return "<undefined/>";
-      }
-
-      const found = pagePath(call.name);
-      if (typeof found?.fn !== "function") {
-        return "<undefined/>";
-      }
-
-      try {
-        return toXml(found.fn.apply(found.self, call.args));
-      } catch {
+        // XML it cannot read, a name that is no expression or that eval is refused for, or a call that threw.
         return "<undefined/>";
       }
     },
@@ -351,6 +320,10 @@ export function externalInterfaceHost(
       }
 
       bridge.callback(name, (...args) => {
+        if (!bridge.alive()) {
+          return undefined;
+        }
+
         let answer: unknown;
         try {
           answer = callback(invocation(name, args), null);

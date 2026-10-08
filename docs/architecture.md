@@ -1541,11 +1541,28 @@ XML invocation and decides what to execute; the player does not evaluate
 script text. Without a host, `available` is false, `objectID` is null,
 and calls and callback registration throw Error #2067 as Flash does in a
 container without a bridge. A host may refuse some SWFs (`allows`): each
-native asks it with the URL of the SWF whose code is calling
-(`Code.codeUrl`), as Flash checked allowScriptAccess against the calling
-SWF's domain, so a child that a same-domain SWF loads from elsewhere
-finds ExternalInterface as if there were no bridge. fscommand gives its
-host the caller's URL likewise.
+native asks it about the SWF whose code is calling, as Flash checked
+allowScriptAccess against the calling SWF's domain, so a child that a
+same-domain SWF loads from elsewhere finds ExternalInterface as if there
+were no bridge. fscommand gives its host the same URLs. The check never
+takes the main SWF's word where it cannot tell (`Code.securityUrls`):
+the caller is the innermost SWF frame of a stack taken whole, with the
+engine's stackTraceLimit lifted for that one capture (its default ten
+frames lost the caller under an `Array.forEach` of
+`ExternalInterface.call`); where no SWF frame is on the stack, as for a
+library function a timer calls, every loaded SWF's URL is asked, and all
+must pass, so single-origin content works from timers and mixed-origin
+content fails closed. A loadBytes' content is the calling SWF's, as
+Flash gave it the loader's domain, not the main SWF's, never on the
+display list as it may be; a load a redirect took elsewhere is the final
+URL's (`FetchResult.url`), for its LoaderInfo and its checks alike.
+
+The player has no sandbox between SWFs, though. A cross-origin child can
+call the main SWF's functions, or a grandchild's, and the check looks at
+the innermost SWF frame: a main-SWF function that forwards its arguments
+to ExternalInterface acts as the main SWF for whichever SWF called it. A
+page that loads SWFs it does not trust beside ones it does should not
+give any of them script access.
 
 A callback the page calls goes through playerglobal's `_callIn` either
 way it can: with an array of AVM2 values, applied as they are and
@@ -1632,8 +1649,11 @@ then stops every sound and closes the audio host (`AudioHost.close`, which
 closes the browser's AudioContext, whose thread a page otherwise keeps),
 closes the Sockets' and WebSockets' connections still open, and aborts
 the fetches under way of the host's `fetch`. First it writes the
-SharedObjects scripts opened, as Flash wrote them as a SWF unloaded, so
-data a SWF set without flushing is kept. Scripting wraps the hosts
+SharedObjects scripts opened and changed since they were read or last
+written, as Flash wrote them as a SWF unloaded, so data a SWF set without
+flushing is kept; never a removal, since an object whose stored file the
+player could not read starts empty, and writing it back would lose the
+save. Scripting wraps the hosts
 it is given to keep each connection from its connect until either end
 closes it or it fails, so the natives keep no list of their own. Left open, a
 connection went on receiving and queueing for a player no one played,
@@ -1696,23 +1716,30 @@ true` gives every player one IndexedDB module cache
 is off by default, as the player's is, a first visit being slower for
 the writes.
 
-ExternalInterface (`external.ts`) speaks Flash's protocol. A SWF's
-`call` comes first as the JavaScript playerglobal writes, `name(args)`
-inside `__flash__toXML`. For a name that is a path, `a.b.c`, the host
-declines it, and playerglobal sends the call as an XML invocation, read
-here as data and made a call of the function the path finds, on what
-holds it: the JavaScript form writes an object's keys unquoted, as
-Flash's did, so a SWF's key such as `a:(code),b` would run in the page.
-Only a name that is no path, an inline function's source, which pages
-wrote and which is code already, is evaluated, with `__flash__toXML` in
-scope, as Flash's plug-in evaluated it. A callback the SWF adds becomes
-a method of the element, called with an XML invocation and answered in
-XML, so the page gets plain arrays and objects back, synchronously, as
-from Flash; one that throws is reported and throws "Error calling
-method on NPObject" into the page, and an `<exception>`, which
-marshallExceptions sends, throws its message. A callback whose name the
+ExternalInterface (`external.ts`) speaks Flash's protocol, but takes
+every call from a SWF as data. playerglobal's `call` first offers the
+JavaScript it writes, `name(args)` inside `__flash__toXML`, which writes
+an object's keys unquoted, as Flash's did, so a SWF's key such as
+`a:(code),b` would run in the page: the host declines every one, and
+playerglobal sends the call as an XML invocation instead. Its name is
+read as written, unescaped, up to the first `" returntype="xml">`,
+which the arguments after it cannot move, and its arguments parsed as
+data. A name that is a path, `a.b.c` give or take spaces, is the
+function that path finds, called on what holds it. Any other name, an
+inline function's source as pages wrote them (`function(){return
+window.location.href;}`), is evaluated alone, `(name)`, as the code the
+SWF gave it to be, and what it gives applied to the arguments, without
+an object for `this`; the arguments never reach eval. A callback the
+SWF adds becomes a method of the element, called with an XML invocation
+and answered in XML, so the page gets plain arrays and objects back,
+synchronously, as from Flash; one that throws is reported and throws
+"Error calling method on NPObject" into the page, an `<exception>`,
+which marshallExceptions sends, throws its message, and one the page
+kept after the SWF stopped does nothing. A callback whose name the
 element already has, its own methods' or the DOM's (`destroy`,
-`getAttribute`, `dispatchEvent`), is refused with a warning, and the
+`getAttribute`, `dispatchEvent`), or one of the protocols other code
+looks for on any object (`then`, which would make the element a
+thenable, `toJSON`, `handleEvent`), is refused with a warning, and the
 element calls its own internals as `#private` methods and the DOM's
 through functions taken as the module loads, never looked up on itself.
 A value met again inside itself crosses as null, where Flash recursed
@@ -1722,7 +1749,7 @@ origin no one's; a SWF it denies finds ExternalInterface unavailable and
 its fscommand dropped, `available` false and a call throwing #2067, as
 Ruffle has it, where Flash's plug-in threw a SecurityError.
 `allownetworking` is `all`, `internal`, which takes ExternalInterface,
-fscommand and navigateToURL away, or `none`, which takes every fetch,
+fscommand, navigateToURL and sendToURL away (Scripting's `sendToUrl`), or `none`, which takes every fetch,
 socket and WebSocket too; Flash threw SecurityErrors for them, where
 here they fail as networks do. `objectID` is the element's id, else its
 name, as the plug-in's was the `<object>`'s id or the `<embed>`'s name.
@@ -1781,8 +1808,9 @@ is WebAssembly, so a page needs `'unsafe-eval'` and `'wasm-unsafe-eval'`
 in its script-src (an extension cannot lift them for the page). A page
 with `object-src 'none'` had no Flash tags that worked, but replaceFlash
 swaps them all the same. And under a CSP without eval, inline-function
-calls come to nothing, but `callOut`'s XML path still reaches any
-function a global path names, as a named call does with eval.
+calls come to nothing, but a call by a path still reaches any function
+a global path names, `eval` itself among them: script access is the
+page's whole, as it was in Flash.
 
 ### Screen capabilities
 

@@ -181,6 +181,8 @@ check(
         objectID: "movie",
         hello: { got: ["hi", [1, 2], { k: "v", d: "1970-01-01T00:00:00.005Z" }] },
         inline: 42,
+        href: ei.calls.reports[0]?.href,
+        sum: 5,
         greeting: "hello there",
         n: "7",
       },
@@ -192,7 +194,12 @@ check(
     assert.deepEqual(ei.shadowed, []);
     assert.equal(ei.attribute, "movie");
     assert.equal(ei.pwned, false);
-    assert.deepEqual(ei.calls.captured, [{ "a:(window.swf2esPwned=1),b": 1 }]);
+    // window.location.href, through an inline function with no space before "(".
+    assert.match(String(ei.calls.reports[0]?.href), /\/web-test\/index\.html$/);
+    assert.deepEqual(ei.calls.captured, [
+      { "a:(window.swf2esPwned=1),b": 1 },
+      { "a:(window.swf2esPwned=1),b": 1 },
+    ]);
   },
 );
 
@@ -230,9 +237,13 @@ check("destroy takes the callbacks off and closes the socket and the audio", asy
     callbacks: string[];
     player: boolean;
     destroyed: boolean;
+    kept: boolean;
+    awaited: boolean;
     counts: Record<string, number>;
   }>(evaluate, "destroyMovie()");
   assert.deepEqual(r.callbacks, []);
+  assert.ok(r.awaited, "the element was a thenable");
+  assert.ok(r.kept, "a callback kept past destroy still ran the SWF's code");
   assert.ok(r.player && r.destroyed);
   // Each EmbedTest opened a socket and its sound made an audio context; the movie's are gone.
   assert.equal(before.openSockets, 2);

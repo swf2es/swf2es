@@ -158,8 +158,19 @@ async function browserFetch(request: FetchRequest, signal: AbortSignal): Promise
     bytes: response.ok ? new Uint8Array(await response.arrayBuffer()) : null,
     status: response.status,
     headers,
+    // Where a redirect took it: the SWF is judged and named by that.
+    ...(response.redirected ? { url: response.url } : {}),
   };
 }
+
+/**
+ * Callback names the element refuses though it has no such property:
+ * protocols other code looks for on any object. A `then` would make the
+ * element a thenable, so that awaiting it, or Promise.resolve(it), would
+ * call into the SWF and hang; `toJSON` would answer JSON.stringify, and
+ * `handleEvent` would take every event the element is added as a listener for.
+ */
+const RESERVED = new Set(["then", "toJSON", "handleEvent"]);
 
 export class Swf2esPlayerElement extends ElementBase {
   static readonly observedAttributes = [
@@ -392,6 +403,7 @@ export class Swf2esPlayerElement extends ElementBase {
     const bridge: PageBridge = {
       objectID,
       callback: (name, call) => this.#callback(session, name, call),
+      alive: () => this.#session === session,
     };
     const scripting = new Scripting(codegen, {
       url,
@@ -401,13 +413,14 @@ export class Swf2esPlayerElement extends ElementBase {
       socket: offline ? undefined : socketHost(),
       webSocket: offline ? null : undefined,
       navigate: internal ? null : undefined,
+      sendToUrl: !internal,
       externalInterface: externalInterfaceHost(
         bridge,
         (error) => this.#report(session, error),
         allows,
       ),
-      fsCommand: (command, args, caller) => {
-        if (allows(caller)) {
+      fsCommand: (command, args, callers) => {
+        if (callers.every(allows)) {
           this.#fsCommand(objectID, command, args);
         }
       },
@@ -430,7 +443,7 @@ export class Swf2esPlayerElement extends ElementBase {
 
     if (call) {
       // Never over what the element is or does, its own methods or the DOM's.
-      if (name in this && !session.callbacks.has(name)) {
+      if ((name in this || RESERVED.has(name)) && !session.callbacks.has(name)) {
         console.warn(
           `swf2es: the SWF's ExternalInterface callback "${name}" is the element's own; left out`,
         );

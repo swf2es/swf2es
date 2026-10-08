@@ -162,7 +162,13 @@ const frames = (n: number) =>
 
 /** Each player once all have played or failed, with what the test checks of it. */
 async function booted() {
-  await loading;
+  // Generous for a cold start on a loaded machine, but never for ever.
+  await Promise.race([
+    loading,
+    new Promise((_, fail) =>
+      setTimeout(() => fail(new Error("@swf2es/web did not load within 180 s")), 180_000),
+    ),
+  ]);
   const outcomes = await Promise.all(
     players().map((p) =>
       p.ready.then(
@@ -220,7 +226,7 @@ function externalInterface() {
     failed,
     lockedCallbacks: ["echo", "add", "fail"].filter((name) => name in locked),
     // The SWF's callbacks of these names are refused: the element's own stay.
-    shadowed: ["destroy", "getAttribute", "dispatchEvent"].filter((name) =>
+    shadowed: ["destroy", "getAttribute", "dispatchEvent", "then"].filter((name) =>
       Object.hasOwn(movie, name),
     ),
     attribute: movie.getAttribute("id"),
@@ -230,11 +236,16 @@ function externalInterface() {
 }
 
 /** Destroy the scripted SWF: its callbacks leave the element, and its socket and audio close. */
-function destroyMovie() {
+async function destroyMovie() {
   const movie = element("movie");
   const player = movie.player;
+  // A callback the page kept, and the element awaited: a `then` the SWF added was refused.
+  const kept = movie.echo;
+  const awaited = (await Promise.resolve(movie)) === movie;
   movie.destroy();
   return {
+    kept: kept(1) === undefined,
+    awaited,
     callbacks: ["echo", "add", "fail"].filter((name) => name in movie),
     player: movie.player === null,
     destroyed: player?.destroyed ?? false,
