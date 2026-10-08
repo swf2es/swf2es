@@ -65,6 +65,13 @@ package {
       parse(cf, ["1.234,50 €", "1.234,50€", "-1.234,50 €", "€ 5", "5 EUR", "5"]);
       call("parse null", function():void { cf.parse(null); });
       call("constructor null", function():void { new CurrencyFormatter(null); });
+      for each (id in ["es-419", "en-150"]) {
+        cf = new CurrencyFormatter(id);
+        trace(id, "|", cf.actualLocaleIDName, cf.currencyISOCode, "[" + cf.currencySymbol + "]", cf.positiveCurrencyFormat, cf.negativeCurrencyFormat,
+          "[" + cf.format(1234.5, true) + "]", "[" + cf.format(-1234.5) + "]");
+      }
+      cf = new CurrencyFormatter("en-US");
+      parse(cf, ["$.5", "$12.", "$1,2,3", "( $12 )", "$ ( 12 )", "-$-12"]);
       trace("available", CurrencyFormatter.getAvailableLocaleIDNames().length > 0);
     }
 

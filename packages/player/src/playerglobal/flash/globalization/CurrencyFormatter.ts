@@ -41,6 +41,49 @@ const NEGATIVE = [
   "(n $)",
 ];
 
+/** A locale's own currency settings, read off Intl once per locale. */
+interface CurrencyData {
+  code: string;
+  symbol: string;
+  digits: number;
+  positive: number;
+  negative: number;
+}
+
+const currencyData = new Map<string, CurrencyData>();
+
+function localeCurrency(locale: string): CurrencyData {
+  let data = currencyData.get(locale);
+  if (data) {
+    return data;
+  }
+
+  const code = currencyOf(locale);
+  // A narrow symbol has ICU place it as the locale's pattern says, with no spacing of its own;
+  // a region with no currency of its own (XDR) is placed as the dollar would be.
+  const options = {
+    style: "currency",
+    currency: code === "XDR" ? "USD" : code,
+    currencyDisplay: "narrowSymbol",
+  } as const;
+  const parts = new Intl.NumberFormat(locale, options).formatToParts(1234.5);
+  const accounting = new Intl.NumberFormat(locale, { ...options, currencySign: "accounting" });
+  const own = new Intl.NumberFormat(locale, { style: "currency", currency: code });
+  data = {
+    code,
+    // Windows gives such a region's currency no symbol.
+    symbol:
+      code === "XDR"
+        ? ""
+        : (own.formatToParts(1).find((p) => p.type === "currency")?.value ?? code),
+    digits: own.resolvedOptions().maximumFractionDigits ?? 2,
+    positive: Math.max(0, POSITIVE.indexOf(partsPattern(parts))),
+    negative: Math.max(0, NEGATIVE.indexOf(partsPattern(accounting.formatToParts(-1234.5)))),
+  };
+  currencyData.set(locale, data);
+  return data;
+}
+
 class CurrencySettings extends NumberSettings {
   currencyISOCode: string;
   currencySymbol: string;
@@ -49,21 +92,12 @@ class CurrencySettings extends NumberSettings {
 
   constructor(locale: Locale) {
     super(locale);
-    this.currencyISOCode = currencyOf(locale.actual);
-    const options = { style: "currency", currency: this.currencyISOCode } as const;
-    const nf = new Intl.NumberFormat(locale.actual, options);
-    const parts = nf.formatToParts(1234.5);
-    this.currencySymbol = parts.find((p) => p.type === "currency")?.value ?? this.currencyISOCode;
-    this.fractionalDigits = nf.resolvedOptions().maximumFractionDigits ?? 2;
-    this.positiveFormat = Math.max(0, POSITIVE.indexOf(partsPattern(parts)));
-    const accounting = new Intl.NumberFormat(locale.actual, {
-      ...options,
-      currencySign: "accounting",
-    });
-    this.negativeCurrencyFormat = Math.max(
-      0,
-      NEGATIVE.indexOf(partsPattern(accounting.formatToParts(-1234.5))),
-    );
+    const data = localeCurrency(locale.actual);
+    this.currencyISOCode = data.code;
+    this.currencySymbol = data.symbol;
+    this.fractionalDigits = data.digits;
+    this.positiveFormat = data.positive;
+    this.negativeCurrencyFormat = data.negative;
   }
 
   /**
@@ -102,9 +136,10 @@ class CurrencySettings extends NumberSettings {
   private patternRegExp(pattern: string): RegExp {
     const literal = (text: string) => text.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&");
     const sign = literal(this.negativeSymbol);
-    // A currency neither begins nor ends with a space, nor holds a sign or parentheses.
+    // A currency neither begins nor ends with a space, nor holds a sign or parentheses; before
+    // the number, as little as leaves it one, so that "$.5" is "$" and .5.
     const not = `()${this.negativeSymbol.replace(/[\\\]^-]/g, "\\$&")}`;
-    const symbolBefore = `(?<symbol>[^\\p{Nd}\\p{Zs}${not}](?:[^\\p{Nd}${not}]*[^\\p{Nd}\\p{Zs}${not}])?)?`;
+    const symbolBefore = `(?<symbol>[^\\p{Nd}\\p{Zs}${not}](?:[^\\p{Nd}${not}]*?[^\\p{Nd}\\p{Zs}${not}])??)?`;
     const symbolAfter = `(?<symbol>[^\\p{Zs}${not}](?:[^${not}]*[^\\p{Zs}${not}])?)?`;
     const group = this.groupingSeparator === "" ? "" : `(?:${literal(this.groupingSeparator)})?`;
     const decimal = literal(this.decimalSeparator);
@@ -117,18 +152,22 @@ class CurrencySettings extends NumberSettings {
         source += "\\p{Zs}*";
       }
 
-      source +=
-        c === "(" || c === ")"
-          ? `\\${c}`
-          : c === "-"
-            ? sign
-            : c === "$"
-              ? before
-                ? symbolBefore
-                : symbolAfter
-              : c === "n"
-                ? number
-                : "";
+      switch (c) {
+        case "(":
+        case ")":
+          source += `\\${c}`;
+          break;
+        case "-":
+          source += sign;
+          break;
+        case "$":
+          source += before ? symbolBefore : symbolAfter;
+          break;
+        case "n":
+          source += number;
+          break;
+      }
+
       if (c !== " ") {
         previous = c;
       }
@@ -244,7 +283,7 @@ export function currencyFormatterNatives(s: Scripting): avm2.Natives {
     }
 
     set digitsType(v: number) {
-      settings(this).set("digitsType", v);
+      settings(this).setDigitsType(v);
     }
 
     get decimalSeparator(): string {
@@ -260,7 +299,7 @@ export function currencyFormatterNatives(s: Scripting): avm2.Natives {
     }
 
     set groupingSeparator(v: string | null) {
-      settings(this).set("groupingSeparator", nonNull(s, v, "value"));
+      settings(this).setGroupingSeparator(nonNull(s, v, "value"));
     }
 
     get negativeSymbol(): string {

@@ -132,4 +132,43 @@ de parse [-1.234,5] -1234.5 0 8 -1234.5 noError
 parse null TypeError: Error #2007: Parameter parseString must be non-null.
 parseNumber null TypeError: Error #2007: Parameter parseString must be non-null.
 constructor null TypeError: Error #2007: Parameter requestedLocaleIDName must be non-null.
+digitsType 10000 10000 noError
+digitsType 10fff6 10fff6 noError
+digitsType 10fff7 6f0 invalidAttrValue
+digitsType 10ffff 6f0 invalidAttrValue
+digitsType 110000 6f0 invalidAttrValue
+digitsType 7fffffff 6f0 invalidAttrValue
+digitsType 80000000 6f0 illegalArgumentError
+digitsType ffffffff 6f0 illegalArgumentError
+digitsType zero [-.]
+separator a noError noError a a
+separator abc noError noError abc abc
+separator abcd illegalArgumentError illegalArgumentError . ,
+separator éééé illegalArgumentError illegalArgumentError . ,
+spaces 0 [-  5]5,3,4/NaN [- 5]5,2,3/NaN [5 -]5,0,1/NaN [5  -]5,0,1/NaN [(  5)]5,3,4/NaN [( 5 )]-5,0,5/-5 [−5]5,1,2/NaN [5−]5,0,1/NaN [- 5]5,2,3/NaN [12  -]12,0,2/NaN
+spaces 1 [-  5]5,3,4/NaN [- 5]-5,0,3/-5 [5 -]5,0,1/NaN [5  -]5,0,1/NaN [(  5)]5,3,4/NaN [( 5 )]5,2,3/NaN [−5]-5,0,2/-5 [5−]5,0,1/NaN [- 5]-5,0,3/-5 [12  -]12,0,2/NaN
+spaces 3 [-  5]5,3,4/NaN [- 5]5,2,3/NaN [5 -]-5,0,3/-5 [5  -]5,0,1/NaN [(  5)]5,3,4/NaN [( 5 )]5,2,3/NaN [−5]5,1,2/NaN [5−]-5,0,2/-5 [- 5]5,2,3/NaN [12  -]12,0,2/NaN
+spaces 4 [-  5]5,3,4/NaN [- 5]5,2,3/NaN [5 -]-5,0,3/-5 [5  -]5,0,1/NaN [(  5)]5,3,4/NaN [( 5 )]5,2,3/NaN [−5]5,1,2/NaN [5−]-5,0,2/-5 [- 5]5,2,3/NaN [12  -]12,0,2/NaN
+locale [nb-NO] nb-NO nb-NO noError
+locale [iw-IL] iw-IL en-US usingDefaultWarning
+locale [in-ID] in-ID en-US usingDefaultWarning
+locale [tl] tl en-US usingDefaultWarning
+locale [und] und en-US usingDefaultWarning
+locale [en--us] en--us en-US noError
+locale [en-US-] en-US- en-US noError
+locale [en.US] en.US en-US noError
+locale [  en-US]   en-us en-US usingDefaultWarning
+locale [ja-JP-JP] ja-JP-JP ja-JP noError
+locale [en-us-x-foo] en-us-x-foo en-US usingDefaultWarning
+locale [en-u-nu-arab] en-u-nu-arab en-US usingDefaultWarning
+locale [de-1996] de-1996 en-US usingDefaultWarning
+locale [C] c en-US usingDefaultWarning
+locale [POSIX] posix en-US usingDefaultWarning
+locale [EN_us] en-US en-US noError
+locale [en@currency=EUR] en@currency=EUR en-US noError
+locale [fil-PH] fil-PH fil-PH noError
+locale [zh-Hans-CN] zh-Hans-CN zh-CN noError
+locale [sr-Cyrl] sr-Cyrl sr-Cyrl-RS noError
+locale [es-MX] es-MX es-MX noError
+locale [pt] pt pt-BR noError
 available true noError

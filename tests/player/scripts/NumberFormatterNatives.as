@@ -118,6 +118,38 @@ package {
       call("parse null", function():void { nf.parse(null); });
       call("parseNumber null", function():void { nf.parseNumber(null); });
       call("constructor null", function():void { new NumberFormatter(null); });
+      // Digits past Unicode's last are invalid, past int's range illegal; the value stays.
+      nf = new NumberFormatter("en-US");
+      for each (var zero:uint in [0x10000, 0x10FFF6, 0x10FFF7, 0x10FFFF, 0x110000, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF]) {
+        nf.digitsType = 0x6F0;
+        nf.digitsType = zero;
+        trace("digitsType", zero.toString(16), nf.digitsType.toString(16), nf.lastOperationStatus);
+      }
+      nf.digitsType = 0;
+      trace("digitsType zero [" + nf.formatNumber(-12.5) + "]");
+      nf = new NumberFormatter("en-US");
+      for each (var sep:String in ["a", "abc", "abcd", "\u00e9\u00e9\u00e9\u00e9"]) {
+        nf.decimalSeparator = sep;
+        var decimalStatus:String = nf.lastOperationStatus;
+        nf.groupingSeparator = sep;
+        trace("separator", sep, decimalStatus, nf.lastOperationStatus, nf.decimalSeparator, nf.groupingSeparator);
+        nf.decimalSeparator = ".";
+        nf.groupingSeparator = ",";
+      }
+      // A sign or parenthesis at most a space from the number; U+2212 a minus too.
+      for each (var format:uint in [0, 1, 3, 4]) {
+        nf.negativeNumberFormat = format;
+        out = [];
+        for each (s in ["-  5", "- 5", "5 -", "5  -", "(  5)", "( 5 )", "\u22125", "5\u2212", "-\u00a05", "12  -"]) {
+          r = nf.parse(s);
+          out.push("[" + s + "]" + r.value + "," + r.startIndex + "," + r.endIndex + "/" + nf.parseNumber(s));
+        }
+        trace("spaces", format, out.join(" "));
+      }
+      for each (id in ["nb-NO", "iw-IL", "in-ID", "tl", "und", "en--us", "en-US-", "en.US", "  en-US", "ja-JP-JP", "en-us-x-foo", "en-u-nu-arab", "de-1996", "C", "POSIX", "EN_us", "en@currency=EUR", "fil-PH", "zh-Hans-CN", "sr-Cyrl", "es-MX", "pt"]) {
+        nf = new NumberFormatter(id);
+        trace("locale [" + id + "]", nf.requestedLocaleIDName, nf.actualLocaleIDName, nf.lastOperationStatus);
+      }
       trace("available", NumberFormatter.getAvailableLocaleIDNames().length > 0, LastOperationStatus.NO_ERROR);
     }
 

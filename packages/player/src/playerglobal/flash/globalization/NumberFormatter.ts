@@ -30,20 +30,25 @@ const BIDI = /[\u061c\u200e\u200f]/g;
 export function partsPattern(parts: Intl.NumberFormatPart[]): string {
   let pattern = "";
   for (const { type, value } of parts) {
-    const token =
-      type === "literal"
-        ? value
-            .replace(BIDI, "")
-            .replace(/\s+/g, " ")
-            .replace(/[^() ]/g, "")
-        : type === "minusSign"
-          ? "-"
-          : type === "currency"
-            ? "$"
-            : "n";
-    if (!(token === "n" && pattern.endsWith("n"))) {
-      pattern += token;
+    let token: string;
+    switch (type) {
+      case "literal":
+        token = value
+          .replace(BIDI, "")
+          .replace(/\s+/g, " ")
+          .replace(/[^() ]/g, "");
+        break;
+      case "minusSign":
+        token = "-";
+        break;
+      case "currency":
+        token = "$";
+        break;
+      default:
+        token = pattern.endsWith("n") ? "" : "n";
     }
+
+    pattern += token;
   }
 
   return pattern;
@@ -61,6 +66,50 @@ type Setting =
 
 // Group sizes, the last repeated with a "*": five fields at most.
 const GROUPING = /^(?=.{1,9}$)([1-9](;[1-9])*(;\*)?|\*)$/;
+
+// Separators longer than three characters Windows refuses.
+const SEPARATOR_MAX = 3;
+
+// adl crashes formatting a thousand fractional digits; none are padded past that.
+const FRACTION_MAX = 1000;
+
+/** A locale's own number settings, read off Intl once per locale. */
+interface NumberData {
+  decimal: string;
+  group: string;
+  minus: string;
+  digits: number;
+  grouping: string;
+  negative: number;
+}
+
+const numberData = new Map<string, NumberData>();
+
+function localeNumbers(locale: string): NumberData {
+  let data = numberData.get(locale);
+  if (data) {
+    return data;
+  }
+
+  const nf = new Intl.NumberFormat(locale);
+  const parts = nf.formatToParts(-1234567890.5);
+  const value = (type: string, otherwise: string) =>
+    parts.find((p) => p.type === type)?.value.replace(BIDI, "") ?? otherwise;
+  const groups = parts.filter((p) => p.type === "integer").map((p) => p.value.length);
+  const primary = groups[groups.length - 1];
+  const secondary = groups[groups.length - 2] ?? primary;
+  data = {
+    decimal: value("decimal", "."),
+    group: value("group", ","),
+    // Flash's negative symbol is one character; ICU gives some locales U+2212 where Windows has "-".
+    minus: value("minusSign", "-").replace("\u2212", "-"),
+    digits: nf.format(0).codePointAt(0) ?? 48,
+    grouping: secondary === primary ? `${primary};*` : `${primary};${secondary};*`,
+    negative: Math.max(0, NEGATIVE_NUMBER.indexOf(partsPattern(parts))),
+  };
+  numberData.set(locale, data);
+  return data;
+}
 
 /** A locale's number settings, as a NumberFormatter or CurrencyFormatter holds them, and its status. */
 export class NumberSettings {
@@ -80,20 +129,13 @@ export class NumberSettings {
   constructor(locale: Locale) {
     this.locale = locale;
     this.status = locale.status;
-    const nf = new Intl.NumberFormat(locale.actual);
-    const parts = nf.formatToParts(-1234567890.5);
-    const value = (type: string, otherwise: string) =>
-      parts.find((p) => p.type === type)?.value.replace(BIDI, "") ?? otherwise;
-    this.decimalSeparator = value("decimal", ".");
-    this.groupingSeparator = value("group", ",");
-    // Flash's negative symbol is one character; ICU gives some locales U+2212 where Windows has "-".
-    this.negativeSymbol = value("minusSign", "-").replace("\u2212", "-");
-    this.digitsType = nf.format(0).codePointAt(0) ?? 48;
-    const groups = parts.filter((p) => p.type === "integer").map((p) => p.value.length);
-    const primary = groups[groups.length - 1];
-    const secondary = groups[groups.length - 2] ?? primary;
-    this.groupingPattern = secondary === primary ? `${primary};*` : `${primary};${secondary};*`;
-    this.negativeFormat = Math.max(0, NEGATIVE_NUMBER.indexOf(partsPattern(parts)));
+    const data = localeNumbers(locale.actual);
+    this.decimalSeparator = data.decimal;
+    this.groupingSeparator = data.group;
+    this.negativeSymbol = data.minus;
+    this.digitsType = data.digits;
+    this.groupingPattern = data.grouping;
+    this.negativeFormat = data.negative;
   }
 
   /** A setting's new value kept if valid; Flash's status says which. */
@@ -114,7 +156,21 @@ export class NumberSettings {
   }
 
   setDecimalSeparator(separator: string): void {
-    this.set("decimalSeparator", separator, separator !== "");
+    this.set("decimalSeparator", separator, separator !== "" && separator.length <= SEPARATOR_MAX);
+  }
+
+  setGroupingSeparator(separator: string): void {
+    this.set("groupingSeparator", separator, separator.length <= SEPARATOR_MAX);
+  }
+
+  /** Digits from a zero: past int's range an illegal argument, past Unicode's last nine invalid. */
+  setDigitsType(zero: number): void {
+    if (zero <= 0x7fffffff && zero + 9 > 0x10ffff) {
+      this.status = INVALID_ATTR_VALUE;
+      return;
+    }
+
+    this.set("digitsType", zero, zero <= 0x7fffffff);
   }
 
   /** A format among `count`: above them invalid, past int's range an illegal argument. */
@@ -135,7 +191,7 @@ export class NumberSettings {
    * with nine decimals and rounds that half up to the digits asked for.
    */
   digits(magnitude: number): string {
-    const fractionalDigits = this.fractionalDigits;
+    const fractionalDigits = Math.min(this.fractionalDigits, FRACTION_MAX);
     const fixed = magnitude < 1e21 ? magnitude.toFixed(9) : `${BigInt(magnitude)}.000000000`;
     let [whole, fraction] = fixed.split(".");
     if (fractionalDigits < 9) {
@@ -199,17 +255,24 @@ export class NumberSettings {
     const negative = value < 0 || Object.is(value, -0);
     let out = "";
     for (const c of pattern(negative)) {
-      out +=
-        c === "n"
-          ? this.digits(Math.abs(value))
-          : c === "-"
-            ? this.negativeSymbol
-            : c === "$"
-              ? symbol
-              : c;
+      switch (c) {
+        case "n":
+          out += this.digits(Math.abs(value));
+          break;
+        case "-":
+          out += this.negativeSymbol;
+          break;
+        case "$":
+          out += symbol;
+          break;
+        default:
+          out += c;
+      }
     }
 
-    return out;
+    // Flash's strings are C strings: digits from zero end it at a NUL.
+    const nul = out.indexOf("\0");
+    return nul < 0 ? out : out.slice(0, nul);
   }
 
   /**
@@ -259,9 +322,10 @@ export class NumberSettings {
 
     let value = Number(number);
     let end = i;
-    const sign = this.negativeSymbol;
-    const before = skipSpaces(text, start, -1);
-    const after = skipSpaces(text, end, 1);
+    // A sign or parenthesis stands at most a space from the number; U+2212 is a minus too.
+    const signs = this.negativeSymbol === "-" ? ["-", "\u2212"] : [this.negativeSymbol];
+    const before = skipSpace(text, start, -1);
+    const after = skipSpace(text, end, 1);
     switch (this.negativeFormat) {
       case 0:
         if (text[before - 1] === "(" && text[after] === ")") {
@@ -271,17 +335,21 @@ export class NumberSettings {
         }
         break;
       case 1:
-      case 2:
-        if (text.slice(0, before).endsWith(sign)) {
+      case 2: {
+        const sign = signs.find((sign) => text.slice(0, before).endsWith(sign));
+        if (sign) {
           value = -value;
           start = before - sign.length;
         }
         break;
-      default:
-        if (text.startsWith(sign, after)) {
+      }
+      default: {
+        const sign = signs.find((sign) => text.startsWith(sign, after));
+        if (sign) {
           value = -value;
           end = after + sign.length;
         }
+      }
     }
 
     return { value, start, end };
@@ -330,10 +398,17 @@ export function digit(text: string, i: number): number {
   return (c - zero) % 10;
 }
 
+const isSpace = (c: string | undefined) => c !== undefined && /\p{Zs}/u.test(c);
+
+/** The index past one space at `i` in direction `step`, if there is one. */
+function skipSpace(text: string, i: number, step: 1 | -1): number {
+  return isSpace(step > 0 ? text[i] : text[i - 1]) ? i + step : i;
+}
+
 /** The index past the spaces from `i` on in direction `step`: Flash's spaces are Unicode's space separators. */
 export function skipSpaces(text: string, i: number, step: 1 | -1): number {
   const at = step > 0 ? (j: number) => text[j] : (j: number) => text[j - 1];
-  while (at(i) !== undefined && /\p{Zs}/u.test(at(i))) {
+  while (isSpace(at(i))) {
     i += step;
   }
 
@@ -402,7 +477,7 @@ export function numberFormatterNatives(s: Scripting): avm2.Natives {
     }
 
     set digitsType(v: number) {
-      settings(this).set("digitsType", v);
+      settings(this).setDigitsType(v);
     }
 
     get decimalSeparator(): string {
@@ -418,7 +493,7 @@ export function numberFormatterNatives(s: Scripting): avm2.Natives {
     }
 
     set groupingSeparator(v: string | null) {
-      settings(this).set("groupingSeparator", nonNull(s, v, "value"));
+      settings(this).setGroupingSeparator(nonNull(s, v, "value"));
     }
 
     get negativeSymbol(): string {

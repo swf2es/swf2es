@@ -156,10 +156,10 @@ const NATIONAL =
   "VUV WST YER ZAR ZMW ZWG";
 const SHARED =
   "EUR:AD AT AX BE BG BL CY DE EE ES FI FR GF GP GR HR IE IT LT LU LV MC ME MF MQ MT NL PM PT " +
-  "RE SI SK SM TF VA XK YT;USD:AS BQ EC FM GU IO MH MP PR PW SV TC TL UM US VG VI;" +
+  "RE SI SK SM TF VA XK YT EA IC;USD:AS BQ DG EC FM GU IO MH MP PR PW SV TC TL UM US VG VI;" +
   "AUD:AU CC CX HM KI NF NR TV;NZD:CK NU NZ PN TK;XOF:BF BJ CI GW ML NE SN TG;" +
   "XAF:CF CG CM GA GQ TD;XCD:AG AI DM GD KN LC MS VC;XPF:NC PF WF;DKK:DK FO GL;" +
-  "NOK:BV NO SJ;CHF:CH LI;GBP:GB GG GS IM JE;MAD:EH MA;ILS:IL PS;ANG:CW SX";
+  "NOK:BV NO SJ;CHF:CH LI;GBP:GB GG GS IM JE TA;MAD:EH MA;ILS:IL PS;XCG:CW SX;SHP:AC";
 
 let currencies: Map<string, string> | undefined;
 
@@ -177,9 +177,14 @@ function currencyTable(): Map<string, string> {
   return currencies;
 }
 
-/** A locale's currency, by its region; ISO's "no currency" for a region without one, as 419. */
+/**
+ * A locale's currency, by its region: Windows' XDR, with no symbol, for an
+ * area of several countries (419, 150), ISO's "no currency" for any other
+ * region without one.
+ */
 export function currencyOf(locale: string): string {
-  return currencyTable().get(new Intl.Locale(locale).maximize().region ?? "") ?? "XXX";
+  const region = new Intl.Locale(locale).maximize().region ?? "";
+  return /^\d{3}$/.test(region) ? "XDR" : (currencyTable().get(region) ?? "XXX");
 }
 
 let available: string[] | undefined;
