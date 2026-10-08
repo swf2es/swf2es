@@ -194,6 +194,8 @@ export class DisplayObject {
   character: Character | null = null;
   /** Whether a script set a property of it; from then on the timeline swaps no shape under it, as Flash's does not. */
   scripted = false;
+  /** Whether a script or a place set its cacheAsBitmap: Flash then draws it from a bitmap it keeps (`swap`). */
+  cachedAsBitmap = false;
   /**
    * Whether a script set its transform or another property a place gives:
    * from then on the timeline's places, moves and a rewind's alike, leave
@@ -321,6 +323,11 @@ export class DisplayObject {
       mask.invalidate(TRANSFORM);
     }
 
+    this.invalidate(TRANSFORM);
+  }
+
+  setCachedAsBitmap(cached: boolean): void {
+    this.cachedAsBitmap = cached;
     this.invalidate(TRANSFORM);
   }
 
@@ -533,13 +540,22 @@ export class DisplayObject {
     }
 
     // Apart, and once tested: applyPlace runs for each move of each frame, and grown it is no longer inlined.
-    if (place.clipDepth !== null || place.blendMode !== null || place.filters !== null) {
+    if (
+      place.clipDepth !== null ||
+      place.blendMode !== null ||
+      place.filters !== null ||
+      place.cacheAsBitmap !== null
+    ) {
       this.applyRare(place);
     }
   }
 
-  /** What a place sets that few do: a clip depth, a blend mode, filters. */
+  /** What a place sets that few do: a clip depth, a blend mode, filters, cacheAsBitmap. */
   private applyRare(place: Place): void {
+    if (place.cacheAsBitmap !== null) {
+      this.setCachedAsBitmap(place.cacheAsBitmap);
+    }
+
     if (place.filters !== null) {
       this.filters = readFilters(place.filters).map(filterOfSwf);
       this.invalidate(TRANSFORM);
@@ -575,6 +591,12 @@ export class ShapeObject extends DisplayObject {
    * `shape` is still it, which a swap to a shape is not.
    */
   private blended: { morph: MorphCharacter; ratio: number; shape: ShapeCharacter } | null = null;
+  /**
+   * The shape Flash's bitmap cache of it still shows, given another of the
+   * same bounds while cached (`swap`), and the look it was cached with;
+   * null where it draws what it is. It goes for good when the look does.
+   */
+  stale: StaleCache | null = null;
 
   constructor(shape: ShapeCharacter | null) {
     super();
@@ -621,6 +643,90 @@ export class ShapeObject extends DisplayObject {
 
     return this.shape;
   }
+
+  /**
+   * Flash draws the object again, its cache gone stale or not, for another
+   * scale, turn or skew, colour or filters; not when it only moves
+   * (`cache-replace`). The cache turned off counts only where a frame is
+   * drawn so: off and on again in between, it stands (the view's to tell).
+   */
+  override invalidate(what: number): void {
+    const stale = this.stale;
+    if (stale && what & TRANSFORM && !stale.stands(this)) {
+      this.stale = null;
+      what |= CONTENT;
+    }
+
+    super.invalidate(what);
+  }
+}
+
+/** What a bitmap cache was drawn of, and the look it was drawn with. */
+export class StaleCache {
+  private readonly a: number;
+  private readonly b: number;
+  private readonly c: number;
+  private readonly d: number;
+  private readonly color: ColorTransform | null;
+  private readonly filters: readonly Filter[];
+
+  constructor(
+    readonly shape: ShapeCharacter,
+    o: DisplayObject,
+  ) {
+    ({ a: this.a, b: this.b, c: this.c, d: this.d } = o.matrix);
+    this.color = o.colorTransform;
+    this.filters = o.filters;
+  }
+
+  stands(o: DisplayObject): boolean {
+    const m = o.matrix;
+    return (
+      m.a === this.a &&
+      m.b === this.b &&
+      m.c === this.c &&
+      m.d === this.d &&
+      sameColor(o.colorTransform, this.color) &&
+      sameFilters(o.filters, this.filters)
+    );
+  }
+}
+
+/**
+ * A place's filters are read anew at each move, the same or not. Those
+ * from a SWF are plain records; a script's displacement map holds its
+ * bitmap, so another list with one counts as other filters.
+ */
+function sameFilters(a: readonly Filter[], b: readonly Filter[]): boolean {
+  if (a === b) {
+    return true;
+  }
+
+  if (a.length !== b.length || a.some((f) => f.kind === "displacementMap")) {
+    return false;
+  }
+
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Whether Flash draws `o` from a bitmap it keeps: cacheAsBitmap set, or filters. */
+export function cached(o: DisplayObject): boolean {
+  return o.cachedAsBitmap || o.filters.length > 0;
+}
+
+function sameColor(a: ColorTransform | null, b: ColorTransform | null): boolean {
+  const x = a ?? IDENTITY_COLOR;
+  const y = b ?? IDENTITY_COLOR;
+  return (
+    x.rMul === y.rMul &&
+    x.gMul === y.gMul &&
+    x.bMul === y.bMul &&
+    x.aMul === y.aMul &&
+    x.rAdd === y.rAdd &&
+    x.gAdd === y.gAdd &&
+    x.bAdd === y.bAdd &&
+    x.aAdd === y.aAdd
+  );
 }
 
 /** A StaticText: DefineText's glyphs, which only a timeline places; its bounds the tag's. */
@@ -906,6 +1012,17 @@ function swap(existing: DisplayObject, character: Character): void {
     return;
   }
 
+  // Cached as a bitmap, a Shape takes the new shape but Flash goes on
+  // showing the bitmap it drew of the old while their bounds are the same
+  // (`replaces`, `cache-replace`); other bounds draw it again
+  // (`scripted-touch`). A text draws its new glyphs whatever its bounds.
+  const old = existing.drawn();
+  if (cached(existing) && character.type === "shape" && old && sameBounds(old, character)) {
+    existing.stale ??= new StaleCache(old, existing);
+  } else {
+    existing.stale = null;
+  }
+
   // A morph is blended when it is next drawn, at the ratio the place gives.
   if (character.type === "morph") {
     existing.morph = character;
@@ -918,6 +1035,12 @@ function swap(existing: DisplayObject, character: Character): void {
 
   existing.character = character;
   existing.invalidate(CONTENT);
+}
+
+function sameBounds(a: ShapeCharacter, b: ShapeCharacter): boolean {
+  const x = a.shape.bounds;
+  const y = b.shape.bounds;
+  return x.xMin === y.xMin && x.xMax === y.xMax && x.yMin === y.yMin && x.yMax === y.yMax;
 }
 
 /** A Video: a box of the size it was made at, its bounds; the player plays no video in it, so it draws nothing. */

@@ -188,7 +188,6 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
   class DisplayObjectNatives {
     declare $display: DisplayObject;
     declare $transform: AsObject | undefined;
-    declare $cacheAsBitmap: boolean | undefined;
     declare $cacheAsBitmapMatrix: Value;
     declare $metaData: Value;
     declare $opaqueBackground: Value;
@@ -211,13 +210,9 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       return this.$display.visible;
     }
 
-    // Set to what it was, visible, mask and cacheAsBitmap are no touch in Flash (the `replaces` case);
-    // changed, the player takes them for one there, but never for a move (`scripted-moves`).
+    // Visible, mask and cacheAsBitmap are no touch in Flash, whatever they are set to: the
+    // timeline still puts another shape or text in the object's place (`scripted-touch`).
     set visible(v: Value) {
-      if (this.$display.visible !== !!v) {
-        this.$display.scripted = true;
-      }
-
       this.$display.visible = !!v;
       this.$display.invalidate(TRANSFORM);
       if (!v) {
@@ -502,16 +497,13 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       this.$display.setBlendMode(mode);
     }
 
+    // Flash caches an object with filters whatever cacheAsBitmap was set to, and reads it so.
     get cacheAsBitmap(): boolean {
-      return this.$cacheAsBitmap ?? false;
+      return this.$display.cachedAsBitmap || this.$display.filters.length > 0;
     }
 
     set cacheAsBitmap(v: Value) {
-      if ((this.$cacheAsBitmap ?? false) !== !!v) {
-        this.$display.scripted = true;
-      }
-
-      this.$cacheAsBitmap = !!v;
+      this.$display.setCachedAsBitmap(!!v);
     }
 
     get cacheAsBitmapMatrix(): Value {
@@ -563,10 +555,6 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     set mask(v: Value) {
       const mask = (v as AsObject | null)?.$display ?? null;
-      if (this.$display.mask !== mask) {
-        this.$display.scripted = true;
-      }
-
       this.$display.setMask(mask);
     }
 

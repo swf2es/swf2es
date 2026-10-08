@@ -438,6 +438,7 @@ export interface PlaceSpec {
   shadows?: { blur: number; distance: number; angle: number }[];
   /** A blend mode by its number, 1 normal to 14 hard light. */
   blendMode?: number;
+  cacheAsBitmap?: boolean;
   visible?: boolean;
   /** 0xAARRGGBB. */
   opaqueBackground?: number;
@@ -514,6 +515,10 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.blendMode !== undefined) {
     flags2 |= 0x02;
+  }
+
+  if (spec.cacheAsBitmap !== undefined) {
+    flags2 |= 0x04;
   }
 
   if (spec.visible !== undefined) {
@@ -600,6 +605,10 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.blendMode !== undefined) {
     w.u8(spec.blendMode);
+  }
+
+  if (spec.cacheAsBitmap !== undefined) {
+    w.u8(spec.cacheAsBitmap ? 1 : 0);
   }
 
   if (spec.visible !== undefined) {
