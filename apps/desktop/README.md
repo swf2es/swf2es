@@ -34,8 +34,9 @@ own installer. A relative path is taken from the directory pnpm was run in.
 - **Sandbox.** A SWF plays in the sandbox Flash Player gave a local
   SWF, by its FileAttributes' UseNetwork bit. Without it,
   local-with-filesystem: it reads the files in its own directory and
-  below (only itself if that is your home directory or a drive's root)
-  and reaches no network and no socket. With it, local-with-networking:
+  below (only itself if that is your home directory, the one holding every
+  user's, a temporary directory or a drive's root; keep a SWF in a
+  directory of its own) and reaches no network, no socket and no page. With it, local-with-networking:
   it reads no local file but itself, loads from the network as a secure
   web page does (`https:` and `wss:` only, CORS and all), and connects
   sockets as you allow. Only the SWF playing has access; opening another
@@ -44,8 +45,9 @@ own installer. A relative path is taken from the directory pnpm was run in.
 - **Sockets** (`flash.net.Socket`) connect over TCP through the main
   process. The first connection to each server asks: Allow Once, Always
   Allow for This SWF (remembered in `settings.json`) or Deny.
-- **Pages** a SWF opens with navigateToURL go to the system's browser,
-  http and https only, one for each click or key in the window.
+- **Pages** a SWF in local-with-networking opens with navigateToURL go to
+  the system's browser, http and https only, one for each click or key in
+  the window.
 
 ## Layout
 

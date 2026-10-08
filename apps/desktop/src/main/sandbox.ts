@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, relative, sep } from "node:path";
 
 export const FILE_ORIGIN = "swf2es://file";
@@ -48,18 +48,25 @@ export class Sandbox {
    * so that one never runs, for a frame, in the next one's sandbox.
    */
   private pending: Grant | null = null;
-  private readonly home: string;
+  /** Directories never granted whole. */
+  private readonly shared: Set<string>;
 
-  /** `home` is the directory never granted whole, the user's own by default. */
+  /**
+   * `home` is the user's directory, never granted whole, nor the one that
+   * holds every user's (/home, /Users, C:\\Users), nor a temporary one
+   * every program shares: a SWF in any of them reads only itself.
+   */
   constructor(home = homedir()) {
-    let resolved = home;
-    try {
-      resolved = realpathSync.native(home);
-    } catch {
-      // No such directory: compared as given.
-    }
-
-    this.home = resolved;
+    const resolve = (path: string) => {
+      try {
+        return realpathSync.native(path);
+      } catch {
+        // No such directory: compared as given.
+        return path;
+      }
+    };
+    const user = resolve(home);
+    this.shared = new Set([user, dirname(user), resolve(tmpdir()), "/tmp", "/var/tmp"]);
   }
 
   /** The sandbox of the SWF playing; null when none plays. */
@@ -78,13 +85,13 @@ export class Sandbox {
    * not its path, so neither loaderInfo.url nor anything the SWF sends
    * tells where on the disk it is, or whose disk; the token, a hash of the
    * path, stays the same from run to run for the SWF's SharedObjects.
-   * The user's home directory and a file system's root are never granted
-   * whole: a SWF there reads only itself.
+   * The shared directories (the constructor's) and a file system's root
+   * are never granted whole: a SWF there reads only itself.
    */
   play(swf: string, network: boolean): string {
     const path = realpathSync.native(swf);
     const directory = dirname(path);
-    const whole = directory === this.home || directory === parse(directory).root;
+    const whole = this.shared.has(directory) || directory === parse(directory).root;
     const token = createHash("sha256").update(directory).digest("hex").slice(0, 16);
     this.grant = null;
     this.pending = {

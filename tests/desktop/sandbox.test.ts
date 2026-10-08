@@ -65,6 +65,28 @@ test("a SWF in the home directory reads only itself, though it has no network", 
   assert.equal(await sandbox.resolve(asked(url, "games/data.txt")), null);
 });
 
+test("a SWF in the directory of every user's, or a shared temporary one, reads only itself", async () => {
+  // The sandbox's home is games/, so home's own directory holds every user's.
+  const sandbox = new Sandbox(join(home, "games"));
+  const url = await playing(sandbox, "top.swf", false);
+  assert.equal(await sandbox.resolve(asked(url, "secret.txt")), null);
+
+  // Every program's temporary directory, and a file another left there.
+  const swf = join(tmpdir(), `swf2es-sandbox-${process.pid}.swf`);
+  const other = join(tmpdir(), `swf2es-sandbox-${process.pid}.txt`);
+  writeFileSync(swf, "FWS");
+  writeFileSync(other, "another program's");
+  try {
+    const temporary = new Sandbox(home);
+    const at = temporary.play(swf, false);
+    assert.equal(await temporary.resolve(asked(at, at)), realpathSync(swf));
+    assert.equal(await temporary.resolve(asked(at, `swf2es-sandbox-${process.pid}.txt`)), null);
+  } finally {
+    rmSync(swf);
+    rmSync(other);
+  }
+});
+
 test("the URL tells nothing of where the SWF is", () => {
   const url = new Sandbox(home).play(join(home, "games/a.swf"), false);
   assert.match(url, new RegExp(`^${FILE_ORIGIN}/[0-9a-f]{16}/a\\.swf$`));
