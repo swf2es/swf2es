@@ -65,7 +65,10 @@ for (const app of apps) {
     const pkg = readJson(`${app}/package.json`, appsRoot);
     assert.ok(pkg.private, "an app is not published");
     for (const dep of internalDependencies(pkg)) {
-      assert.ok(dep in allowed, `${app} depends on @swf2es/${dep}, which is not a package`);
+      assert.ok(
+        Object.hasOwn(allowed, dep),
+        `${app} depends on @swf2es/${dep}, which is not a package`,
+      );
     }
   });
 }
