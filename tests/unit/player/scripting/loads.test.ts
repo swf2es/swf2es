@@ -1035,3 +1035,62 @@ test("a revived SWF's classes keep the types they resolved, though its parent's 
   assert.ok(compacted >= 1, `${compacted} compactions`);
   assert.equal(revived, 1);
 });
+
+test("the main SWF's code keeps its domain after a load where frames name no Function's script", {
+  skip,
+}, async () => {
+  // JavaScriptCore's frames name no script for a Function's code, as here:
+  // a module's then names none, and must not be taken for the host code
+  // the next frame is, whose every caller, the main SWF's code too, would
+  // then be in the child's domain. (In a document the player evaluates
+  // modules as scripts of their own there; node has none.)
+  const compile = compiler(out);
+  const child = compile(
+    "FramesChild",
+    `package {
+  import flash.display.Sprite;
+  public class FramesChild extends Sprite {}
+}
+class ChildOnly {}`,
+  );
+  const main = compile(
+    "FramesMain",
+    `package {
+  import flash.display.Loader;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.net.URLRequest;
+  import flash.system.ApplicationDomain;
+  public class FramesMain extends Sprite {
+    public function FramesMain() {
+      var loader:Loader = new Loader();
+      loader.contentLoaderInfo.addEventListener(Event.INIT, function (e:Event):void {
+        trace(ApplicationDomain.currentDomain.hasDefinition("FramesChild"));
+        trace(ApplicationDomain.currentDomain.hasDefinition("FramesMain"));
+        trace("child loaded");
+      });
+      loader.load(new URLRequest("child.swf"));
+    }
+  }
+}`,
+  );
+  const prepare = Error.prepareStackTrace;
+  Error.prepareStackTrace = (_error, sites) =>
+    sites
+      .map((site) => {
+        const at = site.isEval()
+          ? ""
+          : `${site.getScriptNameOrSourceURL()}:${site.getLineNumber()}:${site.getColumnNumber()}`;
+        return `${site.getFunctionName() ?? ""}@${at}`;
+      })
+      .join("\n");
+  try {
+    const { lines } = await playNested([main, "FramesMain"], {
+      "child.swf": bare(child, 1, "FramesChild"),
+    });
+
+    assert.deepEqual(lines, ["false", "true", "child loaded"]);
+  } finally {
+    Error.prepareStackTrace = prepare;
+  }
+});

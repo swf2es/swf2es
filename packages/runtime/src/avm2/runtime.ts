@@ -34,6 +34,7 @@ import {
   findScript,
   frameScripts,
   type Script,
+  stackFrames,
 } from "./domain.js";
 import {
   type Enumeration,
@@ -286,8 +287,11 @@ export class Runtime {
    */
   private locate(): void {
     for (const [error, domain] of this.unlocated) {
-      // Its first frame is abc's own, its second the module's factory.
-      const at = frameScripts(error.stack)[1];
+      // Its first frame is abc's own, its second the module's factory. An
+      // engine may name no script for the factory's frame (JavaScriptCore,
+      // for code a Function made), and the next frame that names one is
+      // the host's, which must not stand for the module.
+      const at = stackFrames(error.stack)[1];
       if (at) {
         this.moduleDomains.set(at, new WeakRef(domain));
         this.moduleDomainGone.register(domain, at);

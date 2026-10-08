@@ -666,7 +666,10 @@ that a module defines, as avmplus' code context, so a child's method
 called by the parent's code sees the child's. The runtime finds a frame's
 module by the script the stack names, recorded when the module loads, so
 a host gives each module a script of its own, a `sourceURL` comment for
-code it evaluates (`Runtime.codeDomain`).
+code it evaluates (`Runtime.codeDomain`). A frame that names no script,
+as JavaScriptCore's of a Function's code, is no module's: the module a
+load's stack does not name is left out, not taken for the host's code
+the next frame is.
 avmshell's `File` reads and writes
 `RuntimeOptions.files`, in memory by default. Date is JavaScript's Date, with avmplus' string
 formats. flash.concurrent's Mutex and Condition and ByteArray's atomic
