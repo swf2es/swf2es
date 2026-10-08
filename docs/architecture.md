@@ -3901,7 +3901,7 @@ refused, and a path with malformed %-escapes is a 400.
 ### The sandbox
 
 A local SWF plays in the sandbox Flash Player gave it, chosen by its
-FileAttributes' UseNetwork bit (`usesNetwork` in `format`), and
+FileAttributes' UseNetwork bit (`fileAttributes` in `format`), and
 `src/main/sandbox.ts` holds it:
 
 - **local-with-filesystem**, without the bit: the SWF reads the files in

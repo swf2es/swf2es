@@ -15,7 +15,6 @@ import {
   readSwf,
   readSymbolClass,
   tags,
-  usesNetwork,
 } from "@swf2es/format";
 import * as w from "../../swf-writer.ts";
 
@@ -202,12 +201,6 @@ test("a string's malformed bytes stand for themselves, as avmplus reads them", (
 test("FileAttributes tells ActionScript 3 from an AVM1 movie", () => {
   assert.equal(isAs3(readSwf(movie)), false);
   assert.equal(isAs3(readSwf(frame(w.fileAttributes(true)))), true);
-});
-
-test("FileAttributes' UseNetwork picks a local SWF's sandbox", () => {
-  assert.equal(usesNetwork(readSwf(movie)), false);
-  assert.equal(usesNetwork(readSwf(frame(w.fileAttributes(true)))), false);
-  assert.equal(usesNetwork(readSwf(frame(w.fileAttributes(true, true)))), true);
 });
 
 test("a FILTERLIST reads its blur, glow and bevel, the bevel's highlight first as adl has it", () => {
