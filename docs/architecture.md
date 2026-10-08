@@ -1552,13 +1552,31 @@ capture (its default ten frames lost the caller under an `Array.forEach`
 of `ExternalInterface.call`), the player's frames above the native are
 counted off, then the library function the SWF called (playerglobal's
 `ExternalInterface.call`, `fscommand`, `Loader.loadBytes`), and the
-frame after must be a SWF module's. Anything else there, the player's or
-the runtime's code that calls a function value (a listener a
-dispatchEvent calls, an Array's forEach or sort, a timer), or a frame
-line it cannot read, leaves the caller untold: then the URL of every SWF
+frame after must be a SWF module's: a direct call. `fscommand`, a
+package-level function, a SWF reaches by its name through the runtime,
+`Runtime.call`, `callValue` and the method closure's wrapper, so that
+one chain is accepted too, frame for frame at the sites the player
+measures as it starts by making such a call to a probe of its own (the
+build's own sites, minified or not; none, and no call matches, if the
+probe does not see the chain). Anything else there, the player's or the
+runtime's code that calls a function value (a listener a dispatchEvent
+calls, an Array's forEach or sort, `.call`, `.apply`, `o.f()`, a
+timer), or a frame line it cannot read, leaves the caller untold: then the URL of every SWF
 whose code was ever loaded is asked, and all must pass, so single-origin
 content works from timers and callbacks, and mixed-origin content fails
-closed. Ever, not now: an
+closed. Only V8's stacks are read so: JavaScriptCore elides tail calls,
+and the runtime's chain is `return f(...)` throughout, so a call through
+a function value there looks direct; its stacks, and SpiderMonkey's,
+which have the same form, leave every caller untold. If the page froze
+`Error.stackTraceLimit` (SES lockdown), the caller is untold too.
+
+That has a cost in mixed-origin content: ExternalInterface reached by a
+late-bound path from the SWF's own code, `ExternalInterface.call.apply(...)`,
+the common `callJS(...args)` wrapper that uses `.apply`, `.call`, `o.call`
+on an Object-typed reference, `getDefinitionByName(...)["call"]`, is
+treated as an untold caller and denied. A `Function`-typed local called
+as `f(...)` goes the same way through the runtime as a call by name, and
+counts as the calling SWF's. Single-origin content is unaffected. Ever, not now: an
 unloaded child's timers and closures outlive its modules, which the
 player holds weakly, so the URLs are kept in a set that never shrinks. A
 loadBytes' content is the calling SWF's, as Flash gave it the loader's
@@ -1579,10 +1597,12 @@ The player has no sandbox between SWFs, though, and the check knows
 only which SWF's code made the call. A cross-origin child can call the
 main SWF's functions, or a grandchild's: a main-SWF function that
 forwards its arguments to ExternalInterface acts as the main SWF for
-whichever SWF called it. And main-SWF code that itself calls a function
+whichever SWF called it. Main-SWF code that itself calls a function
 value a child supplied, ExternalInterface.call returned by a child's
 getter, fetched from a Worker's shared property, or kept in a reference
-the child stored, calls it directly, as the main SWF. A page that loads
+the child stored, fails closed on V8 where it goes through `.call`,
+`.apply` or a property call (`o.f()`), but a plain `f(...)` of a local
+cannot be told from a call by name, and acts as the main SWF. A page that loads
 SWFs it does not trust beside ones it does should give none of them
 script access.
 

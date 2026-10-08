@@ -14,7 +14,7 @@ import { containerEngine } from "../../../../oracle/oracle.ts";
 import { readLibrary } from "../../../../packages/player/dist/display/timeline.js";
 import type { CachedModule, ModuleCache } from "../../../../packages/player/dist/hosts.js";
 import { Player } from "../../../../packages/player/dist/player.js";
-import { frameLocations } from "../../../../packages/player/dist/scripting/code.js";
+import { callingScript, frameLocations } from "../../../../packages/player/dist/scripting/code.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
 import { bare, scripted } from "../../../player/cases.ts";
 import { libraryAbcs } from "../../../player/libraries.ts";
@@ -440,4 +440,110 @@ test("SpiderMonkey's and JavaScriptCore's frames read the same way, an @ in a na
     "swf2es-6.js",
     null,
   ]);
+});
+
+// callingScript over hand-made stacks: swf2es-1.js a library's module,
+// swf2es-5.js a SWF's, the rest the player's and the runtime's code.
+const modules = {
+  isModule: (script: string) => /^swf2es-\d+\.js$/.test(script),
+  isLibrary: (script: string) => script === "swf2es-1.js",
+};
+const byName = ["rt.js:888:39", "rt.js:1188:29", "rt.js:1183:21"];
+const v8 = (...frames: string[]) => ["Error", ...frames.map((f) => `    at ${f}`)].join("\n");
+const own = ["callerUrl (code.js:1:1)", "native (natives.js:2:2)"];
+
+test("a call is a SWF's only when its code made it directly, or by name through the runtime's one chain", () => {
+  const caller = (stack: string) => callingScript(stack, own.length, modules, byName);
+  // Directly, through the library function it called, or a native it read itself.
+  assert.equal(caller(v8(...own, "call (swf2es-1.js:3:3)", "f (swf2es-5.js:4:4)")), "swf2es-5.js");
+  assert.equal(caller(v8(...own, "f (swf2es-5.js:4:4)")), "swf2es-5.js");
+  // By name: Runtime.call, callValue, the wrapper, exactly.
+  const named = [
+    "rt.js:888:39",
+    "Runtime.callValue (rt.js:1188:29)",
+    "Runtime.call (rt.js:1183:21)",
+  ];
+  assert.equal(
+    caller(v8(...own, "fscommand (swf2es-1.js:3:3)", ...named, "f (swf2es-5.js:4:4)")),
+    "swf2es-5.js",
+  );
+  // The same chain with no library function called is no by-name call.
+  assert.equal(caller(v8(...own, ...named, "f (swf2es-5.js:4:4)")), null);
+  // A function value: .call (object.js), o.f() (callProperty), forEach, a dispatch.
+  for (const between of [
+    ["rt.js:888:39", "Runtime.callValue (rt.js:1188:29)", "Object.$m8 (object.js:99:19)"],
+    ["rt.js:888:39", "Runtime.callValue (rt.js:1188:29)", "Runtime.callProperty (rt.js:1145:21)"],
+    ["rt.js:888:39", "Runtime.callValue (rt.js:1188:29)", "eachElement (define.js:77:30)"],
+    [...named, "invoke (events.js:27:18)"],
+    // The chain one site off: another build's, or another call.
+    ["rt.js:888:39", "Runtime.callValue (rt.js:1188:29)", "Runtime.call (rt.js:1183:22)"],
+  ]) {
+    assert.equal(
+      caller(v8(...own, "fscommand (swf2es-1.js:3:3)", ...between, "f (swf2es-5.js:4:4)")),
+      null,
+      between.join(" / "),
+    );
+  }
+
+  // The player's frames miscounted, or one unreadable: no one's.
+  assert.equal(callingScript(v8(...own, "f (swf2es-5.js:4:4)"), 3, modules, byName), null);
+  assert.equal(callingScript(v8(...own, "f (swf2es-5.js:4:4)"), 1, modules, byName), null);
+  assert.equal(caller(v8(own[0], "Array.sort (<anonymous>)", "f (swf2es-5.js:4:4)")), null);
+  // No chain measured: only direct calls.
+  assert.equal(
+    callingScript(
+      v8(...own, "fscommand (swf2es-1.js:3:3)", ...named, "f (swf2es-5.js:4:4)"),
+      own.length,
+      modules,
+      null,
+    ),
+    null,
+  );
+});
+
+test("on JavaScriptCore, whose tail calls drop the runtime's frames, no call is any SWF's", () => {
+  const jsc = (...frames: string[]) => frames.join("\n");
+  // A library frame straight on a SWF's: direct, or a function value whose
+  // runtime frames the tail calls took. It cannot be told, so it is no one's.
+  assert.equal(
+    callingScript(
+      jsc(
+        "callerUrl@code.js:1:1",
+        "native@natives.js:2:2",
+        "call@swf2es-1.js:3:3",
+        "f@swf2es-5.js:4:4",
+      ),
+      2,
+      modules,
+      byName,
+    ),
+    null,
+  );
+  assert.equal(
+    callingScript(
+      jsc("callerUrl@code.js:1:1", "native@natives.js:2:2", "f@swf2es-5.js:4:4"),
+      2,
+      modules,
+      byName,
+    ),
+    null,
+  );
+});
+
+test("a stack limit the page froze makes a check fail closed, not throw", async () => {
+  const scripting = new Scripting(await createCodegen(wasm), {});
+  const descriptor = Object.getOwnPropertyDescriptor(Error, "stackTraceLimit");
+  Object.defineProperty(Error, "stackTraceLimit", {
+    value: 10,
+    writable: false,
+    configurable: true,
+  });
+  try {
+    assert.equal(scripting.code.callerUrl(0), null);
+    assert.deepEqual(scripting.code.securityUrls(0), [scripting.url]);
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(Error, "stackTraceLimit", descriptor);
+    }
+  }
 });

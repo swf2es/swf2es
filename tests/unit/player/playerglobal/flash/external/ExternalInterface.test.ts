@@ -551,3 +551,86 @@ test("the same hand-overs pass where every SWF loaded is the page's own", { skip
   // The relay, forEach's one, sort's at least one, and the ping.
   assert.ok(result.evaluated.length >= 4, `${result.evaluated.length} calls reached the page`);
 });
+
+test("the main SWF's own calls are its own, a cross-origin child loaded beside it", {
+  skip,
+}, async () => {
+  const compile = compiler(out);
+  const main = bare(
+    compile(
+      "EiMainCalls",
+      `package {
+  import flash.display.Loader;
+  import flash.display.MovieClip;
+  import flash.events.Event;
+  import flash.external.ExternalInterface;
+  import flash.net.URLLoader;
+  import flash.net.URLLoaderDataFormat;
+  import flash.net.URLRequest;
+  import flash.system.fscommand;
+  public class EiMainCalls extends MovieClip {
+    private var ran:Boolean = false;
+
+    public function EiMainCalls() {
+      var loader:Loader = new Loader();
+      loader.load(new URLRequest("http://other.test/child.swf"));
+      addChild(loader);
+      // Bytes it loads itself: the content is the main SWF's.
+      var stream:URLLoader = new URLLoader();
+      stream.dataFormat = URLLoaderDataFormat.BINARY;
+      stream.addEventListener(Event.COMPLETE, function (e:Event):void {
+        new Loader().loadBytes(stream.data);
+      });
+      stream.load(new URLRequest("http://page.test/own.swf"));
+      addFrameScript(2, frameScript);
+      addEventListener(Event.ENTER_FRAME, enterFrame);
+    }
+
+    private function frameScript():void {
+      ExternalInterface.call("hello", "frame script");
+      fscommand("frame script", "");
+      stop();
+    }
+
+    private function enterFrame(e:Event):void {
+      if (currentFrame == 3 && !ran) {
+        ran = true;
+        ExternalInterface.call("hello", "enterFrame");
+        fscommand("enterFrame", "");
+      }
+    }
+  }
+}`,
+    ),
+    4,
+    "EiMainCalls",
+  );
+  const child = bare(
+    compile("EiRanChild", sprite("EiRanChild", `trace("child ran");`)),
+    1,
+    "EiRanChild",
+  );
+  const own = bare(
+    compile("EiOwnBytes", sprite("EiOwnBytes", `trace("bytes", loaderInfo.loaderURL);`)),
+    1,
+    "EiOwnBytes",
+  );
+  const result = await play(
+    main,
+    { "http://other.test/child.swf": child, "http://page.test/own.swf": own },
+    6,
+  );
+
+  assert.deepEqual(result.lines, ["bytes http://page.test/main.swf", "child ran"]);
+  assert.deepEqual(result.uncaught, []);
+  // Through playerglobal's call: declined to evalJS here, it is offered there first.
+  assert.deepEqual(
+    result.evaluated.map((source) => /hello\("([^"]+)"\)/.exec(source)?.[1]),
+    ["enterFrame", "frame script"],
+  );
+  // fscommand, a global function called by its name: the main's, not every SWF's.
+  assert.deepEqual(result.commands, [
+    { command: "enterFrame", callers: ["http://page.test/main.swf"] },
+    { command: "frame script", callers: ["http://page.test/main.swf"] },
+  ]);
+});
