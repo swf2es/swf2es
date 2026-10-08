@@ -65,7 +65,7 @@ test("a SWF in the home directory reads only itself, though it has no network", 
   assert.equal(await sandbox.resolve(asked(url, "games/data.txt")), null);
 });
 
-test("a SWF in the directory of every user's, or a shared temporary one, reads only itself", async () => {
+test("a SWF where every user's or program's files are reads only itself", async () => {
   // The sandbox's home is games/, so home's own directory holds every user's.
   const sandbox = new Sandbox(join(home, "games"));
   const url = await playing(sandbox, "top.swf", false);
@@ -85,6 +85,26 @@ test("a SWF in the directory of every user's, or a shared temporary one, reads o
     rmSync(swf);
     rmSync(other);
   }
+});
+
+test("a home that is a link is known as both, as are both parents", async () => {
+  const parent = join(home, "users");
+  mkdirSync(join(parent, "me"), { recursive: true });
+  writeFileSync(join(parent, "me", "mine.swf"), "FWS");
+  writeFileSync(join(parent, "me", "mine.txt"), "mine");
+  writeFileSync(join(parent, "all.swf"), "FWS");
+  writeFileSync(join(parent, "other.txt"), "another user's");
+  const link = join(home, "home-link");
+  symlinkSync(join(parent, "me"), link);
+  const sandbox = new Sandbox(link);
+
+  const mine = await playing(sandbox, "users/me/mine.swf", false);
+  assert.equal(await sandbox.resolve(asked(mine, "mine.txt")), null);
+  const all = await playing(sandbox, "users/all.swf", false);
+  assert.equal(await sandbox.resolve(asked(all, "other.txt")), null);
+  // And the link's own parent, which holds it as /home holds a home.
+  const top = await playing(sandbox, "top.swf", false);
+  assert.equal(await sandbox.resolve(asked(top, "secret.txt")), null);
 });
 
 test("the URL tells nothing of where the SWF is", () => {

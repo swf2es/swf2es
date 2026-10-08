@@ -65,8 +65,10 @@ export class Sandbox {
         return path;
       }
     };
-    const user = resolve(home);
-    this.shared = new Set([user, dirname(user), resolve(tmpdir()), "/tmp", "/var/tmp"]);
+    // Each as given and as it really is: a SWF's directory is compared real,
+    // and /tmp is /private/tmp on macOS, a home may be a link.
+    const shared = [home, dirname(home), tmpdir(), "/tmp", "/var/tmp"];
+    this.shared = new Set([...shared, ...shared.map(resolve), dirname(resolve(home))]);
   }
 
   /** The sandbox of the SWF playing; null when none plays. */
