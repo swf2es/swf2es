@@ -135,6 +135,20 @@ test("LZMA that would read past its stream's end fails there", () => {
   assert.throws(() => lzmaByteArrayUncompress(data), CompressedDataError);
 });
 
+test("an LZMA dictionary is 4 KB at least, as the SDK reads one", () => {
+  // 1100 bytes twice: the second time a match 1100 bytes back, past a 1 KB dictionary.
+  const data = new Uint8Array(2200);
+  let x = 1;
+  for (let i = 0; i < 1100; i++) {
+    x = (x * 75 + 74) % 65537;
+    data[i] = data[i + 1100] = x & 255;
+  }
+
+  const compressed = lzmaByteArrayCompress(data);
+  new DataView(compressed.buffer, compressed.byteOffset).setUint32(1, 1024, true);
+  assert.deepEqual(lzmaByteArrayUncompress(compressed), data);
+});
+
 test("a truncated CWS still gives its start", () => {
   const plain = fws(body);
   const whole = cws(plain);

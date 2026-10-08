@@ -103,6 +103,19 @@ for each (var props:int in [225, 255]) {
   badProps[0] = props;
   probe("lzma properties " + props, function():* { badProps.uncompress("lzma"); });
 }
+// A dictionary the header gives as 1 KB is 4 KB, as LzmaDec reads it: a
+// repeat 1100 bytes back still decodes.
+var repeated:ByteArray = new ByteArray();
+var x:int = 1;
+for (i = 0; i < 1100; i++) { x = (x * 75 + 74) % 65537; repeated.writeByte(x & 255); }
+repeated.writeBytes(repeated, 0, 1100);
+var expected:String = hex(repeated);
+repeated.compress("lzma");
+repeated[1] = 0; repeated[2] = 4; repeated[3] = 0; repeated[4] = 0;
+probe("lzma dictionary 1024", function():* {
+  repeated.uncompress("lzma");
+  return repeated.length + " " + (hex(repeated) == expected);
+});
 // Zeros decode to zeros for as long as they last: past them is past the stream.
 var zeros:ByteArray = new ByteArray();
 for (i = 0; i < 26; i++) zeros.writeByte(i == 0 ? 0x5d : i == 3 ? 1 : i == 5 ? 0xa0 : i == 6 ? 0x86 : i == 7 ? 1 : 0);

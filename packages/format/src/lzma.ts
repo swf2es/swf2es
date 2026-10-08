@@ -62,7 +62,8 @@ export function lzmaDecode(
       (input[properties + 3] << 16) |
       (input[properties + 4] << 24)) >>>
     0;
-  const dictSize = Math.max(dictionary, 1);
+  // As the SDK's decoder, a dictionary of at least 4 KB, whatever the header says.
+  const dictSize = Math.max(dictionary, 4096);
 
   let pos = start;
   const end = input.length;
