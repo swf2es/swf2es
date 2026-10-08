@@ -2246,6 +2246,62 @@ screen. By default, resolution comes from the browser's `screen` (zero in a
 non-browser host), pixel aspect ratio is 1 and DPI is 72. The corpus harness
 supplies the screen on which its Flash traces were recorded.
 
+### Globalization
+
+`flash.globalization` (`playerglobal/flash/globalization/`) is Flash on
+Windows' as AIR's adl shows it (the `*-formatter-natives`,
+`collator-natives`, `string-tools-natives` and `locale-id-natives` cases),
+with its locale data from the host's `Intl`, ICU's, where Flash takes the
+system's. Its rules are its own and are followed here; only the data is
+ICU's.
+
+- **Locales.** A name is kept as Flash keeps it (`en_US` as `en-US`, a
+  name it cannot take apart in lower case) and resolved to a locale Intl
+  supports: the language's likely region where none is given (`de` is
+  `de-DE`, Chinese named by region, `zh-TW`), `usingFallbackWarning` and the
+  likely region where ICU has no data for the one given, and the default,
+  `usingDefaultWarning`, for a language Intl does not know or a name with
+  extensions. The default, also for `""` and `i-default`, is
+  `PlatformCapabilities.locale`, the browser's language unless a host sets
+  it; the player's tests start Chrome in en-US, as adl's machine is.
+  Methods and setters set `lastOperationStatus`; getters leave it.
+- **Numbers and currencies** take only their settings from Intl: the
+  separators, digits, grouping, the negative format, the currency's
+  digits and, for its formats, Intl's currency and accounting formats
+  matched against Windows' sixteen negative and four positive ones. A
+  region's currency comes from a table, as Intl has none. Formatting is
+  Flash's: the number printed with nine decimals, then rounded half up to
+  `fractionalDigits` (2 by default, Windows'), grouped by
+  `groupingPattern`, its digits from `digitsType`. `parse` finds the first
+  number anywhere, signed by the negative format around it;
+  `parseNumber` and a currency's `parse` take a string that holds nothing
+  else but spaces.
+- **Dates** are formatted by Flash's LDML pattern, interpreted here as
+  Windows does: Gregorian, European digits, long and medium alike, a long
+  month's genitive when a day is its nearest field, the letters it cannot
+  format left out with `unsupportedError`, a run too long cut with
+  `usingFallbackWarning`, an unknown letter rejected with
+  `patternSyntaxError`. The locale's patterns are read off Intl's parts for
+  its full date, its numeric date and its medium and short times.
+- **Collation** is `Intl.Collator`, with Windows' word sort, hyphens and
+  apostrophes compared last; width and kana are folded before comparing,
+  as Intl has no options for them. `numericComparison` is kept and reports
+  `unsupportedError`, as in adl, without changing the order.
+- **Case** is mapped a character at a time, as Windows does.
+
+What ICU's data gives differently from the system adl runs on, and so
+the cases leave out: separators (French and Swiss German group with
+U+202F and U+2019 where Windows has U+00A0 and an apostrophe; Arabic
+locales' are Arabic), symbols and formats of some currencies (Egyptian,
+Iranian), Finnish weekdays (`sunnuntai` for `sunnuntaina`), German
+abbreviated weekdays without a dot, two-letter weekdays outside Latin
+scripts, Korean day periods, kana, width and `ß` in collation, and
+script subtags in Windows' names (`az-Latn-AZ`). The oddities of adl under Wine are
+not reproduced: an era printed twice (`ADAD`), a lone `*` grouping
+pattern grouping by eleven, a crash for a thousand fractional digits.
+`getAvailableLocaleIDNames` lists each region's likely locale that Intl
+supports, as Intl lists none.
+
 ### What a browser player lacks
 
 Some of playerglobal stands for what the player does not have, and acts
