@@ -1722,35 +1722,61 @@ frame count: `getTimer` reads it, and `Timer` fires by it. A frame
 stepped by `Player.tick()` moves the clock by one frame's duration at
 the stage's frame rate, the first frame's included, so a test that steps
 frames gets the same clock every time; a host playing in real time calls
-`Player.advance(dt)` with the time passed, which accumulates it and runs
-as many frames as it is worth, five at most after a long pause and the
-rest let go, as Ruffle paces, so a stall does not become a spiral of
-catch-up. It returns how many it ran, and `Player.changes` counts what
-may change the picture: each frame, each key, each call from the page
-into an ExternalInterface callback, each `updateAfterEvent`, and the
-pointer events that change what shows at once: a hover that moves on or
-off a button or a sprite in `buttonMode`, as Ruffle redraws for, and,
-more than Ruffle, any press, release or leave, which may move focus and
-a caret, and a drag selecting text. A plain move does
-not: what its listeners change shows at the next frame, as in Flash, so
-a fast mouse draws a 24 fps SWF 24 times a second, not at the screen's
-rate. Loads and socket data are delivered in a frame. A host
-draws when it moved, not on every animation frame: at 60 Hz a 24 fps SWF
-drew each picture two or three times over, and drawing it once took a
-quarter to a third of Chrome's CPU off 32 animated characters, the
-pictures alike. Frame pacing and the clock are related but not one counter:
-the clock may run on within a frame later, where the frame count cannot.
-`getTimer` tells real time, as Flash's does: the whole milliseconds,
-truncated, since the `Scripting` was made, by `performance.now` or the
-`realTime` clock a host gives, running on while a script does, so that
-code timing itself within a frame, as benchmarks and Crossbridge's C
-do, sees the time pass, and a game's motion follows the time between
-frames. `realTime: null` makes it tell the frame clock instead, rounded
-as it was, the same on every run: the player's cases and the corpus
-(`tests/player/page.ts`) and the node tests that trace it ask for that.
-Timers fire by the frame clock either way; a host playing in real time
-drives it through `advance(dt)`, so it never runs ahead of the real one,
-and a timer's `getTimer() - start >= delay` still holds.
+`Player.advance(dt)` with the time passed, which plays frames on a grid
+of the frame's duration and drops those a long frame or a stall lost, as
+Flash does, rather than catch up with them as Ruffle does. Measured in
+adl at 24 fps with a 200 ms busy loop in some frames' ENTER_FRAME, Flash
+runs the next frame at once after the long one, the one after at its
+slot on the grid (8 to 9 ms later, 24 ms after three long frames in a
+row), then 41 to 42 ms apart again: never two back to back, and the lost
+frames are gone, the movie slowing down. Content that moves by the wall
+clock between frames counts on that: a large real-world SWF's walk stops
+when two ENTER_FRAMEs move it less than a pixel, which frames run back
+to back to catch up, with no time between them, did on every hitch. So a
+call runs as many frames as the host's typical interval holds, the lower
+median of its last nine calls, never the current one: one, where the
+SWF's frame is as long as the display's or longer, two for a 120 fps SWF
+at 60 Hz, five at most; until it has seen three calls, one. A typical
+interval over 36 ms is no display's (none refreshes slower than about 30
+Hz) but the host lagging, often by the frames themselves, and gets one
+frame a call, so that the content slows down as Flash's does rather than
+feed its own lag with frames run back to back. What is owed beyond that
+is dropped but for the part of a frame, which keeps the grid's phase;
+not within half an interval of the next frame, though, where a call that
+came a little early would leave a frame owed under ordinary jitter and
+the next drop it. A `dt` that is not a finite positive number counts as
+none. Two limits remain: a SWF faster than the display still runs its
+frames back to back, so a walk placed by the wall clock at 60 fps on a
+30 Hz display can still stop short; and a stream sound runs on by its
+own clock while frames are dropped, drifting from the timeline after a
+hitch, where Flash skipped frames to keep the timeline with the stream
+(`startStream` in `media/sounds.ts` does not yet). `advance` returns how
+many frames it ran, and `Player.changes` counts what may change the
+picture: each frame, each key, each call from the page into an
+ExternalInterface callback, each `updateAfterEvent`, and the pointer
+events that change what shows at once: a hover that moves on or off a
+button or a sprite in `buttonMode`, as Ruffle redraws for, and, more
+than Ruffle, any press, release or leave, which may move focus and a
+caret, and a drag selecting text. A plain move does not: what its
+listeners change shows at the next frame, as in Flash, so a fast mouse
+draws a 24 fps SWF 24 times a second, not at the screen's rate. Loads
+and socket data are delivered in a frame. A host draws when it moved,
+not on every animation frame: at 60 Hz a 24 fps SWF drew each picture
+two or three times over, and drawing it once took a quarter to a third
+of Chrome's CPU off 32 animated characters, the pictures alike. Frame
+pacing and the clock are related but not one counter: the clock may run
+on within a frame later, where the frame count cannot. `getTimer` tells
+real time, as Flash's does: the whole milliseconds, truncated, since the
+`Scripting` was made, by `performance.now` or the `realTime` clock a
+host gives, running on while a script does, so that code timing itself
+within a frame, as benchmarks and Crossbridge's C do, sees the time
+pass, and a game's motion follows the time between frames. `realTime:
+null` makes it tell the frame clock instead, rounded as it was, the same
+on every run: the player's cases and the corpus (`tests/player/page.ts`)
+and the node tests that trace it ask for that. Timers fire by the frame
+clock either way; a host playing in real time drives it through
+`advance(dt)`, so it never runs ahead of the real one, and a timer's
+`getTimer() - start >= delay` still holds.
 
 `flash.utils.Timer` is playerglobal's own in all but three natives: the
 counting, `delay`'s range (RangeError #2066), `reset` and the events are

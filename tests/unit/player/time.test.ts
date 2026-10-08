@@ -1,42 +1,208 @@
-// The player's clock and pacing, on a SWF with no scripts: a tick is one
-// frame and one frame's time; advance(dt) runs what the time is worth,
-// keeps the rest, and catches up only so far after a long pause.
+// The player's pacing: a tick is one frame and one frame's time;
+// advance(dt) plays frames on the grid of the frame rate as Flash does, as
+// many in a call as the host's typical interval holds, and drops the
+// frames a long frame or a stall lost rather than run them back to back.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { createCodegen } from "@swf2es/codegen";
+import { containerEngine } from "../../../oracle/oracle.ts";
 import { Player } from "../../../packages/player/dist/player.js";
+import { Scripting } from "../../../packages/player/dist/scripting.js";
+import { bare } from "../../player/cases.ts";
+import { libraryAbcs } from "../../player/libraries.ts";
+import { compiler } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";
 
-const swf = w.swf({
-  width: 10,
-  height: 10,
-  frameRate: 10,
-  frameCount: 20,
-  tags: [w.fileAttributes(false), ...Array.from({ length: 20 }, () => w.showFrame()), w.end()],
-});
+// This file's own out directory: the other test files compile at the same time.
+const out = fileURLToPath(new URL("../out/player-time/", import.meta.url));
 
-test("advance plays a frame per 100 ms at 10 fps, keeps the remainder, and catches up at most five frames", () => {
-  const player = new Player(swf);
-  assert.equal(player.root.currentFrame, 1);
+let skip: string | false = false;
+try {
+  containerEngine();
+} catch (e) {
+  skip = (e as Error).message;
+}
+
+/** A player of a SWF with no scripts at `frameRate`, long enough never to loop in a test. */
+function playerAt(frameRate: number): Player {
+  return new Player(
+    w.swf({
+      width: 10,
+      height: 10,
+      frameRate,
+      frameCount: 2000,
+      tags: [
+        w.fileAttributes(false),
+        ...Array.from({ length: 2000 }, () => w.showFrame()),
+        w.end(),
+      ],
+    }),
+  );
+}
+
+/** What each call to advance played, for `dts`. */
+function play(player: Player, dts: number[]): number[] {
+  return dts.map((dt) => player.advance(dt));
+}
+
+const sum = (counts: number[]) => counts.reduce((a, b) => a + b, 0);
+const hz = (rate: number, calls: number) => Array.from({ length: calls }, () => 1000 / rate);
+
+test("advance plays a frame per frame's time, keeps the remainder, and says how many it played", () => {
+  const player = playerAt(10);
 
   // Less than a frame: nothing yet; the rest adds up.
-  player.advance(60);
-  assert.equal(player.root.currentFrame, 1);
-  player.advance(60);
-  assert.equal(player.root.currentFrame, 2);
-  player.advance(180);
-  assert.equal(player.root.currentFrame, 4);
+  assert.deepEqual(play(player, [60, 60, 50, 50]), [0, 1, 0, 1]);
+  assert.equal(player.root.currentFrame, 3);
+});
 
-  // A long pause: five frames at most, and the time beyond them let go.
-  player.advance(5000);
-  assert.equal(player.root.currentFrame, 9);
-  player.advance(99);
-  assert.equal(player.root.currentFrame, 9);
-  player.advance(1);
-  assert.equal(player.root.currentFrame, 10);
+test("a 24 fps SWF on a 60 Hz display plays 24 frames a second, one a call at most", () => {
+  const player = playerAt(24);
+  const counts = play(player, hz(60, 600));
 
-  // Five frames and a half: the half is kept, as no whole frame is still owed.
-  player.advance(550);
-  assert.equal(player.root.currentFrame, 15);
-  player.advance(50);
-  assert.equal(player.root.currentFrame, 16);
+  assert.ok(counts.every((n) => n <= 1));
+  assert.ok(Math.abs(sum(counts) - 240) <= 1, `${sum(counts)} frames`);
+});
+
+test("a long frame is not caught up with: the next frame runs at once, the next at its slot", () => {
+  const player = playerAt(10);
+  // A 20 Hz host, then 230 ms: one frame, and the two it lost dropped.
+  assert.deepEqual(play(player, [50, 50, 50, 230]), [0, 1, 0, 1]);
+
+  // 80 ms of the next frame passed already: it runs at the next call, then the grid's pace.
+  assert.deepEqual(play(player, [50, 50, 50, 50, 50]), [1, 0, 1, 0, 1]);
+});
+
+test("a 200 ms hitch at 60 Hz runs one frame, not a burst, and drops what it lost", () => {
+  const player = playerAt(24);
+  play(player, hz(60, 120));
+
+  const after = play(player, [200, ...hz(60, 60)]);
+  assert.ok(after.every((n) => n <= 1));
+  // 1.2 s is worth 28.8 frames; the hitch's lost ones are dropped.
+  assert.ok(sum(after) >= 24 && sum(after) <= 26, `${sum(after)} frames`);
+});
+
+test("a 120 fps SWF on a 60 Hz display plays two frames a call", () => {
+  const player = playerAt(120);
+  play(player, hz(60, 10));
+
+  const counts = play(player, hz(60, 60));
+  assert.ok(counts.every((n) => n <= 2));
+  assert.ok(Math.abs(sum(counts) - 120) <= 2, `${sum(counts)} frames`);
+});
+
+test("a 24 fps SWF on a 30 Hz display plays 24 frames a second", () => {
+  const player = playerAt(24);
+  play(player, hz(30, 10));
+
+  const counts = play(player, hz(30, 300));
+  assert.ok(counts.every((n) => n <= 1));
+  assert.ok(Math.abs(sum(counts) - 240) <= 1, `${sum(counts)} frames`);
+});
+
+test("seconds in a background tab play one frame when it comes back, then the usual pace", () => {
+  const player = playerAt(24);
+  play(player, hz(60, 60));
+
+  const counts = play(player, [5000, ...hz(60, 60)]);
+  assert.equal(counts[0], 1);
+  assert.ok(counts.every((n) => n <= 1));
+  assert.ok(Math.abs(sum(counts) - 25) <= 1, `${sum(counts)} frames`);
+});
+
+test("a 60 fps SWF on a display whose intervals jitter keeps its 60 frames a second", () => {
+  // A call a little early leaves just under a frame owed and the next just over two: one is run, none dropped.
+  const alternating = playerAt(60);
+  const counts = play(
+    alternating,
+    Array.from({ length: 600 }, (_, i) => (i % 2 ? 18 : 15)),
+  );
+  assert.ok(counts.every((n) => n <= 2));
+  assert.ok(Math.abs(sum(counts) - 594) <= 2, `${sum(counts)} frames in 9.9 s`);
+
+  let seed = 1;
+  const random = () => {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  };
+  const jittered = playerAt(60);
+  const dts = Array.from({ length: 600 }, () => 1000 / 60 - 2 + 4 * random());
+  assert.ok(Math.abs(sum(play(jittered, dts)) - sum(dts) * 0.06) <= 3);
+});
+
+/**
+ * What each call played on a host at `display` Hz whose frames cost
+ * `tickCost` ms each: a call comes at the first refresh after the last
+ * one's frames ran, so frames run back to back stretch the intervals.
+ */
+function playCostly(player: Player, display: number, tickCost: number, calls: number): number[] {
+  const refresh = 1000 / display;
+  const counts: number[] = [];
+  let last = 0;
+  for (let i = 0; i < calls; i++) {
+    const dt = Math.max(1, Math.ceil((last * tickCost) / refresh - 1e-9)) * refresh;
+    last = player.advance(dt);
+    counts.push(last);
+  }
+
+  return counts;
+}
+
+test("frames that cost more than the display's interval slow the SWF down, not spiral into bursts", () => {
+  // A 60 fps SWF whose frames take 20 ms: before, its own lag stretched the
+  // intervals until five ran a call. Now a pair, whose frames have their
+  // 20 ms between them, stretches the interval past a display's, and the
+  // next call runs one.
+  const sixty = playCostly(playerAt(60), 60, 20, 600).slice(100);
+  assert.ok(sixty.every((n) => n <= 2));
+
+  // A 30 fps SWF whose frames take 30 ms: a frame a call.
+  const thirty = playCostly(playerAt(30), 60, 30, 600).slice(100);
+  assert.ok(thirty.every((n) => n <= 1));
+});
+
+test("repeated hitches longer than a display's interval play a frame a call", () => {
+  // Five calls of 100 ms in every nine: the typical interval is no display's.
+  const player = playerAt(24);
+  const counts = play(
+    player,
+    Array.from({ length: 900 }, (_, i) => (i % 9 < 5 ? 100 : 1000 / 60)),
+  );
+  assert.ok(counts.every((n) => n <= 1));
+});
+
+test("a time passed that is not a finite positive number plays nothing and stops nothing", () => {
+  const player = playerAt(24);
+  assert.deepEqual(play(player, [NaN, Number.POSITIVE_INFINITY, -50]), [0, 0, 0]);
+  assert.deepEqual(play(player, hz(24, 3)), [1, 1, 1]);
+});
+
+test("a walk placed by the time between frames reaches its end on a host that lags", {
+  skip,
+}, async () => {
+  const wasm = await WebAssembly.compile(
+    await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
+  );
+  const lines: string[] = [];
+  // The host's clock: the time passes between its animation frames, none while frames run.
+  let now = 0;
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: () => now,
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compiler(out)("WalkStall"), 1), scripting);
+  await player.start();
+
+  // 60 Hz, with a 200 ms draw every half second: 1.7 s of walk and some to spare.
+  for (let call = 1; call <= 180; call++) {
+    const dt = call % 30 === 0 ? 200 : 1000 / 60;
+    now += dt;
+    player.advance(dt);
+  }
+
+  assert.deepEqual(lines, ["arrived"]);
 });

@@ -11,8 +11,19 @@ import { KeyboardInput } from "./input/keyboard.js";
 import { PointerInput } from "./input/pointer.js";
 import type { Scripting } from "./scripting.js";
 
-/** Frames one advance() may run to catch up with time passed. */
-const MAX_CATCH_UP = 5;
+/** Frames one advance() may run at most, however fast the SWF and slow the display. */
+const MAX_FRAMES_PER_CALL = 5;
+/** The host's recent calls to advance() whose lower median is its typical interval. */
+const INTERVALS = 9;
+/** Calls seen before the typical interval is trusted; until then, a frame per call at most. */
+const MIN_INTERVALS = 3;
+/**
+ * The longest typical interval taken for a display's, in ms: none
+ * refreshes slower than about 30 Hz. Longer, the host is lagging, its
+ * calls stretched by the frames themselves, and more frames a call would
+ * feed the lag; it gets one a call and the content slows down, as Flash's.
+ */
+const DISPLAY_INTERVAL = 36;
 
 export class Player {
   readonly swf: Swf;
@@ -142,6 +153,10 @@ export class Player {
 
   /** Time a host has let pass, in ms, still to be played as frames. */
   private owed = 0;
+  /** The last INTERVALS times passed to advance(), a ring, for the host's typical interval. */
+  private readonly intervals: number[] = [];
+  private nextInterval = 0;
+  private readonly sortedIntervals: number[] = [];
   /** Frames played. */
   private played = 0;
   /** The clips a tick advances, kept: the whole display list's, every frame. Null while in use. */
@@ -170,12 +185,20 @@ export class Player {
   }
 
   /**
-   * Play what `dt` milliseconds are worth, a frame per frame's duration at
-   * the frame rate, the rest kept for the next call; at most MAX_CATCH_UP
-   * frames at once, so that a long pause does not become a spiral of
-   * catching up, as Ruffle paces. A host playing in real time calls this
-   * each animation frame; the tests step frames with tick(). Returns how
-   * many frames it played.
+   * Play what `dt` milliseconds are worth, as Flash paces: frames on a
+   * grid of the frame rate's duration, and those a long frame or a stall
+   * lost dropped, not caught up with. Flash runs the frame due at once
+   * after an overrun and the next one at its slot on the grid, never two
+   * back to back (measured in adl, docs/architecture.md), so content that
+   * moves by the time between frames always sees time pass between them.
+   * A call runs as many frames as the host's typical interval holds, the
+   * lower median of its recent calls and never the current one, so a
+   * hitch does not become a burst: one where the SWF's frame is as long
+   * as the display's or longer, more for a SWF faster than the display,
+   * and one while the interval is longer than a display's. A `dt` that is
+   * not a finite positive number counts as none. A host playing in real
+   * time calls this each animation frame; the tests step frames with
+   * tick(). Returns how many frames it played.
    */
   advance(dt: number): number {
     if (this.stopped) {
@@ -184,20 +207,53 @@ export class Player {
 
     // The pointer's last move, so the frame's scripts see where it is now.
     this.pointer?.flush();
-    this.owed += Math.max(0, dt);
+    const passed = Number.isFinite(dt) && dt > 0 ? dt : 0;
+    const frame = 1000 / this.frameRate;
+    const typical = this.typicalInterval(passed);
+    const most =
+      typical > DISPLAY_INTERVAL
+        ? 1
+        : Math.min(MAX_FRAMES_PER_CALL, Math.max(1, Math.round(typical / frame)));
+    this.owed += passed;
     let n = 0;
-    while (n < MAX_CATCH_UP && this.owed >= 1000 / this.frameRate) {
-      this.owed -= 1000 / this.frameRate;
+    while (n < most && this.owed >= frame) {
+      this.owed -= frame;
       this.tick();
       n++;
     }
 
-    // What could not be caught up with is let go, not owed for ever; less than a frame is kept.
-    if (this.owed >= 1000 / this.frameRate) {
-      this.owed = 0;
+    // Whole frames lost are dropped, the part of one kept for the grid's
+    // phase; but not within half an interval of the next, where a call
+    // that came a little early leaves one owed under ordinary jitter.
+    if (this.owed >= frame + Math.min(frame, typical) / 2) {
+      this.owed %= frame;
     }
 
     return n;
+  }
+
+  /** `dt` recorded, and the lower median of the recent intervals; 0 until there are a few. */
+  private typicalInterval(dt: number): number {
+    const intervals = this.intervals;
+    if (intervals.length < INTERVALS) {
+      intervals.push(dt);
+    } else {
+      intervals[this.nextInterval] = dt;
+      this.nextInterval = (this.nextInterval + 1) % INTERVALS;
+    }
+
+    if (intervals.length < MIN_INTERVALS) {
+      return 0;
+    }
+
+    const sorted = this.sortedIntervals;
+    sorted.length = 0;
+    for (let i = 0; i < intervals.length; i++) {
+      sorted.push(intervals[i]);
+    }
+
+    sorted.sort((a, b) => a - b);
+    return sorted[(sorted.length - 1) >> 1];
   }
 
   /**
