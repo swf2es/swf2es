@@ -179,6 +179,8 @@ export interface PlatformCapabilities {
   version: string;
   /** A language code: "en", or with its country for Chinese and Portuguese ("zh-CN"). */
   language: string;
+  /** The user's locale, as a BCP 47 tag: flash.globalization's default. */
+  locale: string;
   /** "PlugIn", "ActiveX", "StandAlone", "External" or "Desktop". */
   playerType: string;
 }
@@ -195,10 +197,17 @@ export function platformCapabilities(): PlatformCapabilities {
       ? [`Mac OS ${mac[1]}.${mac[2]}${mac[3] ? `.${mac[3]}` : ""}`, "Adobe Macintosh", "MAC"]
       : ["Linux", "Adobe Linux", "LNX"];
   // Flash gives the country only where the language needs it.
-  const tag = navigator?.language ?? "en";
+  const tag = navigator?.language ?? new Intl.DateTimeFormat().resolvedOptions().locale;
   const [lang, country] = tag.split("-");
   const language = (lang === "zh" || lang === "pt") && country ? `${lang}-${country}` : lang;
-  return { os, manufacturer, version: `${platform} 32,0,0,465`, language, playerType: "PlugIn" };
+  return {
+    os,
+    manufacturer,
+    version: `${platform} 32,0,0,465`,
+    language,
+    locale: tag,
+    playerType: "PlugIn",
+  };
 }
 
 /** How many touches the browser's screen takes at once, as Multitouch.maxTouchPoints reports; 0 without a browser. */

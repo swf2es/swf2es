@@ -1,0 +1,128 @@
+en-US | en-US en-US noError USD $ 2 0 0 - true true
+   USD1,234.50 | (USD1,234.50) | $1,234.50 | ($1,234.50) noError
+fi-FI | fi-FI fi-FI noError EUR € 2 8 3 - true true
+   1 234,50 EUR | -1 234,50 EUR | 1 234,50 € | -1 234,50 € noError
+de-DE | de-DE de-DE noError EUR € 2 8 3 - true true
+   1.234,50 EUR | -1.234,50 EUR | 1.234,50 € | -1.234,50 € noError
+ja-JP | ja-JP ja-JP noError JPY ￥ 0 0 0 - true true
+   JPY1,235 | (JPY1,235) | ￥1,235 | (￥1,235) noError
+en-GB | en-GB en-GB noError GBP £ 2 0 0 - true true
+   GBP1,234.50 | (GBP1,234.50) | £1,234.50 | (£1,234.50) noError
+nl-NL | nl-NL nl-NL noError EUR € 2 14 2 - true true
+   EUR 1.234,50 | (EUR 1.234,50) | € 1.234,50 | (€ 1.234,50) noError
+pt-BR | pt-BR pt-BR noError BRL R$ 2 9 2 - true true
+   BRL 1.234,50 | -BRL 1.234,50 | R$ 1.234,50 | -R$ 1.234,50 noError
+zh-CN | zh-CN zh-CN noError CNY ¥ 2 0 0 - true true
+   CNY1,234.50 | (CNY1,234.50) | ¥1,234.50 | (¥1,234.50) noError
+ko-KR | ko-KR ko-KR noError KRW ₩ 0 0 0 - true true
+   KRW1,235 | (KRW1,235) | ₩1,235 | (₩1,235) noError
+sv-SE | sv-SE sv-SE noError SEK kr 2 8 3 - true true
+   1 234,50 SEK | -1 234,50 SEK | 1 234,50 kr | -1 234,50 kr noError
+en | en en-US noError USD $ 2 0 0 - true true
+   USD1,234.50 | (USD1,234.50) | $1,234.50 | ($1,234.50) noError
+xx | xx en-US usingDefaultWarning USD $ 2 0 0 - true true
+   USD1,234.50 | (USD1,234.50) | $1,234.50 | ($1,234.50) noError
+positiveCurrencyFormat 0 0 noError $5.00 USD5.00
+positiveCurrencyFormat 1 1 noError 5.00$ 5.00USD
+positiveCurrencyFormat 2 2 noError $ 5.00 USD 5.00
+positiveCurrencyFormat 3 3 noError 5.00 $ 5.00 USD
+positiveCurrencyFormat 4 3 invalidAttrValue 5.00 $ 5.00 USD
+positiveCurrencyFormat 2147483648 3 illegalArgumentError 5.00 $ 5.00 USD
+negativeCurrencyFormat 0 0 noError ($5.00) (USD5.00)
+negativeCurrencyFormat 1 1 noError -$5.00 -USD5.00
+negativeCurrencyFormat 2 2 noError $-5.00 USD-5.00
+negativeCurrencyFormat 3 3 noError $5.00- USD5.00-
+negativeCurrencyFormat 4 4 noError (5.00$) (5.00USD)
+negativeCurrencyFormat 5 5 noError -5.00$ -5.00USD
+negativeCurrencyFormat 6 6 noError 5.00-$ 5.00-USD
+negativeCurrencyFormat 7 7 noError 5.00$- 5.00USD-
+negativeCurrencyFormat 8 8 noError -5.00 $ -5.00 USD
+negativeCurrencyFormat 9 9 noError -$ 5.00 -USD 5.00
+negativeCurrencyFormat 10 10 noError 5.00 $- 5.00 USD-
+negativeCurrencyFormat 11 11 noError $ 5.00- USD 5.00-
+negativeCurrencyFormat 12 12 noError $ -5.00 USD -5.00
+negativeCurrencyFormat 13 13 noError 5.00- $ 5.00- USD
+negativeCurrencyFormat 14 14 noError ($ 5.00) (USD 5.00)
+negativeCurrencyFormat 15 15 noError (5.00 $) (5.00 USD)
+negativeCurrencyFormat 16 15 invalidAttrValue (5.00 $) (5.00 USD)
+negativeCurrencyFormat -1 15 illegalArgumentError
+setCurrency EUR noError EUR [€] 2 €3.50 EUR3.50 false false
+setCurrency XYZ noError XYZ [Q] 2 Q3.50 XYZ3.50 false false
+setCurrency eur illegalArgumentError XYZ [Q] 2 Q3.50 XYZ3.50 false false
+setCurrency EU1 illegalArgumentError XYZ [Q] 2 Q3.50 XYZ3.50 false false
+setCurrency  illegalArgumentError XYZ [Q] 2 Q3.50 XYZ3.50 false false
+setCurrency ABCD illegalArgumentError XYZ [Q] 2 Q3.50 XYZ3.50 false false
+setCurrency JPY noError JPY [] 2 3.50 JPY3.50 true false
+setCurrency JPY noError JPY [¥] 2 ¥3.50 JPY3.50 true false
+setCurrency null code TypeError: Error #2007: Parameter currencyISOCode must be non-null.
+setCurrency null symbol TypeError: Error #2007: Parameter currencySymbol must be non-null.
+safe null TypeError: Error #2007: Parameter requestedISOCode must be non-null.
+safe true false false noError
+negativeSymbol - unsupportedError
+settings noError ($12.34.567,5) [USD,25] [USD]
+digitsType noError $١٢,٥
+format $0.01 $1.01 ($0.00) $1,000,000,000,000,000,000,000.00 NaN ∞ -∞
+parse 0 0 [$123.45] 123.45 [$] noError
+parse 0 0 [$ 123.45] 123.45 [$] noError
+parse 0 0 [123.45$] NaN [] parseError
+parse 0 0 [123.45] 123.45 [] noError
+parse 0 0 [USD 123.45] 123.45 [USD] noError
+parse 0 0 [123.45 USD] NaN [] parseError
+parse 0 0 [($123.45)] -123.45 [$] noError
+parse 0 0 [-$123.45] NaN [] parseError
+parse 0 0 [$-123.45] NaN [] parseError
+parse 0 0 [$1,234.5] 1234.5 [$] noError
+parse 0 0 [€5] 5 [€] noError
+parse 0 0 [abc] NaN [] parseError
+parse 0 0 [] NaN [] illegalArgumentError
+parse 0 0 [  $5  ] 5 [$] noError
+parse 0 0 [$5x] NaN [] parseError
+parse 0 0 [EUR5] 5 [EUR] noError
+parse 0 0 [5 EUR] NaN [] parseError
+parse 0 0 [(5)] -5 [] noError
+parse 0 0 [-5] NaN [] parseError
+parse 1 0 [-$5] -5 [$] noError
+parse 1 0 [$-5] NaN [] parseError
+parse 1 0 [($5)] NaN [] parseError
+parse 1 0 [- $ 5] NaN [] parseError
+parse 1 0 [-5] -5 [] noError
+parse 1 0 [-USD5] -5 [USD] noError
+parse 8 0 [-5 $] -5 [$] noError
+parse 8 0 [-5$] -5 [$] noError
+parse 8 0 [5 $-] NaN [] parseError
+parse 8 0 [-5] -5 [] noError
+parse 8 0 [- 5 $] NaN [] parseError
+parse 8 3 [5 $] 5 [$] noError
+parse 8 3 [5$] 5 [$] noError
+parse 8 3 [$5] NaN [] parseError
+parse 8 3 [5 US Dollar] 5 [US Dollar] noError
+parse 8 3 [5 $$] 5 [$$] noError
+parse 8 3 [5 1$] 5 [1$] noError
+parse 8 3 [1.234,50 €] 1234.5 [€] noError
+parse 8 3 [1.234,50€] 1234.5 [€] noError
+parse 8 3 [-1.234,50 €] -1234.5 [€] noError
+parse 8 3 [€ 5] NaN [] parseError
+parse 8 3 [5 EUR] 5 [EUR] noError
+parse 8 3 [5] 5 [] noError
+parse null TypeError: Error #2007: Parameter value must be non-null.
+constructor null TypeError: Error #2007: Parameter requestedLocaleIDName must be non-null.
+es-419 | es-419 XDR [] 0 1 [1,234.50] [-XDR1,234.50]
+en-150 | en-150 XDR [] 3 8 [1,234.50 ] [-1,234.50 XDR]
+parse 0 0 [$.5] 0.5 [$] noError
+parse 0 0 [$12.] 12 [$] noError
+parse 0 0 [$1,2,3] 123 [$] noError
+parse 0 0 [( $12 )] NaN [] parseError
+parse 0 0 [$ ( 12 )] NaN [] parseError
+parse 0 0 [-$-12] NaN [] parseError
+parse 0 0 [$−1] NaN [] parseError
+parse 0 0 [−$1] NaN [] parseError
+parse 0 0 [$.5.5] NaN [] parseError
+parse 0 0 [$ .5] 0.5 [$] noError
+parse 0 0 [USD  5] 5 [USD ] noError
+parse 8 3 [1,5  €] 1.5 [ €] noError
+parse 8 3 [1,5 €] 1.5 [€] noError
+parse 8 3 [1,5€] 1.5 [€] noError
+zh-HK HKD %24
+en-DG USD %24
+en-AU AUD %24
+available true

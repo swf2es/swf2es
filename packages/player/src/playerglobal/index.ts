@@ -47,8 +47,14 @@ import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
 import { perspectiveProjectionNatives } from "./flash/geom/PerspectiveProjection.js";
 import { transformNatives } from "./flash/geom/Transform.js";
 import { utils3DNatives } from "./flash/geom/Utils3D.js";
+import { collatorNatives } from "./flash/globalization/Collator.js";
+import { currencyFormatterNatives } from "./flash/globalization/CurrencyFormatter.js";
 import { currencyParseResultNatives } from "./flash/globalization/CurrencyParseResult.js";
+import { dateTimeFormatterNatives } from "./flash/globalization/DateTimeFormatter.js";
+import { localeIDNatives } from "./flash/globalization/LocaleID.js";
+import { numberFormatterNatives } from "./flash/globalization/NumberFormatter.js";
 import { numberParseResultNatives } from "./flash/globalization/NumberParseResult.js";
+import { stringToolsNatives } from "./flash/globalization/StringTools.js";
 import { soundHooks, soundNatives } from "./flash/media/Sound.js";
 import { soundMixerNatives } from "./flash/media/SoundMixer.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
@@ -116,6 +122,12 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...externalInterfaceNatives(s),
     ...currencyParseResultNatives(s),
     ...numberParseResultNatives(),
+    ...collatorNatives(s),
+    ...currencyFormatterNatives(s),
+    ...dateTimeFormatterNatives(s),
+    ...localeIDNatives(s),
+    ...numberFormatterNatives(s),
+    ...stringToolsNatives(s),
     ...urlRequestNatives(s),
     ...urlStreamNatives(s),
     ...navigateNatives(s),

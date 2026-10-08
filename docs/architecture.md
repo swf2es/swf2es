@@ -2251,6 +2251,123 @@ screen. By default, resolution comes from the browser's `screen` (zero in a
 non-browser host), pixel aspect ratio is 1 and DPI is 72. The corpus harness
 supplies the screen on which its Flash traces were recorded.
 
+### Globalization
+
+`flash.globalization` (`playerglobal/flash/globalization/`) is Flash on
+Windows' as AIR's adl shows it (the `*-formatter-natives`,
+`collator-natives`, `string-tools-natives` and `locale-id-natives` cases),
+with its locale data from the host's `Intl`, ICU's, where Flash takes the
+system's. Its rules are its own and are followed here; only the data is
+ICU's.
+
+- **Locales.** A name is kept as Flash keeps it: one it takes apart, its
+  subtags parted by single hyphens or underscores, canonical (`EN_us` as
+  `en-US`, variants in upper case), one parted otherwise as it came
+  (`en--us`, `en.US`, `en US`), one it cannot take apart (extensions, a
+  variant of digits alone, a language of one letter or nine, a keyword
+  other than calendar, collation, currency or numbers) in lower case. It
+  resolves to a locale Intl supports: the language's likely region where
+  none is given (`de` is `de-DE`, Chinese named by region, `zh-TW`),
+  `usingFallbackWarning` and the likely region for a region whose data ICU
+  does not resolve to (`en-ZZ`; `nb-NO` resolves to `nb`, Norway's), and
+  the default, `usingDefaultWarning`, for a language Intl does not know or
+  knows by another code (`iw`, `in`, `tl`, `und`). The default, also for
+  `""` and `i-default`, is `PlatformCapabilities.locale`, the browser's
+  language unless a host sets it; the player's tests start Chrome in
+  en-US, as adl's machine is. Methods and setters set
+  `lastOperationStatus`; getters leave it. What Intl gives a locale is
+  read once per locale; a name's resolution is kept for the last 64 names
+  only, as a SWF may make any number of them and every player shares the
+  cache (a unit test holds it to that).
+- **Numbers and currencies** take only their settings from Intl: the
+  separators, digits, grouping, the negative format, the currency's
+  digits, its narrow symbol (`$` in Hong Kong) and, for its formats,
+  Intl's currency and accounting formats with a narrow symbol, matched
+  against Windows' sixteen negative and four positive ones. A region's
+  currency comes from a table, as Intl has none; an area of several
+  countries (`419`, `150`) has Windows' XDR with no symbol. Formatting is
+  Flash's: the number printed with nine decimals, then rounded half up to
+  `fractionalDigits` (2 by default, Windows'; padded to a thousand at
+  most, where adl crashes), grouped by `groupingPattern` (five fields at
+  most), its digits from `digitsType` (`invalidAttrValue` for a
+  surrogate, a noncharacter or past Unicode's last, `illegalArgumentError`
+  past int's range), cut at a NUL as Flash's C strings are. Separators of
+  four characters or more are illegal, and a NUL ends one. `parse` finds
+  the first number anywhere, signed by the negative format around it at
+  most a plain, no-break, narrow or ideographic space away, U+2212 a minus
+  too; `parseNumber` and a currency's `parse` take a string that holds
+  nothing else but spaces, a currency one space from its number and any
+  more spaces its own.
+- **Dates** are formatted by Flash's LDML pattern, interpreted here as
+  Windows does: Gregorian, European digits, long and medium alike, a long
+  month's genitive when a day is its nearest field, the letters it cannot
+  format left out with `unsupportedError`, a run too long cut and an
+  unclosed quote closed with `usingFallbackWarning` (and the pattern so
+  kept formatted), an unknown letter or a pattern past 255 characters,
+  counted past a NUL, rejected with `patternSyntaxError`, one that closing
+  its quote takes past them emptied with `bufferOverflowError`, a NUL
+  ending it. A pattern with the date (or one of the letters of it Flash
+  cannot format) formats only Windows' dates, from 1601 to 14 September
+  30828, a year past 65535 wrapping as a 16-bit year does, local times
+  past JavaScript's range too, and gives `""` with `illegalArgumentError`
+  otherwise; one of the time alone formats any. An invalid date is
+  midnight of 1 January 1970 to a pattern without the date in UTC and to
+  one of the date alone in local time, and refused otherwise. The
+  locale's patterns are read off Intl's parts for its full date, its
+  numeric date and its medium and short times, the cased letters of their
+  literals quoted (`d 'de' MMMM`). The shortest weekday names are CLDR's
+  short width, which Intl does not give: a cased script's short names cut
+  to two letters, other scripts' short ones of two characters at most,
+  else the narrow ones, and the short ones wherever that would name two
+  days alike (Vietnamese, Portuguese).
+- **Collation** is `Intl.Collator`, with Windows' word sort, hyphens and
+  apostrophes compared last, `ß` as `ss`, symbols ignored with
+  punctuation, and the empty string apart from one of what is ignored;
+  width and kana are folded before comparing, as Intl has no options for
+  them. `numericComparison` is kept and reports `unsupportedError`, as in
+  adl, without changing the order.
+- **Case** is mapped a character at a time, as Windows does: no locale's
+  rules but Turkish, Azerbaijani and Lithuanian ones (Greek keeps its
+  accents), a character whose full mapping expands taking its simple one
+  where its decomposition gives one (`ᾳ` to `ᾼ`, Lithuanian `Ì` to `ì`).
+- **LocaleID** fills in the script and region of the whole name from
+  Intl's likely subtags (`zh-TW` is Hant), but for `und` and the codes
+  Windows does not know (`ji`, `jw`, `sh`). `determinePreferredLocales`
+  gives, for each locale wanted, those of its language and script: the
+  same locale (as Windows names it, `zh-Hant-HK` being `zh-HK`), those its
+  likely locale is, another locale wanted, other regions, then the
+  language alone; `und` matches only itself.
+
+What ICU's data gives differently from the system adl runs on, and so
+the cases leave out: separators (French and Swiss German group with
+U+202F and U+2019 where Windows has U+00A0 and an apostrophe; Arabic
+locales' are Arabic; Russian's and Bulgarian's date spaces are no-break
+where Windows' are narrow), symbols and formats of some currencies
+(Egyptian, Iranian, Norwegian's, Indonesian's and Malay's position,
+Turkish's parentheses, Curaçao's symbol), Finnish weekdays (`sunnuntai`
+for `sunnuntaina`), German abbreviated weekdays without a dot, the
+shortest weekday names where CLDR's short width is not two letters
+(Spanish `DO`, Catalan `dg.`, Arabic, Thai), Korean day periods, kana and
+width in collation, Windows' likely regions and scripts for some
+languages (`ar` is Saudi Arabia's, `ckb`, `mzn` have none, `mo` is
+Moldova's), script subtags, variants and keywords in Windows' resolved
+names (`az-Latn-AZ`, `ca-ES-VALENCIA`, `de-DE@collation=phonebook`,
+`zh-Hans-HK`), and `no` without a region. Chrome's ICU leaves out some
+locales' data (Georgian, Armenian, Mongolian, Basque, Galician, Kazakh,
+Irish, Hawaiian, Nynorsk among them): those fall back to the default or
+format with ICU's root data. Windows' collation is its own in what it
+ignores as a symbol (an emoji or ™ it does not) and in matching mode,
+where a precomposed letter differs from its decomposition and "áb" from
+"ab". Some pattern corners differ: a run cut short before an unclosed
+quote (`MMMMMMM'`), and the unsupported `W` with invalid and early dates.
+Local times far in the future follow the runtime's Date, which, as
+avmplus, applies no daylight saving after 2038. The oddities of adl
+under Wine are not reproduced: an era printed twice (`ADAD`), a lone `*`
+grouping pattern grouping by eleven, astral digits printed as
+replacement characters, a crash for a thousand fractional digits.
+`getAvailableLocaleIDNames` lists each region's likely locale that Intl
+supports, as Intl lists none.
+
 ### What a browser player lacks
 
 Some of playerglobal stands for what the player does not have, and acts

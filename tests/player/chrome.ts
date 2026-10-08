@@ -159,7 +159,12 @@ export async function withPage<T>(
         "--no-first-run",
         "about:blank",
       ],
-      { stdio: ["ignore", "ignore", "pipe"] },
+      // The user's locale, flash.globalization's default, as the Flash oracle's: Chrome on
+      // Linux takes it from the environment, not --lang.
+      {
+        stdio: ["ignore", "ignore", "pipe"],
+        env: { ...process.env, LANGUAGE: "en_US", LANG: "en_US.UTF-8" },
+      },
     );
     // What Chrome says and whether it is still there, for when it gives no port.
     let stderr = "";

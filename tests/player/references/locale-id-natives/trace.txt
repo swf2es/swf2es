@@ -1,0 +1,66 @@
+[en-US] en-US noError language=en script=Latn region=US variant= rtl=false keys= noError
+[en_US] en-US noError language=en script=Latn region=US variant= rtl=false keys= noError
+[zh-Hant-TW] zh-Hant-TW noError language=zh script=Hant region=TW variant= rtl=false keys= noError
+[sr-Latn-RS] sr-Latn-RS noError language=sr script=Latn region=RS variant= rtl=false keys= noError
+[en-US-POSIX] en-US-POSIX noError language=en script=Latn region=US variant=POSIX rtl=false keys= noError
+[de-DE@collation=phonebook] de-DE@collation=phonebook noError language=de script=Latn region=DE variant= rtl=false keys=collation=phonebook noError
+[ja-JP@calendar=japanese;currency=JPY] ja-JP@calendar=japanese;currency=JPY noError language=ja script=Jpan region=JP variant= rtl=false keys=calendar=japanese;currency=JPY noError
+[ar-EG] ar-EG noError language=ar script=Arab region=EG variant= rtl=true keys= noError
+[he-IL] he-IL noError language=he script=Hebr region=IL variant= rtl=true keys= noError
+[fa] fa noError language=fa script=Arab region=IR variant= rtl=true keys= noError
+[ur-PK] ur-PK noError language=ur script=Arab region=PK variant= rtl=true keys= noError
+[xx-YY] xx-YY noError language=xx script= region=YY variant= rtl=false keys= noError
+[]  noError language= script= region= variant= rtl=false keys= noError
+[i-default] i-default noError language=i-default script= region= variant= rtl=false keys= noError
+[en] en noError language=en script=Latn region=US variant= rtl=false keys= noError
+[EN-us] en-US noError language=en script=Latn region=US variant= rtl=false keys= noError
+[x-private] x-private noError language=x-private script= region= variant= rtl=false keys= noError
+[en-US-u-ca-gregory] en-us-u-ca-gregory noError language=en-us-u-ca-gregory script= region=us variant= rtl=false keys= noError
+[zh-Hans] zh-Hans noError language=zh script=Hans region=CN variant= rtl=false keys= noError
+[123] 123 noError language=123 script= region= variant= rtl=false keys= noError
+[de-AT-1996] de-at-1996 noError language=de-at-1996 script= region=at variant= rtl=false keys= noError
+[en--US] en--US noError language=en script=Latn region=US variant= rtl=false keys= noError
+[es-419] es-419 noError language=es script=Latn region=419 variant= rtl=false keys= noError
+[a-b-c-d] a-b-c-d noError language=a-b-c-d script= region= variant= rtl=false keys= noError
+[toolong-XX] toolong-XX noError language=toolong script= region=XX variant= rtl=false keys= noError
+preferred fr-CA,en-US / en-US,fr-FR,de-DE => fr-FR,en-US 2
+preferred de-CH,fr / de-DE,fr-FR,it-IT => de-DE,fr-FR 2
+preferred xx / en-US,fr-FR =>  0
+preferred  / en-US =>  0
+preferred en-GB,en / en-US,en-GB,en => en-GB,en,en-US 3
+preferred zh-TW / zh-CN,zh-Hant,zh-TW => zh-TW,zh-Hant 2
+[zh-TW] zh-TW zh script=Hant region=TW variant= false
+[sgn-BE-FR] sgn-BE-FR sgn script= region=BE variant=FR false
+[abcdefghi-XX] abcdefghi-xx abcdefghi-xx script= region= variant= false
+[de@x=1] de@x=1 de@x=1 script= region= variant= false
+[und] und und script= region= variant= false
+[de-DE-1996] de-de-1996 de-de-1996 script= region=de variant= false
+[EN_us] en-US en script=Latn region=US variant= false
+[iw] iw iw script=Hebr region=IL variant= true
+[en-US@collation=phonebook;currency=EUR] en-US@collation=phonebook;currency=EUR en script=Latn region=US variant= false
+preferred en-GB,en / en-US,en-GB,en => en-GB,en,en-US
+preferred en,en-GB / en-US,en-GB,en => en,en-US,en-GB
+preferred en-AU / en-GB,en-US,en,en-AU => en-AU,en-GB,en-US,en
+preferred en / en-GB,en-AU,en-US,en => en,en-US,en-GB,en-AU
+preferred pt / pt-PT,pt-BR,pt => pt,pt-BR,pt-PT
+preferred de-AT / de,de-DE,de-CH => de-DE,de-CH,de
+preferred fr-CA / fr,fr-FR,fr-Latn-CA,fr-CA => fr-Latn-CA,fr-CA,fr-FR,fr
+preferred zh-HK / zh-Hant-HK,zh-HK,zh-CN => zh-Hant-HK,zh-HK
+preferred fr-CA,en,zh-TW,pt-PT,de / en-US,fr-FR,fr,zh-CN,zh-Hant-HK,pt-BR,de-DE,en-GB,en,fr-CA,EN-us,,x => fr-CA,fr-FR,fr,en,en-US,EN-us,en-GB,zh-Hant-HK,pt-BR,de-DE
+[ji] ji ji script= region= variant=
+[jw] jw jw script= region= variant=
+[sh] sh sh script= region= variant=
+[iw] iw iw script=Hebr region=IL variant=
+[in] in in script=Latn region=ID variant=
+[tl] tl tl script=Latn region=PH variant=
+[en US] en US en script=Latn region=US variant=
+[en-US-1abc] en-US-1ABC en script=Latn region=US variant=1ABC
+[en-US-1996] en-us-1996 en-us-1996 script= region=us variant=
+und 1
+null elements ,en
+keyword fr-FR
+want null TypeError: Error #2007: Parameter want must be non-null.
+have null TypeError: Error #2007: Parameter have must be non-null.
+keyword null TypeError: Error #2007: Parameter keyword must be non-null.
+constructor null TypeError: Error #2007: Parameter name must be non-null.
+default i-default
