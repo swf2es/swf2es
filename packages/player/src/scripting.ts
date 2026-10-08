@@ -177,6 +177,14 @@ export class Scripting {
   drawer: Drawer | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
+  /** Security.sandboxType, as the host placed the SWF: "remote" by default, a web page's. */
+  readonly sandboxType: string;
+  /**
+   * Takes the policy files Security.loadPolicyFile names, resolved, for a
+   * host that judges requests by them; nothing does by default, as a
+   * browser's fetch knows only CORS.
+   */
+  readonly loadPolicyFile: ((url: string) => void) | null;
   /** Where every relative URL the SWFs ask for resolves, where the host gives one; else against the SWF's. */
   readonly base: string | null;
   /** Where local SharedObjects are kept (flash/net/SharedObject.ts). */
@@ -241,6 +249,13 @@ export class Scripting {
     options: avm2.RuntimeOptions & {
       fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
+      /**
+       * Security.sandboxType: "remote", "localWithFile", "localWithNetwork"
+       * or "localTrusted", as the host placed the SWF; "remote" by default.
+       */
+      sandboxType?: string;
+      /** Takes the URLs Security.loadPolicyFile names, resolved: an "xmlsocket:" one as given. */
+      loadPolicyFile?: (url: string) => void;
       /**
        * Where the SWFs' relative URLs resolve, as a page's `base` parameter
        * has Flash resolve them all; against the URL of the SWF that asks
@@ -346,6 +361,8 @@ export class Scripting {
       ? (request, signal) => fetch(request, AbortSignal.any([signal, this.stopped.signal]))
       : null;
     this.url = options.url ?? this.url;
+    this.sandboxType = options.sandboxType ?? "remote";
+    this.loadPolicyFile = options.loadPolicyFile ?? null;
     this.base = options.base ?? null;
     this.loads = new Loads(this, options);
     this.storage = options.storage ?? defaultStorage();

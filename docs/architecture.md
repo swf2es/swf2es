@@ -1628,7 +1628,16 @@ status and headers. A `URLRequest`'s GET string or URLVariables data is appended
 GET ByteArray data is currently left out and has not been checked against Flash;
 other methods send its string, URLVariables or ByteArray data as the body.
 Only POST forwards custom headers in the browser player, as Flash Player does;
-the host's fetch decides which requests its environment permits. The result
+the host's fetch decides which requests its environment permits. Each
+request says what it is for (`purpose`), as Flash's security model told
+them apart: a Loader's or Sound's `content`, which Flash let a SWF load
+from any domain, a URLStream's `data`, which it let a SWF read from
+another domain only as that domain's policy file allowed, and
+sendToURL's `send`; a browser's fetch ignores it, and a host that judges
+requests as Flash did (the desktop app) reads it. Such a host also gets
+the policy files `Security.loadPolicyFile` names, resolved against the
+SWF (`loadPolicyFile`), and names the sandbox `Security.sandboxType`
+reports (`sandboxType`, "remote" by default). The result
 arrives on the player thread in a later frame.
 A successful stream reports `OPEN`, `PROGRESS`, `HTTP_STATUS`, `COMPLETE`;
 a failed one reports `HTTP_STATUS` before `IO_ERROR`. A URL load through

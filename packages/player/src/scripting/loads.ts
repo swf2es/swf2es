@@ -9,7 +9,7 @@ import { avm2 } from "@swf2es/runtime";
 import { decodeImages, hasUndecoded } from "../bitmap/images.js";
 import { type Container, MovieClip, rootOf } from "../display/display.js";
 import { type Library, readLibrary } from "../display/timeline.js";
-import type { FetchRequest, FetchResult } from "../hosts.js";
+import type { FetchPurpose, FetchRequest, FetchResult } from "../hosts.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent } from "./events.js";
 
@@ -392,7 +392,10 @@ export class Loads {
     }
 
     const { info, generation } = begun;
-    const outgoing = this.fetchRequest(request, info.$loaderURL);
+    const outgoing = {
+      ...this.fetchRequest(request, info.$loaderURL),
+      purpose: "content" as const,
+    };
     const abort = new AbortController();
     loader.$abort = abort;
     const fetch = this.s.fetch;
@@ -406,13 +409,17 @@ export class Loads {
     );
   }
 
-  /** A URLStream's host request, delivered in a frame after the bytes arrive. */
+  /**
+   * A URLStream's or a Sound's host request, delivered in a frame after the bytes arrive: a Sound's
+   * is "content", a URLStream's "data".
+   */
   requestBytes(
     request: AsObject | string,
     signal: AbortSignal,
     deliver: (result: FetchResult, url: string) => void,
+    purpose: FetchPurpose = "data",
   ): void {
-    const outgoing = this.fetchRequest(request, this.s.url);
+    const outgoing = { ...this.fetchRequest(request, this.s.url), purpose };
     const fetch = this.s.fetch;
     // Attach both handlers at once; an early rejection must not be unhandled.
     const fetched = (fetch ? fetch(outgoing, signal) : Promise.reject()).then(
@@ -448,7 +455,15 @@ export class Loads {
       return;
     }
 
-    fetch(this.fetchRequest(request, this.s.url), new AbortController().signal).catch(() => {});
+    fetch(
+      { ...this.fetchRequest(request, this.s.url), purpose: "send" },
+      new AbortController().signal,
+    ).catch(() => {});
+  }
+
+  /** Security.loadPolicyFile's URL, resolved as a load's is, for the host to judge requests by. */
+  policyFile(url: string): void {
+    this.s.loadPolicyFile?.(resolve(this.s.base ?? this.s.url, url));
   }
 
   /** Snapshot a URLRequest at load time, before scripts can change its data or headers. */

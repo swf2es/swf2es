@@ -283,12 +283,24 @@ export interface FetchResult {
   url?: string;
 }
 
+/**
+ * What a request is for, as Flash's security model tells them apart: a
+ * Loader's or a Sound's "content", which Flash let a SWF load from any
+ * domain to display or play; a URLLoader's or URLStream's "data", which it
+ * let a SWF read from another domain only as that domain's policy file
+ * allowed; sendToURL's "send", whose response no one reads; and "movie",
+ * the SWF an embedding plays, which the player never asks for itself.
+ */
+export type FetchPurpose = "movie" | "content" | "data" | "send";
+
 /** The request the player asks its host to send. */
 export interface FetchRequest {
   url: string;
   method: string;
   headers: readonly (readonly [name: string, value: string])[];
   body: Uint8Array | null;
+  /** What it is for, for a host that judges requests as Flash did; a browser's fetch ignores it. */
+  purpose?: FetchPurpose;
 }
 
 /** A TCP connection supplied by the embedding host. */
