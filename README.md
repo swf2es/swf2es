@@ -6,7 +6,7 @@ shipped as `codegen.wasm`, runs in two places: in the page as a SWF loads
 (JIT), and in node ahead of time (AOT). Both write the same modules, byte
 for byte, so the output of either can stand in for the other.
 
-**Status:** ActionScript 3 (AVM2) runs as avmshell runs it, and 95% of
+**Status:** ActionScript 3 (AVM2) runs as avmshell runs it, and 97.9% of
 Tamarin's acceptance tests match it ([coverage](docs/coverage.md)). The
 player covers the display list and timeline, shapes, morphs, text, bitmaps,
 filters, blend modes, sound, input, loading, sockets and ExternalInterface,
@@ -167,7 +167,7 @@ frames to the server:
 
 ```js
 configure({
-  socketProxy: [{ host: "game.example", port: 5588, proxyUrl: "wss://relay.example/5588" }],
+  socketProxy: [{ host: "server.example", port: 9000, proxyUrl: "wss://relay.example/9000" }],
   // or a function: (host, port) => `wss://relay.example/${host}/${port}`, null to refuse
 });
 ```
