@@ -1,0 +1,16 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../../dist/renderer",
+    "tsBuildInfoFile": "../../dist/renderer/.tsbuildinfo",
+    "types": [],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["*.ts"],
+  "references": [
+    { "path": "../shared" },
+    { "path": "../../../../packages/player" },
+    { "path": "../../../../packages/web" }
+  ]
+}

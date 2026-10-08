@@ -7,9 +7,9 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "build": "pnpm --filter @swf2es/codegen build:wasm && tsc -b packages/*",
-    "build:debug": "pnpm --filter @swf2es/codegen build:wasm:debug && tsc -b packages/*",
-    "clean": "tsc -b --clean packages/*",
+    "build": "pnpm --filter @swf2es/codegen build:wasm && tsc -b packages/* apps/*",
+    "build:debug": "pnpm --filter @swf2es/codegen build:wasm:debug && tsc -b packages/* apps/*",
+    "clean": "tsc -b --clean packages/* apps/*",
     "test": "pnpm -r --filter './tests/*' test",
     "test:checked": "pnpm --filter @swf2es/codegen build:wasm:checked && SWF2ES_CHECKED=1 pnpm test",
     "determinism": "node tests/conformance/determinism.ts",
@@ -32,6 +32,7 @@
   },
   "workspaces": [
     "packages/*",
+    "apps/*",
     "tests/*"
   ]
 }

@@ -55,7 +55,7 @@ export interface PlayerResult {
 /** What a call to the page answers when the page's renderer died before answering. */
 const CRASHED = "the page crashed";
 
-class DevTools {
+export class DevTools {
   private id = 0;
   /** Why no call will be answered any more, once the socket has closed. */
   private closed: string | null = null;

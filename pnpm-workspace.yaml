@@ -1,3 +1,8 @@
 packages:
   - packages/*
+  - apps/*
   - tests/*
+# Electron's postinstall downloads its ~100 MB binary; pnpm skips it, and
+# `pnpm --filter @swf2es/desktop fetch-electron` fetches it for those who run the app.
+ignoredBuiltDependencies:
+  - electron

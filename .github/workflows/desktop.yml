@@ -1,0 +1,54 @@
+name: Desktop
+# The desktop app's smoke test in Electron. Apart from CI's build job,
+# which skips it: pnpm install leaves Electron's binary undownloaded, and
+# only this job fetches it.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, dev]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "tests/desktop/**"
+      - "tests/player/**"
+      - "oracle/*.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "tsconfig*.json"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "tests/desktop/**"
+      - "tests/player/**"
+      - "oracle/*.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "tsconfig*.json"
+      - ".github/workflows/desktop.yml"
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm oracle:pull
+      - run: pnpm --filter @swf2es/desktop fetch-electron
+      # A display for the smoke test to start (GTK aborts Electron without one).
+      - run: sudo apt-get install -y --no-install-recommends xvfb
+      # Ubuntu's AppArmor keeps unprivileged user namespaces from Chromium's sandbox, which the app keeps on.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: pnpm --filter @swf2es/tests-desktop test

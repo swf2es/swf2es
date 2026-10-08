@@ -1,6 +1,7 @@
 {
-  // Type-checks the .ts files node runs directly (tests, oracle scripts).
-  // Packages have their own tsconfig and are checked by `pnpm build`.
+  // Type-checks the .ts files node runs directly (tests, oracle scripts, the
+  // desktop app's launcher). Packages and apps have their own tsconfig and
+  // are checked by `pnpm build`.
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",
@@ -16,6 +17,7 @@
   },
   "include": [
     "tests/**/*.ts",
+    "apps/desktop/*.ts",
     "oracle/*.ts",
     "packages/codegen/src/webassembly.d.ts",
     "packages/codegen/stamp.ts"

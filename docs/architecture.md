@@ -119,6 +119,11 @@ but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
 
+Apps, in `apps/`, are what people run rather than import: `desktop`, the
+Electron app (see [The desktop app](#the-desktop-app)), and later a browser
+extension. An app may use any package, and no package may use an app; an
+app is private, never published. The boundaries test checks both.
+
 ## Parsing, linking and verifying
 
 avmplus checks an ABC in three places, and swf2es checks it in the same
@@ -3794,8 +3799,10 @@ gives, as playerglobal is Adobe's and cannot ship with swf2es; `codegen`, codege
 default what the import map gives `@swf2es/codegen/codegen.wasm`;
 `socketProxy`, a function from a socket's host and port to a WebSocket
 relay's URL or a list of them as Ruffle's, a socket without one refused
-with #2031; and `cache`. The page fetches and compiles codegen.wasm once
-and the libraries once, and each player instantiates the compiled module
+with #2031; `sockets`, a SocketHost of the embedder's own that takes the
+relays' place, as the desktop app's, which reaches TCP itself; and
+`cache`. The page fetches and compiles codegen.wasm once and the
+libraries once, and each player instantiates the compiled module
 and reads the same bytes. A player has a Codegen of its own: Scripting
 resets the compiler it is given, and its domains' numbers are its own,
 so two players on one instance would take each other's over. `cache:
@@ -3917,6 +3924,176 @@ swaps them all the same. And under a CSP without eval, inline-function
 calls come to nothing, but a call by a path still reaches any function
 a global path names, `eval` itself among them: script access is the
 page's whole, as it was in Flash.
+
+## The desktop app
+
+`apps/desktop` plays local SWFs in an Electron window. It is the web
+embedding with a shell around it: the page is one `<swf2es-player>`
+filling the window, configured with the IndexedDB module cache and the
+libraries the user pointed the app at, and the main process opens the
+files, keeps the settings and carries the sockets. The page knows the
+shell only through `window.swf2esDesktop`, whose types are
+`src/shared/api.ts`: `start`, which hands the page the libraries' state and
+the SWF to play; `onOpen` and `onClose`; `openDialog`, `openDropped` and
+`chooseLibrary`, requests the main process answers with dialogs and
+`onOpen`; and `sockets`. The page (`src/renderer`, `static/`) imports
+nothing of Electron's, so a Tauri shell can serve it as it is.
+
+### Serving the page
+
+Nothing is loaded from `file:`. One privileged scheme, `swf2es:`,
+standard and secure, so fetch, CORS, IndexedDB and localStorage treat it
+as https, has two hosts. `swf2es://app/` is the page, `static/index.html`
+and its stylesheet, the renderer's build, `/modules/<package>/` for the
+packages' builds and their libraries (pixi.js, pako, lzma1), which the
+page's import map names as `tests/player/serve.ts`'s does, and
+`/libraries/builtin.abc` and `/libraries/playerglobal.abc`, read from where
+the settings say. `swf2es://file/` is the local files the SWF playing may
+read, by its sandbox (below); its answers carry
+`Access-Control-Allow-Origin: swf2es://app`. The two hosts are two
+origins: a SWF's files are never the page's. Anything but GET and HEAD is
+refused, and a path with malformed %-escapes is a 400.
+
+### The sandbox
+
+A local SWF plays in the sandbox Flash Player gave it, chosen by its
+FileAttributes' UseNetwork bit (`fileAttributes` in `format`), and
+`src/main/sandbox.ts` holds it:
+
+- **local-with-filesystem**, without the bit: the SWF reads the files in
+  its own directory and below, its real directory, links followed, and
+  reaches no network. Every http, https, ws and wss request from the page
+  is cancelled in the session's `webRequest` (with a word on stderr), no
+  socket is made, and navigateToURL opens no page, as Flash refused it,
+  since a URL can carry what the SWF read.
+- **local-with-networking**, with it: the SWF reads no local file but
+  itself, and reaches the network as a web page does (https and wss,
+  CORS included), and sockets as the user allows (below).
+
+So no SWF can both read the disk and send what it read away. A
+directory others share is never granted whole: the user's home, the one
+that holds every user's (`/home`, `/Users`, `C:\Users`), the temporary
+ones (the OS's, `/tmp`, `/var/tmp`) and a file system's root; a SWF there
+reads only itself. Only those directories themselves: a SWF one level
+below, in `C:\Users\Public` or a directory of `/tmp`, reads all that
+directory holds, which may be other programs' or users' files, so a SWF
+from elsewhere is best kept in a directory of its own.
+
+The main process chooses the sandbox from the SWF's first 64 KB, with
+`fileAttributes` (`format`), which decompresses only as far as the first
+tag: a SWF's header may name a length of 4 GB, which it never trusts.
+The page decompresses the SWF whole, with what `format`'s LZMA decoder
+bounds (see [Packages](#packages)).
+
+Only the SWF playing has a grant: opening another or closing it revokes
+it, so nothing accumulates over a run, and the next SWF's grant takes
+effect only as the page fetches it, which it does once the element has
+let the last player go, so that player never runs in the next one's
+sandbox. What the SWF loads, a child SWF among it, plays in its sandbox,
+which is the page's. The URL the page plays a SWF from, which is also
+its `loaderInfo.url`, names its directory by a token, a hash of the
+path, and the file by its name, so the SWF learns nothing of where it is
+or whose disk it is on, and the token, the same from run to run, keeps
+its SharedObjects.
+
+The page's Content-Security-Policy, a header the main process writes, is
+`default-src 'none'` and what the player needs: `script-src 'self'
+'unsafe-eval' 'wasm-unsafe-eval'` and the import map's hash, as the player
+evaluates the modules it compiles with `new Function` and codegen is
+WebAssembly; inline styles, for the element's shadow root; images, media
+and fonts from the page, the SWF's files, `data:` and `blob:`; and
+`connect-src` for the page, the SWF's files and `https:` and `wss:`, so a
+SWF in local-with-networking loads from the network as from a web page,
+CORS included. `http:` and `ws:` are refused: the page is a secure
+context, which Chromium would not let reach them anyway as mixed content,
+and the policy says so rather than leave it to that. Nothing may frame
+the page, and it frames nothing.
+
+### What the page may do
+
+The window's renderer is sandboxed (`app.enableSandbox()`), with context
+isolation, no node integration and web security on. The preload, a
+CommonJS script as a sandboxed one must be, puts the API on the page
+through `contextBridge` and passes the path of a dropped file
+(`webUtils.getPathForFile`) to the main process without showing it to the
+page. The main process answers a message only from the window's own top
+frame on `swf2es://app/`, and checks each argument: a path must be
+absolute and its file start with a SWF's signature, a library must be an
+ABC (major version 46), a socket's host a string and its port in range.
+The page never navigates: `will-navigate` is refused, and a new window,
+as a SWF's navigateToURL asks for, is refused too, its URL opened in the
+system's browser with `shell.openExternal` if it is http or https, the
+SWF is in local-with-networking, and a click, key or tap in the window
+asked for it: one page a gesture, within
+five seconds of it and a second after the last, as a browser's popup
+blocker allows, so a SWF cannot launch the browser in a loop.
+`<webview>`s are refused, and the only permission granted is full screen.
+ExternalInterface is off (`allowscriptaccess="never"`): a SWF's calls
+into the page would run beside the API.
+
+### Files, settings and libraries
+
+The main process opens a SWF from File › Open, a drop on the window, the
+command line (the last argument that names a .swf file there is, as a
+switch may take a value), macOS's `open-file`, a second start of the app,
+which hands its SWF to the first and quits, and the recent list, and sends
+the page its swf2es://file URL, which it plays with `load` in place of what played, the element
+letting the last player go. It keeps `settings.json` in Electron's user
+data directory (`SWF2ES_DESKTOP_USER_DATA` names another, for the tests):
+the libraries' paths, the last ten SWFs and the servers each SWF may
+always reach. A settings file that cannot be written keeps them for the
+run, with a word. playerglobal.abc is the
+user's to give; builtin.abc is taken from beside it, else from the
+checkout's avmplus submodule, else given too. Without them, the page
+shows what is missing and why the app cannot include playerglobal, and an
+ActionScript 3 SWF that fails for want of them says so rather than
+showing the 404; choosing one reloads the page, which fetches the
+libraries once.
+
+### Sockets
+
+The element takes the shell's SocketHost through `configure({ sockets
+})`. Each `flash.net.Socket` is an id the preload numbers, and the main
+process connects it with `node:net`, as `player-hosts/node` does,
+relaying its bytes and events over IPC. Only a SWF in
+local-with-networking has sockets, and only as the user allows: the first
+connection to each host and port asks, Allow Once (until the SWF closes),
+Always Allow for This SWF (kept in the settings by the SWF's real path)
+or Deny (until it closes); connections there while the question is open
+wait on its answer, and where no one can be asked it is a refusal. A
+refused socket fails with #2031, as one no server took. A page holds at
+most 64 at once, and one with more than 4 MB its peer has not read fails,
+so a peer that stops reading cannot fill the main process's memory. A
+page's sockets close, silently, as it navigates or reloads, and with it.
+TLS (`SecureSocket`) waits for the player to have it.
+
+### Running and testing
+
+`pnpm install` leaves Electron's binary undownloaded (pnpm's
+`ignoredBuiltDependencies`), so nothing else pays for it;
+`pnpm --filter @swf2es/desktop fetch-electron` fetches it, and `start`
+runs the app, `--trace` printing the page's console, a SWF's traces to
+stdout. `tests/desktop/smoke.ts`, part of `pnpm test`, skips with a word
+where there is no binary; with one, it runs the app in Chromium's headless
+mode with SwiftShader, so it needs no display, and checks that a SWF
+named on the command line, through a link, draws and traces; that in
+local-with-filesystem it reads the file beside it, nothing outside its
+directory, no network and no socket, and its URL tells nothing of its
+path; that playing it again leaves one canvas, that one dropped on the
+window opens, and that a second start hands the first its SWF, which,
+in local-with-networking, reads no file, the last SWF's grant gone, and
+talks to a TCP server it is allowed through the bridge; that no page
+opens without a gesture, and that the policy refuses nothing; and that
+without playerglobal the page says what is missing. `connections.test.ts`
+and `sandbox.test.ts` test the sockets' limits and the sandbox's grants
+in node. CI's `desktop` workflow fetches Electron and runs them.
+
+Not done yet: packaging and installers, `SecureSocket`, Flash's
+Settings Manager for trusting a SWF or directory (localTrusted), each
+loaded SWF in a sandbox of its own rather than its loader's, network
+loads judged by crossdomain.xml rather than CORS, Security.sandboxType
+following the sandbox, a POST from navigateToURL (the system's
+browser gets its URL alone), and reading playerglobal from a `.swc`.
 
 ## Testing against oracles
 

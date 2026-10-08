@@ -1,0 +1,11 @@
+{
+  "name": "@swf2es/tests-desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test connections.test.ts sandbox.test.ts && node smoke.ts"
+  },
+  "dependencies": {
+    "@swf2es/desktop": "workspace:*"
+  }
+}

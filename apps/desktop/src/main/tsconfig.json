@@ -1,0 +1,12 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../../dist/main",
+    "tsBuildInfoFile": "../../dist/main/.tsbuildinfo",
+    "types": ["node"],
+    "lib": ["ES2022"]
+  },
+  "include": ["*.ts"],
+  "references": [{ "path": "../shared" }, { "path": "../../../../packages/format" }]
+}
