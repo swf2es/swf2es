@@ -9,6 +9,7 @@ import { decodeImages } from "../bitmap/images.js";
 import type { Library } from "../display/timeline.js";
 import type { CachedModule, ModuleCache } from "../hosts.js";
 import type { Scripting } from "../scripting.js";
+import { type Evaluated, evaluate, evaluateFunction, type Factory } from "./evaluate.js";
 import { sha256 } from "./sha256.js";
 
 type AsObject = avm2.AsObject;
@@ -150,8 +151,11 @@ export class Code {
     const root = this.s.rt.root;
     for (const abc of abcs) {
       const index = await this.add(abc, true, root);
-      const ready = this.cache() ? await this.prepare([index]) : null;
-      this.compileAt(index, root, true, undefined, ready?.[0]);
+      const ready = this.cache() ? await this.prepare([index]) : undefined;
+      const linked = this.compileAll([index], root, true, undefined, ready);
+      if (linked instanceof Promise) {
+        await linked;
+      }
     }
   }
 
@@ -191,9 +195,14 @@ export class Code {
 
       // With a module cache, each module is read or compiled first, so
       // that they all load into the runtime at once, as without one.
-      const ready = this.cache() ? await this.prepare(added.map((a) => a.index)) : null;
-      for (const [k, { index, lazy }] of added.entries()) {
-        const linked = this.compileAt(index, domain, false, { url, library }, ready?.[k]);
+      const indices = added.map((a) => a.index);
+      const ready = this.cache() ? await this.prepare(indices) : undefined;
+      // Awaited only if a module's evaluation waits, so that where none does
+      // the link goes on in the same turn, as it did before scripts.
+      const linked = this.compileAll(indices, domain, false, { url, library }, ready);
+      const modules = linked instanceof Promise ? await linked : linked;
+      for (const [k, { lazy }] of added.entries()) {
+        const linked = modules[k];
         if (!lazy) {
           runs.push(() => this.s.rt.run(linked));
         }
@@ -319,48 +328,103 @@ export class Code {
   }
 
   /**
-   * ABC `index`'s module, compiled against every ABC added so far that its
-   * domain sees, or `ready` from the host's module cache, loaded into the
-   * runtime's `domain`; `builtin` for the player's own libraries, a SWF's
-   * with its `origin`. Each is evaluated under a script name of its own,
-   * or imported from its URL, by which Runtime.codeDomain finds the domain
-   * of the code running.
+   * The modules of the ABCs at `indices`, each compiled against every ABC
+   * added so far that its domain sees, or `ready` from the host's module
+   * cache, loaded into the runtime's `domain` in order; `builtin` for the
+   * player's own libraries, a SWF's with its `origin`. Each is evaluated
+   * under a script name of its own, or imported from its URL, by which
+   * Runtime.codeDomain finds the domain of the code running. All are
+   * evaluated before any loads, as evaluating may wait (see evaluate), so
+   * that they load at once; a promise only if one waited.
    */
-  private compileAt(
-    index: number,
+  private compileAll(
+    indices: number[],
     domain: avm2.Domain,
     builtin = false,
     origin?: { url: string; library: Library },
-    ready?: Ready,
-  ): Value {
-    let script = `swf2es-${++this.modules}.js`;
-    const run = (factory: Factory) => this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
-    const load = (module: string) => run(evaluateModule(module, script));
-    let linked: Value;
+    ready?: Ready[],
+  ): Value[] | Promise<Value[]> {
+    const pending = indices.map((index, k) => this.evaluateAt(index, builtin, ready?.[k]));
+    const load = (evaluated: Module[]) =>
+      indices.map((index, k) =>
+        this.loadAt(index, domain, builtin, evaluated[k], ready?.[k], origin),
+      );
+    return pending.some((e) => e instanceof Promise)
+      ? Promise.all(pending).then(load)
+      : load(pending as Module[]);
+  }
+
+  /**
+   * ABC `index`'s module evaluated, or imported, compiled first if not
+   * `ready`. A cached module that does not evaluate is compiled now, the
+   * domain already as its compile left it, and its entry goes, not stored
+   * again: the SWF's later modules were readied since, and the key the
+   * compile now would have is not this one. The player's own need no
+   * script the frames name, as codeDomain skips their code.
+   */
+  private evaluateAt(index: number, builtin: boolean, ready?: Ready): Module | Promise<Module> {
+    const compiled = (module = this.s.codegen.compileModule(this.hashes, index)) => {
+      const script = `swf2es-${++this.modules}.js`;
+      return builtin
+        ? { factory: evaluateFunction(module, script), script }
+        : evaluate(module, script);
+    };
     if (!ready?.cached) {
-      linked = load(ready?.module ?? this.s.codegen.compileModule(this.hashes, index));
+      return compiled(ready?.module);
+    }
+
+    if (ready.imported) {
+      return { factory: ready.imported.factory, script: ready.imported.url, cached: true };
+    }
+
+    const recompiled = () => {
+      this.discard(ready.key, ready.entry);
+      return compiled();
+    };
+    try {
+      const evaluated = compiled(ready.module);
+      return evaluated instanceof Promise
+        ? evaluated.then((e) => ({ ...e, cached: true }), recompiled)
+        : { ...evaluated, cached: true };
+    } catch {
+      return recompiled();
+    }
+  }
+
+  /**
+   * ABC `index`'s module, `evaluated`, loaded into the runtime's `domain`.
+   * A cached module that the runtime refuses before loading anything of
+   * it (its linked ABCs differ) is compiled now, as in evaluateAt, and
+   * evaluated by a Function, as a load cannot wait: on an engine whose
+   * frames name no Function's script, its code is the host's to
+   * codeDomain. One that loaded part of itself cannot be, and the load
+   * fails.
+   */
+  private loadAt(
+    index: number,
+    domain: avm2.Domain,
+    builtin: boolean,
+    evaluated: Module,
+    ready?: Ready,
+    origin?: { url: string; library: Library },
+  ): Value {
+    const run = (factory: Factory) => this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
+    let script = evaluated.script;
+    let linked: Value;
+    if (!evaluated.cached || !ready) {
+      linked = run(evaluated.factory);
     } else {
-      // A cached module that does not evaluate, or that the runtime refuses
-      // before loading anything of it (its linked ABCs differ), is compiled
-      // now, the domain already as its compile left it; one that loaded
-      // part of itself cannot be, and the load fails. Either way its entry
-      // goes, not stored again: the SWF's later modules were readied
-      // since, and the key the compile now would have is not this one.
       const loaded = domain.own.length;
       try {
-        if (ready.imported) {
-          linked = run(ready.imported.factory);
-          script = ready.imported.url;
-        } else {
-          linked = load(ready.module);
-        }
+        linked = run(evaluated.factory);
       } catch (e) {
         this.discard(ready.key, ready.entry);
         if (domain.own.length !== loaded) {
           throw e;
         }
 
-        linked = load(this.s.codegen.compileModule(this.hashes, index));
+        script = `swf2es-${++this.modules}.js`;
+        linked = run(evaluateFunction(this.s.codegen.compileModule(this.hashes, index), script));
       }
     }
 
@@ -581,9 +645,6 @@ function whole(entry: CachedModule): boolean {
   );
 }
 
-/** A module's factory, as it exports it: given the runtime, it loads the module into it. */
-type Factory = (rt: avm2.Runtime) => Value;
-
 /** A module imported from its URL, which its code's stack frames name it by. */
 interface Imported {
   factory: Factory;
@@ -633,6 +694,11 @@ async function read(
   return undefined;
 }
 
+/** A module evaluated or imported, and whether it came from the cache. */
+interface Module extends Evaluated {
+  cached?: boolean;
+}
+
 type Read = NonNullable<Awaited<ReturnType<typeof read>>>;
 
 /**
@@ -648,28 +714,7 @@ interface Ready {
   imported?: Imported;
 }
 
-const EXPORT = "export default ";
-
 /** The SHA-256 of `text`'s UTF-8, a cache key of fixed length however many ABCs it names. */
 function sha256Text(text: string): Promise<string> {
   return sha256(new TextEncoder().encode(text));
-}
-
-/**
- * A module's factory, its source evaluated as a script named `script`.
- * Not imported: a document keeps every module it imports for as long as
- * it lives, so the code of a SWF long let go would never be collected; a
- * script's goes once nothing refers to its functions. A module is one
- * exported function and nothing else, so it runs the same returned from a
- * strict Function, the names its code uses its own function's variables
- * (see Lazy compilation in docs/architecture.md); its lines in a stack
- * are its file's two further on, after Function's header.
- */
-function evaluateModule(module: string, script: string): Factory {
-  if (!module.startsWith(EXPORT)) {
-    throw new Error("swf2es: a module that is not one exported function");
-  }
-
-  const body = `"use strict"; return ${module.slice(EXPORT.length)}//# sourceURL=${script}\n`;
-  return new Function(body)();
 }

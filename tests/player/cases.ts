@@ -1682,6 +1682,53 @@ function loadedFont(compile: Compile): Uint8Array {
   });
 }
 
+// ApplicationDomain.currentDomain is the domain of the code that asks
+// (scripts/CurrentDomain.as.template): the main SWF's, before and after
+// it loads a SWF into a child domain, and the loaded SWF's in its own
+// code (scripts/CurrentDomainChild.as), whose second DoABC defines a class
+// only it sees. The domain is found from the script each frame of the
+// stack names, which JavaScriptCore gives no Function's code.
+function currentDomain(compile: Compile): Uint8Array {
+  const inner = w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.doAbc(compile("CurrentDomainOnly"), "CurrentDomainOnly"),
+      w.doAbc(compile("CurrentDomainChild"), "CurrentDomainChild"),
+      w.symbolClass([[0, "CurrentDomainChild"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const template = readFileSync(
+    new URL("scripts/CurrentDomain.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "CurrentDomain",
+    template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
+  );
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.doAbc(abc, "CurrentDomain"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // The same, unloading from INIT (scripts/LoadsInit.as.template). The inner
 // SWF has one frame: a clip taken off the display list plays on in Flash,
 // which is not this case's.
@@ -5407,6 +5454,14 @@ export const cases: PlayerCase[] = [
     name: "loaded-font",
     build: loadedFont,
     frames: 3,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "current-domain",
+    build: currentDomain,
+    frames: 4,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

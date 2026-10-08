@@ -1,0 +1,9 @@
+main sees its class true
+main has no parent true
+child sees its class true
+child sees the main class true
+child finds its class [class CurrentDomainOnly]
+child's closure sees its class true
+main sees the child's class false
+main sees its class true
+main has no parent true
