@@ -184,7 +184,7 @@ const paceSource = `package {
   }
 }`;
 
-/** TimerPace's traces, a host's clock moved by each of `dts` before the advance() it is passed to. */
+/** TimerPace's traces, the host's clock moved by each of `dts` before the advance() given it. */
 async function pace(dts: number[], realTime: boolean): Promise<string[][]> {
   const lines: string[] = [];
   let now = 0;
@@ -517,7 +517,7 @@ test("by the real clock, a timer stopped, reset or started anew within a pass", 
   ]);
 });
 
-/** A SWF at `fps` that starts a one-shot Timer(`delay`) anew as each frame ends and counts its firings. */
+/** A SWF at `fps` that starts a one-shot Timer(`delay`) as each frame ends, counting firings. */
 function restartSwf(name: string, fps: number, delay: number): Uint8Array {
   return bare(
     compiler(out)(
