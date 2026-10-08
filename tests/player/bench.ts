@@ -91,7 +91,11 @@
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
 //     [--min-run N] [--pace MS]
-//     [--json]
+//     [--json] [--write-swf FILE]
+//
+// --write-swf FILE writes the SWF the options make and stops, for another
+// browser or player to play.
+import { writeFileSync } from "node:fs";
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 import { libraryAbcs } from "./libraries.ts";
@@ -779,6 +783,11 @@ const swf =
                       args.includes("--glide"),
                     )
                   : synthetic();
+if (args.includes("--write-swf")) {
+  writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
+  process.exit(0);
+}
+
 const result = await benchPlayer(
   swf,
   frames,
