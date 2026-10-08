@@ -4,9 +4,10 @@
 //
 //   electron apps/desktop [--trace] [file.swf]
 import { statSync } from "node:fs";
-import { open as openFile } from "node:fs/promises";
+import { open as openFile, readFile } from "node:fs/promises";
 import { basename, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readSwf, usesNetwork } from "@swf2es/format";
 import {
   app,
   BrowserWindow,
@@ -21,7 +22,8 @@ import {
   type WebContents,
 } from "electron";
 import type { LibraryName, OpenedMovie, StartState } from "../shared/api.js";
-import { APP_ORIGIN, FileGrants, registerScheme, serve } from "./protocol.js";
+import { APP_ORIGIN, registerScheme, serve } from "./protocol.js";
+import { Sandbox } from "./sandbox.js";
 import { SettingsFile } from "./settings.js";
 import { bridgeSockets } from "./sockets.js";
 
@@ -39,10 +41,15 @@ app.enableSandbox();
 
 /** --trace: what the page logs, a SWF's trace() among it, goes to the terminal. */
 const trace = process.argv.includes("--trace");
-const grants = new FileGrants();
+const sandbox = new Sandbox();
 let settings: SettingsFile;
 let window: BrowserWindow | null = null;
 let current: { path: string; movie: OpenedMovie } | null = null;
+/** The servers the SWF playing was allowed, or denied, a socket to until it closes: "host:port". */
+let allowedOnce = new Set<string>();
+let deniedOnce = new Set<string>();
+/** The prompts on screen, by "host:port": a second connection there waits on the first's answer. */
+const asking = new Map<string, Promise<boolean>>();
 /** The page has asked to start and listens for what opens: until then, start() hands it the movie. */
 let listening = false;
 
@@ -134,19 +141,28 @@ function refuse(message: string, detail: string): void {
   }
 }
 
-/** Play the SWF at `path` in the window, in place of what plays. */
+/** Play the SWF at `path` in the window, in place of what plays, in its sandbox. */
 async function open(path: string): Promise<void> {
   const name = basename(path);
-  const head = await readStart(path, 3);
-  const signature = head ? String.fromCharCode(...head) : "";
-  if (signature !== "FWS" && signature !== "CWS" && signature !== "ZWS") {
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await readFile(path));
+  } catch (error) {
+    refuse(`${name} could not be opened.`, String(error));
+    return;
+  }
+
+  let network: boolean;
+  try {
+    network = usesNetwork(readSwf(bytes));
+  } catch {
     refuse(`${name} is not a SWF.`, path);
     return;
   }
 
   let url: string;
   try {
-    url = grants.grant(path);
+    url = sandbox.play(path, network);
   } catch (error) {
     // Gone, or unreadable, since it was read.
     refuse(`${name} could not be opened.`, String(error));
@@ -154,6 +170,8 @@ async function open(path: string): Promise<void> {
   }
 
   current = { path, movie: { url, name } };
+  allowedOnce = new Set();
+  deniedOnce = new Set();
   settings.opened(path);
   app.addRecentDocument(path);
   buildMenu();
@@ -167,10 +185,85 @@ async function open(path: string): Promise<void> {
 
 function closeMovie(): void {
   current = null;
+  sandbox.stop();
   buildMenu();
   window?.setTitle(TITLE);
   if (listening) {
     window?.webContents.send("desktop:close");
+  }
+}
+
+/**
+ * Whether the SWF playing may connect a socket to `host`:`port`: only in
+ * local-with-networking, and only as the user allows, once or always for
+ * that SWF, when it first asks for that server. Denied where no one can
+ * be asked.
+ */
+async function permitSocket(host: string, port: number): Promise<boolean> {
+  const playing = current;
+  const swf = sandbox.swf;
+  const endpoint = `${host}:${port}`;
+  if (!playing || !swf || sandbox.type !== "localWithNetwork") {
+    process.stderr.write(`swf2es: no socket to ${endpoint}: the SWF has no network\n`);
+    return false;
+  }
+
+  if (settings.socketAllowed(swf, endpoint) || allowedOnce.has(endpoint)) {
+    return true;
+  }
+
+  if (deniedOnce.has(endpoint)) {
+    return false;
+  }
+
+  let answer = asking.get(endpoint);
+  if (!answer) {
+    answer = askForSocket(playing.movie.name, swf, endpoint).finally(() => asking.delete(endpoint));
+    asking.set(endpoint, answer);
+  }
+
+  return (await answer) && current === playing;
+}
+
+async function askForSocket(name: string, swf: string, endpoint: string): Promise<boolean> {
+  if (!window) {
+    return false;
+  }
+
+  const playing = current;
+  let response: number;
+  try {
+    ({ response } = await dialog.showMessageBox(window, {
+      type: "question",
+      message: `${name} asks to connect to ${endpoint}.`,
+      detail:
+        "A socket lets the SWF send that server whatever it has. Allow it only for a server you trust.",
+      buttons: ["Allow Once", "Always Allow for This SWF", "Deny"],
+      defaultId: 2,
+      cancelId: 2,
+      noLink: true,
+    }));
+  } catch {
+    return false;
+  }
+
+  if (current !== playing) {
+    return false;
+  }
+
+  switch (response) {
+    case 0:
+      allowedOnce.add(endpoint);
+      return true;
+    case 1:
+      if (!settings.allowSocket(swf, endpoint)) {
+        allowedOnce.add(endpoint);
+      }
+
+      return true;
+    default:
+      deniedOnce.add(endpoint);
+      return false;
   }
 }
 
@@ -356,7 +449,7 @@ function listen(): void {
       void chooseLibrary(name);
     }
   });
-  bridgeSockets(trusted);
+  bridgeSockets(trusted, permitSocket);
 }
 
 // One app to a user data directory: a second start hands its SWF to the first and quits.
@@ -404,7 +497,19 @@ void app.whenReady().then(() => {
   }
 
   settings = new SettingsFile(app.getPath("userData"));
-  serve(session.defaultSession, grants, () => settings.libraries());
+  serve(session.defaultSession, sandbox, () => settings.libraries());
+  // The network only for a SWF in local-with-networking; the page itself needs none.
+  session.defaultSession.webRequest.onBeforeRequest(
+    { urls: ["http://*/*", "https://*/*", "ws://*/*", "wss://*/*"] },
+    (details, answer) => {
+      const refused = !sandbox.networkAllowed();
+      if (refused) {
+        process.stderr.write(`swf2es: not loading ${details.url}: the SWF has no network\n`);
+      }
+
+      answer({ cancel: refused });
+    },
+  );
   // Only what the player needs that the page cannot simply have: full screen.
   session.defaultSession.setPermissionRequestHandler((contents, permission, answer) =>
     answer(permission === "fullscreen" && contents === window?.webContents),

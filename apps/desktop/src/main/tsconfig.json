@@ -8,5 +8,5 @@
     "lib": ["ES2022"]
   },
   "include": ["*.ts"],
-  "references": [{ "path": "../shared" }]
+  "references": [{ "path": "../shared" }, { "path": "../../../../packages/format" }]
 }

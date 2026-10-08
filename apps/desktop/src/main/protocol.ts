@@ -1,20 +1,20 @@
 // swf2es://, the one scheme the window loads anything from. swf2es://app/
-// is the page, its modules and the libraries; swf2es://file/<path> is the
-// local files of the SWFs opened, a directory at a time. They are two
-// origins, so a SWF's files never share the page's, and the file host
+// is the page, its modules and the libraries; swf2es://file/ is the local
+// files the SWF playing may read, by its sandbox (sandbox.ts). They are
+// two origins, so a SWF's files never share the page's, and the file host
 // answers the page's fetches with CORS headers naming it.
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync } from "node:fs";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, extname, isAbsolute, join, normalize, relative, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname, extname, join, normalize, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { protocol, type Session } from "electron";
 import type { LibraryName, LibraryState } from "../shared/api.js";
+import { FILE_ORIGIN, type Sandbox } from "./sandbox.js";
 
 export const SCHEME = "swf2es";
 export const APP_ORIGIN = `${SCHEME}://app`;
-const FILE_ORIGIN = `${SCHEME}://file`;
 
 const appRoot = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -115,50 +115,10 @@ function contentSecurityPolicy(page: string): string {
   ].join("; ");
 }
 
-/** The local files the page may fetch: those under the directories of the SWFs opened. */
-export class FileGrants {
-  private readonly roots = new Set<string>();
-
-  /**
-   * `swf` and the files beside it and below, which it loads by relative
-   * URL; for a link, beside the file it links to, which is the URL's too.
-   */
-  grant(swf: string): string {
-    const real = realpathSync.native(swf);
-    this.roots.add(dirname(real));
-    return `${FILE_ORIGIN}${pathToFileURL(real).pathname}`;
-  }
-
-  /** The file a swf2es://file URL names, if granted. */
-  async resolve(url: URL): Promise<string | null> {
-    let path: string;
-    try {
-      // The OS's realpath, as grant's realpathSync.native, so the two agree.
-      path = await realpath(fileURLToPath(`file://${url.pathname}`));
-    } catch {
-      return null;
-    }
-
-    for (const root of this.roots) {
-      const inside = relative(root, path);
-      if (
-        inside !== "" &&
-        !inside.startsWith(`..${sep}`) &&
-        inside !== ".." &&
-        !isAbsolute(inside)
-      ) {
-        return path;
-      }
-    }
-
-    return null;
-  }
-}
-
 const notFound = () => new Response(null, { status: 404 });
 
-/** Serve swf2es:// in `session`: the app, its modules, the libraries `libraries` finds, and the granted files. */
-export function serve(session: Session, grants: FileGrants, libraries: () => LibraryState): void {
+/** Serve swf2es:// in `session`: the app, its modules, the libraries `libraries` finds, and what `sandbox` lets the SWF read. */
+export function serve(session: Session, sandbox: Sandbox, libraries: () => LibraryState): void {
   const mounts = moduleMounts();
   const staticDir = join(appRoot, "static");
   const rendererDir = join(appRoot, "dist", "renderer");
@@ -223,7 +183,7 @@ export function serve(session: Session, grants: FileGrants, libraries: () => Lib
     }
 
     if (url.host === "file") {
-      const file = await grants.resolve(url);
+      const file = await sandbox.resolve(path);
       return file ? fileResponse(file, { "access-control-allow-origin": APP_ORIGIN }) : notFound();
     }
 

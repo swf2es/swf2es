@@ -11,6 +11,8 @@ export interface Settings {
   builtin?: string;
   /** Most recent first. */
   recent: string[];
+  /** The servers, "host:port", each SWF, by its real path, is always allowed to connect a socket to. */
+  sockets: Record<string, string[]>;
 }
 
 const RECENT = 10;
@@ -23,6 +25,9 @@ const RECENT = 10;
 const checkoutBuiltin = fileURLToPath(
   new URL("../../../../oracle/avmplus/generated/builtin.abc", import.meta.url),
 );
+
+const strings = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
 
 export class SettingsFile {
   private readonly path: string;
@@ -58,6 +63,17 @@ export class SettingsFile {
     });
   }
 
+  /** Whether `swf` is always allowed a socket to `endpoint`, "host:port". */
+  socketAllowed(swf: string, endpoint: string): boolean {
+    return Object.hasOwn(this.current.sockets, swf) && this.current.sockets[swf].includes(endpoint);
+  }
+
+  /** Allow `swf` a socket to `endpoint` from now on: whether that was saved. */
+  allowSocket(swf: string, endpoint: string): boolean {
+    const allowed = Object.hasOwn(this.current.sockets, swf) ? this.current.sockets[swf] : [];
+    return this.update({ sockets: { ...this.current.sockets, [swf]: [...allowed, endpoint] } });
+  }
+
   clearRecent(): void {
     this.update({ recent: [] });
   }
@@ -73,13 +89,16 @@ export class SettingsFile {
       return {
         playerglobal: text(read.playerglobal),
         builtin: text(read.builtin),
-        recent: Array.isArray(read.recent)
-          ? read.recent.filter((p: unknown) => typeof p === "string")
-          : [],
+        recent: strings(read.recent),
+        sockets: Object.fromEntries(
+          Object.entries(
+            typeof read.sockets === "object" && read.sockets !== null ? read.sockets : {},
+          ).map(([swf, endpoints]) => [swf, strings(endpoints)]),
+        ),
       };
     } catch {
       // None yet, or unreadable: start again rather than refuse to start.
-      return { recent: [] };
+      return { recent: [], sockets: {} };
     }
   }
 

@@ -2,10 +2,16 @@
 // no network of its own beyond fetch, and carried over IPC. Each page's
 // connections (connections.ts) close as it navigates, reloads or goes.
 import { type IpcMainEvent, ipcMain, type WebContents } from "electron";
-import { Connections } from "./connections.js";
+import { Connections, validEndpoint } from "./connections.js";
 
-/** Carry socket messages from pages that `trusted` accepts. */
-export function bridgeSockets(trusted: (event: IpcMainEvent) => boolean): void {
+/**
+ * Carry socket messages from pages that `trusted` accepts, each connection
+ * made only as `permit` allows it.
+ */
+export function bridgeSockets(
+  trusted: (event: IpcMainEvent) => boolean,
+  permit: (host: string, port: number) => Promise<boolean>,
+): void {
   const pages = new Map<WebContents, Connections>();
 
   const connectionsOf = (contents: WebContents): Connections => {
@@ -33,9 +39,31 @@ export function bridgeSockets(trusted: (event: IpcMainEvent) => boolean): void {
   };
 
   ipcMain.on("socket:connect", (event, id: unknown, host: unknown, port: unknown) => {
-    if (trusted(event) && typeof id === "number") {
-      connectionsOf(event.sender).connect(id, host, port);
+    if (!trusted(event) || typeof id !== "number") {
+      return;
     }
+
+    const connections = connectionsOf(event.sender);
+    if (!validEndpoint(host, port)) {
+      connections.refuse(id);
+      return;
+    }
+
+    const generation = connections.generation;
+    void permit(host, port as number)
+      .catch(() => false)
+      .then((allowed) => {
+        // The page that asked may have gone while the user was asked.
+        if (connections.generation !== generation) {
+          return;
+        }
+
+        if (allowed) {
+          connections.connect(id, host, port);
+        } else {
+          connections.refuse(id);
+        }
+      });
   });
 
   ipcMain.on("socket:send", (event, id: unknown, bytes: unknown) => {

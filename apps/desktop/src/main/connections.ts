@@ -17,6 +17,19 @@ export const MAX_BUFFERED = 4 * 1024 * 1024;
 
 const SOCKET_ERROR = "Error #2031: Socket Error.";
 
+/** Whether the page asked for a host name of DNS's length and a TCP port. */
+export function validEndpoint(host: unknown, port: unknown): host is string {
+  return (
+    typeof host === "string" &&
+    host.length > 0 &&
+    host.length <= 255 &&
+    typeof port === "number" &&
+    Number.isInteger(port) &&
+    port > 0 &&
+    port < 65536
+  );
+}
+
 export class Connections {
   private readonly sockets = new Map<number, Socket>();
   private readonly tell: (id: number, event: SocketEvent) => void;
@@ -30,23 +43,17 @@ export class Connections {
     return this.sockets.size;
   }
 
+  /** Counts closeAll's: a connection decided on before one belongs to a page that is gone. */
+  generation = 0;
+
   /** Connect `id` to `host`:`port`, each checked, as the page asks; a refusal is an error, then a close. */
   connect(id: number, host: unknown, port: unknown): void {
-    const valid =
-      typeof host === "string" &&
-      host.length > 0 &&
-      host.length <= 255 &&
-      typeof port === "number" &&
-      Number.isInteger(port) &&
-      port > 0 &&
-      port < 65536;
-    if (!valid || this.sockets.has(id) || this.sockets.size >= MAX_OPEN) {
-      this.tell(id, { type: "error", message: SOCKET_ERROR });
-      this.tell(id, { type: "close" });
+    if (!validEndpoint(host, port) || this.sockets.has(id) || this.sockets.size >= MAX_OPEN) {
+      this.refuse(id);
       return;
     }
 
-    const socket = connect({ host, port });
+    const socket = connect({ host, port: port as number });
     this.sockets.set(id, socket);
     socket.on("connect", () =>
       this.tell(id, {
@@ -85,6 +92,12 @@ export class Connections {
     socket.write(bytes);
   }
 
+  /** Refuse `id`, as a server that took no connection: an error, then a close. */
+  refuse(id: number): void {
+    this.tell(id, { type: "error", message: SOCKET_ERROR });
+    this.tell(id, { type: "close" });
+  }
+
   close(id: number): void {
     this.sockets.get(id)?.destroy();
   }
@@ -98,5 +111,6 @@ export class Connections {
     }
 
     this.sockets.clear();
+    this.generation++;
   }
 }

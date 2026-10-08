@@ -165,8 +165,11 @@ sockets all run.
 ### Play a SWF on the desktop
 
 `apps/desktop` is an Electron app that plays local SWFs in a window,
-the `<swf2es-player>` element inside, with `flash.net.Socket` connecting
-directly. Electron's binary is fetched once, apart from `pnpm install`:
+the `<swf2es-player>` element inside. Each SWF plays in the sandbox Flash
+Player gave a local SWF, by its UseNetwork bit: it reads the files beside
+it and reaches no network, or reaches the network, and sockets you allow,
+and reads no local file. Electron's binary is fetched once, apart from
+`pnpm install`:
 
 ```sh
 pnpm build

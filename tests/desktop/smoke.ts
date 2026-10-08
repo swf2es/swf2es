@@ -1,25 +1,36 @@
 // The desktop app in Electron, end to end: it opens a SWF named on its
-// command line, with the libraries its settings name, and the SWF draws,
-// traces to the terminal (--trace), loads a file beside it through
-// swf2es://file and talks to a TCP server through the main process's
-// socket bridge. The page's own policy refuses nothing it needs, and
-// playing the SWF again leaves one canvas. Skipped, saying why, where
-// Electron was not downloaded (pnpm --filter @swf2es/desktop fetch-electron).
+// command line, with the libraries its settings name, and the SWF draws
+// and traces to the terminal (--trace). A SWF in local-with-filesystem
+// reads the file beside it and reaches no network and no socket; one in
+// local-with-networking reads no file but talks to a TCP server, allowed
+// in the settings, through the main process; neither reads outside its
+// directory, so neither can send away what it read. The page's policy
+// refuses nothing it needs, and playing the SWF again leaves one canvas.
+// Skipped, saying why, where Electron was not downloaded
+// (pnpm --filter @swf2es/desktop fetch-electron).
 //
 //   node tests/desktop/smoke.ts
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { electronBinary, missing } from "../../apps/desktop/electron.ts";
-import { bare } from "../player/cases.ts";
 import { DevTools } from "../player/chrome.ts";
 import { decodePng } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
+import * as w from "../swf-writer.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
@@ -32,6 +43,9 @@ if (why) {
   process.exit(0);
 }
 
+// The same code in two SWFs, one in each sandbox: it names its URL, reads
+// a file beside it and one outside its directory, asks for the network,
+// and connects a socket to the port its file name gives.
 const source = `package {
   import flash.display.Sprite;
   import flash.events.*;
@@ -42,19 +56,15 @@ const source = `package {
       graphics.beginFill(0xff0000);
       graphics.drawRect(0, 0, 100, 50);
       trace("smoke: started");
+      trace("smoke: url " + loaderInfo.url);
       // No click or key asked for these: the app opens none of them.
       for (var i:int = 0; i < 3; i++) {
         navigateToURL(new URLRequest("https://example.invalid/smoke" + i), "_blank");
       }
-      var loader:URLLoader = new URLLoader();
-      loader.addEventListener(Event.COMPLETE, loaded);
-      loader.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
-        trace("smoke: load failed " + e.text);
-      });
-      loader.load(new URLRequest("port.txt"));
-    }
-    private function loaded(e:Event):void {
-      var port:int = int(URLLoader(e.target).data);
+      load("beside", "data.txt");
+      load("outside", "../secret.txt");
+      load("network", "https://example.invalid/network");
+      var port:int = int(/-(\\d+)\\.swf$/.exec(loaderInfo.url)[1]);
       socket = new Socket();
       socket.addEventListener(Event.CONNECT, function (e:Event):void {
         socket.writeUTFBytes("ping");
@@ -64,9 +74,19 @@ const source = `package {
         trace("smoke: socket " + socket.readUTFBytes(socket.bytesAvailable));
       });
       socket.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
-        trace("smoke: socket failed " + e.text);
+        trace("smoke: socket refused");
       });
       socket.connect("127.0.0.1", port);
+    }
+    private function load(label:String, url:String):void {
+      var loader:URLLoader = new URLLoader();
+      loader.addEventListener(Event.COMPLETE, function (e:Event):void {
+        trace("smoke: " + label + " " + loader.data);
+      });
+      loader.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
+        trace("smoke: " + label + " refused");
+      });
+      loader.load(new URLRequest(url));
     }
   }
 }`;
@@ -74,10 +94,6 @@ const source = `package {
 const libraries = `${out}libraries/`;
 libraryAbcs(libraries);
 const abc = compileScripts([{ name: "DesktopSmoke", source }], out).get("DesktopSmoke");
-const site = `${out}site/`;
-mkdirSync(site, { recursive: true });
-const swf = `${site}smoke.swf`;
-writeFileSync(swf, bare(abc as Uint8Array, 1, "DesktopSmoke"));
 
 /** A server that answers each "ping" with "pong". */
 const server: Server = createServer((connection) => {
@@ -89,7 +105,39 @@ const server: Server = createServer((connection) => {
   connection.on("error", () => {});
 });
 await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-writeFileSync(`${site}port.txt`, String((server.address() as { port: number }).port));
+const port = (server.address() as { port: number }).port;
+
+const site = `${out}site/`;
+rmSync(site, { recursive: true, force: true });
+mkdirSync(site, { recursive: true });
+writeFileSync(`${site}data.txt`, "beside");
+writeFileSync(`${out}secret.txt`, "secret");
+
+/** The SWF, its UseNetwork bit `network`, which picks its sandbox. */
+function smokeSwf(name: string, network: boolean): string {
+  const path = `${site}${name}-${port}.swf`;
+  writeFileSync(
+    path,
+    w.swf({
+      width: 100,
+      height: 50,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [
+        w.fileAttributes(true, network),
+        w.backgroundColor(0xffffff),
+        w.doAbc(abc as Uint8Array, "DesktopSmoke"),
+        w.symbolClass([[0, "DesktopSmoke"]]),
+        w.showFrame(),
+        w.end(),
+      ],
+    }),
+  );
+  return path;
+}
+
+const local = smokeSwf("local", false);
+const networked = smokeSwf("network", true);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -229,20 +277,43 @@ const both = {
   builtin: `${libraries}builtin.abc`,
   playerglobal: `${libraries}playerglobal.abc`,
   recent: [],
+  // Always allowed, as if the user had said so: a prompt cannot be answered here.
+  sockets: { [realpathSync(networked)]: [`127.0.0.1:${port}`] },
 };
 
 try {
-  // Opened through a link, the SWF plays from the file it links to, and loads beside that.
-  // In a directory of its own, which the file it links to is not under.
-  const link = `${out}links/smoke.swf`;
-  mkdirSync(`${out}links`, { recursive: true });
-  rmSync(link, { force: true });
-  symlinkSync(swf, link);
+  // Opened through a link, in a directory of its own which the file it
+  // links to is not under, the SWF plays from that file, and its sandbox
+  // is that file's directory.
+  const link = `${out}links/local.swf`;
+  // Afresh: last run's link dangles, its SWF named for another port.
+  rmSync(`${out}links`, { recursive: true, force: true });
+  mkdirSync(`${out}links`);
+  symlinkSync(local, link);
 
   await withApp(both, [link], async ({ stdout, stderr, until, evaluate, devtools, again }) => {
     const traced = (line: string) => stdout.filter((l) => l === line).length;
-    await until("the SWF's socket", () => traced("smoke: socket pong") > 0);
+    const settled = (n: number) => () =>
+      ["beside", "outside", "socket"].every(
+        (what) => stdout.filter((l) => l.startsWith(`smoke: ${what} `)).length >= n,
+      );
+    await until("the local SWF", settled(1));
     assert.equal(traced("smoke: started"), 1);
+    assert.equal(traced("smoke: beside beside"), 1);
+    assert.equal(traced("smoke: outside refused"), 1);
+    assert.equal(traced("smoke: socket refused"), 1);
+    assert.match(
+      stderr(),
+      /not loading https:\/\/example\.invalid\/network: the SWF has no network/,
+    );
+    assert.match(
+      stderr(),
+      new RegExp(`no socket to 127\\.0\\.0\\.1:${port}: the SWF has no network`),
+    );
+
+    // Its URL names a token for its directory, not where it is.
+    const url = stdout.find((l) => l.startsWith("smoke: url "))?.slice("smoke: url ".length) ?? "";
+    assert.match(url, new RegExp(`^swf2es://file/[0-9a-f]{16}/local-${port}\\.swf$`));
 
     // The stage, red all over, fills the window as showAll places it.
     const { data } = await devtools.send<{ data: string }>("Page.captureScreenshot", {
@@ -253,14 +324,13 @@ try {
     assert.deepEqual([...image.data.subarray(centre, centre + 3)], [255, 0, 0]);
 
     // Played again, the last player let go of: one canvas, and the SWF starts anew.
-    const url = `swf2es://file${pathToFileURL(swf).pathname}`;
     const canvases = await evaluate<number>(`(async () => {
       const player = document.getElementById("player");
       await player.load(${JSON.stringify(url)});
       return player.shadowRoot.querySelectorAll("canvas").length;
     })()`);
     assert.equal(canvases, 1);
-    await until("the SWF played again", () => traced("smoke: started") === 2);
+    await until("the SWF played again", settled(2));
 
     // Dropped on the window, the SWF goes to the shell, which opens it: it plays a third time.
     for (const type of ["dragEnter", "dragOver", "drop"]) {
@@ -268,11 +338,12 @@ try {
         type,
         x: 100,
         y: 100,
-        data: { items: [], files: [swf], dragOperationsMask: 1 },
+        data: { items: [], files: [local], dragOperationsMask: 1 },
       });
     }
 
-    await until("the dropped SWF", () => traced("smoke: started") === 3);
+    await until("the dropped SWF", settled(3));
+    assert.equal(traced("smoke: started"), 3);
 
     // Nine pages asked for, by three starts, none after a gesture: none opened.
     assert.equal(stderr().match(/not opening https:\/\/example\.invalid\/smoke\d/g)?.length, 9);
@@ -283,21 +354,32 @@ try {
       400,
     );
 
-    // Started again with the SWF after a switch's value and a .swf that is not
-    // there, the second start hands the SWF to the first and quits.
-    assert.equal(await again(["--lang", "value", `${site}missing.swf`, swf]), 0);
-    await until("the SWF from a second start", () => traced("smoke: started") === 4);
-
-    // A file outside the SWF's directory is not the page's to read.
-    const outside = `swf2es://file${pathToFileURL(fileURLToPath(new URL("smoke.ts", import.meta.url))).pathname}`;
+    // Nor may the page read past the SWF's directory.
+    const outside = new URL("../../smoke.ts", url).href;
     assert.equal(
       await evaluate<number>(`fetch(${JSON.stringify(outside)}).then((r) => r.status)`),
+      404,
+    );
+
+    // Started again with the networked SWF after a switch's value and a .swf
+    // that is not there, the second start hands it to the first and quits.
+    // The local SWF's grant goes with it: the networked one reads no file,
+    // beside it or not, and talks to its server.
+    assert.equal(await again(["--lang", "value", `${site}missing.swf`, networked]), 0);
+    await until("the networked SWF's socket", () => traced("smoke: socket pong") === 1);
+    await until("the networked SWF's reads", settled(4));
+    assert.equal(traced("smoke: beside refused"), 1);
+    assert.equal(traced("smoke: outside refused"), 4);
+    // Its network load went out, where the local SWF's three were stopped.
+    assert.equal(stderr().match(/not loading https:\/\/example\.invalid\/network/g)?.length, 3);
+    assert.equal(
+      await evaluate<number>(`fetch(${JSON.stringify(url)}).then((r) => r.status)`),
       404,
     );
   });
 
   // Without playerglobal.abc, the page says what is missing and why it is not there.
-  await withApp({ recent: [] }, [swf], async ({ evaluate }) => {
+  await withApp({ recent: [] }, [local], async ({ evaluate }) => {
     let failure = "";
     for (let tries = 0; failure === "" && tries < 100; tries++) {
       // Null until the page has parsed, which may be after DevTools first finds it.
@@ -309,7 +391,7 @@ try {
       }
     }
 
-    assert.match(failure, /smoke\.swf needs the libraries below/);
+    assert.match(failure, /local-\d+\.swf needs the libraries below/);
     const panel = await evaluate<{ hidden: boolean; playerglobal: string; text: string }>(`({
       hidden: document.getElementById("libraries").hidden,
       playerglobal: document.getElementById("playerglobal-path").textContent,
