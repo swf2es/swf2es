@@ -161,14 +161,28 @@ const frames = (n: number) =>
   });
 
 /** Each player once all have played or failed, with what the test checks of it. */
+/** Once the package has loaded: null, else why not, its error's text. */
+async function loaded(): Promise<string | null> {
+  try {
+    // Generous for a cold start on a loaded machine, but never for ever.
+    await Promise.race([
+      loading,
+      new Promise((_, fail) =>
+        setTimeout(() => fail(new Error("@swf2es/web did not load within 180 s")), 180_000),
+      ),
+    ]);
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
 async function booted() {
-  // Generous for a cold start on a loaded machine, but never for ever.
-  await Promise.race([
-    loading,
-    new Promise((_, fail) =>
-      setTimeout(() => fail(new Error("@swf2es/web did not load within 180 s")), 180_000),
-    ),
-  ]);
+  const failure = await loaded();
+  if (failure !== null) {
+    throw new Error(failure);
+  }
+
   const outcomes = await Promise.all(
     players().map((p) =>
       p.ready.then(
@@ -323,6 +337,7 @@ async function databases() {
 }
 
 Object.assign(globalThis, {
+  loaded,
   databases,
   booted,
   replacement,

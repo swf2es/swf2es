@@ -297,6 +297,20 @@ const failures = await withPage(
       mobile: false,
     });
     await fresh();
+    // Under a loaded run, the browser has failed to fetch one of the
+    // package's many unbundled modules, and keeps that failure for the
+    // document. A fetch failure alone is tried again, in a new document,
+    // twice at most; any other failure, or a third, is the checks' to report.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const failure = (await evaluate<string | null>("loaded()")).value ?? null;
+      if (failure === null || !/Failed to fetch dynamically imported module/.test(failure)) {
+        break;
+      }
+
+      console.log(`  the page's import failed (${failure}); loading it again`);
+      await fresh();
+    }
+
     let failed = 0;
     for (const [name, run] of checks) {
       try {
