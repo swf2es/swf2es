@@ -76,7 +76,7 @@ test("FileAttributes reads from a SWF's start, compressed or not", () => {
   assert.equal(fileAttributes(fws(body)), 0);
 });
 
-test("a SWF's start does not trust a header that names 4 GB", () => {
+test("neither a SWF nor its start trusts a header that names 4 GB", () => {
   // 30 bytes of ZWS whose header gives the file 4 GB and the dictionary 4 GB, and
   // whose LZMA stream, all zeros, decodes to zeros for as long as it is asked:
   // decompressed whole, it took 4.27 GB and 10.6 s.
@@ -85,6 +85,7 @@ test("a SWF's start does not trust a header that names 4 GB", () => {
     0x5a, 0x57, 0x53, 10, 0xff, 0xff, 0xff, 0xff, 13, 0, 0, 0, 0x5d, 0xff, 0xff, 0xff, 0xff,
   ]);
   const start = performance.now();
+  assert.throws(() => decompressSwf(bomb), CompressedDataError);
   const prefix = decompressSwfPrefix(bomb, 64);
   assert.ok(prefix.length <= 64);
   fileAttributes(bomb);

@@ -150,6 +150,14 @@ export function lzmaByteArrayUncompress(data: Uint8Array): Uint8Array {
 }
 
 /**
+ * More than LZMA can expand a byte to. Its best case, a long run of one
+ * byte, is matches of 273 bytes that cost some 14 coded bits, each at the
+ * 0.022 bits of LZMA's likeliest probability, about 7000:1, which lzma1
+ * reaches on 32 MB of zeros (6959:1); this leaves several times that.
+ */
+const MAX_LZMA_RATIO = 32768;
+
+/**
  * A ZWS SWF's body in the .lzma layout lzma1 reads: the properties, the
  * length it holds, `length`, and the stream. The dictionary is no larger
  * than that length, which no match reaches past, so that a header naming
@@ -233,6 +241,12 @@ export function decompressSwf(swf: Uint8Array): Uint8Array {
   } else if (signature === "ZWS") {
     if (swf.length < 17) {
       throw new CompressedDataError("truncated");
+    }
+
+    // LZMA decodes for as long as the length asks, whatever its input; a
+    // length no stream that short can hold is refused before it runs.
+    if (fileLength - 8 > MAX_LZMA_RATIO * (swf.length - 17) + 4096) {
+      throw new CompressedDataError(`a body of ${fileLength - 8} bytes in ${swf.length} of SWF`);
     }
 
     body = lzmaDecompress(swfLzma(swf, fileLength - 8));
