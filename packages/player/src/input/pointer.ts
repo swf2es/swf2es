@@ -368,6 +368,15 @@ export class PointerInput {
   }
 
   handle(type: "move" | "down" | "up" | "leave", p: PointerState): void {
+    // A press or a release is a user's gesture, in whose handlers a script may write to the clipboard.
+    if (type === "down" || type === "up") {
+      this.scripting.clipboard.gesture(() => this.dispatch(type, p));
+    } else {
+      this.dispatch(type, p);
+    }
+  }
+
+  private dispatch(type: "move" | "down" | "up" | "leave", p: PointerState): void {
     // A move posted before this input comes first; a move given now replaces it.
     if (type === "move") {
       this.moved = null;

@@ -1,11 +1,12 @@
-// flash.system.System: statics about the player's memory and clipboard, of
-// which there is nothing here to tell or do.
+// flash.system.System: statics about the player's memory, of which there
+// is nothing here to tell or do, and setClipboard.
 import { avm2 } from "@swf2es/runtime";
+import { TEXT } from "../../../scripting/clipboard.js";
 import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
 
-export function systemNatives(_s: Scripting): avm2.Natives {
+export function systemNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
   let useCodePage = false;
 
@@ -14,8 +15,23 @@ export function systemNatives(_s: Scripting): avm2.Natives {
       return null;
     }
 
-    static setClipboard(_text: Value): void {
-      // No clipboard.
+    /**
+     * The clipboard's text alone, in place of all it held, while a user's
+     * event is handled; outside one Error #2176, as Ruffle has the plug-in
+     * throw it, and TypeError #2007 for null, as Ruffle's does.
+     */
+    static setClipboard(text: Value): void {
+      if (text === null || text === undefined) {
+        throw s.rt.error("TypeError", 2007, "text");
+      }
+
+      const clipboard = s.clipboard;
+      if (!clipboard.writable) {
+        throw s.rt.error("Error", 2176);
+      }
+
+      clipboard.clear();
+      clipboard.set(TEXT, s.rt.toString(text));
     }
 
     static get totalMemoryNumber(): number {

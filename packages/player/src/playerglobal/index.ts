@@ -7,6 +7,7 @@ import type { Scripting } from "../scripting.js";
 import { webSocketNatives } from "./air/net/WebSocket.js";
 import { accessibilityNatives } from "./flash/accessibility/Accessibility.js";
 import { cryptoNatives } from "./flash/crypto/generateRandomBytes.js";
+import { clipboardHooks, clipboardNatives } from "./flash/desktop/Clipboard.js";
 import { avm1MovieNatives } from "./flash/display/AVM1Movie.js";
 import { bitmapNatives } from "./flash/display/Bitmap.js";
 import { bitmapDataHooks, bitmapDataNatives } from "./flash/display/BitmapData.js";
@@ -87,6 +88,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...accessibilityNatives(s),
     ...toplevelNatives(s),
     ...cryptoNatives(),
+    ...clipboardNatives(s),
     ...eventNatives(),
     ...keyboardEventNatives(s),
     ...timerEventNatives(s),
@@ -167,6 +169,7 @@ export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
     ...httpStatusHooks,
     ...bitmapFilterHooks,
     ...workerHooks(),
+    ...clipboardHooks(),
     ...soundHooks(s),
     ...fontHooks(s),
   };

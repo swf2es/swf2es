@@ -13,6 +13,7 @@ import {
   pointerTarget,
   setHitArea,
 } from "../../../../packages/player/dist/input/pointer.js";
+import { Clipboard } from "../../../../packages/player/dist/scripting/clipboard.js";
 import type { Scripting } from "../../../../packages/player/dist/scripting.js";
 
 test("the topmost artwork targets its interactive parent, with mouseChildren and visibility respected", () => {
@@ -106,7 +107,11 @@ test("a disabled field over a button lets the button take the hit, and its paren
 
 test("a posted move waits for a flush or the next other input, and only the last counts", () => {
   const stage = new Container();
-  const scripting = { stageWidth: 100, stageHeight: 100 } as unknown as Scripting;
+  const scripting = {
+    stageWidth: 100,
+    stageHeight: 100,
+    clipboard: new Clipboard(null),
+  } as unknown as Scripting;
   const input = new PointerInput(stage, scripting);
   input.post({ x: 1, y: 1 });
   input.post({ x: 2, y: 2 });
@@ -142,6 +147,7 @@ test("sprite dragging follows the pointer in parent coordinates, clamps, and sto
     stageHeight: 100,
     mouseStageX: 10,
     mouseStageY: 20,
+    clipboard: new Clipboard(null),
   } as unknown as Scripting;
   const input = new PointerInput(stage, scripting);
 
@@ -244,6 +250,7 @@ test("a sprite in buttonMode with a hitArea shows its hand over the area", () =>
     stageHeight: 100,
     mouseCursor: "auto",
     rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
+    clipboard: new Clipboard(null),
   } as unknown as Scripting;
   const input = new PointerInput(stage, scripting);
   input.handle("move", { x: 10, y: 10 });
@@ -265,6 +272,7 @@ test("dropTarget is the topmost object drawn under the pointer as a drag moves a
     mouseStageX: 10,
     mouseStageY: 10,
     rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
+    clipboard: new Clipboard(null),
   } as unknown as Scripting;
   const input = new PointerInput(stage, scripting);
 
@@ -304,6 +312,7 @@ test("the cursor is a hand under a sprite in buttonMode, as useHandCursor says, 
     stageWidth: 100,
     stageHeight: 100,
     rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
+    clipboard: new Clipboard(null),
   } as unknown as Scripting;
   const input = new PointerInput(stage, scripting);
   const shown: string[] = [];
@@ -365,6 +374,7 @@ test("Mouse.hide and show change the host cursor without changing pointer target
     stageHeight: 100,
     mouseVisible: true,
     rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
+    clipboard: new Clipboard(null),
   } as unknown as Scripting;
   const input = new PointerInput(stage, scripting);
   scripting.pointer = input;
@@ -399,6 +409,7 @@ test("a pointer event asks for a redraw only where it changes a button, focus or
     stageWidth: 100,
     stageHeight: 100,
     rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
+    clipboard: new Clipboard(null),
   } as unknown as Scripting;
   const input = new PointerInput(stage, scripting);
 
@@ -476,6 +487,7 @@ test("a pointer down dispatches capture, target and bubble with target-local coo
       call: (fn: { $f: (self: unknown, event: unknown) => void }, self: unknown, event: unknown) =>
         fn.$f(self, event),
     },
+    clipboard: new Clipboard(null),
   } as unknown as Scripting;
 
   const input = new PointerInput(stage, scripting);
@@ -558,6 +570,7 @@ test("roll events reach only the objects entered or left when the pointer change
       call: (fn: { $f: (self: unknown, event: unknown) => void }, self: unknown, event: unknown) =>
         fn.$f(self, event),
     },
+    clipboard: new Clipboard(null),
   } as unknown as Scripting;
   const input = new PointerInput(stage, scripting);
 

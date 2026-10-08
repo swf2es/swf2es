@@ -408,3 +408,49 @@ export interface ModuleCache {
    */
   delete(key: string, entry?: CachedModule): Promise<void>;
 }
+
+/** What goes to or comes from the system's clipboard: text, and HTML where there is some. */
+export interface ClipboardText {
+  text: string;
+  html?: string;
+}
+
+/**
+ * The system's clipboard, written outside a copy event: what a script
+ * puts there with System.setClipboard or Clipboard.setData in a mouse or
+ * key handler. A copy or cut event the host binds (bindKeyboard) carries
+ * its own data, and a paste brings the clipboard's with it, so nothing
+ * here reads, as Flash read only in a paste.
+ */
+export interface ClipboardHost {
+  /** Puts `data` on the clipboard; may fail quietly, as a browser refuses it without a user's gesture. */
+  write(data: ClipboardText): void;
+}
+
+/**
+ * The browser's async Clipboard API, which writes during a user's gesture
+ * without asking; HTML only where ClipboardItem takes it, else the text
+ * alone. Null where there is none, as in node.
+ */
+export function browserClipboard(): ClipboardHost | null {
+  const clipboard = (globalThis as { navigator?: { clipboard?: Clipboard } }).navigator?.clipboard;
+  if (!clipboard || typeof clipboard.writeText !== "function") {
+    return null;
+  }
+
+  const Item = (globalThis as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem;
+  return {
+    write: ({ text, html }) => {
+      const written =
+        html !== undefined && Item && typeof clipboard.write === "function"
+          ? clipboard.write([
+              new Item({
+                "text/plain": new Blob([text], { type: "text/plain" }),
+                "text/html": new Blob([html], { type: "text/html" }),
+              }),
+            ])
+          : clipboard.writeText(text);
+      written.catch(() => {});
+    },
+  };
+}
