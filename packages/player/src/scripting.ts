@@ -90,7 +90,7 @@ export class Scripting {
   readonly lifecycle = new Lifecycle(this);
   /** What Loaders, URLStreams and host callbacks asked for, till the frame it comes in. */
   readonly loads: Loads;
-  /** The frame clock, getTimer's, and the timers that fire by it. */
+  /** The clocks, getTimer's, and the timers that fire by them. */
   readonly timers: Timers;
   /** The system's clipboard as scripts see it, and when they may read or write it. */
   readonly clipboard: Clipboard;
@@ -270,10 +270,14 @@ export class Scripting {
       /** Drop the final newline produced by an HTML paragraph or BR. */
       trimTrailingHtmlBreak?: boolean;
       /**
-       * The clock getTimer reads, a monotonic one in milliseconds: by default
+       * The clock getTimer reads, in milliseconds: by default
        * `performance.now`, as Flash's runs on in real time, while a script
        * does too; null for the frame clock, which a frame moves and nothing
        * else, the same on every run, as tests that compare traces want.
+       * With a clock, timers fire by the host's time, the sum of the
+       * intervals it passes to advance() (started at this clock's), and this
+       * clock tells the time between calls. Readings that are not finite
+       * are skipped, and one that goes back counts as no time.
        */
       realTime?: (() => number) | null;
       /**
@@ -928,6 +932,7 @@ export class Scripting {
     if (entered) {
       this.frames++;
       this.broadcast("enterFrame");
+      this.timers.frameTimers();
     }
 
     this.constructPending();
@@ -954,13 +959,20 @@ export class Scripting {
     }
 
     this.loads.deliverAvm1Loads();
+    this.render();
+  }
 
+  /**
+   * The stage renders, at the end of a frame or between frames for a
+   * timer's updateAfterEvent: RENDER if a script invalidated the stage,
+   * and the scroll rectangles set since take effect, as Flash's do.
+   */
+  render(): void {
     if (this.invalidated) {
       this.invalidated = false;
       this.broadcast("render");
     }
 
-    // The frame is drawn: the scroll rectangles set since take effect, as Flash's do.
     for (const d of this.scrolled) {
       d.scroll = d.scrollRect;
       d.invalidate(TRANSFORM);

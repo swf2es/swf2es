@@ -1720,7 +1720,8 @@ once the case loads its SWF.
 ### Time
 
 The player keeps a clock of its own, in milliseconds, apart from the
-frame count: `getTimer` reads it, and `Timer` fires by it. A frame
+frame count: with `realTime: null`, `getTimer` reads it and `Timer`
+fires by it, and sounds go by it always. A frame
 stepped by `Player.tick()` moves the clock by one frame's duration at
 the stage's frame rate, the first frame's included, so a test that steps
 frames gets the same clock every time; a host playing in real time calls
@@ -1775,30 +1776,74 @@ within a frame, as benchmarks and Crossbridge's C do, sees the time
 pass, and a game's motion follows the time between frames. `realTime:
 null` makes it tell the frame clock instead, rounded as it was, the same
 on every run: the player's cases and the corpus (`tests/player/page.ts`)
-and the node tests that trace it ask for that. Timers fire by the frame
-clock either way; a host playing in real time drives it through
-`advance(dt)`, so it never runs ahead of the real one, and a timer's
-`getTimer() - start >= delay` still holds.
+and the node tests that trace it ask for that.
+Timers follow the same choice. With a real clock they fire as Flash
+fires them, measured in adl: in each frame right after ENTER_FRAME and
+before the frame's construction, every timer due fires once, in the
+order the timers were started, and next falls due its delay after it
+fired, so the ticks a long frame or a stall lost are dropped, not caught
+up with (a 10 ms timer fires once after a 200 ms frame, and `currentCount`
+counts only the firings). A timer shorter than the frame interval also
+fires between frames at its time, at most once a check; one as long as a
+frame or longer waits for a frame, so a 45 or 50 ms timer at 24 fps fires
+every other frame though the player checks between. In adl a 10 ms timer
+fires two to four times a 24 fps frame, a 1 ms one about once a
+millisecond at 1 fps; there is no floor above 1 ms, for `setInterval`
+neither. Flash truncates a delay to whole milliseconds: `Timer(1000 /
+24)` is 41 ms, shorter than the frame, and fired in 117 of 120 frames,
+`Timer(1000 / 30)` in 150 of 150 and `Timer(1000 / 60)` in 287 of 300;
+`Timer(40)` at 25 fps, the frame's length, fired in 106 of 125, and one
+a millisecond longer than the frame in about 55 to 70 % (five seconds
+each in adl). Our hosts check at each `advance(dt)` that plays no frame,
+60 times a second for a 24 fps SWF, so a timer shorter than that fires
+at each call: two or three times a frame. Their calls do not fall on the
+SWF's grid, though: a 25 fps SWF's frames come 33 and 50 ms apart at 60
+Hz. So the timers keep the host's time, the sum of the `dt`s it passed,
+on which a frame has its exact place on the grid, the time it fell due;
+a timer as long as a frame or longer is due by that, and every timer
+fired in a frame next falls due from it, as does one as long as a frame
+started in a frame. A timer of the frame's length then fires every
+frame, however the calls fall and jitter, where adl's fired in 85 % of
+them, its own frames jittering; one a millisecond longer fires every
+other frame, adl's in 55 to 70 %. A short one is due in a frame by the
+call's time, less a frame for each the call plays after it, so that a
+frame run late does not hold it back, and a SWF faster than the display
+fires it in each of its frames, not once a call; between frames it also
+waits its whole delay since it last fired, the least interval adl showed.
+At 60 Hz the checks come every 16.7 ms where Flash's come every few, so a
+timer shorter than that fires two or three times a 24 fps frame where
+adl's fired two to four, and a 20 ms one each 33 ms between frames where
+Flash's fired each 20 to 25. The host's time follows the `dt`s it
+passes, not the real clock, which only places it at the first call and
+tells the time between calls. `updateAfterEvent` in a timer
+fired between frames has the stage render then, with RENDER if a script
+invalidated it, as Flash does; an invalidation without it waits for the
+frame. Ruffle fires its timers after the frame from the same real clock
+but catches missed ticks up, ten at most a call, clamps delays to 10 ms
+and fires long timers between frames too. With `realTime: null` timers
+fire by the frame clock: a frame moves it on and every due time in it
+fires, at the same point after ENTER_FRAME, the same on every run, which
+the cases and the corpus's `timer*` tests rely on.
 
 `flash.utils.Timer` is playerglobal's own in all but three natives: the
 counting, `delay`'s range (RangeError #2066), `reset` and the events are
 AS3; the player keeps the timers started (`scripting/timers.ts`, with
-the clock), each with its delay and the
-closure to call, fires the ones due as a frame begins, before its
-timeline advances, each firing the earliest due so that two timers
-interleave as their times do, two due at once in the order scheduled,
-and tells `running`. The timers are a heap by due time, as asyncio keeps
-its callbacks: a scan of all of them per firing costs 2.5 ms a frame at a
-thousand timers where the heap costs 0.3, and nothing either way below a
-hundred.
-Flash fires timers between frames at their own times, so while a
-timer's closure runs the time is the one it fell due at, which a timer
-started from it counts from and `getTimer` tells: three timers set one
-from another at 100 ms each land at 400, 500 and 600 ms, as in Flash,
-not a frame later each (the corpus's `timer_finished`).
+the clocks), each with its delay and the closure to call, fires the ones
+due as above (by the frame clock, each firing the earliest due so that
+two timers interleave as their times do, two due at once in the order
+scheduled), and tells `running`. The timers are a heap by due time, as
+asyncio keeps its callbacks: a scan of all of them per firing costs
+2.5 ms a frame at a thousand timers where the heap costs 0.3, and
+nothing either way below a hundred.
+Flash fires timers between frames at their own times, so by the frame
+clock, while a timer's closure runs the time is the one it fell due at,
+which a timer started from it counts from and `getTimer` tells: three
+timers set one from another at 100 ms each land at 400, 500 and 600 ms,
+as in Flash, not a frame later each (the corpus's `timer_finished`).
 `setTimeout` and `setInterval` are AS3 over `Timer`. The corpus's
 `timer*` tests, Flash's traces of timers against frames, are the
-reference, with a node test of the clock and `advance`.
+reference by the frame clock, with node tests of the real clock's
+passes against an injected clock (`tests/unit/player/scripting/timers.test.ts`).
 
 ### The pointer
 

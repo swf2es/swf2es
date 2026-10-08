@@ -215,18 +215,40 @@ export class Player {
         ? 1
         : Math.min(MAX_FRAMES_PER_CALL, Math.max(1, Math.round(typical / frame)));
     this.owed += passed;
+    // How many frames play and what is owed after, worked out first: the
+    // timers fire by each frame's time on the grid, not the call's.
     let n = 0;
-    while (n < most && this.owed >= frame) {
-      this.owed -= frame;
-      this.tick();
+    let rest = this.owed;
+    while (n < most && rest >= frame) {
+      rest -= frame;
       n++;
     }
 
     // Whole frames lost are dropped, the part of one kept for the grid's
     // phase; but not within half an interval of the next, where a call
     // that came a little early leaves one owed under ordinary jitter.
-    if (this.owed >= frame + Math.min(frame, typical) / 2) {
-      this.owed %= frame;
+    if (rest >= frame + Math.min(frame, typical) / 2) {
+      rest %= frame;
+    }
+
+    const timers = this.scripting?.timers;
+    timers?.hostPassed(passed);
+    try {
+      for (let i = 0; i < n; i++) {
+        // Owed as each frame starts: a frame that throws leaves those after it owed.
+        this.owed = rest + (n - 1 - i) * frame;
+        timers?.frameAt((n - 1 - i) * frame, rest);
+        this.tick();
+      }
+    } finally {
+      timers?.frameAt(Number.NaN, Number.NaN);
+    }
+
+    // Flash fires timers shorter than a frame between frames too: a call
+    // that played none checks them.
+    if (n === 0) {
+      this.owed = rest;
+      timers?.betweenFrames(frame);
     }
 
     return n;
