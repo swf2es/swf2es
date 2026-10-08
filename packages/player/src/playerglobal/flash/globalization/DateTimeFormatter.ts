@@ -86,17 +86,7 @@ function localeData(locale: string): DateData {
     shortMonths: names({ month: "short" }, months),
     weekdays: names({ weekday: "long" }, weekdays),
     shortWeekdays,
-    // Windows' shortest names are CLDR's short width ("Su", "DO", "周日"), which Intl does not
-    // give: in a cased script the short ones cut to two letters; in others the short ones of
-    // two characters at most, else the narrow ones.
-    shortestWeekdays: shortWeekdays.map((name, d) => {
-      const chars = [...name];
-      if (/^[\p{Lu}\p{Ll}]/u.test(name)) {
-        return chars.slice(0, 2).join("");
-      }
-
-      return chars.length <= 2 ? name : narrowWeekdays[d];
-    }),
+    shortestWeekdays: shortestNames(shortWeekdays, narrowWeekdays),
     periods: [
       part(periods, SAMPLE, "dayPeriod"),
       part(periods, SAMPLE + 12 * 3600000, "dayPeriod"),
@@ -114,6 +104,25 @@ function localeData(locale: string): DateData {
   };
   dateData.set(locale, data);
   return data;
+}
+
+/**
+ * Windows' shortest weekday names are CLDR's short width ("Su", "DO", "周日"),
+ * which Intl does not give: in a cased script the short names cut to two
+ * letters; in others the short ones of two characters at most, else the
+ * narrow ones; the short ones wherever that would name two days alike
+ * (Vietnamese "Th", Portuguese "qu").
+ */
+function shortestNames(short: string[], narrow: string[]): string[] {
+  const names = short.map((name, d) => {
+    const chars = [...name];
+    if (/^[\p{Lu}\p{Ll}]/u.test(name)) {
+      return chars.slice(0, 2).join("");
+    }
+
+    return chars.length <= 2 ? name : narrow[d];
+  });
+  return new Set(names).size === names.length ? names : short;
 }
 
 const HOURS: Record<string, string> = { h12: "h", h23: "H", h11: "K", h24: "k" };
@@ -185,6 +194,12 @@ const UNSUPPORTED = "DSzZvQwWF";
 
 const STATUS_RANK = [NO_ERROR, USING_FALLBACK_WARNING, UNSUPPORTED_ERROR];
 
+const BUFFER_OVERFLOW_ERROR = "bufferOverflowError";
+
+// The letters that make a pattern one of the date, which formats only Windows' dates.
+const DATE_LETTERS = "yMdEGDQwF";
+const TIME_LETTERS = "hHkKmsaS";
+
 // The longest pattern Flash takes.
 const PATTERN_MAX = 255;
 
@@ -196,11 +211,11 @@ const PATTERN_MAX = 255;
  * NUL ends it, Flash's being a C string.
  */
 function parsePattern(given: string): { fields: Field[]; kept: string; status: string } {
-  const pattern = given.split("\0")[0];
-  if (pattern.length > PATTERN_MAX) {
+  if (given.length > PATTERN_MAX) {
     return { fields: [], kept: "", status: PATTERN_SYNTAX_ERROR };
   }
 
+  const pattern = given.split("\0")[0];
   const fields: Field[] = [];
   let unclosed = false;
   let kept = "";
@@ -281,27 +296,48 @@ function parsePattern(given: string): { fields: Field[]; kept: string; status: s
     kept += c.repeat(count);
   }
 
+  // Closing a quote can take the pattern past what Flash holds: it keeps none of it.
+  if (kept.length > PATTERN_MAX) {
+    return { fields: [], kept: "", status: BUFFER_OVERFLOW_ERROR };
+  }
+
   return { fields: unclosed ? parsePattern(kept).fields : fields, kept, status };
 }
 
 const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
 
 // Windows' dates: from 1601, its first FILETIME, to 30828, its last year, a year past 65535
-// wrapping as a 16-bit SYSTEMTIME's does.
+// wrapping as a 16-bit SYSTEMTIME's does; the last is its last FILETIME's day, 14 September.
 const FIRST_YEAR = 1601;
 const LAST_YEAR = 30828;
 
+// Four hundred Gregorian years, after which dates, weekdays and times repeat.
+const CYCLE_MS = 146097 * 86400000;
+const CYCLE_YEARS = 400;
+
+/**
+ * A time's fields, as a JavaScript Date and its year: a local time past
+ * JavaScript's range is moved by whole cycles into it, its year kept apart.
+ */
+function fieldsOf(t: number): { date: Date; year: number } {
+  const cycles = Math.abs(t) > 8.64e15 ? Math.trunc(t / CYCLE_MS) : 0;
+  const date = new Date(t - cycles * CYCLE_MS);
+  return { date, year: date.getUTCFullYear() + cycles * CYCLE_YEARS };
+}
+
 /** The date as Windows takes it, or null for one it refuses. */
-function windowsDate(t: Date): Date | null {
-  const year = t.getUTCFullYear();
+function windowsDate({ date, year }: { date: Date; year: number }): Date | null {
   const wrapped = year % 65536;
-  if (year < 0 || wrapped < FIRST_YEAR || wrapped > LAST_YEAR) {
+  const last =
+    wrapped === LAST_YEAR &&
+    (date.getUTCMonth() > 8 || (date.getUTCMonth() === 8 && date.getUTCDate() > 14));
+  if (year < 0 || wrapped < FIRST_YEAR || wrapped > LAST_YEAR || last) {
     return null;
   }
 
-  const date = new Date(t.getTime());
-  date.setUTCFullYear(wrapped);
-  return date;
+  const day = new Date(date.getTime());
+  day.setUTCFullYear(wrapped);
+  return day;
 }
 
 /** A date's fields formatted by a pattern's; `fields` hold the time's fields as UTC's. */
@@ -494,15 +530,21 @@ export function dateTimeFormatterNatives(s: Scripting): avm2.Natives {
       const f = settings(this);
       const time = (nonNull(s, date, "dateTime") as AsObject).$time as number;
       // Local time is the runtime's, as Date's own getters give it.
-      const offset =
+      const asked =
         utc || Number.isNaN(time)
           ? 0
           : (s.rt.getProperty(date, s.rt.publicName("timezoneOffset")) as number);
-      // A pattern of the time alone formats any date, an invalid one as midnight; one with
-      // the date only Windows' dates.
-      const local = new Date(Number.isNaN(time) ? 0 : time - offset * 60000);
-      const dated = f.fields.some(({ letter }) => letter !== "" && "yMdEG".includes(letter));
-      const day = dated ? (Number.isNaN(time) ? null : windowsDate(local)) : local;
+      const offset = Number.isNaN(asked) ? new Date(time).getTimezoneOffset() : asked;
+      // A pattern with the date formats only Windows' dates; one of the time alone any. An
+      // invalid date is, as adl has it, midnight of 1 January 1970 to a pattern without the
+      // date in UTC and to one of the date alone in local time, and refused otherwise.
+      const has = (letters: string) =>
+        f.fields.some(({ letter }) => letter !== "" && letters.includes(letter));
+      const dated = has(DATE_LETTERS);
+      const invalid = Number.isNaN(time);
+      const fields = fieldsOf(invalid ? 0 : time - offset * 60000);
+      const refused = invalid && (utc ? dated : !dated || has(TIME_LETTERS));
+      const day = refused ? null : dated ? windowsDate(fields) : fields.date;
       if (!day) {
         f.status = ILLEGAL_ARGUMENT_ERROR;
         return "";

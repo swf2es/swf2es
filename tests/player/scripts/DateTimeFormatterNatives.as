@@ -119,6 +119,27 @@ package {
       for each (id in ["en-AU", "zh-CN", "ja-JP", "fr-FR", "fi-FI", "sv-SE", "he-IL", "hi-IN"]) {
         trace(id, new DateTimeFormatter(id).getWeekdayNames(DateTimeNameStyle.SHORT_ABBREVIATION).join("|"));
       }
+      // Windows' last date is 14 September 30828; an invalid date is midnight of 1970 to a pattern
+      // without the date in UTC, refused otherwise.
+      f = new DateTimeFormatter("en-US");
+      f.setDateTimePattern("yyyy-MM-dd HH:mm");
+      for each (var last:Number in [Date.UTC(30828, 8, 14, 23, 59), Date.UTC(30828, 8, 15), Date.UTC(65536 + 30828, 8, 14), Date.UTC(65536 + 30828, 8, 15)]) {
+        trace("last", "[" + f.formatUTC(new Date(last)) + "]", f.lastOperationStatus);
+      }
+      for each (p in ["HH:mm", "'x'", "''", "yyyy", "D", "QQQ", "w", "F", "z", "S"]) {
+        f.setDateTimePattern(p);
+        var at:Date = new Date(Date.UTC(1000, 0, 1));
+        trace("invalid", p, "[" + f.formatUTC(new Date(NaN)) + "]", f.lastOperationStatus, "[" + f.formatUTC(at) + "]", f.lastOperationStatus);
+      }
+      // Closing a quote past 255 characters keeps no pattern; the limit counts past a NUL.
+      var quoted:String = "'";
+      while (quoted.length < 255) {
+        quoted += "a";
+      }
+      f.setDateTimePattern(quoted);
+      trace("overflow", f.lastOperationStatus, f.getDateTimePattern().length);
+      f.setDateTimePattern("yyyy\u0000" + long);
+      trace("limit past nul", f.lastOperationStatus, f.getDateTimePattern().length);
       trace("available", DateTimeFormatter.getAvailableLocaleIDNames().length > 0);
     }
 

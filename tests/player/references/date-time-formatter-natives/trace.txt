@@ -302,4 +302,20 @@ fi-FI su|ma|ti|ke|to|pe|la
 sv-SE sö|må|ti|on|to|fr|lö
 he-IL א׳|ב׳|ג׳|ד׳|ה׳|ו׳|ש׳
 hi-IN र|सो|मं|बु|गु|शु|श
+last [30828-09-14 23:59] noError
+last [] illegalArgumentError
+last [30828-09-14 00:00] noError
+last [] illegalArgumentError
+invalid HH:mm [00:00] noError [00:00] noError
+invalid 'x' [x] noError [x] noError
+invalid '' ['] noError ['] noError
+invalid yyyy [] illegalArgumentError [] illegalArgumentError
+invalid D [] illegalArgumentError [] illegalArgumentError
+invalid QQQ [] illegalArgumentError [] illegalArgumentError
+invalid w [] illegalArgumentError [] illegalArgumentError
+invalid F [] illegalArgumentError [] illegalArgumentError
+invalid z [] noError [] noError
+invalid S [] noError [] noError
+overflow bufferOverflowError 0
+limit past nul patternSyntaxError 0
 available true
