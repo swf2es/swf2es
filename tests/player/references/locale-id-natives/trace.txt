@@ -47,6 +47,16 @@ preferred de-AT / de,de-DE,de-CH => de-DE,de-CH,de
 preferred fr-CA / fr,fr-FR,fr-Latn-CA,fr-CA => fr-Latn-CA,fr-CA,fr-FR,fr
 preferred zh-HK / zh-Hant-HK,zh-HK,zh-CN => zh-Hant-HK,zh-HK
 preferred fr-CA,en,zh-TW,pt-PT,de / en-US,fr-FR,fr,zh-CN,zh-Hant-HK,pt-BR,de-DE,en-GB,en,fr-CA,EN-us,,x => fr-CA,fr-FR,fr,en,en-US,EN-us,en-GB,zh-Hant-HK,pt-BR,de-DE
+[ji] ji ji script= region= variant=
+[jw] jw jw script= region= variant=
+[sh] sh sh script= region= variant=
+[iw] iw iw script=Hebr region=IL variant=
+[in] in in script=Latn region=ID variant=
+[tl] tl tl script=Latn region=PH variant=
+[en US] en US en script=Latn region=US variant=
+[en-US-1abc] en-US-1ABC en script=Latn region=US variant=1ABC
+[en-US-1996] en-us-1996 en-us-1996 script= region=us variant=
+und 1
 null elements ,en
 keyword fr-FR
 want null TypeError: Error #2007: Parameter want must be non-null.

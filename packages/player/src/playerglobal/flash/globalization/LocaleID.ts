@@ -4,6 +4,7 @@ import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 import {
   canonicalName,
+  keywordsOf,
   NAME_PARTS,
   NO_ERROR,
   nonNull,
@@ -14,7 +15,7 @@ import {
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
-const KEYWORDS = ["calendar", "collation", "currency", "numbers"];
+const UNKNOWN_LANGUAGES = ["und", "ji", "jw", "sh"];
 
 const RTL_SCRIPTS = /^(Adlm|Arab|Hebr|Mand|Nkoo|Rohg|Syrc|Thaa)$/;
 
@@ -29,22 +30,13 @@ interface Parts {
 
 function parseName(given: string): Parts {
   const canonical = canonicalName(given);
-  const [base, keywordList = ""] = canonical.split("@");
-  const keywords: Record<string, string> = {};
-  for (const pair of keywordList.split(";")) {
-    const [key, value] = pair.split("=");
-    if (key && value !== undefined) {
-      keywords[key] = value;
-    }
-  }
-
-  // Keywords other than these leave the name one Flash cannot take apart.
-  const known = Object.keys(keywords).every((key) => KEYWORDS.includes(key));
-  const m = known ? NAME_PARTS.exec(base) : null;
-  if (!m) {
+  const base = canonical.split("@")[0];
+  const keywords = keywordsOf(canonical);
+  const m = keywords ? NAME_PARTS.exec(base) : null;
+  if (!keywords || !m) {
     // Flash keeps a name it cannot take apart whole as its language, and a region after a
     // language it could read.
-    const [first, second = ""] = canonical.split(/[-_.]+/);
+    const [first, second = ""] = canonical.split(/[-_. ]+/);
     return {
       name: canonical,
       language: canonical,
@@ -60,8 +52,9 @@ function parseName(given: string): Parts {
   const region = m[3]?.toUpperCase();
   let likely: Intl.Locale | undefined;
   try {
-    // The language as named, with its script and region, as und has none.
-    if (language !== "und") {
+    // The language as named, with its script and region; und has none, nor the deprecated
+    // codes Windows does not know (it knows iw, in and tl).
+    if (!UNKNOWN_LANGUAGES.includes(language)) {
       likely = new Intl.Locale([language, script, region].filter(Boolean).join("-")).maximize();
     }
   } catch {}
@@ -72,7 +65,7 @@ function parseName(given: string): Parts {
     script: script ?? likely?.script ?? "",
     region: region ?? likely?.region ?? "",
     variant: m[4]
-      .split(/[-_.]+/)
+      .split(/[-_. ]+/)
       .filter(Boolean)
       .map((v) => v.toUpperCase())
       .join("-"),
@@ -93,6 +86,11 @@ function preference(name: string): Preference {
   const full = canonicalName(name).split("@")[0];
   try {
     const l = new Intl.Locale(full);
+    // und, no language, matches only itself.
+    if (l.language === "und") {
+      return { name, named: full, maximized: full, language: full, regional: false };
+    }
+
     const max = l.maximize();
     const implied = new Intl.Locale(l.region ? `${l.language}-${l.region}` : l.language).maximize();
     const script = l.script !== implied.script ? l.script : undefined;

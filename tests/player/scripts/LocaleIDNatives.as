@@ -33,6 +33,11 @@ package {
         preferred = LocaleID.determinePreferredLocales(Vector.<String>(want[0]), Vector.<String>(want[1]));
         trace("preferred", want[0].join(","), "/", want[1].join(","), "=>", preferred.join(","));
       }
+      for each (id in ["ji", "jw", "sh", "iw", "in", "tl", "en US", "en-US-1abc", "en-US-1996"]) {
+        l = new LocaleID(id);
+        trace("[" + id + "]", l.name, l.getLanguage(), "script=" + l.getScript(), "region=" + l.getRegion(), "variant=" + l.getVariant());
+      }
+      trace("und", LocaleID.determinePreferredLocales(new <String>["und"], new <String>["en-US", "und", "fr"]).length);
       trace("null elements", LocaleID.determinePreferredLocales(new <String>[null, "en"], new <String>[null, "en"]).join(","));
       trace("keyword", LocaleID.determinePreferredLocales(new <String>["fr-FR"], new <String>["fr-FR"], "").join(","));
       call("want null", function():void { LocaleID.determinePreferredLocales(null, new <String>["en-US"]); });

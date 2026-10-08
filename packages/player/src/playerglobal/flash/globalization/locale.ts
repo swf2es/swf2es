@@ -27,11 +27,30 @@ export interface Locale {
 
 /**
  * A locale name's parts, as Flash takes it apart: a language, a script, a
- * region, variants of letters; any run of hyphens, underscores or dots
- * between them.
+ * region, variants of two to eight letters and digits, not digits alone;
+ * any run of hyphens, underscores, dots or spaces between them.
  */
 export const NAME_PARTS =
-  /^([a-z]{2,8})(?:[-_.]+([a-z]{4}))?(?:[-_.]+([a-z]{2}|\d{3}))?((?:[-_.]+[a-z]{2,8})*)[-_.]*$/i;
+  /^([a-z]{2,8})(?:[-_. ]+([a-z]{4}))?(?:[-_. ]+([a-z]{2}|\d{3}))?((?:[-_. ]+(?=\d*[a-z])[a-z\d]{2,8})*)[-_. ]*$/i;
+
+/** The keywords after "@" Flash knows; any other leaves a name one it cannot take apart. */
+export const KEYWORDS = ["calendar", "collation", "currency", "numbers"];
+
+/** A name's keywords, "@key=value;key=value", null for one Flash does not know. */
+export function keywordsOf(name: string): Record<string, string> | null {
+  const keywords: Record<string, string> = {};
+  const list = name.split("@")[1];
+  for (const pair of list ? list.split(";") : []) {
+    const [key, value] = pair.split("=");
+    if (!KEYWORDS.includes(key)) {
+      return null;
+    }
+
+    keywords[key] = value ?? "";
+  }
+
+  return keywords;
+}
 
 /**
  * A locale name as Flash keeps what it was given: one it takes apart, its
@@ -47,7 +66,7 @@ export function canonicalName(name: string): string {
     return name.toLowerCase();
   }
 
-  if (!/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/i.test(base)) {
+  if (!/^[a-z\d]+(?:[-_][a-z\d]+)*$/i.test(base)) {
     return name;
   }
 
@@ -63,7 +82,7 @@ export function canonicalName(name: string): string {
 
 // What Flash resolves: a language of two or three letters with the parts above.
 const TAG =
-  /^([a-z]{2,3})(?:[-_.]+([a-z]{4}))?(?:[-_.]+([a-z]{2}|\d{3}))?(?:[-_.]+[a-z]{2,8})*[-_.]*$/i;
+  /^([a-z]{2,3})(?:[-_. ]+([a-z]{4}))?(?:[-_. ]+([a-z]{2}|\d{3}))?(?:[-_. ]+(?=\d*[a-z])[a-z\d]{2,8})*[-_. ]*$/i;
 
 /**
  * The names resolved last, at most this many: a name is any string a SWF
@@ -89,7 +108,7 @@ export function resolveLocale(s: Scripting, name: string): Locale {
     const requested = canonicalName(name);
     const base = requested.split("@")[0];
     const named = base !== "" && base !== "i-default";
-    const found = named ? supported(base) : null;
+    const found = named && keywordsOf(requested) ? supported(base) : null;
     locale = {
       requested,
       actual: found?.actual ?? defaultLocale(s),
