@@ -49,6 +49,7 @@ import { transformNatives } from "./flash/geom/Transform.js";
 import { utils3DNatives } from "./flash/geom/Utils3D.js";
 import { currencyFormatterNatives } from "./flash/globalization/CurrencyFormatter.js";
 import { currencyParseResultNatives } from "./flash/globalization/CurrencyParseResult.js";
+import { dateTimeFormatterNatives } from "./flash/globalization/DateTimeFormatter.js";
 import { numberFormatterNatives } from "./flash/globalization/NumberFormatter.js";
 import { numberParseResultNatives } from "./flash/globalization/NumberParseResult.js";
 import { soundHooks, soundNatives } from "./flash/media/Sound.js";
@@ -119,6 +120,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...currencyParseResultNatives(s),
     ...numberParseResultNatives(),
     ...currencyFormatterNatives(s),
+    ...dateTimeFormatterNatives(s),
     ...numberFormatterNatives(s),
     ...urlRequestNatives(s),
     ...urlStreamNatives(s),
