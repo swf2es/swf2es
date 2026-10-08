@@ -3,7 +3,13 @@
 
 import type { Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
-import { convertDoubleToString, convertDoubleToStringRadix, DTOSTR_PRECISION } from "../numbers.js";
+import {
+  convertDoubleToString,
+  convertDoubleToStringRadix,
+  DTOSTR_EXPONENTIAL,
+  DTOSTR_FIXED,
+  DTOSTR_PRECISION,
+} from "../numbers.js";
 import { numberToString, type Runtime } from "../runtime.js";
 import { conversion, type Natives, plain } from "./define.js";
 
@@ -27,10 +33,100 @@ export const numberNatives: Natives = {
       throw rt.error("RangeError", 1002, precision, min, max);
     }
 
-    return convertDoubleToString(n, mode, precision);
+    switch (mode) {
+      case DTOSTR_FIXED:
+        return numberToFixed(n, precision);
+      case DTOSTR_PRECISION:
+        return numberToPrecision(n, precision);
+      default:
+        return numberToExponential(n, precision);
+    }
   },
   "Number.Number::_minValue": plain(() => Number.MIN_VALUE),
 };
+
+// toFixed, toPrecision and toExponential write avmplus' text, which is not
+// JavaScript's, though JavaScript's methods give it for most numbers at a
+// fraction of the cost. avmplus takes the digits D of a number x from its
+// D2A, the shortest within half an ulp of x narrowed by 10^precision, in
+// exact arithmetic. Scaled so that the last place written is 1, x is some y
+// and D is within y * 2^-53 of it. toFixed and toPrecision then round D
+// half up there, as JavaScript rounds x itself; toExponential truncates D,
+// since avmplus rounds only on D2A's fast path, which no 53-bit mantissa
+// takes. So where y is clear of the point where the rounding (or the
+// truncation) changes, both write the same digits. The guards scale x by
+// a power of ten up to 1e22, which doubles hold exactly, so f is within
+// y * 2^-53 of y, and take JavaScript's text only where f is more than
+// f * 2^-50 from those points. Elsewhere avmplus goes its own way: toFixed
+// writes zeros, unrounded, for a number below its last place (0.006 to
+// "0.00"); toPrecision never writes an exponent below 1, and keeps the
+// exponent it had before rounding carried ("10.0" for 9.99 to 2 digits,
+// "0.e+5" for 99999.9); toExponential leaves out "e+0", and writes 0 as
+// "0.00e-16". tests/unit/runtime/numbers.test.ts checks every precision.
+
+const powersOfTen = Array.from({ length: 23 }, (_, i) => Number(`1e${i}`));
+
+/** x * 10^k, rounded once, for k from -22 to 22. */
+function scaled(x: number, k: number): number {
+  return k >= 0 ? x * powersOfTen[k] : x / powersOfTen[-k];
+}
+
+/** As Number.toFixed. */
+export function numberToFixed(n: number, digits: number): string {
+  // NaN, infinities and f past 2^49, where the tolerance reaches 0.5, fail every test.
+  const f = (n < 0 ? -n : n) * powersOfTen[digits];
+  const tolerance = f / 2 ** 50;
+  const half = f - Math.floor(f) - 0.5;
+  if ((half > tolerance || half < -tolerance) && (f < 0.5 || f > 1 + tolerance)) {
+    return n.toFixed(digits);
+  }
+
+  return convertDoubleToString(n, DTOSTR_FIXED, digits);
+}
+
+/** As Number.toPrecision. */
+export function numberToPrecision(n: number, digits: number): string {
+  // log10 may be one off next to a power of ten: the bounds on f catch that.
+  const x = n < 0 ? -n : n;
+  const exponent = Math.floor(Math.log10(x));
+  const k = digits - 1 - exponent;
+  if (exponent >= -6 && k >= -22 && k <= 22) {
+    const f = scaled(x, k);
+    const tolerance = f / 2 ** 50;
+    const half = f - Math.floor(f) - 0.5;
+    const clear = half > tolerance || half < -tolerance;
+    if (clear && f >= powersOfTen[digits - 1] + tolerance && f < powersOfTen[digits] - 0.5) {
+      return n.toPrecision(digits);
+    }
+  }
+
+  return convertDoubleToString(n, DTOSTR_PRECISION, digits);
+}
+
+/**
+ * As Number.toExponential: JavaScript's digits to one place more, the last
+ * dropped, which truncates as avmplus does where rounding that place does
+ * not carry.
+ */
+export function numberToExponential(n: number, digits: number): string {
+  const x = n < 0 ? -n : n;
+  const exponent = Math.floor(Math.log10(x));
+  const k = digits - exponent;
+  if (k >= -22 && k <= 22) {
+    const f = scaled(x, k);
+    const fraction = f - Math.floor(f);
+    const inRange = f >= powersOfTen[digits] && f < powersOfTen[digits + 1];
+    if (fraction > f / 2 ** 50 && fraction < 0.9 && inRange) {
+      const text = x.toExponential(digits + 1);
+      const e = text.indexOf("e");
+      const mantissa = text.slice(0, digits === 0 ? 1 : e - 1);
+      const written = exponent === 0 ? mantissa : mantissa + text.slice(e);
+      return n < 0 ? `-${written}` : written;
+    }
+  }
+
+  return convertDoubleToString(n, DTOSTR_EXPONENTIAL, digits);
+}
 
 // Math, and Number's copies of it.
 for (const name of [

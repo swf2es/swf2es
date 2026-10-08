@@ -1,10 +1,21 @@
 // numberToString writes a number with JavaScript's String where that gives
 // avmplus' text, and with the port of avmplus' D2A elsewhere: the two must
-// never differ. Seeded samples from where numbers come from in SWFs, and
+// never differ, nor may toFixed, toPrecision and toExponential, which take
+// JavaScript's methods where they agree. Seeded samples from where numbers come from in SWFs, and
 // from everywhere doubles reach.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { convertDoubleToString } from "../../../packages/runtime/dist/avm2/numbers.js";
+import {
+  numberToExponential,
+  numberToFixed,
+  numberToPrecision,
+} from "../../../packages/runtime/dist/avm2/natives/number.js";
+import {
+  convertDoubleToString,
+  DTOSTR_EXPONENTIAL,
+  DTOSTR_FIXED,
+  DTOSTR_PRECISION,
+} from "../../../packages/runtime/dist/avm2/numbers.js";
 import { numberToString, stringToNumber } from "../../../packages/runtime/dist/avm2/runtime.js";
 
 let seed = 1;
@@ -62,6 +73,60 @@ test("numberToString writes every number as avmplus' D2A does", () => {
     }
   }
 });
+
+/** `n` moved by `ulps` doubles, toward +Infinity for a positive count. */
+const nudge = (n: number, ulps: number) => {
+  bits.setFloat64(0, n);
+  bits.setBigUint64(0, bits.getBigUint64(0) + BigInt(n < 0 ? -ulps : ulps));
+  return bits.getFloat64(0);
+};
+
+const sign = () => (random() < 0.3 ? -1 : 1);
+const powerOfTen = (k: number) => Number(`1e${k}`);
+
+// Where toFixed, toPrecision and toExponential round: halves in decimal and
+// the doubles about them, and powers of ten, which a carry crosses.
+const roundingSamples: (() => number)[] = [
+  ...samples,
+  () => (sign() * Math.round(random() * 1e6)) / 100,
+  () => (sign() * (Math.floor(random() * 1e5) * 10 + 5)) / 10 ** Math.floor(random() * 8),
+  () =>
+    nudge(
+      (sign() * (Math.floor(random() * 1e6) + 0.5)) / powerOfTen(Math.floor(random() * 10)),
+      Math.floor(random() * 5) - 2,
+    ),
+  () => nudge(sign() * powerOfTen(Math.floor(random() * 44) - 22), Math.floor(random() * 9) - 4),
+  () => sign() * (10 ** Math.floor(random() * 10) - 10 ** -Math.floor(random() * 12)),
+  () => (sign() * Math.floor(random() * 2 ** 20)) / 2 ** Math.floor(random() * 30),
+];
+
+const conversions = [
+  { name: "toFixed", mode: DTOSTR_FIXED, min: 0, max: 20, fast: numberToFixed },
+  { name: "toPrecision", mode: DTOSTR_PRECISION, min: 1, max: 21, fast: numberToPrecision },
+  { name: "toExponential", mode: DTOSTR_EXPONENTIAL, min: 0, max: 20, fast: numberToExponential },
+];
+
+for (const { name, mode, min, max, fast } of conversions) {
+  test(`${name} writes every number as avmplus' D2A does`, () => {
+    const edges = [0, -0, 0.5, 1.5, 2.5, 0.05, 0.06, 0.006, 1.005, 1.255, 8.345, 99.995, 9.99, 999];
+    edges.push(99999.9, 1.31615, 6895.29, 0.125, 1e-7, 1e21, 1e20, 2 ** 49, 2 ** 53, 0.1 + 0.2);
+    edges.push(Number.NaN, Number.POSITIVE_INFINITY, Number.MIN_VALUE, Number.MAX_VALUE);
+    for (let digits = min; digits <= max; digits++) {
+      for (const n of [...edges, ...edges.map((e) => -e)]) {
+        assert.equal(fast(n, digits), convertDoubleToString(n, mode, digits), `${n} to ${digits}`);
+      }
+
+      for (let i = 0; i < 25_000; i++) {
+        const n = roundingSamples[i % roundingSamples.length]();
+        const quick = fast(n, digits);
+        const full = convertDoubleToString(n, mode, digits);
+        if (quick !== full) {
+          assert.fail(`${n} to ${digits}: ${quick} where avmplus writes ${full}`);
+        }
+      }
+    }
+  });
+}
 
 /** stringToNumber as it was, its rules applied to every string: the reference for the faster one. */
 function readAsBefore(s: string): number {
