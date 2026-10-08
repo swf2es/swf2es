@@ -13,6 +13,11 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron") as typeof i
 
 let nextSocket = 1;
 let nextRequest = 1;
+/** The requests waiting for their response, by number. */
+const responses = new Map<number, (response: NetworkResponse) => void>();
+ipcRenderer.on("net:response", (_event, id: number, response: NetworkResponse) =>
+  responses.get(id)?.(response),
+);
 
 const api: DesktopApi = {
   start: () => ipcRenderer.invoke("desktop:start"),
@@ -45,15 +50,25 @@ const api: DesktopApi = {
     fetch: (request, cancel) => {
       const id = nextRequest++;
       cancel(() => ipcRenderer.send("net:abort", id));
-      return ipcRenderer
-        .invoke("net:fetch", id, request)
-        .then(({ response }: { response: NetworkResponse | null }) => {
-          if (!response) {
-            throw new Error("swf2es: the request was refused");
-          }
-
-          return response;
+      // The response comes as a message of its own, before the answer that says it went.
+      return new Promise<NetworkResponse>((resolve, reject) => {
+        responses.set(id, (response) => {
+          responses.delete(id);
+          resolve(response);
         });
+        ipcRenderer.invoke("net:fetch", id, request).then(
+          ({ delivered }: { delivered: boolean }) => {
+            if (!delivered) {
+              responses.delete(id);
+              reject(new Error("swf2es: the request was refused"));
+            }
+          },
+          (error: unknown) => {
+            responses.delete(id);
+            reject(error);
+          },
+        );
+      });
     },
     loadPolicyFile: (url) => ipcRenderer.send("net:policy-file", String(url)),
   },

@@ -675,10 +675,19 @@ function listen(): void {
       throw new Error("not the app's page");
     }
 
-    // A refusal is an answer, not an error, which Electron would print as one.
-    return fetchForPage(id, request).then(
-      (response) => ({ response }),
-      () => ({ response: null }),
+    // The response goes as a message of its own, copied as it is sent, so
+    // that its bytes count against the movie's budget until then; the answer
+    // says whether it went. A refusal is an answer, not an error, which
+    // Electron would print as one.
+    const contents = event.sender;
+    const deliver = (response: NetworkResponse) => {
+      if (!contents.isDestroyed()) {
+        contents.send("net:response", id, response);
+      }
+    };
+    return fetchForPage(id, request, deliver).then(
+      () => ({ delivered: true }),
+      () => ({ delivered: false }),
     );
   });
   ipcMain.on("net:abort", (event, id: unknown) => {
@@ -699,7 +708,11 @@ function listen(): void {
  * judges it. A refusal is said on stderr, and the page sees a failed
  * load.
  */
-async function fetchForPage(id: number, request: unknown): Promise<NetworkResponse> {
+async function fetchForPage(
+  id: number,
+  request: unknown,
+  deliver: (response: NetworkResponse) => void,
+): Promise<NetworkResponse> {
   const asked = request as { url?: unknown; purpose?: unknown } | null;
   const url = typeof asked?.url === "string" ? asked.url : "";
   const shown = url.slice(0, 2048);
@@ -712,7 +725,7 @@ async function fetchForPage(id: number, request: unknown): Promise<NetworkRespon
   const controller = new AbortController();
   requests.set(id, controller);
   try {
-    return await network.fetch(request, controller.signal);
+    return await network.fetch(request, controller.signal, deliver);
   } catch (error) {
     // A refusal says why; anything else, which should not happen, is said too.
     if (!controller.signal.aborted) {

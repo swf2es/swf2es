@@ -281,9 +281,15 @@ export class Network {
   /**
    * Send what the page asks, `request` as it came over IPC, checked here,
    * if the movie may; `signal` aborts it. Refused, it throws a Refused
-   * saying why.
+   * saying why. `deliver` is handed the response while its bytes still
+   * count against the movie's budget, for a caller that copies them away
+   * (over IPC) before they are given back.
    */
-  async fetch(request: unknown, signal: AbortSignal): Promise<NetResponse> {
+  async fetch(
+    request: unknown,
+    signal: AbortSignal,
+    deliver?: (response: NetResponse) => void,
+  ): Promise<NetResponse> {
     const session = this.session;
     if (!session) {
       throw new Refused("no SWF plays");
@@ -294,11 +300,13 @@ export class Network {
     await this.turn(aborted);
     const budget: Budget = { session, taken: 0 };
     try {
-      return checked.purpose === "movie"
-        ? await this.fetchMovie(session, checked, aborted, budget)
-        : await this.fetchFor(session, checked, aborted, budget);
+      const response =
+        checked.purpose === "movie"
+          ? await this.fetchMovie(session, checked, aborted, budget)
+          : await this.fetchFor(session, checked, aborted, budget);
+      deliver?.(response);
+      return response;
     } finally {
-      // Answered: its bytes are the page's now, on their way over IPC.
       session.buffered -= budget.taken;
       this.done();
     }

@@ -657,6 +657,14 @@ test("a movie's responses hold no more than their budget, given back as each is 
   await new Promise((done) => setTimeout(done, 100));
   assert.match(await outcome(ask(net, `${swf()}/big`)), /hold too much at once/);
   assert.equal(text((await held).bytes)?.length, 5000);
+  // Counted until its caller has copied it away.
+  const seen: number[] = [];
+  await net.fetch(
+    { url: `${swf()}/big`, method: "GET", headers: [], body: null, purpose: "data" },
+    never,
+    () => seen.push((net as unknown as { session: { buffered: number } }).session.buffered),
+  );
+  assert.deepEqual(seen, [5000]);
   assert.equal(text((await ask(net, `${swf()}/big`)).bytes)?.length, 5000);
   // A response is bytes of its own, not a view of a larger buffer.
   const { bytes } = await ask(net, `${swf()}/data.txt`);

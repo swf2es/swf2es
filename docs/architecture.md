@@ -4132,8 +4132,9 @@ small bomb stops at them; gzip's header is read by the main process and
 its stream inflated raw, so what follows the stream is ignored, as
 Chromium ignores it, deflate is zlib's or raw as its first two bytes
 tell, and a body coded twice is refused), past which the next is
-refused (each is copied once, into memory of its own, before IPC copies
-it to the page); a body is sent up to 32 MB, a URL up to 64 KB, 32 headers in 8 KB; a request that hears
+refused (each is copied once, into memory of its own, and counts until
+the main process has sent it to the page in a message of its own, which
+copies it there); a body is sent up to 32 MB, a URL up to 64 KB, 32 headers in 8 KB; a request that hears
 nothing for 30 seconds fails, and one that takes five minutes all told,
 however its bytes trickle in (a policy file's whole fetch ten seconds,
 port 843's socket policy three); 16 requests run at once, a thousand more wait, and the rest
