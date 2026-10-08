@@ -137,6 +137,10 @@ export class Code {
    * once the SWF is let go, the Abc goes, its origin and entry with it.
    */
   private readonly moduleAbcs = new Map<string, WeakRef<object>>();
+  /** The script names of the libraries' modules, builtin's and playerglobal's, for callerUrl. */
+  private readonly libraryScripts = new Set<string>();
+  /** The URLs of the SWFs whose code was ever loaded, for everUrls. */
+  private readonly loadedUrls = new Set<string>();
   private readonly origins = new WeakMap<object, { url: string; library: Library }>();
   private readonly moduleGone = new FinalizationRegistry<string>((script) => {
     if (!this.moduleAbcs.get(script)?.deref()) {
@@ -428,10 +432,15 @@ export class Code {
       }
     }
 
+    if (builtin) {
+      this.libraryScripts.add(script);
+    }
+
     if (origin) {
       const abc = linked as object;
       this.moduleAbcs.set(script, new WeakRef(abc));
       this.origins.set(abc, origin);
+      this.loadedUrls.add(origin.url);
       this.moduleGone.register(abc, script);
     }
 
@@ -594,6 +603,105 @@ export class Code {
     return this.codeOrigin(new Error().stack)?.url ?? this.s.url;
   }
 
+  /**
+   * The URL of the SWF whose code called a gated native, for a security
+   * check; null where that cannot be told, never the main SWF's for want
+   * of better. `own` counts the player's frames between this one and the
+   * native, the native's included. See callingScript for what is read.
+   *
+   * The frame accounting assumes every call keeps its frame: an engine
+   * that elides tail calls (JavaScriptCore's proper tail calls) would drop
+   * the runtime's frames, `return f(...)` all of them, and a call through
+   * a function value would look direct. The runtime keeps its frames now,
+   * calling in no tail position, and a SWF's module names its script on
+   * JavaScriptCore too, but the libraries' modules do not there: a frame
+   * that names none may be a native's as well as a library's. So
+   * callingScript reads V8's stacks alone, and fails closed on any other
+   * engine's, until the libraries name their scripts as well.
+   */
+  callerUrl(own: number): string | null {
+    const stack = wholeStack();
+    const script =
+      stack === null
+        ? null
+        : callingScript(
+            stack,
+            // wholeStack's frame and this one, then the player's.
+            2 + own,
+            { isModule: (s) => this.isModule(s), isLibrary: (s) => this.libraryScripts.has(s) },
+            this.byNameChain(),
+          );
+    if (script === null) {
+      return null;
+    }
+
+    const abc = this.moduleAbcs.get(script)?.deref();
+    return (abc && this.origins.get(abc)?.url) ?? null;
+  }
+
+  /** The runtime's frames of a call by name to a global function, measured once; null where they cannot be. */
+  private byName: readonly string[] | null | undefined;
+
+  /**
+   * The exact sites of the runtime's frames between a SWF's frame and a
+   * library's global function it calls by name, `fscommand(...)`, which
+   * reaches it as Runtime.call, then callValue, then the method closure's
+   * wrapper: found by making such a call to a probe of the player's own,
+   * so they are this build's, minified or not. Null where the probe does
+   * not see them as expected, which no call then matches.
+   */
+  private byNameChain(): readonly string[] | null {
+    if (this.byName !== undefined) {
+      return this.byName;
+    }
+
+    let stack: string | null = null;
+    const probe = () => {
+      stack = wholeStack();
+    };
+    const holder = { proto: { [avm2.methodKey(0)]: probe } };
+    this.s.rt.call(this.s.rt.methodClosure(undefined, holder as never, 0), null);
+    // wholeStack, the probe, the wrapper, callValue, call, then this.
+    const sites = stack === null ? [] : frameSites(stack);
+    const here = sites[0] === undefined || sites[0] === null ? null : siteScript(sites[0]);
+    const chain = sites.slice(2, 5);
+    const valid =
+      here !== null &&
+      chain.length === 3 &&
+      chain.every((site) => site !== null && !this.isModule(siteScript(site) ?? "")) &&
+      sites[1] !== null &&
+      siteScript(sites[1] ?? "") === here &&
+      siteScript(sites[5] ?? "") === here;
+    this.byName = valid ? (chain as string[]) : null;
+    return this.byName;
+  }
+
+  /** Whether `script` names a module the player loaded, a SWF's or a library's. */
+  private isModule(script: string): boolean {
+    return this.libraryScripts.has(script) || this.moduleAbcs.has(script);
+  }
+
+  /**
+   * The URLs of every SWF whose code was ever loaded in the player, the
+   * main SWF's among them: those whose code may be calling. Never fewer:
+   * an unloaded SWF's timers and closures outlive its modules, which are
+   * held weakly, and still run its code. Strings alone, so it costs little.
+   */
+  everUrls(): string[] {
+    return [...new Set([this.s.url, ...this.loadedUrls])];
+  }
+
+  /**
+   * Whom a security check asks about, `own` being the player's frames
+   * above the caller's, the native's included (callerUrl): the calling SWF's URL, or, where the
+   * caller cannot be told, every SWF's ever loaded, each of which must
+   * pass, so that a check fails closed rather than taking the main SWF's word.
+   */
+  securityUrls(own: number): string[] {
+    const caller = this.callerUrl(own + 1);
+    return caller === null ? this.everUrls() : [caller];
+  }
+
   /** The SWF whose code called a playerglobal native. */
   codeLibrary(): Library | null {
     return this.codeOrigin(new Error().stack)?.library ?? this.s.library;
@@ -717,4 +825,136 @@ interface Ready {
 /** The SHA-256 of `text`'s UTF-8, a cache key of fixed length however many ABCs it names. */
 function sha256Text(text: string): Promise<string> {
   return sha256(new TextEncoder().encode(text));
+}
+
+/**
+ * The whole stack here, the engine's frame limit lifted for this capture;
+ * null where the limit cannot be lifted, as on a page that froze Error
+ * (SES lockdown), so that a check fails closed rather than throws.
+ */
+function wholeStack(): string | null {
+  const engine = Error as ErrorConstructor & { stackTraceLimit?: number };
+  const limit = engine.stackTraceLimit;
+  try {
+    engine.stackTraceLimit = Number.POSITIVE_INFINITY;
+  } catch {
+    return null;
+  }
+
+  try {
+    return engine.stackTraceLimit === Number.POSITIVE_INFINITY ? (new Error().stack ?? null) : null;
+  } finally {
+    engine.stackTraceLimit = limit;
+  }
+}
+
+/** Whether a stack's lines are V8's, "    at" frames, as avm2.stackFrames tells them. */
+function isV8(lines: readonly string[]): boolean {
+  return lines.some((line) => /^\s*at /.test(line));
+}
+
+/**
+ * The script a SWF's code called a gated native from, read from a whole
+ * V8 stack: past `own` frames of the player's (none a module's, or the
+ * count is off), past the library function it called, ExternalInterface's
+ * `call` say, the next frame must be a SWF module's, the SWF calling it
+ * directly; or `byName`'s three runtime frames exactly, then a SWF's, a
+ * global function such as fscommand called by its name. Anything else
+ * there, the player's or the runtime's code calling a function value (a
+ * dispatchEvent's listener, an Array's forEach or sort, `.call`,
+ * `.apply`, `o.f()`), or a frame line it cannot read, is no one's: null.
+ * So is any other engine's stack: JavaScriptCore's, whose libraries'
+ * frames name no script, and SpiderMonkey's, which reads the same.
+ */
+export function callingScript(
+  stack: string,
+  own: number,
+  modules: { isModule(script: string): boolean; isLibrary(script: string): boolean },
+  byName: readonly string[] | null,
+): string | null {
+  if (!isV8(stack.split("\n"))) {
+    return null;
+  }
+
+  const sites = frameSites(stack);
+  const scripts = sites.map((site) => (site === null ? null : siteScript(site)));
+  const swf = (script: string | null | undefined) =>
+    script !== null &&
+    script !== undefined &&
+    modules.isModule(script) &&
+    !modules.isLibrary(script);
+  if (
+    scripts.length <= own ||
+    scripts.slice(0, own).some((script) => script === null || modules.isModule(script))
+  ) {
+    return null;
+  }
+
+  let at = own;
+  while (at < scripts.length && modules.isLibrary(scripts[at] ?? "")) {
+    at++;
+  }
+
+  if (swf(scripts[at])) {
+    return scripts[at];
+  }
+
+  const called = at > own;
+  if (called && byName?.every((site, i) => sites[at + i] === site)) {
+    const below = scripts[at + byName.length];
+    return swf(below) ? (below as string) : null;
+  }
+
+  return null;
+}
+
+/** A frame site's script: "script:1:2" without its line and column. */
+function siteScript(site: string): string | null {
+  return /^(.+):\d+:\d+$/.exec(site)?.[1] ?? null;
+}
+
+/**
+ * Each frame's site, "script:line:column", innermost first, or null for a
+ * frame line it cannot read. See frameLocations.
+ */
+export function frameSites(stack: string | undefined): (string | null)[] {
+  // The frame lines as avm2.stackFrames picks them; each one's site read from
+  // where it ends, where stackFrames reads the script up to the first "(".
+  const lines = stack?.split("\n") ?? [];
+  const v8 = isV8(lines);
+  const sites: (string | null)[] = [];
+  for (const line of lines) {
+    if (v8 ? !/^\s*at /.test(line) : !line.includes("@")) {
+      continue;
+    }
+
+    let location: string | null = null;
+    const v8Frame = /^\s*at (.*)$/.exec(line);
+    if (v8Frame) {
+      const text = v8Frame[1];
+      const open = text.lastIndexOf(" (");
+      location =
+        text.endsWith(")") && open >= 0 ? text.slice(open + 2, -1) : text.replace(/^async /, "");
+    } else if (line.includes("@")) {
+      location = line.slice(line.lastIndexOf("@") + 1);
+    }
+
+    sites.push(location !== null && /:\d+:\d+$/.test(location) ? location : null);
+  }
+
+  return sites;
+}
+
+/**
+ * The script each frame of a stack names, innermost first, or null for a
+ * frame line it cannot read: V8's "at name (script:1:2)" and "at
+ * script:1:2", SpiderMonkey's and JavaScriptCore's "name@script:1:2".
+ * The location is what the line ends with, inside its last parentheses
+ * or after its last "@", so that nothing a name holds can stand for it;
+ * a location without a line and column ("native", "<anonymous>", "index
+ * 0") is unread. For security checks, where an unread frame must not be
+ * passed over: Runtime's frameScripts leaves such lines out.
+ */
+export function frameLocations(stack: string | undefined): (string | null)[] {
+  return frameSites(stack).map((site) => (site === null ? null : siteScript(site)));
 }

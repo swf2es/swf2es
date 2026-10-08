@@ -11,7 +11,10 @@ export function fsCommandNatives(s: Scripting): avm2.Natives {
 
   class FSCommandNatives {
     static _fscommand(command: Value, args: Value): void {
-      s.fsCommand?.(s.rt.toString(command), s.rt.toString(args));
+      // With the calling SWF's URL, or every loaded SWF's where the caller
+      // cannot be told, for a host that lets some SWFs command it and not
+      // others; 1 counts this native as the player's frame (Code.callerUrl).
+      s.fsCommand?.(s.rt.toString(command), s.rt.toString(args), s.code.securityUrls(1));
     }
   }
 

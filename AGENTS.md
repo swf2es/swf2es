@@ -62,7 +62,8 @@ calling a change done; CI runs the same steps.
   `codegen.wasm` may import only `env.abort`; a unit test enforces this.
 - **Package boundaries.** `format` and `runtime` depend on nothing, `codegen`
   on `format`, `cli` on `format` and `codegen`, `player` on `format`,
-  `codegen` and `runtime`, `player-hosts` on `player`. `codegen` never imports the runtime implementation.
+  `codegen` and `runtime`, `player-hosts` on `player`, `web` on `codegen`, `format`,
+  `player` and `player-hosts`. `codegen` never imports the runtime implementation.
   `format`, `codegen` and `runtime` load no DOM or node types.
   `tests/unit/boundaries.test.ts` checks this; change the table there only
   together with docs/architecture.md.

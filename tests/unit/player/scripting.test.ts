@@ -1215,3 +1215,57 @@ test("a frame whose scripts change nothing a round reads takes one round", {
   );
   assert.equal(n, 5);
 });
+
+test("destroy closes the open connections, aborts the fetches and closes the audio host", async () => {
+  const closed: string[] = [];
+  let aborted: AbortSignal | null = null;
+  let audioClosed = 0;
+  const remote: { close?: () => void; error?: (message: string) => void } = {};
+  const scripting = new Scripting(await createCodegen(wasm), {
+    socket: {
+      connect(host, _port, events) {
+        if (host === "peer-closes") {
+          remote.close = events.close;
+        }
+
+        if (host === "refused") {
+          remote.error = events.error;
+        }
+
+        return { send: () => {}, close: () => closed.push(`socket ${host}`) };
+      },
+    },
+    webSocket: {
+      connect: (url) => ({ send: () => {}, close: () => closed.push(`webSocket ${url}`) }),
+    },
+    fetch: (_request, signal) => {
+      aborted = signal;
+      return new Promise(() => {});
+    },
+    audio: { decode: () => Promise.reject(new Error("no device")), close: () => audioClosed++ },
+  });
+  const events = { open() {}, data() {}, close() {}, error() {} };
+  const wsEvents = { open() {}, message() {}, close() {}, error() {} };
+  assert.ok(scripting.socket && scripting.webSocket && scripting.fetch);
+  scripting.socket.connect("open", 1, events);
+  scripting.socket.connect("closed-here", 1, events).close();
+  scripting.socket.connect("peer-closes", 1, events);
+  remote.close?.();
+  // Refused, with no close after it: nothing left for destroy to close.
+  scripting.socket.connect("refused", 1, events);
+  remote.error?.("Error #2031: Socket Error.");
+  scripting.webSocket.connect("ws://open.test/", [], wsEvents);
+  void scripting.fetch(
+    { url: "http://a.test/", method: "GET", headers: [], body: null },
+    new AbortController().signal,
+  );
+  assert.deepEqual(closed, ["socket closed-here"]);
+
+  scripting.destroy();
+  // Only what neither end had closed, once each, however often destroyed.
+  scripting.destroy();
+  assert.deepEqual(closed, ["socket closed-here", "socket open", "webSocket ws://open.test/"]);
+  assert.equal((aborted as AbortSignal | null)?.aborted, true);
+  assert.equal(audioClosed, 1);
+  assert.ok(scripting.destroyed);
+});

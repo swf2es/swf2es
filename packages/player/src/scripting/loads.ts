@@ -156,6 +156,28 @@ export class Loads {
   }
 
   /**
+   * Whose a loadBytes' content is: the SWF whose code called it. Where the
+   * caller cannot be told, as from a timer, only while every SWF ever
+   * loaded had one origin is it that origin's, its Loader's SWF's on the
+   * display list, else the main SWF's, which then shares it; with several,
+   * no one's, an opaque URL that no check allows: never the main SWF's
+   * for a Loader nothing places, which an unloaded child may have made.
+   */
+  private bytesOwner(loader: AsObject): string {
+    // This, requestLoad and Loader's _loadBytes are the player's frames.
+    const caller = this.s.code.callerUrl(3);
+    if (caller !== null) {
+      return caller;
+    }
+
+    if (new Set(this.s.code.everUrls().map(originOf)).size !== 1) {
+      return UNKNOWN_OWNER;
+    }
+
+    return this.ownerUrl(loader);
+  }
+
+  /**
    * A Loader's loadBytes. Flash tells the whole of the progress at once, in
    * the call, the URL still null; the content comes in a later frame, under
    * a URL of the bytes' own.
@@ -172,6 +194,9 @@ export class Loads {
     }
 
     const { info, generation } = begun;
+    // The bytes' SWF is the calling SWF's, as Flash gave loadBytes content
+    // the domain of the SWF that loaded it: its code is judged as that SWF's.
+    info.$loaderURL = this.bytesOwner(loader);
     info.$dynamic = `${info.$loaderURL}/[[DYNAMIC]]/${++this.dynamic}`;
     info.$bytes = bytes;
     info.$total = bytes.length;
@@ -419,7 +444,7 @@ export class Loads {
   /** sendToURL's request, sent by the host's fetch and its response dropped, as Flash ignores it. */
   sendTo(request: AsObject): void {
     const fetch = this.s.fetch;
-    if (!fetch) {
+    if (!fetch || !this.s.sendToUrl) {
       return;
     }
 
@@ -429,7 +454,7 @@ export class Loads {
   /** Snapshot a URLRequest at load time, before scripts can change its data or headers. */
   private fetchRequest(request: AsObject | string, base: string, as?: string): FetchRequest {
     if (typeof request === "string") {
-      return { url: resolve(base, request), method: "GET", headers: [], body: null };
+      return { url: resolve(this.s.base ?? base, request), method: "GET", headers: [], body: null };
     }
 
     let url = String(request?.$url ?? "");
@@ -471,13 +496,15 @@ export class Loads {
       ]);
     }
 
-    return { url: resolve(base, url), method, headers, body };
+    return { url: resolve(this.s.base ?? base, url), method, headers, body };
   }
 
   /** The text a failed stream reports, using Flash Player's message and the resolved URL. */
   streamError(url: string, local = false): string {
     const text = this.errorText(2032);
-    return local ? text.replace(/\.$/, "") : `${text} URL: ${resolve(this.s.url, url)}`;
+    return local
+      ? text.replace(/\.$/, "")
+      : `${text} URL: ${resolve(this.s.base ?? this.s.url, url)}`;
   }
 
   /**
@@ -536,6 +563,11 @@ export class Loads {
       }
 
       load.bytes = result.bytes;
+      // Where a redirect took it: the SWF is that URL's, for its LoaderInfo and its checks.
+      if (url !== null && result.url) {
+        load.url = result.url;
+      }
+
       try {
         load.ready = await this.prepare(load);
       } catch {
@@ -565,11 +597,11 @@ export class Loads {
     // Its images first: once its code is linked, a script in the domain can
     // make its symbols, whose bitmaps take the pixels there are then.
     await decodeImages(library, this.s.decodeImage);
-    // One from bytes is its Loader's SWF's, as far as its own URL goes.
+    // One from bytes is the SWF's that loaded it (bytesOwner), as far as its own URL goes.
     const run = await this.s.code.link(
       swf,
       load.domain,
-      load.url ?? this.ownerUrl(load.loader),
+      load.url ?? this.loaderInfoOf(load.loader).$loaderURL ?? this.ownerUrl(load.loader),
       library,
     );
     // Bound as soon as linked, as its classes are found in the domain from
@@ -843,6 +875,18 @@ function appendQuery(url: string, query: string): string {
   const fragment = at < 0 ? "" : url.slice(at);
   const separator = path.includes("?") ? (/[?&]$/.test(path) ? "" : "&") : "?";
   return path + separator + query + fragment;
+}
+
+/** What loadBytes content of no one SWF is: an opaque origin, which no same-domain check passes. */
+const UNKNOWN_OWNER = "about:blank";
+
+/** A URL's origin, or the URL where it has none to read. */
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
 }
 
 /**

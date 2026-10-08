@@ -45,7 +45,7 @@ import {
 } from "./hosts.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
-import { finishSounds, timelineSoundsOf } from "./media/sounds.js";
+import { finishSounds, stopAllSounds, timelineSoundsOf } from "./media/sounds.js";
 import { airLibrary, playerHooks, playerNatives } from "./playerglobal/index.js";
 import { Code } from "./scripting/code.js";
 import { dispatchTo } from "./scripting/events.js";
@@ -139,6 +139,7 @@ export class Scripting {
     placed: { display: DisplayObject; character: DisplayCharacter }[];
     library: Library;
   }[] = [];
+  /** flash.net.Socket's TCP: the host's, each connection kept for destroy to close; null for none. */
   readonly socket: SocketHost | null;
   /** air.net.WebSocket's client: the global WebSocket's by default, null for none. */
   readonly webSocket: WebSocketHost | null;
@@ -147,8 +148,16 @@ export class Scripting {
   readonly navigate: Navigate | null;
   /** Where the host keeps the compiler's modules across page loads, or nothing does. */
   readonly moduleCache: ModuleCache | null;
+  /** The connections open, Sockets' and WebSockets', each closing its transport: what destroy closes. */
+  private readonly connections = new Set<{ close(): void }>();
+  /** Aborts the fetches of the `fetch` option still under way, once destroyed. */
+  private readonly stopped = new AbortController();
+  /** Whether destroy has been called: the player plays, loads and connects no more. */
+  destroyed = false;
+  /** Whether sendToURL sends, as an embedding's allowNetworking "internal" or "none" has it not. */
+  readonly sendToUrl: boolean;
   /** Takes what fscommand sends, or nothing does. */
-  readonly fsCommand: ((command: string, args: string) => void) | null;
+  readonly fsCommand: ((command: string, args: string, callers: string[]) => void) | null;
   /** What plays every library's timeline and button sounds. */
   private readonly timelineSounds = timelineSoundsOf(this);
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
@@ -162,8 +171,12 @@ export class Scripting {
   drawer: Drawer | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
+  /** Where every relative URL the SWFs ask for resolves, where the host gives one; else against the SWF's. */
+  readonly base: string | null;
   /** Where local SharedObjects are kept (flash/net/SharedObject.ts). */
   readonly storage: SharedObjectStorage;
+  /** Writes every SharedObject a script opened, set by their natives; destroy calls it. */
+  flushSharedObjects: (() => void) | null = null;
   /** What Capabilities reports of the system (flash/system/Capabilities.ts). */
   readonly platform: PlatformCapabilities;
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
@@ -213,6 +226,12 @@ export class Scripting {
       fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
       /**
+       * Where the SWFs' relative URLs resolve, as a page's `base` parameter
+       * has Flash resolve them all; against the URL of the SWF that asks
+       * by default.
+       */
+      base?: string;
+      /**
        * The main SWF's flashvars, as a page's FlashVars give them: its
        * loaderInfo.parameters, after its URL's query, whose names they
        * override, as Ruffle's do.
@@ -230,9 +249,13 @@ export class Scripting {
       /**
        * What fscommand sends: a plug-in's page gets it as its DoFSCommand
        * call; none by default. The SWF chooses both strings: never evaluate
-       * them, or use them as a URL or as HTML.
+       * them, or use them as a URL or as HTML. `callers` is the calling
+       * SWF's URL, or every loaded SWF's where the caller cannot be told:
+       * a host that checks them lets the command through only if all pass.
        */
-      fsCommand?: ((command: string, args: string) => void) | null;
+      fsCommand?: ((command: string, args: string, callers: string[]) => void) | null;
+      /** Whether sendToURL sends: true by default; false drops what it sends, as allowNetworking "internal" did. */
+      sendToUrl?: boolean;
       /** Where to keep compiled modules across page loads: none by default (see ModuleCache). */
       moduleCache?: ModuleCache | null;
       decodeImage?: ImageDecode | null;
@@ -271,15 +294,32 @@ export class Scripting {
     this.timers = new Timers(this, options);
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
     this.externalInterface = options.externalInterface ?? null;
-    this.socket = options.socket ?? null;
-    this.webSocket = options.webSocket === undefined ? globalWebSocketHost() : options.webSocket;
+    const socket = options.socket;
+    this.socket = socket
+      ? {
+          connect: (host, port, events) =>
+            this.track(events, (tracked) => socket.connect(host, port, tracked)),
+        }
+      : null;
+    const webSocket = options.webSocket === undefined ? globalWebSocketHost() : options.webSocket;
+    this.webSocket = webSocket
+      ? {
+          connect: (url, protocols, events) =>
+            this.track(events, (tracked) => webSocket.connect(url, protocols, tracked)),
+        }
+      : null;
     this.onUncaught = options.onUncaught ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
     this.fsCommand = options.fsCommand ?? null;
+    this.sendToUrl = options.sendToUrl ?? true;
     this.moduleCache = options.moduleCache ?? null;
-    this.fetch = options.fetch ?? null;
+    const fetch = options.fetch;
+    this.fetch = fetch
+      ? (request, signal) => fetch(request, AbortSignal.any([signal, this.stopped.signal]))
+      : null;
     this.url = options.url ?? this.url;
+    this.base = options.base ?? null;
     this.loads = new Loads(this, options);
     this.storage = options.storage ?? defaultStorage();
     this.platform = { ...platformCapabilities(), ...options.platform };
@@ -300,6 +340,75 @@ export class Scripting {
   /** Resolves once every load and host request so far is ready or failed (Loads.settled). */
   settled(): Promise<void> {
     return this.loads.settled();
+  }
+
+  /**
+   * Stop for good, as a page that takes its player away needs: the open
+   * SharedObjects are written, as Flash wrote them as a SWF went, the sounds
+   * stop and the audio host closes, the open Sockets and WebSockets close,
+   * and the fetches under way are aborted. Left open, a connection kept
+   * receiving and queueing for a player no one plays, and its listeners
+   * kept the player alive. What arrives after is never delivered, as no
+   * frame plays again (Player.destroy).
+   */
+  destroy(): void {
+    if (this.destroyed) {
+      return;
+    }
+
+    this.destroyed = true;
+    this.flushSharedObjects?.();
+    stopAllSounds(this);
+    this.audio?.close?.();
+    for (const connection of [...this.connections]) {
+      connection.close();
+    }
+
+    this.stopped.abort();
+  }
+
+  /**
+   * A host's connection kept among `connections` from its connect till
+   * either end closes it: `connect` is given `events` with a close that
+   * forgets it, and the transport it returns is wrapped likewise.
+   */
+  private track<
+    E extends { close(...args: never[]): void; error(...args: never[]): void },
+    T extends { send(data: never): void; close(code?: number): void },
+  >(events: E, connect: (events: E) => T): T {
+    let open = true;
+    const entry = { close: () => {} };
+    const forget = () => {
+      open = false;
+      this.connections.delete(entry);
+    };
+    const transport = connect({
+      ...events,
+      close: (...args: never[]) => {
+        forget();
+        events.close(...args);
+      },
+      // Refused or failed: a host need not close it after, nor destroy.
+      error: (...args: never[]) => {
+        forget();
+        events.error(...args);
+      },
+    });
+    entry.close = () => {
+      forget();
+      transport.close();
+    };
+    if (open) {
+      this.connections.add(entry);
+    }
+
+    return {
+      send: (data: never) => transport.send(data),
+      close: (code?: number) => {
+        forget();
+        transport.close(code);
+      },
+    } as T;
   }
 
   /** SymbolClass: bind the SWF's characters to their classes, in its library, and the library to this. */

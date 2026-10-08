@@ -126,3 +126,23 @@ test("where there is no window to open, as in node, the player opens no pages", 
   const scripting = new Scripting(await createCodegen(wasm));
   assert.equal(scripting.navigate, null);
 });
+
+test("sendToURL sends nothing where the host says not to, as allowNetworking internal had it", {
+  skip,
+}, async () => {
+  const [abc] = compileScripts([{ name: "Main", source }], out).values();
+  const sent: FetchRequest[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: () => {},
+    url: "http://example.test/games/main.swf",
+    navigate: null,
+    sendToUrl: false,
+    fetch: async (request) => {
+      sent.push(request);
+      return { bytes: new Uint8Array(), status: 200, headers: [] };
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  await new Player(bare(abc, 1), scripting).start();
+  assert.deepEqual(sent, []);
+});

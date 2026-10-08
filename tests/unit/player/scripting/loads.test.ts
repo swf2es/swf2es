@@ -490,6 +490,39 @@ test("URLRequest data reaches the host as a query or a copied body", { skip }, a
   await scripting.settled();
 });
 
+test("a base resolves every relative URL a SWF asks for, as a page's base parameter does", {
+  skip,
+}, async () => {
+  const requests: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: () => {},
+    url: "http://example.test/swf/outer.swf",
+    base: "http://cdn.example.test/assets/",
+    fetch: async (request) => {
+      requests.push(request.url);
+      return { bytes: new Uint8Array(0), status: 200, headers: [] };
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const rt = scripting.rt;
+  const load = (request: avm2.AsObject | string) =>
+    scripting.loads.requestBytes(request, new AbortController().signal, () => {});
+
+  load("data/level.bin");
+  load(rt.construct(rt.classNamed("flash.net::URLRequest"), "../root.xml") as avm2.AsObject);
+  load("https://other.test/absolute.bin");
+  assert.deepEqual(requests, [
+    "http://cdn.example.test/assets/data/level.bin",
+    // Dot segments are left for the fetch to fold.
+    "http://cdn.example.test/assets/../root.xml",
+    "https://other.test/absolute.bin",
+  ]);
+  // The SWF's own URL is still its LoaderInfo's.
+  assert.equal(scripting.url, "http://example.test/swf/outer.swf");
+
+  await scripting.settled();
+});
+
 test("LoaderInfo reports HTTP status between init and complete, and before an I/O error", {
   skip,
 }, async () => {

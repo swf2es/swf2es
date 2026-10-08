@@ -13,6 +13,7 @@ const allowed: Record<string, string[]> = {
   runtime: ["format"],
   player: ["codegen", "format", "runtime"],
   "player-hosts": ["player"],
+  web: ["codegen", "format", "player", "player-hosts"],
   cli: ["codegen", "format"],
 };
 

@@ -16,6 +16,7 @@ export { type Character, type Library, readLibrary, type Timeline } from "./disp
 export type {
   CachedModule,
   Drawer,
+  ExternalInterfaceHost,
   FetchRequest,
   FetchResult,
   ModuleCache,

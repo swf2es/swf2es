@@ -207,9 +207,27 @@ export interface ExternalInterfaceHost {
   evalJS(source: string): string | null;
   /** An XML invocation when evalJS declined the call. */
   callOut(request: string): string | null;
-  /** A wrapper produced by playerglobal. Its arguments and result use AVM2 values. */
-  addCallback(name: string, callback: ((request: string, args: Value[]) => Value) | null): void;
+  /**
+   * The SWF's callback `name`, playerglobal's wrapper of its closure, or
+   * null as it is removed. Called with `args`, AVM2 values, the closure
+   * gets them as they are and the result is JavaScript source (_toJS);
+   * with null, `request` is an XML invocation, as Flash's plug-in sends
+   * one, whose arguments playerglobal converts, and the result is XML
+   * (_toXML) for a `returntype="xml"` request: a host needs no eval.
+   */
+  addCallback(
+    name: string,
+    callback: ((request: string, args: Value[] | null) => Value) | null,
+  ): void;
   objectID?: string | null;
+  /**
+   * Whether the SWF at `url`, whose code is calling, may use the bridge, as
+   * Flash checked allowScriptAccess against the calling SWF's domain, not
+   * the main one's; one it refuses finds ExternalInterface unavailable.
+   * Where the caller cannot be told, as from a timer, it is asked for every
+   * loaded SWF, and all must be allowed. Every SWF may where this is left out.
+   */
+  allows?(url: string): boolean;
 }
 
 /** Screen values reported by flash.system.Capabilities, captured when the player starts. */
@@ -255,6 +273,8 @@ export interface FetchResult {
   headers: readonly (readonly [name: string, value: string])[];
   /** Set for `file:` URLs: Flash reports status 0 and leaves the URL out of #2032. */
   local?: boolean;
+  /** The URL the bytes came from, after any redirect, where it differs from the one asked for. */
+  url?: string;
 }
 
 /** The request the player asks its host to send. */

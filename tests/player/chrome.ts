@@ -36,6 +36,8 @@ export interface RunOptions {
   gpu?: boolean;
   /** The page's Content-Security-Policy, if it is to have one. */
   csp?: string;
+  /** The served page to open, by its path: page.ts's by default. */
+  page?: string;
 }
 
 const QUALITIES = ["low", "medium", "high", "best"];
@@ -124,7 +126,7 @@ interface Evaluated<T> {
  * in once `ready` names a function the page has defined; `fresh` loads the
  * page again, as a new document, and waits for it the same way.
  */
-async function withPage<T>(
+export async function withPage<T>(
   ready: string,
   run: (
     evaluate: <R>(expression: string) => Promise<Evaluated<R>>,
@@ -135,7 +137,7 @@ async function withPage<T>(
   gpu = false,
   options: RunOptions = {},
 ): Promise<T> {
-  const { timeout, mounts, csp } = options;
+  const { timeout, mounts, csp, page = "" } = options;
   const { server, url } = await serve(mounts, csp);
   const profile = mkdtempSync(join(tmpdir(), "swf2es-chrome-"));
   let chrome: ChildProcess | null = null;
@@ -209,7 +211,7 @@ async function withPage<T>(
     const fresh = async () => {
       // The checked build's tests have the player check its own shortcuts too (page.ts).
       await devtools.send("Page.navigate", {
-        url: process.env.SWF2ES_CHECKED ? `${url}?checked` : url,
+        url: process.env.SWF2ES_CHECKED ? `${url}${page}?checked` : `${url}${page}`,
       });
       // The page loads its modules unbundled: on a loaded machine that has
       // taken more than 10 s, so wait up to a minute, and fail rather than

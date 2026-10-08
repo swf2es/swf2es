@@ -38,6 +38,32 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     return array;
   };
 
+  /** What `o` serializes to now, for destroy to tell a change by; null where it cannot. */
+  const saved = (o: AsObject): Uint8Array | null => {
+    try {
+      return serialize(o);
+    } catch {
+      return null;
+    }
+  };
+
+  /** Write `o`'s .sol file, or remove it for no data: false where storage refuses, as a full quota, which flush reports as #2130. */
+  const write = (o: AsObject): boolean => {
+    const file = serialize(o);
+    try {
+      if (file.length) {
+        s.storage.set(o.$key, file);
+      } else {
+        s.storage.remove(o.$key);
+      }
+    } catch {
+      return false;
+    }
+
+    o.$saved = file;
+    return true;
+  };
+
   /**
    * The .sol file of `o`'s data, in its encoding; none, empty, for no
    * properties. AMF0 is the runtime's to write, which has none yet.
@@ -134,6 +160,8 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     declare $name: string;
     declare $encoding: number;
     declare $client: Value;
+    // What it serialized to when last read or written: a change from it is what destroy writes.
+    declare $saved: Uint8Array | null;
 
     static getLocal(name: Value, localPath: Value, secure: Value): Value {
       if (name === null || name === undefined) {
@@ -181,6 +209,7 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       o.$client = o;
       const stored = s.storage.get(key);
       o.$data = (stored && deserialize(stored)) ?? s.rt.newObject([]);
+      o.$saved = saved(o);
       open.set(key, o);
       return o;
     }
@@ -251,25 +280,13 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     // Flush returns true, which flush reports as FLUSHED, or false for #2130.
     "flash.net:SharedObject::invoke"(code: Value, ..._args: Value[]): Value {
       switch (s.rt.toUint(code)) {
-        case FLUSH: {
-          const file = serialize(this);
-          try {
-            if (file.length) {
-              s.storage.set(this.$key, file);
-            } else {
-              s.storage.remove(this.$key);
-            }
-          } catch {
-            // Storage that refuses the write, which flush reports as #2130.
-            return false;
-          }
-
-          return true;
-        }
+        case FLUSH:
+          return write(this);
         case GET_SIZE:
           return serialize(this).length;
         case CLEAR:
           this.$data = s.rt.newObject([]);
+          this.$saved = new Uint8Array(0);
           s.storage.remove(this.$key);
           return undefined;
         case CLOSE:
@@ -280,8 +297,29 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     }
   }
 
+  // Flash wrote each open object as its SWF went: a destroyed player
+  // writes those a script changed since they were read or written. Never
+  // a removal: an object whose stored file it could not read starts empty,
+  // and an unchanged one would take the file away.
+  s.flushSharedObjects = () => {
+    for (const o of open.values()) {
+      try {
+        const file = serialize(o);
+        if (file.length && !sameBytes(file, o.$saved)) {
+          s.storage.set(o.$key, file);
+        }
+      } catch {
+        // One that cannot be written, AMF0's or a full quota's, keeps the others from nothing.
+      }
+    }
+  };
+
   avm2.registerNativeClass(natives, "flash.net::SharedObject", SharedObjectNatives);
   return natives;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array | null): boolean {
+  return b !== null && a.length === b.length && a.every((byte, i) => byte === b[i]);
 }
 
 /** The 0 after each value. */
