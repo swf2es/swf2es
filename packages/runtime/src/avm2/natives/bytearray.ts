@@ -250,9 +250,11 @@ export class Bytes {
     return bytes;
   }
 
-  /** As ByteArray::Write: `bytes` at the position; the length grows to the position after. */
-  write(bytes: Uint8Array): void {
-    const count = bytes.length;
+  /**
+   * As ByteArray::Write: `count` bytes of `source` from `offset`, all of
+   * it by default, at the position; the length grows to the position after.
+   */
+  write(source: Uint8Array, offset = 0, count = source.length): void {
     if (count > 0xffffffff - this.position) {
       throw this.rt.error("flash.errors::MemoryError", 1000);
     }
@@ -262,7 +264,7 @@ export class Bytes {
       this.ensure(end, false);
     }
 
-    this.buffer.set(bytes, this.position);
+    copyBytes(this.buffer, this.position, source, offset, count);
     this.position = end;
     if (this.length < this.position) {
       this.length = this.position;
@@ -282,6 +284,37 @@ export class Bytes {
     }
 
     this.buffer[index] = value;
+  }
+}
+
+/** Below this many bytes, copyBytes copies one at a time. */
+const COPY_LOOP_LENGTH = 32;
+
+/**
+ * `count` bytes of `source` from `offset` copied into `target` at `at`,
+ * as memmove copies them where the two are one array. Part of `source`,
+ * fewer than COPY_LOOP_LENGTH bytes, is copied one at a time: the
+ * subarray set() would take costs more than they do, in JavaScriptCore up
+ * to about 64 bytes and in V8 up to about 32. All of it set() copies
+ * faster than a loop in V8, and as fast in JavaScriptCore.
+ */
+function copyBytes(
+  target: Uint8Array,
+  at: number,
+  source: Uint8Array,
+  offset: number,
+  count: number,
+): void {
+  if (source === target) {
+    target.copyWithin(at, offset, offset + count);
+  } else if (offset === 0 && count === source.length) {
+    target.set(source, at);
+  } else if (count < COPY_LOOP_LENGTH) {
+    for (let i = 0; i < count; i++) {
+      target[at + i] = source[offset + i];
+    }
+  } else {
+    target.set(source.subarray(offset, offset + count), at);
   }
 }
 
@@ -778,16 +811,17 @@ export function byteArrayNatives(rt: Runtime): Natives {
         throw rt.error("RangeError", 2006);
       }
 
-      // A view, not a copy: set copies once, and as memmove where the two
-      // are one ByteArray. A target that grows keeps the view's bytes as
-      // they were.
+      // From the buffer as it is now: a target that grows, this ByteArray
+      // too, gets a new buffer, and the bytes come from the old one.
       const to = bytesOf(rt, bytes);
-      const read = b.readView(count);
+      const source = b.buffer;
+      const from = b.position;
+      b.position = (from + count) >>> 0;
       if (offset + count >= to.length) {
         to.setLength(offset + count);
       }
 
-      to.buffer.set(read, offset);
+      copyBytes(to.buffer, offset, source, from, count);
     }
 
     // Writes.
@@ -881,9 +915,8 @@ export function byteArrayNatives(rt: Runtime): Natives {
         throw rt.error("RangeError", 2006);
       }
 
-      // A view, not a copy, as readBytes reads.
       if (count > 0) {
-        b.write(from.buffer.subarray(offset, offset + count));
+        b.write(from.buffer, offset, count);
       }
     }
 
