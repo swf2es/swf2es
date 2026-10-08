@@ -1,10 +1,12 @@
 /**
  * Compression as SWF files and ByteArray use it, synchronously and with no
  * platform API: zlib and raw deflate through pako, a port of zlib whose
- * output is zlib's byte for byte, and LZMA through lzma1.
+ * output is zlib's byte for byte, and LZMA, compressed through lzma1 and
+ * decoded by lzma.ts.
  */
-import { compress as lzmaCompress, decompress as lzmaDecompress } from "lzma1";
+import { compress as lzmaCompress } from "lzma1";
 import pako from "pako";
+import { LzmaError, lzmaDecode } from "./lzma.js";
 
 /** Data a decompressor cannot read: corrupt, truncated, or not what it says. */
 export class CompressedDataError extends Error {}
@@ -134,14 +136,11 @@ export function lzmaByteArrayCompress(data: Uint8Array): Uint8Array {
  */
 export function lzmaByteArrayUncompress(data: Uint8Array): Uint8Array {
   const length = (data[5] | (data[6] << 8) | (data[7] << 16) | (data[8] << 24)) >>> 0;
-  let bytes: Uint8Array;
-
-  try {
-    bytes = lzmaDecompress(data);
-  } catch (e) {
-    throw new CompressedDataError(String(e));
+  if (length > MAX_LZMA_RATIO * (data.length - LZMA_HEADER) + 4096) {
+    throw new CompressedDataError(`${length} bytes in a stream of ${data.length}`);
   }
 
+  const bytes = lzma(data, 0, LZMA_HEADER, length);
   if (bytes.length !== length) {
     throw new CompressedDataError("length mismatch");
   }
@@ -149,29 +148,28 @@ export function lzmaByteArrayUncompress(data: Uint8Array): Uint8Array {
   return bytes;
 }
 
-/**
- * More than LZMA can expand a byte to. Its best case, a long run of one
- * byte, is matches of 273 bytes that cost some 14 coded bits, each at the
- * 0.022 bits of LZMA's likeliest probability, about 7000:1, which lzma1
- * reaches on 32 MB of zeros (6959:1); this leaves several times that.
- */
-const MAX_LZMA_RATIO = 32768;
+/** lzmaDecode, its failures CompressedDataErrors. */
+function lzma(data: Uint8Array, properties: number, start: number, length: number): Uint8Array {
+  try {
+    return lzmaDecode(data, properties, start, length);
+  } catch (e) {
+    if (e instanceof LzmaError) {
+      throw new CompressedDataError(e.message);
+    }
+
+    throw e;
+  }
+}
 
 /**
- * A ZWS SWF's body in the .lzma layout lzma1 reads: the properties, the
- * length it holds, `length`, and the stream. The dictionary is no larger
- * than that length, which no match reaches past, so that a header naming
- * a dictionary of 4 GB does not make the decoder allocate one.
+ * More than LZMA can expand a byte to. Its best case, a long run of one
+ * byte, is matches of 273 bytes that each cost 14 decisions, each at least
+ * the 0.022 bits of LZMA's likeliest probability (2017/2048): 7090:1,
+ * which lzma1 nears on 32 MB of zeros (6959:1). A header naming more than
+ * this of its stream is refused before decoding; one naming less is
+ * decoded, and a decoder that would read past the stream's end fails.
  */
-function swfLzma(swf: Uint8Array, length: number): Uint8Array {
-  const lzma = new Uint8Array(LZMA_HEADER + swf.length - 17);
-  lzma.set(swf.subarray(12, 17), 0);
-  const view = new DataView(lzma.buffer);
-  view.setUint32(1, Math.min(view.getUint32(1, true), Math.max(length, 4096)), true);
-  view.setUint32(5, length, true);
-  lzma.set(swf.subarray(17), LZMA_HEADER);
-  return lzma;
-}
+const MAX_LZMA_RATIO = 8192;
 
 /**
  * The first `length` bytes of a SWF as an uncompressed one, or fewer if it
@@ -209,9 +207,9 @@ export function decompressSwfPrefix(swf: Uint8Array, length: number): Uint8Array
   } else if (signature === "ZWS" && swf.length >= 17) {
     const fileLength = new DataView(swf.buffer, swf.byteOffset, swf.byteLength).getUint32(4, true);
     try {
-      body = lzmaDecompress(swfLzma(swf, Math.min(want, Math.max(0, fileLength - 8))));
+      body = lzma(swf, 12, 17, Math.min(want, Math.max(0, fileLength - 8)));
     } catch {
-      // Corrupt: no body to read.
+      // Corrupt or cut short: no body to read.
     }
   }
 
@@ -249,7 +247,7 @@ export function decompressSwf(swf: Uint8Array): Uint8Array {
       throw new CompressedDataError(`a body of ${fileLength - 8} bytes in ${swf.length} of SWF`);
     }
 
-    body = lzmaDecompress(swfLzma(swf, fileLength - 8));
+    body = lzma(swf, 12, 17, fileLength - 8);
   } else {
     throw new TypeError(`Not a SWF file (signature ${JSON.stringify(signature)})`);
   }

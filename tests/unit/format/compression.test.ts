@@ -92,6 +92,49 @@ test("neither a SWF nor its start trusts a header that names 4 GB", () => {
   assert.ok(performance.now() - start < 1000, `${performance.now() - start} ms`);
 });
 
+/** Some 73 bytes of text, as xz wrote them with lc 2, lp 2 and pb 4: properties byte 200. */
+const PROPERTIES_200 = Uint8Array.from(
+  (
+    "c800008000ffffffffffffffff00399dc8c32333afd03022ad2a9d4ab23cb281e7173980d279aa96f6d604393" +
+    "87df25a361e6cad2824572838209183ffffe4050000"
+  ).match(/../g) ?? [],
+  (h) => Number.parseInt(h, 16),
+);
+
+test("LZMA of a properties byte past 127 decodes, and one past 224 is refused", () => {
+  const text = "swf2es reads LZMA of every property: swf2es reads LZMA of every property.";
+  const data = PROPERTIES_200.slice();
+  data.set([text.length, 0, 0, 0, 0, 0, 0, 0], 5);
+  assert.equal(new TextDecoder().decode(lzmaByteArrayUncompress(data)), text);
+
+  for (const byte of [225, 255]) {
+    const bad = data.slice();
+    bad[0] = byte;
+    assert.throws(() => lzmaByteArrayUncompress(bad), CompressedDataError);
+
+    // As a SWF's body: a 40-byte ZWS whose properties lzma1 read as -1 ended the process.
+    const swf = new Uint8Array(40);
+    swf.set([0x5a, 0x57, 0x53, 10, 200, 0, 0, 0, 23, 0, 0, 0, byte, 0, 0, 1, 0]);
+    assert.throws(() => decompressSwf(swf), CompressedDataError);
+    assert.equal(decompressSwfPrefix(swf, 64).length, 8);
+    assert.equal(fileAttributes(swf), 0);
+  }
+});
+
+test("LZMA that would read past its stream's end fails there", () => {
+  // Zeros decode to zeros for as long as they last, some 7000 bytes a byte:
+  // a length within the ratio's bound is refused as the stream runs out.
+  const swf = new Uint8Array(17 + 13);
+  swf.set([0x5a, 0x57, 0x53, 10, 0, 0, 0, 0, 13, 0, 0, 0, 0x5d, 0, 0, 1, 0]);
+  new DataView(swf.buffer).setUint32(4, 8 + 100_000, true);
+  assert.throws(() => decompressSwf(swf), /truncated/);
+
+  // ByteArray's, naming 4 GB of 13 bytes, is refused before it decodes.
+  const data = new Uint8Array(13 + 13);
+  data.set([0x5d, 0, 0, 1, 0, 0xff, 0xff, 0xff, 0xff]);
+  assert.throws(() => lzmaByteArrayUncompress(data), CompressedDataError);
+});
+
 test("a SWF whose body is not the length its header says is refused", () => {
   const swf = cws(fws(body));
   new DataView(swf.buffer).setUint32(4, 8 + body.length + 1, true);
