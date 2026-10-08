@@ -113,6 +113,73 @@ test("seconds in a background tab play one frame when it comes back, then the us
   assert.ok(Math.abs(sum(counts) - 25) <= 1, `${sum(counts)} frames`);
 });
 
+test("a 60 fps SWF on a display whose intervals jitter keeps its 60 frames a second", () => {
+  // A call a little early leaves just under a frame owed and the next just over two: one is run, none dropped.
+  const alternating = playerAt(60);
+  const counts = play(
+    alternating,
+    Array.from({ length: 600 }, (_, i) => (i % 2 ? 18 : 15)),
+  );
+  assert.ok(counts.every((n) => n <= 2));
+  assert.ok(Math.abs(sum(counts) - 594) <= 2, `${sum(counts)} frames in 9.9 s`);
+
+  let seed = 1;
+  const random = () => {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  };
+  const jittered = playerAt(60);
+  const dts = Array.from({ length: 600 }, () => 1000 / 60 - 2 + 4 * random());
+  assert.ok(Math.abs(sum(play(jittered, dts)) - sum(dts) * 0.06) <= 3);
+});
+
+/**
+ * What each call played on a host at `display` Hz whose frames cost
+ * `tickCost` ms each: a call comes at the first refresh after the last
+ * one's frames ran, so frames run back to back stretch the intervals.
+ */
+function playCostly(player: Player, display: number, tickCost: number, calls: number): number[] {
+  const refresh = 1000 / display;
+  const counts: number[] = [];
+  let last = 0;
+  for (let i = 0; i < calls; i++) {
+    const dt = Math.max(1, Math.ceil((last * tickCost) / refresh - 1e-9)) * refresh;
+    last = player.advance(dt);
+    counts.push(last);
+  }
+
+  return counts;
+}
+
+test("frames that cost more than the display's interval slow the SWF down, not spiral into bursts", () => {
+  // A 60 fps SWF whose frames take 20 ms: before, its own lag stretched the
+  // intervals until five ran a call. Now a pair, whose frames have their
+  // 20 ms between them, stretches the interval past a display's, and the
+  // next call runs one.
+  const sixty = playCostly(playerAt(60), 60, 20, 600).slice(100);
+  assert.ok(sixty.every((n) => n <= 2));
+
+  // A 30 fps SWF whose frames take 30 ms: a frame a call.
+  const thirty = playCostly(playerAt(30), 60, 30, 600).slice(100);
+  assert.ok(thirty.every((n) => n <= 1));
+});
+
+test("repeated hitches longer than a display's interval play a frame a call", () => {
+  // Five calls of 100 ms in every nine: the typical interval is no display's.
+  const player = playerAt(24);
+  const counts = play(
+    player,
+    Array.from({ length: 900 }, (_, i) => (i % 9 < 5 ? 100 : 1000 / 60)),
+  );
+  assert.ok(counts.every((n) => n <= 1));
+});
+
+test("a time passed that is not a finite positive number plays nothing and stops nothing", () => {
+  const player = playerAt(24);
+  assert.deepEqual(play(player, [NaN, Number.POSITIVE_INFINITY, -50]), [0, 0, 0]);
+  assert.deepEqual(play(player, hz(24, 3)), [1, 1, 1]);
+});
+
 test("a walk placed by the time between frames reaches its end on a host that lags", {
   skip,
 }, async () => {

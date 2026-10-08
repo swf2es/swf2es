@@ -17,6 +17,13 @@ const MAX_FRAMES_PER_CALL = 5;
 const INTERVALS = 9;
 /** Calls seen before the typical interval is trusted; until then, a frame per call at most. */
 const MIN_INTERVALS = 3;
+/**
+ * The longest typical interval taken for a display's, in ms: none
+ * refreshes slower than about 30 Hz. Longer, the host is lagging, its
+ * calls stretched by the frames themselves, and more frames a call would
+ * feed the lag; it gets one a call and the content slows down, as Flash's.
+ */
+const DISPLAY_INTERVAL = 36;
 
 export class Player {
   readonly swf: Swf;
@@ -187,9 +194,11 @@ export class Player {
    * A call runs as many frames as the host's typical interval holds, the
    * lower median of its recent calls and never the current one, so a
    * hitch does not become a burst: one where the SWF's frame is as long
-   * as the display's or longer, more for a SWF faster than the display.
-   * A host playing in real time calls this each animation frame; the
-   * tests step frames with tick(). Returns how many frames it played.
+   * as the display's or longer, more for a SWF faster than the display,
+   * and one while the interval is longer than a display's. A `dt` that is
+   * not a finite positive number counts as none. A host playing in real
+   * time calls this each animation frame; the tests step frames with
+   * tick(). Returns how many frames it played.
    */
   advance(dt: number): number {
     if (this.stopped) {
@@ -198,12 +207,13 @@ export class Player {
 
     // The pointer's last move, so the frame's scripts see where it is now.
     this.pointer?.flush();
-    const passed = Math.max(0, dt);
+    const passed = Number.isFinite(dt) && dt > 0 ? dt : 0;
     const frame = 1000 / this.frameRate;
-    const most = Math.min(
-      MAX_FRAMES_PER_CALL,
-      Math.max(1, Math.round(this.typicalInterval(passed) / frame)),
-    );
+    const typical = this.typicalInterval(passed);
+    const most =
+      typical > DISPLAY_INTERVAL
+        ? 1
+        : Math.min(MAX_FRAMES_PER_CALL, Math.max(1, Math.round(typical / frame)));
     this.owed += passed;
     let n = 0;
     while (n < most && this.owed >= frame) {
@@ -212,8 +222,10 @@ export class Player {
       n++;
     }
 
-    // Whole frames that could not be played are dropped; the rest keeps the grid's phase.
-    if (this.owed >= frame) {
+    // Whole frames lost are dropped, the part of one kept for the grid's
+    // phase; but not within half an interval of the next, where a call
+    // that came a little early leaves one owed under ordinary jitter.
+    if (this.owed >= frame + Math.min(frame, typical) / 2) {
       this.owed %= frame;
     }
 
