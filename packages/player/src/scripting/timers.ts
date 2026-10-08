@@ -1,8 +1,9 @@
-// The player's clock and the timers: by the real clock where the host has
-// one, as Flash fires them, at each frame after ENTER_FRAME and those
-// shorter than a frame between frames too; by the frame clock otherwise, a
-// frame moving it on and firing the timers due by then after ENTER_FRAME. flash.utils.Timer starts and stops them, and getTimer tells
-// the time.
+// The player's clocks and the timers. Where the host has a real clock the
+// timers fire as Flash's do, in each frame after ENTER_FRAME by the
+// frame's time on the grid, and those shorter than a frame between frames
+// too; otherwise by the frame clock, a frame moving it on and firing every
+// due time in it after ENTER_FRAME. flash.utils.Timer starts and stops
+// them, and getTimer tells the time.
 import type { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
 
@@ -10,7 +11,10 @@ type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
 export class Timers {
-  /** The frame clock, in ms since the start, moved by the frame step alone; Timer fires by it without a real clock. */
+  /**
+   * The frame clock, in ms since the start, moved by the frame step alone;
+   * Timer fires by it without a real clock, and sounds go by it with one.
+   */
   clock = 0;
   /**
    * By the frame clock, the time getTimer tells and a timer started now
@@ -25,10 +29,39 @@ export class Timers {
   /** The timers started, by their Timer objects, and a heap of them by when they fall due. */
   private readonly running = new Map<AsObject, TimerRecord>();
   private readonly timers = new TimerHeap();
-  /** Timers started so far: the order of a start, which timers due in one pass of the real clock fire in. */
+  /** Timers started so far: a pass of the real clock fires those due in the order of their starts. */
   private starts = 0;
-  /** Set by updateAfterEvent while a timer fires between frames: the stage renders after its closure. */
+  /** Set by updateAfterEvent as a timer fires: between frames, the stage renders after its closure. */
   renderAsked = false;
+  /**
+   * The timers' time with a real clock: the host's, the sum of what it
+   * passed to advance() since the first call, which started it at the
+   * real clock's; NaN until then. Frames lie on an exact grid by it, where
+   * the real clock read as each runs wobbles with the host's latency, and
+   * a timer as long as a frame would miss frames by a fraction of a ms.
+   */
+  private host = Number.NaN;
+  /** elapsed() when `host` last moved, to tell the time between calls. */
+  private hostReal = 0;
+  /**
+   * The time of the frame or the between-frames pass that runs, which a
+   * timer started in it counts from; NaN outside. A frame's is the call's
+   * time, less the frame interval for each frame the call plays after it.
+   */
+  private at = Number.NaN;
+  /**
+   * The running frame's time on the frame grid: the time it fell due,
+   * which the timers as long as a frame or longer go by, so that one of
+   * the frame's length fires every frame however the host's calls fall
+   * (a 25 fps SWF's frames are 33 and 50 ms apart at 60 Hz). Those shorter
+   * go by `at`, so as not to wait for a between-frames check's time plus
+   * their delay while the frame runs late.
+   */
+  private grid = Number.NaN;
+  /** The last pass's time: none goes back before it. */
+  private lastPass = Number.NEGATIVE_INFINITY;
+  /** The last reading of the real clock, which a reading that is not finite or goes back keeps. */
+  private lastElapsed = 0;
 
   constructor(
     private readonly s: Scripting,
@@ -48,12 +81,45 @@ export class Timers {
     return this.realTime ? Math.floor(this.elapsed()) : Math.round(this.now);
   }
 
-  /** Milliseconds since the start by the real clock, unrounded. */
+  /** Milliseconds since the start by the real clock, unrounded, never going back. */
   private elapsed(): number {
-    return (this.realTime as () => number)() - this.realStart;
+    const t = (this.realTime as () => number)() - this.realStart;
+    if (Number.isFinite(t) && t > this.lastElapsed) {
+      this.lastElapsed = t;
+    }
+
+    return this.lastElapsed;
   }
 
-  /** A frame begins: the frame clock moves on by `ms`; its timers fire after ENTER_FRAME (frameTimers). */
+  /** The timers' time now with a real clock: the host's, run on by the real clock since its call. */
+  private current(): number {
+    const real = this.elapsed();
+    return Number.isNaN(this.host) ? real : this.host + (real - this.hostReal);
+  }
+
+  /** advance() was called with `passed` ms: the host's time moves on. */
+  hostPassed(passed: number): void {
+    if (!this.realTime) {
+      return;
+    }
+
+    const real = this.elapsed();
+    this.host = Number.isNaN(this.host) ? real : this.host + passed;
+    this.hostReal = real;
+  }
+
+  /**
+   * The next frame of the call runs `slot` ms of frames before its last,
+   * and fell due on the grid `rest` ms before that; both NaN once the
+   * call's frames are over.
+   */
+  frameAt(slot: number, rest: number): void {
+    const off = Number.isNaN(slot) || Number.isNaN(this.host);
+    this.at = off ? Number.NaN : this.host - slot;
+    this.grid = off ? Number.NaN : this.host - slot - rest;
+  }
+
+  /** A frame begins: the frame clock moves on by `ms`; its timers fire after ENTER_FRAME. */
   beginFrame(ms: number): void {
     this.clock += ms;
     this.now = this.clock;
@@ -100,7 +166,10 @@ export class Timers {
    */
   frameTimers(): void {
     if (this.realTime) {
-      this.fireDue(Number.POSITIVE_INFINITY, false);
+      // A frame run by tick() alone, not advance(), goes by the time now.
+      const now = Number.isNaN(this.at) ? this.current() : this.at;
+      const grid = Number.isNaN(this.grid) ? now : this.grid;
+      this.fireDue(now, grid, 1000 / this.s.frameRate, false);
     } else {
       this.fireByClock();
     }
@@ -114,28 +183,49 @@ export class Timers {
    * checks between (measured in adl, docs/architecture.md).
    */
   betweenFrames(frameMs: number): void {
-    if (this.realTime) {
-      this.fireDue(frameMs, true);
+    if (!this.realTime) {
+      return;
+    }
+
+    this.at = Number.isNaN(this.host) ? this.elapsed() : this.host;
+    try {
+      this.fireDue(this.at, Number.NaN, frameMs, true);
+    } finally {
+      this.at = Number.NaN;
     }
   }
 
   /**
-   * Each timer due by the real clock with a delay under `shorter` fires
-   * once, in the order the timers were started, and next falls due its
-   * delay after now: the ticks a long frame or a stall lost are dropped,
-   * not caught up with, as in Flash.
+   * A pass: each timer due fires once, in the order the timers were
+   * started, and next falls due its delay after the pass's time, so the
+   * ticks a long frame or a stall lost are dropped, not caught up with, as
+   * in Flash. Those shorter than `frameMs` go by `time`; the others by
+   * `grid`, and wait for a frame between frames (`grid` NaN).
    */
-  private fireDue(shorter: number, between: boolean): void {
-    const now = this.elapsed();
+  private fireDue(time: number, grid: number, frameMs: number, between: boolean): void {
+    const now = Math.max(time, this.lastPass);
+    this.lastPass = now;
     const due: TimerRecord[] = [];
     const held: TimerRecord[] = [];
     for (;;) {
-      const next = this.timers.pop(now);
+      // The grid's time is never after the call's. Sums of a host's
+      // intervals land a hair off the grid: due then is due.
+      const next = this.timers.pop(now + GRID_SLACK);
       if (!next) {
         break;
       }
 
-      (next.delay < shorter ? due : held).push(next);
+      // A short timer is due by the call's time, so as not to wait for a
+      // between-frames check's time plus its delay while the frame runs
+      // late; a longer one by the grid's. Either next falls due from the
+      // grid's, which frames keep to, as Flash's keep to its own.
+      const short = next.delay < frameMs;
+      if (next.due <= (short ? now : grid) + GRID_SLACK) {
+        next.due = Number.isNaN(grid) ? now : grid;
+        due.push(next);
+      } else {
+        held.push(next);
+      }
     }
 
     for (const record of held) {
@@ -147,6 +237,7 @@ export class Timers {
     }
 
     due.sort((a, b) => a.order - b.order);
+
     try {
       for (const record of due) {
         // Stopped by a closure before it in the pass; one started anew has a record of its own.
@@ -154,7 +245,8 @@ export class Timers {
           continue;
         }
 
-        record.due = now + record.delay;
+        // `due` holds the time it fired by, set above.
+        record.due += record.delay;
         this.renderAsked = false;
         try {
           this.s.rt.call(record.closure, record.object);
@@ -179,11 +271,14 @@ export class Timers {
   /** Timer._start: `closure` is called every `delay` ms from now, until stopped; a timer running already is started anew. */
   startTimer(object: AsObject, delay: number, closure: Value): void {
     this.stopTimer(object);
+    // Whole milliseconds, as Flash's: Timer(1000 / 24) is 41 ms, shorter than the frame.
+    const ms = Math.max(Math.trunc(delay) || 0, 1);
+    const from = !this.realTime ? this.now : Number.isNaN(this.at) ? this.current() : this.at;
     const record: TimerRecord = {
       object,
-      delay: Math.max(delay, 1),
+      delay: ms,
       closure,
-      due: (this.realTime ? this.elapsed() : this.now) + delay,
+      due: from + ms,
       seq: 0,
       order: this.starts++,
       stopped: false,
@@ -206,6 +301,9 @@ export class Timers {
   }
 }
 
+/** How far past a pass's time a timer still counts as due, in ms: far below a whole one. */
+const GRID_SLACK = 1e-6;
+
 /** The real clock where the host has one, browsers and node alike; else none, and the frame clock. */
 function defaultClock(): (() => number) | null {
   return typeof performance !== "undefined" ? () => performance.now() : null;
@@ -218,7 +316,7 @@ interface TimerRecord {
   due: number;
   /** Its place among timers due at the same time: the one scheduled first fires first. */
   seq: number;
-  /** When it was started among the others: timers due in one pass of the real clock fire in this order. */
+  /** When it was started among the others: a pass of the real clock fires by this order. */
   order: number;
   /** Stopped, and so to be dropped when it surfaces; a Timer started anew gets a record of its own. */
   stopped: boolean;

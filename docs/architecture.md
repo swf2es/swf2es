@@ -1718,7 +1718,8 @@ once the case loads its SWF.
 ### Time
 
 The player keeps a clock of its own, in milliseconds, apart from the
-frame count: `getTimer` reads it, and `Timer` fires by it. A frame
+frame count: with `realTime: null`, `getTimer` reads it and `Timer`
+fires by it, and sounds go by it always. A frame
 stepped by `Player.tick()` moves the clock by one frame's duration at
 the stage's frame rate, the first frame's included, so a test that steps
 frames gets the same clock every time; a host playing in real time calls
@@ -1786,9 +1787,24 @@ frame or longer waits for a frame, so a 45 or 50 ms timer at 24 fps fires
 every other frame though the player checks between. In adl a 10 ms timer
 fires two to four times a 24 fps frame, a 1 ms one about once a
 millisecond at 1 fps; there is no floor above 1 ms, for `setInterval`
-neither. Our hosts check at each `advance(dt)` that plays no frame, 60
-times a second for a 24 fps SWF, so a timer shorter than that fires at
-each call: two or three times a frame. `updateAfterEvent` in a timer
+neither. Flash truncates a delay to whole milliseconds: `Timer(1000 /
+24)` is 41 ms, shorter than the frame, and fired in 117 of 120 frames,
+`Timer(1000 / 30)` in 150 of 150 and `Timer(1000 / 60)` in 287 of 300;
+`Timer(40)` at 25 fps, the frame's length, fired in 106 of 125, and one
+a millisecond longer than the frame in about 55 to 70 % (five seconds
+each in adl). Our hosts check at each `advance(dt)` that plays no frame,
+60 times a second for a 24 fps SWF, so a timer shorter than that fires
+at each call: two or three times a frame. Their calls do not fall on the
+SWF's grid, though: a 25 fps SWF's frames come 33 and 50 ms apart at 60
+Hz. So the timers keep the host's time, the sum of the `dt`s it passed,
+on which a frame has its exact place on the grid, the time it fell due;
+a timer as long as a frame or longer is due by that, and every timer
+fired in a frame next falls due from it. A timer of the frame's length
+then fires every frame, however the calls fall and jitter, and one a
+millisecond longer every other frame. A short one is due by the call's
+time, less a frame for each the call plays after it, so that a frame run
+late does not hold it back, and a SWF faster than the display fires it
+in each of its frames, not once a call. `updateAfterEvent` in a timer
 fired between frames has the stage render then, with RENDER if a script
 invalidated it, as Flash does; an invalidation without it waits for the
 frame. Ruffle fires its timers after the frame from the same real clock
