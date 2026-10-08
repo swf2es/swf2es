@@ -194,6 +194,8 @@ export class DisplayObject {
   character: Character | null = null;
   /** Whether a script set a property of it; from then on the timeline swaps no shape under it, as Flash's does not. */
   scripted = false;
+  /** Whether a script set its cacheAsBitmap, which keeps it drawn as it was across a replace of the same bounds (`swap`). */
+  cachedAsBitmap = false;
   /**
    * Whether a script set its transform or another property a place gives:
    * from then on the timeline's places, moves and a rewind's alike, leave
@@ -894,6 +896,13 @@ function swap(existing: DisplayObject, character: Character): void {
     return;
   }
 
+  // Cached as a bitmap, the object keeps the bitmap Flash drew of it until
+  // its bounds change: another character of the same bounds shows nothing
+  // new (`replaces`), one of other bounds draws (`scripted-touch`).
+  if (existing.cachedAsBitmap && sameBounds(existing.character, character)) {
+    return;
+  }
+
   if (existing instanceof StaticTextObject) {
     if (character.type === "static") {
       existing.show(character);
@@ -918,6 +927,16 @@ function swap(existing: DisplayObject, character: Character): void {
 
   existing.character = character;
   existing.invalidate(CONTENT);
+}
+
+function sameBounds(a: Character | null, b: Character): boolean {
+  const bounds = (c: Character | null) =>
+    c?.type === "shape" ? c.shape.bounds : c?.type === "static" ? c.definition.bounds : null;
+  const x = bounds(a);
+  const y = bounds(b);
+  return (
+    !!x && !!y && x.xMin === y.xMin && x.xMax === y.xMax && x.yMin === y.yMin && x.yMax === y.yMax
+  );
 }
 
 /** A Video: a box of the size it was made at, its bounds; the player plays no video in it, so it draws nothing. */

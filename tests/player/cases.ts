@@ -3101,6 +3101,59 @@ function staticTextReplace(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Seven red squares and seven texts, each but the first given a property
+// of another value by scripts/ScriptedTouch.as on frame 1 (visible,
+// cacheAsBitmap, a mask of its own, blendMode the same and another, and
+// visible set and set back), and a larger blue square or another text put
+// in each one's place with the move flag on frame 2.
+function scriptedTouch(abc: Uint8Array): Uint8Array {
+  const at = (x: number, y: number) => ({ tx: x * 20, ty: y * 20 });
+  const columns = [0, 1, 2, 3, 4, 5, 6];
+  return w.swf({
+    width: 320,
+    height: 140,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      probeFont(9),
+      square(1, 0xff0000, 400),
+      square(2, 0x0000ff, 600),
+      square(3, 0x00aa00, 200),
+      square(6, 0x0000ff, 400),
+      w.staticText({
+        id: 4,
+        bounds: [0, 800, -600, 100],
+        records: [{ font: 9, height: 600, color: 0x0000cc, x: 0, y: 0, glyphs: [[1, 400]] }],
+      }),
+      w.staticText({
+        id: 5,
+        bounds: [0, 800, -400, 800],
+        records: [
+          { font: 9, height: 400, color: 0xcc0000, x: 0, y: 0, glyphs: [[4, 400]] },
+          { x: 0, y: 500, glyphs: [[3, 300]] },
+        ],
+      }),
+      w.doAbc(abc, "ScriptedTouch"),
+      w.symbolClass([[0, "Main"]]),
+      ...columns.map((i) => w.place({ depth: 1 + i, character: 1, matrix: at(10 + i * 44, 20) })),
+      ...columns.map((i) => w.place({ depth: 8 + i, character: 4, matrix: at(10 + i * 44, 100) })),
+      w.place({ depth: 15, character: 3, matrix: at(142, 20) }),
+      w.place({ depth: 16, character: 3, matrix: at(142, 85) }),
+      w.place({ depth: 17, character: 1, matrix: at(10, 60) }),
+      w.place({ depth: 18, character: 1, matrix: at(54, 60) }),
+      w.showFrame(),
+      ...columns.map((i) => w.place({ depth: 1 + i, move: true, character: 2 })),
+      ...columns.map((i) => w.place({ depth: 8 + i, move: true, character: 5 })),
+      w.place({ depth: 17, move: true, character: 6 }),
+      w.place({ depth: 18, move: true, character: 6 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Static text in Probe over a red square, given drop shadows by
 // scripts/StaticTextFilters.as.
 function staticTextFilters(abc: Uint8Array): Uint8Array {
@@ -4128,6 +4181,15 @@ export const cases: PlayerCase[] = [
     script: "StaticTextReplace",
     frames: 3,
     capture: [1, 2, 3],
+    tolerance: 32,
+    maxOutliers: 60,
+  },
+  {
+    name: "scripted-touch",
+    swf: scriptedTouch,
+    script: "ScriptedTouch",
+    frames: 2,
+    capture: [1, 2],
     tolerance: 32,
     maxOutliers: 60,
   },
