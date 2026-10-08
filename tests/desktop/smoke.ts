@@ -141,6 +141,15 @@ const networked = smokeSwf("network", true);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * The environment without a display: Electron's --headless still draws
+ * through a Wayland or X display it finds, and a compositor whose screen
+ * is locked or asleep sends it no frames, so the player never advanced.
+ */
+const headlessEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([name]) => name !== "DISPLAY" && name !== "WAYLAND_DISPLAY"),
+);
+
 /** The app running in Electron with these settings and arguments, its terminal and its page. */
 interface App {
   /** What it printed to stdout, a line each: the SWF's traces. */
@@ -172,15 +181,15 @@ async function withApp(
       [
         appDir,
         // Chromium's headless mode, which Electron keeps (its build has no
-        // headless Ozone), and a GPU of software: no display needed, and it
-        // draws alike anywhere.
+        // headless Ozone), with no display to find (headlessEnv), and a GPU
+        // of software: it draws alike anywhere.
         "--headless",
         "--use-angle=swiftshader",
         "--enable-unsafe-swiftshader",
         ...more,
       ],
       {
-        env: { ...process.env, SWF2ES_DESKTOP_USER_DATA: userData },
+        env: { ...headlessEnv, SWF2ES_DESKTOP_USER_DATA: userData },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
