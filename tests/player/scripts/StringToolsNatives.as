@@ -15,6 +15,11 @@ package {
       call("upper null", function():void { st.toUpperCase(null); });
       call("lower null", function():void { st.toLowerCase(null); });
       call("constructor null", function():void { new StringTools(null); });
+      for each (id in ["el-GR", "en-US"]) {
+        st = new StringTools(id);
+        trace(id, st.toUpperCase("\u03ac\u03bb\u03c6\u03b1 \u03ad\u03c8\u03b9\u03bb\u03bf\u03bd \u03ce\u03bc\u03b5\u03b3\u03b1 \u03ca \u0390 \u1fb3 \u1fbc \u01f0 \ufb00"),
+          st.toLowerCase("\u0386\u039b\u03a6\u0391 \u039f\u0394\u039f\u03a3 \u03a3 \u1fbc"));
+      }
       trace("available", StringTools.getAvailableLocaleIDNames().length > 0);
     }
 
