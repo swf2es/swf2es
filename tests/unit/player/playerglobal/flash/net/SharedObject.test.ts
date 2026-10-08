@@ -313,3 +313,60 @@ test("a destroyed player writes the SharedObjects its scripts left unflushed, as
   player.destroy();
   assert.ok(stored.has("example.test/main.swf/later"));
 });
+
+test("destroy leaves a save it could not read, and one the SWF did not change, as they were", {
+  skip,
+}, async () => {
+  const abc = compileScripts(
+    [
+      script(
+        "SharedOnlyReads",
+        `trace(SharedObject.getLocal("broken").size, SharedObject.getLocal("kept").data.n);`,
+        "SharedOnlyReads",
+      ),
+      script(
+        "SharedKeeps",
+        `var so:SharedObject = SharedObject.getLocal("kept"); so.data.n = 5; so.flush();`,
+      ),
+    ],
+    out,
+  );
+  const { stored, storage } = mapStorage();
+  const url = "http://example.test/main.swf";
+  await run(abc.get("SharedKeeps") as Uint8Array, url, storage);
+  const kept = stored.get("example.test/main.swf/kept");
+  // Bytes no .sol reader takes: a save of a format the player cannot read.
+  const broken = Uint8Array.of(1, 2, 3, 4);
+  stored.set("example.test/main.swf/broken", broken);
+  let writes = 0;
+  const counted = {
+    ...storage,
+    set: (key: string, bytes: Uint8Array) => {
+      writes++;
+      storage.set(key, bytes);
+    },
+    remove: (key: string) => {
+      writes++;
+      storage.remove(key);
+    },
+  };
+
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    storage: counted,
+    url,
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(
+    bare(abc.get("SharedOnlyReads") as Uint8Array, 1, "SharedOnlyReads"),
+    scripting,
+  );
+  await player.start();
+  player.destroy();
+
+  assert.deepEqual(lines, ["0 5"]);
+  assert.equal(writes, 0);
+  assert.equal(stored.get("example.test/main.swf/broken"), broken);
+  assert.equal(stored.get("example.test/main.swf/kept"), kept);
+});
