@@ -770,6 +770,12 @@ test("the Referer: the URL at home, the origin elsewhere, nothing from https to 
   }
 
   assert.equal(refererFor(swfAt, new URL("http://127.example.test/")), null);
+  for (const local of ["http://localhost./x", "http://foo.localhost./x"]) {
+    assert.equal(refererFor(swfAt, new URL(local)), "https://swf.test/", local);
+  }
+
+  // Of IPv6 addresses, ::1 alone, not an IPv4 loopback address inside one.
+  assert.equal(refererFor(swfAt, new URL("http://[::ffff:127.0.0.1]/x")), null);
   // Past 4096 characters, the origin alone.
   const long = new URL(`https://swf.test/movie.swf?${"a".repeat(5000)}`);
   assert.equal(refererFor(long, new URL("https://swf.test/data")), "https://swf.test/");

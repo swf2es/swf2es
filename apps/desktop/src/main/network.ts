@@ -26,7 +26,7 @@
 import { lookup } from "node:dns/promises";
 import { type ClientRequest, request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { connect, isIP } from "node:net";
+import { connect, isIP, isIPv4 } from "node:net";
 import type { Transform } from "node:stream";
 import * as tls from "node:tls";
 import { createBrotliDecompress, createInflate, createInflateRaw } from "node:zlib";
@@ -1247,11 +1247,14 @@ function trustworthy(url: URL): boolean {
     return true;
   }
 
-  const host = bare(url.hostname).toLowerCase();
+  // A name with its root's dot is the same name; of IPv6 addresses the
+  // specification names ::1 alone, not an IPv4 loopback address inside one.
+  const host = bare(url.hostname).toLowerCase().replace(/\.$/, "");
   return (
     host === "localhost" ||
     host.endsWith(".localhost") ||
-    (isIP(host) !== 0 && addressClass(host) === "loopback")
+    host === "::1" ||
+    (isIPv4(host) && addressClass(host) === "loopback")
   );
 }
 
