@@ -88,6 +88,8 @@ export interface DesktopApi {
   onClose(listener: () => void): void;
   /** Ask for the open dialog. */
   openDialog(): void;
+  /** Ask for the dialog that opens a SWF by its URL, which only the user answers. */
+  openUrlDialog(): void;
   /** A file dropped on the page: the shell opens it if it is a SWF. */
   openDropped(file: File): void;
   /** Ask the user for a library; the page reloads once the shell has it. */

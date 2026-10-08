@@ -3940,16 +3940,18 @@ page's whole, as it was in Flash.
 
 ## The desktop app
 
-`apps/desktop` plays local SWFs in an Electron window. It is the web
+`apps/desktop` plays local SWFs, and SWFs by their http or https URL, in
+an Electron window. It is the web
 embedding with a shell around it: the page is one `<swf2es-player>`
 filling the window, configured with the IndexedDB module cache and the
 libraries the user pointed the app at, and the main process opens the
-files, keeps the settings and carries the sockets. The page knows the
+files, keeps the settings and carries the sockets and the SWF's network
+requests. The page knows the
 shell only through `window.swf2esDesktop`, whose types are
 `src/shared/api.ts`: `start`, which hands the page the libraries' state and
-the SWF to play; `onOpen` and `onClose`; `openDialog`, `openDropped` and
-`chooseLibrary`, requests the main process answers with dialogs and
-`onOpen`; and `sockets`. The page (`src/renderer`, `static/`) imports
+the SWF to play; `onOpen` and `onClose`; `openDialog`, `openUrlDialog`,
+`openDropped` and `chooseLibrary`, requests the main process answers with
+dialogs and `onOpen`; `sockets`; and `network`. The page (`src/renderer`, `static/`) imports
 nothing of Electron's, so a Tauri shell can serve it as it is.
 
 ### Serving the page
@@ -3984,6 +3986,15 @@ FileAttributes' UseNetwork bit (`fileAttributes` in `format`), and
   (see [The network](#the-network)), content from anywhere and data only
   where a policy file grants every domain, and sockets as the user allows
   (below).
+
+A SWF opened by its URL plays in Flash's **remote** sandbox: its security
+domain is its origin, the one its URL came to after redirects, which is
+also its `loaderInfo.url`; it reads no local file at all (the file host
+has no grant for it, and the page fetches nothing else), and reaches the
+network as [The network](#the-network) has it, sockets with a socket
+policy and the user's word. Its grant takes effect as the page asks the
+main process for that very URL as the movie, after the last player has
+gone, as a local SWF's does as the page fetches its file.
 
 So no SWF can both read the disk and send what it read away. A
 directory others share is never granted whole: the user's home, the one
@@ -4133,7 +4144,7 @@ ABC (major version 46), a socket's host a string and its port in range.
 The page never navigates: `will-navigate` is refused, and a new window,
 as a SWF's navigateToURL asks for, is refused too, its URL opened in the
 system's browser with `shell.openExternal` if it is http or https, the
-SWF is in local-with-networking, and a click, key or tap in the window
+SWF has the network (local-with-networking or remote), and a click, key or tap in the window
 asked for it: one page a gesture, within
 five seconds of it and a second after the last, as a browser's popup
 blocker allows, so a SWF cannot launch the browser in a loop.
@@ -4144,14 +4155,24 @@ into the page would run beside the API.
 ### Files, settings and libraries
 
 The main process opens a SWF from File › Open, a drop on the window, the
-command line (the last argument that names a .swf file there is, as a
-switch may take a value), macOS's `open-file`, a second start of the app,
-which hands its SWF to the first and quits, and the recent list, and sends
-the page its swf2es://file URL, which it plays with `load` in place of what played, the element
-letting the last player go. It keeps `settings.json` in Electron's user
-data directory (`SWF2ES_DESKTOP_USER_DATA` names another, for the tests):
-the libraries' paths, the last ten SWFs and the servers each SWF may
-always reach. A settings file that cannot be written keeps them for the
+command line (the last argument that is an http or https URL or names a
+.swf file there is, as a switch may take a value), macOS's `open-file`,
+a second start of the app, which hands its SWF to the first and quits,
+File › Open URL (Ctrl+L), and the recent list, and sends the page its
+swf2es://file URL, or the http or https one, which it plays with `load`
+in place of what played, the element letting the last player go. The
+URL dialog is a window of its own (`static/open-url.html`,
+`src/renderer/open-url.ts`), modal over the player's, with a preload of
+its own (`src/preload/prompt.cts`) whose only messages are what to show
+first and the user's answer, which the main process takes only from that
+window's own page; the player's page may only ask for the dialog
+(`openUrlDialog`). So nothing a SWF runs opens a URL: a SWF's movie fetch
+reaches any address, as the user chose it, and the dialog keeps that
+choice the user's. Only http and https URLs open, with a host and
+without credentials, their fragment dropped. It keeps `settings.json` in
+Electron's user data directory (`SWF2ES_DESKTOP_USER_DATA` names another,
+for the tests): the libraries' paths, the last ten SWFs, by path or URL,
+and the servers each SWF, by path or URL, may always reach. A settings file that cannot be written keeps them for the
 run, with a word. playerglobal.abc is the
 user's to give; builtin.abc is taken from beside it, else from the
 checkout's avmplus submodule, else given too. Without them, the page
@@ -4165,12 +4186,24 @@ libraries once.
 The element takes the shell's SocketHost through `configure({ sockets
 })`. Each `flash.net.Socket` is an id the preload numbers, and the main
 process connects it with `node:net`, as `player-hosts/node` does,
-relaying its bytes and events over IPC. Only a SWF in
-local-with-networking has sockets, and only as the user allows: the first
+relaying its bytes and events over IPC. Only a SWF with the network has
+sockets, and only as the user allows: the first
 connection to each host and port asks, Allow Once (until the SWF closes),
 Always Allow for This SWF (kept in the settings by the SWF's real path)
 or Deny (until it closes); connections there while the question is open
 wait on its answer, and where no one can be asked it is a refusal. A
+remote SWF then needs the server's socket policy too, as Flash Player
+9.0.124 and later asked of every socket, its own server's included: the
+main process connects to port 843, sends `<policy-file-request/>` and its
+NUL and reads the policy up to its NUL (three seconds at most), and, as
+its meta-policy allows ("all" by default for sockets), tries the ports
+`Security.loadPolicyFile("xmlsocket://host:port")` named and the port
+itself; a policy grants the SWF's domain the ports its `to-ports` lists,
+one from a port of 1024 or above only ports of 1024 and above. The
+policy is asked only after the user allows the server, so no SWF makes
+the app speak to a server the user did not allow, and the socket then
+connects to the address the policy came from. A local SWF with
+networking needs no socket policy, as before. A
 refused socket fails with #2031, as one no server took. A page holds at
 most 64 at once, and one with more than 4 MB its peer has not read fails,
 so a peer that stops reading cannot fill the main process's memory. A
@@ -4193,8 +4226,14 @@ path; that playing it again leaves one canvas, that one dropped on the
 window opens, and that a second start hands the first its SWF, which,
 in local-with-networking, reads no file, the last SWF's grant gone, and
 talks to a TCP server it is allowed through the bridge; that no page
-opens without a gesture, and that the policy refuses nothing; and that
-without playerglobal the page says what is missing. `connections.test.ts`
+opens without a gesture, and that the policy refuses nothing; that
+without playerglobal the page says what is missing; and that a SWF
+opened by its http URL, from the command line and then from the URL
+dialog, which starts with the URL playing, plays in the remote sandbox:
+it reads its own origin and one whose crossdomain.xml grants it, not one
+without, no local file by swf2es:// or file://, connects the socket whose
+server answers with a socket policy and not the one without, and both
+URLs join the recent list. `connections.test.ts`
 and `sandbox.test.ts` test the sockets' limits and the sandbox's grants
 in node, `policy.test.ts` the policy parser and what policies grant, by
 the specification's examples, and `network.test.ts` the network against

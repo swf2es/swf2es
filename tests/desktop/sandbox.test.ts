@@ -130,3 +130,26 @@ test("only the SWF playing has a grant, from when the page fetches it", async ()
   assert.equal(sandbox.type, null);
   assert.equal(await sandbox.resolve(asked(b, b)), null);
 });
+
+test("a remote SWF reads no local file, and has the network once the page asks for it", async () => {
+  const sandbox = new Sandbox(home);
+  const local = await playing(sandbox, "games/a.swf", false);
+  sandbox.playRemote("http://swf.test/movie.swf");
+  assert.equal(sandbox.type, null);
+  assert.equal(sandbox.swf, "http://swf.test/movie.swf");
+  assert.equal(sandbox.networkAllowed(), false);
+  assert.equal(sandbox.startRemote("http://swf.test/other.swf"), false);
+  assert.equal(sandbox.startRemote("http://swf.test/movie.swf"), true);
+  assert.equal(sandbox.type, "remote");
+  assert.equal(sandbox.networkAllowed(), true);
+  // Asked for again, as a page that reloads does.
+  assert.equal(sandbox.startRemote("http://swf.test/movie.swf"), true);
+  // No file, the last SWF's included.
+  assert.equal(await sandbox.resolve(asked(local, "data.txt")), null);
+  assert.equal(await sandbox.resolve(asked(local, local)), null);
+  assert.equal(await sandbox.resolve("/null/a.swf"), null);
+
+  sandbox.stop();
+  assert.equal(sandbox.startRemote("http://swf.test/movie.swf"), false);
+  assert.equal(sandbox.networkAllowed(), false);
+});

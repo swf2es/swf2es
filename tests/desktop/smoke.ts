@@ -4,14 +4,19 @@
 // reads the file beside it and reaches no network and no socket; one in
 // local-with-networking reads no file but talks to a TCP server, allowed
 // in the settings, through the main process; neither reads outside its
-// directory, so neither can send away what it read. The page's policy
-// refuses nothing it needs, and playing the SWF again leaves one canvas.
+// directory, so neither can send away what it read. A SWF opened by its
+// http URL, from the command line or the URL dialog, plays in the remote
+// sandbox: it reads its own origin and another whose crossdomain.xml
+// grants it, not one without, no local file, and connects only the socket
+// whose server answers with a socket policy. The page's policy refuses
+// nothing it needs, and playing the SWF again leaves one canvas.
 // Skipped, saying why, where Electron was not downloaded
 // (pnpm --filter @swf2es/desktop fetch-electron).
 //
 //   node tests/desktop/smoke.ts
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
@@ -21,6 +26,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -91,9 +97,66 @@ const source = `package {
   }
 }`;
 
+// A remote SWF: it names its URL and sandbox, reads its own origin, two
+// others and two local files, as its query names them, and connects two
+// sockets, one to a server with a socket policy and one without.
+const remoteSource = `package {
+  import flash.display.Sprite;
+  import flash.events.*;
+  import flash.net.*;
+  import flash.system.Security;
+  public class RemoteSmoke extends Sprite {
+    private var sockets:Array = [];
+    public function RemoteSmoke() {
+      var p:Object = loaderInfo.parameters;
+      trace("remote: url " + loaderInfo.url);
+      trace("remote: sandbox " + Security.sandboxType);
+      load("same", "data.txt");
+      load("allowed", p.allowed);
+      load("denied", p.denied);
+      load("file", p.file);
+      load("local", "file:///etc/hostname");
+      connect("socket-ok", int(p.good));
+      connect("socket-no", int(p.bad));
+    }
+    private function load(label:String, url:String):void {
+      var loader:URLLoader = new URLLoader();
+      loader.addEventListener(Event.COMPLETE, function (e:Event):void {
+        trace("remote: " + label + " " + loader.data);
+      });
+      loader.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
+        trace("remote: " + label + " refused");
+      });
+      loader.load(new URLRequest(url));
+    }
+    private function connect(label:String, port:int):void {
+      var socket:Socket = new Socket();
+      sockets.push(socket);
+      socket.addEventListener(Event.CONNECT, function (e:Event):void {
+        socket.writeUTFBytes("ping");
+        socket.flush();
+      });
+      socket.addEventListener(ProgressEvent.SOCKET_DATA, function (e:ProgressEvent):void {
+        trace("remote: " + label + " " + socket.readUTFBytes(socket.bytesAvailable));
+      });
+      socket.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
+        trace("remote: " + label + " refused");
+      });
+      socket.connect("127.0.0.1", port);
+    }
+  }
+}`;
+
 const libraries = `${out}libraries/`;
 libraryAbcs(libraries);
-const abc = compileScripts([{ name: "DesktopSmoke", source }], out).get("DesktopSmoke");
+const abcs = compileScripts(
+  [
+    { name: "DesktopSmoke", source },
+    { name: "RemoteSmoke", source: remoteSource },
+  ],
+  out,
+);
+const abc = abcs.get("DesktopSmoke");
 
 /** A server that answers each "ping" with "pong". */
 const server: Server = createServer((connection) => {
@@ -140,6 +203,176 @@ const local = smokeSwf("local", false);
 const networked = smokeSwf("network", true);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** An HTTP server on 127.0.0.1 answering each path with what `files` has for it, else a 404. */
+async function httpSite(files: Record<string, [type: string, body: string | Uint8Array]>) {
+  const http = createHttpServer((request, response) => {
+    const file = files[new URL(request.url ?? "/", "http://x").pathname];
+    if (file) {
+      response.writeHead(200, { "content-type": file[0] }).end(file[1]);
+    } else {
+      response.writeHead(404).end();
+    }
+  });
+  await new Promise<void>((done) => http.listen(0, "127.0.0.1", done));
+  return { server: http, origin: `http://127.0.0.1:${(http.address() as { port: number }).port}` };
+}
+
+/**
+ * A TCP server on 127.0.0.1 that answers "ping" with "pong", and a
+ * policy request with `policy` (given its port), or by closing.
+ */
+async function socketSite(policy: ((port: number) => string) | null) {
+  let port = 0;
+  const tcp: Server = createServer((connection) => {
+    connection.on("error", () => {});
+    connection.on("data", (bytes) => {
+      if (bytes.toString() === "<policy-file-request/>\0") {
+        if (policy) {
+          connection.end(`${policy(port)}\0`);
+        } else {
+          connection.end();
+        }
+      } else if (bytes.toString() === "ping") {
+        connection.write("pong");
+      }
+    });
+  });
+  await new Promise<void>((done) => tcp.listen(0, "127.0.0.1", done));
+  port = (tcp.address() as { port: number }).port;
+  return { server: tcp, port };
+}
+
+/**
+ * The remote sandbox: a SWF opened by its http URL, from the command line
+ * and then from the URL dialog.
+ */
+async function remote(): Promise<void> {
+  const xml = (rules: string) => `<cross-domain-policy>${rules}</cross-domain-policy>`;
+  const swfBytes = w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true, false),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abcs.get("RemoteSmoke") as Uint8Array, "RemoteSmoke"),
+      w.symbolClass([[0, "RemoteSmoke"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const home = await httpSite({
+    "/remote.swf": ["application/x-shockwave-flash", swfBytes],
+    "/data.txt": ["text/plain", "same"],
+  });
+  const allowed = await httpSite({
+    "/crossdomain.xml": [
+      "text/x-cross-domain-policy",
+      xml('<allow-access-from domain="127.0.0.1"/>'),
+    ],
+    "/data.txt": ["text/plain", "allowed"],
+  });
+  const denied = await httpSite({ "/data.txt": ["text/plain", "denied"] });
+  const good = await socketSite((port) =>
+    xml(`<allow-access-from domain="127.0.0.1" to-ports="${port}"/>`),
+  );
+  const bad = await socketSite(null);
+  // The local SWF's own URL: its directory's token, a hash of its real path.
+  const token = createHash("sha256").update(realpathSync(site)).digest("hex").slice(0, 16);
+  const query = new URLSearchParams({
+    allowed: `${allowed.origin}/data.txt`,
+    denied: `${denied.origin}/data.txt`,
+    file: `swf2es://file/${token}/data.txt`,
+    good: String(good.port),
+    bad: String(bad.port),
+  });
+  const url = new URL(`${home.origin}/remote.swf?${query}`).href;
+  const again = `${url}&again=1`;
+  // The user's word given for both sockets, from both URLs: the socket policy decides.
+  const endpoints = [`127.0.0.1:${good.port}`, `127.0.0.1:${bad.port}`];
+  const settings = { ...both, sockets: { [url]: endpoints, [again]: endpoints } };
+
+  try {
+    await withApp(settings, [url], async ({ stdout, stderr, until, evaluate, page, userData }) => {
+      const traced = (line: string) => stdout.filter((l) => l === line).length;
+      const settled = (n: number) => () =>
+        ["same", "allowed", "denied", "file", "local", "socket-ok", "socket-no"].every(
+          (what) => stdout.filter((l) => l.startsWith(`remote: ${what} `)).length >= n,
+        );
+      await until("the remote SWF", settled(1));
+      assert.equal(traced(`remote: url ${url}`), 1);
+      assert.equal(traced("remote: sandbox remote"), 1);
+      assert.equal(traced("remote: same same"), 1);
+      assert.equal(traced("remote: allowed allowed"), 1);
+      assert.equal(traced("remote: denied refused"), 1);
+      assert.equal(traced("remote: file refused"), 1);
+      assert.equal(traced("remote: local refused"), 1);
+      assert.equal(traced("remote: socket-ok pong"), 1);
+      assert.equal(traced("remote: socket-no refused"), 1);
+      assert.match(
+        stderr(),
+        new RegExp(
+          `not loading ${denied.origin.replaceAll(".", "\\.")}/data\\.txt: ` +
+            "no policy file on .* grants 127\\.0\\.0\\.1",
+        ),
+      );
+      assert.match(
+        stderr(),
+        new RegExp(`no socket to 127\\.0\\.0\\.1:${bad.port}: no socket policy`),
+      );
+      // Nor may the page read the local SWF's files while a remote one plays.
+      assert.equal(
+        await evaluate<number>(`fetch("swf2es://file/${token}/data.txt").then((r) => r.status)`),
+        404,
+      );
+
+      // The URL dialog, asked for by the page, answered by the user: the SWF plays again.
+      await evaluate("window.swf2esDesktop.openUrlDialog()");
+      const dialog = await page("swf2es://app/open-url.html");
+      const run = async (expression: string) => {
+        for (let tries = 0; ; tries++) {
+          const { result } = await dialog.send<{ result: { value: unknown } }>("Runtime.evaluate", {
+            expression,
+            awaitPromise: true,
+            returnByValue: true,
+          });
+          if (result.value === true || tries > 100) {
+            return result.value;
+          }
+
+          await sleep(100);
+        }
+      };
+      // Its field starts with the URL playing, for the user to change.
+      assert.equal(
+        await run(`document.getElementById("url")?.value === ${JSON.stringify(url)}`),
+        true,
+      );
+      await run(`(() => {
+        document.getElementById("url").value = ${JSON.stringify(again)};
+        // After this answer: the window closes as it submits, and its DevTools with it.
+        setTimeout(() => document.getElementById("form").requestSubmit(), 100);
+        return true;
+      })()`);
+      await until("the SWF from the dialog", settled(2));
+      assert.equal(traced(`remote: url ${again}`), 1);
+      assert.equal(traced("remote: allowed allowed"), 2);
+      assert.equal(traced("remote: denied refused"), 2);
+      assert.equal(traced("remote: socket-ok pong"), 2);
+      assert.equal(traced("remote: socket-no refused"), 2);
+
+      // Both URLs are in the recent list.
+      const recent = JSON.parse(readFileSync(join(userData, "settings.json"), "utf8")).recent;
+      assert.deepEqual(recent.slice(0, 2), [again, url]);
+    });
+  } finally {
+    for (const server of [home.server, allowed.server, denied.server, good.server, bad.server]) {
+      server.close();
+    }
+  }
+}
 
 /**
  * A display of the test's own. Electron's --headless still draws through
@@ -194,6 +427,9 @@ interface App {
   devtools: DevTools;
   /** Start the app again on the same user data, with `args`; its exit code. */
   again(args: string[]): Promise<number | null>;
+  /** DevTools for another of its pages, once there is one whose URL starts with `prefix`. */
+  page(prefix: string): Promise<DevTools>;
+  userData: string;
 }
 
 async function withApp(
@@ -208,6 +444,8 @@ async function withApp(
   let exited: string | null = null;
   let electron: ChildProcess | null = null;
   let socket: WebSocket | null = null;
+  /** The other pages' DevTools connections. */
+  const sockets: WebSocket[] = [];
   const start = (more: string[]) =>
     spawn(
       electronBinary() as string,
@@ -306,12 +544,51 @@ async function withApp(
 
     const again = (more: string[]) =>
       new Promise<number | null>((done) => start(more).on("exit", (code) => done(code)));
-    await run({ stdout, stderr: () => stderr, until, evaluate, devtools, again });
+    const pageOf = async (prefix: string): Promise<DevTools> => {
+      let found: { webSocketDebuggerUrl: string } | undefined;
+      for (let waited = 0; !found; waited += 250) {
+        const listed = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as {
+          type: string;
+          url: string;
+          webSocketDebuggerUrl: string;
+        }[];
+        found = listed.find((t) => t.type === "page" && t.url.startsWith(prefix));
+        if (!found) {
+          if (exited || waited > TIMEOUT) {
+            throw new Error(`a page on ${prefix}: ${exited ?? "timed out"}\nstderr:\n${stderr}`);
+          }
+
+          await sleep(250);
+        }
+      }
+
+      const other = new WebSocket(found.webSocketDebuggerUrl);
+      sockets.push(other);
+      await new Promise((done, fail) => {
+        other.addEventListener("open", done);
+        other.addEventListener("error", fail);
+      });
+      return new DevTools(other);
+    };
+    await run({
+      stdout,
+      stderr: () => stderr,
+      until,
+      evaluate,
+      devtools,
+      again,
+      page: pageOf,
+      userData,
+    });
     // What the page's policy refused, as Chromium words it; Electron's own warning about 'unsafe-
     // eval' is not one.
     assert.doesNotMatch(stderr, /violates the following Content Security Policy/);
   } finally {
     socket?.close();
+    for (const other of sockets) {
+      other.close();
+    }
+
     // Gone before its user data is: it writes there as it quits.
     const running = electron;
     if (running && running.exitCode === null && running.signalCode === null) {
@@ -509,6 +786,8 @@ try {
     assert.equal(panel.playerglobal, "not found");
     assert.match(panel.text, /may not be redistributed/);
   });
+
+  await remote();
 
   console.log("desktop smoke test: ok");
 } finally {

@@ -77,6 +77,7 @@ function close(): void {
 }
 
 byId("open").addEventListener("click", () => desktop.openDialog());
+byId("open-url").addEventListener("click", () => desktop.openUrlDialog());
 byId("choose-playerglobal").addEventListener("click", () => desktop.chooseLibrary("playerglobal"));
 byId("choose-builtin").addEventListener("click", () => desktop.chooseLibrary("builtin"));
 

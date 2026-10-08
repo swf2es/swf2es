@@ -23,6 +23,7 @@ const api: DesktopApi = {
     ipcRenderer.on("desktop:close", () => listener());
   },
   openDialog: () => ipcRenderer.send("desktop:open-dialog"),
+  openUrlDialog: () => ipcRenderer.send("desktop:open-url-dialog"),
   // The page never sees the path, only the URL the shell gives back.
   openDropped: (file) => ipcRenderer.send("desktop:open-path", webUtils.getPathForFile(file)),
   chooseLibrary: (name: LibraryName) => ipcRenderer.send("desktop:choose-library", name),

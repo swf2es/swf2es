@@ -2,8 +2,10 @@
 // SWF by FileAttributes' UseNetwork bit: local-with-filesystem reads the
 // files in the SWF's own directory and below, and reaches no network;
 // local-with-networking reaches the network, and no local file but
-// itself. Only the SWF playing now has a grant: opening another, or
-// closing it, revokes it. What the SWF loads plays in its sandbox too.
+// itself. A SWF opened by its URL is remote: no local file at all, and
+// the network as its origin's (network.ts judges it). Only the SWF
+// playing now has a grant: opening another, or closing it, revokes it.
+// What the SWF loads plays in its sandbox too.
 // Apart from Electron, so that node tests it (tests/desktop/sandbox.test.ts).
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
@@ -13,15 +15,15 @@ import { basename, dirname, isAbsolute, join, parse, relative, sep } from "node:
 
 export const FILE_ORIGIN = "swf2es://file";
 
-export type SandboxType = "localWithFile" | "localWithNetwork";
+export type SandboxType = "localWithFile" | "localWithNetwork" | "remote";
 
 interface Grant {
-  /** The SWF's real path, links followed. */
+  /** The SWF's real path, links followed; a remote SWF's URL. */
   swf: string;
   /** The directory it may read under, or null for none: its own file alone. */
   root: string | null;
-  /** The URL's first segment, standing for the SWF's directory. */
-  token: string;
+  /** The URL's first segment, standing for the SWF's directory; null for a remote SWF. */
+  token: string | null;
   type: SandboxType;
 }
 
@@ -78,7 +80,7 @@ export class Sandbox {
     return this.grant?.type ?? null;
   }
 
-  /** The real path of the SWF playing, or opened to play next; null when none. */
+  /** The real path of the SWF playing, or opened to play next, or its URL; null when none. */
   get swf(): string | null {
     return (this.pending ?? this.grant)?.swf ?? null;
   }
@@ -107,15 +109,40 @@ export class Sandbox {
     return `${FILE_ORIGIN}/${token}/${encodeURIComponent(basename(path))}`;
   }
 
+  /**
+   * Grant the remote SWF at `url` its sandbox, in place of the last SWF's:
+   * no local file, and the network as network.ts judges it. It takes
+   * effect as the page asks for that URL (startRemote).
+   */
+  playRemote(url: string): void {
+    this.grant = null;
+    this.pending = { swf: url, root: null, token: null, type: "remote" };
+  }
+
+  /**
+   * The page asks for the remote SWF at `url`: whether that is the one
+   * opened, whose grant then takes effect, or the one playing.
+   */
+  startRemote(url: string): boolean {
+    const pending = this.pending;
+    if (pending?.type === "remote" && pending.swf === url) {
+      this.grant = pending;
+      this.pending = null;
+      return true;
+    }
+
+    return this.grant?.type === "remote" && this.grant.swf === url && this.pending === null;
+  }
+
   /** Nothing plays: every grant revoked. */
   stop(): void {
     this.grant = null;
     this.pending = null;
   }
 
-  /** Whether the SWF playing may reach the network: only in local-with-networking. */
+  /** Whether the SWF playing may reach the network: in local-with-networking, or remote. */
   networkAllowed(): boolean {
-    return this.grant?.type === "localWithNetwork";
+    return this.grant?.type === "localWithNetwork" || this.grant?.type === "remote";
   }
 
   /**
@@ -125,7 +152,7 @@ export class Sandbox {
   async resolve(pathname: string): Promise<string | null> {
     const [empty, token, ...rest] = pathname.split("/");
     const pending = this.pending;
-    if (pending && empty === "" && token === pending.token && rest.length > 0) {
+    if (pending?.token && empty === "" && token === pending.token && rest.length > 0) {
       const path = await real(join(dirname(pending.swf), ...rest));
       if (path === pending.swf && this.pending === pending) {
         this.grant = pending;
@@ -134,7 +161,7 @@ export class Sandbox {
     }
 
     const grant = this.grant;
-    if (!grant || empty !== "" || token !== grant.token || rest.length === 0) {
+    if (!grant?.token || empty !== "" || token !== grant.token || rest.length === 0) {
       return null;
     }
 

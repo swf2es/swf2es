@@ -2,7 +2,7 @@
 // the files the user opens, the libraries they point at, and the page's
 // few requests (shared/api.ts), each checked to come from that page.
 //
-//   electron apps/desktop [--trace] [file.swf]
+//   electron apps/desktop [--trace] [file.swf | http(s)://host/movie.swf]
 import { statSync } from "node:fs";
 import { open as openFile } from "node:fs/promises";
 import { basename, isAbsolute, resolve } from "node:path";
@@ -29,6 +29,8 @@ import { SettingsFile } from "./settings.ts";
 import { bridgeSockets } from "./sockets.ts";
 
 const preload = fileURLToPath(new URL("../preload/preload.cjs", import.meta.url));
+const promptPreload = fileURLToPath(new URL("../preload/prompt.cjs", import.meta.url));
+const PROMPT_URL = `${APP_ORIGIN}/open-url.html`;
 const TITLE = "swf2es";
 
 // The tests keep their settings apart from the user's.
@@ -51,6 +53,8 @@ let settings: SettingsFile;
 /** What the network judges the movie playing as; null for none, or one without networking. */
 let networkMovie: Movie | null = null;
 let window: BrowserWindow | null = null;
+/** The dialog that asks for a URL, while it is open. */
+let prompt: BrowserWindow | null = null;
 let current: { path: string; movie: OpenedMovie } | null = null;
 /** The servers the SWF playing was allowed, or denied, a socket to until it closes: "host:port". */
 let allowedOnce = new Set<string>();
@@ -62,19 +66,52 @@ const asking = new Map<string, Promise<boolean>>();
  */
 let listening = false;
 
+/** The longest URL a SWF is opened by. */
+const MAX_URL = 8192;
+
+/**
+ * `text` as the URL of a remote SWF: http or https, with a host and no
+ * credentials, its fragment dropped; null if it is not one.
+ */
+function remoteUrl(text: string): URL | null {
+  if (text.length > MAX_URL) {
+    return null;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(text.trim());
+  } catch {
+    return null;
+  }
+
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) {
+    return null;
+  }
+
+  if (url.username || url.password) {
+    return null;
+  }
+
+  url.hash = "";
+  return url;
+}
+
 /**
  * The SWF named on a command line, from `cwd`: the last argument after the
- * app's own that names a .swf file there is. Chromium's and Electron's
- * switches may take values of their own (`--switch value`), so the first
- * argument that is not a switch could be one.
+ * app's own that is an http or https URL or names a .swf file there is.
+ * Chromium's and Electron's switches may take values of their own
+ * (`--switch value`), so the first argument that is not a switch could be one.
  */
-function fileFromArguments(argv: string[], cwd = process.cwd()): string | null {
+function movieFromArguments(argv: string[], cwd = process.cwd()): string | null {
   const named = argv
     .slice(process.defaultApp ? 2 : 1)
-    .filter((a) => !a.startsWith("-") && /\.swf$/i.test(a))
-    .map((a) => resolve(cwd, a));
+    .filter((a) => !a.startsWith("-"))
+    .map((a) => remoteUrl(a)?.href ?? (/\.swf$/i.test(a) ? resolve(cwd, a) : null))
+    .filter((a) => a !== null);
   return (
-    named.reverse().find((path) => statSync(path, { throwIfNoEntry: false })?.isFile()) ?? null
+    named.reverse().find((a) => remoteUrl(a) || statSync(a, { throwIfNoEntry: false })?.isFile()) ??
+    null
   );
 }
 
@@ -168,6 +205,51 @@ function refuse(message: string, detail: string): void {
   }
 }
 
+/** Open what the recent list, the command line or a reload names: a URL or a file's path. */
+function openEntry(entry: string): Promise<void> {
+  return remoteUrl(entry) ? openUrl(entry) : open(entry);
+}
+
+/** Play `movie` in the window, in place of what plays: what the user opened, as `entry`. */
+function show(entry: string, movie: OpenedMovie, onNetwork: Movie | null): void {
+  current = { path: entry, movie };
+  playOnNetwork(onNetwork);
+  allowedOnce = new Set();
+  deniedOnce = new Set();
+  settings.opened(entry);
+  buildMenu();
+  if (window) {
+    window.setTitle(`${movie.name} — ${TITLE}`);
+    if (listening) {
+      window.webContents.send("desktop:open", movie);
+    }
+  }
+}
+
+/**
+ * Play the SWF at `text`, an http or https URL, in Flash's remote sandbox:
+ * no local file, and the network as its origin's (network.ts). The page
+ * fetches it through the main process like anything it loads.
+ */
+async function openUrl(text: string): Promise<void> {
+  const url = remoteUrl(text);
+  if (!url) {
+    refuse("Only an http or https URL opens.", text.slice(0, 200));
+    return;
+  }
+
+  const last = url.pathname.split("/").pop() ?? "";
+  let name: string;
+  try {
+    name = decodeURIComponent(last) || url.host;
+  } catch {
+    name = last;
+  }
+
+  sandbox.playRemote(url.href);
+  show(url.href, { url: url.href, name, sandbox: "remote" }, { kind: "remote", url: url.href });
+}
+
 /** Play the SWF at `path` in the window, in place of what plays, in its sandbox. */
 async function open(path: string): Promise<void> {
   const name = basename(path);
@@ -191,22 +273,12 @@ async function open(path: string): Promise<void> {
     return;
   }
 
-  current = {
-    path,
-    movie: { url, name, sandbox: useNetwork ? "localWithNetwork" : "localWithFile" },
-  };
-  playOnNetwork(useNetwork ? { kind: "local" } : null);
-  allowedOnce = new Set();
-  deniedOnce = new Set();
-  settings.opened(path);
   app.addRecentDocument(path);
-  buildMenu();
-  if (window) {
-    window.setTitle(`${name} — ${TITLE}`);
-    if (listening) {
-      window.webContents.send("desktop:open", current.movie);
-    }
-  }
+  show(
+    path,
+    { url, name, sandbox: useNetwork ? "localWithNetwork" : "localWithFile" },
+    useNetwork ? { kind: "local" } : null,
+  );
 }
 
 /** Judge requests for `movie` from now on: the last one's are aborted. */
@@ -384,10 +456,11 @@ function buildMenu(): void {
       label: "&File",
       submenu: [
         { label: "&Open…", accelerator: "CmdOrCtrl+O", click: () => void showOpenDialog() },
+        { label: "Open &URL…", accelerator: "CmdOrCtrl+L", click: showUrlDialog },
         {
           label: "Open &Recent",
           submenu: [
-            ...recent.map((path) => ({ label: path, click: () => void open(path) })),
+            ...recent.map((entry) => ({ label: entry, click: () => void openEntry(entry) })),
             ...(recent.length > 0 ? [{ type: "separator" as const }] : []),
             {
               label: "Clear Recent",
@@ -420,7 +493,7 @@ function buildMenu(): void {
           label: "&Reload Movie",
           accelerator: "CmdOrCtrl+R",
           enabled: !!current,
-          click: () => current && void open(current.path),
+          click: () => current && void openEntry(current.path),
         },
         { role: "togglefullscreen", accelerator: "F11" },
         { type: "separator" },
@@ -464,6 +537,67 @@ function guard(contents: WebContents): void {
   }
 }
 
+/**
+ * The dialog that asks for a SWF's URL: a window of its own, apart from the
+ * page, so that only the user, and never a SWF, opens one by its URL.
+ */
+function showUrlDialog(): void {
+  if (!window) {
+    return;
+  }
+
+  if (prompt) {
+    prompt.focus();
+    return;
+  }
+
+  const dialogWindow = new BrowserWindow({
+    parent: window,
+    modal: true,
+    width: 560,
+    height: 180,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    title: "Open URL",
+    show: false,
+    webPreferences: {
+      preload: promptPreload,
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      spellcheck: false,
+    },
+  });
+  prompt = dialogWindow;
+  dialogWindow.setMenu(null);
+  dialogWindow.on("page-title-updated", (event) => event.preventDefault());
+  dialogWindow.once("ready-to-show", () => dialogWindow.show());
+  dialogWindow.on("closed", () => {
+    if (prompt === dialogWindow) {
+      prompt = null;
+    }
+  });
+  const contents = dialogWindow.webContents;
+  contents.on("will-navigate", (event) => event.preventDefault());
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  void dialogWindow.loadURL(PROMPT_URL);
+}
+
+/** Whether a message comes from the URL dialog's own page. */
+function fromPrompt(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  const frame = event.senderFrame;
+  return (
+    prompt !== null &&
+    event.sender === prompt.webContents &&
+    frame !== null &&
+    frame.parent === null &&
+    frame.url === PROMPT_URL
+  );
+}
+
 function createWindow(): void {
   window = new BrowserWindow({
     width: 1024,
@@ -501,6 +635,29 @@ function listen(): void {
       void showOpenDialog();
     }
   });
+  ipcMain.on("desktop:open-url-dialog", (event) => {
+    if (trusted(event)) {
+      showUrlDialog();
+    }
+  });
+  ipcMain.handle("prompt:initial", (event) => {
+    if (!fromPrompt(event)) {
+      throw new Error("not the URL dialog");
+    }
+
+    // What plays, if it came by a URL, for the user to change.
+    return current && remoteUrl(current.path) ? current.path : "";
+  });
+  ipcMain.on("prompt:answer", (event, text: unknown) => {
+    if (!fromPrompt(event)) {
+      return;
+    }
+
+    prompt?.close();
+    if (typeof text === "string" && text.trim() !== "") {
+      void openUrl(text);
+    }
+  });
   ipcMain.on("desktop:open-path", (event, path: unknown) => {
     if (trusted(event) && typeof path === "string" && isAbsolute(path)) {
       void open(path);
@@ -536,15 +693,18 @@ function listen(): void {
 }
 
 /**
- * A request of the page's, what the SWF playing loads: only with the
- * network, as network.ts judges it. A refusal is said on stderr, and the
- * page sees a failed load.
+ * A request of the page's: the SWF's own, as the movie opened by its URL,
+ * or what the SWF playing loads, only with the network, as network.ts
+ * judges it. A refusal is said on stderr, and the page sees a failed
+ * load.
  */
 async function fetchForPage(id: number, request: unknown): Promise<NetworkResponse> {
   const asked = request as { url?: unknown; purpose?: unknown } | null;
-  const url = typeof asked?.url === "string" ? asked.url.slice(0, 2048) : "";
-  if (!sandbox.networkAllowed()) {
-    process.stderr.write(`swf2es: not loading ${url}: the SWF has no network\n`);
+  const url = typeof asked?.url === "string" ? asked.url : "";
+  const shown = url.slice(0, 2048);
+  const movie = asked?.purpose === "movie" && sandbox.startRemote(url);
+  if (!movie && !sandbox.networkAllowed()) {
+    process.stderr.write(`swf2es: not loading ${shown}: the SWF has no network\n`);
     throw new Refused("the SWF has no network");
   }
 
@@ -554,7 +714,7 @@ async function fetchForPage(id: number, request: unknown): Promise<NetworkRespon
     return await network.fetch(request, controller.signal);
   } catch (error) {
     if (error instanceof Refused && !controller.signal.aborted) {
-      process.stderr.write(`swf2es: not loading ${url}: ${error.message}\n`);
+      process.stderr.write(`swf2es: not loading ${shown}: ${error.message}\n`);
     }
 
     throw error;
@@ -580,13 +740,13 @@ app.on("second-instance", (_event, argv, workingDirectory) => {
     window.focus();
   }
 
-  const path = fileFromArguments(argv, workingDirectory);
-  if (path && settings) {
-    void open(path);
+  const entry = movieFromArguments(argv, workingDirectory);
+  if (entry && settings) {
+    void openEntry(entry);
   }
 });
 
-let pending = fileFromArguments(process.argv);
+let pending = movieFromArguments(process.argv);
 // macOS hands a file opened from the Finder as an event, perhaps before the app is ready.
 app.on("open-file", (event, path) => {
   event.preventDefault();
@@ -631,6 +791,6 @@ void app.whenReady().then(() => {
   createWindow();
   buildMenu();
   if (pending) {
-    void open(pending);
+    void openEntry(pending);
   }
 });
