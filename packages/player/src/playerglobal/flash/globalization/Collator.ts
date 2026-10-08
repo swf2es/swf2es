@@ -1,7 +1,7 @@
 // flash.globalization.Collator onto Intl.Collator. Intl has no options for
 // character width or kana, so those fold the strings before comparing:
 // full- and half-width forms to their plain ones, hiragana to katakana.
-// Where ICU's order and Windows' differ in their data (kana, ß), ICU's stands.
+// Where ICU's order and Windows' differ in their data (kana, widths), ICU's stands.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 import {
@@ -81,6 +81,8 @@ class CollatorSettings {
   }
 
   private fold(text: string): string {
+    // Windows takes ß for ss at every strength, where ICU tells them apart.
+    text = text.replaceAll("\u00df", "ss").replaceAll("\u1e9e", "SS");
     if (this.ignoreCharacterWidth) {
       text = text.replace(/[\uff01-\uffee]/g, (c) => c.normalize("NFKC"));
     }
@@ -89,6 +91,11 @@ class CollatorSettings {
       text = text.replace(/[\u3041-\u3096\u309d\u309e]/g, (c) =>
         String.fromCharCode(c.charCodeAt(0) + 0x60),
       );
+    }
+
+    // ICU's ignorePunctuation leaves symbols ("$1" against "1"), which Windows ignores too.
+    if (this.ignoreSymbols) {
+      text = text.replace(/\p{S}/gu, "");
     }
 
     return text;

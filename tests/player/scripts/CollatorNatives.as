@@ -60,6 +60,10 @@ package {
       call("compare null", function():void { c.compare(null, "a"); });
       call("compare null second", function():void { c.compare("a", null); });
       call("equals null", function():void { c.equals(null, "a"); });
+      c = new Collator("en-US");
+      trace("sharp s", c.compare("\u00df", "ss"), c.equals("Stra\u00dfe", "Strasse"));
+      c.ignoreSymbols = true;
+      trace("symbols", c.compare("$1", "1"), c.compare("a-b", "ab"), c.compare("a!b", "ab"), c.compare("@", "#"));
       trace("available", Collator.getAvailableLocaleIDNames().length > 0);
     }
 
