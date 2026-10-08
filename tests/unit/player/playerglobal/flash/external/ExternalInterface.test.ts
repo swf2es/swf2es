@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { createCodegen } from "@swf2es/codegen";
 import { containerEngine } from "../../../../../../oracle/oracle.ts";
 import type { ExternalInterfaceHost } from "../../../../../../packages/player/dist/hosts.js";
@@ -156,6 +158,9 @@ try {
   skip = (e as Error).message;
 }
 
+setFlagsFromString("--expose-gc");
+const gc = runInNewContext("gc") as () => void;
+
 const wasmBytes = async () =>
   WebAssembly.compile(
     await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
@@ -184,6 +189,7 @@ async function play(
   main: Uint8Array,
   children: Record<string, Uint8Array | { bytes: Uint8Array; redirect: string }>,
   frames = 6,
+  between?: (frame: number) => Promise<void>,
 ) {
   const lines: string[] = [];
   const evaluated: string[] = [];
@@ -218,6 +224,7 @@ async function play(
   for (let i = 0; i < frames; i++) {
     await scripting.settled();
     player.tick();
+    await between?.(i);
   }
 
   return { lines: lines.sort(), evaluated, commands, uncaught };
@@ -365,4 +372,69 @@ test("a SWF a redirect took elsewhere is judged, and named, by where it came fro
     },
   );
   assert.deepEqual(result.lines, ["false", "http://other.test/redirected.swf"]);
+});
+
+test("a child's timers and loadBytes still count as its own once it is unloaded and collected", {
+  skip,
+}, async () => {
+  const compile = compiler(out);
+  const child = (name: string, body: string) => bare(compile(name, sprite(name, body)), 1, name);
+  // The main SWF unloads its child at 200 ms, before the child's timers fire at 400 and 500.
+  const main = bare(
+    compile(
+      "EiUnloader",
+      sprite(
+        "EiUnloader",
+        `var l:Loader = new Loader();
+      l.load(new URLRequest("http://other.test/child.swf"));
+      addChild(l);
+      setTimeout(function ():void {
+        l.unload();
+        removeChild(l);
+        l = null;
+      }, 200);`,
+      ),
+    ),
+    1,
+    "EiUnloader",
+  );
+  const result = await play(
+    main,
+    {
+      "http://other.test/child.swf": child(
+        "EiLeaver",
+        `setTimeout(ExternalInterface.call, 400, "evil", "x");
+      setTimeout(fscommand, 400, "cmd", "");
+      // Off the display list, its bytes loaded from a timer once the child is gone.
+      var off:Loader = new Loader();
+      var stream:URLLoader = new URLLoader();
+      stream.dataFormat = URLLoaderDataFormat.BINARY;
+      stream.addEventListener(Event.COMPLETE, function (e:Event):void {
+        setTimeout(off.loadBytes, 500, stream.data);
+      });
+      stream.load(new URLRequest("http://other.test/bytes.swf"));`,
+      ),
+      "http://other.test/bytes.swf": child(
+        "EiOrphanBytes",
+        `trace("bytes", ExternalInterface.available, loaderInfo.loaderURL);`,
+      ),
+    },
+    30,
+    async () => {
+      // Collected between frames, as the review had it: the child's modules go.
+      gc();
+      await new Promise((done) => setImmediate(done));
+      gc();
+    },
+  );
+
+  // Repro 1: the timer's call never reaches the page; its fscommand names the child among its callers.
+  assert.equal(result.evaluated.length, 0);
+  assert.deepEqual(result.uncaught, ["Error: Error #2067"]);
+  assert.deepEqual(
+    result.commands.map((c) => c.callers),
+    [["http://page.test/main.swf", "http://other.test/child.swf"]],
+  );
+  // Repro 2: content its Loader took from a timer is no one's, not the main SWF's.
+  assert.deepEqual(result.lines, ["bytes false about:blank"]);
 });

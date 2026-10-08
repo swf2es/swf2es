@@ -1550,11 +1550,15 @@ the caller is the innermost SWF frame of a stack taken whole, with the
 engine's stackTraceLimit lifted for that one capture (its default ten
 frames lost the caller under an `Array.forEach` of
 `ExternalInterface.call`); where no SWF frame is on the stack, as for a
-library function a timer calls, every loaded SWF's URL is asked, and all
-must pass, so single-origin content works from timers and mixed-origin
-content fails closed. A loadBytes' content is the calling SWF's, as
-Flash gave it the loader's domain, not the main SWF's, never on the
-display list as it may be; a load a redirect took elsewhere is the final
+library function a timer calls, the URL of every SWF whose code was
+ever loaded is asked, and all must pass, so single-origin content works
+from timers and mixed-origin content fails closed. Ever, not now: an
+unloaded child's timers and closures outlive its modules, which the
+player holds weakly, so the URLs are kept in a set that never shrinks. A
+loadBytes' content is the calling SWF's, as Flash gave it the loader's
+domain, not the main SWF's; where the caller cannot be told, it is the
+one origin's while only one ever loaded, else no one's, an opaque URL
+no check allows; a load a redirect took elsewhere is the final
 URL's (`FetchResult.url`), for its LoaderInfo and its checks alike.
 
 The player has no sandbox between SWFs, though. A cross-origin child can

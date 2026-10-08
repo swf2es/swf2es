@@ -137,6 +137,8 @@ export class Code {
    * once the SWF is let go, the Abc goes, its origin and entry with it.
    */
   private readonly moduleAbcs = new Map<string, WeakRef<object>>();
+  /** The URLs of the SWFs whose code was ever loaded, for everUrls. */
+  private readonly loadedUrls = new Set<string>();
   private readonly origins = new WeakMap<object, { url: string; library: Library }>();
   private readonly moduleGone = new FinalizationRegistry<string>((script) => {
     if (!this.moduleAbcs.get(script)?.deref()) {
@@ -432,6 +434,7 @@ export class Code {
       const abc = linked as object;
       this.moduleAbcs.set(script, new WeakRef(abc));
       this.origins.set(abc, origin);
+      this.loadedUrls.add(origin.url);
       this.moduleGone.register(abc, script);
     }
 
@@ -615,28 +618,24 @@ export class Code {
     return this.codeOrigin(stack)?.url ?? null;
   }
 
-  /** The URLs of the SWFs whose code is loaded, the main SWF's among them: those that may be calling. */
-  liveUrls(): string[] {
-    const urls = new Set([this.s.url]);
-    for (const ref of this.moduleAbcs.values()) {
-      const abc = ref.deref();
-      const origin = abc && this.origins.get(abc);
-      if (origin) {
-        urls.add(origin.url);
-      }
-    }
-
-    return [...urls];
+  /**
+   * The URLs of every SWF whose code was ever loaded in the player, the
+   * main SWF's among them: those whose code may be calling. Never fewer:
+   * an unloaded SWF's timers and closures outlive its modules, which are
+   * held weakly, and still run its code. Strings alone, so it costs little.
+   */
+  everUrls(): string[] {
+    return [...new Set([this.s.url, ...this.loadedUrls])];
   }
 
   /**
    * Whom a security check asks about: the calling SWF's URL, or, where the
-   * caller cannot be told, every loaded SWF's, each of which must pass, so
-   * that a check fails closed rather than taking the main SWF's word.
+   * caller cannot be told, every SWF's ever loaded, each of which must
+   * pass, so that a check fails closed rather than taking the main SWF's word.
    */
   securityUrls(): string[] {
     const caller = this.callerUrl();
-    return caller === null ? this.liveUrls() : [caller];
+    return caller === null ? this.everUrls() : [caller];
   }
 
   /** The SWF whose code called a playerglobal native. */

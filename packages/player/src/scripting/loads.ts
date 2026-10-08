@@ -156,10 +156,12 @@ export class Loads {
   }
 
   /**
-   * Whose a loadBytes' content is: the SWF whose code called it, or, where
-   * the caller cannot be told, the Loader's SWF while every loaded SWF has
-   * one origin; else no one's, an opaque URL that no check allows, rather
-   * than the main SWF's.
+   * Whose a loadBytes' content is: the SWF whose code called it. Where the
+   * caller cannot be told, as from a timer, only while every SWF ever
+   * loaded had one origin is it that origin's, its Loader's SWF's on the
+   * display list, else the main SWF's, which then shares it; with several,
+   * no one's, an opaque URL that no check allows: never the main SWF's
+   * for a Loader nothing places, which an unloaded child may have made.
    */
   private bytesOwner(loader: AsObject): string {
     const caller = this.s.code.callerUrl();
@@ -167,8 +169,11 @@ export class Loads {
       return caller;
     }
 
-    const origins = new Set(this.s.code.liveUrls().map(originOf));
-    return origins.size === 1 ? this.ownerUrl(loader) : UNKNOWN_OWNER;
+    if (new Set(this.s.code.everUrls().map(originOf)).size !== 1) {
+      return UNKNOWN_OWNER;
+    }
+
+    return this.ownerUrl(loader);
   }
 
   /**
