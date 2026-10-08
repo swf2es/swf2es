@@ -114,4 +114,15 @@ parse 0 0 [$1,2,3] 123 [$] noError
 parse 0 0 [( $12 )] NaN [] parseError
 parse 0 0 [$ ( 12 )] NaN [] parseError
 parse 0 0 [-$-12] NaN [] parseError
+parse 0 0 [$−1] NaN [] parseError
+parse 0 0 [−$1] NaN [] parseError
+parse 0 0 [$.5.5] NaN [] parseError
+parse 0 0 [$ .5] 0.5 [$] noError
+parse 0 0 [USD  5] 5 [USD ] noError
+parse 8 3 [1,5  €] 1.5 [ €] noError
+parse 8 3 [1,5 €] 1.5 [€] noError
+parse 8 3 [1,5€] 1.5 [€] noError
+zh-HK HKD %24
+en-DG USD %24
+en-AU AUD %24
 available true

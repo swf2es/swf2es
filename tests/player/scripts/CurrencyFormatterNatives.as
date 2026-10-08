@@ -72,6 +72,14 @@ package {
       }
       cf = new CurrencyFormatter("en-US");
       parse(cf, ["$.5", "$12.", "$1,2,3", "( $12 )", "$ ( 12 )", "-$-12"]);
+      cf = new CurrencyFormatter("en-US");
+      parse(cf, ["$\u22121", "\u2212$1", "$.5.5", "$ .5", "USD  5"]);
+      cf = new CurrencyFormatter("de-DE");
+      parse(cf, ["1,5  \u20ac", "1,5 \u20ac", "1,5\u20ac"]);
+      for each (id in ["zh-HK", "en-DG", "en-AU"]) {
+        cf = new CurrencyFormatter(id);
+        trace(id, cf.currencyISOCode, escape(cf.currencySymbol));
+      }
       trace("available", CurrencyFormatter.getAvailableLocaleIDNames().length > 0);
     }
 

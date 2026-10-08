@@ -171,4 +171,22 @@ locale [zh-Hans-CN] zh-Hans-CN zh-CN noError
 locale [sr-Cyrl] sr-Cyrl sr-Cyrl-RS noError
 locale [es-MX] es-MX es-MX noError
 locale [pt] pt pt-BR noError
+digitsType d800 6f0 invalidAttrValue
+digitsType dc00 6f0 invalidAttrValue
+digitsType dfff 6f0 invalidAttrValue
+digitsType fffe 6f0 invalidAttrValue
+digitsType ffff 6f0 invalidAttrValue
+digitsType e000 e000 noError
+separator nul a c noError 1c234a50
+separator nul alone a illegalArgumentError
+grouping nul alone [] noError
+sign space %20 -5 0 3 -5 5
+sign space %A0 -5 0 3 -5 5
+sign space %u2000 5 2 3 NaN 5
+sign space %u2007 5 2 3 NaN 5
+sign space %u2009 5 2 3 NaN 5
+sign space %u202F -5 0 3 -5 5
+sign space %u3000 -5 0 3 -5 5
+sign space %u205F 5 2 3 NaN 5
+sign space %09 5 2 3 NaN NaN
 available true noError

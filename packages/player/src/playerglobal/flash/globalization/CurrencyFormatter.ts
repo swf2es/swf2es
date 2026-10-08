@@ -71,11 +71,9 @@ function localeCurrency(locale: string): CurrencyData {
   const own = new Intl.NumberFormat(locale, { style: "currency", currency: code });
   data = {
     code,
-    // Windows gives such a region's currency no symbol.
-    symbol:
-      code === "XDR"
-        ? ""
-        : (own.formatToParts(1).find((p) => p.type === "currency")?.value ?? code),
+    // The narrow symbol is Windows' ("$" in Hong Kong, not "HK$"); Windows gives a region of
+    // several countries' currency none.
+    symbol: code === "XDR" ? "" : (parts.find((p) => p.type === "currency")?.value ?? code),
     digits: own.resolvedOptions().maximumFractionDigits ?? 2,
     positive: Math.max(0, POSITIVE.indexOf(partsPattern(parts))),
     negative: Math.max(0, NEGATIVE.indexOf(partsPattern(accounting.formatToParts(-1234.5)))),
@@ -136,20 +134,28 @@ class CurrencySettings extends NumberSettings {
   private patternRegExp(pattern: string): RegExp {
     const literal = (text: string) => text.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&");
     const sign = literal(this.negativeSymbol);
-    // A currency neither begins nor ends with a space, nor holds a sign or parentheses; before
-    // the number, as little as leaves it one, so that "$.5" is "$" and .5.
-    const not = `()${this.negativeSymbol.replace(/[\\\]^-]/g, "\\$&")}`;
-    const symbolBefore = `(?<symbol>[^\\p{Nd}\\p{Zs}${not}](?:[^\\p{Nd}${not}]*?[^\\p{Nd}\\p{Zs}${not}])??)?`;
-    const symbolAfter = `(?<symbol>[^\\p{Zs}${not}](?:[^${not}]*[^\\p{Zs}${not}])?)?`;
+    // A currency holds no sign or parentheses; it begins with no space before the number and
+    // ends with none after it, where one space parts them and any more are the currency's.
+    // Before the number it is as short as leaves one ("$.5" is "$" and .5), but a number does
+    // not begin after a decimal separator ("$.5.5").
+    const not = `()\\u2212${this.negativeSymbol.replace(/[\\\]^-]/g, "\\$&")}`;
+    const symbolBefore = `(?<symbol>[^\\p{Nd}\\p{Zs}${not}](?:[^\\p{Nd}${not}]*?[^\\p{Nd}${not}])??)?`;
+    const symbolAfter = `(?<symbol>[^${not}](?:[^${not}]*[^\\p{Zs}${not}])?)?`;
     const group = this.groupingSeparator === "" ? "" : `(?:${literal(this.groupingSeparator)})?`;
     const decimal = literal(this.decimalSeparator);
-    const number = `(?<number>\\p{Nd}(?:${group}\\p{Nd})*(?:${decimal}\\p{Nd}*)?|${decimal}\\p{Nd}+)`;
+    const number = `(?<!${decimal})(?<number>\\p{Nd}(?:${group}\\p{Nd})*(?:${decimal}\\p{Nd}*)?|${decimal}\\p{Nd}+)`;
     const before = pattern.indexOf("$") < pattern.indexOf("n");
     let source = "";
     let previous = "";
+    let spaced = false;
     for (const c of pattern) {
-      if (c === " " || (c === "$" && previous === "n") || (c === "n" && previous === "$")) {
-        source += "\\p{Zs}*";
+      if (c === " ") {
+        spaced = true;
+        continue;
+      }
+
+      if (spaced || (c === "$" && previous === "n") || (c === "n" && previous === "$")) {
+        source += "\\p{Zs}?";
       }
 
       switch (c) {
@@ -168,9 +174,8 @@ class CurrencySettings extends NumberSettings {
           break;
       }
 
-      if (c !== " ") {
-        previous = c;
-      }
+      previous = c;
+      spaced = false;
     }
 
     return new RegExp(`^\\p{Zs}*${source}\\p{Zs}*$`, "u");

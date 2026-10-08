@@ -150,6 +150,27 @@ package {
         nf = new NumberFormatter(id);
         trace("locale [" + id + "]", nf.requestedLocaleIDName, nf.actualLocaleIDName, nf.lastOperationStatus);
       }
+      // A surrogate or a noncharacter is no zero; a NUL ends a separator; signs stand only plain,
+      // no-break, narrow or ideographic spaces from their number.
+      nf = new NumberFormatter("en-US");
+      for each (zero in [0xD800, 0xDC00, 0xDFFF, 0xFFFE, 0xFFFF, 0xE000]) {
+        nf.digitsType = 0x6F0;
+        nf.digitsType = zero;
+        trace("digitsType", zero.toString(16), nf.digitsType.toString(16), nf.lastOperationStatus);
+      }
+      nf = new NumberFormatter("en-US");
+      nf.decimalSeparator = "a\u0000b";
+      nf.groupingSeparator = "c\u0000d";
+      trace("separator nul", nf.decimalSeparator, nf.groupingSeparator, nf.lastOperationStatus, nf.formatNumber(1234.5));
+      nf.decimalSeparator = "\u0000";
+      trace("separator nul alone", nf.decimalSeparator, nf.lastOperationStatus);
+      nf.groupingSeparator = "\u0000";
+      trace("grouping nul alone [" + nf.groupingSeparator + "]", nf.lastOperationStatus);
+      nf = new NumberFormatter("en-US");
+      for each (s in [" ", "\u00a0", "\u2000", "\u2007", "\u2009", "\u202f", "\u3000", "\u205f", "\t"]) {
+        r = nf.parse("-" + s + "5");
+        trace("sign space", escape(s), r.value, r.startIndex, r.endIndex, nf.parseNumber("-" + s + "5"), nf.parseNumber(s + "5" + s));
+      }
       trace("available", NumberFormatter.getAvailableLocaleIDNames().length > 0, LastOperationStatus.NO_ERROR);
     }
 

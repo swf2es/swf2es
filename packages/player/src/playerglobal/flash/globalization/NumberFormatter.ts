@@ -155,17 +155,25 @@ export class NumberSettings {
     this.set("groupingPattern", pattern, GROUPING.test(pattern));
   }
 
-  setDecimalSeparator(separator: string): void {
+  // Flash's strings are C strings: a NUL ends a separator.
+  setDecimalSeparator(given: string): void {
+    const separator = given.split("\0")[0];
     this.set("decimalSeparator", separator, separator !== "" && separator.length <= SEPARATOR_MAX);
   }
 
-  setGroupingSeparator(separator: string): void {
+  setGroupingSeparator(given: string): void {
+    const separator = given.split("\0")[0];
     this.set("groupingSeparator", separator, separator.length <= SEPARATOR_MAX);
   }
 
-  /** Digits from a zero: past int's range an illegal argument, past Unicode's last nine invalid. */
+  /**
+   * Digits from a zero: past int's range an illegal argument; past Unicode's
+   * last nine, a surrogate or a noncharacter invalid.
+   */
   setDigitsType(zero: number): void {
-    if (zero <= 0x7fffffff && zero + 9 > 0x10ffff) {
+    const invalid =
+      zero + 9 > 0x10ffff || (zero >= 0xd800 && zero <= 0xdfff) || (zero & 0xfffe) === 0xfffe;
+    if (zero <= 0x7fffffff && invalid) {
       this.status = INVALID_ATTR_VALUE;
       return;
     }
@@ -400,9 +408,13 @@ export function digit(text: string, i: number): number {
 
 const isSpace = (c: string | undefined) => c !== undefined && /\p{Zs}/u.test(c);
 
+// The spaces that may stand between a sign and its number: plain, no-break, narrow and ideographic.
+const SIGN_SPACES = " \u00a0\u202f\u3000";
+
 /** The index past one space at `i` in direction `step`, if there is one. */
 function skipSpace(text: string, i: number, step: 1 | -1): number {
-  return isSpace(step > 0 ? text[i] : text[i - 1]) ? i + step : i;
+  const c = step > 0 ? text[i] : text[i - 1];
+  return c !== undefined && SIGN_SPACES.includes(c) ? i + step : i;
 }
 
 /** The index past the spaces from `i` on in direction `step`: Flash's spaces are Unicode's space separators. */
