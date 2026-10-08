@@ -4092,8 +4092,8 @@ as Flash Player 32 sent it. Every address is placed (`src/main/addresses.ts`):
 on this machine (127/8, ::1), on a private network (10/8, 172.16/12,
 192.168/16, 100.64/10, link-local 169.254/16, where clouds keep their
 metadata service, unique and link-local IPv6, the documentation blocks),
-or public; an IPv4 address inside an IPv6 one, mapped, by NAT64 or by
-6to4, is that address. A request to a place more private than the
+or public; an IPv4 address inside an IPv6 one, mapped, translated
+(`::ffff:0:a.b.c.d`), compatible, by NAT64 or by 6to4, is that address. A request to a place more private than the
 SWF's own needs a policy file from that very address that grants the
 SWF, whatever its purpose and even within its origin, as Chromium's
 Private Network Access asks a server there before a public page may. A
@@ -4239,7 +4239,8 @@ without, no local file by swf2es:// or file://, connects the socket whose
 server answers with a socket policy and not the one without, and both
 URLs join the recent list. `connections.test.ts`
 and `sandbox.test.ts` test the sockets' limits and the sandbox's grants
-in node, `policy.test.ts` the policy parser and what policies grant, by
+in node, `addresses.test.ts` where each address is, in every form an
+IPv4 address takes inside an IPv6 one, `policy.test.ts` the policy parser and what policies grant, by
 the specification's examples, and `network.test.ts` the network against
 servers of its own, each on 127.0.0.2, which it takes for the internet,
 and on 127.0.0.1 at the same port: same-origin and cross-origin loads

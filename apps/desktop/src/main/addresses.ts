@@ -115,8 +115,13 @@ function classOfV6(bytes: Uint8Array): AddressClass | null {
     return "loopback";
   }
 
-  // An IPv4 address within, mapped, compatible, by NAT64 or by 6to4: that address's class.
+  // An IPv4 address within, mapped, translated (RFC 2765's ::ffff:0:a.b.c.d),
+  // compatible, by NAT64 or by 6to4: that address's class.
   if (zero(0, 10) && bytes[10] === 0xff && bytes[11] === 0xff) {
+    return classOfV4(v4At(bytes, 12));
+  }
+
+  if (zero(0, 8) && bytes[8] === 0xff && bytes[9] === 0xff && zero(10, 12)) {
     return classOfV4(v4At(bytes, 12));
   }
 
