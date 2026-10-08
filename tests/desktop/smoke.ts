@@ -176,11 +176,12 @@ async function withApp(
     });
     let target: { webSocketDebuggerUrl: string } | undefined;
     for (let tries = 0; !target; tries++) {
-      const targets = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as {
-        type: string;
-        url: string;
-        webSocketDebuggerUrl: string;
-      }[];
+      let targets: { type: string; url: string; webSocketDebuggerUrl: string }[] = [];
+      try {
+        targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+      } catch {
+        // Not listening yet.
+      }
 
       target = targets.find((t) => t.type === "page" && t.url.startsWith("swf2es://app/"));
       if (!target) {
@@ -212,7 +213,13 @@ async function withApp(
     assert.doesNotMatch(stderr, /violates the following Content Security Policy/);
   } finally {
     socket?.close();
-    electron?.kill();
+    // Gone before its user data is: it writes there as it quits.
+    const running = electron;
+    if (running && running.exitCode === null && running.signalCode === null) {
+      const gone = new Promise((done) => running.once("exit", done));
+      running.kill();
+      await gone;
+    }
 
     rmSync(userData, { recursive: true, force: true });
   }
