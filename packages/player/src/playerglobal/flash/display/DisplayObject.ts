@@ -188,7 +188,6 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
   class DisplayObjectNatives {
     declare $display: DisplayObject;
     declare $transform: AsObject | undefined;
-    declare $cacheAsBitmap: boolean | undefined;
     declare $cacheAsBitmapMatrix: Value;
     declare $metaData: Value;
     declare $opaqueBackground: Value;
@@ -498,12 +497,12 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       this.$display.setBlendMode(mode);
     }
 
+    // Flash caches an object with filters whatever cacheAsBitmap was set to, and reads it so.
     get cacheAsBitmap(): boolean {
-      return this.$cacheAsBitmap ?? false;
+      return this.$display.cachedAsBitmap || this.$display.filters.length > 0;
     }
 
     set cacheAsBitmap(v: Value) {
-      this.$cacheAsBitmap = !!v;
       this.$display.setCachedAsBitmap(!!v);
     }
 

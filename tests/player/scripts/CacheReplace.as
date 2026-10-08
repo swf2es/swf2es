@@ -38,6 +38,8 @@ package {
       o("s5").filters = [new GlowFilter(0, 1, 2, 2)];
       before.r0 = MovieClip(o("r0")).getChildAt(0);
       before.r0.cacheAsBitmap = true;
+      o("g").mask = o("m");
+      trace("cacheAsBitmap read", o("p0").cacheAsBitmap, o("p4").cacheAsBitmap, o("s2").cacheAsBitmap);
     }
 
     private function frame2():void {
@@ -50,6 +52,7 @@ package {
       o("c5").cacheAsBitmap = false;
       o("c6").cacheAsBitmap = false;
       o("c6").cacheAsBitmap = true;
+      o("n1").filters = [new GlowFilter(0, 1, 2, 2)];
       trace("c7 width", o("c7").width);
       trace("t1 text", JSON.stringify(o("t1").text));
       trace("t2 width", o("t2").width);

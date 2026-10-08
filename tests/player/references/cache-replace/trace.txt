@@ -1,3 +1,4 @@
+cacheAsBitmap read true true false
 c7 width 20
 t1 text "c"
 t2 width 40

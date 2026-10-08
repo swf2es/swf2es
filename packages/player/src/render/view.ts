@@ -28,9 +28,11 @@ import {
   Clips,
   CONTENT,
   Container,
+  cached,
   type DisplayObject,
   PIXELS,
   ShapeObject,
+  type StaleCache,
   StaticTextObject,
   TextObject,
   TRANSFORM,
@@ -141,6 +143,8 @@ interface Node {
   container: PixiContainer;
   /** The linear part of the object's transform on the stage. */
   world: Linear;
+  /** A stale cache drawn, the scale it was first drawn at, and whether that has changed since. */
+  stale: { cache: StaleCache; world: Linear; spent: boolean } | null;
   /** What the object itself draws, a shape's or a drawing's layers, under any children. */
   art: PixiContainer;
   /** The layers drawn, a shape's or a drawing's, as of the last redraw. */
@@ -568,6 +572,7 @@ export class PixiView {
       node = {
         container: new PixiContainer(),
         world: [0, 0, 0, 0],
+        stale: null,
         art,
         layers: [],
         fills: [],
@@ -770,6 +775,24 @@ export class PixiView {
     ];
   }
 
+  /**
+   * The shape a Shape draws: the one Flash's stale bitmap cache shows,
+   * while it stands on the stage at the scale it was drawn at; a mask
+   * clips by the shape it is.
+   */
+  private shapeOf(o: ShapeObject, node: Node): ShapeCharacter | null {
+    const cache = o.stale;
+    if (!cache || node.masking) {
+      return o.drawn();
+    }
+
+    if (node.stale?.cache !== cache) {
+      node.stale = { cache, world: node.world, spent: false };
+    }
+
+    return node.stale.spent ? o.drawn() : cache.shape;
+  }
+
   /** What `o` itself draws, into its node emptied of what it drew before. */
   private draw(o: DisplayObject, node: Node): void {
     const current = this.current(o);
@@ -793,7 +816,7 @@ export class PixiView {
       return;
     }
 
-    const shape = o instanceof ShapeObject ? (o.stale?.shape ?? o.drawn()) : null;
+    const shape = o instanceof ShapeObject ? this.shapeOf(o, node) : null;
     node.layers = o.drawing?.layers ?? shape?.layers ?? [];
     const slicing = this.slicing(o, node);
     if (slicing) {
@@ -1142,17 +1165,12 @@ export class PixiView {
       }
     }
 
-    // A shape drawn from Flash's stale bitmap cache is drawn as it is once the cache goes.
-    if (o instanceof ShapeObject && o.stale && !o.staleStands()) {
-      dirty |= CONTENT;
-    }
-
     // A mask is drawn, whatever its visibility, alpha and colour, by its fills alone.
     const masking = inMask || o.maskOf !== null || o.clipDepth > 0;
     const remask = masking !== node.masking;
     node.masking = masking;
     if (remask) {
-      dirty |= TRANSFORM;
+      dirty |= TRANSFORM | (o instanceof ShapeObject && o.stale ? CONTENT : 0);
     }
 
     if (dirty & TRANSFORM) {
@@ -1250,6 +1268,21 @@ export class PixiView {
       if (moved) {
         node.world = [a, b, c, d];
       }
+    }
+
+    // Flash draws a stale cache again when the object's scale on the stage changes, as by its
+    // parent's, or a frame is drawn with its cache off; from then on the view draws the object
+    // as it is.
+    const stale = node.stale;
+    if (
+      stale &&
+      !stale.spent &&
+      o instanceof ShapeObject &&
+      o.stale === stale.cache &&
+      (!sameLinear(stale.world, node.world) || !cached(o))
+    ) {
+      stale.spent = true;
+      dirty |= CONTENT;
     }
 
     // A 9-slice reshapes the shapes as the owner's scale, bounds or grid change, or a Shape child's

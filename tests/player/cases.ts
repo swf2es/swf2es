@@ -3166,6 +3166,10 @@ function scriptedTouch(abc: Uint8Array): Uint8Array {
 // by the script, which touch it, so that it takes neither. Row 4, the same
 // by PlaceObject3's cacheAsBitmap, opaqueBackground and glow.
 // Row 5: a clip whose child is cached and replaced, sent back to frame 1.
+// Row 6, cached by PlaceObject3 and replaced: a shape in a clip the
+// timeline scales on frame 3, a shape the script gives a glow on frame 3,
+// one with a glow the timeline changes on frame 3, and a red square
+// masked by one over it replaced by a triangle.
 function cacheReplace(abc: Uint8Array): Uint8Array {
   const at = (x: number, y: number) => ({ tx: x * 20, ty: y * 20 });
   // Children named `names` from column `first` of row `y`, at depths of the row's.
@@ -3183,9 +3187,9 @@ function cacheReplace(abc: Uint8Array): Uint8Array {
   const c = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => `c${i}`);
   return w.swf({
     width: 420,
-    height: 230,
+    height: 275,
     frameRate: 24,
-    frameCount: 4,
+    frameCount: 5,
     tags: [
       w.fileAttributes(true),
       w.backgroundColor(0xffffff),
@@ -3193,6 +3197,17 @@ function cacheReplace(abc: Uint8Array): Uint8Array {
       square(1, 0xff0000, 400),
       square(2, 0x0000ff, 600),
       square(3, 0x0000ff, 400),
+      w.shape({
+        id: 11,
+        bounds: [0, 400, 0, 400],
+        fills: [0x0000ff],
+        paths: [
+          {
+            fill1: 1,
+            commands: [{ move: [0, 0] }, { line: [400, 0] }, { line: [0, 400] }, { line: [0, 0] }],
+          },
+        ],
+      }),
       w.staticText({
         id: 4,
         bounds: [0, 800, 0, 400],
@@ -3211,6 +3226,16 @@ function cacheReplace(abc: Uint8Array): Uint8Array {
         w.showFrame(),
         w.end(),
       ]),
+      w.sprite(10, 5, [
+        w.place({ depth: 1, character: 1, cacheAsBitmap: true }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, character: 3 }),
+        w.showFrame(),
+        w.showFrame(),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ]),
       w.doAbc(abc, "CacheReplace"),
       w.symbolClass([[0, "Main"]]),
       ...row(0, c, 1),
@@ -3220,6 +3245,11 @@ function cacheReplace(abc: Uint8Array): Uint8Array {
       ...row(3, ["p2", "p3"], 1, { opaqueBackground: 0xffffffff }, 2),
       ...row(3, ["p4", "p5"], 1, glow, 4),
       ...row(4, ["r0"], 7),
+      ...row(5, ["n0"], 10),
+      ...row(5, ["n1"], 1, { cacheAsBitmap: true }, 1),
+      ...row(5, ["n2"], 1, glow, 2),
+      ...row(5, ["g"], 1, {}, 3),
+      w.place({ depth: 110, character: 1, name: "m", matrix: at(130, 235), cacheAsBitmap: true }),
       w.showFrame(),
       ...c.map((_, i) => w.place({ depth: i + 1, move: true, character: 3 })),
       ...[0, 1, 2].map((i) => w.place({ depth: 21 + i, move: true, character: 5 })),
@@ -3227,10 +3257,16 @@ function cacheReplace(abc: Uint8Array): Uint8Array {
         w.place({ depth: 41 + i, move: true, character: i % 2 ? 2 : 3 }),
         w.place({ depth: 61 + i, move: true, character: i % 2 ? 2 : 3 }),
       ]),
+      w.place({ depth: 102, move: true, character: 3 }),
+      w.place({ depth: 103, move: true, character: 3 }),
+      w.place({ depth: 110, move: true, character: 11 }),
       w.showFrame(),
       w.place({ depth: 2, move: true, character: 2 }),
+      w.place({ depth: 101, move: true, matrix: { a: 1.5, d: 1.5, ...at(10, 235) } }),
+      w.place({ depth: 103, move: true, glows: [{ color: 0, blur: 4, strength: 1 }] }),
       w.place({ depth: 9, move: true, matrix: at(10 + 8 * 40 + 5, 10) }),
       w.place({ depth: 10, move: true, colorTransform: { mult: [1, 1, 1, 0.5] } }),
+      w.showFrame(),
       w.showFrame(),
       w.showFrame(),
       w.end(),
@@ -4281,7 +4317,7 @@ export const cases: PlayerCase[] = [
     name: "cache-replace",
     swf: cacheReplace,
     script: "CacheReplace",
-    frames: 4,
+    frames: 5,
     capture: [1, 2, 3, 4],
     tolerance: 32,
     maxOutliers: 60,

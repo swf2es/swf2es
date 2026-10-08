@@ -593,10 +593,10 @@ export class ShapeObject extends DisplayObject {
   private blended: { morph: MorphCharacter; ratio: number; shape: ShapeCharacter } | null = null;
   /**
    * The shape Flash's bitmap cache of it still shows, given another of the
-   * same bounds while cached, and the matrix and colour it was cached at
-   * (`swap`); null where it draws what it is.
+   * same bounds while cached (`swap`), and the look it was cached with;
+   * null where it draws what it is. It goes for good when the look does.
    */
-  stale: { shape: ShapeCharacter; matrix: Matrix; color: ColorTransform | null } | null = null;
+  stale: StaleCache | null = null;
 
   constructor(shape: ShapeCharacter | null) {
     super();
@@ -645,35 +645,72 @@ export class ShapeObject extends DisplayObject {
   }
 
   /**
-   * Whether the stale cache still stands: Flash draws the object again for
-   * another scale, turn or colour, or its cache turned off, but not when it
-   * only moves (`cache-replace`).
+   * Flash draws the object again, its cache gone stale or not, for another
+   * scale, turn or skew, colour or filters; not when it only moves
+   * (`cache-replace`). The cache turned off counts only where a frame is
+   * drawn so: off and on again in between, it stands (the view's to tell).
    */
-  staleStands(): boolean {
+  override invalidate(what: number): void {
     const stale = this.stale;
-    if (!stale) {
-      return false;
-    }
-
-    const m = this.matrix;
-    const s = stale.matrix;
-    const stands =
-      cached(this) &&
-      m.a === s.a &&
-      m.b === s.b &&
-      m.c === s.c &&
-      m.d === s.d &&
-      sameColor(this.colorTransform, stale.color);
-    if (!stands) {
+    if (stale && what & TRANSFORM && !stale.stands(this)) {
       this.stale = null;
+      what |= CONTENT;
     }
 
-    return stands;
+    super.invalidate(what);
   }
 }
 
+/** What a bitmap cache was drawn of, and the look it was drawn with. */
+export class StaleCache {
+  private readonly a: number;
+  private readonly b: number;
+  private readonly c: number;
+  private readonly d: number;
+  private readonly color: ColorTransform | null;
+  private readonly filters: readonly Filter[];
+
+  constructor(
+    readonly shape: ShapeCharacter,
+    o: DisplayObject,
+  ) {
+    ({ a: this.a, b: this.b, c: this.c, d: this.d } = o.matrix);
+    this.color = o.colorTransform;
+    this.filters = o.filters;
+  }
+
+  stands(o: DisplayObject): boolean {
+    const m = o.matrix;
+    return (
+      m.a === this.a &&
+      m.b === this.b &&
+      m.c === this.c &&
+      m.d === this.d &&
+      sameColor(o.colorTransform, this.color) &&
+      sameFilters(o.filters, this.filters)
+    );
+  }
+}
+
+/**
+ * A place's filters are read anew at each move, the same or not. Those
+ * from a SWF are plain records; a script's displacement map holds its
+ * bitmap, so another list with one counts as other filters.
+ */
+function sameFilters(a: readonly Filter[], b: readonly Filter[]): boolean {
+  if (a === b) {
+    return true;
+  }
+
+  if (a.length !== b.length || a.some((f) => f.kind === "displacementMap")) {
+    return false;
+  }
+
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 /** Whether Flash draws `o` from a bitmap it keeps: cacheAsBitmap set, or filters. */
-function cached(o: DisplayObject): boolean {
+export function cached(o: DisplayObject): boolean {
   return o.cachedAsBitmap || o.filters.length > 0;
 }
 
@@ -981,11 +1018,7 @@ function swap(existing: DisplayObject, character: Character): void {
   // (`scripted-touch`). A text draws its new glyphs whatever its bounds.
   const old = existing.drawn();
   if (cached(existing) && character.type === "shape" && old && sameBounds(old, character)) {
-    existing.stale ??= {
-      shape: old,
-      matrix: { ...existing.matrix },
-      color: existing.colorTransform,
-    };
+    existing.stale ??= new StaleCache(old, existing);
   } else {
     existing.stale = null;
   }
