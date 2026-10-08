@@ -56,6 +56,8 @@ node packages/cli/dist/main.js file.swf [-o dir] [--lib x.abc ...] [--emit-libra
 node tests/player/module-cache.ts   # the IndexedDB module cache in Chrome (part of pnpm test)
 node tests/player/precompiled.ts    # AOT modules played in Chrome, imported under a policy
                               # without 'unsafe-eval' too (part of pnpm test)
+node tests/player/resize.ts         # filters inside filters drawn while the renderer is resized
+                              # in Chrome (part of pnpm test)
 node tests/web/run.ts               # @swf2es/web's element, replaceFlash and ExternalInterface in
                               # Chrome (part of pnpm test)
 node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic

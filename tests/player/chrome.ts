@@ -627,3 +627,16 @@ export function withSteppedPage<T>(
     options,
   );
 }
+
+/** Play a SWF with no scripts in the page's resizeSwf, a frame for each [width, height, resolution]; what threw, if anything. */
+export function playResized(
+  swf: Uint8Array,
+  sizes: [number, number, number][],
+): Promise<string | null> {
+  return withPage("resizeSwf", async (evaluate) => {
+    const { value, exception } = await evaluate<string | null>(
+      `resizeSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${JSON.stringify(sizes)})`,
+    );
+    return exception ?? value ?? null;
+  });
+}
