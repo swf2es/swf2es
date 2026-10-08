@@ -1722,10 +1722,23 @@ frame count: `getTimer` reads it, and `Timer` fires by it. A frame
 stepped by `Player.tick()` moves the clock by one frame's duration at
 the stage's frame rate, the first frame's included, so a test that steps
 frames gets the same clock every time; a host playing in real time calls
-`Player.advance(dt)` with the time passed, which accumulates it and runs
-as many frames as it is worth, five at most after a long pause and the
-rest let go, as Ruffle paces, so a stall does not become a spiral of
-catch-up. It returns how many it ran, and `Player.changes` counts what
+`Player.advance(dt)` with the time passed, which plays frames on a grid
+of the frame's duration and drops those a long frame or a stall lost, as
+Flash does, rather than catch up with them as Ruffle does. Measured in
+adl at 24 fps with a 200 ms busy loop in some frames' ENTER_FRAME, Flash
+runs the next frame at once after the long one, the one after at its
+slot on the grid (8 to 9 ms later, 24 ms after three long frames in a
+row), then 41 to 42 ms apart again: never two back to back, and the lost
+frames are gone, the movie slowing down. Content that moves by the wall
+clock between frames counts on that: a large real-world SWF's walk
+stops when two ENTER_FRAMEs move it less than a pixel, which frames run
+back to back to catch up, with no time between them, did on every hitch.
+So a call runs as many frames as the host's typical interval holds,
+the lower median of its last nine calls, never the current one: one,
+where the SWF's frame is as long as the display's or longer, two for a
+120 fps SWF at 60 Hz, five at most; until it has seen three calls, one.
+What is owed beyond that is dropped but for the part of a frame, which
+keeps the grid's phase. It returns how many it ran, and `Player.changes` counts what
 may change the picture: each frame, each key, each call from the page
 into an ExternalInterface callback, each `updateAfterEvent`, and the
 pointer events that change what shows at once: a hover that moves on or

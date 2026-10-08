@@ -18,9 +18,9 @@ test("advance plays what the time is worth and says how many frames; changes cou
   assert.equal(player.advance(60), 0);
   assert.equal(player.changes, before);
 
-  // With what was kept, two frames' worth.
-  assert.equal(player.advance(150), 2);
-  assert.equal(player.changes, before + 2);
+  // With what was kept, a frame's worth.
+  assert.equal(player.advance(50), 1);
+  assert.equal(player.changes, before + 1);
 });
 
 test("a destroyed player plays no more frames", () => {
