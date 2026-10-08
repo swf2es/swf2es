@@ -87,7 +87,7 @@ export class Scripting {
   readonly lifecycle = new Lifecycle(this);
   /** What Loaders, URLStreams and host callbacks asked for, till the frame it comes in. */
   readonly loads: Loads;
-  /** The frame clock, getTimer's, and the timers that fire by it. */
+  /** The clocks, getTimer's, and the timers that fire by them. */
   readonly timers: Timers;
   readonly screenCapabilities: Readonly<ScreenCapabilities>;
   readonly externalInterface: ExternalInterfaceHost | null;
@@ -918,6 +918,7 @@ export class Scripting {
     if (entered) {
       this.frames++;
       this.broadcast("enterFrame");
+      this.timers.frameTimers();
     }
 
     this.constructPending();
@@ -944,13 +945,20 @@ export class Scripting {
     }
 
     this.loads.deliverAvm1Loads();
+    this.render();
+  }
 
+  /**
+   * The stage renders, at the end of a frame or between frames for a
+   * timer's updateAfterEvent: RENDER if a script invalidated the stage,
+   * and the scroll rectangles set since take effect, as Flash's do.
+   */
+  render(): void {
     if (this.invalidated) {
       this.invalidated = false;
       this.broadcast("render");
     }
 
-    // The frame is drawn: the scroll rectangles set since take effect, as Flash's do.
     for (const d of this.scrolled) {
       d.scroll = d.scrollRect;
       d.invalidate(TRANSFORM);

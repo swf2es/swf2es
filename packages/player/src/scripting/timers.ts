@@ -1,6 +1,9 @@
-// The player's clock and the timers that fire by it: a frame moves the
-// clock on and fires the timers due by then, before the timeline advances;
-// flash.utils.Timer starts and stops them, and getTimer tells the time.
+// The player's clock and the timers: by the real clock where the host has
+// one, as Flash fires them, at each frame after ENTER_FRAME and those
+// shorter than a frame between frames too; by the frame clock otherwise, a
+// frame moving it on and firing the timers due by then before the timeline
+// advances. flash.utils.Timer starts and stops them, and getTimer tells
+// the time.
 import type { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
 
@@ -8,10 +11,11 @@ type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
 export class Timers {
-  /** The clock, in milliseconds since the start, moved by the frame step and nothing else; Timer fires by it. */
+  /** The frame clock, in ms since the start, moved by the frame step alone; Timer fires by it without a real clock. */
   clock = 0;
   /**
-   * The time getTimer tells and a timer started now counts from: the clock,
+   * By the frame clock, the time getTimer tells and a timer started now
+   * counts from (sounds go by it with either clock): the clock,
    * except while a timer's closure runs, when it is the time the timer fell
    * due, as Flash fires timers between frames at their own times, so that
    * one timer set from another keeps the first's pace, not the frame's.
@@ -22,6 +26,10 @@ export class Timers {
   /** The timers started, by their Timer objects, and a heap of them by when they fall due. */
   private readonly running = new Map<AsObject, TimerRecord>();
   private readonly timers = new TimerHeap();
+  /** Timers started so far: the order of a start, which timers due in one pass of the real clock fire in. */
+  private starts = 0;
+  /** Set by updateAfterEvent while a timer fires between frames: the stage renders after its closure. */
+  renderAsked = false;
 
   constructor(
     private readonly s: Scripting,
@@ -38,17 +46,28 @@ export class Timers {
    * as it always has been, so that the traces recorded by it stay.
    */
   timer(): number {
-    return this.realTime ? Math.floor(this.realTime() - this.realStart) : Math.round(this.now);
+    return this.realTime ? Math.floor(this.elapsed()) : Math.round(this.now);
+  }
+
+  /** Milliseconds since the start by the real clock, unrounded. */
+  private elapsed(): number {
+    return (this.realTime as () => number)() - this.realStart;
   }
 
   /**
-   * A frame begins: the clock moves on by `ms`, and the timers that fall
-   * due by then fire, before the timeline advances, each firing the
-   * earliest due, so that two timers interleave as their times do and
-   * one started from another with time to spare fires in the same pass.
+   * A frame begins: the clock moves on by `ms`. Without a real clock the
+   * timers that fall due by then fire, before the timeline advances, each
+   * firing the earliest due, so that two timers interleave as their times
+   * do and one started from another with time to spare fires in the same
+   * pass. With one, they fire after ENTER_FRAME (frameTimers).
    */
   beginFrame(ms: number): void {
     this.clock += ms;
+    if (this.realTime) {
+      this.now = this.clock;
+      return;
+    }
+
     try {
       for (;;) {
         const next = this.timers.pop(this.clock);
@@ -76,6 +95,86 @@ export class Timers {
     }
   }
 
+  /**
+   * The frame's timers by the real clock, after ENTER_FRAME and before the
+   * frame's construction, as Flash fires them: every timer due fires once.
+   */
+  frameTimers(): void {
+    if (this.realTime) {
+      this.fireDue(Number.POSITIVE_INFINITY, false);
+    }
+  }
+
+  /**
+   * A check between frames by the real clock: the timers due whose delay
+   * is shorter than the frame fire once each. Flash fires those between
+   * frames at their times and holds a longer one for the next frame, a
+   * 45 ms timer at 24 fps firing every other frame though the player
+   * checks between (measured in adl, docs/architecture.md).
+   */
+  betweenFrames(frameMs: number): void {
+    if (this.realTime) {
+      this.fireDue(frameMs, true);
+    }
+  }
+
+  /**
+   * Each timer due by the real clock with a delay under `shorter` fires
+   * once, in the order the timers were started, and next falls due its
+   * delay after now: the ticks a long frame or a stall lost are dropped,
+   * not caught up with, as in Flash.
+   */
+  private fireDue(shorter: number, between: boolean): void {
+    const now = this.elapsed();
+    const due: TimerRecord[] = [];
+    const held: TimerRecord[] = [];
+    for (;;) {
+      const next = this.timers.pop(now);
+      if (!next) {
+        break;
+      }
+
+      (next.delay < shorter ? due : held).push(next);
+    }
+
+    for (const record of held) {
+      this.timers.push(record);
+    }
+
+    if (!due.length) {
+      return;
+    }
+
+    due.sort((a, b) => a.order - b.order);
+    try {
+      for (const record of due) {
+        // Stopped by a closure before it in the pass; one started anew has a record of its own.
+        if (record.stopped) {
+          continue;
+        }
+
+        record.due = now + record.delay;
+        this.renderAsked = false;
+        try {
+          this.s.rt.call(record.closure, record.object);
+        } catch (error) {
+          this.s.reportUncaught(error);
+        } finally {
+          if (!record.stopped) {
+            this.timers.push(record);
+          }
+        }
+
+        // updateAfterEvent between frames: the stage renders now, RENDER and all, as in Flash.
+        if (between && this.renderAsked) {
+          this.s.render();
+        }
+      }
+    } finally {
+      this.renderAsked = false;
+    }
+  }
+
   /** Timer._start: `closure` is called every `delay` ms from now, until stopped; a timer running already is started anew. */
   startTimer(object: AsObject, delay: number, closure: Value): void {
     this.stopTimer(object);
@@ -83,8 +182,9 @@ export class Timers {
       object,
       delay: Math.max(delay, 1),
       closure,
-      due: this.now + delay,
+      due: (this.realTime ? this.elapsed() : this.now) + delay,
       seq: 0,
+      order: this.starts++,
       stopped: false,
     };
     this.running.set(object, record);
@@ -117,6 +217,8 @@ interface TimerRecord {
   due: number;
   /** Its place among timers due at the same time: the one scheduled first fires first. */
   seq: number;
+  /** When it was started among the others: timers due in one pass of the real clock fire in this order. */
+  order: number;
   /** Stopped, and so to be dropped when it surfaces; a Timer started anew gets a record of its own. */
   stopped: boolean;
 }

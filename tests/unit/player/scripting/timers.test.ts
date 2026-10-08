@@ -150,3 +150,225 @@ test("getTimer runs on in real time by default", { skip }, async () => {
   await new Player(swf, scripting).start();
   assert.deepEqual(lines, ["true"]);
 });
+
+/**
+ * A SWF that logs, between one ENTER_FRAME and the next, the frame's
+ * events and each timer's firings with getTimer: b and a every 10 ms,
+ * started in that order, c every 30 ms, shorter than a 24 fps frame, and d
+ * every 50 ms, longer. Each ENTER_FRAME traces the log so far.
+ */
+const paceSource = `package {
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.events.TimerEvent;
+  import flash.utils.Timer;
+  import flash.utils.getTimer;
+  public class TimerPace extends Sprite {
+    private var log:Array = [];
+    public function TimerPace() {
+      start("b", 10);
+      start("a", 10);
+      start("c", 30);
+      start("d", 50);
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        trace(log.join(" "));
+        log = ["EF" + getTimer()];
+      });
+      addEventListener(Event.FRAME_CONSTRUCTED, function(e:Event):void { log.push("FC"); });
+    }
+    private function start(name:String, delay:int):void {
+      var t:Timer = new Timer(delay);
+      t.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void { log.push(name + getTimer()); });
+      t.start();
+    }
+  }
+}`;
+
+/** TimerPace's traces on a host whose clock moves by each of `dts` before the advance() it passes it to. */
+async function pace(dts: number[], realTime: boolean): Promise<string[][]> {
+  const lines: string[] = [];
+  let now = 0;
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: realTime ? () => now : null,
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const swf = bare(compiler(out)("TimerPace", paceSource), 1, "TimerPace");
+  const player = new Player(swf, scripting);
+  await player.start();
+  for (const dt of dts) {
+    now += dt;
+    player.advance(dt);
+  }
+
+  // The first trace is the frame before the first ENTER_FRAME's.
+  return lines.slice(1).map((line) => line.split(" "));
+}
+
+const hz60 = (calls: number) => Array.from({ length: calls }, () => 1000 / 60);
+const fires = (frame: string[], name: string) => frame.filter((e) => e[0] === name).length;
+
+test("by the real clock, a timer shorter than a frame fires at each check, 2 or 3 times a 24 fps frame at 60 Hz", {
+  skip,
+}, async () => {
+  const frames = await pace(hz60(120), true);
+
+  assert.ok(frames.length >= 45, `${frames.length} frames`);
+  for (const frame of frames.slice(2)) {
+    // Once a call: a 10 ms timer as often as a 60 Hz host checks, as adl's 2 to 4 a frame.
+    assert.ok([2, 3].includes(fires(frame, "a")), frame.join(" "));
+    assert.equal(fires(frame, "a"), fires(frame, "b"), frame.join(" "));
+  }
+});
+
+test("by the real clock, the frame's timers fire after ENTER_FRAME, before the frame is constructed, in the order started", {
+  skip,
+}, async () => {
+  const frames = await pace(hz60(120), true);
+
+  for (const frame of frames) {
+    const fc = frame.indexOf("FC");
+    const time = frame[0].slice(2);
+    assert.ok(frame[0].startsWith("EF") && fc > 0, frame.join(" "));
+    // Those in the frame's pass fire at its time, b before a as started.
+    for (const event of frame.slice(1, fc)) {
+      assert.equal(event.slice(1), time, frame.join(" "));
+    }
+
+    const pass = frame.slice(1, fc).map((e) => e[0]);
+    assert.deepEqual(
+      pass,
+      ["b", "a", "c", "d"].filter((n) => pass.includes(n)),
+      frame.join(" "),
+    );
+  }
+});
+
+test("by the real clock, a timer as long as a frame or longer fires only in a frame, one shorter between frames too", {
+  skip,
+}, async () => {
+  const frames = await pace(hz60(240), true);
+  const between = (name: string) =>
+    frames.flatMap((frame) => frame.slice(frame.indexOf("FC") + 1)).filter((e) => e[0] === name);
+
+  // 50 ms at 24 fps: every other frame, as adl fires a 45, 50 or 60 ms timer.
+  assert.equal(between("d").length, 0);
+  const d = frames.map((frame) => fires(frame, "d"));
+  assert.ok(Math.abs(d.reduce((a, b) => a + b, 0) - frames.length / 2) <= 1, d.join(""));
+  // 30 ms: between frames as well.
+  assert.ok(between("c").length > 0);
+});
+
+test("by the real clock, a long frame fires each timer once and drops the ticks it lost", {
+  skip,
+}, async () => {
+  const frames = await pace([...hz60(30), 200, ...hz60(30)], true);
+  // The frame the 200 ms call plays, whose pass is the only check in those 200 ms.
+  const at = (frame: string[]) => Number(frame[0].slice(2));
+  const long = frames.find((frame, i) => i > 0 && at(frame) - at(frames[i - 1]) > 150);
+  assert.ok(long, frames.map((f) => f[0]).join(" "));
+  const i = frames.indexOf(long);
+  const before = frames[i - 1];
+
+  // 200 ms of a 10 ms timer's ticks: none between the frames, one firing each at the frame's time.
+  assert.deepEqual(before.slice(before.indexOf("FC") + 1), []);
+  assert.deepEqual(
+    long.slice(1, long.indexOf("FC")).filter((e) => e[0] === "a" || e[0] === "b"),
+    [`b${long[0].slice(2)}`, `a${long[0].slice(2)}`],
+  );
+
+  // Then the usual pace again.
+  for (const frame of frames.slice(i + 1)) {
+    assert.ok(fires(frame, "a") <= 3, frame.join(" "));
+  }
+});
+
+test("by the frame clock, timers fire as before: every due time as the next frame begins, before its ENTER_FRAME", {
+  skip,
+}, async () => {
+  const frames = await pace(hz60(60), false);
+
+  for (const frame of frames.slice(1, -1)) {
+    // Nothing after ENTER_FRAME, nor between frames: a 10 ms timer at each of its times in a 41.7 ms frame.
+    assert.equal(frame[1], "FC", frame.join(" "));
+    assert.ok([4, 5].includes(fires(frame, "a")), frame.join(" "));
+    assert.equal(
+      new Set(frame.filter((e) => e[0] === "a")).size,
+      fires(frame, "a"),
+      frame.join(" "),
+    );
+  }
+});
+
+test("by the real clock, updateAfterEvent between frames renders the stage then, RENDER and all", {
+  skip,
+}, async () => {
+  const swf = bare(
+    compiler(out)(
+      "TimerRender",
+      `package {
+        import flash.display.Sprite;
+        import flash.events.Event;
+        import flash.events.TimerEvent;
+        import flash.utils.Timer;
+        public class TimerRender extends Sprite {
+          private var log:Array = [];
+          private var fires:int = 0;
+          public function TimerRender() {
+            var t:Timer = new Timer(10);
+            t.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void {
+              fires++;
+              // Invalidated by every firing, rendered after the odd ones.
+              log.push("T" + fires % 2);
+              stage.invalidate();
+              if (fires % 2 == 1) { e.updateAfterEvent(); }
+            });
+            stage.addEventListener(Event.RENDER, function(e:Event):void { log.push("R"); });
+            t.start();
+            addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+              trace(log.join(" "));
+              log = ["EF"];
+            });
+            addEventListener(Event.EXIT_FRAME, function(e:Event):void { log.push("EX"); });
+          }
+        }
+      }`,
+    ),
+    1,
+    "TimerRender",
+  );
+  const lines: string[] = [];
+  let now = 0;
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: () => now,
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(swf, scripting);
+  await player.start();
+  // The host's draws: those a call asks for by moving changes.
+  let draws = 0;
+  for (let call = 0; call < 30; call++) {
+    const before = player.changes;
+    now += 1000 / 60;
+    draws += player.advance(1000 / 60) === 0 && player.changes !== before ? 1 : 0;
+  }
+
+  const frames = lines.slice(2).map((line) => line.split(" "));
+  for (const frame of frames) {
+    const after = frame.slice(frame.indexOf("EX") + 1);
+    for (let i = 0; i < after.length; i++) {
+      // Between frames: RENDER after an updateAfterEvent's firing, none after the others'.
+      if (after[i] === "T1") {
+        assert.equal(after[i + 1], "R", frame.join(" "));
+      } else if (after[i] === "T0") {
+        assert.notEqual(after[i + 1], "R", frame.join(" "));
+      }
+    }
+  }
+
+  const between = frames.flatMap((frame) => frame.slice(frame.indexOf("EX") + 1));
+  assert.ok(between.includes("T1"), lines.join("\n"));
+  // And the host draws then, between frames, as many times as it asked.
+  assert.equal(draws, between.filter((e) => e === "T1").length + 1);
+});

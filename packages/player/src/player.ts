@@ -229,6 +229,11 @@ export class Player {
       this.owed %= frame;
     }
 
+    // Flash fires timers shorter than a frame between frames too: a call that played none checks them.
+    if (n === 0) {
+      this.scripting?.timers.betweenFrames(frame);
+    }
+
     return n;
   }
 
