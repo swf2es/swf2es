@@ -119,16 +119,21 @@ function contentSecurityPolicy(page: string): string {
 export class FileGrants {
   private readonly roots = new Set<string>();
 
-  /** `swf` and the files beside it and below, which it loads by relative URL. */
+  /**
+   * `swf` and the files beside it and below, which it loads by relative
+   * URL; for a link, beside the file it links to, which is the URL's too.
+   */
   grant(swf: string): string {
-    this.roots.add(realpathSync(dirname(swf)));
-    return `${FILE_ORIGIN}${pathToFileURL(swf).pathname}`;
+    const real = realpathSync.native(swf);
+    this.roots.add(dirname(real));
+    return `${FILE_ORIGIN}${pathToFileURL(real).pathname}`;
   }
 
   /** The file a swf2es://file URL names, if granted. */
   async resolve(url: URL): Promise<string | null> {
     let path: string;
     try {
+      // The OS's realpath, as grant's realpathSync.native, so the two agree.
       path = await realpath(fileURLToPath(`file://${url.pathname}`));
     } catch {
       return null;
@@ -205,7 +210,14 @@ export function serve(session: Session, grants: FileGrants, libraries: () => Lib
       return new Response(null, { status: 405 });
     }
 
-    const path = decodeURIComponent(url.pathname);
+    let path: string;
+    try {
+      path = decodeURIComponent(url.pathname);
+    } catch {
+      // Malformed %-escapes name no file.
+      return new Response(null, { status: 400 });
+    }
+
     if (url.host === "app") {
       return app(path);
     }

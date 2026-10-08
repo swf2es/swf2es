@@ -9,7 +9,7 @@
 //   node tests/desktop/smoke.ts
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -219,7 +219,14 @@ const both = {
 };
 
 try {
-  await withApp(both, [swf], async ({ stdout, stderr, until, evaluate, devtools }) => {
+  // Opened through a link, the SWF plays from the file it links to, and loads beside that.
+  // In a directory of its own, which the file it links to is not under.
+  const link = `${out}links/smoke.swf`;
+  mkdirSync(`${out}links`, { recursive: true });
+  rmSync(link, { force: true });
+  symlinkSync(swf, link);
+
+  await withApp(both, [link], async ({ stdout, stderr, until, evaluate, devtools }) => {
     const traced = (line: string) => stdout.filter((l) => l === line).length;
     await until("the SWF's socket", () => traced("smoke: socket pong") > 0);
     assert.equal(traced("smoke: started"), 1);
@@ -256,6 +263,12 @@ try {
 
     // Nine pages asked for, by three starts, none after a gesture: none opened.
     assert.equal(stderr().match(/not opening https:\/\/example\.invalid\/smoke\d/g)?.length, 9);
+
+    // Malformed %-escapes are a bad request, not a crash.
+    assert.equal(
+      await evaluate<number>(`fetch("swf2es://file/%E0%A4%A").then((r) => r.status)`),
+      400,
+    );
 
     // A file outside the SWF's directory is not the page's to read.
     const outside = `swf2es://file${pathToFileURL(fileURLToPath(new URL("smoke.ts", import.meta.url))).pathname}`;
