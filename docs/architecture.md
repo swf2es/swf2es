@@ -3926,22 +3926,19 @@ from elsewhere is best kept in a directory of its own.
 The main process chooses the sandbox from the SWF's first 64 KB, with
 `fileAttributes` (`format`), which decompresses only as far as the first
 tag: a SWF's header may name a length of 4 GB, which it never trusts.
-The page decompresses the SWF whole. Its LZMA decoder (`lzma.ts` in
-`format`) refuses a properties byte past 224, fails as soon as it would
-read past the stream's end, and grows its output as it writes; and
-`decompressSwf` refuses, before decoding, a ZWS whose header names more
-than 8192 times its stream, as LZMA expands a byte 7090 times at best. A
-ZWS within that bound still costs the page what it names, up to some
-8192 bytes for each of its own; a CWS's zlib stops at its stream's end. Only the SWF playing has a grant: opening
-another or closing it revokes it, so nothing accumulates over a run, and
-the next SWF's grant takes effect only as the page fetches it, which it
-does once the element has let the last player go, so that player never
-runs in the next one's sandbox. What the SWF loads, a child SWF among
-it, plays in its sandbox, which is the page's. The URL the page plays a
-SWF from, which is also its `loaderInfo.url`, names its directory by a
-token, a hash of the path, and the file by its name, so the SWF learns
-nothing of where it is or whose disk it is on, and the token, the same
-from run to run, keeps its SharedObjects.
+The page decompresses the SWF whole, with what `format`'s LZMA decoder
+bounds (see [Packages](#packages)).
+
+Only the SWF playing has a grant: opening another or closing it revokes
+it, so nothing accumulates over a run, and the next SWF's grant takes
+effect only as the page fetches it, which it does once the element has
+let the last player go, so that player never runs in the next one's
+sandbox. What the SWF loads, a child SWF among it, plays in its sandbox,
+which is the page's. The URL the page plays a SWF from, which is also
+its `loaderInfo.url`, names its directory by a token, a hash of the
+path, and the file by its name, so the SWF learns nothing of where it is
+or whose disk it is on, and the token, the same from run to run, keeps
+its SharedObjects.
 
 The page's Content-Security-Policy, a header the main process writes, is
 `default-src 'none'` and what the player needs: `script-src 'self'
