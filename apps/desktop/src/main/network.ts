@@ -989,8 +989,13 @@ export class Network {
           arm();
         };
         // Bytes of their own, not a view of a larger array, whose rest IPC
-        // would carry to the page with them.
-        const done = () => end(length === body.length ? body : body.slice(0, length));
+        // would carry to the page with them; the larger array let go of at
+        // once, so that it may be collected before IPC copies the rest.
+        const done = () => {
+          const bytes = length === body.length ? body : body.slice(0, length);
+          body = new Uint8Array(0);
+          end(bytes);
+        };
         arm();
         if (!coded) {
           response.on("data", take);
