@@ -238,6 +238,13 @@ check("the element follows its size and the device's pixels", async (evaluate) =
   assert.deepEqual(r, { dpr: 2, canvas: [640, 480], css: ["320px", "120px"] });
 });
 
+check("an embedder's fetch loads the SWF, asked for as the movie", async (evaluate) => {
+  assert.deepEqual(await call(evaluate, "embedderFetch()"), {
+    asked: [["/web-test/shapes.swf", "movie"]],
+    played: true,
+  });
+});
+
 check("watchFlash replaces the Flash tags the page adds or makes Flash later", async (evaluate) => {
   assert.deepEqual(await call(evaluate, "watched()"), {
     before: "embed",

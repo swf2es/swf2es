@@ -3809,7 +3809,11 @@ default what the import map gives `@swf2es/codegen/codegen.wasm`;
 `socketProxy`, a function from a socket's host and port to a WebSocket
 relay's URL or a list of them as Ruffle's, a socket without one refused
 with #2031; `sockets`, a SocketHost of the embedder's own that takes the
-relays' place, as the desktop app's, which reaches TCP itself; and
+relays' place, as the desktop app's, which reaches TCP itself; `fetch`,
+an embedder's fetch in place of the browser's for what the SWFs load and
+for the SWF the element plays (purpose `movie`), with `loadPolicyFile`
+and `sandboxType` for the player, as the desktop app judges requests by
+Flash's sandboxes and policy files rather than CORS; and
 `cache`. The page fetches and compiles codegen.wasm once and the
 libraries once, and each player instantiates the compiled module
 and reads the same bytes. A player has a Codegen of its own: Scripting

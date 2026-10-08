@@ -267,6 +267,40 @@ async function destroyMovie() {
   };
 }
 
+/**
+ * A player loading through the embedder's fetch: the requests it was
+ * asked, by purpose, and whether the SWF played. The fetch is taken away
+ * again, so the other players keep the browser's.
+ */
+async function embedderFetch() {
+  const { web } = await loading;
+  const asked: [string, string | undefined][] = [];
+  web.configure({
+    fetch: async (request, signal) => {
+      asked.push([new URL(request.url).pathname, request.purpose]);
+      const response = await pageFetch(request.url, { signal });
+      return {
+        bytes: response.ok ? new Uint8Array(await response.arrayBuffer()) : null,
+        status: response.status,
+        headers: [],
+      };
+    },
+  });
+  const player = document.createElement("swf2es-player") as Player;
+  document.body.append(player);
+  let played = true;
+  try {
+    await player.load("/web-test/shapes.swf");
+  } catch {
+    played = false;
+  } finally {
+    web.configure({ fetch: undefined });
+    player.remove();
+  }
+
+  return { asked, played };
+}
+
 /** Pixels per CSS pixel and the scripted SWF's canvas after the page widens it. */
 async function resize() {
   const movie = element("movie");
@@ -442,6 +476,7 @@ Object.assign(globalThis, {
   externalInterface,
   destroyMovie,
   resize,
+  embedderFetch,
   watched,
   churn,
   survivors,
