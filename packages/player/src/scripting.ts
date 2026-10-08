@@ -8,7 +8,7 @@
 // makes one for a `new`. The rest is in parts it holds, in scripting/:
 // the SWFs' code, what SymbolClass binds, display objects' comings and
 // goings, loads and timers.
-import type { Codegen } from "@swf2es/codegen";
+import { API_VERSION, type Codegen } from "@swf2es/codegen";
 import type { Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
@@ -47,7 +47,7 @@ import type { Cursor, PointerInput } from "./input/pointer.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
 import { finishSounds, timelineSoundsOf } from "./media/sounds.js";
 import { airLibrary, playerHooks, playerNatives } from "./playerglobal/index.js";
-import { API_VERSION, Code } from "./scripting/code.js";
+import { Code } from "./scripting/code.js";
 import { dispatchTo } from "./scripting/events.js";
 import { Lifecycle } from "./scripting/lifecycle.js";
 import { Loads } from "./scripting/loads.js";

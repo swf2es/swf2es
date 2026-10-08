@@ -2,6 +2,7 @@
 // domain its SWF loads into, compiled into a module once all of its SWF's
 // are added, evaluated and linked into the runtime; and, by the module a
 // stack frame is of, the domain, URL and SWF of the code that runs.
+import { libraryLog, moduleKey } from "@swf2es/codegen";
 import { readDoAbc, type Swf, tags } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { decodeImages } from "../bitmap/images.js";
@@ -12,9 +13,6 @@ import { sha256 } from "./sha256.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
-
-/** The API version of the SWFs' ABCs, Flash Player's, that the compiler's domain starts with. */
-export const API_VERSION = 50;
 
 export class Code {
   /** Each ABC's hash, by its index in the compiler; "" once its domain is dropped. */
@@ -112,6 +110,25 @@ export class Code {
   private readonly linking = new Map<number, number>();
   /** Modules loaded, each under a script name of its own for Runtime.codeDomain. */
   private modules = 0;
+  /**
+   * The URLs modules were imported from. A document has one module per
+   * URL, so the same module loaded into another domain, as a SWF compiled
+   * ahead of time loaded again into a sibling of the main SWF's domain,
+   * whose context is the same, is imported from a URL of its own, by a
+   * fragment, lest its frames name the first's script and so its domain.
+   */
+  private readonly importedUrls = new Set<string>();
+
+  /** `url` absolute, as frames name it, and not yet imported by this player. */
+  private uniqueUrl(url: string): string {
+    const unique = new URL(url);
+    if (this.importedUrls.has(unique.href)) {
+      unique.hash = `swf2es-${this.importedUrls.size}`;
+    }
+
+    this.importedUrls.add(unique.href);
+    return unique.href;
+  }
   /**
    * The SWF each module's code came from, its URL and library, for codeUrl
    * and codeLibrary: by its script name, the module's Abc, and that.
@@ -306,7 +323,8 @@ export class Code {
    * domain sees, or `ready` from the host's module cache, loaded into the
    * runtime's `domain`; `builtin` for the player's own libraries, a SWF's
    * with its `origin`. Each is evaluated under a script name of its own,
-   * by which Runtime.codeDomain finds the domain of the code running.
+   * or imported from its URL, by which Runtime.codeDomain finds the domain
+   * of the code running.
    */
   private compileAt(
     index: number,
@@ -315,11 +333,9 @@ export class Code {
     origin?: { url: string; library: Library },
     ready?: Ready,
   ): Value {
-    const script = `swf2es-${++this.modules}.js`;
-    const load = (module: string) => {
-      const factory = evaluateModule(module, script);
-      return this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
-    };
+    let script = `swf2es-${++this.modules}.js`;
+    const run = (factory: Factory) => this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
+    const load = (module: string) => run(evaluateModule(module, script));
     let linked: Value;
     if (!ready?.cached) {
       linked = load(ready?.module ?? this.s.codegen.compileModule(this.hashes, index));
@@ -332,9 +348,14 @@ export class Code {
       // since, and the key the compile now would have is not this one.
       const loaded = domain.own.length;
       try {
-        linked = load(ready.module);
+        if (ready.imported) {
+          linked = run(ready.imported.factory);
+          script = ready.imported.url;
+        } else {
+          linked = load(ready.module);
+        }
       } catch (e) {
-        this.discard(ready.key);
+        this.discard(ready.key, ready.entry);
         if (domain.own.length !== loaded) {
           throw e;
         }
@@ -371,8 +392,9 @@ export class Code {
     const cache = this.cache();
     const ready: Ready[] = [];
     await this.digestLibraries(indices[0]);
+    const smallest = cache?.minBytes ?? MIN_CACHED_ABC;
     for (const index of indices) {
-      if (this.sizes[index] < MIN_CACHED_ABC) {
+      if (this.sizes[index] < smallest) {
         const module = this.s.codegen.compileModule(this.hashes, index);
         ready.push({ module, key: null, cached: false });
         continue;
@@ -381,12 +403,12 @@ export class Code {
       // Read again by the key taken again if the read let another load
       // change the compiler's domain, a few times at most.
       let key = this.moduleKey(index);
-      let entry: CachedModule | undefined;
+      let entry: Read | undefined;
       for (let tries = 0; cache && key !== null && tries < 3; tries++) {
         const revision = this.s.codegen.revision();
         const asked: string = key;
         try {
-          entry = await cache.get(await sha256Text(asked));
+          entry = await read(cache, await sha256Text(asked), (url) => this.uniqueUrl(url));
         } catch {
           entry = undefined;
         }
@@ -404,16 +426,17 @@ export class Code {
       }
 
       let failed = false;
-      if (key !== null && entry !== undefined && whole(entry)) {
-        if (this.s.codegen.replay(entry.log, index)) {
-          ready.push({ module: entry.module, key, cached: true });
+      if (key !== null && entry !== undefined) {
+        const { entry: cached, imported } = entry;
+        if (this.s.codegen.replay(cached.log, index)) {
+          ready.push({ module: cached.module, key, cached: true, entry: cached, imported });
           continue;
         }
 
         // Done part way, the log left the domain as no compile would: the
         // module compiled now is not that key's, and the entry goes.
         failed = true;
-        this.discard(key);
+        this.discard(key, cached);
       }
 
       const { module, log } = this.s.codegen.compileModuleLogged(this.hashes, index);
@@ -438,12 +461,12 @@ export class Code {
     }
   }
 
-  /** Have the cache let go of what it holds under `key`'s hash, not waiting for it. */
-  private discard(key: string | null): void {
+  /** Have the cache let go of `entry`, or what it holds, under `key`'s hash, not waiting for it. */
+  private discard(key: string | null, entry?: CachedModule): void {
     const cache = this.cache();
     if (cache && key !== null) {
       sha256Text(key)
-        .then((k) => cache.delete(k))
+        .then((k) => cache.delete(k, entry))
         .catch(() => {});
     }
   }
@@ -461,38 +484,26 @@ export class Code {
       return;
     }
 
-    const context = this.s.codegen.context(index, 0, count);
-    const digest = await sha256Text(context?.log ?? "");
+    const digest = await sha256Text(libraryLog(this.s.codegen, index, count));
     this.libraryLog = { epoch, digest };
   }
 
   /**
-   * What ABC `index`'s module depends on, as the cache keys it: the
-   * compiler's identity, the API version, every ABC its domain sees, by
-   * hash and whether it is a library, those added after it included, its
-   * own place among them, and the compiler's log about them, the lazy
-   * answers fixed so far and the findings recorded, in order (see
-   * Codegen.context), the libraries' part by its digest once taken. Null
-   * where there is none.
+   * ABC `index`'s key, as codegen's moduleKey writes it (the swf2es command
+   * keys its modules alike), the libraries' part by its digest once this
+   * compiler's epoch has one. Null where there is none.
    */
   private moduleKey(index: number): string | null {
     const libraries =
       this.libraryCount !== null && this.libraryLog?.epoch === this.s.codegen.epoch
         ? { count: this.libraryCount, digest: this.libraryLog.digest }
         : null;
-    const context = this.s.codegen.context(index, libraries?.count ?? 0);
-    if (!context) {
-      return null;
-    }
-
-    return JSON.stringify({
-      compiler: this.s.codegen.identity,
-      api: API_VERSION,
-      abcs: context.abcs.map((i) => `${this.builtins[i] ? "builtin " : ""}${this.hashes[i]}`),
-      own: context.own,
+    return moduleKey(
+      this.s.codegen,
+      index,
+      { hashes: this.hashes, builtins: this.builtins },
       libraries,
-      log: context.log,
-    });
+    );
   }
 
   /** An ApplicationDomain object for the runtime's `domain`: a new one at each ask, as Flash's, without running its constructor. */
@@ -554,22 +565,87 @@ export class Code {
  */
 const MIN_CACHED_ABC = 8 * 1024;
 
-/** Whether `entry` is a module and a log of the lengths stored with them: a write cut short at a line's end is a shorter log. */
+/**
+ * Whether `entry` is a module and a log of the lengths stored with them: a
+ * write cut short at a line's end is a shorter log. A module to import is
+ * not read, and its import is what tells whether it is whole.
+ */
 function whole(entry: CachedModule): boolean {
   return (
-    typeof entry.module === "string" &&
     typeof entry.log === "string" &&
     Array.isArray(entry.lengths) &&
-    entry.lengths[0] === entry.module.length &&
-    entry.lengths[1] === entry.log.length
+    entry.lengths[1] === entry.log.length &&
+    (entry.url === undefined
+      ? typeof entry.module === "string" && entry.lengths[0] === entry.module.length
+      : typeof entry.url === "string")
   );
 }
 
-/** A module made ready to load: from the cache, its log replayed, or compiled; its key, if it has one. */
+/** A module's factory, as it exports it: given the runtime, it loads the module into it. */
+type Factory = (rt: avm2.Runtime) => Value;
+
+/** A module imported from its URL, which its code's stack frames name it by. */
+interface Imported {
+  factory: Factory;
+  url: string;
+}
+
+/**
+ * What `cache` holds under `key`, if it is whole, its module imported
+ * first if it has a URL, from `unique(url)`. An entry that is not whole,
+ * or does not import, is deleted and asked for again once: a chain of
+ * caches then answers from the next that holds it (see chainCaches).
+ */
+async function read(
+  cache: ModuleCache,
+  key: string,
+  unique: (url: string) => string,
+): Promise<{ entry: CachedModule; imported?: Imported } | undefined> {
+  for (let tries = 0; tries < 2; tries++) {
+    const entry = await cache.get(key);
+    if (entry === undefined) {
+      return undefined;
+    }
+
+    if (whole(entry)) {
+      if (entry.url === undefined) {
+        return { entry };
+      }
+
+      try {
+        const url = unique(entry.url);
+        const factory = (await import(/* @vite-ignore */ /* webpackIgnore: true */ url)).default;
+        if (typeof factory === "function") {
+          return { entry, imported: { factory, url } };
+        }
+      } catch {
+        // Deleted, as an entry cut short is.
+      }
+    }
+
+    try {
+      await cache.delete(key, entry);
+    } catch {
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+type Read = NonNullable<Awaited<ReturnType<typeof read>>>;
+
+/**
+ * A module made ready to load: from the cache, its log replayed, or
+ * compiled; its key, if it has one; and if cached, the cache's entry, and
+ * if imported, its factory.
+ */
 interface Ready {
   module: string;
   key: string | null;
   cached: boolean;
+  entry?: CachedModule;
+  imported?: Imported;
 }
 
 const EXPORT = "export default ";
@@ -589,7 +665,7 @@ function sha256Text(text: string): Promise<string> {
  * (see Lazy compilation in docs/architecture.md); its lines in a stack
  * are its file's two further on, after Function's header.
  */
-function evaluateModule(module: string, script: string): (rt: avm2.Runtime) => Value {
+function evaluateModule(module: string, script: string): Factory {
   if (!module.startsWith(EXPORT)) {
     throw new Error("swf2es: a module that is not one exported function");
   }

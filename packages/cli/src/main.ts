@@ -19,8 +19,10 @@ const USAGE = `usage: swf2es <file.swf|file.abc> [options]
 
 Compiles the ABCs of a SWF (its DoABC and DoABC2 tags, in order), or a bare
 ABC, to ES modules as the player compiles them for a SWF it loads as its
-main movie, byte for byte. Writes a .js file per ABC and a manifest.json
-naming them, their ABCs' hashes and the compiler.
+main movie, byte for byte. Writes a .js file per ABC, a .log file of what
+its compile fixed, which the player replays in its place, and a
+manifest.json naming them, their ABCs' hashes, the keys the player's
+module cache looks them up by, and the compiler.
 
 options:
   -o, --out <dir>      where to write (default: <file name>.swf2es)
@@ -44,6 +46,12 @@ const REPO_LIBRARIES = fileURLToPath(
 const DEFAULT_LIBRARIES = ["builtin.abc", "playerglobal.abc"].map((n) => REPO_LIBRARIES + n);
 
 const HINT = "run swf2es --help for usage";
+
+/**
+ * manifest.json's format: 2 added each module's log, key and lengths, and
+ * named the compiler by its stamped identity rather than its file's hash.
+ */
+const MANIFEST_VERSION = 2;
 
 /** The exit status for a mistake in how the command was run. */
 const USAGE_ERROR = 2;
@@ -98,7 +106,9 @@ async function removeModules(out: string): Promise<void> {
   for (const entry of entries) {
     const name = (entry as { module?: unknown } | null)?.module;
     if (typeof name === "string" && /^(abc|lib)-\d+\.js$/.test(name)) {
-      await writing(join(out, name), () => rm(join(out, name), { force: true }));
+      for (const file of [name, name.replace(/\.js$/, ".log")]) {
+        await writing(join(out, file), () => rm(join(out, file), { force: true }));
+      }
     }
   }
 }
@@ -174,17 +184,30 @@ async function main(argv: string[]): Promise<void> {
   await writing(out, () => mkdir(out, { recursive: true }));
   await removeModules(out);
   let size = 0;
-  const write = async (path: string, m: Module) => {
-    await writing(join(out, path), () => writeFile(join(out, path), m.module));
-    size += Buffer.byteLength(m.module);
-    return path;
+  const write = async (file: string, text: string) => {
+    await writing(join(out, file), () => writeFile(join(out, file), text));
+    size += Buffer.byteLength(text);
+    return file;
+  };
+  // A module, its log beside it, and what a host's precompiled module cache
+  // looks it up by and checks it with: the key and the two's lengths.
+  const entry = async (name: string, m: Module) => {
+    const module = await write(`${name}.js`, m.module);
+    if (m.log === null || m.key === null) {
+      return { module };
+    }
+
+    const log = await write(`${name}.log`, m.log);
+    return { module, log, key: m.key, lengths: [m.module.length, m.log.length] };
   };
 
-  // The compiler is named by its version and its binary's hash, so that a
-  // host can refuse what another build wrote; an ABC by its hash, as its
-  // module names it, with the ABCs it was linked against.
+  // The compiler is named by the identity stamped into its binary, which
+  // the keys name too, so that a host can tell what another build wrote;
+  // an ABC by its hash, as its module names it, with the ABCs it was
+  // linked against.
   const manifest = {
-    compiler: { name: "swf2es", version: COMPILER_VERSION, wasm: sha256(wasm) },
+    manifestVersion: MANIFEST_VERSION,
+    compiler: { name: "swf2es", version: COMPILER_VERSION, identity: codegen.identity },
     apiVersion: API_VERSION,
     input: {
       file: basename(file),
@@ -195,8 +218,8 @@ async function main(argv: string[]): Promise<void> {
     libraries: await Promise.all(
       libs.map(async ({ name, abc }, i) => {
         const m = compiled.libraries[i];
-        const entry = { name, sha256: sha256(abc) };
-        return m ? { ...entry, module: await write(`lib-${i}.js`, m) } : entry;
+        const lib = { name, sha256: sha256(abc) };
+        return m ? { ...lib, ...(await entry(`lib-${i}`, m)) } : lib;
       }),
     ),
     abcs: await Promise.all(
@@ -204,7 +227,7 @@ async function main(argv: string[]): Promise<void> {
         name: m.name,
         sha256: m.hash,
         lazy: m.lazy,
-        module: await write(`abc-${i}.js`, m),
+        ...(await entry(`abc-${i}`, m)),
       })),
     ),
   };

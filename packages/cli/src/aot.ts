@@ -6,11 +6,16 @@
 // is added, then the SWF's DoABCs all added to a child of the root before
 // any of them compiles.
 import { createHash } from "node:crypto";
-import type { Codegen } from "@swf2es/codegen";
+import {
+  API_VERSION,
+  type Codegen,
+  type LibraryDigest,
+  libraryLog,
+  moduleKey,
+} from "@swf2es/codegen";
 import { isAs3, readDoAbc, readSwf, tags } from "@swf2es/format";
 
-/** The API version the player resets the compiler with: Flash Player's. */
-export const API_VERSION = 50;
+export { API_VERSION };
 
 export interface AbcInput {
   /** DoABC2's name, "" for a DoABC or a bare ABC. */
@@ -34,6 +39,18 @@ export interface Module {
   lazy: boolean;
   /** The ES module's source. */
   module: string;
+  /**
+   * What compiling it fixed in the compiler's domain, which the player
+   * replays in its place (Codegen.compileModuleLogged); null where it
+   * cannot be.
+   */
+  log: string | null;
+  /**
+   * The SHA-256 of its key, as the player's module cache looks it up when
+   * it loads the SWF as its main movie (codegen's moduleKey); null for a
+   * compiler without an identity, or a module without a log.
+   */
+  key: string | null;
 }
 
 const SIGNATURES = new Set(["FWS", "CWS", "ZWS"]);
@@ -116,6 +133,7 @@ export function compileAhead(
 ): { libraries: Module[]; abcs: Module[] } {
   codegen.reset(API_VERSION);
   const hashes: string[] = [];
+  const builtins: boolean[] = [];
   const add = (what: string, abc: Uint8Array, builtin: boolean, domain: number) => {
     const error = codegen.add(abc, builtin, domain);
     if (error) {
@@ -123,15 +141,26 @@ export function compileAhead(
     }
 
     hashes.push(sha256(abc));
+    builtins.push(builtin);
     return hashes.length - 1;
+  };
+  // Keyed before it compiles, as the player keys it before it asks its cache.
+  const compile = (index: number, libraryDigest: LibraryDigest | null) => {
+    const keyText =
+      codegen.identity === null
+        ? null
+        : moduleKey(codegen, index, { hashes, builtins }, libraryDigest);
+    const { module, log } = codegen.compileModuleLogged(hashes, index);
+    const key = keyText === null || log === null ? null : sha256Text(keyText);
+    return { hash: hashes[index], module, log, key };
   };
 
   const libraryModules: Module[] = [];
   for (const { name, abc } of libraries) {
     const index = add(`library ${name}`, abc, true, 0);
-    const module = codegen.compileModule(hashes, index);
+    const compiled = compile(index, null);
     if (keepLibraries) {
-      libraryModules.push({ name, hash: hashes[index], lazy: false, module });
+      libraryModules.push({ name, lazy: false, ...compiled });
     }
   }
 
@@ -140,12 +169,17 @@ export function compileAhead(
   const indices = abcs.map(({ name, abc }, i) =>
     add(`ABC ${i}${name ? ` (${name})` : ""}`, abc, false, domain),
   );
-  const modules = abcs.map(({ name, lazy }, i) => ({
-    name,
-    hash: hashes[indices[i]],
-    lazy,
-    module: codegen.compileModule(hashes, indices[i]),
-  }));
+  // The libraries' part of the log, by its digest, as the player's keys name it once a SWF is added.
+  const count = libraries.length;
+  const digest: LibraryDigest | null =
+    indices.length > 0
+      ? { count, digest: sha256Text(libraryLog(codegen, indices[0], count)) }
+      : null;
+  const modules = abcs.map(({ name, lazy }, i) => ({ name, lazy, ...compile(indices[i], digest) }));
 
   return { libraries: libraryModules, abcs: modules };
+}
+
+function sha256Text(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
 }

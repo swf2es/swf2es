@@ -352,6 +352,13 @@ export interface CachedModule {
   module: string;
   log: string;
   lengths: [module: number, log: number];
+  /**
+   * An absolute URL to import the module from, as an ES module, in place
+   * of evaluating `module`, which is then not read: for a page whose
+   * Content-Security-Policy refuses 'unsafe-eval'. A document keeps what
+   * it imports for as long as it lives.
+   */
+  url?: string;
 }
 
 /**
@@ -362,10 +369,22 @@ export interface CachedModule {
  * nothing; the player then compiles, as without one.
  */
 export interface ModuleCache {
+  /**
+   * The smallest ABC, in bytes, whose module the player asks this cache
+   * for; 8 KB by default, below which a key, a read and a replay cost
+   * about what a compile does. A cache that holds modules compiled ahead
+   * of time asks for every one, so that none is compiled.
+   */
+  readonly minBytes?: number;
   /** The module stored under `key`, if any. */
   get(key: string): Promise<CachedModule | undefined>;
   /** Store `entry` under `key`; a store that is full may evict others, or refuse it. */
   put(key: string, entry: CachedModule): Promise<void>;
-  /** Let go of what is stored under `key`, as a module that loaded part of itself and failed. */
-  delete(key: string): Promise<void>;
+  /**
+   * Let go of what is stored under `key`, as a module that loaded part of
+   * itself and failed; `entry`, where given, is the one this cache's get
+   * answered that the player could not use, as a chain of caches needs to
+   * tell which of its members gave it.
+   */
+  delete(key: string, entry?: CachedModule): Promise<void>;
 }
