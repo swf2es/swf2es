@@ -154,6 +154,8 @@ export class Scripting {
   private readonly stopped = new AbortController();
   /** Whether destroy has been called: the player plays, loads and connects no more. */
   destroyed = false;
+  /** Whether sendToURL sends, as an embedding's allowNetworking "internal" or "none" has it not. */
+  readonly sendToUrl: boolean;
   /** Takes what fscommand sends, or nothing does. */
   readonly fsCommand: ((command: string, args: string, callers: string[]) => void) | null;
   /** What plays every library's timeline and button sounds. */
@@ -252,6 +254,8 @@ export class Scripting {
        * a host that checks them lets the command through only if all pass.
        */
       fsCommand?: ((command: string, args: string, callers: string[]) => void) | null;
+      /** Whether sendToURL sends: true by default; false drops what it sends, as allowNetworking "internal" did. */
+      sendToUrl?: boolean;
       /** Where to keep compiled modules across page loads: none by default (see ModuleCache). */
       moduleCache?: ModuleCache | null;
       decodeImage?: ImageDecode | null;
@@ -308,6 +312,7 @@ export class Scripting {
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
     this.fsCommand = options.fsCommand ?? null;
+    this.sendToUrl = options.sendToUrl ?? true;
     this.moduleCache = options.moduleCache ?? null;
     const fetch = options.fetch;
     this.fetch = fetch

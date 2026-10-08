@@ -438,7 +438,7 @@ export class Loads {
   /** sendToURL's request, sent by the host's fetch and its response dropped, as Flash ignores it. */
   sendTo(request: AsObject): void {
     const fetch = this.s.fetch;
-    if (!fetch) {
+    if (!fetch || !this.s.sendToUrl) {
       return;
     }
 
