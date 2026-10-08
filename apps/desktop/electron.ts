@@ -1,15 +1,22 @@
 // Where Electron and the built app are, for launch.ts and the smoke test.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 
-/** The Electron binary, or null where `pnpm install` skipped its download. */
+/**
+ * The Electron binary, or null where `pnpm install` skipped its download.
+ * Read from the package's path.txt and dist/, not by requiring it: its
+ * index.js downloads the binary when it is missing, which would make a
+ * check for it the download it is meant to avoid.
+ */
 export function electronBinary(): string | null {
   try {
-    // electron's index.js gives the binary's path, and throws if it was never downloaded.
-    const path = createRequire(import.meta.url)("electron") as string;
+    const root = dirname(createRequire(import.meta.url).resolve("electron/package.json"));
+    const name = readFileSync(join(root, "path.txt"), "utf8");
+    const path = join(root, "dist", name);
     return existsSync(path) ? path : null;
   } catch {
     return null;
