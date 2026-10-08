@@ -47,6 +47,8 @@ jobs:
       - run: pnpm build
       - run: pnpm oracle:pull
       - run: pnpm --filter @swf2es/desktop fetch-electron
+      # A display for the smoke test to start (GTK aborts Electron without one).
+      - run: sudo apt-get install -y --no-install-recommends xvfb
       # Ubuntu's AppArmor keeps unprivileged user namespaces from Chromium's sandbox, which the app keeps on.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: pnpm --filter @swf2es/tests-desktop test

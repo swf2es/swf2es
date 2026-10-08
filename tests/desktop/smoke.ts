@@ -11,7 +11,7 @@
 //
 //   node tests/desktop/smoke.ts
 import assert from "node:assert/strict";
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -142,13 +142,46 @@ const networked = smokeSwf("network", true);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * The environment without a display: Electron's --headless still draws
- * through a Wayland or X display it finds, and a compositor whose screen
- * is locked or asleep sends it no frames, so the player never advanced.
+ * A display of the test's own. Electron's --headless still draws through
+ * a Wayland or X display it finds, and a compositor whose screen is
+ * locked or asleep sends it no frames, so the player never advanced; and
+ * with no display at all GTK aborts it ("Can't create a GtkStyleContext
+ * without a display connection"), as on a CI runner. So the test starts
+ * an Xvfb where there is one, and draws there; elsewhere it leaves the
+ * user's display out, which GTK still finds through XDG_RUNTIME_DIR.
  */
-const headlessEnv = Object.fromEntries(
-  Object.entries(process.env).filter(([name]) => name !== "DISPLAY" && name !== "WAYLAND_DISPLAY"),
-);
+async function display(): Promise<{ env: NodeJS.ProcessEnv; stop(): void }> {
+  const base = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([name]) => name !== "DISPLAY" && name !== "WAYLAND_DISPLAY",
+    ),
+  );
+  const xvfb = spawnSync("sh", ["-c", "command -v Xvfb"], { encoding: "utf8" }).stdout.trim();
+  if (!xvfb) {
+    return { env: base, stop() {} };
+  }
+
+  // Xvfb writes the display it chose to the descriptor -displayfd names.
+  const x = spawn(xvfb, ["-displayfd", "3", "-screen", "0", "1280x1024x24", "-nolisten", "tcp"], {
+    stdio: ["ignore", "ignore", "pipe", "pipe"],
+  });
+  const number = await new Promise<string>((done, fail) => {
+    let text = "";
+    x.stdio[3]?.on("data", (chunk: Buffer) => {
+      text += chunk.toString();
+      if (text.includes("\n")) {
+        done(text.trim());
+      }
+    });
+    x.on("exit", (code) => fail(new Error(`Xvfb exited with ${code}`)));
+  });
+  return {
+    env: { ...base, DISPLAY: `:${number}`, GDK_BACKEND: "x11", XDG_SESSION_TYPE: "x11" },
+    stop: () => x.kill(),
+  };
+}
+
+const screen = await display();
 
 /** The app running in Electron with these settings and arguments, its terminal and its page. */
 interface App {
@@ -181,7 +214,7 @@ async function withApp(
       [
         appDir,
         // Chromium's headless mode, which Electron keeps (its build has no
-        // headless Ozone), with no display to find (headlessEnv), and a GPU
+        // headless Ozone), on the test's own display (display()), and a GPU
         // of software: it draws alike anywhere.
         "--headless",
         "--use-angle=swiftshader",
@@ -189,7 +222,7 @@ async function withApp(
         ...more,
       ],
       {
-        env: { ...headlessEnv, SWF2ES_DESKTOP_USER_DATA: userData },
+        env: { ...screen.env, SWF2ES_DESKTOP_USER_DATA: userData },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -470,4 +503,5 @@ try {
   console.log("desktop smoke test: ok");
 } finally {
   server.close();
+  screen.stop();
 }
