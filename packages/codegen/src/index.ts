@@ -203,7 +203,6 @@ export interface Codegen {
    * the cache key names them.
    */
   compile(hashes?: string[], index?: number): Compiled;
-  /** Method bodies of ABC `index` (the last added by default) compiled alone, as the JIT compiles each on its first call; a native, unverified or unknown one is left out. */
   /**
    * ABC `index`'s module alone, as `compile` writes it, for a host that
    * loads it and needs neither its source map nor its entries: writing
@@ -211,6 +210,13 @@ export interface Codegen {
    * never shrinks.
    */
   compileModule(hashes?: string[], index?: number): string;
+  /**
+   * Method bodies of ABC `index` (the last added by default) compiled
+   * alone, as the planned lazy JIT is to compile each on its first call; a
+   * native, unverified or unknown one is left out. No host calls it yet,
+   * but its tests hold each to its entry in the module, the JIT/AOT
+   * invariant that lazy compilation will rest on.
+   */
   compileMethods(bodies: number[], index?: number): Map<number, string>;
   /**
    * What ABC `index`'s module depends on beyond the ABCs' bytes, for a
