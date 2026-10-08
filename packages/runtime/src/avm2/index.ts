@@ -4,7 +4,7 @@ import type { RuntimeOptions } from "./options.js";
 import { Runtime } from "./runtime.js";
 
 export type { Abc, AsObject, CompileUnit, FoundDefinition, Method, Value } from "./descriptors.js";
-export { type Domain, frameScripts, stackFrames } from "./domain.js";
+export { type Domain, frameScripts, frameSites, siteScript, stackFrames } from "./domain.js";
 export type { ClassHook, NativesProvider } from "./hooks.js";
 export { messages } from "./messages.js";
 export { publicNs, qname } from "./names.js";

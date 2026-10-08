@@ -274,7 +274,7 @@ export function findProperty(bd: BodyDecoder, opcode: u8, mn: u32): bool {
 }
 
 /** The IR of where a name was found, pushed into register `dst`. */
-export function emitFound(bd: BodyDecoder, op: u16, dst: i32, src: i32, a: u32, c: i32): bool {
+function emitFound(bd: BodyDecoder, op: u16, dst: i32, src: i32, a: u32, c: i32): bool {
   if (bd.emitPass) {
     bd.emit(op, dst, src, src >= 0 ? 1 : 0, a, 0, c, bd.pc);
     bd.emitted = true;
@@ -358,7 +358,7 @@ export function getProperty(bd: BodyDecoder, mn: u32, n: u32): bool {
  * Whether multiname `mn` is a runtime name in a public namespace, not an
  * attribute, and the top of the stack, its name, is a number.
  */
-export function numericIndex(bd: BodyDecoder, mn: u32): bool {
+function numericIndex(bd: BodyDecoder, mn: u32): bool {
   const domain = bd.domain;
   const parts = nameParts(bd.abc.pool, mn);
   if (parts & MN_Attr || !(parts & MN_Rtname) || !domain.hasPublicNamespace(bd.index, mn)) {
@@ -519,7 +519,7 @@ export function callProperty(bd: BodyDecoder, opcode: u8, mn: u32, argc: u32): b
 }
 
 /** The convert opcode that gives `type`, one of the builtin conversions. */
-export function conversionOp(bd: BodyDecoder, type: i32): u16 {
+function conversionOp(bd: BodyDecoder, type: i32): u16 {
   const domain = bd.domain;
   if (type === domain.intType) {
     return ops.OP_convert_i;
@@ -542,7 +542,7 @@ export function conversionOp(bd: BodyDecoder, type: i32): u16 {
  * arguments of the right types, which Math's numbers and String's exactly
  * its parameter types.
  */
-export function fasterCall(bd: BodyDecoder, type: i32, mn: u32, b: u32, argc: u32): u32 {
+function fasterCall(bd: BodyDecoder, type: i32, mn: u32, b: u32, argc: u32): u32 {
   const domain = bd.domain;
   if (type < 0 || (type !== domain.mathStatic && type !== domain.stringType)) {
     return b;

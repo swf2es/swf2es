@@ -67,7 +67,7 @@ export const describeNatives: Natives = {
  * undefined and null have traits of their own, void's and null's, with
  * nothing in them.
  */
-export function describeTypeJSON(rt: Runtime, v: Value, flags: number): Value {
+function describeTypeJSON(rt: Runtime, v: Value, flags: number): Value {
   // A class object: its own traits are the class's statics, its $it its instances'.
   const cls: AsObject | null = v !== null && typeof v === "object" && v.$it ? v : null;
   const traits = cls ? rt.traitsOf(cls) : chooseTraits(rt, v);

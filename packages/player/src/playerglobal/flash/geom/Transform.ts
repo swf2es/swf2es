@@ -41,7 +41,7 @@ const IDENTITY_COLOR: Color = {
 };
 
 /** A new flash.geom.Matrix of `m`. */
-export function matrixObject(s: Scripting, m: Linear): AsObject {
+function matrixObject(s: Scripting, m: Linear): AsObject {
   return s.rt.construct(
     s.rt.classNamed("flash.geom::Matrix"),
     m.a,
@@ -60,7 +60,7 @@ export function matrixOf(s: Scripting, o: AsObject): Linear {
 }
 
 /** A new flash.geom.ColorTransform of `c`. */
-export function colorObject(s: Scripting, c: Color): AsObject {
+function colorObject(s: Scripting, c: Color): AsObject {
   return s.rt.construct(
     s.rt.classNamed("flash.geom::ColorTransform"),
     c.rMul,

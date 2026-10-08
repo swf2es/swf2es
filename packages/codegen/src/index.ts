@@ -69,36 +69,6 @@ export function moduleKey(
   });
 }
 
-/** A finding as a cache key names it: the defining ABC by its hash (see FoundDefinition). */
-export interface FoundKey {
-  nsKind: number;
-  uri: string;
-  name: string;
-  hash: string;
-  asType: boolean;
-}
-
-/**
- * Cache key for compiled output. Browser caches, the AOT server and the JIT
- * all use this key, so their results are interchangeable. `linked` are the
- * hashes of the ABCs loaded before this one, in order, whose layouts the
- * output depends on; `found`, what its application domain was recorded to
- * find (Codegen.found), which binds its names and types too.
- */
-export function cacheKey(abcHash: string, linked: string[] = [], found: FoundKey[] = []): string {
-  const key = `swf2es@${COMPILER_VERSION}:${[...linked, abcHash].join("+")}`;
-  if (found.length === 0) {
-    return key;
-  }
-
-  // In one order whatever order they were found in; JSON keeps a URI or a
-  // name that holds a separator from reading as two.
-  const findings = found
-    .map((f) => JSON.stringify([f.asType ? 1 : 0, f.nsKind, f.uri, f.name, f.hash]))
-    .sort();
-  return `${key}:found[${findings.join(",")}]`;
-}
-
 /**
  * A definition an application domain has found by name, or as a type,
  * which is not the first one from the root down, as the runtime reports it:
@@ -233,7 +203,6 @@ export interface Codegen {
    * the cache key names them.
    */
   compile(hashes?: string[], index?: number): Compiled;
-  /** Method bodies of ABC `index` (the last added by default) compiled alone, as the JIT compiles each on its first call; a native, unverified or unknown one is left out. */
   /**
    * ABC `index`'s module alone, as `compile` writes it, for a host that
    * loads it and needs neither its source map nor its entries: writing
@@ -241,6 +210,13 @@ export interface Codegen {
    * never shrinks.
    */
   compileModule(hashes?: string[], index?: number): string;
+  /**
+   * Method bodies of ABC `index` (the last added by default) compiled
+   * alone, as the planned lazy JIT is to compile each on its first call; a
+   * native, unverified or unknown one is left out. No host calls it yet,
+   * but its tests hold each to its entry in the module, the JIT/AOT
+   * invariant that lazy compilation will rest on.
+   */
   compileMethods(bodies: number[], index?: number): Map<number, string>;
   /**
    * What ABC `index`'s module depends on beyond the ABCs' bytes, for a

@@ -662,16 +662,16 @@ export class Code {
     const holder = { proto: { [avm2.methodKey(0)]: probe } };
     this.s.rt.call(this.s.rt.methodClosure(undefined, holder as never, 0), null);
     // wholeStack, the probe, the wrapper, callValue, call, then this.
-    const sites = stack === null ? [] : frameSites(stack);
-    const here = sites[0] === undefined || sites[0] === null ? null : siteScript(sites[0]);
+    const sites = stack === null ? [] : avm2.frameSites(stack);
+    const here = sites[0] === undefined || sites[0] === null ? null : avm2.siteScript(sites[0]);
     const chain = sites.slice(2, 5);
     const valid =
       here !== null &&
       chain.length === 3 &&
-      chain.every((site) => site !== null && !this.isModule(siteScript(site) ?? "")) &&
+      chain.every((site) => site !== null && !this.isModule(avm2.siteScript(site) ?? "")) &&
       sites[1] !== null &&
-      siteScript(sites[1] ?? "") === here &&
-      siteScript(sites[5] ?? "") === here;
+      avm2.siteScript(sites[1] ?? "") === here &&
+      avm2.siteScript(sites[5] ?? "") === here;
     this.byName = valid ? (chain as string[]) : null;
     return this.byName;
   }
@@ -848,11 +848,6 @@ function wholeStack(): string | null {
   }
 }
 
-/** Whether a stack's lines are V8's, "    at" frames, as avm2.stackFrames tells them. */
-function isV8(lines: readonly string[]): boolean {
-  return lines.some((line) => /^\s*at /.test(line));
-}
-
 /**
  * The script a SWF's code called a gated native from, read from a whole
  * V8 stack: past `own` frames of the player's (none a module's, or the
@@ -872,12 +867,13 @@ export function callingScript(
   modules: { isModule(script: string): boolean; isLibrary(script: string): boolean },
   byName: readonly string[] | null,
 ): string | null {
-  if (!isV8(stack.split("\n"))) {
+  // V8's frames are "    at" lines, as avm2.frameSites tells them.
+  if (!stack.split("\n").some((line) => /^\s*at /.test(line))) {
     return null;
   }
 
-  const sites = frameSites(stack);
-  const scripts = sites.map((site) => (site === null ? null : siteScript(site)));
+  const sites = avm2.frameSites(stack);
+  const scripts = sites.map((site) => (site === null ? null : avm2.siteScript(site)));
   const swf = (script: string | null | undefined) =>
     script !== null &&
     script !== undefined &&
@@ -908,53 +904,5 @@ export function callingScript(
   return null;
 }
 
-/** A frame site's script: "script:1:2" without its line and column. */
-function siteScript(site: string): string | null {
-  return /^(.+):\d+:\d+$/.exec(site)?.[1] ?? null;
-}
-
-/**
- * Each frame's site, "script:line:column", innermost first, or null for a
- * frame line it cannot read. See frameLocations.
- */
-export function frameSites(stack: string | undefined): (string | null)[] {
-  // The frame lines as avm2.stackFrames picks them; each one's site read from
-  // where it ends, where stackFrames reads the script up to the first "(".
-  const lines = stack?.split("\n") ?? [];
-  const v8 = isV8(lines);
-  const sites: (string | null)[] = [];
-  for (const line of lines) {
-    if (v8 ? !/^\s*at /.test(line) : !line.includes("@")) {
-      continue;
-    }
-
-    let location: string | null = null;
-    const v8Frame = /^\s*at (.*)$/.exec(line);
-    if (v8Frame) {
-      const text = v8Frame[1];
-      const open = text.lastIndexOf(" (");
-      location =
-        text.endsWith(")") && open >= 0 ? text.slice(open + 2, -1) : text.replace(/^async /, "");
-    } else if (line.includes("@")) {
-      location = line.slice(line.lastIndexOf("@") + 1);
-    }
-
-    sites.push(location !== null && /:\d+:\d+$/.test(location) ? location : null);
-  }
-
-  return sites;
-}
-
-/**
- * The script each frame of a stack names, innermost first, or null for a
- * frame line it cannot read: V8's "at name (script:1:2)" and "at
- * script:1:2", SpiderMonkey's and JavaScriptCore's "name@script:1:2".
- * The location is what the line ends with, inside its last parentheses
- * or after its last "@", so that nothing a name holds can stand for it;
- * a location without a line and column ("native", "<anonymous>", "index
- * 0") is unread. For security checks, where an unread frame must not be
- * passed over: Runtime's frameScripts leaves such lines out.
- */
-export function frameLocations(stack: string | undefined): (string | null)[] {
-  return frameSites(stack).map((site) => (site === null ? null : siteScript(site)));
-}
+/** The script each frame of a stack names, for security checks: see avm2.stackFrames. */
+export const frameLocations = avm2.stackFrames;

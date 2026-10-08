@@ -9,7 +9,7 @@ type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
 /** The events Flash broadcasts to every display object that listens, on the display list or not, target only. */
-export const BROADCAST = new Set(["enterFrame", "frameConstructed", "exitFrame", "render"]);
+const BROADCAST = new Set(["enterFrame", "frameConstructed", "exitFrame", "render"]);
 
 function listeners(o: AsObject): Map<string, Listener[]> {
   if (!o.$listeners) {

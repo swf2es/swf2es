@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { COMPILER_VERSION, cacheKey, createCodegen } from "@swf2es/codegen";
+import { API_VERSION, createCodegen, moduleKey } from "@swf2es/codegen";
 import { abc, tables, u30 } from "./abc-builder.ts";
 import { script } from "./ir-cases.ts";
 import { classes, METHOD, mn, pool, SLOT } from "./link-cases.ts";
@@ -23,35 +23,31 @@ test("codegen.wasm imports nothing but abort", () => {
 
 test("wrapper and wasm agree on the compiler version", async () => {
   await createCodegen(module); // throws on a mismatch
-  assert.equal(cacheKey("abc123"), `swf2es@${COMPILER_VERSION}:abc123`);
-  assert.equal(cacheKey("abc123", ["b1", "s2"]), `swf2es@${COMPILER_VERSION}:b1+s2+abc123`);
 });
 
-test("a cache key names what the ABC's application domain was recorded to find", () => {
-  const found = (name: string, hash: string, asType = true) => ({
-    nsKind: 0,
-    uri: "p",
-    name,
-    hash,
-    asType,
+test("a module key names the compiler, the ABCs its domain sees and what it found", async () => {
+  const codegen = await createCodegen(module);
+  codegen.reset();
+  // A script with a slot public::x, the first multiname of script()'s pool.
+  assert.equal(codegen.add(script([0x47], {}, [{ name: 1, kind: SLOT }]), true), 0);
+  const child = codegen.childDomain(0);
+  assert.equal(codegen.add(script([0x47]), false, child), 0);
+  const abcs = { hashes: ["a", "b"], builtins: [true, false] };
+  const key = moduleKey(codegen, 1, abcs, null);
+  assert.deepEqual(JSON.parse(key ?? ""), {
+    compiler: codegen.identity,
+    api: API_VERSION,
+    abcs: ["builtin a", "b"],
+    own: 1,
+    libraries: null,
+    log: "",
   });
-  const plain = cacheKey("abc123", ["b1"]);
-  const child = cacheKey("abc123", ["b1"], [found("C", "child")]);
-  assert.equal(cacheKey("abc123", ["b1"], []), plain);
-  assert.notEqual(child, plain);
-  // Another definition, the same one by name rather than as a type, or a
-  // name that would spell the same with a separator in it: another key.
-  assert.notEqual(cacheKey("abc123", ["b1"], [found("C", "parent")]), child);
-  assert.notEqual(cacheKey("abc123", ["b1"], [found("C", "child", false)]), child);
-  assert.notEqual(
-    cacheKey("abc123", ["b1"], [{ ...found("C", "child"), uri: "p::C" }]),
-    cacheKey("abc123", ["b1"], [{ ...found("C::C", "child"), uri: "p" }]),
-  );
-  // The same findings in another order: the same key.
-  assert.equal(
-    cacheKey("abc123", ["b1"], [found("C", "child"), found("D", "child")]),
-    cacheKey("abc123", ["b1"], [found("D", "child"), found("C", "child")]),
-  );
+
+  // The child's domain finding public::x, which the root defines: another key.
+  codegen.found({ domain: child, nsKind: 0, uri: "", name: "x", abc: 0, asType: false });
+  const found = moduleKey(codegen, 1, abcs, null);
+  assert.notEqual(found, key);
+  assert.match(JSON.parse(found ?? "").log, /:x$/);
 });
 
 test("reads the ABC version header", async () => {
