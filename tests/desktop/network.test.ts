@@ -28,6 +28,8 @@ import { runInNewContext } from "node:vm";
 import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } from "node:zlib";
 import { addressClass } from "../../apps/desktop/src/main/addresses.ts";
 import {
+  GZIP_HEADER_MAX,
+  GzipHeader,
   type Limits,
   Network,
   type NetworkOptions,
@@ -937,4 +939,68 @@ test("a remote SWF's socket needs a policy: port 843's, the port's own, or one n
   fresh.play({ kind: "remote", url: `${swf()}/movie.swf` });
   await assert.rejects(fresh.socketAddress("swf.test", targetPort), /has not loaded/);
   await assert.rejects((await net()).socketAddress("0.0.0.0", targetPort), /no request reaches/);
+});
+
+/** A gzip header with what `flags` asks for: FHCRC 2, FEXTRA 4, FNAME 8, FCOMMENT 16. */
+function gzipHead(flags: number, name = "name.txt", extra = 3): Uint8Array {
+  const parts = [Buffer.from([0x1f, 0x8b, 8, flags, 0, 0, 0, 0, 0, 3])];
+  if (flags & 4) {
+    parts.push(Buffer.from([extra & 0xff, extra >> 8]), Buffer.alloc(extra, 7));
+  }
+
+  if (flags & 8) {
+    parts.push(Buffer.from(`${name}\0`));
+  }
+
+  if (flags & 16) {
+    parts.push(Buffer.from("a comment\0"));
+  }
+
+  if (flags & 2) {
+    parts.push(Buffer.from([1, 2]));
+  }
+
+  return Buffer.concat(parts);
+}
+
+/** What GzipHeader says of `bytes` given whole, and given a byte at a time. */
+function headerEnds(bytes: Uint8Array): [whole: number, bytewise: number] {
+  const whole = new GzipHeader().add(bytes);
+  const header = new GzipHeader();
+  let bytewise = 0;
+  for (let i = 0; i < bytes.length && bytewise === 0; i++) {
+    bytewise = header.add(bytes.subarray(i, i + 1));
+  }
+
+  return [whole, bytewise];
+}
+
+test("a gzip header is read the same whole or a byte at a time, in time linear in it", () => {
+  for (const flags of [0, 2, 4, 8, 16, 2 | 4 | 8 | 16]) {
+    const head = gzipHead(flags);
+    // What follows the header is not part of it.
+    const withData = Buffer.concat([head, Buffer.from([1, 2, 3])]);
+    assert.deepEqual(headerEnds(withData), [head.length, head.length], String(flags));
+  }
+
+  assert.deepEqual(headerEnds(Buffer.from("not gzip at all")), [-1, -1]);
+  assert.deepEqual(headerEnds(Buffer.from([0x1f, 0x8b, 9])), [-1, -1]);
+
+  // Its limit, the same however it comes: a header ending at it is read, one past it is not.
+  const at = gzipHead(8, "n".repeat(GZIP_HEADER_MAX - 11));
+  assert.equal(at.length, GZIP_HEADER_MAX);
+  assert.deepEqual(headerEnds(at), [GZIP_HEADER_MAX, GZIP_HEADER_MAX]);
+  const past = gzipHead(8, "n".repeat(GZIP_HEADER_MAX - 10));
+  assert.deepEqual(headerEnds(past), [-1, -1]);
+  // An extra field running past it, its length alone told.
+  assert.deepEqual(headerEnds(gzipHead(4, "", GZIP_HEADER_MAX - 10)), [-1, -1]);
+
+  // A name that never ends, a byte at a time: refused once past the limit, and soon.
+  const endless = Buffer.concat([
+    gzipHead(8, "").subarray(0, 10),
+    Buffer.alloc(GZIP_HEADER_MAX * 2, 0x6e),
+  ]);
+  const started = performance.now();
+  assert.deepEqual(headerEnds(endless), [-1, -1]);
+  assert.ok(performance.now() - started < 100, `${performance.now() - started} ms`);
 });
