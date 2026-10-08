@@ -65,13 +65,27 @@ export function canonicalName(name: string): string {
 const TAG =
   /^([a-z]{2,3})(?:[-_.]+([a-z]{4}))?(?:[-_.]+([a-z]{2}|\d{3}))?(?:[-_.]+[a-z]{2,8})*[-_.]*$/i;
 
+/**
+ * The names resolved last, at most this many: a name is any string a SWF
+ * makes, and every player shares the cache, so it must not keep them all.
+ */
+export const RESOLVED_MAX = 64;
+
 const resolved = new Map<string, Locale>();
+
+/** How many resolutions are kept, for tests. */
+export function resolvedCount(): number {
+  return resolved.size;
+}
 
 /** The locale Flash uses for a name: the name's own, its language's in its likely region, or the default. */
 export function resolveLocale(s: Scripting, name: string): Locale {
   const key = `${name}@@${s.platform.locale}`;
   let locale = resolved.get(key);
-  if (!locale) {
+  if (locale) {
+    // The most recent last, so that the oldest goes first.
+    resolved.delete(key);
+  } else {
     const requested = canonicalName(name);
     const base = requested.split("@")[0];
     const named = base !== "" && base !== "i-default";
@@ -81,9 +95,12 @@ export function resolveLocale(s: Scripting, name: string): Locale {
       actual: found?.actual ?? defaultLocale(s),
       status: found?.status ?? (named ? USING_DEFAULT_WARNING : NO_ERROR),
     };
-    resolved.set(key, locale);
+    if (resolved.size >= RESOLVED_MAX) {
+      resolved.delete(resolved.keys().next().value as string);
+    }
   }
 
+  resolved.set(key, locale);
   return { ...locale };
 }
 
