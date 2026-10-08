@@ -3926,10 +3926,13 @@ from elsewhere is best kept in a directory of its own.
 The main process chooses the sandbox from the SWF's first 64 KB, with
 `fileAttributes` (`format`), which decompresses only as far as the first
 tag: a SWF's header may name a length of 4 GB, which it never trusts.
-The page decompresses the SWF whole, and `decompressSwf` refuses a ZWS
-whose length no LZMA stream that short can hold, more than 32768 times
-the stream, as LZMA expands a byte some 7000 times at best; a CWS's zlib
-stops at its stream's end. Only the SWF playing has a grant: opening
+The page decompresses the SWF whole. Its LZMA decoder (`lzma.ts` in
+`format`) refuses a properties byte past 224, fails as soon as it would
+read past the stream's end, and grows its output as it writes; and
+`decompressSwf` refuses, before decoding, a ZWS whose header names more
+than 8192 times its stream, as LZMA expands a byte 7090 times at best. A
+ZWS within that bound still costs the page what it names, up to some
+8192 bytes for each of its own; a CWS's zlib stops at its stream's end. Only the SWF playing has a grant: opening
 another or closing it revokes it, so nothing accumulates over a run, and
 the next SWF's grant takes effect only as the page fetches it, which it
 does once the element has let the last player go, so that player never
