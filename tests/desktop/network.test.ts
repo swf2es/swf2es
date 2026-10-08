@@ -10,7 +10,7 @@
 // internet, and on 127.0.0.1 at the same port, which stays this machine:
 // a name the test resolves to either reaches one or the other.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import {
   createServer as createHttpServer,
@@ -23,6 +23,8 @@ import { createServer as createTcpServer, type Server as TcpServer } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } from "node:zlib";
 import { addressClass } from "../../apps/desktop/src/main/addresses.ts";
 import {
@@ -614,7 +616,8 @@ test("responses are bounded in size and in time, and requests in number", async 
 
 test("a movie's responses hold no more than their budget, given back as each is done", async () => {
   policies.clear();
-  const net = await playing(`${swf()}/movie.swf`, { limits: { buffered: 6000 } });
+  // The held one's array doubles from 4000 to 8000 bytes as its rest comes.
+  const net = await playing(`${swf()}/movie.swf`, { limits: { buffered: 8500 } });
   const held = ask(net, `${swf()}/hold`);
   // Its first 4000 bytes in, a 5000-byte one does not fit beside them.
   await new Promise((done) => setTimeout(done, 100));
@@ -624,6 +627,55 @@ test("a movie's responses hold no more than their budget, given back as each is 
   // A response is bytes of its own, not a view of a larger buffer.
   const { bytes } = await ask(net, `${swf()}/data.txt`);
   assert.equal(bytes?.byteLength, bytes?.buffer.byteLength);
+});
+
+test("a body sent a byte at a time takes memory for its bytes, not its chunks", async (t) => {
+  // The server in a process of its own, whose 1M writes would take this one's memory.
+  const server = spawn(
+    process.execPath,
+    [
+      "-e",
+      `require("node:http").createServer((q, r) => {
+        const n = Number(new URL(q.url, "http://x").searchParams.get("n"));
+        r.writeHead(200);
+        let sent = 0;
+        const pump = () => {
+          while (sent < n) { sent++; if (!r.write("x")) { r.once("drain", pump); return; } }
+          r.end();
+        };
+        pump();
+      }).listen(0, "${PUBLIC}", function () { console.log(this.address().port); });`,
+    ],
+    { stdio: ["ignore", "pipe", "inherit"] },
+  );
+  t.after(() => server.kill());
+  const port = await new Promise<number>((done) =>
+    server.stdout.once("data", (line: Buffer) => done(Number(line.toString()))),
+  );
+  const tiny = `http://swf.test:${port}/tiny`;
+  const net = await playing();
+  const n = 1024 * 1024;
+  // A run first, so that what Node itself takes is taken.
+  await ask(net, `${tiny}?n=1000`, "content");
+  // What is live, sampled after a collection while the bytes come: kept
+  // chunks would be some 500 MB of it, an array of their bytes 1 to 2 MB.
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  const live = () => {
+    gc();
+    const { heapUsed, arrayBuffers } = process.memoryUsage();
+    return heapUsed + arrayBuffers;
+  };
+  const before = live();
+  let peak = before;
+  const sample = setInterval(() => {
+    peak = Math.max(peak, live());
+  }, 50);
+  const { bytes } = await ask(net, `${tiny}?n=${n}`, "content");
+  clearInterval(sample);
+  assert.equal(bytes?.length, n);
+  const grown = (peak - before) / (1024 * 1024);
+  assert.ok(grown < 32, `${grown.toFixed(0)} MB`);
 });
 
 test("the Referer: the URL at home, the origin elsewhere, nothing from https to http", () => {

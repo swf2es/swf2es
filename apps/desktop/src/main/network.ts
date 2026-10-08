@@ -892,41 +892,63 @@ export class Network {
           received.splice(0, received.length, ...received.filter(([n]) => !named(n)));
         }
 
-        const chunks: Buffer[] = [];
-        let length = 0;
+        // The body, copied as it comes into one array that doubles as it
+        // fills: never a list of the chunks, which for a body sent a byte at
+        // a time would hold hundreds of times its size. It starts at the
+        // declared length, where that is believable, and so needs no copy at
+        // the end.
         const budget = options.budget;
+        const exact = !coded && Number.isSafeInteger(declared) && declared >= 0;
+        let body = new Uint8Array(0);
+        let length = 0;
+        const reserve = (capacity: number): boolean => {
+          const more = capacity - body.length;
+          if (budget) {
+            if (budget.session.buffered + more > this.limits.buffered) {
+              stop(new Refused("the SWF's responses under way hold too much at once"));
+              return false;
+            }
+
+            budget.session.buffered += more;
+            budget.taken += more;
+          }
+
+          const grown = new Uint8Array(capacity);
+          grown.set(body.subarray(0, length));
+          body = grown;
+          return true;
+        };
+        if (exact && declared > 0 && !reserve(declared)) {
+          return;
+        }
+
         const take = (chunk: Buffer) => {
-          length += chunk.length;
-          if (length > options.max) {
+          if (finished) {
+            return;
+          }
+
+          if (length + chunk.length > options.max) {
             stop(new Refused(`its response is larger than ${options.max} bytes`));
             return;
           }
 
-          if (budget) {
-            if (budget.session.buffered + chunk.length > this.limits.buffered) {
-              stop(new Refused("the SWF's responses under way hold too much at once"));
+          if (length + chunk.length > body.length) {
+            const capacity = Math.min(
+              options.max,
+              Math.max(length + chunk.length, body.length * 2),
+            );
+            if (!reserve(capacity)) {
               return;
             }
-
-            budget.session.buffered += chunk.length;
-            budget.taken += chunk.length;
           }
 
-          chunks.push(chunk);
+          body.set(chunk, length);
+          length += chunk.length;
           arm();
         };
-        // One copy, into memory of its own: Buffer.concat may hand out a slice of
-        // Node's shared pool, whose rest IPC would carry to the page with it.
-        const done = () => {
-          const bytes = new Uint8Array(length);
-          let at = 0;
-          for (const chunk of chunks.splice(0)) {
-            bytes.set(chunk, at);
-            at += chunk.length;
-          }
-
-          end(bytes);
-        };
+        // Bytes of their own, not a view of a larger array, whose rest IPC
+        // would carry to the page with them.
+        const done = () => end(length === body.length ? body : body.slice(0, length));
         arm();
         if (!coded) {
           response.on("data", take);
