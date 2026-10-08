@@ -243,6 +243,9 @@ const resolve = async (host: string): Promise<string[]> => {
     case "inside.test":
     case "localhost":
       return [LOOPBACK];
+    case "hang.test":
+      // A resolver that never answers.
+      return new Promise<string[]>(() => {});
     case "rebind.test":
       // The first answer public, every later one this machine.
       return [rebinds++ === 0 ? PUBLIC : LOOPBACK];
@@ -933,6 +936,24 @@ test("a remote SWF's socket needs a policy: port 843's, the port's own, or one n
       `<allow-access-from domain="swf.test" to-ports="${targetPort}"/>`,
   );
   assert.equal(await connect(await net()), PUBLIC);
+
+  // The deadline bounds the whole search: a server that takes the policy
+  // request and never answers, and a name whose DNS never answers.
+  masterPolicy = null;
+  const silent = createTcpServer((connection) => connection.on("error", () => {}));
+  const silentPort = (await listen(silent, PUBLIC)) as number;
+  const hurried = await playing(`${swf()}/movie.swf`, {
+    socketPolicyPort: masterPort,
+    limits: { deadline: 300, policyTimeout: 5000 },
+  });
+  for (const [where, at] of [
+    ["swf.test", silentPort],
+    ["hang.test", targetPort],
+  ] as const) {
+    const started = performance.now();
+    await assert.rejects(hurried.socketAddress(where, at), /took too long/, where);
+    assert.ok(performance.now() - started < 1000, where);
+  }
 
   // Nothing before the SWF has come, and nowhere no request reaches.
   const fresh = network();

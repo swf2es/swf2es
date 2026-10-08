@@ -332,12 +332,30 @@ export class Network {
       throw new Refused("the SWF has not loaded");
     }
 
-    // All told, the policies of every port it tries included.
+    // All told, its DNS and the policies of every port it tries included,
+    // each of which it stops waiting on when time is up.
     const deadline = AbortSignal.timeout(this.limits.deadline);
+    try {
+      return await this.socketPolicyAddress(session, origin, host, port, deadline);
+    } catch (error) {
+      throw deadline.aborted ? new Refused("it took too long") : error;
+    }
+  }
+
+  private async socketPolicyAddress(
+    session: Session,
+    origin: Origin,
+    host: string,
+    port: number,
+    deadline: AbortSignal,
+  ): Promise<string> {
     const target = await this.pin(host, deadline);
     const policy = (at: number, timeout: number) =>
-      cached(session.socketPolicies, `${target.address}|${at}`, () =>
-        this.socketPolicy(target.address, at, timeout, session.abort.signal),
+      abortable(
+        cached(session.socketPolicies, `${target.address}|${at}`, () =>
+          this.socketPolicy(target.address, at, timeout, session.abort.signal),
+        ),
+        deadline,
       );
     const master = await policy(this.socketPolicyPort, this.limits.masterSocketTimeout);
     if (allowsSocket(master, [], origin.requester, port)) {
@@ -352,10 +370,6 @@ export class Network {
         port,
       ];
       for (const at of new Set(ports)) {
-        if (deadline.aborted) {
-          throw new Refused("it took too long");
-        }
-
         if (at === this.socketPolicyPort) {
           continue;
         }
