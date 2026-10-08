@@ -1,6 +1,7 @@
 // What the app remembers between runs, in settings.json under its user
 // data: where the user's libraries are, and the SWFs opened last.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LibraryName, LibraryState } from "../shared/api.js";
@@ -45,8 +46,9 @@ export class SettingsFile {
     return { builtin, playerglobal };
   }
 
-  setLibrary(name: LibraryName, path: string): void {
-    this.update({ [name]: path });
+  /** Whether it was saved; it holds for this run either way. */
+  setLibrary(name: LibraryName, path: string): boolean {
+    return this.update({ [name]: path });
   }
 
   /** `path` opened: first in the recent list. */
@@ -81,12 +83,24 @@ export class SettingsFile {
     }
   }
 
-  private update(change: Partial<Settings>): void {
+  /**
+   * Apply `change`, and write the settings: whether they were written. A
+   * user data directory that cannot be written keeps them for this run.
+   */
+  private update(change: Partial<Settings>): boolean {
     this.current = { ...this.current, ...change };
-    // Written whole and renamed into place, so a crash never leaves half a file.
-    const temporary = `${this.path}.tmp`;
-    mkdirSync(dirname(this.path), { recursive: true });
-    writeFileSync(temporary, `${JSON.stringify(this.current, null, 2)}\n`);
-    renameSync(temporary, this.path);
+    // Written whole and renamed into place, so a crash never leaves half a
+    // file, under a name no other write shares.
+    const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      mkdirSync(dirname(this.path), { recursive: true });
+      writeFileSync(temporary, `${JSON.stringify(this.current, null, 2)}\n`);
+      renameSync(temporary, this.path);
+      return true;
+    } catch (error) {
+      console.error(`swf2es: settings not saved to ${this.path}: ${error}`);
+      rmSync(temporary, { force: true });
+      return false;
+    }
   }
 }

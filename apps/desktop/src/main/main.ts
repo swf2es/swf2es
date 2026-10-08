@@ -3,6 +3,7 @@
 // few requests (shared/api.ts), each checked to come from that page.
 //
 //   electron apps/desktop [--trace] [file.swf]
+import { statSync } from "node:fs";
 import { open as openFile } from "node:fs/promises";
 import { basename, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,10 +46,20 @@ let current: { path: string; movie: OpenedMovie } | null = null;
 /** The page has asked to start and listens for what opens: until then, start() hands it the movie. */
 let listening = false;
 
-/** The SWF named on the command line: the first argument that is not a switch, after the app's own. */
-function fileFromArguments(argv: string[]): string | null {
-  const rest = argv.slice(process.defaultApp ? 2 : 1).filter((a) => !a.startsWith("-"));
-  return rest.length > 0 ? resolve(rest[0]) : null;
+/**
+ * The SWF named on a command line, from `cwd`: the last argument after the
+ * app's own that names a .swf file there is. Chromium's and Electron's
+ * switches may take values of their own (`--switch value`), so the first
+ * argument that is not a switch could be one.
+ */
+function fileFromArguments(argv: string[], cwd = process.cwd()): string | null {
+  const named = argv
+    .slice(process.defaultApp ? 2 : 1)
+    .filter((a) => !a.startsWith("-") && /\.swf$/i.test(a))
+    .map((a) => resolve(cwd, a));
+  return (
+    named.reverse().find((path) => statSync(path, { throwIfNoEntry: false })?.isFile()) ?? null
+  );
 }
 
 /** Whether a message comes from the window's own page, on swf2es://app/. */
@@ -133,7 +144,16 @@ async function open(path: string): Promise<void> {
     return;
   }
 
-  current = { path, movie: { url: grants.grant(path), name } };
+  let url: string;
+  try {
+    url = grants.grant(path);
+  } catch (error) {
+    // Gone, or unreadable, since it was read.
+    refuse(`${name} could not be opened.`, String(error));
+    return;
+  }
+
+  current = { path, movie: { url, name } };
   settings.opened(path);
   app.addRecentDocument(path);
   buildMenu();
@@ -198,7 +218,10 @@ async function chooseLibrary(name: LibraryName): Promise<void> {
     return;
   }
 
-  settings.setLibrary(name, path);
+  if (!settings.setLibrary(name, path)) {
+    refuse("The settings could not be saved.", `swf2es uses ${path} until it quits.`);
+  }
+
   // The page fetched the libraries once; a fresh page fetches the new one.
   window.webContents.reload();
 }
@@ -336,6 +359,27 @@ function listen(): void {
   bridgeSockets(trusted);
 }
 
+// One app to a user data directory: a second start hands its SWF to the first and quits.
+const first = app.requestSingleInstanceLock();
+if (!first) {
+  app.quit();
+}
+
+app.on("second-instance", (_event, argv, workingDirectory) => {
+  if (window) {
+    if (window.isMinimized()) {
+      window.restore();
+    }
+
+    window.focus();
+  }
+
+  const path = fileFromArguments(argv, workingDirectory);
+  if (path && settings) {
+    void open(path);
+  }
+});
+
 let pending = fileFromArguments(process.argv);
 // macOS hands a file opened from the Finder as an event, perhaps before the app is ready.
 app.on("open-file", (event, path) => {
@@ -355,6 +399,10 @@ app.on("window-all-closed", () => app.quit());
 
 // Not awaited at the top level: Electron makes the app ready only once the main module has run.
 void app.whenReady().then(() => {
+  if (!first) {
+    return;
+  }
+
   settings = new SettingsFile(app.getPath("userData"));
   serve(session.defaultSession, grants, () => settings.libraries());
   // Only what the player needs that the page cannot simply have: full screen.

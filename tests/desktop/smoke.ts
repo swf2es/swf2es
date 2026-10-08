@@ -102,6 +102,8 @@ interface App {
   until(what: string, done: () => boolean): Promise<void>;
   evaluate<T>(expression: string): Promise<T>;
   devtools: DevTools;
+  /** Start the app again on the same user data, with `args`; its exit code. */
+  again(args: string[]): Promise<number | null>;
 }
 
 async function withApp(
@@ -116,26 +118,26 @@ async function withApp(
   let exited: string | null = null;
   let electron: ChildProcess | null = null;
   let socket: WebSocket | null = null;
-  try {
-    electron = spawn(
+  const start = (more: string[]) =>
+    spawn(
       electronBinary() as string,
       [
         appDir,
-        "--trace",
-        "--remote-debugging-port=0",
         // Chromium's headless mode, which Electron keeps (its build has no
         // headless Ozone), and a GPU of software: no display needed, and it
         // draws alike anywhere.
         "--headless",
         "--use-angle=swiftshader",
         "--enable-unsafe-swiftshader",
-        ...args,
+        ...more,
       ],
       {
         env: { ...process.env, SWF2ES_DESKTOP_USER_DATA: userData },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
+  try {
+    electron = start(["--trace", "--remote-debugging-port=0", ...args]);
     electron.on("exit", (code, signal) => {
       exited = `exit ${code ?? signal}`;
     });
@@ -179,6 +181,7 @@ async function withApp(
         url: string;
         webSocketDebuggerUrl: string;
       }[];
+
       target = targets.find((t) => t.type === "page" && t.url.startsWith("swf2es://app/"));
       if (!target) {
         assert.ok(tries < 100, JSON.stringify(targets));
@@ -202,12 +205,15 @@ async function withApp(
       return result.value;
     };
 
-    await run({ stdout, stderr: () => stderr, until, evaluate, devtools });
+    const again = (more: string[]) =>
+      new Promise<number | null>((done) => start(more).on("exit", (code) => done(code)));
+    await run({ stdout, stderr: () => stderr, until, evaluate, devtools, again });
     // What the page's policy refused, as Chromium words it; Electron's own warning about 'unsafe-eval' is not one.
     assert.doesNotMatch(stderr, /violates the following Content Security Policy/);
   } finally {
     socket?.close();
     electron?.kill();
+
     rmSync(userData, { recursive: true, force: true });
   }
 }
@@ -226,7 +232,7 @@ try {
   rmSync(link, { force: true });
   symlinkSync(swf, link);
 
-  await withApp(both, [link], async ({ stdout, stderr, until, evaluate, devtools }) => {
+  await withApp(both, [link], async ({ stdout, stderr, until, evaluate, devtools, again }) => {
     const traced = (line: string) => stdout.filter((l) => l === line).length;
     await until("the SWF's socket", () => traced("smoke: socket pong") > 0);
     assert.equal(traced("smoke: started"), 1);
@@ -269,6 +275,11 @@ try {
       await evaluate<number>(`fetch("swf2es://file/%E0%A4%A").then((r) => r.status)`),
       400,
     );
+
+    // Started again with the SWF after a switch's value and a .swf that is not
+    // there, the second start hands the SWF to the first and quits.
+    assert.equal(await again(["--lang", "value", `${site}missing.swf`, swf]), 0);
+    await until("the SWF from a second start", () => traced("smoke: started") === 4);
 
     // A file outside the SWF's directory is not the page's to read.
     const outside = `swf2es://file${pathToFileURL(fileURLToPath(new URL("smoke.ts", import.meta.url))).pathname}`;
