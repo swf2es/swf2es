@@ -24,7 +24,7 @@
 //
 // Without Electron, so that node tests it (tests/desktop/network.test.ts).
 import { lookup } from "node:dns/promises";
-import { request as httpRequest, type IncomingMessage } from "node:http";
+import { type ClientRequest, request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { connect, isIP } from "node:net";
 import type { Transform } from "node:stream";
@@ -410,9 +410,10 @@ export class Network {
         throw new Refused("not a header");
       }
 
-      // No line breaks or NULs, which would start a header of their own.
-      if (/[\0\r\n]/.test(value)) {
-        throw new Refused(`the header ${name} breaks its line`);
+      // No control characters, line breaks among them, which would start a header of
+      // their own, and nothing HTTP's Latin-1 does not hold: what Node would throw for.
+      if (/[^\t\x20-\x7e\x80-\xff]/.test(value)) {
+        throw new Refused(`the header ${name} has a character no header may hold`);
       }
 
       if (forbiddenHeader(name)) {
@@ -793,25 +794,32 @@ export class Network {
 
       const https = url.protocol === "https:";
       const family = isIP(address);
-      const request = (https ? httpsRequest : httpRequest)({
-        host,
-        port: url.port || (https ? 443 : 80),
-        path: `${url.pathname}${url.search}`,
-        method,
-        headers: outgoing,
-        agent: false,
-        // The address pinned for this request, whatever the resolver would say now.
-        lookup: (_name, opts, callback) => {
-          if ((opts as { all?: boolean }).all) {
-            (callback as (e: null, a: { address: string; family: number }[]) => void)(null, [
-              { address, family },
-            ]);
-          } else {
-            (callback as (e: null, a: string, f: number) => void)(null, address, family);
-          }
-        },
-        ...(https ? { servername: isIP(host) ? undefined : host, ca: this.ca } : {}),
-      });
+      let request: ClientRequest;
+      try {
+        request = (https ? httpsRequest : httpRequest)({
+          host,
+          port: url.port || (https ? 443 : 80),
+          path: `${url.pathname}${url.search}`,
+          method,
+          headers: outgoing,
+          agent: false,
+          // The address pinned for this request, whatever the resolver would say now.
+          lookup: (_name, opts, callback) => {
+            if ((opts as { all?: boolean }).all) {
+              (callback as (e: null, a: { address: string; family: number }[]) => void)(null, [
+                { address, family },
+              ]);
+            } else {
+              (callback as (e: null, a: string, f: number) => void)(null, address, family);
+            }
+          },
+          ...(https ? { servername: isIP(host) ? undefined : host, ca: this.ca } : {}),
+        });
+      } catch (error) {
+        // What check() let through and Node still refuses: a refusal like any other.
+        fail(new Refused((error as Error).message));
+        return;
+      }
       let timer: NodeJS.Timeout;
       const overall = setTimeout(() => stop(new Refused("it took too long")), deadline);
       let finished = false;

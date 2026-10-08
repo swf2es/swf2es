@@ -500,7 +500,11 @@ test("requests are what Flash let a SWF send, and no more", async () => {
     ["Cookie", { method: "POST", headers: [["Cookie", "a=b"]] }, /may not send the header Cookie/],
     ["Host", { method: "POST", headers: [["host", "evil"]] }, /may not send the header host/],
     ["Referer_", { method: "POST", headers: [["Referer", "x"]] }, /may not send/],
-    ["CRLF", { method: "POST", headers: [["X-A", "1\r\nX-B: 2"]] }, /breaks its line/],
+    ["CRLF", { method: "POST", headers: [["X-A", "1\r\nX-B: 2"]] }, /no header may hold/],
+    ["NUL", { method: "POST", headers: [["X-A", "a\0b"]] }, /no header may hold/],
+    ["DEL", { method: "POST", headers: [["X-A", "a\x7fb"]] }, /no header may hold/],
+    ["escape", { method: "POST", headers: [["X-A", "a\x1bb"]] }, /no header may hold/],
+    ["wide", { method: "POST", headers: [["X-A", "\u2028"]] }, /no header may hold/],
     ["name", { method: "POST", headers: [["X A", "1"]] }, /not a header/],
     ["count", { method: "POST", headers: Array(40).fill(["X-A", "1"]) }, /too many headers/],
   ] as const) {

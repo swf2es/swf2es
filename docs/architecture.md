@@ -4080,7 +4080,8 @@ controls") and its Cross Domain Policy File Specification (2.0):
 - Flash Player outside AIR sent GET and POST only, and refused a SWF the
   headers `URLRequestHeader` lists (Cookie, Host, Referer, User-Agent and
   the rest); the main process refuses those too, and Proxy- and Sec-
-  headers, and any header whose value breaks its line.
+  headers, and any header value with a control character or beyond
+  Latin-1, which Node would throw for, saying so on stderr.
 
 What Flash never guarded, the machine's place on the network, is
 guarded here, since a request from the main process is one from this

@@ -139,9 +139,10 @@ let openedAt = Number.NEGATIVE_INFINITY;
 
 /**
  * An http(s) URL in the system's browser, never in the app, only for a SWF
- * in local-with-networking, and only as a click or a key asked: one page a
- * gesture, a second apart at least, as a browser's popup blocker allows,
- * so a SWF cannot launch the browser in a loop. Anything else goes nowhere.
+ * with the network (local-with-networking or remote), and only as a click
+ * or a key asked: one page a gesture, a second apart at least, as a
+ * browser's popup blocker allows, so a SWF cannot launch the browser in a
+ * loop. Anything else goes nowhere.
  */
 function openExternal(url: string): void {
   let protocol: string;
@@ -713,8 +714,10 @@ async function fetchForPage(id: number, request: unknown): Promise<NetworkRespon
   try {
     return await network.fetch(request, controller.signal);
   } catch (error) {
-    if (error instanceof Refused && !controller.signal.aborted) {
-      process.stderr.write(`swf2es: not loading ${shown}: ${error.message}\n`);
+    // A refusal says why; anything else, which should not happen, is said too.
+    if (!controller.signal.aborted) {
+      const why = error instanceof Refused ? error.message : `failed: ${error}`;
+      process.stderr.write(`swf2es: not loading ${shown}: ${why}\n`);
     }
 
     throw error;
