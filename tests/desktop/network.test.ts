@@ -120,6 +120,12 @@ function serve(name: string): Handler {
 
         response.end();
         return;
+      case "/hold":
+        // 4000 bytes now, the rest a moment later.
+        response.writeHead(200);
+        response.write("x".repeat(4000));
+        setTimeout(() => response.end("x".repeat(1000)), 300);
+        return;
       case "/slow":
         // Never answers.
         return;
@@ -553,6 +559,20 @@ test("responses are bounded in size and in time, and requests in number", async 
   assert.match(await left, /aborted/);
   net.play(null);
   assert.match(await outcome(ask(net, `${swf()}/data.txt`)), /no SWF plays/);
+});
+
+test("a movie's responses hold no more than their budget at once, given back as each is done", async () => {
+  policies.clear();
+  const net = await playing(`${swf()}/movie.swf`, { limits: { buffered: 6000 } });
+  const held = ask(net, `${swf()}/hold`);
+  // Its first 4000 bytes in, a 5000-byte one does not fit beside them.
+  await new Promise((done) => setTimeout(done, 100));
+  assert.match(await outcome(ask(net, `${swf()}/big`)), /hold too much at once/);
+  assert.equal(text((await held).bytes)?.length, 5000);
+  assert.equal(text((await ask(net, `${swf()}/big`)).bytes)?.length, 5000);
+  // A response is bytes of its own, not a view of a larger buffer.
+  const { bytes } = await ask(net, `${swf()}/data.txt`);
+  assert.equal(bytes?.byteLength, bytes?.buffer.byteLength);
 });
 
 test("HTTPS: verified, and its policies' secure flag kept", async (t) => {

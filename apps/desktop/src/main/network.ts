@@ -83,6 +83,12 @@ export interface Limits {
   /** How long a policy file may take, and port 843's socket policy, which most servers lack. */
   policyTimeout: number;
   masterSocketTimeout: number;
+  /**
+   * The bytes a movie's responses may hold at once, all told: past it a
+   * response is refused, so many large ones together cannot take the
+   * main process's memory, as each alone may come near `response`.
+   */
+  buffered: number;
   /** Requests under way at once; the rest wait their turn, up to `queue`. */
   concurrent: number;
   queue: number;
@@ -101,6 +107,7 @@ export const LIMITS: Limits = {
   timeout: 30_000,
   policyTimeout: 10_000,
   masterSocketTimeout: 3_000,
+  buffered: 256 * 1024 * 1024,
   concurrent: 16,
   queue: 1024,
   policyFiles: 64,
@@ -139,6 +146,12 @@ interface Pinned {
 }
 
 /** What one movie's requests share, and lose as the next opens. */
+/** What one request's responses hold of its movie's `buffered`, given back as it is answered. */
+interface Budget {
+  session: Session;
+  taken: number;
+}
+
 interface Session {
   movie: Movie;
   origin: Origin | null;
@@ -149,6 +162,8 @@ interface Session {
   /** What Security.loadPolicyFile named: http(s) URLs, and xmlsocket "host:port"s. */
   urlPolicyFiles: URL[];
   socketPolicyFiles: { host: string; port: number }[];
+  /** The bytes its responses hold now, of `buffered`. */
+  buffered: number;
 }
 
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
@@ -204,6 +219,7 @@ export class Network {
           socketPolicies: new Map(),
           urlPolicyFiles: [],
           socketPolicyFiles: [],
+          buffered: 0,
         }
       : null;
   }
@@ -267,11 +283,14 @@ export class Network {
     const checked = this.check(request);
     const aborted = AbortSignal.any([signal, session.abort.signal]);
     await this.turn(aborted);
+    const budget: Budget = { session, taken: 0 };
     try {
       return checked.purpose === "movie"
-        ? await this.fetchMovie(session, checked, aborted)
-        : await this.fetchFor(session, checked, aborted);
+        ? await this.fetchMovie(session, checked, aborted, budget)
+        : await this.fetchFor(session, checked, aborted, budget);
     } finally {
+      // Answered: its bytes are the page's now, on their way over IPC.
+      session.buffered -= budget.taken;
       this.done();
     }
   }
@@ -476,6 +495,7 @@ export class Network {
     session: Session,
     request: NetRequest & { target: URL },
     signal: AbortSignal,
+    budget: Budget,
   ): Promise<NetResponse> {
     const movie = session.movie;
     if (movie.kind !== "remote" || request.url !== new URL(movie.url).href) {
@@ -496,6 +516,7 @@ export class Network {
         read: true,
         max: this.limits.response,
         referer: null,
+        budget,
       });
       const next = redirectOf(url, response);
       if (next) {
@@ -522,6 +543,7 @@ export class Network {
     session: Session,
     request: NetRequest & { target: URL },
     signal: AbortSignal,
+    budget: Budget,
   ): Promise<NetResponse> {
     let requester: Requester;
     let rank: number;
@@ -568,6 +590,7 @@ export class Network {
         // sendToURL's answer is no one's to read.
         read: request.purpose !== "send",
         max: this.limits.response,
+        budget,
         // The SWF's URL to its own origin, only that origin elsewhere, as browsers now send it.
         referer: !session.origin ? null : same ? session.origin.url.href : `${origin}/`,
       });
@@ -723,7 +746,14 @@ export class Network {
     headers: [string, string][],
     body: Uint8Array | null,
     signal: AbortSignal,
-    options: { read: boolean; max: number; referer: string | null; timeout?: number },
+    options: {
+      read: boolean;
+      max: number;
+      referer: string | null;
+      timeout?: number;
+      /** Where the bytes read count against the movie's `buffered`; a policy file's do not. */
+      budget?: Budget;
+    },
   ): Promise<NetResponse> {
     const timeout = options.timeout ?? this.limits.timeout;
     return new Promise((answer, fail) => {
@@ -824,6 +854,7 @@ export class Network {
 
         const chunks: Buffer[] = [];
         let length = 0;
+        const budget = options.budget;
         arm();
         response.on("data", (chunk: Buffer) => {
           length += chunk.length;
@@ -832,10 +863,31 @@ export class Network {
             return;
           }
 
+          if (budget) {
+            if (budget.session.buffered + chunk.length > this.limits.buffered) {
+              stop(new Refused("the SWF's responses under way hold too much at once"));
+              return;
+            }
+
+            budget.session.buffered += chunk.length;
+            budget.taken += chunk.length;
+          }
+
           chunks.push(chunk);
           arm();
         });
-        response.on("end", () => end(new Uint8Array(Buffer.concat(chunks, length))));
+        // One copy, into memory of its own: Buffer.concat may hand out a slice of
+        // Node's shared pool, whose rest IPC would carry to the page with it.
+        response.on("end", () => {
+          const bytes = new Uint8Array(length);
+          let at = 0;
+          for (const chunk of chunks.splice(0)) {
+            bytes.set(chunk, at);
+            at += chunk.length;
+          }
+
+          end(bytes);
+        });
         response.on("error", (error) => stop(new Refused(error.message)));
         response.on("aborted", () => stop(new Refused("the response broke off")));
       });

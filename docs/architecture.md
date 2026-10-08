@@ -4112,8 +4112,10 @@ same-origin by name, a request now at 127.0.0.1 is judged as one to this
 machine. Every redirect is judged as a request of its own, a POST
 redirected by a 301, 302 or 303 going on as a GET without its body, to
 http or https only and ten at most. HTTPS is verified against Node's
-roots and the system's. A response is read up to 128 MB, a body sent up
-to 32 MB, a URL up to 64 KB, 32 headers in 8 KB; a request that hears
+roots and the system's. A response is read up to 128 MB, and a movie's
+responses under way hold 256 MB at most all told, past which the next is
+refused (each is copied once, into memory of its own, before IPC copies
+it to the page); a body is sent up to 32 MB, a URL up to 64 KB, 32 headers in 8 KB; a request that hears
 nothing for 30 seconds fails (a policy file in 10, port 843's socket
 policy in 3); 16 requests run at once, a thousand more wait, and the rest
 are refused. A sendToURL's response is not read. Requests the page aborts
