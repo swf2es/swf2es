@@ -666,7 +666,21 @@ that a module defines, as avmplus' code context, so a child's method
 called by the parent's code sees the child's. The runtime finds a frame's
 module by the script the stack names, recorded when the module loads, so
 a host gives each module a script of its own, a `sourceURL` comment for
-code it evaluates (`Runtime.codeDomain`).
+code it evaluates (`Runtime.codeDomain`). A frame that names no script,
+as JavaScriptCore's of a Function's code, is no module's: the module a
+load's stack does not name is left out, not taken for the host's code
+the next frame is. JavaScriptCore also makes a strict `return f(...)` a
+proper tail call, dropping the caller's frame, so the runtime calls a
+function value, a bound method or a getter for a SWF's code, and calls
+on to its own functions that do (`call` to `callValue`, `callProperty`
+to `callBound`, Function's `call` and `apply`, a Proxy's methods), in no
+tail position: its frames stay between the callee and the code that
+called the runtime, as anything reading the stack expects. It is written
+`let r; r = f(...); return r;`, not `const r = f(...); return r;`, which
+minifiers (terser's and esbuild's) fold back into `return f(...)`; this
+form they keep, as `return r = f(...), r`. Measured in JavaScriptCore's
+shell, as3pb's run and the untyped benchmark took the same within their
+spread either way.
 avmshell's `File` reads and writes
 `RuntimeOptions.files`, in memory by default. Date is JavaScript's Date, with avmplus' string
 formats. flash.concurrent's Mutex and Condition and ByteArray's atomic
@@ -1439,7 +1453,31 @@ A module is loaded as the factory a strict `Function` returns, not
 imported: a document keeps every module it imports while it lives, so the
 code of SWFs long unloaded stayed (some 4.5 MB a player made again, its
 libraries' code and all), where a function's code goes once nothing
-refers to it. What the player keeps of a loaded SWF beside the SWF
+refers to it. JavaScriptCore's frames name no script for a
+`Function`'s code, whatever its `sourceURL`, so there, as a `Function`
+made once tells (`scripting/evaluate.ts`), a SWF's module is evaluated
+in a document as a classic script from a Blob URL of its own, which its
+frames name and whose code goes with the SWF as a `Function`'s does,
+and by a `Function` once a script does not run where a `Function`
+does: refused by a Content-Security-Policy without `blob:` in
+`script-src` or by Trusted Types, not loaded within 5 s, or loaded but
+not run, as by a DOM that runs no scripts. Until one has run, the
+modules' scripts go one at a time, so that such a policy reports one
+refusal, not one a module. A module whose script did not run is
+evaluated by a `Function` all the same, which throws its source's error
+where it has one. Without a script, as in a Worker, which has no
+document, or under such a policy, JavaScriptCore's frames tell no SWF's
+code from the host's, and every SWF's code is the main SWF's to
+`Runtime.codeDomain`: its domain for `currentDomain`, a load's default
+domain and the rest. The scripts load asynchronously, so a SWF's modules
+are all evaluated before any loads into the runtime; where none waits,
+the link goes on in the same turn. Measured in WebKitGTK's MiniBrowser, loading
+and unloading children as `tests/player/leak.ts` does, the heap after a
+collection grew 8.4 KB a load over 290 loads; with a `Function` each,
+every child's code taken for the host's made each load's default domain
+a child of the last, a chain kept whole, 145 to 234 KB a load. A script
+took some 0.2 ms longer to evaluate than a `Function` for a module of
+110 KB. What the player keeps of a loaded SWF beside the SWF
 itself, the domain and origin of each module's script for the stack,
 its symbols and its fonts for those registered later, it keeps
 weakly, so that the SWF, its code included, goes with its last object
@@ -1819,7 +1857,7 @@ and `LoaderInfo.applicationDomain.getDefinition` finds its own
 (`loader_duplicate_class`). The domain of the code that asks, for
 `ApplicationDomain.currentDomain`, `getDefinitionByName` and a load's
 default, is `Runtime.codeDomain`'s, so each module is evaluated under a
-`sourceURL` of its own (`scripting/code.ts`), and the player's own modules load as builtin,
+`sourceURL` of its own, or as a script of its own (`scripting/evaluate.ts`), and the player's own modules load as builtin,
 whose frames do not count, as avmplus skips builtin code. SymbolClass
 binds a character to the class its name finds in the SWF's domain, by
 the module that defines it, so the same name in another domain is

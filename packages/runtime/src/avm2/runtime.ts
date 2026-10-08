@@ -34,6 +34,7 @@ import {
   findScript,
   frameScripts,
   type Script,
+  stackFrames,
 } from "./domain.js";
 import {
   type Enumeration,
@@ -286,8 +287,11 @@ export class Runtime {
    */
   private locate(): void {
     for (const [error, domain] of this.unlocated) {
-      // Its first frame is abc's own, its second the module's factory.
-      const at = frameScripts(error.stack)[1];
+      // Its first frame is abc's own, its second the module's factory. An
+      // engine may name no script for the factory's frame (JavaScriptCore,
+      // for code a Function made), and the next frame that names one is
+      // the host's, which must not stand for the module.
+      const at = stackFrames(error.stack)[1];
       if (at) {
         this.moduleDomains.set(at, new WeakRef(domain));
         this.moduleDomainGone.register(domain, at);
@@ -725,7 +729,17 @@ export class Runtime {
     return this.classOf(ref).$it.proto;
   }
 
+  // Where the runtime calls a function for a SWF's code, a getter, a
+  // method or a function value, or calls on to the runtime's own function
+  // that does, it never returns the call directly but through a variable
+  // assigned apart (`let r; r = f(); return r;`). JavaScriptCore makes a
+  // strict `return f()` a proper tail call, which drops the caller's frame,
+  // so that the stack a security check reads would lose the runtime's
+  // frames between a SWF's code and the function it called through them;
+  // minifiers fold `const r = f(); return r;` back into `return f()`,
+  // but keep this form (as `return r = f(), r`).
   getProperty(o: Value, mn: Multiname): Value {
+    let r: Value;
     const e = cached(this.receiverTraits(o), mn);
     if (e !== null) {
       switch (e.kind) {
@@ -734,7 +748,8 @@ export class Runtime {
           return o[e.key];
         case IC_Get:
         case IC_GetSet:
-          return (e.get as Method).call(o);
+          r = (e.get as Method).call(o);
+          return r;
         case IC_Method:
           return this.methodClosure(o, e.traits as Traits, e.id);
         case IC_Dynamic: {
@@ -1009,6 +1024,7 @@ export class Runtime {
   }
 
   private getBound(o: Value, traits: Traits, b: number, mn: Multiname): Value {
+    let r: Value;
     const id = b >> 3;
     switch (b & 7) {
       case BIND_Var:
@@ -1016,7 +1032,8 @@ export class Runtime {
         return o[slotKey(id)];
       case BIND_Get:
       case BIND_GetSet:
-        return traits.proto[methodKey(id)].call(o);
+        r = traits.proto[methodKey(id)].call(o);
+        return r;
       case BIND_Method:
         return this.methodClosure(o, traits, id);
       case BIND_Set: {
@@ -1142,7 +1159,12 @@ export class Runtime {
       const method: Method = traits.proto[methodKey(id)];
       f = this.newFunctionObject(
         (method as CountedMethod).$min === undefined
-          ? (...args: Value[]) => method.apply(o, args)
+          ? (...args: Value[]) => {
+              // biome-ignore lint/style/useConst: a const is folded into a tail call (see Runtime.getProperty)
+              let r: Value;
+              r = method.apply(o, args);
+              return r;
+            }
           : (...args: Value[]) => this.callBound(method, o, args),
         null,
       );
@@ -1419,24 +1441,29 @@ export class Runtime {
   // Calls.
 
   callProperty(o: Value, mn: Multiname, ...args: Value[]): Value {
+    let r: Value;
     const e = cached(this.receiverTraits(o), mn);
     if (e !== null) {
       switch (e.kind) {
         case IC_Method:
         case IC_Call:
-          return this.callBound(e.get as CountedMethod, o, args);
+          r = this.callBound(e.get as CountedMethod, o, args);
+          return r;
         case IC_Slot:
         case IC_Const:
-          return this.callValue(o[e.key], o, args, mn);
+          r = this.callValue(o[e.key], o, args, mn);
+          return r;
         case IC_Get:
         case IC_GetSet:
-          return this.callValue((e.get as Method).call(o), o, args, mn);
+          r = this.callValue((e.get as Method).call(o), o, args, mn);
+          return r;
         case IC_Dynamic: {
           const d: Map<string, Value> | null = o.$d;
           if (d) {
             const v = d.get(e.key);
             if (v !== undefined || d.has(e.key)) {
-              return this.callValue(v, o, args, mn);
+              r = this.callValue(v, o, args, mn);
+              return r;
             }
           }
         }
@@ -1447,10 +1474,12 @@ export class Runtime {
     const b = traits.find(mn);
     this.fill(o, traits, b, mn);
     if ((b & 7) === BIND_Method) {
-      return this.callBound(traits.proto[methodKey(b >> 3)], o, args);
+      r = this.callBound(traits.proto[methodKey(b >> 3)], o, args);
+      return r;
     }
 
-    return this.callValue(this.callee(o, traits, b, mn), o, args, mn);
+    r = this.callValue(this.callee(o, traits, b, mn), o, args, mn);
+    return r;
   }
 
   /**
@@ -1486,33 +1515,43 @@ export class Runtime {
 
   /** callproplex: as callproperty, with no receiver. */
   callPropLex(o: Value, mn: Multiname, ...args: Value[]): Value {
+    let r: Value;
     const traits = this.traitsOf(o);
     const b = traits.find(mn);
     if ((b & 7) === BIND_Method) {
-      return this.callBound(traits.proto[methodKey(b >> 3)], o, args);
+      r = this.callBound(traits.proto[methodKey(b >> 3)], o, args);
+      return r;
     }
 
-    return this.callValue(this.callee(o, traits, b, mn), null, args, mn);
+    r = this.callValue(this.callee(o, traits, b, mn), null, args, mn);
+    return r;
   }
 
   call(f: Value, receiver: Value, ...args: Value[]): Value {
-    return this.callValue(f, receiver, args, null);
+    // biome-ignore lint/style/useConst: a const is folded into a tail call (see Runtime.getProperty)
+    let r: Value;
+    r = this.callValue(f, receiver, args, null);
+    return r;
   }
 
   callValue(f: Value, receiver: Value, args: Value[], mn: Multiname | null): Value {
+    let r: Value;
     if (f !== null && typeof f === "object") {
       if (f.$f) {
-        return f.$f.apply(receiver ?? f.$global ?? null, args);
+        r = f.$f.apply(receiver ?? f.$global ?? null, args);
+        return r;
       }
 
       if (f.$it) {
-        return this.callClass(f, args);
+        r = this.callClass(f, args);
+        return r;
       }
 
       // A RegExp called is its exec of the argument's string, as RegExpObject::call has it.
       if (f.$re !== undefined) {
         this.execName ??= qname(namespace(NS_Public, "http://adobe.com/AS3/2006/builtin"), "exec");
-        return this.callProperty(f, this.execName, args.length ? this.toString(args[0]) : "");
+        r = this.callProperty(f, this.execName, args.length ? this.toString(args[0]) : "");
+        return r;
       }
     }
 
@@ -1532,11 +1571,14 @@ export class Runtime {
     required: number,
     max: number,
   ): Value {
+    // biome-ignore lint/style/useConst: a const is folded into a tail call (see Runtime.getProperty)
+    let r: Value;
     if (args.length < required || (max >= 0 && args.length > max)) {
       throw this.argumentCountError(required, args.length);
     }
 
-    return this.callInDxns(dxns, f, receiver, args);
+    r = this.callInDxns(dxns, f, receiver, args);
+    return r;
   }
 
   /**
@@ -1557,12 +1599,14 @@ export class Runtime {
   private execName: Multiname | null = null;
 
   callInterface(iface: TypeRef, disp: number, o: Value, ...args: Value[]): Value {
+    let r: Value;
     const cls = this.classOf(iface);
     // The interface's layout names the method; the receiver binds that name.
     const desc = cls.$desc as ClassDesc;
     for (const [ns, , name, b] of desc.instance.bindings) {
       if (b >> 3 === disp && (b & 7) === BIND_Method) {
-        return this.callProperty(o, qname(ns, name), ...args);
+        r = this.callProperty(o, qname(ns, name), ...args);
+        return r;
       }
     }
 
@@ -1577,17 +1621,20 @@ export class Runtime {
   // alone, a name they do not bind a ReferenceError, not a dynamic property.
 
   callSuper(sup: AsObject, o: Value, mn: Multiname, ...args: Value[]): Value {
+    let r: Value;
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
     if ((b & 7) === BIND_Method) {
-      return this.callBound(traits.proto[methodKey(b >> 3)], o, args);
+      r = this.callBound(traits.proto[methodKey(b >> 3)], o, args);
+      return r;
     }
 
     if (b === 0) {
       throw this.error("ReferenceError", 1070, mn.name ?? "*", traits.name);
     }
 
-    return this.callValue(this.getBound(o, traits, b, mn), o, args, mn);
+    r = this.callValue(this.getBound(o, traits, b, mn), o, args, mn);
+    return r;
   }
 
   getSuper(sup: AsObject, o: Value, mn: Multiname): Value {
@@ -2847,13 +2894,16 @@ export class Runtime {
    * checks its own.
    */
   callBound(f: CountedMethod, o: Value, args: Value[]): Value {
+    // biome-ignore lint/style/useConst: a const is folded into a tail call (see Runtime.getProperty)
+    let r: Value;
     const min = f.$min;
     const max = f.$max as number;
     if (min !== undefined && (args.length < min || (max >= 0 && args.length > max))) {
       throw this.argumentCountError(min, args.length);
     }
 
-    return f.apply(o, args);
+    r = f.apply(o, args);
+    return r;
   }
 
   get noBody(): Factory {

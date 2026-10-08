@@ -73,22 +73,34 @@ export class Domain {
 }
 
 /**
- * The scripts a stack's frames name, innermost first: V8's "at f (script:1:2)"
- * and "at script:1:2", and SpiderMonkey's and JavaScriptCore's "f@script:1:2".
+ * The script each of a stack's frames names, innermost first, or null for
+ * a frame that names none: V8's "at f (script:1:2)" and "at script:1:2",
+ * and SpiderMonkey's and JavaScriptCore's "f@script:1:2". JavaScriptCore
+ * names none for code a Function or eval made, whatever its sourceURL
+ * ("f@"), nor for native code ("f@[native code]"). Lines that are no frame,
+ * as V8's heading "Error", are left out.
  */
-export function frameScripts(stack: string | undefined): string[] {
-  const scripts: string[] = [];
-  for (const line of stack?.split("\n") ?? []) {
-    const m =
-      /^\s*at .*? \((.*):\d+:\d+\)$/.exec(line) ??
-      /^\s*at (.*):\d+:\d+$/.exec(line) ??
-      /@(.*):\d+:\d+$/.exec(line);
-    if (m) {
-      scripts.push(m[1]);
+export function stackFrames(stack: string | undefined): (string | null)[] {
+  const lines = stack?.split("\n") ?? [];
+  const v8 = lines.some((line) => /^\s*at /.test(line));
+  const frames: (string | null)[] = [];
+  for (const line of lines) {
+    if (v8 ? !/^\s*at /.test(line) : !line.includes("@")) {
+      continue;
     }
+
+    const m = v8
+      ? (/^\s*at .*? \((.*):\d+:\d+\)$/.exec(line) ?? /^\s*at (.*):\d+:\d+$/.exec(line))
+      : /@(.*):\d+:\d+$/.exec(line);
+    frames.push(m ? m[1] : null);
   }
 
-  return scripts;
+  return frames;
+}
+
+/** The scripts a stack's frames name, innermost first, those that name none left out. */
+export function frameScripts(stack: string | undefined): string[] {
+  return stackFrames(stack).filter((at) => at !== null);
 }
 
 /** The definition of a table's that `mn` names: its namespaces in order, each at a version it sees. */
