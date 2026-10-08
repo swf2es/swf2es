@@ -48,6 +48,7 @@ import { perspectiveProjectionNatives } from "./flash/geom/PerspectiveProjection
 import { transformNatives } from "./flash/geom/Transform.js";
 import { utils3DNatives } from "./flash/geom/Utils3D.js";
 import { currencyParseResultNatives } from "./flash/globalization/CurrencyParseResult.js";
+import { numberFormatterNatives } from "./flash/globalization/NumberFormatter.js";
 import { numberParseResultNatives } from "./flash/globalization/NumberParseResult.js";
 import { soundHooks, soundNatives } from "./flash/media/Sound.js";
 import { soundMixerNatives } from "./flash/media/SoundMixer.js";
@@ -116,6 +117,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...externalInterfaceNatives(s),
     ...currencyParseResultNatives(s),
     ...numberParseResultNatives(),
+    ...numberFormatterNatives(s),
     ...urlRequestNatives(s),
     ...urlStreamNatives(s),
     ...navigateNatives(s),
