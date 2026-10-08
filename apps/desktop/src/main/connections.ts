@@ -47,16 +47,16 @@ export class Connections {
   generation = 0;
 
   /**
-   * Connect `id` to `host`:`port`, each checked, as the page asks; a refusal is an error, then a
-   * close.
+   * Connect `id` to `host`:`port`, each checked, as the page asks, at `address` where the host's
+   * was pinned (a remote SWF's socket policy came from there); a refusal is an error, then a close.
    */
-  connect(id: number, host: unknown, port: unknown): void {
+  connect(id: number, host: unknown, port: unknown, address?: string): void {
     if (!validEndpoint(host, port) || this.sockets.has(id) || this.sockets.size >= MAX_OPEN) {
       this.refuse(id);
       return;
     }
 
-    const socket = connect({ host, port: port as number });
+    const socket = connect({ host: address ?? host, port: port as number });
     this.sockets.set(id, socket);
     socket.on("connect", () =>
       this.tell(id, {

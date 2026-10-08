@@ -1,11 +1,18 @@
 // The page's one way to the shell, window.swf2esDesktop: a few messages,
 // each checked again by the main process. A sandboxed preload is a
 // CommonJS script that may require only Electron's renderer modules.
-import type { DesktopApi, LibraryName, OpenedMovie, SocketEvent } from "../shared/api.js";
+import type {
+  DesktopApi,
+  LibraryName,
+  NetworkResponse,
+  OpenedMovie,
+  SocketEvent,
+} from "../shared/api.js";
 
 const { contextBridge, ipcRenderer, webUtils } = require("electron") as typeof import("electron");
 
 let nextSocket = 1;
+let nextRequest = 1;
 
 const api: DesktopApi = {
   start: () => ipcRenderer.invoke("desktop:start"),
@@ -32,6 +39,22 @@ const api: DesktopApi = {
         listener(id, event),
       );
     },
+  },
+  network: {
+    fetch: (request, cancel) => {
+      const id = nextRequest++;
+      cancel(() => ipcRenderer.send("net:abort", id));
+      return ipcRenderer
+        .invoke("net:fetch", id, request)
+        .then(({ response }: { response: NetworkResponse | null }) => {
+          if (!response) {
+            throw new Error("swf2es: the request was refused");
+          }
+
+          return response;
+        });
+    },
+    loadPolicyFile: (url) => ipcRenderer.send("net:policy-file", String(url)),
   },
 };
 

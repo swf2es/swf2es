@@ -5,6 +5,9 @@
     "outDir": "../../dist/main",
     "tsBuildInfoFile": "../../dist/main/.tsbuildinfo",
     "types": ["node"],
+    // Its modules import each other by their .ts names, so that node runs
+    // them as they are in the tests, and the build writes .js.
+    "rewriteRelativeImportExtensions": true,
     "lib": ["ES2022"]
   },
   "include": ["*.ts"],

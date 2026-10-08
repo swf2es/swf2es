@@ -2,15 +2,16 @@
 // no network of its own beyond fetch, and carried over IPC. Each page's
 // connections (connections.ts) close as it navigates, reloads or goes.
 import { type IpcMainEvent, ipcMain, type WebContents } from "electron";
-import { Connections, validEndpoint } from "./connections.js";
+import { Connections, validEndpoint } from "./connections.ts";
 
 /**
  * Carry socket messages from pages that `trusted` accepts, each connection
- * made only as `permit` allows it.
+ * made only as `permit` allows it, to the address it gives where it gives
+ * one; null refuses it.
  */
 export function bridgeSockets(
   trusted: (event: IpcMainEvent) => boolean,
-  permit: (host: string, port: number) => Promise<boolean>,
+  permit: (host: string, port: number) => Promise<{ address?: string } | null>,
 ): void {
   const pages = new Map<WebContents, Connections>();
 
@@ -51,7 +52,7 @@ export function bridgeSockets(
 
     const generation = connections.generation;
     void permit(host, port as number)
-      .catch(() => false)
+      .catch(() => null)
       .then((allowed) => {
         // The page that asked may have gone while the user was asked.
         if (connections.generation !== generation) {
@@ -59,7 +60,7 @@ export function bridgeSockets(
         }
 
         if (allowed) {
-          connections.connect(id, host, port);
+          connections.connect(id, host, port, allowed.address);
         } else {
           connections.refuse(id);
         }

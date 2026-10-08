@@ -428,8 +428,18 @@ try {
     await until("the networked SWF's pages", () => (stderr().match(noGesture)?.length ?? 0) >= 3);
     assert.equal(stderr().match(noGesture)?.length, 3);
     assert.equal(traced("smoke: outside refused"), 4);
-    // Its network load went out, where the local SWF's three were stopped.
-    assert.equal(stderr().match(/not loading https:\/\/example\.invalid\/network/g)?.length, 3);
+    // Its network load went to the main process, which found no such host, where the local
+    // SWF's three were stopped for want of the network.
+    assert.equal(
+      stderr().match(/not loading https:\/\/example\.invalid\/network: the SWF has no network/g)
+        ?.length,
+      3,
+    );
+    await until("the networked SWF's load", () =>
+      /not loading https:\/\/example\.invalid\/network: example\.invalid has no address/.test(
+        stderr(),
+      ),
+    );
     assert.equal(
       await evaluate<number>(`fetch(${JSON.stringify(url)}).then((r) => r.status)`),
       404,

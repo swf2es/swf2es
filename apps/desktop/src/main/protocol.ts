@@ -11,7 +11,7 @@ import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { protocol, type Session } from "electron";
 import type { LibraryName, LibraryState } from "../shared/api.js";
-import { FILE_ORIGIN, type Sandbox } from "./sandbox.js";
+import { FILE_ORIGIN, type Sandbox } from "./sandbox.ts";
 
 export const SCHEME = "swf2es";
 export const APP_ORIGIN = `${SCHEME}://app`;
@@ -99,8 +99,9 @@ const typeOf = (path: string) => TYPES[extname(path).toLowerCase()] ?? "applicat
  * The page's Content-Security-Policy. 'unsafe-eval' is the player's: it
  * evaluates the modules it compiles with `new Function`; codegen is
  * WebAssembly; the import map is allowed by its hash and no other inline
- * script runs. A SWF's loads reach its own files and what a web page's
- * could; nothing is framed, embedded or posted to the page.
+ * script runs. The page reaches its own files and the SWF's, never the
+ * network: a SWF's http and https loads go through the main process
+ * (network.ts). Nothing is framed, embedded or posted to the page.
  */
 function contentSecurityPolicy(page: string): string {
   const map = /<script type="importmap">([\s\S]*?)<\/script>/.exec(page)?.[1] ?? "";
@@ -113,7 +114,7 @@ function contentSecurityPolicy(page: string): string {
     `img-src 'self' ${FILE_ORIGIN} data: blob:`,
     `media-src 'self' ${FILE_ORIGIN} data: blob:`,
     `font-src 'self' data:`,
-    `connect-src 'self' ${FILE_ORIGIN} https: wss: data: blob:`,
+    `connect-src 'self' ${FILE_ORIGIN} data: blob:`,
     "base-uri 'none'",
     "form-action https:",
     "frame-ancestors 'none'",

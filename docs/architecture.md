@@ -3975,13 +3975,15 @@ FileAttributes' UseNetwork bit (`fileAttributes` in `format`), and
 
 - **local-with-filesystem**, without the bit: the SWF reads the files in
   its own directory and below, its real directory, links followed, and
-  reaches no network. Every http, https, ws and wss request from the page
-  is cancelled in the session's `webRequest` (with a word on stderr), no
-  socket is made, and navigateToURL opens no page, as Flash refused it,
-  since a URL can carry what the SWF read.
+  reaches no network. The main process refuses its http and https
+  requests (with a word on stderr), no socket is made, and navigateToURL
+  opens no page, as Flash refused it, since a URL can carry what the SWF
+  read.
 - **local-with-networking**, with it: the SWF reads no local file but
-  itself, and reaches the network as a web page does (https and wss,
-  CORS included), and sockets as the user allows (below).
+  itself, reaches the network through the main process by Flash's rules
+  (see [The network](#the-network)), content from anywhere and data only
+  where a policy file grants every domain, and sockets as the user allows
+  (below).
 
 So no SWF can both read the disk and send what it read away. A
 directory others share is never granted whole: the user's home, the one
@@ -4015,12 +4017,107 @@ The page's Content-Security-Policy, a header the main process writes, is
 evaluates the modules it compiles with `new Function` and codegen is
 WebAssembly; inline styles, for the element's shadow root; images, media
 and fonts from the page, the SWF's files, `data:` and `blob:`; and
-`connect-src` for the page, the SWF's files and `https:` and `wss:`, so a
-SWF in local-with-networking loads from the network as from a web page,
-CORS included. `http:` and `ws:` are refused: the page is a secure
-context, which Chromium would not let reach them anyway as mixed content,
-and the policy says so rather than leave it to that. Nothing may frame
-the page, and it frames nothing.
+`connect-src` for the page and the SWF's files alone. The page never
+reaches the network itself: a SWF's http and https loads go through the
+main process (below), and every http, https, ws and wss request the page
+makes is cancelled in the session's `webRequest`, with a word on stderr,
+whatever the policy would allow. So `air.net.WebSocket`, AIR's and not
+Flash Player's, has no server here. Nothing may frame the page, and it
+frames nothing.
+
+### The network
+
+A SWF's http and https requests are the main process's to send
+(`src/main/network.ts`), not the page's: the element is configured with a
+fetch (`configure({ fetch })`, `src/renderer/network.ts`) that hands each
+one, with its purpose, over IPC, and the main process judges it as Flash
+Player judged it, by the SWF's sandbox and the policy files of the sites
+it reaches, not by CORS. So a SWF reaches `http:` and servers that never
+heard of CORS, as it did in Flash. A swf2es://file URL, a local SWF's own
+files, the page fetches as before, and any other scheme is refused.
+
+Flash's rules, from Adobe's security documentation (the ActionScript 3.0
+Developer's Guide's "Security sandboxes", "Loading data" and "Permission
+controls") and its Cross Domain Policy File Specification (2.0):
+
+- A **remote** SWF may load anything from its own origin (scheme, host
+  and port), and content, a Loader's or a Sound's, from anywhere; it
+  reads another origin's data, a URLLoader's or URLStream's, only as that
+  origin's policy files grant its domain; sendToURL sends anywhere.
+- A **local-with-networking** SWF has no domain: it loads content from
+  anywhere, sends anywhere, and reads data only where a policy file
+  grants every domain (`domain="*"`), as the Developer's Guide says.
+- **Policy files** (`src/main/policy.ts`) are read as the specification
+  defines them. The master policy file is `/crossdomain.xml`; others,
+  named with `Security.loadPolicyFile`, count only as the master's
+  meta-policy permits (site-control, or the
+  `X-Permitted-Cross-Domain-Policies` header, the stricter of the two
+  winning), and Flash Player 10's default is master-only: a site without a
+  master policy file has no other either. A policy covers its own origin,
+  and a non-master one only its directory and below. A policy file must
+  come as `text/*`, `application/xml` or `application/xhtml+xml`, with a
+  200, without a redirect (the specification ignores one to another
+  domain; one within the site would move the file's scope), and with a
+  root of `<cross-domain-policy>`; a DOCTYPE is skipped, so no entity of
+  its own is expanded. Domains match by the specification's table:
+  `*.example.com` is example.com and every name under it, an address is
+  never its host's name, and only `*` names a local SWF. An HTTPS policy's
+  rule grants an HTTP SWF, or a local one, only with `secure="false"`.
+  Headers other than Content-Type go to another origin only as its
+  `allow-http-request-headers-from` lists them. Each policy file is
+  fetched once a movie and address, and forgotten as the movie closes.
+- Flash Player outside AIR sent GET and POST only, and refused a SWF the
+  headers `URLRequestHeader` lists (Cookie, Host, Referer, User-Agent and
+  the rest); the main process refuses those too, and Proxy- and Sec-
+  headers, and any header whose value breaks its line.
+
+What Flash never guarded, the machine's place on the network, is
+guarded here, since a request from the main process is one from this
+machine. No request carries the user's credentials: no cookies (a
+response's are dropped), no HTTP authentication, no client certificate,
+no proxy; the SWF's URL goes as the Referer, and `x-flash-version` as
+Flash Player 32 sent it. Every address is placed (`src/main/addresses.ts`):
+on this machine (127/8, ::1), on a private network (10/8, 172.16/12,
+192.168/16, 100.64/10, link-local 169.254/16, where clouds keep their
+metadata service, unique and link-local IPv6, the documentation blocks),
+or public; an IPv4 address inside an IPv6 one, mapped, by NAT64 or by
+6to4, is that address. A request to a place more private than the
+SWF's own needs a policy file from that very address that grants the
+SWF, whatever its purpose and even within its origin, as Chromium's
+Private Network Access asks a server there before a public page may. A
+remote SWF's place is that of the address it came from; a local one
+stands for the internet, so it reaches this machine and the LAN only
+where a policy there grants every domain. Addresses no server has
+(0.0.0.0/8, ::, multicast, 240/4) are never reached, nor the ports the
+Fetch standard blocks (SMTP's, SSH's and the rest), as Flash in a browser
+never reached them either.
+
+Each request resolves its host once and connects to that address, its
+policy file fetched from the same one (Node's `lookup` pinned, the name
+kept for TLS's server name and the Host header), so DNS that changes its
+answer between the policy and the request, rebinding, gains nothing:
+same-origin by name, a request now at 127.0.0.1 is judged as one to this
+machine. Every redirect is judged as a request of its own, a POST
+redirected by a 301, 302 or 303 going on as a GET without its body, to
+http or https only and ten at most. HTTPS is verified against Node's
+roots and the system's. A response is read up to 128 MB, a body sent up
+to 32 MB, a URL up to 64 KB, 32 headers in 8 KB; a request that hears
+nothing for 30 seconds fails (a policy file in 10, port 843's socket
+policy in 3); 16 requests run at once, a thousand more wait, and the rest
+are refused. A sendToURL's response is not read. Requests the page aborts
+are aborted, and a movie's all are as the next opens, closes, or the page
+reloads. A refused request is a failed load to the SWF (IOErrorEvent, or
+the player's error for the SWF itself) and a line on stderr saying why.
+
+The page says what a request is for, and the main process cannot check
+it; nor does the player keep Flash's other half of the content rule,
+which let a SWF show another domain's image but not read its pixels or
+bytes without a policy. So a content load's bytes are the SWF's to read,
+and the line that holds against a SWF, or a page that misbehaves, is the
+one above: nothing with the user's credentials, and nothing more private
+than the SWF without that place's own policy. What a SWF reads from the
+internet that way is what its author's own server could fetch. The page
+also tells the player the sandbox, which `Security.sandboxType` reports.
 
 ### What the page may do
 
@@ -4099,14 +4196,25 @@ talks to a TCP server it is allowed through the bridge; that no page
 opens without a gesture, and that the policy refuses nothing; and that
 without playerglobal the page says what is missing. `connections.test.ts`
 and `sandbox.test.ts` test the sockets' limits and the sandbox's grants
-in node. CI's `desktop` workflow fetches Electron and runs them.
+in node, `policy.test.ts` the policy parser and what policies grant, by
+the specification's examples, and `network.test.ts` the network against
+servers of its own, each on 127.0.0.2, which it takes for the internet,
+and on 127.0.0.1 at the same port: same-origin and cross-origin loads
+with and without policies, meta-policies and named policy files,
+redirects, this machine reached by address, by name, by redirect and by
+a name whose DNS turns to it, HTTPS with a certificate it makes with
+openssl (skipped without), socket policies on a stand-in for port 843
+and on the port itself, and the limits. CI's `desktop` workflow fetches Electron and runs them.
 
 Not done yet: packaging and installers, `SecureSocket`, Flash's
 Settings Manager for trusting a SWF or directory (localTrusted), each
-loaded SWF in a sandbox of its own rather than its loader's, network
-loads judged by crossdomain.xml rather than CORS, Security.sandboxType
-following the sandbox, a POST from navigateToURL (the system's
-browser gets its URL alone), and reading playerglobal from a `.swc`.
+loaded SWF in a sandbox of its own rather than its loader's, a POST from
+navigateToURL (the system's browser gets its URL alone), reading
+playerglobal from a `.swc`, Flash's SecurityErrorEvent for a load a
+policy refused (the SWF sees an IOErrorEvent), cookies for a SWF's own
+origin, the system's proxy, and Flash's checks within the player:
+`checkPolicyFile`, pixels and bytes of another domain's content, and
+`Security.allowDomain`.
 
 ## Testing against oracles
 

@@ -21,11 +21,12 @@ import {
   shell,
   type WebContents,
 } from "electron";
-import type { LibraryName, OpenedMovie, StartState } from "../shared/api.js";
-import { APP_ORIGIN, registerScheme, serve } from "./protocol.js";
-import { Sandbox } from "./sandbox.js";
-import { SettingsFile } from "./settings.js";
-import { bridgeSockets } from "./sockets.js";
+import type { LibraryName, NetworkResponse, OpenedMovie, StartState } from "../shared/api.js";
+import { type Movie, Network, Refused } from "./network.ts";
+import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
+import { Sandbox } from "./sandbox.ts";
+import { SettingsFile } from "./settings.ts";
+import { bridgeSockets } from "./sockets.ts";
 
 const preload = fileURLToPath(new URL("../preload/preload.cjs", import.meta.url));
 const TITLE = "swf2es";
@@ -42,7 +43,13 @@ app.enableSandbox();
 /** --trace: what the page logs, a SWF's trace() among it, goes to the terminal. */
 const trace = process.argv.includes("--trace");
 const sandbox = new Sandbox();
+/** The SWF's http and https requests, judged as Flash's sandboxes had them. */
+const network = new Network();
+/** What the page's requests under way abort with, by the preload's number. */
+const requests = new Map<number, AbortController>();
 let settings: SettingsFile;
+/** What the network judges the movie playing as; null for none, or one without networking. */
+let networkMovie: Movie | null = null;
 let window: BrowserWindow | null = null;
 let current: { path: string; movie: OpenedMovie } | null = null;
 /** The servers the SWF playing was allowed, or denied, a socket to until it closes: "host:port". */
@@ -173,18 +180,22 @@ async function open(path: string): Promise<void> {
     return;
   }
 
-  const network = (fileAttributes(head) & USE_NETWORK) !== 0;
+  const useNetwork = (fileAttributes(head) & USE_NETWORK) !== 0;
 
   let url: string;
   try {
-    url = sandbox.play(path, network);
+    url = sandbox.play(path, useNetwork);
   } catch (error) {
     // Gone, or unreadable, since it was read.
     refuse(`${name} could not be opened.`, String(error));
     return;
   }
 
-  current = { path, movie: { url, name } };
+  current = {
+    path,
+    movie: { url, name, sandbox: useNetwork ? "localWithNetwork" : "localWithFile" },
+  };
+  playOnNetwork(useNetwork ? { kind: "local" } : null);
   allowedOnce = new Set();
   deniedOnce = new Set();
   settings.opened(path);
@@ -198,9 +209,16 @@ async function open(path: string): Promise<void> {
   }
 }
 
+/** Judge requests for `movie` from now on: the last one's are aborted. */
+function playOnNetwork(movie: Movie | null): void {
+  networkMovie = movie;
+  network.play(movie);
+}
+
 function closeMovie(): void {
   current = null;
   sandbox.stop();
+  playOnNetwork(null);
   buildMenu();
   window?.setTitle(TITLE);
   if (listening) {
@@ -209,20 +227,43 @@ function closeMovie(): void {
 }
 
 /**
- * Whether the SWF playing may connect a socket to `host`:`port`: only in
- * local-with-networking, and only as the user allows, once or always for
- * that SWF, when it first asks for that server. Denied where no one can
- * be asked.
+ * Whether the SWF playing may connect a socket to `host`:`port`, and where
+ * to: only with the network, and only as the user allows, once or always
+ * for that SWF, when it first asks for that server; and for a remote SWF,
+ * as that server's socket policy allows, at the address it came from.
+ * Denied where no one can be asked.
  */
-async function permitSocket(host: string, port: number): Promise<boolean> {
+async function permitSocket(host: string, port: number): Promise<{ address?: string } | null> {
   const playing = current;
   const swf = sandbox.swf;
   const endpoint = `${host}:${port}`;
-  if (!playing || !swf || sandbox.type !== "localWithNetwork") {
+  if (!playing || !swf || !sandbox.networkAllowed()) {
     process.stderr.write(`swf2es: no socket to ${endpoint}: the SWF has no network\n`);
-    return false;
+    return null;
   }
 
+  if (!(await allowedByUser(playing, swf, endpoint))) {
+    return null;
+  }
+
+  if (networkMovie?.kind !== "remote") {
+    return {};
+  }
+
+  try {
+    return { address: await network.socketAddress(host, port) };
+  } catch (error) {
+    process.stderr.write(`swf2es: no socket to ${endpoint}: ${(error as Error).message}\n`);
+    return null;
+  }
+}
+
+/** Whether the user allows the SWF playing a socket to `endpoint`, asked once a server. */
+async function allowedByUser(
+  playing: NonNullable<typeof current>,
+  swf: string,
+  endpoint: string,
+): Promise<boolean> {
   if (settings.socketAllowed(swf, endpoint) || allowedOnce.has(endpoint)) {
     return true;
   }
@@ -410,6 +451,9 @@ function guard(contents: WebContents): void {
   contents.on("did-start-navigation", (details) => {
     if (details.isMainFrame && !details.isSameDocument) {
       listening = false;
+      // The page's requests go with it; the next page asks for the movie again.
+      network.play(networkMovie);
+      requests.clear();
     }
   });
   if (trace) {
@@ -468,6 +512,57 @@ function listen(): void {
     }
   });
   bridgeSockets(trusted, permitSocket);
+  ipcMain.handle("net:fetch", (event, id: unknown, request: unknown) => {
+    if (!trusted(event) || typeof id !== "number") {
+      throw new Error("not the app's page");
+    }
+
+    // A refusal is an answer, not an error, which Electron would print as one.
+    return fetchForPage(id, request).then(
+      (response) => ({ response }),
+      () => ({ response: null }),
+    );
+  });
+  ipcMain.on("net:abort", (event, id: unknown) => {
+    if (trusted(event) && typeof id === "number") {
+      requests.get(id)?.abort();
+    }
+  });
+  ipcMain.on("net:policy-file", (event, url: unknown) => {
+    if (trusted(event) && sandbox.networkAllowed()) {
+      network.addPolicyFile(url);
+    }
+  });
+}
+
+/**
+ * A request of the page's, what the SWF playing loads: only with the
+ * network, as network.ts judges it. A refusal is said on stderr, and the
+ * page sees a failed load.
+ */
+async function fetchForPage(id: number, request: unknown): Promise<NetworkResponse> {
+  const asked = request as { url?: unknown; purpose?: unknown } | null;
+  const url = typeof asked?.url === "string" ? asked.url.slice(0, 2048) : "";
+  if (!sandbox.networkAllowed()) {
+    process.stderr.write(`swf2es: not loading ${url}: the SWF has no network\n`);
+    throw new Refused("the SWF has no network");
+  }
+
+  const controller = new AbortController();
+  requests.set(id, controller);
+  try {
+    return await network.fetch(request, controller.signal);
+  } catch (error) {
+    if (error instanceof Refused && !controller.signal.aborted) {
+      process.stderr.write(`swf2es: not loading ${url}: ${error.message}\n`);
+    }
+
+    throw error;
+  } finally {
+    if (requests.get(id) === controller) {
+      requests.delete(id);
+    }
+  }
 }
 
 // One app to a user data directory: a second start hands its SWF to the first and quits.
@@ -516,16 +611,13 @@ void app.whenReady().then(() => {
 
   settings = new SettingsFile(app.getPath("userData"));
   serve(session.defaultSession, sandbox, () => settings.libraries());
-  // The network only for a SWF in local-with-networking; the page itself needs none.
+  // The page never goes to the network itself: a SWF's requests go through
+  // the main process (network.ts), which sends them without this session.
   session.defaultSession.webRequest.onBeforeRequest(
     { urls: ["http://*/*", "https://*/*", "ws://*/*", "wss://*/*"] },
     (details, answer) => {
-      const refused = !sandbox.networkAllowed();
-      if (refused) {
-        process.stderr.write(`swf2es: not loading ${details.url}: the SWF has no network\n`);
-      }
-
-      answer({ cancel: refused });
+      process.stderr.write(`swf2es: not loading ${details.url}: the page has no network\n`);
+      answer({ cancel: true });
     },
   );
   // Only what the player needs that the page cannot simply have: full screen.

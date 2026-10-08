@@ -38,10 +38,16 @@ own installer. A relative path is taken from the directory pnpm was run in.
   user's, a temporary directory or a drive's root; keep a SWF in a
   directory of its own) and reaches no network, no socket and no page.
   With it, local-with-networking: it reads no local file but itself, loads
-  from the network as a secure web page does (`https:` and `wss:` only,
-  CORS and all), and connects sockets as you allow. Only the SWF playing
+  content (images, sounds, SWFs) from the network, reads data only where
+  the server's `crossdomain.xml` grants every domain (`domain="*"`), as
+  Flash had it, and connects sockets as you allow. Only the SWF playing
   has access; opening another or closing it takes it away. Its URL
   (`loaderInfo.url`) does not tell where on the disk it is.
+- **Network.** A SWF's http and https requests go through the main
+  process, judged by Flash's rules and policy files rather than CORS, so
+  `http:` and servers without CORS work. No request carries your cookies
+  or credentials, and none reaches this machine or your local network
+  unless the SWF came from there or a policy file there grants it.
 - **Sockets** (`flash.net.Socket`) connect over TCP through the main
   process. The first connection to each server asks: Allow Once, Always
   Allow for This SWF (remembered in `settings.json`) or Deny.
@@ -52,7 +58,7 @@ own installer. A relative path is taken from the directory pnpm was run in.
 ## Layout
 
 ```
-src/main/       the main process: window, menu, settings, swf2es:// and the socket bridge
+src/main/       the main process: window, menu, settings, swf2es://, sockets and the network
 src/preload/    window.swf2esDesktop, the page's only way to the main process
 src/renderer/   the page: the element, the welcome and library panels, the socket host
 src/shared/     api.ts, the types of window.swf2esDesktop
