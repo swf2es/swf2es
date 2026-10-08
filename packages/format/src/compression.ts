@@ -1,10 +1,12 @@
 /**
  * Compression as SWF files and ByteArray use it, synchronously and with no
  * platform API: zlib and raw deflate through pako, a port of zlib whose
- * output is zlib's byte for byte, and LZMA through lzma1.
+ * output is zlib's byte for byte, and LZMA, compressed through lzma1 and
+ * decoded by lzma.ts.
  */
-import { compress as lzmaCompress, decompress as lzmaDecompress } from "lzma1";
+import { compress as lzmaCompress } from "lzma1";
 import pako from "pako";
+import { LzmaError, lzmaDecode } from "./lzma.js";
 
 /** Data a decompressor cannot read: corrupt, truncated, or not what it says. */
 export class CompressedDataError extends Error {}
@@ -134,19 +136,109 @@ export function lzmaByteArrayCompress(data: Uint8Array): Uint8Array {
  */
 export function lzmaByteArrayUncompress(data: Uint8Array): Uint8Array {
   const length = (data[5] | (data[6] << 8) | (data[7] << 16) | (data[8] << 24)) >>> 0;
-  let bytes: Uint8Array;
-
-  try {
-    bytes = lzmaDecompress(data);
-  } catch (e) {
-    throw new CompressedDataError(String(e));
+  if (length > MAX_LZMA_RATIO * (data.length - LZMA_HEADER) + 4096) {
+    throw new CompressedDataError(`${length} bytes in a stream of ${data.length}`);
   }
 
+  const bytes = lzma(data, 0, LZMA_HEADER, length);
   if (bytes.length !== length) {
     throw new CompressedDataError("length mismatch");
   }
 
   return bytes;
+}
+
+/** lzmaDecode, its failures CompressedDataErrors. */
+function lzma(
+  data: Uint8Array,
+  properties: number,
+  start: number,
+  length: number,
+  offset = 0,
+): Uint8Array {
+  try {
+    return lzmaDecode(data, properties, start, length, offset);
+  } catch (e) {
+    if (e instanceof LzmaError) {
+      throw new CompressedDataError(e.message);
+    }
+
+    throw e;
+  }
+}
+
+/**
+ * More than LZMA can expand a byte to. Its best case, a long run of one
+ * byte, is matches of 273 bytes that each cost 14 decisions, each at least
+ * the 0.022 bits of LZMA's likeliest probability (2017/2048): 7090:1,
+ * which lzma1 nears on 32 MB of zeros (6959:1). A header naming more than
+ * this of its stream is refused before decoding; one naming less is
+ * decoded, and a decoder that would read past the stream's end fails.
+ */
+const MAX_LZMA_RATIO = 8192;
+
+/** What pako's Inflate keeps of its output; its types leave it out. */
+interface InflateStream {
+  output: Uint8Array;
+  next_out: number;
+  avail_out: number;
+}
+
+/**
+ * The first `length` bytes of a SWF as an uncompressed one, or fewer if it
+ * has fewer, decompressing only as far as they need: the header and the
+ * first tags, without trusting the header's file length, which a SWF of
+ * 30 bytes may give as 4 GB. Whatever cannot be read ends it early.
+ */
+export function decompressSwfPrefix(swf: Uint8Array, length: number): Uint8Array {
+  const signature = String.fromCharCode(swf[0], swf[1], swf[2]);
+  if (swf.length < 8 || signature === "FWS") {
+    return swf.subarray(0, length);
+  }
+
+  const want = Math.max(0, length - 8);
+  let body: Uint8Array = new Uint8Array(0);
+  if (signature === "CWS") {
+    const chunks: Uint8Array[] = [];
+    let have = 0;
+    const inflator = new pako.Inflate({ chunkSize: 4096 });
+    inflator.onData = (chunk: Uint8Array) => {
+      chunks.push(chunk);
+      have += chunk.length;
+    };
+    // A little input at a time: a kilobyte of deflate inflates to a megabyte at most.
+    for (let at = 8; at < swf.length && have < want && !inflator.err; at += 1024) {
+      inflator.push(swf.subarray(at, at + 1024), false);
+    }
+
+    // What pako holds back until its chunk fills: a SWF cut short ends in it.
+    // (A sync flush does not hand it over: pako 2.1 calls onData for full chunks alone.)
+    const { strm, ended } = inflator as unknown as { strm: InflateStream; ended: boolean };
+    if (have < want && !ended && strm.avail_out !== 0 && strm.next_out > 0) {
+      chunks.push(strm.output.slice(0, strm.next_out));
+      have += strm.next_out;
+    }
+
+    body = new Uint8Array(have);
+    let at = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, at);
+      at += chunk.length;
+    }
+  } else if (signature === "ZWS" && swf.length >= 17) {
+    const fileLength = new DataView(swf.buffer, swf.byteOffset, swf.byteLength).getUint32(4, true);
+    try {
+      body = lzma(swf, 12, 17, Math.min(want, Math.max(0, fileLength - 8)));
+    } catch {
+      // Corrupt or cut short: no body to read.
+    }
+  }
+
+  const out = new Uint8Array(8 + Math.min(want, body.length));
+  out.set(swf.subarray(0, 8), 0);
+  out[0] = 0x46; // F
+  out.set(body.subarray(0, out.length - 8), 8);
+  return out;
 }
 
 /**
@@ -162,33 +254,39 @@ export function decompressSwf(swf: Uint8Array): Uint8Array {
   }
 
   const fileLength = new DataView(swf.buffer, swf.byteOffset, swf.byteLength).getUint32(4, true);
-  let body: Uint8Array;
+  if (fileLength < 8 && (signature === "CWS" || signature === "ZWS")) {
+    throw new CompressedDataError(`a file length of ${fileLength}, shorter than its header`);
+  }
+
+  let file: Uint8Array;
   if (signature === "CWS") {
-    body = zlibUncompress(swf.subarray(8));
+    const body = zlibUncompress(swf.subarray(8));
+    file = new Uint8Array(8 + body.length);
+    file.set(body, 8);
   } else if (signature === "ZWS") {
     if (swf.length < 17) {
       throw new CompressedDataError("truncated");
     }
 
-    // The .lzma layout lzma1 reads: the properties, the length it holds, the stream.
-    const lzma = new Uint8Array(LZMA_HEADER + swf.length - 17);
-    lzma.set(swf.subarray(12, 17), 0);
-    new DataView(lzma.buffer).setUint32(5, fileLength - 8, true);
-    lzma.set(swf.subarray(17), LZMA_HEADER);
-    body = lzmaDecompress(lzma);
+    // A length no stream that short can hold is refused before decoding;
+    // within it, the decoder stops where the stream does.
+    if (fileLength - 8 > MAX_LZMA_RATIO * (swf.length - 17) + 4096) {
+      throw new CompressedDataError(`a body of ${fileLength - 8} bytes in ${swf.length} of SWF`);
+    }
+
+    // Decoded after room for the header, so the file is not copied whole.
+    file = lzma(swf, 12, 17, fileLength - 8, 8);
   } else {
     throw new TypeError(`Not a SWF file (signature ${JSON.stringify(signature)})`);
   }
 
-  if (body.length !== fileLength - 8) {
+  if (file.length !== fileLength) {
     throw new CompressedDataError(
-      `body of ${body.length} bytes where the header says ${fileLength - 8}`,
+      `body of ${file.length - 8} bytes where the header says ${fileLength - 8}`,
     );
   }
 
-  const out = new Uint8Array(fileLength);
-  out.set(swf.subarray(0, 8), 0);
-  out[0] = 0x46; // F
-  out.set(body, 8);
-  return out;
+  file.set(swf.subarray(0, 8), 0);
+  file[0] = 0x46; // F
+  return file;
 }

@@ -106,8 +106,15 @@ over the builtins, then each conformance case (also compiled with asc's
 `format`, `codegen` and `runtime` load no DOM or node types, so they run in
 browsers, workers and node alike. `runtime` contains only the language, with
 no display list, so it runs in node next to avmshell. It uses `format` for what both need, such as compression
-(zlib through pako, LZMA through lzma1): ByteArray's `compress` and a SWF's
-body are the same code. `codegen` knows the runtime's function names and signatures
+(zlib through pako; LZMA compressed through lzma1 and decoded by
+`format`'s own `lzma.ts`): ByteArray's `compress` and a SWF's body are the
+same code. The decoder follows the LZMA SDK's specification decoder, as
+avmplus' LzmaDec reads a stream: a properties byte past 224 is refused,
+a dictionary is 4 KB at least, and it fails as soon as it would read past
+the stream's end, so a header's length costs at most some 7000 bytes for
+each of the stream's; a ZWS whose header names more than 8192 times its
+stream is refused before decoding, and `decompressSwfPrefix` decodes a
+SWF's start alone, for its FileAttributes (`fileAttributes`). `codegen` knows the runtime's function names and signatures
 but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.

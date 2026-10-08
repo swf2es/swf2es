@@ -18,6 +18,7 @@ export {
 export {
   CompressedDataError,
   decompressSwf,
+  decompressSwfPrefix,
   deflateCompress,
   LZMA_HEADER,
   lzmaByteArrayCompress,
@@ -75,6 +76,7 @@ export {
 } from "./sound.js";
 export {
   backgroundColor,
+  fileAttributes,
   isAs3,
   type Rect,
   readSwf,
