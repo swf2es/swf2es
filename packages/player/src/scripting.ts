@@ -155,7 +155,7 @@ export class Scripting {
   /** Whether destroy has been called: the player plays, loads and connects no more. */
   destroyed = false;
   /** Takes what fscommand sends, or nothing does. */
-  readonly fsCommand: ((command: string, args: string, url: string) => void) | null;
+  readonly fsCommand: ((command: string, args: string, callers: string[]) => void) | null;
   /** What plays every library's timeline and button sounds. */
   private readonly timelineSounds = timelineSoundsOf(this);
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
@@ -247,9 +247,11 @@ export class Scripting {
       /**
        * What fscommand sends: a plug-in's page gets it as its DoFSCommand
        * call; none by default. The SWF chooses both strings: never evaluate
-       * them, or use them as a URL or as HTML. `url` is the calling SWF's.
+       * them, or use them as a URL or as HTML. `callers` is the calling
+       * SWF's URL, or every loaded SWF's where the caller cannot be told:
+       * a host that checks them lets the command through only if all pass.
        */
-      fsCommand?: ((command: string, args: string, url: string) => void) | null;
+      fsCommand?: ((command: string, args: string, callers: string[]) => void) | null;
       /** Where to keep compiled modules across page loads: none by default (see ModuleCache). */
       moduleCache?: ModuleCache | null;
       decodeImage?: ImageDecode | null;

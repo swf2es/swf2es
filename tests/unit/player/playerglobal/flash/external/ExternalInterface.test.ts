@@ -128,7 +128,7 @@ test("ExternalInterface asks the host whether the calling SWF may use it", () =>
       return url.startsWith("http://page.test/");
     },
   });
-  (s as unknown as { code: { codeUrl(): string } }).code = { codeUrl: () => caller };
+  (s as unknown as { code: { securityUrls(): string[] } }).code = { securityUrls: () => [caller] };
   const natives = externalInterfaceNatives(s);
   assert.equal(natives[`${CLASS}.get:available`](s.rt).call(null), true);
   assert.equal(natives[`${PRIVATE}_evalJS`](s.rt).call(null, "source"), "<null/>");
@@ -156,89 +156,213 @@ try {
   skip = (e as Error).message;
 }
 
-test("a loaded SWF's calls are checked against its own URL, not the main SWF's", {
-  skip,
-}, async () => {
-  const compile = compiler(out);
-  const child = (name: string) =>
-    bare(
-      compile(
-        name,
-        `package {
-  import flash.display.Sprite;
-  import flash.external.ExternalInterface;
-  public class ${name} extends Sprite {
-    public function ${name}() {
-      trace("${name}", ExternalInterface.available);
-      try {
-        ExternalInterface.call("hello", "${name}");
-      } catch (e:Error) {
-        trace("${name}", e.errorID);
-      }
-    }
-  }
-}`,
-      ),
-      1,
-      name,
-    );
-  const children: Record<string, Uint8Array> = {
-    "http://page.test/same.swf": child("EiSameChild"),
-    "http://other.test/child.swf": child("EiOtherChild"),
-  };
-  const main = bare(
-    compile(
-      "EiLoader",
-      `package {
+const wasmBytes = async () =>
+  WebAssembly.compile(
+    await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
+  );
+
+/** A document class `name` whose constructor runs `body`, with the imports the cases below use. */
+const sprite = (name: string, body: string) => `package {
   import flash.display.Loader;
   import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.external.ExternalInterface;
+  import flash.net.URLLoader;
+  import flash.net.URLLoaderDataFormat;
   import flash.net.URLRequest;
-  public class EiLoader extends Sprite {
-    public function EiLoader() {
-      for each (var url:String in ["http://page.test/same.swf", "http://other.test/child.swf"]) {
-        var loader:Loader = new Loader();
-        loader.load(new URLRequest(url));
-        addChild(loader);
-      }
+  import flash.system.fscommand;
+  import flash.utils.setTimeout;
+  public class ${name} extends Sprite {
+    public function ${name}() {
+      ${body}
     }
   }
-}`,
-    ),
-    3,
-    "EiLoader",
-  );
+}`;
+
+/** `main` played with `children` served by URL, the host allowing page.test's SWFs alone: what reached it. */
+async function play(
+  main: Uint8Array,
+  children: Record<string, Uint8Array | { bytes: Uint8Array; redirect: string }>,
+  frames = 6,
+) {
   const lines: string[] = [];
   const evaluated: string[] = [];
-  const scripting = new PlayerScripting(
-    await createCodegen(
-      await WebAssembly.compile(
-        await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
-      ),
-    ),
-    {
-      print: (line) => lines.push(line),
-      url: "http://page.test/main.swf",
-      fetch: async ({ url }) => ({ bytes: children[url] ?? null, status: 200, headers: [] }),
-      externalInterface: {
-        evalJS: (source) => {
-          evaluated.push(source);
-          return "<undefined/>";
-        },
-        callOut: () => null,
-        addCallback: () => {},
-        allows: (url) => new URL(url).origin === "http://page.test",
-      },
+  const commands: { command: string; callers: string[] }[] = [];
+  const uncaught: string[] = [];
+  const scripting = new PlayerScripting(await createCodegen(await wasmBytes()), {
+    print: (line) => lines.push(line),
+    url: "http://page.test/main.swf",
+    // The frame clock: a timer of 1 ms fires in the next frame.
+    realTime: null,
+    fetch: async ({ url }) => {
+      const served = children[url];
+      return served instanceof Uint8Array || served === undefined
+        ? { bytes: served ?? null, status: 200, headers: [] }
+        : { bytes: served.bytes, status: 200, headers: [], url: served.redirect };
     },
-  );
+    externalInterface: {
+      evalJS: (source) => {
+        evaluated.push(source);
+        return "<undefined/>";
+      },
+      callOut: () => null,
+      addCallback: () => {},
+      allows: (url) => new URL(url).origin === "http://page.test",
+    },
+    fsCommand: (command, _args, callers) => commands.push({ command, callers }),
+    onUncaught: (error) => uncaught.push(scripting.rt.toString(error as never)),
+  });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
   const player = new Player(main, scripting);
   await player.start();
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < frames; i++) {
     await scripting.settled();
     player.tick();
   }
 
-  assert.deepEqual(lines.sort(), ["EiOtherChild 2067", "EiOtherChild false", "EiSameChild true"]);
-  assert.equal(evaluated.length, 1);
-  assert.match(evaluated[0], /hello\("EiSameChild"\)/);
+  return { lines: lines.sort(), evaluated, commands, uncaught };
+}
+
+/** A main SWF that loads each of `urls` into a Loader on its display list. */
+const loading = (compile: ReturnType<typeof compiler>, name: string, urls: string[]) =>
+  bare(
+    compile(
+      name,
+      sprite(
+        name,
+        `for each (var url:String in ${JSON.stringify(urls)}) {
+        var loader:Loader = new Loader();
+        loader.load(new URLRequest(url));
+        addChild(loader);
+      }`,
+      ),
+    ),
+    1,
+    name,
+  );
+
+test("a loaded SWF's calls are checked against its own URL, never falling back to the main SWF's", {
+  skip,
+}, async () => {
+  const compile = compiler(out);
+  const child = (name: string, body: string) => bare(compile(name, sprite(name, body)), 1, name);
+  const result = await play(
+    loading(compile, "EiLoader", ["http://page.test/same.swf", "http://other.test/child.swf"]),
+    {
+      "http://page.test/same.swf": child(
+        "EiSameChild",
+        `trace("EiSameChild", ExternalInterface.available);
+      ExternalInterface.call("hello", "EiSameChild");`,
+      ),
+      "http://other.test/child.swf": child(
+        "EiOtherChild",
+        `trace("EiOtherChild", ExternalInterface.available);
+      try {
+        ExternalInterface.call("hello", "direct");
+      } catch (e:Error) {
+        trace("EiOtherChild", e.errorID);
+      }
+      // Bypass 1: only playerglobal's frames on the stack when the timer fires.
+      setTimeout(ExternalInterface.call, 1, "hello", "timer");
+      setTimeout(fscommand, 1, "timer", "");
+      // Bypass 2: the child's frame past the engine's default ten.
+      try {
+        var names:Array = ["hello"];
+        names.forEach(ExternalInterface.call);
+      } catch (e:Error) {
+        trace("forEach", e.errorID);
+      }
+      // Bypass 3: content from bytes, never on the display list.
+      var stream:URLLoader = new URLLoader();
+      stream.dataFormat = URLLoaderDataFormat.BINARY;
+      stream.addEventListener(Event.COMPLETE, function (e:Event):void {
+        new Loader().loadBytes(stream.data);
+      });
+      stream.load(new URLRequest("http://other.test/bytes.swf"));`,
+      ),
+      "http://other.test/bytes.swf": child(
+        "EiBytes",
+        `trace("EiBytes", ExternalInterface.available);
+      try {
+        ExternalInterface.call("hello", "bytes");
+      } catch (e:Error) {
+        trace("EiBytes", e.errorID);
+      }`,
+      ),
+    },
+  );
+
+  // The page.test child's call alone reached the page; each of the other's
+  // ways threw #2067 or, from a timer, which nothing catches, never got there.
+  assert.equal(result.evaluated.length, 1);
+  assert.match(result.evaluated[0], /hello\("EiSameChild"\)/);
+  assert.ok(result.lines.includes("EiOtherChild 2067"));
+  assert.ok(result.lines.includes("forEach 2067"));
+  assert.ok(result.lines.includes("EiBytes false"));
+  assert.ok(result.lines.includes("EiBytes 2067"));
+  assert.ok(result.lines.includes("EiSameChild true"));
+  // The timer's call, which nothing catches.
+  assert.deepEqual(result.uncaught, ["Error: Error #2067"]);
+  // The timer's fscommand could not be told from any loaded SWF's: the host is given them all.
+  assert.deepEqual(
+    result.commands.map((c) => [c.command, c.callers.sort()]),
+    [
+      [
+        "timer",
+        ["http://other.test/child.swf", "http://page.test/main.swf", "http://page.test/same.swf"],
+      ],
+    ],
+  );
+});
+
+test("a call from a timer passes where every loaded SWF is allowed", { skip }, async () => {
+  const compile = compiler(out);
+  const main = bare(
+    compile(
+      "EiTimerOnly",
+      sprite(
+        "EiTimerOnly",
+        `setTimeout(ExternalInterface.call, 1, "hello", "timer");
+      var names:Array = ["hello"];
+        names.forEach(ExternalInterface.call);`,
+      ),
+    ),
+    1,
+    "EiTimerOnly",
+  );
+  const result = await play(main, {});
+  assert.equal(result.evaluated.length, 2);
+  assert.deepEqual(result.uncaught, []);
+});
+
+test("a SWF a redirect took elsewhere is judged, and named, by where it came from", {
+  skip,
+}, async () => {
+  const compile = compiler(out);
+  const redirected = bare(
+    compile(
+      "EiRedirected",
+      sprite(
+        "EiRedirected",
+        `trace(ExternalInterface.available);
+      // Its LoaderInfo has its URL once the load completes.
+      var info:Object = loaderInfo;
+      setTimeout(function ():void {
+        trace(info.url);
+      }, 1);`,
+      ),
+    ),
+    1,
+    "EiRedirected",
+  );
+  const result = await play(
+    loading(compile, "EiRedirectLoader", ["http://page.test/open-redirect.swf"]),
+    {
+      "http://page.test/open-redirect.swf": {
+        bytes: redirected,
+        redirect: "http://other.test/redirected.swf",
+      },
+    },
+  );
+  assert.deepEqual(result.lines, ["false", "http://other.test/redirected.swf"]);
 });

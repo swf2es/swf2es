@@ -224,7 +224,8 @@ export interface ExternalInterfaceHost {
    * Whether the SWF at `url`, whose code is calling, may use the bridge, as
    * Flash checked allowScriptAccess against the calling SWF's domain, not
    * the main one's; one it refuses finds ExternalInterface unavailable.
-   * Every SWF may where this is left out.
+   * Where the caller cannot be told, as from a timer, it is asked for every
+   * loaded SWF, and all must be allowed. Every SWF may where this is left out.
    */
   allows?(url: string): boolean;
 }
@@ -272,6 +273,8 @@ export interface FetchResult {
   headers: readonly (readonly [name: string, value: string])[];
   /** Set for `file:` URLs: Flash reports status 0 and leaves the URL out of #2032. */
   local?: boolean;
+  /** The URL the bytes came from, after any redirect, where it differs from the one asked for. */
+  url?: string;
 }
 
 /** The request the player asks its host to send. */

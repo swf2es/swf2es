@@ -594,6 +594,51 @@ export class Code {
     return this.codeOrigin(new Error().stack)?.url ?? this.s.url;
   }
 
+  /**
+   * The URL of the SWF whose code is calling, the innermost on the whole
+   * stack, for a security check; null when no SWF's code is on it, as for
+   * a library function a timer or a forEach calls. Unlike codeUrl it never
+   * falls back to the main SWF, and the stack is taken whole: the engine's
+   * default ten frames lost a caller under a few of playerglobal's.
+   */
+  callerUrl(): string | null {
+    const engine = Error as ErrorConstructor & { stackTraceLimit?: number };
+    const limit = engine.stackTraceLimit;
+    let stack: string | undefined;
+    engine.stackTraceLimit = Number.POSITIVE_INFINITY;
+    try {
+      stack = new Error().stack;
+    } finally {
+      engine.stackTraceLimit = limit;
+    }
+
+    return this.codeOrigin(stack)?.url ?? null;
+  }
+
+  /** The URLs of the SWFs whose code is loaded, the main SWF's among them: those that may be calling. */
+  liveUrls(): string[] {
+    const urls = new Set([this.s.url]);
+    for (const ref of this.moduleAbcs.values()) {
+      const abc = ref.deref();
+      const origin = abc && this.origins.get(abc);
+      if (origin) {
+        urls.add(origin.url);
+      }
+    }
+
+    return [...urls];
+  }
+
+  /**
+   * Whom a security check asks about: the calling SWF's URL, or, where the
+   * caller cannot be told, every loaded SWF's, each of which must pass, so
+   * that a check fails closed rather than taking the main SWF's word.
+   */
+  securityUrls(): string[] {
+    const caller = this.callerUrl();
+    return caller === null ? this.liveUrls() : [caller];
+  }
+
   /** The SWF whose code called a playerglobal native. */
   codeLibrary(): Library | null {
     return this.codeOrigin(new Error().stack)?.library ?? this.s.library;

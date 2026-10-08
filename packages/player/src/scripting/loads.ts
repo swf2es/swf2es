@@ -156,6 +156,22 @@ export class Loads {
   }
 
   /**
+   * Whose a loadBytes' content is: the SWF whose code called it, or, where
+   * the caller cannot be told, the Loader's SWF while every loaded SWF has
+   * one origin; else no one's, an opaque URL that no check allows, rather
+   * than the main SWF's.
+   */
+  private bytesOwner(loader: AsObject): string {
+    const caller = this.s.code.callerUrl();
+    if (caller !== null) {
+      return caller;
+    }
+
+    const origins = new Set(this.s.code.liveUrls().map(originOf));
+    return origins.size === 1 ? this.ownerUrl(loader) : UNKNOWN_OWNER;
+  }
+
+  /**
    * A Loader's loadBytes. Flash tells the whole of the progress at once, in
    * the call, the URL still null; the content comes in a later frame, under
    * a URL of the bytes' own.
@@ -172,6 +188,9 @@ export class Loads {
     }
 
     const { info, generation } = begun;
+    // The bytes' SWF is the calling SWF's, as Flash gave loadBytes content
+    // the domain of the SWF that loaded it: its code is judged as that SWF's.
+    info.$loaderURL = this.bytesOwner(loader);
     info.$dynamic = `${info.$loaderURL}/[[DYNAMIC]]/${++this.dynamic}`;
     info.$bytes = bytes;
     info.$total = bytes.length;
@@ -538,6 +557,11 @@ export class Loads {
       }
 
       load.bytes = result.bytes;
+      // Where a redirect took it: the SWF is that URL's, for its LoaderInfo and its checks.
+      if (url !== null && result.url) {
+        load.url = result.url;
+      }
+
       try {
         load.ready = await this.prepare(load);
       } catch {
@@ -567,11 +591,11 @@ export class Loads {
     // Its images first: once its code is linked, a script in the domain can
     // make its symbols, whose bitmaps take the pixels there are then.
     await decodeImages(library, this.s.decodeImage);
-    // One from bytes is its Loader's SWF's, as far as its own URL goes.
+    // One from bytes is the SWF's that loaded it (bytesOwner), as far as its own URL goes.
     const run = await this.s.code.link(
       swf,
       load.domain,
-      load.url ?? this.ownerUrl(load.loader),
+      load.url ?? this.loaderInfoOf(load.loader).$loaderURL ?? this.ownerUrl(load.loader),
       library,
     );
     // Bound as soon as linked, as its classes are found in the domain from
@@ -845,6 +869,18 @@ function appendQuery(url: string, query: string): string {
   const fragment = at < 0 ? "" : url.slice(at);
   const separator = path.includes("?") ? (/[?&]$/.test(path) ? "" : "&") : "?";
   return path + separator + query + fragment;
+}
+
+/** What loadBytes content of no one SWF is: an opaque origin, which no same-domain check passes. */
+const UNKNOWN_OWNER = "about:blank";
+
+/** A URL's origin, or the URL where it has none to read. */
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
 }
 
 /**
