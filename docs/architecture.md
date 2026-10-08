@@ -3738,7 +3738,8 @@ gives, as playerglobal is Adobe's and cannot ship with swf2es; `codegen`, codege
 default what the import map gives `@swf2es/codegen/codegen.wasm`;
 `socketProxy`, a function from a socket's host and port to a WebSocket
 relay's URL or a list of them as Ruffle's, a socket without one refused
-with #2031; and `cache`. The page fetches and compiles codegen.wasm once
+with #2031; `sockets`, a SocketHost of the embedder's own that takes the
+relays' place, as the desktop app's, which reaches TCP itself; and `cache`. The page fetches and compiles codegen.wasm once
 and the libraries once, and each player instantiates the compiled module
 and reads the same bytes. A player has a Codegen of its own: Scripting
 resets the compiler it is given, and its domains' numbers are its own,

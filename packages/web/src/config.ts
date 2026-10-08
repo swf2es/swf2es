@@ -29,6 +29,11 @@ export interface Configuration {
    */
   socketProxy?: ((host: string, port: number) => string | null) | SocketProxy[];
   /**
+   * A host of the embedder's own for flash.net.Socket, in place of
+   * socketProxy's relays: a desktop app's, which reaches TCP itself.
+   */
+  sockets?: SocketHost;
+  /**
    * Whether the modules the compiler writes are kept in IndexedDB for the
    * page's next visit, which then links them without compiling: off by
    * default, as a first visit is some 9% slower for the writes.
@@ -107,8 +112,12 @@ export function libraries(): Promise<Uint8Array[]> {
   return libraryBytes;
 }
 
-/** flash.net.Socket's host: through the configured relays, or none. */
+/** flash.net.Socket's host: the embedder's, through the configured relays, or none. */
 export function socketHost(): SocketHost | undefined {
+  if (config.sockets) {
+    return config.sockets;
+  }
+
   const proxy = config.socketProxy;
   if (!proxy) {
     return undefined;
