@@ -3,7 +3,7 @@
  *
  * The compiler itself is AssemblyScript (assembly/), built to codegen.wasm.
  * This wrapper instantiates it and gives its exports their types. The same wasm runs as the browser JIT
- * (lazily, per method, in a worker pool) and as the ahead-of-time compiler,
+ * (a module per ABC as its SWF loads) and as the ahead-of-time compiler,
  * so both produce identical output. See docs/architecture.md.
  */
 import { instantiate } from "./codegen.js";

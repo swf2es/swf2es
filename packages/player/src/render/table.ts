@@ -1,5 +1,5 @@
 // Graphics drawn alone, a shape's fills and lines, drawn many to a call
-// (docs/architecture.md, "The player"). Each draws a shared context's
+// (docs/architecture.md, "Rendering"). Each draws a shared context's
 // geometry under its own transform, a draw call apiece: in a crowded room,
 // thousands a frame, each binding the context's buffers and setting its
 // uniforms. Here the contexts' local vertices go once into one buffer, the

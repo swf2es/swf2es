@@ -5,7 +5,7 @@
 // entry and method compiled alone of a live ABC must come out of both the
 // same, byte for byte: what a rebuild links and resolves again must be what
 // the reference linked and resolved the first time (docs/architecture.md,
-// Linking).
+// "Parsing, linking and verifying").
 //
 // The ABCs are the conformance cases, compiled into this package's out/,
 // and classes made by hand to collide: an A, a B and an F of different

@@ -21,16 +21,22 @@ pnpm build       # asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
-pnpm test        # unit, conformance, program and player tests (needs podman or
-                 # docker, and Chrome; CHROME names another browser)
+pnpm test        # unit, conformance, library, program, fuzz, player and web tests
+                 # (needs podman or docker, and Chrome; CHROME names another browser)
 pnpm test:checked # the same with every array access bounds-checked
-pnpm oracle path/to/file.as   # print avmshell's output for a file
+pnpm determinism              # each module the same however it is compiled, and each method
+                              # compiled alone its entry in the module (after the runners)
+pnpm oracle path/to/file.as   # print avmshell's output for a file (oracle:abcdump its dump)
+pnpm oracle:pull              # pull the oracle's pinned container image
 pnpm oracle:cases             # the unit tests' hand-built ABCs vs avmshell
 pnpm tamarin [prefix...]      # Tamarin acceptance tests vs baseline.json (about 10 minutes
                               # uncached; SWF2ES_ORACLE_JOBS sets parallelism, default 10)
 pnpm tamarin --update-baseline [prefix...]   # after an oracle or harness change
+pnpm tamarin:swf2es [--update-baseline | --relax] [prefix...]   # the same tests in swf2es, vs
+                              # swf2es-baseline.json (after pnpm tamarin compiled them)
 node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
+node tests/player/run.ts [--table-ab] [case...]   # the player's cases in Chrome vs Flash's frames
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
 node tests/player/corpus/fetch-ruffle.ts     # Ruffle's test corpus, for the two below
 pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on the corpus's avm2 and
@@ -44,10 +50,18 @@ node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revival
 node tests/player/leak.ts [--loads N] [--snapshots DIR]   # load SWFs over and over in Chrome; the
                               # heap after a full collection must stay bounded, and codegen's
                               # memory must not grow (part of pnpm test)
-node packages/cli/dist/main.js file.swf [-o dir] [--lib x.abc ...]   # AOT: the player's modules
-                              # for the SWF and a manifest (libraries from tests/player/out/libraries/)
+node packages/cli/dist/main.js file.swf [-o dir] [--lib x.abc ...] [--emit-libraries]   # AOT: the
+                              # player's modules for the SWF, their logs and a manifest (libraries
+                              # from tests/player/out/libraries/ by default)
+node tests/player/module-cache.ts   # the IndexedDB module cache in Chrome (part of pnpm test)
+node tests/player/precompiled.ts    # AOT modules played in Chrome, imported under a policy
+                              # without 'unsafe-eval' too (part of pnpm test)
+node tests/web/run.ts               # @swf2es/web's element, replaceFlash and ExternalInterface in
+                              # Chrome (part of pnpm test)
 node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
-                              # timeline in Chrome; keep a change only for a gain that repeats
+                              # timeline in Chrome; keep a change only for a gain that repeats;
+                              # --write-swf FILE writes its SWF for another player instead
+pnpm bench [file.abc...]      # time the ABC parser and decoder
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
 ```
@@ -60,8 +74,8 @@ calling a change done; CI runs the same steps.
 - **Codegen is pure.** No DOM or node APIs, no clock, no randomness, and a
   method's output never depends on what was compiled before it.
   `codegen.wasm` may import only `env.abort`; a unit test enforces this.
-- **Package boundaries.** `format` and `runtime` depend on nothing, `codegen`
-  on `format`, `cli` on `format` and `codegen`, `player` on `format`,
+- **Package boundaries.** `format` depends on nothing, `codegen` and
+  `runtime` on `format`, `cli` on `format` and `codegen`, `player` on `format`,
   `codegen` and `runtime`, `player-hosts` on `player`, `web` on `codegen`, `format`,
   `player` and `player-hosts`. `codegen` never imports the runtime implementation.
   `format`, `codegen` and `runtime` load no DOM or node types.
@@ -78,8 +92,9 @@ calling a change done; CI runs the same steps.
   what avmshell prints, not what JavaScript or the spec suggests. Add a case
   under `tests/conformance/cases/` for any semantic you implement.
 - **Never edit `oracle/avmplus`.** It is a submodule (MPL-2.0). Patches go to
-  the swf2es/avmplus fork, and its source is not copied into the Apache-2.0
-  packages.
+  the swf2es/avmplus fork. Code translated from avmplus stays in files of
+  its own that carry the MPL-2.0 header; nothing from avmplus goes into an
+  Apache-2.0 file, so the MPL's file-level copyleft never reaches the rest.
 - **Only redistributable SWFs** go into the repository.
 
 ## Code style

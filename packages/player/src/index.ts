@@ -1,7 +1,8 @@
 /**
- * Browser SWF player: display list, timeline, playerglobal (flash.*), AVM1
- * globals and renderer adapters. It runs @swf2es/codegen in a worker pool as
- * its JIT, or loads cached ahead-of-time output with the same cache key.
+ * Browser SWF player: display list, timeline, playerglobal (flash.*) and
+ * the PixiJS renderer. It compiles a SWF's ABCs with
+ * @swf2es/codegen as the SWF loads (its JIT), or takes their modules from a
+ * module cache, those the swf2es command compiled ahead of time included.
  */
 export {
   Container,
