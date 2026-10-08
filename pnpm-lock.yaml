@@ -121,6 +121,12 @@ importers:
 
   tests/conformance: {}
 
+  tests/desktop:
+    dependencies:
+      '@swf2es/desktop':
+        specifier: workspace:*
+        version: link:../../apps/desktop
+
   tests/fuzz: {}
 
   tests/libraries: {}

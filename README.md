@@ -211,7 +211,7 @@ packages/
 apps/
   desktop/       the desktop app: an Electron shell around <swf2es-player>
 oracle/          avmshell and Flash (adl) references
-tests/           unit, conformance, player, web and fuzz tests
+tests/           unit, conformance, player, web, desktop and fuzz tests
 docs/            architecture, references, coverage, benchmarks, roadmap
 ```
 

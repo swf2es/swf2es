@@ -3958,7 +3958,15 @@ its sockets close, silently, as it navigates or reloads, and with it. TLS
 `ignoredBuiltDependencies`), so nothing else pays for it;
 `pnpm --filter @swf2es/desktop fetch-electron` fetches it, and `start`
 runs the app, `--trace` printing the page's console, a SWF's traces to
-stdout.
+stdout. `tests/desktop/smoke.ts`, part of `pnpm test`, skips with a word
+where there is no binary; with one, it runs the app in Chromium's headless
+mode with SwiftShader, so it needs no display, and checks that a SWF
+named on the command line draws, traces, loads a file beside it and
+talks to a TCP server through the bridge; that playing it again leaves
+one canvas, that a file dropped on the window opens, that a file outside
+its directory is refused, and that the policy refuses nothing; and that
+without playerglobal the page says what is missing. CI's `desktop`
+workflow fetches Electron and runs it.
 
 Not done yet: packaging and installers, a single instance that takes the
 next file, `SecureSocket`, a loaded SWF's network loads judged by
