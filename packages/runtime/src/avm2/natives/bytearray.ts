@@ -812,15 +812,17 @@ export function byteArrayNatives(rt: Runtime): Natives {
       }
 
       // From the buffer as it is now: a target that grows, this ByteArray
-      // too, gets a new buffer, and the bytes come from the old one.
+      // too, gets a new buffer, and the bytes come from the old one. As in
+      // DataInput::ReadByteArray, the target is sized first: one that
+      // cannot grow leaves the position where it was.
       const to = bytesOf(rt, bytes);
       const source = b.buffer;
       const from = b.position;
-      b.position = (from + count) >>> 0;
       if (offset + count >= to.length) {
         to.setLength(offset + count);
       }
 
+      b.position = (from + count) >>> 0;
       copyBytes(to.buffer, offset, source, from, count);
     }
 
