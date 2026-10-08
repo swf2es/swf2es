@@ -4136,8 +4136,10 @@ refused (each is copied once, into memory of its own, and counts until
 the main process has sent it to the page in a message of its own, which
 copies it there); a body is sent up to 32 MB, a URL up to 64 KB, 32 headers in 8 KB; a request that hears
 nothing for 30 seconds fails, and one that takes five minutes all told,
-however its bytes trickle in (a policy file's whole fetch ten seconds,
-port 843's socket policy three); 16 requests run at once, a thousand more wait, and the rest
+from its turn, however its bytes trickle in, its redirects and the
+policy files it waits on included, as does a socket's search for its
+policy (a policy file's whole fetch takes ten seconds at most, port
+843's socket policy three); 16 requests run at once, a thousand more wait, and the rest
 are refused. A sendToURL's response is not read. Requests the page aborts
 are aborted, and a movie's all are as the next opens, closes, or the page
 reloads. A refused request is a failed load to the SWF (IOErrorEvent, or

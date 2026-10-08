@@ -298,14 +298,19 @@ export class Network {
     const checked = this.check(request);
     const aborted = AbortSignal.any([signal, session.abort.signal]);
     await this.turn(aborted);
+    // All told, from its turn: its redirects and the policy files it waits on included.
+    const deadline = AbortSignal.timeout(this.limits.deadline);
+    const bounded = AbortSignal.any([aborted, deadline]);
     const budget: Budget = { session, taken: 0 };
     try {
       const response =
         checked.purpose === "movie"
-          ? await this.fetchMovie(session, checked, aborted, budget)
-          : await this.fetchFor(session, checked, aborted, budget);
+          ? await this.fetchMovie(session, checked, bounded, budget)
+          : await this.fetchFor(session, checked, bounded, budget);
       deliver?.(response);
       return response;
+    } catch (error) {
+      throw deadline.aborted && !aborted.aborted ? new Refused("it took too long") : error;
     } finally {
       session.buffered -= budget.taken;
       this.done();
@@ -327,7 +332,9 @@ export class Network {
       throw new Refused("the SWF has not loaded");
     }
 
-    const target = await this.pin(host);
+    // All told, the policies of every port it tries included.
+    const deadline = AbortSignal.timeout(this.limits.deadline);
+    const target = await this.pin(host, deadline);
     const policy = (at: number, timeout: number) =>
       cached(session.socketPolicies, `${target.address}|${at}`, () =>
         this.socketPolicy(target.address, at, timeout, session.abort.signal),
@@ -345,6 +352,10 @@ export class Network {
         port,
       ];
       for (const at of new Set(ports)) {
+        if (deadline.aborted) {
+          throw new Refused("it took too long");
+        }
+
         if (at === this.socketPolicyPort) {
           continue;
         }
@@ -480,7 +491,7 @@ export class Network {
   }
 
   /** `host`'s address, its resolver's first, and how private; refused where none is reached. */
-  private async pin(host: string): Promise<Pinned> {
+  private async pin(host: string, signal?: AbortSignal): Promise<Pinned> {
     const name = bare(host);
     let address: string;
     if (isIP(name)) {
@@ -488,9 +499,11 @@ export class Network {
     } else {
       let addresses: string[];
       try {
-        addresses = await this.resolveHost(name);
+        addresses = await (signal
+          ? abortable(this.resolveHost(name), signal)
+          : this.resolveHost(name));
       } catch {
-        throw new Refused(`${name} has no address`);
+        throw new Refused(signal?.aborted ? "aborted" : `${name} has no address`);
       }
 
       if (addresses.length === 0) {
@@ -523,7 +536,7 @@ export class Network {
     let url = request.target;
     let first: number | null = null;
     for (let hop = 0; hop <= this.limits.redirects; hop++) {
-      const target = await this.pin(url.hostname);
+      const target = await this.pin(url.hostname, signal);
       checkPort(url);
       first ??= target.rank;
       if (target.rank > first) {
@@ -582,14 +595,14 @@ export class Network {
     let url = request.target;
     for (let hop = 0; hop <= this.limits.redirects; hop++) {
       checkPort(url);
-      const target = await this.pin(url.hostname);
+      const target = await this.pin(url.hostname, signal);
       const same = origin === url.origin;
       const morePrivate = target.rank > rank;
       const custom = headers.map(([n]) => n).filter((n) => n.toLowerCase() !== "content-type");
       const needsAccess = morePrivate || (!same && request.purpose === "data");
       const needsHeaders = !same && custom.length > 0;
       if (needsAccess || needsHeaders) {
-        const policies = await this.policiesFor(session, url, target.address);
+        const policies = await abortable(this.policiesFor(session, url, target.address), signal);
         if (needsAccess && !allowsAccess(policies, requester, url)) {
           throw new Refused(
             morePrivate
@@ -1093,7 +1106,7 @@ class Decompressor {
     this.inflater?.destroy();
   }
 
-  /** Make the inflater once the bytes so far tell which (`last`: no more come); false on failure. */
+  /** Make the inflater once the bytes so far tell which (`last`: no more come); false: failed. */
   private choose(last: boolean): boolean {
     const head = this.head;
     if (head.length === 0) {
@@ -1152,6 +1165,28 @@ export function refererFor(swf: URL | null, target: URL): string | null {
   }
 
   return swf.origin === target.origin ? swf.href : `${swf.origin}/`;
+}
+
+/** `promise`, or a Refused once `signal` aborts: a request stops waiting on a shared policy. */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(new Refused("aborted"));
+  }
+
+  return new Promise((resolve, reject) => {
+    const stop = () => reject(new Refused("aborted"));
+    signal.addEventListener("abort", stop, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", stop);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", stop);
+        reject(error);
+      },
+    );
+  });
 }
 
 /** A host name without an IPv6 address's brackets. */

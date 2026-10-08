@@ -205,6 +205,16 @@ function serve(name: string): Handler {
       case "/post-redirect":
         response.writeHead(302, { location: "/echo" }).end();
         return;
+      case "/slow-redirect": {
+        // A redirect every 150 ms, n of them.
+        const n = Number(url.searchParams.get("n"));
+        setTimeout(() => {
+          response
+            .writeHead(n > 0 ? 302 : 200, n > 0 ? { location: `/slow-redirect?n=${n - 1}` } : {})
+            .end("arrived");
+        }, 150);
+        return;
+      }
       case "/loop":
         response.writeHead(302, { location: "/loop" }).end();
         return;
@@ -626,6 +636,21 @@ test("responses are bounded in size and in time, and requests in number", async 
   started = performance.now();
   assert.match(await outcome(ask(dripping, `${other()}/data.txt`)), /no policy file/);
   assert.ok(performance.now() - started < 1000);
+  policies.clear();
+
+  // The deadline is the whole request's: its redirects, each quick, and the
+  // policy file it waits on, which may take longer, all count.
+  const quick = await playing(`${swf()}/movie.swf`, {
+    limits: { timeout: 1000, deadline: 400, policyTimeout: 5000 },
+  });
+  assert.equal(await outcome(ask(quick, `${swf()}/slow-redirect?n=1`)), "arrived");
+  started = performance.now();
+  assert.match(await outcome(ask(quick, `${swf()}/slow-redirect?n=5`)), /took too long/);
+  assert.ok(performance.now() - started < 700);
+  policies.set("other/crossdomain.xml", "drip");
+  started = performance.now();
+  assert.match(await outcome(ask(quick, `${other()}/data.txt`)), /took too long/);
+  assert.ok(performance.now() - started < 700);
   policies.clear();
 
   // One at a time, one waiting, and a third refused.
