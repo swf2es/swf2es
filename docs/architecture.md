@@ -3744,8 +3744,9 @@ default what the import map gives `@swf2es/codegen/codegen.wasm`;
 `socketProxy`, a function from a socket's host and port to a WebSocket
 relay's URL or a list of them as Ruffle's, a socket without one refused
 with #2031; `sockets`, a SocketHost of the embedder's own that takes the
-relays' place, as the desktop app's, which reaches TCP itself; and `cache`. The page fetches and compiles codegen.wasm once
-and the libraries once, and each player instantiates the compiled module
+relays' place, as the desktop app's, which reaches TCP itself; and
+`cache`. The page fetches and compiles codegen.wasm once and the
+libraries once, and each player instantiates the compiled module
 and reads the same bytes. A player has a Codegen of its own: Scripting
 resets the compiler it is given, and its domains' numbers are its own,
 so two players on one instance would take each other's over. `cache:
@@ -3893,8 +3894,7 @@ page's import map names as `tests/player/serve.ts`'s does, and
 `/libraries/builtin.abc` and `/libraries/playerglobal.abc`, read from where
 the settings say. `swf2es://file/<path>` is the local files, but only
 under the directories of the SWFs the user opened, each granted as its SWF
-opens, real paths compared, so a SWF loads what lies beside it and below,
-and nothing else on the disk; its answers carry
+opens, real paths compared; its answers carry
 `Access-Control-Allow-Origin: swf2es://app`. The two hosts are two
 origins: a SWF's files are never the page's. Anything but GET and HEAD is
 refused.
@@ -3907,6 +3907,9 @@ WebAssembly; inline styles, for the element's shadow root; images, media
 and fonts from the page, the SWF's files, `data:` and `blob:`; and
 `connect-src` for the page, the SWF's files and `https:` and `wss:`, so a
 SWF's loads from the network work as from a web page, CORS included.
+`http:` and `ws:` are refused: the page is a secure context, which
+Chromium would not let reach them anyway as mixed content, and the policy
+says so rather than leave it to that.
 Nothing may frame the page, and it frames nothing.
 
 ### What the page may do

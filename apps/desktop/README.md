@@ -30,9 +30,9 @@ own installer. A relative path is taken from the directory pnpm was run in.
   else from the checkout's `oracle/avmplus/generated/`, else chosen too.
 - **Trace.** `--trace` prints what the page logs, a SWF's `trace()` among
   it, to the terminal: trace lines to stdout, warnings and errors to stderr.
-- **Loads** (URLLoader, Loader) of relative URLs read the files beside the
-  SWF and below it; other URLs load as they would from a web page, CORS
-  and all. **Sockets** (`flash.net.Socket`) connect over TCP directly,
+- **Loads** (URLLoader, Loader) of relative URLs read local files; other
+  URLs load as they would from a secure web page, CORS and all: `https:`
+  and `wss:` only, never `http:` or `ws:`. **Sockets** (`flash.net.Socket`) connect over TCP directly,
   through the main process.
 
 ## Layout
