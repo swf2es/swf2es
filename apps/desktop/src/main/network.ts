@@ -600,8 +600,7 @@ export class Network {
         read: request.purpose !== "send",
         max: this.limits.response,
         budget,
-        // The SWF's URL to its own origin, only that origin elsewhere, as browsers now send it.
-        referer: !session.origin ? null : same ? session.origin.url.href : `${origin}/`,
+        referer: refererFor(session.origin?.url ?? null, url),
       });
       const next = redirectOf(url, response);
       if (!next) {
@@ -972,6 +971,19 @@ function decoderFor(encoding: string, first: Buffer): Transform {
     default:
       return createGunzip();
   }
+}
+
+/**
+ * The Referer a request from the SWF at `swf` to `target` carries, as
+ * browsers' strict-origin-when-cross-origin has it: the SWF's URL to its
+ * own origin, its origin alone to another, and nothing from https to http.
+ */
+export function refererFor(swf: URL | null, target: URL): string | null {
+  if (!swf || (swf.protocol === "https:" && target.protocol !== "https:")) {
+    return null;
+  }
+
+  return swf.origin === target.origin ? swf.href : `${swf.origin}/`;
 }
 
 /** A host name without an IPv6 address's brackets. */

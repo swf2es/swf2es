@@ -131,7 +131,7 @@ test("only the SWF playing has a grant, from when the page fetches it", async ()
   assert.equal(await sandbox.resolve(asked(b, b)), null);
 });
 
-test("a remote SWF reads no local file, and has the network once the page asks for it", async () => {
+test("a remote SWF reads no local file, and has the network once the page asks", async () => {
   const sandbox = new Sandbox(home);
   const local = await playing(sandbox, "games/a.swf", false);
   sandbox.playRemote("http://swf.test/movie.swf");

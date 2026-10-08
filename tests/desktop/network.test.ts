@@ -31,6 +31,7 @@ import {
   type NetworkOptions,
   type Purpose,
   Refused,
+  refererFor,
 } from "../../apps/desktop/src/main/network.ts";
 
 const PUBLIC = "127.0.0.2";
@@ -607,7 +608,7 @@ test("responses are bounded in size and in time, and requests in number", async 
   assert.match(await outcome(ask(net, `${swf()}/data.txt`)), /no SWF plays/);
 });
 
-test("a movie's responses hold no more than their budget at once, given back as each is done", async () => {
+test("a movie's responses hold no more than their budget, given back as each is done", async () => {
   policies.clear();
   const net = await playing(`${swf()}/movie.swf`, { limits: { buffered: 6000 } });
   const held = ask(net, `${swf()}/hold`);
@@ -619,6 +620,17 @@ test("a movie's responses hold no more than their budget at once, given back as 
   // A response is bytes of its own, not a view of a larger buffer.
   const { bytes } = await ask(net, `${swf()}/data.txt`);
   assert.equal(bytes?.byteLength, bytes?.buffer.byteLength);
+});
+
+test("the Referer: the URL at home, the origin elsewhere, nothing from https to http", () => {
+  const swfAt = new URL("https://swf.test/games/movie.swf?token=1");
+  assert.equal(refererFor(swfAt, new URL("https://swf.test/data")), swfAt.href);
+  assert.equal(refererFor(swfAt, new URL("https://other.test/data")), "https://swf.test/");
+  assert.equal(refererFor(swfAt, new URL("http://swf.test/data")), null);
+  assert.equal(refererFor(swfAt, new URL("http://other.test/data")), null);
+  const plain = new URL("http://swf.test/movie.swf");
+  assert.equal(refererFor(plain, new URL("https://other.test/")), "http://swf.test/");
+  assert.equal(refererFor(null, new URL("https://other.test/")), null);
 });
 
 test("a body compressed unasked is decompressed, within the limits", async () => {
