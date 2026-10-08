@@ -34,7 +34,10 @@ const LEN_SIZE = LEN_HIGH + 256;
 
 const probabilities = (n: number) => new Uint16Array(n).fill(PROB_INIT);
 
-/** The literal context bits, the literal position bits and the position bits of a properties byte. */
+/**
+ * The literal context bits, the literal position bits and the position
+ * bits of a properties byte.
+ */
 export function lzmaProperties(byte: number): { lc: number; lp: number; pb: number } {
   if (byte >= 9 * 5 * 5) {
     throw new LzmaError(`properties byte ${byte}`);
@@ -47,14 +50,21 @@ export function lzmaProperties(byte: number): { lc: number; lp: number; pb: numb
  * Decode an LZMA stream, `input` from `start`, of the properties in its
  * 5 bytes at `properties` of `input`, to `length` bytes, or to its end
  * marker if it has one first: the bytes it decoded, fewer than `length`
- * after a marker. The output grows as it is written, never past `length`.
+ * after a marker, after `offset` bytes left for the caller, as a SWF's
+ * header, so that its file needs no copy. The output grows as it is
+ * written, never past `length`.
  */
 export function lzmaDecode(
   input: Uint8Array,
   properties: number,
   start: number,
   length: number,
+  offset = 0,
 ): Uint8Array {
+  if (length < 0) {
+    throw new LzmaError(`length ${length}`);
+  }
+
   const { lc, lp, pb } = lzmaProperties(input[properties]);
   const dictionary =
     (input[properties + 1] |
@@ -181,13 +191,15 @@ export function lzmaDecode(
 
   const pbMask = (1 << pb) - 1;
   const lpMask = (1 << lp) - 1;
-  let out = new Uint8Array(Math.min(length, 1 << 16));
+  let out = new Uint8Array(offset + Math.min(length, 1 << 16));
   let outPos = 0;
+
   /** Room for `n` more bytes, the buffer doubled as it fills, never past `length`. */
   const room = (n: number) => {
-    if (outPos + n > out.length) {
-      const grown = new Uint8Array(Math.min(length, Math.max(out.length * 2, outPos + n)));
-      grown.set(out.subarray(0, outPos));
+    if (offset + outPos + n > out.length) {
+      const size = Math.min(length, Math.max((out.length - offset) * 2, outPos + n));
+      const grown = new Uint8Array(offset + size);
+      grown.set(out.subarray(0, offset + outPos));
       out = grown;
     }
   };
@@ -200,11 +212,11 @@ export function lzmaDecode(
   while (outPos < length) {
     const posState = outPos & pbMask;
     if (bit(isMatch, (state << POS_BITS_MAX) + posState) === 0) {
-      const prev = outPos > 0 ? out[outPos - 1] : 0;
+      const prev = outPos > 0 ? out[offset + outPos - 1] : 0;
       const base = 0x300 * (((outPos & lpMask) << lc) + (prev >>> (8 - lc)));
       let symbol = 1;
       if (state >= 7) {
-        let matchByte = out[outPos - rep0 - 1];
+        let matchByte = out[offset + outPos - rep0 - 1];
         do {
           const matchBit = (matchByte >>> 7) & 1;
           matchByte <<= 1;
@@ -221,7 +233,7 @@ export function lzmaDecode(
       }
 
       room(1);
-      out[outPos++] = symbol - 0x100;
+      out[offset + outPos++] = symbol - 0x100;
       state = state < 4 ? 0 : state < 10 ? state - 3 : state - 6;
       continue;
     }
@@ -236,7 +248,7 @@ export function lzmaDecode(
         if (bit(isRep0Long, (state << POS_BITS_MAX) + posState) === 0) {
           state = state < 7 ? 9 : 11;
           room(1);
-          out[outPos] = out[outPos - rep0 - 1];
+          out[offset + outPos] = out[offset + outPos - rep0 - 1];
           outPos++;
           continue;
         }
@@ -299,10 +311,10 @@ export function lzmaDecode(
     len = Math.min(len + MATCH_MIN_LEN, length - outPos);
     room(len);
     for (let i = 0; i < len; i++) {
-      out[outPos] = out[outPos - rep0 - 1];
+      out[offset + outPos] = out[offset + outPos - rep0 - 1];
       outPos++;
     }
   }
 
-  return outPos === out.length ? out : out.subarray(0, outPos);
+  return offset + outPos === out.length ? out : out.subarray(0, offset + outPos);
 }

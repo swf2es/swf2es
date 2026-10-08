@@ -149,9 +149,15 @@ export function lzmaByteArrayUncompress(data: Uint8Array): Uint8Array {
 }
 
 /** lzmaDecode, its failures CompressedDataErrors. */
-function lzma(data: Uint8Array, properties: number, start: number, length: number): Uint8Array {
+function lzma(
+  data: Uint8Array,
+  properties: number,
+  start: number,
+  length: number,
+  offset = 0,
+): Uint8Array {
   try {
-    return lzmaDecode(data, properties, start, length);
+    return lzmaDecode(data, properties, start, length, offset);
   } catch (e) {
     if (e instanceof LzmaError) {
       throw new CompressedDataError(e.message);
@@ -248,34 +254,39 @@ export function decompressSwf(swf: Uint8Array): Uint8Array {
   }
 
   const fileLength = new DataView(swf.buffer, swf.byteOffset, swf.byteLength).getUint32(4, true);
-  let body: Uint8Array;
+  if (fileLength < 8 && (signature === "CWS" || signature === "ZWS")) {
+    throw new CompressedDataError(`a file length of ${fileLength}, shorter than its header`);
+  }
+
+  let file: Uint8Array;
   if (signature === "CWS") {
-    body = zlibUncompress(swf.subarray(8));
+    const body = zlibUncompress(swf.subarray(8));
+    file = new Uint8Array(8 + body.length);
+    file.set(body, 8);
   } else if (signature === "ZWS") {
     if (swf.length < 17) {
       throw new CompressedDataError("truncated");
     }
 
-    // LZMA decodes for as long as the length asks, whatever its input; a
-    // length no stream that short can hold is refused before it runs.
+    // A length no stream that short can hold is refused before decoding;
+    // within it, the decoder stops where the stream does.
     if (fileLength - 8 > MAX_LZMA_RATIO * (swf.length - 17) + 4096) {
       throw new CompressedDataError(`a body of ${fileLength - 8} bytes in ${swf.length} of SWF`);
     }
 
-    body = lzma(swf, 12, 17, fileLength - 8);
+    // Decoded after room for the header, so the file is not copied whole.
+    file = lzma(swf, 12, 17, fileLength - 8, 8);
   } else {
     throw new TypeError(`Not a SWF file (signature ${JSON.stringify(signature)})`);
   }
 
-  if (body.length !== fileLength - 8) {
+  if (file.length !== fileLength) {
     throw new CompressedDataError(
-      `body of ${body.length} bytes where the header says ${fileLength - 8}`,
+      `body of ${file.length - 8} bytes where the header says ${fileLength - 8}`,
     );
   }
 
-  const out = new Uint8Array(fileLength);
-  out.set(swf.subarray(0, 8), 0);
-  out[0] = 0x46; // F
-  out.set(body, 8);
-  return out;
+  file.set(swf.subarray(0, 8), 0);
+  file[0] = 0x46; // F
+  return file;
 }

@@ -149,6 +149,17 @@ test("an LZMA dictionary is 4 KB at least, as the SDK reads one", () => {
   assert.deepEqual(lzmaByteArrayUncompress(compressed), data);
 });
 
+test("a compressed SWF whose header gives it fewer bytes than the header is refused", () => {
+  for (const swf of [cws(fws(body)), zws(fws(body))]) {
+    for (const length of [0, 7]) {
+      const short = swf.slice();
+      new DataView(short.buffer).setUint32(4, length, true);
+      assert.throws(() => decompressSwf(short), CompressedDataError);
+      fileAttributes(short);
+    }
+  }
+});
+
 test("a truncated CWS still gives its start", () => {
   const plain = fws(body);
   const whole = cws(plain);
