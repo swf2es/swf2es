@@ -3154,6 +3154,90 @@ function scriptedTouch(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Red squares and blue texts that Flash caches as bitmaps, given a blue
+// square or a red text of the same bounds with the move flag on frame 2,
+// then on frame 3 something that may draw them again
+// (scripts/CacheReplace.as). Row 1, cached by the script: nothing, a
+// larger square in their place, a colour transform, a scale, a move by
+// the script, the cache turned off, off and on, a read of width, a move
+// and a colour transform by the timeline. Row 2, texts: nothing, a read
+// of text, of width. Row 3, cached for other reasons, each with the same
+// bounds and then larger: a scrollRect, an opaqueBackground, a glow set
+// by the script, which touch it, so that it takes neither. Row 4, the same
+// by PlaceObject3's cacheAsBitmap, opaqueBackground and glow.
+// Row 5: a clip whose child is cached and replaced, sent back to frame 1.
+function cacheReplace(abc: Uint8Array): Uint8Array {
+  const at = (x: number, y: number) => ({ tx: x * 20, ty: y * 20 });
+  // Children named `names` from column `first` of row `y`, at depths of the row's.
+  const row = (y: number, names: string[], character: number, extra = {}, first = 0) =>
+    names.map((name, i) =>
+      w.place({
+        depth: y * 20 + first + i + 1,
+        character,
+        name,
+        matrix: at(10 + (first + i) * 40, 10 + y * 45),
+        ...extra,
+      }),
+    );
+  const glow = { glows: [{ color: 0, blur: 2, strength: 1 }] };
+  const c = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => `c${i}`);
+  return w.swf({
+    width: 420,
+    height: 230,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      probeFont(9),
+      square(1, 0xff0000, 400),
+      square(2, 0x0000ff, 600),
+      square(3, 0x0000ff, 400),
+      w.staticText({
+        id: 4,
+        bounds: [0, 800, 0, 400],
+        records: [{ font: 9, height: 400, color: 0x0000cc, x: 0, y: 300, glyphs: [[1, 400]] }],
+      }),
+      w.staticText({
+        id: 5,
+        bounds: [0, 800, 0, 400],
+        records: [{ font: 9, height: 400, color: 0xcc0000, x: 0, y: 300, glyphs: [[4, 400]] }],
+      }),
+      w.sprite(7, 3, [
+        w.place({ depth: 1, character: 1 }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, character: 3 }),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc, "CacheReplace"),
+      w.symbolClass([[0, "Main"]]),
+      ...row(0, c, 1),
+      ...row(1, ["t0", "t1", "t2"], 4),
+      ...row(2, ["s0", "s1", "s2", "s3", "s4", "s5"], 1),
+      ...row(3, ["p0", "p1"], 1, { cacheAsBitmap: true }),
+      ...row(3, ["p2", "p3"], 1, { opaqueBackground: 0xffffffff }, 2),
+      ...row(3, ["p4", "p5"], 1, glow, 4),
+      ...row(4, ["r0"], 7),
+      w.showFrame(),
+      ...c.map((_, i) => w.place({ depth: i + 1, move: true, character: 3 })),
+      ...[0, 1, 2].map((i) => w.place({ depth: 21 + i, move: true, character: 5 })),
+      ...[0, 1, 2, 3, 4, 5].flatMap((i) => [
+        w.place({ depth: 41 + i, move: true, character: i % 2 ? 2 : 3 }),
+        w.place({ depth: 61 + i, move: true, character: i % 2 ? 2 : 3 }),
+      ]),
+      w.showFrame(),
+      w.place({ depth: 2, move: true, character: 2 }),
+      w.place({ depth: 9, move: true, matrix: at(10 + 8 * 40 + 5, 10) }),
+      w.place({ depth: 10, move: true, colorTransform: { mult: [1, 1, 1, 0.5] } }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Static text in Probe over a red square, given drop shadows by
 // scripts/StaticTextFilters.as.
 function staticTextFilters(abc: Uint8Array): Uint8Array {
@@ -4190,6 +4274,15 @@ export const cases: PlayerCase[] = [
     script: "ScriptedTouch",
     frames: 2,
     capture: [1, 2],
+    tolerance: 32,
+    maxOutliers: 60,
+  },
+  {
+    name: "cache-replace",
+    swf: cacheReplace,
+    script: "CacheReplace",
+    frames: 4,
+    capture: [1, 2, 3, 4],
     tolerance: 32,
     maxOutliers: 60,
   },

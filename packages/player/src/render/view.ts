@@ -793,7 +793,7 @@ export class PixiView {
       return;
     }
 
-    const shape = o instanceof ShapeObject ? o.drawn() : null;
+    const shape = o instanceof ShapeObject ? (o.stale?.shape ?? o.drawn()) : null;
     node.layers = o.drawing?.layers ?? shape?.layers ?? [];
     const slicing = this.slicing(o, node);
     if (slicing) {
@@ -1140,6 +1140,11 @@ export class PixiView {
         node.world = [Number.NaN, Number.NaN, Number.NaN, Number.NaN];
         dirty |= CONTENT;
       }
+    }
+
+    // A shape drawn from Flash's stale bitmap cache is drawn as it is once the cache goes.
+    if (o instanceof ShapeObject && o.stale && !o.staleStands()) {
+      dirty |= CONTENT;
     }
 
     // A mask is drawn, whatever its visibility, alpha and colour, by its fills alone.

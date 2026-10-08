@@ -504,7 +504,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     set cacheAsBitmap(v: Value) {
       this.$cacheAsBitmap = !!v;
-      this.$display.cachedAsBitmap = !!v;
+      this.$display.setCachedAsBitmap(!!v);
     }
 
     get cacheAsBitmapMatrix(): Value {
