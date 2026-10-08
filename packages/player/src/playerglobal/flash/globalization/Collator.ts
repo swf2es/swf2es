@@ -63,6 +63,11 @@ class CollatorSettings {
       ignorePunctuation: this.ignoreSymbols,
     });
     this.status = NO_ERROR;
+    // Windows tells a string of what it ignores alone from the empty one.
+    if ((a === "") !== (b === "")) {
+      return a === "" ? -1 : 1;
+    }
+
     a = this.fold(a);
     b = this.fold(b);
     // Windows' word sort sets hyphens and apostrophes aside, so that "co-op" stays beside

@@ -23,15 +23,12 @@ function mapCase(text: string, locale: string, lower: boolean): string {
       continue;
     }
 
-    if (lower) {
-      out += mapped[0];
-      continue;
-    }
-
-    // The base letter mapped, its marks kept: the simple mapping, if it is one character.
+    // The base letter mapped, its marks kept: the simple mapping, if it is one character
+    // (Lithuanian's Ì lowers to ì); else a lower case keeps its first character, the dotted
+    // I's i, and an upper case the character as it is.
     const [base, ...marks] = [...c.normalize("NFD")];
     const simple = [...(map(base) + marks.join("")).normalize("NFC")];
-    out += simple.length === 1 ? simple[0] : c;
+    out += simple.length === 1 ? simple[0] : lower ? mapped[0] : c;
   }
 
   return out;

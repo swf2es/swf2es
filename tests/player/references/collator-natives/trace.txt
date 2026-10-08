@@ -52,4 +52,5 @@ compare null second TypeError: Error #2007: Parameter string2 must be non-null.
 equals null TypeError: Error #2007: Parameter string1 must be non-null.
 sharp s 0 true
 symbols 0 0 0 0
+ignored alone 1 -1 0 false 0
 available true

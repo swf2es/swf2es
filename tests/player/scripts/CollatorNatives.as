@@ -64,6 +64,9 @@ package {
       trace("sharp s", c.compare("\u00df", "ss"), c.equals("Stra\u00dfe", "Strasse"));
       c.ignoreSymbols = true;
       trace("symbols", c.compare("$1", "1"), c.compare("a-b", "ab"), c.compare("a!b", "ab"), c.compare("@", "#"));
+      c = new Collator("en-US");
+      c.ignoreSymbols = true;
+      trace("ignored alone", c.compare("$", ""), c.compare("", "$"), c.compare("$$", "$"), c.equals("", " "), c.compare("", ""));
       trace("available", Collator.getAvailableLocaleIDNames().length > 0);
     }
 

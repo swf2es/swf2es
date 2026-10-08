@@ -20,4 +20,5 @@ lower null TypeError: Error #2007: Parameter s must be non-null.
 constructor null TypeError: Error #2007: Parameter requestedLocaleIDName must be non-null.
 el-GR ΆΛΦΑ ΈΨΙΛΟΝ ΏΜΕΓΑ Ϊ ΐ ᾼ ᾼ ǰ ﬀ άλφα οδοσ σ ᾳ
 en-US ΆΛΦΑ ΈΨΙΛΟΝ ΏΜΕΓΑ Ϊ ΐ ᾼ ᾼ ǰ ﬀ άλφα οδοσ σ ᾳ
+lt ìíĩįïi i j ÌÍĨ I J
 available true

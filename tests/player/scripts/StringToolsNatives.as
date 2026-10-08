@@ -20,6 +20,8 @@ package {
         trace(id, st.toUpperCase("\u03ac\u03bb\u03c6\u03b1 \u03ad\u03c8\u03b9\u03bb\u03bf\u03bd \u03ce\u03bc\u03b5\u03b3\u03b1 \u03ca \u0390 \u1fb3 \u1fbc \u01f0 \ufb00"),
           st.toLowerCase("\u0386\u039b\u03a6\u0391 \u039f\u0394\u039f\u03a3 \u03a3 \u1fbc"));
       }
+      st = new StringTools("lt-LT");
+      trace("lt", st.toLowerCase("\u00cc\u00cd\u0128\u012e\u00cf\u0130 I J"), st.toUpperCase("\u00ec\u00ed\u0129 i j"));
       trace("available", StringTools.getAvailableLocaleIDNames().length > 0);
     }
 
