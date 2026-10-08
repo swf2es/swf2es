@@ -425,7 +425,7 @@ function pcmBytes(samples: Int16Array): Uint8Array {
 }
 
 /** An ADPCM DefineSound as the uncompressed sound it decodes to. */
-export function adpcmSound(sound: Sound): Sound {
+function adpcmSound(sound: Sound): Sound {
   const samples = decodeAdpcm(sound.data, sound.channels);
   return {
     ...sound,

@@ -85,7 +85,7 @@ export function isNumeric(em: MethodEmitter, r: i32): bool {
 }
 
 /** Whether register r holds a value of one of the primitive types now. */
-export function isPrimitive(em: MethodEmitter, r: i32): bool {
+function isPrimitive(em: MethodEmitter, r: i32): bool {
   return isNumeric(em, r) || em.builtinOf(r) === BUILTIN_String;
 }
 
@@ -286,7 +286,7 @@ export function keeps(em: MethodEmitter, type: i32, from: i32): bool {
  * CodegenLIR::coerceToType writes no code for: instances of a subtype
  * are, and null stays null.
  */
-export function upcast(em: MethodEmitter, type: i32, from: i32): bool {
+function upcast(em: MethodEmitter, type: i32, from: i32): bool {
   return (
     isClassRef(em, type) && isClassRef(em, from) && em.domain.traits.subtypeOf(<u32>from, <u32>type)
   );
@@ -415,7 +415,7 @@ export function convert(em: MethodEmitter, prefix: string, r: i32, type: i32, fr
   }
 }
 
-export function operand(em: MethodEmitter, prefix: string, r: i32): void {
+function operand(em: MethodEmitter, prefix: string, r: i32): void {
   if (prefix.length) {
     em.out.text(prefix);
     em.out.uint(<u64>r);

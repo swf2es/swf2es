@@ -3,7 +3,7 @@ import { MAX_NESTING, MethodEmitter } from "./method";
 import { typeRef } from "./refs";
 
 /** The index after block k's last instruction, and its first. */
-export function blockEnd(em: MethodEmitter, k: u32): u32 {
+function blockEnd(em: MethodEmitter, k: u32): u32 {
   const ir = em.ir;
   return k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
 }
@@ -39,7 +39,7 @@ export function conditional(op: u16): bool {
  * something branches to, so one may be in the middle), then what its
  * last instruction does, or its fall-through.
  */
-export function successors(em: MethodEmitter, k: u32): void {
+function successors(em: MethodEmitter, k: u32): void {
   const ir = em.ir;
   const first = ir.blockFirst[k];
   const end = blockEnd(em, k);
@@ -296,7 +296,7 @@ export function analyze(em: MethodEmitter): bool {
   return true;
 }
 
-export function intersect(em: MethodEmitter, a: u32, b: u32): u32 {
+function intersect(em: MethodEmitter, a: u32, b: u32): u32 {
   let x = a;
   let y = b;
   while (x !== y) {
@@ -313,7 +313,7 @@ export function intersect(em: MethodEmitter, a: u32, b: u32): u32 {
 }
 
 /** Whether block a dominates block b. */
-export function dominates(em: MethodEmitter, a: u32, b: u32): bool {
+function dominates(em: MethodEmitter, a: u32, b: u32): bool {
   let x = b;
   while (x !== a) {
     if (x === 0) {
@@ -350,7 +350,7 @@ export function node(em: MethodEmitter, x: u32): void {
 }
 
 /** Block x's code inside a labelled block for each merge node from j, each followed by its code. */
-export function within(em: MethodEmitter, x: u32, merges: u32[], j: i32): void {
+function within(em: MethodEmitter, x: u32, merges: u32[], j: i32): void {
   const out = em.out;
   if (j === merges.length) {
     structuredBlock(em, x);
@@ -382,7 +382,7 @@ export function within(em: MethodEmitter, x: u32, merges: u32[], j: i32): void {
  * Handler h's catch, around the code before its block y: the exception
  * if it came from one of h's regions and has its type, else on.
  */
-export function catchClause(em: MethodEmitter, h: u32, y: u32): void {
+function catchClause(em: MethodEmitter, h: u32, y: u32): void {
   const out = em.out;
   const ir = em.ir;
   let low: u32 = 0;
@@ -450,7 +450,7 @@ export function enclosed(em: MethodEmitter, r: i32): bool {
 }
 
 /** Block k's instructions, and its fall-through as an explicit branch. */
-export function structuredBlock(em: MethodEmitter, k: u32): void {
+function structuredBlock(em: MethodEmitter, k: u32): void {
   em.currentBlock = k;
   em.blockBody(k);
   if (!terminates(em, k) && k + 1 < em.ir.blockCount) {
@@ -497,7 +497,7 @@ export function branchTo(em: MethodEmitter, t: u32): void {
 }
 
 /** Push what writing a block follows: its registers' types and copies, scopes and region. */
-export function save(em: MethodEmitter): void {
+function save(em: MethodEmitter): void {
   const ir = em.ir;
   const saved = em.saved;
   for (let r: u32 = 0; r < ir.frameSize; r++) {
@@ -524,7 +524,7 @@ export function save(em: MethodEmitter): void {
 }
 
 /** Pop what save pushed. */
-export function restore(em: MethodEmitter): void {
+function restore(em: MethodEmitter): void {
   const ir = em.ir;
   const saved = em.saved;
   em.line = <u32>saved.pop();

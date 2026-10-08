@@ -28,7 +28,7 @@ export const IC_Call = 7;
 export const IC_Dynamic = 8;
 
 /** Entries a name keeps, for as many traits, before it replaces the oldest. */
-export const ENTRIES = 8;
+const ENTRIES = 8;
 /**
  * Entries a name replaces before it stops: one seen on more traits than it
  * keeps would replace one on every miss, and still miss as often. It keeps
@@ -71,7 +71,7 @@ export function epoch(): number {
 const filled: PropertyCache[] = [];
 
 /** Note that `head`'s cache is being filled in this epoch. */
-export function filling(head: PropertyCache): void {
+function filling(head: PropertyCache): void {
   filled.push(head);
 }
 

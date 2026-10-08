@@ -170,7 +170,7 @@ function transform(d: DisplayObject, change: (m: Matrix) => void): void {
 const IDENTITY_COLOR = { rMul: 1, gMul: 1, bMul: 1, aMul: 1, rAdd: 0, gAdd: 0, bAdd: 0, aAdd: 0 };
 
 /** Whether `d` is on the display list: under the stage. */
-export function onStage(s: Scripting, d: DisplayObject): boolean {
+function onStage(s: Scripting, d: DisplayObject): boolean {
   for (let o: DisplayObject | null = d; o; o = o.parent) {
     if (o === s.stage) {
       return true;

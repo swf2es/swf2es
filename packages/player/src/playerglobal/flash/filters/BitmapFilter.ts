@@ -47,7 +47,7 @@ export function recordOf(o: AsObject, kind: FilterKind): Filter {
 }
 
 /** The conversions of filters' values as adl keeps them: alpha in 255ths, strength in 256ths, clamped. */
-export function filterValues(s: Scripting) {
+function filterValues(s: Scripting) {
   const num = (v: Value) => s.rt.toNumber(v);
   const blur = (v: Value) => {
     const n = num(v);

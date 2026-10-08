@@ -589,7 +589,7 @@ function onStage(d: DisplayObject, stage: Container): boolean {
 }
 
 /** The caret index nearest (x, y), in twips in the field: the nearer side of the character there, or its line's end. */
-export function caretAt(field: TextObject, x: number, y: number): number {
+function caretAt(field: TextObject, x: number, y: number): number {
   const layout = field.layout;
   if (layout.lines.length === 0) {
     return 0;

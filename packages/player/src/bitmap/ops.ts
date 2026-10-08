@@ -12,7 +12,7 @@ const M = 2147483647;
  * 2^31 - 1, a seed of 0 taken as 1 and one under 0 as -seed + 1 (all 25
  * pixels Ruffle's bitmapdata_getvector records of noise(0) match).
  */
-export class ParkMiller {
+class ParkMiller {
   private x: number;
 
   constructor(seed: number) {

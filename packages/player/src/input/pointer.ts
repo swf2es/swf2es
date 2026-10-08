@@ -201,7 +201,7 @@ export function dropTargetOf(d: DisplayObject): DisplayObject | null {
  * `sprite_dropTarget` names the unnamed shapes in its sprites, where
  * Ruffle's names the sprites), and null over nothing, not the stage.
  */
-export function objectUnder(
+function objectUnder(
   stage: Container,
   x: number,
   y: number,

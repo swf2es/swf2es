@@ -66,7 +66,7 @@ export function ownNames(o: AsObject): EnumeratedName[] {
  * The names of `o` for a for-in starting over it: those it had before in
  * their slots, and new ones in the slots of those gone, then after them.
  */
-export function startEnumeration(
+function startEnumeration(
   enumerating: WeakMap<object, Enumeration>,
   o: AsObject,
 ): (EnumeratedName | null)[] {

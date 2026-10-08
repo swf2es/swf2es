@@ -3400,8 +3400,8 @@ as Flash's sound-transform corpus trace shows, and the four gains reach the
 browser's left and right outputs through Web Audio. `Sound` classes bound by
 SymbolClass to a DefineSound tag find its encoded samples in the library.
 The player decodes MP3, uncompressed 8/16-bit or ADPCM sound on first play
-(ADPCM as Ruffle's decoder does, to 16-bit samples the browser host plays as
-uncompressed ones; `adpcmSound` in `media/audio.ts` does it for another host), sharing
+(ADPCM as Ruffle's decoder does, to 16-bit samples the browser host in
+`media/audio.ts` plays as uncompressed ones), sharing
 a decode when separate loads contain the same sound (`scripting/symbols.ts`). The shared cache holds
 decoded audio while a sound uses it; entries leave when no SWF holds their
 sound definition, so unused audio can be collected. The parser leaves the

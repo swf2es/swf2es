@@ -438,7 +438,7 @@ function dateKeyword(word: string, f: DateFields): boolean {
  * few others ("1/1/1999 13:30 PM"), by numbers and the separators before
  * and after them, and three-letter keywords; NaN for anything else.
  */
-export function parseDate(s: string): number {
+function parseDate(s: string): number {
   const f: DateFields = { year: -1, month: -1, day: -1, hour: -1, min: -1, sec: -1, zone: -1 };
   const length = s.length;
   const code = (k: number) => s.charCodeAt(k);

@@ -5,7 +5,7 @@
 // otherwise. Generated from that output; not to be edited.
 import { messages } from "./messages.js";
 
-export const playerMessages: Record<number, string> = {
+const playerMessages: Record<number, string> = {
   1083: 'The prefix "%1" for element "%2" is not bound.',
   1085: 'The element type "%1" must be terminated by the matching end-tag "</%2>".',
   1104: 'Attribute "%1" was already specified for element "%2".',

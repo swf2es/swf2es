@@ -327,7 +327,7 @@ export function newNamespace(rt: Runtime, uri: Value): Namespace {
  * As AvmCore::newNamespace(prefix, uri): a namespace with a prefix, none
  * if it is not an XML name, or null for a prefix of the empty URI.
  */
-export function newPrefixedNamespace(rt: Runtime, prefix: Value, uri: Value): Namespace | null {
+function newPrefixedNamespace(rt: Runtime, prefix: Value, uri: Value): Namespace | null {
   const u =
     typeof uri === "object" && uri !== null && uri.$local !== undefined && uri.$ns
       ? (uri.$ns.uri as string)

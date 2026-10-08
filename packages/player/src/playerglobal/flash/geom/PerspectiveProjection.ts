@@ -19,7 +19,7 @@ export function alwaysProjects(s: Scripting, d: DisplayObject): boolean {
 }
 
 /** The projection `d` has: its own, or the default the stage, a root, or a projection's reader falls back on. */
-export function projectionOf(s: Scripting, d: DisplayObject): Projection {
+function projectionOf(s: Scripting, d: DisplayObject): Projection {
   if (d.projection) {
     return d.projection;
   }
