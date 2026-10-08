@@ -119,6 +119,11 @@ but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
 
+Apps, in `apps/`, are what people run rather than import: `desktop`, the
+Electron app (see [The desktop app](#the-desktop-app)), and later a browser
+extension. An app may use any package, and no package may use an app; an
+app is private, never published. The boundaries test checks both.
+
 ## Parsing, linking and verifying
 
 avmplus checks an ABC in three places, and swf2es checks it in the same
@@ -3862,6 +3867,103 @@ swaps them all the same. And under a CSP without eval, inline-function
 calls come to nothing, but a call by a path still reaches any function
 a global path names, `eval` itself among them: script access is the
 page's whole, as it was in Flash.
+
+## The desktop app
+
+`apps/desktop` plays local SWFs in an Electron window. It is the web
+embedding with a shell around it: the page is one `<swf2es-player>`
+filling the window, configured with the IndexedDB module cache and the
+libraries the user pointed the app at, and the main process opens the
+files, keeps the settings and carries the sockets. The page knows the
+shell only through `window.swf2esDesktop`, whose types are
+`src/shared/api.ts`: `start`, which hands the page the libraries' state and
+the SWF to play; `onOpen` and `onClose`; `openDialog`, `openDropped` and
+`chooseLibrary`, requests the main process answers with dialogs and
+`onOpen`; and `sockets`. The page (`src/renderer`, `static/`) imports
+nothing of Electron's, so a Tauri shell can serve it as it is.
+
+### Serving the page
+
+Nothing is loaded from `file:`. One privileged scheme, `swf2es:`,
+standard and secure, so fetch, CORS, IndexedDB and localStorage treat it
+as https, has two hosts. `swf2es://app/` is the page, `static/index.html`
+and its stylesheet, the renderer's build, `/modules/<package>/` for the
+packages' builds and their libraries (pixi.js, pako, lzma1), which the
+page's import map names as `tests/player/serve.ts`'s does, and
+`/libraries/builtin.abc` and `/libraries/playerglobal.abc`, read from where
+the settings say. `swf2es://file/<path>` is the local files, but only
+under the directories of the SWFs the user opened, each granted as its SWF
+opens, real paths compared, so a SWF loads what lies beside it and below,
+and nothing else on the disk; its answers carry
+`Access-Control-Allow-Origin: swf2es://app`. The two hosts are two
+origins: a SWF's files are never the page's. Anything but GET and HEAD is
+refused.
+
+The page's Content-Security-Policy, a header the main process writes, is
+`default-src 'none'` and what the player needs: `script-src 'self'
+'unsafe-eval' 'wasm-unsafe-eval'` and the import map's hash, as the player
+evaluates the modules it compiles with `new Function` and codegen is
+WebAssembly; inline styles, for the element's shadow root; images, media
+and fonts from the page, the SWF's files, `data:` and `blob:`; and
+`connect-src` for the page, the SWF's files and `https:` and `wss:`, so a
+SWF's loads from the network work as from a web page, CORS included.
+Nothing may frame the page, and it frames nothing.
+
+### What the page may do
+
+The window's renderer is sandboxed (`app.enableSandbox()`), with context
+isolation, no node integration and web security on. The preload, a
+CommonJS script as a sandboxed one must be, puts the API on the page
+through `contextBridge` and passes the path of a dropped file
+(`webUtils.getPathForFile`) to the main process without showing it to the
+page. The main process answers a message only from the window's own top
+frame on `swf2es://app/`, and checks each argument: a path must be
+absolute and its file start with a SWF's signature, a library must be an
+ABC (major version 46), a socket's host a string and its port in range.
+The page never navigates: `will-navigate` is refused, and a new window,
+as a SWF's navigateToURL asks for, is refused too, its URL opened in the
+system's browser with `shell.openExternal` if it is http or https.
+`<webview>`s are refused, and the only permission granted is full screen.
+ExternalInterface is off (`allowscriptaccess="never"`): a SWF's calls
+into the page would run beside the API.
+
+### Files, settings and libraries
+
+The main process opens a SWF from File › Open, a drop on the window, the
+command line (the first argument that is not a switch), macOS's
+`open-file`, and the recent list, and sends the page its swf2es://file
+URL, which it plays with `load` in place of what played, the element
+letting the last player go. It keeps `settings.json` in Electron's user
+data directory (`SWF2ES_DESKTOP_USER_DATA` names another, for the tests):
+the libraries' paths and the last ten SWFs. playerglobal.abc is the
+user's to give; builtin.abc is taken from beside it, else from the
+checkout's avmplus submodule, else given too. Without them, the page
+shows what is missing and why the app cannot include playerglobal, and an
+ActionScript 3 SWF that fails for want of them says so rather than
+showing the 404; choosing one reloads the page, which fetches the
+libraries once.
+
+### Sockets
+
+The element takes the shell's SocketHost through `configure({ sockets
+})`. Each `flash.net.Socket` is an id the preload numbers, and the main
+process connects it with `node:net`, as `player-hosts/node` does,
+relaying its bytes and events over IPC. A page holds at most 64 at once;
+its sockets close, silently, as it navigates or reloads, and with it. TLS
+(`SecureSocket`) waits for the player to have it.
+
+### Running and testing
+
+`pnpm install` leaves Electron's binary undownloaded (pnpm's
+`ignoredBuiltDependencies`), so nothing else pays for it;
+`pnpm --filter @swf2es/desktop fetch-electron` fetches it, and `start`
+runs the app, `--trace` printing the page's console, a SWF's traces to
+stdout.
+
+Not done yet: packaging and installers, a single instance that takes the
+next file, `SecureSocket`, a loaded SWF's network loads judged by
+crossdomain.xml rather than CORS, a POST from navigateToURL (the system's
+browser gets its URL alone), and reading playerglobal from a `.swc`.
 
 ## Testing against oracles
 

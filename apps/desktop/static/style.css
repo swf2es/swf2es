@@ -1,0 +1,90 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  --muted: #666;
+  --panel: #f3f3f3;
+  --error: #c0392b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --muted: #aaa;
+    --panel: #2a2a2a;
+    --error: #ff7b6b;
+  }
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+swf2es-player {
+  display: block;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+[hidden] {
+  display: none;
+}
+
+#welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted);
+}
+
+#welcome[hidden] {
+  display: none;
+}
+
+#welcome h1 {
+  margin: 0 0 0.5em;
+  font-weight: 600;
+}
+
+#failure,
+#libraries {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+#failure {
+  top: 16px;
+  color: var(--error);
+}
+
+#libraries {
+  bottom: 16px;
+}
+
+#libraries h2 {
+  margin: 0 0 0.5em;
+  font-size: 1.1em;
+}
+
+#libraries dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+}
+
+#libraries dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}

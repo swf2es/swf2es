@@ -58,6 +58,9 @@ node tests/player/precompiled.ts    # AOT modules played in Chrome, imported und
                               # without 'unsafe-eval' too (part of pnpm test)
 node tests/web/run.ts               # @swf2es/web's element, replaceFlash and ExternalInterface in
                               # Chrome (part of pnpm test)
+pnpm --filter @swf2es/desktop fetch-electron   # Electron's binary, once; pnpm install skips it
+pnpm --filter @swf2es/desktop start [--trace] [file.swf]   # the desktop app (apps/desktop);
+                              # --trace prints the SWF's trace() to the terminal
 node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
                               # timeline in Chrome; keep a change only for a gain that repeats;
                               # --write-swf FILE writes its SWF for another player instead
@@ -78,7 +81,8 @@ calling a change done; CI runs the same steps.
   `runtime` on `format`, `cli` on `format` and `codegen`, `player` on `format`,
   `codegen` and `runtime`, `player-hosts` on `player`, `web` on `codegen`, `format`,
   `player` and `player-hosts`. `codegen` never imports the runtime implementation.
-  `format`, `codegen` and `runtime` load no DOM or node types.
+  `format`, `codegen` and `runtime` load no DOM or node types. Apps
+  (`apps/*`) may use any package; no package may use an app.
   `tests/unit/boundaries.test.ts` checks this; change the table there only
   together with docs/architecture.md.
 - **The Tamarin baseline is avmshell's behaviour**, failures included:

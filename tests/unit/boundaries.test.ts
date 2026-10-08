@@ -22,25 +22,67 @@ const allowed: Record<string, string[]> = {
 const portable = ["format", "codegen", "runtime"];
 
 const root = new URL("../../packages/", import.meta.url);
-const readJson = (path: string) => JSON.parse(readFileSync(new URL(path, root), "utf8"));
+const appsRoot = new URL("../../apps/", import.meta.url);
+const readJson = (path: string, base = root) =>
+  JSON.parse(readFileSync(new URL(path, base), "utf8"));
 // tsconfig.json may contain comments.
 const readJsonc = (path: string) =>
   JSON.parse(readFileSync(new URL(path, root), "utf8").replace(/^\s*\/\/.*$/gm, ""));
 
+/** The @swf2es/ names a package.json lists, without the scope. */
+function internalDependencies(pkg: Record<string, Record<string, string> | undefined>): string[] {
+  return [
+    ...Object.keys(pkg.dependencies ?? {}),
+    ...Object.keys(pkg.devDependencies ?? {}),
+    ...Object.keys(pkg.peerDependencies ?? {}),
+  ]
+    .filter((d) => d.startsWith("@swf2es/"))
+    .map((d) => d.slice("@swf2es/".length))
+    .sort();
+}
+
 for (const [name, deps] of Object.entries(allowed)) {
   test(`${name} depends only on ${deps.join(", ") || "nothing"}`, () => {
-    const pkg = readJson(`${name}/package.json`);
-    const internal = [
-      ...Object.keys(pkg.dependencies ?? {}),
-      ...Object.keys(pkg.devDependencies ?? {}),
-      ...Object.keys(pkg.peerDependencies ?? {}),
-    ]
-      .filter((d) => d.startsWith("@swf2es/"))
-      .map((d) => d.slice("@swf2es/".length))
-      .sort();
-    assert.deepEqual(internal, deps);
+    assert.deepEqual(internalDependencies(readJson(`${name}/package.json`)), deps);
   });
 }
+
+// Apps (apps/*) may use any package, and no package may use an app.
+const apps = readdirSync(appsRoot, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name);
+
+test("every package is in the table", () => {
+  const packages = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(packages, Object.keys(allowed).sort());
+});
+
+for (const app of apps) {
+  test(`app ${app} depends only on packages`, () => {
+    const pkg = readJson(`${app}/package.json`, appsRoot);
+    assert.ok(pkg.private, "an app is not published");
+    for (const dep of internalDependencies(pkg)) {
+      assert.ok(dep in allowed, `${app} depends on @swf2es/${dep}, which is not a package`);
+    }
+  });
+}
+
+test("no package depends on an app", () => {
+  const appNames = new Set(
+    apps.map((app) =>
+      String(readJson(`${app}/package.json`, appsRoot).name).slice("@swf2es/".length),
+    ),
+  );
+  for (const name of Object.keys(allowed)) {
+    const used = internalDependencies(readJson(`${name}/package.json`)).filter((d) =>
+      appNames.has(d),
+    );
+    assert.deepEqual(used, [], `${name} depends on an app`);
+  }
+});
 
 for (const name of portable) {
   test(`${name} has no DOM or node types`, () => {

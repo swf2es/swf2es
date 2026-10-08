@@ -162,6 +162,21 @@ Without a renderer, nothing is drawn, and `BitmapData.draw` of a display
 object is not supported. The display list, scripts, timers, loads and
 sockets all run.
 
+### Play a SWF on the desktop
+
+`apps/desktop` is an Electron app that plays local SWFs in a window,
+the `<swf2es-player>` element inside, with `flash.net.Socket` connecting
+directly. Electron's binary is fetched once, apart from `pnpm install`:
+
+```sh
+pnpm build
+pnpm --filter @swf2es/desktop fetch-electron
+pnpm --filter @swf2es/desktop start movie.swf   # or File › Open, or drop a SWF on the window
+```
+
+The first ActionScript 3 SWF asks for your playerglobal.abc, and the app
+remembers where it is. [apps/desktop/README.md](apps/desktop/README.md) has the rest.
+
 ### Sockets
 
 A browser cannot open TCP connections. Each `flash.net.Socket` goes
@@ -178,7 +193,9 @@ configure({
 
 A player you set up yourself takes `socket:` from
 `webSocketSocketHost(urlFor)` (`@swf2es/player-hosts/websocket`). In node,
-`nodeSocketHost()` (`@swf2es/player-hosts/node`) connects directly.
+`nodeSocketHost()` (`@swf2es/player-hosts/node`) connects directly, and
+so does the desktop app, through its main process; an embedder with a
+transport of its own gives it as `configure({ sockets })`.
 
 ## Packages
 
@@ -191,6 +208,8 @@ packages/
   player-hosts/  optional hosts: Node TCP, WebSocket relay, IndexedDB and precompiled module caches
   web/           <swf2es-player>, replaceFlash and ExternalInterface for any page
   cli/           the swf2es ahead-of-time compiler
+apps/
+  desktop/       the desktop app: an Electron shell around <swf2es-player>
 oracle/          avmshell and Flash (adl) references
 tests/           unit, conformance, player, web and fuzz tests
 docs/            architecture, references, coverage, benchmarks, roadmap

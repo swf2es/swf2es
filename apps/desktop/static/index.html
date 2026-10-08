@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>swf2es</title>
+<script type="importmap">{"imports":{"@swf2es/format":"/modules/format/index.js","@swf2es/codegen":"/modules/codegen/index.js","@swf2es/runtime":"/modules/runtime/index.js","@swf2es/player":"/modules/player/index.js","@swf2es/player-hosts/indexeddb":"/modules/player-hosts/indexeddb.js","@swf2es/player-hosts/precompiled":"/modules/player-hosts/precompiled.js","@swf2es/player-hosts/websocket":"/modules/player-hosts/websocket.js","@swf2es/web":"/modules/web/index.js","@swf2es/codegen/codegen.wasm":"/modules/codegen/codegen.wasm","pixi.js":"/modules/pixi/pixi.mjs","pako":"/modules/pako/pako.esm.mjs","lzma1":"/modules/lzma1/index.js"}}</script>
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/renderer/index.js"></script>
+</head>
+<body>
+<swf2es-player id="player" allowscriptaccess="never" scale="showAll" hidden></swf2es-player>
+<main id="welcome">
+  <h1>swf2es</h1>
+  <p>Open a SWF with File › Open, or drop one on this window.</p>
+  <button id="open" type="button">Open a SWF…</button>
+</main>
+<p id="failure" role="alert" hidden></p>
+<section id="libraries" hidden>
+  <h2>ActionScript 3 needs two libraries</h2>
+  <p>
+    A SWF's ActionScript 3 links against <code>builtin.abc</code>, avmplus' standard library,
+    and <code>playerglobal.abc</code>, Adobe's <code>flash.*</code> declarations.
+    playerglobal is Adobe's and may not be redistributed, so swf2es does not include it:
+    point swf2es at a copy of your own, once, and it remembers where it is.
+    SWFs without ActionScript 3 play without either.
+  </p>
+  <dl>
+    <dt>playerglobal.abc</dt><dd id="playerglobal-path"></dd>
+    <dt>builtin.abc</dt><dd id="builtin-path"></dd>
+  </dl>
+  <button id="choose-playerglobal" type="button">Choose playerglobal.abc…</button>
+  <button id="choose-builtin" type="button">Choose builtin.abc…</button>
+</section>
+</body>
+</html>
