@@ -3907,15 +3907,29 @@ FileAttributes' UseNetwork bit (`usesNetwork` in `format`), and
 - **local-with-filesystem**, without the bit: the SWF reads the files in
   its own directory and below, its real directory, links followed, and
   reaches no network. Every http, https, ws and wss request from the page
-  is cancelled in the session's `webRequest` (with a word on stderr), and
-  no socket is made.
+  is cancelled in the session's `webRequest` (with a word on stderr), no
+  socket is made, and navigateToURL opens no page, as Flash refused it,
+  since a URL can carry what the SWF read.
 - **local-with-networking**, with it: the SWF reads no local file but
   itself, and reaches the network as a web page does (https and wss,
   CORS included), and sockets as the user allows (below).
 
-So no SWF can both read the disk and send what it read away. The user's
-home directory and a file system's root are never granted whole: a SWF
-there reads only itself. Only the SWF playing has a grant: opening
+So no SWF can both read the disk and send what it read away. A
+directory others share is never granted whole: the user's home, the one
+that holds every user's (`/home`, `/Users`, `C:\Users`), the temporary
+ones (the OS's, `/tmp`, `/var/tmp`) and a file system's root; a SWF there
+reads only itself. Only those directories themselves: a SWF one level
+below, in `C:\Users\Public` or a directory of `/tmp`, reads all that
+directory holds, which may be other programs' or users' files, so a SWF
+from elsewhere is best kept in a directory of its own.
+
+The main process chooses the sandbox from the SWF's first 64 KB, with
+`fileAttributes` (`format`), which decompresses only as far as the first
+tag: a SWF's header may name a length of 4 GB, which it never trusts.
+The page decompresses the SWF whole, and `decompressSwf` refuses a ZWS
+whose length no LZMA stream that short can hold, more than 32768 times
+the stream, as LZMA expands a byte some 7000 times at best; a CWS's zlib
+stops at its stream's end. Only the SWF playing has a grant: opening
 another or closing it revokes it, so nothing accumulates over a run, and
 the next SWF's grant takes effect only as the page fetches it, which it
 does once the element has let the last player go, so that player never
@@ -3952,8 +3966,9 @@ absolute and its file start with a SWF's signature, a library must be an
 ABC (major version 46), a socket's host a string and its port in range.
 The page never navigates: `will-navigate` is refused, and a new window,
 as a SWF's navigateToURL asks for, is refused too, its URL opened in the
-system's browser with `shell.openExternal` if it is http or https and a
-click, key or tap in the window asked for it: one page a gesture, within
+system's browser with `shell.openExternal` if it is http or https, the
+SWF is in local-with-networking, and a click, key or tap in the window
+asked for it: one page a gesture, within
 five seconds of it and a second after the last, as a browser's popup
 blocker allows, so a SWF cannot launch the browser in a loop.
 `<webview>`s are refused, and the only permission granted is full screen.
