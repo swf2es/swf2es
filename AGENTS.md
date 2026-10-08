@@ -92,8 +92,9 @@ calling a change done; CI runs the same steps.
   what avmshell prints, not what JavaScript or the spec suggests. Add a case
   under `tests/conformance/cases/` for any semantic you implement.
 - **Never edit `oracle/avmplus`.** It is a submodule (MPL-2.0). Patches go to
-  the swf2es/avmplus fork, and its source is not copied into the Apache-2.0
-  packages.
+  the swf2es/avmplus fork. Code translated from avmplus stays in files of
+  its own that carry the MPL-2.0 header; nothing from avmplus goes into an
+  Apache-2.0 file, so the MPL's file-level copyleft never reaches the rest.
 - **Only redistributable SWFs** go into the repository.
 
 ## Code style
