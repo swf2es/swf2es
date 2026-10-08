@@ -432,8 +432,13 @@ export interface PlaceSpec {
   hasImage?: boolean;
   /** Blur filters, each blurring as much both ways, in one pass; [] clears. */
   blurs?: number[];
+  /** Glow filters after the blurs, in one pass: 0xRRGGBB, blur both ways and strength. */
+  glows?: { color: number; blur: number; strength: number }[];
+  /** Drop shadows after the glows, in one pass, black: blur both ways, `distance` at `angle` degrees. */
+  shadows?: { blur: number; distance: number; angle: number }[];
   /** A blend mode by its number, 1 normal to 14 hard light. */
   blendMode?: number;
+  cacheAsBitmap?: boolean;
   visible?: boolean;
   /** 0xAARRGGBB. */
   opaqueBackground?: number;
@@ -454,6 +459,9 @@ function colorTransform(w: BitWriter, cx: { mult?: number[]; add?: number[] }): 
 
   w.align();
 }
+
+/** A 16.16 fixed-point number's bits. */
+const fixed = (v: number) => Math.round(v * 65536) >>> 0;
 
 /** A PlaceObject2 tag, or a PlaceObject3 when the spec has fields only it holds. */
 export function place(spec: PlaceSpec): Uint8Array {
@@ -499,12 +507,18 @@ export function place(spec: PlaceSpec): Uint8Array {
     flags2 |= 0x10;
   }
 
-  if (spec.blurs !== undefined) {
+  const filters =
+    (spec.blurs?.length ?? 0) + (spec.glows?.length ?? 0) + (spec.shadows?.length ?? 0);
+  if (spec.blurs !== undefined || filters > 0) {
     flags2 |= 0x01;
   }
 
   if (spec.blendMode !== undefined) {
     flags2 |= 0x02;
+  }
+
+  if (spec.cacheAsBitmap !== undefined) {
+    flags2 |= 0x04;
   }
 
   if (spec.visible !== undefined) {
@@ -550,19 +564,51 @@ export function place(spec: PlaceSpec): Uint8Array {
     w.u16(spec.clipDepth);
   }
 
-  if (spec.blurs !== undefined) {
-    w.u8(spec.blurs.length);
-    for (const blur of spec.blurs) {
+  if (flags2 & 0x01) {
+    w.u8(filters);
+    for (const blur of spec.blurs ?? []) {
       // BLURFILTER: its id, blurX and blurY in 16.16, then passes in five bits.
       w.u8(1)
-        .u32(blur * 65536)
-        .u32(blur * 65536)
+        .u32(fixed(blur))
+        .u32(fixed(blur))
         .u8(1 << 3);
+    }
+
+    // GLOWFILTER and DROPSHADOWFILTER: RGBA, blurs, the shadow's angle in radians and distance,
+    // strength in 8.8, then composite source and one pass.
+    for (const glow of spec.glows ?? []) {
+      w.u8(2)
+        .u8(glow.color >> 16)
+        .u8(glow.color >> 8)
+        .u8(glow.color)
+        .u8(255)
+        .u32(fixed(glow.blur))
+        .u32(fixed(glow.blur))
+        .u16(Math.round(glow.strength * 256))
+        .u8(0x21);
+    }
+
+    for (const shadow of spec.shadows ?? []) {
+      w.u8(0)
+        .u8(0)
+        .u8(0)
+        .u8(0)
+        .u8(255)
+        .u32(fixed(shadow.blur))
+        .u32(fixed(shadow.blur))
+        .u32(fixed((shadow.angle * Math.PI) / 180))
+        .u32(fixed(shadow.distance))
+        .u16(256)
+        .u8(0x21);
     }
   }
 
   if (spec.blendMode !== undefined) {
     w.u8(spec.blendMode);
+  }
+
+  if (spec.cacheAsBitmap !== undefined) {
+    w.u8(spec.cacheAsBitmap ? 1 : 0);
   }
 
   if (spec.visible !== undefined) {
@@ -666,11 +712,25 @@ export function sprite(id: number, frameCount: number, tags: Uint8Array[]): Uint
   return tag(39, concat([new BitWriter().u16(id).u16(frameCount).done(), ...tags]));
 }
 
+/** A DefineScalingGrid: the 9-slice grid of sprite or button `id`, in twips. */
+export function scalingGrid(
+  id: number,
+  xMin: number,
+  xMax: number,
+  yMin: number,
+  yMax: number,
+): Uint8Array {
+  const w = new BitWriter().u16(id);
+  rect(w, xMin, xMax, yMin, yMax);
+  return tag(78, w.done());
+}
+
 /**
  * A DefineEditText: its initial text, its size in twips and alignment (0
  * left, 1 right, 2 center), and optionally HTML text, multiline, a colour
  * (0xRRGGBB), a font by id with its height in twips, wrapping, the
- * font's outlines, and margins, indent and leading in twips.
+ * font's outlines, margins, indent and leading in twips, and read-only,
+ * which makes it a dynamic field rather than an input one.
  */
 export function editText(
   id: number,
@@ -688,6 +748,7 @@ export function editText(
     at?: [number, number];
     wordWrap?: boolean;
     useOutlines?: boolean;
+    readOnly?: boolean;
     /** In twips; the indent may be negative, as the tag's 16 bits hold it. */
     layout?: { leftMargin: number; rightMargin: number; indent: number; leading: number };
   } = {},
@@ -700,6 +761,7 @@ export function editText(
     0x80 |
       (options.wordWrap ? 0x40 : 0) |
       (options.multiline ? 0x20 : 0) |
+      (options.readOnly ? 0x08 : 0) |
       (options.color !== undefined ? 0x04 : 0) |
       (font ? 0x01 : 0),
   );

@@ -1,8 +1,8 @@
 // flash.events.MouseEvent's native fields. Playerglobal constructs and
 // formats the event in AS3; the coordinates follow its current target.
 import { avm2 } from "@swf2es/runtime";
-import { toStage } from "../../../bounds.js";
-import { apply } from "../../../geometry.js";
+import { toStage } from "../../../display/bounds.js";
+import { apply } from "../../../display/geometry.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;

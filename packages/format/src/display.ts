@@ -1,9 +1,9 @@
 // The display list's tags (SWF specification, chapter 3), and the ones that
 // tie a SWF's classes to its symbols: PlaceObject 1 to 3, RemoveObject 1
-// and 2, FrameLabel, DefineSprite, SymbolClass and DoABC. Filters and clip
-// actions are kept as their bytes for now.
+// and 2, FrameLabel, DefineSprite, DefineScalingGrid, SymbolClass and
+// DoABC. Filters and clip actions are kept as their bytes for now.
 import { type ColorTransform, type Matrix, readColorTransform, readMatrix } from "./shape.js";
-import { readTags, SwfReader, type Tag } from "./swf.js";
+import { type Rect, readTags, SwfReader, type Tag } from "./swf.js";
 import { DoABC, PlaceObject, PlaceObject3, RemoveObject, RemoveObject2 } from "./tags.js";
 
 /**
@@ -198,23 +198,34 @@ export function readFilterBytes(r: SwfReader): Uint8Array {
 
   for (let i = 0; i < count && !r.overrun; i++) {
     const id = r.u8();
-    if (id === 0) {
-      r.pos += 23; // DropShadow
-    } else if (id === 1) {
-      r.pos += 9; // Blur
-    } else if (id === 2) {
-      r.pos += 15; // Glow
-    } else if (id === 3) {
-      r.pos += 27; // Bevel
-    } else if (id === 4 || id === 7) {
-      const stops = r.u8(); // GradientGlow, GradientBevel
-      r.pos += stops * 5 + 19;
-    } else if (id === 5) {
-      const x = r.u8(); // Convolution
-      const y = r.u8();
-      r.pos += 8 + x * y * 4 + 5;
-    } else if (id === 6) {
-      r.pos += 80; // ColorMatrix
+    switch (id) {
+      case 0:
+        r.pos += 23; // DropShadow
+        break;
+      case 1:
+        r.pos += 9; // Blur
+        break;
+      case 2:
+        r.pos += 15; // Glow
+        break;
+      case 3:
+        r.pos += 27; // Bevel
+        break;
+      case 4:
+      case 7: {
+        const stops = r.u8(); // GradientGlow, GradientBevel
+        r.pos += stops * 5 + 19;
+        break;
+      }
+      case 5: {
+        const x = r.u8(); // Convolution
+        const y = r.u8();
+        r.pos += 8 + x * y * 4 + 5;
+        break;
+      }
+      case 6:
+        r.pos += 80; // ColorMatrix
+        break;
     }
   }
 
@@ -288,6 +299,13 @@ export function readSprite(
   const id = r.u16();
   const frameCount = r.u16();
   return { id, frameCount, tags: readTags(bytes, r.pos, tag.offset + tag.length).tags };
+}
+
+/** DefineScalingGrid: the sprite or button it is for, and its grid, in twips, in the character's space. */
+export function readScalingGrid(bytes: Uint8Array, tag: Tag): { id: number; grid: Rect } {
+  const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+  const id = r.u16();
+  return { id, grid: r.rect() };
 }
 
 /** DefineBinaryData: a character's bytes, after its id and 4 reserved bytes, which a ByteArray subclass SymbolClass binds to it holds. */

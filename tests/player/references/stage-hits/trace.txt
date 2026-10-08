@@ -1,0 +1,7 @@
+window root false true false loaderInfo true false stage root true
+30,20 window true true inner false false off false stage false true
+  under window
+55,20 window true true inner true true off false stage false true
+  under window,inner
+70,20 window false false inner false false off false stage false false
+  under 

@@ -12,10 +12,12 @@
 // Translated from avmplus' core/AvmSerializer.cpp, this file is subject to
 // the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
+import type { AsObject, Value } from "./descriptors.js";
 import { NS_PackageInternal, NS_Public, namespace, publicNs, qname } from "./names.js";
 import { type Bytes, bytesOf, fromUtf8, utf8 } from "./natives/bytearray.js";
 import { xmlToXMLString } from "./natives/xml/xml.js";
-import type { AsObject, Runtime, Traits, Value } from "./runtime.js";
+import type { Runtime } from "./runtime.js";
+import type { Traits } from "./traits.js";
 
 const kUndefined = 0;
 const kNull = 1;
@@ -573,7 +575,7 @@ export class Reader implements ExternalStream {
       }
 
       if (k === length) {
-        input.position = at + length;
+        input.position = (at + length) >>> 0;
         this.strings.push(ascii);
         return ascii;
       }

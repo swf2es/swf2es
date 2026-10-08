@@ -1,7 +1,7 @@
 // flash.media.Video: a box of its size on the display list, as Flash makes
 // it; no stream or camera plays in it, the player having neither.
 import { avm2 } from "@swf2es/runtime";
-import type { VideoObject } from "../../../display.js";
+import type { VideoObject } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;

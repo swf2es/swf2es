@@ -1,12 +1,16 @@
 // flash.display.Graphics: the natives record into the display object's
-// drawing (drawing.ts). drawCircle and drawEllipse are playerglobal's own,
-// over curveTo.
-import type { Line } from "@swf2es/format";
+// drawing (display/drawing.ts), and readGraphicsData reads it back
+// (display/graphicsdata.ts). drawCircle and drawEllipse are playerglobal's
+// own, over curveTo.
+import type { Line, Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { BitmapStore } from "../../../bitmap.js";
-import type { DisplayObject } from "../../../display.js";
-import { CONTENT } from "../../../display.js";
-import { Drawing } from "../../../drawing.js";
+import { BitmapStore } from "../../../bitmap/bitmap.js";
+import type { DisplayObject } from "../../../display/display.js";
+import { CONTENT, Container, ShapeObject } from "../../../display/display.js";
+import { Drawing } from "../../../display/drawing.js";
+import { concat } from "../../../display/geometry.js";
+import { type GraphicsDatum, graphicsData } from "../../../display/graphicsdata.js";
+import type { Paint } from "../../../display/shapes.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
@@ -15,6 +19,10 @@ type Value = avm2.Value;
 const TWIPS = 20;
 const CAPS: Record<string, number> = { round: 0, none: 1, square: 2 };
 const JOINTS: Record<string, number> = { round: 0, bevel: 1, miter: 2 };
+const IDENTITY = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+
+/** The gradients begun with no matrix, which read back with Flash's default for one. */
+const unplaced = new WeakSet<Paint>();
 
 /** A Graphics object for `display`, made once. */
 export function graphicsOf(s: Scripting, o: AsObject): AsObject {
@@ -45,8 +53,93 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
     return Number.isNaN(n) ? fallback : n;
   };
 
+  /** The data of `display`'s drawing, a timeline shape's too, and with `recurse` its children's, each through `m`. */
+  const gather = (display: DisplayObject, m: Matrix, recurse: boolean, out: GraphicsDatum[]) => {
+    if (display instanceof ShapeObject) {
+      graphicsData(display.drawn()?.layers ?? [], m, unplaced, out);
+    }
+
+    graphicsData(display.drawing?.layers ?? [], m, unplaced, out);
+    if (recurse && display instanceof Container) {
+      for (const child of display.children) {
+        gather(child, concat(child.matrix, m), true, out);
+      }
+    }
+  };
+  const matrixOf = (m: Matrix): AsObject =>
+    s.rt.construct(
+      s.rt.classNamed("flash.geom::Matrix"),
+      m.a,
+      m.b,
+      m.c,
+      m.d,
+      m.tx,
+      m.ty,
+    ) as AsObject;
+  const vectorOf = (type: string, values: number[]): AsObject => {
+    const o = s.rt.resolve(s.rt.vector(type)).$it.instance();
+    o.$a = values;
+    return o;
+  };
+  const objectOf = (datum: GraphicsDatum): AsObject => {
+    const make = (name: string, ...args: Value[]) =>
+      s.rt.construct(s.rt.classNamed(`flash.display::${name}`), ...args) as AsObject;
+    switch (datum.type) {
+      case "solid":
+        return make("GraphicsSolidFill", datum.color, datum.alpha);
+      case "gradient":
+        return make(
+          "GraphicsGradientFill",
+          datum.radial ? "radial" : "linear",
+          s.rt.array(datum.colors),
+          s.rt.array(datum.alphas),
+          s.rt.array(datum.ratios),
+          matrixOf(datum.matrix),
+          datum.spread,
+          datum.linearRgb ? "linearRGB" : "rgb",
+          datum.focal,
+        );
+      case "bitmap": {
+        // A copy of its pixels, not the BitmapData it was begun with, as adl gives.
+        const store = datum.image instanceof BitmapStore ? datum.image : null;
+        let bitmap: AsObject | null = null;
+        if (store) {
+          bitmap = s.rt.construct(
+            s.rt.classNamed("flash.display::BitmapData"),
+            store.width,
+            store.height,
+            store.transparent,
+            0,
+          ) as AsObject;
+          bitmap.$store = store.clone();
+        }
+
+        return make("GraphicsBitmapFill", bitmap, matrixOf(datum.matrix), true, false);
+      }
+      case "path":
+        return make(
+          "GraphicsPath",
+          vectorOf("int", datum.commands),
+          vectorOf("Number", datum.data),
+          datum.winding,
+        );
+      default:
+        return make("GraphicsEndFill");
+    }
+  };
+
   class GraphicsNatives {
     declare $display: DisplayObject;
+
+    /** readGraphicsData's: what the drawing holds, in Flash's form, onto `target`. */
+    "flash.display:Graphics::nativeGetGraphicsData"(target: Value, recurse: Value): void {
+      const out: GraphicsDatum[] = [];
+      gather(this.$display, IDENTITY, !!recurse, out);
+      const list: Value[] = (target as AsObject).$a;
+      for (const datum of out) {
+        list.push(objectOf(datum));
+      }
+    }
 
     clear(): void {
       drawing(this).clear();
@@ -100,7 +193,7 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
           ? fallback
           : s.rt.toNumber(s.rt.getProperty(matrix as AsObject, s.rt.publicName(k)));
       const spread = s.rt.toString(spreadMethod);
-      drawing(this).beginFill({
+      const fill: Paint = {
         type: "gradient",
         radial: kind === "radial",
         focal: kind === "radial" ? num(focalPointRatio) : 0,
@@ -115,7 +208,12 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
           tx: read("tx", 0),
           ty: read("ty", 0),
         },
-      });
+      };
+      if (matrix === null || matrix === undefined) {
+        unplaced.add(fill);
+      }
+
+      drawing(this).beginFill(fill);
     }
 
     /** The BitmapData itself, not a copy: the fill shows its later changes, the shape a view of its store. */

@@ -12,6 +12,7 @@ const skip = !existsSync(generated) && "oracle/avmplus missing";
 const rt = {
   greaterThan: (a: number, b: number) => a > b,
   caught: (e: unknown) => e,
+  toInt: (v: number) => v | 0,
   unreachable: () => new Error("unreachable"),
   defaultXmlNamespace: null,
 };
@@ -54,6 +55,8 @@ const GETLOCAL3 = 0xd3;
 const SETLOCAL1 = 0xd5;
 const SETLOCAL2 = 0xd6;
 const SETLOCAL3 = 0xd7;
+const INCLOCAL_I = 0xc2;
+const IFLT = 0x15;
 
 test("locals and arithmetic run as plain JavaScript", { skip }, () => {
   const code = [PUSHBYTE, 7, SETLOCAL1, PUSHBYTE, 5, SETLOCAL2, GETLOCAL1, GETLOCAL2, ADD];
@@ -127,7 +130,7 @@ test("a loop is a labelled for (;;), its back edge a continue, and no dispatcher
   assert.match(js, /continue L1;/);
   assert.doesNotMatch(js, /switch \(b\)/);
   // The locals are read and written straight, with no stack registers between.
-  assert.match(js, /l1 = l1 \+ l2 \| 0;\n {4}l2 = l2 - 1 \| 0;/);
+  assert.match(js, /l1 = l1 \+ l2 \| 0;\nl2 = l2 - 1 \| 0;/);
 });
 
 test("if and else meet again after a labelled block", { skip }, () => {
@@ -242,7 +245,7 @@ test("a throw in a handler's range runs the handler, with the exception on the s
   assert.equal(run(abc), 7);
   // A structured try, the handler's code after its labelled block.
   const js = emit(abc);
-  assert.match(js, /L\d+: \{\n {2}try \{/);
+  assert.match(js, /L\d+: \{\ntry \{/);
   assert.doesNotMatch(js, /switch \(b\)/);
 });
 
@@ -281,6 +284,108 @@ test("an exception in a handler's code goes to the handler covering that", { ski
   });
   assert.equal(run(abc), 8);
   assert.doesNotMatch(emit(abc), /switch \(b\)/);
+});
+
+test("a stack copy of a local stays the local past a branch that leaves it as it is", {
+  skip,
+}, () => {
+  // l1 = 5; push l1; if (true) { l2 }; return what was pushed.
+  // 0 pushbyte 5; 2 setlocal1; 3 getlocal1; 4 pushtrue; 5 iffalse +2 to 11;
+  // 9 getlocal2; 10 pop; 11 returnvalue.
+  const code = [PUSHBYTE, 5, SETLOCAL1, GETLOCAL1, PUSHTRUE, IFFALSE, ...s24(2), GETLOCAL2, POP];
+  const js = emit(script([...code, RETURNVALUE]));
+  assert.match(js, /return l1;/);
+  assert.doesNotMatch(js, /s0 = /);
+  assert.equal(run(script([...code, RETURNVALUE])), 5);
+});
+
+test("a stack copy of a local is written where a branch sets the local before a merge", {
+  skip,
+}, () => {
+  // l1 = 5; push l1; if (c) l1 = 9; return what was pushed, 5 either way.
+  // 0 pushbyte 5; 2 setlocal1; 3 getlocal1; 4 pushtrue or pushfalse;
+  // 5 iffalse +3 to 12; 9 pushbyte 9; 11 setlocal1; 12 returnvalue.
+  for (const c of [PUSHTRUE, PUSHFALSE]) {
+    const code = [PUSHBYTE, 5, SETLOCAL1, GETLOCAL1, c, IFFALSE, ...s24(3), PUSHBYTE, 9, SETLOCAL1];
+    assert.equal(run(script([...code, RETURNVALUE])), 5);
+  }
+});
+
+test("a stack copy of a local the loop it is live through sets is written before the loop", {
+  skip,
+}, () => {
+  // l2 = 0; l1 = 7; push l1; do { l1++; l2++ } while (l2 < 3); return what was pushed.
+  // 0 pushbyte 0; 2 setlocal2; 3 pushbyte 7; 5 setlocal1; 6 getlocal1; 7 label;
+  // 8 inclocal_i 1; 10 inclocal_i 2; 12 getlocal2; 13 pushbyte 3; 15 iflt -12 to 7;
+  // 19 returnvalue.
+  const code = [
+    PUSHBYTE,
+    0,
+    SETLOCAL2,
+    PUSHBYTE,
+    7,
+    SETLOCAL1,
+    GETLOCAL1,
+    LABEL,
+    INCLOCAL_I,
+    1,
+    INCLOCAL_I,
+    2,
+    GETLOCAL2,
+    PUSHBYTE,
+    3,
+    IFLT,
+    ...s24(-12),
+    RETURNVALUE,
+  ];
+  assert.match(emit(script(code)), /s0 = l1;\nL\d+: for/);
+  assert.equal(run(script(code)), 7);
+});
+
+test("a stack copy of a local an irreducible loop sets is written, in the dispatcher", {
+  skip,
+}, () => {
+  // As the irreducible loop above, with l1 pushed before it and returned after.
+  // 0 pushbyte 3; 2 setlocal1; 3 getlocal1; 4 pushtrue; 5 iftrue +10 to 19;
+  // 9 label; 10 getlocal1; 11 pushbyte 1; 13 subtract_i; 14 setlocal1; 15 jump +0 to 19;
+  // 19 getlocal1; 20 pushbyte 0; 22 ifgt -17 to 9; 26 returnvalue.
+  const code = [
+    PUSHBYTE,
+    3,
+    SETLOCAL1,
+    GETLOCAL1,
+    PUSHTRUE,
+    IFTRUE,
+    ...s24(10),
+    LABEL,
+    GETLOCAL1,
+    PUSHBYTE,
+    1,
+    SUBTRACT_I,
+    SETLOCAL1,
+    JUMP,
+    ...s24(0),
+    GETLOCAL1,
+    PUSHBYTE,
+    0,
+    IFGT,
+    ...s24(-17),
+    RETURNVALUE,
+  ];
+  assert.match(emit(script(code)), /switch \(b\)/);
+  assert.equal(run(script(code)), 3);
+});
+
+test("a stack copy of a local set inside a try is written before, and the handler sees the local", {
+  skip,
+}, () => {
+  // l1 = 1; push l1; l1 = 2; throw what was pushed; the handler of 0 up to 8
+  // returns the exception + l1, 1 + 2.
+  // 0 pushbyte 1; 2 setlocal1; 3 getlocal1; 4 pushbyte 2; 6 setlocal1; 7 throw;
+  // 8 getlocal1; 9 add_i; 10 returnvalue.
+  const code = [PUSHBYTE, 1, SETLOCAL1, GETLOCAL1, PUSHBYTE, 2, SETLOCAL1, THROW];
+  const abc = script([...code, GETLOCAL1, ADD_I, RETURNVALUE], { exceptions: [[0, 8, 8, 0, 0]] });
+  assert.equal(run(abc), 3);
 });
 
 test("a handler that goes back into its range first keeps the dispatcher, and runs the same", {
@@ -360,6 +465,17 @@ test("a module's functions are named after their methods, for stacks and profile
   assert.match(js, /function \$Array_Array__set_length\(/);
   // No name the generated code binds: every factory's function starts with $.
   assert.doesNotMatch(js, /=> function [A-Za-z_][A-Za-z0-9_]*\(/);
+});
+
+test("the tables name namespaces, classes and multinames by the module's shorthands", {
+  skip,
+}, () => {
+  testing.domainReset(50);
+  const js = module("builtin.abc", true);
+  assert.match(js, /\n {2}const mn = \(kind, set, name\) => rt\.name\(N, V, kind, set, name\);\n/);
+  assert.match(js, /\n {4}mn\(7, \[\d+\], "Object"\),\n/);
+  assert.match(js, /\bcls\(ns\(\d, "[\w.]*"\), "\w+"\)/);
+  assert.equal(js.match(/rt\.(ns|cls|name)\(/g)?.length, 3, "only in the shorthands");
 });
 
 test("a metadata item's key or value past the string pool is empty, as avmplus reads it", {
@@ -467,9 +583,7 @@ function factoryAt(factories: string, index: number): string {
   let at = -1;
   for (let i = 1; i < lines.length; i++) {
     if (
-      /^ {4}(\(scope, sup, \$dx[^)]*\) =>|\(\(\.\.\.T\) => \(scope, sup, \$dx[^)]*\) =>|rt\.)/.test(
-        lines[i],
-      ) &&
+      /^ {4}(\(\(\.\.\.T\) => |\((scope(, sup(, \$dx[^)]*)?)?)?\) =>|rt\.)/.test(lines[i]) &&
       /[[,]$/.test(lines[i - 1]) &&
       ++at === index
     ) {
@@ -551,4 +665,56 @@ test("a module's source map has each statement's line, from debugfile and debugl
 
   assert.equal(lineOf(js.findIndex((l) => l.trim() === "l1 = 5;")), 6);
   assert.equal(lineOf(js.findIndex((l) => l.trim() === "return l1;")), 8);
+});
+
+test("a null check is made where the instruction it checks for reads the value first", {
+  skip,
+}, () => {
+  const GETPROPERTY = 0x66;
+  const CONVERT_O = 0x77;
+  assert.match(
+    emit(script([GETLOCAL1, GETPROPERTY, 1, RETURNVALUE])),
+    /= rt\.getProperty\(l1 \?\? nn\(l1\), M\[1\]\);/,
+  );
+  // A conversion to Object reads it after a check of its own.
+  assert.match(emit(script([GETLOCAL1, CONVERT_O, RETURNVALUE])), /\nl1 \?\? nn\(l1\);\n/);
+});
+
+test("undefined is written void 0, and a return of it a bare return", { skip }, () => {
+  const PUSHUNDEFINED = 0x21;
+  const KILL = 0x08;
+  const RETURNVOID = 0x47;
+  const js = emit(script([PUSHUNDEFINED, SETLOCAL1, GETLOCAL1, POP, KILL, 1, RETURNVOID]));
+  assert.match(js, /\nl1 = void 0;\n/);
+  assert.match(js, /\nreturn;\n/);
+  assert.doesNotMatch(js, /\bundefined\b/);
+});
+
+test("registers reset one after another are reset in one statement", { skip }, () => {
+  const KILL = 0x08;
+  const code = [PUSHBYTE, 1, SETLOCAL1, PUSHBYTE, 2, SETLOCAL2, GETLOCAL1, GETLOCAL2, ADD, POP];
+  const js = emit(script([...code, KILL, 1, KILL, 2, KILL, 3, PUSHBYTE, 3, RETURNVALUE]));
+  assert.match(js, /\nl1 = l2 = l3 = void 0;\n/);
+  assert.equal(run(script([...code, KILL, 1, GETLOCAL1, KILL, 2, RETURNVALUE])), undefined);
+});
+
+test("a factory names only the parameters its method uses", { skip }, () => {
+  testing.domainReset(50);
+  const js = module("builtin.abc", true);
+  const factories = js.match(/\(([^()]*)\) => function \$\w*\([^)]*\) \{\n(.*\n){2}/g) ?? [];
+  const named = (params: string) => factories.filter((f) => f.startsWith(`(${params}) =>`));
+  assert.ok(named("").length > 0, "() =>");
+  assert.ok(named("scope, sup").length > 0, "(scope, sup) =>");
+  // $dx where the method checks it on entry, and only there.
+  const dx = named("scope, sup, $dx = rt.defaultXmlNamespace");
+  assert.ok(dx.length > 0);
+  assert.ok(dx.every((f) => f.includes("rt.defaultXmlNamespace !== $dx")));
+  assert.equal(js.match(/!== \$dx\)/g)?.length, dx.length);
+});
+
+test("a module's code has no empty statements or trailing spaces", { skip }, () => {
+  testing.domainReset(50);
+  const js = module("builtin.abc", true);
+  const methods = js.slice(js.indexOf("const F = ["));
+  assert.doesNotMatch(methods, /;;\n|\};\n|[ \t]\n|\n\n/);
 });

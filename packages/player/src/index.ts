@@ -1,7 +1,8 @@
 /**
- * Browser SWF player: display list, timeline, playerglobal (flash.*), AVM1
- * globals and renderer adapters. It runs @swf2es/codegen in a worker pool as
- * its JIT, or loads cached ahead-of-time output with the same cache key.
+ * Browser SWF player: display list, timeline, playerglobal (flash.*) and
+ * the PixiJS renderer. It compiles a SWF's ABCs with
+ * @swf2es/codegen as the SWF loads (its JIT), or takes their modules from a
+ * module cache, those the swf2es command compiled ahead of time included.
  */
 export {
   Container,
@@ -10,22 +11,31 @@ export {
   instantiate,
   MovieClip,
   ShapeObject,
-} from "./display.js";
-export { bindKeyboard, type KeyState } from "./keyboard.js";
-export { PixiView } from "./pixi.js";
+} from "./display/display.js";
+export { type Path, type ShapeLayer, shapeLayers } from "./display/shapes.js";
+export { type Character, type Library, readLibrary, type Timeline } from "./display/timeline.js";
+export type {
+  CachedModule,
+  Drawer,
+  ExternalInterfaceHost,
+  FetchRequest,
+  FetchResult,
+  ModuleCache,
+  Navigate,
+  PlatformCapabilities,
+  ScreenCapabilities,
+  SharedObjectStorage,
+  SocketEndpoints,
+  SocketEvents,
+  SocketHost,
+  SocketTransport,
+  WebSocketEvents,
+  WebSocketHost,
+  WebSocketTransport,
+} from "./hosts.js";
+export { globalWebSocketHost } from "./hosts.js";
+export { bindKeyboard, type KeyState } from "./input/keyboard.js";
 export { Player } from "./player.js";
-export type { Navigate } from "./playerglobal/flash/net/navigateToURL.js";
-export type { SharedObjectStorage } from "./playerglobal/flash/net/SharedObject.js";
-export type { PlatformCapabilities } from "./playerglobal/flash/system/Capabilities.js";
-export {
-  type Drawer,
-  type FetchRequest,
-  type FetchResult,
-  type ScreenCapabilities,
-  Scripting,
-  type SocketEvents,
-  type SocketHost,
-  type SocketTransport,
-} from "./scripting.js";
-export { type Path, type ShapeLayer, shapeLayers } from "./shapes.js";
-export { type Character, type Library, readLibrary, type Timeline } from "./timeline.js";
+export { setTransformTable } from "./render/table.js";
+export { PixiView } from "./render/view.js";
+export { airLibrary, Scripting } from "./scripting.js";

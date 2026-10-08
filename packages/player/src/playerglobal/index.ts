@@ -4,6 +4,7 @@
 // a private native as "Class#pkg:Class::name".
 import type { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
+import { webSocketNatives } from "./air/net/WebSocket.js";
 import { accessibilityNatives } from "./flash/accessibility/Accessibility.js";
 import { cryptoNatives } from "./flash/crypto/generateRandomBytes.js";
 import { avm1MovieNatives } from "./flash/display/AVM1Movie.js";
@@ -28,7 +29,16 @@ import { keyboardEventNatives } from "./flash/events/KeyboardEvent.js";
 import { mouseEventNatives } from "./flash/events/MouseEvent.js";
 import { timerEventNatives } from "./flash/events/TimerEvent.js";
 import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js";
-import { filterHooks, filterNatives } from "./flash/filters/filters.js";
+import { bevelFilterNatives } from "./flash/filters/BevelFilter.js";
+import { bitmapFilterHooks } from "./flash/filters/BitmapFilter.js";
+import { blurFilterNatives } from "./flash/filters/BlurFilter.js";
+import { colorMatrixFilterNatives } from "./flash/filters/ColorMatrixFilter.js";
+import { convolutionFilterNatives } from "./flash/filters/ConvolutionFilter.js";
+import { displacementMapFilterNatives } from "./flash/filters/DisplacementMapFilter.js";
+import { dropShadowFilterNatives } from "./flash/filters/DropShadowFilter.js";
+import { glowFilterNatives } from "./flash/filters/GlowFilter.js";
+import { gradientBevelFilterNatives } from "./flash/filters/GradientBevelFilter.js";
+import { gradientGlowFilterNatives } from "./flash/filters/GradientGlowFilter.js";
 import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
 import { perspectiveProjectionNatives } from "./flash/geom/PerspectiveProjection.js";
 import { transformNatives } from "./flash/geom/Transform.js";
@@ -70,6 +80,8 @@ import { timerNatives } from "./flash/utils/Timer.js";
 import { xmlDocumentNatives } from "./flash/xml/XMLDocument.js";
 import { toplevelNatives } from "./toplevel.js";
 
+export { airLibrary } from "./air-library.js";
+
 export function playerNatives(s: Scripting): avm2.Natives {
   return {
     ...accessibilityNatives(s),
@@ -107,10 +119,19 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...interactiveObjectNatives(s),
     ...fileFilterNatives(s),
     ...socketNatives(s),
+    ...webSocketNatives(s),
     ...sharedObjectNatives(s),
     ...transformNatives(s),
     ...matrix3DNatives(s),
-    ...filterNatives(s),
+    ...blurFilterNatives(s),
+    ...glowFilterNatives(s),
+    ...dropShadowFilterNatives(s),
+    ...bevelFilterNatives(s),
+    ...gradientGlowFilterNatives(s),
+    ...gradientBevelFilterNatives(s),
+    ...colorMatrixFilterNatives(s),
+    ...convolutionFilterNatives(s),
+    ...displacementMapFilterNatives(s),
     ...soundTransformNatives(s),
     ...soundNatives(s),
     ...soundMixerNatives(s),
@@ -144,7 +165,7 @@ export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
     ...bitmapDataHooks(s),
     ...byteArrayHooks(s),
     ...httpStatusHooks,
-    ...filterHooks,
+    ...bitmapFilterHooks,
     ...workerHooks(),
     ...soundHooks(s),
     ...fontHooks(s),

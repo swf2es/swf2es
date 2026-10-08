@@ -34,6 +34,7 @@ import {
   BUILTIN_Uint,
   TYPE_Any,
 } from "../link/traits";
+import { CONSTANT, flowCopies, getsLocal, NONE, pushesConstant, setsLocal } from "./copies";
 import { inRange, isAddress, viewMethod } from "./memory";
 import { Output } from "./output";
 import { constant, poolString, typeRef } from "./refs";
@@ -58,8 +59,8 @@ import {
 
 /** The deepest structured code a method is given; one deeper keeps the dispatcher. */
 export const MAX_NESTING: u32 = 500;
-/** copyOf of a stack register that holds a constant: CONSTANT - the instruction that pushed it. */
-const CONSTANT: i32 = -2;
+/** The length of the end of a reset, ` = void 0;\n`. */
+const RESET_END: u32 = 11;
 
 @final
 export class MethodEmitter {
@@ -79,7 +80,16 @@ export class MethodEmitter {
   scopeDepth: u32 = 0;
   /** The classes and Vectors the method being written refers to, in the order its T holds them. */
   types: i32[] = [];
-  typeIndex: Map<i32, u32> = new Map<i32, u32>();
+  /**
+   * By type: its index in types, where its stamp is typeGen, the method's.
+   * A new generation per method forgets them all: a Map's clear allocates
+   * new tables, garbage the minimal runtime keeps until the call returns,
+   * thousands of times in a module.
+   */
+  typeIndex: StaticArray<u32> = new StaticArray<u32>(0);
+  typeStamp: StaticArray<u32> = new StaticArray<u32>(0);
+  // From 1, as a fresh stamp is 0: an emitter that never called newTypes has seen no type.
+  typeGen: u32 = 1;
   /** The name the method being written is given, a JavaScript identifier; "" for none. */
   functionName: string = "";
   /**
@@ -89,6 +99,9 @@ export class MethodEmitter {
    * it runs with its scope's (see checkEntry).
    */
   seesDxns: bool = false;
+  /** Whether the method reads its factory's scope chain, and its base class. */
+  usesScope: bool = false;
+  usesSup: bool = false;
   dxnsAt: u32 = 0;
   dxnsMarks: i32 = 0;
   /** The method's name in its own code, for running it again (see checkEntry). */
@@ -104,6 +117,16 @@ export class MethodEmitter {
   staticInit: bool = false;
   /** Where the block being written ends: the instruction after its last. */
   blockLast: u32 = 0;
+  /**
+   * The register whose null check the next instruction makes where it
+   * first reads it, -1 if none; and where the check's statement goes
+   * should it not read it.
+   */
+  pendingNull: i32 = -1;
+  pendingRead: i32 = -1;
+  pendingUntil: u32 = 0;
+  pendingAt: u32 = 0;
+  pendingMarks: i32 = 0;
   /** By register: whether it holds an int or uint made a Number by the coercion before it, in this block. */
   promoted: StaticArray<u8> = new StaticArray<u8>(0);
   /**
@@ -155,7 +178,7 @@ export class MethodEmitter {
     }
 
     for (let r: u32 = 0; r < ir.frameSize; r++) {
-      this.copyOf[r] = -1;
+      this.copyOf[r] = NONE;
     }
 
     if (<u32>this.checked.length < ir.frameSize) {
@@ -181,12 +204,14 @@ export class MethodEmitter {
     this.dxnsMarks = this.map.count;
     this.entryName = name;
     this.seesDxns = false;
+    this.usesScope = false;
+    this.usesSup = false;
     this.prologue(method, global, flags);
     // A method that sets the default XML namespace gives its caller's
     // back when it returns or throws.
     const dxns = (flags & C.METHOD_SetsDxns) !== 0;
     if (dxns) {
-      out.text("  const $dxns = rt.enterDxns();\n  try {\n");
+      out.text("const $dxns = rt.enterDxns();\ntry {\n");
     }
 
     const handled = ir.handlerCount > 0;
@@ -195,6 +220,7 @@ export class MethodEmitter {
     }
 
     this.debugLines();
+    flowCopies(this);
     const marks = this.map.count;
 
     // Structured control flow where the graph is reducible and each
@@ -202,7 +228,7 @@ export class MethodEmitter {
     if (analyze(this)) {
       const start = out.length;
       if (handled) {
-        out.text("  let t = 0;\n");
+        out.text("let t = 0;\n");
       }
 
       this.structured = true;
@@ -222,9 +248,9 @@ export class MethodEmitter {
     }
 
     if (handled) {
-      out.text("  let b = 0, t = 0;\n  for (;;) try { switch (b) {\n");
+      out.text("let b = 0, t = 0;\nfor (;;) try { switch (b) {\n");
     } else {
-      out.text("  let b = 0;\n  for (;;) switch (b) {\n");
+      out.text("let b = 0;\nfor (;;) switch (b) {\n");
     }
 
     for (let k: u32 = 0; k < ir.blockCount; k++) {
@@ -232,11 +258,11 @@ export class MethodEmitter {
     }
 
     // The verifier proved every block ends; a dispatcher still needs an end.
-    out.text("  default: throw rt.unreachable();\n  }");
+    out.text("default: throw rt.unreachable();\n}");
     if (handled) {
       out.text(" } catch (e) {\n");
       this.handlers();
-      out.text("  }");
+      out.text("}");
     }
 
     out.text("\n");
@@ -247,7 +273,8 @@ export class MethodEmitter {
 
   /**
    * The checks on entry, written first in the method once its code shows
-   * which it needs. Its arguments' count, as MethodEnv's argcOk. And a
+   * which it needs. Its arguments' count, as MethodEnv's argcOk, whose
+   * error the module's ac throws (see ModuleEmitter.module). And a
    * method that can see the default XML namespace runs with the one of the
    * scope it was made in ($dx, see ModuleEmitter.factory), not its
    * caller's: else it runs again with it, and the caller's is back after.
@@ -259,11 +286,11 @@ export class MethodEmitter {
     const dxns = "rt.defaultXmlNamespace !== $dx";
     let check = "";
     if (this.seesDxns && args.length) {
-      check = `  if (${args} || ${dxns}) return rt.enter($dx, ${this.entryName}, this, arguments, ${this.argsRequired}, ${this.argsMax});\n`;
+      check = `if (${args} || ${dxns}) return rt.enter($dx, ${this.entryName}, this, arguments, ${this.argsRequired}, ${this.argsMax});\n`;
     } else if (this.seesDxns) {
-      check = `  if (${dxns}) return rt.callInDxns($dx, ${this.entryName}, this, arguments);\n`;
+      check = `if (${dxns}) return rt.callInDxns($dx, ${this.entryName}, this, arguments);\n`;
     } else if (args.length) {
-      check = `  if (${args}) throw rt.argumentCountError(${this.argsRequired}, arguments.length);\n`;
+      check = `if (${args}) ac(${this.argsRequired}, arguments.length);\n`;
     } else {
       return;
     }
@@ -333,7 +360,7 @@ export class MethodEmitter {
   /** The end of a method that sets the default XML namespace: its caller's back. */
   leaveDxns(dxns: bool): void {
     if (dxns) {
-      this.out.text("  } finally {\n    rt.defaultXmlNamespace = $dxns;\n  }\n");
+      this.out.text("} finally {\nrt.defaultXmlNamespace = $dxns;\n}\n");
     }
   }
 
@@ -442,7 +469,7 @@ export class MethodEmitter {
     const ir = this.ir;
     const bounds = this.bounds;
     const exception = <i32>(ir.localCount + ir.maxScope);
-    out.text("    const x = rt.caught(e);\n    switch (t) {\n");
+    out.text("const x = rt.caught(e);\nswitch (t) {\n");
     for (let r: u32 = 1; r < this.boundCount; r++) {
       if (!this.covered[r - 1]) {
         continue;
@@ -456,14 +483,13 @@ export class MethodEmitter {
         }
 
         if (first) {
-          out.text("    case ");
+          out.text("case ");
           out.uint(r);
           out.text(":\n");
           first = false;
         }
 
         const type = ir.handlerType[h];
-        out.text("      ");
         if (type >= 0) {
           out.text("if (rt.catches(x, ");
           typeRef(this, type);
@@ -478,11 +504,11 @@ export class MethodEmitter {
       }
 
       if (!first) {
-        out.text("      break;\n");
+        out.text("break;\n");
       }
     }
 
-    out.text("    }\n    throw e;\n");
+    out.text("}\nthrow e;\n");
   }
 
   /** Declare the registers: `this`, the parameters, coerced, with defaults, then the rest. */
@@ -497,7 +523,8 @@ export class MethodEmitter {
     const optional = abc.methodOptionalStart[method + 1] - abc.methodOptionalStart[method];
 
     // As MethodEnv's argcOk, before any coercion: fewer arguments than it
-    // requires, or more than it declares unless it takes the rest.
+    // requires, or more than it declares unless it takes the rest; both, as
+    // one unsigned comparison.
     const required = count - traits.optionalCount[global];
     const extra = this.domain.allowsExtraArgs(global);
     this.argsRequired = required;
@@ -506,7 +533,7 @@ export class MethodEmitter {
       this.argsTest =
         required === count
           ? `arguments.length !== ${count}`
-          : `arguments.length < ${required} || arguments.length > ${count}`;
+          : `arguments.length - ${required} >>> 0 > ${count - required}`;
     } else if (required > 0) {
       this.argsTest = `arguments.length < ${required}`;
     } else if (!extra) {
@@ -517,7 +544,7 @@ export class MethodEmitter {
 
     // var, not let: V8 starts a frame's registers undefined, where each
     // let is initialized with bytecode of its own, which counts against inlining.
-    out.text("  var l0 = this");
+    out.text("var l0 = this");
     for (let p: u32 = 1; p <= count; p++) {
       out.text(", l");
       out.uint(p);
@@ -562,7 +589,7 @@ export class MethodEmitter {
   /** Write block k: its case label, then its instructions, following register types. */
   block(k: u32): void {
     const out = this.out;
-    out.text("  case ");
+    out.text("case ");
     out.uint(k);
     out.text(":\n");
     this.blockBody(k);
@@ -573,6 +600,7 @@ export class MethodEmitter {
     const out = this.out;
     const ir = this.ir;
     const entry = k * ir.frameSize;
+    this.resetEnd = -1;
     for (let r: u32 = 0; r < ir.frameSize; r++) {
       this.regType[r] = ir.entryType[entry + r];
     }
@@ -587,10 +615,17 @@ export class MethodEmitter {
     this.region = -1;
     const last = k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
     const stack = <i32>(ir.localCount + ir.maxScope);
-    // Every way in wrote its copies. A block written in place has one way
-    // in, the code before it, and keeps what that checked; avmplus' JIT
-    // knows no value as it was made from there, a block in place or not.
-    this.uncopy(stack);
+    // Every way in wrote the copies the block does not know. A block written
+    // in place has one way in, the code before it, and keeps what that
+    // checked; avmplus' JIT knows no value as it was made from there, a
+    // block in place or not.
+    const base = <i32>ir.localCount;
+    const slots = <i32>ir.frameSize - base;
+    const row = <i32>k * slots;
+    for (let s = 0; s < slots; s++) {
+      this.copyOf[base + s] = this.copyIn[row + s];
+    }
+
     for (let r: u32 = 0; r < ir.frameSize; r++) {
       this.promoted[r] = 0;
     }
@@ -602,6 +637,7 @@ export class MethodEmitter {
     }
 
     this.inPlace = false;
+    this.pendingNull = -1;
     this.file = this.blockFile[k];
     this.line = this.blockLine[k];
     this.mark();
@@ -610,53 +646,73 @@ export class MethodEmitter {
       const dst = ir.dst[i];
       // A branch's code written in place is another block's: this one's end, for each instruction.
       this.blockLast = last;
-      // An int or uint the verifier makes a Number, as LIR's i2d and ui2d (see wraps).
-      const promotes =
-        op === IR_Coerce &&
-        dst === ir.src[i] &&
-        this.domain.builtin(ir.c[i]) === BUILTIN_Number &&
-        (this.builtinOf(dst) === BUILTIN_Int || this.builtinOf(dst) === BUILTIN_Uint);
+      const promotes = this.promotes(i);
       // What the instruction writes, other than stack registers, is copied
       // first by the stack registers copying it, but for those it takes:
       // it reads them before it writes. And what a branch leaves on the
       // stack is written, for the block it goes to.
       const frame = <i32>ir.frameSize;
       const pops = this.stackDiscipline(op) && ir.srcCount[i] > 0 && ir.src[i] >= stack;
-      if (dst >= 0 && dst < stack) {
-        this.copyAll(dst, pops ? ir.src[i] : frame);
+      if (dst >= 0 && !this.keptAt(i, this.regType[dst])) {
+        // Above a push nothing is live to copy it.
+        const push = dst >= stack && this.stackDiscipline(op);
+        this.copyAll(dst, pops ? ir.src[i] : push ? dst : frame);
       }
 
       if (op === ops.OP_hasnext2) {
         this.copyAll(<i32>ir.a[i], frame);
         this.copyAll(<i32>ir.b[i], frame);
-      } else if (op === ops.OP_popscope) {
+      } else if (op === ops.OP_popscope || op === ops.OP_swap) {
         this.copyAll(ir.src[i], frame);
-      } else if (conditional(op) || op === ops.OP_lookupswitch) {
-        this.copyBelow(ir.src[i]);
+      } else if (conditional(op)) {
+        this.copyFor(ir.a[i], ir.src[i]);
+      } else if (op === ops.OP_lookupswitch) {
+        this.copyFor(ir.a[i], ir.src[i]);
+        for (let c: u32 = 0; c <= <u32>ir.c[i]; c++) {
+          this.copyFor(ir.cases[ir.b[i] + c], ir.src[i]);
+        }
       } else if (op === ops.OP_jump) {
-        this.copyBelow(<i32>ir.frameSize);
+        this.copyFor(ir.a[i], frame);
       }
 
-      // A value the next instruction only moves to a local goes there
-      // straight, if the instruction assigns it.
+      // A value the next instruction only moves to a local or scope goes
+      // there straight, if the instruction assigns it; one it duplicates to
+      // set a local goes to the local, and stays on the stack as its copy.
+      // Conversions between that change nothing write nothing either.
       this.target = -1;
-      if (
-        dst >= stack &&
-        i + 1 < last &&
-        this.setsLocal(ir.op[i + 1]) &&
-        ir.src[i + 1] === dst &&
-        op !== ops.OP_hasnext2
-      ) {
-        // After the two, the stack is as far as dst: what is there on, the
+      let moves: u32 = 0;
+      if (dst >= stack && op !== ops.OP_hasnext2) {
+        let n = i + 1;
+        while (n < last && ir.dst[n] === dst && this.keptAt(n, ir.type[n - 1])) {
+          n++;
+        }
+
+        if (n < last && ir.src[n] === dst) {
+          const next = ir.op[n];
+          if (setsLocal(next) || next === ops.OP_pushscope) {
+            moves = n - i;
+          } else if (
+            next === ops.OP_dup &&
+            n + 1 < last &&
+            setsLocal(ir.op[n + 1]) &&
+            ir.src[n + 1] === dst + 1
+          ) {
+            moves = n + 1 - i;
+          }
+        }
+      }
+
+      if (moves) {
+        // After them, the stack is as far as dst: what is there on, the
         // instruction takes.
-        this.target = ir.dst[i + 1];
+        this.target = ir.dst[i + moves];
         this.copyAll(this.target, dst);
       }
 
       if (handled) {
         const region = this.regionOf(ir.pc[i]);
         if (region !== this.region) {
-          out.text("    t = ");
+          out.text("t = ");
           out.int(region);
           out.text(";\n");
           this.region = region;
@@ -668,10 +724,14 @@ export class MethodEmitter {
 
       // A branch's own target, written in place, sinks its own values: only
       // an instruction given a local here can have assigned it.
-      const sinking = this.target >= 0;
+      const sinking = this.target;
       this.kept = false;
       this.sunk = false;
       this.instruction(i);
+      if (this.pendingNull >= 0 && i >= this.pendingUntil) {
+        this.unpend();
+      }
+
       this.unchecks(i);
       this.target = -1;
       if (op === ops.OP_swap) {
@@ -698,24 +758,43 @@ export class MethodEmitter {
         this.promoted[this.target] = 0;
       }
 
-      if (sinking && this.sunk) {
-        // The setlocal is written: its stack register was never set, and
-        // the stack is as far as it.
-        i++;
-        this.regType[ir.dst[i]] = ir.type[i];
-        this.uncopy(dst);
+      if (sinking >= 0 && this.sunk) {
+        // The setlocal or pushscope is written: its stack register was
+        // never set, and the stack is as far as it, or as far as the copy.
+        const copied = ir.op[i + moves - 1] === ops.OP_dup;
+        for (let j = i + 1; j <= i + moves; j++) {
+          const to = ir.dst[j];
+          this.promoted[to] = this.promotes(j) ? 1 : 0;
+          this.regType[to] = ir.type[j];
+        }
+
+        i += moves;
+        this.copyOf[sinking] = NONE;
+        if (ir.op[i] === ops.OP_pushscope) {
+          this.scopeWith[this.scopeDepth++] = 0;
+        }
+
+        if (copied) {
+          this.copyOf[dst] = sinking;
+          this.uncopy(dst + 1);
+        } else {
+          this.uncopy(dst);
+        }
+
         continue;
       }
 
       if (conditional(op) || op === ops.OP_lookupswitch) {
-        // What the branch took is gone, and the rest is written.
-        this.uncopy(stack);
+        // What the branch took is gone.
+        this.uncopy(ir.src[i]);
       } else if (op === ops.OP_swap) {
-        this.copyOf[ir.src[i]] = -1;
-        this.copyOf[ir.src[i] + 1] = -1;
+        this.copyOf[ir.src[i]] = NONE;
+        this.copyOf[ir.src[i] + 1] = NONE;
+      } else if (op === ops.OP_popscope) {
+        this.copyOf[ir.src[i]] = NONE;
       } else {
-        if (dst >= stack && !this.kept) {
-          this.copyOf[dst] = -1;
+        if (dst >= 0 && !this.kept) {
+          this.copyOf[dst] = NONE;
         }
 
         // What is above the stack now is gone.
@@ -729,32 +808,88 @@ export class MethodEmitter {
       }
     }
 
-    if (!terminates(this, k)) {
-      this.copyBelow(<i32>ir.frameSize);
+    if (!terminates(this, k) && k + 1 < ir.blockCount) {
+      this.copyFor(k + 1, <i32>ir.frameSize);
     }
   }
 
   /**
-   * Whether instruction i, a getlocal or dup to a stack register, only
-   * makes it a copy: of the local, or of what the register duplicated copies.
+   * Whether instruction i, reading register `read`, only makes its
+   * destination a copy, as flowCopies knows it: a getlocal, dup,
+   * getscopeobject or nip to a stack register, of what it reads or what
+   * that copies; a pushscope of a local or scope.
    */
-  private copies(i: u32): bool {
+  private copies(i: u32, read: i32): bool {
     const ir = this.ir;
     const stack = <i32>(ir.localCount + ir.maxScope);
     const dst = ir.dst[i];
-    const src = ir.src[i];
-    if (dst < stack) {
+    if (dst < <i32>ir.localCount) {
       return false;
     }
 
-    const from = src < stack ? src : this.copyOf[src];
-    if (from === -1) {
+    const copy = read < <i32>ir.localCount ? NONE : this.copyOf[read];
+    const from = copy === NONE ? read : copy;
+    if (dst < stack && (from < 0 || from >= stack)) {
       return false;
     }
 
-    this.copyOf[dst] = from;
+    // Its own value again, as a nip of a dup: as it was.
+    this.copyOf[dst] = from === dst ? NONE : from;
     this.kept = true;
     return true;
+  }
+
+  /** Whether instruction i makes an int or uint a Number, as LIR's i2d and ui2d (see wraps). */
+  private promotes(i: u32): bool {
+    const ir = this.ir;
+    const dst = ir.dst[i];
+    if (ir.op[i] !== IR_Coerce || dst !== ir.src[i]) {
+      return false;
+    }
+
+    const bt = this.builtinOf(dst);
+    return (
+      this.domain.builtin(ir.c[i]) === BUILTIN_Number && (bt === BUILTIN_Int || bt === BUILTIN_Uint)
+    );
+  }
+
+  /** Whether instruction i is a conversion in place that writes nothing, its value of type `from` being one already. */
+  private keptAt(i: u32, from: i32): bool {
+    const ir = this.ir;
+    const op = ir.op[i];
+    if (ir.dst[i] !== ir.src[i] || ir.srcCount[i] !== 1) {
+      return false;
+    }
+
+    if (op === IR_Coerce) {
+      return keeps(this, ir.c[i], from);
+    }
+
+    return op < 256 && keeps(this, conversionType(this, <u8>op, i), from);
+  }
+
+  /**
+   * Before a branch to block t: write the copies below `limit` that t
+   * needs and does not know, as flowCopies found its entry.
+   */
+  private copyFor(t: u32, limit: i32): void {
+    const ir = this.ir;
+    const base = <i32>ir.localCount;
+    const stack = base + <i32>ir.maxScope;
+    const end = min(limit, <i32>ir.frameSize);
+    const row = <i32>t * (<i32>ir.frameSize - base) - base;
+    const scopes = base + <i32>ir.blockScope[t];
+    const depth = stack + <i32>ir.blockStack[t];
+    for (let r = base; r < end; r++) {
+      const copy = this.copyOf[r];
+      if (copy === NONE || this.copyIn[row + r] === copy) {
+        continue;
+      }
+
+      if (r < stack ? r < scopes : r < depth) {
+        this.writeCopy(r);
+      }
+    }
   }
 
   /**
@@ -766,39 +901,27 @@ export class MethodEmitter {
     return op !== IR_Coerce && op !== IR_CheckNull && op !== ops.OP_swap;
   }
 
-  /** Whether op is a setlocal, which takes its stack register. */
-  private setsLocal(op: u16): bool {
-    return op === ops.OP_setlocal || (op >= ops.OP_setlocal0 && op < ops.OP_setlocal0 + 4);
-  }
-
-  /** Write the stack registers below `limit` that are copies. */
-  private copyBelow(limit: i32): void {
-    const ir = this.ir;
-    const end = min(limit, <i32>ir.frameSize);
-    for (let r = <i32>(ir.localCount + ir.maxScope); r < end; r++) {
-      if (this.copyOf[r] !== -1) {
-        this.writeCopy(r);
-      }
-    }
-  }
-
-  /** Write the stack registers below `limit` that copy register w, before w changes. */
+  /** Write the scope and stack registers below `limit` that copy register w, before w changes. */
   private copyAll(w: i32, limit: i32): void {
     const ir = this.ir;
     const end = min(limit, <i32>ir.frameSize);
-    for (let r = <i32>(ir.localCount + ir.maxScope); r < end; r++) {
+    for (let r = <i32>ir.localCount; r < end; r++) {
       if (this.copyOf[r] === w) {
         this.writeCopy(r);
       }
     }
   }
 
+  /**
+   * A copy written may be the register of a pending null check: the
+   * instruction then reads the copy, as unpend would read what pendingRead
+   * names, both the value when it was checked.
+   */
   private writeCopy(r: i32): void {
     const out = this.out;
     const from = this.copyOf[r];
-    this.copyOf[r] = -1;
+    this.copyOf[r] = NONE;
     this.checked[r] = 0;
-    out.text("    ");
     this.reg(r);
     out.text(" = ");
     this.copied(from);
@@ -823,26 +946,6 @@ export class MethodEmitter {
     } else if (op === ops.OP_swap) {
       this.checked[ir.src[i]] = 0;
       this.checked[ir.src[i] + 1] = 0;
-    }
-  }
-
-  /** Whether op pushes a constant, which a stack register can be a copy of. */
-  private pushesConstant(op: u16): bool {
-    switch (op) {
-      case ops.OP_pushbyte:
-      case ops.OP_pushshort:
-      case ops.OP_pushint:
-      case ops.OP_pushuint:
-      case ops.OP_pushdouble:
-      case ops.OP_pushnan:
-      case ops.OP_pushstring:
-      case ops.OP_pushtrue:
-      case ops.OP_pushfalse:
-      case ops.OP_pushnull:
-      case ops.OP_pushundefined:
-        return true;
-      default:
-        return false;
     }
   }
 
@@ -887,7 +990,7 @@ export class MethodEmitter {
         out.text("null");
         break;
       default:
-        out.text("undefined");
+        out.text("void 0");
     }
   }
 
@@ -913,7 +1016,7 @@ export class MethodEmitter {
   /** Forget every copy from register `from` up: none is needed. */
   private uncopy(from: i32): void {
     for (let r = from; r < <i32>this.ir.frameSize; r++) {
-      this.copyOf[r] = -1;
+      this.copyOf[r] = NONE;
     }
   }
 
@@ -922,10 +1025,125 @@ export class MethodEmitter {
     return this.domain.builtin(this.regType[r]);
   }
 
-  /** Register r as read: what it copies, if it is a copy. */
+  /** A new method's types: none yet. */
+  newTypes(): void {
+    this.types.length = 0;
+    if (++this.typeGen === 0) {
+      // Every 2^32 methods, the stamps of the first generation would match again.
+      const stamp = this.typeStamp;
+      for (let k = 0; k < stamp.length; k++) {
+        stamp[k] = 0;
+      }
+
+      this.typeGen = 1;
+    }
+  }
+
+  /** Class or Vector type t's index in the method's T, given it the next if new. */
+  typeSlot(t: i32): u32 {
+    // t is a type of the domain's (isClassRef read its kind), which may
+    // have more since the tables were sized.
+    const count = this.domain.traits.kind.length;
+    if (this.typeStamp.length < count) {
+      const size = max(count, this.typeStamp.length * 2);
+      const index = new StaticArray<u32>(size);
+      const stamp = new StaticArray<u32>(size);
+      memory.copy(
+        changetype<usize>(index),
+        changetype<usize>(this.typeIndex),
+        this.typeIndex.length << 2,
+      );
+      memory.copy(
+        changetype<usize>(stamp),
+        changetype<usize>(this.typeStamp),
+        this.typeStamp.length << 2,
+      );
+      this.typeIndex = index;
+      this.typeStamp = stamp;
+    }
+
+    if (this.typeStamp[t] !== this.typeGen) {
+      this.typeStamp[t] = this.typeGen;
+      this.typeIndex[t] = <u32>this.types.length;
+      this.types.push(t);
+    }
+
+    return this.typeIndex[t];
+  }
+
+  /** A space, but at the start of a line, as after a block written in place. */
+  space(): void {
+    if (this.out.bytes[this.out.length - 1] !== 0x0a) {
+      this.out.byte(0x20);
+    }
+  }
+
+  /** Register r as read: what it copies, if it is a copy; null checked, if the check is pending. */
   reg(r: i32): void {
+    if (r === this.pendingNull) {
+      this.pendingNull = -1;
+      this.checkedRead(r);
+      return;
+    }
+
+    this.read(r);
+  }
+
+  /** Register r as read before a `.`; a constant in parentheses, as `void 0.x` does not parse. */
+  member(r: i32): void {
+    if (r === this.pendingNull || this.copyOf[r] <= CONSTANT) {
+      this.out.byte(0x28); // (
+      this.reg(r);
+      this.out.byte(0x29); // )
+      return;
+    }
+
+    this.read(r);
+  }
+
+  /**
+   * Register r read, null checked: `r ?? nn(r)`, nn throwing the error for
+   * null or undefined (see ModuleEmitter.module); only a null or undefined
+   * r reads it twice.
+   */
+  checkedRead(r: i32): void {
+    this.read(r);
+    this.out.text(" ?? nn(");
+    this.read(r);
+    this.out.text(")");
+  }
+
+  /**
+   * The null check pending for an instruction that did not read the
+   * register, as a statement before it.
+   */
+  unpend(): void {
+    const name = this.nameOf(this.pendingRead);
+    this.pendingNull = -1;
+    const check = `${name} ?? nn(${name});\n`;
+    this.out.insert(this.pendingAt, check);
+    this.map.shift(this.pendingMarks, <u32>check.length);
+  }
+
+  /** Register `at`'s name, as text. */
+  nameOf(at: i32): string {
+    const ir = this.ir;
+    const local = <i32>ir.localCount;
+    if (at < local) {
+      return `l${at}`;
+    }
+
+    if (at < local + <i32>ir.maxScope) {
+      return `sc${at - local}`;
+    }
+
+    return `s${at - local - <i32>ir.maxScope}`;
+  }
+
+  /** Register r as read: what it copies, if it is a copy. */
+  read(r: i32): void {
     const copy = this.copyOf[r];
-    if (copy === -1) {
+    if (copy === NONE) {
       this.regName(r);
     } else {
       this.copied(copy);
@@ -951,7 +1169,6 @@ export class MethodEmitter {
 
   /** `dst = ` for instruction i. */
   assign(i: u32): void {
-    this.out.text("    ");
     if (this.target >= 0) {
       this.regName(this.target);
       this.sunk = true;
@@ -1017,11 +1234,15 @@ export class MethodEmitter {
   /** The state of the blocks around one being written in place, as save pushes it. */
   saved: i32[] = [];
   /**
-   * The local or scope register each stack register copies, -1 if none:
-   * a copy is not written until something needs the stack register itself,
+   * The register or constant each scope and stack register copies, NONE if
+   * none: a copy is not written until something needs the register itself,
    * so reading it reads what it copies.
    */
   copyOf: StaticArray<i32> = new StaticArray<i32>(0);
+  /** Each block's copies on entry, and flowCopies' scratch (see copies.ts). */
+  copyIn: StaticArray<i32> = new StaticArray<i32>(0);
+  flow: StaticArray<i32> = new StaticArray<i32>(0);
+  dirty: StaticArray<u8> = new StaticArray<u8>(0);
   /** By register: whether it was checked not null since it was last written, in the block being written. */
   checked: StaticArray<u8> = new StaticArray<u8>(0);
   /** Whether the block about to be written is written in place, after the one way into it. */
@@ -1037,13 +1258,17 @@ export class MethodEmitter {
   reachable: u32 = 0;
   structured: bool = false;
   currentBlock: u32 = 0;
+  /** Where the last reset written ends, -1 if none can be joined, and the source map's marks then; whether one is being written. */
+  resetEnd: i32 = -1;
+  resetMarks: i32 = 0;
+  resets: bool = false;
 
   instruction(i: u32): void {
     const out = this.out;
     const ir = this.ir;
     const op = ir.op[i];
     const a = ir.a[i];
-    if (this.pushesConstant(op) && ir.dst[i] >= <i32>(ir.localCount + ir.maxScope)) {
+    if (pushesConstant(op) && ir.dst[i] >= <i32>(ir.localCount + ir.maxScope)) {
       // Read as the literal until the register changes or a branch needs
       // it: V8 then gives the operation the constant in its own bytecode.
       this.copyOf[ir.dst[i]] = CONSTANT - <i32>i;
@@ -1097,12 +1322,12 @@ export class MethodEmitter {
         break;
       case ops.OP_pushundefined:
         this.assign(i);
-        out.text("undefined");
+        out.text("void 0");
         break;
       case ops.OP_getlocal:
       case ops.OP_setlocal:
       case ops.OP_dup:
-        if (this.copies(i)) {
+        if (this.copies(i, ir.src[i])) {
           return;
         }
 
@@ -1110,14 +1335,13 @@ export class MethodEmitter {
         this.reg(ir.src[i]);
         break;
       case ops.OP_kill:
-        this.assign(i);
-        out.text("undefined");
+        this.reset(ir.dst[i]);
         break;
       case ops.OP_swap: {
         // Through a temporary, not [a, b] = [b, a]: destructuring is an
         // array and the iterator protocol, which V8 counts against inlining.
         const x = ir.src[i];
-        out.text("    { const w = ");
+        out.text("{ const w = ");
         this.reg(x + 1);
         out.text("; ");
         this.regName(x + 1);
@@ -1149,8 +1373,9 @@ export class MethodEmitter {
         break;
       case IR_CheckNull: {
         // A register checked since it was last written is not null.
-        const copy = this.copyOf[ir.src[i]];
-        const r = copy === -1 ? ir.src[i] : copy;
+        const src = ir.src[i];
+        const copy = this.copyOf[src];
+        const r = copy === NONE ? src : copy;
         if (r >= 0) {
           if (this.checked[r]) {
             return;
@@ -1159,11 +1384,38 @@ export class MethodEmitter {
           this.checked[r] = 1;
         }
 
-        out.text("    if (");
-        this.reg(ir.src[i]);
-        out.text(" == null) throw rt.nullError(");
-        this.reg(ir.src[i]);
-        out.text(")");
+        // The instruction checked for reads it before it does anything,
+        // and the check is there, as it reads it: `(r ?? nn(r)).$1`. Its
+        // operands' conversions that change nothing may come between: each
+        // of a register of its own, as the verifier coerces each operand
+        // once, so the types they are kept by are the registers' now.
+        let next = i + 1;
+        while (
+          next < this.blockLast &&
+          ir.pc[next] === ir.pc[i] &&
+          ir.op[next] === IR_Coerce &&
+          ir.dst[next] === ir.src[next] &&
+          keeps(this, ir.c[next], this.regType[ir.src[next]])
+        ) {
+          next++;
+        }
+
+        // Not a copy of a constant (copyOf below NONE), which has no name for unpend.
+        if (
+          copy >= NONE &&
+          next < this.blockLast &&
+          ir.pc[next] === ir.pc[i] &&
+          readsFirst(ir.op[next])
+        ) {
+          this.pendingNull = src;
+          this.pendingRead = copy === NONE ? src : copy;
+          this.pendingUntil = next;
+          this.pendingAt = out.length;
+          this.pendingMarks = this.map.count;
+          return;
+        }
+
+        this.checkedRead(src);
         break;
       }
       case ops.OP_add:
@@ -1322,16 +1574,16 @@ export class MethodEmitter {
         conversion(this, i, <u8>op);
         break;
       case ops.OP_jump:
-        out.text("    ");
         this.goto(a);
         break;
       case ops.OP_iftrue:
       case ops.OP_iffalse:
-        out.text(op === ops.OP_iftrue ? "    if (" : "    if (!");
+        out.text(op === ops.OP_iftrue ? "if (" : "if (!");
         this.reg(ir.src[i]);
         out.text(") { ");
         this.goto(a);
-        out.text(" }");
+        this.space();
+        out.text("}");
         break;
       case ops.OP_ifeq:
       case ops.OP_ifne:
@@ -1349,40 +1601,48 @@ export class MethodEmitter {
         break;
       case ops.OP_lookupswitch: {
         // An index out of range, or not an int, takes the default.
-        out.text("    switch (");
+        out.text("switch (");
         this.reg(ir.src[i]);
         out.text(") {");
         const first = ir.b[i];
         for (let c: u32 = 0; c <= <u32>ir.c[i]; c++) {
-          out.text(" case ");
+          this.space();
+          out.text("case ");
           out.uint(c);
           out.text(": ");
           this.goto(ir.cases[first + c]);
         }
 
-        out.text(" default: ");
+        this.space();
+        out.text("default: ");
         this.goto(a);
-        out.text(" }");
+        this.space();
+        out.text("}");
         break;
       }
       case ops.OP_returnvoid:
-        out.text("    return undefined");
+        out.text("return");
         break;
       case ops.OP_returnvalue:
-        out.text("    return ");
+        out.text("return ");
         this.reg(ir.src[i]);
         break;
       case ops.OP_throw:
-        out.text("    throw ");
+        out.text("throw ");
         this.reg(ir.src[i]);
         break;
       default:
         if (this.object(i, op)) {
+          // One that only made a copy wrote nothing.
+          if (this.kept) {
+            return;
+          }
+
           break;
         }
 
-        if (op >= ops.OP_getlocal0 && op < ops.OP_getlocal0 + 4) {
-          if (this.copies(i)) {
+        if (getsLocal(op)) {
+          if (this.copies(i, ir.src[i])) {
             return;
           }
 
@@ -1398,13 +1658,44 @@ export class MethodEmitter {
         }
 
         // An instruction not lowered yet fails where it runs.
-        out.text('    throw rt.unsupported("');
+        out.text('throw rt.unsupported("');
         out.text(op < 256 ? opcodeNames[op] : "ir");
         out.text('")');
         break;
     }
 
-    out.text(";\n");
+    // A branch, switch or swap ends in its own `}` or `;`, or in the code
+    // of a block written in place: no empty statement after it.
+    const last = out.bytes[out.length - 1];
+    if (
+      !(conditional(op) || op === ops.OP_jump || op === ops.OP_lookupswitch || op === ops.OP_swap)
+    ) {
+      out.text(";\n");
+    } else if (last !== 0x0a) {
+      out.text(last === 0x7d || last === 0x3b ? "\n" : ";\n"); // } ;
+    }
+    if (this.resets) {
+      this.resets = false;
+      this.resetEnd = <i32>out.length;
+      this.resetMarks = this.map.count;
+    }
+  }
+
+  /**
+   * `r = void 0`, as a kill or popscope leaves a register; one right after
+   * another such, with nothing written or marked between, joins it as
+   * `a = r = void 0`, one statement.
+   */
+  reset(r: i32): void {
+    const out = this.out;
+    if (<i32>out.length === this.resetEnd && this.map.count === this.resetMarks) {
+      out.length -= RESET_END;
+      out.text(" = ");
+    }
+
+    this.regName(r);
+    out.text(" = void 0");
+    this.resets = true;
   }
 
   /**
@@ -1424,27 +1715,38 @@ export class MethodEmitter {
       case ops.OP_pushscope:
       case ops.OP_pushwith:
         this.scopeWith[this.scopeDepth++] = op === ops.OP_pushwith ? 1 : 0;
+        if (this.copies(i, src)) {
+          return true;
+        }
+
         this.assign(i);
         this.reg(src);
         return true;
       case ops.OP_popscope:
         this.scopeDepth--;
-        out.text("    ");
-        this.regName(src);
-        out.text(" = undefined");
+        this.reset(src);
         return true;
       case ops.OP_getscopeobject:
+        if (this.copies(i, src)) {
+          return true;
+        }
+
         this.assign(i);
         this.reg(src);
         return true;
       case ops.OP_getouterscope:
         this.assign(i);
         out.text("scope[");
+        this.usesScope = true;
         out.uint(a);
         out.text("]");
         return true;
       case ops.OP_getglobalscope:
       case IR_GetGlobalScope:
+        if (this.ir.outerSize === 0 && this.copies(i, <i32>this.ir.localCount)) {
+          return true;
+        }
+
         this.assign(i);
         this.globalScope();
         return true;
@@ -1470,18 +1772,18 @@ export class MethodEmitter {
         out.text(op === ops.OP_findpropstrict ? "rt.findPropertyStrict(" : "rt.findProperty(");
         this.name(a, src);
         out.text(", scope, ");
+        this.usesScope = true;
         this.localScopes();
         out.text(")");
         return true;
       case ops.OP_getslot:
         this.assign(i);
-        this.reg(src);
+        this.member(src);
         out.text(".$");
         out.uint(a);
         return true;
       case ops.OP_setslot:
-        out.text("    ");
-        this.reg(src);
+        this.member(src);
         out.text(".$");
         out.uint(a);
         out.text(" = ");
@@ -1494,7 +1796,6 @@ export class MethodEmitter {
         out.uint(a);
         return true;
       case ops.OP_setglobalslot:
-        out.text("    ");
         this.globalScope();
         out.text(".$");
         out.uint(a);
@@ -1506,14 +1807,11 @@ export class MethodEmitter {
         this.virtual(a, src, 0);
         return true;
       case IR_CallSetter:
-        out.text("    ");
         this.virtual(a, src, 1);
         return true;
       case ops.OP_callmethod:
         if (ir.dst[i] >= 0) {
           this.assign(i);
-        } else {
-          out.text("    ");
         }
 
         this.virtual(a, src, ir.b[i]);
@@ -1521,8 +1819,6 @@ export class MethodEmitter {
       case IR_CallInterface:
         if (ir.dst[i] >= 0) {
           this.assign(i);
-        } else {
-          out.text("    ");
         }
 
         // By the interface's dispatch id, which its layout maps to a name.
@@ -1536,6 +1832,10 @@ export class MethodEmitter {
         out.text(")");
         return true;
       case IR_Nip:
+        if (this.copies(i, src + <i32>ir.srcCount[i] - 1)) {
+          return true;
+        }
+
         this.assign(i);
         this.reg(src + <i32>ir.srcCount[i] - 1);
         return true;
@@ -1569,7 +1869,7 @@ export class MethodEmitter {
       case ops.OP_setproperty:
         if (this.indexed(a, src + 1)) {
           const kind = this.vectorKind(this.regType[src]);
-          out.text(kind.length ? "    rt.vectorSet" : "    rt.setIndexed(");
+          out.text(kind.length ? "rt.vectorSet" : "rt.setIndexed(");
           if (kind.length) {
             out.text(kind);
             out.text("(");
@@ -1586,7 +1886,7 @@ export class MethodEmitter {
           return true;
         }
 
-        out.text("    rt.setProperty(");
+        out.text("rt.setProperty(");
         this.reg(src);
         out.text(", ");
         this.name(a, src + 1);
@@ -1595,7 +1895,7 @@ export class MethodEmitter {
         out.text(")");
         return true;
       case ops.OP_initproperty: {
-        out.text(op === ops.OP_initproperty ? "    rt.initProperty(" : "    rt.setProperty(");
+        out.text(op === ops.OP_initproperty ? "rt.initProperty(" : "rt.setProperty(");
         this.reg(src);
         out.text(", ");
         this.name(a, src + 1);
@@ -1625,8 +1925,6 @@ export class MethodEmitter {
         const parts = ir.srcCount[i] - 1 - argc;
         if (ir.dst[i] >= 0) {
           this.assign(i);
-        } else {
-          out.text("    ");
         }
 
         out.text(
@@ -1651,8 +1949,6 @@ export class MethodEmitter {
         const parts = ir.srcCount[i] - 1 - argc;
         if (ir.dst[i] >= 0) {
           this.assign(i);
-        } else {
-          out.text("    ");
         }
 
         out.text(
@@ -1662,6 +1958,7 @@ export class MethodEmitter {
               ? "rt.setSuper(sup, "
               : "rt.callSuper(sup, ",
         );
+        this.usesSup = true;
         this.reg(src);
         out.text(", ");
         this.name(a, src + 1);
@@ -1670,7 +1967,8 @@ export class MethodEmitter {
         return true;
       }
       case ops.OP_constructsuper:
-        out.text("    rt.constructSuper(sup, ");
+        out.text("rt.constructSuper(sup, ");
+        this.usesSup = true;
         this.reg(src);
         this.args(src + 1, a);
         out.text(")");
@@ -1694,8 +1992,6 @@ export class MethodEmitter {
       case ops.OP_callstatic:
         if (ir.dst[i] >= 0) {
           this.assign(i);
-        } else {
-          out.text("    ");
         }
 
         out.text("rt.callStatic(A, ");
@@ -1768,7 +2064,7 @@ export class MethodEmitter {
       case ops.OP_hasnext2: {
         // hasnext2 updates its two locals: the object and the index.
         const b = ir.b[i];
-        out.text("    [");
+        out.text("[");
         this.regName(ir.dst[i]);
         out.text(", ");
         this.regName(<i32>a);
@@ -1848,7 +2144,6 @@ export class MethodEmitter {
       case ops.OP_sf32:
       case ops.OP_sf64:
         // The value's conversion is DataView's own for a number or Boolean.
-        out.text("    ");
         if (isAddress(this, src + 1) && isNumeric(this, src)) {
           out.text("if (");
           inRange(this, src + 1, op);
@@ -1892,17 +2187,17 @@ export class MethodEmitter {
         out.text(")");
         return true;
       case ops.OP_dxns:
-        out.text("    rt.setDefaultXmlNamespace(");
+        out.text("rt.setDefaultXmlNamespace(");
         poolString(this, a);
         out.text(")");
         return true;
       case ops.OP_dxnslate:
-        out.text("    rt.setDefaultXmlNamespace(");
+        out.text("rt.setDefaultXmlNamespace(");
         this.reg(src);
         out.text(")");
         return true;
       case ops.OP_checkfilter:
-        out.text("    rt.checkFilter(");
+        out.text("rt.checkFilter(");
         this.reg(src);
         out.text(")");
         return true;
@@ -1922,6 +2217,7 @@ export class MethodEmitter {
   globalScope(): void {
     if (this.ir.outerSize > 0) {
       this.out.text("scope[0]");
+      this.usesScope = true;
     } else {
       this.reg(<i32>this.ir.localCount);
     }
@@ -1948,6 +2244,7 @@ export class MethodEmitter {
   /** The scope chain a function or class created here runs in. */
   scopeHere(): void {
     this.out.text("rt.scope(scope, ");
+    this.usesScope = true;
     this.localScopes();
     this.out.text(")");
   }
@@ -2076,7 +2373,7 @@ export class MethodEmitter {
     // class prototype's; any other object has its own.
     if (bt === BUILTIN_Object) {
       out.text("(");
-      this.reg(src);
+      this.member(src);
       out.text(".$m");
       out.uint(disp);
       out.text(" ?? rt.prototypeOf(");
@@ -2090,11 +2387,48 @@ export class MethodEmitter {
       return;
     }
 
-    this.reg(src);
+    this.member(src);
     out.text(".$m");
     out.uint(disp);
     out.text("(");
     this.list(src + 1, argc);
     out.text(")");
+  }
+}
+
+/**
+ * Whether instruction op reads the register it null checks before anything
+ * it does that can throw or be seen: before it, only the runtime's
+ * methods, the module's tables and other registers. The check can then be
+ * made where it reads it.
+ */
+function readsFirst(op: u16): bool {
+  switch (op) {
+    case ops.OP_getslot:
+    case ops.OP_setslot:
+    case IR_CallGetter:
+    case IR_CallSetter:
+    case ops.OP_callmethod:
+    case IR_CallInterface:
+    case ops.OP_getproperty:
+    case ops.OP_setproperty:
+    case ops.OP_initproperty:
+    case ops.OP_deleteproperty:
+    case ops.OP_callproperty:
+    case ops.OP_callproplex:
+    case ops.OP_callpropvoid:
+    case ops.OP_constructprop:
+    case ops.OP_callsuper:
+    case ops.OP_callsupervoid:
+    case ops.OP_getsuper:
+    case ops.OP_setsuper:
+    case ops.OP_callstatic:
+    case ops.OP_constructsuper:
+    case ops.OP_getdescendants:
+    case ops.OP_in:
+    case ops.OP_checkfilter:
+      return true;
+    default:
+      return false;
   }
 }

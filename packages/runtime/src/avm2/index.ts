@@ -1,7 +1,11 @@
 // The AVM2 runtime: what generated modules call as `rt`.
 import { builtinHooks, builtinNatives } from "./natives/index.js";
-import { Runtime, type RuntimeOptions } from "./runtime.js";
+import type { RuntimeOptions } from "./options.js";
+import { Runtime } from "./runtime.js";
 
+export type { Abc, AsObject, CompileUnit, FoundDefinition, Method, Value } from "./descriptors.js";
+export { type Domain, frameScripts, stackFrames } from "./domain.js";
+export type { ClassHook, NativesProvider } from "./hooks.js";
 export { messages } from "./messages.js";
 export { publicNs, qname } from "./names.js";
 export {
@@ -17,23 +21,11 @@ export { type NativeClass, plain, registerNativeClass } from "./natives/define.j
 export { builtinHooks, builtinNatives } from "./natives/index.js";
 // avmplus' XML tokenizer, which playerglobal's flash.xml.XMLDocument parses with too.
 export { XMLParser, XMLTag } from "./natives/xml/parser.js";
+export type { RuntimeOptions, ShellFiles } from "./options.js";
 export { errorMessages } from "./player-messages.js";
-export {
-  type Abc,
-  type AsObject,
-  type ClassHook,
-  type CompileUnit,
-  type Domain,
-  type FoundDefinition,
-  frameScripts,
-  type Method,
-  type NativesProvider,
-  Runtime,
-  type RuntimeOptions,
-  type ShellFiles,
-  setStaticVar,
-  type Value,
-} from "./runtime.js";
+export { Runtime } from "./runtime.js";
+// methodKey: where a method sits on its traits, for a player that makes a closure of its own.
+export { methodKey, setStaticVar } from "./traits.js";
 
 /** A runtime with the builtins' natives, for modules compiled from builtin.abc and after. */
 export function createRuntime(options: RuntimeOptions = {}): Runtime {

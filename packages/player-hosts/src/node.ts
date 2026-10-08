@@ -7,7 +7,14 @@ export function nodeSocketHost(): SocketHost {
   return {
     connect(host, port, events) {
       const socket = connect({ host, port });
-      socket.on("connect", () => events.open());
+      socket.on("connect", () =>
+        events.open({
+          localAddress: socket.localAddress ?? "",
+          localPort: socket.localPort ?? 0,
+          remoteAddress: socket.remoteAddress ?? "",
+          remotePort: socket.remotePort ?? 0,
+        }),
+      );
       socket.on("data", (bytes) => events.data(bytes));
       socket.on("close", () => events.close());
       socket.on("error", () => events.error("Error #2031: Socket Error."));

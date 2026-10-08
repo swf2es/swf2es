@@ -1,0 +1,41 @@
+authored-dynamic dynamic nowrap html kab| 18 2 22
+authored-dynamic dynamic nowrap plain kab| 18 2 22
+authored-dynamic dynamic nowrap none kab 18 1 22
+authored-dynamic dynamic wrap html kab| 18 2 22
+authored-dynamic dynamic wrap plain kab| 18 2 22
+authored-dynamic dynamic wrap none kab 18 1 22
+authored-input input nowrap html kab| 36 2 40
+authored-input input nowrap plain kab| 36 2 40
+authored-input input nowrap none kab 18 1 22
+authored-input input wrap html kab| 36 2 40
+authored-input input wrap plain kab| 36 2 40
+authored-input input wrap none kab 18 1 22
+script-default dynamic nowrap html kab| 18 2 22
+script-default dynamic nowrap plain kab| 18 2 22
+script-default dynamic nowrap none kab 18 1 22
+script-default dynamic wrap html kab| 18 2 22
+script-default dynamic wrap plain kab| 18 2 22
+script-default dynamic wrap none kab 18 1 22
+script-input input nowrap html kab| 36 2 40
+script-input input nowrap plain kab| 36 2 40
+script-input input nowrap none kab 18 1 22
+script-input input wrap html kab| 36 2 40
+script-input input wrap plain kab| 36 2 40
+script-input input wrap none kab 18 1 22
+script-switch dynamic nowrap html kab| 18 2 22
+script-switch input nowrap html kab| 36 2 40
+script-switch dynamic nowrap html kab| 18 2 22
+script-switch input wrap plain kab| 36 2 40
+authored-switch input wrap html kab| 36 2 40
+authored-switch dynamic wrap html kab| 18 2 22
+authored-switch input wrap html kab| 36 2 40
+authored-dynamic-switch input wrap html kab| 36 2 40
+authored-dynamic-switch dynamic wrap html kab| 18 2 22
+chat dynamic 3 18 22 176
+chat dynamic 2 36 40 138
+chat dynamic 1 18 22 118
+chat dynamic 0 18 22 98
+chat input 3 36 40 158
+chat input 2 54 58 102
+chat input 1 36 40 64
+chat input 0 36 40 26

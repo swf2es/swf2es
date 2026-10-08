@@ -6,8 +6,10 @@
 //
 // Translated from avmplus' core/ArrayClass.cpp, this file is subject to the
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
+
+import type { AsObject, Value } from "../descriptors.js";
 import { publicNs, qname } from "../names.js";
-import type { AsObject, Runtime, Value } from "../runtime.js";
+import type { Runtime } from "../runtime.js";
 import { lowerCase } from "./case.js";
 
 export const kCaseInsensitive = 1;

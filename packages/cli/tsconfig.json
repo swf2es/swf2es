@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "rootDir": "src", "outDir": "dist", "types": ["node"], "lib": ["ES2022"] },
-  "include": ["src"],
+  // Node has WebAssembly, but neither ES2022 nor @types/node declares it.
+  "include": ["src", "../codegen/src/webassembly.d.ts"],
   "references": [{ "path": "../format" }, { "path": "../codegen" }]
 }

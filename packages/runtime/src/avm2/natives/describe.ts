@@ -4,9 +4,14 @@
 // from the root of the chain down, as addBindings adds them, so a derived
 // class's binding stands over its base's; their order is the hashtable's
 // in avmplus, keyed by string addresses, which nothing reproduces.
+//
+// Translated from avmplus' core/TypeDescriber.cpp, this file is subject to
+// the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
+
+import type { AsObject, Metadata, Signature, TypeRef, Value } from "../descriptors.js";
 import { formatClassName, type Namespace, NS_Public } from "../names.js";
+import type { Runtime } from "../runtime.js";
 import {
-  type AsObject,
   BIND_Const,
   BIND_Get,
   BIND_GetSet,
@@ -14,14 +19,9 @@ import {
   BIND_Set,
   BIND_Var,
   ClassRef,
-  type Metadata,
-  type Runtime,
-  type Signature,
   type Traits,
-  type TypeRef,
-  type Value,
   VectorRef,
-} from "../runtime.js";
+} from "../traits.js";
 import type { Natives } from "./define.js";
 
 const HIDE_NSURI_METHODS = 0x0001;

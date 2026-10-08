@@ -21,8 +21,8 @@
     "assemblyscript": "^0.28.20"
   },
   "scripts": {
-    "build:wasm": "asc --config asconfig.json --target release && asc --config asconfig.testing.json --target release",
-    "build:wasm:debug": "asc --config asconfig.json --target debug && asc --config asconfig.testing.json --target debug",
+    "build:wasm": "asc --config asconfig.json --target release && node stamp.ts dist/codegen.wasm && asc --config asconfig.testing.json --target release",
+    "build:wasm:debug": "asc --config asconfig.json --target debug && node stamp.ts dist/codegen.wasm && asc --config asconfig.testing.json --target debug",
     "build:wasm:checked": "asc --config asconfig.testing.json --target checked"
   }
 }

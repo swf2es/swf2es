@@ -12,20 +12,39 @@
 // times the grid's, often not a whole number, and the stage is drawn at the
 // zoom's inverse, so the same samples come out where Pixi's own arithmetic
 // at that resolution decides.
+// Or it may have the stage shown at that zoom, as a game's page does: the
+// stage drawn at its size at that resolution, the frames the zoom's size.
 //
 // And it may ask for multisampling, as a host made with `antialias: true`
 // draws: the samples are then each resolved from the multisampled targets,
-// blends' backdrops and the back buffer alike (pixi-resolve.ts), before
+// blends' backdrops and the back buffer alike (render/resolve.ts), before
 // the page averages them.
 import { createCodegen } from "@swf2es/codegen";
 import { isAs3, readSwf, tags } from "@swf2es/format";
-import { Container, type DisplayObject, PixiView, Player, Scripting } from "@swf2es/player";
+import {
+  Container,
+  type DisplayObject,
+  type ModuleCache,
+  PixiView,
+  Player,
+  Scripting,
+  setTransformTable,
+} from "@swf2es/player";
+import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
+import { precompiledModules } from "@swf2es/player-hosts/precompiled";
 import { autoDetectRenderer } from "pixi.js";
+
+// `pnpm test:checked`'s page (chrome.ts): the player checks its own shortcuts too.
+if (new URLSearchParams(location.search).has("checked")) {
+  Scripting.checkRounds = true;
+}
 
 interface Run {
   images: Record<number, string>;
   /** What the SWF's scripts traced, a line each. */
   trace: string[];
+  /** The draws the transform table made (render/table.ts), in its multi-draw calls. */
+  tableDraws: number;
   error: string | null;
 }
 
@@ -39,6 +58,8 @@ async function scriptingFor(
   trace: string[],
   url: string | null,
   uncaught: unknown[],
+  moduleCache: ModuleCache | null = null,
+  onCompile?: () => void,
 ): Promise<Scripting | null> {
   const swf = readSwf(bytes);
   if (!isAs3(swf) || !swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2)) {
@@ -46,7 +67,22 @@ async function scriptingFor(
   }
 
   const wasm = await WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm"));
-  const scripting = new Scripting(await createCodegen(wasm), {
+  const codegen = await createCodegen(wasm);
+  if (onCompile) {
+    const compileModule = codegen.compileModule.bind(codegen);
+    const compileModuleLogged = codegen.compileModuleLogged.bind(codegen);
+    codegen.compileModule = (hashes, index) => {
+      onCompile();
+      return compileModule(hashes, index);
+    };
+    codegen.compileModuleLogged = (hashes, index) => {
+      onCompile();
+      return compileModuleLogged(hashes, index);
+    };
+  }
+
+  const scripting = new Scripting(codegen, {
+    moduleCache,
     // A trace of several lines is several lines of Flash's output.
     print: (line) => trace.push(...line.split("\n")),
     // The debugger player, as adl is and as Ruffle's traces were recorded: errors carry their text.
@@ -84,9 +120,15 @@ async function scriptingFor(
     },
   });
   const libraries = await Promise.all(
-    ["builtin", "playerglobal"].map(
-      async (n) => new Uint8Array(await (await fetch(`/libraries/${n}.abc`)).arrayBuffer()),
-    ),
+    ["builtin", "playerglobal"].map(async (n) => {
+      // A missing library would reach codegen as an empty ABC, rejected as #1107 as if the SWF's.
+      const response = await fetch(`/libraries/${n}.abc`);
+      if (!response.ok) {
+        throw new Error(`no /libraries/${n}.abc: fetch them with libraries.ts's libraryAbcs()`);
+      }
+
+      return new Uint8Array(await response.arrayBuffer());
+    }),
   );
   await scripting.loadLibraries(libraries);
   return scripting;
@@ -130,10 +172,14 @@ async function runSwf(
   url: string | null = null,
   zoom = 1,
   antialias = false,
+  table = true,
+  tableMinRun?: number,
+  shown = false,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
   const trace: string[] = [];
+  let tableDraws = 0;
   let scripting: Scripting | null = null;
   const uncaught: unknown[] = [];
   // A run ends at the first error nothing caught, after the frame it came in.
@@ -146,6 +192,7 @@ async function runSwf(
     scripting = await scriptingFor(bytes, trace, url, uncaught);
     const player = new Player(bytes, scripting);
     const n = GRID[quality] ?? 4;
+    setTransformTable(table, tableMinRun);
     const renderer = await autoDetectRenderer({
       preference: "webgl",
       width: player.width,
@@ -154,20 +201,32 @@ async function runSwf(
       antialias,
       preserveDrawingBuffer: true,
       resolution: n * zoom,
-      // Blend modes read what is below them from it (pixi-blend.ts).
+      // Blend modes read what is below them from it (render/blend.ts).
       useBackBuffer: true,
     });
+    const multi = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl?.getExtension(
+      "WEBGL_multi_draw",
+    );
+    if (multi) {
+      const draw = multi.multiDrawElementsWEBGL.bind(multi);
+      multi.multiDrawElementsWEBGL = (...args: Parameters<typeof draw>) => {
+        tableDraws += args[6];
+        draw(...args);
+      };
+    }
+
     const samples = document.createElement("canvas");
     samples.width = renderer.canvas.width;
     samples.height = renderer.canvas.height;
     const output = document.createElement("canvas");
-    output.width = player.width;
-    output.height = player.height;
+    const shownAt = shown ? zoom : 1;
+    output.width = Math.round(player.width * shownAt);
+    output.height = Math.round(player.height * shownAt);
     document.body.replaceChildren(output);
     const view = new PixiView(renderer);
     // Drawn n times finer to be averaged down: the screen is the output canvas.
-    view.screenScale = 1;
-    view.stage.scale.set(1 / zoom);
+    view.screenScale = shownAt;
+    view.stage.scale.set(shownAt / zoom);
     // BitmapData.draw of a display object renders with it, from the document class on.
     if (scripting) {
       scripting.drawer = view;
@@ -199,9 +258,9 @@ async function runSwf(
     }
 
     renderer.destroy();
-    return { images, trace, error: null };
+    return { images, trace, tableDraws, error: null };
   } catch (e) {
-    return { images, trace, error: describe(e, scripting) };
+    return { images, trace, tableDraws, error: describe(e, scripting) };
   }
 }
 
@@ -221,6 +280,10 @@ function describe(e: unknown, scripting: Scripting | null): string {
 interface Bench {
   /** The view's counts at the end, and the JS heap in use before and after, where Chrome tells. */
   counts: Record<string, number>;
+  /** Each frame's meter readings after the first: see meter. */
+  meters: Record<string, number>[];
+  /** Filled in by chrome.ts from a sampled heap profile, where asked for. */
+  allocated: number;
   heap: [number, number];
   tick: number[];
   sync: number[];
@@ -247,6 +310,125 @@ interface Bench {
  * frames, as a pool's objects and a panel shown and hidden come and go;
  * the toggle counts in the tick. -1 toggles nothing.
  */
+/**
+ * What a renderer does in a frame, counted by wrapping it: GL's draw calls,
+ * Pixi's unbatched Graphics and batches, its render groups' instruction
+ * rebuilds and their time, contexts tessellated with their vertices and
+ * time, buffer uploads and their bytes, and program switches. `read` gives
+ * the counts since the last read.
+ */
+function meter(renderer: object): { read(): Record<string, number> } {
+  let counts: Record<string, number> = {};
+  const add = (key: string, by = 1) => {
+    counts[key] = (counts[key] ?? 0) + by;
+  };
+  const wrap = <T extends object>(
+    target: T | undefined,
+    method: string,
+    count: (args: unknown[], took: number, self: T) => void,
+  ) => {
+    const object = target as Record<string, unknown> | undefined;
+    const original = object?.[method] as ((...args: unknown[]) => unknown) | undefined;
+    if (!object || typeof original !== "function") {
+      return;
+    }
+
+    object[method] = function (this: T, ...args: unknown[]) {
+      const begun = performance.now();
+      const out = original.apply(this, args);
+      count(args, performance.now() - begun, this);
+      return out;
+    };
+  };
+  const r = renderer as {
+    uid: number;
+    gl?: WebGL2RenderingContext;
+    renderPipes: Record<string, object>;
+    filter: object;
+    renderGroup: object;
+    graphicsContext: {
+      getGpuContext(context: object): { geometryData: { vertices: ArrayLike<number> } };
+    };
+  };
+  const gl = r.gl;
+  wrap(gl, "drawElements", () => add("glDraws"));
+  wrap(gl, "drawArrays", () => add("glDraws"));
+  wrap(gl, "useProgram", () => add("programs"));
+  // Stencil masks: state set for each mask drawn and taken off, and the clears.
+  for (const method of ["stencilFunc", "stencilOp", "colorMask"]) {
+    wrap(gl, method, () => add("stencilState"));
+  }
+  wrap(gl, "clear", (args) => {
+    add("clears");
+    if (gl && (args[0] as number) & gl.STENCIL_BUFFER_BIT) {
+      add("stencilClears");
+    }
+  });
+  wrap(gl, "texSubImage2D", () => add("texUploads"));
+  for (const method of ["bufferData", "bufferSubData"]) {
+    wrap(gl, method, (args) => {
+      add("uploads");
+      const data = args[method === "bufferData" ? 1 : 2];
+      // A WebGL 2 bufferSubData may take only `length` elements of its data.
+      const length = method === "bufferSubData" ? (args[4] as number | undefined) : undefined;
+      const view = data as ArrayBufferView & { BYTES_PER_ELEMENT?: number };
+      add(
+        "uploadBytes",
+        typeof data === "number"
+          ? data
+          : length
+            ? length * (view.BYTES_PER_ELEMENT ?? 1)
+            : view.byteLength,
+      );
+    });
+  }
+
+  wrap(gl?.getExtension("WEBGL_multi_draw") ?? undefined, "multiDrawElementsWEBGL", (args) => {
+    add("glDraws");
+    add("tableRuns");
+    add("tableDraws", args[6] as number);
+  });
+  wrap(r.renderPipes.graphics, "execute", () => add("aloneGraphics"));
+  wrap(r.renderPipes.batch, "execute", () => add("batches"));
+  // A filter's region: the bounds Pixi measures for it each time it draws.
+  wrap(r.filter, "_calculateFilterArea", (_, took) => {
+    add("filterAreas");
+    add("filterAreaMs", took);
+  });
+  wrap(r.renderGroup, "_buildInstructions", (_, took) => {
+    add("rebuilds");
+    add("rebuildMs", took);
+  });
+  // Tessellation: a context Pixi has no GPU data for yet, or one marked dirty, built now.
+  const contexts = r.graphicsContext as unknown as Record<string, unknown>;
+  const update = contexts.updateGpuContext as (context: object) => unknown;
+  contexts.updateGpuContext = function (
+    this: unknown,
+    context: { dirty: boolean; _gpuData: object },
+  ) {
+    const fresh = context.dirty || !(context._gpuData as Record<number, unknown>)[r.uid];
+    const begun = performance.now();
+    const out = update.call(this, context);
+    if (fresh) {
+      add("tessellated");
+      add("tessMs", performance.now() - begun);
+      add(
+        "tessVertices",
+        r.graphicsContext.getGpuContext(context).geometryData.vertices.length / 2,
+      );
+    }
+
+    return out;
+  };
+  return {
+    read() {
+      const out = counts;
+      counts = {};
+      return out;
+    },
+  };
+}
+
 async function benchSwf(
   base64: string,
   frames: number,
@@ -256,7 +438,11 @@ async function benchSwf(
   antialias = false,
   toggleEvery = 1,
   nestedGroups = false,
+  table = true,
+  tableMinRun?: number,
+  pace = 0,
 ): Promise<Bench> {
+  setTransformTable(table, tableMinRun);
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
   const sync: number[] = [];
@@ -330,6 +516,9 @@ async function benchSwf(
     await finish();
     const first = performance.now() - start;
     const heapBefore = heapNow();
+    const meters: Record<string, number>[] = [];
+    const counter = meter(renderer);
+    let stroked = view.counts.strokeContexts;
     for (let frame = 2; frame <= frames; frame++) {
       const before = performance.now();
       for (const [depth, child] of toggled.entries()) {
@@ -355,12 +544,22 @@ async function benchSwf(
       sync.push(synced - ticked);
       draw.push(drawn - synced);
       finished.push(performance.now() - drawn);
+      // Lines' contexts made, tessellated or not yet.
+      const reading = counter.read();
+      reading.strokeContexts = view.counts.strokeContexts - stroked;
+      stroked = view.counts.strokeContexts;
+      meters.push(reading);
       // Renders no tick came before, as a host that draws on every animation frame does.
       for (let k = 0; k < idleRenders; k++) {
         const begun = performance.now();
         view.render(player.stage);
         await finish();
         idle.push(performance.now() - begun);
+      }
+
+      // Frames apart in time, for what is kept by age to age between them.
+      if (pace > 0) {
+        await new Promise((resolve) => setTimeout(resolve, pace));
       }
     }
 
@@ -369,6 +568,8 @@ async function benchSwf(
     renderer.destroy();
     return {
       counts,
+      meters,
+      allocated: 0,
       heap,
       tick,
       sync,
@@ -382,6 +583,8 @@ async function benchSwf(
   } catch (e) {
     return {
       counts: {},
+      meters: [],
+      allocated: 0,
       heap: [0, 0],
       tick,
       sync,
@@ -401,7 +604,7 @@ async function benchSwf(
  * and puts back.
  */
 async function toggling(root: Player["root"], count: number): Promise<DisplayObject[]> {
-  const { Drawing } = (await import("/player/drawing.js" as string)) as {
+  const { Drawing } = (await import("/player/display/drawing.js" as string)) as {
     Drawing: new () => {
       beginFill(fill: { type: "solid"; color: number }): void;
       drawRoundRect(x: number, y: number, w: number, h: number, ew: number, eh: number): void;
@@ -430,6 +633,346 @@ async function toggling(root: Player["root"], count: number): Promise<DisplayObj
   return children;
 }
 
-const page = globalThis as unknown as { runSwf: typeof runSwf; benchSwf: typeof benchSwf };
+/** The memory of the codegen instance made last, the opened SWF's, for stepSwf to tell its size. */
+let codegenMemory: WebAssembly.Memory | null = null;
+const instantiate = WebAssembly.instantiate.bind(WebAssembly);
+WebAssembly.instantiate = (async (module: WebAssembly.Module, imports?: WebAssembly.Imports) => {
+  const instance = await instantiate(module, imports);
+  const memory = instance.exports.memory;
+  codegenMemory = memory instanceof WebAssembly.Memory ? memory : codegenMemory;
+  return instance;
+}) as typeof WebAssembly.instantiate;
+
+/** The SWF openSwf started, which stepSwf plays on: for leak.ts, which measures the heap between steps. */
+let opened: {
+  player: Player;
+  scripting: Scripting | null;
+  trace: string[];
+  uncaught: unknown[];
+} | null = null;
+
+/** Start a SWF, with no renderer, for stepSwf to play; any SWF opened before is let go. */
+/** The module cache openSwf's players share, made by the first that asks for one (leak.ts --cache). */
+let leakCache: ModuleCache | null = null;
+
+async function openSwf(base64: string, url: string | null, cached = false): Promise<string | null> {
+  opened = null;
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const trace: string[] = [];
+  const uncaught: unknown[] = [];
+  let scripting: Scripting | null = null;
+  try {
+    if (cached) {
+      leakCache ??= indexedDbModuleCache({ name: `swf2es-leak-${Math.random()}` });
+    }
+
+    scripting = await scriptingFor(bytes, trace, url, uncaught, cached ? leakCache : null);
+    const player = new Player(bytes, scripting);
+    await player.start();
+    opened = { player, scripting, trace, uncaught };
+    return null;
+  } catch (e) {
+    return describe(e, scripting);
+  }
+}
+
+/**
+ * Play the opened SWF's frames until it has traced `lines` lines, or for
+ * `frames` frames at most: the lines it has traced, the size of its
+ * codegen's memory, and what stopped it.
+ */
+async function stepSwf(
+  lines: number,
+  frames: number,
+): Promise<{ lines: number; codegen: number; error: string | null }> {
+  if (!opened) {
+    return { lines: 0, codegen: 0, error: "no SWF is open" };
+  }
+
+  const { player, scripting, trace, uncaught } = opened;
+  try {
+    for (let frame = 0; frame < frames && trace.length < lines; frame++) {
+      await scripting?.settled();
+      player.tick();
+      if (uncaught.length > 0) {
+        throw uncaught[0];
+      }
+    }
+
+    return { lines: trace.length, codegen: codegenMemory?.buffer.byteLength ?? 0, error: null };
+  } catch (e) {
+    return { lines: trace.length, codegen: 0, error: describe(e, scripting) };
+  }
+}
+
+/** What the SWF openSwf started has traced. */
+async function traceSwf(): Promise<string[]> {
+  return opened?.trace ?? [];
+}
+
+/** Let go of the SWF openSwf started. */
+async function closeSwf(): Promise<boolean> {
+  opened = null;
+  return true;
+}
+
+/** What moduleCacheSwf found: each load's trace and modules compiled, what eviction kept, and more. */
+interface CacheCheck {
+  loads: { trace: string[]; compiled: number; error: string | null }[];
+  /** The keys left after putting a, b, getting a, then putting c, with room for two. */
+  kept: string[];
+  /** Whether a module larger than the whole cache was stored. */
+  oversized: boolean;
+  /** Whether the cache, closed, read a module again; then deleted it. */
+  reopened: boolean;
+  deleted: boolean;
+  /** Whether it wrote and read again once its database was deleted under it. */
+  afterVersionChange: boolean;
+  /** Whether a database that failed to open was tried again after retryAfter, and only then. */
+  retried: boolean;
+}
+
+/**
+ * The IndexedDB module cache (player-hosts): a SWF played three times with
+ * it, the last after its modules were overwritten with half of themselves,
+ * which must trace alike, the second compiling nothing; the cache closed
+ * and read again; and its eviction of the least recently used, in a small
+ * database of its own.
+ */
+async function moduleCacheSwf(base64: string): Promise<CacheCheck> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const name = `swf2es-test-${Math.random()}`;
+  const cache = indexedDbModuleCache({ name });
+  const written: string[] = [];
+  const keys: string[] = [];
+  const watched: ModuleCache = {
+    get: (key) => cache.get(key),
+    put: async (key, module) => {
+      keys.push(key);
+      await cache.put(key, module);
+      written.push(key);
+    },
+    delete: (key) => cache.delete(key),
+  };
+  const loads: CacheCheck["loads"] = [];
+  const play = async () => {
+    const trace: string[] = [];
+    let compiled = 0;
+    const uncaught: unknown[] = [];
+    let scripting: Scripting | null = null;
+    try {
+      scripting = await scriptingFor(bytes, trace, null, uncaught, watched, () => compiled++);
+      const player = new Player(bytes, scripting);
+      await player.start();
+      loads.push({
+        trace,
+        compiled,
+        error: uncaught.length ? String(uncaught[0]) : null,
+      });
+    } catch (e) {
+      loads.push({ trace, compiled, error: describe(e, scripting) });
+    }
+  };
+  const stored = async (count: number) => {
+    for (let i = 0; i < 300 && written.length < count; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
+
+  await play();
+  await stored(keys.length);
+  await play();
+  for (const key of new Set(keys)) {
+    const entry = await cache.get(key);
+    if (entry) {
+      await cache.put(key, { ...entry, module: entry.module.slice(0, entry.module.length / 2) });
+    }
+  }
+
+  await play();
+
+  // Closed, it opens again.
+  cache.close();
+  const reopened = (await cache.get(keys[0])) !== undefined;
+  await cache.delete(keys[0]);
+  const deleted = (await cache.get(keys[0])) === undefined;
+
+  // Room for two modules of 10 characters, 20 bytes each.
+  const small = indexedDbModuleCache({ name: `${name}-small`, maxBytes: 40 });
+  const ten = (c: string, n = 10) => ({
+    module: c.repeat(n),
+    log: "",
+    lengths: [n, 0] as [number, number],
+  });
+  await small.put("a", ten("a"));
+  await small.put("b", ten("b"));
+  // Used later than "b" was put, by the clock's milliseconds.
+  await new Promise((r) => setTimeout(r, 20));
+  await small.get("a");
+  await small.put("c", ten("c"));
+  const kept: string[] = [];
+  for (const key of ["a", "b", "c"]) {
+    if ((await small.get(key)) !== undefined) {
+      kept.push(key);
+    }
+  }
+
+  await small.put("d", ten("d", 30));
+  const oversized = (await small.get("d")) !== undefined;
+
+  // Deleted under it, as another tab's upgrade would close it: opened again.
+  await new Promise((done) => {
+    indexedDB.deleteDatabase(`${name}-small`).onsuccess = done;
+  });
+  await small.put("e", ten("e"));
+  const afterVersionChange = (await small.get("e")) !== undefined;
+
+  // A database that did not open is tried again once `retryAfter` has passed, not before.
+  let opens = 0;
+  const flaky = {
+    open: (n: string, v?: number) => {
+      if (++opens === 1) {
+        throw new Error("not now");
+      }
+
+      return indexedDB.open(n, v);
+    },
+  } as IDBFactory;
+  const later = indexedDbModuleCache({ name: `${name}-later`, indexedDB: flaky, retryAfter: 200 });
+  const outcomes: boolean[] = [];
+  for (const wait of [0, 0, 300]) {
+    await new Promise((r) => setTimeout(r, wait));
+    outcomes.push(
+      await later.get("x").then(
+        () => true,
+        () => false,
+      ),
+    );
+  }
+  const retried = outcomes.join() === "false,false,true" && opens === 2;
+
+  for (const c of [cache, small, later]) {
+    c.close();
+  }
+
+  for (const db of [name, `${name}-small`, `${name}-later`]) {
+    indexedDB.deleteDatabase(db);
+  }
+
+  return { loads, kept, oversized, reopened, deleted, afterVersionChange, retried };
+}
+
+/** What precompiledSwf found. */
+interface PrecompiledRun {
+  trace: string[];
+  /** How many modules the player compiled. */
+  compiled: number;
+  /** Whether the page refused to evaluate code, as a Content-Security-Policy without 'unsafe-eval' has it. */
+  evalRefused: boolean;
+  /** The last frame drawn, as a PNG data URL, or null where nothing drew. */
+  image: string | null;
+  error: string | null;
+}
+
+/**
+ * Pixi's own polyfills for the code it would otherwise build with
+ * `new Function`, as pixi.js/unsafe-eval installs them. A bundling host
+ * imports that; this page has Pixi's bundle unbundled, so it installs
+ * them as Pixi's global build does, its script patching what the global
+ * PIXI names, the classes of the bundle the player draws with.
+ */
+async function pixiWithoutEval(): Promise<void> {
+  const global = globalThis as { PIXI?: object };
+  if (global.PIXI) {
+    return;
+  }
+
+  global.PIXI = { ...(await import("pixi.js")) };
+  await new Promise((done, fail) => {
+    const script = document.createElement("script");
+    script.src = "/pixi/packages/unsafe-eval.js";
+    script.onload = done;
+    script.onerror = () => fail(new Error("no /pixi/packages/unsafe-eval.js"));
+    document.head.append(script);
+  });
+}
+
+/**
+ * Play a SWF for `frames` frames from the modules the swf2es command wrote
+ * beside `manifest`, imported from their URLs or evaluated, and draw its
+ * last frame.
+ */
+async function precompiledSwf(
+  base64: string,
+  manifest: string,
+  importModules: boolean,
+  frames: number,
+): Promise<PrecompiledRun> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const trace: string[] = [];
+  const uncaught: unknown[] = [];
+  let compiled = 0;
+  let evalRefused = false;
+  // Out of DevTools' call, which lets code evaluate what the page's policy refuses.
+  await new Promise((r) => setTimeout(r, 0));
+  try {
+    new Function("return 1")();
+  } catch {
+    evalRefused = true;
+  }
+
+  let scripting: Scripting | null = null;
+  let image: string | null = null;
+  try {
+    const cache = precompiledModules(manifest, { importModules });
+    scripting = await scriptingFor(bytes, trace, null, uncaught, cache, () => compiled++);
+    const player = new Player(bytes, scripting);
+    await player.start();
+    for (let frame = 2; frame <= frames && uncaught.length === 0; frame++) {
+      await scripting?.settled();
+      player.tick();
+    }
+
+    if (uncaught.length > 0) {
+      throw uncaught[0];
+    }
+
+    if (evalRefused) {
+      await pixiWithoutEval();
+    }
+
+    const renderer = await autoDetectRenderer({
+      preference: "webgl",
+      width: player.width,
+      height: player.height,
+      background: player.background,
+      preserveDrawingBuffer: true,
+    });
+    const view = new PixiView(renderer);
+    view.render(player.stage);
+    image = renderer.canvas.toDataURL("image/png");
+    renderer.destroy();
+    return { trace, compiled, evalRefused, image, error: null };
+  } catch (e) {
+    return { trace, compiled, evalRefused, image, error: describe(e, scripting) };
+  }
+}
+
+const page = globalThis as unknown as {
+  precompiledSwf: typeof precompiledSwf;
+  moduleCacheSwf: typeof moduleCacheSwf;
+  runSwf: typeof runSwf;
+  benchSwf: typeof benchSwf;
+  openSwf: typeof openSwf;
+  stepSwf: typeof stepSwf;
+  closeSwf: typeof closeSwf;
+  traceSwf: typeof traceSwf;
+};
 page.runSwf = runSwf;
+page.precompiledSwf = precompiledSwf;
+page.moduleCacheSwf = moduleCacheSwf;
 page.benchSwf = benchSwf;
+page.openSwf = openSwf;
+page.stepSwf = stepSwf;
+page.closeSwf = closeSwf;
+page.traceSwf = traceSwf;

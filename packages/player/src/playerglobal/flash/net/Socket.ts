@@ -1,7 +1,8 @@
 // flash.net.Socket: DataInput/DataOutput over a host-provided TCP transport.
 import { avm2 } from "@swf2es/runtime";
-import type { Scripting, SocketTransport } from "../../../scripting.js";
-import { dispatchEvent } from "../events/EventDispatcher.js";
+import type { SocketEndpoints, SocketTransport } from "../../../hosts.js";
+import { dispatchEvent } from "../../../scripting/events.js";
+import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -14,7 +15,16 @@ interface Connection {
   connected: boolean;
   connecting: boolean;
   failed: boolean;
+  /** Null before a connection and after close(); UNKNOWN while one opens, or open where the host does not know them. */
+  endpoints: SocketEndpoints | null;
 }
+
+const UNKNOWN: SocketEndpoints = {
+  localAddress: "",
+  localPort: 0,
+  remoteAddress: "",
+  remotePort: 0,
+};
 
 export function socketNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
@@ -31,6 +41,7 @@ export function socketNatives(s: Scripting): avm2.Natives {
         connected: false,
         connecting: false,
         failed: false,
+        endpoints: null,
       };
       connections.set(o, c);
     }
@@ -70,6 +81,7 @@ export function socketNatives(s: Scripting): avm2.Natives {
       c.connected = false;
       c.connecting = true;
       c.failed = false;
+      c.endpoints = UNKNOWN;
       avm2.bytesOf(s.rt, c.input).clear();
       avm2.bytesOf(s.rt, c.output).clear();
       const generation = c.generation;
@@ -98,7 +110,7 @@ export function socketNatives(s: Scripting): avm2.Natives {
         );
       };
       if (!s.socket) {
-        s.deferHostEvent(() => fail("Error #2031: Socket Error."));
+        s.loads.deferHostEvent(() => fail("Error #2031: Socket Error."));
         return;
       }
 
@@ -107,19 +119,20 @@ export function socketNatives(s: Scripting): avm2.Natives {
           host === null ? "localhost" : s.rt.toString(host),
           s.rt.toInt(port),
           {
-            open: () =>
-              s.deferHostEvent(() => {
+            open: (endpoints) =>
+              s.loads.deferHostEvent(() => {
                 if (!current()) {
                   return;
                 }
 
                 c.connecting = false;
                 c.connected = true;
+                c.endpoints = endpoints ? { ...endpoints } : UNKNOWN;
                 event(this, "connect");
               }),
             data: (bytes) => {
               const copy = bytes.slice();
-              s.deferHostEvent(() => {
+              s.loads.deferHostEvent(() => {
                 if (!current() || !c.connected) {
                   return;
                 }
@@ -151,7 +164,7 @@ export function socketNatives(s: Scripting): avm2.Natives {
               });
             },
             close: () =>
-              s.deferHostEvent(() => {
+              s.loads.deferHostEvent(() => {
                 if (!current()) {
                   return;
                 }
@@ -166,11 +179,11 @@ export function socketNatives(s: Scripting): avm2.Natives {
                 c.transport = null;
                 event(this, "close");
               }),
-            error: (message) => s.deferHostEvent(() => fail(message)),
+            error: (message) => s.loads.deferHostEvent(() => fail(message)),
           },
         );
       } catch (e) {
-        s.deferHostEvent(() => fail(String(e)));
+        s.loads.deferHostEvent(() => fail(String(e)));
       }
     }
 
@@ -189,12 +202,34 @@ export function socketNatives(s: Scripting): avm2.Natives {
       c.transport = null;
       c.connected = false;
       c.connecting = false;
+      c.endpoints = null;
     }
 
     "flash.net:Socket::OnError"(): void {}
 
     "flash.net:Socket::wasCalledByAppContent"(): boolean {
       return false;
+    }
+
+    /**
+     * AIR's, as adl reads them: null and 0 before a connection and after
+     * close(), "" and 0 while one opens or after it fails, and the ends,
+     * resolved, once open, kept after the peer closes.
+     */
+    get localAddress(): string | null {
+      return connection(this).endpoints?.localAddress ?? null;
+    }
+
+    get localPort(): number {
+      return connection(this).endpoints?.localPort ?? 0;
+    }
+
+    get remoteAddress(): string | null {
+      return connection(this).endpoints?.remoteAddress ?? null;
+    }
+
+    get remotePort(): number {
+      return connection(this).endpoints?.remotePort ?? 0;
     }
 
     get connected(): boolean {

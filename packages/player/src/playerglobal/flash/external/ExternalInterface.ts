@@ -7,14 +7,24 @@ type Value = avm2.Value;
 
 export function externalInterfaceNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
+  // The host, if it lets the calling SWF use it; if the caller cannot be
+  // told, only if it lets every SWF ever loaded (Code.securityUrls). Called
+  // straight from the natives: 2 counts this and the native as the player's.
+  const bridge = () => {
+    const host = s.externalInterface;
+    const allows = host?.allows;
+    return host && (!allows || s.code.securityUrls(2).every((url) => allows.call(host, url)))
+      ? host
+      : null;
+  };
 
   class ExternalInterfaceNatives {
     static get available(): boolean {
-      return s.externalInterface !== null;
+      return bridge() !== null;
     }
 
     static get objectID(): Value {
-      return s.externalInterface?.objectID ?? null;
+      return bridge()?.objectID ?? null;
     }
 
     static "flash.external:ExternalInterface::_initJS"(): void {
@@ -41,7 +51,7 @@ export function externalInterfaceNatives(s: Scripting): avm2.Natives {
       closure: Value,
       remove: Value,
     ): void {
-      const host = s.externalInterface;
+      const host = bridge();
       if (!host) {
         throw s.rt.error("Error", 2067);
       }
@@ -52,13 +62,18 @@ export function externalInterfaceNatives(s: Scripting): avm2.Natives {
           ? null
           : (request, args) => {
               s.hostCalls++;
-              return s.rt.callValue(closure, null, [request, s.rt.array(args)], null);
+              return s.rt.callValue(
+                closure,
+                null,
+                [request, args === null ? null : s.rt.array(args)],
+                null,
+              );
             },
       );
     }
 
     static "flash.external:ExternalInterface::_evalJS"(source: Value): Value {
-      const host = s.externalInterface;
+      const host = bridge();
       if (!host) {
         throw s.rt.error("Error", 2067);
       }
@@ -67,7 +82,7 @@ export function externalInterfaceNatives(s: Scripting): avm2.Natives {
     }
 
     static "flash.external:ExternalInterface::_callOut"(request: Value): Value {
-      const host = s.externalInterface;
+      const host = bridge();
       if (!host) {
         throw s.rt.error("Error", 2067);
       }

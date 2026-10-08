@@ -53,7 +53,7 @@ export function toplevelNatives(s: Scripting): avm2.Natives {
       },
     // Looked up in the domain of the code that asks, as Flash's.
     "flash.utils::getDefinitionByName": (rt) => (name: Value) =>
-      definitionNamed(rt, rt.toString(name), (q) => rt.definitionNamed(q, s.codeDomain())),
+      definitionNamed(rt, rt.toString(name), (q) => rt.definitionNamed(q, s.code.codeDomain())),
     // The alias registerClassAlias gave the value's class, which describeType writes; null for none.
     "flash.utils::getAliasName": (rt) => (v: Value) => {
       if (v === null || v === undefined) {
@@ -63,8 +63,8 @@ export function toplevelNatives(s: Scripting): avm2.Natives {
       const alias = rt.aliasOf(v.$it ? v.$it : rt.traitsOf(v));
       return alias === "" ? null : alias;
     },
-    // Milliseconds since the start, by the host's real clock or the frame clock (Scripting.timer).
-    "flash.utils::getTimer": () => () => s.timer(),
+    // Milliseconds since the start, by the host's real clock or the frame clock (Timers.timer).
+    "flash.utils::getTimer": () => () => s.timers.timer(),
     "flash.utils::escapeMultiByte": (rt) => (text: Value) => escapeMultiByte(rt.toString(text)),
     "flash.utils::unescapeMultiByte": (rt) => (text: Value) => unescapeMultiByte(rt.toString(text)),
   };

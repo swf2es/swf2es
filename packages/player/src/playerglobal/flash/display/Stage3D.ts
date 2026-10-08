@@ -3,8 +3,8 @@
 // answers it without a GPU, an ErrorEvent #3702 in a later frame, so that
 // content that falls back to the display list can.
 import { avm2 } from "@swf2es/runtime";
+import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
-import { dispatchEvent } from "../events/EventDispatcher.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -13,7 +13,7 @@ export function stage3DNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
   const unavailable = (target: AsObject): void => {
-    s.deferHostEvent(() =>
+    s.loads.deferHostEvent(() =>
       dispatchEvent(
         s,
         target,

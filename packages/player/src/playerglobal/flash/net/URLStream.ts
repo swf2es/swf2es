@@ -1,8 +1,8 @@
 // flash.net.URLStream: bytes fetched by the host, read through ByteArray's
 // DataInput implementation and delivered to scripts on a later frame.
 import { avm2 } from "@swf2es/runtime";
+import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
-import { dispatchEvent } from "../events/EventDispatcher.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -39,7 +39,7 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
       const abort = new AbortController();
       this.$abort = abort;
       const source = request as AsObject;
-      s.requestBytes(source, abort.signal, ({ bytes, status, local }, url) => {
+      s.loads.requestBytes(source, abort.signal, ({ bytes, status, local }, url) => {
         if (this.$generation !== generation) {
           return;
         }
@@ -60,7 +60,7 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
               "ioError",
               false,
               false,
-              s.streamError(url, local),
+              s.loads.streamError(url, local),
             ) as AsObject,
           );
           return;
@@ -189,7 +189,8 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
     }
 
     set position(value: Value) {
-      avm2.bytesOf(s.rt, bufferOf(this)).position = s.rt.toUint(value);
+      // As ByteArray's setter: a uint32 of its own, not toUint's (see Bytes).
+      avm2.bytesOf(s.rt, bufferOf(this)).position = s.rt.toUint(value) >>> 0;
     }
 
     get length(): number {

@@ -1,19 +1,21 @@
 // flash.geom.Matrix3D's 16 float32 values, in column-major rawData order,
-// and its arithmetic, matrix3d.ts's float32 as Flash's.
+// and its arithmetic, display/matrix3d.ts's float32 as Flash's.
 import { avm2 } from "@swf2es/runtime";
 import {
   compose3D,
   decompose3D,
   determinant3D,
+  interpolate3D,
   invert3D,
   multiply3D,
   type Orientation,
+  pointAt3D,
   type Raw,
   rotation3D,
   scale3D,
   transform3D,
   translation3D,
-} from "../../../matrix3d.js";
+} from "../../../display/matrix3d.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
@@ -110,47 +112,6 @@ export function matrix3DNatives(s: Scripting): avm2.Natives {
       pivot === null || pivot === undefined ? [0, 0, 0] : read3D(pivot as AsObject),
       s.rt.swfVersion >= 13,
     );
-
-  /**
-   * Both taken apart as decompose takes them, the translations and scales
-   * lerped and the rotations slerped, and put together with the scale
-   * applied after the rotation, as adl does: a scale that is not uniform
-   * then stretches the turned axes (the `three-d` case). Ruffle's corpus
-   * has the scale dropped, which adl does not.
-   */
-  const interpolate = (from: Raw, to: Raw, percent: number): Raw => {
-    const [t0, q0, s0] = decompose3D(from, "quaternion");
-    const [t1, q1, s1] = decompose3D(to, "quaternion");
-    const lerp = (a: number[], b: number[]) => [0, 1, 2].map((i) => a[i] + (b[i] - a[i]) * percent);
-    let dot = q0[0] * q1[0] + q0[1] * q1[1] + q0[2] * q1[2] + q0[3] * q1[3];
-    let end = q1;
-    if (dot < 0) {
-      dot = -dot;
-      end = q1.map((c) => -c);
-    }
-
-    let k0 = 1 - percent;
-    let k1 = percent;
-    if (dot <= 0.9995) {
-      const theta = Math.acos(dot);
-      const sinTheta = Math.sin(theta);
-      k0 = Math.sin((1 - percent) * theta) / sinTheta;
-      k1 = Math.sin(percent * theta) / sinTheta;
-    }
-
-    let r = q0.map((c, i) => c * k0 + end[i] * k1);
-    const length = Math.hypot(...r);
-    r = length === 0 ? [0, 0, 0, 1] : r.map((c) => c / length);
-    const [sx, sy, sz] = lerp(s0, s1);
-    const turned = compose3D(lerp(t0, t1), r, [1, 1, 1], "quaternion");
-    return multiply3D(
-      translation3D(turned[12], turned[13], turned[14]),
-      multiply3D(
-        scale3D(sx, sy, sz),
-        turned.map((v, i) => (i >= 12 && i < 15 ? 0 : v)),
-      ),
-    );
-  };
 
   class Matrix3DNatives {
     declare $matrix3D: Float32Array;
@@ -400,6 +361,18 @@ export function matrix3DNatives(s: Scripting): avm2.Natives {
       }
     }
 
+    pointAt(pos: Value, at: Value = null, up: Value = null): void {
+      const turned = pointAt3D(
+        data(this),
+        xyz(nonNull(pos, "position")),
+        at === null || at === undefined ? [0, 1, 0] : xyz(at as AsObject),
+        up === null || up === undefined ? [0, 0, 1] : xyz(up as AsObject),
+      );
+      if (turned) {
+        data(this).set(turned);
+      }
+    }
+
     decompose(style: Value = "eulerAngles"): AsObject {
       const parts = decompose3D(data(this), orientation(style));
       const cls = s.rt.applyType(s.rt.classNamed("__AS3__.vec::Vector"), [
@@ -426,13 +399,13 @@ export function matrix3DNatives(s: Scripting): avm2.Natives {
 
     interpolateTo(to: Value, percent: Value): void {
       const target = data(nonNull(to, "toMat"));
-      data(this).set(interpolate(data(this), target, s.rt.toNumber(percent)));
+      data(this).set(interpolate3D(data(this), target, s.rt.toNumber(percent)));
     }
 
     static interpolate(from: Value, to: Value, percent: Value): AsObject {
       const a = data(nonNull(from, "fromMat"));
       const b = data(nonNull(to, "toMat"));
-      return matrix3D(interpolate(a, b, s.rt.toNumber(percent)));
+      return matrix3D(interpolate3D(a, b, s.rt.toNumber(percent)));
     }
   }
 

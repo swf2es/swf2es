@@ -4,12 +4,12 @@
 // advance until the next); with scripts, the frame's events and scripts
 // follow; then the frame is drawn.
 import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
-import { Container, type DisplayObject, frameChildren, MovieClip } from "./display.js";
-import { decodeImages, decodeInBrowser } from "./images.js";
-import { PointerInput } from "./input.js";
-import { KeyboardInput } from "./keyboard.js";
+import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
+import { CLIP, Container, type DisplayObject, MovieClip, OTHER } from "./display/display.js";
+import { type Library, readLibrary } from "./display/timeline.js";
+import { KeyboardInput } from "./input/keyboard.js";
+import { PointerInput } from "./input/pointer.js";
 import type { Scripting } from "./scripting.js";
-import { type Library, readLibrary } from "./timeline.js";
 
 /** Frames one advance() may run to catch up with time passed. */
 const MAX_CATCH_UP = 5;
@@ -79,7 +79,7 @@ export class Player {
       return;
     }
 
-    await s.loadSwf(this.swf, this.library);
+    await s.code.loadSwf(this.swf, this.library);
     s.stage = this.stage;
     s.root = this.root;
     s.stageWidth = this.width;
@@ -88,14 +88,17 @@ export class Player {
     s.frameRate = this.frameRate;
     s.constructAs(this.stage, s.rt.classNamed("flash.display::Stage"));
     // The first frame has its time too: the clock is a frame's duration on as it runs, as in Flash.
-    s.beginFrame(1000 / this.frameRate);
+    s.timers.beginFrame(1000 / this.frameRate);
     // The main SWF's LoaderInfo: on the root, which every display object under it reports.
-    const info = s.loaderInfo(null);
-    s.describe(info, this.bytes, this.swf);
+    const info = s.loads.loaderInfo(null);
+    s.loads.describe(info, this.bytes, this.swf);
     info.$loaded = this.bytes.length;
     info.$url = s.url;
-    info.$params = s.mainParameters();
+    info.$params = s.loads.mainParameters();
     this.root.loaderInfo = info;
+    // The stage's too: what a script puts on the stage itself has the stage
+    // for its root and this for its LoaderInfo, and takes hits, as in Flash.
+    this.stage.loaderInfo = info;
     // The main SWF's root is root1, as Flash names the root at depth 0.
     this.root.name = "root1";
     // Its first frame's children are there before the document class's constructor runs.
@@ -113,16 +116,36 @@ export class Player {
     }
 
     info.$content = this.root.object ?? null;
-    s.mainLoaded(info);
+    s.loads.mainLoaded(info);
     this.root.enterFirstFrame();
     s.frame(this.stage, false);
     this.frameRate = s.frameRate;
+  }
+
+  /** Whether destroy has been called. */
+  get destroyed(): boolean {
+    return this.stopped;
+  }
+
+  private stopped = false;
+
+  /**
+   * Stop for good: no frame plays after, and with scripts their sounds,
+   * connections and fetches end (Scripting.destroy). What the host made
+   * for the player, its renderer, its input bindings and its loop, is the
+   * host's to let go.
+   */
+  destroy(): void {
+    this.stopped = true;
+    this.scripting?.destroy();
   }
 
   /** Time a host has let pass, in ms, still to be played as frames. */
   private owed = 0;
   /** Frames played. */
   private played = 0;
+  /** The clips a tick advances, kept: the whole display list's, every frame. Null while in use. */
+  private ticking: (MovieClip | null)[] | null = [];
 
   /**
    * A count that moves whenever what the player shows may have changed: a
@@ -155,6 +178,10 @@ export class Player {
    * many frames it played.
    */
   advance(dt: number): number {
+    if (this.stopped) {
+      return 0;
+    }
+
     // The pointer's last move, so the frame's scripts see where it is now.
     this.pointer?.flush();
     this.owed += Math.max(0, dt);
@@ -180,31 +207,49 @@ export class Player {
    * takes off still has its frame, as in Flash. Then the frame's scripts.
    */
   tick(): void {
+    if (this.stopped) {
+      return;
+    }
+
     this.played++;
-    this.scripting?.beginFrame(1000 / this.frameRate);
-    const clips: MovieClip[] = [];
+    this.scripting?.timers.beginFrame(1000 / this.frameRate);
+    const clips = this.ticking ?? [];
+    this.ticking = null;
+    let count = 0;
     const collect = (o: DisplayObject) => {
-      if (o instanceof MovieClip) {
+      if (o.kind === CLIP) {
         // One a goto made sit this frame out takes all in it along.
-        if (o.skipsAfter >= 0 && o.skipsAfter === this.scripting?.frames) {
+        const clip = o as MovieClip;
+        if (clip.skipsAfter >= 0 && clip.skipsAfter === this.scripting?.frames) {
           return;
         }
 
-        clips.push(o);
+        clips[count++] = clip;
       }
 
-      // A button's states all play, whichever it shows.
-      for (const child of frameChildren(o)) {
-        collect(child);
+      // A button's states all play, whichever it shows. An index, not for-of,
+      // and no call for a leaf: this visits every object on the list each frame.
+      const children = o.frameChildren;
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        if (child.kind !== OTHER || child.frameChildren.length !== 0) {
+          collect(child);
+        }
       }
     };
     collect(this.stage);
-    for (const orphan of this.scripting?.orphanRoots() ?? []) {
+    for (const orphan of this.scripting?.lifecycle.orphanRoots() ?? []) {
       collect(orphan);
     }
 
-    for (const clip of clips) {
-      clip.advance();
+    // Let go of once advanced, so that the kept list holds none past the tick.
+    try {
+      for (let i = 0; i < count; i++) {
+        (clips[i] as MovieClip).advance();
+      }
+    } finally {
+      clips.fill(null, 0, count);
+      this.ticking = clips;
     }
 
     if (this.scripting) {

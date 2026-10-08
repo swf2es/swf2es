@@ -1,7 +1,7 @@
 // flash.display.Bitmap: a display object showing a BitmapData, its node a
-// BitmapObject (display.ts) that the renderer draws as a textured sprite.
+// BitmapObject (display/display.ts) that the renderer draws as a textured sprite.
 import { avm2 } from "@swf2es/runtime";
-import { type BitmapObject, CONTENT } from "../../../display.js";
+import { type BitmapObject, CONTENT } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
@@ -41,7 +41,7 @@ export function bitmapNatives(s: Scripting): avm2.Natives {
       // One of a bitmap's class, or placed by a timeline, shows a new BitmapData of its pixels.
       const character = this.$display.character;
       const none = bitmapData === null || bitmapData === undefined;
-      setData(this, none && character ? s.bitmapDataOf(character) : bitmapData);
+      setData(this, none && character ? s.symbols.bitmapDataOf(character) : bitmapData);
       setSnapping(this, pixelSnapping);
       setSmoothing(this, smoothing);
     }

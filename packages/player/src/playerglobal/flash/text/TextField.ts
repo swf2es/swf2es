@@ -1,11 +1,12 @@
 // flash.text.TextField and TextFormat: a field's text and formats as a
-// TextModel (text.ts), its properties as adl reports them; a TextFormat's
+// TextModel (text/text.ts), its properties as adl reports them; a TextFormat's
 // values stored as Flash converts them, null for one it does not set.
 import { avm2 } from "@swf2es/runtime";
-import { CONTENT, type TextObject } from "../../../display.js";
+import { CONTENT, type TextObject } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
-import { applied, emptyFormat, type PartialFormat } from "../../../text.js";
-import { GUTTER, lineOf, shownLines } from "../../../text-layout.js";
+import { GUTTER, lineOf, shownLines } from "../../../text/layout.js";
+import { applied, emptyFormat, type PartialFormat } from "../../../text/text.js";
+import { embeddedFonts } from "./Font.js";
 import { useSheet } from "./StyleSheet.js";
 
 type AsObject = avm2.AsObject;
@@ -372,6 +373,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     }
     set type(v: Value) {
       this.$display.type = choice(v, ["dynamic", "input"], "type");
+      changed(this);
     }
     get autoSize(): string {
       return this.$display.autoSize;
@@ -669,6 +671,40 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     /** That paragraph's length, its line end in it; at the text's length, one past the last's. */
     getParagraphLength(charIndex: Value): number {
       return paragraphAt(this.$display.model.text, s.rt.toInt(charIndex))[1];
+    }
+    /**
+     * The object an IMG of this id loaded, or null. The player reads no
+     * IMG, as adl does not: its fields drop the tag and give null for every
+     * id, by class name or URL (Ruffle's is a stub giving null).
+     */
+    getImageReference(id: Value): Value {
+      if (id === null || id === undefined) {
+        throw s.rt.error("TypeError", 2007, "name");
+      }
+
+      return null;
+    }
+    /**
+     * Whether a field can draw `fontName` in `fontStyle` from an embedded
+     * font: the name in any case, a CFF font never, and a style other than
+     * "bold", "italic" or "boldItalic", in that case, regular, as adl has it.
+     */
+    static isFontCompatible(fontName: Value, fontStyle: Value): boolean {
+      if (fontName === null || fontName === undefined) {
+        return false;
+      }
+
+      const name = s.rt.toString(fontName).toLowerCase();
+      const style = fontStyle === null || fontStyle === undefined ? "" : s.rt.toString(fontStyle);
+      const bold = style === "bold" || style === "boldItalic";
+      const italic = style === "italic" || style === "boldItalic";
+      return embeddedFonts(s).some(
+        (font) =>
+          font.type === "font" &&
+          font.name.toLowerCase() === name &&
+          font.bold === bold &&
+          font.italic === italic,
+      );
     }
     /** A desktop player's: no touch selection. */
     get textInteractionMode(): string {

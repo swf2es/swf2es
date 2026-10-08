@@ -1,53 +1,73 @@
-// flash.media.Sound and SoundChannel: a SWF's embedded sound or a host-fetched
-// MP3, with playback through the host's audio device and frame-delivered events;
-// and the timeline's own sounds, which no script sees: StartSound, the stream,
-// and a button's.
-import type { SoundInfo, StartSound } from "@swf2es/format";
+// flash.media.Sound and SoundChannel: a SWF's embedded sound, a host-fetched
+// MP3, or MP3 or PCM bytes a script hands it, with playback through the
+// host's audio device and frame-delivered events; the channels themselves,
+// and the timeline's sounds, are the player's (media/sounds.ts), and what
+// extract reads is media/extract.ts'.
+import type { Sound } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import type { SoundCharacter } from "../../../display/timeline.js";
+import type { ExtractedSamples, SoundMix } from "../../../media/audio.js";
 import {
-  type DecodedSound,
-  type PlayingSound,
-  type PlayShape,
-  type SoundMix,
-  streamSound,
-} from "../../../audio.js";
-import type { DisplayObject, MovieClip } from "../../../display.js";
+  EXTRACT_RATE,
+  type ExtractSource,
+  embeddedSource,
+  extractSamples,
+  toExtractRate,
+} from "../../../media/extract.js";
+import { mp3Frames } from "../../../media/mp3.js";
+import {
+  type ChannelState,
+  channels,
+  liveSounds,
+  MAX_SOUNDS,
+  mixerMix,
+  mixerMixes,
+  mixOf,
+  outputMix,
+  positionOf,
+  type SoundState,
+  stopChannel,
+  updateTimelineMixes,
+} from "../../../media/sounds.js";
+import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
-import type { Library, SoundCharacter, SoundStream, TimelineSounds } from "../../../timeline.js";
-import { dispatchEvent } from "../events/EventDispatcher.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
-interface SoundState {
-  character: SoundCharacter | null;
-  bytes: Uint8Array | null;
-  url: string | null;
-  loaded: number;
-  total: number;
-  length: number;
-  used: boolean;
-  generation: number;
-  abort: AbortController | null;
-  clip: Promise<DecodedSound> | null;
+/** An uncompressed or ADPCM DefineSound's samples, decoded once for extract; null for another format. */
+const embeddedSources = new WeakMap<SoundCharacter, ExtractSource | null>();
+
+/**
+ * An MP3's samples as Flash decodes them, by its DefineSound or by the
+ * Sound it was loaded into: decoded the first time a script extracts
+ * them, apart from the decode it plays, and kept for the extracts after.
+ */
+const mp3Decodes = new WeakMap<object, { samples: ExtractedSamples | null }>();
+
+/** 44.1 kHz samples as an uncompressed 16-bit DefineSound, for the host to play. */
+function pcmSound(channels: Float32Array[]): Sound {
+  const frames = channels[0].length;
+  const data = new Uint8Array(frames * channels.length * 2);
+  const view = new DataView(data.buffer);
+  for (let i = 0; i < frames; i++) {
+    for (const [c, channel] of channels.entries()) {
+      const v = Math.max(-1, Math.min(1, channel[i]));
+      view.setInt16((i * channels.length + c) * 2, Math.round(v * 32767), true);
+    }
+  }
+
+  return {
+    id: 0,
+    format: 3,
+    sampleRate: EXTRACT_RATE,
+    sampleSize: 16,
+    channels: channels.length === 1 ? 1 : 2,
+    sampleCount: frames,
+    seekSamples: 0,
+    data,
+  };
 }
-
-interface ChannelState {
-  sound: SoundState;
-  started: number;
-  start: number;
-  loops: number;
-  mix: SoundMix;
-  playing: PlayingSound | null;
-  stopped: boolean;
-  /** Where a stopped channel's position stays. */
-  stoppedAt: number;
-}
-
-const channels = new WeakMap<Scripting, Set<AsObject>>();
-
-/** SoundMixer's transform, applied over every channel's own. */
-const mixerMixes = new WeakMap<Scripting, SoundMix>();
 
 function stateOf(o: AsObject): SoundState {
   if (o.$sound) {
@@ -65,18 +85,14 @@ function stateOf(o: AsObject): SoundState {
     generation: 0,
     abort: null,
     clip: null,
+    frames: null,
+    compressed: false,
+    pcm: null,
+    extracted: 0,
   };
   o.$sound = state;
   return state;
 }
-
-export const mixOf = (o: AsObject | null): SoundMix => ({
-  volume: o?.$soundVolume ?? 1,
-  leftToLeft: o?.$soundLeftToLeft ?? 1,
-  leftToRight: o?.$soundLeftToRight ?? 0,
-  rightToLeft: o?.$soundRightToLeft ?? 0,
-  rightToRight: o?.$soundRightToRight ?? 1,
-});
 
 /** The mixer stores channel coefficients in hundredths when a transform is assigned. */
 export function channelMix(mix: SoundMix): SoundMix {
@@ -92,35 +108,6 @@ export function channelMix(mix: SoundMix): SoundMix {
     rightToLeft: hundredths(mix.rightToLeft),
     rightToRight: hundredths(mix.rightToRight),
   };
-}
-
-/**
- * What a channel sends to the device: its own transform and the mixer's,
- * combined as Ruffle's SoundTransform::concat computes them. Only
- * transforms that both cross channels depend on the order, which no trace
- * can show; Ruffle's is kept.
- */
-export function outputMix(local: SoundMix, global: SoundMix): SoundMix {
-  return {
-    volume: Math.abs(local.volume * global.volume),
-    leftToLeft: local.leftToLeft * global.leftToLeft + local.rightToLeft * global.leftToRight,
-    leftToRight: local.leftToRight * global.leftToLeft + local.rightToRight * global.leftToRight,
-    rightToLeft: local.leftToLeft * global.rightToLeft + local.rightToLeft * global.rightToRight,
-    rightToRight: local.leftToRight * global.rightToLeft + local.rightToRight * global.rightToRight,
-  };
-}
-
-const mixerMix = (s: Scripting): SoundMix => mixerMixes.get(s) ?? mixOf(null);
-
-const positionOf = (s: Scripting, state: ChannelState): number =>
-  state.stopped
-    ? state.stoppedAt
-    : Math.min(state.sound.length, state.start + Math.max(0, s.now - state.started));
-
-function stopChannel(s: Scripting, state: ChannelState): void {
-  state.stoppedAt = positionOf(s, state);
-  state.stopped = true;
-  state.playing?.stop();
 }
 
 /** SoundMixer.soundTransform: a copy, as Flash returns. */
@@ -144,392 +131,6 @@ export function setMixerTransform(s: Scripting, transform: Value): void {
   updateTimelineMixes(s);
 }
 
-/**
- * SoundMixer.stopAll: every channel stays where it was, and none completes;
- * the timeline's sounds stop too, though a stream starts again at the next
- * block its clip plays on to, as Ruffle has it.
- */
-export function stopAllSounds(s: Scripting): void {
-  const active = channels.get(s);
-  for (const channel of active ?? []) {
-    stopChannel(s, channel.$channel as ChannelState);
-  }
-
-  active?.clear();
-  for (const sound of [...(timelineSounds.get(s) ?? [])]) {
-    stopTimelineSound(s, sound);
-  }
-}
-
-/** A sound the timeline started: an event sound, a button's, or a clip's stream. */
-interface TimelineSound {
-  owner: DisplayObject;
-  character: SoundCharacter;
-  /** The clip whose stream it is; null for an event sound. */
-  clip: MovieClip | null;
-  started: number;
-  /** How long it plays, all loops, by the player's clock. */
-  duration: number;
-  playing: PlayingSound | null;
-  stopped: boolean;
-  /** Whether its decode is still to come. */
-  decoding: boolean;
-  /**
-   * When the player's clock ran its length, or null while it plays: over,
-   * it no longer counts for SyncNoMultiple or its clip's stream, but the
-   * device may still play it, later than the clock has it where the page
-   * held the device, and a stop still reaches it until the device is done
-   * with it (`PlayingSound.ended`), or, for a host that cannot tell, until
-   * TAIL has passed and it is stopped for good.
-   */
-  endedAt: number | null;
-}
-
-const timelineSounds = new WeakMap<Scripting, Set<TimelineSound>>();
-
-/** How long a sound over by the clock may still sound on the device before it is stopped. */
-const TAIL = 100;
-
-/**
- * The sounds that may play at once, timeline and script alike: Flash's 32
- * channels, Ruffle's AudioManager::MAX_SOUNDS. A timeline sound past them
- * does not start, nor queue on a device that is not yet running.
- */
-const MAX_SOUNDS = 32;
-
-/** Whether the device has, or will have, a timeline sound playing. */
-function onDevice(sound: TimelineSound): boolean {
-  return (
-    sound.endedAt === null || sound.decoding || (!!sound.playing && sound.playing.ended !== true)
-  );
-}
-
-/**
- * The sounds that hold a channel: a script's whose sound is there to play
- * (one still loading holds none until it can start), and the timeline's
- * the device has or will have.
- */
-function liveSounds(s: Scripting): number {
-  let n = 0;
-  for (const channel of channels.get(s) ?? []) {
-    if ((channel.$channel as ChannelState).sound.length > 0) {
-      n++;
-    }
-  }
-
-  for (const sound of timelineSounds.get(s) ?? []) {
-    if (onDevice(sound)) {
-      n++;
-    }
-  }
-
-  return n;
-}
-
-/** SOUNDINFO's points and envelope are in samples at 44.1 kHz, whatever the sound's rate. */
-const ENVELOPE_RATE = 44.1;
-
-/**
- * What a timeline sound sends to the device: the transforms of its owner
- * and each ancestor, then the mixer's, concatenated as Ruffle's
- * transform_for_sound does. A sprite's is its soundTransform; a button's
- * is the mixer's, so it has none of its own.
- */
-function timelineMix(s: Scripting, owner: DisplayObject): SoundMix {
-  let mix = mixOf(null);
-  for (let o: DisplayObject | null = owner; o; o = o.parent) {
-    const own: SoundMix | undefined = o.object?.$soundMix;
-    if (own) {
-      mix = outputMix(mix, own);
-    }
-  }
-
-  return outputMix(mix, mixerMix(s));
-}
-
-/** A sprite's transform or the mixer's changed: every timeline sound's mix follows. */
-export function updateTimelineMixes(s: Scripting): void {
-  for (const sound of timelineSounds.get(s) ?? []) {
-    sound.playing?.setMix(timelineMix(s, sound.owner));
-  }
-}
-
-function stopTimelineSound(s: Scripting, sound: TimelineSound): void {
-  sound.stopped = true;
-  sound.playing?.stop();
-  timelineSounds.get(s)?.delete(sound);
-  if (sound.clip?.stream === sound) {
-    sound.clip.stream = null;
-  }
-}
-
-function playTimelineSound(
-  s: Scripting,
-  owner: DisplayObject,
-  character: SoundCharacter,
-  clip: MovieClip | null,
-  start: number,
-  loops: number,
-  shape: PlayShape,
-  duration: number,
-): TimelineSound | null {
-  const task = s.soundClip(character);
-  if (!task || liveSounds(s) >= MAX_SOUNDS) {
-    return null;
-  }
-
-  const sound: TimelineSound = {
-    owner,
-    character,
-    clip,
-    started: s.now,
-    duration,
-    playing: null,
-    stopped: false,
-    decoding: true,
-    endedAt: null,
-  };
-  let active = timelineSounds.get(s);
-  if (!active) {
-    active = new Set();
-    timelineSounds.set(s, active);
-  }
-
-  active.add(sound);
-  void task.then(
-    (decoded) => {
-      sound.decoding = false;
-      // A stream whose decode took frames starts as far in as the clock has
-      // run, to keep with its timeline; an event sound plays whole, late.
-      const late = Math.max(0, s.now - sound.started);
-      if (!sound.stopped && (!clip || late < sound.duration)) {
-        sound.playing = decoded.play(
-          start,
-          loops,
-          timelineMix(s, owner),
-          clip ? { ...shape, atMs: late } : shape,
-        );
-      }
-    },
-    () => {
-      sound.decoding = false;
-    },
-  );
-  return sound;
-}
-
-/**
- * An event sound, as StartSound and a button start one: SyncStop stops
- * every instance of the sound the timeline started, SyncNoMultiple starts
- * none while one plays, and otherwise it plays from its in point to its
- * out point, as many loops as it says, under its envelope. AS3's channels
- * of the sound are left be: adl plays one on through a SyncStop of it.
- */
-function startEventSound(
-  s: Scripting,
-  owner: DisplayObject,
-  character: SoundCharacter,
-  info: SoundInfo,
-): void {
-  const active = timelineSounds.get(s);
-  if (info.stop) {
-    for (const sound of [...(active ?? [])]) {
-      if (sound.character === character) {
-        stopTimelineSound(s, sound);
-      }
-    }
-
-    return;
-  }
-
-  if (
-    info.noMultiple &&
-    active &&
-    [...active].some((sound) => sound.character === character && sound.endedAt === null)
-  ) {
-    return;
-  }
-
-  const definition = character.definition;
-  const length = (definition.sampleCount * 1000) / definition.sampleRate;
-  const start = (info.inPoint ?? 0) / ENVELOPE_RATE;
-  const end = info.outPoint === null ? length : Math.min(length, info.outPoint / ENVELOPE_RATE);
-  const loops = Math.max(1, info.loops);
-  const shape: PlayShape = {};
-  if (info.outPoint !== null) {
-    shape.endMs = end;
-  }
-
-  if (info.envelope) {
-    shape.envelope = info.envelope.map((point) => ({
-      ms: point.sample / ENVELOPE_RATE,
-      left: point.left,
-      right: point.right,
-    }));
-  }
-
-  playTimelineSound(
-    s,
-    owner,
-    character,
-    null,
-    start,
-    loops,
-    shape,
-    Math.max(0, end - start) * loops,
-  );
-}
-
-/** The DefineSound a StartSound names, by id or, for StartSound2, by the class bound to it. */
-function startSoundCharacter(library: Library, start: StartSound): SoundCharacter | null {
-  let id = start.id;
-  if (start.className !== null) {
-    const dot = start.className.lastIndexOf(".");
-    const name =
-      dot < 0
-        ? start.className
-        : `${start.className.slice(0, dot)}::${start.className.slice(dot + 1)}`;
-    id = null;
-    for (const [bound, className] of library.classes) {
-      if (className === name) {
-        id = bound;
-        break;
-      }
-    }
-  }
-
-  const character = id === null ? undefined : library.characters.get(id);
-  return character?.type === "sound" ? character : null;
-}
-
-/** A stream's blocks made one sound on its first play, shared by every clip of its timeline. */
-function streamOf(stream: SoundStream): NonNullable<SoundStream["sound"]> {
-  if (!stream.sound) {
-    const { sound, starts } = streamSound(stream.head, stream.blocks);
-    stream.sound = { character: { type: "sound", id: 0, definition: sound }, starts };
-  }
-
-  return stream.sound;
-}
-
-/**
- * The block on `frame` of a playing clip with no stream playing starts it
- * from there, as Ruffle's sound_stream_block does, to the end of the run of
- * frames with blocks after it, where Ruffle's stream ends; MP3's runs on
- * over gaps, to its last block. It keeps on as the clip plays on; Flash's
- * skipping of frames to keep the timeline with it is not done.
- */
-function startStream(s: Scripting, clip: MovieClip, stream: SoundStream, frame: number): void {
-  const block = stream.byFrame.get(frame);
-  if (block === undefined || !clip.playing || clip.stream) {
-    return;
-  }
-
-  // What the timeline took off plays the frame it went in, but its streams no more.
-  let top: DisplayObject = clip;
-  while (top.parent) {
-    top = top.parent;
-  }
-
-  if (unloaded.get(top) === s.frames) {
-    return;
-  }
-
-  // The last moments of its stream before, over by the clock, give way to this one.
-  for (const sound of [...(timelineSounds.get(s) ?? [])]) {
-    if (sound.clip === clip) {
-      stopTimelineSound(s, sound);
-    }
-  }
-
-  const { character, starts } = streamOf(stream);
-  let last = block + 1;
-  if (stream.head.format === 2) {
-    last = stream.blocks.length;
-  } else {
-    while (stream.byFrame.get(frame + last - block) === last) {
-      last++;
-    }
-  }
-
-  const rate = character.definition.sampleRate;
-  const start = (starts[block] * 1000) / rate;
-  const end = (starts[last] * 1000) / rate;
-  clip.stream = playTimelineSound(s, clip, character, clip, start, 1, { endMs: end }, end - start);
-}
-
-/** What the timeline took off, by the frame it did. */
-const unloaded = new WeakMap<DisplayObject, number>();
-
-/** Whether `inner` is `outer` or under it. */
-function within(inner: DisplayObject, outer: DisplayObject): boolean {
-  for (let o: DisplayObject | null = inner; o; o = o.parent) {
-    if (o === outer) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/** unloadAndStop: the sounds of the timelines under `display` stop, its event sounds too. */
-export function stopTimelineSoundsUnder(s: Scripting, display: DisplayObject): void {
-  for (const sound of [...(timelineSounds.get(s) ?? [])]) {
-    if (within(sound.owner, display)) {
-      stopTimelineSound(s, sound);
-    }
-  }
-}
-
-/** What plays the timelines' sounds of every library a Scripting loads. */
-export function timelineSoundsOf(s: Scripting): TimelineSounds {
-  return {
-    frame(clip, frame) {
-      if (!s.audio) {
-        return;
-      }
-
-      const timeline = clip.timeline;
-      for (const start of timeline.sounds.get(frame) ?? []) {
-        const character = startSoundCharacter(clip.library, start);
-        if (character) {
-          startEventSound(s, clip, character, start.info);
-        }
-      }
-
-      if (timeline.stream) {
-        startStream(s, clip, timeline.stream, frame);
-      }
-    },
-    stopStream(clip) {
-      clip.stream = null;
-      for (const sound of [...(timelineSounds.get(s) ?? [])]) {
-        if (sound.clip === clip) {
-          stopTimelineSound(s, sound);
-        }
-      }
-    },
-    start(owner, library, id, info) {
-      const character = library.characters.get(id);
-      if (s.audio && character?.type === "sound") {
-        startEventSound(s, owner, character, info);
-      }
-    },
-    removed(display) {
-      if (!s.audio) {
-        return;
-      }
-
-      unloaded.set(display, s.frames);
-      for (const sound of [...(timelineSounds.get(s) ?? [])]) {
-        if (sound.clip && within(sound.clip, display)) {
-          stopTimelineSound(s, sound);
-        }
-      }
-    },
-  };
-}
-
 export function transformOf(s: Scripting, mix: SoundMix): AsObject {
   const o = s.rt.construct(s.rt.classNamed("flash.media::SoundTransform")) as AsObject;
   o.$soundVolume = mix.volume;
@@ -538,49 +139,6 @@ export function transformOf(s: Scripting, mix: SoundMix): AsObject {
   o.$soundRightToLeft = mix.rightToLeft;
   o.$soundRightToRight = mix.rightToRight;
   return o;
-}
-
-/** Sound completions run with the next SWF frame, even if the device ended between frames. */
-export function finishSounds(s: Scripting): void {
-  // A timeline sound that has played its time is over: a NoMultiple may start
-  // it again, and its clip's stream at the next block.
-  for (const sound of [...(timelineSounds.get(s) ?? [])]) {
-    if (sound.endedAt === null && s.now - sound.started >= sound.duration) {
-      sound.endedAt = s.now;
-      if (sound.clip?.stream === sound) {
-        sound.clip.stream = null;
-      }
-    } else if (sound.endedAt !== null && !onDevice(sound)) {
-      stopTimelineSound(s, sound);
-    } else if (
-      sound.endedAt !== null &&
-      sound.playing?.ended === undefined &&
-      s.now - sound.endedAt >= TAIL
-    ) {
-      stopTimelineSound(s, sound);
-    }
-  }
-
-  const active = channels.get(s);
-  if (!active) {
-    return;
-  }
-
-  for (const channel of active) {
-    const state = channel.$channel as ChannelState;
-    if (state.stopped || state.sound.length <= 0) {
-      continue;
-    }
-
-    const duration = (state.sound.length - state.start) * Math.max(1, state.loops);
-    if (s.now - state.started < duration) {
-      continue;
-    }
-
-    stopChannel(s, state);
-    active.delete(channel);
-    dispatchEvent(s, channel, s.event("soundComplete"));
-  }
 }
 
 export function soundNatives(s: Scripting): avm2.Natives {
@@ -607,7 +165,11 @@ export function soundNatives(s: Scripting): avm2.Natives {
   };
   const startAudio = (state: ChannelState): void => {
     const sound = state.sound;
-    const task = sound.character ? s.soundClip(sound.character) : sound.clip;
+    if (!sound.character && !sound.clip) {
+      sound.clip = loadedClip(sound);
+    }
+
+    const task = sound.character ? s.symbols.soundClip(sound.character) : sound.clip;
     void task
       ?.then(
         (clip) => {
@@ -628,8 +190,254 @@ export function soundNatives(s: Scripting): avm2.Natives {
       });
   };
 
+  /** The decode a sound loaded from a ByteArray plays, made when it first plays. */
+  const loadedClip = (sound: SoundState) => {
+    if (!s.audio) {
+      return null;
+    }
+
+    if (sound.pcm) {
+      return s.audio.decode(pcmSound(sound.pcm));
+    }
+
+    return sound.compressed && sound.bytes ? s.audio.decode(sound.bytes) : null;
+  };
+
+  /**
+   * What extract reads of a sound now: an MP3's decode only once it is
+   * done, which the browser's decoder gives late where Flash's gives at
+   * once, so that an MP3's first extract starts its decode and gives
+   * nothing.
+   */
+  const extractSource = (sound: SoundState): ExtractSource | null => {
+    if (sound.pcm) {
+      return { rate: EXTRACT_RATE, channels: sound.pcm, skip: 0, whole: false };
+    }
+
+    const character = sound.character;
+    const definition = character?.definition;
+    if (character && definition && definition.format !== 2) {
+      let source = embeddedSources.get(character);
+      if (source === undefined) {
+        source = embeddedSource(definition);
+        embeddedSources.set(character, source);
+      }
+
+      return source;
+    }
+
+    const key = character ?? sound;
+    const bytes = definition ? definition.data : sound.bytes;
+    let decode = mp3Decodes.get(key);
+    if (!decode && bytes?.length) {
+      const entry: { samples: ExtractedSamples | null } = { samples: null };
+      decode = entry;
+      mp3Decodes.set(key, entry);
+      const task = s.audio?.extractSamples?.(bytes);
+      if (task) {
+        s.loads.trackRequest(
+          task.then(
+            (samples) => {
+              entry.samples = samples;
+            },
+            () => {},
+          ),
+        );
+      }
+    }
+
+    const samples = decode?.samples;
+    return samples
+      ? {
+          rate: samples.rate,
+          channels: samples.channels,
+          skip: definition ? Math.max(0, definition.seekSamples) : 0,
+          whole: false,
+        }
+      : null;
+  };
+
   class SoundNatives {
     declare $sound: SoundState | undefined;
+
+    /**
+     * Up to `length` samples at 44.1 kHz into `target` at its position, a
+     * float each for left and right in its byte order, from `startPosition`
+     * or, for -1, from where the last extract stopped.
+     */
+    extract(target: Value, length: Value, startPosition: Value = -1): number {
+      const sound = stateOf(this as AsObject);
+      if (target === null || target === undefined) {
+        return 0;
+      }
+
+      const source = extractSource(sound);
+      const start = s.rt.toNumber(startPosition);
+      if (start >= 0) {
+        // Past 32 bits a start is from the beginning, as in adl.
+        const at = start >= 2 ** 31 ? 0 : Math.floor(start);
+        sound.extracted = source?.seek ? source.seek(at) : at;
+        if (source && sound.extracted >= (source.starts ?? Number.POSITIVE_INFINITY)) {
+          sound.extracted = source.channels[0].length;
+          return 0;
+        }
+      }
+
+      if (!source) {
+        return 0;
+      }
+
+      const { samples, position, count } = extractSamples(
+        source,
+        sound.extracted,
+        s.rt.toNumber(length),
+      );
+      sound.extracted = position;
+      const b = avm2.bytesOf(s.rt, target as AsObject);
+      const bytes = new Uint8Array(samples.length * 4);
+      const view = new DataView(bytes.buffer);
+      for (let i = 0; i < samples.length; i++) {
+        view.setFloat32(i * 4, samples[i], b.littleEndian);
+      }
+
+      if (bytes.length) {
+        b.write(bytes);
+      }
+
+      return count;
+    }
+
+    /**
+     * MP3 frames from `bytes`, added to any it was given before, as adl
+     * has it: its length counts a frame cut short, its decode does not,
+     * and a sound of the SWF's keeps its own samples.
+     */
+    loadCompressedDataFromByteArray(bytes: Value, bytesLength: Value): void {
+      if (bytes === null || bytes === undefined) {
+        throw s.rt.error("TypeError", 2007, "bytes");
+      }
+
+      const sound = stateOf(this as AsObject);
+      const b = avm2.bytesOf(s.rt, bytes as AsObject);
+      const n = s.rt.toUint(bytesLength);
+      if (n === 0 || n > b.length - b.position) {
+        throw s.rt.error("ArgumentError", 2084);
+      }
+
+      const data = b.readView(n);
+      if (sound.character) {
+        return;
+      }
+
+      // Into room kept past the bytes before, which doubles as they grow,
+      // their frames read on from where they stopped: chunk by chunk, it
+      // all takes time in step with its bytes. Its decodes wait till it
+      // plays or a script extracts it.
+      const had = sound.compressed ? sound.bytes : null;
+      const size = (had?.length ?? 0) + n;
+      let buffer =
+        had && had.byteOffset === 0 && had.buffer.byteLength >= size
+          ? new Uint8Array(had.buffer)
+          : null;
+      if (!buffer) {
+        buffer = new Uint8Array(Math.max(size, (had?.length ?? 0) * 2));
+        buffer.set(had ?? []);
+      }
+
+      buffer.set(data, had?.length ?? 0);
+      const all = buffer.subarray(0, size);
+      const mp3 = mp3Frames(all, had ? sound.frames : null);
+      sound.bytes = all;
+      sound.frames = mp3;
+      sound.compressed = true;
+      sound.pcm = null;
+      sound.used = true;
+      sound.loaded = n;
+      sound.total = n;
+      sound.length = mp3 ? (mp3.frames * mp3.samplesPerFrame * 1000) / mp3.rate : 0;
+      sound.clip = null;
+      mp3Decodes.delete(sound);
+      dispatchEvent(
+        s,
+        this as AsObject,
+        s.rt.construct(
+          s.rt.classNamed("flash.events::ProgressEvent"),
+          "progress",
+          false,
+          false,
+          n,
+          n,
+        ) as AsObject,
+      );
+    }
+
+    /**
+     * `samples` samples of 32-bit floats or 16-bit integers from `bytes`,
+     * in its byte order, brought to 44.1 kHz: they take the place of
+     * whatever the sound had, a SWF's sound too.
+     */
+    loadPCMFromByteArray(
+      bytes: Value,
+      samples: Value,
+      format: Value = "float",
+      stereo: Value = true,
+      sampleRate: Value = EXTRACT_RATE,
+    ): void {
+      if (bytes === null || bytes === undefined) {
+        throw s.rt.error("TypeError", 2007, "bytes");
+      }
+
+      if (format === null || format === undefined) {
+        throw s.rt.error("TypeError", 2007, "format");
+      }
+
+      const kind = s.rt.toString(format);
+      if (kind !== "float" && kind !== "short") {
+        throw s.rt.error("ArgumentError", 2005);
+      }
+
+      const b = avm2.bytesOf(s.rt, bytes as AsObject);
+      const n = s.rt.toUint(samples);
+      const rate = s.rt.toNumber(sampleRate);
+      const channels = stereo ? 2 : 1;
+      const size = kind === "float" ? 4 : 2;
+      const available = b.length - b.position;
+      // adl weighs the samples against the bytes, not the bytes they take,
+      // and then reads what there is before it finds them short.
+      if (n === 0 || !(rate > 0) || n > available) {
+        throw s.rt.error("ArgumentError", 2084);
+      }
+
+      // Faster than 44.1 kHz, it reads only as many as it gives out.
+      const outputs = Math.floor((n * EXTRACT_RATE) / rate);
+      const count = Math.min(n, outputs);
+      if (count * channels * size > available) {
+        b.position = (b.position + Math.floor(available / size) * size) >>> 0;
+        throw s.rt.error("flash.errors::EOFError", 2030);
+      }
+
+      const little = b.littleEndian;
+      const view = new DataView(b.read(count * channels * size).buffer);
+      const raw = Array.from({ length: channels }, () => new Float32Array(count));
+      for (let i = 0; i < count * channels; i++) {
+        raw[i % channels][Math.floor(i / channels)] =
+          size === 4 ? view.getFloat32(i * 4, little) : view.getInt16(i * 2, little) / 32768;
+      }
+
+      const sound = stateOf(this as AsObject);
+      const pcm = toExtractRate(raw, count < n ? EXTRACT_RATE : rate);
+      sound.character = null;
+      sound.pcm = pcm;
+      sound.bytes = new Uint8Array(0);
+      sound.compressed = false;
+      sound.used = true;
+      sound.loaded = n * size;
+      sound.total = n * size;
+      // In samples a millisecond, to adl's last bit.
+      sound.length = pcm[0].length / (EXTRACT_RATE / 1000);
+      sound.extracted = 0;
+      sound.clip = null;
+    }
 
     "flash.media:Sound::_load"(request: Value, _checkPolicyFile: Value, _bufferTime: Value): void {
       // Sound's AS3 constructor always calls load, with null when it was given no request.
@@ -646,7 +454,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
       const generation = ++sound.generation;
       const abort = new AbortController();
       sound.abort = abort;
-      s.requestBytes(request as AsObject, abort.signal, ({ bytes, local }, url) => {
+      s.loads.requestBytes(request as AsObject, abort.signal, ({ bytes, local }, url) => {
         if (sound.generation !== generation) {
           return;
         }
@@ -663,7 +471,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
               "ioError",
               false,
               false,
-              s.streamError(url, local),
+              s.loads.streamError(url, local),
             ) as AsObject,
           );
           return;
@@ -710,7 +518,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
         const completed = sound.clip.then(
           (clip) => {
             sound.length = clip.durationMs;
-            s.deferHostEvent(() => {
+            s.loads.deferHostEvent(() => {
               if (sound.generation === generation) {
                 dispatchEvent(s, this as AsObject, s.event("complete"));
               }
@@ -718,7 +526,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
           },
           () => {
             discardPending(sound);
-            s.deferHostEvent(() => {
+            s.loads.deferHostEvent(() => {
               if (sound.generation === generation) {
                 dispatchEvent(
                   s,
@@ -728,14 +536,14 @@ export function soundNatives(s: Scripting): avm2.Natives {
                     "ioError",
                     false,
                     false,
-                    s.streamError(url, local),
+                    s.loads.streamError(url, local),
                   ) as AsObject,
                 );
               }
             });
           },
         );
-        s.trackRequest(completed);
+        s.loads.trackRequest(completed);
       });
     }
 
@@ -794,7 +602,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
       const channel = s.rt.construct(s.rt.classNamed("flash.media::SoundChannel")) as AsObject;
       const state: ChannelState = {
         sound,
-        started: s.now,
+        started: s.timers.now,
         start,
         loops: Math.max(0, s.rt.toInt(loops)),
         mix: channelMix(mixOf(transform as AsObject | null)),
@@ -863,7 +671,7 @@ export function soundHooks(s: Scripting): Record<string, avm2.ClassHook> {
     "flash.media::Sound": {
       create: (traits) => {
         const o = Object.create(traits.proto);
-        const character = s.soundSymbol(traits);
+        const character = s.symbols.soundSymbol(traits);
         const data = character?.definition;
         o.$sound = {
           character,
@@ -871,11 +679,16 @@ export function soundHooks(s: Scripting): Record<string, avm2.ClassHook> {
           url: null,
           loaded: data?.data.length ?? 0,
           total: data?.data.length ?? 0,
-          length: data ? (data.sampleCount * 1000) / data.sampleRate : 0,
+          // In samples a millisecond, to adl's last bit.
+          length: data ? data.sampleCount / (data.sampleRate / 1000) : 0,
           used: !!data,
           generation: 0,
           abort: null,
           clip: null,
+          frames: null,
+          compressed: false,
+          pcm: null,
+          extracted: 0,
         } satisfies SoundState;
         return o;
       },

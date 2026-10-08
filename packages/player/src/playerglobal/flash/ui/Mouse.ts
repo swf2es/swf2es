@@ -2,7 +2,7 @@
 // which of Flash's own it forces, and bitmap cursors registered by name.
 // MouseCursorData holds a cursor's frames, hot spot and frame rate.
 import { avm2 } from "@swf2es/runtime";
-import { encodePng } from "../../../png.js";
+import { encodePng } from "../../../bitmap/png.js";
 import type { Scripting } from "../../../scripting.js";
 import { storeOf } from "../display/BitmapData.js";
 

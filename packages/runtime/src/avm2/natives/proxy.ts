@@ -4,8 +4,11 @@
 // at run time, as proxy[name], as the value it was, a string or a QName.
 // callProperty gets the QName and the arguments; for-in asks
 // nextNameIndex, nextName and nextValue.
+
+import type { AsObject, Value } from "../descriptors.js";
+import type { ClassHook, PropertyHook } from "../hooks.js";
 import { type Multiname, NS_Public, namespace, publicNs, qname } from "../names.js";
-import type { AsObject, ClassHook, PropertyHook, Runtime, Value } from "../runtime.js";
+import type { Runtime } from "../runtime.js";
 import type { Natives } from "./define.js";
 
 const FLASH_PROXY = namespace(NS_Public, "http://www.adobe.com/2006/actionscript/flash/proxy");
@@ -44,7 +47,11 @@ function isIndex(name: string): boolean {
 }
 
 function call(rt: Runtime, o: AsObject, method: string, ...args: Value[]): Value {
-  return rt.callProperty(o, qname(FLASH_PROXY, method), ...args);
+  // Not a tail call, as the runtime's calls are not (see Runtime.getProperty).
+  // biome-ignore lint/style/useConst: a const is folded into a tail call (see Runtime.getProperty)
+  let r: Value;
+  r = rt.callProperty(o, qname(FLASH_PROXY, method), ...args);
+  return r;
 }
 
 export const proxyHook: PropertyHook = {

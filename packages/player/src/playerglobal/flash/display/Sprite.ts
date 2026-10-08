@@ -5,11 +5,13 @@
 // Its soundTransform is kept, in whole percents as a channel's, and read
 // back as a copy; it mixes the timeline sounds of the sprite and all in it.
 import { avm2 } from "@swf2es/runtime";
-import type { SoundMix } from "../../../audio.js";
-import { type DisplayObject, MovieClip } from "../../../display.js";
-import type { Rect } from "../../../geometry.js";
+import { type DisplayObject, MovieClip } from "../../../display/display.js";
+import type { Rect } from "../../../display/geometry.js";
+import { dropTargetOf, hitAreaOf, setHitArea } from "../../../input/pointer.js";
+import type { SoundMix } from "../../../media/audio.js";
+import { mixOf, updateTimelineMixes } from "../../../media/sounds.js";
 import type { Scripting } from "../../../scripting.js";
-import { channelMix, mixOf, transformOf, updateTimelineMixes } from "../media/Sound.js";
+import { channelMix, transformOf } from "../media/Sound.js";
 import { graphicsOf } from "./Graphics.js";
 
 type Value = avm2.Value;
@@ -66,6 +68,20 @@ export function spriteNatives(s: Scripting): avm2.Natives {
 
     set useHandCursor(v: Value) {
       this.$useHandCursor = !!v;
+    }
+
+    /** Another sprite whose drawing the pointer hits this one by (input/pointer.ts). */
+    get hitArea(): Value {
+      return hitAreaOf(this.$display)?.object ?? null;
+    }
+
+    set hitArea(v: Value) {
+      setHitArea(this.$display, (v as { $display?: DisplayObject } | null)?.$display ?? null);
+    }
+
+    /** The object the sprite was last dragged over, kept once it is dropped. */
+    get dropTarget(): Value {
+      return dropTargetOf(this.$display)?.object ?? null;
     }
 
     startDrag(lockCenter: Value, bounds: Value): void {

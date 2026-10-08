@@ -1,7 +1,10 @@
 // Object, Class, Function, Namespace and QName: their natives, and what
 // calling or constructing Object, Namespace, QName or Function does.
+
+import type { AsObject, Value } from "../descriptors.js";
+import type { ClassHook } from "../hooks.js";
 import { formatClassName, Namespace, prefixOf, publicNs, qname } from "../names.js";
-import { type AsObject, type ClassHook, NOT_FOUND, type Runtime, type Value } from "../runtime.js";
+import { NOT_FOUND, type Runtime } from "../runtime.js";
 import { AS3, elements, type Natives, plain } from "./define.js";
 import { constructNamespace, newNamespace } from "./xml/xml.js";
 
@@ -104,7 +107,11 @@ export const objectNatives: Natives = {
   }),
   [`Function#${AS3}::call`]: (rt) =>
     function (this: AsObject, receiver: Value, ...args: Value[]) {
-      return rt.callValue(this, receiver, args, null);
+      // Not a tail call, as the runtime's calls are not (see Runtime.getProperty).
+      // biome-ignore lint/style/useConst: a const is folded into a tail call (see Runtime.getProperty)
+      let r: Value;
+      r = rt.callValue(this, receiver, args, null);
+      return r;
     },
   [`Function#${AS3}::apply`]: (rt) =>
     function (this: AsObject, receiver: Value, args: Value) {
@@ -113,7 +120,10 @@ export const objectNatives: Natives = {
         throw rt.error("TypeError", 1116);
       }
 
-      return rt.callValue(this, receiver, elements(args).slice(), null);
+      // biome-ignore lint/style/useConst: a const is folded into a tail call (see Runtime.getProperty)
+      let r: Value;
+      r = rt.callValue(this, receiver, elements(args).slice(), null);
+      return r;
     },
 
   // Namespace and QName: a QName holds its namespace, null for any, and its

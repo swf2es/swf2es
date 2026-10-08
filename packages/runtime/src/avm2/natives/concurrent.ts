@@ -3,7 +3,9 @@
 // is held or not, recursively, and nothing else runs to take it, to notify
 // a condition or to see memory out of order. Crossbridge uses them all on
 // startup whether or not it starts workers.
-import type { AsObject, Runtime, Value } from "../runtime.js";
+
+import type { AsObject, Value } from "../descriptors.js";
+import type { Runtime } from "../runtime.js";
 import { type Natives, plain, registerNativeClass } from "./define.js";
 
 /** A mutex's state: how many times this one thread holds it. */

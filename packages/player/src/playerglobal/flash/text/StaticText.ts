@@ -1,6 +1,6 @@
 // flash.text.StaticText: DefineText's glyphs, which a script reads as its text.
 import { avm2 } from "@swf2es/runtime";
-import { StaticTextObject } from "../../../display.js";
+import { StaticTextObject } from "../../../display/display.js";
 import { displayOf } from "../display/DisplayObject.js";
 
 type Value = avm2.Value;

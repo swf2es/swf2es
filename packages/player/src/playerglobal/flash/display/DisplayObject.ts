@@ -2,18 +2,23 @@
 // other face, and its properties read and written through it.
 import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { bounds, boundsIn, hitsObject, hitsPoint, toStage } from "../../../bounds.js";
+import { bounds, boundsIn, hitsObject, hitsPoint, toStage } from "../../../display/bounds.js";
 import {
   ButtonObject,
   CONTENT,
   type DisplayObject,
+  MovieClip,
+  rootOf,
+  scriptWork,
   TextObject,
   TRANSFORM,
-} from "../../../display.js";
-import { copyFilter } from "../../../filters.js";
-import { apply, invert, type Rect, transformRect } from "../../../geometry.js";
+} from "../../../display/display.js";
+import { copyFilter } from "../../../display/filters.js";
+import { apply, invert, type Rect, transformRect } from "../../../display/geometry.js";
+import { gridInside, sliceBounds } from "../../../display/scale9.js";
 import type { Scripting } from "../../../scripting.js";
-import { copyMap, filterClassName, filterKindOf, recordOf } from "../filters/filters.js";
+import { filterClassName, filterKindOf, recordOf } from "../filters/BitmapFilter.js";
+import { copyMap } from "../filters/DisplacementMapFilter.js";
 import { colorOf, matrixOf } from "../geom/Transform.js";
 
 type AsObject = avm2.AsObject;
@@ -41,18 +46,6 @@ const BLEND_MODES = new Set([
   "hardlight",
   "shader",
 ]);
-
-/** A new flash.geom.Rectangle with `r`'s values, as Flash hands out copies, or null for none. */
-function rectangleCopy(s: Scripting, r: AsObject | null): Value {
-  if (!r) {
-    return null;
-  }
-
-  return s.rt.construct(
-    s.rt.classNamed("flash.geom::Rectangle"),
-    ...["x", "y", "width", "height"].map((k) => s.rt.getProperty(r, name(k))),
-  );
-}
 
 /** The nearest whole number, a half to the even one. */
 function halfEven(v: number): number {
@@ -120,7 +113,7 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
       create: (traits) => {
         const o = Object.create(traits.proto);
         const made = s.pending === null;
-        const display = s.pending ?? s.displayFor(traits);
+        const display = s.pending ?? s.symbols.displayFor(traits);
         s.pending = null;
         // Flash names each display object without a name of its own as it
         // is made, instance1, instance2, ..., the stage aside.
@@ -130,14 +123,39 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
 
         o.$display = display;
         display.object = o;
+        // A clip alive now has its frame scripts to run (Scripting.runFrameScripts).
+        scriptWork.changes++;
+        // Only a MovieClip plays its timeline: a sprite bound to a class that
+        // extends Sprite alone stays on its first frame, as fl.controls'
+        // components do, whose second frame holds their skins. An AVM1
+        // movie's root, an AVM1Movie, is no Sprite and plays.
+        if (display instanceof MovieClip && spriteOnly(traits)) {
+          display.playing = false;
+        }
+
         if (made) {
-          s.made(display);
+          s.lifecycle.made(display);
         }
 
         return o;
       },
     },
   };
+}
+
+/** Whether `traits` is Sprite's or a subclass's that does not extend MovieClip. */
+function spriteOnly(traits: { name: string; base: unknown }): boolean {
+  for (let t = traits as typeof traits | null; t; t = t.base as typeof traits | null) {
+    if (t.name === "flash.display::MovieClip") {
+      return false;
+    }
+
+    if (t.name === "flash.display::Sprite") {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /** Move a display object, by a copy of its matrix, and have it drawn again. */
@@ -150,17 +168,6 @@ function transform(d: DisplayObject, change: (m: Matrix) => void): void {
 }
 
 const IDENTITY_COLOR = { rMul: 1, gMul: 1, bMul: 1, aMul: 1, rAdd: 0, gAdd: 0, bAdd: 0, aAdd: 0 };
-
-/** The root `d` is under, or is: the nearest display object up from it that carries a LoaderInfo; null under none, as for one a script made and did not add. */
-export function rootOf(d: DisplayObject): DisplayObject | null {
-  for (let o: DisplayObject | null = d; o; o = o.parent) {
-    if (o.loaderInfo) {
-      return o;
-    }
-  }
-
-  return null;
-}
 
 /** Whether `d` is on the display list: under the stage. */
 export function onStage(s: Scripting, d: DisplayObject): boolean {
@@ -181,11 +188,9 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
   class DisplayObjectNatives {
     declare $display: DisplayObject;
     declare $transform: AsObject | undefined;
-    declare $cacheAsBitmap: boolean | undefined;
     declare $cacheAsBitmapMatrix: Value;
     declare $metaData: Value;
     declare $opaqueBackground: Value;
-    declare $scale9Grid: AsObject | null | undefined;
     declare $accessibilityProperties: Value;
 
     get name(): string {
@@ -205,13 +210,9 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       return this.$display.visible;
     }
 
-    // Set to what it was, visible, mask and cacheAsBitmap are no touch in Flash (the `replaces` case);
-    // changed, the player takes them for one there, but never for a move (`scripted-moves`).
+    // Visible, mask and cacheAsBitmap are no touch in Flash, whatever they are set to: the
+    // timeline still puts another shape or text in the object's place (`scripted-touch`).
     set visible(v: Value) {
-      if (this.$display.visible !== !!v) {
-        this.$display.scripted = true;
-      }
-
       this.$display.visible = !!v;
       this.$display.invalidate(TRANSFORM);
       if (!v) {
@@ -496,16 +497,13 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       this.$display.setBlendMode(mode);
     }
 
+    // Flash caches an object with filters whatever cacheAsBitmap was set to, and reads it so.
     get cacheAsBitmap(): boolean {
-      return this.$cacheAsBitmap ?? false;
+      return this.$display.cachedAsBitmap || this.$display.filters.length > 0;
     }
 
     set cacheAsBitmap(v: Value) {
-      if ((this.$cacheAsBitmap ?? false) !== !!v) {
-        this.$display.scripted = true;
-      }
-
-      this.$cacheAsBitmap = !!v;
+      this.$display.setCachedAsBitmap(!!v);
     }
 
     get cacheAsBitmapMatrix(): Value {
@@ -557,10 +555,6 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     set mask(v: Value) {
       const mask = (v as AsObject | null)?.$display ?? null;
-      if (this.$display.mask !== mask) {
-        this.$display.scripted = true;
-      }
-
       this.$display.setMask(mask);
     }
 
@@ -581,13 +575,42 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       this.$opaqueBackground = v === null || v === undefined ? null : s.rt.toUint(v);
     }
 
+    /** Whole pixels, each of x, y, width and height cut toward 0, as adl reports a grid. */
     get scale9Grid(): Value {
-      return rectangleCopy(s, this.$scale9Grid ?? null);
+      const g = this.$display.scale9Grid;
+      return g
+        ? s.rt.construct(
+            s.rt.classNamed("flash.geom::Rectangle"),
+            Math.trunc(g.xMin),
+            Math.trunc(g.yMin),
+            Math.trunc(g.xMax - g.xMin),
+            Math.trunc(g.yMax - g.yMin),
+          )
+        : null;
     }
 
+    /**
+     * Kept in whole pixels, cut toward 0. A grid not strictly inside the
+     * bounds a grid divides (display/scale9.ts), as given, is kept as well,
+     * and then refused with ArgumentError #2004, as adl does.
+     */
     set scale9Grid(v: Value) {
-      this.$display.touch();
-      this.$scale9Grid = v ? (rectangleCopy(s, v as AsObject) as AsObject) : null;
+      const d = this.$display;
+      d.touch();
+      d.invalidate(CONTENT);
+      if (!v) {
+        d.scale9Grid = null;
+        return;
+      }
+
+      const [x, y, w, h] = ["x", "y", "width", "height"].map((k) =>
+        Number(s.rt.getProperty(v as AsObject, name(k))),
+      );
+      const [cx, cy] = [Math.trunc(x), Math.trunc(y)];
+      d.scale9Grid = { xMin: cx, yMin: cy, xMax: cx + Math.trunc(w), yMax: cy + Math.trunc(h) };
+      if (!gridInside(sliceBounds(d), { xMin: x, yMin: y, xMax: x + w, yMax: y + h })) {
+        throw s.rt.error("ArgumentError", 2004);
+      }
     }
 
     get scrollRect(): Value {

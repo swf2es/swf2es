@@ -1,5 +1,9 @@
 // The Vectors: one implementation, over their element conversions.
-import { type AsObject, arrayIndex, type ClassHook, type Runtime, type Value } from "../runtime.js";
+
+import type { AsObject, Value } from "../descriptors.js";
+import type { ClassHook } from "../hooks.js";
+import { arrayIndex } from "../names.js";
+import type { Runtime } from "../runtime.js";
 import { AS3, eachElement, elements, type Natives, plain, withStorage } from "./define.js";
 import { sort } from "./sort.js";
 

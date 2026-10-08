@@ -1,0 +1,11 @@
+0: K B K K B R R K K
+1: K B K K B R R K K
+2: K B G K B R R G G
+3: K B G K B R R G G
+4: G B G K B R R G G
+5: K B B K B G R w w
+6: w B K w B K w K K
+7: w B G w B K G R w
+8: K K R K B R R K K
+9: w G B w G G w w w
+10 top rows: w/w K/K K/K R/R R/R

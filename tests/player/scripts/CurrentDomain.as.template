@@ -1,0 +1,51 @@
+package {
+  import flash.display.Loader;
+  import flash.display.MovieClip;
+  import flash.events.Event;
+  import flash.system.ApplicationDomain;
+  import flash.system.LoaderContext;
+  import flash.utils.ByteArray;
+
+  public class Main extends MovieClip {
+    private static const INNER:String = "@@INNER@@";
+
+    public function Main() {
+      var d:ApplicationDomain = ApplicationDomain.currentDomain;
+      trace("main sees its class", d.hasDefinition("Main"));
+      trace("main has no parent", d.parentDomain == null);
+      var loader:Loader = new Loader();
+      var context:LoaderContext = new LoaderContext(false, new ApplicationDomain(d));
+      context.allowCodeImport = true;
+      loader.contentLoaderInfo.addEventListener(Event.INIT, function (e:Event):void {
+        var now:ApplicationDomain = ApplicationDomain.currentDomain;
+        trace("main sees the child's class", now.hasDefinition("CurrentDomainOnly"));
+        trace("main sees its class", now.hasDefinition("Main"));
+        trace("main has no parent", now.parentDomain == null);
+      });
+      loader.loadBytes(decode(INNER), context);
+    }
+
+    private static function decode(text:String):ByteArray {
+      const alphabet:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      var out:ByteArray = new ByteArray();
+      var bits:int = 0;
+      var have:int = 0;
+      for (var i:int = 0; i < text.length; i++) {
+        var c:String = text.charAt(i);
+        if (c == "=") {
+          break;
+        }
+
+        bits = ((bits << 6) | alphabet.indexOf(c)) & 0xffff;
+        have += 6;
+        if (have >= 8) {
+          have -= 8;
+          out.writeByte((bits >> have) & 0xff);
+        }
+      }
+
+      out.position = 0;
+      return out;
+    }
+  }
+}

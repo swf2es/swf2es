@@ -18,7 +18,10 @@ import {
   zlibUncompress,
 } from "@swf2es/format";
 import type { ExternalStream, Reader, Writer } from "../amf.js";
-import type { AsObject, IndexHook, Method, Runtime, Traits, Value } from "../runtime.js";
+import type { AsObject, Method, Value } from "../descriptors.js";
+import type { IndexHook } from "../hooks.js";
+import type { Runtime } from "../runtime.js";
+import type { Traits } from "../traits.js";
 import { type Natives, registerNativeClass } from "./define.js";
 
 const kGrowthIncr = 4096;
@@ -35,10 +38,36 @@ export const GLOBAL_MEMORY_MIN_SIZE = 1024;
 const kAMF0 = 0;
 const kAMF3 = 3;
 
+/** A count of bytes, which a ByteArray and its runtime share. */
+interface Count {
+  bytes: number;
+}
+
+/** The capacity of each runtime's ByteArrays, live or not yet collected. */
+const runtimeCapacity = new WeakMap<Runtime, Count>();
+/** A ByteArray collected: its capacity no longer counted, by its runtime's count and its own. */
+const collected = new FinalizationRegistry<{ runtime: Count; own: Count }>(({ runtime, own }) => {
+  runtime.bytes -= own.bytes;
+});
+
+/** The capacity of `rt`'s ByteArrays, which avmshell's System counts in its memory. */
+export function byteArrayCapacity(rt: Runtime): number {
+  return runtimeCapacity.get(rt)?.bytes ?? 0;
+}
+
 /**
  * A ByteArray's state: its buffer, as long as its capacity, and its length
  * and position. A read or write takes its offset first: growing replaces
  * the buffer and its view.
+ *
+ * A length or position is stored through `>>> 0`, as a uint32: an int32
+ * while below 2^31, and a double only from there.
+ * JavaScriptCore keeps a number its JIT once made a double a double, and
+ * an addition that has seen one makes doubles from then on: a double
+ * offset fails the int32 check of a DataView or typed array access, and
+ * after enough failures JavaScriptCore calls DataView's methods instead
+ * of inlining them, a quarter slower on every read and write. V8 makes
+ * small integers of them itself.
  */
 export class Bytes {
   buffer = new Uint8Array(0);
@@ -50,12 +79,31 @@ export class Bytes {
   objectEncoding: number;
   /** Whether it is the domain memory, which it then tells when its buffer or length changes. */
   subscribed = false;
+  /** Its runtime's capacity count, and its own part of it. */
+  private readonly capacity: { runtime: Count; own: Count };
 
   constructor(
     readonly rt: Runtime,
     readonly owner: AsObject,
   ) {
     this.objectEncoding = rt.defaultObjectEncoding;
+    let runtime = runtimeCapacity.get(rt);
+    if (!runtime) {
+      runtime = { bytes: 0 };
+      runtimeCapacity.set(rt, runtime);
+    }
+
+    this.capacity = { runtime, own: { bytes: 0 } };
+    collected.register(this, this.capacity);
+  }
+
+  /** Its buffer replaced by `next`, its runtime's capacity count with it. */
+  setBuffer(next: Uint8Array<ArrayBuffer>): void {
+    const { runtime, own } = this.capacity;
+    runtime.bytes += next.length - own.bytes;
+    own.bytes = next.length;
+    this.buffer = next;
+    this.view = new DataView(next.buffer);
   }
 
   get available(): number {
@@ -91,8 +139,7 @@ export class Bytes {
     }
 
     next.set(this.buffer.subarray(0, Math.min(capacity, this.length)));
-    this.buffer = next;
-    this.view = new DataView(next.buffer);
+    this.setBuffer(next);
   }
 
   /** As Grower::EnsureWritableCapacity: double, at least `minimum`, and 4096 unless the setter sizes an empty one. */
@@ -124,9 +171,9 @@ export class Bytes {
       }
     }
 
-    this.length = length;
+    this.length = length >>> 0;
     if (this.position > length) {
-      this.position = length;
+      this.position = this.length;
     }
 
     this.notify();
@@ -149,8 +196,7 @@ export class Bytes {
       throw this.rt.error("RangeError", 1506);
     }
 
-    this.buffer = new Uint8Array(0);
-    this.view = new DataView(this.buffer.buffer);
+    this.setBuffer(new Uint8Array(0));
     this.length = 0;
     this.position = 0;
   }
@@ -162,7 +208,7 @@ export class Bytes {
       throw this.rt.error("flash.errors::EOFError", 2030);
     }
 
-    this.position = at + n;
+    this.position = (at + n) >>> 0;
     return at;
   }
 
@@ -177,7 +223,7 @@ export class Bytes {
       this.setLength(at + n);
     }
 
-    this.position = at + n;
+    this.position = (at + n) >>> 0;
     return at;
   }
 
@@ -192,7 +238,7 @@ export class Bytes {
   read(count: number): Uint8Array {
     this.checkEOF(count);
     const bytes = this.buffer.slice(this.position, this.position + count);
-    this.position += count;
+    this.position = (this.position + count) >>> 0;
     return bytes;
   }
 
@@ -200,23 +246,25 @@ export class Bytes {
   readView(count: number): Uint8Array {
     this.checkEOF(count);
     const bytes = this.buffer.subarray(this.position, this.position + count);
-    this.position += count;
+    this.position = (this.position + count) >>> 0;
     return bytes;
   }
 
-  /** As ByteArray::Write: `bytes` at the position; the length grows to the position after. */
-  write(bytes: Uint8Array): void {
-    const count = bytes.length;
+  /**
+   * As ByteArray::Write: `count` bytes of `source` from `offset`, all of
+   * it by default, at the position; the length grows to the position after.
+   */
+  write(source: Uint8Array, offset = 0, count = source.length): void {
     if (count > 0xffffffff - this.position) {
       throw this.rt.error("flash.errors::MemoryError", 1000);
     }
 
-    const end = this.position + count;
+    const end = (this.position + count) >>> 0;
     if (end > this.buffer.length) {
       this.ensure(end, false);
     }
 
-    this.buffer.set(bytes, this.position);
+    copyBytes(this.buffer, this.position, source, offset, count);
     this.position = end;
     if (this.length < this.position) {
       this.length = this.position;
@@ -236,6 +284,37 @@ export class Bytes {
     }
 
     this.buffer[index] = value;
+  }
+}
+
+/** Below this many bytes, copyBytes copies one at a time. */
+const COPY_LOOP_LENGTH = 32;
+
+/**
+ * `count` bytes of `source` from `offset` copied into `target` at `at`,
+ * as memmove copies them where the two are one array. Part of `source`,
+ * fewer than COPY_LOOP_LENGTH bytes, is copied one at a time: the
+ * subarray set() would take costs more than they do, in JavaScriptCore up
+ * to about 64 bytes and in V8 up to about 32. All of it set() copies
+ * faster than a loop in V8, and as fast in JavaScriptCore.
+ */
+function copyBytes(
+  target: Uint8Array,
+  at: number,
+  source: Uint8Array,
+  offset: number,
+  count: number,
+): void {
+  if (source === target) {
+    target.copyWithin(at, offset, offset + count);
+  } else if (offset === 0 && count === source.length) {
+    target.set(source, at);
+  } else if (count < COPY_LOOP_LENGTH) {
+    for (let i = 0; i < count; i++) {
+      target[at + i] = source[offset + i];
+    }
+  } else {
+    target.set(source.subarray(offset, offset + count), at);
   }
 }
 
@@ -481,10 +560,9 @@ function algorithmOf(rt: Runtime, algorithm: Value): "zlib" | "deflate" | "lzma"
 
 /** A ByteArray's bytes, all of them, replaced by a copy of `bytes`, its position `position`; the domain memory told, if it is. */
 function replaceBytes(b: Bytes, bytes: Uint8Array, position: number): void {
-  b.buffer = new Uint8Array(bytes);
-  b.view = new DataView(b.buffer.buffer);
+  b.setBuffer(new Uint8Array(bytes));
   b.length = bytes.length;
-  b.position = position;
+  b.position = position >>> 0;
   b.notify();
 }
 
@@ -512,7 +590,7 @@ export function byteArrayNatives(rt: Runtime): Natives {
     }
 
     const s = fromUtf8(toNul(bytes));
-    b.position += n;
+    b.position = (b.position + n) >>> 0;
     return s;
   };
 
@@ -549,7 +627,10 @@ export function byteArrayNatives(rt: Runtime): Natives {
 
     set position(v: Value) {
       const b = bytesOf(rt, this);
-      b.position = rt.toUint(v);
+      // Not redundant: toUint's own `>>> 0` serves every caller, and once
+      // one passes it 2^31 or more, JavaScriptCore makes doubles there for
+      // all of them (see Bytes).
+      b.position = rt.toUint(v) >>> 0;
     }
 
     get bytesAvailable() {
@@ -730,16 +811,19 @@ export function byteArrayNatives(rt: Runtime): Natives {
         throw rt.error("RangeError", 2006);
       }
 
-      // A view, not a copy: set copies once, and as memmove where the two
-      // are one ByteArray. A target that grows keeps the view's bytes as
-      // they were.
+      // From the buffer as it is now: a target that grows, this ByteArray
+      // too, gets a new buffer, and the bytes come from the old one. As in
+      // DataInput::ReadByteArray, the target is sized first: one that
+      // cannot grow leaves the position where it was.
       const to = bytesOf(rt, bytes);
-      const read = b.readView(count);
+      const source = b.buffer;
+      const from = b.position;
       if (offset + count >= to.length) {
         to.setLength(offset + count);
       }
 
-      to.buffer.set(read, offset);
+      b.position = (from + count) >>> 0;
+      copyBytes(to.buffer, offset, source, from, count);
     }
 
     // Writes.
@@ -833,9 +917,8 @@ export function byteArrayNatives(rt: Runtime): Natives {
         throw rt.error("RangeError", 2006);
       }
 
-      // A view, not a copy, as readBytes reads.
       if (count > 0) {
-        b.write(from.buffer.subarray(offset, offset + count));
+        b.write(from.buffer, offset, count);
       }
     }
 

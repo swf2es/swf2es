@@ -339,11 +339,11 @@ export function node(em: MethodEmitter, x: u32): void {
   }
 
   if (em.loopHeader[x]) {
-    out.text("  L");
+    out.text("L");
     out.uint(x);
     out.text(": for (;;) {\n");
     within(em, x, merges, 0);
-    out.text("  }\n");
+    out.text("}\n");
   } else {
     within(em, x, merges, 0);
   }
@@ -358,23 +358,23 @@ export function within(em: MethodEmitter, x: u32, merges: u32[], j: i32): void {
   }
 
   const y = merges[j];
-  out.text("  L");
+  out.text("L");
   out.uint(y);
   out.text(": {\n");
   const h = em.handlerOf[y];
   if (h >= 0) {
-    out.text("  try {\n");
+    out.text("try {\n");
     em.tryStack.push(<u32>h);
     within(em, x, merges, j + 1);
     em.tryStack.pop();
-    out.text("  } catch (e) {\n");
+    out.text("} catch (e) {\n");
     catchClause(em, <u32>h, y);
-    out.text("  }\n");
+    out.text("}\n");
   } else {
     within(em, x, merges, j + 1);
   }
 
-  out.text("  }\n");
+  out.text("}\n");
   node(em, y);
 }
 
@@ -395,7 +395,7 @@ export function catchClause(em: MethodEmitter, h: u32, y: u32): void {
     }
   }
 
-  out.text("    const x = rt.caught(e);\n    if (");
+  out.text("const x = rt.caught(e);\nif (");
   if (low === high) {
     out.text("t === ");
     out.uint(low);
@@ -417,7 +417,7 @@ export function catchClause(em: MethodEmitter, h: u32, y: u32): void {
   em.regName(<i32>(ir.localCount + ir.maxScope));
   out.text(" = x; break L");
   out.uint(y);
-  out.text("; }\n    throw e;\n");
+  out.text("; }\nthrow e;\n");
 }
 
 /** Whether the handlers covering region r have their trys open, innermost first in the table's order. */
@@ -455,9 +455,10 @@ export function structuredBlock(em: MethodEmitter, k: u32): void {
   em.blockBody(k);
   if (!terminates(em, k) && k + 1 < em.ir.blockCount) {
     em.currentBlock = k;
-    em.out.text("    ");
     branchTo(em, k + 1);
-    em.out.text("\n");
+    if (em.out.bytes[em.out.length - 1] !== 0x0a) {
+      em.out.text("\n");
+    }
   }
 }
 
@@ -476,7 +477,15 @@ export function branchTo(em: MethodEmitter, t: u32): void {
   } else {
     // Its only way in: its code here, and then the block branching goes
     // on, a conditional branch's, with its own types, scopes and region.
-    out.text("\n");
+    // On a line of its own, with no space left at the end of this one.
+    if (out.bytes[out.length - 1] === 0x20) {
+      out.length--;
+    }
+
+    if (out.bytes[out.length - 1] !== 0x0a) {
+      out.text("\n");
+    }
+
     save(em);
     // A loop's header is also entered from its end, with other checks.
     em.inPlace = !em.loopHeader[t];
@@ -487,7 +496,7 @@ export function branchTo(em: MethodEmitter, t: u32): void {
   }
 }
 
-/** Push what writing a block follows: its registers' types, scopes and region. */
+/** Push what writing a block follows: its registers' types and copies, scopes and region. */
 export function save(em: MethodEmitter): void {
   const ir = em.ir;
   const saved = em.saved;
@@ -504,6 +513,10 @@ export function save(em: MethodEmitter): void {
     saved.push(em.promoted[r]);
   }
 
+  for (let r = ir.localCount; r < ir.frameSize; r++) {
+    saved.push(em.copyOf[r]);
+  }
+
   saved.push(<i32>em.scopeDepth);
   saved.push(em.region);
   saved.push(em.file);
@@ -518,6 +531,10 @@ export function restore(em: MethodEmitter): void {
   em.file = saved.pop();
   em.region = saved.pop();
   em.scopeDepth = <u32>saved.pop();
+  for (let r = <i32>ir.frameSize - 1; r >= <i32>ir.localCount; r--) {
+    em.copyOf[r] = saved.pop();
+  }
+
   for (let r = <i32>ir.frameSize - 1; r >= 0; r--) {
     em.promoted[r] = <u8>saved.pop();
     em.checked[r] = <u8>saved.pop();

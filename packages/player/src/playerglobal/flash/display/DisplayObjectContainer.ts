@@ -1,8 +1,8 @@
 // flash.display.DisplayObjectContainer: children by index, as AS3 sees
 // them, over the player's render-ordered list.
 import { avm2 } from "@swf2es/runtime";
-import { hitsOwnPoint } from "../../../bounds.js";
-import { Container, type DisplayObject, MovieClip } from "../../../display.js";
+import { hitsOwnPoint } from "../../../display/bounds.js";
+import { Container, type DisplayObject, MovieClip } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
@@ -46,18 +46,18 @@ export function containerNatives(s: Scripting): avm2.Natives {
     // Out of another parent first, with its events; within the same one, a move only.
     const moved = d.parent === c;
     if (d.parent && !moved) {
-      s.removing(d);
+      s.lifecycle.removing(d);
     }
 
     c.addChildAt(d, index);
     if (!moved) {
-      s.added(d);
+      s.lifecycle.added(d);
     }
 
     return v;
   };
   const remove = (c: Container, d: DisplayObject): void => {
-    s.removing(d);
+    s.lifecycle.removing(d);
     c.removeChild(d);
   };
 

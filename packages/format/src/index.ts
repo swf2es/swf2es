@@ -1,5 +1,6 @@
 /**
- * Parsers for the SWF container, its tags, ABC (DoABC) and AVM1 action records.
+ * Parsers for the SWF container and its tags: shapes, fonts, text, bitmaps,
+ * sounds, buttons and filters, and a DoABC's bytes, which codegen parses.
  * The compiler and the player both use this package, so it must stay free of
  * DOM and node APIs.
  */
@@ -32,6 +33,7 @@ export {
   readFrameLabel,
   readPlace,
   readRemove,
+  readScalingGrid,
   readSceneData,
   readSprite,
   readString,

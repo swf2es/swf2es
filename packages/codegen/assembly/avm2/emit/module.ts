@@ -6,6 +6,9 @@
 // names them by hash, and the runtime refuses it after any others.
 //
 //   export default function (rt) {
+//     const nn = (v) => { throw rt.nullError(v); };
+//     const ac = (n, given) => { throw rt.argumentCountError(n, given); };
+//     const ns = ..., cls = ..., mn = ...;   (rt.ns, rt.cls and rt.name, shorter)
 //     const N = [...namespaces], S = [...namespace sets], M = [...multinames];
 //     const F = [...method factories, (scope, sup, $dx) => function (...) {...}];
 //     const A = rt.abc({ hash, linked, names: M, classes, scripts, activations });
@@ -14,12 +17,13 @@
 //
 // A factory makes a method's function once its scope chain is known: `scope`
 // is the chain it captured, and `sup` the base class of the class it is a
-// method of, for the super instructions. Methods reach the module's own
+// method of, for the super instructions; it names only those, and $dx,
+// that the method uses. Methods reach the module's own
 // descriptors, such as the class a newclass creates, through A. A method
 // that refers to classes or Vectors has them in a table of its own, T,
 // made as the module loads:
 //
-//     ((...T) => (scope, sup) => function (...) {... T[0] ...})(rt.cls(...))
+//     ((...T) => (scope, sup) => function (...) {... T[0] ...})(cls(...))
 //
 // numbered as the method first refers to each, so that its code does not
 // depend on the module's other methods: compiled alone, as lazy JIT will
@@ -55,32 +59,47 @@ export class ModuleEmitter {
    * Write the whole module; the result is in `out`. `hashes` are the
    * hashes of the domain's ABCs, in load order, up to and including this
    * one, as the host computes them for the cache key; it is compiled after
-   * those its application domain sees.
+   * those its application domain sees. With `linkedOnly`, `hashes` are
+   * this one's and then only those of the ABCs it names as linked, in
+   * order (see domainLinked), so a host need not pass every ABC's.
    */
-  module(hashes: string[]): void {
+  module(hashes: string[], linkedOnly: bool = false): void {
     const out = this.out;
     out.reset();
     this.methods.map.reset();
     out.text("export default function (rt) {\n");
+    // A null check's throw, an expression where a check reads its register
+    // (MethodEmitter.checkedRead), and an argument count's (checkEntry); not
+    // named with a $, so that a stack starts at the method that called them
+    // (Runtime.stackOf).
+    out.text("  const nn = (v) => { throw rt.nullError(v); };\n");
+    out.text("  const ac = (n, given) => { throw rt.argumentCountError(n, given); };\n");
+    // The tables name a namespace, class or multiname each, tens of
+    // thousands in a large ABC: as these, not rt.ns, rt.cls and rt.name.
+    out.text("  const ns = (kind, uri) => rt.ns(kind, uri);\n");
+    out.text("  const cls = (n, name) => rt.cls(n, name);\n");
+    out.text("  const mn = (kind, set, name) => rt.name(N, V, kind, set, name);\n");
     this.names();
     this.functions();
     out.text("  const A = rt.abc({\n    hash: ");
-    this.text(this.index < <u32>hashes.length ? hashes[this.index] : "");
+    const self: u32 = linkedOnly ? 0 : this.index;
+    this.text(self < <u32>hashes.length ? hashes[self] : "");
     out.text(",\n    linked: [");
     const domain = this.domain;
     const own = domain.abcDomain[this.index];
-    let first = true;
+    let linked: u32 = 0;
     for (let i: u32 = 0; i < this.index; i++) {
       if (!domain.sees(own, domain.abcDomain[i])) {
         continue;
       }
 
-      if (!first) {
+      if (linked > 0) {
         out.text(", ");
       }
 
-      first = false;
-      this.text(i < <u32>hashes.length ? hashes[i] : "");
+      linked++;
+      const at = linkedOnly ? linked : i;
+      this.text(at < <u32>hashes.length ? hashes[at] : "");
     }
 
     out.text("],\n    names: M,\n    classes: [");
@@ -148,7 +167,7 @@ export class ModuleEmitter {
   }
 
   /**
-   * Multiname i as rt.name(kind, namespace indices, name): kinds as the ABC
+   * Multiname i as mn(kind, namespace indices, name): kinds as the ABC
    * numbers them, namespaces as indices into N (and their versions into V),
    * a null name for any name; TypeNames as rt.typeName(base, parameter).
    */
@@ -165,7 +184,7 @@ export class ModuleEmitter {
       return;
     }
 
-    out.text("rt.name(N, V, ");
+    out.text("mn(");
     out.uint(kind);
     out.text(", ");
     switch (kind) {
@@ -268,16 +287,24 @@ export class ModuleEmitter {
   factory(m: u32, global: u32, decoder: BodyDecoder): void {
     const out = this.out;
     const methods = this.methods;
-    methods.types.length = 0;
-    methods.typeIndex.clear();
+    methods.newTypes();
     const at = out.length;
     const marks = methods.map.count;
-    // $dx: the default XML namespace when the factory runs, as avmplus'
-    // scope chain captures it when the method's closure or class is made.
-    out.text("(scope, sup, $dx = rt.defaultXmlNamespace) => ");
     methods.functionName = this.functionName(global);
     methods.method(m, global, decoder.ir);
     methods.functionName = "";
+    // Its parameters, up to the last the method uses. $dx: the default XML
+    // namespace when the factory runs, as avmplus' scope chain captures it
+    // when the method's closure or class is made.
+    const params = methods.seesDxns
+      ? "(scope, sup, $dx = rt.defaultXmlNamespace) => "
+      : methods.usesSup
+        ? "(scope, sup) => "
+        : methods.usesScope
+          ? "(scope) => "
+          : "() => ";
+    out.insert(at, params);
+    methods.map.shift(marks, <u32>params.length);
     const types = methods.types;
     if (types.length === 0) {
       return;

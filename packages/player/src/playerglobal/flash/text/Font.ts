@@ -1,7 +1,7 @@
 // flash.text.Font: embedded SWF font metadata and explicit font registration.
 import { avm2 } from "@swf2es/runtime";
+import type { AnyFontCharacter, FontCharacter } from "../../../display/timeline.js";
 import type { Scripting } from "../../../scripting.js";
-import type { AnyFontCharacter, FontCharacter } from "../../../timeline.js";
 
 type AsObject = avm2.AsObject;
 
@@ -14,6 +14,25 @@ function style(font: AnyFontCharacter): string {
   }
 
   return font.italic ? "italic" : "regular";
+}
+
+/** The fonts enumerateFonts lists: the running code's SWF's, with layout or no glyphs, and those registered. */
+export function embeddedFonts(s: Scripting): AnyFontCharacter[] {
+  const fonts: AnyFontCharacter[] = [];
+  const library = s.code.codeLibrary();
+  if (library) {
+    for (const character of library.characters.values()) {
+      if (
+        character.type === "font" &&
+        (character.font.layout || character.font.glyphs.length === 0)
+      ) {
+        fonts.push(character);
+      }
+    }
+  }
+
+  fonts.push(...s.symbols.registeredFonts.values());
+  return fonts;
 }
 
 export function fontNatives(s: Scripting): avm2.Natives {
@@ -62,19 +81,7 @@ export function fontNatives(s: Scripting): avm2.Natives {
 
     static enumerateFonts(_enumerateDeviceFonts: boolean): AsObject {
       const cls = s.rt.classNamed("flash.text::Font");
-      const fonts: AnyFontCharacter[] = [];
-      const library = s.codeLibrary();
-      if (library) {
-        for (const character of library.characters.values()) {
-          if (
-            character.type === "font" &&
-            (character.font.layout || character.font.glyphs.length === 0)
-          ) {
-            fonts.push(character);
-          }
-        }
-      }
-      fonts.push(...s.registeredFonts.values());
+      const fonts = embeddedFonts(s);
       fonts.sort((a, b) => {
         const first = a.name.toLowerCase();
         const second = b.name.toLowerCase();
@@ -91,12 +98,12 @@ export function fontNatives(s: Scripting): avm2.Natives {
     }
 
     static registerFont(cls: AsObject): void {
-      const font = cls?.$it && s.fontSymbol(cls.$it);
+      const font = cls?.$it && s.symbols.fontSymbol(cls.$it);
       if (!font) {
         throw s.rt.error("ArgumentError", 1508, "font");
       }
 
-      s.registerFont(cls, font);
+      s.symbols.registerFont(cls, font);
     }
   }
 
@@ -109,7 +116,7 @@ export function fontHooks(s: Scripting): Record<string, avm2.ClassHook> {
     "flash.text::Font": {
       create: (traits) => {
         const object = Object.create(traits.proto);
-        object.$font = s.fontSymbol(traits);
+        object.$font = s.symbols.fontSymbol(traits);
         return object;
       },
     },

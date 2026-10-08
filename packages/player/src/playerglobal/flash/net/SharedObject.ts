@@ -23,93 +23,6 @@ const CLEAR = 6;
 /** What a name may not hold, as Flash refuses it (Error #2134); % it allows. */
 const BAD_NAME = /[~&\\;:"',<>?#\s]/;
 
-/**
- * Where the host keeps shared objects' bytes, by key: the browser's
- * localStorage by default, else memory.
- */
-export interface SharedObjectStorage {
-  get(key: string): Uint8Array | null;
-  set(key: string, bytes: Uint8Array): void;
-  remove(key: string): void;
-  keys(): string[];
-}
-
-/**
- * The default storage: localStorage, base64 under a prefix, where the host
- * has it and lets it be read; memory otherwise. localStorage is first reached
- * when a SWF first uses a shared object, since merely reading it can throw
- * (a SecurityError where site data is blocked). A write it refuses, a full
- * quota say, throws, which flush reports as Error #2130.
- */
-export function defaultStorage(): SharedObjectStorage {
-  const memory = new Map<string, Uint8Array>();
-  const inMemory: SharedObjectStorage = {
-    get: (key) => memory.get(key) ?? null,
-    set: (key, bytes) => {
-      memory.set(key, bytes.slice());
-    },
-    remove: (key) => {
-      memory.delete(key);
-    },
-    keys: () => [...memory.keys()],
-  };
-  let chosen: SharedObjectStorage | undefined;
-  const storage = (): SharedObjectStorage => {
-    if (!chosen) {
-      let local: Storage | undefined;
-      try {
-        local = (globalThis as { localStorage?: Storage }).localStorage;
-        local?.getItem(PREFIX);
-      } catch {
-        local = undefined;
-      }
-
-      chosen = local ? localStorageOf(local) : inMemory;
-    }
-
-    return chosen;
-  };
-
-  return {
-    get: (key) => storage().get(key),
-    set: (key, bytes) => storage().set(key, bytes),
-    remove: (key) => storage().remove(key),
-    keys: () => storage().keys(),
-  };
-}
-
-const PREFIX = "swf2es:so:";
-
-function localStorageOf(local: Storage): SharedObjectStorage {
-  return {
-    get: (key) => {
-      const text = local.getItem(PREFIX + key);
-      return text === null ? null : Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-    },
-    set: (key, bytes) => {
-      // In chunks: one String.fromCharCode of every byte overflows the stack.
-      const parts: string[] = [];
-      for (let i = 0; i < bytes.length; i += 0x2000) {
-        parts.push(String.fromCharCode(...bytes.subarray(i, i + 0x2000)));
-      }
-
-      local.setItem(PREFIX + key, btoa(parts.join("")));
-    },
-    remove: (key) => local.removeItem(PREFIX + key),
-    keys: () => {
-      const keys: string[] = [];
-      for (let i = 0; i < local.length; i++) {
-        const k = local.key(i);
-        if (k?.startsWith(PREFIX)) {
-          keys.push(k.slice(PREFIX.length));
-        }
-      }
-
-      return keys;
-    },
-  };
-}
-
 export function sharedObjectNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
   /** The shared objects getLocal made, by key: one for each, as Flash's. */
@@ -123,6 +36,32 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     const array = s.rt.construct(s.rt.classNamed("flash.utils::ByteArray")) as AsObject;
     s.rt.setProperty(array, avm2.qname(avm2.publicNs, "objectEncoding"), encoding);
     return array;
+  };
+
+  /** What `o` serializes to now, for destroy to tell a change by; null where it cannot. */
+  const saved = (o: AsObject): Uint8Array | null => {
+    try {
+      return serialize(o);
+    } catch {
+      return null;
+    }
+  };
+
+  /** Write `o`'s .sol file, or remove it for no data: false where storage refuses, as a full quota, which flush reports as #2130. */
+  const write = (o: AsObject): boolean => {
+    const file = serialize(o);
+    try {
+      if (file.length) {
+        s.storage.set(o.$key, file);
+      } else {
+        s.storage.remove(o.$key);
+      }
+    } catch {
+      return false;
+    }
+
+    o.$saved = file;
+    return true;
   };
 
   /**
@@ -202,7 +141,7 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
         }
 
         const key = decoder.decode(bytes.subarray(at, at + length));
-        b.position = at + length;
+        b.position = (at + length) >>> 0;
         const value = s.rt.callProperty(array, avm2.qname(avm2.publicNs, "readObject"));
         s.rt.setProperty(data, avm2.qname(avm2.publicNs, key), value);
         // The 0 after each value.
@@ -221,6 +160,8 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     declare $name: string;
     declare $encoding: number;
     declare $client: Value;
+    // What it serialized to when last read or written: a change from it is what destroy writes.
+    declare $saved: Uint8Array | null;
 
     static getLocal(name: Value, localPath: Value, secure: Value): Value {
       if (name === null || name === undefined) {
@@ -233,7 +174,7 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       }
 
       // The SWF whose code asks, which a loaded one's is, not the main SWF.
-      const url = new URL(s.codeUrl(), "file:///");
+      const url = new URL(s.code.codeUrl(), "file:///");
       // A secure one only for a SWF that came over HTTPS; adl, whose SWFs
       // never do, refuses it so.
       if (secure && url.protocol !== "https:") {
@@ -268,6 +209,7 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       o.$client = o;
       const stored = s.storage.get(key);
       o.$data = (stored && deserialize(stored)) ?? s.rt.newObject([]);
+      o.$saved = saved(o);
       open.set(key, o);
       return o;
     }
@@ -338,25 +280,13 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     // Flush returns true, which flush reports as FLUSHED, or false for #2130.
     "flash.net:SharedObject::invoke"(code: Value, ..._args: Value[]): Value {
       switch (s.rt.toUint(code)) {
-        case FLUSH: {
-          const file = serialize(this);
-          try {
-            if (file.length) {
-              s.storage.set(this.$key, file);
-            } else {
-              s.storage.remove(this.$key);
-            }
-          } catch {
-            // Storage that refuses the write, which flush reports as #2130.
-            return false;
-          }
-
-          return true;
-        }
+        case FLUSH:
+          return write(this);
         case GET_SIZE:
           return serialize(this).length;
         case CLEAR:
           this.$data = s.rt.newObject([]);
+          this.$saved = new Uint8Array(0);
           s.storage.remove(this.$key);
           return undefined;
         case CLOSE:
@@ -367,8 +297,29 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     }
   }
 
+  // Flash wrote each open object as its SWF went: a destroyed player
+  // writes those a script changed since they were read or written. Never
+  // a removal: an object whose stored file it could not read starts empty,
+  // and an unchanged one would take the file away.
+  s.flushSharedObjects = () => {
+    for (const o of open.values()) {
+      try {
+        const file = serialize(o);
+        if (file.length && !sameBytes(file, o.$saved)) {
+          s.storage.set(o.$key, file);
+        }
+      } catch {
+        // One that cannot be written, AMF0's or a full quota's, keeps the others from nothing.
+      }
+    }
+  };
+
   avm2.registerNativeClass(natives, "flash.net::SharedObject", SharedObjectNatives);
   return natives;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array | null): boolean {
+  return b !== null && a.length === b.length && a.every((byte, i) => byte === b[i]);
 }
 
 /** The 0 after each value. */

@@ -2,6 +2,7 @@
 // libraries they import, and page.ts with its types stripped, under an
 // import map that gives the page's bare specifiers their files. Nothing is
 // bundled; the browser loads the modules as tsc wrote them.
+import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { stripTypeScriptTypes } from "node:module";
@@ -17,6 +18,8 @@ const mounts: [string, string][] = [
   ["/codegen/", join(root, "packages/codegen/dist/")],
   ["/runtime/", join(root, "packages/runtime/dist/")],
   ["/player/", join(root, "packages/player/dist/")],
+  ["/player-hosts/", join(root, "packages/player-hosts/dist/")],
+  ["/web/", join(root, "packages/web/dist/")],
   // The ABCs a SWF's code links against, the player tests' own copies (libraries.ts).
   ["/libraries/", join(here, "out/libraries/")],
   ["/pixi/", join(root, "packages/player/node_modules/pixi.js/dist/")],
@@ -31,6 +34,11 @@ export const importMap = {
     "@swf2es/codegen": "/codegen/index.js",
     "@swf2es/runtime": "/runtime/index.js",
     "@swf2es/player": "/player/index.js",
+    "@swf2es/player-hosts/indexeddb": "/player-hosts/indexeddb.js",
+    "@swf2es/player-hosts/precompiled": "/player-hosts/precompiled.js",
+    "@swf2es/player-hosts/websocket": "/player-hosts/websocket.js",
+    "@swf2es/web": "/web/index.js",
+    "@swf2es/codegen/codegen.wasm": "/codegen/codegen.wasm",
     "pixi.js": "/pixi/pixi.mjs",
     pako: "/pako/pako.esm.mjs",
     lzma1: "/lzma1/index.js",
@@ -46,26 +54,39 @@ const types: Record<string, string> = {
   ".wasm": "application/wasm",
 };
 
+const importMapText = JSON.stringify(importMap);
+
+/** The page's inline import map as a Content-Security-Policy source, for a policy that allows no other inline script. */
+export const importMapSource = `'sha256-${createHash("sha256").update(importMapText).digest("base64")}'`;
+
 function page(): string {
   return `<!doctype html>
 <html>
 <head><meta charset="utf-8">
-<script type="importmap">${JSON.stringify(importMap)}</script>
+<script type="importmap">${importMapText}</script>
 <style>body { margin: 0 } canvas { display: block }</style>
 </head>
 <body><script type="module" src="/page/page.ts"></script></body>
 </html>`;
 }
 
-/** Start serving on a free port of the loopback interface; `extra` mounts more directories, as the corpus runner's SWFs. */
+/**
+ * Start serving on a free port of the loopback interface; `extra` mounts
+ * more directories, as the corpus runner's SWFs, and `csp` is the page's
+ * Content-Security-Policy, if it has one.
+ */
 export async function serve(
   extra: [string, string][] = [],
+  csp?: string,
 ): Promise<{ server: Server; url: string }> {
   const served = [...extra, ...mounts];
   const server = createServer((request, response) => {
     const path = decodeURIComponent(new URL(request.url ?? "/", "http://localhost").pathname);
     if (path === "/") {
-      response.writeHead(200, { "content-type": "text/html" });
+      response.writeHead(200, {
+        "content-type": "text/html",
+        ...(csp ? { "content-security-policy": csp } : {}),
+      });
       response.end(page());
       return;
     }

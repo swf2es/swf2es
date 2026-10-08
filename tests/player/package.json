@@ -3,12 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node run.ts"
+    "test": "node run.ts && node leak.ts && node module-cache.ts && node precompiled.ts"
   },
   "dependencies": {
     "@swf2es/codegen": "workspace:*",
     "@swf2es/format": "workspace:*",
     "@swf2es/player": "workspace:*",
+    "@swf2es/player-hosts": "workspace:*",
     "@swf2es/runtime": "workspace:*",
     "pixi.js": "8.21.0"
   }

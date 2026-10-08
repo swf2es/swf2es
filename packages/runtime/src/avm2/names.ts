@@ -4,8 +4,10 @@
 // interns them, so two modules' `public` are one object and names compare by
 // identity. A private namespace is only ever equal to itself.
 
+import type { Domain } from "./domain.js";
+import { NO_CACHE, type PropertyCache } from "./property-cache.js";
+
 /** Namespace kinds, numbered as the compiler's NS_* constants. */
-import type { Domain } from "./runtime.js";
 export const NS_Public = 0;
 export const NS_PackageInternal = 1;
 export const NS_Protected = 2;
@@ -104,6 +106,8 @@ export class Multiname {
    * module's, or the one of the name it was made from; null for the root.
    */
   domain: Domain | null = null;
+  /** What its lookups found, for a module's name (property-cache.ts); a name made at run time keeps none. */
+  cache: PropertyCache = NO_CACHE;
 
   constructor(
     readonly kind: number,
@@ -246,4 +250,21 @@ const VECTOR_NAMES: Record<string, string> = {
 export function formatClassName(name: string): string {
   const own = name.endsWith("$") ? name.slice(0, -1) : name;
   return VECTOR_NAMES[own] ?? own;
+}
+
+/** A name's index as an array element, or -1: a canonical uint below 2^32 - 1. */
+export function arrayIndex(name: string): number {
+  const c = name.charCodeAt(0);
+  if (!(c >= 0x30 && c <= 0x39)) {
+    return -1;
+  }
+
+  const i = Number(name);
+  return i >>> 0 === i && i !== 0xffffffff && String(i) === name ? i : -1;
+}
+
+/** The qualified name of a class's name, "uri::name", or the name in the unnamed package. */
+export function qualifiedName(mn: Multiname): string {
+  const ns = mn.namespaces[0];
+  return ns?.uri ? `${ns.uri}::${mn.name}` : (mn.name ?? "*");
 }

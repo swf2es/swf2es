@@ -77,6 +77,24 @@ importers:
         specifier: workspace:*
         version: link:../format
 
+  packages/web:
+    dependencies:
+      '@swf2es/codegen':
+        specifier: workspace:*
+        version: link:../codegen
+      '@swf2es/format':
+        specifier: workspace:*
+        version: link:../format
+      '@swf2es/player':
+        specifier: workspace:*
+        version: link:../player
+      '@swf2es/player-hosts':
+        specifier: workspace:*
+        version: link:../player-hosts
+      pixi.js:
+        specifier: 8.21.0
+        version: 8.21.0
+
   tests/bench: {}
 
   tests/conformance: {}
@@ -96,6 +114,9 @@ importers:
       '@swf2es/player':
         specifier: workspace:*
         version: link:../../packages/player
+      '@swf2es/player-hosts':
+        specifier: workspace:*
+        version: link:../../packages/player-hosts
       '@swf2es/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -121,6 +142,12 @@ importers:
       '@swf2es/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+
+  tests/web:
+    dependencies:
+      '@swf2es/web':
+        specifier: workspace:*
+        version: link:../../packages/web
 
 packages:
 

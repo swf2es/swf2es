@@ -3,13 +3,71 @@
  *
  * The compiler itself is AssemblyScript (assembly/), built to codegen.wasm.
  * This wrapper instantiates it and gives its exports their types. The same wasm runs as the browser JIT
- * (lazily, per method, in a worker pool) and as the ahead-of-time compiler,
+ * (a module per ABC as its SWF loads) and as the ahead-of-time compiler,
  * so both produce identical output. See docs/architecture.md.
  */
 import { instantiate } from "./codegen.js";
 
 /** Bumped whenever generated code or the runtime ABI it calls changes. */
 export const COMPILER_VERSION = "0.0.0";
+
+/**
+ * The API version of Flash Player's SWFs' ABCs, which the player and the
+ * swf2es command reset the compiler with, and module cache keys name.
+ */
+export const API_VERSION = 50;
+
+/** The ABCs added to a compiler, by their indices: each one's hash, and whether it was added as a library. */
+export interface AddedAbcs {
+  readonly hashes: readonly string[];
+  readonly builtins: readonly boolean[];
+}
+
+/**
+ * The log's entries made while only the first `count` ABCs, the libraries,
+ * were added, as a key names them: by the SHA-256 of libraryLog's text,
+ * taken once, since they are the same in every later module's context.
+ */
+export interface LibraryDigest {
+  count: number;
+  digest: string;
+}
+
+/** The text whose SHA-256 is a LibraryDigest's, for ABC `index`, any added after the first `count`. */
+export function libraryLog(codegen: Codegen, index: number, count: number): string {
+  return codegen.context(index, 0, count)?.log ?? "";
+}
+
+/**
+ * The text of ABC `index`'s module cache key, whose UTF-8's SHA-256 is the
+ * key: what the module depends on, the compiler's identity, the API
+ * version, every ABC its domain sees, by hash and whether it is a library,
+ * those added after it included, its own place among them, and the
+ * compiler's log about them (see Codegen.context), the libraries' part by
+ * its digest once taken. The player's module cache and the swf2es command
+ * both key by it, so that the command's modules are the cache's. Null
+ * where there is no context.
+ */
+export function moduleKey(
+  codegen: Codegen,
+  index: number,
+  abcs: AddedAbcs,
+  libraries: LibraryDigest | null,
+): string | null {
+  const context = codegen.context(index, libraries?.count ?? 0);
+  if (!context) {
+    return null;
+  }
+
+  return JSON.stringify({
+    compiler: codegen.identity,
+    api: API_VERSION,
+    abcs: context.abcs.map((i) => `${abcs.builtins[i] ? "builtin " : ""}${abcs.hashes[i]}`),
+    own: context.own,
+    libraries,
+    log: context.log,
+  });
+}
 
 /** A finding as a cache key names it: the defining ABC by its hash (see FoundDefinition). */
 export interface FoundKey {
@@ -74,11 +132,38 @@ export interface Compiled {
 }
 
 /**
+ * What ABC `index`'s module depends on in the domain beyond the ABCs'
+ * bytes (see Codegen.context).
+ */
+export interface ModuleContext {
+  /** The ABCs its application domain sees, by their positions among those added, in load order. */
+  abcs: number[];
+  /** Its own place in `abcs`. */
+  own: number;
+  /**
+   * The domain's log about those ABCs, in order: the lazy answers fixed so
+   * far and the findings recorded, each with how many of `abcs` there were.
+   */
+  log: string;
+}
+
+/** A module compiled, and what compiling it fixed in the domain, to replay in its place (Codegen.replay); null where it cannot be. */
+export interface LoggedModule {
+  module: string;
+  log: string | null;
+}
+
+/**
  * The compiler. ABCs are added to a domain in the order the SWF loads them
  * (the builtins first), and the last one added compiles, whole or a method
  * at a time, to code that is byte for byte the same either way.
  */
 export interface Codegen {
+  /**
+   * The identity of this codegen.wasm, a hash of its bytes that its build
+   * stamps it with; null for one built without it.
+   */
+  readonly identity: string | null;
   /** The version at the start of an ABC block, or null if it is too short. */
   abcVersion(abc: Uint8Array): AbcVersion | null;
   /** Start a domain whose user ABCs have API version `apiVersion`: Flash Player's, 50, by default. */
@@ -87,10 +172,58 @@ export interface Codegen {
    * Add an ABC, loaded into application domain `appDomain` (0, the root, by
    * default), linking it against what that domain sees of those before it;
    * 0, or the VerifyError it was rejected with (then it is not added).
+   * Throws for an application domain never made, or dropped.
    */
   add(abc: Uint8Array, builtin?: boolean, appDomain?: number): number;
-  /** A new application domain, a child of `parent`: its number. */
+  /** A new application domain, a child of `parent`: its number. Throws for a `parent` never made, or dropped. */
   childDomain(parent: number): number;
+  /**
+   * Drop application domain `appDomain` and its descendants once nothing
+   * can run their code: no other sees their ABCs, which compile no more,
+   * and compact reuses the memory they took. The indices of the ABCs added
+   * after them do not change, and neither does what those compile to.
+   * Nothing, if `epoch` is given and the domain was reset since.
+   */
+  dropDomain(appDomain: number, epoch?: number): void;
+  /**
+   * How many times `reset` has started a domain: a host that keeps the
+   * number a domain had passes it to dropDomain, which then drops nothing
+   * if the domain was reset since, as when another player took the Codegen
+   * over and its numbers are another domain's.
+   */
+  readonly epoch: number;
+  /**
+   * Rebuild the domain without the ABCs of dropped and evicted domains, if
+   * memory would otherwise grow and they hold enough to keep it from
+   * growing: whether it did. A rebuild links every live ABC again, tens of
+   * milliseconds for a large application, so a host calls this when it has
+   * time, as when idle; nothing else does.
+   */
+  compact(): boolean;
+  /**
+   * What the ABCs hold of codegen's memory, roughly, in bytes: the live
+   * ones', and the dropped and evicted domains' that compact would free;
+   * and the size of codegen's memory, which never shrinks.
+   */
+  usage(): { live: number; dead: number; memory: number };
+  /**
+   * Evict application domain `appDomain` and its descendants while the host
+   * has no use for them, as once their ABCs are compiled: as dropped, but
+   * reviveDomain makes one live again. compact reuses what they took
+   * meanwhile, all but their findings, what was first resolved of them,
+   * and their ABCs' places.
+   */
+  evictDomain(appDomain: number): void;
+  /** Whether application domain `appDomain` is live: made, and neither evicted nor dropped. */
+  isLive(appDomain: number): boolean;
+  /**
+   * Make evicted application domain `appDomain` live again, with its evicted
+   * ancestors, the first of them a child of a live domain: given all their
+   * ABCs again by their indices, as they were added, their ABCs link as
+   * they did, by one rebuild at most, and what they found holds. Throws if
+   * they cannot be.
+   */
+  reviveDomain(appDomain: number, abcs: Map<number, Uint8Array>): void;
   /** Record a definition an application domain has found; it holds for the ABCs added after. */
   found(definition: FoundDefinition): void;
   /**
@@ -101,7 +234,38 @@ export interface Codegen {
    */
   compile(hashes?: string[], index?: number): Compiled;
   /** Method bodies of ABC `index` (the last added by default) compiled alone, as the JIT compiles each on its first call; a native, unverified or unknown one is left out. */
+  /**
+   * ABC `index`'s module alone, as `compile` writes it, for a host that
+   * loads it and needs neither its source map nor its entries: writing
+   * those too would add a large ABC's worth to codegen's memory, which
+   * never shrinks.
+   */
+  compileModule(hashes?: string[], index?: number): string;
   compileMethods(bodies: number[], index?: number): Map<number, string>;
+  /**
+   * What ABC `index`'s module depends on beyond the ABCs' bytes, for a
+   * cache key: besides the ABCs its domain sees, what the domain has
+   * fixed of what resolves lazily, which a later ABC in an ancestor would
+   * change were it first asked now. Its log only of the entries made with
+   * more than `after` ABCs added, and `upTo` at most unless negative. Null
+   * for an ABC never added.
+   */
+  context(index?: number, after?: number, upTo?: number): ModuleContext | null;
+  /**
+   * A string that changes whenever a context might: a host that took one
+   * and finds this the same since need not take it again.
+   */
+  revision(): string;
+  /** compileModule, with what the compile fixed in the domain (see replay). */
+  compileModuleLogged(hashes?: string[], index?: number): LoggedModule;
+  /**
+   * Fix in the domain what compiling ABC `index` did, from the log
+   * compileModuleLogged gave with its module, in place of compiling it:
+   * the domain is then as the compile would have left it, if its context
+   * is the one that compile had. False if the log is malformed or an
+   * entry fails, after doing those before it.
+   */
+  replay(log: string, index?: number): boolean;
 }
 
 /**
@@ -140,6 +304,29 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
     return index < 0 ? -1 : index;
   };
+  // ABC `index`'s module, its source map and entries kept for `keep`. A
+  // module is never empty: the ABC was of a dropped application domain.
+  const moduleOf = (hashes: string[], index: number, keep: boolean) => {
+    // Only the hashes the module names: joining every ABC's for each
+    // compile took megabytes of codegen's memory a few thousand loads on.
+    const at = indexOf(index);
+    const own = at < 0 ? added - 1 : at;
+    const linked = collected(wasm.domainLinked(at));
+    const named = [hashes[own] ?? ""];
+    for (const i of linked ? linked.split(",") : []) {
+      named.push(hashes[Number(i)] ?? "");
+    }
+
+    const module = collected(wasm.domainModule(named.join("\n"), at, keep, true));
+    if (module === "") {
+      throw new Error(`ABC ${index}: its application domain was dropped`);
+    }
+
+    return module;
+  };
+  const stamps = WebAssembly.Module.customSections(module, "swf2es.build");
+  const identity = stamps.length ? String.fromCharCode(...new Uint8Array(stamps[0])) : null;
+  let epoch = 0;
   const collected = <T>(result: T): T => {
     const grown = wasm.memory.buffer.byteLength;
     if (grown > size || ++calls >= COLLECT_EVERY) {
@@ -152,16 +339,25 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   };
 
   return {
+    identity,
     abcVersion(abc) {
       const packed = collected(wasm.abcVersion(abc));
       return packed < 0 ? null : { major: packed >>> 16, minor: packed & 0xffff };
     },
+    get epoch() {
+      return epoch;
+    },
     reset(apiVersion = 50) {
       added = 0;
+      epoch++;
       collected(wasm.domainReset(apiVersion));
     },
     add(abc, builtin = false, appDomain = 0) {
       const error = collected(wasm.domainAdd(abc, builtin, appDomain));
+      if (error < 0) {
+        throw new Error(`application domain ${appDomain}: never made, or dropped`);
+      }
+
       if (error === 0) {
         added++;
       }
@@ -169,18 +365,121 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       return error;
     },
     childDomain(parent) {
-      return collected(wasm.domainChild(parent));
+      const domain = collected(wasm.domainChild(parent));
+      if (domain < 0) {
+        throw new Error(`application domain ${parent}: never made, or dropped`);
+      }
+
+      return domain;
+    },
+    dropDomain(appDomain, of = epoch) {
+      if (of === epoch) {
+        collected(wasm.domainDrop(appDomain));
+      }
+    },
+    evictDomain(appDomain) {
+      collected(wasm.domainEvict(appDomain));
+    },
+    usage() {
+      const [live, dead, memory] = collected(wasm.domainUsage()).split(" ").map(Number);
+      return { live, dead, memory };
+    },
+    compact() {
+      // A rebuild makes new tables while the old are live: what earlier
+      // calls left is collected first, and the old tables once it is done,
+      // before the next call's allocations would grow memory past them.
+      if (!collected(wasm.domainWantsCompact())) {
+        return false;
+      }
+
+      wasm.__collect();
+      calls = 0;
+      if (!wasm.domainCompact()) {
+        return false;
+      }
+
+      wasm.__collect();
+      size = wasm.memory.buffer.byteLength;
+      calls = 0;
+      return true;
+    },
+    isLive(appDomain) {
+      return collected(wasm.domainState(appDomain)) === 0;
+    },
+    reviveDomain(appDomain, abcs) {
+      // Its ABCs' bytes are copied into the compiler only if a rebuild let go of them.
+      let revived = collected(wasm.domainRevive(appDomain));
+      if (revived < 0) {
+        for (const [index, bytes] of abcs) {
+          const error = collected(wasm.domainRestore(index, bytes));
+          if (error !== 0) {
+            throw new Error(`ABC ${index}: not of an evicted domain, or rejected (${error})`);
+          }
+        }
+
+        revived = collected(wasm.domainRevive(appDomain));
+      }
+
+      if (revived < 0) {
+        throw new Error(
+          `application domain ${appDomain}: not evicted, its parent not live, or an ABC of it not given`,
+        );
+      }
+
+      if (revived > 0) {
+        wasm.__collect();
+        size = wasm.memory.buffer.byteLength;
+        calls = 0;
+      }
     },
     found(d) {
       collected(wasm.domainFound(d.domain, d.nsKind, d.uri, d.name, d.abc, d.asType));
     },
     compile(hashes = [], index = -1) {
       last("compile");
-      const module = wasm.domainModule(hashes.join("\n"), indexOf(index));
-      const sourceMap = wasm.domainSourceMap();
-      const entries = parseEntries(wasm.domainModuleEntries());
-      collected(undefined);
+      // Each part a call of its own, collected after it: the module's garbage
+      // is gone before its entries are written.
+      const module = moduleOf(hashes, index, true);
+      const sourceMap = collected(wasm.domainSourceMap());
+      const entries = parseEntries(collected(wasm.domainModuleEntries()));
       return { module, sourceMap, entries };
+    },
+    compileModule(hashes = [], index = -1) {
+      last("compileModule");
+      return moduleOf(hashes, index, false);
+    },
+    context(index = -1, after = 0, upTo = -1) {
+      if (added === 0) {
+        return null;
+      }
+
+      const text = collected(wasm.domainContext(indexOf(index), after, upTo));
+      if (text === "") {
+        return null;
+      }
+
+      const first = text.indexOf("\n");
+      const second = text.indexOf("\n", first + 1);
+      const abcs = text.slice(0, first);
+      return {
+        abcs: abcs ? abcs.split(",").map(Number) : [],
+        own: Number(text.slice(first + 1, second < 0 ? text.length : second)),
+        log: second < 0 ? "" : text.slice(second + 1),
+      };
+    },
+    revision() {
+      return `${epoch} ${wasm.domainRevision()}`;
+    },
+    compileModuleLogged(hashes = [], index = -1) {
+      last("compileModuleLogged");
+      const mark = wasm.domainLogMark();
+      const module = moduleOf(hashes, index, false);
+      const log = collected(wasm.domainLogSince(mark, indexOf(index)));
+      return { module, log: log === "!" ? null : log };
+    },
+    replay(log, index = -1) {
+      last("replay");
+      return collected(wasm.domainReplay(log, indexOf(index)));
     },
     compileMethods(bodies, index = -1) {
       last("compileMethods");

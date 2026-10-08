@@ -10,11 +10,11 @@ import { createCodegen } from "@swf2es/codegen";
 import { zlibCompress } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../oracle/oracle.ts";
-import type { Container, MovieClip } from "../../../packages/player/dist/display.js";
-import { pointerTarget } from "../../../packages/player/dist/input.js";
+import type { Container, MovieClip } from "../../../packages/player/dist/display/display.js";
+import type { SocketEndpoints } from "../../../packages/player/dist/hosts.js";
 import { Player } from "../../../packages/player/dist/player.js";
-import { type FetchRequest, Scripting } from "../../../packages/player/dist/scripting.js";
-import { bare, innerSwf, scripted } from "../../player/cases.ts";
+import { Scripting } from "../../../packages/player/dist/scripting.js";
+import { bare, boundClip, innerSwf, scripted } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compiler, compileScripts } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";
@@ -71,7 +71,7 @@ test("Socket uses a host connection and delivers data on player frames", { skip 
   );
   const sent: Uint8Array[] = [];
   const closeCalls: number[] = [];
-  let opened: (() => void) | undefined;
+  let opened: ((endpoints?: SocketEndpoints) => void) | undefined;
   let received: ((bytes: Uint8Array) => void) | undefined;
   let remoteClose: (() => void) | undefined;
   let failed: ((message: string) => void) | undefined;
@@ -107,14 +107,26 @@ test("Socket uses a host connection and delivers data on player frames", { skip 
     rt.callProperty(socket, rt.publicName(name), ...args);
   const get = (name: string) => rt.getProperty(socket, rt.publicName(name));
 
+  const ends = () =>
+    ["localAddress", "localPort", "remoteAddress", "remotePort"].map((name) => get(name));
+
   assert.equal(get("connected"), false);
+  assert.deepEqual(ends(), [null, 0, null, 0]);
   call("connect", "example.test", 1234);
   assert.equal(get("connected"), false);
-  opened?.();
+  assert.deepEqual(ends(), ["", 0, "", 0]);
+  opened?.({
+    localAddress: "192.0.2.1",
+    localPort: 50000,
+    remoteAddress: "198.51.100.7",
+    remotePort: 1234,
+  });
   assert.deepEqual(events, []);
+  assert.deepEqual(ends(), ["", 0, "", 0]);
   player.tick();
   assert.deepEqual(events, ["connect"]);
   assert.equal(get("connected"), true);
+  assert.deepEqual(ends(), ["192.0.2.1", 50000, "198.51.100.7", 1234]);
 
   call("writeByte", 0x12);
   call("writeShort", 0x3456);
@@ -136,18 +148,21 @@ test("Socket uses a host connection and delivers data on player frames", { skip 
 
   call("close");
   assert.equal(get("connected"), false);
+  assert.deepEqual(ends(), [null, 0, null, 0]);
   assert.equal(closeCalls.length, 1);
   remoteClose?.();
   player.tick();
   assert.deepEqual(events, ["connect", "socketData"]);
 
   call("connect", "example.test", 1234);
-  opened?.();
+  opened?.({ localAddress: "::1", localPort: 50001, remoteAddress: "::1", remotePort: 1234 });
   player.tick();
   remoteClose?.();
   player.tick();
   assert.deepEqual(events, ["connect", "socketData", "connect", "close"]);
   assert.equal(get("connected"), false);
+  // The peer's close keeps them, as adl's does.
+  assert.deepEqual(ends(), ["::1", 50001, "::1", 1234]);
   assert.equal(closeCalls.length, 1);
 
   call("connect", "example.test", 1234);
@@ -158,20 +173,14 @@ test("Socket uses a host connection and delivers data on player frames", { skip 
   remoteClose?.();
   player.tick();
   assert.equal(events.length, 5);
-});
+  assert.deepEqual(ends(), ["", 0, "", 0]);
 
-test("an unloaded LoaderInfo reports its owner's URL before any load", { skip }, async () => {
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: () => {},
-    url: "http://example.test/outer.swf",
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const rt = scripting.rt;
-  const loader = rt.construct(rt.classNamed("flash.display::Loader"));
-  const info = rt.getProperty(loader, rt.publicName("contentLoaderInfo"));
-
-  assert.equal(rt.getProperty(info, rt.publicName("url")), null);
-  assert.equal(rt.getProperty(info, rt.publicName("loaderURL")), "http://example.test/outer.swf");
+  // A host that does not know the ends, as a WebSocket relay's, leaves them unknown.
+  call("connect", "example.test", 1234);
+  opened?.();
+  player.tick();
+  assert.equal(get("connected"), true);
+  assert.deepEqual(ends(), ["", 0, "", 0]);
 });
 
 test("Mouse.hide and show set the host's cursor as a script calls them", { skip }, async () => {
@@ -260,683 +269,43 @@ function describeCursor(cursor: string): string {
   return `image ${png.readUInt32BE(16)}x${png.readUInt32BE(20)} at ${image[2]},${image[3]}`;
 }
 
-test("loaderInfo.parameters: the main SWF's query and flashvars, a loaded SWF's query or context's", {
-  skip,
-}, async () => {
-  const lines: string[] = [];
-  const compile = compiler(out);
-  const inner = bare(compile("ParametersInner"), 1, "ParametersInner");
-  const fetches: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: (line) => lines.push(line),
-    url: "http://example.test/main.swf?q=1&shared=query&x=a+b#shared=fragment",
-    parameters: { shared: "flashvars", f: "v w" },
-    fetch: async ({ url }) => {
-      fetches.push(url);
-      return { bytes: inner, status: 200, headers: [] };
-    },
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const player = new Player(bare(compile("FlashVars"), 2, "FlashVars"), scripting);
-  await player.start();
-
-  // The flashvars override the query's names, as Ruffle's; the stage's and
-  // the root's are the main SWF's. A context's parameters are told from
-  // the call on.
-  const main = "{f=v w,q=1,shared=flashvars,x=a b}";
-  assert.deepEqual(lines.splice(0), [
-    `main ${main} ${main} ${main}`,
-    "query after {}",
-    "given after {g=ctx}",
-  ]);
-  assert.deepEqual(fetches, [
-    "http://example.test/inner.swf?k=1&k=2&t&=v&w=x=y+z&s=%E2%82%AC#k=3",
-    "http://example.test/inner.swf?k=1",
-  ]);
-
-  // A URL's query comes with the SWF, at the second PROGRESS, as Flash's
-  // (decoded, the last of a name kept, an empty name left out); the
-  // context's parameters take its place. The contents' constructors see
-  // the same, before the frame's script.
-  await scripting.settled();
-  player.tick();
-  const query = "{k=2,s=€,t=,w=x=y z}";
-  assert.deepEqual(lines.splice(0), [
-    "query open {}",
-    "query progress {}",
-    `query progress ${query}`,
-    "given open {g=ctx}",
-    "given progress {g=ctx}",
-    "given progress {g=ctx}",
-    `loaded ${query.slice(1, -1)} ${query}`,
-    "loaded g=ctx {g=ctx}",
-    `query init ${query}`,
-    "given init {g=ctx}",
-  ]);
-});
-
-test("a Loader's load of a URL fetches through the host, and fails as one, in frames", {
-  skip,
-}, async () => {
-  const lines: string[] = [];
-  const codegen = await createCodegen(wasm);
-  const compile = compiler(out);
-  const inner = innerSwf(compile("Inner"));
-  const nested = bare(compile("LoadsNested"), 2, "LoadsNested");
-  const replacer = bare(compile("Replacer"), 1, "Replacer");
-  const fetches: string[] = [];
-  const aborted: string[] = [];
-  const scripting = new Scripting(codegen, {
-    print: (line) => lines.push(line),
-    url: "http://example.test/outer.swf",
-    fetch: async ({ url }, signal) => {
-      fetches.push(url);
-      signal.addEventListener("abort", () => aborted.push(url));
-      if (url.endsWith("inner.swf") || url.endsWith("deep.swf")) {
-        return { bytes: inner, status: 200, headers: [] };
+test("an AS3 error tells a host the methods it was thrown in", { skip }, async () => {
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Main extends MovieClip {
+      public var nothing:Object = null;
+      public function Main() {
+        addFrameScript(0, frame1);
       }
-
-      if (url.endsWith("nested.swf")) {
-        return { bytes: nested, status: 200, headers: [] };
+      private function frame1():void {
+        a();
       }
-
-      if (url.endsWith("replacer.swf")) {
-        return { bytes: replacer, status: 200, headers: [] };
+      private function a():void { b(); }
+      private function b():void { c(); }
+      private function c():void { d(); }
+      private function d():void { e(); }
+      private function e():void { reachNothing(); }
+      private function reachNothing():void {
+        trace(nothing.field);
       }
-
-      throw new Error("404");
-    },
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const player = new Player(bare(compile("LoadsUrl"), 6), scripting);
-  await player.start();
-  // The frame that asks sees nothing of the loads; the host is asked for the URLs resolved against the SWF's.
-  assert.deepEqual(lines.splice(0), ["0 requested inner.swf", "1 requested missing.swf"]);
-  assert.deepEqual(fetches, ["http://example.test/inner.swf", "http://example.test/missing.swf"]);
-
-  // The next frame: the bytes that came are told as a URL load tells them,
-  // OPEN and the progress, then the content comes as from loadBytes (the
-  // loads case has Flash's trace of that); the fetch that failed is an
-  // IO_ERROR worded as Flash's, in the order asked; the frame's scripts
-  // follow, the content's first after its parent's; INIT and COMPLETE end
-  // the frame.
-  await scripting.settled();
-  player.tick();
-  const content = [
-    "Inner made false false true true 1 true",
-    "Inner added true false false false false true",
-    "Inner added true false false true true true",
-    "Inner addedToStage true true true true true true",
-  ];
-  assert.deepEqual(lines.splice(0), [
-    "0 open - null false",
-    `0 progress 0/${inner.length} null false`,
-    `0 progress ${inner.length}/${inner.length} null false`,
-    ...content,
-    "1 ioError Error #2035: URL Not Found. URL: http://example.test/missing.swf null false",
-    "2 requested inner.swf",
-    "3 requested nested.swf",
-    "4 requested inner.swf",
-    "5 requested missing.swf",
-    "inner frame 1 true true true true",
-    "0 init - http://example.test/inner.swf true",
-    "0 complete - http://example.test/inner.swf true",
-  ]);
-  // Closing a load and replacing one abort their fetches at once.
-  assert.deepEqual(aborted, ["http://example.test/inner.swf", "http://example.test/missing.swf"]);
-  const contentOf = (loader: number) => (player.root.children[loader] as Container).children[0];
-  const first = contentOf(0);
-
-  // The same SWF again, into a child domain of its own, as a Loader without
-  // a context loads: its classes are its own, not the first load's, and it
-  // plays on its own.
-  // The closed load and the replaced one come to nothing; the replacement
-  // loads. A loaded SWF's own load resolves against it.
-  await scripting.settled();
-  player.tick();
-  assert.deepEqual(lines.splice(0), [
-    "2 open - null false",
-    `2 progress 0/${inner.length} null false`,
-    `2 progress ${inner.length}/${inner.length} null false`,
-    ...content,
-    `3 open - null false`,
-    `3 progress 0/${nested.length} null false`,
-    `3 progress ${nested.length}/${nested.length} null false`,
-    "5 open - null false",
-    `5 progress 0/${inner.length} null false`,
-    `5 progress ${inner.length}/${inner.length} null false`,
-    ...content,
-    "frame 3 1,0,1,1,0,1",
-    `before reload true ${inner.length} 10`,
-    "after reload true 0 0 true true",
-    "6 requested inner.swf",
-    "7 requested inner.swf",
-    "inner frame 2",
-    "inner frame 1 true true true true",
-    "nested requested deep.swf",
-    "inner frame 1 true true true true",
-    "2 init - http://example.test/inner.swf true",
-    "2 complete - http://example.test/inner.swf true",
-    "3 init - http://example.test/nested.swf true",
-    "3 complete - http://example.test/nested.swf true",
-    "5 init - http://example.test/inner.swf true",
-    "5 complete - http://example.test/inner.swf true",
-  ]);
-  assert.equal(fetches[fetches.length - 1], "http://example.test/deep.swf");
-  const second = contentOf(2);
-  assert.ok(first.object && second.object);
-  assert.notEqual(first.object, second.object);
-  assert.notEqual(Object.getPrototypeOf(second.object), Object.getPrototypeOf(first.object));
-
-  // The reload: the first Loader's content went at the call, and the new
-  // content comes as a first load's does; the one unloaded before its bytes
-  // came stays empty. The nested SWF's content reports the nested SWF as its
-  // loaderURL (the last field of addedToStage). The loaded clips' scripts
-  // run in tree order, the reloaded one's first again.
-  await scripting.settled();
-  player.tick();
-  assert.deepEqual(lines.splice(0), [
-    "0 open - null false",
-    `0 progress 0/${inner.length} null false`,
-    `0 progress ${inner.length}/${inner.length} null false`,
-    ...content,
-    // A load replaced from its OPEN listener ends there: no progress, no content.
-    "7 open - null false",
-    "replaced from open true 0",
-    ...content,
-    // Loader 0's first content, let go of by the reload, plays on as an orphan: its scripts first.
-    "inner frame 1 false true true false",
-    "frame 4 1,0,1,1,0,1,0,0 1",
-    // An unload asked for again from REMOVED finds no content: one REMOVED; this one stops the content.
-    "unloaded from removed 1 0 true",
-    "8 requested replacer.swf",
-    "inner frame 1 true true true true",
-    "inner frame 2",
-    "inner frame 1 true true true true",
-    "inner frame 2",
-    "0 init - http://example.test/inner.swf true",
-    "0 complete - http://example.test/inner.swf true",
-  ]);
-  assert.deepEqual(aborted.slice(2), ["http://example.test/inner.swf"]);
-
-  // The replacement asked for from OPEN loads as any, and the replaced never
-  // attached; the nested SWF's two frames loop, so it asks for its load again.
-  await scripting.settled();
-  player.tick();
-  assert.deepEqual(lines.splice(0), [
-    "7 open - null false",
-    `7 progress 0/${nested.length} null false`,
-    `7 progress ${nested.length}/${nested.length} null false`,
-    // Content that replaces its own load from its constructor never attaches, and its scripts never run.
-    "8 open - null false",
-    `8 progress 0/${replacer.length} null false`,
-    `8 progress ${replacer.length}/${replacer.length} null false`,
-    "replaced from constructor true 0",
-    // Loader 0's orphan plays on; loader 2's, stopped, is silent.
-    "inner frame 2",
-    "frame 5 1,0,0,1,0,1,0,1,0 LoadsNested",
-    // From bytes, closing from the first PROGRESS: no second, no content.
-    `9 progress 0/${inner.length}`,
-    // The content replaced loads another from REMOVED; the replacement that asked is dropped for it.
-    "loaded from removed",
-    "inner frame 2",
-    "nested requested deep.swf",
-    "inner frame 2",
-    // The replaced content, off the display list, still runs the script it had queued.
-    "inner frame 1 false true true false",
-    "nested requested deep.swf",
-    "7 init - http://example.test/nested.swf true",
-    "7 complete - http://example.test/nested.swf true",
-  ]);
-
-  // The load the constructor asked for instead comes as any, and with it
-  // the loads the two nested SWFs asked for in frame 5, in the order asked.
-  await scripting.settled();
-  player.tick();
-  assert.deepEqual(lines.splice(0), [
-    "8 open - null false",
-    `8 progress 0/${inner.length} null false`,
-    `8 progress ${inner.length}/${inner.length} null false`,
-    ...content,
-    // The load asked for from REMOVED, the nested SWF, is loader 5's; the one that replaced it is not.
-    "5 open - null false",
-    `5 progress 0/${nested.length} null false`,
-    `5 progress ${nested.length}/${nested.length} null false`,
-    ...content,
-    ...content,
-    // The orphans, newest first: loader 5's replaced content, then loader 0's.
-    "inner frame 2",
-    "inner frame 1 false true true false",
-    "frame 6 1,0,0,1,0,1,0,1,1,0 Inner LoadsNested",
-    "inner frame 1 true true true true",
-    "inner frame 1 true true true true",
-    "inner frame 1 true true true true",
-    "nested requested deep.swf",
-    "inner frame 1 true true true true",
-    "inner frame 1 true true true true",
-    "8 init - http://example.test/inner.swf true",
-    "8 complete - http://example.test/inner.swf true",
-    "5 init - http://example.test/nested.swf true",
-    "5 complete - http://example.test/nested.swf true",
-  ]);
-});
-
-test("a stalled URLStream does not hold up a later Loader load", { skip }, async () => {
-  const compile = compiler(out);
-  const inner = innerSwf(compile("Inner"));
+    }
+  }`;
+  const errors: unknown[] = [];
   const scripting = new Scripting(await createCodegen(wasm), {
     print: () => {},
-    url: "http://example.test/outer.swf",
-    fetch: ({ url }) =>
-      url.endsWith("never.bin")
-        ? new Promise(() => {})
-        : Promise.resolve({ bytes: inner, status: 200, headers: [] }),
+    onUncaught: (error) => errors.push(error),
   });
-  assert.equal(
-    scripting.streamError("missing.bin"),
-    "Error #2032: Stream Error. URL: http://example.test/missing.bin",
-  );
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const root = compile(
-    "StreamLoaderRoot",
-    "package { import flash.display.Sprite; public class StreamLoaderRoot extends Sprite {} }",
-  );
-  const player = new Player(bare(root, 1, "StreamLoaderRoot"), scripting);
+  const player = new Player(bare(compiler(out)("ErrorStack", source)), scripting);
   await player.start();
 
-  scripting.requestBytes("never.bin", new AbortController().signal, () => {});
-  const loader = scripting.rt.construct(
-    scripting.rt.classNamed("flash.display::Loader"),
-  ) as avm2.AsObject;
-  scripting.requestLoadUrl(loader, "inner.swf");
-  // settled() waits for both requests, but Loader's preparation must finish
-  // independently of the stream that never resolves.
-  const preparing = (scripting as unknown as { preparing: Promise<void> }).preparing;
-  const finished = await Promise.race([
-    preparing.then(() => true),
-    new Promise<boolean>((resolve) => {
-      setTimeout(() => resolve(false), 3000).unref();
-    }),
-  ]);
-  assert.equal(finished, true);
-
-  player.tick();
-  assert.ok(loader.$content);
-});
-
-test("URLRequest data reaches the host as a query or a copied body", { skip }, async () => {
-  const requests: FetchRequest[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: () => {},
-    url: "http://example.test/outer.swf",
-    fetch: async (request) => {
-      requests.push(request);
-      return { bytes: new Uint8Array(0), status: 200, headers: [] };
-    },
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const rt = scripting.rt;
-  const name = (property: string) => rt.publicName(property);
-  const load = (request: avm2.AsObject) =>
-    scripting.requestBytes(request, new AbortController().signal, () => {});
-  const cls = rt.classNamed("flash.net::URLRequest");
-
-  const get = rt.construct(cls, "/api?old=1#part") as avm2.AsObject;
-  rt.setProperty(get, name("data"), "new=2");
-  load(get);
-  assert.deepEqual(requests[0], {
-    url: "http://example.test/api?old=1&new=2#part",
-    method: "GET",
-    headers: [],
-    body: null,
-  });
-
-  const variables = rt.construct(rt.classNamed("flash.net::URLVariables"), "sku=Test");
-  rt.setProperty(get, name("data"), variables);
-  load(get);
-  assert.equal(requests[1].url, "http://example.test/api?old=1&sku=Test#part");
-
-  const post = rt.construct(cls, "/api") as avm2.AsObject;
-  rt.setProperty(post, name("method"), "POST");
-  rt.setProperty(post, name("contentType"), "text/plain");
-  rt.setProperty(post, name("data"), "hello");
-  const header = rt.construct(rt.classNamed("flash.net::URLRequestHeader"), "X-Test", "one");
-  rt.setProperty(post, name("requestHeaders"), rt.array([header]));
-  load(post);
-  assert.deepEqual(requests[2], {
-    url: "http://example.test/api",
-    method: "POST",
-    headers: [
-      ["X-Test", "one"],
-      ["Content-Type", "text/plain"],
-    ],
-    body: new TextEncoder().encode("hello"),
-  });
-
-  const binary = rt.construct(rt.classNamed("flash.utils::ByteArray")) as avm2.AsObject;
-  const bytes = avm2.bytesOf(rt, binary);
-  bytes.write(new Uint8Array([0, 255, 4]));
-  rt.setProperty(post, name("data"), binary);
-  load(post);
-  bytes.buffer[0] = 9;
-  assert.deepEqual(requests[3].body, new Uint8Array([0, 255, 4]));
-
-  const loader = rt.construct(rt.classNamed("flash.display::Loader"));
-  rt.callProperty(loader, name("load"), post);
-  assert.equal(requests[4].method, "POST");
-  assert.deepEqual(requests[4].body, new Uint8Array([9, 255, 4]));
-
-  rt.setProperty(get, name("requestHeaders"), rt.array([header]));
-  load(get);
-  assert.deepEqual(requests[5].headers, []);
-
-  await scripting.settled();
-});
-
-test("LoaderInfo reports HTTP status between init and complete, and before an I/O error", {
-  skip,
-}, async () => {
-  const compile = compiler(out);
-  const inner = innerSwf(compile("Inner"));
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: () => {},
-    url: "http://example.test/outer.swf",
-    fetch: async ({ url }) =>
-      url.endsWith("inner.swf")
-        ? { bytes: inner, status: 200, headers: [] }
-        : { bytes: null, status: 404, headers: [] },
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  assert.equal(
-    scripting.rt.toString(scripting.httpStatus(200)),
-    '[HTTPStatusEvent type="httpStatus" bubbles=false cancelable=false eventPhase=2 status=200 redirected=false responseURL=null]',
-  );
-  const statusEvent = scripting.httpStatus(200);
-  const responseURL = scripting.rt.publicName("responseURL");
-  scripting.rt.setProperty(statusEvent, responseURL, "http://example.test/inner.swf");
-  assert.equal(scripting.rt.getProperty(statusEvent, responseURL), "http://example.test/inner.swf");
-  const root = compile(
-    "StreamLoaderRoot",
-    "package { import flash.display.Sprite; public class StreamLoaderRoot extends Sprite {} }",
-  );
-  const player = new Player(bare(root, 1, "StreamLoaderRoot"), scripting);
-  await player.start();
-
-  const loader = scripting.rt.construct(
-    scripting.rt.classNamed("flash.display::Loader"),
-  ) as avm2.AsObject;
-  scripting.requestLoadUrl(loader, "inner.swf");
-  const events: string[] = [];
-  const info = loader.$loaderInfo as avm2.AsObject;
-  info.$listeners = new Map(
-    ["open", "progress", "init", "httpStatus", "complete", "ioError"].map((type) => [
-      type,
-      [
-        {
-          fn: {
-            $f: (event: avm2.AsObject) => {
-              events.push(
-                type === "httpStatus"
-                  ? `${type}:${scripting.rt.getProperty(event, scripting.rt.publicName("status"))}`
-                  : type,
-              );
-            },
-          },
-          capture: false,
-          priority: 0,
-        },
-      ],
-    ]),
-  );
-
-  await scripting.settled();
-  player.tick();
-  assert.deepEqual(events.splice(0), [
-    "open",
-    "progress",
-    "progress",
-    "init",
-    "httpStatus:200",
-    "complete",
-  ]);
-
-  scripting.requestLoadUrl(loader, "missing.swf");
-  await scripting.settled();
-  player.tick();
-  assert.deepEqual(events, ["httpStatus:404", "ioError"]);
-});
-
-// An AVM1 SWF of version 8: a 10 by 10 square, two frames, and `extra` tags before them.
-function avm1Swf(extra: Uint8Array[] = []): Uint8Array {
-  const square = w.shape({
-    id: 1,
-    bounds: [0, 200, 0, 200],
-    fills: [0xff0000],
-    paths: [
-      {
-        fill1: 1,
-        commands: [
-          { move: [0, 0] },
-          { line: [200, 0] },
-          { line: [200, 200] },
-          { line: [0, 200] },
-          { line: [0, 0] },
-        ],
-      },
-    ],
-  });
-  return w.swf({
-    version: 8,
-    width: 30,
-    height: 20,
-    frameRate: 12,
-    frameCount: 2,
-    tags: [
-      ...extra,
-      square,
-      w.place({ depth: 1, character: 1 }),
-      w.showFrame(),
-      w.showFrame(),
-      w.end(),
-    ],
-  });
-}
-
-/** A player of a bare AS3 root and a Loader on it, whose LoaderInfo's events are logged. */
-async function avm1Loading(options: ConstructorParameters<typeof Scripting>[1] = {}) {
-  const compile = compiler(out);
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: () => {},
-    url: "http://example.test/outer.swf",
-    ...options,
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const root = compile(
-    "Avm1Root",
-    "package { import flash.display.Sprite; public class Avm1Root extends Sprite {} }",
-  );
-  const player = new Player(bare(root, 1, "Avm1Root"), scripting);
-  await player.start();
-
-  const rt = scripting.rt;
-  const loader = rt.construct(rt.classNamed("flash.display::Loader")) as avm2.AsObject;
-  rt.callProperty(player.root.object, rt.publicName("addChild"), loader);
-  const info = rt.getProperty(loader, rt.publicName("contentLoaderInfo")) as avm2.AsObject;
-  const events: string[] = [];
-  info.$listeners = new Map(
-    ["open", "progress", "init", "httpStatus", "complete", "ioError"].map((type) => [
-      type,
-      [
-        {
-          fn: {
-            $f: (event: avm2.AsObject) => {
-              const text = type === "ioError" ? rt.getProperty(event, rt.publicName("text")) : "";
-              events.push(text ? `${type} ${text}` : type);
-            },
-          },
-          capture: false,
-          priority: 0,
-        },
-      ],
-    ]),
-  );
-  const content = () => rt.getProperty(loader, rt.publicName("content")) as avm2.AsObject | null;
-  const get = (name: string) => rt.getProperty(info, rt.publicName(name));
-  const parameter = (name: string) =>
-    rt.getProperty(get("parameters") as avm2.AsObject, rt.publicName(name));
-  return { scripting, player, rt, loader, info, events, content, get, parameter };
-}
-
-test("an AVM1 SWF from a URL comes as an AS3 one's content does, its INIT and COMPLETE at the frame's end", {
-  skip,
-}, async () => {
-  const avm1 = avm1Swf();
-  const { scripting, player, rt, loader, events, content, get, parameter } = await avm1Loading({
-    fetch: async () => ({ bytes: avm1, status: 200, headers: [] }),
-  });
-  scripting.requestLoadUrl(loader, "avm1.swf?a=1");
-
-  await scripting.settled();
-  player.tick();
-  assert.deepEqual(events, ["open", "progress", "progress", "init", "httpStatus", "complete"]);
-  const movie = content() as avm2.AsObject;
-  assert.equal(rt.traitsOf(movie).name, "flash.display::AVM1Movie");
-  assert.deepEqual(
-    ["actionScriptVersion", "swfVersion", "frameRate", "width", "height"].map(get),
-    [2, 8, 12, 30, 20],
-  );
-  assert.equal(parameter("a"), "1");
-
-  // Added in the frame's construct phase, as an AS3 SWF's root is (Ruffle),
-  // it plays on from the next frame.
-  const clip = movie.$display as MovieClip;
-  assert.equal(clip.children.length, 1);
-  const frames = [clip.currentFrame];
-  for (let i = 0; i < 3; i++) {
-    player.tick();
-    frames.push(clip.currentFrame);
-  }
-
-  assert.deepEqual(frames, [1, 2, 1, 2]);
-});
-
-test("an AVM1 SWF from bytes comes at the end of the frame, its context's parameters on it", {
-  skip,
-}, async () => {
-  const { scripting, player, rt, loader, events, content, parameter } = await avm1Loading();
-  scripting.requestLoad(loader, avm1Swf(), undefined, new Map([["b", "2"]]));
-  assert.deepEqual(events.splice(0), ["progress", "progress"]);
-  assert.equal(content(), null);
-
-  // Made in the call, a frame's end away: no settling needed.
-  player.tick();
-  assert.deepEqual(events, ["init", "complete"]);
-  const movie = content() as avm2.AsObject;
-  assert.equal(rt.traitsOf(movie).name, "flash.display::AVM1Movie");
-  assert.equal(parameter("b"), "2");
-  const clip = movie.$display as MovieClip;
-  const frames = [clip.currentFrame];
-  for (let i = 0; i < 3; i++) {
-    player.tick();
-    frames.push(clip.currentFrame);
-  }
-
-  assert.deepEqual(frames, [1, 1, 2, 1]);
-});
-
-test("an AVM1 SWF from bytes with an image comes once it is decoded, or ends in #2124", {
-  skip,
-}, async () => {
-  // DefineBitsJPEG2 holding a PNG's signature, which the decoders below take as an image.
-  const png = w.tag(
-    21,
-    Uint8Array.from([2, 0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    true,
-  );
-  const decoded = await avm1Loading({
-    decodeImage: async () => ({ width: 1, height: 1, rgba: Uint8Array.from([0, 0, 255, 255]) }),
-  });
-  decoded.scripting.requestLoad(decoded.loader, avm1Swf([png]));
-  decoded.events.splice(0);
-  decoded.player.tick();
-  assert.deepEqual(decoded.events, []);
-  await decoded.scripting.settled();
-  decoded.player.tick();
-  assert.deepEqual(decoded.events, ["init", "complete"]);
-  assert.ok(decoded.content());
-
-  const refused = await avm1Loading({ decodeImage: () => Promise.reject(new Error("no")) });
-  refused.scripting.requestLoad(refused.loader, avm1Swf([png]));
-  refused.events.splice(0);
-  await refused.scripting.settled();
-  refused.player.tick();
-  assert.deepEqual(refused.events, ["ioError Error #2124: Loaded file is an unknown type."]);
-  assert.equal(refused.content(), null);
-});
-
-test("an AVM1 SWF from bytes closed or unloaded before the frame's end never comes", {
-  skip,
-}, async () => {
-  const { scripting, player, rt, loader, events, content } = await avm1Loading();
-  scripting.requestLoad(loader, avm1Swf());
-  rt.callProperty(loader, rt.publicName("close"));
-  scripting.requestLoad(loader, avm1Swf());
-  rt.callProperty(loader, rt.publicName("unload"));
-  events.splice(0);
-  player.tick();
-  assert.deepEqual(events, []);
-  assert.equal(content(), null);
-  assert.equal((loader.$display as Container).children.length, 0);
-});
-
-test("the pointer over an AVM1 movie hits its Loader, the AVM1Movie being no InteractiveObject", {
-  skip,
-}, async () => {
-  const { scripting, player, loader } = await avm1Loading();
-  scripting.requestLoad(loader, avm1Swf());
-  player.tick();
-
-  assert.equal(pointerTarget(player.stage, 5, 5, player.width, player.height), loader.$display);
-  // Off the movie's artwork, the stage.
-  assert.equal(pointerTarget(player.stage, 15, 15, player.width, player.height), player.stage);
-});
-
-test("timers fire in the order of their times, each at its own time", { skip }, async () => {
-  const lines: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: (line) => lines.push(line),
-    // The frame clock: what the timers trace of getTimer is the same on every run.
-    realTime: null,
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  // A 10 fps root: the clock is at 100 as the constructor starts the timers, at 400 after three ticks.
-  const player = new Player(bare(compiler(out)("Timers"), 4), scripting);
-  player.frameRate = 10;
-  await player.start();
-  player.tick();
-  player.tick();
-  player.tick();
-  // Both due at 400: B was scheduled for it first, at 250, and goes first.
-  assert.deepEqual(lines, ["A 200", "B 250", "A 300", "B 400", "A 400"]);
-});
-
-test("timers due at once fire in the order started, after others around them were stopped", {
-  skip,
-}, async () => {
-  const lines: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: (line) => lines.push(line),
-    // The frame clock: what the timers trace of getTimer is the same on every run.
-    realTime: null,
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  // Five timers started A to E, three stopped at once: B and C, both due at 300, keep their order.
-  const player = new Player(bare(compiler(out)("TimerTies"), 3), scripting);
-  player.frameRate = 10;
-  await player.start();
-  player.tick();
-  player.tick();
-  assert.deepEqual(lines, ["B 300", "C 300"]);
+  assert.equal(errors.length, 1);
+  assert.match(scripting.rt.toString(errors[0] as avm2.Value), /1009/);
+  const stack = scripting.rt.stackOf(errors[0] as avm2.Value) ?? "";
+  // The method that reached null first, and the frame script six calls out, past V8's usual ten frames.
+  assert.match(stack.split("\n")[0], /reachNothing/);
+  assert.match(stack, /frame1/);
+  assert.equal(scripting.rt.stackOf("not an error"), null);
 });
 
 test("frame scripts that send their clip to each other's frame end in a stack overflow, not the page's", {
@@ -980,29 +349,6 @@ test("frame scripts that send their clip to each other's frame end in a stack ov
     return true;
   });
 });
-
-/** A SWF of `version` whose root places Bound, a clip of `frames` frames bound to the script's class. */
-function boundClip(abc: Uint8Array, version: number, frames: number): Uint8Array {
-  return w.swf({
-    version,
-    width: 20,
-    height: 20,
-    frameCount: 2,
-    tags: [
-      w.fileAttributes(true),
-      w.sprite(2, frames, [...Array.from({ length: frames }, () => w.showFrame()), w.end()]),
-      w.doAbc(abc),
-      w.symbolClass([
-        [0, "Main"],
-        [2, "Bound"],
-      ]),
-      w.place({ depth: 1, character: 2, name: "bound" }),
-      w.showFrame(),
-      w.showFrame(),
-      w.end(),
-    ],
-  });
-}
 
 test("a goto plays or stops as it happens, so the landing frame's script has the last word", {
   skip,
@@ -1635,24 +981,6 @@ test("scripts that catch the stack overflow of their goto cycles stop soon, not 
   assert.ok(runs > 256 && runs < 10000, `${runs} runs`);
 });
 
-test("a timer whose closure throws keeps running and fires again", { skip }, async () => {
-  const lines: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: (line) => lines.push(line),
-    // The frame clock: what the timers trace of getTimer is the same on every run.
-    realTime: null,
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const player = new Player(bare(compiler(out)("TimerThrows"), 3), scripting);
-  player.frameRate = 10;
-  await player.start();
-  // The first firing's error reaches the host; the timer is back in its place for the next.
-  assert.throws(() => player.tick());
-  assert.equal(scripting.now, scripting.clock);
-  player.tick();
-  assert.deepEqual(lines, ["firing 1 200 true", "firing 2 300 true"]);
-});
-
 test("a bitmap a timeline places is a Bitmap, its bound class its data's with HasImage alone", {
   skip,
 }, async () => {
@@ -1723,70 +1051,221 @@ test("a bitmap a timeline places is a Bitmap, its bound class its data's with Ha
   );
 });
 
-test("getTimer reads the real clock as it runs on within a frame, or the frame clock if asked", {
+// The rounds of a frame's scripts: another round runs when a script made
+// something else's due, and is left out when nothing a round reads changed
+// (display.ts's scriptWork). In version 9, where a goto runs no cycle of
+// its own, each way a script can make another clip's script due shows in
+// the rounds.
+// Clip, of 4 frames, the fourth placing a Kid, each frame's script traced;
+// on its second frame, the clip after a, named for what it does, sends a,
+// whose script ran, to a frame, or makes a Kid with `new`, and adds it or
+// not. Each makes a script due after the round has listed its clips,
+// which only another round runs.
+const SOURCE = `package {
+  import flash.display.MovieClip;
+
+  public dynamic class Clip extends MovieClip {
+    public function Clip() {
+      addFrameScript(0, function():void { trace(name, 1); },
+        1, function():void { trace(name, 2); stop(); if (name != "a") poke(); },
+        2, function():void { trace(name, 3); stop(); },
+        3, function():void { trace(name, 4); stop(); });
+    }
+
+    private function poke():void {
+      var a:MovieClip = MovieClip(parent.getChildByName("a"));
+      if (name == "goto") {
+        a.gotoAndStop(3);
+      } else if (name == "place") {
+        a.gotoAndStop(4);
+      } else {
+        var kid:Kid = new Kid();
+        kid.name = name;
+        if (name == "add") {
+          MovieClip(parent).addChild(kid);
+        }
+      }
+    }
+  }
+
+  public class Kid extends MovieClip {
+    public function Kid() {
+      addFrameScript(0, function():void { trace("kid", name); });
+    }
+  }
+
+  public dynamic class Main extends MovieClip {
+    public function Main() {
+      addFrameScript(1, function():void { trace("main", 2); stop(); });
+    }
+  }
+}`;
+
+/** A version 9 root of a Clip "a" and one named `second` after it. */
+function roundsSwf(abc: Uint8Array, second: string): Uint8Array {
+  return w.swf({
+    version: 9,
+    width: 20,
+    height: 20,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(3, 1, [w.showFrame(), w.end()]),
+      w.sprite(2, 4, [
+        w.showFrame(),
+        w.showFrame(),
+        w.showFrame(),
+        w.place({ depth: 1, character: 3, name: "kid" }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Clip"],
+        [3, "Kid"],
+      ]),
+      w.place({ depth: 1, character: 2, name: "a" }),
+      w.place({ depth: 2, character: 2, name: second }),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+for (const [second, due] of [
+  // A clip's frame moved.
+  ["goto", ["a 3"]],
+  // That, and a child placed and made alive.
+  ["place", ["a 4", "kid kid"]],
+  // A clip made alive, with `new`, off the list, and on it.
+  ["make", ["kid make"]],
+  ["add", ["kid add"]],
+] as const) {
+  test(`a script that makes another's due has it run in the next round: ${second}`, {
+    skip,
+  }, async () => {
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const player = new Player(roundsSwf(compiler(out)("Rounds", SOURCE), second), scripting);
+    await player.start();
+    assert.deepEqual(lines.splice(0), ["a 1", `${second} 1`]);
+
+    player.tick();
+    assert.deepEqual(lines.splice(0), ["main 2", "a 2", `${second} 2`, ...due]);
+
+    player.tick();
+    assert.deepEqual(lines, []);
+  });
+}
+
+test("a frame whose scripts change nothing a round reads takes one round", {
   skip,
 }, async () => {
-  const compile = compiler(out);
-  const swf = bare(
-    compile(
-      "ClockReads",
-      `package {
-        import flash.display.Sprite;
-        import flash.utils.getTimer;
-        public class ClockReads extends Sprite {
-          public function ClockReads() { var a:int = getTimer(); var b:int = getTimer(); trace(a, b); }
-        }
-      }`,
-    ),
-    1,
-    "ClockReads",
-  );
-
-  // The frame clock: the first frame's time at 24 fps, the same at each read.
-  const framed: string[] = [];
-  const stepped = new Scripting(await createCodegen(wasm), {
-    print: (l) => framed.push(l),
-    realTime: null,
-  });
-  await stepped.loadLibraries(libraryAbcs(`${out}libraries/`));
-  await new Player(swf, stepped).start();
-  assert.deepEqual(framed, ["42 42"]);
-
-  // A host's clock, read once as the player starts, then at each getTimer:
-  // the time since, which runs on within the frame.
-  let clock = 1000;
-  const real: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: (l) => real.push(l),
-    realTime: () => (clock += 2),
-  });
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Quiet extends MovieClip {
+      public var n:int = 0;
+      public function Quiet() {
+        addFrameScript(0, function():void { n++; }, 1, function():void { n++; });
+      }
+    }
+  }`;
+  const scripting = new Scripting(await createCodegen(wasm), { print: () => {} });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  await new Player(swf, scripting).start();
-  assert.deepEqual(real, ["2 4"]);
+  const abc = compiler(out)("Quiet", source);
+  const player = new Player(
+    w.swf({
+      width: 20,
+      height: 20,
+      frameCount: 2,
+      tags: [
+        w.fileAttributes(true),
+        w.doAbc(abc),
+        w.symbolClass([[0, "Quiet"]]),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ],
+    }),
+    scripting,
+  );
+  await player.start();
+
+  // The root's script runs, and changes nothing a round reads: no second
+  // round walks the list. Each walk, the tick's and each round's, starts
+  // with the orphans. The checked build runs the round left out anyway, to
+  // see that it finds nothing.
+  let walks = 0;
+  const orphanRoots = scripting.lifecycle.orphanRoots.bind(scripting.lifecycle);
+  scripting.lifecycle.orphanRoots = () => {
+    walks++;
+    return orphanRoots();
+  };
+  for (let i = 0; i < 4; i++) {
+    player.tick();
+  }
+
+  assert.equal(walks, Scripting.checkRounds ? 12 : 8);
+  const n = scripting.rt.getProperty(
+    player.root.object as avm2.AsObject,
+    avm2.qname(avm2.publicNs, "n"),
+  );
+  assert.equal(n, 5);
 });
 
-test("getTimer runs on in real time by default", { skip }, async () => {
-  const swf = bare(
-    compiler(out)(
-      "ClockRuns",
-      `package {
-        import flash.display.Sprite;
-        import flash.utils.getTimer;
-        public class ClockRuns extends Sprite {
-          public function ClockRuns() {
-            var start:int = getTimer();
-            for (var n:int = 0; getTimer() == start && n < 100000000; n++) {}
-            trace(getTimer() > start);
-          }
+test("destroy closes the open connections, aborts the fetches and closes the audio host", async () => {
+  const closed: string[] = [];
+  let aborted: AbortSignal | null = null;
+  let audioClosed = 0;
+  const remote: { close?: () => void; error?: (message: string) => void } = {};
+  const scripting = new Scripting(await createCodegen(wasm), {
+    socket: {
+      connect(host, _port, events) {
+        if (host === "peer-closes") {
+          remote.close = events.close;
         }
-      }`,
-    ),
-    1,
-    "ClockRuns",
+
+        if (host === "refused") {
+          remote.error = events.error;
+        }
+
+        return { send: () => {}, close: () => closed.push(`socket ${host}`) };
+      },
+    },
+    webSocket: {
+      connect: (url) => ({ send: () => {}, close: () => closed.push(`webSocket ${url}`) }),
+    },
+    fetch: (_request, signal) => {
+      aborted = signal;
+      return new Promise(() => {});
+    },
+    audio: { decode: () => Promise.reject(new Error("no device")), close: () => audioClosed++ },
+  });
+  const events = { open() {}, data() {}, close() {}, error() {} };
+  const wsEvents = { open() {}, message() {}, close() {}, error() {} };
+  assert.ok(scripting.socket && scripting.webSocket && scripting.fetch);
+  scripting.socket.connect("open", 1, events);
+  scripting.socket.connect("closed-here", 1, events).close();
+  scripting.socket.connect("peer-closes", 1, events);
+  remote.close?.();
+  // Refused, with no close after it: nothing left for destroy to close.
+  scripting.socket.connect("refused", 1, events);
+  remote.error?.("Error #2031: Socket Error.");
+  scripting.webSocket.connect("ws://open.test/", [], wsEvents);
+  void scripting.fetch(
+    { url: "http://a.test/", method: "GET", headers: [], body: null },
+    new AbortController().signal,
   );
-  const lines: string[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  await new Player(swf, scripting).start();
-  assert.deepEqual(lines, ["true"]);
+  assert.deepEqual(closed, ["socket closed-here"]);
+
+  scripting.destroy();
+  // Only what neither end had closed, once each, however often destroyed.
+  scripting.destroy();
+  assert.deepEqual(closed, ["socket closed-here", "socket open", "webSocket ws://open.test/"]);
+  assert.equal((aborted as AbortSignal | null)?.aborted, true);
+  assert.equal(audioClosed, 1);
+  assert.ok(scripting.destroyed);
 });

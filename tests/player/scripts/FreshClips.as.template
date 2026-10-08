@@ -1,0 +1,204 @@
+// Which clips sit out the advance after a script makes one with `new`, and
+// which play on: the clip, the children its first frame places (and
+// theirs), wherever they are by then; not a clip a script puts into it, nor
+// one a goto places; nor a clip a timeline places, nor a loaded SWF's
+// root. Each label is a clip made one way, shown as its currentFrame with
+// its clips' in brackets, at each of the root's frame events. No frame
+// scripts of theirs: the order Flash runs a new clip's first one in is not
+// what this asks. The inner SWF's bytes are put in as base64 by
+// tests/player/cases.ts. A goto from a script ends a frame of its own in
+// Flash, whose EXIT_FRAME the harness counts as a frame: the gotos are all
+// in the constructor, where the first runs the root's frame 1 script too,
+// before the harness counts.
+package {
+  import flash.display.DisplayObject;
+  import flash.display.DisplayObjectContainer;
+  import flash.display.Loader;
+  import flash.display.MovieClip;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.system.ApplicationDomain;
+  import flash.system.LoaderContext;
+  import flash.utils.ByteArray;
+
+  public class Kid extends MovieClip {
+  }
+
+  /** Four frames, a Kid on the first; Box3 places another on its third. */
+  public class Box extends MovieClip {
+    public var kid:Kid;
+  }
+
+  public class Box3 extends MovieClip {
+    public var kid:Kid;
+    public var late:Kid;
+  }
+
+  /** Four frames, a Box (with its Kid) on the first. */
+  public class Outer extends MovieClip {
+    public var box:Box;
+  }
+
+  /** A Sprite's class on a symbol with a Kid: it stays on its frame, its Kid plays. */
+  public class SBox extends Sprite {
+    public var kid:Kid;
+  }
+
+  /** One frame, whose constructor makes a Box. */
+  public class Maker extends MovieClip {
+    public function Maker() {
+      addChild(new Box());
+    }
+  }
+
+  public class Main extends MovieClip {
+    private static const INNER:String = "@@INNER@@";
+    public var placed:Box;
+    public var placedOuter:Outer;
+    public var q:Box3;
+    private var tracked:Array = [];
+    private var later:Box;
+    private var mover:Kid;
+    private var entered:int = 0;
+
+    public function Main() {
+      addFrameScript(0, frame1, 1, frame2, 2, frame3, 3, frame4);
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        report("enter");
+        if (++entered == 1) {
+          addChild(track("E", new Box()));
+        }
+      });
+      addEventListener(Event.FRAME_CONSTRUCTED, function(e:Event):void { report("constructed"); });
+      addEventListener(Event.EXIT_FRAME, function(e:Event):void { report("exit"); });
+      // Made in the root's constructor: added at once, never, at frame 2.
+      addChild(track("A", new Box()));
+      track("B", new Box());
+      later = track("C", new Box()) as Box;
+      addChild(track("O", new Outer()));
+      addChild(track("S", new SBox()));
+      addChild(track("M", new Maker()));
+      // A goto at once: to a frame with the first's Kid, and with another a goto places.
+      var stopped:Box3 = track("GS", new Box3()) as Box3;
+      stopped.gotoAndStop(3);
+      addChild(stopped);
+      var played:Box3 = track("GP", new Box3()) as Box3;
+      played.gotoAndPlay(3);
+      addChild(played);
+      // A new clip's Kid taken out of it into the root, at once.
+      var r:Box = track("R", new Box()) as Box;
+      addChild(r);
+      addChild(r.kid);
+      tracked.push(["RK", r.kid]);
+      mover = new Kid();
+      addChild(mover);
+      load();
+      report("ctor");
+    }
+
+    private function track(label:String, d:DisplayObject):DisplayObject {
+      tracked.push([label, d]);
+      d.x = 40 * (tracked.length % 5);
+      d.y = 20 * int(tracked.length / 5);
+      return d;
+    }
+
+    private function load():void {
+      var loader:Loader = new Loader();
+      loader.contentLoaderInfo.addEventListener(Event.INIT, function(e:Event):void {
+        tracked.push(["L", loader.content]);
+        report("init");
+      });
+      addChild(loader);
+      var context:LoaderContext = new LoaderContext(false, new ApplicationDomain());
+      context.allowCodeImport = true;
+      loader.loadBytes(decode(INNER), context);
+    }
+
+    private function frame1():void {
+      // The timeline's, made with the root: they play on.
+      tracked.push(["P", placed]);
+      tracked.push(["PO", placedOuter]);
+      tracked.push(["Q", q]);
+      addChild(track("D", new Box()));
+      // A new clip given a new Kid of its own.
+      var k:Box = track("K", new Box()) as Box;
+      k.addChild(new Kid());
+      addChild(k);
+      // A goto at once in a frame script; one on a clip the timeline placed,
+      // whose Kid that the goto places plays on.
+      var stopped:Box3 = track("GS1", new Box3()) as Box3;
+      stopped.gotoAndStop(3);
+      addChild(stopped);
+      var played:Box3 = track("GP1", new Box3()) as Box3;
+      played.gotoAndPlay(2);
+      addChild(played);
+      q.gotoAndPlay(3);
+      report("frame 1");
+    }
+
+    private function frame2():void {
+      addChild(later);
+      addChild(track("D2", new Box()));
+      report("frame 2");
+    }
+
+    private function frame3():void {
+      // A Kid that has played since the constructor, put into a new clip.
+      var x:Box = track("X", new Box()) as Box;
+      x.addChild(mover);
+      addChild(x);
+      report("frame 3");
+    }
+
+    private function frame4():void {
+      report("frame 4");
+    }
+
+    private function report(when:String):void {
+      var parts:Array = [];
+      for each (var t:Array in tracked) {
+        parts.push(t[0] + "=" + show(t[1]));
+      }
+
+      trace(when, currentFrame, parts.join(" "));
+    }
+
+    /** currentFrame, "s" for a Sprite, with its children's in brackets. */
+    private static function show(d:DisplayObject):String {
+      var s:String = d is MovieClip ? String(MovieClip(d).currentFrame) : "s";
+      var c:DisplayObjectContainer = d as DisplayObjectContainer;
+      var parts:Array = [];
+      for (var i:int = 0; c && i < c.numChildren; i++) {
+        if (c.getChildAt(i) is DisplayObjectContainer) {
+          parts.push(show(c.getChildAt(i)));
+        }
+      }
+
+      return parts.length ? s + "(" + parts.join(",") + ")" : s;
+    }
+
+    private static function decode(text:String):ByteArray {
+      const ALPHABET:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      var out:ByteArray = new ByteArray();
+      var bits:int = 0;
+      var have:int = 0;
+      for (var i:int = 0; i < text.length; i++) {
+        var c:String = text.charAt(i);
+        if (c == "=") {
+          break;
+        }
+
+        bits = ((bits << 6) | ALPHABET.indexOf(c)) & 0xffff;
+        have += 6;
+        if (have >= 8) {
+          have -= 8;
+          out.writeByte((bits >> have) & 0xff);
+        }
+      }
+
+      out.position = 0;
+      return out;
+    }
+  }
+}

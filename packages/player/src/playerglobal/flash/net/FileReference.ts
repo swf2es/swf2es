@@ -3,8 +3,8 @@
 // and the saves return, and Event.CANCEL comes in the next frame; a
 // FileReference never has a file, so what reads one throws #2037.
 import { avm2 } from "@swf2es/runtime";
+import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
-import { dispatchEvent } from "../events/EventDispatcher.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -14,7 +14,7 @@ export function fileReferenceNatives(s: Scripting): avm2.Natives {
 
   /** The dialog cancelled, as Flash reports it: CANCEL from the player, in a later frame. */
   const cancelled = (target: AsObject): void => {
-    s.deferHostEvent(() => dispatchEvent(s, target, s.event("cancel")));
+    s.loads.deferHostEvent(() => dispatchEvent(s, target, s.event("cancel")));
   };
 
   const noFile = (): never => {

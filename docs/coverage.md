@@ -26,32 +26,32 @@ recurses until the host's stack runs out, and
 
 ## Results
 
-2026-09-29, after the triage of what differed (#41), in 43 s. Two runs
-agree, but for the two tests above; three of `ecma3/Date` (`e15_9_5_10_1`,
-`e15_9_5_12_1`, `e15_9_5_34_1`) compute from the time now, and fail, in
-avmshell too, late in the UTC day, so their entries are kept from a run
-earlier in it.
+2026-10-08, on dev (#268), in 36 s. The tests that time themselves
+(above) can differ between runs; `regress-271716-n` ended its worker in one
+run where avmshell timed out, as it has before. Checks passed are left out
+of this run's table: a test may pass more checks in swf2es than avmshell
+runs, so their sum over a directory overstates; the 2026-09-29 run counted
+them per test, at 97.7%.
 
-| | Tests | Match avmshell | Checks passed, of avmshell's |
-|---|---|---|---|
-| **All** | 2578 | **2459 (95.4%)** | 60,970 of 62,435 (97.7%) |
-| ecma3 | 928 | 903 (97%) | 44,534 of 44,561 (99.9%) |
-| spidermonkey | 521 | 500 (96%) | 2,662 of 2,701 (98.6%) |
-| as3 | 849 | 800 (94%) | 11,027 of 11,522 (95.7%) |
-| e4x | 173 | 173 (100%) | 1,919 of 1,919 (100%) |
-| regress | 61 | 47 (77%) | 584 of 1,344 |
-| misc, mmgc, mops, recursion, versioning | 46 | 36 | 244 of 388 |
+| | Tests | Match avmshell |
+|---|---|---|
+| **All** | 2578 | **2523 (97.9%)** |
+| ecma3 | 928 | 918 (99%) |
+| spidermonkey | 521 | 508 (98%) |
+| as3 | 849 | 819 (96%) |
+| e4x | 173 | 173 (100%) |
+| regress | 61 | 60 (98%) |
+| misc, mmgc, mops, recursion, versioning | 46 | 45 |
 
 What stops a test, or makes it differ, most often:
 
 | Tests | Reason |
 |---|---|
-| 40 | Fewer checks passed than in avmshell |
-| 17 | Ended otherwise: 16 with an AS3 exception nothing caught where avmshell ended normally, 1 the other way |
 | 15 | The same checks passed, but others failed |
-| 34 | avmshell's shell API (`System`, `File`, `Domain`, the sampler, `Mutex`, `Worker`), which a SWF never calls |
-| 4 | `describeTypeJSON`, and AMF3 for XML |
-| 5 | The host's limits: a string, stack or pattern too large |
+| 9 | Fewer checks passed than in avmshell |
+| 11 | Ended otherwise: 9 with an AS3 exception nothing caught where avmshell ended normally, 2 the other way |
+| 11 | avmshell's sampler (`flash.sampler`, `as3/sampling`), which a SWF in the player does not use |
+| 5 | The host's limits: a string, array, stack or pattern too large |
 
 ### Since the first run (2015, 78.2%)
 

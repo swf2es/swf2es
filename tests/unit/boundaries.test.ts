@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 // Package boundaries (docs/architecture.md). pnpm only links the packages a
 // package.json lists, so the build already rejects imports that are not
@@ -11,6 +13,7 @@ const allowed: Record<string, string[]> = {
   runtime: ["format"],
   player: ["codegen", "format", "runtime"],
   "player-hosts": ["player"],
+  web: ["codegen", "format", "player", "player-hosts"],
   cli: ["codegen", "format"],
 };
 
@@ -49,3 +52,31 @@ for (const name of portable) {
     );
   });
 }
+
+// Inside the player, playerglobal/ is AS3's bindings only: it imports the
+// player, and the player imports it once, where Scripting registers its
+// natives and hooks (docs/architecture.md, "Source layout").
+const playerSrc = fileURLToPath(new URL("player/src/", root));
+const registration = "scripting.ts -> playerglobal/index.ts";
+
+test("the player imports playerglobal only to register it", () => {
+  const files = readdirSync(playerSrc, { recursive: true, encoding: "utf8" })
+    .map((file) => file.replaceAll("\\", "/"))
+    .filter((file) => file.endsWith(".ts") && !file.startsWith("playerglobal/"));
+  assert.ok(files.length > 0);
+
+  const imports: string[] = [];
+  for (const file of files) {
+    const source = readFileSync(join(playerSrc, file), "utf8");
+    for (const [, specifier] of source.matchAll(/(?:from|import)\s*\(?\s*"(\.[^"]*)"/g)) {
+      const target = relative(playerSrc, join(playerSrc, dirname(file), specifier))
+        .replaceAll("\\", "/")
+        .replace(/\.js$/, ".ts");
+      if (target.startsWith("playerglobal/")) {
+        imports.push(`${file} -> ${target}`);
+      }
+    }
+  }
+
+  assert.deepEqual(imports, [registration]);
+});

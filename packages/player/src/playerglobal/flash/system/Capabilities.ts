@@ -1,40 +1,9 @@
 // flash.system.Capabilities: the screen values the host captured for this
 // player, and the rest as Flash Player 32's browser plugin reports them on
-// the host's system (platformCapabilities), which a host may set apart.
+// the host's system (hosts.ts's platformCapabilities), which a host may
+// set apart.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
-
-/** What Capabilities reports of the system the player runs on. */
-export interface PlatformCapabilities {
-  /** "Windows 10", "Mac OS 10.15.7", "Linux"... */
-  os: string;
-  /** "Adobe Windows", "Adobe Macintosh" or "Adobe Linux". */
-  manufacturer: string;
-  /** The platform and the player's version: "WIN 32,0,0,465". */
-  version: string;
-  /** A language code: "en", or with its country for Chinese and Portuguese ("zh-CN"). */
-  language: string;
-  /** "PlugIn", "ActiveX", "StandAlone", "External" or "Desktop". */
-  playerType: string;
-}
-
-/** The platform as the host's browser reports it, a Linux plugin's where it has none. */
-export function platformCapabilities(): PlatformCapabilities {
-  const navigator = (globalThis as { navigator?: { userAgent?: string; language?: string } })
-    .navigator;
-  const agent = navigator?.userAgent ?? "";
-  const mac = /Mac OS X (\d+)[._](\d+)(?:[._](\d+))?/.exec(agent);
-  const [os, manufacturer, platform] = /Windows/.test(agent)
-    ? ["Windows 10", "Adobe Windows", "WIN"]
-    : mac
-      ? [`Mac OS ${mac[1]}.${mac[2]}${mac[3] ? `.${mac[3]}` : ""}`, "Adobe Macintosh", "MAC"]
-      : ["Linux", "Adobe Linux", "LNX"];
-  // Flash gives the country only where the language needs it.
-  const tag = navigator?.language ?? "en";
-  const [lang, country] = tag.split("-");
-  const language = (lang === "zh" || lang === "pt") && country ? `${lang}-${country}` : lang;
-  return { os, manufacturer, version: `${platform} 32,0,0,465`, language, playerType: "PlugIn" };
-}
 
 export function capabilitiesNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};

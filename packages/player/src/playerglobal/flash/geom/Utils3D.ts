@@ -1,6 +1,7 @@
-// flash.geom.Utils3D: points through a projection matrix, to the plane w = 1.
+// flash.geom.Utils3D: points through a projection matrix, to the plane w = 1,
+// and a matrix turned part of the way to face a point.
 import { avm2 } from "@swf2es/runtime";
-import { transform3D } from "../../../matrix3d.js";
+import { interpolate3D, pointAt3D, transform3D, translation3D } from "../../../display/matrix3d.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
@@ -37,7 +38,49 @@ export function utils3DNatives(s: Scripting): avm2.Natives {
     }
   };
 
+  const xyz = (v: AsObject): number[] => ["x", "y", "z"].map((name) => component(v, name));
+
   class Utils3DNatives {
+    /**
+     * A new matrix, `mat` interpolated toward its translation alone turned
+     * by pointAt, the percent held to 0 to 1, as adl has it: so the scale
+     * goes to 1 with it. Where pointAt would leave the matrix, a copy of
+     * it. The translation is lerped apart from the rotation, and the last
+     * element is 1, so a NaN direction leaves both as they were.
+     */
+    static pointTowards(
+      percent: Value,
+      mat: Value,
+      pos: Value,
+      at: Value = null,
+      up: Value = null,
+    ): AsObject {
+      const from: Float32Array = nonNull(mat, "fromMat").$matrix3D;
+      const target = xyz(nonNull(pos, "target"));
+      const position = translation3D(from[12], from[13], from[14]);
+      const turned = pointAt3D(
+        position,
+        target,
+        at === null || at === undefined ? [0, 1, 0] : xyz(at as AsObject),
+        up === null || up === undefined ? [0, 0, 1] : xyz(up as AsObject),
+      );
+      const out = s.rt.construct(s.rt.classNamed("flash.geom::Matrix3D")) as AsObject;
+      const raw: Float32Array = out.$matrix3D;
+      if (!turned) {
+        raw.set(from);
+        return out;
+      }
+
+      const p = Math.max(0, Math.min(1, s.rt.toNumber(percent)));
+      raw.set(interpolate3D(from, turned, p));
+      for (let i = 0; i < 3; i++) {
+        raw[12 + i] = from[12 + i] + (position[12 + i] - from[12 + i]) * p;
+      }
+
+      raw[15] = 1;
+      return out;
+    }
+
     /**
      * transformVector's float32 result times the float32 reciprocal of its
      * w, as adl has it; the Flash Player of Ruffle's corpus rounds the

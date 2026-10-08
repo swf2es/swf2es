@@ -1,0 +1,23 @@
+{
+  "name": "@swf2es/web",
+  "version": "0.0.0",
+  "description": "Plays SWFs on any web page: the <swf2es-player> element, replaceFlash and ExternalInterface",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@swf2es/codegen": "workspace:*",
+    "@swf2es/format": "workspace:*",
+    "@swf2es/player": "workspace:*",
+    "@swf2es/player-hosts": "workspace:*",
+    "pixi.js": "8.21.0"
+  }
+}
