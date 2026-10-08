@@ -643,6 +643,43 @@ WebAssembly.instantiate = (async (module: WebAssembly.Module, imports?: WebAssem
   return instance;
 }) as typeof WebAssembly.instantiate;
 
+/**
+ * Play a SWF with no scripts a frame for each of `sizes`, the renderer
+ * resized before it to that width, height and resolution, as a host
+ * fitting the stage to a page that resizes does (resize.ts): what threw,
+ * if anything.
+ */
+async function resizeSwf(
+  base64: string,
+  sizes: [number, number, number][],
+): Promise<string | null> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const player = new Player(bytes, null);
+  const renderer = await autoDetectRenderer({
+    preference: "webgl",
+    width: player.width,
+    height: player.height,
+    background: player.background,
+    resolution: 1,
+    useBackBuffer: true,
+  });
+  try {
+    const view = new PixiView(renderer);
+    await player.start();
+    for (const [width, height, resolution] of sizes) {
+      renderer.resize(width, height, resolution);
+      player.tick();
+      view.render(player.stage);
+    }
+
+    return null;
+  } catch (e) {
+    return describe(e, null);
+  } finally {
+    renderer.destroy();
+  }
+}
+
 /** The SWF openSwf started, which stepSwf plays on: for leak.ts, which measures the heap between steps. */
 let opened: {
   player: Player;
@@ -967,6 +1004,7 @@ const page = globalThis as unknown as {
   stepSwf: typeof stepSwf;
   closeSwf: typeof closeSwf;
   traceSwf: typeof traceSwf;
+  resizeSwf: typeof resizeSwf;
 };
 page.runSwf = runSwf;
 page.precompiledSwf = precompiledSwf;
@@ -976,3 +1014,4 @@ page.openSwf = openSwf;
 page.stepSwf = stepSwf;
 page.closeSwf = closeSwf;
 page.traceSwf = traceSwf;
+page.resizeSwf = resizeSwf;

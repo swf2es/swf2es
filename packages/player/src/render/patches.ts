@@ -1,13 +1,15 @@
 // Pixi's GraphicsPipe and render-group builds patched, as this module loads,
 // for Graphics drawn alone: a swapped context rebuilds nothing, and a group
 // left alone a while has its Graphics batched; and a filtered render group's
-// fast bounds placed in its parent's. Loaded by view.ts before any renderer
-// is made. Also SharedGraphics, the Graphics that draws a context its
+// fast bounds placed in its parent's; and a filter's resolution lookup kept
+// from a texture a resize destroyed. Loaded by view.ts before any renderer is
+// made. Also SharedGraphics, the Graphics that draws a context its
 // instances share.
 import type { ColorTransform } from "@swf2es/format";
 import {
   type Bounds,
   boundsPool,
+  FilterSystem,
   Graphics,
   type GraphicsContext,
   GraphicsPipe,
@@ -15,6 +17,7 @@ import {
   Container as PixiContainer,
   type Renderer,
   RenderGroupSystem,
+  type Texture,
 } from "pixi.js";
 import { type SharingGraphics, showFor } from "./color.js";
 // Registers the table's pipe with Pixi, which the override below looks up by name.
@@ -193,6 +196,35 @@ measured._getGlobalBoundsRecursive = function (this: Measured, layers, bounds, l
 
     boundsPool.return(into);
   }
+};
+
+/**
+ * Pixi 8.21's filter resolution lookup, made safe for a texture a resize
+ * destroyed. A filter's push asks it before setting up the entry it has
+ * just pushed, whose input texture is then the one it held when last
+ * used, given back to the pool since; a resize lets the pool destroy the
+ * textures it kept for the old screen size, which leaves that texture
+ * without a source, and a filter inside a filter then threw. The walk is
+ * Pixi's, so applyFilter, which asks it of the live entry, gets what it
+ * did. Pixi 8.22 drops the push's lookup, and this with it.
+ */
+type FilterStack = {
+  _filterStack: { skip: boolean; inputTexture?: Texture }[];
+  _filterStackIndex: number;
+  _findFilterResolution(rootResolution: number): number;
+};
+(FilterSystem.prototype as unknown as FilterStack)._findFilterResolution = function (
+  this: FilterStack,
+  rootResolution,
+) {
+  let currentIndex = this._filterStackIndex - 1;
+  while (currentIndex > 0 && this._filterStack[currentIndex].skip) {
+    --currentIndex;
+  }
+
+  const source =
+    currentIndex > 0 ? this._filterStack[currentIndex].inputTexture?.source : undefined;
+  return source ? source._resolution : rootResolution;
 };
 
 /**
