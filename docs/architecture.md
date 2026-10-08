@@ -1778,8 +1778,8 @@ and the node tests that trace it ask for that.
 Timers follow the same choice. With a real clock they fire as Flash
 fires them, measured in adl: in each frame right after ENTER_FRAME and
 before the frame's construction, every timer due fires once, in the
-order the timers were started, and next falls due its delay after that
-pass, so the ticks a long frame or a stall lost are dropped, not caught
+order the timers were started, and next falls due its delay after it
+fired, so the ticks a long frame or a stall lost are dropped, not caught
 up with (a 10 ms timer fires once after a 200 ms frame, and `currentCount`
 counts only the firings). A timer shorter than the frame interval also
 fires between frames at its time, at most once a check; one as long as a
@@ -1799,12 +1799,21 @@ SWF's grid, though: a 25 fps SWF's frames come 33 and 50 ms apart at 60
 Hz. So the timers keep the host's time, the sum of the `dt`s it passed,
 on which a frame has its exact place on the grid, the time it fell due;
 a timer as long as a frame or longer is due by that, and every timer
-fired in a frame next falls due from it. A timer of the frame's length
-then fires every frame, however the calls fall and jitter, and one a
-millisecond longer every other frame. A short one is due by the call's
-time, less a frame for each the call plays after it, so that a frame run
-late does not hold it back, and a SWF faster than the display fires it
-in each of its frames, not once a call. `updateAfterEvent` in a timer
+fired in a frame next falls due from it, as does one as long as a frame
+started in a frame. A timer of the frame's length then fires every
+frame, however the calls fall and jitter, where adl's fired in 85 % of
+them, its own frames jittering; one a millisecond longer fires every
+other frame, adl's in 55 to 70 %. A short one is due in a frame by the
+call's time, less a frame for each the call plays after it, so that a
+frame run late does not hold it back, and a SWF faster than the display
+fires it in each of its frames, not once a call; between frames it also
+waits its whole delay since it last fired, the least interval adl showed.
+At 60 Hz the checks come every 16.7 ms where Flash's come every few, so a
+timer shorter than that fires two or three times a 24 fps frame where
+adl's fired two to four, and a 20 ms one each 33 ms between frames where
+Flash's fired each 20 to 25. The host's time follows the `dt`s it
+passes, not the real clock, which only places it at the first call and
+tells the time between calls. `updateAfterEvent` in a timer
 fired between frames has the stage render then, with RENDER if a script
 invalidated it, as Flash does; an invalidation without it waits for the
 frame. Ruffle fires its timers after the frame from the same real clock

@@ -231,11 +231,12 @@ export class Player {
       rest %= frame;
     }
 
-    this.owed = rest;
     const timers = this.scripting?.timers;
     timers?.hostPassed(passed);
     try {
       for (let i = 0; i < n; i++) {
+        // Owed as each frame starts: a frame that throws leaves those after it owed.
+        this.owed = rest + (n - 1 - i) * frame;
         timers?.frameAt((n - 1 - i) * frame, rest);
         this.tick();
       }
@@ -246,6 +247,7 @@ export class Player {
     // Flash fires timers shorter than a frame between frames too: a call
     // that played none checks them.
     if (n === 0) {
+      this.owed = rest;
       timers?.betweenFrames(frame);
     }
 

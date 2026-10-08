@@ -25,13 +25,12 @@ export class Timers {
    */
   now = 0;
   private readonly realTime: (() => number) | null;
-  private readonly realStart: number;
   /** The timers started, by their Timer objects, and a heap of them by when they fall due. */
   private readonly running = new Map<AsObject, TimerRecord>();
   private readonly timers = new TimerHeap();
-  /** Timers started so far: a pass of the real clock fires those due in the order of their starts. */
+  /** Timers started so far: a pass of the real clock fires those due in start order. */
   private starts = 0;
-  /** Set by updateAfterEvent as a timer fires: between frames, the stage renders after its closure. */
+  /** Set by updateAfterEvent: a timer fired between frames has the stage render after it. */
   renderAsked = false;
   /**
    * The timers' time with a real clock: the host's, the sum of what it
@@ -60,8 +59,9 @@ export class Timers {
   private grid = Number.NaN;
   /** The last pass's time: none goes back before it. */
   private lastPass = Number.NEGATIVE_INFINITY;
-  /** The last reading of the real clock, which a reading that is not finite or goes back keeps. */
-  private lastElapsed = 0;
+  /** The real clock's last finite reading, and the sum of its forward steps since the start. */
+  private lastRaw = Number.NaN;
+  private sum = 0;
 
   constructor(
     private readonly s: Scripting,
@@ -69,7 +69,9 @@ export class Timers {
   ) {
     this.realTime = options.realTime === undefined ? defaultClock() : options.realTime;
     // getTimer's zero: when the player is made, as Flash's is when it starts.
-    this.realStart = this.realTime ? this.realTime() : 0;
+    if (this.realTime) {
+      this.elapsed();
+    }
   }
 
   /**
@@ -81,17 +83,25 @@ export class Timers {
     return this.realTime ? Math.floor(this.elapsed()) : Math.round(this.now);
   }
 
-  /** Milliseconds since the start by the real clock, unrounded, never going back. */
+  /**
+   * Milliseconds since the start by the real clock, unrounded: the sum of
+   * its forward steps, so that a reading that is not finite is skipped and
+   * one that jumps back neither goes back nor stops the time after it.
+   */
   private elapsed(): number {
-    const t = (this.realTime as () => number)() - this.realStart;
-    if (Number.isFinite(t) && t > this.lastElapsed) {
-      this.lastElapsed = t;
+    const raw = (this.realTime as () => number)();
+    if (Number.isFinite(raw)) {
+      if (raw > this.lastRaw) {
+        this.sum += raw - this.lastRaw;
+      }
+
+      this.lastRaw = raw;
     }
 
-    return this.lastElapsed;
+    return this.sum;
   }
 
-  /** The timers' time now with a real clock: the host's, run on by the real clock since its call. */
+  /** The timers' time now with a real clock: the host's, run on by the real clock since. */
   private current(): number {
     const real = this.elapsed();
     return Number.isNaN(this.host) ? real : this.host + (real - this.hostReal);
@@ -197,10 +207,11 @@ export class Timers {
 
   /**
    * A pass: each timer due fires once, in the order the timers were
-   * started, and next falls due its delay after the pass's time, so the
-   * ticks a long frame or a stall lost are dropped, not caught up with, as
-   * in Flash. Those shorter than `frameMs` go by `time`; the others by
-   * `grid`, and wait for a frame between frames (`grid` NaN).
+   * started, and next falls due its delay after the frame's time on the
+   * grid, or after `time` between frames (`grid` NaN), so the ticks a long
+   * frame or a stall lost are dropped, not caught up with, as in Flash.
+   * Those shorter than `frameMs` are due by `time`; the others by `grid`,
+   * and wait for a frame.
    */
   private fireDue(time: number, grid: number, frameMs: number, between: boolean): void {
     const now = Math.max(time, this.lastPass);
@@ -219,9 +230,13 @@ export class Timers {
       // between-frames check's time plus its delay while the frame runs
       // late; a longer one by the grid's. Either next falls due from the
       // grid's, which frames keep to, as Flash's keep to its own.
+      // Between frames, a short one also waits its whole delay since it
+      // last fired, as Flash's do: due from the grid, it is a little early.
       const short = next.delay < frameMs;
-      if (next.due <= (short ? now : grid) + GRID_SLACK) {
+      const ready = !between || next.fired + next.delay <= now + GRID_SLACK;
+      if (ready && next.due <= (short ? now : grid) + GRID_SLACK) {
         next.due = Number.isNaN(grid) ? now : grid;
+        next.fired = now;
         due.push(next);
       } else {
         held.push(next);
@@ -273,12 +288,20 @@ export class Timers {
     this.stopTimer(object);
     // Whole milliseconds, as Flash's: Timer(1000 / 24) is 41 ms, shorter than the frame.
     const ms = Math.max(Math.trunc(delay) || 0, 1);
-    const from = !this.realTime ? this.now : Number.isNaN(this.at) ? this.current() : this.at;
+    // In a frame, one as long as a frame counts from the frame's time on
+    // the grid, which it fires by; others from the frame's or the pass's.
+    let from = this.now;
+    if (this.realTime) {
+      const long = ms >= 1000 / this.s.frameRate && !Number.isNaN(this.grid);
+      from = long ? this.grid : Number.isNaN(this.at) ? this.current() : this.at;
+    }
+
     const record: TimerRecord = {
       object,
       delay: ms,
       closure,
       due: from + ms,
+      fired: Number.NEGATIVE_INFINITY,
       seq: 0,
       order: this.starts++,
       stopped: false,
@@ -316,6 +339,8 @@ interface TimerRecord {
   due: number;
   /** Its place among timers due at the same time: the one scheduled first fires first. */
   seq: number;
+  /** The pass time it last fired at with a real clock. */
+  fired: number;
   /** When it was started among the others: a pass of the real clock fires by this order. */
   order: number;
   /** Stopped, and so to be dropped when it surfaces; a Timer started anew gets a record of its own. */

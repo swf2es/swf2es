@@ -184,7 +184,7 @@ const paceSource = `package {
   }
 }`;
 
-/** TimerPace's traces on a host whose clock moves by each of `dts` before the advance() it passes it to. */
+/** TimerPace's traces, a host's clock moved by each of `dts` before the advance() it is passed to. */
 async function pace(dts: number[], realTime: boolean): Promise<string[][]> {
   const lines: string[] = [];
   let now = 0;
@@ -301,7 +301,10 @@ test("by the frame clock, every due time in the frame fires after its ENTER_FRAM
   }
 });
 
-/** A SWF at `fps` with a timer of each of `delays`, which traces at each ENTER_FRAME the frames so far and each timer's firings. */
+/**
+ * A SWF at `fps` with a timer of each of `delays`, which traces at each
+ * ENTER_FRAME the frames so far and each timer's firings.
+ */
 function rateSwf(fps: number, delays: string[]): Uint8Array {
   const name = `TimerRate${fps}_${delays.length}_${delays.join("_").replace(/[^0-9]/g, "")}`;
   return bare(
@@ -342,8 +345,8 @@ function rateSwf(fps: number, delays: string[]): Uint8Array {
 
 /**
  * The frames played and each timer's firings from the 20th frame to the
- * last, a host calling advance() with each of `dts` and its clock moved
- * by `clock(dt)`, the injected clock answering `read()` of its time.
+ * last, a host calling advance() with each of `dts` and its clock moved on
+ * by each, the injected clock answering `read(now, reads)`.
  */
 async function rates(
   swf: Uint8Array,
@@ -417,7 +420,7 @@ test("by the real clock, a SWF faster than the display fires its frames' timers 
 }, async () => {
   // 60 fps on a 30 Hz host: two frames a call, each with its own time.
   const { frames, fires } = await rates(
-    rateSwf(60, ["16", "1000 / 60"]),
+    rateSwf(60, ["16"]),
     hz60(300).map((dt) => dt * 2),
   );
 
@@ -490,9 +493,10 @@ test("by the real clock, a timer stopped, reset or started anew within a pass", 
 
   // 24 fps at 60 Hz, a check each 16.7 ms: a 20 ms timer fires every other
   // check. b, stopped by a in the pass at 66 before its turn, does not fire
-  // in it; started anew at 133, it fires 20 ms on, at the next check after
-  // 153; a, reset and started at 150, fires again from 170. c completes
-  // after its third. Due together at 233, b goes first: a was started after it.
+  // in it; started anew in the frame at 133, it fires in the frame at 166,
+  // after a, whose turn comes first. a, fired at 133, waits its whole 20 ms
+  // and does not fire between the frames at 150; reset and started at 166,
+  // it goes after b from then on. c completes after its third.
   assert.deepEqual(lines.slice(0, 16), [
     "a 33 1",
     "b 33",
@@ -503,12 +507,162 @@ test("by the real clock, a timer stopped, reset or started anew within a pass", 
     "c 100 3",
     "c done 100",
     "a 133 4",
-    "a 150 5",
+    "a 166 5",
     "b 166",
-    "a 183 6",
     "b 199",
-    "a 216 7",
+    "a 199 6",
     "b 233",
-    "a 233 8",
+    "a 233 7",
+    "b 266",
   ]);
+});
+
+/** A SWF at `fps` that starts a one-shot Timer(`delay`) anew as each frame ends and counts its firings. */
+function restartSwf(name: string, fps: number, delay: number): Uint8Array {
+  return bare(
+    compiler(out)(
+      name,
+      `package {
+        import flash.display.Sprite;
+        import flash.events.Event;
+        import flash.events.TimerEvent;
+        import flash.utils.Timer;
+        public class ${name} extends Sprite {
+          public function ${name}() {
+            stage.frameRate = ${fps};
+            var fires:int = 0;
+            var frames:int = 0;
+            var t:Timer = new Timer(${delay}, 1);
+            t.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void { fires++; });
+            addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+              frames++;
+              trace(frames + " " + fires);
+            });
+            // After the frame's timers, which fire after ENTER_FRAME.
+            addEventListener(Event.EXIT_FRAME, function(e:Event):void {
+              t.reset();
+              t.start();
+            });
+          }
+        }
+      }`,
+    ),
+    1,
+    name,
+  );
+}
+
+test("by the real clock, a timer started in a frame counts from that frame's time", {
+  skip,
+}, async () => {
+  // 60 fps on a 30 Hz host: a 10 ms timer started in the first of a call's
+  // two frames is due by the second, 16.7 ms on, not by the next call.
+  const short = await rates(
+    restartSwf("TimerEachFrame", 60, 10),
+    hz60(300).map((dt) => dt * 2),
+  );
+  // 25 fps at 60 Hz: one of the frame's length counts from the frame's
+  // time on the grid, and so fires in the next frame, as adl's mostly did.
+  const long = await rates(restartSwf("TimerFrameLong", 25, 40), jittered(1000 / 60, 600, 0.4));
+
+  for (const { frames, fires } of [short, long]) {
+    assert.ok(frames > 200, `${frames} frames`);
+    assert.ok(Math.abs(fires[0] - frames) <= 1, `${fires} in ${frames}`);
+  }
+});
+
+test("by the real clock, a short timer waits its whole delay between frames, a call of no time included", {
+  skip,
+}, async () => {
+  const lines: string[] = [];
+  let now = 0;
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: () => now,
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const name = "TimerGaps";
+  const swf = bare(
+    compiler(out)(
+      name,
+      `package {
+        import flash.display.Sprite;
+        import flash.events.TimerEvent;
+        import flash.utils.Timer;
+        import flash.utils.getTimer;
+        public class ${name} extends Sprite {
+          public function ${name}() {
+            for each (var d:int in [10, 20]) {
+              var t:Timer = new Timer(d);
+              t.addEventListener(TimerEvent.TIMER, report(d));
+              t.start();
+            }
+          }
+          private function report(d:int):Function {
+            return function(e:TimerEvent):void { trace(d, getTimer()); };
+          }
+        }
+      }`,
+    ),
+    1,
+    name,
+  );
+  const player = new Player(swf, scripting);
+  await player.start();
+  // 60 Hz, each call followed by one of no time, now and then one of NaN.
+  for (let call = 0; call < 240; call++) {
+    const dt = call % 2 === 0 ? 1000 / 60 : call % 6 === 1 ? Number.NaN : 0;
+    now += Number.isFinite(dt) ? dt : 0;
+    player.advance(dt);
+  }
+
+  for (const delay of [10, 20]) {
+    const times = lines
+      .filter((l) => l.startsWith(`${delay} `))
+      .map((l) => Number(l.split(" ")[1]));
+    assert.ok(times.length > 40, `${delay}: ${times.length}`);
+    for (let i = 1; i < times.length; i++) {
+      // getTimer truncates: a whole delay reads as one less at most.
+      assert.ok(times[i] - times[i - 1] >= delay - 1, `${delay}: ${times.join(" ")}`);
+    }
+  }
+});
+
+test("a delay is whole milliseconds, as Flash truncates it", { skip }, async () => {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: null,
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const name = "TimerTruncates";
+  const swf = bare(
+    compiler(out)(
+      name,
+      `package {
+        import flash.display.Sprite;
+        import flash.events.TimerEvent;
+        import flash.utils.Timer;
+        import flash.utils.getTimer;
+        public class ${name} extends Sprite {
+          public function ${name}() {
+            var t:Timer = new Timer(10.9, 4);
+            t.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void {
+              trace(t.delay, getTimer());
+            });
+            t.start();
+          }
+        }
+      }`,
+    ),
+    1,
+    name,
+  );
+  const player = new Player(swf, scripting);
+  await player.start();
+  player.tick();
+  player.tick();
+
+  // Started at 41.7 by the frame clock: 10 ms apart, not 10.9; delay still tells 10.9.
+  assert.deepEqual(lines, ["10.9 52", "10.9 62", "10.9 72", "10.9 82"]);
 });

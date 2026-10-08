@@ -263,10 +263,14 @@ export class Scripting {
       /** Drop the final newline produced by an HTML paragraph or BR. */
       trimTrailingHtmlBreak?: boolean;
       /**
-       * The clock getTimer reads, a monotonic one in milliseconds: by default
+       * The clock getTimer reads, in milliseconds: by default
        * `performance.now`, as Flash's runs on in real time, while a script
        * does too; null for the frame clock, which a frame moves and nothing
        * else, the same on every run, as tests that compare traces want.
+       * With a clock, timers fire by the host's time, the sum of the
+       * intervals it passes to advance() (started at this clock's), and by
+       * this clock only before the first call. Readings that are not
+       * finite are skipped, and one that goes back counts as no time.
        */
       realTime?: (() => number) | null;
       /**
