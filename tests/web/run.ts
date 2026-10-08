@@ -36,6 +36,7 @@ const abcs = compileScripts(
     "Main",
     { name: "EmbedTest", source: readFileSync(`${here}scripts/EmbedTest.as`, "utf8") },
     { name: "ClipboardTest", source: readFileSync(`${here}scripts/ClipboardTest.as`, "utf8") },
+    { name: "TouchTest", source: readFileSync(`${here}scripts/TouchTest.as`, "utf8") },
   ],
   out,
 );
@@ -50,6 +51,10 @@ writeFileSync(
 writeFileSync(
   `${site}clipboard.swf`,
   bare(abcs.get("ClipboardTest") as Uint8Array, 1, "ClipboardTest", 160, 120),
+);
+writeFileSync(
+  `${site}touch.swf`,
+  bare(abcs.get("TouchTest") as Uint8Array, 1, "TouchTest", 200, 100),
 );
 writeFileSync(
   `${site}index.html`,
@@ -366,6 +371,122 @@ check(
 
     assert.deepEqual([log, pressed.seed], [["press"], "set on a press"]);
     await call(evaluate, "clipDestroy()");
+  },
+);
+
+check(
+  "touches reach a SWF as TouchEvents and as the mouse, and a tap may write the clipboard",
+  async (evaluate, send) => {
+    // A touch screen the page has from here on: the players made before it saw none.
+    await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+    const [left, top, touchAction] = await call<[number, number, string]>(
+      evaluate,
+      "touchPlayer()",
+    );
+    const log = () => call<string[]>(evaluate, "touchLog()");
+    const touch = (type: string, points: [x: number, y: number, id: number][]) =>
+      send("Input.dispatchTouchEvent", {
+        type,
+        touchPoints: points.map(([x, y, id]) => ({ x: left + x, y: top + y, id })),
+      });
+
+    // The page does not scroll or zoom under the SWF, which takes every touch as Flash's plug-in did.
+    assert.equal(touchAction, "none");
+    assert.deepEqual(await call(evaluate, `touchCall("touchState")`), [
+      true,
+      5,
+      "gesture",
+      "finger",
+    ]);
+
+    // In gesture mode, which recognizes no gestures here, a tap is the mouse's alone.
+    await touch("touchStart", [[30, 30, 0]]);
+    await touch("touchEnd", []);
+    assert.deepEqual(await log(), [
+      "rollOver b 10,10 false null",
+      "rollOver a 30,30 false null",
+      "mouseOver b 10,10 false null",
+      "mouseMove b 10,10 false null",
+      "mouseDown b 10,10 true null",
+      "mouseUp b 10,10 false null",
+      "click b 10,10 false null",
+    ]);
+
+    // In touchPoint mode, each step's touch events, then the primary touch's mouse
+    // events; the mouse stays over b, where the tap left it.
+    assert.equal(await call(evaluate, `touchCall("setMode", "touchPoint")`), "touchPoint");
+    await touch("touchStart", [[30, 30, 0]]);
+    await touch("touchEnd", []);
+    assert.deepEqual(await log(), [
+      "touchRollOver b primary 10,10 30,30 null",
+      "touchRollOver a primary 30,30 30,30 null",
+      "touchOver b primary 10,10 30,30 null",
+      "touchBegin b primary 10,10 30,30 null",
+      "mouseDown b 10,10 true null",
+      "touchEnd b primary 10,10 30,30 null",
+      "touchTap b primary 10,10 30,30 null",
+      "touchOut b primary 10,10 30,30 null",
+      "touchRollOut b primary 10,10 30,30 null",
+      "touchRollOut a primary 30,30 30,30 null",
+      "mouseUp b 10,10 false null",
+      "click b 10,10 false null",
+    ]);
+    // The tap's listener wrote the clipboard, through the async API, as a click's would.
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    let seed = "";
+    for (let i = 0; i < 20 && seed !== "tapped b"; i++) {
+      await new Promise((done) => setTimeout(done, 50));
+      await call(evaluate, `seedFocus("")`);
+      await ctrl(send, "v", "paste");
+      seed = await call<string>(evaluate, "touchSeed()");
+    }
+
+    assert.equal(seed, "tapped b");
+
+    // A drag from b to c: out and rolls as the point moves, a move that may not
+    // write the clipboard, and the mouse after it.
+    await touch("touchStart", [[30, 30, 0]]);
+    await log();
+    await touch("touchMove", [[110, 30, 0]]);
+    assert.deepEqual(await log(), [
+      "touchOut b primary 90,10 110,30 c",
+      "touchRollOut b primary 90,10 110,30 c",
+      "touchRollOut a primary 110,30 110,30 c",
+      "touchRollOver c primary 10,30 110,30 b",
+      "touchOver c primary 10,30 110,30 b",
+      "touchMove c primary 10,30 110,30 null",
+      "setClipboard in touchMove 2176",
+      "mouseOut b 90,10 true c",
+      "rollOut b 90,10 true c",
+      "rollOut a 110,30 true c",
+      "rollOver c 10,30 true b",
+      "mouseOver c 10,30 true b",
+      "mouseMove c 10,30 true null",
+    ]);
+
+    // A second finger is touch events alone; the first, lifted over c where
+    // it did not begin, is no tap and no click.
+    await touch("touchStart", [
+      [110, 30, 0],
+      [10, 10, 1],
+    ]);
+    await touch("touchEnd", [[10, 10, 1]]);
+    await touch("touchEnd", []);
+    assert.deepEqual(await log(), [
+      "touchRollOver a secondary 10,10 10,10 null",
+      "touchOver a secondary 10,10 10,10 null",
+      "touchBegin a secondary 10,10 10,10 null",
+      "touchEnd a secondary 10,10 10,10 null",
+      "touchTap a secondary 10,10 10,10 null",
+      "touchOut a secondary 10,10 10,10 null",
+      "touchRollOut a secondary 10,10 10,10 null",
+      "touchEnd c primary 10,30 110,30 null",
+      "touchOut c primary 10,30 110,30 null",
+      "touchRollOut c primary 10,30 110,30 null",
+      "mouseUp c 10,30 false null",
+    ]);
+    await call(evaluate, "touchDestroy()");
+    await send("Emulation.setTouchEmulationEnabled", { enabled: false });
   },
 );
 

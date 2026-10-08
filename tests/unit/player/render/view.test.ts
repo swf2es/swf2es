@@ -631,6 +631,63 @@ test("Pixi pointer moves are posted, flushed by a frame of their own where nothi
   }
 });
 
+test("Pixi touch pointers go to the player's touches, the mouse's alone to its pointer", () => {
+  const renderer = { screen: { width: 100, height: 100 } } as unknown as ConstructorParameters<
+    typeof PixiView
+  >[0];
+  const view = new PixiView(renderer);
+  const calls: string[] = [];
+  const player = {
+    width: 200,
+    height: 200,
+    pointer: {
+      post: () => {},
+      flush: () => {},
+      handle: (type: string, p: { x: number }) => calls.push(`mouse ${type} ${p.x}`),
+      cursor: () => "default",
+    },
+    touch: {
+      post: () => {},
+      flush: () => {},
+      handle: (type: string, t: { x: number; id: number; primary: boolean; width: number }) =>
+        calls.push(`touch ${type} ${t.x} ${t.id} ${t.primary} ${t.width}`),
+    },
+  } as unknown as Player;
+  const unbind = view.bindPointer(player);
+  const at = (x: number, pointerType: string, pointerId = 1, isPrimary = true) =>
+    ({
+      global: { x, y: 0 },
+      button: 0,
+      buttons: 0,
+      pointerType,
+      pointerId,
+      isPrimary,
+      width: 3,
+      height: 3,
+      pressure: 0.5,
+    }) as never;
+  view.stage.emit("pointerdown", at(1, "touch"));
+  view.stage.emit("pointerdown", at(2, "touch", 2, false));
+  view.stage.emit("pointermove", at(3, "touch"));
+  view.stage.emit("pointerup", at(4, "touch"));
+  view.stage.emit("pointerupoutside", at(5, "touch", 2, false));
+  // A finger lifted leaves the canvas; the mouse it moved stays where it was.
+  view.stage.emit("pointerleave", at(5, "touch"));
+  view.stage.emit("pointerdown", at(6, "mouse"));
+  view.stage.emit("pointerdown", at(7, "pen"));
+  unbind();
+  // Stage units: the stage is twice the screen, so are the contact's width and the points.
+  assert.deepEqual(calls, [
+    "touch begin 2 1 true 6",
+    "touch begin 4 2 false 6",
+    "touch move 6 1 true 6",
+    "touch end 8 1 true 6",
+    "touch end 10 2 false 6",
+    "mouse down 12",
+    "mouse down 14",
+  ]);
+});
+
 test("Pixi pointer positions are taken within the box CSS object-fit shows the canvas in", () => {
   // A 100 by 50 stage drawn at resolution 2, a 200 by 100 canvas, in a 400 by
   // 100 element with a 5 pixel border: a 390 by 90 content box from (15, 25).

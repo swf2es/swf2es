@@ -9,6 +9,7 @@ import { CLIP, Container, type DisplayObject, MovieClip, OTHER } from "./display
 import { type Library, readLibrary } from "./display/timeline.js";
 import { KeyboardInput } from "./input/keyboard.js";
 import { PointerInput } from "./input/pointer.js";
+import { TouchInput } from "./input/touch.js";
 import type { Scripting } from "./scripting.js";
 
 /** Frames one advance() may run at most, however fast the SWF and slow the display. */
@@ -48,6 +49,8 @@ export class Player {
   readonly pointer: PointerInput | null;
   /** The keyboard's, likewise: keys to the focused object, and typing into a focused field. */
   readonly keyboard: KeyboardInput | null;
+  /** Touches, likewise: TouchEvents, and the mouse the primary touch moves. */
+  readonly touch: TouchInput | null;
 
   /**
    * Without scripts the player is ready at once, but for the images of
@@ -66,6 +69,8 @@ export class Player {
     this.swfBackground = backgroundColor(this.swf);
     this.keyboard = scripting ? new KeyboardInput(this.stage, scripting) : null;
     this.pointer = scripting ? new PointerInput(this.stage, scripting, this.keyboard) : null;
+    this.touch =
+      this.pointer && scripting ? new TouchInput(this.stage, scripting, this.pointer) : null;
     if (scripting) {
       scripting.pointer = this.pointer;
     }
@@ -178,6 +183,7 @@ export class Player {
     return (
       this.played +
       (this.pointer?.redraws ?? 0) +
+      (this.touch?.redraws ?? 0) +
       (this.scripting?.updates ?? 0) +
       (this.keyboard?.handled ?? 0) +
       (this.scripting?.hostCalls ?? 0)
@@ -205,8 +211,9 @@ export class Player {
       return 0;
     }
 
-    // The pointer's last move, so the frame's scripts see where it is now.
+    // The pointer's and the touches' last moves, so the frame's scripts see where they are now.
     this.pointer?.flush();
+    this.touch?.flush();
     const passed = Number.isFinite(dt) && dt > 0 ? dt : 0;
     const frame = 1000 / this.frameRate;
     const typical = this.typicalInterval(passed);

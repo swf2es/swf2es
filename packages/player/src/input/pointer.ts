@@ -25,6 +25,8 @@ export interface PointerState {
   shiftKey?: boolean;
   /** When, in milliseconds, which tells a double click from two clicks. */
   time?: number;
+  /** A release the browser took back, as a touch it turned into a scroll: no click. */
+  canceled?: boolean;
 }
 
 /**
@@ -489,7 +491,7 @@ export class PointerInput {
         this.send("mouseUp", target, p, false);
       }
 
-      if (target && target === this.pressed) {
+      if (target && target === this.pressed && !p.canceled) {
         this.send("click", target, p, false);
       }
 

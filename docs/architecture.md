@@ -1917,6 +1917,55 @@ in adl, which the harness gives no pointer, so the unit tests carry them.
 Roll events, wheel, right and middle buttons, and Flash's drag and focus
 rules still need their own cases.
 
+### Touch
+
+`Multitouch` reports the host's touch screen: `maxTouchPoints` is the
+browser's `navigator.maxTouchPoints` (or the `maxTouchPoints` a host gives
+`Scripting`), `supportsTouchEvents` whether it is above zero, and
+`Capabilities.touchscreenType` `"finger"` then, `"none"` otherwise.
+Without a touch screen, adl and Flash Player 32 both start `inputMode`
+at `"none"` and keep it there whatever a script sets, after checking the
+value (TypeError #2007 for null, ArgumentError #2008 for a name not
+MultitouchInputMode's), and the player does the same (the `touch-natives`
+case); with one, it starts at `"gesture"`, as Adobe's reference has
+Flash start, and takes every mode. No gesture is recognized:
+`supportsGestureEvents` is false and `supportedGestures` null, so gesture
+mode leaves touches to the mouse, and scripts can only make and dispatch
+the gesture events themselves.
+
+`bindPointer` sends the pointer events whose `pointerType` is `"touch"`
+to `input/touch.ts`; a pen is a mouse. The browser's primary touch, the
+first finger down while none was, moves the mouse, in every mode, as
+Flash's plug-in did (AIR's `mapTouchToMouse`, true by default, turns
+that off in touchPoint mode): a press is a move to the point, where the
+mouse was elsewhere, and a press, as Flash Player 32 handled a browser's
+emulated touch, then moves, then a release, which clicks as a mouse's
+does; the lifted finger leaves the mouse where it was, with no rollOut.
+In touchPoint mode every touch is TouchEvents too, picked as the pointer
+picks: `touchOut` and `touchRollOut` from what the point was over,
+`touchRollOver` and `touchOver` on what it is over, then its
+`touchBegin`, `touchMove` or `touchEnd`, a `touchTap` where it ends on
+the object it began on, and, once lifted, `touchOut` and `touchRollOut`,
+as a lifted finger is over nothing. `touchPointID` is the pointerId, the
+local point is the target's, `sizeX` and `sizeY` the contact's size in
+stage units and `pressure` the browser's. Each step's touch events come
+before the mouse events of the same step. A point's moves are posted as
+the pointer's are, the last of each point handled at the next flush. A
+touch the browser cancels ends with `touchEnd` but no `touchTap`, and its
+mouse with `mouseUp` but no click. A touch's begin, end and tap are a
+user's gesture for the clipboard, as a press is; the browser itself
+counts only a touch's release as the user's activation, so a write in
+`touchBegin`, or in the `mouseDown` a touch makes, may be refused by its
+async API. The canvas keeps Pixi's `touch-action:
+none` whatever the mode: Flash's plug-in took every touch on it, and a
+SWF that drags with the mouse needs it, as a page that scrolled under the
+finger would cancel the drag. None of the order between touch and mouse
+events could be measured: adl under Wine and Flash Player 32 on Linux
+report no touch screen and dispatch no TouchEvent. The order is the
+reference's ("the first point of contact dispatches a mouse event and a
+touch event") and the W3C's, touch first; Ruffle dispatches no
+TouchEvent.
+
 ### Keyboard and focus
 
 A host gives the player its keys (`bindKeyboard`, `input/keyboard.ts`): each
@@ -1966,7 +2015,7 @@ tell; the player keeps those rules in `scripting/clipboard.ts`, which
 holds the clipboard by Flash's native format names (`air:text`,
 `air:html`, `air:rtf`, `air:url`, and a script's own formats as
 `air:reference:` and `air:serialization:` entries). The pointer's
-presses and releases and every key run as a gesture, in which
+presses and releases, a touch's begin, end and tap, and every key run as a gesture, in which
 `canWriteContents` is true; a paste runs as one in which
 `canReadContents` is too. playerglobal's AS3 checks both and throws its
 SecurityErrors; the natives (`playerglobal/flash/desktop/Clipboard.ts`)
