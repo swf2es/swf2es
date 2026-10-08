@@ -1,0 +1,25 @@
+supportsTouchEvents false
+supportsGestureEvents false
+maxTouchPoints 0
+supportedGestures null
+inputMode none
+touchscreenType none
+set touchPoint -> none
+set gesture -> none
+set bogus ArgumentError: Error #2008: Parameter inputMode must be one of the accepted values. -> none
+set null TypeError: Error #2007: Parameter inputMode must be non-null. -> none
+set none -> none
+[TouchEvent type="touchBegin" bubbles=true cancelable=false eventPhase=2 touchPointID=0 isPrimaryTouchPoint=false localX=NaN localY=NaN stageX=NaN stageY=NaN sizeX=NaN sizeY=NaN pressure=NaN relatedObject=null ctrlKey=false altKey=false shiftKey=false commandKey=false controlKey=false timestamp=NaN touchIntent="unknown" isTouchPointCanceled=false]
+[TouchEvent type="touchBegin" bubbles=true cancelable=false eventPhase=2 touchPointID=0 isPrimaryTouchPoint=false localX=NaN localY=NaN stageX=NaN stageY=NaN sizeX=NaN sizeY=NaN pressure=NaN relatedObject=null ctrlKey=false altKey=false shiftKey=false commandKey=false controlKey=false timestamp=NaN touchIntent="unknown" isTouchPointCanceled=false]
+[TouchEvent type="touchTap" bubbles=true cancelable=false eventPhase=2 touchPointID=7 isPrimaryTouchPoint=true localX=4 localY=5 stageX=0 stageY=0 sizeX=6 sizeY=7 pressure=0.5 relatedObject=[object Sprite] ctrlKey=true altKey=false shiftKey=true commandKey=false controlKey=false timestamp=NaN touchIntent="unknown" isTouchPointCanceled=false]
+heard touchTap 3 4 5 24 25 7 true 6 7 0.5
+after 24 25
+NaN local NaN NaN
+[TouchEvent type="touchTap" bubbles=true cancelable=false eventPhase=2 touchPointID=7 isPrimaryTouchPoint=true localX=NaN localY=5 stageX=NaN stageY=NaN sizeX=6 sizeY=7 pressure=0.5 relatedObject=[object Sprite] ctrlKey=true altKey=false shiftKey=true commandKey=false controlKey=false timestamp=NaN touchIntent="unknown" isTouchPointCanceled=false] true
+heard gestureZoom update 1 2 18 22
+gestureZoom update 1 1.5 1.25 30 4 5
+[GestureEvent type="gestureTwoFingerTap" bubbles=true cancelable=false phase=null localX=0 localY=0 stageX=0 stageY=0 ctrlKey=false altKey=false shiftKey=false commandKey=false controlKey=false]
+heard gestureTwoFingerTap null 0 0 10 20
+[PressAndTapGestureEvent type="gesturePressAndTap" bubbles=true cancelable=false phase="all" localX=1 localY=2 tapLocalX=3 tapLocalY=4 ctrlKey=false altKey=false shiftKey=false commandKey=false controlKey=false]
+heard gesturePressAndTap all 1 2 18 22 3 4 22 24
+[PressAndTapGestureEvent type="gesturePressAndTap" bubbles=true cancelable=false phase="all" localX=1 localY=2 tapLocalX=3 tapLocalY=4 ctrlKey=false altKey=false shiftKey=false commandKey=false controlKey=false]

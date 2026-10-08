@@ -25,10 +25,13 @@ import { stageNatives } from "./flash/display/Stage.js";
 import { stage3DNatives } from "./flash/display/Stage3D.js";
 import { eventNatives } from "./flash/events/Event.js";
 import { eventDispatcherNatives } from "./flash/events/EventDispatcher.js";
+import { gestureEventNatives } from "./flash/events/GestureEvent.js";
 import { httpStatusHooks } from "./flash/events/HTTPStatusEvent.js";
 import { keyboardEventNatives } from "./flash/events/KeyboardEvent.js";
 import { mouseEventNatives } from "./flash/events/MouseEvent.js";
+import { pressAndTapGestureEventNatives } from "./flash/events/PressAndTapGestureEvent.js";
 import { timerEventNatives } from "./flash/events/TimerEvent.js";
+import { touchEventNatives } from "./flash/events/TouchEvent.js";
 import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js";
 import { bevelFilterNatives } from "./flash/filters/BevelFilter.js";
 import { bitmapFilterHooks } from "./flash/filters/BitmapFilter.js";
@@ -76,6 +79,7 @@ import { traceNatives } from "./flash/trace/Trace.js";
 import { gameInputNatives } from "./flash/ui/GameInput.js";
 import { keyboardNatives } from "./flash/ui/Keyboard.js";
 import { mouseNatives } from "./flash/ui/Mouse.js";
+import { multitouchNatives } from "./flash/ui/Multitouch.js";
 import { byteArrayHooks } from "./flash/utils/ByteArray.js";
 import { timerNatives } from "./flash/utils/Timer.js";
 import { xmlDocumentNatives } from "./flash/xml/XMLDocument.js";
@@ -93,7 +97,11 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...keyboardEventNatives(s),
     ...timerEventNatives(s),
     ...mouseEventNatives(s),
+    ...touchEventNatives(s),
+    ...gestureEventNatives(s),
+    ...pressAndTapGestureEventNatives(s),
     ...mouseNatives(s),
+    ...multitouchNatives(s),
     ...eventDispatcherNatives(s),
     ...displayObjectNatives(s),
     ...avm1MovieNatives(),

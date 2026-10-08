@@ -8,10 +8,16 @@ import type { Scripting } from "../../../scripting.js";
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
-/** The stage point of an event whose target is on the display list. */
-function stagePoint(s: Scripting, event: AsObject): [number, number] {
-  const x = event.$mouseX ?? Number.NaN;
-  const y = event.$mouseY ?? Number.NaN;
+/**
+ * The stage point of an event's local point, (x, y) on its target where
+ * that is on the display list; TouchEvent and GestureEvent read theirs so.
+ */
+export function stagePoint(
+  s: Scripting,
+  event: AsObject,
+  x = Number.NaN,
+  y = Number.NaN,
+): [number, number] {
   const target = (event.$target as AsObject | null)?.$display;
   if (target) {
     return apply(toStage(target, s.stage), x, y);
@@ -58,11 +64,11 @@ export function mouseEventNatives(s: Scripting): avm2.Natives {
     }
 
     "flash.events:MouseEvent::getStageX"(): number {
-      return stagePoint(s, this)[0];
+      return stagePoint(s, this, this.$mouseX, this.$mouseY)[0];
     }
 
     "flash.events:MouseEvent::getStageY"(): number {
-      return stagePoint(s, this)[1];
+      return stagePoint(s, this, this.$mouseX, this.$mouseY)[1];
     }
 
     get movementX(): number {

@@ -36,6 +36,7 @@ import {
   type FetchRequest,
   type FetchResult,
   globalWebSocketHost,
+  hostTouchPoints,
   type ModuleCache,
   type Navigate,
   type PlatformCapabilities,
@@ -184,6 +185,16 @@ export class Scripting {
   flushSharedObjects: (() => void) | null = null;
   /** What Capabilities reports of the system (flash/system/Capabilities.ts). */
   readonly platform: PlatformCapabilities;
+  /** How many touches the host's screen takes at once: none where it has no touch screen. */
+  readonly maxTouchPoints: number;
+  /**
+   * Multitouch.inputMode: "gesture" where the host takes touches, as Flash
+   * starts on a touch screen; "none" where it does not, which Flash keeps
+   * there whatever a script sets (measured in adl and Flash Player 32).
+   */
+  inputMode: "none" | "gesture" | "touchPoint";
+  /** Multitouch.mapTouchToMouse, AIR's: whether the primary touch moves the mouse in touchPoint mode too. */
+  mapTouchToMouse = true;
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
   pending: DisplayObject | null = null;
   /** The stage, once the player has made it, and the root it holds. */
@@ -246,6 +257,8 @@ export class Scripting {
       storage?: SharedObjectStorage;
       /** What Capabilities reports of the system: by default the browser's, as Flash Player 32's plugin. */
       platform?: Partial<PlatformCapabilities>;
+      /** How many touches the screen takes at once: by default the browser's navigator.maxTouchPoints, 0 without one. */
+      maxTouchPoints?: number;
       externalInterface?: ExternalInterfaceHost;
       socket?: SocketHost;
       webSocket?: WebSocketHost | null;
@@ -337,6 +350,8 @@ export class Scripting {
     this.loads = new Loads(this, options);
     this.storage = options.storage ?? defaultStorage();
     this.platform = { ...platformCapabilities(), ...options.platform };
+    this.maxTouchPoints = Math.max(0, Math.floor(options.maxTouchPoints ?? hostTouchPoints()) || 0);
+    this.inputMode = this.maxTouchPoints > 0 ? "gesture" : "none";
     this.rt = new avm2.Runtime(
       (rt) => ({ ...avm2.builtinNatives(rt), ...playerNatives(this) }),
       { ...avm2.builtinHooks(), ...playerHooks(this) },
