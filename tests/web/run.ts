@@ -381,12 +381,12 @@ check(
   async (evaluate, send) => {
     const [left, top] = await call<[number, number]>(evaluate, "touchPlayer()");
     const log = () => call<string[]>(evaluate, "touchLog()");
-    const mouse = async (type: string, x: number, y: number, buttons = 0) => {
+    const mouse = async (type: string, x: number, y: number, buttons = 0, button = "left") => {
       await send("Input.dispatchMouseEvent", {
         type,
         x: left + x,
         y: top + y,
-        button: type === "mouseMoved" && buttons === 0 ? "none" : "left",
+        button: type === "mouseMoved" && buttons === 0 ? "none" : button,
         buttons,
         clickCount: type === "mouseMoved" ? 0 : 1,
       });
@@ -413,16 +413,42 @@ check(
       "mouseDown c 10,30 true null",
     ]);
     // Dragged off the player, the mouse stays its own: moves to the stage,
-    // the release too, and the leave only after it.
+    // the release too, and the leave only at the next move after it.
     assert.deepEqual(await mouse("mouseMoved", 300, 30, 1), [
       "mouseMove stage 300,30 true null",
       "mouseOut c 200,30 true null",
       "rollOut c 200,30 true null",
     ]);
-    assert.deepEqual(await mouse("mouseReleased", 300, 30), [
-      "mouseUp stage 300,30 false null",
+    assert.deepEqual(await mouse("mouseReleased", 300, 30), ["mouseUp stage 300,30 false null"]);
+    assert.deepEqual(await mouse("mouseMoved", 310, 30), ["mouseLeave stage"]);
+
+    // The right button holds nothing: the pointer leaves as it goes, and its
+    // release outside leaves no second time.
+    await mouse("mouseMoved", 110, 30);
+    await mouse("mousePressed", 110, 30, 2, "right");
+    assert.deepEqual(await mouse("mouseMoved", 300, 30, 2, "right"), [
+      "mouseOut c -101,-1 false null",
+      "rollOut c -101,-1 false null",
       "mouseLeave stage",
     ]);
+    assert.deepEqual(await mouse("mouseReleased", 300, 30, 0, "right"), []);
+    assert.deepEqual(await mouse("mouseMoved", 310, 30), []);
+
+    // The left button let go while the right stays down is a release, which
+    // the browser tells as a move: the leave after it is not held back.
+    await mouse("mouseMoved", 110, 30);
+    await mouse("mousePressed", 110, 30, 1);
+    await mouse("mousePressed", 110, 30, 3, "right");
+    assert.deepEqual(await mouse("mouseReleased", 110, 30, 2), [
+      "mouseUp c 10,30 false null",
+      "click c 10,30 false null",
+    ]);
+    assert.deepEqual(await mouse("mouseMoved", 300, 30, 2, "right"), [
+      "mouseOut c -101,-1 false null",
+      "rollOut c -101,-1 false null",
+      "mouseLeave stage",
+    ]);
+    await mouse("mouseReleased", 300, 30, 0, "right");
     await call(evaluate, "touchDestroy()");
   },
 );

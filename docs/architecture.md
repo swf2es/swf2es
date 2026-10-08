@@ -1915,9 +1915,13 @@ and no `mouseOver`. The pointer leaving the player with its button up is
 and `mouseY` stay where they were, then `mouseLeave`. With the button
 down after a press on the player, the mouse stays its own, as Flash's
 plug-in kept it: no leave, the moves outside go to the stage, and so
-does the release, after which the leave comes (Flash sends it at the next
-move; the browser sends none then, so the player sends it with the
-release). `updateAfterEvent` changes none of this. Ruffle sends
+does the release, and the leave comes at the next move outside after it.
+A leave is sent once until the pointer is back, so a right button's
+release outside, which holds nothing, leaves no second time; a left
+button let go where the host told of no release (outside the browser, or
+while another button stays down, which Chrome tells as a move) is
+released at the next move that shows it, and left where that is outside.
+`updateAfterEvent` changes none of this. Ruffle sends
 `mouseMove` first too, and no `mouseLeave`.
 `DisplayObject.mouseX` and `mouseY` follow the last pointer position.
 The pick follows Flash's order, as Ruffle's `mouse_pick_avm2` has it:

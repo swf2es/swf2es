@@ -539,17 +539,24 @@ export class PixiView {
     // button is down after a press on it, one anywhere, as Flash keeps the
     // mouse until the release.
     const screen = this.renderer.screen;
+    // A release outside after a press that held the mouse leaves it at the
+    // next move outside, as Flash's mouseLeave comes.
+    let leaveNext = false;
     const move = (e: FederatedPointerEvent) => {
       const { x, y } = e.global;
       const inside = x >= 0 && y >= 0 && x < screen.width && y < screen.height;
       if (inside || (e.pointerType !== "touch" && player.pointer?.captured)) {
+        leaveNext = false;
         moved(e);
+      } else if (leaveNext && e.pointerType !== "touch") {
+        leaveNext = false;
+        leave(e);
       }
     };
-    // A release outside is the mouse's leave too, which its press held back.
     const upOutside = (e: FederatedPointerEvent) => {
+      const held = e.pointerType !== "touch" && !!player.pointer?.captured;
       up(e);
-      leave(e);
+      leaveNext ||= held && !player.pointer?.captured;
     };
     this.stage.on("globalpointermove", move);
     this.stage.on("pointerdown", down);

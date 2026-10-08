@@ -242,6 +242,8 @@ export class PointerInput {
   private hover: DisplayObject | null = null;
   /** Whether the left button is down after a press here. */
   private held = false;
+  /** Whether the pointer has left the player, and not come back to it since. */
+  private gone = false;
   private pressed: DisplayObject | null = null;
   /** The last press, which the next continues as a double or triple click if near it in place and time. */
   private lastPress: { x: number; y: number; time: number; clicks: number } | null = null;
@@ -402,14 +404,21 @@ export class PointerInput {
     }
 
     const s = this.scripting;
-    const moved = p.x !== s.mouseStageX || p.y !== s.mouseStageY;
-    if (type === "move" && !moved) {
+    // A release the host never sent, as one outside the browser, or the left
+    // button's let go while another stays down, which Chrome tells as a move:
+    // the release it was, there, and the leave after it where that is outside.
+    if (type === "move" && this.held && p.buttons !== undefined && !(p.buttons & 1)) {
+      this.handle("up", { ...p, button: 0 });
+      if (!pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight)) {
+        this.handle("leave", p);
+      }
+
       return;
     }
 
-    // A browser that lost a release outside it shows it on the next move.
-    if (type === "move" && p.buttons !== undefined && !(p.buttons & 1)) {
-      this.held = false;
+    const moved = p.x !== s.mouseStageX || p.y !== s.mouseStageY;
+    if (type === "move" && !moved) {
+      return;
     }
 
     this.handled++;
@@ -419,6 +428,10 @@ export class PointerInput {
     const found = pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
     // Outside the stage while the button is down, the mouse is still the stage's.
     const target = found ?? (this.held && this.stage.object ? this.stage : null);
+    if (found) {
+      this.gone = false;
+    }
+
     // The empty stage takes the mouse's events, but no one is over it.
     const over = target === this.stage ? null : target;
     const down = (p.buttons ?? 0) & 1 ? true : type === "down" && (p.button ?? 0) === 0;
@@ -516,6 +529,12 @@ export class PointerInput {
    * but gives the out and roll outs the stage point (-1, -1).
    */
   private leave(p: PointerState): void {
+    // Once, until the pointer is back: a host may tell of a leave twice.
+    if (this.gone) {
+      return;
+    }
+
+    this.gone = true;
     this.hoverTo(null, { ...p, x: -1, y: -1 }, false);
     const stage = this.stage.object;
     if (stage && heard(stage, "mouseLeave")) {

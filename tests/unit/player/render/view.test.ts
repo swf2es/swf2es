@@ -598,7 +598,10 @@ test("Pixi pointer moves are posted, flushed by a frame of their own where nothi
     captured: false,
     post: (p: { x: number }) => calls.push(`post ${p.x}`),
     flush: () => calls.push("flush"),
-    handle: (type: string, p: { x: number }) => calls.push(`${type} ${p.x}`),
+    handle: (type: string, p: { x: number }) => {
+      calls.push(`${type} ${p.x}`);
+      pointer.captured &&= type !== "up";
+    },
     cursor: () => "default",
   };
   const player = { width: 100, height: 100, pointer } as unknown as Player;
@@ -620,18 +623,25 @@ test("Pixi pointer moves are posted, flushed by a frame of their own where nothi
     assert.deepEqual(calls.slice(3), ["flush"]);
 
     // A move off the canvas is the player's only while it holds the mouse,
-    // and a release off it is a release, then the leave the press held back.
+    // and a release off it is a release, then, at the next move off it, the
+    // leave the press held back, once.
     view.stage.emit("globalpointermove", at(150));
     pointer.captured = true;
     view.stage.emit("globalpointermove", at(160));
     view.stage.emit("pointerupoutside", at(170));
-    assert.deepEqual(calls.slice(4), ["post 160", "up 170", "leave 170"]);
+    view.stage.emit("globalpointermove", at(180));
+    view.stage.emit("globalpointermove", at(190));
+    assert.deepEqual(calls.slice(4), ["post 160", "up 170", "leave 180"]);
+    // A release outside that held nothing leaves nothing: the leave came as the pointer left.
+    view.stage.emit("pointerupoutside", at(170));
+    view.stage.emit("globalpointermove", at(180));
+    assert.deepEqual(calls.slice(7), ["up 170"]);
     frames[1]();
 
     view.stage.emit("globalpointermove", at(4));
     unbind();
     frames[2]();
-    assert.deepEqual(calls.slice(7), ["flush", "post 4", "flush"]);
+    assert.deepEqual(calls.slice(8), ["flush", "post 4", "flush"]);
   } finally {
     delete g.requestAnimationFrame;
     delete g.cancelAnimationFrame;

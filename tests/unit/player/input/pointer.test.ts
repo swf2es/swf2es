@@ -709,9 +709,14 @@ test("the pointer's events come in Flash Player 32's order, to its targets", { s
   const pointer = player.pointer;
   assert.ok(pointer);
   let buttons = 0;
-  const input = (type: "move" | "down" | "up" | "leave", x: number, y: number): string[] => {
-    buttons = type === "down" ? 1 : type === "up" ? 0 : buttons;
-    pointer.handle(type, { x, y, button: 0, buttons });
+  const input = (
+    type: "move" | "down" | "up" | "leave",
+    x: number,
+    y: number,
+    button = 0,
+  ): string[] => {
+    buttons = type === "down" ? buttons | (1 << button) : type === "up" ? 0 : buttons;
+    pointer.handle(type, { x, y, button, buttons });
     return lines.splice(0);
   };
 
@@ -818,5 +823,47 @@ test("the pointer's events come in Flash Player 32's order, to its targets", { s
     "rollOver a null false 31,31 @31,31",
     "rollOver root null false 31,31 @31,31",
     "mouseOver a1 null false 11,11 @31,31",
+  ]);
+
+  // A leave told twice, as a right button's release outside follows its leave, is one.
+  assert.deepEqual(input("down", 31, 31, 2), []);
+  assert.deepEqual(input("leave", 400, 100), [
+    "mouseOut a1 null false -21,-21 @31,31",
+    "rollOut a1 null false -21,-21 @31,31",
+    "rollOut a null false -1,-1 @31,31",
+    "rollOut root null false -1,-1 @31,31",
+    "mouseLeave stage @31,31",
+  ]);
+  assert.deepEqual(input("up", 400, 100, 2), []);
+  assert.deepEqual(input("leave", 400, 100), []);
+
+  // The left button let go while the right stays down, which Chrome tells as
+  // a move, is the release: the leave after it is not held back.
+  input("move", 110, 10);
+  input("down", 110, 10);
+  input("down", 110, 10, 2);
+  buttons = 2;
+  assert.deepEqual(input("move", 110, 10), [
+    "mouseUp b null false 10,10 @110,10",
+    "click b null false 10,10 @110,10",
+  ]);
+  assert.deepEqual(input("leave", 400, 100), [
+    "mouseOut b null false -101,-1 @110,10",
+    "rollOut b null false -101,-1 @110,10",
+    "rollOut root null false -1,-1 @110,10",
+    "mouseLeave stage @110,10",
+  ]);
+
+  // A release lost outside the browser shows on the next move as one, there,
+  // and the leave after it.
+  buttons = 0;
+  input("move", 110, 10);
+  input("down", 110, 10);
+  input("move", 400, 100);
+  buttons = 0;
+  assert.deepEqual(input("move", 500, 100), [
+    "mouseMove stage null true 500,100 @500,100",
+    "mouseUp stage null false 500,100 @500,100",
+    "mouseLeave stage @500,100",
   ]);
 });
