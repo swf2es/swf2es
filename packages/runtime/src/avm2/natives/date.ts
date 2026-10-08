@@ -10,7 +10,8 @@
 // where the host's time zone says daylight saving is in effect, asked of the
 // host (here through JavaScript's Date) with the time in 32-bit seconds.
 // So no zone's history beyond its daylight saving applies, and none after
-// 2038.
+// 2038. Flash on Windows (WinPortUtils) applies the zone's rule of today
+// to every year instead, 1900 and 2050 alike; avmshell is the reference.
 //
 // The calendar, local time and parseDate are translated from avmplus'
 // core/Date.cpp, core/DateClass.cpp and VMPI/PosixPortUtils.cpp, and so subject
