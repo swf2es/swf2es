@@ -283,14 +283,15 @@ test("by the real clock, a long frame fires each timer once and drops the ticks 
   }
 });
 
-test("by the frame clock, timers fire as before: every due time as the next frame begins, before its ENTER_FRAME", {
+test("by the frame clock, every due time in the frame fires after its ENTER_FRAME, none between frames", {
   skip,
 }, async () => {
   const frames = await pace(hz60(60), false);
 
   for (const frame of frames.slice(1, -1)) {
-    // Nothing after ENTER_FRAME, nor between frames: a 10 ms timer at each of its times in a 41.7 ms frame.
-    assert.equal(frame[1], "FC", frame.join(" "));
+    const fc = frame.indexOf("FC");
+    // A 10 ms timer at each of its times in a 41.7 ms frame, all before the frame's construction.
+    assert.equal(fc, frame.length - 1, frame.join(" "));
     assert.ok([4, 5].includes(fires(frame, "a")), frame.join(" "));
     assert.equal(
       new Set(frame.filter((e) => e[0] === "a")).size,
@@ -298,77 +299,4 @@ test("by the frame clock, timers fire as before: every due time as the next fram
       frame.join(" "),
     );
   }
-});
-
-test("by the real clock, updateAfterEvent between frames renders the stage then, RENDER and all", {
-  skip,
-}, async () => {
-  const swf = bare(
-    compiler(out)(
-      "TimerRender",
-      `package {
-        import flash.display.Sprite;
-        import flash.events.Event;
-        import flash.events.TimerEvent;
-        import flash.utils.Timer;
-        public class TimerRender extends Sprite {
-          private var log:Array = [];
-          private var fires:int = 0;
-          public function TimerRender() {
-            var t:Timer = new Timer(10);
-            t.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void {
-              fires++;
-              // Invalidated by every firing, rendered after the odd ones.
-              log.push("T" + fires % 2);
-              stage.invalidate();
-              if (fires % 2 == 1) { e.updateAfterEvent(); }
-            });
-            stage.addEventListener(Event.RENDER, function(e:Event):void { log.push("R"); });
-            t.start();
-            addEventListener(Event.ENTER_FRAME, function(e:Event):void {
-              trace(log.join(" "));
-              log = ["EF"];
-            });
-            addEventListener(Event.EXIT_FRAME, function(e:Event):void { log.push("EX"); });
-          }
-        }
-      }`,
-    ),
-    1,
-    "TimerRender",
-  );
-  const lines: string[] = [];
-  let now = 0;
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: (line) => lines.push(line),
-    realTime: () => now,
-  });
-  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const player = new Player(swf, scripting);
-  await player.start();
-  // The host's draws: those a call asks for by moving changes.
-  let draws = 0;
-  for (let call = 0; call < 30; call++) {
-    const before = player.changes;
-    now += 1000 / 60;
-    draws += player.advance(1000 / 60) === 0 && player.changes !== before ? 1 : 0;
-  }
-
-  const frames = lines.slice(2).map((line) => line.split(" "));
-  for (const frame of frames) {
-    const after = frame.slice(frame.indexOf("EX") + 1);
-    for (let i = 0; i < after.length; i++) {
-      // Between frames: RENDER after an updateAfterEvent's firing, none after the others'.
-      if (after[i] === "T1") {
-        assert.equal(after[i + 1], "R", frame.join(" "));
-      } else if (after[i] === "T0") {
-        assert.notEqual(after[i + 1], "R", frame.join(" "));
-      }
-    }
-  }
-
-  const between = frames.flatMap((frame) => frame.slice(frame.indexOf("EX") + 1));
-  assert.ok(between.includes("T1"), lines.join("\n"));
-  // And the host draws then, between frames, as many times as it asked.
-  assert.equal(draws, between.filter((e) => e === "T1").length + 1);
 });

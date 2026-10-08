@@ -1,8 +1,7 @@
 // The player's clock and the timers: by the real clock where the host has
 // one, as Flash fires them, at each frame after ENTER_FRAME and those
 // shorter than a frame between frames too; by the frame clock otherwise, a
-// frame moving it on and firing the timers due by then before the timeline
-// advances. flash.utils.Timer starts and stops them, and getTimer tells
+// frame moving it on and firing the timers due by then after ENTER_FRAME. flash.utils.Timer starts and stops them, and getTimer tells
 // the time.
 import type { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
@@ -54,20 +53,19 @@ export class Timers {
     return (this.realTime as () => number)() - this.realStart;
   }
 
-  /**
-   * A frame begins: the clock moves on by `ms`. Without a real clock the
-   * timers that fall due by then fire, before the timeline advances, each
-   * firing the earliest due, so that two timers interleave as their times
-   * do and one started from another with time to spare fires in the same
-   * pass. With one, they fire after ENTER_FRAME (frameTimers).
-   */
+  /** A frame begins: the frame clock moves on by `ms`; its timers fire after ENTER_FRAME (frameTimers). */
   beginFrame(ms: number): void {
     this.clock += ms;
-    if (this.realTime) {
-      this.now = this.clock;
-      return;
-    }
+    this.now = this.clock;
+  }
 
+  /**
+   * By the frame clock, the timers that fall due by the frame's time, each
+   * firing the earliest due, so that two timers interleave as their times
+   * do and one started from another with time to spare fires in the same
+   * pass.
+   */
+  private fireByClock(): void {
     try {
       for (;;) {
         const next = this.timers.pop(this.clock);
@@ -96,12 +94,15 @@ export class Timers {
   }
 
   /**
-   * The frame's timers by the real clock, after ENTER_FRAME and before the
-   * frame's construction, as Flash fires them: every timer due fires once.
+   * The frame's timers, after ENTER_FRAME and before the frame's
+   * construction, as Flash fires them: by the real clock every timer due
+   * fires once; by the frame clock every due time in the frame fires.
    */
   frameTimers(): void {
     if (this.realTime) {
       this.fireDue(Number.POSITIVE_INFINITY, false);
+    } else {
+      this.fireByClock();
     }
   }
 

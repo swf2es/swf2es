@@ -1794,9 +1794,9 @@ invalidated it, as Flash does; an invalidation without it waits for the
 frame. Ruffle fires its timers after the frame from the same real clock
 but catches missed ticks up, ten at most a call, clamps delays to 10 ms
 and fires long timers between frames too. With `realTime: null` timers
-fire by the frame clock as before: a frame moves it on and every due time
-in it fires before ENTER_FRAME, the same on every run, which the cases
-and the corpus's `timer*` tests rely on.
+fire by the frame clock: a frame moves it on and every due time in it
+fires, at the same point after ENTER_FRAME, the same on every run, which
+the cases and the corpus's `timer*` tests rely on.
 
 `flash.utils.Timer` is playerglobal's own in all but three natives: the
 counting, `delay`'s range (RangeError #2066), `reset` and the events are
