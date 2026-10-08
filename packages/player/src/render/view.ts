@@ -43,6 +43,7 @@ import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
 import type { ShapeLayer } from "../display/shapes.js";
 import type { ShapeCharacter } from "../display/timeline.js";
 import type { PointerState } from "../input/pointer.js";
+import type { TouchState } from "../input/touch.js";
 import type { Player } from "../player.js";
 import { retireBatchers, viewGroups } from "./batchers.js";
 import { argbOf, characterStore, gpuBitmaps } from "./bitmaps.js";
@@ -372,21 +373,26 @@ export class PixiView {
    * as `fill` would, so the point is taken within that box instead, centred
    * as the default `object-position` puts it, and then from the canvas's
    * pixels to Pixi's screen and the stage. `style` is the canvas's live
-   * computed style, null where there is no DOM.
+   * computed style, null where there is no DOM. A `size`, a touch's
+   * contact, comes back in stage units after the point.
    */
   private stagePoint(
     player: Player,
-    e: FederatedPointerEvent,
+    e: { clientX: number; clientY: number; global: { x: number; y: number } },
     style: CSSStyleDeclaration | null,
-  ): [number, number] {
+    size: { width: number; height: number } = { width: 0, height: 0 },
+  ): [x: number, y: number, width: number, height: number] {
     const screen = this.renderer.screen;
-    const toStage = (x: number, y: number): [number, number] => [
-      (x * player.width) / screen.width,
-      (y * player.height) / screen.height,
-    ];
+    const toStage = (x: number, y: number, w: number, h: number) =>
+      [
+        (x * player.width) / screen.width,
+        (y * player.height) / screen.height,
+        (w * player.width) / screen.width,
+        (h * player.height) / screen.height,
+      ] as [number, number, number, number];
     const canvas = this.renderer.canvas as HTMLCanvasElement | undefined;
     if (!canvas?.getBoundingClientRect || !style) {
-      return toStage(e.global.x, e.global.y);
+      return toStage(e.global.x, e.global.y, size.width, size.height);
     }
 
     // The content box: the element's rectangle within its borders and padding.
@@ -423,7 +429,12 @@ export class PixiView {
     }
 
     const resolution = this.renderer.resolution || 1;
-    return toStage((e.clientX - left) / sx / resolution, (e.clientY - top) / sy / resolution);
+    return toStage(
+      (e.clientX - left) / sx / resolution,
+      (e.clientY - top) / sy / resolution,
+      size.width / sx / resolution,
+      size.height / sy / resolution,
+    );
   }
 
   /** Let Pixi normalize browser coordinates; Flash's display list chooses the target. */
@@ -450,7 +461,57 @@ export class PixiView {
       canvas?.getBoundingClientRect && typeof getComputedStyle === "function"
         ? getComputedStyle(canvas)
         : null;
+    const flushSoon = () => {
+      frame ||= requestAnimationFrame(() => {
+        frame = 0;
+        player.pointer?.flush();
+        player.touch?.flush();
+      });
+    };
+    // Each touch's last point, which a cancel, whose own may be anywhere, ends at.
+    const touches = new Map<number, TouchState>();
+    // A touch goes to the player's touches, which move the mouse for the primary one.
+    const touched = (type: "move" | "down" | "up" | "leave", e: FederatedPointerEvent) => {
+      const touch = player.touch;
+      // A lifted finger leaves the canvas too: the mouse it moved stays, as Flash's does.
+      if (!touch || type === "leave") {
+        return;
+      }
+
+      const [x, y, width, height] = this.stagePoint(player, e, style, e);
+      const t: TouchState = {
+        x,
+        y,
+        id: e.pointerId,
+        primary: e.isPrimary,
+        width,
+        height,
+        pressure: e.pressure,
+        altKey: e.altKey,
+        ctrlKey: e.ctrlKey,
+        shiftKey: e.shiftKey,
+        time: e.timeStamp,
+      };
+      if (type === "up") {
+        touches.delete(t.id);
+      } else {
+        touches.set(t.id, t);
+      }
+
+      if (type === "move" && typeof requestAnimationFrame === "function") {
+        touch.post(t);
+        flushSoon();
+        return;
+      }
+
+      touch.handle(type === "down" ? "begin" : type === "up" ? "end" : "move", t);
+    };
     const send = (type: "move" | "down" | "up" | "leave") => (e: FederatedPointerEvent) => {
+      if (e.pointerType === "touch") {
+        touched(type, e);
+        return;
+      }
+
       const [x, y] = this.stagePoint(player, e, style);
       const p: PointerState = {
         x,
@@ -464,10 +525,7 @@ export class PixiView {
       };
       if (type === "move" && player.pointer && typeof requestAnimationFrame === "function") {
         player.pointer.post(p);
-        frame ||= requestAnimationFrame(() => {
-          frame = 0;
-          player.pointer?.flush();
-        });
+        flushSoon();
         return;
       }
 
@@ -482,6 +540,16 @@ export class PixiView {
     this.stage.on("pointerup", up);
     this.stage.on("pointerupoutside", up);
     this.stage.on("pointerleave", leave);
+    // Pixi listens for no cancel: the browser takes a touch back so, as for a
+    // system gesture, and the touch ends where it last was, without its tap or click.
+    const cancel = (e: Event) => {
+      const t = touches.get((e as PointerEvent).pointerId);
+      if (t && (e as PointerEvent).pointerType === "touch") {
+        touches.delete(t.id);
+        player.touch?.handle("cancel", { ...t, time: e.timeStamp });
+      }
+    };
+    canvas?.addEventListener?.("pointercancel", cancel);
     // Pixi sets the canvas's cursor on every move, from its target's, which
     // is this stage: the player's cursor goes there, and through Pixi's own
     // setter now, which keeps Pixi's record of it right.
@@ -531,6 +599,8 @@ export class PixiView {
       }
 
       player.pointer?.flush();
+      player.touch?.flush();
+      canvas?.removeEventListener?.("pointercancel", cancel);
       this.stage.off("pointermove", move);
       this.stage.off("pointerdown", down);
       this.stage.off("pointerup", up);

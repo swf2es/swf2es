@@ -4760,6 +4760,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "touch-natives",
+    swf: (abc) => bare(abc, 1, "TouchNatives"),
+    script: "TouchNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "number-parse-result-natives",
     swf: (abc) => bare(abc, 1, "NumberParseResultNatives"),
     script: "NumberParseResultNatives",

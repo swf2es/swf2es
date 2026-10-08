@@ -201,6 +201,12 @@ export function platformCapabilities(): PlatformCapabilities {
   return { os, manufacturer, version: `${platform} 32,0,0,465`, language, playerType: "PlugIn" };
 }
 
+/** How many touches the browser's screen takes at once, as Multitouch.maxTouchPoints reports; 0 without a browser. */
+export function hostTouchPoints(): number {
+  const navigator = (globalThis as { navigator?: { maxTouchPoints?: number } }).navigator;
+  return navigator?.maxTouchPoints ?? 0;
+}
+
 /** The host side of playerglobal's synchronous ExternalInterface protocol. */
 export interface ExternalInterfaceHost {
   /** JavaScript source from playerglobal; the host decides whether to evaluate it. */

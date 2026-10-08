@@ -834,7 +834,11 @@ function pagesOwn(e: Event): boolean {
  * clipboard through them, synchronously and without asking for leave.
  */
 export function bindKeyboard(
-  player: { keyboard: KeyboardInput | null; pointer?: { flush(): void } | null },
+  player: {
+    keyboard: KeyboardInput | null;
+    pointer?: { flush(): void } | null;
+    touch?: { flush(): void } | null;
+  },
   target: EventTarget,
 ): () => void {
   const listener = (event: Event) => {
@@ -848,8 +852,9 @@ export function bindKeyboard(
       return;
     }
 
-    // A key's listeners see the pointer where it last moved.
+    // A key's listeners see the pointer and the touches where they last moved.
     player.pointer?.flush();
+    player.touch?.flush();
 
     const used = keyboard.handle(e.type === "keydown" ? "down" : "up", {
       keyCode: KEY_CODES[e.keyCode] ?? e.keyCode,

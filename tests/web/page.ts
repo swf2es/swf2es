@@ -394,7 +394,42 @@ function clipDestroy() {
   return true;
 }
 
+/** A player of the touch SWF, made once the test has given the page a touch screen; where its stage is. */
+async function touchPlayer() {
+  const p = document.createElement("swf2es-player") as Player;
+  p.id = "touch";
+  p.setAttribute("src", "/web-test/touch.swf");
+  p.setAttribute("allowscriptaccess", "always");
+  document.body.append(p);
+  const seed = document.createElement("textarea");
+  seed.id = "seed";
+  document.body.append(seed);
+  await p.ready;
+  await frames(2);
+  const box = p.getBoundingClientRect();
+  return [
+    box.left,
+    box.top,
+    getComputedStyle(p.shadowRoot?.querySelector("canvas") as Element).touchAction,
+  ];
+}
+
+/** What the touch SWF heard since last asked, after the frame that handles a posted move. */
+async function touchLog() {
+  await frames(2);
+  return element("touch").takeLog();
+}
+
 Object.assign(globalThis, {
+  touchPlayer,
+  touchLog,
+  touchCall: (name: string, ...args: unknown[]) => element("touch")[name](...args),
+  touchSeed: () => (document.getElementById("seed") as HTMLTextAreaElement).value,
+  touchDestroy: () => {
+    element("touch").destroy();
+    document.getElementById("seed")?.remove();
+    return true;
+  },
   clipboardPlayer,
   seedFocus,
   clipFocus,
