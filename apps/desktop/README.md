@@ -54,7 +54,10 @@ own installer. A relative path is taken from the directory pnpm was run in.
   process, judged by Flash's rules and policy files rather than CORS, so
   `http:` and servers without CORS work. No request carries your cookies
   or credentials, and none reaches this machine or your local network
-  unless the SWF came from there or a policy file there grants it.
+  unless the SWF came from there or a policy file there grants it. That
+  is judged by address range, as a browser judges it: this machine's own
+  public address, or a LAN device's global IPv6 address, counts as the
+  internet, which any web page could reach too.
 - **Sockets** (`flash.net.Socket`) connect over TCP through the main
   process. The first connection to each server asks: Allow Once, Always
   Allow for This SWF (remembered in `settings.json`) or Deny.

@@ -4106,6 +4106,16 @@ where a policy there grants every domain. Addresses no server has
 Fetch standard blocks (SMTP's, SSH's and the rest), as Flash in a browser
 never reached them either.
 
+Addresses are placed by their ranges alone, as a browser's Private
+Network Access places them: the app does not know which public
+addresses are this machine's own or its network's. So this machine's
+own public IPv4 address or global IPv6 one, and a LAN device reached by
+its global IPv6 address (as most on an IPv6 network are), count as the
+internet: a SWF from the internet reaches a service listening there as
+any web page in a browser could, though still without the user's
+credentials. A service that is to stay private should listen on
+loopback or a private address, or ask for authentication.
+
 Each request resolves its host once and connects to that address, its
 policy file fetched from the same one (Node's `lookup` pinned, the name
 kept for TLS's server name and the Host header), so DNS that changes its
