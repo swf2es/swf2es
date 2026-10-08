@@ -438,3 +438,116 @@ test("a child's timers and loadBytes still count as its own once it is unloaded 
   // Repro 2: content its Loader took from a timer is no one's, not the main SWF's.
   assert.deepEqual(result.lines, ["bytes false about:blank"]);
 });
+
+/**
+ * A child that hands the main SWF ExternalInterface.call as a function
+ * value four ways, and a main that runs them from its own code: a child
+ * event it re-dispatches whose toString names the page function, an
+ * Array's forEach and sort, and an event of its own a child listens for.
+ */
+function handOver(compile: ReturnType<typeof compiler>, childUrl: string) {
+  const main = bare(
+    compile(
+      "EiHandMain",
+      `package {
+  import flash.display.Loader;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.net.URLRequest;
+  public dynamic class EiHandMain extends Sprite {
+    public function EiHandMain() {
+      var loader:Loader = new Loader();
+      loader.load(new URLRequest(${JSON.stringify(childUrl)}));
+      addChild(loader);
+      addEventListener(Event.ENTER_FRAME, frame);
+    }
+
+    private function frame(e:Event):void {
+      if (!this.fn) {
+        return;
+      }
+
+      removeEventListener(Event.ENTER_FRAME, frame);
+      var self:Object = this;
+      for each (var run:Function in [
+        function ():void { stage.dispatchEvent(self.relayed); },
+        function ():void { self.names.forEach(self.fn); },
+        function ():void { self.sorts.sort(self.fn); },
+        function ():void { stage.dispatchEvent(new Event("ping")); }
+      ]) {
+        try {
+          run();
+        } catch (error:Error) {
+          trace("main", error.errorID);
+        }
+      }
+    }
+  }
+}`,
+    ),
+    1,
+    "EiHandMain",
+  );
+  const child = bare(
+    compile(
+      "EiHandChild",
+      `package {
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.external.ExternalInterface;
+  public class EiHandChild extends Sprite {
+    public function EiHandChild() {
+      addEventListener(Event.ADDED_TO_STAGE, added);
+    }
+
+    private function added(e:Event):void {
+      var main:Object = parent.parent;
+      stage.addEventListener("relay", ExternalInterface.call);
+      stage.addEventListener("ping", ExternalInterface.call);
+      main.relayed = new EiRelay();
+      main.names = ["hello"];
+      main.sorts = ["hello", "there"];
+      main.fn = ExternalInterface.call;
+    }
+  }
+}
+
+import flash.events.Event;
+
+class EiRelay extends Event {
+  public function EiRelay() {
+    super("relay");
+  }
+
+  override public function toString():String {
+    return "hello";
+  }
+}`,
+    ),
+    1,
+    "EiHandChild",
+  );
+  return { main, child };
+}
+
+test("a child's ExternalInterface.call that the main runs through the player is not the main's", {
+  skip,
+}, async () => {
+  const compile = compiler(out);
+  const { main, child } = handOver(compile, "http://other.test/child.swf");
+  const result = await play(main, { "http://other.test/child.swf": child }, 8);
+  // None reaches the page: forEach and sort throw in the main's code, and
+  // the two listeners' errors are reported, as a listener's are, not thrown.
+  assert.deepEqual(result.evaluated, []);
+  assert.deepEqual(result.lines, ["main 2067", "main 2067"]);
+  assert.deepEqual(result.uncaught, ["Error: Error #2067", "Error: Error #2067"]);
+});
+
+test("the same hand-overs pass where every SWF loaded is the page's own", { skip }, async () => {
+  const compile = compiler(out);
+  const { main, child } = handOver(compile, "http://page.test/child.swf");
+  const result = await play(main, { "http://page.test/child.swf": child }, 8);
+  assert.equal(result.lines.filter((l) => l === "main 2067").length, 0);
+  // The relay, forEach's one, sort's at least one, and the ping.
+  assert.ok(result.evaluated.length >= 4, `${result.evaluated.length} calls reached the page`);
+});

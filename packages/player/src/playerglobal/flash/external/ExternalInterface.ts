@@ -8,11 +8,12 @@ type Value = avm2.Value;
 export function externalInterfaceNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
   // The host, if it lets the calling SWF use it; if the caller cannot be
-  // told, only if it lets every loaded SWF (Code.securityUrls).
+  // told, only if it lets every SWF ever loaded (Code.securityUrls). Called
+  // straight from the natives: 2 counts this and the native as the player's.
   const bridge = () => {
     const host = s.externalInterface;
     const allows = host?.allows;
-    return host && (!allows || s.code.securityUrls().every((url) => allows.call(host, url)))
+    return host && (!allows || s.code.securityUrls(2).every((url) => allows.call(host, url)))
       ? host
       : null;
   };

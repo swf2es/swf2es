@@ -14,6 +14,7 @@ import { containerEngine } from "../../../../oracle/oracle.ts";
 import { readLibrary } from "../../../../packages/player/dist/display/timeline.js";
 import type { CachedModule, ModuleCache } from "../../../../packages/player/dist/hosts.js";
 import { Player } from "../../../../packages/player/dist/player.js";
+import { frameLocations } from "../../../../packages/player/dist/scripting/code.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
 import { bare, scripted } from "../../../player/cases.ts";
 import { libraryAbcs } from "../../../player/libraries.ts";
@@ -382,4 +383,61 @@ test("a module's key names the ABCs added after it in its domain", { skip }, asy
   const other = await play(withAbc("CacheExtraB"), cache);
   assert.equal(other.modules.length, 2);
   assert.deepEqual(other.lines, ["CacheMain 5"]);
+});
+
+// What a SWF's code could put in a frame line to pass for another SWF's
+// frame, or hide its own: the name before the location. Codegen names
+// every function, method, getter and class from [A-Za-z0-9_$], a SWF has
+// no eval or new Function, its functions' JavaScript `name` is not the AS3
+// object's to set, and the module's sourceURL is the player's. So the
+// location is read from where the line ends alone, and a frame the parser
+// cannot read is a null, which callerUrl does not pass over.
+test("a frame line's location is where it ends, whatever its name holds", () => {
+  const stack = [
+    "Error",
+    "    at Code.callerUrl (file:///player/scripting/code.js:1:2)",
+    // A name that holds a location of its own: the real one is last.
+    "    at x (swf2es-5.js:1:1) (file:///player/natives.js:2:2)",
+    "    at get available [as $m5] (swf2es-2.js:3:4)",
+    "    at bound f (swf2es-4.js:5:6)",
+    "    at async swf2es-4.js:7:8",
+    "    at new Klass (swf2es-4.js:9:10)",
+    // Frames with no line and column: unread, never skipped as if not there.
+    "    at Array.sort (<anonymous>)",
+    "    at async Promise.all (index 0)",
+    "    at Reflect.apply (native)",
+    // An eval's frame names its caller inside: not that caller's.
+    "    at eval (eval at f (swf2es-4.js:1:1), <anonymous>:1:1)",
+    "    at swf2es-6.js:11:12",
+    "",
+  ].join("\n");
+  assert.deepEqual(frameLocations(stack), [
+    "file:///player/scripting/code.js",
+    "file:///player/natives.js",
+    "swf2es-2.js",
+    "swf2es-4.js",
+    "swf2es-4.js",
+    "swf2es-4.js",
+    null,
+    null,
+    null,
+    "swf2es-4.js:1:1), <anonymous>",
+    "swf2es-6.js",
+  ]);
+});
+
+test("SpiderMonkey's and JavaScriptCore's frames read the same way, an @ in a name or not", () => {
+  const stack = [
+    "callerUrl@file:///player/scripting/code.js:1:2",
+    "a@b@swf2es-5.js:3:4",
+    "@swf2es-6.js:5:6",
+    "sort@[native code]",
+    "",
+  ].join("\n");
+  assert.deepEqual(frameLocations(stack), [
+    "file:///player/scripting/code.js",
+    "swf2es-5.js",
+    "swf2es-6.js",
+    null,
+  ]);
 });

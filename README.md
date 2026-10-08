@@ -65,6 +65,13 @@ movie.sendScore(120); // ExternalInterface.addCallback("sendScore", ...) in the 
 movie.destroy(); // stops it and lets go of its GL context, audio and sockets
 ```
 
+`allowscriptaccess` is checked against the SWF whose code calls, but the
+player has no sandbox between the SWFs it plays: a SWF one loads can
+reach the page through another's code (see
+[ExternalInterface](docs/architecture.md#externalinterface)). On a page
+that mixes SWFs it trusts with ones it does not, give no SWF script
+access.
+
 `watchFlash()` replaces Flash tags the page adds later too. See
 [docs/architecture.md](docs/architecture.md#the-web-embedding).
 

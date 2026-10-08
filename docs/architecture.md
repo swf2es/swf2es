@@ -1545,14 +1545,20 @@ native asks it about the SWF whose code is calling, as Flash checked
 allowScriptAccess against the calling SWF's domain, so a child that a
 same-domain SWF loads from elsewhere finds ExternalInterface as if there
 were no bridge. fscommand gives its host the same URLs. The check never
-takes the main SWF's word where it cannot tell (`Code.securityUrls`):
-the caller is the innermost SWF frame of a stack taken whole, with the
-engine's stackTraceLimit lifted for that one capture (its default ten
-frames lost the caller under an `Array.forEach` of
-`ExternalInterface.call`); where no SWF frame is on the stack, as for a
-library function a timer calls, the URL of every SWF whose code was
-ever loaded is asked, and all must pass, so single-origin content works
-from timers and mixed-origin content fails closed. Ever, not now: an
+takes the main SWF's word where it cannot tell (`Code.securityUrls`).
+The caller is a SWF only when its own code called the gate directly: on
+a stack taken whole, the engine's stackTraceLimit lifted for that one
+capture (its default ten frames lost the caller under an `Array.forEach`
+of `ExternalInterface.call`), the player's frames above the native are
+counted off, then the library function the SWF called (playerglobal's
+`ExternalInterface.call`, `fscommand`, `Loader.loadBytes`), and the
+frame after must be a SWF module's. Anything else there, the player's or
+the runtime's code that calls a function value (a listener a
+dispatchEvent calls, an Array's forEach or sort, a timer), or a frame
+line it cannot read, leaves the caller untold: then the URL of every SWF
+whose code was ever loaded is asked, and all must pass, so single-origin
+content works from timers and callbacks, and mixed-origin content fails
+closed. Ever, not now: an
 unloaded child's timers and closures outlive its modules, which the
 player holds weakly, so the URLs are kept in a set that never shrinks. A
 loadBytes' content is the calling SWF's, as Flash gave it the loader's
@@ -1561,12 +1567,24 @@ one origin's while only one ever loaded, else no one's, an opaque URL
 no check allows; a load a redirect took elsewhere is the final
 URL's (`FetchResult.url`), for its LoaderInfo and its checks alike.
 
-The player has no sandbox between SWFs, though. A cross-origin child can
-call the main SWF's functions, or a grandchild's, and the check looks at
-the innermost SWF frame: a main-SWF function that forwards its arguments
-to ExternalInterface acts as the main SWF for whichever SWF called it. A
-page that loads SWFs it does not trust beside ones it does should not
-give any of them script access.
+The location a frame line names is read from where the line ends, inside
+its last parentheses or after its last `@`
+(`frameLocations`), so a name cannot stand for a location; and a SWF
+cannot set one anyway: codegen names functions, methods, getters and
+classes from `[A-Za-z0-9_$]`, a SWF has no eval or `new Function`, an
+AS3 function's JavaScript `name` is not its to set, and a module's
+`sourceURL` is the player's.
+
+The player has no sandbox between SWFs, though, and the check knows
+only which SWF's code made the call. A cross-origin child can call the
+main SWF's functions, or a grandchild's: a main-SWF function that
+forwards its arguments to ExternalInterface acts as the main SWF for
+whichever SWF called it. And main-SWF code that itself calls a function
+value a child supplied, ExternalInterface.call returned by a child's
+getter, fetched from a Worker's shared property, or kept in a reference
+the child stored, calls it directly, as the main SWF. A page that loads
+SWFs it does not trust beside ones it does should give none of them
+script access.
 
 A callback the page calls goes through playerglobal's `_callIn` either
 way it can: with an array of AVM2 values, applied as they are and

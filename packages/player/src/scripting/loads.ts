@@ -164,7 +164,8 @@ export class Loads {
    * for a Loader nothing places, which an unloaded child may have made.
    */
   private bytesOwner(loader: AsObject): string {
-    const caller = this.s.code.callerUrl();
+    // This, requestLoad and Loader's _loadBytes are the player's frames.
+    const caller = this.s.code.callerUrl(3);
     if (caller !== null) {
       return caller;
     }
