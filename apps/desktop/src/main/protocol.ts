@@ -18,7 +18,9 @@ export const APP_ORIGIN = `${SCHEME}://app`;
 
 const appRoot = fileURLToPath(new URL("../../", import.meta.url));
 
-/** Before the app is ready: a standard, secure scheme, which fetch, CORS and storage treat as https. */
+/**
+ * Before the app is ready: a standard, secure scheme, which fetch, CORS and storage treat as https.
+ */
 export function registerScheme(): void {
   protocol.registerSchemesAsPrivileged([
     {
@@ -58,7 +60,10 @@ function packageRoot(specifier: string, from: string): string {
   }
 }
 
-/** What /modules/<name>/ serves: the packages' builds and their libraries, as static/index.html's import map names them. */
+/**
+ * What /modules/<name>/ serves: the packages' builds and their libraries, as static/index.html's
+ * import map names them.
+ */
 function moduleMounts(): Map<string, string> {
   const here = join(appRoot, "package.json");
   const dist = (specifier: string, from = here) => join(packageRoot(specifier, from), "dist");
@@ -117,7 +122,10 @@ function contentSecurityPolicy(page: string): string {
 
 const notFound = () => new Response(null, { status: 404 });
 
-/** Serve swf2es:// in `session`: the app, its modules, the libraries `libraries` finds, and what `sandbox` lets the SWF read. */
+/**
+ * Serve swf2es:// in `session`: the app, its modules, the libraries `libraries` finds, and what
+ * `sandbox` lets the SWF read.
+ */
 export function serve(session: Session, sandbox: Sandbox, libraries: () => LibraryState): void {
   const mounts = moduleMounts();
   const staticDir = join(appRoot, "static");

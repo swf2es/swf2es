@@ -257,7 +257,8 @@ async function withApp(
     const again = (more: string[]) =>
       new Promise<number | null>((done) => start(more).on("exit", (code) => done(code)));
     await run({ stdout, stderr: () => stderr, until, evaluate, devtools, again });
-    // What the page's policy refused, as Chromium words it; Electron's own warning about 'unsafe-eval' is not one.
+    // What the page's policy refused, as Chromium words it; Electron's own warning about 'unsafe-
+    // eval' is not one.
     assert.doesNotMatch(stderr, /violates the following Content Security Policy/);
   } finally {
     socket?.close();
@@ -425,7 +426,10 @@ try {
     for (let tries = 0; failure === "" && tries < 100; tries++) {
       // Null until the page has parsed, which may be after DevTools first finds it.
       failure = await evaluate<string>(
-        `(() => { const f = document.getElementById("failure"); return f && !f.hidden ? f.textContent : ""; })()`,
+        `(() => {
+          const f = document.getElementById("failure");
+          return f && !f.hidden ? f.textContent : "";
+        })()`,
       );
       if (failure === "") {
         await sleep(100);

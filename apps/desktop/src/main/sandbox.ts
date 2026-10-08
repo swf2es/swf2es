@@ -25,7 +25,9 @@ interface Grant {
   type: SandboxType;
 }
 
-/** The OS's realpath, links followed, as both the grant and a request use it; null for no such file. */
+/**
+ * The OS's realpath, links followed, as both the grant and a request use it; null for no such file.
+ */
 async function real(path: string): Promise<string | null> {
   try {
     return await realpath(path);
@@ -116,7 +118,10 @@ export class Sandbox {
     return this.grant?.type === "localWithNetwork";
   }
 
-  /** The local file a swf2es://file URL names, if the SWF playing may read it; its path, decoded, is `pathname`. */
+  /**
+   * The local file a swf2es://file URL names, if the SWF playing may read it; its path, decoded, is
+   * `pathname`.
+   */
   async resolve(pathname: string): Promise<string | null> {
     const [empty, token, ...rest] = pathname.split("/");
     const pending = this.pending;

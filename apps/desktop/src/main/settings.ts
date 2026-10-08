@@ -11,7 +11,9 @@ export interface Settings {
   builtin?: string;
   /** Most recent first. */
   recent: string[];
-  /** The servers, "host:port", each SWF, by its real path, is always allowed to connect a socket to. */
+  /**
+   * The servers, "host:port", each SWF, by its real path, is always allowed to connect a socket to.
+   */
   sockets: Record<string, string[]>;
 }
 
@@ -42,7 +44,10 @@ export class SettingsFile {
     return this.current;
   }
 
-  /** The libraries the app can find, by the user's choice, else beside playerglobal.abc, else the checkout's builtin.abc. */
+  /**
+   * The libraries the app can find, by the user's choice, else beside playerglobal.abc, else the
+   * checkout's builtin.abc.
+   */
   libraries(): LibraryState {
     const playerglobal = this.found(this.current.playerglobal);
     const besideIt = playerglobal ? join(dirname(playerglobal), "builtin.abc") : undefined;

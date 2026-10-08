@@ -46,7 +46,10 @@ export class Connections {
   /** Counts closeAll's: a connection decided on before one belongs to a page that is gone. */
   generation = 0;
 
-  /** Connect `id` to `host`:`port`, each checked, as the page asks; a refusal is an error, then a close. */
+  /**
+   * Connect `id` to `host`:`port`, each checked, as the page asks; a refusal is an error, then a
+   * close.
+   */
   connect(id: number, host: unknown, port: unknown): void {
     if (!validEndpoint(host, port) || this.sockets.has(id) || this.sockets.size >= MAX_OPEN) {
       this.refuse(id);
@@ -76,7 +79,10 @@ export class Connections {
     });
   }
 
-  /** Write `bytes`, unless the peer has left more than MAX_BUFFERED unread: then the connection fails. */
+  /**
+   * Write `bytes`, unless the peer has left more than MAX_BUFFERED unread: then the connection
+   * fails.
+   */
   send(id: number, bytes: Uint8Array): void {
     const socket = this.sockets.get(id);
     if (!socket || socket.destroyed) {
@@ -102,7 +108,10 @@ export class Connections {
     this.sockets.get(id)?.destroy();
   }
 
-  /** Close every connection without a word: the page that held them is gone, and the next numbers its own from 1. */
+  /**
+   * Close every connection without a word: the page that held them is gone, and the next numbers
+   * its own from 1.
+   */
   closeAll(): void {
     for (const socket of this.sockets.values()) {
       socket.removeAllListeners();

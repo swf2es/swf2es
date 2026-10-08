@@ -50,7 +50,9 @@ let allowedOnce = new Set<string>();
 let deniedOnce = new Set<string>();
 /** The prompts on screen, by "host:port": a second connection there waits on the first's answer. */
 const asking = new Map<string, Promise<boolean>>();
-/** The page has asked to start and listens for what opens: until then, start() hands it the movie. */
+/**
+ * The page has asked to start and listens for what opens: until then, start() hands it the movie.
+ */
 let listening = false;
 
 /**
@@ -93,9 +95,9 @@ let openedAt = Number.NEGATIVE_INFINITY;
 
 /**
  * An http(s) URL in the system's browser, never in the app, only for a SWF
- * in local-with-networking, and only as a click or a key asked: one page a gesture, a second apart at least, as a
- * browser's popup blocker allows, so a SWF cannot launch the browser in a
- * loop. Anything else goes nowhere.
+ * in local-with-networking, and only as a click or a key asked: one page a
+ * gesture, a second apart at least, as a browser's popup blocker allows,
+ * so a SWF cannot launch the browser in a loop. Anything else goes nowhere.
  */
 function openExternal(url: string): void {
   let protocol: string;
@@ -127,11 +129,17 @@ function openExternal(url: string): void {
   void shell.openExternal(url);
 }
 
-/** How much of a SWF the main process reads to choose its sandbox: far more than FileAttributes takes compressed. */
+/**
+ * How much of a SWF the main process reads to choose its sandbox: far more than FileAttributes
+ * takes compressed.
+ */
 const START = 64 * 1024;
 const USE_NETWORK = 0x01;
 
-/** The first `length` bytes of the file at `path`, or as many as it has, at least `least`; null otherwise. */
+/**
+ * The first `length` bytes of the file at `path`, or as many as it has, at least `least`; null
+ * otherwise.
+ */
 async function readStart(path: string, length: number, least = 8): Promise<Uint8Array | null> {
   try {
     const file = await openFile(path);
@@ -244,7 +252,8 @@ async function askForSocket(name: string, swf: string, endpoint: string): Promis
       type: "question",
       message: `${name} asks to connect to ${endpoint}.`,
       detail:
-        "A socket lets the SWF send that server whatever it has. Allow it only for a server you trust.",
+        "A socket lets the SWF send that server whatever it has. " +
+        "Allow it only for a server you trust.",
       buttons: ["Allow Once", "Always Allow for This SWF", "Deny"],
       defaultId: 2,
       cancelId: 2,
@@ -381,7 +390,9 @@ function buildMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-/** The window's page may go nowhere but swf2es://app/, and open nothing but the system's browser. */
+/**
+ * The window's page may go nowhere but swf2es://app/, and open nothing but the system's browser.
+ */
 function guard(contents: WebContents): void {
   contents.on("will-navigate", (event) => {
     event.preventDefault();
