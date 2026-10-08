@@ -628,11 +628,19 @@ export class StaticTextObject extends DisplayObject {
   private laidGlyphs: { glyphs: PlacedGlyph[]; text: string | null } | null = null;
 
   constructor(
-    readonly definition: StaticTextCharacter,
+    public definition: StaticTextCharacter,
     private readonly characters: Map<number, Character>,
   ) {
     super();
     this.character = definition;
+  }
+
+  /** Show another text in its place, its glyphs laid out when next asked for. */
+  show(definition: StaticTextCharacter): void {
+    this.definition = definition;
+    this.character = definition;
+    this.laidGlyphs = null;
+    this.invalidate(CONTENT);
   }
 
   /**
@@ -873,13 +881,28 @@ function madeAs(display: DisplayObject, character: Character | undefined): boole
 
 /**
  * Another character placed in a child's stead, with the move flag or where
- * a rewind keeps the child: Flash makes no new object, and only a Shape or
- * MorphShape no script has touched takes the new shape's or morph's
- * graphic; a clip, a Shape a script set a property of, and a Shape a
- * sprite is placed over all stay as they are (`replaces`).
+ * a rewind keeps the child: Flash makes no new object, and only a Shape,
+ * MorphShape or StaticText no script has touched takes the new shape's,
+ * morph's or text's graphic; a clip, a Shape a script set a property of,
+ * and a Shape a sprite is placed over all stay as they are (`replaces`,
+ * `static-text-replace`). Flash also gives a Shape a text's glyphs and a
+ * StaticText a shape's fills, which the player does not: they stay as
+ * they are.
  */
 function swap(existing: DisplayObject, character: Character): void {
-  if (!(existing instanceof ShapeObject) || existing.scripted || existing.character === character) {
+  if (existing.scripted || existing.character === character) {
+    return;
+  }
+
+  if (existing instanceof StaticTextObject) {
+    if (character.type === "static") {
+      existing.show(character);
+    }
+
+    return;
+  }
+
+  if (!(existing instanceof ShapeObject)) {
     return;
   }
 

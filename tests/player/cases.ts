@@ -3012,6 +3012,84 @@ function staticTexts(): Uint8Array {
   });
 }
 
+// Static text replaced in place: frame 2 puts text B with the move flag
+// where text A was (depth 1), removes A and places B (2), does the first
+// to a text a script touched (3), and a two-frame clip does the first on
+// its own timeline, looping (4). Frame 3 puts A back at depth 1
+// (scripts/StaticTextReplace.as).
+function staticTextReplace(abc: Uint8Array): Uint8Array {
+  const at = (x: number, y: number) => ({ tx: x * 20, ty: y * 20 });
+  return w.swf({
+    width: 330,
+    height: 160,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      probeFont(9),
+      w.staticText({
+        id: 1,
+        bounds: [0, 1400, -600, 100],
+        records: [
+          {
+            font: 9,
+            height: 600,
+            color: 0x0000cc,
+            x: 0,
+            y: 0,
+            glyphs: [
+              [0, 320],
+              [1, 440],
+            ],
+          },
+        ],
+      }),
+      w.staticText({
+        id: 2,
+        bounds: [0, 1800, -400, 800],
+        matrix: { tx: 100, ty: 200 },
+        records: [
+          {
+            font: 9,
+            height: 400,
+            color: 0xcc0000,
+            x: 0,
+            y: 0,
+            glyphs: [
+              [4, 400],
+              [2, 200],
+            ],
+          },
+          { x: 200, y: 500, glyphs: [[1, 300]] },
+        ],
+      }),
+      w.sprite(4, 2, [
+        w.place({ depth: 1, character: 1 }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, character: 2 }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc, "StaticTextReplace"),
+      w.symbolClass([[0, "Main"]]),
+      w.place({ depth: 1, character: 1, matrix: at(10, 50) }),
+      w.place({ depth: 2, character: 1, matrix: at(120, 50) }),
+      w.place({ depth: 3, character: 1, matrix: at(230, 50) }),
+      w.place({ depth: 4, character: 4, matrix: at(10, 110) }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, character: 2 }),
+      w.remove(2),
+      w.place({ depth: 2, character: 2, matrix: at(120, 50) }),
+      w.place({ depth: 3, move: true, character: 2 }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, character: 1 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Static text in Probe over a red square, given drop shadows by
 // scripts/StaticTextFilters.as.
 function staticTextFilters(abc: Uint8Array): Uint8Array {
@@ -4032,6 +4110,15 @@ export const cases: PlayerCase[] = [
     capture: [1],
     tolerance: 32,
     maxOutliers: 100,
+  },
+  {
+    name: "static-text-replace",
+    swf: staticTextReplace,
+    script: "StaticTextReplace",
+    frames: 3,
+    capture: [1, 2, 3],
+    tolerance: 32,
+    maxOutliers: 60,
   },
   {
     name: "static-text-probe",
