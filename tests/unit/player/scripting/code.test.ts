@@ -530,6 +530,32 @@ test("on JavaScriptCore, whose tail calls drop the runtime's frames, no call is 
   );
 });
 
+test("on JavaScriptCore, a library frame that names no script is not taken for one", () => {
+  // As runtime-jsc-frames has it: SWF modules as Blob URLs' scripts, the
+  // runtime's frames kept, but the libraries made by Function, "f@" with
+  // no script, like a native's "f@[native code]". A null there could be
+  // either, so the call is no one's until the libraries carry URLs too.
+  const swfModule = "blob:http://page.test/0b1c";
+  const blobs = {
+    isModule: (script: string) => script === swfModule || modules.isModule(script),
+    isLibrary: modules.isLibrary,
+  };
+  for (const library of ["call@", "sort@[native code]"]) {
+    assert.equal(
+      callingScript(
+        ["callerUrl@code.js:1:1", "native@natives.js:2:2", library, `f@${swfModule}:4:4`].join(
+          "\n",
+        ),
+        2,
+        blobs,
+        byName,
+      ),
+      null,
+      library,
+    );
+  }
+});
+
 test("a stack limit the page froze makes a check fail closed, not throw", async () => {
   const scripting = new Scripting(await createCodegen(wasm), {});
   const descriptor = Object.getOwnPropertyDescriptor(Error, "stackTraceLimit");

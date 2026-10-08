@@ -613,7 +613,10 @@ export class Code {
    * that elides tail calls (JavaScriptCore's proper tail calls) would drop
    * the runtime's frames, `return f(...)` all of them, and a call through
    * a function value would look direct. callingScript therefore reads V8's
-   * stacks alone, and fails closed on any other engine's.
+   * stacks alone, and fails closed on any other engine's. Reading
+   * JavaScriptCore's once its runtime frames survive also needs the
+   * libraries' modules to name their scripts, as SWFs' do there: a frame
+   * that names none may be a native's as well as a library's.
    */
   callerUrl(own: number): string | null {
     const stack = wholeStack();
