@@ -412,7 +412,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
       const outputs = Math.floor((n * EXTRACT_RATE) / rate);
       const count = Math.min(n, outputs);
       if (count * channels * size > available) {
-        b.position += Math.floor(available / size) * size;
+        b.position = (b.position + Math.floor(available / size) * size) >>> 0;
         throw s.rt.error("flash.errors::EOFError", 2030);
       }
 

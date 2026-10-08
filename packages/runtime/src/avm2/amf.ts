@@ -575,7 +575,7 @@ export class Reader implements ExternalStream {
       }
 
       if (k === length) {
-        input.position = at + length;
+        input.position = (at + length) >>> 0;
         this.strings.push(ascii);
         return ascii;
       }

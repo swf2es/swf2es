@@ -189,7 +189,8 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
     }
 
     set position(value: Value) {
-      avm2.bytesOf(s.rt, bufferOf(this)).position = s.rt.toUint(value);
+      // As ByteArray's setter: a uint32 of its own, not toUint's (see Bytes).
+      avm2.bytesOf(s.rt, bufferOf(this)).position = s.rt.toUint(value) >>> 0;
     }
 
     get length(): number {

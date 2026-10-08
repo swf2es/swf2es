@@ -141,7 +141,7 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
         }
 
         const key = decoder.decode(bytes.subarray(at, at + length));
-        b.position = at + length;
+        b.position = (at + length) >>> 0;
         const value = s.rt.callProperty(array, avm2.qname(avm2.publicNs, "readObject"));
         s.rt.setProperty(data, avm2.qname(avm2.publicNs, key), value);
         // The 0 after each value.

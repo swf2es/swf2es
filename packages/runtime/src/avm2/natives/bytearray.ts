@@ -59,6 +59,15 @@ export function byteArrayCapacity(rt: Runtime): number {
  * A ByteArray's state: its buffer, as long as its capacity, and its length
  * and position. A read or write takes its offset first: growing replaces
  * the buffer and its view.
+ *
+ * A length or position is stored through `>>> 0`, as a uint32: an int32
+ * while below 2^31, and a double only from there.
+ * JavaScriptCore keeps a number its JIT once made a double a double, and
+ * an addition that has seen one makes doubles from then on: a double
+ * offset fails the int32 check of a DataView or typed array access, and
+ * after enough failures JavaScriptCore calls DataView's methods instead
+ * of inlining them, a quarter slower on every read and write. V8 makes
+ * small integers of them itself.
  */
 export class Bytes {
   buffer = new Uint8Array(0);
@@ -162,9 +171,9 @@ export class Bytes {
       }
     }
 
-    this.length = length;
+    this.length = length >>> 0;
     if (this.position > length) {
-      this.position = length;
+      this.position = this.length;
     }
 
     this.notify();
@@ -199,7 +208,7 @@ export class Bytes {
       throw this.rt.error("flash.errors::EOFError", 2030);
     }
 
-    this.position = at + n;
+    this.position = (at + n) >>> 0;
     return at;
   }
 
@@ -214,7 +223,7 @@ export class Bytes {
       this.setLength(at + n);
     }
 
-    this.position = at + n;
+    this.position = (at + n) >>> 0;
     return at;
   }
 
@@ -229,7 +238,7 @@ export class Bytes {
   read(count: number): Uint8Array {
     this.checkEOF(count);
     const bytes = this.buffer.slice(this.position, this.position + count);
-    this.position += count;
+    this.position = (this.position + count) >>> 0;
     return bytes;
   }
 
@@ -237,7 +246,7 @@ export class Bytes {
   readView(count: number): Uint8Array {
     this.checkEOF(count);
     const bytes = this.buffer.subarray(this.position, this.position + count);
-    this.position += count;
+    this.position = (this.position + count) >>> 0;
     return bytes;
   }
 
@@ -248,7 +257,7 @@ export class Bytes {
       throw this.rt.error("flash.errors::MemoryError", 1000);
     }
 
-    const end = this.position + count;
+    const end = (this.position + count) >>> 0;
     if (end > this.buffer.length) {
       this.ensure(end, false);
     }
@@ -520,7 +529,7 @@ function algorithmOf(rt: Runtime, algorithm: Value): "zlib" | "deflate" | "lzma"
 function replaceBytes(b: Bytes, bytes: Uint8Array, position: number): void {
   b.setBuffer(new Uint8Array(bytes));
   b.length = bytes.length;
-  b.position = position;
+  b.position = position >>> 0;
   b.notify();
 }
 
@@ -548,7 +557,7 @@ export function byteArrayNatives(rt: Runtime): Natives {
     }
 
     const s = fromUtf8(toNul(bytes));
-    b.position += n;
+    b.position = (b.position + n) >>> 0;
     return s;
   };
 
@@ -585,7 +594,10 @@ export function byteArrayNatives(rt: Runtime): Natives {
 
     set position(v: Value) {
       const b = bytesOf(rt, this);
-      b.position = rt.toUint(v);
+      // Not redundant: toUint's own `>>> 0` serves every caller, and once
+      // one passes it 2^31 or more, JavaScriptCore makes doubles there for
+      // all of them (see Bytes).
+      b.position = rt.toUint(v) >>> 0;
     }
 
     get bytesAvailable() {
