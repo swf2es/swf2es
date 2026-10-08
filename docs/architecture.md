@@ -20,7 +20,8 @@ AssemblyScript's minimal runtime, whose garbage the wrapper collects between
 calls (see [benchmarks.md](benchmarks.md#the-assemblyscript-runtime)).
 
 The wrapper's `Codegen` (`createCodegen` in `packages/codegen/src`) is the
-compiler's whole API:
+compiler's API; besides `identity`, `epoch`, `abcVersion`, `usage` and
+`isLive`, which report on it:
 
 - `reset` starts a domain, and `add` links an ABC into it, after those
   before, into one of its application domains: `childDomain` makes one,
@@ -60,20 +61,18 @@ requires:
    compiled proves (final classes, sealed traits, typed slots). Anything that
    can change at runtime, such as a child SWF redefining a class, gets a
    runtime guard in both modes.
-4. **Shared cache key.** Output is keyed by `COMPILER_VERSION`, the ABC's
-   hash, and the hashes of the ABCs in its domain when it compiled, in load
-   order, those loaded with it included, since a SWF's `DoABC`s are all
-   added before any compiles (`cacheKey()` in codegen), so the browser
-   cache, AOT output served by a server, and JIT output are
-   interchangeable. An ABC's layouts depend on those it links
-   against, since its slot and dispatch ids follow its base classes', so a
-   module also records their hashes and the runtime refuses it when the
-   ABCs loaded before it differ. In a child application domain, what the
-   domain was recorded to find (`found`) binds names and types too, so the
-   key names those findings, each by the hash of the ABC that defines it.
-   The player's module cache, and the swf2es command for it, key more
-   widely, by what the domain has fixed of what resolves lazily too
-   (`moduleKey`, see [Caching modules](#caching-modules)).
+4. **Shared cache key.** Output is keyed by codegen's `moduleKey`, which
+   the player's module cache and the swf2es command both take: the
+   compiler's identity, the API version, and the module's context, every
+   ABC its application domain sees, by hash, in load order, those loaded
+   with it included, since a SWF's `DoABC`s are all added before any
+   compiles, and what the domain was told it found (`found`) and has fixed
+   of what resolves lazily (see [Caching modules](#caching-modules)). So
+   the browser cache, AOT output served by a server, and JIT output are
+   interchangeable. An ABC's layouts depend on those it links against,
+   since its slot and dispatch ids follow its base classes', so a module
+   also records their hashes and the runtime refuses it when the ABCs
+   loaded before it differ.
 
 CI checks both (`pnpm determinism`, `tests/conformance/determinism.ts`),
 over the builtins, then each conformance case (also compiled with asc's
@@ -96,10 +95,10 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `format`  | SWF container and tags, ABC, AVM1 action records                | —                         |
+| `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC) | —                        |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
-| `runtime` | AS3/AS2 language semantics called by generated code             | format                    |
-| `player`  | display list, timeline, playerglobal, AVM1 globals, renderers   | format, codegen, runtime  |
+| `runtime` | AS3 language semantics called by generated code (AVM1 a placeholder) | format               |
+| `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, runtime  |
 | `cli`     | ahead-of-time compiler command: a SWF's modules and a manifest  | format, codegen           |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
@@ -414,7 +413,7 @@ runtime, `rt`, that returns:
 - **scripts**: each script's traits and initializer, run the first time
   something asks for a name it defines, as avmplus runs them.
 - **hash** and **linked**: the hash of its ABC and of the ABCs loaded
-  before it, in order, as the cache key names them. Its layouts depend on
+  before it that its application domain sees, in order (`domainLinked`). Its layouts depend on
   those ABCs, so the runtime refuses to load it after any others.
 
 The runtime starts with builtin.abc, then the ABCs that follow it (for
@@ -585,7 +584,8 @@ the runtime translates it, so that its output is avmplus' byte for byte:
 number formatting (`numbers.ts`), Array's sort (`natives/sort.ts`),
 ByteArray with its capacity and UTF-8 (`natives/bytearray.ts`), AMF3
 (`amf.ts`), JSON (`natives/json.ts`), Date's formats (`natives/date.ts`),
-the XML parser (`natives/xml/`) and describeType (`natives/describe.ts`).
+XML (`natives/xml/`: `chars.ts`, `parser.ts`, `node.ts` and `xml.ts`) and
+describeType (`natives/describe.ts`).
 Each of these files is MPL-2.0, as its source is, and says so at its top.
 avmshell's `File` reads and writes `RuntimeOptions.files`, in memory by
 default. Date is JavaScript's Date, with avmplus' string formats.
@@ -800,9 +800,11 @@ runtime checks as it loads it.
 A host gives the player these modules as a module cache: see [Modules
 compiled ahead of time in the player](#modules-compiled-ahead-of-time-in-the-player).
 Skipping a compile is not enough: what a compile resolves in codegen's
-domain is what later ABCs compile against, so the player replays each
-module's log in place of its compile. A module is found only where its
-compile would have had the same context: the SWF loaded after the same
+domain, the first answers to a traits' types or a method's signature, is
+what later ABCs, such as a child SWF's loaded into the same domain,
+compile against, so the player replays each module's log in place of its
+compile. The key names the domain's context, so a module is found only
+where its compile would have had that context: the SWF loaded after the same
 libraries into a domain that sees nothing else, as the main movie, or by a
 `Loader` into `new ApplicationDomain(null)`, a sibling of the main movie's.
 Loaded into the main movie's domain or under it, the SWF compiles, as do
@@ -846,7 +848,7 @@ custom section (`packages/codegen/stamp.ts`) and `createCodegen` reads as
 moves only by hand; a compiler without the section uses no cache. The
 log's entries made while only the libraries were added, some hundred
 thousand characters, are the same in every later module's context, so
-the key names them by a digest taken once a player
+the key names them by a digest taken once per compiler epoch
 (`Code.digestLibraries`), and the context written for each module leaves
 them out: keyed whole, and taken twice a module, they cost 4.5 ms a
 module, hit or miss.
@@ -1920,8 +1922,8 @@ which the player reads from the stack:
 - `fscommand`, a package-level function, a SWF reaches by its name through
   the runtime, `Runtime.call`, `callValue` and the method closure's
   wrapper, so that one chain is accepted too, frame for frame, at the
-  sites the player measures as it starts by making such a call to a probe
-  of its own (the build's own sites, minified or not; if the probe does
+  sites the player measures once, at the first check, by making such a
+  call to a probe of its own (`Code.byNameChain`) (the build's own sites, minified or not; if the probe does
   not see the chain, no call matches).
 - Anything else there, the player's or the runtime's code that calls a
   function value (a listener a dispatchEvent calls, an Array's forEach or
@@ -2664,7 +2666,8 @@ is uploaded from the pixels and again when they change, which the store
 counts in a version the node compares.
 
 The pixel operations that read and write the store alone are in
-`bitmap/bitmap.ts` beside the rest: `noise` and
+`bitmap/ops.ts`, beside the store and its premultiplied arithmetic in
+`bitmap/bitmap.ts`: `noise` and
 `pixelDissolve`, whose pseudo-random sequences are Flash's own and fitted
 to the values Ruffle's corpus recorded of it; `copyChannel`,
 `colorTransform`, `merge`, `scroll`; `threshold`, `hitTest`,
@@ -2710,8 +2713,8 @@ Flash's sum settles long before, a negative count among them.
 #### Drawing into a bitmap
 
 `draw` and `drawWithQuality` take one of two paths. A
-BitmapData or a Bitmap drawn is composited on the CPU, in `bitmap/bitmap.ts`'s
-arithmetic: through the matrix by the inverse of each destination
+BitmapData or a Bitmap drawn is composited on the CPU, by `drawBitmap`
+in `bitmap/ops.ts`: through the matrix by the inverse of each destination
 pixel's centre, nearest or bilinear as `smoothing` asks, the colour
 transform as `colorTransform` applies it, then the blend mode (normal,
 `alpha`, `erase`, `multiply`, `screen`, `lighten`, `darken`,
@@ -3618,7 +3621,8 @@ JavaScript it writes, `name(args)` inside `__flash__toXML`, which writes
 an object's keys unquoted, as Flash's did, so a SWF's key such as
 `a:(code),b` would run in the page: the host declines every one, and
 playerglobal sends the call as an XML invocation instead. Its name is
-read as written, unescaped, up to the first `" returntype="xml">`,
+read as written, unescaped, up to the first
+`" returntype="xml"><arguments>`,
 which the arguments after it cannot move, and its arguments parsed as
 data. A name that is a path, `a.b.c` give or take spaces, is the
 function that path finds, called on what holds it. Any other name, an
@@ -3711,7 +3715,8 @@ time yet: its only cache is `cache`'s IndexedDB.
 A content script's isolated world has no registry (above), so the element
 must be defined in the page's main world, where the page's
 Content-Security-Policy applies to it. The player evaluates the modules it
-compiles with `new Function` (on JavaScriptCore, as Blob URLs' scripts),
+compiles with `new Function` (on JavaScriptCore, as Blob URLs' scripts
+where `blob:` is allowed, else by `Function` too),
 and codegen is WebAssembly, so a page needs `'unsafe-eval'` and
 `'wasm-unsafe-eval'` in its script-src, which an extension cannot lift for
 the page, unless every module is compiled ahead of time and imported (see

@@ -20,15 +20,17 @@ Stage3D and the clipboard are not there either.
 A SWF's ActionScript 3 links against `builtin.abc` (avmplus' standard
 library, MPL-2.0) and `playerglobal.abc` (Adobe's `flash.*` declarations).
 playerglobal is not redistributable, so swf2es does not ship it: you
-supply both files. The repository's tests copy them out of the oracle's
-container image into `tests/player/out/libraries/` (`tests/player/libraries.ts`).
+supply both files. The repository's tests take builtin.abc from the
+avmplus submodule (`oracle/avmplus/generated/`) and playerglobal.abc from
+the oracle's container image, into `tests/player/out/libraries/`
+(`tests/player/libraries.ts`).
 
 ## Examples
 
 ### Embed a SWF in a page
 
 `@swf2es/web` defines `<swf2es-player>` when it loads. It takes the same
-attributes as an `<embed>`. The page calls `configure()` once, before the
+main attributes as an `<embed>`. The page calls `configure()` once, before the
 first player loads:
 
 ```html
@@ -60,11 +62,12 @@ back its GL context, audio and sockets. It fires `load`, `error` and
 ### Replace the Flash tags on an existing page
 
 ```js
-import { configure, replaceFlash, watchFlash } from "@swf2es/web";
+import { configure, watchFlash } from "@swf2es/web";
 
 configure({ libraries: { builtin: "/flash/builtin.abc", playerglobal: "/flash/playerglobal.abc" } });
-replaceFlash(); // each <object>/<embed> of Flash becomes a <swf2es-player> with its params
-const stop = watchFlash(); // and so does each Flash tag the page adds later, until stop()
+// Each Flash <object>/<embed> becomes a <swf2es-player> with its params, now and as the
+// page adds more, until stop(). replaceFlash() does it once, for the tags there now.
+const stop = watchFlash();
 ```
 
 ### ExternalInterface
@@ -123,8 +126,9 @@ await player.start(); // nothing compiled: every module came from movie.swf2es
 ```
 
 A module the command wrote is found only for the SWF in the position it
-was compiled for: the main movie, loaded after the same libraries. Other
-modules compile as usual. If `importModules` is on and the libraries were
+was compiled for: loaded after the same libraries into a domain that sees
+nothing else, as the main movie or by a `Loader` into
+`new ApplicationDomain(null)`. Other modules compile as usual. If `importModules` is on and the libraries were
 compiled with `--emit-libraries`, every module is imported rather than
 evaluated, so the page runs under `script-src 'self' 'wasm-unsafe-eval'`,
 without `'unsafe-eval'`. Pixi then needs `import "pixi.js/unsafe-eval"`.
@@ -180,7 +184,7 @@ A player you set up yourself takes `socket:` from
 
 ```
 packages/
-  format/        SWF, ABC and AVM1 parsers
+  format/        SWF container and tag parsers (a DoABC's bytes; codegen parses the ABC)
   codegen/       bytecode → ES modules, in AssemblyScript (codegen.wasm), for JIT and AOT
   runtime/       the AS3 language runtime
   player/        display list, timeline, playerglobal, PixiJS renderer

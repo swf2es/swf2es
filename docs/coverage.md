@@ -50,7 +50,7 @@ What stops a test, or makes it differ, most often:
 | 15 | The same checks passed, but others failed |
 | 9 | Fewer checks passed than in avmshell |
 | 11 | Ended otherwise: 9 with an AS3 exception nothing caught where avmshell ended normally, 2 the other way |
-| 11 | avmshell's sampler (`flash.sampler`) and workers, which a SWF in the player does not use |
+| 11 | avmshell's sampler (`flash.sampler`, `as3/sampling`), which a SWF in the player does not use |
 | 5 | The host's limits: a string, array, stack or pattern too large |
 
 ### Since the first run (2015, 78.2%)

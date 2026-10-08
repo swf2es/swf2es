@@ -13,8 +13,9 @@ add a conformance case for the difference.
   `core/opcodes.tbl` lists the opcodes, and `AvmCore::readOperands` and
   `Verifier::verifyBlock` show how their operands are read.
   MPL-2.0: read it and run it. Where swf2es must reproduce one of its
-  algorithms exactly (number formatting, sorting, ByteArray, AMF3, JSON,
-  XML, describeType), the translation is a file of its own that stays
+  algorithms exactly (for example number formatting, sorting, ByteArray,
+  AMF3, JSON, XML, Date's formats, describeType, the error messages), the
+  translation is a file of its own that stays
   MPL-2.0 and says so at its top; nothing of avmplus goes into an
   Apache-2.0 file.
 - **Flash Player, as AIR's `adl` runs it**, for the player: what it traces
