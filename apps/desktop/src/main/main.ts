@@ -92,8 +92,8 @@ let gestureAt = Number.NEGATIVE_INFINITY;
 let openedAt = Number.NEGATIVE_INFINITY;
 
 /**
- * An http(s) URL in the system's browser, never in the app, and only as a
- * click or a key asked: one page a gesture, a second apart at least, as a
+ * An http(s) URL in the system's browser, never in the app, only for a SWF
+ * in local-with-networking, and only as a click or a key asked: one page a gesture, a second apart at least, as a
  * browser's popup blocker allows, so a SWF cannot launch the browser in a
  * loop. Anything else goes nowhere.
  */
@@ -107,6 +107,13 @@ function openExternal(url: string): void {
 
   const now = performance.now();
   if (protocol !== "https:" && protocol !== "http:") {
+    return;
+  }
+
+  // Flash refused a local-with-filesystem SWF the network, navigateToURL
+  // among it: a page opened with what it read in its URL would send it away.
+  if (!sandbox.networkAllowed()) {
+    process.stderr.write(`swf2es: not opening ${url}: the SWF has no network\n`);
     return;
   }
 

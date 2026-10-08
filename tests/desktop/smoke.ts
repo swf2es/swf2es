@@ -345,8 +345,9 @@ try {
     await until("the dropped SWF", settled(3));
     assert.equal(traced("smoke: started"), 3);
 
-    // Nine pages asked for, by three starts, none after a gesture: none opened.
-    assert.equal(stderr().match(/not opening https:\/\/example\.invalid\/smoke\d/g)?.length, 9);
+    // Nine pages asked for, by three starts of a SWF with no network: none opened.
+    const noNetwork = /not opening https:\/\/example\.invalid\/smoke\d: the SWF has no network/g;
+    assert.equal(stderr().match(noNetwork)?.length, 9);
 
     // Malformed %-escapes are a bad request, not a crash.
     assert.equal(
@@ -369,6 +370,9 @@ try {
     await until("the networked SWF's socket", () => traced("smoke: socket pong") === 1);
     await until("the networked SWF's reads", settled(4));
     assert.equal(traced("smoke: beside refused"), 1);
+    // The networked SWF may open pages, but not without a click or a key.
+    const noGesture = /not opening https:\/\/example\.invalid\/smoke\d: no click or key/g;
+    assert.equal(stderr().match(noGesture)?.length, 3);
     assert.equal(traced("smoke: outside refused"), 4);
     // Its network load went out, where the local SWF's three were stopped.
     assert.equal(stderr().match(/not loading https:\/\/example\.invalid\/network/g)?.length, 3);
@@ -396,6 +400,23 @@ try {
 
     assert.match(failure, /bomb\.swf did not play/);
     assert.ok(performance.now() - started < 5000, `${performance.now() - started} ms`);
+
+    // After a click, the SWF with no network still opens no page: its sandbox
+    // refuses what the gesture would allow.
+    for (const type of ["mousePressed", "mouseReleased"]) {
+      await devtools.send("Input.dispatchMouseEvent", {
+        type,
+        x: 10,
+        y: 10,
+        button: "left",
+        clickCount: 1,
+      });
+    }
+
+    assert.equal(await again([local]), 0);
+    await until("the local SWF after a click", () => traced("smoke: started") === 5);
+    await until("its pages refused", () => (stderr().match(noNetwork)?.length ?? 0) === 12);
+    assert.equal(stderr().match(noGesture)?.length, 3);
   });
 
   // Without playerglobal.abc, the page says what is missing and why it is not there.
