@@ -16,6 +16,8 @@ import {
   TextObject,
 } from "../display/display.js";
 import { apply } from "../display/geometry.js";
+import type { ClipboardText } from "../hosts.js";
+import { TEXT } from "../scripting/clipboard.js";
 import { dispatchEvent } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import { GUTTER } from "../text/layout.js";
@@ -42,10 +44,6 @@ const UP = 38;
 const RIGHT = 39;
 const DOWN = 40;
 const DELETE = 46;
-
-/** Whether `d` takes typing: an input field. */
-const editable = (d: DisplayObject | null): d is TextObject =>
-  d instanceof TextObject && d.type === "input";
 
 /** A display object's AS3 fields that focus reads. */
 type Fields = {
@@ -281,8 +279,14 @@ export class KeyboardInput {
    */
   handle(type: "down" | "up", k: KeyState): boolean {
     this.handled++;
+    // A key is a user's gesture, in whose handlers a script may write to the clipboard.
+    return this.scripting.clipboard.gesture(() => this.key(type, k));
+  }
+
+  private key(type: "down" | "up", k: KeyState): boolean {
     const s = this.scripting;
-    const target = s.focus && onStage(s.focus, this.stage) ? s.focus : this.stage;
+    const focus = this.focused();
+    const target = focus ?? this.stage;
     if (target.object) {
       const event = s.rt.construct(
         s.rt.classNamed("flash.events::KeyboardEvent"),
@@ -307,11 +311,120 @@ export class KeyboardInput {
       return this.tab(!!k.shiftKey);
     }
 
-    if (editable(s.focus) && onStage(s.focus, this.stage)) {
-      return this.edit(s.focus, k);
+    // Ctrl with Alt is AltGr on some layouts, which types characters.
+    if (k.ctrlKey && !k.altKey && (k.keyCode === 65 || k.charCode === 97 || k.charCode === 65)) {
+      return this.selectAll(focus);
+    }
+
+    if (focus instanceof TextObject && (focus.type === "input" || focus.selectable)) {
+      return this.edit(focus, k);
     }
 
     return false;
+  }
+
+  /** What has focus, while it is on the stage. */
+  private focused(): DisplayObject | null {
+    const focus = this.scripting.focus;
+    return focus && onStage(focus, this.stage) ? focus : null;
+  }
+
+  /**
+   * Ctrl+A: a text field selects all its text, if selectable; any other
+   * object with focus hears Event.SELECT_ALL, as Flash 10 tells an
+   * InteractiveObject, though never a TextField. Whether the player used it.
+   */
+  private selectAll(focus: DisplayObject | null): boolean {
+    if (focus instanceof TextObject) {
+      if (focus.selectable) {
+        focus.select(0, focus.model.text.length);
+      }
+
+      return true;
+    }
+
+    return this.dispatchClipboard(focus, "selectAll");
+  }
+
+  /**
+   * A copy, Ctrl+C, or a cut, Ctrl+X, as the host's copy or cut event has
+   * it: the text field with focus copies its selection, but not a
+   * password's, and an input field's cut deletes it after, with
+   * Event.CHANGE, as Ruffle's does; any other object with focus hears
+   * Event.COPY or Event.CUT, in which a script may write the clipboard.
+   * What goes to the system's clipboard, or null for nothing.
+   */
+  copy(cut = false): ClipboardText | null {
+    this.handled++;
+    const s = this.scripting;
+    const focus = this.focused();
+    if (!(focus instanceof TextObject)) {
+      return s.clipboard.collect(() => this.dispatchClipboard(focus, cut ? "cut" : "copy"));
+    }
+
+    const [from, to] = focus.selection;
+    if (focus.displayAsPassword || from === to || (cut && focus.type !== "input")) {
+      return null;
+    }
+
+    // Flash's line breaks are "\r", a browser's "\n".
+    const text = focus.model.text.slice(from, to).replace(/\r\n?/g, "\n");
+    return s.clipboard.collect(() => {
+      s.clipboard.clear();
+      s.clipboard.set(TEXT, text);
+      if (cut) {
+        this.replace(focus, from, to, "");
+      }
+    });
+  }
+
+  /**
+   * A paste, Ctrl+V, of `data` from the system's clipboard, or of what the
+   * SWF last put there where the host gives none: an input field with
+   * focus takes the text as if typed, a TextEvent first, but its line
+   * breaks only if multiline, and nothing where the clipboard is empty, as
+   * Ruffle's does; any other object with focus hears Event.PASTE, which
+   * bubbles, and in which alone a script may read the clipboard. Whether
+   * the player used it.
+   */
+  paste(data: ClipboardText | null = null): boolean {
+    this.handled++;
+    const s = this.scripting;
+    const focus = this.focused();
+    if (!(focus instanceof TextObject)) {
+      return s.clipboard.paste(data, () => this.dispatchClipboard(focus, "paste"));
+    }
+
+    if (focus.type !== "input") {
+      return false;
+    }
+
+    return s.clipboard.paste(data, () => {
+      const text = pasteable(focus.multiline, s.clipboard.data.text);
+      if (text !== "") {
+        this.type(focus, text);
+      }
+
+      return true;
+    });
+  }
+
+  /** Event.COPY, CUT, PASTE or SELECT_ALL to what has focus, if a script made it: whether one heard it. */
+  private dispatchClipboard(focus: DisplayObject | null, type: string): boolean {
+    if (!focus?.object || !isInteractive(focus)) {
+      return false;
+    }
+
+    const s = this.scripting;
+    // Flash Player's paste bubbles; AIR's, and the others, do not.
+    const event = s.rt.construct(
+      s.rt.classNamed("flash.events::Event"),
+      type,
+      type === "paste",
+      false,
+    );
+    dispatchEvent(s, focus.object, event);
+    return true;
   }
 
   /**
@@ -424,17 +537,16 @@ export class KeyboardInput {
     return true;
   }
 
-  /** A key's edit of the focused field: a character typed, a deletion, or the caret moved. */
+  /**
+   * A key's edit of the focused field: a character typed, a deletion, or
+   * the caret moved; a selectable field that takes no typing moves its
+   * caret and selection alone.
+   */
   private edit(field: TextObject, k: KeyState): boolean {
     const length = field.model.text.length;
     const [begin, end] = field.selection;
     const caret = field.caret;
-    // Ctrl with Alt is AltGr on some layouts, which types characters.
     const shortcut = !!k.ctrlKey && !k.altKey;
-    if (shortcut && (k.keyCode === 65 || k.charCode === 97 || k.charCode === 65)) {
-      field.select(0, length);
-      return true;
-    }
 
     if (k.keyCode === UP || k.keyCode === DOWN) {
       const to = lineMove(field, caret, k.keyCode === UP ? -1 : 1);
@@ -458,6 +570,10 @@ export class KeyboardInput {
                 : Math.min(length, caret + 1);
       field.select(k.shiftKey ? field.anchor : to, to);
       return true;
+    }
+
+    if (field.type !== "input") {
+      return false;
     }
 
     if (k.keyCode === BACKSPACE || k.keyCode === DELETE) {
@@ -538,6 +654,17 @@ export class KeyboardInput {
       );
     }
   }
+}
+
+/**
+ * Pasted text as a field takes it, as Ruffle's text_input: its line breaks
+ * as Flash's "\r", none at all in a single-line field, and no other
+ * control characters.
+ */
+export function pasteable(multiline: boolean, text: string): string {
+  const lines = text.replace(/\r\n?|\n/g, multiline ? "\r" : "");
+  // A control character other than "\r".
+  return lines.replace(/[^\P{Cc}\r]/gu, "");
 }
 
 /** Where `d`'s bounds start on the stage, as Flash orders Tab: 6y + x, in twips. */
@@ -688,12 +815,23 @@ function charCodeOf(e: KeyboardEvent): number {
   return { Enter: 13, Backspace: 8, Tab: 9, Escape: 27, Delete: 127 }[e.key] ?? 0;
 }
 
+/** Whether a browser event is the page's own: typed into its input or button, or editable content. */
+function pagesOwn(e: Event): boolean {
+  const into = e.target as HTMLElement | null;
+  return (
+    !!into?.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(into?.tagName ?? "")
+  );
+}
+
 /**
  * Send the browser's keys on `target` (the window, say) to the player. A
  * key goes to the SWF unless it is typed into the page's own input or
  * button, or comes from an IME, which the player cannot compose; the
  * browser is kept from acting on one only where the SWF used it: a field's
  * edit or caret, or Tab moving the SWF's focus. Its own shortcuts stay.
+ * The copy, cut and paste events the browser sends for Ctrl+C, X and V,
+ * or its menu's, go to the player too, which reads and writes the
+ * clipboard through them, synchronously and without asking for leave.
  */
 export function bindKeyboard(
   player: { keyboard: KeyboardInput | null; pointer?: { flush(): void } | null },
@@ -701,13 +839,7 @@ export function bindKeyboard(
 ): () => void {
   const listener = (event: Event) => {
     const e = event as KeyboardEvent;
-    const into = e.target as HTMLElement | null;
-    if (
-      into?.isContentEditable ||
-      /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(into?.tagName ?? "") ||
-      e.isComposing ||
-      e.keyCode === 229
-    ) {
+    if (pagesOwn(e) || e.isComposing || e.keyCode === 229) {
       return;
     }
 
@@ -731,10 +863,53 @@ export function bindKeyboard(
       e.preventDefault();
     }
   };
-  target.addEventListener("keydown", listener);
-  target.addEventListener("keyup", listener);
+  const clipboard = (event: Event) => {
+    const e = event as ClipboardEvent;
+    const keyboard = player.keyboard;
+    if (pagesOwn(e) || !keyboard) {
+      return;
+    }
+
+    const transfer = e.clipboardData;
+    if (e.type === "paste") {
+      const html = transfer?.getData("text/html");
+      const data = transfer
+        ? { text: transfer.getData("text/plain"), ...(html ? { html } : {}) }
+        : null;
+      if (keyboard.paste(data)) {
+        e.preventDefault();
+      }
+
+      return;
+    }
+
+    const data = keyboard.copy(e.type === "cut");
+    if (data && transfer) {
+      transfer.setData("text/plain", data.text);
+      if (data.html !== undefined) {
+        transfer.setData("text/html", data.html);
+      }
+
+      e.preventDefault();
+    }
+  };
+  const types = ["keydown", "keyup"] as const;
+  const clipboardTypes = ["copy", "cut", "paste"] as const;
+  for (const type of types) {
+    target.addEventListener(type, listener);
+  }
+
+  for (const type of clipboardTypes) {
+    target.addEventListener(type, clipboard);
+  }
+
   return () => {
-    target.removeEventListener("keydown", listener);
-    target.removeEventListener("keyup", listener);
+    for (const type of types) {
+      target.removeEventListener(type, listener);
+    }
+
+    for (const type of clipboardTypes) {
+      target.removeEventListener(type, clipboard);
+    }
   };
 }

@@ -1024,10 +1024,12 @@ and the player's paths in this document are relative to it:
   URLStreams ask for through the host and gives it to a frame,
   `symbols.ts` keeps what SymbolClass
   bound classes to, the fonts registered and the sounds' shared decodes,
-  `timers.ts` keeps the clock and the timers that fire by it. `hosts.ts`
+  `timers.ts` keeps the clock and the timers that fire by it,
+  `clipboard.ts` what the clipboard holds and when scripts may touch it.
+  `hosts.ts`
   holds what a host may supply in place of the browser (navigation,
-  shared objects' storage, the platform Capabilities reports) with the
-  browser's defaults, and the interfaces of what only a host supplies
+  shared objects' storage, the platform Capabilities reports, the
+  clipboard's writes) with the browser's defaults, and the interfaces of what only a host supplies
   (ExternalInterface's page, a renderer's draws, fetches, sockets).
 - `display/`: the display list and the timeline, and what they are made
   of: shapes, morphs, drawings and what they read back as, bounds and hit
@@ -1901,9 +1903,63 @@ selection shaded, line by line, both clipped to the lines shown; a
 focused selectable dynamic field shows its selection too. A key the
 player used, an edit or a caret moved in a field or a Tab that moved
 focus, the host keeps from the browser; any other, a game's arrows say,
-still reaches the page too, which may scroll by it. adl cannot be typed
-into, so none of this is recorded against Flash; there is no IME, no
-clipboard, and no scrolling to keep the caret in view.
+still reaches the page too, which may scroll by it. A focused selectable
+field that takes no typing moves its caret and selection with the same
+keys, and selects all with Ctrl+A. adl cannot be typed into, so none of
+this is recorded against Flash; there is no IME, and no scrolling to
+keep the caret in view.
+
+### The clipboard
+
+Flash Player 10 let a script write the clipboard only while it handled
+a user's event, a key, a mouse button, a copy or a cut, and read it only
+while it handled a paste, as the
+[Clipboard reference](https://help.adobe.com/en_US/FlashPlatform/reference/actionscript/3/flash/desktop/Clipboard.html)
+and the
+[developer's guide](https://help.adobe.com/en_US/as3/dev/WS2F6A31B9-1AE6-4b23-9C12-57A33F4F0516.html)
+tell; the player keeps those rules in `scripting/clipboard.ts`, which
+holds the clipboard by Flash's native format names (`air:text`,
+`air:html`, `air:rtf`, `air:url`, and a script's own formats as
+`air:reference:` and `air:serialization:` entries). The pointer's
+presses and releases and every key run as a gesture, in which
+`canWriteContents` is true; a paste runs as one in which
+`canReadContents` is too. playerglobal's AS3 checks both and throws its
+SecurityErrors; the natives (`playerglobal/flash/desktop/Clipboard.ts`)
+store and give back, run a `setDataHandler` handler when its format is
+first read, and refuse `new Clipboard()` with IllegalOperationError
+#2178, Flash Player having the system's alone. `clear` and `clearData`
+outside a gesture throw SecurityError #2191, and `System.setClipboard`
+Error #2176, as Ruffle has the plug-in throw it; a null string is
+TypeError #2007. Bitmaps and files are AIR's, and are not kept.
+
+The keys go through the text field with focus, as Ruffle's
+`text_control_input` has them: Ctrl+C copies its selection, but not a
+password's; Ctrl+X does so and deletes it, in an input field only, with
+Event.CHANGE; Ctrl+V types the clipboard's text into an input field as
+if typed, a TextEvent first that a listener may cancel, then `restrict`
+and `maxChars`, its line breaks as `"\r"` in a multiline field and
+dropped from a single-line one, with every other control character,
+and nothing at all from an empty clipboard. A TextField dispatches no
+Event.COPY, CUT, PASTE or SELECT_ALL, Flash's reference says; any other
+object with focus hears them for the same keys, PASTE bubbling as in
+Flash Player and the others not, and writes or reads the clipboard in
+them. With nothing in focus, none is heard, and Ctrl+A is the page's.
+
+The browser's own copy, cut and paste events carry the data both ways:
+`bindKeyboard` lets Ctrl+C, X and V through to the browser, which sends
+the focused element the event, and the player answers it at once, the
+copy's data set on the event and the paste's read from it, which needs
+no permission. A script's write in any other gesture, a click's
+`System.setClipboard` say, goes to the host's `ClipboardHost`, by
+default the async Clipboard API's `writeText`, or `write` with HTML,
+which a browser allows during a user's activation; null in node, where
+the clipboard is the player's memory alone and a paste without the
+host's data pastes what the SWF last copied. Nothing reads the system's
+clipboard but a paste, as in Flash. Flash's context menu, with its Cut,
+Copy, Paste, Delete and Select All, has no counterpart: a menu of the
+player's own could paste only through the async API's `readText`, which
+asks the user's leave, so the browser's menu stays. `tests/web` presses
+the keys in Chrome.
 
 ### ExternalInterface
 
