@@ -754,6 +754,20 @@ test("the Referer: the URL at home, the origin elsewhere, nothing from https to 
   const plain = new URL("http://swf.test/movie.swf");
   assert.equal(refererFor(plain, new URL("https://other.test/")), "http://swf.test/");
   assert.equal(refererFor(null, new URL("https://other.test/")), null);
+  // This machine is potentially trustworthy over http too.
+  for (const local of [
+    "http://127.0.0.1:8080/x",
+    "http://[::1]/x",
+    "http://localhost/x",
+    "http://a.localhost/x",
+  ]) {
+    assert.equal(refererFor(swfAt, new URL(local)), "https://swf.test/", local);
+  }
+
+  assert.equal(refererFor(swfAt, new URL("http://127.example.test/")), null);
+  // Past 4096 characters, the origin alone.
+  const long = new URL(`https://swf.test/movie.swf?${"a".repeat(5000)}`);
+  assert.equal(refererFor(long, new URL("https://swf.test/data")), "https://swf.test/");
 });
 
 test("a body compressed unasked is decompressed, within the limits", async () => {

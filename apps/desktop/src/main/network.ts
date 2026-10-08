@@ -1155,16 +1155,44 @@ class Decompressor {
 }
 
 /**
+ * Whether `url` is potentially trustworthy, as the Secure Contexts
+ * specification has it for a Referer: https, or this machine by its
+ * loopback address or a name under localhost.
+ */
+function trustworthy(url: URL): boolean {
+  if (url.protocol === "https:") {
+    return true;
+  }
+
+  const host = bare(url.hostname).toLowerCase();
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    (isIP(host) !== 0 && addressClass(host) === "loopback")
+  );
+}
+
+/** The longest Referer sent whole, as the Referrer Policy specification has it. */
+const MAX_REFERER = 4096;
+
+/**
  * The Referer a request from the SWF at `swf` to `target` carries, as
  * browsers' strict-origin-when-cross-origin has it: the SWF's URL to its
- * own origin, its origin alone to another, and nothing from https to http.
+ * own origin, its origin alone to another, and nothing from https to what
+ * is not potentially trustworthy; a URL longer than 4096 characters goes
+ * as its origin.
  */
 export function refererFor(swf: URL | null, target: URL): string | null {
-  if (!swf || (swf.protocol === "https:" && target.protocol !== "https:")) {
+  if (!swf || (swf.protocol === "https:" && !trustworthy(target))) {
     return null;
   }
 
-  return swf.origin === target.origin ? swf.href : `${swf.origin}/`;
+  const origin = `${swf.origin}/`;
+  if (swf.origin !== target.origin || swf.href.length > MAX_REFERER) {
+    return origin.length > MAX_REFERER ? null : origin;
+  }
+
+  return swf.href;
 }
 
 /** `promise`, or a Refused once `signal` aborts: a request stops waiting on a shared policy. */

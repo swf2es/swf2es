@@ -4089,7 +4089,9 @@ machine. No request carries the user's credentials: no cookies (a
 response's are dropped), no HTTP authentication, no client certificate,
 no proxy. The Referer is what a browser's default policy,
 strict-origin-when-cross-origin, sends: the SWF's URL to its own origin,
-its origin alone to another, and none from an https SWF to http; a
+its origin alone to another, and none from an https SWF to what is not
+potentially trustworthy (http, but for this machine's loopback addresses
+and localhost names), a URL past 4096 characters going as its origin; a
 local SWF sends none. `x-flash-version` goes as Flash Player 32 sent it. Every address is placed (`src/main/addresses.ts`):
 on this machine (127/8, ::1), on a private network (10/8, 172.16/12,
 192.168/16, 100.64/10, link-local 169.254/16, where clouds keep their
