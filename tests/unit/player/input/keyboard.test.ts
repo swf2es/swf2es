@@ -1,4 +1,5 @@
-// Keys to the focused object or the stage, an input field's editing, and focus moving.
+// Keys to the focused object or the stage, an input field's editing, its
+// copy, cut and paste, and focus moving.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -6,16 +7,19 @@ import {
   type DisplayObject,
   TextObject,
 } from "../../../../packages/player/dist/display/display.js";
+import type { ClipboardText } from "../../../../packages/player/dist/hosts.js";
 import {
   KeyboardInput,
   restrictText,
   setFocus,
 } from "../../../../packages/player/dist/input/keyboard.js";
+import { Clipboard } from "../../../../packages/player/dist/scripting/clipboard.js";
 import type { Scripting } from "../../../../packages/player/dist/scripting.js";
 
 type Event = {
   cls: string;
   $type: string;
+  $bubbles: boolean;
   $cancelable: boolean;
   $prevented: boolean;
   $stopped: number;
@@ -24,6 +28,8 @@ type Event = {
 
 /** A stage with input fields, a scripting that makes events as records, and what each object heard. */
 function setUp(...names: string[]) {
+  const written: ClipboardText[] = [];
+  const clipboard = new Clipboard({ write: (data) => written.push(data) });
   const stage = new Container();
   stage.object = { $display: stage } as never;
   const heard: string[] = [];
@@ -45,6 +51,7 @@ function setUp(...names: string[]) {
   });
   const scripting = {
     focus: null,
+    clipboard,
     rt: {
       classNamed: (name: string) => ({ name }),
       construct: (
@@ -75,7 +82,7 @@ function setUp(...names: string[]) {
       });
     }
   };
-  return { stage, fields, scripting, keyboard, heard, listen, type };
+  return { stage, fields, scripting, keyboard, heard, listen, type, clipboard, written };
 }
 
 // What Flash keeps of TYPED under each restrict, from Ruffle's corpus
@@ -318,4 +325,171 @@ test("a drag selects from the press, by characters, or by words and lines after 
   keyboard.pressed(field, ...at(1));
   keyboard.dragged(field, ...at(6));
   assert.deepEqual(field.selection, [8, 13]);
+});
+
+const ctrl = (keyboard: KeyboardInput, letter: string) =>
+  keyboard.handle("down", {
+    keyCode: letter.toUpperCase().charCodeAt(0),
+    charCode: letter.charCodeAt(0),
+    ctrlKey: true,
+  });
+
+test("a paste types the clipboard's text: a TextEvent, then restrict, maxChars and Event.CHANGE", () => {
+  const { fields, scripting, keyboard, heard, listen } = setUp("name");
+  const [field] = fields;
+  setFocus(scripting, field);
+  listen(field, "textInput", (e) => heard.push(`text ${JSON.stringify(e.args[0])}`));
+  listen(field, "change", () => heard.push("change"));
+
+  // A single-line field drops the line breaks, and every control character.
+  assert.equal(keyboard.paste({ text: "ab\r\ncd\tef" }), true);
+  assert.equal(field.model.text, "abcdef");
+  assert.deepEqual(heard, ['text "abcdef"', "change"]);
+  assert.equal(field.caret, 6);
+
+  // Over the selection, what restrict lets through, cut to the room maxChars leaves.
+  heard.length = 0;
+  field.select(1, 3);
+  field.restrict = "a-z";
+  field.maxChars = 7;
+  keyboard.paste({ text: "XY12z" });
+  assert.equal(field.model.text, "axyzdef");
+  assert.deepEqual(heard, ['text "XY12z"', "change"]);
+
+  // Full, it hears nothing; with an empty clipboard nothing is pasted, the selection kept.
+  heard.length = 0;
+  keyboard.paste({ text: "q" });
+  field.maxChars = 0;
+  field.select(0, 2);
+  keyboard.paste({ text: "" });
+  assert.equal(field.model.text, "axyzdef");
+  assert.deepEqual(field.selection, [0, 2]);
+  assert.deepEqual(heard, []);
+});
+
+test("a multiline field keeps a paste's line breaks as Flash's, and a listener may cancel it", () => {
+  const { fields, scripting, keyboard, heard, listen } = setUp("name");
+  const [field] = fields;
+  field.multiline = true;
+  setFocus(scripting, field);
+  listen(field, "textInput", (e) => {
+    heard.push(JSON.stringify(e.args[0]));
+    e.$prevented = e.args[0] === "no";
+  });
+
+  keyboard.paste({ text: "one\r\ntwo\nthree" });
+  assert.equal(field.model.text, "one\rtwo\rthree");
+  assert.deepEqual(heard, ['"one\\ntwo\\nthree"']);
+  keyboard.paste({ text: "no" });
+  assert.equal(field.model.text, "one\rtwo\rthree");
+});
+
+test("copy and cut give the selection, a cut deleting it; a password gives nothing", () => {
+  const { fields, scripting, keyboard, heard, listen, clipboard, written } = setUp("name", "pass");
+  const [field, pass] = fields;
+  field.multiline = true;
+  field.model.setText("one\rtwo");
+  setFocus(scripting, field);
+  listen(field, "change", () => heard.push("change"));
+
+  field.select(2, 5);
+  assert.deepEqual(keyboard.copy(), { text: "e\nt" });
+  assert.equal(field.model.text, "one\rtwo");
+  assert.deepEqual(keyboard.copy(true), { text: "e\nt" });
+  assert.equal(field.model.text, "onwo");
+  assert.equal(field.caret, 2);
+  assert.deepEqual(heard, ["change"]);
+  // The copy event carries the data: no write of the host's own.
+  assert.deepEqual(written, []);
+  assert.equal(clipboard.data.text, "e\nt");
+
+  // Nothing selected, nothing copied.
+  assert.equal(keyboard.copy(), null);
+
+  pass.displayAsPassword = true;
+  pass.model.setText("secret");
+  pass.select(0, 6);
+  setFocus(scripting, pass);
+  assert.equal(keyboard.copy(), null);
+  assert.equal(keyboard.copy(true), null);
+  assert.equal(pass.model.text, "secret");
+  // But a password field takes a paste: what the SWF itself last copied, where the host gives nothing.
+  keyboard.paste();
+  assert.equal(pass.model.text, "et");
+});
+
+test("a selectable dynamic field copies and selects all, but neither cuts nor takes a paste", () => {
+  const { fields, scripting, keyboard } = setUp("label");
+  const [field] = fields;
+  field.type = "dynamic";
+  field.model.setText("hello");
+  setFocus(scripting, field);
+
+  assert.equal(ctrl(keyboard, "a"), true);
+  assert.deepEqual(field.selection, [0, 5]);
+  keyboard.handle("down", { keyCode: 37, charCode: 0, shiftKey: true });
+  assert.deepEqual(field.selection, [0, 4]);
+  assert.deepEqual(keyboard.copy(), { text: "hell" });
+  assert.equal(keyboard.copy(true), null);
+  assert.equal(keyboard.paste({ text: "x" }), false);
+  // Typing does nothing to it, and goes on to the page.
+  assert.equal(keyboard.handle("down", { keyCode: 66, charCode: 98 }), false);
+  assert.equal(field.model.text, "hello");
+
+  // One that cannot be selected selects nothing, and keeps no keys from the page.
+  field.selectable = false;
+  field.select(0, 0);
+  ctrl(keyboard, "a");
+  assert.deepEqual(field.selection, [0, 0]);
+  assert.equal(keyboard.handle("down", { keyCode: 37, charCode: 0 }), false);
+});
+
+test("an object with focus that is not a field hears copy, cut, paste and selectAll", () => {
+  const { stage, scripting, keyboard, heard, listen, clipboard, written } = setUp();
+  const sprite = new Container();
+  sprite.object = { $display: sprite } as never;
+  stage.addChildAt(sprite, 0);
+  setFocus(scripting, sprite);
+  for (const type of ["copy", "cut", "paste", "selectAll"]) {
+    listen(sprite, type, (e) =>
+      heard.push(
+        `${type} bubbles ${e.$bubbles} read ${clipboard.readable} write ${clipboard.writable}`,
+      ),
+    );
+  }
+
+  listen(sprite, "copy", () => clipboard.set("air:text", "from copy"));
+  assert.deepEqual(keyboard.copy(), { text: "from copy" });
+  // A cut that writes nothing leaves the browser's event alone.
+  assert.equal(keyboard.copy(true), null);
+  assert.equal(keyboard.paste({ text: "pasted" }), true);
+  assert.equal(ctrl(keyboard, "a"), true);
+  assert.deepEqual(heard, [
+    "copy bubbles false read false write true",
+    "cut bubbles false read false write true",
+    "paste bubbles true read true write true",
+    "selectAll bubbles false read false write true",
+  ]);
+  assert.equal(clipboard.data.text, "pasted");
+  assert.deepEqual(written, []);
+
+  // Nothing with focus: the stage hears none of them, and the browser keeps Ctrl+A.
+  setFocus(scripting, null);
+  assert.equal(ctrl(keyboard, "a"), false);
+  assert.equal(keyboard.copy(), null);
+  assert.equal(keyboard.paste({ text: "x" }), false);
+});
+
+test("a key handler's write reaches the host when the key's handling ends", () => {
+  const { stage, keyboard, listen, clipboard, written } = setUp();
+  listen(stage, "keyDown", () => {
+    clipboard.set("air:text", "one");
+    clipboard.set("air:html", "<b>one</b>");
+  });
+  keyboard.handle("down", { keyCode: 66, charCode: 98 });
+  assert.deepEqual(written, [{ text: "one", html: "<b>one</b>" }]);
+  assert.equal(clipboard.writable, false);
+  // A key whose handlers write nothing writes nothing to the host.
+  keyboard.handle("up", { keyCode: 66, charCode: 98 });
+  assert.equal(written.length, 1);
 });

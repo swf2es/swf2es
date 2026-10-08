@@ -8,6 +8,8 @@
 // follows its size and the device's pixels, and that destroy lets go of
 // everything: 20 elements made and destroyed leave no player, codegen,
 // socket or audio context alive, and the heap no larger than a bound.
+// Last, Chrome's own Ctrl+C, X and V and a press reach a SWF's field and
+// its Clipboard through the element's copy, cut and paste events.
 //
 //   node tests/web/run.ts
 import assert from "node:assert/strict";
@@ -30,7 +32,11 @@ const CHURN = 20;
 // This package's own copies: pnpm runs the player's tests at the same time.
 libraryAbcs(`${out}libraries/`);
 const abcs = compileScripts(
-  ["Main", { name: "EmbedTest", source: readFileSync(`${here}scripts/EmbedTest.as`, "utf8") }],
+  [
+    "Main",
+    { name: "EmbedTest", source: readFileSync(`${here}scripts/EmbedTest.as`, "utf8") },
+    { name: "ClipboardTest", source: readFileSync(`${here}scripts/ClipboardTest.as`, "utf8") },
+  ],
   out,
 );
 mkdirSync(site, { recursive: true });
@@ -40,6 +46,10 @@ writeFileSync(`${site}scripted.swf`, scripted(abcs.get("Main") as Uint8Array));
 writeFileSync(
   `${site}embed.swf`,
   bare(abcs.get("EmbedTest") as Uint8Array, 1, "EmbedTest", 160, 120),
+);
+writeFileSync(
+  `${site}clipboard.swf`,
+  bare(abcs.get("ClipboardTest") as Uint8Array, 1, "ClipboardTest", 160, 120),
 );
 writeFileSync(
   `${site}index.html`,
@@ -276,6 +286,88 @@ check(`${CHURN} elements made and destroyed leave nothing behind`, async (evalua
   assert.equal(left.codegens, 2);
   assert.ok(after - warm < BOUND * CHURN, `the heap grew by ${after - warm} bytes`);
 });
+
+/** Ctrl and a letter, as a user presses it, with the editing command Chrome runs for it, if any. */
+async function ctrl(send: Send, letter: string, command?: string) {
+  const key = {
+    modifiers: 2,
+    key: letter,
+    code: `Key${letter.toUpperCase()}`,
+    windowsVirtualKeyCode: letter.toUpperCase().charCodeAt(0),
+  };
+  await send("Input.dispatchKeyEvent", {
+    type: "rawKeyDown",
+    ...key,
+    ...(command ? { commands: [command] } : {}),
+  });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+}
+
+check(
+  "Ctrl+C, X and V and a press use the clipboard, as Flash Player did",
+  async (evaluate, send) => {
+    type State = { log: string[]; text: string; copied: string | null; seed: string };
+    const state = () => call<State>(evaluate, "clipState()");
+    const [left, top] = await call<[number, number]>(evaluate, "clipboardPlayer()");
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+
+    // The page's own copy puts two lines on the clipboard; pasted into the
+    // single-line field, they lose the line break, a TextEvent and a change.
+    await call(evaluate, `seedFocus("two\\nlines")`);
+    await ctrl(send, "c", "copy");
+    await call(evaluate, `clipFocus("Field")`);
+    await ctrl(send, "v", "paste");
+    assert.deepEqual(await state(), {
+      log: ["textInput twolines", "change twolines"],
+      text: "twolines",
+      // The page's own copy, whose data the browser fills in after the event.
+      copied: "",
+      seed: "two\nlines",
+    });
+
+    // Ctrl+A selects the field's text, Ctrl+X cuts it to the clipboard.
+    await ctrl(send, "a", "selectAll");
+    await ctrl(send, "x", "cut");
+    assert.deepEqual(await state(), {
+      log: ["change "],
+      text: "",
+      copied: null,
+      seed: "two\nlines",
+    });
+    await call(evaluate, `seedFocus("")`);
+    await ctrl(send, "v", "paste");
+    assert.equal((await state()).seed, "twolines");
+
+    // The box hears copy, paste and selectAll, and writes and reads the clipboard in them.
+    await call(evaluate, `clipFocus("Box")`);
+    await ctrl(send, "c", "copy");
+    await ctrl(send, "v", "paste");
+    await ctrl(send, "a", "selectAll");
+    assert.deepEqual(await state(), {
+      log: ["copy", "paste copied by the box", "selectAll"],
+      text: "",
+      copied: "copied by the box",
+      seed: "twolines",
+    });
+
+    // A press on the stage writes the clipboard with System.setClipboard, through the async API.
+    const at = { x: left + 100, y: top + 100, button: "left", clickCount: 1 };
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", ...at });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...at });
+    // The write is a promise the page settles later: paste until it lands, or give up.
+    let pressed = await state();
+    const log = pressed.log;
+    for (let i = 0; i < 20 && pressed.seed !== "set on a press"; i++) {
+      await new Promise((done) => setTimeout(done, 50));
+      await call(evaluate, `seedFocus("")`);
+      await ctrl(send, "v", "paste");
+      pressed = await state();
+    }
+
+    assert.deepEqual([log, pressed.seed], [["press"], "set on a press"]);
+    await call(evaluate, "clipDestroy()");
+  },
+);
 
 const failures = await withPage(
   "survivors",

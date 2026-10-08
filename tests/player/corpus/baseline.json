@@ -1022,7 +1022,7 @@
   "avm2/symbol_class_root_not_zero": {"matched":0,"lines":1,"traced":0,"error":null},
   "avm2/symbolclass_invalid_utf8": {"matched":0,"lines":2,"traced":0,"error":"ReferenceError: Error #1065: Variable Testþÿ is not defined."},
   "avm2/system_exit": {"matched":0,"lines":3,"traced":0,"error":null},
-  "avm2/system_setclipboard_null": {"matched":0,"lines":1,"traced":1,"error":null},
+  "avm2/system_setclipboard_null": {"matched":1,"lines":1,"traced":1,"error":null},
   "avm2/tab_ordering_properties": {"matched":108,"lines":732,"traced":175,"error":"TypeError: Cannot convert object to primitive value"},
   "avm2/tab_ordering_stage_tab_children_remove_root": {"matched":5,"lines":5,"traced":5,"error":null},
   "avm2/tabstop_properties": {"matched":13,"lines":105,"traced":58,"error":null},

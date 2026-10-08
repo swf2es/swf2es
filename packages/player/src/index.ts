@@ -16,6 +16,8 @@ export { type Path, type ShapeLayer, shapeLayers } from "./display/shapes.js";
 export { type Character, type Library, readLibrary, type Timeline } from "./display/timeline.js";
 export type {
   CachedModule,
+  ClipboardHost,
+  ClipboardText,
   Drawer,
   ExternalInterfaceHost,
   FetchRequest,
@@ -33,7 +35,7 @@ export type {
   WebSocketHost,
   WebSocketTransport,
 } from "./hosts.js";
-export { globalWebSocketHost } from "./hosts.js";
+export { browserClipboard, globalWebSocketHost } from "./hosts.js";
 export { bindKeyboard, type KeyState } from "./input/keyboard.js";
 export { Player } from "./player.js";
 export { setTransformTable } from "./render/table.js";

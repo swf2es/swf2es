@@ -336,7 +336,70 @@ async function databases() {
   return (await indexedDB.databases()).map((d) => d.name);
 }
 
+/** What the page last saw copied from a player, read as the copy event went by. */
+let copied: string | null = null;
+document.addEventListener("copy", (e) => {
+  copied = e.clipboardData?.getData("text/plain") ?? null;
+});
+
+/** The clipboard SWF in an element of its own, and a textarea of the page's beside it: where each is. */
+async function clipboardPlayer() {
+  const p = document.createElement("swf2es-player") as Player;
+  p.id = "clip";
+  p.setAttribute("src", "/web-test/clipboard.swf");
+  p.setAttribute("allowscriptaccess", "always");
+  document.body.append(p);
+  const seed = document.createElement("textarea");
+  seed.id = "seed";
+  document.body.append(seed);
+  await p.ready;
+  await frames(2);
+  const box = p.getBoundingClientRect();
+  return [box.left, box.top];
+}
+
+/** The page's textarea focused, holding `text` selected, for a copy into the clipboard or a paste from it. */
+function seedFocus(text: string) {
+  const seed = document.getElementById("seed") as HTMLTextAreaElement;
+  seed.value = text;
+  seed.focus();
+  seed.select();
+  return true;
+}
+
+/** The clipboard element focused, and in its SWF its field or its box. */
+function clipFocus(target: "Field" | "Box") {
+  const p = element("clip");
+  p.focus();
+  p[`focus${target}`]();
+  return true;
+}
+
+/** What the SWF heard since last asked, its field's text, what was copied, and the textarea's value. */
+function clipState() {
+  const p = element("clip");
+  const state = {
+    log: p.takeLog(),
+    text: p.text(),
+    copied,
+    seed: (document.getElementById("seed") as HTMLTextAreaElement).value,
+  };
+  copied = null;
+  return state;
+}
+
+function clipDestroy() {
+  element("clip").destroy();
+  document.getElementById("seed")?.remove();
+  return true;
+}
+
 Object.assign(globalThis, {
+  clipboardPlayer,
+  seedFocus,
+  clipFocus,
+  clipState,
+  clipDestroy,
   loaded,
   databases,
   booted,

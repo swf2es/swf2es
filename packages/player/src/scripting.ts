@@ -27,7 +27,9 @@ import {
 } from "./display/display.js";
 import type { ButtonCharacter, DisplayCharacter, Library } from "./display/timeline.js";
 import {
+  browserClipboard,
   browserNavigate,
+  type ClipboardHost,
   type Drawer,
   defaultStorage,
   type ExternalInterfaceHost,
@@ -47,6 +49,7 @@ import type { Cursor, PointerInput } from "./input/pointer.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
 import { finishSounds, stopAllSounds, timelineSoundsOf } from "./media/sounds.js";
 import { airLibrary, playerHooks, playerNatives } from "./playerglobal/index.js";
+import { Clipboard } from "./scripting/clipboard.js";
 import { Code } from "./scripting/code.js";
 import { dispatchTo } from "./scripting/events.js";
 import { Lifecycle } from "./scripting/lifecycle.js";
@@ -89,6 +92,8 @@ export class Scripting {
   readonly loads: Loads;
   /** The frame clock, getTimer's, and the timers that fire by it. */
   readonly timers: Timers;
+  /** The system's clipboard as scripts see it, and when they may read or write it. */
+  readonly clipboard: Clipboard;
   readonly screenCapabilities: Readonly<ScreenCapabilities>;
   readonly externalInterface: ExternalInterfaceHost | null;
   /** How many calls the page has made into the SWF's ExternalInterface callbacks, which run outside a frame. */
@@ -246,6 +251,8 @@ export class Scripting {
       webSocket?: WebSocketHost | null;
       audio?: AudioHost | null;
       navigate?: Navigate | null;
+      /** Where scripts' writes to the clipboard go outside a copy event: the browser's by default, null for none. */
+      clipboard?: ClipboardHost | null;
       /**
        * What fscommand sends: a plug-in's page gets it as its DoFSCommand
        * call; none by default. The SWF chooses both strings: never evaluate
@@ -311,6 +318,9 @@ export class Scripting {
     this.onUncaught = options.onUncaught ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
+    this.clipboard = new Clipboard(
+      options.clipboard === undefined ? browserClipboard() : options.clipboard,
+    );
     this.fsCommand = options.fsCommand ?? null;
     this.sendToUrl = options.sendToUrl ?? true;
     this.moduleCache = options.moduleCache ?? null;
