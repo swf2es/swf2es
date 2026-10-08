@@ -1951,8 +1951,15 @@ local point is the target's, `sizeX` and `sizeY` the contact's size in
 stage units and `pressure` the browser's. Each step's touch events come
 before the mouse events of the same step. A point's moves are posted as
 the pointer's are, the last of each point handled at the next flush. A
-touch the browser cancels ends with `touchEnd` but no `touchTap`, and its
-mouse with `mouseUp` but no click. A touch's begin, end and tap are a
+touch the browser cancels ends where it last was, with a `touchEnd` whose
+AIR `isTouchPointCanceled` is true but no `touchTap`, and its mouse with
+`mouseUp` but no click; a pointer id that begins again before its end
+came first takes the old point out of what it was over and lets its
+mouse go, without a click. Each step reads `inputMode` and
+`mapTouchToMouse` as they are then, so a change in the middle of a touch
+applies from its next step: a touch begun in gesture mode may end with
+touch events and no begin, and one begun in touchPoint mode with none.
+What Flash did there is not known. A touch's begin, end and tap are a
 user's gesture for the clipboard, as a press is; the browser itself
 counts only a touch's release as the user's activation, so a write in
 `touchBegin`, or in the `mouseDown` a touch makes, may be refused by its

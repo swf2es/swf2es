@@ -73,6 +73,11 @@ export class TouchInput {
 
     let point = this.points.get(t.id);
     if (type === "begin") {
+      // An id begun again whose end never came: what it was over hears it go first.
+      if (point) {
+        this.drop(t.id, point, t);
+      }
+
       point = { over: null, began: null };
       this.points.set(t.id, point);
       // The browser's primary, as Flash's: the first finger down while none was.
@@ -104,6 +109,30 @@ export class TouchInput {
     }
   }
 
+  /** Let go of a point that never ended: out of what it is over, and the mouse it pressed released where it is. */
+  private drop(id: number, point: Point, t: TouchState): void {
+    const primary = this.primary === id;
+    const s = this.scripting;
+    if (s.inputMode === "touchPoint") {
+      this.hover(point, null, t, primary);
+    }
+
+    if (primary) {
+      this.primary = null;
+      if (s.inputMode !== "touchPoint" || s.mapTouchToMouse) {
+        this.pointer.handle("up", {
+          x: s.mouseStageX,
+          y: s.mouseStageY,
+          button: 0,
+          buttons: 0,
+          canceled: true,
+        });
+      }
+    }
+
+    this.points.delete(id);
+  }
+
   /** The mouse events of the primary touch: a press is a move there and a press, as a mouse's would be. */
   private mouse(type: "begin" | "move" | "end" | "cancel", t: TouchState): void {
     const p: PointerState = {
@@ -116,6 +145,7 @@ export class TouchInput {
       shiftKey: t.shiftKey,
       time: t.time,
     };
+
     switch (type) {
       case "begin":
         // Flash moves the mouse there first, if it was elsewhere (Flash Player 32, under a
@@ -165,7 +195,7 @@ export class TouchInput {
     const canceled = type === "cancel";
     s.clipboard.gesture(() => {
       if (target) {
-        this.send("touchEnd", target, t, primary);
+        this.send("touchEnd", target, t, primary, true, null, canceled);
       }
 
       if (target && target === point.began && !canceled) {
@@ -223,6 +253,7 @@ export class TouchInput {
     primary: boolean,
     bubbles = true,
     related: DisplayObject | null = null,
+    canceled = false,
   ): void {
     if (!target.object) {
       return;
@@ -247,6 +278,13 @@ export class TouchInput {
       !!t.ctrlKey,
       !!t.altKey,
       !!t.shiftKey,
+      // AIR's own: commandKey, controlKey, timestamp, touchIntent, samples, isTouchPointCanceled.
+      false,
+      !!t.ctrlKey,
+      Number.NaN,
+      "unknown",
+      null,
+      canceled,
     );
     dispatchEvent(s, target.object, event);
   }

@@ -632,9 +632,16 @@ test("Pixi pointer moves are posted, flushed by a frame of their own where nothi
 });
 
 test("Pixi touch pointers go to the player's touches, the mouse's alone to its pointer", () => {
-  const renderer = { screen: { width: 100, height: 100 } } as unknown as ConstructorParameters<
-    typeof PixiView
-  >[0];
+  const listeners = new Map<string, (e: unknown) => void>();
+  const canvas = {
+    style: { cursor: "" },
+    addEventListener: (type: string, f: (e: unknown) => void) => listeners.set(type, f),
+    removeEventListener: (type: string) => listeners.delete(type),
+  };
+  const renderer = {
+    screen: { width: 100, height: 100 },
+    canvas,
+  } as unknown as ConstructorParameters<typeof PixiView>[0];
   const view = new PixiView(renderer);
   const calls: string[] = [];
   const player = {
@@ -675,7 +682,14 @@ test("Pixi touch pointers go to the player's touches, the mouse's alone to its p
   view.stage.emit("pointerleave", at(5, "touch"));
   view.stage.emit("pointerdown", at(6, "mouse"));
   view.stage.emit("pointerdown", at(7, "pen"));
+  // A cancel ends a touch where it last was, wherever the browser says it is.
+  view.stage.emit("pointerdown", at(8, "touch", 3));
+  const cancel = listeners.get("pointercancel");
+  assert.ok(cancel);
+  cancel({ pointerType: "touch", pointerId: 3, clientX: 999, clientY: 999, timeStamp: 1 });
+  cancel({ pointerType: "touch", pointerId: 3, clientX: 999, clientY: 999, timeStamp: 2 });
   unbind();
+  assert.equal(listeners.has("pointercancel"), false);
   // Stage units: the stage is twice the screen, so are the contact's width and the points.
   assert.deepEqual(calls, [
     "touch begin 2 1 true 6",
@@ -685,6 +699,8 @@ test("Pixi touch pointers go to the player's touches, the mouse's alone to its p
     "touch end 10 2 false 6",
     "mouse down 12",
     "mouse down 14",
+    "touch begin 16 3 true 6",
+    "touch cancel 16 3 true 6",
   ]);
 });
 

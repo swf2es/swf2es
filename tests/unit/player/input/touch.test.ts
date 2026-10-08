@@ -51,6 +51,10 @@ const SOURCE = `package {
       if (e is TouchEvent) {
         var t:TouchEvent = TouchEvent(e);
         line += " " + t.touchPointID + " " + t.isPrimaryTouchPoint + " " + t.localX + "," + t.localY + " " + t.sizeX + "," + t.sizeY + " " + t.pressure;
+        // AIR's isTouchPointCanceled, which a Flash Player SWF reads only in the event's string.
+        if (String(t).indexOf("isTouchPointCanceled=true") >= 0) {
+          line += " canceled";
+        }
       }
 
       trace(line);
@@ -171,7 +175,7 @@ test("touches move the mouse and, in touchPoint mode, dispatch TouchEvents first
   touch.handle("cancel", at(17, 15));
   touch.handle("end", at(61, 5, 2, false));
   assert.deepEqual(lines.splice(0), [
-    "touchEnd b 1 true 7,5 2,3 0.5",
+    "touchEnd b 1 true 7,5 2,3 0.5 canceled",
     "touchOut b 1 true 7,5 2,3 0.5",
     "touchRollOut a 1 true 17,15 2,3 0.5",
     "mouseUp b",
@@ -179,6 +183,26 @@ test("touches move the mouse and, in touchPoint mode, dispatch TouchEvents first
     "touchTap c 2 false 11,5 2,3 0.5",
     "touchOut c 2 false 11,5 2,3 0.5",
   ]);
+
+  // An id begun again before its end came: the stale point goes out of what it
+  // was over, and its mouse is let go without a click, before the new begin.
+  touch.handle("begin", at(15, 15));
+  lines.splice(0);
+  touch.handle("begin", at(60, 5));
+  assert.deepEqual(lines.splice(0), [
+    "touchOut b 1 true 50,-5 2,3 0.5",
+    "touchRollOut a 1 true 60,5 2,3 0.5",
+    "mouseUp b",
+    "touchOver c 1 true 10,5 2,3 0.5",
+    "no clipboard in touchOver",
+    "touchBegin c 1 true 10,5 2,3 0.5",
+    "mouseOut b",
+    "mouseOver c",
+    "mouseMove c",
+    "mouseDown c",
+  ]);
+  touch.handle("end", at(60, 5));
+  lines.splice(0);
 
   // With AIR's mapTouchToMouse off, touchPoint mode leaves the mouse alone.
   scripting.mapTouchToMouse = false;
