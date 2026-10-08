@@ -15,8 +15,8 @@ export interface SocketProxy {
 
 export interface Configuration {
   /**
-   * The ABCs a SWF's ActionScript 3 links against. They are Adobe's and
-   * cannot ship with swf2es, so the page or extension gives their URLs;
+   * The ABCs a SWF's ActionScript 3 links against. playerglobal is Adobe's
+   * and cannot ship with swf2es, so the page or extension gives their URLs;
    * without them only SWFs with no ActionScript 3 play.
    */
   libraries?: { builtin: string; playerglobal: string };
