@@ -87,6 +87,7 @@ export {
   type SwfHeader,
   SwfReader,
   type Tag,
+  usesNetwork,
 } from "./swf.js";
 export * as tags from "./tags.js";
 export {

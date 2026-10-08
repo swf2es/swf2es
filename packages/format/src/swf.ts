@@ -193,6 +193,16 @@ export function backgroundColor(swf: Swf): number {
 }
 
 /**
+ * Whether FileAttributes asks for the network (UseNetwork): a local SWF
+ * with it plays in Flash's local-with-networking sandbox, which reaches
+ * the network but no local files; one without, in local-with-filesystem.
+ */
+export function usesNetwork(swf: Swf): boolean {
+  const tag = swf.tags.find((t) => t.code === FileAttributes);
+  return !!tag && tag.length >= 1 && (swf.bytes[tag.offset] & 0x01) !== 0;
+}
+
+/**
  * The flags of a SWF file's FileAttributes, from the start of the file
  * alone, as Flash Player reads them, FileAttributes being the first tag:
  * 0 for a SWF whose first tag is another. For a host that must not

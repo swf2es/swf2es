@@ -676,9 +676,9 @@ export function sceneData(scenes: [number, string][], labels: [number, string][]
   return tag(86, w.done());
 }
 
-/** FileAttributes: ActionScript 3, as a SWF with a DoABC needs. */
-export function fileAttributes(as3: boolean): Uint8Array {
-  return tag(69, new BitWriter().u32(as3 ? 0x08 : 0).done());
+/** FileAttributes: ActionScript 3, as a SWF with a DoABC needs; UseNetwork, for a local SWF's sandbox. */
+export function fileAttributes(as3: boolean, useNetwork = false): Uint8Array {
+  return tag(69, new BitWriter().u32((as3 ? 0x08 : 0) | (useNetwork ? 0x01 : 0)).done());
 }
 
 /** A DoABC (code 82) tag, run at once, or, `lazy`, when something first looks up what it defines. */
