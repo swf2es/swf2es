@@ -51,7 +51,16 @@ if (update) {
   // The oracle needs adl, which only this mode does.
   const { runFlash } = await import("../../oracle/flash.ts");
   const results = await runFlash(
-    jobs.map((job, i) => ({ ...job, swf: chosen[i].flash ?? job.swf })),
+    jobs.map((job, i) => {
+      const flash = chosen[i].flash;
+      return {
+        ...job,
+        swf:
+          typeof flash === "function"
+            ? flash(scripts.get(chosen[i].script ?? "") as Uint8Array)
+            : (flash ?? job.swf),
+      };
+    }),
   );
   for (const [i, c] of chosen.entries()) {
     const r = results[i];
