@@ -171,6 +171,13 @@ function lzma(data: Uint8Array, properties: number, start: number, length: numbe
  */
 const MAX_LZMA_RATIO = 8192;
 
+/** What pako's Inflate keeps of its output; its types leave it out. */
+interface InflateStream {
+  output: Uint8Array;
+  next_out: number;
+  avail_out: number;
+}
+
 /**
  * The first `length` bytes of a SWF as an uncompressed one, or fewer if it
  * has fewer, decompressing only as far as they need: the header and the
@@ -196,6 +203,14 @@ export function decompressSwfPrefix(swf: Uint8Array, length: number): Uint8Array
     // A little input at a time: a kilobyte of deflate inflates to a megabyte at most.
     for (let at = 8; at < swf.length && have < want && !inflator.err; at += 1024) {
       inflator.push(swf.subarray(at, at + 1024), false);
+    }
+
+    // What pako holds back until its chunk fills: a SWF cut short ends in it.
+    // (A sync flush does not hand it over: pako 2.1 calls onData for full chunks alone.)
+    const { strm, ended } = inflator as unknown as { strm: InflateStream; ended: boolean };
+    if (have < want && !ended && strm.avail_out !== 0 && strm.next_out > 0) {
+      chunks.push(strm.output.slice(0, strm.next_out));
+      have += strm.next_out;
     }
 
     body = new Uint8Array(have);

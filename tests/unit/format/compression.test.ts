@@ -135,6 +135,15 @@ test("LZMA that would read past its stream's end fails there", () => {
   assert.throws(() => lzmaByteArrayUncompress(data), CompressedDataError);
 });
 
+test("a truncated CWS still gives its start", () => {
+  const plain = fws(body);
+  const whole = cws(plain);
+  const truncated = whole.subarray(0, whole.length - 6);
+  const prefix = decompressSwfPrefix(truncated, 64);
+  assert.ok(prefix.length > 8);
+  assert.deepEqual(prefix, plain.subarray(0, prefix.length));
+});
+
 test("a SWF whose body is not the length its header says is refused", () => {
   const swf = cws(fws(body));
   new DataView(swf.buffer).setUint32(4, 8 + body.length + 1, true);
