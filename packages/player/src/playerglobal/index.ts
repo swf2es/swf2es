@@ -53,6 +53,7 @@ import { currencyParseResultNatives } from "./flash/globalization/CurrencyParseR
 import { dateTimeFormatterNatives } from "./flash/globalization/DateTimeFormatter.js";
 import { numberFormatterNatives } from "./flash/globalization/NumberFormatter.js";
 import { numberParseResultNatives } from "./flash/globalization/NumberParseResult.js";
+import { stringToolsNatives } from "./flash/globalization/StringTools.js";
 import { soundHooks, soundNatives } from "./flash/media/Sound.js";
 import { soundMixerNatives } from "./flash/media/SoundMixer.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
@@ -124,6 +125,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...currencyFormatterNatives(s),
     ...dateTimeFormatterNatives(s),
     ...numberFormatterNatives(s),
+    ...stringToolsNatives(s),
     ...urlRequestNatives(s),
     ...urlStreamNatives(s),
     ...navigateNatives(s),
