@@ -47,7 +47,11 @@ function isIndex(name: string): boolean {
 }
 
 function call(rt: Runtime, o: AsObject, method: string, ...args: Value[]): Value {
-  return rt.callProperty(o, qname(FLASH_PROXY, method), ...args);
+  // Not a tail call, as the runtime's calls are not (see Runtime.getProperty).
+  // biome-ignore lint/style/useConst: a const is folded into a tail call (see Runtime.getProperty)
+  let r: Value;
+  r = rt.callProperty(o, qname(FLASH_PROXY, method), ...args);
+  return r;
 }
 
 export const proxyHook: PropertyHook = {

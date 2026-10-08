@@ -669,7 +669,18 @@ a host gives each module a script of its own, a `sourceURL` comment for
 code it evaluates (`Runtime.codeDomain`). A frame that names no script,
 as JavaScriptCore's of a Function's code, is no module's: the module a
 load's stack does not name is left out, not taken for the host's code
-the next frame is.
+the next frame is. JavaScriptCore also makes a strict `return f(...)` a
+proper tail call, dropping the caller's frame, so the runtime calls a
+function value, a bound method or a getter for a SWF's code, and calls
+on to its own functions that do (`call` to `callValue`, `callProperty`
+to `callBound`, Function's `call` and `apply`, a Proxy's methods), in no
+tail position: its frames stay between the callee and the code that
+called the runtime, as anything reading the stack expects. It is written
+`let r; r = f(...); return r;`, not `const r = f(...); return r;`, which
+minifiers (terser's and esbuild's) fold back into `return f(...)`; this
+form they keep, as `return r = f(...), r`. Measured in JavaScriptCore's
+shell, as3pb's run and the untyped benchmark took the same within their
+spread either way.
 avmshell's `File` reads and writes
 `RuntimeOptions.files`, in memory by default. Date is JavaScript's Date, with avmplus' string
 formats. flash.concurrent's Mutex and Condition and ByteArray's atomic
