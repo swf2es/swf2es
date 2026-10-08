@@ -3015,8 +3015,9 @@ function staticTexts(): Uint8Array {
 // Static text replaced in place: frame 2 puts text B with the move flag
 // where text A was (depth 1), removes A and places B (2), does the first
 // to a text a script touched (3), and a two-frame clip does the first on
-// its own timeline, looping (4). Frame 3 puts A back at depth 1
-// (scripts/StaticTextReplace.as).
+// its own timeline, looping (4); a script sends a clip at depth 5 from
+// its frame 1 to its frame 3, which does the first, past a frame that
+// moves A. Frame 3 puts A back at depth 1 (scripts/StaticTextReplace.as).
 function staticTextReplace(abc: Uint8Array): Uint8Array {
   const at = (x: number, y: number) => ({ tx: x * 20, ty: y * 20 });
   return w.swf({
@@ -3071,12 +3072,22 @@ function staticTextReplace(abc: Uint8Array): Uint8Array {
         w.showFrame(),
         w.end(),
       ]),
+      w.sprite(5, 3, [
+        w.place({ depth: 1, character: 1 }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, matrix: { tx: 200 } }),
+        w.showFrame(),
+        w.place({ depth: 1, move: true, character: 2, matrix: { tx: 0 } }),
+        w.showFrame(),
+        w.end(),
+      ]),
       w.doAbc(abc, "StaticTextReplace"),
       w.symbolClass([[0, "Main"]]),
       w.place({ depth: 1, character: 1, matrix: at(10, 50) }),
       w.place({ depth: 2, character: 1, matrix: at(120, 50) }),
       w.place({ depth: 3, character: 1, matrix: at(230, 50) }),
       w.place({ depth: 4, character: 4, matrix: at(10, 110) }),
+      w.place({ depth: 5, character: 5, matrix: at(120, 110) }),
       w.showFrame(),
       w.place({ depth: 1, move: true, character: 2 }),
       w.remove(2),

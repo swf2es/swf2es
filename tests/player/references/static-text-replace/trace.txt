@@ -1,12 +1,15 @@
 1 0 flash.text::StaticText true " W" 70 35
 1 1 flash.text::StaticText true " W" 70 35
 1 2 flash.text::StaticText true " W" 70 35
-1 3 flash.display::MovieClip true - 70 35
+1 3 flash.display::MovieClip true " W" 70 35
+1 4 flash.display::MovieClip true "ca\nW" 90 60
 2 0 flash.text::StaticText true "ca\nW" 90 60
 2 1 flash.text::StaticText false "ca\nW" 90 60
 2 2 flash.text::StaticText true " W" 70 35
-2 3 flash.display::MovieClip true - 90 60
+2 3 flash.display::MovieClip true "ca\nW" 90 60
+2 4 flash.display::MovieClip true "ca\nW" 90 60
 3 0 flash.text::StaticText true " W" 70 35
 3 1 flash.text::StaticText false "ca\nW" 90 60
 3 2 flash.text::StaticText true " W" 70 35
-3 3 flash.display::MovieClip true - 70 35
+3 3 flash.display::MovieClip true " W" 70 35
+3 4 flash.display::MovieClip true "ca\nW" 90 60
