@@ -77,8 +77,8 @@ pnpm as3                      # the AS3 libraries under as3/, compiled by ASC 1 
                               # Player's API; as3:air, the AIR library into air-library.ts
 pnpm as3:format               # format them with Apache Royale's asformat, in its default style
                               # (ASFORMAT names its script if it is not on the PATH)
-SWF2ES_PLAYERGLOBAL=ours ...  # the unit, player and corpus tests with our playerglobal's classes
-                              # ahead of Flash Player's (tests/player/libraries.ts)
+SWF2ES_PLAYERGLOBAL=ours ...  # the unit, player and corpus tests on our playerglobal in place of
+                              # Flash Player's (tests/player/libraries.ts); not yet all passing
 pnpm bench [file.abc...]      # time the ABC parser and decoder
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved

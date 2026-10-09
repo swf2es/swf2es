@@ -5,8 +5,8 @@
 // pnpm runs at once would read them.
 //
 // With SWF2ES_PLAYERGLOBAL=ours, our playerglobal (tools/playerglobal.ts)
-// comes between them: its classes ahead of Flash Player's, which still has
-// the rest. The player's pages do the same (chrome.ts, page.ts).
+// takes the place of Flash Player's. The player's pages do the same
+// (chrome.ts, page.ts).
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { libraries } from "../../oracle/oracle.ts";
@@ -15,10 +15,6 @@ import { build, sourcesChanged } from "../../tools/playerglobal.ts";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const NAMES = ["builtin", "playerglobal"];
 
-// Classes of ours that name a class of Flash Player's naming them back: a
-// type resolves when its ABC links, so they wait until both are ours.
-const CYCLIC = ["flash/geom/Transform.as"];
-
 /** Our playerglobal in `out`, compiled again once its sources have changed. */
 function ours(out: string): Uint8Array {
   const file = `${out}ours.abc`;
@@ -26,7 +22,7 @@ function ours(out: string): Uint8Array {
     // Test processes run at once: each compiles apart and swaps in its result whole.
     const dir = mkdtempSync(`${out}ours-`);
     try {
-      build({ outDir: dir, flash: `${out}playerglobal.abc`, without: CYCLIC });
+      build(dir);
       renameSync(`${dir}/playerglobal.abc`, file);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -37,9 +33,9 @@ function ours(out: string): Uint8Array {
 }
 
 /**
- * builtin.abc and playerglobal.abc, in that order, from `out`, with ours
- * between them under SWF2ES_PLAYERGLOBAL=ours unless `ours` is false: for
- * tests that count the modules of a fixed set of libraries.
+ * builtin.abc and playerglobal.abc, in that order, from `out`: ours in place
+ * of Flash Player's under SWF2ES_PLAYERGLOBAL=ours, unless `ours` is false,
+ * for tests that hold modules to Flash Player's.
  */
 export function libraryAbcs(
   out = `${here}out/libraries/`,
@@ -50,5 +46,5 @@ export function libraryAbcs(
   }
 
   const [builtin, playerglobal] = NAMES.map((n) => new Uint8Array(readFileSync(`${out}${n}.abc`)));
-  return withOurs ? [builtin, ours(out), playerglobal] : [builtin, playerglobal];
+  return withOurs ? [builtin, ours(out)] : [builtin, playerglobal];
 }

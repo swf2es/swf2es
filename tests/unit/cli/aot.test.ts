@@ -18,7 +18,7 @@ import { libraryAbcs } from "../../player/libraries.ts";
 import { compileScripts } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";
 
-// These tests count modules, one for each library: the same libraries in every mode.
+// The command compiles against Flash Player's playerglobal: the player here does too.
 const FIXED = { ours: false };
 
 const out = fileURLToPath(new URL("../out/cli/", import.meta.url));

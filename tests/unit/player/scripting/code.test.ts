@@ -21,9 +21,6 @@ import { libraryAbcs } from "../../../player/libraries.ts";
 import { type Compile, compiler } from "../../../player/scripts.ts";
 import * as w from "../../../swf-writer.ts";
 
-// These tests count modules, one for each library: the same libraries in every mode.
-const FIXED = { ours: false };
-
 // This file's own out directory: the other test files compile at the same time.
 const out = fileURLToPath(new URL("../../out/player-code/", import.meta.url));
 
@@ -100,7 +97,7 @@ async function scripting(cache: ModuleCache | null, identity?: string | null) {
   const { codegen, modules } = await counted(identity);
   const lines: string[] = [];
   const s = new Scripting(codegen, { print: (line) => lines.push(line), moduleCache: cache });
-  await s.loadLibraries(libraryAbcs(`${out}libraries/`, FIXED));
+  await s.loadLibraries(libraryAbcs(`${out}libraries/`));
   return { s, lines, modules };
 }
 
