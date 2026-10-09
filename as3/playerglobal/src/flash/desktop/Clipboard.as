@@ -20,13 +20,117 @@ package flash.desktop
 
 		public native function clearData(format:String):void;
 
-		public native function setData(format:String, data:Object, serializable:Boolean = true):Boolean;
+		public function setData(format:String, data:Object, serializable:Boolean = true):Boolean
+		{
+			checkWrite();
+			switch (format)
+			{
+				case ClipboardFormats.TEXT_FORMAT:
+					putString(String(data));
+					break;
+				case ClipboardFormats.HTML_FORMAT:
+					putHTML(String(data));
+					break;
+				case ClipboardFormats.RICH_TEXT_FORMAT:
+					putRTF(data as ByteArray);
+					break;
+				case ClipboardFormats.URL_FORMAT:
+					putURL(String(data));
+					break;
+				case ClipboardFormats.BITMAP_FORMAT:
+					putBitmapData(data as BitmapData);
+					break;
+				case ClipboardFormats.FILE_LIST_FORMAT:
+					nativePutFileList(data as Array);
+					break;
+				case ClipboardFormats.FILE_PROMISE_LIST_FORMAT:
+					nativePutFilePromiseList(data as Array);
+					break;
+				default:
+					// A script's own format: the object itself, and a serialized copy if it may be.
+					putObjectReference(REFERENCE + format, data);
+					if (serializable)
+					{
+						const bytes:ByteArray = new ByteArray();
+						bytes.writeObject(data);
+						putByteArray(SERIALIZATION + format, bytes);
+					}
+			}
 
-		public native function setDataHandler(format:String, handler:Function, serializable:Boolean = true):Boolean;
+			return true;
+		}
 
-		public native function getData(format:String, transferMode:String = "originalPreferred"):Object;
+		public function setDataHandler(format:String, handler:Function, serializable:Boolean = true):Boolean
+		{
+			checkWrite();
+			setHandlerStoringData(serializable);
+			nativeSetHandler(format, handler);
+			return true;
+		}
 
-		public native function hasFormat(format:String):Boolean;
+		public function getData(format:String, transferMode:String = "originalPreferred"):Object
+		{
+			if (!canReadContents)
+			{
+				throw new SecurityError("Reading from clipboard not permitted in this context");
+			}
+
+			switch (format)
+			{
+				case ClipboardFormats.TEXT_FORMAT:
+					return getString();
+				case ClipboardFormats.HTML_FORMAT:
+					return getHTML();
+				case ClipboardFormats.RICH_TEXT_FORMAT:
+					return getRTF();
+				case ClipboardFormats.URL_FORMAT:
+					return getURL();
+				case ClipboardFormats.BITMAP_FORMAT:
+					return getBitmapData();
+				case ClipboardFormats.FILE_LIST_FORMAT:
+					return getFileList();
+				case ClipboardFormats.FILE_PROMISE_LIST_FORMAT:
+					return nativeGetFilePromiseList();
+			}
+
+			switch (transferMode)
+			{
+				case ClipboardTransferMode.ORIGINAL_ONLY:
+					return getObjectReference(REFERENCE + format);
+				case ClipboardTransferMode.CLONE_ONLY:
+					return cloneOf(format);
+				case ClipboardTransferMode.CLONE_PREFERRED:
+					const clone:Object = cloneOf(format);
+					return clone != null ? clone : getObjectReference(REFERENCE + format);
+				default:
+					const original:Object = getObjectReference(REFERENCE + format);
+					return original != null ? original : cloneOf(format);
+			}
+		}
+
+		public function hasFormat(format:String):Boolean
+		{
+			return canReadContents && formats.indexOf(format) >= 0;
+		}
+
+		// The player's keys for a script's own format, which formats gives back bare.
+		private static const REFERENCE:String = "air:reference:";
+		private static const SERIALIZATION:String = "air:serialization:";
+
+		private function checkWrite():void
+		{
+			if (!canWriteContents)
+			{
+				throw new SecurityError("Writing to clipboard not permitted in this context");
+			}
+		}
+
+		// A script's own format, as a copy read from what setData serialized.
+		private function cloneOf(format:String):Object
+		{
+			const bytes:ByteArray = getByteArray(SERIALIZATION + format);
+			return bytes != null ? bytes.readObject() : null;
+		}
 
 		[API("668")]
 		public native function get supportsFilePromise():Boolean;
