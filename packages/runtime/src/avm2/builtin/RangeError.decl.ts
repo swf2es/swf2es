@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const RangeErrorClass = {
+export const RangeErrorDecl = {
   name: "RangeError",
   super: "Error",
   init: {

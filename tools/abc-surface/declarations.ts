@@ -535,8 +535,10 @@ function fileOf(name: string): string {
   return join(...(pkg ? pkg.split(".") : []), `${localOf(name)}.decl.ts`);
 }
 
+/** A declaration's export, "ArrayDecl"; AS3's Class's is "ClassClassDecl", as ClassDecl is the type. */
 function exportOf(name: string): string {
-  return `${localOf(name)}Class`;
+  const local = localOf(name);
+  return local === "Class" ? "ClassClassDecl" : `${local}Decl`;
 }
 
 /** Math's constants, written by name: the same doubles, which the linter would rather see named. */

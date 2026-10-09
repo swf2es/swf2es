@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const StringClass = {
+export const StringDecl = {
   name: "String",
   super: "Object",
   sealed: true,

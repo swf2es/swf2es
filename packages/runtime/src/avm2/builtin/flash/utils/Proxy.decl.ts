@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const ProxyClass = {
+export const ProxyDecl = {
   name: "flash.utils::Proxy",
   super: "Object",
   sealed: true,

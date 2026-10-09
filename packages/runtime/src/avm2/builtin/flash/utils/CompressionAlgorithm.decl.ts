@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const CompressionAlgorithmClass = {
+export const CompressionAlgorithmDecl = {
   name: "flash.utils::CompressionAlgorithm",
   super: "Object",
   sealed: true,

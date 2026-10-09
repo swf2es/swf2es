@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const Vector$doubleClass = {
+export const Vector$doubleDecl = {
   name: "internal:__AS3__.vec::Vector$double",
   super: "Object",
   final: true,

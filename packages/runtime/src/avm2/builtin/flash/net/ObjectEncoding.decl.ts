@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const ObjectEncodingClass = {
+export const ObjectEncodingDecl = {
   name: "flash.net::ObjectEncoding",
   super: "Object",
   sealed: true,

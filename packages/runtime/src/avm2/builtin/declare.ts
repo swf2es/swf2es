@@ -93,11 +93,14 @@ export interface ScriptDecl {
 }
 
 // What a class's natives must be, from its declaration written `as const
-// satisfies ClassDecl`: one function per method, getter ("get:name") and
-// setter ("set:name") it declares native, and no other. Each receives its
+// satisfies ClassDecl`: a class (see bind.ts) with a method for each
+// method the declaration calls native, static or not, a get or set
+// accessor for each accessor, and the AS3 constructor, if native, as a
+// method named as the class, as AS3 writes it. Nothing else may be public;
+// private members are the class's own helpers. Each native receives its
 // arguments as bind.ts passes them, defaults filled in and coerced to the
 // declared types, so a uint parameter is a number, a String one a string
-// or null.
+// or null, and one with a default is never missing.
 
 /** What a value of the AS3 type `T` is, once coerced to it. */
 type Coerced<T> = T extends "int" | "uint" | "Number"
@@ -108,38 +111,64 @@ type Coerced<T> = T extends "int" | "uint" | "Number"
       ? boolean
       : AsValue;
 
-/** The arguments of a method declared with parameters `P`: optional from the first with a default. */
+/** The arguments of a method declared with parameters `P`: every one, a missing one given its default. */
 type Args<P> = P extends readonly [infer First, ...infer Rest]
-  ? First extends readonly [infer T, Value]
-    ? [Coerced<T>?, ...Args<Rest>]
-    : [Coerced<First>, ...Args<Rest>]
+  ? [Coerced<First extends readonly [infer T, Value] ? T : First>, ...Args<Rest>]
   : [];
+
+type ParamsOf<D> = D extends { params: infer P } ? Args<P> : [];
 
 type NativeOf<D> = (
   this: AsObject,
   ...args: D extends { rest: true } | { arguments: true }
-    ? [...Args<D extends { params: infer P } ? P : []>, ...AsValue[]]
-    : Args<D extends { params: infer P } ? P : []>
+    ? [...ParamsOf<D>, ...AsValue[]]
+    : ParamsOf<D>
 ) => D extends { returns: "void" } ? void : D extends { returns: infer R } ? Coerced<R> : AsValue;
 
-/** A native trait's key among its class's natives. */
-type KeyOf<D> = D extends { method: infer N extends string }
-  ? N
-  : D extends { get: infer N extends string }
-    ? `get:${N}`
-    : D extends { set: infer N extends string }
-      ? `set:${N}`
-      : never;
+type Natives<L> = Extract<L, { native: true }>;
 
-type NativesOf<L> = L extends readonly TraitDecl[]
-  ? { [D in Extract<L[number], { native: true }> as KeyOf<D>]: NativeOf<D> }
-  : never;
+/** One side's natives: methods by name, and each accessor as a property of its type. */
+type Side<L extends readonly TraitDecl[]> = {
+  [D in Natives<L[number]> as D extends { method: infer N extends string }
+    ? N
+    : never]: NativeOf<D>;
+} & {
+  [D in Natives<L[number]> as D extends { get: infer N extends string } ? N : never]: D extends {
+    returns: infer R;
+  }
+    ? Coerced<R>
+    : AsValue;
+} & {
+  [D in Natives<L[number]> as D extends { set: infer N extends string } ? N : never]: D extends {
+    params: readonly [infer P];
+  }
+    ? Coerced<P>
+    : AsValue;
+};
 
-/** The natives of class `C`'s instance methods and accessors. */
-export type InstanceNatives<C extends ClassDecl> = NativesOf<C["instance"]>;
+/** A class's name without its package: "ByteArray" for "flash.utils::ByteArray". */
+type LocalName<N> = N extends `${string}::${infer L}` ? LocalName<L> : N;
 
-/** The natives of class `C`'s static methods and accessors. */
-export type StaticNatives<C extends ClassDecl> = NativesOf<C["static"]>;
+/** The AS3 constructor, if native, as a method named as the class. */
+type ConstructorOf<C extends ClassDecl> = C["init"] extends { native: true }
+  ? { [K in LocalName<C["name"]>]: NativeOf<C["init"]> }
+  : unknown;
 
-/** Class `C`'s constructor, as a native. */
-export type ConstructorNative<C extends ClassDecl> = NativeOf<C["init"]>;
+/** The instance side of class `C`'s natives. */
+export type InstanceNatives<C extends ClassDecl> = Side<C["instance"]> & ConstructorOf<C>;
+
+/** The static side of class `C`'s natives. */
+export type StaticNatives<C extends ClassDecl> = Side<C["static"]>;
+
+/** A class of natives for `C`: never constructed, it only holds them. */
+export type NativeClass<C extends ClassDecl> = (abstract new () => InstanceNatives<C>) &
+  StaticNatives<C>;
+
+type Extra<K, C extends ClassDecl> =
+  | Exclude<keyof K, keyof StaticNatives<C> | "prototype">
+  | (K extends abstract new () => infer I ? Exclude<keyof I, keyof InstanceNatives<C>> : never);
+
+/** `K` if it has no public member `C` does not declare native, else a type naming them. */
+export type Exactly<K, C extends ClassDecl> = [Extra<K, C>] extends [never]
+  ? K
+  : { "not declared native": Extra<K, C> };

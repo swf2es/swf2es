@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const ObjectInputClass = {
+export const ObjectInputDecl = {
   name: "internal:flash.utils::ObjectInput",
   super: "Object",
   interfaces: ["flash.utils::IDataInput"],

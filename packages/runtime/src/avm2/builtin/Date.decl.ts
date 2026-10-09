@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const DateClass = {
+export const DateDecl = {
   name: "Date",
   super: "Object",
   init: {

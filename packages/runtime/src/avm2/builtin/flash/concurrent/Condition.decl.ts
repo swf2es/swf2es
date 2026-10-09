@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const ConditionClass = {
+export const ConditionDecl = {
   name: "flash.concurrent::Condition",
   api: 24,
   super: "Object",

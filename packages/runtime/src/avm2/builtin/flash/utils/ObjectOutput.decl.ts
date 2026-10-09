@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const ObjectOutputClass = {
+export const ObjectOutputDecl = {
   name: "internal:flash.utils::ObjectOutput",
   super: "Object",
   interfaces: ["flash.utils::IDataOutput"],

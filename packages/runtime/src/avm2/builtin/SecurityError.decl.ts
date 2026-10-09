@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const SecurityErrorClass = {
+export const SecurityErrorDecl = {
   name: "SecurityError",
   super: "Error",
   init: {

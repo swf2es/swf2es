@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const IDynamicPropertyOutputClass = {
+export const IDynamicPropertyOutputDecl = {
   name: "flash.net::IDynamicPropertyOutput",
   sealed: true,
   interface: true,

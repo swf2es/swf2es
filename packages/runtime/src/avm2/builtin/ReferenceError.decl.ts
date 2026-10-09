@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const ReferenceErrorClass = {
+export const ReferenceErrorDecl = {
   name: "ReferenceError",
   super: "Error",
   init: {

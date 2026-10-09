@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const JSONClass = {
+export const JSONDecl = {
   name: "JSON",
   api: 14,
   super: "Object",

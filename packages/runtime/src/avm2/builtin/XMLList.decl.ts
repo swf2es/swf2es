@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const XMLListClass = {
+export const XMLListDecl = {
   name: "XMLList",
   super: "Object",
   final: true,

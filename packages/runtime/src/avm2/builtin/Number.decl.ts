@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const NumberClass = {
+export const NumberDecl = {
   name: "Number",
   super: "Object",
   sealed: true,

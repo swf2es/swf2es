@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const DictionaryClass = {
+export const DictionaryDecl = {
   name: "flash.utils::Dictionary",
   super: "Object",
   init: { params: [["Boolean", ["boolean", false]]], avmplus: true },

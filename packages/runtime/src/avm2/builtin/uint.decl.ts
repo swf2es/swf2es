@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const uintClass = {
+export const uintDecl = {
   name: "uint",
   super: "Object",
   sealed: true,

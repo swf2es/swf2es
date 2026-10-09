@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const MemoryErrorClass = {
+export const MemoryErrorDecl = {
   name: "flash.errors::MemoryError",
   super: "Error",
   init: {

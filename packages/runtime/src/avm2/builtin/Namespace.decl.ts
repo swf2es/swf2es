@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const NamespaceClass = {
+export const NamespaceDecl = {
   name: "Namespace",
   super: "Object",
   sealed: true,

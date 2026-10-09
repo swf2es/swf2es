@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const IDynamicPropertyWriterClass = {
+export const IDynamicPropertyWriterDecl = {
   name: "flash.net::IDynamicPropertyWriter",
   sealed: true,
   interface: true,

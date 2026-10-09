@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const IllegalOperationErrorClass = {
+export const IllegalOperationErrorDecl = {
   name: "flash.errors::IllegalOperationError",
   super: "Error",
   init: {

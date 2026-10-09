@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const ArrayClass = {
+export const ArrayDecl = {
   name: "Array",
   super: "Object",
   init: { rest: true, native: true },

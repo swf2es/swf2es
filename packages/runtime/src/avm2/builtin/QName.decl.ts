@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const QNameClass = {
+export const QNameDecl = {
   name: "QName",
   super: "Object",
   sealed: true,

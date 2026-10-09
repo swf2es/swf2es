@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const WalkerClass = {
+export const WalkerDecl = {
   name: "internal:::Walker",
   super: "Object",
   sealed: true,

@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const IDataInput2Class = {
+export const IDataInput2Decl = {
   name: "internal:flash.utils::IDataInput2",
   interfaces: ["flash.utils::IDataInput"],
   sealed: true,

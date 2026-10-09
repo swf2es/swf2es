@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const MethodClosureClass = {
+export const MethodClosureDecl = {
   name: "private::MethodClosure",
   super: "Function",
   sealed: true,

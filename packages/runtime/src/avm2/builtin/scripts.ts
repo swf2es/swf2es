@@ -1,64 +1,64 @@
 // builtin's scripts in the order they load, each with the definitions it
 // makes (see declare.ts).
 
-import { VectorClass } from "./__AS3__/vec/Vector.decl.js";
-import { Vector$doubleClass } from "./__AS3__/vec/Vector$double.decl.js";
-import { Vector$intClass } from "./__AS3__/vec/Vector$int.decl.js";
-import { Vector$objectClass } from "./__AS3__/vec/Vector$object.decl.js";
-import { Vector$uintClass } from "./__AS3__/vec/Vector$uint.decl.js";
-import { ArgumentErrorClass } from "./ArgumentError.decl.js";
-import { ArrayClass } from "./Array.decl.js";
-import { BooleanClass } from "./Boolean.decl.js";
-import { ClassClass } from "./Class.decl.js";
-import { DateClass } from "./Date.decl.js";
-import { DefinitionErrorClass } from "./DefinitionError.decl.js";
+import { VectorDecl } from "./__AS3__/vec/Vector.decl.js";
+import { Vector$doubleDecl } from "./__AS3__/vec/Vector$double.decl.js";
+import { Vector$intDecl } from "./__AS3__/vec/Vector$int.decl.js";
+import { Vector$objectDecl } from "./__AS3__/vec/Vector$object.decl.js";
+import { Vector$uintDecl } from "./__AS3__/vec/Vector$uint.decl.js";
+import { ArgumentErrorDecl } from "./ArgumentError.decl.js";
+import { ArrayDecl } from "./Array.decl.js";
+import { BooleanDecl } from "./Boolean.decl.js";
+import { ClassClassDecl } from "./Class.decl.js";
+import { DateDecl } from "./Date.decl.js";
+import { DefinitionErrorDecl } from "./DefinitionError.decl.js";
 import type { ScriptDecl } from "./declare.js";
-import { ErrorClass } from "./Error.decl.js";
-import { EvalErrorClass } from "./EvalError.decl.js";
-import { FunctionClass } from "./Function.decl.js";
-import { ConditionClass } from "./flash/concurrent/Condition.decl.js";
-import { MutexClass } from "./flash/concurrent/Mutex.decl.js";
-import { EOFErrorClass } from "./flash/errors/EOFError.decl.js";
-import { IllegalOperationErrorClass } from "./flash/errors/IllegalOperationError.decl.js";
-import { IOErrorClass } from "./flash/errors/IOError.decl.js";
-import { MemoryErrorClass } from "./flash/errors/MemoryError.decl.js";
-import { DynamicPropertyOutputClass } from "./flash/net/DynamicPropertyOutput.decl.js";
-import { IDynamicPropertyOutputClass } from "./flash/net/IDynamicPropertyOutput.decl.js";
-import { IDynamicPropertyWriterClass } from "./flash/net/IDynamicPropertyWriter.decl.js";
-import { ObjectEncodingClass } from "./flash/net/ObjectEncoding.decl.js";
-import { ByteArrayClass } from "./flash/utils/ByteArray.decl.js";
-import { CompressionAlgorithmClass } from "./flash/utils/CompressionAlgorithm.decl.js";
-import { DictionaryClass } from "./flash/utils/Dictionary.decl.js";
-import { IDataInputClass } from "./flash/utils/IDataInput.decl.js";
-import { IDataInput2Class } from "./flash/utils/IDataInput2.decl.js";
-import { IDataOutputClass } from "./flash/utils/IDataOutput.decl.js";
-import { IDataOutput2Class } from "./flash/utils/IDataOutput2.decl.js";
-import { IExternalizableClass } from "./flash/utils/IExternalizable.decl.js";
-import { ObjectInputClass } from "./flash/utils/ObjectInput.decl.js";
-import { ObjectOutputClass } from "./flash/utils/ObjectOutput.decl.js";
-import { ProxyClass } from "./flash/utils/Proxy.decl.js";
-import { intClass } from "./int.decl.js";
-import { JSONClass } from "./JSON.decl.js";
-import { MathClass } from "./Math.decl.js";
-import { MethodClosureClass } from "./MethodClosure.decl.js";
-import { NamespaceClass } from "./Namespace.decl.js";
-import { NumberClass } from "./Number.decl.js";
-import { ObjectClass } from "./Object.decl.js";
-import { QNameClass } from "./QName.decl.js";
-import { RangeErrorClass } from "./RangeError.decl.js";
-import { ReferenceErrorClass } from "./ReferenceError.decl.js";
-import { RegExpClass } from "./RegExp.decl.js";
-import { SecurityErrorClass } from "./SecurityError.decl.js";
-import { StringClass } from "./String.decl.js";
-import { SyntaxErrorClass } from "./SyntaxError.decl.js";
-import { TypeErrorClass } from "./TypeError.decl.js";
-import { UninitializedErrorClass } from "./UninitializedError.decl.js";
-import { URIErrorClass } from "./URIError.decl.js";
-import { uintClass } from "./uint.decl.js";
-import { VerifyErrorClass } from "./VerifyError.decl.js";
-import { WalkerClass } from "./Walker.decl.js";
-import { XMLClass } from "./XML.decl.js";
-import { XMLListClass } from "./XMLList.decl.js";
+import { ErrorDecl } from "./Error.decl.js";
+import { EvalErrorDecl } from "./EvalError.decl.js";
+import { FunctionDecl } from "./Function.decl.js";
+import { ConditionDecl } from "./flash/concurrent/Condition.decl.js";
+import { MutexDecl } from "./flash/concurrent/Mutex.decl.js";
+import { EOFErrorDecl } from "./flash/errors/EOFError.decl.js";
+import { IllegalOperationErrorDecl } from "./flash/errors/IllegalOperationError.decl.js";
+import { IOErrorDecl } from "./flash/errors/IOError.decl.js";
+import { MemoryErrorDecl } from "./flash/errors/MemoryError.decl.js";
+import { DynamicPropertyOutputDecl } from "./flash/net/DynamicPropertyOutput.decl.js";
+import { IDynamicPropertyOutputDecl } from "./flash/net/IDynamicPropertyOutput.decl.js";
+import { IDynamicPropertyWriterDecl } from "./flash/net/IDynamicPropertyWriter.decl.js";
+import { ObjectEncodingDecl } from "./flash/net/ObjectEncoding.decl.js";
+import { ByteArrayDecl } from "./flash/utils/ByteArray.decl.js";
+import { CompressionAlgorithmDecl } from "./flash/utils/CompressionAlgorithm.decl.js";
+import { DictionaryDecl } from "./flash/utils/Dictionary.decl.js";
+import { IDataInputDecl } from "./flash/utils/IDataInput.decl.js";
+import { IDataInput2Decl } from "./flash/utils/IDataInput2.decl.js";
+import { IDataOutputDecl } from "./flash/utils/IDataOutput.decl.js";
+import { IDataOutput2Decl } from "./flash/utils/IDataOutput2.decl.js";
+import { IExternalizableDecl } from "./flash/utils/IExternalizable.decl.js";
+import { ObjectInputDecl } from "./flash/utils/ObjectInput.decl.js";
+import { ObjectOutputDecl } from "./flash/utils/ObjectOutput.decl.js";
+import { ProxyDecl } from "./flash/utils/Proxy.decl.js";
+import { intDecl } from "./int.decl.js";
+import { JSONDecl } from "./JSON.decl.js";
+import { MathDecl } from "./Math.decl.js";
+import { MethodClosureDecl } from "./MethodClosure.decl.js";
+import { NamespaceDecl } from "./Namespace.decl.js";
+import { NumberDecl } from "./Number.decl.js";
+import { ObjectDecl } from "./Object.decl.js";
+import { QNameDecl } from "./QName.decl.js";
+import { RangeErrorDecl } from "./RangeError.decl.js";
+import { ReferenceErrorDecl } from "./ReferenceError.decl.js";
+import { RegExpDecl } from "./RegExp.decl.js";
+import { SecurityErrorDecl } from "./SecurityError.decl.js";
+import { StringDecl } from "./String.decl.js";
+import { SyntaxErrorDecl } from "./SyntaxError.decl.js";
+import { TypeErrorDecl } from "./TypeError.decl.js";
+import { UninitializedErrorDecl } from "./UninitializedError.decl.js";
+import { URIErrorDecl } from "./URIError.decl.js";
+import { uintDecl } from "./uint.decl.js";
+import { VerifyErrorDecl } from "./VerifyError.decl.js";
+import { WalkerDecl } from "./Walker.decl.js";
+import { XMLDecl } from "./XML.decl.js";
+import { XMLListDecl } from "./XMLList.decl.js";
 
 export const scripts: ScriptDecl[] = [
   {
@@ -85,7 +85,7 @@ export const scripts: ScriptDecl[] = [
     init: { avmplus: true },
     traits: [
       {
-        class: MathClass,
+        class: MathDecl,
         meta: [
           [
             "native",
@@ -105,7 +105,7 @@ export const scripts: ScriptDecl[] = [
     init: { avmplus: true },
     traits: [
       {
-        class: ErrorClass,
+        class: ErrorDecl,
         meta: [
           [
             "native",
@@ -119,7 +119,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: DefinitionErrorClass,
+        class: DefinitionErrorDecl,
         meta: [
           [
             "native",
@@ -133,7 +133,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: EvalErrorClass,
+        class: EvalErrorDecl,
         meta: [
           [
             "native",
@@ -147,7 +147,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: RangeErrorClass,
+        class: RangeErrorDecl,
         meta: [
           [
             "native",
@@ -161,7 +161,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: ReferenceErrorClass,
+        class: ReferenceErrorDecl,
         meta: [
           [
             "native",
@@ -175,7 +175,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: SecurityErrorClass,
+        class: SecurityErrorDecl,
         meta: [
           [
             "native",
@@ -189,7 +189,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: SyntaxErrorClass,
+        class: SyntaxErrorDecl,
         meta: [
           [
             "native",
@@ -203,7 +203,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: TypeErrorClass,
+        class: TypeErrorDecl,
         meta: [
           [
             "native",
@@ -217,7 +217,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: URIErrorClass,
+        class: URIErrorDecl,
         meta: [
           [
             "native",
@@ -231,7 +231,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: VerifyErrorClass,
+        class: VerifyErrorDecl,
         meta: [
           [
             "native",
@@ -245,7 +245,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: UninitializedErrorClass,
+        class: UninitializedErrorDecl,
         meta: [
           [
             "native",
@@ -259,7 +259,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: ArgumentErrorClass,
+        class: ArgumentErrorDecl,
         meta: [
           [
             "native",
@@ -272,17 +272,17 @@ export const scripts: ScriptDecl[] = [
           ],
         ],
       },
-      { class: IOErrorClass },
-      { class: EOFErrorClass },
-      { class: MemoryErrorClass },
-      { class: IllegalOperationErrorClass },
+      { class: IOErrorDecl },
+      { class: EOFErrorDecl },
+      { class: MemoryErrorDecl },
+      { class: IllegalOperationErrorDecl },
     ],
   },
   {
     init: { avmplus: true },
     traits: [
       {
-        class: DateClass,
+        class: DateDecl,
         meta: [
           [
             "native",
@@ -302,7 +302,7 @@ export const scripts: ScriptDecl[] = [
     init: { avmplus: true },
     traits: [
       {
-        class: RegExpClass,
+        class: RegExpDecl,
         meta: [
           [
             "native",
@@ -322,7 +322,7 @@ export const scripts: ScriptDecl[] = [
     init: { avmplus: true },
     traits: [
       {
-        class: JSONClass,
+        class: JSONDecl,
         meta: [
           [
             "native",
@@ -336,14 +336,14 @@ export const scripts: ScriptDecl[] = [
           ["API", [["", "674"]]],
         ],
       },
-      { class: WalkerClass },
+      { class: WalkerDecl },
     ],
   },
   {
     init: { avmplus: true },
     traits: [
       {
-        class: XMLClass,
+        class: XMLDecl,
         meta: [
           [
             "native",
@@ -358,7 +358,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: XMLListClass,
+        class: XMLListDecl,
         meta: [
           [
             "native",
@@ -373,7 +373,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: QNameClass,
+        class: QNameDecl,
         meta: [
           [
             "native",
@@ -389,8 +389,8 @@ export const scripts: ScriptDecl[] = [
       },
     ],
   },
-  { init: { avmplus: true }, traits: [{ class: IDataInputClass }] },
-  { init: { avmplus: true }, traits: [{ class: IDataOutputClass }] },
+  { init: { avmplus: true }, traits: [{ class: IDataInputDecl }] },
+  { init: { avmplus: true }, traits: [{ class: IDataOutputDecl }] },
   {
     init: { avmplus: true },
     traits: [
@@ -399,7 +399,7 @@ export const scripts: ScriptDecl[] = [
         value: ["namespace", "namespace:http://www.adobe.com/2006/actionscript/flash/proxy"],
       },
       {
-        class: ProxyClass,
+        class: ProxyDecl,
         meta: [
           [
             "native",
@@ -418,7 +418,7 @@ export const scripts: ScriptDecl[] = [
     init: { avmplus: true },
     traits: [
       {
-        class: DictionaryClass,
+        class: DictionaryDecl,
         meta: [
           [
             "native",
@@ -433,14 +433,14 @@ export const scripts: ScriptDecl[] = [
       },
     ],
   },
-  { init: { avmplus: true }, traits: [{ class: IDynamicPropertyOutputClass }] },
-  { init: { avmplus: true }, traits: [{ class: IDynamicPropertyWriterClass }] },
-  { init: { avmplus: true }, traits: [{ class: IExternalizableClass }] },
+  { init: { avmplus: true }, traits: [{ class: IDynamicPropertyOutputDecl }] },
+  { init: { avmplus: true }, traits: [{ class: IDynamicPropertyWriterDecl }] },
+  { init: { avmplus: true }, traits: [{ class: IExternalizableDecl }] },
   {
     init: { avmplus: true },
     traits: [
       {
-        class: ObjectEncodingClass,
+        class: ObjectEncodingDecl,
         meta: [
           [
             "native",
@@ -459,7 +459,7 @@ export const scripts: ScriptDecl[] = [
     init: { avmplus: true },
     traits: [
       {
-        class: MutexClass,
+        class: MutexDecl,
         meta: [
           [
             "native",
@@ -473,7 +473,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: ConditionClass,
+        class: ConditionDecl,
         meta: [
           [
             "native",
@@ -513,7 +513,7 @@ export const scripts: ScriptDecl[] = [
     init: { avmplus: true },
     traits: [
       {
-        class: ObjectInputClass,
+        class: ObjectInputDecl,
         meta: [
           [
             "native",
@@ -532,11 +532,11 @@ export const scripts: ScriptDecl[] = [
   {
     init: { avmplus: true },
     traits: [
-      { class: CompressionAlgorithmClass },
-      { class: IDataInput2Class },
-      { class: IDataOutput2Class },
+      { class: CompressionAlgorithmDecl },
+      { class: IDataInput2Decl },
+      { class: IDataOutput2Decl },
       {
-        class: ByteArrayClass,
+        class: ByteArrayDecl,
         meta: [
           [
             "native",
@@ -555,7 +555,7 @@ export const scripts: ScriptDecl[] = [
     init: { avmplus: true },
     traits: [
       {
-        class: ObjectOutputClass,
+        class: ObjectOutputDecl,
         meta: [
           [
             "native",
@@ -575,7 +575,7 @@ export const scripts: ScriptDecl[] = [
     init: { avmplus: true },
     traits: [
       {
-        class: DynamicPropertyOutputClass,
+        class: DynamicPropertyOutputDecl,
         meta: [
           [
             "native",
@@ -597,7 +597,7 @@ export const scripts: ScriptDecl[] = [
     traits: [
       { const: "AS3", value: ["namespace", "namespace:http://adobe.com/AS3/2006/builtin"] },
       {
-        class: ObjectClass,
+        class: ObjectDecl,
         meta: [
           [
             "native",
@@ -611,7 +611,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: ClassClass,
+        class: ClassClassDecl,
         meta: [
           [
             "native",
@@ -626,7 +626,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: FunctionClass,
+        class: FunctionDecl,
         meta: [
           [
             "native",
@@ -641,7 +641,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: MethodClosureClass,
+        class: MethodClosureDecl,
         meta: [
           [
             "native",
@@ -656,7 +656,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: NamespaceClass,
+        class: NamespaceDecl,
         meta: [
           [
             "native",
@@ -671,7 +671,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: BooleanClass,
+        class: BooleanDecl,
         meta: [
           [
             "native",
@@ -686,7 +686,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: NumberClass,
+        class: NumberDecl,
         meta: [
           [
             "native",
@@ -701,7 +701,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: intClass,
+        class: intDecl,
         meta: [
           [
             "native",
@@ -716,7 +716,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: uintClass,
+        class: uintDecl,
         meta: [
           [
             "native",
@@ -731,7 +731,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: StringClass,
+        class: StringDecl,
         meta: [
           [
             "native",
@@ -746,7 +746,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: ArrayClass,
+        class: ArrayDecl,
         meta: [
           [
             "native",
@@ -854,7 +854,7 @@ export const scripts: ScriptDecl[] = [
       { const: "Infinity", type: "Number", value: ["double", "Infinity"] },
       { const: "undefined" },
       {
-        class: VectorClass,
+        class: VectorDecl,
         meta: [
           [
             "native",
@@ -869,7 +869,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: Vector$objectClass,
+        class: Vector$objectDecl,
         meta: [
           [
             "native",
@@ -884,7 +884,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: Vector$intClass,
+        class: Vector$intDecl,
         meta: [
           [
             "native",
@@ -899,7 +899,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: Vector$uintClass,
+        class: Vector$uintDecl,
         meta: [
           [
             "native",
@@ -914,7 +914,7 @@ export const scripts: ScriptDecl[] = [
         ],
       },
       {
-        class: Vector$doubleClass,
+        class: Vector$doubleDecl,
         meta: [
           [
             "native",

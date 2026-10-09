@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const IOErrorClass = {
+export const IOErrorDecl = {
   name: "flash.errors::IOError",
   super: "Error",
   init: {

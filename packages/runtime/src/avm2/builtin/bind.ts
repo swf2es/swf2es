@@ -1,16 +1,24 @@
-// A class's natives bound by its declaration: under the names the compiler
-// gives them ("Array#http://adobe.com/AS3/2006/builtin::push",
-// "Array.Array::_pop", "Array#get:length", and "Array()" for the
-// constructor), each called as avmplus calls a native: with a parameter's
-// declared default where its argument is missing, and each argument
-// coerced to its parameter's type. A native bound so may also replace a
-// method whose body is still avmplus' AS3: see Runtime.override.
+// A class's natives, written as a class that holds them (see declare.ts),
+// bound by its declaration under the names the compiler gives them
+// ("Array#http://adobe.com/AS3/2006/builtin::push", "Array.Array::_pop",
+// "Array#get:length", and "Array()" for the constructor), each called as
+// avmplus calls a native: with a parameter's declared default where its
+// argument is missing, and each argument coerced to its parameter's type.
+// A native bound so may also replace a method whose body is still
+// avmplus' AS3: see Runtime.override.
 
 import type { AsObject, Method, TypeRef, Value } from "../descriptors.js";
 import { NS_PackageInternal, NS_Public, namespace } from "../names.js";
 import type { Natives } from "../natives/define.js";
 import type { Runtime } from "../runtime.js";
-import type { ClassDecl, Value as Constant, MethodDecl, TraitDecl } from "./declare.js";
+import type {
+  ClassDecl,
+  Value as Constant,
+  Exactly,
+  MethodDecl,
+  NativeClass,
+  TraitDecl,
+} from "./declare.js";
 
 const AS3 = "http://adobe.com/AS3/2006/builtin";
 const FLASH_PROXY = "http://www.adobe.com/2006/actionscript/flash/proxy";
@@ -21,12 +29,8 @@ export type Arity = [number, number];
 /** A native made by bindNatives: its arity rides on it, for a method whose ABC has a body. */
 export type BoundNative = ((rt: Runtime) => Method) & { arity: Arity };
 
-/** A class's natives, keyed as its declaration names them (see declare.ts). */
-export interface ClassNatives {
-  init?: Method;
-  static?: object;
-  instance?: object;
-}
+/** A class of natives as bindNatives reads it: never constructed, its members are them. */
+type Holder = Record<string, unknown> & { prototype: Record<string, unknown> };
 
 function packageOf(name: string): string {
   const at = name.lastIndexOf("::");
@@ -128,6 +132,35 @@ function arity(d: MethodDecl): Arity {
   return [required, d.rest || d.arguments ? -1 : params.length];
 }
 
+/** How an argument is coerced to AS3 type `type`; null for *, which takes it as it is. */
+function coercer(rt: Runtime, type: string): ((v: Value) => Value) | null {
+  switch (type) {
+    case "*":
+      return null;
+    case "int":
+      return (v) => rt.toInt(v);
+    case "uint":
+      return (v) => rt.toUint(v);
+    case "Number":
+      return (v) => rt.toNumber(v);
+    case "Boolean":
+      return (v) => !!v;
+    case "String":
+      return (v) => rt.coerceString(v);
+    case "Object":
+      return (v) => rt.coerceObject(v);
+    default: {
+      const ref = typeRef(rt, type);
+      return (v) => rt.coerce(v, ref);
+    }
+  }
+}
+
+const same = (v: Value) => v;
+
+/** A parameter with no default. */
+const NONE = Symbol("no default");
+
 /**
  * `f` called as avmplus calls a native declared by `d`: each missing
  * argument with a default given it, and each argument coerced to its
@@ -135,32 +168,55 @@ function arity(d: MethodDecl): Arity {
  */
 function adapt(rt: Runtime, f: Method, d: MethodDecl): Method {
   const params = d.params ?? [];
-  const types = params.map((p) => (typeof p === "string" ? p : p[0]));
-  const defaults = params.map((p) => (typeof p === "string" ? undefined : p[1]));
-  if (types.every((t) => t === "*") && defaults.every((v) => v === undefined)) {
+  const coerce = params.map((p) => coercer(rt, typeof p === "string" ? p : p[0]));
+  const defaults = params.map((p) => (typeof p === "string" ? NONE : constant(p[1])));
+  const anyDefault = defaults.some((v) => v !== NONE);
+  if (!anyDefault && coerce.every((c) => c === null)) {
     return f;
   }
 
-  const refs = types.map((t) => typeRef(rt, t));
-  const values = defaults.map((v) => (v === undefined ? undefined : constant(v)));
+  // Without defaults, each parameter has its argument: a call with fewer,
+  // or more where nothing takes the rest, is refused before it gets here.
+  const [c0 = same, c1 = same, c2 = same] = coerce.map((c) => c ?? same);
+  if (!anyDefault && !d.rest && !d.arguments) {
+    switch (params.length) {
+      case 1:
+        return function (this: AsObject, a: Value) {
+          return f.call(this, c0(a));
+        };
+      case 2:
+        return function (this: AsObject, a: Value, b: Value) {
+          return f.call(this, c0(a), c1(b));
+        };
+      case 3:
+        return function (this: AsObject, a: Value, b: Value, c: Value) {
+          return f.call(this, c0(a), c1(b), c2(c));
+        };
+    }
+  }
+
   const n = params.length;
-  return function (this: AsObject, ...args: Value[]) {
+  const adapted = function (this: AsObject, ...args: Value[]) {
     for (let i = 0; i < n; i++) {
       if (i >= args.length) {
-        if (defaults[i] === undefined) {
+        if (defaults[i] === NONE) {
           break;
         }
 
-        args.push(values[i]);
+        args.push(defaults[i]);
       }
 
-      if (refs[i] !== null) {
-        args[i] = rt.coerce(args[i], refs[i]);
+      const c = coerce[i];
+      if (c !== null) {
+        args[i] = c(args[i]);
       }
     }
 
     return f.apply(this, args);
   };
+  // Its length is its parameters', as the ABC's count gives a native's with ...rest.
+  Object.defineProperty(adapted, "length", { value: n });
+  return adapted;
 }
 
 /** Each native trait of `traits` with its key and declaration. */
@@ -176,47 +232,68 @@ function* nativeTraits(traits: readonly TraitDecl[]): Generator<[string, string,
   }
 }
 
+/** A member of `holder`: a method's function, or an accessor's ("get:x", "set:x"). */
+function memberOf(holder: Record<string, unknown>, member: string): Method {
+  const accessor = member.startsWith("get:") || member.startsWith("set:");
+  if (!accessor) {
+    return holder[member] as Method;
+  }
+
+  // The class's own, or one it extends.
+  let d: PropertyDescriptor | undefined;
+  for (let o: object | null = holder; o && !d; o = Object.getPrototypeOf(o)) {
+    d = Object.getOwnPropertyDescriptor(o, member.slice(4));
+  }
+
+  return (member.startsWith("get:") ? d?.get : d?.set) as Method;
+}
+
 /**
- * The natives of class `decl` for the runtime, from `natives`. Their
- * types, not this, hold them to the declaration (see declare.ts).
+ * The natives of class `decl` for the runtime: the members of the class
+ * `natives` makes for it, which their types, not this, hold to the
+ * declaration (see declare.ts).
  */
-export function bindNatives(decl: ClassDecl, natives: (rt: Runtime) => ClassNatives): Natives {
+export function bindNatives<C extends ClassDecl, K extends NativeClass<C>>(
+  decl: C,
+  natives: (rt: Runtime) => K & Exactly<K, C>,
+): Natives {
   const cls = className(decl);
   const out: Natives = {};
-  let made: ClassNatives | null = null;
+  let made: Holder | null = null;
   let runtime: Runtime | null = null;
   // Made once per runtime, each when first bound: the natives close over it.
   const of = (rt: Runtime) => {
     if (runtime !== rt) {
-      made = natives(rt);
+      made = natives(rt) as unknown as Holder;
       runtime = rt;
     }
 
-    return made as ClassNatives;
+    return made as Holder;
   };
 
-  const add = (key: string, d: MethodDecl, get: (n: ClassNatives) => Method | undefined) => {
-    const bound = ((rt: Runtime) => adapt(rt, get(of(rt)) as Method, d)) as BoundNative;
+  const add = (key: string, d: MethodDecl, get: (holder: Holder) => Method) => {
+    const bound = ((rt: Runtime) => adapt(rt, get(of(rt)), d)) as BoundNative;
     bound.arity = arity(d);
     out[key] = bound;
   };
 
   const sides = [
-    [".", decl.static, (n: ClassNatives) => n.static],
-    ["#", decl.instance, (n: ClassNatives) => n.instance],
+    [".", decl.static, (h: Holder) => h],
+    ["#", decl.instance, (h: Holder) => h.prototype],
   ] as const;
   for (const [separator, traits, side] of sides) {
     for (const [member, name, d] of nativeTraits(traits)) {
       const accessor = member.startsWith("get:") ? "get:" : member.startsWith("set:") ? "set:" : "";
-      add(`${cls}${separator}${accessor}${keyName(name, decl)}`, d, (n) => {
-        const holder = side(n) as Record<string, Method> | undefined;
-        return holder?.[member];
-      });
+      add(`${cls}${separator}${accessor}${keyName(name, decl)}`, d, (h) =>
+        memberOf(side(h), member),
+      );
     }
   }
 
   if (decl.init.native) {
-    add(`${cls}()`, decl.init, (n) => n.init);
+    // The AS3 constructor is the method named as the class.
+    const named = localOf(decl.name);
+    add(`${cls}()`, decl.init, (h) => h.prototype[named] as Method);
   }
 
   return out;

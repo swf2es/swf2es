@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const ObjectClass = {
+export const ObjectDecl = {
   name: "Object",
   init: { avmplus: true },
   classInit: { avmplus: true },

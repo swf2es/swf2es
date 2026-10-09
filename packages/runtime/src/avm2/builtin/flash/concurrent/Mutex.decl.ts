@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const MutexClass = {
+export const MutexDecl = {
   name: "flash.concurrent::Mutex",
   api: 24,
   super: "Object",

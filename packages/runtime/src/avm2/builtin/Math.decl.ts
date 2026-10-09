@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const MathClass = {
+export const MathDecl = {
   name: "Math",
   super: "Object",
   sealed: true,

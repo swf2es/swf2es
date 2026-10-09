@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const IExternalizableClass = {
+export const IExternalizableDecl = {
   name: "flash.utils::IExternalizable",
   sealed: true,
   interface: true,

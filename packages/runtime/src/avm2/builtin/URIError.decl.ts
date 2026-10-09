@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const URIErrorClass = {
+export const URIErrorDecl = {
   name: "URIError",
   super: "Error",
   init: {

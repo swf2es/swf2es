@@ -9,9 +9,8 @@ import type { ClassHook } from "../hooks.js";
 import { eachElement, elements, withStorage } from "../natives/define.js";
 import { sort, sortOn } from "../natives/sort.js";
 import { type Runtime, SEALED_ELEMENTS } from "../runtime.js";
-import { ArrayClass } from "./Array.decl.js";
+import { ArrayDecl } from "./Array.decl.js";
 import { bindNatives } from "./bind.js";
-import type { ConstructorNative, InstanceNatives, StaticNatives } from "./declare.js";
 
 /**
  * Whether `o` is a sealed Array subclass's instance, which has no elements:
@@ -384,9 +383,7 @@ function map(rt: Runtime, o: Value, f: Value, receiver: Value): AsObject {
   return rt.array(out);
 }
 
-export const arrayNatives = bindNatives(ArrayClass, (rt) => {
-  // As Array's constructor: one number is a length, which must be a uint;
-  // any other arguments are the elements.
+export const arrayNatives = bindNatives(ArrayDecl, (rt) => {
   // As `length = n` in AS3: a subclass's accessor, if it overrides it.
   const length = (o: AsObject, n: number) => {
     if (plainArray(rt, o)) {
@@ -396,128 +393,195 @@ export const arrayNatives = bindNatives(ArrayClass, (rt) => {
     }
   };
 
-  const init: ConstructorNative<typeof ArrayClass> = function (this: AsObject, ...args) {
-    if (args.length === 1 && typeof args[0] === "number") {
-      const n = rt.toUint(args[0]);
-      if (n !== args[0]) {
-        throw rt.error("RangeError", 1005, args[0]);
+  return class ArrayNatives {
+    // One number is a length, which must be a uint; any other arguments are the elements.
+    Array(this: AsObject, ...args: Value[]) {
+      if (args.length === 1 && typeof args[0] === "number") {
+        const n = rt.toUint(args[0]);
+        if (n !== args[0]) {
+          throw rt.error("RangeError", 1005, args[0]);
+        }
+
+        length(this, n);
+        return;
       }
 
-      length(this, n);
-      return;
-    }
-
-    length(this, args.length);
-    if (!sealed(rt, this, args.length)) {
-      for (let i = 0; i < args.length; i++) {
-        this.$a[i] = args[i];
+      length(this, args.length);
+      if (!sealed(rt, this, args.length)) {
+        for (let i = 0; i < args.length; i++) {
+          this.$a[i] = args[i];
+        }
       }
     }
-  };
 
-  const statics = {
-    "private::_join": (o, sep) => join(rt, o, sep),
-    "private::_pop": (o) => pop(rt, o),
-    "private::_reverse": (o) => reverse(rt, o),
-    "private::_concat": (o, args) => concat(rt, o, elements(args)),
-    "private::_shift": (o) => shift(rt, o),
-    "private::_slice": (o, start, end) => slice(rt, o, start, end),
-    "private::_unshift": (o: AsObject, args) => {
+    static "private::_join"(o: Value, sep: Value) {
+      return join(rt, o, sep);
+    }
+
+    static "private::_pop"(o: Value) {
+      return pop(rt, o);
+    }
+
+    static "private::_reverse"(o: Value) {
+      return reverse(rt, o);
+    }
+
+    static "private::_concat"(o: Value, args: Value) {
+      return concat(rt, o, elements(args));
+    }
+
+    static "private::_shift"(o: Value) {
+      return shift(rt, o);
+    }
+
+    static "private::_slice"(o: Value, start: number, end: number) {
+      return slice(rt, o, start, end);
+    }
+
+    static "private::_unshift"(o: AsObject, args: Value) {
       const a = elements(args);
       return sealed(rt, o, a.length) ? 0 : o.$a.unshift(...a);
-    },
-    "private::_splice": (o, args) => splice(rt, o, elements(args)),
-    "private::_sort": (o, args) => sort(rt, o, elements(args)),
-    "private::_sortOn": (o, names, options) => sortOn(rt, o, names, options),
-    "private::_indexOf": (o, v, from) => indexOf(rt, o, v, from),
-    "private::_lastIndexOf": (o, v, from = 0) => lastIndexOf(rt, o, v, from),
-    "private::_every": (o, f, receiver) => every(rt, o, f, receiver),
-    "private::_filter": (o, f, receiver) => filter(rt, o, f, receiver),
-    "private::_forEach": (o, f, receiver) => forEach(rt, o, f, receiver),
-    "private::_map": (o, f, receiver) => map(rt, o, f, receiver),
-    "private::_some": (o, f, receiver) => some(rt, o, f, receiver),
-  } satisfies StaticNatives<typeof ArrayClass>;
+    }
 
-  const instance = {
-    "AS3::insertAt"(this: AsObject, i, v) {
+    static "private::_splice"(o: Value, args: Value) {
+      return splice(rt, o, elements(args));
+    }
+
+    static "private::_sort"(o: Value, args: Value) {
+      return sort(rt, o, elements(args));
+    }
+
+    static "private::_sortOn"(o: Value, names: Value, options: Value) {
+      return sortOn(rt, o, names, options);
+    }
+
+    static "private::_indexOf"(o: Value, v: Value, from: number) {
+      return indexOf(rt, o, v, from);
+    }
+
+    static "private::_lastIndexOf"(o: Value, v: Value, from: number) {
+      return lastIndexOf(rt, o, v, from);
+    }
+
+    static "private::_every"(o: Value, f: Value, receiver: Value) {
+      return every(rt, o, f, receiver);
+    }
+
+    static "private::_filter"(o: Value, f: Value, receiver: Value) {
+      return filter(rt, o, f, receiver);
+    }
+
+    static "private::_forEach"(o: Value, f: Value, receiver: Value) {
+      forEach(rt, o, f, receiver);
+    }
+
+    static "private::_map"(o: Value, f: Value, receiver: Value) {
+      return map(rt, o, f, receiver);
+    }
+
+    static "private::_some"(o: Value, f: Value, receiver: Value) {
+      return some(rt, o, f, receiver);
+    }
+
+    "AS3::insertAt"(this: AsObject, i: number, v: Value) {
       if (!sealed(rt, this, 1)) {
-        this.$a.splice(rt.toInt(i), 0, v);
+        this.$a.splice(i, 0, v);
       }
-    },
-    "AS3::removeAt"(this: AsObject, i) {
-      return sealed(rt, this, 0) ? undefined : this.$a.splice(rt.toInt(i), 1)[0];
-    },
-    "get:length"(this: AsObject) {
-      return this.$a.length;
-    },
-    "set:length"(this: AsObject, n) {
+    }
+
+    "AS3::removeAt"(this: AsObject, i: number) {
+      return sealed(rt, this, 0) ? undefined : this.$a.splice(i, 1)[0];
+    }
+
+    get length(): number {
+      return (this as AsObject).$a.length;
+    }
+
+    set length(n: number) {
       setLength(rt, this, n);
-    },
-    // As set_length: a length that is not a uint is a RangeError (bugzilla 661330).
-    "private::set_length"(this: AsObject, n) {
+    }
+
+    // A length that is not a uint is a RangeError (bugzilla 661330).
+    "private::set_length"(this: AsObject, n: Value, _alt: number) {
       if (!rt.isInstanceOf(n, rt.builtinClass("uint").$it)) {
         throw rt.error("RangeError", 2108, n);
       }
 
       setLength(rt, this, n);
-    },
-    "AS3::join"(this: AsObject, sep) {
+    }
+
+    "AS3::join"(this: AsObject, sep: Value) {
       return join(rt, this, sep);
-    },
+    }
+
     "AS3::pop"(this: AsObject) {
       return sealed(rt, this, 0) ? undefined : this.$a.pop();
-    },
-    "AS3::push"(this: AsObject, ...args) {
+    }
+
+    "AS3::push"(this: AsObject, ...args: Value[]) {
       return sealed(rt, this, args.length) ? 0 : this.$a.push(...args);
-    },
+    }
+
     "AS3::reverse"(this: AsObject) {
       return reverse(rt, this);
-    },
-    "AS3::concat"(this: AsObject, ...args) {
+    }
+
+    "AS3::concat"(this: AsObject, ...args: Value[]) {
       return concat(rt, this, args);
-    },
+    }
+
     "AS3::shift"(this: AsObject) {
       return shift(rt, this);
-    },
-    "AS3::slice"(this: AsObject, start, end) {
-      return slice(rt, this, rt.toNumber(start), rt.toNumber(end));
-    },
-    "AS3::unshift"(this: AsObject, ...args) {
-      return sealed(rt, this, args.length) ? 0 : this.$a.unshift(...args);
-    },
-    "AS3::splice"(this: AsObject, ...args) {
-      return args.length ? splice(rt, this, args) : undefined;
-    },
-    "AS3::sort"(this: AsObject, ...args) {
-      return sort(rt, this, args);
-    },
-    "AS3::sortOn"(this: AsObject, names, options) {
-      return sortOn(rt, this, names, options);
-    },
-    "AS3::indexOf"(this: AsObject, v, from) {
-      return indexOf(rt, this, v, rt.toInt(from));
-    },
-    "AS3::lastIndexOf"(this: AsObject, v, from) {
-      return lastIndexOf(rt, this, v, rt.toInt(from));
-    },
-    "AS3::every"(this: AsObject, f, receiver) {
-      return every(rt, this, f, receiver);
-    },
-    "AS3::filter"(this: AsObject, f, receiver) {
-      return filter(rt, this, f, receiver);
-    },
-    "AS3::forEach"(this: AsObject, f, receiver) {
-      forEach(rt, this, f, receiver);
-    },
-    "AS3::map"(this: AsObject, f, receiver) {
-      return map(rt, this, f, receiver);
-    },
-    "AS3::some"(this: AsObject, f, receiver) {
-      return some(rt, this, f, receiver);
-    },
-  } satisfies InstanceNatives<typeof ArrayClass>;
+    }
 
-  return { init, static: statics, instance };
+    "AS3::slice"(this: AsObject, start: Value, end: Value) {
+      return slice(rt, this, rt.toNumber(start), rt.toNumber(end));
+    }
+
+    "AS3::unshift"(this: AsObject, ...args: Value[]) {
+      return sealed(rt, this, args.length) ? 0 : this.$a.unshift(...args);
+    }
+
+    "AS3::splice"(this: AsObject, ...args: Value[]) {
+      return args.length ? splice(rt, this, args) : undefined;
+    }
+
+    "AS3::sort"(this: AsObject, ...args: Value[]) {
+      return sort(rt, this, args);
+    }
+
+    "AS3::sortOn"(this: AsObject, names: Value, options: Value) {
+      return sortOn(rt, this, names, options);
+    }
+
+    "AS3::indexOf"(this: AsObject, v: Value, from: Value) {
+      return indexOf(rt, this, v, rt.toInt(from));
+    }
+
+    "AS3::lastIndexOf"(this: AsObject, v: Value, from: Value) {
+      return lastIndexOf(rt, this, v, rt.toInt(from));
+    }
+
+    "AS3::every"(this: AsObject, f: Value, receiver: Value) {
+      return every(rt, this, f, receiver);
+    }
+
+    "AS3::filter"(this: AsObject, f: Value, receiver: Value) {
+      return filter(rt, this, f, receiver);
+    }
+
+    "AS3::forEach"(this: AsObject, f: Value, receiver: Value) {
+      forEach(rt, this, f, receiver);
+    }
+
+    "AS3::map"(this: AsObject, f: Value, receiver: Value) {
+      return map(rt, this, f, receiver);
+    }
+
+    "AS3::some"(this: AsObject, f: Value, receiver: Value) {
+      return some(rt, this, f, receiver);
+    }
+  };
 });
 
 export const arrayHooks: Record<string, ClassHook> = {

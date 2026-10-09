@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const UninitializedErrorClass = {
+export const UninitializedErrorDecl = {
   name: "UninitializedError",
   super: "Error",
   init: {

@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const RegExpClass = {
+export const RegExpDecl = {
   name: "RegExp",
   super: "Object",
   init: {

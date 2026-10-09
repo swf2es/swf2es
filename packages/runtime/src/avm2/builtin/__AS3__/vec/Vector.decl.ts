@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const VectorClass = {
+export const VectorDecl = {
   name: "__AS3__.vec::Vector",
   super: "Object",
   final: true,

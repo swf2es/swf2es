@@ -1,6 +1,6 @@
 import type { ClassDecl } from "../../declare.js";
 
-export const ByteArrayClass = {
+export const ByteArrayDecl = {
   name: "flash.utils::ByteArray",
   super: "Object",
   interfaces: ["internal:flash.utils::IDataInput2", "internal:flash.utils::IDataOutput2"],

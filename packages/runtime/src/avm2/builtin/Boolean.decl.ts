@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const BooleanClass = {
+export const BooleanDecl = {
   name: "Boolean",
   super: "Object",
   sealed: true,

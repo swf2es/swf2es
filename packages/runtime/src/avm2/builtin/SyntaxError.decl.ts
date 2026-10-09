@@ -1,6 +1,6 @@
 import type { ClassDecl } from "./declare.js";
 
-export const SyntaxErrorClass = {
+export const SyntaxErrorDecl = {
   name: "SyntaxError",
   super: "Error",
   init: {
