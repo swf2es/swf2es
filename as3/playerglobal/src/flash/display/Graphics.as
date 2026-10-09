@@ -70,10 +70,98 @@ package flash.display
 		public native function drawTriangles(vertices:Vector.<Number>, indices:Vector.<int> = null, uvtData:Vector.<Number> = null, culling:String = "none"):void;
 
 		[API("662")]
-		public native function drawGraphicsData(graphicsData:Vector.<IGraphicsData>):void;
+		public function drawGraphicsData(graphicsData:Vector.<IGraphicsData>):void
+		{
+			for (var i:int = 0; i < graphicsData.length; i++)
+			{
+				drawDatum(graphicsData[i]);
+			}
+		}
+
+		// Each kind of graphics data as the drawing call it stands for.
+		private function drawDatum(datum:IGraphicsData):void
+		{
+			if (datum is GraphicsSolidFill)
+			{
+				const solid:GraphicsSolidFill = GraphicsSolidFill(datum);
+				beginFill(solid.color, solid.alpha);
+			}
+			else if (datum is GraphicsGradientFill)
+			{
+				const gradient:GraphicsGradientFill = GraphicsGradientFill(datum);
+				beginGradientFill(gradient.type, gradient.colors, gradient.alphas, gradient.ratios, gradient.matrix, gradient.spreadMethod, gradient.interpolationMethod, gradient.focalPointRatio);
+			}
+			else if (datum is GraphicsBitmapFill)
+			{
+				const bitmap:GraphicsBitmapFill = GraphicsBitmapFill(datum);
+				beginBitmapFill(bitmap.bitmapData, bitmap.matrix, bitmap.repeat, bitmap.smooth);
+			}
+			else if (datum is GraphicsShaderFill)
+			{
+				const shader:GraphicsShaderFill = GraphicsShaderFill(datum);
+				beginShaderFill(shader.shader, shader.matrix);
+			}
+			else if (datum is GraphicsEndFill)
+			{
+				endFill();
+			}
+			else if (datum is GraphicsStroke)
+			{
+				stroke(GraphicsStroke(datum));
+			}
+			else if (datum is GraphicsPath)
+			{
+				const path:GraphicsPath = GraphicsPath(datum);
+				if (path.commands != null && path.data != null)
+				{
+					drawPath(path.commands, path.data, path.winding);
+				}
+			}
+			else if (datum is GraphicsTrianglePath)
+			{
+				const triangles:GraphicsTrianglePath = GraphicsTrianglePath(datum);
+				if (triangles.vertices != null)
+				{
+					drawTriangles(triangles.vertices, triangles.indices, triangles.uvtData, triangles.culling);
+				}
+			}
+		}
+
+		// A stroke's line, its fill as the line's own; NaN thickness, no line.
+		private function stroke(stroke:GraphicsStroke):void
+		{
+			if (isNaN(stroke.thickness))
+			{
+				lineStyle();
+				return;
+			}
+
+			const solid:GraphicsSolidFill = stroke.fill as GraphicsSolidFill;
+			lineStyle(stroke.thickness, solid != null ? solid.color : 0, solid != null ? solid.alpha : 1, stroke.pixelHinting, stroke.scaleMode, stroke.caps, stroke.joints, stroke.miterLimit);
+			if (stroke.fill is GraphicsGradientFill)
+			{
+				const gradient:GraphicsGradientFill = GraphicsGradientFill(stroke.fill);
+				lineGradientStyle(gradient.type, gradient.colors, gradient.alphas, gradient.ratios, gradient.matrix, gradient.spreadMethod, gradient.interpolationMethod, gradient.focalPointRatio);
+			}
+			else if (stroke.fill is GraphicsBitmapFill)
+			{
+				const bitmap:GraphicsBitmapFill = GraphicsBitmapFill(stroke.fill);
+				lineBitmapStyle(bitmap.bitmapData, bitmap.matrix, bitmap.repeat, bitmap.smooth);
+			}
+			else if (stroke.fill is GraphicsShaderFill)
+			{
+				const shader:GraphicsShaderFill = GraphicsShaderFill(stroke.fill);
+				lineShaderStyle(shader.shader, shader.matrix);
+			}
+		}
 
 		[API("686")]
-		public native function readGraphicsData(recurse:Boolean = true):Vector.<IGraphicsData>;
+		public function readGraphicsData(recurse:Boolean = true):Vector.<IGraphicsData>
+		{
+			const result:Vector.<IGraphicsData> = new Vector.<IGraphicsData>();
+			nativeGetGraphicsData(result, recurse);
+			return result;
+		}
 
 		// The player's natives (packages/player/src/playerglobal/flash/display/Graphics.ts).
 		private native function nativeGetGraphicsData(target:Vector.<IGraphicsData>, recurse:Boolean):void;
