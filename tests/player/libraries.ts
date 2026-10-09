@@ -32,19 +32,22 @@ function ours(out: string): Uint8Array {
   return new Uint8Array(readFileSync(file));
 }
 
-/**
- * builtin.abc and playerglobal.abc, in that order, from `out`: ours in place
- * of Flash Player's under SWF2ES_PLAYERGLOBAL=ours, unless `ours` is false,
- * for tests that hold modules to Flash Player's.
- */
-export function libraryAbcs(
-  out = `${here}out/libraries/`,
-  { ours: withOurs = process.env.SWF2ES_PLAYERGLOBAL === "ours" } = {},
-): Uint8Array[] {
+/** builtin.abc and playerglobal.abc, in that order, from `out`: ours in place of Flash Player's under SWF2ES_PLAYERGLOBAL=ours. */
+export function libraryAbcs(out = `${here}out/libraries/`): Uint8Array[] {
   if (!NAMES.every((n) => existsSync(`${out}${n}.abc`))) {
     libraries(NAMES, out);
   }
 
   const [builtin, playerglobal] = NAMES.map((n) => new Uint8Array(readFileSync(`${out}${n}.abc`)));
-  return withOurs ? [builtin, ours(out)] : [builtin, playerglobal];
+  return process.env.SWF2ES_PLAYERGLOBAL === "ours"
+    ? [builtin, ours(out)]
+    : [builtin, playerglobal];
+}
+
+/** The files of the libraries libraryAbcs gives, in its order, for a command that reads them. */
+export function libraryFiles(out = `${here}out/libraries/`): string[] {
+  libraryAbcs(out);
+  return ["builtin", process.env.SWF2ES_PLAYERGLOBAL === "ours" ? "ours" : "playerglobal"].map(
+    (n) => `${out}${n}.abc`,
+  );
 }

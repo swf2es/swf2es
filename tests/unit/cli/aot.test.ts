@@ -14,12 +14,9 @@ import { containerEngine, libraries, runOracle } from "../../../oracle/oracle.ts
 import type { Library } from "../../../packages/player/dist/display/timeline.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
 import { cases, scripted } from "../../player/cases.ts";
-import { libraryAbcs } from "../../player/libraries.ts";
+import { libraryAbcs, libraryFiles } from "../../player/libraries.ts";
 import { compileScripts } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";
-
-// The command compiles against Flash Player's playerglobal: the player here does too.
-const FIXED = { ours: false };
 
 const out = fileURLToPath(new URL("../out/cli/", import.meta.url));
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -76,8 +73,8 @@ function assertSame(cliOut: Buffer[], player: string[]): void {
 }
 
 test("the command's modules are the player's for its cases' SWFs", { skip }, async () => {
-  const libs = libraryAbcs(`${out}libraries/`, FIXED);
-  const libPaths = ["builtin", "playerglobal"].map((n) => `${out}libraries/${n}.abc`);
+  const libs = libraryAbcs(`${out}libraries/`);
+  const libPaths = libraryFiles(`${out}libraries/`);
   const picked = ["scripted", "events", "init", "goto-children"];
   const chosen = cases.filter((c) => picked.includes(c.name));
   assert.equal(chosen.length, picked.length);
