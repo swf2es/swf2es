@@ -7,7 +7,11 @@ package flash.events
 
 	public class MouseEvent extends Event
 	{
-		public function MouseEvent(type:String, bubbles:Boolean = true, cancelable:Boolean = false, localX:Number = void 0, localY:Number = void 0, relatedObject:InteractiveObject = null, ctrlKey:Boolean = false, altKey:Boolean = false, shiftKey:Boolean = false, buttonDown:Boolean = false, delta:int = 0, arg11:Boolean = false, arg12:Boolean = false, arg13:int = 0)
+		private var _commandKey:Boolean;
+		private var _controlKey:Boolean;
+		private var _clickCount:int;
+
+		public function MouseEvent(type:String, bubbles:Boolean = true, cancelable:Boolean = false, localX:Number = void 0, localY:Number = void 0, relatedObject:InteractiveObject = null, ctrlKey:Boolean = false, altKey:Boolean = false, shiftKey:Boolean = false, buttonDown:Boolean = false, delta:int = 0, commandKey:Boolean = false, controlKey:Boolean = false, clickCount:int = 0)
 		{
 			super(type, bubbles, cancelable);
 			this.localX = localX;
@@ -18,6 +22,9 @@ package flash.events
 			this.shiftKey = shiftKey;
 			this.buttonDown = buttonDown;
 			this.delta = delta;
+			this.commandKey = commandKey;
+			this.controlKey = controlKey;
+			_clickCount = clickCount;
 		}
 
 		public static const CLICK:String = "click";
@@ -39,9 +46,15 @@ package flash.events
 		public static const RIGHT_MOUSE_UP:String = "rightMouseUp";
 		public static const CONTEXT_MENU:String = "contextMenu";
 
-		override public native function clone():Event;
+		override public function clone():Event
+		{
+			return new MouseEvent(type, bubbles, cancelable, localX, localY, relatedObject, ctrlKey, altKey, shiftKey, buttonDown, delta, commandKey, controlKey, clickCount);
+		}
 
-		override public native function toString():String;
+		override public function toString():String
+		{
+			return formatToString("MouseEvent", "type", "bubbles", "cancelable", "eventPhase", "localX", "localY", "stageX", "stageY", "relatedObject", "ctrlKey", "altKey", "shiftKey", "buttonDown", "delta");
+		}
 
 		public native function get localX():Number;
 
@@ -75,9 +88,15 @@ package flash.events
 
 		public native function set delta(value:int):void;
 
-		public native function get stageX():Number;
+		public function get stageX():Number
+		{
+			return getStageX();
+		}
 
-		public native function get stageY():Number;
+		public function get stageY():Number
+		{
+			return getStageY();
+		}
 
 		public native function updateAfterEvent():void;
 
@@ -99,15 +118,30 @@ package flash.events
 		[API("678")]
 		public native function set movementY(value:Number):void;
 
-		public native function get commandKey():Boolean;
+		public function get commandKey():Boolean
+		{
+			return _commandKey;
+		}
 
-		public native function set commandKey(arg0:Boolean):void;
+		public function set commandKey(value:Boolean):void
+		{
+			_commandKey = value;
+		}
 
-		public native function get controlKey():Boolean;
+		public function get controlKey():Boolean
+		{
+			return _controlKey;
+		}
 
-		public native function set controlKey(arg0:Boolean):void;
+		public function set controlKey(value:Boolean):void
+		{
+			_controlKey = value;
+		}
 
-		public native function get clickCount():int;
+		public function get clickCount():int
+		{
+			return _clickCount;
+		}
 
 		// The player's natives (packages/player/src/playerglobal/flash/events/MouseEvent.ts).
 		private native function getStageX():Number;

@@ -6,18 +6,29 @@ package flash.events
 	[API("667")]
 	public class PressAndTapGestureEvent extends GestureEvent
 	{
-		public function PressAndTapGestureEvent(type:String, bubbles:Boolean = true, cancelable:Boolean = false, phase:String = null, localX:Number = 0, localY:Number = 0, tapLocalX:Number = 0, tapLocalY:Number = 0, ctrlKey:Boolean = false, altKey:Boolean = false, shiftKey:Boolean = false, controlKey:Boolean = false, arg12:Boolean = false)
+		public function PressAndTapGestureEvent(type:String, bubbles:Boolean = true, cancelable:Boolean = false, phase:String = null, localX:Number = 0, localY:Number = 0, tapLocalX:Number = 0, tapLocalY:Number = 0, ctrlKey:Boolean = false, altKey:Boolean = false, shiftKey:Boolean = false, commandKey:Boolean = false, controlKey:Boolean = false)
 		{
 			super(type, bubbles, cancelable, phase, localX, localY);
 			this.tapLocalX = tapLocalX;
 			this.tapLocalY = tapLocalY;
+			this.ctrlKey = ctrlKey;
+			this.altKey = altKey;
+			this.shiftKey = shiftKey;
+			this.commandKey = commandKey;
+			this.controlKey = controlKey;
 		}
 
 		public static const GESTURE_PRESS_AND_TAP:String = "gesturePressAndTap";
 
-		override public native function clone():Event;
+		override public function clone():Event
+		{
+			return new PressAndTapGestureEvent(type, bubbles, cancelable, phase, localX, localY, tapLocalX, tapLocalY, ctrlKey, altKey, shiftKey, commandKey, controlKey);
+		}
 
-		override public native function toString():String;
+		override public function toString():String
+		{
+			return formatToString("PressAndTapGestureEvent", "type", "bubbles", "cancelable", "phase", "localX", "localY", "tapLocalX", "tapLocalY", "ctrlKey", "altKey", "shiftKey", "commandKey", "controlKey");
+		}
 
 		public native function get tapLocalX():Number;
 
@@ -27,9 +38,15 @@ package flash.events
 
 		public native function set tapLocalY(value:Number):void;
 
-		public native function get tapStageX():Number;
+		public function get tapStageX():Number
+		{
+			return getTapStageX();
+		}
 
-		public native function get tapStageY():Number;
+		public function get tapStageY():Number
+		{
+			return getTapStageY();
+		}
 
 		// The player's natives (packages/player/src/playerglobal/flash/events/PressAndTapGestureEvent.ts).
 		private native function getTapStageX():Number;
