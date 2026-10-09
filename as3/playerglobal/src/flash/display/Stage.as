@@ -3,6 +3,7 @@
 
 package flash.display
 {
+	import flash.errors.IllegalOperationError;
 	import flash.accessibility.AccessibilityImplementation;
 	import flash.accessibility.AccessibilityProperties;
 	import flash.events.Event;
@@ -105,98 +106,245 @@ package flash.display
 		[API("670")]
 		public native function get softKeyboardRect():Rectangle;
 
-		override public native function set name(value:String):void;
+		override public function set name(value:String):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set mask(value:DisplayObject):void;
+		override public function set mask(value:DisplayObject):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set visible(value:Boolean):void;
+		override public function set visible(value:Boolean):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set x(value:Number):void;
+		override public function set x(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set y(value:Number):void;
-
-		[API("662")]
-		override public native function set z(value:Number):void;
-
-		override public native function set scaleX(value:Number):void;
-
-		override public native function set scaleY(value:Number):void;
-
-		[API("662")]
-		override public native function set scaleZ(value:Number):void;
-
-		override public native function set rotation(value:Number):void;
-
-		[API("662")]
-		override public native function set rotationX(value:Number):void;
-
-		[API("662")]
-		override public native function set rotationY(value:Number):void;
+		override public function set y(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
 		[API("662")]
-		override public native function set rotationZ(value:Number):void;
+		override public function set z(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set alpha(value:Number):void;
+		override public function set scaleX(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set cacheAsBitmap(value:Boolean):void;
+		override public function set scaleY(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set opaqueBackground(value:Object):void;
+		[API("662")]
+		override public function set scaleZ(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set scrollRect(value:Rectangle):void;
+		override public function set rotation(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set filters(value:Array):void;
+		[API("662")]
+		override public function set rotationX(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set blendMode(value:String):void;
+		[API("662")]
+		override public function set rotationY(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set transform(value:Transform):void;
+		[API("662")]
+		override public function set rotationZ(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set accessibilityProperties(value:AccessibilityProperties):void;
+		override public function set alpha(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set scale9Grid(value:Rectangle):void;
+		override public function set cacheAsBitmap(value:Boolean):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set tabEnabled(value:Boolean):void;
+		override public function set opaqueBackground(value:Object):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set tabIndex(value:int):void;
+		override public function set scrollRect(value:Rectangle):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set focusRect(value:Object):void;
+		override public function set filters(value:Array):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set mouseEnabled(value:Boolean):void;
+		override public function set blendMode(value:String):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set accessibilityImplementation(value:AccessibilityImplementation):void;
+		override public function set transform(value:Transform):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function addChild(child:DisplayObject):DisplayObject;
+		override public function set accessibilityProperties(value:AccessibilityProperties):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function addChildAt(child:DisplayObject, index:int):DisplayObject;
+		override public function set scale9Grid(value:Rectangle):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function setChildIndex(child:DisplayObject, index:int):void;
+		override public function set tabEnabled(value:Boolean):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function addEventListener(type:String, listener:Function, useCapture:Boolean = false, priority:int = 0, useWeakReference:Boolean = false):void;
+		override public function set tabIndex(value:int):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function dispatchEvent(event:Event):Boolean;
+		override public function set focusRect(value:Object):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function hasEventListener(type:String):Boolean;
+		override public function set mouseEnabled(value:Boolean):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function willTrigger(type:String):Boolean;
+		override public function set accessibilityImplementation(value:AccessibilityImplementation):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function get width():Number;
+		override public function addChild(child:DisplayObject):DisplayObject
+		{
+			requireOwnerPermissions();
+			return super.addChild(child);
+		}
 
-		override public native function set width(value:Number):void;
+		override public function addChildAt(child:DisplayObject, index:int):DisplayObject
+		{
+			requireOwnerPermissions();
+			return super.addChildAt(child, index);
+		}
 
-		override public native function get height():Number;
+		override public function setChildIndex(child:DisplayObject, index:int):void
+		{
+			requireOwnerPermissions();
+			super.setChildIndex(child, index);
+		}
 
-		override public native function set height(value:Number):void;
+		override public function addEventListener(type:String, listener:Function, useCapture:Boolean = false, priority:int = 0, useWeakReference:Boolean = false):void
+		{
+			requireOwnerPermissions();
+			super.addEventListener(type, listener, useCapture, priority, useWeakReference);
+		}
 
-		override public native function get textSnapshot():TextSnapshot;
+		override public function dispatchEvent(event:Event):Boolean
+		{
+			requireOwnerPermissions();
+			return super.dispatchEvent(event);
+		}
 
-		override public native function get mouseChildren():Boolean;
+		override public function hasEventListener(type:String):Boolean
+		{
+			requireOwnerPermissions();
+			return super.hasEventListener(type);
+		}
 
-		override public native function set mouseChildren(value:Boolean):void;
+		override public function willTrigger(type:String):Boolean
+		{
+			requireOwnerPermissions();
+			return super.willTrigger(type);
+		}
 
-		override public native function get numChildren():int;
+		override public function get width():Number
+		{
+			requireOwnerPermissions();
+			return super.width;
+		}
 
-		override public native function get tabChildren():Boolean;
+		override public function set width(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
-		override public native function set tabChildren(value:Boolean):void;
+		override public function get height():Number
+		{
+			requireOwnerPermissions();
+			return super.height;
+		}
+
+		override public function set height(value:Number):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
+
+		override public function get textSnapshot():TextSnapshot
+		{
+			Error.throwError(IllegalOperationError, 2071);
+			return null;
+		}
+
+		override public function get mouseChildren():Boolean
+		{
+			requireOwnerPermissions();
+			return super.mouseChildren;
+		}
+
+		override public function set mouseChildren(value:Boolean):void
+		{
+			requireOwnerPermissions();
+			super.mouseChildren = value;
+		}
+
+		override public function get numChildren():int
+		{
+			requireOwnerPermissions();
+			return super.numChildren;
+		}
+
+		override public function get tabChildren():Boolean
+		{
+			requireOwnerPermissions();
+			return super.tabChildren;
+		}
+
+		override public function set tabChildren(value:Boolean):void
+		{
+			requireOwnerPermissions();
+			super.tabChildren = value;
+		}
 
 		[API("670")]
 		public native function get allowsFullScreen():Boolean;
@@ -243,7 +391,10 @@ package flash.display
 		public native function get autoOrients():Boolean;
 
 		[API("671")]
-		public native function set autoOrients(value:Boolean):void;
+		public function set autoOrients(value:Boolean):void
+		{
+			setAutoOrients(value);
+		}
 
 		[API("671")]
 		public native function get supportedOrientations():Vector.<String>;

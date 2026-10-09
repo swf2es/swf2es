@@ -32,9 +32,16 @@ package flash.display
 
 		public native function drawRoundRectComplex(x:Number, y:Number, width:Number, height:Number, topLeftRadius:Number, topRightRadius:Number, bottomLeftRadius:Number, bottomRightRadius:Number):void;
 
-		public native function drawCircle(x:Number, y:Number, radius:Number):void;
+		public function drawCircle(x:Number, y:Number, radius:Number):void
+		{
+			drawEllipse(x - radius, y - radius, radius * 2, radius * 2);
+		}
 
-		public native function drawEllipse(x:Number, y:Number, width:Number, height:Number):void;
+		public function drawEllipse(x:Number, y:Number, width:Number, height:Number):void
+		{
+			// An ellipse is a rectangle rounded all the way.
+			drawRoundRect(x, y, width, height, width, height);
+		}
 
 		public native function moveTo(x:Number, y:Number):void;
 

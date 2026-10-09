@@ -139,9 +139,15 @@ package flash.display
 
 		public native function get loaderInfo():LoaderInfo;
 
-		public native function hitTestObject(obj:DisplayObject):Boolean;
+		public function hitTestObject(obj:DisplayObject):Boolean
+		{
+			return _hitTest(false, 0, 0, false, obj);
+		}
 
-		public native function hitTestPoint(x:Number, y:Number, shapeFlag:Boolean = false):Boolean;
+		public function hitTestPoint(x:Number, y:Number, shapeFlag:Boolean = false):Boolean
+		{
+			return _hitTest(true, x, y, shapeFlag, null);
+		}
 
 		public native function get accessibilityProperties():AccessibilityProperties;
 

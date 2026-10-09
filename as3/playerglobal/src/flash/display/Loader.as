@@ -3,6 +3,7 @@
 
 package flash.display
 {
+	import flash.errors.IllegalOperationError;
 	import flash.system.ApplicationDomain;
 	import flash.system.SecurityDomain;
 	import flash.desktop.IFilePromise;
@@ -17,33 +18,82 @@ package flash.display
 		{
 		}
 
-		public native function load(request:URLRequest, context:LoaderContext = null):void;
+		public function load(request:URLRequest, context:LoaderContext = null):void
+		{
+			if (request == null)
+			{
+				Error.throwError(TypeError, 2007, "request");
+			}
 
-		public native function loadBytes(data:ByteArray, context:LoaderContext = null):void;
+			const c:LoaderContext = context != null ? context : new LoaderContext();
+			_load(request, c.checkPolicyFile, c.applicationDomain, c.securityDomain, c.requestedContentParent, c.parameters, _getJPEGLoaderContextdeblockingfilter(c), c.allowCodeImport, c.imageDecodingPolicy);
+		}
 
-		public native function close():void;
+		public function loadBytes(data:ByteArray, context:LoaderContext = null):void
+		{
+			if (data == null)
+			{
+				Error.throwError(TypeError, 2007, "bytes");
+			}
 
-		public native function unload():void;
+			const c:LoaderContext = context != null ? context : new LoaderContext();
+			_loadBytes(data, c.checkPolicyFile, c.applicationDomain, c.securityDomain, c.requestedContentParent, c.parameters, _getJPEGLoaderContextdeblockingfilter(c), c.allowCodeImport, c.imageDecodingPolicy);
+		}
+
+		public function close():void
+		{
+			_close();
+		}
+
+		public function unload():void
+		{
+			_unload(false, false);
+		}
 
 		[API("662")]
-		public native function unloadAndStop(gc:Boolean = true):void;
+		public function unloadAndStop(gc:Boolean = true):void
+		{
+			_unload(true, gc);
+		}
 
 		public native function get content():DisplayObject;
 
 		public native function get contentLoaderInfo():LoaderInfo;
 
-		override public native function addChild(child:DisplayObject):DisplayObject;
+		override public function addChild(child:DisplayObject):DisplayObject
+		{
+			Error.throwError(IllegalOperationError, 2069);
+			return null;
+		}
 
-		override public native function addChildAt(child:DisplayObject, index:int):DisplayObject;
+		override public function addChildAt(child:DisplayObject, index:int):DisplayObject
+		{
+			Error.throwError(IllegalOperationError, 2069);
+			return null;
+		}
 
-		override public native function removeChild(child:DisplayObject):DisplayObject;
+		override public function removeChild(child:DisplayObject):DisplayObject
+		{
+			Error.throwError(IllegalOperationError, 2069);
+			return null;
+		}
 
-		override public native function removeChildAt(index:int):DisplayObject;
+		override public function removeChildAt(index:int):DisplayObject
+		{
+			Error.throwError(IllegalOperationError, 2069);
+			return null;
+		}
 
-		override public native function setChildIndex(child:DisplayObject, index:int):void;
+		override public function setChildIndex(child:DisplayObject, index:int):void
+		{
+			Error.throwError(IllegalOperationError, 2069);
+		}
 
 		[API("667")]
-		public native function get uncaughtErrorEvents():UncaughtErrorEvents;
+		public function get uncaughtErrorEvents():UncaughtErrorEvents
+		{
+			return _getUncaughtErrorEvents();
+		}
 
 		[API("669")]
 		public native function loadFilePromise(arg0:IFilePromise, arg1:LoaderContext = null):void;
