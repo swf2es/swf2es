@@ -100,7 +100,8 @@ export interface ScriptDecl {
 // private members are the class's own helpers. Each native receives its
 // arguments as bind.ts passes them, defaults filled in and coerced to the
 // declared types, so a uint parameter is a number, a String one a string
-// or null, and one with a default is never missing.
+// or null, and one with a default is never missing; but a method whose
+// AS3 reads `arguments` gets them as given.
 
 /** What a value of the AS3 type `T` is, once coerced to it. */
 type Coerced<T> = T extends "int" | "uint" | "Number"
@@ -118,11 +119,14 @@ type Args<P> = P extends readonly [infer First, ...infer Rest]
 
 type ParamsOf<D> = D extends { params: infer P } ? Args<P> : [];
 
+// One whose AS3 reads `arguments` gets them as given: neither defaulted nor coerced.
 type NativeOf<D> = (
   this: AsObject,
-  ...args: D extends { rest: true } | { arguments: true }
-    ? [...ParamsOf<D>, ...AsValue[]]
-    : ParamsOf<D>
+  ...args: D extends { arguments: true }
+    ? AsValue[]
+    : D extends { rest: true }
+      ? [...ParamsOf<D>, ...AsValue[]]
+      : ParamsOf<D>
 ) => D extends { returns: "void" } ? void : D extends { returns: infer R } ? Coerced<R> : AsValue;
 
 type Natives<L> = Extract<L, { native: true }>;

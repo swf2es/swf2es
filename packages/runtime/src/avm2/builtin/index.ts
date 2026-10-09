@@ -8,6 +8,7 @@ import { ArrayBuiltin } from "./Array.js";
 import { BooleanBuiltin } from "./Boolean.js";
 import type { BuiltinClass } from "./bind.js";
 import { ClassBuiltin } from "./Class.js";
+import { DateBuiltin } from "./Date.js";
 import { ErrorBuiltins } from "./Error.js";
 import { FunctionBuiltin } from "./Function.js";
 import { intBuiltin } from "./int.js";
@@ -16,6 +17,7 @@ import { NamespaceBuiltin } from "./Namespace.js";
 import { NumberBuiltin } from "./Number.js";
 import { ObjectBuiltin } from "./Object.js";
 import { QNameBuiltin } from "./QName.js";
+import { RegExpBuiltin } from "./RegExp.js";
 import { StringBuiltin } from "./String.js";
 import { uintBuiltin } from "./uint.js";
 
@@ -23,6 +25,7 @@ const classes: BuiltinClass[] = [
   ArrayBuiltin,
   BooleanBuiltin,
   ClassBuiltin,
+  DateBuiltin,
   ...ErrorBuiltins,
   FunctionBuiltin,
   intBuiltin,
@@ -31,6 +34,7 @@ const classes: BuiltinClass[] = [
   NumberBuiltin,
   ObjectBuiltin,
   QNameBuiltin,
+  RegExpBuiltin,
   StringBuiltin,
   uintBuiltin,
 ];

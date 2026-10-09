@@ -11,14 +11,12 @@ import type { Runtime } from "../runtime.js";
 import { aliasesNatives } from "./aliases.js";
 import { byteArrayHook, byteArrayNatives } from "./bytearray.js";
 import { concurrentNatives } from "./concurrent.js";
-import { dateHook, dateNatives } from "./date.js";
 import type { Natives } from "./define.js";
 import { describeNatives } from "./describe.js";
 import { dictionaryNatives } from "./dictionary.js";
 import { jsonNatives } from "./json.js";
 import { objectHooks } from "./object.js";
 import { proxyHooks, proxyNatives } from "./proxy.js";
-import { regexpHooks, regexpNatives } from "./regexp.js";
 import { shellHooks, shellNatives } from "./shell.js";
 import { toplevelNatives } from "./toplevel.js";
 import { vectorHooks, vectorNatives } from "./vector.js";
@@ -28,7 +26,6 @@ import { xmlHooks, xmlNatives } from "./xml/xml.js";
 export function builtinNatives(rt: Runtime): Natives {
   return {
     ...classNatives,
-    ...regexpNatives(rt),
     ...toplevelNatives,
     ...describeNatives,
     ...proxyNatives,
@@ -38,7 +35,6 @@ export function builtinNatives(rt: Runtime): Natives {
     ...vectorNatives,
     ...byteArrayNatives(rt),
     ...concurrentNatives(rt),
-    ...dateNatives(),
     ...jsonNatives(),
     ...xmlNatives,
   };
@@ -48,9 +44,7 @@ export function builtinHooks(): Record<string, ClassHook> {
   return {
     ...classHooks,
     ...objectHooks,
-    ...regexpHooks,
     "flash.utils::ByteArray": byteArrayHook,
-    Date: dateHook,
     ...vectorHooks,
     ...xmlHooks,
     ...proxyHooks,

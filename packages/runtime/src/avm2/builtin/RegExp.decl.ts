@@ -8,7 +8,7 @@ export const RegExpDecl = {
       ["*", ["undefined", null]],
       ["*", ["undefined", null]],
     ],
-    avmplus: true,
+    native: true,
   },
   classInit: { avmplus: true },
   static: [{ const: "length", type: "int", value: ["int", 1] }],
@@ -26,7 +26,7 @@ export const RegExpDecl = {
       method: "AS3::test",
       params: [["String", ["string", ""]]],
       returns: "Boolean",
-      avmplus: true,
+      native: true,
     },
   ],
 } as const satisfies ClassDecl;

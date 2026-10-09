@@ -165,9 +165,27 @@ const NONE = Symbol("no default");
 /**
  * `f` called as avmplus calls a native declared by `d`: each missing
  * argument with a default given it, and each argument coerced to its
- * parameter's type. `f` itself where nothing needs doing.
+ * parameter's type; but as given to one whose AS3 reads `arguments`,
+ * which holds them so. `f` itself where nothing needs doing.
  */
 function adapt(rt: Runtime, f: Method, d: MethodDecl): Method {
+  const g = wrap(rt, f, d);
+  // Its length is its declared parameters' count, as a compiled method's
+  // is, however the native spells them (...args, or fewer).
+  const n = d.params?.length ?? 0;
+  if (g.length !== n) {
+    Object.defineProperty(g, "length", { value: n });
+  }
+
+  return g;
+}
+
+function wrap(rt: Runtime, f: Method, d: MethodDecl): Method {
+  // One that reads its arguments, as AS3's `arguments`, gets them as given.
+  if (d.arguments) {
+    return f;
+  }
+
   const params = d.params ?? [];
   const coerce = params.map((p) => coercer(rt, typeof p === "string" ? p : p[0]));
   const defaults = params.map((p) => (typeof p === "string" ? NONE : constant(p[1])));
@@ -182,7 +200,7 @@ function adapt(rt: Runtime, f: Method, d: MethodDecl): Method {
   // each default, coerced once here, where its argument is missing.
   const [c0 = same, c1 = same, c2 = same] = coerce.map((c) => c ?? same);
   const [v0, v1, v2] = defaults.map((v, i) => (v === NONE ? undefined : (coerce[i] ?? same)(v)));
-  if (!d.rest && !d.arguments) {
+  if (!d.rest) {
     switch (params.length) {
       case 1:
         return anyDefault
@@ -217,7 +235,7 @@ function adapt(rt: Runtime, f: Method, d: MethodDecl): Method {
   }
 
   const n = params.length;
-  const adapted = function (this: AsObject, ...args: Value[]) {
+  return function (this: AsObject, ...args: Value[]) {
     for (let i = 0; i < n; i++) {
       if (i >= args.length) {
         if (defaults[i] === NONE) {
@@ -235,9 +253,6 @@ function adapt(rt: Runtime, f: Method, d: MethodDecl): Method {
 
     return f.apply(this, args);
   };
-  // Its length is its parameters', as the ABC's count gives a native's with ...rest.
-  Object.defineProperty(adapted, "length", { value: n });
-  return adapted;
 }
 
 /** Each native trait of `traits` with its key and declaration. */

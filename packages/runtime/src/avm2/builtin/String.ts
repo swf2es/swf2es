@@ -4,9 +4,9 @@
 import type { Value } from "../descriptors.js";
 import { lowerCase, upperCase } from "../natives/case.js";
 import { conversion } from "../natives/define.js";
-import { compile, matchArray, replacement as replacementOf } from "../natives/regexp.js";
 import type { Runtime } from "../runtime.js";
 import { bindNatives } from "./bind.js";
+import { compile, matchArray, replacement as replacementOf } from "./regexp/compile.js";
 import { StringDecl } from "./String.decl.js";
 
 /** A String argument as avmplus' natives read one: null as "null". */
