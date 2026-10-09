@@ -18,7 +18,10 @@ package flash.events
 			return new TimerEvent(type, bubbles, cancelable);
 		}
 
-		override public native function toString():String;
+		override public function toString():String
+		{
+			return formatToString("TimerEvent", "type", "bubbles", "cancelable", "eventPhase");
+		}
 
 		public native function updateAfterEvent():void;
 	}

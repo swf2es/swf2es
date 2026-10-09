@@ -399,7 +399,10 @@ package flash.display
 		[API("671")]
 		public native function get supportedOrientations():Vector.<String>;
 
-		override public native function set contextMenu(value:NativeMenu):void;
+		override public function set contextMenu(value:NativeMenu):void
+		{
+			Error.throwError(IllegalOperationError, 2071);
+		}
 
 		// The player's natives (packages/player/src/playerglobal/flash/display/Stage.ts).
 		private native function requireOwnerPermissions():void;

@@ -34,12 +34,32 @@ package flash.net
 		public native function get data():ByteArray;
 
 		[API("662")]
-		public native function load():void;
+		public function load():void
+		{
+			_load(new ByteArray());
+		}
 
 		[API("662")]
-		public native function save(data:*, defaultFileName:String = null):void;
+		public function save(data:*, defaultFileName:String = null):void
+		{
+			// Bytes as they are, anything else as its text in UTF-8.
+			var bytes:ByteArray = data as ByteArray;
+			if (bytes == null)
+			{
+				bytes = new ByteArray();
+				bytes.writeUTFBytes(String(data));
+			}
 
-		public native function get extension():String;
+			_save(bytes, defaultFileName);
+		}
+
+		public function get extension():String
+		{
+			// The name throws where there is no file, as Flash's does.
+			const fileName:String = name;
+			const dot:int = fileName.lastIndexOf(".");
+			return dot >= 0 ? fileName.substr(dot + 1) : null;
+		}
 
 		public native function browse(typeFilter:Array = null):Boolean;
 

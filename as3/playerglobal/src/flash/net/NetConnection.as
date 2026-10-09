@@ -19,11 +19,20 @@ package flash.net
 
 		public native function get uri():String;
 
-		public native function close():void;
+		public function close():void
+		{
+			invoke(CLOSE);
+		}
 
-		public native function addHeader(operation:String, mustUnderstand:Boolean = false, param:Object = null):void;
+		public function addHeader(operation:String, mustUnderstand:Boolean = false, param:Object = null):void
+		{
+			invokeWithArgsArray(ADD_HEADER, [operation, mustUnderstand, param]);
+		}
 
-		public native function call(command:String, responder:Responder, ...arguments):void;
+		public function call(command:String, responder:Responder, ...args):void
+		{
+			invokeWithArgsArray(CALL, [command, responder].concat(args));
+		}
 
 		public native function connect(command:String, ...arguments):void;
 
@@ -71,9 +80,17 @@ package flash.net
 		public native function get httpIdleTimeout():Number;
 
 		[API("671")]
-		public native function set httpIdleTimeout(arg0:Number):void;
+		public function set httpIdleTimeout(value:Number):void
+		{
+			_SetHTTPIdleTimeout(value);
+		}
 
 		// The player's natives (packages/player/src/playerglobal/flash/net/NetConnection.ts).
+		// What the player's invoke does, by these codes (NetConnection.ts).
+		private static const CLOSE:uint = 1;
+		private static const CALL:uint = 2;
+		private static const ADD_HEADER:uint = 3;
+
 		private native function invoke(code:uint, ...rest):*;
 
 		private native function invokeWithArgsArray(code:uint, args:Array):*;
