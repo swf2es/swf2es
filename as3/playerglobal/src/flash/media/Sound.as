@@ -11,9 +11,15 @@ package flash.media
 	{
 		public function Sound(stream:URLRequest = null, context:SoundLoaderContext = null)
 		{
+			// Always, with null when given no request (the player's Sound.ts).
+			load(stream, context);
 		}
 
-		public native function load(stream:URLRequest, context:SoundLoaderContext = null):void;
+		public function load(stream:URLRequest, context:SoundLoaderContext = null):void
+		{
+			const resolved:SoundLoaderContext = context != null ? context : new SoundLoaderContext();
+			_load(stream, resolved.checkPolicyFile, resolved.bufferTime);
+		}
 
 		[API("674")]
 		public native function loadCompressedDataFromByteArray(bytes:ByteArray, bytesLength:uint):void;
@@ -43,6 +49,6 @@ package flash.media
 		public native function extract(target:ByteArray, length:Number, startPosition:Number = -1):Number;
 
 		// The player's natives (packages/player/src/playerglobal/flash/media/Sound.ts).
-		private native function _load(request:URLRequest, _checkPolicyFile:Boolean, _bufferTime:Number):void;
+		private native function _load(request:URLRequest, checkPolicyFile:Boolean, bufferTime:Number):void;
 	}
 }

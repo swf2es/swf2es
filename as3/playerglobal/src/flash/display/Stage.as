@@ -253,6 +253,6 @@ package flash.display
 		// The player's natives (packages/player/src/playerglobal/flash/display/Stage.ts).
 		private native function requireOwnerPermissions():void;
 
-		private native function setAutoOrients(_v:Boolean):void;
+		private native function setAutoOrients(v:Boolean):void;
 	}
 }

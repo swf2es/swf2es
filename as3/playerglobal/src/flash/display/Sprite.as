@@ -10,6 +10,7 @@ package flash.display
 	{
 		public function Sprite()
 		{
+			constructChildren();
 		}
 
 		public native function get graphics():Graphics;

@@ -76,7 +76,7 @@ package flash.net
 		// The player's natives (packages/player/src/playerglobal/flash/net/NetConnection.ts).
 		private native function invoke(code:uint, ...rest):*;
 
-		private native function invokeWithArgsArray(code:uint, _args:Array):*;
+		private native function invokeWithArgsArray(code:uint, args:Array):*;
 
 		private native function _SetHTTPIdleTimeout(v:Number):void;
 	}

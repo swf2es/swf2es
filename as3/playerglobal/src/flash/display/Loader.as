@@ -49,11 +49,11 @@ package flash.display
 		public native function loadFilePromise(arg0:IFilePromise, arg1:LoaderContext = null):void;
 
 		// The player's natives (packages/player/src/playerglobal/flash/display/Loader.ts).
-		private native function _getJPEGLoaderContextdeblockingfilter(_context:Object):Number;
+		private native function _getJPEGLoaderContextdeblockingfilter(context:Object):Number;
 
-		private native function _loadBytes(bytes:ByteArray, _checkPolicyFile:Boolean, applicationDomain:ApplicationDomain, _securityDomain:SecurityDomain, _requestedContentParent:DisplayObjectContainer, parameters:Object, arg6:Number, arg7:Boolean, arg8:String):void;
+		private native function _loadBytes(bytes:ByteArray, checkPolicyFile:Boolean, applicationDomain:ApplicationDomain, securityDomain:SecurityDomain, requestedContentParent:DisplayObjectContainer, parameters:Object, arg6:Number, arg7:Boolean, arg8:String):void;
 
-		private native function _unload(stopAllMovieClips:Boolean, _gc:Boolean):void;
+		private native function _unload(stopAllMovieClips:Boolean, gc:Boolean):void;
 
 		private native function _close():void;
 
@@ -61,6 +61,6 @@ package flash.display
 
 		private native function _setUncaughtErrorEvents(v:UncaughtErrorEvents):void;
 
-		private native function _load(request:URLRequest, _checkPolicyFile:Boolean, applicationDomain:ApplicationDomain, _securityDomain:SecurityDomain, _requestedContentParent:DisplayObjectContainer, parameters:Object, arg6:Number, arg7:Boolean, arg8:String):void;
+		private native function _load(request:URLRequest, checkPolicyFile:Boolean, applicationDomain:ApplicationDomain, securityDomain:SecurityDomain, requestedContentParent:DisplayObjectContainer, parameters:Object, arg6:Number, arg7:Boolean, arg8:String):void;
 	}
 }
