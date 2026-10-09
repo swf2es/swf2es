@@ -1,4 +1,4 @@
-// Date, as avmplus' DateClass and Date: the time a Date holds, its fields
+// Date, as avmplus' DateClass and Date, its natives held to Date.decl.ts: the time a Date holds, its fields
 // by the indices Date.as asks for, the setters, its strings in avmplus'
 // formats, which are not JavaScript's, and its own parser of them for
 // Date.parse and new Date(string).
@@ -20,9 +20,9 @@
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
 import type { Runtime } from "../runtime.js";
-import type { Natives } from "./define.js";
+import { bindNatives } from "./bind.js";
+import { DateDecl } from "./Date.decl.js";
 
-const AS3 = "http://adobe.com/AS3/2006/builtin";
 const MONTHS = "JanFebMarAprMayJunJulAugSepOctNovDec";
 const DAYS = "SunMonTueWedThuFriSat";
 
@@ -582,7 +582,7 @@ function construct(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
   return o;
 }
 
-export const dateHook: ClassHook = {
+const dateHook: ClassHook = {
   construct,
   // Date.prototype is a Date, of no time.
   prototype: (_rt, cls) => {
@@ -594,85 +594,401 @@ export const dateHook: ClassHook = {
   call: () => format(Date.now(), 0),
 };
 
-export function dateNatives(): Natives {
-  const natives: Natives = {
-    "Date.parse": (rt) => (s: Value) => parseDate(rt.toString(s)),
-    "Date.UTC":
-      (rt) =>
-      (...args: Value[]) => {
-        const n = args.map((a) => rt.toNumber(a));
-        return fromFields(
-          [n[0], n[1], n[2] ?? 1, n[3] ?? 0, n[4] ?? 0, n[5] ?? 0, n[6] ?? 0],
-          false,
-        );
-      },
-    "Date#Date::_get": () =>
-      function (this: AsObject, index: number) {
-        return field(timeOf(this), index);
-      },
-    "Date#Date::_toString": () =>
-      function (this: AsObject, index: number) {
-        return format(timeOf(this), index);
-      },
-    "Date#Date::_setTime": (rt) =>
-      function (this: AsObject, v: Value) {
-        this.$time = timeClip(rt.toNumber(v));
-        return this.$time;
-      },
-    [`Date#${AS3}::getTime`]: () =>
-      function (this: AsObject) {
-        return timeOf(this);
-      },
-    [`Date#${AS3}::valueOf`]: () =>
-      function (this: AsObject) {
-        return timeOf(this);
-      },
-    [`Date#${AS3}::getTimezoneOffset`]: () =>
-      function (this: AsObject) {
-        return field(timeOf(this), 16);
-      },
-  };
-
-  // The getters by field, as their native names ask for them.
-  const getters: [string, number][] = [
-    ["getUTCFullYear", 0],
-    ["getUTCMonth", 1],
-    ["getUTCDate", 2],
-    ["getUTCDay", 3],
-    ["getUTCHours", 4],
-    ["getUTCMinutes", 5],
-    ["getUTCSeconds", 6],
-    ["getUTCMilliseconds", 7],
-    ["getFullYear", 8],
-    ["getMonth", 9],
-    ["getDate", 10],
-    ["getDay", 11],
-    ["getHours", 12],
-    ["getMinutes", 13],
-    ["getSeconds", 14],
-    ["getMilliseconds", 15],
-  ];
-  for (const [name, index] of getters) {
-    natives[`Date#${AS3}::${name}`] = () =>
-      function (this: AsObject) {
-        return field(timeOf(this), index);
-      };
-  }
-
-  // The setters, by DateObject's indices: 1 to 7 local, negated in UTC.
-  const setters = ["FullYear", "Month", "Date", "Hours", "Minutes", "Seconds", "Milliseconds"];
-  for (let i = 0; i < setters.length; i++) {
-    for (const [prefix, index] of [
-      ["", i + 1],
-      ["UTC", -(i + 1)],
-    ] as const) {
-      natives[`Date#Date::_set${prefix}${setters[i]}`] = (rt) =>
-        function (this: AsObject, ...args: Value[]) {
-          this.$time = set(rt, timeOf(this), index, args);
-          return this.$time;
-        };
-    }
-  }
-
-  return natives;
+/** Set field `index` of `o`'s time from `args`, as DateObject's setters by index: 1 to 7 local, negated in UTC. */
+function setField(rt: Runtime, o: AsObject, index: number, args: Value[]): number {
+  o.$time = set(rt, timeOf(o), index, args);
+  return o.$time;
 }
+
+export const DateBuiltin = bindNatives(
+  DateDecl,
+  (rt) =>
+    class DateNatives {
+      // Its class hook makes the Date: this runs only as a subclass's super().
+      Date() {}
+
+      static parse(s: Value) {
+        return parseDate(rt.toString(s));
+      }
+
+      static UTC(
+        year: Value,
+        month: Value,
+        date: Value,
+        hours: Value,
+        minutes: Value,
+        seconds: Value,
+        ms: Value,
+      ) {
+        const n = [year, month, date, hours, minutes, seconds, ms].map((v) => rt.toNumber(v));
+        return fromFields(n, false);
+      }
+
+      "AS3::valueOf"(this: AsObject) {
+        return timeOf(this);
+      }
+
+      "AS3::getTime"(this: AsObject) {
+        return timeOf(this);
+      }
+
+      "AS3::getTimezoneOffset"(this: AsObject) {
+        return field(timeOf(this), 16);
+      }
+
+      "private::_get"(this: AsObject, index: number) {
+        return field(timeOf(this), index);
+      }
+
+      "private::_toString"(this: AsObject, index: number) {
+        return format(timeOf(this), index);
+      }
+
+      "private::_setTime"(this: AsObject, t: number) {
+        this.$time = timeClip(t);
+        return this.$time;
+      }
+
+      "AS3::setTime"(this: AsObject, t: Value) {
+        this.$time = timeClip(rt.toNumber(t));
+        return this.$time;
+      }
+
+      "AS3::getUTCFullYear"(this: AsObject) {
+        return field(timeOf(this), 0);
+      }
+
+      "AS3::getUTCMonth"(this: AsObject) {
+        return field(timeOf(this), 1);
+      }
+
+      "AS3::getUTCDate"(this: AsObject) {
+        return field(timeOf(this), 2);
+      }
+
+      "AS3::getUTCDay"(this: AsObject) {
+        return field(timeOf(this), 3);
+      }
+
+      "AS3::getUTCHours"(this: AsObject) {
+        return field(timeOf(this), 4);
+      }
+
+      "AS3::getUTCMinutes"(this: AsObject) {
+        return field(timeOf(this), 5);
+      }
+
+      "AS3::getUTCSeconds"(this: AsObject) {
+        return field(timeOf(this), 6);
+      }
+
+      "AS3::getUTCMilliseconds"(this: AsObject) {
+        return field(timeOf(this), 7);
+      }
+
+      "AS3::getFullYear"(this: AsObject) {
+        return field(timeOf(this), 8);
+      }
+
+      "AS3::getMonth"(this: AsObject) {
+        return field(timeOf(this), 9);
+      }
+
+      "AS3::getDate"(this: AsObject) {
+        return field(timeOf(this), 10);
+      }
+
+      "AS3::getDay"(this: AsObject) {
+        return field(timeOf(this), 11);
+      }
+
+      "AS3::getHours"(this: AsObject) {
+        return field(timeOf(this), 12);
+      }
+
+      "AS3::getMinutes"(this: AsObject) {
+        return field(timeOf(this), 13);
+      }
+
+      "AS3::getSeconds"(this: AsObject) {
+        return field(timeOf(this), 14);
+      }
+
+      "AS3::getMilliseconds"(this: AsObject) {
+        return field(timeOf(this), 15);
+      }
+
+      "AS3::toString"(this: AsObject) {
+        return format(timeOf(this), 0);
+      }
+
+      "AS3::toDateString"(this: AsObject) {
+        return format(timeOf(this), 1);
+      }
+
+      "AS3::toTimeString"(this: AsObject) {
+        return format(timeOf(this), 2);
+      }
+
+      "AS3::toLocaleString"(this: AsObject) {
+        return format(timeOf(this), 3);
+      }
+
+      "AS3::toLocaleDateString"(this: AsObject) {
+        return format(timeOf(this), 4);
+      }
+
+      "AS3::toLocaleTimeString"(this: AsObject) {
+        return format(timeOf(this), 5);
+      }
+
+      "AS3::toUTCString"(this: AsObject) {
+        return format(timeOf(this), 6);
+      }
+
+      "private::_setFullYear"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 1, args);
+      }
+
+      "AS3::setFullYear"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 1, args);
+      }
+
+      "private::_setUTCFullYear"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -1, args);
+      }
+
+      "AS3::setUTCFullYear"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -1, args);
+      }
+
+      "private::_setMonth"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 2, args);
+      }
+
+      "AS3::setMonth"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 2, args);
+      }
+
+      "private::_setUTCMonth"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -2, args);
+      }
+
+      "AS3::setUTCMonth"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -2, args);
+      }
+
+      "private::_setDate"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 3, args);
+      }
+
+      "AS3::setDate"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 3, args);
+      }
+
+      "private::_setUTCDate"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -3, args);
+      }
+
+      "AS3::setUTCDate"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -3, args);
+      }
+
+      "private::_setHours"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 4, args);
+      }
+
+      "AS3::setHours"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 4, args);
+      }
+
+      "private::_setUTCHours"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -4, args);
+      }
+
+      "AS3::setUTCHours"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -4, args);
+      }
+
+      "private::_setMinutes"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 5, args);
+      }
+
+      "AS3::setMinutes"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 5, args);
+      }
+
+      "private::_setUTCMinutes"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -5, args);
+      }
+
+      "AS3::setUTCMinutes"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -5, args);
+      }
+
+      "private::_setSeconds"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 6, args);
+      }
+
+      "AS3::setSeconds"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 6, args);
+      }
+
+      "private::_setUTCSeconds"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -6, args);
+      }
+
+      "AS3::setUTCSeconds"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -6, args);
+      }
+
+      "private::_setMilliseconds"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 7, args);
+      }
+
+      "AS3::setMilliseconds"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, 7, args);
+      }
+
+      "private::_setUTCMilliseconds"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -7, args);
+      }
+
+      "AS3::setUTCMilliseconds"(this: AsObject, ...args: Value[]) {
+        return setField(rt, this, -7, args);
+      }
+
+      get fullYear(): number {
+        return field(timeOf(this), 8);
+      }
+
+      set fullYear(value: number) {
+        setField(rt, this, 1, [value]);
+      }
+
+      get month(): number {
+        return field(timeOf(this), 9);
+      }
+
+      set month(value: number) {
+        setField(rt, this, 2, [value]);
+      }
+
+      get date(): number {
+        return field(timeOf(this), 10);
+      }
+
+      set date(value: number) {
+        setField(rt, this, 3, [value]);
+      }
+
+      get hours(): number {
+        return field(timeOf(this), 12);
+      }
+
+      set hours(value: number) {
+        setField(rt, this, 4, [value]);
+      }
+
+      get minutes(): number {
+        return field(timeOf(this), 13);
+      }
+
+      set minutes(value: number) {
+        setField(rt, this, 5, [value]);
+      }
+
+      get seconds(): number {
+        return field(timeOf(this), 14);
+      }
+
+      set seconds(value: number) {
+        setField(rt, this, 6, [value]);
+      }
+
+      get milliseconds(): number {
+        return field(timeOf(this), 15);
+      }
+
+      set milliseconds(value: number) {
+        setField(rt, this, 7, [value]);
+      }
+
+      get fullYearUTC(): number {
+        return field(timeOf(this), 0);
+      }
+
+      set fullYearUTC(value: number) {
+        setField(rt, this, -1, [value]);
+      }
+
+      get monthUTC(): number {
+        return field(timeOf(this), 1);
+      }
+
+      set monthUTC(value: number) {
+        setField(rt, this, -2, [value]);
+      }
+
+      get dateUTC(): number {
+        return field(timeOf(this), 2);
+      }
+
+      set dateUTC(value: number) {
+        setField(rt, this, -3, [value]);
+      }
+
+      get hoursUTC(): number {
+        return field(timeOf(this), 4);
+      }
+
+      set hoursUTC(value: number) {
+        setField(rt, this, -4, [value]);
+      }
+
+      get minutesUTC(): number {
+        return field(timeOf(this), 5);
+      }
+
+      set minutesUTC(value: number) {
+        setField(rt, this, -5, [value]);
+      }
+
+      get secondsUTC(): number {
+        return field(timeOf(this), 6);
+      }
+
+      set secondsUTC(value: number) {
+        setField(rt, this, -6, [value]);
+      }
+
+      get millisecondsUTC(): number {
+        return field(timeOf(this), 7);
+      }
+
+      set millisecondsUTC(value: number) {
+        setField(rt, this, -7, [value]);
+      }
+
+      get time(): number {
+        return timeOf(this);
+      }
+
+      set time(value: number) {
+        (this as AsObject).$time = timeClip(value);
+      }
+
+      get timezoneOffset(): number {
+        return field(timeOf(this), 16);
+      }
+
+      get day(): number {
+        return field(timeOf(this), 11);
+      }
+
+      get dayUTC(): number {
+        return field(timeOf(this), 3);
+      }
+    },
+  dateHook,
+);

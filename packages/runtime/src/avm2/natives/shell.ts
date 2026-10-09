@@ -2,11 +2,6 @@
 // Domain, and its Worker as the one that runs, the primordial, with no
 // others to start.
 
-import type { AsObject, Value } from "../descriptors.js";
-import type { Domain } from "../domain.js";
-import type { ClassHook } from "../hooks.js";
-import type { Runtime } from "../runtime.js";
-import { setStaticVar } from "../traits.js";
 import {
   byteArrayCapacity,
   bytesOf,
@@ -14,7 +9,12 @@ import {
   GLOBAL_MEMORY_MIN_SIZE,
   setDomainMemory,
   utf8,
-} from "./bytearray.js";
+} from "../builtin/flash/utils/ByteArray.js";
+import type { AsObject, Value } from "../descriptors.js";
+import type { Domain } from "../domain.js";
+import type { ClassHook } from "../hooks.js";
+import type { Runtime } from "../runtime.js";
+import { setStaticVar } from "../traits.js";
 import { elements, type Natives, registerNativeClass } from "./define.js";
 
 const started = Date.now();

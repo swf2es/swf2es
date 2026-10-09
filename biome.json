@@ -47,7 +47,21 @@
   },
   "overrides": [
     {
-      "includes": ["packages/runtime/src/avm2/natives/**", "packages/player/src/playerglobal/**"],
+      "includes": ["packages/runtime/src/avm2/builtin/thunks.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noArguments": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "packages/runtime/src/avm2/natives/**",
+        "packages/runtime/src/avm2/builtin/**",
+        "packages/player/src/playerglobal/**"
+      ],
       "linter": {
         "rules": {
           "complexity": {

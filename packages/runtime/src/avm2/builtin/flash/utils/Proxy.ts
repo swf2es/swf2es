@@ -5,11 +5,12 @@
 // callProperty gets the QName and the arguments; for-in asks
 // nextNameIndex, nextName and nextValue.
 
-import type { AsObject, Value } from "../descriptors.js";
-import type { ClassHook, PropertyHook } from "../hooks.js";
-import { type Multiname, NS_Public, namespace, publicNs, qname } from "../names.js";
-import type { Runtime } from "../runtime.js";
-import type { Natives } from "./define.js";
+import type { AsObject, Value } from "../../../descriptors.js";
+import type { PropertyHook } from "../../../hooks.js";
+import { type Multiname, NS_Public, namespace, publicNs, qname } from "../../../names.js";
+import type { Runtime } from "../../../runtime.js";
+import { bindNatives } from "../../bind.js";
+import { ProxyDecl } from "./Proxy.decl.js";
 
 const FLASH_PROXY = namespace(NS_Public, "http://www.adobe.com/2006/actionscript/flash/proxy");
 
@@ -86,13 +87,62 @@ const proxyHook: PropertyHook = {
     rt.toString(call(rt, o, "callProperty", nameFor(rt, qname(publicNs, "toString")))),
 };
 
-export const proxyHooks: Record<string, ClassHook> = {
-  "flash.utils::Proxy": { properties: proxyHook },
-};
+/** A flash_proxy method a subclass does not override: as avmplus' AS3, IllegalOperationError `id`. */
+function unimplemented(rt: Runtime, id: number): never {
+  throw rt.error("flash.errors::IllegalOperationError", id);
+}
 
-export const proxyNatives: Natives = {
-  // As ProxyObject::flash_proxy_isAttribute: whether the name is a QName of an attribute.
-  "flash.utils::Proxy#http://www.adobe.com/2006/actionscript/flash/proxy::isAttribute":
-    () => (name: Value) =>
-      name !== null && typeof name === "object" && name.$local !== undefined && name.$attr === true,
-};
+export const ProxyBuiltin = bindNatives(
+  ProxyDecl,
+  (rt) =>
+    class ProxyNatives {
+      Proxy() {}
+
+      "flash_proxy::getProperty"(_name: Value): Value {
+        return unimplemented(rt, 2088);
+      }
+
+      "flash_proxy::setProperty"(_name: Value, _value: Value): void {
+        unimplemented(rt, 2089);
+      }
+
+      "flash_proxy::callProperty"(_name: Value, ..._rest: Value[]): Value {
+        return unimplemented(rt, 2090);
+      }
+
+      "flash_proxy::hasProperty"(_name: Value): boolean {
+        return unimplemented(rt, 2091);
+      }
+
+      "flash_proxy::deleteProperty"(_name: Value): boolean {
+        return unimplemented(rt, 2092);
+      }
+
+      "flash_proxy::getDescendants"(_name: Value): Value {
+        return unimplemented(rt, 2093);
+      }
+
+      "flash_proxy::nextNameIndex"(_index: number): number {
+        return unimplemented(rt, 2105);
+      }
+
+      "flash_proxy::nextName"(_index: number): string {
+        return unimplemented(rt, 2106);
+      }
+
+      "flash_proxy::nextValue"(_index: number): Value {
+        return unimplemented(rt, 2107);
+      }
+
+      // As ProxyObject::flash_proxy_isAttribute: whether the name is a QName of an attribute.
+      "flash_proxy::isAttribute"(name: Value): boolean {
+        return (
+          name !== null &&
+          typeof name === "object" &&
+          name.$local !== undefined &&
+          name.$attr === true
+        );
+      }
+    },
+  { properties: proxyHook },
+);

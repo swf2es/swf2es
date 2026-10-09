@@ -1,12 +1,10 @@
-// The global functions, bugzilla, and Error.
+// The global functions, and bugzilla.
 
+import { qualifiedClassName } from "../builtin/Object.js";
 import type { Value } from "../descriptors.js";
-import type { ClassHook } from "../hooks.js";
 import { formatClassName } from "../names.js";
-import { errorMessages } from "../player-messages.js";
 import type { Runtime } from "../runtime.js";
 import { type Natives, plain } from "./define.js";
-import { qualifiedClassName } from "./object.js";
 
 /** A String argument as avmplus has it: null, as undefined coerced to String is, as "null". */
 const text = (rt: Runtime, s: Value): string =>
@@ -106,58 +104,4 @@ export const toplevelNatives: Natives = {
   // As Toplevel::bugzilla: the bug fixes the builtins' AS3 asks about, all
   // in effect at the latest SWF version, as avmshell runs.
   bugzilla: plain((n: number) => n === 504525 || n === 574600 || n === 661330),
-
-  // Error
-  // Error.throwError fills in the template's %n: in debugger mode it has some.
-  // The debugger player writes the template as it is, %1 and all; an id it has no text for is the number alone.
-  "Error.getErrorMessage": (rt) => (id: number) =>
-    rt.debugger && errorMessages[id] ? `Error #${id}: ${errorMessages[id]}` : `Error #${id}`,
-  "Error#getStackTrace": plain(() => null),
-};
-
-/**
- * The native error classes, which construct an error when called, as
- * ErrorClass::call does: Error("x") is new Error("x"), not a coercion.
- * flash.errors' are AS3 classes, and coerce.
- */
-const constructs: ClassHook = { call: (rt, cls, args) => rt.constructClass(cls, args) };
-
-/**
- * An AS3 error's JavaScript error, made with it: where it was made, the
- * compiled method's name in it, for a host to show (Runtime.stackOf). The
- * release player has no stack trace for AS3 to read, and getStackTrace
- * still gives null.
- */
-const errorClass: ClassHook = {
-  ...constructs,
-  create: (traits) => {
-    const o = Object.create(traits.proto);
-    // V8 keeps 10 frames, and the runtime's own take most of those before the first AS3 one.
-    const engine = Error as ErrorConstructor & { stackTraceLimit?: number };
-    const limit = engine.stackTraceLimit;
-    engine.stackTraceLimit = 48;
-    Object.defineProperty(o, "$jsError", { value: new Error() });
-    engine.stackTraceLimit = limit;
-    return o;
-  },
-};
-
-export const errorHooks: Record<string, ClassHook> = {
-  ...Object.fromEntries(
-    [
-      "DefinitionError",
-      "EvalError",
-      "RangeError",
-      "ReferenceError",
-      "SecurityError",
-      "SyntaxError",
-      "TypeError",
-      "URIError",
-      "VerifyError",
-      "UninitializedError",
-      "ArgumentError",
-    ].map((name) => [name, constructs]),
-  ),
-  // Its subclasses inherit its create: one of their own would replace it.
-  Error: errorClass,
 };

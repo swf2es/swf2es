@@ -1,69 +1,9 @@
-// RegExp: `this` holds its JavaScript RegExp in $re; and the match
-// arrays String's methods give too.
+// AS3's regular expressions in JavaScript's: avmplus' PCRE patterns and
+// flags translated to a JavaScript RegExp, the match arrays AS3 gives, and
+// replacement text. RegExp's natives and String's use them.
 
-import type { AsObject, Value } from "../descriptors.js";
-import type { ClassHook } from "../hooks.js";
-import type { Runtime } from "../runtime.js";
-import { AS3, type Natives, registerNativeClass } from "./define.js";
-
-/** RegExp's natives, for `rt`: written as a class, each running with the RegExp object as `this`. */
-export function regexpNatives(rt: Runtime): Natives {
-  const natives: Natives = {};
-
-  class RegExpNatives {
-    declare $re: RegExp;
-    declare $source: string;
-    declare $extended: boolean;
-
-    get source(): string {
-      return this.$source;
-    }
-
-    get global(): boolean {
-      return this.$re.global;
-    }
-
-    get ignoreCase(): boolean {
-      return this.$re.ignoreCase;
-    }
-
-    get multiline(): boolean {
-      return this.$re.multiline;
-    }
-
-    get dotall(): boolean {
-      return this.$re.dotAll;
-    }
-
-    get extended(): boolean {
-      return this.$extended;
-    }
-
-    get lastIndex(): number {
-      return this.$re.lastIndex;
-    }
-
-    set lastIndex(i: Value) {
-      this.$re.lastIndex = rt.toInt(i);
-    }
-
-    [`${AS3}::exec`](s: Value = ""): Value {
-      // As RegExpObject::_exec: a global one from before the start fails,
-      // where JavaScript starts from 0.
-      const re: RegExp = this.$re;
-      if (re.global && re.lastIndex < 0) {
-        re.lastIndex = 0;
-        return null;
-      }
-
-      const m = re.exec(rt.toString(s));
-      return m ? matchArray(rt, m) : null;
-    }
-  }
-
-  registerNativeClass(natives, "RegExp", RegExpNatives);
-  return natives;
-}
+import type { AsObject, Value } from "../../descriptors.js";
+import type { Runtime } from "../../runtime.js";
 
 /** A match as AS3 gives it: an Array of the match and its groups, with its index and input. */
 export function matchArray(rt: Runtime, m: RegExpMatchArray): AsObject {
@@ -81,7 +21,7 @@ export function matchArray(rt: Runtime, m: RegExpMatchArray): AsObject {
  * flags g, i, m and s are JavaScript's, and x, extended, drops whitespace
  * and comments from the pattern.
  */
-function newRegExp(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
+export function newRegExp(rt: Runtime, cls: AsObject, args: Value[]): AsObject {
   const [pattern, options] = args;
   const o = cls.$it.instance();
   // A RegExp with flags is a TypeError, as ECMA-262 15.10.4.1 has it.
@@ -568,13 +508,3 @@ const modifiers = (on: string, off: string) => (on || off ? `${on}${off ? `-${of
 /** PCRE's whitespace, which extended mode drops. */
 const isSpace = (c: string) =>
   c === " " || c === "\t" || c === "\n" || c === "\r" || c === "\f" || c === "\v";
-
-export const regexpHooks: Record<string, ClassHook> = {
-  RegExp: {
-    construct: newRegExp,
-    // RegExp.prototype is a RegExp, of the empty pattern, which avmplus writes (?:).
-    prototype: (rt, cls) => newRegExp(rt, cls, ["(?:)"]),
-    call: (rt, cls, args) =>
-      args[0]?.$re instanceof RegExp && args[1] === undefined ? args[0] : newRegExp(rt, cls, args),
-  },
-};

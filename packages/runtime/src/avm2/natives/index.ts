@@ -5,45 +5,32 @@
 // the builtin classes differ from others: how their instances hold native
 // state, and what calling or constructing them does.
 
+import { objectStreamNatives } from "../builtin/flash/utils/ByteArray.js";
+import { classHooks, classNatives } from "../builtin/index.js";
 import type { ClassHook } from "../hooks.js";
 import type { Runtime } from "../runtime.js";
 import { aliasesNatives } from "./aliases.js";
-import { arrayHooks, arrayNatives } from "./array.js";
-import { byteArrayHook, byteArrayNatives } from "./bytearray.js";
 import { concurrentNatives } from "./concurrent.js";
-import { dateHook, dateNatives } from "./date.js";
 import type { Natives } from "./define.js";
 import { describeNatives } from "./describe.js";
-import { dictionaryNatives } from "./dictionary.js";
 import { jsonNatives } from "./json.js";
-import { numberHooks, numberNatives } from "./number.js";
-import { objectHooks, objectNatives } from "./object.js";
-import { proxyHooks, proxyNatives } from "./proxy.js";
-import { regexpHooks, regexpNatives } from "./regexp.js";
+import { objectHooks } from "./object.js";
 import { shellHooks, shellNatives } from "./shell.js";
-import { stringHooks, stringNatives } from "./string.js";
-import { errorHooks, toplevelNatives } from "./toplevel.js";
+import { toplevelNatives } from "./toplevel.js";
 import { vectorHooks, vectorNatives } from "./vector.js";
 import { xmlHooks, xmlNatives } from "./xml/xml.js";
 
 /** The builtins' natives for `rt`: most are the same for every runtime; a class of natives closes over it. */
 export function builtinNatives(rt: Runtime): Natives {
   return {
-    ...objectNatives,
-    ...arrayNatives,
-    ...stringNatives,
-    ...regexpNatives(rt),
-    ...numberNatives,
+    ...classNatives,
     ...toplevelNatives,
     ...describeNatives,
-    ...proxyNatives,
     ...aliasesNatives,
     ...shellNatives(rt),
-    ...dictionaryNatives,
     ...vectorNatives,
-    ...byteArrayNatives(rt),
+    ...objectStreamNatives(rt),
     ...concurrentNatives(rt),
-    ...dateNatives(),
     ...jsonNatives(),
     ...xmlNatives,
   };
@@ -51,17 +38,10 @@ export function builtinNatives(rt: Runtime): Natives {
 
 export function builtinHooks(): Record<string, ClassHook> {
   return {
+    ...classHooks,
     ...objectHooks,
-    ...numberHooks,
-    ...stringHooks,
-    ...arrayHooks,
-    ...regexpHooks,
-    "flash.utils::ByteArray": byteArrayHook,
-    Date: dateHook,
     ...vectorHooks,
     ...xmlHooks,
-    ...proxyHooks,
-    ...errorHooks,
     ...shellHooks,
   };
 }
