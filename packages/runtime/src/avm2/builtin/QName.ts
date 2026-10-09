@@ -8,10 +8,10 @@
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
 import { Namespace } from "../names.js";
-import { newNamespace } from "./xml/xml.js";
 import type { Runtime } from "../runtime.js";
 import { bindNatives } from "./bind.js";
 import { QNameDecl } from "./QName.decl.js";
+import { newNamespace } from "./xml/xml.js";
 
 /** As QNameClass::construct: QName(name) or QName(namespace, name). */
 function newQName(rt: Runtime, cls: AsObject, args: Value[]): AsObject {

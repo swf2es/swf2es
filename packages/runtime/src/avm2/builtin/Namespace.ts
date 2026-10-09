@@ -4,9 +4,9 @@
 import type { Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
 import { Namespace, prefixOf } from "../names.js";
-import { constructNamespace } from "./xml/xml.js";
 import { bindNatives } from "./bind.js";
 import { NamespaceDecl } from "./Namespace.decl.js";
+import { constructNamespace } from "./xml/xml.js";
 
 /** As NamespaceClass: Namespace(), Namespace(uri) or Namespace(prefix, uri). */
 const namespaceHook: ClassHook = {

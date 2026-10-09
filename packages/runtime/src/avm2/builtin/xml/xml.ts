@@ -10,7 +10,7 @@
 // http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Value } from "../../descriptors.js";
-import type { ClassHook, PropertyHook } from "../../hooks.js";
+import type { PropertyHook } from "../../hooks.js";
 import {
   CONSTANT_Qname,
   CONSTANT_QnameA,
@@ -22,9 +22,9 @@ import {
   prefixOf,
   publicNs,
 } from "../../names.js";
+import type { Natives } from "../../natives/define.js";
 import type { Runtime } from "../../runtime.js";
 import type { Traits } from "../../traits.js";
-import { AS3, type Natives } from "../../natives/define.js";
 import { isSpace, isXMLName } from "./chars.js";
 import { escapeAttributeValue, escapeElementValue } from "./escape.js";
 import {
@@ -44,7 +44,7 @@ import * as P from "./parser.js";
 const PREFIX_NOT_BOUND = 1083;
 const BAD_QNAME = 1084;
 const UNTERMINATED_ELEMENT_TAG = 1085;
-const ONLY_ONE_ITEM_LISTS = 1086;
+export const ONLY_ONE_ITEM_LISTS = 1086;
 const ASSIGNMENT_TO_INDEXED_XML = 1087;
 const MARKUP_MUST_BE_WELL_FORMED = 1088;
 const ASSIGNMENT_ONE_ITEM_LISTS = 1089;
@@ -84,7 +84,7 @@ interface E4X {
 
 const states = new WeakMap<Runtime, E4X>();
 
-function e4x(rt: Runtime): E4X {
+export function e4x(rt: Runtime): E4X {
   let state = states.get(rt);
   if (!state) {
     state = {
@@ -107,11 +107,12 @@ const okToPrettyPrint = (e: E4X) => e.prettyPrinting && e.prettyIndent >= 0;
 
 // XML and XMLList values.
 
-const isXML = (v: Value): boolean => typeof v === "object" && v !== null && v.$node !== undefined;
+export const isXML = (v: Value): boolean =>
+  typeof v === "object" && v !== null && v.$node !== undefined;
 const isList = (v: Value): boolean => typeof v === "object" && v !== null && v.$nodes !== undefined;
 
 /** The XML object that stands for `node`, the same each time. */
-function xmlOf(rt: Runtime, node: XMLNode): AsObject {
+export function xmlOf(rt: Runtime, node: XMLNode): AsObject {
   let o = node.object;
   if (!o) {
     o = e4x(rt).xml.instance();
@@ -123,7 +124,11 @@ function xmlOf(rt: Runtime, node: XMLNode): AsObject {
 }
 
 /** A new XMLList, got from `target` by `property`. */
-function newList(rt: Runtime, target: AsObject | null = null, property: XName = ANY): AsObject {
+export function newList(
+  rt: Runtime,
+  target: AsObject | null = null,
+  property: XName = ANY,
+): AsObject {
   const o = e4x(rt).list.instance();
   o.$nodes = [];
   o.$target = target;
@@ -139,7 +144,7 @@ function appendNode(list: AsObject, node: XMLNode): void {
 }
 
 /** As XMLListObject::_append: an XMLList's nodes, and its target, or an XML value's node. */
-function append(list: AsObject, v: Value): void {
+export function append(list: AsObject, v: Value): void {
   if (isList(v)) {
     list.$target = v.$target;
     list.$targetProperty = v.$targetProperty;
@@ -206,7 +211,7 @@ const sameNamespace = (ns: Namespace | null, other: Namespace): boolean =>
  * too, and a name of "*" or starting with "@" as any name or an
  * attribute's.
  */
-function coerce(rt: Runtime, n: XName): XName {
+export function coerce(rt: Runtime, n: XName): XName {
   let namespaces = n.namespaces;
   if (!n.qualified && namespaces !== null) {
     const dxns = rt.defaultXmlNamespace;
@@ -250,7 +255,7 @@ function fromMultiname(mn: Multiname): XName {
  * one. A QName is its local name, in a namespace of its URI; anything else
  * is its string, in the public namespace: "@name" an attribute's, "*" any.
  */
-function toXMLName(rt: Runtime, p: Value): XName {
+export function toXMLName(rt: Runtime, p: Value): XName {
   if (p === null || p === undefined) {
     throw rt.error("TypeError", 1010);
   }
@@ -285,7 +290,7 @@ function toXMLName(rt: Runtime, p: Value): XName {
 }
 
 /** As ToAttributeName and then ToXMLName: an attribute's name for XML's attribute(). */
-function toAttributeName(rt: Runtime, v: Value): XName {
+export function toAttributeName(rt: Runtime, v: Value): XName {
   if (v === null || v === undefined || typeof v === "number" || typeof v === "boolean") {
     throw rt.error("TypeError", 1010);
   }
@@ -367,7 +372,7 @@ export function constructNamespace(rt: Runtime, args: Value[]): Namespace {
 }
 
 /** A QName object of a node's name, as XML's name() gives it. */
-function qnameOf(rt: Runtime, node: XMLNode): AsObject {
+export function qnameOf(rt: Runtime, node: XMLNode): AsObject {
   const q = e4x(rt).qname.instance();
   q.$ns = node.ns;
   q.$local = node.name;
@@ -643,7 +648,7 @@ function copyAttributesAndNamespaces(rt: Runtime, element: XMLNode, tag: P.XMLTa
 // Conversions.
 
 /** As ToXML: XML itself, a one-item XMLList's, or text parsed as one node. */
-function toXML(rt: Runtime, v: Value): AsObject {
+export function toXML(rt: Runtime, v: Value): AsObject {
   if (v === null || v === undefined) {
     throw rt.error("TypeError", v === undefined ? 1010 : 1009);
   }
@@ -694,7 +699,7 @@ function toXML(rt: Runtime, v: Value): AsObject {
 }
 
 /** As ToXMLList: an XMLList itself, XML as a list of it, or text parsed as nodes. */
-function toXMLList(rt: Runtime, v: Value): AsObject {
+export function toXMLList(rt: Runtime, v: Value): AsObject {
   if (v === null || v === undefined) {
     throw rt.error("TypeError", v === undefined ? 1010 : 1009);
   }
@@ -737,12 +742,12 @@ function isWhitespace(s: string): boolean {
   return true;
 }
 
-function deepCopy(rt: Runtime, node: XMLNode): XMLNode {
+export function deepCopy(rt: Runtime, node: XMLNode): XMLNode {
   const e = e4x(rt);
   return node.deepCopy(e.ignoreComments, e.ignoreProcessingInstructions);
 }
 
-function listDeepCopy(rt: Runtime, list: AsObject): AsObject {
+export function listDeepCopy(rt: Runtime, list: AsObject): AsObject {
   fixTarget(rt, list);
   const copy = newList(rt, list.$target, list.$targetProperty);
   for (const node of list.$nodes as XMLNode[]) {
@@ -779,7 +784,7 @@ function issueNotifications(
   }
 }
 
-function childChanges(
+export function childChanges(
   rt: Runtime,
   node: XMLNode,
   type: string,
@@ -815,7 +820,7 @@ function checkCycle(rt: Runtime, x: XMLNode, node: XMLNode): void {
 }
 
 /** As _insert: `value` (an XMLList's nodes, else a node as _replace makes it) at `entry`. */
-function insertAt(rt: Runtime, x: XMLNode, entry: number, value: Value): void {
+export function insertAt(rt: Runtime, x: XMLNode, entry: number, value: Value): void {
   if (x.kind !== ELEMENT) {
     return;
   }
@@ -898,7 +903,7 @@ function replaceAt(
 // XML's internal methods, E4X 9.1.1, on a node, with a name not yet coerced.
 
 /** [[Get]]: the attributes or children the name names, or the node itself as index 0. */
-function getXML(rt: Runtime, o: AsObject, name: XName): Value {
+export function getXML(rt: Runtime, o: AsObject, name: XName): Value {
   const n = coerce(rt, name);
   const index = indexOf(n);
   if (index >= 0) {
@@ -925,7 +930,7 @@ function getXML(rt: Runtime, o: AsObject, name: XName): Value {
 }
 
 /** [[Put]]. */
-function setXML(rt: Runtime, o: AsObject, name: XName, value: Value): void {
+export function setXML(rt: Runtime, o: AsObject, name: XName, value: Value): void {
   const n = coerce(rt, name);
   if (indexOf(n) >= 0) {
     throw rt.error("TypeError", ASSIGNMENT_TO_INDEXED_XML);
@@ -1104,7 +1109,7 @@ function deleteXML(rt: Runtime, o: AsObject, name: XName): boolean {
 }
 
 /** [[HasProperty]]. */
-function hasXML(rt: Runtime, o: AsObject, name: XName): boolean {
+export function hasXML(rt: Runtime, o: AsObject, name: XName): boolean {
   const n = coerce(rt, name);
   const index = indexOf(n);
   if (index >= 0) {
@@ -1120,7 +1125,7 @@ function hasXML(rt: Runtime, o: AsObject, name: XName): boolean {
 }
 
 /** [[Descendants]]: the attributes or elements the name names, in each child, depth first. */
-function descendantsOf(rt: Runtime, node: XMLNode, name: XName): AsObject {
+export function descendantsOf(rt: Runtime, node: XMLNode, name: XName): AsObject {
   const n = coerce(rt, name);
   const list = newList(rt);
   if (n.attribute) {
@@ -1147,7 +1152,7 @@ function descendantsOf(rt: Runtime, node: XMLNode, name: XName): AsObject {
 
 // XMLList's internal methods, E4X 9.2.1.
 
-function getList(rt: Runtime, o: AsObject, n: XName): Value {
+export function getList(rt: Runtime, o: AsObject, n: XName): Value {
   const nodes: XMLNode[] = o.$nodes;
   const index = indexOf(n);
   if (index >= 0) {
@@ -1215,7 +1220,7 @@ function deleteList(rt: Runtime, o: AsObject, n: XName): boolean {
   return true;
 }
 
-function hasList(rt: Runtime, o: AsObject, n: XName): boolean {
+export function hasList(rt: Runtime, o: AsObject, n: XName): boolean {
   const nodes: XMLNode[] = o.$nodes;
   const index = indexOf(n);
   if (index >= 0) {
@@ -1225,7 +1230,7 @@ function hasList(rt: Runtime, o: AsObject, n: XName): boolean {
   return nodes.some((node) => node.kind === ELEMENT && hasXML(rt, xmlOf(rt, node), n));
 }
 
-function descendantsOfList(rt: Runtime, o: AsObject, n: XName): AsObject {
+export function descendantsOfList(rt: Runtime, o: AsObject, n: XName): AsObject {
   const list = newList(rt);
   for (const node of o.$nodes as XMLNode[]) {
     if (node.kind === ELEMENT) {
@@ -1455,7 +1460,7 @@ function setIndex(rt: Runtime, o: AsObject, index: number, value: Value): void {
 }
 
 /** As XMLListObject::delUintProperty: item `index` out of the list, and out of its parent. */
-function deleteIndex(rt: Runtime, o: AsObject, index: number): boolean {
+export function deleteIndex(rt: Runtime, o: AsObject, index: number): boolean {
   const nodes: XMLNode[] = o.$nodes;
   if (index >= nodes.length) {
     return true;
@@ -1640,7 +1645,7 @@ export function xmlToXMLString(rt: Runtime, node: XMLNode): string {
   return out.join("");
 }
 
-function listToXMLString(rt: Runtime, list: AsObject): string {
+export function listToXMLString(rt: Runtime, list: AsObject): string {
   const out: string[] = [];
   const nodes: XMLNode[] = list.$nodes;
   for (let i = 0; i < nodes.length; i++) {
@@ -1655,7 +1660,7 @@ function listToXMLString(rt: Runtime, list: AsObject): string {
 }
 
 /** As XMLObject::toString, E4X 10.1.1: a simple node's text, else its XML. */
-function xmlToString(rt: Runtime, node: XMLNode): string {
+export function xmlToString(rt: Runtime, node: XMLNode): string {
   if (node.kind & (TEXT | CDATA | ATTRIBUTE)) {
     return node.value;
   }
@@ -1674,7 +1679,7 @@ function xmlToString(rt: Runtime, node: XMLNode): string {
   return xmlToXMLString(rt, node);
 }
 
-function listHasSimpleContent(nodes: XMLNode[]): boolean {
+export function listHasSimpleContent(nodes: XMLNode[]): boolean {
   if (nodes.length === 0) {
     return true;
   }
@@ -1686,7 +1691,7 @@ function listHasSimpleContent(nodes: XMLNode[]): boolean {
   return !nodes.some((n) => n.kind === ELEMENT);
 }
 
-function listToString(rt: Runtime, list: AsObject): string {
+export function listToString(rt: Runtime, list: AsObject): string {
   const nodes: XMLNode[] = list.$nodes;
   if (listHasSimpleContent(nodes)) {
     let s = "";
@@ -1806,7 +1811,7 @@ const forward = (rt: Runtime, receiver: Value, mn: Multiname) =>
 
 // The hooks.
 
-const xmlProperties: PropertyHook = {
+export const xmlProperties: PropertyHook = {
   hidesMethods: true,
   get: (rt, o, mn) => getXML(rt, o, fromMultiname(mn)),
   set: (rt, o, mn, v) => setXML(rt, o, fromMultiname(mn), v),
@@ -1836,7 +1841,7 @@ const xmlProperties: PropertyHook = {
   toXMLString: (rt, o) => xmlToXMLString(rt, o.$node),
 };
 
-const listProperties: PropertyHook = {
+export const listProperties: PropertyHook = {
   hidesMethods: true,
   get: (rt, o, mn) => getList(rt, o, coerce(rt, fromMultiname(mn))),
   set: (rt, o, mn, v) => setList(rt, o, coerce(rt, fromMultiname(mn)), v),
@@ -1867,7 +1872,7 @@ const listProperties: PropertyHook = {
   toXMLString: (rt, o) => listToXMLString(rt, o),
 };
 
-function constructXML(rt: Runtime, _cls: AsObject, args: Value[]): Value {
+export function constructXML(rt: Runtime, _cls: AsObject, args: Value[]): Value {
   const v = args[0];
   if (v === null || v === undefined) {
     return toXML(rt, "");
@@ -1881,7 +1886,7 @@ function constructXML(rt: Runtime, _cls: AsObject, args: Value[]): Value {
   return x;
 }
 
-function constructXMLList(rt: Runtime, _cls: AsObject, args: Value[]): Value {
+export function constructXMLList(rt: Runtime, _cls: AsObject, args: Value[]): Value {
   const v = args[0];
   if (v === null || v === undefined) {
     return toXMLList(rt, "");
@@ -1896,69 +1901,14 @@ function constructXMLList(rt: Runtime, _cls: AsObject, args: Value[]): Value {
   return toXMLList(rt, v);
 }
 
-export const xmlHooks: Record<string, ClassHook> = {
-  XML: {
-    properties: xmlProperties,
-    construct: constructXML,
-    call: (rt, _cls, args) =>
-      args[0] === null || args[0] === undefined ? toXML(rt, "") : toXML(rt, args[0]),
-  },
-  XMLList: {
-    properties: listProperties,
-    construct: constructXMLList,
-    call: (rt, _cls, args) =>
-      args[0] === null || args[0] === undefined ? toXMLList(rt, "") : toXMLList(rt, args[0]),
-  },
-};
-
 // The natives.
-
-/** An XML method: `f` with the runtime, on the node. */
-const onXML =
-  (f: (rt: Runtime, o: AsObject, node: XMLNode, ...args: Value[]) => Value) => (rt: Runtime) =>
-    function (this: AsObject, ...args: Value[]) {
-      return f(rt, this, this.$node, ...args);
-    };
-
-/** An XMLList method: `f` with the runtime, on the list and its nodes. */
-const onList =
-  (f: (rt: Runtime, o: AsObject, nodes: XMLNode[], ...args: Value[]) => Value) => (rt: Runtime) =>
-    function (this: AsObject, ...args: Value[]) {
-      return f(rt, this, this.$nodes, ...args);
-    };
-
-/** An XMLList method that only a list of one has: its item's. */
-const onlyOne = (name: string, f: (rt: Runtime, x: AsObject, ...args: Value[]) => Value) =>
-  onList((rt, _o, nodes, ...args) => {
-    if (nodes.length !== 1) {
-      throw rt.error("TypeError", ONLY_ONE_ITEM_LISTS, name);
-    }
-
-    return f(rt, xmlOf(rt, nodes[0]), ...args);
-  });
-
-/** An XMLList method: the XMLList of each element's results, together. */
-const eachElement = (f: (rt: Runtime, x: AsObject, ...args: Value[]) => AsObject) =>
-  onList((rt, o, nodes, ...args) => {
-    const list = newList(rt, o);
-    for (const node of nodes) {
-      if (node.kind === ELEMENT) {
-        const r = f(rt, xmlOf(rt, node), ...args);
-        if (r.$nodes.length) {
-          append(list, r);
-        }
-      }
-    }
-
-    return list;
-  });
 
 /**
  * As maybeEscapeChild, with the fixes of avmshell's SWF version: a child
  * is added as it is, a string as text, and XML already in a tree is first
  * taken out of it.
  */
-function adopt(v: Value): Value {
+export function adopt(v: Value): Value {
   if (isXML(v)) {
     const node: XMLNode = v.$node;
     const i = node.childIndex();
@@ -1972,21 +1922,21 @@ function adopt(v: Value): Value {
 
 const NOT_ELEMENT = TEXT | COMMENT | PROCESSING_INSTRUCTION | ATTRIBUTE | CDATA;
 
-function addNamespace(rt: Runtime, o: AsObject, node: XMLNode, v: Value): AsObject {
+export function addNamespace(rt: Runtime, o: AsObject, node: XMLNode, v: Value): AsObject {
   const ns = newNamespace(rt, v);
   node.addInScopeNamespace(ns);
   nonChildChanges(rt, node, "namespaceAdded", ns);
   return o;
 }
 
-function appendChild(rt: Runtime, o: AsObject, node: XMLNode, child: Value): AsObject {
+export function appendChild(rt: Runtime, o: AsObject, node: XMLNode, child: Value): AsObject {
   const c = adopt(child);
   const children = getXML(rt, o, toXMLName(rt, "*"));
   setIndex(rt, children, node.children.length, c);
   return o;
 }
 
-function insertChild(
+export function insertChild(
   rt: Runtime,
   o: AsObject,
   node: XMLNode,
@@ -2022,7 +1972,7 @@ function insertChild(
   return undefined;
 }
 
-function namespaceOf(rt: Runtime, node: XMLNode, argc: number, prefix: Value): Value {
+export function namespaceOf(rt: Runtime, node: XMLNode, argc: number, prefix: Value): Value {
   const inScope = node.inScopeNamespaces();
   if (!argc) {
     if (node.kind & (TEXT | COMMENT | CDATA | PROCESSING_INSTRUCTION)) {
@@ -2036,7 +1986,7 @@ function namespaceOf(rt: Runtime, node: XMLNode, argc: number, prefix: Value): V
   return inScope.find((ns) => prefixOf(ns) === p) ?? undefined;
 }
 
-function namespaceDeclarations(rt: Runtime, node: XMLNode): AsObject {
+export function namespaceDeclarations(rt: Runtime, node: XMLNode): AsObject {
   const result: Namespace[] = [];
   if (!(node.kind & NOT_ELEMENT)) {
     const ancestors = node.parent ? node.parent.inScopeNamespaces() : [];
@@ -2054,7 +2004,7 @@ function namespaceDeclarations(rt: Runtime, node: XMLNode): AsObject {
   return rt.newArray(result);
 }
 
-function normalize(rt: Runtime, node: XMLNode): void {
+export function normalize(rt: Runtime, node: XMLNode): void {
   const notify = notifyNeeded(node);
   let i = 0;
   while (i < node.children.length) {
@@ -2091,7 +2041,7 @@ function normalize(rt: Runtime, node: XMLNode): void {
   }
 }
 
-function removeNamespace(rt: Runtime, node: XMLNode, v: Value): void {
+export function removeNamespace(rt: Runtime, node: XMLNode, v: Value): void {
   if (node.kind & NOT_ELEMENT) {
     return;
   }
@@ -2121,7 +2071,13 @@ function removeNamespace(rt: Runtime, node: XMLNode, v: Value): void {
   nonChildChanges(rt, node, "namespaceRemoved", ns);
 }
 
-function replace(rt: Runtime, o: AsObject, node: XMLNode, name: Value, value: Value): AsObject {
+export function replace(
+  rt: Runtime,
+  o: AsObject,
+  node: XMLNode,
+  name: Value,
+  value: Value,
+): AsObject {
   if (node.kind & NOT_ELEMENT) {
     return o;
   }
@@ -2168,7 +2124,7 @@ function replace(rt: Runtime, o: AsObject, node: XMLNode, name: Value, value: Va
   return o;
 }
 
-function setLocalName(rt: Runtime, node: XMLNode, name: Value): void {
+export function setLocalName(rt: Runtime, node: XMLNode, name: Value): void {
   if (node.kind & (TEXT | COMMENT | CDATA)) {
     return;
   }
@@ -2188,7 +2144,7 @@ function setLocalName(rt: Runtime, node: XMLNode, name: Value): void {
   }
 }
 
-function setName(rt: Runtime, node: XMLNode, value: Value): void {
+export function setName(rt: Runtime, node: XMLNode, value: Value): void {
   if (node.kind & (TEXT | COMMENT | CDATA)) {
     return;
   }
@@ -2225,7 +2181,7 @@ function setName(rt: Runtime, node: XMLNode, value: Value): void {
   nonChildChanges(rt, node, "nameSet", name, node.name);
 }
 
-function setNamespace(rt: Runtime, node: XMLNode, v: Value): void {
+export function setNamespace(rt: Runtime, node: XMLNode, v: Value): void {
   if (node.kind & (TEXT | COMMENT | PROCESSING_INSTRUCTION | CDATA)) {
     return;
   }
@@ -2245,7 +2201,7 @@ function setNamespace(rt: Runtime, node: XMLNode, v: Value): void {
 }
 
 /** A list of `node`'s children of `kinds`, got from `o`. */
-function childrenOf(rt: Runtime, o: AsObject, node: XMLNode, kinds: number): AsObject {
+export function childrenOf(rt: Runtime, o: AsObject, node: XMLNode, kinds: number): AsObject {
   const list = newList(rt, o);
   for (const child of node.children) {
     if (child.kind & kinds) {
@@ -2256,7 +2212,7 @@ function childrenOf(rt: Runtime, o: AsObject, node: XMLNode, kinds: number): AsO
   return list;
 }
 
-function elements(rt: Runtime, o: AsObject, node: XMLNode, name: Value): AsObject {
+export function elements(rt: Runtime, o: AsObject, node: XMLNode, name: Value): AsObject {
   const n = toXMLName(rt, name);
   const list = newList(rt, o, n);
   for (const child of node.children) {
@@ -2268,7 +2224,12 @@ function elements(rt: Runtime, o: AsObject, node: XMLNode, name: Value): AsObjec
   return list;
 }
 
-function processingInstructions(rt: Runtime, o: AsObject, node: XMLNode, name: Value): AsObject {
+export function processingInstructions(
+  rt: Runtime,
+  o: AsObject,
+  node: XMLNode,
+  name: Value,
+): AsObject {
   const n = toXMLName(rt, name);
   const list = newList(rt, o);
   if (n.attribute) {
@@ -2284,7 +2245,7 @@ function processingInstructions(rt: Runtime, o: AsObject, node: XMLNode, name: V
   return list;
 }
 
-function child(rt: Runtime, o: AsObject, node: XMLNode, name: Value): AsObject {
+export function child(rt: Runtime, o: AsObject, node: XMLNode, name: Value): AsObject {
   const index = parseIndex(rt.toString(name));
   if (index >= 0) {
     const list = newList(rt);
@@ -2298,234 +2259,10 @@ function child(rt: Runtime, o: AsObject, node: XMLNode, name: Value): AsObject {
   return getXML(rt, o, toXMLName(rt, name));
 }
 
-const x = (name: string) => `XML#${AS3}::${name}`;
-const l = (name: string) => `XMLList#${AS3}::${name}`;
-const star = (v: Value) => (v === undefined ? "*" : v);
+/** A name given, or "*" for none. */
+export const star = (v: Value) => (v === undefined ? "*" : v);
 
-/** XML's settings, as its static accessors. */
-const setting = <K extends keyof E4X>(key: K, set: (rt: Runtime, v: Value) => E4X[K]): Natives => ({
-  [`XML.get:${key}`]: (rt) => () => e4x(rt)[key],
-  [`XML.set:${key}`]: (rt) => (v: Value) => {
-    e4x(rt)[key] = set(rt, v);
-  },
-});
-
-const toBoolean = (_rt: Runtime, v: Value) => Boolean(v);
-
+/** The global isXMLName, the E4X native that is not a class's. */
 export const xmlNatives: Natives = {
-  ...setting("ignoreComments", toBoolean),
-  ...setting("ignoreProcessingInstructions", toBoolean),
-  ...setting("ignoreWhitespace", toBoolean),
-  ...setting("prettyPrinting", toBoolean),
-  ...setting("prettyIndent", (rt, v) => rt.toInt(v)),
-
-  [x("toString")]: onXML((rt, _o, node) => xmlToString(rt, node)),
-  [x("toXMLString")]: onXML((rt, _o, node) => xmlToXMLString(rt, node)),
-  [x("hasOwnProperty")]: onXML((rt, o, _node, p) => hasXML(rt, o, toXMLName(rt, p))),
-  [x("propertyIsEnumerable")]: onXML((rt, _o, _node, p) => rt.toString(p) === "0"),
-  [x("addNamespace")]: onXML((rt, o, node, v) => addNamespace(rt, o, node, v)),
-  [x("appendChild")]: onXML((rt, o, node, c) => appendChild(rt, o, node, c)),
-  [x("attribute")]: onXML((rt, o, _node, name) => getXML(rt, o, toAttributeName(rt, name))),
-  [x("attributes")]: onXML((rt, o) => getXML(rt, o, toAttributeName(rt, "*"))),
-  [x("child")]: onXML((rt, o, node, name) => child(rt, o, node, name)),
-  [x("childIndex")]: onXML((_rt, _o, node) => node.childIndex()),
-  [x("children")]: onXML((rt, o) => getXML(rt, o, toXMLName(rt, "*"))),
-  [x("comments")]: onXML((rt, o, node) => childrenOf(rt, o, node, COMMENT)),
-  [x("contains")]: onXML(
-    (_rt, o, node, v) => o === v || (isXML(v) && node.equals(v.$node as XMLNode)),
-  ),
-  [x("copy")]: onXML((rt, _o, node) => xmlOf(rt, deepCopy(rt, node))),
-  [x("descendants")]: onXML((rt, _o, node, name) =>
-    descendantsOf(rt, node, toXMLName(rt, star(name))),
-  ),
-  [x("elements")]: onXML((rt, o, node, name) => elements(rt, o, node, star(name))),
-  [x("hasComplexContent")]: onXML((_rt, _o, node) => node.hasComplexContent()),
-  [x("hasSimpleContent")]: onXML((_rt, _o, node) => node.hasSimpleContent()),
-  [x("inScopeNamespaces")]: onXML((rt, _o, node) => {
-    const list = node.inScopeNamespaces();
-    return rt.newArray(list.length ? list : [publicNs]);
-  }),
-  [x("insertChildAfter")]: onXML((rt, o, node, c1, c2) => insertChild(rt, o, node, c1, c2, true)),
-  [x("insertChildBefore")]: onXML((rt, o, node, c1, c2) => insertChild(rt, o, node, c1, c2, false)),
-  [x("localName")]: onXML((_rt, _o, node) => node.name),
-  [x("name")]: onXML((rt, _o, node) => (node.name === null ? null : qnameOf(rt, node))),
-  "XML#XML::_namespace": onXML((rt, _o, node, prefix, argc) => namespaceOf(rt, node, argc, prefix)),
-  [x("namespaceDeclarations")]: onXML((rt, _o, node) => namespaceDeclarations(rt, node)),
-  [x("nodeKind")]: onXML((_rt, _o, node) => node.nodeKind()),
-  [x("normalize")]: onXML((rt, o, node) => {
-    normalize(rt, node);
-    return o;
-  }),
-  [x("parent")]: onXML((rt, _o, node) => (node.parent ? xmlOf(rt, node.parent) : undefined)),
-  [x("processingInstructions")]: onXML((rt, o, node, name) =>
-    processingInstructions(rt, o, node, star(name)),
-  ),
-  [x("prependChild")]: onXML((rt, o, node, v) => {
-    const c = adopt(v);
-    insertAt(rt, node, 0, c);
-    childChanges(rt, node, "nodeAdded", c);
-    return o;
-  }),
-  [x("removeNamespace")]: onXML((rt, o, node, v) => {
-    removeNamespace(rt, node, v);
-    return o;
-  }),
-  [x("replace")]: onXML((rt, o, node, name, v) => replace(rt, o, node, name, v)),
-  [x("setChildren")]: onXML((rt, o, _node, v) => {
-    setXML(rt, o, toXMLName(rt, "*"), v);
-    return o;
-  }),
-  [x("setLocalName")]: onXML((rt, _o, node, name) => setLocalName(rt, node, name)),
-  [x("setName")]: onXML((rt, _o, node, name) => setName(rt, node, name)),
-  [x("setNamespace")]: onXML((rt, _o, node, ns) => setNamespace(rt, node, ns)),
-  [x("text")]: onXML((rt, o, node) => childrenOf(rt, o, node, TEXT | CDATA)),
-  [x("notification")]: onXML((_rt, _o, node) => node.notification ?? null),
-  [x("setNotification")]: onXML((rt, _o, node, f) => {
-    if (f !== null && f !== undefined && !f.$f) {
-      throw rt.error("ArgumentError", 1508, "f");
-    }
-
-    if (node.kind === ELEMENT) {
-      node.notification = f ?? null;
-    }
-
-    return undefined;
-  }),
-
-  [l("toString")]: onList((rt, o) => listToString(rt, o)),
-  [l("toXMLString")]: onList((rt, o) => listToXMLString(rt, o)),
-  [l("hasOwnProperty")]: onList((rt, o, _nodes, p) => hasList(rt, o, coerce(rt, toXMLName(rt, p)))),
-  [l("propertyIsEnumerable")]: onList((rt, _o, nodes, p) => {
-    const index = rt.toNumber(p);
-    return index >= 0 && index < nodes.length;
-  }),
-  [l("attribute")]: onList((rt, o, _nodes, name) =>
-    getList(rt, o, coerce(rt, toAttributeName(rt, name))),
-  ),
-  [l("attributes")]: onList((rt, o) => getList(rt, o, coerce(rt, toAttributeName(rt, "*")))),
-  [l("child")]: onList((rt, o, nodes, name) => {
-    const list = newList(rt, o);
-    for (const node of nodes) {
-      const r = child(rt, xmlOf(rt, node), node, name);
-      if (r.$nodes.length) {
-        append(list, r);
-      }
-    }
-
-    return list;
-  }),
-  [l("children")]: onList((rt, o) => getList(rt, o, coerce(rt, toXMLName(rt, "*")))),
-  [l("comments")]: eachElement((rt, x) => childrenOf(rt, x, x.$node, COMMENT)),
-  [l("contains")]: onList((rt, _o, nodes, v) =>
-    nodes.some((node) => rt.equals(xmlOf(rt, node), v)),
-  ),
-  [l("copy")]: onList((rt, o) => listDeepCopy(rt, o)),
-  [l("descendants")]: onList((rt, o, _nodes, name) =>
-    descendantsOfList(rt, o, toXMLName(rt, star(name))),
-  ),
-  [l("elements")]: onList((rt, o, nodes, name) => {
-    const list = newList(rt, o, toXMLName(rt, star(name)));
-    for (const node of nodes) {
-      if (node.kind === ELEMENT) {
-        const r = elements(rt, xmlOf(rt, node), node, star(name));
-        if (r.$nodes.length) {
-          append(list, r);
-        }
-      }
-    }
-
-    return list;
-  }),
-  [l("hasComplexContent")]: onList((_rt, _o, nodes) => {
-    if (nodes.length === 1) {
-      return nodes[0].hasComplexContent();
-    }
-
-    return nodes.some((n) => n.kind === ELEMENT);
-  }),
-  [l("hasSimpleContent")]: onList((_rt, _o, nodes) => listHasSimpleContent(nodes)),
-  [l("length")]: onList((_rt, _o, nodes) => nodes.length),
-  [l("name")]: onlyOne("name", (rt, x) => (x.$node.name === null ? null : qnameOf(rt, x.$node))),
-  [l("normalize")]: onList((rt, o, nodes) => {
-    let i = 0;
-    while (i < nodes.length) {
-      const xn = nodes[i];
-      if (xn.kind === ELEMENT) {
-        normalize(rt, xn);
-        i++;
-      } else if (xn.kind & (TEXT | CDATA)) {
-        while (i + 1 < nodes.length && nodes[i + 1].kind & (TEXT | CDATA)) {
-          xn.value += nodes[i + 1].value;
-          deleteIndex(rt, o, i + 1);
-        }
-
-        if (xn.value.length === 0) {
-          deleteIndex(rt, o, i);
-        } else {
-          i++;
-        }
-      } else {
-        i++;
-      }
-    }
-
-    return o;
-  }),
-  [l("parent")]: onList((rt, _o, nodes) => {
-    if (!nodes.length) {
-      return undefined;
-    }
-
-    const parent = nodes[0].parent;
-    if (!parent || nodes.some((n) => n.parent !== parent)) {
-      return undefined;
-    }
-
-    return xmlOf(rt, parent);
-  }),
-  [l("processingInstructions")]: eachElement((rt, x, name) =>
-    processingInstructions(rt, x, x.$node, star(name)),
-  ),
-  [l("text")]: eachElement((rt, x) => childrenOf(rt, x, x.$node, TEXT | CDATA)),
-  [l("addNamespace")]: onlyOne("addNamespace", (rt, x, v) => addNamespace(rt, x, x.$node, v)),
-  [l("appendChild")]: onlyOne("appendChild", (rt, x, c) => appendChild(rt, x, x.$node, c)),
-  [l("childIndex")]: onlyOne("childIndex", (_rt, x) => x.$node.childIndex()),
-  [l("inScopeNamespaces")]: onlyOne("inScopeNamespaces", (rt, x) => {
-    const list = x.$node.inScopeNamespaces();
-    return rt.newArray(list.length ? list : [publicNs]);
-  }),
-  [l("insertChildAfter")]: onlyOne("insertChildAfter", (rt, x, c1, c2) =>
-    insertChild(rt, x, x.$node, c1, c2, true),
-  ),
-  [l("insertChildBefore")]: onlyOne("insertChildBefore", (rt, x, c1, c2) =>
-    insertChild(rt, x, x.$node, c1, c2, false),
-  ),
-  [l("nodeKind")]: onlyOne("nodeKind", (_rt, x) => x.$node.nodeKind()),
-  "XMLList#XMLList::_namespace": onlyOne("namespace", (rt, x, prefix, argc) =>
-    namespaceOf(rt, x.$node, argc, prefix),
-  ),
-  [l("localName")]: onlyOne("localName", (_rt, x) => x.$node.name),
-  [l("namespaceDeclarations")]: onlyOne("namespaceDeclarations", (rt, x) =>
-    namespaceDeclarations(rt, x.$node),
-  ),
-  [l("prependChild")]: onlyOne("prependChild", (rt, x, v) => {
-    const c = adopt(v);
-    insertAt(rt, x.$node, 0, c);
-    childChanges(rt, x.$node, "nodeAdded", c);
-    return x;
-  }),
-  [l("removeNamespace")]: onlyOne("removeNamespace", (rt, x, v) => {
-    removeNamespace(rt, x.$node, v);
-    return x;
-  }),
-  [l("replace")]: onlyOne("replace", (rt, x, name, v) => replace(rt, x, x.$node, name, v)),
-  [l("setChildren")]: onlyOne("setChildren", (rt, x, v) => {
-    setXML(rt, x, toXMLName(rt, "*"), v);
-    return x;
-  }),
-  [l("setLocalName")]: onlyOne("setLocalName", (rt, x, name) => setLocalName(rt, x.$node, name)),
-  [l("setName")]: onlyOne("setName", (rt, x, name) => setName(rt, x.$node, name)),
-  [l("setNamespace")]: onlyOne("setNamespace", (rt, x, ns) => setNamespace(rt, x.$node, ns)),
-
   isXMLName: (rt) => (v: Value) => v !== null && v !== undefined && isXMLName(rt.toString(v)),
 };

@@ -12,6 +12,7 @@
 // derives one (docs/architecture.md, "Modules and the bootstrap").
 
 import { isBound } from "./builtin/bind.js";
+import { escapeAttributeValue, escapeElementValue } from "./builtin/xml/escape.js";
 import { newClass, withId } from "./classes.js";
 import type {
   Abc,
@@ -70,7 +71,6 @@ import {
   qname,
   TypeName,
 } from "./names.js";
-import { escapeAttributeValue, escapeElementValue } from "./builtin/xml/escape.js";
 import { convertDoubleToString } from "./numbers.js";
 import { defaultPrint, memoryFiles, type RuntimeOptions, type ShellFiles } from "./options.js";
 import { errorMessages } from "./player-messages.js";

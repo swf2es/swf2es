@@ -7,6 +7,7 @@
 
 import { objectStreamNatives } from "../builtin/flash/utils/ByteArray.js";
 import { classHooks, classNatives } from "../builtin/index.js";
+import { xmlNatives } from "../builtin/xml/xml.js";
 import type { ClassHook } from "../hooks.js";
 import type { Runtime } from "../runtime.js";
 import { aliasesNatives } from "./aliases.js";
@@ -18,7 +19,6 @@ import { objectHooks } from "./object.js";
 import { shellHooks, shellNatives } from "./shell.js";
 import { toplevelNatives } from "./toplevel.js";
 import { vectorHooks, vectorNatives } from "./vector.js";
-import { xmlHooks, xmlNatives } from "../builtin/xml/xml.js";
 
 /** The builtins' natives for `rt`: most are the same for every runtime; a class of natives closes over it. */
 export function builtinNatives(rt: Runtime): Natives {
@@ -41,7 +41,6 @@ export function builtinHooks(): Record<string, ClassHook> {
     ...classHooks,
     ...objectHooks,
     ...vectorHooks,
-    ...xmlHooks,
     ...shellHooks,
   };
 }

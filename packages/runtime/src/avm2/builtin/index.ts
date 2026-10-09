@@ -23,6 +23,8 @@ import { QNameBuiltin } from "./QName.js";
 import { RegExpBuiltin } from "./RegExp.js";
 import { StringBuiltin } from "./String.js";
 import { uintBuiltin } from "./uint.js";
+import { XMLBuiltin } from "./XML.js";
+import { XMLListBuiltin } from "./XMLList.js";
 
 const classes: BuiltinClass[] = [
   ArrayBuiltin,
@@ -43,6 +45,8 @@ const classes: BuiltinClass[] = [
   RegExpBuiltin,
   StringBuiltin,
   uintBuiltin,
+  XMLBuiltin,
+  XMLListBuiltin,
 ];
 
 export const classNatives: Natives = Object.assign({}, ...classes.map((c) => c.natives));
