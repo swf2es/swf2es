@@ -2,7 +2,6 @@
 // a String parameter's argument is a string or null (see bind.ts).
 
 import type { Value } from "../descriptors.js";
-import type { ClassHook } from "../hooks.js";
 import { lowerCase, upperCase } from "../natives/case.js";
 import { conversion } from "../natives/define.js";
 import { compile, matchArray, replacement as replacementOf } from "../natives/regexp.js";
@@ -76,7 +75,10 @@ function split(rt: Runtime, s: string, delimiter: Value, limit: number): Value {
   return rt.array(limit >= 0 && limit < parts.length ? parts.slice(0, limit) : parts);
 }
 
-export const stringNatives = bindNatives(
+/** String(x) converts, as new String(x) makes, a string. */
+const stringHook = conversion((rt, args) => (args.length ? rt.toString(args[0]) : ""));
+
+export const StringBuiltin = bindNatives(
   StringDecl,
   (rt) =>
     class StringNatives {
@@ -223,8 +225,5 @@ export const stringNatives = bindNatives(
         return this;
       }
     },
+  stringHook,
 );
-
-export const stringHooks: Record<string, ClassHook> = {
-  String: conversion((rt, args) => (args.length ? rt.toString(args[0]) : "")),
-};

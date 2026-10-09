@@ -8,6 +8,7 @@
 // avmplus' AS3: see Runtime.override.
 
 import type { AsObject, Method, TypeRef, Value } from "../descriptors.js";
+import type { ClassHook } from "../hooks.js";
 import { NS_PackageInternal, NS_Public, namespace } from "../names.js";
 import type { Natives } from "../natives/define.js";
 import type { Runtime } from "../runtime.js";
@@ -268,15 +269,22 @@ function memberOf(holder: Record<string, unknown>, member: string): Method {
   return (member.startsWith("get:") ? d?.get : d?.set) as Method;
 }
 
+/** A builtin class's natives, by the names the compiler gives them, and its class hook, by its name. */
+export interface BuiltinClass {
+  natives: Natives;
+  hooks: Record<string, ClassHook>;
+}
+
 /**
- * The natives of class `decl` for the runtime: the members of the class
- * `natives` makes for it, which their types, not this, hold to the
- * declaration (see declare.ts).
+ * Class `decl` for the runtime: the natives of the class `natives` makes
+ * for it, which their types, not this, hold to the declaration (see
+ * declare.ts), and `hook`, how the class differs from others, if it does.
  */
 export function bindNatives<C extends ClassDecl, K extends NativeClass<C>>(
   decl: C,
   natives: (rt: Runtime) => K & Exactly<K, C>,
-): Natives {
+  hook?: ClassHook,
+): BuiltinClass {
   const cls = className(decl);
   const out: Natives = {};
   let made: Holder | null = null;
@@ -316,7 +324,7 @@ export function bindNatives<C extends ClassDecl, K extends NativeClass<C>>(
     add(`${cls}()`, decl.init, (h) => h.prototype[named] as Method);
   }
 
-  return out;
+  return { natives: out, hooks: hook ? { [cls]: hook } : {} };
 }
 
 /** Whether a native was made by bindNatives, and so carries its arity. */

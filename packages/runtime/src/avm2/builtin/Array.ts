@@ -383,221 +383,224 @@ function map(rt: Runtime, o: Value, f: Value, receiver: Value): AsObject {
   return rt.array(out);
 }
 
-export const arrayNatives = bindNatives(ArrayDecl, (rt) => {
-  // As `length = n` in AS3: a subclass's accessor, if it overrides it.
-  const length = (o: AsObject, n: number) => {
-    if (plainArray(rt, o)) {
-      setLength(rt, o, n);
-    } else {
-      rt.setProperty(o, rt.publicName("length"), n);
-    }
-  };
-
-  return class ArrayNatives {
-    // One number is a length, which must be a uint; any other arguments are the elements.
-    Array(this: AsObject, ...args: Value[]) {
-      if (args.length === 1 && typeof args[0] === "number") {
-        const n = rt.toUint(args[0]);
-        if (n !== args[0]) {
-          throw rt.error("RangeError", 1005, args[0]);
-        }
-
-        length(this, n);
-        return;
-      }
-
-      length(this, args.length);
-      if (!sealed(rt, this, args.length)) {
-        for (let i = 0; i < args.length; i++) {
-          this.$a[i] = args[i];
-        }
-      }
+/** How Array differs from other classes (see hooks.ts). */
+const arrayHook: ClassHook = {
+  // A subclass that is not dynamic has no elements from SWF 13 (avmplus'
+  // bugzilla 654807); before, it keeps them, as here.
+  create: (traits, rt) => {
+    const o = withStorage(traits);
+    if (!traits.dynamic && rt.swfVersion >= 13) {
+      o.$a = SEALED_ELEMENTS;
     }
 
-    static "private::_join"(o: Value, sep: Value) {
-      return join(rt, o, sep);
-    }
-
-    static "private::_pop"(o: Value) {
-      return pop(rt, o);
-    }
-
-    static "private::_reverse"(o: Value) {
-      return reverse(rt, o);
-    }
-
-    static "private::_concat"(o: Value, args: Value) {
-      return concat(rt, o, elements(args));
-    }
-
-    static "private::_shift"(o: Value) {
-      return shift(rt, o);
-    }
-
-    static "private::_slice"(o: Value, start: number, end: number) {
-      return slice(rt, o, start, end);
-    }
-
-    static "private::_unshift"(o: AsObject, args: Value) {
-      const a = elements(args);
-      return sealed(rt, o, a.length) ? 0 : o.$a.unshift(...a);
-    }
-
-    static "private::_splice"(o: Value, args: Value) {
-      return splice(rt, o, elements(args));
-    }
-
-    static "private::_sort"(o: Value, args: Value) {
-      return sort(rt, o, elements(args));
-    }
-
-    static "private::_sortOn"(o: Value, names: Value, options: Value) {
-      return sortOn(rt, o, names, options);
-    }
-
-    static "private::_indexOf"(o: Value, v: Value, from: number) {
-      return indexOf(rt, o, v, from);
-    }
-
-    static "private::_lastIndexOf"(o: Value, v: Value, from: number) {
-      return lastIndexOf(rt, o, v, from);
-    }
-
-    static "private::_every"(o: Value, f: Value, receiver: Value) {
-      return every(rt, o, f, receiver);
-    }
-
-    static "private::_filter"(o: Value, f: Value, receiver: Value) {
-      return filter(rt, o, f, receiver);
-    }
-
-    static "private::_forEach"(o: Value, f: Value, receiver: Value) {
-      forEach(rt, o, f, receiver);
-    }
-
-    static "private::_map"(o: Value, f: Value, receiver: Value) {
-      return map(rt, o, f, receiver);
-    }
-
-    static "private::_some"(o: Value, f: Value, receiver: Value) {
-      return some(rt, o, f, receiver);
-    }
-
-    "AS3::insertAt"(this: AsObject, i: number, v: Value) {
-      if (!sealed(rt, this, 1)) {
-        this.$a.splice(i, 0, v);
-      }
-    }
-
-    "AS3::removeAt"(this: AsObject, i: number) {
-      return sealed(rt, this, 0) ? undefined : this.$a.splice(i, 1)[0];
-    }
-
-    get length(): number {
-      return (this as AsObject).$a.length;
-    }
-
-    set length(n: number) {
-      setLength(rt, this, n);
-    }
-
-    // A length that is not a uint is a RangeError (bugzilla 661330).
-    "private::set_length"(this: AsObject, n: Value, _alt: number) {
-      if (!rt.isInstanceOf(n, rt.builtinClass("uint").$it)) {
-        throw rt.error("RangeError", 2108, n);
-      }
-
-      setLength(rt, this, n);
-    }
-
-    "AS3::join"(this: AsObject, sep: Value) {
-      return join(rt, this, sep);
-    }
-
-    "AS3::pop"(this: AsObject) {
-      return sealed(rt, this, 0) ? undefined : this.$a.pop();
-    }
-
-    "AS3::push"(this: AsObject, ...args: Value[]) {
-      return sealed(rt, this, args.length) ? 0 : this.$a.push(...args);
-    }
-
-    "AS3::reverse"(this: AsObject) {
-      return reverse(rt, this);
-    }
-
-    "AS3::concat"(this: AsObject, ...args: Value[]) {
-      return concat(rt, this, args);
-    }
-
-    "AS3::shift"(this: AsObject) {
-      return shift(rt, this);
-    }
-
-    "AS3::slice"(this: AsObject, start: Value, end: Value) {
-      return slice(rt, this, rt.toNumber(start), rt.toNumber(end));
-    }
-
-    "AS3::unshift"(this: AsObject, ...args: Value[]) {
-      return sealed(rt, this, args.length) ? 0 : this.$a.unshift(...args);
-    }
-
-    "AS3::splice"(this: AsObject, ...args: Value[]) {
-      return args.length ? splice(rt, this, args) : undefined;
-    }
-
-    "AS3::sort"(this: AsObject, ...args: Value[]) {
-      return sort(rt, this, args);
-    }
-
-    "AS3::sortOn"(this: AsObject, names: Value, options: Value) {
-      return sortOn(rt, this, names, options);
-    }
-
-    "AS3::indexOf"(this: AsObject, v: Value, from: Value) {
-      return indexOf(rt, this, v, rt.toInt(from));
-    }
-
-    "AS3::lastIndexOf"(this: AsObject, v: Value, from: Value) {
-      return lastIndexOf(rt, this, v, rt.toInt(from));
-    }
-
-    "AS3::every"(this: AsObject, f: Value, receiver: Value) {
-      return every(rt, this, f, receiver);
-    }
-
-    "AS3::filter"(this: AsObject, f: Value, receiver: Value) {
-      return filter(rt, this, f, receiver);
-    }
-
-    "AS3::forEach"(this: AsObject, f: Value, receiver: Value) {
-      forEach(rt, this, f, receiver);
-    }
-
-    "AS3::map"(this: AsObject, f: Value, receiver: Value) {
-      return map(rt, this, f, receiver);
-    }
-
-    "AS3::some"(this: AsObject, f: Value, receiver: Value) {
-      return some(rt, this, f, receiver);
-    }
-  };
-});
-
-export const arrayHooks: Record<string, ClassHook> = {
-  Array: {
-    // A subclass that is not dynamic has no elements from SWF 13 (avmplus'
-    // bugzilla 654807); before, it keeps them, as here.
-    create: (traits, rt) => {
-      const o = withStorage(traits);
-      if (!traits.dynamic && rt.swfVersion >= 13) {
-        o.$a = SEALED_ELEMENTS;
-      }
-
-      return o;
-    },
-    // Array.prototype is an Array, empty.
-    prototype: (_rt, cls) => cls.$it.instance(),
-    call: (rt, cls, args) => rt.constructClass(cls, args),
+    return o;
   },
+  // Array.prototype is an Array, empty.
+  prototype: (_rt, cls) => cls.$it.instance(),
+  call: (rt, cls, args) => rt.constructClass(cls, args),
 };
+
+export const ArrayBuiltin = bindNatives(
+  ArrayDecl,
+  (rt) => {
+    // As `length = n` in AS3: a subclass's accessor, if it overrides it.
+    const length = (o: AsObject, n: number) => {
+      if (plainArray(rt, o)) {
+        setLength(rt, o, n);
+      } else {
+        rt.setProperty(o, rt.publicName("length"), n);
+      }
+    };
+
+    return class ArrayNatives {
+      // One number is a length, which must be a uint; any other arguments are the elements.
+      Array(this: AsObject, ...args: Value[]) {
+        if (args.length === 1 && typeof args[0] === "number") {
+          const n = rt.toUint(args[0]);
+          if (n !== args[0]) {
+            throw rt.error("RangeError", 1005, args[0]);
+          }
+
+          length(this, n);
+          return;
+        }
+
+        length(this, args.length);
+        if (!sealed(rt, this, args.length)) {
+          for (let i = 0; i < args.length; i++) {
+            this.$a[i] = args[i];
+          }
+        }
+      }
+
+      static "private::_join"(o: Value, sep: Value) {
+        return join(rt, o, sep);
+      }
+
+      static "private::_pop"(o: Value) {
+        return pop(rt, o);
+      }
+
+      static "private::_reverse"(o: Value) {
+        return reverse(rt, o);
+      }
+
+      static "private::_concat"(o: Value, args: Value) {
+        return concat(rt, o, elements(args));
+      }
+
+      static "private::_shift"(o: Value) {
+        return shift(rt, o);
+      }
+
+      static "private::_slice"(o: Value, start: number, end: number) {
+        return slice(rt, o, start, end);
+      }
+
+      static "private::_unshift"(o: AsObject, args: Value) {
+        const a = elements(args);
+        return sealed(rt, o, a.length) ? 0 : o.$a.unshift(...a);
+      }
+
+      static "private::_splice"(o: Value, args: Value) {
+        return splice(rt, o, elements(args));
+      }
+
+      static "private::_sort"(o: Value, args: Value) {
+        return sort(rt, o, elements(args));
+      }
+
+      static "private::_sortOn"(o: Value, names: Value, options: Value) {
+        return sortOn(rt, o, names, options);
+      }
+
+      static "private::_indexOf"(o: Value, v: Value, from: number) {
+        return indexOf(rt, o, v, from);
+      }
+
+      static "private::_lastIndexOf"(o: Value, v: Value, from: number) {
+        return lastIndexOf(rt, o, v, from);
+      }
+
+      static "private::_every"(o: Value, f: Value, receiver: Value) {
+        return every(rt, o, f, receiver);
+      }
+
+      static "private::_filter"(o: Value, f: Value, receiver: Value) {
+        return filter(rt, o, f, receiver);
+      }
+
+      static "private::_forEach"(o: Value, f: Value, receiver: Value) {
+        forEach(rt, o, f, receiver);
+      }
+
+      static "private::_map"(o: Value, f: Value, receiver: Value) {
+        return map(rt, o, f, receiver);
+      }
+
+      static "private::_some"(o: Value, f: Value, receiver: Value) {
+        return some(rt, o, f, receiver);
+      }
+
+      "AS3::insertAt"(this: AsObject, i: number, v: Value) {
+        if (!sealed(rt, this, 1)) {
+          this.$a.splice(i, 0, v);
+        }
+      }
+
+      "AS3::removeAt"(this: AsObject, i: number) {
+        return sealed(rt, this, 0) ? undefined : this.$a.splice(i, 1)[0];
+      }
+
+      get length(): number {
+        return (this as AsObject).$a.length;
+      }
+
+      set length(n: number) {
+        setLength(rt, this, n);
+      }
+
+      // A length that is not a uint is a RangeError (bugzilla 661330).
+      "private::set_length"(this: AsObject, n: Value, _alt: number) {
+        if (!rt.isInstanceOf(n, rt.builtinClass("uint").$it)) {
+          throw rt.error("RangeError", 2108, n);
+        }
+
+        setLength(rt, this, n);
+      }
+
+      "AS3::join"(this: AsObject, sep: Value) {
+        return join(rt, this, sep);
+      }
+
+      "AS3::pop"(this: AsObject) {
+        return sealed(rt, this, 0) ? undefined : this.$a.pop();
+      }
+
+      "AS3::push"(this: AsObject, ...args: Value[]) {
+        return sealed(rt, this, args.length) ? 0 : this.$a.push(...args);
+      }
+
+      "AS3::reverse"(this: AsObject) {
+        return reverse(rt, this);
+      }
+
+      "AS3::concat"(this: AsObject, ...args: Value[]) {
+        return concat(rt, this, args);
+      }
+
+      "AS3::shift"(this: AsObject) {
+        return shift(rt, this);
+      }
+
+      "AS3::slice"(this: AsObject, start: Value, end: Value) {
+        return slice(rt, this, rt.toNumber(start), rt.toNumber(end));
+      }
+
+      "AS3::unshift"(this: AsObject, ...args: Value[]) {
+        return sealed(rt, this, args.length) ? 0 : this.$a.unshift(...args);
+      }
+
+      "AS3::splice"(this: AsObject, ...args: Value[]) {
+        return args.length ? splice(rt, this, args) : undefined;
+      }
+
+      "AS3::sort"(this: AsObject, ...args: Value[]) {
+        return sort(rt, this, args);
+      }
+
+      "AS3::sortOn"(this: AsObject, names: Value, options: Value) {
+        return sortOn(rt, this, names, options);
+      }
+
+      "AS3::indexOf"(this: AsObject, v: Value, from: Value) {
+        return indexOf(rt, this, v, rt.toInt(from));
+      }
+
+      "AS3::lastIndexOf"(this: AsObject, v: Value, from: Value) {
+        return lastIndexOf(rt, this, v, rt.toInt(from));
+      }
+
+      "AS3::every"(this: AsObject, f: Value, receiver: Value) {
+        return every(rt, this, f, receiver);
+      }
+
+      "AS3::filter"(this: AsObject, f: Value, receiver: Value) {
+        return filter(rt, this, f, receiver);
+      }
+
+      "AS3::forEach"(this: AsObject, f: Value, receiver: Value) {
+        forEach(rt, this, f, receiver);
+      }
+
+      "AS3::map"(this: AsObject, f: Value, receiver: Value) {
+        return map(rt, this, f, receiver);
+      }
+
+      "AS3::some"(this: AsObject, f: Value, receiver: Value) {
+        return some(rt, this, f, receiver);
+      }
+    };
+  },
+  arrayHook,
+);

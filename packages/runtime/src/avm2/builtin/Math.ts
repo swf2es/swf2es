@@ -109,4 +109,4 @@ export function mathClass(rt: Runtime) {
   };
 }
 
-export const mathNatives = bindNatives(MathDecl, mathClass);
+export const MathBuiltin = bindNatives(MathDecl, mathClass);

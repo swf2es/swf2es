@@ -5,12 +5,11 @@
 
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
-import type { Natives } from "../natives/define.js";
 import { errorMessages } from "../player-messages.js";
 import type { Runtime } from "../runtime.js";
 import { slotKey } from "../traits.js";
 import { ArgumentErrorDecl } from "./ArgumentError.decl.js";
-import { bindNatives } from "./bind.js";
+import { type BuiltinClass, bindNatives } from "./bind.js";
 import { DefinitionErrorDecl } from "./DefinitionError.decl.js";
 import { ErrorDecl } from "./Error.decl.js";
 import { EvalErrorDecl } from "./EvalError.decl.js";
@@ -63,178 +62,6 @@ function construct(rt: Runtime, o: AsObject, message: Value, id: Value, own: str
   }
 }
 
-export const errorNatives: Natives = {
-  ...bindNatives(ErrorDecl, (rt) => {
-    let errorID: string | null = null;
-    return class ErrorNatives {
-      Error(this: AsObject, message: Value, id: Value) {
-        errorID ??= errorIDKey(rt);
-        rt.setProperty(this, rt.publicName("message"), message);
-        this[errorID] = rt.toInt(id);
-        nameFrom(rt, this, rt.builtinClass("Error"));
-      }
-
-      static getErrorMessage(id: number) {
-        return errorMessage(rt, id);
-      }
-
-      // Its message's %1 to %6 the arguments after the id, or nothing where
-      // there are fewer, and the rest of %0 to %9 nothing.
-      static throwError(type: Value, index: number, ...args: Value[]) {
-        const message = errorMessage(rt, index).replace(/%[0-9]/g, (m) => {
-          const n = "123456".indexOf(m[1]);
-          return n >= 0 && n < args.length ? rt.toString(args[n]) : "";
-        });
-        throw rt.construct(type, message, index);
-      }
-
-      getStackTrace() {
-        return null;
-      }
-
-      get errorID(): number {
-        errorID ??= errorIDKey(rt);
-        return (this as AsObject)[errorID];
-      }
-    };
-  }),
-  ...bindNatives(
-    DefinitionErrorDecl,
-    (rt) =>
-      class DefinitionErrorNatives {
-        DefinitionError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, "DefinitionError");
-        }
-      },
-  ),
-  ...bindNatives(
-    EvalErrorDecl,
-    (rt) =>
-      class EvalErrorNatives {
-        EvalError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, "EvalError");
-        }
-      },
-  ),
-  ...bindNatives(
-    RangeErrorDecl,
-    (rt) =>
-      class RangeErrorNatives {
-        RangeError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, "RangeError");
-        }
-      },
-  ),
-  ...bindNatives(
-    ReferenceErrorDecl,
-    (rt) =>
-      class ReferenceErrorNatives {
-        ReferenceError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, "ReferenceError");
-        }
-      },
-  ),
-  ...bindNatives(
-    SecurityErrorDecl,
-    (rt) =>
-      class SecurityErrorNatives {
-        SecurityError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, "SecurityError");
-        }
-      },
-  ),
-  ...bindNatives(
-    SyntaxErrorDecl,
-    (rt) =>
-      class SyntaxErrorNatives {
-        SyntaxError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, "SyntaxError");
-        }
-      },
-  ),
-  ...bindNatives(
-    TypeErrorDecl,
-    (rt) =>
-      class TypeErrorNatives {
-        TypeError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, "TypeError");
-        }
-      },
-  ),
-  ...bindNatives(
-    URIErrorDecl,
-    (rt) =>
-      class URIErrorNatives {
-        URIError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, "URIError");
-        }
-      },
-  ),
-  ...bindNatives(
-    VerifyErrorDecl,
-    (rt) =>
-      class VerifyErrorNatives {
-        VerifyError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, "VerifyError");
-        }
-      },
-  ),
-  ...bindNatives(
-    UninitializedErrorDecl,
-    (rt) =>
-      class UninitializedErrorNatives {
-        UninitializedError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, "UninitializedError");
-        }
-      },
-  ),
-  ...bindNatives(
-    ArgumentErrorDecl,
-    (rt) =>
-      class ArgumentErrorNatives {
-        ArgumentError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, "ArgumentError");
-        }
-      },
-  ),
-  ...bindNatives(
-    IOErrorDecl,
-    (rt) =>
-      class IOErrorNatives {
-        IOError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, null);
-        }
-      },
-  ),
-  ...bindNatives(
-    EOFErrorDecl,
-    (rt) =>
-      class EOFErrorNatives {
-        EOFError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, null);
-        }
-      },
-  ),
-  ...bindNatives(
-    MemoryErrorDecl,
-    (rt) =>
-      class MemoryErrorNatives {
-        MemoryError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, null);
-        }
-      },
-  ),
-  ...bindNatives(
-    IllegalOperationErrorDecl,
-    (rt) =>
-      class IllegalOperationErrorNatives {
-        IllegalOperationError(this: AsObject, message: Value, id: Value) {
-          construct(rt, this, message, id, null);
-        }
-      },
-  ),
-};
-
 /**
  * The native error classes, which construct an error when called, as
  * ErrorClass::call does: Error("x") is new Error("x"), not a coercion.
@@ -262,22 +89,190 @@ const errorClass: ClassHook = {
   },
 };
 
-export const errorHooks: Record<string, ClassHook> = {
-  ...Object.fromEntries(
-    [
-      "DefinitionError",
-      "EvalError",
-      "RangeError",
-      "ReferenceError",
-      "SecurityError",
-      "SyntaxError",
-      "TypeError",
-      "URIError",
-      "VerifyError",
-      "UninitializedError",
-      "ArgumentError",
-    ].map((name) => [name, constructs]),
+/** Error and its subclasses, builtin's and flash.errors'. */
+export const ErrorBuiltins: BuiltinClass[] = [
+  bindNatives(
+    ErrorDecl,
+    (rt) => {
+      let errorID: string | null = null;
+      return class ErrorNatives {
+        Error(this: AsObject, message: Value, id: Value) {
+          errorID ??= errorIDKey(rt);
+          rt.setProperty(this, rt.publicName("message"), message);
+          this[errorID] = rt.toInt(id);
+          nameFrom(rt, this, rt.builtinClass("Error"));
+        }
+
+        static getErrorMessage(id: number) {
+          return errorMessage(rt, id);
+        }
+
+        // Its message's %1 to %6 the arguments after the id, or nothing where
+        // there are fewer, and the rest of %0 to %9 nothing.
+        static throwError(type: Value, index: number, ...args: Value[]) {
+          const message = errorMessage(rt, index).replace(/%[0-9]/g, (m) => {
+            const n = "123456".indexOf(m[1]);
+            return n >= 0 && n < args.length ? rt.toString(args[n]) : "";
+          });
+          throw rt.construct(type, message, index);
+        }
+
+        getStackTrace() {
+          return null;
+        }
+
+        get errorID(): number {
+          errorID ??= errorIDKey(rt);
+          return (this as AsObject)[errorID];
+        }
+      };
+    },
+    errorClass,
   ),
-  // Its subclasses inherit its create: one of their own would replace it.
-  Error: errorClass,
-};
+  bindNatives(
+    DefinitionErrorDecl,
+    (rt) =>
+      class DefinitionErrorNatives {
+        DefinitionError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, "DefinitionError");
+        }
+      },
+    constructs,
+  ),
+  bindNatives(
+    EvalErrorDecl,
+    (rt) =>
+      class EvalErrorNatives {
+        EvalError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, "EvalError");
+        }
+      },
+    constructs,
+  ),
+  bindNatives(
+    RangeErrorDecl,
+    (rt) =>
+      class RangeErrorNatives {
+        RangeError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, "RangeError");
+        }
+      },
+    constructs,
+  ),
+  bindNatives(
+    ReferenceErrorDecl,
+    (rt) =>
+      class ReferenceErrorNatives {
+        ReferenceError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, "ReferenceError");
+        }
+      },
+    constructs,
+  ),
+  bindNatives(
+    SecurityErrorDecl,
+    (rt) =>
+      class SecurityErrorNatives {
+        SecurityError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, "SecurityError");
+        }
+      },
+    constructs,
+  ),
+  bindNatives(
+    SyntaxErrorDecl,
+    (rt) =>
+      class SyntaxErrorNatives {
+        SyntaxError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, "SyntaxError");
+        }
+      },
+    constructs,
+  ),
+  bindNatives(
+    TypeErrorDecl,
+    (rt) =>
+      class TypeErrorNatives {
+        TypeError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, "TypeError");
+        }
+      },
+    constructs,
+  ),
+  bindNatives(
+    URIErrorDecl,
+    (rt) =>
+      class URIErrorNatives {
+        URIError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, "URIError");
+        }
+      },
+    constructs,
+  ),
+  bindNatives(
+    VerifyErrorDecl,
+    (rt) =>
+      class VerifyErrorNatives {
+        VerifyError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, "VerifyError");
+        }
+      },
+    constructs,
+  ),
+  bindNatives(
+    UninitializedErrorDecl,
+    (rt) =>
+      class UninitializedErrorNatives {
+        UninitializedError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, "UninitializedError");
+        }
+      },
+    constructs,
+  ),
+  bindNatives(
+    ArgumentErrorDecl,
+    (rt) =>
+      class ArgumentErrorNatives {
+        ArgumentError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, "ArgumentError");
+        }
+      },
+    constructs,
+  ),
+  bindNatives(
+    IOErrorDecl,
+    (rt) =>
+      class IOErrorNatives {
+        IOError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, null);
+        }
+      },
+  ),
+  bindNatives(
+    EOFErrorDecl,
+    (rt) =>
+      class EOFErrorNatives {
+        EOFError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, null);
+        }
+      },
+  ),
+  bindNatives(
+    MemoryErrorDecl,
+    (rt) =>
+      class MemoryErrorNatives {
+        MemoryError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, null);
+        }
+      },
+  ),
+  bindNatives(
+    IllegalOperationErrorDecl,
+    (rt) =>
+      class IllegalOperationErrorNatives {
+        IllegalOperationError(this: AsObject, message: Value, id: Value) {
+          construct(rt, this, message, id, null);
+        }
+      },
+  ),
+];

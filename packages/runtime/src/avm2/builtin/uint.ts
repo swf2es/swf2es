@@ -1,11 +1,15 @@
 // uint: its methods are Number's, as avmplus' AS3 calls them, on Number(this).
 
 import type { Value } from "../descriptors.js";
+import { conversion } from "../natives/define.js";
 import { bindNatives } from "./bind.js";
 import { toExponentialOf, toFixedOf, toPrecisionOf, toStringOf } from "./Number.js";
 import { uintDecl } from "./uint.decl.js";
 
-export const uintNatives = bindNatives(
+/** uint(x) converts, as new uint(x) makes, a uint. */
+const uintHook = conversion((rt, args) => (args.length ? rt.toUint(args[0]) : 0));
+
+export const uintBuiltin = bindNatives(
   uintDecl,
   (rt) =>
     class uintNatives {
@@ -32,4 +36,5 @@ export const uintNatives = bindNatives(
         return toFixedOf(rt, this, p);
       }
     },
+  uintHook,
 );

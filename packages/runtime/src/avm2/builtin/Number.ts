@@ -2,7 +2,6 @@
 // functions, as avmplus has. int's and uint's methods are Number's.
 
 import type { Value } from "../descriptors.js";
-import type { ClassHook } from "../hooks.js";
 import { conversion } from "../natives/define.js";
 import {
   convertDoubleToString,
@@ -69,65 +68,72 @@ export function toFixedOf(rt: Runtime, n: number, p: Value): string {
   return convert(rt, n, rt.toInt(p), DTOSTR_FIXED);
 }
 
-export const numberNatives = bindNatives(NumberDecl, (rt) => {
-  const math = mathClass(rt);
-  return class NumberNatives {
-    // Its class hook makes new Number(x) x: this never runs on one.
-    Number() {}
+/** Number(x) converts, as new Number(x) makes, a number. */
+const numberHook = conversion((rt, args) => (args.length ? rt.toNumber(args[0]) : 0));
 
-    // Copies of Math's functions, as avmplus has them.
-    static abs = math.abs;
-    static acos = math.acos;
-    static asin = math.asin;
-    static atan = math.atan;
-    static ceil = math.ceil;
-    static cos = math.cos;
-    static exp = math.exp;
-    static floor = math.floor;
-    static log = math.log;
-    static round = math.round;
-    static sin = math.sin;
-    static sqrt = math.sqrt;
-    static tan = math.tan;
-    static atan2 = math.atan2;
-    static pow = math.pow;
-    static max = math.max;
-    static min = math.min;
-    static random = math.random;
+export const NumberBuiltin = bindNatives(
+  NumberDecl,
+  (rt) => {
+    const math = mathClass(rt);
+    return class NumberNatives {
+      // Its class hook makes new Number(x) x: this never runs on one.
+      Number() {}
 
-    static "private::_numberToString"(n: number, radix: number) {
-      return toStringRadix(rt, n, radix);
-    }
+      // Copies of Math's functions, as avmplus has them.
+      static abs = math.abs;
+      static acos = math.acos;
+      static asin = math.asin;
+      static atan = math.atan;
+      static ceil = math.ceil;
+      static cos = math.cos;
+      static exp = math.exp;
+      static floor = math.floor;
+      static log = math.log;
+      static round = math.round;
+      static sin = math.sin;
+      static sqrt = math.sqrt;
+      static tan = math.tan;
+      static atan2 = math.atan2;
+      static pow = math.pow;
+      static max = math.max;
+      static min = math.min;
+      static random = math.random;
 
-    static "private::_convert"(n: number, precision: number, mode: number) {
-      return convert(rt, n, precision, mode);
-    }
+      static "private::_numberToString"(n: number, radix: number) {
+        return toStringRadix(rt, n, radix);
+      }
 
-    static "private::_minValue"() {
-      return Number.MIN_VALUE;
-    }
+      static "private::_convert"(n: number, precision: number, mode: number) {
+        return convert(rt, n, precision, mode);
+      }
 
-    "AS3::toString"(this: number, radix: Value) {
-      return toStringOf(rt, this, radix);
-    }
+      static "private::_minValue"() {
+        return Number.MIN_VALUE;
+      }
 
-    "AS3::valueOf"(this: number) {
-      return this;
-    }
+      "AS3::toString"(this: number, radix: Value) {
+        return toStringOf(rt, this, radix);
+      }
 
-    "AS3::toExponential"(this: number, p: Value) {
-      return toExponentialOf(rt, this, p);
-    }
+      "AS3::valueOf"(this: number) {
+        return this;
+      }
 
-    "AS3::toPrecision"(this: number, p: Value) {
-      return toPrecisionOf(rt, this, p);
-    }
+      "AS3::toExponential"(this: number, p: Value) {
+        return toExponentialOf(rt, this, p);
+      }
 
-    "AS3::toFixed"(this: number, p: Value) {
-      return toFixedOf(rt, this, p);
-    }
-  };
-});
+      "AS3::toPrecision"(this: number, p: Value) {
+        return toPrecisionOf(rt, this, p);
+      }
+
+      "AS3::toFixed"(this: number, p: Value) {
+        return toFixedOf(rt, this, p);
+      }
+    };
+  },
+  numberHook,
+);
 
 // toFixed, toPrecision and toExponential write avmplus' text, which is not
 // JavaScript's, though JavaScript's methods give it for most numbers at a
@@ -211,10 +217,3 @@ export function numberToExponential(n: number, digits: number): string {
 
   return convertDoubleToString(n, DTOSTR_EXPONENTIAL, digits);
 }
-
-export const numberHooks: Record<string, ClassHook> = {
-  int: conversion((rt, args) => (args.length ? rt.toInt(args[0]) : 0)),
-  uint: conversion((rt, args) => (args.length ? rt.toUint(args[0]) : 0)),
-  Number: conversion((rt, args) => (args.length ? rt.toNumber(args[0]) : 0)),
-  Boolean: conversion((_rt, args) => !!args[0]),
-};
