@@ -19,6 +19,7 @@
     "tests/**/*.ts",
     "apps/desktop/*.ts",
     "oracle/*.ts",
+    "tools/**/*.ts",
     "packages/codegen/src/webassembly.d.ts",
     "packages/codegen/stamp.ts"
   ],
