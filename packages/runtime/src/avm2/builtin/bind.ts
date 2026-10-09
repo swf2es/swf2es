@@ -175,23 +175,43 @@ function adapt(rt: Runtime, f: Method, d: MethodDecl): Method {
     return f;
   }
 
-  // Without defaults, each parameter has its argument: a call with fewer,
-  // or more where nothing takes the rest, is refused before it gets here.
+  // A parameter without a default has its argument: a call with fewer, or
+  // more where nothing takes the rest, is refused before it gets here. So
+  // for a few parameters and no rest, fixed shapes do, with no array made:
+  // each default, coerced once here, where its argument is missing.
   const [c0 = same, c1 = same, c2 = same] = coerce.map((c) => c ?? same);
-  if (!anyDefault && !d.rest && !d.arguments) {
+  const [v0, v1, v2] = defaults.map((v, i) => (v === NONE ? undefined : (coerce[i] ?? same)(v)));
+  if (!d.rest && !d.arguments) {
     switch (params.length) {
       case 1:
-        return function (this: AsObject, a: Value) {
-          return f.call(this, c0(a));
-        };
+        return anyDefault
+          ? function (this: AsObject, a: Value) {
+              // biome-ignore lint/complexity/noArguments: how many were given, as a default needs
+              return f.call(this, arguments.length > 0 ? c0(a) : v0);
+            }
+          : function (this: AsObject, a: Value) {
+              return f.call(this, c0(a));
+            };
       case 2:
-        return function (this: AsObject, a: Value, b: Value) {
-          return f.call(this, c0(a), c1(b));
-        };
+        return anyDefault
+          ? function (this: AsObject, a: Value, b: Value) {
+              // biome-ignore lint/complexity/noArguments: how many were given, as a default needs
+              const n = arguments.length;
+              return f.call(this, n > 0 ? c0(a) : v0, n > 1 ? c1(b) : v1);
+            }
+          : function (this: AsObject, a: Value, b: Value) {
+              return f.call(this, c0(a), c1(b));
+            };
       case 3:
-        return function (this: AsObject, a: Value, b: Value, c: Value) {
-          return f.call(this, c0(a), c1(b), c2(c));
-        };
+        return anyDefault
+          ? function (this: AsObject, a: Value, b: Value, c: Value) {
+              // biome-ignore lint/complexity/noArguments: how many were given, as a default needs
+              const n = arguments.length;
+              return f.call(this, n > 0 ? c0(a) : v0, n > 1 ? c1(b) : v1, n > 2 ? c2(c) : v2);
+            }
+          : function (this: AsObject, a: Value, b: Value, c: Value) {
+              return f.call(this, c0(a), c1(b), c2(c));
+            };
     }
   }
 
