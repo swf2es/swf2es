@@ -215,22 +215,18 @@ export class Runtime {
     this.functionTraits = new Traits("Function", this.objectTraits);
     this.functionTraits.dynamic = true;
     this.natives = typeof natives === "function" ? natives(this) : natives;
-    // What each key could begin with as a class's name: "Array" for
-    // "Array#push" (and some prefixes no class has, which cost nothing).
-    for (const key of Object.keys(this.natives)) {
-      for (let i = 0; i < key.length; i++) {
-        const c = key[i];
-        if (c === "#" || c === "." || c === "(") {
-          this.nativeOwners.add(key.slice(0, i));
-        }
+    // The classes whose natives bindNatives made: only theirs can replace AS3 bodies.
+    for (const make of Object.values(this.natives)) {
+      if (isBound(make)) {
+        this.nativeOwners.add(make.owner);
       }
     }
   }
 
-  /** The names classes with natives may have: only theirs are looked at for overrides. */
+  /** The classes with natives bound by their declarations: only theirs are looked at for overrides. */
   private readonly nativeOwners = new Set<string>();
 
-  /** Whether class `qualified` may have natives that replace methods with AS3 bodies. */
+  /** Whether class `qualified` has natives that may replace methods with AS3 bodies. */
   hasNatives(qualified: string): boolean {
     return this.nativeOwners.has(qualified);
   }

@@ -20,8 +20,12 @@ const FLASH_PROXY = "http://www.adobe.com/2006/actionscript/flash/proxy";
 /** A native's argument counts, as the ABC would give them: required, and at most (-1: any). */
 export type Arity = [number, number];
 
-/** A native made by bindNatives: its arity rides on it, for a method whose ABC has a body. */
-export type BoundNative = ((rt: Runtime) => Method) & { arity: Arity };
+/**
+ * A native made by bindNatives: its arity rides on it, for a method whose
+ * ABC has a body, and its class's name, whose methods the runtime looks at
+ * for natives to replace their AS3 bodies.
+ */
+export type BoundNative = ((rt: Runtime) => Method) & { arity: Arity; owner: string };
 
 /** A class of natives as bindNatives reads it: never constructed, its members are them. */
 type Holder = Record<string, unknown> & { prototype: Record<string, unknown> };
@@ -221,6 +225,7 @@ export function bindNatives<C extends ClassDecl, K extends NativeClass<C>>(
       return adapt(rt, memberOf(isStatic ? h : h.prototype, member), d, key);
     }) as BoundNative;
     bound.arity = arity(d);
+    bound.owner = cls;
     out[key] = bound;
   }
 
