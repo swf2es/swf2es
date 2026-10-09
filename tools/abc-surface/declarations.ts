@@ -44,8 +44,9 @@ function split(raw: string): { ns: string; local: string } {
 
 /** What a name's private, protected and internal namespaces are relative to. */
 interface Owner {
-  /** The private namespace's number, once a name in it is seen. */
+  /** The private namespace's number and URI, once a name in it is seen. */
   private?: string;
+  privateUri?: string;
   /** Its package, for internal names; undefined for a script, whose names give theirs. */
   pkg?: string;
   /** Its protected namespace's URI. */
@@ -90,6 +91,7 @@ function declName(raw: string, owner: Owner): [string, number | undefined] {
     default:
       if (kind.startsWith("private#")) {
         owner.private ??= kind;
+        owner.privateUri ??= uri;
         if (owner.private !== kind) {
           throw new Error(`${raw}: a second private namespace in one class or script`);
         }
@@ -113,7 +115,7 @@ function rawName(name: string, api: number | undefined, owner: Owner, ownerKey: 
     case "flash_proxy":
       return one(`namespace:${FLASH_PROXY}`);
     case "private":
-      return one(`private#${ownerKey}`);
+      return one(`private#${ownerKey}:${owner.privateUri}`);
     case "internal":
       return one(`internal:${owner.pkg}`);
     case "protected":
@@ -307,17 +309,31 @@ export function toDeclarations(surface: Surface): ScriptDecl[] {
       head.protectedNs = owner.protected ?? false;
     }
 
+    const statics = traits(c.static, owner);
+    const instance = traits(c.instance, owner);
+    if (owner.privateUri !== undefined && owner.privateUri !== defaultProtected(name)) {
+      head.privateNs = owner.privateUri;
+    }
+
     return {
       ...head,
       name,
       init: methodDecl(c.init),
       classInit: methodDecl(c.classInit),
-      static: traits(c.static, owner),
-      instance: traits(c.instance, owner),
+      static: statics,
+      instance,
     };
   };
 
-  return surface.scripts.map((s) => ({ init: methodDecl(s.init), traits: traits(s.traits, {}) }));
+  return surface.scripts.map((s) => {
+    const owner: Owner = {};
+    const declared = traits(s.traits, owner);
+    return {
+      ...(owner.privateUri !== undefined ? { private: owner.privateUri } : {}),
+      init: methodDecl(s.init),
+      traits: declared,
+    };
+  });
 }
 
 /** A class reference as declared: unversioned and internal names as they are, versioned ones without their version. */
@@ -365,7 +381,7 @@ export function normalize(surface: Surface): Normal {
   const privates = new Map<string, string>();
   const claim = (traits: Trait[], key: string) => {
     for (const t of traits) {
-      const m = t.name.match(/^\{(private#\d+)\}/);
+      const m = t.name.match(/^\{(private#\d+):/);
       if (m) {
         privates.set(m[1], key);
       }
@@ -373,7 +389,7 @@ export function normalize(surface: Surface): Normal {
   };
 
   const name = (raw: string) =>
-    raw.replace(/^\{(private#\d+)\}/, (_, p: string) => `{private#${privates.get(p)}}`);
+    raw.replace(/^\{(private#\d+):/, (_, p: string) => `{private#${privates.get(p)}:`);
 
   // A script's first: a class it names privately is known by that name.
   surface.scripts.forEach((s, i) => {
@@ -460,7 +476,11 @@ export function fromDeclarations(scripts: ScriptDecl[]): Normal {
           c.protectedNs === false
             ? undefined
             : (c.protectedNs ?? (c.interface ? undefined : defaultProtected(c.name)));
-        const inner: Owner = { pkg, protected: protectedNs };
+        const inner: Owner = {
+          pkg,
+          protected: protectedNs,
+          privateUri: c.privateNs ?? defaultProtected(c.name),
+        };
         const flags = (["sealed", "final", "interface"] as const).filter((f) => c[f]);
         return [
           "class",
@@ -503,7 +523,7 @@ export function fromDeclarations(scripts: ScriptDecl[]): Normal {
   return {
     scripts: scripts.map((s, i) => ({
       init: methodNormal(s.init),
-      traits: traits(s.traits, {}, `script${i}`),
+      traits: traits(s.traits, { privateUri: s.private }, `script${i}`),
     })),
   };
 }
@@ -586,7 +606,9 @@ export function writeDeclarations(scripts: ScriptDecl[], dir: string): string[] 
 
   const bodies = scripts.map(
     (s) =>
-      `{ init: ${literal(s.init)}, traits: [\n${scriptTraits(s)
+      `{ ${s.private ? `private: ${JSON.stringify(s.private)}, ` : ""}init: ${literal(s.init)}, traits: [\n${scriptTraits(
+        s,
+      )
         .map((x) => `${x},\n`)
         .join("")}] }`,
   );

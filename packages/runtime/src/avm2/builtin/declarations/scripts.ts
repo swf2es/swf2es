@@ -592,6 +592,7 @@ export const scripts: ScriptDecl[] = [
     ],
   },
   {
+    private: "builtin.as$0",
     init: { avmplus: true },
     traits: [
       { const: "AS3", value: ["namespace", "namespace:http://adobe.com/AS3/2006/builtin"] },

@@ -72,6 +72,8 @@ export interface ClassDecl {
    * in the empty package); false for a class without one, as interfaces are.
    */
   protectedNs?: string | false;
+  /** The URI of its private namespace, when not the usual one, as protectedNs. */
+  privateNs?: string;
   /** The constructor. */
   init: MethodDecl;
   /** The class initializer, which sets up the prototype. */
@@ -81,6 +83,8 @@ export interface ClassDecl {
 }
 
 export interface ScriptDecl {
+  /** The URI of its private namespace, as "File.as$1", if it names anything in it. */
+  private?: string;
   init: MethodDecl;
   traits: TraitDecl[];
 }

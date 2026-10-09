@@ -194,7 +194,7 @@ function readPool(r: Reader): Pool {
     const kind = r.u8();
     const name = uri(strings[r.u30()]);
     const k = NS_KINDS[kind] ?? `ns${kind}`;
-    namespaces.push(kind === 0x05 ? `private#${privates++}` : `${k}:${name}`);
+    namespaces.push(kind === 0x05 ? `private#${privates++}:${name}` : `${k}:${name}`);
   }
 
   const nsSets: string[][] = [[]];
