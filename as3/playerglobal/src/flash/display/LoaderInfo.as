@@ -3,6 +3,7 @@
 
 package flash.display
 {
+	import flash.errors.IllegalOperationError;
 	import flash.events.Event;
 	import flash.events.EventDispatcher;
 	import flash.events.UncaughtErrorEvents;
@@ -35,7 +36,10 @@ package flash.display
 
 		public native function get frameRate():Number;
 
-		public native function get parameters():Object;
+		public function get parameters():Object
+		{
+			return _getArgs();
+		}
 
 		public native function get width():int;
 
@@ -53,7 +57,11 @@ package flash.display
 
 		public native function set childSandboxBridge(obj:Object):void;
 
-		override public native function dispatchEvent(event:Event):Boolean;
+		override public function dispatchEvent(event:Event):Boolean
+		{
+			Error.throwError(IllegalOperationError, 2118);
+			return false;
+		}
 
 		public native function get sameDomain():Boolean;
 
@@ -68,7 +76,10 @@ package flash.display
 		public native function get bytes():ByteArray;
 
 		[API("667")]
-		public native function get uncaughtErrorEvents():UncaughtErrorEvents;
+		public function get uncaughtErrorEvents():UncaughtErrorEvents
+		{
+			return _getUncaughtErrorEvents();
+		}
 
 		// The player's natives (packages/player/src/playerglobal/flash/display/LoaderInfo.ts).
 		private native function _getArgs():Object;

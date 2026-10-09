@@ -42,7 +42,10 @@ package flash.display
 		[API("662")]
 		public native function get currentFrameLabel():String;
 
-		public native function get currentLabels():Array;
+		public function get currentLabels():Array
+		{
+			return currentScene.labels;
+		}
 
 		public native function prevScene():void;
 
