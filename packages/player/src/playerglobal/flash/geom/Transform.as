@@ -5,7 +5,7 @@ package flash.geom {
 
     public class Transform {
         public function Transform(object:DisplayObject) {
-            ctor(displayObject);
+            ctor(object);
         }
 
         // The player's native constructor (Transform.ts).
