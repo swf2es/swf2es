@@ -18,7 +18,7 @@ import { objectHooks } from "./object.js";
 import { shellHooks, shellNatives } from "./shell.js";
 import { toplevelNatives } from "./toplevel.js";
 import { vectorHooks, vectorNatives } from "./vector.js";
-import { xmlHooks, xmlNatives } from "./xml/xml.js";
+import { xmlHooks, xmlNatives } from "../builtin/xml/xml.js";
 
 /** The builtins' natives for `rt`: most are the same for every runtime; a class of natives closes over it. */
 export function builtinNatives(rt: Runtime): Natives {

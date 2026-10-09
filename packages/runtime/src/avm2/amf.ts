@@ -15,7 +15,7 @@
 import { type Bytes, bytesOf, fromUtf8, utf8 } from "./builtin/flash/utils/ByteArray.js";
 import type { AsObject, Value } from "./descriptors.js";
 import { NS_PackageInternal, NS_Public, namespace, publicNs, qname } from "./names.js";
-import { xmlToXMLString } from "./natives/xml/xml.js";
+import { xmlToXMLString } from "./builtin/xml/xml.js";
 import type { Runtime } from "./runtime.js";
 import type { Traits } from "./traits.js";
 

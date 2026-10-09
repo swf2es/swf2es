@@ -20,7 +20,7 @@ export type { Natives } from "./natives/define.js";
 export { type NativeClass, plain, registerNativeClass } from "./natives/define.js";
 export { builtinHooks, builtinNatives } from "./natives/index.js";
 // avmplus' XML tokenizer, which playerglobal's flash.xml.XMLDocument parses with too.
-export { XMLParser, XMLTag } from "./natives/xml/parser.js";
+export { XMLParser, XMLTag } from "./builtin/xml/parser.js";
 export type { RuntimeOptions, ShellFiles } from "./options.js";
 export { errorMessages } from "./player-messages.js";
 export { Runtime } from "./runtime.js";

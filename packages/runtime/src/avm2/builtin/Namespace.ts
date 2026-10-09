@@ -4,7 +4,7 @@
 import type { Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
 import { Namespace, prefixOf } from "../names.js";
-import { constructNamespace } from "../natives/xml/xml.js";
+import { constructNamespace } from "./xml/xml.js";
 import { bindNatives } from "./bind.js";
 import { NamespaceDecl } from "./Namespace.decl.js";
 

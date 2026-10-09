@@ -70,7 +70,7 @@ import {
   qname,
   TypeName,
 } from "./names.js";
-import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
+import { escapeAttributeValue, escapeElementValue } from "./builtin/xml/escape.js";
 import { convertDoubleToString } from "./numbers.js";
 import { defaultPrint, memoryFiles, type RuntimeOptions, type ShellFiles } from "./options.js";
 import { errorMessages } from "./player-messages.js";

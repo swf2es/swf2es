@@ -8,7 +8,7 @@
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
 import { Namespace } from "../names.js";
-import { newNamespace } from "../natives/xml/xml.js";
+import { newNamespace } from "./xml/xml.js";
 import type { Runtime } from "../runtime.js";
 import { bindNatives } from "./bind.js";
 import { QNameDecl } from "./QName.decl.js";
