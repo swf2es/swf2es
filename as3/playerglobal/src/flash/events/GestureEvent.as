@@ -8,7 +8,9 @@ package flash.events
 	{
 		public function GestureEvent(type:String, bubbles:Boolean = true, cancelable:Boolean = false, phase:String = null, localX:Number = 0, localY:Number = 0, ctrlKey:Boolean = false, altKey:Boolean = false, shiftKey:Boolean = false, commandKey:Boolean = false, controlKey:Boolean = false)
 		{
-			super(type);
+			super(type, bubbles, cancelable);
+			this.localX = localX;
+			this.localY = localY;
 		}
 
 		public static const GESTURE_TWO_FINGER_TAP:String = "gestureTwoFingerTap";

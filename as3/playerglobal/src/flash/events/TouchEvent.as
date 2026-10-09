@@ -11,7 +11,9 @@ package flash.events
 	{
 		public function TouchEvent(type:String, bubbles:Boolean = true, cancelable:Boolean = false, touchPointID:int = 0, isPrimaryTouchPoint:Boolean = false, localX:Number = NaN, localY:Number = NaN, sizeX:Number = NaN, sizeY:Number = NaN, pressure:Number = NaN, relatedObject:InteractiveObject = null, ctrlKey:Boolean = false, altKey:Boolean = false, shiftKey:Boolean = false, arg14:Boolean = false, arg15:Boolean = false, arg16:Number = NaN, arg17:String = "unknown", arg18:ByteArray = null, arg19:Boolean = false)
 		{
-			super(type);
+			super(type, bubbles, cancelable);
+			this.localX = localX;
+			this.localY = localY;
 		}
 
 		public static const TOUCH_BEGIN:String = "touchBegin";

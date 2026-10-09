@@ -7,6 +7,15 @@ package flash.filters
 	{
 		public function ConvolutionFilter(matrixX:Number = 0, matrixY:Number = 0, matrix:Array = null, divisor:Number = 1, bias:Number = 0, preserveAlpha:Boolean = true, clamp:Boolean = true, color:uint = 0, alpha:Number = 0)
 		{
+			this.matrixX = matrixX;
+			this.matrixY = matrixY;
+			this.matrix = matrix;
+			this.divisor = divisor;
+			this.bias = bias;
+			this.preserveAlpha = preserveAlpha;
+			this.clamp = clamp;
+			this.color = color;
+			this.alpha = alpha;
 		}
 
 		public native function get matrix():Array;

@@ -10,6 +10,15 @@ package flash.filters
 	{
 		public function DisplacementMapFilter(mapBitmap:BitmapData = null, mapPoint:Point = null, componentX:uint = 0, componentY:uint = 0, scaleX:Number = 0, scaleY:Number = 0, mode:String = "wrap", color:uint = 0, alpha:Number = 0)
 		{
+			this.mapBitmap = mapBitmap;
+			this.mapPoint = mapPoint;
+			this.componentX = componentX;
+			this.componentY = componentY;
+			this.scaleX = scaleX;
+			this.scaleY = scaleY;
+			this.mode = mode;
+			this.color = color;
+			this.alpha = alpha;
 		}
 
 		public native function get mapBitmap():BitmapData;

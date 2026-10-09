@@ -7,6 +7,18 @@ package flash.filters
 	{
 		public function BevelFilter(distance:Number = 4, angle:Number = 45, highlightColor:uint = 16777215, highlightAlpha:Number = 1, shadowColor:uint = 0, shadowAlpha:Number = 1, blurX:Number = 4, blurY:Number = 4, strength:Number = 1, quality:int = 1, type:String = "inner", knockout:Boolean = false)
 		{
+			this.distance = distance;
+			this.angle = angle;
+			this.highlightColor = highlightColor;
+			this.highlightAlpha = highlightAlpha;
+			this.shadowColor = shadowColor;
+			this.shadowAlpha = shadowAlpha;
+			this.blurX = blurX;
+			this.blurY = blurY;
+			this.strength = strength;
+			this.quality = quality;
+			this.type = type;
+			this.knockout = knockout;
 		}
 
 		public native function get distance():Number;

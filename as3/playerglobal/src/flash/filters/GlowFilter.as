@@ -7,6 +7,14 @@ package flash.filters
 	{
 		public function GlowFilter(color:uint = 16711680, alpha:Number = 1, blurX:Number = 6, blurY:Number = 6, strength:Number = 2, quality:int = 1, inner:Boolean = false, knockout:Boolean = false)
 		{
+			this.color = color;
+			this.alpha = alpha;
+			this.blurX = blurX;
+			this.blurY = blurY;
+			this.strength = strength;
+			this.quality = quality;
+			this.inner = inner;
+			this.knockout = knockout;
 		}
 
 		public native function get color():uint;

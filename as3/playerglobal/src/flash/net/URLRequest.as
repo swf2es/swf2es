@@ -7,6 +7,7 @@ package flash.net
 	{
 		public function URLRequest(url:String = null)
 		{
+			this.url = url;
 		}
 
 		public native function get url():String;

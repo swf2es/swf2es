@@ -9,7 +9,15 @@ package flash.events
 	{
 		public function MouseEvent(type:String, bubbles:Boolean = true, cancelable:Boolean = false, localX:Number = void 0, localY:Number = void 0, relatedObject:InteractiveObject = null, ctrlKey:Boolean = false, altKey:Boolean = false, shiftKey:Boolean = false, buttonDown:Boolean = false, delta:int = 0, arg11:Boolean = false, arg12:Boolean = false, arg13:int = 0)
 		{
-			super(type);
+			super(type, bubbles, cancelable);
+			this.localX = localX;
+			this.localY = localY;
+			this.relatedObject = relatedObject;
+			this.ctrlKey = ctrlKey;
+			this.altKey = altKey;
+			this.shiftKey = shiftKey;
+			this.buttonDown = buttonDown;
+			this.delta = delta;
 		}
 
 		public static const CLICK:String = "click";

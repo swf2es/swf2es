@@ -7,6 +7,9 @@ package flash.net
 	{
 		public function FileFilter(description:String, extension:String, macType:String = null)
 		{
+			this.description = description;
+			this.extension = extension;
+			this.macType = macType;
 		}
 
 		public native function get description():String;

@@ -6,7 +6,7 @@ package flash.events
 	{
 		public function TextEvent(type:String, bubbles:Boolean = false, cancelable:Boolean = false, text:String = "")
 		{
-			super(type);
+			super(type, bubbles, cancelable);
 		}
 
 		public static const LINK:String = "link";

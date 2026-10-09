@@ -8,7 +8,9 @@ package flash.events
 	{
 		public function PressAndTapGestureEvent(type:String, bubbles:Boolean = true, cancelable:Boolean = false, phase:String = null, localX:Number = 0, localY:Number = 0, tapLocalX:Number = 0, tapLocalY:Number = 0, ctrlKey:Boolean = false, altKey:Boolean = false, shiftKey:Boolean = false, controlKey:Boolean = false, arg12:Boolean = false)
 		{
-			super(type);
+			super(type, bubbles, cancelable, phase, localX, localY);
+			this.tapLocalX = tapLocalX;
+			this.tapLocalY = tapLocalY;
 		}
 
 		public static const GESTURE_PRESS_AND_TAP:String = "gesturePressAndTap";

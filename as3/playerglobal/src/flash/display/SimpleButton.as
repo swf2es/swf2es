@@ -9,6 +9,10 @@ package flash.display
 	{
 		public function SimpleButton(upState:DisplayObject = null, overState:DisplayObject = null, downState:DisplayObject = null, hitTestState:DisplayObject = null)
 		{
+			this.upState = upState;
+			this.overState = overState;
+			this.downState = downState;
+			this.hitTestState = hitTestState;
 		}
 
 		public native function get useHandCursor():Boolean;

@@ -7,7 +7,7 @@ package flash.events
 	{
 		public function KeyboardEvent(type:String, bubbles:Boolean = true, cancelable:Boolean = false, charCodeValue:uint = 0, keyCodeValue:uint = 0, keyLocationValue:uint = 0, ctrlKeyValue:Boolean = false, altKeyValue:Boolean = false, shiftKeyValue:Boolean = false, controlKeyValue:Boolean = false, commandKeyValue:Boolean = false)
 		{
-			super(type);
+			super(type, bubbles, cancelable);
 		}
 
 		public static const KEY_DOWN:String = "keyDown";

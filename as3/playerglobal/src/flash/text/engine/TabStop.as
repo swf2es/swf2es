@@ -8,6 +8,9 @@ package flash.text.engine
 	{
 		public function TabStop(alignment:String = "start", position:Number = 0, decimalAlignmentToken:String = "")
 		{
+			this.alignment = alignment;
+			this.position = position;
+			this.decimalAlignmentToken = decimalAlignmentToken;
 		}
 
 		public native function get alignment():String;

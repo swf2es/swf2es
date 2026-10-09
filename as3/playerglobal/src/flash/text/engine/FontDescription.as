@@ -8,6 +8,12 @@ package flash.text.engine
 	{
 		public function FontDescription(fontName:String = "_serif", fontWeight:String = "normal", fontPosture:String = "normal", fontLookup:String = "device", renderingMode:String = "cff", cffHinting:String = "horizontalStem")
 		{
+			this.fontName = fontName;
+			this.fontWeight = fontWeight;
+			this.fontPosture = fontPosture;
+			this.fontLookup = fontLookup;
+			this.renderingMode = renderingMode;
+			this.cffHinting = cffHinting;
 		}
 
 		public static native function isFontCompatible(fontName:String, fontWeight:String, fontPosture:String):Boolean;
