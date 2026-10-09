@@ -90,7 +90,7 @@ function className(decl: ClassDecl): string {
 function arity(d: MethodDecl): Arity {
   const params = d.params ?? [];
   const required = params.filter((p) => typeof p === "string").length;
-  return [required, d.rest || d.arguments ? -1 : params.length];
+  return [required, d.rest || d.arguments || d.ignoreRest ? -1 : params.length];
 }
 
 /**
