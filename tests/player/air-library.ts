@@ -12,7 +12,7 @@ import { runOracle } from "../../oracle/oracle.ts";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const playerglobal = "packages/player/src/playerglobal/";
-const SOURCES = ["air/net/WebSocket.as", "flash/events/WebSocketEvent.as"];
+export const SOURCES = ["air/net/WebSocket.as", "flash/events/WebSocketEvent.as"];
 export const GENERATED = `${root}${playerglobal}air-library.ts`;
 
 // U+E294, API version 0 (VM_ALLVERSIONS), in UTF-8. Loaded as a builtin, an
