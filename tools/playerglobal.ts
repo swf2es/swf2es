@@ -1,15 +1,14 @@
 // Our playerglobal.abc, from the AS3 under as3/playerglobal/src/:
 // compiled as avmplus compiles its own libraries, with ASC 1 (the Flex
 // SDK's, in the oracle's image) as a builtin library over builtin.abc, with
-// API versioning. Its `native` methods are the player's TypeScript natives.
+// API versioning, and the AS3 namespace open as Ruffle's sources expect.
+// Its `native` methods are the player's TypeScript natives.
 //
 //   node tools/playerglobal.ts [--check]
 //
 // writes tests/player/out/playerglobal/playerglobal.abc; --check then holds
-// each class it defines to the same class in Flash Player's playerglobal.abc
-// (tests/player/out/libraries/, from the oracle's image), as SWFs see it.
-// While only some packages are ours, Flash Player's is imported for the
-// types the rest name.
+// its classes to Flash Player's playerglobal.abc (tests/player/out/libraries/,
+// from the oracle's image), as SWFs see them.
 
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -57,29 +56,14 @@ export function sourcesChanged(): number {
   return Math.max(...sources(SOURCES).map((f) => statSync(join(root, f)).mtimeMs));
 }
 
-export interface BuildOptions {
-  /** Where to write playerglobal.abc, in the repository, which the container sees. */
-  outDir?: string;
-  /** Flash Player's playerglobal.abc, for the types ours does not define yet. */
-  flash?: string;
-  /** Sources to leave out, as paths under as3/playerglobal/src/. */
-  without?: string[];
-}
-
-export function build({
-  outDir = join(root, OUT),
-  flash = join(root, FLASH),
-  without = [],
-}: BuildOptions = {}): Uint8Array {
-  const left = new Set(without.map((s) => join(SOURCES, s)));
-  const files = sources(SOURCES)
-    .filter((f) => !left.has(f))
-    .sort();
+/** Compile our playerglobal into `outDir`, in the repository, which the container sees. */
+export function build(outDir = join(root, OUT)): Uint8Array {
+  const files = sources(SOURCES).sort();
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
   const asc = [
     "java -ea -DAS3 -DAVMPLUS -classpath /opt/flex/lib/asc.jar macromedia.asc.embedding.ScriptCompiler",
-    `-import ${BUILTIN} -import ${relative(root, flash)} -builtin -apiversioning -strict`,
+    `-import ${BUILTIN} -builtin -apiversioning -strict -AS3`,
     `-outdir ${relative(root, outDir)} -out playerglobal`,
     ...files,
   ].join(" ");
@@ -111,13 +95,40 @@ const number = (v: unknown) =>
     ? ["number", Number(v[1])]
     : (v ?? null);
 
+/** A name with its namespace set in one order: the set is what a SWF sees, not its order. */
+function sorted(name: string): string {
+  const m = name.match(/^\{(.*)\}::(.*)$/);
+  return m ? `{${m[1].split(",").sort().join(",")}}::${m[2]}` : name;
+}
+
 function shapes(abc: Uint8Array): Map<string, Shape> {
   const out = new Map<string, Shape>();
   const visible = (name: string) =>
     !name.startsWith("{") || /^\{(package|protected|staticprotected|namespace)/.test(name);
   for (const script of readSurface(abc).scripts) {
     for (const t of script.traits) {
+      // A definition in an internal namespace is the library's own.
+      if (!t.name.startsWith("{package:")) {
+        continue;
+      }
+
+      const qualified = t.name.replace(/^\{[^:}]*:([^@,}]*)[^}]*\}::/, "$1::");
       if (t.kind !== "class") {
+        const definition =
+          "method" in t
+            ? {
+                params: t.method.params.map((p) => [p.type, number(p.default)]),
+                returns: t.method.returns,
+              }
+            : "type" in t
+              ? { type: t.type, value: number(t.value) }
+              : {};
+        out.set(
+          qualified,
+          new Map([
+            ["(definition)", JSON.stringify({ name: sorted(t.name), kind: t.kind, ...definition })],
+          ]),
+        );
         continue;
       }
 
@@ -126,7 +137,7 @@ function shapes(abc: Uint8Array): Map<string, Shape> {
       shape.set(
         "(class)",
         JSON.stringify({
-          name: t.name,
+          name: sorted(t.name),
           super: c.super,
           flags: c.flags,
           interfaces: c.interfaces.map((i) => i.replace(/^\{.*\}::/, "")),
@@ -153,22 +164,32 @@ function shapes(abc: Uint8Array): Map<string, Shape> {
               : "type" in m
                 ? { type: m.type, value: number(m.value) }
                 : {};
-          shape.set(`${side} ${m.kind} ${m.name}`, JSON.stringify(body));
+          shape.set(`${side} ${m.kind} ${sorted(m.name)}`, JSON.stringify(body));
         }
       }
 
-      out.set(t.name.replace(/^\{[^}]*\}::|^.*::/, ""), shape);
+      out.set(qualified, shape);
     }
   }
 
   return out;
 }
 
+// What Flash Player 32's playerglobal has (fpdownload.macromedia.com's
+// playerglobal32_0.swc) and the oracle's, older, lacks: ours has it too.
+const NEWER = new Set([
+  "flash.display3D::Context3DProfile static const STANDARD_CONSTRAINED",
+  "flash.display3D::Context3DProfile static const STANDARD_EXTENDED",
+  "flash.ui::ContextMenuBuiltInItems instance method clone",
+  "flash.net.drm::DRMDeviceGroup instance getter serverURL",
+]);
+
 /** Each difference between our classes and Flash Player's same ones, as a line. */
 export function check(ours: Uint8Array, flash: Uint8Array): string[] {
   const theirs = shapes(flash);
   const out: string[] = [];
-  for (const [name, mine] of shapes(ours)) {
+  const mine = shapes(ours);
+  for (const [name, shape] of mine) {
     const ref = theirs.get(name);
     if (!ref) {
       out.push(`${name}: not Flash Player's`);
@@ -176,15 +197,21 @@ export function check(ours: Uint8Array, flash: Uint8Array): string[] {
     }
 
     for (const [key, v] of ref) {
-      if (mine.get(key) !== v) {
-        out.push(`${name} ${key}\n    Flash ${v}\n    ours  ${mine.get(key) ?? "(missing)"}`);
+      if (shape.get(key) !== v) {
+        out.push(`${name} ${key}\n    Flash ${v}\n    ours  ${shape.get(key) ?? "(missing)"}`);
       }
     }
 
-    for (const key of mine.keys()) {
-      if (!ref.has(key)) {
+    for (const key of shape.keys()) {
+      if (!ref.has(key) && !NEWER.has(`${name} ${key.replace(/\{[^}]*\}::/, "")}`)) {
         out.push(`${name} ${key}: only ours`);
       }
+    }
+  }
+
+  for (const name of theirs.keys()) {
+    if (!mine.has(name)) {
+      out.push(`${name}: missing`);
     }
   }
 
@@ -203,7 +230,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     }
 
     console.log(
-      `${shapes(abc).size} classes, ${differences.length} differences from Flash Player's`,
+      `${shapes(abc).size} definitions, ${differences.length} differences from Flash Player's`,
     );
     process.exitCode = differences.length ? 1 : 0;
   }

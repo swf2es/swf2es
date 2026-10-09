@@ -1,0 +1,71 @@
+// Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts).
+
+package flash.display3D
+{
+	import flash.display.BitmapData;
+	import flash.display3D.textures.CubeTexture;
+	import flash.display3D.textures.RectangleTexture;
+	import flash.display3D.textures.Texture;
+	import flash.display3D.textures.TextureBase;
+	import flash.events.EventDispatcher;
+	import flash.geom.Matrix3D;
+	import flash.geom.Rectangle;
+	import flash.utils.ByteArray;
+
+	[API("674")]
+	public final class Context3D extends EventDispatcher
+	{
+		public function Context3D()
+		{
+		}
+
+		public native function get driverInfo():String;
+		public native function dispose(recreate:Boolean = true):void;
+		public native function get enableErrorChecking():Boolean;
+		public native function set enableErrorChecking(enable:Boolean):void;
+		public native function configureBackBuffer(width:int, height:int, antiAlias:int, enableDepthAndStencil:Boolean = true, wantsBestResolution:Boolean = false, wantsBestResolutionOnBrowserZoom:Boolean = false):void;
+		public native function clear(red:Number = 0, green:Number = 0, blue:Number = 0, alpha:Number = 1, depth:Number = 1, stencil:uint = 0, mask:uint = 4294967295):void;
+		public native function drawTriangles(indexBuffer:IndexBuffer3D, firstIndex:int = 0, numTriangles:int = -1):void;
+		public native function present():void;
+		public native function setProgram(program:Program3D):void;
+		public native function setProgramConstantsFromVector(programType:String, firstRegister:int, data:Vector.<Number>, numRegisters:int = -1):void;
+		public native function setProgramConstantsFromMatrix(programType:String, firstRegister:int, matrix:Matrix3D, transposedMatrix:Boolean = false):void;
+		[API("676")]
+		public native function setProgramConstantsFromByteArray(programType:String, firstRegister:int, numRegisters:int, data:ByteArray, dataOffset:uint):void;
+		public native function setVertexBufferAt(index:int, buffer:VertexBuffer3D, bufferOffset:int = 0, format:String = "float4"):void;
+		public native function setBlendFactors(sourceFactor:String, destinationFactor:String):void;
+		public native function setColorMask(red:Boolean, green:Boolean, blue:Boolean, alpha:Boolean):void;
+		public native function setDepthTest(depthMask:Boolean, passCompareMode:String):void;
+		public native function setTextureAt(sampler:int, texture:TextureBase):void;
+		public native function setRenderToTexture(texture:TextureBase, enableDepthAndStencil:Boolean = false, antiAlias:int = 0, surfaceSelector:int = 0, colorOutputIndex:int = 0):void;
+		public native function setRenderToBackBuffer():void;
+		public native function setCulling(triangleFaceToCull:String):void;
+		public native function setStencilActions(triangleFace:String = "frontAndBack", compareMode:String = "always", actionOnBothPass:String = "keep", actionOnDepthFail:String = "keep", actionOnDepthPassStencilFail:String = "keep"):void;
+		public native function setStencilReferenceValue(referenceValue:uint, readMask:uint = 255, writeMask:uint = 255):void;
+		public native function setScissorRectangle(rectangle:Rectangle):void;
+		public native function createVertexBuffer(numVertices:int, data32PerVertex:int, bufferUsage:String = "staticDraw"):VertexBuffer3D;
+		public native function createIndexBuffer(numIndices:int, bufferUsage:String = "staticDraw"):IndexBuffer3D;
+		public native function createTexture(width:int, height:int, format:String, optimizeForRenderToTexture:Boolean, streamingLevels:int = 0):Texture;
+		public native function createCubeTexture(size:int, format:String, optimizeForRenderToTexture:Boolean, streamingLevels:int = 0):CubeTexture;
+		[API("690")]
+		public native function createRectangleTexture(width:int, height:int, format:String, optimizeForRenderToTexture:Boolean):RectangleTexture;
+		public native function createProgram():Program3D;
+		public native function drawToBitmapData(destination:BitmapData):void;
+		[API("686")]
+		public native function setSamplerStateAt(sampler:int, wrap:String, filter:String, mipfilter:String):void;
+		[API("692")]
+		public native function get profile():String;
+		[API("700")]
+		public native function get backBufferWidth():int;
+		[API("700")]
+		public native function get backBufferHeight():int;
+		[API("700")]
+		public native function get maxBackBufferWidth():int;
+		[API("700")]
+		public native function set maxBackBufferWidth(value:int):void;
+		[API("700")]
+		public native function get maxBackBufferHeight():int;
+		[API("700")]
+		public native function set maxBackBufferHeight(value:int):void;
+	}
+}
