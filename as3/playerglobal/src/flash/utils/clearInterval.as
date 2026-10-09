@@ -2,5 +2,8 @@
 
 package flash.utils
 {
-	public native function clearInterval(arg0:uint):void;
+	public function clearInterval(id:uint):void
+	{
+		IntervalTimer.clear(id);
+	}
 }

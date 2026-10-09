@@ -2,5 +2,8 @@
 
 package flash.utils
 {
-	public native function setInterval(arg0:Function, arg1:Number, ...rest):uint;
+	public function setInterval(closure:Function, delay:Number, ...args):uint
+	{
+		return new IntervalTimer(closure, delay, true, args).id;
+	}
 }
