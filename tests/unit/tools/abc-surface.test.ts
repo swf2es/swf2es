@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { scripts } from "../../../packages/runtime/dist/avm2/builtin/declarations/scripts.js";
+import {
+  fromDeclarations,
+  normalize,
+  toDeclarations,
+} from "../../../tools/abc-surface/declarations.ts";
 import { type Class, readSurface, type Trait } from "../../../tools/abc-surface/read.ts";
 
 const builtin = readFileSync(
@@ -46,4 +52,13 @@ test("builtin.abc's surface: every class, and Array's traits as avmplus declares
   const length = array.instance.find((t) => t.name === "{package:@v0}::length");
   assert.ok(length && length.kind === "getter");
   assert.deepEqual(length.method.flags, ["native"]);
+});
+
+test("declarations made from builtin.abc's surface give that surface back", () => {
+  const surface = readSurface(builtin);
+  assert.deepEqual(fromDeclarations(toDeclarations(surface)), normalize(surface));
+});
+
+test("the runtime's builtin declarations declare builtin.abc's surface", () => {
+  assert.deepEqual(fromDeclarations(scripts), normalize(readSurface(builtin)));
 });

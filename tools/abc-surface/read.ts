@@ -252,17 +252,18 @@ function readName(r: Reader, strings: string[], namespaces: string[], nsSets: st
   }
 }
 
-/** "Array", "flash.net::getClassByAlias", "http://adobe.com/AS3/2006/builtin::push", … */
+/**
+ * A QName as a type is written: "Array" or "flash.utils::ByteArray" in a
+ * public namespace without a version mark, else "{ns}::name" as a
+ * multiname with its one namespace.
+ */
 function qualified(ns: string, name: string): string {
-  if (ns === "package:") {
-    return name;
+  if (ns.startsWith("package:") && !ns.includes("@v")) {
+    const pkg = ns.slice("package:".length);
+    return pkg ? `${pkg}::${name}` : name;
   }
 
-  if (ns.startsWith("package:")) {
-    return `${ns.slice("package:".length)}::${name}`;
-  }
-
-  return `${ns}::${name}`;
+  return `{${ns}}::${name}`;
 }
 
 /** The pool's type names, read as indices, written out by name. */
