@@ -144,12 +144,14 @@ export const ObjectBuiltin = bindNatives(
         return onChain(rt, this, v);
       }
 
+      // As avmplus' AS3, through _hasOwnProperty(o, V:String): the name a
+      // String, so that none given, undefined, is null, the name "null".
       "AS3::hasOwnProperty"(this: AsObject, v: Value) {
-        return hasOwn(rt, this, v);
+        return hasOwn(rt, this, rt.coerceString(v));
       }
 
       "AS3::propertyIsEnumerable"(this: AsObject, v: Value) {
-        return isEnumerable(rt, this, v);
+        return isEnumerable(rt, this, rt.coerceString(v));
       }
     },
   objectHook,
