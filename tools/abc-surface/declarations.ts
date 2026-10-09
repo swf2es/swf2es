@@ -574,8 +574,7 @@ export function writeDeclarations(scripts: ScriptDecl[], dir: string): string[] 
       const { name } = t.class;
       writeFileSync(
         path,
-        `// ${name.replace(/^.*::/, "")}, as SWFs link against it (see ${specifier(path).replace(/\.js$/, ".ts")}).\n\n` +
-          `import type { ClassDecl } from "${specifier(path)}";\n\n` +
+        `import type { ClassDecl } from "${specifier(path)}";\n\n` +
           `export const ${exportOf(name)}: ClassDecl = ${literal(t.class)};\n`,
       );
       written.push(path);

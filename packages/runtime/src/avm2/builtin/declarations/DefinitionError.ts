@@ -1,5 +1,3 @@
-// DefinitionError, as SWFs link against it (see ../declare.ts).
-
 import type { ClassDecl } from "../declare.js";
 
 export const DefinitionErrorClass: ClassDecl = {

@@ -1,5 +1,3 @@
-// IDataInput2, as SWFs link against it (see ../../../declare.ts).
-
 import type { ClassDecl } from "../../../declare.js";
 
 export const IDataInput2Class: ClassDecl = {
