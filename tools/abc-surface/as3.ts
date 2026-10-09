@@ -203,14 +203,14 @@ function member(
     return null;
   }
 
-  const meta = metadata(t, "        ");
+  const meta = metadata(t, "\t\t");
   const mods = isInterface ? "" : `${acc} ${isStatic ? "static " : ""}`;
   switch (t.kind) {
     case "slot":
     case "const": {
       const value = t.value ? ` = ${literal(t.value)}` : "";
       const kw = t.kind === "slot" ? "var" : "const";
-      return `${meta}        ${mods}${kw} ${n.local}:${typeName(t.type, pkg, imports)}${value};`;
+      return `${meta}\t\t${mods}${kw} ${n.local}:${typeName(t.type, pkg, imports)}${value};`;
     }
     case "method":
     case "getter":
@@ -222,7 +222,7 @@ function member(
       const native = isInterface ? "" : "native ";
       const named = names.get(`${acc2.trim()}${n.local}`);
       const ret = typeName(t.method.returns, pkg, imports);
-      return `${meta}        ${flags}${mods}${native}function ${acc2}${n.local}(${params(t.method, pkg, imports, named)}):${ret};`;
+      return `${meta}\t\t${flags}${mods}${native}function ${acc2}${n.local}(${params(t.method, pkg, imports, named)}):${ret};`;
     }
     default:
       return null;
@@ -262,17 +262,20 @@ function classSource(c: Class, raw: string, meta: Trait["meta"], namesDir: strin
   const ctor = isInterface
     ? []
     : [
-        `        public function ${n.local}(${params(c.init, pkg, imports, names.get(n.local))}) {`,
-        "        }",
+        `\t\tpublic function ${n.local}(${params(c.init, pkg, imports, names.get(n.local))})`,
+        "\t\t{",
+        "\t\t}",
       ];
   const body = [...ctor, ...(ctor.length && lines.length ? [""] : []), ...lines];
   return [
-    `package ${pkg} {`,
-    ...[...imports].sort().map((i) => `    import ${i};`),
+    `package ${pkg}`,
+    "{",
+    ...[...imports].sort().map((i) => `\timport ${i};`),
     ...(imports.size ? [""] : []),
-    `${metadata({ name: raw, meta }, "    ")}    ${decl} {`,
+    `${metadata({ name: raw, meta }, "\t")}\t${decl}`,
+    "\t{",
     ...body,
-    "    }",
+    "\t}",
     "}",
     "",
   ].join("\n");
@@ -292,13 +295,13 @@ function definitionSource(t: Trait, namesDir: string | null): string | null {
     case "slot":
     case "const": {
       const value = t.value ? ` = ${literal(t.value)}` : "";
-      decl = `    public ${t.kind === "slot" ? "var" : "const"} ${n.local}:${typeName(t.type, n.uri, imports)}${value};`;
+      decl = `\tpublic ${t.kind === "slot" ? "var" : "const"} ${n.local}:${typeName(t.type, n.uri, imports)}${value};`;
       break;
     }
     case "method":
     case "function": {
       const m = t.method;
-      decl = `    public native function ${n.local}(${params(m, n.uri, imports, names.get(n.local))}):${typeName(m.returns, n.uri, imports)};`;
+      decl = `\tpublic native function ${n.local}(${params(m, n.uri, imports, names.get(n.local))}):${typeName(m.returns, n.uri, imports)};`;
       break;
     }
     default:
@@ -306,10 +309,11 @@ function definitionSource(t: Trait, namesDir: string | null): string | null {
   }
 
   return [
-    `package ${n.uri} {`,
-    ...[...imports].sort().map((i) => `    import ${i};`),
+    `package ${n.uri}`,
+    "{",
+    ...[...imports].sort().map((i) => `\timport ${i};`),
     ...(imports.size ? [""] : []),
-    `${metadata(t, "    ")}${decl}`,
+    `${metadata(t, "\t")}${decl}`,
     "}",
     "",
   ].join("\n");

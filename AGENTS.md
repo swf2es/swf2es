@@ -75,6 +75,8 @@ node tools/abc-surface/as3.ts lib.abc out-dir [package...] [--names dir]   # AS3
 pnpm as3                      # the AS3 libraries under as3/, compiled by ASC 1 in the oracle's
                               # image: as3:playerglobal, our playerglobal.abc held to Flash
                               # Player's API; as3:air, the AIR library into air-library.ts
+pnpm as3:format               # format them with Apache Royale's asformat, in its default style
+                              # (ASFORMAT names its script if it is not on the PATH)
 SWF2ES_PLAYERGLOBAL=ours ...  # the unit, player and corpus tests with our playerglobal's classes
                               # ahead of Flash Player's (tests/player/libraries.ts)
 pnpm bench [file.abc...]      # time the ABC parser and decoder

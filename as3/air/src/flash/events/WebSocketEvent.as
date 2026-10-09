@@ -4,37 +4,44 @@
 // tests/player/air-library.ts marks this library's package namespaces with
 // API version 0, so its code sees only the names playerglobal gives every
 // version: a member playerglobal marks for a later one would not resolve.
-package flash.events {
-  import flash.utils.ByteArray;
+package flash.events
+{
+	import flash.utils.ByteArray;
 
-  public class WebSocketEvent extends Event {
-    public static const DATA:String = "websocketData";
+	public class WebSocketEvent extends Event
+	{
+		public static const DATA:String = "websocketData";
 
-    private var _format:uint;
-    private var _data:ByteArray;
+		private var _format:uint;
+		private var _data:ByteArray;
 
-    public function WebSocketEvent(type:String, format:uint, data:ByteArray) {
-      super(type, false, false);
-      _format = format;
-      _data = data;
-    }
+		public function WebSocketEvent(type:String, format:uint, data:ByteArray)
+		{
+			super(type, false, false);
+			_format = format;
+			_data = data;
+		}
 
-    public function get format():uint {
-      return _format;
-    }
+		public function get format():uint
+		{
+			return _format;
+		}
 
-    public function get data():ByteArray {
-      _data.position = 0;
-      return _data;
-    }
+		public function get data():ByteArray
+		{
+			_data.position = 0;
+			return _data;
+		}
 
-    public function get stringData():String {
-      if (_format != 1) {
-        return null;
-      }
+		public function get stringData():String
+		{
+			if (_format != 1)
+			{
+				return null;
+			}
 
-      _data.position = 0;
-      return _data.readUTFBytes(_data.length);
-    }
-  }
+			_data.position = 0;
+			return _data.readUTFBytes(_data.length);
+		}
+	}
 }
