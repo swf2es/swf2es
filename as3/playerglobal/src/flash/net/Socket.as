@@ -40,7 +40,8 @@ package flash.net
 		// Kept: the player's connections wait as long as the host's do.
 		public function set timeout(value:uint):void
 		{
-			_timeout = value;
+			// No less than 250 ms, as Flash's clamps it.
+			_timeout = value < 250 ? 250 : value;
 		}
 
 		public native function readBytes(bytes:ByteArray, offset:uint = 0, length:uint = 0):void;
