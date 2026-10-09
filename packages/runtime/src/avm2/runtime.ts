@@ -435,8 +435,12 @@ export class Runtime {
     return ns;
   }
 
-  cls(ns: Namespace, name: string): ClassRef {
-    const domain = this.loading;
+  /**
+   * A class named in the domain loading, as its module names one; or in
+   * `domain`, as a builtin native names one, in the root domain whatever
+   * is loading when the native is first bound.
+   */
+  cls(ns: Namespace, name: string, domain: Domain = this.loading): ClassRef {
     let byName = domain.classRefs.get(ns);
     if (!byName) {
       byName = new Map();

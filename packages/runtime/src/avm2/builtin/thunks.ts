@@ -17,21 +17,21 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, a0, rt.toUint(a1));
     },
   "Array#http://adobe.com/AS3/2006/builtin::every": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? a1 : null);
     };
   },
   "Array#http://adobe.com/AS3/2006/builtin::filter": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? a1 : null);
     };
   },
   "Array#http://adobe.com/AS3/2006/builtin::forEach": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? a1 : null);
@@ -57,7 +57,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, a0, n > 1 ? a1 : 2147483647);
     },
   "Array#http://adobe.com/AS3/2006/builtin::map": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? a1 : null);
@@ -73,7 +73,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? a0 : 0, n > 1 ? a1 : 4294967295);
     },
   "Array#http://adobe.com/AS3/2006/builtin::some": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? a1 : null);
@@ -89,25 +89,25 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.toUint(a0));
     },
   "Array.Array::_concat": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0));
     };
   },
   "Array.Array::_every": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "Array.Array::_filter": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "Array.Array::_forEach": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
@@ -122,7 +122,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, a0, a1, n > 2 ? rt.toInt(a2) : 0);
     },
   "Array.Array::_map": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
@@ -132,25 +132,25 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, a0, rt.toNumber(a1), rt.toNumber(a2));
     },
   "Array.Array::_some": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "Array.Array::_sort": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0));
     };
   },
   "Array.Array::_splice": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0));
     };
   },
   "Array.Array::_unshift": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0));
     };
@@ -300,7 +300,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.toInt(a0));
     },
   "Error.throwError": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Class");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Class", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, ...rest: Value[]) {
       return f.call(this, rt.coerceTo(a0, r0), rt.toUint(a1), ...rest);
     };
@@ -321,7 +321,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? a0 : undefined, ...rest);
     },
   "JSON.JSON::computePropertyList": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceTo(a0, r0));
     };
@@ -331,8 +331,8 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.coerceString(a0));
     },
   "JSON.JSON::stringifySpecializedToString": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
-    const r1 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
+    const r1 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value, a3: Value) {
       return f.call(
         this,
@@ -344,7 +344,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
     };
   },
   "JSON.parse": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceString(a0), n > 1 ? rt.coerceTo(a1, r0) : null);
@@ -771,7 +771,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.coerceObject(a0), rt.coerceString(a1));
     },
   "Walker()": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceTo(a0, r0));
     };
@@ -806,7 +806,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? a0 : undefined);
     },
   "XML#http://adobe.com/AS3/2006/builtin::setNotification": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceTo(a0, r0));
     };
@@ -884,19 +884,19 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? a0 : undefined);
     },
   "__AS3__.vec::Vector$double#__AS3__.vec:Vector$double::_concat": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceTo(a0, r0));
     };
   },
   "__AS3__.vec::Vector$double#__AS3__.vec:Vector$double::_filter": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, rt.coerceTo(a0, r0), a1);
     };
   },
   "__AS3__.vec::Vector$double#__AS3__.vec:Vector$double::_map": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, rt.coerceTo(a0, r0), a1);
     };
@@ -907,7 +907,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? rt.toNumber(a0) : 0, n > 1 ? rt.toNumber(a1) : 2147483647);
     },
   "__AS3__.vec::Vector$double#__AS3__.vec:Vector$double::_splice": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, a1, rt.coerceTo(a2, r0));
     };
@@ -928,21 +928,21 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.toNumber(a0), rt.toUint(a1));
     },
   "__AS3__.vec::Vector$double#http://adobe.com/AS3/2006/builtin::every": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
     };
   },
   "__AS3__.vec::Vector$double#http://adobe.com/AS3/2006/builtin::filter": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
     };
   },
   "__AS3__.vec::Vector$double#http://adobe.com/AS3/2006/builtin::forEach": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
@@ -968,7 +968,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.toNumber(a0), n > 1 ? rt.toNumber(a1) : 2147483647);
     },
   "__AS3__.vec::Vector$double#http://adobe.com/AS3/2006/builtin::map": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
@@ -1006,43 +1006,43 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? rt.toUint(a0) : 0, n > 1 ? !!a1 : false);
     },
   "__AS3__.vec::Vector$double.__AS3__.vec:Vector$double::_every": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "__AS3__.vec::Vector$double.__AS3__.vec:Vector$double::_forEach": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "__AS3__.vec::Vector$double.__AS3__.vec:Vector$double::_some": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "__AS3__.vec::Vector$double.__AS3__.vec:Vector$double::_sort": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0));
     };
   },
   "__AS3__.vec::Vector$int#__AS3__.vec:Vector$int::_concat": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceTo(a0, r0));
     };
   },
   "__AS3__.vec::Vector$int#__AS3__.vec:Vector$int::_filter": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, rt.coerceTo(a0, r0), a1);
     };
   },
   "__AS3__.vec::Vector$int#__AS3__.vec:Vector$int::_map": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, rt.coerceTo(a0, r0), a1);
     };
@@ -1053,7 +1053,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? rt.toNumber(a0) : 0, n > 1 ? rt.toNumber(a1) : 2147483647);
     },
   "__AS3__.vec::Vector$int#__AS3__.vec:Vector$int::_splice": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, a1, rt.coerceTo(a2, r0));
     };
@@ -1074,21 +1074,21 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.toNumber(a0), rt.toUint(a1));
     },
   "__AS3__.vec::Vector$int#http://adobe.com/AS3/2006/builtin::every": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
     };
   },
   "__AS3__.vec::Vector$int#http://adobe.com/AS3/2006/builtin::filter": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
     };
   },
   "__AS3__.vec::Vector$int#http://adobe.com/AS3/2006/builtin::forEach": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
@@ -1114,7 +1114,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.toInt(a0), n > 1 ? rt.toNumber(a1) : 2147483647);
     },
   "__AS3__.vec::Vector$int#http://adobe.com/AS3/2006/builtin::map": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
@@ -1152,43 +1152,43 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? rt.toUint(a0) : 0, n > 1 ? !!a1 : false);
     },
   "__AS3__.vec::Vector$int.__AS3__.vec:Vector$int::_every": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "__AS3__.vec::Vector$int.__AS3__.vec:Vector$int::_forEach": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "__AS3__.vec::Vector$int.__AS3__.vec:Vector$int::_some": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "__AS3__.vec::Vector$int.__AS3__.vec:Vector$int::_sort": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0));
     };
   },
   "__AS3__.vec::Vector$object#__AS3__.vec:Vector$object::_concat": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceTo(a0, r0));
     };
   },
   "__AS3__.vec::Vector$object#__AS3__.vec:Vector$object::_filter": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, rt.coerceTo(a0, r0), a1);
     };
   },
   "__AS3__.vec::Vector$object#__AS3__.vec:Vector$object::_map": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, rt.coerceTo(a0, r0), a1);
     };
@@ -1199,7 +1199,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? rt.toNumber(a0) : 0, n > 1 ? rt.toNumber(a1) : 2147483647);
     },
   "__AS3__.vec::Vector$object#__AS3__.vec:Vector$object::_splice": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, a1, rt.coerceTo(a2, r0));
     };
@@ -1220,21 +1220,21 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.toNumber(a0), rt.toUint(a1));
     },
   "__AS3__.vec::Vector$object#http://adobe.com/AS3/2006/builtin::every": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
     };
   },
   "__AS3__.vec::Vector$object#http://adobe.com/AS3/2006/builtin::filter": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
     };
   },
   "__AS3__.vec::Vector$object#http://adobe.com/AS3/2006/builtin::forEach": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
@@ -1260,7 +1260,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.coerceObject(a0), n > 1 ? rt.toNumber(a1) : 2147483647);
     },
   "__AS3__.vec::Vector$object#http://adobe.com/AS3/2006/builtin::map": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
@@ -1298,43 +1298,43 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? rt.toUint(a0) : 0, n > 1 ? !!a1 : false);
     },
   "__AS3__.vec::Vector$object.__AS3__.vec:Vector$object::_every": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "__AS3__.vec::Vector$object.__AS3__.vec:Vector$object::_forEach": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "__AS3__.vec::Vector$object.__AS3__.vec:Vector$object::_some": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "__AS3__.vec::Vector$object.__AS3__.vec:Vector$object::_sort": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0));
     };
   },
   "__AS3__.vec::Vector$uint#__AS3__.vec:Vector$uint::_concat": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceTo(a0, r0));
     };
   },
   "__AS3__.vec::Vector$uint#__AS3__.vec:Vector$uint::_filter": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, rt.coerceTo(a0, r0), a1);
     };
   },
   "__AS3__.vec::Vector$uint#__AS3__.vec:Vector$uint::_map": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, rt.coerceTo(a0, r0), a1);
     };
@@ -1345,7 +1345,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? rt.toNumber(a0) : 0, n > 1 ? rt.toNumber(a1) : 2147483647);
     },
   "__AS3__.vec::Vector$uint#__AS3__.vec:Vector$uint::_splice": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, a1, rt.coerceTo(a2, r0));
     };
@@ -1366,21 +1366,21 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.toNumber(a0), rt.toUint(a1));
     },
   "__AS3__.vec::Vector$uint#http://adobe.com/AS3/2006/builtin::every": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
     };
   },
   "__AS3__.vec::Vector$uint#http://adobe.com/AS3/2006/builtin::filter": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
     };
   },
   "__AS3__.vec::Vector$uint#http://adobe.com/AS3/2006/builtin::forEach": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
@@ -1406,7 +1406,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.toUint(a0), n > 1 ? rt.toNumber(a1) : 2147483647);
     },
   "__AS3__.vec::Vector$uint#http://adobe.com/AS3/2006/builtin::map": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, rt.coerceTo(a0, r0), n > 1 ? rt.coerceObject(a1) : null);
@@ -1444,31 +1444,31 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? rt.toUint(a0) : 0, n > 1 ? !!a1 : false);
     },
   "__AS3__.vec::Vector$uint.__AS3__.vec:Vector$uint::_every": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "__AS3__.vec::Vector$uint.__AS3__.vec:Vector$uint::_forEach": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "__AS3__.vec::Vector$uint.__AS3__.vec:Vector$uint::_some": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Function");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0), a2);
     };
   },
   "__AS3__.vec::Vector$uint.__AS3__.vec:Vector$uint::_sort": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, ""), "Array");
+    const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
     return function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, a0, rt.coerceTo(a1, r0));
     };
   },
   "flash.concurrent::Condition#flash.concurrent:Condition::ctor": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, "flash.concurrent"), "Mutex");
+    const r0 = rt.cls(namespace(NS_Public, "flash.concurrent"), "Mutex", rt.root);
     return function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceTo(a0, r0));
     };
@@ -1479,7 +1479,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? rt.toNumber(a0) : -1);
     },
   "flash.concurrent::Condition()": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, "flash.concurrent"), "Mutex");
+    const r0 = rt.cls(namespace(NS_Public, "flash.concurrent"), "Mutex", rt.root);
     return function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceTo(a0, r0));
     };
@@ -1509,7 +1509,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.coerceString(a0), a1);
     },
   "flash.net::ObjectEncoding.set:dynamicPropertyWriter": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, "flash.net"), "IDynamicPropertyWriter");
+    const r0 = rt.cls(namespace(NS_Public, "flash.net"), "IDynamicPropertyWriter", rt.root);
     return function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceTo(a0, r0));
     };
@@ -1536,7 +1536,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.coerceString(a0));
     },
   "flash.utils::ByteArray#readBytes": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, "flash.utils"), "ByteArray");
+    const r0 = rt.cls(namespace(NS_Public, "flash.utils"), "ByteArray", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       const n = arguments.length;
       return f.call(
@@ -1589,7 +1589,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.toInt(a0));
     },
   "flash.utils::ByteArray#writeBytes": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, "flash.utils"), "ByteArray");
+    const r0 = rt.cls(namespace(NS_Public, "flash.utils"), "ByteArray", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       const n = arguments.length;
       return f.call(
@@ -1646,7 +1646,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, n > 0 ? !!a0 : false);
     },
   "flash.utils::ObjectInput#readBytes": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, "flash.utils"), "ByteArray");
+    const r0 = rt.cls(namespace(NS_Public, "flash.utils"), "ByteArray", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       const n = arguments.length;
       return f.call(
@@ -1690,7 +1690,7 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, rt.toInt(a0));
     },
   "flash.utils::ObjectOutput#writeBytes": (rt, f) => {
-    const r0 = rt.cls(namespace(NS_Public, "flash.utils"), "ByteArray");
+    const r0 = rt.cls(namespace(NS_Public, "flash.utils"), "ByteArray", rt.root);
     return function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       const n = arguments.length;
       return f.call(

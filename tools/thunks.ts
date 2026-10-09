@@ -97,14 +97,16 @@ function defaultLiteral(v: Value, type: string): string {
 }
 
 /**
- * A class type as a thunk names it: a reference made once, which coerceTo
- * keeps the class's traits on, as compiled code's coercions do.
+ * A class type as a thunk names it: a reference made once, in the root
+ * domain, builtin's, whatever domain is loading when the thunk is made
+ * (a child domain's would be kept alive by it), and which coerceTo keeps
+ * the class's traits on, as compiled code's coercions do.
  */
 function classRef(type: string, refs: string[]): string {
   // A top-level class, in the unnamed package.
   if (!type.includes("::")) {
     const name = `r${refs.length}`;
-    refs.push(`const ${name} = rt.cls(namespace(NS_Public, ""), ${JSON.stringify(type)});`);
+    refs.push(`const ${name} = rt.cls(namespace(NS_Public, ""), ${JSON.stringify(type)}, rt.root);`);
     return name;
   }
 
@@ -119,7 +121,7 @@ function classRef(type: string, refs: string[]): string {
   const pkg = m[2] ?? (m[3]?.startsWith("internal:") ? m[3].slice("internal:".length) : m[3]);
   const ns = `namespace(${internal ? "NS_PackageInternal" : "NS_Public"}, ${JSON.stringify(pkg)})`;
   const name = `r${refs.length}`;
-  refs.push(`const ${name} = rt.cls(${ns}, ${JSON.stringify(m[4])});`);
+  refs.push(`const ${name} = rt.cls(${ns}, ${JSON.stringify(m[4])}, rt.root);`);
   return name;
 }
 
