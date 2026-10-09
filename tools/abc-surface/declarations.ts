@@ -2,13 +2,14 @@
 // from an ABC's surface, as TypeScript, and the surface back from them, so
 // a test can hold the declarations to the ABC they began as.
 //
-//   node tools/abc-surface/declarations.ts builtin.abc [out dir]
+//   node tools/abc-surface/declarations.ts builtin.abc out-dir
 //
-// writes one file per class under the out dir (by default the runtime's
-// declarations/) and scripts.ts, which lists the scripts in order.
+// writes one file per class under out-dir, which it empties first, and
+// scripts.ts, which lists the scripts in order. The runtime's declarations
+// began so and are edited by hand since: write elsewhere and compare.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
@@ -18,7 +19,7 @@ import type {
   ScriptDecl,
   TraitDecl,
   Value,
-} from "../../packages/runtime/src/avm2/builtin/declare.ts";
+} from "../../packages/runtime/dist/avm2/builtin/declare.js";
 import { type Class, type Method, readSurface, type Surface, type Trait } from "./read.ts";
 
 const AS3 = "http://adobe.com/AS3/2006/builtin";
@@ -195,8 +196,11 @@ function resolver(surface: Surface): (raw: string) => string {
   };
 }
 
+/** A declaration while it is being built: the types are read-only for those who read them. */
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+
 function methodDecl(m: Method): MethodDecl {
-  const d: MethodDecl = {};
+  const d: Mutable<MethodDecl> = {};
   if (m.params.length) {
     d.params = m.params.map((p): Param => (p.default ? [p.type, p.default as Value] : p.type));
   }
@@ -245,17 +249,12 @@ export function toDeclarations(surface: Surface): ScriptDecl[] {
       switch (t.kind) {
         case "slot":
         case "const": {
-          const d: TraitDecl =
-            t.kind === "slot" ? { var: name, ...common } : { const: name, ...common };
-          if (t.type !== "*") {
-            d.type = t.type;
-          }
-
-          if (t.value) {
-            d.value = t.value as Value;
-          }
-
-          return d;
+          return {
+            ...(t.kind === "slot" ? { var: name } : { const: name }),
+            ...common,
+            ...(t.type !== "*" ? { type: t.type } : {}),
+            ...(t.value ? { value: t.value as Value } : {}),
+          } as TraitDecl;
         }
         case "class":
           return { class: classDecl(t.class, name, api), ...(t.meta ? { meta: t.meta } : {}) };
@@ -287,7 +286,7 @@ export function toDeclarations(surface: Surface): ScriptDecl[] {
     }
 
     const owner: Owner = { pkg, protected: c.protectedNs?.slice(c.protectedNs.indexOf(":") + 1) };
-    const head: Partial<ClassDecl> = { name };
+    const head: Mutable<Partial<ClassDecl>> = { name };
     if (api !== undefined) {
       head.api = api;
     }
@@ -465,7 +464,7 @@ function methodNormal(d: MethodDecl): unknown {
 
 /** The declarations as normalize() sees the surface they declare. */
 export function fromDeclarations(scripts: ScriptDecl[]): Normal {
-  const traits = (list: TraitDecl[], owner: Owner, ownerKey: string): unknown[] =>
+  const traits = (list: readonly TraitDecl[], owner: Owner, ownerKey: string): unknown[] =>
     list.map((t) => {
       const meta = t.meta ?? [];
       if ("class" in t) {
@@ -533,7 +532,7 @@ export function fromDeclarations(scripts: ScriptDecl[]): Normal {
 /** Where a class's declaration goes, relative to the declarations' folder. */
 function fileOf(name: string): string {
   const pkg = packageOf(name);
-  return join(...(pkg ? pkg.split(".") : []), `${localOf(name)}.ts`);
+  return join(...(pkg ? pkg.split(".") : []), `${localOf(name)}.decl.ts`);
 }
 
 function exportOf(name: string): string {
@@ -572,11 +571,16 @@ function literal(v: unknown, expand = false): string {
 }
 
 /** Write `scripts` into `dir` as one file per class and scripts.ts. */
-export function writeDeclarations(scripts: ScriptDecl[], dir: string): string[] {
+export function writeDeclarations(scripts: readonly ScriptDecl[], dir: string): string[] {
+  // The runtime's own folder holds the natives and the hand-edited declarations.
+  if (existsSync(join(dir, "declare.ts"))) {
+    throw new Error(`${dir} holds declare.ts: write the declarations elsewhere and compare`);
+  }
+
   rmSync(dir, { recursive: true, force: true });
   const written: string[] = [];
   const imports: string[] = [];
-  const declare = join(dir, "..", "declare.js");
+  const declare = join(dir, "declare.js");
 
   const scriptTraits = (s: ScriptDecl) =>
     s.traits.map((t) => {
@@ -595,7 +599,7 @@ export function writeDeclarations(scripts: ScriptDecl[], dir: string): string[] 
       writeFileSync(
         path,
         `import type { ClassDecl } from "${specifier(path)}";\n\n` +
-          `export const ${exportOf(name)}: ClassDecl = ${literal(t.class)};\n`,
+          `export const ${exportOf(name)} = ${literal(t.class)} as const satisfies ClassDecl;\n`,
       );
       written.push(path);
       imports.push(`import { ${exportOf(name)} } from "./${file.replace(/\.ts$/, ".js")}";`);
@@ -616,8 +620,8 @@ export function writeDeclarations(scripts: ScriptDecl[], dir: string): string[] 
   writeFileSync(
     index,
     "// builtin's scripts in the order they load, each with the definitions it\n" +
-      "// makes (see ../declare.ts).\n\n" +
-      `import type { ScriptDecl } from "../declare.js";\n${imports.sort().join("\n")}\n\n` +
+      "// makes (see declare.ts).\n\n" +
+      `import type { ScriptDecl } from "./declare.js";\n${imports.sort().join("\n")}\n\n` +
       `export const scripts: ScriptDecl[] = [\n${bodies.map((b) => `${b},\n`).join("")}];\n`,
   );
   written.push(index);
@@ -627,13 +631,13 @@ export function writeDeclarations(scripts: ScriptDecl[], dir: string): string[] 
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [abc, out] = process.argv.slice(2);
-  if (!abc) {
-    console.error("usage: node tools/abc-surface/declarations.ts builtin.abc [out dir]");
+  if (!abc || !out) {
+    console.error("usage: node tools/abc-surface/declarations.ts builtin.abc out-dir");
     process.exit(2);
   }
 
   const root = fileURLToPath(new URL("../../", import.meta.url));
-  const dir = out ?? join(root, "packages/runtime/src/avm2/builtin/declarations");
+  const dir = out;
   const files = writeDeclarations(toDeclarations(readSurface(readFileSync(abc))), dir);
   execFileSync(join(root, "node_modules/.bin/biome"), ["check", "--write", dir], {
     stdio: "ignore",

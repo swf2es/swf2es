@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { scripts } from "../../../packages/runtime/dist/avm2/builtin/declarations/scripts.js";
+import { scripts } from "../../../packages/runtime/dist/avm2/builtin/scripts.js";
 import {
   fromDeclarations,
   normalize,
