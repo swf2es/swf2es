@@ -17,12 +17,20 @@ import {
   zlibCompress,
   zlibUncompress,
 } from "@swf2es/format";
-import type { ExternalStream, Reader, Writer } from "../amf.js";
-import type { AsObject, Method, Value } from "../descriptors.js";
-import type { IndexHook } from "../hooks.js";
-import type { Runtime } from "../runtime.js";
-import type { Traits } from "../traits.js";
-import { type Natives, registerNativeClass } from "./define.js";
+import {
+  type ExternalStream,
+  type Reader,
+  readObject as readAmf,
+  type Writer,
+  writeObject as writeAmf,
+} from "../../../amf.js";
+import type { AsObject, Method, Value } from "../../../descriptors.js";
+import type { IndexHook } from "../../../hooks.js";
+import { type Natives, registerNativeClass } from "../../../natives/define.js";
+import type { Runtime } from "../../../runtime.js";
+import type { Traits } from "../../../traits.js";
+import { bindNatives } from "../../bind.js";
+import { ByteArrayDecl } from "./ByteArray.decl.js";
 
 const kGrowthIncr = 4096;
 const kHugeGrowthThreshold = 24 * 1024 * 1024;
@@ -568,34 +576,129 @@ function replaceBytes(b: Bytes, bytes: Uint8Array, position: number): void {
 
 /** ByteArray's natives, by the names the compiler gives them. */
 /** ByteArray's natives, for `rt`: written as a class, each running with the ByteArray object as `this`. */
-export function byteArrayNatives(rt: Runtime): Natives {
-  const own = "flash.utils:ByteArray";
-  const natives: Natives = {};
 
-  const nonNull = (rt: Runtime, v: Value, name: string) => {
-    if (v === null || v === undefined) {
-      throw rt.error("TypeError", 2007, name);
+function nonNull(rt: Runtime, v: Value, name: string): void {
+  if (v === null || v === undefined) {
+    throw rt.error("TypeError", 2007, name);
+  }
+}
+
+// As ByteArrayObject::readUTFBytes: a BOM skipped, and a NUL ends the string.
+function readUTFBytes(rt: Runtime, b: Bytes, n: number): string {
+  if (b.available < n) {
+    throw rt.error("flash.errors::EOFError", 2030);
+  }
+
+  let bytes = b.buffer.subarray(b.position, b.position + n);
+  if (BOM(bytes)) {
+    bytes = bytes.subarray(3);
+  }
+
+  const s = fromUtf8(toNul(bytes));
+  b.position = (b.position + n) >>> 0;
+  return s;
+}
+
+function compressWith(rt: Runtime, o: AsObject, algorithm: Value): void {
+  const kind = algorithmOf(rt, algorithm);
+  const b = bytesOf(rt, o);
+  if (b.length === 0) {
+    return;
+  }
+
+  const data = b.buffer.subarray(0, b.length);
+  const out =
+    kind === "zlib"
+      ? zlibCompress(data)
+      : kind === "deflate"
+        ? deflateCompress(data)
+        : lzmaByteArrayCompress(data);
+  replaceBytes(b, out, out.length);
+}
+
+function uncompressWith(rt: Runtime, o: AsObject, algorithm: Value): void {
+  const kind = algorithmOf(rt, algorithm);
+  const b = bytesOf(rt, o);
+  if (b.length === 0) {
+    return;
+  }
+
+  const data = b.buffer.subarray(0, b.length);
+  let out: Uint8Array;
+  if (kind === "lzma") {
+    // As UncompressViaLzma: too short for its header is left as it is, and
+    // a length past 32 bits a MemoryError before anything is read.
+    if (b.length < LZMA_HEADER) {
+      return;
     }
-  };
 
-  // As ByteArrayObject::readUTFBytes: a BOM skipped, and a NUL ends the string.
-  const readUTFBytes = (rt: Runtime, b: Bytes, n: number) => {
-    if (b.available < n) {
-      throw rt.error("flash.errors::EOFError", 2030);
+    if (data[9] | data[10] | data[11] | data[12]) {
+      throw rt.error("flash.errors::MemoryError", 1000);
+    }
+  }
+
+  try {
+    out =
+      kind === "lzma" ? lzmaByteArrayUncompress(data) : zlibUncompress(data, kind === "deflate");
+  } catch (e) {
+    if (e instanceof CompressedDataError) {
+      throw rt.error("flash.errors::IOError", 2058);
     }
 
-    let bytes = b.buffer.subarray(b.position, b.position + n);
+    throw e;
+  }
+
+  replaceBytes(b, out, 0);
+}
+
+function toStringOf(rt: Runtime, o: AsObject): string {
+  const b = bytesOf(rt, o);
+  const bytes = b.buffer.subarray(0, b.length);
+  if (bytes.length >= 3) {
     if (BOM(bytes)) {
-      bytes = bytes.subarray(3);
+      return fromUtf8(bytes.subarray(3));
     }
 
-    const s = fromUtf8(toNul(bytes));
-    b.position = (b.position + n) >>> 0;
-    return s;
-  };
+    if ((bytes[0] === 0xfe && bytes[1] === 0xff) || (bytes[0] === 0xff && bytes[1] === 0xfe)) {
+      const little = bytes[0] === 0xff;
+      const units: number[] = [];
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
+      for (let i = 2; i + 1 < bytes.length; i += 2) {
+        units.push(view.getUint16(i, little));
+      }
 
-  class ByteArrayNatives {
-    declare $bytes: Bytes;
+      return fromCodes(units);
+    }
+  }
+
+  return fromUtf8(bytes);
+}
+
+/** ByteArray's natives for runtime `rt`; ObjectInput and ObjectOutput delegate to them too. */
+export function byteArrayClass(rt: Runtime) {
+  return class ByteArrayNatives {
+    // Its constructor is avmplus' empty one: its class hook made the bytes.
+    ByteArray() {}
+
+    deflate(this: AsObject) {
+      compressWith(rt, this, "deflate");
+    }
+
+    compress(this: AsObject, algorithm: string | null) {
+      compressWith(rt, this, algorithm);
+    }
+
+    inflate(this: AsObject) {
+      uncompressWith(rt, this, "deflate");
+    }
+
+    uncompress(this: AsObject, algorithm: string | null) {
+      uncompressWith(rt, this, algorithm);
+    }
+
+    toString(this: AsObject) {
+      return toStringOf(rt, this);
+    }
 
     static get defaultObjectEncoding() {
       return rt.defaultObjectEncoding;
@@ -928,91 +1031,43 @@ export function byteArrayNatives(rt: Runtime): Natives {
     // compressed too, as avmshell's is: its Domain does not subscribe to it
     // as the player refuses a subscribed one (3735). Compressing leaves the position at the end, uncompressing at 0;
     // data that does not uncompress leaves the ByteArray as it was.
-    [`${own}::_compress`](algorithm: Value) {
-      const kind = algorithmOf(rt, algorithm);
-      const b = bytesOf(rt, this);
-      if (b.length === 0) {
-        return;
-      }
-
-      const data = b.buffer.subarray(0, b.length);
-      const out =
-        kind === "zlib"
-          ? zlibCompress(data)
-          : kind === "deflate"
-            ? deflateCompress(data)
-            : lzmaByteArrayCompress(data);
-      replaceBytes(b, out, out.length);
+    "private::_compress"(this: AsObject, algorithm: string | null) {
+      compressWith(rt, this, algorithm);
     }
 
-    [`${own}::_uncompress`](algorithm: Value) {
-      const kind = algorithmOf(rt, algorithm);
-      const b = bytesOf(rt, this);
-      if (b.length === 0) {
-        return;
-      }
-
-      const data = b.buffer.subarray(0, b.length);
-      let out: Uint8Array;
-      if (kind === "lzma") {
-        // As UncompressViaLzma: too short for its header is left as it is, and
-        // a length past 32 bits a MemoryError before anything is read.
-        if (b.length < LZMA_HEADER) {
-          return;
-        }
-
-        if (data[9] | data[10] | data[11] | data[12]) {
-          throw rt.error("flash.errors::MemoryError", 1000);
-        }
-      }
-
-      try {
-        out =
-          kind === "lzma"
-            ? lzmaByteArrayUncompress(data)
-            : zlibUncompress(data, kind === "deflate");
-      } catch (e) {
-        if (e instanceof CompressedDataError) {
-          throw rt.error("flash.errors::IOError", 2058);
-        }
-
-        throw e;
-      }
-
-      replaceBytes(b, out, 0);
+    "private::_uncompress"(this: AsObject, algorithm: string | null) {
+      uncompressWith(rt, this, algorithm);
     }
 
     // As ByteArrayObject::_toString: by its BOM, UTF-8 or UTF-16 of either
     // order, else UTF-8; all of its length, NULs too.
-    [`${own}::_toString`]() {
-      const b = bytesOf(rt, this);
-      const bytes = b.buffer.subarray(0, b.length);
-      if (bytes.length >= 3) {
-        if (BOM(bytes)) {
-          return fromUtf8(bytes.subarray(3));
-        }
-
-        if ((bytes[0] === 0xfe && bytes[1] === 0xff) || (bytes[0] === 0xff && bytes[1] === 0xfe)) {
-          const little = bytes[0] === 0xff;
-          const units: number[] = [];
-          const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
-          for (let i = 2; i + 1 < bytes.length; i += 2) {
-            units.push(view.getUint16(i, little));
-          }
-
-          return fromCodes(units);
-        }
-      }
-
-      return fromUtf8(bytes);
+    // An object in the byte array's AMF encoding.
+    writeObject(this: AsObject, v: Value) {
+      writeAmf(rt, bytesOf(rt, this), v);
     }
-  }
 
-  registerNativeClass(natives, "flash.utils::ByteArray", ByteArrayNatives);
+    readObject(this: AsObject) {
+      return readAmf(rt, bytesOf(rt, this));
+    }
 
-  // flash.utils' ObjectOutput and ObjectInput, what writeExternal and
-  // readExternal are given: the ByteArray's own writes and reads, in the
-  // stream's byte order, and its objects through the stream's tables.
+    "private::_toString"(this: AsObject) {
+      return toStringOf(rt, this);
+    }
+  };
+}
+
+export const ByteArrayBuiltin = bindNatives(ByteArrayDecl, byteArrayClass, byteArrayHook);
+
+/**
+ * flash.utils' ObjectOutput and ObjectInput, what writeExternal and
+ * readExternal are given: not ported yet, their natives by name.
+ */
+export function objectStreamNatives(rt: Runtime): Natives {
+  const natives: Natives = {};
+  const ByteArrayNatives = byteArrayClass(rt);
+
+  // The ByteArray's own writes and reads, in the stream's byte order, and
+  // its objects through the stream's tables.
   const delegated = (target: object, names: string[]) => {
     const from = ByteArrayNatives.prototype as unknown as Record<string, Method>;
     for (const name of names) {

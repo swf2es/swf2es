@@ -5,18 +5,16 @@
 // the builtin classes differ from others: how their instances hold native
 // state, and what calling or constructing them does.
 
+import { objectStreamNatives } from "../builtin/flash/utils/ByteArray.js";
 import { classHooks, classNatives } from "../builtin/index.js";
 import type { ClassHook } from "../hooks.js";
 import type { Runtime } from "../runtime.js";
 import { aliasesNatives } from "./aliases.js";
-import { byteArrayHook, byteArrayNatives } from "./bytearray.js";
 import { concurrentNatives } from "./concurrent.js";
 import type { Natives } from "./define.js";
 import { describeNatives } from "./describe.js";
-import { dictionaryNatives } from "./dictionary.js";
 import { jsonNatives } from "./json.js";
 import { objectHooks } from "./object.js";
-import { proxyHooks, proxyNatives } from "./proxy.js";
 import { shellHooks, shellNatives } from "./shell.js";
 import { toplevelNatives } from "./toplevel.js";
 import { vectorHooks, vectorNatives } from "./vector.js";
@@ -28,12 +26,10 @@ export function builtinNatives(rt: Runtime): Natives {
     ...classNatives,
     ...toplevelNatives,
     ...describeNatives,
-    ...proxyNatives,
     ...aliasesNatives,
     ...shellNatives(rt),
-    ...dictionaryNatives,
     ...vectorNatives,
-    ...byteArrayNatives(rt),
+    ...objectStreamNatives(rt),
     ...concurrentNatives(rt),
     ...jsonNatives(),
     ...xmlNatives,
@@ -44,10 +40,8 @@ export function builtinHooks(): Record<string, ClassHook> {
   return {
     ...classHooks,
     ...objectHooks,
-    "flash.utils::ByteArray": byteArrayHook,
     ...vectorHooks,
     ...xmlHooks,
-    ...proxyHooks,
     ...shellHooks,
   };
 }

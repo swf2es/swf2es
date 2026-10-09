@@ -12,9 +12,9 @@
 // Translated from avmplus' core/AvmSerializer.cpp, this file is subject to
 // the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
+import { type Bytes, bytesOf, fromUtf8, utf8 } from "./builtin/flash/utils/ByteArray.js";
 import type { AsObject, Value } from "./descriptors.js";
 import { NS_PackageInternal, NS_Public, namespace, publicNs, qname } from "./names.js";
-import { type Bytes, bytesOf, fromUtf8, utf8 } from "./natives/bytearray.js";
 import { xmlToXMLString } from "./natives/xml/xml.js";
 import type { Runtime } from "./runtime.js";
 import type { Traits } from "./traits.js";

@@ -11,6 +11,9 @@ import { ClassBuiltin } from "./Class.js";
 import { DateBuiltin } from "./Date.js";
 import { ErrorBuiltins } from "./Error.js";
 import { FunctionBuiltin } from "./Function.js";
+import { ByteArrayBuiltin } from "./flash/utils/ByteArray.js";
+import { DictionaryBuiltin } from "./flash/utils/Dictionary.js";
+import { ProxyBuiltin } from "./flash/utils/Proxy.js";
 import { intBuiltin } from "./int.js";
 import { MathBuiltin } from "./Math.js";
 import { NamespaceBuiltin } from "./Namespace.js";
@@ -24,8 +27,10 @@ import { uintBuiltin } from "./uint.js";
 const classes: BuiltinClass[] = [
   ArrayBuiltin,
   BooleanBuiltin,
+  ByteArrayBuiltin,
   ClassBuiltin,
   DateBuiltin,
+  DictionaryBuiltin,
   ...ErrorBuiltins,
   FunctionBuiltin,
   intBuiltin,
@@ -33,6 +38,7 @@ const classes: BuiltinClass[] = [
   NamespaceBuiltin,
   NumberBuiltin,
   ObjectBuiltin,
+  ProxyBuiltin,
   QNameBuiltin,
   RegExpBuiltin,
   StringBuiltin,

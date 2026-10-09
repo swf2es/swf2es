@@ -1,7 +1,5 @@
 // Class aliases, and AMF through ByteArray's readObject and writeObject.
-import { readObject, writeObject } from "../amf.js";
 import type { AsObject, Value } from "../descriptors.js";
-import { bytesOf } from "./bytearray.js";
 import type { Natives } from "./define.js";
 
 export const aliasesNatives: Natives = {
@@ -47,13 +45,5 @@ export const aliasesNatives: Natives = {
       }
 
       this.$amf.dynamicProperty(rt.toString(name), value);
-    },
-  "flash.utils::ByteArray#writeObject": (rt) =>
-    function (this: AsObject, v: Value) {
-      writeObject(rt, bytesOf(rt, this), v);
-    },
-  "flash.utils::ByteArray#readObject": (rt) =>
-    function (this: AsObject) {
-      return readObject(rt, bytesOf(rt, this));
     },
 };
