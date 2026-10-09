@@ -4,12 +4,12 @@
 //
 //   node tools/abc-surface/declarations.ts builtin.abc out-dir
 //
-// writes one file per class under out-dir, which it empties first, and
-// scripts.ts, which lists the scripts in order. The runtime's declarations
+// writes one file per class under out-dir, which must be new or empty,
+// and scripts.ts, which lists the scripts in order. The runtime's declarations
 // began so and are edited by hand since: write elsewhere and compare.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
@@ -574,12 +574,12 @@ function literal(v: unknown, expand = false): string {
 
 /** Write `scripts` into `dir` as one file per class and scripts.ts. */
 export function writeDeclarations(scripts: readonly ScriptDecl[], dir: string): string[] {
-  // The runtime's own folder holds the natives and the hand-edited declarations.
-  if (existsSync(join(dir, "declare.ts"))) {
-    throw new Error(`${dir} holds declare.ts: write the declarations elsewhere and compare`);
+  // Into a new or empty folder only: never over anything, the runtime's
+  // hand-edited declarations above all.
+  if (existsSync(dir) && readdirSync(dir).length > 0) {
+    throw new Error(`${dir} is not empty: write the declarations into a new folder and compare`);
   }
 
-  rmSync(dir, { recursive: true, force: true });
   const written: string[] = [];
   const imports: string[] = [];
   const declare = join(dir, "declare.js");
