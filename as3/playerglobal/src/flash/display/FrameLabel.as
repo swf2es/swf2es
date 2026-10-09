@@ -11,6 +11,7 @@ package flash.display
 		}
 
 		public native function get name():String;
+
 		public native function get frame():int;
 	}
 }

@@ -14,11 +14,17 @@ package flash.desktop
 		}
 
 		public static native function get dropAction():String;
+
 		public static native function set dropAction(arg0:String):void;
+
 		public static native function acceptDragDrop(arg0:InteractiveObject):void;
+
 		public static native function get isDragging():Boolean;
+
 		public static native function get dragInitiator():InteractiveObject;
+
 		public static native function doDrag(arg0:InteractiveObject, arg1:Clipboard, arg2:BitmapData = null, arg3:Point = null, arg4:NativeDragOptions = null):void;
+
 		[API("668")]
 		public static native function get isSupported():Boolean;
 	}

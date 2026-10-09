@@ -10,6 +10,7 @@ package flash.notifications
 		}
 
 		public native function get notificationStyles():Vector.<String>;
+
 		public native function set notificationStyles(arg0:Vector.<String>):void;
 	}
 }

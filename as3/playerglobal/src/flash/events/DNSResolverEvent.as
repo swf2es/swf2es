@@ -11,11 +11,17 @@ package flash.events
 		}
 
 		public static const LOOKUP:String = "lookup";
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
+
 		public native function get host():String;
+
 		public native function set host(arg0:String):void;
+
 		public native function get resourceRecords():Array;
+
 		public native function set resourceRecords(arg0:Array):void;
 	}
 }

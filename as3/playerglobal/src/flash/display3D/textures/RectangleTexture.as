@@ -13,6 +13,7 @@ package flash.display3D.textures
 		}
 
 		public native function uploadFromBitmapData(source:BitmapData):void;
+
 		public native function uploadFromByteArray(data:ByteArray, byteArrayOffset:uint):void;
 	}
 }

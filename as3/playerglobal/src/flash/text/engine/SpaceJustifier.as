@@ -11,19 +11,27 @@ package flash.text.engine
 		}
 
 		public native function get letterSpacing():Boolean;
+
 		public native function set letterSpacing(value:Boolean):void;
+
 		[API("667")]
 		public native function get minimumSpacing():Number;
+
 		[API("667")]
 		public native function set minimumSpacing(value:Number):void;
+
 		[API("667")]
 		public native function get optimumSpacing():Number;
+
 		[API("667")]
 		public native function set optimumSpacing(value:Number):void;
+
 		[API("667")]
 		public native function get maximumSpacing():Number;
+
 		[API("667")]
 		public native function set maximumSpacing(value:Number):void;
+
 		override public native function clone():TextJustifier;
 	}
 }

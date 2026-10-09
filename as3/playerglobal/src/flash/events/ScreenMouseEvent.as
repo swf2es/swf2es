@@ -16,9 +16,13 @@ package flash.events
 		public static const RIGHT_CLICK:String = "rightClick";
 		public static const RIGHT_MOUSE_DOWN:String = "rightMouseDown";
 		public static const RIGHT_MOUSE_UP:String = "rightMouseUp";
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
+
 		public native function get screenX():Number;
+
 		public native function get screenY():Number;
 	}
 }

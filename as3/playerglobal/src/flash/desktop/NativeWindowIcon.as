@@ -10,8 +10,11 @@ package flash.desktop
 		}
 
 		override public native function set bitmaps(arg0:Array):void;
+
 		override public native function get bitmaps():Array;
+
 		override public native function get width():int;
+
 		override public native function get height():int;
 	}
 }

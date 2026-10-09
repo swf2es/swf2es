@@ -13,6 +13,7 @@ package flash.system
 		}
 
 		public native function createApplicationInstaller(arg0:XML, arg1:ByteArray):ApplicationInstaller;
+
 		public native function enableDiskCache(arg0:URLStream):Boolean;
 	}
 }

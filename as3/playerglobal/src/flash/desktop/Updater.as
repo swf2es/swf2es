@@ -12,6 +12,7 @@ package flash.desktop
 
 		[API("668")]
 		public static native function get isSupported():Boolean;
+
 		public native function update(arg0:File, arg1:String):void;
 	}
 }

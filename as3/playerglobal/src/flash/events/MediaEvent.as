@@ -14,8 +14,11 @@ package flash.events
 
 		public static const COMPLETE:String = "complete";
 		public static const SELECT:String = "select";
+
 		public native function get data():MediaPromise;
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
 	}
 }

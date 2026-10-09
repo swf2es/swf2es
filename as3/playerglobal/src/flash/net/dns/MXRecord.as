@@ -10,8 +10,11 @@ package flash.net.dns
 		}
 
 		public native function get exchange():String;
+
 		public native function set exchange(arg0:String):void;
+
 		public native function get preference():int;
+
 		public native function set preference(arg0:int):void;
 	}
 }

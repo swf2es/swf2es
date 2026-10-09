@@ -10,6 +10,7 @@ package flash.text
 		}
 
 		public native function set multiline(arg0:Boolean):*;
+
 		public native function get multiline():Boolean;
 	}
 }

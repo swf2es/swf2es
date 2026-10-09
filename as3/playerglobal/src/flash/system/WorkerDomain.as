@@ -12,8 +12,11 @@ package flash.system
 		}
 
 		public static native function get isSupported():Boolean;
+
 		public static native function get current():WorkerDomain;
+
 		public native function createWorker(swf:ByteArray, giveAppPrivileges:Boolean = false):Worker;
+
 		public native function listWorkers():Vector.<Worker>;
 	}
 }

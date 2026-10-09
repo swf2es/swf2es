@@ -12,8 +12,11 @@ package flash.events
 
 		public static const TIMER:String = "timer";
 		public static const TIMER_COMPLETE:String = "timerComplete";
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
+
 		public native function updateAfterEvent():void;
 	}
 }

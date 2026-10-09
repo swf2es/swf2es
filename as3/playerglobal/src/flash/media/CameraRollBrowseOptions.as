@@ -12,10 +12,15 @@ package flash.media
 		}
 
 		public native function get width():Number;
+
 		public native function set width(arg0:Number):void;
+
 		public native function get height():Number;
+
 		public native function set height(arg0:Number):void;
+
 		public native function get origin():Rectangle;
+
 		public native function set origin(arg0:Rectangle):void;
 	}
 }

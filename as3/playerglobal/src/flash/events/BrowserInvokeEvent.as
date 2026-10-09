@@ -11,11 +11,17 @@ package flash.events
 		}
 
 		public static const BROWSER_INVOKE:String = "browserInvoke";
+
 		override public native function clone():Event;
+
 		public native function get arguments():Array;
+
 		public native function get sandboxType():String;
+
 		public native function get securityDomain():String;
+
 		public native function get isHTTPS():Boolean;
+
 		public native function get isUserEvent():Boolean;
 	}
 }

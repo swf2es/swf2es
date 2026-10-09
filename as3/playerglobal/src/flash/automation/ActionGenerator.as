@@ -9,6 +9,7 @@ package flash.automation
 		}
 
 		public native function generateActions(arg0:Array):void;
+
 		public native function generateAction(arg0:AutomationAction):void;
 	}
 }

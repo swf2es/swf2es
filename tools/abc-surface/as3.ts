@@ -267,7 +267,16 @@ function classSource(
     for (const t of list) {
       const m = member(t, isStatic, pkg, imports, names, isInterface);
       if (m) {
+        // A blank line after each function; fields stay together.
+        const last = lines.at(-1);
+        if (last !== undefined && last !== "" && !/\bfunction\b/.test(last) && /\bfunction\b/.test(m)) {
+          lines.push("");
+        }
+
         lines.push(m);
+        if (/\bfunction\b/.test(m)) {
+          lines.push("");
+        }
       }
     }
   }
@@ -291,6 +300,10 @@ function classSource(
         ...superCall(c, baseInit, names.get(n.local)),
         "\t\t}",
       ];
+  while (lines.at(-1) === "") {
+    lines.pop();
+  }
+
   const body = [...ctor, ...(ctor.length && lines.length ? [""] : []), ...lines];
   return [
     `package ${pkg}`,

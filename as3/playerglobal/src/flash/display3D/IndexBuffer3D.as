@@ -12,7 +12,9 @@ package flash.display3D
 		}
 
 		public native function uploadFromVector(data:Vector.<uint>, startOffset:int, count:int):void;
+
 		public native function uploadFromByteArray(data:ByteArray, byteArrayOffset:int, startOffset:int, count:int):void;
+
 		public native function dispose():void;
 	}
 }

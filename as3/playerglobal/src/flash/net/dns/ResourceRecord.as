@@ -10,8 +10,11 @@ package flash.net.dns
 		}
 
 		public native function get name():String;
+
 		public native function set name(arg0:String):void;
+
 		public native function get ttl():int;
+
 		public native function set ttl(arg0:int):void;
 	}
 }

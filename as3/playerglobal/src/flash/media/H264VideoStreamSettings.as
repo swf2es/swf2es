@@ -10,8 +10,11 @@ package flash.media
 		}
 
 		override public native function get codec():String;
+
 		public native function setProfileLevel(arg0:String, arg1:String):void;
+
 		public native function get profile():String;
+
 		public native function get level():String;
 	}
 }

@@ -16,11 +16,17 @@ package flash.media
 		}
 
 		public native function get isAsync():Boolean;
+
 		public native function open():IDataInput;
+
 		public native function close():void;
+
 		public native function reportError(arg0:ErrorEvent):void;
+
 		public native function get file():File;
+
 		public native function get mediaType():String;
+
 		public native function get relativePath():String;
 	}
 }

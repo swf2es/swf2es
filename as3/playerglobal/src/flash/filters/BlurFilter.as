@@ -10,11 +10,17 @@ package flash.filters
 		}
 
 		public native function get blurX():Number;
+
 		public native function set blurX(arg0:Number):void;
+
 		public native function get blurY():Number;
+
 		public native function set blurY(arg0:Number):void;
+
 		public native function get quality():int;
+
 		public native function set quality(arg0:int):void;
+
 		override public native function clone():BitmapFilter;
 	}
 }

@@ -11,12 +11,17 @@ package flash.net
 		}
 
 		public native function connect(host:String, port:int):void;
+
 		public native function send(object:*):void;
+
 		[API("662")]
 		public native function get timeout():int;
+
 		[API("662")]
 		public native function set timeout(value:int):void;
+
 		public native function close():void;
+
 		public native function get connected():Boolean;
 	}
 }

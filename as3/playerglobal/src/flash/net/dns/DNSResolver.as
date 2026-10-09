@@ -12,6 +12,7 @@ package flash.net.dns
 		}
 
 		public static native function get isSupported():Boolean;
+
 		public native function lookup(arg0:String, arg1:Class):void;
 	}
 }

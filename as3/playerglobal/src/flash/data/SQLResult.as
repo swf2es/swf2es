@@ -10,8 +10,11 @@ package flash.data
 		}
 
 		public native function get complete():Boolean;
+
 		public native function get data():Array;
+
 		public native function get rowsAffected():Number;
+
 		public native function get lastInsertRowID():Number;
 	}
 }

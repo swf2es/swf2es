@@ -12,9 +12,13 @@ package flash.ui
 		}
 
 		public native function get value():Number;
+
 		public native function get minValue():Number;
+
 		public native function get maxValue():Number;
+
 		public native function get device():GameInputDevice;
+
 		public native function get id():String;
 	}
 }

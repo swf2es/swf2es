@@ -12,12 +12,19 @@ package flash.system
 		}
 
 		public native function send(arg:*, queueLimit:int = -1):void;
+
 		public native function get messageAvailable():Boolean;
+
 		public native function receive(arg0:Boolean = false):*;
+
 		override public native function addEventListener(arg0:String, arg1:Function, arg2:Boolean = false, arg3:int = 0, arg4:Boolean = false):void;
+
 		override public native function removeEventListener(arg0:String, arg1:Function, arg2:Boolean = false):void;
+
 		public native function close():void;
+
 		public native function get state():String;
+
 		override public native function toString():String;
 	}
 }

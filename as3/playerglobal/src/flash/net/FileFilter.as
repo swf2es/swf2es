@@ -10,10 +10,15 @@ package flash.net
 		}
 
 		public native function get description():String;
+
 		public native function set description(val:String):void;
+
 		public native function get extension():String;
+
 		public native function set extension(val:String):void;
+
 		public native function get macType():String;
+
 		public native function set macType(val:String):void;
 	}
 }

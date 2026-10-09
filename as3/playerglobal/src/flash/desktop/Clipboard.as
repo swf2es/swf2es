@@ -11,13 +11,21 @@ package flash.desktop
 		}
 
 		public static native function get generalClipboard():Clipboard;
+
 		public native function get formats():Array;
+
 		public native function clear():void;
+
 		public native function clearData(format:String):void;
+
 		public native function setData(format:String, data:Object, serializable:Boolean = true):Boolean;
+
 		public native function setDataHandler(format:String, handler:Function, serializable:Boolean = true):Boolean;
+
 		public native function getData(format:String, transferMode:String = "originalPreferred"):Object;
+
 		public native function hasFormat(format:String):Boolean;
+
 		[API("668")]
 		public native function get supportsFilePromise():Boolean;
 	}

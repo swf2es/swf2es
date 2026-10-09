@@ -12,7 +12,9 @@ package flash.sensors
 		}
 
 		public static native function get isSupported():Boolean;
+
 		public native function setRequestedUpdateInterval(interval:Number):void;
+
 		public native function get muted():Boolean;
 	}
 }

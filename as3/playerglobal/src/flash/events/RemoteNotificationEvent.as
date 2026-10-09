@@ -12,7 +12,9 @@ package flash.events
 
 		public static const NOTIFICATION:String = "notification";
 		public static const TOKEN:String = "token";
+
 		public native function get data():Object;
+
 		public native function get tokenId():String;
 	}
 }

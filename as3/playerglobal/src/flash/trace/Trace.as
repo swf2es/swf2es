@@ -16,9 +16,13 @@ package flash.trace
 		public static const METHODS_AND_LINES_WITH_ARGS:int = 4;
 		public static const FILE:* = 1;
 		public static const LISTENER:* = 2;
+
 		public static native function setLevel(level:int, target:int = 2):*;
+
 		public static native function getLevel(target:int = 2):int;
+
 		public static native function setListener(func:Function):*;
+
 		public static native function getListener():Function;
 	}
 }

@@ -10,12 +10,19 @@ package flash.net.dns
 		}
 
 		public native function get priority():int;
+
 		public native function set priority(arg0:int):void;
+
 		public native function get weight():int;
+
 		public native function set weight(arg0:int):void;
+
 		public native function get port():int;
+
 		public native function set port(arg0:int):void;
+
 		public native function get target():String;
+
 		public native function set target(arg0:String):void;
 	}
 }

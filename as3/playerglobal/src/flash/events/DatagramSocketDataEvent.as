@@ -13,17 +13,29 @@ package flash.events
 		}
 
 		public static const DATA:String = "data";
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
+
 		public native function get srcAddress():String;
+
 		public native function set srcAddress(arg0:String):void;
+
 		public native function get srcPort():int;
+
 		public native function set srcPort(arg0:int):void;
+
 		public native function get dstAddress():String;
+
 		public native function set dstAddress(arg0:String):void;
+
 		public native function get dstPort():int;
+
 		public native function set dstPort(arg0:int):void;
+
 		public native function get data():ByteArray;
+
 		public native function set data(arg0:ByteArray):void;
 	}
 }

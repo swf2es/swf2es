@@ -11,6 +11,7 @@ package flash.globalization
 		}
 
 		public native function get value():Number;
+
 		public native function get currencyString():String;
 	}
 }

@@ -12,14 +12,23 @@ package flash.filters
 		}
 
 		public native function get shader():Shader;
+
 		public native function set shader(value:Shader):void;
+
 		public native function get leftExtension():int;
+
 		public native function set leftExtension(value:int):void;
+
 		public native function get topExtension():int;
+
 		public native function set topExtension(value:int):void;
+
 		public native function get rightExtension():int;
+
 		public native function set rightExtension(value:int):void;
+
 		public native function get bottomExtension():int;
+
 		public native function set bottomExtension(value:int):void;
 	}
 }

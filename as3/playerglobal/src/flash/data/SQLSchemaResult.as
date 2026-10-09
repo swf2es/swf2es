@@ -10,8 +10,11 @@ package flash.data
 		}
 
 		public native function get indices():Array;
+
 		public native function get tables():Array;
+
 		public native function get triggers():Array;
+
 		public native function get views():Array;
 	}
 }

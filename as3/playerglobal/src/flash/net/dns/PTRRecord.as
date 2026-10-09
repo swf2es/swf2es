@@ -10,6 +10,7 @@ package flash.net.dns
 		}
 
 		public native function get ptrdName():String;
+
 		public native function set ptrdName(arg0:String):void;
 	}
 }

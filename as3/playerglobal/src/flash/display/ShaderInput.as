@@ -10,12 +10,19 @@ package flash.display
 		}
 
 		public native function get input():Object;
+
 		public native function set input(value:Object):void;
+
 		public native function get width():int;
+
 		public native function set width(value:int):void;
+
 		public native function get height():int;
+
 		public native function set height(value:int):void;
+
 		public native function get channels():int;
+
 		public native function get index():int;
 	}
 }

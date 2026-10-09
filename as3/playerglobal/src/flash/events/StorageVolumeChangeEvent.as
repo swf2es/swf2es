@@ -15,9 +15,13 @@ package flash.events
 
 		public static const STORAGE_VOLUME_MOUNT:String = "storageVolumeMount";
 		public static const STORAGE_VOLUME_UNMOUNT:String = "storageVolumeUnmount";
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
+
 		public native function get rootDirectory():File;
+
 		public native function get storageVolume():StorageVolume;
 	}
 }

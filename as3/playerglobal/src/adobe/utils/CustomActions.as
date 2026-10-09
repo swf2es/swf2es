@@ -9,8 +9,11 @@ package adobe.utils
 		}
 
 		public static native function installActions(arg0:String, arg1:String):void;
+
 		public static native function uninstallActions(arg0:String):void;
+
 		public static native function get actionsList():Array;
+
 		public static native function getActions(arg0:String):String;
 	}
 }

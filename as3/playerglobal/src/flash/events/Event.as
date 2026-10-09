@@ -77,18 +77,31 @@ package flash.events
 		public static const HTML_RENDER:String = "htmlRender";
 		public static const HTML_DOM_INITIALIZE:String = "htmlDOMInitialize";
 		public static const LOCATION_CHANGE:String = "locationChange";
+
 		public native function formatToString(className:String, ...arguments):String;
+
 		public native function clone():Event;
+
 		public native function toString():String;
+
 		public native function get type():String;
+
 		public native function get bubbles():Boolean;
+
 		public native function get cancelable():Boolean;
+
 		public native function get target():Object;
+
 		public native function get currentTarget():Object;
+
 		public native function get eventPhase():uint;
+
 		public native function stopPropagation():void;
+
 		public native function stopImmediatePropagation():void;
+
 		public native function preventDefault():void;
+
 		public native function isDefaultPrevented():Boolean;
 	}
 }

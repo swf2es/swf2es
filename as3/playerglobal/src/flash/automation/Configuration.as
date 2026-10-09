@@ -9,7 +9,9 @@ package flash.automation
 		}
 
 		public static native function get testAutomationConfiguration():String;
+
 		public static native function set deviceConfiguration(arg0:String):void;
+
 		public static native function get deviceConfiguration():String;
 	}
 }

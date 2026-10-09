@@ -11,11 +11,15 @@ package flash.text.engine
 		}
 
 		public native function get justificationStyle():String;
+
 		public native function set justificationStyle(value:String):void;
+
 		[API("674")]
 		public native function get composeTrailingIdeographicSpaces():Boolean;
+
 		[API("674")]
 		public native function set composeTrailingIdeographicSpaces(value:Boolean):void;
+
 		override public native function clone():TextJustifier;
 	}
 }

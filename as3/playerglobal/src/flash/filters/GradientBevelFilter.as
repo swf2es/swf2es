@@ -10,27 +10,49 @@ package flash.filters
 		}
 
 		public native function get distance():Number;
+
 		public native function set distance(value:Number):void;
+
 		public native function get angle():Number;
+
 		public native function set angle(value:Number):void;
+
 		public native function get colors():Array;
+
 		public native function set colors(value:Array):void;
+
 		public native function get alphas():Array;
+
 		public native function set alphas(value:Array):void;
+
 		public native function get ratios():Array;
+
 		public native function set ratios(value:Array):void;
+
 		public native function get blurX():Number;
+
 		public native function set blurX(value:Number):void;
+
 		public native function get blurY():Number;
+
 		public native function set blurY(value:Number):void;
+
 		public native function get knockout():Boolean;
+
 		public native function set knockout(value:Boolean):void;
+
 		public native function get quality():int;
+
 		public native function set quality(value:int):void;
+
 		public native function get strength():Number;
+
 		public native function set strength(value:Number):void;
+
 		public native function get type():String;
+
 		public native function set type(value:String):void;
+
 		override public native function clone():BitmapFilter;
 	}
 }

@@ -13,10 +13,15 @@ package flash.display
 		}
 
 		public static native function get screens():Array;
+
 		public static native function get mainScreen():Screen;
+
 		public static native function getScreensForRectangle(arg0:Rectangle):Array;
+
 		public native function get bounds():Rectangle;
+
 		public native function get visibleBounds():Rectangle;
+
 		public native function get colorDepth():int;
 	}
 }

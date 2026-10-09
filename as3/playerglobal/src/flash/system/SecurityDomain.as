@@ -10,6 +10,7 @@ package flash.system
 		}
 
 		public static native function get currentDomain():SecurityDomain;
+
 		[API("680")]
 		public native function get domainID():String;
 	}

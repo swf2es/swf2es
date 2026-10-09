@@ -12,7 +12,9 @@ package flash.accessibility
 		}
 
 		public static native function get active():Boolean;
+
 		public static native function sendEvent(source:DisplayObject, childID:uint, eventType:uint, nonHTML:Boolean = false):void;
+
 		public static native function updateProperties():void;
 	}
 }

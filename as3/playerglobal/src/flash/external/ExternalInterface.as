@@ -10,9 +10,13 @@ package flash.external
 		}
 
 		public static native function get available():Boolean;
+
 		public static var marshallExceptions:Boolean = false;
+
 		public static native function addCallback(functionName:String, closure:Function):void;
+
 		public static native function call(functionName:String, ...arguments):*;
+
 		public static native function get objectID():String;
 	}
 }

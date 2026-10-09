@@ -11,9 +11,13 @@ package flash.events
 		}
 
 		public static const UNCAUGHT_SCRIPT_EXCEPTION:* = "uncaughtScriptException";
+
 		override public native function clone():Event;
+
 		public var exceptionValue:*;
+
 		public native function get stackTrace():Array;
+
 		public native function set stackTrace(arg0:Array):void;
 	}
 }

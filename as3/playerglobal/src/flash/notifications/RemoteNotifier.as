@@ -12,7 +12,9 @@ package flash.notifications
 		}
 
 		public static native function get supportedNotificationStyles():Vector.<String>;
+
 		public native function subscribe(arg0:RemoteNotifierSubscribeOptions = null):void;
+
 		public native function unsubscribe():void;
 	}
 }

@@ -12,6 +12,7 @@ package flash.media
 		}
 
 		public static native function get isSupported():Boolean;
+
 		public native function launch(arg0:String):void;
 	}
 }

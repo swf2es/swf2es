@@ -12,9 +12,13 @@ package flash.display
 		}
 
 		public native function set byteCode(code:ByteArray):void;
+
 		public native function get data():ShaderData;
+
 		public native function set data(value:ShaderData):void;
+
 		public native function get precisionHint():String;
+
 		public native function set precisionHint(value:String):void;
 	}
 }

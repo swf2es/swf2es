@@ -10,10 +10,15 @@ package flash.data
 		}
 
 		public native function get allowNull():Boolean;
+
 		public native function get autoIncrement():Boolean;
+
 		public native function get defaultCollationType():String;
+
 		public native function get dataType():String;
+
 		public native function get name():String;
+
 		public native function get primaryKey():Boolean;
 	}
 }

@@ -30,43 +30,75 @@ package flash.events
 		public static const RIGHT_MOUSE_DOWN:String = "rightMouseDown";
 		public static const RIGHT_MOUSE_UP:String = "rightMouseUp";
 		public static const CONTEXT_MENU:String = "contextMenu";
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
+
 		public native function get localX():Number;
+
 		public native function set localX(value:Number):void;
+
 		public native function get localY():Number;
+
 		public native function set localY(value:Number):void;
+
 		public native function get relatedObject():InteractiveObject;
+
 		public native function set relatedObject(value:InteractiveObject):void;
+
 		public native function get ctrlKey():Boolean;
+
 		public native function set ctrlKey(value:Boolean):void;
+
 		public native function get altKey():Boolean;
+
 		public native function set altKey(value:Boolean):void;
+
 		public native function get shiftKey():Boolean;
+
 		public native function set shiftKey(value:Boolean):void;
+
 		public native function get buttonDown():Boolean;
+
 		public native function set buttonDown(value:Boolean):void;
+
 		public native function get delta():int;
+
 		public native function set delta(value:int):void;
+
 		public native function get stageX():Number;
+
 		public native function get stageY():Number;
+
 		public native function updateAfterEvent():void;
+
 		[API("662")]
 		public native function get isRelatedObjectInaccessible():Boolean;
+
 		[API("662")]
 		public native function set isRelatedObjectInaccessible(value:Boolean):void;
+
 		[API("678")]
 		public native function get movementX():Number;
+
 		[API("678")]
 		public native function set movementX(value:Number):void;
+
 		[API("678")]
 		public native function get movementY():Number;
+
 		[API("678")]
 		public native function set movementY(value:Number):void;
+
 		public native function get commandKey():Boolean;
+
 		public native function set commandKey(arg0:Boolean):void;
+
 		public native function get controlKey():Boolean;
+
 		public native function set controlKey(arg0:Boolean):void;
+
 		public native function get clickCount():int;
 	}
 }

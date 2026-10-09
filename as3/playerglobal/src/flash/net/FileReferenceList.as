@@ -11,6 +11,7 @@ package flash.net
 		}
 
 		public native function get fileList():Array;
+
 		public native function browse(typeFilter:Array = null):Boolean;
 	}
 }

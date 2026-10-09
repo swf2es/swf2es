@@ -10,9 +10,13 @@ package flash.text.engine
 		}
 
 		public static native function getJustifierForLocale(arg0:String):TextJustifier;
+
 		public native function get locale():String;
+
 		public native function get lineJustification():String;
+
 		public native function set lineJustification(value:String):void;
+
 		public native function clone():TextJustifier;
 	}
 }

@@ -27,6 +27,7 @@ package flash.events
 		public static const ROLLBACK_TO_SAVEPOINT:String = "rollbackToSavepoint";
 		public static const SCHEMA:String = "schema";
 		public static const SET_SAVEPOINT:String = "setSavepoint";
+
 		override public native function clone():Event;
 	}
 }

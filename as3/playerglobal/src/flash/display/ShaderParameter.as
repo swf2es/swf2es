@@ -10,8 +10,11 @@ package flash.display
 		}
 
 		public native function get value():Array;
+
 		public native function set value(value:Array):void;
+
 		public native function get type():String;
+
 		public native function get index():int;
 	}
 }

@@ -10,7 +10,9 @@ package flash.filters
 		}
 
 		public native function get matrix():Array;
+
 		public native function set matrix(matrix:Array):void;
+
 		override public native function clone():BitmapFilter;
 	}
 }

@@ -11,8 +11,10 @@ package flash.filesystem
 		}
 
 		public static native function get storageVolumeInfo():StorageVolumeInfo;
+
 		[API("668")]
 		public static native function get isSupported():Boolean;
+
 		public native function getStorageVolumes():Vector.<StorageVolume>;
 	}
 }

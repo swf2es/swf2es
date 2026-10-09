@@ -13,9 +13,12 @@ package flash.media
 		}
 
 		public static native function get supportsAddBitmapData():Boolean;
+
 		[API("669")]
 		public static native function get supportsBrowseForImage():Boolean;
+
 		public native function addBitmapData(arg0:BitmapData):void;
+
 		[API("669")]
 		public native function browseForImage(arg0:CameraRollBrowseOptions = null):void;
 	}

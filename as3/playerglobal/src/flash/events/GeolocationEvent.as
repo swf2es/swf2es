@@ -11,23 +11,41 @@ package flash.events
 		}
 
 		public static const UPDATE:String = "update";
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
+
 		public native function get latitude():Number;
+
 		public native function set latitude(arg0:Number):void;
+
 		public native function get longitude():Number;
+
 		public native function set longitude(arg0:Number):void;
+
 		public native function get altitude():Number;
+
 		public native function set altitude(arg0:Number):void;
+
 		public native function get horizontalAccuracy():Number;
+
 		public native function set horizontalAccuracy(arg0:Number):void;
+
 		public native function get verticalAccuracy():Number;
+
 		public native function set verticalAccuracy(arg0:Number):void;
+
 		public native function get speed():Number;
+
 		public native function set speed(arg0:Number):void;
+
 		public native function get heading():Number;
+
 		public native function set heading(arg0:Number):void;
+
 		public native function get timestamp():Number;
+
 		public native function set timestamp(arg0:Number):void;
 	}
 }

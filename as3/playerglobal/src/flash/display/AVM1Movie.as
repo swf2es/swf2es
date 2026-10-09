@@ -10,6 +10,7 @@ package flash.display
 		}
 
 		public native function call(functionName:String, ...rest):*;
+
 		public native function addCallback(name:String, fn:Function):void;
 	}
 }

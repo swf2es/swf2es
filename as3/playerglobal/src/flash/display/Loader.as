@@ -16,20 +16,33 @@ package flash.display
 		}
 
 		public native function load(request:URLRequest, context:LoaderContext = null):void;
+
 		public native function loadBytes(data:ByteArray, context:LoaderContext = null):void;
+
 		public native function close():void;
+
 		public native function unload():void;
+
 		[API("662")]
 		public native function unloadAndStop(gc:Boolean = true):void;
+
 		public native function get content():DisplayObject;
+
 		public native function get contentLoaderInfo():LoaderInfo;
+
 		override public native function addChild(child:DisplayObject):DisplayObject;
+
 		override public native function addChildAt(child:DisplayObject, index:int):DisplayObject;
+
 		override public native function removeChild(child:DisplayObject):DisplayObject;
+
 		override public native function removeChildAt(index:int):DisplayObject;
+
 		override public native function setChildIndex(child:DisplayObject, index:int):void;
+
 		[API("667")]
 		public native function get uncaughtErrorEvents():UncaughtErrorEvents;
+
 		[API("669")]
 		public native function loadFilePromise(arg0:IFilePromise, arg1:LoaderContext = null):void;
 	}

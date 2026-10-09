@@ -10,12 +10,19 @@ package flash.net
 		}
 
 		public native function get address():String;
+
 		public native function set address(arg0:String):void;
+
 		public native function get broadcast():String;
+
 		public native function set broadcast(arg0:String):void;
+
 		public native function get prefixLength():int;
+
 		public native function set prefixLength(arg0:int):void;
+
 		public native function get ipVersion():String;
+
 		public native function set ipVersion(arg0:String):void;
 	}
 }

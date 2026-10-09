@@ -12,9 +12,13 @@ package flash.events
 
 		public static const ORIENTATION_CHANGING:String = "orientationChanging";
 		public static const ORIENTATION_CHANGE:String = "orientationChange";
+
 		override public native function clone():Event;
+
 		public native function get beforeOrientation():String;
+
 		public native function get afterOrientation():String;
+
 		override public native function toString():String;
 	}
 }

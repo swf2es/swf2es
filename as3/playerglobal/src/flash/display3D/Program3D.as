@@ -12,6 +12,7 @@ package flash.display3D
 		}
 
 		public native function upload(vertexProgram:ByteArray, fragmentProgram:ByteArray):void;
+
 		public native function dispose():void;
 	}
 }

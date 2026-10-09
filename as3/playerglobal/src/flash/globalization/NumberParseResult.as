@@ -11,7 +11,9 @@ package flash.globalization
 		}
 
 		public native function get value():Number;
+
 		public native function get startIndex():int;
+
 		public native function get endIndex():int;
 	}
 }

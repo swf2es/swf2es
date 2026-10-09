@@ -10,9 +10,13 @@ package flash.errors
 		}
 
 		public native function get details():String;
+
 		public native function get detailID():int;
+
 		public native function get detailArguments():Array;
+
 		public native function get operation():String;
+
 		public native function toString():String;
 	}
 }

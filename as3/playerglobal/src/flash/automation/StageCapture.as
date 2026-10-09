@@ -18,14 +18,23 @@ package flash.automation
 		public static const RASTER:String = "raster";
 		public static const STAGE:String = "stage";
 		public static const SCREEN:String = "screen";
+
 		public native function capture(arg0:String):void;
+
 		public native function cancel():void;
+
 		public native function set fileNameBase(arg0:String):void;
+
 		public native function get fileNameBase():String;
+
 		public native function set clipRect(arg0:Rectangle):void;
+
 		public native function get clipRect():Rectangle;
+
 		public native function captureBitmapData():BitmapData;
+
 		public native function set captureSource(arg0:String):void;
+
 		public native function get captureSource():String;
 	}
 }

@@ -10,13 +10,21 @@ package flash.net
 		}
 
 		public native function get postingSendDataBytesPerSecond():Number;
+
 		public native function get postingSendControlBytesPerSecond():Number;
+
 		public native function get postingReceiveDataBytesPerSecond():Number;
+
 		public native function get postingReceiveControlBytesPerSecond():Number;
+
 		public native function get routingSendBytesPerSecond():Number;
+
 		public native function get routingReceiveBytesPerSecond():Number;
+
 		public native function get objectReplicationSendBytesPerSecond():Number;
+
 		public native function get objectReplicationReceiveBytesPerSecond():Number;
+
 		public native function toString():String;
 	}
 }

@@ -13,9 +13,13 @@ package flash.events
 		}
 
 		public static const CONNECT:String = "connect";
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
+
 		public native function get socket():Socket;
+
 		public native function set socket(arg0:Socket):void;
 	}
 }

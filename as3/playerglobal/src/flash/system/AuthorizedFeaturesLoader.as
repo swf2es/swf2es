@@ -13,7 +13,9 @@ package flash.system
 		}
 
 		public native function get authorizedFeatures():AuthorizedFeatures;
+
 		public native function loadAuthorizedFeatures():void;
+
 		[API("688")]
 		public native function loadAuthorizedFeaturesFromData(arg0:ByteArray):void;
 	}

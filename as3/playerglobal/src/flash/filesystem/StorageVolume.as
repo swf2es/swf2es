@@ -10,10 +10,15 @@ package flash.filesystem
 		}
 
 		public native function get rootDirectory():File;
+
 		public native function get name():String;
+
 		public native function get drive():String;
+
 		public native function get isWritable():Boolean;
+
 		public native function get isRemovable():Boolean;
+
 		public native function get fileSystemType():String;
 	}
 }

@@ -12,13 +12,21 @@ package flash.utils
 		}
 
 		public native function get delay():Number;
+
 		public native function get repeatCount():int;
+
 		public native function set repeatCount(value:int):void;
+
 		public native function get currentCount():int;
+
 		public native function get running():Boolean;
+
 		public native function set delay(value:Number):void;
+
 		public native function start():void;
+
 		public native function reset():void;
+
 		public native function stop():void;
 	}
 }

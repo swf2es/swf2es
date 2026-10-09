@@ -253,13 +253,19 @@ package flash.ui
 		public static const SPACE:uint = 32;
 		public static const TAB:uint = 9;
 		public static const UP:uint = 38;
+
 		public static native function get capsLock():Boolean;
+
 		public static native function get numLock():Boolean;
+
 		public static native function isAccessible():Boolean;
+
 		[API("667")]
 		public static native function get hasVirtualKeyboard():Boolean;
+
 		[API("667")]
 		public static native function get physicalKeyboardType():String;
+
 		[API("669")]
 		public static const RED:uint = 16777216;
 		[API("669")]

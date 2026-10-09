@@ -11,9 +11,13 @@ package flash.events
 		}
 
 		public static const EXIT:String = "exit";
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
+
 		public native function get exitCode():Number;
+
 		public native function set exitCode(arg0:Number):void;
 	}
 }

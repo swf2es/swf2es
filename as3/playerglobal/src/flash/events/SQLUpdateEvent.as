@@ -13,8 +13,11 @@ package flash.events
 		public static const UPDATE:String = "update";
 		public static const INSERT:String = "insert";
 		public static const DELETE:String = "delete";
+
 		public native function get table():String;
+
 		public native function get rowID():Number;
+
 		override public native function clone():Event;
 	}
 }

@@ -10,8 +10,11 @@ package flash.html
 		}
 
 		public native function get url():String;
+
 		public native function get originalUrl():String;
+
 		public native function get isPost():Boolean;
+
 		public native function get title():String;
 	}
 }

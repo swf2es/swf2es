@@ -13,8 +13,11 @@ package flash.events
 		}
 
 		public static const ERROR:String = "error";
+
 		public native function get error():SQLError;
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
 	}
 }

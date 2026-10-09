@@ -10,23 +10,41 @@ package flash.filters
 		}
 
 		public native function get matrix():Array;
+
 		public native function set matrix(arg0:Array):void;
+
 		public native function get matrixX():Number;
+
 		public native function set matrixX(arg0:Number):void;
+
 		public native function get matrixY():Number;
+
 		public native function set matrixY(arg0:Number):void;
+
 		public native function get divisor():Number;
+
 		public native function set divisor(arg0:Number):void;
+
 		public native function get bias():Number;
+
 		public native function set bias(arg0:Number):void;
+
 		public native function get preserveAlpha():Boolean;
+
 		public native function set preserveAlpha(arg0:Boolean):void;
+
 		public native function get clamp():Boolean;
+
 		public native function set clamp(arg0:Boolean):void;
+
 		public native function get color():uint;
+
 		public native function set color(arg0:uint):void;
+
 		public native function get alpha():Number;
+
 		public native function set alpha(arg0:Number):void;
+
 		override public native function clone():BitmapFilter;
 	}
 }

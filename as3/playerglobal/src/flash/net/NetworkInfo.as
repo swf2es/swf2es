@@ -12,7 +12,9 @@ package flash.net
 		}
 
 		public static native function get isSupported():Boolean;
+
 		public static native function get networkInfo():NetworkInfo;
+
 		public native function findInterfaces():Vector.<NetworkInterface>;
 	}
 }

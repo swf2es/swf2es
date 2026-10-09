@@ -12,6 +12,7 @@ package flash.text.engine
 		}
 
 		public native function set text(value:String):void;
+
 		public native function replaceText(beginIndex:int, endIndex:int, newText:String):void;
 	}
 }

@@ -12,6 +12,7 @@ package flash.system
 		}
 
 		public native function update(arg0:String):void;
+
 		public native function cancel():void;
 	}
 }

@@ -12,14 +12,21 @@ package flash.system
 		}
 
 		public static native function get currentDomain():ApplicationDomain;
+
 		[API("662", "663")]
 		public static native function get MIN_DOMAIN_MEMORY_LENGTH():uint;
+
 		public native function get parentDomain():ApplicationDomain;
+
 		public native function getDefinition(name:String):Object;
+
 		public native function hasDefinition(name:String):Boolean;
+
 		public native function getQualifiedDefinitionNames():Vector.<String>;
+
 		[API("662", "663")]
 		public native function get domainMemory():ByteArray;
+
 		[API("662", "663")]
 		public native function set domainMemory(value:ByteArray):*;
 	}

@@ -10,7 +10,9 @@ package flash.data
 		}
 
 		public native function get database():String;
+
 		public native function get name():String;
+
 		public native function get sql():String;
 	}
 }

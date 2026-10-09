@@ -10,6 +10,7 @@ package flash.net.dns
 		}
 
 		public native function get address():String;
+
 		public native function set address(arg0:String):void;
 	}
 }

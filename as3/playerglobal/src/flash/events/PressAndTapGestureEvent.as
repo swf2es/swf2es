@@ -12,13 +12,21 @@ package flash.events
 		}
 
 		public static const GESTURE_PRESS_AND_TAP:String = "gesturePressAndTap";
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
+
 		public native function get tapLocalX():Number;
+
 		public native function set tapLocalX(value:Number):void;
+
 		public native function get tapLocalY():Number;
+
 		public native function set tapLocalY(value:Number):void;
+
 		public native function get tapStageX():Number;
+
 		public native function get tapStageY():Number;
 	}
 }

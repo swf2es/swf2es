@@ -11,9 +11,13 @@ package flash.events
 
 		public static const LINK:String = "link";
 		public static const TEXT_INPUT:String = "textInput";
+
 		public native function get text():String;
+
 		public native function set text(value:String):void;
+
 		override public native function clone():Event;
+
 		override public native function toString():String;
 	}
 }
