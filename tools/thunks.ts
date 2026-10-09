@@ -153,8 +153,10 @@ export function thunkOf(d: MethodDecl): string | null {
   const types = params.map((p) => (typeof p === "string" ? p : p[0]));
   const defaults = params.map((p) => (typeof p === "string" ? null : p[1]));
   const anyDefault = defaults.some((v) => v !== null);
-  // One whose AS3 reads `arguments` gets them as given.
-  if (d.arguments || (!anyDefault && types.every((t) => t === "*"))) {
+  // One whose AS3 reads `arguments` gets them as given; and untyped
+  // parameters with no default but undefined need nothing done.
+  const untyped = types.every((t) => t === "*");
+  if (d.arguments || (untyped && defaults.every((v) => v === null || v[0] === "undefined"))) {
     return null;
   }
 

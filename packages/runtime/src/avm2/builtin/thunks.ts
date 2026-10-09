@@ -46,11 +46,6 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
     function (this: AsObject, a0: Value, a1: Value) {
       return f.call(this, rt.toInt(a0), a1);
     },
-  "Array#http://adobe.com/AS3/2006/builtin::join": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
-    },
   "Array#http://adobe.com/AS3/2006/builtin::lastIndexOf": (_rt, f) =>
     function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
@@ -155,11 +150,6 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       return f.call(this, a0, rt.coerceTo(a1, r0));
     };
   },
-  "Boolean()": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
-    },
   "Date#Date::_get": (rt, f) =>
     function (this: AsObject, a0: Value) {
       return f.call(this, rt.toInt(a0));
@@ -171,11 +161,6 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
   "Date#Date::_toString": (rt, f) =>
     function (this: AsObject, a0: Value) {
       return f.call(this, rt.toInt(a0));
-    },
-  "Date#http://adobe.com/AS3/2006/builtin::setTime": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
     },
   "Date#set:date": (rt, f) =>
     function (this: AsObject, a0: Value) {
@@ -237,29 +222,6 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
     function (this: AsObject, a0: Value) {
       return f.call(this, rt.toNumber(a0));
     },
-  "Date()": (_rt, f) =>
-    function (
-      this: AsObject,
-      a0: Value,
-      a1: Value,
-      a2: Value,
-      a3: Value,
-      a4: Value,
-      a5: Value,
-      a6: Value,
-    ) {
-      const n = arguments.length;
-      return f.call(
-        this,
-        n > 0 ? a0 : undefined,
-        n > 1 ? a1 : undefined,
-        n > 2 ? a2 : undefined,
-        n > 3 ? a3 : undefined,
-        n > 4 ? a4 : undefined,
-        n > 5 ? a5 : undefined,
-        n > 6 ? a6 : undefined,
-      );
-    },
   "Date.UTC": (_rt, f) =>
     function (
       this: AsObject,
@@ -309,16 +271,6 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
     function (this: AsObject, a0: Value, a1: Value) {
       const n = arguments.length;
       return f.call(this, n > 0 ? a0 : "", n > 1 ? a1 : 0);
-    },
-  "Function#http://adobe.com/AS3/2006/builtin::apply": (_rt, f) =>
-    function (this: AsObject, a0: Value, a1: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined, n > 1 ? a1 : undefined);
-    },
-  "Function#http://adobe.com/AS3/2006/builtin::call": (_rt, f) =>
-    function (this: AsObject, a0: Value, ...rest: Value[]) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined, ...rest);
     },
   "JSON.JSON::computePropertyList": (rt, f) => {
     const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
@@ -443,11 +395,6 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
     function (this: AsObject, a0: Value) {
       return f.call(this, rt.toNumber(a0));
     },
-  "Namespace()": (_rt, f) =>
-    function (this: AsObject, a0: Value, a1: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined, n > 1 ? a1 : undefined);
-    },
   "Number#http://adobe.com/AS3/2006/builtin::toExponential": (_rt, f) =>
     function (this: AsObject, a0: Value) {
       const n = arguments.length;
@@ -561,21 +508,6 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
     function (this: AsObject, a0: Value) {
       return f.call(this, rt.toNumber(a0));
     },
-  "Object#http://adobe.com/AS3/2006/builtin::hasOwnProperty": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
-    },
-  "Object#http://adobe.com/AS3/2006/builtin::isPrototypeOf": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
-    },
-  "Object#http://adobe.com/AS3/2006/builtin::propertyIsEnumerable": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
-    },
   "Object.Object::_dontEnumPrototype": (rt, f) =>
     function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceObject(a0));
@@ -591,11 +523,6 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
   "Object.Object::_setPropertyIsEnumerable": (rt, f) =>
     function (this: AsObject, a0: Value, a1: Value, a2: Value) {
       return f.call(this, a0, rt.coerceString(a1), !!a2);
-    },
-  "QName()": (_rt, f) =>
-    function (this: AsObject, a0: Value, a1: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined, n > 1 ? a1 : undefined);
     },
   "RangeError()": (_rt, f) =>
     function (this: AsObject, a0: Value, a1: Value) {
@@ -620,11 +547,6 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
   "RegExp#set:lastIndex": (rt, f) =>
     function (this: AsObject, a0: Value) {
       return f.call(this, rt.toInt(a0));
-    },
-  "RegExp()": (_rt, f) =>
-    function (this: AsObject, a0: Value, a1: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined, n > 1 ? a1 : undefined);
     },
   "SecurityError()": (_rt, f) =>
     function (this: AsObject, a0: Value, a1: Value) {
@@ -679,26 +601,6 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
         n > 0 ? rt.coerceString(a0) : "undefined",
         n > 1 ? rt.toNumber(a1) : 2147483647,
       );
-    },
-  "String#http://adobe.com/AS3/2006/builtin::localeCompare": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
-    },
-  "String#http://adobe.com/AS3/2006/builtin::match": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
-    },
-  "String#http://adobe.com/AS3/2006/builtin::replace": (_rt, f) =>
-    function (this: AsObject, a0: Value, a1: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined, n > 1 ? a1 : undefined);
-    },
-  "String#http://adobe.com/AS3/2006/builtin::search": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
     },
   "String#http://adobe.com/AS3/2006/builtin::slice": (rt, f) =>
     function (this: AsObject, a0: Value, a1: Value) {
@@ -790,20 +692,10 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       const n = arguments.length;
       return f.call(this, n > 0 ? a0 : "*");
     },
-  "XML#http://adobe.com/AS3/2006/builtin::hasOwnProperty": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
-    },
   "XML#http://adobe.com/AS3/2006/builtin::processingInstructions": (_rt, f) =>
     function (this: AsObject, a0: Value) {
       const n = arguments.length;
       return f.call(this, n > 0 ? a0 : "*");
-    },
-  "XML#http://adobe.com/AS3/2006/builtin::propertyIsEnumerable": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
     },
   "XML#http://adobe.com/AS3/2006/builtin::setNotification": (rt, f) => {
     const r0 = rt.cls(namespace(NS_Public, ""), "Function", rt.root);
@@ -814,11 +706,6 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
   "XML#http://adobe.com/AS3/2006/builtin::toJSON": (rt, f) =>
     function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceString(a0));
-    },
-  "XML()": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
     },
   "XML.http://adobe.com/AS3/2006/builtin::setSettings": (rt, f) =>
     function (this: AsObject, a0: Value) {
@@ -859,29 +746,14 @@ export const thunks: Record<string, (rt: Runtime, f: Method) => Method> = {
       const n = arguments.length;
       return f.call(this, n > 0 ? a0 : "*");
     },
-  "XMLList#http://adobe.com/AS3/2006/builtin::hasOwnProperty": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
-    },
   "XMLList#http://adobe.com/AS3/2006/builtin::processingInstructions": (_rt, f) =>
     function (this: AsObject, a0: Value) {
       const n = arguments.length;
       return f.call(this, n > 0 ? a0 : "*");
     },
-  "XMLList#http://adobe.com/AS3/2006/builtin::propertyIsEnumerable": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
-    },
   "XMLList#http://adobe.com/AS3/2006/builtin::toJSON": (rt, f) =>
     function (this: AsObject, a0: Value) {
       return f.call(this, rt.coerceString(a0));
-    },
-  "XMLList()": (_rt, f) =>
-    function (this: AsObject, a0: Value) {
-      const n = arguments.length;
-      return f.call(this, n > 0 ? a0 : undefined);
     },
   "__AS3__.vec::Vector$double#__AS3__.vec:Vector$double::_concat": (rt, f) => {
     const r0 = rt.cls(namespace(NS_Public, ""), "Array", rt.root);
