@@ -13,7 +13,7 @@ import {
 } from "../numbers.js";
 import { numberToString, type Runtime } from "../runtime.js";
 import { bindNatives } from "./bind.js";
-import { mathFunctions } from "./Math.js";
+import { mathClass } from "./Math.js";
 import { NumberDecl } from "./Number.decl.js";
 
 /** As NumberClass::_numberToString: another radix writes the integer part only. */
@@ -69,46 +69,65 @@ export function toFixedOf(rt: Runtime, n: number, p: Value): string {
   return convert(rt, n, rt.toInt(p), DTOSTR_FIXED);
 }
 
-export const numberNatives = bindNatives(
-  NumberDecl,
-  (rt) =>
-    class NumberNatives extends mathFunctions(rt) {
-      // Its class hook makes new Number(x) x: this never runs on one.
-      Number() {}
+export const numberNatives = bindNatives(NumberDecl, (rt) => {
+  const math = mathClass(rt);
+  return class NumberNatives {
+    // Its class hook makes new Number(x) x: this never runs on one.
+    Number() {}
 
-      static "private::_numberToString"(n: number, radix: number) {
-        return toStringRadix(rt, n, radix);
-      }
+    // Copies of Math's functions, as avmplus has them.
+    static abs = math.abs;
+    static acos = math.acos;
+    static asin = math.asin;
+    static atan = math.atan;
+    static ceil = math.ceil;
+    static cos = math.cos;
+    static exp = math.exp;
+    static floor = math.floor;
+    static log = math.log;
+    static round = math.round;
+    static sin = math.sin;
+    static sqrt = math.sqrt;
+    static tan = math.tan;
+    static atan2 = math.atan2;
+    static pow = math.pow;
+    static max = math.max;
+    static min = math.min;
+    static random = math.random;
 
-      static "private::_convert"(n: number, precision: number, mode: number) {
-        return convert(rt, n, precision, mode);
-      }
+    static "private::_numberToString"(n: number, radix: number) {
+      return toStringRadix(rt, n, radix);
+    }
 
-      static "private::_minValue"() {
-        return Number.MIN_VALUE;
-      }
+    static "private::_convert"(n: number, precision: number, mode: number) {
+      return convert(rt, n, precision, mode);
+    }
 
-      "AS3::toString"(this: number, radix: Value) {
-        return toStringOf(rt, this, radix);
-      }
+    static "private::_minValue"() {
+      return Number.MIN_VALUE;
+    }
 
-      "AS3::valueOf"(this: number) {
-        return this;
-      }
+    "AS3::toString"(this: number, radix: Value) {
+      return toStringOf(rt, this, radix);
+    }
 
-      "AS3::toExponential"(this: number, p: Value) {
-        return toExponentialOf(rt, this, p);
-      }
+    "AS3::valueOf"(this: number) {
+      return this;
+    }
 
-      "AS3::toPrecision"(this: number, p: Value) {
-        return toPrecisionOf(rt, this, p);
-      }
+    "AS3::toExponential"(this: number, p: Value) {
+      return toExponentialOf(rt, this, p);
+    }
 
-      "AS3::toFixed"(this: number, p: Value) {
-        return toFixedOf(rt, this, p);
-      }
-    },
-);
+    "AS3::toPrecision"(this: number, p: Value) {
+      return toPrecisionOf(rt, this, p);
+    }
+
+    "AS3::toFixed"(this: number, p: Value) {
+      return toFixedOf(rt, this, p);
+    }
+  };
+});
 
 // toFixed, toPrecision and toExponential write avmplus' text, which is not
 // JavaScript's, though JavaScript's methods give it for most numbers at a

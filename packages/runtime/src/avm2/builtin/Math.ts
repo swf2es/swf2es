@@ -23,10 +23,10 @@ function extreme(
   return rest.length ? f(x, y, ...rest.map((v) => rt.toNumber(v))) : f(x, y);
 }
 
-/** Math's functions, which Number has as well: a class each extends. */
-export function mathFunctions(rt: Runtime) {
-  // biome-ignore lint/complexity/noStaticOnlyClass: a class of natives holds Math's static ones
-  return class MathFunctions {
+/** Math's natives for runtime `rt`; Number's copies of its functions are taken from them. */
+export function mathClass(rt: Runtime) {
+  // biome-ignore lint/complexity/noStaticOnlyClass: Math's natives are all static
+  return class MathNatives {
     static abs(x: number) {
       return Math.abs(x);
     }
@@ -98,19 +98,15 @@ export function mathFunctions(rt: Runtime) {
     static random() {
       return Math.random();
     }
+
+    static "private::_max"(x: number, y: number) {
+      return Math.max(x, y);
+    }
+
+    static "private::_min"(x: number, y: number) {
+      return Math.min(x, y);
+    }
   };
 }
 
-export const mathNatives = bindNatives(
-  MathDecl,
-  (rt) =>
-    class MathNatives extends mathFunctions(rt) {
-      static "private::_max"(x: number, y: number) {
-        return Math.max(x, y);
-      }
-
-      static "private::_min"(x: number, y: number) {
-        return Math.min(x, y);
-      }
-    },
-);
+export const mathNatives = bindNatives(MathDecl, mathClass);
