@@ -526,7 +526,8 @@ export const ArrayBuiltin = bindNatives(
           throw rt.error("RangeError", 2108, n);
         }
 
-        setLength(rt, this, n);
+        // As `this.length = newLength`: a subclass's accessor, if it overrides it.
+        length(this, n);
       }
 
       "AS3::join"(this: AsObject, sep: Value) {
