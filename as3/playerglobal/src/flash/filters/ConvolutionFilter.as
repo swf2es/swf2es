@@ -9,7 +9,12 @@ package flash.filters
 		{
 			this.matrixX = matrixX;
 			this.matrixY = matrixY;
-			this.matrix = matrix;
+			// Null keeps the default.
+			if (matrix != null)
+			{
+				this.matrix = matrix;
+			}
+
 			this.divisor = divisor;
 			this.bias = bias;
 			this.preserveAlpha = preserveAlpha;

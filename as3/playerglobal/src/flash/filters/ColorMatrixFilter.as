@@ -7,7 +7,12 @@ package flash.filters
 	{
 		public function ColorMatrixFilter(matrix:Array = null)
 		{
-			this.matrix = matrix;
+			// Null keeps the default.
+			if (matrix != null)
+			{
+				this.matrix = matrix;
+			}
+
 		}
 
 		public native function get matrix():Array;

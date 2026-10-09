@@ -9,9 +9,22 @@ package flash.filters
 		{
 			this.distance = distance;
 			this.angle = angle;
-			this.colors = colors;
-			this.alphas = alphas;
-			this.ratios = ratios;
+			// Null keeps the default.
+			if (colors != null)
+			{
+				this.colors = colors;
+			}
+
+			if (alphas != null)
+			{
+				this.alphas = alphas;
+			}
+
+			if (ratios != null)
+			{
+				this.ratios = ratios;
+			}
+
 			this.blurX = blurX;
 			this.blurY = blurY;
 			this.strength = strength;
