@@ -1,4 +1,5 @@
-// Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts); natives in PerspectiveProjection.ts.
+// Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts);
+// natives in packages/player/src/playerglobal/flash/geom/PerspectiveProjection.ts.
 
 package flash.geom {
     [API("662")]
@@ -7,7 +8,7 @@ package flash.geom {
             ctor();
         }
 
-        // The player's native constructor (PerspectiveProjection.ts).
+        // The player's native constructor.
         private native function ctor():void;
 
         public native function get fieldOfView():Number;

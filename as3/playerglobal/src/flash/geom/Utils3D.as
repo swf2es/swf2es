@@ -1,4 +1,5 @@
-// Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts); natives in Utils3D.ts.
+// Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts);
+// natives in packages/player/src/playerglobal/flash/geom/Utils3D.ts.
 
 package flash.geom {
     [API("662")]

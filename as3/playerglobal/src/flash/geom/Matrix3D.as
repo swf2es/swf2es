@@ -1,4 +1,5 @@
-// Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts); natives in Matrix3D.ts.
+// Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts);
+// natives in packages/player/src/playerglobal/flash/geom/Matrix3D.ts.
 
 package flash.geom {
     [API("662")]
@@ -7,7 +8,7 @@ package flash.geom {
             ctor(v);
         }
 
-        // The player's native constructor (Matrix3D.ts).
+        // The player's native constructor.
         private native function ctor(v:Vector.<Number>):void;
 
         public static native function interpolate(fromMat:Matrix3D, toMat:Matrix3D, percent:Number):Matrix3D;

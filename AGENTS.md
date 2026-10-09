@@ -72,8 +72,8 @@ node tools/abc-surface/main.ts file.abc [--classes | --json]   # an ABC's classe
                               # signatures; how many methods are native and how many AS3
 node tools/abc-surface/as3.ts lib.abc out-dir [package...] [--names dir]   # AS3 skeletons of
                               # an ABC's public API, parameter names from sources such as Ruffle's
-node tools/playerglobal.ts [--check]   # our playerglobal.abc from packages/player/src/playerglobal
-                              # (ASC 1 in the oracle's image); --check holds it to Flash Player's API
+node tools/playerglobal.ts [--check]   # our playerglobal.abc from as3/playerglobal (ASC 1 in
+                              # the oracle's image); --check holds it to Flash Player's API
 SWF2ES_PLAYERGLOBAL=ours ...  # the unit, player and corpus tests with our playerglobal's classes
                               # ahead of Flash Player's (tests/player/libraries.ts)
 pnpm bench [file.abc...]      # time the ABC parser and decoder

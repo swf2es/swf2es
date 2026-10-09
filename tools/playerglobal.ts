@@ -1,4 +1,4 @@
-// Our playerglobal.abc, from the AS3 under packages/player/src/playerglobal/:
+// Our playerglobal.abc, from the AS3 under as3/playerglobal/src/:
 // compiled as avmplus compiles its own libraries, with ASC 1 (the Flex
 // SDK's, in the oracle's image) as a builtin library over builtin.abc, with
 // API versioning. Its `native` methods are the player's TypeScript natives.
@@ -15,11 +15,10 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync }
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { container, containerEngine } from "../oracle/oracle.ts";
-import { SOURCES as AIR_SOURCES } from "../tests/player/air-library.ts";
 import { type Class, readSurface, type Trait } from "./abc-surface/read.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const SOURCES = "packages/player/src/playerglobal";
+const SOURCES = "as3/playerglobal/src";
 const OUT = "tests/player/out/playerglobal";
 const FLASH = "tests/player/out/libraries/playerglobal.abc";
 const BUILTIN = "oracle/avmplus/generated/builtin.abc";
@@ -63,7 +62,7 @@ export interface BuildOptions {
   outDir?: string;
   /** Flash Player's playerglobal.abc, for the types ours does not define yet. */
   flash?: string;
-  /** Sources to leave out, as paths under packages/player/src/playerglobal/. */
+  /** Sources to leave out, as paths under as3/playerglobal/src/. */
   without?: string[];
 }
 
@@ -72,8 +71,7 @@ export function build({
   flash = join(root, FLASH),
   without = [],
 }: BuildOptions = {}): Uint8Array {
-  // AIR's classes are a library of their own (tests/player/air-library.ts).
-  const left = new Set([...AIR_SOURCES, ...without].map((s) => join(SOURCES, s)));
+  const left = new Set(without.map((s) => join(SOURCES, s)));
   const files = sources(SOURCES)
     .filter((f) => !left.has(f))
     .sort();

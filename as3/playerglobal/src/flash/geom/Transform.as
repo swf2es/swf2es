@@ -1,4 +1,5 @@
-// Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts); natives in Transform.ts.
+// Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts);
+// natives in packages/player/src/playerglobal/flash/geom/Transform.ts.
 
 package flash.geom {
     import flash.display.DisplayObject;
@@ -8,7 +9,7 @@ package flash.geom {
             ctor(object);
         }
 
-        // The player's native constructor (Transform.ts).
+        // The player's native constructor.
         private native function ctor(displayObject:DisplayObject):void;
 
         public native function get matrix():Matrix;
