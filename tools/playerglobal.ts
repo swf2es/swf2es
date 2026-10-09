@@ -63,7 +63,7 @@ export function build(): Uint8Array {
   mkdirSync(join(root, OUT), { recursive: true });
   const asc = [
     "java -ea -DAS3 -DAVMPLUS -classpath /opt/flex/lib/asc.jar macromedia.asc.embedding.ScriptCompiler",
-    `-import ${BUILTIN} -import ${FLASH} -builtin -apiversioning`,
+    `-import ${BUILTIN} -import ${FLASH} -builtin -apiversioning -strict`,
     `-outdir ${OUT} -out playerglobal`,
     ...files,
   ].join(" ");
