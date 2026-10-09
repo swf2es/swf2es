@@ -83,8 +83,9 @@ function typeName(type: string, pkg: string, imports: Set<string>): string {
 
 function literal(v: Value): string {
   switch (v[0]) {
+    // ASC resolves no name undefined in a builtin library: void 0 is the same constant.
     case "undefined":
-      return "undefined";
+      return "void 0";
     case "null":
       return "null";
     case "string":
@@ -198,7 +199,8 @@ function member(
   isInterface: boolean,
 ): string | null {
   const n = parseName(t.name);
-  const acc = access(n);
+  // An interface's methods are in its own namespace, and written with no access.
+  const acc = isInterface && n.kind === "namespace" ? "public" : access(n);
   if (!acc) {
     return null;
   }
@@ -229,7 +231,29 @@ function member(
   }
 }
 
-function classSource(c: Class, raw: string, meta: Trait["meta"], namesDir: string | null): string {
+/**
+ * The constructor's call of its base's, when the base's takes arguments it
+ * must be given: the constructor's own, by position, and null for any it
+ * lacks. Without one, ASC calls super() with none, which it rejects.
+ */
+function superCall(c: Class, base: Method | undefined, named: string[] | undefined): string[] {
+  const required = base ? base.params.filter((p) => !p.default).length : 0;
+  if (!required) {
+    return [];
+  }
+
+  const own = c.init.params.map((_, i) => named?.[i] ?? `arg${i}`);
+  const args = Array.from({ length: required }, (_, i) => own[i] ?? "null");
+  return [`\t\t\tsuper(${args.join(", ")});`];
+}
+
+function classSource(
+  c: Class,
+  raw: string,
+  meta: Trait["meta"],
+  namesDir: string | null,
+  baseInit: Method | undefined,
+): string {
   const n = parseName(raw);
   const pkg = n.uri;
   const imports = new Set<string>();
@@ -264,6 +288,7 @@ function classSource(c: Class, raw: string, meta: Trait["meta"], namesDir: strin
     : [
         `\t\tpublic function ${n.local}(${params(c.init, pkg, imports, names.get(n.local))})`,
         "\t\t{",
+        ...superCall(c, baseInit, names.get(n.local)),
         "\t\t}",
       ];
   const body = [...ctor, ...(ctor.length && lines.length ? [""] : []), ...lines];
@@ -326,6 +351,17 @@ export function skeletons(
   namesDir: string | null,
 ): [string, string][] {
   const surface = readSurface(bytes);
+  // Each class's constructor, by the name a subclass gives its base.
+  const inits = new Map<string, Method>();
+  for (const script of surface.scripts) {
+    for (const t of script.traits) {
+      if (t.kind === "class") {
+        const n = parseName(t.name);
+        inits.set(n.uri ? `${n.uri}::${n.local}` : n.local, t.class.init);
+      }
+    }
+  }
+
   const out: [string, string][] = [];
   const wanted = (pkg: string) =>
     prefixes.length === 0 || prefixes.some((p) => pkg === p || pkg.startsWith(`${p}.`));
@@ -338,7 +374,7 @@ export function skeletons(
 
       const source =
         t.kind === "class"
-          ? classSource(t.class, t.name, t.meta, namesDir)
+          ? classSource(t.class, t.name, t.meta, namesDir, inits.get(t.class.super ?? ""))
           : definitionSource(t, namesDir);
       if (source) {
         out.push([join(...n.uri.split("."), `${n.local}.as`), source]);
