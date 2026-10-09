@@ -10,13 +10,25 @@ package flash.events
 			ctor(target);
 		}
 
-		public native function toString():String;
+		public function toString():String
+		{
+			return Object.prototype.toString.call(this);
+		}
 
 		public native function addEventListener(type:String, listener:Function, useCapture:Boolean = false, priority:int = 0, useWeakReference:Boolean = false):void;
 
 		public native function removeEventListener(type:String, listener:Function, useCapture:Boolean = false):void;
 
-		public native function dispatchEvent(event:Event):Boolean;
+		public function dispatchEvent(event:Event):Boolean
+		{
+			if (event == null)
+			{
+				Error.throwError(TypeError, 2007, "event");
+			}
+
+			// An event dispatched again goes out as a clone, as Flash's does.
+			return dispatchEventFunction(event.target != null ? event.clone() : event);
+		}
 
 		public native function hasEventListener(type:String):Boolean;
 

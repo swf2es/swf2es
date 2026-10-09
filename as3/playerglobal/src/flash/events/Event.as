@@ -1,6 +1,8 @@
 // Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts);
 // natives in packages/player/src/playerglobal/flash/events/Event.ts.
-
+// clone, toString and formatToString from Ruffle (https://github.com/ruffle-rs/ruffle),
+// core/src/avm2/globals/flash/events/Event.as: MIT OR Apache-2.0, Copyright (c)
+// 2018-2022 Ruffle LLC and Ruffle contributors.
 package flash.events
 {
 	public class Event
@@ -79,11 +81,28 @@ package flash.events
 		public static const HTML_DOM_INITIALIZE:String = "htmlDOMInitialize";
 		public static const LOCATION_CHANGE:String = "locationChange";
 
-		public native function formatToString(className:String, ...arguments):String;
+		public function formatToString(className:String, ...args):String
+		{
+			var text:String = "[" + className;
+			for (var i:int = 0; i < args.length; i++)
+			{
+				const key:String = args[i];
+				const value:* = this[key];
+				text += value is String ? " " + key + "=\"" + value + "\"" : " " + key + "=" + value;
+			}
 
-		public native function clone():Event;
+			return text + "]";
+		}
 
-		public native function toString():String;
+		public function clone():Event
+		{
+			return new Event(type, bubbles, cancelable);
+		}
+
+		public function toString():String
+		{
+			return formatToString("Event", "type", "bubbles", "cancelable", "eventPhase");
+		}
 
 		public native function get type():String;
 
