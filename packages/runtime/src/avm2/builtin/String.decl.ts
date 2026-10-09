@@ -5,7 +5,7 @@ export const StringDecl = {
   super: "Object",
   sealed: true,
   final: true,
-  init: { params: [["*", ["string", ""]]], avmplus: true },
+  init: { params: [["*", ["string", ""]]], native: true },
   classInit: { avmplus: true },
   static: [
     { const: "length", type: "int", value: ["int", 1] },
@@ -78,14 +78,14 @@ export const StringDecl = {
       returns: "Number",
       native: true,
     },
-    { method: "AS3::concat", returns: "String", rest: true, avmplus: true },
+    { method: "AS3::concat", returns: "String", rest: true, native: true },
     {
       method: "AS3::localeCompare",
       params: [["*", ["undefined", null]]],
       returns: "int",
       native: true,
     },
-    { method: "AS3::match", params: [["*", ["undefined", null]]], returns: "Array", avmplus: true },
+    { method: "AS3::match", params: [["*", ["undefined", null]]], returns: "Array", native: true },
     {
       method: "AS3::replace",
       params: [
@@ -93,9 +93,9 @@ export const StringDecl = {
         ["*", ["undefined", null]],
       ],
       returns: "String",
-      avmplus: true,
+      native: true,
     },
-    { method: "AS3::search", params: [["*", ["undefined", null]]], returns: "int", avmplus: true },
+    { method: "AS3::search", params: [["*", ["undefined", null]]], returns: "int", native: true },
     {
       method: "private::_slice",
       params: [
@@ -121,7 +121,7 @@ export const StringDecl = {
         ["*", ["double", 4294967295]],
       ],
       returns: "Array",
-      avmplus: true,
+      native: true,
     },
     {
       method: "private::_substring",
@@ -160,10 +160,10 @@ export const StringDecl = {
       native: true,
     },
     { method: "AS3::toLowerCase", returns: "String", native: true },
-    { method: "AS3::toLocaleLowerCase", returns: "String", avmplus: true },
+    { method: "AS3::toLocaleLowerCase", returns: "String", native: true },
     { method: "AS3::toUpperCase", returns: "String", native: true },
-    { method: "AS3::toLocaleUpperCase", returns: "String", avmplus: true },
-    { method: "AS3::toString", returns: "String", avmplus: true },
-    { method: "AS3::valueOf", returns: "String", avmplus: true },
+    { method: "AS3::toLocaleUpperCase", returns: "String", native: true },
+    { method: "AS3::toString", returns: "String", native: true },
+    { method: "AS3::valueOf", returns: "String", native: true },
   ],
 } as const satisfies ClassDecl;

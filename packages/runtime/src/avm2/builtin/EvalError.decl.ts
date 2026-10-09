@@ -8,7 +8,7 @@ export const EvalErrorDecl = {
       ["*", ["string", ""]],
       ["*", ["int", 0]],
     ],
-    avmplus: true,
+    native: true,
   },
   classInit: { avmplus: true },
   static: [{ const: "length", type: "int", value: ["int", 1] }],

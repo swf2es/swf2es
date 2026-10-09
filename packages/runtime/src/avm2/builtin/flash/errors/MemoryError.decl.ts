@@ -8,7 +8,7 @@ export const MemoryErrorDecl = {
       ["String", ["string", ""]],
       ["int", ["int", 0]],
     ],
-    avmplus: true,
+    native: true,
   },
   classInit: { avmplus: true },
   static: [],

@@ -6,6 +6,13 @@
 // state, and what calling or constructing them does.
 
 import { arrayHooks, arrayNatives } from "../builtin/Array.js";
+import { booleanNatives } from "../builtin/Boolean.js";
+import { errorHooks, errorNatives } from "../builtin/Error.js";
+import { intNatives } from "../builtin/int.js";
+import { mathNatives } from "../builtin/Math.js";
+import { numberHooks, numberNatives } from "../builtin/Number.js";
+import { stringHooks, stringNatives } from "../builtin/String.js";
+import { uintNatives } from "../builtin/uint.js";
 import type { ClassHook } from "../hooks.js";
 import type { Runtime } from "../runtime.js";
 import { aliasesNatives } from "./aliases.js";
@@ -16,13 +23,11 @@ import type { Natives } from "./define.js";
 import { describeNatives } from "./describe.js";
 import { dictionaryNatives } from "./dictionary.js";
 import { jsonNatives } from "./json.js";
-import { numberHooks, numberNatives } from "./number.js";
 import { objectHooks, objectNatives } from "./object.js";
 import { proxyHooks, proxyNatives } from "./proxy.js";
 import { regexpHooks, regexpNatives } from "./regexp.js";
 import { shellHooks, shellNatives } from "./shell.js";
-import { stringHooks, stringNatives } from "./string.js";
-import { errorHooks, toplevelNatives } from "./toplevel.js";
+import { toplevelNatives } from "./toplevel.js";
 import { vectorHooks, vectorNatives } from "./vector.js";
 import { xmlHooks, xmlNatives } from "./xml/xml.js";
 
@@ -34,7 +39,12 @@ export function builtinNatives(rt: Runtime): Natives {
     ...stringNatives,
     ...regexpNatives(rt),
     ...numberNatives,
+    ...intNatives,
+    ...uintNatives,
+    ...booleanNatives,
+    ...mathNatives,
     ...toplevelNatives,
+    ...errorNatives,
     ...describeNatives,
     ...proxyNatives,
     ...aliasesNatives,

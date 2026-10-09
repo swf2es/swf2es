@@ -9,7 +9,7 @@ import {
   numberToExponential,
   numberToFixed,
   numberToPrecision,
-} from "../../../packages/runtime/dist/avm2/natives/number.js";
+} from "../../../packages/runtime/dist/avm2/builtin/Number.js";
 import {
   convertDoubleToString,
   DTOSTR_EXPONENTIAL,

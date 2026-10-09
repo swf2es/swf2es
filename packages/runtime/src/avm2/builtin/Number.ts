@@ -1,8 +1,9 @@
-// Number, int, uint and Boolean, and Math, whose functions Number has
-// copies of.
+// Number: its natives, held to Number.decl.ts, with copies of Math's
+// functions, as avmplus has. int's and uint's methods are Number's.
 
 import type { Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
+import { conversion } from "../natives/define.js";
 import {
   convertDoubleToString,
   convertDoubleToStringRadix,
@@ -11,39 +12,103 @@ import {
   DTOSTR_PRECISION,
 } from "../numbers.js";
 import { numberToString, type Runtime } from "../runtime.js";
-import { conversion, type Natives, plain } from "./define.js";
+import { bindNatives } from "./bind.js";
+import { mathFunctions } from "./Math.js";
+import { NumberDecl } from "./Number.decl.js";
 
-export const numberNatives: Natives = {
-  // As NumberClass::_numberToString: another radix writes the integer part only.
-  "Number.Number::_numberToString": (rt) => (n: number, radix: number) => {
-    if (radix === 10 || !Number.isFinite(n)) {
-      return numberToString(n);
-    }
+/** As NumberClass::_numberToString: another radix writes the integer part only. */
+function toStringRadix(rt: Runtime, n: number, radix: number): string {
+  if (radix === 10 || !Number.isFinite(n)) {
+    return numberToString(n);
+  }
 
-    if (radix < 2 || radix > 36) {
-      throw rt.error("RangeError", 1003, radix);
-    }
+  if (radix < 2 || radix > 36) {
+    throw rt.error("RangeError", 1003, radix);
+  }
 
-    return convertDoubleToStringRadix(n, radix);
-  },
-  // As NumberClass::_convert: toFixed, toPrecision and toExponential.
-  "Number.Number::_convert": (rt) => (n: number, precision: number, mode: number) => {
-    const [min, max] = mode === DTOSTR_PRECISION ? [1, 21] : [0, 20];
-    if (precision < min || precision > max) {
-      throw rt.error("RangeError", 1002, precision, min, max);
-    }
+  return convertDoubleToStringRadix(n, radix);
+}
 
-    switch (mode) {
-      case DTOSTR_FIXED:
-        return numberToFixed(n, precision);
-      case DTOSTR_PRECISION:
-        return numberToPrecision(n, precision);
-      default:
-        return numberToExponential(n, precision);
-    }
-  },
-  "Number.Number::_minValue": plain(() => Number.MIN_VALUE),
-};
+/** As NumberClass::_convert: toFixed, toPrecision and toExponential. */
+function convert(rt: Runtime, n: number, precision: number, mode: number): string {
+  const [min, max] = mode === DTOSTR_PRECISION ? [1, 21] : [0, 20];
+  if (precision < min || precision > max) {
+    throw rt.error("RangeError", 1002, precision, min, max);
+  }
+
+  switch (mode) {
+    case DTOSTR_FIXED:
+      return numberToFixed(n, precision);
+    case DTOSTR_PRECISION:
+      return numberToPrecision(n, precision);
+    default:
+      return numberToExponential(n, precision);
+  }
+}
+
+// Number's AS3 methods, which int's and uint's are too, as Number(this)'s:
+// `this` is the number, each precision converted to an int, as avmplus'
+// AS3 does, and the radix to an int, as _numberToString's parameter is.
+
+export function toStringOf(rt: Runtime, n: number, radix: Value): string {
+  return toStringRadix(rt, n, rt.toInt(radix));
+}
+
+export function toExponentialOf(rt: Runtime, n: number, p: Value): string {
+  return convert(rt, n, rt.toInt(p), DTOSTR_EXPONENTIAL);
+}
+
+/** An undefined or null precision writes the number as toString does. */
+export function toPrecisionOf(rt: Runtime, n: number, p: Value): string {
+  return p === undefined || p === null
+    ? numberToString(n)
+    : convert(rt, n, rt.toInt(p), DTOSTR_PRECISION);
+}
+
+export function toFixedOf(rt: Runtime, n: number, p: Value): string {
+  return convert(rt, n, rt.toInt(p), DTOSTR_FIXED);
+}
+
+export const numberNatives = bindNatives(
+  NumberDecl,
+  (rt) =>
+    class NumberNatives extends mathFunctions(rt) {
+      // Its class hook makes new Number(x) x: this never runs on one.
+      Number() {}
+
+      static "private::_numberToString"(n: number, radix: number) {
+        return toStringRadix(rt, n, radix);
+      }
+
+      static "private::_convert"(n: number, precision: number, mode: number) {
+        return convert(rt, n, precision, mode);
+      }
+
+      static "private::_minValue"() {
+        return Number.MIN_VALUE;
+      }
+
+      "AS3::toString"(this: number, radix: Value) {
+        return toStringOf(rt, this, radix);
+      }
+
+      "AS3::valueOf"(this: number) {
+        return this;
+      }
+
+      "AS3::toExponential"(this: number, p: Value) {
+        return toExponentialOf(rt, this, p);
+      }
+
+      "AS3::toPrecision"(this: number, p: Value) {
+        return toPrecisionOf(rt, this, p);
+      }
+
+      "AS3::toFixed"(this: number, p: Value) {
+        return toFixedOf(rt, this, p);
+      }
+    },
+);
 
 // toFixed, toPrecision and toExponential write avmplus' text, which is not
 // JavaScript's, though JavaScript's methods give it for most numbers at a
@@ -127,63 +192,6 @@ export function numberToExponential(n: number, digits: number): string {
 
   return convertDoubleToString(n, DTOSTR_EXPONENTIAL, digits);
 }
-
-// Math, and Number's copies of it.
-for (const name of [
-  "abs",
-  "acos",
-  "asin",
-  "atan",
-  "ceil",
-  "cos",
-  "exp",
-  "floor",
-  "log",
-  "sin",
-  "sqrt",
-  "tan",
-]) {
-  const f = (Math as unknown as Record<string, (x: number) => number>)[name];
-  const native = (rt: Runtime) => (x: Value) => f(rt.toNumber(x));
-  numberNatives[`Math.${name}`] = native;
-  numberNatives[`Number.${name}`] = native;
-}
-
-for (const prefix of ["Math", "Number"]) {
-  // As MathUtils::round, floor(x + 0.5): never -0, as JavaScript's is for -0.5 to -0.
-  numberNatives[`${prefix}.round`] = (rt) => (x: Value) => {
-    const r = Math.round(rt.toNumber(x));
-    return r === 0 ? 0 : r;
-  };
-  numberNatives[`${prefix}.atan2`] = (rt) => (y: Value, x: Value) =>
-    Math.atan2(rt.toNumber(y), rt.toNumber(x));
-  numberNatives[`${prefix}.pow`] = (rt) => (x: Value, y: Value) => rt.toNumber(x) ** rt.toNumber(y);
-  numberNatives[`${prefix}.random`] = plain(() => Math.random());
-  // Of two declared parameters, and any more, so that their length is 2.
-  numberNatives[`${prefix}.max`] = (rt) =>
-    function (x: Value, y: Value) {
-      // biome-ignore lint/complexity/noArguments: all of them, however many
-      const args = arguments;
-      if (args.length === 2) {
-        return Math.max(rt.toNumber(x), rt.toNumber(y));
-      }
-
-      return Math.max(...Array.from(args, (a: Value) => rt.toNumber(a)));
-    };
-  numberNatives[`${prefix}.min`] = (rt) =>
-    function (x: Value, y: Value) {
-      // biome-ignore lint/complexity/noArguments: all of them, however many
-      const args = arguments;
-      if (args.length === 2) {
-        return Math.min(rt.toNumber(x), rt.toNumber(y));
-      }
-
-      return Math.min(...Array.from(args, (a: Value) => rt.toNumber(a)));
-    };
-}
-
-numberNatives["Math.Math::_max"] = plain((x: number, y: number) => Math.max(x, y));
-numberNatives["Math.Math::_min"] = plain((x: number, y: number) => Math.min(x, y));
 
 export const numberHooks: Record<string, ClassHook> = {
   int: conversion((rt, args) => (args.length ? rt.toInt(args[0]) : 0)),

@@ -5,7 +5,7 @@ export const intDecl = {
   super: "Object",
   sealed: true,
   final: true,
-  init: { params: [["*", ["int", 0]]], avmplus: true },
+  init: { params: [["*", ["int", 0]]], native: true },
   classInit: { avmplus: true },
   static: [
     { const: "MIN_VALUE", type: "int", value: ["int", -2147483648] },
@@ -13,10 +13,10 @@ export const intDecl = {
     { const: "length", type: "int", value: ["int", 1] },
   ],
   instance: [
-    { method: "AS3::toString", params: [["*", ["int", 10]]], returns: "String", avmplus: true },
-    { method: "AS3::valueOf", returns: "int", avmplus: true },
-    { method: "AS3::toExponential", params: [["*", ["int", 0]]], returns: "String", avmplus: true },
-    { method: "AS3::toPrecision", params: [["*", ["int", 0]]], returns: "String", avmplus: true },
-    { method: "AS3::toFixed", params: [["*", ["int", 0]]], returns: "String", avmplus: true },
+    { method: "AS3::toString", params: [["*", ["int", 10]]], returns: "String", native: true },
+    { method: "AS3::valueOf", returns: "int", native: true },
+    { method: "AS3::toExponential", params: [["*", ["int", 0]]], returns: "String", native: true },
+    { method: "AS3::toPrecision", params: [["*", ["int", 0]]], returns: "String", native: true },
+    { method: "AS3::toFixed", params: [["*", ["int", 0]]], returns: "String", native: true },
   ],
 } as const satisfies ClassDecl;

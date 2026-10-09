@@ -8,7 +8,7 @@ export const IllegalOperationErrorDecl = {
       ["String", ["string", ""]],
       ["int", ["int", 0]],
     ],
-    avmplus: true,
+    native: true,
   },
   classInit: { avmplus: true },
   static: [],
