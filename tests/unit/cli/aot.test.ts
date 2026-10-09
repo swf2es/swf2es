@@ -18,6 +18,9 @@ import { libraryAbcs } from "../../player/libraries.ts";
 import { compileScripts } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";
 
+// These tests count modules, one for each library: the same libraries in every mode.
+const FIXED = { ours: false };
+
 const out = fileURLToPath(new URL("../out/cli/", import.meta.url));
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const cli = fileURLToPath(new URL("../../../packages/cli/dist/main.js", import.meta.url));
@@ -73,7 +76,7 @@ function assertSame(cliOut: Buffer[], player: string[]): void {
 }
 
 test("the command's modules are the player's for its cases' SWFs", { skip }, async () => {
-  const libs = libraryAbcs(`${out}libraries/`);
+  const libs = libraryAbcs(`${out}libraries/`, FIXED);
   const libPaths = ["builtin", "playerglobal"].map((n) => `${out}libraries/${n}.abc`);
   const picked = ["scripted", "events", "init", "goto-children"];
   const chosen = cases.filter((c) => picked.includes(c.name));

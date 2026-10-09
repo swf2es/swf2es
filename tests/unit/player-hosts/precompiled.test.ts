@@ -21,6 +21,9 @@ import { libraryAbcs } from "../../player/libraries.ts";
 import { compileScripts } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";
 
+// These tests count modules, one for each library: the same libraries in every mode.
+const FIXED = { ours: false };
+
 const out = fileURLToPath(new URL("../out/player-precompiled/", import.meta.url));
 const cli = fileURLToPath(new URL("../../../packages/cli/dist/main.js", import.meta.url));
 
@@ -59,7 +62,7 @@ async function play(swf: Uint8Array, cache: ModuleCache | null, identity?: strin
   const { codegen, compiled } = await counted(identity);
   const lines: string[] = [];
   const s = new Scripting(codegen, { print: (line) => lines.push(line), moduleCache: cache });
-  await s.loadLibraries(libraryAbcs(`${out}libraries/`));
+  await s.loadLibraries(libraryAbcs(`${out}libraries/`, FIXED));
   const player = new Player(swf, s);
   await player.start();
   for (let frame = 2; frame <= frames; frame++) {
@@ -149,7 +152,7 @@ function compiled() {
 
 /** `swf` compiled ahead of time by the command, with the libraries' modules, into `out`/`name`/. */
 function ahead(name: string, swf: Uint8Array): { dir: string; manifest: URL } {
-  libraryAbcs(`${out}libraries/`);
+  libraryAbcs(`${out}libraries/`, FIXED);
   mkdirSync(out, { recursive: true });
   writeFileSync(`${out}${name}.swf`, swf);
   const dir = `${out}${name}/`;

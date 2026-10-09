@@ -53,22 +53,40 @@ function versionMarks(abc: Uint8Array): Uint8Array {
   return out;
 }
 
-export function build(): Uint8Array {
+/** When our playerglobal's sources last changed. */
+export function sourcesChanged(): number {
+  return Math.max(...sources(SOURCES).map((f) => statSync(join(root, f)).mtimeMs));
+}
+
+export interface BuildOptions {
+  /** Where to write playerglobal.abc, in the repository, which the container sees. */
+  outDir?: string;
+  /** Flash Player's playerglobal.abc, for the types ours does not define yet. */
+  flash?: string;
+  /** Sources to leave out, as paths under packages/player/src/playerglobal/. */
+  without?: string[];
+}
+
+export function build({
+  outDir = join(root, OUT),
+  flash = join(root, FLASH),
+  without = [],
+}: BuildOptions = {}): Uint8Array {
   // AIR's classes are a library of their own (tests/player/air-library.ts).
-  const air = new Set(AIR_SOURCES.map((s) => join(SOURCES, s)));
+  const left = new Set([...AIR_SOURCES, ...without].map((s) => join(SOURCES, s)));
   const files = sources(SOURCES)
-    .filter((f) => !air.has(f))
+    .filter((f) => !left.has(f))
     .sort();
-  rmSync(join(root, OUT), { recursive: true, force: true });
-  mkdirSync(join(root, OUT), { recursive: true });
+  rmSync(outDir, { recursive: true, force: true });
+  mkdirSync(outDir, { recursive: true });
   const asc = [
     "java -ea -DAS3 -DAVMPLUS -classpath /opt/flex/lib/asc.jar macromedia.asc.embedding.ScriptCompiler",
-    `-import ${BUILTIN} -import ${FLASH} -builtin -apiversioning -strict`,
-    `-outdir ${OUT} -out playerglobal`,
+    `-import ${BUILTIN} -import ${relative(root, flash)} -builtin -apiversioning -strict`,
+    `-outdir ${relative(root, outDir)} -out playerglobal`,
     ...files,
   ].join(" ");
   const r = container(containerEngine(), ["-c", asc]);
-  const abcFile = join(root, OUT, "playerglobal.abc");
+  const abcFile = join(outDir, "playerglobal.abc");
   let abc: Uint8Array;
   try {
     abc = new Uint8Array(readFileSync(abcFile));
@@ -79,8 +97,8 @@ export function build(): Uint8Array {
   const marked = versionMarks(abc);
   writeFileSync(abcFile, marked);
   // ASC also writes C++ glue for avmplus' natives, which ours are not.
-  rmSync(join(root, OUT, "playerglobal.cpp"), { force: true });
-  rmSync(join(root, OUT, "playerglobal.h"), { force: true });
+  rmSync(join(outDir, "playerglobal.cpp"), { force: true });
+  rmSync(join(outDir, "playerglobal.h"), { force: true });
   return marked;
 }
 
