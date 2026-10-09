@@ -68,6 +68,8 @@ node tests/desktop/smoke.ts         # the desktop app in headless Electron: play
 node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
                               # timeline in Chrome; keep a change only for a gain that repeats;
                               # --write-swf FILE writes its SWF for another player instead
+node tools/abc-surface/main.ts file.abc [--classes | --json]   # an ABC's classes, traits and
+                              # signatures; how many methods are native and how many AS3
 pnpm bench [file.abc...]      # time the ABC parser and decoder
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
