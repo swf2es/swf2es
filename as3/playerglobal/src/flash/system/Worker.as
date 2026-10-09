@@ -8,13 +8,19 @@ package flash.system
 	[API("682")]
 	public final class Worker extends EventDispatcher
 	{
+		// The primordial worker, which the player's class hook sets (Worker.ts).
+		private static var _current:Worker;
+
 		public function Worker()
 		{
 		}
 
 		public static native function get isSupported():Boolean;
 
-		public static native function get current():Worker;
+		public static function get current():Worker
+		{
+			return _current;
+		}
 
 		public native function createMessageChannel(receiver:Worker):MessageChannel;
 
@@ -26,11 +32,22 @@ package flash.system
 
 		public native function get isPrimordial():Boolean;
 
-		public native function get state():String;
+		public function get state():String
+		{
+			return internalGetState();
+		}
 
-		override public native function addEventListener(arg0:String, arg1:Function, arg2:Boolean = false, arg3:int = 0, arg4:Boolean = false):void;
+		override public function addEventListener(type:String, listener:Function, useCapture:Boolean = false, priority:int = 0, useWeakReference:Boolean = false):void
+		{
+			super.addEventListener(type, listener, useCapture, priority, useWeakReference);
+			internalAddEventListener(type, listener, useCapture, priority, useWeakReference);
+		}
 
-		override public native function removeEventListener(arg0:String, arg1:Function, arg2:Boolean = false):void;
+		override public function removeEventListener(type:String, listener:Function, useCapture:Boolean = false):void
+		{
+			super.removeEventListener(type, listener, useCapture);
+			internalRemoveEventListener(type, listener, useCapture);
+		}
 
 		public native function terminate():Boolean;
 

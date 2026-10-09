@@ -19,7 +19,10 @@ package flash.globalization
 
 		public native function setCurrency(currencyISOCode:String, currencySymbol:String):void;
 
-		public native function format(value:Number, withCurrencySymbol:Boolean = false):String;
+		public function format(value:Number, withCurrencySymbol:Boolean = false):String
+		{
+			return formatImplementation(value, withCurrencySymbol);
+		}
 
 		public native function formattingWithCurrencySymbolIsSafe(requestedISOCode:String):Boolean;
 

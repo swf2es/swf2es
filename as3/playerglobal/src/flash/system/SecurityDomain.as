@@ -5,8 +5,10 @@ package flash.system
 {
 	public class SecurityDomain
 	{
+		// Throws #2012: the player makes currentDomain without this.
 		public function SecurityDomain()
 		{
+			ctor_impl();
 		}
 
 		public static native function get currentDomain():SecurityDomain;

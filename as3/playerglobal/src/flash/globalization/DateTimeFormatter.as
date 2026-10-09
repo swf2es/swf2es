@@ -25,9 +25,15 @@ package flash.globalization
 
 		public native function get actualLocaleIDName():String;
 
-		public native function format(dateTime:Date):String;
+		public function format(dateTime:Date):String
+		{
+			return formatImplementation(dateTime, false);
+		}
 
-		public native function formatUTC(dateTime:Date):String;
+		public function formatUTC(dateTime:Date):String
+		{
+			return formatImplementation(dateTime, true);
+		}
 
 		public native function getMonthNames(nameStyle:String = "full", context:String = "standalone"):Vector.<String>;
 
