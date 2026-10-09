@@ -11,8 +11,8 @@ package {
   import flash.ui.Multitouch;
 
   // The web test's touch SWF: a box "a" holding a box "b", and a box "c"
-  // beside it, logging the mouse and touch events the stage hears, and the
-  // roll events each box hears, for the page to read. A tap writes the
+  // beside it, logging the mouse and touch events the stage hears, its
+  // mouseLeave, and the roll events each box hears, for the page to read. A tap writes the
   // clipboard, a touch's move tries to.
   public class TouchTest extends Sprite {
     private var log:Array = [];
@@ -36,7 +36,7 @@ package {
       if (e is TouchEvent) {
         var t:TouchEvent = TouchEvent(e);
         line += " " + (t.isPrimaryTouchPoint ? "primary" : "secondary") + " " + t.localX + "," + t.localY + " " + t.stageX + "," + t.stageY + " " + nameOf(t.relatedObject);
-      } else {
+      } else if (e is MouseEvent) {
         var m:MouseEvent = MouseEvent(e);
         line += " " + m.localX + "," + m.localY + " " + m.buttonDown + " " + nameOf(m.relatedObject);
       }
@@ -71,6 +71,7 @@ package {
         }
       }
 
+      stage.addEventListener(Event.MOUSE_LEAVE, heard);
       stage.addEventListener(TouchEvent.TOUCH_MOVE, function (e:TouchEvent):void {
         try {
           System.setClipboard("moved");

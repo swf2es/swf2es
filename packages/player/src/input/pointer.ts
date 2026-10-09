@@ -11,7 +11,7 @@ import {
   TextObject,
 } from "../display/display.js";
 import { apply, invert, type Rect } from "../display/geometry.js";
-import { dispatchEvent } from "../scripting/events.js";
+import { dispatchEvent, heard } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import type { KeyboardInput } from "./keyboard.js";
 
@@ -240,6 +240,10 @@ export class PointerInput {
    */
   redraws = 0;
   private hover: DisplayObject | null = null;
+  /** Whether the left button is down after a press here. */
+  private held = false;
+  /** Whether the pointer has left the player, and not come back to it since. */
+  private gone = false;
   private pressed: DisplayObject | null = null;
   /** The last press, which the next continues as a double or triple click if near it in place and time. */
   private lastPress: { x: number; y: number; time: number; clicks: number } | null = null;
@@ -369,6 +373,15 @@ export class PointerInput {
     }
   }
 
+  /**
+   * Flash Player 32's order, measured: a pointer at a new point first sends
+   * `mouseMove` to what is under it, then moves the hover there (`mouseOut`
+   * and roll outs from what it was over, roll overs and `mouseOver` on what
+   * it is over), and only then a press or a release; a press or a release
+   * where the pointer already was sends its own events first, then any
+   * hover that changed. A move to where the pointer already is sends
+   * nothing.
+   */
   handle(type: "move" | "down" | "up" | "leave", p: PointerState): void {
     // A move posted before this input comes first; a move given now replaces it.
     if (type === "move") {
@@ -377,89 +390,162 @@ export class PointerInput {
       this.flush();
     }
 
-    this.handled++;
+    if (type === "leave") {
+      // While its button is down, Flash keeps the mouse when it leaves: the
+      // moves outside go on, to the stage, until the release.
+      if (!this.held) {
+        this.handled++;
+        this.redraws++;
+        this.leave(p);
+        this.updateCursor();
+      }
+
+      return;
+    }
+
     const s = this.scripting;
+    // A release the host never sent, as one outside the browser, or the left
+    // button's let go while another stays down, which Chrome tells as a move:
+    // the release it was, there, and the leave after it where that is outside.
+    if (type === "move" && this.held && p.buttons !== undefined && !(p.buttons & 1)) {
+      this.handle("up", { ...p, button: 0 });
+      if (!pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight)) {
+        this.handle("leave", p);
+      }
+
+      return;
+    }
+
+    const moved = p.x !== s.mouseStageX || p.y !== s.mouseStageY;
+    if (type === "move" && !moved) {
+      return;
+    }
+
+    this.handled++;
     s.mouseStageX = p.x;
     s.mouseStageY = p.y;
     this.updateDrag();
-    const target =
-      type === "leave" ? null : pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
+    const found = pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
+    // Outside the stage while the button is down, the mouse is still the stage's.
+    const target = found ?? (this.held && this.stage.object ? this.stage : null);
+    if (found) {
+      this.gone = false;
+    }
+
+    // The empty stage takes the mouse's events, but no one is over it.
+    const over = target === this.stage ? null : target;
     const down = (p.buttons ?? 0) & 1 ? true : type === "down" && (p.button ?? 0) === 0;
 
     // What may show at once, rather than at the next frame: a hover that
     // moves on or off a button or a sprite in buttonMode, as Ruffle redraws
-    // for, and more than Ruffle, any press, release or leave, which may move
-    // focus and a caret, and a drag selecting text.
-    if (
-      type !== "move" ||
-      (target !== this.hover && (buttonLike(target) || buttonLike(this.hover)))
-    ) {
+    // for, and more than Ruffle, any press or release, which may move focus
+    // and a caret, and a drag selecting text.
+    if (type !== "move" || (over !== this.hover && (buttonLike(over) || buttonLike(this.hover)))) {
       this.redraws++;
     }
 
-    if (target !== this.hover) {
-      const previous = this.hover;
-      const entered = new Set<DisplayObject>();
-      for (let d = target; d; d = d.parent) {
-        entered.add(d);
-      }
-
-      let common: DisplayObject | null = this.stage;
-      if (previous && target) {
-        for (let d: DisplayObject | null = previous; d; d = d.parent) {
-          if (entered.has(d)) {
-            common = d;
-            break;
-          }
-        }
-      }
-
-      if (previous) {
-        buttonState(previous, "up");
-        this.send("mouseOut", previous, p, down, true, target);
-        for (let d: DisplayObject | null = previous; d && d !== common; d = d.parent) {
-          this.send("rollOut", d, p, down, false, target);
-        }
-      }
-
+    // The move a press or a release at a new point makes is the button's state before it.
+    const moveDown = type === "move" ? down : this.held;
+    if (moved) {
       if (target) {
-        buttonState(target, down && target === this.pressed ? "down" : "over");
-        for (let d: DisplayObject | null = target; d && d !== common; d = d.parent) {
-          this.send("rollOver", d, p, down, false, previous);
-        }
-
-        this.send("mouseOver", target, p, down, true, previous);
+        this.send("mouseMove", target, p, moveDown);
       }
 
-      this.hover = target;
-    }
-
-    if (type === "move") {
-      if (target) {
-        this.send("mouseMove", target, p, down);
-      }
-
+      this.hoverTo(over, p, moveDown);
       // A drag from a field selects in it, wherever the pointer goes.
       const pressed = this.pressed;
-      if (down && pressed instanceof TextObject && this.keyboard) {
+      if (moveDown && pressed instanceof TextObject && this.keyboard) {
         const m = invert(toStage(pressed, this.stage));
         if (m) {
           this.keyboard.dragged(pressed, ...apply(m, p.x, p.y));
           this.redraws++;
         }
       }
-    } else if ((type === "down" || type === "up") && (p.button ?? 0) === 0) {
+    }
+
+    if (type !== "move" && (p.button ?? 0) === 0) {
       // A press or a release is a user's gesture, in whose handlers alone a
-      // script may write to the clipboard: not the hover's events before it.
+      // script may write to the clipboard: not the hover's events around it.
       this.scripting.clipboard.gesture(() => this.button(type, target, p));
+    }
+
+    if (!moved) {
+      this.hoverTo(over, p, down);
     }
 
     this.updateCursor();
   }
 
+  /** Whether the left button is down after a press the player took, which keeps the mouse its own wherever it goes. */
+  get captured(): boolean {
+    return this.held;
+  }
+
+  /** Move the hover to `target`: out and roll outs from what it was over, roll overs and over on what it is. */
+  private hoverTo(target: DisplayObject | null, p: PointerState, down: boolean): void {
+    const previous = this.hover;
+    if (target === previous) {
+      return;
+    }
+
+    const entered = new Set<DisplayObject>();
+    for (let d = target; d; d = d.parent) {
+      entered.add(d);
+    }
+
+    let common: DisplayObject | null = this.stage;
+    if (previous && target) {
+      for (let d: DisplayObject | null = previous; d; d = d.parent) {
+        if (entered.has(d)) {
+          common = d;
+          break;
+        }
+      }
+    }
+
+    if (previous) {
+      buttonState(previous, "up");
+      this.send("mouseOut", previous, p, down, true, target);
+      for (let d: DisplayObject | null = previous; d && d !== common; d = d.parent) {
+        this.send("rollOut", d, p, down, false, target);
+      }
+    }
+
+    if (target) {
+      buttonState(target, down && target === this.pressed ? "down" : "over");
+      for (let d: DisplayObject | null = target; d && d !== common; d = d.parent) {
+        this.send("rollOver", d, p, down, false, previous);
+      }
+
+      this.send("mouseOver", target, p, down, true, previous);
+    }
+
+    this.hover = target;
+  }
+
+  /**
+   * The pointer gone from the player: out of what it was over, then the
+   * stage's `mouseLeave`. Flash leaves the mouse's position where it was
+   * but gives the out and roll outs the stage point (-1, -1).
+   */
+  private leave(p: PointerState): void {
+    // Once, until the pointer is back: a host may tell of a leave twice.
+    if (this.gone) {
+      return;
+    }
+
+    this.gone = true;
+    this.hoverTo(null, { ...p, x: -1, y: -1 }, false);
+    const stage = this.stage.object;
+    if (stage && heard(stage, "mouseLeave")) {
+      dispatchEvent(this.scripting, stage, this.scripting.event("mouseLeave"));
+    }
+  }
+
   /** The left button pressed or let go over `target`: focus, a button's state, and the mouse events. */
   private button(type: "down" | "up", target: DisplayObject | null, p: PointerState): void {
     if (type === "down") {
+      this.held = true;
       this.pressed = target;
       // Ruffle's rule: within half a second and two pixels of the last press.
       const last = this.lastPress;
@@ -496,6 +582,7 @@ export class PointerInput {
       }
 
       this.pressed = null;
+      this.held = false;
     }
   }
 
