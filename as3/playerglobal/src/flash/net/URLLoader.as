@@ -28,7 +28,7 @@ package flash.net
 			_stream.addEventListener(ProgressEvent.PROGRESS, progress);
 			_stream.addEventListener(HTTPStatusEvent.HTTP_STATUS, forward);
 			_stream.addEventListener(HTTPStatusEvent.HTTP_RESPONSE_STATUS, forward);
-			_stream.addEventListener(IOErrorEvent.IO_ERROR, forward);
+			_stream.addEventListener(IOErrorEvent.IO_ERROR, failed);
 			_stream.addEventListener(SecurityErrorEvent.SECURITY_ERROR, forward);
 			_stream.addEventListener(Event.COMPLETE, complete);
 			if (request != null)
@@ -71,8 +71,25 @@ package flash.net
 
 		private function complete(event:Event):void
 		{
+			readData();
+			dispatchEvent(event);
+		}
+
+		// A failed load's data is what it delivered, nothing, as Flash's reads after one.
+		private function failed(event:IOErrorEvent):void
+		{
+			readData();
+			dispatchEvent(event);
+		}
+
+		private function readData():void
+		{
 			const bytes:ByteArray = new ByteArray();
-			_stream.readBytes(bytes);
+			if (_stream.connected)
+			{
+				_stream.readBytes(bytes);
+			}
+
 			switch (dataFormat)
 			{
 				case URLLoaderDataFormat.BINARY:
@@ -84,8 +101,6 @@ package flash.net
 				default:
 					data = bytes.readUTFBytes(bytes.length);
 			}
-
-			dispatchEvent(event);
 		}
 	}
 }

@@ -9,10 +9,26 @@ package flash.display
 	{
 		public function SimpleButton(upState:DisplayObject = null, overState:DisplayObject = null, downState:DisplayObject = null, hitTestState:DisplayObject = null)
 		{
-			this.upState = upState;
-			this.overState = overState;
-			this.downState = downState;
-			this.hitTestState = hitTestState;
+			// Null keeps the states the timeline gave a placed button.
+			if (upState != null)
+			{
+				this.upState = upState;
+			}
+
+			if (overState != null)
+			{
+				this.overState = overState;
+			}
+
+			if (downState != null)
+			{
+				this.downState = downState;
+			}
+
+			if (hitTestState != null)
+			{
+				this.hitTestState = hitTestState;
+			}
 		}
 
 		public native function get useHandCursor():Boolean;
