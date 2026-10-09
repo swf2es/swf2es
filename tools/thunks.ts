@@ -106,7 +106,9 @@ function classRef(type: string, refs: string[]): string {
   // A top-level class, in the unnamed package.
   if (!type.includes("::")) {
     const name = `r${refs.length}`;
-    refs.push(`const ${name} = rt.cls(namespace(NS_Public, ""), ${JSON.stringify(type)}, rt.root);`);
+    refs.push(
+      `const ${name} = rt.cls(namespace(NS_Public, ""), ${JSON.stringify(type)}, rt.root);`,
+    );
     return name;
   }
 
