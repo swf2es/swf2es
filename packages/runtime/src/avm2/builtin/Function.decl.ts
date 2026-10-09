@@ -3,7 +3,7 @@ import type { ClassDecl } from "./declare.js";
 export const FunctionDecl = {
   name: "Function",
   super: "Object",
-  init: { avmplus: true },
+  init: { native: true },
   classInit: { avmplus: true },
   static: [
     { const: "length", type: "int", value: ["int", 1] },
@@ -11,7 +11,7 @@ export const FunctionDecl = {
       method: "createEmptyFunction",
       final: true,
       returns: "Function",
-      avmplus: true,
+      native: true,
       api: 52,
       meta: [
         ["cppcall", []],

@@ -16,7 +16,7 @@ import type { Natives } from "./define.js";
 import { describeNatives } from "./describe.js";
 import { dictionaryNatives } from "./dictionary.js";
 import { jsonNatives } from "./json.js";
-import { objectHooks, objectNatives } from "./object.js";
+import { objectHooks } from "./object.js";
 import { proxyHooks, proxyNatives } from "./proxy.js";
 import { regexpHooks, regexpNatives } from "./regexp.js";
 import { shellHooks, shellNatives } from "./shell.js";
@@ -28,7 +28,6 @@ import { xmlHooks, xmlNatives } from "./xml/xml.js";
 export function builtinNatives(rt: Runtime): Natives {
   return {
     ...classNatives,
-    ...objectNatives,
     ...regexpNatives(rt),
     ...toplevelNatives,
     ...describeNatives,

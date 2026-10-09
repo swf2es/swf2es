@@ -2,7 +2,7 @@ import type { ClassDecl } from "./declare.js";
 
 export const ObjectDecl = {
   name: "Object",
-  init: { avmplus: true },
+  init: { native: true },
   classInit: { avmplus: true },
   static: [
     { const: "length", type: "int", value: ["int", 1] },
@@ -42,7 +42,7 @@ export const ObjectDecl = {
       returns: "void",
       avmplus: true,
     },
-    { method: "internal::init", final: true, avmplus: true },
+    { method: "internal::init", final: true, native: true },
     { method: "_init", final: true, avmplus: true, api: 52, meta: [["API", [["", "712"]]]] },
   ],
   instance: [
@@ -50,19 +50,19 @@ export const ObjectDecl = {
       method: "AS3::isPrototypeOf",
       params: [["*", ["undefined", null]]],
       returns: "Boolean",
-      avmplus: true,
+      native: true,
     },
     {
       method: "AS3::hasOwnProperty",
       params: [["*", ["undefined", null]]],
       returns: "Boolean",
-      avmplus: true,
+      native: true,
     },
     {
       method: "AS3::propertyIsEnumerable",
       params: [["*", ["undefined", null]]],
       returns: "Boolean",
-      avmplus: true,
+      native: true,
     },
   ],
 } as const satisfies ClassDecl;

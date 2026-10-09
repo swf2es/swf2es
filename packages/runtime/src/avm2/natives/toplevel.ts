@@ -1,10 +1,10 @@
 // The global functions, and bugzilla.
 
+import { qualifiedClassName } from "../builtin/Object.js";
 import type { Value } from "../descriptors.js";
 import { formatClassName } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import { type Natives, plain } from "./define.js";
-import { qualifiedClassName } from "./object.js";
 
 /** A String argument as avmplus has it: null, as undefined coerced to String is, as "null". */
 const text = (rt: Runtime, s: Value): string =>

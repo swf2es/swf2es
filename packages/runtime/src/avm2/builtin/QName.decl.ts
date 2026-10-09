@@ -10,14 +10,14 @@ export const QNameDecl = {
       ["*", ["undefined", null]],
       ["*", ["undefined", null]],
     ],
-    avmplus: true,
+    native: true,
   },
   classInit: { avmplus: true },
   static: [{ const: "length", value: ["int", 2] }],
   instance: [
     { get: "localName", returns: "String", native: true },
     { get: "uri", native: true },
-    { method: "AS3::valueOf", returns: "QName", avmplus: true },
-    { method: "AS3::toString", returns: "String", avmplus: true },
+    { method: "AS3::valueOf", returns: "QName", native: true },
+    { method: "AS3::toString", returns: "String", native: true },
   ],
 } as const satisfies ClassDecl;

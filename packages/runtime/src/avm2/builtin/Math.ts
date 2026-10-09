@@ -2,6 +2,7 @@
 // Math.decl.ts. Each gets its arguments as Numbers already (see bind.ts).
 
 import type { Value } from "../descriptors.js";
+import type { ClassHook } from "../hooks.js";
 import type { Runtime } from "../runtime.js";
 import { bindNatives } from "./bind.js";
 import { MathDecl } from "./Math.decl.js";
@@ -109,4 +110,14 @@ export function mathClass(rt: Runtime) {
   };
 }
 
-export const MathBuiltin = bindNatives(MathDecl, mathClass);
+/** Math is neither a function nor a constructor. */
+const mathHook: ClassHook = {
+  call: (rt) => {
+    throw rt.error("TypeError", 1075);
+  },
+  construct: (rt) => {
+    throw rt.error("TypeError", 1076);
+  },
+};
+
+export const MathBuiltin = bindNatives(MathDecl, mathClass, mathHook);
