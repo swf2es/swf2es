@@ -4,12 +4,12 @@ export const XMLListDecl = {
   name: "XMLList",
   super: "Object",
   final: true,
-  init: { params: [["*", ["undefined", null]]], avmplus: true },
+  init: { params: [["*", ["undefined", null]]], native: true },
   classInit: { avmplus: true },
   static: [{ const: "length", value: ["int", 1] }],
   instance: [
     { method: "AS3::toString", returns: "String", native: true },
-    { method: "AS3::valueOf", returns: "XMLList", avmplus: true },
+    { method: "AS3::valueOf", returns: "XMLList", native: true },
     {
       method: "AS3::hasOwnProperty",
       override: true,
@@ -60,7 +60,7 @@ export const XMLListDecl = {
     { method: "AS3::insertChildBefore", params: ["*", "*"], native: true },
     { method: "AS3::nodeKind", returns: "String", native: true },
     { method: "private::_namespace", params: ["*", "int"], native: true },
-    { method: "AS3::namespace", params: [["*", ["null", null]]], arguments: true, avmplus: true },
+    { method: "AS3::namespace", params: [["*", ["null", null]]], arguments: true, native: true },
     { method: "AS3::localName", returns: "Object", native: true },
     { method: "AS3::namespaceDeclarations", returns: "Array", native: true },
     { method: "AS3::prependChild", params: ["*"], returns: "XML", native: true },
@@ -70,6 +70,6 @@ export const XMLListDecl = {
     { method: "AS3::setLocalName", params: ["*"], returns: "void", native: true },
     { method: "AS3::setName", params: ["*"], returns: "void", native: true },
     { method: "AS3::setNamespace", params: ["*"], returns: "void", native: true },
-    { method: "AS3::toJSON", params: ["String"], avmplus: true },
+    { method: "AS3::toJSON", params: ["String"], native: true },
   ],
 } as const satisfies ClassDecl;
