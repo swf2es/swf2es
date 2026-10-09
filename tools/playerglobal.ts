@@ -177,9 +177,9 @@ function shapes(abc: Uint8Array): Map<string, Shape> {
 
 // What Flash Player 32's playerglobal has (fpdownload.macromedia.com's
 // playerglobal32_0.swc) and the oracle's, older, lacks: ours has it too.
+// Unversioned only: a builtin's highest mark, from 42 up, is the VM's
+// internal one, and a newer one would make 42 public.
 const NEWER = new Set([
-  "flash.display3D::Context3DProfile static const STANDARD_CONSTRAINED",
-  "flash.display3D::Context3DProfile static const STANDARD_EXTENDED",
   "flash.ui::ContextMenuBuiltInItems instance method clone",
   "flash.net.drm::DRMDeviceGroup instance getter serverURL",
 ]);
