@@ -23,7 +23,10 @@
     "oracle": "node oracle/oracle.ts",
     "oracle:pull": "node oracle/oracle.ts --pull",
     "oracle:abcdump": "node oracle/oracle.ts --abcdump",
-    "oracle:cases": "node oracle/cases.ts"
+    "oracle:cases": "node oracle/cases.ts",
+    "as3": "pnpm as3:playerglobal && pnpm as3:air",
+    "as3:playerglobal": "node tools/playerglobal.ts --check",
+    "as3:air": "node tests/player/air-library.ts --update"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

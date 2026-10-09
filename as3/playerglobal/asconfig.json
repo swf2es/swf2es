@@ -7,6 +7,5 @@
     "strict": true,
     "warnings": true,
     "output": "bin/playerglobal.swc"
-  },
-  "additionalOptions": "-compiler.float=false"
+  }
 }
