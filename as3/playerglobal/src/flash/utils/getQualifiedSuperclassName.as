@@ -2,5 +2,10 @@
 
 package flash.utils
 {
-	public native function getQualifiedSuperclassName(arg0:*):String;
+	import avmplus.getQualifiedSuperclassName;
+
+	public function getQualifiedSuperclassName(value:*):String
+	{
+		return avmplus.getQualifiedSuperclassName(value);
+	}
 }

@@ -2,5 +2,12 @@
 
 package flash.utils
 {
-	public native function describeType(arg0:*):XML;
+	import avmplus.FLASH10_FLAGS;
+	import avmplus.describeType;
+
+	// avmplus' describeType, with the flags Flash Player 10 and later describe by.
+	public function describeType(value:*):XML
+	{
+		return avmplus.describeType(value, avmplus.FLASH10_FLAGS);
+	}
 }

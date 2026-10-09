@@ -2,5 +2,10 @@
 
 package flash.utils
 {
-	public native function getQualifiedClassName(arg0:*):String;
+	import avmplus.getQualifiedClassName;
+
+	public function getQualifiedClassName(value:*):String
+	{
+		return avmplus.getQualifiedClassName(value);
+	}
 }
