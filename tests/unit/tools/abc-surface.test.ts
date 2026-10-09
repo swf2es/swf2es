@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { scripts } from "../../../packages/runtime/dist/avm2/builtin/scripts.js";
 import {
   fromDeclarations,
@@ -8,6 +10,7 @@ import {
   toDeclarations,
 } from "../../../tools/abc-surface/declarations.ts";
 import { type Class, readSurface, type Trait } from "../../../tools/abc-surface/read.ts";
+import { generate, THUNKS } from "../../../tools/thunks.ts";
 
 const builtin = readFileSync(
   new URL("../../../oracle/avmplus/generated/builtin.abc", import.meta.url),
@@ -61,4 +64,18 @@ test("declarations made from builtin.abc's surface give that surface back", () =
 
 test("the runtime's builtin declarations declare builtin.abc's surface", () => {
   assert.deepEqual(fromDeclarations(scripts), normalize(readSurface(builtin)));
+});
+
+test("thunks.ts is what tools/thunks.ts generates from the declarations", async () => {
+  const { nativeMembers } = await import("../../../packages/runtime/dist/avm2/builtin/bind.js");
+  const generated = execFileSync(
+    fileURLToPath(new URL("../../../node_modules/.bin/biome", import.meta.url)),
+    ["format", `--stdin-file-path=${THUNKS}`],
+    { input: generate(scripts, nativeMembers), encoding: "utf8" },
+  );
+  assert.equal(
+    generated,
+    readFileSync(THUNKS, "utf8"),
+    "run node tools/thunks.ts after pnpm build",
+  );
 });

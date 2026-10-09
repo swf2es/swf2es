@@ -173,6 +173,5 @@ type Extra<K, C extends ClassDecl> =
   | (K extends abstract new () => infer I ? Exclude<keyof I, keyof InstanceNatives<C>> : never);
 
 /** `K` if it has no public member `C` does not declare native, else a type naming them. */
-export type Exactly<K, C extends ClassDecl> = [Extra<K, C>] extends [never]
-  ? K
-  : { "not declared native": Extra<K, C> };
+export type Exactly<K, C extends ClassDecl> =
+  Extra<K, C> extends infer E ? ([E] extends [never] ? K : { "not declared native": E }) : never;

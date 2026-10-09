@@ -72,6 +72,8 @@ node tools/abc-surface/main.ts file.abc [--classes | --json]   # an ABC's classe
                               # signatures; how many methods are native and how many AS3
 node tools/abc-surface/declarations.ts builtin.abc dir   # declarations of an ABC's classes, as
                               # packages/runtime/src/avm2/builtin/ began (empties dir first)
+node tools/thunks.ts          # builtin's thunks, from its declarations: after changing a
+                              # declaration, pnpm build, this, and pnpm build again
 pnpm bench [file.abc...]      # time the ABC parser and decoder
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved

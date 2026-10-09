@@ -26,7 +26,6 @@ function extreme(
 
 /** Math's natives for runtime `rt`; Number's copies of its functions are taken from them. */
 export function mathClass(rt: Runtime) {
-  // biome-ignore lint/complexity/noStaticOnlyClass: Math's natives are all static
   return class MathNatives {
     static abs(x: number) {
       return Math.abs(x);

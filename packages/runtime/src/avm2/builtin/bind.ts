@@ -7,19 +7,12 @@
 // A native bound so may also replace a method whose body is still
 // avmplus' AS3: see Runtime.override.
 
-import type { AsObject, Method, TypeRef, Value } from "../descriptors.js";
+import type { Method } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
-import { NS_PackageInternal, NS_Public, namespace } from "../names.js";
 import type { Natives } from "../natives/define.js";
 import type { Runtime } from "../runtime.js";
-import type {
-  ClassDecl,
-  Value as Constant,
-  Exactly,
-  MethodDecl,
-  NativeClass,
-  TraitDecl,
-} from "./declare.js";
+import type { ClassDecl, Exactly, MethodDecl, NativeClass, TraitDecl } from "./declare.js";
+import { thunks } from "./thunks.js";
 
 const AS3 = "http://adobe.com/AS3/2006/builtin";
 const FLASH_PROXY = "http://www.adobe.com/2006/actionscript/flash/proxy";
@@ -94,84 +87,23 @@ function className(decl: ClassDecl): string {
   return qualify(packageOf(decl.name), localOf(decl.name));
 }
 
-function constant(v: Constant): Value {
-  switch (v[0]) {
-    case "undefined":
-      return undefined;
-    case "null":
-      return null;
-    case "double":
-      return Number(v[1]);
-    case "namespace":
-      throw new Error(`a native's default namespace ${v[1]} is not supported`);
-    default:
-      return v[1];
-  }
-}
-
-/** A type as the runtime coerces to it: null for *, a builtin's name, or a class by reference. */
-function typeRef(rt: Runtime, type: string): TypeRef {
-  if (type === "*") {
-    return null;
-  }
-
-  const at = type.lastIndexOf("::");
-  if (at < 0) {
-    return type;
-  }
-
-  const prefix = type.slice(0, at);
-  const ns = prefix.startsWith("internal:")
-    ? namespace(NS_PackageInternal, prefix.slice("internal:".length))
-    : namespace(NS_Public, prefix);
-  return rt.cls(ns, type.slice(at + 2));
-}
-
 function arity(d: MethodDecl): Arity {
   const params = d.params ?? [];
   const required = params.filter((p) => typeof p === "string").length;
   return [required, d.rest || d.arguments ? -1 : params.length];
 }
 
-/** How an argument is coerced to AS3 type `type`; null for *, which takes it as it is. */
-function coercer(rt: Runtime, type: string): ((v: Value) => Value) | null {
-  switch (type) {
-    case "*":
-      return null;
-    case "int":
-      return (v) => rt.toInt(v);
-    case "uint":
-      return (v) => rt.toUint(v);
-    case "Number":
-      return (v) => rt.toNumber(v);
-    case "Boolean":
-      return (v) => !!v;
-    case "String":
-      return (v) => rt.coerceString(v);
-    case "Object":
-      return (v) => rt.coerceObject(v);
-    default: {
-      const ref = typeRef(rt, type);
-      return (v) => rt.coerce(v, ref);
-    }
-  }
-}
-
-const same = (v: Value) => v;
-
-/** A parameter with no default. */
-const NONE = Symbol("no default");
-
 /**
- * `f` called as avmplus calls a native declared by `d`: each missing
- * argument with a default given it, and each argument coerced to its
- * parameter's type; but as given to one whose AS3 reads `arguments`,
- * which holds them so. `f` itself where nothing needs doing.
+ * `f` called as avmplus calls a native declared by `d`: through its thunk
+ * (see thunks.ts), which gives each missing argument its default and
+ * coerces each to its parameter's type, where it has one; `f` itself
+ * where nothing needs doing, as for a method whose AS3 reads `arguments`,
+ * which gets them as given. Its length is its declared parameters' count,
+ * as a compiled method's is, however the native spells them.
  */
-function adapt(rt: Runtime, f: Method, d: MethodDecl): Method {
-  const g = wrap(rt, f, d);
-  // Its length is its declared parameters' count, as a compiled method's
-  // is, however the native spells them (...args, or fewer).
+function adapt(rt: Runtime, f: Method, d: MethodDecl, key: string): Method {
+  const thunk = thunks[key];
+  const g = thunk ? thunk(rt, f) : f;
   const n = d.params?.length ?? 0;
   if (g.length !== n) {
     Object.defineProperty(g, "length", { value: n });
@@ -180,92 +112,60 @@ function adapt(rt: Runtime, f: Method, d: MethodDecl): Method {
   return g;
 }
 
-function wrap(rt: Runtime, f: Method, d: MethodDecl): Method {
-  // One that reads its arguments, as AS3's `arguments`, gets them as given.
-  if (d.arguments) {
-    return f;
-  }
-
-  const params = d.params ?? [];
-  const coerce = params.map((p) => coercer(rt, typeof p === "string" ? p : p[0]));
-  const defaults = params.map((p) => (typeof p === "string" ? NONE : constant(p[1])));
-  const anyDefault = defaults.some((v) => v !== NONE);
-  if (!anyDefault && coerce.every((c) => c === null)) {
-    return f;
-  }
-
-  // A parameter without a default has its argument: a call with fewer, or
-  // more where nothing takes the rest, is refused before it gets here. So
-  // for a few parameters and no rest, fixed shapes do, with no array made:
-  // each default, coerced once here, where its argument is missing.
-  const [c0 = same, c1 = same, c2 = same] = coerce.map((c) => c ?? same);
-  const [v0, v1, v2] = defaults.map((v, i) => (v === NONE ? undefined : (coerce[i] ?? same)(v)));
-  if (!d.rest) {
-    switch (params.length) {
-      case 1:
-        return anyDefault
-          ? function (this: AsObject, a: Value) {
-              // biome-ignore lint/complexity/noArguments: how many were given, as a default needs
-              return f.call(this, arguments.length > 0 ? c0(a) : v0);
-            }
-          : function (this: AsObject, a: Value) {
-              return f.call(this, c0(a));
-            };
-      case 2:
-        return anyDefault
-          ? function (this: AsObject, a: Value, b: Value) {
-              // biome-ignore lint/complexity/noArguments: how many were given, as a default needs
-              const n = arguments.length;
-              return f.call(this, n > 0 ? c0(a) : v0, n > 1 ? c1(b) : v1);
-            }
-          : function (this: AsObject, a: Value, b: Value) {
-              return f.call(this, c0(a), c1(b));
-            };
-      case 3:
-        return anyDefault
-          ? function (this: AsObject, a: Value, b: Value, c: Value) {
-              // biome-ignore lint/complexity/noArguments: how many were given, as a default needs
-              const n = arguments.length;
-              return f.call(this, n > 0 ? c0(a) : v0, n > 1 ? c1(b) : v1, n > 2 ? c2(c) : v2);
-            }
-          : function (this: AsObject, a: Value, b: Value, c: Value) {
-              return f.call(this, c0(a), c1(b), c2(c));
-            };
-    }
-  }
-
-  const n = params.length;
-  return function (this: AsObject, ...args: Value[]) {
-    for (let i = 0; i < n; i++) {
-      if (i >= args.length) {
-        if (defaults[i] === NONE) {
-          break;
-        }
-
-        args.push(defaults[i]);
-      }
-
-      const c = coerce[i];
-      if (c !== null) {
-        args[i] = c(args[i]);
-      }
-    }
-
-    return f.apply(this, args);
-  };
-}
-
-/** Each native trait of `traits` with its key and declaration. */
-function* nativeTraits(traits: readonly TraitDecl[]): Generator<[string, string, MethodDecl]> {
+/** Each trait of `traits` that is native, or has a body if `bodies`, with its member key and name. */
+function* nativeTraits(
+  traits: readonly TraitDecl[],
+  bodies: boolean,
+): Generator<[string, string, MethodDecl]> {
   for (const t of traits) {
-    if ("method" in t && t.native) {
+    if (!("method" in t || "get" in t || "set" in t) || !(t.native || (bodies && t.avmplus))) {
+      continue;
+    }
+
+    if ("method" in t) {
       yield [t.method, t.method, t];
-    } else if ("get" in t && t.native) {
+    } else if ("get" in t) {
       yield [`get:${t.get}`, t.get, t];
-    } else if ("set" in t && t.native) {
+    } else {
       yield [`set:${t.set}`, t.set, t];
     }
   }
+}
+
+/** A class's native: its key, the compiler's name for it, where its class of natives holds it, and its declaration. */
+export interface NativeMember {
+  key: string;
+  static: boolean;
+  /** Its member of the class of natives: "name", "get:name", "set:name", or the class's own name for the constructor. */
+  member: string;
+  decl: MethodDecl;
+}
+
+/**
+ * The natives of class `decl`: its methods, accessors and constructor
+ * declared native, and with `bodies`, those whose AS3 is still avmplus'
+ * too, which ported will be.
+ */
+export function nativeMembers(decl: ClassDecl, bodies = false): NativeMember[] {
+  const cls = className(decl);
+  const out: NativeMember[] = [];
+  for (const [isStatic, traits] of [
+    [true, decl.static],
+    [false, decl.instance],
+  ] as const) {
+    for (const [member, name, d] of nativeTraits(traits, bodies)) {
+      const accessor = member.startsWith("get:") ? "get:" : member.startsWith("set:") ? "set:" : "";
+      const key = `${cls}${isStatic ? "." : "#"}${accessor}${keyName(name, decl)}`;
+      out.push({ key, static: isStatic, member, decl: d });
+    }
+  }
+
+  if (decl.init.native || (bodies && decl.init.avmplus)) {
+    // The AS3 constructor is the method named as the class.
+    out.push({ key: `${cls}()`, static: false, member: localOf(decl.name), decl: decl.init });
+  }
+
+  return out;
 }
 
 /** A member of `holder`: a method's function, or an accessor's ("get:x", "set:x"). */
@@ -314,29 +214,13 @@ export function bindNatives<C extends ClassDecl, K extends NativeClass<C>>(
     return made as Holder;
   };
 
-  const add = (key: string, d: MethodDecl, get: (holder: Holder) => Method) => {
-    const bound = ((rt: Runtime) => adapt(rt, get(of(rt)), d)) as BoundNative;
+  for (const { key, static: isStatic, member, decl: d } of nativeMembers(decl)) {
+    const bound = ((rt: Runtime) => {
+      const h = of(rt);
+      return adapt(rt, memberOf(isStatic ? h : h.prototype, member), d, key);
+    }) as BoundNative;
     bound.arity = arity(d);
     out[key] = bound;
-  };
-
-  const sides = [
-    [".", decl.static, (h: Holder) => h],
-    ["#", decl.instance, (h: Holder) => h.prototype],
-  ] as const;
-  for (const [separator, traits, side] of sides) {
-    for (const [member, name, d] of nativeTraits(traits)) {
-      const accessor = member.startsWith("get:") ? "get:" : member.startsWith("set:") ? "set:" : "";
-      add(`${cls}${separator}${accessor}${keyName(name, decl)}`, d, (h) =>
-        memberOf(side(h), member),
-      );
-    }
-  }
-
-  if (decl.init.native) {
-    // The AS3 constructor is the method named as the class.
-    const named = localOf(decl.name);
-    add(`${cls}()`, decl.init, (h) => h.prototype[named] as Method);
   }
 
   return { natives: out, hooks: hook ? { [cls]: hook } : {} };
