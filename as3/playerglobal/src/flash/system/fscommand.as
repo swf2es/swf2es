@@ -2,5 +2,8 @@
 
 package flash.system
 {
-	public native function fscommand(arg0:String, arg1:String = ""):void;
+	public function fscommand(command:String, args:String = ""):void
+	{
+		FSCommand._fscommand(command, args);
+	}
 }
