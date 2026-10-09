@@ -20,7 +20,28 @@ package flash.net
 
 		public native function get method():String;
 
-		public native function set method(value:String):void;
+		public function set method(value:String):void
+		{
+			if (value == null)
+			{
+				Error.throwError(TypeError, 2007, "method");
+			}
+
+			// AIR's methods, as the reference playerglobal takes them.
+			switch (value.toUpperCase())
+			{
+				case "GET":
+				case "POST":
+				case "PUT":
+				case "DELETE":
+				case "HEAD":
+				case "OPTIONS":
+					setMethod(value);
+					return;
+			}
+
+			Error.throwError(ArgumentError, 2008, "method");
+		}
 
 		public native function get contentType():String;
 
@@ -28,7 +49,10 @@ package flash.net
 
 		public native function get requestHeaders():Array;
 
-		public native function set requestHeaders(headers:Array):void;
+		public function set requestHeaders(headers:Array):void
+		{
+			setRequestHeaders(headers);
+		}
 
 		public native function get digest():String;
 
@@ -71,7 +95,10 @@ package flash.net
 		public native function get idleTimeout():Number;
 
 		[API("668")]
-		public native function set idleTimeout(arg0:Number):void;
+		public function set idleTimeout(value:Number):void
+		{
+			_SetIdleTimeout(value);
+		}
 
 		[API("661")]
 		public native function get authenticate():Boolean;

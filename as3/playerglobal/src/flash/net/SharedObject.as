@@ -24,26 +24,49 @@ package flash.net
 		public static native function set defaultObjectEncoding(arg0:uint):void;
 
 		[API("689")]
-		public static native function get preventBackup():Boolean;
+		public static function get preventBackup():Boolean
+		{
+			return preventBackupImpl;
+		}
 
 		[API("689")]
-		public static native function set preventBackup(arg0:Boolean):void;
+		public static function set preventBackup(value:Boolean):void
+		{
+			preventBackupImpl = value;
+		}
 
 		public native function get data():Object;
 
 		public native function connect(arg0:NetConnection, arg1:String = null):void;
 
-		public native function close():void;
+		public function close():void
+		{
+			invoke(CLOSE);
+		}
 
-		public native function flush(minDiskSpace:int = 0):String;
+		public function flush(minDiskSpace:int = 0):String
+		{
+			if (!invoke(FLUSH, minDiskSpace))
+			{
+				Error.throwError(Error, 2130);
+			}
 
-		public native function get size():uint;
+			return SharedObjectFlushStatus.FLUSHED;
+		}
+
+		public function get size():uint
+		{
+			return invoke(GET_SIZE);
+		}
 
 		public native function set fps(arg0:Number):void;
 
 		public native function send(...rest):void;
 
-		public native function clear():void;
+		public function clear():void
+		{
+			invoke(CLEAR);
+		}
 
 		public native function get objectEncoding():uint;
 
@@ -55,13 +78,23 @@ package flash.net
 
 		public native function setDirty(arg0:String):void;
 
-		public native function setProperty(propertyName:String, value:Object = null):void;
+		public function setProperty(propertyName:String, value:Object = null):void
+		{
+			data[propertyName] = value;
+			setDirty(propertyName);
+		}
 
 		// The player's natives (packages/player/src/playerglobal/flash/net/SharedObject.ts).
+		// What the player's invoke does, by these codes (SharedObject.ts).
+		private static const FLUSH:uint = 2;
+		private static const CLOSE:uint = 3;
+		private static const GET_SIZE:uint = 4;
+		private static const CLEAR:uint = 6;
+
 		private native function invoke(code:uint, ...rest):*;
 
 		private static native function get preventBackupImpl():Boolean;
 
-		private static native function set preventBackupImpl(arg0:Boolean):void;
+		private static native function set preventBackupImpl(value:Boolean):void;
 	}
 }
