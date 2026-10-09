@@ -1,5 +1,7 @@
 // From Ruffle (https://github.com/ruffle-rs/ruffle), core/src/avm2/globals/flash/xml/XMLDocument.as:
 // MIT OR Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors.
+// parseXML is ours: the tree built from the tags of the player's tokenizer, as
+// Flash's legacy parser builds it.
 
 package flash.xml
 {
@@ -27,91 +29,101 @@ package flash.xml
 			}
 		}
 
-		public function parseXML(input:String):void
+		public function parseXML(source:String):void
 		{
-			// This is something of a hack, but that's somewhat the nature of XMLDocument
-			// It accepts things like `<node>...</node> <!-- comment --> foo` which is FOUR children:
-			// `<node>...</node>` gets parsed as an element
-			// ` ` gets parsed as a text node
-			// `<!-- comment -->` gets parsed as a comment
-			// ` foo` is another text node
-			// To achieve this, just wrap it all together in a parent.
-
-			var oldSettings = XML.AS3::settings();
-			var newSettings = XML.AS3::defaultSettings();
-			newSettings.ignoreWhitespace = this.ignoreWhite;
-			XML.AS3::setSettings(newSettings);
-
-			try
+			clear();
+			const parser:XMLParser = new XMLParser();
+			const tag:XMLTag = new XMLTag();
+			parser.startParse(source, ignoreWhite);
+			var parent:XMLNode = this;
+			for (var status:int = parser.getNext(tag); status != END; status = parser.getNext(tag))
 			{
-				clear();
-				var root = new XML("<xml>" + input + "</xml>");
-				for each (var child in root.children())
+				if (status != OK)
 				{
-					appendChild(_convertXmlNode(child));
+					Error.throwError(TypeError, errorOf(status));
+				}
+
+				switch (tag.type)
+				{
+					case XMLNodeType.ELEMENT_NODE:
+						if (tag.value.charAt(0) == "/")
+						{
+							if (parent == this)
+							{
+								Error.throwError(Error, 2070);
+							}
+
+							if (parent.nodeName != tag.value.substr(1))
+							{
+								Error.throwError(TypeError, 1096);
+							}
+
+							parent = parent.parentNode;
+							break;
+						}
+
+						const element:XMLNode = createElement(tag.value);
+						const attributes:Object = tag.attrs;
+						element.attributes = attributes;
+						if (attributes != null && attributes.id != null)
+						{
+							idMap[attributes.id] = element;
+						}
+
+						parent.appendChild(element);
+						if (!tag.empty)
+						{
+							parent = element;
+						}
+
+						break;
+					case XMLNodeType.TEXT_NODE:
+					case CDATA:
+						parent.appendChild(createTextNode(tag.value));
+						break;
+					case XML_DECLARATION:
+						xmlDecl = "<?" + tag.value + "?>";
+						break;
+					case DOCTYPE:
+						docTypeDecl = tag.value;
+						break;
 				}
 			}
-			finally
+
+			// An element left open.
+			if (parent != this)
 			{
-				XML.AS3::setSettings(oldSettings);
+				Error.throwError(TypeError, 1096);
 			}
 		}
 
-		private function _convertXmlNode(original:XML):XMLNode
+		// The tokenizer's tags and statuses (packages/runtime/src/avm2/natives/xml/parser.ts).
+		private static const CDATA:uint = 4;
+		private static const DOCTYPE:uint = 10;
+		private static const XML_DECLARATION:uint = 13;
+		private static const OK:int = 0;
+		private static const END:int = -1;
+
+		// A status as the error E4X throws for it.
+		private static function errorOf(status:int):int
 		{
-			var nodeType = _convertXmlNodeType(original.nodeKind());
-			var nodeValue = nodeType == XMLNodeType.ELEMENT_NODE ?
-				_convertXmlName(original) : original.toString();
-			var result = new XMLNode(nodeType, nodeValue);
-			for each (var originalChild in original.children())
+			switch (status)
 			{
-				result.appendChild(_convertXmlNode(originalChild));
+				case -2:
+					return 1091;
+				case -3:
+					return 1092;
+				case -4:
+					return 1093;
+				case -5:
+					return 1094;
+				case -8:
+					return 1095;
+				case -10:
+					return 1097;
+				default:
+					return 1090;
 			}
-
-			var attributes = {};
-			for each (var attribute in original.attributes())
-			{
-				attributes[_convertXmlName(attribute)] = attribute.toString();
-			}
-			for each (var ns in original.namespaceDeclarations())
-			{
-				var name = "xmlns";
-				if (ns.prefix)
-				{
-					name += ":" + ns.prefix;
-				}
-				attributes[name] = ns.uri;
-			}
-
-			result.attributes = attributes;
-			return result;
-		}
-
-		private function _convertXmlName(node:XML):String
-		{
-			var ns = node.namespace ();
-			if (ns.prefix)
-			{
-				return ns.prefix + ":" + node.localName();
-			}
-			return node.localName();
-		}
-
-		private function _convertXmlNodeType(kind:String):uint
-		{
-			if (kind == "text")
-			{
-				return XMLNodeType.TEXT_NODE;
-			}
-			if (kind == "comment")
-			{
-				return XMLNodeType.COMMENT_NODE;
-			}
-			if (kind == "element")
-			{
-				return XMLNodeType.ELEMENT_NODE;
-			}
-			throw new Error("Invalid XML Node kind '" + kind + "' found whilst constructing (legacy) XMLDocument");
 		}
 
 		public function createElement(name:String):XMLNode
@@ -126,7 +138,9 @@ package flash.xml
 
 		override public function toString():String
 		{
-			return super.toString();
+			const declaration:String = xmlDecl != null ? String(xmlDecl) : "";
+			const doctype:String = docTypeDecl != null ? String(docTypeDecl) : "";
+			return declaration + doctype + super.toString();
 		}
 	}
 }
