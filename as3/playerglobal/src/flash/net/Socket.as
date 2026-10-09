@@ -10,17 +10,38 @@ package flash.net
 
 	public class Socket extends EventDispatcher implements IDataInput, IDataOutput
 	{
+		private var _timeout:uint = 20000;
+
 		public function Socket(host:String = null, port:int = 0)
 		{
+			if (host != null)
+			{
+				connect(host, port);
+			}
 		}
 
-		public native function connect(host:String, port:int):void;
+		public function connect(host:String, port:int):void
+		{
+			if (port < 0 || port > 65535)
+			{
+				Error.throwError(SecurityError, 2003);
+			}
+
+			internalConnect(host, port);
+		}
 
 		[API("662")]
-		public native function get timeout():uint;
+		public function get timeout():uint
+		{
+			return _timeout;
+		}
 
 		[API("662")]
-		public native function set timeout(value:uint):void;
+		// Kept: the player's connections wait as long as the host's do.
+		public function set timeout(value:uint):void
+		{
+			_timeout = value;
+		}
 
 		public native function readBytes(bytes:ByteArray, offset:uint = 0, length:uint = 0):void;
 
@@ -74,7 +95,10 @@ package flash.net
 
 		public native function get connected():Boolean;
 
-		public native function close():void;
+		public function close():void
+		{
+			internalClose();
+		}
 
 		public native function flush():void;
 
