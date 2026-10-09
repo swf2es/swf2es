@@ -8,6 +8,7 @@ package flash.globalization
 	{
 		public function Collator(requestedLocaleIDName:String, initialMode:String = "sorting")
 		{
+			ctor(requestedLocaleIDName, initialMode);
 		}
 
 		public static native function getAvailableLocaleIDNames():Vector.<String>;
@@ -45,5 +46,8 @@ package flash.globalization
 		public native function get actualLocaleIDName():String;
 
 		public native function get requestedLocaleIDName():String;
+
+		// The player's natives (packages/player/src/playerglobal/flash/globalization/Collator.ts).
+		private native function ctor(requestedLocaleIDName:String, initialMode:String):void;
 	}
 }

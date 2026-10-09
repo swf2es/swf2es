@@ -7,6 +7,7 @@ package flash.display
 	{
 		public function Bitmap(bitmapData:BitmapData = null, pixelSnapping:String = "auto", smoothing:Boolean = false)
 		{
+			ctor(bitmapData, pixelSnapping, smoothing);
 		}
 
 		public native function get pixelSnapping():String;
@@ -20,5 +21,8 @@ package flash.display
 		public native function get bitmapData():BitmapData;
 
 		public native function set bitmapData(value:BitmapData):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/display/Bitmap.ts).
+		private native function ctor(bitmapData:BitmapData, pixelSnapping:String, smoothing:Boolean):void;
 	}
 }

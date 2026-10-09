@@ -9,6 +9,7 @@ package flash.system
 	{
 		public function ApplicationDomain(parentDomain:ApplicationDomain = null)
 		{
+			ctor(parentDomain);
 		}
 
 		public static native function get currentDomain():ApplicationDomain;
@@ -29,5 +30,8 @@ package flash.system
 
 		[API("662", "663")]
 		public native function set domainMemory(value:ByteArray):*;
+
+		// The player's natives (packages/player/src/playerglobal/flash/system/ApplicationDomain.ts).
+		private native function ctor(parentDomain:ApplicationDomain):void;
 	}
 }

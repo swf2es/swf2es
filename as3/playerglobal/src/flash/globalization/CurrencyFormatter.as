@@ -8,6 +8,7 @@ package flash.globalization
 	{
 		public function CurrencyFormatter(requestedLocaleIDName:String)
 		{
+			ctor(requestedLocaleIDName);
 		}
 
 		public static native function getAvailableLocaleIDNames():Vector.<String>;
@@ -73,5 +74,10 @@ package flash.globalization
 		public native function get trailingZeros():Boolean;
 
 		public native function set trailingZeros(value:Boolean):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/globalization/CurrencyFormatter.ts).
+		private native function ctor(requestedLocaleIDName:String):void;
+
+		private native function formatImplementation(value:Number, withSymbol:Boolean):String;
 	}
 }

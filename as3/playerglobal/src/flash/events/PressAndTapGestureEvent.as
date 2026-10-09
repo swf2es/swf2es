@@ -28,5 +28,10 @@ package flash.events
 		public native function get tapStageX():Number;
 
 		public native function get tapStageY():Number;
+
+		// The player's natives (packages/player/src/playerglobal/flash/events/PressAndTapGestureEvent.ts).
+		private native function getTapStageX():Number;
+
+		private native function getTapStageY():Number;
 	}
 }

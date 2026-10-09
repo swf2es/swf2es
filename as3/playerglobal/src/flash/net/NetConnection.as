@@ -72,5 +72,12 @@ package flash.net
 
 		[API("671")]
 		public native function set httpIdleTimeout(arg0:Number):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/net/NetConnection.ts).
+		private native function invoke(code:uint, ...rest):*;
+
+		private native function invokeWithArgsArray(code:uint, _args:Array):*;
+
+		private native function _SetHTTPIdleTimeout(v:Number):void;
 	}
 }

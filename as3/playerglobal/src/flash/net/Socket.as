@@ -104,5 +104,18 @@ package flash.net
 
 		[API("668")]
 		public native function get remotePort():int;
+
+		// The player's natives (packages/player/src/playerglobal/flash/net/Socket.ts).
+		private native function internalGetSecurityErrorMessage(host:String, port:int):String;
+
+		private native function internalConnect(host:String, port:int):void;
+
+		private native function didFailureOccur():Boolean;
+
+		private native function internalClose():void;
+
+		private native function OnError():void;
+
+		private native function wasCalledByAppContent(arg0:String):Boolean;
 	}
 }

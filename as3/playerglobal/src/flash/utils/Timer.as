@@ -28,5 +28,10 @@ package flash.utils
 		public native function reset():void;
 
 		public native function stop():void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/utils/Timer.ts).
+		private native function _start(delay:Number, closure:Function):void;
+
+		private native function _timerDispatch():void;
 	}
 }

@@ -13,5 +13,8 @@ package flash.system
 
 		[API("680")]
 		public native function get domainID():String;
+
+		// The player's natives (packages/player/src/playerglobal/flash/system/SecurityDomain.ts).
+		private native function ctor_impl():void;
 	}
 }

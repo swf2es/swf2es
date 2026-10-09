@@ -56,5 +56,12 @@ package flash.net
 		public native function setDirty(arg0:String):void;
 
 		public native function setProperty(propertyName:String, value:Object = null):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/net/SharedObject.ts).
+		private native function invoke(code:uint, ...rest):*;
+
+		private static native function get preventBackupImpl():Boolean;
+
+		private static native function set preventBackupImpl(arg0:Boolean):void;
 	}
 }

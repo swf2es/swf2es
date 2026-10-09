@@ -77,5 +77,12 @@ package flash.net
 
 		[API("661")]
 		public native function set authenticate(arg0:Boolean):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/net/URLRequest.ts).
+		private native function setMethod(v:String):void;
+
+		private native function setRequestHeaders(v:Array):void;
+
+		private native function _SetIdleTimeout(v:Number):void;
 	}
 }

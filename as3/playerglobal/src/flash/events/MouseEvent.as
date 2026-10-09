@@ -100,5 +100,10 @@ package flash.events
 		public native function set controlKey(arg0:Boolean):void;
 
 		public native function get clickCount():int;
+
+		// The player's natives (packages/player/src/playerglobal/flash/events/MouseEvent.ts).
+		private native function getStageX():Number;
+
+		private native function getStageY():Number;
 	}
 }

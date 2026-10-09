@@ -8,6 +8,7 @@ package flash.globalization
 	{
 		public function NumberFormatter(requestedLocaleIDName:String)
 		{
+			ctor(requestedLocaleIDName);
 		}
 
 		public static native function getAvailableLocaleIDNames():Vector.<String>;
@@ -67,5 +68,8 @@ package flash.globalization
 		public native function formatUint(value:uint):String;
 
 		public native function formatNumber(value:Number):String;
+
+		// The player's natives (packages/player/src/playerglobal/flash/globalization/NumberFormatter.ts).
+		private native function ctor(requestedLocaleIDName:String):void;
 	}
 }

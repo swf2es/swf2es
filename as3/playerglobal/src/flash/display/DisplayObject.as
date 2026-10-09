@@ -167,5 +167,8 @@ package flash.display
 
 		[API("668")]
 		public native function set cacheAsBitmapMatrix(arg0:Matrix):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/display/DisplayObject.ts).
+		private native function _hitTest(point:Boolean, x:Number, y:Number, shape:Boolean, other:DisplayObject):Boolean;
 	}
 }

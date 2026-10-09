@@ -7,6 +7,7 @@ package flash.events
 	{
 		public function Event(type:String, bubbles:Boolean = false, cancelable:Boolean = false)
 		{
+			ctor(type, bubbles, cancelable);
 		}
 
 		public static const ACTIVATE:String = "activate";
@@ -103,5 +104,8 @@ package flash.events
 		public native function preventDefault():void;
 
 		public native function isDefaultPrevented():Boolean;
+
+		// The player's natives (packages/player/src/playerglobal/flash/events/Event.ts).
+		private native function ctor(type:String, bubbles:Boolean, cancelable:Boolean):void;
 	}
 }

@@ -119,5 +119,14 @@ package flash.events
 
 		[API("675")]
 		public native function getSamples(buffer:ByteArray, append:Boolean = false):uint;
+
+		// The player's natives (packages/player/src/playerglobal/flash/events/TouchEvent.ts).
+		private native function getStageX():Number;
+
+		private native function getStageY():Number;
+
+		private native function privateGetSamples(arg0:ByteArray):uint;
+
+		private native function setSamples(arg0:ByteArray):void;
 	}
 }

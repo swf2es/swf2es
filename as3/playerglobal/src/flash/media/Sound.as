@@ -41,5 +41,8 @@ package flash.media
 
 		[API("662")]
 		public native function extract(target:ByteArray, length:Number, startPosition:Number = -1):Number;
+
+		// The player's natives (packages/player/src/playerglobal/flash/media/Sound.ts).
+		private native function _load(request:URLRequest, _checkPolicyFile:Boolean, _bufferTime:Number):void;
 	}
 }

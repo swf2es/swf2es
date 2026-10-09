@@ -10,6 +10,7 @@ package flash.media
 	{
 		public function Video(width:int = 320, height:int = 240)
 		{
+			ctor(width, height);
 		}
 
 		public native function get deblocking():int;
@@ -29,5 +30,8 @@ package flash.media
 		public native function attachNetStream(netStream:NetStream):void;
 
 		public native function attachCamera(arg0:Camera):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/media/Video.ts).
+		private native function ctor(width:int, height:int):void;
 	}
 }

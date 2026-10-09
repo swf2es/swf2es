@@ -8,6 +8,7 @@ package flash.globalization
 	{
 		public function LocaleID(name:String)
 		{
+			ctor(name);
 		}
 
 		public static const DEFAULT:String = "i-default";
@@ -29,5 +30,8 @@ package flash.globalization
 		public native function get lastOperationStatus():String;
 
 		public native function isRightToLeft():Boolean;
+
+		// The player's natives (packages/player/src/playerglobal/flash/globalization/LocaleID.ts).
+		private native function ctor(name:String):void;
 	}
 }

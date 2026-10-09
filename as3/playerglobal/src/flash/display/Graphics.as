@@ -67,5 +67,8 @@ package flash.display
 
 		[API("686")]
 		public native function readGraphicsData(recurse:Boolean = true):Vector.<IGraphicsData>;
+
+		// The player's natives (packages/player/src/playerglobal/flash/display/Graphics.ts).
+		private native function nativeGetGraphicsData(target:Vector.<IGraphicsData>, recurse:Boolean):void;
 	}
 }

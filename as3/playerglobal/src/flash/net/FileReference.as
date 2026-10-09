@@ -45,5 +45,12 @@ package flash.net
 
 		[API("661")]
 		public native function uploadUnencoded(request:URLRequest):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/net/FileReference.ts).
+		private native function _load(_into:ByteArray):void;
+
+		private native function _save(_data:ByteArray, _name:String):void;
+
+		private static native function _ensureIsRootPlayer():void;
 	}
 }

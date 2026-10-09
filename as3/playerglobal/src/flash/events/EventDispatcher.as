@@ -7,6 +7,7 @@ package flash.events
 	{
 		public function EventDispatcher(target:IEventDispatcher = null)
 		{
+			ctor(target);
 		}
 
 		public native function toString():String;
@@ -20,5 +21,10 @@ package flash.events
 		public native function hasEventListener(type:String):Boolean;
 
 		public native function willTrigger(type:String):Boolean;
+
+		// The player's natives (packages/player/src/playerglobal/flash/events/EventDispatcher.ts).
+		private native function ctor(target:IEventDispatcher):void;
+
+		private native function dispatchEventFunction(event:Event):Boolean;
 	}
 }

@@ -54,5 +54,10 @@ package flash.events
 		public native function get controlKey():Boolean;
 
 		public native function set controlKey(value:Boolean):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/events/GestureEvent.ts).
+		private native function getStageX():Number;
+
+		private native function getStageY():Number;
 	}
 }

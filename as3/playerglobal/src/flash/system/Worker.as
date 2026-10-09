@@ -33,5 +33,16 @@ package flash.system
 		override public native function removeEventListener(arg0:String, arg1:Function, arg2:Boolean = false):void;
 
 		public native function terminate():Boolean;
+
+		// The player's natives (packages/player/src/playerglobal/flash/system/Worker.ts).
+		private native function internalSetSharedProperty(key:String, value:*):void;
+
+		private native function internalGetSharedProperty(key:String):*;
+
+		private native function internalGetState():String;
+
+		private native function internalAddEventListener(arg0:String, arg1:Function, arg2:Boolean, arg3:int, arg4:Boolean):void;
+
+		private native function internalRemoveEventListener(arg0:String, arg1:Function, arg2:Boolean):void;
 	}
 }

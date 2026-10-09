@@ -14,6 +14,7 @@ package flash.display
 	{
 		public function BitmapData(width:int, height:int, transparent:Boolean = true, fillColor:uint = 4294967295)
 		{
+			ctor(width, height, transparent, fillColor);
 		}
 
 		public native function clone():BitmapData;
@@ -97,5 +98,8 @@ package flash.display
 
 		[API("680")]
 		public native function encode(rect:Rectangle, compressor:Object, byteArray:ByteArray = null):ByteArray;
+
+		// The player's natives (packages/player/src/playerglobal/flash/display/BitmapData.ts).
+		private native function ctor(width:int, height:int, transparent:Boolean, fillColor:uint):void;
 	}
 }

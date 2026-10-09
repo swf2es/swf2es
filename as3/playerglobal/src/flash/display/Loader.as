@@ -3,6 +3,8 @@
 
 package flash.display
 {
+	import flash.system.ApplicationDomain;
+	import flash.system.SecurityDomain;
 	import flash.desktop.IFilePromise;
 	import flash.events.UncaughtErrorEvents;
 	import flash.net.URLRequest;
@@ -45,5 +47,20 @@ package flash.display
 
 		[API("669")]
 		public native function loadFilePromise(arg0:IFilePromise, arg1:LoaderContext = null):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/display/Loader.ts).
+		private native function _getJPEGLoaderContextdeblockingfilter(_context:Object):Number;
+
+		private native function _loadBytes(bytes:ByteArray, _checkPolicyFile:Boolean, applicationDomain:ApplicationDomain, _securityDomain:SecurityDomain, _requestedContentParent:DisplayObjectContainer, parameters:Object, arg6:Number, arg7:Boolean, arg8:String):void;
+
+		private native function _unload(stopAllMovieClips:Boolean, _gc:Boolean):void;
+
+		private native function _close():void;
+
+		private native function _getUncaughtErrorEvents():UncaughtErrorEvents;
+
+		private native function _setUncaughtErrorEvents(v:UncaughtErrorEvents):void;
+
+		private native function _load(request:URLRequest, _checkPolicyFile:Boolean, applicationDomain:ApplicationDomain, _securityDomain:SecurityDomain, _requestedContentParent:DisplayObjectContainer, parameters:Object, arg6:Number, arg7:Boolean, arg8:String):void;
 	}
 }

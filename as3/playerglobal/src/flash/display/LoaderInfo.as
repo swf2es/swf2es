@@ -69,5 +69,12 @@ package flash.display
 
 		[API("667")]
 		public native function get uncaughtErrorEvents():UncaughtErrorEvents;
+
+		// The player's natives (packages/player/src/playerglobal/flash/display/LoaderInfo.ts).
+		private native function _getArgs():Object;
+
+		private native function _getUncaughtErrorEvents():UncaughtErrorEvents;
+
+		private native function _setUncaughtErrorEvents(v:UncaughtErrorEvents):void;
 	}
 }

@@ -3,6 +3,7 @@
 
 package flash.display
 {
+	import flash.utils.ByteArray;
 	public class AVM1Movie extends DisplayObject
 	{
 		public function AVM1Movie()
@@ -12,5 +13,12 @@ package flash.display
 		public native function call(functionName:String, ...rest):*;
 
 		public native function addCallback(name:String, fn:Function):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/display/AVM1Movie.ts).
+		private native function get _interopAvailable():Boolean;
+
+		private native function _callAS2(arg0:String, arg1:ByteArray):void;
+
+		private native function _setCallAS3(arg0:Function):void;
 	}
 }

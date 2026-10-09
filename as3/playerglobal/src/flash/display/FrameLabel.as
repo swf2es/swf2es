@@ -8,10 +8,14 @@ package flash.display
 	{
 		public function FrameLabel(name:String, frame:int)
 		{
+			ctor(name, frame);
 		}
 
 		public native function get name():String;
 
 		public native function get frame():int;
+
+		// The player's natives (packages/player/src/playerglobal/flash/display/FrameLabel.ts).
+		private native function ctor(name:String, frame:int):void;
 	}
 }

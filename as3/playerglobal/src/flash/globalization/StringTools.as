@@ -8,6 +8,7 @@ package flash.globalization
 	{
 		public function StringTools(requestedLocaleIDName:String)
 		{
+			ctor(requestedLocaleIDName);
 		}
 
 		public static native function getAvailableLocaleIDNames():Vector.<String>;
@@ -21,5 +22,8 @@ package flash.globalization
 		public native function toLowerCase(s:String):String;
 
 		public native function toUpperCase(s:String):String;
+
+		// The player's natives (packages/player/src/playerglobal/flash/globalization/StringTools.ts).
+		private native function ctor(requestedLocaleIDName:String):void;
 	}
 }

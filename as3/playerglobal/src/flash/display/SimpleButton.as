@@ -42,5 +42,8 @@ package flash.display
 		public native function get soundTransform():SoundTransform;
 
 		public native function set soundTransform(sndTransform:SoundTransform):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/display/SimpleButton.ts).
+		private native function _updateButton():void;
 	}
 }

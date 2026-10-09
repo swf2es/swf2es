@@ -8,6 +8,7 @@ package flash.globalization
 	{
 		public function DateTimeFormatter(requestedLocaleIDName:String, dateStyle:String = "long", timeStyle:String = "long")
 		{
+			ctor(requestedLocaleIDName, dateStyle, timeStyle);
 		}
 
 		public static native function getAvailableLocaleIDNames():Vector.<String>;
@@ -37,5 +38,10 @@ package flash.globalization
 		public native function getDateTimePattern():String;
 
 		public native function setDateTimePattern(pattern:String):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/globalization/DateTimeFormatter.ts).
+		private native function ctor(requestedLocaleIDName:String, dateStyle:String, timeStyle:String):void;
+
+		private native function formatImplementation(date:Date, utc:Boolean):String;
 	}
 }

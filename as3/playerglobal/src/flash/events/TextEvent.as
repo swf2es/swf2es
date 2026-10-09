@@ -19,5 +19,8 @@ package flash.events
 		override public native function clone():Event;
 
 		override public native function toString():String;
+
+		// The player's natives (packages/player/src/playerglobal/flash/events/TextEvent.ts).
+		private native function copyNativeData(arg0:TextEvent):void;
 	}
 }

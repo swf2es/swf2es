@@ -249,5 +249,10 @@ package flash.display
 		public native function get supportedOrientations():Vector.<String>;
 
 		override public native function set contextMenu(value:NativeMenu):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/display/Stage.ts).
+		private native function requireOwnerPermissions():void;
+
+		private native function setAutoOrients(_v:Boolean):void;
 	}
 }
