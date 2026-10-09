@@ -3,6 +3,10 @@
 // static ones the prototype's functions call share each operation, which
 // takes any receiver: an Array directly, anything else through its
 // length and index properties, as avmplus' generic_ functions do.
+//
+// Its constructor, join and set_length translated from avmplus'
+// core/Array.as, this file is subject to the Mozilla Public License,
+// v. 2.0: http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";

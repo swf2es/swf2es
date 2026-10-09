@@ -2,6 +2,10 @@
 // held to their declarations, and their class hooks. One file for the
 // family, as Error.as is: each subclass's constructor is Error's and its
 // name, nothing else.
+//
+// Their constructors and throwError translated from avmplus' core/Error.as,
+// this file is subject to the Mozilla Public License, v. 2.0:
+// http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
