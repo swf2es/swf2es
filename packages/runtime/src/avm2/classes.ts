@@ -2,11 +2,11 @@
 // traits from the module's descriptor, with its hooks, its prototype
 // object and its methods bound to the scope chain it is made in.
 
-import type { Abc, AsObject, ClassDesc, Method, Scope, Value } from "./descriptors.js";
+import type { Abc, AsObject, ClassDesc, Method, Scope, TraitsDesc, Value } from "./descriptors.js";
 import { type Multiname, qualifiedName } from "./names.js";
 import { invalidate } from "./property-cache.js";
 import type { Runtime } from "./runtime.js";
-import { BIND_Set, methodKey, Traits } from "./traits.js";
+import { BIND_Get, BIND_GetSet, BIND_Method, BIND_Set, methodKey, Traits } from "./traits.js";
 
 /**
  * As OP_newclass: a class from its module's descriptor, extending `base`,
@@ -137,12 +137,17 @@ export function newClass(
   prototype.$dontEnum = new Set(["constructor"]);
 
   const iscope = rt.scope(scope, [cls], 0);
+  const natives = rt.hasNatives(qualified);
+  const statics = natives ? memberNames(desc.static) : null;
+  const instance = natives ? memberNames(desc.instance) : null;
   for (const [d, factory, id] of desc.static.methods) {
-    straits.proto[methodKey(d)] = withId(factory(scope, base), id);
+    const native = statics?.has(d) ? rt.override(`${qualified}.${statics.get(d)}`) : null;
+    straits.proto[methodKey(d)] = withId((native ?? factory)(scope, base), id);
   }
 
   for (const [d, factory, id] of desc.instance.methods) {
-    itraits.proto[methodKey(d)] = withId(factory(iscope, base), id);
+    const native = instance?.has(d) ? rt.override(`${qualified}#${instance.get(d)}`) : null;
+    itraits.proto[methodKey(d)] = withId((native ?? factory)(iscope, base), id);
   }
 
   // Playerglobal can declare an accessor whose setter has no ABC body.
@@ -160,7 +165,8 @@ export function newClass(
 
   // Caches keep the methods and what the hooks decide.
   invalidate();
-  itraits.proto.$init = desc.init(iscope, base);
+  const init = (natives ? rt.override(`${qualified}()`) : null) ?? desc.init;
+  itraits.proto.$init = init(iscope, base);
   // Its static initializer may name the class as a type, as avmplus
   // resolves from traits, before initproperty has stored it anywhere.
   rt.defining.set(qualified, cls);
@@ -178,4 +184,35 @@ export function newClass(
 export function withId(f: Method, id: number): Method {
   (f as Method & { $id?: number }).$id = id;
   return f;
+}
+
+/**
+ * Each method's name by dispatch id, as the compiler names a native:
+ * "uri::name", or "name" in a namespace whose URI is empty, with "get:" or
+ * "set:" before an accessor's.
+ */
+function memberNames(desc: TraitsDesc): Map<number, string> {
+  const names = new Map<number, string>();
+  for (const [ns, , name, b] of desc.bindings) {
+    const uri = ns.uri ?? "";
+    const q = uri ? `${uri}::${name}` : name;
+    const id = b >> 3;
+    switch (b & 7) {
+      case BIND_Method:
+        names.set(id, q);
+        break;
+      case BIND_Get:
+        names.set(id, `get:${q}`);
+        break;
+      case BIND_Set:
+        names.set(id + 1, `set:${q}`);
+        break;
+      case BIND_GetSet:
+        names.set(id, `get:${q}`);
+        names.set(id + 1, `set:${q}`);
+        break;
+    }
+  }
+
+  return names;
 }

@@ -3,6 +3,7 @@ import { builtinHooks, builtinNatives } from "./natives/index.js";
 import type { RuntimeOptions } from "./options.js";
 import { Runtime } from "./runtime.js";
 
+// The builtins' natives and hooks, for a player that adds playerglobal's to them.
 export type { Abc, AsObject, CompileUnit, FoundDefinition, Method, Value } from "./descriptors.js";
 export { type Domain, frameScripts, frameSites, siteScript, stackFrames } from "./domain.js";
 export type { ClassHook, NativesProvider } from "./hooks.js";
@@ -17,7 +18,6 @@ export {
 } from "./natives/bytearray.js";
 export type { Natives } from "./natives/define.js";
 export { type NativeClass, plain, registerNativeClass } from "./natives/define.js";
-// The builtins' natives and hooks, for a player that adds playerglobal's to them.
 export { builtinHooks, builtinNatives } from "./natives/index.js";
 // avmplus' XML tokenizer, which playerglobal's flash.xml.XMLDocument parses with too.
 export { XMLParser, XMLTag } from "./natives/xml/parser.js";

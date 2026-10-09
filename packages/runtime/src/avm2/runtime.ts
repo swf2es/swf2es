@@ -11,6 +11,7 @@
 // Layouts come from the module, computed by the compiler: the runtime never
 // derives one (docs/architecture.md, "Modules and the bootstrap").
 
+import { isBound } from "./builtin/bind.js";
 import { newClass, withId } from "./classes.js";
 import type {
   Abc,
@@ -214,6 +215,39 @@ export class Runtime {
     this.functionTraits = new Traits("Function", this.objectTraits);
     this.functionTraits.dynamic = true;
     this.natives = typeof natives === "function" ? natives(this) : natives;
+    // What each key could begin with as a class's name: "Array" for
+    // "Array#push" (and some prefixes no class has, which cost nothing).
+    for (const key of Object.keys(this.natives)) {
+      for (let i = 0; i < key.length; i++) {
+        const c = key[i];
+        if (c === "#" || c === "." || c === "(") {
+          this.nativeOwners.add(key.slice(0, i));
+        }
+      }
+    }
+  }
+
+  /** The names classes with natives may have: only theirs are looked at for overrides. */
+  private readonly nativeOwners = new Set<string>();
+
+  /** Whether class `qualified` may have natives that replace methods with AS3 bodies. */
+  hasNatives(qualified: string): boolean {
+    return this.nativeOwners.has(qualified);
+  }
+
+  /**
+   * The native bound by declaration under `key` (see builtin/bind.ts), to
+   * replace a method whose body is AS3, as a port of builtin does; null
+   * where there is none, and the compiled body stays.
+   */
+  override(key: string): Factory | null {
+    const make = this.natives[key];
+    if (!make || !isBound(make)) {
+      return null;
+    }
+
+    const [required, max] = make.arity;
+    return this.native(key, required, max);
   }
 
   /** Empty the inline caches, so that they keep no traits or code of what is being let go of. */

@@ -5,10 +5,10 @@
 // the builtin classes differ from others: how their instances hold native
 // state, and what calling or constructing them does.
 
+import { arrayHooks, arrayNatives } from "../builtin/Array.js";
 import type { ClassHook } from "../hooks.js";
 import type { Runtime } from "../runtime.js";
 import { aliasesNatives } from "./aliases.js";
-import { arrayHooks, arrayNatives } from "./array.js";
 import { byteArrayHook, byteArrayNatives } from "./bytearray.js";
 import { concurrentNatives } from "./concurrent.js";
 import { dateHook, dateNatives } from "./date.js";
