@@ -45,14 +45,14 @@ package flash.events
 
 		override public function toString():String
 		{
-			return this.formatToString(
-					"IOErrorEvent",
-					"type",
-					"bubbles",
-					"cancelable",
-					"eventPhase",
-					"text"
-				);
+			const fields:Array = ["IOErrorEvent", "type", "bubbles", "cancelable", "eventPhase", "text"];
+			// The error's number where it has one, as Flash's string shows it.
+			if (errorID != 0)
+			{
+				fields.push("errorID");
+			}
+
+			return formatToString.apply(this, fields);
 		}
 	}
 }
