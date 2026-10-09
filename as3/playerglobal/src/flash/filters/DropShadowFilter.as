@@ -64,6 +64,9 @@ package flash.filters
 
 		public native function set strength(arg0:Number):void;
 
-		override public native function clone():BitmapFilter;
+		override public function clone():BitmapFilter
+		{
+			return new DropShadowFilter(distance, angle, color, alpha, blurX, blurY, strength, quality, inner, knockout, hideObject);
+		}
 	}
 }

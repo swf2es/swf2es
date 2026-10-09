@@ -13,7 +13,10 @@ package flash.events
 		public static const TIMER:String = "timer";
 		public static const TIMER_COMPLETE:String = "timerComplete";
 
-		override public native function clone():Event;
+		override public function clone():Event
+		{
+			return new TimerEvent(type, bubbles, cancelable);
+		}
 
 		override public native function toString():String;
 

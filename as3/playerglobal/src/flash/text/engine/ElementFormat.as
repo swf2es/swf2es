@@ -83,6 +83,9 @@ package flash.text.engine
 
 		public native function getFontMetrics():FontMetrics;
 
-		public native function clone():ElementFormat;
+		public function clone():ElementFormat
+		{
+			return new ElementFormat(fontDescription, fontSize, color, alpha, textRotation, dominantBaseline, alignmentBaseline, baselineShift, kerning, trackingRight, trackingLeft, locale, breakOpportunity, digitCase, digitWidth, ligatureLevel, typographicCase);
+		}
 	}
 }

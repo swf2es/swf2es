@@ -16,7 +16,10 @@ package flash.events
 
 		public native function set text(value:String):void;
 
-		override public native function clone():Event;
+		override public function clone():Event
+		{
+			return new TextEvent(type, bubbles, cancelable, text);
+		}
 
 		override public native function toString():String;
 

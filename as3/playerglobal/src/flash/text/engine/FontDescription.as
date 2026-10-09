@@ -49,6 +49,9 @@ package flash.text.engine
 
 		public native function set locked(value:Boolean):void;
 
-		public native function clone():FontDescription;
+		public function clone():FontDescription
+		{
+			return new FontDescription(fontName, fontWeight, fontPosture, fontLookup, renderingMode, cffHinting);
+		}
 	}
 }

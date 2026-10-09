@@ -32,6 +32,9 @@ package flash.text.engine
 		[API("667")]
 		public native function set maximumSpacing(value:Number):void;
 
-		override public native function clone():TextJustifier;
+		override public function clone():TextJustifier
+		{
+			return new SpaceJustifier(locale, lineJustification, letterSpacing);
+		}
 	}
 }

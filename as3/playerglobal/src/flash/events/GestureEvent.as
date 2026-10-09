@@ -15,7 +15,10 @@ package flash.events
 
 		public static const GESTURE_TWO_FINGER_TAP:String = "gestureTwoFingerTap";
 
-		override public native function clone():Event;
+		override public function clone():Event
+		{
+			return new GestureEvent(type, bubbles, cancelable, phase, localX, localY, ctrlKey, altKey, shiftKey, commandKey, controlKey);
+		}
 
 		override public native function toString():String;
 

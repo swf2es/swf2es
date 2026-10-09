@@ -20,6 +20,9 @@ package flash.text.engine
 		[API("674")]
 		public native function set composeTrailingIdeographicSpaces(value:Boolean):void;
 
-		override public native function clone():TextJustifier;
+		override public function clone():TextJustifier
+		{
+			return new EastAsianJustifier(locale, lineJustification, justificationStyle);
+		}
 	}
 }

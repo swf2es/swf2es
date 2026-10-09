@@ -17,6 +17,9 @@ package flash.text.engine
 
 		public native function set lineJustification(value:String):void;
 
-		public native function clone():TextJustifier;
+		public function clone():TextJustifier
+		{
+			return new TextJustifier(locale, lineJustification);
+		}
 	}
 }

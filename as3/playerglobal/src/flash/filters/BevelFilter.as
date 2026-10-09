@@ -69,6 +69,9 @@ package flash.filters
 
 		public native function set type(arg0:String):void;
 
-		override public native function clone():BitmapFilter;
+		override public function clone():BitmapFilter
+		{
+			return new BevelFilter(distance, angle, highlightColor, highlightAlpha, shadowColor, shadowAlpha, blurX, blurY, strength, quality, type, knockout);
+		}
 	}
 }

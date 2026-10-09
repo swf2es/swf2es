@@ -77,6 +77,9 @@ package flash.filters
 
 		public native function set type(value:String):void;
 
-		override public native function clone():BitmapFilter;
+		override public function clone():BitmapFilter
+		{
+			return new GradientGlowFilter(distance, angle, colors, alphas, ratios, blurX, blurY, strength, quality, type, knockout);
+		}
 	}
 }

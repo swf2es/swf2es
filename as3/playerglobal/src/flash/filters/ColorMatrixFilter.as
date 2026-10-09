@@ -19,6 +19,9 @@ package flash.filters
 
 		public native function set matrix(matrix:Array):void;
 
-		override public native function clone():BitmapFilter;
+		override public function clone():BitmapFilter
+		{
+			return new ColorMatrixFilter(matrix);
+		}
 	}
 }

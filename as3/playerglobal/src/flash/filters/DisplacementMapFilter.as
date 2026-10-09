@@ -66,6 +66,9 @@ package flash.filters
 
 		public native function set alpha(arg0:Number):void;
 
-		override public native function clone():BitmapFilter;
+		override public function clone():BitmapFilter
+		{
+			return new DisplacementMapFilter(mapBitmap, mapPoint, componentX, componentY, scaleX, scaleY, mode, color, alpha);
+		}
 	}
 }

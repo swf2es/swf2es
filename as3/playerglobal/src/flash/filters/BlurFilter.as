@@ -24,6 +24,9 @@ package flash.filters
 
 		public native function set quality(arg0:int):void;
 
-		override public native function clone():BitmapFilter;
+		override public function clone():BitmapFilter
+		{
+			return new BlurFilter(blurX, blurY, quality);
+		}
 	}
 }
