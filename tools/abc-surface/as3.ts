@@ -269,7 +269,12 @@ function classSource(
       if (m) {
         // A blank line after each function; fields stay together.
         const last = lines.at(-1);
-        if (last !== undefined && last !== "" && !/\bfunction\b/.test(last) && /\bfunction\b/.test(m)) {
+        if (
+          last !== undefined &&
+          last !== "" &&
+          !/\bfunction\b/.test(last) &&
+          /\bfunction\b/.test(m)
+        ) {
           lines.push("");
         }
 

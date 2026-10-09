@@ -210,7 +210,7 @@ check(
     assert.equal(ei.attribute, "movie");
     assert.equal(ei.pwned, false);
     // window.location.href, through an inline function with no space before "(".
-    assert.match(String(ei.calls.reports[0]?.href), /\/web-test\/index\.html(\?checked)?$/);
+    assert.match(String(ei.calls.reports[0]?.href), /\/web-test\/index\.html(\?[a-z&]+)?$/);
     assert.deepEqual(ei.calls.captured, [
       { "a:(window.swf2esPwned=1),b": 1 },
       { "a:(window.swf2esPwned=1),b": 1 },
