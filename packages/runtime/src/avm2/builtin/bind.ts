@@ -202,16 +202,17 @@ export function bindNatives<C extends ClassDecl, K extends NativeClass<C>>(
 ): BuiltinClass {
   const cls = className(decl);
   const out: Natives = {};
-  let made: Holder | null = null;
-  let runtime: Runtime | null = null;
-  // Made once per runtime, each when first bound: the natives close over it.
+  // Made once per runtime, when first bound: the natives close over it.
+  // Weakly, so that a runtime let go of is collected with its natives.
+  const made = new WeakMap<Runtime, Holder>();
   const of = (rt: Runtime) => {
-    if (runtime !== rt) {
-      made = natives(rt) as unknown as Holder;
-      runtime = rt;
+    let holder = made.get(rt);
+    if (!holder) {
+      holder = natives(rt) as unknown as Holder;
+      made.set(rt, holder);
     }
 
-    return made as Holder;
+    return holder;
   };
 
   for (const { key, static: isStatic, member, decl: d } of nativeMembers(decl)) {
