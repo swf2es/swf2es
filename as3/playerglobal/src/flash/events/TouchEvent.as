@@ -176,12 +176,13 @@ package flash.events
 
 		public function get stageX():Number
 		{
-			return getStageX();
+			// Without a whole local point there is no stage point, as Flash's shows.
+			return isNaN(localX) || isNaN(localY) ? NaN : getStageX();
 		}
 
 		public function get stageY():Number
 		{
-			return getStageY();
+			return isNaN(localX) || isNaN(localY) ? NaN : getStageY();
 		}
 
 		public native function updateAfterEvent():void;
