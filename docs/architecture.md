@@ -1974,6 +1974,9 @@ it gets its outs, one that comes under it its overs, with no
 came, the root's too, as Flash sends them. Flash notices an object moved
 in under the mouse a frame later than one moved out (its pick seems to
 go by where the last render drew it); the player notices both at once.
+Nor does Flash notice a text field that shrinks out from under a still
+mouse until the mouse next moves; the player sends its outs at the
+frame's end, as for any other object.
 The pick runs only when something a pick reads changed since the last
 (`pickWork`: whatever invalidates an object, and `mouseEnabled`,
 `mouseChildren`, a `hitArea` or a button's `enabled`), so a still scene
@@ -2002,7 +2005,9 @@ false. The main SWF's root is never the target, as Flash Player 32
 traced it (the `MouseGaps` probe of the same test file): its own art, a
 hit passed up to it, and all of it with its `mouseChildren` false go to
 the stage, while it stays over as an ancestor; a sprite a script puts on
-the stage beside it takes its hits as any other. What a
+the stage beside it takes its hits as any other; a loaded SWF's root a
+script puts on the stage itself is taken for the main root, which no
+probe has measured. What a
 mask, a scroll rect or a timeline's mask layer hides takes no pointer
 (`mouse_pick_masking`): a list scrolled under a mask layer is clicked
 only where it shows. `hitTestPoint` asks no mask layer above the object
@@ -2038,7 +2043,8 @@ scroll under it; Adobe documents the delta as the lines a notch
 scrolls, 3 by Windows' default, as Ruffle's own tests send it. The host makes a browser's notch 3 lines, whether it gives 3 lines
 or about 100 pixels (fewer on a zoomed page or a scaled screen, a
 multiple for notches run together), and adds a touchpad's pixels up, 100
-to 3 lines, sending nothing for a part of one. It keeps the page from
+to 3 lines, sending nothing for a part of one. That is untried on
+macOS, whose wheels and touchpads give pixels of their own measure. It keeps the page from
 scrolling only where the SWF takes the wheel: a `mouseWheel` listener on
 the target or an ancestor, or a field that can scroll; elsewhere the page
 has it. With Ctrl, as a touchpad's pinch comes too, the page zooms and the
