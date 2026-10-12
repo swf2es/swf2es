@@ -3037,7 +3037,7 @@ test("a child taken off gives its Graphics, emptied, to the next shape placed", 
   });
 });
 
-test("the wheel reaches the player in Flash's lines, and keeps the page from scrolling only where the SWF takes it", () => {
+test("the wheel reaches the player in Flash's lines, keeps the page from scrolling only where the SWF takes it, and leaves Ctrl's zoom to the page", () => {
   const listeners = new Map<string, (e: unknown) => void>();
   const canvas = {
     style: { cursor: "" },
@@ -3094,7 +3094,8 @@ test("the wheel reaches the player in Flash's lines, and keeps the page from scr
     turn(10);
   }
 
-  // Where the SWF does not take it, or with Ctrl, the page scrolls or zooms.
+  // Where the SWF does not take it the page scrolls; with Ctrl, a pinch too, the page zooms
+  // and the SWF hears nothing.
   taken = false;
   assert.equal(turn(100), false);
   taken = true;
@@ -3111,7 +3112,6 @@ test("the wheel reaches the player in Flash's lines, and keeps the page from scr
     "10 0",
     "10 0",
     "10 -1",
-    "10 -3",
     "10 -3",
   ]);
 });

@@ -2040,8 +2040,9 @@ or about 100 pixels (fewer on a zoomed page or a scaled screen, a
 multiple for notches run together), and adds a touchpad's pixels up, 100
 to 3 lines, sending nothing for a part of one. It keeps the page from
 scrolling only where the SWF takes the wheel: a `mouseWheel` listener on
-the target or an ancestor, or a field that can scroll; elsewhere, and
-with Ctrl, which zooms, the page has it. Right and middle buttons, and
+the target or an ancestor, or a field that can scroll; elsewhere the page
+has it. With Ctrl, as a touchpad's pinch comes too, the page zooms and the
+SWF hears nothing. Right and middle buttons, and
 Flash's drag and focus rules, still need their own cases.
 
 ### Touch

@@ -580,11 +580,12 @@ export class PixiView {
     // fewer where the page is zoomed or the screen scaled, and several at
     // once as their multiple; a touchpad's few pixels at a time add up, 100
     // to 3 lines. The page scrolls unless the SWF takes the wheel where the
-    // pointer is, and zooms with Ctrl as ever. Pixi listens passively.
+    // pointer is. With Ctrl, as a touchpad's pinch comes too, the page zooms
+    // and the SWF hears nothing. Pixi listens passively.
     let lines = 0;
     const wheel = (e: WheelEvent) => {
       const pointer = player.pointer;
-      if (!pointer || e.deltaY === 0) {
+      if (!pointer || e.deltaY === 0 || e.ctrlKey) {
         return;
       }
 
@@ -606,11 +607,10 @@ export class PixiView {
         y,
         buttons: e.buttons,
         altKey: e.altKey,
-        ctrlKey: e.ctrlKey,
         shiftKey: e.shiftKey,
         time: e.timeStamp,
       };
-      if (pointer.wheel(p, delta) && !e.ctrlKey) {
+      if (pointer.wheel(p, delta)) {
         e.preventDefault();
       }
     };
