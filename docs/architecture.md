@@ -1965,6 +1965,21 @@ object; the player counts a press on the last one's target within half a
 second and two pixels of it, Ruffle's rule, as the browser's own would.
 Ruffle sends
 `mouseMove` first too, and no `mouseLeave`.
+A mouse that stands still is picked for again at each frame's end, after
+its `exitFrame` and before its `render`, as Flash Player 32 does: an
+object a script moves, hides, disables or takes off the list from under
+it gets its outs, one that comes under it its overs, with no
+`mouseMove`, and the cursor follows. One taken off the list hears no
+`mouseOut`, only the `rollOut`s of the ancestors it had when the hover
+came, the root's too, as Flash sends them. Flash notices an object moved
+in under the mouse a frame later than one moved out (its pick seems to
+go by where the last render drew it); the player notices both at once.
+The pick runs only when something a pick reads changed since the last
+(`pickWork`: whatever invalidates an object, and `mouseEnabled`,
+`mouseChildren`, a `hitArea` or a button's `enabled`), so a still scene
+costs nothing, and a busy one a pick a frame, what one mouse move costs:
+`tests/player/bench.ts --scripted 400 --still --hover`, 4,800 moving
+clips, ticks in 0.9 ms against 0.6 ms with no mouse over the stage.
 `DisplayObject.mouseX` and `mouseY` follow the last pointer position.
 The pick follows Flash's order, as Ruffle's `mouse_pick_avm2` has it:
 interactive children before artwork, and a hit on what takes no pointer

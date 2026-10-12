@@ -6,6 +6,7 @@ import {
   ButtonObject,
   Container,
   type DisplayObject,
+  pickWork,
   ShapeObject,
   StaticTextObject,
   TextObject,
@@ -71,6 +72,7 @@ const hitAreas = new WeakMap<DisplayObject, DisplayObject>();
 
 /** Sprite.hitArea: `area` picks for `sprite` in place of its own drawing. */
 export function setHitArea(sprite: DisplayObject, area: DisplayObject | null): void {
+  pickWork.changes++;
   if (area) {
     hitAreas.set(sprite, area);
   } else {
@@ -251,6 +253,12 @@ export class PointerInput {
    */
   redraws = 0;
   private hover: DisplayObject | null = null;
+  /** The hover and its ancestors as they were when it came over them, nearest first: those its roll outs go to. */
+  private hoverChain: DisplayObject[] = [];
+  /** The pointer's last state over the player; null before it came, or once it left. */
+  private last: PointerState | null = null;
+  /** pickWork's count when the hover was last picked. */
+  private picked = -1;
   /** Whether the left button is down after a press here. */
   private held = false;
   /** Whether the pointer has left the player, and not come back to it since. */
@@ -441,7 +449,9 @@ export class PointerInput {
     this.handled++;
     s.mouseStageX = p.x;
     s.mouseStageY = p.y;
+    this.last = p;
     this.updateDrag();
+    this.picked = pickWork.changes;
     const found = pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
     // Outside the stage while the button is down, the mouse is still the stage's.
     const target = found ?? (this.held && this.stage.object ? this.stage : null);
@@ -498,6 +508,37 @@ export class PointerInput {
     return this.held;
   }
 
+  /**
+   * At a frame's end, after its EXIT_FRAME and before its RENDER, as Flash
+   * Player 32 does: what is under a pointer that has not moved, picked
+   * again if the display list or a pick's field changed since the last
+   * pick, and the hover moved to it with no mouseMove. An object that
+   * moves out from under the mouse or is hidden so gets its outs, one
+   * that comes under it its overs, and the cursor follows. Flash notices
+   * one moved in under the mouse a frame later than one moved out, which
+   * the player does not copy.
+   */
+  frameEnded(): void {
+    const p = this.last;
+    if (p && !this.gone && this.picked !== pickWork.changes) {
+      const s = this.scripting;
+      this.picked = pickWork.changes;
+      const found = pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
+      const target = found ?? (this.held && this.stage.object ? this.stage : null);
+      const over = target === this.stage ? null : target;
+      if (over !== this.hover) {
+        this.handled++;
+        if (buttonLike(over) || buttonLike(this.hover)) {
+          this.redraws++;
+        }
+
+        this.hoverTo(over, p, this.held);
+      }
+    }
+
+    this.updateCursor();
+  }
+
   /** Move the hover to `target`: out and roll outs from what it was over, roll overs and over on what it is. */
   private hoverTo(target: DisplayObject | null, p: PointerState, down: boolean): void {
     const previous = this.hover;
@@ -510,11 +551,16 @@ export class PointerInput {
       entered.add(d);
     }
 
+    // Left as they were when the hover came: one a script took off the
+    // list rolls out of the ancestors it had, as in Flash.
+    const left = this.hoverChain;
     let common: DisplayObject | null = this.stage;
-    if (previous && target) {
-      for (let d: DisplayObject | null = previous; d; d = d.parent) {
-        if (entered.has(d)) {
-          common = d;
+    let leaving = left.length;
+    if (target) {
+      for (let i = 0; i < left.length; i++) {
+        if (entered.has(left[i])) {
+          common = left[i];
+          leaving = i;
           break;
         }
       }
@@ -526,9 +572,15 @@ export class PointerInput {
     const held = down && this.pressed;
     if (previous) {
       buttonState(previous, previous === held ? "over" : "up", previous !== held);
-      this.send("mouseOut", previous, p, down, true, target);
-      for (let d: DisplayObject | null = previous; d && d !== common; d = d.parent) {
-        this.send("rollOut", d, p, down, false, target);
+      // Off the stage, it hears no mouseOut, only its roll outs.
+      if (this.stage.encloses(previous)) {
+        this.send("mouseOut", previous, p, down, true, target);
+      }
+
+      for (let i = 0; i < leaving; i++) {
+        if (left[i] !== this.stage) {
+          this.send("rollOut", left[i], p, down, false, target);
+        }
       }
     }
 
@@ -547,6 +599,12 @@ export class PointerInput {
     }
 
     this.hover = target;
+    const chain: DisplayObject[] = [];
+    for (let d = target; d; d = d.parent) {
+      chain.push(d);
+    }
+
+    this.hoverChain = chain;
   }
 
   /**
@@ -561,6 +619,7 @@ export class PointerInput {
     }
 
     this.gone = true;
+    this.last = null;
     this.hoverTo(null, { ...p, x: -1, y: -1 }, false);
     const stage = this.stage.object;
     if (stage && heard(stage, "mouseLeave")) {

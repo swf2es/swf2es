@@ -1249,3 +1249,108 @@ test("a double click on an object whose doubleClickEnabled is true sends doubleC
   cmd("set", "b", "x", 0);
   assert.deepEqual(click(10, 10).at(-1), "click b null false 10,10 @10,10");
 });
+
+test("a frame's end moves the hover under a mouse that stands still, and the cursor with it", {
+  skip,
+}, async () => {
+  const { input, cmd, frame, pointer } = await gaps();
+  input("move", 10, 10);
+
+  // What Flash Player 32 traced, the changes made between frames: after
+  // the next frame's EXIT_FRAME, before its RENDER, outs and overs as a
+  // move's, with no mouseMove. (Flash notices an object moved in under
+  // the mouse a frame later than one moved out; the player, at once.)
+  assert.deepEqual(cmd("set", "a", "x", 300), []);
+  assert.deepEqual(frame(), [
+    "mouseOut a null false -290,10 @10,10",
+    "rollOut a null false -290,10 @10,10",
+    "rollOut root null false 10,10 @10,10",
+  ]);
+  cmd("set", "a", "x", 0);
+  assert.deepEqual(frame(), [
+    "rollOver a null false 10,10 @10,10",
+    "rollOver root null false 10,10 @10,10",
+    "mouseOver a null false 10,10 @10,10",
+  ]);
+  cmd("set", "b", "x", 0);
+  assert.deepEqual(frame(), [
+    "mouseOut a b false 10,10 @10,10",
+    "rollOut a b false 10,10 @10,10",
+    "rollOver b a false 10,10 @10,10",
+    "mouseOver b a false 10,10 @10,10",
+  ]);
+  cmd("set", "b", "x", 100);
+  frame();
+  // Nothing changed, nothing sent.
+  assert.deepEqual(frame(), []);
+
+  // One taken off the list hears no mouseOut, only roll outs of the
+  // ancestors it had, the root's too; put back, it is over again.
+  input("move", 30, 30);
+  cmd("remove", "a");
+  assert.deepEqual(frame(), [
+    "rollOut a1 null false 10,10 @30,30",
+    "rollOut a null false 30,30 @30,30",
+    "rollOut root null false 30,30 @30,30",
+  ]);
+  cmd("add", "a");
+  assert.deepEqual(frame(), [
+    "rollOver a1 null false 10,10 @30,30",
+    "rollOver a null false 30,30 @30,30",
+    "rollOver root null false 30,30 @30,30",
+    "mouseOver a1 null false 10,10 @30,30",
+  ]);
+  cmd("remove", "a1");
+  assert.deepEqual(frame(), [
+    "rollOut a1 a false 10,10 @30,30",
+    "mouseOver a a1 false 30,30 @30,30",
+  ]);
+  cmd("add", "a1", "a");
+  frame();
+
+  // Hidden, it is out as by a move; so is one whose mouseEnabled turns false.
+  cmd("set", "a", "visible", false);
+  assert.deepEqual(frame(), [
+    "mouseOut a1 null false 10,10 @30,30",
+    "rollOut a1 null false 10,10 @30,30",
+    "rollOut a null false 30,30 @30,30",
+    "rollOut root null false 30,30 @30,30",
+  ]);
+  cmd("set", "a", "visible", true);
+  frame();
+  cmd("set", "a1", "mouseEnabled", false);
+  assert.deepEqual(frame(), [
+    "mouseOut a1 a false 10,10 @30,30",
+    "rollOut a1 a false 10,10 @30,30",
+    "mouseOver a a1 false 30,30 @30,30",
+  ]);
+  cmd("set", "a1", "mouseEnabled", true);
+  frame();
+
+  // With the button held too, the events saying so; the button on top again, over a put back.
+  cmd("add", "btn");
+  frame();
+  input("down", 30, 30);
+  cmd("set", "btn", "x", 0);
+  assert.deepEqual(frame(), [
+    "mouseOut a1 btn true 10,10 @30,30",
+    "rollOut a1 btn true 10,10 @30,30",
+    "rollOut a btn true 30,30 @30,30",
+    "rollOver btn a1 true 30,30 @30,30",
+    "mouseOver btn a1 true 30,30 @30,30",
+  ]);
+  cmd("set", "btn", "x", 200);
+  frame();
+  input("up", 30, 30);
+
+  // A sprite in buttonMode that comes under the mouse shows the hand.
+  input("move", 350, 50);
+  const cursors: string[] = [];
+  pointer.onCursor = (cursor) => cursors.push(cursor);
+  cmd("set", "b", "buttonMode", true);
+  cmd("set", "b", "x", 300);
+  frame();
+  cmd("set", "b", "x", 100);
+  frame();
+  assert.deepEqual(cursors, ["pointer", "default"]);
+});

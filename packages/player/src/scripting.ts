@@ -1013,6 +1013,8 @@ export class Scripting {
     }
 
     this.loads.deliverAvm1Loads();
+    // What is under a mouse that stands still, as the frame left the list.
+    this.pointer?.frameEnded();
     this.render();
   }
 

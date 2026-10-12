@@ -61,6 +61,16 @@ export const PIXELS = 8;
  */
 export const scriptWork = { changes: 0 };
 
+/**
+ * A count that moves whenever something changes that may change what is
+ * under a pointer that stands still: any change a renderer would sync
+ * (DisplayObject.invalidate), and the pick's own fields, mouseEnabled,
+ * mouseChildren, a hitArea, a button's enabled. While it stands still,
+ * the pointer has no need to pick again at a frame's end. One for every
+ * player: another's moving it costs a pick, never an event.
+ */
+export const pickWork = { changes: 0 };
+
 /** DisplayObject.kind's. */
 export const OTHER = 0;
 export const CLIP = 1;
@@ -277,6 +287,7 @@ export class DisplayObject {
   /** Mark a change, and that its ancestors have a changed descendant. */
   invalidate(what: number): void {
     this.dirty |= what;
+    pickWork.changes++;
     for (let p = this.parent; p && !p.descendantsDirty; p = p.parent) {
       p.descendantsDirty = true;
     }
