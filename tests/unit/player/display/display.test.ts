@@ -783,10 +783,12 @@ test("every change a round of frame scripts reads moves scriptWork, and a script
   assert.ok(!moves(() => (button.firstScripts = false)), "first scripts still walked");
 });
 
-test("the walks' kept lists follow every clip and container that comes, goes or moves", () => {
+test("the walks' kept lists follow every clip, container and button that comes, goes or moves", () => {
   // Kept on each container (walkList), a list must be what walking the
   // tree gives, whatever changed below it since: checked after each of a
-  // run of moves, among subtrees long enough to keep lists of their own.
+  // run of moves, among subtrees long enough to keep lists of their own,
+  // and buttons whose states, clips in holders among them, change, are
+  // swapped and shown, or hold the button itself.
   const tags: Uint8Array[] = [
     w.sprite(3, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
   ];
@@ -796,6 +798,7 @@ test("the walks' kept lists follow every clip and container that comes, goes or 
 
   const { root, stage } = movie(tags);
   const clips = root.children.slice() as MovieClip[];
+  // What a walk visits: clips and buttons, a button as a leaf (walkList's items).
   const walked = (o: DisplayObject, out: DisplayObject[]) => {
     if (o.kind !== 0) {
       out.push(o);
@@ -813,6 +816,63 @@ test("the walks' kept lists follow every clip and container that comes, goes or 
 
     return out;
   };
+  // The clips a tick advances, through buttons' states too, walked; and as the kept lists give them.
+  const advanced = (o: DisplayObject, out: DisplayObject[]) => {
+    if (o.kind === 1) {
+      out.push(o);
+    }
+
+    const children = o.kind === 2 ? (o as ButtonObject).playingStates() : o.frameChildren;
+    for (const child of children) {
+      advanced(child, out);
+    }
+
+    return out;
+  };
+  const listed = (o: DisplayObject, out: DisplayObject[]) => {
+    if (o instanceof Container && o.kind !== 2) {
+      for (const item of walkList(o).items) {
+        if (item.kind === 2) {
+          listed(item, out);
+        } else {
+          out.push(item);
+        }
+      }
+
+      return out;
+    }
+
+    if (o.kind === 1) {
+      out.push(o);
+    }
+
+    const children = o.kind === 2 ? (o as ButtonObject).playingStates() : o.frameChildren;
+    for (const child of children) {
+      listed(child, out);
+    }
+
+    return out;
+  };
+  const same = (a: DisplayObject[], b: DisplayObject[], what: string) => {
+    assert.equal(a.length, b.length, what);
+    assert.ok(
+      a.every((o, i) => o === b[i]),
+      what,
+    );
+  };
+  // Ends leave a clip out with all it holds.
+  const checkEnds = (top: Container, what: string) => {
+    const { items, ends } = walkList(top);
+    for (let i = 0; i < items.length; i++) {
+      for (let k = i + 1; k < ends[i]; k++) {
+        assert.ok(items[i].encloses(items[k]), what);
+      }
+
+      if (ends[i] < items.length) {
+        assert.ok(!items[i].encloses(items[ends[i]]), what);
+      }
+    }
+  };
   // A 32-bit LCG, so that the run is the same every time.
   let seed = 11;
   const random = (n: number) => {
@@ -820,9 +880,12 @@ test("the walks' kept lists follow every clip and container that comes, goes or 
     return (seed >>> 8) % n;
   };
   const containers: Container[] = [root];
-  for (let step = 0; step < 400; step++) {
+  const buttons: ButtonObject[] = [];
+  const states = ["up", "over", "down", "hitTest"] as const;
+  let cycles = 0;
+  for (let step = 0; step < 600; step++) {
     const into = [...containers, ...clips][random(containers.length + clips.length)];
-    const what = random(5);
+    const what = random(8);
     const clip = clips[random(clips.length)];
     if (what === 0) {
       const sprite = new Container();
@@ -843,32 +906,75 @@ test("the walks' kept lists follow every clip and container that comes, goes or 
       }
 
       into.placeAtDepth(placed, 1000 + random(5));
+    } else if (what === 5) {
+      const button = new ButtonObject();
+      buttons.push(button);
+      into.addChildAt(button, random(into.children.length + 1));
+    } else if (what === 6 && buttons.length > 0) {
+      // A state set as SimpleButton's setter sets it: a holder of a free clip, or any container,
+      // one that holds the button too, which stays where it is.
+      const button = buttons[random(buttons.length)];
+      let state: Container;
+      if (random(2) === 0) {
+        state = new Container();
+        containers.push(state);
+        if (!clip.parent && !clip.encloses(state)) {
+          state.addChildAt(clip, 0);
+        }
+      } else {
+        state = containers[random(containers.length)];
+      }
+
+      if (state.encloses(button)) {
+        cycles++;
+      } else if (state.parent && state.parent !== button) {
+        state.parent.removeChild(state);
+      }
+
+      const which = states[random(4)];
+      if (which === "up") {
+        button.upState = state;
+      } else if (which === "over") {
+        button.overState = state;
+      } else if (which === "down") {
+        button.downState = state;
+      } else {
+        button.hitTestState = state;
+      }
+
+      button.show();
+    } else if (what === 7 && buttons.length > 0) {
+      buttons[random(buttons.length)].setState((["up", "over", "down"] as const)[random(3)]);
     }
 
     // Every few steps the stage's list, and a container's own, as a frame's walk asks for them.
     if (step % 3 === 0) {
       const some = containers[random(containers.length)];
       for (const top of [stage as Container, some]) {
-        const kept = walkList(top).items;
-        const now = walked(top, []);
-        assert.equal(kept.length, now.length, `step ${step}`);
-        assert.ok(
-          kept.every((o, i) => o === now[i]),
-          `step ${step}`,
-        );
+        same(walkList(top).items, walked(top, []), `step ${step}`);
+        same(listed(top, []), advanced(top, []), `step ${step}, through buttons`);
+        checkEnds(top, `step ${step}, ends`);
       }
     }
   }
 
-  // Ends leave a clip out with all it holds.
-  const { items, ends } = walkList(stage as Container);
-  for (let i = 0; i < items.length; i++) {
-    for (let k = i + 1; k < ends[i]; k++) {
-      assert.ok(items[i].encloses(items[k]));
-    }
+  // The run made buttons whose states held them.
+  assert.ok(cycles > 0);
 
-    if (ends[i] < items.length) {
-      assert.ok(!items[i].encloses(items[ends[i]]));
-    }
-  }
+  // A state off the list that the button is then put in, which no setter refused: the walks
+  // leave it out of the button's states rather than going round it.
+  const button = new ButtonObject();
+  const holder = new Container();
+  holder.addChildAt(new Container(), 0);
+  (holder.children[0] as Container).addChildAt(clips[0].parent ? new Container() : clips[0], 0);
+  button.overState = holder;
+  root.addChildAt(button, 0);
+  root.removeChild(button);
+  holder.addChildAt(button, 1);
+  root.addChildAt(holder, 0);
+  same(
+    listed(stage as Container, []),
+    advanced(stage as Container, []),
+    "a state round the button",
+  );
 });
