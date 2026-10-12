@@ -77,6 +77,20 @@
 // --toggle-branches N removes and reattaches those N branches every --toggle-every K frames.
 // --nested-groups also renders nested Pixi groups while they leave and return.
 //
+// --town N plays instead a busy town: N characters, each of its own parts
+// (outlined in hairlines, as a game's are), on loops of different lengths:
+// every eighth one's body breathing, a uniform pulse of a few percent, limbs that turn
+// and swing, one that turns about (squashed across, then mirrored), a hand
+// whose timeline swaps its shape on every frame, and a glowing weapon; half
+// of them mirrored, all of them clips of a class with frame scripts. Among
+// them scenery: N clips of eight clips of two shapes, every fourth glowing,
+// every fifth pulsing. What a crowded town's characters cost: new lines for
+// new stretches, filters, render group rebuilds and the frame's walks.
+//
+// --cpu-profile FILE samples the frames after the warm-up in Chrome's
+// profiler and writes the profile there (DevTools' Performance panel opens
+// it); the bench prints the functions that took the most time themselves.
+//
 // Each run also gives per-frame means of what the renderer did: GL draw
 // calls, Pixi's unbatched Graphics and batches, render group rebuilds and
 // their time, contexts tessellated with their vertices and time, buffer
@@ -88,14 +102,14 @@
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--glide]
 //     | --pulse N [--loop K] [--line W]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
+//     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
 //     [--min-run N] [--pace MS]
-//     [--json] [--write-swf FILE]
+//     [--json] [--write-swf FILE] [--cpu-profile FILE]
 //
 // --write-swf FILE writes the SWF the options make and stops, for another
 // browser or player to play.
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 import { libraryAbcs } from "./libraries.ts";
@@ -118,6 +132,10 @@ const toggle = option("toggle", 0);
 const masks = option("masks", 0);
 const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
+const town = option("town", 0);
+const cpuProfile = args.includes("--cpu-profile")
+  ? args[args.indexOf("--cpu-profile") + 1]
+  : undefined;
 const pace = option("pace", 0);
 const profile = args.includes("--profile") ? args[args.indexOf("--profile") + 1] : undefined;
 const toggleStatic = option("toggle-static", 0);
@@ -701,6 +719,213 @@ function scriptedSwf(count: number, still: boolean): Uint8Array {
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: still ? 2 : 1, tags });
 }
 
+/** The town's classes: the root, and each character's, whose frame scripts count its loops. */
+const TOWN_SOURCE = `package {
+  import flash.display.MovieClip;
+
+  public class Main extends MovieClip {
+    public var loops:int = 0;
+  }
+
+  public class Character extends MovieClip {
+    private var turns:int = 0;
+
+    public function Character() {
+      addFrameScript(0, first, totalFrames - 1, last);
+    }
+
+    private function first():void {
+      turns++;
+    }
+
+    private function last():void {
+      Main(root).loops++;
+    }
+  }
+}
+`;
+
+/**
+ * The town (--town): `count` characters of their own parts, on loops of
+ * different lengths, half of them mirrored, and scenery among them.
+ */
+function townSwf(count: number): Uint8Array {
+  const abc = compiler()("BenchTown", TOWN_SOURCE);
+  libraryAbcs();
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xd0e0c0)];
+  const PARTS = 12;
+  const symbols: [number, string][] = [[0, "Main"]];
+  // Scenery's shapes, shared by all its clips.
+  for (let id = 1; id <= 8; id++) {
+    tags.push(character(id));
+  }
+
+  let next = 1000;
+  const characters: number[] = [];
+  for (let c = 0; c < count; c++) {
+    // Its own parts, each a clip of one frame holding a shape outlined in a hairline.
+    const parts: number[] = [];
+    for (let k = 0; k < PARTS; k++) {
+      const shape = next++;
+      const inner = next++;
+      const clip = next++;
+      tags.push(
+        curvedPart(shape, 1, 120 + ((c * 37 + k * 53) % 200)),
+        w.sprite(inner, 1, [w.place({ depth: 1, character: shape }), w.showFrame(), w.end()]),
+        w.sprite(clip, 1, [w.place({ depth: 1, character: inner }), w.showFrame(), w.end()]),
+      );
+      parts.push(clip);
+    }
+
+    // A hand drawn frame by frame: four shapes, one swapped for the next on each frame.
+    const hands: number[] = [];
+    for (let k = 0; k < 4; k++) {
+      hands.push(next);
+      tags.push(curvedPart(next++, 1, 80 + 40 * k));
+    }
+
+    const hand = next++;
+    const handFrames: Uint8Array[] = [];
+    for (let f = 0; f < 4; f++) {
+      handFrames.push(
+        f === 0
+          ? w.place({ depth: 1, character: hands[0] })
+          : w.place({ depth: 1, move: true, character: hands[f] }),
+        w.showFrame(),
+      );
+    }
+
+    tags.push(w.sprite(hand, 4, [...handFrames, w.end()]));
+    // The body: its parts turning and swinging on a loop of its own length.
+    const loop = 36 + (c % 7) * 4;
+    const body = next++;
+    const frames: Uint8Array[] = [];
+    for (let f = 0; f < loop; f++) {
+      const t = (2 * Math.PI * f) / loop;
+      for (let k = 0; k <= PARTS + 1; k++) {
+        const swing = 0.35 * Math.sin(t + k);
+        // Two parts pulse a few percent, one turns about, the rest only turn.
+        const pulse = k === 2 || k === 5 ? 1 + 0.04 * Math.sin(2 * t + k) : 1;
+        const across = k === 7 ? Math.cos(t) : 1;
+        const sx = Math.sign(across || 1) * Math.max(0.05, Math.abs(across)) * pulse;
+        const matrix = {
+          a: sx * Math.cos(swing),
+          b: sx * Math.sin(swing),
+          c: -pulse * Math.sin(swing),
+          d: pulse * Math.cos(swing),
+          tx: Math.round(300 * Math.cos(k * 0.9)),
+          ty: Math.round(450 * Math.sin(k * 1.3)),
+        };
+        const id = k < PARTS ? parts[k] : k === PARTS ? hand : parts[0];
+        // The last a weapon, glowing.
+        const glows = k === PARTS + 1 ? [{ color: 0x60c0ff, blur: 6, strength: 1.5 }] : undefined;
+        frames.push(
+          f === 0
+            ? w.place({ depth: k + 1, character: id, matrix, glows })
+            : w.place({ depth: k + 1, move: true, matrix }),
+        );
+      }
+
+      frames.push(w.showFrame());
+    }
+
+    tags.push(w.sprite(body, loop, [...frames, w.end()]));
+    // The character, a clip of the class Character: every eighth one's body breathing, its chest
+    // rising a little.
+    const figure = next++;
+    const breaths: Uint8Array[] = [];
+    for (let f = 0; f < loop; f++) {
+      const s = c % 8 ? 1 : 1 + 0.01 * Math.sin((4 * Math.PI * f) / loop);
+      breaths.push(
+        f === 0
+          ? w.place({ depth: 1, character: body, matrix: { a: 1, d: s } })
+          : w.place({ depth: 1, move: true, matrix: { a: 1, d: s } }),
+        w.showFrame(),
+      );
+    }
+
+    tags.push(w.sprite(figure, loop, [...breaths, w.end()]));
+    symbols.push([figure, "Character"]);
+    characters.push(figure);
+  }
+
+  // Scenery: clips of eight clips of two shapes, every fourth glowing, every fifth pulsing.
+  const sceneryCount = count;
+  const piece = next++;
+  tags.push(
+    w.sprite(piece, 1, [
+      w.place({ depth: 1, character: 1, matrix: { a: 0.3, d: 0.3 } }),
+      w.place({ depth: 2, character: 2, matrix: { a: 0.2, d: 0.2, tx: 100 } }),
+      w.showFrame(),
+      w.end(),
+    ]),
+  );
+  const scenery = next++;
+  const pieces: Uint8Array[] = [];
+  for (let k = 0; k < 8; k++) {
+    pieces.push(
+      w.place({
+        depth: k + 1,
+        character: piece,
+        matrix: { tx: (k % 4) * 300, ty: Math.floor(k / 4) * 300 },
+      }),
+    );
+  }
+
+  tags.push(w.sprite(scenery, 1, [...pieces, w.showFrame(), w.end()]));
+  const pulsing = next++;
+  const pulses: Uint8Array[] = [];
+  for (let f = 0; f < 24; f++) {
+    const s = 1 + 0.1 * Math.sin((2 * Math.PI * f) / 24);
+    pulses.push(
+      f === 0
+        ? w.place({ depth: 1, character: scenery, matrix: { a: s, d: s } })
+        : w.place({ depth: 1, move: true, matrix: { a: s, d: s } }),
+      w.showFrame(),
+    );
+  }
+
+  tags.push(
+    w.sprite(pulsing, 24, [...pulses, w.end()]),
+    w.doAbc(abc, "BenchTown"),
+    w.symbolClass(symbols),
+  );
+  let depth = 1;
+  for (let i = 0; i < sceneryCount; i++) {
+    tags.push(
+      w.place({
+        depth: depth++,
+        character: i % 5 === 0 ? pulsing : scenery,
+        matrix: {
+          tx: Math.round(((i * 97) % WIDTH) * TWIPS),
+          ty: Math.round(((i * 61) % HEIGHT) * TWIPS),
+        },
+        glows: i % 4 === 0 ? [{ color: 0xfff080, blur: 4, strength: 1 }] : undefined,
+      }),
+    );
+  }
+
+  const columns = Math.ceil(Math.sqrt(count * 1.5));
+  for (let c = 0; c < count; c++) {
+    const flip = c % 2 ? -1 : 1;
+    tags.push(
+      w.place({
+        depth: depth++,
+        character: characters[c],
+        matrix: {
+          a: 0.12 * flip,
+          d: 0.12,
+          tx: Math.round(((c % columns) + 0.5) * (WIDTH / columns) * TWIPS),
+          ty: Math.round((Math.floor(c / columns) + 0.6) * ((HEIGHT * 1.5) / columns) * TWIPS),
+        },
+      }),
+    );
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
 /** 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st... */
 const ordinal = (n: number) => {
   const tens = Math.floor(n / 10) % 10;
@@ -760,29 +985,31 @@ function branchSwf(count: number): Uint8Array {
 }
 
 const swf =
-  toggleBranches > 0
-    ? branchSwf(toggleBranches)
-    : toggle > 0
-      ? toggleSwf(toggle)
-      : toggleStatic > 0
-        ? toggleStaticSwf(toggleStatic)
-        : scripted > 0
-          ? scriptedSwf(scripted, args.includes("--still"))
-          : pulse > 0
-            ? pulseSwf(pulse, option("loop", 96), option("line", 1))
-            : masks > 0
-              ? masksSwf(masks, args.includes("--unmasked"))
-              : branches > 0
-                ? branchSwf(branches)
-                : rig > 0
-                  ? rigSwf(
-                      rig,
-                      args.includes("--swap"),
-                      args.includes("--fresh"),
-                      args.includes("--blurred") || filtered > 0,
-                      args.includes("--glide"),
-                    )
-                  : synthetic();
+  town > 0
+    ? townSwf(town)
+    : toggleBranches > 0
+      ? branchSwf(toggleBranches)
+      : toggle > 0
+        ? toggleSwf(toggle)
+        : toggleStatic > 0
+          ? toggleStaticSwf(toggleStatic)
+          : scripted > 0
+            ? scriptedSwf(scripted, args.includes("--still"))
+            : pulse > 0
+              ? pulseSwf(pulse, option("loop", 96), option("line", 1))
+              : masks > 0
+                ? masksSwf(masks, args.includes("--unmasked"))
+                : branches > 0
+                  ? branchSwf(branches)
+                  : rig > 0
+                    ? rigSwf(
+                        rig,
+                        args.includes("--swap"),
+                        args.includes("--fresh"),
+                        args.includes("--blurred") || filtered > 0,
+                        args.includes("--glide"),
+                      )
+                    : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -803,6 +1030,7 @@ const result = await benchPlayer(
   args.includes("--min-run") ? option("min-run", 1) : undefined,
   profile,
   pace,
+  cpuProfile,
 );
 if (result.error) {
   console.error(result.error);
@@ -831,23 +1059,25 @@ const total = tick.map((t, i) => t + sync[i] + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
   shapes:
-    toggleBranches > 0
-      ? `toggle of ${toggleBranches} branches`
-      : toggle > 0
-        ? `toggle of ${toggle}`
-        : toggleStatic > 0
-          ? `static toggle of ${toggleStatic}`
-          : scripted > 0
-            ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
-            : pulse > 0
-              ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
-              : masks > 0
-                ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                : branches > 0
-                  ? `${branches} branches`
-                  : rig > 0
-                    ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
-                    : shapes,
+    town > 0
+      ? `town of ${town}`
+      : toggleBranches > 0
+        ? `toggle of ${toggleBranches} branches`
+        : toggle > 0
+          ? `toggle of ${toggle}`
+          : toggleStatic > 0
+            ? `static toggle of ${toggleStatic}`
+            : scripted > 0
+              ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
+              : pulse > 0
+                ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+                : masks > 0
+                  ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                  : branches > 0
+                    ? `${branches} branches`
+                    : rig > 0
+                      ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
+                      : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   frames,
@@ -875,6 +1105,45 @@ const summary = {
       }
     : {}),
 };
+/** A sampled CPU profile's self time by function and by where its code is from, in ms a frame. */
+function selfTimes(path: string, measured: number): { areas: string[]; functions: string[] } {
+  const profile = JSON.parse(readFileSync(path, "utf8")) as {
+    nodes: {
+      id: number;
+      callFrame: { functionName: string; url: string; lineNumber: number };
+    }[];
+    samples: number[];
+    timeDeltas: number[];
+  };
+  const byId = new Map(profile.nodes.map((n) => [n.id, n.callFrame]));
+  const functions = new Map<string, number>();
+  const areas = new Map<string, number>();
+  for (let i = 0; i < profile.samples.length; i++) {
+    const frame = byId.get(profile.samples[i]);
+    const dt = (profile.timeDeltas[i + 1] ?? 0) / 1000;
+    if (!frame || frame.functionName === "(idle)") {
+      continue;
+    }
+
+    const url = frame.url.replace(/[?#].*/, "");
+    const area = /^\(/.test(frame.functionName)
+      ? frame.functionName
+      : /pixi/.test(url)
+        ? "pixi"
+        : (/\/(player|runtime|codegen|format)\//.exec(url)?.[1] ?? (url ? "other" : "native"));
+    const name = `${frame.functionName || "(anonymous)"} ${url.split("/").slice(-2).join("/")}:${frame.lineNumber + 1}`;
+    functions.set(name, (functions.get(name) ?? 0) + dt);
+    areas.set(area, (areas.get(area) ?? 0) + dt);
+  }
+
+  const top = (m: Map<string, number>, n: number) =>
+    [...m]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, n)
+      .map(([k, v]) => `${(v / measured).toFixed(3).padStart(7)} ms  ${k}`);
+  return { areas: top(areas, 12), functions: top(functions, 30) };
+}
+
 if (args.includes("--json")) {
   console.log(JSON.stringify(summary));
 } else {
@@ -904,4 +1173,12 @@ if (args.includes("--json")) {
   }
 
   console.log(`  frame   median ${ms(summary.frame.median)}  p90 ${ms(summary.frame.p90)}`);
+  if (cpuProfile) {
+    // Profiled from the 12th frame (page.ts, PROFILED_FROM) to the last.
+    const { areas, functions } = selfTimes(cpuProfile, frames - 11);
+    console.log("  self time a frame, by area:");
+    console.log(areas.map((line) => `    ${line}`).join("\n"));
+    console.log("  self time a frame, by function:");
+    console.log(functions.map((line) => `    ${line}`).join("\n"));
+  }
 }

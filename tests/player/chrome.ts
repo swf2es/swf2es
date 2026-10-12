@@ -450,10 +450,19 @@ export function benchPlayer(
   tableMinRun?: number,
   profilePath?: string,
   pace = 0,
+  cpuProfilePath?: string,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
-    async (evaluate, send) => {
+    async (evaluate, send, _fresh, listen) => {
+      if (cpuProfilePath) {
+        await send("Profiler.enable");
+        await send("Profiler.setSamplingInterval", { interval: 100 });
+        listen("Profiler.consoleProfileFinished", (params) =>
+          writeFileSync(cpuProfilePath, JSON.stringify(params.profile)),
+        );
+      }
+
       if (allocs) {
         await send("HeapProfiler.enable");
         await send("HeapProfiler.startSampling", {
@@ -464,7 +473,7 @@ export function benchPlayer(
       }
 
       const { value, exception } = await evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath})`,
       );
       if (value && allocs) {
         const { profile } = await send<{ profile: { head: SampledNode } }>(
