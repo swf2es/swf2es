@@ -47,6 +47,9 @@
 // plain shape instead, the same art with no mask, which bounds what any
 // cheaper clip (a scissor) could gain.
 //
+// --hover holds the mouse still over the stage's middle, as a user's often
+// is, for what a SWF with scripts does for it each frame.
+//
 // --idle K renders K times more after each frame with no tick between, as
 // a host that draws on every animation frame does, and times those apart.
 //
@@ -110,7 +113,7 @@
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
-//     [--min-run N] [--pace MS]
+//     [--min-run N] [--pace MS] [--hover]
 //     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined]
 //
 // --write-swf FILE writes the SWF the options make and stops, for another
@@ -1065,6 +1068,7 @@ const result = await benchPlayer(
   pace,
   cpuProfile,
   args.includes("--pipelined") ? 30 : 1,
+  args.includes("--hover"),
 );
 if (result.error) {
   console.error(result.error);

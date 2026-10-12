@@ -456,6 +456,7 @@ async function benchSwf(
   pace = 0,
   cpuProfile = false,
   finishEvery = 1,
+  hover = false,
 ): Promise<Bench> {
   setTransformTable(table, tableMinRun);
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -488,6 +489,11 @@ async function benchSwf(
     }
 
     await player.start();
+    // The mouse over the stage's middle, still, as a user's often is.
+    if (hover) {
+      player.pointer?.handle("move", { x: player.width / 2, y: player.height / 2 });
+    }
+
     if (uncaught.length > 0) {
       throw uncaught[0];
     }
