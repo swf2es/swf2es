@@ -188,6 +188,24 @@ export function hitsOwnPoint(
 
   const probe = { x: x - 0.5, y, root };
   const [lx, ly] = apply(toLocal, probe.x, probe.y);
+  return hitsOwnLocal(d, lx, ly, probe, clips);
+}
+
+/**
+ * hitsOwnPoint with the probe already in `d`'s own space, at (`lx`, `ly`):
+ * the pointer's pick carries it down the list, making no matrix per object.
+ */
+export function hitsOwnLocal(
+  d: DisplayObject,
+  lx: number,
+  ly: number,
+  probe: Probe,
+  clips = false,
+): boolean {
+  if (!underRoot(d) || d.maskOf) {
+    return false;
+  }
+
   let hit: boolean;
   if (d instanceof TextObject) {
     const r = ownBounds(d, true);
@@ -250,7 +268,7 @@ function clippedByLayers(d: DisplayObject, probe: Probe): boolean {
 }
 
 /** The point a shape test asks of, in the root's space: masks are found from it. */
-interface Probe {
+export interface Probe {
   x: number;
   y: number;
   root: DisplayObject | null;

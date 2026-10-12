@@ -1977,9 +1977,22 @@ go by where the last render drew it); the player notices both at once.
 The pick runs only when something a pick reads changed since the last
 (`pickWork`: whatever invalidates an object, and `mouseEnabled`,
 `mouseChildren`, a `hitArea` or a button's `enabled`), so a still scene
-costs nothing, and a busy one a pick a frame, what one mouse move costs:
-`tests/player/bench.ts --scripted 400 --still --hover`, 4,800 moving
-clips, ticks in 0.9 ms against 0.6 ms with no mouse over the stage.
+costs nothing, and a busy one a pick a frame, what one mouse move costs.
+The pick carries the point down the list into each object's space, making
+no matrix per object, and passes over a container whose bounds miss it:
+bounds each object keeps in its own space (`pickBounds`), marked stale by
+a change in it or under it, and not by its own move, which only its
+ancestors' bounds see. They are worked out only for what stood still over
+the last two picks, as what changes on most frames costs less gone
+through than measured; a timeline shape is checked against its recorded
+bounds before its fills. A button's hit test state is in no container,
+so a button and those above it are measured each time, and while any
+sprite has a `hitArea`, which may be anywhere, nothing is passed over.
+On 400 rigs of 12 moving parts (10,000 objects), a pick takes 0.01 ms
+where it took 0.5 ms and 125 KB, and
+`tests/player/bench.ts --scripted 400 --still --hover` ticks as without a
+mouse over the stage, 0.3 to 0.4 ms, where it took 0.8; where every part
+is new each frame, a pick after a tick takes 0.2 to 0.3 ms, against 0.7.
 `DisplayObject.mouseX` and `mouseY` follow the last pointer position.
 The pick follows Flash's order, as Ruffle's `mouse_pick_avm2` has it:
 interactive children before artwork, and a hit on what takes no pointer

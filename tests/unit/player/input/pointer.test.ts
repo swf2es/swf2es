@@ -10,6 +10,7 @@ import {
   ButtonObject,
   Container,
   TextObject,
+  TRANSFORM,
 } from "../../../../packages/player/dist/display/display.js";
 import {
   dropTargetOf,
@@ -1422,4 +1423,56 @@ test("the wheel sends mouseWheel to what is under the pointer, then scrolls a fi
 
   // Part of a line sends nothing, but says the SWF takes the wheel there.
   assert.deepEqual(wheel(10, 10, 0), [true]);
+});
+
+test("a pick passes over what stood still away from the point, and sees what moved, scrolled or came since", () => {
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
+  const box = (x: number) => {
+    const s = new Container();
+    s.object = { $display: s } as never;
+    s.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+    s.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: x, ty: 0 });
+    return s;
+  };
+  const group = box(0);
+  const inner = box(0);
+  group.addChildAt(inner, 1);
+  stage.addChildAt(group, 0);
+  // Picks enough that the group's bounds are worked out and kept.
+  const pick = (x: number, y: number) => {
+    for (let i = 0; i < 3; i++) {
+      pointerTarget(stage, x, y, 200, 200);
+    }
+
+    return pointerTarget(stage, x, y, 200, 200);
+  };
+
+  assert.equal(pick(10, 10), inner);
+  assert.equal(pick(110, 10), stage);
+  // A child moved out to the point, its parent's bounds kept until then.
+  inner.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 100, ty: 0 });
+  assert.equal(pick(110, 10), inner);
+  // A child put in where nothing was.
+  const late = box(150);
+  group.addChildAt(late, 2);
+  assert.equal(pick(160, 10), late);
+  // A scroll that shows the child's other part.
+  late.scrollRect = { xMin: 10, yMin: 0, xMax: 20, yMax: 20 };
+  late.scroll = late.scrollRect;
+  late.invalidate(TRANSFORM);
+  assert.equal(pick(155, 10), late);
+  assert.equal(pick(165, 10), stage);
+
+  // A button is hit by its hit test state, wherever that is, however long its parent stood still.
+  const button = new ButtonObject();
+  button.object = { $display: button } as never;
+  const area = new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff));
+  area.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 100 });
+  button.hitTestState = area;
+  group.addChildAt(button, 3);
+  assert.equal(pick(10, 110), button);
+  area.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 150 });
+  assert.equal(pick(10, 160), button);
 });
