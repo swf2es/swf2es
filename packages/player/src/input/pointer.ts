@@ -514,8 +514,12 @@ export class PointerInput {
       }
     }
 
+    // A pressed button the pointer drags off shows over until the release,
+    // and down again when it comes back; one it is dragged onto stays up,
+    // as Flash Player 32 shows them.
+    const held = down && this.pressed;
     if (previous) {
-      buttonState(previous, "up");
+      buttonState(previous, previous === held ? "over" : "up", previous !== held);
       this.send("mouseOut", previous, p, down, true, target);
       for (let d: DisplayObject | null = previous; d && d !== common; d = d.parent) {
         this.send("rollOut", d, p, down, false, target);
@@ -523,7 +527,12 @@ export class PointerInput {
     }
 
     if (target) {
-      buttonState(target, down && target === this.pressed ? "down" : "over");
+      if (!held) {
+        buttonState(target, "over");
+      } else if (target === held) {
+        buttonState(target, "down", false);
+      }
+
       for (let d: DisplayObject | null = target; d && d !== common; d = d.parent) {
         this.send("rollOver", d, p, down, false, previous);
       }
@@ -669,9 +678,13 @@ function buttonLike(d: DisplayObject | null): boolean {
   );
 }
 
-/** Show state `state` of `d`, if it is an enabled button: the pointer moves a disabled one through none. */
-function buttonState(d: DisplayObject, state: "up" | "over" | "down"): void {
+/**
+ * Show state `state` of `d`, if it is an enabled button, with the sound for
+ * the change unless `sound` is false: the pointer moves a disabled one
+ * through none.
+ */
+function buttonState(d: DisplayObject, state: "up" | "over" | "down", sound = true): void {
   if (d instanceof ButtonObject && d.enabled) {
-    d.setState(state);
+    d.setState(state, sound);
   }
 }

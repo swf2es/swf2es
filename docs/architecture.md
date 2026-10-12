@@ -3918,9 +3918,12 @@ drift.
 A button's change of state plays DefineButtonSound's sound for it, as
 Ruffle's button events pick them: up to over, over to down, down to over,
 and over to up, and a release outside plays over to up's (the pointer's
-up, with a button pressed and something else under it). Dragging off a
-pressed button, down to up here, and back on, up to down, play none, as
-Ruffle's DragOut and DragOver do.
+up, with a button pressed and something else under it). A pressed
+button dragged off shows its over state until the release, and its down
+state again when the pointer comes back, as Flash Player 32 shows them
+(`tests/unit/player/input/pointer.test.ts`); those two changes play
+none, as Ruffle's DragOut and DragOver do. A button pressed elsewhere and
+dragged onto stays up until the release over it, which shows over.
 
 A timeline sound's mix is the transforms of its clip or button and each
 ancestor, a sprite's `soundTransform`, concatenated from it up, then the

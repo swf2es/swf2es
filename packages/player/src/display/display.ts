@@ -1195,9 +1195,11 @@ export type ButtonState = "up" | "over" | "down";
 
 /**
  * Which of DefineButtonSound's sounds a change of state plays, by the
- * state before and after, as Ruffle's button events pick them: a drag off
- * while pressed, down to up here, and back over, up to down, none (-1); a
- * release outside plays over to up's (ButtonObject.releasedOutside).
+ * state before and after, as Ruffle's button events pick them; none is -1.
+ * A drag off while pressed, which shows over, and back on, down again,
+ * play none either, as Ruffle's DragOut and DragOver: the pointer asks
+ * those quietly. A release outside plays over to up's
+ * (ButtonObject.releasedOutside).
  */
 const BUTTON_SOUNDS: Record<ButtonState, Record<ButtonState, number>> = {
   up: { up: -1, over: 1, down: -1 },
@@ -1313,15 +1315,19 @@ export class ButtonObject extends Container {
   }
 
   /** Show state `state`, with the sound DefineButtonSound gives the change. */
-  setState(state: ButtonState): void {
-    this.playSound(BUTTON_SOUNDS[this.state][state]);
+  setState(state: ButtonState, sound = true): void {
+    if (sound) {
+      this.playSound(BUTTON_SOUNDS[this.state][state]);
+    }
+
     this.state = state;
     this.show();
   }
 
-  /** A press on it released elsewhere: over to up's sound, as Ruffle's ReleaseOutside plays. */
+  /** A press on it released elsewhere: up, with over to up's sound, as Ruffle's ReleaseOutside plays. */
   releasedOutside(): void {
     this.playSound(0);
+    this.setState("up", false);
   }
 
   /** DefineButtonSound's sound `index`, if it has one. */

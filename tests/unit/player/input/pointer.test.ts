@@ -1139,3 +1139,63 @@ test("what the main root would take goes to the stage, and a disabled object's h
     "rollOut b null false 50,150 @150,150",
   ]);
 });
+
+test("a pressed button dragged off shows over, and down again back on; one dragged onto stays up", {
+  skip,
+}, async () => {
+  const { input, player } = await gaps();
+  const btn = player.root.children.find((c) => c instanceof ButtonObject) as ButtonObject;
+  // The state a step leaves the button in, and the events it traced.
+  const step = (type: "move" | "down" | "up", x: number, y: number) => {
+    const lines = input(type, x, y).filter((line) => !line.startsWith("mouseMove"));
+    return [btn.state, lines];
+  };
+
+  // The states Flash Player 32 showed: each state a sprite whose
+  // ADDED_TO_STAGE traced as the button showed it (PepperFlash).
+  input("move", 210, 10);
+  assert.deepEqual(step("down", 210, 10), ["down", ["mouseDown btn null true 10,10 @210,10"]]);
+  assert.deepEqual(step("move", 300, 10), [
+    "over",
+    [
+      "mouseOut btn null true 100,10 @300,10",
+      "rollOut btn null true 100,10 @300,10",
+      "rollOut root null true 300,10 @300,10",
+    ],
+  ]);
+  assert.deepEqual(step("move", 220, 10), [
+    "down",
+    [
+      "rollOver btn null true 20,10 @220,10",
+      "rollOver root null true 220,10 @220,10",
+      "mouseOver btn null true 20,10 @220,10",
+    ],
+  ]);
+  assert.deepEqual(step("up", 220, 10), [
+    "over",
+    ["mouseUp btn null false 20,10 @220,10", "click btn null false 20,10 @220,10"],
+  ]);
+
+  // Released off it, it is up.
+  input("down", 220, 10);
+  assert.deepEqual(step("move", 300, 10)[0], "over");
+  assert.deepEqual(step("up", 300, 10), ["up", ["mouseUp stage null false 300,10 @300,10"]]);
+
+  // Pressed elsewhere and dragged on, it stays up until the release over it.
+  assert.deepEqual(step("down", 300, 10), ["up", ["mouseDown stage null true 300,10 @300,10"]]);
+  assert.deepEqual(step("move", 220, 20)[0], "up");
+  assert.deepEqual(step("up", 220, 20), ["over", ["mouseUp btn null false 20,20 @220,20"]]);
+
+  // Pressed on it and dragged onto another object, over; released there, up.
+  input("down", 220, 20);
+  assert.deepEqual(step("move", 150, 20), [
+    "over",
+    [
+      "mouseOut btn b true -50,20 @150,20",
+      "rollOut btn b true -50,20 @150,20",
+      "rollOver b btn true 50,20 @150,20",
+      "mouseOver b btn true 50,20 @150,20",
+    ],
+  ]);
+  assert.deepEqual(step("up", 150, 20), ["up", ["mouseUp b null false 50,20 @150,20"]]);
+});
