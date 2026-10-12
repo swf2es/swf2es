@@ -1271,11 +1271,28 @@ export class ButtonObject extends Container {
    * new list, so that none it let go of stays held.
    */
   private statesChanged(): void {
+    // A state that holds the button plays as its parent's child, not as the button's.
     const states = [this.hitTest, this.up, this.down, this.over].filter(
-      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
+      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i && !o.encloses(this),
     );
     this.frameChildren = states.length > 0 ? states : NO_CHILDREN;
     scriptWork.changes++;
+  }
+
+  /**
+   * Its frame children but any that has since come to hold it, as a state
+   * off the list a script then put the button in: a walk down them would
+   * come back to it.
+   */
+  playingStates(): readonly DisplayObject[] {
+    const states = this.frameChildren;
+    for (let i = 0; i < states.length; i++) {
+      if (states[i].encloses(this)) {
+        return states.filter((o) => !o.encloses(this));
+      }
+    }
+
+    return states;
   }
 
   /** Its states' next frame scripts run up, over, down, hit: the first, in a SWF after 9 (Scripting.construct). */
@@ -1335,7 +1352,9 @@ export class ButtonObject extends Container {
       }
     }
 
-    if (current && !this.children.includes(current)) {
+    // One that holds the button cannot be its child, as Flash refuses it (#2150): the button
+    // shows nothing, and it stays where it is.
+    if (current && !this.children.includes(current) && !current.encloses(this)) {
       if (current.parent !== this) {
         current.parent?.removeChild(current);
       }
@@ -1535,11 +1554,11 @@ export function scriptChildren(d: DisplayObject): readonly DisplayObject[] {
     const b = d as ButtonObject;
     b.firstScripts = false;
     return [b.upState, b.overState, b.downState, b.hitTestState].filter(
-      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
+      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i && !o.encloses(b),
     );
   }
 
-  return d.frameChildren;
+  return d.kind === BUTTON ? (d as ButtonObject).playingStates() : d.frameChildren;
 }
 
 /** The root `d` is under, or is: the nearest display object up from it that carries a LoaderInfo; null under none, as for one a script made and did not add. */

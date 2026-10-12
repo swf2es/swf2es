@@ -7,6 +7,7 @@ import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
 import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
 import {
   BUTTON,
+  type ButtonObject,
   CLIP,
   Container,
   type DisplayObject,
@@ -342,7 +343,7 @@ export class Player {
         clips[count++] = o as MovieClip;
       }
 
-      const children = o.frameChildren;
+      const children = o.kind === BUTTON ? (o as ButtonObject).playingStates() : o.frameChildren;
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
         if (child.kind !== OTHER || child.frameChildren.length !== 0) {
