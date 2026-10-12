@@ -45,18 +45,45 @@ function sources(dir: string): string[] {
 }
 
 /**
- * ASC marks a name with no [API] with 0xE000, version 0, where avmplus' own
- * versions start at 0xE294, Flash Player 9's API 660, which is what such a
- * name is in Flash Player's playerglobal: mark it so. Both are three bytes
- * of UTF-8, and only a namespace URI ends with either.
+ * ASC marks a name with no [API] with U+E000, version 0, where avmplus' own
+ * versions start at U+E294, Flash Player 9's API 660, which is what such a
+ * name is in Flash Player's playerglobal: mark it so. Only the strings that
+ * end with the mark change, in place, as both are three bytes of UTF-8;
+ * code and other constants are left alone, whatever bytes they hold.
  */
 function versionMarks(abc: Uint8Array): Uint8Array {
   const out = abc.slice();
-  for (let i = 0; i + 2 < out.length; i++) {
-    if (out[i] === 0xee && out[i + 1] === 0x80 && out[i + 2] === 0x80) {
-      out[i + 1] = 0x8a;
-      out[i + 2] = 0x94;
+  let at = 4;
+  const u30 = () => {
+    let value = 0;
+    for (let shift = 0; shift < 35; shift += 7) {
+      const byte = out[at++];
+      value += (byte & 0x7f) * 2 ** shift;
+      if (!(byte & 0x80)) {
+        break;
+      }
     }
+
+    return value;
+  };
+
+  // The int and uint pools, then the double pool's 8 bytes each, then the strings.
+  for (let pool = 0; pool < 2; pool++) {
+    for (let count = u30(), i = 1; i < count; i++) {
+      u30();
+    }
+  }
+
+  const doubles = u30();
+  at += 8 * Math.max(doubles - 1, 0);
+  for (let count = u30(), i = 1; i < count; i++) {
+    const end = u30() + at;
+    if (end - at >= 3 && out[end - 3] === 0xee && out[end - 2] === 0x80 && out[end - 1] === 0x80) {
+      out[end - 2] = 0x8a;
+      out[end - 1] = 0x94;
+    }
+
+    at = end;
   }
 
   return out;
