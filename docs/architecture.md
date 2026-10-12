@@ -1961,7 +1961,13 @@ released at the next move that shows it, and left where that is outside.
 `DisplayObject.mouseX` and `mouseY` follow the last pointer position.
 The pick follows Flash's order, as Ruffle's `mouse_pick_avm2` has it:
 interactive children before artwork, and a hit on what takes no pointer
-goes up only once nothing else under the point has taken it. What a
+goes up only once nothing else under the point has taken it, to the
+nearest ancestor whose `mouseEnabled` is true, past any number that are
+false. The main SWF's root is never the target, as Flash Player 32
+traced it (the `MouseGaps` probe of the same test file): its own art, a
+hit passed up to it, and all of it with its `mouseChildren` false go to
+the stage, while it stays over as an ancestor; a sprite a script puts on
+the stage beside it takes its hits as any other. What a
 mask, a scroll rect or a timeline's mask layer hides takes no pointer
 (`mouse_pick_masking`): a list scrolled under a mask layer is clicked
 only where it shows. `hitTestPoint` asks no mask layer above the object

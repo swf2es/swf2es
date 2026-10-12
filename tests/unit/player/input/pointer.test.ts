@@ -27,6 +27,7 @@ import { compileScripts } from "../../../player/scripts.ts";
 test("the topmost artwork targets its interactive parent, with mouseChildren and visibility respected", () => {
   const stage = new Container();
   stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
   const root = new Container();
   root.object = { $display: root } as never;
   root.loaderInfo = {} as never;
@@ -49,8 +50,14 @@ test("the topmost artwork targets its interactive parent, with mouseChildren and
   front.visible = true;
   assert.ok(root.object);
   root.object.$mouseChildren = false;
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), root);
   assert.equal(pointerTarget(stage, 50, 50, 100, 100), stage);
+  // A sprite takes its children's hits itself; the main root is never the
+  // target, as Flash Player 32 has it, and the stage takes them.
+  assert.equal(pointerTarget(stage, 10, 10, 100, 100), stage);
+  const info = root.loaderInfo;
+  root.loaderInfo = null;
+  assert.equal(pointerTarget(stage, 10, 10, 100, 100), root);
+  root.loaderInfo = info;
   assert.equal(pointerTarget(stage, -1, 10, 100, 100), null);
 
   const field = new TextObject(null);
@@ -89,9 +96,10 @@ test("a disabled overlay lets pointer input reach an interactive object below it
 test("a disabled field over a button lets the button take the hit, and its parent takes it where nothing does", () => {
   const stage = new Container();
   stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
+  // A sprite on the stage, not the main root, which would leave the hits it takes to the stage.
   const panel = new Container();
   panel.object = { $display: panel } as never;
-  panel.loaderInfo = {} as never;
   stage.addChildAt(panel, 0);
   const button = new Container();
   button.object = { $display: button } as never;
@@ -865,5 +873,269 @@ test("the pointer's events come in Flash Player 32's order, to its targets", { s
     "mouseMove stage null true 500,100 @500,100",
     "mouseUp stage null false 500,100 @500,100",
     "mouseLeave stage @500,100",
+  ]);
+});
+
+const GAPS_SOURCE = `package {
+  import flash.display.DisplayObject;
+  import flash.display.Shape;
+  import flash.display.SimpleButton;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.events.MouseEvent;
+
+  // Boxes "a" holding "a1", "b", "c" holding "c1" holding "c2", and a
+  // SimpleButton "btn": the stage traces the mouse events it hears, each
+  // object its roll events; cmd changes them between frames. In Flash, the
+  // probe also logged each line, and took cmd, through ExternalInterface.
+  public class MouseGaps extends Sprite {
+    private var named:Object = {};
+
+    private function box(name:String, x:Number, y:Number, size:Number):Sprite {
+      var s:Sprite = new Sprite();
+      s.name = name;
+      var art:Shape = new Shape();
+      art.graphics.beginFill(0xff0000);
+      art.graphics.drawRect(0, 0, size, size);
+      s.addChild(art);
+      s.x = x;
+      s.y = y;
+      named[name] = s;
+      return s;
+    }
+
+    // Flash's float noise left out: 50.000003814697266 is 50.
+    private function round(n:Number):Number {
+      return Math.round(n * 1000) / 1000;
+    }
+
+    private function nameOf(o:Object):String {
+      return o == null ? "null" : o == stage ? "stage" : o == this ? "root" : o.name;
+    }
+
+    private function heard(e:Event):void {
+      var line:String = e.type + " " + nameOf(e.target);
+      if (e is MouseEvent) {
+        var m:MouseEvent = MouseEvent(e);
+        line += " " + nameOf(m.relatedObject) + " " + m.buttonDown + " " + round(m.localX) + "," + round(m.localY);
+        if (e.type == "mouseWheel") {
+          line += " " + m.delta;
+        }
+      }
+
+      trace(line + " @" + stage.mouseX + "," + stage.mouseY);
+    }
+
+    private function state(color:uint):Shape {
+      var s:Shape = new Shape();
+      s.graphics.beginFill(color);
+      s.graphics.drawRect(0, 0, 80, 80);
+      return s;
+    }
+
+    public function cmd(op:String, name:String, key:String, value:*):void {
+      var o:Object = name == "root" ? this : named[name];
+      switch (op) {
+        case "set":
+          o[key] = value;
+          break;
+        case "remove":
+          o.parent.removeChild(DisplayObject(o));
+          break;
+        case "add":
+          (key == "stage" ? stage : key ? named[key] : this).addChild(DisplayObject(o));
+          break;
+        case "draw":
+          var r:Array = String(value).split(",");
+          o.graphics.beginFill(0x808080);
+          o.graphics.drawRect(r[0], r[1], r[2], r[3]);
+          break;
+      }
+    }
+
+    public function MouseGaps() {
+      var a:Sprite = box("a", 0, 0, 80);
+      a.addChild(box("a1", 20, 20, 40));
+      addChild(a);
+      addChild(box("b", 100, 0, 80));
+      var c:Sprite = box("c", 0, 100, 90);
+      var c1:Sprite = box("c1", 20, 20, 50);
+      c1.addChild(box("c2", 20, 20, 20));
+      c.addChild(c1);
+      addChild(c);
+      var btn:SimpleButton = new SimpleButton(state(0xff0000), state(0x00ff00), state(0x0000ff), state(0));
+      btn.name = "btn";
+      btn.x = 200;
+      named.btn = btn;
+      addChild(btn);
+      for each (var type:String in ["mouseDown", "mouseUp", "click", "doubleClick", "mouseMove", "mouseOver", "mouseOut", "mouseWheel"]) {
+        stage.addEventListener(type, heard);
+      }
+
+      for each (var o:Object in [stage, this, a, named.a1, named.b, c, c1, named.c2, btn]) {
+        o.addEventListener("rollOver", heard);
+        o.addEventListener("rollOut", heard);
+      }
+
+      stage.addEventListener("mouseLeave", heard);
+    }
+  }
+}`;
+
+/**
+ * MouseGaps playing, and the input a test gives it: each call returns the
+ * lines traced since the last. Moves, presses and releases are 300 ms apart
+ * unless a call says otherwise, too far apart for a double click.
+ */
+async function gaps() {
+  const wasm = await WebAssembly.compile(
+    await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
+  );
+  const abc = compileScripts([{ name: "MouseGaps", source: GAPS_SOURCE }], out).get(
+    "MouseGaps",
+  ) as Uint8Array;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(abc, 1, "MouseGaps", 400, 300), scripting);
+  await player.start();
+  lines.length = 0;
+  const pointer = player.pointer;
+  assert.ok(pointer);
+  let buttons = 0;
+  let time = 0;
+  const input = (type: "move" | "down" | "up", x: number, y: number, wait = 300): string[] => {
+    buttons = type === "down" ? 1 : type === "up" ? 0 : buttons;
+    time += wait;
+    pointer.handle(type, { x, y, button: 0, buttons, time });
+    return lines.splice(0);
+  };
+  const cmd = (op: string, name: string, key: string | null = null, value: unknown = null) => {
+    const rt = scripting.rt;
+    rt.callProperty(player.root.object, rt.publicName("cmd"), op, name, key, value as never);
+    return lines.splice(0);
+  };
+  const frame = (): string[] => {
+    player.tick();
+    return lines.splice(0);
+  };
+
+  return { input, cmd, frame, player, pointer, scripting };
+}
+
+test("what the main root would take goes to the stage, and a disabled object's hit to its nearest enabled ancestor", {
+  skip,
+}, async () => {
+  const { input, cmd } = await gaps();
+
+  // Each of these is what Flash Player 32 traced (PepperFlash, over the
+  // DevTools protocol). A sprite whose mouseEnabled is false, under the
+  // root, leaves its art's hits to the stage, not to the root.
+  cmd("set", "a", "mouseEnabled", false);
+  assert.deepEqual(input("move", 10, 10), ["mouseMove stage null false 10,10 @10,10"]);
+  assert.deepEqual(input("move", 30, 30), [
+    "mouseMove a1 null false 10,10 @30,30",
+    "rollOver a1 null false 10,10 @30,30",
+    "rollOver a null false 30,30 @30,30",
+    "rollOver root null false 30,30 @30,30",
+    "mouseOver a1 null false 10,10 @30,30",
+  ]);
+  assert.deepEqual(input("move", 10, 10), [
+    "mouseMove stage null false 10,10 @10,10",
+    "mouseOut a1 null false -10,-10 @10,10",
+    "rollOut a1 null false -10,-10 @10,10",
+    "rollOut a null false 10,10 @10,10",
+    "rollOut root null false 10,10 @10,10",
+  ]);
+  assert.deepEqual(input("down", 10, 10), ["mouseDown stage null true 10,10 @10,10"]);
+  assert.deepEqual(input("up", 10, 10), [
+    "mouseUp stage null false 10,10 @10,10",
+    "click stage null false 10,10 @10,10",
+  ]);
+  input("move", 150, 150);
+  cmd("set", "a", "mouseEnabled", true);
+
+  // Deeper, the hit goes up to the nearest ancestor that takes the pointer,
+  // past one or two that do not, and to the stage where that is the root.
+  cmd("set", "c1", "mouseEnabled", false);
+  assert.deepEqual(input("move", 30, 130), [
+    "mouseMove c null false 30,30 @30,130",
+    "rollOver c null false 30,30 @30,130",
+    "rollOver root null false 30,130 @30,130",
+    "mouseOver c null false 30,30 @30,130",
+  ]);
+  assert.deepEqual(input("move", 50, 150), [
+    "mouseMove c2 null false 10,10 @50,150",
+    "mouseOut c c2 false 50,50 @50,150",
+    "rollOver c2 c false 10,10 @50,150",
+    "rollOver c1 c false 30,30 @50,150",
+    "mouseOver c2 c false 10,10 @50,150",
+  ]);
+  input("move", 150, 150);
+  cmd("set", "c2", "mouseEnabled", false);
+  assert.deepEqual(input("move", 50, 150), [
+    "mouseMove c null false 50,50 @50,150",
+    "rollOver c null false 50,50 @50,150",
+    "rollOver root null false 50,150 @50,150",
+    "mouseOver c null false 50,50 @50,150",
+  ]);
+  input("move", 150, 150);
+  cmd("set", "c", "mouseEnabled", false);
+  assert.deepEqual(input("move", 50, 150), ["mouseMove stage null false 50,150 @50,150"]);
+  assert.deepEqual(input("move", 10, 110), ["mouseMove stage null false 10,110 @10,110"]);
+  input("move", 150, 150);
+  for (const name of ["c", "c1", "c2"]) {
+    cmd("set", name, "mouseEnabled", true);
+  }
+
+  // A sprite whose mouseChildren is false takes its children's hits.
+  cmd("set", "c1", "mouseChildren", false);
+  assert.deepEqual(input("move", 50, 150), [
+    "mouseMove c1 null false 30,30 @50,150",
+    "rollOver c1 null false 30,30 @50,150",
+    "rollOver c null false 50,50 @50,150",
+    "rollOver root null false 50,150 @50,150",
+    "mouseOver c1 null false 30,30 @50,150",
+  ]);
+  input("move", 150, 150);
+  cmd("set", "c1", "mouseChildren", true);
+
+  // The root's own art, and all of it with its mouseChildren false, are the stage's.
+  cmd("draw", "root", null, "300,200,80,80");
+  assert.deepEqual(input("move", 310, 210), ["mouseMove stage null false 310,210 @310,210"]);
+  assert.deepEqual(input("down", 310, 210), ["mouseDown stage null true 310,210 @310,210"]);
+  assert.deepEqual(input("up", 310, 210), [
+    "mouseUp stage null false 310,210 @310,210",
+    "click stage null false 310,210 @310,210",
+  ]);
+  cmd("set", "root", "mouseChildren", false);
+  assert.deepEqual(input("move", 30, 30), ["mouseMove stage null false 30,30 @30,30"]);
+  input("move", 150, 150);
+  cmd("set", "root", "mouseChildren", true);
+
+  // The root's mouseEnabled false leaves its children theirs.
+  cmd("set", "root", "mouseEnabled", false);
+  assert.deepEqual(input("move", 30, 30), [
+    "mouseMove a1 null false 10,10 @30,30",
+    "rollOver a1 null false 10,10 @30,30",
+    "rollOver a null false 30,30 @30,30",
+    "rollOver root null false 30,30 @30,30",
+    "mouseOver a1 null false 10,10 @30,30",
+  ]);
+  input("move", 150, 150);
+  cmd("set", "root", "mouseEnabled", true);
+
+  // A sprite on the stage itself, beside the root, takes its hits as any other.
+  cmd("add", "b", "stage");
+  cmd("set", "b", "mouseChildren", false);
+  assert.deepEqual(input("move", 110, 10), [
+    "mouseMove b null false 10,10 @110,10",
+    "rollOver b null false 10,10 @110,10",
+    "mouseOver b null false 10,10 @110,10",
+  ]);
+  assert.deepEqual(input("move", 150, 150), [
+    "mouseMove stage null false 150,150 @150,150",
+    "mouseOut b null false 50,150 @150,150",
+    "rollOut b null false 50,150 @150,150",
   ]);
 });

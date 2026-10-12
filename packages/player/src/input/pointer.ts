@@ -53,8 +53,18 @@ const isInteractive = (d: DisplayObject): boolean =>
 const mouseEnabled = (d: DisplayObject): boolean =>
   !!d.object && !d.avm1Root && d.object.$mouseEnabled !== false;
 
+/**
+ * Whether `d` is the main SWF's root, the stage's child that is a SWF's
+ * root: Flash Player 32 never makes it the target. What would, its own
+ * artwork, a hit passed up from a child whose mouseEnabled is false, all
+ * of it with its mouseChildren false, goes to the stage, as the stage's
+ * own empty space does, and it is only ever over as an ancestor. A sprite
+ * a script puts on the stage beside it takes its hits as any other.
+ */
+const isMainRoot = (d: DisplayObject): boolean => !!d.loaderInfo && !!d.parent && !d.parent.parent;
+
 /** `d` itself where it takes the pointer, else the hit goes on to its parent. */
-const own = (d: DisplayObject): Pick => (mouseEnabled(d) ? d : PROPAGATE);
+const own = (d: DisplayObject): Pick => (mouseEnabled(d) && !isMainRoot(d) ? d : PROPAGATE);
 
 /** Each sprite's hitArea. */
 const hitAreas = new WeakMap<DisplayObject, DisplayObject>();
@@ -77,8 +87,9 @@ export function hitAreaOf(sprite: DisplayObject): DisplayObject | null {
  * (Ruffle's `mouse_pick_avm2`): within a container, its interactive
  * children first, topmost first, then the rest. A hit on artwork, or on
  * a child whose mouseEnabled is false, goes to the nearest ancestor that
- * takes the pointer; one that goes up is kept while the search goes on,
- * so a disabled field over a button leaves the button its clicks.
+ * takes the pointer, short of the main root (isMainRoot): the stage takes
+ * it there. One that goes up is kept while the search goes on, so a
+ * disabled field over a button leaves the button its clicks.
  *
  * A sprite with a hitArea is hit where the area draws, wherever the area
  * is on the display list and whether or not it is visible, and its own
