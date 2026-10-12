@@ -1354,3 +1354,72 @@ test("a frame's end moves the hover under a mouse that stands still, and the cur
   frame();
   assert.deepEqual(cursors, ["pointer", "default"]);
 });
+
+// The corpus's `mouse_wheel_events`, without its embedded font: two
+// sprites, a shape of the root's, and a field of 13 lines under them.
+const WHEEL_SOURCE = `package {
+  import flash.display.Shape;
+  import flash.display.Sprite;
+  import flash.events.MouseEvent;
+  import flash.text.TextField;
+
+  public class MouseWheel extends Sprite {
+    public function MouseWheel() {
+      var text:TextField = new TextField();
+      for each (var x:int in [0, 100, 200]) {
+        var s:Sprite = new Sprite();
+        var art:Object = x == 200 ? new Shape() : s;
+        art.graphics.beginFill(0xff00ff);
+        art.graphics.drawRect(0, 0, 100, 100);
+        art.x = x;
+        art.name = x == 200 ? "shape" : "sprite" + (x / 100 + 1);
+        addChild(art == s ? s : Shape(art));
+      }
+
+      text.name = "text";
+      text.y = 100;
+      text.multiline = true;
+      text.text = "xxxx 1\\nxxxx 2\\nxxxx 3\\nxxxx 4\\nxxxx 5\\nxxxx 6\\nxxxx 7\\nxxxx 8\\nxxxx 9\\nxxxx 10\\nxxxx 11\\nxxxx 12\\nxxxx 13\\n";
+      addChild(text);
+      stage.addEventListener("mouseWheel", function (e:MouseEvent):void {
+        trace(e.type + " " + (e.target == stage ? "stage" : e.target.name) + " " + e.delta + " " + e.bubbles + " " + e.cancelable + " " + text.scrollV);
+      });
+    }
+  }
+}`;
+
+test("the wheel sends mouseWheel to what is under the pointer, then scrolls a field there", {
+  skip,
+}, async () => {
+  const wasm = await WebAssembly.compile(
+    await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
+  );
+  const abc = compileScripts([{ name: "MouseWheel", source: WHEEL_SOURCE }], out).get(
+    "MouseWheel",
+  ) as Uint8Array;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(abc, 1, "MouseWheel", 300, 200), scripting);
+  await player.start();
+  const pointer = player.pointer;
+  assert.ok(pointer);
+  const wheel = (x: number, y: number, delta: number) => {
+    const taken = pointer.wheel({ x, y }, delta);
+    return [taken, ...lines.splice(0).filter((line) => line.startsWith("mouseWheel"))];
+  };
+
+  // As Flash traced the corpus's test: to the sprite under the pointer,
+  // bubbling and not cancelable; over the root's shape, to the stage; over
+  // the field, which scrolls by the delta after the event, up positive.
+  assert.deepEqual(wheel(10, 10, -3), [true, "mouseWheel sprite1 -3 true false 1"]);
+  assert.deepEqual(wheel(110, 10, 3), [true, "mouseWheel sprite2 3 true false 1"]);
+  assert.deepEqual(wheel(210, 10, -3), [true, "mouseWheel stage -3 true false 1"]);
+  assert.deepEqual(wheel(10, 110, -3), [true, "mouseWheel text -3 true false 1"]);
+  assert.deepEqual(wheel(10, 110, -3), [true, "mouseWheel text -3 true false 4"]);
+  assert.deepEqual(wheel(10, 110, 3), [true, "mouseWheel text 3 true false 7"]);
+  assert.deepEqual(wheel(10, 110, -3), [true, "mouseWheel text -3 true false 4"]);
+
+  // Part of a line sends nothing, but says the SWF takes the wheel there.
+  assert.deepEqual(wheel(10, 10, 0), [true]);
+});

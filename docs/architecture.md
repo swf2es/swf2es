@@ -2015,8 +2015,21 @@ sprite, which `dropTarget` reads: the shape, not the sprite that takes
 the pointer, as Flash's trace of the corpus's `sprite_dropTarget` names
 the shapes in its sprites, and null over nothing. Neither can be played
 in adl, which the harness gives no pointer, so the unit tests carry them.
-Wheel, right and middle buttons, and Flash's drag and focus rules still
-need their own cases.
+The wheel sends `mouseWheel` to what is under the pointer, bubbling and
+not cancelable, its `delta` lines up positive, and a text field there
+whose `mouseWheelEnabled` is true then scrolls by as many lines, as the
+corpus's `mouse_wheel_events` has Flash trace them (its `scroll` event is
+not sent yet). PepperFlash on Linux, the Flash Player 32 at hand, gave no
+`mouseWheel` at all for the DevTools protocol's wheel, and let the page
+scroll under it; Adobe documents the delta as the lines a notch
+scrolls, 3 by Windows' default, as Ruffle's own tests send it. The host makes a browser's notch 3 lines, whether it gives 3 lines
+or about 100 pixels (fewer on a zoomed page or a scaled screen, a
+multiple for notches run together), and adds a touchpad's pixels up, 100
+to 3 lines, sending nothing for a part of one. It keeps the page from
+scrolling only where the SWF takes the wheel: a `mouseWheel` listener on
+the target or an ancestor, or a field that can scroll; elsewhere, and
+with Ctrl, which zooms, the page has it. Right and middle buttons, and
+Flash's drag and focus rules, still need their own cases.
 
 ### Touch
 

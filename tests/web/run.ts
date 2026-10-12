@@ -499,6 +499,41 @@ check(
 );
 
 check(
+  "the wheel scrolls the page over a SWF that does not listen for it, and only goes to one that does",
+  async (evaluate, send) => {
+    const [left, top] = await call<[number, number]>(evaluate, "touchPlayer()");
+    const scrolled = () =>
+      call<number>(evaluate, "(document.body.style.height = '3000px', window.scrollY)");
+    // The wheel over c, the page at its top; a page that scrolls takes the
+    // player from under the pointer, whose leave is logged too.
+    const wheel = async (deltaY: number) => {
+      await call(evaluate, "(window.scrollTo(0, 0), window.scrollY)");
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: left + 110, y: top + 30 });
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseWheel",
+        x: left + 110,
+        y: top + 30,
+        deltaX: 0,
+        deltaY,
+      });
+      // The page scrolls a moment later, if at all.
+      await new Promise((done) => setTimeout(done, 300));
+      const log = await call<string[]>(evaluate, "touchLog()");
+      return [(await scrolled()) > 0, log.filter((line) => line.startsWith("mouseWheel"))];
+    };
+
+    await scrolled();
+    assert.deepEqual(await wheel(100), [true, []]);
+    await call(evaluate, `touchCall("listenWheel")`);
+    // A notch of 100 pixels is 3 lines, down negative, as Flash's delta.
+    assert.deepEqual(await wheel(100), [false, ["mouseWheel c -3"]]);
+    assert.deepEqual(await wheel(-100), [false, ["mouseWheel c 3"]]);
+    await call(evaluate, "(document.body.style.height = '', window.scrollTo(0, 0), true)");
+    await call(evaluate, "touchDestroy()");
+  },
+);
+
+check(
   "touches reach a SWF as TouchEvents and as the mouse, and a tap may write the clipboard",
   async (evaluate, send) => {
     // A touch screen the page has from here on: the players made before it saw none.

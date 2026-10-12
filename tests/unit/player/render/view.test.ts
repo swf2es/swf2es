@@ -3036,3 +3036,82 @@ test("a child taken off gives its Graphics, emptied, to the next shape placed", 
     );
   });
 });
+
+test("the wheel reaches the player in Flash's lines, and keeps the page from scrolling only where the SWF takes it", () => {
+  const listeners = new Map<string, (e: unknown) => void>();
+  const canvas = {
+    style: { cursor: "" },
+    addEventListener: (type: string, f: (e: unknown) => void) => listeners.set(type, f),
+    removeEventListener: (type: string) => listeners.delete(type),
+  };
+  const renderer = {
+    screen: { width: 100, height: 100 },
+    canvas,
+  } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const calls: string[] = [];
+  let taken = true;
+  const player = {
+    width: 200,
+    height: 200,
+    pointer: {
+      post: () => {},
+      flush: () => {},
+      cursor: () => "default",
+      wheel: (p: { x: number }, delta: number) => {
+        calls.push(`${p.x} ${delta}`);
+        return taken;
+      },
+    },
+  } as unknown as Player;
+  const unbind = view.bindPointer(player);
+  const wheel = listeners.get("wheel");
+  assert.ok(wheel);
+  const turn = (deltaY: number, deltaMode = 0, ctrlKey = false) => {
+    let prevented = false;
+    wheel({
+      deltaY,
+      deltaMode,
+      ctrlKey,
+      offsetX: 5,
+      offsetY: 5,
+      buttons: 0,
+      preventDefault: () => {
+        prevented = true;
+      },
+    });
+    return prevented;
+  };
+
+  // A notch, however many pixels the browser makes it, is 3 lines, up positive.
+  assert.equal(turn(100), true);
+  turn(-100);
+  turn(53);
+  turn(200);
+  turn(3, 1);
+  // A touchpad's pixels add up: 100 of them are 3 lines.
+  for (let i = 0; i < 4; i++) {
+    turn(10);
+  }
+
+  // Where the SWF does not take it, or with Ctrl, the page scrolls or zooms.
+  taken = false;
+  assert.equal(turn(100), false);
+  taken = true;
+  assert.equal(turn(100, 0, true), false);
+  unbind();
+  assert.equal(listeners.has("wheel"), false);
+  assert.deepEqual(calls, [
+    "10 -3",
+    "10 3",
+    "10 -3",
+    "10 -6",
+    "10 -3",
+    "10 0",
+    "10 0",
+    "10 0",
+    "10 -1",
+    "10 -3",
+    "10 -3",
+  ]);
+});

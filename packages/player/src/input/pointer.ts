@@ -4,6 +4,7 @@ import { hitsOwnPoint, hitsPoint, toStage } from "../display/bounds.js";
 import {
   BitmapObject,
   ButtonObject,
+  CONTENT,
   Container,
   type DisplayObject,
   pickWork,
@@ -14,6 +15,7 @@ import {
 import { apply, invert, type Rect } from "../display/geometry.js";
 import { dispatchEvent, heard } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
+import { maxScrollV } from "../text/layout.js";
 import type { KeyboardInput } from "./keyboard.js";
 
 export interface PointerState {
@@ -356,6 +358,7 @@ export class PointerInput {
     buttonDown: boolean,
     bubbles = true,
     related: DisplayObject | null = null,
+    delta = 0,
   ): void {
     if (!target.object) {
       return;
@@ -376,7 +379,7 @@ export class PointerInput {
       !!p.altKey,
       !!p.shiftKey,
       buttonDown,
-      0,
+      delta,
     );
     dispatchEvent(s, target.object, event);
   }
@@ -501,6 +504,44 @@ export class PointerInput {
     }
 
     this.updateCursor();
+  }
+
+  /**
+   * The wheel turned by `delta` lines over the player, up positive, as
+   * MouseEvent.delta has it: a move to `p` first, if the pointer was not
+   * there, then `mouseWheel` to what is under it, bubbling, and a text
+   * field under it whose mouseWheelEnabled is true scrolls by as many
+   * lines, after the event, as the corpus's `mouse_wheel_events` has
+   * Flash do. A delta of 0, part of a line a touchpad gave, sends nothing.
+   * Returns whether the SWF takes the wheel there, a listener for
+   * mouseWheel on the way or a field that can scroll, which a host lets
+   * the page scroll without.
+   */
+  wheel(p: PointerState, delta: number): boolean {
+    this.handle("move", p);
+    const s = this.scripting;
+    const found = pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
+    const target = found ?? (this.held && this.stage.object ? this.stage : null);
+    if (!target?.object) {
+      return false;
+    }
+
+    const field = target instanceof TextObject && target.mouseWheelEnabled ? target : null;
+    const taken = heard(target.object, "mouseWheel") || (!!field && maxScrollV(field) > 1);
+    if (delta !== 0) {
+      this.handled++;
+      this.send("mouseWheel", target, p, this.held, true, null, delta);
+      if (field) {
+        const scrollV = Math.max(1, Math.min(field.scrollV - delta, maxScrollV(field)));
+        if (scrollV !== field.scrollV) {
+          field.scrollV = scrollV;
+          field.invalidate(CONTENT);
+          this.redraws++;
+        }
+      }
+    }
+
+    return taken;
   }
 
   /** Whether the left button is down after a press the player took, which keeps the mouse its own wherever it goes. */
