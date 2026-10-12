@@ -211,17 +211,6 @@ function within(outer: PixiContainer, inner: PixiContainer): boolean {
 // also places a measured group without effects by its relative transform, which the stage's
 // then moves again; no filter measures one, as a filter is an effect, so that is left.)
 let measuring = 0;
-const fastGlobalBounds = (measured as unknown as { getFastGlobalBounds: FastBounds })
-  .getFastGlobalBounds;
-type FastBounds = (this: PixiContainer, layers?: boolean, bounds?: Bounds) => Bounds;
-(measured as unknown as { getFastGlobalBounds: FastBounds }).getFastGlobalBounds = function (
-  layers,
-  bounds,
-) {
-  // A walk that threw leaves no depth behind.
-  measuring = 0;
-  return fastGlobalBounds.call(this, layers, bounds);
-};
 measured._getGlobalBoundsRecursive = function (this: Measured, layers, bounds, layer) {
   if (layers && this.parentRenderLayer && this.parentRenderLayer !== layer) {
     return;
@@ -253,12 +242,15 @@ measured._getGlobalBoundsRecursive = function (this: Measured, layers, bounds, l
     }
 
     const children = this.children as Measured[];
+    // Restored however the walk ends: one that throws leaves no depth behind for the next.
     measuring++;
-    for (let i = 0; i < children.length; i++) {
-      children[i]._getGlobalBoundsRecursive(layers, local, layer);
+    try {
+      for (let i = 0; i < children.length; i++) {
+        children[i]._getGlobalBoundsRecursive(layers, local, layer);
+      }
+    } finally {
+      measuring--;
     }
-
-    measuring--;
   }
 
   if (manageEffects) {
