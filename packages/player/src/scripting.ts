@@ -49,7 +49,12 @@ import {
 import type { Cursor, PointerInput } from "./input/pointer.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
 import { finishSounds, stopAllSounds, timelineSoundsOf } from "./media/sounds.js";
-import { airLibrary, playerHooks, playerNatives } from "./playerglobal/index.js";
+import {
+  airLibrary,
+  playerglobalLibrary,
+  playerHooks,
+  playerNatives,
+} from "./playerglobal/index.js";
 import { Clipboard } from "./scripting/clipboard.js";
 import { Code } from "./scripting/code.js";
 import { dispatchTo } from "./scripting/events.js";
@@ -59,7 +64,7 @@ import { Symbols } from "./scripting/symbols.js";
 import { Timers } from "./scripting/timers.js";
 
 // For index.ts, which reaches playerglobal only through here.
-export { airLibrary };
+export { airLibrary, playerglobalLibrary };
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;

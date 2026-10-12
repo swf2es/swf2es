@@ -25,7 +25,7 @@
     "oracle:abcdump": "node oracle/oracle.ts --abcdump",
     "oracle:cases": "node oracle/cases.ts",
     "as3": "pnpm as3:playerglobal && pnpm as3:air",
-    "as3:playerglobal": "node tools/playerglobal.ts --check",
+    "as3:playerglobal": "node tools/playerglobal.ts --check --update",
     "as3:air": "node tests/player/air-library.ts --update",
     "as3:format": "cd as3 && ${ASFORMAT:-asformat} -write-files playerglobal/src air/src"
   },
