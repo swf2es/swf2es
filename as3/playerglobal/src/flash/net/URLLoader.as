@@ -20,6 +20,8 @@ package flash.net
 		public var bytesTotal:uint = 0;
 
 		private var _stream:URLStream;
+		// From load until its stream completes or fails: its bytes may not have come yet.
+		private var _loading:Boolean;
 
 		public function URLLoader(request:URLRequest = null)
 		{
@@ -47,12 +49,14 @@ package flash.net
 			bytesLoaded = 0;
 			bytesTotal = 0;
 			_stream.load(request);
+			_loading = true;
 		}
 
 		public function close():void
 		{
-			if (_stream.connected)
+			if (_loading || _stream.connected)
 			{
+				_loading = false;
 				_stream.close();
 			}
 		}
@@ -71,6 +75,7 @@ package flash.net
 
 		private function complete(event:Event):void
 		{
+			_loading = false;
 			readData();
 			dispatchEvent(event);
 		}
@@ -78,6 +83,7 @@ package flash.net
 		// A failed load's data is what it delivered, nothing, as Flash's reads after one.
 		private function failed(event:IOErrorEvent):void
 		{
+			_loading = false;
 			readData();
 			dispatchEvent(event);
 		}

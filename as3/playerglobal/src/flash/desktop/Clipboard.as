@@ -49,12 +49,15 @@ package flash.desktop
 				default:
 					// A script's own format: the object itself, and a serialized copy if it may be.
 					putObjectReference(REFERENCE + format, data);
+					// Without a copy of its own, none of an earlier object's stays.
+					var bytes:ByteArray = null;
 					if (serializable)
 					{
-						const bytes:ByteArray = new ByteArray();
+						bytes = new ByteArray();
 						bytes.writeObject(data);
-						putByteArray(SERIALIZATION + format, bytes);
 					}
+
+					putByteArray(SERIALIZATION + format, bytes);
 			}
 
 			return true;
