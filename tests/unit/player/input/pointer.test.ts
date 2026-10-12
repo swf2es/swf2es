@@ -1199,3 +1199,53 @@ test("a pressed button dragged off shows over, and down again back on; one dragg
   ]);
   assert.deepEqual(step("up", 150, 20), ["up", ["mouseUp b null false 50,20 @150,20"]]);
 });
+
+test("a double click on an object whose doubleClickEnabled is true sends doubleClick for the second click", {
+  skip,
+}, async () => {
+  const { input, cmd } = await gaps();
+  // A click's events, the press 30 ms after the step before it.
+  const click = (x: number, y: number) => [...input("down", x, y, 30), ...input("up", x, y, 30)];
+  cmd("set", "a", "doubleClickEnabled", true);
+  input("move", 10, 10);
+
+  // What Flash Player 32 traced: the second click of a double is the
+  // doubleClick, in the click's place, and the third a click again.
+  assert.deepEqual(click(10, 10), [
+    "mouseDown a null true 10,10 @10,10",
+    "mouseUp a null false 10,10 @10,10",
+    "click a null false 10,10 @10,10",
+  ]);
+  assert.deepEqual(click(10, 10), [
+    "mouseDown a null true 10,10 @10,10",
+    "mouseUp a null false 10,10 @10,10",
+    "doubleClick a null false 10,10 @10,10",
+  ]);
+  assert.deepEqual(click(10, 10).at(-1), "click a null false 10,10 @10,10");
+
+  // Two clicks 600 ms apart are two clicks.
+  input("move", 11, 11, 800);
+  click(10, 10);
+  input("move", 10, 10, 570);
+  assert.deepEqual(click(10, 10).at(-1), "click a null false 10,10 @10,10");
+
+  // Only the target's own doubleClickEnabled counts, not its parent's.
+  input("move", 30, 30, 800);
+  click(30, 30);
+  assert.deepEqual(click(30, 30).at(-1), "click a1 null false 10,10 @30,30");
+
+  // A second press released elsewhere is no click, nor a double.
+  input("move", 10, 10, 800);
+  click(10, 10);
+  input("down", 10, 10, 30);
+  assert.deepEqual(input("up", 110, 10, 30).at(-1), "mouseUp b null false 10,10 @110,10");
+
+  // Nor is one whose first press was on another object, there: Flash
+  // Player 32 sent a click where the browser counted a double whose first
+  // click was on another object.
+  cmd("set", "b", "doubleClickEnabled", true);
+  input("move", 10, 10, 800);
+  click(10, 10);
+  cmd("set", "b", "x", 0);
+  assert.deepEqual(click(10, 10).at(-1), "click b null false 10,10 @10,10");
+});

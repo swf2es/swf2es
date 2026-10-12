@@ -256,8 +256,14 @@ export class PointerInput {
   /** Whether the pointer has left the player, and not come back to it since. */
   private gone = false;
   private pressed: DisplayObject | null = null;
-  /** The last press, which the next continues as a double or triple click if near it in place and time. */
-  private lastPress: { x: number; y: number; time: number; clicks: number } | null = null;
+  /** The last press, which the next continues as a double or triple click if on its target, near it in place and time. */
+  private lastPress: {
+    x: number;
+    y: number;
+    time: number;
+    clicks: number;
+    target: DisplayObject | null;
+  } | null = null;
   private moved: PointerState | null = null;
   private shown: Cursor = "default";
   private drag: {
@@ -567,15 +573,17 @@ export class PointerInput {
     if (type === "down") {
       this.held = true;
       this.pressed = target;
-      // Ruffle's rule: within half a second and two pixels of the last press.
+      // Ruffle's rule: within half a second and two pixels of the last
+      // press; and on its target, as Flash Player 32 counts a double click.
       const last = this.lastPress;
       const time = p.time ?? Number.NaN;
       const again =
         last !== null &&
+        last.target === target &&
         Math.abs(time - last.time) < 500 &&
         (p.x - last.x) ** 2 + (p.y - last.y) ** 2 < 4;
       const clicks = again ? last.clicks + 1 : 1;
-      this.lastPress = { x: p.x, y: p.y, time, clicks };
+      this.lastPress = { x: p.x, y: p.y, time, clicks, target };
       if (this.keyboard) {
         const m = target && invert(toStage(target, this.stage));
         const [x, y] = m ? apply(m, p.x, p.y) : [0, 0];
@@ -597,8 +605,14 @@ export class PointerInput {
         this.send("mouseUp", target, p, false);
       }
 
+      // The second click of a double, on an object whose doubleClickEnabled
+      // is true, is a doubleClick in its place, as Flash Player 32 sends it;
+      // a third is a click again.
       if (target && target === this.pressed && !p.canceled) {
-        this.send("click", target, p, false);
+        const double =
+          this.lastPress?.clicks === 2 &&
+          (target.object as { $doubleClickEnabled?: boolean } | null)?.$doubleClickEnabled;
+        this.send(double ? "doubleClick" : "click", target, p, false);
       }
 
       this.pressed = null;

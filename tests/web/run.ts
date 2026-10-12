@@ -462,6 +462,43 @@ check(
 );
 
 check(
+  "a double click in Chrome is a doubleClick where the target's doubleClickEnabled is true",
+  async (evaluate, send) => {
+    const [left, top] = await call<[number, number]>(evaluate, "touchPlayer()");
+    const log = () => call<string[]>(evaluate, "touchLog()");
+    const click = async (x: number, y: number, clickCount: number) => {
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: left + x,
+          y: top + y,
+          button: "left",
+          buttons: type === "mousePressed" ? 1 : 0,
+          clickCount,
+        });
+      }
+
+      return log();
+    };
+
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: left + 110, y: top + 30 });
+    await log();
+    await call(evaluate, `touchCall("setBox", "c", "doubleClickEnabled", true)`);
+    assert.deepEqual(await click(110, 30, 1), [
+      "mouseDown c 10,30 true null",
+      "mouseUp c 10,30 false null",
+      "click c 10,30 false null",
+    ]);
+    assert.deepEqual(await click(110, 30, 2), [
+      "mouseDown c 10,30 true null",
+      "mouseUp c 10,30 false null",
+      "doubleClick c 10,30 false null",
+    ]);
+    await call(evaluate, "touchDestroy()");
+  },
+);
+
+check(
   "touches reach a SWF as TouchEvents and as the mouse, and a tap may write the clipboard",
   async (evaluate, send) => {
     // A touch screen the page has from here on: the players made before it saw none.

@@ -1931,7 +1931,7 @@ The display list decides the target, so masks, scroll rectangles, depth,
 visibility, `mouseEnabled` and `mouseChildren` use the same objects that
 scripts see; Pixi's render tree does not choose a Flash target. The
 pointer sends `mouseOver`, `mouseOut`, `rollOver`, `rollOut`, `mouseMove`,
-`mouseDown`, `mouseUp` and `click` through EventDispatcher's capture and
+`mouseDown`, `mouseUp`, `click` and `doubleClick` through EventDispatcher's capture and
 bubble phases, and the stage's `mouseLeave`, in the order Flash Player 32
 traced them (a probe logging every event with its target, run in
 Electron's PepperFlash and driven over the DevTools protocol, the
@@ -1956,7 +1956,14 @@ release outside, which holds nothing, leaves no second time; a left
 button let go where the host told of no release (outside the browser, or
 while another button stays down, which Chrome tells as a move) is
 released at the next move that shows it, and left where that is outside.
-`updateAfterEvent` changes none of this. Ruffle sends
+`updateAfterEvent` changes none of this. The second click of a double
+is a `doubleClick` in the click's place where the target's own
+`doubleClickEnabled` is true, its parent's counting for nothing, and a
+third a click again, as Flash Player 32 traced them. The plug-in took the
+browser's count of clicks, and counted none whose first was on another
+object; the player counts a press on the last one's target within half a
+second and two pixels of it, Ruffle's rule, as the browser's own would.
+Ruffle sends
 `mouseMove` first too, and no `mouseLeave`.
 `DisplayObject.mouseX` and `mouseY` follow the last pointer position.
 The pick follows Flash's order, as Ruffle's `mouse_pick_avm2` has it:
