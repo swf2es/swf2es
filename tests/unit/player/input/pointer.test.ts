@@ -3,12 +3,15 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
+import { readMorphShape, readSwf } from "@swf2es/format";
 import { containerEngine } from "../../../../oracle/oracle.ts";
 import { BitmapStore } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import {
   BitmapObject,
   ButtonObject,
+  CONTENT,
   Container,
+  ShapeObject,
   TextObject,
   TRANSFORM,
 } from "../../../../packages/player/dist/display/display.js";
@@ -24,6 +27,7 @@ import { Scripting } from "../../../../packages/player/dist/scripting.js";
 import { bare } from "../../../player/cases.ts";
 import { libraryAbcs } from "../../../player/libraries.ts";
 import { compileScripts } from "../../../player/scripts.ts";
+import * as w from "../../../swf-writer.ts";
 
 test("the topmost artwork targets its interactive parent, with mouseChildren and visibility respected", () => {
   const stage = new Container();
@@ -1493,4 +1497,62 @@ test("a pick passes over what stood still away from the point, and sees what mov
   assert.equal(pick(10, 110), button);
   area.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 150 });
   assert.equal(pick(10, 160), button);
+});
+
+test("a pick sees a morph's new blend once drawn, though picks came between its ratio and its draw", () => {
+  // A square of 20 pixels growing to 120.
+  const square = (size: number): w.PathCommand[] => [
+    { move: [0, 0] },
+    { line: [size, 0] },
+    { line: [size, size] },
+    { line: [0, size] },
+    { line: [0, 0] },
+  ];
+  const swf = readSwf(
+    w.swf({
+      width: 100,
+      height: 100,
+      frameRate: 12,
+      frameCount: 1,
+      tags: [
+        w.morphShape({
+          id: 1,
+          startBounds: [0, 400, 0, 400],
+          endBounds: [0, 2400, 0, 2400],
+          fills: [{ start: 0xffff0000, end: 0xff0000ff }],
+          start: [{ fill0: 0, fill1: 1, commands: square(400) }],
+          end: [square(2400)],
+        }),
+      ],
+    }),
+  );
+  const tag = swf.tags[0];
+  const morph = {
+    type: "morph",
+    id: 1,
+    morph: readMorphShape(swf.bytes, tag.code, tag.offset, tag.length),
+    blends: new Map(),
+    bitmap: () => null,
+  };
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
+  const clip = new Container();
+  clip.object = { $display: clip } as never;
+  stage.addChildAt(clip, 0);
+  const shape = ShapeObject.ofMorph(morph as never);
+  clip.addChildAt(shape, 0);
+  for (let i = 0; i < 4; i++) {
+    pointerTarget(stage, 5, 5, 200, 200);
+  }
+
+  // A frame sets the ratio, frames pick before the view draws the new blend.
+  shape.ratio = 65535;
+  shape.invalidate(CONTENT);
+  for (let i = 0; i < 3; i++) {
+    pointerTarget(stage, 150, 150, 200, 200);
+  }
+
+  shape.drawn();
+  assert.equal(pointerTarget(stage, 100, 100, 200, 200), clip);
 });

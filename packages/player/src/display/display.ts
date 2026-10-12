@@ -311,9 +311,17 @@ export class DisplayObject {
     }
 
     // Its own pick bounds stand when it only moves; its ancestors' do not.
-    // An ancestor of one changed since the last pick is marked already.
+    this.pickChanged(what !== TRANSFORM);
+  }
+
+  /**
+   * Mark the pick bounds above it stale, and its own unless `own` is false
+   * (input/pointer.ts): an ancestor of one changed since the last pick is
+   * marked already.
+   */
+  pickChanged(own: boolean): void {
     const picks = pickWork.picks;
-    if (what !== TRANSFORM) {
+    if (own) {
       this.pickStale = true;
       this.pickChangedAt = picks;
     }
@@ -681,6 +689,10 @@ export class ShapeObject extends DisplayObject {
     ) {
       this.shape = morphAt(this.morph, this.ratio);
       this.blended = { morph: this.morph, ratio: this.ratio, shape: this.shape };
+      // New bounds, which no invalidate tells of: the change of ratio did,
+      // but those it marked may have been measured since, with the old blend.
+      pickWork.changes++;
+      this.pickChanged(true);
     }
 
     return this.shape;
