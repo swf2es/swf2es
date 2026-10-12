@@ -1086,10 +1086,32 @@ export class Container extends DisplayObject {
   readonly depths = new Map<number, DisplayObject>();
   /** Whether a descendant changed since the renderer last synced. */
   descendantsDirty = true;
+  /**
+   * The clips and buttons the frame's walks visit at and under it, in
+   * their order, kept while no clip or container comes or goes below it
+   * (walkList); null where it is to be made again, or too short to keep.
+   */
+  walk: WalkList | null = null;
 
   constructor() {
     super();
     this.frameChildren = this.children;
+  }
+
+  /**
+   * A child came, went or moved: the walks' lists that hold it are made
+   * again, those of this container and every one above it. Not for a
+   * leaf, a shape or a text, which no walk visits: a timeline's shapes
+   * swapped every frame leave the lists be.
+   */
+  protected relist(child: DisplayObject): void {
+    if (child.kind === OTHER && child.frameChildren.length === 0) {
+      return;
+    }
+
+    for (let p: Container | null = this; p; p = p.parent) {
+      p.walk = null;
+    }
   }
 
   /** Place `child` at timeline depth `depth`: before the first child of a greater depth. */
@@ -1108,6 +1130,7 @@ export class Container extends DisplayObject {
     child.parent = this;
     this.children.splice(index, 0, child);
     this.depths.set(depth, child);
+    this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
   }
@@ -1135,6 +1158,7 @@ export class Container extends DisplayObject {
     this.children.splice(this.children.indexOf(child), 1);
     child.parent = null;
     child.focusDrop?.(child);
+    this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
   }
@@ -1149,6 +1173,7 @@ export class Container extends DisplayObject {
     child.parent?.removeChild(child);
     child.parent = this;
     this.children.splice(same ? Math.min(index, this.children.length) : index, 0, child);
+    this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
   }
@@ -1158,6 +1183,8 @@ export class Container extends DisplayObject {
     const j = this.children.indexOf(b);
     this.children[i] = b;
     this.children[j] = a;
+    this.relist(a);
+    this.relist(b);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
   }
@@ -1315,6 +1342,7 @@ export class ButtonObject extends Container {
 
       this.children.splice(0, 0, current);
       current.parent = this;
+      this.relist(current);
       this.invalidate(CHILDREN);
       scriptWork.changes++;
     }
@@ -1406,6 +1434,95 @@ function recordPlace(record: ButtonRecord, look: boolean): Place {
     filters: look ? record.filters : null,
     clipActions: null,
   };
+}
+
+/**
+ * The clips and buttons the frame's walks visit at and under a container,
+ * in tree order, parents first (Player.tick's collect, a round of frame
+ * scripts): `ends[i]` is the index after `items[i]` and all under it, to
+ * leave a clip out with what it holds. A button's states are not in it,
+ * its end the index after it: they are walked as they are, which a button
+ * changes without its parent knowing (`frameChildren`, `scriptChildren`).
+ */
+export interface WalkList {
+  items: DisplayObject[];
+  ends: number[];
+}
+
+/** The shortest list a container keeps for itself; a shorter one its parent's making walks again. */
+const KEPT_WALK = 32;
+
+/**
+ * Those the frame's walks visit at and under `root`, as WalkList lays them
+ * out: kept on each container till a clip or a container comes or goes
+ * under it (Container.relist), so that a frame visits the clips alone,
+ * where its walks visited every object with children, twice or more.
+ */
+export function walkList(root: Container): WalkList {
+  const kept = root.walk;
+  if (kept) {
+    return kept;
+  }
+
+  const list: WalkList = { items: [], ends: [] };
+  listInto(root, list, false);
+  root.walk = list;
+  return list;
+}
+
+/**
+ * `c` and those under it appended to `list`, each container's kept list
+ * copied where it has one; `c`'s own kept too where `keep`, and long enough.
+ */
+function listInto(c: Container, list: WalkList, keep = true): void {
+  const { items, ends } = list;
+  const start = items.length;
+  if (c.kind === CLIP) {
+    items.push(c);
+    ends.push(0);
+  }
+
+  const children = c.children;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (child.kind === BUTTON) {
+      items.push(child);
+      ends.push(items.length);
+      continue;
+    }
+
+    if (child.kind === OTHER && child.frameChildren.length === 0) {
+      continue;
+    }
+
+    const kept = (child as Container).walk;
+    if (!kept) {
+      listInto(child as Container, list);
+      continue;
+    }
+
+    const base = items.length;
+    const keptItems = kept.items;
+    const keptEnds = kept.ends;
+    for (let k = 0; k < keptItems.length; k++) {
+      items.push(keptItems[k]);
+      ends.push(keptEnds[k] + base);
+    }
+  }
+
+  if (c.kind === CLIP) {
+    ends[start] = items.length;
+  }
+
+  // Long enough, kept for the next list made above it, which then copies it.
+  if (keep && items.length - start >= KEPT_WALK) {
+    const own: WalkList = { items: items.slice(start), ends: ends.slice(start) };
+    for (let k = 0; k < own.ends.length; k++) {
+      own.ends[k] -= start;
+    }
+
+    c.walk = own;
+  }
 }
 
 /**

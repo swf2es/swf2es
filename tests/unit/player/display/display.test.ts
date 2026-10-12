@@ -14,6 +14,7 @@ import {
   scriptChildren,
   scriptWork,
   type TextObject,
+  walkList,
 } from "../../../../packages/player/dist/display/display.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import * as w from "../../../swf-writer.ts";
@@ -780,4 +781,94 @@ test("every change a round of frame scripts reads moves scriptWork, and a script
   assert.ok(!moves(() => (clip.makingChildren = false)), "still made");
   assert.ok(!moves(() => (clip.timelineChild = true)), "still a timeline child");
   assert.ok(!moves(() => (button.firstScripts = false)), "first scripts still walked");
+});
+
+test("the walks' kept lists follow every clip and container that comes, goes or moves", () => {
+  // Kept on each container (walkList), a list must be what walking the
+  // tree gives, whatever changed below it since: checked after each of a
+  // run of moves, among subtrees long enough to keep lists of their own.
+  const tags: Uint8Array[] = [
+    w.sprite(3, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+  ];
+  for (let i = 0; i < 300; i++) {
+    tags.push(w.place({ depth: i + 1, character: 3 }));
+  }
+
+  const { root, stage } = movie(tags);
+  const clips = root.children.slice() as MovieClip[];
+  const walked = (o: DisplayObject, out: DisplayObject[]) => {
+    if (o.kind !== 0) {
+      out.push(o);
+    }
+
+    if (o.kind === 2) {
+      return out;
+    }
+
+    for (const child of o.frameChildren) {
+      if (child.kind !== 0 || child.frameChildren.length !== 0) {
+        walked(child, out);
+      }
+    }
+
+    return out;
+  };
+  // A 32-bit LCG, so that the run is the same every time.
+  let seed = 11;
+  const random = (n: number) => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return (seed >>> 8) % n;
+  };
+  const containers: Container[] = [root];
+  for (let step = 0; step < 400; step++) {
+    const into = [...containers, ...clips][random(containers.length + clips.length)];
+    const what = random(5);
+    const clip = clips[random(clips.length)];
+    if (what === 0) {
+      const sprite = new Container();
+      containers.push(sprite);
+      into.addChildAt(sprite, random(into.children.length + 1));
+    } else if (what === 1 && !clip.encloses(into)) {
+      into.addChildAt(clip, random(into.children.length + 1));
+    } else if (what === 2 && clip.parent) {
+      clip.parent.removeChild(clip);
+    } else if (what === 3 && into.children.length >= 2) {
+      into.swapChildren(into.children[0], into.children[into.children.length - 1]);
+    } else if (what === 4) {
+      // A timeline's place, which takes what is at the depth off first: a clip off the list, or
+      // a new container.
+      const placed = clip.parent || clip.encloses(into) ? new Container() : clip;
+      if (placed !== clip) {
+        containers.push(placed as Container);
+      }
+
+      into.placeAtDepth(placed, 1000 + random(5));
+    }
+
+    // Every few steps the stage's list, and a container's own, as a frame's walk asks for them.
+    if (step % 3 === 0) {
+      const some = containers[random(containers.length)];
+      for (const top of [stage as Container, some]) {
+        const kept = walkList(top).items;
+        const now = walked(top, []);
+        assert.equal(kept.length, now.length, `step ${step}`);
+        assert.ok(
+          kept.every((o, i) => o === now[i]),
+          `step ${step}`,
+        );
+      }
+    }
+  }
+
+  // Ends leave a clip out with all it holds.
+  const { items, ends } = walkList(stage as Container);
+  for (let i = 0; i < items.length; i++) {
+    for (let k = i + 1; k < ends[i]; k++) {
+      assert.ok(items[i].encloses(items[k]));
+    }
+
+    if (ends[i] < items.length) {
+      assert.ok(!items[i].encloses(items[ends[i]]));
+    }
+  }
 });

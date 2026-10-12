@@ -1196,7 +1196,18 @@ advance, and once for each round of frame scripts, which a busy scene of
 some 13,000 objects felt. A walk reads each object's `frameChildren`, a
 container's own children array, a button's states, one empty list for
 the rest, and its `kind`, not its class, and calls into no object with
-nothing under it. Another round runs only when the last ran a script and
+nothing under it. Each container keeps the list of clips and buttons at
+and under it in that order (`walkList`), with where each clip's own end,
+for one that sits a frame out with all it holds; a clip or container that
+comes, goes or moves under it drops the lists from its parent up, and the
+next walk makes them again, copying those still kept below (a list of
+fewer than 32 is not kept, but walked again within its parent's). A
+shape or text swapped, as a timeline swaps them on every frame, drops
+none. So a frame visits the clips alone, not every container: in
+`walk-bench.ts`'s 13,000 objects a tick went from 284 to 117 µs and a
+round of scripts from 122 to 44, for some 25 bytes an object. A
+button's states, which it changes without its parent knowing, are walked
+as they are. Another round runs only when the last ran a script and
 something a round reads changed since it walked, which `scriptWork`
 counts: a clip's frame, its frame scripts, `makingChildren` or
 `timelineChild`, a children list or a button's states, an object made
