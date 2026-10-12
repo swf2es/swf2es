@@ -2,7 +2,13 @@
 // the libraries come from, how sockets reach their servers, whether
 // compiled code is cached. Each is fetched once a page, on first use.
 import { type Codegen, createCodegen } from "@swf2es/codegen";
-import type { FetchRequest, FetchResult, ModuleCache, SocketHost } from "@swf2es/player";
+import {
+  type FetchRequest,
+  type FetchResult,
+  type ModuleCache,
+  playerglobalLibrary,
+  type SocketHost,
+} from "@swf2es/player";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { webSocketSocketHost } from "@swf2es/player-hosts/websocket";
 
@@ -15,11 +21,12 @@ export interface SocketProxy {
 
 export interface Configuration {
   /**
-   * The ABCs a SWF's ActionScript 3 links against. playerglobal is Adobe's
-   * and cannot ship with swf2es, so the page or extension gives their URLs;
-   * without them only SWFs with no ActionScript 3 play.
+   * The ABCs a SWF's ActionScript 3 links against, by URL: avmplus'
+   * builtin.abc, and a playerglobal in place of the one swf2es ships
+   * (playerglobalLibrary), if one is given. Without builtin only SWFs with
+   * no ActionScript 3 play.
    */
-  libraries?: { builtin: string; playerglobal: string };
+  libraries?: { builtin: string; playerglobal?: string };
   /** codegen.wasm's URL: by default what the page's import map gives `@swf2es/codegen/codegen.wasm`. */
   codegen?: string;
   /**
@@ -96,7 +103,7 @@ export async function codegenForPlayer(): Promise<Codegen> {
   return createCodegen(module);
 }
 
-/** builtin.abc and playerglobal.abc, fetched once a page; every player reads the same bytes. */
+/** builtin.abc and playerglobal, fetched once a page; every player reads the same bytes. */
 export function libraries(): Promise<Uint8Array[]> {
   const urls = config.libraries;
   if (!urls) {
@@ -106,7 +113,11 @@ export function libraries(): Promise<Uint8Array[]> {
   }
 
   libraryBytes ??= Promise.all(
-    [urls.builtin, urls.playerglobal].map(async (url) => {
+    [urls.builtin, urls.playerglobal ?? null].map(async (url) => {
+      if (url === null) {
+        return playerglobalLibrary;
+      }
+
       const response = await fetch(url);
       // A missing one would reach codegen as an empty ABC, refused as if the SWF's.
       if (!response.ok) {

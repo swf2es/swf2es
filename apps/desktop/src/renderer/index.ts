@@ -15,8 +15,6 @@ declare global {
 const desktop = window.swf2esDesktop;
 
 configure({
-  // The shell serves them from where the user pointed it; a missing one is a 404.
-  libraries: { builtin: "/libraries/builtin.abc", playerglobal: "/libraries/playerglobal.abc" },
   cache: true,
   sockets: shellSocketHost(desktop.sockets),
   fetch: shellFetch(desktop.network),
@@ -30,15 +28,21 @@ const libraryPanel = byId<HTMLElement>("libraries");
 const failure = byId<HTMLElement>("failure");
 
 let libraries: LibraryState = { builtin: null, playerglobal: null };
-const librariesReady = () => libraries.builtin !== null && libraries.playerglobal !== null;
+// A playerglobal the user chose in place of swf2es's own is optional.
+const librariesReady = () => libraries.builtin !== null;
 
 function showLibraries(state: LibraryState): void {
   libraries = state;
-  for (const name of ["builtin", "playerglobal"] as const) {
-    byId(`${name}-path`).textContent = state[name] ?? "not found";
-    byId(`choose-${name}`).hidden = name === "builtin" && state.builtin !== null;
-  }
-
+  // The shell serves them from where the user pointed it; a missing one is a 404.
+  configure({
+    libraries: {
+      builtin: "/libraries/builtin.abc",
+      playerglobal: state.playerglobal !== null ? "/libraries/playerglobal.abc" : undefined,
+    },
+  });
+  byId("builtin-path").textContent = state.builtin ?? "not found";
+  byId("playerglobal-path").textContent = state.playerglobal ?? "swf2es's own";
+  byId("choose-builtin").hidden = state.builtin !== null;
   libraryPanel.hidden = librariesReady();
 }
 

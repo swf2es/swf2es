@@ -15,14 +15,15 @@ does not run yet: an AVM1 SWF plays its timeline with no actions. Video,
 Stage3D and the clipboard are not there either.
 [docs/architecture.md](docs/architecture.md) describes how it all works.
 
-## Libraries you provide
+## Libraries
 
 A SWF's ActionScript 3 links against `builtin.abc` (avmplus' standard
-library, MPL-2.0) and `playerglobal.abc` (Adobe's `flash.*` declarations).
-playerglobal is not redistributable, so swf2es does not ship it: you
-supply both files. The repository's tests take builtin.abc from the
-avmplus submodule (`oracle/avmplus/generated/`) and playerglobal.abc from
-the oracle's container image, into `tests/player/out/libraries/`
+library, MPL-2.0) and a playerglobal (the `flash.*` classes). swf2es ships
+its own playerglobal, `playerglobalLibrary` in `@swf2es/player`: Flash
+Player's API, compiled from `as3/playerglobal` (Ruffle's AS3 and the
+player's own, see [as3/README.md](as3/README.md)). You supply
+`builtin.abc`; the repository's tests take it from the avmplus submodule
+(`oracle/avmplus/generated/`) into `tests/player/out/libraries/`
 (`tests/player/libraries.ts`).
 
 ## Examples
@@ -42,7 +43,7 @@ first player loads:
   import { configure } from "@swf2es/web";
 
   configure({
-    libraries: { builtin: "/flash/builtin.abc", playerglobal: "/flash/playerglobal.abc" },
+    libraries: { builtin: "/flash/builtin.abc" },
     cache: true, // keep compiled modules in IndexedDB for the next visit
   });
 
@@ -64,7 +65,7 @@ back its GL context, audio and sockets. It fires `load`, `error` and
 ```js
 import { configure, watchFlash } from "@swf2es/web";
 
-configure({ libraries: { builtin: "/flash/builtin.abc", playerglobal: "/flash/playerglobal.abc" } });
+configure({ libraries: { builtin: "/flash/builtin.abc" } });
 // Each Flash <object>/<embed> becomes a <swf2es-player> with its params, now and as the
 // page adds more, until stop(). replaceFlash() does it once, for the tags there now.
 const stop = watchFlash();
@@ -101,6 +102,10 @@ would compile, a log for each, and a `manifest.json` of their keys:
 node packages/cli/dist/main.js movie.swf -o movie.swf2es \
   --lib builtin.abc --lib playerglobal.abc --emit-libraries
 ```
+
+with the playerglobal the player loads: its own, which the repository's
+tests write to `tests/player/out/libraries/playerglobal-swf2es.abc`, and the command takes
+by default there.
 
 The player reads them as a module cache. Chain an IndexedDB cache behind
 it to keep whatever the command did not compile:
