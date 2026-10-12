@@ -2,11 +2,11 @@
 
 package flash.text.engine
 {
+	import flash.geom.Rectangle;
 	import flash.display.DisplayObject;
 	import flash.display.DisplayObjectContainer;
 	import flash.display.NativeMenu;
 	import flash.events.EventDispatcher;
-	import flash.geom.Rectangle;
 
 	[API("662")]
 	public final class TextLine extends DisplayObjectContainer

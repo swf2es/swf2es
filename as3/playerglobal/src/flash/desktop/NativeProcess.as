@@ -2,9 +2,9 @@
 
 package flash.desktop
 {
-	import flash.events.EventDispatcher;
-	import flash.utils.IDataInput;
 	import flash.utils.IDataOutput;
+	import flash.utils.IDataInput;
+	import flash.events.EventDispatcher;
 
 	[API("668")]
 	public class NativeProcess extends EventDispatcher

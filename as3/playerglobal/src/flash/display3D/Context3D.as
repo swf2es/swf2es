@@ -2,10 +2,10 @@
 
 package flash.display3D
 {
-	import flash.display.BitmapData;
-	import flash.display3D.textures.CubeTexture;
-	import flash.display3D.textures.RectangleTexture;
 	import flash.display3D.textures.Texture;
+	import flash.display3D.textures.RectangleTexture;
+	import flash.display3D.textures.CubeTexture;
+	import flash.display.BitmapData;
 	import flash.display3D.textures.TextureBase;
 	import flash.events.EventDispatcher;
 	import flash.geom.Matrix3D;

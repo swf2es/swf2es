@@ -153,7 +153,8 @@ package flash.ui
 		public static const STRING_FIND:String = "";
 		public static const STRING_HELP:String = "";
 		public static const STRING_MODESWITCH:String = "";
-		public static const CharCodeStrings:Array;
+		// AIR's names for keys, which swf2es has none of.
+		public static const CharCodeStrings:Array = null;
 		public static const NUMBER_0:uint = 48;
 		public static const NUMBER_1:uint = 49;
 		public static const NUMBER_2:uint = 50;

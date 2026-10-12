@@ -34,7 +34,7 @@ package flash.events
 		{
 			return this._bitmapData;
 		}
-		public function set bitmapData(bitmapData:BitmapData)
+		public function set bitmapData(bitmapData:BitmapData):*
 		{
 			this._bitmapData = bitmapData;
 		}
@@ -43,7 +43,7 @@ package flash.events
 		{
 			return this._byteArray;
 		}
-		public function set byteArray(byteArray:ByteArray)
+		public function set byteArray(byteArray:ByteArray):*
 		{
 			this._byteArray = byteArray;
 		}
@@ -52,7 +52,7 @@ package flash.events
 		{
 			return this._vector;
 		}
-		public function set vector(vector:Vector.<Number>)
+		public function set vector(vector:Vector.<Number>):*
 		{
 			this._vector = vector;
 		}

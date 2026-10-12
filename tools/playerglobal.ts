@@ -101,6 +101,31 @@ const number = (v: unknown) =>
     ? ["number", Number(v[1])]
     : (v ?? null);
 
+/**
+ * A slot's value as the VM starts it: one with none declared holds its
+ * type's default, as one declaring that default does, which a SWF cannot
+ * tell apart.
+ */
+const slotValue = (type: string, v: unknown) => {
+  if (v !== undefined && v !== null) {
+    return number(v);
+  }
+
+  switch (type) {
+    case "Number":
+      return ["number", Number.NaN];
+    case "int":
+    case "uint":
+      return ["number", 0];
+    case "Boolean":
+      return ["boolean", false];
+    case "*":
+      return ["undefined", null];
+    default:
+      return ["null", null];
+  }
+};
+
 /** A name with its namespace set in one order: the set is what a SWF sees, not its order. */
 function sorted(name: string): string {
   const m = name.match(/^\{(.*)\}::(.*)$/);
@@ -127,7 +152,7 @@ function shapes(abc: Uint8Array): Map<string, Shape> {
                 returns: t.method.returns,
               }
             : "type" in t
-              ? { type: t.type, value: number(t.value) }
+              ? { type: t.type, value: slotValue(t.type, t.value) }
               : {};
         out.set(
           qualified,
@@ -168,7 +193,7 @@ function shapes(abc: Uint8Array): Map<string, Shape> {
                   flags: "flags" in m ? m.flags : [],
                 }
               : "type" in m
-                ? { type: m.type, value: number(m.value) }
+                ? { type: m.type, value: slotValue(m.type, m.value) }
                 : {};
           shape.set(`${side} ${m.kind} ${sorted(m.name)}`, JSON.stringify(body));
         }

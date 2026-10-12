@@ -23,7 +23,7 @@ package flash.events
 		{
 			return this._deviceGroup;
 		}
-		public function set deviceGroup(value:DRMDeviceGroup)
+		public function set deviceGroup(value:DRMDeviceGroup):*
 		{
 			this._deviceGroup = value;
 		}

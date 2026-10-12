@@ -34,12 +34,12 @@ package flash.geom
 
 		public function concat(m:Matrix):void
 		{
-			var a = m.a * this.a + m.c * this.b;
-			var b = m.b * this.a + m.d * this.b;
-			var c = m.a * this.c + m.c * this.d;
-			var d = m.b * this.c + m.d * this.d;
-			var tx = m.a * this.tx + m.c * this.ty + m.tx;
-			var ty = m.b * this.tx + m.d * this.ty + m.ty;
+			const a:Number = m.a * this.a + m.c * this.b;
+			const b:Number = m.b * this.a + m.d * this.b;
+			const c:Number = m.a * this.c + m.c * this.d;
+			const d:Number = m.b * this.c + m.d * this.d;
+			const tx:Number = m.a * this.tx + m.c * this.ty + m.tx;
+			const ty:Number = m.b * this.tx + m.d * this.ty + m.ty;
 
 			this.a = a;
 			this.b = b;
@@ -160,13 +160,13 @@ package flash.geom
 
 		public function invert():void
 		{
-			var det = this.a * this.d - this.c * this.b;
-			var tx = (this.d * this.tx - this.c * this.ty) / -det;
-			var ty = (this.b * this.tx - this.a * this.ty) / det;
-			var a = this.d / det;
-			var b = this.b / -det;
-			var c = this.c / -det;
-			var d = this.a / det;
+			const det:Number = this.a * this.d - this.c * this.b;
+			const tx:Number = (this.d * this.tx - this.c * this.ty) / -det;
+			const ty:Number = (this.b * this.tx - this.a * this.ty) / det;
+			const a:Number = this.d / det;
+			const b:Number = this.b / -det;
+			const c:Number = this.c / -det;
+			const d:Number = this.a / det;
 
 			this.a = a;
 			this.b = b;
@@ -178,15 +178,15 @@ package flash.geom
 
 		public function rotate(angle:Number):void
 		{
-			var sin = Math.sin(angle);
-			var cos = Math.cos(angle);
+			const sin:Number = Math.sin(angle);
+			const cos:Number = Math.cos(angle);
 
-			var a = cos * this.a + (-sin) * this.b;
-			var b = sin * this.a + cos * this.b;
-			var c = cos * this.c + (-sin) * this.d;
-			var d = sin * this.c + cos * this.d;
-			var tx = cos * this.tx + (-sin) * this.ty;
-			var ty = sin * this.tx + cos * this.ty;
+			const a:Number = cos * this.a + (-sin) * this.b;
+			const b:Number = sin * this.a + cos * this.b;
+			const c:Number = cos * this.c + (-sin) * this.d;
+			const d:Number = sin * this.c + cos * this.d;
+			const tx:Number = cos * this.tx + (-sin) * this.ty;
+			const ty:Number = sin * this.tx + cos * this.ty;
 
 			this.a = a;
 			this.b = b;

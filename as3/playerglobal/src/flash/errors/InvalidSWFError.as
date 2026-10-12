@@ -5,7 +5,7 @@ package flash.errors
 {
 	public dynamic class InvalidSWFError extends Error
 	{
-		prototype.name = "InvalidSWFError";
+		InvalidSWFError.prototype.name = "InvalidSWFError";
 
 		public function InvalidSWFError(message:String = "", id:int = 0)
 		{

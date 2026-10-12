@@ -8,8 +8,9 @@ package flash.sampler
 		{
 		}
 
-		public const id:Number;
-		public const type:Class;
+		// Flash Player fills these in, which swf2es does not: their type's default.
+		public const id:Number = NaN;
+		public const type:Class = null as Class;
 
 		public native function get object():*;
 

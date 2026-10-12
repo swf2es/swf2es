@@ -8,8 +8,9 @@ package flash.events
 	{
 		public static const STAGE_VIDEO_AVAILABILITY:String = "stageVideoAvailability";
 
-		public const driver:String;
-		public const reason:String;
+		// Flash Player fills these in, which swf2es does not: their type's default.
+		public const driver:String = null;
+		public const reason:String = null;
 
 		private var _availability:String;
 

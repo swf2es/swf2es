@@ -156,16 +156,16 @@ package flash.geom
 
 		public function containsRect(rect:Rectangle):Boolean
 		{
-			var r1 = rect.x + rect.width;
-			var b1 = rect.y + rect.height;
-			var r2 = this.x + this.width;
-			var b2 = this.y + this.height;
+			const r1:Number = rect.x + rect.width;
+			const b1:Number = rect.y + rect.height;
+			const r2:Number = this.x + this.width;
+			const b2:Number = this.y + this.height;
 			return rect.x >= this.x && rect.x < r2 && rect.y >= this.y && rect.y < b2 && r1 > this.x && r1 <= r2 && b1 > this.y && b1 <= b2;
 		}
 
 		public function intersection(toIntersect:Rectangle):Rectangle
 		{
-			var result = new Rectangle();
+			const result:Rectangle = new Rectangle();
 			if (this.isEmpty() || toIntersect.isEmpty())
 			{
 				result.setEmpty();
@@ -188,10 +188,10 @@ package flash.geom
 			{
 				return false;
 			}
-			var resultx = Math.max(this.x, toIntersect.x);
-			var resulty = Math.max(this.y, toIntersect.y);
-			var resultwidth = Math.min(this.x + this.width, toIntersect.x + toIntersect.width) - resultx;
-			var resultheight = Math.min(this.y + this.height, toIntersect.y + toIntersect.height) - resulty;
+			const resultx:Number = Math.max(this.x, toIntersect.x);
+			const resulty:Number = Math.max(this.y, toIntersect.y);
+			const resultwidth:Number = Math.min(this.x + this.width, toIntersect.x + toIntersect.width) - resultx;
+			const resultheight:Number = Math.min(this.y + this.height, toIntersect.y + toIntersect.height) - resulty;
 			if (resultwidth <= 0 || resultheight <= 0)
 			{
 				return false;
@@ -209,7 +209,7 @@ package flash.geom
 			{
 				return this.clone();
 			}
-			var r = new Rectangle();
+			const r:Rectangle = new Rectangle();
 			r.x = Math.min(this.x, toUnion.x);
 			r.y = Math.min(this.y, toUnion.y);
 			r.width = Math.max(this.x + this.width, toUnion.x + toUnion.width) - r.x;

@@ -2,10 +2,10 @@
 
 package flash.media
 {
+	import flash.filesystem.File;
 	import flash.desktop.IFilePromise;
 	import flash.events.ErrorEvent;
 	import flash.events.EventDispatcher;
-	import flash.filesystem.File;
 	import flash.utils.IDataInput;
 
 	[API("669")]

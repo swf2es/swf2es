@@ -13,7 +13,8 @@ package flash.events
 		public static const RENDER_STATUS_SOFTWARE:String = "software";
 		public static const RENDER_STATUS_UNAVAILABLE:String = "unavailable";
 
-		public const codecInfo:String;
+		// Flash Player fills these in, which swf2es does not: their type's default.
+		public const codecInfo:String = null;
 
 		private var _status:String;
 		private var _colorSpace:String;

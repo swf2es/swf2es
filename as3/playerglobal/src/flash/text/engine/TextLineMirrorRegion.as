@@ -2,8 +2,8 @@
 
 package flash.text.engine
 {
-	import flash.events.EventDispatcher;
 	import flash.geom.Rectangle;
+	import flash.events.EventDispatcher;
 
 	[API("662")]
 	public final class TextLineMirrorRegion

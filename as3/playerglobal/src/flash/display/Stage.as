@@ -3,13 +3,13 @@
 
 package flash.display
 {
+	import flash.media.StageVideo;
 	import flash.errors.IllegalOperationError;
 	import flash.accessibility.AccessibilityImplementation;
 	import flash.accessibility.AccessibilityProperties;
 	import flash.events.Event;
 	import flash.geom.Rectangle;
 	import flash.geom.Transform;
-	import flash.media.StageVideo;
 	import flash.text.TextSnapshot;
 
 	public class Stage extends DisplayObjectContainer

@@ -4,7 +4,6 @@
 
 package flash.xml
 {
-	import flash.xml.XMLNode;
 	import flash.xml.XMLNodeType;
 
 	public class XMLNode
@@ -67,15 +66,15 @@ package flash.xml
 
 		public function cloneNode(deep:Boolean):XMLNode
 		{
-			var clone = new XMLNode(nodeType, nodeType == XMLNodeType.ELEMENT_NODE ? nodeName : nodeValue);
-			for (var key in attributes)
+			const clone:XMLNode = new XMLNode(nodeType, nodeType == XMLNodeType.ELEMENT_NODE ? nodeName : nodeValue);
+			for (var key:String in attributes)
 			{
 				clone.attributes[key] = attributes[key];
 			}
 
 			if (deep)
 			{
-				for (var i = 0; i < childNodes.length; i++)
+				for (var i:int = 0; i < childNodes.length; i++)
 				{
 					clone.appendChild(childNodes[i].cloneNode(true));
 				}
@@ -96,7 +95,7 @@ package flash.xml
 				{
 					parentNode.lastChild = previousSibling;
 				}
-				var index = parentNode.childNodes.indexOf(this);
+				const index:int = parentNode.childNodes.indexOf(this);
 				if (index > -1)
 				{
 					// For some reason ASC doesn't add the AS3 namespace here;
@@ -133,7 +132,7 @@ package flash.xml
 				// inserting in the middle
 				before.previousSibling.nextSibling = node;
 
-				for (var i = 0; i < childNodes.length; i++)
+				for (var i:int = 0; i < childNodes.length; i++)
 				{
 					if (childNodes[i] === before)
 					{
@@ -179,7 +178,7 @@ package flash.xml
 
 		public function getNamespaceForPrefix(prefix:String):String
 		{
-			for (var attr in attributes)
+			for (var attr:String in attributes)
 			{
 				if (attr.indexOf("xmlns:") != 0)
 				{
@@ -201,7 +200,7 @@ package flash.xml
 
 		public function getPrefixForNamespace(ns:String):String
 		{
-			for (var attr in attributes)
+			for (var attr:String in attributes)
 			{
 				if (attr.indexOf("xmlns:") != 0)
 				{
@@ -227,7 +226,7 @@ package flash.xml
 			{
 				return null;
 			}
-			var index = nodeName.indexOf(":");
+			const index:int = nodeName.indexOf(":");
 			if (index > -1)
 			{
 				return nodeName.substring(index + 1);
@@ -244,7 +243,7 @@ package flash.xml
 			{
 				return null;
 			}
-			var index = nodeName.indexOf(":");
+			const index:int = nodeName.indexOf(":");
 			if (index > -1)
 			{
 				return nodeName.substring(0, index);
@@ -284,13 +283,13 @@ package flash.xml
 				return escapeXML(nodeValue);
 			}
 
-			var result = "";
+			var result:String = "";
 			if (nodeName != null)
 			{
 				result += "<" + nodeName;
 			}
 
-			for (var key in this.attributes)
+			for (var key:String in this.attributes)
 			{
 				result += " " + key + "=\"" + escapeXML(this.attributes[key]) + "\"";
 			}
@@ -301,9 +300,9 @@ package flash.xml
 				{
 					result += ">";
 				}
-				for each (var child in childNodes)
+				for (var j:int = 0; j < childNodes.length; j++)
 				{
-					result += child.toString();
+					result += childNodes[j].toString();
 				}
 				if (nodeName != null)
 				{

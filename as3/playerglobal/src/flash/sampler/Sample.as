@@ -5,7 +5,8 @@ package flash.sampler
 {
 	public class Sample
 	{
-		public const time:Number;
-		public const stack:Array;
+		// Flash Player fills these in, which swf2es does not: their type's default.
+		public const time:Number = NaN;
+		public const stack:Array = null;
 	}
 }

@@ -59,7 +59,7 @@ package flash.display
 		{
 			return this._joints;
 		}
-		public function set joints(value:String)
+		public function set joints(value:String):*
 		{
 			if (value != "miter" && value != "bevel" && value != "round")
 			{

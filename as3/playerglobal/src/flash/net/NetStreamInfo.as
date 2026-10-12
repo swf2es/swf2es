@@ -40,7 +40,7 @@ package flash.net
 
 		public function toString():String
 		{
-			return super.toString();
+			return Object.prototype.toString.call(this);
 		}
 
 		public function get audioBufferByteLength():Number

@@ -5,13 +5,14 @@ package flash.sampler
 {
 	public final class StackFrame
 	{
-		public const name:String;
+		// Flash Player fills these in, which swf2es does not: their type's default.
+		public const name:String = null;
 
-		public const file:String;
+		public const file:String = null;
 
-		public const line:uint;
+		public const line:uint = 0;
 
-		public const scriptID:Number;
+		public const scriptID:Number = NaN;
 
 		public function toString():String
 		{

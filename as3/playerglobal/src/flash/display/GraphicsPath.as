@@ -33,7 +33,7 @@ package flash.display
 			return this._winding;
 		}
 
-		public function set winding(value:String)
+		public function set winding(value:String):*
 		{
 			if (value != GraphicsPathWinding.EVEN_ODD && value != GraphicsPathWinding.NON_ZERO)
 			{

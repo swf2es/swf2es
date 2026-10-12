@@ -30,7 +30,7 @@ package flash.events
 		{
 			return this._position;
 		}
-		public function set position(value:Number)
+		public function set position(value:Number):*
 		{
 			this._position = value;
 		}
@@ -39,7 +39,7 @@ package flash.events
 		{
 			return this._data;
 		}
-		public function set data(value:ByteArray)
+		public function set data(value:ByteArray):*
 		{
 			this._data = value;
 		}

@@ -6,7 +6,8 @@ package flash.events
 	[API("670")]
 	public class VideoEvent extends Event
 	{
-		public const codecInfo:String;
+		// Flash Player fills these in, which swf2es does not: their type's default.
+		public const codecInfo:String = null;
 		public static const RENDER_STATE:String = "renderState";
 		public static const RENDER_STATUS_ACCELERATED:String = "accelerated";
 		public static const RENDER_STATUS_SOFTWARE:String = "software";

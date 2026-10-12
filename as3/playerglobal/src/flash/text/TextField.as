@@ -3,9 +3,9 @@
 
 package flash.text
 {
+	import flash.geom.Rectangle;
 	import flash.display.DisplayObject;
 	import flash.display.InteractiveObject;
-	import flash.geom.Rectangle;
 
 	public class TextField extends InteractiveObject
 	{

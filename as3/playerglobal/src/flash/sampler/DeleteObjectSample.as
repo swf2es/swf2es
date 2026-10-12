@@ -5,7 +5,8 @@ package flash.sampler
 {
 	public final class DeleteObjectSample extends Sample
 	{
-		public const id:Number;
-		public const size:Number;
+		// Flash Player fills these in, which swf2es does not: their type's default.
+		public const id:Number = NaN;
+		public const size:Number = NaN;
 	}
 }

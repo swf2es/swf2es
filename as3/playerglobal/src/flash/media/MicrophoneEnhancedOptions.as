@@ -24,7 +24,7 @@ package flash.media
 			return this._isVoiceDetected;
 		}
 
-		public function set isVoiceDetected(value:int)
+		public function set isVoiceDetected(value:int):*
 		{
 			this._isVoiceDetected = value;
 		}

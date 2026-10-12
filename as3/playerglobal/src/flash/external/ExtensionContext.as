@@ -2,8 +2,8 @@
 
 package flash.external
 {
-	import flash.events.EventDispatcher;
 	import flash.filesystem.File;
+	import flash.events.EventDispatcher;
 
 	[API("669")]
 	public final class ExtensionContext extends EventDispatcher

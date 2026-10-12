@@ -3,12 +3,12 @@
 
 package flash.display
 {
+	import flash.utils.ByteArray;
+	import flash.system.ApplicationDomain;
 	import flash.errors.IllegalOperationError;
 	import flash.events.Event;
 	import flash.events.EventDispatcher;
 	import flash.events.UncaughtErrorEvents;
-	import flash.system.ApplicationDomain;
-	import flash.utils.ByteArray;
 
 	public class LoaderInfo extends EventDispatcher
 	{
