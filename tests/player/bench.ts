@@ -88,6 +88,11 @@
 // every fifth pulsing. What a crowded town's characters cost: new lines for
 // new stretches, filters, render group rebuilds and the frame's walks.
 //
+// --pipelined waits for the GPU only every 30 frames, not after each, so
+// that its work goes on behind the next frames' as a page's does: the
+// frames' mean is then the slower of the page's and the GPU's share, where
+// the median of each part is the page's alone.
+//
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens
 // it); the bench prints the functions that took the most time themselves.
@@ -106,7 +111,7 @@
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
 //     [--min-run N] [--pace MS]
-//     [--json] [--write-swf FILE] [--cpu-profile FILE]
+//     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined]
 //
 // --write-swf FILE writes the SWF the options make and stops, for another
 // browser or player to play.
@@ -1059,6 +1064,7 @@ const result = await benchPlayer(
   profile,
   pace,
   cpuProfile,
+  args.includes("--pipelined") ? 30 : 1,
 );
 if (result.error) {
   console.error(result.error);
@@ -1117,6 +1123,8 @@ const summary = {
   draw: stats(draw),
   gl: stats(gl),
   frame: stats(total),
+  // The frames' mean, whole: pipelined, the time the slower of the page and the GPU takes a frame.
+  frameMean: Math.round((total.reduce((a, b) => a + b, 0) / total.length) * 100) / 100,
   idle: stats(result.idle.slice(WARMUP * idleRenders)),
   // Each counter's mean over the measured frames: draws, rebuilds, tessellation, uploads.
   perFrame: perFrame(result.meters.slice(WARMUP)),
@@ -1200,7 +1208,9 @@ if (args.includes("--json")) {
     );
   }
 
-  console.log(`  frame   median ${ms(summary.frame.median)}  p90 ${ms(summary.frame.p90)}`);
+  console.log(
+    `  frame   median ${ms(summary.frame.median)}  p90 ${ms(summary.frame.p90)}  mean ${ms(summary.frameMean)}`,
+  );
   if (cpuProfile) {
     // Profiled from the 12th frame (page.ts, PROFILED_FROM) to the last.
     const { areas, functions } = selfTimes(cpuProfile, frames - 11);

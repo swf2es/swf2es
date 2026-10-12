@@ -455,6 +455,7 @@ async function benchSwf(
   tableMinRun?: number,
   pace = 0,
   cpuProfile = false,
+  finishEvery = 1,
 ): Promise<Bench> {
   setTransformTable(table, tableMinRun);
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -558,7 +559,12 @@ async function benchSwf(
       const synced = performance.now();
       renderer.render(view.stage);
       const drawn = performance.now();
-      await finish();
+      // Pipelined, the GPU's work goes on behind the next frames', as a page's does, and only
+      // every so many frames is waited for: what the frames take is then the slower of the two.
+      if (frame % finishEvery === 0 || frame === frames) {
+        await finish();
+      }
+
       tick.push(ticked - before);
       sync.push(synced - ticked);
       draw.push(drawn - synced);
