@@ -1,10 +1,11 @@
 // Touches enter here, a point at a time, as the browser's pointer events
 // give them. The primary touch moves the mouse, as Flash moves it for
 // the first finger down whatever Multitouch.inputMode is, and in
-// touchPoint mode every touch is a TouchEvent's too: over, out and rolls
-// as the point moves on and off objects, then its begin, move or end,
-// and a tap where it ends on the object it began on. Each step's touch
-// events come before its mouse events (docs/architecture.md, Touch).
+// touchPoint mode every touch is a TouchEvent's too, in the mouse's
+// order: a move, then out, over and rolls as the point moves on and off
+// objects; over and rolls, then a begin; an end, and a tap where it ends
+// on the object it began on. Each step's touch events come before its
+// mouse events (docs/architecture.md, Touch).
 import { toStage } from "../display/bounds.js";
 import type { Container, DisplayObject } from "../display/display.js";
 import { apply, invert } from "../display/geometry.js";
@@ -146,14 +147,10 @@ export class TouchInput {
       time: t.time,
     };
 
+    // A press where the mouse was elsewhere moves it there first, as Flash Player 32 did
+    // under a browser's touch emulation, and as it does for a mouse's press.
     switch (type) {
       case "begin":
-        // Flash moves the mouse there first, if it was elsewhere (Flash Player 32, under a
-        // browser's touch emulation).
-        if (t.x !== this.scripting.mouseStageX || t.y !== this.scripting.mouseStageY) {
-          this.pointer.handle("move", { ...p, buttons: 0 });
-        }
-
         this.pointer.handle("down", p);
         break;
       case "move":
@@ -172,14 +169,19 @@ export class TouchInput {
   ): void {
     const s = this.scripting;
     const target = pointerTarget(this.stage, t.x, t.y, s.stageWidth, s.stageHeight);
-    this.hover(point, target, t, primary);
+    // The empty stage takes the point's events, but no one is over it, as for the mouse.
+    const over = target === this.stage ? null : target;
+    // A move first, then the hover, in the mouse's order.
     if (type === "move") {
       if (target) {
         this.send("touchMove", target, t, primary);
       }
 
+      this.hover(point, over, t, primary);
       return;
     }
+
+    this.hover(point, over, t, primary);
 
     this.redraws++;
     if (type === "begin") {

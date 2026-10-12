@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { createCodegen } from "@swf2es/codegen";
+import { containerEngine } from "../../../../oracle/oracle.ts";
 import { BitmapStore } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import {
   BitmapObject,
@@ -13,8 +17,12 @@ import {
   pointerTarget,
   setHitArea,
 } from "../../../../packages/player/dist/input/pointer.js";
+import { Player } from "../../../../packages/player/dist/player.js";
 import { Clipboard } from "../../../../packages/player/dist/scripting/clipboard.js";
-import type { Scripting } from "../../../../packages/player/dist/scripting.js";
+import { Scripting } from "../../../../packages/player/dist/scripting.js";
+import { bare } from "../../../player/cases.ts";
+import { libraryAbcs } from "../../../player/libraries.ts";
+import { compileScripts } from "../../../player/scripts.ts";
 
 test("the topmost artwork targets its interactive parent, with mouseChildren and visibility respected", () => {
   const stage = new Container();
@@ -499,8 +507,12 @@ test("a pointer down dispatches capture, target and bubble with target-local coo
   child.object.$listeners.set("click", [
     { fn: { $f: () => heard.push("click") }, capture: false, priority: 0 },
   ]);
+  // A leave while the button is down is held back, as Flash keeps the mouse
+  // until the release; the release outside is no click, and the leave after it counts.
   input.handle("leave", { x: 120, y: 5, button: 0, buttons: 1 });
+  assert.equal(input.handled, 1);
   input.handle("up", { x: 120, y: 5, button: 0, buttons: 0 });
+  input.handle("leave", { x: 120, y: 5, button: 0, buttons: 0 });
   assert.deepEqual(heard, ["capture", "target", "bubble"]);
   // Each event counts as a change a host draws for.
   assert.equal(input.handled, 3);
@@ -610,4 +622,248 @@ test("a list under a timeline's mask layer takes no click where the mask hides i
   below.addChildAt(new BitmapObject(new BitmapStore(100, 100, true, 0xffffffff)), 0);
   list.placeAtDepth(below, 6);
   assert.equal(pointerTarget(stage, 10, 70, 200, 200), below);
+});
+
+// Its own: node runs test files at once, and a compile writes its job list into `out`.
+const out = fileURLToPath(new URL("../../out/player-pointer/", import.meta.url));
+
+let skip: string | false = false;
+try {
+  containerEngine();
+} catch (e) {
+  skip = (e as Error).message;
+}
+
+// Boxes "a" holding "a1", "b" beside them and a SimpleButton "btn": the
+// stage traces the mouse events it hears, and each object its roll events.
+const ORDER_SOURCE = `package {
+  import flash.display.Shape;
+  import flash.display.SimpleButton;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.events.MouseEvent;
+
+  public class MouseOrder extends Sprite {
+    private function box(name:String, x:Number, y:Number, size:Number):Sprite {
+      var s:Sprite = new Sprite();
+      s.name = name;
+      s.graphics.beginFill(0xff0000);
+      s.graphics.drawRect(0, 0, size, size);
+      s.x = x;
+      s.y = y;
+      return s;
+    }
+
+    private function nameOf(o:Object):String {
+      return o == null ? "null" : o == stage ? "stage" : o == this ? "root" : o.name;
+    }
+
+    private function heard(e:Event):void {
+      var line:String = e.type + " " + nameOf(e.target);
+      if (e is MouseEvent) {
+        var m:MouseEvent = MouseEvent(e);
+        line += " " + nameOf(m.relatedObject) + " " + m.buttonDown + " " + m.localX + "," + m.localY;
+      }
+
+      trace(line + " @" + stage.mouseX + "," + stage.mouseY);
+    }
+
+    public function MouseOrder() {
+      var a:Sprite = box("a", 0, 0, 80);
+      a.addChild(box("a1", 20, 20, 40));
+      addChild(a);
+      addChild(box("b", 100, 0, 80));
+      var hit:Shape = new Shape();
+      hit.graphics.beginFill(0);
+      hit.graphics.drawRect(0, 0, 80, 80);
+      var btn:SimpleButton = new SimpleButton(hit, hit, hit, hit);
+      btn.name = "btn";
+      btn.x = 200;
+      addChild(btn);
+      for each (var type:String in ["mouseDown", "mouseUp", "click", "mouseMove", "mouseOver", "mouseOut"]) {
+        stage.addEventListener(type, heard);
+      }
+
+      for each (var o:Object in [stage, this, a, a.getChildAt(0), getChildAt(1), btn]) {
+        o.addEventListener("rollOver", heard);
+        o.addEventListener("rollOut", heard);
+      }
+
+      stage.addEventListener("mouseLeave", heard);
+    }
+  }
+}`;
+
+test("the pointer's events come in Flash Player 32's order, to its targets", { skip }, async () => {
+  const wasm = await WebAssembly.compile(
+    await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
+  );
+  const abc = compileScripts([{ name: "MouseOrder", source: ORDER_SOURCE }], out).get(
+    "MouseOrder",
+  ) as Uint8Array;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(abc, 1, "MouseOrder", 300, 200), scripting);
+  await player.start();
+  const pointer = player.pointer;
+  assert.ok(pointer);
+  let buttons = 0;
+  const input = (
+    type: "move" | "down" | "up" | "leave",
+    x: number,
+    y: number,
+    button = 0,
+  ): string[] => {
+    buttons = type === "down" ? buttons | (1 << button) : type === "up" ? 0 : buttons;
+    pointer.handle(type, { x, y, button, buttons });
+    return lines.splice(0);
+  };
+
+  // Each of these is what Flash Player 32 traced for the same input (in
+  // Electron's PepperFlash, driven over the DevTools protocol): a move sends
+  // mouseMove first, then the hover's out, roll outs, roll overs and over.
+  // The empty stage takes the move but no hover, so it has no over or out.
+  assert.deepEqual(input("move", 150, 150), ["mouseMove stage null false 150,150 @150,150"]);
+  assert.deepEqual(input("move", 10, 10), [
+    "mouseMove a null false 10,10 @10,10",
+    "rollOver a null false 10,10 @10,10",
+    "rollOver root null false 10,10 @10,10",
+    "mouseOver a null false 10,10 @10,10",
+  ]);
+  // Into a child, and out of it to a sibling of its parent.
+  assert.deepEqual(input("move", 30, 30), [
+    "mouseMove a1 null false 10,10 @30,30",
+    "mouseOut a a1 false 30,30 @30,30",
+    "rollOver a1 a false 10,10 @30,30",
+    "mouseOver a1 a false 10,10 @30,30",
+  ]);
+  assert.deepEqual(input("move", 110, 10), [
+    "mouseMove b null false 10,10 @110,10",
+    "mouseOut a1 b false 90,-10 @110,10",
+    "rollOut a1 b false 90,-10 @110,10",
+    "rollOut a b false 110,10 @110,10",
+    "rollOver b a1 false 10,10 @110,10",
+    "mouseOver b a1 false 10,10 @110,10",
+  ]);
+  // Out to the stage, then onto a SimpleButton.
+  assert.deepEqual(input("move", 150, 150), [
+    "mouseMove stage null false 150,150 @150,150",
+    "mouseOut b null false 50,150 @150,150",
+    "rollOut b null false 50,150 @150,150",
+    "rollOut root null false 150,150 @150,150",
+  ]);
+  assert.deepEqual(input("move", 210, 10), [
+    "mouseMove btn null false 10,10 @210,10",
+    "rollOver btn null false 10,10 @210,10",
+    "rollOver root null false 210,10 @210,10",
+    "mouseOver btn null false 10,10 @210,10",
+  ]);
+  // A move to where the mouse already is sends nothing.
+  assert.deepEqual(input("move", 210, 10), []);
+
+  // A press at a new point is a move there, with the button still up, then
+  // the press; its release where it was is the release's own events.
+  assert.deepEqual(input("down", 110, 10), [
+    "mouseMove b null false 10,10 @110,10",
+    "mouseOut btn b false -90,10 @110,10",
+    "rollOut btn b false -90,10 @110,10",
+    "rollOver b btn false 10,10 @110,10",
+    "mouseOver b btn false 10,10 @110,10",
+    "mouseDown b null true 10,10 @110,10",
+  ]);
+  assert.deepEqual(input("up", 110, 10), [
+    "mouseUp b null false 10,10 @110,10",
+    "click b null false 10,10 @110,10",
+  ]);
+
+  // A release at a new point is a move there with the button down, then the release.
+  input("move", 10, 10);
+  input("down", 10, 10);
+  assert.deepEqual(input("up", 110, 10), [
+    "mouseMove b null true 10,10 @110,10",
+    "mouseOut a b true 110,10 @110,10",
+    "rollOut a b true 110,10 @110,10",
+    "rollOver b a true 10,10 @110,10",
+    "mouseOver b a true 10,10 @110,10",
+    "mouseUp b null false 10,10 @110,10",
+  ]);
+
+  // Dragged off the player, the mouse stays the player's: no leave, and
+  // the moves outside go to the stage, as does the release, a host's leave
+  // after it the mouse's leave then.
+  input("move", 30, 30);
+  input("down", 30, 30);
+  assert.deepEqual(input("leave", 400, 100), []);
+  assert.deepEqual(input("move", 400, 100), [
+    "mouseMove stage null true 400,100 @400,100",
+    "mouseOut a1 null true 380,80 @400,100",
+    "rollOut a1 null true 380,80 @400,100",
+    "rollOut a null true 400,100 @400,100",
+    "rollOut root null true 400,100 @400,100",
+  ]);
+  assert.deepEqual(input("up", 400, 100), ["mouseUp stage null false 400,100 @400,100"]);
+  assert.deepEqual(input("leave", 400, 100), ["mouseLeave stage @400,100"]);
+
+  // Left with the button up: out of what it was over, at the stage point
+  // (-1, -1), though the mouse stays where it was, then the stage's leave.
+  input("move", 30, 30);
+  assert.deepEqual(input("leave", 400, 100), [
+    "mouseOut a1 null false -21,-21 @30,30",
+    "rollOut a1 null false -21,-21 @30,30",
+    "rollOut a null false -1,-1 @30,30",
+    "rollOut root null false -1,-1 @30,30",
+    "mouseLeave stage @30,30",
+  ]);
+  // Back where it left, the mouse has not moved: nothing, until it does.
+  assert.deepEqual(input("move", 30, 30), []);
+  assert.deepEqual(input("move", 31, 31), [
+    "mouseMove a1 null false 11,11 @31,31",
+    "rollOver a1 null false 11,11 @31,31",
+    "rollOver a null false 31,31 @31,31",
+    "rollOver root null false 31,31 @31,31",
+    "mouseOver a1 null false 11,11 @31,31",
+  ]);
+
+  // A leave told twice, as a right button's release outside follows its leave, is one.
+  assert.deepEqual(input("down", 31, 31, 2), []);
+  assert.deepEqual(input("leave", 400, 100), [
+    "mouseOut a1 null false -21,-21 @31,31",
+    "rollOut a1 null false -21,-21 @31,31",
+    "rollOut a null false -1,-1 @31,31",
+    "rollOut root null false -1,-1 @31,31",
+    "mouseLeave stage @31,31",
+  ]);
+  assert.deepEqual(input("up", 400, 100, 2), []);
+  assert.deepEqual(input("leave", 400, 100), []);
+
+  // The left button let go while the right stays down, which Chrome tells as
+  // a move, is the release: the leave after it is not held back.
+  input("move", 110, 10);
+  input("down", 110, 10);
+  input("down", 110, 10, 2);
+  buttons = 2;
+  assert.deepEqual(input("move", 110, 10), [
+    "mouseUp b null false 10,10 @110,10",
+    "click b null false 10,10 @110,10",
+  ]);
+  assert.deepEqual(input("leave", 400, 100), [
+    "mouseOut b null false -101,-1 @110,10",
+    "rollOut b null false -101,-1 @110,10",
+    "rollOut root null false -1,-1 @110,10",
+    "mouseLeave stage @110,10",
+  ]);
+
+  // A release lost outside the browser shows on the next move as one, there,
+  // and the leave after it.
+  buttons = 0;
+  input("move", 110, 10);
+  input("down", 110, 10);
+  input("move", 400, 100);
+  buttons = 0;
+  assert.deepEqual(input("move", 500, 100), [
+    "mouseMove stage null true 500,100 @500,100",
+    "mouseUp stage null false 500,100 @500,100",
+    "mouseLeave stage @500,100",
+  ]);
 });

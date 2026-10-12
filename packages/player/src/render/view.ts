@@ -531,14 +531,37 @@ export class PixiView {
 
       player.pointer?.handle(type, p);
     };
-    const move = send("move");
+    const moved = send("move");
     const down = send("down");
     const up = send("up");
     const leave = send("leave");
-    this.stage.on("pointermove", move);
+    // Every move on the page: one over the canvas, and, while the mouse's
+    // button is down after a press on it, one anywhere, as Flash keeps the
+    // mouse until the release.
+    const screen = this.renderer.screen;
+    // A release outside after a press that held the mouse leaves it at the
+    // next move outside, as Flash's mouseLeave comes.
+    let leaveNext = false;
+    const move = (e: FederatedPointerEvent) => {
+      const { x, y } = e.global;
+      const inside = x >= 0 && y >= 0 && x < screen.width && y < screen.height;
+      if (inside || (e.pointerType !== "touch" && player.pointer?.captured)) {
+        leaveNext = false;
+        moved(e);
+      } else if (leaveNext && e.pointerType !== "touch") {
+        leaveNext = false;
+        leave(e);
+      }
+    };
+    const upOutside = (e: FederatedPointerEvent) => {
+      const held = e.pointerType !== "touch" && !!player.pointer?.captured;
+      up(e);
+      leaveNext ||= held && !player.pointer?.captured;
+    };
+    this.stage.on("globalpointermove", move);
     this.stage.on("pointerdown", down);
     this.stage.on("pointerup", up);
-    this.stage.on("pointerupoutside", up);
+    this.stage.on("pointerupoutside", upOutside);
     this.stage.on("pointerleave", leave);
     // Pixi listens for no cancel: the browser takes a touch back so, as for a
     // system gesture, and the touch ends where it last was, without its tap or click.
@@ -601,10 +624,10 @@ export class PixiView {
       player.pointer?.flush();
       player.touch?.flush();
       canvas?.removeEventListener?.("pointercancel", cancel);
-      this.stage.off("pointermove", move);
+      this.stage.off("globalpointermove", move);
       this.stage.off("pointerdown", down);
       this.stage.off("pointerup", up);
-      this.stage.off("pointerupoutside", up);
+      this.stage.off("pointerupoutside", upOutside);
       this.stage.off("pointerleave", leave);
       this.stage.eventMode = "passive";
       this.stage.hitArea = null;
