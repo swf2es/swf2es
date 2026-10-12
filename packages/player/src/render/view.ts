@@ -142,7 +142,7 @@ const STALE = "stale";
 /** What the view keeps for a display object. */
 interface Node {
   container: PixiContainer;
-  /** The linear part of the object's transform on the stage. */
+  /** The linear part of the object's transform on the stage, its own, which it changes in place. */
   world: Linear;
   /** A stale cache drawn, the scale it was first drawn at, and whether that has changed since. */
   stale: { cache: StaleCache; world: Linear; spent: boolean } | null;
@@ -858,7 +858,7 @@ export class PixiView {
    */
   private lineSpace(o: DisplayObject, node: Node, parent: Linear): Linear {
     if (node.slice) {
-      return parent;
+      return [...parent];
     }
 
     const owner = this.nodes.get(o.parent as Container)?.lineSpace ?? parent;
@@ -883,7 +883,7 @@ export class PixiView {
     }
 
     if (node.stale?.cache !== cache) {
-      node.stale = { cache, world: node.world, spent: false };
+      node.stale = { cache, world: [...node.world], spent: false };
     }
 
     return node.stale.spent ? o.drawn() : cache.shape;
@@ -1268,7 +1268,7 @@ export class PixiView {
       dirty |= TRANSFORM | (kids ? CHILDREN : 0);
       if (node.emptied) {
         node.emptied = false;
-        node.world = [Number.NaN, Number.NaN, Number.NaN, Number.NaN];
+        node.world.fill(Number.NaN);
         dirty |= CONTENT;
       }
     }
@@ -1371,10 +1371,14 @@ export class PixiView {
       const c = parent[0] * m.c + parent[2] * m.d;
       const d = parent[1] * m.c + parent[3] * m.d;
       const was = node.world;
-      // A new one only where it changed: others may hold the one before, which stays as it was.
       moved = a !== was[0] || b !== was[1] || c !== was[2] || d !== was[3];
+      // In place, as a node's world is held by none but it: what keeps one keeps a copy. Thousands
+      // of parts move on a busy frame, and each made an array.
       if (moved) {
-        node.world = [a, b, c, d];
+        was[0] = a;
+        was[1] = b;
+        was[2] = c;
+        was[3] = d;
       }
     }
 
