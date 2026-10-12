@@ -48,7 +48,8 @@
 // cheaper clip (a scissor) could gain.
 //
 // --hover holds the mouse still over the stage's middle, as a user's often
-// is, for what a SWF with scripts does for it each frame.
+// is, for what a SWF with scripts does for it each frame: with --scripted
+// only, as the other SWFs have no scripts, and so no pointer.
 //
 // --idle K renders K times more after each frame with no tick between, as
 // a host that draws on every animation frame does, and times those apart.
@@ -149,6 +150,11 @@ const pace = option("pace", 0);
 const profile = args.includes("--profile") ? args[args.indexOf("--profile") + 1] : undefined;
 const toggleStatic = option("toggle-static", 0);
 const frames = option("frames", 120);
+if (args.includes("--hover") && scripted === 0) {
+  console.error("--hover needs --scripted: the other SWFs have no scripts, and so no pointer");
+  process.exit(2);
+}
+
 const WARMUP = 10;
 const WIDTH = 800;
 const HEIGHT = 600;
