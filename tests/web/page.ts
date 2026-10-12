@@ -145,10 +145,10 @@ const loading = import("@swf2es/web").then((web) => {
   web.configure({
     libraries: {
       builtin: "/libraries/builtin.abc",
-      // SWF2ES_PLAYERGLOBAL=ours (chrome.ts): our playerglobal in place of Flash Player's.
-      playerglobal: new URLSearchParams(location.search).has("ours")
-        ? "/libraries/ours.abc"
-        : "/libraries/playerglobal.abc",
+      // The package's own playerglobal, unless SWF2ES_PLAYERGLOBAL=adobe (chrome.ts).
+      playerglobal: new URLSearchParams(location.search).has("adobe")
+        ? "/libraries/playerglobal-adobe.abc"
+        : undefined,
     },
     socketProxy: [{ host: "example.test", port: 1234, proxyUrl: "ws://relay.invalid/" }],
     cache: true,

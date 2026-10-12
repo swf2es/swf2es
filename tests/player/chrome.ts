@@ -215,10 +215,10 @@ export async function withPage<T>(
     // brings a crashed page back in a new renderer.
     const fresh = async () => {
       // The checked build's tests have the player check its own shortcuts
-      // too, and SWF2ES_PLAYERGLOBAL=ours plays on our playerglobal (page.ts).
+      // too, and SWF2ES_PLAYERGLOBAL=adobe plays on Flash Player's playerglobal (page.ts).
       const flags = [
         ...(process.env.SWF2ES_CHECKED ? ["checked"] : []),
-        ...(process.env.SWF2ES_PLAYERGLOBAL === "ours" ? ["ours"] : []),
+        ...(process.env.SWF2ES_PLAYERGLOBAL === "adobe" ? ["adobe"] : []),
       ];
       await devtools.send("Page.navigate", {
         url: `${url}${page}${flags.length ? `?${flags.join("&")}` : ""}`,

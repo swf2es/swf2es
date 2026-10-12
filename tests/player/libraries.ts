@@ -1,53 +1,54 @@
-// The ABCs a SWF's code links against: builtin.abc and playerglobal.abc,
-// copied out of the oracle's image into `out` the first time they are
-// missing, and kept there uncommitted: playerglobal is Adobe's. Not the
-// libraries test's copies: that test rewrites them while the packages
-// pnpm runs at once would read them.
+// The ABCs a SWF's code links against: builtin.abc, copied out of the
+// oracle's image into `out` the first time it is missing, and the
+// playerglobal the player ships (playerglobalLibrary), written beside it as
+// playerglobal-swf2es.abc for the pages and the command that read files.
+// Not the libraries test's copies: that test rewrites them while the
+// packages pnpm runs at once would read them.
 //
-// With SWF2ES_PLAYERGLOBAL=ours, our playerglobal (tools/playerglobal.ts)
-// takes the place of Flash Player's. The player's pages do the same
-// (chrome.ts, page.ts).
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+// With SWF2ES_PLAYERGLOBAL=adobe, Flash Player's playerglobal from the
+// oracle's image, playerglobal-adobe.abc, takes the place of swf2es's, kept
+// uncommitted: it is Adobe's. The player's pages do the same (chrome.ts,
+// page.ts).
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { libraries } from "../../oracle/oracle.ts";
-import { build, sourcesChanged } from "../../tools/playerglobal.ts";
+import { playerglobalLibrary } from "../../packages/player/dist/playerglobal/playerglobal-library.js";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-const NAMES = ["builtin", "playerglobal"];
+const adobe = process.env.SWF2ES_PLAYERGLOBAL === "adobe";
+const PLAYERGLOBAL = adobe ? "playerglobal-adobe" : "playerglobal-swf2es";
 
-/** Our playerglobal in `out`, compiled again once its sources have changed. */
-function ours(out: string): Uint8Array {
-  const file = `${out}ours.abc`;
-  if (!existsSync(file) || statSync(file).mtimeMs < sourcesChanged()) {
-    // Test processes run at once: each compiles apart and swaps in its result whole.
-    const dir = mkdtempSync(`${out}ours-`);
-    try {
-      build(dir);
-      renameSync(`${dir}/playerglobal.abc`, file);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+/** playerglobal-swf2es.abc in `out`, written again if it is not the player's. */
+function writeSwf2es(out: string): void {
+  const file = `${out}playerglobal-swf2es.abc`;
+  if (existsSync(file) && Buffer.from(readFileSync(file)).equals(playerglobalLibrary)) {
+    return;
   }
 
-  return new Uint8Array(readFileSync(file));
+  // Test processes run at once: each writes apart and swaps in its file whole.
+  const temporary = `${file}.${process.pid}`;
+  writeFileSync(temporary, playerglobalLibrary);
+  renameSync(temporary, file);
 }
 
-/** builtin.abc and playerglobal.abc, in that order, from `out`: ours in place of Flash Player's under SWF2ES_PLAYERGLOBAL=ours. */
+/** builtin.abc and the playerglobal the tests play on, in that order, from `out`. */
 export function libraryAbcs(out = `${here}out/libraries/`): Uint8Array[] {
-  if (!NAMES.every((n) => existsSync(`${out}${n}.abc`))) {
-    libraries(NAMES, out);
+  if (!existsSync(`${out}builtin.abc`)) {
+    libraries(["builtin"], out);
   }
 
-  const [builtin, playerglobal] = NAMES.map((n) => new Uint8Array(readFileSync(`${out}${n}.abc`)));
-  return process.env.SWF2ES_PLAYERGLOBAL === "ours"
-    ? [builtin, ours(out)]
-    : [builtin, playerglobal];
+  // The image names it playerglobal.abc.
+  if (adobe && !existsSync(`${out}playerglobal-adobe.abc`)) {
+    libraries(["playerglobal"], out);
+    renameSync(`${out}playerglobal.abc`, `${out}playerglobal-adobe.abc`);
+  }
+
+  writeSwf2es(out);
+  return ["builtin", PLAYERGLOBAL].map((n) => new Uint8Array(readFileSync(`${out}${n}.abc`)));
 }
 
 /** The files of the libraries libraryAbcs gives, in its order, for a command that reads them. */
 export function libraryFiles(out = `${here}out/libraries/`): string[] {
   libraryAbcs(out);
-  return ["builtin", process.env.SWF2ES_PLAYERGLOBAL === "ours" ? "ours" : "playerglobal"].map(
-    (n) => `${out}${n}.abc`,
-  );
+  return ["builtin", PLAYERGLOBAL].map((n) => `${out}${n}.abc`);
 }

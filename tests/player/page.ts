@@ -34,11 +34,11 @@ import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { precompiledModules } from "@swf2es/player-hosts/precompiled";
 import { autoDetectRenderer } from "pixi.js";
 
-// SWF2ES_PLAYERGLOBAL=ours (chrome.ts): our playerglobal in place of Flash
-// Player's (libraries.ts).
+// The player's own playerglobal, or Flash Player's under SWF2ES_PLAYERGLOBAL=adobe
+// (chrome.ts, libraries.ts).
 const LIBRARIES = [
   "builtin",
-  new URLSearchParams(location.search).has("ours") ? "ours" : "playerglobal",
+  new URLSearchParams(location.search).has("adobe") ? "playerglobal-adobe" : "playerglobal-swf2es",
 ];
 
 // `pnpm test:checked`'s page (chrome.ts): the player checks its own shortcuts too.

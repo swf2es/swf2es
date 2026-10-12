@@ -5,9 +5,10 @@ oracle's image and formatted by `pnpm as3:format`.
 
 - `air/`: AIR's WebSocket client, which the oracle's playerglobal predates,
   loaded after playerglobal (`packages/player/src/playerglobal/air-library.ts`).
-- `playerglobal/`: our playerglobal, to take the place of Flash Player's.
-  `pnpm as3:playerglobal` holds its API to Flash Player's, and
-  `SWF2ES_PLAYERGLOBAL=ours` runs the tests on it.
+- `playerglobal/`: the player's playerglobal, which it ships as
+  `playerglobalLibrary` (`packages/player/src/playerglobal/playerglobal-library.ts`).
+  `pnpm as3:playerglobal` holds its API to Flash Player's and writes that
+  file, and `SWF2ES_PLAYERGLOBAL=adobe` runs the tests on Flash Player's.
 
 ## playerglobal's sources
 

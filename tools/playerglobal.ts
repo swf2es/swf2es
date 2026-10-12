@@ -16,6 +16,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -28,7 +29,7 @@ import { type Class, readSurface, type Trait } from "./abc-surface/read.ts";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const SOURCES = "as3/playerglobal/src";
 const OUT = "tests/player/out/playerglobal";
-const FLASH = "tests/player/out/libraries/playerglobal.abc";
+const FLASH = "tests/player/out/libraries/playerglobal-adobe.abc";
 const BUILTIN = "oracle/avmplus/generated/builtin.abc";
 export const GENERATED = join(root, "packages/player/src/playerglobal/playerglobal-library.ts");
 
@@ -59,11 +60,6 @@ function versionMarks(abc: Uint8Array): Uint8Array {
   }
 
   return out;
-}
-
-/** When our playerglobal's sources last changed. */
-export function sourcesChanged(): number {
-  return Math.max(...sources(SOURCES).map((f) => statSync(join(root, f)).mtimeMs));
 }
 
 /** Compile our playerglobal into `outDir`, in the repository, which the container sees. */
@@ -271,8 +267,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
 
   if (process.argv.includes("--check")) {
+    // As tests/player/libraries.ts keeps it: the image names it playerglobal.abc.
     if (!existsSync(join(root, FLASH))) {
-      libraries(["playerglobal"], join(root, "tests/player/out/libraries/"));
+      const dir = join(root, "tests/player/out/libraries/");
+      libraries(["playerglobal"], dir);
+      renameSync(join(dir, "playerglobal.abc"), join(root, FLASH));
     }
 
     const differences = check(abc, new Uint8Array(readFileSync(join(root, FLASH))));

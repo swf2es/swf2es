@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { bare } from "./cases.ts";
 import { playPrecompiled } from "./chrome.ts";
-import { libraryAbcs } from "./libraries.ts";
+import { libraryAbcs, libraryFiles } from "./libraries.ts";
 import { compileScripts } from "./scripts.ts";
 import { importMapSource } from "./serve.ts";
 
@@ -46,7 +46,7 @@ const compiled = spawnSync(
     dir,
     "--emit-libraries",
     "-q",
-    ...["builtin", "playerglobal"].flatMap((n) => ["--lib", `${libraries}${n}.abc`]),
+    ...libraryFiles(libraries).flatMap((file) => ["--lib", file]),
   ],
   { encoding: "utf8" },
 );

@@ -73,12 +73,13 @@ node tools/abc-surface/main.ts file.abc [--classes | --json]   # an ABC's classe
 node tools/abc-surface/as3.ts lib.abc out-dir [package...] [--names dir]   # AS3 skeletons of
                               # an ABC's public API, parameter names from sources such as Ruffle's
 pnpm as3                      # the AS3 libraries under as3/, compiled by ASC 1 in the oracle's
-                              # image: as3:playerglobal, our playerglobal.abc held to Flash
-                              # Player's API; as3:air, the AIR library into air-library.ts
+                              # image: as3:playerglobal, the player's playerglobal held to Flash
+                              # Player's API and into playerglobal-library.ts; as3:air, the AIR
+                              # library into air-library.ts
 pnpm as3:format               # format them with Apache Royale's asformat, in its default style
                               # (ASFORMAT names its script if it is not on the PATH)
-SWF2ES_PLAYERGLOBAL=ours ...  # the unit, player and corpus tests on our playerglobal in place of
-                              # Flash Player's (tests/player/libraries.ts); not yet all passing
+SWF2ES_PLAYERGLOBAL=adobe ... # the unit, player, web and corpus tests on Flash Player's
+                              # playerglobal in place of the player's own (tests/player/libraries.ts)
 pnpm bench [file.abc...]      # time the ABC parser and decoder
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved

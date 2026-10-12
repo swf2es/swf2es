@@ -224,7 +224,8 @@ check(
     const counts = await call<Record<string, number>>(evaluate, "webCounts()");
     assert.equal(counts.codegenFetches, 1);
     assert.equal(counts.codegenCompiles, 1);
-    assert.equal(counts.libraryFetches, 2);
+    // builtin.abc, and Flash Player's playerglobal where the page is given it in place of the package's.
+    assert.equal(counts.libraryFetches, process.env.SWF2ES_PLAYERGLOBAL === "adobe" ? 2 : 1);
   },
 );
 
