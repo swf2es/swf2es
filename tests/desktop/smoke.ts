@@ -601,9 +601,13 @@ async function withApp(
   }
 }
 
+// builtin.abc, and the playerglobal the tests play on: the app's own, or
+// Flash Player's under SWF2ES_PLAYERGLOBAL=adobe.
 const both = {
   builtin: `${libraries}builtin.abc`,
-  playerglobal: `${libraries}playerglobal.abc`,
+  ...(process.env.SWF2ES_PLAYERGLOBAL === "adobe"
+    ? { playerglobal: `${libraries}playerglobal-adobe.abc` }
+    : {}),
   recent: [],
   // Always allowed, as if the user had said so: a prompt cannot be answered here.
   sockets: { [realpathSync(networked)]: [`127.0.0.1:${port}`] },
@@ -760,31 +764,16 @@ try {
     assert.equal(stderr().match(noGesture)?.length, 3);
   });
 
-  // Without playerglobal.abc, the page says what is missing and why it is not there.
-  await withApp({ recent: [] }, [local], async ({ evaluate }) => {
-    let failure = "";
-    for (let tries = 0; failure === "" && tries < 100; tries++) {
-      // Null until the page has parsed, which may be after DevTools first finds it.
-      failure = await evaluate<string>(
-        `(() => {
-          const f = document.getElementById("failure");
-          return f && !f.hidden ? f.textContent : "";
-        })()`,
-      );
-      if (failure === "") {
-        await sleep(100);
-      }
-    }
-
-    assert.match(failure, /local-\d+\.swf needs the libraries below/);
-    const panel = await evaluate<{ hidden: boolean; playerglobal: string; text: string }>(`({
+  // With no library chosen, the checkout's builtin.abc and the app's own
+  // playerglobal play an ActionScript 3 SWF, and the page asks for nothing.
+  await withApp({ recent: [] }, [local], async ({ stdout, until, evaluate }) => {
+    await until("the local SWF on the app's playerglobal", () => stdout.includes("smoke: started"));
+    const panel = await evaluate<{ hidden: boolean; playerglobal: string }>(`({
       hidden: document.getElementById("libraries").hidden,
       playerglobal: document.getElementById("playerglobal-path").textContent,
-      text: document.getElementById("libraries").textContent,
     })`);
-    assert.equal(panel.hidden, false);
-    assert.equal(panel.playerglobal, "not found");
-    assert.match(panel.text, /may not be redistributed/);
+    assert.equal(panel.hidden, true);
+    assert.equal(panel.playerglobal, "swf2es's own");
   });
 
   await remote();

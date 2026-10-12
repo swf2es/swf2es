@@ -214,9 +214,14 @@ export async function withPage<T>(
     // Navigating answers once the new document has replaced the old, and
     // brings a crashed page back in a new renderer.
     const fresh = async () => {
-      // The checked build's tests have the player check its own shortcuts too (page.ts).
+      // The checked build's tests have the player check its own shortcuts
+      // too, and SWF2ES_PLAYERGLOBAL=adobe plays on Flash Player's playerglobal (page.ts).
+      const flags = [
+        ...(process.env.SWF2ES_CHECKED ? ["checked"] : []),
+        ...(process.env.SWF2ES_PLAYERGLOBAL === "adobe" ? ["adobe"] : []),
+      ];
       await devtools.send("Page.navigate", {
-        url: process.env.SWF2ES_CHECKED ? `${url}${page}?checked` : `${url}${page}`,
+        url: `${url}${page}${flags.length ? `?${flags.join("&")}` : ""}`,
       });
       // The page loads its modules unbundled: on a loaded machine that has
       // taken more than 10 s, so wait up to a minute, and fail rather than

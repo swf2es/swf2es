@@ -943,7 +943,7 @@ function nestMain(compile: ReturnType<typeof compiler>, between: boolean): [Uint
 }
 
 /** Enough fillers for the compiler to let go of the parent's ABCs. */
-const FILLERS = 80;
+const FILLERS = 120;
 
 const LOAD_CHILD = `public function loadChild():void {
       var loader:Loader = new Loader();

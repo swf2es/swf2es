@@ -40,4 +40,4 @@ export { bindKeyboard, type KeyState } from "./input/keyboard.js";
 export { Player } from "./player.js";
 export { setTransformTable } from "./render/table.js";
 export { PixiView } from "./render/view.js";
-export { airLibrary, Scripting } from "./scripting.js";
+export { airLibrary, playerglobalLibrary, Scripting } from "./scripting.js";

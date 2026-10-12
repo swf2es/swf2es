@@ -17,7 +17,7 @@ import type { CachedModule, ModuleCache } from "../../../packages/player/dist/ho
 import { Player } from "../../../packages/player/dist/player.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
 import { bare } from "../../player/cases.ts";
-import { libraryAbcs } from "../../player/libraries.ts";
+import { libraryAbcs, libraryFiles } from "../../player/libraries.ts";
 import { compileScripts } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";
 
@@ -149,11 +149,10 @@ function compiled() {
 
 /** `swf` compiled ahead of time by the command, with the libraries' modules, into `out`/`name`/. */
 function ahead(name: string, swf: Uint8Array): { dir: string; manifest: URL } {
-  libraryAbcs(`${out}libraries/`);
   mkdirSync(out, { recursive: true });
   writeFileSync(`${out}${name}.swf`, swf);
   const dir = `${out}${name}/`;
-  const libs = ["builtin", "playerglobal"].flatMap((n) => ["--lib", `${out}libraries/${n}.abc`]);
+  const libs = libraryFiles(`${out}libraries/`).flatMap((file) => ["--lib", file]);
   const r = spawnSync(
     process.execPath,
     [cli, `${out}${name}.swf`, "-o", dir, "--emit-libraries", "-q", ...libs],

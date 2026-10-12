@@ -34,6 +34,13 @@ import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { precompiledModules } from "@swf2es/player-hosts/precompiled";
 import { autoDetectRenderer } from "pixi.js";
 
+// The player's own playerglobal, or Flash Player's under SWF2ES_PLAYERGLOBAL=adobe
+// (chrome.ts, libraries.ts).
+const LIBRARIES = [
+  "builtin",
+  new URLSearchParams(location.search).has("adobe") ? "playerglobal-adobe" : "playerglobal-swf2es",
+];
+
 // `pnpm test:checked`'s page (chrome.ts): the player checks its own shortcuts too.
 if (new URLSearchParams(location.search).has("checked")) {
   Scripting.checkRounds = true;
@@ -120,7 +127,7 @@ async function scriptingFor(
     },
   });
   const libraries = await Promise.all(
-    ["builtin", "playerglobal"].map(async (n) => {
+    LIBRARIES.map(async (n) => {
       // A missing library would reach codegen as an empty ABC, rejected as #1107 as if the SWF's.
       const response = await fetch(`/libraries/${n}.abc`);
       if (!response.ok) {

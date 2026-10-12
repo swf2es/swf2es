@@ -19,12 +19,12 @@
 </main>
 <p id="failure" role="alert" hidden></p>
 <section id="libraries" hidden>
-  <h2>ActionScript 3 needs two libraries</h2>
+  <h2>ActionScript 3 needs builtin.abc</h2>
   <p>
     A SWF's ActionScript 3 links against <code>builtin.abc</code>, avmplus' standard library,
-    and <code>playerglobal.abc</code>, Adobe's <code>flash.*</code> declarations.
-    playerglobal is Adobe's and may not be redistributed, so swf2es does not include it:
-    point swf2es at a copy of your own, once, and it remembers where it is.
+    and a playerglobal, the <code>flash.*</code> classes, which swf2es brings its own of.
+    Point swf2es at <code>builtin.abc</code> once, and it remembers where it is; choose a
+    <code>playerglobal.abc</code> only to use it in place of swf2es's own.
     SWFs without ActionScript 3 play without either.
   </p>
   <dl>

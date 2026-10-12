@@ -143,7 +143,13 @@ page.report = (value: unknown) => {
 // checks, and a load that fails is their error, not a page that never ran.
 const loading = import("@swf2es/web").then((web) => {
   web.configure({
-    libraries: { builtin: "/libraries/builtin.abc", playerglobal: "/libraries/playerglobal.abc" },
+    libraries: {
+      builtin: "/libraries/builtin.abc",
+      // The package's own playerglobal, unless SWF2ES_PLAYERGLOBAL=adobe (chrome.ts).
+      playerglobal: new URLSearchParams(location.search).has("adobe")
+        ? "/libraries/playerglobal-adobe.abc"
+        : undefined,
+    },
     socketProxy: [{ host: "example.test", port: 1234, proxyUrl: "ws://relay.invalid/" }],
     cache: true,
   });

@@ -28,8 +28,9 @@ options:
   -o, --out <dir>      where to write (default: <file name>.swf2es)
   --lib <file.abc>     a library the code links against, loaded into the
                        root domain in the order given; repeat for each.
-                       Default: builtin.abc and playerglobal.abc from the
-                       repository's tests/player/out/libraries/, if there
+                       Default: builtin.abc and playerglobal-swf2es.abc,
+                       the player's own, from the repository's
+                       tests/player/out/libraries/, if there
   --emit-libraries     write the libraries' modules too
   -q, --quiet          print nothing but errors
   -h, --help           show this
@@ -39,11 +40,11 @@ exit status: 0 on success, 2 for a mistake in the command line or missing
 default libraries, 1 for anything else (an unreadable, AVM1 or rejected
 input or library, or an output that cannot be written)`;
 
-/** Where the repository's tests keep Adobe's libraries, which cannot ship with the package. */
+/** Where the repository's tests keep builtin.abc and the player's playerglobal as files. */
 const REPO_LIBRARIES = fileURLToPath(
   new URL("../../../tests/player/out/libraries/", import.meta.url),
 );
-const DEFAULT_LIBRARIES = ["builtin.abc", "playerglobal.abc"].map((n) => REPO_LIBRARIES + n);
+const DEFAULT_LIBRARIES = ["builtin.abc", "playerglobal-swf2es.abc"].map((n) => REPO_LIBRARIES + n);
 
 const HINT = "run swf2es --help for usage";
 
@@ -140,9 +141,9 @@ async function main(argv: string[]): Promise<void> {
   const libraries = values.lib ?? DEFAULT_LIBRARIES;
   if (!values.lib && !libraries.every((p) => existsSync(p))) {
     fail(
-      "no --lib given, and no builtin.abc and playerglobal.abc in the repository's\n" +
-        "tests/player/out/libraries/. Pass Adobe's builtin.abc and playerglobal.abc with\n" +
-        "--lib (swf2es cannot ship them), or run the player's tests once, which copy them there.",
+      "no --lib given, and no builtin.abc and playerglobal-swf2es.abc in the repository's\n" +
+        "tests/player/out/libraries/. Pass builtin.abc and a playerglobal with --lib, or run\n" +
+        "the player's tests once, which write them there.",
       USAGE_ERROR,
     );
   }

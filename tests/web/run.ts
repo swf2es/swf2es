@@ -210,7 +210,7 @@ check(
     assert.equal(ei.attribute, "movie");
     assert.equal(ei.pwned, false);
     // window.location.href, through an inline function with no space before "(".
-    assert.match(String(ei.calls.reports[0]?.href), /\/web-test\/index\.html(\?checked)?$/);
+    assert.match(String(ei.calls.reports[0]?.href), /\/web-test\/index\.html(\?[a-z&]+)?$/);
     assert.deepEqual(ei.calls.captured, [
       { "a:(window.swf2esPwned=1),b": 1 },
       { "a:(window.swf2esPwned=1),b": 1 },
@@ -224,7 +224,8 @@ check(
     const counts = await call<Record<string, number>>(evaluate, "webCounts()");
     assert.equal(counts.codegenFetches, 1);
     assert.equal(counts.codegenCompiles, 1);
-    assert.equal(counts.libraryFetches, 2);
+    // builtin.abc, and Flash Player's playerglobal where the page is given it in place of the package's.
+    assert.equal(counts.libraryFetches, process.env.SWF2ES_PLAYERGLOBAL === "adobe" ? 2 : 1);
   },
 );
 

@@ -1,0 +1,28 @@
+// Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts);
+// natives in packages/player/src/playerglobal/flash/display/Bitmap.ts.
+
+package flash.display
+{
+	public class Bitmap extends DisplayObject
+	{
+		public function Bitmap(bitmapData:BitmapData = null, pixelSnapping:String = "auto", smoothing:Boolean = false)
+		{
+			ctor(bitmapData, pixelSnapping, smoothing);
+		}
+
+		public native function get pixelSnapping():String;
+
+		public native function set pixelSnapping(value:String):void;
+
+		public native function get smoothing():Boolean;
+
+		public native function set smoothing(value:Boolean):void;
+
+		public native function get bitmapData():BitmapData;
+
+		public native function set bitmapData(value:BitmapData):void;
+
+		// The player's natives (packages/player/src/playerglobal/flash/display/Bitmap.ts).
+		private native function ctor(bitmapData:BitmapData, pixelSnapping:String, smoothing:Boolean):void;
+	}
+}
