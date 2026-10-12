@@ -82,7 +82,8 @@
 // every eighth one's body breathing, a uniform pulse of a few percent, limbs that turn
 // and swing, one that turns about (squashed across, then mirrored), a hand
 // whose timeline swaps its shape on every frame, and a glowing weapon; half
-// of them mirrored, all of them clips of a class with frame scripts. Among
+// of them mirrored, every fourth glowing whole, every third walking to and
+// fro, all of them clips of a class with frame scripts. Among
 // them scenery: N clips of eight clips of two shapes, every fourth glowing,
 // every fifth pulsing. What a crowded town's characters cost: new lines for
 // new stretches, filters, render group rebuilds and the frame's walks.
@@ -846,7 +847,34 @@ function townSwf(count: number): Uint8Array {
 
     tags.push(w.sprite(figure, loop, [...breaths, w.end()]));
     symbols.push([figure, "Character"]);
-    characters.push(figure);
+    // Every fourth glows whole, as a game marks a character; every third walks to and fro.
+    const glows = c % 4 === 0 ? [{ color: 0xffe060, blur: 8, strength: 2 }] : undefined;
+    if (c % 3 === 0) {
+      const walker = next++;
+      const steps: Uint8Array[] = [];
+      for (let f = 0; f < 96; f++) {
+        const matrix = { tx: Math.round(1200 * Math.sin((2 * Math.PI * f) / 96)) };
+        steps.push(
+          f === 0
+            ? w.place({ depth: 1, character: figure, matrix, glows })
+            : w.place({ depth: 1, move: true, matrix }),
+          w.showFrame(),
+        );
+      }
+
+      tags.push(w.sprite(walker, 96, [...steps, w.end()]));
+      characters.push(walker);
+    } else {
+      const holder = next++;
+      tags.push(
+        w.sprite(holder, 1, [
+          w.place({ depth: 1, character: figure, glows }),
+          w.showFrame(),
+          w.end(),
+        ]),
+      );
+      characters.push(holder);
+    }
   }
 
   // Scenery: clips of eight clips of two shapes, every fourth glowing, every fifth pulsing.
