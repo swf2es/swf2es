@@ -1556,3 +1556,35 @@ test("a pick sees a morph's new blend once drawn, though picks came between its 
   shape.drawn();
   assert.equal(pointerTarget(stage, 100, 100, 200, 200), clip);
 });
+
+test("an object with a NaN or infinite matrix, or drawn infinite, keeps nothing else from the pointer", () => {
+  const sprite = () => {
+    const s = new Container();
+    s.object = { $display: s } as never;
+    s.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+    return s;
+  };
+  for (const odd of [
+    { a: Number.NaN, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+    { a: Number.POSITIVE_INFINITY, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+    { a: 1, b: 0, c: 0, d: 1, tx: Number.NaN, ty: 0 },
+  ]) {
+    const stage = new Container();
+    stage.object = { $display: stage } as never;
+    stage.loaderInfo = {} as never;
+    const root = new Container();
+    root.object = { $display: root } as never;
+    root.loaderInfo = {} as never;
+    stage.addChildAt(root, 0);
+    const button = sprite();
+    button.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 100, ty: 100 });
+    root.addChildAt(button, 0);
+    const other = sprite();
+    other.setMatrix(odd);
+    root.addChildAt(other, 1);
+    // Picks enough that the stage's bounds are worked out and kept.
+    for (let i = 0; i < 4; i++) {
+      assert.equal(pointerTarget(stage, 110, 110, 200, 200), button, JSON.stringify(odd));
+    }
+  }
+});

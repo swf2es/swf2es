@@ -280,9 +280,15 @@ function missesShape(d: DisplayObject, x: number, y: number): boolean {
   );
 }
 
-/** Whether (x, y) is within a pixel of `r`: a hairline's half pixel, and rounding, are in. */
+/**
+ * Whether (x, y) is within a pixel of `r`: a hairline's half pixel, and
+ * rounding, are in. Asked as what rules the point out, so that a NaN, in
+ * the bounds or the point (a NaN or infinite matrix, a zero scale turned in
+ * 3D, an infinite rectangle drawn), rules out nothing: a pick goes through
+ * as it would without bounds, rather than missing all above it.
+ */
 function nearRect(r: Rect | null, x: number, y: number): boolean {
-  return r !== null && x >= r.xMin - 1 && x <= r.xMax + 1 && y >= r.yMin - 1 && y <= r.yMax + 1;
+  return !(r === null || x < r.xMin - 1 || x > r.xMax + 1 || y < r.yMin - 1 || y > r.yMax + 1);
 }
 
 /**
