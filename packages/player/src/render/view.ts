@@ -68,9 +68,11 @@ import {
   StrokeContexts,
   sameLinear,
   scalesEvenly,
+  settledStretch,
   stretchOf,
   strokeFrame,
   UNIT,
+  widestLine,
 } from "./strokes.js";
 import { destroyContext, fillContext, type Painter, paint, SharedFills } from "./tessellate.js";
 import { drawStaticText, drawText } from "./text.js";
@@ -134,8 +136,6 @@ function hasLines(strokes: readonly (SharedGraphics | null)[]): boolean {
 
 /** sync's scratch, which a container's matrix is set from and which it does not keep. */
 const PLACED = new Matrix();
-/** restroke's scratch, which a stretch is compared in and never kept. */
-const STRETCH: Linear = [0, 0, 0, 0];
 /** A Shape child's slice key once its owner's slice changed: it is sliced again on its next sync. */
 const STALE = "stale";
 
@@ -182,6 +182,8 @@ interface Node {
    * leaves them as they are. Null otherwise.
    */
   stretched: Linear | null;
+  /** The width of the widest line of its layers that scale both ways, in twips (settledStretch). */
+  widest: number;
   /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
   bitmap: Sprite | null;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
@@ -679,6 +681,7 @@ export class PixiView {
         emptied: false,
         strokedAt: 0,
         stretched: null,
+        widest: 0,
         bitmap: null,
         lines: [],
         spare: null,
@@ -977,7 +980,12 @@ export class PixiView {
       return kept;
     };
 
+    node.widest = 0;
     node.layers.forEach((layer, i) => {
+      if (layer.strokes.length > 0 && scalesEvenly(layer)) {
+        node.widest = Math.max(node.widest, widestLine(layer));
+      }
+
       graphic(fills[i]);
       const borrowed = lines?.[i];
       const strokes = layer.strokes.length ? graphic(borrowed?.shared) : null;
@@ -1153,11 +1161,14 @@ export class PixiView {
   private restroke(node: Node, moved = false): void {
     const m = node.world;
     const least = this.leastWidth;
-    // Turned or mirrored, not stretched: the lines and the inverse they are under stay, as a limb's
-    // that only turns on every frame.
+    // Turned or mirrored, or stretched within one settled stretch: the lines and the inverse they
+    // are under stay, as a limb's that only turns on every frame.
+    // Settled once, for the test and the lines alike.
+    let settled: Linear | null | undefined;
     if (moved && node.stretched && node.strokedAt === least) {
-      const stretch = stretchOf(m, STRETCH);
-      if (stretch && sameLinear(stretch, node.stretched)) {
+      const stretch = stretchOf(m);
+      settled = stretch && settledStretch(stretch, node.widest, least, stretch);
+      if (settled && sameLinear(settled, node.stretched)) {
         return;
       }
     }
@@ -1169,8 +1180,12 @@ export class PixiView {
     let scaled: ReturnType<typeof strokeFrame> | null | undefined;
     const frameFor = (layer: ShapeLayer) => {
       if (scaled === undefined && !by && scalesEvenly(layer)) {
-        const stretch = stretchOf(m);
-        scaled = stretch && strokeFrame(stretch, least);
+        if (settled === undefined) {
+          const stretch = stretchOf(m);
+          settled = stretch && settledStretch(stretch, node.widest, least, stretch);
+        }
+
+        scaled = settled && strokeFrame(settled, least);
       }
 
       if (scaled && scalesEvenly(layer)) {

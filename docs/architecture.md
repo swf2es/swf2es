@@ -2533,8 +2533,17 @@ stretch, and a line scaled both ways is as wide through any turn of it:
 such a layer's lines are stroked through the stretch alone and turned by
 their Graphics' matrix, so a limb that turns on every frame, or a
 squashed particle that spins, shares one context through every angle,
-and a turn that keeps the stretch leaves its lines as they are;
-one with a line scaled one way alone, which turns with it, or a
+and a turn that keeps the stretch leaves its lines as they are.
+The stretch is then settled on a grid of its logarithm, in a step of at
+most 1/64 and fine enough that the lines' edges stand within a fiftieth
+of a screen pixel of their place (`settledStretch`): stroked through the
+grid's stretch and taken back by its inverse, the lines follow the path
+exactly, and only their width sees the difference. A character that
+breathes, scaling a percent or two on every frame, had a stretch for
+each frame of each loop, and a crowd of them made its lines faster than
+the cache could keep them; settled, a pulse has a few (`bench.ts --town
+60`: 75,000 contexts in 300 frames, 2,500 settled, and a frame's sync
+and draw from 9 to 2.5 ms). One with a line scaled one way alone, which turns with it, or a
 transform near collapse, which rounding would distort, keeps the
 transform exactly. Contexts are counted as instances take and give
 them back. An object that leaves the list, and those of its
