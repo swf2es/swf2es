@@ -1425,6 +1425,24 @@ test("the wheel sends mouseWheel to what is under the pointer, then scrolls a fi
   assert.deepEqual(wheel(10, 10, 0), [true]);
 });
 
+test("a button's new hit test state under a still mouse is picked at the frame's end", {
+  skip,
+}, async () => {
+  const { input, cmd, frame, player } = await gaps();
+  const c = player.root.children.find((child) => child.name === "c")?.object;
+  cmd("remove", "c");
+  input("move", 210, 150);
+  frame();
+
+  // c, off the list, 90 pixels square 100 below the button's origin: the point is in it now.
+  cmd("set", "btn", "hitTestState", c);
+  assert.deepEqual(frame(), [
+    "rollOver btn null false 10,150 @210,150",
+    "rollOver root null false 210,150 @210,150",
+    "mouseOver btn null false 10,150 @210,150",
+  ]);
+});
+
 test("a pick passes over what stood still away from the point, and sees what moved, scrolled or came since", () => {
   const stage = new Container();
   stage.object = { $display: stage } as never;

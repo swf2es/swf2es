@@ -1306,6 +1306,8 @@ export class ButtonObject extends Container {
 
   set hitTestState(d: DisplayObject | null) {
     this.hitTest = d;
+    // Where it is hit, which no change in the display list tells the pointer.
+    pickWork.changes++;
     this.statesChanged();
   }
 
