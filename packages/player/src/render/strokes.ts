@@ -372,13 +372,23 @@ export function settledStretch(s: Linear, widest: number, least: number, out?: L
   const q0 = (up + down) / 2 + across * h;
   const q1 = across * l12;
   const q3 = (up + down) / 2 - across * h;
-  // s q⁻¹ near the identity, each entry within a step: an edge within the slack of its place.
+  // s q⁻¹ near the identity, within a step by its norm, the most it stretches any direction: the
+  // edges, half the widest line from the path, within the slack of their place. (Each entry
+  // within a step alone let an edge stray to nearly twice that, 0.036 of a pixel measured.)
   const qDet = q0 * q3 - q1 * q1;
   const e0 = (s[0] * q3 - s[2] * q1) / qDet;
   const e1 = (s[1] * q3 - s[3] * q1) / qDet;
   const e2 = (s[2] * q0 - s[0] * q1) / qDet;
   const e3 = (s[3] * q0 - s[1] * q1) / qDet;
-  if (Math.max(Math.abs(e0 - 1), Math.abs(e1), Math.abs(e2), Math.abs(e3 - 1)) > step) {
+  // The spectral norm of D = s q⁻¹ - I: the root of the larger eigenvalue of DᵀD.
+  const d0 = e0 - 1;
+  const d3 = e3 - 1;
+  const frobenius = d0 * d0 + e1 * e1 + e2 * e2 + d3 * d3;
+  const det = d0 * d3 - e1 * e2;
+  const norm = Math.sqrt(
+    (frobenius + Math.sqrt(Math.max(0, frobenius * frobenius - 4 * det * det))) / 2,
+  );
+  if (!(norm <= step)) {
     return s;
   }
 
