@@ -751,9 +751,23 @@ cannot judge; Flash's traces in Ruffle's corpus do. A host gives the
 libraries' bytes, and the player compiles them as any ABC, or takes their
 modules from a module cache, as the swf2es command writes them with
 `--emit-libraries`. builtin.abc's AS3 sources are MPL-2.0, and so are its
-compiled modules. `playerglobal` (`flash.*`) is declarations only, so the
-player implements all of it; it is Adobe's, and neither it nor its modules
-ship with swf2es.
+compiled modules.
+
+The playerglobal (`flash.*`) the player loads is its own,
+`playerglobalLibrary`, compiled from `as3/playerglobal/src` by ASC 1 in
+the oracle's image as avmplus compiles its libraries (`tools/playerglobal.ts`,
+`pnpm as3:playerglobal`), into `playerglobal/playerglobal-library.ts`. Each
+public definition of Flash Player's playerglobal has a file there: Ruffle's
+AS3 where both are plain AS3 (MIT OR Apache-2.0, as each file says), else
+Flash Player's API with bodies of swf2es's own over the player's natives.
+A method native in Flash Player's playerglobal is native in ours, which the
+player's TypeScript implements; private natives are declared with the
+signatures it binds. `--check` holds the compiled API to Flash Player's
+(names, version marks, types, defaults, flags), and a unit test holds the
+committed file to its sources; `SWF2ES_PLAYERGLOBAL=adobe` runs the tests on
+Flash Player's own instead. No version mark goes past the reference's 41:
+a builtin's highest mark from 42 up is the VM's internal one
+(`API_FirstInternalMark`), which a higher mark would make public.
 
 ## Compiling ahead of time and caching modules
 
@@ -780,10 +794,11 @@ cases, a SWF of two DoABCs, one lazy, and as3pb's ABC against avmshell's
 libraries, the command's modules, the libraries' included, are the
 player's, which its own `Code.link` compiles in node.
 
-The libraries are the host's (playerglobal is Adobe's and cannot ship),
-so `--lib` names them, in load order; with
-none given, the command takes builtin.abc and playerglobal.abc from
-`tests/player/out/libraries/`, where the player's tests copy them, and
+The libraries are the host's, so `--lib` names them, in load order; the
+command depends on format and codegen alone, so it cannot take the
+player's playerglobalLibrary itself. With none given, it takes builtin.abc
+and playerglobal-swf2es.abc from `tests/player/out/libraries/`, where the
+player's tests write them, and
 says what to pass when they are not there. The player loads only the
 libraries its host gives `loadLibraries`, builtin and playerglobal by
 default: a host that also loads one of the player's own, as
@@ -2187,9 +2202,8 @@ script access.
 AIR 51's `air.net.WebSocket` and `flash.events.WebSocketEvent` are
 newer than the oracle's playerglobal, and Adobe's airglobal that has
 them may not be committed. The player declares them itself, in AS3 of its
-own beside their natives (`playerglobal/air/net/WebSocket.as`,
-`playerglobal/flash/events/WebSocketEvent.as`), with AIR's API as adl
-shows it. `tests/player/air-library.ts` compiles them with ASC in the
+own under `as3/air/src` (`air/net/WebSocket.as`,
+`flash/events/WebSocketEvent.as`), with AIR's API as adl shows it. `tests/player/air-library.ts` compiles them with ASC in the
 oracle's container against builtin and playerglobal into one ABC,
 committed as `playerglobal/air-library.ts`, and a unit test compiles them
 again and compares. ASC keeps no default values for a native method's

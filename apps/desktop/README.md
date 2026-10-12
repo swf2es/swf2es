@@ -24,13 +24,14 @@ own installer. A relative path is taken from the directory pnpm was run in.
   again, View › Toggle Full Screen (F11) fills the screen, and File ›
   Close Movie (Ctrl+W) stops it. Opening another SWF destroys the
   player before the next starts.
-- **Libraries.** ActionScript 3 needs `builtin.abc` and `playerglobal.abc`.
-  playerglobal is Adobe's and may not be redistributed, so the app does
-  not include it: the first ActionScript 3 SWF shows what is missing and a
-  button to choose it (or File › Choose playerglobal.abc…), and the app
-  keeps the path in `settings.json` in Electron's user data directory.
-  builtin.abc (avmplus', MPL-2.0) is taken from beside playerglobal.abc,
-  else from the checkout's `oracle/avmplus/generated/`, else chosen too.
+- **Libraries.** ActionScript 3 needs `builtin.abc` (avmplus', MPL-2.0)
+  and a playerglobal, which the app has of its own (`playerglobalLibrary`).
+  builtin.abc is taken from beside a chosen playerglobal.abc, else from the
+  checkout's `oracle/avmplus/generated/`; without either, the first
+  ActionScript 3 SWF shows what is missing and a button to choose it. File ›
+  Choose playerglobal.abc… plays on another playerglobal in place of the
+  app's own. The app keeps the paths in `settings.json` in Electron's user
+  data directory.
 - **Trace.** `--trace` prints what the page logs, a SWF's `trace()` among
   it, to the terminal: trace lines to stdout, warnings and errors to stderr.
 - **Sandbox.** A SWF plays in the sandbox Flash Player gave a local SWF,

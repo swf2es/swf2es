@@ -112,7 +112,7 @@ it to keep whatever the command did not compile:
 
 ```js
 import { createCodegen } from "@swf2es/codegen";
-import { Player, Scripting } from "@swf2es/player";
+import { Player, playerglobalLibrary, Scripting } from "@swf2es/player";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { chainCaches, precompiledModules } from "@swf2es/player-hosts/precompiled";
 
@@ -125,7 +125,7 @@ const scripting = new Scripting(codegen, {
     indexedDbModuleCache(),
   ),
 });
-await scripting.loadLibraries([await bytes("/flash/builtin.abc"), await bytes("/flash/playerglobal.abc")]);
+await scripting.loadLibraries([await bytes("/flash/builtin.abc"), playerglobalLibrary]);
 const player = new Player(await bytes("movie.swf"), scripting);
 await player.start(); // nothing compiled: every module came from movie.swf2es
 ```
@@ -145,14 +145,14 @@ and how the element uses it (`packages/web/src/playback.ts`).
 ```ts
 import { readFile } from "node:fs/promises";
 import { createCodegen } from "@swf2es/codegen";
-import { Player, Scripting } from "@swf2es/player";
+import { Player, playerglobalLibrary, Scripting } from "@swf2es/player";
 
 const wasm = await readFile(new URL(import.meta.resolve("@swf2es/codegen/codegen.wasm")));
 const scripting = new Scripting(await createCodegen(await WebAssembly.compile(wasm)), {
   print: (line) => console.log(line), // trace()
   realTime: null, // getTimer() follows the frames, so every run prints the same
 });
-await scripting.loadLibraries([await readFile("builtin.abc"), await readFile("playerglobal.abc")]);
+await scripting.loadLibraries([await readFile("builtin.abc"), playerglobalLibrary]);
 
 const player = new Player(await readFile("movie.swf"), scripting);
 await player.start(); // the document class and the first frame
@@ -182,8 +182,9 @@ pnpm --filter @swf2es/desktop fetch-electron
 pnpm --filter @swf2es/desktop start movie.swf   # or File › Open, or drop a SWF on the window
 ```
 
-The first ActionScript 3 SWF asks for your playerglobal.abc, and the app
-remembers where it is. [apps/desktop/README.md](apps/desktop/README.md) has the rest.
+In a checkout the app takes builtin.abc from the avmplus submodule and
+plays on its own playerglobal; elsewhere the first ActionScript 3 SWF asks
+for builtin.abc, and the app remembers where it is. [apps/desktop/README.md](apps/desktop/README.md) has the rest.
 
 ### Sockets
 
