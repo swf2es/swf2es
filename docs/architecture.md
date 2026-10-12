@@ -1989,8 +1989,10 @@ ancestors' bounds see. They are worked out only for what stood still over
 the last two picks, as what changes on most frames costs less gone
 through than measured; a timeline shape is checked against its recorded
 bounds before its fills. A button's hit test state is in no container,
-so a button and those above it are measured each time, and while any
-sprite has a `hitArea`, which may be anywhere, nothing is passed over.
+so a button and those above it are measured each time, as is a sprite
+with a `hitArea`, which may be anywhere on the list, its bounds taken
+through the stage into the sprite's. A NaN in bounds, from a NaN or
+infinite matrix or an infinite drawing, rules no point out.
 On 400 rigs of 12 moving parts (10,000 objects), a pick takes 0.01 ms
 where it took 0.5 ms and 125 KB, and
 `tests/player/bench.ts --scripted 400 --still --hover` ticks as without a

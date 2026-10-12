@@ -20,7 +20,7 @@ import {
   StaticTextObject,
   TextObject,
 } from "../display/display.js";
-import { apply, invert, type Rect } from "../display/geometry.js";
+import { apply, concat, invert, type Rect } from "../display/geometry.js";
 import { dispatchEvent, heard } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import { maxScrollV } from "../text/layout.js";
@@ -80,23 +80,14 @@ const own = (d: DisplayObject): Pick => (mouseEnabled(d) && !isMainRoot(d) ? d :
 /** Each sprite's hitArea. */
 const hitAreas = new WeakMap<DisplayObject, DisplayObject>();
 
-/**
- * How many sprites have a hitArea: an area may be anywhere on the list, so
- * while there is one, no pick passes over a container by its bounds.
- */
-let areas = 0;
-
 /** Sprite.hitArea: `area` picks for `sprite` in place of its own drawing. */
 export function setHitArea(sprite: DisplayObject, area: DisplayObject | null): void {
   pickWork.changes++;
-  const had = hitAreas.has(sprite);
   if (area) {
     hitAreas.set(sprite, area);
   } else {
     hitAreas.delete(sprite);
   }
-
-  areas += (area ? 1 : 0) - (had ? 1 : 0);
 }
 
 export function hitAreaOf(sprite: DisplayObject): DisplayObject | null {
@@ -136,7 +127,6 @@ export function pointerTarget(
   // space, the object's own drawing of it in its own, which the pick
   // carries down the list from parent to child, making no matrix per object.
   const probe: Probe = { x: x - 0.5, y, root: stage };
-  const cull = areas === 0;
   const picks = pickWork.picks++;
 
   // Whether `d`'s artwork is under (lx, ly), in its parent's space, its children's included.
@@ -200,7 +190,7 @@ export function pointerTarget(
     // Nothing under it reaches the point: most of a crowded list is passed
     // over so. Bounds are worked out only for what stood still over the
     // last two picks: what changes on most frames costs less gone through.
-    if (cull && (!d.pickStale || d.pickChangedAt < picks - 1) && !nearRect(pickBounds(d), lx, ly)) {
+    if ((!d.pickStale || d.pickChangedAt < picks - 1) && !nearRect(pickBounds(d), lx, ly)) {
       return null;
     }
 
@@ -326,6 +316,15 @@ function pickBounds(d: DisplayObject): Rect | null {
       }
     }
 
+    // A hitArea, wherever it is on the list, through the stage to here; as
+    // for a button's, no change to it reaches this sprite, measured each time.
+    const area = hitAreas.get(d);
+    if (area && area !== d) {
+      stale = true;
+      const up = invert(toStage(d, null));
+      extend(box, up ? pickBounds(area) : UNKNOWN, up && concat(toStage(area, null), up));
+    }
+
     if (d instanceof Container) {
       for (const child of d.children) {
         if (child.clipDepth > 0 || child.maskOf) {
@@ -381,6 +380,8 @@ const EMPTY = [
   Number.NEGATIVE_INFINITY,
 ];
 const boxes: Float64Array[] = [];
+/** Bounds no point is ruled out of (nearRect). */
+const UNKNOWN: Rect = { xMin: Number.NaN, yMin: Number.NaN, xMax: Number.NaN, yMax: Number.NaN };
 let boundsDepth = 0;
 
 /** `box` (xMin, yMin, xMax, yMax) grown to take in `r`'s corners, times `scale`, through `m`. */

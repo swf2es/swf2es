@@ -1588,3 +1588,43 @@ test("an object with a NaN or infinite matrix, or drawn infinite, keeps nothing 
     }
   }
 });
+
+test("a sprite's hitArea elsewhere on the list is picked for it however long both stood still, and as it moves", () => {
+  const sprite = (x: number, y: number) => {
+    const s = new Container();
+    s.object = { $display: s } as never;
+    s.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+    s.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: x, ty: y });
+    return s;
+  };
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
+  const group = new Container();
+  group.object = { $display: group } as never;
+  stage.addChildAt(group, 0);
+  const owner = sprite(0, 0);
+  group.addChildAt(owner, 0);
+  // The area in another branch, far from the owner's own drawing, and not shown.
+  const area = sprite(150, 150);
+  area.visible = false;
+  stage.addChildAt(area, 1);
+  setHitArea(owner, area);
+  const pick = (x: number, y: number) => {
+    for (let i = 0; i < 3; i++) {
+      pointerTarget(stage, x, y, 200, 200);
+    }
+
+    return pointerTarget(stage, x, y, 200, 200);
+  };
+
+  assert.equal(pick(160, 160), owner);
+  assert.equal(pick(10, 10), stage);
+  area.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 100, ty: 20 });
+  assert.equal(pick(110, 30), owner);
+  // The owner moving moves where its area is, from the owner's side, not at all.
+  owner.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 50, ty: 0 });
+  assert.equal(pick(110, 30), owner);
+  setHitArea(owner, null);
+  assert.equal(pick(110, 30), stage);
+});
