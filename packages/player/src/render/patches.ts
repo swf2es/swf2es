@@ -12,15 +12,17 @@ import {
   type Bounds,
   boundsPool,
   FilterSystem,
+  GpuGraphicsContext,
   Graphics,
   type GraphicsContext,
+  GraphicsContextSystem,
   GraphicsPipe,
   type InstructionSet,
   Matrix,
   Container as PixiContainer,
   type Renderer,
   RenderGroupSystem,
-  type Texture,
+  Texture,
 } from "pixi.js";
 import { forgetShown, type SharingGraphics, showFor } from "./color.js";
 // Registers the table's pipe with Pixi, which the override below looks up by name.
@@ -188,6 +190,85 @@ pipe.validateRenderable = function (graphics) {
   const gpuContext = this.renderer.graphicsContext.updateGpuContext(graphics.context);
   const data = (graphics as unknown as PipeGraphics)._gpuData[this.renderer.uid];
   return gpuContext.isBatchable || data?.batched !== false;
+};
+
+/**
+ * A context's tessellation kept in typed arrays once built, rather than
+ * the arrays of numbers Pixi pushes it into: some 130 MB of a crowded
+ * room's heap were these, its UVs half of them, all zero for a fill
+ * without a texture. Pixi reads them only to pack a context's vertices,
+ * and builds into new arrays (reset). Kept as each is packed into the
+ * same Float32Array: positions as 32-bit floats for a context drawn
+ * alone, packed as they are, but as 64-bit ones for one batched, packed
+ * through its transform; UVs as 32-bit floats, packed as they are, or
+ * a view of zeros for a context without a texture; indices as 16-bit
+ * integers where its vertices are few enough.
+ */
+type Tessellated = {
+  vertices: ArrayLike<number>;
+  uvs: ArrayLike<number>;
+  indices: ArrayLike<number>;
+};
+type GpuContext = {
+  isBatchable: boolean;
+  batches: { texture: Texture }[];
+  geometryData: Tessellated | null;
+};
+/** Shorter arrays stay as Pixi made them: a typed array costs some 100 bytes more. */
+const COMPACT_LEAST = 64;
+/** Zeros, the UVs of every context without a texture, grown to the largest's. */
+let zeros = new Float32Array(1024);
+
+function compact(gpu: GpuContext): void {
+  const data = gpu.geometryData;
+  if (!data || !Array.isArray(data.vertices) || data.vertices.length < COMPACT_LEAST) {
+    return;
+  }
+
+  const vertices = data.vertices as number[];
+  data.vertices = gpu.isBatchable ? new Float64Array(vertices) : new Float32Array(vertices);
+  let white = true;
+  for (const batch of gpu.batches) {
+    white &&= batch.texture === Texture.WHITE;
+  }
+
+  const uvs = data.uvs.length;
+  if (white && zeros.length < uvs) {
+    zeros = new Float32Array(Math.max(uvs, zeros.length * 2));
+  }
+
+  data.uvs = white ? zeros.subarray(0, uvs) : new Float32Array(data.uvs as number[]);
+  const indices = data.indices as number[];
+  data.indices =
+    vertices.length / 2 <= 0x10000 ? new Uint16Array(indices) : new Uint32Array(indices);
+}
+
+const contextSystem = GraphicsContextSystem.prototype as unknown as {
+  _renderer: Renderer;
+  updateGpuContext(context: GraphicsContext): GpuContext;
+};
+const updateGpuContext = contextSystem.updateGpuContext;
+contextSystem.updateGpuContext = function (context) {
+  const built = (context as unknown as PipeGraphics)._gpuData[this._renderer.uid];
+  const building = context.dirty || !built;
+  const gpu = updateGpuContext.call(this, context);
+  if (building) {
+    compact(gpu);
+  }
+
+  return gpu;
+};
+// Pixi empties the arrays to build into them again: typed arrays are given back as new ones.
+const resetGpu = GpuGraphicsContext.prototype.reset;
+GpuGraphicsContext.prototype.reset = function (this: GpuGraphicsContext) {
+  const data = (this as unknown as GpuContext).geometryData;
+  if (data && !Array.isArray(data.vertices)) {
+    data.vertices = [];
+    data.uvs = [];
+    data.indices = [];
+  }
+
+  resetGpu.call(this);
 };
 
 /**
