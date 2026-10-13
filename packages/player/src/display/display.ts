@@ -335,7 +335,16 @@ export class DisplayObject {
    * when it next draws.
    */
   scrollRect: Rect | null = null;
-  scroll: Rect | null = null;
+  private scrollTaken: Rect | null = null;
+
+  /** The scroll a 3D object has none of: Flash draws, bounds and hits all of it whatever its scrollRect. */
+  get scroll(): Rect | null {
+    return this.space ? null : this.scrollTaken;
+  }
+
+  set scroll(r: Rect | null) {
+    this.scrollTaken = r;
+  }
   /**
    * Its 9-slice grid, in its own space, in pixels (display/scale9.ts): its
    * symbol's DefineScalingGrid's, or what a script set; null for none.

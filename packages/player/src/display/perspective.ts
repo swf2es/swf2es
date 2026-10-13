@@ -75,7 +75,7 @@ export function focalLength(radians: number, d: DisplayObject): number {
 /** A column-major 4x4 matrix. */
 type M4 = Float64Array;
 
-/** `m`, `d`'s own transform in 3D: its matrix3D, or its 2D matrix with z kept; a scroll's shift first. */
+/** `m`, `d`'s own transform in 3D: its matrix3D, or its 2D matrix with z kept (a 3D object has no scroll). */
 function own3D(d: DisplayObject): M4 {
   const m = new Float64Array(16);
   const space = d.space;
@@ -84,14 +84,6 @@ function own3D(d: DisplayObject): M4 {
   } else {
     const p = d.placed;
     m.set([p.a, p.b, 0, 0, p.c, p.d, 0, 0, 0, 0, 1, 0, p.tx, p.ty, 0, 1]);
-    return m;
-  }
-
-  const scroll = d.scroll;
-  if (scroll) {
-    for (let r = 0; r < 4; r++) {
-      m[12 + r] -= m[r] * scroll.xMin + m[4 + r] * scroll.yMin;
-    }
   }
 
   return m;
