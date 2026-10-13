@@ -655,6 +655,22 @@ test("a container's frame children are its own children, a leaf's one empty list
   assert.equal(shape.frameChildren, new ShapeObject(null).frameChildren);
 });
 
+test("removing what is not a container's child changes nothing, its last child stays", () => {
+  const sprite = new Container();
+  const other = new Container();
+  const [a, b, c] = [new ShapeObject(null), new ShapeObject(null), new ShapeObject(null)];
+  sprite.addChildAt(a, 0);
+  sprite.addChildAt(b, 1);
+  other.addChildAt(c, 0);
+  sprite.removeChild(a);
+  sprite.removeChild(a);
+  sprite.removeChild(c);
+  assert.deepEqual(sprite.children, [b]);
+  assert.equal(b.parent, sprite);
+  assert.deepEqual(other.children, [c]);
+  assert.equal(c.parent, other);
+});
+
 test("a button's frame children follow its states, the hit test state first, each once", () => {
   const button = new ButtonObject();
   assert.equal(button.frameChildren.length, 0);
