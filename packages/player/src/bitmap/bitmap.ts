@@ -79,6 +79,9 @@ export function spanRect(x: number, y: number, width: number, height: number): P
   return pixelRect(x, y, width, height);
 }
 
+/** No gaps, shared by every copy that leaves none. */
+const NO_GAPS: readonly PixelRect[] = [];
+
 /** The reciprocals Flash divides alpha out with, 8.8 fixed point. */
 const RECIPROCAL = new Uint32Array(256);
 for (let a = 1; a < 256; a++) {
@@ -326,8 +329,12 @@ export class BitmapStore {
     ax = 0,
     ay = 0,
   ): void {
-    const gaps = source === this ? this.copyGaps(rect, dx, dy) : [];
-    const [gx, gy, gax, gay] = [dx, dy, ax, ay];
+    const gaps = source === this ? this.copyGaps(rect, dx, dy) : NO_GAPS;
+    // The point and alpha point as given, which the gaps are written from.
+    const gx = dx;
+    const gy = dy;
+    const gax = ax;
+    const gay = ay;
     const s = source.clip(rect);
     const d =
       s &&
@@ -405,7 +412,7 @@ export class BitmapStore {
    * other move (or another source) clips it and moves the point with it.
    * Within the store, and apart; none for any other copy.
    */
-  copyGaps(rect: PixelRect, dx: number, dy: number): PixelRect[] {
+  copyGaps(rect: PixelRect, dx: number, dy: number): readonly PixelRect[] {
     // Where the source's (0, 0) lands.
     const kx = dx - rect.x;
     const ky = dy - rect.y;
@@ -418,7 +425,7 @@ export class BitmapStore {
       kx > rect.width ||
       ky > rect.height
     ) {
-      return [];
+      return NO_GAPS;
     }
 
     const right = dx + rect.width;
@@ -436,7 +443,7 @@ export class BitmapStore {
    * draws black, which this keeps them, as opaque black.
    */
   private fillGaps(
-    gaps: PixelRect[],
+    gaps: readonly PixelRect[],
     source: BitmapStore,
     dx: number,
     dy: number,
