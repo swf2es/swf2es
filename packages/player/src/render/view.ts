@@ -36,6 +36,7 @@ import {
   StaticTextObject,
   TextObject,
   TRANSFORM,
+  unloads,
 } from "../display/display.js";
 import type { Filter as FilterRecord } from "../display/filters.js";
 import { shifted } from "../display/geometry.js";
@@ -50,7 +51,7 @@ import { argbOf, characterStore, gpuBitmaps } from "./bitmaps.js";
 import { blendFilters } from "./blend.js";
 import { setFlashColor } from "./color.js";
 import { displayFilters, FilterChain, sameFilterRecords } from "./filters.js";
-import { SETTLE_MS, type Settling, SharedGraphics, settle } from "./patches.js";
+import { SETTLE_MS, type Settling, SharedGraphics, settle, unsettle } from "./patches.js";
 import {
   drawTarget,
   IDLE_MS,
@@ -58,6 +59,7 @@ import {
   PARKED_MOST,
   releaseDrawTarget,
   SPARE_GRAPHICS_MOST,
+  SPARE_NODES_MOST,
   trimPools,
 } from "./pools.js";
 import { boundedResolves } from "./resolve.js";
@@ -84,7 +86,6 @@ const NO_RECORDS: readonly FilterRecord[] = [];
 /** What an emptied node has drawn, shared by all: replaced as it draws, never added to. */
 const NO_LAYERS: ShapeLayer[] = [];
 const NO_FILLS: GraphicsContext[] = [];
-const NO_LINES_GIVEN: readonly (GraphicsContext | undefined)[] = [];
 
 /** Whether every one of `art` is a SharedGraphics, which a redraw keeps for its new content. */
 function allShared(art: readonly PixiContainer[]): boolean {
@@ -189,10 +190,12 @@ interface Node {
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
   lines: SharedGraphics[];
   /**
-   * Between a redraw's clear and its draw, the Graphics the content left,
-   * and which are lines, for the next to take in place.
+   * Between a redraw's clear and its draw (while `spared`), the Graphics
+   * the content left, and which are lines, for the next to take in place;
+   * kept, emptied, for the next redraw.
    */
   spare: { graphics: SharedGraphics[]; lines: boolean[] } | null;
+  spared: boolean;
   /** Whether the object is a mask or in one, as of the last sync. */
   masking: boolean;
   /** The containers of the children a timeline's mask clips, each masked by it. */
@@ -232,6 +235,13 @@ interface Node {
    * line as wide as in that space. Null for its own transform.
    */
   lineSpace: Linear | null;
+  /**
+   * The object it draws, the one it was made for or the last to take it,
+   * and the character and class of those that may take it (`PixiView.spareNodes`).
+   */
+  owner: WeakRef<DisplayObject>;
+  character: object | null;
+  kind: object;
 }
 
 /** Only a partner outside the branch prevents it owning a separate instruction set. */
@@ -251,6 +261,34 @@ export class PixiView {
   readonly counts = { strokeContexts: 0, strokeReuses: 0 };
   /** Graphics of children taken off, kept for the next content to take (SPARE_GRAPHICS_MOST). */
   private readonly spareGraphics: SharedGraphics[] = [];
+  /**
+   * The released nodes, by their objects' character, for a new object of
+   * the character to take. A timeline that places its children anew on
+   * every frame, as an animated character's often does, made hundreds of
+   * nodes a frame, each with its containers, and dropped as many: taken, a
+   * node keeps its containers and Graphics, where they are in Pixi's tree
+   * when it comes back in its place, and its filters where the new
+   * object's are the same. And all of them, oldest first, with the time
+   * each was listed: SPARE_NODES_MOST at most, none past IDLE_MS, and none
+   * past an unload (`dropSpares`), which would keep its SWF's characters.
+   */
+  private readonly spareNodes = new Map<object, Set<Node>>();
+  private readonly spareSince = new Map<Node, number>();
+  /** The unloads (display's `unloads`) the spares were last dropped for. */
+  private unloadsSeen = unloads.count;
+  /** The nodes by their containers, for a child's sync to take the node that is in its place. */
+  private readonly containerNodes = new WeakMap<PixiContainer, Node>();
+  /** The container in the place the next object synced goes to, set and read as arrange syncs it. */
+  private placeHint: PixiContainer | null = null;
+  /** What the nodes cleared give back once their new content is drawn (clear, giveBack). */
+  private readonly giving = {
+    fills: [] as GraphicsContext[],
+    lines: [] as GraphicsContext[],
+    shapes: [] as ShapeCharacter[],
+  };
+  /** settleGroups' scratch: the groups whose batched Graphics draw alone again, and whose to look through. */
+  private readonly unsettling = new Set<Settling>();
+  private readonly scanned: Settling[] = [];
   private readonly lines = new StrokeContexts(this.counts);
   private readonly nodes = new WeakMap<DisplayObject, Node>();
   /** A fresh view's fills of the shapes it built them for, shared by their instances; it destroys them with itself. */
@@ -702,7 +740,13 @@ export class PixiView {
   }
 
   private node(o: DisplayObject): Node {
+    const hint = this.placeHint;
+    this.placeHint = null;
     let node = this.nodes.get(o);
+    if (!node && !this.fresh) {
+      node = this.takeSpare(o, hint);
+    }
+
     if (!node) {
       const art = new PixiContainer();
       node = {
@@ -726,6 +770,7 @@ export class PixiView {
         bitmap: null,
         lines: [],
         spare: null,
+        spared: false,
         masking: false,
         groups: [],
         scroll: null,
@@ -745,12 +790,153 @@ export class PixiView {
         sliceOwner: null,
         sliceLinear: null,
         lineSpace: null,
+        owner: o.ref,
+        character: o.character,
+        kind: o.constructor,
       };
       node.container.addChild(art);
       this.nodes.set(o, node);
+      if (!this.fresh) {
+        this.containerNodes.set(node.container, node);
+      }
     }
 
     return node;
+  }
+
+  /**
+   * A released node of `o`'s character and class for `o` to take, the one
+   * whose container is `hint`, in `o`'s place, where it is one. Its object
+   * gets a node of its own if it comes back. The node is synced as one
+   * that comes back is, which `o`, new, has redrawn and placed whole;
+   * what only its old object's history set (a stale cache, a slice, a
+   * colour) is forgotten here.
+   */
+  private takeSpare(o: DisplayObject, hint: PixiContainer | null): Node | undefined {
+    const character = o.character;
+    const listed = character && this.spareNodes.get(character);
+    if (!listed) {
+      return undefined;
+    }
+
+    let node: Node | undefined;
+    const placed = hint ? this.containerNodes.get(hint) : undefined;
+    if (placed && listed.has(placed) && this.spareFor(placed, o)) {
+      node = placed;
+    } else {
+      // Oldest first; one no longer fit to take, as one made a mask, is let go of on the way.
+      for (const spare of listed) {
+        if (this.spareFor(spare, o)) {
+          node = spare;
+          break;
+        }
+
+        this.unlistSpare(spare);
+      }
+    }
+
+    if (!node) {
+      return undefined;
+    }
+
+    this.unlistSpare(node);
+    // Back on the list, the old object is drawn whole into a node of its own.
+    const was = node.owner.deref();
+    if (was) {
+      this.nodes.delete(was);
+      was.dirty |= TRANSFORM | CONTENT | (was instanceof Container ? CHILDREN : 0);
+    }
+
+    node.owner = o.ref;
+    node.stale = null;
+    node.color = null;
+    node.inherited = null;
+    node.slice = null;
+    node.sliceKey = "";
+    node.sliceOwner = null;
+    node.sliceLinear = null;
+    node.lineSpace = null;
+    this.nodes.set(o, node);
+    return node;
+  }
+
+  /**
+   * Whether `node`, listed spare, may be taken by `o`: still off the list,
+   * of its class, and not made a mask since it was listed, as an object
+   * taken off the list in the frame a script makes it one is.
+   */
+  private spareFor(node: Node, o: DisplayObject): boolean {
+    const container = node.container;
+    return (
+      node.released &&
+      node.kind === o.constructor &&
+      node.character === o.character &&
+      container.includeInBuild !== false &&
+      container.measurable !== false
+    );
+  }
+
+  /**
+   * List a node just released for a new object of its character to take:
+   * not a mask's, whose container a masked one may still hold.
+   */
+  private listSpare(node: Node): void {
+    // As its object is now: a timeline may have swapped the character it was made of.
+    const owner = node.owner.deref();
+    if (owner) {
+      node.character = owner.character;
+      node.kind = owner.constructor;
+    }
+
+    const character = node.character;
+    const container = node.container;
+    if (
+      this.fresh ||
+      !character ||
+      node.masking ||
+      container.includeInBuild === false ||
+      container.measurable === false ||
+      this.spareSince.has(node)
+    ) {
+      return;
+    }
+
+    let listed = this.spareNodes.get(character);
+    if (!listed) {
+      listed = new Set();
+      this.spareNodes.set(character, listed);
+    }
+
+    listed.add(node);
+    this.spareSince.set(node, performance.now());
+    if (this.spareSince.size > SPARE_NODES_MOST) {
+      this.unlistSpare(this.spareSince.keys().next().value as Node);
+    }
+  }
+
+  /** A node off the spares: taken, come back, kept too long, or past the most. */
+  private unlistSpare(node: Node): void {
+    if (!this.spareSince.delete(node)) {
+      return;
+    }
+
+    const character = node.character as object;
+    const listed = this.spareNodes.get(character);
+    listed?.delete(node);
+    if (listed?.size === 0) {
+      this.spareNodes.delete(character);
+    }
+  }
+
+  /**
+   * Let go of every spare node, as a SWF unloads: they hold its characters,
+   * and its objects' containers, till taken or IDLE_MS on, which a player
+   * paused or let go of never reaches. For a host to call too as it lets
+   * go of a player whose view it keeps.
+   */
+  dropSpares(): void {
+    this.spareNodes.clear();
+    this.spareSince.clear();
   }
 
   /**
@@ -759,43 +945,65 @@ export class PixiView {
    * its own and change.
    */
   private redraw(o: DisplayObject, node: Node): void {
-    const done = this.clear(node, true);
+    this.clear(node, true);
     // Given back after the new ones are made, so that a texture or a blend they share is kept, not
     // made again.
     try {
       this.draw(o, node);
     } finally {
-      done();
+      this.giveBack();
       // Drawn, the new content has taken or dropped them all; one that threw has not.
       this.dropSpare(node);
     }
   }
 
   /**
-   * Empty the node of what it drew, and return what gives back its fills
-   * and lines: a drawing's fills, a blend's, and every node's lines; a
-   * Graphics frees only a context it made.
+   * Empty the node of what it drew, listing for giveBack what gives back
+   * its fills and lines: a drawing's fills, a blend's, and every node's
+   * lines; a Graphics frees only a context it made.
    */
-  private clear(node: Node, keep = false): () => void {
+  private clear(node: Node, keep = false): void {
     // A Bitmap's texture is its store's: only the sprite goes.
     node.bitmap?.destroy();
     node.bitmap = null;
-    // Of the content's arrays, none is made where it has nothing: an object is emptied and drawn
-    // anew each time its content changes.
-    const old = node.ownFills && !this.fresh ? node.fills : NO_FILLS;
-    const oldLines =
-      this.fresh || node.strokes.length === 0 ? NO_LINES_GIVEN : node.strokes.map((g) => g?.shared);
-    const shared = node.sharedFills;
+    // Listed in the view's own lists, not in arrays of their own: an object is emptied and drawn
+    // anew each time its content changes, hundreds of times a frame in an animated crowd.
+    const giving = this.giving;
+    if (node.ownFills && !this.fresh) {
+      for (let i = 0; i < node.fills.length; i++) {
+        giving.fills.push(node.fills[i]);
+      }
+    }
+
+    if (!this.fresh) {
+      for (let i = 0; i < node.strokes.length; i++) {
+        const context = node.strokes[i]?.shared;
+        if (context) {
+          giving.lines.push(context);
+        }
+      }
+    }
+
+    if (node.sharedFills) {
+      giving.shapes.push(node.sharedFills);
+    }
+
     // A shape's Graphics stay where they are, for the content drawn next to take in place: taken
     // off and put on, they changed the structure of its render group, which Pixi then rebuilt
     // whole, an animated character's every frame its timeline swapped a shape.
     const art = node.art.children;
     if (keep && art.length > 0 && allShared(art)) {
       const lines = node.lines;
-      node.spare = {
-        graphics: art.slice() as SharedGraphics[],
-        lines: art.map((g) => lines.includes(g as SharedGraphics)),
-      };
+      node.spare ??= { graphics: [], lines: [] };
+      const spare = node.spare;
+      spare.graphics.length = 0;
+      spare.lines.length = 0;
+      for (let i = 0; i < art.length; i++) {
+        spare.graphics.push(art[i] as SharedGraphics);
+        spare.lines.push(lines.includes(art[i] as SharedGraphics));
+      }
+
+      node.spared = true;
     } else {
       // A text's characters are in a container of their own; their shared
       // glyph fills stay, not being theirs. A shape's Graphics are kept for
@@ -813,24 +1021,30 @@ export class PixiView {
     node.fills = NO_FILLS;
     node.ownFills = false;
     node.sharedFills = null;
-    node.strokes = [];
-    node.lines = [];
-    return () => {
-      for (let i = 0; i < old.length; i++) {
-        destroyContext(old[i]);
+    node.strokes.length = 0;
+    node.lines.length = 0;
+  }
+
+  /** Give back what the nodes cleared since listed (clear): their fills, lines and shapes' fills. */
+  private giveBack(): void {
+    const { fills, lines, shapes } = this.giving;
+    try {
+      for (let i = 0; i < fills.length; i++) {
+        destroyContext(fills[i]);
       }
 
-      for (let i = 0; i < oldLines.length; i++) {
-        const context = oldLines[i];
-        if (context) {
-          this.lines.give(context);
-        }
+      for (let i = 0; i < lines.length; i++) {
+        this.lines.give(lines[i]);
       }
 
-      if (shared) {
-        this.shared.give(shared);
+      for (let i = 0; i < shapes.length; i++) {
+        this.shared.give(shapes[i]);
       }
-    };
+    } finally {
+      fills.length = 0;
+      lines.length = 0;
+      shapes.length = 0;
+    }
   }
 
   /**
@@ -960,29 +1174,22 @@ export class PixiView {
       node.layers = sliceLayers(node.layers, slicing.slice, slicing.m, o.drawing?.version);
     }
 
-    const build = (layer: ShapeLayer) => {
-      const context = fillContext(layer, this.painter);
-      if (this.fresh) {
-        this.built.add(context);
-      }
-
-      return context;
-    };
     let fills: GraphicsContext[];
     node.ownFills = false;
     if (current && current.layers === node.layers && current.fills.length === node.layers.length) {
       fills = current.fills;
     } else if (shape && !o.drawing && !slicing && !this.fresh) {
       // A shape's, or a morph's blend's, shared and counted: they go once nothing draws them.
-      fills = this.shared.take(shape, () => node.layers.map(build));
+      fills = this.shared.take(shape, node.layers, this.buildFills);
       node.sharedFills = shape;
     } else if (shape && !o.drawing && !slicing) {
       // A fresh view borrows the stage's, which its object, off the list, may no longer hold;
       // else builds its own, shared by its instances, which it destroys with the rest.
-      fills = this.source?.shared.peek(shape) ?? this.fills.get(shape) ?? node.layers.map(build);
+      fills =
+        this.source?.shared.peek(shape) ?? this.fills.get(shape) ?? this.buildFills(node.layers);
       this.fills.set(shape, fills);
     } else {
-      fills = node.layers.map(build);
+      fills = this.buildFills(node.layers);
       node.ownFills = true;
     }
 
@@ -1000,36 +1207,29 @@ export class PixiView {
     // The Graphics the last content left, taken in place where it laid out
     // its fills and lines alike.
     const spare =
-      node.spare && laidOutAs(node.spare.lines, node.layers) ? node.spare.graphics : null;
+      node.spared && node.spare && laidOutAs(node.spare.lines, node.layers)
+        ? node.spare.graphics
+        : null;
     if (!spare) {
       this.dropSpare(node);
     }
 
-    node.spare = null;
+    node.spared = false;
+    // A loop, not forEach with closures: a crowd's shapes are drawn again hundreds of times a frame.
     let next = 0;
-    const graphic = (context?: GraphicsContext): SharedGraphics => {
-      if (!spare) {
-        const made = this.spareGraphics.pop() ?? new SharedGraphics(NO_LINES);
-        made.swap(context ?? NO_LINES);
-        node.art.addChild(made);
-        return made;
-      }
-
-      const kept = spare[next++];
-      // A line's shows none till restroke gives it its own, and gives back the old.
-      kept.swap(context ?? NO_LINES);
-      return kept;
-    };
-
     node.widest = 0;
-    node.layers.forEach((layer, i) => {
+    const layers = node.layers;
+    for (let i = 0; i < layers.length; i++) {
+      const layer = layers[i];
       if (layer.strokes.length > 0 && scalesEvenly(layer)) {
         node.widest = Math.max(node.widest, widestLine(layer));
       }
 
-      graphic(fills[i]);
+      this.graphic(node, spare, next++, fills[i]);
       const borrowed = lines?.[i];
-      const strokes = layer.strokes.length ? graphic(borrowed?.shared) : null;
+      const strokes = layer.strokes.length
+        ? this.graphic(node, spare, next++, borrowed?.shared)
+        : null;
       if (strokes) {
         if (borrowed) {
           strokes.setFromMatrix(borrowed.localTransform);
@@ -1039,8 +1239,47 @@ export class PixiView {
       }
 
       node.strokes.push(borrowed ? null : strokes);
-    });
+    }
+
     this.restroke(node);
+  }
+
+  /** The fills of `layers`, built: a fresh view's to destroy with the rest. */
+  private readonly buildFills = (layers: readonly ShapeLayer[]): GraphicsContext[] => {
+    const fills: GraphicsContext[] = [];
+    for (let i = 0; i < layers.length; i++) {
+      const context = fillContext(layers[i], this.painter);
+      if (this.fresh) {
+        this.built.add(context);
+      }
+
+      fills.push(context);
+    }
+
+    return fills;
+  };
+
+  /**
+   * The Graphics the `k`th of a node's new content draws `context` with:
+   * the `k`th the last content left, in place, or one kept or made, put on.
+   */
+  private graphic(
+    node: Node,
+    spare: SharedGraphics[] | null,
+    k: number,
+    context: GraphicsContext | undefined,
+  ): SharedGraphics {
+    if (!spare) {
+      const made = this.spareGraphics.pop() ?? new SharedGraphics(NO_LINES);
+      made.swap(context ?? NO_LINES);
+      node.art.addChild(made);
+      return made;
+    }
+
+    const kept = spare[k];
+    // A line's shows none till restroke gives it its own, and gives back the old.
+    kept.swap(context ?? NO_LINES);
+    return kept;
   }
 
   /**
@@ -1069,6 +1308,7 @@ export class PixiView {
     }
 
     node.released = true;
+    this.listSpare(node);
     const group = node.container.isRenderGroup ? node.container.renderGroup : null;
     if (group) {
       const uid = group.instructionSet.uid;
@@ -1135,7 +1375,14 @@ export class PixiView {
 
   /** Keep the Graphics a redraw kept for its new content that it did not take, or destroy them in a fresh view. */
   private dropSpare(node: Node): void {
-    for (const graphic of node.spare?.graphics ?? []) {
+    const spare = node.spare;
+    if (!node.spared || !spare) {
+      return;
+    }
+
+    node.spared = false;
+    for (let i = 0; i < spare.graphics.length; i++) {
+      const graphic = spare.graphics[i];
       graphic.parent?.removeChild(graphic);
       if (this.fresh) {
         graphic.destroy();
@@ -1144,7 +1391,8 @@ export class PixiView {
       }
     }
 
-    node.spare = null;
+    spare.graphics.length = 0;
+    spare.lines.length = 0;
   }
 
   /**
@@ -1176,7 +1424,8 @@ export class PixiView {
   private empty(node: Node): void {
     this.parked.delete(node);
     node.emptied = true;
-    this.clear(node)();
+    this.clear(node);
+    this.giveBack();
   }
 
   /** Return a parked group's batches without changing its nested group hierarchy. */
@@ -1219,8 +1468,17 @@ export class PixiView {
     // One key and one inverse for all its layers of each kind, made as one first needs them.
     let exact: ReturnType<typeof strokeFrame> | null = null;
     let scaled: ReturnType<typeof strokeFrame> | null | undefined;
-    const frameFor = (layer: ShapeLayer) => {
-      if (scaled === undefined && !by && scalesEvenly(layer)) {
+    // A loop, not forEach with closures: every shape that moves on a frame is stroked again.
+    const layers = node.layers;
+    for (let i = 0; i < layers.length; i++) {
+      const strokes = node.strokes[i];
+      if (!strokes) {
+        continue;
+      }
+
+      const layer = layers[i];
+      const even = scalesEvenly(layer);
+      if (scaled === undefined && !by && even) {
         if (settled === undefined) {
           const stretch = stretchOf(m);
           settled = stretch && settledStretch(stretch, node.widest, least, stretch);
@@ -1229,20 +1487,15 @@ export class PixiView {
         scaled = settled && strokeFrame(settled, least);
       }
 
-      if (scaled && scalesEvenly(layer)) {
-        return scaled;
+      let frame: ReturnType<typeof strokeFrame>;
+      if (scaled && even) {
+        frame = scaled;
+      } else {
+        exact ??= strokeFrame(m, least);
+        frame = exact;
       }
 
-      exact ??= strokeFrame(m, least);
-      return exact;
-    };
-    node.layers.forEach((layer, i) => {
-      const strokes = node.strokes[i];
-      if (!strokes) {
-        return;
-      }
-
-      const { m: seen, key, inverse } = frameFor(layer);
+      const { m: seen, key, inverse } = frame;
       // The new context goes in before the old one goes back, as it may be the same.
       const previous = strokes.shared;
       // A fresh view borrows the stage's lines where it draws them alike.
@@ -1269,7 +1522,8 @@ export class PixiView {
       if (inverse) {
         strokes.setFromMatrix(inverse);
       }
-    });
+    }
+
     node.stretched = scaled && !exact ? scaled.m : null;
   }
 
@@ -1299,6 +1553,7 @@ export class PixiView {
       node.released = false;
       node.reused = true;
       this.parked.delete(node);
+      this.unlistSpare(node);
       const group = node.container.renderGroup;
       if (group) {
         this.parkedGroups.delete(group.instructionSet.uid);
@@ -1682,7 +1937,10 @@ export class PixiView {
     // pools the group, which the next to take it must find unmarked.
     const group = container.renderGroup as unknown as Settling | null;
     if (group) {
-      settle(group, false);
+      this.unsettling.add(group);
+      unsettle(this.unsettling, this.unsettling);
+      this.unsettling.clear();
+      group.$batched = undefined;
       group.$builtAt = undefined;
       group.$settled = undefined;
       group.$settling = undefined;
@@ -1747,6 +2005,7 @@ export class PixiView {
       let at = 1;
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
+        this.placeHint = content.children[at] ?? null;
         const container = this.sync(
           child,
           node.world,
@@ -1913,6 +2172,14 @@ export class PixiView {
       this.emptyGroup(uid, entry.group.deref());
     }
 
+    for (const [node, since] of this.spareSince) {
+      if (now - since < IDLE_MS) {
+        break;
+      }
+
+      this.unlistSpare(node);
+    }
+
     trimPools();
     const units = this.filterUnits;
     this.rescaled = this.leastWidth !== this.strokedAt || units !== this.filteredAt;
@@ -1929,15 +2196,21 @@ export class PixiView {
     if (!this.fresh) {
       this.settleGroups();
     }
+
+    // After the sync, which released what an unload took off the list and listed it spare.
+    if (unloads.count !== this.unloadsSeen) {
+      this.unloadsSeen = unloads.count;
+      this.dropSpares();
+    }
   }
 
   /**
    * Batch the Graphics of each render group drawn that has not been rebuilt
    * for SETTLE_MS, and draw those of one rebuilt since alone again: walking
    * Pixi's tree of groups from the stage's, which holds those drawn and no
-   * other. A group rebuilt and not settled is looked through for Graphics
-   * still batched, which a branch brings along as it moves under it or
-   * becomes a group of its own.
+   * other. What a group batched is looked through as it unsettles or its
+   * structure changes, for Graphics a branch took along as it moved under
+   * another group or became a group of its own (unsettle).
    */
   private settleGroups(): void {
     const stage = this.stage.renderGroup as unknown as Settling | null;
@@ -1946,18 +2219,33 @@ export class PixiView {
     }
 
     const now = performance.now();
+    const unsettling = this.unsettling;
+    const scanned = this.scanned;
     const visit = (group: Settling) => {
       const quiet = group.$builtAt !== undefined && now - group.$builtAt >= SETTLE_MS;
-      if (quiet !== !!group.$settled || (!quiet && group.$seen !== group.$builtAt)) {
-        settle(group, quiet);
+      if (quiet && !group.$settled) {
+        settle(group);
+      } else if (!quiet && (group.$settled || group.$seen !== group.$builtAt)) {
+        unsettling.add(group);
+      }
+
+      // What it batched may have left it only as its structure changed, or be its own to unbatch.
+      if (group.$batched?.size && (group.structureDidChange || unsettling.has(group))) {
+        scanned.push(group);
       }
 
       group.$seen = group.$builtAt;
-      for (const child of group.renderGroupChildren) {
-        visit(child);
+      const children = group.renderGroupChildren;
+      for (let i = 0; i < children.length; i++) {
+        visit(children[i]);
       }
     };
     visit(stage);
+    if (unsettling.size > 0 || scanned.length > 0) {
+      unsettle(unsettling, scanned);
+      unsettling.clear();
+      scanned.length = 0;
+    }
   }
 
   /**

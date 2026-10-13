@@ -110,35 +110,41 @@ function blur(
   // Not a stage pixel's texels: on a stage shown larger than its size those strode over texels,
   // blurring past the padding, which cut the blur off.
   const step = 1 / input.source.resolution;
-  const runs: [number, number, number][] = [];
-  for (let i = 0; i < quality; i++) {
-    if (blurX > 1) {
-      runs.push([step, 0, blurX * texels]);
-    }
-
-    if (blurY > 1) {
-      runs.push([0, step, blurY * texels]);
-    }
-  }
-
-  if (runs.length === 0) {
+  // Each quality's run across, then down, of those wider than a texel; counted, not listed, as
+  // every glow's and shadow's passes come here on every frame they are drawn.
+  const across = blurX > 1;
+  const down = blurY > 1;
+  const each = (across ? 1 : 0) + (down ? 1 : 0);
+  const runs = quality * each;
+  if (runs === 0) {
     pass.set(1, 0, 1);
     system.applyFilter(pass, input, output, clear);
     return;
   }
 
-  const temps = [TexturePool.getSameSizeTexture(input), TexturePool.getSameSizeTexture(input)];
+  // Between the runs, two textures in turn, the second only where a third run needs one.
+  const first = runs > 1 ? TexturePool.getSameSizeTexture(input) : null;
+  const second = runs > 2 ? TexturePool.getSameSizeTexture(input) : null;
   let from = input;
-  for (const [k, [dx, dy, width]] of runs.entries()) {
-    pass.set(dx, dy, width);
-    const last = k === runs.length - 1;
-    const to = last ? output : temps[k % 2];
+  for (let k = 0; k < runs; k++) {
+    if (across && (!down || k % 2 === 0)) {
+      pass.set(step, 0, blurX * texels);
+    } else {
+      pass.set(0, step, blurY * texels);
+    }
+
+    const last = k === runs - 1;
+    const to = last ? output : ((k % 2 === 0 ? first : second) as Texture);
     system.applyFilter(pass, from, to, last ? clear : true);
     from = to as Texture;
   }
 
-  for (const t of temps) {
-    TexturePool.returnTexture(t);
+  if (first) {
+    TexturePool.returnTexture(first);
+  }
+
+  if (second) {
+    TexturePool.returnTexture(second);
   }
 }
 
@@ -1047,6 +1053,20 @@ void main(void) {
   finalColor = texture(uTexture, vTextureCoord);
 }`;
 
+/** A chain's object's area on the stage, and its transform on the stage then. */
+interface Measured {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  tx: number;
+  ty: number;
+}
+
 /**
  * What a chain's output depends on beyond its object: its input's size
  * and place, and the colour it is drawn in.
@@ -1085,22 +1105,26 @@ function sameInput(a: Input, b: Input): boolean {
 export class FilterChain extends Filter implements AreaKeeper {
   /** The input last run on, and the output kept of it, if any. */
   private ran: Input | null = null;
+  /** The input to be compared with it, which then becomes it. */
+  private next: Input = { width: 0, height: 0, resolution: 0, dx: 0, dy: 0, colorAlpha: 0 };
   /**
    * The area its object was last measured at on the stage, and the
    * object's transform on the stage then; null till measured again.
    */
-  private area: {
-    minX: number;
-    minY: number;
-    maxX: number;
-    maxY: number;
-    a: number;
-    b: number;
-    c: number;
-    d: number;
-    tx: number;
-    ty: number;
-  } | null = null;
+  private area: Measured | null = null;
+  /** What `area` points to when it is set, filled again at each measure. */
+  private readonly measured: Measured = {
+    minX: 0,
+    minY: 0,
+    maxX: 0,
+    maxY: 0,
+    a: 0,
+    b: 0,
+    c: 0,
+    d: 0,
+    tx: 0,
+    ty: 0,
+  };
   private kept: Texture | null = null;
   private stale = true;
   /** Runs in a row its object changed for. */
@@ -1165,19 +1189,20 @@ export class FilterChain extends Filter implements AreaKeeper {
       return;
     }
 
+    // In place: a moving object is measured again on every frame.
     const m = container.worldTransform;
-    this.area = {
-      minX: bounds.minX,
-      minY: bounds.minY,
-      maxX: bounds.maxX,
-      maxY: bounds.maxY,
-      a: m.a,
-      b: m.b,
-      c: m.c,
-      d: m.d,
-      tx: m.tx,
-      ty: m.ty,
-    };
+    const area = this.measured;
+    area.minX = bounds.minX;
+    area.minY = bounds.minY;
+    area.maxX = bounds.maxX;
+    area.maxY = bounds.maxY;
+    area.a = m.a;
+    area.b = m.b;
+    area.c = m.c;
+    area.d = m.d;
+    area.tx = m.tx;
+    area.ty = m.ty;
+    this.area = area;
   }
 
   /** The target's units to a pixel of the stage its filters are drawn at. */
@@ -1213,14 +1238,14 @@ export class FilterChain extends Filter implements AreaKeeper {
       system as unknown as { _activeFilterData: { bounds: { minX: number; minY: number } } }
     )._activeFilterData.bounds;
     const m = this.owner.worldTransform;
-    const now: Input = {
-      width: input.frame.width,
-      height: input.frame.height,
-      resolution,
-      dx: (bounds.minX - m.tx) * resolution,
-      dy: (bounds.minY - m.ty) * resolution,
-      colorAlpha: this.owner.groupColorAlpha,
-    };
+    // Filled in place, and swapped with `ran` as it becomes that: a chain runs on every frame.
+    const now = this.next;
+    now.width = input.frame.width;
+    now.height = input.frame.height;
+    now.resolution = resolution;
+    now.dx = (bounds.minX - m.tx) * resolution;
+    now.dy = (bounds.minY - m.ty) * resolution;
+    now.colorAlpha = this.owner.groupColorAlpha;
     const same = this.ran !== null && sameInput(this.ran, now);
     if (same && !this.stale && this.kept) {
       this.changing = 0;
@@ -1231,6 +1256,7 @@ export class FilterChain extends Filter implements AreaKeeper {
     // Unchanged but not kept, as after being filtered straight: kept now.
     this.changing = this.stale || !same ? this.changing + 1 : 0;
     this.stale = false;
+    this.next = this.ran ?? { width: 0, height: 0, resolution: 0, dx: 0, dy: 0, colorAlpha: 0 };
     this.ran = now;
     this.release();
     if (this.changing > 1) {
@@ -1252,21 +1278,20 @@ export class FilterChain extends Filter implements AreaKeeper {
       return;
     }
 
-    const temps = [TexturePool.getSameSizeTexture(input)];
-    if (filters.length > 2) {
-      temps.push(TexturePool.getSameSizeTexture(input));
-    }
-
+    // Two textures in turn between them, the second only for a third filter.
+    const first = TexturePool.getSameSizeTexture(input);
+    const second = filters.length > 2 ? TexturePool.getSameSizeTexture(input) : first;
     let from = input;
     for (let i = 0; i < filters.length - 1; i++) {
-      const to = temps[i % temps.length];
+      const to = i % 2 === 0 ? first : second;
       filters[i].apply(system, from, to, true);
       from = to;
     }
 
     filters[filters.length - 1].apply(system, from, output, clear);
-    for (const t of temps) {
-      TexturePool.returnTexture(t);
+    TexturePool.returnTexture(first);
+    if (second !== first) {
+      TexturePool.returnTexture(second);
     }
   }
 

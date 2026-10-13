@@ -3014,6 +3014,60 @@ test("a large shape under a colour transform draws alone until its group settles
   }
 });
 
+test("batched Graphics are looked through only in groups that change, and follow a move to another settled group", async () => {
+  // A static stage's thousands of batched Graphics were looked through on every frame an animated
+  // group beside them was rebuilt.
+  const { settle, unsettle, SharedGraphics } = await import(
+    "../../../../packages/player/dist/render/patches.js"
+  );
+  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    Container: new () => {
+      enableRenderGroup(): void;
+      addChild(...c: unknown[]): void;
+      renderGroup: Parameters<typeof settle>[0];
+    };
+  };
+  const stage = new pixi.Container();
+  stage.enableRenderGroup();
+  const group = () => {
+    const c = new pixi.Container();
+    c.enableRenderGroup();
+    stage.addChild(c);
+    return c;
+  };
+  const scenery = group();
+  const shelf = group();
+  const animated = group();
+  const parts = Array.from({ length: 3 }, () => {
+    const part = new pixi.Container();
+    const g = new SharedGraphics();
+    part.addChild(g);
+    scenery.addChild(part);
+    return { part, g };
+  });
+  settle(scenery.renderGroup);
+  settle(shelf.renderGroup);
+  assert.ok(parts.every(({ g }) => g.settled));
+  assert.equal(scenery.renderGroup.$batched?.size, 3);
+
+  // The animated group rebuilt, the scenery unchanged: nothing of the scenery's is touched.
+  scenery.renderGroup.structureDidChange = false;
+  unsettle(new Set([animated.renderGroup]), [animated.renderGroup]);
+  assert.ok(parts.every(({ g }) => g.settled));
+
+  // One part moved to the settled shelf stays batched, listed there; one to the animated group draws alone.
+  shelf.addChild(parts[0].part);
+  animated.addChild(parts[1].part);
+  unsettle(new Set([animated.renderGroup]), [scenery.renderGroup, animated.renderGroup]);
+  assert.equal(parts[0].g.settled, true);
+  assert.ok(shelf.renderGroup.$batched?.has(parts[0].g));
+  assert.equal(parts[1].g.settled, false);
+  assert.equal(parts[2].g.settled, true);
+  assert.equal(scenery.renderGroup.$batched?.size, 1);
+});
+
 test("a mask's Graphics are never batched, as they draw in another group", async () => {
   const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
   const character = await outlinedSquare();
@@ -3112,6 +3166,172 @@ test("a child taken off gives its Graphics, emptied, to the next shape placed", 
     assert.ok(
       taken.every((g) => !g.destroyed && g.parent !== null && (g.flashColor ?? null) === null),
     );
+  });
+});
+
+test("a new object of a released one's character takes its node, reset, and the old one gets its own back", async () => {
+  // A timeline that places its children anew on every frame made and
+  // dropped hundreds of nodes a frame, with their containers and filters.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const { filterDefaults } = await import("../../../../packages/player/dist/display/filters.js");
+  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    DOMAdapter: { get(): object; set(adapter: object): void };
+  };
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  try {
+    const character = await outlinedSquare();
+    const { renderer } = standIn([]);
+    (renderer as unknown as { type: number }).type = 1;
+    const view = new PixiView(renderer);
+    const root = new Container();
+    const glow = () => [{ ...filterDefaults("glow"), blurX: 4, blurY: 4 }];
+    type Placed = {
+      filters: unknown[] | null;
+      alpha: number;
+      visible: boolean;
+      localTransform: { a: number; b: number; tx: number; ty: number };
+      updateLocalTransform(): void;
+      children: { children: unknown[] }[];
+    };
+    const placed = (k: number) => view.stage.children[0].children[1 + k] as unknown as Placed;
+
+    const first = new ShapeObject(character);
+    first.setMatrix({ a: 0, b: 1, c: -1, d: 0, tx: 30, ty: 20 });
+    first.colorTransform = {
+      rMul: 1,
+      gMul: 1,
+      bMul: 1,
+      aMul: 0.5,
+      rAdd: 0,
+      gAdd: 0,
+      bAdd: 0,
+      aAdd: 0,
+    };
+    first.visible = false;
+    first.filters = glow();
+    root.placeAtDepth(first, 1);
+    view.prepare(root);
+    const container = placed(0);
+    const chain = container.filters?.[0];
+    assert.ok(chain);
+    const art = [...container.children[0].children];
+
+    // Its place taken by another of the character: the node comes back to it, as the new one is.
+    root.removeChild(first);
+    const second = new ShapeObject(character);
+    second.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 5, ty: 6 });
+    second.filters = glow();
+    root.placeAtDepth(second, 1);
+    view.prepare(root);
+    assert.equal(placed(0), container);
+    assert.equal(container.filters?.[0], chain);
+    assert.equal(container.alpha, 1);
+    assert.equal(container.visible, true);
+    container.updateLocalTransform();
+    const { a, b, tx, ty } = container.localTransform;
+    assert.deepEqual([a, b, tx, ty], [1, 0, 5, 6]);
+    assert.deepEqual(container.children[0].children, art);
+
+    // One without filters takes it without them.
+    root.removeChild(second);
+    const third = new ShapeObject(character);
+    root.placeAtDepth(third, 1);
+    view.prepare(root);
+    assert.equal(placed(0), container);
+    assert.equal(container.filters, null);
+
+    // The first back on the list has a node of its own, drawn anew, its filters with it.
+    root.placeAtDepth(first, 2);
+    view.prepare(root);
+    assert.equal(placed(0), container);
+    assert.notEqual(placed(1), container);
+    assert.equal(placed(1).alpha, 0.5);
+    assert.equal(placed(1).visible, false);
+    assert.ok(placed(1).filters?.[0]);
+    assert.equal(placed(1).children[0].children.length, art.length);
+  } finally {
+    pixi.DOMAdapter.set(adapter);
+  }
+});
+
+test("an object made a mask as it leaves the list keeps its node from a new one of its character", async () => {
+  // Released before the object it masks takes it as its mask, it was listed
+  // spare: taken, the new one drew as the mask, and itself not at all.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const mask = new ShapeObject(character);
+  const masked = new Container();
+  root.placeAtDepth(mask, 1);
+  root.placeAtDepth(masked, 2);
+  view.prepare(root);
+
+  masked.setMask(mask);
+  root.removeChild(mask);
+  root.placeAtDepth(new ShapeObject(character), 3);
+  view.prepare(root);
+  const [, maskedContainer, next] = view.stage.children[0].children;
+  assert.notEqual(maskedContainer.mask, next);
+  assert.equal(maskedContainer.mask, view.stage.children[1].children[0]);
+  assert.notEqual(next.includeInBuild, false);
+});
+
+test("spare nodes are listed once, kept to the most, and dropped as a SWF unloads", async () => {
+  // They hold their objects' characters: kept on past an unload, they kept the SWF.
+  const { ShapeObject, unloads } = await import(
+    "../../../../packages/player/dist/display/display.js"
+  );
+  const { SPARE_NODES_MOST } = await import("../../../../packages/player/dist/render/pools.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const spares = view as unknown as {
+    spareNodes: Map<unknown, Set<unknown>>;
+    spareSince: Map<unknown, number>;
+  };
+  const root = new Container();
+
+  await withClock(() => {
+    const placeAll = (n: number) => {
+      for (let i = 0; i < n; i++) {
+        root.placeAtDepth(new ShapeObject(character), i + 1);
+      }
+
+      view.prepare(root);
+    };
+    const removeAll = () => {
+      for (const child of [...root.children]) {
+        root.removeChild(child);
+      }
+
+      view.prepare(root);
+    };
+
+    placeAll(3);
+    removeAll();
+    assert.equal(spares.spareSince.size, 3);
+    assert.equal(spares.spareNodes.get(character)?.size, 3);
+
+    // Taken by new objects, they leave the lists; released again, each is listed once.
+    placeAll(3);
+    assert.equal(spares.spareSince.size, 0);
+    removeAll();
+    assert.equal(spares.spareSince.size, 3);
+
+    // Past the most, the oldest go.
+    placeAll(SPARE_NODES_MOST + 10);
+    removeAll();
+    assert.equal(spares.spareSince.size, SPARE_NODES_MOST);
+    assert.equal(spares.spareNodes.get(character)?.size, SPARE_NODES_MOST);
+
+    // An unload lets go of them all at the next prepare.
+    unloads.count++;
+    view.prepare(root);
+    assert.equal(spares.spareSince.size, 0);
+    assert.equal(spares.spareNodes.size, 0);
   });
 });
 

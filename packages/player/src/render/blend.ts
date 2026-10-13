@@ -136,6 +136,18 @@ filterSystem._calculateFilterArea = function (instruction: AreaInstruction, boun
     areaWatch.root = keeper ? container : null;
     areaWatch.outside = false;
     calculateFilterArea.call(this, instruction, bounds);
+    // An object that draws nothing is filtered into nothing, as adl draws a glow or a shadow of
+    // it (the `filters-empty` case). Pixi measures it as a point at its group's origin, which its
+    // padding made an area it ran every filter on: emptied, the push skips them.
+    if (
+      !instruction.renderables &&
+      !instruction.filterEffect.filterArea &&
+      !(bounds.maxX > bounds.minX && bounds.maxY > bounds.minY)
+    ) {
+      bounds.clear();
+      return;
+    }
+
     if (keeper && !areaWatch.outside) {
       keeper.keepArea(container, bounds);
     }

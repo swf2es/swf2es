@@ -7,7 +7,7 @@
 import { isAs3, readSwf, type Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { decodeImages, hasUndecoded } from "../bitmap/images.js";
-import { type Container, MovieClip, rootOf } from "../display/display.js";
+import { type Container, MovieClip, rootOf, unloads } from "../display/display.js";
 import { type Library, readLibrary } from "../display/timeline.js";
 import type { FetchPurpose, FetchRequest, FetchResult } from "../hosts.js";
 import type { Scripting } from "../scripting.js";
@@ -659,6 +659,10 @@ export class Loads {
       info.$params = NO_PARAMETERS;
       info.$loaded = 0;
       info.$total = 0;
+    }
+
+    if (content) {
+      unloads.count++;
     }
 
     if (content && info) {
