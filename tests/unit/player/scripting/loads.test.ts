@@ -1185,10 +1185,15 @@ async function heldLoading() {
 
   const code = scripting.code as unknown as { link: (...args: unknown[]) => Promise<unknown> };
   const link = code.link.bind(code);
+  // hold() makes the links from then on wait for the next release.
   let release = () => {};
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  let held = Promise.resolve();
+  const hold = () => {
+    held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+  };
+  hold();
   code.link = async (...args) => {
     await held;
     return link(...args);
@@ -1208,7 +1213,7 @@ async function heldLoading() {
   lines.length = 0;
   const arm = (ms: number) => rt.callProperty(player.root.object, rt.publicName("arm"), ms);
   const content = () => rt.getProperty(loader, rt.publicName("content"));
-  return { scripting, loader, lines, step, arm, content, release: () => release() };
+  return { scripting, loader, lines, step, arm, content, hold, release: () => release() };
 }
 
 test("a load from bytes comes in the next frame however long its code takes, the frames and timers waiting", {
@@ -1246,4 +1251,27 @@ test("a frame waits ten seconds at most for a load from bytes", { skip }, async 
   assert.ok(held.lines.includes("frame"));
   assert.equal(held.content(), null);
   held.release();
+});
+
+test("each load from bytes waited for has ten seconds of its own", { skip }, async () => {
+  const held = await heldLoading();
+  const inner = innerSwf(compiler(out)("Inner"), 1);
+  held.scripting.loads.requestLoad(held.loader, inner);
+  held.step(480);
+  held.release();
+  await held.scripting.settled();
+  held.step();
+  assert.ok(held.content());
+
+  // Asked again as the first came: eight seconds on, it still holds the frame.
+  held.hold();
+  held.scripting.loads.requestLoad(held.loader, inner);
+  held.lines.length = 0;
+  held.step(480);
+  assert.equal(held.lines.length, 0, held.lines.join(" | "));
+  held.release();
+  await held.scripting.settled();
+  held.step();
+  assert.equal(held.lines[0], "frame");
+  assert.ok(held.content());
 });

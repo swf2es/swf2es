@@ -245,15 +245,17 @@ export class Player {
     // the frame's slot, between-frames timers firing by then, and stops
     // there, as if the load had taken no time, as Flash's takes almost none.
     // That is the time of the call in which it came too, which its compile
-    // may have taken whole.
+    // may have taken whole. Each load waited for has the ten seconds to
+    // itself: one asked as the last comes does not inherit its wait.
     if (!this.scripting?.heldTime()) {
       this.held = 0;
+    } else if (!this.scripting.holdsFrame()) {
+      this.held = 0;
+      passed = Math.max(0, Math.min(passed, frame - this.owed));
     } else if (this.held < HOLD_LIMIT) {
       this.held += passed;
       passed = Math.max(0, Math.min(passed, frame - this.owed));
-      if (this.scripting.holdsFrame()) {
-        most = 0;
-      }
+      most = 0;
     }
 
     this.owed += passed;
