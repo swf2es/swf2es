@@ -5,7 +5,9 @@
 // takes the child from where it is. removeChildren takes those there when
 // it began; addChild's move out of another parent throws at nothing. Each
 // case is a row of Boxes, so what is left of it draws: the siblings after
-// the child must stay.
+// the child must stay. While the timeline's removal tells of it, the child
+// is out of its parent's list already, still its parent's: the indexes
+// have closed up, its parent contains it, and asks after its index throw.
 package {
   import flash.display.DisplayObject;
   import flash.display.DisplayObjectContainer;
@@ -223,6 +225,22 @@ package {
 
       once(p0, Event.REMOVED_FROM_STAGE, "timeline remove", function():void {
         p0.parent.removeChild(p0);
+      });
+      // Its siblings' indexes as the timeline's removal tells of it: removeChildAt(0) is p2's.
+      var self:Main = this;
+      once(p1, Event.REMOVED, "timeline remove", function():void {
+        trace(" ", self.numChildren, list(self), self.contains(p1), parentName(p1));
+        trace(" ", self.getChildByName("p1"), self.p1 == p1);
+        attempt(" getChildIndex", function():void {
+          self.getChildIndex(p1);
+        });
+        attempt(" setChildIndex", function():void {
+          self.setChildIndex(p1, 0);
+        });
+        attempt(" swapChildren", function():void {
+          self.swapChildren(p1, p2);
+        });
+        self.removeChildAt(0);
       });
       trace("frame 1", list(this));
     }

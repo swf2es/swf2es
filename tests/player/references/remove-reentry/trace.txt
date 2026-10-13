@@ -56,5 +56,12 @@ outer done
 frame 1 [p0,p1,p2,holder,row0,row1,row2,row3,row4,row5,row6,row7,row8,row9,row10,row11]
  timeline remove in removedFromStage, parent main, on stage true
  timeline remove threw 2025 ArgumentError
-frame 2 [p2,holder,row0,row1,row2,row3,row4,row5,row6,row7,row8,row9,row10,row11] []
+ timeline remove in removed, parent main, on stage true
+  14 [p2,holder,row0,row1,row2,row3,row4,row5,row6,row7,row8,row9,row10,row11] true main
+  null true
+ getChildIndex threw 2025
+ setChildIndex threw 2025
+ swapChildren threw 2025
+ timeline remove done
+frame 2 [holder,row0,row1,row2,row3,row4,row5,row6,row7,row8,row9,row10,row11] []
 p0 null, p1 null, p2 [object Box]

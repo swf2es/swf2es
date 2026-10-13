@@ -1196,9 +1196,22 @@ export class Container extends DisplayObject {
     }
 
     // The timeline's removal: a script's goes through the natives, which tell of it themselves.
+    // Flash has the child out of the list while it tells of it, still its parent's: the
+    // siblings' indexes have closed up, and the parent no longer finds it there (#2025).
+    const index = this.children.indexOf(child);
+    if (index >= 0) {
+      this.takeOut(child, index);
+    }
+
     this.library?.removing?.(child, true);
     this.library?.sounds?.removed(child);
-    this.removeChild(child);
+    // A listener may have put it on a list again. One without an AS object had no listener
+    // to do so, and a timeline's shapes, swapped every frame, are spared the search.
+    if (child.parent === this && (child.object === null || !this.children.includes(child))) {
+      child.parent = null;
+      child.focusDrop?.(child);
+    }
+
     return child;
   }
 
@@ -1213,14 +1226,19 @@ export class Container extends DisplayObject {
       return;
     }
 
+    this.takeOut(child, index);
+    child.parent = null;
+    child.focusDrop?.(child);
+  }
+
+  /** `child`, at `index`, out of the list and off the depths; its parent is left to the caller. */
+  private takeOut(child: DisplayObject, index: number): void {
     if (child.depth !== null) {
       this.depths.delete(child.depth);
       child.depth = null;
     }
 
     this.children.splice(index, 1);
-    child.parent = null;
-    child.focusDrop?.(child);
     this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
