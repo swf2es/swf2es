@@ -150,6 +150,11 @@ export class StrokeContexts {
     );
   }
 
+  /** Content unloaded: the budget back to its floor, the unloaded content's idle lines going on the next tick. */
+  unloaded(): void {
+    this.budget.reset();
+  }
+
   /** The layer's lines under `key` if they are kept, not taken: for a view drawn once to borrow. */
   peek(layer: ShapeLayer, key: string): GraphicsContext | null {
     return this.byLayer.get(layer)?.get(key) ?? null;

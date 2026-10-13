@@ -160,3 +160,12 @@ test("the device's memory is read where a host tells it, and nothing taken from 
     }
   }
 });
+
+test("a reset takes the budget back to its floor", () => {
+  const budget = new IdleBudget(1000, 4000, WINDOW, 16);
+  budget.evicted("a", 0, 2000);
+  budget.missed("a", 10);
+  assert.equal(budget.size, 3000);
+  budget.reset();
+  assert.equal(budget.size, 1000);
+});

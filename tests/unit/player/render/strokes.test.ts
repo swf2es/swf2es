@@ -86,3 +86,29 @@ test("a budget given its ceiling by the device never grows past it", () => {
 
   assert.equal(lines.budget.size, LINES_IDLE_VERTICES);
 });
+
+test("as content unloads, the budget goes back to its floor and the idle past it go at the next tick", () => {
+  const counts = { strokeContexts: 0, strokeReuses: 0 };
+  const lines = new StrokeContexts(counts, {});
+  const loop = layers(LINES_IDLE_MOST + 512);
+  const held = loop.map((layer) => lines.take(layer, UNIT, 1));
+  for (const context of held) {
+    lines.give(context);
+  }
+
+  // Taken again, those let go grow the budget, and all of them are kept idle.
+  for (const layer of loop.slice(0, 512)) {
+    lines.give(lines.take(layer, UNIT, 1));
+  }
+
+  assert.ok(lines.budget.size > LINES_IDLE_VERTICES);
+  const idle = loop.map((layer) => lines.peek(layer, "1,0,0,1,1"));
+  assert.ok(idle.every((context) => context !== null && !context.destroyed));
+
+  lines.unloaded();
+  assert.equal(lines.budget.size, LINES_IDLE_VERTICES);
+  lines.tick();
+  const kept = loop.filter((layer) => lines.peek(layer, "1,0,0,1,1") !== null);
+  assert.equal(kept.length, LINES_IDLE_MOST);
+  assert.equal(idle.filter((context) => context?.destroyed).length, 512);
+});

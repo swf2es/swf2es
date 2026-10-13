@@ -132,6 +132,14 @@ export class IdleBudget {
     return this.ghosts.size;
   }
 
+  /**
+   * Back to the floor, as content unloads: what it left idle goes on the
+   * next trim, and what is still used grows it again through its ghosts.
+   */
+  reset(): void {
+    this.size = this.floor;
+  }
+
   /** `key`, idle since `since` and `size` large, let go for room. */
   evicted(key: string, since: number, size: number): void {
     this.ghosts.delete(key);

@@ -3335,6 +3335,23 @@ test("spare nodes are listed once, kept to the most, and dropped as a SWF unload
   });
 });
 
+test("an unload takes the lines' budget back to its floor at the next prepare", async () => {
+  const { unloads } = await import("../../../../packages/player/dist/display/display.js");
+  const { LINES_IDLE_VERTICES } = await import("../../../../packages/player/dist/render/pools.js");
+  const view = new PixiView(standIn([]).renderer);
+  const budget = (view as unknown as { lines: { budget: { size: number } } }).lines.budget;
+  const root = new Container();
+  view.prepare(root);
+  budget.size = 2_000_000;
+  view.prepare(root);
+  // Not grown, it shrinks only slowly on its own.
+  assert.ok(budget.size > 1_900_000, `${budget.size}`);
+
+  unloads.count++;
+  view.prepare(root);
+  assert.equal(budget.size, LINES_IDLE_VERTICES);
+});
+
 test("the wheel reaches the player in Flash's lines, keeps the page from scrolling only where the SWF takes it, and leaves Ctrl's zoom to the page", () => {
   const listeners = new Map<string, (e: unknown) => void>();
   const canvas = {
