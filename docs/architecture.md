@@ -3146,20 +3146,30 @@ ArgumentError 2015 and no more: Flash's old limits, 8191 a side and
 adl); `dispose` empties the store, after which every read, the size
 included, throws 2015, and a second `dispose` is nothing. `copyPixels`
 into an opaque bitmap composites source over destination whether or not
-`mergeAlpha` asks, as Flash does. `fillRect`, `copyPixels`, `getPixels` and
-`setPixels` (ByteArrays of big-endian ARGB), `getVector` and `setVector`,
-`clone` and `rect` work on that store, clipped to it, a Rectangle's edges
-rounded to the nearest pixel and a half to the even one, as Flash rounds
-them (`bitmapdata_rectangle_rounding`), and a Point's coordinates
-truncated toward 0 (the destination, alpha and hit-test points of every
-operation alike, under adl: 3.7 is 3, -1.5 is -1; NaN, or past int's
-range, off the bitmap). A source rect past the source's edge is clipped and the point moved with it; `copyPixels`
-in place that moves right and down by no more than its rect's size
-writes the rect whole instead, and what lay left of or above the bitmap
-comes out empty (`copyGaps`; adl reads an opaque bitmap's as 0, alpha
-and all, and draws it black, which the store keeps as opaque black; a
-transparent one's are whatever its memory held, kept transparent; the
-`bitmap-rects` case). `copyPixels`
+`mergeAlpha` asks, as Flash does. `fillRect`, `copyPixels`, `getPixels`
+and `setPixels` (ByteArrays of big-endian ARGB), `getVector` and
+`setVector`, `clone` and `rect` work on that store, clipped to it, a
+Rectangle's edges rounded to the nearest pixel and a half to the even one,
+as Flash rounds them (`bitmapdata_rectangle_rounding`), each edge, x and
+x + width, clamped to 2^30 - 1 either way and NaN made int's least
+(`pixelEdge`): under adl an x of NaN or Infinity covers nothing, a width
+of Infinity reaches the bitmap's edge, and a copy's point moves by the
+clamped edge. `colorTransform` alone takes a height of NaN to the bitmap's
+foot from a top past 0, the height wrapping in int arithmetic; `merge`,
+`copyChannel`, `paletteMap`, `threshold` and `pixelDissolve` take a
+negative size as the rect it spans back over (`spanRect`), the others as
+none; `applyFilter` refuses with 2015 what adl cannot make the buffers for
+(`filterRefuses`). A Point's coordinates are truncated toward 0 (the
+destination, alpha and hit-test points of every operation alike, under
+adl: 3.7 is 3, -1.5 is -1; NaN, or past int's range, off the bitmap). A
+source rect past the source's edge is clipped and the point moved with it;
+`copyPixels` in place that moves right and down by no more than its rect's
+size writes the rect whole instead, and what lay left of or above the
+bitmap comes out empty (`copyGaps`; adl reads an opaque bitmap's as 0,
+alpha and all, and draws it black, which the store keeps as opaque black;
+a transparent one's are whatever its memory held, kept transparent; the
+`bitmap-rects` case).
+`copyPixels`
 copies in place in Flash's order, which within one store reads what it
 already wrote in one direction (rows bottom-up only when the copy moves
 down without moving left, columns right to left when it moves right;

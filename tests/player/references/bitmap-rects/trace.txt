@@ -1160,3 +1160,486 @@ odd point threshold 4294967299,4 0 none
 odd point applyFilter 4294967299,4 none
 odd point pixelDissolve 4294967299,4 0 none
 odd point hitTest 4294967299,4 false false false false
+odd fillRect NaN,3,5,4 none
+odd fillDrawn NaN,3,5,4 none
+odd colorTransform NaN,3,5,4 none
+odd getPixels NaN,3,5,4 0
+odd setPixels NaN,3,5,4 0 none
+odd getVector NaN,3,5,4 0
+odd setVector NaN,3,5,4 none
+odd histogram NaN,3,5,4 0
+odd drawClip NaN,3,5,4 none
+odd pixelDissolve NaN,3,5,4 0 none / 0 none
+odd hitTest NaN,3,5,4 false
+odd generateFilterRect NaN,3,5,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy NaN,3,5,4 none / none
+odd copyChannel NaN,3,5,4 none / none
+odd merge NaN,3,5,4 none / none
+odd paletteMap NaN,3,5,4 none / none
+odd threshold NaN,3,5,4 0 none / 0 none
+odd applyFilter NaN,3,5,4 none / none
+odd pixelDissolve NaN,3,5,4 0 none / 0 none
+odd filters NaN,3,5,4 ok / error 2015 / error 2015 / ok / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015
+odd fillRect 2,NaN,5,4 none
+odd fillDrawn 2,NaN,5,4 none
+odd colorTransform 2,NaN,5,4 none
+odd getPixels 2,NaN,5,4 0
+odd setPixels 2,NaN,5,4 0 none
+odd getVector 2,NaN,5,4 0
+odd setVector 2,NaN,5,4 none
+odd histogram 2,NaN,5,4 0
+odd drawClip 2,NaN,5,4 none
+odd pixelDissolve 2,NaN,5,4 0 none / 0 none
+odd hitTest 2,NaN,5,4 false
+odd generateFilterRect 2,NaN,5,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 2,NaN,5,4 none / none
+odd copyChannel 2,NaN,5,4 none / none
+odd merge 2,NaN,5,4 none / none
+odd paletteMap 2,NaN,5,4 none / none
+odd threshold 2,NaN,5,4 0 none / 0 none
+odd applyFilter 2,NaN,5,4 none / none
+odd pixelDissolve 2,NaN,5,4 0 none / 0 none
+odd filters 2,NaN,5,4 ok / error 2015 / error 2015 / ok / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015
+odd fillRect 2,3,NaN,4 none
+odd fillDrawn 2,3,NaN,4 none
+odd colorTransform 2,3,NaN,4 none
+odd getPixels 2,3,NaN,4 0
+odd setPixels 2,3,NaN,4 0 none
+odd getVector 2,3,NaN,4 0
+odd setVector 2,3,NaN,4 none
+odd histogram 2,3,NaN,4 0
+odd drawClip 2,3,NaN,4 none
+odd pixelDissolve 2,3,NaN,4 0 none / 0 none
+odd hitTest 2,3,NaN,4 false
+odd generateFilterRect 2,3,NaN,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 2,3,NaN,4 none / none
+odd copyChannel 2,3,NaN,4 none / none
+odd merge 2,3,NaN,4 none / none
+odd paletteMap 2,3,NaN,4 none / none
+odd threshold 2,3,NaN,4 0 none / 0 none
+odd applyFilter 2,3,NaN,4 error 2015 / error 2015
+odd pixelDissolve 2,3,NaN,4 0 none / 0 none
+odd filters 2,3,NaN,4 error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / ok / ok / ok / ok
+odd fillRect 2,3,5,NaN none
+odd fillDrawn 2,3,5,NaN none
+odd colorTransform 2,3,5,NaN 2,3 5x13
+odd getPixels 2,3,5,NaN 0
+odd setPixels 2,3,5,NaN 0 none
+odd getVector 2,3,5,NaN 0
+odd setVector 2,3,5,NaN none
+odd histogram 2,3,5,NaN 0
+odd drawClip 2,3,5,NaN none
+odd pixelDissolve 2,3,5,NaN 0 none / 0 none
+odd hitTest 2,3,5,NaN false
+odd generateFilterRect 2,3,5,NaN (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 2,3,5,NaN none / none
+odd copyChannel 2,3,5,NaN none / none
+odd merge 2,3,5,NaN none / none
+odd paletteMap 2,3,5,NaN none / none
+odd threshold 2,3,5,NaN 0 none / 0 none
+odd applyFilter 2,3,5,NaN error 2015 / error 2015
+odd pixelDissolve 2,3,5,NaN 0 none / 0 none
+odd filters 2,3,5,NaN error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / ok / ok / ok / ok
+odd fillRect Infinity,3,5,4 none
+odd fillDrawn Infinity,3,5,4 none
+odd colorTransform Infinity,3,5,4 none
+odd getPixels Infinity,3,5,4 0
+odd setPixels Infinity,3,5,4 0 none
+odd getVector Infinity,3,5,4 0
+odd setVector Infinity,3,5,4 none
+odd histogram Infinity,3,5,4 0
+odd drawClip Infinity,3,5,4 none
+odd pixelDissolve Infinity,3,5,4 0 none / 0 none
+odd hitTest Infinity,3,5,4 false
+odd generateFilterRect Infinity,3,5,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy Infinity,3,5,4 none / none
+odd copyChannel Infinity,3,5,4 none / none
+odd merge Infinity,3,5,4 none / none
+odd paletteMap Infinity,3,5,4 none / none
+odd threshold Infinity,3,5,4 0 none / 0 none
+odd applyFilter Infinity,3,5,4 none / none
+odd pixelDissolve Infinity,3,5,4 0 none / 0 none
+odd filters Infinity,3,5,4 ok / ok / ok / ok / ok / ok / ok / ok / ok / ok
+odd fillRect -Infinity,3,5,4 none
+odd fillDrawn -Infinity,3,5,4 none
+odd colorTransform -Infinity,3,5,4 none
+odd getPixels -Infinity,3,5,4 0
+odd setPixels -Infinity,3,5,4 0 none
+odd getVector -Infinity,3,5,4 0
+odd setVector -Infinity,3,5,4 none
+odd histogram -Infinity,3,5,4 0
+odd drawClip -Infinity,3,5,4 none
+odd pixelDissolve -Infinity,3,5,4 0 none / 0 none
+odd hitTest -Infinity,3,5,4 false
+odd generateFilterRect -Infinity,3,5,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy -Infinity,3,5,4 none / none
+odd copyChannel -Infinity,3,5,4 none / none
+odd merge -Infinity,3,5,4 none / none
+odd paletteMap -Infinity,3,5,4 none / none
+odd threshold -Infinity,3,5,4 0 none / 0 none
+odd applyFilter -Infinity,3,5,4 none / none
+odd pixelDissolve -Infinity,3,5,4 0 none / 0 none
+odd filters -Infinity,3,5,4 ok / ok / ok / ok / ok / ok / error 2015 / error 2015 / error 2015 / error 2015
+odd fillRect 2,3,Infinity,4 2,3 14x4
+odd fillDrawn 2,3,Infinity,4 2,3 14x4
+odd colorTransform 2,3,Infinity,4 2,3 14x4
+odd getPixels 2,3,Infinity,4 56 first 2,3
+odd setPixels 2,3,Infinity,4 56 2,3 14x4
+odd getVector 2,3,Infinity,4 56 first 2,3
+odd setVector 2,3,Infinity,4 2,3 14x4
+odd histogram 2,3,Infinity,4 56
+odd drawClip 2,3,Infinity,4 2,3 14x4
+odd pixelDissolve 2,3,Infinity,4 10 2,3 7x4 / 7 8,1 8x4
+odd hitTest 2,3,Infinity,4 true
+odd generateFilterRect 2,3,Infinity,4 (x=2, y=3, w=14, h=4) (x=0, y=1, w=18, h=8)
+odd copy 2,3,Infinity,4 3,4 13x4 shift 1,1 / 3,4 6x4 shift 1,1
+odd copyChannel 2,3,Infinity,4 3,4 13x4 from 2,3 / 3,4 13x4 from 2,3
+odd merge 2,3,Infinity,4 3,4 13x4 shift 1,1 / 3,4 13x4 [2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 13,3 14,3 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 13,3 2,5 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 2,6 2,5 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3]
+odd paletteMap 2,3,Infinity,4 3,4 13x4 shift 1,1 / 3,4 13x4 [2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 13,3 14,3 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 13,3 2,5 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 2,6 2,5 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3]
+odd threshold 2,3,Infinity,4 0 3,4 13x4 shift 1,1 / 0 3,4 13x4 [2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 13,3 14,3 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 13,3 2,5 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 2,6 2,5 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3]
+odd applyFilter 2,3,Infinity,4 error 2015 / error 2015
+odd pixelDissolve 2,3,Infinity,4 59 3,4 13x4 shift 1,1 / 59 2,3 13x4 empty=52
+odd filters 2,3,Infinity,4 error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / ok / ok / ok / ok
+odd fillRect 2,3,5,Infinity 2,3 5x13
+odd fillDrawn 2,3,5,Infinity 2,3 5x13
+odd colorTransform 2,3,5,Infinity 2,3 5x13
+odd getPixels 2,3,5,Infinity 65 first 2,3
+odd setPixels 2,3,5,Infinity 65 2,3 5x13
+odd getVector 2,3,5,Infinity 65 first 2,3
+odd setVector 2,3,5,Infinity 2,3 5x13
+odd histogram 2,3,5,Infinity 65
+odd drawClip 2,3,5,Infinity 2,3 5x13
+odd pixelDissolve 2,3,5,Infinity 14 2,3 5x7 / 117 8,1 5x13
+odd hitTest 2,3,5,Infinity true
+odd generateFilterRect 2,3,5,Infinity (x=2, y=3, w=5, h=13) (x=0, y=1, w=9, h=17)
+odd copy 2,3,5,Infinity 3,4 5x12 shift 1,1 / 3,4 5x5 shift 1,1
+odd copyChannel 2,3,5,Infinity 3,4 5x12 from 2,3 / 3,4 5x12 from 2,3
+odd merge 2,3,5,Infinity 3,4 5x12 shift 1,1 / 3,4 5x12 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3 2,7 2,6 2,5 2,4 2,3 2,8 2,7 2,6 2,5 2,4 2,9 2,8 2,7 2,6 2,5 2,10 2,9 2,8 2,7 2,6 2,11 2,10 2,9 2,8 2,7 2,12 2,11 2,10 2,9 2,8 2,13 2,12 2,11 2,10 2,9 2,14 2,13 2,12 2,11 2,10]
+odd paletteMap 2,3,5,Infinity 3,4 5x12 shift 1,1 / 3,4 5x12 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3 2,7 2,6 2,5 2,4 2,3 2,8 2,7 2,6 2,5 2,4 2,9 2,8 2,7 2,6 2,5 2,10 2,9 2,8 2,7 2,6 2,11 2,10 2,9 2,8 2,7 2,12 2,11 2,10 2,9 2,8 2,13 2,12 2,11 2,10 2,9 2,14 2,13 2,12 2,11 2,10]
+odd threshold 2,3,5,Infinity 0 3,4 5x12 shift 1,1 / 0 3,4 5x12 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3 2,7 2,6 2,5 2,4 2,3 2,8 2,7 2,6 2,5 2,4 2,9 2,8 2,7 2,6 2,5 2,10 2,9 2,8 2,7 2,6 2,11 2,10 2,9 2,8 2,7 2,12 2,11 2,10 2,9 2,8 2,13 2,12 2,11 2,10 2,9 2,14 2,13 2,12 2,11 2,10]
+odd applyFilter 2,3,5,Infinity error 2015 / error 2015
+odd pixelDissolve 2,3,5,Infinity 4 3,4 5x12 shift 1,1 / 4 2,3 5x12 empty=60
+odd filters 2,3,5,Infinity error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / ok / ok / ok / ok
+odd fillRect 2,3,-Infinity,4 none
+odd fillDrawn 2,3,-Infinity,4 none
+odd colorTransform 2,3,-Infinity,4 none
+odd getPixels 2,3,-Infinity,4 0
+odd setPixels 2,3,-Infinity,4 0 none
+odd getVector 2,3,-Infinity,4 0
+odd setVector 2,3,-Infinity,4 none
+odd histogram 2,3,-Infinity,4 0
+odd drawClip 2,3,-Infinity,4 none
+odd pixelDissolve 2,3,-Infinity,4 0 none / 0 none
+odd hitTest 2,3,-Infinity,4 false
+odd generateFilterRect 2,3,-Infinity,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 2,3,-Infinity,4 none / none
+odd copyChannel 2,3,-Infinity,4 none / none
+odd merge 2,3,-Infinity,4 none / none
+odd paletteMap 2,3,-Infinity,4 none / none
+odd threshold 2,3,-Infinity,4 0 none / 0 none
+odd applyFilter 2,3,-Infinity,4 error 2015 / error 2015
+odd pixelDissolve 2,3,-Infinity,4 0 none / 0 none
+odd filters 2,3,-Infinity,4 error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / ok / ok / ok / ok
+odd fillRect 2147483648,3,5,4 none
+odd fillDrawn 2147483648,3,5,4 none
+odd colorTransform 2147483648,3,5,4 none
+odd getPixels 2147483648,3,5,4 0
+odd setPixels 2147483648,3,5,4 0 none
+odd getVector 2147483648,3,5,4 0
+odd setVector 2147483648,3,5,4 none
+odd histogram 2147483648,3,5,4 0
+odd drawClip 2147483648,3,5,4 none
+odd pixelDissolve 2147483648,3,5,4 0 none / 0 none
+odd hitTest 2147483648,3,5,4 false
+odd generateFilterRect 2147483648,3,5,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 2147483648,3,5,4 none / none
+odd copyChannel 2147483648,3,5,4 none / none
+odd merge 2147483648,3,5,4 none / none
+odd paletteMap 2147483648,3,5,4 none / none
+odd threshold 2147483648,3,5,4 0 none / 0 none
+odd applyFilter 2147483648,3,5,4 none / none
+odd pixelDissolve 2147483648,3,5,4 0 none / 0 none
+odd filters 2147483648,3,5,4 ok / ok / ok / ok / ok / ok / ok / ok / ok / ok
+odd fillRect -2147483649,3,5,4 none
+odd fillDrawn -2147483649,3,5,4 none
+odd colorTransform -2147483649,3,5,4 none
+odd getPixels -2147483649,3,5,4 0
+odd setPixels -2147483649,3,5,4 0 none
+odd getVector -2147483649,3,5,4 0
+odd setVector -2147483649,3,5,4 none
+odd histogram -2147483649,3,5,4 0
+odd drawClip -2147483649,3,5,4 none
+odd pixelDissolve -2147483649,3,5,4 0 none / 0 none
+odd hitTest -2147483649,3,5,4 false
+odd generateFilterRect -2147483649,3,5,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy -2147483649,3,5,4 none / none
+odd copyChannel -2147483649,3,5,4 none / none
+odd merge -2147483649,3,5,4 none / none
+odd paletteMap -2147483649,3,5,4 none / none
+odd threshold -2147483649,3,5,4 0 none / 0 none
+odd applyFilter -2147483649,3,5,4 none / none
+odd pixelDissolve -2147483649,3,5,4 0 none / 0 none
+odd filters -2147483649,3,5,4 ok / ok / ok / ok / ok / ok / error 2015 / error 2015 / error 2015 / error 2015
+odd fillRect 100000000000000000000,3,5,4 none
+odd fillDrawn 100000000000000000000,3,5,4 none
+odd colorTransform 100000000000000000000,3,5,4 none
+odd getPixels 100000000000000000000,3,5,4 0
+odd setPixels 100000000000000000000,3,5,4 0 none
+odd getVector 100000000000000000000,3,5,4 0
+odd setVector 100000000000000000000,3,5,4 none
+odd histogram 100000000000000000000,3,5,4 0
+odd drawClip 100000000000000000000,3,5,4 none
+odd pixelDissolve 100000000000000000000,3,5,4 0 none / 0 none
+odd hitTest 100000000000000000000,3,5,4 false
+odd generateFilterRect 100000000000000000000,3,5,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 100000000000000000000,3,5,4 none / none
+odd copyChannel 100000000000000000000,3,5,4 none / none
+odd merge 100000000000000000000,3,5,4 none / none
+odd paletteMap 100000000000000000000,3,5,4 none / none
+odd threshold 100000000000000000000,3,5,4 0 none / 0 none
+odd applyFilter 100000000000000000000,3,5,4 none / none
+odd pixelDissolve 100000000000000000000,3,5,4 0 none / 0 none
+odd filters 100000000000000000000,3,5,4 ok / ok / ok / ok / ok / ok / ok / ok / ok / ok
+odd fillRect -100000000000000000000,3,5,4 none
+odd fillDrawn -100000000000000000000,3,5,4 none
+odd colorTransform -100000000000000000000,3,5,4 none
+odd getPixels -100000000000000000000,3,5,4 0
+odd setPixels -100000000000000000000,3,5,4 0 none
+odd getVector -100000000000000000000,3,5,4 0
+odd setVector -100000000000000000000,3,5,4 none
+odd histogram -100000000000000000000,3,5,4 0
+odd drawClip -100000000000000000000,3,5,4 none
+odd pixelDissolve -100000000000000000000,3,5,4 0 none / 0 none
+odd hitTest -100000000000000000000,3,5,4 false
+odd generateFilterRect -100000000000000000000,3,5,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy -100000000000000000000,3,5,4 none / none
+odd copyChannel -100000000000000000000,3,5,4 none / none
+odd merge -100000000000000000000,3,5,4 none / none
+odd paletteMap -100000000000000000000,3,5,4 none / none
+odd threshold -100000000000000000000,3,5,4 0 none / 0 none
+odd applyFilter -100000000000000000000,3,5,4 none / none
+odd pixelDissolve -100000000000000000000,3,5,4 0 none / 0 none
+odd filters -100000000000000000000,3,5,4 ok / ok / ok / ok / ok / ok / error 2015 / error 2015 / error 2015 / error 2015
+odd fillRect 2,3,100000000000000000000,4 2,3 14x4
+odd fillDrawn 2,3,100000000000000000000,4 2,3 14x4
+odd colorTransform 2,3,100000000000000000000,4 2,3 14x4
+odd getPixels 2,3,100000000000000000000,4 56 first 2,3
+odd setPixels 2,3,100000000000000000000,4 56 2,3 14x4
+odd getVector 2,3,100000000000000000000,4 56 first 2,3
+odd setVector 2,3,100000000000000000000,4 2,3 14x4
+odd histogram 2,3,100000000000000000000,4 56
+odd drawClip 2,3,100000000000000000000,4 2,3 14x4
+odd pixelDissolve 2,3,100000000000000000000,4 10 2,3 7x4 / 7 8,1 8x4
+odd hitTest 2,3,100000000000000000000,4 true
+odd generateFilterRect 2,3,100000000000000000000,4 (x=2, y=3, w=14, h=4) (x=0, y=1, w=18, h=8)
+odd copy 2,3,100000000000000000000,4 3,4 13x4 shift 1,1 / 3,4 6x4 shift 1,1
+odd copyChannel 2,3,100000000000000000000,4 3,4 13x4 from 2,3 / 3,4 13x4 from 2,3
+odd merge 2,3,100000000000000000000,4 3,4 13x4 shift 1,1 / 3,4 13x4 [2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 13,3 14,3 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 13,3 2,5 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 2,6 2,5 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3]
+odd paletteMap 2,3,100000000000000000000,4 3,4 13x4 shift 1,1 / 3,4 13x4 [2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 13,3 14,3 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 13,3 2,5 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 2,6 2,5 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3]
+odd threshold 2,3,100000000000000000000,4 0 3,4 13x4 shift 1,1 / 0 3,4 13x4 [2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 13,3 14,3 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 13,3 2,5 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 2,6 2,5 2,4 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3]
+odd applyFilter 2,3,100000000000000000000,4 error 2015 / error 2015
+odd pixelDissolve 2,3,100000000000000000000,4 59 3,4 13x4 shift 1,1 / 59 2,3 13x4 empty=52
+odd filters 2,3,100000000000000000000,4 error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / ok / ok / ok / ok
+odd fillRect -5000000000,3,6000000000,4 0,3 16x4
+odd fillDrawn -5000000000,3,6000000000,4 0,3 16x4
+odd colorTransform -5000000000,3,6000000000,4 0,3 16x4
+odd getPixels -5000000000,3,6000000000,4 64 first 0,3
+odd setPixels -5000000000,3,6000000000,4 64 0,3 16x4
+odd getVector -5000000000,3,6000000000,4 64 first 0,3
+odd setVector -5000000000,3,6000000000,4 0,3 16x4
+odd histogram -5000000000,3,6000000000,4 64
+odd drawClip -5000000000,3,6000000000,4 0,3 16x4
+odd pixelDissolve -5000000000,3,6000000000,4 0 none / 0 none
+odd hitTest -5000000000,3,6000000000,4 true
+odd generateFilterRect -5000000000,3,6000000000,4 (x=0, y=3, w=16, h=4) (x=-2, y=1, w=20, h=8)
+odd copy -5000000000,3,6000000000,4 none / none
+odd copyChannel -5000000000,3,6000000000,4 none / none
+odd merge -5000000000,3,6000000000,4 none / none
+odd paletteMap -5000000000,3,6000000000,4 none / none
+odd threshold -5000000000,3,6000000000,4 0 none / 0 none
+odd applyFilter -5000000000,3,6000000000,4 error 2015 / error 2015
+odd pixelDissolve -5000000000,3,6000000000,4 0 none / 0 none
+odd filters -5000000000,3,6000000000,4 error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015
+odd fillRect 0,0,5,4 0,0 5x4
+odd fillDrawn 0,0,5,4 0,0 5x4
+odd colorTransform 0,0,5,4 0,0 5x4
+odd getPixels 0,0,5,4 20 first 0,0
+odd setPixels 0,0,5,4 20 0,0 5x4
+odd getVector 0,0,5,4 20 first 0,0
+odd setVector 0,0,5,4 0,0 5x4
+odd histogram 0,0,5,4 20
+odd drawClip 0,0,5,4 0,0 5x4
+odd pixelDissolve 0,0,5,4 13 0,0 5x4 / 13 8,1 5x4
+odd hitTest 0,0,5,4 false
+odd generateFilterRect 0,0,5,4 (x=0, y=0, w=5, h=4) (x=-2, y=-2, w=9, h=8)
+odd copy 0,0,5,4 3,4 5x4 shift 3,4 / 3,4 5x4 shift 3,4
+odd copyChannel 0,0,5,4 3,4 5x4 from 0,0 / 3,4 5x4 from 0,0
+odd merge 0,0,5,4 3,4 5x4 shift 3,4 / 3,4 5x4 shift 3,4
+odd paletteMap 0,0,5,4 3,4 5x4 shift 3,4 / 3,4 5x4 shift 3,4
+odd threshold 0,0,5,4 0 3,4 5x4 shift 3,4 / 0 3,4 5x4 shift 3,4
+odd applyFilter 0,0,5,4 3,4 5x4 shift 3,4 / 3,4 5x4 shift 3,4
+odd pixelDissolve 0,0,5,4 13 3,4 5x4 shift 3,4 / 13 0,0 5x4 empty=20
+odd filters 0,0,5,4 ok / ok / ok / ok / ok / ok / ok / ok / ok / ok
+odd fillRect 2,1,5,NaN none
+odd fillDrawn 2,1,5,NaN none
+odd colorTransform 2,1,5,NaN 2,1 5x15
+odd getPixels 2,1,5,NaN 0
+odd setPixels 2,1,5,NaN 0 none
+odd getVector 2,1,5,NaN 0
+odd setVector 2,1,5,NaN none
+odd histogram 2,1,5,NaN 0
+odd drawClip 2,1,5,NaN none
+odd pixelDissolve 2,1,5,NaN 0 none / 0 none
+odd hitTest 2,1,5,NaN false
+odd generateFilterRect 2,1,5,NaN (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 2,1,5,NaN none / none
+odd copyChannel 2,1,5,NaN none / none
+odd merge 2,1,5,NaN none / none
+odd paletteMap 2,1,5,NaN none / none
+odd threshold 2,1,5,NaN 0 none / 0 none
+odd applyFilter 2,1,5,NaN error 2015 / error 2015
+odd pixelDissolve 2,1,5,NaN 0 none / 0 none
+odd filters 2,1,5,NaN error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / ok / ok / ok / ok
+odd fillRect 2,0,5,NaN none
+odd fillDrawn 2,0,5,NaN none
+odd colorTransform 2,0,5,NaN none
+odd getPixels 2,0,5,NaN 0
+odd setPixels 2,0,5,NaN 0 none
+odd getVector 2,0,5,NaN 0
+odd setVector 2,0,5,NaN none
+odd histogram 2,0,5,NaN 0
+odd drawClip 2,0,5,NaN none
+odd pixelDissolve 2,0,5,NaN 0 none / 0 none
+odd hitTest 2,0,5,NaN false
+odd generateFilterRect 2,0,5,NaN (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 2,0,5,NaN none / none
+odd copyChannel 2,0,5,NaN none / none
+odd merge 2,0,5,NaN none / none
+odd paletteMap 2,0,5,NaN none / none
+odd threshold 2,0,5,NaN 0 none / 0 none
+odd applyFilter 2,0,5,NaN error 2015 / error 2015
+odd pixelDissolve 2,0,5,NaN 0 none / 0 none
+odd filters 2,0,5,NaN error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / ok / ok / ok / ok
+odd fillRect -100000000000000000000,3,Infinity,4 0,3 16x4
+odd fillDrawn -100000000000000000000,3,Infinity,4 0,3 16x4
+odd colorTransform -100000000000000000000,3,Infinity,4 0,3 16x4
+odd getPixels -100000000000000000000,3,Infinity,4 64 first 0,3
+odd setPixels -100000000000000000000,3,Infinity,4 64 0,3 16x4
+odd getVector -100000000000000000000,3,Infinity,4 64 first 0,3
+odd setVector -100000000000000000000,3,Infinity,4 0,3 16x4
+odd histogram -100000000000000000000,3,Infinity,4 64
+odd drawClip -100000000000000000000,3,Infinity,4 0,3 16x4
+odd pixelDissolve -100000000000000000000,3,Infinity,4 0 none / 0 none
+odd hitTest -100000000000000000000,3,Infinity,4 true
+odd generateFilterRect -100000000000000000000,3,Infinity,4 (x=0, y=3, w=16, h=4) (x=-2, y=1, w=20, h=8)
+odd copy -100000000000000000000,3,Infinity,4 none / none
+odd copyChannel -100000000000000000000,3,Infinity,4 none / none
+odd merge -100000000000000000000,3,Infinity,4 none / none
+odd paletteMap -100000000000000000000,3,Infinity,4 none / none
+odd threshold -100000000000000000000,3,Infinity,4 0 none / 0 none
+odd applyFilter -100000000000000000000,3,Infinity,4 error 2015 / error 2015
+odd pixelDissolve -100000000000000000000,3,Infinity,4 0 none / 0 none
+odd filters -100000000000000000000,3,Infinity,4 error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015
+odd fillRect 100000000000000000000,3,-100000000000000000000,4 none
+odd fillDrawn 100000000000000000000,3,-100000000000000000000,4 none
+odd colorTransform 100000000000000000000,3,-100000000000000000000,4 none
+odd getPixels 100000000000000000000,3,-100000000000000000000,4 0
+odd setPixels 100000000000000000000,3,-100000000000000000000,4 0 none
+odd getVector 100000000000000000000,3,-100000000000000000000,4 0
+odd setVector 100000000000000000000,3,-100000000000000000000,4 none
+odd histogram 100000000000000000000,3,-100000000000000000000,4 0
+odd drawClip 100000000000000000000,3,-100000000000000000000,4 none
+odd pixelDissolve 100000000000000000000,3,-100000000000000000000,4 10 0,3 7x4 / 7 8,1 8x4
+odd hitTest 100000000000000000000,3,-100000000000000000000,4 false
+odd generateFilterRect 100000000000000000000,3,-100000000000000000000,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 100000000000000000000,3,-100000000000000000000,4 none / none
+odd copyChannel 100000000000000000000,3,-100000000000000000000,4 3,4 13x4 from 0,3 / 3,4 13x4 from 0,3
+odd merge 100000000000000000000,3,-100000000000000000000,4 3,4 13x4 shift 3,1 / 3,4 13x4 [0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 0,4 1,4 2,4 0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 0,5 1,5 2,5 0,4 1,4 2,4 0,3 1,3 2,3 3,3 4,3 5,3 6,3 0,6 1,6 2,6 0,5 1,5 2,5 0,4 1,4 2,4 0,3 1,3 2,3 3,3]
+odd paletteMap 100000000000000000000,3,-100000000000000000000,4 3,4 13x4 shift 3,1 / 3,4 13x4 [0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 0,4 1,4 2,4 0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 0,5 1,5 2,5 0,4 1,4 2,4 0,3 1,3 2,3 3,3 4,3 5,3 6,3 0,6 1,6 2,6 0,5 1,5 2,5 0,4 1,4 2,4 0,3 1,3 2,3 3,3]
+odd threshold 100000000000000000000,3,-100000000000000000000,4 0 3,4 13x4 shift 3,1 / 0 3,4 13x4 [0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 12,3 0,4 1,4 2,4 0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 0,5 1,5 2,5 0,4 1,4 2,4 0,3 1,3 2,3 3,3 4,3 5,3 6,3 0,6 1,6 2,6 0,5 1,5 2,5 0,4 1,4 2,4 0,3 1,3 2,3 3,3]
+odd applyFilter 100000000000000000000,3,-100000000000000000000,4 error 2015 / error 2015
+odd pixelDissolve 100000000000000000000,3,-100000000000000000000,4 59 3,4 13x4 shift 3,1 / 59 0,3 13x4 empty=52
+odd filters 100000000000000000000,3,-100000000000000000000,4 error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / ok / ok / ok / ok
+odd fillRect 5,5,-100000000000000000000,-100000000000000000000 none
+odd fillDrawn 5,5,-100000000000000000000,-100000000000000000000 none
+odd colorTransform 5,5,-100000000000000000000,-100000000000000000000 none
+odd getPixels 5,5,-100000000000000000000,-100000000000000000000 0
+odd setPixels 5,5,-100000000000000000000,-100000000000000000000 0 none
+odd getVector 5,5,-100000000000000000000,-100000000000000000000 0
+odd setVector 5,5,-100000000000000000000,-100000000000000000000 none
+odd histogram 5,5,-100000000000000000000,-100000000000000000000 0
+odd drawClip 5,5,-100000000000000000000,-100000000000000000000 none
+odd pixelDissolve 5,5,-100000000000000000000,-100000000000000000000 0 none / 0 none
+odd hitTest 5,5,-100000000000000000000,-100000000000000000000 false
+odd generateFilterRect 5,5,-100000000000000000000,-100000000000000000000 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 5,5,-100000000000000000000,-100000000000000000000 none / none
+odd copyChannel 5,5,-100000000000000000000,-100000000000000000000 none / none
+odd merge 5,5,-100000000000000000000,-100000000000000000000 none / none
+odd paletteMap 5,5,-100000000000000000000,-100000000000000000000 none / none
+odd threshold 5,5,-100000000000000000000,-100000000000000000000 0 none / 0 none
+odd applyFilter 5,5,-100000000000000000000,-100000000000000000000 error 2015 / error 2015
+odd pixelDissolve 5,5,-100000000000000000000,-100000000000000000000 0 none / 0 none
+odd filters 5,5,-100000000000000000000,-100000000000000000000 error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / ok / ok / ok / ok
+odd fillRect 5,5,-Infinity,2 none
+odd fillDrawn 5,5,-Infinity,2 none
+odd colorTransform 5,5,-Infinity,2 none
+odd getPixels 5,5,-Infinity,2 0
+odd setPixels 5,5,-Infinity,2 0 none
+odd getVector 5,5,-Infinity,2 0
+odd setVector 5,5,-Infinity,2 none
+odd histogram 5,5,-Infinity,2 0
+odd drawClip 5,5,-Infinity,2 none
+odd pixelDissolve 5,5,-Infinity,2 0 none / 0 none
+odd hitTest 5,5,-Infinity,2 false
+odd generateFilterRect 5,5,-Infinity,2 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 5,5,-Infinity,2 none / none
+odd copyChannel 5,5,-Infinity,2 none / none
+odd merge 5,5,-Infinity,2 none / none
+odd paletteMap 5,5,-Infinity,2 none / none
+odd threshold 5,5,-Infinity,2 0 none / 0 none
+odd applyFilter 5,5,-Infinity,2 error 2015 / error 2015
+odd pixelDissolve 5,5,-Infinity,2 0 none / 0 none
+odd filters 5,5,-Infinity,2 error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / ok / ok / ok / ok
+odd fillRect 7,3,-5,4 none
+odd fillDrawn 7,3,-5,4 none
+odd colorTransform 7,3,-5,4 none
+odd getPixels 7,3,-5,4 0
+odd setPixels 7,3,-5,4 0 none
+odd getVector 7,3,-5,4 0
+odd setVector 7,3,-5,4 none
+odd histogram 7,3,-5,4 0
+odd drawClip 7,3,-5,4 none
+odd pixelDissolve 7,3,-5,4 13 2,3 5x4 / 13 8,1 5x4
+odd hitTest 7,3,-5,4 false
+odd generateFilterRect 7,3,-5,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 7,3,-5,4 none / none
+odd copyChannel 7,3,-5,4 3,4 5x4 from 2,3 / 3,4 5x4 from 2,3
+odd merge 7,3,-5,4 3,4 5x4 shift 1,1 / 3,4 5x4 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3]
+odd paletteMap 7,3,-5,4 3,4 5x4 shift 1,1 / 3,4 5x4 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3]
+odd threshold 7,3,-5,4 0 3,4 5x4 shift 1,1 / 0 3,4 5x4 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3]
+odd applyFilter 7,3,-5,4 none / none
+odd pixelDissolve 7,3,-5,4 13 3,4 5x4 shift 1,1 / 13 2,3 5x4 empty=20
+odd filters 7,3,-5,4 ok / ok / ok / ok / ok / ok / ok / ok / ok / ok
+odd fillRect 2147483647,3,-2147483640,4 none
+odd fillDrawn 2147483647,3,-2147483640,4 none
+odd colorTransform 2147483647,3,-2147483640,4 none
+odd getPixels 2147483647,3,-2147483640,4 0
+odd setPixels 2147483647,3,-2147483640,4 0 none
+odd getVector 2147483647,3,-2147483640,4 0
+odd setVector 2147483647,3,-2147483640,4 none
+odd histogram 2147483647,3,-2147483640,4 0
+odd drawClip 2147483647,3,-2147483640,4 none
+odd pixelDissolve 2147483647,3,-2147483640,4 10 7,3 7x4 / 7 8,1 8x4
+odd hitTest 2147483647,3,-2147483640,4 false
+odd generateFilterRect 2147483647,3,-2147483640,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+odd copy 2147483647,3,-2147483640,4 none / none
+odd copyChannel 2147483647,3,-2147483640,4 3,4 9x4 from 7,3 / 3,4 9x4 from 7,3
+odd merge 2147483647,3,-2147483640,4 3,4 9x4 shift -4,1 / 3,4 9x4 [7,3 8,3 9,3 10,3 11,3 12,3 13,3 14,3 15,3 11,3 12,3 13,3 14,3 15,3 12,4 13,4 14,4 15,4 15,3 12,4 13,4 14,4 15,4 12,5 13,5 14,5 15,5 15,4 12,5 13,5 14,5 15,5 12,6 13,6 14,6 15,6]
+odd paletteMap 2147483647,3,-2147483640,4 3,4 9x4 shift -4,1 / 3,4 9x4 [7,3 8,3 9,3 10,3 11,3 12,3 13,3 14,3 15,3 11,3 12,3 13,3 14,3 15,3 12,4 13,4 14,4 15,4 15,3 12,4 13,4 14,4 15,4 12,5 13,5 14,5 15,5 15,4 12,5 13,5 14,5 15,5 12,6 13,6 14,6 15,6]
+odd threshold 2147483647,3,-2147483640,4 0 3,4 9x4 shift -4,1 / 0 3,4 9x4 [7,3 8,3 9,3 10,3 11,3 12,3 13,3 14,3 15,3 11,3 12,3 13,3 14,3 15,3 12,4 13,4 14,4 15,4 15,3 12,4 13,4 14,4 15,4 12,5 13,5 14,5 15,5 15,4 12,5 13,5 14,5 15,5 12,6 13,6 14,6 15,6]
+odd applyFilter 2147483647,3,-2147483640,4 error 2015 / error 2015
+odd pixelDissolve 2147483647,3,-2147483640,4 27 3,4 9x4 shift -4,1 / 27 7,3 9x4 empty=36
+odd filters 2147483647,3,-2147483640,4 error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / error 2015 / ok / ok / ok / ok
+clamped -1000000000000,3,1000000000005,4 3,4 5x4 shift 3,1 / 4,4 5x4 shift 4,1 / 3,4 5x4 shift 3,1
+clamped -2147483648,3,2147483653,4 3,4 5x4 shift 3,1 / 4,4 5x4 shift 4,1 / 3,4 5x4 shift 3,1
+clamped -1073741823,3,1073741828,4 3,4 5x4 shift 3,1 / 4,4 5x4 shift 4,1 / 3,4 5x4 shift 3,1

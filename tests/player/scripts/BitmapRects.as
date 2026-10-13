@@ -5,14 +5,24 @@
 // moves right and down by no more than its size, where the rect is
 // written whole and what lay past the edge comes out empty. In place,
 // merge, paletteMap, threshold and copyChannel read each pixel as the
-// ones before it left it; a colour matrix goes by fours. Every pixel names
+// ones before it left it; a colour matrix goes by fours. A rect's NaN,
+// Infinity and edges past int's range, and the filters adl refuses them for,
+// are traced too. Every pixel names
 // where it came from, so a line tells which pixels moved and from where.
 package {
   import flash.display.Bitmap;
   import flash.display.BitmapData;
   import flash.display.Sprite;
+  import flash.filters.BevelFilter;
+  import flash.filters.BitmapFilter;
   import flash.filters.BlurFilter;
   import flash.filters.ColorMatrixFilter;
+  import flash.filters.ConvolutionFilter;
+  import flash.filters.DisplacementMapFilter;
+  import flash.filters.DropShadowFilter;
+  import flash.filters.GlowFilter;
+  import flash.filters.GradientBevelFilter;
+  import flash.filters.GradientGlowFilter;
   import flash.geom.ColorTransform;
   import flash.geom.Point;
   import flash.geom.Rectangle;
@@ -153,6 +163,37 @@ package {
           hb.hitTest(new Point(p[0], p[1]), 1, dot, new Point(3, 3)), hb.hitTest(new Point(0, 0), 1, dot, new Point(p[0], p[1])));
       }
 
+      // A rect of NaN, Infinity or past int's range: each edge, x and x + width, rounded and clamped
+      // to 2^30 - 1 either way, NaN int's least; so an x of NaN or Infinity, or a width of NaN, covers
+      // nothing, and a width of Infinity reaches the bitmap's edge. colorTransform takes a height of
+      // NaN to the foot from a top past 0; merge, copyChannel, paletteMap, threshold and pixelDissolve
+      // span a negative size back.
+      var odd:Array = [[NaN, 3, 5, 4], [2, NaN, 5, 4], [2, 3, NaN, 4], [2, 3, 5, NaN], [Infinity, 3, 5, 4], [-Infinity, 3, 5, 4],
+        [2, 3, Infinity, 4], [2, 3, 5, Infinity], [2, 3, -Infinity, 4], [2147483648, 3, 5, 4], [-2147483649, 3, 5, 4], [1e20, 3, 5, 4],
+        [-1e20, 3, 5, 4], [2, 3, 1e20, 4], [-5e9, 3, 6e9, 4], [-0, -0, 5, 4], [2, 1, 5, NaN], [2, 0, 5, NaN], [-1e20, 3, Infinity, 4],
+        [1e20, 3, -1e20, 4], [5, 5, -1e20, -1e20], [5, 5, -Infinity, 2], [7, 3, -5, 4], [2147483647, 3, -2147483640, 4]];
+      for each (r in odd) {
+        for each (lop in ["fillRect", "fillDrawn", "colorTransform", "getPixels", "setPixels", "getVector", "setVector", "histogram",
+            "drawClip", "pixelDissolve", "hitTest", "generateFilterRect"]) {
+          trace("odd", lop, r, single(lop, r));
+        }
+        // Not in place: adl copies a rect in place through a buffer of its size, which past its memory
+        // copies nothing, or ends adl.
+        trace("odd copy", r, guarded(function():String { return copy(false, false, r, [3, 4], 0); }), "/",
+          guarded(function():String { return copy(false, false, r, [3, 4], 2, [0, 0]); }));
+        for each (op in ["copyChannel", "merge", "paletteMap", "threshold", "applyFilter", "pixelDissolve"]) {
+          trace("odd", op, r, guarded(function():String { return other(op, false, r, [3, 4]); }), "/",
+            guarded(function():String { return other(op, true, r, [3, 4]); }));
+        }
+        trace("odd filters", r, filters(r));
+      }
+
+      // A clamped edge moves a copy's point by 2^30 - 1.
+      for each (r in [[-1e12, 3, 1e12 + 5, 4], [-2147483648, 3, 2147483653, 4], [-1073741823, 3, 1073741828, 4]]) {
+        trace("clamped", r, copy(false, false, r, [3 - 1073741823, 4], 0), "/", copy(false, false, r, [4 - 1073741823, 4], 0),
+          "/", other("merge", false, r, [3 - 1073741823, 4]));
+      }
+
       // Shown: an opaque bitmap with empty pixels, as drawn, and one drawn on the GPU first.
       var shown:BitmapData = pattern(2, false);
       shown.copyPixels(shown, new Rectangle(-3, -2, 8, 7), new Point(3, 4));
@@ -236,6 +277,38 @@ package {
           return seed + " " + describe(dst, same);
       }
       return describe(dst, same);
+    }
+
+    /** What `f` returns, or the error it throws. */
+    private function guarded(f:Function):String {
+      try {
+        return f();
+      } catch (e:Error) {
+        return "error " + e.errorID;
+      }
+      return null;
+    }
+
+    /**
+     * applyFilter with each kind of filter, from another bitmap: whether adl
+     * takes the rect or refuses it with ArgumentError 2015 (what it writes
+     * of a rect it takes, past the source's edge or of a negative size, is
+     * another matter).
+     */
+    private function filters(r:Array):String {
+      var out:Array = [];
+      for each (var f:BitmapFilter in [new ColorMatrixFilter(), new BlurFilter(4, 4, 1), new GlowFilter(), new DropShadowFilter(),
+          new DropShadowFilter(0), new ConvolutionFilter(3, 3, [0, 0, 0, 0, 1, 0, 0, 0, 0]), new BevelFilter(), new GradientGlowFilter(),
+          new GradientBevelFilter(), new DisplacementMapFilter(pattern(3), new Point(0, 0), 1, 2, 0, 0)]) {
+        var dst:BitmapData = pattern(2);
+        try {
+          dst.applyFilter(pattern(1), new Rectangle(r[0], r[1], r[2], r[3]), new Point(3, 4), f);
+          out.push("ok");
+        } catch (e:Error) {
+          out.push("error " + e.errorID);
+        }
+      }
+      return out.join(" / ");
     }
 
     /** The pixels whose blue two copyChannels set: their box, and where they came from. */

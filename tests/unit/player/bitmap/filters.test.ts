@@ -3,13 +3,17 @@
 // whole rect's would; a convolution's two ways, as adl takes them.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BitmapStore } from "../../../../packages/player/dist/bitmap/bitmap.js";
+import { BitmapStore, pixelRect } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import {
   applyFilter,
   filterRect,
+  filterRefuses,
   integerKernel,
 } from "../../../../packages/player/dist/bitmap/filters.js";
-import { filterDefaults } from "../../../../packages/player/dist/display/filters.js";
+import {
+  type FilterKind,
+  filterDefaults,
+} from "../../../../packages/player/dist/display/filters.js";
 
 /** A 40 by 40 source: a half-alpha red square and an opaque green one. */
 function source(): BitmapStore {
@@ -245,4 +249,40 @@ test("a filter's rect grows as adl's generateFilterRect grows it", () => {
     angle: 30,
   };
   assert.deepEqual(grown(bevel), [9, 9, 9, 9]);
+});
+
+test("adl's refusals of a filter's rect: NaN, an edge as far as it goes, and sizes past its buffers", () => {
+  const kinds: FilterKind[] = [
+    "colorMatrix",
+    "blur",
+    "glow",
+    "dropShadow",
+    "convolution",
+    "bevel",
+    "displacementMap",
+  ];
+  // A convolution of 3 by 3, which reaches a pixel round, as adl's probes had it.
+  const of = (kind: FilterKind) => ({ ...filterDefaults(kind), matrixX: 3, matrixY: 3 });
+  const refused = (r: number[], f = of) =>
+    kinds.filter((kind) => filterRefuses(pixelRect(r[0], r[1], r[2], r[3]), f(kind))).join(" ");
+  assert.equal(refused([NaN, 2, 3, 3]), "blur glow convolution bevel displacementMap");
+  assert.equal(
+    refused([2, NaN, 3, 3], (kind) => ({ ...of(kind), distance: 0 })),
+    "blur glow dropShadow convolution bevel displacementMap",
+  );
+  assert.equal(refused([-Infinity, 2, 3, 3]), "bevel displacementMap");
+  assert.equal(refused([-(2 ** 29), 2, 3, 3]), "");
+  for (const r of [
+    [2, 2, NaN, 3],
+    [2, 2, 3, Infinity],
+    [2, 2, -1e20, 3],
+    [-1e9, 2, 2e9, 3],
+    [2, 2, 108e6, 1],
+    [2, 2, 23171, 23171],
+  ]) {
+    assert.equal(refused(r), "colorMatrix blur glow dropShadow convolution", `${r}`);
+  }
+  // A glow blurs 6 pixels round it by default, past 2^29.
+  assert.equal(refused([2, 2, 106e6, 1]), "glow");
+  assert.equal(refused([2, 2, 23170, 23170]), "blur glow dropShadow convolution");
 });
