@@ -488,3 +488,16 @@ test("no BitmapData native or filter throws a JS error or makes a buffer the inp
   );
   assert.deepEqual(grown, []);
 });
+
+test("pixelDissolve takes its seed as the int it is declared, NaN as 0", () => {
+  const b = make("flash.display::BitmapData", 6, 5, true, 0);
+  const r = make("flash.geom::Rectangle", 0, 0, 6, 5);
+  const p = make("flash.geom::Point", 0, 0);
+  for (const seed of [Number.NaN, Infinity, 2 ** 32 + 3]) {
+    const zero = make("flash.display::BitmapData", 6, 5, true, 0);
+    assert.equal(
+      call(b, "pixelDissolve", b, r, p, seed, 7, 0xff00ff00),
+      call(zero, "pixelDissolve", zero, r, p, seed === 2 ** 32 + 3 ? 3 : 0, 7, 0xff00ff00),
+    );
+  }
+});

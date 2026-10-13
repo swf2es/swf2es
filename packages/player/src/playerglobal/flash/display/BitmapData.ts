@@ -930,7 +930,8 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         r,
         dx,
         dy,
-        seed === undefined ? 0 : s.rt.toNumber(seed),
+        // An int, as declared: NaN is 0, where it would never reach a state.
+        seed === undefined ? 0 : s.rt.toInt(seed),
         n,
         fill === undefined ? 0 : s.rt.toUint(fill),
       );
