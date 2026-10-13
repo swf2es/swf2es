@@ -6034,6 +6034,36 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  // Drawn in perspective from a bitmap of each 3D object (render/three.ts). The stages are 500
+  // wide: adl draws with the focal length of a stage that wide, whatever the SWF's, where Flash
+  // Player draws with its stage's, as its bounds and local3DToGlobal are in both.
+  {
+    name: "three-d-flip",
+    swf: (abc) => bare(abc, 7, "ThreeDFlip", 500, 200),
+    script: "ThreeDFlip",
+    frames: 7,
+    capture: [1, 2, 3, 4, 5, 6, 7],
+    tolerance: 40,
+    maxOutliers: 500,
+  },
+  {
+    name: "three-d-scene",
+    swf: (abc) => bare(abc, 2, "ThreeDScene", 500, 400),
+    script: "ThreeDScene",
+    frames: 2,
+    capture: [1],
+    tolerance: 40,
+    maxOutliers: 500,
+  },
+  {
+    name: "three-d-projection",
+    swf: (abc) => bare(abc, 2, "ThreeDProjection", 500, 400),
+    script: "ThreeDProjection",
+    frames: 2,
+    capture: [1],
+    tolerance: 40,
+    maxOutliers: 200,
+  },
   {
     name: "point-at",
     swf: (abc) => bare(abc, 1, "PointAt"),
