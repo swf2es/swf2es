@@ -3,7 +3,13 @@
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
 import { BitmapStore, type PixelRect, pixelRect, spanRect } from "../../../bitmap/bitmap.js";
-import { applyFilter, filterRect, filterRefuses, filtersDrawn } from "../../../bitmap/filters.js";
+import {
+  applyFilter,
+  filterRect,
+  filterRefusal,
+  filtersDrawn,
+  isInner,
+} from "../../../bitmap/filters.js";
 import {
   type Affine,
   alphaAt,
@@ -380,8 +386,11 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("flash.errors::IllegalOperationError", 2077);
       }
 
-      if (filterRefuses(r, f)) {
-        throw s.rt.error("ArgumentError", 2015);
+      switch (filterRefusal(r, f, { x: 0, y: 0, width: from.width, height: from.height })) {
+        case 2015:
+          throw s.rt.error("ArgumentError", 2015);
+        case 2077:
+          throw s.rt.error("flash.errors::IllegalOperationError", 2077);
       }
 
       // A displacement map's map as it is now, not as it was when set.
@@ -406,13 +415,22 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const y0 = Math.max(0, given.y);
       const x1 = Math.min(store.width, given.x + given.width);
       const y1 = Math.min(store.height, given.y + given.height);
-      let r = filterRect(
-        x1 >= x0 && y1 >= y0
-          ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
-          : { x: 0x7ffffff, y: 0x7ffffff, width: 0, height: 0 },
-        f,
-      );
-      // A displacement map's result within the bitmap too.
+      if (x1 < x0 || y1 < y0) {
+        // Grown as any other, but an inner filter's, which stays where it is.
+        const apart = { x: 0x7ffffff, y: 0x7ffffff, width: 0, height: 0 };
+        const r = isInner(f) ? apart : filterRect(apart, f);
+        return s.rt.construct(
+          s.rt.classNamed("flash.geom::Rectangle"),
+          r.x,
+          r.y,
+          r.width,
+          r.height,
+        );
+      }
+
+      let r = filterRect({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, f);
+      // A displacement map's result within the bitmap too, and an inner
+      // filter's, which draws within what it filters.
       const within = (r: PixelRect): PixelRect => {
         const x0 = Math.max(0, r.x);
         const y0 = Math.max(0, r.y);
@@ -422,7 +440,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
           ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
           : { x: 0, y: 0, width: 0, height: 0 };
       };
-      if (f.kind === "displacementMap") {
+      if (f.kind === "displacementMap" || isInner(f)) {
         r = within(r);
       }
 
@@ -788,6 +806,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     ): boolean {
       const store = storeOf(s, this);
       const [fx, fy] = pointOf(s, firstPoint, "firstPoint");
+
       const a1 = s.rt.toUint(firstAlpha);
       const other = second as AsObject;
       if (other === null || other === undefined) {
@@ -829,6 +848,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         const second = storeOf(s, data);
         // Against a bitmap, its point is required.
         const [sx, sy] = pointOf(s, secondPoint, "secondBitmapDataPoint");
+
         const a2 = secondAlpha === undefined ? 1 : s.rt.toUint(secondAlpha);
         const ox = sx - fx;
         const oy = sy - fy;

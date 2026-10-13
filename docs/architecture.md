@@ -3173,7 +3173,7 @@ foot from a top past 0, the height wrapping in int arithmetic; `merge`,
 `copyChannel`, `paletteMap`, `threshold` and `pixelDissolve` take a
 negative size as the rect it spans back over (`spanRect`), the others as
 none; `applyFilter` refuses with 2015 what adl cannot make the buffers for
-(`filterRefuses`). A Point's coordinates are truncated toward 0 (the
+(`filterRefusal`). A Point's coordinates are truncated toward 0 (the
 destination, alpha and hit-test points of every operation alike, under
 adl: 3.7 is 3, -1.5 is -1; NaN, or past int's range, off the bitmap). A
 source rect past the source's edge is clipped and the point moved with it;
@@ -3759,7 +3759,20 @@ place where the whole pixel it lands on is past it (ignore), or the
 filter's colour; where the map is not, or there is none, it keeps its
 own. Its rect grows by a quarter of each scale, whole, and none with no
 map; `generateFilterRect` takes any filter's rect within the bitmap first,
-and a displacement's result within it too. applyFilter writes the rect
+and a displacement's result, and an inner glow's, shadow's, bevel's or
+gradient filter's, within it too. adl keeps each part of a shadow's or a
+bevel's offset in 256ths in an int: 2^23 − 1 or more wraps round to
+−2^23 − 256 and less stops there (`shadowOffset`), so the rect reaches
+−8388866; a distance past a float's 2^31, or Infinity, is that both ways.
+An outer shadow or gradient glow so cast writes its rect empty, the
+source too; a filter rect past the buffers adl makes is refused, 2015 for
+an outer shadow or gradient glow (1e5 at 45° already), 2077 for a bevel,
+and a distance or angle of NaN refuses an outer shadow and is none for
+the rest (`filterRefusal`). Cast some 2^15 pixels left or up, adl draws
+an outer shadow in pieces as its 16-bit sums wrap, which swf2es leaves.
+However far the offset, the work is what the destination shows: the
+alpha read from the offset is blurred where it is read, not over all the
+offset spans (the `filter-distances` case). applyFilter writes the rect
 alone: adl, displacing a rect moved elsewhere, fills its grown rect from
 the rect's corner, shifted, and into an opaque destination leaves alpha,
 quirks swf2es does not take on. The map is read as it is when applied.

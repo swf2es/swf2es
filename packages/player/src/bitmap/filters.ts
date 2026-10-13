@@ -76,18 +76,56 @@ function reach(f: Filter): [number, number] {
   return [spreadOf(f.blurX, f.quality, f.kind), spreadOf(f.blurY, f.quality, f.kind)];
 }
 
+/** Where adl's offsets in 256ths run out: the most a part of one reaches, as -2^23 - 256. */
+const FAR = -(2 ** 23 + 256);
+
+/**
+ * A shadow's or a bevel's offset, down: [x, y], unrounded. adl keeps each
+ * part in 256ths in an int, so one of 2^23 - 1 or more wraps round and one
+ * below FAR stops there, both at FAR (generateFilterRect's -8388866 past
+ * a reach of 2); a distance past a float's 2^31 is FAR both ways, short of
+ * 1e10 for a shadow or a gradient glow, which takes 4e9 at 0° as the part
+ * it is, and so is Infinity. A distance of NaN is FAR both ways for an
+ * outer shadow or gradient glow, none for the rest; an angle of NaN or
+ * Infinity is 0 (an outer shadow refuses either NaN: filterRefusal).
+ */
+function shadowOffset(f: Filter): [number, number] {
+  const d = f.distance;
+  if (Number.isNaN(d)) {
+    return (f.kind === "dropShadow" || f.kind === "gradientGlow") && !isInner(f)
+      ? [FAR, FAR]
+      : [0, 0];
+  }
+
+  const bevels = f.kind === "bevel" || f.kind === "gradientBevel";
+  if (!(Math.abs(Math.fround(d)) < 2 ** 31) && (bevels || !(Math.abs(d) < 1e10))) {
+    return [FAR, FAR];
+  }
+
+  const radians = ((f.angle || 0) * Math.PI) / 180;
+  // A part a whisker off whole is whole, as adl's 256ths have it: 3 at
+  // 180° is -3 across and 0 down, not 3.7e-16, which would read between rows.
+  const part = (v: number) => {
+    const whole = Math.round(v);
+    return v >= 2 ** 23 - 1 || v < FAR ? FAR : Math.abs(v - whole) < 1e-9 ? whole : v;
+  };
+  return [part(d * Math.cos(radians)), part(d * Math.sin(radians))];
+}
+
 /**
  * A shadow's or a bevel's offset in whole pixels, down: [x, y]. adl has it
  * in 256ths, to the nearest, so the cosine of 90° is 0, not just under it,
  * and 6 × sin 30° is 3, not just under.
  */
 function offsetOf(f: Filter): [number, number] {
-  const radians = ((f.angle || 0) * Math.PI) / 180;
   const whole = (v: number) => Math.floor(Math.round(v * 256) / 256);
-  return [
-    whole((f.distance || 0) * Math.cos(radians)),
-    whole((f.distance || 0) * Math.sin(radians)),
-  ];
+  const [ox, oy] = shadowOffset(f);
+  return [whole(ox), whole(oy)];
+}
+
+/** Whether `f` is drawn within what it filters: an inner glow, shadow, bevel or gradient one. */
+export function isInner(f: Filter): boolean {
+  return f.kind === "glow" || f.kind === "dropShadow" ? f.inner : f.type === "inner";
 }
 
 /**
@@ -126,35 +164,60 @@ const EDGED = new Set(["bevel", "gradientBevel", "gradientGlow", "displacementMa
 const SIZED = new Set(["colorMatrix", "convolution", "blur", "glow", "dropShadow"]);
 
 /**
- * Whether adl refuses applyFilter's `rect` (bitmap.ts pixelRect) for `f`
- * with ArgumentError 2015, as it does where it cannot make the filter's
- * buffers. Probed under adl: an x or y of NaN for every filter but a
- * colour matrix and a drop shadow cast some distance; a left or top edge
- * clamped to the farthest, as -Infinity is (-2^29 passes), for the
- * bevels, a gradient glow and a displacement map; and for the filters sized by what they write, a filter rect a side
- * of which passes 2^31 / 20 pixels (106e6 passes, 108e6 is refused) or of
- * more than 2^29 pixels, a width or height of NaN or Infinity among them,
- * the sizes in int arithmetic as the edges' difference wraps. A blur or
- * glow some way short of those is refused with 2077, which this leaves.
+ * The error adl refuses applyFilter's `rect` (bitmap.ts pixelRect) for `f`
+ * with, as it does where it cannot make the filter's buffers: 2015
+ * (ArgumentError), 2077 (IllegalOperationError), or 0 for none. Probed
+ * under adl: an x or y of NaN, 2015, for every filter but a colour matrix
+ * and a drop shadow cast some distance; a left or top edge clamped to the
+ * farthest, as -Infinity is (-2^29 passes), 2015 for the bevels, a
+ * gradient glow and a displacement map; and for the filters sized by what
+ * they write, 2015 for a filter rect a side of which passes 2^31 / 20
+ * pixels (106e6 passes, 108e6 is refused) or of more than 2^29 pixels, a
+ * width or height of NaN or Infinity among them, the sizes in int
+ * arithmetic as the edges' difference wraps; an outer shadow's grown by
+ * its offset (1e5 at 45° is refused), an inner one's not. By its offset
+ * alone, as what the rect holds of the source grows by it: a gradient
+ * glow outer or full past 2^30 pixels, 2015, and a bevel past a side of
+ * 2^31 / 20 or 2^29 pixels, 2077; and an outer shadow or gradient glow of
+ * a distance or angle of NaN (or Infinity, which the angle keeps as NaN),
+ * 2015. A blur or glow some way short of those is refused with 2077,
+ * which this leaves.
  */
-export function filterRefuses(rect: PixelRect, f: Filter): boolean {
+export function filterRefusal(rect: PixelRect, f: Filter, source: PixelRect): number {
   if (rect.x === NAN_EDGE || rect.y === NAN_EDGE) {
-    return f.kind !== "colorMatrix" && !(f.kind === "dropShadow" && f.distance);
+    return f.kind !== "colorMatrix" && !(f.kind === "dropShadow" && f.distance) ? 2015 : 0;
   }
 
-  if (EDGED.has(f.kind)) {
-    return rect.x <= 1 - EDGE_LIMIT || rect.y <= 1 - EDGE_LIMIT;
+  if (EDGED.has(f.kind) && (rect.x <= 1 - EDGE_LIMIT || rect.y <= 1 - EDGE_LIMIT)) {
+    return 2015;
+  }
+
+  const outerShadow = (f.kind === "dropShadow" || f.kind === "gradientGlow") && !isInner(f);
+  if (outerShadow && (Number.isNaN(f.distance) || Number.isNaN(f.angle))) {
+    return 2015;
+  }
+
+  const side = 2 ** 31 / 20;
+  const held = intersect(rect, source);
+  if (held && (f.kind === "gradientGlow" || f.kind === "bevel" || f.kind === "gradientBevel")) {
+    const out = filterRect(held, f);
+    const pixels = out.width * out.height;
+    if (f.kind === "gradientGlow") {
+      return !isInner(f) && pixels > 2 ** 30 ? 2015 : 0;
+    }
+
+    return out.width > side || out.height > side || pixels > 2 ** 29 ? 2077 : 0;
   }
 
   if (!SIZED.has(f.kind)) {
-    return false;
+    return 0;
   }
 
-  const out = filterRect({ ...rect, width: rect.width | 0, height: rect.height | 0 }, f);
+  const sized = isInner(f) ? { ...f, distance: 0 } : f;
+  const out = filterRect({ ...rect, width: rect.width | 0, height: rect.height | 0 }, sized);
   const w = Math.abs(out.width);
   const h = Math.abs(out.height);
-  const side = 2 ** 31 / 20;
-  return w > side || h > side || w * h > 2 ** 29;
+  return w > side || h > side || w * h > 2 ** 29 ? 2015 : 0;
 }
 
 /**
@@ -290,30 +353,88 @@ export function applyFilter(
     return true;
   }
 
-  // The work: what is shown and as far round it as the filter reaches into
-  // it, which may be past the rect, whose edge cuts what is written alone.
-  const [hx, hy] = halo(f);
-  const work = {
-    x: shown.x - hx,
-    y: shown.y - hy,
-    width: shown.width + 2 * hx,
-    height: shown.height + 2 * hy,
-  };
-  const w = work.width;
-  const h = work.height;
+  if (f.kind === "blur") {
+    // The work: what is shown and as far round it as the blur reaches into
+    // it, which may be past the rect, whose edge cuts what is written alone.
+    const [hx, hy] = blurHalo(f);
+    const work = {
+      x: shown.x - hx,
+      y: shown.y - hy,
+      width: shown.width + 2 * hx,
+      height: shown.height + 2 * hy,
+    };
+    const planes = channelsOf(source, work);
+    const [a, r, g, b] = planes;
+    blur(planes, work.width, work.height, f);
+    const result = new Uint32Array(work.width * work.height);
+    for (let i = 0; i < result.length; i++) {
+      result[i] = ((a[i] << 24) | (r[i] << 16) | (g[i] << 8) | b[i]) >>> 0;
+    }
 
-  // The source's premultiplied channels over the work, past `rect` too, as
-  // far as the bitmap goes.
+    write(dest, result, work, shown, mx, my);
+    return true;
+  }
+
+  // The source's pixels where they are shown, and its alpha blurred and read
+  // from the offset, each over what is shown alone: however far the offset
+  // reaches, the work is the destination's size.
+  const w = shown.width;
+  const h = shown.height;
+  const planes = channelsOf(source, shown);
+  const [ox, oy] = f.kind === "glow" ? [0, 0] : shadowOffset(f);
+  const result = new Uint32Array(w * h);
+  // An outer shadow cast as far as an offset goes adl writes empty, the
+  // source's own pixels too.
+  const outer = (f.kind === "dropShadow" || f.kind === "gradientGlow") && !isInner(f);
+  if (outer && (ox === FAR || oy === FAR)) {
+    write(dest, result, shown, shown, mx, my);
+    return true;
+  }
+
+  switch (f.kind) {
+    case "bevel":
+      bevel(
+        result,
+        planes,
+        alphaFrom(source, shown, f, ox, oy),
+        alphaFrom(source, shown, f, -ox, -oy),
+        f,
+      );
+      break;
+    case "gradientGlow":
+      gradientGlow(result, planes, alphaFrom(source, shown, f, -ox, -oy), f);
+      break;
+    case "gradientBevel":
+      gradientBevel(
+        result,
+        planes,
+        alphaFrom(source, shown, f, ox, oy),
+        alphaFrom(source, shown, f, -ox, -oy),
+        f,
+      );
+      break;
+    default:
+      glow(result, planes, alphaFrom(source, shown, f, -ox, -oy, f.inner), f);
+  }
+
+  write(dest, result, shown, shown, mx, my);
+  return true;
+}
+
+/** The source's premultiplied channels over `area`, past `rect` too, as far as the bitmap goes; 0 past it. */
+function channelsOf(source: BitmapStore, area: PixelRect): Int32Array[] {
+  const w = area.width;
+  const n = w * area.height;
+  const a = new Int32Array(n);
+  const r = new Int32Array(n);
+  const g = new Int32Array(n);
+  const b = new Int32Array(n);
   const pixels = source.pixels;
   const sw = source.width;
-  const a = new Int32Array(w * h);
-  const r = new Int32Array(w * h);
-  const g = new Int32Array(w * h);
-  const b = new Int32Array(w * h);
-  const from = intersect(work, { x: 0, y: 0, width: sw, height: source.height });
+  const from = intersect(area, { x: 0, y: 0, width: sw, height: source.height });
   if (from) {
     for (let sy = from.y; sy < from.y + from.height; sy++) {
-      let i = (sy - work.y) * w + from.x - work.x;
+      let i = (sy - area.y) * w + from.x - area.x;
       for (let sx = from.x; sx < from.x + from.width; sx++, i++) {
         const p = pixels[sy * sw + sx];
         a[i] = p >>> 24;
@@ -324,30 +445,55 @@ export function applyFilter(
     }
   }
 
-  const result = new Uint32Array(w * h);
-  switch (f.kind) {
-    case "blur":
-      blur([a, r, g, b], w, h, f);
-      for (let i = 0; i < result.length; i++) {
-        result[i] = ((a[i] << 24) | (r[i] << 16) | (g[i] << 8) | b[i]) >>> 0;
-      }
+  return [a, r, g, b];
+}
 
-      break;
-    case "bevel":
-      bevel(result, [a, r, g, b], w, h, f);
-      break;
-    case "gradientGlow":
-      gradientGlow(result, [a, r, g, b], w, h, f);
-      break;
-    case "gradientBevel":
-      gradientBevel(result, [a, r, g, b], w, h, f);
-      break;
-    default:
-      glow(result, [a, r, g, b], w, h, f);
+/**
+ * The source's alpha, blurred as `f` blurs it and truncated, read at each
+ * pixel of `area` moved by (dx, dy), between pixels as `shifted` reads;
+ * with `invert`, of 255 less the alpha, as an inner glow blurs what the
+ * source leaves. Blurred over that and as far round it as the blur
+ * reaches, so the work is `area`'s size wherever the offset takes it.
+ */
+function alphaFrom(
+  source: BitmapStore,
+  area: PixelRect,
+  f: Filter,
+  dx: number,
+  dy: number,
+  invert = false,
+): Int32Array {
+  const [hx, hy] = blurHalo(f);
+  const kx = Math.floor(dx);
+  const ky = Math.floor(dy);
+  const read = {
+    x: area.x + kx - hx,
+    y: area.y + ky - hy,
+    width: area.width + 1 + 2 * hx,
+    height: area.height + 1 + 2 * hy,
+  };
+  const [plane] = channelsOf(source, read);
+  if (invert) {
+    for (let i = 0; i < plane.length; i++) {
+      plane[i] = 255 - plane[i];
+    }
   }
 
-  write(dest, result, work, shown, mx, my);
-  return true;
+  blur([plane], read.width, read.height, f);
+  const moved = shifted(
+    plane,
+    read.width,
+    read.height,
+    hx + (dx - kx),
+    hy + (dy - ky),
+    invert ? 255 : 0,
+  );
+  const out = new Int32Array(area.width * area.height);
+  for (let y = 0; y < area.height; y++) {
+    out.set(moved.subarray(y * read.width, y * read.width + area.width), y * area.width);
+  }
+
+  return out;
 }
 
 function intersect(p: PixelRect, q: PixelRect): PixelRect | null {
@@ -358,25 +504,9 @@ function intersect(p: PixelRect, q: PixelRect): PixelRect | null {
   return x1 > x0 && y1 > y0 ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } : null;
 }
 
-/**
- * How far a pixel's result reaches for the source, each way: a blur's
- * `quality` runs each reach half its box, whole taps; a shadow's offset,
- * and the next pixel it samples between, beyond that.
- */
-function halo(f: Filter): [number, number] {
-  if (f.kind === "colorMatrix") {
-    return [0, 0];
-  }
-
-  let hx = f.quality * Math.ceil((f.blurX || 0) / 2);
-  let hy = f.quality * Math.ceil((f.blurY || 0) / 2);
-  if (f.kind !== "blur" && f.kind !== "glow") {
-    const radians = ((f.angle || 0) * Math.PI) / 180;
-    hx += Math.ceil(Math.abs((f.distance || 0) * Math.cos(radians))) + 1;
-    hy += Math.ceil(Math.abs((f.distance || 0) * Math.sin(radians))) + 1;
-  }
-
-  return [hx, hy];
+/** How far a blur reaches for the source, each way: each of `quality` runs half its box, whole taps. */
+function blurHalo(f: Filter): [number, number] {
+  return [f.quality * Math.ceil((f.blurX || 0) / 2), f.quality * Math.ceil((f.blurY || 0) / 2)];
 }
 
 /** The bounds of the pixels of `rect` of the source that are not transparent: null for none. */
@@ -908,19 +1038,12 @@ function shifted(
 function bevel(
   result: Uint32Array,
   [a, r, g, b]: Int32Array[],
-  w: number,
-  h: number,
+  on: Int32Array,
+  back: Int32Array,
   f: Filter,
 ): void {
-  const blurred = new Int32Array(a);
-  blur([blurred], w, h, f);
-  const radians = ((f.angle || 0) * Math.PI) / 180;
-  // As a shadow's. Off the axes adl reads about a 256th further out, which
-  // this does not: within 2 a channel there.
-  const ox = (f.distance || 0) * Math.cos(radians);
-  const oy = (f.distance || 0) * Math.sin(radians);
-  const on = shifted(blurred, w, h, ox, oy, 0);
-  const back = shifted(blurred, w, h, -ox, -oy, 0);
+  // Read as a shadow's. Off the axes adl reads about a 256th further out,
+  // which this does not: within 2 a channel there.
   const channels = (c: number) => [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
   const [hr, hg, hb] = channels(f.highlightColor);
   const [sr, sg, sb] = channels(f.shadowColor);
@@ -928,7 +1051,7 @@ function bevel(
   const shadowAlpha = f.shadowAlpha;
   const strength = f.strength;
   const place = placer(f);
-  for (let i = 0; i < w * h; i++) {
+  for (let i = 0; i < result.length; i++) {
     const d = on[i] - back[i];
     const lit = d > 0;
     // Its alpha rounds, where a glow's truncates.
@@ -1029,19 +1152,12 @@ export function gradientTable(f: Filter): Uint32Array {
 function gradientGlow(
   result: Uint32Array,
   [a, r, g, b]: Int32Array[],
-  w: number,
-  h: number,
+  moved: Int32Array,
   f: Filter,
 ): void {
-  const blurred = new Int32Array(a);
-  blur([blurred], w, h, f);
-  const radians = ((f.angle || 0) * Math.PI) / 180;
-  const ox = (f.distance || 0) * Math.cos(radians);
-  const oy = (f.distance || 0) * Math.sin(radians);
-  const moved = shifted(blurred, w, h, -ox, -oy, 0);
   const table = gradientTable(f);
   const place = placer(f);
-  for (let i = 0; i < w * h; i++) {
+  for (let i = 0; i < result.length; i++) {
     const c = table[Math.min(255, Math.floor(moved[i] * f.strength))];
     result[i] = place(
       a[i],
@@ -1064,20 +1180,13 @@ function gradientGlow(
 function gradientBevel(
   result: Uint32Array,
   [a, r, g, b]: Int32Array[],
-  w: number,
-  h: number,
+  on: Int32Array,
+  back: Int32Array,
   f: Filter,
 ): void {
-  const blurred = new Int32Array(a);
-  blur([blurred], w, h, f);
-  const radians = ((f.angle || 0) * Math.PI) / 180;
-  const ox = (f.distance || 0) * Math.cos(radians);
-  const oy = (f.distance || 0) * Math.sin(radians);
-  const on = shifted(blurred, w, h, ox, oy, 0);
-  const back = shifted(blurred, w, h, -ox, -oy, 0);
   const table = gradientTable(f);
   const place = placer(f);
-  for (let i = 0; i < w * h; i++) {
+  for (let i = 0; i < result.length; i++) {
     const d = Math.max(-255, Math.min(255, Math.floor((on[i] - back[i]) * f.strength)));
     const c = table[Math.floor((d + 256) / 2)];
     result[i] = place(
@@ -1098,77 +1207,60 @@ function gradientBevel(
  * (to 255) and alpha, in its colour, from the offset back for a shadow;
  * behind the source, or inside it for an inner one, or alone.
  */
-function glow(
-  result: Uint32Array,
-  [a, r, g, b]: Int32Array[],
-  w: number,
-  h: number,
-  f: Filter,
-): void {
-  // An inner one blurs what the source leaves, 255 less its alpha, as adl does.
-  const blurred = f.inner ? a.map((v) => 255 - v) : new Int32Array(a);
-  blur([blurred], w, h, f);
-  const radians = ((f.angle || 0) * Math.PI) / 180;
+function glow(result: Uint32Array, [a, r, g, b]: Int32Array[], moved: Int32Array, f: Filter): void {
   const shadow = f.kind === "dropShadow";
-  // A shadow's offset, which adl samples the blurred alpha at between pixels, linearly.
-  const ox = shadow ? (f.distance || 0) * Math.cos(radians) : 0;
-  const oy = shadow ? (f.distance || 0) * Math.sin(radians) : 0;
-  const moved = shifted(blurred, w, h, -ox, -oy, f.inner ? 255 : 0);
   const cr = (f.color >> 16) & 0xff;
   const cg = (f.color >> 8) & 0xff;
   const cb = f.color & 0xff;
   const hide = shadow && f.hideObject;
   const round = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = y * w + x;
-      const blurA = moved[i];
-      const sa = a[i];
-      let ga = Math.floor(Math.min(255, Math.floor(blurA * f.strength)) * f.alpha);
-      if (f.inner) {
-        ga = Math.floor((ga * sa) / 255);
-      }
-
-      const gr = (cr * ga) / 255;
-      const gg = (cg * ga) / 255;
-      const gb = (cb * ga) / 255;
-      let oa: number;
-      let or: number;
-      let og: number;
-      let ob: number;
-      if (f.knockout && !f.inner) {
-        oa = (ga * (255 - sa)) / 255;
-        or = (gr * (255 - sa)) / 255;
-        og = (gg * (255 - sa)) / 255;
-        ob = (gb * (255 - sa)) / 255;
-      } else if (f.inner && !f.knockout) {
-        const keep = (255 - ga) / 255;
-        oa = ga + sa * keep;
-        or = gr + r[i] * keep;
-        og = gg + g[i] * keep;
-        ob = gb + b[i] * keep;
-      } else if (f.knockout || hide) {
-        // Knocked out inside, or a shadow drawn alone: the glow by itself.
-        oa = ga;
-        or = gr;
-        og = gg;
-        ob = gb;
-      } else {
-        const behind = (255 - sa) / 255;
-        oa = sa + ga * behind;
-        or = r[i] + gr * behind;
-        og = g[i] + gg * behind;
-        ob = b[i] + gb * behind;
-      }
-
-      const ka = round(oa);
-      result[i] =
-        ((ka << 24) |
-          (Math.min(round(or), ka) << 16) |
-          (Math.min(round(og), ka) << 8) |
-          Math.min(round(ob), ka)) >>>
-        0;
+  for (let i = 0; i < result.length; i++) {
+    const blurA = moved[i];
+    const sa = a[i];
+    let ga = Math.floor(Math.min(255, Math.floor(blurA * f.strength)) * f.alpha);
+    if (f.inner) {
+      ga = Math.floor((ga * sa) / 255);
     }
+
+    const gr = (cr * ga) / 255;
+    const gg = (cg * ga) / 255;
+    const gb = (cb * ga) / 255;
+    let oa: number;
+    let or: number;
+    let og: number;
+    let ob: number;
+    if (f.knockout && !f.inner) {
+      oa = (ga * (255 - sa)) / 255;
+      or = (gr * (255 - sa)) / 255;
+      og = (gg * (255 - sa)) / 255;
+      ob = (gb * (255 - sa)) / 255;
+    } else if (f.inner && !f.knockout) {
+      const keep = (255 - ga) / 255;
+      oa = ga + sa * keep;
+      or = gr + r[i] * keep;
+      og = gg + g[i] * keep;
+      ob = gb + b[i] * keep;
+    } else if (f.knockout || hide) {
+      // Knocked out inside, or a shadow drawn alone: the glow by itself.
+      oa = ga;
+      or = gr;
+      og = gg;
+      ob = gb;
+    } else {
+      const behind = (255 - sa) / 255;
+      oa = sa + ga * behind;
+      or = r[i] + gr * behind;
+      og = g[i] + gg * behind;
+      ob = b[i] + gb * behind;
+    }
+
+    const ka = round(oa);
+    result[i] =
+      ((ka << 24) |
+        (Math.min(round(or), ka) << 16) |
+        (Math.min(round(og), ka) << 8) |
+        Math.min(round(ob), ka)) >>>
+      0;
   }
 }
 
