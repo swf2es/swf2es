@@ -401,6 +401,13 @@ test("a copy in place moved right and down by no more than its rect leaves what 
     Array.from({ length: 12 }, (_, x) => into.getPixel32(x, 4) >>> 24),
     [0, 0, 0, 0, 0, 0, 0x80, 0x80, 0x80, 0x80, 0x80, 0],
   );
+
+  // A rect wholly left of the bitmap copies nothing, but its gap is still a change shown.
+  store.setPixel32(0, 1, 0xff123456);
+  const version = store.version;
+  store.copyPixels(store, rect(-5, 1, 3, 2), -2, 1, false);
+  assert.equal(store.getPixel32(0, 1), 0xff000000);
+  assert.notEqual(store.version, version);
 });
 
 test("a gap of a copy in place on the GPU is filled there, after the copy", () => {

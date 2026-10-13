@@ -292,6 +292,7 @@ export class BitmapStore {
     if (!s || !d) {
       if (gaps.length) {
         this.fillGaps(gaps, source, gx, gy, mergeAlpha, alpha, gax, gay);
+        this.changed();
       }
 
       return;
