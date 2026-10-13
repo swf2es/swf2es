@@ -15,9 +15,10 @@ must give **identical output** in both modes.
 ## Commands
 
 ```sh
-git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb
+git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb,
+                              # vendor/pixijs (the Pixi fork the player draws with)
 pnpm install
-pnpm build       # asc → codegen.wasm, then tsc -b for all packages
+pnpm build       # the Pixi fork, asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
@@ -82,6 +83,8 @@ pnpm as3:format               # format them with Apache Royale's asformat, in it
                               # (ASFORMAT names its script if it is not on the PATH)
 SWF2ES_PLAYERGLOBAL=adobe ... # the unit, player, web and corpus tests on Flash Player's
                               # playerglobal in place of the player's own (tests/player/libraries.ts)
+node tools/pixijs.ts [--force]   # build vendor/pixijs's lib/ and the bundles swf2es loads (pnpm
+                              # build's first step; skipped while the fork is unchanged)
 pnpm bench [file.abc...]      # time the ABC parser and decoder
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
@@ -118,6 +121,10 @@ calling a change done; CI runs the same steps.
   its own that carry the MPL-2.0 header; nothing from avmplus goes into an
   Apache-2.0 file, so the MPL's file-level copyleft never reaches the rest.
 - **Only redistributable SWFs** go into the repository.
+- **PixiJS is the fork in `vendor/pixijs`**, pinned to its `swf2es` branch
+  (its `SWF2ES.md` has the plan). Change Pixi there, in commits of its own
+  on `swf2es`, which is never rebased, then move the submodule. The
+  fork's commits carry no attribution trailers either.
 
 ## Code style
 

@@ -17,6 +17,13 @@ const allowed: Record<string, string[]> = {
   cli: ["codegen", "format"],
 };
 
+// Third-party packages swf2es forks are submodules in vendor/, built as
+// workspace packages under their own names (docs/architecture.md). Only the
+// packages listed may use one, and through the workspace, never a registry copy.
+const vendored: Record<string, { dir: string; users: string[] }> = {
+  "pixi.js": { dir: "pixijs", users: ["player", "web"] },
+};
+
 // These run in browsers, workers and node alike, so they must not see DOM or
 // node types; without them the build rejects `node:` imports and DOM globals.
 const portable = ["format", "codegen", "runtime"];
@@ -44,6 +51,39 @@ function internalDependencies(pkg: Record<string, Record<string, string> | undef
 for (const [name, deps] of Object.entries(allowed)) {
   test(`${name} depends only on ${deps.join(", ") || "nothing"}`, () => {
     assert.deepEqual(internalDependencies(readJson(`${name}/package.json`)), deps);
+  });
+}
+
+const vendorRoot = new URL("../../vendor/", import.meta.url);
+
+test("every vendored package is in the table", () => {
+  const dirs = readdirSync(vendorRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(
+    dirs,
+    Object.values(vendored)
+      .map((v) => v.dir)
+      .sort(),
+  );
+  for (const [name, { dir }] of Object.entries(vendored)) {
+    assert.equal(readJson(`${dir}/package.json`, vendorRoot).name, name);
+  }
+});
+
+for (const [name, { users }] of Object.entries(vendored)) {
+  test(`only ${users.join(", ")} use ${name}, from vendor/`, () => {
+    const using = Object.keys(allowed).filter((pkg) => {
+      const json = readJson(`${pkg}/package.json`);
+      const spec = json.dependencies?.[name] ?? json.devDependencies?.[name];
+      if (spec !== undefined) {
+        assert.equal(spec, "workspace:*", `${pkg}'s ${name}`);
+      }
+
+      return spec !== undefined;
+    });
+    assert.deepEqual(using, users);
   });
 }
 

@@ -124,6 +124,21 @@ Electron app (see [The desktop app](#the-desktop-app)), and later a browser
 extension. An app may use any package, and no package may use an app; an
 app is private, never published. The boundaries test checks both.
 
+Third-party code swf2es forks lives in `vendor/`, a git submodule each,
+kept apart from `packages/` because it is neither swf2es's code nor under
+its licence, and is built with its own tools rather than `tsc -b`.
+`vendor/pixijs` is [swf2es/pixijs](https://github.com/swf2es/pixijs), PixiJS
+(MIT) pinned to a commit of its `swf2es` branch; its `SWF2ES.md` says why
+and what changes there. It is the workspace package `pixi.js`, under its
+own name and version, so `player` and `web`, the only packages that may use
+it, import `"pixi.js"` as from npm and declare it as `workspace:*`; the
+boundaries test checks both. `.pnpmfile.cjs` trims its manifest to the
+tools its build needs, at the versions of its own `package-lock.json`, and
+`tools/pixijs.ts`, the first step of `pnpm build`, runs its rollup and
+declaration builds for `lib/` and the two bundles the pages load. At the
+fork's first commit the output is byte for byte npm's `pixi.js` 8.21.0 but
+for the bundles' build date, which is the fork commit's.
+
 ## Parsing, linking and verifying
 
 avmplus checks an ABC in three places, and swf2es checks it in the same

@@ -219,6 +219,8 @@ packages/
   cli/           the swf2es ahead-of-time compiler
 apps/
   desktop/       the desktop app: an Electron shell around <swf2es-player>
+vendor/
+  pixijs/        the swf2es fork of PixiJS (MIT), a submodule built by pnpm build
 oracle/          avmshell and Flash (adl) references
 tests/           unit, conformance, player, web, desktop and fuzz tests
 docs/            architecture, references, coverage, benchmarks, roadmap
@@ -242,4 +244,5 @@ for coding agents, and it applies to people just as well.
 ## License
 
 Apache-2.0. Files translated from avmplus are MPL-2.0 and say so at
-the top.
+the top. PixiJS, in the `vendor/pixijs` submodule, is MIT, under its own
+`LICENSE` there.

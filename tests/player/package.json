@@ -11,6 +11,6 @@
     "@swf2es/player": "workspace:*",
     "@swf2es/player-hosts": "workspace:*",
     "@swf2es/runtime": "workspace:*",
-    "pixi.js": "8.21.0"
+    "pixi.js": "workspace:*"
   }
 }
