@@ -279,16 +279,15 @@ export class PixiView {
   private placeHint: PixiContainer | null = null;
   /** When the spare nodes were last swept of those kept too long. */
   private sweptAt = 0;
-  /** The Graphics settled groups batched, some since destroyed or moved out (settle, unsettle). */
-  private readonly batched = new Set<Graphics>();
   /** What the nodes cleared give back once their new content is drawn (clear, giveBack). */
   private readonly giving = {
     fills: [] as GraphicsContext[],
     lines: [] as GraphicsContext[],
     shapes: [] as ShapeCharacter[],
   };
-  /** settleGroups' scratch: the groups whose batched Graphics draw alone again. */
+  /** settleGroups' scratch: the groups whose batched Graphics draw alone again, and whose to look through. */
   private readonly unsettling = new Set<Settling>();
+  private readonly scanned: Settling[] = [];
   private readonly lines = new StrokeContexts(this.counts);
   private readonly nodes = new WeakMap<DisplayObject, Node>();
   /** A fresh view's fills of the shapes it built them for, shared by their instances; it destroys them with itself. */
@@ -1420,7 +1419,6 @@ export class PixiView {
 
     graphic.unload();
     graphic.settled = false;
-    this.batched.delete(graphic);
     graphic.flashColor = null;
     graphic.swap(NO_LINES);
     graphic.setFromMatrix(IDENTITY);
@@ -1945,8 +1943,9 @@ export class PixiView {
     const group = container.renderGroup as unknown as Settling | null;
     if (group) {
       this.unsettling.add(group);
-      unsettle(this.unsettling, this.batched);
+      unsettle(this.unsettling, this.unsettling);
       this.unsettling.clear();
+      group.$batched = undefined;
       group.$builtAt = undefined;
       group.$settled = undefined;
       group.$settling = undefined;
@@ -2205,9 +2204,9 @@ export class PixiView {
    * Batch the Graphics of each render group drawn that has not been rebuilt
    * for SETTLE_MS, and draw those of one rebuilt since alone again: walking
    * Pixi's tree of groups from the stage's, which holds those drawn and no
-   * other. A group rebuilt and not settled is looked through for Graphics
-   * still batched, which a branch brings along as it moves under it or
-   * becomes a group of its own.
+   * other. What a group batched is looked through as it unsettles or its
+   * structure changes, for Graphics a branch took along as it moved under
+   * another group or became a group of its own (unsettle).
    */
   private settleGroups(): void {
     const stage = this.stage.renderGroup as unknown as Settling | null;
@@ -2217,12 +2216,18 @@ export class PixiView {
 
     const now = performance.now();
     const unsettling = this.unsettling;
+    const scanned = this.scanned;
     const visit = (group: Settling) => {
       const quiet = group.$builtAt !== undefined && now - group.$builtAt >= SETTLE_MS;
       if (quiet && !group.$settled) {
-        settle(group, this.batched);
+        settle(group);
       } else if (!quiet && (group.$settled || group.$seen !== group.$builtAt)) {
         unsettling.add(group);
+      }
+
+      // What it batched may have left it only as its structure changed, or be its own to unbatch.
+      if (group.$batched?.size && (group.structureDidChange || unsettling.has(group))) {
+        scanned.push(group);
       }
 
       group.$seen = group.$builtAt;
@@ -2232,9 +2237,10 @@ export class PixiView {
       }
     };
     visit(stage);
-    if (unsettling.size > 0) {
-      unsettle(unsettling, this.batched);
+    if (unsettling.size > 0 || scanned.length > 0) {
+      unsettle(unsettling, scanned);
       unsettling.clear();
+      scanned.length = 0;
     }
   }
 

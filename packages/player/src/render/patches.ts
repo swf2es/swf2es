@@ -33,11 +33,12 @@ type Batching = SharingGraphics & { flashColor?: ColorTransform | null };
 /**
  * Batch the Graphics of a render group, its own and not those of a group
  * nested in it: showFor picks the batched copy of each one's shared
- * context, and `batched` lists it, for unsettle to find. A mask's are left
- * alone: drawn into the group of what it masks, they would be packed there
- * and kept, though its own group's rebuilds draw them alone again.
+ * context, and the group lists it (`$batched`), for unsettle to find. A
+ * mask's are left alone: drawn into the group of what it masks, they would
+ * be packed there and kept, though its own group's rebuilds draw them
+ * alone again.
  */
-export function settle(group: Settling, batched: Set<Graphics>): void {
+export function settle(group: Settling): void {
   const root = group.root;
   // Already changing, its next rebuild is one of its own, not its batching's.
   const changing = group.structureDidChange;
@@ -52,7 +53,8 @@ export function settle(group: Settling, batched: Set<Graphics>): void {
     if (container instanceof Graphics && !graphics.settled && graphics.shared) {
       graphics.settled = true;
       showFor(graphics, graphics.flashColor ?? null);
-      batched.add(graphics);
+      group.$batched ??= new Set();
+      group.$batched.add(graphics);
       switched = true;
     }
 
@@ -73,49 +75,68 @@ export function settle(group: Settling, batched: Set<Graphics>): void {
   }
 }
 
+/** Which call of unsettle last marked a group, to note once what it was before the call changed it. */
+let passes = 0;
+
 /**
- * Draw alone again the Graphics batched (`batched`, as settle left it) that
- * are now the own of one of `groups`, not of a group nested in it, and
- * mark those groups unsettled. Found from the batched, not by walking the
- * groups: an animated group is rebuilt on most frames, and walking it whole
- * each time found nothing, as hardly any Graphics are batched outside a
- * settled group. One that was in a mask, which settle skips, is left too.
+ * Mark `unsettling` unsettled, and look through the Graphics batched by
+ * the groups of `scanned` (those, and any whose structure changed): each
+ * one still in its settled group stays batched, one moved to another
+ * settled group is listed there, and any other, in a group unsettling,
+ * one that has not settled, or off the stage, is drawn alone again. A
+ * Graphics leaves its group only as the group's structure changes, so the
+ * batched of groups that neither unsettle nor change need no look: a
+ * static stage's many batched Graphics cost nothing while an animated
+ * group beside it is rebuilt on every frame.
  */
-export function unsettle(groups: Set<Settling>, batched: Set<Graphics>): void {
-  // Already changing, a group's next rebuild is one of its own, not its unbatching's.
-  for (const group of groups) {
+export function unsettle(unsettling: Set<Settling>, scanned: Iterable<Settling>): void {
+  const pass = ++passes;
+  for (const group of unsettling) {
     group.$settled = false;
-    group.$changing = group.structureDidChange;
+    mark(group, pass);
   }
 
-  for (const graphics of batched as Set<Batching>) {
-    if (graphics.destroyed || !graphics.settled) {
-      batched.delete(graphics);
+  for (const from of scanned) {
+    const list = from.$batched;
+    if (!list) {
       continue;
     }
 
-    const group = graphics.parentRenderGroup as unknown as Settling | null;
-    if (!group || !groups.has(group) || !builds(graphics, group.root)) {
-      continue;
-    }
+    for (const graphics of list as Set<Batching>) {
+      if (graphics.destroyed || !graphics.settled) {
+        list.delete(graphics);
+        continue;
+      }
 
-    graphics.settled = false;
-    showFor(graphics, graphics.flashColor ?? null);
-    batched.delete(graphics);
-    group.structureDidChange = true;
-    group.$settling = !group.$changing;
+      const group = graphics.parentRenderGroup as unknown as Settling | null;
+      if (group?.$settled) {
+        if (group !== from) {
+          list.delete(graphics);
+          group.$batched ??= new Set();
+          group.$batched.add(graphics);
+        }
+
+        continue;
+      }
+
+      list.delete(graphics);
+      graphics.settled = false;
+      showFor(graphics, graphics.flashColor ?? null);
+      if (group) {
+        mark(group, pass);
+        group.structureDidChange = true;
+        group.$settling = !group.$changing;
+      }
+    }
   }
 }
 
-/** Whether the build of the group `root` stands for reaches `container`: no mask on the way. */
-function builds(container: PixiContainer, root: PixiContainer | null): boolean {
-  for (let c: PixiContainer | null = container; c && c !== root; c = c.parent) {
-    if (c.includeInBuild === false) {
-      return false;
-    }
+/** Note, once a call, whether `group` was changing before the call: its rebuild is then its own. */
+function mark(group: Settling, pass: number): void {
+  if (group.$pass !== pass) {
+    group.$pass = pass;
+    group.$changing = group.structureDidChange;
   }
-
-  return root?.includeInBuild !== false;
 }
 
 /**
@@ -190,8 +211,11 @@ export type Settling = {
   $settling?: boolean;
   /** The rebuild settleGroups last looked at. */
   $seen?: number;
-  /** Whether it was changing as unsettle began, whose rebuild is then its own. */
+  /** Whether it was changing as unsettle first touched it, whose rebuild is then its own; and in which call. */
   $changing?: boolean;
+  $pass?: number;
+  /** The Graphics settle batched in it, some since destroyed, unbatched or moved (unsettle). */
+  $batched?: Set<Graphics>;
 };
 const buildInstructions = (
   RenderGroupSystem.prototype as unknown as {

@@ -3014,6 +3014,60 @@ test("a large shape under a colour transform draws alone until its group settles
   }
 });
 
+test("batched Graphics are looked through only in groups that change, and follow a move to another settled group", async () => {
+  // A static stage's thousands of batched Graphics were looked through on every frame an animated
+  // group beside them was rebuilt.
+  const { settle, unsettle, SharedGraphics } = await import(
+    "../../../../packages/player/dist/render/patches.js"
+  );
+  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    Container: new () => {
+      enableRenderGroup(): void;
+      addChild(...c: unknown[]): void;
+      renderGroup: Parameters<typeof settle>[0];
+    };
+  };
+  const stage = new pixi.Container();
+  stage.enableRenderGroup();
+  const group = () => {
+    const c = new pixi.Container();
+    c.enableRenderGroup();
+    stage.addChild(c);
+    return c;
+  };
+  const scenery = group();
+  const shelf = group();
+  const animated = group();
+  const parts = Array.from({ length: 3 }, () => {
+    const part = new pixi.Container();
+    const g = new SharedGraphics();
+    part.addChild(g);
+    scenery.addChild(part);
+    return { part, g };
+  });
+  settle(scenery.renderGroup);
+  settle(shelf.renderGroup);
+  assert.ok(parts.every(({ g }) => g.settled));
+  assert.equal(scenery.renderGroup.$batched?.size, 3);
+
+  // The animated group rebuilt, the scenery unchanged: nothing of the scenery's is touched.
+  scenery.renderGroup.structureDidChange = false;
+  unsettle(new Set([animated.renderGroup]), [animated.renderGroup]);
+  assert.ok(parts.every(({ g }) => g.settled));
+
+  // One part moved to the settled shelf stays batched, listed there; one to the animated group draws alone.
+  shelf.addChild(parts[0].part);
+  animated.addChild(parts[1].part);
+  unsettle(new Set([animated.renderGroup]), [scenery.renderGroup, animated.renderGroup]);
+  assert.equal(parts[0].g.settled, true);
+  assert.ok(shelf.renderGroup.$batched?.has(parts[0].g));
+  assert.equal(parts[1].g.settled, false);
+  assert.equal(parts[2].g.settled, true);
+  assert.equal(scenery.renderGroup.$batched?.size, 1);
+});
+
 test("a mask's Graphics are never batched, as they draw in another group", async () => {
   const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
   const character = await outlinedSquare();
