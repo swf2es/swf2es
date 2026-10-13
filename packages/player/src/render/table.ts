@@ -39,6 +39,7 @@ import {
   UniformGroup,
   type WebGLRenderer,
 } from "pixi.js";
+import { resizeOnGpu } from "./batchers.js";
 
 const NAME = "flashTable";
 
@@ -70,6 +71,15 @@ const SHORT_RUN = 40;
 const VERTEX_FLOATS = 6;
 /** Atlas vertices dropped contexts may leave as holes before it is packed again. */
 const ATLAS_SLACK = 1 << 16;
+/** The fewest vertices the atlas holds room for, and its indices thrice that. */
+const ATLAS_LEAST = 4096;
+/**
+ * How much the atlas grows by when full, and how much room it is given
+ * over its live vertices as it starts again: doubled, and kept at its
+ * peak, a crowded room's held 96 MB of vertices and 48 MB of indices with
+ * a third and a fifth of them in use.
+ */
+const ATLAS_GROWTH = 1.5;
 
 let enabled = true;
 let minRun = MIN_RUN;
@@ -209,6 +219,7 @@ export interface Packed {
 /** Where a context's batches lie in the atlas: each one's index count and first byte. */
 export interface Placed {
   vertices: number;
+  indices: number;
   counts: number[];
   offsets: number[];
 }
@@ -222,8 +233,8 @@ const atlases = new Set<Atlas>();
  * holes those leave are reclaimed by packing again (compact).
  */
 export class Atlas {
-  vertices = new Float32Array(VERTEX_FLOATS * 4096);
-  indices = new Uint32Array(4096 * 3);
+  vertices = new Float32Array(VERTEX_FLOATS * ATLAS_LEAST);
+  indices = new Uint32Array(ATLAS_LEAST * 3);
   vertexCount = 0;
   indexCount = 0;
   /** The vertices and indices the GPU's buffers hold; what was added since goes up alone. */
@@ -231,8 +242,11 @@ export class Atlas {
   sentIndices = 0;
   /** Whether the buffers must take the atlas whole: it grew into new arrays, or started again. */
   whole = true;
+  /** Whether it started again in smaller arrays, which the GPU's buffers are to shrink to. */
+  shrunk = false;
   private readonly placed = new Map<object, Placed | null>();
   private live = 0;
+  private liveIndices = 0;
   private holes = 0;
   /** The id of a texture that is no texture, which alone the table draws. */
   private readonly white: number;
@@ -282,8 +296,14 @@ export class Atlas {
     this.vertexCount += vertexCount;
     this.indexCount += batcher.indexSize;
     this.live += vertexCount;
+    this.liveIndices += batcher.indexSize;
 
-    const placed: Placed = { vertices: vertexCount, counts: [], offsets: [] };
+    const placed: Placed = {
+      vertices: vertexCount,
+      indices: batcher.indexSize,
+      counts: [],
+      offsets: [],
+    };
     for (let i = 0; i < instructions.instructionSize; i++) {
       const batch = instructions.instructions[i];
       if (batch.size) {
@@ -297,6 +317,7 @@ export class Atlas {
     if (!shown) {
       this.holes += vertexCount;
       this.live -= vertexCount;
+      this.liveIndices -= batcher.indexSize;
     }
 
     return shown;
@@ -312,6 +333,7 @@ export class Atlas {
     this.placed.delete(key);
     if (placed) {
       this.live -= placed.vertices;
+      this.liveIndices -= placed.indices;
       this.holes += placed.vertices;
     }
   }
@@ -327,8 +349,24 @@ export class Atlas {
     }
   }
 
-  /** Forget every context, to be copied in again as each is next drawn. */
+  /**
+   * Forget every context, to be copied in again as each is next drawn: in
+   * arrays cut down to what was live, with room to grow, if those it has
+   * are larger.
+   */
   clear(): void {
+    const vertices = VERTEX_FLOATS * Math.ceil(Math.max(this.live * ATLAS_GROWTH, ATLAS_LEAST));
+    if (vertices < this.vertices.length) {
+      this.vertices = new Float32Array(vertices);
+      this.shrunk = true;
+    }
+
+    const indices = Math.ceil(Math.max(this.liveIndices * ATLAS_GROWTH, ATLAS_LEAST * 3));
+    if (indices < this.indices.length) {
+      this.indices = new Uint32Array(indices);
+      this.shrunk = true;
+    }
+
     this.placed.clear();
     this.vertexCount = 0;
     this.indexCount = 0;
@@ -336,6 +374,7 @@ export class Atlas {
     this.sentIndices = 0;
     this.whole = true;
     this.live = 0;
+    this.liveIndices = 0;
     this.holes = 0;
   }
 
@@ -347,7 +386,8 @@ export class Atlas {
   private reserve(vertexCount: number, indexCount: number): void {
     const vertices = (this.vertexCount + vertexCount) * VERTEX_FLOATS;
     if (vertices > this.vertices.length) {
-      const grown = new Float32Array(Math.max(vertices, this.vertices.length * 2));
+      const room = VERTEX_FLOATS * Math.ceil((this.vertices.length / VERTEX_FLOATS) * ATLAS_GROWTH);
+      const grown = new Float32Array(Math.max(vertices, room));
       grown.set(this.vertices.subarray(0, this.vertexCount * VERTEX_FLOATS));
       this.vertices = grown;
       this.whole = true;
@@ -355,7 +395,9 @@ export class Atlas {
 
     const indices = this.indexCount + indexCount;
     if (indices > this.indices.length) {
-      const grown = new Uint32Array(Math.max(indices, this.indices.length * 2));
+      const grown = new Uint32Array(
+        Math.max(indices, Math.ceil(this.indices.length * ATLAS_GROWTH)),
+      );
       grown.set(this.indices.subarray(0, this.indexCount));
       this.indices = grown;
       this.whole = true;
@@ -443,8 +485,8 @@ export class TablePipe {
   /** The next row free this frame. */
   private cursor = 0;
   // Made for WebGL alone, the only renderer that draws the table. The
-  // table, the atlas and their buffers never shrink from their peak: a
-  // crowded scene's, kept while the renderer lives.
+  // table never shrinks from its peak, a crowded scene's rows; the atlas
+  // shrinks to what is live as it starts again.
   private table!: BufferImageSource;
   private atlas!: Atlas;
   private attributes!: Buffer;
@@ -752,6 +794,12 @@ export class TablePipe {
    */
   private send(): void {
     const atlas = this.atlas;
+    if (atlas.shrunk) {
+      atlas.shrunk = false;
+      resizeOnGpu(this.renderer, this.attributes);
+      resizeOnGpu(this.renderer, this.indexBuffer);
+    }
+
     if (atlas.whole) {
       atlas.whole = false;
       this.attributes.setDataWithSize(atlas.vertices, atlas.vertexCount * VERTEX_FLOATS, true);

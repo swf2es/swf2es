@@ -135,8 +135,8 @@ function trim(renderer: Renderer, batcher: Packing, now: number): void {
   batcher.attributeBuffer = packed;
   batcher.indexBuffer = indexed;
   const geometry = batcher.geometry;
-  resize(renderer, geometry.buffers[0]);
-  resize(renderer, geometry.indexBuffer);
+  resizeOnGpu(renderer, geometry.buffers[0]);
+  resizeOnGpu(renderer, geometry.indexBuffer);
   geometry.buffers[0].setDataWithSize(packed.float32View, floats, true);
   geometry.indexBuffer.setDataWithSize(indexed, count, true);
 }
@@ -146,7 +146,7 @@ function trim(renderer: Renderer, batcher: Packing, now: number): void {
  * Pixi only ever writes a smaller array into the GPU's larger one. A lost
  * context's buffers are made again anyway.
  */
-function resize(renderer: Renderer, buffer: Buffer): void {
+export function resizeOnGpu(renderer: Renderer, buffer: Buffer): void {
   if (renderer.type !== RendererType.WEBGL) {
     return;
   }
