@@ -27,32 +27,35 @@ import { forgetShown, type SharingGraphics, showFor } from "./color.js";
 import "./table.js";
 import type { TablePipe } from "./table.js";
 
+/** A Graphics as settling batches it, with the colour transform it is drawn under. */
+type Batching = SharingGraphics & { flashColor?: ColorTransform | null };
+
 /**
  * Batch the Graphics of a render group, its own and not those of a group
- * nested in it, or draw them alone again: showFor picks the batched copy
- * of each one's shared context. A mask's are left alone: drawn into the
- * group of what it masks, they would be packed there and kept, though its
- * own group's rebuilds draw them alone again.
+ * nested in it: showFor picks the batched copy of each one's shared
+ * context, and `batched` lists it, for unsettle to find. A mask's are left
+ * alone: drawn into the group of what it masks, they would be packed there
+ * and kept, though its own group's rebuilds draw them alone again.
  */
-export function settle(group: Settling, settled: boolean): void {
+export function settle(group: Settling, batched: Set<Graphics>): void {
   const root = group.root;
   // Already changing, its next rebuild is one of its own, not its batching's.
   const changing = group.structureDidChange;
-  group.$settled = settled;
+  group.$settled = true;
   let switched = false;
   const visit = (container: PixiContainer) => {
     if (container.includeInBuild === false) {
       return;
     }
 
-    const graphics = container as SharingGraphics & { flashColor?: ColorTransform | null };
-    if (container instanceof Graphics && !!graphics.settled !== settled && graphics.shared) {
-      graphics.settled = settled;
+    const graphics = container as Batching;
+    if (container instanceof Graphics && !graphics.settled && graphics.shared) {
+      graphics.settled = true;
       showFor(graphics, graphics.flashColor ?? null);
+      batched.add(graphics);
       switched = true;
     }
 
-    // An index, not for-of: a rebuilt group is walked whole each frame.
     const children = container.children;
     for (let i = 0; i < children.length; i++) {
       if (!children[i].isRenderGroup) {
@@ -68,6 +71,51 @@ export function settle(group: Settling, settled: boolean): void {
     group.structureDidChange = true;
     group.$settling = !changing;
   }
+}
+
+/**
+ * Draw alone again the Graphics batched (`batched`, as settle left it) that
+ * are now the own of one of `groups`, not of a group nested in it, and
+ * mark those groups unsettled. Found from the batched, not by walking the
+ * groups: an animated group is rebuilt on most frames, and walking it whole
+ * each time found nothing, as hardly any Graphics are batched outside a
+ * settled group. One that was in a mask, which settle skips, is left too.
+ */
+export function unsettle(groups: Set<Settling>, batched: Set<Graphics>): void {
+  // Already changing, a group's next rebuild is one of its own, not its unbatching's.
+  for (const group of groups) {
+    group.$settled = false;
+    group.$changing = group.structureDidChange;
+  }
+
+  for (const graphics of batched as Set<Batching>) {
+    if (graphics.destroyed || !graphics.settled) {
+      batched.delete(graphics);
+      continue;
+    }
+
+    const group = graphics.parentRenderGroup as unknown as Settling | null;
+    if (!group || !groups.has(group) || !builds(graphics, group.root)) {
+      continue;
+    }
+
+    graphics.settled = false;
+    showFor(graphics, graphics.flashColor ?? null);
+    batched.delete(graphics);
+    group.structureDidChange = true;
+    group.$settling = !group.$changing;
+  }
+}
+
+/** Whether the build of the group `root` stands for reaches `container`: no mask on the way. */
+function builds(container: PixiContainer, root: PixiContainer | null): boolean {
+  for (let c: PixiContainer | null = container; c && c !== root; c = c.parent) {
+    if (c.includeInBuild === false) {
+      return false;
+    }
+  }
+
+  return root?.includeInBuild !== false;
 }
 
 /**
@@ -142,6 +190,8 @@ export type Settling = {
   $settling?: boolean;
   /** The rebuild settleGroups last looked at. */
   $seen?: number;
+  /** Whether it was changing as unsettle began, whose rebuild is then its own. */
+  $changing?: boolean;
 };
 const buildInstructions = (
   RenderGroupSystem.prototype as unknown as {

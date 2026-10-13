@@ -50,7 +50,7 @@ import { argbOf, characterStore, gpuBitmaps } from "./bitmaps.js";
 import { blendFilters } from "./blend.js";
 import { setFlashColor } from "./color.js";
 import { displayFilters, FilterChain, sameFilterRecords } from "./filters.js";
-import { SETTLE_MS, type Settling, SharedGraphics, settle } from "./patches.js";
+import { SETTLE_MS, type Settling, SharedGraphics, settle, unsettle } from "./patches.js";
 import {
   drawTarget,
   IDLE_MS,
@@ -251,6 +251,10 @@ export class PixiView {
   readonly counts = { strokeContexts: 0, strokeReuses: 0 };
   /** Graphics of children taken off, kept for the next content to take (SPARE_GRAPHICS_MOST). */
   private readonly spareGraphics: SharedGraphics[] = [];
+  /** The Graphics settled groups batched, some since destroyed or moved out (settle, unsettle). */
+  private readonly batched = new Set<Graphics>();
+  /** settleGroups' scratch: the groups whose batched Graphics draw alone again. */
+  private readonly unsettling = new Set<Settling>();
   private readonly lines = new StrokeContexts(this.counts);
   private readonly nodes = new WeakMap<DisplayObject, Node>();
   /** A fresh view's fills of the shapes it built them for, shared by their instances; it destroys them with itself. */
@@ -1165,6 +1169,7 @@ export class PixiView {
 
     graphic.unload();
     graphic.settled = false;
+    this.batched.delete(graphic);
     graphic.flashColor = null;
     graphic.swap(NO_LINES);
     graphic.setFromMatrix(IDENTITY);
@@ -1682,7 +1687,9 @@ export class PixiView {
     // pools the group, which the next to take it must find unmarked.
     const group = container.renderGroup as unknown as Settling | null;
     if (group) {
-      settle(group, false);
+      this.unsettling.add(group);
+      unsettle(this.unsettling, this.batched);
+      this.unsettling.clear();
       group.$builtAt = undefined;
       group.$settled = undefined;
       group.$settling = undefined;
@@ -1946,18 +1953,26 @@ export class PixiView {
     }
 
     const now = performance.now();
+    const unsettling = this.unsettling;
     const visit = (group: Settling) => {
       const quiet = group.$builtAt !== undefined && now - group.$builtAt >= SETTLE_MS;
-      if (quiet !== !!group.$settled || (!quiet && group.$seen !== group.$builtAt)) {
-        settle(group, quiet);
+      if (quiet && !group.$settled) {
+        settle(group, this.batched);
+      } else if (!quiet && (group.$settled || group.$seen !== group.$builtAt)) {
+        unsettling.add(group);
       }
 
       group.$seen = group.$builtAt;
-      for (const child of group.renderGroupChildren) {
-        visit(child);
+      const children = group.renderGroupChildren;
+      for (let i = 0; i < children.length; i++) {
+        visit(children[i]);
       }
     };
     visit(stage);
+    if (unsettling.size > 0) {
+      unsettle(unsettling, this.batched);
+      unsettling.clear();
+    }
   }
 
   /**
