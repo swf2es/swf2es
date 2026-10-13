@@ -2019,9 +2019,11 @@ export class PixiView {
       plane.holder.addChild(container);
     }
 
-    if (container.mask) {
-      quad.mask = container.mask;
+    const mask = container.mask;
+    if (mask) {
+      // Let go of first: Pixi gives a mask taken off a container back to the build, to be drawn.
       container.mask = null;
+      quad.mask = mask;
     } else if (!o.mask) {
       quad.mask = null;
     }
