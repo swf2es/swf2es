@@ -254,10 +254,36 @@ contextSystem.updateGpuContext = function (context) {
   const gpu = updateGpuContext.call(this, context);
   if (building) {
     compact(gpu);
+    forgetCommands(context);
   }
 
   return gpu;
 };
+
+/** A path as Pixi keeps it: its commands, and the shapes they flatten to, built once. */
+type Commands = { instructions: unknown[]; _shapePath?: unknown; _dirty: boolean };
+
+/**
+ * Let go of the commands of a context's paths once they are flattened to
+ * shapes, which is all Pixi reads of them again: to build the context
+ * again, as a lost context or Pixi's collection of what went unused for a
+ * minute has it, to measure its bounds, and to hit test it. A crowded
+ * room's contexts kept some 120 MB of these, an object and an array for
+ * each segment. Every context of the player is made whole before it is
+ * first built (render/tessellate.ts); a path changed after that, as only
+ * a cut drawn later would change one, is flattened again from what it
+ * has, which no context does.
+ */
+function forgetCommands(context: GraphicsContext): void {
+  for (const instruction of context.instructions) {
+    const data = instruction.data as { path?: Commands; hole?: Commands };
+    for (const path of [data.path, data.hole]) {
+      if (path?._shapePath && !path._dirty && path.instructions.length > 0) {
+        path.instructions = [];
+      }
+    }
+  }
+}
 // Pixi empties the arrays to build into them again: typed arrays are given back as new ones.
 const resetGpu = GpuGraphicsContext.prototype.reset;
 GpuGraphicsContext.prototype.reset = function (this: GpuGraphicsContext) {
