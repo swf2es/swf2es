@@ -311,8 +311,9 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       this.$display.set3D("rotationY", Number(v));
     }
 
+    // 0 in 2D, whatever the rotation, as Flash reads it.
     get rotationZ(): number {
-      return this.$display.rotation;
+      return this.$display.space ? this.$display.rotation : 0;
     }
 
     set rotationZ(v: Value) {
