@@ -5502,6 +5502,16 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "blend-direct-clear",
+    swf: (abc) => bare(abc, 1, "BlendDirectClear", 240, 80),
+    script: "BlendDirectClear",
+    frames: 3,
+    capture: [1, 3],
+    // Within 4 a channel: adl's rounding of the glows and of the blends.
+    tolerance: 4,
+    maxOutliers: 0,
+  },
+  {
     name: "blend-edges",
     swf: (abc) => bare(abc, 1, "BlendEdges", 200, 150),
     script: "BlendEdges",
