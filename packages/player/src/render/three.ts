@@ -75,6 +75,21 @@ void main(void) {
 
 let program: GlProgram | null = null;
 
+/** Each renderer's count of contexts it was given, lost ones' bitmaps empty in the new. */
+const contexts = new WeakMap<Renderer, { count: number }>();
+
+function contextOf(renderer: Renderer): number {
+  let context = contexts.get(renderer);
+  if (!context) {
+    const counted = { count: 0 };
+    renderer.runners.contextChange.add({ contextChange: () => counted.count++ });
+    contexts.set(renderer, counted);
+    context = counted;
+  }
+
+  return context.count;
+}
+
 /** What the view keeps for a 3D object: the container its content is drawn from, the quad, and its bitmap. */
 export class Plane {
   /** The root the object's container is drawn into its bitmap under, on no list. */
@@ -92,6 +107,8 @@ export class Plane {
   private height = 0;
   /** Whether what it draws may have changed since its bitmap was drawn. */
   stale = true;
+  /** The renderer's context the bitmap was drawn in (contextOf). */
+  private drawnIn = -1;
   /** Whether the quad was placed elsewhere, or its bitmap drawn again, since the last frame. */
   changed = true;
 
@@ -201,13 +218,15 @@ export class Plane {
     return true;
   }
 
-  /** Draw the object's container into its bitmap, if it may have changed. */
+  /** Draw the object's container into its bitmap, if it may have changed or its context was lost. */
   draw(renderer: Renderer): void {
-    if (!this.stale) {
+    const context = contextOf(renderer);
+    if (!this.stale && this.drawnIn === context) {
       return;
     }
 
     this.stale = false;
+    this.drawnIn = context;
     this.changed = true;
     const texels = Math.min(1, LARGEST / Math.max(this.width, this.height));
     const width = Math.max(1, Math.ceil(this.width * texels));

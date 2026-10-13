@@ -734,6 +734,7 @@ async function contextLossSwf(
   base64: string,
   frames: number,
   table: boolean,
+  turned = false,
 ): Promise<string | null> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const player = new Player(bytes, null);
@@ -768,6 +769,16 @@ async function contextLossSwf(
     await player.start();
     for (let i = 0; i < frames; i++) {
       player.tick();
+      if (turned && i === 0) {
+        // Some objects turned in 3D, each drawn from a bitmap of its own (render/three.ts).
+        const root = player.stage.children[0] as unknown as { children: DisplayObject[] };
+        root.children.forEach((child, n) => {
+          if (n % 3 === 0) {
+            child.set3D("rotationY", 30 + n);
+          }
+        });
+      }
+
       view.render(player.stage);
     }
 
