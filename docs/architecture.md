@@ -3079,27 +3079,43 @@ its own space, a texel a pixel of that space whatever its scale, its
 parent's or the stage's zoom, then draws the bitmap smoothed through its
 plane; so a 3D object scaled up is blurred, a texel magnified, where a 2D
 child scaled up inside it is sharp, and its filters are in its space and
-turn with it. The view does the same (`render/three.ts`): the object's
-container is in a holder of its own, drawn before the stage into a
-texture of the object's bounds (filters' reach included) out to whole
-pixels, at 4 samples a side halved down to a texel a pixel as the stage's
-edges are anti-aliased, with a texel of nothing around; in its place in
-its parent is a quad of the texture's four corners, each with the w its
-plane gives it, so that the GPU interpolates in perspective. A 3D object
-in another draws its quad into the other's bitmap, by its plane in the
-other's space, so the two are drawn deepest first. Its hairlines are a
-pixel of its own space. The bitmap is drawn again only when what is in
-it changes, not as the object moves or turns. As adl and Flash Player
-measure it, the bitmap is drawn a texel wider and taller than it is,
-about its centre and half a stage pixel right and down, which at a texel
-a pixel keeps its left and top edges in place; and sampled once a pixel
-of the stage, at the pixel's centre, which the shader does for each of
-the target's samples of the pixel where the host says how many there are
-(`screenScale`), as the test page does. A mask set on a 3D object clips
-its quad on the stage, where Flash clips the bitmap in the object's
-space; a blend mode composites within the bitmap. Under WebGPU, which the
-quad's shader has no program for, a 3D object draws as its matrix3D's x
-and y rows.
+turn with it. The colour and alpha of all above it go into each of its
+fills in the bitmap, so a card under a half-transparent parent shows its
+own white square paler than its edge, not as a layer faded whole; its
+blend mode composites the drawn bitmap with what is behind it; and its
+scrollRect counts for nothing, Flash drawing, bounding and hitting all of
+it (`three-d-mixed`, the same in adl and Flash Player). The view does the
+same (`render/three.ts`): the object's container is in a holder of its
+own, coloured from the stage down, drawn before the stage into a texture
+of the object's bounds (filters' reach included) out to whole pixels, at
+4 samples a side averaged down to a texel a pixel in one pass, as the
+stage's edges are anti-aliased, with a texel of nothing around; in its
+place in its parent is a quad of the texture's four corners, each with
+the w its plane gives it, so that the GPU interpolates in perspective,
+which takes none of Pixi's colour and carries the blend mode. Where the
+samples would pass the GPU's largest texture or 4M texels, fewer are
+taken; past 2048 texels a side, the bitmap holds less than a texel a
+pixel, and its lines and filters are made for the units it is drawn at.
+Textures are kept in sizes of 32-texel steps, so an object whose
+children move each frame keeps its bitmap and the pool's intermediates.
+A 3D object in another draws its quad into the other's bitmap, by its
+plane in the other's space, so the two are drawn deepest first. Its
+hairlines are a texel. The bitmap is drawn again only when what is in it
+changes, not as the object moves or turns: 100 turning 3D rigs of 12
+parts each, all animated, take some 1.9 ms of sync a frame, and turning
+alone 0.1 ms. As adl and Flash Player measure it, the bitmap is drawn a
+texel wider and taller than it is, about its centre and half a stage
+pixel right and down, which at a texel a pixel keeps its left and top
+edges in place; and sampled once a pixel of the stage, at the pixel's
+centre, which the shader does for each of the target's samples of the
+pixel where the host says how many there are (`screenScale`), as the test
+page does; the evidence for that last is mixed, edges matching better
+with it and magnified bitmaps no worse. A BitmapData's draw of an object
+on no stage projects what is in 3D in it as on a stage the bitmap's
+size, centred on it, as Flash does. A mask set on a 3D object clips its
+quad on the stage, where Flash clips the bitmap in the object's space.
+Under WebGPU, which the quad's shader has no program for, a 3D object
+draws as its matrix3D's x and y rows.
 
 adl draws through a focal length for a stage 500 wide whatever the SWF's,
 and a projection set on the root as if it were not, where Flash Player
@@ -3108,7 +3124,10 @@ Flash Player, and the `three-d-*` cases, whose references adl draws, have
 stages 500 wide and leave the root's projection alone. Flash's
 anti-aliasing of the bitmap's edges and its hairlines' place in it (a
 pixel's row, where the view straddles two) differ by a level or a pixel
-at edges, within the cases' tolerance.
+at edges, within the cases' tolerance. For an object hidden behind the
+eye adl still projects its 2D children's bounds through the negative w,
+and `hitTestPoint(0, 0, false)` on it is true; the player gives such an
+object no bounds and no hits.
 
 ### Nine-slice scaling
 

@@ -6074,6 +6074,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 500,
   },
   {
+    name: "three-d-mixed",
+    swf: (abc) => bare(abc, 1, "ThreeDMixed", 500, 400),
+    script: "ThreeDMixed",
+    frames: 1,
+    capture: [1],
+    tolerance: 40,
+    maxOutliers: 400,
+  },
+  {
     name: "three-d-projection",
     swf: (abc) => bare(abc, 2, "ThreeDProjection", 500, 400),
     script: "ThreeDProjection",
