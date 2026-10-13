@@ -1151,8 +1151,8 @@ class ChildOnly {}`,
 });
 
 /**
- * A player by the real clock whose root traces each ENTER_FRAME and has
- * arm(ms) trace "timeout" after `ms`, its loads' links held until `release`
+ * A player by the real clock whose root traces each ENTER_FRAME, has
+ * arm(ms) trace "timeout <ms>" after `ms` and every(ms) "tick" each `ms`, its loads' links held until `release`
  * is called; `step` moves the clock by a 60 Hz display's interval and advances.
  */
 async function heldLoading() {
@@ -1169,13 +1169,17 @@ async function heldLoading() {
     `package {
       import flash.display.Sprite;
       import flash.events.Event;
+      import flash.utils.setInterval;
       import flash.utils.setTimeout;
       public class HoldRoot extends Sprite {
         public function HoldRoot() {
           addEventListener(Event.ENTER_FRAME, function(e:Event):void { trace("frame"); });
         }
         public function arm(ms:int):void {
-          setTimeout(function():void { trace("timeout"); }, ms);
+          setTimeout(function():void { trace("timeout " + ms); }, ms);
+        }
+        public function every(ms:int):void {
+          setInterval(function():void { trace("tick"); }, ms);
         }
       }
     }`,
@@ -1212,33 +1216,48 @@ async function heldLoading() {
   step(10);
   lines.length = 0;
   const arm = (ms: number) => rt.callProperty(player.root.object, rt.publicName("arm"), ms);
+  const every = (ms: number) => rt.callProperty(player.root.object, rt.publicName("every"), ms);
   const content = () => rt.getProperty(loader, rt.publicName("content"));
-  return { scripting, loader, lines, step, arm, content, hold, release: () => release() };
+  return { scripting, loader, lines, step, arm, every, content, hold, release: () => release() };
 }
 
-test("a load from bytes comes in the next frame however long its code takes, the frames and timers waiting", {
+test("a load from bytes comes in the next frame however long its code takes, the timers after it", {
   skip,
 }, async () => {
   const held = await heldLoading();
   held.scripting.loads.requestLoad(held.loader, innerSwf(compiler(out)("Inner"), 1));
-  // A timer set at the call that counts on the content by then, as content may.
-  held.arm(100);
+  // Timers set at the call that count on the content by then, as content may.
+  held.arm(10);
+  held.arm(1000);
+  held.every(10);
 
-  // Two seconds of the host's: no frame and no timer, as Flash's next frame has the content.
+  // Two seconds of the host's: no frame, and only the timers due by the
+  // frame's slot, between frames, as Flash's before its parse.
   held.step(120);
-  assert.equal(held.lines.length, 0, held.lines.join(" | "));
+  assert.deepEqual(
+    held.lines.filter((line) => line !== "tick"),
+    ["timeout 10"],
+  );
+  assert.ok(held.lines.filter((line) => line === "tick").length <= 3, held.lines.join(" | "));
   assert.equal(held.content(), null);
 
   held.release();
   await held.scripting.settled();
+  held.lines.length = 0;
   held.step();
   assert.equal(held.lines[0], "frame");
+  assert.ok(!held.lines.some((line) => line.startsWith("timeout") || line === "tick"));
   assert.ok(held.content());
-  assert.ok(!held.lines.includes("timeout"));
 
-  // The time held was not the timer's: 100 ms on from the hold's start, it fires.
-  held.step(6);
-  assert.ok(held.lines.includes("timeout"), held.lines.join(" | "));
+  // The time held counts: what fell due in it fires now, once each, the
+  // interval's lost ticks dropped, not the second's wait over again.
+  held.step(3);
+  const after = held.lines.filter((line) => line === "tick" || line.startsWith("timeout"));
+  assert.deepEqual(
+    after.filter((line) => line !== "tick"),
+    ["timeout 1000"],
+  );
+  assert.ok(after.filter((line) => line === "tick").length <= 3, held.lines.join(" | "));
 });
 
 test("a frame waits ten seconds at most for a load from bytes", { skip }, async () => {

@@ -1597,17 +1597,22 @@ asked for is compiled and linked between frames, in the order asked, and
 each takes its place in the first frame after its code is linked; a host
 that steps frames by hand awaits `Scripting.settled()` between them, as
 the tests do, to see Flash's frame. Flash has a `loadBytes`' content in
-the frame after the call whatever its size, its code verified as it runs
-(the `loader-bytes-frames` case; in adl a SWF of half a megabyte of ABC
-and eight of sounds came in that frame as a small one did, a few
-milliseconds after the call), and content counts on it, as a timer of a
-second set at the call that reads the `Loader`'s child. Compiling such
-an ABC takes a few hundred milliseconds here, longer on a slow machine,
-so `Player.advance` holds the next frame while a load from bytes due next
-still compiles: time passes up to the frame's slot, the timers due by
-then firing between frames, and stops there, the time held, the call in
-which the load came included, counting for neither the frames nor the
-timers; ten seconds at most, so that a load that never ends does not stop
+the frame after the call whatever its size (the `loader-bytes-frames`
+case): it parses the SWF before that frame's `ENTER_FRAME`, which comes
+late by the parse's time, a few to a few tens of milliseconds in adl for
+0.5 MB of ABC (8 MB of sounds cost nothing). Its timers count that time:
+those due by the frame's slot fire between frames before it, those due
+during the parse fire once each in the frame after `ENTER_FRAME`, a
+repeating one's lost ticks dropped, and the rest at their times after.
+Content counts on the content coming first, as a timer of a second set at
+the call that reads the `Loader`'s child. Compiling such an ABC takes a
+few hundred milliseconds here, seconds on a slow machine, so
+`Player.advance` holds the next frame while a load from bytes due next
+still compiles: the frames stop at the frame's slot and do not catch up
+the time held; the timers count it, but none due after the slot fires
+until the held frame has played, its content made and `INIT` and
+`COMPLETE` told, the call in which the load came included. Each wait
+lasts ten seconds at most, so that a load that never ends does not stop
 the player. Several loads from bytes asked in one frame all come in the
 next, here in the order asked; adl completes them in an order of its
 own, neither that order nor its reverse. `SymbolClass` bindings are the

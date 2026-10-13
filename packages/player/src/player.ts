@@ -233,32 +233,47 @@ export class Player {
     // The pointer's and the touches' last moves, so the frame's scripts see where they are now.
     this.pointer?.flush();
     this.touch?.flush();
-    let passed = Number.isFinite(dt) && dt > 0 ? dt : 0;
+    const passed = Number.isFinite(dt) && dt > 0 ? dt : 0;
     const frame = 1000 / this.frameRate;
     const typical = this.typicalInterval(passed);
     let most =
       typical > DISPLAY_INTERVAL
         ? 1
         : Math.min(MAX_FRAMES_PER_CALL, Math.max(1, Math.round(typical / frame)));
-    // A frame that waits for a load from bytes plays once it is ready, and
-    // the time held is not the timers' or the frames': time passes up to
-    // the frame's slot, between-frames timers firing by then, and stops
-    // there, as if the load had taken no time, as Flash's takes almost none.
-    // That is the time of the call in which it came too, which its compile
-    // may have taken whole. Each load waited for has the ten seconds to
-    // itself: one asked as the last comes does not inherit its wait.
+    // A frame that waits for a load from bytes plays once it is ready, as
+    // Flash's waits for the parse. The frames do not catch up the time
+    // held: they stop at the frame's slot. The timers count it, as Flash's
+    // do, but fire nothing due after that slot until the frame has played,
+    // its content made and INIT and COMPLETE told: Flash's parse takes a
+    // few tens of milliseconds where a compile here may take seconds, and
+    // content counts on having its content before a timer set at the call.
+    // That holds for the call in which the load came too, which its
+    // compile may have taken whole. Each load waited for has the ten
+    // seconds to itself: one asked as the last comes does not inherit its
+    // wait.
+    const timers = this.scripting?.timers;
+    let holding = false;
+    let resuming = false;
     if (!this.scripting?.heldTime()) {
       this.held = 0;
     } else if (!this.scripting.holdsFrame()) {
       this.held = 0;
-      passed = Math.max(0, Math.min(passed, frame - this.owed));
+      resuming = true;
     } else if (this.held < HOLD_LIMIT) {
       this.held += passed;
-      passed = Math.max(0, Math.min(passed, frame - this.owed));
+      holding = true;
       most = 0;
     }
 
-    this.owed += passed;
+    let framePassed = passed;
+    if (holding || resuming) {
+      timers?.holdAfter(Math.max(0, frame - this.owed));
+      framePassed = Math.max(0, Math.min(passed, frame - this.owed));
+    } else {
+      timers?.release();
+    }
+
+    this.owed += framePassed;
     // How many frames play and what is owed after, worked out first: the
     // timers fire by each frame's time on the grid, not the call's.
     let n = 0;
@@ -275,7 +290,6 @@ export class Player {
       rest %= frame;
     }
 
-    const timers = this.scripting?.timers;
     timers?.hostPassed(passed);
     try {
       for (let i = 0; i < n; i++) {
@@ -286,6 +300,9 @@ export class Player {
       }
     } finally {
       timers?.frameAt(Number.NaN, Number.NaN);
+      if (resuming) {
+        timers?.release();
+      }
     }
 
     // Flash fires timers shorter than a frame between frames too: a call
