@@ -42,6 +42,12 @@ const GLOWS: ReadonlySet<string> = new Set([
 
 import { colorOf } from "../geom/Transform.js";
 
+/** The longest side adl makes a BitmapData of: 2^31 / 20, whole. */
+const MAX_SIDE = 107374182;
+
+/** The most pixels adl makes a BitmapData of, whatever its shape: 2146500576 bytes. */
+const MAX_PIXELS = 536625144;
+
 type Value = avm2.Value;
 type AsObject = avm2.AsObject;
 
@@ -244,11 +250,11 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      // A side under 1 is refused, and so is 2^29 pixels or more (65536 by 8192), as
-      // adl refuses them; no side alone is (16384 wide and 65536 by 4096 both pass).
+      // A side under 1 is refused, and as adl refuses them, a side past 2^31 / 20
+      // (107374183 by 1) and more than MAX_PIXELS (32753 by 16384, 65514 by 8191).
       const w = s.rt.toInt(width);
       const h = s.rt.toInt(height);
-      if (w < 1 || h < 1 || w * h >= 2 ** 29) {
+      if (w < 1 || h < 1 || w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_PIXELS) {
         throw s.rt.error("ArgumentError", 2015);
       }
 

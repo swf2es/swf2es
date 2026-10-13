@@ -3140,10 +3140,12 @@ premultiplied by alpha as Flash keeps them, so `setPixel32` premultiplies
 and `getPixel32` divides back, with the rounding Flash's does (Ruffle's
 `bitmapdata_accuracy` tabulates every alpha and value; adl is the judge of
 the rule); a bitmap made opaque keeps every alpha at 255, and `getPixel`
-answers without the alpha. The constructor refuses a side under 1, and
-2^29 pixels or more, with ArgumentError 2015, and no more: Flash's old
-limits, 8191 a side and 16,777,215 pixels, are gone (16384 by 1, 4097 by
-4096 and 65536 by 4096 pass in adl, 65536 by 8192 not); `dispose`
+answers without the alpha. The constructor refuses a side under 1 or
+past 2^31 / 20 (107,374,182 passes), and more than 536,625,144 pixels
+whatever the shape (32752 by 16384 and 65513 by 8191 pass in adl, 32753
+by 16384 and 65514 by 8191 not), with ArgumentError 2015, as it does an
+allocation the browser refuses: Flash's old limits, 8191 a side and
+16,777,215 pixels, are gone; `dispose`
 empties the store, after which every read, the size included, throws
 2015, and a second `dispose` is nothing. `copyPixels`
 into an opaque bitmap composites source over destination whether or not
