@@ -85,7 +85,6 @@ const NO_RECORDS: readonly FilterRecord[] = [];
 /** What an emptied node has drawn, shared by all: replaced as it draws, never added to. */
 const NO_LAYERS: ShapeLayer[] = [];
 const NO_FILLS: GraphicsContext[] = [];
-const NO_LINES_GIVEN: readonly (GraphicsContext | undefined)[] = [];
 
 /** Whether every one of `art` is a SharedGraphics, which a redraw keeps for its new content. */
 function allShared(art: readonly PixiContainer[]): boolean {
@@ -190,10 +189,12 @@ interface Node {
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
   lines: SharedGraphics[];
   /**
-   * Between a redraw's clear and its draw, the Graphics the content left,
-   * and which are lines, for the next to take in place.
+   * Between a redraw's clear and its draw (while `spared`), the Graphics
+   * the content left, and which are lines, for the next to take in place;
+   * kept, emptied, for the next redraw.
    */
   spare: { graphics: SharedGraphics[]; lines: boolean[] } | null;
+  spared: boolean;
   /** Whether the object is a mask or in one, as of the last sync. */
   masking: boolean;
   /** The containers of the children a timeline's mask clips, each masked by it. */
@@ -280,6 +281,12 @@ export class PixiView {
   private sweptAt = 0;
   /** The Graphics settled groups batched, some since destroyed or moved out (settle, unsettle). */
   private readonly batched = new Set<Graphics>();
+  /** What the nodes cleared give back once their new content is drawn (clear, giveBack). */
+  private readonly giving = {
+    fills: [] as GraphicsContext[],
+    lines: [] as GraphicsContext[],
+    shapes: [] as ShapeCharacter[],
+  };
   /** settleGroups' scratch: the groups whose batched Graphics draw alone again. */
   private readonly unsettling = new Set<Settling>();
   private readonly lines = new StrokeContexts(this.counts);
@@ -763,6 +770,7 @@ export class PixiView {
         bitmap: null,
         lines: [],
         spare: null,
+        spared: false,
         masking: false,
         groups: [],
         scroll: null,
@@ -933,43 +941,65 @@ export class PixiView {
    * its own and change.
    */
   private redraw(o: DisplayObject, node: Node): void {
-    const done = this.clear(node, true);
+    this.clear(node, true);
     // Given back after the new ones are made, so that a texture or a blend they share is kept, not
     // made again.
     try {
       this.draw(o, node);
     } finally {
-      done();
+      this.giveBack();
       // Drawn, the new content has taken or dropped them all; one that threw has not.
       this.dropSpare(node);
     }
   }
 
   /**
-   * Empty the node of what it drew, and return what gives back its fills
-   * and lines: a drawing's fills, a blend's, and every node's lines; a
-   * Graphics frees only a context it made.
+   * Empty the node of what it drew, listing for giveBack what gives back
+   * its fills and lines: a drawing's fills, a blend's, and every node's
+   * lines; a Graphics frees only a context it made.
    */
-  private clear(node: Node, keep = false): () => void {
+  private clear(node: Node, keep = false): void {
     // A Bitmap's texture is its store's: only the sprite goes.
     node.bitmap?.destroy();
     node.bitmap = null;
-    // Of the content's arrays, none is made where it has nothing: an object is emptied and drawn
-    // anew each time its content changes.
-    const old = node.ownFills && !this.fresh ? node.fills : NO_FILLS;
-    const oldLines =
-      this.fresh || node.strokes.length === 0 ? NO_LINES_GIVEN : node.strokes.map((g) => g?.shared);
-    const shared = node.sharedFills;
+    // Listed in the view's own lists, not in arrays of their own: an object is emptied and drawn
+    // anew each time its content changes, hundreds of times a frame in an animated crowd.
+    const giving = this.giving;
+    if (node.ownFills && !this.fresh) {
+      for (let i = 0; i < node.fills.length; i++) {
+        giving.fills.push(node.fills[i]);
+      }
+    }
+
+    if (!this.fresh) {
+      for (let i = 0; i < node.strokes.length; i++) {
+        const context = node.strokes[i]?.shared;
+        if (context) {
+          giving.lines.push(context);
+        }
+      }
+    }
+
+    if (node.sharedFills) {
+      giving.shapes.push(node.sharedFills);
+    }
+
     // A shape's Graphics stay where they are, for the content drawn next to take in place: taken
     // off and put on, they changed the structure of its render group, which Pixi then rebuilt
     // whole, an animated character's every frame its timeline swapped a shape.
     const art = node.art.children;
     if (keep && art.length > 0 && allShared(art)) {
       const lines = node.lines;
-      node.spare = {
-        graphics: art.slice() as SharedGraphics[],
-        lines: art.map((g) => lines.includes(g as SharedGraphics)),
-      };
+      node.spare ??= { graphics: [], lines: [] };
+      const spare = node.spare;
+      spare.graphics.length = 0;
+      spare.lines.length = 0;
+      for (let i = 0; i < art.length; i++) {
+        spare.graphics.push(art[i] as SharedGraphics);
+        spare.lines.push(lines.includes(art[i] as SharedGraphics));
+      }
+
+      node.spared = true;
     } else {
       // A text's characters are in a container of their own; their shared
       // glyph fills stay, not being theirs. A shape's Graphics are kept for
@@ -987,24 +1017,30 @@ export class PixiView {
     node.fills = NO_FILLS;
     node.ownFills = false;
     node.sharedFills = null;
-    node.strokes = [];
-    node.lines = [];
-    return () => {
-      for (let i = 0; i < old.length; i++) {
-        destroyContext(old[i]);
+    node.strokes.length = 0;
+    node.lines.length = 0;
+  }
+
+  /** Give back what the nodes cleared since listed (clear): their fills, lines and shapes' fills. */
+  private giveBack(): void {
+    const { fills, lines, shapes } = this.giving;
+    try {
+      for (let i = 0; i < fills.length; i++) {
+        destroyContext(fills[i]);
       }
 
-      for (let i = 0; i < oldLines.length; i++) {
-        const context = oldLines[i];
-        if (context) {
-          this.lines.give(context);
-        }
+      for (let i = 0; i < lines.length; i++) {
+        this.lines.give(lines[i]);
       }
 
-      if (shared) {
-        this.shared.give(shared);
+      for (let i = 0; i < shapes.length; i++) {
+        this.shared.give(shapes[i]);
       }
-    };
+    } finally {
+      fills.length = 0;
+      lines.length = 0;
+      shapes.length = 0;
+    }
   }
 
   /**
@@ -1134,29 +1170,22 @@ export class PixiView {
       node.layers = sliceLayers(node.layers, slicing.slice, slicing.m, o.drawing?.version);
     }
 
-    const build = (layer: ShapeLayer) => {
-      const context = fillContext(layer, this.painter);
-      if (this.fresh) {
-        this.built.add(context);
-      }
-
-      return context;
-    };
     let fills: GraphicsContext[];
     node.ownFills = false;
     if (current && current.layers === node.layers && current.fills.length === node.layers.length) {
       fills = current.fills;
     } else if (shape && !o.drawing && !slicing && !this.fresh) {
       // A shape's, or a morph's blend's, shared and counted: they go once nothing draws them.
-      fills = this.shared.take(shape, () => node.layers.map(build));
+      fills = this.shared.take(shape, node.layers, this.buildFills);
       node.sharedFills = shape;
     } else if (shape && !o.drawing && !slicing) {
       // A fresh view borrows the stage's, which its object, off the list, may no longer hold;
       // else builds its own, shared by its instances, which it destroys with the rest.
-      fills = this.source?.shared.peek(shape) ?? this.fills.get(shape) ?? node.layers.map(build);
+      fills =
+        this.source?.shared.peek(shape) ?? this.fills.get(shape) ?? this.buildFills(node.layers);
       this.fills.set(shape, fills);
     } else {
-      fills = node.layers.map(build);
+      fills = this.buildFills(node.layers);
       node.ownFills = true;
     }
 
@@ -1174,36 +1203,29 @@ export class PixiView {
     // The Graphics the last content left, taken in place where it laid out
     // its fills and lines alike.
     const spare =
-      node.spare && laidOutAs(node.spare.lines, node.layers) ? node.spare.graphics : null;
+      node.spared && node.spare && laidOutAs(node.spare.lines, node.layers)
+        ? node.spare.graphics
+        : null;
     if (!spare) {
       this.dropSpare(node);
     }
 
-    node.spare = null;
+    node.spared = false;
+    // A loop, not forEach with closures: a crowd's shapes are drawn again hundreds of times a frame.
     let next = 0;
-    const graphic = (context?: GraphicsContext): SharedGraphics => {
-      if (!spare) {
-        const made = this.spareGraphics.pop() ?? new SharedGraphics(NO_LINES);
-        made.swap(context ?? NO_LINES);
-        node.art.addChild(made);
-        return made;
-      }
-
-      const kept = spare[next++];
-      // A line's shows none till restroke gives it its own, and gives back the old.
-      kept.swap(context ?? NO_LINES);
-      return kept;
-    };
-
     node.widest = 0;
-    node.layers.forEach((layer, i) => {
+    const layers = node.layers;
+    for (let i = 0; i < layers.length; i++) {
+      const layer = layers[i];
       if (layer.strokes.length > 0 && scalesEvenly(layer)) {
         node.widest = Math.max(node.widest, widestLine(layer));
       }
 
-      graphic(fills[i]);
+      this.graphic(node, spare, next++, fills[i]);
       const borrowed = lines?.[i];
-      const strokes = layer.strokes.length ? graphic(borrowed?.shared) : null;
+      const strokes = layer.strokes.length
+        ? this.graphic(node, spare, next++, borrowed?.shared)
+        : null;
       if (strokes) {
         if (borrowed) {
           strokes.setFromMatrix(borrowed.localTransform);
@@ -1213,8 +1235,47 @@ export class PixiView {
       }
 
       node.strokes.push(borrowed ? null : strokes);
-    });
+    }
+
     this.restroke(node);
+  }
+
+  /** The fills of `layers`, built: a fresh view's to destroy with the rest. */
+  private readonly buildFills = (layers: readonly ShapeLayer[]): GraphicsContext[] => {
+    const fills: GraphicsContext[] = [];
+    for (let i = 0; i < layers.length; i++) {
+      const context = fillContext(layers[i], this.painter);
+      if (this.fresh) {
+        this.built.add(context);
+      }
+
+      fills.push(context);
+    }
+
+    return fills;
+  };
+
+  /**
+   * The Graphics the `k`th of a node's new content draws `context` with:
+   * the `k`th the last content left, in place, or one kept or made, put on.
+   */
+  private graphic(
+    node: Node,
+    spare: SharedGraphics[] | null,
+    k: number,
+    context: GraphicsContext | undefined,
+  ): SharedGraphics {
+    if (!spare) {
+      const made = this.spareGraphics.pop() ?? new SharedGraphics(NO_LINES);
+      made.swap(context ?? NO_LINES);
+      node.art.addChild(made);
+      return made;
+    }
+
+    const kept = spare[k];
+    // A line's shows none till restroke gives it its own, and gives back the old.
+    kept.swap(context ?? NO_LINES);
+    return kept;
   }
 
   /**
@@ -1310,7 +1371,14 @@ export class PixiView {
 
   /** Keep the Graphics a redraw kept for its new content that it did not take, or destroy them in a fresh view. */
   private dropSpare(node: Node): void {
-    for (const graphic of node.spare?.graphics ?? []) {
+    const spare = node.spare;
+    if (!node.spared || !spare) {
+      return;
+    }
+
+    node.spared = false;
+    for (let i = 0; i < spare.graphics.length; i++) {
+      const graphic = spare.graphics[i];
       graphic.parent?.removeChild(graphic);
       if (this.fresh) {
         graphic.destroy();
@@ -1319,7 +1387,8 @@ export class PixiView {
       }
     }
 
-    node.spare = null;
+    spare.graphics.length = 0;
+    spare.lines.length = 0;
   }
 
   /**
@@ -1352,7 +1421,8 @@ export class PixiView {
   private empty(node: Node): void {
     this.parked.delete(node);
     node.emptied = true;
-    this.clear(node)();
+    this.clear(node);
+    this.giveBack();
   }
 
   /** Return a parked group's batches without changing its nested group hierarchy. */
@@ -1395,8 +1465,17 @@ export class PixiView {
     // One key and one inverse for all its layers of each kind, made as one first needs them.
     let exact: ReturnType<typeof strokeFrame> | null = null;
     let scaled: ReturnType<typeof strokeFrame> | null | undefined;
-    const frameFor = (layer: ShapeLayer) => {
-      if (scaled === undefined && !by && scalesEvenly(layer)) {
+    // A loop, not forEach with closures: every shape that moves on a frame is stroked again.
+    const layers = node.layers;
+    for (let i = 0; i < layers.length; i++) {
+      const strokes = node.strokes[i];
+      if (!strokes) {
+        continue;
+      }
+
+      const layer = layers[i];
+      const even = scalesEvenly(layer);
+      if (scaled === undefined && !by && even) {
         if (settled === undefined) {
           const stretch = stretchOf(m);
           settled = stretch && settledStretch(stretch, node.widest, least, stretch);
@@ -1405,20 +1484,15 @@ export class PixiView {
         scaled = settled && strokeFrame(settled, least);
       }
 
-      if (scaled && scalesEvenly(layer)) {
-        return scaled;
+      let frame: ReturnType<typeof strokeFrame>;
+      if (scaled && even) {
+        frame = scaled;
+      } else {
+        exact ??= strokeFrame(m, least);
+        frame = exact;
       }
 
-      exact ??= strokeFrame(m, least);
-      return exact;
-    };
-    node.layers.forEach((layer, i) => {
-      const strokes = node.strokes[i];
-      if (!strokes) {
-        return;
-      }
-
-      const { m: seen, key, inverse } = frameFor(layer);
+      const { m: seen, key, inverse } = frame;
       // The new context goes in before the old one goes back, as it may be the same.
       const previous = strokes.shared;
       // A fresh view borrows the stage's lines where it draws them alike.
@@ -1445,7 +1519,8 @@ export class PixiView {
       if (inverse) {
         strokes.setFromMatrix(inverse);
       }
-    });
+    }
+
     node.stretched = scaled && !exact ? scaled.m : null;
   }
 

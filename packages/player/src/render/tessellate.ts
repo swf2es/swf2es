@@ -354,11 +354,15 @@ export class SharedFills {
     return this.held.get(shape)?.fills ?? null;
   }
 
-  /** The shape's fills, taken: found, or built by `build`. */
-  take(shape: ShapeCharacter, build: () => GraphicsContext[]): GraphicsContext[] {
+  /** The shape's fills, taken: found, or built of `layers` by `build`. */
+  take<L>(
+    shape: ShapeCharacter,
+    layers: L,
+    build: (layers: L) => GraphicsContext[],
+  ): GraphicsContext[] {
     let entry = this.held.get(shape);
     if (!entry) {
-      entry = { fills: build(), uses: 0 };
+      entry = { fills: build(layers), uses: 0 };
       this.held.set(shape, entry);
     }
 
