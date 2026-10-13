@@ -258,24 +258,7 @@ export function trimPools(): void {
     data.clear();
   }
 
-  // Pool's fields: its items, how many are free (the first of them), and how many it made.
-  const batchables = BigPool.getPool(BatchableGraphics) as unknown as {
-    _pool: unknown[];
-    _index: number;
-    _count: number;
-  };
-  const extra = batchables._index - POOLED_BATCHABLES_MOST;
-  if (extra > 0) {
-    batchables._index = POOLED_BATCHABLES_MOST;
-    batchables._count -= extra;
-    batchables._pool.length = POOLED_BATCHABLES_MOST;
-  }
-
-  // Past the free ones are those taken, which Pixi leaves listed: their users hold them, if anyone.
-  // Cut once they are many, not on every frame, which would shrink and regrow the list each time.
-  if (batchables._pool.length > batchables._index + POOLED_BATCHABLES_MOST) {
-    batchables._pool.length = batchables._index;
-  }
+  BigPool.getPool(BatchableGraphics).trim(POOLED_BATCHABLES_MOST);
 
   const now = performance.now();
   while (drawTargets.length > 0 && now - drawTargets[0].since > IDLE_MS) {

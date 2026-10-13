@@ -292,11 +292,7 @@ export class StrokeContexts {
  * it: what keeping it costs.
  */
 function verticesOf(context: GraphicsContext): number {
-  const data = (
-    context as unknown as {
-      _gpuData: Record<number, { geometryData?: { vertices: unknown[] } } | undefined>;
-    }
-  )._gpuData;
+  const data = context._gpuData;
   let vertices = 0;
   for (const uid in data) {
     vertices += (data[uid]?.geometryData?.vertices.length ?? 0) / 2;

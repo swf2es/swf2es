@@ -134,22 +134,29 @@ test("a timeline mask's range goes in a container it masks, a scroll clips the r
 });
 
 test("a batchable keeps the batcher name it is given, and one under a colour transform goes to swf2es's", async () => {
-  // Pixi as the player loads it, its ES module, which render/color.ts patched.
+  const { batcherNameFor } = await import("../../../../packages/player/dist/render/color.js");
   const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
-  const { BatchableSprite } = (await import(entry)) as {
+  const { BatchableMesh, BatchableSprite } = (await import(entry)) as {
+    BatchableMesh: new () => { batcherName: string; renderable: unknown };
     BatchableSprite: new () => { batcherName: string; renderable: unknown };
   };
+  type Element = Parameters<typeof batcherNameFor>[0];
   const sprite = new BatchableSprite();
-  assert.equal(sprite.batcherName, "default");
+  assert.equal(batcherNameFor(sprite as unknown as Element), "default");
   sprite.batcherName = "host-custom";
-  assert.equal(sprite.batcherName, "host-custom");
+  assert.equal(batcherNameFor(sprite as unknown as Element), "host-custom");
 
   const ct = { rMul: 1, gMul: 1, bMul: 1, aMul: 1, rAdd: 10, gAdd: 0, bAdd: 0, aAdd: 0 };
   sprite.renderable = { flashColor: ct };
-  assert.equal(sprite.batcherName, "flash-color");
+  assert.equal(batcherNameFor(sprite as unknown as Element), "flash-color");
   sprite.renderable = { flashColor: null };
-  assert.equal(sprite.batcherName, "host-custom");
+  assert.equal(batcherNameFor(sprite as unknown as Element), "host-custom");
+
+  // A mesh, which the colour batcher does not pack, keeps its own.
+  const mesh = new BatchableMesh();
+  mesh.renderable = { flashColor: ct };
+  assert.equal(batcherNameFor(mesh as unknown as Element), "default");
 });
 
 test("nested render groups keep their hierarchy while parked and release idle batches", async () => {
@@ -284,20 +291,36 @@ test("one-off groups give back the oldest batches past the parked limit", () => 
 });
 
 /** A batch pipe that gives each instruction set it builds a default and a colour batcher. */
+/** Pixi's module, as the player loads it. */
+const pixiEntry = pathToFileURL(
+  createRequire(new URL("../../../../packages/player/package.json", import.meta.url))
+    .resolve("pixi.js")
+    .replace(/\.js$/, ".mjs"),
+).href;
+const { BatcherPipe } = (await import(pixiEntry)) as { BatcherPipe: { prototype: object } };
+
+/**
+ * Pixi's batch pipe as the player uses it, its batchers stood in for: kept
+ * by instruction set, taken out (takeBatchers, Pixi's own), and given to a
+ * new set as it builds (batchersFor), or made.
+ */
 function batchPipe() {
   type Batchers = Record<string, { name: string; destroy(): void }>;
   const destroyed: string[] = [];
-  const pipe = {
+  const pipe = Object.assign(Object.create(BatcherPipe.prototype) as object, {
     _batchersByInstructionSet: {} as Record<number, Batchers | undefined>,
+    batchersFor: null as ((set: { uid: number }) => Batchers | undefined) | null,
     buildStart(set: { uid: number }) {
-      this._batchersByInstructionSet[set.uid] ??= Object.fromEntries(
-        ["default", "flash-color"].map((name) => [
-          name,
-          { name, destroy: () => destroyed.push(name) },
-        ]),
-      );
+      this._batchersByInstructionSet[set.uid] ??=
+        this.batchersFor?.(set) ??
+        Object.fromEntries(
+          ["default", "flash-color"].map((name) => [
+            name,
+            { name, destroy: () => destroyed.push(name) },
+          ]),
+        );
     },
-  };
+  });
   const renderer = {
     ...standIn([]).renderer,
     renderPipes: { batch: pipe },
@@ -383,7 +406,6 @@ test("given-back batchers go to groups a view makes, up to 16 groups' worth, eac
   }
 
   // Masked, each art gives up its group: 16 keep their batchers, the 17th's are destroyed.
-  const unwrapped = pipe.buildStart;
   for (const [index, art] of arts.entries()) {
     art.setMask(masks[index]);
   }
@@ -394,8 +416,6 @@ test("given-back batchers go to groups a view makes, up to 16 groups' worth, eac
     false,
   );
   assert.deepEqual(destroyed.sort(), ["default", "flash-color"]);
-  const wrapped = pipe.buildStart;
-  assert.notEqual(wrapped, unwrapped);
 
   // The panels, grouped now, take the 16 records whole, and the 17th builds anew.
   const taken = new Set<unknown>();
@@ -414,7 +434,7 @@ test("given-back batchers go to groups a view makes, up to 16 groups' worth, eac
 
   assert.equal(taken.size, 16);
 
-  // Given back again, the pipe keeps the one wrapper.
+  // Given back again, and taken again.
   for (const art of arts) {
     art.setMask(null);
   }
@@ -434,7 +454,6 @@ test("given-back batchers go to groups a view makes, up to 16 groups' worth, eac
   }
 
   view.prepare(root);
-  assert.equal(pipe.buildStart, wrapped);
   assert.equal(destroyed.length, 4);
 
   // A root rendered once, though in a group Pixi pooled from one a view made, builds anew.
@@ -2173,187 +2192,6 @@ test("of many objects off the list at once, only the latest 1024 are kept whole"
   assert.notEqual(fills[1099].parent, null);
 });
 
-test("a blend's copy of what is behind it is held to the target and the texture, and clears nothing", async () => {
-  // Loaded with the view, it patches the copy for every renderer.
-  await import("../../../../packages/player/dist/render/blend.js");
-  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
-  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
-  const { RenderTargetSystem } = (await import(entry)) as {
-    RenderTargetSystem: {
-      prototype: { copyToTexture(this: unknown, ...args: unknown[]): unknown };
-    };
-  };
-  type Copy = [number, number, number, number, number, number];
-  // A target of 893×150 pixels and a back texture of 256×128.
-  const copy = (from: [number, number], size: [number, number], to: [number, number] = [0, 0]) => {
-    const copies: Copy[] = [];
-    const clears: unknown[] = [];
-    const system = {
-      getRenderTarget: () => ({ pixelWidth: 893, pixelHeight: 150 }),
-      adaptor: {
-        copyToTexture: (
-          _source: unknown,
-          _destination: unknown,
-          o: { x: number; y: number },
-          s: { width: number; height: number },
-          d: { x: number; y: number },
-        ) => copies.push([o.x, o.y, s.width, s.height, d.x, d.y]),
-      },
-      push: (options: { clearColor: unknown }) => clears.push(options.clearColor),
-      pop: () => {},
-    };
-    const destination = { source: { pixelWidth: 256, pixelHeight: 128 } };
-    RenderTargetSystem.prototype.copyToTexture.call(
-      system,
-      {},
-      destination,
-      { x: from[0], y: from[1] },
-      { width: size[0], height: size[1] },
-      { x: to[0], y: to[1] },
-    );
-    return { copies, clears };
-  };
-
-  // Inside: copied as asked, nothing cleared.
-  assert.deepEqual(copy([10, 20], [100, 50]), { copies: [[10, 20, 100, 50, 0, 0]], clears: [] });
-  // A hair wider and taller than the texture: held to it, and nothing missed.
-  assert.deepEqual(copy([10, 20], [257, 129]), { copies: [[10, 20, 256, 128, 0, 0]], clears: [] });
-  // Past the top-left: what the target has goes where it belongs, the rest left as it is.
-  assert.deepEqual(copy([-4, -6], [100, 50]), {
-    copies: [[0, 0, 96, 44, 4, 6]],
-    clears: [],
-  });
-  // Past the bottom-right: the copy stops at the target's edge.
-  assert.deepEqual(copy([850, 120], [100, 50]), {
-    copies: [[850, 120, 43, 30, 0, 0]],
-    clears: [],
-  });
-  // Wholly beyond, which Pixi's own clamp left as a width of -1 or a height
-  // of -3 that GL refused: no copy at all.
-  assert.deepEqual(copy([894, 150], [10, 75]), { copies: [], clears: [] });
-  assert.deepEqual(copy([205, -4], [174, 1]), { copies: [], clears: [] });
-});
-
-/** Pixi's bounds, as far as these tests use them. */
-interface PixiBounds {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-  clear(): void;
-  addFrame(x0: number, y0: number, x1: number, y1: number): void;
-}
-
-/** Pixi's own module, as the player loads it, with the player's patches to it. */
-async function patchedPixi(): Promise<{
-  Bounds: new (minX?: number, minY?: number, maxX?: number, maxY?: number) => PixiBounds;
-  FilterEffect: new () => { filters: unknown };
-  FilterSystem: { prototype: unknown };
-}> {
-  await import("../../../../packages/player/dist/render/blend.js");
-  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
-  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
-  return import(entry);
-}
-
-test("a filter's region lies on its texture's texels at a resolution that is no whole number", async () => {
-  const { Bounds, FilterSystem } = await patchedPixi();
-  const system = FilterSystem.prototype as unknown as {
-    _calculateFilterBounds(this: unknown, data: unknown, ...rest: unknown[]): void;
-  };
-  const r = 1.5;
-  const data = {
-    bounds: new Bounds(10.3, 20.7, 50.2, 60.1),
-    filters: [
-      {
-        enabled: true,
-        resolution: "inherit",
-        padding: 3,
-        antialias: "off",
-        clipToViewport: false,
-        compatibleRenderers: 1,
-        blendRequired: false,
-      },
-    ],
-    skip: false,
-    resolution: 0,
-  };
-  const stub = { renderer: { type: 1, backBuffer: { useBackBuffer: true } } };
-  system._calculateFilterBounds.call(stub, data, { width: 1000, height: 1000 }, false, r, 1);
-
-  // Pixi put it on the texels, then padded it by 3 pixels, 4.5 texels:
-  // half a texel off them. It is put on them again, grown by the half.
-  const { minX, minY, maxX, maxY } = data.bounds;
-  assert.deepEqual(
-    [minX, minY, maxX, maxY].map((v) => Math.round(v * r * 1e6) / 1e6),
-    [10, 26, 81, 96],
-  );
-});
-
-test("a blend's copy of what is behind it starts at the texel its region does", async () => {
-  const { Bounds, FilterSystem } = await patchedPixi();
-  const system = FilterSystem.prototype as unknown as {
-    getBackTexture(this: unknown, surface: unknown, bounds: unknown, previous?: unknown): unknown;
-  };
-  const r = 1.6228571428571428;
-  const copies: number[][] = [];
-  const stub = {
-    renderer: {
-      renderTarget: {
-        copyToTexture: (
-          _source: unknown,
-          _destination: unknown,
-          o: { x: number; y: number },
-          s: { width: number; height: number },
-        ) => copies.push([o.x, o.y, s.width, s.height]),
-      },
-    },
-  };
-  const surface = { colorTexture: { source: { resolution: r } } };
-
-  // A blend in a layer, its region 18 texels left of and 3 above the
-  // layer's, a hair short of whole: Pixi's floor took 19 and 4, and the
-  // blend read, along its region's top and left, texels never copied.
-  const layer = new Bounds(531 / r, 140 / r, 600 / r, 200 / r);
-  const blend = new Bounds(513 / r - 1e-12, 137 / r - 1e-12, 560 / r, 170 / r);
-  system.getBackTexture.call(stub, surface, blend, layer);
-  assert.deepEqual(copies, [[-18, -3, 47, 33]]);
-});
-
-test("a layer's region holds its filtered children's padding, but not its own", async () => {
-  const { Bounds, FilterEffect, FilterSystem } = await patchedPixi();
-  const system = FilterSystem.prototype as unknown as {
-    _calculateFilterArea(this: unknown, instruction: unknown, bounds: unknown): void;
-  };
-  type Padded = { filters: unknown; addBounds(b: unknown, skip: boolean): void };
-  const effect = (...paddings: number[]) => {
-    const e = new FilterEffect();
-    // The second filter disabled.
-    e.filters = paddings.map((padding, i) => ({ enabled: i !== 1, padding }));
-    return e as Padded;
-  };
-  const own = effect(7);
-  const child = effect(4, 10, 2.5);
-  // Measured as Pixi measures: the shapes, then the effects, the child's and the object's own.
-  const container = {
-    parentRenderGroup: {},
-    getFastGlobalBounds(_layers: boolean, bounds: PixiBounds) {
-      bounds.clear();
-      bounds.addFrame(10, 20, 30, 40);
-      child.addBounds(bounds, true);
-      own.addBounds(bounds, true);
-      return bounds;
-    },
-  };
-  const bounds = new Bounds();
-  system._calculateFilterArea.call({}, { container, filterEffect: own }, bounds);
-  assert.deepEqual([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], [4, 14, 36, 46]);
-
-  // Measured for anything else, its own is padded too.
-  container.getFastGlobalBounds(true, bounds);
-  assert.deepEqual([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], [-3, 7, 43, 53]);
-});
-
 test("large branches keep their own instructions as they shrink, without grouping their wrappers", () => {
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
@@ -2739,62 +2577,6 @@ test("a shape drawn anew with its fills laid out alike keeps its Graphics, in pl
   assert.equal(before[0].destroyed, false);
 });
 
-test("a Graphics whose context is swapped gets its group rebuilt unless drawn alone before and after", async () => {
-  // Pixi rebuilt a group for every swap of a context drawn alone, as each
-  // shape's are; the player asks for a rebuild only where the last build
-  // batched the Graphics, or where its new context is batched. One the
-  // last build batched into no batches, an empty context, has no
-  // instruction of its own until a rebuild gives it one.
-  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
-  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
-  type Context = { batchMode: string; rect(...a: number[]): { fill(color: number): Context } };
-  type Graphic = { context: Context };
-  type Pipe = {
-    addRenderable(graphics: Graphic, instructions: never): void;
-    validateRenderable(graphics: Graphic): boolean;
-  };
-  const pixi = (await import(entry)) as {
-    GraphicsContextSystem: { prototype: object };
-    GraphicsPipe: { prototype: object };
-    GraphicsContext: new () => Context;
-    Graphics: new (context: Context) => Graphic;
-  };
-  type Mutable = Record<string, unknown>;
-  const renderer: Mutable = {
-    uid: 7,
-    gc: { addCollection() {}, addResource() {}, removeResource() {} },
-    runners: { contextChange: { add() {} } },
-  };
-  const contexts = Object.create(pixi.GraphicsContextSystem.prototype) as Mutable;
-  contexts._renderer = renderer;
-  contexts._managedContexts = { add() {} };
-  renderer.graphicsContext = contexts;
-  const added: unknown[] = [];
-  renderer.renderPipes = { batch: { break() {}, addToBatch: (b: unknown) => added.push(b) } };
-  const pipe = Object.create(pixi.GraphicsPipe.prototype) as Pipe;
-  Object.assign(pipe, { renderer, _managedGraphics: { add() {} } });
-  const instructions = { add: (x: unknown) => added.push(x) } as never;
-  const alone = () => {
-    const context = new pixi.GraphicsContext();
-    context.batchMode = "no-batch";
-    return context.rect(0, 0, 10, 10).fill(0xff0000);
-  };
-
-  // Drawn alone, then swapped for another drawn alone: no rebuild.
-  const graphics = new pixi.Graphics(alone());
-  pipe.addRenderable(graphics, instructions);
-  graphics.context = alone();
-  assert.equal(pipe.validateRenderable(graphics), false);
-
-  // Batched into nothing, empty: the next swap rebuilds, else it would have no instruction.
-  const empty = new pixi.Graphics(new pixi.GraphicsContext());
-  added.length = 0;
-  pipe.addRenderable(empty, instructions);
-  assert.equal(added.length, 0);
-  empty.context = alone();
-  assert.equal(pipe.validateRenderable(empty), true);
-});
-
 test("a shape swapped for one with fills and lines laid out alike keeps its Graphics, and its lines", async () => {
   const { ShapeObject, CONTENT } = await import(
     "../../../../packages/player/dist/display/display.js"
@@ -2989,9 +2771,8 @@ test("a large shape under a colour transform draws alone until its group settles
 test("batched Graphics are looked through only in groups that change, and follow a move to another settled group", async () => {
   // A static stage's thousands of batched Graphics were looked through on every frame an animated
   // group beside them was rebuilt.
-  const { settle, unsettle, SharedGraphics } = await import(
-    "../../../../packages/player/dist/render/patches.js"
-  );
+  const { settle, unsettle } = await import("../../../../packages/player/dist/render/settle.js");
+  const { SharedGraphics } = await import("../../../../packages/player/dist/render/shared.js");
   const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
   const pixi = (await import(entry)) as {

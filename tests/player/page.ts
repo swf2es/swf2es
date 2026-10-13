@@ -17,7 +17,7 @@
 //
 // And it may ask for multisampling, as a host made with `antialias: true`
 // draws: the samples are then each resolved from the multisampled targets,
-// blends' backdrops and the back buffer alike (render/resolve.ts), before
+// blends' backdrops and the back buffer alike (the Pixi fork's bounded resolves), before
 // the page averages them.
 import { createCodegen } from "@swf2es/codegen";
 import { isAs3, readSwf, tags } from "@swf2es/format";

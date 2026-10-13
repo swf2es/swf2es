@@ -44,7 +44,10 @@ function packed(
     },
     instructions: {
       instructionSize: batches.length,
+      // Pixi's batches, as far as the atlas reads them.
       instructions: batches.map((b) => ({
+        renderPipeId: "batch",
+        canBundle: true,
         start: b.start,
         size: b.size,
         topology: b.topology ?? "triangle-list",
@@ -181,34 +184,21 @@ test("Graphics added one after another share a run, and anything between them st
   assert.deepEqual((set.instructions[0] as TableInstruction).items, [c]);
 });
 
-test("rows go up to texture unit 0, even where a render pass left another active", () => {
-  // Pixi's texture system as far as the table uses it: a bind of what a unit
-  // holds already changes nothing, so the unit a pass activated to unbind its
-  // target stays active.
-  const units: unknown[] = [];
-  let active = 0;
-  const uploads: number[] = [];
+test("rows go up bound for an upload to texture unit 0", () => {
+  // Bound already, Pixi's bind leaves the unit a pass activated to unbind
+  // its target active: the table binds for an upload, which activates it.
+  const steps: string[] = [];
   const texture = {
-    _boundTextures: units,
-    _premultiplyAlpha: false,
-    _activateLocation(location: number) {
-      active = location;
-    },
-    bind(source: unknown, location: number) {
-      if (units[location] !== source) {
-        units[location] = source;
-        active = location;
-      }
+    bindForUpload(_source: unknown, location: number) {
+      steps.push(`bind ${location}`);
     },
   };
   const gl = {
     TEXTURE_2D: 1,
     RGBA: 2,
     FLOAT: 3,
-    UNPACK_PREMULTIPLY_ALPHA_WEBGL: 4,
-    pixelStorei() {},
     texSubImage2D() {
-      uploads.push(active);
+      steps.push("upload");
     },
   };
   const renderer = {
@@ -221,15 +211,13 @@ test("rows go up to texture unit 0, even where a render pass left another active
   const upload = (pipe as unknown as { upload(from: number, to: number): void }).upload.bind(pipe);
 
   upload(0, 1);
-  // A pass's target, bound at unit 1 as a back texture, unbound: unit 1 active.
-  active = 1;
   upload(1, 2);
-  assert.deepEqual(uploads, [0, 0]);
+  assert.deepEqual(steps, ["bind 0", "upload", "bind 0", "upload"]);
 });
 
 test("a run's rows go up in one call: the part of their line, or the whole lines they span", () => {
   const calls: number[][] = [];
-  const texture = { _premultiplyAlpha: false, _activateLocation() {}, bind() {} };
+  const texture = { bindForUpload() {} };
   const gl = {
     TEXTURE_2D: 1,
     RGBA: 2,

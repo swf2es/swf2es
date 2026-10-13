@@ -11,7 +11,7 @@
 // --back-buffer makes the renderer as a host that draws blend modes must,
 // with Pixi's back buffer. --antialias makes it multisampled, as a host
 // made with `antialias: true`; with --back-buffer, what blends and
-// filters resolve of it (render/resolve.ts) counts in the draw and gl.
+// filters resolve of it (the Pixi fork's bounded resolves) counts in the draw and gl.
 //
 // --rig N plays instead N instances of one animated character, a sprite of
 // 12 outlined parts that turn and swell on a loop of 24 frames, all in

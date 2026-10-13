@@ -254,6 +254,25 @@ export function shapeContext(): GraphicsContext {
 }
 
 /**
+ * Let go of the commands of a context's paths once Pixi has built it
+ * (render/hooks.ts), as they are flattened to shapes then, which is all
+ * Pixi reads of them again: to build the context again, as a lost
+ * context or Pixi's collection of what went unused for a minute has it,
+ * to measure its bounds, and to hit test it. A crowded room's contexts
+ * kept some 120 MB of these, an object and an array for each segment.
+ * Every context of the player is made whole before it is first built,
+ * and none is changed after.
+ */
+export function forgetCommands(context: GraphicsContext): void {
+  for (const instruction of context.instructions) {
+    if (instruction.action !== "texture") {
+      instruction.data.path.releaseInstructions();
+      instruction.data.hole?.releaseInstructions();
+    }
+  }
+}
+
+/**
  * A layer's fills, which are the same for every instance of the shape.
  * Each contour's region is inside or not by the fill's rule, by its depth
  * in the containment for even-odd, by the sum of orientations around it

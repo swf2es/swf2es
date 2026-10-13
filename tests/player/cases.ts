@@ -5461,7 +5461,7 @@ export const cases: PlayerCase[] = [
     frames: 1,
     capture: [1],
     // Multisampled, as most hosts draw: blends and filters then read their
-    // backdrops through the bounded resolves of render/resolve.ts, which no
+    // backdrops through the Pixi fork's bounded resolves, which no
     // other case runs. Within 3 a channel, as drawn without multisampling:
     // the blends' 8-bit round trips and adl's rounding of the blurs.
     antialias: true,

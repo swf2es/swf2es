@@ -139,6 +139,15 @@ declaration builds for `lib/` and the two bundles the pages load. At the
 fork's first commit the output is byte for byte npm's `pixi.js` 8.21.0 but
 for the bundles' build date, which is the fork commit's.
 
+The player overwrites no method of Pixi's. What is Pixi's own
+behaviour, a bug fix or a memory or speed fix any user of Pixi would
+want, is changed in the fork; what is the player's policy, Flash's
+semantics, when a render group settles, the colour transform's shader,
+runs through extension points the fork adds for it (a pipe's
+`aloneDrawer` and `shaderFor`, a system's `onContextBuilt`,
+`onBuildInstructions` and `filterAreaHook`, and the like), which
+`render/hooks.ts` sets on each renderer the player draws with.
+
 ## Parsing, linking and verifying
 
 avmplus checks an ABC in three places, and swf2es checks it in the same
@@ -1087,8 +1096,10 @@ and the player's paths in this document are relative to it:
 - `input/`: the pointer and the keyboard.
 - `render/`: the PixiJS view (`view.ts`) and what only it uses: shapes'
   fills tessellated (`tessellate.ts`) and lines stroked (`strokes.ts`)
-  into shared contexts, Pixi's pipe and render-group builds patched
-  (`patches.ts`), what the view and Pixi pool and how much (`pools.ts`),
+  into shared contexts, where the player plugs into the Pixi fork's
+  extension points (`hooks.ts`), render groups settling (`settle.ts`),
+  the Graphics that draws a shared context (`shared.ts`), what the view
+  and Pixi pool and how much (`pools.ts`),
   text drawn (`text.ts`), bitmaps' and gradients' textures
   (`bitmaps.ts`), batchers kept for new groups (`batchers.ts`), the
   transform table, colour transforms, blend modes, filters and resolves
@@ -2735,7 +2746,7 @@ draw calls, but far fewer program switches and uploads, and `bench.ts
 software GL. But a crowded scene is mostly still: of some 4,400 draws a
 frame in a room of a dozen characters, half were in render groups no
 timeline had rebuilt for seconds. A render group not rebuilt for 2 s has
-its Graphics batched (`render/patches.ts`), each drawing a batched copy of its shared context,
+its Graphics batched (`render/settle.ts`), each drawing a batched copy of its shared context,
 as a colour transform does: packed once, as nothing rebuilds the group,
 and drawn in a few calls, which took a frame's render from 17–18 ms to
 15. Rebuilt again by anything but its batching, the group draws them
@@ -3645,17 +3656,15 @@ A renderer made with `antialias: true` draws into multisampled targets,
 which must be resolved before they are read, and Pixi resolves the whole
 target at each step: before a blend copies its backdrop, again in the
 copy, and after each filter pass drawn on the back buffer, a full-screen
-resolve for each small blend. `render/resolve.ts` resolves only the copy's
+resolve for each small blend. The Pixi fork resolves only the copy's
 clipped source rectangle when a backdrop is copied, skips the resolve
 before the copy, and leaves the back buffer unresolved after filter
 passes until it is presented; a filter's intermediate textures still
 resolve before they are sampled. On a scene of 100 nested blends and
 glows (RX 7900 XTX) the GPU's frame fell from some 4.1 ms to 3.3 ms, the
-frames unchanged. It wraps Pixi 8.21's `FilterSystem`
-(`_setupFilterTextures`, `_setupBindGroupsAndRender`) and its WebGL
-render target adaptor's `copyToTexture` and `finishRenderPass`, and
-relies on the order Pixi calls them in and the framebuffers it leaves
-bound: a Pixi upgrade must check those again. The `blend-antialias` case
+frames unchanged. It is in the fork's `FilterSystem` and WebGL render
+target adaptor (`finishRenderPass`), and relies on the order the filter
+system calls them in. The `blend-antialias` case
 draws nested blends, a blurred child of a blend and blends past the
 stage's edges multisampled against adl, the only case that runs these
 paths; a resolve skipped or of the wrong rectangle fails it, and
