@@ -18,6 +18,7 @@
 // table's, which cost the GPU more than the CPU saved.
 import type { ColorTransform } from "@swf2es/format";
 import {
+  type Batch,
   Buffer,
   BufferImageSource,
   BufferUsage,
@@ -26,10 +27,9 @@ import {
   extensions,
   Geometry,
   GlProgram,
-  GpuGraphicsContext,
+  type GpuGraphicsContext,
   type Graphics,
-  type GraphicsContext,
-  type GraphicsPipe,
+  type GraphicsContextSystem,
   type Instruction,
   type InstructionSet,
   RendererType,
@@ -39,8 +39,6 @@ import {
   UniformGroup,
   type WebGLRenderer,
 } from "pixi.js";
-import { resizeOnGpu } from "./batchers.js";
-import { packedOnCpu } from "./packed.js";
 
 const NAME = "flashTable";
 
@@ -206,15 +204,8 @@ export interface Packed {
     indexBuffer: ArrayLike<number>;
     indexSize: number;
   };
-  instructions: {
-    instructionSize: number;
-    instructions: ArrayLike<{
-      start: number;
-      size: number;
-      topology: string;
-      textures: { count: number; textures: ArrayLike<{ uid: number }> };
-    }>;
-  };
+  /** Its batches, as Pixi's instruction set lists them. */
+  instructions: { instructionSize: number; instructions: ArrayLike<Instruction> };
 }
 
 /** Where a context's batches lie in the atlas: each one's index count and first byte. */
@@ -274,7 +265,7 @@ export class Atlas {
 
     const { batcher, instructions } = packed;
     for (let i = 0; i < instructions.instructionSize; i++) {
-      const batch = instructions.instructions[i];
+      const batch = instructions.instructions[i] as Batch;
       const textures = batch.textures;
       let flat = batch.topology === "triangle-list";
       for (let k = 0; k < textures.count; k++) {
@@ -311,7 +302,7 @@ export class Atlas {
       offsets: [],
     };
     for (let i = 0; i < instructions.instructionSize; i++) {
-      const batch = instructions.instructions[i];
+      const batch = instructions.instructions[i] as Batch;
       if (batch.size) {
         placed.counts.push(batch.size);
         placed.offsets.push((first + batch.start) * 4);
@@ -411,15 +402,15 @@ export class Atlas {
   }
 }
 
-// A context's GPU data is reset as it is built again and as it is destroyed: its place goes then.
-const reset = GpuGraphicsContext.prototype.reset;
-GpuGraphicsContext.prototype.reset = function (this: GpuGraphicsContext) {
+/**
+ * A context's GPU data reset, as it is built again and as it is destroyed
+ * (render/hooks.ts): its place in each atlas goes then.
+ */
+export function releaseFromAtlases(gpu: GpuGraphicsContext): void {
   for (const atlas of atlases) {
-    atlas.release(this);
+    atlas.release(gpu);
   }
-
-  reset.call(this);
-};
+}
 
 /** A run of Graphics drawn alone, in the order the build added them. */
 export interface TableInstruction extends Instruction {
@@ -450,10 +441,6 @@ type Multi = {
     offsetsOffset: number,
     drawcount: number,
   ): void;
-};
-
-type ContextSystem = {
-  getGpuContext(context: GraphicsContext): GpuGraphicsContext;
 };
 
 type Drawn = Graphics & { _roundPixels: number };
@@ -563,9 +550,9 @@ export class TablePipe {
 
   execute(instruction: TableInstruction): void {
     const renderer = this.renderer;
-    const graphicsPipe = renderer.renderPipes.graphics as unknown as GraphicsPipe;
-    const contexts = renderer.graphicsContext as unknown as ContextSystem;
-    const roundAll = (renderer as unknown as { _roundPixels: number })._roundPixels;
+    const graphicsPipe = renderer.renderPipes.graphics;
+    const contexts = renderer.graphicsContext;
+    const roundAll = renderer._roundPixels;
     // Switched off, a context restored without the extension, or a run
     // that cannot reach minRun draws, as most between filters, before a row
     // is written: Pixi's pipe draws it.
@@ -598,7 +585,7 @@ export class TablePipe {
           : this.atlas.where(gpu);
       if (place === undefined) {
         // What Pixi packed is read only to be copied in, packed again if it was let go of.
-        place = this.atlas.place(gpu, packedOnCpu(renderer, context) as Packed);
+        place = this.atlas.place(gpu, contexts.getContextRenderDataOnCpu(context));
       }
 
       if (!place || this.cursor + place.counts.length > this.maxRows) {
@@ -625,7 +612,7 @@ export class TablePipe {
   }
 
   /** The draws `instruction` makes at most: one for each batch of each Graphics' context. */
-  private mostDraws(instruction: TableInstruction, contexts: ContextSystem): number {
+  private mostDraws(instruction: TableInstruction, contexts: GraphicsContextSystem): number {
     let draws = 0;
     for (const item of instruction.items) {
       draws += contexts.getGpuContext(item.context).batches.length;
@@ -712,7 +699,7 @@ export class TablePipe {
 
     const renderer = this.renderer;
     if (draws < minRun) {
-      const graphicsPipe = renderer.renderPipes.graphics as unknown as GraphicsPipe;
+      const graphicsPipe = renderer.renderPipes.graphics;
       for (const graphics of this.segment) {
         graphicsPipe.execute(graphics);
       }
@@ -779,10 +766,7 @@ export class TablePipe {
   /** Pass the run's rows to the short shader, bound: Pixi knows nothing of its uRows. */
   private passRows(shader: Shader): void {
     const gl = this.renderer.gl;
-    const shaders = this.renderer.shader as unknown as {
-      _getProgramData(program: GlProgram): { program: WebGLProgram };
-    };
-    const program = shaders._getProgramData(shader.glProgram).program;
+    const program = this.renderer.shader._getProgramData(shader.glProgram).program;
     if (this.rows?.program !== program) {
       this.rows = { program, location: gl.getUniformLocation(program, "uRows") };
     }
@@ -806,8 +790,8 @@ export class TablePipe {
     const atlas = this.atlas;
     if (atlas.shrunk) {
       atlas.shrunk = false;
-      resizeOnGpu(this.renderer, this.attributes);
-      resizeOnGpu(this.renderer, this.indexBuffer);
+      this.renderer.buffer.resizeOnNextUpload(this.attributes);
+      this.renderer.buffer.resizeOnNextUpload(this.indexBuffer);
     }
 
     if (atlas.whole) {
@@ -841,20 +825,9 @@ export class TablePipe {
   private upload(from: number, to: number): void {
     const renderer = this.renderer;
     const gl = renderer.gl;
-    const textures = renderer.texture as unknown as {
-      bind(texture: BufferImageSource, location: number): void;
-      _activateLocation(location: number): void;
-      _premultiplyAlpha: boolean;
-    };
-    // Bound first, as Pixi binds: a new table is allocated and uploaded whole then.
-    textures.bind(this.table, 0);
-    // Bound already, bind leaves the active unit as it was, which a render
-    // pass may have moved to unbind a back texture: the upload must go to 0.
-    textures._activateLocation(0);
-    if (textures._premultiplyAlpha) {
-      textures._premultiplyAlpha = false;
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-    }
+    // Bound as Pixi binds, a new table allocated and uploaded whole then, and to the active unit,
+    // which a render pass may have moved to unbind a back texture: the upload must go to 0.
+    renderer.texture.bindForUpload(this.table, 0);
 
     const first = Math.floor(from / ROWS_A_LINE);
     const lines = Math.floor((to - 1) / ROWS_A_LINE) - first + 1;

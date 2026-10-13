@@ -4,9 +4,10 @@
 // transform, and whose shader applies it to the straight colour: a fill's
 // colour and alpha as the vertex has them, a texture's unpremultiplied.
 // Pixi names a batchable's batcher "default" itself; here it is the
-// renderable's `flashColor` that decides.
+// renderable's `flashColor` that decides (batcherNameFor).
 import type { ColorTransform } from "@swf2es/format";
 import {
+  type BatchableElement,
   BatchableGraphics,
   BatchableSprite,
   Batcher,
@@ -24,12 +25,12 @@ import {
   Graphics,
   type GraphicsContext,
   type GraphicsPath,
-  GraphicsPipe,
   generateTextureBatchBit,
   generateTextureBatchBitGl,
   getBatchSamplersUniformGroup,
   localUniformBitGl,
   Matrix,
+  type Renderer,
   RendererType,
   roundPixelsBit,
   roundPixelsBitGl,
@@ -343,18 +344,20 @@ export class ColorBatcher extends Batcher {
 }
 
 extensions.add(ColorBatcher);
-// The name set, Pixi's "default" or another a host gives, is kept; a
-// renderable under a colour transform goes to this batcher over it.
-for (const proto of [BatchableGraphics.prototype, BatchableSprite.prototype]) {
-  Object.defineProperty(proto, "batcherName", {
-    configurable: true,
-    get(this: { renderable?: Colored | null; $batcherName?: string }) {
-      return this.renderable?.flashColor ? NAME : (this.$batcherName ?? "default");
-    },
-    set(this: { $batcherName?: string }, name: string) {
-      this.$batcherName = name;
-    },
-  });
+
+/**
+ * The batcher an element goes to (render/hooks.ts): a Graphics' or a
+ * sprite's under a colour transform to this batcher, any other to the one
+ * it names, Pixi's "default" or another a host gives.
+ */
+export function batcherNameFor(element: BatchableElement): string {
+  if (element instanceof BatchableGraphics || element instanceof BatchableSprite) {
+    if ((element.renderable as Colored | null)?.flashColor) {
+      return NAME;
+    }
+  }
+
+  return element.batcherName;
 }
 
 /** Each unbatched context's batched copy, made when a Graphics drawing it is first colour-transformed. */
@@ -396,12 +399,12 @@ export function dropBatchedCopy(context: GraphicsContext): void {
 /**
  * A Graphics that may show another context than the one it stands for: the
  * shared one it was given (`shared`), and `show` to draw another, as a
- * shape's lines swap theirs (render/patches.ts, SharedGraphics).
+ * shape's lines swap theirs (render/shared.ts, SharedGraphics).
  */
 export type SharingGraphics = Graphics & {
   shared?: GraphicsContext;
   show?: (context: GraphicsContext) => void;
-  /** Whether it is in a render group settled long enough to batch it (render/patches.ts, settle). */
+  /** Whether it is in a render group settled long enough to batch it (render/settle.ts, settle). */
   settled?: boolean;
 };
 
@@ -511,9 +514,9 @@ export function forgetShown(g: SharingGraphics): void {
  * has no colour transform, so under one it draws a batched copy; but a
  * large one, as a creature's parts are, is drawn alone still, by the
  * transform table (render/table.ts), whose rows carry a colour transform,
- * or by Pixi's pipe with the colour shader (GraphicsPipe's execute below),
+ * or by Pixi's pipe with the colour shader (colorShaderFor),
  * where every renderer is WebGL; a SharedGraphics alone, which forgets it
- * as it goes (render/patches.ts). The
+ * as it goes (render/shared.ts). The
  * context it stands for is shared by every instance of a character, and
  * every text in a font, and is never changed: switched to batched, the
  * Graphics of the others, made unbatched, drew nothing.
@@ -592,29 +595,19 @@ function aloneShader(maxTextures: number): Shader {
 }
 
 /**
- * A Graphics drawn alone under a colour transform, as in a render group
- * that has not settled: Pixi's pipe draws it with the colour shader, which
- * it takes as the context's own for the one draw, the transform and the
- * Graphics' own tint and alpha in uniforms. Its context, shared, is never
- * packed: a gradient's or a bitmap's, which the table cannot draw.
- *
- * It leans on Pixi 8.21's internals: the pipe's renderer, private; a
- * context's customShader, which the pipe's execute and its GL adaptor
- * read as they draw, and the context system only as it builds, which a
- * draw never does; and the order of the shader's sections, Pixi's local
- * uniforms' colour applied in the vertex's main before aloneBitGl's end
- * replaces it.
+ * The shader a Graphics drawn alone is drawn with (render/hooks.ts): under
+ * a colour transform, as in a render group that has not settled, the
+ * colour shader, the transform and the Graphics' own tint and alpha in its
+ * uniforms, which Pixi's pipe then fills its local uniforms of; otherwise
+ * Pixi's, from null. Its context, shared, is never packed: a gradient's or
+ * a bitmap's, which the table cannot draw. It leans on the order of the
+ * shader's sections, Pixi's local uniforms' colour applied in the vertex's
+ * main before aloneBitGl's end replaces it.
  */
-const drawAlone = GraphicsPipe.prototype.execute;
-GraphicsPipe.prototype.execute = function (this: GraphicsPipe, graphics: Graphics) {
+export function colorShaderFor(graphics: Graphics, renderer: Renderer): Shader | null {
   const ct = (graphics as Colored).flashColor;
-  const renderer = (
-    this as unknown as { renderer: { type: number; limits: { maxBatchableTextures: number } } }
-  ).renderer;
-  const context = graphics.context;
-  if (!ct || renderer.type !== RendererType.WEBGL || context.customShader) {
-    drawAlone.call(this, graphics);
-    return;
+  if (!ct || renderer.type !== RendererType.WEBGL) {
+    return null;
   }
 
   const shader = aloneShader(renderer.limits.maxBatchableTextures);
@@ -635,13 +628,8 @@ GraphicsPipe.prototype.execute = function (this: GraphicsPipe, graphics: Graphic
   add[1] = ct.gAdd / 255;
   add[2] = ct.bAdd / 255;
   add[3] = ct.aAdd / 255;
-  context.customShader = shader;
-  try {
-    drawAlone.call(this, graphics);
-  } finally {
-    context.customShader = undefined;
-  }
-};
+  return shader;
+}
 
 /**
  * Draw `leaf` and what is in it under `ct`, or under Pixi's tint again for

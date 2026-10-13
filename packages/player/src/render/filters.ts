@@ -1233,10 +1233,8 @@ export class FilterChain extends Filter implements AreaKeeper {
     }
 
     const resolution = input.source.resolution;
-    // The input's corner on the screen, which Pixi 8 keeps to itself.
-    const bounds = (
-      system as unknown as { _activeFilterData: { bounds: { minX: number; minY: number } } }
-    )._activeFilterData.bounds;
+    // The input's corner on the screen.
+    const bounds = system.activeBounds as Bounds;
     const m = this.owner.worldTransform;
     // Filled in place, and swapped with `ran` as it becomes that: a chain runs on every frame.
     const now = this.next;

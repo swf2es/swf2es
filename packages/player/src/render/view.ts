@@ -16,7 +16,6 @@ import {
   RendererType,
   type RenderTexture,
   Sprite,
-  type WebGLRenderer,
 } from "pixi.js";
 import { BitmapStore } from "../bitmap/bitmap.js";
 import { toStage } from "../display/bounds.js";
@@ -51,7 +50,7 @@ import { argbOf, characterStore, gpuBitmaps } from "./bitmaps.js";
 import { blendFilters } from "./blend.js";
 import { setFlashColor } from "./color.js";
 import { displayFilters, FilterChain, sameFilterRecords } from "./filters.js";
-import { SETTLE_MS, type Settling, SharedGraphics, settle, unsettle } from "./patches.js";
+import { hookRenderer } from "./hooks.js";
 import {
   drawTarget,
   IDLE_MS,
@@ -62,7 +61,8 @@ import {
   SPARE_NODES_MOST,
   trimPools,
 } from "./pools.js";
-import { boundedResolves } from "./resolve.js";
+import { SETTLE_MS, type Settling, settle, unsettle } from "./settle.js";
+import { SharedGraphics } from "./shared.js";
 import {
   type Linear,
   linesContext,
@@ -401,9 +401,7 @@ export class PixiView {
     /** The stage's view, whose geometry and textures a fresh view borrows where they are current. */
     private readonly source: PixiView | null = null,
   ) {
-    if (renderer.type === RendererType.WEBGL) {
-      boundedResolves(renderer as WebGLRenderer);
-    }
+    hookRenderer(renderer);
   }
 
   /**

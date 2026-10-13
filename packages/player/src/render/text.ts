@@ -14,7 +14,7 @@ import type { StaticTextObject, TextObject } from "../display/display.js";
 import { shapeLayers } from "../display/shapes.js";
 import { deviceMetrics, fontFamily } from "../text/fonts.js";
 import { GUTTER, type LaidChar, shownLines } from "../text/layout.js";
-import { SharedGraphics } from "./patches.js";
+import { SharedGraphics } from "./shared.js";
 import { fillContext, paint } from "./tessellate.js";
 
 /**
