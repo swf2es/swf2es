@@ -2,7 +2,13 @@
 // asked for again, never past its ceiling, and shrunk back once nothing is.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { IdleBudget } from "../../../../packages/player/dist/render/pools.js";
+import {
+  deviceMemory,
+  IdleBudget,
+  LINES_IDLE_VERTICES,
+  LINES_IDLE_VERTICES_MOST,
+  linesCeiling,
+} from "../../../../packages/player/dist/render/pools.js";
 
 const WINDOW = 30_000;
 
@@ -101,4 +107,56 @@ test("small content keeps the floor", () => {
   }
 
   assert.equal(budget.size, 1000);
+});
+
+test("the lines' ceiling follows the device's memory and heap, within the floor and the most", () => {
+  // Telling nothing, as node and a browser without either: the most.
+  assert.equal(linesCeiling({}), LINES_IDLE_VERTICES_MOST);
+
+  // Half a million vertices a GB of memory.
+  assert.equal(linesCeiling({ deviceMemory: 2 }), 1_000_000);
+  assert.equal(linesCeiling({ deviceMemory: 4 }), 2_000_000);
+  assert.equal(linesCeiling({ deviceMemory: 8 }), LINES_IDLE_VERTICES_MOST);
+  assert.equal(linesCeiling({ deviceMemory: 0.5 }), LINES_IDLE_VERTICES);
+
+  // An eighth of the heap's limit at 110 bytes a vertex: 1 GiB is some 1.2 million.
+  assert.equal(linesCeiling({ heapLimit: 2 ** 30 }), Math.floor(2 ** 30 / 8 / 110));
+  assert.equal(linesCeiling({ heapLimit: 4 * 2 ** 30 }), LINES_IDLE_VERTICES_MOST);
+  assert.equal(linesCeiling({ heapLimit: 2 ** 28 }), LINES_IDLE_VERTICES);
+
+  // The less of the two where both are told.
+  assert.equal(
+    linesCeiling({ deviceMemory: 8, heapLimit: 2 ** 30 }),
+    Math.floor(2 ** 30 / 8 / 110),
+  );
+  assert.equal(linesCeiling({ deviceMemory: 2, heapLimit: 4 * 2 ** 30 }), 1_000_000);
+});
+
+test("the device's memory is read where a host tells it, and nothing taken from one that does not", () => {
+  const host = globalThis as { navigator?: unknown; performance: { memory?: unknown } };
+  const navigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  try {
+    Object.defineProperty(globalThis, "navigator", { value: {}, configurable: true });
+    assert.deepEqual(deviceMemory(), { deviceMemory: undefined, heapLimit: undefined });
+
+    Object.defineProperty(globalThis, "navigator", {
+      value: { deviceMemory: 4 },
+      configurable: true,
+    });
+    host.performance.memory = { jsHeapSizeLimit: 2 ** 31 };
+    assert.deepEqual(deviceMemory(), { deviceMemory: 4, heapLimit: 2 ** 31 });
+
+    // Nonsense is no answer.
+    Object.defineProperty(globalThis, "navigator", {
+      value: { deviceMemory: "4" },
+      configurable: true,
+    });
+    host.performance.memory = { jsHeapSizeLimit: 0 };
+    assert.deepEqual(deviceMemory(), { deviceMemory: undefined, heapLimit: undefined });
+  } finally {
+    delete host.performance.memory;
+    if (navigator) {
+      Object.defineProperty(globalThis, "navigator", navigator);
+    }
+  }
 });

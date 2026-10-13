@@ -72,3 +72,17 @@ test("content within the least budget leaves it as it is", () => {
   assert.equal(counts.strokeContexts, 64);
   assert.equal(lines.budget.size, LINES_IDLE_VERTICES);
 });
+
+test("a budget given its ceiling by the device never grows past it", () => {
+  const counts = { strokeContexts: 0, strokeReuses: 0 };
+  const lines = new StrokeContexts(counts, { deviceMemory: 1 });
+  assert.equal(lines.budget.ceiling, LINES_IDLE_VERTICES);
+  const loop = layers(LINES_IDLE_MOST + 512);
+  for (let i = 0; i < 3; i++) {
+    for (const layer of loop) {
+      lines.give(lines.take(layer, UNIT, 1));
+    }
+  }
+
+  assert.equal(lines.budget.size, LINES_IDLE_VERTICES);
+});

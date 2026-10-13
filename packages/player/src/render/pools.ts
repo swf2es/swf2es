@@ -52,6 +52,51 @@ export const LINES_IDLE_VERTICES = 500_000;
  * again than kept.
  */
 export const LINES_IDLE_VERTICES_MOST = 4_000_000;
+/** The vertices of idle lines allowed for each GB of the device's memory. */
+const LINES_IDLE_VERTICES_PER_GB = 500_000;
+/** The share of the JavaScript heap's limit idle lines may take, at some 110 bytes a vertex. */
+const LINES_IDLE_HEAP_SHARE = 1 / 8;
+const BYTES_PER_LINE_VERTEX = 110;
+
+/** What a host tells of its memory: `navigator.deviceMemory` in GB, Chrome's `performance.memory` heap limit in bytes. */
+export interface DeviceMemory {
+  deviceMemory?: number;
+  heapLimit?: number;
+}
+
+/** The host's memory as far as it tells it; nothing outside a browser that does. */
+export function deviceMemory(): DeviceMemory {
+  const host = globalThis as {
+    navigator?: { deviceMemory?: unknown };
+    performance?: { memory?: { jsHeapSizeLimit?: unknown } };
+  };
+  const gb = host.navigator?.deviceMemory;
+  const limit = host.performance?.memory?.jsHeapSizeLimit;
+  return {
+    deviceMemory: typeof gb === "number" && gb > 0 ? gb : undefined,
+    heapLimit: typeof limit === "number" && limit > 0 ? limit : undefined,
+  };
+}
+
+/**
+ * The most the idle lines' budget may grow to on a device: a phone with a
+ * heap of half a GB would lose the tab long before LINES_IDLE_VERTICES_MOST.
+ * 0.5 million vertices for each GB of its memory, and an eighth of its
+ * heap's limit, the less of the two it tells; never under the floor, never
+ * over LINES_IDLE_VERTICES_MOST, which is also all where it tells neither.
+ */
+export function linesCeiling(device: DeviceMemory): number {
+  let most = LINES_IDLE_VERTICES_MOST;
+  if (device.deviceMemory !== undefined) {
+    most = Math.min(most, LINES_IDLE_VERTICES_PER_GB * device.deviceMemory);
+  }
+
+  if (device.heapLimit !== undefined) {
+    most = Math.min(most, (device.heapLimit * LINES_IDLE_HEAP_SHARE) / BYTES_PER_LINE_VERTEX);
+  }
+
+  return Math.max(LINES_IDLE_VERTICES, Math.floor(most));
+}
 
 /**
  * How much an idle pool keeps, grown as the pool turns out too small for

@@ -6,11 +6,13 @@ import { type GraphicsContext, Matrix } from "pixi.js";
 import { blendLayers, droppedLayers } from "../display/morph.js";
 import { LINE, type Path, pointsOf, type ShapeLayer } from "../display/shapes.js";
 import {
+  type DeviceMemory,
+  deviceMemory,
   IdleBudget,
   LINES_IDLE_MOST,
   LINES_IDLE_MS,
   LINES_IDLE_VERTICES,
-  LINES_IDLE_VERTICES_MOST,
+  linesCeiling,
 } from "./pools.js";
 import { destroyContext, shapeContext, trace } from "./tessellate.js";
 
@@ -129,19 +131,24 @@ export class StrokeContexts {
   private readonly idleSizes = new Map<GraphicsContext, number>();
   private idleVertices = 0;
   /** How many vertices the idle may hold, grown as content comes back to what went for room. */
-  readonly budget = new IdleBudget(
-    LINES_IDLE_VERTICES,
-    LINES_IDLE_VERTICES_MOST,
-    LINES_IDLE_MS,
-    4 * LINES_IDLE_MOST,
-  );
+  readonly budget: IdleBudget;
   /** Each layer's number, for the budget's keys, which must hold no layer. */
   private readonly layerIds = new WeakMap<ShapeLayer, number>();
   private layerCount = 0;
   /** The idle ones of blends, which go as soon as their morph drops the blend. */
   private readonly idleBlends = new Set<GraphicsContext>();
 
-  constructor(private readonly counts: { strokeContexts: number; strokeReuses: number }) {}
+  constructor(
+    private readonly counts: { strokeContexts: number; strokeReuses: number },
+    device: DeviceMemory = deviceMemory(),
+  ) {
+    this.budget = new IdleBudget(
+      LINES_IDLE_VERTICES,
+      linesCeiling(device),
+      LINES_IDLE_MS,
+      4 * LINES_IDLE_MOST,
+    );
+  }
 
   /** The layer's lines under `key` if they are kept, not taken: for a view drawn once to borrow. */
   peek(layer: ShapeLayer, key: string): GraphicsContext | null {
