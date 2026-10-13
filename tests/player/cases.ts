@@ -5019,6 +5019,18 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Shadows and a bevel cast hundreds of pixels from small objects (scripts/FilterFarShadow.as):
+    // padded as far as they reach, drawn whole.
+    name: "filter-far-shadow",
+    swf: (abc) => bare(abc, 1, "Main", 480, 60),
+    script: "FilterFarShadow",
+    frames: 1,
+    capture: [1],
+    // The page blurs at its four samples a pixel, as the filters case says.
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
     // Display objects with a shadow, bevel or gradient filter cast past what adl holds
     // (scripts/FilterFar.as): the GPU's padding stays what can be drawn.
     name: "filter-far",

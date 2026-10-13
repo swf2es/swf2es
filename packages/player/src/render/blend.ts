@@ -85,6 +85,20 @@ export function measureFilterArea(
   bounds: Bounds,
   system: FilterSystem,
 ): void {
+  measureArea(instruction, bounds, system);
+  // The area known, a filter that pads past what the GPU can draw round it pads less.
+  for (const filter of instruction.filterEffect.filters ?? []) {
+    (filter as Partial<PaddingFitter>).fitPadding?.(bounds, system);
+  }
+}
+
+/** A filter whose padding depends on the area it pads and on what the renderer can draw. */
+export interface PaddingFitter {
+  /** Its padding for `bounds`, as the filter system will pad them. */
+  fitPadding(bounds: Bounds, system: FilterSystem): void;
+}
+
+function measureArea(instruction: FilterInstruction, bounds: Bounds, system: FilterSystem): void {
   const keeper = keeperOf(instruction);
   const container = instruction.container as Container;
   if (keeper?.keptArea(container, bounds)) {
