@@ -5471,12 +5471,34 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "blend-formulas",
+    swf: (abc) => bare(abc, 1, "BlendFormulas", 320, 210),
+    script: "BlendFormulas",
+    frames: 1,
+    capture: [1],
+    // Within 2 a channel: adl's rounding of the premultiplied source and of
+    // the blend, which the GPU's blending and the blend filter round alike.
+    tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
     name: "blend-direct",
     swf: (abc) => bare(abc, 1, "BlendDirect", 240, 80),
     script: "BlendDirect",
     frames: 4,
     capture: [1, 2, 3, 4],
     tolerance: 1,
+    maxOutliers: 0,
+  },
+  {
+    name: "blend-direct-filtered",
+    swf: (abc) => bare(abc, 1, "BlendDirectFiltered", 320, 160),
+    script: "BlendDirectFiltered",
+    frames: 4,
+    capture: [1, 2, 3, 4],
+    // Within 6 a channel: adl's rounding of the glows' blurs, and of the layer whose ground is
+    // partly clear, as the blend filter draws them too.
+    tolerance: 6,
     maxOutliers: 0,
   },
   {

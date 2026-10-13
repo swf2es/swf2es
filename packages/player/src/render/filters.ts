@@ -10,6 +10,7 @@
 // right and down, as BitmapData.applyFilter does. WebGL
 // alone: each pass is a filter of its own.
 import {
+  type BLEND_MODES,
   type Bounds,
   BufferImageSource,
   type Container,
@@ -1319,6 +1320,15 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     this.padding = total;
   }
 
+  /**
+   * Its result blended over what is below in `mode`, by the GPU's own
+   * blending as its last pass draws it, where that is Flash's blend
+   * (render/view.ts): no copy of what is below, nor a blend filter after it.
+   */
+  blendOver(mode: BLEND_MODES): void {
+    this.blendMode = mode;
+  }
+
   /** The output kept let go of, as its object leaves the display list. */
   forget(): void {
     this.release();
@@ -1328,7 +1338,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     if (!this.keeps) {
-      this.run(system, input, output, clear);
+      this.runOver(system, input, output, clear);
       return;
     }
 
@@ -1358,7 +1368,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     this.ran = now;
     this.release();
     if (this.changing > 1) {
-      this.run(system, input, output, clear);
+      this.runOver(system, input, output, clear);
       return;
     }
 
@@ -1366,6 +1376,28 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     this.run(system, input, kept, true);
     this.kept = kept;
     system.applyFilter(this, kept, output, clear);
+  }
+
+  /**
+   * Run into `output`; blended over it, into a texture of the pool first,
+   * which its own pass then blends: the filters' last passes draw as each
+   * of them blends, not as the chain does.
+   */
+  private runOver(
+    system: FilterSystem,
+    input: Texture,
+    output: RenderSurface,
+    clear: boolean,
+  ): void {
+    if (this.blendMode === "normal") {
+      this.run(system, input, output, clear);
+      return;
+    }
+
+    const result = TexturePool.getSameSizeTexture(input);
+    this.run(system, input, result, true);
+    system.applyFilter(this, result, output, clear);
+    TexturePool.returnTexture(result);
   }
 
   /** The filters in turn, as Pixi runs a chain, through a texture of the pool between them. */

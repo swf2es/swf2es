@@ -5,6 +5,7 @@
 // shared by the instances that see them through the same one (strokes.ts).
 import type { ColorTransform } from "@swf2es/format";
 import {
+  type BLEND_MODES,
   type FederatedPointerEvent,
   type Filter,
   Graphics,
@@ -1577,6 +1578,8 @@ export class PixiView {
       dirty |= TRANSFORM | (o instanceof ShapeObject && o.stale ? CONTENT : 0);
     }
 
+    // Whether its filters were made again, which a direct blend sets again.
+    let refilled = false;
     if (dirty & TRANSFORM) {
       const m = own;
       container.setFromMatrix(PLACED.set(m.a, m.b, m.c, m.d, m.tx, m.ty));
@@ -1620,6 +1623,7 @@ export class PixiView {
         const blending = blendFilters(blend);
         container.filters =
           node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;
+        refilled = true;
       }
 
       // Most objects have neither: they pay one test.
@@ -1830,22 +1834,15 @@ export class PixiView {
 
     if (!this.fresh) {
       this.group(o, node);
-      // Fixed-function multiply needs an opaque backdrop; screen's equation
-      // also holds over transparent pixels. Add does not preserve layer alpha.
-      let direct: "multiply" | "screen" | null = null;
-      if (node.singleDraw === 1) {
-        if (node.blend === "screen") {
-          direct = "screen";
-        } else if (node.blend === "multiply" && this.renderer.background.alpha === 1) {
-          direct = "multiply";
+      const direct = isolated ? null : this.directBlend(node);
+      if (direct !== node.directBlend || (direct && refilled)) {
+        // A fill blends as it is drawn; a filtered object as its chain's result is drawn.
+        const chain = node.filters[0];
+        container.blendMode = direct && !chain ? direct : "inherit";
+        if (chain instanceof FilterChain) {
+          chain.blendOver(direct ?? "normal");
         }
-      }
-      if (isolated) {
-        direct = null;
-      }
 
-      if (direct !== node.directBlend || (direct && container.filters)) {
-        container.blendMode = direct ?? "inherit";
         const blending = direct ? null : blendFilters(node.blend);
         container.filters =
           node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;
@@ -1859,6 +1856,38 @@ export class PixiView {
     }
 
     return container;
+  }
+
+  /**
+   * The mode `node` is blended in by the GPU's own blending, where that is
+   * what Flash draws, else null for a blend filter (render/blend.ts). Flash
+   * blends the object as one layer, so it must be drawn at once: as a
+   * single fill, or as its filters' result. Over an opaque backdrop, the
+   * stage's, as an isolated layer's may not be, Flash's add, subtract,
+   * multiply and screen are the GPU's to 8-bit rounding (the
+   * `blend-formulas` case); screen's holds over any backdrop. Its lighten,
+   * darken and difference blend the straight colours, which the GPU's min
+   * and max of premultiplied ones are only where opaque.
+   */
+  private directBlend(node: Node): BLEND_MODES | null {
+    if (node.singleDraw !== 1 && !(node.filters[0] instanceof FilterChain)) {
+      return null;
+    }
+
+    switch (node.blend) {
+      case "screen":
+        return "screen";
+      case "multiply":
+        return this.renderer.background.alpha === 1 ? "multiply" : null;
+      case "add":
+      case "subtract":
+        // WebGPU's add leaves an opaque target less than opaque, and it has no subtract.
+        return this.renderer.type === RendererType.WEBGL && this.renderer.background.alpha === 1
+          ? node.blend
+          : null;
+      default:
+        return null;
+    }
   }
 
   /** Keep an animated branch from rebuilding all the stage's batches when its children change. */
