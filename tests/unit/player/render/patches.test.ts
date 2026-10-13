@@ -109,3 +109,27 @@ test("a small context stays as Pixi built it", () => {
   const gpu = system().updateGpuContext(star(3, "no-batch"));
   assert.ok(Array.isArray(gpu.geometryData.vertices));
 });
+
+test("a batch's textures cleared leave no IDs behind", async () => {
+  const { BatchTextureArray } = (await import(pixi)) as {
+    BatchTextureArray: new () => {
+      ids: Record<number, number>;
+      textures: { uid: number }[];
+      count: number;
+      clear(): void;
+    };
+  };
+  const batch = new BatchTextureArray();
+  for (let round = 0; round < 3; round++) {
+    for (let i = 0; i < 4; i++) {
+      const uid = 1000 * round + i * 37;
+      batch.ids[uid] = batch.count;
+      batch.textures[batch.count++] = { uid };
+    }
+
+    assert.equal(batch.ids[1000 * round + 37], 1);
+    batch.clear();
+    assert.deepEqual(Object.keys(batch.ids), []);
+    assert.equal(batch.count, 0);
+  }
+});

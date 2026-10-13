@@ -9,6 +9,7 @@
 // with, in render/color.ts.
 import type { ColorTransform } from "@swf2es/format";
 import {
+  BatchTextureArray,
   type Bounds,
   boundsPool,
   FilterSystem,
@@ -295,6 +296,25 @@ GpuGraphicsContext.prototype.reset = function (this: GpuGraphicsContext) {
   }
 
   resetGpu.call(this);
+};
+
+/**
+ * A batch's textures cleared without leaving their IDs behind. Pixi sets
+ * each ID it held to null rather than deleting it, so that the lookup of
+ * every pooled batch grew by each texture it was ever given, in a crowded
+ * room 19 MB of them. A lookup missed reads the same either way.
+ */
+(BatchTextureArray.prototype as unknown as { clear(): void }).clear = function (
+  this: BatchTextureArray,
+) {
+  const ids = this.ids as Record<number, number | null>;
+  for (let i = 0; i < this.count; i++) {
+    const texture = this.textures[i];
+    this.textures[i] = null as unknown as (typeof this.textures)[number];
+    delete ids[texture.uid];
+  }
+
+  this.count = 0;
 };
 
 /**
