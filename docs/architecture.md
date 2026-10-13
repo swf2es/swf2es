@@ -2743,16 +2743,33 @@ before any row is written if its contexts' batches are fewer, and
 otherwise once a blend mode or a Graphics the table cannot draw has cut
 it short (`--min-run` times other thresholds). Under software GL the
 table won at every length, by 5 ms on runs of 6, but a player's GPU is
-what counts. A run of up to 48 draws takes its rows in a uniform array,
+what counts. A run of up to 40 draws takes its rows in a uniform array,
 not the table texture, as an upload between draws cost a few µs more a
 run (0.5 ms a frame on 128 runs of 22); a longer one uploads its rows in
 one call, the whole lines they span if more than one. The rows are
 uploaded between draws that read the table, which a driver may make wait
-for the earlier draws (ANGLE on D3D11 or Metal, unmeasured). A Flash
-colour transform's batched copies stay with the colour batcher: drawn by
-the table, `--branches 64`'s few batches became 12,000 draws, which
-saved the main thread a millisecond and cost GL two on a GPU, fifteen
-under software GL. `bench.ts --no-table` draws without the table, and
+for the earlier draws (ANGLE on D3D11 or Metal, unmeasured). Small
+Graphics under a Flash colour transform, and a settled group's, stay
+batched copies with the colour batcher: drawn by the table, `--branches
+64`'s few batches became 12,000 draws, which saved the main thread a
+millisecond and cost GL two on a GPU, fifteen under software GL. A large
+one, of 200 vertices or more as Pixi draws alone uncoloured, in a group
+that has not settled, is drawn alone instead (`render/color.ts`,
+`showFor`): a batched copy's vertices were packed and uploaded again with
+each rebuild and each change of the transform, and a busy monster SWF
+whose creatures, rebuilt on most frames, fade out under a tween packed
+some 55 MB a frame of them. A flat one takes its transform in its row,
+which grows to five texels with the multipliers, the offsets and a flag;
+a Graphics Pixi's pipe draws, of a gradient or a bitmap, a run too short
+or a table switched off, takes Pixi's graphics shader with the colour
+batcher's colour, the transform in uniforms. Both apply it as the colour
+batcher does, to the straight colour, the fill's times the Graphics' own
+tint rounded to a byte, clamped and premultiplied after, and leave out
+Pixi's group colour; where a renderer is not WebGL, every one is a
+batched copy. A context is weighed once built, so a part coloured as it
+first shows is a batched copy until its transform changes. The
+`color-alone` case draws large discs, gradients and bitmaps under changing
+transforms each way. `bench.ts --no-table` draws without the table, and
 the `table-runs` case, with `draw-objects`, is played with the table
 drawing even its shortest runs and without it, and must draw the same
 pixels (`run.ts --table-ab` asks it of every case).

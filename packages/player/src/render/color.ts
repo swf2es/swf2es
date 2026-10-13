@@ -23,14 +23,20 @@ import {
   Geometry,
   Graphics,
   type GraphicsContext,
+  GraphicsPipe,
   generateTextureBatchBit,
   generateTextureBatchBitGl,
   getBatchSamplersUniformGroup,
+  localUniformBitGl,
+  Matrix,
+  RendererType,
   roundPixelsBit,
   roundPixelsBitGl,
   Shader,
+  UniformGroup,
   ViewableBuffer,
 } from "pixi.js";
+import { drawsColorAlone } from "./table.js";
 
 const NAME = "flash-color";
 
@@ -76,6 +82,44 @@ const colorBitGl = {
       } else {
         vec4 straight = vec4(outColor.rgb / outColor.a * vColor.rgb, outColor.a * vColor.a);
         vec4 c = clamp(straight * vMul + vAdd, 0.0, 1.0);
+        finalColor = vec4(c.rgb * c.a, c.a);
+      }
+    `,
+  },
+};
+
+/**
+ * The colour batcher's colour for Pixi's graphics shader, which draws a
+ * Graphics alone under its transform: the straight colour as the batcher
+ * packs it (straight), the fill's from the vertex times the Graphics' own
+ * tint, rounded to a byte, and alpha cut to one; the transform in uniforms.
+ */
+const aloneBitGl = {
+  name: "flash-color-alone-bit",
+  vertex: {
+    header: `
+      in vec4 aColor;
+      uniform vec4 uOwn;
+    `,
+    // After Pixi's tint and world colour, which it replaces: the transform includes every ancestor's.
+    end: `
+      vColor = vec4(
+        floor(aColor.rgb * uOwn.rgb * 255.0 + 0.5),
+        floor(aColor.a * uOwn.a * 255.0 + 0.001)
+      ) / 255.0;
+    `,
+  },
+  fragment: {
+    header: `
+      uniform vec4 uMul;
+      uniform vec4 uAdd;
+    `,
+    end: `
+      if (outColor.a == 0.0) {
+        finalColor = vec4(0.0);
+      } else {
+        vec4 straight = vec4(outColor.rgb / outColor.a * vColor.rgb, outColor.a * vColor.a);
+        vec4 c = clamp(straight * uMul + uAdd, 0.0, 1.0);
         finalColor = vec4(c.rgb * c.a, c.a);
       }
     `,
@@ -400,16 +444,70 @@ export type SharingGraphics = Graphics & {
 };
 
 /**
- * The context a Graphics should draw under `ct`: an unbatched one, as a
- * shape's are (render/tessellate.ts), Pixi draws with its own shader, which has no
- * colour transform, so under one it draws a batched copy. The context it
- * stands for is shared by every instance of a character, and every text in
- * a font, and is never changed: switched to batched, the Graphics of the
- * others, made unbatched, drew nothing.
+ * Floats of a context's vertices from which, under a colour transform, it
+ * is drawn alone rather than as a batched copy: Pixi's own line between
+ * the Graphics it batches and those it draws alone.
+ */
+const ALONE_FLOATS = 400;
+/** Each shared context's vertex floats, as first built for any renderer: it never changes. */
+const floatsOf = new WeakMap<GraphicsContext, number>();
+
+/**
+ * Whether `context` was built with ALONE_FLOATS or more, or its batched
+ * copy, which has its geometry; false until either is built.
+ */
+function large(context: GraphicsContext): boolean {
+  let floats = floatsOf.get(context);
+  for (const built of [context, batchedCopies.get(context)]) {
+    if (floats !== undefined || !built) {
+      break;
+    }
+
+    const data = (
+      built as unknown as {
+        _gpuData: Record<number, { geometryData?: { vertices: ArrayLike<number> } } | undefined>;
+      }
+    )._gpuData;
+    for (const uid in data) {
+      const vertices = data[uid]?.geometryData?.vertices;
+      if (vertices) {
+        floats = vertices.length;
+        floatsOf.set(context, floats);
+        break;
+      }
+    }
+  }
+
+  return floats !== undefined && floats >= ALONE_FLOATS;
+}
+
+/**
+ * The context a Graphics should draw under `ct`. An unbatched one, as a
+ * shape's are (render/tessellate.ts), Pixi draws with its own shader, which
+ * has no colour transform, so under one it draws a batched copy; but a
+ * large one, as a creature's parts are, is drawn alone still, by the
+ * transform table (render/table.ts), whose rows carry a colour transform,
+ * or by Pixi's pipe with the colour shader (GraphicsPipe's execute below),
+ * where every renderer is WebGL. The
+ * context it stands for is shared by every instance of a character, and
+ * every text in a font, and is never changed: switched to batched, the
+ * Graphics of the others, made unbatched, drew nothing.
+ *
+ * In a settled group, batched copies are packed once and drawn in a few
+ * calls. In one rebuilt often, as an animated character's is, a batched
+ * copy's vertices were packed again with every rebuild, and a tween of the
+ * transform repacked them each frame: a creature fading out packed and
+ * uploaded every vertex of its every part, frame after frame. Drawn alone,
+ * a draw writes a row or a few uniforms instead. Small ones stay batched:
+ * a draw apiece costs more than packing their few vertices
+ * (`bench.ts --branches 64`).
  */
 export function showFor(g: SharingGraphics, ct: ColorTransform | null): void {
   const shared = g.shared ?? g.context;
-  const want = ct || g.settled ? batched(shared) : shared;
+  const want =
+    g.settled || (ct && (shared.batchMode !== "no-batch" || !drawsColorAlone() || !large(shared)))
+      ? batched(shared)
+      : shared;
   if (g.context !== want) {
     if (g.show) {
       g.show(want);
@@ -421,10 +519,93 @@ export function showFor(g: SharingGraphics, ct: ColorTransform | null): void {
   g.shared = shared;
 }
 
+/** Pixi's graphics shader with the colour batcher's colour, by texture count. */
+const aloneShaders = new Map<number, Shader>();
+
+function aloneShader(maxTextures: number): Shader {
+  let shader = aloneShaders.get(maxTextures);
+  if (!shader) {
+    shader = new Shader({
+      glProgram: compileHighShaderGlProgram({
+        name: `${NAME}-alone`,
+        bits: [
+          aloneBitGl,
+          generateTextureBatchBitGl(maxTextures),
+          localUniformBitGl,
+          roundPixelsBitGl,
+        ],
+      }),
+      resources: {
+        localUniforms: new UniformGroup({
+          uColor: { value: new Float32Array([1, 1, 1, 1]), type: "vec4<f32>" },
+          uTransformMatrix: { value: new Matrix(), type: "mat3x3<f32>" },
+          uRound: { value: 0, type: "f32" },
+        }),
+        flashUniforms: new UniformGroup({
+          uOwn: { value: new Float32Array(4), type: "vec4<f32>" },
+          uMul: { value: new Float32Array(4), type: "vec4<f32>" },
+          uAdd: { value: new Float32Array(4), type: "vec4<f32>" },
+        }),
+        batchSamplers: getBatchSamplersUniformGroup(maxTextures),
+      },
+    });
+    aloneShaders.set(maxTextures, shader);
+  }
+
+  return shader;
+}
+
+/**
+ * A Graphics drawn alone under a colour transform, as in a render group
+ * that has not settled: Pixi's pipe draws it with the colour shader, which
+ * it takes as the context's own for the one draw, the transform and the
+ * Graphics' own tint and alpha in uniforms. Its context, shared, is never
+ * packed: a gradient's or a bitmap's, which the table cannot draw.
+ */
+const drawAlone = GraphicsPipe.prototype.execute;
+GraphicsPipe.prototype.execute = function (this: GraphicsPipe, graphics: Graphics) {
+  const ct = (graphics as Colored).flashColor;
+  const renderer = (
+    this as unknown as { renderer: { type: number; limits: { maxBatchableTextures: number } } }
+  ).renderer;
+  const context = graphics.context;
+  if (!ct || renderer.type !== RendererType.WEBGL || context.customShader) {
+    drawAlone.call(this, graphics);
+    return;
+  }
+
+  const shader = aloneShader(renderer.limits.maxBatchableTextures);
+  const uniforms = (shader.resources.flashUniforms as UniformGroup).uniforms;
+  const own = uniforms.uOwn as Float32Array;
+  const bgr = graphics.localColor;
+  own[0] = (bgr & 0xff) / 255;
+  own[1] = ((bgr >> 8) & 0xff) / 255;
+  own[2] = ((bgr >> 16) & 0xff) / 255;
+  own[3] = graphics.localAlpha;
+  const mul = uniforms.uMul as Float32Array;
+  mul[0] = ct.rMul;
+  mul[1] = ct.gMul;
+  mul[2] = ct.bMul;
+  mul[3] = ct.aMul;
+  const add = uniforms.uAdd as Float32Array;
+  add[0] = ct.rAdd / 255;
+  add[1] = ct.gAdd / 255;
+  add[2] = ct.bAdd / 255;
+  add[3] = ct.aAdd / 255;
+  context.customShader = shader;
+  try {
+    drawAlone.call(this, graphics);
+  } finally {
+    context.customShader = undefined;
+  }
+};
+
 /**
  * Draw `leaf` and what is in it under `ct`, or under Pixi's tint again for
  * null. Moving between batchers rebuilds the render group's instructions;
- * another transform in the same batcher packs the vertices again.
+ * another transform in the same batcher packs the vertices again. A
+ * Graphics the table draws, before and after, reads its transform as its
+ * row is written, and needs neither.
  */
 export function setFlashColor(leaf: Container, ct: ColorTransform | null): void {
   const colored = leaf as Colored;
@@ -434,17 +615,20 @@ export function setFlashColor(leaf: Container, ct: ColorTransform | null): void 
   }
 
   colored.flashColor = ct;
+  let drawnAlone = false;
   if (leaf instanceof Graphics) {
+    const before = leaf.context;
     showFor(leaf, ct);
+    drawnAlone = leaf.context === before && before.batchMode === "no-batch";
   }
 
   const view = leaf as Container & { onViewUpdate?: () => void };
-  if ((was === null) !== (ct === null)) {
+  if (!drawnAlone && (was === null) !== (ct === null)) {
     const group = (leaf.renderGroup ?? leaf.parentRenderGroup) as { structureDidChange: boolean };
     if (group) {
       group.structureDidChange = true;
     }
-  } else {
+  } else if (!drawnAlone) {
     view.onViewUpdate?.();
   }
 

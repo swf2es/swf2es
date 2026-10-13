@@ -9,10 +9,14 @@
 // writes the rows and uploads them, and no vertex moves. A run too short to
 // repay its multi-draw, as filters leave, is drawn by Pixi's pipe. What the
 // table cannot draw, a context with a texture or a Graphics that rounds to
-// pixels, is drawn by Pixi's own pipe in its place in the run. A Flash
-// colour transform's batched copies stay with the colour batcher
-// (render/color.ts): drawn here, a few batched draws became thousands of the
+// pixels, is drawn by Pixi's own pipe in its place in the run. A large
+// Graphics under a Flash colour transform, in a group that has not settled,
+// is drawn here too, the transform in its row (render/color.ts, showFor):
+// as a batched copy, its vertices were packed again with every rebuild and
+// every change of the transform. Small ones, and a settled group's, stay
+// batched copies: drawn here, a few batched draws became thousands of the
 // table's, which cost the GPU more than the CPU saved.
+import type { ColorTransform } from "@swf2es/format";
 import {
   Buffer,
   BufferImageSource,
@@ -38,10 +42,14 @@ import {
 
 const NAME = "flashTable";
 
-/** Texels a row: the linear part, the translation, the tint. */
-const ROW_TEXELS = 4;
-const TABLE_WIDTH = 1024;
-const ROWS_A_LINE = TABLE_WIDTH / ROW_TEXELS;
+/**
+ * Texels a row: the linear part; the translation, and whether a colour
+ * transform applies; the tint; the colour transform's multipliers and its
+ * offsets.
+ */
+const ROW_TEXELS = 5;
+const ROWS_A_LINE = 256;
+const TABLE_WIDTH = ROWS_A_LINE * ROW_TEXELS;
 /**
  * The fewest draws a run makes through the table; Pixi's pipe draws a
  * shorter one. A multi-draw call costs Chrome's GPU process some 5 to 15
@@ -53,11 +61,11 @@ const ROWS_A_LINE = TABLE_WIDTH / ROW_TEXELS;
 const MIN_RUN = 16;
 /**
  * The most draws a run passes in uniforms rather than through the table
- * texture, whose upload costs Chrome a few µs more a run: 48 rows of 4
- * vectors leave room for Pixi's under the 256 every WebGL 2 allows a
- * vertex shader.
+ * texture, whose upload costs Chrome a few µs more a run: 40 rows of 5
+ * vectors leave room for Pixi's, and for what a driver keeps for itself,
+ * under the 256 every WebGL 2 allows a vertex shader.
  */
-const SHORT_RUN = 48;
+const SHORT_RUN = 40;
 /** Floats a vertex of a context's packed geometry: position, UV, colour, texture and rounding. */
 const VERTEX_FLOATS = 6;
 /** Atlas vertices dropped contexts may leave as holes before it is packed again. */
@@ -65,6 +73,9 @@ const ATLAS_SLACK = 1 << 16;
 
 let enabled = true;
 let minRun = MIN_RUN;
+/** The renderers the table's pipes were made for, and those of them not WebGL. */
+const pipes = new Set<object>();
+const notWebGL = new Set<object>();
 
 /**
  * Draw Graphics alone through the table, or not, from the next frame: a
@@ -80,8 +91,21 @@ export function setTransformTable(on: boolean, shortest = MIN_RUN): void {
 }
 
 /**
+ * Whether every renderer is WebGL, where a Graphics drawn alone can take a
+ * colour transform: in a row of the table, or through Pixi's pipe with the
+ * colour shader (render/color.ts).
+ */
+export function drawsColorAlone(): boolean {
+  return pipes.size > 0 && notWebGL.size === 0;
+}
+
+/**
  * The vertex shader, reading a draw's row from the table texture or, for a
  * short run (SHORT_RUN), from a uniform array laid out as the table's rows.
+ * Under a Flash colour transform it passes the straight colour as the
+ * colour batcher packs it (render/color.ts, straight): the fill's times the
+ * Graphics' own tint, rounded to a byte, and alpha cut to one; Pixi's group
+ * colour is left out, as the transform includes every ancestor's.
  */
 const vertex = (short: boolean) => `#version 300 es
 #extension GL_ANGLE_multi_draw : require
@@ -98,6 +122,9 @@ ${
 uniform float uBase;`
 }
 out vec4 vColor;
+flat out float vFlash;
+flat out vec4 vMul;
+flat out vec4 vAdd;
 
 void main(void) {
 ${
@@ -105,30 +132,54 @@ ${
     ? `  int at = gl_DrawID * ${ROW_TEXELS};
   vec4 m = uRows[at];
   vec4 t = uRows[at + 1];
-  vec4 tint = uRows[at + 2];`
+  vec4 tint = uRows[at + 2];
+  vec4 mul = uRows[at + 3];
+  vec4 add = uRows[at + 4];`
     : `  int row = int(uBase) + gl_DrawID;
   ivec2 at = ivec2((row & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, row >> ${Math.log2(ROWS_A_LINE)});
   vec4 m = texelFetch(uTable, at, 0);
   vec4 t = texelFetch(uTable, at + ivec2(1, 0), 0);
-  vec4 tint = texelFetch(uTable, at + ivec2(2, 0), 0);`
+  vec4 tint = texelFetch(uTable, at + ivec2(2, 0), 0);
+  vec4 mul = texelFetch(uTable, at + ivec2(3, 0), 0);
+  vec4 add = texelFetch(uTable, at + ivec2(4, 0), 0);`
 }
   mat3 modelMatrix = mat3(m.x, m.y, 0.0, m.z, m.w, 0.0, t.x, t.y, 1.0);
   mat3 modelViewProjectionMatrix = uProjectionMatrix * uWorldTransformMatrix * modelMatrix;
   gl_Position = vec4((modelViewProjectionMatrix * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
-  // As Pixi's graphics shader: the premultiplied fill times the group's tint and the world's.
-  vColor = vec4(1.0);
-  vColor *= vec4(aColor.rgb * aColor.a, aColor.a);
-  vColor *= tint;
-  vColor *= uWorldColorAlpha;
+  vFlash = t.z;
+  vMul = mul;
+  vAdd = add;
+  if (t.z > 0.5) {
+    // A byte's product is never half way between two, so the rounding is the batcher's.
+    vColor = vec4(
+      floor(aColor.rgb * tint.rgb * 255.0 + 0.5),
+      floor(aColor.a * tint.a * 255.0 + 0.001)
+    ) / 255.0;
+  } else {
+    // As Pixi's graphics shader: the premultiplied fill times the group's tint and the world's.
+    vColor = vec4(1.0);
+    vColor *= vec4(aColor.rgb * aColor.a, aColor.a);
+    vColor *= tint;
+    vColor *= uWorldColorAlpha;
+  }
 }
 `;
 
+/** Under a colour transform, as the colour batcher's shader: applied to straight colour, clamped. */
 const fragment = `#version 300 es
 in vec4 vColor;
+flat in float vFlash;
+flat in vec4 vMul;
+flat in vec4 vAdd;
 out vec4 finalColor;
 
 void main(void) {
-  finalColor = vColor;
+  if (vFlash > 0.5) {
+    vec4 c = clamp(vColor * vMul + vAdd, 0.0, 1.0);
+    finalColor = vec4(c.rgb * c.a, c.a);
+  } else {
+    finalColor = vColor;
+  }
 }
 `;
 
@@ -371,6 +422,8 @@ type ContextSystem = {
 };
 
 type Drawn = Graphics & { _roundPixels: number };
+/** A Graphics as render/color.ts marks one under a Flash colour transform. */
+type Colored = Graphics & { flashColor?: ColorTransform | null };
 
 const tableSource = (height: number) =>
   new BufferImageSource({
@@ -420,7 +473,9 @@ export class TablePipe {
 
   constructor(renderer: WebGLRenderer) {
     this.renderer = renderer;
+    pipes.add(this);
     if (renderer.type !== RendererType.WEBGL) {
+      notWebGL.add(this);
       return;
     }
 
@@ -568,7 +623,27 @@ export class TablePipe {
     out[at + 3] = m.d;
     out[at + 4] = m.tx;
     out[at + 5] = m.ty;
-    color32BitToUniform(graphics.groupColorAlpha, out, at + 8);
+    const ct = (graphics as Colored).flashColor;
+    if (ct) {
+      // Its own tint and alpha, straight, as the colour batcher's: a glyph's colour.
+      const bgr = graphics.localColor;
+      out[at + 6] = 1;
+      out[at + 8] = (bgr & 0xff) / 255;
+      out[at + 9] = ((bgr >> 8) & 0xff) / 255;
+      out[at + 10] = ((bgr >> 16) & 0xff) / 255;
+      out[at + 11] = graphics.localAlpha;
+      out[at + 12] = ct.rMul;
+      out[at + 13] = ct.gMul;
+      out[at + 14] = ct.bMul;
+      out[at + 15] = ct.aMul;
+      out[at + 16] = ct.rAdd / 255;
+      out[at + 17] = ct.gAdd / 255;
+      out[at + 18] = ct.bAdd / 255;
+      out[at + 19] = ct.aAdd / 255;
+    } else {
+      out[at + 6] = 0;
+      color32BitToUniform(graphics.groupColorAlpha, out, at + 8);
+    }
 
     this.cursor++;
   }
@@ -755,6 +830,8 @@ export class TablePipe {
   }
 
   destroy(): void {
+    pipes.delete(this);
+    notWebGL.delete(this);
     if (this.renderer.type !== RendererType.WEBGL) {
       return;
     }

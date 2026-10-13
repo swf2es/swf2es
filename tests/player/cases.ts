@@ -4078,6 +4078,134 @@ function tableRuns(): Uint8Array {
   return w.swf({ width: 240, height: 160, frameRate: 24, frameCount: 3, tags });
 }
 
+/**
+ * Large timeline shapes under colour transforms that change each frame, as
+ * a tween fades a creature out to white, in a render group that has not
+ * settled: batched copies on the first frame, before their shapes are
+ * built, and drawn alone after (render/color.ts, showFor). Flat discs,
+ * which the transform table draws with the transform in their rows
+ * (render/table.ts), and a gradient and a bitmap with transparent pixels,
+ * which Pixi's pipe draws with the colour shader; an offset, a fade, an
+ * alpha multiplier and a negative one, a shape taking a transform and
+ * another giving its up. No gradient stop is clamped, which Flash does
+ * before the ramp and swf2es after.
+ */
+function colorAlone(): Uint8Array {
+  // Of hundreds of vertices, as a creature's parts are, which a batched copy packs again for each
+  // change of transform: a disc of 240 sides, and squares of 60 points a side.
+  const round: w.PathCommand[] = [{ move: [300, 0] }];
+  for (let k = 1; k <= 240; k++) {
+    const a = (2 * Math.PI * k) / 240;
+    round.push({ line: [Math.round(300 * Math.cos(a)), Math.round(300 * Math.sin(a))] });
+  }
+
+  const square: w.PathCommand[] = [{ move: [0, 0] }];
+  const corners = [
+    [0, 0],
+    [800, 0],
+    [800, 800],
+    [0, 800],
+    [0, 0],
+  ];
+  for (let side = 0; side < 4; side++) {
+    const [x0, y0] = corners[side];
+    const [x1, y1] = corners[side + 1];
+    for (let k = 1; k <= 60; k++) {
+      square.push({
+        line: [Math.round(x0 + ((x1 - x0) * k) / 60), Math.round(y0 + ((y1 - y0) * k) / 60)],
+      });
+    }
+  }
+
+  const disc = (id: number, color: number) =>
+    w.shape({
+      id,
+      bounds: [-300, 300, -300, 300],
+      fills: [color],
+      paths: [{ fill1: 1, commands: round }],
+    });
+  const box = (id: number, fill: w.ShapeSpec["fills"][number]) =>
+    w.shape({
+      id,
+      bounds: [0, 800, 0, 800],
+      fills: [fill],
+      paths: [{ fill1: 1, commands: square }],
+      version: 3,
+    });
+  // 4 by 4 premultiplied ARGB, a quarter of it transparent and a quarter half so.
+  const pixels = Array.from({ length: 16 }, (_, i) =>
+    i < 4 ? 0x00000000 : i < 8 ? 0x80400020 : i % 2 ? 0xff20c040 : 0xffe08020,
+  );
+  const data = pixels.flatMap((p) => [p >>> 24, (p >> 16) & 0xff, (p >> 8) & 0xff, p & 0xff]);
+  const header = [4, 0, 5, 4, 0, 4, 0];
+  const compressed = zlibCompress(Uint8Array.from(data));
+  const body = new Uint8Array(header.length + compressed.length);
+  body.set(header);
+  body.set(compressed, header.length);
+  const at = (x: number, y: number) => ({ tx: x * 20, ty: y * 20 });
+  const fade = (alpha: number) => ({ mult: [0, 0, 0, alpha], add: [255, 255, 255, 0] });
+  const frames = [
+    [
+      fade(1),
+      { mult: [1, 1, 1, 1], add: [80, 0, -40, 0] },
+      undefined,
+      { mult: [1, 0.5, 1, 0.5], add: [0, 60, 0, 0] },
+    ],
+    [fade(0.6), { mult: [1, 1, 1, 1], add: [0, 90, 0, 0] }, fade(0.8), { mult: [1, 1, 1, 1] }],
+    [
+      fade(0.3),
+      { mult: [-1, -1, -1, 1], add: [255, 255, 255, 0] },
+      { mult: [1.5, 1, 1, 1], add: [0, 0, 0, -64] },
+      { mult: [1, 1, 1, 1], add: [0, 0, 60, 0] },
+    ],
+  ];
+  const tags: Uint8Array[] = [
+    w.fileAttributes(true),
+    w.backgroundColor(0x606060),
+    disc(1, 0xe04030),
+    disc(2, 0x30b050),
+    box(3, {
+      type: 0x10,
+      matrix: { a: 800 / 32768, d: 800 / 32768, tx: 400, ty: 400 },
+      stops: [
+        [0, 0xff806040],
+        [255, 0x403060a0],
+      ],
+    }),
+    w.tag(36, body, true),
+    box(5, { bitmap: 4, type: 0x43, matrix: { a: 200, d: 200 } }),
+  ];
+  // Four columns, one transform each: two discs, the gradient and the bitmap a column.
+  const place = (frame: number) => {
+    const out: Uint8Array[] = [];
+    for (let column = 0; column < 4; column++) {
+      const ct = frames[frame - 1][column];
+      for (let row = 0; row < 4; row++) {
+        const depth = 1 + column * 4 + row;
+        const character = [1, 2, 3, 5][row];
+        const x = 10 + column * 55 + (row < 2 ? 15 + row * 25 : (row - 2) * 27);
+        const y = row < 2 ? 22 : 50;
+        out.push(
+          w.place({
+            depth,
+            ...(frame === 1 ? { character } : { move: true }),
+            matrix: row < 2 ? at(x, y) : { a: 0.6, d: 0.6, ...at(x, y) },
+            colorTransform: ct ?? (frame === 1 ? undefined : { mult: [1, 1, 1, 1] }),
+          }),
+        );
+      }
+    }
+
+    return out;
+  };
+  for (let frame = 1; frame <= 3; frame++) {
+    tags.push(...place(frame), w.showFrame());
+  }
+
+  tags.push(w.end());
+  return w.swf({ width: 230, height: 100, frameRate: 24, frameCount: 3, tags });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 // A rounded panel 100 by 60 with a line, for the `scale9` case: its corners
@@ -4442,6 +4570,7 @@ export const cases: PlayerCase[] = [
     capture: [1, 2, 3],
     tolerance: 32,
     maxOutliers: 60,
+    table: true,
   },
   {
     name: "table-runs",
@@ -4452,6 +4581,18 @@ export const cases: PlayerCase[] = [
     // and around the small shapes.
     tolerance: 32,
     maxOutliers: 1000,
+    table: true,
+  },
+  {
+    name: "color-alone",
+    swf: colorAlone(),
+    frames: 3,
+    capture: [1, 2, 3],
+    // Within 3 a channel, Flash's 8.8 multipliers against floats, but for
+    // the discs' edges, anti-aliased each rasteriser's way: up to 1,034
+    // channels a frame. A shape in a wrong colour adds some 1,700.
+    tolerance: 3,
+    maxOutliers: 1100,
     table: true,
   },
   {
@@ -5046,6 +5187,7 @@ export const cases: PlayerCase[] = [
     // line's round caps, anti-aliased each rasteriser's way: 48 channels a frame.
     tolerance: 2,
     maxOutliers: 60,
+    table: true,
   },
   {
     name: "text-layout",
