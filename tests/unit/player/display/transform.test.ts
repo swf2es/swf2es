@@ -138,4 +138,18 @@ test("matrix3D null changes nothing in 2D, and from 3D gives back the 2D scales 
   assert.equal(e.space, null);
   assert.deepEqual([e.scaleX, e.scaleY], [2, 3]);
   assert.deepEqual(e.matrix, IDENTITY_MATRIX);
+
+  // A scale set then makes the matrix again from them all, the rotation from before too.
+  const f = new DisplayObject();
+  f.setRotation(20);
+  f.setScaleX(2);
+  f.setScaleY(3);
+  f.set3D("rotationY", 30);
+  f.setMatrix3D(null);
+  assert.equal(f.rotation, 20);
+  f.setScaleX(4);
+  near(f.matrix.a, 4 * Math.cos(Math.PI / 9));
+  near(f.matrix.b, 4 * Math.sin(Math.PI / 9));
+  near(f.matrix.c, -3 * Math.sin(Math.PI / 9));
+  near(f.matrix.d, 3 * Math.cos(Math.PI / 9));
 });

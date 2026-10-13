@@ -239,6 +239,12 @@ export class DisplayObject {
   rotation = 0;
   /** The second column's turn beyond the first's, in degrees: 0 but for a matrix that skews. */
   skew = 0;
+  /**
+   * Whether the matrix is not the one the scales, rotation and skew make:
+   * the identity matrix3D set to null leaves, which a scale set then makes
+   * again from all of them, as Flash's does, not in proportion.
+   */
+  private unmade = false;
   colorTransform: ColorTransform | null = null;
   visible = true;
   /**
@@ -445,6 +451,7 @@ export class DisplayObject {
   /** As setMatrix, with a matrix made for it, which it keeps: a place's, on each move of each frame. */
   private adoptMatrix(m: Matrix): void {
     this.space = null;
+    this.unmade = false;
     this.matrix = m;
     this.scaleX = Math.hypot(m.a, m.b);
     this.scaleY = Math.hypot(m.c, m.d);
@@ -468,6 +475,12 @@ export class DisplayObject {
       return;
     }
 
+    if (this.unmade) {
+      this.scaleX = v;
+      this.remake();
+      return;
+    }
+
     const column = scaled(v, this.scaleX, this.matrix.a, this.matrix.b);
     this.scaleX = v;
     if (column) {
@@ -481,6 +494,12 @@ export class DisplayObject {
   setScaleY(v: number): void {
     if (this.space) {
       this.set3D("scaleY", v);
+      return;
+    }
+
+    if (this.unmade) {
+      this.scaleY = v;
+      this.remake();
       return;
     }
 
@@ -507,6 +526,7 @@ export class DisplayObject {
   }
 
   private remake(): void {
+    this.unmade = false;
     const [sinR, cosR] = sinCos(this.rotation || 0);
     const [sinQ, cosQ] = sinCos((this.rotation || 0) + this.skew);
     this.matrix = {
@@ -593,6 +613,7 @@ export class DisplayObject {
       if (this.space) {
         this.setMatrix(IDENTITY);
         [this.scaleX, this.scaleY, this.rotation, this.skew] = before;
+        this.unmade = true;
       }
 
       return;
