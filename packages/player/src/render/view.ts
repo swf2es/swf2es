@@ -356,6 +356,12 @@ export class PixiView {
    * as a pool's objects or a panel shown and hidden come back, then emptied.
    */
   private readonly parked = new Map<Node, number>();
+  /** The nodes on the list blended with erase or alpha outside any layer (checkStageClear). */
+  private readonly clearing = new Set<Node>();
+  /** The nodes on the list blended outside any layer in a mode the GPU blends as Flash only over opaque pixels. */
+  private readonly overOpaque = new Set<Node>();
+  /** Whether the stage's pixels may be less than opaque below a blend (checkStageClear). */
+  private stageClear = true;
   /** Retain only batches, not detached display trees, while a group waits for reuse. */
   private readonly parkedGroups = new Map<
     number,
@@ -1309,6 +1315,8 @@ export class PixiView {
     }
 
     node.released = true;
+    this.clearing.delete(node);
+    this.overOpaque.delete(node);
     this.listSpare(node);
     const group = node.container.isRenderGroup ? node.container.renderGroup : null;
     if (group) {
@@ -1834,20 +1842,20 @@ export class PixiView {
 
     if (!this.fresh) {
       this.group(o, node);
-      const direct = isolated ? null : this.directBlend(node);
-      if (direct !== node.directBlend || (direct && refilled)) {
-        // A fill blends as it is drawn; a filtered object as its chain's result is drawn.
-        const chain = node.filters[0];
-        container.blendMode = direct && !chain ? direct : "inherit";
-        if (chain instanceof FilterChain) {
-          chain.blendOver(direct ?? "normal");
-        }
-
-        const blending = direct ? null : blendFilters(node.blend);
-        container.filters =
-          node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;
-        node.directBlend = direct;
+      // What may leave the stage's pixels less than opaque, and what blends only over opaque ones.
+      if (!isolated && (node.blend === "erase" || node.blend === "alpha")) {
+        this.clearing.add(node);
+      } else {
+        this.clearing.delete(node);
       }
+
+      if (!isolated && (node.blend === "multiply" || node.blend === "subtract")) {
+        this.overOpaque.add(node);
+      } else {
+        this.overOpaque.delete(node);
+      }
+
+      this.blendDirectly(node, isolated ? null : this.directBlend(node), refilled);
       o.dirty = CLEAN;
     }
 
@@ -1858,33 +1866,74 @@ export class PixiView {
     return container;
   }
 
+  /** Blend `node` in `direct` by the GPU's own blending, or by its blend filter for null. */
+  private blendDirectly(node: Node, direct: BLEND_MODES | null, refilled: boolean): void {
+    if (direct === node.directBlend && !(direct && refilled)) {
+      return;
+    }
+
+    // A fill blends as it is drawn; a filtered object as its chain's result is drawn.
+    const container = node.container;
+    const chain = node.filters[0];
+    container.blendMode = direct && !chain ? direct : "inherit";
+    if (chain instanceof FilterChain) {
+      chain.blendOver(direct ?? "normal");
+    }
+
+    const blending = direct ? null : blendFilters(node.blend);
+    container.filters =
+      node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;
+    node.directBlend = direct;
+  }
+
+  /**
+   * Whether the stage's pixels may be less than opaque as what is below a
+   * blend: a clear background, or an erase or alpha blend outside any layer
+   * on the list, which clears what it covers on the stage as adl does.
+   * Where that changes, the multiply and subtract blends drawn over it
+   * choose again, before what is drawn this frame.
+   */
+  private checkStageClear(): void {
+    // A stand-in renderer may have no background: it is drawn on nothing.
+    const clear = (this.renderer.background?.alpha ?? 1) < 1 || this.clearing.size > 0;
+    if (clear === this.stageClear) {
+      return;
+    }
+
+    this.stageClear = clear;
+    for (const node of this.overOpaque) {
+      this.blendDirectly(node, this.directBlend(node), false);
+    }
+  }
+
   /**
    * The mode `node` is blended in by the GPU's own blending, where that is
    * what Flash draws, else null for a blend filter (render/blend.ts). Flash
    * blends the object as one layer, so it must be drawn at once: as a
-   * single fill, or as its filters' result. Over an opaque backdrop, the
-   * stage's, as an isolated layer's may not be, Flash's add, subtract,
-   * multiply and screen are the GPU's to 8-bit rounding (the
-   * `blend-formulas` case); screen's holds over any backdrop. Its lighten,
-   * darken and difference blend the straight colours, which the GPU's min
-   * and max of premultiplied ones are only where opaque.
+   * single fill, or as its filters' result. Flash's add and screen are the
+   * GPU's over any backdrop, its subtract and multiply over an opaque one,
+   * to 8-bit rounding (the `blend-formulas` case): over a clear pixel GPU
+   * multiply drops the object's own colour, which Flash keeps, and
+   * subtract its alpha. An isolated layer's ground may be clear where the
+   * stage's is not, so none is used in one. Its lighten, darken and
+   * difference blend the straight colours, which the GPU's min and max of
+   * premultiplied ones are only where opaque.
    */
   private directBlend(node: Node): BLEND_MODES | null {
     if (node.singleDraw !== 1 && !(node.filters[0] instanceof FilterChain)) {
       return null;
     }
 
+    // WebGPU's add leaves an opaque target less than opaque, and it has no subtract.
     switch (node.blend) {
       case "screen":
         return "screen";
       case "multiply":
-        return this.renderer.background.alpha === 1 ? "multiply" : null;
+        return this.stageClear ? null : "multiply";
       case "add":
+        return this.renderer.type === RendererType.WEBGL ? "add" : null;
       case "subtract":
-        // WebGPU's add leaves an opaque target less than opaque, and it has no subtract.
-        return this.renderer.type === RendererType.WEBGL && this.renderer.background.alpha === 1
-          ? node.blend
-          : null;
+        return this.renderer.type === RendererType.WEBGL && !this.stageClear ? "subtract" : null;
       default:
         return null;
     }
@@ -2215,8 +2264,16 @@ export class PixiView {
     this.rescaled = this.leastWidth !== this.strokedAt || units !== this.filteredAt;
     this.strokedAt = this.leastWidth;
     this.filteredAt = units;
+    if (!this.fresh) {
+      this.checkStageClear();
+    }
+
     const node = this.sync(root, UNIT, false);
     this.rescaled = false;
+    if (!this.fresh) {
+      this.checkStageClear();
+    }
+
     if (node.parent !== this.stage) {
       this.stage.removeChildren();
       this.stage.addChild(node, this.offList);

@@ -3629,10 +3629,19 @@ stage's colour included, where Pixi would blend each child on its own.
 Where Pixi draws such a layer at once, as a single fill with no masks or
 as a filtered object's result, and the GPU's own blending computes
 Flash's blend, the GPU blends it, with no copy of what is below:
-`screen` anywhere, and `add`, `subtract` and `multiply` over an opaque
-stage, under WebGL for the first two (WebGPU's add keeps the alpha below
-and it has no subtract), never below a blended, filtered or clipped
-ancestor, which may draw it into a layer whose ground is clear. A filtered object's chain draws
+`screen` and `add` over any ground, `subtract` and `multiply` while the
+stage's pixels are opaque, add and subtract under WebGL alone (WebGPU's
+add leaves an opaque target less than opaque, and it has no subtract),
+and none below a blended, filtered or clipped ancestor, which may draw it
+into a layer whose ground is clear. Over a clear pixel the GPU's multiply
+drops the object's own colour, which Flash keeps (off by up to 128), and
+its subtract the alpha. The stage's pixels may be clear while its
+background is (a host's transparent window mode, set at any time) or
+while an `erase` or `alpha` blend outside any layer is on the list, which
+clears what it covers of the stage as adl does; the view checks both
+before and after it brings the list up to date, and where that changes,
+each multiply and subtract blend outside a layer chooses again, so that
+it switches on the frame the change is drawn on (`blend-direct-clear`). A filtered object's chain draws
 its result with that blend (`FilterChain.blendOver`); the Pixi fork maps
 `subtract` to WebGL's reverse subtraction. adl's lighten, darken and
 difference blend the straight colours, which the GPU's min and max of
