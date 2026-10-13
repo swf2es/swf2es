@@ -2,7 +2,7 @@
 // object, as $store; the natives read and write it. Flash's limits and its
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
-import { BitmapStore, type PixelRect } from "../../../bitmap/bitmap.js";
+import { BitmapStore, type PixelRect, pixelRect } from "../../../bitmap/bitmap.js";
 import { applyFilter, filterRect, filtersDrawn } from "../../../bitmap/filters.js";
 import {
   type Affine,
@@ -66,43 +66,33 @@ function sizeOf(s: Scripting, o: AsObject): BitmapStore {
   return store;
 }
 
-/** The nearest integer, a half to the even one, as C's rint rounds and Flash's pixel coordinates do. */
-function nearest(v: number): number {
-  const f = Math.floor(v);
-  const d = v - f;
-  if (d !== 0.5) {
-    return d > 0.5 ? f + 1 : f;
-  }
-
-  return f % 2 === 0 ? f : f + 1;
-}
-
-/** A flash.geom.Rectangle as pixels; TypeError 2007 for null. */
+/** A flash.geom.Rectangle as pixels (bitmap.ts pixelRect); TypeError 2007 for null. */
 function rectOf(s: Scripting, v: Value): PixelRect {
   if (v === null || v === undefined) {
     throw s.rt.error("TypeError", 2007, "rect");
   }
 
-  // Each edge rounded to the nearest pixel, a half to the even one, as
-  // Flash does: a rect from 1.6 of 1.8 fills the pixel at 2 alone, one
-  // from 3.5 of 1 fills nothing (Ruffle's bitmapdata_rectangle_rounding).
   const r = v as AsObject;
   const read = (k: string) => s.rt.toNumber(s.rt.getProperty(r, s.rt.publicName(k))) || 0;
-  const x0 = nearest(read("x"));
-  const y0 = nearest(read("y"));
-  const x1 = nearest(read("x") + read("width"));
-  const y1 = nearest(read("y") + read("height"));
-  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+  return pixelRect(read("x"), read("y"), read("width"), read("height"));
 }
 
-/** A flash.geom.Point's values, rounded to pixels; TypeError 2007 for null. */
+/**
+ * A flash.geom.Point's values as pixels, truncated toward 0 as Flash's
+ * destination, alpha and hit-test points are, unlike a rect's rounded
+ * edges; NaN, and anything past int's range, int's least, which lies off
+ * every bitmap, as adl takes them; TypeError 2007 for null.
+ */
 function pointOf(s: Scripting, v: Value, name: string): [number, number] {
   if (v === null || v === undefined) {
     throw s.rt.error("TypeError", 2007, name);
   }
 
   const p = v as AsObject;
-  const read = (k: string) => nearest(s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k))) || 0);
+  const read = (k: string) => {
+    const t = Math.trunc(s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k))));
+    return t >= -0x80000000 && t <= 0x7fffffff ? t + 0 : -0x80000000;
+  };
   return [read("x"), read("y")];
 }
 
@@ -383,7 +373,20 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.unsupported(`BitmapData.generateFilterRect with a ${f.kind} filter`);
       }
 
-      // The rect within the bitmap first; a displacement map's result within it too.
+      // The rect within the bitmap first, an edge of it a rect of no width;
+      // one apart from it Flash makes 2^27 - 1 on each side, of no size.
+      const given = rectOf(s, sourceRect);
+      const x0 = Math.max(0, given.x);
+      const y0 = Math.max(0, given.y);
+      const x1 = Math.min(store.width, given.x + given.width);
+      const y1 = Math.min(store.height, given.y + given.height);
+      let r = filterRect(
+        x1 >= x0 && y1 >= y0
+          ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
+          : { x: 0x7ffffff, y: 0x7ffffff, width: 0, height: 0 },
+        f,
+      );
+      // A displacement map's result within the bitmap too.
       const within = (r: PixelRect): PixelRect => {
         const x0 = Math.max(0, r.x);
         const y0 = Math.max(0, r.y);
@@ -393,7 +396,6 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
           ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
           : { x: 0, y: 0, width: 0, height: 0 };
       };
-      let r = filterRect(within(rectOf(s, sourceRect)), f);
       if (f.kind === "displacementMap") {
         r = within(r);
       }
@@ -773,11 +775,13 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const isPoint = name === "flash.geom::Point";
       const isRect = name === "flash.geom::Rectangle";
       if (isPoint || isRect) {
-        const read = (k: string) => s.rt.toNumber(s.rt.getProperty(other, s.rt.publicName(k))) || 0;
-        const x0 = Math.trunc(read("x")) - fx;
-        const y0 = Math.trunc(read("y")) - fy;
-        const w = isRect ? Math.trunc(read("width")) : 1;
-        const h = isRect ? Math.trunc(read("height")) : 1;
+        // A point truncated, a rect's edges rounded, as everywhere else.
+        const area = isRect ? rectOf(s, other) : null;
+        const [px, py] = isPoint ? pointOf(s, other, "secondObject") : [0, 0];
+        const x0 = (area ? area.x : px) - fx;
+        const y0 = (area ? area.y : py) - fy;
+        const w = area ? area.width : 1;
+        const h = area ? area.height : 1;
         for (let y = Math.max(0, y0); y < Math.min(store.height, y0 + h); y++) {
           for (let x = Math.max(0, x0); x < Math.min(store.width, x0 + w); x++) {
             // A point or rect hits no pixel of alpha 0, at threshold 0 too (bitmapdata_hittest_threshold).
@@ -831,7 +835,14 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "sourceRect");
       }
 
-      const r = rectOf(s, rect);
+      // A rect of a negative size is taken as the one it spans, here alone.
+      const given = rectOf(s, rect);
+      const r = {
+        x: Math.min(given.x, given.x + given.width),
+        y: Math.min(given.y, given.y + given.height),
+        width: Math.abs(given.width),
+        height: Math.abs(given.height),
+      };
       const [dx, dy] = pointOf(s, dest, "destPoint");
       const n = count === undefined ? 0 : s.rt.toInt(count);
       if (n < 0) {

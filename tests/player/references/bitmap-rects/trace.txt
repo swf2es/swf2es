@@ -1,0 +1,1162 @@
+copy false 2,3,5,4 @3,4 3,4 5x4 shift 1,1
+copy false -3,2,8,4 @3,4 6,4 5x4 shift 6,2
+copy false 2,-3,5,8 @3,4 3,7 5x5 shift 1,7
+copy false 12,3,8,4 @3,4 3,4 4x4 shift -9,1
+copy false 3,13,4,6 @3,4 3,4 4x3 shift 0,-9
+copy false 0.5,3,5,4 @3,4 3,4 6x4 shift 3,1
+copy false 1.5,3,5,4 @3,4 3,4 4x4 shift 1,1
+copy false 2.5,3,5,4 @3,4 3,4 6x4 shift 1,1
+copy false -0.5,3,5,4 @3,4 3,4 4x4 shift 3,1
+copy false -0.7,3,5,4 @3,4 4,4 4x4 shift 4,1
+copy false -1.5,3,5,4 @3,4 5,4 4x4 shift 5,1
+copy false 2,3,5.5,4 @3,4 3,4 6x4 shift 1,1
+copy false 2,3,4.5,4 @3,4 3,4 4x4 shift 1,1
+copy false 2.6,3,5.6,4 @3,4 3,4 5x4 shift 0,1
+copy false 2,-1.5,5,6 @3,4 3,6 5x4 shift 1,6
+copy false -5,-3,20,20 @3,4 8,7 8x9 shift 8,7
+copy false 2.5,1.7,10.6,10.2 @3,4 3,4 11x10 shift 1,2
+copy false 5,5,-3,4 @3,4 none
+copy false 14.5,2,3,3 @3,4 3,4 2x3 shift -11,2
+copy false 15.5,2,3,3 @3,4 none
+copy false 2,3,5,4 @ 3,4 3,4 5x4 shift 1,1
+copy false 2,3,5,4 @ 3.5,4 3,4 5x4 shift 1,1
+copy false 2,3,5,4 @ 3.7,4 3,4 5x4 shift 1,1
+copy false 2,3,5,4 @ 4.5,4 4,4 5x4 shift 2,1
+copy false 2,3,5,4 @ -0.5,4 0,4 5x4 shift -2,1
+copy false 2,3,5,4 @ -0.7,4 0,4 5x4 shift -2,1
+copy false 2,3,5,4 @ -1.5,4 0,4 4x4 shift -3,1
+copy false 2,3,5,4 @ 3,-1.5 3,0 5x3 shift 1,-4
+copy false 2,3,5,4 @ -3,-2 0,0 2x2 shift -5,-5
+copy false 2,3,5,4 @ 13.5,4 13,4 3x4 shift 11,1
+copy false 2,3,5,4 @ 14.5,4 14,4 2x4 shift 12,1
+copy false 2,3,5,4 @ 3,14.5 3,14 5x2 shift 1,11
+copy false 2,3,5,4 @ 3.4,3.6 3,3 5x4 shift 1,0
+copy true 2,3,5,4 @3,4 3,4 5x4 shift 1,1
+copy true -3,2,8,4 @3,4 3,4 8x4 empty=12 shift 6,2
+copy true 2,-3,5,8 @3,4 3,4 5x8 empty=15 shift 1,7
+copy true 12,3,8,4 @3,4 3,4 4x4 shift -9,1
+copy true 3,13,4,6 @3,4 3,4 4x3 shift 0,-9
+copy true 0.5,3,5,4 @3,4 3,4 6x4 shift 3,1
+copy true 1.5,3,5,4 @3,4 3,4 4x4 shift 1,1
+copy true 2.5,3,5,4 @3,4 3,4 6x4 shift 1,1
+copy true -0.5,3,5,4 @3,4 3,4 4x4 shift 3,1
+copy true -0.7,3,5,4 @3,4 3,4 5x4 empty=4 shift 4,1
+copy true -1.5,3,5,4 @3,4 3,4 6x4 empty=8 shift 5,1
+copy true 2,3,5.5,4 @3,4 3,4 6x4 shift 1,1
+copy true 2,3,4.5,4 @3,4 3,4 4x4 shift 1,1
+copy true 2.6,3,5.6,4 @3,4 3,4 5x4 shift 0,1
+copy true 2,-1.5,5,6 @3,4 3,4 5x6 empty=10 shift 1,6
+copy true -5,-3,20,20 @3,4 3,4 13x12 empty=84 shift 8,7
+copy true 2.5,1.7,10.6,10.2 @3,4 3,4 11x10 shift 1,2
+copy true 5,5,-3,4 @3,4 none
+copy true 14.5,2,3,3 @3,4 3,4 2x3 shift -11,2
+copy true 15.5,2,3,3 @3,4 none
+copy true 2,3,5,4 @ 3,4 3,4 5x4 shift 1,1
+copy true 2,3,5,4 @ 3.5,4 3,4 5x4 shift 1,1
+copy true 2,3,5,4 @ 3.7,4 3,4 5x4 shift 1,1
+copy true 2,3,5,4 @ 4.5,4 4,4 5x4 shift 2,1
+copy true 2,3,5,4 @ -0.5,4 0,4 5x4 [2,3 3,3 4,3 5,3 6,3 4,3 5,3 6,3 5,4 6,4 6,3 5,4 6,4 5,5 6,5 6,4 5,5 6,5 5,6 6,6]
+copy true 2,3,5,4 @ -0.7,4 0,4 5x4 [2,3 3,3 4,3 5,3 6,3 4,3 5,3 6,3 5,4 6,4 6,3 5,4 6,4 5,5 6,5 6,4 5,5 6,5 5,6 6,6]
+copy true 2,3,5,4 @ -1.5,4 0,4 4x4 [3,3 4,3 5,3 6,3 6,3 4,4 5,4 6,4 6,4 4,5 5,5 6,5 6,5 4,6 5,6 6,6]
+copy true 2,3,5,4 @ 3,-1.5 3,0 5x3 shift 1,-4
+copy true 2,3,5,4 @ -3,-2 0,0 2x2 shift -5,-5
+copy true 2,3,5,4 @ 13.5,4 13,4 3x4 shift 11,1
+copy true 2,3,5,4 @ 14.5,4 14,4 2x4 shift 12,1
+copy true 2,3,5,4 @ 3,14.5 3,14 5x2 shift 1,11
+copy true 2,3,5,4 @ 3.4,3.6 3,3 5x4 shift 1,0
+inplace -3,2,8,4 @ 3,4 3,4 8x4 empty=12 shift 6,2 / 3,4 8x4 empty=12 shift 6,2 / 3,4 6x4 empty=12 shift 6,2
+inplace drawn -3,2,8,4 @ 3,4 3,4 8x4 empty=12 shift 6,2 / 3,4 6x4 empty=12 shift 6,2
+inplace -3,2,8,4 @ 5,4 5,4 8x4 empty=12 shift 8,2 / 5,4 8x4 empty=12 shift 8,2 / 5,4 6x4 empty=12 shift 8,2
+inplace drawn -3,2,8,4 @ 5,4 5,4 8x4 empty=12 shift 8,2 / 5,4 6x4 empty=12 shift 8,2
+inplace -3,2,8,4 @ 6,3 9,3 5x4 shift 9,1 / 9,3 5x4 shift 9,1 / 9,3 3x4 shift 9,1
+inplace drawn -3,2,8,4 @ 6,3 9,3 5x4 shift 9,1 / 9,3 3x4 shift 9,1
+inplace -3,2,8,4 @ 5,6 5,6 8x4 empty=12 shift 8,4 / 5,6 8x4 empty=12 shift 8,4 / 5,6 6x4 empty=12 shift 8,4
+inplace drawn -3,2,8,4 @ 5,6 5,6 8x4 empty=12 shift 8,4 / 5,6 6x4 empty=12 shift 8,4
+inplace -3,2,8,4 @ 5,7 8,7 5x4 shift 8,5 / 8,7 5x4 shift 8,5 / 8,7 3x4 shift 8,5
+inplace drawn -3,2,8,4 @ 5,7 8,7 5x4 shift 8,5 / 8,7 3x4 shift 8,5
+inplace -3,2,8,4 @ 3,2 3,2 8x4 empty=12 shift 6,0 / 3,2 8x4 empty=12 shift 6,0 / 3,2 6x4 empty=12 shift 6,0
+inplace drawn -3,2,8,4 @ 3,2 3,2 8x4 empty=12 shift 6,0 / 3,2 6x4 empty=12 shift 6,0
+inplace -3,2,8,4 @ 2,0 5,0 5x4 shift 5,-2 / 5,0 5x4 shift 5,-2 / 5,0 3x4 shift 5,-2
+inplace drawn -3,2,8,4 @ 2,0 5,0 5x4 shift 5,-2 / 5,0 3x4 shift 5,-2
+inplace -3,2,8,4 @ -1,1 2,1 5x4 shift 2,-1 / 2,1 5x4 shift 2,-1 / 2,1 3x4 shift 2,-1
+inplace drawn -3,2,8,4 @ -1,1 2,1 5x4 shift 2,-1 / 2,1 3x4 shift 2,-1
+inplace -3,2,8,4 @ -2,3 0,3 6x4 empty=4 shift 1,1 / 0,3 6x4 empty=4 shift 1,1 / 0,3 4x4 empty=4 shift 1,1
+inplace drawn -3,2,8,4 @ -2,3 0,3 6x4 empty=4 shift 1,1 / 0,3 4x4 empty=4 shift 1,1
+inplace 2,-3,4,8 @ 2,5 2,5 4x8 empty=12 shift 0,8 / 2,5 4x8 empty=12 shift 0,8 / 2,5 4x5 empty=12 shift 0,8
+inplace drawn 2,-3,4,8 @ 2,5 2,5 4x8 empty=12 shift 0,8 / 2,5 4x5 empty=12 shift 0,8
+inplace 2,-3,4,8 @ 6,5 6,5 4x8 empty=12 shift 4,8 / 6,5 4x8 empty=12 shift 4,8 / 6,5 4x5 empty=12 shift 4,8
+inplace drawn 2,-3,4,8 @ 6,5 6,5 4x8 empty=12 shift 4,8 / 6,5 4x5 empty=12 shift 4,8
+inplace 2,-3,4,8 @ 7,5 7,8 4x5 shift 5,8 / 7,8 4x5 shift 5,8 / 7,8 4x2 shift 5,8
+inplace drawn 2,-3,4,8 @ 7,5 7,8 4x5 shift 5,8 / 7,8 4x2 shift 5,8
+inplace 2,-3,4,8 @ 1,-1 1,2 4x5 [2,0 3,0 4,0 5,0 2,1 3,1 4,1 5,1 3,0 4,0 5,0 5,2 3,1 4,1 5,1 5,3 4,0 5,0 5,2 5,4] / 1,2 4x5 [2,0 3,0 4,0 5,0 2,1 3,1 4,1 5,1 3,0 4,0 5,0 5,2 3,1 4,1 5,1 5,3 4,0 5,0 5,2 5,4] / 1,2 4x2 shift -1,2
+inplace drawn 2,-3,4,8 @ 1,-1 1,2 4x5 [2,0 3,0 4,0 5,0 2,1 3,1 4,1 5,1 3,0 4,0 5,0 5,2 3,1 4,1 5,1 5,3 4,0 5,0 5,2 5,4] / 1,2 4x2 shift -1,2
+inplace -3,-3,8,8 @ 0,0 0,0 8x8 empty=39 shift 3,3 / 0,0 8x8 empty=39 shift 3,3 / 0,0 6x5 empty=24 shift 3,3
+inplace drawn -3,-3,8,8 @ 0,0 0,0 8x8 empty=39 shift 3,3 / 0,0 6x5 empty=24 shift 3,3
+inplace -3,-3,8,8 @ -3,-1 0,0 5x7 empty=10 shift 0,2 / 0,0 5x7 empty=10 shift 0,2 / 0,0 3x4 empty=6 shift 0,2
+inplace drawn -3,-3,8,8 @ -3,-1 0,0 5x7 empty=10 shift 0,2 / 0,0 3x4 empty=6 shift 0,2
+inplace -2,-1,4,3 @ 3,4 5,5 2x2 shift 5,5 / 5,5 2x2 shift 5,5 / 5,5 2x2 shift 5,5
+inplace drawn -2,-1,4,3 @ 3,4 5,5 2x2 shift 5,5 / 5,5 2x2 shift 5,5
+inplace -2.5,2,8,4 @ 3.5,4.5 3,4 8x4 empty=8 shift 5,2 / 3,4 8x4 empty=8 shift 5,2 / 3,4 6x4 empty=8 shift 5,2
+inplace drawn -2.5,2,8,4 @ 3.5,4.5 3,4 8x4 empty=8 shift 5,2 / 3,4 6x4 empty=8 shift 5,2
+inplace 2.5,-2.5,4,8 @ 2,5 2,5 4x8 empty=8 shift 0,7 / 2,5 4x8 empty=8 shift 0,7 / 2,5 4x5 empty=8 shift 0,7
+inplace drawn 2.5,-2.5,4,8 @ 2,5 2,5 4x8 empty=8 shift 0,7 / 2,5 4x5 empty=8 shift 0,7
+inplace 12,3,8,4 @ 10,4 10,4 4x4 [12,3 13,3 14,3 15,3 14,3 15,3 14,4 15,4 14,4 15,4 14,5 15,5 14,5 15,5 14,6 15,6] / 10,4 4x4 [12,3 13,3 14,3 15,3 14,3 15,3 14,4 15,4 14,4 15,4 14,5 15,5 14,5 15,5 14,6 15,6] / 10,4 4x4 [12,3 13,3 14,3 15,3 14,3 15,3 14,4 15,4 14,4 15,4 14,5 15,5 14,5 15,5 14,6 15,6]
+inplace drawn 12,3,8,4 @ 10,4 10,4 4x4 [12,3 13,3 14,3 15,3 14,3 15,3 14,4 15,4 14,4 15,4 14,5 15,5 14,5 15,5 14,6 15,6] / 10,4 4x4 [12,3 13,3 14,3 15,3 14,3 15,3 14,4 15,4 14,4 15,4 14,5 15,5 14,5 15,5 14,6 15,6]
+inplace 2,3,5,4 @ 1,4 1,4 5x4 [2,3 3,3 4,3 5,3 6,3 3,3 4,3 5,3 6,3 6,4 4,3 5,3 6,3 6,4 6,5 5,3 6,3 6,4 6,5 6,6] / 1,4 5x4 [2,3 3,3 4,3 5,3 6,3 3,3 4,3 5,3 6,3 6,4 4,3 5,3 6,3 6,4 6,5 5,3 6,3 6,4 6,5 6,6] / 1,4 5x4 [2,3 3,3 4,3 5,3 6,3 3,3 4,3 5,3 6,3 6,4 4,3 5,3 6,3 6,4 6,5 5,3 6,3 6,4 6,5 6,6]
+inplace drawn 2,3,5,4 @ 1,4 1,4 5x4 [2,3 3,3 4,3 5,3 6,3 3,3 4,3 5,3 6,3 6,4 4,3 5,3 6,3 6,4 6,5 5,3 6,3 6,4 6,5 6,6] / 1,4 5x4 [2,3 3,3 4,3 5,3 6,3 3,3 4,3 5,3 6,3 6,4 4,3 5,3 6,3 6,4 6,5 5,3 6,3 6,4 6,5 6,6]
+inplace 2,3,5,4 @ 3,2 3,2 5x4 shift 1,-1 / 3,2 5x4 shift 1,-1 / 3,2 5x4 shift 1,-1
+inplace drawn 2,3,5,4 @ 3,2 3,2 5x4 shift 1,-1 / 3,2 5x4 shift 1,-1
+inplace 10,2,8,4 @ 6,3 6,3 6x4 [10,2 11,2 12,2 13,2 14,2 15,2 14,2 15,2 12,3 13,3 14,3 15,3 14,3 15,3 12,4 13,4 14,4 15,4 14,4 15,4 12,5 13,5 14,5 15,5] / 6,3 6x4 [10,2 11,2 12,2 13,2 14,2 15,2 14,2 15,2 12,3 13,3 14,3 15,3 14,3 15,3 12,4 13,4 14,4 15,4 14,4 15,4 12,5 13,5 14,5 15,5] / 6,3 6x4 [10,2 11,2 12,2 13,2 14,2 15,2 14,2 15,2 12,3 13,3 14,3 15,3 14,3 15,3 12,4 13,4 14,4 15,4 14,4 15,4 12,5 13,5 14,5 15,5]
+inplace drawn 10,2,8,4 @ 6,3 6,3 6x4 [10,2 11,2 12,2 13,2 14,2 15,2 14,2 15,2 12,3 13,3 14,3 15,3 14,3 15,3 12,4 13,4 14,4 15,4 14,4 15,4 12,5 13,5 14,5 15,5] / 6,3 6x4 [10,2 11,2 12,2 13,2 14,2 15,2 14,2 15,2 12,3 13,3 14,3 15,3 14,3 15,3 12,4 13,4 14,4 15,4 14,4 15,4 12,5 13,5 14,5 15,5]
+transparent inplace 2,3,5,4 @ 3,4 3,4 5x4 shift 1,1 / 3,4 5x4 shift 1,1
+transparent inplace 2,3,5,4 @ 1,4 1,4 5x4 [2,3 3,3 4,3 5,3 6,3 3,3 4,3 5,3 6,3 6,4 4,3 5,3 6,3 6,4 6,5 5,3 6,3 6,4 6,5 6,6] / 1,4 5x4 [2,3 3,3 4,3 5,3 6,3 3,3 4,3 5,3 6,3 6,4 4,3 5,3 6,3 6,4 6,5 5,3 6,3 6,4 6,5 6,6]
+transparent inplace 12,3,8,4 @ 10,4 10,4 4x4 [12,3 13,3 14,3 15,3 14,3 15,3 14,4 15,4 14,4 15,4 14,5 15,5 14,5 15,5 14,6 15,6] / 10,4 4x4 [12,3 13,3 14,3 15,3 14,3 15,3 14,4 15,4 14,4 15,4 14,5 15,5 14,5 15,5 14,6 15,6]
+transparent inplace -2,-1,4,3 @ 3,4 5,5 2x2 shift 5,5 / 5,5 2x2 shift 5,5
+transparent inplace -3,2,8,4 @ 2,0 5,0 5x4 shift 5,-2 / 5,0 5x4 shift 5,-2
+transparent inplace -3,2,8,4 @ 6,3 9,3 5x4 shift 9,1 / 9,3 5x4 shift 9,1
+transparent inplace 2.5,3,5.5,4 @ 3.5,4 3,4 6x4 shift 1,1 / 3,4 6x4 shift 1,1
+drawn -3,2,8,4 @ 3,4 6,4 5x4 shift 6,2 / 6,4 5x4 shift 6,2
+drawn -3,2,8,4 @ 3.5,4 6,4 5x4 shift 6,2 / 6,4 5x4 shift 6,2
+drawn -3,2,8,4 @ -1.5,4 2,4 5x4 shift 2,2 / 2,4 5x4 shift 2,2
+drawn -3,2,8,4 @ 10,10 13,10 3x4 shift 13,8 / 13,10 3x4 shift 13,8
+drawn -3,2,8,4 @ 3.4,3.6 6,3 5x4 shift 6,1 / 6,3 5x4 shift 6,1
+drawn 2.5,3,5.5,4 @ 3,4 3,4 6x4 shift 1,1 / 3,4 6x4 shift 1,1
+drawn 2.5,3,5.5,4 @ 3.5,4 3,4 6x4 shift 1,1 / 3,4 6x4 shift 1,1
+drawn 2.5,3,5.5,4 @ -1.5,4 0,4 5x4 shift -3,1 / 0,4 5x4 shift -3,1
+drawn 2.5,3,5.5,4 @ 10,10 10,10 6x4 shift 8,7 / 10,10 6x4 shift 8,7
+drawn 2.5,3,5.5,4 @ 3.4,3.6 3,3 6x4 shift 1,0 / 3,3 6x4 shift 1,0
+drawn -1.5,3,5,4 @ 3,4 5,4 4x4 shift 5,1 / 5,4 4x4 shift 5,1
+drawn -1.5,3,5,4 @ 3.5,4 5,4 4x4 shift 5,1 / 5,4 4x4 shift 5,1
+drawn -1.5,3,5,4 @ -1.5,4 1,4 4x4 shift 1,1 / 1,4 4x4 shift 1,1
+drawn -1.5,3,5,4 @ 10,10 12,10 4x4 shift 12,7 / 12,10 4x4 shift 12,7
+drawn -1.5,3,5,4 @ 3.4,3.6 5,3 4x4 shift 5,0 / 5,3 4x4 shift 5,0
+drawn -5,-3,20,20 @ 3,4 8,7 8x9 shift 8,7 / 8,7 8x9 shift 8,7
+drawn -5,-3,20,20 @ 3.5,4 8,7 8x9 shift 8,7 / 8,7 8x9 shift 8,7
+drawn -5,-3,20,20 @ -1.5,4 4,7 12x9 shift 4,7 / 4,7 12x9 shift 4,7
+drawn -5,-3,20,20 @ 10,10 15,13 1x3 shift 15,13 / 15,13 1x3 shift 15,13
+drawn -5,-3,20,20 @ 3.4,3.6 8,6 8x10 shift 8,6 / 8,6 8x10 shift 8,6
+drawn 2.5,1.7,10.6,10.2 @ 3,4 3,4 11x10 shift 1,2 / 3,4 11x10 shift 1,2
+drawn 2.5,1.7,10.6,10.2 @ 3.5,4 3,4 11x10 shift 1,2 / 3,4 11x10 shift 1,2
+drawn 2.5,1.7,10.6,10.2 @ -1.5,4 0,4 10x10 shift -3,2 / 0,4 10x10 shift -3,2
+drawn 2.5,1.7,10.6,10.2 @ 10,10 10,10 6x6 shift 8,8 / 10,10 6x6 shift 8,8
+drawn 2.5,1.7,10.6,10.2 @ 3.4,3.6 3,3 11x10 shift 1,1 / 3,3 11x10 shift 1,1
+alpha 2,3,5,4 @ 3,4 ap 0,0 3,4 5x4 shift 1,1 / 3,4 5x4 shift 1,1
+alpha 2,3,5,4 @ 3.5,4 ap 0,0 3,4 5x4 shift 1,1 / 3,4 5x4 shift 1,1
+alpha 2,3,5,4 @ -1.5,4 ap 0,0 0,4 4x4 shift -3,1 / 0,4 4x4 shift -3,1
+alpha 2,3,5,4 @ 3,4 ap 1.5,2 3,4 5x3 shift 1,1 / 3,4 5x3 shift 1,1
+alpha 2,3,5,4 @ 3.5,4 ap 1.5,2 3,4 5x3 shift 1,1 / 3,4 5x3 shift 1,1
+alpha 2,3,5,4 @ -1.5,4 ap 1.5,2 0,4 4x3 shift -3,1 / 0,4 4x3 shift -3,1
+alpha 2,3,5,4 @ 3,4 ap 2.5,2 3,4 4x3 shift 1,1 / 3,4 4x3 shift 1,1
+alpha 2,3,5,4 @ 3.5,4 ap 2.5,2 3,4 4x3 shift 1,1 / 3,4 4x3 shift 1,1
+alpha 2,3,5,4 @ -1.5,4 ap 2.5,2 0,4 3x3 shift -3,1 / 0,4 3x3 shift -3,1
+alpha 2,3,5,4 @ 3,4 ap -1.5,0 4,4 4x4 shift 1,1 / 4,4 4x4 shift 1,1
+alpha 2,3,5,4 @ 3.5,4 ap -1.5,0 4,4 4x4 shift 1,1 / 4,4 4x4 shift 1,1
+alpha 2,3,5,4 @ -1.5,4 ap -1.5,0 0,4 4x4 shift -3,1 / 0,4 4x4 shift -3,1
+alpha 2,3,5,4 @ 3,4 ap -0.5,0 3,4 5x4 shift 1,1 / 3,4 5x4 shift 1,1
+alpha 2,3,5,4 @ 3.5,4 ap -0.5,0 3,4 5x4 shift 1,1 / 3,4 5x4 shift 1,1
+alpha 2,3,5,4 @ -1.5,4 ap -0.5,0 0,4 4x4 shift -3,1 / 0,4 4x4 shift -3,1
+alpha 2,3,5,4 @ 3,4 ap 0.5,0 3,4 5x4 shift 1,1 / 3,4 5x4 shift 1,1
+alpha 2,3,5,4 @ 3.5,4 ap 0.5,0 3,4 5x4 shift 1,1 / 3,4 5x4 shift 1,1
+alpha 2,3,5,4 @ -1.5,4 ap 0.5,0 0,4 4x4 shift -3,1 / 0,4 4x4 shift -3,1
+alpha 2,3,5,4 @ 3,4 ap 1,2.5 3,4 5x3 shift 1,1 / 3,4 5x3 shift 1,1
+alpha 2,3,5,4 @ 3.5,4 ap 1,2.5 3,4 5x3 shift 1,1 / 3,4 5x3 shift 1,1
+alpha 2,3,5,4 @ -1.5,4 ap 1,2.5 0,4 4x3 shift -3,1 / 0,4 4x3 shift -3,1
+merge 2,3,5,4 @ 3,4 3,4 5x4 shift 1,1 / 3,4 5x4 shift 1,1
+merge 2,3,5,4 @ 3.5,4 3,4 5x4 shift 1,1 / 3,4 5x4 shift 1,1
+merge 2,3,5,4 @ -1.5,4 0,4 4x4 shift -3,1 / 0,4 4x4 shift -3,1
+alpha -3,2,8,4 @ 3,4 ap 0,0 6,4 3x4 shift 6,2 / 6,4 3x4 shift 6,2
+alpha -3,2,8,4 @ 3.5,4 ap 0,0 6,4 3x4 shift 6,2 / 6,4 3x4 shift 6,2
+alpha -3,2,8,4 @ -1.5,4 ap 0,0 2,4 3x4 shift 2,2 / 2,4 3x4 shift 2,2
+alpha -3,2,8,4 @ 3,4 ap 1.5,2 6,4 2x3 shift 6,2 / 6,4 2x3 shift 6,2
+alpha -3,2,8,4 @ 3.5,4 ap 1.5,2 6,4 2x3 shift 6,2 / 6,4 2x3 shift 6,2
+alpha -3,2,8,4 @ -1.5,4 ap 1.5,2 2,4 2x3 shift 2,2 / 2,4 2x3 shift 2,2
+alpha -3,2,8,4 @ 3,4 ap 2.5,2 6,4 1x3 shift 6,2 / 6,4 1x3 shift 6,2
+alpha -3,2,8,4 @ 3.5,4 ap 2.5,2 6,4 1x3 shift 6,2 / 6,4 1x3 shift 6,2
+alpha -3,2,8,4 @ -1.5,4 ap 2.5,2 2,4 1x3 shift 2,2 / 2,4 1x3 shift 2,2
+alpha -3,2,8,4 @ 3,4 ap -1.5,0 6,4 4x4 shift 6,2 / 6,4 4x4 shift 6,2
+alpha -3,2,8,4 @ 3.5,4 ap -1.5,0 6,4 4x4 shift 6,2 / 6,4 4x4 shift 6,2
+alpha -3,2,8,4 @ -1.5,4 ap -1.5,0 2,4 4x4 shift 2,2 / 2,4 4x4 shift 2,2
+alpha -3,2,8,4 @ 3,4 ap -0.5,0 6,4 3x4 shift 6,2 / 6,4 3x4 shift 6,2
+alpha -3,2,8,4 @ 3.5,4 ap -0.5,0 6,4 3x4 shift 6,2 / 6,4 3x4 shift 6,2
+alpha -3,2,8,4 @ -1.5,4 ap -0.5,0 2,4 3x4 shift 2,2 / 2,4 3x4 shift 2,2
+alpha -3,2,8,4 @ 3,4 ap 0.5,0 6,4 3x4 shift 6,2 / 6,4 3x4 shift 6,2
+alpha -3,2,8,4 @ 3.5,4 ap 0.5,0 6,4 3x4 shift 6,2 / 6,4 3x4 shift 6,2
+alpha -3,2,8,4 @ -1.5,4 ap 0.5,0 2,4 3x4 shift 2,2 / 2,4 3x4 shift 2,2
+alpha -3,2,8,4 @ 3,4 ap 1,2.5 6,4 2x3 shift 6,2 / 6,4 2x3 shift 6,2
+alpha -3,2,8,4 @ 3.5,4 ap 1,2.5 6,4 2x3 shift 6,2 / 6,4 2x3 shift 6,2
+alpha -3,2,8,4 @ -1.5,4 ap 1,2.5 2,4 2x3 shift 2,2 / 2,4 2x3 shift 2,2
+merge -3,2,8,4 @ 3,4 6,4 5x4 shift 6,2 / 6,4 5x4 shift 6,2
+merge -3,2,8,4 @ 3.5,4 6,4 5x4 shift 6,2 / 6,4 5x4 shift 6,2
+merge -3,2,8,4 @ -1.5,4 2,4 5x4 shift 2,2 / 2,4 5x4 shift 2,2
+alpha 2.5,3,5.5,4 @ 3,4 ap 0,0 3,4 6x4 shift 1,1 / 3,4 6x4 shift 1,1
+alpha 2.5,3,5.5,4 @ 3.5,4 ap 0,0 3,4 6x4 shift 1,1 / 3,4 6x4 shift 1,1
+alpha 2.5,3,5.5,4 @ -1.5,4 ap 0,0 0,4 5x4 shift -3,1 / 0,4 5x4 shift -3,1
+alpha 2.5,3,5.5,4 @ 3,4 ap 1.5,2 3,4 5x3 shift 1,1 / 3,4 5x3 shift 1,1
+alpha 2.5,3,5.5,4 @ 3.5,4 ap 1.5,2 3,4 5x3 shift 1,1 / 3,4 5x3 shift 1,1
+alpha 2.5,3,5.5,4 @ -1.5,4 ap 1.5,2 0,4 4x3 shift -3,1 / 0,4 4x3 shift -3,1
+alpha 2.5,3,5.5,4 @ 3,4 ap 2.5,2 3,4 4x3 shift 1,1 / 3,4 4x3 shift 1,1
+alpha 2.5,3,5.5,4 @ 3.5,4 ap 2.5,2 3,4 4x3 shift 1,1 / 3,4 4x3 shift 1,1
+alpha 2.5,3,5.5,4 @ -1.5,4 ap 2.5,2 0,4 3x3 shift -3,1 / 0,4 3x3 shift -3,1
+alpha 2.5,3,5.5,4 @ 3,4 ap -1.5,0 4,4 5x4 shift 1,1 / 4,4 5x4 shift 1,1
+alpha 2.5,3,5.5,4 @ 3.5,4 ap -1.5,0 4,4 5x4 shift 1,1 / 4,4 5x4 shift 1,1
+alpha 2.5,3,5.5,4 @ -1.5,4 ap -1.5,0 0,4 5x4 shift -3,1 / 0,4 5x4 shift -3,1
+alpha 2.5,3,5.5,4 @ 3,4 ap -0.5,0 3,4 6x4 shift 1,1 / 3,4 6x4 shift 1,1
+alpha 2.5,3,5.5,4 @ 3.5,4 ap -0.5,0 3,4 6x4 shift 1,1 / 3,4 6x4 shift 1,1
+alpha 2.5,3,5.5,4 @ -1.5,4 ap -0.5,0 0,4 5x4 shift -3,1 / 0,4 5x4 shift -3,1
+alpha 2.5,3,5.5,4 @ 3,4 ap 0.5,0 3,4 6x4 shift 1,1 / 3,4 6x4 shift 1,1
+alpha 2.5,3,5.5,4 @ 3.5,4 ap 0.5,0 3,4 6x4 shift 1,1 / 3,4 6x4 shift 1,1
+alpha 2.5,3,5.5,4 @ -1.5,4 ap 0.5,0 0,4 5x4 shift -3,1 / 0,4 5x4 shift -3,1
+alpha 2.5,3,5.5,4 @ 3,4 ap 1,2.5 3,4 5x3 shift 1,1 / 3,4 5x3 shift 1,1
+alpha 2.5,3,5.5,4 @ 3.5,4 ap 1,2.5 3,4 5x3 shift 1,1 / 3,4 5x3 shift 1,1
+alpha 2.5,3,5.5,4 @ -1.5,4 ap 1,2.5 0,4 4x3 shift -3,1 / 0,4 4x3 shift -3,1
+merge 2.5,3,5.5,4 @ 3,4 3,4 6x4 shift 1,1 / 3,4 6x4 shift 1,1
+merge 2.5,3,5.5,4 @ 3.5,4 3,4 6x4 shift 1,1 / 3,4 6x4 shift 1,1
+merge 2.5,3,5.5,4 @ -1.5,4 0,4 5x4 shift -3,1 / 0,4 5x4 shift -3,1
+alpha -1.5,3,5,4 @ 3,4 ap 0,0 5,4 4x4 shift 5,1 / 5,4 4x4 shift 5,1
+alpha -1.5,3,5,4 @ 3.5,4 ap 0,0 5,4 4x4 shift 5,1 / 5,4 4x4 shift 5,1
+alpha -1.5,3,5,4 @ -1.5,4 ap 0,0 1,4 4x4 shift 1,1 / 1,4 4x4 shift 1,1
+alpha -1.5,3,5,4 @ 3,4 ap 1.5,2 5,4 3x3 shift 5,1 / 5,4 3x3 shift 5,1
+alpha -1.5,3,5,4 @ 3.5,4 ap 1.5,2 5,4 3x3 shift 5,1 / 5,4 3x3 shift 5,1
+alpha -1.5,3,5,4 @ -1.5,4 ap 1.5,2 1,4 3x3 shift 1,1 / 1,4 3x3 shift 1,1
+alpha -1.5,3,5,4 @ 3,4 ap 2.5,2 5,4 2x3 shift 5,1 / 5,4 2x3 shift 5,1
+alpha -1.5,3,5,4 @ 3.5,4 ap 2.5,2 5,4 2x3 shift 5,1 / 5,4 2x3 shift 5,1
+alpha -1.5,3,5,4 @ -1.5,4 ap 2.5,2 1,4 2x3 shift 1,1 / 1,4 2x3 shift 1,1
+alpha -1.5,3,5,4 @ 3,4 ap -1.5,0 5,4 4x4 shift 5,1 / 5,4 4x4 shift 5,1
+alpha -1.5,3,5,4 @ 3.5,4 ap -1.5,0 5,4 4x4 shift 5,1 / 5,4 4x4 shift 5,1
+alpha -1.5,3,5,4 @ -1.5,4 ap -1.5,0 1,4 4x4 shift 1,1 / 1,4 4x4 shift 1,1
+alpha -1.5,3,5,4 @ 3,4 ap -0.5,0 5,4 4x4 shift 5,1 / 5,4 4x4 shift 5,1
+alpha -1.5,3,5,4 @ 3.5,4 ap -0.5,0 5,4 4x4 shift 5,1 / 5,4 4x4 shift 5,1
+alpha -1.5,3,5,4 @ -1.5,4 ap -0.5,0 1,4 4x4 shift 1,1 / 1,4 4x4 shift 1,1
+alpha -1.5,3,5,4 @ 3,4 ap 0.5,0 5,4 4x4 shift 5,1 / 5,4 4x4 shift 5,1
+alpha -1.5,3,5,4 @ 3.5,4 ap 0.5,0 5,4 4x4 shift 5,1 / 5,4 4x4 shift 5,1
+alpha -1.5,3,5,4 @ -1.5,4 ap 0.5,0 1,4 4x4 shift 1,1 / 1,4 4x4 shift 1,1
+alpha -1.5,3,5,4 @ 3,4 ap 1,2.5 5,4 3x3 shift 5,1 / 5,4 3x3 shift 5,1
+alpha -1.5,3,5,4 @ 3.5,4 ap 1,2.5 5,4 3x3 shift 5,1 / 5,4 3x3 shift 5,1
+alpha -1.5,3,5,4 @ -1.5,4 ap 1,2.5 1,4 3x3 shift 1,1 / 1,4 3x3 shift 1,1
+merge -1.5,3,5,4 @ 3,4 5,4 4x4 shift 5,1 / 5,4 4x4 shift 5,1
+merge -1.5,3,5,4 @ 3.5,4 5,4 4x4 shift 5,1 / 5,4 4x4 shift 5,1
+merge -1.5,3,5,4 @ -1.5,4 1,4 4x4 shift 1,1 / 1,4 4x4 shift 1,1
+copyChannel false 2,3,5,4 @ 3,4 3,4 5x4 from 2,3
+copyChannel false 2,3,5,4 @ 3.5,4 3,4 5x4 from 2,3
+copyChannel false 2,3,5,4 @ -1.5,4 0,4 4x4 from 3,3
+copyChannel false 2,3,5,4 @ 3.4,3.6 3,3 5x4 from 2,3
+copyChannel false 2,3,5,4 @ 13,4 13,4 3x4 from 2,3
+copyChannel false 2,3,5,4 @ 1,4 1,4 5x4 from 2,3
+copyChannel false 2,3,5,4 @ 3,2 3,2 5x4 from 2,3
+copyChannel false -3,2,8,4 @ 3,4 6,4 5x4 from 0,2
+copyChannel false -3,2,8,4 @ 3.5,4 6,4 5x4 from 0,2
+copyChannel false -3,2,8,4 @ -1.5,4 2,4 5x4 from 0,2
+copyChannel false -3,2,8,4 @ 3.4,3.6 6,3 5x4 from 0,2
+copyChannel false -3,2,8,4 @ 13,4 none
+copyChannel false -3,2,8,4 @ 1,4 4,4 5x4 from 0,2
+copyChannel false -3,2,8,4 @ 3,2 6,2 5x4 from 0,2
+copyChannel false 2.5,3,5.5,4 @ 3,4 3,4 6x4 from 2,3
+copyChannel false 2.5,3,5.5,4 @ 3.5,4 3,4 6x4 from 2,3
+copyChannel false 2.5,3,5.5,4 @ -1.5,4 0,4 5x4 from 3,3
+copyChannel false 2.5,3,5.5,4 @ 3.4,3.6 3,3 6x4 from 2,3
+copyChannel false 2.5,3,5.5,4 @ 13,4 13,4 3x4 from 2,3
+copyChannel false 2.5,3,5.5,4 @ 1,4 1,4 6x4 from 2,3
+copyChannel false 2.5,3,5.5,4 @ 3,2 3,2 6x4 from 2,3
+copyChannel false -1.5,3,5,4 @ 3,4 5,4 4x4 from 0,3
+copyChannel false -1.5,3,5,4 @ 3.5,4 5,4 4x4 from 0,3
+copyChannel false -1.5,3,5,4 @ -1.5,4 1,4 4x4 from 0,3
+copyChannel false -1.5,3,5,4 @ 3.4,3.6 5,3 4x4 from 0,3
+copyChannel false -1.5,3,5,4 @ 13,4 15,4 1x4 from 0,3
+copyChannel false -1.5,3,5,4 @ 1,4 3,4 4x4 from 0,3
+copyChannel false -1.5,3,5,4 @ 3,2 5,2 4x4 from 0,3
+copyChannel false 1.5,3,5,4 @ 3,4 3,4 4x4 from 2,3
+copyChannel false 1.5,3,5,4 @ 3.5,4 3,4 4x4 from 2,3
+copyChannel false 1.5,3,5,4 @ -1.5,4 0,4 3x4 from 3,3
+copyChannel false 1.5,3,5,4 @ 3.4,3.6 3,3 4x4 from 2,3
+copyChannel false 1.5,3,5,4 @ 13,4 13,4 3x4 from 2,3
+copyChannel false 1.5,3,5,4 @ 1,4 1,4 4x4 from 2,3
+copyChannel false 1.5,3,5,4 @ 3,2 3,2 4x4 from 2,3
+copyChannel false -5,-3,20,20 @ 3,4 8,7 8x9 from 0,0
+copyChannel false -5,-3,20,20 @ 3.5,4 8,7 8x9 from 0,0
+copyChannel false -5,-3,20,20 @ -1.5,4 4,7 12x9 from 0,0
+copyChannel false -5,-3,20,20 @ 3.4,3.6 8,6 8x10 from 0,0
+copyChannel false -5,-3,20,20 @ 13,4 none
+copyChannel false -5,-3,20,20 @ 1,4 6,7 10x9 from 0,0
+copyChannel false -5,-3,20,20 @ 3,2 8,5 8x11 from 0,0
+copyChannel false 12,3,8,4 @ 3,4 3,4 4x4 from 12,3
+copyChannel false 12,3,8,4 @ 3.5,4 3,4 4x4 from 12,3
+copyChannel false 12,3,8,4 @ -1.5,4 0,4 3x4 from 13,3
+copyChannel false 12,3,8,4 @ 3.4,3.6 3,3 4x4 from 12,3
+copyChannel false 12,3,8,4 @ 13,4 13,4 3x4 from 12,3
+copyChannel false 12,3,8,4 @ 1,4 1,4 4x4 from 12,3
+copyChannel false 12,3,8,4 @ 3,2 3,2 4x4 from 12,3
+copyChannel true 2,3,5,4 @ 3,4 3,4 5x4 from 2,3
+copyChannel true 2,3,5,4 @ 3.5,4 3,4 5x4 from 2,3
+copyChannel true 2,3,5,4 @ -1.5,4 0,4 4x4 from 3,3
+copyChannel true 2,3,5,4 @ 3.4,3.6 3,3 5x4 from 2,3
+copyChannel true 2,3,5,4 @ 13,4 13,4 3x4 from 2,3
+copyChannel true 2,3,5,4 @ 1,4 1,4 5x4 from 2,3
+copyChannel true 2,3,5,4 @ 3,2 3,2 5x4 from 2,3
+copyChannel true -3,2,8,4 @ 3,4 6,4 5x4 from 0,2
+copyChannel true -3,2,8,4 @ 3.5,4 6,4 5x4 from 0,2
+copyChannel true -3,2,8,4 @ -1.5,4 2,4 5x4 from 0,2
+copyChannel true -3,2,8,4 @ 3.4,3.6 6,3 5x4 from 0,2
+copyChannel true -3,2,8,4 @ 13,4 none
+copyChannel true -3,2,8,4 @ 1,4 4,4 5x4 from 0,2
+copyChannel true -3,2,8,4 @ 3,2 6,2 5x4 from 0,2
+copyChannel true 2.5,3,5.5,4 @ 3,4 3,4 6x4 from 2,3
+copyChannel true 2.5,3,5.5,4 @ 3.5,4 3,4 6x4 from 2,3
+copyChannel true 2.5,3,5.5,4 @ -1.5,4 0,4 5x4 from 3,3
+copyChannel true 2.5,3,5.5,4 @ 3.4,3.6 3,3 6x4 from 2,3
+copyChannel true 2.5,3,5.5,4 @ 13,4 13,4 3x4 from 2,3
+copyChannel true 2.5,3,5.5,4 @ 1,4 1,4 6x4 from 2,3
+copyChannel true 2.5,3,5.5,4 @ 3,2 3,2 6x4 from 2,3
+copyChannel true -1.5,3,5,4 @ 3,4 5,4 4x4 from 0,3
+copyChannel true -1.5,3,5,4 @ 3.5,4 5,4 4x4 from 0,3
+copyChannel true -1.5,3,5,4 @ -1.5,4 1,4 4x4 from 0,3
+copyChannel true -1.5,3,5,4 @ 3.4,3.6 5,3 4x4 from 0,3
+copyChannel true -1.5,3,5,4 @ 13,4 15,4 1x4 from 0,3
+copyChannel true -1.5,3,5,4 @ 1,4 3,4 4x4 from 0,3
+copyChannel true -1.5,3,5,4 @ 3,2 5,2 4x4 from 0,3
+copyChannel true 1.5,3,5,4 @ 3,4 3,4 4x4 from 2,3
+copyChannel true 1.5,3,5,4 @ 3.5,4 3,4 4x4 from 2,3
+copyChannel true 1.5,3,5,4 @ -1.5,4 0,4 3x4 from 3,3
+copyChannel true 1.5,3,5,4 @ 3.4,3.6 3,3 4x4 from 2,3
+copyChannel true 1.5,3,5,4 @ 13,4 13,4 3x4 from 2,3
+copyChannel true 1.5,3,5,4 @ 1,4 1,4 4x4 from 2,3
+copyChannel true 1.5,3,5,4 @ 3,2 3,2 4x4 from 2,3
+copyChannel true -5,-3,20,20 @ 3,4 8,7 8x9 from 0,0
+copyChannel true -5,-3,20,20 @ 3.5,4 8,7 8x9 from 0,0
+copyChannel true -5,-3,20,20 @ -1.5,4 4,7 12x9 from 0,0
+copyChannel true -5,-3,20,20 @ 3.4,3.6 8,6 8x10 from 0,0
+copyChannel true -5,-3,20,20 @ 13,4 none
+copyChannel true -5,-3,20,20 @ 1,4 6,7 10x9 from 0,0
+copyChannel true -5,-3,20,20 @ 3,2 8,5 8x11 from 0,0
+copyChannel true 12,3,8,4 @ 3,4 3,4 4x4 from 12,3
+copyChannel true 12,3,8,4 @ 3.5,4 3,4 4x4 from 12,3
+copyChannel true 12,3,8,4 @ -1.5,4 0,4 3x4 from 13,3
+copyChannel true 12,3,8,4 @ 3.4,3.6 3,3 4x4 from 12,3
+copyChannel true 12,3,8,4 @ 13,4 13,4 3x4 from 12,3
+copyChannel true 12,3,8,4 @ 1,4 1,4 4x4 from 12,3
+copyChannel true 12,3,8,4 @ 3,2 3,2 4x4 from 12,3
+merge false 2,3,5,4 @ 3,4 3,4 5x4 shift 1,1
+merge false 2,3,5,4 @ 3.5,4 3,4 5x4 shift 1,1
+merge false 2,3,5,4 @ -1.5,4 0,4 4x4 shift -3,1
+merge false 2,3,5,4 @ 3.4,3.6 3,3 5x4 shift 1,0
+merge false 2,3,5,4 @ 13,4 13,4 3x4 shift 11,1
+merge false 2,3,5,4 @ 1,4 1,4 5x4 shift -1,1
+merge false 2,3,5,4 @ 3,2 3,2 5x4 shift 1,-1
+merge false -3,2,8,4 @ 3,4 6,4 5x4 shift 6,2
+merge false -3,2,8,4 @ 3.5,4 6,4 5x4 shift 6,2
+merge false -3,2,8,4 @ -1.5,4 2,4 5x4 shift 2,2
+merge false -3,2,8,4 @ 3.4,3.6 6,3 5x4 shift 6,1
+merge false -3,2,8,4 @ 13,4 none
+merge false -3,2,8,4 @ 1,4 4,4 5x4 shift 4,2
+merge false -3,2,8,4 @ 3,2 6,2 5x4 shift 6,0
+merge false 2.5,3,5.5,4 @ 3,4 3,4 6x4 shift 1,1
+merge false 2.5,3,5.5,4 @ 3.5,4 3,4 6x4 shift 1,1
+merge false 2.5,3,5.5,4 @ -1.5,4 0,4 5x4 shift -3,1
+merge false 2.5,3,5.5,4 @ 3.4,3.6 3,3 6x4 shift 1,0
+merge false 2.5,3,5.5,4 @ 13,4 13,4 3x4 shift 11,1
+merge false 2.5,3,5.5,4 @ 1,4 1,4 6x4 shift -1,1
+merge false 2.5,3,5.5,4 @ 3,2 3,2 6x4 shift 1,-1
+merge false -1.5,3,5,4 @ 3,4 5,4 4x4 shift 5,1
+merge false -1.5,3,5,4 @ 3.5,4 5,4 4x4 shift 5,1
+merge false -1.5,3,5,4 @ -1.5,4 1,4 4x4 shift 1,1
+merge false -1.5,3,5,4 @ 3.4,3.6 5,3 4x4 shift 5,0
+merge false -1.5,3,5,4 @ 13,4 15,4 1x4 shift 15,1
+merge false -1.5,3,5,4 @ 1,4 3,4 4x4 shift 3,1
+merge false -1.5,3,5,4 @ 3,2 5,2 4x4 shift 5,-1
+merge false 1.5,3,5,4 @ 3,4 3,4 4x4 shift 1,1
+merge false 1.5,3,5,4 @ 3.5,4 3,4 4x4 shift 1,1
+merge false 1.5,3,5,4 @ -1.5,4 0,4 3x4 shift -3,1
+merge false 1.5,3,5,4 @ 3.4,3.6 3,3 4x4 shift 1,0
+merge false 1.5,3,5,4 @ 13,4 13,4 3x4 shift 11,1
+merge false 1.5,3,5,4 @ 1,4 1,4 4x4 shift -1,1
+merge false 1.5,3,5,4 @ 3,2 3,2 4x4 shift 1,-1
+merge false -5,-3,20,20 @ 3,4 8,7 8x9 shift 8,7
+merge false -5,-3,20,20 @ 3.5,4 8,7 8x9 shift 8,7
+merge false -5,-3,20,20 @ -1.5,4 4,7 12x9 shift 4,7
+merge false -5,-3,20,20 @ 3.4,3.6 8,6 8x10 shift 8,6
+merge false -5,-3,20,20 @ 13,4 none
+merge false -5,-3,20,20 @ 1,4 6,7 10x9 shift 6,7
+merge false -5,-3,20,20 @ 3,2 8,5 8x11 shift 8,5
+merge false 12,3,8,4 @ 3,4 3,4 4x4 shift -9,1
+merge false 12,3,8,4 @ 3.5,4 3,4 4x4 shift -9,1
+merge false 12,3,8,4 @ -1.5,4 0,4 3x4 shift -13,1
+merge false 12,3,8,4 @ 3.4,3.6 3,3 4x4 shift -9,0
+merge false 12,3,8,4 @ 13,4 13,4 3x4 shift 1,1
+merge false 12,3,8,4 @ 1,4 1,4 4x4 shift -11,1
+merge false 12,3,8,4 @ 3,2 3,2 4x4 shift -9,-1
+merge true 2,3,5,4 @ 3,4 3,4 5x4 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3]
+merge true 2,3,5,4 @ 3.5,4 3,4 5x4 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3]
+merge true 2,3,5,4 @ -1.5,4 0,4 4x4 [3,3 4,3 5,3 6,3 6,3 4,4 5,4 6,4 6,4 4,5 5,5 6,5 6,5 4,6 5,6 6,6]
+merge true 2,3,5,4 @ 3.4,3.6 3,3 5x4 [2,3 2,3 2,3 2,3 2,3 2,4 2,4 2,4 2,4 2,4 2,5 2,5 2,5 2,5 2,5 2,6 2,6 2,6 2,6 2,6]
+merge true 2,3,5,4 @ 13,4 13,4 3x4 shift 11,1
+merge true 2,3,5,4 @ 1,4 1,4 5x4 [2,3 3,3 4,3 5,3 6,3 3,3 4,3 5,3 6,3 6,4 4,3 5,3 6,3 6,4 6,5 5,3 6,3 6,4 6,5 6,6]
+merge true 2,3,5,4 @ 3,2 3,2 5x4 shift 1,-1
+merge true -3,2,8,4 @ 3,4 6,4 5x4 shift 6,2
+merge true -3,2,8,4 @ 3.5,4 6,4 5x4 shift 6,2
+merge true -3,2,8,4 @ -1.5,4 2,4 5x4 [0,2 1,2 2,2 3,2 4,2 0,3 1,3 2,3 3,3 4,3 0,4 1,4 0,2 1,2 2,2 0,5 1,5 0,3 1,3 2,3]
+merge true -3,2,8,4 @ 3.4,3.6 6,3 5x4 shift 6,1
+merge true -3,2,8,4 @ 13,4 none
+merge true -3,2,8,4 @ 1,4 4,4 5x4 [0,2 1,2 2,2 3,2 4,2 0,3 1,3 2,3 3,3 4,3 0,4 1,4 2,4 3,4 0,2 0,5 1,5 2,5 3,5 0,3]
+merge true -3,2,8,4 @ 3,2 6,2 5x4 shift 6,0
+merge true 2.5,3,5.5,4 @ 3,4 3,4 6x4 [2,3 3,3 4,3 5,3 6,3 7,3 2,4 2,3 3,3 4,3 5,3 6,3 2,5 2,4 2,3 3,3 4,3 5,3 2,6 2,5 2,4 2,3 3,3 4,3]
+merge true 2.5,3,5.5,4 @ 3.5,4 3,4 6x4 [2,3 3,3 4,3 5,3 6,3 7,3 2,4 2,3 3,3 4,3 5,3 6,3 2,5 2,4 2,3 3,3 4,3 5,3 2,6 2,5 2,4 2,3 3,3 4,3]
+merge true 2.5,3,5.5,4 @ -1.5,4 0,4 5x4 [3,3 4,3 5,3 6,3 7,3 6,3 7,3 5,4 6,4 7,4 6,4 7,4 5,5 6,5 7,5 6,5 7,5 5,6 6,6 7,6]
+merge true 2.5,3,5.5,4 @ 3.4,3.6 3,3 6x4 [2,3 2,3 2,3 2,3 2,3 2,3 2,4 2,4 2,4 2,4 2,4 2,4 2,5 2,5 2,5 2,5 2,5 2,5 2,6 2,6 2,6 2,6 2,6 2,6]
+merge true 2.5,3,5.5,4 @ 13,4 13,4 3x4 shift 11,1
+merge true 2.5,3,5.5,4 @ 1,4 1,4 6x4 [2,3 3,3 4,3 5,3 6,3 7,3 3,3 4,3 5,3 6,3 7,3 7,4 4,3 5,3 6,3 7,3 7,4 7,5 5,3 6,3 7,3 7,4 7,5 7,6]
+merge true 2.5,3,5.5,4 @ 3,2 3,2 6x4 shift 1,-1
+merge true -1.5,3,5,4 @ 3,4 5,4 4x4 shift 5,1
+merge true -1.5,3,5,4 @ 3.5,4 5,4 4x4 shift 5,1
+merge true -1.5,3,5,4 @ -1.5,4 1,4 4x4 [0,3 1,3 2,3 3,3 0,4 0,3 1,3 2,3 0,5 0,4 0,3 1,3 0,6 0,5 0,4 0,3]
+merge true -1.5,3,5,4 @ 3.4,3.6 5,3 4x4 shift 5,0
+merge true -1.5,3,5,4 @ 13,4 15,4 1x4 shift 15,1
+merge true -1.5,3,5,4 @ 1,4 3,4 4x4 [0,3 1,3 2,3 3,3 0,4 1,4 2,4 0,3 0,5 1,5 2,5 0,4 0,6 1,6 2,6 0,5]
+merge true -1.5,3,5,4 @ 3,2 5,2 4x4 shift 5,-1
+merge true 1.5,3,5,4 @ 3,4 3,4 4x4 [2,3 3,3 4,3 5,3 2,4 2,3 3,3 4,3 2,5 2,4 2,3 3,3 2,6 2,5 2,4 2,3]
+merge true 1.5,3,5,4 @ 3.5,4 3,4 4x4 [2,3 3,3 4,3 5,3 2,4 2,3 3,3 4,3 2,5 2,4 2,3 3,3 2,6 2,5 2,4 2,3]
+merge true 1.5,3,5,4 @ -1.5,4 0,4 3x4 shift -3,1
+merge true 1.5,3,5,4 @ 3.4,3.6 3,3 4x4 [2,3 2,3 2,3 2,3 2,4 2,4 2,4 2,4 2,5 2,5 2,5 2,5 2,6 2,6 2,6 2,6]
+merge true 1.5,3,5,4 @ 13,4 13,4 3x4 shift 11,1
+merge true 1.5,3,5,4 @ 1,4 1,4 4x4 [2,3 3,3 4,3 5,3 3,3 4,3 5,3 5,4 4,3 5,3 5,4 5,5 5,3 5,4 5,5 5,6]
+merge true 1.5,3,5,4 @ 3,2 3,2 4x4 shift 1,-1
+merge true -5,-3,20,20 @ 3,4 8,7 8x9 shift 8,7
+merge true -5,-3,20,20 @ 3.5,4 8,7 8x9 shift 8,7
+merge true -5,-3,20,20 @ -1.5,4 4,7 12x9 [0,0 1,0 2,0 3,0 4,0 5,0 6,0 7,0 8,0 9,0 10,0 11,0 0,1 1,1 2,1 3,1 4,1 5,1 6,1 7,1 8,1 9,1 10,1 11,1 0,2 1,2 2,2 3,2 4,2 5,2 6,2 7,2 8,2 9,2 10,2 11,2 0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 0,4 1,4 2,4 3,4 4,4 5,4 6,4 7,4 8,4 9,4 10,4 11,4 0,5 1,5 2,5 3,5 4,5 5,5 6,5 7,5 8,5 9,5 10,5 11,5 0,6 1,6 2,6 3,6 4,6 5,6 6,6 7,6 8,6 9,6 10,6 11,6 0,7 1,7 2,7 3,7 0,0 1,0 2,0 3,0 4,0 5,0 6,0 7,0 0,8 1,8 2,8 3,8 0,1 1,1 2,1 3,1 4,1 5,1 6,1 7,1]
+merge true -5,-3,20,20 @ 3.4,3.6 8,6 8x10 shift 8,6
+merge true -5,-3,20,20 @ 13,4 none
+merge true -5,-3,20,20 @ 1,4 6,7 10x9 [0,0 1,0 2,0 3,0 4,0 5,0 6,0 7,0 8,0 9,0 0,1 1,1 2,1 3,1 4,1 5,1 6,1 7,1 8,1 9,1 0,2 1,2 2,2 3,2 4,2 5,2 6,2 7,2 8,2 9,2 0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 0,4 1,4 2,4 3,4 4,4 5,4 6,4 7,4 8,4 9,4 0,5 1,5 2,5 3,5 4,5 5,5 6,5 7,5 8,5 9,5 0,6 1,6 2,6 3,6 4,6 5,6 6,6 7,6 8,6 9,6 0,7 1,7 2,7 3,7 4,7 5,7 0,0 1,0 2,0 3,0 0,8 1,8 2,8 3,8 4,8 5,8 0,1 1,1 2,1 3,1]
+merge true -5,-3,20,20 @ 3,2 8,5 8x11 shift 8,5
+merge true 12,3,8,4 @ 3,4 3,4 4x4 shift -9,1
+merge true 12,3,8,4 @ 3.5,4 3,4 4x4 shift -9,1
+merge true 12,3,8,4 @ -1.5,4 0,4 3x4 shift -13,1
+merge true 12,3,8,4 @ 3.4,3.6 3,3 4x4 shift -9,0
+merge true 12,3,8,4 @ 13,4 13,4 3x4 [12,3 13,3 14,3 12,4 12,3 13,3 12,5 12,4 12,3 12,6 12,5 12,4]
+merge true 12,3,8,4 @ 1,4 1,4 4x4 shift -11,1
+merge true 12,3,8,4 @ 3,2 3,2 4x4 shift -9,-1
+paletteMap false 2,3,5,4 @ 3,4 3,4 5x4 shift 1,1
+paletteMap false 2,3,5,4 @ 3.5,4 3,4 5x4 shift 1,1
+paletteMap false 2,3,5,4 @ -1.5,4 0,4 4x4 shift -3,1
+paletteMap false 2,3,5,4 @ 3.4,3.6 3,3 5x4 shift 1,0
+paletteMap false 2,3,5,4 @ 13,4 13,4 3x4 shift 11,1
+paletteMap false 2,3,5,4 @ 1,4 1,4 5x4 shift -1,1
+paletteMap false 2,3,5,4 @ 3,2 3,2 5x4 shift 1,-1
+paletteMap false -3,2,8,4 @ 3,4 6,4 5x4 shift 6,2
+paletteMap false -3,2,8,4 @ 3.5,4 6,4 5x4 shift 6,2
+paletteMap false -3,2,8,4 @ -1.5,4 2,4 5x4 shift 2,2
+paletteMap false -3,2,8,4 @ 3.4,3.6 6,3 5x4 shift 6,1
+paletteMap false -3,2,8,4 @ 13,4 none
+paletteMap false -3,2,8,4 @ 1,4 4,4 5x4 shift 4,2
+paletteMap false -3,2,8,4 @ 3,2 6,2 5x4 shift 6,0
+paletteMap false 2.5,3,5.5,4 @ 3,4 3,4 6x4 shift 1,1
+paletteMap false 2.5,3,5.5,4 @ 3.5,4 3,4 6x4 shift 1,1
+paletteMap false 2.5,3,5.5,4 @ -1.5,4 0,4 5x4 shift -3,1
+paletteMap false 2.5,3,5.5,4 @ 3.4,3.6 3,3 6x4 shift 1,0
+paletteMap false 2.5,3,5.5,4 @ 13,4 13,4 3x4 shift 11,1
+paletteMap false 2.5,3,5.5,4 @ 1,4 1,4 6x4 shift -1,1
+paletteMap false 2.5,3,5.5,4 @ 3,2 3,2 6x4 shift 1,-1
+paletteMap false -1.5,3,5,4 @ 3,4 5,4 4x4 shift 5,1
+paletteMap false -1.5,3,5,4 @ 3.5,4 5,4 4x4 shift 5,1
+paletteMap false -1.5,3,5,4 @ -1.5,4 1,4 4x4 shift 1,1
+paletteMap false -1.5,3,5,4 @ 3.4,3.6 5,3 4x4 shift 5,0
+paletteMap false -1.5,3,5,4 @ 13,4 15,4 1x4 shift 15,1
+paletteMap false -1.5,3,5,4 @ 1,4 3,4 4x4 shift 3,1
+paletteMap false -1.5,3,5,4 @ 3,2 5,2 4x4 shift 5,-1
+paletteMap false 1.5,3,5,4 @ 3,4 3,4 4x4 shift 1,1
+paletteMap false 1.5,3,5,4 @ 3.5,4 3,4 4x4 shift 1,1
+paletteMap false 1.5,3,5,4 @ -1.5,4 0,4 3x4 shift -3,1
+paletteMap false 1.5,3,5,4 @ 3.4,3.6 3,3 4x4 shift 1,0
+paletteMap false 1.5,3,5,4 @ 13,4 13,4 3x4 shift 11,1
+paletteMap false 1.5,3,5,4 @ 1,4 1,4 4x4 shift -1,1
+paletteMap false 1.5,3,5,4 @ 3,2 3,2 4x4 shift 1,-1
+paletteMap false -5,-3,20,20 @ 3,4 8,7 8x9 shift 8,7
+paletteMap false -5,-3,20,20 @ 3.5,4 8,7 8x9 shift 8,7
+paletteMap false -5,-3,20,20 @ -1.5,4 4,7 12x9 shift 4,7
+paletteMap false -5,-3,20,20 @ 3.4,3.6 8,6 8x10 shift 8,6
+paletteMap false -5,-3,20,20 @ 13,4 none
+paletteMap false -5,-3,20,20 @ 1,4 6,7 10x9 shift 6,7
+paletteMap false -5,-3,20,20 @ 3,2 8,5 8x11 shift 8,5
+paletteMap false 12,3,8,4 @ 3,4 3,4 4x4 shift -9,1
+paletteMap false 12,3,8,4 @ 3.5,4 3,4 4x4 shift -9,1
+paletteMap false 12,3,8,4 @ -1.5,4 0,4 3x4 shift -13,1
+paletteMap false 12,3,8,4 @ 3.4,3.6 3,3 4x4 shift -9,0
+paletteMap false 12,3,8,4 @ 13,4 13,4 3x4 shift 1,1
+paletteMap false 12,3,8,4 @ 1,4 1,4 4x4 shift -11,1
+paletteMap false 12,3,8,4 @ 3,2 3,2 4x4 shift -9,-1
+paletteMap true 2,3,5,4 @ 3,4 3,4 5x4 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3]
+paletteMap true 2,3,5,4 @ 3.5,4 3,4 5x4 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3]
+paletteMap true 2,3,5,4 @ -1.5,4 0,4 4x4 [3,3 4,3 5,3 6,3 6,3 4,4 5,4 6,4 6,4 4,5 5,5 6,5 6,5 4,6 5,6 6,6]
+paletteMap true 2,3,5,4 @ 3.4,3.6 3,3 5x4 [2,3 2,3 2,3 2,3 2,3 2,4 2,4 2,4 2,4 2,4 2,5 2,5 2,5 2,5 2,5 2,6 2,6 2,6 2,6 2,6]
+paletteMap true 2,3,5,4 @ 13,4 13,4 3x4 shift 11,1
+paletteMap true 2,3,5,4 @ 1,4 1,4 5x4 [2,3 3,3 4,3 5,3 6,3 3,3 4,3 5,3 6,3 6,4 4,3 5,3 6,3 6,4 6,5 5,3 6,3 6,4 6,5 6,6]
+paletteMap true 2,3,5,4 @ 3,2 3,2 5x4 shift 1,-1
+paletteMap true -3,2,8,4 @ 3,4 6,4 5x4 shift 6,2
+paletteMap true -3,2,8,4 @ 3.5,4 6,4 5x4 shift 6,2
+paletteMap true -3,2,8,4 @ -1.5,4 2,4 5x4 [0,2 1,2 2,2 3,2 4,2 0,3 1,3 2,3 3,3 4,3 0,4 1,4 0,2 1,2 2,2 0,5 1,5 0,3 1,3 2,3]
+paletteMap true -3,2,8,4 @ 3.4,3.6 6,3 5x4 shift 6,1
+paletteMap true -3,2,8,4 @ 13,4 none
+paletteMap true -3,2,8,4 @ 1,4 4,4 5x4 [0,2 1,2 2,2 3,2 4,2 0,3 1,3 2,3 3,3 4,3 0,4 1,4 2,4 3,4 0,2 0,5 1,5 2,5 3,5 0,3]
+paletteMap true -3,2,8,4 @ 3,2 6,2 5x4 shift 6,0
+paletteMap true 2.5,3,5.5,4 @ 3,4 3,4 6x4 [2,3 3,3 4,3 5,3 6,3 7,3 2,4 2,3 3,3 4,3 5,3 6,3 2,5 2,4 2,3 3,3 4,3 5,3 2,6 2,5 2,4 2,3 3,3 4,3]
+paletteMap true 2.5,3,5.5,4 @ 3.5,4 3,4 6x4 [2,3 3,3 4,3 5,3 6,3 7,3 2,4 2,3 3,3 4,3 5,3 6,3 2,5 2,4 2,3 3,3 4,3 5,3 2,6 2,5 2,4 2,3 3,3 4,3]
+paletteMap true 2.5,3,5.5,4 @ -1.5,4 0,4 5x4 [3,3 4,3 5,3 6,3 7,3 6,3 7,3 5,4 6,4 7,4 6,4 7,4 5,5 6,5 7,5 6,5 7,5 5,6 6,6 7,6]
+paletteMap true 2.5,3,5.5,4 @ 3.4,3.6 3,3 6x4 [2,3 2,3 2,3 2,3 2,3 2,3 2,4 2,4 2,4 2,4 2,4 2,4 2,5 2,5 2,5 2,5 2,5 2,5 2,6 2,6 2,6 2,6 2,6 2,6]
+paletteMap true 2.5,3,5.5,4 @ 13,4 13,4 3x4 shift 11,1
+paletteMap true 2.5,3,5.5,4 @ 1,4 1,4 6x4 [2,3 3,3 4,3 5,3 6,3 7,3 3,3 4,3 5,3 6,3 7,3 7,4 4,3 5,3 6,3 7,3 7,4 7,5 5,3 6,3 7,3 7,4 7,5 7,6]
+paletteMap true 2.5,3,5.5,4 @ 3,2 3,2 6x4 shift 1,-1
+paletteMap true -1.5,3,5,4 @ 3,4 5,4 4x4 shift 5,1
+paletteMap true -1.5,3,5,4 @ 3.5,4 5,4 4x4 shift 5,1
+paletteMap true -1.5,3,5,4 @ -1.5,4 1,4 4x4 [0,3 1,3 2,3 3,3 0,4 0,3 1,3 2,3 0,5 0,4 0,3 1,3 0,6 0,5 0,4 0,3]
+paletteMap true -1.5,3,5,4 @ 3.4,3.6 5,3 4x4 shift 5,0
+paletteMap true -1.5,3,5,4 @ 13,4 15,4 1x4 shift 15,1
+paletteMap true -1.5,3,5,4 @ 1,4 3,4 4x4 [0,3 1,3 2,3 3,3 0,4 1,4 2,4 0,3 0,5 1,5 2,5 0,4 0,6 1,6 2,6 0,5]
+paletteMap true -1.5,3,5,4 @ 3,2 5,2 4x4 shift 5,-1
+paletteMap true 1.5,3,5,4 @ 3,4 3,4 4x4 [2,3 3,3 4,3 5,3 2,4 2,3 3,3 4,3 2,5 2,4 2,3 3,3 2,6 2,5 2,4 2,3]
+paletteMap true 1.5,3,5,4 @ 3.5,4 3,4 4x4 [2,3 3,3 4,3 5,3 2,4 2,3 3,3 4,3 2,5 2,4 2,3 3,3 2,6 2,5 2,4 2,3]
+paletteMap true 1.5,3,5,4 @ -1.5,4 0,4 3x4 shift -3,1
+paletteMap true 1.5,3,5,4 @ 3.4,3.6 3,3 4x4 [2,3 2,3 2,3 2,3 2,4 2,4 2,4 2,4 2,5 2,5 2,5 2,5 2,6 2,6 2,6 2,6]
+paletteMap true 1.5,3,5,4 @ 13,4 13,4 3x4 shift 11,1
+paletteMap true 1.5,3,5,4 @ 1,4 1,4 4x4 [2,3 3,3 4,3 5,3 3,3 4,3 5,3 5,4 4,3 5,3 5,4 5,5 5,3 5,4 5,5 5,6]
+paletteMap true 1.5,3,5,4 @ 3,2 3,2 4x4 shift 1,-1
+paletteMap true -5,-3,20,20 @ 3,4 8,7 8x9 shift 8,7
+paletteMap true -5,-3,20,20 @ 3.5,4 8,7 8x9 shift 8,7
+paletteMap true -5,-3,20,20 @ -1.5,4 4,7 12x9 [0,0 1,0 2,0 3,0 4,0 5,0 6,0 7,0 8,0 9,0 10,0 11,0 0,1 1,1 2,1 3,1 4,1 5,1 6,1 7,1 8,1 9,1 10,1 11,1 0,2 1,2 2,2 3,2 4,2 5,2 6,2 7,2 8,2 9,2 10,2 11,2 0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 0,4 1,4 2,4 3,4 4,4 5,4 6,4 7,4 8,4 9,4 10,4 11,4 0,5 1,5 2,5 3,5 4,5 5,5 6,5 7,5 8,5 9,5 10,5 11,5 0,6 1,6 2,6 3,6 4,6 5,6 6,6 7,6 8,6 9,6 10,6 11,6 0,7 1,7 2,7 3,7 0,0 1,0 2,0 3,0 4,0 5,0 6,0 7,0 0,8 1,8 2,8 3,8 0,1 1,1 2,1 3,1 4,1 5,1 6,1 7,1]
+paletteMap true -5,-3,20,20 @ 3.4,3.6 8,6 8x10 shift 8,6
+paletteMap true -5,-3,20,20 @ 13,4 none
+paletteMap true -5,-3,20,20 @ 1,4 6,7 10x9 [0,0 1,0 2,0 3,0 4,0 5,0 6,0 7,0 8,0 9,0 0,1 1,1 2,1 3,1 4,1 5,1 6,1 7,1 8,1 9,1 0,2 1,2 2,2 3,2 4,2 5,2 6,2 7,2 8,2 9,2 0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 0,4 1,4 2,4 3,4 4,4 5,4 6,4 7,4 8,4 9,4 0,5 1,5 2,5 3,5 4,5 5,5 6,5 7,5 8,5 9,5 0,6 1,6 2,6 3,6 4,6 5,6 6,6 7,6 8,6 9,6 0,7 1,7 2,7 3,7 4,7 5,7 0,0 1,0 2,0 3,0 0,8 1,8 2,8 3,8 4,8 5,8 0,1 1,1 2,1 3,1]
+paletteMap true -5,-3,20,20 @ 3,2 8,5 8x11 shift 8,5
+paletteMap true 12,3,8,4 @ 3,4 3,4 4x4 shift -9,1
+paletteMap true 12,3,8,4 @ 3.5,4 3,4 4x4 shift -9,1
+paletteMap true 12,3,8,4 @ -1.5,4 0,4 3x4 shift -13,1
+paletteMap true 12,3,8,4 @ 3.4,3.6 3,3 4x4 shift -9,0
+paletteMap true 12,3,8,4 @ 13,4 13,4 3x4 [12,3 13,3 14,3 12,4 12,3 13,3 12,5 12,4 12,3 12,6 12,5 12,4]
+paletteMap true 12,3,8,4 @ 1,4 1,4 4x4 shift -11,1
+paletteMap true 12,3,8,4 @ 3,2 3,2 4x4 shift -9,-1
+threshold false 2,3,5,4 @ 3,4 0 3,4 5x4 shift 1,1
+threshold false 2,3,5,4 @ 3.5,4 0 3,4 5x4 shift 1,1
+threshold false 2,3,5,4 @ -1.5,4 0 0,4 4x4 shift -3,1
+threshold false 2,3,5,4 @ 3.4,3.6 0 3,3 5x4 shift 1,0
+threshold false 2,3,5,4 @ 13,4 0 13,4 3x4 shift 11,1
+threshold false 2,3,5,4 @ 1,4 0 1,4 5x4 shift -1,1
+threshold false 2,3,5,4 @ 3,2 0 3,2 5x4 shift 1,-1
+threshold false -3,2,8,4 @ 3,4 0 6,4 5x4 shift 6,2
+threshold false -3,2,8,4 @ 3.5,4 0 6,4 5x4 shift 6,2
+threshold false -3,2,8,4 @ -1.5,4 0 2,4 5x4 shift 2,2
+threshold false -3,2,8,4 @ 3.4,3.6 0 6,3 5x4 shift 6,1
+threshold false -3,2,8,4 @ 13,4 0 none
+threshold false -3,2,8,4 @ 1,4 0 4,4 5x4 shift 4,2
+threshold false -3,2,8,4 @ 3,2 0 6,2 5x4 shift 6,0
+threshold false 2.5,3,5.5,4 @ 3,4 0 3,4 6x4 shift 1,1
+threshold false 2.5,3,5.5,4 @ 3.5,4 0 3,4 6x4 shift 1,1
+threshold false 2.5,3,5.5,4 @ -1.5,4 0 0,4 5x4 shift -3,1
+threshold false 2.5,3,5.5,4 @ 3.4,3.6 0 3,3 6x4 shift 1,0
+threshold false 2.5,3,5.5,4 @ 13,4 0 13,4 3x4 shift 11,1
+threshold false 2.5,3,5.5,4 @ 1,4 0 1,4 6x4 shift -1,1
+threshold false 2.5,3,5.5,4 @ 3,2 0 3,2 6x4 shift 1,-1
+threshold false -1.5,3,5,4 @ 3,4 0 5,4 4x4 shift 5,1
+threshold false -1.5,3,5,4 @ 3.5,4 0 5,4 4x4 shift 5,1
+threshold false -1.5,3,5,4 @ -1.5,4 0 1,4 4x4 shift 1,1
+threshold false -1.5,3,5,4 @ 3.4,3.6 0 5,3 4x4 shift 5,0
+threshold false -1.5,3,5,4 @ 13,4 0 15,4 1x4 shift 15,1
+threshold false -1.5,3,5,4 @ 1,4 0 3,4 4x4 shift 3,1
+threshold false -1.5,3,5,4 @ 3,2 0 5,2 4x4 shift 5,-1
+threshold false 1.5,3,5,4 @ 3,4 0 3,4 4x4 shift 1,1
+threshold false 1.5,3,5,4 @ 3.5,4 0 3,4 4x4 shift 1,1
+threshold false 1.5,3,5,4 @ -1.5,4 0 0,4 3x4 shift -3,1
+threshold false 1.5,3,5,4 @ 3.4,3.6 0 3,3 4x4 shift 1,0
+threshold false 1.5,3,5,4 @ 13,4 0 13,4 3x4 shift 11,1
+threshold false 1.5,3,5,4 @ 1,4 0 1,4 4x4 shift -1,1
+threshold false 1.5,3,5,4 @ 3,2 0 3,2 4x4 shift 1,-1
+threshold false -5,-3,20,20 @ 3,4 0 8,7 8x9 shift 8,7
+threshold false -5,-3,20,20 @ 3.5,4 0 8,7 8x9 shift 8,7
+threshold false -5,-3,20,20 @ -1.5,4 0 4,7 12x9 shift 4,7
+threshold false -5,-3,20,20 @ 3.4,3.6 0 8,6 8x10 shift 8,6
+threshold false -5,-3,20,20 @ 13,4 0 none
+threshold false -5,-3,20,20 @ 1,4 0 6,7 10x9 shift 6,7
+threshold false -5,-3,20,20 @ 3,2 0 8,5 8x11 shift 8,5
+threshold false 12,3,8,4 @ 3,4 0 3,4 4x4 shift -9,1
+threshold false 12,3,8,4 @ 3.5,4 0 3,4 4x4 shift -9,1
+threshold false 12,3,8,4 @ -1.5,4 0 0,4 3x4 shift -13,1
+threshold false 12,3,8,4 @ 3.4,3.6 0 3,3 4x4 shift -9,0
+threshold false 12,3,8,4 @ 13,4 0 13,4 3x4 shift 1,1
+threshold false 12,3,8,4 @ 1,4 0 1,4 4x4 shift -11,1
+threshold false 12,3,8,4 @ 3,2 0 3,2 4x4 shift -9,-1
+threshold true 2,3,5,4 @ 3,4 0 3,4 5x4 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3]
+threshold true 2,3,5,4 @ 3.5,4 0 3,4 5x4 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3]
+threshold true 2,3,5,4 @ -1.5,4 0 0,4 4x4 [3,3 4,3 5,3 6,3 6,3 4,4 5,4 6,4 6,4 4,5 5,5 6,5 6,5 4,6 5,6 6,6]
+threshold true 2,3,5,4 @ 3.4,3.6 0 3,3 5x4 [2,3 2,3 2,3 2,3 2,3 2,4 2,4 2,4 2,4 2,4 2,5 2,5 2,5 2,5 2,5 2,6 2,6 2,6 2,6 2,6]
+threshold true 2,3,5,4 @ 13,4 0 13,4 3x4 shift 11,1
+threshold true 2,3,5,4 @ 1,4 0 1,4 5x4 [2,3 3,3 4,3 5,3 6,3 3,3 4,3 5,3 6,3 6,4 4,3 5,3 6,3 6,4 6,5 5,3 6,3 6,4 6,5 6,6]
+threshold true 2,3,5,4 @ 3,2 0 3,2 5x4 shift 1,-1
+threshold true -3,2,8,4 @ 3,4 0 6,4 5x4 shift 6,2
+threshold true -3,2,8,4 @ 3.5,4 0 6,4 5x4 shift 6,2
+threshold true -3,2,8,4 @ -1.5,4 0 2,4 5x4 [0,2 1,2 2,2 3,2 4,2 0,3 1,3 2,3 3,3 4,3 0,4 1,4 0,2 1,2 2,2 0,5 1,5 0,3 1,3 2,3]
+threshold true -3,2,8,4 @ 3.4,3.6 0 6,3 5x4 shift 6,1
+threshold true -3,2,8,4 @ 13,4 0 none
+threshold true -3,2,8,4 @ 1,4 0 4,4 5x4 [0,2 1,2 2,2 3,2 4,2 0,3 1,3 2,3 3,3 4,3 0,4 1,4 2,4 3,4 0,2 0,5 1,5 2,5 3,5 0,3]
+threshold true -3,2,8,4 @ 3,2 0 6,2 5x4 shift 6,0
+threshold true 2.5,3,5.5,4 @ 3,4 0 3,4 6x4 [2,3 3,3 4,3 5,3 6,3 7,3 2,4 2,3 3,3 4,3 5,3 6,3 2,5 2,4 2,3 3,3 4,3 5,3 2,6 2,5 2,4 2,3 3,3 4,3]
+threshold true 2.5,3,5.5,4 @ 3.5,4 0 3,4 6x4 [2,3 3,3 4,3 5,3 6,3 7,3 2,4 2,3 3,3 4,3 5,3 6,3 2,5 2,4 2,3 3,3 4,3 5,3 2,6 2,5 2,4 2,3 3,3 4,3]
+threshold true 2.5,3,5.5,4 @ -1.5,4 0 0,4 5x4 [3,3 4,3 5,3 6,3 7,3 6,3 7,3 5,4 6,4 7,4 6,4 7,4 5,5 6,5 7,5 6,5 7,5 5,6 6,6 7,6]
+threshold true 2.5,3,5.5,4 @ 3.4,3.6 0 3,3 6x4 [2,3 2,3 2,3 2,3 2,3 2,3 2,4 2,4 2,4 2,4 2,4 2,4 2,5 2,5 2,5 2,5 2,5 2,5 2,6 2,6 2,6 2,6 2,6 2,6]
+threshold true 2.5,3,5.5,4 @ 13,4 0 13,4 3x4 shift 11,1
+threshold true 2.5,3,5.5,4 @ 1,4 0 1,4 6x4 [2,3 3,3 4,3 5,3 6,3 7,3 3,3 4,3 5,3 6,3 7,3 7,4 4,3 5,3 6,3 7,3 7,4 7,5 5,3 6,3 7,3 7,4 7,5 7,6]
+threshold true 2.5,3,5.5,4 @ 3,2 0 3,2 6x4 shift 1,-1
+threshold true -1.5,3,5,4 @ 3,4 0 5,4 4x4 shift 5,1
+threshold true -1.5,3,5,4 @ 3.5,4 0 5,4 4x4 shift 5,1
+threshold true -1.5,3,5,4 @ -1.5,4 0 1,4 4x4 [0,3 1,3 2,3 3,3 0,4 0,3 1,3 2,3 0,5 0,4 0,3 1,3 0,6 0,5 0,4 0,3]
+threshold true -1.5,3,5,4 @ 3.4,3.6 0 5,3 4x4 shift 5,0
+threshold true -1.5,3,5,4 @ 13,4 0 15,4 1x4 shift 15,1
+threshold true -1.5,3,5,4 @ 1,4 0 3,4 4x4 [0,3 1,3 2,3 3,3 0,4 1,4 2,4 0,3 0,5 1,5 2,5 0,4 0,6 1,6 2,6 0,5]
+threshold true -1.5,3,5,4 @ 3,2 0 5,2 4x4 shift 5,-1
+threshold true 1.5,3,5,4 @ 3,4 0 3,4 4x4 [2,3 3,3 4,3 5,3 2,4 2,3 3,3 4,3 2,5 2,4 2,3 3,3 2,6 2,5 2,4 2,3]
+threshold true 1.5,3,5,4 @ 3.5,4 0 3,4 4x4 [2,3 3,3 4,3 5,3 2,4 2,3 3,3 4,3 2,5 2,4 2,3 3,3 2,6 2,5 2,4 2,3]
+threshold true 1.5,3,5,4 @ -1.5,4 0 0,4 3x4 shift -3,1
+threshold true 1.5,3,5,4 @ 3.4,3.6 0 3,3 4x4 [2,3 2,3 2,3 2,3 2,4 2,4 2,4 2,4 2,5 2,5 2,5 2,5 2,6 2,6 2,6 2,6]
+threshold true 1.5,3,5,4 @ 13,4 0 13,4 3x4 shift 11,1
+threshold true 1.5,3,5,4 @ 1,4 0 1,4 4x4 [2,3 3,3 4,3 5,3 3,3 4,3 5,3 5,4 4,3 5,3 5,4 5,5 5,3 5,4 5,5 5,6]
+threshold true 1.5,3,5,4 @ 3,2 0 3,2 4x4 shift 1,-1
+threshold true -5,-3,20,20 @ 3,4 0 8,7 8x9 shift 8,7
+threshold true -5,-3,20,20 @ 3.5,4 0 8,7 8x9 shift 8,7
+threshold true -5,-3,20,20 @ -1.5,4 0 4,7 12x9 [0,0 1,0 2,0 3,0 4,0 5,0 6,0 7,0 8,0 9,0 10,0 11,0 0,1 1,1 2,1 3,1 4,1 5,1 6,1 7,1 8,1 9,1 10,1 11,1 0,2 1,2 2,2 3,2 4,2 5,2 6,2 7,2 8,2 9,2 10,2 11,2 0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 0,4 1,4 2,4 3,4 4,4 5,4 6,4 7,4 8,4 9,4 10,4 11,4 0,5 1,5 2,5 3,5 4,5 5,5 6,5 7,5 8,5 9,5 10,5 11,5 0,6 1,6 2,6 3,6 4,6 5,6 6,6 7,6 8,6 9,6 10,6 11,6 0,7 1,7 2,7 3,7 0,0 1,0 2,0 3,0 4,0 5,0 6,0 7,0 0,8 1,8 2,8 3,8 0,1 1,1 2,1 3,1 4,1 5,1 6,1 7,1]
+threshold true -5,-3,20,20 @ 3.4,3.6 0 8,6 8x10 shift 8,6
+threshold true -5,-3,20,20 @ 13,4 0 none
+threshold true -5,-3,20,20 @ 1,4 0 6,7 10x9 [0,0 1,0 2,0 3,0 4,0 5,0 6,0 7,0 8,0 9,0 0,1 1,1 2,1 3,1 4,1 5,1 6,1 7,1 8,1 9,1 0,2 1,2 2,2 3,2 4,2 5,2 6,2 7,2 8,2 9,2 0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 0,4 1,4 2,4 3,4 4,4 5,4 6,4 7,4 8,4 9,4 0,5 1,5 2,5 3,5 4,5 5,5 6,5 7,5 8,5 9,5 0,6 1,6 2,6 3,6 4,6 5,6 6,6 7,6 8,6 9,6 0,7 1,7 2,7 3,7 4,7 5,7 0,0 1,0 2,0 3,0 0,8 1,8 2,8 3,8 4,8 5,8 0,1 1,1 2,1 3,1]
+threshold true -5,-3,20,20 @ 3,2 0 8,5 8x11 shift 8,5
+threshold true 12,3,8,4 @ 3,4 0 3,4 4x4 shift -9,1
+threshold true 12,3,8,4 @ 3.5,4 0 3,4 4x4 shift -9,1
+threshold true 12,3,8,4 @ -1.5,4 0 0,4 3x4 shift -13,1
+threshold true 12,3,8,4 @ 3.4,3.6 0 3,3 4x4 shift -9,0
+threshold true 12,3,8,4 @ 13,4 0 13,4 3x4 [12,3 13,3 14,3 12,4 12,3 13,3 12,5 12,4 12,3 12,6 12,5 12,4]
+threshold true 12,3,8,4 @ 1,4 0 1,4 4x4 shift -11,1
+threshold true 12,3,8,4 @ 3,2 0 3,2 4x4 shift -9,-1
+applyFilter false 2,3,5,4 @ 3,4 3,4 5x4 shift 1,1
+applyFilter false 2,3,5,4 @ 3.5,4 3,4 5x4 shift 1,1
+applyFilter false 2,3,5,4 @ -1.5,4 0,4 4x4 shift -3,1
+applyFilter false 2,3,5,4 @ 3.4,3.6 3,3 5x4 shift 1,0
+applyFilter false 2,3,5,4 @ 13,4 13,4 3x4 shift 11,1
+applyFilter false 2,3,5,4 @ 1,4 1,4 5x4 shift -1,1
+applyFilter false 2,3,5,4 @ 3,2 3,2 5x4 shift 1,-1
+applyFilter false -3,2,8,4 @ 3,4 6,4 5x4 shift 6,2
+applyFilter false -3,2,8,4 @ 3.5,4 6,4 5x4 shift 6,2
+applyFilter false -3,2,8,4 @ -1.5,4 2,4 5x4 shift 2,2
+applyFilter false -3,2,8,4 @ 3.4,3.6 6,3 5x4 shift 6,1
+applyFilter false -3,2,8,4 @ 13,4 none
+applyFilter false -3,2,8,4 @ 1,4 4,4 5x4 shift 4,2
+applyFilter false -3,2,8,4 @ 3,2 6,2 5x4 shift 6,0
+applyFilter false 2.5,3,5.5,4 @ 3,4 3,4 6x4 shift 1,1
+applyFilter false 2.5,3,5.5,4 @ 3.5,4 3,4 6x4 shift 1,1
+applyFilter false 2.5,3,5.5,4 @ -1.5,4 0,4 5x4 shift -3,1
+applyFilter false 2.5,3,5.5,4 @ 3.4,3.6 3,3 6x4 shift 1,0
+applyFilter false 2.5,3,5.5,4 @ 13,4 13,4 3x4 shift 11,1
+applyFilter false 2.5,3,5.5,4 @ 1,4 1,4 6x4 shift -1,1
+applyFilter false 2.5,3,5.5,4 @ 3,2 3,2 6x4 shift 1,-1
+applyFilter false -1.5,3,5,4 @ 3,4 5,4 4x4 shift 5,1
+applyFilter false -1.5,3,5,4 @ 3.5,4 5,4 4x4 shift 5,1
+applyFilter false -1.5,3,5,4 @ -1.5,4 1,4 4x4 shift 1,1
+applyFilter false -1.5,3,5,4 @ 3.4,3.6 5,3 4x4 shift 5,0
+applyFilter false -1.5,3,5,4 @ 13,4 15,4 1x4 shift 15,1
+applyFilter false -1.5,3,5,4 @ 1,4 3,4 4x4 shift 3,1
+applyFilter false -1.5,3,5,4 @ 3,2 5,2 4x4 shift 5,-1
+applyFilter false 1.5,3,5,4 @ 3,4 3,4 4x4 shift 1,1
+applyFilter false 1.5,3,5,4 @ 3.5,4 3,4 4x4 shift 1,1
+applyFilter false 1.5,3,5,4 @ -1.5,4 0,4 3x4 shift -3,1
+applyFilter false 1.5,3,5,4 @ 3.4,3.6 3,3 4x4 shift 1,0
+applyFilter false 1.5,3,5,4 @ 13,4 13,4 3x4 shift 11,1
+applyFilter false 1.5,3,5,4 @ 1,4 1,4 4x4 shift -1,1
+applyFilter false 1.5,3,5,4 @ 3,2 3,2 4x4 shift 1,-1
+applyFilter false -5,-3,20,20 @ 3,4 8,7 8x9 shift 8,7
+applyFilter false -5,-3,20,20 @ 3.5,4 8,7 8x9 shift 8,7
+applyFilter false -5,-3,20,20 @ -1.5,4 4,7 12x9 shift 4,7
+applyFilter false -5,-3,20,20 @ 3.4,3.6 8,6 8x10 shift 8,6
+applyFilter false -5,-3,20,20 @ 13,4 none
+applyFilter false -5,-3,20,20 @ 1,4 6,7 10x9 shift 6,7
+applyFilter false -5,-3,20,20 @ 3,2 8,5 8x11 shift 8,5
+applyFilter false 12,3,8,4 @ 3,4 3,4 4x4 shift -9,1
+applyFilter false 12,3,8,4 @ 3.5,4 3,4 4x4 shift -9,1
+applyFilter false 12,3,8,4 @ -1.5,4 0,4 3x4 shift -13,1
+applyFilter false 12,3,8,4 @ 3.4,3.6 3,3 4x4 shift -9,0
+applyFilter false 12,3,8,4 @ 13,4 13,4 3x4 shift 1,1
+applyFilter false 12,3,8,4 @ 1,4 1,4 4x4 shift -11,1
+applyFilter false 12,3,8,4 @ 3,2 3,2 4x4 shift -9,-1
+applyFilter true 2,3,5,4 @ 3,4 3,4 5x4 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3]
+applyFilter true 2,3,5,4 @ 3.5,4 3,4 5x4 [2,3 3,3 4,3 5,3 6,3 2,4 2,3 3,3 4,3 5,3 2,5 2,4 2,3 3,3 4,3 2,6 2,5 2,4 2,3 3,3]
+applyFilter true 2,3,5,4 @ -1.5,4 0,4 4x4 [3,3 4,3 5,3 6,3 6,3 4,4 5,4 6,4 6,4 4,5 5,5 6,5 6,5 4,6 5,6 6,6]
+applyFilter true 2,3,5,4 @ 3.4,3.6 3,3 5x4 [2,3 3,3 4,3 5,3 5,3 2,4 3,4 4,4 5,4 5,4 2,5 3,5 4,5 5,5 5,5 2,6 3,6 4,6 5,6 5,6]
+applyFilter true 2,3,5,4 @ 13,4 13,4 3x4 shift 11,1
+applyFilter true 2,3,5,4 @ 1,4 1,4 5x4 [2,3 3,3 4,3 5,3 6,3 3,3 4,3 5,3 6,3 6,4 4,3 5,3 6,3 6,4 6,5 5,3 6,3 6,4 6,5 6,6]
+applyFilter true 2,3,5,4 @ 3,2 3,2 5x4 shift 1,-1
+applyFilter true -3,2,8,4 @ 3,4 6,4 5x4 shift 6,2
+applyFilter true -3,2,8,4 @ 3.5,4 6,4 5x4 shift 6,2
+applyFilter true -3,2,8,4 @ -1.5,4 2,4 5x4 [0,2 1,2 2,2 3,2 4,2 0,3 1,3 2,3 3,3 4,3 0,4 1,4 0,2 1,2 2,2 0,5 1,5 0,3 1,3 2,3]
+applyFilter true -3,2,8,4 @ 3.4,3.6 6,3 5x4 shift 6,1
+applyFilter true -3,2,8,4 @ 13,4 none
+applyFilter true -3,2,8,4 @ 1,4 4,4 5x4 [0,2 1,2 2,2 3,2 4,2 0,3 1,3 2,3 3,3 4,3 0,4 1,4 2,4 3,4 0,2 0,5 1,5 2,5 3,5 0,3]
+applyFilter true -3,2,8,4 @ 3,2 6,2 5x4 shift 6,0
+applyFilter true 2.5,3,5.5,4 @ 3,4 3,4 6x4 [2,3 3,3 4,3 5,3 6,3 7,3 2,4 2,3 3,3 4,3 5,3 6,3 2,5 2,4 2,3 3,3 4,3 5,3 2,6 2,5 2,4 2,3 3,3 4,3]
+applyFilter true 2.5,3,5.5,4 @ 3.5,4 3,4 6x4 [2,3 3,3 4,3 5,3 6,3 7,3 2,4 2,3 3,3 4,3 5,3 6,3 2,5 2,4 2,3 3,3 4,3 5,3 2,6 2,5 2,4 2,3 3,3 4,3]
+applyFilter true 2.5,3,5.5,4 @ -1.5,4 0,4 5x4 [3,3 4,3 5,3 6,3 7,3 6,3 7,3 5,4 6,4 7,4 6,4 7,4 5,5 6,5 7,5 6,5 7,5 5,6 6,6 7,6]
+applyFilter true 2.5,3,5.5,4 @ 3.4,3.6 3,3 6x4 [2,3 3,3 4,3 5,3 5,3 5,3 2,4 3,4 4,4 5,4 5,4 5,4 2,5 3,5 4,5 5,5 5,5 5,5 2,6 3,6 4,6 5,6 5,6 5,6]
+applyFilter true 2.5,3,5.5,4 @ 13,4 13,4 3x4 shift 11,1
+applyFilter true 2.5,3,5.5,4 @ 1,4 1,4 6x4 [2,3 3,3 4,3 5,3 6,3 7,3 3,3 4,3 5,3 6,3 7,3 7,4 4,3 5,3 6,3 7,3 7,4 7,5 5,3 6,3 7,3 7,4 7,5 7,6]
+applyFilter true 2.5,3,5.5,4 @ 3,2 3,2 6x4 shift 1,-1
+applyFilter true -1.5,3,5,4 @ 3,4 5,4 4x4 shift 5,1
+applyFilter true -1.5,3,5,4 @ 3.5,4 5,4 4x4 shift 5,1
+applyFilter true -1.5,3,5,4 @ -1.5,4 1,4 4x4 [0,3 1,3 2,3 3,3 0,4 0,3 1,3 2,3 0,5 0,4 0,3 1,3 0,6 0,5 0,4 0,3]
+applyFilter true -1.5,3,5,4 @ 3.4,3.6 5,3 4x4 shift 5,0
+applyFilter true -1.5,3,5,4 @ 13,4 15,4 1x4 shift 15,1
+applyFilter true -1.5,3,5,4 @ 1,4 3,4 4x4 [0,3 1,3 2,3 3,3 0,4 1,4 2,4 0,3 0,5 1,5 2,5 0,4 0,6 1,6 2,6 0,5]
+applyFilter true -1.5,3,5,4 @ 3,2 5,2 4x4 shift 5,-1
+applyFilter true 1.5,3,5,4 @ 3,4 3,4 4x4 [2,3 3,3 4,3 5,3 2,4 2,3 3,3 4,3 2,5 2,4 2,3 3,3 2,6 2,5 2,4 2,3]
+applyFilter true 1.5,3,5,4 @ 3.5,4 3,4 4x4 [2,3 3,3 4,3 5,3 2,4 2,3 3,3 4,3 2,5 2,4 2,3 3,3 2,6 2,5 2,4 2,3]
+applyFilter true 1.5,3,5,4 @ -1.5,4 0,4 3x4 shift -3,1
+applyFilter true 1.5,3,5,4 @ 3.4,3.6 3,3 4x4 shift 1,0
+applyFilter true 1.5,3,5,4 @ 13,4 13,4 3x4 shift 11,1
+applyFilter true 1.5,3,5,4 @ 1,4 1,4 4x4 [2,3 3,3 4,3 5,3 3,3 4,3 5,3 5,4 4,3 5,3 5,4 5,5 5,3 5,4 5,5 5,6]
+applyFilter true 1.5,3,5,4 @ 3,2 3,2 4x4 shift 1,-1
+applyFilter true -5,-3,20,20 @ 3,4 8,7 8x9 shift 8,7
+applyFilter true -5,-3,20,20 @ 3.5,4 8,7 8x9 shift 8,7
+applyFilter true -5,-3,20,20 @ -1.5,4 4,7 12x9 [0,0 1,0 2,0 3,0 4,0 5,0 6,0 7,0 8,0 9,0 10,0 11,0 0,1 1,1 2,1 3,1 4,1 5,1 6,1 7,1 8,1 9,1 10,1 11,1 0,2 1,2 2,2 3,2 4,2 5,2 6,2 7,2 8,2 9,2 10,2 11,2 0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 10,3 11,3 0,4 1,4 2,4 3,4 4,4 5,4 6,4 7,4 8,4 9,4 10,4 11,4 0,5 1,5 2,5 3,5 4,5 5,5 6,5 7,5 8,5 9,5 10,5 11,5 0,6 1,6 2,6 3,6 4,6 5,6 6,6 7,6 8,6 9,6 10,6 11,6 0,7 1,7 2,7 3,7 0,0 1,0 2,0 3,0 4,0 5,0 6,0 7,0 0,8 1,8 2,8 3,8 0,1 1,1 2,1 3,1 4,1 5,1 6,1 7,1]
+applyFilter true -5,-3,20,20 @ 3.4,3.6 8,6 8x10 shift 8,6
+applyFilter true -5,-3,20,20 @ 13,4 none
+applyFilter true -5,-3,20,20 @ 1,4 6,7 10x9 [0,0 1,0 2,0 3,0 4,0 5,0 6,0 7,0 8,0 9,0 0,1 1,1 2,1 3,1 4,1 5,1 6,1 7,1 8,1 9,1 0,2 1,2 2,2 3,2 4,2 5,2 6,2 7,2 8,2 9,2 0,3 1,3 2,3 3,3 4,3 5,3 6,3 7,3 8,3 9,3 0,4 1,4 2,4 3,4 4,4 5,4 6,4 7,4 8,4 9,4 0,5 1,5 2,5 3,5 4,5 5,5 6,5 7,5 8,5 9,5 0,6 1,6 2,6 3,6 4,6 5,6 6,6 7,6 8,6 9,6 0,7 1,7 2,7 3,7 4,7 5,7 0,0 1,0 2,0 3,0 0,8 1,8 2,8 3,8 4,8 5,8 0,1 1,1 2,1 3,1]
+applyFilter true -5,-3,20,20 @ 3,2 8,5 8x11 shift 8,5
+applyFilter true 12,3,8,4 @ 3,4 3,4 4x4 shift -9,1
+applyFilter true 12,3,8,4 @ 3.5,4 3,4 4x4 shift -9,1
+applyFilter true 12,3,8,4 @ -1.5,4 0,4 3x4 shift -13,1
+applyFilter true 12,3,8,4 @ 3.4,3.6 3,3 4x4 shift -9,0
+applyFilter true 12,3,8,4 @ 13,4 13,4 3x4 [12,3 13,3 14,3 12,4 12,3 13,3 12,5 12,4 12,3 12,6 12,5 12,4]
+applyFilter true 12,3,8,4 @ 1,4 1,4 4x4 shift -11,1
+applyFilter true 12,3,8,4 @ 3,2 3,2 4x4 shift -9,-1
+pixelDissolve false 2,3,5,4 @ 3,4 13 3,4 5x4 shift 1,1
+pixelDissolve false 2,3,5,4 @ 3.5,4 13 3,4 5x4 shift 1,1
+pixelDissolve false 2,3,5,4 @ -1.5,4 9 0,4 4x4 shift -3,1
+pixelDissolve false 2,3,5,4 @ 3.4,3.6 13 3,3 5x4 shift 1,0
+pixelDissolve false 2,3,5,4 @ 13,4 1 13,4 3x4 shift 11,1
+pixelDissolve false 2,3,5,4 @ 1,4 13 1,4 5x4 shift -1,1
+pixelDissolve false 2,3,5,4 @ 3,2 13 3,2 5x4 shift 1,-1
+pixelDissolve false -3,2,8,4 @ 3,4 13 6,4 5x4 shift 6,2
+pixelDissolve false -3,2,8,4 @ 3.5,4 13 6,4 5x4 shift 6,2
+pixelDissolve false -3,2,8,4 @ -1.5,4 13 2,4 5x4 shift 2,2
+pixelDissolve false -3,2,8,4 @ 3.4,3.6 13 6,3 5x4 shift 6,1
+pixelDissolve false -3,2,8,4 @ 13,4 0 none
+pixelDissolve false -3,2,8,4 @ 1,4 13 4,4 5x4 shift 4,2
+pixelDissolve false -3,2,8,4 @ 3,2 13 6,2 5x4 shift 6,0
+pixelDissolve false 2.5,3,5.5,4 @ 3,4 21 3,4 6x4 shift 1,1
+pixelDissolve false 2.5,3,5.5,4 @ 3.5,4 21 3,4 6x4 shift 1,1
+pixelDissolve false 2.5,3,5.5,4 @ -1.5,4 13 0,4 5x4 shift -3,1
+pixelDissolve false 2.5,3,5.5,4 @ 3.4,3.6 21 3,3 6x4 shift 1,0
+pixelDissolve false 2.5,3,5.5,4 @ 13,4 1 13,4 3x4 shift 11,1
+pixelDissolve false 2.5,3,5.5,4 @ 1,4 21 1,4 6x4 shift -1,1
+pixelDissolve false 2.5,3,5.5,4 @ 3,2 21 3,2 6x4 shift 1,-1
+pixelDissolve false -1.5,3,5,4 @ 3,4 9 5,4 4x4 shift 5,1
+pixelDissolve false -1.5,3,5,4 @ 3.5,4 9 5,4 4x4 shift 5,1
+pixelDissolve false -1.5,3,5,4 @ -1.5,4 9 1,4 4x4 shift 1,1
+pixelDissolve false -1.5,3,5,4 @ 3.4,3.6 9 5,3 4x4 shift 5,0
+pixelDissolve false -1.5,3,5,4 @ 13,4 0 none
+pixelDissolve false -1.5,3,5,4 @ 1,4 9 3,4 4x4 shift 3,1
+pixelDissolve false -1.5,3,5,4 @ 3,2 9 5,2 4x4 shift 5,-1
+pixelDissolve false 1.5,3,5,4 @ 3,4 9 3,4 4x4 shift 1,1
+pixelDissolve false 1.5,3,5,4 @ 3.5,4 9 3,4 4x4 shift 1,1
+pixelDissolve false 1.5,3,5,4 @ -1.5,4 1 0,4 3x4 shift -3,1
+pixelDissolve false 1.5,3,5,4 @ 3.4,3.6 9 3,3 4x4 shift 1,0
+pixelDissolve false 1.5,3,5,4 @ 13,4 1 13,4 3x4 shift 11,1
+pixelDissolve false 1.5,3,5,4 @ 1,4 9 1,4 4x4 shift -1,1
+pixelDissolve false 1.5,3,5,4 @ 3,2 9 3,2 4x4 shift 1,-1
+pixelDissolve false -5,-3,20,20 @ 3,4 20 8,7 8x9 shift 8,7
+pixelDissolve false -5,-3,20,20 @ 3.5,4 20 8,7 8x9 shift 8,7
+pixelDissolve false -5,-3,20,20 @ -1.5,4 155 4,7 12x9 shift 4,7
+pixelDissolve false -5,-3,20,20 @ 3.4,3.6 22 8,6 8x10 shift 8,6
+pixelDissolve false -5,-3,20,20 @ 13,4 0 none
+pixelDissolve false -5,-3,20,20 @ 1,4 20 6,7 10x9 shift 6,7
+pixelDissolve false -5,-3,20,20 @ 3,2 18 8,5 8x11 shift 8,5
+pixelDissolve false 12,3,8,4 @ 3,4 9 3,4 4x4 shift -9,1
+pixelDissolve false 12,3,8,4 @ 3.5,4 9 3,4 4x4 shift -9,1
+pixelDissolve false 12,3,8,4 @ -1.5,4 1 0,4 3x4 shift -13,1
+pixelDissolve false 12,3,8,4 @ 3.4,3.6 9 3,3 4x4 shift -9,0
+pixelDissolve false 12,3,8,4 @ 13,4 1 13,4 3x4 shift 1,1
+pixelDissolve false 12,3,8,4 @ 1,4 9 1,4 4x4 shift -11,1
+pixelDissolve false 12,3,8,4 @ 3,2 9 3,2 4x4 shift -9,-1
+pixelDissolve true 2,3,5,4 @ 3,4 13 2,3 5x4 empty=20
+pixelDissolve true 2,3,5,4 @ 3.5,4 13 2,3 5x4 empty=20
+pixelDissolve true 2,3,5,4 @ -1.5,4 9 3,3 4x4 empty=16
+pixelDissolve true 2,3,5,4 @ 3.4,3.6 13 2,3 5x4 empty=20
+pixelDissolve true 2,3,5,4 @ 13,4 1 2,3 3x4 empty=12
+pixelDissolve true 2,3,5,4 @ 1,4 13 2,3 5x4 empty=20
+pixelDissolve true 2,3,5,4 @ 3,2 13 2,3 5x4 empty=20
+pixelDissolve true -3,2,8,4 @ 3,4 13 0,2 5x4 empty=20
+pixelDissolve true -3,2,8,4 @ 3.5,4 13 0,2 5x4 empty=20
+pixelDissolve true -3,2,8,4 @ -1.5,4 13 0,2 5x4 empty=20
+pixelDissolve true -3,2,8,4 @ 3.4,3.6 13 0,2 5x4 empty=20
+pixelDissolve true -3,2,8,4 @ 13,4 0 none
+pixelDissolve true -3,2,8,4 @ 1,4 13 0,2 5x4 empty=20
+pixelDissolve true -3,2,8,4 @ 3,2 13 0,2 5x4 empty=20
+pixelDissolve true 2.5,3,5.5,4 @ 3,4 21 2,3 6x4 empty=24
+pixelDissolve true 2.5,3,5.5,4 @ 3.5,4 21 2,3 6x4 empty=24
+pixelDissolve true 2.5,3,5.5,4 @ -1.5,4 13 3,3 5x4 empty=20
+pixelDissolve true 2.5,3,5.5,4 @ 3.4,3.6 21 2,3 6x4 empty=24
+pixelDissolve true 2.5,3,5.5,4 @ 13,4 1 2,3 3x4 empty=12
+pixelDissolve true 2.5,3,5.5,4 @ 1,4 21 2,3 6x4 empty=24
+pixelDissolve true 2.5,3,5.5,4 @ 3,2 21 2,3 6x4 empty=24
+pixelDissolve true -1.5,3,5,4 @ 3,4 9 0,3 4x4 empty=16
+pixelDissolve true -1.5,3,5,4 @ 3.5,4 9 0,3 4x4 empty=16
+pixelDissolve true -1.5,3,5,4 @ -1.5,4 9 0,3 4x4 empty=16
+pixelDissolve true -1.5,3,5,4 @ 3.4,3.6 9 0,3 4x4 empty=16
+pixelDissolve true -1.5,3,5,4 @ 13,4 0 none
+pixelDissolve true -1.5,3,5,4 @ 1,4 9 0,3 4x4 empty=16
+pixelDissolve true -1.5,3,5,4 @ 3,2 9 0,3 4x4 empty=16
+pixelDissolve true 1.5,3,5,4 @ 3,4 9 2,3 4x4 empty=16
+pixelDissolve true 1.5,3,5,4 @ 3.5,4 9 2,3 4x4 empty=16
+pixelDissolve true 1.5,3,5,4 @ -1.5,4 1 3,3 3x4 empty=12
+pixelDissolve true 1.5,3,5,4 @ 3.4,3.6 9 2,3 4x4 empty=16
+pixelDissolve true 1.5,3,5,4 @ 13,4 1 2,3 3x4 empty=12
+pixelDissolve true 1.5,3,5,4 @ 1,4 9 2,3 4x4 empty=16
+pixelDissolve true 1.5,3,5,4 @ 3,2 9 2,3 4x4 empty=16
+pixelDissolve true -5,-3,20,20 @ 3,4 20 0,0 8x9 empty=72
+pixelDissolve true -5,-3,20,20 @ 3.5,4 20 0,0 8x9 empty=72
+pixelDissolve true -5,-3,20,20 @ -1.5,4 155 0,0 12x9 empty=108
+pixelDissolve true -5,-3,20,20 @ 3.4,3.6 22 0,0 8x10 empty=80
+pixelDissolve true -5,-3,20,20 @ 13,4 0 none
+pixelDissolve true -5,-3,20,20 @ 1,4 20 0,0 10x9 empty=90
+pixelDissolve true -5,-3,20,20 @ 3,2 18 0,0 8x11 empty=88
+pixelDissolve true 12,3,8,4 @ 3,4 9 12,3 4x4 empty=16
+pixelDissolve true 12,3,8,4 @ 3.5,4 9 12,3 4x4 empty=16
+pixelDissolve true 12,3,8,4 @ -1.5,4 1 13,3 3x4 empty=12
+pixelDissolve true 12,3,8,4 @ 3.4,3.6 9 12,3 4x4 empty=16
+pixelDissolve true 12,3,8,4 @ 13,4 1 12,3 3x4 empty=12
+pixelDissolve true 12,3,8,4 @ 1,4 9 12,3 4x4 empty=16
+pixelDissolve true 12,3,8,4 @ 3,2 9 12,3 4x4 empty=16
+copyChannel self 2,3,5,4,3,4  3,4=2 4,4=3 5,4=4 6,4=5 7,4=6 3,5=2 4,5=2 5,5=3 6,5=4 7,5=5 3,6=2 4,6=2 5,6=2 6,6=3 7,6=4 3,7=2 4,7=2 5,7=2 6,7=2 7,7=3
+copyChannel self 2,3,5,4,1,4  1,4=2 2,4=3 3,4=4 4,4=5 5,4=6 1,5=3 2,5=4 3,5=5 4,5=6 5,5=6 1,6=4 2,6=5 3,6=6 4,6=6 5,6=6 1,7=5 2,7=6 3,7=6 4,7=6 5,7=6
+copyChannel self -3,2,8,4,3,4  6,4=0 7,4=1 8,4=2 9,4=3 10,4=4 6,5=0 7,5=1 8,5=2 9,5=3 10,5=4 6,6=0 7,6=1 8,6=2 9,6=3 10,6=4 6,7=0 7,7=1 8,7=2 9,7=3 10,7=4
+matrix row 0 1 3  1,3=0 2,3=0 3,3=0
+matrix row 0 1 4  1,3=0 2,3=1 3,3=2 4,3=3
+matrix row 0 1 5  1,3=0 2,3=1 3,3=2 4,3=3 5,3=3
+matrix row 0 1 8  1,3=0 2,3=1 3,3=2 4,3=3 5,3=3 6,3=5 7,3=6 8,3=7
+matrix row 0 1 9  1,3=0 2,3=1 3,3=2 4,3=3 5,3=3 6,3=5 7,3=6 8,3=7 9,3=7
+matrix row 0 2 3  2,3=0 3,3=1 4,3=0
+matrix row 0 2 4  2,3=0 3,3=1 4,3=2 5,3=3
+matrix row 0 2 5  2,3=0 3,3=1 4,3=2 5,3=3 6,3=2
+matrix row 0 2 8  2,3=0 3,3=1 4,3=2 5,3=3 6,3=2 7,3=3 8,3=6 9,3=7
+matrix row 0 2 9  2,3=0 3,3=1 4,3=2 5,3=3 6,3=2 7,3=3 8,3=6 9,3=7 10,3=6
+matrix row 0 3 3  3,3=0 4,3=1 5,3=2
+matrix row 0 3 4  3,3=0 4,3=1 5,3=2 6,3=3
+matrix row 0 3 5  3,3=0 4,3=1 5,3=2 6,3=3 7,3=1
+matrix row 0 3 8  3,3=0 4,3=1 5,3=2 6,3=3 7,3=1 8,3=2 9,3=3 10,3=7
+matrix row 0 3 9  3,3=0 4,3=1 5,3=2 6,3=3 7,3=1 8,3=2 9,3=3 10,3=7 11,3=2
+matrix row 1 1 3  2,3=1 3,3=1 4,3=1
+matrix row 1 1 4  2,3=1 3,3=2 4,3=3 5,3=4
+matrix row 1 1 5  2,3=1 3,3=2 4,3=3 5,3=4 6,3=4
+matrix row 1 1 8  2,3=1 3,3=2 4,3=3 5,3=4 6,3=4 7,3=6 8,3=7 9,3=8
+matrix row 1 1 9  2,3=1 3,3=2 4,3=3 5,3=4 6,3=4 7,3=6 8,3=7 9,3=8 10,3=8
+matrix row 1 2 3  3,3=1 4,3=2 5,3=1
+matrix row 1 2 4  3,3=1 4,3=2 5,3=3 6,3=4
+matrix row 1 2 5  3,3=1 4,3=2 5,3=3 6,3=4 7,3=3
+matrix row 1 2 8  3,3=1 4,3=2 5,3=3 6,3=4 7,3=3 8,3=4 9,3=7 10,3=8
+matrix row 1 2 9  3,3=1 4,3=2 5,3=3 6,3=4 7,3=3 8,3=4 9,3=7 10,3=8 11,3=7
+matrix row 1 3 3  4,3=1 5,3=2 6,3=3
+matrix row 1 3 4  4,3=1 5,3=2 6,3=3 7,3=4
+matrix row 1 3 5  4,3=1 5,3=2 6,3=3 7,3=4 8,3=2
+matrix row 1 3 8  4,3=1 5,3=2 6,3=3 7,3=4 8,3=2 9,3=3 10,3=4 11,3=8
+matrix row 1 3 9  4,3=1 5,3=2 6,3=3 7,3=4 8,3=2 9,3=3 10,3=4 11,3=8 12,3=3
+fillRect 2,3,5,4 2,3 5x4
+fillRect -3,2,8,4 0,2 5x4
+fillRect 0.5,3,5,4 0,3 6x4
+fillRect 1.5,3,5,4 2,3 4x4
+fillRect 2.5,3,5,4 2,3 6x4
+fillRect -0.5,3,5,4 0,3 4x4
+fillRect -1.5,3,5,4 0,3 4x4
+fillRect 2,3,5.5,4 2,3 6x4
+fillRect 2,3,4.5,4 2,3 4x4
+fillRect 2.3,3,5.4,4 2,3 6x4
+fillRect 2.6,3,5.6,4 3,3 5x4
+fillRect 2.5,1.7,10.6,10.2 2,2 11x10
+fillRect -5,-3,20,20 0,0 15x16
+fillRect 14.5,2,3,3 14,2 2x3
+fillRect 5,5,-3,4 none
+fillRect 5,5,3,-4 none
+fillRect 20,20,5,5 none
+fillRect 5,5,0,0 none
+fillRect 15.5,3,1,1 none
+fillRect -3,-3,3.4,3.6 none
+fillDrawn 2,3,5,4 2,3 5x4
+fillDrawn -3,2,8,4 0,2 5x4
+fillDrawn 0.5,3,5,4 0,3 6x4
+fillDrawn 1.5,3,5,4 2,3 4x4
+fillDrawn 2.5,3,5,4 2,3 6x4
+fillDrawn -0.5,3,5,4 0,3 4x4
+fillDrawn -1.5,3,5,4 0,3 4x4
+fillDrawn 2,3,5.5,4 2,3 6x4
+fillDrawn 2,3,4.5,4 2,3 4x4
+fillDrawn 2.3,3,5.4,4 2,3 6x4
+fillDrawn 2.6,3,5.6,4 3,3 5x4
+fillDrawn 2.5,1.7,10.6,10.2 2,2 11x10
+fillDrawn -5,-3,20,20 0,0 15x16
+fillDrawn 14.5,2,3,3 14,2 2x3
+fillDrawn 5,5,-3,4 none
+fillDrawn 5,5,3,-4 none
+fillDrawn 20,20,5,5 none
+fillDrawn 5,5,0,0 none
+fillDrawn 15.5,3,1,1 none
+fillDrawn -3,-3,3.4,3.6 none
+colorTransform 2,3,5,4 2,3 5x4
+colorTransform -3,2,8,4 0,2 5x4
+colorTransform 0.5,3,5,4 0,3 6x4
+colorTransform 1.5,3,5,4 2,3 4x4
+colorTransform 2.5,3,5,4 2,3 6x4
+colorTransform -0.5,3,5,4 0,3 4x4
+colorTransform -1.5,3,5,4 0,3 4x4
+colorTransform 2,3,5.5,4 2,3 6x4
+colorTransform 2,3,4.5,4 2,3 4x4
+colorTransform 2.3,3,5.4,4 2,3 6x4
+colorTransform 2.6,3,5.6,4 3,3 5x4
+colorTransform 2.5,1.7,10.6,10.2 2,2 11x10
+colorTransform -5,-3,20,20 0,0 15x16
+colorTransform 14.5,2,3,3 14,2 2x3
+colorTransform 5,5,-3,4 none
+colorTransform 5,5,3,-4 none
+colorTransform 20,20,5,5 none
+colorTransform 5,5,0,0 none
+colorTransform 15.5,3,1,1 none
+colorTransform -3,-3,3.4,3.6 none
+getPixels 2,3,5,4 20 first 2,3
+getPixels -3,2,8,4 20 first 0,2
+getPixels 0.5,3,5,4 24 first 0,3
+getPixels 1.5,3,5,4 16 first 2,3
+getPixels 2.5,3,5,4 24 first 2,3
+getPixels -0.5,3,5,4 16 first 0,3
+getPixels -1.5,3,5,4 16 first 0,3
+getPixels 2,3,5.5,4 24 first 2,3
+getPixels 2,3,4.5,4 16 first 2,3
+getPixels 2.3,3,5.4,4 24 first 2,3
+getPixels 2.6,3,5.6,4 20 first 3,3
+getPixels 2.5,1.7,10.6,10.2 110 first 2,2
+getPixels -5,-3,20,20 240 first 0,0
+getPixels 14.5,2,3,3 6 first 14,2
+getPixels 5,5,-3,4 0
+getPixels 5,5,3,-4 0
+getPixels 20,20,5,5 0
+getPixels 5,5,0,0 0
+getPixels 15.5,3,1,1 0
+getPixels -3,-3,3.4,3.6 0
+setPixels 2,3,5,4 20 2,3 5x4
+setPixels -3,2,8,4 20 0,2 5x4
+setPixels 0.5,3,5,4 24 0,3 6x4
+setPixels 1.5,3,5,4 16 2,3 4x4
+setPixels 2.5,3,5,4 24 2,3 6x4
+setPixels -0.5,3,5,4 16 0,3 4x4
+setPixels -1.5,3,5,4 16 0,3 4x4
+setPixels 2,3,5.5,4 24 2,3 6x4
+setPixels 2,3,4.5,4 16 2,3 4x4
+setPixels 2.3,3,5.4,4 24 2,3 6x4
+setPixels 2.6,3,5.6,4 20 3,3 5x4
+setPixels 2.5,1.7,10.6,10.2 110 2,2 11x10
+setPixels -5,-3,20,20 240 0,0 15x16
+setPixels 14.5,2,3,3 6 14,2 2x3
+setPixels 5,5,-3,4 0 none
+setPixels 5,5,3,-4 0 none
+setPixels 20,20,5,5 0 none
+setPixels 5,5,0,0 0 none
+setPixels 15.5,3,1,1 0 none
+setPixels -3,-3,3.4,3.6 0 none
+getVector 2,3,5,4 20 first 2,3
+getVector -3,2,8,4 20 first 0,2
+getVector 0.5,3,5,4 24 first 0,3
+getVector 1.5,3,5,4 16 first 2,3
+getVector 2.5,3,5,4 24 first 2,3
+getVector -0.5,3,5,4 16 first 0,3
+getVector -1.5,3,5,4 16 first 0,3
+getVector 2,3,5.5,4 24 first 2,3
+getVector 2,3,4.5,4 16 first 2,3
+getVector 2.3,3,5.4,4 24 first 2,3
+getVector 2.6,3,5.6,4 20 first 3,3
+getVector 2.5,1.7,10.6,10.2 110 first 2,2
+getVector -5,-3,20,20 240 first 0,0
+getVector 14.5,2,3,3 6 first 14,2
+getVector 5,5,-3,4 0
+getVector 5,5,3,-4 0
+getVector 20,20,5,5 0
+getVector 5,5,0,0 0
+getVector 15.5,3,1,1 0
+getVector -3,-3,3.4,3.6 0
+setVector 2,3,5,4 2,3 5x4
+setVector -3,2,8,4 0,2 5x4
+setVector 0.5,3,5,4 0,3 6x4
+setVector 1.5,3,5,4 2,3 4x4
+setVector 2.5,3,5,4 2,3 6x4
+setVector -0.5,3,5,4 0,3 4x4
+setVector -1.5,3,5,4 0,3 4x4
+setVector 2,3,5.5,4 2,3 6x4
+setVector 2,3,4.5,4 2,3 4x4
+setVector 2.3,3,5.4,4 2,3 6x4
+setVector 2.6,3,5.6,4 3,3 5x4
+setVector 2.5,1.7,10.6,10.2 2,2 11x10
+setVector -5,-3,20,20 0,0 15x16
+setVector 14.5,2,3,3 14,2 2x3
+setVector 5,5,-3,4 none
+setVector 5,5,3,-4 none
+setVector 20,20,5,5 none
+setVector 5,5,0,0 none
+setVector 15.5,3,1,1 none
+setVector -3,-3,3.4,3.6 none
+histogram 2,3,5,4 20
+histogram -3,2,8,4 20
+histogram 0.5,3,5,4 24
+histogram 1.5,3,5,4 16
+histogram 2.5,3,5,4 24
+histogram -0.5,3,5,4 16
+histogram -1.5,3,5,4 16
+histogram 2,3,5.5,4 24
+histogram 2,3,4.5,4 16
+histogram 2.3,3,5.4,4 24
+histogram 2.6,3,5.6,4 20
+histogram 2.5,1.7,10.6,10.2 110
+histogram -5,-3,20,20 240
+histogram 14.5,2,3,3 6
+histogram 5,5,-3,4 0
+histogram 5,5,3,-4 0
+histogram 20,20,5,5 0
+histogram 5,5,0,0 0
+histogram 15.5,3,1,1 0
+histogram -3,-3,3.4,3.6 0
+drawClip 2,3,5,4 2,3 5x4
+drawClip -3,2,8,4 0,2 5x4
+drawClip 0.5,3,5,4 0,3 6x4
+drawClip 1.5,3,5,4 2,3 4x4
+drawClip 2.5,3,5,4 2,3 6x4
+drawClip -0.5,3,5,4 0,3 4x4
+drawClip -1.5,3,5,4 0,3 4x4
+drawClip 2,3,5.5,4 2,3 6x4
+drawClip 2,3,4.5,4 2,3 4x4
+drawClip 2.3,3,5.4,4 2,3 6x4
+drawClip 2.6,3,5.6,4 3,3 5x4
+drawClip 2.5,1.7,10.6,10.2 2,2 11x10
+drawClip -5,-3,20,20 0,0 15x16
+drawClip 14.5,2,3,3 14,2 2x3
+drawClip 5,5,-3,4 none
+drawClip 5,5,3,-4 none
+drawClip 20,20,5,5 none
+drawClip 5,5,0,0 none
+drawClip 15.5,3,1,1 none
+drawClip -3,-3,3.4,3.6 none
+pixelDissolve 2,3,5,4 13 2,3 5x4 / 13 8,1 5x4
+pixelDissolve -3,2,8,4 9 0,2 4x4 / 13 11,1 5x4
+pixelDissolve 0.5,3,5,4 21 0,3 6x4 / 21 8,1 6x4
+pixelDissolve 1.5,3,5,4 9 2,3 4x4 / 9 8,1 4x4
+pixelDissolve 2.5,3,5,4 21 2,3 6x4 / 21 8,1 6x4
+pixelDissolve -0.5,3,5,4 9 0,3 4x4 / 9 8,1 4x4
+pixelDissolve -1.5,3,5,4 9 0,3 4x4 / 9 10,1 4x4
+pixelDissolve 2,3,5.5,4 21 2,3 6x4 / 21 8,1 6x4
+pixelDissolve 2,3,4.5,4 9 2,3 4x4 / 9 8,1 4x4
+pixelDissolve 2.3,3,5.4,4 21 2,3 6x4 / 21 8,1 6x4
+pixelDissolve 2.6,3,5.6,4 13 3,3 5x4 / 13 8,1 5x4
+pixelDissolve 2.5,1.7,10.6,10.2 62 2,2 7x7 / 22 8,1 8x10
+pixelDissolve -5,-3,20,20 1 0,0 2x4 / 54 13,4 3x12
+pixelDissolve 14.5,2,3,3 6 14,2 2x3 / 6 8,1 2x3
+pixelDissolve 5,5,-3,4 1 2,5 3x4 / 1 8,1 3x4
+pixelDissolve 5,5,3,-4 1 5,1 3x4 / 1 8,1 3x4
+pixelDissolve 20,20,5,5 0 none / 0 none
+pixelDissolve 5,5,0,0 0 none / 0 none
+pixelDissolve 15.5,3,1,1 0 none / 0 none
+pixelDissolve -3,-3,3.4,3.6 0 none / 0 none
+hitTest 2,3,5,4 true
+hitTest -3,2,8,4 true
+hitTest 0.5,3,5,4 true
+hitTest 1.5,3,5,4 true
+hitTest 2.5,3,5,4 true
+hitTest -0.5,3,5,4 false
+hitTest -1.5,3,5,4 false
+hitTest 2,3,5.5,4 true
+hitTest 2,3,4.5,4 true
+hitTest 2.3,3,5.4,4 true
+hitTest 2.6,3,5.6,4 true
+hitTest 2.5,1.7,10.6,10.2 true
+hitTest -5,-3,20,20 true
+hitTest 14.5,2,3,3 false
+hitTest 5,5,-3,4 false
+hitTest 5,5,3,-4 false
+hitTest 20,20,5,5 false
+hitTest 5,5,0,0 false
+hitTest 15.5,3,1,1 false
+hitTest -3,-3,3.4,3.6 false
+generateFilterRect 2,3,5,4 (x=2, y=3, w=5, h=4) (x=0, y=1, w=9, h=8)
+generateFilterRect -3,2,8,4 (x=0, y=2, w=5, h=4) (x=-2, y=0, w=9, h=8)
+generateFilterRect 0.5,3,5,4 (x=0, y=3, w=6, h=4) (x=-2, y=1, w=10, h=8)
+generateFilterRect 1.5,3,5,4 (x=2, y=3, w=4, h=4) (x=0, y=1, w=8, h=8)
+generateFilterRect 2.5,3,5,4 (x=2, y=3, w=6, h=4) (x=0, y=1, w=10, h=8)
+generateFilterRect -0.5,3,5,4 (x=0, y=3, w=4, h=4) (x=-2, y=1, w=8, h=8)
+generateFilterRect -1.5,3,5,4 (x=0, y=3, w=4, h=4) (x=-2, y=1, w=8, h=8)
+generateFilterRect 2,3,5.5,4 (x=2, y=3, w=6, h=4) (x=0, y=1, w=10, h=8)
+generateFilterRect 2,3,4.5,4 (x=2, y=3, w=4, h=4) (x=0, y=1, w=8, h=8)
+generateFilterRect 2.3,3,5.4,4 (x=2, y=3, w=6, h=4) (x=0, y=1, w=10, h=8)
+generateFilterRect 2.6,3,5.6,4 (x=3, y=3, w=5, h=4) (x=1, y=1, w=9, h=8)
+generateFilterRect 2.5,1.7,10.6,10.2 (x=2, y=2, w=11, h=10) (x=0, y=0, w=15, h=14)
+generateFilterRect -5,-3,20,20 (x=0, y=0, w=15, h=16) (x=-2, y=-2, w=19, h=20)
+generateFilterRect 14.5,2,3,3 (x=14, y=2, w=2, h=3) (x=12, y=0, w=6, h=7)
+generateFilterRect 5,5,-3,4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+generateFilterRect 5,5,3,-4 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+generateFilterRect 20,20,5,5 (x=134217727, y=134217727, w=0, h=0) (x=134217725, y=134217725, w=4, h=4)
+generateFilterRect 5,5,0,0 (x=5, y=5, w=0, h=0) (x=3, y=3, w=4, h=4)
+generateFilterRect 15.5,3,1,1 (x=16, y=3, w=0, h=1) (x=14, y=1, w=4, h=5)
+generateFilterRect -3,-3,3.4,3.6 (x=0, y=0, w=0, h=1) (x=-2, y=-2, w=4, h=5)
+hitTest rect 3.3,4,1.4,1 true
+hitTest rect 4.4,4,0.2,1 true
+hitTest rect 4.5,4,1,1 true
+hitTest rect 3.5,4,1,1 false
+hitTest rect 3.6,4,0.8,1 false
+hitTest rect 4,3.3,1,1.4 true
+hitTest rect -1,4,5.5,1 false
+hitTest rect 4.9,4,0.3,1 false
+hitTest point 0.5,0 true true true true
+hitTest point -0.5,0 false false false true
+hitTest point 0.7,0 true false true true
+hitTest point -0.7,0 false false false true
+hitTest point 1.5,0 true false true false
+hitTest point -1.5,0 false true false true
+hitTest point 4.5,0 true true false false
+hitTest point -4.5,0 true false false false
+hitTest point 0,0.6 true false true true
+hitTest point 0,-0.6 true false false true
+scroll 1.5,0 1,0 15x16 shift 1,0
+scroll -1.5,0 0,0 15x16 shift -1,0
+scroll 0.5,0 none
+scroll 2.7,-0.7 2,0 14x16 shift 2,0
+scroll -2.7,1.2 0,1 14x15 shift -2,1
+odd point NaN,4 none / none
+odd point copyChannel NaN,4 none
+odd point merge NaN,4 none
+odd point paletteMap NaN,4 none
+odd point threshold NaN,4 0 none
+odd point applyFilter NaN,4 none
+odd point pixelDissolve NaN,4 0 none
+odd point hitTest NaN,4 false false false false
+odd point 3,NaN none / none
+odd point copyChannel 3,NaN none
+odd point merge 3,NaN none
+odd point paletteMap 3,NaN none
+odd point threshold 3,NaN 0 none
+odd point applyFilter 3,NaN none
+odd point pixelDissolve 3,NaN 0 none
+odd point hitTest 3,NaN false false false false
+odd point Infinity,4 none / none
+odd point copyChannel Infinity,4 none
+odd point merge Infinity,4 none
+odd point paletteMap Infinity,4 none
+odd point threshold Infinity,4 0 none
+odd point applyFilter Infinity,4 none
+odd point pixelDissolve Infinity,4 0 none
+odd point hitTest Infinity,4 false false false false
+odd point -Infinity,4 none / none
+odd point copyChannel -Infinity,4 none
+odd point merge -Infinity,4 none
+odd point paletteMap -Infinity,4 none
+odd point threshold -Infinity,4 0 none
+odd point applyFilter -Infinity,4 none
+odd point pixelDissolve -Infinity,4 0 none
+odd point hitTest -Infinity,4 false false false false
+odd point 4294967299,4 none / none
+odd point copyChannel 4294967299,4 none
+odd point merge 4294967299,4 none
+odd point paletteMap 4294967299,4 none
+odd point threshold 4294967299,4 0 none
+odd point applyFilter 4294967299,4 none
+odd point pixelDissolve 4294967299,4 0 none
+odd point hitTest 4294967299,4 false false false false

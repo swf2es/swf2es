@@ -12,6 +12,30 @@ export interface PixelRect {
   height: number;
 }
 
+/** The nearest integer, a half to the even one, as C's rint rounds and Flash's pixel coordinates do. */
+export function nearest(v: number): number {
+  const f = Math.floor(v);
+  const d = v - f;
+  if (d !== 0.5) {
+    return d > 0.5 ? f + 1 : f;
+  }
+
+  return f % 2 === 0 ? f : f + 1;
+}
+
+/**
+ * A flash.geom.Rectangle's numbers as the pixels Flash takes it to cover:
+ * each edge rounded to the nearest pixel, a half to the even one, so a
+ * rect from 1.6 of 1.8 covers the pixel at 2 alone, and one from 3.5 of 1
+ * covers none (Ruffle's bitmapdata_rectangle_rounding; under adl the same
+ * for every operation taking a rect).
+ */
+export function pixelRect(x: number, y: number, width: number, height: number): PixelRect {
+  const x0 = nearest(x);
+  const y0 = nearest(y);
+  return { x: x0, y: y0, width: nearest(x + width) - x0, height: nearest(y + height) - y0 };
+}
+
 /** The reciprocals Flash divides alpha out with, 8.8 fixed point. */
 const RECIPROCAL = new Uint32Array(256);
 for (let a = 1; a < 256; a++) {
@@ -246,7 +270,8 @@ export class BitmapStore {
    * Without `mergeAlpha` the pixels replace the destination's; with it,
    * and always into an opaque destination, they go source over
    * destination, s + ((d * (256 - sa)) >> 8) a channel (the 160 cases of
-   * bitmapdata_copypixels_alpha_merge).
+   * bitmapdata_copypixels_alpha_merge). In place, a rect reaching past
+   * the bitmap's left or top edge may leave a gap (copyGaps).
    */
   copyPixels(
     source: BitmapStore,
@@ -258,8 +283,18 @@ export class BitmapStore {
     ax = 0,
     ay = 0,
   ): void {
+    const gaps = source === this ? this.copyGaps(rect, dx, dy) : [];
+    const [gx, gy, gax, gay] = [dx, dy, ax, ay];
     const s = source.clip(rect);
-    if (!s) {
+    const d =
+      s &&
+      this.clip({ x: dx + s.x - rect.x, y: dy + s.y - rect.y, width: s.width, height: s.height });
+    if (!s || !d) {
+      if (gaps.length) {
+        this.fillGaps(gaps, source, gx, gy, mergeAlpha, alpha, gax, gay);
+        this.changed();
+      }
+
       return;
     }
 
@@ -267,25 +302,23 @@ export class BitmapStore {
     dy += s.y - rect.y;
     ax += s.x - rect.x;
     ay += s.y - rect.y;
-    const d = this.clip({ x: dx, y: dy, width: s.width, height: s.height });
-    if (!d) {
-      return;
-    }
-
     const sx = s.x + (d.x - dx);
     const sy = s.y + (d.y - dy);
     ax += d.x - dx;
     ay += d.y - dy;
     // A plain replacement, where the pixels land as they are: an opaque
-    // source's go over anything unchanged. In place, all but a move down and
-    // left, which Flash's order smears, are a memmove.
+    // source's go over anything unchanged, and a gap is empty. In place,
+    // all but a move down and left, which Flash's order smears, are a
+    // memmove.
     const replaces = !alpha && (!source.transparent || (this.transparent && !mergeAlpha));
     const smears = source === this && d.y > sy && d.x < sx;
     if (
       replaces &&
       !smears &&
-      this.onGpu((copy) =>
-        copy.copy(source, { x: sx, y: sy, width: d.width, height: d.height }, d.x, d.y),
+      this.onGpu(
+        (copy) =>
+          copy.copy(source, { x: sx, y: sy, width: d.width, height: d.height }, d.x, d.y) &&
+          gaps.every((gap) => copy.fill(gap, source.transparent ? 0 : 0xff000000)),
       )
     ) {
       return;
@@ -314,17 +347,90 @@ export class BitmapStore {
           p = scale(p, alpha.pixels[my * alpha.width + mx] >>> 24);
         }
 
-        if (!this.transparent) {
-          this.pixels[to + i] = (over(p, this.pixels[to + i]) | 0xff000000) >>> 0;
-        } else if (mergeAlpha) {
-          this.pixels[to + i] = over(p, this.pixels[to + i]);
-        } else {
-          this.pixels[to + i] = p;
-        }
+        this.pixels[to + i] = this.composite(p, this.pixels[to + i], mergeAlpha);
       }
     }
 
+    this.fillGaps(gaps, source, gx, gy, mergeAlpha, alpha, gax, gay);
     this.changed();
+  }
+
+  /**
+   * The parts of an in-place copy Flash leaves empty: moved right and down
+   * by no more than its size, the rect is written whole from (dx, dy), and
+   * what of it lies left of or above the bitmap reads as nothing, where any
+   * other move (or another source) clips it and moves the point with it.
+   * Within the store, and apart; none for any other copy.
+   */
+  copyGaps(rect: PixelRect, dx: number, dy: number): PixelRect[] {
+    // Where the source's (0, 0) lands.
+    const kx = dx - rect.x;
+    const ky = dy - rect.y;
+    if (
+      (rect.x >= 0 && rect.y >= 0) ||
+      rect.width <= 0 ||
+      rect.height <= 0 ||
+      kx < 0 ||
+      ky < 0 ||
+      kx > rect.width ||
+      ky > rect.height
+    ) {
+      return [];
+    }
+
+    const right = dx + rect.width;
+    const bottom = dy + rect.height;
+    const left = this.clip({ x: dx, y: dy, width: Math.min(kx, right) - dx, height: rect.height });
+    const x0 = Math.max(dx, kx);
+    const top = this.clip({ x: x0, y: dy, width: right - x0, height: Math.min(ky, bottom) - dy });
+    return [left, top].filter((r): r is PixelRect => r !== null);
+  }
+
+  /**
+   * The gaps of an in-place copy written, as an empty pixel copied: a
+   * transparent bitmap's are what Flash's memory held there, taken as
+   * transparent; an opaque one's Flash reads back as 0, alpha and all, and
+   * draws black, which this keeps them, as opaque black.
+   */
+  private fillGaps(
+    gaps: PixelRect[],
+    source: BitmapStore,
+    dx: number,
+    dy: number,
+    mergeAlpha: boolean,
+    alpha: BitmapStore | null,
+    ax: number,
+    ay: number,
+  ): void {
+    const empty = source.transparent ? 0 : 0xff000000;
+    for (const gap of gaps) {
+      for (let y = gap.y; y < gap.y + gap.height; y++) {
+        for (let x = gap.x; x < gap.x + gap.width; x++) {
+          let p = empty;
+          if (alpha) {
+            const mx = ax + x - dx;
+            const my = ay + y - dy;
+            if (mx < 0 || my < 0 || mx >= alpha.width || my >= alpha.height) {
+              continue;
+            }
+
+            p = scale(p, alpha.pixels[my * alpha.width + mx] >>> 24);
+          }
+
+          const i = y * this.width + x;
+          this.pixels[i] = this.composite(p, this.pixels[i], mergeAlpha);
+        }
+      }
+    }
+  }
+
+  /** A copied pixel `p` on `d`: over it into an opaque store or merging, else in its place. */
+  private composite(p: number, d: number, mergeAlpha: boolean): number {
+    if (!this.transparent) {
+      return (over(p, d) | 0xff000000) >>> 0;
+    }
+
+    return mergeAlpha ? over(p, d) : p;
   }
 
   /** The rect's pixels, unmultiplied ARGB, row by row; the rect clipped to the store. */
