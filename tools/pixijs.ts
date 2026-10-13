@@ -64,7 +64,7 @@ function git(...args: string[]): string {
 function sourceKey(): string {
   const hash = createHash("sha256");
   hash.update(git("rev-parse", "HEAD"));
-  hash.update(git("diff", "HEAD"));
+  hash.update(git("diff", "--binary", "HEAD"));
   for (const path of git("ls-files", "--others", "--exclude-standard", "-z").split("\0")) {
     if (path !== "") {
       hash.update(path);
@@ -179,14 +179,24 @@ function declarationConfig(): string {
 }
 
 async function declarations(): Promise<void> {
-  await run(join(pixi, "node_modules/.bin/tsc"), ["-p", declarationConfig()]);
+  const tsc = join(pixi, "node_modules/typescript/bin/tsc");
+  await run(process.execPath, [tsc, "-p", declarationConfig()]);
   copyDeclarations("");
   await run(process.execPath, ["scripts/types/fixTypes.mts"]);
 }
 
+function fail(message: string): never {
+  console.error(`pixi.js: ${message}`);
+  process.exit(1);
+}
+
 async function main(): Promise<void> {
   if (!existsSync(join(pixi, "package.json"))) {
-    throw new Error("vendor/pixijs is empty: run git submodule update --init");
+    fail("vendor/pixijs is empty: run git submodule update --init, then pnpm install");
+  }
+
+  if (!existsSync(join(pixi, "node_modules/rollup"))) {
+    fail("vendor/pixijs has no build tools: run pnpm install");
   }
 
   const key = sourceKey();
