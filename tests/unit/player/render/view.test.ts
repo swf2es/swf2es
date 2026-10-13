@@ -3115,6 +3115,94 @@ test("a child taken off gives its Graphics, emptied, to the next shape placed", 
   });
 });
 
+test("a new object of a released one's character takes its node, reset, and the old one gets its own back", async () => {
+  // A timeline that places its children anew on every frame made and
+  // dropped hundreds of nodes a frame, with their containers and filters.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const { filterDefaults } = await import("../../../../packages/player/dist/display/filters.js");
+  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    DOMAdapter: { get(): object; set(adapter: object): void };
+  };
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  try {
+    const character = await outlinedSquare();
+    const { renderer } = standIn([]);
+    (renderer as unknown as { type: number }).type = 1;
+    const view = new PixiView(renderer);
+    const root = new Container();
+    const glow = () => [{ ...filterDefaults("glow"), blurX: 4, blurY: 4 }];
+    type Placed = {
+      filters: unknown[] | null;
+      alpha: number;
+      visible: boolean;
+      localTransform: { a: number; b: number; tx: number; ty: number };
+      updateLocalTransform(): void;
+      children: { children: unknown[] }[];
+    };
+    const placed = (k: number) => view.stage.children[0].children[1 + k] as unknown as Placed;
+
+    const first = new ShapeObject(character);
+    first.setMatrix({ a: 0, b: 1, c: -1, d: 0, tx: 30, ty: 20 });
+    first.colorTransform = {
+      rMul: 1,
+      gMul: 1,
+      bMul: 1,
+      aMul: 0.5,
+      rAdd: 0,
+      gAdd: 0,
+      bAdd: 0,
+      aAdd: 0,
+    };
+    first.visible = false;
+    first.filters = glow();
+    root.placeAtDepth(first, 1);
+    view.prepare(root);
+    const container = placed(0);
+    const chain = container.filters?.[0];
+    assert.ok(chain);
+    const art = [...container.children[0].children];
+
+    // Its place taken by another of the character: the node comes back to it, as the new one is.
+    root.removeChild(first);
+    const second = new ShapeObject(character);
+    second.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 5, ty: 6 });
+    second.filters = glow();
+    root.placeAtDepth(second, 1);
+    view.prepare(root);
+    assert.equal(placed(0), container);
+    assert.equal(container.filters?.[0], chain);
+    assert.equal(container.alpha, 1);
+    assert.equal(container.visible, true);
+    container.updateLocalTransform();
+    const { a, b, tx, ty } = container.localTransform;
+    assert.deepEqual([a, b, tx, ty], [1, 0, 5, 6]);
+    assert.deepEqual(container.children[0].children, art);
+
+    // One without filters takes it without them.
+    root.removeChild(second);
+    const third = new ShapeObject(character);
+    root.placeAtDepth(third, 1);
+    view.prepare(root);
+    assert.equal(placed(0), container);
+    assert.equal(container.filters, null);
+
+    // The first back on the list has a node of its own, drawn anew, its filters with it.
+    root.placeAtDepth(first, 2);
+    view.prepare(root);
+    assert.equal(placed(0), container);
+    assert.notEqual(placed(1), container);
+    assert.equal(placed(1).alpha, 0.5);
+    assert.equal(placed(1).visible, false);
+    assert.ok(placed(1).filters?.[0]);
+    assert.equal(placed(1).children[0].children.length, art.length);
+  } finally {
+    pixi.DOMAdapter.set(adapter);
+  }
+});
+
 test("the wheel reaches the player in Flash's lines, keeps the page from scrolling only where the SWF takes it, and leaves Ctrl's zoom to the page", () => {
   const listeners = new Map<string, (e: unknown) => void>();
   const canvas = {

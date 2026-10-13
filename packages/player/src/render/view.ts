@@ -58,6 +58,7 @@ import {
   PARKED_MOST,
   releaseDrawTarget,
   SPARE_GRAPHICS_MOST,
+  SPARE_NODES_MOST,
   trimPools,
 } from "./pools.js";
 import { boundedResolves } from "./resolve.js";
@@ -232,6 +233,16 @@ interface Node {
    * line as wide as in that space. Null for its own transform.
    */
   lineSpace: Linear | null;
+  /**
+   * The object it draws, the one it was made for or the last to take it,
+   * and the character and class of those that may take it (`PixiView.spareNodes`).
+   */
+  owner: WeakRef<DisplayObject>;
+  character: object | null;
+  kind: object;
+  /** Whether it is listed among the spare nodes, and since when; it may have come back since. */
+  listed: boolean;
+  since: number;
 }
 
 /** Only a partner outside the branch prevents it owning a separate instruction set. */
@@ -251,6 +262,22 @@ export class PixiView {
   readonly counts = { strokeContexts: 0, strokeReuses: 0 };
   /** Graphics of children taken off, kept for the next content to take (SPARE_GRAPHICS_MOST). */
   private readonly spareGraphics: SharedGraphics[] = [];
+  /**
+   * The released nodes, by their objects' character, for a new object of
+   * the character to take (SPARE_NODES_MOST of each), newest last. A
+   * timeline that places its children anew on every frame, as an animated
+   * character's often does, made hundreds of nodes a frame, each with its
+   * containers, and dropped as many: taken, a node keeps its containers
+   * and Graphics, where they are in Pixi's tree when it comes back in its
+   * place, and its filters where the new object's are the same.
+   */
+  private readonly spareNodes = new Map<object, Node[]>();
+  /** The nodes by their containers, for a child's sync to take the node that is in its place. */
+  private readonly containerNodes = new WeakMap<PixiContainer, Node>();
+  /** The container in the place the next object synced goes to, set and read as arrange syncs it. */
+  private placeHint: PixiContainer | null = null;
+  /** When the spare nodes were last swept of those kept too long. */
+  private sweptAt = 0;
   /** The Graphics settled groups batched, some since destroyed or moved out (settle, unsettle). */
   private readonly batched = new Set<Graphics>();
   /** settleGroups' scratch: the groups whose batched Graphics draw alone again. */
@@ -706,7 +733,13 @@ export class PixiView {
   }
 
   private node(o: DisplayObject): Node {
+    const hint = this.placeHint;
+    this.placeHint = null;
     let node = this.nodes.get(o);
+    if (!node && !this.fresh) {
+      node = this.takeSpare(o, hint);
+    }
+
     if (!node) {
       const art = new PixiContainer();
       node = {
@@ -749,12 +782,149 @@ export class PixiView {
         sliceOwner: null,
         sliceLinear: null,
         lineSpace: null,
+        owner: o.ref,
+        character: o.character,
+        kind: o.constructor,
+        listed: false,
+        since: 0,
       };
       node.container.addChild(art);
       this.nodes.set(o, node);
+      if (!this.fresh) {
+        this.containerNodes.set(node.container, node);
+      }
     }
 
     return node;
+  }
+
+  /**
+   * A released node of `o`'s character and class for `o` to take, the one
+   * whose container is `hint`, in `o`'s place, where it is one. Its object
+   * gets a node of its own if it comes back. The node is synced as one
+   * that comes back is, which `o`, new, has redrawn and placed whole;
+   * what only its old object's history set (a stale cache, a slice, a
+   * colour) is forgotten here.
+   */
+  private takeSpare(o: DisplayObject, hint: PixiContainer | null): Node | undefined {
+    const character = o.character;
+    const list = character && this.spareNodes.get(character);
+    if (!list) {
+      return undefined;
+    }
+
+    let node: Node | undefined;
+    const placed = hint ? this.containerNodes.get(hint) : undefined;
+    if (placed?.listed && this.spareFor(placed, o)) {
+      node = placed;
+    } else {
+      while (list.length > 0) {
+        const last = list.pop() as Node;
+        if (last.listed && this.spareFor(last, o)) {
+          node = last;
+          break;
+        }
+
+        last.listed = false;
+      }
+    }
+
+    if (!node) {
+      return undefined;
+    }
+
+    node.listed = false;
+    // Back on the list, the old object is drawn whole into a node of its own.
+    const was = node.owner.deref();
+    if (was) {
+      this.nodes.delete(was);
+      was.dirty |= TRANSFORM | CONTENT | (was instanceof Container ? CHILDREN : 0);
+    }
+
+    node.owner = o.ref;
+    node.stale = null;
+    node.color = null;
+    node.inherited = null;
+    node.slice = null;
+    node.sliceKey = "";
+    node.sliceOwner = null;
+    node.sliceLinear = null;
+    node.lineSpace = null;
+    this.nodes.set(o, node);
+    return node;
+  }
+
+  /** Whether `node`, listed spare, may be taken by `o`: still off the list, and of its class. */
+  private spareFor(node: Node, o: DisplayObject): boolean {
+    return node.released && node.kind === o.constructor && node.character === o.character;
+  }
+
+  /**
+   * List a node just released for a new object of its character to take:
+   * not a mask's, whose container a masked one may still hold.
+   */
+  private listSpare(node: Node): void {
+    const character = node.character;
+    const container = node.container;
+    if (
+      this.fresh ||
+      node.listed ||
+      !character ||
+      node.masking ||
+      container.includeInBuild === false ||
+      container.measurable === false
+    ) {
+      return;
+    }
+
+    let list = this.spareNodes.get(character);
+    if (!list) {
+      list = [];
+      this.spareNodes.set(character, list);
+    }
+
+    // Past the most, those come back or taken are dropped, then the oldest.
+    if (list.length >= SPARE_NODES_MOST) {
+      let k = 0;
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].listed && list[i].released) {
+          list[k++] = list[i];
+        } else {
+          list[i].listed = false;
+        }
+      }
+
+      list.length = k;
+      if (k >= SPARE_NODES_MOST) {
+        for (const dropped of list.splice(0, k - SPARE_NODES_MOST + 1)) {
+          dropped.listed = false;
+        }
+      }
+    }
+
+    node.listed = true;
+    node.since = performance.now();
+    list.push(node);
+  }
+
+  /** Let go of the spare nodes listed longer than IDLE_MS, and of those since taken or come back. */
+  private sweepSpares(now: number): void {
+    for (const [character, list] of this.spareNodes) {
+      let k = 0;
+      for (let i = 0; i < list.length; i++) {
+        const node = list[i];
+        if (node.listed && node.released && now - node.since < IDLE_MS) {
+          list[k++] = node;
+        } else {
+          node.listed = false;
+        }
+      }
+
+      list.length = k;
+      if (k === 0) {
+        this.spareNodes.delete(character);
+      }
+    }
   }
 
   /**
@@ -1073,6 +1243,7 @@ export class PixiView {
     }
 
     node.released = true;
+    this.listSpare(node);
     const group = node.container.isRenderGroup ? node.container.renderGroup : null;
     if (group) {
       const uid = group.instructionSet.uid;
@@ -1754,6 +1925,7 @@ export class PixiView {
       let at = 1;
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
+        this.placeHint = content.children[at] ?? null;
         const container = this.sync(
           child,
           node.world,
@@ -1918,6 +2090,11 @@ export class PixiView {
       }
 
       this.emptyGroup(uid, entry.group.deref());
+    }
+
+    if (now - this.sweptAt >= IDLE_MS) {
+      this.sweptAt = now;
+      this.sweepSpares(now);
     }
 
     trimPools();
