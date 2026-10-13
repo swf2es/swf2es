@@ -239,6 +239,11 @@ export function applyFilter(
     return true;
   }
 
+  if (f.kind === "colorMatrix") {
+    colorMatrix(dest, source, rect, dx, dy, f.matrix);
+    return true;
+  }
+
   // The work: what is shown and as far round it as the filter reaches into
   // it, which may be past the rect, whose edge cuts what is written alone.
   const [hx, hy] = halo(f);
@@ -281,9 +286,6 @@ export function applyFilter(
         result[i] = ((a[i] << 24) | (r[i] << 16) | (g[i] << 8) | b[i]) >>> 0;
       }
 
-      break;
-    case "colorMatrix":
-      colorMatrix(dest, result, [a, r, g, b], work, contentOf(source, rect), f.matrix);
       break;
     case "bevel":
       bevel(result, [a, r, g, b], w, h, f);
@@ -358,20 +360,30 @@ function contentOf(source: BitmapStore, rect: PixelRect): PixelRect | null {
 }
 
 /**
- * A colour matrix of each pixel's straight colour, rounded. adl maps the
- * pixels about what the source has, its bounds and one more each way, one
- * by one, their colour premultiplied by the new alpha and truncated; the
- * rest of the rect it fills with the map of a transparent pixel, written as
- * the store premultiplies it.
+ * A colour matrix of each pixel's straight colour, rounded, into `dest`.
+ * adl maps the pixels about what the source has, its bounds and one more
+ * each way, one by one, their colour premultiplied by the new alpha and
+ * truncated; the rest of the rect it fills with the map of a transparent
+ * pixel, written as the store premultiplies it. Of the rect, only what
+ * lies within the source is written, the point moved with the clip, as a
+ * copy's is.
  */
 function colorMatrix(
   dest: BitmapStore,
-  result: Uint32Array,
-  [a, r, g, b]: Int32Array[],
-  work: PixelRect,
-  content: PixelRect | null,
+  source: BitmapStore,
+  rect: PixelRect,
+  dx: number,
+  dy: number,
   m: number[],
 ): void {
+  const area = intersect(rect, { x: 0, y: 0, width: source.width, height: source.height });
+  const mx = dx - rect.x;
+  const my = dy - rect.y;
+  const shown = area && intersect(area, { x: -mx, y: -my, width: dest.width, height: dest.height });
+  if (!shown) {
+    return;
+  }
+
   // The map of straight (r, g, b, a) into `mapped`, each clamped and rounded.
   const mapped = [0, 0, 0, 0];
   const map = (cr: number, cg: number, cb: number, ca: number) => {
@@ -387,36 +399,69 @@ function colorMatrix(
 
     return mapped;
   };
-  const empty = [...map(0, 0, 0, 0)];
-  result.fill(
-    dest.premultiplied(((empty[3] << 24) | (empty[0] << 16) | (empty[1] << 8) | empty[2]) >>> 0),
-  );
-  if (!content) {
-    return;
-  }
+  const [er, eg, eb, ea] = map(0, 0, 0, 0);
+  const empty = dest.premultiplied(((ea << 24) | (er << 16) | (eg << 8) | eb) >>> 0);
 
-  // What the source has, and one more each way, as far as the work goes.
-  const near = intersect(
-    { x: content.x - 1, y: content.y - 1, width: content.width + 2, height: content.height + 2 },
-    work,
-  );
-  if (!near) {
-    return;
-  }
+  // What the source has, and one more each way.
+  const content = contentOf(source, area);
+  const near = content && {
+    x: content.x - 1,
+    y: content.y - 1,
+    width: content.width + 2,
+    height: content.height + 2,
+  };
+  const from = source.pixels;
+  const into = dest.pixels;
+  const opaque = dest.transparent ? 0 : 0xff000000;
+  const pixel = (x: number, y: number): number => {
+    if (
+      !near ||
+      x < near.x ||
+      y < near.y ||
+      x >= near.x + near.width ||
+      y >= near.y + near.height
+    ) {
+      return empty;
+    }
 
-  for (let y = near.y; y < near.y + near.height; y++) {
-    for (let x = near.x; x < near.x + near.width; x++) {
-      const i = (y - work.y) * work.width + (x - work.x);
-      const s = a[i] > 0 ? 255 / a[i] : 0;
-      const [nr, ng, nb, na] = map(r[i] * s, g[i] * s, b[i] * s, a[i]);
-      result[i] =
-        ((na << 24) |
-          (Math.floor((nr * na) / 255) << 16) |
-          (Math.floor((ng * na) / 255) << 8) |
-          Math.floor((nb * na) / 255)) >>>
-        0;
+    const p = from[y * source.width + x];
+    const a = p >>> 24;
+    const s = a > 0 ? 255 / a : 0;
+    const [nr, ng, nb, na] = map(
+      ((p >>> 16) & 0xff) * s,
+      ((p >>> 8) & 0xff) * s,
+      (p & 0xff) * s,
+      a,
+    );
+    return (
+      ((na << 24) |
+        (Math.floor((nr * na) / 255) << 16) |
+        (Math.floor((ng * na) / 255) << 8) |
+        Math.floor((nb * na) / 255)) >>>
+      0
+    );
+  };
+
+  // Rows down, each in fours from its start, a four read whole before it is
+  // written, the rest one by one: in place, a move right repeats what the
+  // fours before wrote, as 480 rows under adl show.
+  const four = [0, 0, 0, 0];
+  const end = shown.x + shown.width;
+  for (let y = shown.y; y < shown.y + shown.height; y++) {
+    const row = (y + my) * dest.width + mx;
+    for (let x = shown.x; x < end; ) {
+      const n = end - x >= 4 ? 4 : 1;
+      for (let k = 0; k < n; k++) {
+        four[k] = pixel(x + k, y);
+      }
+
+      for (let k = 0; k < n; k++, x++) {
+        into[row + x] = (four[k] | opaque) >>> 0;
+      }
     }
   }
+
+  dest.changed();
 }
 
 /** The channel of an unmultiplied pixel a displacement reads: red 1, green 2, blue 4, alpha 8; any other none, 128. */
