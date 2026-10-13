@@ -715,6 +715,98 @@ async function resizeSwf(
   }
 }
 
+/**
+ * Play a SWF with no scripts through the transform table, lose the WebGL
+ * context and get it back, and draw the same frame again, then play on:
+ * the pixels that differ between the two draws, or what threw.
+ */
+async function contextLossSwf(base64: string, frames: number): Promise<string | null> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const player = new Player(bytes, null);
+  setTransformTable(true, 1);
+  const renderer = await autoDetectRenderer({
+    preference: "webgl",
+    width: player.width,
+    height: player.height,
+    background: player.background,
+    resolution: 1,
+    preserveDrawingBuffer: true,
+    useBackBuffer: true,
+  });
+  const gl = (renderer as unknown as { gl: WebGL2RenderingContext }).gl;
+  const pixels = () => {
+    const out = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+    gl.readPixels(
+      0,
+      0,
+      gl.drawingBufferWidth,
+      gl.drawingBufferHeight,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      out,
+    );
+    return out;
+  };
+  let tableDraws = 0;
+  try {
+    const multi = gl.getExtension("WEBGL_multi_draw");
+    const view = new PixiView(renderer);
+    await player.start();
+    for (let i = 0; i < frames; i++) {
+      player.tick();
+      view.render(player.stage);
+    }
+
+    const before = pixels();
+    const restored = new Promise((done) =>
+      renderer.canvas.addEventListener("webglcontextrestored", () => setTimeout(done, 0), {
+        once: true,
+      }),
+    );
+    (renderer as unknown as { context: { forceContextLoss(): void } }).context.forceContextLoss();
+    await restored;
+    // The restored context's extension is a new object: count the table's draws through it.
+    const again = gl.getExtension("WEBGL_multi_draw");
+    if (multi && again) {
+      const draw = again.multiDrawElementsWEBGL.bind(again);
+      again.multiDrawElementsWEBGL = (...args: Parameters<typeof draw>) => {
+        tableDraws += args[6];
+        draw(...args);
+      };
+    }
+
+    view.render(player.stage);
+    const after = pixels();
+    let differ = 0;
+    for (let i = 0; i < before.length; i += 4) {
+      if (
+        before[i] !== after[i] ||
+        before[i + 1] !== after[i + 1] ||
+        before[i + 2] !== after[i + 2] ||
+        before[i + 3] !== after[i + 3]
+      ) {
+        differ++;
+      }
+    }
+
+    for (let i = 0; i < frames; i++) {
+      player.tick();
+      view.render(player.stage);
+    }
+
+    if (multi && tableDraws === 0) {
+      return "the table drew nothing after the context came back";
+    }
+
+    return differ > 0 ? `${differ} of ${before.length / 4} pixels differ` : null;
+  } catch (e) {
+    return describe(e, null);
+  } finally {
+    renderer.destroy();
+    setTransformTable(true);
+  }
+}
+
 /** The SWF openSwf started, which stepSwf plays on: for leak.ts, which measures the heap between steps. */
 let opened: {
   player: Player;
@@ -1040,6 +1132,7 @@ const page = globalThis as unknown as {
   closeSwf: typeof closeSwf;
   traceSwf: typeof traceSwf;
   resizeSwf: typeof resizeSwf;
+  contextLossSwf: typeof contextLossSwf;
 };
 page.runSwf = runSwf;
 page.precompiledSwf = precompiledSwf;
@@ -1050,3 +1143,4 @@ page.stepSwf = stepSwf;
 page.closeSwf = closeSwf;
 page.traceSwf = traceSwf;
 page.resizeSwf = resizeSwf;
+page.contextLossSwf = contextLossSwf;
