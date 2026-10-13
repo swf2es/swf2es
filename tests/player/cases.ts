@@ -5852,6 +5852,16 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "flip-zero-scale",
+    swf: (abc) => bare(abc, 1, "FlipZeroScale", 160, 20),
+    script: "FlipZeroScale",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    // Flash smooths the edges of the two boxes it draws as 3D objects, a pixel round each.
+    maxOutliers: 250,
+  },
+  {
     name: "three-d",
     swf: (abc) => bare(abc, 1, "ThreeD"),
     script: "ThreeD",
