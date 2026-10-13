@@ -25,7 +25,7 @@ import {
 } from "pixi.js";
 import { filterRect, gradientTable, integerKernel } from "../bitmap/filters.js";
 import type { Filter as FilterRecord } from "../display/filters.js";
-import type { AreaKeeper } from "./blend.js";
+import type { AreaKeeper, PaddingFitter } from "./blend.js";
 
 const VERTEX = `in vec2 aPosition;
 out vec2 vTextureCoord;
@@ -153,6 +153,15 @@ function placeOffset(offset: Float32Array, f: FilterRecord, distance: number, un
   const radians = ((f.angle || 0) * Math.PI) / 180;
   offset[0] = distance * Math.cos(radians) * units;
   offset[1] = distance * Math.sin(radians) * units;
+}
+
+/**
+ * A distance as far as it pads: NaN none; Infinity, or the -8388866
+ * generateFilterRect makes of NaN, as far as a GPU's texture could be,
+ * which the chain fits to what this one can draw (FilterChain.fitPadding).
+ */
+function paddedDistance(distance: number): number {
+  return Number.isNaN(distance) ? 0 : Math.max(-(2 ** 24), Math.min(2 ** 24, distance));
 }
 
 /**
@@ -304,7 +313,7 @@ class GlowFilter extends BlurredFilter {
         },
       },
     });
-    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance);
+    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(paddedDistance(distance));
     this.padding = Math.ceil(this.reach);
     this.distance = distance;
   }
@@ -409,7 +418,7 @@ class BevelFilter extends BlurredFilter {
         },
       },
     });
-    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance);
+    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(paddedDistance(distance));
     this.padding = Math.ceil(this.reach);
   }
 
@@ -556,7 +565,13 @@ class GradientFilter extends BlurredFilter {
     });
     this.gradient = gradient;
     // The rect's growth each way, as applyFilter's: left, top, right, bottom.
-    const rect = filterRect({ x: 0, y: 0, width: 1, height: 1 }, f);
+    const rect = filterRect(
+      { x: 0, y: 0, width: 1, height: 1 },
+      {
+        ...f,
+        distance: paddedDistance(f.distance),
+      },
+    );
     this.grows = [-rect.x, -rect.y, rect.x + rect.width - 1, rect.y + rect.height - 1];
     this.reach = Math.max(...this.grows) + 1;
     this.padding = this.reach;
@@ -1028,13 +1043,20 @@ export function displayFilters(
  * the padding of it and the filters after it.
  */
 function scaleFilters(filters: readonly Filter[], units: number): void {
-  let inset = 0;
-  for (let i = filters.length - 1; i >= 0; i--) {
-    const filter = filters[i];
+  for (const filter of filters) {
     if (filter instanceof FlashFilter) {
       filter.setUnits(units);
     }
+  }
 
+  insetFilters(filters);
+}
+
+/** Each filter that reads the object's own pixels told how far in they start: its and the later filters' padding. */
+function insetFilters(filters: readonly Filter[]): void {
+  let inset = 0;
+  for (let i = filters.length - 1; i >= 0; i--) {
+    const filter = filters[i];
     inset += filter.padding;
     if (
       filter instanceof ConvolutionFilter ||
@@ -1102,7 +1124,28 @@ function sameInput(a: Input, b: Input): boolean {
  * One changing frame after frame is filtered straight to the target,
  * with no copy kept; so is one that `keeps` not, drawn once.
  */
-export class FilterChain extends Filter implements AreaKeeper {
+/** Each renderer's largest texture side, asked once. */
+const textureLimits = new WeakMap<object, number>();
+
+/** The largest texture side `renderer` makes: WebGL's MAX_TEXTURE_SIZE, WebGPU's limit, else 4096. */
+function textureLimit(renderer: FilterSystem["renderer"]): number {
+  let limit = textureLimits.get(renderer);
+  if (limit === undefined) {
+    const r = renderer as unknown as {
+      gl?: WebGLRenderingContext;
+      gpu?: { device?: { limits?: { maxTextureDimension2D?: number } } };
+    };
+    limit =
+      (r.gl?.getParameter(r.gl.MAX_TEXTURE_SIZE) as number | undefined) ??
+      r.gpu?.device?.limits?.maxTextureDimension2D ??
+      4096;
+    textureLimits.set(renderer, limit);
+  }
+
+  return limit;
+}
+
+export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   /** The input last run on, and the output kept of it, if any. */
   private ran: Input | null = null;
   /** The input to be compared with it, which then becomes it. */
@@ -1214,9 +1257,66 @@ export class FilterChain extends Filter implements AreaKeeper {
   rescale(units: number): void {
     this.drawnAt = units;
     scaleFilters(this.filters, units);
-    this.padding = this.filters.reduce((sum, f) => sum + f.padding, 0);
+    this.wanted = this.filters.map((f) => f.padding);
+    this.padding = this.wanted.reduce((sum, p) => sum + p, 0);
     this.stale = true;
     this.area = null;
+  }
+
+  /** Each filter's padding as its reach asks, before fitPadding cuts it to what can be drawn. */
+  private wanted: number[] = [];
+
+  /**
+   * The filters' padding as their reach asks, where the texture the object
+   * is filtered in, its area within the screen and twice the padding at
+   * the target's resolution, fits the renderer's largest; past that, cut
+   * alike from the furthest reaching down to what fits, as a shadow cast
+   * 1e9 away, or Infinity, asks. What is cut lies past the screen, but for
+   * an object off it whose shadow is not.
+   */
+  fitPadding(bounds: Bounds, system: FilterSystem): void {
+    const renderer = system.renderer;
+    const target = renderer.renderTarget;
+    const resolution = target.rootRenderTarget.colorTexture.source.resolution;
+    const viewport = target.rootViewPort;
+    // As the filter system clips the area before it pads it.
+    const width = Math.min(bounds.maxX, viewport.width / resolution) - Math.max(bounds.minX, 0);
+    const height = Math.min(bounds.maxY, viewport.height / resolution) - Math.max(bounds.minY, 0);
+    const room =
+      Math.floor((textureLimit(renderer) / resolution - Math.max(width, height, 0)) / 2) - 2;
+    const wanted = this.wanted;
+    let total = wanted.reduce((sum, p) => sum + p, 0);
+    // The most any one filter pads: all they want where it fits, else the level that fits.
+    let cap = Infinity;
+    if (total > room) {
+      const sorted = [...wanted].sort((a, b) => a - b);
+      let below = 0;
+      cap = 0;
+      for (let i = 0; i < sorted.length; i++) {
+        const level = Math.floor((Math.max(0, room) - below) / (sorted.length - i));
+        if (level <= sorted[i]) {
+          cap = Math.max(0, level);
+          break;
+        }
+
+        below += sorted[i];
+      }
+    }
+
+    let changed = false;
+    total = 0;
+    for (let i = 0; i < this.filters.length; i++) {
+      const padding = Math.min(wanted[i], cap);
+      changed ||= this.filters[i].padding !== padding;
+      this.filters[i].padding = padding;
+      total += padding;
+    }
+
+    if (changed) {
+      insetFilters(this.filters);
+    }
+
+    this.padding = total;
   }
 
   /** The output kept let go of, as its object leaves the display list. */

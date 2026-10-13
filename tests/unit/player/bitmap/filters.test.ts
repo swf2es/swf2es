@@ -7,7 +7,7 @@ import { BitmapStore, pixelRect } from "../../../../packages/player/dist/bitmap/
 import {
   applyFilter,
   filterRect,
-  filterRefuses,
+  filterRefusal,
   integerKernel,
 } from "../../../../packages/player/dist/bitmap/filters.js";
 import {
@@ -264,7 +264,17 @@ test("adl's refusals of a filter's rect: NaN, an edge as far as it goes, and siz
   // A convolution of 3 by 3, which reaches a pixel round, as adl's probes had it.
   const of = (kind: FilterKind) => ({ ...filterDefaults(kind), matrixX: 3, matrixY: 3 });
   const refused = (r: number[], f = of) =>
-    kinds.filter((kind) => filterRefuses(pixelRect(r[0], r[1], r[2], r[3]), f(kind))).join(" ");
+    kinds
+      .filter(
+        (kind) =>
+          filterRefusal(pixelRect(r[0], r[1], r[2], r[3]), f(kind), {
+            x: 0,
+            y: 0,
+            width: 16,
+            height: 16,
+          }) !== 0,
+      )
+      .join(" ");
   assert.equal(refused([NaN, 2, 3, 3]), "blur glow convolution bevel displacementMap");
   assert.equal(
     refused([2, NaN, 3, 3], (kind) => ({ ...of(kind), distance: 0 })),
@@ -285,4 +295,86 @@ test("adl's refusals of a filter's rect: NaN, an edge as far as it goes, and siz
   // A glow blurs 6 pixels round it by default, past 2^29.
   assert.equal(refused([2, 2, 106e6, 1]), "glow");
   assert.equal(refused([2, 2, 23170, 23170]), "blur glow dropShadow convolution");
+});
+
+test("a shadow's or a bevel's distance past what adl holds: wrapped, stopped, refused, or cleared", () => {
+  const src = { x: 0, y: 0, width: 8, height: 8 };
+  const shadow = (distance: number, angle: number, inner = false) => ({
+    ...filterDefaults("dropShadow"),
+    distance,
+    angle,
+    inner,
+    blurX: 2,
+    blurY: 2,
+  });
+  const bevel = (distance: number, angle: number) => ({
+    ...filterDefaults("bevel"),
+    distance,
+    angle,
+    blurX: 2,
+    blurY: 2,
+  });
+  // 2^23 - 1 across wraps round to -2^23 - 256, which a reach of 2 makes -8388866; adl's
+  // angle, a hair off, reaches a pixel up too.
+  assert.deepEqual(filterRect(src, shadow(8388607, 0)), {
+    x: -8388866,
+    y: -3,
+    width: 8388874,
+    height: 12,
+  });
+  assert.deepEqual(filterRect(src, shadow(4e9, 0)), {
+    x: -8388866,
+    y: -30,
+    width: 8388874,
+    height: 38,
+  });
+  assert.deepEqual(filterRect(src, shadow(1e11, 90)), {
+    x: 0,
+    y: -8388866,
+    width: 689,
+    height: 8388874,
+  });
+  assert.deepEqual(filterRect(src, shadow(8388900, 180)), {
+    x: -8388866,
+    y: -2,
+    width: 8388874,
+    height: 12,
+  });
+  assert.deepEqual(filterRect(src, shadow(1000, 180)), {
+    x: -1002,
+    y: -2,
+    width: 1010,
+    height: 12,
+  });
+
+  const refusal = (f: ReturnType<typeof filterDefaults>) => filterRefusal(src, f, src);
+  assert.deepEqual(
+    [
+      refusal(shadow(1e5, 45)),
+      refusal(shadow(1e5, 45, true)),
+      refusal(shadow(1e9, 0)),
+      refusal(shadow(8e9, 0)),
+      refusal(shadow(Infinity, 0)),
+      refusal(shadow(Number.NaN, 0)),
+      refusal(shadow(Number.NaN, 0, true)),
+      refusal(shadow(3, Number.NaN)),
+      refusal(bevel(1e5, 45)),
+      refusal(bevel(1e9, 0)),
+      refusal(bevel(Infinity, 0)),
+      refusal(bevel(Number.NaN, 0)),
+    ],
+    [2015, 0, 0, 2015, 2015, 2015, 0, 2015, 2077, 0, 2077, 0],
+  );
+
+  // An outer shadow cast as far as an offset goes writes the rect empty, its source too,
+  // and works on no more than the destination shows.
+  const dest = new BitmapStore(8, 8, true, 0xff0000ff);
+  const square = new BitmapStore(8, 8, true, 0);
+  square.fillRect({ x: 2, y: 2, width: 4, height: 4 }, 0xffff0000);
+  applyFilter(dest, square, src, 0, 0, shadow(1e9, 0));
+  assert.ok(dest.pixels.every((p) => p === 0));
+  // A bevel so far off has nothing to light: the source as it was.
+  const lit = new BitmapStore(8, 8, true, 0);
+  applyFilter(lit, square, src, 0, 0, bevel(1e9, 0));
+  assert.deepEqual([...lit.pixels], [...square.pixels]);
 });

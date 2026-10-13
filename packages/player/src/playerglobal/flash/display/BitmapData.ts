@@ -3,7 +3,13 @@
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
 import { BitmapStore, type PixelRect, pixelRect, spanRect } from "../../../bitmap/bitmap.js";
-import { applyFilter, filterRect, filterRefuses, filtersDrawn } from "../../../bitmap/filters.js";
+import {
+  applyFilter,
+  filterRect,
+  filterRefusal,
+  filtersDrawn,
+  isInner,
+} from "../../../bitmap/filters.js";
 import {
   type Affine,
   alphaAt,
@@ -215,10 +221,35 @@ function samplesOf(s: Scripting, quality: Value): number {
   }
 }
 
-/** A flash.geom.Matrix's six values. */
+/**
+ * A flash.geom.Matrix's six values, its translation as draw takes it under
+ * adl, in twips in an int: NaN is int's least, and so is anything past
+ * the int's range, Infinity too, which a matrix that only moves draws at
+ * 0 (and any other off every bitmap); and a move within 2^30 twips of
+ * the range's ends wraps round to near 0, 107374180 drawing at -2.4.
+ */
 function matrixOf(s: Scripting, o: AsObject): Affine {
   const read = (k: string) => s.rt.toNumber(s.rt.getProperty(o, s.rt.publicName(k)));
-  return { a: read("a"), b: read("b"), c: read("c"), d: read("d"), tx: read("tx"), ty: read("ty") };
+  const m = {
+    a: read("a"),
+    b: read("b"),
+    c: read("c"),
+    d: read("d"),
+    tx: read("tx"),
+    ty: read("ty"),
+  };
+  const moves = m.a === 1 && m.b === 0 && m.c === 0 && m.d === 1;
+  const twips = (t: number) => {
+    const v = t * 20;
+    if (Number.isNaN(v) || (moves && Math.abs(v) >= 2 ** 31)) {
+      return 0;
+    }
+
+    return moves && Math.abs(v) >= 2 ** 30 ? (v - Math.sign(v) * 2 ** 31) / 20 : t;
+  };
+  m.tx = twips(m.tx);
+  m.ty = twips(m.ty);
+  return m;
 }
 
 export function bitmapDataNatives(s: Scripting): avm2.Natives {
@@ -380,8 +411,11 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("flash.errors::IllegalOperationError", 2077);
       }
 
-      if (filterRefuses(r, f)) {
-        throw s.rt.error("ArgumentError", 2015);
+      switch (filterRefusal(r, f, { x: 0, y: 0, width: from.width, height: from.height })) {
+        case 2015:
+          throw s.rt.error("ArgumentError", 2015);
+        case 2077:
+          throw s.rt.error("flash.errors::IllegalOperationError", 2077);
       }
 
       // A displacement map's map as it is now, not as it was when set.
@@ -406,13 +440,22 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const y0 = Math.max(0, given.y);
       const x1 = Math.min(store.width, given.x + given.width);
       const y1 = Math.min(store.height, given.y + given.height);
-      let r = filterRect(
-        x1 >= x0 && y1 >= y0
-          ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
-          : { x: 0x7ffffff, y: 0x7ffffff, width: 0, height: 0 },
-        f,
-      );
-      // A displacement map's result within the bitmap too.
+      if (x1 < x0 || y1 < y0) {
+        // Grown as any other, but an inner filter's, which stays where it is.
+        const apart = { x: 0x7ffffff, y: 0x7ffffff, width: 0, height: 0 };
+        const r = isInner(f) ? apart : filterRect(apart, f);
+        return s.rt.construct(
+          s.rt.classNamed("flash.geom::Rectangle"),
+          r.x,
+          r.y,
+          r.width,
+          r.height,
+        );
+      }
+
+      let r = filterRect({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, f);
+      // A displacement map's result within the bitmap too, and an inner
+      // filter's, which draws within what it filters.
       const within = (r: PixelRect): PixelRect => {
         const x0 = Math.max(0, r.x);
         const y0 = Math.max(0, r.y);
@@ -422,7 +465,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
           ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
           : { x: 0, y: 0, width: 0, height: 0 };
       };
-      if (f.kind === "displacementMap") {
+      if (f.kind === "displacementMap" || isInner(f)) {
         r = within(r);
       }
 
@@ -788,6 +831,11 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     ): boolean {
       const store = storeOf(s, this);
       const [fx, fy] = pointOf(s, firstPoint, "firstPoint");
+      // adl refuses a point the bitmap, put there, would reach past int's range from.
+      if (fx + store.width > 0x7fffffff || fy + store.height > 0x7fffffff) {
+        throw s.rt.error("ArgumentError", 1508, "firstPoint");
+      }
+
       const a1 = s.rt.toUint(firstAlpha);
       const other = second as AsObject;
       if (other === null || other === undefined) {
@@ -829,6 +877,10 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         const second = storeOf(s, data);
         // Against a bitmap, its point is required.
         const [sx, sy] = pointOf(s, secondPoint, "secondBitmapDataPoint");
+        if (sx + second.width > 0x7fffffff || sy + second.height > 0x7fffffff) {
+          throw s.rt.error("ArgumentError", 1508, "secondBitmapDataPoint");
+        }
+
         const a2 = secondAlpha === undefined ? 1 : s.rt.toUint(secondAlpha);
         const ox = sx - fx;
         const oy = sy - fy;
@@ -878,7 +930,8 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         r,
         dx,
         dy,
-        seed === undefined ? 0 : s.rt.toNumber(seed),
+        // An int, as declared: NaN is 0, where it would never reach a state.
+        seed === undefined ? 0 : s.rt.toInt(seed),
         n,
         fill === undefined ? 0 : s.rt.toUint(fill),
       );
