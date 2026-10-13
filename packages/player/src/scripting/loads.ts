@@ -556,11 +556,14 @@ export class Loads {
   /**
    * Whether the next frame waits for the load due next, one from bytes
    * whose code still compiles. Not one behind a load of a URL whose bytes
-   * have not come, nor one that was closed: neither is Flash's to time.
+   * have not come: that is not Flash's to time. A closed one still
+   * compiling ahead of it is passed over, as it will never come.
    */
   holdsFrame(): boolean {
-    const next = this.loads.find((load) => !load.ready && !load.failed);
-    return next !== undefined && next.url === null && next.generation === next.loader.$generation;
+    const next = this.loads.find(
+      (load) => !load.ready && !load.failed && load.generation === load.loader.$generation,
+    );
+    return next !== undefined && next.url === null;
   }
 
   private newLoad(

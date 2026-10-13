@@ -1260,6 +1260,24 @@ test("a load from bytes comes in the next frame however long its code takes, the
   assert.ok(after.filter((line) => line === "tick").length <= 3, held.lines.join(" | "));
 });
 
+test("a closed load from bytes still compiling does not end the wait for one after it", {
+  skip,
+}, async () => {
+  const held = await heldLoading();
+  const inner = innerSwf(compiler(out)("Inner"), 1);
+  // The second load closes the first, which still compiles ahead of it.
+  held.scripting.loads.requestLoad(held.loader, inner);
+  held.scripting.loads.requestLoad(held.loader, inner);
+
+  held.step(120);
+  assert.equal(held.lines.length, 0, held.lines.join(" | "));
+  held.release();
+  await held.scripting.settled();
+  held.step();
+  assert.equal(held.lines[0], "frame");
+  assert.ok(held.content());
+});
+
 test("a frame waits ten seconds at most for a load from bytes", { skip }, async () => {
   const held = await heldLoading();
   held.scripting.loads.requestLoad(held.loader, innerSwf(compiler(out)("Inner"), 1));
