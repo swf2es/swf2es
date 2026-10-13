@@ -48,6 +48,10 @@ node tests/fuzz/abc.ts [cases, 2000] [seed, 1]   # malformed ABCs: codegen never
                               # parse, JIT equals AOT (SWF2ES_CHECKED=1 for the checked build)
 node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revivals and rebuilds of
                               # application domains change no module against a reference
+SWF2ES_FUZZ_STEPS=50000 SWF2ES_FUZZ_SEED=14 node --test tests/unit/player/playerglobal/flash/display/BitmapData.test.ts
+                              # BitmapData's natives and filters fed odd numbers longer, or from
+                              # another seed, than pnpm test's 2000 steps from 1; a failure names
+                              # the two to reproduce it, SWF2ES_FUZZ_LOG=1 prints each step
 node tests/player/leak.ts [--loads N] [--snapshots DIR]   # load SWFs over and over in Chrome; the
                               # heap after a full collection must stay bounded, and codegen's
                               # memory must not grow (part of pnpm test)

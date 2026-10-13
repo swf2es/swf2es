@@ -19,9 +19,12 @@ const s = new Scripting(await createCodegen(wasm), { print: () => {} });
 await s.loadLibraries(libraryAbcs(`${out}libraries/`));
 const rt = s.rt;
 
-// A short run from seed 1; SWF2ES_FUZZ_STEPS and SWF2ES_FUZZ_SEED run it longer, or from another.
+// A short run from seed 1; SWF2ES_FUZZ_STEPS and SWF2ES_FUZZ_SEED run it longer, or from another,
+// and SWF2ES_FUZZ_LOG=1 prints each step before it runs, for one that never returns.
 const steps = Number(process.env.SWF2ES_FUZZ_STEPS ?? 2000);
-let seed = Number(process.env.SWF2ES_FUZZ_SEED ?? 1) >>> 0;
+const first = Number(process.env.SWF2ES_FUZZ_SEED ?? 1) >>> 0;
+const log = process.env.SWF2ES_FUZZ_LOG === "1";
+let seed = first;
 const rand = () => {
   seed = (seed * 1664525 + 1013904223) >>> 0;
   return seed / 2 ** 32;
@@ -460,13 +463,18 @@ test("no BitmapData native or filter throws a JS error or makes a buffer the inp
   const grown: string[] = [];
   for (let i = 0; i < steps; i++) {
     const [name, fn] = pick(ops);
-    const at = seed;
+    // Each step's state is what the steps before it left: the run to it reproduces it.
+    const again = `SWF2ES_FUZZ_SEED=${first} SWF2ES_FUZZ_STEPS=${i + 1}`;
+    if (log) {
+      console.log(`${again} ${name}`);
+    }
+
     const before = process.memoryUsage().arrayBuffers;
     try {
       fn();
     } catch (e) {
       if (e instanceof Error && !errors.has(`${name}: ${e.message}`)) {
-        errors.set(`${name}: ${e.message}`, `step ${i}, seed ${at}: ${e.stack?.split("\n")[1]}`);
+        errors.set(`${name}: ${e.message}`, `${again}: ${e.stack?.split("\n")[1]}`);
       }
     }
 
@@ -474,7 +482,7 @@ test("no BitmapData native or filter throws a JS error or makes a buffer the inp
     // that only what the input asked for could have grown it.
     const growth = process.memoryUsage().arrayBuffers - before;
     if (growth > 1e9) {
-      grown.push(`${name}, step ${i}, seed ${at}: ${Math.round(growth / 1e6)} MB`);
+      grown.push(`${name}, ${again}: ${Math.round(growth / 1e6)} MB`);
     }
 
     if (bitmaps.length > 40) {
