@@ -279,6 +279,9 @@ test("moves and fills of a store newer on the GPU stay there; the rest bring it 
 
   scroll(store, 9, 0);
   scroll(store, 0, 0);
+  // A scroll by nothing keeps the copy current: else the next move on it, finding its
+  // texture behind, would read the store back and leave the CPU's pixels behind the GPU's.
+  assert.equal(copy.version, store.version);
   store.fillRect({ x: -1, y: 1, width: 3, height: 9 }, 0x80ff0000);
   store.copyPixels(store, { x: 0, y: 0, width: 2, height: 2 }, 1, 0, false);
   store.copyPixels(opaque, { x: 0, y: 0, width: 2, height: 2 }, 3, 3, true);

@@ -148,6 +148,9 @@ export class BitmapStore {
       return false;
     }
 
+    // The op may have read the pixels back, for a texture of this store that
+    // was behind: the CPU then holds them as they were before it.
+    this.gpuNewer = true;
     this.changed();
     copy.version = this.version;
     return true;
