@@ -40,6 +40,7 @@ import {
   type WebGLRenderer,
 } from "pixi.js";
 import { resizeOnGpu } from "./batchers.js";
+import { packedOnCpu } from "./packed.js";
 
 const NAME = "flashTable";
 
@@ -256,6 +257,11 @@ export class Atlas {
     atlases.add(this);
   }
 
+  /** Where `key`'s batches lie: null if the table cannot draw them, undefined if not yet placed. */
+  where(key: object): Placed | null | undefined {
+    return this.placed.get(key);
+  }
+
   /**
    * Where `key`'s batches lie, `packed` copied in first if they are not
    * there yet; null if the table cannot draw them.
@@ -448,7 +454,6 @@ type Multi = {
 
 type ContextSystem = {
   getGpuContext(context: GraphicsContext): GpuGraphicsContext;
-  getContextRenderData(context: GraphicsContext): Packed;
 };
 
 type Drawn = Graphics & { _roundPixels: number };
@@ -587,10 +592,15 @@ export class TablePipe {
         continue;
       }
 
-      const place =
+      let place =
         gpu.isBatchable || context.customShader || roundAll | graphics._roundPixels
           ? null
-          : this.atlas.place(gpu, contexts.getContextRenderData(context));
+          : this.atlas.where(gpu);
+      if (place === undefined) {
+        // What Pixi packed is read only to be copied in, packed again if it was let go of.
+        place = this.atlas.place(gpu, packedOnCpu(renderer, context) as Packed);
+      }
+
       if (!place || this.cursor + place.counts.length > this.maxRows) {
         this.flush();
         graphicsPipe.execute(graphics);
