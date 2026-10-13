@@ -5,7 +5,13 @@ import type { Line } from "@swf2es/format";
 import { type GraphicsContext, Matrix } from "pixi.js";
 import { blendLayers, droppedLayers } from "../display/morph.js";
 import { LINE, type Path, pointsOf, type ShapeLayer } from "../display/shapes.js";
-import { LINES_IDLE_MOST, LINES_IDLE_MS, LINES_IDLE_VERTICES } from "./pools.js";
+import {
+  IdleBudget,
+  LINES_IDLE_MOST,
+  LINES_IDLE_MS,
+  LINES_IDLE_VERTICES,
+  LINES_IDLE_VERTICES_MOST,
+} from "./pools.js";
 import { destroyContext, shapeContext, trace } from "./tessellate.js";
 
 /** The linear part of a matrix, [a, b, c, d]: all a stroke's width depends on. */
@@ -106,8 +112,10 @@ function strokeContext(layer: ShapeLayer, m: Linear, least: number, by = m): Gra
  * instances of one creature in step, or one instance on its loop's next
  * turn. Contexts are counted as they are taken and given back, a removed
  * object's too; one no longer taken waits among the idle, destroyed after
- * LINES_IDLE_MS or, the oldest first, past LINES_IDLE_MOST of them or
- * LINES_IDLE_VERTICES of their vertices. Only a character's layers
+ * LINES_IDLE_MS or, the oldest first, past the budget of their vertices,
+ * which grows from LINES_IDLE_VERTICES as content comes back to what it
+ * let go (IdleBudget), or past as many of them, LINES_IDLE_MOST for that
+ * budget's least and more for more. Only a character's layers
  * are shared, which never change, and a blend's while its morph keeps it:
  * one it has dropped is never drawn from again, so its lines go at once.
  */
@@ -120,6 +128,16 @@ export class StrokeContexts {
   /** The idle ones' vertices as they went idle, and their sum. */
   private readonly idleSizes = new Map<GraphicsContext, number>();
   private idleVertices = 0;
+  /** How many vertices the idle may hold, grown as content comes back to what went for room. */
+  readonly budget = new IdleBudget(
+    LINES_IDLE_VERTICES,
+    LINES_IDLE_VERTICES_MOST,
+    LINES_IDLE_MS,
+    4 * LINES_IDLE_MOST,
+  );
+  /** Each layer's number, for the budget's keys, which must hold no layer. */
+  private readonly layerIds = new WeakMap<ShapeLayer, number>();
+  private layerCount = 0;
   /** The idle ones of blends, which go as soon as their morph drops the blend. */
   private readonly idleBlends = new Set<GraphicsContext>();
 
@@ -145,6 +163,10 @@ export class StrokeContexts {
     } else {
       context = linesContext(layer, m, least);
       this.counts.strokeContexts++;
+      if (this.budget.remembered > 0) {
+        this.budget.missed(this.ghostKey(layer, key), performance.now());
+      }
+
       contexts.set(key, context);
       this.keys.set(context, [layer, key]);
     }
@@ -185,9 +207,7 @@ export class StrokeContexts {
       this.idleBlends.add(context);
     }
 
-    while (this.idle.size > LINES_IDLE_MOST || this.idleVertices > LINES_IDLE_VERTICES) {
-      this.drop(this.idle.keys().next().value as GraphicsContext);
-    }
+    this.trim();
   }
 
   /** A frame prepared: the contexts idle too long go, and those of blends their morph dropped. */
@@ -206,6 +226,36 @@ export class StrokeContexts {
 
       this.drop(context);
     }
+
+    this.budget.tick(now);
+    this.trim();
+  }
+
+  /** The oldest idle let go, their keys remembered, till the rest are within the budget. */
+  private trim(): void {
+    const budget = this.budget.size;
+    const most = (LINES_IDLE_MOST * budget) / LINES_IDLE_VERTICES;
+    while (this.idle.size > most || this.idleVertices > budget) {
+      const [context, since] = this.idle.entries().next().value as [GraphicsContext, number];
+      const [layer, key] = this.keys.get(context) as [ShapeLayer, string];
+      // At least a context's share of the least budget: one let go for their count grows it too.
+      const size = Math.max(
+        this.idleSizes.get(context) ?? 0,
+        LINES_IDLE_VERTICES / LINES_IDLE_MOST,
+      );
+      this.budget.evicted(this.ghostKey(layer, key), since, size);
+      this.drop(context);
+    }
+  }
+
+  private ghostKey(layer: ShapeLayer, key: string): string {
+    let id = this.layerIds.get(layer);
+    if (id === undefined) {
+      id = this.layerCount++;
+      this.layerIds.set(layer, id);
+    }
+
+    return `${id}:${key}`;
   }
 
   /** Take a context off the idle, if it is there. */
