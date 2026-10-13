@@ -160,6 +160,24 @@ export interface Space {
 
 export type SpaceProperty = Exclude<keyof Space, "raw">;
 
+/**
+ * The records of a place's filters, read once for each list of them: an
+ * animated character's timeline places the same glowing children again on
+ * each frame, and each read the list anew. Shared by every object placed
+ * with the list, as nothing changes a record in place: a script reads
+ * copies and sets new ones.
+ */
+const placedLists = new WeakMap<Uint8Array, readonly Filter[]>();
+function placedFilters(bytes: Uint8Array): readonly Filter[] {
+  let filters = placedLists.get(bytes);
+  if (!filters) {
+    filters = readFilters(bytes).map(filterOfSwf);
+    placedLists.set(bytes, filters);
+  }
+
+  return filters;
+}
+
 /** A perspective projection a script gave a display object: the field of view in radians, as Flash keeps it, and the centre. */
 export interface Projection {
   fieldOfView: number;
@@ -607,7 +625,7 @@ export class DisplayObject {
     }
 
     if (place.filters !== null) {
-      this.filters = readFilters(place.filters).map(filterOfSwf);
+      this.filters = placedFilters(place.filters);
       this.invalidate(TRANSFORM);
     }
 
