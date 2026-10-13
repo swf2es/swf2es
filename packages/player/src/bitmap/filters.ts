@@ -406,28 +406,19 @@ export function applyFilter(
 
   switch (f.kind) {
     case "bevel":
-      bevel(
-        result,
-        planes,
-        alphaFrom(source, shown, f, ox, oy),
-        alphaFrom(source, shown, f, -ox, -oy),
-        f,
-      );
+    case "gradientBevel": {
+      const [on, back] = alphasFrom(source, shown, f, [
+        [ox, oy],
+        [-ox, -oy],
+      ]);
+      (f.kind === "bevel" ? bevel : gradientBevel)(result, planes, on, back, f);
       break;
+    }
     case "gradientGlow":
-      gradientGlow(result, planes, alphaFrom(source, shown, f, -ox, -oy), f);
-      break;
-    case "gradientBevel":
-      gradientBevel(
-        result,
-        planes,
-        alphaFrom(source, shown, f, ox, oy),
-        alphaFrom(source, shown, f, -ox, -oy),
-        f,
-      );
+      gradientGlow(result, planes, alphasFrom(source, shown, f, [[-ox, -oy]])[0], f);
       break;
     default:
-      glow(result, planes, alphaFrom(source, shown, f, -ox, -oy, f.inner), f);
+      glow(result, planes, alphasFrom(source, shown, f, [[-ox, -oy]], f.inner)[0], f);
   }
 
   write(dest, result, shown, shown, mx, my);
@@ -461,31 +452,59 @@ function channelsOf(source: BitmapStore, area: PixelRect): Int32Array[] {
   return [a, r, g, b];
 }
 
+/** The source's alpha over `area`, as far as the bitmap goes; 0 past it. */
+function alphaOf(source: BitmapStore, area: PixelRect): Int32Array {
+  const w = area.width;
+  const a = new Int32Array(w * area.height);
+  const pixels = source.pixels;
+  const sw = source.width;
+  const from = intersect(area, { x: 0, y: 0, width: sw, height: source.height });
+  if (from) {
+    for (let sy = from.y; sy < from.y + from.height; sy++) {
+      let i = (sy - area.y) * w + from.x - area.x;
+      for (let sx = from.x; sx < from.x + from.width; sx++, i++) {
+        a[i] = pixels[sy * sw + sx] >>> 24;
+      }
+    }
+  }
+
+  return a;
+}
+
 /**
  * The source's alpha, blurred as `f` blurs it and truncated, read at each
- * pixel of `area` moved by (dx, dy), between pixels as `shifted` reads;
- * with `invert`, of 255 less the alpha, as an inner glow blurs what the
- * source leaves. Blurred over that and as far round it as the blur
- * reaches, so the work is `area`'s size wherever the offset takes it.
+ * pixel of `area` moved by each of `moves`, between pixels as `shifted`
+ * reads; with `invert`, of 255 less the alpha, as an inner glow blurs what
+ * the source leaves. Blurred once over where they all read and as far
+ * round it as the blur reaches, as a bevel reads on and back; reads
+ * further apart than `area` is wide or high, each over its own, so the
+ * work is `area`'s size wherever the offset takes it.
  */
-function alphaFrom(
+function alphasFrom(
   source: BitmapStore,
   area: PixelRect,
   f: Filter,
-  dx: number,
-  dy: number,
+  moves: readonly (readonly [number, number])[],
   invert = false,
-): Int32Array {
+): Int32Array[] {
+  const kxs = moves.map(([dx]) => Math.floor(dx));
+  const kys = moves.map(([, dy]) => Math.floor(dy));
+  const x0 = Math.min(...kxs);
+  const y0 = Math.min(...kys);
+  const spanX = Math.max(...kxs) - x0;
+  const spanY = Math.max(...kys) - y0;
+  if (moves.length > 1 && (spanX > area.width || spanY > area.height)) {
+    return moves.map((move) => alphasFrom(source, area, f, [move], invert)[0]);
+  }
+
   const [hx, hy] = blurHalo(f);
-  const kx = Math.floor(dx);
-  const ky = Math.floor(dy);
   const read = {
-    x: area.x + kx - hx,
-    y: area.y + ky - hy,
-    width: area.width + 1 + 2 * hx,
-    height: area.height + 1 + 2 * hy,
+    x: area.x + x0 - hx,
+    y: area.y + y0 - hy,
+    width: area.width + 1 + spanX + 2 * hx,
+    height: area.height + 1 + spanY + 2 * hy,
   };
-  const [plane] = channelsOf(source, read);
+  const plane = alphaOf(source, read);
   if (invert) {
     for (let i = 0; i < plane.length; i++) {
       plane[i] = 255 - plane[i];
@@ -493,20 +512,18 @@ function alphaFrom(
   }
 
   blur([plane], read.width, read.height, f);
-  const moved = shifted(
-    plane,
-    read.width,
-    read.height,
-    hx + (dx - kx),
-    hy + (dy - ky),
-    invert ? 255 : 0,
+  return moves.map(([dx, dy], i) =>
+    shifted(
+      plane,
+      read.width,
+      read.height,
+      hx + (kxs[i] - x0) + (dx - kxs[i]),
+      hy + (kys[i] - y0) + (dy - kys[i]),
+      invert ? 255 : 0,
+      area.width,
+      area.height,
+    ),
   );
-  const out = new Int32Array(area.width * area.height);
-  for (let y = 0; y < area.height; y++) {
-    out.set(moved.subarray(y * read.width, y * read.width + area.width), y * area.width);
-  }
-
-  return out;
 }
 
 function intersect(p: PixelRect, q: PixelRect): PixelRect | null {
@@ -994,10 +1011,10 @@ export function integerKernel(matrix: number[], divisor: number): number | null 
 }
 
 /**
- * The plane (w × h) read at every pixel moved by (ox, oy), between pixels
- * linearly, with weights in 256ths, truncated, as adl's fixed point has
- * them; `outside` past it. Each column's and row's whole part and weight
- * are computed once.
+ * The plane (w × h) read at each pixel of its first `ow` × `oh` moved by
+ * (ox, oy), between pixels linearly, with weights in 256ths, truncated, as
+ * adl's fixed point has them; `outside` past it. Each column's and row's
+ * whole part and weight are computed once.
  */
 function shifted(
   plane: Int32Array,
@@ -1006,33 +1023,35 @@ function shifted(
   ox: number,
   oy: number,
   outside: number,
+  ow = w,
+  oh = h,
 ): Int32Array {
-  const xs = new Int32Array(w);
-  const fxs = new Float64Array(w);
-  for (let x = 0; x < w; x++) {
+  const xs = new Int32Array(ow);
+  const fxs = new Float64Array(ow);
+  for (let x = 0; x < ow; x++) {
     const at = x + ox;
     xs[x] = Math.floor(at);
     fxs[x] = Math.floor((at - xs[x]) * 256) / 256;
   }
 
-  const out = new Int32Array(w * h);
+  const out = new Int32Array(ow * oh);
   const value = (x: number, y: number) =>
     x >= 0 && x < w && y >= 0 && y < h ? plane[y * w + x] : outside;
-  for (let y = 0; y < h; y++) {
+  for (let y = 0; y < oh; y++) {
     const at = y + oy;
     const y0 = Math.floor(at);
     const fy = Math.floor((at - y0) * 256) / 256;
-    for (let x = 0; x < w; x++) {
+    for (let x = 0; x < ow; x++) {
       const x0 = xs[x];
       const fx = fxs[x];
       if (fx === 0 && fy === 0) {
-        out[y * w + x] = value(x0, y0);
+        out[y * ow + x] = value(x0, y0);
         continue;
       }
 
       const top = value(x0, y0) * (1 - fx) + value(x0 + 1, y0) * fx;
       const bottom = value(x0, y0 + 1) * (1 - fx) + value(x0 + 1, y0 + 1) * fx;
-      out[y * w + x] = Math.floor(top * (1 - fy) + bottom * fy + 1e-7);
+      out[y * ow + x] = Math.floor(top * (1 - fy) + bottom * fy + 1e-7);
     }
   }
 
