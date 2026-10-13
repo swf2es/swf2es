@@ -1,0 +1,60 @@
+removeChild, removed again from removedFromStage
+ removeChild in removedFromStage, parent row0, on stage true
+ removeChild threw 2094 Error
+outer done
+[a1,a2] null true
+removeChildAt, removed again from removed
+ removeChildAt in removed, parent row1, on stage true
+ removeChildAt threw 2094 Error
+outer done
+[b0,b2] null
+moved elsewhere from removedFromStage
+ move in removedFromStage, parent row2, on stage true
+ move done
+outer done
+[c1,c2] [] null
+moved to the top of the same parent from removed
+ top in removed, parent row3, on stage true
+ top done
+outer done
+[d1,d2] null
+setChildIndex from removed
+ setChildIndex in removed, parent row4, on stage true
+ setChildIndex done
+outer done
+[e0,e1] null
+removeChildren, a sibling removed from removed
+ sibling in removed, parent row5, on stage true
+ sibling done
+outer done
+[f2,f3] null null
+removeChildren, a sibling moved from removed
+ sibling in removed, parent row6, on stage true
+ sibling done
+outer done
+[k2,k3] [] null null
+removeChildren, removed again from removed
+ again in removed, parent row7, on stage true
+ again threw 2094 Error
+outer done
+[g2] null
+addChild from another parent, moved elsewhere from removed
+ move in removed, parent row8, on stage true
+ move done
+outer done
+[h1,h2] [h3,h0] [] row9
+addChild from another parent, removed from removed
+ remove in removed, parent row10, on stage true
+ remove done
+outer done
+[i1,i2] [i3,i0] row11
+stage.removeChildAt, removed again from removed
+ stage in removed, parent stage, on stage true
+ stage threw 2094 Error
+outer done
+1 null
+frame 1 [p0,p1,p2,holder,row0,row1,row2,row3,row4,row5,row6,row7,row8,row9,row10,row11]
+ timeline remove in removedFromStage, parent main, on stage true
+ timeline remove threw 2025 ArgumentError
+frame 2 [p2,holder,row0,row1,row2,row3,row4,row5,row6,row7,row8,row9,row10,row11] []
+p0 null, p1 null, p2 [object Box]

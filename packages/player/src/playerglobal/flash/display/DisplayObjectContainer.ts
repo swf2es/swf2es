@@ -56,11 +56,6 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     return v;
   };
-  const remove = (c: Container, d: DisplayObject): void => {
-    s.lifecycle.removing(d);
-    c.removeChild(d);
-  };
-
   class DisplayObjectContainerNatives {
     declare $display: Container;
     declare $mouseChildren: boolean | undefined;
@@ -100,14 +95,14 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     removeChild(child: Value): Value {
       const c = this.$display;
-      remove(c, ownChild(c, child));
+      s.lifecycle.remove(ownChild(c, child));
       return child;
     }
 
     removeChildAt(index: Value): Value {
       const c = this.$display;
       const d = c.children[indexIn(c, index)];
-      remove(c, d);
+      s.lifecycle.remove(d);
       return d.object;
     }
 
@@ -123,8 +118,12 @@ export function containerNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("RangeError", 2006);
       }
 
+      // Those there when it began, each from wherever a listener put it meanwhile, as Flash's
+      // are; one a listener took off already is left be.
       for (const d of c.children.slice(from, all ? n : to + 1)) {
-        remove(c, d);
+        if (d.parent) {
+          s.lifecycle.remove(d);
+        }
       }
     }
 

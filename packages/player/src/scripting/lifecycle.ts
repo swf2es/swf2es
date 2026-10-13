@@ -23,6 +23,12 @@ export class Lifecycle {
     { ref: WeakRef<DisplayObject>; keep: boolean; since: number }
   >();
   private readonly madeThisFrame: DisplayObject[] = [];
+  /**
+   * The children whose removal is being told of, by the error Flash throws
+   * at a script that removes one again from a listener meanwhile: #2094
+   * while a script's removal tells of it, #2025 while the timeline's does.
+   */
+  private readonly leaving = new Map<DisplayObject, number>();
 
   constructor(private readonly s: Scripting) {}
 
@@ -59,12 +65,14 @@ export class Lifecycle {
    * `display` is about to lose its parent: REMOVED, bubbling, and
    * REMOVED_FROM_STAGE through the subtree if it was on the display list.
    * It then plays on as an orphan; the timeline's removal has it play its
-   * removal frame only, and takes the parent's property of its name away.
+   * removal frame only, and takes the parent's property of its name away;
+   * a script that removes it meanwhile throws #2025, as Flash's does.
    */
   removing(display: DisplayObject, byTimeline = false): void {
-    this.dispatch(display.object, "removed", true);
-    if (this.onStage(display)) {
-      this.eachObject(display, (o) => this.dispatch(o, "removedFromStage", false));
+    if (byTimeline) {
+      this.telling(display, 2025);
+    } else {
+      this.tell(display);
     }
 
     this.orphan(display, !byTimeline);
@@ -74,6 +82,46 @@ export class Lifecycle {
       if (this.s.rt.getProperty(parent, name) === display.object) {
         this.s.rt.setProperty(parent, name, null);
       }
+    }
+  }
+
+  /**
+   * A script removes `display` from its parent: told of as `removing` does,
+   * and then taken from wherever a listener put it meanwhile, as Flash
+   * does. One whose removal is being told of already is not removed again:
+   * Flash throws, and the first removal goes on.
+   */
+  remove(display: DisplayObject): void {
+    const error = this.leaving.get(display);
+    if (error !== undefined) {
+      throw this.s.rt.error(error === 2025 ? "ArgumentError" : "Error", error);
+    }
+
+    this.telling(display, 2094);
+    this.orphan(display);
+    display.parent?.removeChild(display);
+  }
+
+  /** REMOVED and REMOVED_FROM_STAGE told of `display`, a script that removes it meanwhile thrown `error`. */
+  private telling(display: DisplayObject, error: number): void {
+    // Told of again inside its own telling: the outer one's error holds until it ends.
+    if (this.leaving.has(display)) {
+      this.tell(display);
+      return;
+    }
+
+    this.leaving.set(display, error);
+    try {
+      this.tell(display);
+    } finally {
+      this.leaving.delete(display);
+    }
+  }
+
+  private tell(display: DisplayObject): void {
+    this.dispatch(display.object, "removed", true);
+    if (this.onStage(display)) {
+      this.eachObject(display, (o) => this.dispatch(o, "removedFromStage", false));
     }
   }
 
