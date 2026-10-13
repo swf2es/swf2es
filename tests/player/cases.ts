@@ -6065,6 +6065,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 500,
   },
   {
+    name: "three-d-behind-hit",
+    swf: (abc) => bare(abc, 2, "ThreeDBehindHit", 500, 400),
+    script: "ThreeDBehindHit",
+    frames: 2,
+    capture: [1],
+    tolerance: 40,
+    maxOutliers: 500,
+  },
+  {
     name: "three-d-projection",
     swf: (abc) => bare(abc, 2, "ThreeDProjection", 500, 400),
     script: "ThreeDProjection",

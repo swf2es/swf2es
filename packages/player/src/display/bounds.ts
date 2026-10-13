@@ -142,6 +142,10 @@ export function hitsPoint(
   root: DisplayObject | null,
 ): boolean {
   const up = toStage(d, root);
+  if (isProjective(up) && inHidden3D(d)) {
+    return false;
+  }
+
   // In 3D, the bounds are the box around what is drawn on the stage, as Flash tests them.
   if (!shape && isProjective(up)) {
     const r = bounds(d, true);
@@ -404,6 +408,17 @@ function drawnAt(
       ) {
         return true;
       }
+    }
+  }
+
+  return false;
+}
+
+/** Whether `d` or a 3D object above it has a corner behind the eye, so that none of `d` is drawn. */
+function inHidden3D(d: DisplayObject): boolean {
+  for (let p: DisplayObject | null = d; p; p = p.parent) {
+    if (p.space && hidden3D(p)) {
+      return true;
     }
   }
 
