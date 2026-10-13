@@ -235,11 +235,37 @@ export function domainModule(
   keep: bool = true,
   linkedOnly: bool = false,
 ): string {
+  const out = writeModule(hashes, index, keep, linkedOnly);
+  return out === null ? "" : String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
+}
+
+/**
+ * domainModule's module as its UTF-8 bytes, which the host decodes: a
+ * module of megabytes is decoded there many times faster than made a
+ * string here and lifted a code unit at a time. Empty where it is "".
+ */
+export function domainModuleBytes(
+  hashes: string = "",
+  index: i32 = -1,
+  keep: bool = true,
+  linkedOnly: bool = false,
+): Uint8Array {
+  const out = writeModule(hashes, index, keep, linkedOnly);
+  if (out === null) {
+    return new Uint8Array(0);
+  }
+
+  const bytes = new Uint8Array(out.length);
+  memory.copy(bytes.dataStart, changetype<usize>(out.bytes), out.length);
+  return bytes;
+}
+
+function writeModule(hashes: string, index: i32, keep: bool, linkedOnly: bool): Output | null {
   written = null;
   // No ABC, no module: the caller asked before adding one.
   const at = abcIndex(index);
   if (at < 0) {
-    return "";
+    return null;
   }
 
   const rows = domain.rows();
@@ -250,8 +276,7 @@ export function domainModule(
     written = emitter;
   }
 
-  const out = emitter.out;
-  return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
+  return emitter.out;
 }
 
 /**

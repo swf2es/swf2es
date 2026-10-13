@@ -36,6 +36,7 @@ export {
   domainLogMark,
   domainLogSince,
   domainModule,
+  domainModuleBytes,
   domainModuleEntries,
   domainReplay,
   domainReset,
