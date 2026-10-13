@@ -1146,6 +1146,8 @@ export class Container extends DisplayObject {
    * (walkList); null where it is to be made again, or too short to keep.
    */
   walk: WalkList | null = null;
+  /** Counts the children put on the list, for removeAtDepth to see whether a listener put one back. */
+  protected puts = 0;
 
   constructor() {
     super();
@@ -1183,6 +1185,7 @@ export class Container extends DisplayObject {
     child.depth = depth;
     child.parent = this;
     this.children.splice(index, 0, child);
+    this.puts++;
     this.depths.set(depth, child);
     this.relist(child);
     this.invalidate(CHILDREN);
@@ -1203,11 +1206,12 @@ export class Container extends DisplayObject {
       this.takeOut(child, index);
     }
 
+    const puts = this.puts;
     this.library?.removing?.(child, true);
     this.library?.sounds?.removed(child);
-    // A listener may have put it on a list again. One without an AS object had no listener
-    // to do so, and a timeline's shapes, swapped every frame, are spared the search.
-    if (child.parent === this && (child.object === null || !this.children.includes(child))) {
+    // A listener may have put it on this list again (which Flash does not survive). Where
+    // nothing was put on it meanwhile, the search, a whole list's on every removal, is spared.
+    if (child.parent === this && (this.puts === puts || !this.children.includes(child))) {
       child.parent = null;
       child.focusDrop?.(child);
     }
@@ -1254,6 +1258,7 @@ export class Container extends DisplayObject {
     child.parent?.removeChild(child);
     child.parent = this;
     this.children.splice(same ? Math.min(index, this.children.length) : index, 0, child);
+    this.puts++;
     this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
@@ -1449,6 +1454,7 @@ export class ButtonObject extends Container {
       }
 
       this.children.splice(0, 0, current);
+      this.puts++;
       current.parent = this;
       this.relist(current);
       this.invalidate(CHILDREN);
