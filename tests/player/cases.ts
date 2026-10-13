@@ -4087,8 +4087,9 @@ function tableRuns(): Uint8Array {
  * (render/table.ts), and a gradient and a bitmap with transparent pixels,
  * which Pixi's pipe draws with the colour shader; an offset, a fade, an
  * alpha multiplier and a negative one, a shape taking a transform and
- * another giving its up. No gradient stop is clamped, which Flash does
- * before the ramp and swf2es after.
+ * another giving its up; and a run of 48 discs the table draws from its
+ * texture. No gradient stop is clamped, which Flash does before the ramp
+ * and swf2es after.
  */
 function colorAlone(): Uint8Array {
   // Of hundreds of vertices, as a creature's parts are, which a batched copy packs again for each
@@ -4198,12 +4199,28 @@ function colorAlone(): Uint8Array {
 
     return out;
   };
+  // Two rows of small discs, one run longer than a run that takes its rows in uniforms, which
+  // uploads them, the transform's flag among them, to the table's texture.
+  const offsets = [
+    [40, -30, 0],
+    [-20, 50, 30],
+    [0, 0, -60],
+  ];
+  const discs = (frame: number) =>
+    Array.from({ length: 48 }, (_, k) =>
+      w.place({
+        depth: 17 + k,
+        ...(frame === 1 ? { character: 1 + (k % 2) } : { move: true }),
+        matrix: { a: 0.28, d: 0.28, ...at(10 + (k % 24) * 9, 98 + Math.floor(k / 24) * 10) },
+        colorTransform: { mult: [1, 1, 1, 1], add: [...offsets[frame - 1], 0] },
+      }),
+    );
   for (let frame = 1; frame <= 3; frame++) {
-    tags.push(...place(frame), w.showFrame());
+    tags.push(...place(frame), ...discs(frame), w.showFrame());
   }
 
   tags.push(w.end());
-  return w.swf({ width: 230, height: 100, frameRate: 24, frameCount: 3, tags });
+  return w.swf({ width: 230, height: 116, frameRate: 24, frameCount: 3, tags });
 }
 
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
@@ -4589,10 +4606,11 @@ export const cases: PlayerCase[] = [
     frames: 3,
     capture: [1, 2, 3],
     // Within 3 a channel, Flash's 8.8 multipliers against floats, but for
-    // the discs' edges, anti-aliased each rasteriser's way: up to 1,034
-    // channels a frame. A shape in a wrong colour adds some 1,700.
+    // the discs' edges, anti-aliased each rasteriser's way: up to 1,610
+    // channels a frame. A large shape in a wrong colour adds some 1,700;
+    // played without the table, the small discs must draw the same pixels.
     tolerance: 3,
-    maxOutliers: 1100,
+    maxOutliers: 1700,
     table: true,
   },
   {

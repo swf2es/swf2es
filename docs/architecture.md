@@ -2771,7 +2771,8 @@ batched copy, those already drawn alone too as one is made
 paths' points (a line's by its joins, round ones some ten vertices a
 point), as a part may keep the transform it first shows under. The
 `color-alone` case draws large discs, gradients and bitmaps under changing
-transforms each way. `bench.ts --no-table` draws without the table, and
+transforms each way, and a run of 48 that the table draws from its
+texture. `bench.ts --no-table` draws without the table, and
 the `table-runs` case, with `draw-objects`, is played with the table
 drawing even its shortest runs and without it, and must draw the same
 pixels (`run.ts --table-ab` asks it of every case).
