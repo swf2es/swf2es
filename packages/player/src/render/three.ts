@@ -92,6 +92,8 @@ export class Plane {
   private height = 0;
   /** Whether what it draws may have changed since its bitmap was drawn. */
   stale = true;
+  /** Whether the quad was placed elsewhere, or its bitmap drawn again, since the last frame. */
+  changed = true;
 
   constructor() {
     program ??= new GlProgram({ vertex, fragment, name: "flash-plane" });
@@ -175,8 +177,14 @@ export class Plane {
         return false;
       }
 
-      this.positions[i * 2] = (m.a * x + m.c * y + m.tx) / q;
-      this.positions[i * 2 + 1] = (m.b * x + m.d * y + m.ty) / q;
+      const px = (m.a * x + m.c * y + m.tx) / q;
+      const py = (m.b * x + m.d * y + m.ty) / q;
+      if (px !== this.positions[i * 2] || py !== this.positions[i * 2 + 1] || q !== this.ws[i]) {
+        this.changed = true;
+      }
+
+      this.positions[i * 2] = px;
+      this.positions[i * 2 + 1] = py;
       this.ws[i] = q;
     }
 
@@ -200,6 +208,7 @@ export class Plane {
     }
 
     this.stale = false;
+    this.changed = true;
     const texels = Math.min(1, LARGEST / Math.max(this.width, this.height));
     const width = Math.max(1, Math.ceil(this.width * texels));
     const height = Math.max(1, Math.ceil(this.height * texels));

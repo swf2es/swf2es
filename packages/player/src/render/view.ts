@@ -2103,9 +2103,32 @@ export class PixiView {
         );
       }
 
+      plane.changed ||= plane.quad.visible !== shown;
       plane.quad.visible = shown;
       if (shown) {
         plane.draw(this.renderer);
+      }
+
+      // Its quad is drawn into the bitmap of the 3D object it is in, which then shows it as it is
+      // now: its plane there moves as that object turns, which changes nothing in it.
+      if (depth > 0 && plane.changed) {
+        this.restaleAbove(o);
+      }
+
+      plane.changed = false;
+    }
+  }
+
+  /** The bitmap of the nearest 3D object above `o` marked to be drawn again. */
+  private restaleAbove(o: DisplayObject): void {
+    for (let p = o.parent; p; p = p.parent) {
+      if (p.space) {
+        const plane = this.nodes.get(p)?.plane;
+        if (plane) {
+          plane.stale = true;
+        }
+
+        return;
       }
     }
   }
