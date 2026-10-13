@@ -3203,6 +3203,29 @@ test("a new object of a released one's character takes its node, reset, and the 
   }
 });
 
+test("an object made a mask as it leaves the list keeps its node from a new one of its character", async () => {
+  // Released before the object it masks takes it as its mask, it was listed
+  // spare: taken, the new one drew as the mask, and itself not at all.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const mask = new ShapeObject(character);
+  const masked = new Container();
+  root.placeAtDepth(mask, 1);
+  root.placeAtDepth(masked, 2);
+  view.prepare(root);
+
+  masked.setMask(mask);
+  root.removeChild(mask);
+  root.placeAtDepth(new ShapeObject(character), 3);
+  view.prepare(root);
+  const [, maskedContainer, next] = view.stage.children[0].children;
+  assert.notEqual(maskedContainer.mask, next);
+  assert.equal(maskedContainer.mask, view.stage.children[1].children[0]);
+  assert.notEqual(next.includeInBuild, false);
+});
+
 test("the wheel reaches the player in Flash's lines, keeps the page from scrolling only where the SWF takes it, and leaves Ctrl's zoom to the page", () => {
   const listeners = new Map<string, (e: unknown) => void>();
   const canvas = {

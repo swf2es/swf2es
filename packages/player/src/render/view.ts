@@ -862,9 +862,20 @@ export class PixiView {
     return node;
   }
 
-  /** Whether `node`, listed spare, may be taken by `o`: still off the list, and of its class. */
+  /**
+   * Whether `node`, listed spare, may be taken by `o`: still off the list,
+   * of its class, and not made a mask since it was listed, as an object
+   * taken off the list in the frame a script makes it one is.
+   */
   private spareFor(node: Node, o: DisplayObject): boolean {
-    return node.released && node.kind === o.constructor && node.character === o.character;
+    const container = node.container;
+    return (
+      node.released &&
+      node.kind === o.constructor &&
+      node.character === o.character &&
+      container.includeInBuild !== false &&
+      container.measurable !== false
+    );
   }
 
   /**
