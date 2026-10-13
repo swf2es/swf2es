@@ -36,7 +36,6 @@ import {
   UniformGroup,
   ViewableBuffer,
 } from "pixi.js";
-import { drawsColorAlone } from "./table.js";
 
 const NAME = "flash-color";
 
@@ -482,6 +481,45 @@ function large(context: GraphicsContext): boolean {
   return floats !== undefined && floats >= ALONE_FLOATS;
 }
 
+/** The renderers made, and those of them not WebGL, where Pixi's shader takes no colour transform. */
+const renderers = new Set<object>();
+const notWebGL = new Set<object>();
+/** Graphics drawn alone under a colour transform, to be shown as batched copies if a renderer cannot. */
+const shownAlone = new Set<SharingGraphics>();
+
+/**
+ * Notes each renderer as it is made, of any kind, as a renderer that is
+ * not WebGL may come after Graphics were shown alone for one that is.
+ */
+export class ColorAloneSystem {
+  static extension = {
+    type: [ExtensionType.WebGLSystem, ExtensionType.WebGPUSystem, ExtensionType.CanvasSystem],
+    name: "flashColorAlone",
+  } as const;
+
+  constructor(renderer: { type: number }) {
+    renderers.add(this);
+    if (renderer.type !== RendererType.WEBGL) {
+      notWebGL.add(this);
+      for (const g of [...shownAlone]) {
+        showFor(g, (g as Colored).flashColor ?? null);
+      }
+    }
+  }
+
+  destroy(): void {
+    renderers.delete(this);
+    notWebGL.delete(this);
+  }
+}
+
+extensions.add(ColorAloneSystem);
+
+/** A Graphics destroyed: no longer one to show otherwise. */
+export function forgetShown(g: SharingGraphics): void {
+  shownAlone.delete(g);
+}
+
 /**
  * The context a Graphics should draw under `ct`. An unbatched one, as a
  * shape's are (render/tessellate.ts), Pixi draws with its own shader, which
@@ -489,7 +527,8 @@ function large(context: GraphicsContext): boolean {
  * large one, as a creature's parts are, is drawn alone still, by the
  * transform table (render/table.ts), whose rows carry a colour transform,
  * or by Pixi's pipe with the colour shader (GraphicsPipe's execute below),
- * where every renderer is WebGL. The
+ * where every renderer is WebGL; a SharedGraphics alone, which forgets it
+ * as it goes (render/patches.ts). The
  * context it stands for is shared by every instance of a character, and
  * every text in a font, and is never changed: switched to batched, the
  * Graphics of the others, made unbatched, drew nothing.
@@ -505,10 +544,21 @@ function large(context: GraphicsContext): boolean {
  */
 export function showFor(g: SharingGraphics, ct: ColorTransform | null): void {
   const shared = g.shared ?? g.context;
-  const want =
-    g.settled || (ct && (shared.batchMode !== "no-batch" || !drawsColorAlone() || !large(shared)))
-      ? batched(shared)
-      : shared;
+  const alone =
+    !!ct &&
+    !g.settled &&
+    !!g.show &&
+    shared.batchMode === "no-batch" &&
+    renderers.size > 0 &&
+    notWebGL.size === 0 &&
+    large(shared);
+  const want = alone || !(ct || g.settled) ? shared : batched(shared);
+  if (alone) {
+    shownAlone.add(g);
+  } else {
+    shownAlone.delete(g);
+  }
+
   if (g.context !== want) {
     if (g.show) {
       g.show(want);

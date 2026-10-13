@@ -22,7 +22,7 @@ import {
   RenderGroupSystem,
   type Texture,
 } from "pixi.js";
-import { type SharingGraphics, showFor } from "./color.js";
+import { forgetShown, type SharingGraphics, showFor } from "./color.js";
 // Registers the table's pipe with Pixi, which the override below looks up by name.
 import "./table.js";
 import type { TablePipe } from "./table.js";
@@ -348,6 +348,11 @@ export class SharedGraphics extends Graphics {
   swap(context: GraphicsContext): void {
     this.shared = context;
     showFor(this, this.flashColor ?? null);
+  }
+
+  override destroy(options?: Parameters<Graphics["destroy"]>[0]): void {
+    forgetShown(this);
+    super.destroy(options);
   }
 
   /** Draw `context` without listening on it: a shared context would gather a listener for every instance. */

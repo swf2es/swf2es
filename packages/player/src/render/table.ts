@@ -73,9 +73,6 @@ const ATLAS_SLACK = 1 << 16;
 
 let enabled = true;
 let minRun = MIN_RUN;
-/** The renderers the table's pipes were made for, and those of them not WebGL. */
-const pipes = new Set<object>();
-const notWebGL = new Set<object>();
 
 /**
  * Draw Graphics alone through the table, or not, from the next frame: a
@@ -88,15 +85,6 @@ const notWebGL = new Set<object>();
 export function setTransformTable(on: boolean, shortest = MIN_RUN): void {
   enabled = on;
   minRun = shortest;
-}
-
-/**
- * Whether every renderer is WebGL, where a Graphics drawn alone can take a
- * colour transform: in a row of the table, or through Pixi's pipe with the
- * colour shader (render/color.ts).
- */
-export function drawsColorAlone(): boolean {
-  return pipes.size > 0 && notWebGL.size === 0;
 }
 
 /**
@@ -473,9 +461,7 @@ export class TablePipe {
 
   constructor(renderer: WebGLRenderer) {
     this.renderer = renderer;
-    pipes.add(this);
     if (renderer.type !== RendererType.WEBGL) {
-      notWebGL.add(this);
       return;
     }
 
@@ -830,8 +816,6 @@ export class TablePipe {
   }
 
   destroy(): void {
-    pipes.delete(this);
-    notWebGL.delete(this);
     if (this.renderer.type !== RendererType.WEBGL) {
       return;
     }

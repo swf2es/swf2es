@@ -2766,7 +2766,8 @@ batcher's colour, the transform in uniforms. Both apply it as the colour
 batcher does, to the straight colour, the fill's times the Graphics' own
 tint rounded to a byte, clamped and premultiplied after, and leave out
 Pixi's group colour; where a renderer is not WebGL, every one is a
-batched copy. A context is weighed once built, so a part coloured as it
+batched copy, those already drawn alone too as one is made
+(`ColorAloneSystem`). A context is weighed once built, so a part coloured as it
 first shows is a batched copy until its transform changes. The
 `color-alone` case draws large discs, gradients and bitmaps under changing
 transforms each way. `bench.ts --no-table` draws without the table, and
