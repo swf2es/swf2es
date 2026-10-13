@@ -4941,6 +4941,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // The rects and points of BitmapData's operations, in place and not, on the GPU and not
+    // (scripts/BitmapRects.as); shown, an opaque bitmap a copy in place left empty pixels in.
+    name: "bitmap-rects",
+    swf: (abc) => bare(abc, 1, "Main", 80, 32),
+    script: "BitmapRects",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "bitmap-symbols",
     build: bitmapSymbols,
     frames: 1,

@@ -3128,13 +3128,26 @@ included, throws 2015, and a second `dispose` is nothing. `copyPixels`
 into an opaque bitmap composites source over destination whether or not
 `mergeAlpha` asks, as Flash does. `fillRect`, `copyPixels`, `getPixels` and
 `setPixels` (ByteArrays of big-endian ARGB), `getVector` and `setVector`,
-`clone` and `rect` work on that store, clipped to it, a Rectangle's or
-Point's coordinates rounded to the nearest pixel and a half to the even
-one, as Flash rounds them (`bitmapdata_rectangle_rounding`). `copyPixels`
+`clone` and `rect` work on that store, clipped to it, a Rectangle's edges
+rounded to the nearest pixel and a half to the even one, as Flash rounds
+them (`bitmapdata_rectangle_rounding`), and a Point's coordinates
+truncated toward 0 (the destination, alpha and hit-test points of every
+operation alike, under adl: 3.7 is 3, -1.5 is -1). A source rect past
+the source's edge is clipped and the point moved with it; `copyPixels`
+in place that moves right and down by no more than its rect's size
+writes the rect whole instead, and what lay left of or above the bitmap
+comes out empty (`copyGaps`; adl reads an opaque bitmap's as 0, alpha
+and all, and draws it black, which the store keeps as opaque black; a
+transparent one's are whatever its memory held, kept transparent; the
+`bitmap-rects` case). `copyPixels`
 copies in place in Flash's order, which within one store reads what it
 already wrote in one direction (rows bottom-up only when the copy moves
 down without moving left, columns right to left when it moves right;
-`bitmapdata_copypixels_self`); an alpha bitmap scales each premultiplied
+`bitmapdata_copypixels_self`); `merge`, `paletteMap`, `threshold` and
+`copyChannel` in place go rows down and pixels along, each pixel read as
+the ones before it left it, and a colour matrix's `applyFilter` by fours
+from each row's start; `pixelDissolve` in place dissolves the source
+rect, wherever the point is; an alpha bitmap scales each premultiplied
 channel by its alpha, 256 for 255, shifted down 8, and leaves the
 destination as it was where it does not reach; compositing is
 s + ((d * (256 - sa)) >> 8) a channel (`bitmapdata_copypixels_alpha_*`).

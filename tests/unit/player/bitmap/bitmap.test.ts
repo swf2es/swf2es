@@ -6,10 +6,12 @@ import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import {
   BitmapStore,
+  nearest,
+  pixelRect,
   premultiply,
   unmultiply,
 } from "../../../../packages/player/dist/bitmap/bitmap.js";
-import { drawBitmap, scroll } from "../../../../packages/player/dist/bitmap/ops.js";
+import { drawBitmap, merge, scroll } from "../../../../packages/player/dist/bitmap/ops.js";
 import { BitmapObject } from "../../../../packages/player/dist/display/display.js";
 
 setFlagsFromString("--expose-gc");
@@ -304,4 +306,145 @@ test("moves and fills of a store newer on the GPU stay there; the rest bring it 
   store.copyPixels(faint, { x: 0, y: 0, width: 2, height: 2 }, 0, 0, true);
   assert.deepEqual([reads, store.newerOnGpu, done.length], [2, false, 6]);
   assert.equal(store.getPixel32(3, 3).toString(16), "ff0000ff");
+});
+
+test("a rect's edges round to the nearest pixel, a half to the even one, as adl's do", () => {
+  assert.deepEqual(
+    [0.5, 1.5, 2.5, -0.5, -1.5, -2.5, 1.49, 1.51, -0.7].map(nearest),
+    [0, 2, 2, 0, -2, -2, 1, 2, -1],
+  );
+  // [x, y, width, height] as given, and the pixels adl's copies and fills cover.
+  const cases: [number[], number[]][] = [
+    [
+      [0.5, 3, 5, 4],
+      [0, 3, 6, 4],
+    ],
+    [
+      [1.5, 3, 5, 4],
+      [2, 3, 4, 4],
+    ],
+    [
+      [2.5, 3, 5, 4],
+      [2, 3, 6, 4],
+    ],
+    [
+      [2.6, 3, 5.6, 4],
+      [3, 3, 5, 4],
+    ],
+    [
+      [-0.5, 3, 5, 4],
+      [0, 3, 4, 4],
+    ],
+    [
+      [-1.5, 3, 5, 4],
+      [-2, 3, 6, 4],
+    ],
+    [
+      [2.5, 1.7, 10.6, 10.2],
+      [2, 2, 11, 10],
+    ],
+    [
+      [3.5, 4, 1, 1],
+      [4, 4, 0, 1],
+    ],
+    [
+      [5, 5, -3, 4],
+      [5, 5, -3, 4],
+    ],
+  ];
+  for (const [[x, y, w, h], [ex, ey, ew, eh]] of cases) {
+    assert.deepEqual(
+      pixelRect(x, y, w, h),
+      { x: ex, y: ey, width: ew, height: eh },
+      `${[x, y, w, h]}`,
+    );
+  }
+});
+
+test("a copy in place moved right and down by no more than its rect leaves what lay past the edge empty", () => {
+  const store = new BitmapStore(16, 16, false, 0);
+  const rect = (x: number, y: number, width: number, height: number) => ({ x, y, width, height });
+  // The rect, the point, and the gaps: none where it moves left or up, or further than its size.
+  assert.deepEqual(store.copyGaps(rect(-3, 2, 8, 4), 3, 4), [rect(3, 4, 3, 4)]);
+  assert.deepEqual(store.copyGaps(rect(-3, 2, 8, 4), 5, 6), [rect(5, 6, 3, 4)]);
+  assert.deepEqual(store.copyGaps(rect(-3, 2, 8, 4), 6, 3), []);
+  assert.deepEqual(store.copyGaps(rect(-3, 2, 8, 4), 2, 0), []);
+  assert.deepEqual(store.copyGaps(rect(2, -3, 4, 8), 6, 5), [rect(6, 5, 4, 3)]);
+  assert.deepEqual(store.copyGaps(rect(-3, -3, 8, 8), 0, 0), [rect(0, 0, 3, 8), rect(3, 0, 5, 3)]);
+  assert.deepEqual(store.copyGaps(rect(-2, -1, 4, 3), 3, 4), []);
+  assert.deepEqual(store.copyGaps(rect(2, 3, 5, 4), 3, 4), []);
+
+  // Filled opaque black, the copy itself clipped and moved as any other.
+  for (let x = 0; x < 16; x++) {
+    store.setPixel32(x, 2, 0xff000000 | x);
+  }
+
+  store.copyPixels(store, rect(-3, 2, 8, 1), 3, 4, false);
+  const row = Array.from({ length: 12 }, (_, x) => store.getPixel32(x, 4).toString(16));
+  assert.deepEqual(row.slice(3), [
+    "ff000000",
+    "ff000000",
+    "ff000000",
+    "ff000000",
+    "ff000001",
+    "ff000002",
+    "ff000003",
+    "ff000004",
+    "ff000000",
+  ]);
+
+  // From another bitmap, the rect is clipped and the point moved with it.
+  const other = new BitmapStore(16, 16, true, 0x80ffffff);
+  const into = new BitmapStore(16, 16, true, 0);
+  into.copyPixels(other, rect(-3, 2, 8, 1), 3, 4, false);
+  assert.deepEqual(
+    Array.from({ length: 12 }, (_, x) => into.getPixel32(x, 4) >>> 24),
+    [0, 0, 0, 0, 0, 0, 0x80, 0x80, 0x80, 0x80, 0x80, 0],
+  );
+});
+
+test("a gap of a copy in place on the GPU is filled there, after the copy", () => {
+  for (const transparent of [false, true]) {
+    const store = new BitmapStore(8, 8, transparent, 0xff102030);
+    const done: string[] = [];
+    const copy = {
+      version: -1,
+      read: () => new Uint32Array(64),
+      copy: (
+        _: BitmapStore,
+        r: { x: number; y: number; width: number; height: number },
+        dx: number,
+        dy: number,
+      ) => {
+        done.push(`copy ${r.x},${r.y} ${r.width}x${r.height} to ${dx},${dy}`);
+        return true;
+      },
+      fill: (r: { x: number; y: number; width: number; height: number }, pixel: number) => {
+        done.push(`fill ${r.x},${r.y} ${r.width}x${r.height} ${pixel.toString(16)}`);
+        return true;
+      },
+      destroy: () => {},
+    };
+    store.copies.add(copy);
+    store.drawnOnGpu(copy);
+    store.copyPixels(store, { x: -2, y: 1, width: 5, height: 3 }, 1, 2, false);
+    assert.deepEqual(done, [
+      "copy 0,1 3x3 to 3,2",
+      `fill 1,2 2x3 ${transparent ? "0" : "ff000000"}`,
+    ]);
+    assert.equal(store.newerOnGpu, true);
+  }
+});
+
+test("merge in place reads each pixel as the ones before it left it", () => {
+  const store = new BitmapStore(4, 1, false, 0);
+  for (let x = 0; x < 4; x++) {
+    store.setPixel32(x, 0, 0xff000000 | x);
+  }
+
+  merge(store, store, { x: 0, y: 0, width: 3, height: 1 }, 1, 0, [256, 256, 256, 256]);
+  assert.deepEqual(
+    Array.from({ length: 4 }, (_, x) => store.getPixel32(x, 0) & 0xff),
+    [0, 0, 0, 0],
+  );
 });
