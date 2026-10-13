@@ -104,7 +104,7 @@ export function drawsColorAlone(): boolean {
  * short run (SHORT_RUN), from a uniform array laid out as the table's rows.
  * Under a Flash colour transform it passes the straight colour as the
  * colour batcher packs it (render/color.ts, straight): the fill's times the
- * Graphics' own tint, rounded to a byte, and alpha cut to one; Pixi's group
+ * Graphics' own tint, rounded to a byte, and its alpha truncated to one; Pixi's group
  * colour is left out, as the transform includes every ancestor's.
  */
 const vertex = (short: boolean) => `#version 300 es

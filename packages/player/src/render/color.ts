@@ -92,7 +92,8 @@ const colorBitGl = {
  * The colour batcher's colour for Pixi's graphics shader, which draws a
  * Graphics alone under its transform: the straight colour as the batcher
  * packs it (straight), the fill's from the vertex times the Graphics' own
- * tint, rounded to a byte, and alpha cut to one; the transform in uniforms.
+ * tint, rounded to a byte, and its alpha truncated to one; the transform in
+ * uniforms.
  */
 const aloneBitGl = {
   name: "flash-color-alone-bit",
@@ -561,6 +562,13 @@ function aloneShader(maxTextures: number): Shader {
  * it takes as the context's own for the one draw, the transform and the
  * Graphics' own tint and alpha in uniforms. Its context, shared, is never
  * packed: a gradient's or a bitmap's, which the table cannot draw.
+ *
+ * It leans on Pixi 8.21's internals: the pipe's renderer, private; a
+ * context's customShader, which the pipe's execute and its GL adaptor
+ * read as they draw, and the context system only as it builds, which a
+ * draw never does; and the order of the shader's sections, Pixi's local
+ * uniforms' colour applied in the vertex's main before aloneBitGl's end
+ * replaces it.
  */
 const drawAlone = GraphicsPipe.prototype.execute;
 GraphicsPipe.prototype.execute = function (this: GraphicsPipe, graphics: Graphics) {

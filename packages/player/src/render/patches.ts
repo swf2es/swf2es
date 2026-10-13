@@ -4,7 +4,9 @@
 // fast bounds placed in its parent's; and a filter's resolution lookup kept
 // from a texture a resize destroyed. Loaded by view.ts before any renderer is
 // made. Also SharedGraphics, the Graphics that draws a context its
-// instances share.
+// instances share. GraphicsPipe's execute, for a Graphics drawn alone
+// under a colour transform, is patched beside the colour shader it draws
+// with, in render/color.ts.
 import type { ColorTransform } from "@swf2es/format";
 import {
   type Bounds,
