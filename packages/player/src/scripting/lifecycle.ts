@@ -69,14 +69,16 @@ export class Lifecycle {
    * a script that removes it meanwhile throws #2025, as Flash's does.
    */
   removing(display: DisplayObject, byTimeline = false): void {
+    // Before the listeners, which may move it: the property to clear is the one of the parent
+    // that loses it, and one they put back on a list is no orphan (`added`).
+    const parent = display.parent?.object;
+    this.orphan(display, !byTimeline);
     if (byTimeline) {
       this.telling(display, 2025);
     } else {
       this.tell(display);
     }
 
-    this.orphan(display, !byTimeline);
-    const parent = display.parent?.object;
     if (byTimeline && parent && display.timelineNamed) {
       const name = avm2.qname(avm2.publicNs, display.name);
       if (this.s.rt.getProperty(parent, name) === display.object) {
