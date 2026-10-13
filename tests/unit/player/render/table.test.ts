@@ -220,13 +220,13 @@ test("a run's rows go up in one call: the part of their line, or the whole lines
   const pipe = new TablePipe(renderer as unknown as ConstructorParameters<typeof TablePipe>[0]);
   const upload = (pipe as unknown as { upload(from: number, to: number): void }).upload.bind(pipe);
 
-  // A line holds 256 rows of 4 texels, 16 floats a row.
+  // A line holds 256 rows of 5 texels, 20 floats a row.
   upload(10, 20);
   upload(250, 300);
   upload(256, 512);
   assert.deepEqual(calls, [
-    [40, 0, 40, 1, 160],
-    [0, 0, 1024, 2, 0],
-    [0, 1, 1024, 1, 256 * 16],
+    [50, 0, 50, 1, 200],
+    [0, 0, 1280, 2, 0],
+    [0, 1, 1280, 1, 256 * 20],
   ]);
 });

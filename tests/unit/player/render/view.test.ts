@@ -2936,6 +2936,84 @@ test("Graphics a settled group batched draw alone again in a group that has not 
   });
 });
 
+test("a large shape under a colour transform draws alone until its group settles, or a renderer is not WebGL", async () => {
+  // A batched copy is packed again at each rebuild and each change of the
+  // transform, every frame of a creature fading out; drawn alone, a draw
+  // takes the transform in a row of the table or in uniforms instead.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const { MOVE, LINE } = await import("../../../../packages/player/dist/display/shapes.js");
+  const { ColorAloneSystem } = await import("../../../../packages/player/dist/render/color.js");
+  const disc: number[] = [MOVE, 200, 0];
+  for (let k = 1; k <= 240; k++) {
+    const a = (2 * Math.PI * k) / 240;
+    disc.push(LINE, Math.round(200 * Math.cos(a)), Math.round(200 * Math.sin(a)));
+  }
+
+  const large = (await outlinedSquare()) as unknown as {
+    layers: { fills: { contours: number[][] }[]; strokes: { paths: number[][] }[] }[];
+  };
+  large.layers[0].fills[0].contours = [disc];
+  large.layers[0].strokes[0].paths = [disc];
+  const small = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const shapes = [
+    new ShapeObject(large as unknown as ConstructorParameters<typeof ShapeObject>[0]),
+    new ShapeObject(small),
+  ];
+  for (const [i, shape] of shapes.entries()) {
+    shape.colorTransform = {
+      rMul: 1,
+      gMul: 1,
+      bMul: 1,
+      aMul: 1,
+      rAdd: 40,
+      gAdd: 0,
+      bAdd: 0,
+      aAdd: 0,
+    };
+    root.placeAtDepth(shape, i + 1);
+  }
+
+  type Drawn = { context: { batchMode: string }; shared: unknown; settled?: boolean };
+  type Group = { $builtAt?: number; $settled?: boolean };
+  const art = (k: number) =>
+    [...view.stage.children[0].children[1 + k].children[0].children] as unknown as Drawn[];
+  const alone = (g: Drawn) => g.context === g.shared;
+  const webgl = new ColorAloneSystem({ type: 1 });
+  let other: InstanceType<typeof ColorAloneSystem> | null = null;
+  try {
+    await withClock((clock) => {
+      view.prepare(root);
+      view.stage.enableRenderGroup();
+      const group = view.stage.renderGroup as unknown as Group;
+      group.$builtAt = clock.at;
+      view.prepare(root);
+      // Weighed before it is ever built: the large shape's fill and lines alone, the small batched.
+      assert.ok(art(0).every(alone));
+      assert.ok(art(1).every((g) => !alone(g) && g.context.batchMode === "batch"));
+
+      // Settled: batched copies, packed once.
+      clock.at += 2500;
+      view.prepare(root);
+      assert.equal(group.$settled, true);
+      assert.ok(art(0).every((g) => g.settled && !alone(g) && g.context.batchMode === "batch"));
+
+      // Rebuilt again: alone again.
+      group.$builtAt = clock.at;
+      view.prepare(root);
+      assert.ok(art(0).every(alone));
+
+      // A renderer that is not WebGL, whose graphics shader has no colour transform: batched copies.
+      other = new ColorAloneSystem({ type: 2 });
+      assert.ok(art(0).every((g) => !alone(g) && g.context.batchMode === "batch"));
+    });
+  } finally {
+    webgl.destroy();
+    (other as InstanceType<typeof ColorAloneSystem> | null)?.destroy();
+  }
+});
+
 test("a mask's Graphics are never batched, as they draw in another group", async () => {
   const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
   const character = await outlinedSquare();
