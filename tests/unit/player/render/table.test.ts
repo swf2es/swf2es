@@ -132,6 +132,34 @@ test("the atlas starts again only once released contexts leave more holes than l
   atlas.destroy();
 });
 
+test("the atlas starts again in arrays cut down to what was live, and grows by half", () => {
+  const atlas = new Atlas(WHITE);
+  const keys = Array.from({ length: 8 }, () => ({}));
+  const big = 40000;
+  for (const key of keys) {
+    atlas.place(key, packed(big, [0, 1, 2], [{ start: 0, size: 3 }]));
+  }
+
+  const peak = atlas.vertices.length;
+  assert.ok(peak >= 8 * big * 6 && peak < 8 * big * 6 * 1.5 + 6 * big);
+  for (const key of keys.slice(1)) {
+    atlas.release(key);
+  }
+
+  atlas.compact();
+  assert.equal(atlas.vertexCount, 0);
+  assert.equal(atlas.shrunk, true);
+  assert.equal(atlas.vertices.length, big * 1.5 * 6);
+  assert.equal(atlas.indices.length, 4096 * 3);
+
+  // Placed again, the one left fits; more grows by half.
+  atlas.place(keys[0], packed(big, [0, 1, 2], [{ start: 0, size: 3 }]));
+  assert.equal(atlas.vertices.length, big * 1.5 * 6);
+  atlas.place({}, packed(big, [0, 1, 2], [{ start: 0, size: 3 }]));
+  assert.equal(atlas.vertices.length, big * 1.5 * 1.5 * 6);
+  atlas.destroy();
+});
+
 test("Graphics added one after another share a run, and anything between them starts another", () => {
   const set = new InstructionSet();
   const [a, b, c] = [new Graphics(), new Graphics(), new Graphics()];

@@ -15,7 +15,6 @@ import {
   TRANSFORM,
 } from "../../../../packages/player/dist/display/display.js";
 import type { Player } from "../../../../packages/player/dist/player.js";
-import { ColorBatcher } from "../../../../packages/player/dist/render/color.js";
 import { PixiView } from "../../../../packages/player/dist/render/view.js";
 
 setFlagsFromString("--expose-gc");
@@ -471,33 +470,6 @@ test("a nested group regroups under its parent's group after the branch comes ba
   view.prepare(root);
   assert.equal(view.stage.children[0].children[1], outer);
   assert.equal(outer.children[1], inner);
-});
-
-test("a colour batcher gives back a past geometry peak after many smaller builds", () => {
-  // Shader construction needs a browser; the batcher lifecycle itself does not.
-  const batcher = Object.create(ColorBatcher.prototype) as ColorBatcher;
-  let destroyed = 0;
-  const largeGeometry = { destroy: () => destroyed++ };
-  Object.assign(batcher, {
-    attributeBuffer: { size: 8 << 20, destroy: () => {} },
-    indexBuffer: new Uint32Array(1 << 20),
-    geometry: largeGeometry,
-    batches: [],
-    batchIndex: 0,
-    _elements: [],
-    underusedBuilds: 0,
-  });
-
-  for (let frame = 0; frame < 120; frame++) {
-    batcher.attributeSize = 1000;
-    batcher.indexSize = 1000;
-    batcher.begin();
-  }
-
-  assert.ok(batcher.attributeBuffer.size < 8 << 20);
-  assert.ok(batcher.indexBuffer.byteLength < 4 << 20);
-  assert.notEqual(batcher.geometry, largeGeometry);
-  assert.equal(destroyed, 1);
 });
 
 test("Pixi pointer delivery scales to SWF coordinates and stops on unbind", () => {

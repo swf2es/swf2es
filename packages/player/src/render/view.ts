@@ -46,7 +46,7 @@ import type { ShapeCharacter } from "../display/timeline.js";
 import type { PointerState } from "../input/pointer.js";
 import type { TouchState } from "../input/touch.js";
 import type { Player } from "../player.js";
-import { retireBatchers, viewGroups } from "./batchers.js";
+import { retireBatchers, trimBatchers, viewGroups } from "./batchers.js";
 import { argbOf, characterStore, gpuBitmaps } from "./bitmaps.js";
 import { blendFilters } from "./blend.js";
 import { setFlashColor } from "./color.js";
@@ -2183,6 +2183,7 @@ export class PixiView {
     }
 
     trimPools();
+    trimBatchers(this.renderer, now);
     const units = this.filterUnits;
     this.rescaled = this.leastWidth !== this.strokedAt || units !== this.filteredAt;
     this.strokedAt = this.leastWidth;

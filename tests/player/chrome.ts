@@ -661,3 +661,17 @@ export function playResized(
     return exception ?? value ?? null;
   });
 }
+
+/** Play a SWF with no scripts in the page's contextLossSwf: what differs after a lost context, or threw. */
+export function playLosingContext(
+  swf: Uint8Array,
+  frames: number,
+  table: boolean,
+): Promise<string | null> {
+  return withPage("contextLossSwf", async (evaluate) => {
+    const { value, exception } = await evaluate<string | null>(
+      `contextLossSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${table})`,
+    );
+    return exception ?? value ?? null;
+  });
+}

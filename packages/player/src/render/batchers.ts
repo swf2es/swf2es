@@ -1,5 +1,14 @@
-// Pixi's batchers of groups that went, kept for new groups to build with.
-import type { Batcher, InstructionSet, Renderer } from "pixi.js";
+// Pixi's batchers of groups that went, kept for new groups to build with;
+// and the batchers of groups that stay, cut back once they hold far more
+// than they use.
+import {
+  type Batcher,
+  type Buffer,
+  type InstructionSet,
+  type Renderer,
+  RendererType,
+  ViewableBuffer,
+} from "pixi.js";
 
 /** Pixi's batch pipe, which keeps batchers by instruction-set ID until told to destroy them. */
 interface BatchPipe {
@@ -51,5 +60,100 @@ export function retireBatchers(renderer: Renderer, uid: number): void {
 
   for (const batcher of Object.values(batchers)) {
     batcher.destroy();
+  }
+}
+
+/** Buffers smaller than this, attributes and indices together, are never cut back: not worth a copy. */
+const TRIM_FLOOR = 1 << 16;
+/**
+ * How long a batcher may use under a quarter of its buffers before they
+ * are cut back to twice its use. Pixi only grows them, to twice the most a
+ * build ever packed: a group that once held a crowd's settled Graphics, or
+ * that took a larger group's spare batchers, kept megabytes for the few
+ * vertices it packs since. By time, so that a group not rebuilt is cut back
+ * too, and long enough that one whose use swings comes back to its peak
+ * first.
+ */
+const TRIM_MS = 3000;
+/** When each batcher was first seen using under a quarter of its buffers, since it last used more. */
+const lowSince = new WeakMap<Batcher, number>();
+
+type Packing = Batcher & { attributeSize: number; indexSize: number };
+
+/** Cut back the buffers of the batchers of `renderer`'s groups that have long used little of them. */
+export function trimBatchers(renderer: Renderer, now: number): void {
+  const sets = (renderer.renderPipes?.batch as unknown as BatchPipe | undefined)
+    ?._batchersByInstructionSet;
+  if (!sets) {
+    return;
+  }
+
+  for (const uid in sets) {
+    const batchers = sets[uid];
+    for (const name in batchers) {
+      trim(renderer, batchers[name] as Packing, now);
+    }
+  }
+}
+
+function trim(renderer: Renderer, batcher: Packing, now: number): void {
+  const attributes = batcher.attributeBuffer;
+  const indices = batcher.indexBuffer;
+  // Destroyed, or yet to build.
+  if (!attributes || !indices || !batcher.geometry) {
+    return;
+  }
+
+  const floats = batcher.attributeSize || 0;
+  const count = batcher.indexSize || 0;
+  const held = attributes.size + indices.byteLength;
+  const used = floats * 4 + count * indices.BYTES_PER_ELEMENT;
+  if (held < TRIM_FLOOR || used * 4 > held) {
+    lowSince.delete(batcher);
+    return;
+  }
+
+  const since = lowSince.get(batcher);
+  if (since === undefined) {
+    lowSince.set(batcher, now);
+    return;
+  }
+
+  if (now - since < TRIM_MS) {
+    return;
+  }
+
+  lowSince.delete(batcher);
+  // What the last build packed is copied: a group not rebuilt draws it again, and an element
+  // updated in place writes where it was.
+  const packed = new ViewableBuffer(Math.max(floats * 2, 4) * 4);
+  packed.float32View.set(attributes.float32View.subarray(0, floats));
+  const length = Math.max(count * 2, 6);
+  const indexed = new (indices.constructor as Uint16ArrayConstructor)(length + (length % 2));
+  indexed.set(indices.subarray(0, count));
+  attributes.destroy();
+  batcher.attributeBuffer = packed;
+  batcher.indexBuffer = indexed;
+  const geometry = batcher.geometry;
+  resizeOnGpu(renderer, geometry.buffers[0]);
+  resizeOnGpu(renderer, geometry.indexBuffer);
+  geometry.buffers[0].setDataWithSize(packed.float32View, floats, true);
+  geometry.indexBuffer.setDataWithSize(indexed, count, true);
+}
+
+/**
+ * Have WebGL's copy of `buffer` made again at the size of its next data:
+ * Pixi only ever writes a smaller array into the GPU's larger one. A lost
+ * context's buffers are made again anyway.
+ */
+export function resizeOnGpu(renderer: Renderer, buffer: Buffer): void {
+  if (renderer.type !== RendererType.WEBGL) {
+    return;
+  }
+
+  const gpu = (buffer as unknown as { _gpuData: Record<number, { byteLength: number } | null> })
+    ._gpuData[renderer.uid];
+  if (gpu) {
+    gpu.byteLength = -1;
   }
 }
