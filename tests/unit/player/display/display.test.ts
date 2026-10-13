@@ -994,3 +994,30 @@ test("the walks' kept lists follow every clip, container and button that comes, 
     "a state round the button",
   );
 });
+
+test("the walks' lists are made again in the arrays they had, holding none that left", () => {
+  // A busy movie's list is made again every frame: new arrays each time were most of what its
+  // walks allocated.
+  const tags: Uint8Array[] = [
+    w.sprite(3, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+  ];
+  for (let i = 0; i < 100; i++) {
+    tags.push(w.place({ depth: i + 1, character: 3 }));
+  }
+
+  const { root, stage } = movie(tags);
+  const first = walkList(stage as Container);
+  const { items, ends } = first;
+  const length = items.length;
+  const gone = root.children[root.children.length - 1];
+  root.removeChild(gone);
+  const again = walkList(stage as Container);
+  assert.equal(again, first);
+  assert.equal(again.items, items);
+  assert.equal(again.ends, ends);
+  assert.equal(items.length, length - 1);
+  assert.ok(!items.includes(gone));
+
+  root.addChildAt(gone, 0);
+  assert.equal(walkList(stage as Container).items[1], gone);
+});
