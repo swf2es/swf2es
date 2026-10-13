@@ -1202,14 +1202,23 @@ export class Container extends DisplayObject {
     return child;
   }
 
-  /** Take `child` out, wherever it is in the list, and off the timeline's depths. */
+  /**
+   * Take `child` out, wherever it is in the list, and off the timeline's
+   * depths; nothing for one not in it, which a listener of its removal may
+   * have taken out already.
+   */
   removeChild(child: DisplayObject): void {
+    const index = this.children.indexOf(child);
+    if (index < 0) {
+      return;
+    }
+
     if (child.depth !== null) {
       this.depths.delete(child.depth);
       child.depth = null;
     }
 
-    this.children.splice(this.children.indexOf(child), 1);
+    this.children.splice(index, 1);
     child.parent = null;
     child.focusDrop?.(child);
     this.relist(child);

@@ -1605,6 +1605,37 @@ function addedEvents(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A row of Boxes the timeline places on frame 1 and partly removes on
+// frame 2, under the rows scripts/RemoveReentry.as adds and removes from
+// the display list's events.
+function removeReentry(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 170,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000, 200),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "RemoveReentry"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Box"],
+      ]),
+      ...[0, 1, 2].map((i) =>
+        w.place({ depth: i + 1, character: 2, name: `p${i}`, matrix: { tx: 240 * i, ty: 3000 } }),
+      ),
+      w.showFrame(),
+      w.remove(1),
+      w.remove(2),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // What differs from Flash in "moves" is anti-aliasing a quarter pixel off:
 // Flash's curved lines reach further into their shape, and under the skew
 // of frame 2 its lines are a little wider or narrower than Ruffle's rule
@@ -5445,6 +5476,15 @@ export const cases: PlayerCase[] = [
     script: "Added",
     frames: 2,
     capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "remove-reentry",
+    swf: removeReentry,
+    script: "RemoveReentry",
+    frames: 2,
+    capture: [2],
     tolerance: 0,
     maxOutliers: 0,
   },

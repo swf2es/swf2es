@@ -56,11 +56,6 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     return v;
   };
-  const remove = (c: Container, d: DisplayObject): void => {
-    s.lifecycle.removing(d);
-    c.removeChild(d);
-  };
-
   class DisplayObjectContainerNatives {
     declare $display: Container;
     declare $mouseChildren: boolean | undefined;
@@ -100,28 +95,35 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     removeChild(child: Value): Value {
       const c = this.$display;
-      remove(c, ownChild(c, child));
+      s.lifecycle.remove(ownChild(c, child));
       return child;
     }
 
     removeChildAt(index: Value): Value {
       const c = this.$display;
       const d = c.children[indexIn(c, index)];
-      remove(c, d);
+      s.lifecycle.remove(d);
       return d.object;
     }
 
     removeChildren(begin: Value, end: Value): void {
       const c = this.$display;
+      const n = c.children.length;
       const from = begin === undefined ? 0 : s.rt.toInt(begin);
-      const to =
-        end === undefined || s.rt.toInt(end) === 0x7fffffff ? c.children.length : s.rt.toInt(end);
-      if (from < 0 || to > c.children.length || from > to) {
+      const to = end === undefined ? 0x7fffffff : s.rt.toInt(end);
+      // `end` is the last one removed. Its default, 0x7fffffff, stands for the last child, and
+      // with it a `begin` past the end removes nothing where Flash would otherwise throw.
+      const all = to === 0x7fffffff;
+      if (from < 0 || (!all && (to >= n || from > to))) {
         throw s.rt.error("RangeError", 2006);
       }
 
-      for (const d of c.children.slice(from, to)) {
-        remove(c, d);
+      // Those there when it began, each from wherever a listener put it meanwhile, as Flash's
+      // are; one a listener took off already is left be.
+      for (const d of c.children.slice(from, all ? n : to + 1)) {
+        if (d.parent) {
+          s.lifecycle.remove(d);
+        }
       }
     }
 
