@@ -932,11 +932,13 @@ export class PixiView {
    * Let go of every spare node, as a SWF unloads: they hold its characters,
    * and its objects' containers, till taken or IDLE_MS on, which a player
    * paused or let go of never reaches. For a host to call too as it lets
-   * go of a player whose view it keeps.
+   * go of a player whose view it keeps. And the lines' budget back to
+   * its floor: what grew it may have gone with the SWF.
    */
   dropSpares(): void {
     this.spareNodes.clear();
     this.spareSince.clear();
+    this.lines.unloaded();
   }
 
   /**
