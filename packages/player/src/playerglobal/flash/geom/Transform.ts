@@ -7,7 +7,13 @@ import { avm2 } from "@swf2es/runtime";
 import { boundsIn, toStage } from "../../../display/bounds.js";
 import { type DisplayObject, TRANSFORM } from "../../../display/display.js";
 import { concat } from "../../../display/geometry.js";
-import { identity3D, invert3D, multiply3D, type Raw } from "../../../display/matrix3d.js";
+import {
+  determinant3D,
+  identity3D,
+  invert3D,
+  multiply3D,
+  type Raw,
+} from "../../../display/matrix3d.js";
 import type { Scripting } from "../../../scripting.js";
 import { alwaysProjects, projectionFrom, projectionObject } from "./PerspectiveProjection.js";
 
@@ -168,10 +174,26 @@ export function transformNatives(s: Scripting): avm2.Natives {
       return m;
     }
 
-    /** Taken as given, and apart into the 3D properties; null back to 2D, at the identity. */
+    /**
+     * Taken as given, and apart into the 3D properties; null back to 2D, at
+     * the identity. As in Flash, one equal to the object's own changes
+     * nothing, its properties kept as they were set rather than read from
+     * it again, and any other whose float32 determinant is 0 is refused.
+     */
     set matrix3D(v: Value) {
+      const raw = v ? ((v as AsObject).$matrix3D as Float32Array) : null;
+      const own = this.$display.space?.raw;
+      if (raw && own && raw.every((x, i) => x === own[i])) {
+        this.$display.touch();
+        return;
+      }
+
+      if (raw && determinant3D(raw) === 0) {
+        throw s.rt.error("ArgumentError", 2188);
+      }
+
       this.$display.touch();
-      this.$display.setMatrix3D(v ? ((v as AsObject).$matrix3D as Float32Array) : null);
+      this.$display.setMatrix3D(raw);
     }
 
     /**

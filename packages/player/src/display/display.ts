@@ -25,7 +25,7 @@ import { TextModel } from "../text/text.js";
 import type { Drawing } from "./drawing.js";
 import { type Filter, filterOfSwf } from "./filters.js";
 import { type Rect, shifted } from "./geometry.js";
-import { compose3D, decompose3D } from "./matrix3d.js";
+import { compose3D, decompose3D, identity3D } from "./matrix3d.js";
 import { morphAt } from "./morph.js";
 import {
   type BitmapCharacter,
@@ -164,9 +164,28 @@ export interface Space {
   rotationY: number;
   rotationZ: number;
   raw: Float32Array;
+  /**
+   * Whether its matrix could not be taken apart, a column of it of no
+   * length: Flash then reads the properties as the identity's, at the
+   * position, until a scale or rotation set makes it the identity.
+   */
+  singular: boolean;
+  /**
+   * Whether a scale or rotation set has made the matrix since it was set
+   * whole: Flash keeps the first scale set after that as a float32.
+   */
+  composed: boolean;
+  /** The 2D scales, rotation and skew from before it went 3D, which matrix3D set to null gives back. */
+  flat: readonly number[];
 }
 
-export type SpaceProperty = Exclude<keyof Space, "raw">;
+export type SpaceProperty = Exclude<keyof Space, "raw" | "singular" | "composed" | "flat">;
+
+/**
+ * The least a 3D scale goes to, as Flash's: a smaller one, 0 or NaN is
+ * this, so the matrix stays invertible and the scale can come back.
+ */
+export const LEAST_SCALE_3D = 1.175494351e-36;
 
 /**
  * The records of a place's filters, read once for each list of them: an
@@ -501,12 +520,15 @@ export class DisplayObject {
     this.invalidate(TRANSFORM);
   }
 
-  /** Its 3D transform, made from the 2D matrix the first time. */
+  /** Its 3D transform, made from the 2D matrix the first time, a -0 in it taken as 0. */
   enter3D(): Space {
     if (!this.space) {
       const m = this.matrix;
       this.setMatrix3D(
-        Float32Array.of(m.a, m.b, 0, 0, m.c, m.d, 0, 0, 0, 0, 1, 0, m.tx, m.ty, 0, 1),
+        Float32Array.of(m.a, m.b, 0, 0, m.c, m.d, 0, 0, 0, 0, 1, 0, m.tx, m.ty, 0, 1).map(
+          (v) => v + 0,
+        ),
+        true,
       );
     }
 
@@ -516,17 +538,32 @@ export class DisplayObject {
   /**
    * One 3D property set, as Flash's: a position moves the matrix3D, as set
    * whole or not; a scale or rotation makes it again from all of them, a
-   * rotation as set, not brought within ±180. A NaN position or rotation
-   * is 0.
+   * rotation as set, not brought within ±180, a scale no nearer 0 than
+   * LEAST_SCALE_3D, and a float32 if the matrix was set whole since the
+   * last such set. A NaN position or rotation is 0. A scale or rotation
+   * set where the 2D matrix could not be taken apart makes it the
+   * identity, at the origin, and is lost, as in Flash.
    */
   set3D(key: SpaceProperty, v: number): void {
     const space = this.enter3D();
-    space[key] = Number.isNaN(v) && !key.startsWith("scale") ? 0 : v;
     const at = ["x", "y", "z"].indexOf(key);
     if (at >= 0) {
+      space[key] = Number.isNaN(v) ? 0 : v;
       space.raw[12 + at] = space[key];
       this.flatten();
       return;
+    }
+
+    if (space.singular) {
+      this.setMatrix3D(identity3D());
+      return;
+    }
+
+    if (!key.startsWith("scale")) {
+      space[key] = Number.isNaN(v) ? 0 : v;
+    } else {
+      const kept = Math.abs(v) >= LEAST_SCALE_3D ? v : LEAST_SCALE_3D;
+      space[key] = space.composed ? kept : Math.fround(kept);
     }
 
     const radians = [space.rotationX, space.rotationY, space.rotationZ].map(
@@ -538,30 +575,48 @@ export class DisplayObject {
       [space.scaleX, space.scaleY, space.scaleZ],
       "eulerAngles",
     );
+    space.composed = true;
     this.flatten();
   }
 
-  /** The matrix3D set whole, and taken apart into the properties as Matrix3D.decompose would; null back to 2D, at the identity. */
-  setMatrix3D(raw: Float32Array | null): void {
+  /**
+   * The matrix3D set whole, and taken apart into the properties as
+   * Matrix3D.decompose would; null back to 2D, at the identity, with the
+   * scales and rotation it had before it went 3D. Null in 2D changes
+   * nothing. One made from the 2D matrix (`flat`) with a column of no
+   * length reads as the identity at its position, as in Flash, where a
+   * matrix3D set so reads as NaN.
+   */
+  setMatrix3D(raw: Float32Array | null, flat = false): void {
+    const before = this.space?.flat ?? [this.scaleX, this.scaleY, this.rotation, this.skew];
     if (!raw) {
-      this.space = null;
-      this.setMatrix(IDENTITY);
+      if (this.space) {
+        this.setMatrix(IDENTITY);
+        [this.scaleX, this.scaleY, this.rotation, this.skew] = before;
+      }
+
       return;
     }
 
     const [[x, y, z], rotation, [scaleX, scaleY, scaleZ]] = decompose3D(raw, "eulerAngles");
-    const [rotationX, rotationY, rotationZ] = rotation.map((r) => r * DEGREES);
+    const singular = flat && (scaleX === 0 || scaleY === 0);
+    const [rotationX, rotationY, rotationZ] = singular
+      ? [0, 0, 0]
+      : rotation.map((r) => r * DEGREES);
     this.space = {
       x,
       y,
       z,
-      scaleX,
-      scaleY,
-      scaleZ,
+      scaleX: singular ? 1 : scaleX,
+      scaleY: singular ? 1 : scaleY,
+      scaleZ: singular ? 1 : scaleZ,
       rotationX,
       rotationY,
       rotationZ,
       raw: Float32Array.from(raw),
+      singular,
+      composed: false,
+      flat: before,
     };
     this.flatten();
   }
