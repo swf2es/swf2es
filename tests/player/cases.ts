@@ -5019,6 +5019,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // A shadow's and a bevel's distance past what adl holds, and NaN; inner filters'
+    // rects; draw's matrix past the int's range; hitTest's points near it.
+    name: "filter-distances",
+    swf: (abc) => bare(abc, 1, "Main", 40, 40),
+    script: "FilterDistances",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     // The rects and points of BitmapData's operations, in place and not, on the GPU and not
     // (scripts/BitmapRects.as); shown, an opaque bitmap a copy in place left empty pixels in.
     name: "bitmap-rects",

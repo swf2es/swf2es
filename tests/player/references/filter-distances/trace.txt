@@ -1,0 +1,535 @@
+1000 0 DropShadowFilter 820266535
+1000 0 DropShadowFilter inner 381277168
+1000 0 BevelFilter inner 820266535
+1000 0 GradientGlowFilter outer 820266535
+1000 0 GradientGlowFilter inner 820266535
+1000 0 GradientBevelFilter inner 725405749
+1000 45 DropShadowFilter 820266535
+1000 45 DropShadowFilter inner 381277168
+1000 45 BevelFilter inner 820266535
+1000 45 GradientGlowFilter outer 820266535
+1000 45 GradientGlowFilter inner 820266535
+1000 45 GradientBevelFilter inner 725405749
+1000 90 DropShadowFilter 820266535
+1000 90 DropShadowFilter inner 381277168
+1000 90 BevelFilter inner 820266535
+1000 90 GradientGlowFilter outer 820266535
+1000 90 GradientGlowFilter inner 820266535
+1000 90 GradientBevelFilter inner 725405749
+1000 30 DropShadowFilter 820266535
+1000 30 DropShadowFilter inner 381277168
+1000 30 BevelFilter inner 820266535
+1000 30 GradientGlowFilter outer 820266535
+1000 30 GradientGlowFilter inner 820266535
+1000 30 GradientBevelFilter inner 725405749
+1000 NaN DropShadowFilter error 2015
+1000 NaN DropShadowFilter inner 381277168
+1000 NaN BevelFilter inner 820266535
+1000 NaN GradientGlowFilter outer error 2015
+1000 NaN GradientGlowFilter inner 820266535
+1000 NaN GradientBevelFilter inner 725405749
+100000 0 DropShadowFilter 820266535
+100000 0 DropShadowFilter inner 381277168
+100000 0 BevelFilter inner 820266535
+100000 0 GradientGlowFilter outer 820266535
+100000 0 GradientGlowFilter inner 820266535
+100000 0 GradientBevelFilter inner 725405749
+100000 45 DropShadowFilter error 2015
+100000 45 DropShadowFilter inner 381277168
+100000 45 BevelFilter inner error 2077
+100000 45 GradientGlowFilter outer error 2015
+100000 45 GradientGlowFilter inner 820266535
+100000 45 GradientBevelFilter inner error 2077
+100000 90 DropShadowFilter 820266535
+100000 90 DropShadowFilter inner 381277168
+100000 90 BevelFilter inner 820266535
+100000 90 GradientGlowFilter outer 820266535
+100000 90 GradientGlowFilter inner 820266535
+100000 90 GradientBevelFilter inner 725405749
+100000 30 DropShadowFilter error 2015
+100000 30 DropShadowFilter inner 381277168
+100000 30 BevelFilter inner error 2077
+100000 30 GradientGlowFilter outer error 2015
+100000 30 GradientGlowFilter inner 820266535
+100000 30 GradientBevelFilter inner error 2077
+100000 NaN DropShadowFilter error 2015
+100000 NaN DropShadowFilter inner 381277168
+100000 NaN BevelFilter inner 820266535
+100000 NaN GradientGlowFilter outer error 2015
+100000 NaN GradientGlowFilter inner 820266535
+100000 NaN GradientBevelFilter inner 725405749
+4000000 0 DropShadowFilter 820266535
+4000000 0 DropShadowFilter inner 381277168
+4000000 0 BevelFilter inner 820266535
+4000000 0 GradientGlowFilter outer 820266535
+4000000 0 GradientGlowFilter inner 820266535
+4000000 0 GradientBevelFilter inner 725405749
+4000000 45 DropShadowFilter error 2015
+4000000 45 DropShadowFilter inner 381277168
+4000000 45 BevelFilter inner error 2077
+4000000 45 GradientGlowFilter outer error 2015
+4000000 45 GradientGlowFilter inner 820266535
+4000000 45 GradientBevelFilter inner error 2077
+4000000 90 DropShadowFilter 820266535
+4000000 90 DropShadowFilter inner 381277168
+4000000 90 BevelFilter inner 820266535
+4000000 90 GradientGlowFilter outer 820266535
+4000000 90 GradientGlowFilter inner 820266535
+4000000 90 GradientBevelFilter inner 725405749
+4000000 30 DropShadowFilter error 2015
+4000000 30 DropShadowFilter inner 381277168
+4000000 30 BevelFilter inner error 2077
+4000000 30 GradientGlowFilter outer error 2015
+4000000 30 GradientGlowFilter inner 820266535
+4000000 30 GradientBevelFilter inner error 2077
+4000000 NaN DropShadowFilter error 2015
+4000000 NaN DropShadowFilter inner 381277168
+4000000 NaN BevelFilter inner 820266535
+4000000 NaN GradientGlowFilter outer error 2015
+4000000 NaN GradientGlowFilter inner 820266535
+4000000 NaN GradientBevelFilter inner 725405749
+8388607 0 DropShadowFilter 0
+8388607 0 DropShadowFilter inner 381277168
+8388607 0 BevelFilter inner 820266535
+8388607 0 GradientGlowFilter outer 0
+8388607 0 GradientGlowFilter inner 820266535
+8388607 0 GradientBevelFilter inner 725405749
+8388607 45 DropShadowFilter error 2015
+8388607 45 DropShadowFilter inner 381277168
+8388607 45 BevelFilter inner error 2077
+8388607 45 GradientGlowFilter outer error 2015
+8388607 45 GradientGlowFilter inner 820266535
+8388607 45 GradientBevelFilter inner error 2077
+8388607 90 DropShadowFilter 0
+8388607 90 DropShadowFilter inner 381277168
+8388607 90 BevelFilter inner 820266535
+8388607 90 GradientGlowFilter outer 0
+8388607 90 GradientGlowFilter inner 820266535
+8388607 90 GradientBevelFilter inner 725405749
+8388607 30 DropShadowFilter error 2015
+8388607 30 DropShadowFilter inner 381277168
+8388607 30 BevelFilter inner error 2077
+8388607 30 GradientGlowFilter outer error 2015
+8388607 30 GradientGlowFilter inner 820266535
+8388607 30 GradientBevelFilter inner error 2077
+8388607 NaN DropShadowFilter error 2015
+8388607 NaN DropShadowFilter inner 381277168
+8388607 NaN BevelFilter inner 820266535
+8388607 NaN GradientGlowFilter outer error 2015
+8388607 NaN GradientGlowFilter inner 820266535
+8388607 NaN GradientBevelFilter inner 725405749
+8388900 0 DropShadowFilter 0
+8388900 0 DropShadowFilter inner 381277168
+8388900 0 BevelFilter inner 820266535
+8388900 0 GradientGlowFilter outer 0
+8388900 0 GradientGlowFilter inner 820266535
+8388900 0 GradientBevelFilter inner 725405749
+8388900 45 DropShadowFilter error 2015
+8388900 45 DropShadowFilter inner 381277168
+8388900 45 BevelFilter inner error 2077
+8388900 45 GradientGlowFilter outer error 2015
+8388900 45 GradientGlowFilter inner 820266535
+8388900 45 GradientBevelFilter inner error 2077
+8388900 90 DropShadowFilter 0
+8388900 90 DropShadowFilter inner 381277168
+8388900 90 BevelFilter inner 820266535
+8388900 90 GradientGlowFilter outer 0
+8388900 90 GradientGlowFilter inner 820266535
+8388900 90 GradientBevelFilter inner 725405749
+8388900 30 DropShadowFilter error 2015
+8388900 30 DropShadowFilter inner 381277168
+8388900 30 BevelFilter inner error 2077
+8388900 30 GradientGlowFilter outer error 2015
+8388900 30 GradientGlowFilter inner 820266535
+8388900 30 GradientBevelFilter inner error 2077
+8388900 NaN DropShadowFilter error 2015
+8388900 NaN DropShadowFilter inner 381277168
+8388900 NaN BevelFilter inner 820266535
+8388900 NaN GradientGlowFilter outer error 2015
+8388900 NaN GradientGlowFilter inner 820266535
+8388900 NaN GradientBevelFilter inner 725405749
+1000000000 0 DropShadowFilter 0
+1000000000 0 DropShadowFilter inner 381277168
+1000000000 0 BevelFilter inner 820266535
+1000000000 0 GradientGlowFilter outer 0
+1000000000 0 GradientGlowFilter inner 820266535
+1000000000 0 GradientBevelFilter inner 725405749
+1000000000 45 DropShadowFilter error 2015
+1000000000 45 DropShadowFilter inner 381277168
+1000000000 45 BevelFilter inner error 2077
+1000000000 45 GradientGlowFilter outer error 2015
+1000000000 45 GradientGlowFilter inner 820266535
+1000000000 45 GradientBevelFilter inner error 2077
+1000000000 90 DropShadowFilter 0
+1000000000 90 DropShadowFilter inner 381277168
+1000000000 90 BevelFilter inner 820266535
+1000000000 90 GradientGlowFilter outer 0
+1000000000 90 GradientGlowFilter inner 820266535
+1000000000 90 GradientBevelFilter inner 725405749
+1000000000 30 DropShadowFilter error 2015
+1000000000 30 DropShadowFilter inner 381277168
+1000000000 30 BevelFilter inner error 2077
+1000000000 30 GradientGlowFilter outer error 2015
+1000000000 30 GradientGlowFilter inner 820266535
+1000000000 30 GradientBevelFilter inner error 2077
+1000000000 NaN DropShadowFilter error 2015
+1000000000 NaN DropShadowFilter inner 381277168
+1000000000 NaN BevelFilter inner 820266535
+1000000000 NaN GradientGlowFilter outer error 2015
+1000000000 NaN GradientGlowFilter inner 820266535
+1000000000 NaN GradientBevelFilter inner 725405749
+2147483648 0 DropShadowFilter 0
+2147483648 0 DropShadowFilter inner 381277168
+2147483648 0 BevelFilter inner error 2077
+2147483648 0 GradientGlowFilter outer 0
+2147483648 0 GradientGlowFilter inner 820266535
+2147483648 0 GradientBevelFilter inner error 2077
+2147483648 45 DropShadowFilter error 2015
+2147483648 45 DropShadowFilter inner 381277168
+2147483648 45 BevelFilter inner error 2077
+2147483648 45 GradientGlowFilter outer error 2015
+2147483648 45 GradientGlowFilter inner 820266535
+2147483648 45 GradientBevelFilter inner error 2077
+2147483648 90 DropShadowFilter 0
+2147483648 90 DropShadowFilter inner 381277168
+2147483648 90 BevelFilter inner error 2077
+2147483648 90 GradientGlowFilter outer 0
+2147483648 90 GradientGlowFilter inner 820266535
+2147483648 90 GradientBevelFilter inner error 2077
+2147483648 30 DropShadowFilter error 2015
+2147483648 30 DropShadowFilter inner 381277168
+2147483648 30 BevelFilter inner error 2077
+2147483648 30 GradientGlowFilter outer error 2015
+2147483648 30 GradientGlowFilter inner 820266535
+2147483648 30 GradientBevelFilter inner error 2077
+2147483648 NaN DropShadowFilter error 2015
+2147483648 NaN DropShadowFilter inner 381277168
+2147483648 NaN BevelFilter inner error 2077
+2147483648 NaN GradientGlowFilter outer error 2015
+2147483648 NaN GradientGlowFilter inner 820266535
+2147483648 NaN GradientBevelFilter inner error 2077
+100000000000000000000 0 DropShadowFilter error 2015
+100000000000000000000 0 DropShadowFilter inner 381277168
+100000000000000000000 0 BevelFilter inner error 2077
+100000000000000000000 0 GradientGlowFilter outer error 2015
+100000000000000000000 0 GradientGlowFilter inner 820266535
+100000000000000000000 0 GradientBevelFilter inner error 2077
+100000000000000000000 45 DropShadowFilter error 2015
+100000000000000000000 45 DropShadowFilter inner 381277168
+100000000000000000000 45 BevelFilter inner error 2077
+100000000000000000000 45 GradientGlowFilter outer error 2015
+100000000000000000000 45 GradientGlowFilter inner 820266535
+100000000000000000000 45 GradientBevelFilter inner error 2077
+100000000000000000000 90 DropShadowFilter error 2015
+100000000000000000000 90 DropShadowFilter inner 381277168
+100000000000000000000 90 BevelFilter inner error 2077
+100000000000000000000 90 GradientGlowFilter outer error 2015
+100000000000000000000 90 GradientGlowFilter inner 820266535
+100000000000000000000 90 GradientBevelFilter inner error 2077
+100000000000000000000 30 DropShadowFilter error 2015
+100000000000000000000 30 DropShadowFilter inner 381277168
+100000000000000000000 30 BevelFilter inner error 2077
+100000000000000000000 30 GradientGlowFilter outer error 2015
+100000000000000000000 30 GradientGlowFilter inner 820266535
+100000000000000000000 30 GradientBevelFilter inner error 2077
+100000000000000000000 NaN DropShadowFilter error 2015
+100000000000000000000 NaN DropShadowFilter inner 381277168
+100000000000000000000 NaN BevelFilter inner error 2077
+100000000000000000000 NaN GradientGlowFilter outer error 2015
+100000000000000000000 NaN GradientGlowFilter inner 820266535
+100000000000000000000 NaN GradientBevelFilter inner error 2077
+Infinity 0 DropShadowFilter error 2015
+Infinity 0 DropShadowFilter inner 381277168
+Infinity 0 BevelFilter inner error 2077
+Infinity 0 GradientGlowFilter outer error 2015
+Infinity 0 GradientGlowFilter inner 820266535
+Infinity 0 GradientBevelFilter inner error 2077
+Infinity 45 DropShadowFilter error 2015
+Infinity 45 DropShadowFilter inner 381277168
+Infinity 45 BevelFilter inner error 2077
+Infinity 45 GradientGlowFilter outer error 2015
+Infinity 45 GradientGlowFilter inner 820266535
+Infinity 45 GradientBevelFilter inner error 2077
+Infinity 90 DropShadowFilter error 2015
+Infinity 90 DropShadowFilter inner 381277168
+Infinity 90 BevelFilter inner error 2077
+Infinity 90 GradientGlowFilter outer error 2015
+Infinity 90 GradientGlowFilter inner 820266535
+Infinity 90 GradientBevelFilter inner error 2077
+Infinity 30 DropShadowFilter error 2015
+Infinity 30 DropShadowFilter inner 381277168
+Infinity 30 BevelFilter inner error 2077
+Infinity 30 GradientGlowFilter outer error 2015
+Infinity 30 GradientGlowFilter inner 820266535
+Infinity 30 GradientBevelFilter inner error 2077
+Infinity NaN DropShadowFilter error 2015
+Infinity NaN DropShadowFilter inner 381277168
+Infinity NaN BevelFilter inner error 2077
+Infinity NaN GradientGlowFilter outer error 2015
+Infinity NaN GradientGlowFilter inner 820266535
+Infinity NaN GradientBevelFilter inner error 2077
+-Infinity 0 DropShadowFilter error 2015
+-Infinity 0 DropShadowFilter inner 381277168
+-Infinity 0 BevelFilter inner error 2077
+-Infinity 0 GradientGlowFilter outer error 2015
+-Infinity 0 GradientGlowFilter inner 820266535
+-Infinity 0 GradientBevelFilter inner error 2077
+-Infinity 45 DropShadowFilter error 2015
+-Infinity 45 DropShadowFilter inner 381277168
+-Infinity 45 BevelFilter inner error 2077
+-Infinity 45 GradientGlowFilter outer error 2015
+-Infinity 45 GradientGlowFilter inner 820266535
+-Infinity 45 GradientBevelFilter inner error 2077
+-Infinity 90 DropShadowFilter error 2015
+-Infinity 90 DropShadowFilter inner 381277168
+-Infinity 90 BevelFilter inner error 2077
+-Infinity 90 GradientGlowFilter outer error 2015
+-Infinity 90 GradientGlowFilter inner 820266535
+-Infinity 90 GradientBevelFilter inner error 2077
+-Infinity 30 DropShadowFilter error 2015
+-Infinity 30 DropShadowFilter inner 381277168
+-Infinity 30 BevelFilter inner error 2077
+-Infinity 30 GradientGlowFilter outer error 2015
+-Infinity 30 GradientGlowFilter inner 820266535
+-Infinity 30 GradientBevelFilter inner error 2077
+-Infinity NaN DropShadowFilter error 2015
+-Infinity NaN DropShadowFilter inner 381277168
+-Infinity NaN BevelFilter inner error 2077
+-Infinity NaN GradientGlowFilter outer error 2015
+-Infinity NaN GradientGlowFilter inner 820266535
+-Infinity NaN GradientBevelFilter inner error 2077
+-8388900 0 DropShadowFilter 0
+-8388900 0 DropShadowFilter inner 381277168
+-8388900 0 BevelFilter inner 820266535
+-8388900 0 GradientGlowFilter outer 0
+-8388900 0 GradientGlowFilter inner 820266535
+-8388900 0 GradientBevelFilter inner 725405749
+-8388900 45 DropShadowFilter error 2015
+-8388900 45 DropShadowFilter inner 381277168
+-8388900 45 BevelFilter inner error 2077
+-8388900 45 GradientGlowFilter outer error 2015
+-8388900 45 GradientGlowFilter inner 820266535
+-8388900 45 GradientBevelFilter inner error 2077
+-8388900 90 DropShadowFilter 0
+-8388900 90 DropShadowFilter inner 381277168
+-8388900 90 BevelFilter inner 820266535
+-8388900 90 GradientGlowFilter outer 0
+-8388900 90 GradientGlowFilter inner 820266535
+-8388900 90 GradientBevelFilter inner 725405749
+-8388900 30 DropShadowFilter error 2015
+-8388900 30 DropShadowFilter inner 381277168
+-8388900 30 BevelFilter inner error 2077
+-8388900 30 GradientGlowFilter outer error 2015
+-8388900 30 GradientGlowFilter inner 820266535
+-8388900 30 GradientBevelFilter inner error 2077
+-8388900 NaN DropShadowFilter error 2015
+-8388900 NaN DropShadowFilter inner 381277168
+-8388900 NaN BevelFilter inner 820266535
+-8388900 NaN GradientGlowFilter outer error 2015
+-8388900 NaN GradientGlowFilter inner 820266535
+-8388900 NaN GradientBevelFilter inner 725405749
+-1000000000 0 DropShadowFilter 0
+-1000000000 0 DropShadowFilter inner 381277168
+-1000000000 0 BevelFilter inner 820266535
+-1000000000 0 GradientGlowFilter outer 0
+-1000000000 0 GradientGlowFilter inner 820266535
+-1000000000 0 GradientBevelFilter inner 725405749
+-1000000000 45 DropShadowFilter error 2015
+-1000000000 45 DropShadowFilter inner 381277168
+-1000000000 45 BevelFilter inner error 2077
+-1000000000 45 GradientGlowFilter outer error 2015
+-1000000000 45 GradientGlowFilter inner 820266535
+-1000000000 45 GradientBevelFilter inner error 2077
+-1000000000 90 DropShadowFilter 0
+-1000000000 90 DropShadowFilter inner 381277168
+-1000000000 90 BevelFilter inner 820266535
+-1000000000 90 GradientGlowFilter outer 0
+-1000000000 90 GradientGlowFilter inner 820266535
+-1000000000 90 GradientBevelFilter inner 725405749
+-1000000000 30 DropShadowFilter error 2015
+-1000000000 30 DropShadowFilter inner 381277168
+-1000000000 30 BevelFilter inner error 2077
+-1000000000 30 GradientGlowFilter outer error 2015
+-1000000000 30 GradientGlowFilter inner 820266535
+-1000000000 30 GradientBevelFilter inner error 2077
+-1000000000 NaN DropShadowFilter error 2015
+-1000000000 NaN DropShadowFilter inner 381277168
+-1000000000 NaN BevelFilter inner 820266535
+-1000000000 NaN GradientGlowFilter outer error 2015
+-1000000000 NaN GradientGlowFilter inner 820266535
+-1000000000 NaN GradientBevelFilter inner 725405749
+NaN 0 DropShadowFilter error 2015
+NaN 0 DropShadowFilter inner 13302481
+NaN 0 BevelFilter inner 820266535
+NaN 0 GradientGlowFilter outer error 2015
+NaN 0 GradientGlowFilter inner 322122258
+NaN 0 GradientBevelFilter inner 725405749
+NaN 45 DropShadowFilter error 2015
+NaN 45 DropShadowFilter inner 13302481
+NaN 45 BevelFilter inner 820266535
+NaN 45 GradientGlowFilter outer error 2015
+NaN 45 GradientGlowFilter inner 322122258
+NaN 45 GradientBevelFilter inner 725405749
+NaN 90 DropShadowFilter error 2015
+NaN 90 DropShadowFilter inner 13302481
+NaN 90 BevelFilter inner 820266535
+NaN 90 GradientGlowFilter outer error 2015
+NaN 90 GradientGlowFilter inner 322122258
+NaN 90 GradientBevelFilter inner 725405749
+NaN 30 DropShadowFilter error 2015
+NaN 30 DropShadowFilter inner 13302481
+NaN 30 BevelFilter inner 820266535
+NaN 30 GradientGlowFilter outer error 2015
+NaN 30 GradientGlowFilter inner 322122258
+NaN 30 GradientBevelFilter inner 725405749
+NaN NaN DropShadowFilter error 2015
+NaN NaN DropShadowFilter inner 13302481
+NaN NaN BevelFilter inner 820266535
+NaN NaN GradientGlowFilter outer error 2015
+NaN NaN GradientGlowFilter inner 322122258
+NaN NaN GradientBevelFilter inner 725405749
+3 0 DropShadowFilter 584809927
+3 0 DropShadowFilter inner 280593969
+3 0 BevelFilter inner 237408026
+3 0 GradientGlowFilter outer 752165702
+3 0 GradientGlowFilter inner 747517641
+3 0 GradientBevelFilter inner 94216623
+3 90 DropShadowFilter 292344075
+3 90 DropShadowFilter inner 609503312
+3 90 BevelFilter inner 982697595
+3 90 GradientGlowFilter outer 171078005
+3 90 GradientGlowFilter inner 60812939
+3 90 GradientBevelFilter inner 221298171
+3 180 DropShadowFilter 288142413
+3 180 DropShadowFilter inner 289629085
+3 180 BevelFilter inner 145535264
+3 180 GradientGlowFilter outer 114716774
+3 180 GradientGlowFilter inner 502794040
+3 180 GradientBevelFilter inner 2343861
+3 NaN DropShadowFilter error 2015
+3 NaN DropShadowFilter inner 280593969
+3 NaN BevelFilter inner 237408026
+3 NaN GradientGlowFilter outer error 2015
+3 NaN GradientGlowFilter inner 747517641
+3 NaN GradientBevelFilter inner 94216623
+1000 180 DropShadowFilter 820266535
+1000 180 DropShadowFilter inner 381277168
+1000 180 BevelFilter inner 820266535
+1000 180 GradientGlowFilter outer 820266535
+1000 180 GradientGlowFilter inner 820266535
+1000 180 GradientBevelFilter inner 725405749
+rect 3 180 DropShadowFilter -5,-2,13,12
+rect 3 180 DropShadowFilter inner 0,0,8,10
+rect 3 180 BevelFilter inner 0,0,13,10
+rect 3 180 GradientGlowFilter outer -5,-2,13,12
+rect 3 180 GradientGlowFilter inner 0,0,8,10
+rect 3 180 GradientBevelFilter inner 0,0,13,10
+rect 3 270 DropShadowFilter -2,-5,12,13
+rect 3 270 DropShadowFilter inner 0,0,10,8
+rect 3 270 BevelFilter inner 0,0,10,13
+rect 3 270 GradientGlowFilter outer -2,-5,12,13
+rect 3 270 GradientGlowFilter inner 0,0,10,8
+rect 3 270 GradientBevelFilter inner 0,0,10,13
+rect 3 45 DropShadowFilter 0,0,12,12
+rect 3 45 DropShadowFilter inner 0,0,12,12
+rect 3 45 BevelFilter inner 0,0,12,12
+rect 3 45 GradientGlowFilter outer 0,0,12,12
+rect 3 45 GradientGlowFilter inner 0,0,12,12
+rect 3 45 GradientBevelFilter inner 0,0,12,12
+rect 1000 180 DropShadowFilter -1002,-2,1010,12
+rect 1000 180 DropShadowFilter inner 0,0,8,10
+rect 1000 180 BevelFilter inner 0,0,40,10
+rect 1000 180 GradientGlowFilter outer -1002,-2,1010,12
+rect 1000 180 GradientGlowFilter inner 0,0,8,10
+rect 1000 180 GradientBevelFilter inner 0,0,40,10
+rect 1000 270 DropShadowFilter -2,-1002,12,1010
+rect 1000 270 DropShadowFilter inner 0,0,10,8
+rect 1000 270 BevelFilter inner 0,0,10,40
+rect 1000 270 GradientGlowFilter outer -2,-1002,12,1010
+rect 1000 270 GradientGlowFilter inner 0,0,10,8
+rect 1000 270 GradientBevelFilter inner 0,0,10,40
+rect 1000 45 DropShadowFilter 0,0,717,717
+rect 1000 45 DropShadowFilter inner 0,0,40,40
+rect 1000 45 BevelFilter inner 0,0,40,40
+rect 1000 45 GradientGlowFilter outer 0,0,717,717
+rect 1000 45 GradientGlowFilter inner 0,0,40,40
+rect 1000 45 GradientBevelFilter inner 0,0,40,40
+rect 8388607 180 DropShadowFilter -8388609,-2,8388617,12
+rect 8388607 180 DropShadowFilter inner 0,0,8,10
+rect 8388607 180 BevelFilter inner 0,0,40,10
+rect 8388607 180 GradientGlowFilter outer -8388609,-2,8388617,12
+rect 8388607 180 GradientGlowFilter inner 0,0,8,10
+rect 8388607 180 GradientBevelFilter inner 0,0,40,10
+rect 8388607 45 DropShadowFilter 0,0,5931650,5931650
+rect 8388607 45 DropShadowFilter inner 0,0,40,40
+rect 8388607 45 BevelFilter inner 0,0,40,40
+rect 8388607 45 GradientGlowFilter outer 0,0,5931650,5931650
+rect 8388607 45 GradientGlowFilter inner 0,0,40,40
+rect 8388607 45 GradientBevelFilter inner 0,0,40,40
+rect 8388609 180 DropShadowFilter -8388611,-2,8388619,12
+rect 8388609 180 DropShadowFilter inner 0,0,8,10
+rect 8388609 180 BevelFilter inner 0,0,40,10
+rect 8388609 180 GradientGlowFilter outer -8388611,-2,8388619,12
+rect 8388609 180 GradientGlowFilter inner 0,0,8,10
+rect 8388609 180 GradientBevelFilter inner 0,0,40,10
+rect 8388609 45 DropShadowFilter 0,0,5931652,5931652
+rect 8388609 45 DropShadowFilter inner 0,0,40,40
+rect 8388609 45 BevelFilter inner 0,0,40,40
+rect 8388609 45 GradientGlowFilter outer 0,0,5931652,5931652
+rect 8388609 45 GradientGlowFilter inner 0,0,40,40
+rect 8388609 45 GradientBevelFilter inner 0,0,40,40
+rect 8388900 180 DropShadowFilter -8388866,-2,8388874,12
+rect 8388900 180 DropShadowFilter inner 0,0,8,10
+rect 8388900 180 BevelFilter inner 0,0,40,10
+rect 8388900 180 GradientGlowFilter outer -8388866,-2,8388874,12
+rect 8388900 180 GradientGlowFilter inner 0,0,8,10
+rect 8388900 180 GradientBevelFilter inner 0,0,40,10
+rect 8388900 45 DropShadowFilter 0,0,5931858,5931858
+rect 8388900 45 DropShadowFilter inner 0,0,40,40
+rect 8388900 45 BevelFilter inner 0,0,40,40
+rect 8388900 45 GradientGlowFilter outer 0,0,5931858,5931858
+rect 8388900 45 GradientGlowFilter inner 0,0,40,40
+rect 8388900 45 GradientBevelFilter inner 0,0,40,40
+inner rect GlowFilter inner 0,0,14,15 32,31,8,9 134217727,134217727,0,0
+inner rect GlowFilter -2,-1,16,16 32,31,12,13 134217723,134217723,8,8
+inner rect DropShadowFilter 2,3,12,12 36,35,8,9 134217727,134217727,4,4
+inner rect DropShadowFilter inner 2,3,12,12 36,35,4,5 134217727,134217727,0,0
+inner rect BevelFilter outer -2,-1,16,16 32,31,12,13 134217723,134217723,8,8
+inner rect BevelFilter full -2,-1,16,16 32,31,12,13 134217723,134217723,8,8
+inner rect BevelFilter inner 0,0,14,15 32,31,8,9 134217727,134217727,0,0
+inner rect GradientGlowFilter full 2,3,12,12 36,35,8,9 134217727,134217727,4,4
+inner rect GradientGlowFilter inner 2,3,12,12 36,35,4,5 134217727,134217727,0,0
+inner rect GradientBevelFilter outer -2,-1,16,16 32,31,12,13 134217723,134217723,8,8
+inner rect GlowFilter inner 1,2,10,10 35,34,5,6 134217727,134217727,0,0
+stops 0,0,255 | 1,1,1 | 0,128,255 | 739240701
+stops 0,255 | 0,1 | 0,255 | 807961518
+stops 0,255,65280 | 1,1,1 | 0,0,255 | 889580183
+stops 16711680,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0 | 1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0 | 255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0 | 974277249
+draw NaN  shape 0,10,4,4 bitmap 0,10,4,4 shape 10,0,4,4 bitmap 10,0,4,4 scaled 0,3,8,8
+draw Infinity  shape 0,10,4,4 bitmap 0,10,4,4 shape 10,0,4,4 bitmap 10,0,4,4 scaled 0,0,0,0
+draw -Infinity  shape 0,10,4,4 bitmap 0,10,4,4 shape 10,0,4,4 bitmap 10,0,4,4 scaled 0,0,0,0
+draw 1e+300  shape 0,10,4,4 bitmap 0,10,4,4 shape 10,0,4,4 bitmap 10,0,4,4 scaled 0,0,0,0
+draw 100000000000000000000  shape 0,10,4,4 bitmap 0,10,4,4 shape 10,0,4,4 bitmap 10,0,4,4 scaled 0,0,0,0
+draw 4294967298  shape 0,10,4,4 bitmap 0,10,4,4 shape 10,0,4,4 bitmap 10,0,4,4 scaled 0,0,0,0
+draw 2147483648  shape 0,10,4,4 bitmap 0,10,4,4 shape 10,0,4,4 bitmap 10,0,4,4 scaled 0,0,0,0
+draw 107374184  shape 0,10,4,4 bitmap 0,10,4,4 shape 10,0,4,4 bitmap 10,0,4,4 scaled 0,0,0,0
+draw 107374182.4  shape 0,10,4,4 bitmap 0,10,4,4 shape 10,0,4,4 bitmap 10,0,4,4 scaled 0,0,0,0
+draw 107374181  shape 0,10,3,4 bitmap 0,10,3,4 shape 10,0,4,3 bitmap 10,0,4,3 scaled 0,0,0,0
+draw 107374180  shape 0,10,2,4 bitmap 0,10,2,4 shape 10,0,4,2 bitmap 10,0,4,2 scaled 0,0,0,0
+draw 100000000  shape 0,0,0,0 bitmap 0,0,0,0 shape 0,0,0,0 bitmap 0,0,0,0 scaled 0,0,0,0
+draw -100000000  shape 0,0,0,0 bitmap 0,0,0,0 shape 0,0,0,0 bitmap 0,0,0,0 scaled 0,0,0,0
+draw -107374181  shape 1,10,5,4 bitmap 1,10,5,4 shape 10,1,4,5 bitmap 10,1,4,5 scaled 0,0,0,0
+draw -107374182.5  shape 0,10,4,4 bitmap 0,10,4,4 shape 10,0,4,4 bitmap 10,0,4,4 scaled 0,0,0,0
+draw -1e+300  shape 0,10,4,4 bitmap 0,10,4,4 shape 10,0,4,4 bitmap 10,0,4,4 scaled 0,0,0,0
+draw 2.5  shape 2,10,5,4 bitmap 2,10,5,4 shape 10,2,4,5 bitmap 10,2,4,5 scaled 2,3,8,8
+hitTest 2147483639  x false y false rect false second false bitmap error 1508 bitmap y error 1508 x error 1508 y error 1508 rect error 1508 second false bitmap error 1508 bitmap y error 1508
+hitTest 2147483640  x error 1508 y false rect error 1508 second false bitmap error 1508 bitmap y error 1508 x error 1508 y error 1508 rect error 1508 second false bitmap error 1508 bitmap y error 1508
+hitTest 2147483642  x error 1508 y false rect error 1508 second false bitmap error 1508 bitmap y error 1508 x error 1508 y error 1508 rect error 1508 second false bitmap error 1508 bitmap y error 1508
+hitTest 2147483643  x error 1508 y error 1508 rect error 1508 second false bitmap error 1508 bitmap y error 1508 x error 1508 y error 1508 rect error 1508 second false bitmap error 1508 bitmap y error 1508
+hitTest 2147483547  x false y false rect false second false bitmap false bitmap y false x false y false rect false second false bitmap false bitmap y false
+hitTest 2147483548  x false y false rect false second false bitmap error 1508 bitmap y false x error 1508 y false rect error 1508 second false bitmap error 1508 bitmap y false
+hitTest 2147483617  x false y false rect false second false bitmap error 1508 bitmap y false x error 1508 y false rect error 1508 second false bitmap error 1508 bitmap y false
+hitTest 2147483618  x false y false rect false second false bitmap error 1508 bitmap y error 1508 x error 1508 y error 1508 rect error 1508 second false bitmap error 1508 bitmap y error 1508
+hitTest 2147483648  x false y false rect false second false bitmap false bitmap y false x false y false rect false second false bitmap false bitmap y false
+hitTest NaN  x false y false rect false second false bitmap false bitmap y false x false y false rect false second false bitmap false bitmap y false
+hitTest -2147483648  x false y false rect false second false bitmap false bitmap y false x false y false rect false second false bitmap false bitmap y false
