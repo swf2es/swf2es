@@ -156,6 +156,24 @@ function placeOffset(offset: Float32Array, f: FilterRecord, distance: number, un
 }
 
 /**
+ * The furthest a shadow, bevel or gradient filter is padded for its
+ * distance, in stage pixels: as far as Flash's authoring tools set one.
+ * The texture a filter draws into is the object and its padding twice over
+ * at the target's resolution, four times the stage's at high quality, and
+ * WebGL refuses one past its maximum, ending the frame: a distance of 1e9
+ * or Infinity, or the -8388866 generateFilterRect makes of NaN, asked for
+ * one past any GPU's. A shadow cast further is cut there, the object drawn
+ * as ever; where adl draws such a shadow at all it wraps it round in its
+ * own arithmetic.
+ */
+const MAX_DISTANCE = 255;
+
+/** A distance as far as it pads: NaN none, past MAX_DISTANCE that, either way. */
+function paddedDistance(distance: number): number {
+  return Number.isNaN(distance) ? 0 : Math.max(-MAX_DISTANCE, Math.min(MAX_DISTANCE, distance));
+}
+
+/**
  * A filter run at the target's resolution, its blurs and distances in
  * pixels of the stage: an object scaled up has its glow reach no further,
  * and a stage a host shows three times its size has it reach three times
@@ -304,7 +322,7 @@ class GlowFilter extends BlurredFilter {
         },
       },
     });
-    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance);
+    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(paddedDistance(distance));
     this.padding = Math.ceil(this.reach);
     this.distance = distance;
   }
@@ -409,7 +427,7 @@ class BevelFilter extends BlurredFilter {
         },
       },
     });
-    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance);
+    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(paddedDistance(distance));
     this.padding = Math.ceil(this.reach);
   }
 
@@ -556,7 +574,13 @@ class GradientFilter extends BlurredFilter {
     });
     this.gradient = gradient;
     // The rect's growth each way, as applyFilter's: left, top, right, bottom.
-    const rect = filterRect({ x: 0, y: 0, width: 1, height: 1 }, f);
+    const rect = filterRect(
+      { x: 0, y: 0, width: 1, height: 1 },
+      {
+        ...f,
+        distance: paddedDistance(f.distance),
+      },
+    );
     this.grows = [-rect.x, -rect.y, rect.x + rect.width - 1, rect.y + rect.height - 1];
     this.reach = Math.max(...this.grows) + 1;
     this.padding = this.reach;

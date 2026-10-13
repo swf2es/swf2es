@@ -5019,6 +5019,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Display objects with a shadow, bevel or gradient filter cast past what adl holds
+    // (scripts/FilterFar.as): the GPU's padding stays what can be drawn.
+    name: "filter-far",
+    swf: (abc) => bare(abc, 1, "Main", 80, 60),
+    script: "FilterFar",
+    frames: 2,
+    capture: [2],
+    tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
     // A shadow's and a bevel's distance past what adl holds, and NaN; inner filters'
     // rects; draw's matrix past the int's range; hitTest's points near it.
     name: "filter-distances",
