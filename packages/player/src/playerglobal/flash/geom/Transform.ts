@@ -1,7 +1,8 @@
 // flash.geom.Transform: a display object's matrix and color transform as
 // flash.geom's Matrix and ColorTransform, copies each time, as Flash gives
 // them, and set from either; and its 3D transform and perspective
-// projection, kept and reported as Flash's, though not drawn in perspective.
+// projection, kept and reported as Flash's, and drawn in perspective
+// (display/perspective.ts).
 import type { Matrix as Linear } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { boundsIn, toStage } from "../../../display/bounds.js";
@@ -229,6 +230,8 @@ export function transformNatives(s: Scripting): avm2.Natives {
 
     set perspectiveProjection(v: Value) {
       this.$display.projection = v ? projectionFrom(s, v as AsObject) : null;
+      // What is in it is drawn through it.
+      this.$display.invalidate(TRANSFORM);
     }
 
     /** The bounds on the stage, out to whole pixels. */

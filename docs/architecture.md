@@ -3035,11 +3035,80 @@ touch. A `PerspectiveProjection` of its own measures 500 pixels wide;
 one a transform gives reads and writes its object's, as Flash's does,
 which keeps the field of view in radians, the stage's 500 wide and the
 others' as wide as the stage; the stage and each SWF's root always have
-one, back to their defaults when set to null. The player keeps all this
-but does not draw in perspective: a 3D object draws, bounds and hits as
-its matrix3D's x and y rows, and `local3DToGlobal` and `globalToLocal3D`
-are not implemented. `transform.pixelBounds` is the bounds on the stage
-out to whole pixels.
+one, back to their defaults when set to null. `transform.pixelBounds` is
+the bounds on the stage out to whole pixels.
+
+### 3D display objects
+
+A 3D object is drawn, bounded and hit in perspective, as Flash Player 32
+(PepperFlash) and adl draw it (`display/perspective.ts`). Its projection is
+that of the nearest container above it with one set on its transform, or
+else its SWF's root's, or the stage's for one on the stage: the centre in
+that container's own space, the root's at the stage's centre, and the
+focal length the field of view's over the stage's width. Its matrix3D,
+those of the 3D objects above it and the 2D matrices between go into one
+3D transform to the container's space, which the projection divides, a
+point at depth z drawn at f / (f + z) of its distance from the centre: a
+3D object in another is in one 3D space with it, not flattened into the
+other's plane (the `three-d-scene` case's green card in the blue). Each
+object's plane is then a projective map of its space to that container's,
+and a 3D object's `placed` matrix is its plane in its parent's, the
+parent's inverse after its own: a `Projective` matrix, whose third row
+`geometry.ts`'s functions divide by, so bounds, hit tests, the pointer's
+pick, `mouseX`, `localToGlobal` and `globalToLocal` follow it as they
+follow any matrix, and 2D objects pay one test. It is kept on the object
+until anything is invalidated, as an ancestor's move changes it.
+`local3DToGlobal` projects a point of the object's 3D space so, which
+Flash reports to a quarter pixel; `globalToLocal3D` is the point of the
+object's plane under the stage's, at z 0.
+
+Bounds through a plane are out to whole pixels, as Flash reports them:
+a turned card's `width` is its drawn width (`three-d-flip`); Flash's are a
+pixel smaller here and there, as if its corners were nearer whole pixels
+than doubles put them, which the cases leave untraced. An object with a
+corner of its bounds at or behind the eye (f + z at most 0) Flash draws
+none of, takes no hit on and counts in no bounds; its own bounds are an
+empty rectangle at the origin. `hitTestPoint` without the shape flag
+tests the box around what is drawn on the stage, and the pointer picks
+where the plane is drawn (`pointer.test.ts`, against Flash Player 32's
+traces). Siblings are drawn in the list's order, whatever their depths.
+A 3D mask masks nothing, and is not drawn.
+
+Flash draws a 3D object from a bitmap of what it and its children draw in
+its own space, a texel a pixel of that space whatever its scale, its
+parent's or the stage's zoom, then draws the bitmap smoothed through its
+plane; so a 3D object scaled up is blurred, a texel magnified, where a 2D
+child scaled up inside it is sharp, and its filters are in its space and
+turn with it. The view does the same (`render/three.ts`): the object's
+container is in a holder of its own, drawn before the stage into a
+texture of the object's bounds (filters' reach included) out to whole
+pixels, at 4 samples a side halved down to a texel a pixel as the stage's
+edges are anti-aliased, with a texel of nothing around; in its place in
+its parent is a quad of the texture's four corners, each with the w its
+plane gives it, so that the GPU interpolates in perspective. A 3D object
+in another draws its quad into the other's bitmap, by its plane in the
+other's space, so the two are drawn deepest first. Its hairlines are a
+pixel of its own space. The bitmap is drawn again only when what is in
+it changes, not as the object moves or turns. As adl and Flash Player
+measure it, the bitmap is drawn a texel wider and taller than it is,
+about its centre and half a stage pixel right and down, which at a texel
+a pixel keeps its left and top edges in place; and sampled once a pixel
+of the stage, at the pixel's centre, which the shader does for each of
+the target's samples of the pixel where the host says how many there are
+(`screenScale`), as the test page does. A mask set on a 3D object clips
+its quad on the stage, where Flash clips the bitmap in the object's
+space; a blend mode composites within the bitmap. Under WebGPU, which the
+quad's shader has no program for, a 3D object draws as its matrix3D's x
+and y rows.
+
+adl draws through a focal length for a stage 500 wide whatever the SWF's,
+and a projection set on the root as if it were not, where Flash Player
+draws as its bounds and `local3DToGlobal` say, in both: the player follows
+Flash Player, and the `three-d-*` cases, whose references adl draws, have
+stages 500 wide and leave the root's projection alone. Flash's
+anti-aliasing of the bitmap's edges and its hairlines' place in it (a
+pixel's row, where the view straddles two) differ by a level or a pixel
+at edges, within the cases' tolerance.
 
 ### Nine-slice scaling
 

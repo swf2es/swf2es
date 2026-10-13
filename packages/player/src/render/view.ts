@@ -19,7 +19,8 @@ import {
   Sprite,
 } from "pixi.js";
 import { BitmapStore } from "../bitmap/bitmap.js";
-import { toStage } from "../display/bounds.js";
+import { filterRect } from "../bitmap/filters.js";
+import { bounds, toStage } from "../display/bounds.js";
 import { concatColor, multipliesOnly, sameColor } from "../display/color.js";
 import {
   BitmapObject,
@@ -79,6 +80,10 @@ import {
 } from "./strokes.js";
 import { destroyContext, fillContext, type Painter, paint, SharedFills } from "./tessellate.js";
 import { drawStaticText, drawText } from "./text.js";
+import { Plane, SAMPLES } from "./three.js";
+
+/** No transform, for a 3D object's container in its bitmap's space. */
+const IDENTITY_PLACE = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
 
 /** No transform, for a Graphics kept to be taken again (recycle). */
 const IDENTITY = new Matrix();
@@ -213,6 +218,8 @@ interface Node {
   /** Its filters' records as of the last sync, and the Pixi filters made of them, its own. */
   filterRecords: readonly FilterRecord[];
   filters: Filter[];
+  /** A 3D object's bitmap and quad (render/three.ts), which it is drawn by in its parent; null for any other. */
+  plane: Plane | null;
   /** Draws in this branch, excluding those already isolated in a child render group. */
   draws: number;
   /** Zero draws, one safe draw, or more than one draw/one requiring isolation. */
@@ -325,6 +332,10 @@ export class PixiView {
     const m = fill.matrix;
     return { texture, matrix: new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty), textureSpace: "global" };
   };
+  /** The nodes of 3D objects, each drawn into its bitmap before the stage is drawn (renderPlanes). */
+  private readonly planes = new Set<Node>();
+  /** Whether the sync is in a 3D object, whose content is drawn a texel a pixel of its own space. */
+  private inPlane = false;
   /** Whether the renderer was found to lack the back buffer that filter-backed blends read. */
   private backBufferChecked = false;
 
@@ -733,6 +744,10 @@ export class PixiView {
 
   /** Destroy what this fresh view built, and its containers; what it borrowed stays its owner's. */
   dispose(root: PixiContainer): void {
+    for (const node of this.planes) {
+      this.dropPlane(node);
+    }
+
     root.destroy({ children: true });
     for (const context of this.built) {
       destroyContext(context);
@@ -785,6 +800,7 @@ export class PixiView {
         blend: "normal",
         filterRecords: NO_RECORDS,
         filters: [],
+        plane: null,
         draws: 0,
         singleDraw: 0,
         directBlend: null,
@@ -1317,6 +1333,7 @@ export class PixiView {
     node.released = true;
     this.clearing.delete(node);
     this.overOpaque.delete(node);
+    this.dropPlane(node);
     this.listSpare(node);
     const group = node.container.isRenderGroup ? node.container.renderGroup : null;
     if (group) {
@@ -1553,7 +1570,26 @@ export class PixiView {
   ): PixiContainer {
     const node = this.node(o);
     const { container } = node;
+    // A 3D object's content is drawn in its own space into its bitmap, which its plane then
+    // places (render/three.ts); a mask, which Flash draws by no plane, and the root of a
+    // BitmapData's draw, which its matrix places, go by its matrix3D's x and y rows.
+    const three =
+      o.space !== null &&
+      o !== this.drawRoot &&
+      this.renderer.type !== RendererType.WEBGPU &&
+      !(inMask || o.maskOf !== null || o.clipDepth > 0);
+    const outside = this.inPlane;
+    if (three) {
+      own = IDENTITY_PLACE;
+      parent = UNIT;
+      this.inPlane = true;
+    } else if (o.space && o !== this.drawRoot) {
+      own = o.flatPlaced;
+    }
+
     let dirty = this.fresh ? TRANSFORM | CHILDREN | CONTENT : o.dirty;
+    // What a 3D object's bitmap shows changes with what is in it, not with its own transform.
+    let redrawn = three && o instanceof Container && o.descendantsDirty;
     if (node.released) {
       // Back from off the list: drawn again if its art was emptied, its transform as if unknown, so
       // that it and all below draw their lines again; a parked one has kept its own. Its children,
@@ -1591,7 +1627,8 @@ export class PixiView {
     if (dirty & TRANSFORM) {
       const m = own;
       container.setFromMatrix(PLACED.set(m.a, m.b, m.c, m.d, m.tx, m.ty));
-      container.visible = o.visible || masking;
+      // A 3D mask masks nothing in Flash, and is not drawn.
+      container.visible = (o.visible || masking) && !(o.maskOf && o.space);
       // A blend mode composites the object as a layer (render/blend.ts); a mask is its fills alone.
       // Its filters, then its blend: adl filters the object, then blends what they make.
       const blend = masking ? "normal" : o.blendMode;
@@ -1602,6 +1639,7 @@ export class PixiView {
         records !== node.filterRecords && !sameFilterRecords(records, node.filterRecords);
       node.filterRecords = records;
       if (blend !== node.blend || refiltered) {
+        redrawn = true;
         node.blend = blend;
         for (const f of node.filters) {
           f.destroy();
@@ -1863,6 +1901,12 @@ export class PixiView {
       this.checkBackBuffer();
     }
 
+    this.inPlane = outside;
+    if (three || node.plane) {
+      redrawn ||= (dirty & ~TRANSFORM) !== 0 || recolor || remask || this.rescaled;
+      return this.planeOf(o, node, three, redrawn);
+    }
+
     return container;
   }
 
@@ -1936,6 +1980,133 @@ export class PixiView {
         return this.renderer.type === RendererType.WEBGL && !this.stageClear ? "subtract" : null;
       default:
         return null;
+    }
+  }
+
+  /**
+   * What a 3D object is drawn by in its parent, its quad, which takes its
+   * container's place, the container going into the plane's holder; and
+   * the container again for one no longer drawn in 3D. A mask set on it
+   * clips the quad, on the stage.
+   */
+  private planeOf(o: DisplayObject, node: Node, three: boolean, redrawn: boolean): PixiContainer {
+    const { container } = node;
+    let plane = node.plane;
+    if (!three) {
+      const quad = plane?.quad;
+      const parent = quad?.parent;
+      if (quad && parent) {
+        parent.addChildAt(container, parent.getChildIndex(quad));
+      }
+
+      this.dropPlane(node);
+      return container;
+    }
+
+    if (!plane) {
+      plane = new Plane();
+      node.plane = plane;
+      this.planes.add(node);
+    }
+
+    const quad = plane.quad;
+    if (container.parent !== plane.holder) {
+      const parent = container.parent;
+      if (parent) {
+        parent.addChildAt(quad, parent.getChildIndex(container));
+      }
+
+      plane.holder.addChild(container);
+    }
+
+    if (container.mask) {
+      quad.mask = container.mask;
+      container.mask = null;
+    } else if (!o.mask) {
+      quad.mask = null;
+    }
+
+    plane.stale ||= redrawn;
+    return quad;
+  }
+
+  /** A 3D object's plane let go of, its container on no list. */
+  private dropPlane(node: Node): void {
+    const plane = node.plane;
+    if (!plane) {
+      return;
+    }
+
+    plane.destroy();
+    node.plane = null;
+    this.planes.delete(node);
+  }
+
+  /**
+   * Each 3D object's quad placed by its plane in perspective, which moves
+   * as anything above it does, and its bitmap drawn again where it may
+   * have changed: those in another first, as the other's bitmap draws
+   * their quads. One with a corner behind the eye is not drawn.
+   */
+  private renderPlanes(): void {
+    if (this.planes.size === 0) {
+      return;
+    }
+
+    const drawn: { depth: number; node: Node; o: DisplayObject }[] = [];
+    for (const node of this.planes) {
+      const o = node.owner.deref();
+      if (!o || !node.plane) {
+        this.dropPlane(node);
+        continue;
+      }
+
+      if (node.released) {
+        continue;
+      }
+
+      let depth = 0;
+      for (let p = o.parent; p; p = p.parent) {
+        depth += p.space ? 1 : 0;
+      }
+
+      drawn.push({ depth, node, o });
+    }
+
+    drawn.sort((a, b) => b.depth - a.depth);
+    // The target's pixels a side of a pixel of Flash's, which the quad samples once: in another's
+    // bitmap, its samples; on the stage, a pixel of the screen, where the host says what that is.
+    const scale = this.stage.scale.x;
+    const onStage = this.fresh
+      ? this.samples
+      : this.screenScale
+        ? ((this.renderer.resolution ?? 1) * (Number.isFinite(scale) && scale > 0 ? scale : 1)) /
+          this.screenScale
+        : 1;
+    for (const { depth, node, o } of drawn) {
+      const plane = node.plane as Plane;
+      const r = bounds(o, true);
+      let shown = false;
+      if (r && node.container.visible) {
+        let rect = { x: r.xMin, y: r.yMin, width: r.xMax - r.xMin, height: r.yMax - r.yMin };
+        for (const f of node.filterRecords) {
+          rect = filterRect(rect, f);
+        }
+
+        shown = plane.place(
+          o.placed,
+          rect.x,
+          rect.y,
+          rect.x + rect.width,
+          rect.y + rect.height,
+          depth > 0 ? SAMPLES : onStage,
+        );
+      }
+
+      plane.quad.visible = shown;
+      if (shown) {
+        plane.draw(this.renderer);
+      }
     }
   }
 
@@ -2139,7 +2310,8 @@ export class PixiView {
    * the object or above it, Pixi could not draw: it is left out.
    */
   private clip(o: DisplayObject, node: Node): boolean {
-    const mask = o.mask && !o.maskOf && !o.mask.encloses(o) ? o.mask : null;
+    // A 3D mask masks nothing in Flash.
+    const mask = o.mask && !o.maskOf && !o.mask.encloses(o) && !o.mask.space ? o.mask : null;
     node.container.mask = mask ? this.node(mask).container : null;
     if (mask) {
       this.maskees.add(o.ref);
@@ -2217,7 +2389,8 @@ export class PixiView {
   /** Bring the stage up to date with `root`'s display list, without drawing. */
   /** The thinnest line, in stage pixels: a pixel of the screen. */
   private get leastWidth(): number {
-    return this.fresh ? 1 : 1 / (this.screenScale ?? this.renderer.resolution ?? 1);
+    // In a 3D object's bitmap, a pixel of its own space, as Flash draws a hairline there.
+    return this.fresh || this.inPlane ? 1 : 1 / (this.screenScale ?? this.renderer.resolution ?? 1);
   }
 
   /**
@@ -2225,7 +2398,7 @@ export class PixiView {
    * the stage larger has them reach as much further on the screen, as Flash Player's do.
    */
   private get filterUnits(): number {
-    const units = this.fresh ? this.samples : this.stage.scale.x;
+    const units = this.inPlane ? SAMPLES : this.fresh ? this.samples : this.stage.scale.x;
     // A stage scaled to nothing filters at a unit a pixel rather than not at all.
     return Number.isFinite(units) && units > 0 ? units : 1;
   }
@@ -2289,6 +2462,9 @@ export class PixiView {
       this.unloadsSeen = unloads.count;
       this.dropSpares();
     }
+
+    // Their bitmaps are drawn now, as a host may draw the stage itself after.
+    this.renderPlanes();
   }
 
   /**
@@ -2363,6 +2539,7 @@ export class PixiView {
       const masks = new PixiContainer();
       scaled.addChild(node, masks);
       view.placeMasks(o, masks);
+      view.renderPlanes();
       scaled.scale.set(n);
       this.renderer.render({ container: scaled, target, clear: true });
     } catch (error) {

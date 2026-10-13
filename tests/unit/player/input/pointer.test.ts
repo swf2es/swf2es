@@ -1628,3 +1628,75 @@ test("a sprite's hitArea elsewhere on the list is picked for it however long bot
   setHitArea(owner, null);
   assert.equal(pick(110, 30), stage);
 });
+
+// A card turned 60 degrees about y, nearer on its right, over a sprite as
+// large as the stage: the stage traces where each mouse event lands.
+const PERSPECTIVE_SOURCE = `package {
+  import flash.display.Sprite;
+  import flash.events.MouseEvent;
+
+  public class MousePerspective extends Sprite {
+    private var card:Sprite;
+
+    public function MousePerspective() {
+      var back:Sprite = new Sprite();
+      back.name = "back";
+      back.graphics.beginFill(0xdddddd);
+      back.graphics.drawRect(0, 0, 500, 400);
+      addChild(back);
+      card = new Sprite();
+      card.name = "card";
+      card.graphics.beginFill(0x3366cc);
+      card.graphics.drawRect(-60, -80, 120, 160);
+      card.x = 330;
+      card.y = 200;
+      card.rotationY = 60;
+      addChild(card);
+      for each (var type:String in ["mouseMove", "mouseDown", "click"]) {
+        stage.addEventListener(type, heard);
+      }
+    }
+
+    private function heard(e:MouseEvent):void {
+      trace(e.type, e.target.name, Math.round(e.localX) + "," + Math.round(e.localY),
+        card.hitTestPoint(e.stageX, e.stageY, true), card.hitTestPoint(e.stageX, e.stageY, false));
+    }
+  }
+}`;
+
+test("a card turned in 3D takes the pointer where it is drawn in perspective", {
+  skip,
+}, async () => {
+  const wasm = await WebAssembly.compile(
+    await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
+  );
+  const abc = compileScripts([{ name: "MousePerspective", source: PERSPECTIVE_SOURCE }], out).get(
+    "MousePerspective",
+  ) as Uint8Array;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(abc, 1, "MousePerspective", 500, 400), scripting);
+  await player.start();
+  const pointer = player.pointer;
+  assert.ok(pointer);
+  const input = (type: "move" | "down" | "up", x: number, y: number): string[] => {
+    pointer.handle(type, { x, y, button: 0, buttons: type === "down" ? 1 : 0 });
+    return lines.splice(0);
+  };
+
+  // What Flash Player 32 traced for the same input (PepperFlash in Electron, driven over the
+  // DevTools protocol). The card's plane runs from x 295 to 373 on the stage, its nearer right
+  // edge from y 110 to 290: drawn without perspective it would be x 300 to 360, y 120 to 280.
+  assert.deepEqual(input("move", 330, 200), ["mouseMove card 0,0 true true"]);
+  assert.deepEqual(input("move", 370, 200), ["mouseMove card 56,0 true true"]);
+  assert.deepEqual(input("move", 298, 125), ["mouseMove back 298,125 false true"]);
+  assert.deepEqual(input("move", 365, 115), ["mouseMove card 49,-77 true true"]);
+  assert.deepEqual(input("move", 250, 200), ["mouseMove back 250,200 false false"]);
+  assert.deepEqual(input("move", 372, 150), ["mouseMove card 58,-45 true true"]);
+  assert.deepEqual(input("down", 370, 200), [
+    "mouseMove card 56,0 true true",
+    "mouseDown card 56,0 true true",
+  ]);
+  assert.deepEqual(input("up", 370, 200), ["click card 56,0 true true"]);
+});

@@ -110,6 +110,8 @@
     "flash.display::DisplayObject#getBounds",
     "flash.display::DisplayObject#getRect",
     "flash.display::DisplayObject#globalToLocal",
+    "flash.display::DisplayObject#globalToLocal3D",
+    "flash.display::DisplayObject#local3DToGlobal",
     "flash.display::DisplayObject#localToGlobal",
     "flash.display::DisplayObject#set:accessibilityProperties",
     "flash.display::DisplayObject#set:alpha",

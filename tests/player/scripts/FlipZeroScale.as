@@ -135,7 +135,7 @@ package {
       back.transform.matrix3D = null;
       step("matrix3D null", back, true);
 
-      // Under a 3D parent, on the list but not drawn: the player draws no perspective.
+      // Under a 3D parent, on the list but not drawn.
       var parent:Sprite = new Sprite();
       parent.rotationY = 30;
       parent.visible = false;

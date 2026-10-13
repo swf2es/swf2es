@@ -6020,8 +6020,9 @@ export const cases: PlayerCase[] = [
     script: "FlipZeroScale",
     frames: 1,
     capture: [1],
-    tolerance: 0,
-    // Flash smooths the edges of the two boxes it draws as 3D objects, a pixel round each.
+    // The two boxes it draws as 3D objects, both drawn from a bitmap, smoothed: their edges'
+    // levels differ by a little (render/three.ts).
+    tolerance: 24,
     maxOutliers: 250,
   },
   {
