@@ -2,7 +2,7 @@
 // them, over the player's render-ordered list.
 import { avm2 } from "@swf2es/runtime";
 import { hitsOwnPoint } from "../../../display/bounds.js";
-import { Container, type DisplayObject, MovieClip } from "../../../display/display.js";
+import { Container, type DisplayObject, MovieClip, pickWork } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
@@ -221,6 +221,7 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     set mouseChildren(v: Value) {
       this.$mouseChildren = !!v;
+      pickWork.changes++;
     }
 
     declare $tabChildren: boolean | undefined;

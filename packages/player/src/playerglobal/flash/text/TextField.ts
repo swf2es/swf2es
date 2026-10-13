@@ -4,7 +4,7 @@
 import { avm2 } from "@swf2es/runtime";
 import { CONTENT, type TextObject } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
-import { GUTTER, lineOf, shownLines } from "../../../text/layout.js";
+import { lineOf, maxScrollV, shownLines } from "../../../text/layout.js";
 import { applied, emptyFormat, type PartialFormat } from "../../../text/text.js";
 import { embeddedFonts } from "./Font.js";
 import { useSheet } from "./StyleSheet.js";
@@ -39,26 +39,6 @@ function lineAtPoint(field: TextObject, x: number, y: number): number {
   }
 
   return -1;
-}
-
-/** The last first line a scroll can show: the lines after it fit the field's height. */
-function maxScrollV(field: TextObject): number {
-  const lines = field.layout.lines;
-  const room = field.height * 20 - 2 * GUTTER;
-  let used = 0;
-  let first = lines.length;
-  while (first > 0) {
-    const line = lines[first - 1];
-    const next = used + line.ascent + line.descent + (first < lines.length ? line.leading : 0);
-    if (next > room && first < lines.length) {
-      break;
-    }
-
-    used = next;
-    first--;
-  }
-
-  return Math.max(1, first + 1);
 }
 
 /** The start and length of the paragraph `i` is in, as Flash gives them (Ruffle's edit_text.rs); [-1, -1] outside the text. */

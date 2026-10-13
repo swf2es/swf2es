@@ -1,6 +1,7 @@
 // flash.display.InteractiveObject: what it keeps about input, kept as
 // fields with Flash's defaults until input reaches the player.
 import { avm2 } from "@swf2es/runtime";
+import { pickWork } from "../../../display/display.js";
 import { tabEnabledDefault } from "../../../input/keyboard.js";
 import type { Scripting } from "../../../scripting.js";
 import { displayOf } from "./DisplayObject.js";
@@ -50,6 +51,7 @@ export function interactiveObjectNatives(_s: Scripting): avm2.Natives {
 
     set mouseEnabled(v: Value) {
       this.$mouseEnabled = !!v;
+      pickWork.changes++;
     }
 
     get doubleClickEnabled(): boolean {

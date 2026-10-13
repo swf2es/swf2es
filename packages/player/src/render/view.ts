@@ -575,6 +575,46 @@ export class PixiView {
       }
     };
     canvas?.addEventListener?.("pointercancel", cancel);
+    // The wheel in Flash's lines, up positive: 3 a notch, Flash's delta on
+    // Windows. A browser gives a notch as 3 lines, or as about 100 pixels,
+    // fewer where the page is zoomed or the screen scaled, and several at
+    // once as their multiple; a touchpad's few pixels at a time add up, 100
+    // to 3 lines. The page scrolls unless the SWF takes the wheel where the
+    // pointer is. With Ctrl, as a touchpad's pinch comes too, the page zooms
+    // and the SWF hears nothing. Pixi listens passively.
+    let lines = 0;
+    const wheel = (e: WheelEvent) => {
+      const pointer = player.pointer;
+      if (!pointer || e.deltaY === 0 || e.ctrlKey) {
+        return;
+      }
+
+      const size = Math.abs(e.deltaY);
+      if (e.deltaMode !== 0) {
+        lines = -e.deltaY * (e.deltaMode === 2 ? 3 : 1);
+      } else if (size >= 50) {
+        lines = -Math.sign(e.deltaY) * 3 * Math.max(1, Math.round(size / 100));
+      } else {
+        lines -= (e.deltaY * 3) / 100;
+      }
+
+      const delta = Math.trunc(lines);
+      lines -= delta;
+      const at = { clientX: e.clientX, clientY: e.clientY, global: { x: e.offsetX, y: e.offsetY } };
+      const [x, y] = this.stagePoint(player, at, style);
+      const p: PointerState = {
+        x,
+        y,
+        buttons: e.buttons,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        time: e.timeStamp,
+      };
+      if (pointer.wheel(p, delta)) {
+        e.preventDefault();
+      }
+    };
+    canvas?.addEventListener?.("wheel", wheel, { passive: false });
     // Pixi sets the canvas's cursor on every move, from its target's, which
     // is this stage: the player's cursor goes there, and through Pixi's own
     // setter now, which keeps Pixi's record of it right.
@@ -626,6 +666,7 @@ export class PixiView {
       player.pointer?.flush();
       player.touch?.flush();
       canvas?.removeEventListener?.("pointercancel", cancel);
+      canvas?.removeEventListener?.("wheel", wheel);
       this.stage.off("globalpointermove", move);
       this.stage.off("pointerdown", down);
       this.stage.off("pointerup", up);

@@ -1931,7 +1931,7 @@ The display list decides the target, so masks, scroll rectangles, depth,
 visibility, `mouseEnabled` and `mouseChildren` use the same objects that
 scripts see; Pixi's render tree does not choose a Flash target. The
 pointer sends `mouseOver`, `mouseOut`, `rollOver`, `rollOut`, `mouseMove`,
-`mouseDown`, `mouseUp` and `click` through EventDispatcher's capture and
+`mouseDown`, `mouseUp`, `click` and `doubleClick` through EventDispatcher's capture and
 bubble phases, and the stage's `mouseLeave`, in the order Flash Player 32
 traced them (a probe logging every event with its target, run in
 Electron's PepperFlash and driven over the DevTools protocol, the
@@ -1956,12 +1956,60 @@ release outside, which holds nothing, leaves no second time; a left
 button let go where the host told of no release (outside the browser, or
 while another button stays down, which Chrome tells as a move) is
 released at the next move that shows it, and left where that is outside.
-`updateAfterEvent` changes none of this. Ruffle sends
+`updateAfterEvent` changes none of this. The second click of a double
+is a `doubleClick` in the click's place where the target's own
+`doubleClickEnabled` is true, its parent's counting for nothing, and a
+third a click again, as Flash Player 32 traced them. The plug-in took the
+browser's count of clicks, and counted none whose first was on another
+object; the player counts a press on the last one's target within half a
+second and two pixels of it, Ruffle's rule, as the browser's own would.
+Ruffle sends
 `mouseMove` first too, and no `mouseLeave`.
+A mouse that stands still is picked for again at each frame's end, after
+its `exitFrame` and before its `render`, as Flash Player 32 does: an
+object a script moves, hides, disables or takes off the list from under
+it gets its outs, one that comes under it its overs, with no
+`mouseMove`, and the cursor follows. One taken off the list hears no
+`mouseOut`, only the `rollOut`s of the ancestors it had when the hover
+came, the root's too, as Flash sends them. Flash notices an object moved
+in under the mouse a frame later than one moved out (its pick seems to
+go by where the last render drew it); the player notices both at once.
+Nor does Flash notice a text field that shrinks out from under a still
+mouse until the mouse next moves; the player sends its outs at the
+frame's end, as for any other object.
+The pick runs only when something a pick reads changed since the last
+(`pickWork`: whatever invalidates an object, and `mouseEnabled`,
+`mouseChildren`, a `hitArea` or a button's `enabled`), so a still scene
+costs nothing, and a busy one a pick a frame, what one mouse move costs.
+The pick carries the point down the list into each object's space, making
+no matrix per object, and passes over a container whose bounds miss it:
+bounds each object keeps in its own space (`pickBounds`), marked stale by
+a change in it or under it, and not by its own move, which only its
+ancestors' bounds see. They are worked out only for what stood still over
+the last two picks, as what changes on most frames costs less gone
+through than measured; a timeline shape is checked against its recorded
+bounds before its fills. A button's hit test state is in no container,
+so a button and those above it are measured each time, as is a sprite
+with a `hitArea`, which may be anywhere on the list, its bounds taken
+through the stage into the sprite's. A NaN in bounds, from a NaN or
+infinite matrix or an infinite drawing, rules no point out.
+On 400 rigs of 12 moving parts (10,000 objects), a pick takes 0.01 ms
+where it took 0.5 ms and 125 KB, and
+`tests/player/bench.ts --scripted 400 --still --hover` ticks as without a
+mouse over the stage, 0.3 to 0.4 ms, where it took 0.8; where every part
+is new each frame, a pick after a tick takes 0.2 to 0.3 ms, against 0.7.
 `DisplayObject.mouseX` and `mouseY` follow the last pointer position.
 The pick follows Flash's order, as Ruffle's `mouse_pick_avm2` has it:
 interactive children before artwork, and a hit on what takes no pointer
-goes up only once nothing else under the point has taken it. What a
+goes up only once nothing else under the point has taken it, to the
+nearest ancestor whose `mouseEnabled` is true, past any number that are
+false. The main SWF's root is never the target, as Flash Player 32
+traced it (the `MouseGaps` probe of the same test file): its own art, a
+hit passed up to it, and all of it with its `mouseChildren` false go to
+the stage, while it stays over as an ancestor; a sprite a script puts on
+the stage beside it takes its hits as any other; a loaded SWF's root a
+script puts on the stage itself is taken for the main root, which no
+probe has measured. What a
 mask, a scroll rect or a timeline's mask layer hides takes no pointer
 (`mouse_pick_masking`): a list scrolled under a mask layer is clicked
 only where it shows. `hitTestPoint` asks no mask layer above the object
@@ -1987,8 +2035,23 @@ sprite, which `dropTarget` reads: the shape, not the sprite that takes
 the pointer, as Flash's trace of the corpus's `sprite_dropTarget` names
 the shapes in its sprites, and null over nothing. Neither can be played
 in adl, which the harness gives no pointer, so the unit tests carry them.
-Wheel, right and middle buttons, and Flash's drag and focus rules still
-need their own cases.
+The wheel sends `mouseWheel` to what is under the pointer, bubbling and
+not cancelable, its `delta` lines up positive, and a text field there
+whose `mouseWheelEnabled` is true then scrolls by as many lines, as the
+corpus's `mouse_wheel_events` has Flash trace them (its `scroll` event is
+not sent yet). PepperFlash on Linux, the Flash Player 32 at hand, gave no
+`mouseWheel` at all for the DevTools protocol's wheel, and let the page
+scroll under it; Adobe documents the delta as the lines a notch
+scrolls, 3 by Windows' default, as Ruffle's own tests send it. The host makes a browser's notch 3 lines, whether it gives 3 lines
+or about 100 pixels (fewer on a zoomed page or a scaled screen, a
+multiple for notches run together), and adds a touchpad's pixels up, 100
+to 3 lines, sending nothing for a part of one. That is untried on
+macOS, whose wheels and touchpads give pixels of their own measure. It keeps the page from
+scrolling only where the SWF takes the wheel: a `mouseWheel` listener on
+the target or an ancestor, or a field that can scroll; elsewhere the page
+has it. With Ctrl, as a touchpad's pinch comes too, the page zooms and the
+SWF hears nothing. Right and middle buttons, and
+Flash's drag and focus rules, still need their own cases.
 
 ### Touch
 
@@ -3912,9 +3975,12 @@ drift.
 A button's change of state plays DefineButtonSound's sound for it, as
 Ruffle's button events pick them: up to over, over to down, down to over,
 and over to up, and a release outside plays over to up's (the pointer's
-up, with a button pressed and something else under it). Dragging off a
-pressed button, down to up here, and back on, up to down, play none, as
-Ruffle's DragOut and DragOver do.
+up, with a button pressed and something else under it). A pressed
+button dragged off shows its over state until the release, and its down
+state again when the pointer comes back, as Flash Player 32 shows them
+(`tests/unit/player/input/pointer.test.ts`); those two changes play
+none, as Ruffle's DragOut and DragOver do. A button pressed elsewhere and
+dragged onto stays up until the release over it, which shows over.
 
 A timeline sound's mix is the transforms of its clip or button and each
 ancestor, a sprite's `soundTransform`, concatenated from it up, then the

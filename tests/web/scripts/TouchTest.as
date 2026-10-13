@@ -13,7 +13,8 @@ package {
   // The web test's touch SWF: a box "a" holding a box "b", and a box "c"
   // beside it, logging the mouse and touch events the stage hears, its
   // mouseLeave, and the roll events each box hears, for the page to read. A tap writes the
-  // clipboard, a touch's move tries to.
+  // clipboard, a touch's move tries to. setBox sets a property of "a" or "c", listenWheel
+  // logs the wheel from then on.
   public class TouchTest extends Sprite {
     private var log:Array = [];
 
@@ -56,7 +57,8 @@ package {
 
       var ids:Object = {};
       var types:Array = [
-        MouseEvent.MOUSE_DOWN, MouseEvent.MOUSE_UP, MouseEvent.CLICK, MouseEvent.MOUSE_MOVE,
+        MouseEvent.MOUSE_DOWN, MouseEvent.MOUSE_UP, MouseEvent.CLICK, MouseEvent.DOUBLE_CLICK,
+        MouseEvent.MOUSE_MOVE,
         MouseEvent.MOUSE_OVER, MouseEvent.MOUSE_OUT, MouseEvent.ROLL_OVER, MouseEvent.ROLL_OUT,
         TouchEvent.TOUCH_BEGIN, TouchEvent.TOUCH_END, TouchEvent.TOUCH_MOVE, TouchEvent.TOUCH_OVER,
         TouchEvent.TOUCH_OUT, TouchEvent.TOUCH_ROLL_OVER, TouchEvent.TOUCH_ROLL_OUT, TouchEvent.TOUCH_TAP
@@ -89,6 +91,16 @@ package {
       ExternalInterface.addCallback("setMode", function (mode:String):String {
         Multitouch.inputMode = mode;
         return Multitouch.inputMode;
+      });
+      ExternalInterface.addCallback("setBox", function (name:String, key:String, value:*):* {
+        getChildByName(name)[key] = value;
+        return getChildByName(name)[key];
+      });
+      ExternalInterface.addCallback("listenWheel", function ():Boolean {
+        stage.addEventListener(MouseEvent.MOUSE_WHEEL, function (e:MouseEvent):void {
+          log.push(e.type + " " + nameOf(e.target) + " " + e.delta);
+        });
+        return true;
       });
       ExternalInterface.addCallback("takeLog", function ():Array {
         var taken:Array = log;

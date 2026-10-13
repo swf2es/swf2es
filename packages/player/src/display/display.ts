@@ -61,6 +61,17 @@ export const PIXELS = 8;
  */
 export const scriptWork = { changes: 0 };
 
+/**
+ * A count that moves whenever something changes that may change what is
+ * under a pointer that stands still: any change a renderer would sync
+ * (DisplayObject.invalidate), and the pick's own fields, mouseEnabled,
+ * mouseChildren, a hitArea, a button's enabled. While it stands still,
+ * the pointer has no need to pick again at a frame's end. One for every
+ * player: another's moving it costs a pick, never an event. `picks`
+ * counts the pointer's picks, which an object's pickChangedAt is told in.
+ */
+export const pickWork = { changes: 0, picks: 0 };
+
 /** DisplayObject.kind's. */
 export const OTHER = 0;
 export const CLIP = 1;
@@ -215,6 +226,23 @@ export class DisplayObject {
   /** What changed since the renderer last synced it: TRANSFORM, CHILDREN, CONTENT. */
   dirty = TRANSFORM | CONTENT;
   /**
+   * Where anything under it may take the pointer, in its own space, as the
+   * pointer's pick last worked it out (input/pointer.ts), and whether a
+   * change under it since has made that stale: the renderer's flags are
+   * cleared as it syncs, these as the pick reads them. A move alone marks
+   * its ancestors, not it: its bounds in its own space stand.
+   */
+  pickBounds: Rect | null = null;
+  pickStale = true;
+  /** The scroll its pick bounds were worked out for: a scroll's change marks it only moved. */
+  pickScroll: Rect | null = null;
+  /**
+   * The pick (pickWork.picks) before which it or something under it last
+   * changed, or it was made: one that changes between every two picks is
+   * not worth its bounds, and the pick goes through it instead.
+   */
+  pickChangedAt = pickWork.picks;
+  /**
    * The display objects whose frames its frames run: a container's own
    * children array, a button's states (ButtonObject), none for the rest.
    * A field every object has, so that the walks each frame, which visit
@@ -277,8 +305,30 @@ export class DisplayObject {
   /** Mark a change, and that its ancestors have a changed descendant. */
   invalidate(what: number): void {
     this.dirty |= what;
+    pickWork.changes++;
     for (let p = this.parent; p && !p.descendantsDirty; p = p.parent) {
       p.descendantsDirty = true;
+    }
+
+    // Its own pick bounds stand when it only moves; its ancestors' do not.
+    this.pickChanged(what !== TRANSFORM);
+  }
+
+  /**
+   * Mark the pick bounds above it stale, and its own unless `own` is false
+   * (input/pointer.ts): an ancestor of one changed since the last pick is
+   * marked already.
+   */
+  pickChanged(own: boolean): void {
+    const picks = pickWork.picks;
+    if (own) {
+      this.pickStale = true;
+      this.pickChangedAt = picks;
+    }
+
+    for (let p = this.parent; p && p.pickChangedAt !== picks; p = p.parent) {
+      p.pickStale = true;
+      p.pickChangedAt = picks;
     }
   }
 
@@ -639,6 +689,10 @@ export class ShapeObject extends DisplayObject {
     ) {
       this.shape = morphAt(this.morph, this.ratio);
       this.blended = { morph: this.morph, ratio: this.ratio, shape: this.shape };
+      // New bounds, which no invalidate tells of: the change of ratio did,
+      // but those it marked may have been measured since, with the old blend.
+      pickWork.changes++;
+      this.pickChanged(true);
     }
 
     return this.shape;
@@ -1195,9 +1249,11 @@ export type ButtonState = "up" | "over" | "down";
 
 /**
  * Which of DefineButtonSound's sounds a change of state plays, by the
- * state before and after, as Ruffle's button events pick them: a drag off
- * while pressed, down to up here, and back over, up to down, none (-1); a
- * release outside plays over to up's (ButtonObject.releasedOutside).
+ * state before and after, as Ruffle's button events pick them; none is -1.
+ * A drag off while pressed, which shows over, and back on, down again,
+ * play none either, as Ruffle's DragOut and DragOver: the pointer asks
+ * those quietly. A release outside plays over to up's
+ * (ButtonObject.releasedOutside).
  */
 const BUTTON_SOUNDS: Record<ButtonState, Record<ButtonState, number>> = {
   up: { up: -1, over: 1, down: -1 },
@@ -1262,6 +1318,8 @@ export class ButtonObject extends Container {
 
   set hitTestState(d: DisplayObject | null) {
     this.hitTest = d;
+    // Where it is hit, which no change in the display list tells the pointer.
+    pickWork.changes++;
     this.statesChanged();
   }
 
@@ -1313,15 +1371,19 @@ export class ButtonObject extends Container {
   }
 
   /** Show state `state`, with the sound DefineButtonSound gives the change. */
-  setState(state: ButtonState): void {
-    this.playSound(BUTTON_SOUNDS[this.state][state]);
+  setState(state: ButtonState, sound = true): void {
+    if (sound) {
+      this.playSound(BUTTON_SOUNDS[this.state][state]);
+    }
+
     this.state = state;
     this.show();
   }
 
-  /** A press on it released elsewhere: over to up's sound, as Ruffle's ReleaseOutside plays. */
+  /** A press on it released elsewhere: up, with over to up's sound, as Ruffle's ReleaseOutside plays. */
   releasedOutside(): void {
     this.playSound(0);
+    this.setState("up", false);
   }
 
   /** DefineButtonSound's sound `index`, if it has one. */

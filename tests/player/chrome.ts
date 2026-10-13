@@ -452,6 +452,7 @@ export function benchPlayer(
   pace = 0,
   cpuProfilePath?: string,
   finishEvery = 1,
+  hover = false,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
@@ -474,7 +475,7 @@ export function benchPlayer(
       }
 
       const { value, exception } = await evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover})`,
       );
       if (value && allocs) {
         const { profile } = await send<{ profile: { head: SampledNode } }>(

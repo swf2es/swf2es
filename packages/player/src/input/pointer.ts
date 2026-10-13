@@ -1,18 +1,29 @@
 // Browser pointer input enters here; Flash chooses targets from its display
 // list, while Pixi only supplies the pointer's position and buttons.
-import { hitsOwnPoint, hitsPoint, toStage } from "../display/bounds.js";
+import type { Matrix } from "@swf2es/format";
+import {
+  hitsOwnLocal,
+  hitsOwnPoint,
+  hitsPoint,
+  ownBounds,
+  type Probe,
+  toStage,
+} from "../display/bounds.js";
 import {
   BitmapObject,
   ButtonObject,
+  CONTENT,
   Container,
   type DisplayObject,
+  pickWork,
   ShapeObject,
   StaticTextObject,
   TextObject,
 } from "../display/display.js";
-import { apply, invert, type Rect } from "../display/geometry.js";
+import { apply, concat, invert, type Rect } from "../display/geometry.js";
 import { dispatchEvent, heard } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
+import { maxScrollV } from "../text/layout.js";
 import type { KeyboardInput } from "./keyboard.js";
 
 export interface PointerState {
@@ -53,14 +64,25 @@ const isInteractive = (d: DisplayObject): boolean =>
 const mouseEnabled = (d: DisplayObject): boolean =>
   !!d.object && !d.avm1Root && d.object.$mouseEnabled !== false;
 
+/**
+ * Whether `d` is the main SWF's root, the stage's child that is a SWF's
+ * root: Flash Player 32 never makes it the target. What would, its own
+ * artwork, a hit passed up from a child whose mouseEnabled is false, all
+ * of it with its mouseChildren false, goes to the stage, as the stage's
+ * own empty space does, and it is only ever over as an ancestor. A sprite
+ * a script puts on the stage beside it takes its hits as any other.
+ */
+const isMainRoot = (d: DisplayObject): boolean => !!d.loaderInfo && !!d.parent && !d.parent.parent;
+
 /** `d` itself where it takes the pointer, else the hit goes on to its parent. */
-const own = (d: DisplayObject): Pick => (mouseEnabled(d) ? d : PROPAGATE);
+const own = (d: DisplayObject): Pick => (mouseEnabled(d) && !isMainRoot(d) ? d : PROPAGATE);
 
 /** Each sprite's hitArea. */
 const hitAreas = new WeakMap<DisplayObject, DisplayObject>();
 
 /** Sprite.hitArea: `area` picks for `sprite` in place of its own drawing. */
 export function setHitArea(sprite: DisplayObject, area: DisplayObject | null): void {
+  pickWork.changes++;
   if (area) {
     hitAreas.set(sprite, area);
   } else {
@@ -77,8 +99,9 @@ export function hitAreaOf(sprite: DisplayObject): DisplayObject | null {
  * (Ruffle's `mouse_pick_avm2`): within a container, its interactive
  * children first, topmost first, then the rest. A hit on artwork, or on
  * a child whose mouseEnabled is false, goes to the nearest ancestor that
- * takes the pointer; one that goes up is kept while the search goes on,
- * so a disabled field over a button leaves the button its clicks.
+ * takes the pointer, short of the main root (isMainRoot): the stage takes
+ * it there. One that goes up is kept while the search goes on, so a
+ * disabled field over a button leaves the button its clicks.
  *
  * A sprite with a hitArea is hit where the area draws, wherever the area
  * is on the display list and whether or not it is visible, and its own
@@ -95,24 +118,52 @@ export function pointerTarget(
   width: number,
   height: number,
 ): DisplayObject | null {
-  // Whether `d`'s artwork is under the point, its children's included.
-  const drawn = (d: DisplayObject): boolean => {
-    if (!d.visible || d.clipDepth > 0 || d.maskOf) {
+  if (x < 0 || y < 0 || x >= width || y >= height) {
+    return null;
+  }
+
+  // Flash samples half a pixel to the left of the point (bounds.ts,
+  // hitsOwnPoint); the masks over an object are asked of it in the stage's
+  // space, the object's own drawing of it in its own, which the pick
+  // carries down the list from parent to child, making no matrix per object.
+  const probe: Probe = { x: x - 0.5, y, root: stage };
+  const picks = pickWork.picks++;
+
+  // Whether `d`'s artwork is under (lx, ly), in its parent's space, its children's included.
+  const drawn = (d: DisplayObject, px: number, py: number): boolean => {
+    if (!d.visible || d.clipDepth > 0 || d.maskOf || !toLocal(d, px, py)) {
       return false;
     }
 
-    if (d instanceof Container && d.children.some(drawn)) {
-      return true;
+    const lx = at.x;
+    const ly = at.y;
+    if (missesShape(d, lx, ly)) {
+      return false;
     }
 
-    return hitsOwnPoint(d, x, y, stage, true);
+    if (d instanceof Container) {
+      for (const child of d.children) {
+        if (drawn(child, lx, ly)) {
+          return true;
+        }
+      }
+    }
+
+    return hitsOwnLocal(d, lx, ly, probe, true);
   };
 
-  const pick = (d: DisplayObject): Pick => {
+  // What `d` picks for the point (px, py) in its parent's space; the stage's is its own.
+  const pick = (d: DisplayObject, px: number, py: number): Pick => {
     if (!d.visible || d.clipDepth > 0 || d.maskOf) {
       return null;
     }
 
+    if (d !== stage && !toLocal(d, px, py)) {
+      return null;
+    }
+
+    const lx = d === stage ? px : at.x;
+    const ly = d === stage ? py : at.y;
     // A button is hit where its hit test state is, whatever state it shows,
     // and is the target itself, its states' objects never. The hit test
     // state is in no container: it is tested as the button's child.
@@ -126,14 +177,21 @@ export function pointerTarget(
       area.parent = d;
       // A disabled button is missed, not passed up: what is under it gets the hit (Ruffle).
       try {
-        return mouseEnabled(d) && drawn(area) ? d : null;
+        return mouseEnabled(d) && drawn(area, lx, ly) ? d : null;
       } finally {
         area.parent = parent;
       }
     }
 
     if (!(d instanceof Container)) {
-      return hitsOwnPoint(d, x, y, stage, true) ? own(d) : null;
+      return !missesShape(d, lx, ly) && hitsOwnLocal(d, lx, ly, probe, true) ? own(d) : null;
+    }
+
+    // Nothing under it reaches the point: most of a crowded list is passed
+    // over so. Bounds are worked out only for what stood still over the
+    // last two picks: what changes on most frames costs less gone through.
+    if ((!d.pickStale || d.pickChangedAt < picks - 1) && !nearRect(pickBounds(d), lx, ly)) {
+      return null;
     }
 
     const area = hitAreas.get(d);
@@ -151,7 +209,7 @@ export function pointerTarget(
         continue;
       }
 
-      const found = pick(children[i]);
+      const found = pick(children[i], lx, ly);
       if (found === PROPAGATE) {
         propagated = true;
       } else if (found) {
@@ -169,24 +227,179 @@ export function pointerTarget(
     }
 
     for (let i = children.length - 1; i >= 0; i--) {
-      if (!isInteractive(children[i]) && drawn(children[i])) {
+      if (!isInteractive(children[i]) && drawn(children[i], lx, ly)) {
         return own(d);
       }
     }
 
-    return hitsOwnPoint(d, x, y, stage, true) ? own(d) : null;
+    return hitsOwnLocal(d, lx, ly, probe, true) ? own(d) : null;
   };
 
-  if (x < 0 || y < 0 || x >= width || y >= height) {
-    return null;
-  }
-
-  const found = pick(stage);
+  const found = pick(stage, probe.x, probe.y);
   if (found && found !== PROPAGATE) {
     return found;
   }
 
   return stage.object ? stage : null;
+}
+
+/** Where toLocal puts a point. */
+const at = { x: 0, y: 0 };
+
+/** (x, y) of `d`'s parent's space in `d`'s own, put in `at`: false where its matrix flattens the plane. */
+function toLocal(d: DisplayObject, x: number, y: number): boolean {
+  const m = d.placed;
+  const det = m.a * m.d - m.b * m.c;
+  if (det === 0) {
+    return false;
+  }
+
+  const dx = x - m.tx;
+  const dy = y - m.ty;
+  at.x = (m.d * dx - m.c * dy) / det;
+  at.y = (m.a * dy - m.b * dx) / det;
+  return true;
+}
+
+/** Whether (x, y), in its own space, is more than a pixel off a timeline shape's recorded bounds. */
+function missesShape(d: DisplayObject, x: number, y: number): boolean {
+  const r = d instanceof ShapeObject && !d.drawing ? d.shape?.shape.bounds : null;
+  return (
+    !!r &&
+    (x * 20 < r.xMin - 20 || x * 20 > r.xMax + 20 || y * 20 < r.yMin - 20 || y * 20 > r.yMax + 20)
+  );
+}
+
+/**
+ * Whether (x, y) is within a pixel of `r`: a hairline's half pixel, and
+ * rounding, are in. Asked as what rules the point out, so that a NaN, in
+ * the bounds or the point (a NaN or infinite matrix, a zero scale turned in
+ * 3D, an infinite rectangle drawn), rules out nothing: a pick goes through
+ * as it would without bounds, rather than missing all above it.
+ */
+function nearRect(r: Rect | null, x: number, y: number): boolean {
+  return !(r === null || x < r.xMin - 1 || x > r.xMax + 1 || y < r.yMin - 1 || y > r.yMax + 1);
+}
+
+/**
+ * Where anything under `d` may take the pointer, in its own space: what it
+ * and its children draw, a scroll's rectangle in their place, and a
+ * button's hit test state; masks are left out, which only take hits away.
+ * Kept on `d` until a change in it or below it marks it stale
+ * (invalidate), or its scroll changes. A
+ * button's hit test state is in no container, so no change reaches its
+ * button from it: a button, and all above it, are worked out each time.
+ */
+function pickBounds(d: DisplayObject): Rect | null {
+  if (!d.pickStale && d.pickScroll === d.scroll) {
+    return d.pickBounds;
+  }
+
+  // The extent so far, one per depth of this recursion: no closure or array a call.
+  const depth = boundsDepth++;
+  if (depth === boxes.length) {
+    boxes.push(new Float64Array(4));
+  }
+
+  const box = boxes[depth];
+  box.set(EMPTY);
+  let stale = false;
+  try {
+    const scroll = d.scroll;
+    // In its own space, which its placed matrix shifts by the scroll.
+    extend(box, scroll ?? ownBounds(d, true), null);
+    if (d instanceof ButtonObject) {
+      const area = d.hitTestState;
+      stale = true;
+      if (area && !scroll) {
+        extend(box, pickBounds(area), area.placed);
+      }
+    }
+
+    // A hitArea, wherever it is on the list, through the stage to here; as
+    // for a button's, no change to it reaches this sprite, measured each time.
+    const area = hitAreas.get(d);
+    if (area && area !== d) {
+      stale = true;
+      const up = invert(toStage(d, null));
+      extend(box, up ? pickBounds(area) : UNKNOWN, up && concat(toStage(area, null), up));
+    }
+
+    if (d instanceof Container) {
+      for (const child of d.children) {
+        if (child.clipDepth > 0 || child.maskOf) {
+          continue;
+        }
+
+        // A timeline shape's recorded bounds, read where they are: the
+        // commonest leaf, and kept nowhere.
+        const shape = child instanceof ShapeObject && !child.drawing ? child.shape : null;
+        if (shape) {
+          if (!scroll) {
+            extend(box, shape.shape.bounds, child.placed, 1 / 20);
+          }
+
+          continue;
+        }
+
+        // Inside a scroll, only for whether it is to be worked out again.
+        const r = pickBounds(child);
+        if (!scroll) {
+          extend(box, r, child.placed);
+        }
+
+        stale ||= child.pickStale;
+      }
+    }
+
+    let r = d.pickBounds;
+    if (box[0] > box[2]) {
+      r = null;
+    } else if (r) {
+      r.xMin = box[0];
+      r.yMin = box[1];
+      r.xMax = box[2];
+      r.yMax = box[3];
+    } else {
+      r = { xMin: box[0], yMin: box[1], xMax: box[2], yMax: box[3] };
+    }
+
+    d.pickBounds = r;
+    d.pickStale = stale;
+    d.pickScroll = scroll;
+    return r;
+  } finally {
+    boundsDepth--;
+  }
+}
+
+const EMPTY = [
+  Number.POSITIVE_INFINITY,
+  Number.POSITIVE_INFINITY,
+  Number.NEGATIVE_INFINITY,
+  Number.NEGATIVE_INFINITY,
+];
+const boxes: Float64Array[] = [];
+/** Bounds no point is ruled out of (nearRect). */
+const UNKNOWN: Rect = { xMin: Number.NaN, yMin: Number.NaN, xMax: Number.NaN, yMax: Number.NaN };
+let boundsDepth = 0;
+
+/** `box` (xMin, yMin, xMax, yMax) grown to take in `r`'s corners, times `scale`, through `m`. */
+function extend(box: Float64Array, r: Rect | null, m: Matrix | null, scale = 1): void {
+  if (!r) {
+    return;
+  }
+
+  for (let i = 0; i < 4; i++) {
+    const px = (i & 1 ? r.xMax : r.xMin) * scale;
+    const py = (i & 2 ? r.yMax : r.yMin) * scale;
+    const x = m ? m.a * px + m.c * py + m.tx : px;
+    const y = m ? m.b * px + m.d * py + m.ty : py;
+    box[0] = Math.min(box[0], x);
+    box[1] = Math.min(box[1], y);
+    box[2] = Math.max(box[2], x);
+    box[3] = Math.max(box[3], y);
+  }
 }
 
 /** What each sprite dragged was last over, which Sprite.dropTarget reads. */
@@ -240,13 +453,25 @@ export class PointerInput {
    */
   redraws = 0;
   private hover: DisplayObject | null = null;
+  /** The hover and its ancestors as they were when it came over them, nearest first: those its roll outs go to. */
+  private hoverChain: DisplayObject[] = [];
+  /** The pointer's last state over the player; null before it came, or once it left. */
+  private last: PointerState | null = null;
+  /** pickWork's count when the hover was last picked. */
+  private picked = -1;
   /** Whether the left button is down after a press here. */
   private held = false;
   /** Whether the pointer has left the player, and not come back to it since. */
   private gone = false;
   private pressed: DisplayObject | null = null;
-  /** The last press, which the next continues as a double or triple click if near it in place and time. */
-  private lastPress: { x: number; y: number; time: number; clicks: number } | null = null;
+  /** The last press, which the next continues as a double or triple click if on its target, near it in place and time. */
+  private lastPress: {
+    x: number;
+    y: number;
+    time: number;
+    clicks: number;
+    target: DisplayObject | null;
+  } | null = null;
   private moved: PointerState | null = null;
   private shown: Cursor = "default";
   private drag: {
@@ -331,6 +556,7 @@ export class PointerInput {
     buttonDown: boolean,
     bubbles = true,
     related: DisplayObject | null = null,
+    delta = 0,
   ): void {
     if (!target.object) {
       return;
@@ -351,7 +577,7 @@ export class PointerInput {
       !!p.altKey,
       !!p.shiftKey,
       buttonDown,
-      0,
+      delta,
     );
     dispatchEvent(s, target.object, event);
   }
@@ -424,7 +650,9 @@ export class PointerInput {
     this.handled++;
     s.mouseStageX = p.x;
     s.mouseStageY = p.y;
+    this.last = p;
     this.updateDrag();
+    this.picked = pickWork.changes;
     const found = pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
     // Outside the stage while the button is down, the mouse is still the stage's.
     const target = found ?? (this.held && this.stage.object ? this.stage : null);
@@ -476,9 +704,78 @@ export class PointerInput {
     this.updateCursor();
   }
 
+  /**
+   * The wheel turned by `delta` lines over the player, up positive, as
+   * MouseEvent.delta has it: a move to `p` first, if the pointer was not
+   * there, then `mouseWheel` to what is under it, bubbling, and a text
+   * field under it whose mouseWheelEnabled is true scrolls by as many
+   * lines, after the event, as the corpus's `mouse_wheel_events` has
+   * Flash do. A delta of 0, part of a line a touchpad gave, sends nothing.
+   * Returns whether the SWF takes the wheel there, a listener for
+   * mouseWheel on the way or a field that can scroll, which a host lets
+   * the page scroll without.
+   */
+  wheel(p: PointerState, delta: number): boolean {
+    this.handle("move", p);
+    const s = this.scripting;
+    const found = pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
+    const target = found ?? (this.held && this.stage.object ? this.stage : null);
+    if (!target?.object) {
+      return false;
+    }
+
+    const field = target instanceof TextObject && target.mouseWheelEnabled ? target : null;
+    const taken = heard(target.object, "mouseWheel") || (!!field && maxScrollV(field) > 1);
+    if (delta !== 0) {
+      this.handled++;
+      this.send("mouseWheel", target, p, this.held, true, null, delta);
+      if (field) {
+        const scrollV = Math.max(1, Math.min(field.scrollV - delta, maxScrollV(field)));
+        if (scrollV !== field.scrollV) {
+          field.scrollV = scrollV;
+          field.invalidate(CONTENT);
+          this.redraws++;
+        }
+      }
+    }
+
+    return taken;
+  }
+
   /** Whether the left button is down after a press the player took, which keeps the mouse its own wherever it goes. */
   get captured(): boolean {
     return this.held;
+  }
+
+  /**
+   * At a frame's end, after its EXIT_FRAME and before its RENDER, as Flash
+   * Player 32 does: what is under a pointer that has not moved, picked
+   * again if the display list or a pick's field changed since the last
+   * pick, and the hover moved to it with no mouseMove. An object that
+   * moves out from under the mouse or is hidden so gets its outs, one
+   * that comes under it its overs, and the cursor follows. Flash notices
+   * one moved in under the mouse a frame later than one moved out, which
+   * the player does not copy.
+   */
+  frameEnded(): void {
+    const p = this.last;
+    if (p && !this.gone && this.picked !== pickWork.changes) {
+      const s = this.scripting;
+      this.picked = pickWork.changes;
+      const found = pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
+      const target = found ?? (this.held && this.stage.object ? this.stage : null);
+      const over = target === this.stage ? null : target;
+      if (over !== this.hover) {
+        this.handled++;
+        if (buttonLike(over) || buttonLike(this.hover)) {
+          this.redraws++;
+        }
+
+        this.hoverTo(over, p, this.held);
+      }
+    }
+
+    this.updateCursor();
   }
 
   /** Move the hover to `target`: out and roll outs from what it was over, roll overs and over on what it is. */
@@ -493,26 +790,46 @@ export class PointerInput {
       entered.add(d);
     }
 
+    // Left as they were when the hover came: one a script took off the
+    // list rolls out of the ancestors it had, as in Flash.
+    const left = this.hoverChain;
     let common: DisplayObject | null = this.stage;
-    if (previous && target) {
-      for (let d: DisplayObject | null = previous; d; d = d.parent) {
-        if (entered.has(d)) {
-          common = d;
+    let leaving = left.length;
+    if (target) {
+      for (let i = 0; i < left.length; i++) {
+        if (entered.has(left[i])) {
+          common = left[i];
+          leaving = i;
           break;
         }
       }
     }
 
+    // A pressed button the pointer drags off shows over until the release,
+    // and down again when it comes back; one it is dragged onto stays up,
+    // as Flash Player 32 shows them.
+    const held = down && this.pressed;
     if (previous) {
-      buttonState(previous, "up");
-      this.send("mouseOut", previous, p, down, true, target);
-      for (let d: DisplayObject | null = previous; d && d !== common; d = d.parent) {
-        this.send("rollOut", d, p, down, false, target);
+      buttonState(previous, previous === held ? "over" : "up", previous !== held);
+      // Off the stage, it hears no mouseOut, only its roll outs.
+      if (this.stage.encloses(previous)) {
+        this.send("mouseOut", previous, p, down, true, target);
+      }
+
+      for (let i = 0; i < leaving; i++) {
+        if (left[i] !== this.stage) {
+          this.send("rollOut", left[i], p, down, false, target);
+        }
       }
     }
 
     if (target) {
-      buttonState(target, down && target === this.pressed ? "down" : "over");
+      if (!held) {
+        buttonState(target, "over");
+      } else if (target === held) {
+        buttonState(target, "down", false);
+      }
+
       for (let d: DisplayObject | null = target; d && d !== common; d = d.parent) {
         this.send("rollOver", d, p, down, false, previous);
       }
@@ -521,6 +838,12 @@ export class PointerInput {
     }
 
     this.hover = target;
+    const chain: DisplayObject[] = [];
+    for (let d = target; d; d = d.parent) {
+      chain.push(d);
+    }
+
+    this.hoverChain = chain;
   }
 
   /**
@@ -535,6 +858,7 @@ export class PointerInput {
     }
 
     this.gone = true;
+    this.last = null;
     this.hoverTo(null, { ...p, x: -1, y: -1 }, false);
     const stage = this.stage.object;
     if (stage && heard(stage, "mouseLeave")) {
@@ -547,15 +871,17 @@ export class PointerInput {
     if (type === "down") {
       this.held = true;
       this.pressed = target;
-      // Ruffle's rule: within half a second and two pixels of the last press.
+      // Ruffle's rule: within half a second and two pixels of the last
+      // press; and on its target, as Flash Player 32 counts a double click.
       const last = this.lastPress;
       const time = p.time ?? Number.NaN;
       const again =
         last !== null &&
+        last.target === target &&
         Math.abs(time - last.time) < 500 &&
         (p.x - last.x) ** 2 + (p.y - last.y) ** 2 < 4;
       const clicks = again ? last.clicks + 1 : 1;
-      this.lastPress = { x: p.x, y: p.y, time, clicks };
+      this.lastPress = { x: p.x, y: p.y, time, clicks, target };
       if (this.keyboard) {
         const m = target && invert(toStage(target, this.stage));
         const [x, y] = m ? apply(m, p.x, p.y) : [0, 0];
@@ -577,8 +903,14 @@ export class PointerInput {
         this.send("mouseUp", target, p, false);
       }
 
+      // The second click of a double, on an object whose doubleClickEnabled
+      // is true, is a doubleClick in its place, as Flash Player 32 sends it;
+      // a third is a click again.
       if (target && target === this.pressed && !p.canceled) {
-        this.send("click", target, p, false);
+        const double =
+          this.lastPress?.clicks === 2 &&
+          (target.object as { $doubleClickEnabled?: boolean } | null)?.$doubleClickEnabled;
+        this.send(double ? "doubleClick" : "click", target, p, false);
       }
 
       this.pressed = null;
@@ -658,9 +990,13 @@ function buttonLike(d: DisplayObject | null): boolean {
   );
 }
 
-/** Show state `state` of `d`, if it is an enabled button: the pointer moves a disabled one through none. */
-function buttonState(d: DisplayObject, state: "up" | "over" | "down"): void {
+/**
+ * Show state `state` of `d`, if it is an enabled button, with the sound for
+ * the change unless `sound` is false: the pointer moves a disabled one
+ * through none.
+ */
+function buttonState(d: DisplayObject, state: "up" | "over" | "down", sound = true): void {
   if (d instanceof ButtonObject && d.enabled) {
-    d.setState(state);
+    d.setState(state, sound);
   }
 }
