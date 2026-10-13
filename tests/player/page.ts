@@ -716,14 +716,19 @@ async function resizeSwf(
 }
 
 /**
- * Play a SWF with no scripts through the transform table, lose the WebGL
- * context and get it back, and draw the same frame again, then play on:
- * the pixels that differ between the two draws, or what threw.
+ * Play a SWF with no scripts, through the transform table or with each
+ * large context drawn alone, lose the WebGL context and get it back, and
+ * draw the same frame again, then play on: the pixels that differ between
+ * the two draws, or what threw.
  */
-async function contextLossSwf(base64: string, frames: number): Promise<string | null> {
+async function contextLossSwf(
+  base64: string,
+  frames: number,
+  table: boolean,
+): Promise<string | null> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const player = new Player(bytes, null);
-  setTransformTable(true, 1);
+  setTransformTable(table, 1);
   const renderer = await autoDetectRenderer({
     preference: "webgl",
     width: player.width,
@@ -794,7 +799,7 @@ async function contextLossSwf(base64: string, frames: number): Promise<string | 
       view.render(player.stage);
     }
 
-    if (multi && tableDraws === 0) {
+    if (table && multi && tableDraws === 0) {
       return "the table drew nothing after the context came back";
     }
 

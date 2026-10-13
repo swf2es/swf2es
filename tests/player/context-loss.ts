@@ -85,5 +85,7 @@ tags.push(
 );
 const swf = w.swf({ width: 400, height: 300, frameCount: 1, tags });
 
-assert.equal(await playLosingContext(swf, 4), null);
+// Through the table's atlas, and drawn alone from what Pixi packed of each, as without the table.
+assert.equal(await playLosingContext(swf, 4, true), null, "with the transform table");
+assert.equal(await playLosingContext(swf, 4, false), null, "without the transform table");
 console.log("context-loss: ok");
