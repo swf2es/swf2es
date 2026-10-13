@@ -334,8 +334,14 @@ export class PixiView {
   };
   /** The nodes of 3D objects, each drawn into its bitmap before the stage is drawn (renderPlanes). */
   private readonly planes = new Set<Node>();
-  /** Whether the sync is in a 3D object, whose content is drawn a texel a pixel of its own space. */
-  private inPlane = false;
+  /**
+   * In a 3D object's sync, the renderer's units a pixel of its own space its content is drawn at
+   * (render/three.ts), and its thinnest line, a texel; 0 elsewhere.
+   */
+  private planeUnits = 0;
+  private planeLeast = 1;
+  /** renderPlanes' scratch, the 3D objects to draw, deepest first. */
+  private readonly planeOrder: { depth: number; node: Node; o: DisplayObject }[] = [];
   /** Whether the renderer was found to lack the back buffer that filter-backed blends read. */
   private backBufferChecked = false;
 
@@ -1563,7 +1569,7 @@ export class PixiView {
     o: DisplayObject,
     parent: Linear,
     moved: boolean,
-    own: DisplayObject["matrix"] = o.placed,
+    own: DisplayObject["matrix"] = o.flatPlaced,
     inMask = false,
     tint: ColorTransform | null = null,
     isolated = false,
@@ -1578,13 +1584,16 @@ export class PixiView {
       o !== this.drawRoot &&
       this.renderer.type !== RendererType.WEBGPU &&
       !(inMask || o.maskOf !== null || o.clipDepth > 0);
-    const outside = this.inPlane;
+    const outsideUnits = this.planeUnits;
+    const outsideLeast = this.planeLeast;
     if (three) {
       own = IDENTITY_PLACE;
       parent = UNIT;
-      this.inPlane = true;
-    } else if (o.space && o !== this.drawRoot) {
-      own = o.flatPlaced;
+      this.planeUnits = node.plane?.units ?? SAMPLES;
+      this.planeLeast = 1 / (node.plane?.texels ?? 1);
+      if (node.plane) {
+        node.plane.syncedUnits = this.planeUnits;
+      }
     }
 
     let dirty = this.fresh ? TRANSFORM | CHILDREN | CONTENT : o.dirty;
@@ -1870,7 +1879,15 @@ export class PixiView {
             child.dirty !== CLEAN ||
             (child instanceof Container && child.descendantsDirty)
           ) {
-            this.sync(child, node.world, moved, child.placed, masking, node.color, childIsolation);
+            this.sync(
+              child,
+              node.world,
+              moved,
+              child.flatPlaced,
+              masking,
+              node.color,
+              childIsolation,
+            );
           }
         }
       }
@@ -1903,7 +1920,8 @@ export class PixiView {
       this.checkBackBuffer();
     }
 
-    this.inPlane = outside;
+    this.planeUnits = outsideUnits;
+    this.planeLeast = outsideLeast;
     if (three || node.plane) {
       redrawn ||= (dirty & ~TRANSFORM) !== 0 || recolor || remask || this.rescaled;
       return this.planeOf(o, node, three, redrawn);
@@ -2074,7 +2092,8 @@ export class PixiView {
       return;
     }
 
-    const drawn: { depth: number; node: Node; o: DisplayObject }[] = [];
+    const drawn = this.planeOrder;
+    drawn.length = 0;
     for (const node of this.planes) {
       const o = node.owner.deref();
       if (!o || !node.plane) {
@@ -2106,21 +2125,27 @@ export class PixiView {
         : 1;
     for (const { depth, node, o } of drawn) {
       const plane = node.plane as Plane;
-      const r = bounds(o, true);
-      let shown = false;
-      if (r && node.container.visible) {
-        let rect = { x: r.xMin, y: r.yMin, width: r.xMax - r.xMin, height: r.yMax - r.yMin };
+      // What it draws is measured again only when it may have changed, as its bitmap is drawn.
+      if (plane.stale || plane.drawnRect === undefined) {
+        const r = bounds(o, true);
+        let rect = r && { x: r.xMin, y: r.yMin, width: r.xMax - r.xMin, height: r.yMax - r.yMin };
         for (const f of node.filterRecords) {
-          rect = filterRect(rect, f);
+          rect = rect && filterRect(rect, f);
         }
 
+        plane.drawnRect = rect;
+      }
+
+      const rect = plane.drawnRect;
+      let shown = false;
+      if (rect && node.container.visible) {
         shown = plane.place(
           o.placed,
           rect.x,
           rect.y,
           rect.x + rect.width,
           rect.y + rect.height,
-          depth > 0 ? SAMPLES : onStage,
+          depth > 0 ? this.unitsAbove(o) : onStage,
         );
       }
 
@@ -2128,6 +2153,14 @@ export class PixiView {
       plane.quad.visible = shown;
       if (shown) {
         plane.draw(this.renderer);
+        // Drawn at other units than its content was made for, as an object grown past what the
+        // GPU or the budget takes at full samples: its lines and filters made again for them.
+        if (plane.units !== plane.syncedUnits) {
+          this.rescaled = true;
+          this.sync(o, UNIT, false, o.flatPlaced, false, node.inherited, node.childIsolation);
+          this.rescaled = false;
+          plane.draw(this.renderer);
+        }
       }
 
       // Its quad is drawn into the bitmap of the 3D object it is in, which then shows it as it is
@@ -2138,6 +2171,17 @@ export class PixiView {
 
       plane.changed = false;
     }
+  }
+
+  /** The units of the bitmap of the nearest 3D object above `o`, which its quad is drawn into. */
+  private unitsAbove(o: DisplayObject): number {
+    for (let p = o.parent; p; p = p.parent) {
+      if (p.space) {
+        return this.nodes.get(p)?.plane?.units ?? SAMPLES;
+      }
+    }
+
+    return SAMPLES;
   }
 
   /** The bitmap of the nearest 3D object above `o` marked to be drawn again. */
@@ -2303,7 +2347,7 @@ export class PixiView {
           child,
           node.world,
           moved,
-          child.placed,
+          child.flatPlaced,
           masking,
           node.color,
           isolated,
@@ -2332,7 +2376,7 @@ export class PixiView {
         child,
         node.world,
         moved,
-        child.placed,
+        child.flatPlaced,
         masking,
         node.color,
         isolated,
@@ -2434,7 +2478,11 @@ export class PixiView {
   /** The thinnest line, in stage pixels: a pixel of the screen. */
   private get leastWidth(): number {
     // In a 3D object's bitmap, a pixel of its own space, as Flash draws a hairline there.
-    return this.fresh || this.inPlane ? 1 : 1 / (this.screenScale ?? this.renderer.resolution ?? 1);
+    if (this.planeUnits) {
+      return this.planeLeast;
+    }
+
+    return this.fresh ? 1 : 1 / (this.screenScale ?? this.renderer.resolution ?? 1);
   }
 
   /**
@@ -2442,7 +2490,7 @@ export class PixiView {
    * the stage larger has them reach as much further on the screen, as Flash Player's do.
    */
   private get filterUnits(): number {
-    const units = this.inPlane ? SAMPLES : this.fresh ? this.samples : this.stage.scale.x;
+    const units = this.planeUnits || (this.fresh ? this.samples : this.stage.scale.x);
     // A stage scaled to nothing filters at a unit a pixel rather than not at all.
     return Number.isFinite(units) && units > 0 ? units : 1;
   }
