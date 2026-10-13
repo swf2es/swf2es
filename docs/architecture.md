@@ -1576,7 +1576,8 @@ traces in Ruffle's corpus agree where they overlap). `loadBytes` tells
 the whole of the progress in the call, `PROGRESS` with nothing loaded and
 again with all of it, `bytes` set and `url` still null, and has no
 `OPEN`; a `load` of a URL has `OPEN` once the bytes come. The content
-comes in a later frame, after `ENTER_FRAME` and before `FRAME_CONSTRUCTED`:
+comes in a later frame, for `loadBytes` the next, after `ENTER_FRAME`
+and before `FRAME_CONSTRUCTED`:
 its SWF's code runs, its document class is constructed with `parent` and
 `stage` null and its timeline's first frame in place, it gets `ADDED`
 while it still has no parent, then `url` and `content` are set and it is
@@ -1595,7 +1596,21 @@ SWF's does (`scripting/loads.ts`). Linking is asynchronous (its ABCs are hashed 
 asked for is compiled and linked between frames, in the order asked, and
 each takes its place in the first frame after its code is linked; a host
 that steps frames by hand awaits `Scripting.settled()` between them, as
-the tests do, to see Flash's frame. `SymbolClass` bindings are the
+the tests do, to see Flash's frame. Flash has a `loadBytes`' content in
+the frame after the call whatever its size, its code verified as it runs
+(the `loader-bytes-frames` case; in adl a SWF of half a megabyte of ABC
+and eight of sounds came in that frame as a small one did, a few
+milliseconds after the call), and content counts on it, as a timer of a
+second set at the call that reads the `Loader`'s child. Compiling such
+an ABC takes a few hundred milliseconds here, longer on a slow machine,
+so `Player.advance` holds the next frame while a load from bytes due next
+still compiles: time passes up to the frame's slot, the timers due by
+then firing between frames, and stops there, the time held, the call in
+which the load came included, counting for neither the frames nor the
+timers; ten seconds at most, so that a load that never ends does not stop
+the player. Several loads from bytes asked in one frame all come in the
+next, here in the order asked; adl completes them in an order of its
+own, neither that order nor its reverse. `SymbolClass` bindings are the
 library's, since character ids collide across SWFs. The player package
 has no I/O: `load` of a URL asks the host for the bytes through a
 function the `Scripting` is given, with a resolved URL, method, headers,

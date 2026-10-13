@@ -1900,6 +1900,84 @@ function avm1Movie(compile: Compile): Uint8Array {
   });
 }
 
+// When content from Loader.loadBytes comes (scripts/LoaderBytesFrames.as):
+// a small SWF, and a large one of 200 classes' ABC and a megabyte of
+// sounds, each in the frame after the call whatever its size, as adl has
+// it. Their bytes are DefineBinaryData bound to ByteArray subclasses, too
+// large for the script's source.
+function loaderBytesFrames(compile: Compile): Uint8Array {
+  const bytesClass = (name: string) =>
+    compile(
+      name,
+      `package { import flash.utils.ByteArray; public class ${name} extends ByteArray { public function ${name}() { super(); } } }`,
+    );
+  const inner = (name: string, body: string, tags: Uint8Array[]) =>
+    w.swf({
+      width: 100,
+      height: 50,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [
+        w.fileAttributes(true),
+        ...tags,
+        w.doAbc(
+          compile(
+            name,
+            `package { import flash.display.MovieClip; public class ${name} extends MovieClip { public function ${name}() { ${body} addFrameScript(0, function():void { trace("${name} frame 1"); }); } } }`,
+          ),
+          name,
+        ),
+        w.symbolClass([[0, name]]),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+  const classes = Array.from(
+    { length: 200 },
+    (_, c) =>
+      `package { public class Many${c} { public static function f(x:int):int { var y:int = x; for (var i:int = 0; i < 4; i++) { y = (y ^ i) + ${c}; } return y; } public function g():String { return "${c}"; } } }`,
+  );
+  const sounds = Array.from({ length: 4 }, (_, k) => {
+    const data = new Uint8Array(250_000);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (i * 7 + k) & 0xff;
+    }
+
+    return w.defineSound(
+      10 + k,
+      { rate: 3, sixteen: true, stereo: true, samples: data.length / 4 },
+      data,
+    );
+  });
+  const small = inner("SmallInner", `trace("SmallInner made");`, []);
+  const large = inner("LargeInner", `trace("LargeInner made", Many0.f(1) + Many199.f(2));`, [
+    ...sounds,
+    w.doAbc(compile("ManyClasses", classes.join("\n")), "ManyClasses"),
+  ]);
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.binaryData(1, small),
+      w.binaryData(2, large),
+      w.doAbc(bytesClass("SmallBytes"), "SmallBytes"),
+      w.doAbc(bytesClass("LargeBytes"), "LargeBytes"),
+      w.doAbc(compile("LoaderBytesFrames"), "LoaderBytesFrames"),
+      w.symbolClass([
+        [1, "SmallBytes"],
+        [2, "LargeBytes"],
+        [0, "Main"],
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // What Crossbridge's runtime asks of the player as it starts
 // (scripts/CrossbridgeRuntime.as): a ByteArray subclass bound to
 // DefineBinaryData, as Crossbridge keeps a C program's data, among the rest.
@@ -5739,6 +5817,14 @@ export const cases: PlayerCase[] = [
   },
   // The unload at INIT follows frame 2's capture (see the harness): frame 3 shows it.
   { name: "loads-init", build: loadsInit, frames: 3, capture: [3], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "loader-bytes-frames",
+    build: loaderBytesFrames,
+    frames: 5,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "loader-parameters",
     build: loaderParameters,

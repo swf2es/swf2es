@@ -1149,3 +1149,101 @@ class ChildOnly {}`,
     Error.prepareStackTrace = prepare;
   }
 });
+
+/**
+ * A player by the real clock whose root traces each ENTER_FRAME and has
+ * arm(ms) trace "timeout" after `ms`, its loads' links held until `release`
+ * is called; `step` moves the clock by a 60 Hz display's interval and advances.
+ */
+async function heldLoading() {
+  const compile = compiler(out);
+  const lines: string[] = [];
+  let now = 0;
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: () => now,
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const root = compile(
+    "HoldRoot",
+    `package {
+      import flash.display.Sprite;
+      import flash.events.Event;
+      import flash.utils.setTimeout;
+      public class HoldRoot extends Sprite {
+        public function HoldRoot() {
+          addEventListener(Event.ENTER_FRAME, function(e:Event):void { trace("frame"); });
+        }
+        public function arm(ms:int):void {
+          setTimeout(function():void { trace("timeout"); }, ms);
+        }
+      }
+    }`,
+  );
+  const player = new Player(bare(root, 1, "HoldRoot"), scripting);
+  await player.start();
+
+  const code = scripting.code as unknown as { link: (...args: unknown[]) => Promise<unknown> };
+  const link = code.link.bind(code);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  code.link = async (...args) => {
+    await held;
+    return link(...args);
+  };
+
+  const rt = scripting.rt;
+  const loader = rt.construct(rt.classNamed("flash.display::Loader")) as avm2.AsObject;
+  rt.callProperty(player.root.object, rt.publicName("addChild"), loader);
+  const step = (calls = 1) => {
+    for (let i = 0; i < calls; i++) {
+      now += 1000 / 60;
+      player.advance(1000 / 60);
+    }
+  };
+  // The host's typical interval, known.
+  step(10);
+  lines.length = 0;
+  const arm = (ms: number) => rt.callProperty(player.root.object, rt.publicName("arm"), ms);
+  const content = () => rt.getProperty(loader, rt.publicName("content"));
+  return { scripting, loader, lines, step, arm, content, release: () => release() };
+}
+
+test("a load from bytes comes in the next frame however long its code takes, the frames and timers waiting", {
+  skip,
+}, async () => {
+  const held = await heldLoading();
+  held.scripting.loads.requestLoad(held.loader, innerSwf(compiler(out)("Inner"), 1));
+  // A timer set at the call that counts on the content by then, as content may.
+  held.arm(100);
+
+  // Two seconds of the host's: no frame and no timer, as Flash's next frame has the content.
+  held.step(120);
+  assert.equal(held.lines.length, 0, held.lines.join(" | "));
+  assert.equal(held.content(), null);
+
+  held.release();
+  await held.scripting.settled();
+  held.step();
+  assert.equal(held.lines[0], "frame");
+  assert.ok(held.content());
+  assert.ok(!held.lines.includes("timeout"));
+
+  // The time held was not the timer's: 100 ms on from the hold's start, it fires.
+  held.step(6);
+  assert.ok(held.lines.includes("timeout"), held.lines.join(" | "));
+});
+
+test("a frame waits ten seconds at most for a load from bytes", { skip }, async () => {
+  const held = await heldLoading();
+  held.scripting.loads.requestLoad(held.loader, innerSwf(compiler(out)("Inner"), 1));
+
+  held.step(590);
+  assert.equal(held.lines.length, 0, held.lines.join(" | "));
+  held.step(20);
+  assert.ok(held.lines.includes("frame"));
+  assert.equal(held.content(), null);
+  held.release();
+});
