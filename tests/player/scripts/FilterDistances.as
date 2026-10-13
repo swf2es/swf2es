@@ -42,6 +42,20 @@ package {
         }
       }
 
+      // A hair off its angle, adl's offset grows across the axes as the distance does, to the
+      // point the ordinary limits refuse an outer shadow: 8e9 and on, where 7.5e9 passes.
+      for each (var far:Number in [5e5, 1e8, 1e9, 2147483647, 4e9, 7.5e9, 8e9, 2e10, 1e11, -1e9, -8e9]) {
+        for each (ang in [0, 90, 180, 270]) {
+          var row:String = "";
+          for each (f in [new DropShadowFilter(far, ang, 0, 1, 2, 2, 1, 1), new DropShadowFilter(far, ang, 0, 1, 2, 2, 1, 1, true),
+              new GradientGlowFilter(far, ang, [0, 0xffffff], [0, 1], [0, 255], 2, 2, 1, 1, "outer"), new BevelFilter(far, ang, 0xffffff, 1, 0, 1, 2, 2, 1, 1),
+              new GradientBevelFilter(far, ang, [0, 0xffffff], [1, 1], [0, 255], 2, 2, 1, 1, "outer")]) {
+            row += " | " + grown(new BitmapData(40, 40, true, 0), new Rectangle(0, 0, 8, 8), f) + " " + refused(f);
+          }
+          trace("far", far, ang, row);
+        }
+      }
+
       // generateFilterRect: distances that wrap at 180° and stop, and inner filters within the bitmap.
       for each (c in [[3, [180, 270, 45]], [1000, [180, 270, 45]], [8388607, [180, 45]], [8388609, [180, 45]], [8388900, [180, 45]]]) {
         for each (ang in c[1]) {
@@ -145,6 +159,16 @@ package {
         }
       }
       return String(n);
+    }
+
+    /** Whether applyFilter takes `f` for an 8 by 8 source, or the error it refuses it with. */
+    private function refused(f:BitmapFilter):String {
+      try {
+        new BitmapData(8, 8, true, 0).applyFilter(new BitmapData(8, 8, true, 0), new Rectangle(0, 0, 8, 8), new Point(0, 0), f);
+      } catch (e:Error) {
+        return "error " + e.errorID;
+      }
+      return "ok";
     }
 
     private function grown(bd:BitmapData, r:Rectangle, f:BitmapFilter):String {

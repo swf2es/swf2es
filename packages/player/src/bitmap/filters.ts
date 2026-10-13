@@ -80,14 +80,23 @@ function reach(f: Filter): [number, number] {
 const FAR = -(2 ** 23 + 256);
 
 /**
+ * How far off adl's angle is, in radians: its offset has a part across the
+ * angle of 6.79e-9 of the distance, back, even on the axes, so 4e9 at 0°
+ * reaches 30 up past a reach of 2 and 27 right at 90°, and 1e11 679 both
+ * ways (fitted from 5e5 to 1e11 at the four axes, either sign).
+ */
+const SKEW = -6.79e-9;
+
+/**
  * A shadow's or a bevel's offset, down: [x, y], unrounded. adl keeps each
  * part in 256ths in an int, so one of 2^23 - 1 or more wraps round and one
  * below FAR stops there, both at FAR (generateFilterRect's -8388866 past
- * a reach of 2); a distance past a float's 2^31 is FAR both ways, short of
- * 1e10 for a shadow or a gradient glow, which takes 4e9 at 0° as the part
- * it is, and so is Infinity. A distance of NaN is FAR both ways for an
- * outer shadow or gradient glow, none for the rest; an angle of NaN or
- * Infinity is 0 (an outer shadow refuses either NaN: filterRefusal).
+ * a reach of 2), as Infinity does; its angle is off by SKEW, which this
+ * takes where it comes to a 512th, from a distance of some 288,000, and
+ * leaves out nearer, where it would only move a sample between pixels by
+ * a hair. A distance of NaN is FAR both ways for an outer shadow or
+ * gradient glow, none for the rest; an angle of NaN or Infinity is 0 (an
+ * outer shadow refuses either NaN: filterRefusal).
  */
 function shadowOffset(f: Filter): [number, number] {
   const d = f.distance;
@@ -97,17 +106,13 @@ function shadowOffset(f: Filter): [number, number] {
       : [0, 0];
   }
 
-  const bevels = f.kind === "bevel" || f.kind === "gradientBevel";
-  if (!(Math.abs(Math.fround(d)) < 2 ** 31) && (bevels || !(Math.abs(d) < 1e10))) {
-    return [FAR, FAR];
-  }
-
-  const radians = ((f.angle || 0) * Math.PI) / 180;
+  const skew = Math.abs(d * SKEW) >= 1 / 512 ? SKEW : 0;
+  const radians = ((f.angle || 0) * Math.PI) / 180 + skew;
   // A part a whisker off whole is whole, as adl's 256ths have it: 3 at
   // 180° is -3 across and 0 down, not 3.7e-16, which would read between rows.
   const part = (v: number) => {
     const whole = Math.round(v);
-    return v >= 2 ** 23 - 1 || v < FAR ? FAR : Math.abs(v - whole) < 1e-9 ? whole : v;
+    return !(v < 2 ** 23 - 1 && v >= FAR) ? FAR : Math.abs(v - whole) < 1e-9 ? whole : v;
   };
   return [part(d * Math.cos(radians)), part(d * Math.sin(radians))];
 }
@@ -177,8 +182,9 @@ const SIZED = new Set(["colorMatrix", "convolution", "blur", "glow", "dropShadow
  * arithmetic as the edges' difference wraps; an outer shadow's grown by
  * its offset (1e5 at 45° is refused), an inner one's not. By its offset
  * alone, as what the rect holds of the source grows by it: a gradient
- * glow outer or full past 2^30 pixels, 2015, and a bevel past a side of
- * 2^31 / 20 or 2^29 pixels, 2077; and an outer shadow or gradient glow of
+ * glow outer or full past 2^29 pixels, 2015, and a bevel past a side of
+ * 2^31 / 20 or 2^29 pixels, 2077, but a gradient bevel outer or full 2015
+ * there and 2077 past 2^31 / 10 pixels already; and an outer shadow or gradient glow of
  * a distance or angle of NaN (or Infinity, which the angle keeps as NaN),
  * 2015. A blur or glow some way short of those is refused with 2077,
  * which this leaves.
@@ -203,10 +209,17 @@ export function filterRefusal(rect: PixelRect, f: Filter, source: PixelRect): nu
     const out = filterRect(held, f);
     const pixels = out.width * out.height;
     if (f.kind === "gradientGlow") {
-      return !isInner(f) && pixels > 2 ** 30 ? 2015 : 0;
+      return !isInner(f) && pixels > 2 ** 29 ? 2015 : 0;
     }
 
-    return out.width > side || out.height > side || pixels > 2 ** 29 ? 2077 : 0;
+    const past = out.width > side || out.height > side || pixels > 2 ** 29;
+    // A gradient bevel outer or full is refused sooner, with 2077 (16777740 by 14,
+    // not by 12), and past the rest with 2015.
+    if (f.kind === "gradientBevel" && !isInner(f)) {
+      return past ? 2015 : pixels > 2 ** 31 / 10 ? 2077 : 0;
+    }
+
+    return past ? 2077 : 0;
   }
 
   if (!SIZED.has(f.kind)) {

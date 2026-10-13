@@ -314,12 +314,25 @@ test("a shadow's or a bevel's distance past what adl holds: wrapped, stopped, re
     blurX: 2,
     blurY: 2,
   });
-  // 2^23 - 1 across wraps round to -2^23 - 256, which a reach of 2 makes -8388866.
+  // 2^23 - 1 across wraps round to -2^23 - 256, which a reach of 2 makes -8388866; adl's
+  // angle, a hair off, reaches a pixel up too.
   assert.deepEqual(filterRect(src, shadow(8388607, 0)), {
     x: -8388866,
-    y: -2,
+    y: -3,
     width: 8388874,
     height: 12,
+  });
+  assert.deepEqual(filterRect(src, shadow(4e9, 0)), {
+    x: -8388866,
+    y: -30,
+    width: 8388874,
+    height: 38,
+  });
+  assert.deepEqual(filterRect(src, shadow(1e11, 90)), {
+    x: 0,
+    y: -8388866,
+    width: 689,
+    height: 8388874,
   });
   assert.deepEqual(filterRect(src, shadow(8388900, 180)), {
     x: -8388866,
@@ -340,6 +353,7 @@ test("a shadow's or a bevel's distance past what adl holds: wrapped, stopped, re
       refusal(shadow(1e5, 45)),
       refusal(shadow(1e5, 45, true)),
       refusal(shadow(1e9, 0)),
+      refusal(shadow(8e9, 0)),
       refusal(shadow(Infinity, 0)),
       refusal(shadow(Number.NaN, 0)),
       refusal(shadow(Number.NaN, 0, true)),
@@ -349,7 +363,7 @@ test("a shadow's or a bevel's distance past what adl holds: wrapped, stopped, re
       refusal(bevel(Infinity, 0)),
       refusal(bevel(Number.NaN, 0)),
     ],
-    [2015, 0, 0, 2015, 2015, 0, 2015, 2077, 0, 2077, 0],
+    [2015, 0, 0, 2015, 2015, 2015, 0, 2015, 2077, 0, 2077, 0],
   );
 
   // An outer shadow cast as far as an offset goes writes the rect empty, its source too,
