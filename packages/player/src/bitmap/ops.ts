@@ -358,6 +358,18 @@ export function perlinNoise(
 /** scroll: the pixels moved by (x, y); what nothing moved onto keeps its old pixels. */
 export function scroll(store: BitmapStore, x: number, y: number): void {
   const { width, height } = store;
+  // Nothing moves: the pixels are left where they are, on the GPU or not.
+  if (x === 0 && y === 0) {
+    store.changed();
+    return;
+  }
+
+  // The pixels that stay within the store, moved on the GPU where it holds the newest.
+  const moved = store.clip({ x: -x, y: -y, width, height });
+  if (store.onGpu((copy) => !moved || copy.copy(store, moved, moved.x + x, moved.y + y))) {
+    return;
+  }
+
   const old = store.pixels.slice();
   for (let row = 0; row < height; row++) {
     const sy = row - y;
