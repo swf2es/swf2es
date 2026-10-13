@@ -3132,8 +3132,8 @@ into an opaque bitmap composites source over destination whether or not
 rounded to the nearest pixel and a half to the even one, as Flash rounds
 them (`bitmapdata_rectangle_rounding`), and a Point's coordinates
 truncated toward 0 (the destination, alpha and hit-test points of every
-operation alike, under adl: 3.7 is 3, -1.5 is -1). A source rect past
-the source's edge is clipped and the point moved with it; `copyPixels`
+operation alike, under adl: 3.7 is 3, -1.5 is -1; NaN, or past int's
+range, off the bitmap). A source rect past the source's edge is clipped and the point moved with it; `copyPixels`
 in place that moves right and down by no more than its rect's size
 writes the rect whole instead, and what lay left of or above the bitmap
 comes out empty (`copyGaps`; adl reads an opaque bitmap's as 0, alpha

@@ -1120,3 +1120,43 @@ scroll -1.5,0 0,0 15x16 shift -1,0
 scroll 0.5,0 none
 scroll 2.7,-0.7 2,0 14x16 shift 2,0
 scroll -2.7,1.2 0,1 14x15 shift -2,1
+odd point NaN,4 none / none
+odd point copyChannel NaN,4 none
+odd point merge NaN,4 none
+odd point paletteMap NaN,4 none
+odd point threshold NaN,4 0 none
+odd point applyFilter NaN,4 none
+odd point pixelDissolve NaN,4 0 none
+odd point hitTest NaN,4 false false false false
+odd point 3,NaN none / none
+odd point copyChannel 3,NaN none
+odd point merge 3,NaN none
+odd point paletteMap 3,NaN none
+odd point threshold 3,NaN 0 none
+odd point applyFilter 3,NaN none
+odd point pixelDissolve 3,NaN 0 none
+odd point hitTest 3,NaN false false false false
+odd point Infinity,4 none / none
+odd point copyChannel Infinity,4 none
+odd point merge Infinity,4 none
+odd point paletteMap Infinity,4 none
+odd point threshold Infinity,4 0 none
+odd point applyFilter Infinity,4 none
+odd point pixelDissolve Infinity,4 0 none
+odd point hitTest Infinity,4 false false false false
+odd point -Infinity,4 none / none
+odd point copyChannel -Infinity,4 none
+odd point merge -Infinity,4 none
+odd point paletteMap -Infinity,4 none
+odd point threshold -Infinity,4 0 none
+odd point applyFilter -Infinity,4 none
+odd point pixelDissolve -Infinity,4 0 none
+odd point hitTest -Infinity,4 false false false false
+odd point 4294967299,4 none / none
+odd point copyChannel 4294967299,4 none
+odd point merge 4294967299,4 none
+odd point paletteMap 4294967299,4 none
+odd point threshold 4294967299,4 0 none
+odd point applyFilter 4294967299,4 none
+odd point pixelDissolve 4294967299,4 0 none
+odd point hitTest 4294967299,4 false false false false

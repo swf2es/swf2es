@@ -80,7 +80,8 @@ function rectOf(s: Scripting, v: Value): PixelRect {
 /**
  * A flash.geom.Point's values as pixels, truncated toward 0 as Flash's
  * destination, alpha and hit-test points are, unlike a rect's rounded
- * edges; TypeError 2007 for null.
+ * edges; NaN, and anything past int's range, int's least, which lies off
+ * every bitmap, as adl takes them; TypeError 2007 for null.
  */
 function pointOf(s: Scripting, v: Value, name: string): [number, number] {
   if (v === null || v === undefined) {
@@ -88,8 +89,10 @@ function pointOf(s: Scripting, v: Value, name: string): [number, number] {
   }
 
   const p = v as AsObject;
-  const read = (k: string) =>
-    Math.trunc(s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k)))) || 0;
+  const read = (k: string) => {
+    const t = Math.trunc(s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k))));
+    return t >= -0x80000000 && t <= 0x7fffffff ? t + 0 : -0x80000000;
+  };
   return [read("x"), read("y")];
 }
 

@@ -143,6 +143,16 @@ package {
         trace("scroll", s, describe(b, true));
       }
 
+      // A point of NaN, or past int's range, lies off every bitmap.
+      for each (p in [[NaN, 4], [3, NaN], [Infinity, 4], [-Infinity, 4], [4294967299, 4]]) {
+        trace("odd point", p, copy(false, false, [2, 3, 5, 4], p, 0), "/", copy(false, false, [2, 3, 5, 4], [3, 4], 2, p));
+        for each (op in ["copyChannel", "merge", "paletteMap", "threshold", "applyFilter", "pixelDissolve"]) {
+          trace("odd point", op, p, other(op, false, [2, 3, 5, 4], p));
+        }
+        trace("odd point hitTest", p, hb.hitTest(new Point(p[0], p[1]), 1, new Point(4, 4)), hb.hitTest(new Point(0, 0), 1, new Point(p[0], p[1])),
+          hb.hitTest(new Point(p[0], p[1]), 1, dot, new Point(3, 3)), hb.hitTest(new Point(0, 0), 1, dot, new Point(p[0], p[1])));
+      }
+
       // Shown: an opaque bitmap with empty pixels, as drawn, and one drawn on the GPU first.
       var shown:BitmapData = pattern(2, false);
       shown.copyPixels(shown, new Rectangle(-3, -2, 8, 7), new Point(3, 4));
