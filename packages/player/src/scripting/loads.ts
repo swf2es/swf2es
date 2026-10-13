@@ -65,6 +65,8 @@ export class Loads {
   private readonly pendingRequests = new Set<Promise<void>>();
   /** Completed host byte requests delivered at the next frame, with scripts on the player thread. */
   private readonly readyBytes: (() => void)[] = [];
+  /** A load from bytes was asked, and heldTime has not yet told of it ready. */
+  private holding = false;
   /** How many loads from bytes there have been: each gets a URL of its own under the main SWF's. */
   private dynamic = 0;
   /** The main SWF's flashvars, as the host gave them. */
@@ -225,6 +227,7 @@ export class Loads {
       return;
     }
 
+    this.holding = true;
     this.enqueue(
       loader,
       generation,
@@ -529,6 +532,38 @@ export class Loads {
    */
   settled(): Promise<void> {
     return Promise.all([this.preparing, ...this.pendingRequests]).then(() => {});
+  }
+
+  /**
+   * Whether the time since the host's last call was a load from bytes':
+   * one was asked since, or was still compiling at that call. Flash has a
+   * loadBytes' content in the frame after the call, ENTER_FRAME's,
+   * whatever the SWF's size, its code verified as it runs (the
+   * `loader-bytes-frames` case; in adl 0.5 MB of ABC and 8 MB of sounds
+   * still came in that frame), and content may count on it, as with a
+   * timer of a second, set at the call, that reads the Loader's child. True
+   * once more after the load is ready, for the call in which it came.
+   */
+  heldTime(): boolean {
+    if (!this.holding) {
+      return false;
+    }
+
+    this.holding = this.holdsFrame();
+    return true;
+  }
+
+  /**
+   * Whether the next frame waits for the load due next, one from bytes
+   * whose code still compiles. Not one behind a load of a URL whose bytes
+   * have not come: that is not Flash's to time. A closed one still
+   * compiling ahead of it is passed over, as it will never come.
+   */
+  holdsFrame(): boolean {
+    const next = this.loads.find(
+      (load) => !load.ready && !load.failed && load.generation === load.loader.$generation,
+    );
+    return next !== undefined && next.url === null;
   }
 
   private newLoad(

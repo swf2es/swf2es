@@ -57,6 +57,12 @@ export class Timers {
    * their delay while the frame runs late.
    */
   private grid = Number.NaN;
+  /**
+   * While a frame waits for a load from bytes, the host's time of the
+   * frame's slot: no timer due after it fires until release(); Infinity
+   * otherwise (Player.advance).
+   */
+  private cap = Number.POSITIVE_INFINITY;
   /** The last pass's time: none goes back before it. */
   private lastPass = Number.NEGATIVE_INFINITY;
   /** The real clock's last finite reading, and the sum of its forward steps since the start. */
@@ -127,6 +133,22 @@ export class Timers {
     const off = Number.isNaN(slot) || Number.isNaN(this.host);
     this.at = off ? Number.NaN : this.host - slot;
     this.grid = off ? Number.NaN : this.host - slot - rest;
+  }
+
+  /**
+   * A frame waits for a load from bytes `ms` before its slot, from the
+   * host's time now: timers due after the slot wait for release(), then
+   * fire once each, the ticks they lost dropped. Already waiting, nothing.
+   */
+  holdAfter(ms: number): void {
+    if (this.realTime && this.cap === Number.POSITIVE_INFINITY && !Number.isNaN(this.host)) {
+      this.cap = this.host + ms;
+    }
+  }
+
+  /** The frame that waited has played: the timers fire as they fall due again. */
+  release(): void {
+    this.cap = Number.POSITIVE_INFINITY;
   }
 
   /** A frame begins: the frame clock moves on by `ms`; its timers fire after ENTER_FRAME. */
@@ -208,13 +230,15 @@ export class Timers {
   /**
    * A pass: each timer due fires once, in the order the timers were
    * started, and next falls due its delay after the frame's time on the
-   * grid, or after `time` between frames (`grid` NaN), so the ticks a long
+   * grid, or after `time` between frames (`frameGrid` NaN), so the ticks a long
    * frame or a stall lost are dropped, not caught up with, as in Flash.
-   * Those shorter than `frameMs` are due by `time`; the others by `grid`,
+   * Those shorter than `frameMs` are due by `time`; the others by `frameGrid`,
    * and wait for a frame.
    */
-  private fireDue(time: number, grid: number, frameMs: number, between: boolean): void {
-    const now = Math.max(time, this.lastPass);
+  private fireDue(time: number, frameGrid: number, frameMs: number, between: boolean): void {
+    // While a frame waits for a load, none due after its slot.
+    const now = Math.max(Math.min(time, this.cap), this.lastPass);
+    const grid = Math.min(frameGrid, this.cap);
     this.lastPass = now;
     const due: TimerRecord[] = [];
     const held: TimerRecord[] = [];

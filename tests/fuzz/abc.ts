@@ -165,6 +165,7 @@ function fail(abc: Uint8Array, why: string): void {
   failures.push(`${why}: ${name}`);
 }
 
+const utf8 = new TextDecoder("utf-8", { fatal: true });
 const started = Date.now();
 for (let k = 0; k < caseCount; k++) {
   const abc = mutate(seeds[below(seeds.length)]);
@@ -180,7 +181,23 @@ for (let k = 0; k < caseCount; k++) {
     }
 
     accepted++;
-    const module: string = testing.domainModule([...builtinHashes, sha(abc)].join("\n"));
+    const hashes = [...builtinHashes, sha(abc)].join("\n");
+    // The bytes the player decodes (codegen's wrapper) are the module's
+    // well-formed UTF-8: a decode that refuses none gives the same string.
+    const bytes: Uint8Array = testing.domainModuleBytes(hashes, -1, false);
+    const module: string = testing.domainModule(hashes);
+    let decoded: string | null = null;
+    try {
+      decoded = utf8.decode(bytes);
+    } catch {
+      // Not UTF-8: reported below.
+    }
+
+    if (decoded !== module) {
+      fail(abc, "the module's bytes are not its string's UTF-8");
+      continue;
+    }
+
     // Imported as the player imports it: an ES module, strict, where
     // await is reserved; its body only defines the function it exports.
     try {

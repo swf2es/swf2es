@@ -827,6 +827,7 @@ export {
   domainLogMark,
   domainLogSince,
   domainModule,
+  domainModuleBytes,
   domainModuleEntries,
   domainRebuild,
   domainReplay,

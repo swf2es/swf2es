@@ -395,6 +395,16 @@ export class Scripting {
     return this.loads.settled();
   }
 
+  /** Whether the time since the host's last call was a load from bytes' (Loads.heldTime). */
+  heldTime(): boolean {
+    return this.loads.heldTime();
+  }
+
+  /** Whether the next frame waits for a load from bytes still compiling (Loads.holdsFrame). */
+  holdsFrame(): boolean {
+    return this.loads.holdsFrame();
+  }
+
   /**
    * Stop for good, as a page that takes its player away needs: the open
    * SharedObjects are written, as Flash wrote them as a SWF went, the sounds

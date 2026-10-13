@@ -293,7 +293,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       named.push(hashes[Number(i)] ?? "");
     }
 
-    const module = collected(wasm.domainModule(named.join("\n"), at, keep, true));
+    // Its bytes decoded here: lifted as a string, a module of megabytes took
+    // longer than compiling it. The emitter writes only well-formed UTF-8,
+    // which decodes alike either way.
+    const module = utf8.decode(collected(wasm.domainModuleBytes(named.join("\n"), at, keep, true)));
     if (module === "") {
       throw new Error(`ABC ${index}: its application domain was dropped`);
     }
@@ -483,3 +486,9 @@ function parseEntries(text: string): Map<number, string> {
 }
 
 const COLLECT_EVERY = 64;
+
+// TextDecoder is the web's and node's alike, though not ECMAScript's,
+// whose library alone the compiler's wrapper is typed against.
+declare const TextDecoder: new () => { decode(bytes: Uint8Array): string };
+
+const utf8 = new TextDecoder();
