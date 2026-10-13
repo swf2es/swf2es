@@ -97,6 +97,12 @@
 // frames' mean is then the slower of the page's and the GPU's share, where
 // the median of each part is the page's alone.
 //
+// --scroll N plays instead a BitmapData of N by N shown in a Bitmap, into
+// which a script draws a sprite of drifting dots each frame and then
+// scrolls it a pixel up, as a preloader's trail of rising sparks does: a
+// draw on the GPU followed by an operation on the store's pixels, which
+// must not bring them back from the GPU each frame (perFrame.readbacks).
+//
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens
 // it); the bench prints the functions that took the most time themselves.
@@ -112,7 +118,7 @@
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--glide]
 //     | --pulse N [--loop K] [--line W]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
+//     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
 //     [--min-run N] [--pace MS] [--hover]
 //     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined]
@@ -143,6 +149,7 @@ const masks = option("masks", 0);
 const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
 const town = option("town", 0);
+const scrolled = option("scroll", 0);
 const cpuProfile = args.includes("--cpu-profile")
   ? args[args.indexOf("--cpu-profile") + 1]
   : undefined;
@@ -734,6 +741,68 @@ function scriptedSwf(count: number, still: boolean): Uint8Array {
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: still ? 2 : 1, tags });
 }
 
+/** The scrolling trail's class (--scroll): dots drawn into a bitmap each frame, then scrolled up a pixel. */
+const SCROLL_SOURCE = `package {
+  import flash.display.Bitmap;
+  import flash.display.BitmapData;
+  import flash.display.Shape;
+  import flash.display.Sprite;
+  import flash.events.Event;
+
+  public class Main extends Sprite {
+    private var data:BitmapData;
+    private var dots:Sprite = new Sprite();
+    private var frame:int = 0;
+
+    public function Main() {
+      var size:int = SIZE;
+      data = new BitmapData(size, size, true, 0);
+      addChild(new Bitmap(data));
+      for (var i:int = 0; i < 40; i++) {
+        var dot:Shape = new Shape();
+        dot.graphics.beginFill(0xffc040 + i * 4, 0.8);
+        dot.graphics.drawCircle(0, 0, 2 + (i % 3));
+        dots.addChild(dot);
+      }
+
+      addEventListener(Event.ENTER_FRAME, step);
+    }
+
+    private function step(e:Event):void {
+      frame++;
+      for (var i:int = 0; i < dots.numChildren; i++) {
+        var dot:Shape = Shape(dots.getChildAt(i));
+        dot.x = (i * 97 + frame * (1 + i % 5)) % data.width;
+        dot.y = data.height - 8 - (i * 13 + frame) % 24;
+      }
+
+      data.draw(dots);
+      data.scroll(0, -1);
+    }
+  }
+}
+`;
+
+/** The scrolling trail (--scroll): a bitmap of `size` a side that a script draws into and scrolls each frame. */
+function scrollSwf(size: number): Uint8Array {
+  const abc = compiler()(`BenchScroll${size}`, SCROLL_SOURCE.replace("SIZE", String(size)));
+  libraryAbcs();
+  return w.swf({
+    width: WIDTH,
+    height: HEIGHT,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0x102040),
+      w.doAbc(abc, `BenchScroll${size}`),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** The town's classes: the root, and each character's, whose frame scripts count its loops. */
 const TOWN_SOURCE = `package {
   import flash.display.MovieClip;
@@ -1027,31 +1096,33 @@ function branchSwf(count: number): Uint8Array {
 }
 
 const swf =
-  town > 0
-    ? townSwf(town)
-    : toggleBranches > 0
-      ? branchSwf(toggleBranches)
-      : toggle > 0
-        ? toggleSwf(toggle)
-        : toggleStatic > 0
-          ? toggleStaticSwf(toggleStatic)
-          : scripted > 0
-            ? scriptedSwf(scripted, args.includes("--still"))
-            : pulse > 0
-              ? pulseSwf(pulse, option("loop", 96), option("line", 1))
-              : masks > 0
-                ? masksSwf(masks, args.includes("--unmasked"))
-                : branches > 0
-                  ? branchSwf(branches)
-                  : rig > 0
-                    ? rigSwf(
-                        rig,
-                        args.includes("--swap"),
-                        args.includes("--fresh"),
-                        args.includes("--blurred") || filtered > 0,
-                        args.includes("--glide"),
-                      )
-                    : synthetic();
+  scrolled > 0
+    ? scrollSwf(scrolled)
+    : town > 0
+      ? townSwf(town)
+      : toggleBranches > 0
+        ? branchSwf(toggleBranches)
+        : toggle > 0
+          ? toggleSwf(toggle)
+          : toggleStatic > 0
+            ? toggleStaticSwf(toggleStatic)
+            : scripted > 0
+              ? scriptedSwf(scripted, args.includes("--still"))
+              : pulse > 0
+                ? pulseSwf(pulse, option("loop", 96), option("line", 1))
+                : masks > 0
+                  ? masksSwf(masks, args.includes("--unmasked"))
+                  : branches > 0
+                    ? branchSwf(branches)
+                    : rig > 0
+                      ? rigSwf(
+                          rig,
+                          args.includes("--swap"),
+                          args.includes("--fresh"),
+                          args.includes("--blurred") || filtered > 0,
+                          args.includes("--glide"),
+                        )
+                      : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -1103,25 +1174,27 @@ const total = tick.map((t, i) => t + sync[i] + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
   shapes:
-    town > 0
-      ? `town of ${town}`
-      : toggleBranches > 0
-        ? `toggle of ${toggleBranches} branches`
-        : toggle > 0
-          ? `toggle of ${toggle}`
-          : toggleStatic > 0
-            ? `static toggle of ${toggleStatic}`
-            : scripted > 0
-              ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
-              : pulse > 0
-                ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
-                : masks > 0
-                  ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                  : branches > 0
-                    ? `${branches} branches`
-                    : rig > 0
-                      ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
-                      : shapes,
+    scrolled > 0
+      ? `scrolled bitmap of ${scrolled}`
+      : town > 0
+        ? `town of ${town}`
+        : toggleBranches > 0
+          ? `toggle of ${toggleBranches} branches`
+          : toggle > 0
+            ? `toggle of ${toggle}`
+            : toggleStatic > 0
+              ? `static toggle of ${toggleStatic}`
+              : scripted > 0
+                ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
+                : pulse > 0
+                  ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+                  : masks > 0
+                    ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                    : branches > 0
+                      ? `${branches} branches`
+                      : rig > 0
+                        ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
+                        : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   frames,

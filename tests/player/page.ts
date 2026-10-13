@@ -321,7 +321,7 @@ interface Bench {
  * What a renderer does in a frame, counted by wrapping it: GL's draw calls,
  * Pixi's unbatched Graphics and batches, its render groups' instruction
  * rebuilds and their time, contexts tessellated with their vertices and
- * time, buffer uploads and their bytes, and program switches. `read` gives
+ * time, buffer uploads and their bytes, program switches, and readbacks. `read` gives
  * the counts since the last read.
  */
 function meter(renderer: object): { read(): Record<string, number> } {
@@ -372,6 +372,15 @@ function meter(renderer: object): { read(): Record<string, number> } {
     }
   });
   wrap(gl, "texSubImage2D", () => add("texUploads"));
+  // Pixels brought back from the GPU, each a wait for it to finish; the
+  // bench's own wait, a single pixel, is not the player's.
+  wrap(gl, "readPixels", (args) => {
+    const pixels = (args[2] as number) * (args[3] as number);
+    if (pixels > 1) {
+      add("readbacks");
+      add("readbackPixels", pixels);
+    }
+  });
   for (const method of ["bufferData", "bufferSubData"]) {
     wrap(gl, method, (args) => {
       add("uploads");
