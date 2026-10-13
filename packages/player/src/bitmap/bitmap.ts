@@ -23,18 +23,64 @@ export function nearest(v: number): number {
   return f % 2 === 0 ? f : f + 1;
 }
 
+/** How far a rect's edge reaches either way, as adl clamps it: 2^30 - 1. */
+export const EDGE_LIMIT = 0x3fffffff;
+
+/** The edge NaN makes, which lies off every bitmap: int's least. */
+export const NAN_EDGE = -0x80000000;
+
+/**
+ * A rect's edge as a pixel: rounded to the nearest, a half to the even
+ * one, then clamped to EDGE_LIMIT, so that Infinity and 1e20 lie past
+ * every bitmap as a huge finite edge does; NaN, which the clamp lets
+ * through, is int's least, as adl converts it (a copy's point moved by a
+ * clamped edge lands where 2^30 - 1 puts it).
+ */
+export function pixelEdge(v: number): number {
+  if (Number.isNaN(v)) {
+    return NAN_EDGE;
+  }
+
+  return Math.max(-EDGE_LIMIT, Math.min(EDGE_LIMIT, nearest(v))) + 0;
+}
+
 /**
  * A flash.geom.Rectangle's numbers as the pixels Flash takes it to cover:
- * each edge rounded to the nearest pixel, a half to the even one, so a
- * rect from 1.6 of 1.8 covers the pixel at 2 alone, and one from 3.5 of 1
- * covers none (Ruffle's bitmapdata_rectangle_rounding; under adl the same
- * for every operation taking a rect).
+ * each edge, x and x + width, as pixelEdge makes it, so a rect from 1.6 of
+ * 1.8 covers the pixel at 2 alone, and one from 3.5 of 1 covers none
+ * (Ruffle's bitmapdata_rectangle_rounding; under adl the same for every
+ * operation taking a rect). A width of Infinity reaches the bitmap's edge,
+ * one of NaN covers nothing, and an x of NaN or Infinity nothing either.
  */
 export function pixelRect(x: number, y: number, width: number, height: number): PixelRect {
-  const x0 = nearest(x);
-  const y0 = nearest(y);
-  return { x: x0, y: y0, width: nearest(x + width) - x0, height: nearest(y + height) - y0 };
+  const x0 = pixelEdge(x);
+  const y0 = pixelEdge(y);
+  return { x: x0, y: y0, width: pixelEdge(x + width) - x0, height: pixelEdge(y + height) - y0 };
 }
+
+/**
+ * pixelRect of the rect as merge, copyChannel, paletteMap, threshold and
+ * pixelDissolve take it under adl: a negative width or height spans back
+ * from x to x + width, turned round on the numbers before their edges are
+ * made, so that 5 of -1e20 is a rect from -1e20 of 1e20, which the double
+ * rounds to end at 0, not one reaching from the clamped edge to 5.
+ */
+export function spanRect(x: number, y: number, width: number, height: number): PixelRect {
+  if (width < 0) {
+    x += width;
+    width = -width;
+  }
+
+  if (height < 0) {
+    y += height;
+    height = -height;
+  }
+
+  return pixelRect(x, y, width, height);
+}
+
+/** No gaps, shared by every copy that leaves none. */
+const NO_GAPS: readonly PixelRect[] = [];
 
 /** The reciprocals Flash divides alpha out with, 8.8 fixed point. */
 const RECIPROCAL = new Uint32Array(256);
@@ -283,8 +329,12 @@ export class BitmapStore {
     ax = 0,
     ay = 0,
   ): void {
-    const gaps = source === this ? this.copyGaps(rect, dx, dy) : [];
-    const [gx, gy, gax, gay] = [dx, dy, ax, ay];
+    const gaps = source === this ? this.copyGaps(rect, dx, dy) : NO_GAPS;
+    // The point and alpha point as given, which the gaps are written from.
+    const gx = dx;
+    const gy = dy;
+    const gax = ax;
+    const gay = ay;
     const s = source.clip(rect);
     const d =
       s &&
@@ -362,7 +412,7 @@ export class BitmapStore {
    * other move (or another source) clips it and moves the point with it.
    * Within the store, and apart; none for any other copy.
    */
-  copyGaps(rect: PixelRect, dx: number, dy: number): PixelRect[] {
+  copyGaps(rect: PixelRect, dx: number, dy: number): readonly PixelRect[] {
     // Where the source's (0, 0) lands.
     const kx = dx - rect.x;
     const ky = dy - rect.y;
@@ -375,7 +425,7 @@ export class BitmapStore {
       kx > rect.width ||
       ky > rect.height
     ) {
-      return [];
+      return NO_GAPS;
     }
 
     const right = dx + rect.width;
@@ -393,7 +443,7 @@ export class BitmapStore {
    * draws black, which this keeps them, as opaque black.
    */
   private fillGaps(
-    gaps: PixelRect[],
+    gaps: readonly PixelRect[],
     source: BitmapStore,
     dx: number,
     dy: number,

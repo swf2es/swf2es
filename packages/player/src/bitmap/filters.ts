@@ -8,7 +8,15 @@
 
 import type { Filter } from "../display/filters.js";
 import { ramp } from "../display/gradients.js";
-import { type BitmapStore, over, type PixelRect, premultiply, unmultiply } from "./bitmap.js";
+import {
+  type BitmapStore,
+  EDGE_LIMIT,
+  NAN_EDGE,
+  over,
+  type PixelRect,
+  premultiply,
+  unmultiply,
+} from "./bitmap.js";
 
 /** The filters this filters: the others' rects and pixels are still to come. */
 export const filtersDrawn: ReadonlySet<string> = new Set([
@@ -109,6 +117,44 @@ export function filterRect(rect: PixelRect, f: Filter): PixelRect {
     width: rect.width + left + right,
     height: rect.height + top + bottom,
   };
+}
+
+/** The filters adl refuses a rect for whose left or top edge lies as far as an edge can. */
+const EDGED = new Set(["bevel", "gradientBevel", "gradientGlow", "displacementMap"]);
+
+/** The filters whose buffers adl sizes by the rect they write, and refuses past its reach. */
+const SIZED = new Set(["colorMatrix", "convolution", "blur", "glow", "dropShadow"]);
+
+/**
+ * Whether adl refuses applyFilter's `rect` (bitmap.ts pixelRect) for `f`
+ * with ArgumentError 2015, as it does where it cannot make the filter's
+ * buffers. Probed under adl: an x or y of NaN for every filter but a
+ * colour matrix and a drop shadow cast some distance; a left or top edge
+ * clamped to the farthest, as -Infinity is (-2^29 passes), for the
+ * bevels, a gradient glow and a displacement map; and for the filters sized by what they write, a filter rect a side
+ * of which passes 2^31 / 20 pixels (106e6 passes, 108e6 is refused) or of
+ * more than 2^29 pixels, a width or height of NaN or Infinity among them,
+ * the sizes in int arithmetic as the edges' difference wraps. A blur or
+ * glow some way short of those is refused with 2077, which this leaves.
+ */
+export function filterRefuses(rect: PixelRect, f: Filter): boolean {
+  if (rect.x === NAN_EDGE || rect.y === NAN_EDGE) {
+    return f.kind !== "colorMatrix" && !(f.kind === "dropShadow" && f.distance);
+  }
+
+  if (EDGED.has(f.kind)) {
+    return rect.x <= 1 - EDGE_LIMIT || rect.y <= 1 - EDGE_LIMIT;
+  }
+
+  if (!SIZED.has(f.kind)) {
+    return false;
+  }
+
+  const out = filterRect({ ...rect, width: rect.width | 0, height: rect.height | 0 }, f);
+  const w = Math.abs(out.width);
+  const h = Math.abs(out.height);
+  const side = 2 ** 31 / 20;
+  return w > side || h > side || w * h > 2 ** 29;
 }
 
 /**

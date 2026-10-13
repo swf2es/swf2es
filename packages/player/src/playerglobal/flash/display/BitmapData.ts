@@ -2,8 +2,8 @@
 // object, as $store; the natives read and write it. Flash's limits and its
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
-import { BitmapStore, type PixelRect, pixelRect } from "../../../bitmap/bitmap.js";
-import { applyFilter, filterRect, filtersDrawn } from "../../../bitmap/filters.js";
+import { BitmapStore, type PixelRect, pixelRect, spanRect } from "../../../bitmap/bitmap.js";
+import { applyFilter, filterRect, filterRefuses, filtersDrawn } from "../../../bitmap/filters.js";
 import {
   type Affine,
   alphaAt,
@@ -42,6 +42,12 @@ const GLOWS: ReadonlySet<string> = new Set([
 
 import { colorOf } from "../geom/Transform.js";
 
+/** The longest side adl makes a BitmapData of: 2^31 / 20, whole. */
+const MAX_SIDE = 107374182;
+
+/** The most pixels adl makes a BitmapData of, whatever its shape: 2146500576 bytes. */
+const MAX_PIXELS = 536625144;
+
 type Value = avm2.Value;
 type AsObject = avm2.AsObject;
 
@@ -66,15 +72,20 @@ function sizeOf(s: Scripting, o: AsObject): BitmapStore {
   return store;
 }
 
-/** A flash.geom.Rectangle as pixels (bitmap.ts pixelRect); TypeError 2007 for null. */
-function rectOf(s: Scripting, v: Value): PixelRect {
+/**
+ * A flash.geom.Rectangle as pixels (bitmap.ts pixelRect), NaN and Infinity
+ * as adl takes them; with `span`, a negative size spanning back, as merge,
+ * copyChannel, paletteMap, threshold and pixelDissolve take it (spanRect).
+ * TypeError 2007 for null.
+ */
+function rectOf(s: Scripting, v: Value, span = false): PixelRect {
   if (v === null || v === undefined) {
     throw s.rt.error("TypeError", 2007, "rect");
   }
 
   const r = v as AsObject;
-  const read = (k: string) => s.rt.toNumber(s.rt.getProperty(r, s.rt.publicName(k))) || 0;
-  return pixelRect(read("x"), read("y"), read("width"), read("height"));
+  const read = (k: string) => s.rt.toNumber(s.rt.getProperty(r, s.rt.publicName(k)));
+  return (span ? spanRect : pixelRect)(read("x"), read("y"), read("width"), read("height"));
 }
 
 /**
@@ -239,19 +250,30 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      // A side under 1 is refused; Flash sets no upper bound any more (16384 wide and 4097 by 4096 both pass).
+      // A side under 1 is refused, and as adl refuses them, a side past 2^31 / 20
+      // (107374183 by 1) and more than MAX_PIXELS (32753 by 16384, 65514 by 8191).
       const w = s.rt.toInt(width);
       const h = s.rt.toInt(height);
-      if (w < 1 || h < 1) {
+      if (w < 1 || h < 1 || w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_PIXELS) {
         throw s.rt.error("ArgumentError", 2015);
       }
 
-      this.$store = new BitmapStore(
-        w,
-        h,
-        transparent === undefined ? true : !!transparent,
-        s.rt.toUint(fill === undefined ? 0xffffffff : fill),
-      );
+      // One the browser cannot allocate is refused, as adl refuses what its memory
+      // cannot hold, rather than ending the player with a RangeError.
+      try {
+        this.$store = new BitmapStore(
+          w,
+          h,
+          transparent === undefined ? true : !!transparent,
+          s.rt.toUint(fill === undefined ? 0xffffffff : fill),
+        );
+      } catch (e) {
+        if (e instanceof RangeError) {
+          throw s.rt.error("ArgumentError", 2015);
+        }
+
+        throw e;
+      }
     }
 
     // Disposed, every read throws, the size included, as Flash has it.
@@ -356,6 +378,10 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       // adl draws none of the filters with a glow into an opaque destination.
       if (!store.transparent && GLOWS.has(f.kind)) {
         throw s.rt.error("flash.errors::IllegalOperationError", 2077);
+      }
+
+      if (filterRefuses(r, f)) {
+        throw s.rt.error("ArgumentError", 2015);
       }
 
       // A displacement map's map as it is now, not as it was when set.
@@ -526,7 +552,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     copyChannel(source: Value, rect: Value, dest: Value, from: Value, to: Value): void {
       const store = storeOf(s, this);
       const src = sourceOf(s, source);
-      const r = rectOf(s, rect);
+      const r = rectOf(s, rect, true);
       const [dx, dy] = pointOf(s, dest, "destPoint");
       copyChannel(store, src, r, dx, dy, s.rt.toUint(from), s.rt.toUint(to));
     }
@@ -584,7 +610,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "sourceRect");
       }
 
-      const r = rectOf(s, rect);
+      const r = rectOf(s, rect, true);
       const [dx, dy] = pointOf(s, dest, "destPoint");
       // A channel's table, or itself where none is given.
       const table = (v: Value, shift: number): Uint32Array =>
@@ -648,6 +674,10 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "colorTransform");
       }
 
+      // A foot of NaN, int's least, less a top past 0 wraps round in int
+      // arithmetic to a height reaching the bitmap's foot, as adl has it; a
+      // width of NaN covers nothing.
+      r.height |= 0;
       colorTransform(store, r, colorOf(s, ct as AsObject));
     }
 
@@ -662,7 +692,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     ): void {
       const store = storeOf(s, this);
       const src = sourceOf(s, source);
-      const r = rectOf(s, rect);
+      const r = rectOf(s, rect, true);
       const [dx, dy] = pointOf(s, dest, "destPoint");
       merge(
         store,
@@ -690,7 +720,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     ): number {
       const store = storeOf(s, this);
       const src = sourceOf(s, source);
-      const r = rectOf(s, rect);
+      const r = rectOf(s, rect, true);
       const [dx, dy] = pointOf(s, dest, "destPoint");
       // A String parameter: undefined is null, refused with 2007 before the value is looked at.
       if (op === null || op === undefined) {
@@ -835,14 +865,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "sourceRect");
       }
 
-      // A rect of a negative size is taken as the one it spans, here alone.
-      const given = rectOf(s, rect);
-      const r = {
-        x: Math.min(given.x, given.x + given.width),
-        y: Math.min(given.y, given.y + given.height),
-        width: Math.abs(given.width),
-        height: Math.abs(given.height),
-      };
+      const r = rectOf(s, rect, true);
       const [dx, dy] = pointOf(s, dest, "destPoint");
       const n = count === undefined ? 0 : s.rt.toInt(count);
       if (n < 0) {
