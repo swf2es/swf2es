@@ -3223,7 +3223,13 @@ as c · (a + 1) >> 8, leaving a pixel of alpha 0 alone; `merge` is
 ((s · m + d · (256 − m)) >> 8) & 0xFF with the multiplier a uint and
 nothing clamped; `copyChannel` from more than one channel copies 0;
 `getColorBoundsRect` gives an empty rect where the one pixel found is the
-origin; a point or rect `hitTest` never hits alpha 0; `pixelDissolve`
+origin; a point or rect `hitTest` never hits alpha 0, and it refuses
+with ArgumentError 1508 a first point, or a second bitmap's, the bitmap
+would reach past int's range from; `draw` moves its matrix in twips in
+an int, so NaN draws at 0, and so does a move past the int's range,
+Infinity too, for a matrix that only moves (one that scales draws it
+nowhere), while one within 2^30 twips of the ends wraps round to near 0;
+`pixelDissolve`
 visits the rect, clipped to both bitmaps, in Flash's own order, a Galois
 LFSR over ⌈log2 w⌉ + ⌈log2 h⌉ bits whose taps for every width from 2 to
 26 bits were read off adl, a state standing for (s & (2^bw − 1), s >> bw)

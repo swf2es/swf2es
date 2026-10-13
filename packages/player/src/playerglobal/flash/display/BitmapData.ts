@@ -221,10 +221,35 @@ function samplesOf(s: Scripting, quality: Value): number {
   }
 }
 
-/** A flash.geom.Matrix's six values. */
+/**
+ * A flash.geom.Matrix's six values, its translation as draw takes it under
+ * adl, in twips in an int: NaN is int's least, and so is anything past
+ * the int's range, Infinity too, which a matrix that only moves draws at
+ * 0 (and any other off every bitmap); and a move within 2^30 twips of
+ * the range's ends wraps round to near 0, 107374180 drawing at -2.4.
+ */
 function matrixOf(s: Scripting, o: AsObject): Affine {
   const read = (k: string) => s.rt.toNumber(s.rt.getProperty(o, s.rt.publicName(k)));
-  return { a: read("a"), b: read("b"), c: read("c"), d: read("d"), tx: read("tx"), ty: read("ty") };
+  const m = {
+    a: read("a"),
+    b: read("b"),
+    c: read("c"),
+    d: read("d"),
+    tx: read("tx"),
+    ty: read("ty"),
+  };
+  const moves = m.a === 1 && m.b === 0 && m.c === 0 && m.d === 1;
+  const twips = (t: number) => {
+    const v = t * 20;
+    if (Number.isNaN(v) || (moves && Math.abs(v) >= 2 ** 31)) {
+      return 0;
+    }
+
+    return moves && Math.abs(v) >= 2 ** 30 ? (v - Math.sign(v) * 2 ** 31) / 20 : t;
+  };
+  m.tx = twips(m.tx);
+  m.ty = twips(m.ty);
+  return m;
 }
 
 export function bitmapDataNatives(s: Scripting): avm2.Natives {
@@ -806,6 +831,10 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     ): boolean {
       const store = storeOf(s, this);
       const [fx, fy] = pointOf(s, firstPoint, "firstPoint");
+      // adl refuses a point the bitmap, put there, would reach past int's range from.
+      if (fx + store.width > 0x7fffffff || fy + store.height > 0x7fffffff) {
+        throw s.rt.error("ArgumentError", 1508, "firstPoint");
+      }
 
       const a1 = s.rt.toUint(firstAlpha);
       const other = second as AsObject;
@@ -848,6 +877,9 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         const second = storeOf(s, data);
         // Against a bitmap, its point is required.
         const [sx, sy] = pointOf(s, secondPoint, "secondBitmapDataPoint");
+        if (sx + second.width > 0x7fffffff || sy + second.height > 0x7fffffff) {
+          throw s.rt.error("ArgumentError", 1508, "secondBitmapDataPoint");
+        }
 
         const a2 = secondAlpha === undefined ? 1 : s.rt.toUint(secondAlpha);
         const ox = sx - fx;
