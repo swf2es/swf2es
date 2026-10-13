@@ -5551,6 +5551,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 20,
   },
   {
+    // Filters on objects that draw nothing draw nothing, glows, shadows and colour matrices alike.
+    name: "filters-empty",
+    swf: (abc) => bare(abc, 1, "FiltersEmpty", 330, 132),
+    script: "FiltersEmpty",
+    frames: 1,
+    capture: [1],
+    // As "filters": the page's samples against adl's whole pixels.
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
     name: "filter-retween",
     swf: filterRetween,
     script: "FilterRetween",
