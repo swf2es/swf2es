@@ -3775,8 +3775,9 @@ up (fitted from 5e5 to 1e11, taken from where it comes to a 512th). An
 outer shadow or gradient glow cast past the wrap writes its rect empty,
 the source too; a filter rect past the buffers adl makes is refused, 2015
 for an outer shadow or gradient glow (1e5 at 45°, or 8e9 at 0° as the
-part across grows), 2077 for a bevel, a gradient bevel outer or full 2077
-from 2^31 / 10 pixels and 2015 past 2^29; and a distance or angle of NaN
+part across grows), 2077 for an inner bevel and 2015 for an outer or
+full one, which is refused with 2077 from 2^31 / 10 pixels already; and a
+distance or angle of NaN
 refuses an outer shadow and is none for the rest (`filterRefusal`). Cast some 2^15 pixels left or up, adl draws
 an outer shadow in pieces as its 16-bit sums wrap, which swf2es leaves.
 However far the offset, the work is what the destination shows: the

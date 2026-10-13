@@ -183,8 +183,8 @@ const SIZED = new Set(["colorMatrix", "convolution", "blur", "glow", "dropShadow
  * its offset (1e5 at 45° is refused), an inner one's not. By its offset
  * alone, as what the rect holds of the source grows by it: a gradient
  * glow outer or full past 2^29 pixels, 2015, and a bevel past a side of
- * 2^31 / 20 or 2^29 pixels, 2077, but a gradient bevel outer or full 2015
- * there and 2077 past 2^31 / 10 pixels already; and an outer shadow or gradient glow of
+ * 2^31 / 20 or 2^29 pixels, 2077, but outer or full 2015, and 2077 past
+ * 2^31 / 10 pixels already; and an outer shadow or gradient glow of
  * a distance or angle of NaN (or Infinity, which the angle keeps as NaN),
  * 2015. A blur or glow some way short of those is refused with 2077,
  * which this leaves.
@@ -213,9 +213,9 @@ export function filterRefusal(rect: PixelRect, f: Filter, source: PixelRect): nu
     }
 
     const past = out.width > side || out.height > side || pixels > 2 ** 29;
-    // A gradient bevel outer or full is refused sooner, with 2077 (16777740 by 14,
-    // not by 12), and past the rest with 2015.
-    if (f.kind === "gradientBevel" && !isInner(f)) {
+    // A bevel outer or full is refused sooner, with 2077 (16777740 by 14, not by
+    // 12), and past the rest with 2015.
+    if (!isInner(f)) {
       return past ? 2015 : pixels > 2 ** 31 / 10 ? 2077 : 0;
     }
 

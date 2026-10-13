@@ -56,6 +56,16 @@ package {
         }
       }
 
+      // A bevel outer or full is refused with 2015 where an inner one is with 2077.
+      for each (c in [[1e5, 45], [1e8, 0], [1e8, 270], [1e9, 0], [2147483647, 0]]) {
+        row = "";
+        for each (var type:String in ["inner", "outer", "full"]) {
+          row += " " + type + " " + refused(new BevelFilter(c[0], c[1], 0xffffff, 1, 0, 1, 2, 2, 1, 1, type))
+            + " / " + refused(new GradientBevelFilter(c[0], c[1], [0, 0xffffff], [1, 1], [0, 255], 2, 2, 1, 1, type));
+        }
+        trace("bevel types", c[0], c[1], row);
+      }
+
       // generateFilterRect: distances that wrap at 180° and stop, and inner filters within the bitmap.
       for each (c in [[3, [180, 270, 45]], [1000, [180, 270, 45]], [8388607, [180, 45]], [8388609, [180, 45]], [8388900, [180, 45]]]) {
         for each (ang in c[1]) {

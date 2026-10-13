@@ -462,6 +462,11 @@ far -8000000000 0  | -8388866,0,8388874,64 error 2015 | 0,0,8,40 ok | -8388866,0
 far -8000000000 90  | -57,-8388866,65,8388874 error 2015 | 0,0,8,8 ok | -57,-8388866,65,8388874 error 2015 | 0,0,40,40 error 2077 | -57,-8388866,122,16777740 error 2015
 far -8000000000 180  | -8388866,-57,8388874,65 error 2015 | 0,0,8,8 ok | -8388866,-57,8388874,65 error 2015 | 0,0,40,40 error 2077 | -8388866,-57,16777740,122 error 2015
 far -8000000000 270  | 0,-8388866,64,8388874 error 2015 | 0,0,40,8 ok | 0,-8388866,64,8388874 error 2015 | 0,0,40,40 error 2077 | -56,-8388866,120,16777740 error 2015
+bevel types 100000 45  inner error 2077 / error 2077 outer error 2015 / error 2015 full error 2015 / error 2015
+bevel types 100000000 0  inner ok / ok outer error 2077 / error 2077 full error 2077 / error 2077
+bevel types 100000000 270  inner ok / ok outer error 2077 / error 2077 full error 2077 / error 2077
+bevel types 1000000000 0  inner ok / ok outer error 2077 / error 2077 full error 2077 / error 2077
+bevel types 2147483647 0  inner error 2077 / error 2077 outer error 2015 / error 2015 full error 2015 / error 2015
 rect 3 180 DropShadowFilter -5,-2,13,12
 rect 3 180 DropShadowFilter inner 0,0,8,10
 rect 3 180 BevelFilter inner 0,0,13,10
