@@ -23,6 +23,7 @@ import {
   Geometry,
   Graphics,
   type GraphicsContext,
+  type GraphicsPath,
   GraphicsPipe,
   generateTextureBatchBit,
   generateTextureBatchBitGl,
@@ -444,41 +445,64 @@ export type SharingGraphics = Graphics & {
 };
 
 /**
- * Floats of a context's vertices from which, under a colour transform, it
- * is drawn alone rather than as a batched copy: Pixi's own line between
- * the Graphics it batches and those it draws alone.
+ * Vertices of a context from which, under a colour transform, it is drawn
+ * alone rather than as a batched copy: Pixi's own line between the
+ * Graphics it batches and those it draws alone.
  */
-const ALONE_FLOATS = 400;
-/** Each shared context's vertex floats, as first built for any renderer: it never changes. */
-const floatsOf = new WeakMap<GraphicsContext, number>();
+const ALONE_VERTICES = 200;
+/** Each shared context's vertices as weighed: it never changes. */
+const weights = new WeakMap<GraphicsContext, number>();
 
-/**
- * Whether `context` was built with ALONE_FLOATS or more, or its batched
- * copy, which has its geometry; false until either is built.
- */
-function large(context: GraphicsContext): boolean {
-  let floats = floatsOf.get(context);
-  for (const built of [context, batchedCopies.get(context)]) {
-    if (floats !== undefined || !built) {
-      break;
-    }
-
-    const data = (
-      built as unknown as {
-        _gpuData: Record<number, { geometryData?: { vertices: ArrayLike<number> } } | undefined>;
-      }
-    )._gpuData;
-    for (const uid in data) {
-      const vertices = data[uid]?.geometryData?.vertices;
-      if (vertices) {
-        floats = vertices.length;
-        floatsOf.set(context, floats);
-        break;
-      }
-    }
+/** The points of `path`'s shapes, which Pixi builds once and keeps for the context's build. */
+function pointsOf(path: GraphicsPath | undefined): number {
+  let points = 0;
+  for (const { shape } of path?.shapePath.shapePrimitives ?? []) {
+    const polygon = (shape as { points?: number[] }).points;
+    points += polygon ? polygon.length / 2 : 4;
   }
 
-  return floats !== undefined && floats >= ALONE_FLOATS;
+  return points;
+}
+
+/**
+ * Vertices a line has a point, as Pixi strokes it: a pixel line's one, a
+ * line with round joins some 11 to 15 for a creature's parts (10 taken, so
+ * that a short one stays batched), others two.
+ */
+function lineVertices(style: { join?: string; pixelLine?: boolean }): number {
+  return style.pixelLine ? 1 : style.join === "round" ? 10 : 2;
+}
+
+/**
+ * Whether `context` has ALONE_VERTICES or more, weighed from its paths
+ * before it is built, as a part may show under a transform it then keeps,
+ * and lines are swapped for new contexts as they turn: a fill a vertex a
+ * point, a line as lineVertices says, a texture four.
+ */
+function large(context: GraphicsContext): boolean {
+  let vertices = weights.get(context);
+  if (vertices === undefined) {
+    vertices = 0;
+    for (const instruction of context.instructions) {
+      if (instruction.action === "texture") {
+        vertices += 4;
+        continue;
+      }
+
+      const data = instruction.data as {
+        path?: GraphicsPath;
+        hole?: GraphicsPath;
+        style: { join?: string; pixelLine?: boolean };
+      };
+      vertices +=
+        pointsOf(data.path) * (instruction.action === "stroke" ? lineVertices(data.style) : 1);
+      vertices += pointsOf(data.hole);
+    }
+
+    weights.set(context, vertices);
+  }
+
+  return vertices >= ALONE_VERTICES;
 }
 
 /** The renderers made, and those of them not WebGL, where Pixi's shader takes no colour transform. */

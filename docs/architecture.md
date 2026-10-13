@@ -2767,8 +2767,9 @@ batcher does, to the straight colour, the fill's times the Graphics' own
 tint rounded to a byte, clamped and premultiplied after, and leave out
 Pixi's group colour; where a renderer is not WebGL, every one is a
 batched copy, those already drawn alone too as one is made
-(`ColorAloneSystem`). A context is weighed once built, so a part coloured as it
-first shows is a batched copy until its transform changes. The
+(`ColorAloneSystem`). A context is weighed before it is built, from its
+paths' points (a line's by its joins, round ones some ten vertices a
+point), as a part may keep the transform it first shows under. The
 `color-alone` case draws large discs, gradients and bitmaps under changing
 transforms each way. `bench.ts --no-table` draws without the table, and
 the `table-runs` case, with `draw-objects`, is played with the table
