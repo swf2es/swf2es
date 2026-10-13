@@ -1196,7 +1196,18 @@ advance, and once for each round of frame scripts, which a busy scene of
 some 13,000 objects felt. A walk reads each object's `frameChildren`, a
 container's own children array, a button's states, one empty list for
 the rest, and its `kind`, not its class, and calls into no object with
-nothing under it. Another round runs only when the last ran a script and
+nothing under it. Each container keeps the list of clips and buttons at
+and under it in that order (`walkList`), with where each clip's own end,
+for one that sits a frame out with all it holds; a clip or container that
+comes, goes or moves under it drops the lists from its parent up, and the
+next walk makes them again, copying those still kept below (a list of
+fewer than 32 is not kept, but walked again within its parent's). A
+shape or text swapped, as a timeline swaps them on every frame, drops
+none. So a frame visits the clips alone, not every container: in
+`walk-bench.ts`'s 13,000 objects a tick went from 284 to 117 µs and a
+round of scripts from 122 to 44, for some 25 bytes an object. A
+button's states, which it changes without its parent knowing, are walked
+as they are. Another round runs only when the last ran a script and
 something a round reads changed since it walked, which `scriptWork`
 counts: a clip's frame, its frame scripts, `makingChildren` or
 `timelineChild`, a children list or a button's states, an object made
@@ -2533,8 +2544,17 @@ stretch, and a line scaled both ways is as wide through any turn of it:
 such a layer's lines are stroked through the stretch alone and turned by
 their Graphics' matrix, so a limb that turns on every frame, or a
 squashed particle that spins, shares one context through every angle,
-and a turn that keeps the stretch leaves its lines as they are;
-one with a line scaled one way alone, which turns with it, or a
+and a turn that keeps the stretch leaves its lines as they are.
+The stretch is then settled on a grid of its logarithm, in a step of at
+most 1/64 and fine enough that the lines' edges stand within a fiftieth
+of a screen pixel of their place (`settledStretch`): stroked through the
+grid's stretch and taken back by its inverse, the lines follow the path
+exactly, and only their width sees the difference. A character that
+breathes, scaling a percent or two on every frame, had a stretch for
+each frame of each loop, and a crowd of them made its lines faster than
+the cache could keep them; settled, a pulse has a few (`bench.ts --town
+60`: 75,000 contexts in 300 frames, 2,500 settled, and a frame's sync
+and draw from 9 to 2.5 ms). One with a line scaled one way alone, which turns with it, or a
 transform near collapse, which rounding would distort, keeps the
 transform exactly. Contexts are counted as instances take and give
 them back. An object that leaves the list, and those of its
@@ -3701,6 +3721,13 @@ its chain, unless given a `filterArea`; that measuring is some 1% of the
 main thread on a page of 32 animated creatures running 450 chains a
 frame, and 0.13 ms of a 3.3 ms draw on `bench.ts --rig 32 --blurred`
 (the `filterAreaMs` meter), less than the runs vary, so no area is set.
+In a busy town of an application, though, with hundreds of filtered
+characters and scenery, it was 1 ms of a 14 ms frame, so a chain keeps
+the area it was measured at with the object's transform on the stage,
+and gives it again, moved as the object moved, until the object changes
+as its kept output goes stale or its transform's linear part changes;
+one with a mask from outside it in it is measured each time, as that
+mask may move with nothing in it changing (`FilterChain.keptArea`).
 Each filter pass clears the texture it draws into: Pixi clears a chain's
 input as it binds it, and the box blur's runs and a chain's steps clear
 their pool textures, some 1,230 clears a frame on that page and 769 on

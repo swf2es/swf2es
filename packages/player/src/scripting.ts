@@ -14,6 +14,7 @@ import { avm2 } from "@swf2es/runtime";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
 import {
   BitmapObject,
+  BUTTON,
   ButtonObject,
   buttonStates,
   CLIP,
@@ -24,6 +25,7 @@ import {
   scriptChildren,
   scriptWork,
   TRANSFORM,
+  walkList,
 } from "./display/display.js";
 import type { ButtonCharacter, DisplayCharacter, Library } from "./display/timeline.js";
 import {
@@ -812,12 +814,27 @@ export class Scripting {
     };
     let count = 0;
     const visit = (o: DisplayObject) => {
+      // The clips under a container from the list it keeps (walkList); a button is visited as it
+      // is, for its states' first order.
+      if (o instanceof Container && o.kind !== BUTTON) {
+        const items = walkList(o).items;
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (item.kind === BUTTON) {
+            visit(item);
+          } else if (item.object) {
+            queue[count++] = item as MovieClip;
+          }
+        }
+
+        return;
+      }
+
       if (o.kind === CLIP && o.object) {
         queue[count++] = o as MovieClip;
       }
 
-      // An index, not for-of, and no call for a leaf: this visits every
-      // object on the list. A button is visited for its states' first order.
+      // An index, not for-of, and no call for a leaf.
       const children = scriptChildren(o);
       for (let i = 0; i < children.length; i++) {
         const child = children[i];

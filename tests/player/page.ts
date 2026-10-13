@@ -436,6 +436,12 @@ function meter(renderer: object): { read(): Record<string, number> } {
   };
 }
 
+/** Chrome's console profiler, which the DOM's types leave out. */
+type Profiling = Console & { profile(label: string): void; profileEnd(label: string): void };
+
+/** The first frame a bench profiles, after bench.ts's ten of warm-up and the first. */
+const PROFILED_FROM = 12;
+
 async function benchSwf(
   base64: string,
   frames: number,
@@ -448,6 +454,8 @@ async function benchSwf(
   table = true,
   tableMinRun?: number,
   pace = 0,
+  cpuProfile = false,
+  finishEvery = 1,
 ): Promise<Bench> {
   setTransformTable(table, tableMinRun);
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -527,6 +535,11 @@ async function benchSwf(
     const counter = meter(renderer);
     let stroked = view.counts.strokeContexts;
     for (let frame = 2; frame <= frames; frame++) {
+      // The frames after the bench's warm-up, profiled for chrome.ts to read (--cpu-profile).
+      if (cpuProfile && frame === PROFILED_FROM) {
+        (console as Profiling).profile("frames");
+      }
+
       const before = performance.now();
       for (const [depth, child] of toggled.entries()) {
         if (Math.floor((frame - 2) / toggleEvery) % 2) {
@@ -546,7 +559,12 @@ async function benchSwf(
       const synced = performance.now();
       renderer.render(view.stage);
       const drawn = performance.now();
-      await finish();
+      // Pipelined, the GPU's work goes on behind the next frames', as a page's does, and only
+      // every so many frames is waited for: what the frames take is then the slower of the two.
+      if (frame % finishEvery === 0 || frame === frames) {
+        await finish();
+      }
+
       tick.push(ticked - before);
       sync.push(synced - ticked);
       draw.push(drawn - synced);
@@ -568,6 +586,10 @@ async function benchSwf(
       if (pace > 0) {
         await new Promise((resolve) => setTimeout(resolve, pace));
       }
+    }
+
+    if (cpuProfile) {
+      (console as Profiling).profileEnd("frames");
     }
 
     const counts = { ...view.counts };

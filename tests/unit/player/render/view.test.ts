@@ -2565,7 +2565,9 @@ test("a shape's lines share a context through every turn and mirror of one stret
   assert.equal(view.counts.strokeContexts, 5);
   assert.ok(lines(7).instructions.length > 0);
 
-  // Each one's lines reach the stage through a turn or a mirror alone: the stroke is not stretched.
+  // Each one's lines reach the stage through a turn or a mirror alone, but for the grid it was
+  // settled on (settledStretch), whose step for these lines, 2 to 6 pixels wide, is 1/128 or less:
+  // the stroke is not stretched.
   shapes.forEach((shape, i) => {
     const m = shape.matrix;
     // Pixi works its local transform out of its scale, turn and skew as it renders.
@@ -2582,15 +2584,15 @@ test("a shape's lines share a context through every turn and mirror of one stret
     }
 
     assert.ok(
-      Math.abs(Math.hypot(w[0], w[1]) - 1) < 1e-3,
+      Math.abs(Math.hypot(w[0], w[1]) - 1) < 0.01,
       `shape ${i}: column 1 is ${w[0]},${w[1]}`,
     );
     assert.ok(
-      Math.abs(Math.hypot(w[2], w[3]) - 1) < 1e-3,
+      Math.abs(Math.hypot(w[2], w[3]) - 1) < 0.01,
       `shape ${i}: column 2 is ${w[2]},${w[3]}`,
     );
     assert.ok(
-      Math.abs(w[0] * w[2] + w[1] * w[3]) < 1e-3,
+      Math.abs(w[0] * w[2] + w[1] * w[3]) < 0.02,
       `shape ${i}: columns not at right angles`,
     );
   });
@@ -2614,6 +2616,71 @@ test("a line scaled one way alone keeps its lines for each angle", async () => {
   view.prepare(root);
   // Its width reads one row of the transform, which the turn changes.
   assert.equal(view.counts.strokeContexts, 2);
+});
+
+test("a shape that pulses a little shares its lines between the frames of the pulse", async () => {
+  // A character that breathes scales a few percent on every frame: each
+  // frame's stretch was its own, its lines tessellated again on every
+  // frame of every loop. Settled on a grid, its frames share a few.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const shape = new ShapeObject(character);
+  root.placeAtDepth(shape, 1);
+  type Lines = {
+    context: unknown;
+    localTransform: { a: number; b: number; c: number; d: number };
+    updateLocalTransform(): void;
+  };
+  const strokes = () =>
+    view.stage.children[0].children[1].children[0].children[1] as unknown as Lines;
+  for (let f = 0; f < 48; f++) {
+    const s = 1 + 0.02 * Math.sin((2 * Math.PI * f) / 48);
+    const turn = 0.3 * Math.sin((2 * Math.PI * f) / 24);
+    shape.setMatrix({
+      a: s * Math.cos(turn),
+      b: s * Math.sin(turn),
+      c: -s * 0.99 * Math.sin(turn),
+      d: s * 0.99 * Math.cos(turn),
+      tx: 0,
+      ty: 0,
+    });
+    view.prepare(root);
+    // Its 2 pixel lines, under the stretch's inverse, reach the stage within a few hundredths of
+    // a pixel of their width: their path is the shape's exactly.
+    const lines = strokes();
+    lines.updateLocalTransform();
+    const l = lines.localTransform;
+    const m = shape.matrix;
+    const column = Math.hypot(m.a * l.a + m.c * l.b, m.b * l.a + m.d * l.b);
+    assert.ok(Math.abs(column - 1) < 0.02, `frame ${f}: column 1 is ${column} long`);
+  }
+
+  // 48 frames of a pulse of 2% and a squash of 1%: a few stretches.
+  assert.ok(view.counts.strokeContexts <= 6, `${view.counts.strokeContexts} contexts`);
+});
+
+test("a wide line settles on a finer grid, and one too wide on none", async () => {
+  const { settledStretch } = await import("../../../../packages/player/dist/render/strokes.js");
+  const pulse: [number, number, number, number] = [1.013, 0.002, 0.002, 1.007];
+  // A hairline moves to a grid of 64ths of its logarithm.
+  const hair = settledStretch(pulse, 1, 1);
+  assert.notDeepEqual(hair, pulse);
+  // Its lines' edges, half a pixel out, stand where the pulse's put them within a fiftieth.
+  const det = hair[0] * hair[3] - hair[1] * hair[2];
+  const e0 = (pulse[0] * hair[3] - pulse[2] * hair[1]) / det;
+  assert.ok(Math.abs(e0 - 1) * 0.5 < 0.02);
+  // A line of 20 pixels needs a grid 20 times finer, which a near pulse may still reach.
+  const wide = settledStretch(pulse, 400, 1);
+  assert.ok(Math.abs(wide[0] - pulse[0]) < Math.abs(hair[0] - pulse[0]) || wide[0] === pulse[0]);
+  // One of 2000 pixels is its own stretch.
+  assert.deepEqual(settledStretch(pulse, 40000, 1), pulse);
+  // Stretches a step apart on the grid's scale settle alike.
+  assert.deepEqual(
+    settledStretch([1.0101, 0, 0, 1.0101], 1, 1),
+    settledStretch([1.0102, 0, 0, 1.0102], 1, 1),
+  );
 });
 
 test("Pixi's pool of Graphics' batch elements is cut back as a view prepares", async () => {

@@ -307,6 +307,111 @@ export function stretchOf(m: Linear, out?: Linear): Linear | null {
 
 const roundStretch = (x: number, t: number) => Math.round((x / t) * 65536) / 65536;
 
+/**
+ * How far, in pixels of the screen, a line's edge may stand from where its
+ * own stretch puts it when stroked through a nearby one (settledStretch):
+ * a fiftieth of a pixel, under the twentieth a SWF's twips can tell.
+ */
+const EDGE_SLACK = 0.02;
+/** The coarsest step of the stretches' grid: about 1.5% of a scale. */
+const COARSEST_STEP = 1 / 64;
+/** The finest: a line wider than this allows is stroked through its own stretch. */
+const FINEST_STEP = 1 / 4096;
+
+/**
+ * The stretch `s` (stretchOf's, symmetric with a positive determinant)
+ * moved to the nearest point of a grid, `widest` the width of its widest
+ * line in twips and `least` a pixel of the screen; or `s` itself. A tween
+ * that scales a little on every frame, a character that breathes, gave
+ * each frame a stretch of its own, and its lines were tessellated again
+ * on every frame of every loop, faster than the cache could keep them; the
+ * grid gives such a pulse a few. Lines stroked through the grid's stretch
+ * and taken back through its inverse (strokeFrame) follow the shape's path
+ * exactly; only their width and joins see the small difference between
+ * the two stretches, s q⁻¹'s from the identity, which the grid keeps under
+ * EDGE_SLACK of a pixel at their edges. The grid is on the stretch's
+ * logarithm, a symmetric matrix whose entries measure scale and shear
+ * alike, in a step that is a power of two, so that stretches settled alike
+ * share their contexts; one it would move further than a step, as it may
+ * one that squashes nearly flat, is its own.
+ */
+export function settledStretch(s: Linear, widest: number, least: number, out?: Linear): Linear {
+  // s = mean I + N, N = [[half, off], [off, -half]], N² = r² I: its scales are mean ± r, along
+  // the axes P± = (I ± N / r) / 2 project on.
+  const mean = (s[0] + s[3]) / 2;
+  const half = (s[0] - s[3]) / 2;
+  const off = s[1];
+  const r = Math.sqrt(half * half + off * off);
+  if (!(mean - r > 0)) {
+    return s;
+  }
+
+  // Half the widest line's width on the screen, at most as the larger scale makes it, times the
+  // step must stay under the slack.
+  const width = Math.max(least, (widest / 20) * (mean + r));
+  const most = Math.min(COARSEST_STEP, (2 * EDGE_SLACK * least) / width);
+  if (!(most >= FINEST_STEP)) {
+    return s;
+  }
+
+  const step = 2 ** Math.floor(Math.log2(most));
+  // Its logarithm, ln(mean + r) P+ + ln(mean - r) P-, is α I + β N; its entries go on the grid.
+  const large = Math.log(mean + r);
+  const small = Math.log(mean - r);
+  const alpha = (large + small) / 2;
+  const beta = r === 0 ? 1 / mean : (large - small) / (2 * r);
+  const l11 = Math.round((alpha + beta * half) / step) * step;
+  const l22 = Math.round((alpha - beta * half) / step) * step;
+  const l12 = Math.round((beta * off) / step) * step;
+  // And back: the grid's α' I + N', N'² = ρ² I, is e^(α' + ρ) P'+ + e^(α' - ρ) P'-.
+  const h = (l11 - l22) / 2;
+  const rho = Math.sqrt(h * h + l12 * l12);
+  const up = Math.exp((l11 + l22) / 2 + rho);
+  const down = Math.exp((l11 + l22) / 2 - rho);
+  const across = rho === 0 ? 0 : (up - down) / (2 * rho);
+  const q0 = (up + down) / 2 + across * h;
+  const q1 = across * l12;
+  const q3 = (up + down) / 2 - across * h;
+  // s q⁻¹ near the identity, within a step by its norm, the most it stretches any direction: the
+  // edges, half the widest line from the path, within the slack of their place. (Each entry
+  // within a step alone let an edge stray to nearly twice that, 0.036 of a pixel measured.)
+  const qDet = q0 * q3 - q1 * q1;
+  const e0 = (s[0] * q3 - s[2] * q1) / qDet;
+  const e1 = (s[1] * q3 - s[3] * q1) / qDet;
+  const e2 = (s[2] * q0 - s[0] * q1) / qDet;
+  const e3 = (s[3] * q0 - s[1] * q1) / qDet;
+  // The spectral norm of D = s q⁻¹ - I: the root of the larger eigenvalue of DᵀD.
+  const d0 = e0 - 1;
+  const d3 = e3 - 1;
+  const frobenius = d0 * d0 + e1 * e1 + e2 * e2 + d3 * d3;
+  const det = d0 * d3 - e1 * e2;
+  const norm = Math.sqrt(
+    (frobenius + Math.sqrt(Math.max(0, frobenius * frobenius - 4 * det * det))) / 2,
+  );
+  if (!(norm <= step)) {
+    return s;
+  }
+
+  // Into `out` where given, which may be `s`, as stretchOf's: a move each frame then makes no
+  // array to compare.
+  const q = out ?? [0, 0, 0, 0];
+  q[0] = q0;
+  q[1] = q1;
+  q[2] = q1;
+  q[3] = q3;
+  return q;
+}
+
+/** The width of the layer's widest line, in twips. */
+export function widestLine(layer: ShapeLayer): number {
+  let widest = 0;
+  for (const { line } of layer.strokes) {
+    widest = Math.max(widest, line.width);
+  }
+
+  return widest;
+}
+
 /** Whether every line of the layer scales both ways, whose width no rotation changes; one scaled one way alone turns with it. */
 export function scalesEvenly(layer: ShapeLayer): boolean {
   return layer.strokes.every(({ line }) => !line.noHScale && !line.noVScale);

@@ -5,7 +5,16 @@
 // follow; then the frame is drawn.
 import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
 import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
-import { CLIP, Container, type DisplayObject, MovieClip, OTHER } from "./display/display.js";
+import {
+  BUTTON,
+  type ButtonObject,
+  CLIP,
+  Container,
+  type DisplayObject,
+  MovieClip,
+  OTHER,
+  walkList,
+} from "./display/display.js";
 import { type Library, readLibrary } from "./display/timeline.js";
 import { KeyboardInput } from "./input/keyboard.js";
 import { PointerInput } from "./input/pointer.js";
@@ -301,20 +310,40 @@ export class Player {
     const clips = this.ticking ?? [];
     this.ticking = null;
     let count = 0;
+    const frames = this.scripting?.frames;
+    // One a goto made sit this frame out takes all in it along.
+    const sitsOut = (clip: MovieClip) => clip.skipsAfter >= 0 && clip.skipsAfter === frames;
     const collect = (o: DisplayObject) => {
-      if (o.kind === CLIP) {
-        // One a goto made sit this frame out takes all in it along.
-        const clip = o as MovieClip;
-        if (clip.skipsAfter >= 0 && clip.skipsAfter === this.scripting?.frames) {
-          return;
-        }
-
-        clips[count++] = clip;
+      if (o.kind === CLIP && sitsOut(o as MovieClip)) {
+        return;
       }
 
-      // A button's states all play, whichever it shows. An index, not for-of,
-      // and no call for a leaf: this visits every object on the list each frame.
-      const children = o.frameChildren;
+      // The clips under a container from the list it keeps (walkList); a button's states all
+      // play, whichever it shows, walked as they are.
+      if (o instanceof Container && o.kind !== BUTTON) {
+        const { items, ends } = walkList(o);
+        for (let i = 0; i < items.length; ) {
+          const item = items[i];
+          if (item.kind === BUTTON) {
+            collect(item);
+          } else if (sitsOut(item as MovieClip)) {
+            i = ends[i];
+            continue;
+          } else {
+            clips[count++] = item as MovieClip;
+          }
+
+          i++;
+        }
+
+        return;
+      }
+
+      if (o.kind === CLIP) {
+        clips[count++] = o as MovieClip;
+      }
+
+      const children = o.kind === BUTTON ? (o as ButtonObject).playingStates() : o.frameChildren;
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
         if (child.kind !== OTHER || child.frameChildren.length !== 0) {

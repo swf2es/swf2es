@@ -14,6 +14,7 @@ import {
   type GraphicsContext,
   GraphicsPipe,
   type InstructionSet,
+  Matrix,
   Container as PixiContainer,
   type Renderer,
   RenderGroupSystem,
@@ -167,26 +168,117 @@ const buildInstructions = (
  * unmoved, where a group without effects is moved by its place in the
  * parent: a filtered submenu batched as a group of its own, beside the
  * filtered menu it is a child of, lost to the menu's filter as much of its
- * right side as it stood to the right of the menu.
+ * right side as it stood to the right of the menu. Pixi's walk itself,
+ * with that placing in it rather than around each call, as it visits
+ * every object below each filter on every frame; and it notes a mask from
+ * outside what it measures (areaWatch), which bounds it as no change of
+ * the object's tells.
  */
 type Measured = PixiContainer & {
   _getGlobalBoundsRecursive(layers: boolean, bounds: Bounds, layer: unknown): void;
+  parentRenderLayer: unknown;
+  localDisplayStatus: number;
+  renderPipeId?: string;
+  bounds: { minX: number; minY: number; maxX: number; maxY: number };
+  effects: { addBounds?: (bounds: Bounds, skipUpdateTransform?: boolean) => void }[];
 };
 const measured = PixiContainer.prototype as unknown as Measured;
-const globalBounds = measured._getGlobalBoundsRecursive;
+/** The inverse of a group's transform, as Pixi's walk takes a padded effect's bounds back. */
+const INVERSE = new Matrix();
+
+/**
+ * What a filter's area is measured from, and whether a mask outside it
+ * bounds something in it: set by the filter system's measure (render/blend.ts).
+ */
+export const areaWatch: { root: PixiContainer | null; outside: boolean } = {
+  root: null,
+  outside: false,
+};
+
+/** Whether `inner` is `outer` or under it. */
+function within(outer: PixiContainer, inner: PixiContainer): boolean {
+  for (let p: PixiContainer | null = inner; p; p = p.parent) {
+    if (p === outer) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // How deep the walk is: the object measured itself is in its own group's space, which
 // getFastGlobalBounds then takes to the stage; only a group below it needs placing. (Pixi
 // also places a measured group without effects by its relative transform, which the stage's
 // then moves again; no filter measures one, as a filter is an effect, so that is left.)
 let measuring = 0;
 measured._getGlobalBoundsRecursive = function (this: Measured, layers, bounds, layer) {
-  const placing = measuring > 0 && !!this.renderGroup && !!this.effects?.length;
+  if (layers && this.parentRenderLayer && this.parentRenderLayer !== layer) {
+    return;
+  }
+
+  if (this.localDisplayStatus !== 7 || !this.measurable) {
+    return;
+  }
+
+  const watch = areaWatch.root;
+  if (watch && !areaWatch.outside) {
+    const mask = this.mask;
+    if (mask instanceof PixiContainer && !within(watch, mask)) {
+      areaWatch.outside = true;
+    }
+  }
+
+  const effects = this.effects;
+  const manageEffects = effects.length > 0;
+  const placing = measuring > 0 && !!this.renderGroup && manageEffects;
   const into = placing ? boundsPool.get().clear() : bounds;
-  measuring++;
-  try {
-    globalBounds.call(this, layers, into, layer);
-  } finally {
-    measuring--;
+  const local = this.renderGroup || manageEffects ? boundsPool.get().clear() : into;
+  if (this.boundsArea) {
+    into.addRect(this.boundsArea, this.worldTransform);
+  } else {
+    if (this.renderPipeId) {
+      const view = this.bounds;
+      local.addFrame(view.minX, view.minY, view.maxX, view.maxY, this.groupTransform);
+    }
+
+    const children = this.children as Measured[];
+    // Restored however the walk ends: one that throws leaves no depth behind for the next.
+    measuring++;
+    try {
+      for (let i = 0; i < children.length; i++) {
+        children[i]._getGlobalBoundsRecursive(layers, local, layer);
+      }
+    } finally {
+      measuring--;
+    }
+  }
+
+  if (manageEffects) {
+    let advanced = false;
+    const group = (this.renderGroup || this.parentRenderGroup) as unknown as {
+      worldTransform: Matrix;
+    };
+    for (let i = 0; i < effects.length; i++) {
+      const addBounds = effects[i].addBounds;
+      if (addBounds) {
+        if (!advanced) {
+          advanced = true;
+          local.applyMatrix(group.worldTransform);
+        }
+
+        addBounds.call(effects[i], local, true);
+      }
+    }
+
+    if (advanced) {
+      local.applyMatrix(group.worldTransform.copyTo(INVERSE).invert());
+    }
+
+    into.addBounds(local);
+    boundsPool.return(local);
+  } else if (this.renderGroup) {
+    into.addBounds(local, this.relativeGroupTransform);
+    boundsPool.return(local);
   }
 
   if (placing) {

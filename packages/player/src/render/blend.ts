@@ -7,6 +7,7 @@ import {
   type BindGroup,
   BlendModeFilter,
   type Bounds,
+  type Container,
   type Filter,
   FilterEffect,
   FilterSystem,
@@ -15,10 +16,11 @@ import {
   TexturePool,
   TextureSource,
 } from "pixi.js";
+import { areaWatch } from "./patches.js";
 
 type FilterData = { skip: boolean; resolution: number; bounds: Bounds };
 const filterSystem = FilterSystem.prototype as unknown as {
-  _calculateFilterArea(instruction: { filterEffect: FilterEffect }, bounds: Bounds): void;
+  _calculateFilterArea(instruction: AreaInstruction, bounds: Bounds): void;
   _calculateFilterBounds(data: FilterData, ...rest: unknown[]): void;
   _applyFiltersToTexture(data: { backTexture: Texture }, clear: boolean): void;
 };
@@ -82,13 +84,64 @@ let measuring: FilterEffect | null = null;
 
     bounds.pad(padding | 0);
   };
+/**
+ * A filter that keeps the area its object was last measured at, to give
+ * it again while nothing in the object changed but where it is
+ * (FilterChain): Pixi measured every filtered object, all of it, on every
+ * frame, a crowd's glows and their characters' every part.
+ */
+export interface AreaKeeper {
+  /** Into `bounds` the area kept, moved as `container` has moved since; false where none stands. */
+  keptArea(container: Container, bounds: Bounds): boolean;
+  /** Keep `bounds`, the area just measured of `container`. */
+  keepArea(container: Container, bounds: Bounds): void;
+}
+
+type AreaInstruction = {
+  filterEffect: FilterEffect;
+  container?: Container | null;
+  renderables?: unknown;
+};
+
+/** The keeper of the instruction's area, where it is measured as Pixi measures a container. */
+function keeperOf(instruction: AreaInstruction): AreaKeeper | null {
+  const container = instruction.container;
+  const first = instruction.filterEffect.filters?.[0] as Partial<AreaKeeper> | undefined;
+  if (
+    !container ||
+    !first?.keptArea ||
+    instruction.renderables ||
+    instruction.filterEffect.filterArea
+  ) {
+    return null;
+  }
+
+  const group = (container.renderGroup || container.parentRenderGroup) as {
+    cacheToLocalTransform?: unknown;
+  } | null;
+  return group?.cacheToLocalTransform ? null : (first as AreaKeeper);
+}
+
 const calculateFilterArea = filterSystem._calculateFilterArea;
-filterSystem._calculateFilterArea = function (instruction, bounds) {
+filterSystem._calculateFilterArea = function (instruction: AreaInstruction, bounds) {
   measuring = instruction.filterEffect;
   try {
+    const keeper = keeperOf(instruction);
+    const container = instruction.container as Container;
+    if (keeper?.keptArea(container, bounds)) {
+      return;
+    }
+
+    // A mask from outside it may bound what is in it, and move as nothing in it changes.
+    areaWatch.root = keeper ? container : null;
+    areaWatch.outside = false;
     calculateFilterArea.call(this, instruction, bounds);
+    if (keeper && !areaWatch.outside) {
+      keeper.keepArea(container, bounds);
+    }
   } finally {
     measuring = null;
+    areaWatch.root = null;
   }
 };
 

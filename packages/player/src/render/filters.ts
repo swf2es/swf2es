@@ -10,6 +10,7 @@
 // right and down, as BitmapData.applyFilter does. WebGL
 // alone: each pass is a filter of its own.
 import {
+  type Bounds,
   BufferImageSource,
   type Container,
   Filter,
@@ -24,6 +25,7 @@ import {
 } from "pixi.js";
 import { filterRect, gradientTable, integerKernel } from "../bitmap/filters.js";
 import type { Filter as FilterRecord } from "../display/filters.js";
+import type { AreaKeeper } from "./blend.js";
 
 const VERTEX = `in vec2 aPosition;
 out vec2 vTextureCoord;
@@ -1080,9 +1082,25 @@ function sameInput(a: Input, b: Input): boolean {
  * One changing frame after frame is filtered straight to the target,
  * with no copy kept; so is one that `keeps` not, drawn once.
  */
-export class FilterChain extends Filter {
+export class FilterChain extends Filter implements AreaKeeper {
   /** The input last run on, and the output kept of it, if any. */
   private ran: Input | null = null;
+  /**
+   * The area its object was last measured at on the stage, and the
+   * object's transform on the stage then; null till measured again.
+   */
+  private area: {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+    a: number;
+    b: number;
+    c: number;
+    d: number;
+    tx: number;
+    ty: number;
+  } | null = null;
   private kept: Texture | null = null;
   private stale = true;
   /** Runs in a row its object changed for. */
@@ -1108,9 +1126,58 @@ export class FilterChain extends Filter {
     this.antialias = "inherit";
   }
 
-  /** What it was run on changed: run it again. */
+  /** What it was run on changed: run it again, and measure it again. */
   changed(): void {
     this.stale = true;
+    this.area = null;
+  }
+
+  /**
+   * The area kept, moved as the object moved: while nothing in the object
+   * changed (`changed`) and its transform on the stage only moved, all it
+   * draws moved alike, and so did its bounds.
+   */
+  keptArea(container: Container, bounds: Bounds): boolean {
+    const area = this.area;
+    if (!area || container !== this.owner) {
+      return false;
+    }
+
+    const m = container.worldTransform;
+    if (m.a !== area.a || m.b !== area.b || m.c !== area.c || m.d !== area.d) {
+      return false;
+    }
+
+    const dx = m.tx - area.tx;
+    const dy = m.ty - area.ty;
+    bounds.minX = area.minX + dx;
+    bounds.minY = area.minY + dy;
+    bounds.maxX = area.maxX + dx;
+    bounds.maxY = area.maxY + dy;
+    return true;
+  }
+
+  keepArea(container: Container, bounds: Bounds): void {
+    // A view drawn once measures once; an object that draws nothing is placed by its group, not by
+    // itself.
+    if (!this.keeps || container !== this.owner || !(bounds.width > 0 && bounds.height > 0)) {
+      this.area = null;
+      return;
+    }
+
+    const m = container.worldTransform;
+    this.area = {
+      minX: bounds.minX,
+      minY: bounds.minY,
+      maxX: bounds.maxX,
+      maxY: bounds.maxY,
+      a: m.a,
+      b: m.b,
+      c: m.c,
+      d: m.d,
+      tx: m.tx,
+      ty: m.ty,
+    };
   }
 
   /** The target's units to a pixel of the stage its filters are drawn at. */
@@ -1124,12 +1191,14 @@ export class FilterChain extends Filter {
     scaleFilters(this.filters, units);
     this.padding = this.filters.reduce((sum, f) => sum + f.padding, 0);
     this.stale = true;
+    this.area = null;
   }
 
   /** The output kept let go of, as its object leaves the display list. */
   forget(): void {
     this.release();
     this.ran = null;
+    this.area = null;
   }
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
