@@ -459,7 +459,7 @@
   "avm2/filereferencelist_browse_cancel": {"matched":6,"lines":6,"traced":6,"error":null},
   "avm2/filereferencelist_browse_select": {"matched":3,"lines":7,"traced":4,"error":null},
   "avm2/filter_rewind": {"matched":8,"lines":8,"traced":8,"error":null},
-  "avm2/filters_array_holes": {"matched":13,"lines":25,"traced":13,"error":"TypeError: Cannot read properties of undefined (reading 'ratio')"},
+  "avm2/filters_array_holes": {"matched":25,"lines":25,"traced":25,"error":null},
   "avm2/finddef": {"matched":3,"lines":3,"traced":3,"error":null},
   "avm2/findprop_global_prototype": {"matched":6,"lines":6,"traced":6,"error":null},
   "avm2/flash_media_video_constructor": {"matched":60,"lines":157,"traced":157,"error":null},
