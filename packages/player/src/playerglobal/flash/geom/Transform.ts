@@ -176,9 +176,12 @@ export function transformNatives(s: Scripting): avm2.Natives {
 
     /**
      * Taken as given, and apart into the 3D properties; null back to 2D, at
-     * the identity. As in Flash, one equal to the object's own changes
-     * nothing, its properties kept as they were set rather than read from
-     * it again, and any other whose float32 determinant is 0 is refused.
+     * the identity. Flash's getter hands out the object's own matrix, and
+     * setting that same object back changes nothing, its properties kept as
+     * they were set rather than read from it again; our getter copies, so
+     * an equal matrix stands for it (a clone, which Flash takes apart
+     * again, is the difference). Any other whose float32 determinant is 0
+     * is refused.
      */
     set matrix3D(v: Value) {
       const raw = v ? ((v as AsObject).$matrix3D as Float32Array) : null;
