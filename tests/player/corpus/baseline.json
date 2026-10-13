@@ -322,7 +322,7 @@
   "avm2/displayobjectcontainer_removechild_errors": {"matched":4,"lines":4,"traced":4,"error":null},
   "avm2/displayobjectcontainer_removechild_timelinemanip_remove1": {"matched":38,"lines":38,"traced":38,"error":null},
   "avm2/displayobjectcontainer_removechildat": {"matched":18,"lines":18,"traced":18,"error":null},
-  "avm2/displayobjectcontainer_removechildren": {"matched":5,"lines":51,"traced":12,"error":"RangeError: Error #2006: The supplied index is out of bounds."},
+  "avm2/displayobjectcontainer_removechildren": {"matched":51,"lines":51,"traced":51,"error":null},
   "avm2/displayobjectcontainer_setchildindex": {"matched":42,"lines":42,"traced":42,"error":null},
   "avm2/displayobjectcontainer_stopallmovieclips": {"matched":2,"lines":2,"traced":2,"error":null},
   "avm2/displayobjectcontainer_stopallmovieclips_nonconstructed": {"matched":19,"lines":19,"traced":35,"error":null},

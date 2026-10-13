@@ -113,14 +113,17 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     removeChildren(begin: Value, end: Value): void {
       const c = this.$display;
+      const n = c.children.length;
       const from = begin === undefined ? 0 : s.rt.toInt(begin);
-      const to =
-        end === undefined || s.rt.toInt(end) === 0x7fffffff ? c.children.length : s.rt.toInt(end);
-      if (from < 0 || to > c.children.length || from > to) {
+      const to = end === undefined ? 0x7fffffff : s.rt.toInt(end);
+      // `end` is the last one removed. Its default, 0x7fffffff, stands for the last child, and
+      // with it a `begin` past the end removes nothing where Flash would otherwise throw.
+      const all = to === 0x7fffffff;
+      if (from < 0 || (!all && (to >= n || from > to))) {
         throw s.rt.error("RangeError", 2006);
       }
 
-      for (const d of c.children.slice(from, to)) {
+      for (const d of c.children.slice(from, all ? n : to + 1)) {
         remove(c, d);
       }
     }
