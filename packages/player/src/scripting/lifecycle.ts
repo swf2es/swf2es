@@ -102,7 +102,10 @@ export class Lifecycle {
     display.parent?.removeChild(display);
   }
 
-  /** REMOVED and REMOVED_FROM_STAGE told of `display`, a script that removes it meanwhile thrown `error`. */
+  /**
+   * REMOVED and REMOVED_FROM_STAGE told of `display`; a script that
+   * removes it meanwhile is thrown `error`.
+   */
   private telling(display: DisplayObject, error: number): void {
     // Told of again inside its own telling: the outer one's error holds until it ends.
     if (this.leaving.has(display)) {
