@@ -3183,3 +3183,60 @@ test("the wheel reaches the player in Flash's lines, keeps the page from scrolli
     "10 -3",
   ]);
 });
+
+test("multiply and subtract blend directly only while the stage's pixels are opaque", async () => {
+  const { Drawing } = await import("../../../../packages/player/dist/display/drawing.js");
+  const { renderer } = standIn([]);
+  const background = { alpha: 1 };
+  Object.assign(renderer, { type: 1, background });
+  const view = new PixiView(renderer);
+  const filled = (mode: string) => {
+    const sprite = new Container();
+    const drawing = new Drawing();
+    drawing.beginFill({ type: "solid", color: 0xff336699 });
+    drawing.drawRect(0, 0, 30, 20);
+    drawing.endFill();
+    sprite.drawing = drawing;
+    sprite.blendMode = mode;
+    return sprite;
+  };
+  const root = new Container();
+  const multiply = filled("multiply");
+  const subtract = filled("subtract");
+  const add = filled("add");
+  root.placeAtDepth(multiply, 1);
+  root.placeAtDepth(subtract, 2);
+  root.placeAtDepth(add, 3);
+  const nodes = (view as unknown as { nodes: WeakMap<object, { directBlend: string | null }> })
+    .nodes;
+  const direct = () => [multiply, subtract, add].map((o) => nodes.get(o)?.directBlend ?? null);
+
+  view.prepare(root);
+  assert.deepEqual(direct(), ["multiply", "subtract", "add"]);
+
+  // An erase outside any layer clears the stage's pixels below what comes after it: the blends
+  // drawn before it choose again on the frame it comes on, though nothing in them changed.
+  const eraser = filled("erase");
+  root.placeAtDepth(eraser, 0);
+  view.prepare(root);
+  assert.deepEqual(direct(), [null, null, "add"]);
+  root.removeChild(eraser);
+  view.prepare(root);
+  assert.deepEqual(direct(), ["multiply", "subtract", "add"]);
+
+  // In a layer, it clears the layer's alone.
+  const layer = new Container();
+  layer.blendMode = "layer";
+  layer.placeAtDepth(filled("erase"), 1);
+  root.placeAtDepth(layer, 0);
+  view.prepare(root);
+  assert.deepEqual(direct(), ["multiply", "subtract", "add"]);
+
+  // A host that makes the stage clear, as a transparent window mode, is seen on the frame it draws.
+  background.alpha = 0;
+  view.prepare(root);
+  assert.deepEqual(direct(), [null, null, "add"]);
+  background.alpha = 1;
+  view.prepare(root);
+  assert.deepEqual(direct(), ["multiply", "subtract", "add"]);
+});

@@ -3626,9 +3626,35 @@ its stops, so the two part only where a transformed stop is clamped.
 adl composites an object with a blend mode as a layer, its children
 together in the normal way, and blends that with what is below, the
 stage's colour included, where Pixi would blend each child on its own.
-A single fill with `screen`, or with `multiply` over an opaque stage,
-can use Pixi's direct blend when it has no filters, masks or isolated
-ancestor. Other blends use a filter (`render/blend.ts`): `layer`
+Where Pixi draws such a layer at once, as a single fill with no masks or
+as a filtered object's result, and the GPU's own blending computes
+Flash's blend, the GPU blends it, with no copy of what is below:
+`screen` and `add` over any ground, `subtract` and `multiply` while the
+stage's pixels are opaque, add and subtract under WebGL alone (WebGPU's
+add leaves an opaque target less than opaque, and it has no subtract),
+and none below a blended, filtered or clipped ancestor, which may draw it
+into a layer whose ground is clear. Over a clear pixel the GPU's multiply
+drops the object's own colour, which Flash keeps (off by up to 128), and
+its subtract the alpha. The stage's pixels may be clear while its
+background is (a host's transparent window mode, set at any time) or
+while an `erase` or `alpha` blend outside any layer is on the list, which
+clears what it covers of the stage as adl does; the view checks both
+before and after it brings the list up to date, and where that changes,
+each multiply and subtract blend outside a layer chooses again, so that
+it switches on the frame the change is drawn on (`blend-direct-clear`). A filtered object's chain draws
+its result with that blend (`FilterChain.blendOver`); the Pixi fork maps
+`subtract` to WebGL's reverse subtraction. adl's lighten, darken and
+difference blend the straight colours, which the GPU's min and max of
+premultiplied ones match only where the object is opaque, and overlay
+and hard light depend on what is below, so those keep the filter. The
+`blend-formulas` case puts each mode's formula against adl, at five
+alphas over five grounds, unfiltered and through a filter, and
+`blend-direct-filtered` draws filtered blends over the stage, in layers
+and as they change; the GPU's blends draw what the filter drew, byte for
+byte. On the bench (`--rig 300 --filtered 3 --added --glide
+--back-buffer --gpu`, an RX 7900 XTX) a frame fell from some 43 ms to
+37 ms, and on a busy page of 66 added fills the frame's framebuffer
+binds fell by an eighth. Other blends use a filter (`render/blend.ts`): `layer`
 one that only makes it a layer, any other one that reads the back buffer
 and computes the mode in premultiplied colour, its result replacing what
 is there. Multiply, screen, lighten, darken, difference, overlay and

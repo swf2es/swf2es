@@ -30,6 +30,8 @@
 // transform table's run (render/table.ts), which then draws only the parts
 // between two, as in a game's creatures with a glow on every few parts.
 // The rig has 12 parts, so any K of 12 or more blurs the first alone.
+// --added adds the blurred parts to what is below (blend mode add), as a
+// game's glowing effects do; with --back-buffer, as blends need it.
 //
 // --pulse plays instead N rigs whose 12 parts are curved outlines, half of
 // them swelling and shrinking a little as they turn, the others squashed
@@ -115,7 +117,7 @@
 // allocated, the player's start left out; --profile FILE also writes the
 // sampled profile there, for DevTools' Memory panel to open.
 //
-//   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--glide]
+//   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--added] [--glide]
 //     | --pulse N [--loop K] [--line W]
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
@@ -139,6 +141,7 @@ const option = (name: string, fallback: number) => {
 const shapes = option("shapes", 2000);
 const rig = option("rig", 0);
 const filtered = option("filtered", 0);
+const added = args.includes("--added");
 const branches = option("branches", 0);
 const toggleBranches = option("toggle-branches", 0);
 const toggleEvery = Math.max(1, option("toggle-every", 1));
@@ -352,12 +355,13 @@ function rigSwf(
         ty: Math.round(400 * Math.sin(i * 1.7)),
       };
       const blurs = blurred && (filtered === 0 || i % filtered === 0) ? [3] : undefined;
+      const blendMode = blurs && added ? 8 : undefined;
       if (f === 0) {
-        sprite.push(w.place({ depth: i + 1, character: 11 + (i % 4), matrix, blurs }));
+        sprite.push(w.place({ depth: i + 1, character: 11 + (i % 4), matrix, blurs, blendMode }));
       } else if (swap) {
         sprite.push(
           w.remove(i + 1),
-          w.place({ depth: i + 1, character: 11 + ((i + f) % 4), matrix, blurs }),
+          w.place({ depth: i + 1, character: 11 + ((i + f) % 4), matrix, blurs, blendMode }),
         );
       } else {
         sprite.push(w.place({ depth: i + 1, move: true, matrix, blurs }));
@@ -1193,7 +1197,7 @@ const summary = {
                     : branches > 0
                       ? `${branches} branches`
                       : rig > 0
-                        ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
+                        ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
                         : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
