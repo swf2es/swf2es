@@ -244,19 +244,30 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      // A side under 1 is refused; Flash sets no upper bound any more (16384 wide and 4097 by 4096 both pass).
+      // A side under 1 is refused, and so is 2^29 pixels or more (65536 by 8192), as
+      // adl refuses them; no side alone is (16384 wide and 65536 by 4096 both pass).
       const w = s.rt.toInt(width);
       const h = s.rt.toInt(height);
-      if (w < 1 || h < 1) {
+      if (w < 1 || h < 1 || w * h >= 2 ** 29) {
         throw s.rt.error("ArgumentError", 2015);
       }
 
-      this.$store = new BitmapStore(
-        w,
-        h,
-        transparent === undefined ? true : !!transparent,
-        s.rt.toUint(fill === undefined ? 0xffffffff : fill),
-      );
+      // One the browser cannot allocate is refused, as adl refuses what its memory
+      // cannot hold, rather than ending the player with a RangeError.
+      try {
+        this.$store = new BitmapStore(
+          w,
+          h,
+          transparent === undefined ? true : !!transparent,
+          s.rt.toUint(fill === undefined ? 0xffffffff : fill),
+        );
+      } catch (e) {
+        if (e instanceof RangeError) {
+          throw s.rt.error("ArgumentError", 2015);
+        }
+
+        throw e;
+      }
     }
 
     // Disposed, every read throws, the size included, as Flash has it.

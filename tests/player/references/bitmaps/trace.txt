@@ -8,6 +8,8 @@ area ok 4095
 tall [object BitmapData]
 4097x4096 [object BitmapData]
 negative error 2015
+65536x8192 error 2015
+1e20 error 2015
 size 4 3 true (x=0, y=0, w=4, h=3)
 default fill 80ff7f40 ff7f40
 out of range 0 0 0

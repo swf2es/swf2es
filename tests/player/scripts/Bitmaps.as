@@ -23,6 +23,9 @@ package {
       probe("tall", function():* { return new BitmapData(1, 8193); });
       probe("4097x4096", function():* { return new BitmapData(4097, 4096); });
       probe("negative", function():* { return new BitmapData(-1, 1); });
+      // 2^29 pixels are refused, however they are shaped; 1e20 is int's 1661992960.
+      probe("65536x8192", function():* { return new BitmapData(65536, 8192); });
+      probe("1e20", function():* { return new BitmapData(1e20, 4); });
       var bd:BitmapData = new BitmapData(4, 3, true, 0x80FF8040);
       trace("size", bd.width, bd.height, bd.transparent, bd.rect);
       trace("default fill", bd.getPixel32(0, 0).toString(16), bd.getPixel(0, 0).toString(16));
