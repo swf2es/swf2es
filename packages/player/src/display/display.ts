@@ -1146,6 +1146,8 @@ export class Container extends DisplayObject {
    * (walkList); null where it is to be made again, or too short to keep.
    */
   walk: WalkList | null = null;
+  /** Counts the children put on the list, for removeAtDepth to see whether a listener put one back. */
+  protected puts = 0;
 
   constructor() {
     super();
@@ -1183,6 +1185,7 @@ export class Container extends DisplayObject {
     child.depth = depth;
     child.parent = this;
     this.children.splice(index, 0, child);
+    this.puts++;
     this.depths.set(depth, child);
     this.relist(child);
     this.invalidate(CHILDREN);
@@ -1196,9 +1199,23 @@ export class Container extends DisplayObject {
     }
 
     // The timeline's removal: a script's goes through the natives, which tell of it themselves.
+    // Flash has the child out of the list while it tells of it, still its parent's: the
+    // siblings' indexes have closed up, and the parent no longer finds it there (#2025).
+    const index = this.children.indexOf(child);
+    if (index >= 0) {
+      this.takeOut(child, index);
+    }
+
+    const puts = this.puts;
     this.library?.removing?.(child, true);
     this.library?.sounds?.removed(child);
-    this.removeChild(child);
+    // A listener may have put it on this list again (which Flash does not survive). Where
+    // nothing was put on it meanwhile, the search, a whole list's on every removal, is spared.
+    if (child.parent === this && (this.puts === puts || !this.children.includes(child))) {
+      child.parent = null;
+      child.focusDrop?.(child);
+    }
+
     return child;
   }
 
@@ -1213,14 +1230,19 @@ export class Container extends DisplayObject {
       return;
     }
 
+    this.takeOut(child, index);
+    child.parent = null;
+    child.focusDrop?.(child);
+  }
+
+  /** `child`, at `index`, out of the list and off the depths; its parent is left to the caller. */
+  private takeOut(child: DisplayObject, index: number): void {
     if (child.depth !== null) {
       this.depths.delete(child.depth);
       child.depth = null;
     }
 
     this.children.splice(index, 1);
-    child.parent = null;
-    child.focusDrop?.(child);
     this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
@@ -1236,6 +1258,7 @@ export class Container extends DisplayObject {
     child.parent?.removeChild(child);
     child.parent = this;
     this.children.splice(same ? Math.min(index, this.children.length) : index, 0, child);
+    this.puts++;
     this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
@@ -1431,6 +1454,7 @@ export class ButtonObject extends Container {
       }
 
       this.children.splice(0, 0, current);
+      this.puts++;
       current.parent = this;
       this.relist(current);
       this.invalidate(CHILDREN);

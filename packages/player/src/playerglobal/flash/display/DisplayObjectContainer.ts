@@ -26,6 +26,20 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     return d;
   };
+  /**
+   * Where `d` is in `c`'s list, or -1. One the timeline is taking out is
+   * out of the list while its removal is told of, its parent still `c`.
+   */
+  const indexOf = (c: Container, d: DisplayObject): number =>
+    d.parent === c ? c.children.indexOf(d) : -1;
+  const ownIndex = (c: Container, d: DisplayObject): number => {
+    const i = indexOf(c, d);
+    if (i < 0) {
+      throw s.rt.error("ArgumentError", 2025);
+    }
+
+    return i;
+  };
   const indexIn = (c: Container, v: Value, max = c.children.length - 1): number => {
     const i = s.rt.toInt(v);
     if (i < 0 || i > max) {
@@ -34,8 +48,8 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     return i;
   };
-  const add = (c: Container, v: Value, index: number): Value => {
-    const d = childOf(v);
+  /** `d` put at `index` of `c`; `moved` if it is in `c`'s list already. */
+  const add = (c: Container, v: Value, d: DisplayObject, index: number, moved: boolean): Value => {
     // Adding an ancestor, or itself, would make a cycle.
     for (let o: DisplayObject | null = c; o; o = o.parent) {
       if (o === d) {
@@ -43,9 +57,9 @@ export function containerNatives(s: Scripting): avm2.Natives {
       }
     }
 
-    // Out of another parent first, with its events; within the same one, a move only.
-    const moved = d.parent === c;
-    if (d.parent && !moved) {
+    // Out of another parent first, with its events; within the same one, a move only. One the
+    // timeline is taking out of `c` is told of already.
+    if (d.parent && d.parent !== c) {
       s.lifecycle.removing(d);
     }
 
@@ -84,13 +98,15 @@ export function containerNatives(s: Scripting): avm2.Natives {
       const c = this.$display;
       const d = childOf(child);
       // Already a child: moved to the top.
-      return add(c, child, d.parent === c ? c.children.length - 1 : c.children.length);
+      const moved = indexOf(c, d) >= 0;
+      return add(c, child, d, c.children.length - (moved ? 1 : 0), moved);
     }
 
     addChildAt(child: Value, index: Value): Value {
       const c = this.$display;
       const d = childOf(child);
-      return add(c, child, indexIn(c, index, c.children.length - (d.parent === c ? 1 : 0)));
+      const moved = indexOf(c, d) >= 0;
+      return add(c, child, d, indexIn(c, index, c.children.length - (moved ? 1 : 0)), moved);
     }
 
     removeChild(child: Value): Value {
@@ -182,12 +198,13 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     getChildIndex(child: Value): number {
       const c = this.$display;
-      return c.children.indexOf(ownChild(c, child));
+      return ownIndex(c, childOf(child));
     }
 
     setChildIndex(child: Value, index: Value): void {
       const c = this.$display;
-      const d = ownChild(c, child);
+      const d = childOf(child);
+      ownIndex(c, d);
       c.addChildAt(d, indexIn(c, index));
     }
 
@@ -209,7 +226,11 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     swapChildren(a: Value, b: Value): void {
       const c = this.$display;
-      c.swapChildren(ownChild(c, a), ownChild(c, b));
+      const x = childOf(a);
+      ownIndex(c, x);
+      const y = childOf(b);
+      ownIndex(c, y);
+      c.swapChildren(x, y);
     }
 
     swapChildrenAt(a: Value, b: Value): void {
