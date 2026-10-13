@@ -3280,6 +3280,61 @@ test("an object made a mask as it leaves the list keeps its node from a new one 
   assert.notEqual(next.includeInBuild, false);
 });
 
+test("spare nodes are listed once, kept to the most, and dropped as a SWF unloads", async () => {
+  // They hold their objects' characters: kept on past an unload, they kept the SWF.
+  const { ShapeObject, unloads } = await import(
+    "../../../../packages/player/dist/display/display.js"
+  );
+  const { SPARE_NODES_MOST } = await import("../../../../packages/player/dist/render/pools.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const spares = view as unknown as {
+    spareNodes: Map<unknown, Set<unknown>>;
+    spareSince: Map<unknown, number>;
+  };
+  const root = new Container();
+
+  await withClock(() => {
+    const placeAll = (n: number) => {
+      for (let i = 0; i < n; i++) {
+        root.placeAtDepth(new ShapeObject(character), i + 1);
+      }
+
+      view.prepare(root);
+    };
+    const removeAll = () => {
+      for (const child of [...root.children]) {
+        root.removeChild(child);
+      }
+
+      view.prepare(root);
+    };
+
+    placeAll(3);
+    removeAll();
+    assert.equal(spares.spareSince.size, 3);
+    assert.equal(spares.spareNodes.get(character)?.size, 3);
+
+    // Taken by new objects, they leave the lists; released again, each is listed once.
+    placeAll(3);
+    assert.equal(spares.spareSince.size, 0);
+    removeAll();
+    assert.equal(spares.spareSince.size, 3);
+
+    // Past the most, the oldest go.
+    placeAll(SPARE_NODES_MOST + 10);
+    removeAll();
+    assert.equal(spares.spareSince.size, SPARE_NODES_MOST);
+    assert.equal(spares.spareNodes.get(character)?.size, SPARE_NODES_MOST);
+
+    // An unload lets go of them all at the next prepare.
+    unloads.count++;
+    view.prepare(root);
+    assert.equal(spares.spareSince.size, 0);
+    assert.equal(spares.spareNodes.size, 0);
+  });
+});
+
 test("the wheel reaches the player in Flash's lines, keeps the page from scrolling only where the SWF takes it, and leaves Ctrl's zoom to the page", () => {
   const listeners = new Map<string, (e: unknown) => void>();
   const canvas = {

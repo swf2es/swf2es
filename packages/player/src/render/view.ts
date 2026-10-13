@@ -36,6 +36,7 @@ import {
   StaticTextObject,
   TextObject,
   TRANSFORM,
+  unloads,
 } from "../display/display.js";
 import type { Filter as FilterRecord } from "../display/filters.js";
 import { shifted } from "../display/geometry.js";
@@ -241,9 +242,6 @@ interface Node {
   owner: WeakRef<DisplayObject>;
   character: object | null;
   kind: object;
-  /** Whether it is listed among the spare nodes, and since when; it may have come back since. */
-  listed: boolean;
-  since: number;
 }
 
 /** Only a partner outside the branch prevents it owning a separate instruction set. */
@@ -265,20 +263,23 @@ export class PixiView {
   private readonly spareGraphics: SharedGraphics[] = [];
   /**
    * The released nodes, by their objects' character, for a new object of
-   * the character to take (SPARE_NODES_MOST of each), newest last. A
-   * timeline that places its children anew on every frame, as an animated
-   * character's often does, made hundreds of nodes a frame, each with its
-   * containers, and dropped as many: taken, a node keeps its containers
-   * and Graphics, where they are in Pixi's tree when it comes back in its
-   * place, and its filters where the new object's are the same.
+   * the character to take. A timeline that places its children anew on
+   * every frame, as an animated character's often does, made hundreds of
+   * nodes a frame, each with its containers, and dropped as many: taken, a
+   * node keeps its containers and Graphics, where they are in Pixi's tree
+   * when it comes back in its place, and its filters where the new
+   * object's are the same. And all of them, oldest first, with the time
+   * each was listed: SPARE_NODES_MOST at most, none past IDLE_MS, and none
+   * past an unload (`dropSpares`), which would keep its SWF's characters.
    */
-  private readonly spareNodes = new Map<object, Node[]>();
+  private readonly spareNodes = new Map<object, Set<Node>>();
+  private readonly spareSince = new Map<Node, number>();
+  /** The unloads (display's `unloads`) the spares were last dropped for. */
+  private unloadsSeen = unloads.count;
   /** The nodes by their containers, for a child's sync to take the node that is in its place. */
   private readonly containerNodes = new WeakMap<PixiContainer, Node>();
   /** The container in the place the next object synced goes to, set and read as arrange syncs it. */
   private placeHint: PixiContainer | null = null;
-  /** When the spare nodes were last swept of those kept too long. */
-  private sweptAt = 0;
   /** What the nodes cleared give back once their new content is drawn (clear, giveBack). */
   private readonly giving = {
     fills: [] as GraphicsContext[],
@@ -792,8 +793,6 @@ export class PixiView {
         owner: o.ref,
         character: o.character,
         kind: o.constructor,
-        listed: false,
-        since: 0,
       };
       node.container.addChild(art);
       this.nodes.set(o, node);
@@ -815,24 +814,24 @@ export class PixiView {
    */
   private takeSpare(o: DisplayObject, hint: PixiContainer | null): Node | undefined {
     const character = o.character;
-    const list = character && this.spareNodes.get(character);
-    if (!list) {
+    const listed = character && this.spareNodes.get(character);
+    if (!listed) {
       return undefined;
     }
 
     let node: Node | undefined;
     const placed = hint ? this.containerNodes.get(hint) : undefined;
-    if (placed?.listed && this.spareFor(placed, o)) {
+    if (placed && listed.has(placed) && this.spareFor(placed, o)) {
       node = placed;
     } else {
-      while (list.length > 0) {
-        const last = list.pop() as Node;
-        if (last.listed && this.spareFor(last, o)) {
-          node = last;
+      // Oldest first; one no longer fit to take, as one made a mask, is let go of on the way.
+      for (const spare of listed) {
+        if (this.spareFor(spare, o)) {
+          node = spare;
           break;
         }
 
-        last.listed = false;
+        this.unlistSpare(spare);
       }
     }
 
@@ -840,7 +839,7 @@ export class PixiView {
       return undefined;
     }
 
-    node.listed = false;
+    this.unlistSpare(node);
     // Back on the list, the old object is drawn whole into a node of its own.
     const was = node.owner.deref();
     if (was) {
@@ -882,67 +881,62 @@ export class PixiView {
    * not a mask's, whose container a masked one may still hold.
    */
   private listSpare(node: Node): void {
+    // As its object is now: a timeline may have swapped the character it was made of.
+    const owner = node.owner.deref();
+    if (owner) {
+      node.character = owner.character;
+      node.kind = owner.constructor;
+    }
+
     const character = node.character;
     const container = node.container;
     if (
       this.fresh ||
-      node.listed ||
       !character ||
       node.masking ||
       container.includeInBuild === false ||
-      container.measurable === false
+      container.measurable === false ||
+      this.spareSince.has(node)
     ) {
       return;
     }
 
-    let list = this.spareNodes.get(character);
-    if (!list) {
-      list = [];
-      this.spareNodes.set(character, list);
+    let listed = this.spareNodes.get(character);
+    if (!listed) {
+      listed = new Set();
+      this.spareNodes.set(character, listed);
     }
 
-    // Past the most, those come back or taken are dropped, then the oldest.
-    if (list.length >= SPARE_NODES_MOST) {
-      let k = 0;
-      for (let i = 0; i < list.length; i++) {
-        if (list[i].listed && list[i].released) {
-          list[k++] = list[i];
-        } else {
-          list[i].listed = false;
-        }
-      }
-
-      list.length = k;
-      if (k >= SPARE_NODES_MOST) {
-        for (const dropped of list.splice(0, k - SPARE_NODES_MOST + 1)) {
-          dropped.listed = false;
-        }
-      }
+    listed.add(node);
+    this.spareSince.set(node, performance.now());
+    if (this.spareSince.size > SPARE_NODES_MOST) {
+      this.unlistSpare(this.spareSince.keys().next().value as Node);
     }
-
-    node.listed = true;
-    node.since = performance.now();
-    list.push(node);
   }
 
-  /** Let go of the spare nodes listed longer than IDLE_MS, and of those since taken or come back. */
-  private sweepSpares(now: number): void {
-    for (const [character, list] of this.spareNodes) {
-      let k = 0;
-      for (let i = 0; i < list.length; i++) {
-        const node = list[i];
-        if (node.listed && node.released && now - node.since < IDLE_MS) {
-          list[k++] = node;
-        } else {
-          node.listed = false;
-        }
-      }
-
-      list.length = k;
-      if (k === 0) {
-        this.spareNodes.delete(character);
-      }
+  /** A node off the spares: taken, come back, kept too long, or past the most. */
+  private unlistSpare(node: Node): void {
+    if (!this.spareSince.delete(node)) {
+      return;
     }
+
+    const character = node.character as object;
+    const listed = this.spareNodes.get(character);
+    listed?.delete(node);
+    if (listed?.size === 0) {
+      this.spareNodes.delete(character);
+    }
+  }
+
+  /**
+   * Let go of every spare node, as a SWF unloads: they hold its characters,
+   * and its objects' containers, till taken or IDLE_MS on, which a player
+   * paused or let go of never reaches. For a host to call too as it lets
+   * go of a player whose view it keeps.
+   */
+  dropSpares(): void {
+    this.spareNodes.clear();
+    this.spareSince.clear();
   }
 
   /**
@@ -1559,6 +1553,7 @@ export class PixiView {
       node.released = false;
       node.reused = true;
       this.parked.delete(node);
+      this.unlistSpare(node);
       const group = node.container.renderGroup;
       if (group) {
         this.parkedGroups.delete(group.instructionSet.uid);
@@ -2177,9 +2172,12 @@ export class PixiView {
       this.emptyGroup(uid, entry.group.deref());
     }
 
-    if (now - this.sweptAt >= IDLE_MS) {
-      this.sweptAt = now;
-      this.sweepSpares(now);
+    for (const [node, since] of this.spareSince) {
+      if (now - since < IDLE_MS) {
+        break;
+      }
+
+      this.unlistSpare(node);
     }
 
     trimPools();
@@ -2197,6 +2195,12 @@ export class PixiView {
     this.placeMasks(root, this.offList);
     if (!this.fresh) {
       this.settleGroups();
+    }
+
+    // After the sync, which released what an unload took off the list and listed it spare.
+    if (unloads.count !== this.unloadsSeen) {
+      this.unloadsSeen = unloads.count;
+      this.dropSpares();
     }
   }
 

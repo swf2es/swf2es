@@ -10,11 +10,14 @@ import { BatchableGraphics, BigPool, GraphicsContextRenderData, RenderTexture } 
 export const SPARE_GRAPHICS_MOST = 4096;
 
 /**
- * The most released nodes a view keeps of each character for a new object
- * of it to take (render/view.ts): a crowd of one animated character places
- * a few hundred children anew on each frame.
+ * The most released nodes a view keeps, of all characters, for a new
+ * object of their character to take (render/view.ts), the oldest going
+ * first. A crowd of 32 of one animated character releases some 340 a
+ * frame and takes most of them back only as its loop comes round, a second
+ * or two on: it keeps some 9,000. At 2,048 those went before they were
+ * taken, and a third of the nodes were made anew.
  */
-export const SPARE_NODES_MOST = 512;
+export const SPARE_NODES_MOST = 16_384;
 
 /**
  * How long, in milliseconds, what no instance uses is kept for one to come

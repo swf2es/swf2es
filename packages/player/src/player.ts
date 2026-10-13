@@ -13,6 +13,7 @@ import {
   type DisplayObject,
   MovieClip,
   OTHER,
+  unloads,
   walkList,
 } from "./display/display.js";
 import { type Library, readLibrary } from "./display/timeline.js";
@@ -163,6 +164,7 @@ export class Player {
   destroy(): void {
     this.stopped = true;
     this.scripting?.destroy();
+    unloads.count++;
   }
 
   /** Time a host has let pass, in ms, still to be played as frames. */
