@@ -56,6 +56,7 @@ void main(void) {
 }
 `;
 
+// Its colour is in its bitmap, all above it drawn into it (view.ts): Pixi's is not taken.
 // Sampled where the pixel it is in has its centre: Flash smooths the bitmap
 // once a pixel, and the target's samples (uPixel a side of a pixel, for
 // the page that draws finer to average down) all take that pixel's value.
@@ -69,7 +70,7 @@ uniform float uPixel;
 void main(void) {
   vec2 d = (floor(gl_FragCoord.xy / uPixel) + 0.5) * uPixel - gl_FragCoord.xy;
   vec2 uv = vUV + dFdx(vUV) * d.x + dFdy(vUV) * d.y;
-  finalColor = texture(uTexture, uv) * vColor;
+  finalColor = texture(uTexture, uv);
 }
 `;
 

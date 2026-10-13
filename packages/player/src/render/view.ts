@@ -1696,7 +1696,9 @@ export class PixiView {
 
     const flash = node.color && !multipliesOnly(node.color) ? node.color : null;
     if (dirty & TRANSFORM || recolor) {
-      const ct = flash || masking ? null : o.colorTransform;
+      // A 3D object's bitmap is drawn coloured by all above it too, each of its fills under the
+      // alpha, as Flash's is: its quad takes none of Pixi's colour (render/three.ts).
+      const ct = flash || masking ? null : three ? node.color : o.colorTransform;
       container.alpha = ct ? Math.max(0, Math.min(1, ct.aMul)) : 1;
       const tint = ct
         ? (Math.round(Math.max(0, Math.min(1, ct.rMul)) * 255) << 16) |
@@ -2017,6 +2019,23 @@ export class PixiView {
       }
 
       plane.holder.addChild(container);
+    }
+
+    // Its blend mode composites the quad with what is behind it, as Flash's does, not its content
+    // within its bitmap: the blend's filters, or the fixed-function blend, go on the quad.
+    const filters = container.filters;
+    if (filters && filters.length > node.filters.length) {
+      quad.filters = filters.slice(node.filters.length);
+      container.filters = node.filters.length > 0 ? node.filters : null;
+    } else if (!filters || node.blend === "normal") {
+      quad.filters = null;
+    }
+
+    if (container.blendMode !== "inherit") {
+      quad.blendMode = container.blendMode;
+      container.blendMode = "inherit";
+    } else if (node.directBlend === null) {
+      quad.blendMode = "inherit";
     }
 
     const mask = container.mask;
