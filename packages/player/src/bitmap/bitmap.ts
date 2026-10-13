@@ -58,8 +58,18 @@ export function unmultiply(pixel: number): number {
  * the same premultiplied ARGB, which a draw may render into.
  */
 export interface GpuCopy {
+  /** The store's version the texture holds. */
+  version: number;
   /** The texture's pixels, read back: premultiplied ARGB, row by row. */
   read(): Uint32Array;
+  /**
+   * `rect` of `source`, within it, put at (dx, dy) in the texture, which it
+   * fits, replacing what was there: as a memmove where `source` is this
+   * store. False, having done nothing, where `source` can have no texture.
+   */
+  copy(source: BitmapStore, rect: PixelRect, dx: number, dy: number): boolean;
+  /** `rect`, within the store, set to `pixel`, premultiplied ARGB. */
+  fill(rect: PixelRect, pixel: number): boolean;
   /** Free the texture. */
   destroy(): void;
 }
@@ -121,6 +131,29 @@ export class BitmapStore {
     this.gpu = copy;
     this.gpuNewer = true;
     this.changed();
+    copy.version = this.version;
+  }
+
+  /**
+   * `op` done on the GPU's copy where that is newer, so the pixels stay
+   * there: an operation after a draw would otherwise wait for the GPU and
+   * bring the whole store back, on every frame of a SWF that draws and then
+   * scrolls, fills or copies. Only an operation the GPU does exactly takes
+   * this way: moves of whole pixels and fills, never arithmetic. Whether
+   * it was done.
+   */
+  onGpu(op: (copy: GpuCopy) => boolean): boolean {
+    const copy = this.gpu;
+    if (!this.gpuNewer || !copy || !op(copy)) {
+      return false;
+    }
+
+    // The op may have read the pixels back, for a texture of this store that
+    // was behind: the CPU then holds them as they were before it.
+    this.gpuNewer = true;
+    this.changed();
+    copy.version = this.version;
+    return true;
   }
 
   /** A store of its own holding `pixels`, premultiplied already. */
@@ -192,6 +225,10 @@ export class BitmapStore {
     }
 
     const pixel = this.premultiplied(argb);
+    if (this.onGpu((copy) => copy.fill(c, pixel))) {
+      return;
+    }
+
     for (let y = c.y; y < c.y + c.height; y++) {
       this.pixels.fill(pixel, y * this.width + c.x, y * this.width + c.x + c.width);
     }
@@ -239,6 +276,21 @@ export class BitmapStore {
     const sy = s.y + (d.y - dy);
     ax += d.x - dx;
     ay += d.y - dy;
+    // A plain replacement, where the pixels land as they are: an opaque
+    // source's go over anything unchanged. In place, all but a move down and
+    // left, which Flash's order smears, are a memmove.
+    const replaces = !alpha && (!source.transparent || (this.transparent && !mergeAlpha));
+    const smears = source === this && d.y > sy && d.x < sx;
+    if (
+      replaces &&
+      !smears &&
+      this.onGpu((copy) =>
+        copy.copy(source, { x: sx, y: sy, width: d.width, height: d.height }, d.x, d.y),
+      )
+    ) {
+      return;
+    }
+
     // In place, in Flash's order, which reads what it already wrote in one
     // direction (Ruffle's bitmapdata_copypixels_self): rows bottom-up when
     // the copy moves down without moving left, columns right to left when

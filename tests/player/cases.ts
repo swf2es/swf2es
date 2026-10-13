@@ -5644,6 +5644,18 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Draws followed by scrolls, fills and copies on every frame (scripts/DrawScroll.as).
+    name: "draw-scroll",
+    swf: (abc) => bare(abc, 1, "DrawScroll", 512, 104),
+    script: "DrawScroll",
+    frames: 6,
+    capture: [2, 4, 6],
+    // The half-green square drawn over the opaque bitmap's blue rounds a level apart: the
+    // draw's own compositing, the same whether the operations after it run on the GPU or not.
+    tolerance: 1,
+    maxOutliers: 0,
+  },
+  {
     name: "draw-objects",
     swf: drawObjects,
     script: "DrawObjects",

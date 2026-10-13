@@ -9,7 +9,7 @@ import {
   premultiply,
   unmultiply,
 } from "../../../../packages/player/dist/bitmap/bitmap.js";
-import { drawBitmap } from "../../../../packages/player/dist/bitmap/ops.js";
+import { drawBitmap, scroll } from "../../../../packages/player/dist/bitmap/ops.js";
 import { BitmapObject } from "../../../../packages/player/dist/display/display.js";
 
 setFlagsFromString("--expose-gc");
@@ -208,10 +208,13 @@ test("a store written on the GPU is read back once, when its pixels are next rea
   let reads = 0;
   let destroyed = false;
   const copy = {
+    version: -1,
     read: () => {
       reads++;
       return Uint32Array.of(0xff102030, 0x80402010);
     },
+    copy: () => false,
+    fill: () => false,
     destroy: () => {
       destroyed = true;
     },
@@ -234,4 +237,71 @@ test("a store written on the GPU is read back once, when its pixels are next rea
   assert.equal(destroyed, true);
   assert.equal(store.gpu, null);
   assert.deepEqual(seen, [false, true]);
+});
+
+test("moves and fills of a store newer on the GPU stay there; the rest bring it back once", () => {
+  const store = new BitmapStore(4, 4, true, 0);
+  const done: string[] = [];
+  let reads = 0;
+  const copy = {
+    version: -1,
+    read: () => {
+      reads++;
+      return new Uint32Array(16).fill(0xff0000ff);
+    },
+    copy: (
+      source: BitmapStore,
+      r: { x: number; y: number; width: number; height: number },
+      dx: number,
+      dy: number,
+    ) => {
+      done.push(
+        `copy ${source === store ? "self" : "other"} ${r.x},${r.y} ${r.width}x${r.height} to ${dx},${dy}`,
+      );
+      return true;
+    },
+    fill: (r: { x: number; y: number; width: number; height: number }, pixel: number) => {
+      done.push(`fill ${r.x},${r.y} ${r.width}x${r.height} ${pixel.toString(16)}`);
+      return true;
+    },
+    destroy: () => {},
+  };
+  const opaque = new BitmapStore(2, 2, false, 0x00ff00);
+  const faint = new BitmapStore(2, 2, true, 0x8000ff00);
+  store.copies.add(copy);
+  store.drawnOnGpu(copy);
+
+  // A draw then a scroll a frame, as a trail does: nothing comes back.
+  for (let frame = 0; frame < 3; frame++) {
+    store.drawnOnGpu(copy);
+    scroll(store, 0, -1);
+  }
+
+  scroll(store, 9, 0);
+  scroll(store, 0, 0);
+  // A scroll by nothing keeps the copy current: else the next move on it, finding its
+  // texture behind, would read the store back and leave the CPU's pixels behind the GPU's.
+  assert.equal(copy.version, store.version);
+  store.fillRect({ x: -1, y: 1, width: 3, height: 9 }, 0x80ff0000);
+  store.copyPixels(store, { x: 0, y: 0, width: 2, height: 2 }, 1, 0, false);
+  store.copyPixels(opaque, { x: 0, y: 0, width: 2, height: 2 }, 3, 3, true);
+  assert.deepEqual(done, [
+    "copy self 0,1 4x3 to 0,0",
+    "copy self 0,1 4x3 to 0,0",
+    "copy self 0,1 4x3 to 0,0",
+    "fill 0,1 2x3 80800000",
+    "copy self 0,0 2x2 to 1,0",
+    "copy other 0,0 1x1 to 3,3",
+  ]);
+  assert.deepEqual([reads, store.newerOnGpu, copy.version], [0, true, store.version]);
+
+  // Moved down and left in place, Flash's order smears: the pixels come back, once.
+  store.copyPixels(store, { x: 1, y: 0, width: 2, height: 2 }, 0, 1, false);
+  assert.deepEqual([reads, store.newerOnGpu, done.length], [1, false, 6]);
+
+  // Merged over a transparent store, the arithmetic is Flash's, on the CPU.
+  store.drawnOnGpu(copy);
+  store.copyPixels(faint, { x: 0, y: 0, width: 2, height: 2 }, 0, 0, true);
+  assert.deepEqual([reads, store.newerOnGpu, done.length], [2, false, 6]);
+  assert.equal(store.getPixel32(3, 3).toString(16), "ff0000ff");
 });
