@@ -5545,6 +5545,41 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "stage-erase",
+    swf: (abc) => bare(abc, 1, "StageErase", 240, 80),
+    script: "StageErase",
+    frames: 5,
+    capture: [1, 2, 3, 4, 5],
+    // Within 5 a channel: adl's rounding of the glows and of the blends, a subtracted glow's
+    // faint edge the most.
+    tolerance: 5,
+    maxOutliers: 0,
+  },
+  {
+    name: "blend-filtered-alpha",
+    swf: (abc) => bare(abc, 1, "BlendFilteredAlpha", 320, 200),
+    script: "BlendFilteredAlpha",
+    frames: 2,
+    capture: [1, 2],
+    // Within 5 a channel: adl's rounding of the glows and of the blends, and a drop shadow's edge
+    // a pixel wide. But for the corners of the glow under an alpha offset, some 30 channels up to
+    // 10 off: each of the test page's samples there with any alpha takes the offset, where adl's
+    // pixel has none; and a few of the shadow's corners.
+    tolerance: 5,
+    maxOutliers: 52,
+  },
+  {
+    name: "filtered-colors",
+    swf: (abc) => bare(abc, 1, "FilteredColors", 320, 240),
+    script: "FilteredColors",
+    frames: 2,
+    capture: [1, 2],
+    // Within 5 a channel but for some 170: the corners of a glow under an alpha offset, as in
+    // blend-filtered-alpha, up to 49 off; a glow's edge along a mask's, 35; a bitmap's, 10.
+    tolerance: 5,
+    maxOutliers: 170,
+  },
+  {
     name: "blend-edges",
     swf: (abc) => bare(abc, 1, "BlendEdges", 200, 150),
     script: "BlendEdges",
@@ -5593,6 +5628,15 @@ export const cases: PlayerCase[] = [
     name: "apply-filter",
     swf: (abc) => bare(abc, 1, "ApplyFilter"),
     script: "ApplyFilter",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "apply-filter-inner",
+    swf: (abc) => bare(abc, 1, "ApplyFilterInner"),
+    script: "ApplyFilterInner",
     frames: 1,
     capture: [],
     tolerance: 0,

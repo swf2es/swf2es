@@ -137,6 +137,11 @@ function anyClips(children: readonly DisplayObject[]): boolean {
   return false;
 }
 
+/** Whether `ct` leaves every pixel clear, whatever its alpha. */
+function clearsAll(ct: ColorTransform | null): boolean {
+  return ct !== null && ct.aAdd <= 0 && ct.aMul * 255 + ct.aAdd <= 0;
+}
+
 /** Whether any layer has lines of the node's own to stroke. */
 function hasLines(strokes: readonly (SharedGraphics | null)[]): boolean {
   for (let i = 0; i < strokes.length; i++) {
@@ -220,6 +225,11 @@ interface Node {
   /** Its colour transform from the stage down, null for none, and its parent's that it was made from. */
   color: ColorTransform | null;
   inherited: ColorTransform | null;
+  /**
+   * Whether its filters' output takes its colour, not what they are run on, as Flash colours a
+   * filtered object's bitmap: what is in it is then drawn uncoloured by it and all above it.
+   */
+  rooted: boolean;
   /** The blend mode its filters composite it in. */
   blend: string;
   /** Its filters' records as of the last sync, and the Pixi filters made of them, its own. */
@@ -810,6 +820,7 @@ export class PixiView {
         clipped: false,
         color: null,
         inherited: null,
+        rooted: false,
         blend: "normal",
         filterRecords: NO_RECORDS,
         filters: [],
@@ -885,6 +896,13 @@ export class PixiView {
     node.stale = null;
     node.color = null;
     node.inherited = null;
+    // The chain it keeps, as filters set alike keep it, is coloured only as the colour changes:
+    // from none, as node.color now is, not in the old object's.
+    const chain = node.filters[0];
+    if (chain instanceof FilterChain) {
+      chain.recolor(null);
+    }
+
     node.slice = null;
     node.sliceKey = "";
     node.sliceOwner = null;
@@ -1702,9 +1720,21 @@ export class PixiView {
     // Pixi's tint and alpha, which Pixi composes down the tree itself; any
     // other is what is drawn's own (render/color.ts), and the tint stays white.
     let recolor = false;
+    // A 3D one's chain runs in its bitmap, where it colours what its filters make as any does.
+    const rooted = node.filters[0] instanceof FilterChain && !masking;
+    const rerooted = rooted !== node.rooted;
+    if (rerooted) {
+      node.rooted = rooted;
+      container.colorRoot = rooted;
+      recolor = true;
+    }
+
+    // BitmapData.draw takes its object without its own colour transform, as adl draws it, though
+    // its filters with it (filtered-colors).
+    const ownColor = o === this.drawRoot ? null : o.colorTransform;
     if (dirty & TRANSFORM || tint !== node.inherited) {
       node.inherited = tint;
-      const ct = o.colorTransform;
+      const ct = ownColor;
       const color = masking ? null : ct ? (tint ? concatColor(tint, ct) : ct) : tint;
       if (!sameColor(color, node.color)) {
         node.color = color;
@@ -1712,11 +1742,16 @@ export class PixiView {
       }
     }
 
-    const flash = node.color && !multipliesOnly(node.color) ? node.color : null;
+    if (rooted && (recolor || refilled)) {
+      (node.filters[0] as FilterChain).recolor(node.color);
+    }
+
+    const flash = !rooted && node.color && !multipliesOnly(node.color) ? node.color : null;
     if (dirty & TRANSFORM || recolor) {
       // A 3D object's bitmap is drawn coloured by all above it too, each of its fills under the
-      // alpha, as Flash's is: its quad takes none of Pixi's colour (render/three.ts).
-      const ct = flash || masking ? null : three ? node.color : o.colorTransform;
+      // alpha, as Flash's is: its quad takes none of Pixi's colour (render/three.ts). A filtered
+      // object's chain colours what its filters make.
+      const ct = flash || masking || rooted ? null : three ? node.color : ownColor;
       container.alpha = ct ? Math.max(0, Math.min(1, ct.aMul)) : 1;
       const tint = ct
         ? (Math.round(Math.max(0, Math.min(1, ct.rMul)) * 255) << 16) |
@@ -1728,6 +1763,10 @@ export class PixiView {
       if (container.tint !== tint) {
         container.tint = tint;
       }
+
+      // One its colour leaves wholly clear is not drawn, nor its filters run, as Pixi skips one
+      // whose alpha is 0: a filtered object's alpha is its chain's.
+      container.renderable = !rooted || !clearsAll(node.color);
     }
 
     if (moved || dirty & TRANSFORM) {
@@ -1851,7 +1890,8 @@ export class PixiView {
       (dirty & ~TRANSFORM ||
         moved ||
         remask ||
-        recolor ||
+        (recolor && !rooted) ||
+        rerooted ||
         this.rescaled ||
         // A scroll moves what is drawn within the input; any move of a scrolled object counts.
         (dirty & TRANSFORM && (o.scroll || node.scroll)) ||
@@ -1894,7 +1934,7 @@ export class PixiView {
               moved,
               child.flatPlaced,
               masking,
-              node.color,
+              node.rooted ? null : node.color,
               childIsolation,
             );
           }
@@ -2370,7 +2410,7 @@ export class PixiView {
           moved,
           child.flatPlaced,
           masking,
-          node.color,
+          node.rooted ? null : node.color,
           isolated,
         );
         if (content.children[at] !== container) {
@@ -2399,7 +2439,7 @@ export class PixiView {
         moved,
         child.flatPlaced,
         masking,
-        node.color,
+        node.rooted ? null : node.color,
         isolated,
       );
       into.addChild(container);

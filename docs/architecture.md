@@ -3474,7 +3474,8 @@ clamped to the source's edges; the translation is snapped down to
 quarter pixels before rasterising, which the 4 × 4 coverage reads exactly
 (a move of 0.49 covers three quarters of the left edge pixels); `normal`
 is the store's source-over; a Bitmap draws as its data, its own transform
-ignored, as any source's is; a BitmapData drawn into itself goes a row
+ignored, as any source's is, and its own colour transform too, though
+not its filters (`filtered-colors`); a BitmapData drawn into itself goes a row
 at a time, top down, every pixel of the row read before one is written,
 so a move right keeps the pixels and a move down smears rows, while
 through a Bitmap of itself it goes in plain scan order and smears both
@@ -3800,6 +3801,26 @@ vertex colour there too. A gradient there is
 transformed pixel by pixel, which clamps after the ramp where Flash clamps
 its stops, so the two part only where a transformed stop is clamped.
 
+A filtered object is the exception: adl colours the bitmap its filters
+make, the glow and the shadow too, not what they are run on. Its
+colour transform from the stage down, or from the filtered object it is
+in, is applied by its chain's last pass to the straight colour of each
+pixel the filters made, a clear one staying clear, and what is in it is
+drawn as though nothing above it, itself included, were coloured: the
+fork's `Container.colorRoot` keeps Pixi's tint and alpha, the render
+group's included, from reaching it. A glowing object faded to an alpha of
+0.6 had its glow drawn from its faded shape, 65 off, and offsets left the
+glow as it was, 139 off (`blend-filtered-alpha`). A filtered 3D object
+is coloured so in its bitmap: one at an alpha of 0.6 drew its glow from
+its faded shape, 77 off. Children's own colours, masks, text, bitmaps,
+filtered objects in filtered objects, render groups in and around them,
+filters taken off and put on, and the colours that leave one clear, are
+the `filtered-colors` case. A colour that changes
+draws the output it kept again in the new colour, with no filter run;
+one that leaves every pixel clear draws nothing and runs none, as Pixi
+skipped an object at an alpha of 0 before its colour went to the chain
+(a rig's faded glowing parts took 12 ms a frame for nothing, 2 skipped).
+
 ### Blend modes
 
 adl composites an object with a blend mode as a layer, its children
@@ -3820,7 +3841,12 @@ while an `erase` or `alpha` blend outside any layer is on the list, which
 clears what it covers of the stage as adl does; the view checks both
 before and after it brings the list up to date, and where that changes,
 each multiply and subtract blend outside a layer chooses again, so that
-it switches on the frame the change is drawn on (`blend-direct-clear`). A filtered object's chain draws
+it switches on the frame the change is drawn on (`blend-direct-clear`).
+Pixi drew its back buffer onto the canvas blended, over what the canvas
+held: with a drawing buffer kept, as the test page keeps it, the frame
+before showed through such cleared pixels, and an erase added after the
+first frame seemed to clear nothing. The fork copies it instead
+(`stage-erase`). A filtered object's chain draws
 its result with that blend (`FilterChain.blendOver`); the Pixi fork maps
 `subtract` to WebGL's reverse subtraction. adl's lighten, darken and
 difference blend the straight colours, which the GPU's min and max of
@@ -3839,7 +3865,8 @@ and computes the mode in premultiplied colour, its result replacing what
 is there. Multiply, screen, lighten, darken, difference, overlay and
 hardlight are the separable blends of the straight colours, composited
 source over; `add` adds and `subtract` takes the object from what is
-below, each clamped; `invert` inverts what is below as far as the
+below, each clamped, subtract's alpha the object's over what is below
+(over a layer's clear ground adl leaves the object's alpha in black); `invert` inverts what is below as far as the
 object covers it; `alpha` and `erase` scale the layer below by the
 object's alpha, or by what it leaves, only where the object has any.
 The `blend-modes` case draws each over two grounds against adl. Pixi
@@ -3937,7 +3964,11 @@ passes' reach, and cuts what they spread. A blur is a box of fractional width, i
 part, run along x and then y `quality` times, each value truncated to
 8 bits. A glow's alpha is that blur of the source's alpha (of 255 less
 it, for an inner one), truncated, times strength to 255 and alpha, over
-or under the source as the display's are; a shadow samples it from its
+or under the source as the display's are; inner, the source keeps its
+alpha and the glow lies on its straight colour, the glow's colour times
+that alpha in 255ths and the source's times what is left in 256ths,
+truncated, premultiplied again rounding, and knocked out the glow's
+alpha is times the source's, rounded; a shadow samples it from its
 offset between pixels, linearly with weights in 256ths. A colour matrix
 maps straight colour, rounded, the pixels about what the source has
 premultiplied truncated and the rest of the rect the map of a
@@ -3945,7 +3976,8 @@ transparent pixel. A bevel is the source's alpha so blurred, read from
 its offset on and back between pixels, as a shadow reads; their
 difference times strength, to 255, times the colour's alpha, rounded, in
 the highlight colour where on is more and the shadow colour where it is
-less. Inner, it lies atop the source, which keeps its alpha; outer,
+less. Inner, it lies atop the source, which keeps its alpha, on its
+straight colour as an inner glow does; outer,
 behind it; full, over it; knocked out, alone, masked to where the source
 is (inner) or is not (outer); each over another as the store draws it,
 s + d × (256 − sa) / 256 truncated. Off the axes adl reads the offset
@@ -3987,8 +4019,15 @@ refuses an outer shadow and is none for the rest (`filterRefusal`). Cast some 2^
 an outer shadow in pieces as its 16-bit sums wrap, which swf2es leaves.
 However far the offset, the work is what the destination shows: the
 alpha read from the offset is blurred where it is read, not over all the
-offset spans (the `filter-distances` case). applyFilter writes the rect
-alone: adl, displacing a rect moved elsewhere, fills its grown rect from
+offset spans (the `filter-distances` case). An inner filter writes its
+rect as generateFilterRect gives it, the rect within the bitmap grown
+and kept within it, and adl moves it by that rect's corner from the
+source rect's twice: the source rect (8, 8) at (10, 10) of an inner glow
+reaching 2, whose rect is (6, 6), writes at (6, 6), not (8, 8)
+(`apply-filter-inner`, every inner filter from a rect inside the
+source's content, past its edge and past the bitmap's, to the bit; it
+wrote the grown rect where an outer filter's goes). A displacement map
+writes the rect alone: adl, displacing a rect moved elsewhere, fills its grown rect from
 the rect's corner, shifted, and into an opaque destination leaves alpha,
 quirks swf2es does not take on. The map is read as it is when applied.
 The `apply-filter` case matches adl's numbers to the bit.
@@ -4075,8 +4114,8 @@ were stepped beside its unfiltered neighbours' smooth ones, for some
 As Flash caches a filtered object as a bitmap, an object's filters run
 as one chain (`FilterChain`) whose output is kept and drawn again until
 what it was run on changes: the object or anything below it, its
-transform other than a move, the colour and alpha it is drawn in, or how
-much of it the screen shows. Filters set again with the values they had,
+transform other than a move, or how much of it the screen shows (its
+colour colours the output as it is drawn). Filters set again with the values they had,
 as a tween writes them on each frame or a script sets them from their
 own, keep the chain and its output; a displacement's map is the same only
 as the same object, which setting it again takes anew. A wide blur's

@@ -1561,6 +1561,93 @@ test("filters blur, move and pad in pixels of the stage however far a host zooms
   }
 });
 
+test("a filtered object's colour colours its chain's output, not what is in it", async () => {
+  // adl colours a filtered object's bitmap, glow and all: what is in it is drawn as though nothing
+  // above it were coloured (the `blend-filtered-alpha` case).
+  const { ShapeObject, TRANSFORM } = await import(
+    "../../../../packages/player/dist/display/display.js"
+  );
+  const { filterDefaults } = await import("../../../../packages/player/dist/display/filters.js");
+  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    DOMAdapter: { get(): object; set(adapter: object): void };
+  };
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  try {
+    const { renderer } = standIn([]);
+    (renderer as unknown as { type: number }).type = 1;
+    const view = new PixiView(renderer);
+    const root = new Container();
+    const ct = (aMul: number, rAdd: number) => ({
+      rMul: 1,
+      gMul: 1,
+      bMul: 1,
+      aMul,
+      rAdd,
+      gAdd: 0,
+      bAdd: 0,
+      aAdd: 0,
+    });
+    const outer = new Container();
+    outer.colorTransform = ct(0.5, 0);
+    const glowing = new Container();
+    glowing.colorTransform = ct(0.8, 40);
+    glowing.filters = [{ ...filterDefaults("glow"), blurX: 4, blurY: 4 }];
+    const shape = new ShapeObject(await outlinedSquare());
+    shape.colorTransform = ct(1, 20);
+    glowing.placeAtDepth(shape, 1);
+    outer.placeAtDepth(glowing, 1);
+    root.placeAtDepth(outer, 1);
+    view.prepare(root);
+
+    type Node = {
+      alpha: number;
+      renderable: boolean;
+      colorRoot: boolean;
+      filters: { resources: { colorUniforms: { uniforms: { uMul: number[]; uAdd: number[] } } } }[];
+      children: Node[];
+      flashColor?: { aMul: number; rAdd: number } | null;
+    };
+    const outerContainer = view.stage.children[0].children[1] as unknown as Node;
+    const glowingContainer = outerContainer.children[1];
+    assert.equal(outerContainer.colorRoot, false);
+    assert.equal(outerContainer.alpha, 0.5);
+    assert.equal(glowingContainer.colorRoot, true);
+    assert.equal(glowingContainer.alpha, 1);
+    // The chain takes the colour from the stage down: the parent's alpha and its own.
+    const uniforms = glowingContainer.filters[0].resources.colorUniforms.uniforms;
+    assert.equal(uniforms.uMul[3], Math.fround(0.4));
+    assert.equal(uniforms.uAdd[0], Math.fround(40 / 255));
+    // What is in it takes its own alone.
+    const art = glowingContainer.children[1].children[0].children;
+    assert.ok(art.length > 0);
+    assert.ok(art.every((g) => g.flashColor?.rAdd === 20 && g.flashColor.aMul === 1));
+
+    // Faded further, the chain's colour changes; what is in it does not.
+    outer.colorTransform = ct(0.25, 0);
+    outer.invalidate(TRANSFORM);
+    view.prepare(root);
+    assert.equal(uniforms.uMul[3], Math.fround(0.2));
+    assert.ok(art.every((g) => g.flashColor?.rAdd === 20 && g.flashColor.aMul === 1));
+    assert.equal(glowingContainer.renderable, true);
+
+    // Faded out, it is not drawn and its filters do not run, as Pixi skips an alpha of 0; faded
+    // in again, it is.
+    outer.colorTransform = ct(0, 0);
+    outer.invalidate(TRANSFORM);
+    view.prepare(root);
+    assert.equal(glowingContainer.renderable, false);
+    outer.colorTransform = ct(0.5, 0);
+    outer.invalidate(TRANSFORM);
+    view.prepare(root);
+    assert.equal(glowingContainer.renderable, true);
+  } finally {
+    pixi.DOMAdapter.set(adapter);
+  }
+});
+
 test("a tween's lines go once its morph drops their blend, not idle for a ratio never drawn again", async () => {
   const { ShapeObject, CONTENT } = await import(
     "../../../../packages/player/dist/display/display.js"
@@ -2944,6 +3031,7 @@ test("a new object of a released one's character takes its node, reset, and the 
     type Placed = {
       filters: unknown[] | null;
       alpha: number;
+      colorRoot: boolean;
       visible: boolean;
       localTransform: { a: number; b: number; tx: number; ty: number };
       updateLocalTransform(): void;
@@ -2982,6 +3070,10 @@ test("a new object of a released one's character takes its node, reset, and the 
     assert.equal(placed(0), container);
     assert.equal(container.filters?.[0], chain);
     assert.equal(container.alpha, 1);
+    // Nor does the chain it keeps colour what its filters make in the first one's colour.
+    const uniforms = (chain as { resources: { colorUniforms: { uniforms: { uColored: number } } } })
+      .resources.colorUniforms.uniforms;
+    assert.equal(uniforms.uColored, 0);
     assert.equal(container.visible, true);
     container.updateLocalTransform();
     const { a, b, tx, ty } = container.localTransform;
@@ -3001,7 +3093,9 @@ test("a new object of a released one's character takes its node, reset, and the 
     view.prepare(root);
     assert.equal(placed(0), container);
     assert.notEqual(placed(1), container);
-    assert.equal(placed(1).alpha, 0.5);
+    // Its alpha is its chain's, which colours what the filters make, not what they are run on.
+    assert.equal(placed(1).alpha, 1);
+    assert.equal(placed(1).colorRoot, true);
     assert.equal(placed(1).visible, false);
     assert.ok(placed(1).filters?.[0]);
     assert.equal(placed(1).children[0].children.length, art.length);

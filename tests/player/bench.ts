@@ -32,6 +32,9 @@
 // The rig has 12 parts, so any K of 12 or more blurs the first alone.
 // --added adds the blurred parts to what is below (blend mode add), as a
 // game's glowing effects do; with --back-buffer, as blends need it.
+// --colored gives the blurred parts a colour transform, an alpha and
+// offsets, which their chain's last pass applies to what the blur made;
+// --fade changes the alpha on every frame, as a tween fades a creature.
 //
 // --pulse plays instead N rigs whose 12 parts are curved outlines, half of
 // them swelling and shrinking a little as they turn, the others squashed
@@ -121,6 +124,7 @@
 // FILE also writes a heap snapshot then.
 //
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--added] [--glide]
+//     [--colored [--fade]]
 //     | --pulse N [--loop K] [--line W]
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
@@ -145,6 +149,8 @@ const shapes = option("shapes", 2000);
 const rig = option("rig", 0);
 const filtered = option("filtered", 0);
 const added = args.includes("--added");
+const colored = args.includes("--colored");
+const fade = args.includes("--fade");
 const branches = option("branches", 0);
 const toggleBranches = option("toggle-branches", 0);
 const toggleEvery = Math.max(1, option("toggle-every", 1));
@@ -359,15 +365,34 @@ function rigSwf(
       };
       const blurs = blurred && (filtered === 0 || i % filtered === 0) ? [3] : undefined;
       const blendMode = blurs && added ? 8 : undefined;
+      const alpha = fade ? 0.55 + 0.4 * Math.sin(t * 3 + i) : 0.8;
+      const colorTransform =
+        blurs && colored ? { mult: [1, 1, 1, alpha], add: [24, -16, 32, 0] } : undefined;
       if (f === 0) {
-        sprite.push(w.place({ depth: i + 1, character: 11 + (i % 4), matrix, blurs, blendMode }));
+        sprite.push(
+          w.place({
+            depth: i + 1,
+            character: 11 + (i % 4),
+            matrix,
+            blurs,
+            blendMode,
+            colorTransform,
+          }),
+        );
       } else if (swap) {
         sprite.push(
           w.remove(i + 1),
-          w.place({ depth: i + 1, character: 11 + ((i + f) % 4), matrix, blurs, blendMode }),
+          w.place({
+            depth: i + 1,
+            character: 11 + ((i + f) % 4),
+            matrix,
+            blurs,
+            blendMode,
+            colorTransform,
+          }),
         );
       } else {
-        sprite.push(w.place({ depth: i + 1, move: true, matrix, blurs }));
+        sprite.push(w.place({ depth: i + 1, move: true, matrix, blurs, colorTransform }));
       }
     }
 
