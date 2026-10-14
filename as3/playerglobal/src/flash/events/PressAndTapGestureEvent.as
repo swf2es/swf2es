@@ -6,6 +6,9 @@ package flash.events
 	[API("667")]
 	public class PressAndTapGestureEvent extends GestureEvent
 	{
+		private var _tapLocalX:Number;
+		private var _tapLocalY:Number;
+
 		public function PressAndTapGestureEvent(type:String, bubbles:Boolean = true, cancelable:Boolean = false, phase:String = null, localX:Number = 0, localY:Number = 0, tapLocalX:Number = 0, tapLocalY:Number = 0, ctrlKey:Boolean = false, altKey:Boolean = false, shiftKey:Boolean = false, commandKey:Boolean = false, controlKey:Boolean = false)
 		{
 			super(type, bubbles, cancelable, phase, localX, localY);
@@ -30,27 +33,39 @@ package flash.events
 			return formatToString("PressAndTapGestureEvent", "type", "bubbles", "cancelable", "phase", "localX", "localY", "tapLocalX", "tapLocalY", "ctrlKey", "altKey", "shiftKey", "commandKey", "controlKey");
 		}
 
-		public native function get tapLocalX():Number;
+		public function get tapLocalX():Number
+		{
+			return _tapLocalX;
+		}
 
-		public native function set tapLocalX(value:Number):void;
+		public function set tapLocalX(value:Number):void
+		{
+			_tapLocalX = value;
+		}
 
-		public native function get tapLocalY():Number;
+		public function get tapLocalY():Number
+		{
+			return _tapLocalY;
+		}
 
-		public native function set tapLocalY(value:Number):void;
+		public function set tapLocalY(value:Number):void
+		{
+			_tapLocalY = value;
+		}
 
 		public function get tapStageX():Number
 		{
-			return getTapStageX();
+			return getTapStageX(_tapLocalX, _tapLocalY);
 		}
 
 		public function get tapStageY():Number
 		{
-			return getTapStageY();
+			return getTapStageY(_tapLocalX, _tapLocalY);
 		}
 
 		// The player's natives (packages/player/src/playerglobal/flash/events/PressAndTapGestureEvent.ts).
-		private native function getTapStageX():Number;
+		private native function getTapStageX(x:Number, y:Number):Number;
 
-		private native function getTapStageY():Number;
+		private native function getTapStageY(x:Number, y:Number):Number;
 	}
 }

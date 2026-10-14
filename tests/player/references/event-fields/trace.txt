@@ -1,0 +1,213 @@
+flash.events::Event false false
+  accessor bubbles readonly Boolean flash.events::Event
+  accessor cancelable readonly Boolean flash.events::Event
+  accessor currentTarget readonly Object flash.events::Event
+  accessor eventPhase readonly uint flash.events::Event
+  accessor target readonly Object flash.events::Event
+  accessor type readonly String flash.events::Event
+  for-in []
+  type in true own true enumerable false
+  bubbles in true own true enumerable false
+  target in true own true enumerable false
+  eventPhase in true own true enumerable false
+  localX in false own false enumerable false
+  ctrlKey in false own false enumerable false
+  charCode in false own false enumerable false
+flash.events::MouseEvent false false
+  accessor altKey readwrite Boolean flash.events::MouseEvent
+  accessor bubbles readonly Boolean flash.events::Event
+  accessor buttonDown readwrite Boolean flash.events::MouseEvent
+  accessor cancelable readonly Boolean flash.events::Event
+  accessor ctrlKey readwrite Boolean flash.events::MouseEvent
+  accessor currentTarget readonly Object flash.events::Event
+  accessor delta readwrite int flash.events::MouseEvent
+  accessor eventPhase readonly uint flash.events::Event
+  accessor isRelatedObjectInaccessible readwrite Boolean flash.events::MouseEvent
+  accessor localX readwrite Number flash.events::MouseEvent
+  accessor localY readwrite Number flash.events::MouseEvent
+  accessor movementX readwrite Number flash.events::MouseEvent
+  accessor movementY readwrite Number flash.events::MouseEvent
+  accessor relatedObject readwrite flash.display::InteractiveObject flash.events::MouseEvent
+  accessor shiftKey readwrite Boolean flash.events::MouseEvent
+  accessor stageX readonly Number flash.events::MouseEvent
+  accessor stageY readonly Number flash.events::MouseEvent
+  accessor target readonly Object flash.events::Event
+  accessor type readonly String flash.events::Event
+  for-in []
+  type in true own true enumerable false
+  bubbles in true own true enumerable false
+  target in true own true enumerable false
+  eventPhase in true own true enumerable false
+  localX in true own true enumerable false
+  ctrlKey in true own true enumerable false
+  charCode in false own false enumerable false
+flash.events::KeyboardEvent false false
+  accessor altKey readwrite Boolean flash.events::KeyboardEvent
+  accessor bubbles readonly Boolean flash.events::Event
+  accessor cancelable readonly Boolean flash.events::Event
+  accessor charCode readwrite uint flash.events::KeyboardEvent
+  accessor ctrlKey readwrite Boolean flash.events::KeyboardEvent
+  accessor currentTarget readonly Object flash.events::Event
+  accessor eventPhase readonly uint flash.events::Event
+  accessor keyCode readwrite uint flash.events::KeyboardEvent
+  accessor keyLocation readwrite uint flash.events::KeyboardEvent
+  accessor shiftKey readwrite Boolean flash.events::KeyboardEvent
+  accessor target readonly Object flash.events::Event
+  accessor type readonly String flash.events::Event
+  for-in []
+  type in true own true enumerable false
+  bubbles in true own true enumerable false
+  target in true own true enumerable false
+  eventPhase in true own true enumerable false
+  localX in false own false enumerable false
+  ctrlKey in true own true enumerable false
+  charCode in true own true enumerable false
+flash.events::TouchEvent false false
+  accessor altKey readwrite Boolean flash.events::TouchEvent
+  accessor bubbles readonly Boolean flash.events::Event
+  accessor cancelable readonly Boolean flash.events::Event
+  accessor ctrlKey readwrite Boolean flash.events::TouchEvent
+  accessor currentTarget readonly Object flash.events::Event
+  accessor eventPhase readonly uint flash.events::Event
+  accessor isPrimaryTouchPoint readwrite Boolean flash.events::TouchEvent
+  accessor isRelatedObjectInaccessible readwrite Boolean flash.events::TouchEvent
+  accessor localX readwrite Number flash.events::TouchEvent
+  accessor localY readwrite Number flash.events::TouchEvent
+  accessor pressure readwrite Number flash.events::TouchEvent
+  accessor relatedObject readwrite flash.display::InteractiveObject flash.events::TouchEvent
+  accessor shiftKey readwrite Boolean flash.events::TouchEvent
+  accessor sizeX readwrite Number flash.events::TouchEvent
+  accessor sizeY readwrite Number flash.events::TouchEvent
+  accessor stageX readonly Number flash.events::TouchEvent
+  accessor stageY readonly Number flash.events::TouchEvent
+  accessor target readonly Object flash.events::Event
+  accessor touchPointID readwrite int flash.events::TouchEvent
+  accessor type readonly String flash.events::Event
+  for-in []
+  type in true own true enumerable false
+  bubbles in true own true enumerable false
+  target in true own true enumerable false
+  eventPhase in true own true enumerable false
+  localX in true own true enumerable false
+  ctrlKey in true own true enumerable false
+  charCode in false own false enumerable false
+flash.events::GestureEvent false false
+  accessor altKey readwrite Boolean flash.events::GestureEvent
+  accessor bubbles readonly Boolean flash.events::Event
+  accessor cancelable readonly Boolean flash.events::Event
+  accessor commandKey readwrite Boolean flash.events::GestureEvent
+  accessor controlKey readwrite Boolean flash.events::GestureEvent
+  accessor ctrlKey readwrite Boolean flash.events::GestureEvent
+  accessor currentTarget readonly Object flash.events::Event
+  accessor eventPhase readonly uint flash.events::Event
+  accessor localX readwrite Number flash.events::GestureEvent
+  accessor localY readwrite Number flash.events::GestureEvent
+  accessor phase readwrite String flash.events::GestureEvent
+  accessor shiftKey readwrite Boolean flash.events::GestureEvent
+  accessor stageX readonly Number flash.events::GestureEvent
+  accessor stageY readonly Number flash.events::GestureEvent
+  accessor target readonly Object flash.events::Event
+  accessor type readonly String flash.events::Event
+  for-in []
+  type in true own true enumerable false
+  bubbles in true own true enumerable false
+  target in true own true enumerable false
+  eventPhase in true own true enumerable false
+  localX in true own true enumerable false
+  ctrlKey in true own true enumerable false
+  charCode in false own false enumerable false
+flash.events::PressAndTapGestureEvent false false
+  accessor altKey readwrite Boolean flash.events::GestureEvent
+  accessor bubbles readonly Boolean flash.events::Event
+  accessor cancelable readonly Boolean flash.events::Event
+  accessor commandKey readwrite Boolean flash.events::GestureEvent
+  accessor controlKey readwrite Boolean flash.events::GestureEvent
+  accessor ctrlKey readwrite Boolean flash.events::GestureEvent
+  accessor currentTarget readonly Object flash.events::Event
+  accessor eventPhase readonly uint flash.events::Event
+  accessor localX readwrite Number flash.events::GestureEvent
+  accessor localY readwrite Number flash.events::GestureEvent
+  accessor phase readwrite String flash.events::GestureEvent
+  accessor shiftKey readwrite Boolean flash.events::GestureEvent
+  accessor stageX readonly Number flash.events::GestureEvent
+  accessor stageY readonly Number flash.events::GestureEvent
+  accessor tapLocalX readwrite Number flash.events::PressAndTapGestureEvent
+  accessor tapLocalY readwrite Number flash.events::PressAndTapGestureEvent
+  accessor tapStageX readonly Number flash.events::PressAndTapGestureEvent
+  accessor tapStageY readonly Number flash.events::PressAndTapGestureEvent
+  accessor target readonly Object flash.events::Event
+  accessor type readonly String flash.events::Event
+  for-in []
+  type in true own true enumerable false
+  bubbles in true own true enumerable false
+  target in true own true enumerable false
+  eventPhase in true own true enumerable false
+  localX in true own true enumerable false
+  ctrlKey in true own true enumerable false
+  charCode in false own false enumerable false
+[Event type="plain" bubbles=false cancelable=false eventPhase=2] null null 2 false
+prevented uncancelable false
+prevented cancelable true clone false
+[Event type="c" bubbles=true cancelable=true eventPhase=2]
+null type TypeError: Error #2007: Parameter type must be non-null.
+undefined type TypeError: Error #2007: Parameter type must be non-null.
+null mouse type TypeError: Error #2007: Parameter type must be non-null.
+number type true 12
+flags false true
+[MouseEvent type="m" bubbles=true cancelable=false eventPhase=2 localX=NaN localY=NaN stageX=NaN stageY=NaN relatedObject=null ctrlKey=false altKey=false shiftKey=false buttonDown=false delta=0]
+[MouseEvent type="m" bubbles=true cancelable=false eventPhase=2 localX=NaN localY=NaN stageX=NaN stageY=NaN relatedObject=null ctrlKey=false altKey=false shiftKey=false buttonDown=false delta=0]
+null NaN NaN 0 false
+[MouseEvent type="m2" bubbles=false cancelable=true eventPhase=2 localX=1.5 localY=-2.5 stageX=0 stageY=0 relatedObject=null ctrlKey=true altKey=true shiftKey=true buttonDown=true delta=7]
+[KeyboardEvent type="k" bubbles=true cancelable=false eventPhase=2 charCode=0 keyCode=0 keyLocation=0 ctrlKey=false altKey=false shiftKey=false]
+[KeyboardEvent type="k2" bubbles=false cancelable=true eventPhase=2 charCode=65 keyCode=66 keyLocation=1 ctrlKey=true altKey=true shiftKey=true]
+NaN NaN NaN NaN
+[TouchEvent type="t2" bubbles=true cancelable=false eventPhase=2 touchPointID=4 isPrimaryTouchPoint=true localX=5 localY=6 stageX=0 stageY=0 sizeX=NaN sizeY=NaN pressure=NaN relatedObject=null ctrlKey=false altKey=false shiftKey=false commandKey=false controlKey=false timestamp=NaN touchIntent="unknown" isTouchPointCanceled=false]
+[GestureEvent type="g" bubbles=true cancelable=false phase=null localX=7 localY=8 stageX=0 stageY=0 ctrlKey=false altKey=false shiftKey=false commandKey=false controlKey=false]
+3 4 0 0 [PressAndTapGestureEvent type="p" bubbles=true cancelable=false phase=null localX=1 localY=2 tapLocalX=3 tapLocalY=4 ctrlKey=false altKey=false shiftKey=false commandKey=false controlKey=false]
+3.5 NaN 3 false true true true
+-2 NaN 0 4
+1
+relatedObject 1034
+4294967295 70000 4294967295 false
+4294967294 false true false
+70000.7 -1
+8
+2 1
+type 1074
+bubbles 1074
+cancelable 1074
+target 1074
+currentTarget 1074
+eventPhase 1074
+stageX 1074
+stageY 1074
+unknown 1056
+go 1 true true
+go 2 true false
+after go 2
+go 3 true true
+after go 3
+returned false true
+left 3 true false false
+stop 1 true true
+returned true
+now 1 true true
+now 2 true false
+returned true
+click 1 true true 2 3 17 6 true
+click 2 true false 2 3 17 6 true
+after click 2
+click 3 true true 2 3 17 6 true
+after click 3
+go 1 true true
+go 2 true false
+after go 2
+go 3 true true
+after go 3
+again false 3
+null null 2 [MouseEvent type="click" bubbles=true cancelable=false eventPhase=2 localX=2 localY=3 stageX=0 stageY=0 relatedObject=null ctrlKey=true altKey=false shiftKey=false buttonDown=false delta=0]
+go 1 true true
+stand-in true true 2
+[Labelled type="x" label="tag" eventPhase=2] [Labelled type="x" label="tag'" eventPhase=2] tag tag'
+heard tag 2 true
+heard tag' 2 true

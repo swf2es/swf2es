@@ -1,8 +1,10 @@
-// flash.events.MouseEvent's native fields. Playerglobal constructs and
-// formats the event in AS3; the coordinates follow its current target.
+// flash.events.MouseEvent's natives. Playerglobal keeps its fields in AS3;
+// its stage point follows its target. The local point's accessors are
+// Flash Player's playerglobal's natives, kept for it.
 import { avm2 } from "@swf2es/runtime";
 import { toStage } from "../../../display/bounds.js";
 import { apply } from "../../../display/geometry.js";
+import { eventFields } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
@@ -18,7 +20,7 @@ export function stagePoint(
   x = Number.NaN,
   y = Number.NaN,
 ): [number, number] {
-  const target = (event.$target as AsObject | null)?.$display;
+  const target = (event[eventFields(s).target] as AsObject | null)?.$display;
   if (target) {
     return apply(toStage(target, s.stage), x, y);
   }
@@ -34,14 +36,6 @@ export function mouseEventNatives(s: Scripting): avm2.Natives {
     declare $mouseY: number | undefined;
     declare $movementX: number | undefined;
     declare $movementY: number | undefined;
-    declare $target: Value;
-    declare $relatedObject: Value;
-    declare $altKey: boolean;
-    declare $buttonDown: boolean;
-    declare $ctrlKey: boolean;
-    declare $shiftKey: boolean;
-    declare $delta: number;
-    declare $relatedObjectInaccessible: boolean;
 
     updateAfterEvent(): void {
       s.updates++;
@@ -63,12 +57,13 @@ export function mouseEventNatives(s: Scripting): avm2.Natives {
       this.$mouseY = s.rt.toNumber(value);
     }
 
-    "flash.events:MouseEvent::getStageX"(): number {
-      return stagePoint(s, this, this.$mouseX, this.$mouseY)[0];
+    // Ours passes its local point; Flash Player's keeps it in the natives above.
+    "flash.events:MouseEvent::getStageX"(x?: number, y?: number): number {
+      return stagePoint(s, this, x ?? this.$mouseX, y ?? this.$mouseY)[0];
     }
 
-    "flash.events:MouseEvent::getStageY"(): number {
-      return stagePoint(s, this, this.$mouseX, this.$mouseY)[1];
+    "flash.events:MouseEvent::getStageY"(x?: number, y?: number): number {
+      return stagePoint(s, this, x ?? this.$mouseX, y ?? this.$mouseY)[1];
     }
 
     get movementX(): number {
@@ -85,62 +80,6 @@ export function mouseEventNatives(s: Scripting): avm2.Natives {
 
     set movementY(value: Value) {
       this.$movementY = s.rt.toNumber(value);
-    }
-
-    get relatedObject(): Value {
-      return this.$relatedObject ?? null;
-    }
-
-    set relatedObject(value: Value) {
-      this.$relatedObject = value;
-    }
-
-    get altKey(): boolean {
-      return this.$altKey ?? false;
-    }
-
-    set altKey(value: Value) {
-      this.$altKey = !!value;
-    }
-
-    get buttonDown(): boolean {
-      return this.$buttonDown ?? false;
-    }
-
-    set buttonDown(value: Value) {
-      this.$buttonDown = !!value;
-    }
-
-    get ctrlKey(): boolean {
-      return this.$ctrlKey ?? false;
-    }
-
-    set ctrlKey(value: Value) {
-      this.$ctrlKey = !!value;
-    }
-
-    get shiftKey(): boolean {
-      return this.$shiftKey ?? false;
-    }
-
-    set shiftKey(value: Value) {
-      this.$shiftKey = !!value;
-    }
-
-    get delta(): number {
-      return this.$delta ?? 0;
-    }
-
-    set delta(value: Value) {
-      this.$delta = s.rt.toInt(value);
-    }
-
-    get isRelatedObjectInaccessible(): boolean {
-      return this.$relatedObjectInaccessible ?? false;
-    }
-
-    set isRelatedObjectInaccessible(value: Value) {
-      this.$relatedObjectInaccessible = !!value;
     }
   }
 

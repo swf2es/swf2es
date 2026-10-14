@@ -1,4 +1,5 @@
-// MouseEvent through playerglobal's AS3 constructor and native accessors.
+// MouseEvent through playerglobal's AS3 constructor and accessors, and its
+// native stage point.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -7,6 +8,7 @@ import { createCodegen } from "@swf2es/codegen";
 import type { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../../../../oracle/oracle.ts";
 import { Container, ShapeObject } from "../../../../../../packages/player/dist/display/display.js";
+import { eventFields } from "../../../../../../packages/player/dist/scripting/events.js";
 import { Scripting } from "../../../../../../packages/player/dist/scripting.js";
 import { libraryAbcs } from "../../../../../player/libraries.ts";
 
@@ -45,7 +47,8 @@ test("MouseEvent's native coordinates follow its target while its local point st
   const display = new ShapeObject(null);
   stage.addChildAt(display, 0);
   s.stage = stage;
-  event.$target = { $display: display } as avm2.AsObject;
+  // As dispatch sets it.
+  event[eventFields(s).target] = { $display: display } as avm2.AsObject;
   set(event, "localX", 1);
   set(event, "localY", 2);
   display.setMatrix({ a: 1, b: 2, c: 3, d: 4, tx: 5, ty: 6 });

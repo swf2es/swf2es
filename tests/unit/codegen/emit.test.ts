@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
-import { abc, tables, u30 } from "./abc-builder.ts";
+import { abc, type Trait, tables, u30 } from "./abc-builder.ts";
 import { s24, script } from "./ir-cases.ts";
 import { loadTesting, testing } from "./testing-module.ts";
 
@@ -717,4 +717,129 @@ test("a module's code has no empty statements or trailing spaces", { skip }, () 
   const js = module("builtin.abc", true);
   const methods = js.slice(js.indexOf("const F = ["));
   assert.doesNotMatch(methods, /;;\n|\};\n|[ \t]\n|\n\n/);
+});
+
+/** Pool strings of the fill cases: names, then a string that needs escaping in JavaScript. */
+const FILL_STRINGS = [
+  "",
+  "Object",
+  "int",
+  "A",
+  "B",
+  ...Array.from({ length: 20 }, (_, i) => `a${i}`),
+  "b0",
+  "b1",
+  "b2",
+  'quote " backslash \\ line\n sep  </script>',
+];
+/** The multiname naming `name`; FILL_STRINGS[k] is pool string k + 1, named by multiname k. */
+const fillName = (name: string) => FILL_STRINGS.indexOf(name);
+const ESCAPED = FILL_STRINGS.length - 1;
+const SLOT_TRAIT = 0;
+
+/** An ABC defining class `name` extending `base`, with `slots`, over FILL_STRINGS' pool. */
+function fillClass(name: string, base: string, slots: Trait[]): Uint8Array {
+  return abc(
+    {
+      strings: FILL_STRINGS,
+      ints: [-7],
+      namespaces: [[0x16, ...u30(1)]],
+      multinames: FILL_STRINGS.slice(1).map((_, i) => [0x07, ...u30(1), ...u30(i + 2)]),
+    },
+    tables({
+      methods: [{}, {}, {}],
+      classes: [
+        {
+          instance: { name: fillName(name), base: fillName(base), init: 0, traits: slots },
+          init: 1,
+        },
+      ],
+      scripts: [{ init: 2, traits: [{ name: fillName(name), kind: 4, id: 1, index: 0 }] }],
+      bodies: [{ method: 2 }],
+    }),
+  );
+}
+
+/** The fills of a module's traits, as functions, in the order the module lists them. */
+function fills(js: string): ((o: object, v: unknown[]) => void)[] {
+  return [...js.matchAll(/, fill: (\(o, v\) => \{[^\n]*?; \})/g)].map(
+    (m) => new Function(`return ${m[1]}`)() as (o: object, v: unknown[]) => void,
+  );
+}
+
+test("a class's fill sets every slot, its base's in another ABC too, by name, highest first", {
+  skip,
+}, () => {
+  // A: 20 slots of int, *, a constant, a string that needs escaping and a namespace.
+  const a: Trait[] = Array.from({ length: 20 }, (_, i) => ({
+    name: fillName(`a${i}`),
+    kind: SLOT_TRAIT,
+    index: i % 2 ? 0 : fillName("int"),
+  }));
+  a[3] = { ...a[3], value: 1, valueKind: 0x03 };
+  a[5] = { ...a[5], value: ESCAPED + 1, valueKind: 0x01 };
+  a[7] = { ...a[7], value: 1, valueKind: 0x08 };
+  const b: Trait[] = [
+    { name: fillName("b0"), kind: SLOT_TRAIT, value: ESCAPED + 1, valueKind: 0x01 },
+    { name: fillName("b1"), kind: SLOT_TRAIT, index: fillName("int") },
+    { name: fillName("b2"), kind: SLOT_TRAIT },
+  ];
+  testing.domainReset(50);
+  assert.equal(
+    testing.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true),
+    0,
+  );
+  assert.equal(testing.domainAdd(fillClass("A", "Object", a), false), 0);
+  const [fillA] = fills(testing.domainModule("") as string);
+  assert.equal(testing.domainAdd(fillClass("B", "A", b), false), 0);
+  const moduleB = testing.domainModule("") as string;
+  const [fillB] = fills(moduleB);
+
+  // What the runtime has from the descriptors, by slot.
+  const ns = { namespace: true };
+  const values: unknown[] = Array.from({ length: 23 }, (_, i) => (i % 2 ? undefined : 0));
+  values[3] = -7;
+  values[5] = FILL_STRINGS[ESCAPED];
+  values[7] = ns;
+  values[20] = FILL_STRINGS[ESCAPED];
+  values[21] = 0;
+  values[22] = undefined;
+  // Literals where they are this ABC's or a type's default; a base's constants from v.
+  const marked = values.map((value, i) => (i === 3 || i === 5 || i === 7 ? { from: i } : value));
+
+  const o: Record<string, unknown> = {};
+  fillB(o, marked);
+  assert.deepEqual(
+    Object.keys(o),
+    Array.from({ length: 23 }, (_, i) => `$${22 - i}`),
+  );
+  for (let i = 0; i < 23; i++) {
+    assert.deepEqual(o[`$${i}`], marked[i], `slot ${i}`);
+  }
+
+  // A's own fill writes its constants itself, but not the namespace, which the runtime makes.
+  const own: Record<string, unknown> = {};
+  fillA(
+    own,
+    values.map((value, i) => (i === 7 ? value : { not: i })),
+  );
+  assert.deepEqual(
+    Object.keys(own),
+    Array.from({ length: 20 }, (_, i) => `$${19 - i}`),
+  );
+  for (let i = 0; i < 20; i++) {
+    assert.deepEqual(own[`$${i}`], values[i], `A's slot ${i}`);
+  }
+
+  assert.ok(moduleB.includes('o.$20 = "quote \\" backslash \\\\ line\\x0a sep'), "escaped");
+});
+
+test("traits of no slots have no fill", { skip }, () => {
+  testing.domainReset(50);
+  testing.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
+  assert.equal(testing.domainAdd(fillClass("A", "Object", []), false), 0);
+  const js = testing.domainModule("") as string;
+  // The script's alone, for its slot of class A.
+  assert.equal(fills(js).length, 1);
+  assert.match(js, /\{ traits: \{[^\n]*, fill: \(o, v\) => \{ o\.\$0 = null; \} \}, init/);
 });

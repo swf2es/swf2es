@@ -36,6 +36,13 @@ import { MethodEmitter } from "./method";
 import { Output } from "./output";
 import { className, constant, namespace, poolString, qualified, typeExpr, uri } from "./refs";
 
+/**
+ * The most slots a traits' fill sets: V8 keeps an object's properties
+ * fast up to 128 added by name, and past them it is a dictionary however
+ * they are set.
+ */
+const FILL_SLOTS: u32 = 128;
+
 @final
 export class ModuleEmitter {
   methods: MethodEmitter;
@@ -46,6 +53,10 @@ export class ModuleEmitter {
   entryEnd: u32[] = [];
   domain: Domain;
   index: u32;
+  /** fill's scratch: each slot's declaring ABC and trait, and the traits from t to its root. */
+  fillAbc: i32[] = [];
+  fillTrait: u32[] = [];
+  fillChain: u32[] = [];
 
   constructor(domain: Domain, index: u32) {
     const methods = new MethodEmitter(domain, index);
@@ -533,6 +544,96 @@ export class ModuleEmitter {
 
     out.text("]");
     this.meta(t);
+    this.fill(t);
+    out.text(" }");
+  }
+
+  /**
+   * Traits t's `fill`, when it has slots: `(o, v) => { o.$n = ...; ... }`,
+   * which sets each slot of a new object, the base's included, by name,
+   * highest first. A store by a computed key would make an object of more
+   * than 16 slots a dictionary in V8, and one function per class sees that
+   * class's objects alone, whose one shape its stores keep inline. Each
+   * value is a literal where it is one wherever the module is compiled: a
+   * type's default, or a constant of this ABC's own slots; otherwise, as a
+   * namespace or a base's declared value, it is the runtime's, from `v`,
+   * the initial values by slot as the descriptors give them.
+   */
+  fill(t: u32): void {
+    const domain = this.domain;
+    const traits = domain.traits;
+    const count = traits.slotCount[t];
+    if (count === 0 || count > FILL_SLOTS) {
+      return;
+    }
+
+    // Each slot's declaring trait: its ABC (-1 for none) and its index there.
+    const fillAbc = this.fillAbc;
+    const fillTrait = this.fillTrait;
+    fillAbc.length = 0;
+    fillTrait.length = 0;
+    for (let s: u32 = 0; s < count; s++) {
+      fillAbc.push(-1);
+      fillTrait.push(0);
+    }
+
+    // The bases' first, as the runtime lists the initial values, so that a
+    // slot named twice has the value the runtime sets last.
+    const chain = this.fillChain;
+    chain.length = 0;
+    for (let u = <i32>t; u >= 0; u = traits.base[u]) {
+      chain.push(<u32>u);
+    }
+
+    for (let c = chain.length - 1; c >= 0; c--) {
+      const u = chain[c];
+      const index = traits.abc[u];
+      const abc = domain.abcs[index];
+      for (let i = traits.first[u]; i < traits.end[u]; i++) {
+        const kind = abc.traitTag[i] & 0x0f;
+        if (kind !== C.TRAIT_Slot && kind !== C.TRAIT_Const && kind !== C.TRAIT_Class) {
+          continue;
+        }
+
+        traits.readName(domain, index, i);
+        const slot = traits.own(u, traits.nameNs, traits.nameId, traits.nameVersion) >> 3;
+        if (slot < count) {
+          fillAbc[slot] = <i32>index;
+          fillTrait[slot] = i;
+        }
+      }
+    }
+
+    const out = this.out;
+    const slotStart = traits.slotStart[t];
+    out.text(", fill: (o, v) => {");
+    for (let s = <i32>count - 1; s >= 0; s--) {
+      const index = fillAbc[s];
+      if (index < 0) {
+        continue;
+      }
+
+      out.text(" o.$");
+      out.uint(<u32>s);
+      out.text(" = ");
+      const abc = domain.abcs[index];
+      const i = fillTrait[s];
+      const kind = abc.traitTag[i] & 0x0f;
+      const value = abc.traitValue[i];
+      const valueKind = abc.traitValueKind[i];
+      if (kind === C.TRAIT_Class) {
+        out.text("null");
+      } else if (value === 0 || (<u32>index === this.index && literal(valueKind))) {
+        constant(this.methods, value, valueKind, traits.slotType[slotStart + s]);
+      } else {
+        out.text("v[");
+        out.uint(<u32>s);
+        out.text("]");
+      }
+
+      out.text(";");
+    }
+
     out.text(" }");
   }
 
@@ -768,5 +869,21 @@ export class ModuleEmitter {
         this.traits(<u32>bodies[b]);
       }
     }
+  }
+}
+
+/** Whether constant() writes a value of `kind` as a literal, not a namespace the runtime makes. */
+function literal(kind: u8): bool {
+  switch (kind) {
+    case 0x01:
+    case 0x03:
+    case 0x04:
+    case 0x06:
+    case 0x0a:
+    case 0x0b:
+    case 0x0c:
+      return true;
+    default:
+      return false;
   }
 }

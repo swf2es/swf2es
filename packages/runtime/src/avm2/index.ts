@@ -25,7 +25,7 @@ export type { RuntimeOptions, ShellFiles } from "./options.js";
 export { errorMessages } from "./player-messages.js";
 export { Runtime } from "./runtime.js";
 // methodKey: where a method sits on its traits, for a player that makes a closure of its own.
-export { methodKey, setStaticVar } from "./traits.js";
+export { instanceVarField, methodKey, setStaticVar } from "./traits.js";
 
 /** A runtime with the builtins' natives, for modules compiled from builtin.abc and after. */
 export function createRuntime(options: RuntimeOptions = {}): Runtime {
