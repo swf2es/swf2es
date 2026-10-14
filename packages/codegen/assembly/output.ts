@@ -1,5 +1,5 @@
 // The JavaScript being written, as UTF-8 bytes in one growable buffer that
-// is reused from method to method.
+// is reused from method to method; both bytecodes' emitters write to it.
 @final
 export class Output {
   bytes: StaticArray<u8> = new StaticArray<u8>(1 << 16);

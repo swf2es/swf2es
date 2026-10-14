@@ -2,8 +2,9 @@
 // instructions: where the module's code for each AS3 line starts. The
 // method emitter marks the output as it writes it, in order; the map then
 // finds each mark's line and column in the module by walking its bytes once.
+
+import { Output } from "../../output";
 import { ConstantPool } from "../abc/pool";
-import { Output } from "./output";
 
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
