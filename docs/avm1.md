@@ -2,8 +2,8 @@
 
 The plan for ActionScript 1 and 2 in swf2es: what AVM1 bytecode is
 compiled to, where each piece lives, and the pull requests that get it
-there. Step 1, `format`'s list of action blocks, is built; the rest is
-not. [architecture.md](architecture.md) describes what is, and this
+there. Steps 1 to 3 are built: `format`'s list of action blocks, the
+decoder and the emitter of the first actions; the rest is not. [architecture.md](architecture.md) describes what is, and this
 document is folded into it as each piece lands.
 
 AVM1 is compiled, not interpreted. The same `codegen.wasm` that compiles
@@ -83,14 +83,18 @@ whose FileAttributes flag says it runs none of them.
 
 ## Compiling
 
-`Codegen.compileActions(swf, version)` compiles a SWF's whole list of
-blocks to one ES module, as `compile` compiles an ABC to one: one
+`Codegen.compileActions(bytes, actions)` compiles a SWF's whole list of
+blocks, as `format`'s `readActions` gives it (the SWF's version and each
+block's range of its decompressed bytes), to one ES module, as `compile` compiles an ABC to one: one
 module a SWF, not one a block, since a SWF has a block for every frame
 script, event and button and a `Function` each would cost more than the
 code. The SWF's version is an input, since the compiler picks the
 version's operations (below), and part of the module's key with the
-compiler's identity and the bytes' hash, so the module cache and AOT
-modules serve AVM1 as they serve ABCs. AVM1 needs no domain: a block
+compiler's identity and the SHA-256 of the SWF's decompressed bytes
+(`actionsKey`), so the module cache and AOT modules serve AVM1 as they
+serve ABCs. `compileActionBlocks` compiles blocks alone, by index, each
+byte for byte its entry in the module, as a JIT that compiles a block
+when it first runs would. AVM1 needs no domain: a block
 links to nothing at compile time, every name resolves at run time.
 
 In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
@@ -124,8 +128,13 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   the SWF's bytes before the block there, which a block compiled alone
   does not have. The constant pool is tracked along
   the flow: where one `ConstantPool` reaches a `Push` on every path, its
-  strings are literals; where none or several may, the push reads the
-  activation's pool at run time.
+  strings are literals, and a constant past the pool's end `undefined`, as
+  Ruffle pushes it; where none or several may, the push reads the
+  activation's pool at run time, `cx.pool[i]`, which `V.constantPool`
+  sets as the action runs. A region starts with the activation's pool,
+  which for a frame's block is the movie's, the last any block set, and
+  so does a `Try`'s catch or finally, which a throw reaches from anywhere
+  in the try body (`flow/pool.ts`).
 
   `With` and `Try` bodies are not regions, though Ruffle runs them as
   activations: in adl their code runs in the activation that reached
@@ -141,15 +150,22 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   its body and past it, a `Try` to its try body and, where a throw lands,
   to its catch's or finally's bytes, and their bodies' bounds start
   blocks, where the emitter drops what is no longer held.
-- `emit/`: a block as a function, the module around them.
+- `emit/`: a block as an array of its regions' functions (`block.ts`),
+  the block's own code first, then the bodies of the functions it
+  defines, in the order the flow finds them; the module around them
+  (`module.ts`); strings as JavaScript literals (`strings.ts`), read as
+  Ruffle reads them, UTF-8 from SWF 6 and Windows-1252 before, an
+  ill-formed run of UTF-8 a U+FFFD.
 
 ### The dispatcher
 
 Each region is written in the dispatcher form the AVM2 emitter falls back
 to, `let b = 0; for (;;) switch (b) { case 0: ...; b = 3; continue; }`, a
 case per block. That handles any control flow AVM1 compilers and
-obfuscators write. Structured output, as `emit/structure.ts` makes for
-AVM2, comes later, for blocks that profile hot.
+obfuscators write. A region of one block that nothing jumps back into is
+written straight, without the dispatcher. Structured output, as
+`emit/structure.ts` makes for AVM2, comes later, for blocks that profile
+hot.
 
 The operand stack is a JavaScript array per activation, `st`: a `Push`
 is `st.push(...)` and an action's operands `st.pop()`, which gives
@@ -182,31 +198,50 @@ AVM2's `s0`, come later, for regions whose depths the decoder can prove.
 - **Return** returns from the function's region; in a frame's block it
   ends the block. Every region ends in `return`.
 
-A block's function takes the activation, `cx`: its scope chain, target,
+A region's function takes the activation, `cx`: its scope chain, target,
 `this`, the constant pool, the registers, the version's operations and
-the SWF's host. A module looks like:
+the SWF's host. A module, an entry per block in the order `readActions`
+lists them, looks like:
 
 ```js
-(rt) => {
+export default function (rt) {
 const V = rt.version(6);
 return [
-function (cx) {
+[function (cx) {
+const st = [];
+V.constantPool(cx, ["frame"]);
+st.push("frame");
+V.trace(cx, st.pop());
+return;
+}],
+[function (cx) {
 const st = [];
 let b = 0;
 for (;;) switch (b) {
 case 0:
-V.trace(cx, "hello");
-st.push(V.getVariable(cx, "x"));
-if (V.toBoolean(st.pop())) { b = 1; continue; }
-V.stop(cx);
-return;
+st.push(cx.pool[0]);
+if (V.toBoolean(st.pop())) { b = 2; continue; }
 case 1:
+V.notYet("GetVariable");
+V.stop(cx);
+case 2:
 return;
 }
-},
+}, function (cx) {
+const st = [];
+st.push("in a function");
+V.trace(cx, st.pop());
+return;
+}],
 ];
 }
 ```
+
+Step 3 writes `Push` of constants, `ConstantPool`, `Trace`, `Pop`,
+`Jump`, `If`, `Play`, `Stop` and `End`. Every other action Flash knows,
+and a `Push` of a register, is `V.notYet("<name>")`, which throws, so
+the steps after fill them in one at a time; an unknown opcode is
+skipped. A block the flow finds too large is `V.tooLarge()`.
 
 ### Version-dependent semantics
 
@@ -444,7 +479,7 @@ timeout (a block that loops forever hangs the page), and structured output and s
   frames one late in a `Loader`. A player
   case of its own (`tests/player/cases.ts`) is an AVM1 SWF the test
   assembles from actions, through a small assembler in the tests
-  (`tests/player/avm1.ts`), traced and drawn by adl with `--update`.
+  (`tests/avm1-assembler.ts`), traced and drawn by adl with `--update`.
   What only a main AVM1 SWF shows, `_level0` as the root of the stage or
   `Stage.width`, comes from the corpus, as adl cannot run one as the main
   movie.
@@ -452,11 +487,15 @@ timeout (a block that loops forever hangs the page), and structured output and s
   objects, Array and String, get unit tests in node with the expected
   output taken from Flash, as a corpus test or an adl case traces it;
   avmshell runs no AVM1.
-- **The compiler**: the decoder is fuzzed as the ABC parser is
-  (`tests/fuzz/avm1.ts`: mutated action blocks never trap, their modules
-  parse), and `pnpm determinism` compiles the tests' AVM1 SWFs, and the
-  corpus's where it is fetched (it is not in CI), in each of its orders
-  and both builds.
+- **The compiler**: the decoder and the emitter are fuzzed as the ABC
+  parser is (`tests/fuzz/avm1.ts`: mutated action blocks never trap,
+  their modules import as ES modules, each block alone is its entry);
+  `tests/unit/codegen/avm1-emit.test.ts` runs modules of assembled blocks
+  with a stub runtime that records its calls; and `pnpm determinism`
+  (`tests/conformance/determinism-avm1.ts`) compiles the tests'
+  assembled blocks, and the corpus's AVM1 SWFs where it is fetched (it is
+  not in CI), in each of its orders and every build, each block alone and
+  in its module.
 
 ## Code taken from other implementations
 
@@ -490,7 +529,7 @@ AVM1, so nothing is expected from it.
 ## Open questions
 
 - **Writing AVM1 test cases.** Nothing in the repository compiles AS1 or
-  AS2. The plan assembles actions in the tests (`tests/player/avm1.ts`);
+  AS2. The tests assemble actions (`tests/avm1-assembler.ts`);
   an AS2 compiler in the oracle's image (MTASC, or Ruffle's test
   compiler) would let cases be written as source instead.
 - **A main AVM1 SWF without `Scripting`.** The pointer and keyboard take
@@ -529,6 +568,9 @@ determinism` green, and the corpus baseline may only go up.
    runs modules with a stub runtime that records its calls; `pnpm
    determinism` compiles the tests' assembled blocks, and the corpus's
    AVM1 SWFs where it is fetched, each block alone and in its module.
+   Built: `swf2es compile` writes `avm1.js` and a manifest whose `avm1`
+   entry names it, its key and length, which step 17 reads; the
+   assembler is `tests/avm1-assembler.ts`, for the player's cases too.
 4. **Hello world.** `runtime/src/avm1` with values, `rt.version`,
    `toString` and `toBoolean`; `player/src/avm1/avm1.ts` running a main
    AVM1 SWF's frame blocks in order, never an ActionScript 3 SWF's; the web element and the corpus page
@@ -537,7 +579,7 @@ determinism` green, and the corpus baseline may only go up.
    `check-references.ts` gives an AVM1 SWF its frame more. Passes the
    corpus's `looping_real_1_declared_*`, a constant traced from a frame
    script. Verified: the corpus, and an adl case of a trace in each of two
-   frames and a `stop`, assembled by `tests/player/avm1.ts`.
+   frames and a `stop`, assembled by `tests/avm1-assembler.ts`.
 5. **Arithmetic, comparison and strings, by version.** `Add`, `Add2`,
    `Equals`, `Equals2`, `StrictEquals`, `Less`, `Less2`, `Greater`, the
    bitwise and string actions, `ToNumber`, `ToString`, `TypeOf`;
