@@ -2768,13 +2768,18 @@ rounds to pixels, is drawn by Pixi's pipe in its place in the run, as is
 all of a run in a context restored without the extension, or past the
 rows a texture may hold. Contexts are placed on most frames of an
 animation, its lines stroked for a new stretch, so only the vertices and
-indices added since the last draw are uploaded, the atlas whole only as
-it grows or starts again: `bench.ts --rig 400 --fresh`, whose parts take
-a new size on every frame, uploads 0.5 MB a frame where uploading the
-atlas whole sent 7. A context rebuilt or destroyed leaves a hole, and
-between frames the atlas starts again from scratch once the holes pass
-65,536 vertices and the live ones; neither the atlas nor the table
-shrinks from its peak. On a desktop GPU the render's main-thread time
+indices added since the last draw are uploaded: `bench.ts --rig 400
+--fresh`, whose parts take a new size on every frame, uploads 0.5 MB a
+frame where uploading the atlas whole sent 7. The atlas is kept on the
+GPU alone: what a frame places is gathered in arrays of 65,536 vertices
+and written in a call or two, and a full atlas grows by half with the GPU
+copying what it held (the fork's `resizeOnGpu`), so no copy of it stays
+on the CPU, where `bench.ts --town 200` held 127 MB of one; a lost
+context's atlas starts again empty, its contexts copied in as they are
+drawn. A context rebuilt or destroyed leaves a hole, and between frames
+the atlas starts again from scratch once the holes pass 65,536 vertices
+and the live ones, at half again what is live; the table never shrinks
+from its peak. On a desktop GPU the render's main-thread time
 fell from 9–10 to 2 ms on `--rig 400` and `--rig 400 --fresh`, 0.7 to
 0.1 on `--rig 32`, 1.2 to 0.5 on `--rig 32 --swap`, 18 to 8 on `--rig
 400 --swap` and 2.5 to 0.2 on the 2,000 shapes, with GL's own time
