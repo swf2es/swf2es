@@ -15,6 +15,7 @@
 // across it, as two affine triangles would not.
 import type { Matrix as Affine } from "@swf2es/format";
 import {
+  type Filter,
   GlProgram,
   Matrix,
   Mesh,
@@ -249,6 +250,8 @@ export class Plane {
   private readonly at = new Matrix();
   /** Whether the quad was placed elsewhere, or its bitmap drawn again, since the last frame. */
   changed = true;
+  /** The blend's filters on the quad (view.ts), null for none. */
+  blending: Filter[] | null = null;
 
   constructor() {
     program ??= new GlProgram({ vertex, fragment, name: "flash-plane" });

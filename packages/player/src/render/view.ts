@@ -1948,6 +1948,9 @@ export class PixiView {
     container.filters =
       node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;
     node.directBlend = direct;
+    if (node.plane) {
+      this.blendQuad(node, node.plane);
+    }
   }
 
   /**
@@ -2039,22 +2042,7 @@ export class PixiView {
       plane.holder.addChild(container);
     }
 
-    // Its blend mode composites the quad with what is behind it, as Flash's does, not its content
-    // within its bitmap: the blend's filters, or the fixed-function blend, go on the quad.
-    const filters = container.filters;
-    if (filters && filters.length > node.filters.length) {
-      quad.filters = filters.slice(node.filters.length);
-      container.filters = node.filters.length > 0 ? node.filters : null;
-    } else if (!filters || node.blend === "normal") {
-      quad.filters = null;
-    }
-
-    if (container.blendMode !== "inherit") {
-      quad.blendMode = container.blendMode;
-      container.blendMode = "inherit";
-    } else if (node.directBlend === null) {
-      quad.blendMode = "inherit";
-    }
+    this.blendQuad(node, plane);
 
     const mask = container.mask;
     if (mask) {
@@ -2067,6 +2055,30 @@ export class PixiView {
 
     plane.stale ||= redrawn;
     return quad;
+  }
+
+  /**
+   * A 3D object's blend mode put on its quad, which Flash composites with what is behind it, not
+   * on its content within its bitmap: the blend's filters, or the GPU's own blending, from the
+   * node's state, as blendDirectly may change them outside a sync. One with filters that blends
+   * directly is blended by its chain (FilterChain.blendOver), in its bitmap.
+   */
+  private blendQuad(node: Node, plane: Plane): void {
+    const { container } = node;
+    const filters = container.filters;
+    if (filters && filters.length > node.filters.length) {
+      container.filters = node.filters.length > 0 ? node.filters : null;
+    }
+
+    const blending = node.directBlend === null ? blendFilters(node.blend) : null;
+    if (blending !== plane.blending) {
+      plane.blending = blending;
+      plane.quad.filters = blending;
+    }
+
+    const direct = node.filters[0] instanceof FilterChain ? null : node.directBlend;
+    plane.quad.blendMode = (direct as BLEND_MODES | null) ?? "inherit";
+    container.blendMode = "inherit";
   }
 
   /** A 3D object's plane let go of, its container on no list. */
