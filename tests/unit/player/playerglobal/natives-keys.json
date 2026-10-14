@@ -885,6 +885,7 @@
     "flash.system::System.get:ime",
     "flash.system::System.get:privateMemory",
     "flash.system::System.get:processCPUUsage",
+    "flash.system::System.get:totalMemory",
     "flash.system::System.get:totalMemoryNumber",
     "flash.system::System.get:useCodePage",
     "flash.system::System.get:vmVersion",
