@@ -247,6 +247,9 @@ function fail(block: Uint8Array, why: string): void {
 
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 const range = [Int32Array.of(0), Int32Array.of(0)] as const;
+const EXPORT = "export default ";
+const MAX_IMPORTS = 4000;
+let imported = 0;
 
 /** What is wrong with the block's module at `version`, or null. */
 async function emitted(block: Uint8Array, version: number): Promise<string | null> {
@@ -259,9 +262,18 @@ async function emitted(block: Uint8Array, version: number): Promise<string | nul
     return "a module that is not UTF-8";
   }
 
-  // Imported as the player imports it: an ES module, strict.
+  // Imported as the player imports it, an ES module, strict, while there
+  // are few: node keeps every module it imports, so later cases parse as
+  // a strict function's body, which it can collect.
   try {
-    await import(`data:text/javascript;base64,${Buffer.from(module).toString("base64")}`);
+    if (imported < MAX_IMPORTS) {
+      imported++;
+      await import(`data:text/javascript;base64,${Buffer.from(module).toString("base64")}`);
+    } else if (module.startsWith(EXPORT)) {
+      new Function(`"use strict";\nreturn ${module.slice(EXPORT.length)}`);
+    } else {
+      return "a module without its default export";
+    }
   } catch (e) {
     return `a module that does not parse (${(e as Error).message})`;
   }
