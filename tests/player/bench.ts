@@ -115,7 +115,10 @@
 // uploads and bytes, texture uploads, program switches, and the table's
 // runs and draws. --allocs samples the heap and gives the KB the frames
 // allocated, the player's start left out; --profile FILE also writes the
-// sampled profile there, for DevTools' Memory panel to open.
+// sampled profile there, for DevTools' Memory panel to open. After the
+// frames, with the renderer still alive, it gives what the page holds after
+// a full collection, the JS heap and array buffers' data apart; --snapshot
+// FILE also writes a heap snapshot then.
 //
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--added] [--glide]
 //     | --pulse N [--loop K] [--line W]
@@ -123,7 +126,7 @@
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
 //     [--min-run N] [--pace MS] [--hover]
-//     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined]
+//     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //
 // --write-swf FILE writes the SWF the options make and stops, for another
 // browser or player to play.
@@ -1150,6 +1153,7 @@ const result = await benchPlayer(
   cpuProfile,
   args.includes("--pipelined") ? 30 : 1,
   args.includes("--hover"),
+  args.includes("--snapshot") ? args[args.indexOf("--snapshot") + 1] : undefined,
 );
 if (result.error) {
   console.error(result.error);
@@ -1201,6 +1205,10 @@ const summary = {
                         : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
+  retainedMb: {
+    heap: Math.round(result.retained.heap / 1e5) / 10,
+    buffers: Math.round(result.retained.buffers / 1e5) / 10,
+  },
   frames,
   swfBytes: swf.length,
   renderer: result.renderer,
@@ -1276,6 +1284,9 @@ if (args.includes("--json")) {
   );
   console.log(
     `  counts  ${JSON.stringify(result.counts)}; JS heap ${summary.heapMb[0]} to ${summary.heapMb[1]} MB`,
+  );
+  console.log(
+    `  held    ${summary.retainedMb.heap} MB of JS heap and ${summary.retainedMb.buffers} MB of array buffers after a full collection`,
   );
   console.log(`  tick    median ${ms(summary.tick.median)}  p90 ${ms(summary.tick.p90)}`);
   console.log(`  sync    median ${ms(summary.sync.median)}  p90 ${ms(summary.sync.p90)}`);

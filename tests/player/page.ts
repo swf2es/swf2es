@@ -466,6 +466,7 @@ async function benchSwf(
   cpuProfile = false,
   finishEvery = 1,
   hover = false,
+  hold = false,
 ): Promise<Bench> {
   setTransformTable(table, tableMinRun);
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -609,6 +610,13 @@ async function benchSwf(
 
     const counts = { ...view.counts };
     const heap: [number, number] = [heapBefore, heapNow()];
+    // Everything still held while chrome.ts collects and measures what the frames left (benchHold).
+    if (hold) {
+      await new Promise<void>((release) => {
+        Object.assign(globalThis, { benchRelease: release, benchHeld: true });
+      });
+    }
+
     renderer.destroy();
     return {
       counts,
