@@ -14,8 +14,8 @@ import * as ops from "./opcodes";
 export const ERROR_None: u8 = 0;
 /**
  * Its opcode's length, its length, an operand or a nested body runs past the
- * block's end. Flash gives up on the movie at a length past the end and runs
- * no further at an operand past it; the block ends there.
+ * block's end. adl stops the whole SWF at a length past the end and runs no
+ * further at an operand past it; the block ends there.
  */
 export const ERROR_Truncated: u8 = 1;
 
@@ -238,9 +238,8 @@ export class Actions {
 
     this.read += <i64>(this.pos - start - bodies);
     // Wherever the operands ended, the next action is where the length says.
-    // A length past the block's end, read or not, is as truncated: Flash
-    // gives up on the movie there (adl exits), even with the bytes that
-    // follow in the SWF.
+    // A length past the block's end, read or not, is as truncated: adl
+    // stops the whole SWF there, even with the bytes that follow in it.
     const next = <i64>start + length;
     if (next > <i64>end) {
       this.failed = true;
@@ -371,7 +370,7 @@ export class Actions {
           break;
         default:
           // Flash Player 9 skips a type it does not know, and so does Ruffle;
-          // adl gives up on the movie.
+          // adl stops the SWF.
           continue;
       }
 
