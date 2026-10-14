@@ -100,7 +100,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...toplevelNatives(s),
     ...cryptoNatives(),
     ...clipboardNatives(s),
-    ...eventNatives(),
+    ...eventNatives(s),
     ...keyboardEventNatives(s),
     ...timerEventNatives(s),
     ...mouseEventNatives(s),
