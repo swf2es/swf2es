@@ -187,13 +187,17 @@ test("a truncated or malformed clip action ends the place's list, keeping those 
     .u32(1 << 17)
     .u32(1 << 17)
     .u32(0);
-  // Flags of none of the known events end the list.
+  // Flags of none of the known events are a record Flash skips, not the list's end.
   const unknown = new w.BitWriter()
     .u16(0)
-    .u32(1 << 20)
-    .u32(1 << 20)
+    .u32((1 << 31) | 1)
+    .u32(1 << 31)
     .u32(2)
-    .raw(STOP);
+    .raw(STOP)
+    .u32(1)
+    .u32(2)
+    .raw(PLAY)
+    .u32(0);
   // No room for a record's length.
   const lengthless = new w.BitWriter().u16(0).u32(1).u32(1).u16(2);
   const swf = movie(6, [
@@ -211,6 +215,7 @@ test("a truncated or malformed clip action ends the place's list, keeping those 
     [
       [swf.tags[0].offset, STOP],
       [swf.tags[1].offset, STOP],
+      [swf.tags[3].offset, PLAY],
     ],
   );
   assert.equal(readPlace(swf.bytes, swf.tags[2], list).actions, null);

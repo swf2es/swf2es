@@ -45,7 +45,7 @@ export const ClipEvent = {
   construct: 1 << 18,
 } as const;
 
-/** The bits Flash knows; a record whose flags have none of them ends the list, as in Ruffle. */
+/** The bits Flash knows; it skips a record with none of them, and only flags of 0 end the list. */
 const CLIP_EVENTS = 0x7ffff;
 
 /** A button's state transitions, BUTTONCONDACTION's low 9 bits; its key code is above them. */
@@ -186,15 +186,17 @@ function clipActions(
       return 0;
     }
 
-    return (wide ? r.u32() : r.u16()) & CLIP_EVENTS;
+    return wide ? r.u32() : r.u16();
   };
   flags();
 
   for (;;) {
-    const events = flags();
-    if (events === 0 || r.pos + 4 > end) {
+    const raw = flags();
+    if (raw === 0 || r.pos + 4 > end) {
       return;
     }
+
+    const events = raw & CLIP_EVENTS;
 
     let length = r.u32();
     let key = 0;
@@ -212,8 +214,11 @@ function clipActions(
       return;
     }
 
-    const owner: ActionOwner = { type: "clip", timeline, frame, depth, events, key };
-    add(list, tag, owner, r.pos, r.pos + length);
+    if (events !== 0) {
+      const owner: ActionOwner = { type: "clip", timeline, frame, depth, events, key };
+      add(list, tag, owner, r.pos, r.pos + length);
+    }
+
     r.pos += length;
   }
 }
