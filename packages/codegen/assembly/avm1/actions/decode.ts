@@ -360,7 +360,7 @@ export class Actions {
           break;
         default:
           // Flash Player 9 skips a type it does not know, and so does Ruffle;
-          // later players stop the block.
+          // adl gives up on the movie.
           continue;
       }
 

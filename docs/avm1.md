@@ -98,11 +98,14 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
 - `actions/`: the opcodes and their operands (`opcodes.ts`), the
   decoder (`decode.ts`). Actions below 0x80 have no operands; from 0x80 a
   length follows. The decoder reads every action reachable from a block's
-  start, following jumps, and decodes an offset once per region (below),
-  so a jump into the middle of an action, as obfuscators write, decodes
-  from there as Flash reads it. A truncated action, a length past the
-  block or an unknown opcode is what Flash makes of it, an end or a skip,
-  never a trap: errors are sticky flags, as in the ABC parser.
+  start, following jumps, and decodes each offset once, so a jump into the
+  middle of an action, as obfuscators write, decodes from there as Flash
+  reads it. An unknown opcode is skipped, as adl does. An operand or a
+  length past the block's end ends the block: adl gives up on the whole
+  movie at such a length, even with the SWF's next tag behind it. A `Push`
+  value type it does not know is skipped, as Flash Player 9 and Ruffle do,
+  where adl gives up on the movie too: content made for the older players
+  plays. Never a trap: errors are sticky flags, as in the ABC parser.
 - `flow/`: blocks and regions. A block starts at a jump's target, an
   `If`'s, a `WaitForFrame`'s skip, and after each. A **region** is a range
   of code Flash runs as an activation of its own: a block's whole code, a
